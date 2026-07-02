@@ -70,21 +70,78 @@ export interface UseChatScrollOptions {
 }
 
 /**
- * Owns every scroll behavior for the chat message list: stick-to-bottom
- * follow, user-scroll escape/relock, jump-to-message, prepend-load
- * suppression, and cross-tab (KeepAlive) position restore.
+ * useChatScroll — every scroll behavior for the chat message list.
  *
- * Follow/escape is a discriminated-scroll state machine. The fatal bug of a
- * naive stick-to-bottom is that it re-scrolls to the bottom on every content
- * growth while reading scroll *events* to detect the user leaving — but a
- * programmatic scroll and a user scroll are indistinguishable at the event
- * layer, so the follow keeps yanking the viewport back down and the user can
- * never scroll away. The fix: a private flag marks the scrolls the code itself
- * performs, so those events are ignored for escape detection; the escape latch
- * is driven only by signals a programmatic scroll cannot forge — a `wheel`
- * event and a per-frame scrollTop comparison. The follow itself is driven by a
- * MutationObserver on the content subtree (streaming tokens mutate the DOM),
- * and only fires while the user has not escaped.
+ * ─── What it does ─────────────────────────────────────────────────────────
+ *   • stick-to-bottom follow while a reply streams in
+ *   • let the user scroll away ("escape") and STAY there, then re-arm follow
+ *     when they come back to the bottom
+ *   • jump-to-message + transient highlight (reply refs, the scroll rail)
+ *   • keep the viewport still while older history is prepended at the top
+ *   • restore scroll position across KeepAlive tab switches; land a freshly
+ *     opened session at the bottom
+ *
+ * ─── The one idea the whole file rests on ─────────────────────────────────
+ * Follow and escape pull the scroll position in opposite directions, so
+ * everything hinges on telling *the code's own scrolling* apart from *the
+ * user's*. They are indistinguishable at the `scroll`-event layer — both just
+ * fire `scroll`. The naive design (which this file was rewritten to kill) reads
+ * `scroll` direction to decide "did the user leave?" while also snapping to the
+ * bottom on every content growth; the follow's own scroll events then read as
+ * user activity, the two fight every frame, and the user physically cannot
+ * scroll away from a streaming reply.
+ *
+ * The fix is two independent guards:
+ *   1. `isProgrammaticScroll` brackets every scroll the code performs; the
+ *      `scroll` handler ignores events while it is set, so a follow scroll is
+ *      never misread as the user leaving.
+ *   2. Escape is latched only from signals a programmatic scroll cannot forge:
+ *      a physical `wheel` event, and a per-frame `scrollTop` delta.
+ *
+ * ─── State model ──────────────────────────────────────────────────────────
+ * The hot-path latches are plain closure vars, NOT refs on purpose: they move
+ * on every frame of a scroll and must never trigger a re-render. Exactly ONE
+ * reactive mirror, `isAtBottom`, is exposed to the UI (the jump-to-bottom
+ * button); update it wherever scrollTop changes, never read the latches from a
+ * template.
+ *
+ *   isProgrammaticScroll  code is mid-scroll → treat scroll events as "ours"
+ *   userEscaped           user left the bottom → follow is suppressed
+ *   lastScrollTop         previous frame's scrollTop, for the up/down test
+ *   relockTimer           optimistic re-arm after a short down-scroll
+ *   lockScroll (ref)      init / cross-tab restore running → freeze BOTH follow
+ *                         and escape so their setup scrolls latch nothing
+ *
+ * ─── Event flow ───────────────────────────────────────────────────────────
+ *   MutationObserver(content subtree) ─ streaming mutates the DOM ─▶ follow to
+ *       the bottom, gated on !userEscaped. This is the follow heartbeat. Growth
+ *       is sensed via DOM mutation, deliberately NOT a height ResizeObserver +
+ *       "scrollTop = height" snap — that snap was half of the original bug.
+ *   wheel  ─▶ physical intent; deltaY<0 (up) escapes immediately.
+ *   scroll ─▶ refresh isAtBottom; if it is not our own scroll, run the latch.
+ *
+ * ─── Relock (how following comes back) ────────────────────────────────────
+ *   • user scrolls down into the 30px bottom band        → relock now
+ *   • user scrolls down but stops short                  → relock after a short
+ *                                                          optimistic timer
+ *   • a programmatic follow confirms it reached bottom   → relock
+ *   • user sends a message (chat-pane → followBottom)    → relock
+ *   • the active session changes                         → relock + land bottom
+ *
+ * ─── Prepend (older history) ──────────────────────────────────────────────
+ * Loading older messages is treated as an escape (suppressAutoScrollForPrepend
+ * → markEscaped): follow stays off, and the browser's native `overflow-anchor`
+ * keeps the visible content stationary across the insert. There is NO manual
+ * scrollTop compensation — and you must NOT set `overflow-anchor: none` on the
+ * viewport, or that native anchoring stops working and the list jumps.
+ *
+ * ─── chat-pane contract ───────────────────────────────────────────────────
+ * chat-pane owns the DOM refs and drives this composable through:
+ *   scrollToBottom (jump button) · scrollToMessage (reply refs) · followBottom
+ *   (on send) · suppressAutoScrollForPrepend (top sentinel) · markEscaped +
+ *   startScrollTween + findMessageElement + getElementAbsoluteTop (scroll rail)
+ *   · onMessageActive (per message-item) · onActivatedRestoreScroll /
+ *   onDeactivatedResetScroll (its own KeepAlive hooks).
  */
 export function useChatScroll(options: UseChatScrollOptions) {
   const { scrollEl, messages, isActive, sessionId } = options
@@ -182,6 +239,12 @@ export function useChatScroll(options: UseChatScrollOptions) {
 
   // Instant follow used by the MutationObserver during streaming. Marks itself
   // programmatic so the scroll it triggers is not read as a user action.
+  //
+  // Timing: `scrollTo` dispatches its `scroll` event before the next rAF fires,
+  // so the scroll handler runs while `isProgrammaticScroll` is still true and
+  // correctly ignores it. The rAF then clears the flag and, if we truly landed
+  // at the bottom, confirms the relock. Do not "simplify" by clearing the flag
+  // synchronously — the scroll event would then latch a spurious escape.
   function stickToBottomNow() {
     const el = scrollEl.value
     if (!el) return

@@ -2650,6 +2650,8 @@ function scrollToRailSegment(seg: ScrollRailSegment) {
     const root = scrollEl.value
     const target = findMessageElement(seg.id)
     if (!root || !target) return
+    // Rail navigation parks the reader on a chosen turn, so escape follow —
+    // otherwise the next streamed mutation would drag them back to the bottom.
     markEscaped()
     const scrollMargin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0
     startScrollTween(root, () => {
@@ -2795,6 +2797,8 @@ function handleComposerKeydown(e: KeyboardEvent) {
     return
   }
   e.preventDefault()
+  // Sending re-arms stick-to-bottom so the reply streams into view even if the
+  // user had scrolled up (escaped) while reading earlier messages.
   followBottom()
   handleSend()
 }
