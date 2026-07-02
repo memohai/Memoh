@@ -65,62 +65,65 @@
       v-else-if="state.mode === 'daily'"
       class="space-y-4"
     >
-      <div class="space-y-3">
-        <div class="space-y-1.5">
-          <Label>{{ $t('bots.schedule.form.hours') }}</Label>
-          <p class="text-xs text-muted-foreground">
-            {{ $t('bots.schedule.form.hoursHint') }}
-          </p>
-        </div>
+      <FieldStack :label="$t('bots.schedule.form.hours')">
+        <!-- Hint sits ABOVE the AM/PM grid on purpose, matching the original
+             layout: it orients the user before the picker, so it lives in the
+             default slot rather than FieldStack's help prop (which renders
+             after the slot content). Same reasoning as the advanced-mode field
+             below. -->
+        <p class="text-xs text-muted-foreground">
+          {{ $t('bots.schedule.form.hoursHint') }}
+        </p>
+        <div class="space-y-3">
+          <!-- AM Row -->
+          <div class="space-y-2">
+            <div class="flex items-center gap-1.5 text-muted-foreground">
+              <Sun class="size-3.5" />
+              <h3 class="text-[10px] font-semibold uppercase tracking-wider">
+                AM
+              </h3>
+            </div>
+            <div class="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
+              <button
+                v-for="h in 12"
+                :key="h - 1"
+                type="button"
+                class="h-8 rounded-md border text-[11px] font-mono transition-colors"
+                :class="state.hours.includes(h - 1)
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-background hover:bg-accent'"
+                @click="toggleHour(h - 1)"
+              >
+                {{ pad2(h - 1) }}
+              </button>
+            </div>
+          </div>
 
-        <!-- AM Row -->
-        <div class="space-y-2">
-          <div class="flex items-center gap-1.5 text-muted-foreground">
-            <Sun class="size-3.5" />
-            <h3 class="text-[10px] font-semibold uppercase tracking-wider">
-              AM
-            </h3>
-          </div>
-          <div class="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
-            <button
-              v-for="h in 12"
-              :key="h - 1"
-              type="button"
-              class="h-8 rounded-md border text-[11px] font-mono transition-colors"
-              :class="state.hours.includes(h - 1)
-                ? 'bg-primary text-primary-foreground border-primary'
-                : 'bg-background hover:bg-accent'"
-              @click="toggleHour(h - 1)"
-            >
-              {{ pad2(h - 1) }}
-            </button>
-          </div>
-        </div>
-
-        <!-- PM Row -->
-        <div class="space-y-2">
-          <div class="flex items-center gap-1.5 text-muted-foreground">
-            <Moon class="size-3.5" />
-            <h3 class="text-[10px] font-semibold uppercase tracking-wider">
-              PM
-            </h3>
-          </div>
-          <div class="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
-            <button
-              v-for="h in 12"
-              :key="h + 11"
-              type="button"
-              class="h-8 rounded-md border text-[11px] font-mono transition-colors"
-              :class="state.hours.includes(h + 11)
-                ? 'bg-primary text-primary-foreground border-primary'
-                : 'bg-background hover:bg-accent'"
-              @click="toggleHour(h + 11)"
-            >
-              {{ pad2(h + 11) }}
-            </button>
+          <!-- PM Row -->
+          <div class="space-y-2">
+            <div class="flex items-center gap-1.5 text-muted-foreground">
+              <Moon class="size-3.5" />
+              <h3 class="text-[10px] font-semibold uppercase tracking-wider">
+                PM
+              </h3>
+            </div>
+            <div class="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
+              <button
+                v-for="h in 12"
+                :key="h + 11"
+                type="button"
+                class="h-8 rounded-md border text-[11px] font-mono transition-colors"
+                :class="state.hours.includes(h + 11)
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-background hover:bg-accent'"
+                @click="toggleHour(h + 11)"
+              >
+                {{ pad2(h + 11) }}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      </FieldStack>
       <FieldStack :label="$t('bots.schedule.form.minute')">
         <Input
           :model-value="state.minute"
@@ -339,7 +342,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Sun, Moon } from 'lucide-vue-next'
-import { Input, Label, NativeSelect } from '@memohai/ui'
+import { Input, NativeSelect } from '@memohai/ui'
 import FieldStack from '@/components/settings/field-stack.vue'
 import {
   describeCron,

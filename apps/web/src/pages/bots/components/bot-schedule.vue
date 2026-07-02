@@ -1,41 +1,39 @@
 <template>
-  <div class="mx-auto max-w-3xl pt-6 pb-8">
-    <header class="mb-6 flex items-center justify-between gap-4 px-2">
-      <h1 class="text-lg font-semibold">
-        {{ $t('bots.schedule.title') }}
-      </h1>
-      <div class="flex items-center gap-2">
-        <DropdownMenu v-if="schedules.length > 1">
-          <DropdownMenuTrigger as-child>
-            <Button
-              variant="ghost"
-              class="text-muted-foreground"
-            >
-              <ArrowUpDown class="size-3.5" />
-              {{ currentSortLabel }}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              v-for="opt in SORT_OPTIONS"
-              :key="opt.key"
-              class="justify-between gap-4"
-              @select="sortKey = opt.key"
-            >
-              {{ $t(opt.labelKey) }}
-              <Check
-                class="size-3.5 shrink-0"
-                :class="sortKey === opt.key ? 'opacity-100' : 'opacity-0'"
-              />
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <Button @click="handleNew">
-          <Plus class="size-4" />
-          {{ $t('bots.schedule.create') }}
-        </Button>
-      </div>
-    </header>
+  <PageShell
+    variant="tab"
+    :title="$t('bots.schedule.title')"
+  >
+    <template #actions>
+      <DropdownMenu v-if="schedules.length > 1">
+        <DropdownMenuTrigger as-child>
+          <Button
+            variant="ghost"
+            class="text-muted-foreground"
+          >
+            <ArrowUpDown class="size-3.5" />
+            {{ currentSortLabel }}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            v-for="opt in SORT_OPTIONS"
+            :key="opt.key"
+            class="justify-between gap-4"
+            @select="sortKey = opt.key"
+          >
+            {{ $t(opt.labelKey) }}
+            <Check
+              class="size-3.5 shrink-0"
+              :class="sortKey === opt.key ? 'opacity-100' : 'opacity-0'"
+            />
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Button @click="handleNew">
+        <Plus class="size-4" />
+        {{ $t('bots.schedule.create') }}
+      </Button>
+    </template>
 
     <!-- Loading -->
     <div
@@ -137,7 +135,7 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
@@ -160,6 +158,7 @@ import {
   putBotsByBotIdScheduleById,
 } from '@memohai/sdk'
 import type { ScheduleSchedule } from '@memohai/sdk'
+import PageShell from '@/components/page-shell/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { describeCron, nextRuns } from '@/utils/cron-pattern'
 import ScheduleEditor from './schedule-editor.vue'

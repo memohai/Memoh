@@ -20,35 +20,35 @@
       <DialogHeader>
         <DialogTitle>{{ $t('memory.add') }}</DialogTitle>
       </DialogHeader>
-      <div class="space-y-4 py-4">
-        <div class="space-y-2">
-          <Label>{{ $t('memory.name') }}</Label>
-          <Input
-            v-model="form.name"
-            :placeholder="$t('memory.namePlaceholder')"
-          />
-        </div>
-        <div class="space-y-2">
-          <Label>{{ $t('memory.provider') }}</Label>
-          <Select v-model:model-value="form.provider">
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="builtin">
-                  {{ $t('memory.providerNames.builtin') }}
-                </SelectItem>
-                <SelectItem value="mem0">
-                  {{ $t('memory.providerNames.mem0') }}
-                </SelectItem>
-                <SelectItem value="openviking">
-                  {{ $t('memory.providerNames.openviking') }}
-                </SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </div>
+      <div class="py-4">
+        <FormStack>
+          <FieldStack :label="$t('memory.name')">
+            <Input
+              v-model="form.name"
+              :placeholder="$t('memory.namePlaceholder')"
+            />
+          </FieldStack>
+          <FieldStack :label="$t('memory.provider')">
+            <Select v-model:model-value="form.provider">
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="builtin">
+                    {{ $t('memory.providerNames.builtin') }}
+                  </SelectItem>
+                  <SelectItem value="mem0">
+                    {{ $t('memory.providerNames.mem0') }}
+                  </SelectItem>
+                  <SelectItem value="openviking">
+                    {{ $t('memory.providerNames.openviking') }}
+                  </SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </FieldStack>
+        </FormStack>
       </div>
       <DialogFooter>
         <Button
@@ -78,7 +78,6 @@ import { reactive, ref } from 'vue'
 import {
   Button,
   Input,
-  Label,
   Spinner,
   Dialog,
   DialogContent,
@@ -93,6 +92,8 @@ import {
   SelectGroup,
   SelectItem,
 } from '@memohai/ui'
+import FieldStack from '@/components/settings/field-stack.vue'
+import FormStack from '@/components/settings/form-stack.vue'
 import { postMemoryProviders } from '@memohai/sdk'
 import type { AdaptersProviderType } from '@memohai/sdk'
 import { toast } from '@memohai/ui'

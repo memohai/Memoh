@@ -1,70 +1,72 @@
 <template>
-  <div class="group/row mx-4 flex items-center gap-4 border-b border-border py-4 last:border-b-0">
+  <SettingsRow class="group/row">
     <!-- Avatar (hover → dialog to set URL) -->
-    <Dialog
-      v-model:open="avatarOpen"
-      @update:open="onAvatarOpenChange"
-    >
-      <DialogTrigger as-child>
-        <button
-          type="button"
-          class="group/avatar relative shrink-0 cursor-pointer rounded-full outline-none"
-          :aria-label="$t('settings.avatarUrl')"
-        >
-          <Avatar class="size-14">
-            <AvatarImage
-              v-if="avatarUrl"
-              :src="avatarUrl"
-              :alt="fallback"
-            />
-            <AvatarFallback>
-              {{ fallback }}
-            </AvatarFallback>
-          </Avatar>
-          <span class="absolute inset-0 flex items-center justify-center rounded-full bg-black/45 opacity-0 transition-opacity group-hover/avatar:opacity-100">
-            <Pencil class="size-4 text-white" />
-          </span>
-        </button>
-      </DialogTrigger>
-
-      <DialogContent :show-close-button="false">
-        <DialogHeader>
-          <DialogTitle>{{ $t('settings.avatarUrl') }}</DialogTitle>
-        </DialogHeader>
-        <div class="flex items-center gap-4">
-          <Avatar class="size-14 shrink-0">
-            <AvatarImage
-              v-if="avatarDraft"
-              :src="avatarDraft"
-              :alt="fallback"
-            />
-            <AvatarFallback>
-              {{ fallback }}
-            </AvatarFallback>
-          </Avatar>
-          <Input
-            v-model="avatarDraft"
-            type="url"
-            class="flex-1"
+    <template #leading>
+      <Dialog
+        v-model:open="avatarOpen"
+        @update:open="onAvatarOpenChange"
+      >
+        <DialogTrigger as-child>
+          <button
+            type="button"
+            class="group/avatar relative shrink-0 cursor-pointer rounded-full outline-none"
             :aria-label="$t('settings.avatarUrl')"
-          />
-        </div>
-        <DialogFooter>
-          <DialogClose as-child>
-            <Button variant="outline">
-              {{ $t('common.cancel') }}
+          >
+            <Avatar class="size-14">
+              <AvatarImage
+                v-if="avatarUrl"
+                :src="avatarUrl"
+                :alt="fallback"
+              />
+              <AvatarFallback>
+                {{ fallback }}
+              </AvatarFallback>
+            </Avatar>
+            <span class="absolute inset-0 flex items-center justify-center rounded-full bg-black/45 opacity-0 transition-opacity group-hover/avatar:opacity-100">
+              <Pencil class="size-4 text-white" />
+            </span>
+          </button>
+        </DialogTrigger>
+
+        <DialogContent :show-close-button="false">
+          <DialogHeader>
+            <DialogTitle>{{ $t('settings.avatarUrl') }}</DialogTitle>
+          </DialogHeader>
+          <div class="flex items-center gap-4">
+            <Avatar class="size-14 shrink-0">
+              <AvatarImage
+                v-if="avatarDraft"
+                :src="avatarDraft"
+                :alt="fallback"
+              />
+              <AvatarFallback>
+                {{ fallback }}
+              </AvatarFallback>
+            </Avatar>
+            <Input
+              v-model="avatarDraft"
+              type="url"
+              class="flex-1"
+              :aria-label="$t('settings.avatarUrl')"
+            />
+          </div>
+          <DialogFooter>
+            <DialogClose as-child>
+              <Button variant="outline">
+                {{ $t('common.cancel') }}
+              </Button>
+            </DialogClose>
+            <Button @click="applyAvatar">
+              {{ $t('common.confirm') }}
             </Button>
-          </DialogClose>
-          <Button @click="applyAvatar">
-            {{ $t('common.confirm') }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </template>
 
     <!-- Name: read-only with a hover Edit pencil; click → inline editor (✓ / ✗).
          Both modes share the same h-8 line so the username row never shifts. -->
-    <div class="min-w-0 flex-1">
+    <template #content>
       <div class="flex h-8 items-center gap-1.5">
         <template v-if="editing">
           <Input
@@ -111,8 +113,8 @@
       <div class="mt-0.5 truncate text-xs text-muted-foreground">
         {{ username }}
       </div>
-    </div>
-  </div>
+    </template>
+  </SettingsRow>
 </template>
 
 <script setup lang="ts">
@@ -133,6 +135,7 @@ import {
   Input,
 } from '@memohai/ui'
 import { Check, Pencil, X } from 'lucide-vue-next'
+import SettingsRow from '@/components/settings/row.vue'
 
 const props = defineProps<{
   avatarUrl: string

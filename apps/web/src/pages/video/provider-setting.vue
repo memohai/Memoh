@@ -116,7 +116,7 @@
             </SettingsRow>
           </div>
 
-          <div class="mx-4 flex items-center justify-end border-t border-border py-3">
+          <template #footer>
             <LoadingButton
               type="submit"
               size="sm"
@@ -124,7 +124,7 @@
             >
               {{ $t('provider.saveChanges') }}
             </LoadingButton>
-          </div>
+          </template>
         </SettingsSection>
       </form>
 
@@ -204,31 +204,31 @@
               <DialogTitle>{{ $t('models.editModel') }}</DialogTitle>
             </DialogHeader>
 
-            <div class="mt-4 space-y-4">
-              <div class="space-y-2">
-                <Label for="video-model-name">
-                  {{ $t('models.displayName') }}
-                </Label>
+            <FormStack class="mt-4">
+              <FieldStack
+                :label="$t('models.displayName')"
+                for="video-model-name"
+              >
                 <Input
                   id="video-model-name"
                   v-model="modelForm.name"
                   type="text"
                   :placeholder="$t('models.displayNamePlaceholder')"
                 />
-              </div>
+              </FieldStack>
 
-              <div class="space-y-2">
-                <Label for="video-model-id">
-                  {{ $t('models.model') }}
-                </Label>
+              <FieldStack
+                :label="$t('models.model')"
+                for="video-model-id"
+              >
                 <Input
                   id="video-model-id"
                   :model-value="editingModel?.model_id ?? ''"
                   type="text"
                   disabled
                 />
-              </div>
-            </div>
+              </FieldStack>
+            </FormStack>
 
             <DialogFooter class="mt-4">
               <DialogClose as-child>
@@ -267,7 +267,6 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
-  Label,
   Select,
   SelectContent,
   SelectItem,
@@ -289,6 +288,8 @@ import CreateModel from '@/components/create-model/index.vue'
 import SettingsShell from '@/components/settings-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
+import FormStack from '@/components/settings/form-stack.vue'
 
 interface VideoFieldSchema {
   key: string

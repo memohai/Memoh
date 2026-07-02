@@ -8,13 +8,12 @@
         <DialogTitle>{{ $t('supermarket.skillInstallTitle') }}</DialogTitle>
       </DialogHeader>
       <div class="space-y-4 py-2">
-        <div class="space-y-1.5">
-          <label class="text-xs font-medium">{{ $t('supermarket.selectBot') }}</label>
+        <FieldStack :label="$t('supermarket.selectBot')">
           <BotSelect
             v-model="selectedBotId"
             trigger-class="w-full"
           />
-        </div>
+        </FieldStack>
 
         <div
           v-if="skill"
@@ -72,6 +71,7 @@ import {
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import BotSelect from '@/components/bot-select/index.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
 
 const props = defineProps<{
   open: boolean
