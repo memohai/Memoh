@@ -29,6 +29,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/historyfrag"
 	"github.com/memohai/memoh/internal/hooks"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	messagepkg "github.com/memohai/memoh/internal/message"
@@ -269,11 +270,6 @@ func (r *Resolver) InlineImageAttachments(ctx context.Context, botID string, ref
 	return parts
 }
 
-type usageInfo struct {
-	InputTokens  *int `json:"inputTokens"`
-	OutputTokens *int `json:"outputTokens"`
-}
-
 type resolvedContext struct {
 	runConfig                   agentpkg.RunConfig
 	model                       models.GetResponse
@@ -340,15 +336,59 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	if chatModel.Config.ContextWindow != nil && *chatModel.Config.ContextWindow > 0 {
 		contextTokenBudget = *chatModel.Config.ContextWindow
 	}
+	displayName := r.resolveDisplayName(ctx, req)
+	mergedAttachments := r.routeAndMergeAttachments(ctx, chatModel, req)
+	inlineImages := extractNativeImageParts(mergedAttachments)
+
+	tz := runCfg.Identity.TimezoneLocation
+	if tz == nil {
+		tz = time.UTC
+	}
+	headerifiedQuery := FormatUserHeader(UserMessageHeaderInput{
+		MessageID:         strings.TrimSpace(req.ExternalMessageID),
+		ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
+		DisplayName:       displayName,
+		Channel:           req.CurrentChannel,
+		ConversationType:  strings.TrimSpace(req.ConversationType),
+		ConversationName:  strings.TrimSpace(req.ConversationName),
+		Target:            strings.TrimSpace(req.ReplyTarget),
+		AttachmentPaths:   extractAttachmentPaths(mergedAttachments),
+		Time:              time.Now().In(tz),
+		Timezone:          runCfg.Identity.Timezone,
+	}, req.Query)
+	reservedPromptMessages := make([]conversation.ModelMessage, 0, len(reqMessages)+1)
+	if memoryMsg != nil {
+		reservedPromptMessages = append(reservedPromptMessages, *memoryMsg)
+	}
+	if !usePipeline {
+		reservedPromptMessages = append(reservedPromptMessages, reqMessages...)
+	}
+	reservedQuery := ""
+	if !usePipeline {
+		reservedQuery = headerifiedQuery
+	}
+	sourceTokenBudget := contextSourceTokenBudget(contextTokenBudget, contextSourceReserve{
+		Messages:         reservedPromptMessages,
+		Query:            reservedQuery,
+		InlineImageCount: len(inlineImages),
+	})
 
 	var messages []conversation.ModelMessage
+	var historyRecords []historyfrag.HistoryRecord
 	var estimatedTokens int
 	if usePipeline {
-		messages = r.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
+		built := r.buildPipelineContext(ctx, req, sourceTokenBudget)
+		messages = built.Messages
+		historyRecords = built.HistoryRecords
+		// Feeds the failure-path compaction trigger: without it, a pipeline
+		// session whose context outgrew the provider window could never
+		// compact (no usage is reported when every call fails).
+		estimatedTokens = built.EstimatedTokens
 	} else if r.conversationSvc != nil {
-		loaded, loadErr := r.loadMessages(ctx, req.ChatID, req.SessionID, defaultMaxContextMinutes)
+		historyFallback := historyScopeFallbackFromChatRequest(req)
+		loaded, loadErr := r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
 		if loadErr != nil {
-			r.logger.Error("resolve: loadMessages failed",
+			r.logger.Error("resolve: loadHistoryRecords failed",
 				slog.String("bot_id", req.BotID),
 				slog.Any("error", loadErr),
 			)
@@ -356,27 +396,30 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		}
 		loaded = pruneHistoryForGateway(loaded)
 		loaded = dedupePersistedCurrentUserMessage(loaded, req)
-		loaded = r.replaceCompactedMessages(ctx, loaded)
-		messages, estimatedTokens = trimMessagesByTokens(r.logger, loaded, contextTokenBudget)
-		// When context reaches 70% of the contextTokenBudget (the user-configured
-		// budget cap), run synchronous compaction before sending the request.
-		// contextTokenBudget is the authoritative limit for how much context
-		// the user wants to send to the LLM. We compact at 70% to keep the
-		// context healthy and avoid edge-case timeouts.
+		loaded = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
+		messages, historyRecords, estimatedTokens = trimMessagesAndRecordsByTokens(r.logger, loaded, sourceTokenBudget)
+		// When source history reaches 70% of the budget left after prompt/query
+		// reserves, run synchronous compaction before sending the request.
 		compactionThreshold := 0
-		if contextTokenBudget > 0 {
-			compactionThreshold = contextTokenBudget * 70 / 100
+		if sourceTokenBudget > 0 {
+			compactionThreshold = sourceTokenBudget * 70 / 100
 		}
-		if compactionThreshold > 0 && estimatedTokens >= compactionThreshold {
+		// The trigger only counts raw (compactable) rows: active summaries can
+		// never be compacted away, so including them would make the trigger
+		// self-sustaining once accumulated summaries cross the threshold.
+		compactableTokens := totalCompactableHistoryTokens(loaded)
+		if compactionThreshold > 0 && compactableTokens >= compactionThreshold {
 			r.logger.Warn("resolve: context reached compaction threshold, running synchronous compaction",
 				slog.String("bot_id", req.BotID),
 				slog.Int("estimated_tokens", estimatedTokens),
+				slog.Int("compactable_tokens", compactableTokens),
 				slog.Int("context_token_budget", contextTokenBudget),
+				slog.Int("source_token_budget", sourceTokenBudget),
 				slog.Int("compaction_threshold", compactionThreshold),
 			)
-			r.runCompactionSync(ctx, req, estimatedTokens)
+			r.runCompactionSync(ctx, req, compactableTokens)
 			// Reload messages after compaction.
-			loaded, loadErr = r.loadMessages(ctx, req.ChatID, req.SessionID, defaultMaxContextMinutes)
+			loaded, loadErr = r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
 			if loadErr != nil {
 				r.logger.Error("resolve: reload messages after compaction failed",
 					slog.String("bot_id", req.BotID),
@@ -386,8 +429,8 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			}
 			loaded = pruneHistoryForGateway(loaded)
 			loaded = dedupePersistedCurrentUserMessage(loaded, req)
-			loaded = r.replaceCompactedMessages(ctx, loaded)
-			messages, estimatedTokens = trimMessagesByTokens(r.logger, loaded, contextTokenBudget)
+			loaded = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
+			messages, historyRecords, estimatedTokens = trimMessagesAndRecordsByTokens(r.logger, loaded, sourceTokenBudget)
 			// Remove tool messages from the recent context — they are large
 			// and unnecessary when we already have a summary. Keep only
 			// user/assistant conversation turns.
@@ -410,25 +453,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	}
 	messages = repairToolCallClosures(messages, syntheticToolClosureError)
 
-	displayName := r.resolveDisplayName(ctx, req)
-	mergedAttachments := r.routeAndMergeAttachments(ctx, chatModel, req)
-
-	tz := runCfg.Identity.TimezoneLocation
-	if tz == nil {
-		tz = time.UTC
-	}
-	headerifiedQuery := FormatUserHeader(UserMessageHeaderInput{
-		MessageID:         strings.TrimSpace(req.ExternalMessageID),
-		ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
-		DisplayName:       displayName,
-		Channel:           req.CurrentChannel,
-		ConversationType:  strings.TrimSpace(req.ConversationType),
-		ConversationName:  strings.TrimSpace(req.ConversationName),
-		Target:            strings.TrimSpace(req.ReplyTarget),
-		AttachmentPaths:   extractAttachmentPaths(mergedAttachments),
-		Time:              time.Now().In(tz),
-		Timezone:          runCfg.Identity.Timezone,
-	}, req.Query)
+	runCfg.ContextFrags = historyContextFragsForMessages(messages, historyRecords)
 	runCfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
 	// When using the pipeline the user message is already in the RC;
 	// don't send it to the LLM again. headerifiedQuery is still kept
@@ -436,7 +461,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	if !usePipeline {
 		runCfg.Query = headerifiedQuery
 	}
-	runCfg.InlineImages = extractNativeImageParts(mergedAttachments)
+	runCfg.InlineImages = inlineImages
 	runCfg.ContextScope = buildContextFragScope(req, displayName, runCfg.Identity)
 	runCfg = runCfg.RefreshContextFrag()
 
@@ -1068,10 +1093,15 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 	}
 
 	cfg = r.prepareRunConfig(ctx, cfg)
+	contextTokenBudget := 0
+	if chatModel.Config.ContextWindow != nil && *chatModel.Config.ContextWindow > 0 {
+		contextTokenBudget = *chatModel.Config.ContextWindow
+	}
 	return pipelinepkg.ResolveRunConfigResult{
-		RunConfig:   cfg,
-		ModelID:     chatModel.ID,
-		RuntimeType: runtimeType,
+		RunConfig:          cfg,
+		ModelID:            chatModel.ID,
+		RuntimeType:        runtimeType,
+		ContextTokenBudget: contextTokenBudget,
 	}, nil
 }
 

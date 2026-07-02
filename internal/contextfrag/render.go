@@ -33,6 +33,7 @@ func BuildManifest(frags []ContextFrag) Manifest {
 			SourceID:   frag.Provenance.SourceID,
 			Collector:  frag.Provenance.Collector,
 			Scope:      frag.Scope,
+			Budget:     frag.Budget,
 		}
 		for _, part := range frag.Parts {
 			item.PartTypes = append(item.PartTypes, part.Type)
@@ -49,6 +50,9 @@ func BuildManifest(frags []ContextFrag) Manifest {
 		}
 		manifest.Counts.TextBytes += item.TextBytes
 		manifest.Counts.Images += item.ImageCount
+		if frag.Coverage != nil {
+			manifest.CoverageTrace = append(manifest.CoverageTrace, *frag.Coverage)
+		}
 		manifest.Items = append(manifest.Items, item)
 	}
 	manifest.Counts.Fragments = len(frags)

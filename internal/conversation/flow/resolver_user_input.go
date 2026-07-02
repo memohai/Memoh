@@ -289,16 +289,23 @@ func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.R
 		return err
 	}
 
-	loaded, err := r.loadMessages(ctx, input.BotID, req.SessionID, defaultMaxContextMinutes)
+	loaded, err := r.loadHistoryRecords(ctx, historyScopeFallbackFromUserInputRequest(req), req.SessionID, defaultMaxContextMinutes)
 	if err != nil {
 		return err
 	}
 	loaded = pruneHistoryForGateway(loaded)
-	loaded = r.replaceCompactedMessages(ctx, loaded)
-	messages, _ := trimMessagesByTokens(r.logger, loaded, 0)
+	loaded = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(firstNonEmpty(req.BotID, input.BotID), "", req.SessionID, req.ConversationType, "", req.ReplyTarget), loaded)
+	loaded = forceKeepToolResultForBudget(loaded, req.ToolCallID)
+	sourceTokenBudget := contextSourceTokenBudget(resolved.ContextTokenBudget, contextSourceReserve{
+		System: resolved.RunConfig.System,
+	})
+	messages, retained, _ := trimMessagesAndRecordsByTokens(r.logger, loaded, sourceTokenBudget)
+	messages = sanitizeMessages(messages)
+	messages = repairToolCallClosures(messages, syntheticToolClosureError)
 
 	cfg := resolved.RunConfig
-	cfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(sanitizeMessages(messages)))
+	cfg.ContextFrags = historyContextFragsForMessages(messages, retained)
+	cfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
 	cfg.Query = ""
 	cfg.LiveToolStream = eventCh != nil
 	cfg.CanRequestUserInput = r.canDeliverUserInputWS(eventCh)

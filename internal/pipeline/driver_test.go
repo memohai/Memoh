@@ -13,6 +13,7 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
+	messagepkg "github.com/memohai/memoh/internal/message"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 )
 
@@ -608,10 +609,10 @@ func TestHandleReplyWithAgent_ColdStartAnchoredByTR(t *testing.T) {
 }
 
 // TestHandleReplyWithAgent_CursorAdvancesToRCNotWallClock ensures that after
-// a turn we set lastProcessedMs to the max ReceivedAtMs actually consumed in
-// the RC snapshot, not time.Now(). This matters for messages that arrive
-// mid-turn: they end up in a fresher RC with ReceivedAtMs > cursor, which
-// correctly triggers the next round.
+// a turn we set lastProcessedMs to the max event timestamp actually consumed
+// in the RC snapshot, not time.Now(). This matters for messages that arrive
+// mid-turn: they end up in a fresher RC with an event timestamp > cursor,
+// which correctly triggers the next round.
 func TestHandleReplyWithAgent_CursorAdvancesToRCNotWallClock(t *testing.T) {
 	rc := RenderedContext{
 		{
@@ -636,7 +637,7 @@ func TestHandleReplyWithAgent_CursorAdvancesToRCNotWallClock(t *testing.T) {
 		t.Fatal("expected agent to be invoked")
 	}
 	if sess.lastProcessedMs != 777 {
-		t.Fatalf("lastProcessedMs = %d, want 777 (max RC ReceivedAtMs)", sess.lastProcessedMs)
+		t.Fatalf("lastProcessedMs = %d, want 777 (max RC event timestamp)", sess.lastProcessedMs)
 	}
 }
 
@@ -761,6 +762,203 @@ func TestHandleReplyWithAgentRefreshesContextFragAfterLateBinding(t *testing.T) 
 	}
 }
 
+func TestHandleReplyWithAgentUsesCompactionSummary(t *testing.T) {
+	rc := RenderedContext{
+		{
+			MessageID:    "external-old",
+			ReceivedAtMs: 100,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-old">old</message>`}},
+			MentionsMe:   true,
+			ImageRefs:    []ImageAttachmentRef{{ContentHash: "covered-image", Mime: "image/png"}},
+		},
+		{
+			MessageID:    "external-new",
+			ReceivedAtMs: 300,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-new">new</message>`}},
+		},
+	}
+	fakeAgent := &fakeDiscussStreamer{}
+	resolver := &fakeRunConfigResolver{
+		resolveResult: ResolveRunConfigResult{
+			RunConfig: agentpkg.RunConfig{System: "base system", SupportsImageInput: true},
+			ModelID:   "model-1",
+		},
+		inlineFn: func(_ context.Context, _ string, refs []ImageAttachmentRef) []sdk.ImagePart {
+			t.Fatalf("covered image refs must not be inlined: %#v", refs)
+			return nil
+		},
+		compactionSummary: CompactSummary{
+			Text:                   "old summarized",
+			CoveredMessageIDs:      []string{"external-old"},
+			CoveredMessageCutoffMs: map[string]int64{"external-old": 100},
+		},
+	}
+	driver := NewDiscussDriver(DiscussDriverDeps{
+		Pipeline: NewPipeline(RenderParams{}),
+		Resolver: resolver,
+	})
+	sess := &discussSession{
+		config:          DiscussSessionConfig{BotID: "b", SessionID: "s"},
+		lastProcessedMs: 0,
+	}
+
+	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
+
+	if fakeAgent.lastConfig == nil {
+		t.Fatal("expected agent to be invoked")
+	}
+	got := sdkMessageTexts(fakeAgent.lastConfig.Messages)
+	if len(got) < 2 {
+		t.Fatalf("expected summary and current message, got %#v", got)
+	}
+	if got[0] != "[Conversation summary]\nold summarized" {
+		t.Fatalf("first message = %q, want compaction summary; all=%#v", got[0], got)
+	}
+	if strings.Contains(strings.Join(got, "\n"), "external-old") {
+		t.Fatalf("covered RC replay was not skipped: %#v", got)
+	}
+	if !strings.Contains(strings.Join(got, "\n"), "external-new") {
+		t.Fatalf("uncovered RC replay missing: %#v", got)
+	}
+	if strings.Contains(got[len(got)-1], "You were mentioned or replied to") {
+		t.Fatalf("covered mention should not force late-binding response: %#v", got[len(got)-1])
+	}
+}
+
+func TestHandleReplyWithAgentAnchorsSummaryAgainstFullRenderedContext(t *testing.T) {
+	rc := RenderedContext{
+		{
+			MessageID:    "external-before",
+			ReceivedAtMs: 50,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-before">before</message>`}},
+		},
+		{
+			MessageID:    "external-covered",
+			ReceivedAtMs: 100,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-covered">covered</message>`}},
+		},
+		{
+			MessageID:    "external-new",
+			ReceivedAtMs: 300,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-new">new</message>`}},
+		},
+	}
+	fakeAgent := &fakeDiscussStreamer{}
+	resolver := &fakeRunConfigResolver{
+		resolveResult: ResolveRunConfigResult{
+			RunConfig: agentpkg.RunConfig{System: "base system"},
+			ModelID:   "model-1",
+		},
+		compactionSummary: CompactSummary{
+			Text:                   "covered summarized",
+			CoveredMessageIDs:      []string{"external-covered"},
+			CoveredMessageCutoffMs: map[string]int64{"external-covered": 100},
+		},
+	}
+	driver := NewDiscussDriver(DiscussDriverDeps{
+		Pipeline: NewPipeline(RenderParams{}),
+		Resolver: resolver,
+	})
+	sess := &discussSession{
+		config:          DiscussSessionConfig{BotID: "b", SessionID: "s"},
+		lastProcessedMs: 0,
+	}
+
+	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
+
+	if fakeAgent.lastConfig == nil {
+		t.Fatal("expected agent to be invoked")
+	}
+	got := sdkMessageTexts(fakeAgent.lastConfig.Messages)
+	if len(got) < 4 {
+		t.Fatalf("expected before, summary, new, and late binding messages: %#v", got)
+	}
+	if !strings.Contains(got[0], "external-before") ||
+		got[1] != "[Conversation summary]\ncovered summarized" ||
+		!strings.Contains(got[2], "external-new") {
+		t.Fatalf("summary order mismatch: %#v", got)
+	}
+}
+
+func TestHandleReplyWithAgentAppliesResolvedContextBudget(t *testing.T) {
+	rc := RenderedContext{
+		{
+			MessageID:    "external-old",
+			ReceivedAtMs: 100,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-old">` + strings.Repeat("old stale filler ", 80) + `</message>`}},
+		},
+		{
+			MessageID:    "external-new",
+			ReceivedAtMs: 300,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-new">fresh</message>`}},
+		},
+	}
+	fakeAgent := &fakeDiscussStreamer{}
+	resolver := &fakeRunConfigResolver{
+		resolveResult: ResolveRunConfigResult{
+			RunConfig:          agentpkg.RunConfig{System: "base system"},
+			ModelID:            "model-1",
+			ContextTokenBudget: 20,
+		},
+	}
+	driver := NewDiscussDriver(DiscussDriverDeps{
+		Pipeline: NewPipeline(RenderParams{}),
+		Resolver: resolver,
+	})
+	sess := &discussSession{
+		config:          DiscussSessionConfig{BotID: "b", SessionID: "s"},
+		lastProcessedMs: 0,
+	}
+
+	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
+
+	if fakeAgent.lastConfig == nil {
+		t.Fatal("expected agent to be invoked")
+	}
+	got := strings.Join(sdkMessageTexts(fakeAgent.lastConfig.Messages), "\n")
+	if strings.Contains(got, "old stale filler") {
+		t.Fatalf("discuss context retained stale filler despite budget: %s", got)
+	}
+	if !strings.Contains(got, "external-new") {
+		t.Fatalf("discuss context lost latest trigger: %s", got)
+	}
+}
+
+func TestHandleReplyWithAgentSkipsCoveredReplayAndAdvancesCursor(t *testing.T) {
+	rc := RenderedContext{
+		{
+			MessageID:    "external-old",
+			ReceivedAtMs: 100,
+			Content:      []RenderedContentPiece{{Type: "text", Text: `<message id="external-old">old</message>`}},
+		},
+	}
+	fakeAgent := &fakeDiscussStreamer{}
+	resolver := &fakeRunConfigResolver{
+		compactionSummary: CompactSummary{
+			Text:                   "old summarized",
+			CoveredMessageIDs:      []string{"external-old"},
+			CoveredMessageCutoffMs: map[string]int64{"external-old": 100},
+		},
+	}
+	driver := NewDiscussDriver(DiscussDriverDeps{
+		Pipeline: NewPipeline(RenderParams{}),
+		Resolver: resolver,
+	})
+	sess := &discussSession{
+		config:          DiscussSessionConfig{BotID: "b", SessionID: "s"},
+		lastProcessedMs: 0,
+	}
+
+	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
+
+	if fakeAgent.lastConfig != nil {
+		t.Fatal("covered replay must not invoke the agent")
+	}
+	if sess.lastProcessedMs != 100 {
+		t.Fatalf("lastProcessedMs = %d, want covered RC cursor to advance", sess.lastProcessedMs)
+	}
+}
+
 // --- Test helpers ---
 
 type fakeDiscussStreamer struct {
@@ -797,9 +995,10 @@ func (f *fakeDiscussRuntimeStreamer) StreamChat(_ context.Context, req conversat
 }
 
 type fakeRunConfigResolver struct {
-	resolveResult ResolveRunConfigResult
-	resolveFn     func(botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
-	inlineFn      func(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart
+	resolveResult     ResolveRunConfigResult
+	resolveFn         func(botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
+	inlineFn          func(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart
+	compactionSummary CompactSummary
 }
 
 func (f *fakeRunConfigResolver) ResolveRunConfig(_ context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error) {
@@ -836,6 +1035,24 @@ func (f *fakeDiscussCursorStore) UpsertDiscussConsumedCursor(_ context.Context, 
 	f.upsertRouteID = routeID
 	f.upsertCursor = cursor
 	return nil
+}
+
+func (f *fakeRunConfigResolver) LoadCompactionSummary(context.Context, []messagepkg.Message) CompactSummary {
+	return f.compactionSummary
+}
+
+func sdkMessageTexts(messages []sdk.Message) []string {
+	out := make([]string, 0, len(messages))
+	for _, msg := range messages {
+		var parts []string
+		for _, part := range msg.Content {
+			if text, ok := part.(sdk.TextPart); ok {
+				parts = append(parts, text.Text)
+			}
+		}
+		out = append(out, strings.Join(parts, "\n"))
+	}
+	return out
 }
 
 func lastMessageFragContains(frags []contextfrag.ContextFrag, needle string) bool {

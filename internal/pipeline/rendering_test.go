@@ -22,6 +22,9 @@ func TestRenderMessage_ImageRefsPopulated(t *testing.T) {
 
 	seg := renderMessage(msg, RenderParams{})
 
+	if seg.MessageID != "msg-1" {
+		t.Fatalf("message id = %q, want msg-1", seg.MessageID)
+	}
 	if len(seg.ImageRefs) != 1 {
 		t.Fatalf("expected 1 image ref (only images with ContentHash), got %d", len(seg.ImageRefs))
 	}

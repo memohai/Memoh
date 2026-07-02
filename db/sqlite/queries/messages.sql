@@ -383,8 +383,63 @@ SET compact_id = sqlc.arg(compact_id)
 WHERE id IN (sqlc.slice(ids));
 
 -- name: ListUncompactedMessagesBySession :many
-SELECT id, bot_id, session_id, role, content, usage, sender_channel_identity_id, compact_id, created_at
-FROM bot_history_messages
-WHERE session_id = sqlc.arg(session_id)
-  AND compact_id IS NULL
-ORDER BY created_at ASC;
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.event_id,
+  m.display_text,
+  NULLIF(TRIM(COALESCE(m.compact_id, '')), '') AS compact_id,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform,
+  r.conversation_type AS conversation_type,
+  COALESCE(
+    NULLIF(TRIM(COALESCE(json_extract(r.metadata, '$.conversation_name'), '')), ''),
+    NULLIF(TRIM(COALESCE(json_extract(r.metadata, '$.conversation_handle'), '')), ''),
+    ''
+  ) AS conversation_name,
+  r.default_reply_target AS reply_target
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id
+WHERE m.session_id = sqlc.arg(session_id)
+  -- Rows whose compact log never completed ok (crash between mark and
+  -- complete, deleted logs) stay eligible so their content is not lost.
+  AND (NULLIF(TRIM(COALESCE(m.compact_id, '')), '') IS NULL OR NOT EXISTS (
+    SELECT 1 FROM bot_history_message_compacts c
+    WHERE c.id = m.compact_id AND c.status = 'ok'
+  ))
+  AND (json_extract(m.metadata, '$.trigger_mode') IS NULL OR json_extract(m.metadata, '$.trigger_mode') != 'passive_sync')
+ORDER BY m.created_at ASC, m.id ASC;
+
+-- name: ListMessagesByCompactID :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.event_id,
+  m.display_text,
+  NULLIF(TRIM(COALESCE(m.compact_id, '')), '') AS compact_id,
+  m.created_at
+FROM bot_history_messages m
+WHERE NULLIF(TRIM(COALESCE(m.compact_id, '')), '') = sqlc.arg(compact_id)
+ORDER BY m.created_at ASC, m.id ASC;

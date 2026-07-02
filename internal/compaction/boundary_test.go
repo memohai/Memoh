@@ -1,0 +1,235 @@
+package compaction
+
+import (
+	"testing"
+
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+)
+
+func toolCallRow(t *testing.T, tokens int) sqlc.ListUncompactedMessagesBySessionRow {
+	t.Helper()
+	return mkRow(t, "assistant", `[{"type":"tool-call","toolName":"calc","toolCallId":"c1","input":{}}]`, tokens)
+}
+
+func toolResultRow(t *testing.T, tokens int) sqlc.ListUncompactedMessagesBySessionRow {
+	t.Helper()
+	return mkRow(t, "tool", `[{"type":"tool-result","toolName":"calc","toolCallId":"c1","output":{"type":"text","value":"42"}}]`, tokens)
+}
+
+func firstKeptIsNotOrphanTool(t *testing.T, items, toCompact []CompactionCandidate) {
+	t.Helper()
+	keepStart := len(toCompact)
+	if keepStart < len(items) && isToolResultItem(items[keepStart]) {
+		t.Fatalf("keep side starts with an orphan tool result at index %d", keepStart)
+	}
+}
+
+func TestSplitByTargetDoesNotOrphanToolResult(t *testing.T) {
+	t.Parallel()
+
+	// oldest -> newest: assistant, assistant(tool-call), tool(result), assistant.
+	// target 250 would otherwise cut between the tool call and its result,
+	// leaving the kept side starting with an orphan tool result.
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "assistant", `"context"`, 100),
+		toolCallRow(t, 100),
+		toolResultRow(t, 100),
+		mkRow(t, "assistant", `"done"`, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	toCompact := splitByTarget(items, 250)
+	firstKeptIsNotOrphanTool(t, items, toCompact)
+	if len(toCompact) != 3 {
+		t.Fatalf("compact count = %d, want 3 (tool result pulled into compact set)", len(toCompact))
+	}
+	if !isToolResultItem(toCompact[2]) {
+		t.Fatalf("last compacted message should be the tool result")
+	}
+}
+
+func TestSplitByRatioDoesNotOrphanToolResult(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "assistant", `"context"`, 100),
+		toolCallRow(t, 100),
+		toolResultRow(t, 100),
+		mkRow(t, "assistant", `"done"`, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	// total=500, ratio=50 -> keepTokens=250 -> unadjusted cutoff would keep the
+	// tool result at the head of the keep side.
+	toCompact := splitByRatio(items, 500, 50)
+	firstKeptIsNotOrphanTool(t, items, toCompact)
+	if len(toCompact) != 3 {
+		t.Fatalf("compact count = %d, want 3", len(toCompact))
+	}
+}
+
+func TestAdjustForToolBoundaryNoOpWhenKeepStartsClean(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `"a"`, 100),
+		mkRow(t, "assistant", `"b"`, 100),
+		mkRow(t, "user", `"c"`, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	if got := adjustForToolBoundary(items, 2); got != 2 {
+		t.Fatalf("clean boundary should be unchanged, got %d", got)
+	}
+}
+
+func TestAdjustForToolBoundaryAdvancesPastConsecutiveResults(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		toolCallRow(t, 100),
+		toolResultRow(t, 100),
+		toolResultRow(t, 100),
+		mkRow(t, "assistant", `"done"`, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	// cutoff=1 would keep two consecutive tool results; advance past both.
+	if got := adjustForToolBoundary(items, 1); got != 3 {
+		t.Fatalf("should advance past consecutive tool results, got %d", got)
+	}
+}
+
+func TestAdjustForToolBoundaryAllToolsCompactsAll(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		toolResultRow(t, 100),
+		toolResultRow(t, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	if got := adjustForToolBoundary(items, 1); got != 2 {
+		t.Fatalf("all-tool tail should compact everything, got %d", got)
+	}
+}
+
+func TestSplitByRatioNoOpsWhenToolBoundaryWouldConsumeRecentTail(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		toolCallRow(t, 100),
+		toolResultRow(t, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	toCompact := splitByRatio(items, 200, 100)
+	if len(toCompact) != 0 {
+		t.Fatalf("compaction should no-op rather than consume the recent tool tail, got %d items", len(toCompact))
+	}
+}
+
+func TestSplitByRatioPreservesNewestUserTurnSuffix(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `"old question"`, 100),
+		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", `"current question"`, 100),
+		mkRow(t, "assistant", `"current answer"`, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	toCompact := splitByRatio(items, 400, 100)
+	if len(toCompact) != 2 {
+		t.Fatalf("compact count = %d, want 2 (keep newest user turn suffix)", len(toCompact))
+	}
+	if toCompact[0].ID != rows[0].ID || toCompact[1].ID != rows[1].ID {
+		t.Fatalf("should compact only rows before the newest user turn")
+	}
+}
+
+func TestSplitByRatioCompactsCurrentTurnMiddleWhenUserIsFirst(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `"current instruction"`, 100),
+		mkRow(t, "assistant", `"loop step 1"`, 100),
+		mkRow(t, "assistant", `"loop step 2"`, 100),
+		mkRow(t, "assistant", `"latest tail"`, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	toCompact := splitByRatio(items, 400, 100)
+	if len(toCompact) != 2 {
+		t.Fatalf("compact count = %d, want 2 middle current-turn messages", len(toCompact))
+	}
+	if toCompact[0].ID != rows[1].ID || toCompact[1].ID != rows[2].ID {
+		t.Fatalf("should compact current-turn middle while keeping user and latest tail")
+	}
+}
+
+func TestSplitByRatioPreservesCurrentTurnTailToolClosure(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `"current instruction"`, 100),
+		mkRow(t, "assistant", `"loop step 1"`, 100),
+		toolCallRow(t, 100),
+		toolResultRow(t, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	toCompact := splitByRatio(items, 400, 100)
+	if len(toCompact) != 1 {
+		t.Fatalf("compact count = %d, want only pre-tool middle message", len(toCompact))
+	}
+	if toCompact[0].ID != rows[1].ID {
+		t.Fatalf("should keep user plus tail tool closure")
+	}
+}
+
+func TestToolBoundaryGuardRequiresToolClosurePolicy(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		toolCallRow(t, 100),
+		toolResultRow(t, 100),
+		mkRow(t, "assistant", `"done"`, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	items[1].Policies = nil
+	if got := adjustForToolBoundary(items, 1); got != 1 {
+		t.Fatalf("boundary should be policy-driven when tool-result policy is absent, got %d", got)
+	}
+}
+
+func TestTrimCompactMessagesKeepsToolExchangeIntact(t *testing.T) {
+	t.Parallel()
+
+	// compact input (oldest -> newest): assistant(tool-call), tool(result), user, assistant.
+	// maxTokens 350 trims the oldest (the tool call), which would orphan the tool
+	// result at the head of the retained compact input.
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		toolCallRow(t, 100),
+		toolResultRow(t, 100),
+		mkRow(t, "user", `"c"`, 100),
+		mkRow(t, "assistant", `"d"`, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	trimmed := trimCompactMessages(items, 350)
+	if len(trimmed) == 0 {
+		t.Fatalf("trim dropped everything")
+	}
+	if isToolResultItem(trimmed[0]) {
+		t.Fatalf("trim left an orphan tool result at the head of the compact input")
+	}
+	if len(trimmed) != 2 {
+		t.Fatalf("trimmed = %d, want 2 (orphan tool result dropped with its call)", len(trimmed))
+	}
+}
+
+func TestAdjustForToolBoundaryIgnoresZeroCutoff(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		toolResultRow(t, 100),
+		mkRow(t, "assistant", `"x"`, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	// cutoff 0 means "compact nothing"; never start compacting from the front.
+	if got := adjustForToolBoundary(items, 0); got != 0 {
+		t.Fatalf("zero cutoff must stay zero, got %d", got)
+	}
+}

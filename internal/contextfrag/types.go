@@ -44,6 +44,7 @@ const (
 const (
 	HashAlgoSHA256             = "sha256"
 	HashScopeCanonicalFragment = "canonical_fragment"
+	HashScopeSourcePayload     = "source_payload"
 )
 
 type SchemaVersion struct {
@@ -124,8 +125,7 @@ const (
 	OverflowDrop      OverflowAction = "drop"
 )
 
-// BudgetPolicy captures the planned budget behavior for a fragment. Phase 1
-// records policy only; enforcement remains in the existing trimming paths.
+// BudgetPolicy captures budget hints for context allocators.
 type BudgetPolicy struct {
 	MaxTokens int            `json:"max_tokens,omitempty"`
 	MaxChars  int            `json:"max_chars,omitempty"`
@@ -223,19 +223,20 @@ type Part struct {
 
 // ContextFrag is the typed context fragment abstraction.
 type ContextFrag struct {
-	ID         string          `json:"id"`
-	Ref        ContextRef      `json:"ref,omitempty"`
-	Kind       Kind            `json:"kind"`
-	Role       sdk.MessageRole `json:"role,omitempty"`
-	Slot       Slot            `json:"slot"`
-	Priority   int             `json:"priority,omitempty"`
-	CacheClass CacheClass      `json:"cache_class,omitempty"`
-	Trust      TrustLevel      `json:"trust,omitempty"`
-	Scope      Scope           `json:"scope,omitempty"`
-	Budget     BudgetPolicy    `json:"budget,omitempty"`
-	Render     RenderPolicy    `json:"render,omitempty"`
-	Provenance Provenance      `json:"provenance,omitempty"`
-	Parts      []Part          `json:"parts,omitempty"`
+	ID         string           `json:"id"`
+	Ref        ContextRef       `json:"ref,omitempty"`
+	Kind       Kind             `json:"kind"`
+	Role       sdk.MessageRole  `json:"role,omitempty"`
+	Slot       Slot             `json:"slot"`
+	Priority   int              `json:"priority,omitempty"`
+	CacheClass CacheClass       `json:"cache_class,omitempty"`
+	Trust      TrustLevel       `json:"trust,omitempty"`
+	Scope      Scope            `json:"scope,omitempty"`
+	Budget     BudgetPolicy     `json:"budget,omitempty"`
+	Render     RenderPolicy     `json:"render,omitempty"`
+	Provenance Provenance       `json:"provenance,omitempty"`
+	Coverage   *SummaryCoverage `json:"coverage,omitempty"`
+	Parts      []Part           `json:"parts,omitempty"`
 }
 
 // AssembledContext is the compiled view produced from fragments.
@@ -308,6 +309,7 @@ type ManifestItem struct {
 	TextBytes  int             `json:"text_bytes,omitempty"`
 	ImageCount int             `json:"image_count,omitempty"`
 	Scope      Scope           `json:"scope,omitempty"`
+	Budget     BudgetPolicy    `json:"budget,omitempty"`
 }
 
 type SlotRenderPolicy struct {
