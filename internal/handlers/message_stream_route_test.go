@@ -364,6 +364,43 @@ func TestValidatedSessionTurnGraphRejectsStaleExplicitHead(t *testing.T) {
 	}
 }
 
+func TestValidatedSessionTurnGraphUsesHeadValidator(t *testing.T) {
+	t.Parallel()
+
+	svc := &headValidatorMessageService{ok: true}
+	h := &MessageHandler{messageService: svc}
+	if _, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "turn-b", false); err != nil {
+		t.Fatalf("validatedSessionTurnGraph() error = %v", err)
+	}
+	if svc.validatorCalls != 1 {
+		t.Fatalf("validator calls = %d, want 1", svc.validatorCalls)
+	}
+	if svc.graphCalls != 0 {
+		t.Fatalf("graph calls = %d, want 0", svc.graphCalls)
+	}
+}
+
+func TestValidatedSessionTurnGraphValidatorRejectsStaleHead(t *testing.T) {
+	t.Parallel()
+
+	svc := &headValidatorMessageService{ok: false}
+	h := &MessageHandler{messageService: svc}
+	_, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "turn-b", false)
+	if err == nil {
+		t.Fatal("validatedSessionTurnGraph() err = nil, want stale HTTP error")
+	}
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("error type = %T, want *echo.HTTPError", err)
+	}
+	if httpErr.Code != http.StatusConflict {
+		t.Fatalf("HTTPError.Code = %d, want 409", httpErr.Code)
+	}
+	if svc.graphCalls != 0 {
+		t.Fatalf("graph calls = %d, want 0", svc.graphCalls)
+	}
+}
+
 type graphOnlyMessageService struct {
 	messagepkg.Service
 	graph messagepkg.SessionTurnGraph
@@ -371,6 +408,23 @@ type graphOnlyMessageService struct {
 
 func (s *graphOnlyMessageService) GetSessionTurnGraph(context.Context, string) (messagepkg.SessionTurnGraph, error) {
 	return s.graph, nil
+}
+
+type headValidatorMessageService struct {
+	messagepkg.Service
+	ok             bool
+	validatorCalls int
+	graphCalls     int
+}
+
+func (s *headValidatorMessageService) IsSessionTurnHead(context.Context, string, string) (bool, error) {
+	s.validatorCalls++
+	return s.ok, nil
+}
+
+func (s *headValidatorMessageService) GetSessionTurnGraph(context.Context, string) (messagepkg.SessionTurnGraph, error) {
+	s.graphCalls++
+	return messagepkg.SessionTurnGraph{}, nil
 }
 
 // TestStreamSessionMessageEventsRequiresSessionPath confirms the per-session

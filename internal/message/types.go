@@ -140,3 +140,9 @@ type SessionHeadPager interface {
 type SessionHeadLocator interface {
 	LocateByExternalIDBySessionHead(ctx context.Context, sessionID string, headTurnID string, externalMessageID string, beforeLimit int32, afterLimit int32) (LocateResult, error)
 }
+
+// SessionHeadValidator checks whether a turn is one of a session's active
+// heads without loading the full turn graph.
+type SessionHeadValidator interface {
+	IsSessionTurnHead(ctx context.Context, sessionID string, headTurnID string) (bool, error)
+}

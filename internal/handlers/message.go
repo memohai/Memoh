@@ -242,6 +242,18 @@ func (h *MessageHandler) validatedSessionTurnGraph(ctx context.Context, sessionI
 	if head == "" && !needGraph {
 		return messagepkg.SessionTurnGraph{}, nil
 	}
+	if head != "" && !needGraph {
+		if validator, ok := h.messageService.(messagepkg.SessionHeadValidator); ok {
+			ok, err := validator.IsSessionTurnHead(ctx, sessionID, head)
+			if err != nil {
+				return messagepkg.SessionTurnGraph{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+			}
+			if !ok {
+				return messagepkg.SessionTurnGraph{}, echo.NewHTTPError(http.StatusConflict, staleSessionHeadMessage)
+			}
+			return messagepkg.SessionTurnGraph{}, nil
+		}
+	}
 	graph, err := h.messageService.GetSessionTurnGraph(ctx, sessionID)
 	if err != nil {
 		return messagepkg.SessionTurnGraph{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())

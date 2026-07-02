@@ -549,6 +549,33 @@ func (s *DBService) GetSessionTurnGraph(ctx context.Context, sessionID string) (
 	return graph, nil
 }
 
+// IsSessionTurnHead reports whether headTurnID is currently an active head for
+// the session without loading the full turn graph.
+func (s *DBService) IsSessionTurnHead(ctx context.Context, sessionID string, headTurnID string) (bool, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return false, err
+	}
+	pgHeadTurnID, err := parseOptionalUUID(headTurnID)
+	if err != nil {
+		return false, err
+	}
+	if !pgHeadTurnID.Valid {
+		return false, nil
+	}
+	_, err = s.queries.GetSessionTurnHead(ctx, sqlc.GetSessionTurnHeadParams{
+		SessionID:  pgSessionID,
+		HeadTurnID: pgHeadTurnID,
+	})
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return false, err
+}
+
 type sessionTurnGraphNodeMetadata struct {
 	Timestamp    time.Time
 	RequestKey   string
