@@ -85,16 +85,25 @@ label row — e.g. a label with an inline "clear" button), default (the control)
 **distinct from SettingsRow**: SettingsRow puts the label *beside* the control; FieldStack
 stacks it *above*.
 
-> **FieldStack is the intended single owner for vertical form fields — including
-> validated ones.** The codebase still has a second, older field shape: vee-validate's
-> `<FormField>/<FormItem>` (`@memohai/ui`, `grid gap-2`, carries a validation/error
-> state). It is the same Label-over-control relationship with a different gap. The
-> direction is to converge on FieldStack. **Practical rule for now:** a plain field with
-> no validation → FieldStack. A field that needs live validation (a vee-validate
-> `<FormField>` with an error message) → keep `FormItem` until FieldStack ships a
-> validation state; do **not** move a validated field onto FieldStack yet, because that
-> would drop its error handling. When in doubt, match the surrounding form: a dialog
-> already built on `useForm`/`<FormField>` stays on that system field-by-field.
+> **FieldStack is the single owner for vertical form fields — including validated ones.**
+> When a FieldStack sits inside a vee-validate `<FormField>`, it takes over `FormItem`'s
+> job: it provides the form-item id (so a `<FormControl>` wrapping the control resolves
+> aria-invalid / aria-describedby) and renders the field's error inline. So the pattern for
+> a validated field is:
+> ```
+> <FormField v-slot="{ componentField }" name="x">
+>   <FieldStack :label="…" for="x-id">
+>     <FormControl><Input id="x-id" v-bind="componentField" /></FormControl>
+>   </FieldStack>
+> </FormField>
+> ```
+> Keep the outer `<FormField>` and the `<FormControl>`; drop the old `<FormItem>` + bare
+> `<Label>`. A plain field with no validation is just `<FieldStack :label>` around the
+> control. **One caveat:** because FieldStack now renders errors inline, any hardcoded
+> validation message in the zod schema becomes visible — translate it (zh/en/ja) instead
+> of shipping the English default. The older `@memohai/ui` `<FormItem>` (`grid gap-2`) is
+> superseded; new code uses FieldStack.
+
 
 **FormStack** · `settings/form-stack.vue`
 A `space-y-4` wrapper for a run of `FieldStack`s. Use it around a contiguous form column

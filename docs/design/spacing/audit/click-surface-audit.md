@@ -19,6 +19,27 @@ confirms the working thesis: **the risk lives in the forms you have to click to 
 The audit also surfaced a real architecture fork (below) that changes how 17 of the 36
 must be handled.
 
+## RESOLUTION (all 36 handled)
+
+Shipped in three commits after this audit:
+
+- **Group 1 (19 MISS, no validation)** → `1db444c56`. 10 files migrated onto their owners;
+  `bot-mcp` add-tile and `bot-channels` type-picker were re-confirmed at migration time as
+  genuinely different geometries (horizontal `min-h-[4.5rem]` tile / flat menu row, not
+  PersonaTile / SettingsRow) and left local — recorded, not forced.
+- **FieldStack v2** → `445c55aa6`. FieldStack now provides `FORM_ITEM_INJECTION_KEY` and
+  renders the field error inline when inside a `<FormField>`, so it owns validated fields
+  too. Piloted on `add-provider` (5 fields). Standalone FieldStacks unchanged.
+- **Group 2 (17 MISS, vee-validate)** → `445c55aa6` (add-provider) + `8d8c645d3`
+  (create-model, add-platform). All `FormItem` fields swapped to FieldStack v2, validation
+  preserved; previously-hidden schema messages now render inline and were translated to
+  zh/en/ja.
+
+Gate for each: ESLint 0, vue-tsc 0, UI contract 0 new violations (the 9 remaining are the
+pre-existing `sidebar/index.vue` px + `video/provider-setting.vue` hover debt, outside this
+work). A human render check (dark + narrow + zh, submit an empty required field to confirm
+the inline error copy reads correctly) is the remaining non-automated step.
+
 ## The field-system fork (decided: FieldStack absorbs validation)
 
 Vertical form fields have **two owners** in the codebase today:
