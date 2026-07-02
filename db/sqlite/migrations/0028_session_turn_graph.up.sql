@@ -149,7 +149,15 @@ CREATE TABLE IF NOT EXISTS bot_history_turns (
   request_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   final_assistant_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  -- Turn provenance: origin_kind/origin_turn_id record how the turn was
+  -- created (message | retry | edit); request_group_id groups sibling turns
+  -- carrying the same logical request (retry copies the source turn's group,
+  -- send/edit start a new one). NULL request_group_id means the turn is its
+  -- own group (read as COALESCE(request_group_id, id)).
+  origin_kind TEXT,
+  origin_turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
+  request_group_id TEXT
 );
 
 CREATE TABLE tool_approval_requests_new (

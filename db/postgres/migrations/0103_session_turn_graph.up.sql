@@ -45,8 +45,22 @@ CREATE TABLE IF NOT EXISTS bot_history_turns (
   request_message_id UUID,
   final_assistant_message_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- Turn provenance: origin_kind/origin_turn_id record how the turn was
+  -- created (message | retry | edit); request_group_id groups sibling turns
+  -- carrying the same logical request (retry copies the source turn's group,
+  -- send/edit start a new one). NULL request_group_id means the turn is its
+  -- own group (read as COALESCE(request_group_id, id)).
+  origin_kind TEXT,
+  origin_turn_id UUID REFERENCES bot_history_turns(id) ON DELETE SET NULL,
+  request_group_id UUID
 );
+
+-- Guard for databases where an earlier iteration already created the table:
+-- make sure the provenance columns exist either way.
+ALTER TABLE bot_history_turns ADD COLUMN IF NOT EXISTS origin_kind TEXT;
+ALTER TABLE bot_history_turns ADD COLUMN IF NOT EXISTS origin_turn_id UUID REFERENCES bot_history_turns(id) ON DELETE SET NULL;
+ALTER TABLE bot_history_turns ADD COLUMN IF NOT EXISTS request_group_id UUID;
 
 CREATE TABLE IF NOT EXISTS bot_session_turn_heads (
   session_id UUID NOT NULL,
