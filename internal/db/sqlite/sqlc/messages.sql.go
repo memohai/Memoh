@@ -2234,42 +2234,39 @@ request_assets AS (
       '|'
     ) AS request_asset_key
   FROM (
-    SELECT id, message_id, role, ordinal, content_hash, name, metadata, created_at
-    FROM bot_history_message_assets
+    SELECT a.id, a.message_id, a.role, a.ordinal, a.content_hash, a.name, a.metadata, a.created_at
+    FROM graph_turns gt
+    JOIN bot_history_turns t ON t.id = gt.id
+    JOIN bot_history_message_assets a ON a.message_id = t.request_message_id
     ORDER BY content_hash, name, role, ordinal, id
   ) a
   GROUP BY a.message_id
 )
 SELECT
   gt.id AS turn_id,
-  COALESCE(MIN(m.created_at), t.created_at) AS node_created_at,
+  gt.parent_turn_id,
+  COALESCE(rm.created_at, t.created_at) AS node_created_at,
   COALESCE(rm.content, 'null') AS request_content,
   COALESCE(rm.display_text, '') AS request_display_text,
   COALESCE(ra.request_asset_key, '') AS request_asset_key,
   t.request_message_id IS NOT NULL AS has_user,
-  EXISTS (
-    SELECT 1
-    FROM bot_history_messages assistant_m
-    WHERE assistant_m.turn_id = gt.id
-      AND assistant_m.role = 'assistant'
-  ) AS has_assistant
+  t.final_assistant_message_id IS NOT NULL AS has_assistant
 FROM graph_turns gt
 JOIN bot_history_turns t ON t.id = gt.id
-LEFT JOIN bot_history_messages m ON m.turn_id = gt.id
 LEFT JOIN bot_history_messages rm ON rm.id = t.request_message_id
 LEFT JOIN request_assets ra ON ra.message_id = t.request_message_id
-GROUP BY gt.id, t.created_at, t.request_message_id, rm.content, rm.display_text, ra.request_asset_key
-ORDER BY COALESCE(MIN(m.created_at), t.created_at) ASC, gt.id ASC
+ORDER BY COALESCE(rm.created_at, t.created_at) ASC, gt.id ASC
 `
 
 type ListSessionTurnGraphNodeMetadataRow struct {
-	TurnID             string `json:"turn_id"`
-	NodeCreatedAt      string `json:"node_created_at"`
-	RequestContent     string `json:"request_content"`
-	RequestDisplayText string `json:"request_display_text"`
-	RequestAssetKey    string `json:"request_asset_key"`
-	HasUser            bool   `json:"has_user"`
-	HasAssistant       bool   `json:"has_assistant"`
+	TurnID             string         `json:"turn_id"`
+	ParentTurnID       sql.NullString `json:"parent_turn_id"`
+	NodeCreatedAt      string         `json:"node_created_at"`
+	RequestContent     string         `json:"request_content"`
+	RequestDisplayText string         `json:"request_display_text"`
+	RequestAssetKey    string         `json:"request_asset_key"`
+	HasUser            bool           `json:"has_user"`
+	HasAssistant       bool           `json:"has_assistant"`
 }
 
 func (q *Queries) ListSessionTurnGraphNodeMetadata(ctx context.Context, sessionID string) ([]ListSessionTurnGraphNodeMetadataRow, error) {
@@ -2283,6 +2280,7 @@ func (q *Queries) ListSessionTurnGraphNodeMetadata(ctx context.Context, sessionI
 		var i ListSessionTurnGraphNodeMetadataRow
 		if err := rows.Scan(
 			&i.TurnID,
+			&i.ParentTurnID,
 			&i.NodeCreatedAt,
 			&i.RequestContent,
 			&i.RequestDisplayText,

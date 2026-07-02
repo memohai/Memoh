@@ -497,10 +497,6 @@ func (s *DBService) GetSessionTurnGraph(ctx context.Context, sessionID string) (
 	if err != nil {
 		return SessionTurnGraph{}, err
 	}
-	turnRows, err := s.queries.ListSessionTurnGraphTurns(ctx, pgSessionID)
-	if err != nil {
-		return SessionTurnGraph{}, err
-	}
 	metadataRows, err := s.queries.ListSessionTurnGraphNodeMetadata(ctx, pgSessionID)
 	if err != nil {
 		return SessionTurnGraph{}, err
@@ -509,7 +505,7 @@ func (s *DBService) GetSessionTurnGraph(ctx context.Context, sessionID string) (
 	graph := SessionTurnGraph{
 		DefaultHeadTurnID: uuidToString(sess.DefaultHeadTurnID),
 		HeadTurnIDs:       make([]string, 0, len(headRows)),
-		Nodes:             make([]SessionTurnGraphNode, 0, len(turnRows)),
+		Nodes:             make([]SessionTurnGraphNode, 0, len(metadataRows)),
 	}
 	for _, head := range headRows {
 		if id := uuidToString(head.HeadTurnID); id != "" {
@@ -517,33 +513,18 @@ func (s *DBService) GetSessionTurnGraph(ctx context.Context, sessionID string) (
 		}
 	}
 
-	metadataByTurn := make(map[string]sessionTurnGraphNodeMetadata, len(metadataRows))
 	for _, row := range metadataRows {
 		turnID := uuidToString(row.TurnID)
 		if turnID == "" {
 			continue
 		}
-		metadataByTurn[turnID] = sessionTurnGraphNodeMetadata{
-			Timestamp:    row.NodeCreatedAt.Time,
+		graph.Nodes = append(graph.Nodes, SessionTurnGraphNode{
+			TurnID:       turnID,
+			ParentTurnID: uuidToString(row.ParentTurnID),
+			Timestamp:    formatSessionTurnGraphTimestamp(row.NodeCreatedAt.Time),
 			RequestKey:   buildSessionTurnRequestKey(row.RequestContent, row.RequestDisplayText, row.RequestAssetKey),
 			HasUser:      row.HasUser,
 			HasAssistant: row.HasAssistant,
-		}
-	}
-
-	for _, turn := range turnRows {
-		turnID := uuidToString(turn.ID)
-		if turnID == "" {
-			continue
-		}
-		metadata := metadataByTurn[turnID]
-		graph.Nodes = append(graph.Nodes, SessionTurnGraphNode{
-			TurnID:       turnID,
-			ParentTurnID: uuidToString(turn.ParentTurnID),
-			Timestamp:    formatSessionTurnGraphTimestamp(metadata.Timestamp),
-			RequestKey:   metadata.RequestKey,
-			HasUser:      metadata.HasUser,
-			HasAssistant: metadata.HasAssistant,
 		})
 	}
 	return graph, nil
@@ -574,13 +555,6 @@ func (s *DBService) IsSessionTurnHead(ctx context.Context, sessionID string, hea
 		return false, nil
 	}
 	return false, err
-}
-
-type sessionTurnGraphNodeMetadata struct {
-	Timestamp    time.Time
-	RequestKey   string
-	HasUser      bool
-	HasAssistant bool
 }
 
 func formatSessionTurnGraphTimestamp(t time.Time) string {

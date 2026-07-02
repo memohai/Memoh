@@ -2358,33 +2358,30 @@ request_assets AS (
       '|'
       ORDER BY a.content_hash, a.name, a.role, a.ordinal, a.id
     ) AS request_asset_key
-  FROM bot_history_message_assets a
+  FROM graph_turns gt
+  JOIN bot_history_turns t ON t.id = gt.id
+  JOIN bot_history_message_assets a ON a.message_id = t.request_message_id
   GROUP BY a.message_id
 )
 SELECT
   gt.id AS turn_id,
-  COALESCE(MIN(m.created_at), t.created_at) AS node_created_at,
+  gt.parent_turn_id,
+  COALESCE(rm.created_at, t.created_at)::timestamptz AS node_created_at,
   COALESCE(rm.content, 'null'::jsonb) AS request_content,
   COALESCE(rm.display_text, '')::text AS request_display_text,
   COALESCE(ra.request_asset_key, '')::text AS request_asset_key,
   (t.request_message_id IS NOT NULL)::boolean AS has_user,
-  EXISTS (
-    SELECT 1
-    FROM bot_history_messages assistant_m
-    WHERE assistant_m.turn_id = gt.id
-      AND assistant_m.role = 'assistant'
-  ) AS has_assistant
+  (t.final_assistant_message_id IS NOT NULL)::boolean AS has_assistant
 FROM graph_turns gt
 JOIN bot_history_turns t ON t.id = gt.id
-LEFT JOIN bot_history_messages m ON m.turn_id = gt.id
 LEFT JOIN bot_history_messages rm ON rm.id = t.request_message_id
 LEFT JOIN request_assets ra ON ra.message_id = t.request_message_id
-GROUP BY gt.id, t.created_at, t.request_message_id, rm.content, rm.display_text, ra.request_asset_key
-ORDER BY COALESCE(MIN(m.created_at), t.created_at) ASC, gt.id ASC
+ORDER BY COALESCE(rm.created_at, t.created_at)::timestamptz ASC, gt.id ASC
 `
 
 type ListSessionTurnGraphNodeMetadataRow struct {
 	TurnID             pgtype.UUID        `json:"turn_id"`
+	ParentTurnID       pgtype.UUID        `json:"parent_turn_id"`
 	NodeCreatedAt      pgtype.Timestamptz `json:"node_created_at"`
 	RequestContent     []byte             `json:"request_content"`
 	RequestDisplayText string             `json:"request_display_text"`
@@ -2404,6 +2401,7 @@ func (q *Queries) ListSessionTurnGraphNodeMetadata(ctx context.Context, sessionI
 		var i ListSessionTurnGraphNodeMetadataRow
 		if err := rows.Scan(
 			&i.TurnID,
+			&i.ParentTurnID,
 			&i.NodeCreatedAt,
 			&i.RequestContent,
 			&i.RequestDisplayText,
