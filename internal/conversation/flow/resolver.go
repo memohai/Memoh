@@ -385,10 +385,15 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		if contextTokenBudget > 0 {
 			compactionThreshold = contextTokenBudget * 70 / 100
 		}
-		if compactionThreshold > 0 && estimatedTokens >= compactionThreshold {
+		// The trigger only counts raw (compactable) rows: active summaries can
+		// never be compacted away, so including them would make the trigger
+		// self-sustaining once accumulated summaries cross the threshold.
+		compactableTokens := totalCompactableHistoryTokens(loaded)
+		if compactionThreshold > 0 && compactableTokens >= compactionThreshold {
 			r.logger.Warn("resolve: context reached compaction threshold, running synchronous compaction",
 				slog.String("bot_id", req.BotID),
 				slog.Int("estimated_tokens", estimatedTokens),
+				slog.Int("compactable_tokens", compactableTokens),
 				slog.Int("context_token_budget", contextTokenBudget),
 				slog.Int("compaction_threshold", compactionThreshold),
 			)
@@ -396,7 +401,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			// summary. A noop (cooldown, in-flight, nothing markable) keeps
 			// this turn's context untouched — possibly still above the
 			// threshold — and the next turn re-evaluates.
-			if res := r.runCompactionSync(ctx, req, estimatedTokens); res.Status == compaction.StatusOK {
+			if res := r.runCompactionSync(ctx, req, compactableTokens); res.Status == compaction.StatusOK {
 				loaded, loadErr = r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
 				if loadErr != nil {
 					r.logger.Error("resolve: reload messages after compaction failed",

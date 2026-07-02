@@ -361,6 +361,78 @@ func TestReplaceCompactedMessagesLoadsSessionSummaryCoverageFromCompactedRows(t 
 	}
 }
 
+func TestReplaceCompactedMessagesResolvesInWindowGroupsFromSessionLogs(t *testing.T) {
+	t.Parallel()
+
+	sessionID := "00000000-0000-0000-0000-00000000f005"
+	inWindowCompact := "00000000-0000-0000-0000-00000000c005"
+	outOfWindowCompact := "00000000-0000-0000-0000-00000000c006"
+	queries := &recordingCompactionLogQueries{
+		logs: []sqlc.BotHistoryMessageCompact{
+			{
+				ID:        mustPGUUID(t, inWindowCompact),
+				SessionID: mustPGUUID(t, sessionID),
+				Status:    "ok",
+				Summary:   "in-window condensed context",
+			},
+			{
+				ID:        mustPGUUID(t, outOfWindowCompact),
+				SessionID: mustPGUUID(t, sessionID),
+				Status:    "ok",
+				Summary:   "aged-out condensed context",
+			},
+		},
+	}
+	resolver := &Resolver{queries: queries}
+	recent := []historyfrag.HistoryRecord{
+		historyRecord("row-compacted", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("old")}, func(r *historyfrag.HistoryRecord) {
+			r.CompactID = inWindowCompact
+		}),
+		historyRecord("row-current", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("current")}, nil),
+	}
+
+	// The fake does not implement GetCompactionLogByID: resolving in-window
+	// groups must come from the single session log load, not per-group lookups.
+	got := resolver.replaceCompactedMessages(context.Background(), sessionID, contextfrag.Scope{BotID: "bot-1", SessionID: sessionID}, recent)
+
+	if queries.listCalls != 1 {
+		t.Fatalf("session logs loaded %d times, want exactly once", queries.listCalls)
+	}
+	if len(got) != 3 {
+		t.Fatalf("records = %d, want prepended summary + in-window summary + recent row: %#v", len(got), got)
+	}
+	if got[0].CompactID != outOfWindowCompact || got[0].Kind != contextfrag.KindConversationSummary {
+		t.Fatalf("first record should be the aged-out session summary: %#v", got[0])
+	}
+	if got[1].CompactID != inWindowCompact || got[1].Kind != contextfrag.KindConversationSummary {
+		t.Fatalf("in-window group was not replaced by its summary: %#v", got[1])
+	}
+	if got[2].DBMessageID != "row-current" {
+		t.Fatalf("recent row lost or reordered: %#v", got)
+	}
+	for _, called := range queries.coveredCalls {
+		if called == mustPGUUID(t, inWindowCompact) {
+			t.Fatal("covered-ref lookup must be skipped for groups already replaced in-window")
+		}
+	}
+}
+
+func TestTotalCompactableHistoryTokensExcludesSummaries(t *testing.T) {
+	t.Parallel()
+
+	summary := historyfrag.SummaryRecord("compact-big", strings.Repeat("s", 4000), nil, contextfrag.Scope{})
+	raw := historyRecord("row-1", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(strings.Repeat("r", 400))}, nil)
+	records := []historyfrag.HistoryRecord{summary, raw}
+
+	compactable := totalCompactableHistoryTokens(records)
+	if compactable <= 0 {
+		t.Fatal("raw rows must count toward the compactable estimate")
+	}
+	if want := estimateMessageTokens(raw.ModelMessage); compactable != want {
+		t.Fatalf("compactable = %d, want raw-only estimate %d", compactable, want)
+	}
+}
+
 func TestHistoryRecordPathPreservesLegacyResolverMessagePipeline(t *testing.T) {
 	t.Parallel()
 
@@ -556,17 +628,21 @@ func historyRecord(id string, msg conversation.ModelMessage, mutate func(*histor
 
 type recordingCompactionLogQueries struct {
 	dbstore.Queries
-	logs      []sqlc.BotHistoryMessageCompact
-	covered   map[pgtype.UUID][]sqlc.ListMessagesByCompactIDRow
-	sessionID pgtype.UUID
+	logs         []sqlc.BotHistoryMessageCompact
+	covered      map[pgtype.UUID][]sqlc.ListMessagesByCompactIDRow
+	sessionID    pgtype.UUID
+	listCalls    int
+	coveredCalls []pgtype.UUID
 }
 
 func (q *recordingCompactionLogQueries) ListCompactionLogsBySession(_ context.Context, sessionID pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
 	q.sessionID = sessionID
+	q.listCalls++
 	return q.logs, nil
 }
 
 func (q *recordingCompactionLogQueries) ListMessagesByCompactID(_ context.Context, compactID pgtype.UUID) ([]sqlc.ListMessagesByCompactIDRow, error) {
+	q.coveredCalls = append(q.coveredCalls, compactID)
 	return q.covered[compactID], nil
 }
 
