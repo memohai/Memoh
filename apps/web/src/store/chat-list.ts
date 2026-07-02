@@ -1370,9 +1370,27 @@ export const useChatStore = defineStore('chat', () => {
     return knownSessionSummary(sid)?.type === 'chat'
   }
 
+  // Whether the cached graph shows real branching. Single-head sessions never
+  // render variant arrows and their cached graph is allowed to go stale (see
+  // refreshCurrentSession), so callers must not rely on cached graph data for
+  // them.
+  function sessionGraphHasVariants(targetSessionId?: string | null): boolean {
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
+    if (!sid) return false
+    return (turnGraphs.get(sid)?.headTurnIds.length ?? 0) > 1
+  }
+
   function baseHeadForRequest(targetSessionId?: string | null): string | undefined {
     if (!sessionSupportsTurnVariants(targetSessionId)) return undefined
-    return selectedHeadForSession(targetSessionId).trim() || undefined
+    const explicit = explicitSelectedHeadForSession(targetSessionId)
+    if (explicit) return explicit
+    // Pin the send to the viewed default head only when the session actually
+    // branches (its graph is kept fresh on every refresh). For linear sessions
+    // the cached default head may be stale — omit it and let the server
+    // resolve the session's own default head.
+    if (!sessionGraphHasVariants(targetSessionId)) return undefined
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
+    return turnGraphs.get(sid)?.defaultHeadTurnId?.trim() || undefined
   }
 
   function baseHeadPayload(targetSessionId?: string | null): { base_head_turn_id: string } | Record<string, never> {
@@ -2057,7 +2075,9 @@ export const useChatStore = defineStore('chat', () => {
       loading.value = true
       await completion
       resetSelectedHeadForSession(sid)
-      await refreshCurrentSession(bid, sid, { useSelectedView: false })
+      // Retry/rewrite forks the turn chain, which can turn a linear session
+      // into a branching one — force a graph refresh so variant arrows appear.
+      await refreshCurrentSession(bid, sid, { useSelectedView: false, includeGraph: true })
       assistantTurn.streaming = false
       loading.value = false
       return { ok: true }
@@ -2478,17 +2498,37 @@ export const useChatStore = defineStore('chat', () => {
     touchSessionInList(sid, latest)
   }
 
+  // The turn graph is the most expensive part of a `ListMessages` call, and
+  // most sessions are linear (single head, no variants) where the graph never
+  // renders anything. Request it only when it can matter:
+  // - first load of a session (no cached graph yet) — discover branching;
+  // - the cached graph already shows branching — keep heads/nodes fresh so
+  //   variant arrows and head pinning stay correct;
+  // - the caller just ran an action that can create a branch (retry/rewrite),
+  //   signalled via `includeGraph: true`.
+  // Linear sessions skip the graph on every post-turn / SSE-triggered refresh;
+  // their cached graph is stale but unused (see sessionGraphHasVariants).
+  function shouldIncludeGraphOnRefresh(sid: string): boolean {
+    // Non-chat sessions (discuss, acp_agent, ...) never render variants nor
+    // pin heads; their graph is dead weight. Unknown type falls through to
+    // the discovery path below.
+    const type = knownSessionSummary(sid)?.type?.trim()
+    if (type && type !== 'chat') return false
+    return !turnGraphs.has(sid) || sessionGraphHasVariants(sid)
+  }
+
   async function refreshCurrentSession(
     targetBotId?: string,
     targetSessionId?: string,
-    options: { useSelectedView?: boolean } = {},
+    options: { useSelectedView?: boolean; includeGraph?: boolean } = {},
   ) {
     const bid = (targetBotId ?? currentBotId.value ?? '').trim()
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
     if (!bid || !sid) return
     const useSelectedView = options.useSelectedView !== false
+    const includeGraph = options.includeGraph === true || shouldIncludeGraphOnRefresh(sid)
     let expectedHeadKey = currentViewHeadKey(sid, useSelectedView)
-    const key = `${bid}:${sid}:${useSelectedView ? 'selected' : 'default'}:${expectedHeadKey}`
+    const key = `${bid}:${sid}:${useSelectedView ? 'selected' : 'default'}:${expectedHeadKey}:${includeGraph ? 'graph' : 'plain'}`
 
     if (refreshPromise) {
       if (refreshPromise.key === key) {
@@ -2503,7 +2543,7 @@ export const useChatStore = defineStore('chat', () => {
       try {
         payload = await fetchMessagesUI(bid, sid, {
           limit: PAGE_SIZE,
-          includeGraph: true,
+          ...(includeGraph ? { includeGraph: true } : {}),
           ...(useSelectedView ? viewHeadFetchOption(sid) : {}),
         })
       } catch (error) {
@@ -3725,6 +3765,10 @@ export const useChatStore = defineStore('chat', () => {
   function switchActiveSession(sid: string) {
     cancelVariantSelectionLoad()
     sessionMessagesStream.stop()
+    // Drop the cached graph (but keep the user's selected head) so opening a
+    // session always re-discovers branching once; refreshes while it stays
+    // open skip the graph for linear sessions (see shouldIncludeGraphOnRefresh).
+    if (sid) turnGraphs.delete(sid)
     replaceMessages([])
     hasMoreOlder.value = false
     hasLoadedOlder.value = false

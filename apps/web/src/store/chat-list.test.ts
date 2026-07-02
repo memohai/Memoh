@@ -2371,6 +2371,58 @@ describe('chat-list store', () => {
     expect(store.messages.map(message => message.id)).toEqual(['user-c'])
   })
 
+  it('requests the turn graph once for linear sessions and skips it on later refreshes', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    api.fetchMessagesUI
+      .mockResolvedValueOnce(messagesPayload([
+        { id: 'user-a', turn_id: 'turn-a', role: 'user', text: 'A request', timestamp: '2026-06-19T00:01:00.000Z' },
+      ], {
+        defaultHeadTurnId: 'turn-a',
+        headTurnIds: ['turn-a'],
+        nodes: [graphNode('turn-a', { timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'a' })],
+      }))
+      .mockResolvedValueOnce(messagesPayload([
+        { id: 'user-b', turn_id: 'turn-b', role: 'user', text: 'B request', timestamp: '2026-06-19T00:02:00.000Z' },
+      ]))
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await flushPromises()
+    // First load discovers branching, so the graph is requested.
+    expect(api.fetchMessagesUI).toHaveBeenNthCalledWith(1, 'bot-1', 'session-1', {
+      limit: 30,
+      includeGraph: true,
+    })
+
+    // The cached graph shows a single head (no variants): later refreshes
+    // skip the expensive graph query entirely.
+    _sessionMessageHandler?.({ type: 'stale', session_id: 'session-1' })
+    await new Promise(r => setTimeout(r, 150))
+    await flushPromises()
+    expect(api.fetchMessagesUI).toHaveBeenNthCalledWith(2, 'bot-1', 'session-1', {
+      limit: 30,
+    })
+    expect(store.messages.map(message => message.id)).toEqual(['user-b'])
+  })
+
+  it('never requests the turn graph for non-chat sessions', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Discuss', type: 'discuss' },
+    ], nextCursor: null })
+    api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([
+      { id: 'user-a', turn_id: 'turn-a', role: 'user', text: 'A request', timestamp: '2026-06-19T00:01:00.000Z' },
+    ]))
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await flushPromises()
+    expect(api.fetchMessagesUI).toHaveBeenNthCalledWith(1, 'bot-1', 'session-1', {
+      limit: 30,
+    })
+  })
+
   it('does not optimistically submit user input while websocket is disconnected', async () => {
     api.connectWebSocket.mockImplementationOnce((_botId: string, _onStreamEvent: UIStreamEventHandler) => ({
       get connected() {
@@ -3280,7 +3332,15 @@ describe('chat-list store', () => {
       type: 'retry_message',
       session_id: 'session-1',
       retry_message_id: 'assistant-b1',
-      base_head_turn_id: 'turn-b1',
+    })
+    // Single-head session: no explicit base head is pinned; the server
+    // resolves its own default head.
+    expect(sentWSMessages.at(-1)).not.toHaveProperty('base_head_turn_id')
+    // Retry can fork the chain, so its completion refresh must force the
+    // graph even though the cached graph was still single-head.
+    expect(api.fetchMessagesUI).toHaveBeenNthCalledWith(2, 'bot-1', 'session-1', {
+      limit: 30,
+      includeGraph: true,
     })
     expect(store.messages.map(message => message.id)).toEqual(['user-a', 'assistant-a', 'user-b2', 'assistant-b2'])
     expect(store.responseVariantStateForMessage('assistant-b2')).toMatchObject({
@@ -3381,8 +3441,9 @@ describe('chat-list store', () => {
       type: 'message',
       session_id: 'session-1',
       text: 'same request',
-      base_head_turn_id: 'turn-b1',
     })
+    // Single-head session: no explicit base head is pinned.
+    expect(sentWSMessages.at(-1)).not.toHaveProperty('base_head_turn_id')
     expect(sentWSMessages.at(-1)).not.toHaveProperty('retry_message_id')
     expect(store.messages.map(message => message.id)).toEqual(['user-b1', 'assistant-b1'])
     expect(store.responseVariantStateForMessage('assistant-b1')).toBeNull()
@@ -3433,8 +3494,9 @@ describe('chat-list store', () => {
       type: 'retry_message',
       session_id: 'session-1',
       retry_message_id: 'assistant-b1',
-      base_head_turn_id: 'turn-b1',
     })
+    // Single-head session: no explicit base head is pinned.
+    expect(sentWSMessages.at(-1)).not.toHaveProperty('base_head_turn_id')
     expect(store.messages).toHaveLength(before.length)
     expect(store.messages.map(message => message.id).slice(0, -1)).toEqual(before.slice(0, -1))
     expect(store.messages.at(-1)).toMatchObject({
@@ -4253,8 +4315,10 @@ describe('chat-list store', () => {
     expect(sentWSMessages.at(-1)).toMatchObject({
       type: 'message',
       text: 'continue default',
-      base_head_turn_id: 'turn-d',
     })
+    // After recovery the fresh graph has a single head again: no explicit
+    // base head is pinned; the server resolves its own default head.
+    expect(sentWSMessages.at(-1)).not.toHaveProperty('base_head_turn_id')
   })
 
   it('preserves scrolled-back history when an SSE refresh fires', async () => {
