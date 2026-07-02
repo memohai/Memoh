@@ -530,6 +530,28 @@ func (s *DBService) GetSessionTurnGraph(ctx context.Context, sessionID string) (
 	return graph, nil
 }
 
+// ListSessionTurnHeadIDs returns the session's active head turn ids without
+// loading turn graph node metadata. The heads table holds at most a few rows
+// per session, so this is a cheap indexed lookup compared with the recursive
+// graph metadata query.
+func (s *DBService) ListSessionTurnHeadIDs(ctx context.Context, sessionID string) ([]string, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	headRows, err := s.queries.ListSessionTurnHeads(ctx, pgSessionID)
+	if err != nil {
+		return nil, err
+	}
+	headIDs := make([]string, 0, len(headRows))
+	for _, head := range headRows {
+		if id := uuidToString(head.HeadTurnID); id != "" {
+			headIDs = append(headIDs, id)
+		}
+	}
+	return headIDs, nil
+}
+
 // IsSessionTurnHead reports whether headTurnID is currently an active head for
 // the session without loading the full turn graph.
 func (s *DBService) IsSessionTurnHead(ctx context.Context, sessionID string, headTurnID string) (bool, error) {

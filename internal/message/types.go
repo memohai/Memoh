@@ -146,3 +146,10 @@ type SessionHeadLocator interface {
 type SessionHeadValidator interface {
 	IsSessionTurnHead(ctx context.Context, sessionID string, headTurnID string) (bool, error)
 }
+
+// SessionHeadLister lists a session's active head turn ids without loading
+// full turn graph node metadata. Handlers use it to short-circuit graph
+// loading for sessions that cannot have variants (zero or one head).
+type SessionHeadLister interface {
+	ListSessionTurnHeadIDs(ctx context.Context, sessionID string) ([]string, error)
+}

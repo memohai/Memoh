@@ -192,7 +192,7 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	}
 	botID = bot.ID
 	headTurnID = sessionHeadTurnIDForVariantCapableSession(sess, headTurnID)
-	graph, err := h.validatedSessionTurnGraph(c.Request().Context(), sessionID, headTurnID, format == "ui" && includeGraph && !hasBefore)
+	graph, err := h.validatedSessionTurnGraph(c.Request().Context(), sessionID, headTurnID, sess.DefaultHeadTurnID, format == "ui" && includeGraph && !hasBefore)
 	if err != nil {
 		return err
 	}
@@ -237,7 +237,7 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
-func (h *MessageHandler) validatedSessionTurnGraph(ctx context.Context, sessionID, headTurnID string, needGraph bool) (messagepkg.SessionTurnGraph, error) {
+func (h *MessageHandler) validatedSessionTurnGraph(ctx context.Context, sessionID, headTurnID, defaultHeadTurnID string, needGraph bool) (messagepkg.SessionTurnGraph, error) {
 	head := strings.TrimSpace(headTurnID)
 	if head == "" && !needGraph {
 		return messagepkg.SessionTurnGraph{}, nil
@@ -254,6 +254,26 @@ func (h *MessageHandler) validatedSessionTurnGraph(ctx context.Context, sessionI
 			return messagepkg.SessionTurnGraph{}, nil
 		}
 	}
+	// Variants require at least two active heads (a fork keeps the old head
+	// row and adds a new one; a plain append replaces the head in place).
+	// For zero- or single-head sessions the full graph metadata recursion —
+	// the most expensive part of this endpoint — can never surface variants,
+	// so answer from the cheap heads lookup instead.
+	if needGraph {
+		if lister, ok := h.messageService.(messagepkg.SessionHeadLister); ok {
+			headIDs, err := lister.ListSessionTurnHeadIDs(ctx, sessionID)
+			if err != nil {
+				return messagepkg.SessionTurnGraph{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+			}
+			if head != "" && !containsTurnHead(headIDs, head) {
+				return messagepkg.SessionTurnGraph{}, echo.NewHTTPError(http.StatusConflict, staleSessionHeadMessage)
+			}
+			if len(headIDs) <= 1 {
+				return linearSessionTurnGraph(defaultHeadTurnID, headIDs), nil
+			}
+			// Multi-head session: fall through to the full graph load below.
+		}
+	}
 	graph, err := h.messageService.GetSessionTurnGraph(ctx, sessionID)
 	if err != nil {
 		return messagepkg.SessionTurnGraph{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -262,6 +282,38 @@ func (h *MessageHandler) validatedSessionTurnGraph(ctx context.Context, sessionI
 		return messagepkg.SessionTurnGraph{}, echo.NewHTTPError(http.StatusConflict, staleSessionHeadMessage)
 	}
 	return graph, nil
+}
+
+func containsTurnHead(headIDs []string, head string) bool {
+	for _, candidate := range headIDs {
+		if strings.TrimSpace(candidate) == head {
+			return true
+		}
+	}
+	return false
+}
+
+// linearSessionTurnGraph builds the include_graph response for a session that
+// cannot have variants (zero or one active head) without running the graph
+// metadata recursion. Each head gets a minimal node so clients that index
+// heads by node presence still see the head; node metadata (parent chain,
+// timestamps, request keys) is only meaningful for variant navigation, which
+// a linear session never renders.
+func linearSessionTurnGraph(defaultHeadTurnID string, headIDs []string) messagepkg.SessionTurnGraph {
+	graph := messagepkg.SessionTurnGraph{
+		DefaultHeadTurnID: strings.TrimSpace(defaultHeadTurnID),
+		HeadTurnIDs:       make([]string, 0, len(headIDs)),
+		Nodes:             make([]messagepkg.SessionTurnGraphNode, 0, len(headIDs)),
+	}
+	for _, headID := range headIDs {
+		headID = strings.TrimSpace(headID)
+		if headID == "" {
+			continue
+		}
+		graph.HeadTurnIDs = append(graph.HeadTurnIDs, headID)
+		graph.Nodes = append(graph.Nodes, messagepkg.SessionTurnGraphNode{TurnID: headID})
+	}
+	return graph
 }
 
 func sessionHeadTurnIDForVariantCapableSession(sess session.Session, headTurnID string) string {
@@ -347,7 +399,7 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 	}
 	botID = bot.ID
 	headTurnID := sessionHeadTurnIDForVariantCapableSession(sess, strings.TrimSpace(c.QueryParam("head_turn_id")))
-	if _, err := h.validatedSessionTurnGraph(c.Request().Context(), sessionID, headTurnID, false); err != nil {
+	if _, err := h.validatedSessionTurnGraph(c.Request().Context(), sessionID, headTurnID, sess.DefaultHeadTurnID, false); err != nil {
 		return err
 	}
 	externalMessageID := strings.TrimSpace(c.QueryParam("external_message_id"))

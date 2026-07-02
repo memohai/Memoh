@@ -351,7 +351,7 @@ func TestValidatedSessionTurnGraphRejectsStaleExplicitHead(t *testing.T) {
 			},
 		},
 	}}
-	_, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "turn-b", false)
+	_, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "turn-b", "", false)
 	if err == nil {
 		t.Fatal("validatedSessionTurnGraph() err = nil, want stale HTTP error")
 	}
@@ -369,7 +369,7 @@ func TestValidatedSessionTurnGraphUsesHeadValidator(t *testing.T) {
 
 	svc := &headValidatorMessageService{ok: true}
 	h := &MessageHandler{messageService: svc}
-	if _, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "turn-b", false); err != nil {
+	if _, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "turn-b", "", false); err != nil {
 		t.Fatalf("validatedSessionTurnGraph() error = %v", err)
 	}
 	if svc.validatorCalls != 1 {
@@ -385,7 +385,7 @@ func TestValidatedSessionTurnGraphValidatorRejectsStaleHead(t *testing.T) {
 
 	svc := &headValidatorMessageService{ok: false}
 	h := &MessageHandler{messageService: svc}
-	_, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "turn-b", false)
+	_, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "turn-b", "", false)
 	if err == nil {
 		t.Fatal("validatedSessionTurnGraph() err = nil, want stale HTTP error")
 	}
@@ -398,6 +398,110 @@ func TestValidatedSessionTurnGraphValidatorRejectsStaleHead(t *testing.T) {
 	}
 	if svc.graphCalls != 0 {
 		t.Fatalf("graph calls = %d, want 0", svc.graphCalls)
+	}
+}
+
+// TestValidatedSessionTurnGraphSkipsFullGraphForSingleHead verifies the
+// include_graph gate: a session with one active head cannot have variants, so
+// the handler answers from the cheap heads lookup and never runs the graph
+// metadata recursion.
+func TestValidatedSessionTurnGraphSkipsFullGraphForSingleHead(t *testing.T) {
+	t.Parallel()
+
+	svc := &headListerMessageService{headIDs: []string{"turn-b"}}
+	h := &MessageHandler{messageService: svc}
+	graph, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "", "turn-b", true)
+	if err != nil {
+		t.Fatalf("validatedSessionTurnGraph() error = %v", err)
+	}
+	if svc.graphCalls != 0 {
+		t.Fatalf("graph calls = %d, want 0", svc.graphCalls)
+	}
+	if svc.listerCalls != 1 {
+		t.Fatalf("lister calls = %d, want 1", svc.listerCalls)
+	}
+	if graph.DefaultHeadTurnID != "turn-b" {
+		t.Fatalf("DefaultHeadTurnID = %q, want turn-b", graph.DefaultHeadTurnID)
+	}
+	if len(graph.HeadTurnIDs) != 1 || graph.HeadTurnIDs[0] != "turn-b" {
+		t.Fatalf("HeadTurnIDs = %#v, want [turn-b]", graph.HeadTurnIDs)
+	}
+	if len(graph.Nodes) != 1 || graph.Nodes[0].TurnID != "turn-b" {
+		t.Fatalf("Nodes = %#v, want single head node turn-b", graph.Nodes)
+	}
+}
+
+// TestValidatedSessionTurnGraphLoadsFullGraphForMultiHead verifies branching
+// sessions still load the full graph after the heads pre-check.
+func TestValidatedSessionTurnGraphLoadsFullGraphForMultiHead(t *testing.T) {
+	t.Parallel()
+
+	svc := &headListerMessageService{
+		headIDs: []string{"turn-b", "turn-c"},
+		graph: messagepkg.SessionTurnGraph{
+			DefaultHeadTurnID: "turn-c",
+			HeadTurnIDs:       []string{"turn-b", "turn-c"},
+			Nodes: []messagepkg.SessionTurnGraphNode{
+				{TurnID: "turn-a"},
+				{TurnID: "turn-b", ParentTurnID: "turn-a"},
+				{TurnID: "turn-c", ParentTurnID: "turn-a"},
+			},
+		},
+	}
+	h := &MessageHandler{messageService: svc}
+	graph, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "", "turn-c", true)
+	if err != nil {
+		t.Fatalf("validatedSessionTurnGraph() error = %v", err)
+	}
+	if svc.graphCalls != 1 {
+		t.Fatalf("graph calls = %d, want 1", svc.graphCalls)
+	}
+	if len(graph.Nodes) != 3 {
+		t.Fatalf("Nodes = %#v, want full graph", graph.Nodes)
+	}
+}
+
+// TestValidatedSessionTurnGraphHeadsPreCheckRejectsStaleHead verifies the
+// heads pre-check also enforces the stale-head contract without touching the
+// full graph.
+func TestValidatedSessionTurnGraphHeadsPreCheckRejectsStaleHead(t *testing.T) {
+	t.Parallel()
+
+	svc := &headListerMessageService{headIDs: []string{"turn-b"}}
+	h := &MessageHandler{messageService: svc}
+	_, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "turn-stale", "turn-b", true)
+	if err == nil {
+		t.Fatal("validatedSessionTurnGraph() err = nil, want stale HTTP error")
+	}
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("error type = %T, want *echo.HTTPError", err)
+	}
+	if httpErr.Code != http.StatusConflict {
+		t.Fatalf("HTTPError.Code = %d, want 409", httpErr.Code)
+	}
+	if svc.graphCalls != 0 {
+		t.Fatalf("graph calls = %d, want 0", svc.graphCalls)
+	}
+}
+
+// TestValidatedSessionTurnGraphEmptyHeadsReturnsEmptyGraph covers brand-new
+// sessions: no heads yet, so include_graph responds with an empty graph and
+// skips the recursion.
+func TestValidatedSessionTurnGraphEmptyHeadsReturnsEmptyGraph(t *testing.T) {
+	t.Parallel()
+
+	svc := &headListerMessageService{headIDs: nil}
+	h := &MessageHandler{messageService: svc}
+	graph, err := h.validatedSessionTurnGraph(context.Background(), "session-1", "", "", true)
+	if err != nil {
+		t.Fatalf("validatedSessionTurnGraph() error = %v", err)
+	}
+	if svc.graphCalls != 0 {
+		t.Fatalf("graph calls = %d, want 0", svc.graphCalls)
+	}
+	if len(graph.HeadTurnIDs) != 0 || len(graph.Nodes) != 0 {
+		t.Fatalf("graph = %#v, want empty", graph)
 	}
 }
 
@@ -425,6 +529,24 @@ func (s *headValidatorMessageService) IsSessionTurnHead(context.Context, string,
 func (s *headValidatorMessageService) GetSessionTurnGraph(context.Context, string) (messagepkg.SessionTurnGraph, error) {
 	s.graphCalls++
 	return messagepkg.SessionTurnGraph{}, nil
+}
+
+type headListerMessageService struct {
+	messagepkg.Service
+	headIDs     []string
+	graph       messagepkg.SessionTurnGraph
+	listerCalls int
+	graphCalls  int
+}
+
+func (s *headListerMessageService) ListSessionTurnHeadIDs(context.Context, string) ([]string, error) {
+	s.listerCalls++
+	return s.headIDs, nil
+}
+
+func (s *headListerMessageService) GetSessionTurnGraph(context.Context, string) (messagepkg.SessionTurnGraph, error) {
+	s.graphCalls++
+	return s.graph, nil
 }
 
 // TestStreamSessionMessageEventsRequiresSessionPath confirms the per-session
