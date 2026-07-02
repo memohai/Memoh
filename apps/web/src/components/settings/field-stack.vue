@@ -12,7 +12,9 @@
     <slot name="label">
       <Label
         v-if="label"
-        :for="props.for"
+        :for="labelFor"
+        :data-error="hasError"
+        class="data-[error=true]:text-destructive"
       >
         {{ label }}
       </Label>
@@ -22,20 +24,42 @@
 
     <p
       v-if="help"
+      :id="helpId"
       class="text-xs text-muted-foreground"
     >
       {{ help }}
     </p>
+
+    <!-- Validation state. When the FieldStack sits inside a vee-validate
+         <FormField>, it takes over FormItem's job: it provides the form-item id
+         (so a FormControl wrapping the control resolves ids and aria-invalid/
+         aria-describedby) and renders the field's error inline. Standalone
+         FieldStacks provide an id nobody consumes and render none of this. -->
+    <ErrorMessage
+      v-if="fieldContext"
+      :id="`${id}-form-item-message`"
+      v-slot="{ message }"
+      as="p"
+      :name="fieldName"
+      class="text-destructive flex items-center gap-1.5 text-label leading-snug"
+    >
+      <CircleAlert class="size-3.5 shrink-0" />
+      <span>{{ message }}</span>
+    </ErrorMessage>
   </div>
 </template>
 
 <script setup lang="ts">
-import { Label } from '@memohai/ui'
+import { Label, FORM_ITEM_INJECTION_KEY } from '@memohai/ui'
+import { CircleAlert } from 'lucide-vue-next'
+import { ErrorMessage, FieldContextKey } from 'vee-validate'
+import { computed, inject, provide, toValue, useId } from 'vue'
 
 const props = withDefaults(defineProps<{
   label?: string
   // Bound to the control's id so clicking the label focuses it. Left to the
-  // caller because only the caller knows the control's id.
+  // caller because only the caller knows the control's id; inside a FormField
+  // it defaults to the FormControl-assigned form-item id.
   for?: string
   help?: string
 }>(), {
@@ -43,4 +67,13 @@ const props = withDefaults(defineProps<{
   for: undefined,
   help: '',
 })
+
+const id = useId()
+provide(FORM_ITEM_INJECTION_KEY, id)
+
+const fieldContext = inject(FieldContextKey, null)
+const hasError = computed(() => !!fieldContext && !!toValue(fieldContext.errorMessage))
+const fieldName = computed(() => (fieldContext ? toValue(fieldContext.name) : ''))
+const labelFor = computed(() => props.for ?? (fieldContext ? `${id}-form-item` : undefined))
+const helpId = computed(() => (fieldContext ? `${id}-form-item-description` : undefined))
 </script>
