@@ -1385,9 +1385,10 @@ export const useChatStore = defineStore('chat', () => {
     const explicit = explicitSelectedHeadForSession(targetSessionId)
     if (explicit) return explicit
     // Pin the send to the viewed default head only when the session actually
-    // branches (its graph is kept fresh on every refresh). For linear sessions
-    // the cached default head may be stale — omit it and let the server
-    // resolve the session's own default head.
+    // branches (its cached head is kept current by graph refreshes and by
+    // reconcileCachedGraphAfterPlainFetch after graph-less refreshes). For
+    // linear sessions the cached default head may be stale — omit it and let
+    // the server resolve the session's own default head.
     if (!sessionGraphHasVariants(targetSessionId)) return undefined
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
     return turnGraphs.get(sid)?.defaultHeadTurnId?.trim() || undefined
@@ -1459,6 +1460,89 @@ export const useChatStore = defineStore('chat', () => {
     if (!sid) return
     turnGraphs.delete(sid)
     selectedHeadTurnIds.delete(sid)
+  }
+
+  // Keep the cached graph usable across graph-less refreshes. A plain refresh
+  // of the default view still reveals head movement: its last turn IS the
+  // session's current default head. A normal send only extends the head
+  // linearly (no sibling groups change), so appending the unseen page turns as
+  // a parent chain onto the last cached turn we recognize — and swapping that
+  // head for the new one — reproduces exactly what a full graph refetch would
+  // report. Anything the page cannot explain (an unseen sibling head created
+  // by another client, or more than a page of unseen turns) drops the cache
+  // and schedules one graph-inclusive refresh to re-discover.
+  function reconcileCachedGraphAfterPlainFetch(targetSessionId: string, payload: FetchMessagesUIResult) {
+    const sid = targetSessionId.trim()
+    if (!sid) return
+    const graph = turnGraphs.get(sid)
+    if (!graph) return
+    // An explicitly selected head is pinned: a fetch for it either matches the
+    // cache or fails with "stale session head", which already forces a
+    // graph-inclusive refetch (see refreshCurrentSession).
+    if (explicitSelectedHeadForSession(sid)) return
+
+    // Ordered distinct turn ids of the fetched page (oldest → newest).
+    const pageTurnIds: string[] = []
+    const pageInfo = new Map<string, { timestamp: string; hasUser: boolean; hasAssistant: boolean }>()
+    for (const turn of payload.items) {
+      const turnId = turn.turn_id?.trim()
+      if (!turnId) continue
+      let info = pageInfo.get(turnId)
+      if (!info) {
+        info = { timestamp: turn.timestamp ?? '', hasUser: false, hasAssistant: false }
+        pageInfo.set(turnId, info)
+        pageTurnIds.push(turnId)
+      }
+      if (turn.role === 'user') info.hasUser = true
+      if (turn.role === 'assistant') info.hasAssistant = true
+    }
+    const newHead = pageTurnIds[pageTurnIds.length - 1] ?? ''
+    if (!newHead || newHead === graph.defaultHeadTurnId) return
+
+    // Collect the unseen tail of the page and the cached turn it hangs off.
+    let anchor = ''
+    let anchorIndex = -1
+    for (let i = pageTurnIds.length - 1; i >= 0; i -= 1) {
+      const candidate = pageTurnIds[i]
+      if (candidate && graph.nodes.has(candidate)) {
+        anchor = candidate
+        anchorIndex = i
+        break
+      }
+    }
+    const missing = pageTurnIds.slice(anchorIndex + 1)
+    // A session opened while still empty has a cached-but-empty graph; its
+    // first turns chain from the root.
+    const emptySessionFirstTurns = !anchor && graph.nodes.size === 0 && graph.headTurnIds.length === 0
+    // Reconcilable only when the unseen turns extend a currently active head
+    // (the plain default-view refresh after a send, or another client
+    // extending the default branch) or start an empty session. Everything
+    // else — sibling heads created elsewhere, or a gap wider than one page —
+    // needs a real graph refetch.
+    if (missing.length === 0 || (!emptySessionFirstTurns && (!anchor || !graph.headTurnIds.includes(anchor)))) {
+      turnGraphs.delete(sid)
+      void refreshCurrentSession(undefined, sid).catch(() => {})
+      return
+    }
+
+    let parentTurnId = anchor
+    for (const turnId of missing) {
+      const info = pageInfo.get(turnId)
+      graph.nodes.set(turnId, {
+        turnId,
+        parentTurnId: parentTurnId || undefined,
+        timestamp: info?.timestamp || undefined,
+        // requestKey stays unknown: a freshly appended turn has no siblings,
+        // and any sibling-creating action forces a graph-inclusive refresh.
+        hasUser: info?.hasUser ?? false,
+        hasAssistant: info?.hasAssistant ?? false,
+      })
+      parentTurnId = turnId
+    }
+    graph.headTurnIds = emptySessionFirstTurns
+      ? [newHead]
+      : graph.headTurnIds.map(id => (id === anchor ? newHead : id))
+    graph.defaultHeadTurnId = newHead
   }
 
   function headPathSet(graph: SessionTurnGraphState, headTurnId: string): Set<string> {
@@ -2481,6 +2565,8 @@ export const useChatStore = defineStore('chat', () => {
     if (!sid) return
     if (payload.nodes !== undefined) {
       applySessionTurnGraph(sid, payload)
+    } else {
+      reconcileCachedGraphAfterPlainFetch(sid, payload)
     }
     if (hasLoadedOlder.value) {
       mergeMessages(payload.items, sid)
@@ -2501,23 +2587,24 @@ export const useChatStore = defineStore('chat', () => {
     touchSessionInList(sid, latest)
   }
 
-  // The turn graph is the most expensive part of a `ListMessages` call, and
-  // most sessions are linear (single head, no variants) where the graph never
-  // renders anything. Request it only when it can matter:
+  // The turn graph is the most expensive part of a `ListMessages` call.
+  // Request it only when it can matter:
   // - first load of a session (no cached graph yet) — discover branching;
-  // - the cached graph already shows branching — keep heads/nodes fresh so
-  //   variant arrows and head pinning stay correct;
   // - the caller just ran an action that can create a branch (retry/rewrite),
-  //   signalled via `includeGraph: true`.
-  // Linear sessions skip the graph on every post-turn / SSE-triggered refresh;
-  // their cached graph is stale but unused (see sessionGraphHasVariants).
+  //   signalled via `includeGraph: true`;
+  // - stale-head recovery in refreshCurrentSession (forced there).
+  // Ordinary refreshes (post-turn, SSE-triggered) skip the graph even for
+  // branching sessions: a plain append only moves one head forward, which
+  // reconcileCachedGraphAfterPlainFetch replays onto the cached graph from
+  // the fetched page itself; anything it cannot explain drops the cache and
+  // re-enters the discovery path here.
   function shouldIncludeGraphOnRefresh(sid: string): boolean {
     // Non-chat sessions (discuss, acp_agent, ...) never render variants nor
     // pin heads; their graph is dead weight. Unknown type falls through to
     // the discovery path below.
     const type = knownSessionSummary(sid)?.type?.trim()
     if (type && type !== 'chat') return false
-    return !turnGraphs.has(sid) || sessionGraphHasVariants(sid)
+    return !turnGraphs.has(sid)
   }
 
   async function refreshCurrentSession(
@@ -3770,7 +3857,8 @@ export const useChatStore = defineStore('chat', () => {
     sessionMessagesStream.stop()
     // Drop the cached graph (but keep the user's selected head) so opening a
     // session always re-discovers branching once; refreshes while it stays
-    // open skip the graph for linear sessions (see shouldIncludeGraphOnRefresh).
+    // open skip the graph and keep the cache current locally instead (see
+    // shouldIncludeGraphOnRefresh / reconcileCachedGraphAfterPlainFetch).
     if (sid) turnGraphs.delete(sid)
     replaceMessages([])
     hasMoreOlder.value = false

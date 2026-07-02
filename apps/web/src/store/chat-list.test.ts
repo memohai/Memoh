@@ -2061,22 +2061,16 @@ describe('chat-list store', () => {
       expect(store._hasLoadedOlder).toBe(true)
       expect(store.hasMoreOlder).toBe(true)
 
+      // Ordinary refreshes skip the graph even for branching sessions; the
+      // cached graph from the initial load stays authoritative.
       api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([
         { id: 'user-b-refresh', turn_id: 'turn-b', role: 'user', text: 'refreshed request', timestamp: '2026-06-19T00:01:02.000Z' },
-      ], {
-        defaultHeadTurnId: 'turn-b',
-        headTurnIds: ['turn-b', 'turn-c'],
-        nodes: [
-          graphNode('turn-b', { timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'current-request' }),
-          graphNode('turn-c', { timestamp: '2026-06-19T00:02:00.000Z', requestKey: 'other-request' }),
-        ],
-      }))
+      ]))
       _sessionMessageHandler?.({ type: 'stale', session_id: 'session-1' })
       await new Promise(resolve => setTimeout(resolve, 150))
       await flushPromises()
       expect(api.fetchMessagesUI).toHaveBeenLastCalledWith('bot-1', 'session-1', {
         limit: 30,
-        includeGraph: true,
       })
 
       const result = await store.sendMessage('continue from current')
@@ -2384,6 +2378,7 @@ describe('chat-list store', () => {
         nodes: [graphNode('turn-a', { timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'a' })],
       }))
       .mockResolvedValueOnce(messagesPayload([
+        { id: 'user-a', turn_id: 'turn-a', role: 'user', text: 'A request', timestamp: '2026-06-19T00:01:00.000Z' },
         { id: 'user-b', turn_id: 'turn-b', role: 'user', text: 'B request', timestamp: '2026-06-19T00:02:00.000Z' },
       ]))
     const store = useChatStore()
@@ -2396,15 +2391,16 @@ describe('chat-list store', () => {
       includeGraph: true,
     })
 
-    // The cached graph shows a single head (no variants): later refreshes
-    // skip the expensive graph query entirely.
+    // Later refreshes skip the graph query entirely; the fetched page itself
+    // advances the cached head (turn-a → turn-b) without a graph refetch.
     _sessionMessageHandler?.({ type: 'stale', session_id: 'session-1' })
     await new Promise(r => setTimeout(r, 150))
     await flushPromises()
     expect(api.fetchMessagesUI).toHaveBeenNthCalledWith(2, 'bot-1', 'session-1', {
       limit: 30,
     })
-    expect(store.messages.map(message => message.id)).toEqual(['user-b'])
+    expect(api.fetchMessagesUI).toHaveBeenCalledTimes(2)
+    expect(store.messages.map(message => message.id)).toEqual(['user-a', 'user-b'])
   })
 
   it('never requests the turn graph for non-chat sessions', async () => {
@@ -3183,7 +3179,26 @@ describe('chat-list store', () => {
       beforeId: 'user-a',
     })
 
+    // The post-send refresh skips the graph; the plain page itself explains
+    // the head movement (turn-c → turn-new) and the cached graph is advanced
+    // locally instead of refetched.
     api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([
+      { id: 'user-a', turn_id: 'turn-a', role: 'user', text: 'A request', timestamp: '2026-06-19T00:00:00.000Z' },
+      {
+        id: 'assistant-a',
+        turn_id: 'turn-a',
+        role: 'assistant',
+        messages: [{ id: 1, type: 'text', content: 'A reply' }],
+        timestamp: '2026-06-19T00:00:01.000Z',
+      },
+      { id: 'user-c', turn_id: 'turn-c', role: 'user', text: 'C request', timestamp: '2026-06-19T00:02:00.000Z' },
+      {
+        id: 'assistant-c',
+        turn_id: 'turn-c',
+        role: 'assistant',
+        messages: [{ id: 1, type: 'text', content: 'C reply' }],
+        timestamp: '2026-06-19T00:02:01.000Z',
+      },
       { id: 'user-new', turn_id: 'turn-new', role: 'user', text: 'continue from C', timestamp: '2026-06-19T00:03:00.000Z' },
       {
         id: 'assistant-new',
@@ -3192,15 +3207,7 @@ describe('chat-list store', () => {
         messages: [{ id: 1, type: 'text', content: 'continued' }],
         timestamp: '2026-06-19T00:03:01.000Z',
       },
-    ], {
-      defaultHeadTurnId: 'turn-new',
-      headTurnIds: ['turn-b', 'turn-new'],
-      nodes: [
-        graphNode('turn-a', { timestamp: '2026-06-19T00:00:00.000Z', requestKey: 'a' }),
-        graphNode('turn-b', { parentTurnId: 'turn-a', timestamp: '2026-06-19T00:01:00.000Z', requestKey: 'b' }),
-        graphNode('turn-new', { parentTurnId: 'turn-c', timestamp: '2026-06-19T00:03:00.000Z', requestKey: 'new' }),
-      ],
-    }))
+    ]))
     const result = await store.sendMessage('continue from C')
 
     expect(result).toMatchObject({ ok: true })
@@ -3212,7 +3219,19 @@ describe('chat-list store', () => {
     })
     expect(api.fetchMessagesUI).toHaveBeenLastCalledWith('bot-1', 'session-1', {
       limit: 30,
-      includeGraph: true,
+    })
+
+    // The locally advanced head is what the next send pins as its base.
+    api.fetchMessagesUI.mockResolvedValueOnce(messagesPayload([
+      { id: 'user-new', turn_id: 'turn-new', role: 'user', text: 'continue from C', timestamp: '2026-06-19T00:03:00.000Z' },
+      { id: 'user-new-2', turn_id: 'turn-new-2', role: 'user', text: 'and again', timestamp: '2026-06-19T00:04:00.000Z' },
+    ]))
+    await store.sendMessage('and again')
+    expect(sent.at(-1)).toMatchObject({
+      type: 'message',
+      session_id: 'session-1',
+      text: 'and again',
+      base_head_turn_id: 'turn-new',
     })
   })
 
@@ -4219,7 +4238,6 @@ describe('chat-list store', () => {
     await flushPromises()
     expect(api.fetchMessagesUI).toHaveBeenLastCalledWith('bot-1', 'session-1', {
       limit: 30,
-      includeGraph: true,
     })
 
     let resolveC: (value: FetchMessagesUIResult) => void = () => {}
@@ -4302,9 +4320,10 @@ describe('chat-list store', () => {
 
     expect(api.fetchMessagesUI).toHaveBeenNthCalledWith(3, 'bot-1', 'session-1', {
       limit: 30,
-      includeGraph: true,
       headTurnId: 'turn-c',
     })
+    // Stale-head recovery must re-discover the head set, so it forces the
+    // graph even though a graph is cached.
     expect(api.fetchMessagesUI).toHaveBeenNthCalledWith(4, 'bot-1', 'session-1', {
       limit: 30,
       includeGraph: true,
