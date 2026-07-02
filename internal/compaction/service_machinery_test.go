@@ -245,8 +245,8 @@ func TestDoCompactionAllEmptyWindowSkipsModelAndMarking(t *testing.T) {
 	if len(q.markedIDs) != 0 {
 		t.Fatalf("nothing should be marked for an all-empty window (marked=%d)", len(q.markedIDs))
 	}
-	if q.completed.Status != "ok" || q.completed.MessageCount != 0 {
-		t.Fatalf("all-empty window should complete ok with count 0, got status=%q count=%d", q.completed.Status, q.completed.MessageCount)
+	if q.created {
+		t.Fatal("a no-op compaction must not create a log row")
 	}
 }
 
@@ -260,5 +260,58 @@ func TestDoCompactionEmptyHistoryNoOp(t *testing.T) {
 	}
 	if stub.calls != 0 || len(q.markedIDs) != 0 {
 		t.Fatalf("empty history must be a no-op (calls=%d marked=%d)", stub.calls, len(q.markedIDs))
+	}
+	if q.created {
+		t.Fatal("empty history must not create a log row")
+	}
+}
+
+type failingModel struct{ calls int }
+
+func (f *failingModel) RoundTrip(*http.Request) (*http.Response, error) {
+	f.calls++
+	return &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"boom"}}`)),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}, nil
+}
+
+func TestDoCompactionSummarizerFailureRecordsErrorWithoutMarking(t *testing.T) {
+	rows := machineryCorpus(t)
+	q := &fakeQueries{uncompacted: rows}
+	svc := newMachineryService(q)
+
+	cfg := machineryConfig(&stubModel{}, 450)
+	cfg.HTTPClient = &http.Client{Transport: &failingModel{}}
+
+	if err := svc.RunCompactionSync(context.Background(), cfg); err == nil {
+		t.Fatal("summarizer failure must surface an error")
+	}
+	if len(q.markedIDs) != 0 {
+		t.Fatalf("nothing may be marked when the summarizer fails (marked=%d)", len(q.markedIDs))
+	}
+	if !q.created || q.completed.Status != "error" {
+		t.Fatalf("a failed attempt must leave an error log row (created=%v status=%q)", q.created, q.completed.Status)
+	}
+}
+
+func TestRunCompactionSkipsWhenSessionAlreadyInFlight(t *testing.T) {
+	rows := machineryCorpus(t)
+	q := &fakeQueries{uncompacted: rows}
+	stub := &stubModel{summary: "unused"}
+	svc := newMachineryService(q)
+
+	cfg := machineryConfig(stub, 450)
+	if !svc.beginSessionCompaction(cfg.SessionID) {
+		t.Fatal("first acquisition must succeed")
+	}
+	defer svc.endSessionCompaction(cfg.SessionID)
+
+	if err := svc.RunCompactionSync(context.Background(), cfg); err != nil {
+		t.Fatalf("in-flight skip must not error: %v", err)
+	}
+	if stub.calls != 0 || q.created || len(q.markedIDs) != 0 {
+		t.Fatalf("in-flight session must skip entirely (calls=%d created=%v marked=%d)", stub.calls, q.created, len(q.markedIDs))
 	}
 }
