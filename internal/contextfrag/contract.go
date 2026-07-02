@@ -75,7 +75,7 @@ func ValidateContextRef(ref ContextRef) error {
 	if strings.TrimSpace(ref.HashAlgo) != "" && ref.HashAlgo != HashAlgoSHA256 {
 		return fmt.Errorf("unsupported context ref hash algo %q", ref.HashAlgo)
 	}
-	if strings.TrimSpace(ref.HashScope) != "" && ref.HashScope != HashScopeCanonicalFragment {
+	if hashScope := strings.TrimSpace(ref.HashScope); hashScope != "" && !knownHashScope(hashScope) {
 		return fmt.Errorf("unsupported context ref hash scope %q", ref.HashScope)
 	}
 	if strings.TrimSpace(ref.ContentHash) != "" {
@@ -179,7 +179,7 @@ func WithContextRef(frag ContextFrag, ref ContextRef) ContextFrag {
 			ref.Durability = RefDebug
 		}
 	}
-	if hashErr == nil {
+	if hashErr == nil && !hasValidExplicitHash(ref) {
 		ref.HashAlgo = hash.Algo
 		ref.HashScope = hash.Scope
 		ref.ContentHash = hash.Value
@@ -192,6 +192,21 @@ func WithContextRef(frag ContextFrag, ref ContextRef) ContextFrag {
 // schemas share CurrentSchemaVersion until per-schema migration ranges exist.
 func UsesLockstepSchemaVersions() bool {
 	return true
+}
+
+func knownHashScope(scope string) bool {
+	switch scope {
+	case HashScopeCanonicalFragment, HashScopeSourcePayload:
+		return true
+	default:
+		return false
+	}
+}
+
+func hasValidExplicitHash(ref ContextRef) bool {
+	return strings.TrimSpace(ref.ContentHash) != "" &&
+		strings.TrimSpace(ref.HashAlgo) == HashAlgoSHA256 &&
+		knownHashScope(strings.TrimSpace(ref.HashScope))
 }
 
 func ContextRefWarnings(ref ContextRef) []ValidationWarning {

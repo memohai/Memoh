@@ -272,7 +272,7 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 		return err
 	}
 
-	loaded, err := r.loadMessages(ctx, input.BotID, approval.SessionID, defaultMaxContextMinutes)
+	loaded, err := r.loadHistoryRecords(ctx, historyScopeFallbackFromToolApprovalRequest(approval), approval.SessionID, defaultMaxContextMinutes)
 	if err != nil {
 		return err
 	}
