@@ -575,13 +575,27 @@ gen_secret() {
 }
 
 gen_password() {
-  if command -v openssl >/dev/null 2>&1; then
-    openssl rand -hex 16
-  elif command -v od >/dev/null 2>&1; then
-    od -An -N16 -tx1 /dev/urandom | tr -d ' \n'
-  else
-    head -c 64 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32
-  fi
+  while :; do
+    if command -v openssl >/dev/null 2>&1; then
+      password=$(openssl rand -base64 32 | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 16)
+    else
+      password=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16)
+    fi
+    if [ "${#password}" -ne 16 ]; then
+      continue
+    fi
+    case "$password" in
+      *[ABCDEFGHIJKLMNOPQRSTUVWXYZ]*)
+        case "$password" in
+          *[abcdefghijklmnopqrstuvwxyz]*)
+            case "$password" in
+              *[0123456789]*) printf '%s' "$password"; return ;;
+            esac
+            ;;
+        esac
+        ;;
+    esac
+  done
 }
 
 # Configuration defaults (expand ~ for paths)
