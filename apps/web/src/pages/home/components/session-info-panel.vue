@@ -114,13 +114,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, toRef } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { useQueryCache } from '@pinia/colada'
-import { toast, ScrollArea, Button } from '@memohai/ui'
+import { computed, toRef } from 'vue'
+import { ScrollArea, Button } from '@memohai/ui'
 import { Sparkles, Loader2, Minimize2 } from 'lucide-vue-next'
-import { postBotsByBotIdSessionsBySessionIdCompact } from '@memohai/sdk'
-import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import SubagentList from './subagent-list.vue'
 
@@ -130,14 +126,11 @@ const props = defineProps<{
   fallbackContextWindow?: number | null
 }>()
 
-const { t } = useI18n()
-const queryCache = useQueryCache()
-
 const visibleRef = toRef(props, 'visible')
 const overrideModelIdRef = computed(() => props.overrideModelId ?? '')
 const fallbackContextWindowRef = computed(() => props.fallbackContextWindow ?? null)
 
-const { info, usedTokens, contextWindow, contextPercent, currentBotId, sessionId } = useSessionInfo({
+const { info, usedTokens, contextWindow, contextPercent, sessionId, isCompacting, triggerCompact } = useSessionInfo({
   visible: visibleRef,
   overrideModelId: overrideModelIdRef,
   fallbackContextWindow: fallbackContextWindowRef,
@@ -162,27 +155,4 @@ function formatTokenCount(n: number): string {
   return String(n)
 }
 
-const isCompacting = ref(false)
-
-async function triggerCompact() {
-  const botId = currentBotId.value
-  const sid = sessionId.value
-  if (!botId || !sid || isCompacting.value) return
-
-  isCompacting.value = true
-  try {
-    await postBotsByBotIdSessionsBySessionIdCompact({
-      path: { bot_id: botId, session_id: sid },
-      throwOnError: true,
-    })
-    toast.success(t('chat.compactSuccess'))
-    queryCache.invalidateQueries({ key: ['session-status', botId, sid] })
-  }
-  catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('chat.compactFailed')))
-  }
-  finally {
-    isCompacting.value = false
-  }
-}
 </script>

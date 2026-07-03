@@ -1,8 +1,11 @@
 import { computed, ref, type Ref } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useQuery } from '@pinia/colada'
-import { getBotsByBotIdSessionsBySessionIdStatus } from '@memohai/sdk'
+import { useI18n } from 'vue-i18n'
+import { useQuery, useQueryCache } from '@pinia/colada'
+import { toast } from '@memohai/ui'
+import { getBotsByBotIdSessionsBySessionIdStatus, postBotsByBotIdSessionsBySessionIdCompact } from '@memohai/sdk'
 import type { HandlersSessionInfoResponse } from '@memohai/sdk'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useChatStore } from '@/store/chat-list'
 
 interface UseSessionInfoOptions {
@@ -55,6 +58,36 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
     return (usedTokens.value / contextWindow.value) * 100
   })
 
+  // Compaction lives here (not in a component) so every surface that offers
+  // it — the session info panel's button and the composer's /compact slash —
+  // runs the identical action: same API call, same toasts, same cache
+  // invalidation of this composable's own query.
+  const { t } = useI18n()
+  const queryCache = useQueryCache()
+  const isCompacting = ref(false)
+
+  async function triggerCompact() {
+    const botId = currentBotId.value
+    const sid = sessionId.value
+    if (!botId || !sid || isCompacting.value) return
+
+    isCompacting.value = true
+    try {
+      await postBotsByBotIdSessionsBySessionIdCompact({
+        path: { bot_id: botId, session_id: sid },
+        throwOnError: true,
+      })
+      toast.success(t('chat.compactSuccess'))
+      queryCache.invalidateQueries({ key: ['session-status', botId, sid] })
+    }
+    catch (error) {
+      toast.error(resolveApiErrorMessage(error, t('chat.compactFailed')))
+    }
+    finally {
+      isCompacting.value = false
+    }
+  }
+
   return {
     info,
     usedTokens,
@@ -62,5 +95,7 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
     contextPercent,
     currentBotId,
     sessionId,
+    isCompacting,
+    triggerCompact,
   }
 }

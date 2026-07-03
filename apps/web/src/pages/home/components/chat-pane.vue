@@ -264,61 +264,63 @@
                 v-if="slashPanelOpen"
                 class="absolute inset-x-4 bottom-full z-30 mb-2 h-auto w-auto"
               >
-                <CommandList class="max-h-[min(20rem,45dvh)] overscroll-contain [scrollbar-gutter:stable]">
-                  <CommandGroup
-                    v-if="visibleSlashQuickActions.length"
-                    :heading="$t('chat.slash.quickActions')"
-                  >
-                    <CommandItem
-                      v-for="action in visibleSlashQuickActions"
-                      :key="action.id"
-                      :value="action.label"
-                      @select="selectSlashQuickAction(action.label)"
+                <CommandKeyBridge ref="slashPickerBridge">
+                  <CommandList class="max-h-[min(20rem,45dvh)] overscroll-contain [scrollbar-gutter:stable]">
+                    <CommandGroup
+                      v-if="visibleSlashQuickActions.length"
+                      :heading="$t('chat.slash.quickActions')"
                     >
-                      <component
-                        :is="action.icon"
-                        class="size-4 shrink-0 text-muted-foreground"
-                      />
-                      <span class="min-w-0 flex-1">
-                        <span class="block truncate text-control">{{ action.label }}</span>
-                        <span class="block truncate text-caption text-muted-foreground">{{ action.description }}</span>
-                      </span>
-                    </CommandItem>
-                  </CommandGroup>
-                  <CommandSeparator v-if="visibleSlashQuickActions.length && visibleSlashSkills.length" />
-                  <CommandGroup
-                    v-if="visibleSlashSkills.length"
-                    :heading="$t('chat.slash.skills')"
-                  >
-                    <CommandItem
-                      v-for="skill in visibleSlashSkills"
-                      :key="skill.name"
-                      :value="skill.name"
-                      @select="addRequestedSkill(skill)"
+                      <CommandItem
+                        v-for="action in visibleSlashQuickActions"
+                        :key="action.id"
+                        :value="action.label"
+                        @select="selectSlashQuickAction(action)"
+                      >
+                        <component
+                          :is="action.icon"
+                          class="size-4 shrink-0 text-muted-foreground"
+                        />
+                        <span class="min-w-0 flex-1">
+                          <span class="block truncate text-control">{{ action.label }}</span>
+                          <span class="block truncate text-caption text-muted-foreground">{{ action.description }}</span>
+                        </span>
+                      </CommandItem>
+                    </CommandGroup>
+                    <CommandSeparator v-if="visibleSlashQuickActions.length && visibleSlashSkills.length" />
+                    <CommandGroup
+                      v-if="visibleSlashSkills.length"
+                      :heading="$t('chat.slash.skills')"
                     >
-                      <Sparkles class="size-4 shrink-0 text-muted-foreground" />
-                      <span class="min-w-0 flex-1">
-                        <span class="block truncate text-control">{{ skill.display_name || skill.name }}</span>
-                        <span
-                          v-if="skill.description"
-                          class="block truncate text-caption text-muted-foreground"
-                        >{{ skill.description }}</span>
-                      </span>
-                    </CommandItem>
-                  </CommandGroup>
-                  <div
-                    v-if="safeSkillCatalogLoading"
-                    class="py-6 text-center text-body text-muted-foreground"
-                  >
-                    {{ $t('chat.slash.loadingSkills') }}
-                  </div>
-                  <div
-                    v-else-if="!slashPanelHasResults"
-                    class="py-6 text-center text-body text-muted-foreground"
-                  >
-                    {{ $t('chat.slash.noResults') }}
-                  </div>
-                </CommandList>
+                      <CommandItem
+                        v-for="skill in visibleSlashSkills"
+                        :key="skill.name"
+                        :value="skill.name"
+                        @select="addRequestedSkill(skill)"
+                      >
+                        <Sparkles class="size-4 shrink-0 text-muted-foreground" />
+                        <span class="min-w-0 flex-1">
+                          <span class="block truncate text-control">{{ skill.display_name || skill.name }}</span>
+                          <span
+                            v-if="skill.description"
+                            class="block truncate text-caption text-muted-foreground"
+                          >{{ skill.description }}</span>
+                        </span>
+                      </CommandItem>
+                    </CommandGroup>
+                    <div
+                      v-if="safeSkillCatalogLoading"
+                      class="py-6 text-center text-body text-muted-foreground"
+                    >
+                      {{ $t('chat.slash.loadingSkills') }}
+                    </div>
+                    <div
+                      v-else-if="!slashPanelHasResults"
+                      class="py-6 text-center text-body text-muted-foreground"
+                    >
+                      {{ $t('chat.slash.noResults') }}
+                    </div>
+                  </CommandList>
+                </CommandKeyBridge>
               </Command>
             </Transition>
             <section>
@@ -469,37 +471,40 @@
                     <X class="size-3.5" />
                   </Button>
                 </div>
-                <div
+                <Command
                   v-if="commandResultItems.length"
-                  class="border-t border-border p-1"
+                  class="h-auto w-auto rounded-none border-0 border-t border-border bg-transparent shadow-none"
                 >
-                  <Button
-                    v-for="item in commandResultItems"
-                    :key="`${item.kind || 'item'}:${item.id || item.title}`"
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    class="h-auto min-h-8 w-full justify-start gap-2 px-2 py-1.5 text-left"
-                    :disabled="item.kind !== 'skill'"
-                    @click="selectCommandResultItem(item)"
-                  >
-                    <Sparkles
-                      v-if="item.kind === 'skill'"
-                      class="size-3.5 shrink-0 text-muted-foreground"
-                    />
-                    <List
-                      v-else
-                      class="size-3.5 shrink-0 text-muted-foreground"
-                    />
-                    <span class="min-w-0 flex-1">
-                      <span class="block truncate text-body text-foreground">{{ item.title }}</span>
-                      <span
-                        v-if="item.description"
-                        class="block truncate text-caption text-muted-foreground"
-                      >{{ item.description }}</span>
-                    </span>
-                  </Button>
-                </div>
+                  <CommandKeyBridge ref="commandPanelBridge">
+                    <CommandList class="max-h-[min(20rem,45dvh)] p-1 overscroll-contain [scrollbar-gutter:stable]">
+                      <CommandGroup>
+                        <CommandItem
+                          v-for="item in commandResultItems"
+                          :key="`${item.kind || 'item'}:${item.id || item.title}`"
+                          :value="`${item.kind || 'item'}:${item.id || item.title}`"
+                          :disabled="item.kind !== 'skill'"
+                          @select="selectCommandResultItem(item)"
+                        >
+                          <Sparkles
+                            v-if="item.kind === 'skill'"
+                            class="size-3.5 shrink-0 text-muted-foreground"
+                          />
+                          <List
+                            v-else
+                            class="size-3.5 shrink-0 text-muted-foreground"
+                          />
+                          <span class="min-w-0 flex-1">
+                            <span class="block truncate text-body text-foreground">{{ item.title }}</span>
+                            <span
+                              v-if="item.description"
+                              class="block truncate text-caption text-muted-foreground"
+                            >{{ item.description }}</span>
+                          </span>
+                        </CommandItem>
+                      </CommandGroup>
+                    </CommandList>
+                  </CommandKeyBridge>
+                </Command>
               </div>
               <div
                 v-if="composerError"
@@ -612,7 +617,7 @@
                   :class="isMultiline
                     ? 'order-none w-full basis-full pl-2 pr-1 pt-2 pb-1.5 max-h-52'
                     : 'order-2 min-w-0 flex-1 self-center overflow-hidden whitespace-nowrap pl-1 pr-1 py-1 max-h-32'"
-                  @keydown.enter.exact="handleKeydown"
+                  @keydown="handleComposerKeydown"
                   @paste="handlePaste"
                   @input="syncMultiline"
                 />
@@ -988,8 +993,11 @@ import {
   X,
   HelpCircle,
   List,
+  Minimize2,
+  Package,
+  SquarePen,
 } from 'lucide-vue-next'
-import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, Command, CommandGroup, CommandItem, CommandList, CommandSeparator } from '@memohai/ui'
+import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator } from '@memohai/ui'
 import { useChatStore, type ACPAgentSessionInput } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import { useScroll, useElementBounding, useIntersectionObserver, useStorage } from '@vueuse/core'
@@ -1004,6 +1012,7 @@ import BgTaskPill from './bg-task-pill.vue'
 import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
 import MediaGalleryLightbox, { type MediaGalleryItem } from './media-gallery-lightbox.vue'
 import SessionInfoRing from './session-info-ring.vue'
+import { useSessionInfo } from '../composables/useSessionInfo'
 import ChatModelPicker from './chat-model-picker.vue'
 import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
@@ -1551,6 +1560,30 @@ const slashQuickActions = computed(() => [
         icon: List,
       }]
     : []),
+  {
+    id: 'new',
+    label: '/new',
+    description: t('chat.slash.newDescription'),
+    icon: SquarePen,
+  },
+  ...(canCompactViaSlash.value
+    ? [{
+        id: 'compact',
+        label: '/compact',
+        description: sessionContextPercentKnown.value
+          ? t('chat.slash.compactDescription', { percent: Math.round(sessionContextPercent.value) })
+          : t('chat.slash.compactDescriptionNoStats'),
+        icon: Minimize2,
+      }]
+    : []),
+  ...(!activeIsACP.value && !activeIsPendingACP.value
+    ? [{
+        id: 'model',
+        label: '/model',
+        description: t('chat.slash.modelDescription', { model: selectedModelLabel.value }),
+        icon: Package,
+      }]
+    : []),
 ])
 
 const slashQuery = computed(() => {
@@ -1583,13 +1616,73 @@ const slashPanelHasResults = computed(() =>
   visibleSlashQuickActions.value.length > 0 || visibleSlashSkills.value.length > 0,
 )
 
-function selectSlashQuickAction(label: string) {
-  inputText.value = label
-  saveInputDraft(inputDraftKey.value, label)
+// Session usage for the /compact quick action's live description ("42% full")
+// and its availability. Shares the query key with SessionInfoRing/panel, so
+// this adds no extra fetch.
+const {
+  usedTokens: sessionUsedTokens,
+  contextWindow: sessionContextWindow,
+  contextPercent: sessionContextPercent,
+  isCompacting: isCompactingSession,
+  triggerCompact: triggerSessionCompact,
+} = useSessionInfo({
+  overrideModelId,
+  fallbackContextWindow: computed(() => activeModel.value?.config?.context_window ?? null),
+})
+const sessionContextPercentKnown = computed(() => sessionContextWindow.value != null && sessionContextWindow.value > 0)
+const canCompactViaSlash = computed(() =>
+  !!activeSessionId.value && !activeIsACP.value && sessionUsedTokens.value > 0 && !isCompactingSession.value,
+)
+
+// Client-side quick actions run an existing UI affordance directly instead of
+// round-tripping text through send: /compact triggers the session-info
+// panel's compaction, /model opens the composer's model picker. Everything
+// else keeps the type-and-send flow (the store intercepts /new; /help and
+// /skill list execute server-side).
+function runLocalQuickAction(id: string): boolean {
+  if (id === 'compact') {
+    if (!canCompactViaSlash.value) {
+      composerError.value = t('chat.slash.compactUnavailable')
+      return true
+    }
+    void triggerSessionCompact()
+    return true
+  }
+  if (id === 'model') {
+    modelPopoverOpen.value = true
+    return true
+  }
+  return false
+}
+
+function selectSlashQuickAction(action: { id: string, label: string }) {
+  if (runLocalQuickAction(action.id)) {
+    inputText.value = ''
+    saveInputDraft(inputDraftKey.value, '')
+    void nextTick(focusTextarea)
+    return
+  }
+  inputText.value = action.label
+  saveInputDraft(inputDraftKey.value, action.label)
   void nextTick(() => {
     focusTextarea()
     void handleSend()
   })
+}
+
+// Typed forms of the client-side quick actions ("/compact", "/model") — must
+// be intercepted before the store send path, which would otherwise classify
+// them as skill activation and fail with requested_skill_not_found.
+function localQuickActionIDForSlash(text: string): string {
+  switch (text.trim().toLowerCase()) {
+    case '/compact':
+      return 'compact'
+    case '/model':
+    case '/models':
+      return 'model'
+    default:
+      return ''
+  }
 }
 
 function currentPaneCommandScope() {
@@ -2806,8 +2899,42 @@ async function handleReplyJump(messageId: string) {
   }
 }
 
-function handleKeydown(e: KeyboardEvent) {
+// Keyboard bridges into the two composer list surfaces (slash picker, command
+// panel results). The composer textarea keeps focus the whole time — like
+// reka's ListboxFilter, the bridge runs the listbox in virtual-highlight mode
+// and the textarea forwards navigation keys to whichever surface is showing.
+const slashPickerBridge = ref<InstanceType<typeof CommandKeyBridge> | null>(null)
+const commandPanelBridge = ref<InstanceType<typeof CommandKeyBridge> | null>(null)
+
+function activeComposerListBridge() {
+  if (slashPanelOpen.value && slashPanelHasResults.value) return slashPickerBridge.value
+  if (commandPanelEvent.value && commandResultItems.value.length) return commandPanelBridge.value
+  return null
+}
+
+function handleComposerKeydown(e: KeyboardEvent) {
   if (e.isComposing || e.keyCode === 229) return
+  if (e.key === 'Escape') {
+    // Dismiss the command result panel; the slash picker is input-driven and
+    // closes by editing the text, so Escape only targets the panel.
+    if (!slashPanelOpen.value && commandPanelEvent.value) {
+      e.preventDefault()
+      clearCurrentCommandEvent()
+    }
+    return
+  }
+  const bridge = activeComposerListBridge()
+  if (bridge && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    e.preventDefault()
+    bridge.navigate(e)
+    return
+  }
+  if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return
+  if (bridge?.hasHighlight) {
+    e.preventDefault()
+    bridge.select(e)
+    return
+  }
   e.preventDefault()
   isAutoScroll.value = true
   handleSend()
@@ -3003,6 +3130,12 @@ async function handleSend() {
       sessionId: activeSessionId.value || undefined,
       composerScope: inputDraftKey.value || 'chat',
     })
+    return
+  }
+  const localAction = localQuickActionIDForSlash(text)
+  if (localAction && runLocalQuickAction(localAction)) {
+    inputText.value = ''
+    saveInputDraft(inputDraftKey.value, '')
     return
   }
   const isNewCommand = /^\/new(?:\s|$)/i.test(text)
