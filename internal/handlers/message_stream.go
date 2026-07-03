@@ -34,58 +34,37 @@ const sessionMessageStreamBuffer = 128
 // 30s proxy idle cut.
 const sseHeartbeatInterval = 20 * time.Second
 
-func messageVisibleInTurnSet(message messagepkg.Message, visibleTurnIDs map[string]struct{}) bool {
-	if len(visibleTurnIDs) == 0 {
-		return true
-	}
-	turnID := strings.TrimSpace(message.TurnID)
-	if turnID == "" {
-		return false
-	}
-	_, ok := visibleTurnIDs[turnID]
-	return ok
-}
-
-// addVisibleDescendantPath decides whether a live message on an unseen turn
-// belongs to the subscribed view: it does when one of the live heads is an
-// ancestor of (or equal to) the message's turn, i.e. the turn linearly
-// extends the followed branch. Sibling variants created by retries or other
-// clients fail the check and stay hidden. On success the turn's ancestor
-// path joins the visible set and the turn becomes the new live head.
-func (h *MessageHandler) addVisibleDescendantPath(ctx context.Context, visibleTurnIDs map[string]struct{}, liveHeadTurnIDs map[string]struct{}, turnID string) (bool, error) {
-	if len(visibleTurnIDs) == 0 {
-		return true, nil
+// acceptLiveTurn decides whether a live message belongs to the subscribed
+// head view. With no selected/live head there is no branch filter. Otherwise
+// the message turn must be the current live head or a descendant of it; accepted
+// descendants become the new live head for subsequent stream events.
+func (h *MessageHandler) acceptLiveTurn(ctx context.Context, liveHeadTurnID string, turnID string) (bool, string, error) {
+	liveHeadTurnID = strings.TrimSpace(liveHeadTurnID)
+	if liveHeadTurnID == "" {
+		return true, "", nil
 	}
 	turnID = strings.TrimSpace(turnID)
 	if turnID == "" {
-		return false, nil
+		return false, liveHeadTurnID, nil
 	}
-	if _, ok := visibleTurnIDs[turnID]; ok {
-		return true, nil
+	if turnID == liveHeadTurnID {
+		return true, liveHeadTurnID, nil
 	}
-	lister, ok := h.messageService.(messagepkg.SessionTurnPathLister)
+	checker, ok := h.messageService.(messagepkg.SessionTurnAncestorChecker)
 	if !ok {
-		return false, nil
+		// Non-DB tests and fallback message services may not expose the optimized
+		// checker. Keep the stream permissive instead of silently dropping live
+		// events; production DBService implements the checker.
+		return true, turnID, nil
 	}
-	pathIDs, err := lister.ListSessionTurnPathIDs(ctx, turnID)
+	ok, err := checker.IsSessionTurnAncestor(ctx, turnID, liveHeadTurnID)
 	if err != nil {
-		return false, err
+		return false, liveHeadTurnID, err
 	}
-	onFollowedBranch := false
-	for _, id := range pathIDs {
-		if _, ok := liveHeadTurnIDs[id]; ok {
-			onFollowedBranch = true
-			break
-		}
+	if !ok {
+		return false, liveHeadTurnID, nil
 	}
-	if !onFollowedBranch {
-		return false, nil
-	}
-	for _, id := range pathIDs {
-		visibleTurnIDs[id] = struct{}{}
-	}
-	liveHeadTurnIDs[turnID] = struct{}{}
-	return true, nil
+	return true, turnID, nil
 }
 
 // resolveSessionViewHead maps the client-requested turn id to the head that
@@ -166,22 +145,7 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 	if selectedHeadTurnID == "" {
 		selectedHeadTurnID = strings.TrimSpace(sess.DefaultHeadTurnID)
 	}
-	visibleTurnIDs := make(map[string]struct{})
-	if selectedHeadTurnID != "" {
-		if lister, ok := h.messageService.(messagepkg.SessionTurnPathLister); ok {
-			pathIDs, err := lister.ListSessionTurnPathIDs(c.Request().Context(), selectedHeadTurnID)
-			if err != nil {
-				return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-			}
-			for _, id := range pathIDs {
-				visibleTurnIDs[id] = struct{}{}
-			}
-		}
-	}
-	liveHeadTurnIDs := make(map[string]struct{}, 1)
-	if selectedHeadTurnID != "" {
-		liveHeadTurnIDs[selectedHeadTurnID] = struct{}{}
-	}
+	liveHeadTurnID := selectedHeadTurnID
 
 	// Subscribe BEFORE the backlog read so any message persisted during the
 	// DB call lands in the live channel. We then dedup against the backlog
@@ -264,20 +228,19 @@ func (h *MessageHandler) StreamSessionMessageEvents(c echo.Context) error {
 				if message.SessionID != sessionID {
 					continue
 				}
-				if !messageVisibleInTurnSet(message, visibleTurnIDs) {
-					visible, err := h.addVisibleDescendantPath(c.Request().Context(), visibleTurnIDs, liveHeadTurnIDs, message.TurnID)
-					if err != nil {
-						h.logger.Warn("resolve live message turn path failed",
-							slog.String("session_id", sessionID),
-							slog.String("turn_id", message.TurnID),
-							slog.Any("error", err),
-						)
-						continue
-					}
-					if !visible {
-						continue
-					}
+				visible, nextLiveHeadTurnID, err := h.acceptLiveTurn(c.Request().Context(), liveHeadTurnID, message.TurnID)
+				if err != nil {
+					h.logger.Warn("resolve live message turn ancestry failed",
+						slog.String("session_id", sessionID),
+						slog.String("turn_id", message.TurnID),
+						slog.Any("error", err),
+					)
+					continue
 				}
+				if !visible {
+					continue
+				}
+				liveHeadTurnID = nextLiveHeadTurnID
 				// Skip messages already delivered as part of the backlog —
 				// the Subscribe-before-backlog ordering keeps the seam
 				// race-free at the cost of a small dedup set.

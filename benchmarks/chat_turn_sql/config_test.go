@@ -157,7 +157,7 @@ func TestHTTPRunnerAcceptsListMessagesMixedScenario(t *testing.T) {
 	cfg.Workload.QueryWeights = map[string]int{
 		queryLatestPage:     5,
 		queryBeforePage:     3,
-		queryAfterPage:      1,
+		queryLocateWindow:   1,
 		queryExternalLookup: 1,
 	}
 	if err := cfg.validate(); err != nil {

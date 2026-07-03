@@ -34,8 +34,10 @@ pending_ratio = 0.50
 runner = "sqlc"
 
 # One of:
-# mixed_saas_read, latest_page, before_page, after_page, external_lookup,
-# turn_graph, head_resolve, turn_siblings, turn_path, approval_*, user_input_*
+# mixed_saas_read, chat_page_ui, locate_window, approval_resolve,
+# user_input_resolve, sse_live_filter, latest_page, before_page, after_page,
+# external_lookup, turn_graph, head_resolve, turn_siblings, turn_path,
+# turn_ancestor, approval_*, user_input_*
 scenario = "mixed_saas_read"
 duration = "30s"
 warmup = "5s"
@@ -53,28 +55,11 @@ http_format = "ui"
 http_decode_json = true
 
 [workload.query_weights]
-latest_page = 40
-before_page = 18
-after_page = 4
-external_lookup = 3
-turn_graph = 0
-head_resolve = 4
-turn_siblings = 8
-turn_path = 4
-approval_pending_list = 4
-approval_graph_list = 2
-approval_latest = 4
-approval_short_id = 3
-approval_visible_request = 1
-approval_base_head_request = 1
-approval_reply_message = 1
-user_input_pending_list = 3
-user_input_graph_list = 2
-user_input_latest = 3
-user_input_short_id = 2
-user_input_visible_request = 1
-user_input_base_head_request = 1
-user_input_reply_message = 1
+chat_page_ui = 82
+locate_window = 5
+approval_resolve = 3
+user_input_resolve = 3
+sse_live_filter = 7
 
 [output]
 json_path = "benchmarks/chat_turn_sql/out/results.json"

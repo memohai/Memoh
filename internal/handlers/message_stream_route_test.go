@@ -204,112 +204,108 @@ func (*streamBacklogMessageService) ListBeforeBySessionHead(context.Context, str
 	return nil, nil
 }
 
-func TestLiveMessageVisibilityUsesSelectedHeadPath(t *testing.T) {
-	t.Parallel()
-
-	visible := map[string]struct{}{
-		"turn-a": {},
-		"turn-b": {},
-	}
-	if !messageVisibleInTurnSet(messagepkg.Message{TurnID: "turn-b"}, visible) {
-		t.Fatal("message on selected head path was filtered")
-	}
-	if messageVisibleInTurnSet(messagepkg.Message{TurnID: "turn-c"}, visible) {
-		t.Fatal("message on sibling head path was not filtered")
-	}
-	if messageVisibleInTurnSet(messagepkg.Message{}, visible) {
-		t.Fatal("message without turn id was not filtered when a selected path exists")
-	}
-	if !messageVisibleInTurnSet(messagepkg.Message{}, nil) {
-		t.Fatal("legacy message without selected path should remain visible")
-	}
-}
-
-// TestAddVisibleDescendantPathAllowsLinearExtension pins the live-filter
-// contract: a message on an unseen turn is visible only when one of the
-// followed live heads sits on the turn's ancestor path (the turn linearly
-// extends the followed branch). Sibling variants stay hidden.
+// TestAcceptLiveTurnAllowsLinearExtension pins the live-filter contract: an
+// unseen live message is visible only when the current live head sits on the
+// message turn's ancestor path. Accepted descendants become the new live head;
+// sibling variants stay hidden.
 //
 // Fixture paths (child -> root): a <- b <- d <- e, plus sibling c <- a.
-func TestAddVisibleDescendantPathAllowsLinearExtension(t *testing.T) {
+func TestAcceptLiveTurnAllowsLinearExtension(t *testing.T) {
 	t.Parallel()
 
-	svc := &turnPathMessageService{paths: map[string][]string{
-		"turn-d": {"turn-d", "turn-b", "turn-a"},
-		"turn-e": {"turn-e", "turn-d", "turn-b", "turn-a"},
-		"turn-c": {"turn-c", "turn-a"},
+	svc := &turnAncestorMessageService{matches: map[ancestorCheck]bool{
+		{turnID: "turn-d", ancestorTurnID: "turn-b"}: true,
+		{turnID: "turn-e", ancestorTurnID: "turn-d"}: true,
+		{turnID: "turn-c", ancestorTurnID: "turn-e"}: false,
 	}}
 	h := &MessageHandler{messageService: svc}
-	visible := map[string]struct{}{
-		"turn-a": {},
-		"turn-b": {},
-	}
-	liveHeads := map[string]struct{}{"turn-b": {}}
 
-	visibleGot, err := h.addVisibleDescendantPath(context.Background(), visible, liveHeads, "turn-d")
+	visible, liveHead, err := h.acceptLiveTurn(context.Background(), "turn-b", "turn-d")
 	if err != nil {
-		t.Fatalf("addVisibleDescendantPath(turn-d) error = %v", err)
+		t.Fatalf("acceptLiveTurn(turn-d) error = %v", err)
 	}
-	if !visibleGot {
-		t.Fatal("descendant of selected head was filtered")
-	}
-	if _, ok := visible["turn-d"]; !ok {
-		t.Fatalf("descendant was not added to visible set: %#v", visible)
+	if !visible || liveHead != "turn-d" {
+		t.Fatalf("turn-d visible/liveHead = %v/%q, want true/turn-d", visible, liveHead)
 	}
 
-	// turn-e extends turn-d, which just became a live head.
-	visibleGot, err = h.addVisibleDescendantPath(context.Background(), visible, liveHeads, "turn-e")
+	visible, liveHead, err = h.acceptLiveTurn(context.Background(), liveHead, "turn-e")
 	if err != nil {
-		t.Fatalf("addVisibleDescendantPath(turn-e) error = %v", err)
+		t.Fatalf("acceptLiveTurn(turn-e) error = %v", err)
 	}
-	if !visibleGot {
-		t.Fatal("descendant of previously accepted live head was filtered")
-	}
-	if _, ok := visible["turn-e"]; !ok {
-		t.Fatalf("second descendant was not added to visible set: %#v", visible)
+	if !visible || liveHead != "turn-e" {
+		t.Fatalf("turn-e visible/liveHead = %v/%q, want true/turn-e", visible, liveHead)
 	}
 
-	visibleGot, err = h.addVisibleDescendantPath(context.Background(), visible, liveHeads, "turn-c")
+	visible, liveHead, err = h.acceptLiveTurn(context.Background(), liveHead, "turn-c")
 	if err != nil {
-		t.Fatalf("addVisibleDescendantPath(turn-c) error = %v", err)
+		t.Fatalf("acceptLiveTurn(turn-c) error = %v", err)
 	}
-	if visibleGot {
-		t.Fatal("sibling branch was treated as selected-path descendant")
-	}
-	if _, ok := visible["turn-c"]; ok {
-		t.Fatalf("sibling branch leaked into visible set: %#v", visible)
+	if visible || liveHead != "turn-e" {
+		t.Fatalf("turn-c visible/liveHead = %v/%q, want false/turn-e", visible, liveHead)
 	}
 }
 
-// TestAddVisibleDescendantPathLegacyAllVisible covers sessions without a
-// selected path: an empty visible set means "no head filtering", so every
-// live message passes.
-func TestAddVisibleDescendantPathLegacyAllVisible(t *testing.T) {
+func TestAcceptLiveTurnCurrentHeadPassesWithoutQuery(t *testing.T) {
 	t.Parallel()
 
-	h := &MessageHandler{messageService: &turnPathMessageService{}}
-	visibleGot, err := h.addVisibleDescendantPath(context.Background(), map[string]struct{}{}, map[string]struct{}{}, "turn-x")
+	svc := &turnAncestorMessageService{}
+	h := &MessageHandler{messageService: svc}
+	visible, liveHead, err := h.acceptLiveTurn(context.Background(), "turn-b", "turn-b")
 	if err != nil {
-		t.Fatalf("addVisibleDescendantPath() error = %v", err)
+		t.Fatalf("acceptLiveTurn() error = %v", err)
 	}
-	if !visibleGot {
-		t.Fatal("legacy session without selected path filtered a live message")
+	if !visible || liveHead != "turn-b" {
+		t.Fatalf("visible/liveHead = %v/%q, want true/turn-b", visible, liveHead)
+	}
+	if len(svc.calls) != 0 {
+		t.Fatalf("ancestor checks = %v, want none", svc.calls)
 	}
 }
 
-// TestAddVisibleDescendantPathRejectsBlankTurn pins that a live message
-// without a turn id stays hidden once a selected path exists.
-func TestAddVisibleDescendantPathRejectsBlankTurn(t *testing.T) {
+// TestAcceptLiveTurnFallbackWithoutCheckerStaysPermissive covers non-DB
+// fallback services in tests or degraded wiring: without the optimized checker,
+// keep live delivery permissive instead of silently dropping selected-view
+// events.
+func TestAcceptLiveTurnFallbackWithoutCheckerStaysPermissive(t *testing.T) {
 	t.Parallel()
 
-	h := &MessageHandler{messageService: &turnPathMessageService{}}
-	visible := map[string]struct{}{"turn-a": {}}
-	visibleGot, err := h.addVisibleDescendantPath(context.Background(), visible, map[string]struct{}{"turn-a": {}}, "  ")
+	h := &MessageHandler{messageService: &streamBacklogMessageService{}}
+	visible, liveHead, err := h.acceptLiveTurn(context.Background(), "turn-b", "turn-x")
 	if err != nil {
-		t.Fatalf("addVisibleDescendantPath() error = %v", err)
+		t.Fatalf("acceptLiveTurn() error = %v", err)
 	}
-	if visibleGot {
-		t.Fatal("blank turn id passed the selected-path filter")
+	if !visible || liveHead != "turn-x" {
+		t.Fatalf("visible/liveHead = %v/%q, want true/turn-x", visible, liveHead)
+	}
+}
+
+// TestAcceptLiveTurnLegacyAllVisible covers sessions without a selected path:
+// an empty live head means "no branch filtering", so every live message passes.
+func TestAcceptLiveTurnLegacyAllVisible(t *testing.T) {
+	t.Parallel()
+
+	h := &MessageHandler{messageService: &turnAncestorMessageService{}}
+	visible, liveHead, err := h.acceptLiveTurn(context.Background(), "", "turn-x")
+	if err != nil {
+		t.Fatalf("acceptLiveTurn() error = %v", err)
+	}
+	if !visible || liveHead != "" {
+		t.Fatalf("visible/liveHead = %v/%q, want true/empty", visible, liveHead)
+	}
+}
+
+// TestAcceptLiveTurnRejectsBlankTurn pins that a live message without a turn id
+// stays hidden once a selected path exists.
+func TestAcceptLiveTurnRejectsBlankTurn(t *testing.T) {
+	t.Parallel()
+
+	h := &MessageHandler{messageService: &turnAncestorMessageService{}}
+	visible, liveHead, err := h.acceptLiveTurn(context.Background(), "turn-a", "  ")
+	if err != nil {
+		t.Fatalf("acceptLiveTurn() error = %v", err)
+	}
+	if visible || liveHead != "turn-a" {
+		t.Fatalf("visible/liveHead = %v/%q, want false/turn-a", visible, liveHead)
 	}
 }
 
@@ -394,13 +390,21 @@ func TestResolveSessionViewHeadUnresolvedFallsBackEmpty(t *testing.T) {
 	}
 }
 
-type turnPathMessageService struct {
-	messagepkg.Service
-	paths map[string][]string
+type ancestorCheck struct {
+	turnID         string
+	ancestorTurnID string
 }
 
-func (s *turnPathMessageService) ListSessionTurnPathIDs(_ context.Context, headTurnID string) ([]string, error) {
-	return append([]string(nil), s.paths[headTurnID]...), nil
+type turnAncestorMessageService struct {
+	messagepkg.Service
+	matches map[ancestorCheck]bool
+	calls   []ancestorCheck
+}
+
+func (s *turnAncestorMessageService) IsSessionTurnAncestor(_ context.Context, turnID string, ancestorTurnID string) (bool, error) {
+	check := ancestorCheck{turnID: turnID, ancestorTurnID: ancestorTurnID}
+	s.calls = append(s.calls, check)
+	return s.matches[check], nil
 }
 
 type viewHeadMessageService struct {

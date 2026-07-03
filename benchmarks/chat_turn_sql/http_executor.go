@@ -73,11 +73,13 @@ func (*httpExecutor) scanMode() string {
 
 func (e *httpExecutor) execQuery(ctx context.Context, queryName string, s SessionSeed, rng *rand.Rand) (int64, error) {
 	switch queryName {
+	case queryChatPageUI:
+		return e.execListMessages(ctx, s, rng, httpListMessagesLatest)
 	case queryLatestPage:
 		return e.execListMessages(ctx, s, rng, httpListMessagesLatest)
 	case queryBeforePage:
 		return e.execListMessages(ctx, s, rng, httpListMessagesBefore)
-	case queryAfterPage:
+	case queryLocateWindow:
 		return e.execLocateMessages(ctx, s, rng, true)
 	case queryExternalLookup:
 		return e.execLocateMessages(ctx, s, rng, false)
@@ -103,11 +105,12 @@ func (e *httpExecutor) execListMessages(ctx context.Context, s SessionSeed, rng 
 	if format := strings.TrimSpace(e.cfg.Workload.HTTPFormat); format != "" {
 		values.Set("format", format)
 	}
-	if headID := selectedHead(e.cfg, s, rng); headID != uuid.Nil {
+	headID := selectedHead(e.cfg, s, rng)
+	if headID != uuid.Nil {
 		values.Set("head_turn_id", headID.String())
 	}
 	if mode == httpListMessagesBefore {
-		cursorID, cursorTime := selectedCursor(s, rng)
+		cursorID, cursorTime := selectedCursorForHead(s, headID, rng)
 		values.Set("before_id", cursorID.String())
 		values.Set("before", cursorTime.UTC().Format(httpTimeFormat))
 	}
@@ -129,12 +132,13 @@ func (e *httpExecutor) execLocateMessages(ctx context.Context, s SessionSeed, rn
 	if s.OwnerUserID == uuid.Nil {
 		return 0, errors.New("http runner requires owner_user_id in seed catalog; reseed or reload catalog")
 	}
-	if strings.TrimSpace(s.ExternalMessageID) == "" {
+	externalID := selectedExternalMessageID(s, rng)
+	if strings.TrimSpace(externalID) == "" {
 		return 0, queryArgError("external_lookup requires external_message_id")
 	}
 	values := url.Values{}
 	values.Set("session_id", s.SessionID.String())
-	values.Set("external_message_id", s.ExternalMessageID)
+	values.Set("external_message_id", externalID)
 	if withWindow {
 		values.Set("before", strconv.Itoa(e.cfg.Workload.PageSize))
 		values.Set("after", strconv.Itoa(e.cfg.Workload.PageSize))

@@ -165,8 +165,14 @@ type SessionTurnHeadResolver interface {
 }
 
 // SessionTurnPathLister lists the ancestor path turn ids (self included) of
-// one head turn. The SSE stream uses it to filter live messages to the
-// subscribed head path.
+// one head turn. It remains available for path-oriented callers and old-path
+// benchmarks; SSE live filtering uses SessionTurnAncestorChecker.
 type SessionTurnPathLister interface {
 	ListSessionTurnPathIDs(ctx context.Context, headTurnID string) ([]string, error)
+}
+
+// SessionTurnAncestorChecker checks whether ancestorTurnID is on turnID's
+// ancestor path (self included) without materializing the full path in Go.
+type SessionTurnAncestorChecker interface {
+	IsSessionTurnAncestor(ctx context.Context, turnID string, ancestorTurnID string) (bool, error)
 }

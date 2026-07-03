@@ -178,21 +178,58 @@ func (c *statsCollector) result(cfg Config, seed SeedEstimate, startedAt time.Ti
 func resultSourceAndArgs(name string, meta executorMetadata) ([]string, []string) {
 	if meta.QuerySource == querySourceHTTPHandler {
 		switch name {
+		case queryChatPageUI:
+			return []string{"internal/handlers/message.go ListMessages"}, []string{"bot_id", "session_id", "limit", "format=ui", "head_turn_id"}
 		case queryLatestPage:
 			return []string{"internal/handlers/message.go ListMessages"}, []string{"bot_id", "session_id", "limit", "format", "include_graph", "head_turn_id"}
 		case queryBeforePage:
 			return []string{"internal/handlers/message.go ListMessages"}, []string{"bot_id", "session_id", "limit", "format", "before", "before_id", "head_turn_id"}
-		case queryAfterPage, queryExternalLookup:
+		case queryLocateWindow, queryExternalLookup:
 			return []string{"internal/handlers/message.go LocateMessage"}, []string{"bot_id", "session_id", "external_message_id", "before", "after", "head_turn_id"}
 		default:
 			return []string{"internal/handlers/message.go"}, nil
 		}
+	}
+	if sources, args, ok := compositeResultSourceAndArgs(name); ok {
+		return sources, args
 	}
 	def, ok := queryDefinition(name)
 	if !ok {
 		return nil, nil
 	}
 	return []string{def.SourceFile + " " + def.SourceName}, def.Args
+}
+
+func compositeResultSourceAndArgs(name string) ([]string, []string, bool) {
+	switch name {
+	case queryChatPageUI:
+		return []string{
+			"db/postgres/queries/messages.sql ListMessagesLatestBySession",
+			"db/postgres/queries/messages.sql ListSessionTurnSiblings",
+			"db/postgres/queries/tool_approval.sql ListToolApprovalsBySessionToolCalls",
+			"db/postgres/queries/user_input.sql ListUserInputsBySessionToolCalls",
+		}, []string{"session_id", "head_turn_id", "max_count", "turn_ids", "tool_call_ids"}, true
+	case queryLocateWindow:
+		return []string{
+			"db/postgres/queries/messages.sql GetMessageByExternalIDBySession",
+			"db/postgres/queries/messages.sql ListMessagesBeforeBySession",
+			"db/postgres/queries/messages.sql ListMessagesAfterBySession",
+		}, []string{"session_id", "head_turn_id", "external_message_id", "cursor", "max_count"}, true
+	case queryApprovalResolve:
+		return []string{
+			"db/postgres/queries/tool_approval.sql GetLatestPendingToolApprovalBySession",
+			"db/postgres/queries/tool_approval.sql GetPendingToolApprovalBySessionShortID",
+		}, []string{"bot_id", "session_id", "short_id"}, true
+	case queryUserInputResolve:
+		return []string{
+			"db/postgres/queries/user_input.sql GetLatestPendingUserInputBySession",
+			"db/postgres/queries/user_input.sql GetPendingUserInputBySessionShortID",
+		}, []string{"bot_id", "session_id", "short_id"}, true
+	case querySSELiveFilter:
+		return []string{"db/postgres/queries/messages.sql GetSessionTurnAncestorMatch"}, []string{"ancestor_turn_id", "turn_id"}, true
+	default:
+		return nil, nil, false
+	}
 }
 
 func resultConfig(cfg Config) ResultConfig {

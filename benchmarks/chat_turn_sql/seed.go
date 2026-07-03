@@ -22,26 +22,39 @@ type SeedCatalog struct {
 }
 
 type SessionSeed struct {
-	BotID              uuid.UUID   `json:"bot_id"`
-	OwnerUserID        uuid.UUID   `json:"owner_user_id"`
-	RouteID            uuid.UUID   `json:"route_id"`
-	SessionID          uuid.UUID   `json:"session_id"`
-	DefaultHeadTurnID  uuid.UUID   `json:"default_head_turn_id"`
-	HeadTurnIDs        []uuid.UUID `json:"head_turn_ids"`
-	MidPathTurnID      uuid.UUID   `json:"mid_path_turn_id"`
-	PageTurnIDs        []uuid.UUID `json:"page_turn_ids"`
-	LatestMessageID    uuid.UUID   `json:"latest_message_id"`
-	CursorMessageIDs   []uuid.UUID `json:"cursor_message_ids"`
-	CursorCreatedAts   []time.Time `json:"cursor_created_ats"`
-	ExternalMessageID  string      `json:"external_message_id"`
-	ApprovalRequestID  uuid.UUID   `json:"approval_request_id"`
-	ApprovalBaseReqID  uuid.UUID   `json:"approval_base_request_id"`
-	ApprovalShortID    int32       `json:"approval_short_id"`
-	ApprovalPromptID   string      `json:"approval_prompt_external_id"`
-	UserInputRequestID uuid.UUID   `json:"user_input_request_id"`
-	UserInputBaseReqID uuid.UUID   `json:"user_input_base_request_id"`
-	UserInputShortID   int32       `json:"user_input_short_id"`
-	UserInputPromptID  string      `json:"user_input_prompt_external_id"`
+	BotID               uuid.UUID        `json:"bot_id"`
+	OwnerUserID         uuid.UUID        `json:"owner_user_id"`
+	RouteID             uuid.UUID        `json:"route_id"`
+	SessionID           uuid.UUID        `json:"session_id"`
+	DefaultHeadTurnID   uuid.UUID        `json:"default_head_turn_id"`
+	DefaultHeadParentID uuid.UUID        `json:"default_head_parent_turn_id"`
+	HeadTurnIDs         []uuid.UUID      `json:"head_turn_ids"`
+	MidPathTurnID       uuid.UUID        `json:"mid_path_turn_id"`
+	PageTurnIDs         []uuid.UUID      `json:"page_turn_ids"`
+	LatestMessageID     uuid.UUID        `json:"latest_message_id"`
+	CursorMessageIDs    []uuid.UUID      `json:"cursor_message_ids"`
+	CursorCreatedAts    []time.Time      `json:"cursor_created_ats"`
+	ExternalMessageID   string           `json:"external_message_id"`
+	ExternalMessageIDs  []string         `json:"external_message_ids"`
+	HeadCursors         []HeadCursorSeed `json:"head_cursors"`
+	ApprovalToolCallID  string           `json:"approval_tool_call_id"`
+	ApprovalTurnID      uuid.UUID        `json:"approval_turn_id"`
+	ApprovalRequestID   uuid.UUID        `json:"approval_request_id"`
+	ApprovalBaseReqID   uuid.UUID        `json:"approval_base_request_id"`
+	ApprovalShortID     int32            `json:"approval_short_id"`
+	ApprovalPromptID    string           `json:"approval_prompt_external_id"`
+	UserInputToolCallID string           `json:"user_input_tool_call_id"`
+	UserInputTurnID     uuid.UUID        `json:"user_input_turn_id"`
+	UserInputRequestID  uuid.UUID        `json:"user_input_request_id"`
+	UserInputBaseReqID  uuid.UUID        `json:"user_input_base_request_id"`
+	UserInputShortID    int32            `json:"user_input_short_id"`
+	UserInputPromptID   string           `json:"user_input_prompt_external_id"`
+}
+
+type HeadCursorSeed struct {
+	HeadTurnID        uuid.UUID   `json:"head_turn_id"`
+	MessageIDs        []uuid.UUID `json:"message_ids"`
+	MessageCreatedAts []time.Time `json:"message_created_ats"`
 }
 
 type sessionRequestSeq struct {
@@ -204,6 +217,9 @@ func seedBenchmarkData(ctx context.Context, pool *pgxpool.Pool, cfg Config) (See
 			turns := buildSessionTurns(cfg.Seed, sessionIdx, sessionCreated)
 			requestByTurn := make(map[uuid.UUID]uuid.UUID, len(turns))
 			assistantByTurn := make(map[uuid.UUID]uuid.UUID, len(turns))
+			requestCreatedAtByTurn := make(map[uuid.UUID]time.Time, len(turns))
+			sourceByTurn := make(map[uuid.UUID]string, len(turns))
+			parentByTurn := make(map[uuid.UUID]uuid.UUID, len(turns))
 			toolCallsByTurn := make(map[uuid.UUID][]pendingToolCallSeed)
 			for turnIdx, turn := range turns {
 				projectedTurnGlobalIdx := turnGlobalIdx + turnIdx + 1
@@ -229,11 +245,13 @@ func seedBenchmarkData(ctx context.Context, pool *pgxpool.Pool, cfg Config) (See
 				if turn.parentID != uuid.Nil {
 					parent = turn.parentID
 				}
+				parentByTurn[turn.id] = turn.parentID
 				if err := turnBatch.add(turn.id, botID, sessionID, parent, turn.createdAt, turn.createdAt); err != nil {
 					return SeedCatalog{}, err
 				}
 				if turnIdx == cfg.Seed.TurnsPerSession-1 {
 					sessionSeed.DefaultHeadTurnID = turn.id
+					sessionSeed.DefaultHeadParentID = turn.parentID
 				}
 				// A mid-path (non-head) turn: the realistic input for the
 				// head_resolve scenario, whose production caller only runs
@@ -293,6 +311,8 @@ func seedBenchmarkData(ctx context.Context, pool *pgxpool.Pool, cfg Config) (See
 					}
 					if role == "user" && requestByTurn[turn.id] == uuid.Nil {
 						requestByTurn[turn.id] = msgID
+						requestCreatedAtByTurn[turn.id] = createdAt
+						sourceByTurn[turn.id] = sourceMessageID
 						if sessionSeed.ExternalMessageID == "" {
 							sessionSeed.ExternalMessageID = sourceMessageID
 						}
@@ -328,6 +348,8 @@ func seedBenchmarkData(ctx context.Context, pool *pgxpool.Pool, cfg Config) (See
 					promptExternalID := uniqueName("bench-approval-prompt", cfg.Seed.Marker, approvalGlobalIdx)
 					if status == "pending" {
 						sessionSeed.ApprovalRequestID = requestID
+						sessionSeed.ApprovalToolCallID = uniqueName("tool-call", cfg.Seed.Marker, turnGlobalIdx)
+						sessionSeed.ApprovalTurnID = turn.id
 						if turnIdx < cfg.Seed.TurnsPerSession {
 							sessionSeed.ApprovalBaseReqID = requestID
 						}
@@ -348,6 +370,8 @@ func seedBenchmarkData(ctx context.Context, pool *pgxpool.Pool, cfg Config) (See
 					promptExternalID := uniqueName("bench-user-input-prompt", cfg.Seed.Marker, userInputGlobalIdx)
 					if status == "pending" {
 						sessionSeed.UserInputRequestID = requestID
+						sessionSeed.UserInputToolCallID = uniqueName("ask-user", cfg.Seed.Marker, turnGlobalIdx)
+						sessionSeed.UserInputTurnID = turn.id
 						if turnIdx < cfg.Seed.TurnsPerSession {
 							sessionSeed.UserInputBaseReqID = requestID
 						}
@@ -373,9 +397,14 @@ func seedBenchmarkData(ctx context.Context, pool *pgxpool.Pool, cfg Config) (See
 			if err := assetBatch.flush(); err != nil {
 				return SeedCatalog{}, err
 			}
-			if len(sessionSeed.CursorMessageIDs) == 0 {
-				sessionSeed.CursorMessageIDs = append(sessionSeed.CursorMessageIDs, sessionSeed.LatestMessageID)
-				sessionSeed.CursorCreatedAts = append(sessionSeed.CursorCreatedAts, sessionCreated)
+			sessionSeed.HeadCursors = buildHeadCursorSeeds(heads, parentByTurn, requestByTurn, requestCreatedAtByTurn)
+			if len(sessionSeed.HeadCursors) > 0 {
+				sessionSeed.CursorMessageIDs = append([]uuid.UUID(nil), sessionSeed.HeadCursors[0].MessageIDs...)
+				sessionSeed.CursorCreatedAts = append([]time.Time(nil), sessionSeed.HeadCursors[0].MessageCreatedAts...)
+			}
+			sessionSeed.ExternalMessageIDs = externalMessageSamples(sessionSeed.DefaultHeadTurnID, parentByTurn, sourceByTurn)
+			if len(sessionSeed.ExternalMessageIDs) > 0 {
+				sessionSeed.ExternalMessageID = sessionSeed.ExternalMessageIDs[0]
 			}
 			catalog.Sessions = append(catalog.Sessions, sessionSeed)
 			if isHotSession(cfg.Seed, sessIdx) {
@@ -481,6 +510,11 @@ func loadSeedCatalog(ctx context.Context, pool *pgxpool.Pool, cfg Config) (SeedC
 	  JOIN benchmark_sessions s ON s.id = m.session_id
 	)
 	SELECT s.bot_id, s.owner_user_id, s.route_id, s.id, s.default_head_turn_id,
+	       COALESCE((
+	         SELECT t.parent_turn_id
+	         FROM bot_history_turns t
+	         WHERE t.id = s.default_head_turn_id
+	       ), '00000000-0000-0000-0000-000000000000'::uuid) AS default_head_parent_turn_id,
 	       COALESCE(array_agg(h.head_turn_id ORDER BY h.created_at, h.head_turn_id) FILTER (WHERE h.head_turn_id IS NOT NULL), '{}') AS heads,
 	       COALESCE((
 	         SELECT m.id
@@ -581,7 +615,7 @@ func loadSeedCatalog(ctx context.Context, pool *pgxpool.Pool, cfg Config) (SeedC
 	           SELECT p.id, p.parent_turn_id, dp.depth + 1
 	           FROM bot_history_turns p
 	           JOIN default_path dp ON dp.parent_turn_id = p.id
-	           WHERE dp.depth < 16
+	           WHERE dp.depth < 25
 	         )
 	         SELECT array_agg(dp.id) FROM default_path dp
 	       ), ARRAY[]::uuid[]) AS page_turn_ids,
@@ -599,7 +633,7 @@ func loadSeedCatalog(ctx context.Context, pool *pgxpool.Pool, cfg Config) (SeedC
 	for rows.Next() {
 		var s SessionSeed
 		var hot bool
-		if err := rows.Scan(&s.BotID, &s.OwnerUserID, &s.RouteID, &s.SessionID, &s.DefaultHeadTurnID, &s.HeadTurnIDs, &s.LatestMessageID, &s.CursorMessageIDs, &s.CursorCreatedAts, &s.ExternalMessageID, &s.ApprovalRequestID, &s.ApprovalBaseReqID, &s.ApprovalShortID, &s.ApprovalPromptID, &s.UserInputRequestID, &s.UserInputBaseReqID, &s.UserInputShortID, &s.UserInputPromptID, &s.MidPathTurnID, &s.PageTurnIDs, &hot); err != nil {
+		if err := rows.Scan(&s.BotID, &s.OwnerUserID, &s.RouteID, &s.SessionID, &s.DefaultHeadTurnID, &s.DefaultHeadParentID, &s.HeadTurnIDs, &s.LatestMessageID, &s.CursorMessageIDs, &s.CursorCreatedAts, &s.ExternalMessageID, &s.ApprovalRequestID, &s.ApprovalBaseReqID, &s.ApprovalShortID, &s.ApprovalPromptID, &s.UserInputRequestID, &s.UserInputBaseReqID, &s.UserInputShortID, &s.UserInputPromptID, &s.MidPathTurnID, &s.PageTurnIDs, &hot); err != nil {
 			return SeedCatalog{}, err
 		}
 		if !botSeen[s.BotID] {
@@ -620,12 +654,141 @@ func loadSeedCatalog(ctx context.Context, pool *pgxpool.Pool, cfg Config) (SeedC
 	if len(catalog.Sessions) == 0 {
 		return SeedCatalog{}, fmt.Errorf("no benchmark sessions found for marker %q; run -mode seed or -mode seed-run first", cfg.Seed.Marker)
 	}
+	for i := range catalog.Sessions {
+		if err := enrichLoadedSessionSeed(ctx, pool, &catalog.Sessions[i]); err != nil {
+			return SeedCatalog{}, err
+		}
+	}
 	actual, err := actualSeedEstimate(ctx, pool, cfg.Seed.Marker)
 	if err != nil {
 		return SeedCatalog{}, fmt.Errorf("count benchmark rows: %w", err)
 	}
 	catalog.Estimate = actual
 	return catalog, nil
+}
+
+func enrichLoadedSessionSeed(ctx context.Context, pool *pgxpool.Pool, s *SessionSeed) error {
+	if len(s.HeadTurnIDs) == 0 && s.DefaultHeadTurnID != uuid.Nil {
+		s.HeadTurnIDs = []uuid.UUID{s.DefaultHeadTurnID}
+	}
+	s.HeadCursors = s.HeadCursors[:0]
+	for _, headID := range s.HeadTurnIDs {
+		cursor, sources, err := loadHeadCursorSeed(ctx, pool, headID)
+		if err != nil {
+			return fmt.Errorf("load head cursor seed for session %s head %s: %w", s.SessionID, headID, err)
+		}
+		if len(cursor.MessageIDs) > 0 {
+			s.HeadCursors = append(s.HeadCursors, cursor)
+		}
+		if headID == s.DefaultHeadTurnID {
+			s.ExternalMessageIDs = sources
+		}
+	}
+	if len(s.HeadCursors) > 0 {
+		s.CursorMessageIDs = append([]uuid.UUID(nil), s.HeadCursors[0].MessageIDs...)
+		s.CursorCreatedAts = append([]time.Time(nil), s.HeadCursors[0].MessageCreatedAts...)
+	}
+	if len(s.ExternalMessageIDs) > 0 {
+		s.ExternalMessageID = s.ExternalMessageIDs[0]
+	}
+	if err := loadDecorationSeed(ctx, pool, s); err != nil {
+		return err
+	}
+	return nil
+}
+
+func loadHeadCursorSeed(ctx context.Context, pool *pgxpool.Pool, headID uuid.UUID) (HeadCursorSeed, []string, error) {
+	rows, err := pool.Query(ctx, `
+WITH RECURSIVE path_turns AS (
+  SELECT t.id, t.parent_turn_id, 0::bigint AS depth
+  FROM bot_history_turns t
+  WHERE t.id = $1
+  UNION ALL
+  SELECT p.id, p.parent_turn_id, pt.depth + 1
+  FROM bot_history_turns p
+  JOIN path_turns pt ON pt.parent_turn_id = p.id
+)
+SELECT m.id, m.created_at, COALESCE(m.source_message_id, '')
+FROM path_turns pt
+JOIN bot_history_messages m ON m.turn_id = pt.id
+WHERE m.role = 'user'
+ORDER BY pt.depth DESC, COALESCE(m.turn_message_seq, 0) ASC, m.created_at ASC, m.id ASC`, headID)
+	if err != nil {
+		return HeadCursorSeed{}, nil, err
+	}
+	defer rows.Close()
+	type messageSample struct {
+		id        uuid.UUID
+		createdAt time.Time
+		sourceID  string
+	}
+	var messages []messageSample
+	for rows.Next() {
+		var msg messageSample
+		if err := rows.Scan(&msg.id, &msg.createdAt, &msg.sourceID); err != nil {
+			return HeadCursorSeed{}, nil, err
+		}
+		messages = append(messages, msg)
+	}
+	if err := rows.Err(); err != nil {
+		return HeadCursorSeed{}, nil, err
+	}
+	cursor := HeadCursorSeed{HeadTurnID: headID}
+	sources := make([]string, 0, 3)
+	seenSources := map[string]struct{}{}
+	for _, idx := range cursorSampleIndexes(len(messages)) {
+		msg := messages[idx]
+		cursor.MessageIDs = append(cursor.MessageIDs, msg.id)
+		cursor.MessageCreatedAts = append(cursor.MessageCreatedAts, msg.createdAt)
+		if msg.sourceID == "" {
+			continue
+		}
+		if _, ok := seenSources[msg.sourceID]; ok {
+			continue
+		}
+		seenSources[msg.sourceID] = struct{}{}
+		sources = append(sources, msg.sourceID)
+	}
+	return cursor, sources, nil
+}
+
+func loadDecorationSeed(ctx context.Context, pool *pgxpool.Pool, s *SessionSeed) error {
+	rows, err := pool.Query(ctx, `
+SELECT tool_call_id, persist_turn_id
+FROM tool_approval_requests
+WHERE session_id = $1 AND status = 'pending'
+ORDER BY created_at DESC, short_id DESC
+LIMIT 1`, s.SessionID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		if err := rows.Scan(&s.ApprovalToolCallID, &s.ApprovalTurnID); err != nil {
+			rows.Close()
+			return err
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows, err = pool.Query(ctx, `
+SELECT tool_call_id, persist_turn_id
+FROM user_input_requests
+WHERE session_id = $1 AND status = 'pending'
+ORDER BY created_at DESC, short_id DESC
+LIMIT 1`, s.SessionID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		if err := rows.Scan(&s.UserInputToolCallID, &s.UserInputTurnID); err != nil {
+			rows.Close()
+			return err
+		}
+	}
+	rows.Close()
+	return rows.Err()
 }
 
 func buildSessionTurns(seed SeedConfig, sessionIdx int, start time.Time) []turnSeed {
@@ -649,7 +812,7 @@ func buildSessionTurns(seed SeedConfig, sessionIdx int, start time.Time) []turnS
 	if branchHeads == 0 || len(baseIDs) == 0 {
 		return turns
 	}
-	baseStart := int(math.Max(0, float64(seed.TurnsPerSession-seed.BranchDepth-1)))
+	baseStart := int(math.Max(0, float64(seed.TurnsPerSession-variantPageTurnSeedCount)))
 	for branch := 0; branch < branchHeads; branch++ {
 		forkAt := baseStart - branch
 		if forkAt < 0 {
@@ -672,10 +835,10 @@ func buildSessionTurns(seed SeedConfig, sessionIdx int, start time.Time) []turnS
 	return turns
 }
 
-// The number of default-path tail turns recorded per session for the
-// turn_siblings scenario — a stand-in for the turn ids on one latest
-// transcript page.
-const variantPageTurnSeedCount = 16
+// The number of turn ids recorded per session for the turn_siblings scenario.
+// The default UI page is 50 messages and benchmark sessions seed 2 messages
+// per turn, so one chat page usually contains about 25 turns.
+const variantPageTurnSeedCount = 25
 
 // latestPageTurnIDs returns the tail of the base (default-head) path, the
 // turn ids a latest transcript page would hand to ListSessionTurnSiblings.
@@ -692,6 +855,86 @@ func latestPageTurnIDs(seed SeedConfig, turns []turnSeed) []uuid.UUID {
 		ids = append(ids, turn.id)
 	}
 	return ids
+}
+
+func buildHeadCursorSeeds(heads []uuid.UUID, parentByTurn map[uuid.UUID]uuid.UUID, requestByTurn map[uuid.UUID]uuid.UUID, createdAtByTurn map[uuid.UUID]time.Time) []HeadCursorSeed {
+	out := make([]HeadCursorSeed, 0, len(heads))
+	for _, headID := range heads {
+		path := pathFromHead(headID, parentByTurn)
+		indexes := cursorSampleIndexes(len(path))
+		cursor := HeadCursorSeed{HeadTurnID: headID}
+		for _, idx := range indexes {
+			turnID := path[idx]
+			msgID := requestByTurn[turnID]
+			if msgID == uuid.Nil {
+				continue
+			}
+			cursor.MessageIDs = append(cursor.MessageIDs, msgID)
+			cursor.MessageCreatedAts = append(cursor.MessageCreatedAts, createdAtByTurn[turnID])
+		}
+		if len(cursor.MessageIDs) > 0 {
+			out = append(out, cursor)
+		}
+	}
+	return out
+}
+
+func externalMessageSamples(headID uuid.UUID, parentByTurn map[uuid.UUID]uuid.UUID, sourceByTurn map[uuid.UUID]string) []string {
+	path := pathFromHead(headID, parentByTurn)
+	indexes := cursorSampleIndexes(len(path))
+	out := make([]string, 0, len(indexes))
+	seen := map[string]struct{}{}
+	for _, idx := range indexes {
+		source := sourceByTurn[path[idx]]
+		if source == "" {
+			continue
+		}
+		if _, ok := seen[source]; ok {
+			continue
+		}
+		seen[source] = struct{}{}
+		out = append(out, source)
+	}
+	return out
+}
+
+func pathFromHead(headID uuid.UUID, parentByTurn map[uuid.UUID]uuid.UUID) []uuid.UUID {
+	if headID == uuid.Nil {
+		return nil
+	}
+	reversed := make([]uuid.UUID, 0)
+	seen := map[uuid.UUID]struct{}{}
+	for id := headID; id != uuid.Nil; id = parentByTurn[id] {
+		if _, ok := seen[id]; ok {
+			break
+		}
+		seen[id] = struct{}{}
+		reversed = append(reversed, id)
+	}
+	for left, right := 0, len(reversed)-1; left < right; left, right = left+1, right-1 {
+		reversed[left], reversed[right] = reversed[right], reversed[left]
+	}
+	return reversed
+}
+
+func cursorSampleIndexes(count int) []int {
+	if count <= 0 {
+		return nil
+	}
+	candidates := []int{0, count / 2, max(count-3, 0)}
+	out := make([]int, 0, len(candidates))
+	seen := map[int]struct{}{}
+	for _, idx := range candidates {
+		if idx < 0 || idx >= count {
+			continue
+		}
+		if _, ok := seen[idx]; ok {
+			continue
+		}
+		seen[idx] = struct{}{}
+		out = append(out, idx)
+	}
+	return out
 }
 
 func collectHeadTurns(seed SeedConfig, turns []turnSeed) []uuid.UUID {

@@ -450,6 +450,26 @@ WITH RECURSIVE path_turns(id, parent_turn_id) AS (
 SELECT pt.id
 FROM path_turns pt;
 
+-- name: GetSessionTurnAncestorMatch :one
+-- Returns ancestor_turn_id when it sits on turn_id's ancestor path (self
+-- included). The SSE stream uses this as an existence check so deep paths are
+-- not materialized into Go for every live message.
+WITH RECURSIVE path_turns(id, parent_turn_id) AS (
+  SELECT t.id, t.parent_turn_id
+  FROM bot_history_turns t
+  WHERE t.id = sqlc.arg(turn_id)
+  UNION ALL
+  SELECT p.id, p.parent_turn_id
+  FROM bot_history_turns p
+  JOIN path_turns pt ON pt.parent_turn_id = p.id
+  WHERE pt.id <> sqlc.arg(ancestor_turn_id)
+)
+SELECT pt.id
+FROM path_turns pt
+JOIN bot_history_turns matched ON matched.id = pt.id
+  AND matched.id = sqlc.arg(ancestor_turn_id)
+LIMIT 1;
+
 -- name: ListMessagesSince :many
 SELECT
   m.id, m.bot_id, m.session_id, m.turn_id, m.turn_message_seq, m.sender_channel_identity_id,

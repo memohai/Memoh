@@ -4180,6 +4180,25 @@ func (q *Queries) ListSessionTurnPathIDs(ctx context.Context, headTurnID pgtype.
 	return result, nil
 }
 
+func (q *Queries) GetSessionTurnAncestorMatch(ctx context.Context, arg pgsqlc.GetSessionTurnAncestorMatchParams) (pgtype.UUID, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgtype.UUID{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.GetSessionTurnAncestorMatchParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgtype.UUID{}, err
+	}
+	out, err := q.store.queries.GetSessionTurnAncestorMatch(ctx, sqliteArg)
+	if err != nil {
+		return pgtype.UUID{}, mapQueryErr(err)
+	}
+	var result pgtype.UUID
+	if err := convertValue(out, &result); err != nil {
+		return pgtype.UUID{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) ListSessionTurnSiblings(ctx context.Context, arg pgsqlc.ListSessionTurnSiblingsParams) ([]pgsqlc.ListSessionTurnSiblingsRow, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured

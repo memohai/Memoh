@@ -271,6 +271,7 @@ type Queries interface {
 	ListMessagesLatestBySession(ctx context.Context, arg dbsqlc.ListMessagesLatestBySessionParams) ([]dbsqlc.ListMessagesLatestBySessionRow, error)
 	ListMessagesSince(ctx context.Context, arg dbsqlc.ListMessagesSinceParams) ([]dbsqlc.ListMessagesSinceRow, error)
 	ListMessagesSinceBySession(ctx context.Context, arg dbsqlc.ListMessagesSinceBySessionParams) ([]dbsqlc.ListMessagesSinceBySessionRow, error)
+	GetSessionTurnAncestorMatch(ctx context.Context, arg dbsqlc.GetSessionTurnAncestorMatchParams) (pgtype.UUID, error)
 	ListSessionTurnPathIDs(ctx context.Context, headTurnID pgtype.UUID) ([]pgtype.UUID, error)
 	ListSessionTurnSiblings(ctx context.Context, arg dbsqlc.ListSessionTurnSiblingsParams) ([]dbsqlc.ListSessionTurnSiblingsRow, error)
 	ResolveSessionTurnHead(ctx context.Context, arg dbsqlc.ResolveSessionTurnHeadParams) (pgtype.UUID, error)

@@ -112,28 +112,11 @@ func defaultConfig() Config {
 			HTTPFormat:        "ui",
 			HTTPDecodeJSON:    true,
 			QueryWeights: map[string]int{
-				queryLatestPage:               40,
-				queryBeforePage:               18,
-				queryAfterPage:                4,
-				queryExternalLookup:           3,
-				queryTurnGraph:                0,
-				queryHeadResolve:              4,
-				queryTurnSiblings:             8,
-				queryTurnPath:                 4,
-				queryApprovalPendingList:      4,
-				queryApprovalGraphList:        2,
-				queryApprovalLatest:           4,
-				queryApprovalShortID:          3,
-				queryApprovalVisibleRequest:   1,
-				queryApprovalBaseHeadRequest:  1,
-				queryApprovalReplyMessage:     1,
-				queryUserInputPendingList:     3,
-				queryUserInputGraphList:       2,
-				queryUserInputLatest:          3,
-				queryUserInputShortID:         2,
-				queryUserInputVisibleRequest:  1,
-				queryUserInputBaseHeadRequest: 1,
-				queryUserInputReplyMessage:    1,
+				queryChatPageUI:       82,
+				queryLocateWindow:     5,
+				queryApprovalResolve:  3,
+				queryUserInputResolve: 3,
+				querySSELiveFilter:    7,
 			},
 		},
 		Output: OutputConfig{
@@ -304,6 +287,9 @@ func (c Config) validate() error {
 	if c.Seed.TurnsPerSession <= 0 {
 		return errors.New("seed.turns_per_session must be > 0")
 	}
+	if (workloadUsesQuery(c.Workload, queryTurnAncestor) || workloadUsesQuery(c.Workload, querySSELiveFilter)) && c.Seed.TurnsPerSession < 2 {
+		return errors.New("seed.turns_per_session must be >= 2 when turn_ancestor or sse_live_filter is enabled")
+	}
 	if c.Seed.MessagesPerTurn < 2 {
 		return errors.New("seed.messages_per_turn must be >= 2")
 	}
@@ -364,7 +350,7 @@ func (c Config) validate() error {
 func validateHTTPRunnerScenario(workload WorkloadConfig) error {
 	if workload.Scenario != "mixed_saas_read" {
 		if !isHTTPRunnerQuery(workload.Scenario) {
-			return fmt.Errorf("http runner supports only %s, %s, %s, and %s scenarios", queryLatestPage, queryBeforePage, queryAfterPage, queryExternalLookup)
+			return fmt.Errorf("http runner supports only %s, %s, %s, %s, and %s scenarios", queryChatPageUI, queryLatestPage, queryBeforePage, queryLocateWindow, queryExternalLookup)
 		}
 		return nil
 	}
@@ -376,9 +362,19 @@ func validateHTTPRunnerScenario(workload WorkloadConfig) error {
 	return nil
 }
 
+func workloadUsesQuery(workload WorkloadConfig, queryName string) bool {
+	if workload.Scenario == queryName {
+		return true
+	}
+	if workload.Scenario != "mixed_saas_read" {
+		return false
+	}
+	return workload.QueryWeights[queryName] > 0
+}
+
 func isHTTPRunnerQuery(name string) bool {
 	switch name {
-	case queryLatestPage, queryBeforePage, queryAfterPage, queryExternalLookup:
+	case queryChatPageUI, queryLatestPage, queryBeforePage, queryLocateWindow, queryExternalLookup:
 		return true
 	default:
 		return false

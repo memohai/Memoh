@@ -498,6 +498,39 @@ func (q *Queries) GetNextTurnMessageSeq(ctx context.Context, turnID pgtype.UUID)
 	return next_seq, err
 }
 
+const getSessionTurnAncestorMatch = `-- name: GetSessionTurnAncestorMatch :one
+WITH RECURSIVE path_turns AS (
+  SELECT t.id, t.parent_turn_id
+  FROM bot_history_turns t
+  WHERE t.id = $2
+  UNION ALL
+  SELECT p.id, p.parent_turn_id
+  FROM bot_history_turns p
+  JOIN path_turns pt ON pt.parent_turn_id = p.id
+  WHERE pt.id <> $1
+)
+SELECT pt.id
+FROM path_turns pt
+JOIN bot_history_turns matched ON matched.id = pt.id
+  AND matched.id = $1
+LIMIT 1
+`
+
+type GetSessionTurnAncestorMatchParams struct {
+	AncestorTurnID pgtype.UUID `json:"ancestor_turn_id"`
+	TurnID         pgtype.UUID `json:"turn_id"`
+}
+
+// Returns ancestor_turn_id when it sits on turn_id's ancestor path (self
+// included). The SSE stream uses this as an existence check so deep paths are
+// not materialized into Go for every live message.
+func (q *Queries) GetSessionTurnAncestorMatch(ctx context.Context, arg GetSessionTurnAncestorMatchParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getSessionTurnAncestorMatch, arg.AncestorTurnID, arg.TurnID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getVisibleAssistantMessageTurnForFork = `-- name: GetVisibleAssistantMessageTurnForFork :one
 WITH RECURSIVE visible_turns AS (
   SELECT t.id, t.parent_turn_id, 0::bigint AS depth

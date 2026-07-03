@@ -585,6 +585,33 @@ func (s *DBService) ListSessionTurnPathIDs(ctx context.Context, headTurnID strin
 	return ids, nil
 }
 
+// IsSessionTurnAncestor reports whether ancestorTurnID is on turnID's ancestor
+// path (self included) without returning the full path to Go.
+func (s *DBService) IsSessionTurnAncestor(ctx context.Context, turnID string, ancestorTurnID string) (bool, error) {
+	pgTurnID, err := parseOptionalUUID(turnID)
+	if err != nil {
+		return false, err
+	}
+	pgAncestorTurnID, err := parseOptionalUUID(ancestorTurnID)
+	if err != nil {
+		return false, err
+	}
+	if !pgTurnID.Valid || !pgAncestorTurnID.Valid {
+		return false, nil
+	}
+	_, err = s.queries.GetSessionTurnAncestorMatch(ctx, sqlc.GetSessionTurnAncestorMatchParams{
+		TurnID:         pgTurnID,
+		AncestorTurnID: pgAncestorTurnID,
+	})
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return false, err
+}
+
 // ListSessionTurnHeadIDs returns the session's active head turn ids without
 // loading turn graph node metadata. The heads table holds at most a few rows
 // per session, so this is a cheap indexed lookup compared with the recursive

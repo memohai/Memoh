@@ -390,8 +390,8 @@ func TestSQLiteResolveSessionTurnHead(t *testing.T) {
 	}
 }
 
-// TestSQLiteListSessionTurnPathIDs pins the SSE path query: the head's
-// ancestor chain, self included, and nothing from sibling branches.
+// TestSQLiteListSessionTurnPathIDs pins the single-head path helper: the
+// head's ancestor chain, self included, and nothing from sibling branches.
 func TestSQLiteListSessionTurnPathIDs(t *testing.T) {
 	ctx := context.Background()
 	conn := openPaginationDB(t, ctx)
@@ -418,6 +418,44 @@ func TestSQLiteListSessionTurnPathIDs(t *testing.T) {
 	}
 	if _, ok := got[turnB]; ok {
 		t.Fatalf("path ids leaked sibling branch turn %s: %v", turnB, ids)
+	}
+}
+
+func TestSQLiteGetSessionTurnAncestorMatch(t *testing.T) {
+	ctx := context.Background()
+	conn := openPaginationDB(t, ctx)
+	botID := pageUUID(1540)
+	sessionID := pageUUID(1541)
+	turnA, turnB, turnC := seedVariantFixture(t, ctx, conn, botID, sessionID)
+	q := newPaginationQueries(t, conn)
+
+	matched, err := q.GetSessionTurnAncestorMatch(ctx, pgsqlc.GetSessionTurnAncestorMatchParams{
+		TurnID:         mustUUID(t, turnC),
+		AncestorTurnID: mustUUID(t, turnA),
+	})
+	if err != nil {
+		t.Fatalf("ancestor match: %v", err)
+	}
+	if matched.String() != turnA {
+		t.Fatalf("matched ancestor = %s, want %s", matched, turnA)
+	}
+
+	matched, err = q.GetSessionTurnAncestorMatch(ctx, pgsqlc.GetSessionTurnAncestorMatchParams{
+		TurnID:         mustUUID(t, turnC),
+		AncestorTurnID: mustUUID(t, turnC),
+	})
+	if err != nil {
+		t.Fatalf("self ancestor match: %v", err)
+	}
+	if matched.String() != turnC {
+		t.Fatalf("matched self = %s, want %s", matched, turnC)
+	}
+
+	if _, err := q.GetSessionTurnAncestorMatch(ctx, pgsqlc.GetSessionTurnAncestorMatchParams{
+		TurnID:         mustUUID(t, turnC),
+		AncestorTurnID: mustUUID(t, turnB),
+	}); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("sibling ancestor match err = %v, want sql.ErrNoRows", err)
 	}
 }
 

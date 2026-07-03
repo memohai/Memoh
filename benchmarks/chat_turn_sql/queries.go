@@ -9,6 +9,11 @@ import (
 )
 
 const (
+	queryChatPageUI               = "chat_page_ui"
+	queryLocateWindow             = "locate_window"
+	queryApprovalResolve          = "approval_resolve"
+	queryUserInputResolve         = "user_input_resolve"
+	querySSELiveFilter            = "sse_live_filter"
 	queryLatestPage               = "latest_page"
 	queryBeforePage               = "before_page"
 	queryAfterPage                = "after_page"
@@ -17,6 +22,8 @@ const (
 	queryHeadResolve              = "head_resolve"
 	queryTurnSiblings             = "turn_siblings"
 	queryTurnPath                 = "turn_path"
+	queryTurnAncestor             = "turn_ancestor"
+	queryApprovalToolCalls        = "approval_tool_calls"
 	queryApprovalPendingList      = "approval_pending_list"
 	queryApprovalGraphList        = "approval_graph_list"
 	queryApprovalLatest           = "approval_latest"
@@ -24,6 +31,7 @@ const (
 	queryApprovalVisibleRequest   = "approval_visible_request"
 	queryApprovalBaseHeadRequest  = "approval_base_head_request"
 	queryApprovalReplyMessage     = "approval_reply_message"
+	queryUserInputToolCalls       = "user_input_tool_calls"
 	queryUserInputPendingList     = "user_input_pending_list"
 	queryUserInputGraphList       = "user_input_graph_list"
 	queryUserInputLatest          = "user_input_latest"
@@ -49,6 +57,8 @@ var queryDefinitions = []QueryDefinition{
 	{Name: queryHeadResolve, SourceFile: "db/postgres/queries/messages.sql", SourceName: "ResolveSessionTurnHead", Args: []string{"session_id", "target_turn_id"}},
 	{Name: queryTurnSiblings, SourceFile: "db/postgres/queries/messages.sql", SourceName: "ListSessionTurnSiblings", Args: []string{"session_id", "turn_ids"}},
 	{Name: queryTurnPath, SourceFile: "db/postgres/queries/messages.sql", SourceName: "ListSessionTurnPathIDs", Args: []string{"head_turn_id"}},
+	{Name: queryTurnAncestor, SourceFile: "db/postgres/queries/messages.sql", SourceName: "GetSessionTurnAncestorMatch", Args: []string{"ancestor_turn_id", "turn_id"}},
+	{Name: queryApprovalToolCalls, SourceFile: "db/postgres/queries/tool_approval.sql", SourceName: "ListToolApprovalsBySessionToolCalls", Args: []string{"bot_id", "session_id", "tool_call_ids", "turn_ids"}},
 	{Name: queryApprovalPendingList, SourceFile: "db/postgres/queries/tool_approval.sql", SourceName: "ListPendingToolApprovalsBySession", Args: []string{"bot_id", "session_id"}},
 	{Name: queryApprovalGraphList, SourceFile: "db/postgres/queries/tool_approval.sql", SourceName: "ListToolApprovalsBySessionTurnGraph", Args: []string{"bot_id", "session_id"}},
 	{Name: queryApprovalLatest, SourceFile: "db/postgres/queries/tool_approval.sql", SourceName: "GetLatestPendingToolApprovalBySession", Args: []string{"bot_id", "session_id"}},
@@ -56,6 +66,7 @@ var queryDefinitions = []QueryDefinition{
 	{Name: queryApprovalVisibleRequest, SourceFile: "db/postgres/queries/tool_approval.sql", SourceName: "GetPendingToolApprovalByVisibleRequestID", Args: []string{"id", "bot_id", "session_id"}},
 	{Name: queryApprovalBaseHeadRequest, SourceFile: "db/postgres/queries/tool_approval.sql", SourceName: "GetPendingToolApprovalByBaseHeadRequestID", Args: []string{"id", "bot_id", "session_id", "base_head_turn_id"}},
 	{Name: queryApprovalReplyMessage, SourceFile: "db/postgres/queries/tool_approval.sql", SourceName: "GetPendingToolApprovalByReplyMessage", Args: []string{"bot_id", "session_id", "prompt_external_message_id"}},
+	{Name: queryUserInputToolCalls, SourceFile: "db/postgres/queries/user_input.sql", SourceName: "ListUserInputsBySessionToolCalls", Args: []string{"bot_id", "session_id", "tool_call_ids", "turn_ids"}},
 	{Name: queryUserInputPendingList, SourceFile: "db/postgres/queries/user_input.sql", SourceName: "ListPendingUserInputsBySession", Args: []string{"bot_id", "session_id"}},
 	{Name: queryUserInputGraphList, SourceFile: "db/postgres/queries/user_input.sql", SourceName: "ListUserInputsBySessionTurnGraph", Args: []string{"bot_id", "session_id"}},
 	{Name: queryUserInputLatest, SourceFile: "db/postgres/queries/user_input.sql", SourceName: "GetLatestPendingUserInputBySession", Args: []string{"bot_id", "session_id"}},
@@ -65,7 +76,16 @@ var queryDefinitions = []QueryDefinition{
 	{Name: queryUserInputReplyMessage, SourceFile: "db/postgres/queries/user_input.sql", SourceName: "GetPendingUserInputByReplyMessage", Args: []string{"bot_id", "session_id", "prompt_external_message_id"}},
 }
 
-var knownQueries = queryNames(queryDefinitions)
+var (
+	knownQueries   = queryNames(queryDefinitions)
+	knownScenarios = append([]string{
+		queryChatPageUI,
+		queryLocateWindow,
+		queryApprovalResolve,
+		queryUserInputResolve,
+		querySSELiveFilter,
+	}, knownQueries...)
+)
 
 type QuerySet map[string]string
 
@@ -110,7 +130,7 @@ func loadQueries(dir string) (QuerySet, error) {
 }
 
 func isKnownQuery(name string) bool {
-	for _, known := range knownQueries {
+	for _, known := range knownScenarios {
 		if name == known {
 			return true
 		}
@@ -124,7 +144,7 @@ func normalizeWeights(weights map[string]int) ([]WeightedQuery, error) {
 	}
 	total := 0
 	normalized := make([]WeightedQuery, 0, len(weights))
-	for _, name := range knownQueries {
+	for _, name := range knownScenarios {
 		weight := weights[name]
 		if weight <= 0 {
 			continue

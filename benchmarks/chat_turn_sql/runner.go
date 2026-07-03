@@ -213,20 +213,62 @@ func variantPathHead(cfg Config, s SessionSeed, rng *rand.Rand) uuid.UUID {
 	return s.DefaultHeadTurnID
 }
 
-func selectedCursor(s SessionSeed, rng *rand.Rand) (uuid.UUID, time.Time) {
-	if len(s.CursorMessageIDs) == 0 {
+func variantAncestorTurn(queryName string, s SessionSeed) any {
+	if s.DefaultHeadParentID == uuid.Nil {
+		return queryArgError(fmt.Sprintf("%s requires default_head_parent_turn_id in seed catalog; use turns_per_session >= 2 and reseed or reload catalog", queryName))
+	}
+	return s.DefaultHeadParentID
+}
+
+func variantDescendantTurn(queryName string, s SessionSeed) any {
+	if s.DefaultHeadTurnID == uuid.Nil {
+		return queryArgError(fmt.Sprintf("%s requires default_head_turn_id in seed catalog; reseed or reload catalog", queryName))
+	}
+	return s.DefaultHeadTurnID
+}
+
+func variantAncestorArgs(queryName string, s SessionSeed, rng *rand.Rand) (any, any) {
+	if len(s.HeadTurnIDs) > 1 && rng.IntN(10) == 0 {
+		return s.HeadTurnIDs[1], s.DefaultHeadTurnID
+	}
+	if len(s.PageTurnIDs) > 0 && rng.IntN(4) == 0 {
+		return s.PageTurnIDs[0], variantDescendantTurn(queryName, s)
+	}
+	return variantAncestorTurn(queryName, s), variantDescendantTurn(queryName, s)
+}
+
+func selectedCursorForHead(s SessionSeed, headID uuid.UUID, rng *rand.Rand) (uuid.UUID, time.Time) {
+	messageIDs := s.CursorMessageIDs
+	createdAts := s.CursorCreatedAts
+	if headID != uuid.Nil {
+		for _, cursor := range s.HeadCursors {
+			if cursor.HeadTurnID == headID {
+				messageIDs = cursor.MessageIDs
+				createdAts = cursor.MessageCreatedAts
+				break
+			}
+		}
+	}
+	if len(messageIDs) == 0 {
 		return s.LatestMessageID, time.Now().UTC()
 	}
-	idx := rng.IntN(len(s.CursorMessageIDs))
-	cursorID := s.CursorMessageIDs[idx]
+	idx := rng.IntN(len(messageIDs))
+	cursorID := messageIDs[idx]
 	var cursorTime time.Time
-	if idx < len(s.CursorCreatedAts) {
-		cursorTime = s.CursorCreatedAts[idx]
+	if idx < len(createdAts) {
+		cursorTime = createdAts[idx]
 	}
 	if cursorTime.IsZero() {
 		cursorTime = time.Now().UTC()
 	}
 	return cursorID, cursorTime
+}
+
+func selectedExternalMessageID(s SessionSeed, rng *rand.Rand) string {
+	if len(s.ExternalMessageIDs) == 0 {
+		return s.ExternalMessageID
+	}
+	return s.ExternalMessageIDs[rng.IntN(len(s.ExternalMessageIDs))]
 }
 
 type queryArgError string
@@ -278,16 +320,18 @@ func writeExplainPlans(ctx context.Context, pool *pgxpool.Pool, cfg Config, quer
 	}
 	// #nosec G404 -- deterministic pseudo-random sampling is required for repeatable explain plans.
 	explainRNG := rand.New(rand.NewPCG(cfg.Workload.RandomSeed, 1))
-	cursorID, cursorTime := selectedCursor(s, explainRNG)
+	cursorID, cursorTime := selectedCursorForHead(s, headID, explainRNG)
 	argsByQuery := map[string][]any{
 		queryLatestPage:               {s.SessionID, nilUUID(headID), cfg.Workload.PageSize},
 		queryBeforePage:               {s.SessionID, nilUUID(headID), nilUUID(cursorID), cursorTime, cfg.Workload.PageSize},
 		queryAfterPage:                {s.SessionID, nilUUID(headID), nilUUID(cursorID), cursorTime, cfg.Workload.PageSize},
-		queryExternalLookup:           {s.SessionID, nilUUID(headID), s.ExternalMessageID},
+		queryExternalLookup:           {s.SessionID, nilUUID(headID), selectedExternalMessageID(s, explainRNG)},
 		queryTurnGraph:                {s.SessionID},
 		queryHeadResolve:              {s.SessionID, variantResolveTarget(queryHeadResolve, s)},
 		queryTurnSiblings:             {s.SessionID, variantPageTurnIDs(s)},
 		queryTurnPath:                 {variantPathHead(cfg, s, explainRNG)},
+		queryTurnAncestor:             {variantAncestorTurn(queryTurnAncestor, s), variantDescendantTurn(queryTurnAncestor, s)},
+		queryApprovalToolCalls:        {s.BotID, s.SessionID, []string{s.ApprovalToolCallID}, []uuid.UUID{s.ApprovalTurnID}},
 		queryApprovalPendingList:      {s.BotID, s.SessionID},
 		queryApprovalGraphList:        {s.BotID, s.SessionID},
 		queryApprovalLatest:           {s.BotID, s.SessionID},
@@ -295,6 +339,7 @@ func writeExplainPlans(ctx context.Context, pool *pgxpool.Pool, cfg Config, quer
 		queryApprovalVisibleRequest:   {requireUUID(queryApprovalVisibleRequest, s.ApprovalRequestID), s.BotID, s.SessionID},
 		queryApprovalBaseHeadRequest:  {requireUUID(queryApprovalBaseHeadRequest, s.ApprovalBaseReqID), s.BotID, s.SessionID, requireUUID(queryApprovalBaseHeadRequest, selectedHeadForBase(s))},
 		queryApprovalReplyMessage:     {s.BotID, s.SessionID, requireText(queryApprovalReplyMessage, s.ApprovalPromptID)},
+		queryUserInputToolCalls:       {s.BotID, s.SessionID, []string{s.UserInputToolCallID}, []uuid.UUID{s.UserInputTurnID}},
 		queryUserInputPendingList:     {s.BotID, s.SessionID},
 		queryUserInputGraphList:       {s.BotID, s.SessionID},
 		queryUserInputLatest:          {s.BotID, s.SessionID},
