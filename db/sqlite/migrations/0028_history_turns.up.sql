@@ -1,6 +1,9 @@
 -- 0028_history_turns
 -- Add linear history turns for stable retry/edit replacement.
 
+ALTER TABLE bot_history_messages ADD COLUMN turn_id TEXT;
+ALTER TABLE bot_history_messages ADD COLUMN turn_message_seq INTEGER;
+
 CREATE TABLE IF NOT EXISTS bot_history_turns (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
@@ -27,6 +30,12 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_turns_assistant_message
   WHERE assistant_message_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_role_created
   ON bot_history_messages(session_id, role, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_turn
+  ON bot_history_messages(turn_id, turn_message_seq, created_at, id)
+  WHERE turn_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_messages_turn_seq_unique
+  ON bot_history_messages(turn_id, turn_message_seq)
+  WHERE turn_id IS NOT NULL AND turn_message_seq IS NOT NULL;
 
 WITH ordered AS (
   SELECT
@@ -99,14 +108,30 @@ SELECT
   created_at
 FROM positioned;
 
-DROP VIEW IF EXISTS bot_visible_history_messages;
+UPDATE bot_history_messages
+SET turn_id = (
+      SELECT t.id FROM bot_history_turns t WHERE t.request_message_id = bot_history_messages.id
+    ),
+    turn_message_seq = 1
+WHERE turn_id IS NULL
+  AND EXISTS (
+    SELECT 1 FROM bot_history_turns t WHERE t.request_message_id = bot_history_messages.id
+  );
 
-CREATE VIEW IF NOT EXISTS bot_visible_history_messages AS
+UPDATE bot_history_messages
+SET turn_id = (
+      SELECT t.id FROM bot_history_turns t WHERE t.assistant_message_id = bot_history_messages.id
+    ),
+    turn_message_seq = 2
+WHERE turn_id IS NULL
+  AND EXISTS (
+    SELECT 1 FROM bot_history_turns t WHERE t.assistant_message_id = bot_history_messages.id
+  );
+
 WITH bounded_turns AS (
   SELECT
-    t.*,
-    req.created_at AS request_created_at,
-    req.id AS request_id,
+    t.id,
+    t.session_id,
     assistant.created_at AS assistant_created_at,
     assistant.id AS assistant_id,
     LEAD(COALESCE(req.created_at, assistant.created_at)) OVER (
@@ -121,53 +146,71 @@ WITH bounded_turns AS (
   LEFT JOIN bot_history_messages req ON req.id = t.request_message_id
   LEFT JOIN bot_history_messages assistant ON assistant.id = t.assistant_message_id
 ),
-active_turns AS (
-  SELECT *
-  FROM bounded_turns
-  WHERE superseded_at IS NULL
+tail_messages AS (
+  SELECT
+    m.id AS message_id,
+    t.id AS turn_id,
+    2 + ROW_NUMBER() OVER (
+      PARTITION BY t.id
+      ORDER BY m.created_at, m.id
+    ) AS turn_message_seq
+  FROM bounded_turns t
+  JOIN bot_history_messages m
+    ON m.session_id = t.session_id
+   AND m.role IN ('assistant', 'tool')
+  WHERE t.assistant_id IS NOT NULL
+    AND m.id <> t.assistant_id
+    AND m.turn_id IS NULL
+    AND NOT EXISTS (
+      SELECT 1
+      FROM bot_history_turns anchored
+      WHERE anchored.request_message_id = m.id
+         OR anchored.assistant_message_id = m.id
+    )
+    AND (
+      m.created_at > t.assistant_created_at
+      OR (m.created_at = t.assistant_created_at AND m.id > t.assistant_id)
+    )
+    AND (
+      t.next_created_at IS NULL
+      OR m.created_at < t.next_created_at
+      OR (m.created_at = t.next_created_at AND m.id < t.next_message_id)
+    )
 )
+UPDATE bot_history_messages
+SET turn_id = (
+      SELECT tail.turn_id FROM tail_messages tail WHERE tail.message_id = bot_history_messages.id
+    ),
+    turn_message_seq = (
+      SELECT tail.turn_message_seq FROM tail_messages tail WHERE tail.message_id = bot_history_messages.id
+    )
+WHERE id IN (SELECT message_id FROM tail_messages);
+
+DROP VIEW IF EXISTS bot_visible_history_messages;
+
+CREATE VIEW IF NOT EXISTS bot_visible_history_messages AS
 SELECT
   t.id AS turn_id,
   t.position AS turn_position,
-  1 AS turn_message_seq,
-  m.*
-FROM active_turns t
-JOIN bot_history_messages m ON m.id = t.request_message_id
-UNION ALL
-SELECT
-  t.id AS turn_id,
-  t.position AS turn_position,
-  2 AS turn_message_seq,
-  m.*
-FROM active_turns t
-JOIN bot_history_messages m ON m.id = t.assistant_message_id
-UNION ALL
-SELECT
-  t.id AS turn_id,
-  t.position AS turn_position,
-  2 + ROW_NUMBER() OVER (
-    PARTITION BY t.id
-    ORDER BY m.created_at, m.id
-  ) AS turn_message_seq,
-  m.*
-FROM active_turns t
-JOIN bot_history_messages m
-  ON m.session_id = t.session_id
- AND m.role IN ('assistant', 'tool')
-WHERE t.assistant_message_id IS NOT NULL
-  AND m.id <> t.assistant_message_id
-  AND NOT EXISTS (
-    SELECT 1
-    FROM bot_history_turns anchored
-    WHERE anchored.request_message_id = m.id
-       OR anchored.assistant_message_id = m.id
-  )
-  AND (
-    m.created_at > t.assistant_created_at
-    OR (m.created_at = t.assistant_created_at AND m.id > t.assistant_id)
-  )
-  AND (
-    t.next_created_at IS NULL
-    OR m.created_at < t.next_created_at
-    OR (m.created_at = t.next_created_at AND m.id < t.next_message_id)
-  );
+  m.turn_message_seq,
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id,
+  m.source_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.compact_id,
+  m.session_mode,
+  m.runtime_type,
+  m.model_id,
+  m.event_id,
+  m.display_text,
+  m.created_at
+FROM bot_history_messages m
+JOIN bot_history_turns t ON t.id = m.turn_id
+WHERE t.superseded_at IS NULL;

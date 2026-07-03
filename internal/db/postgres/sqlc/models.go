@@ -158,6 +158,8 @@ type BotHistoryMessage struct {
 	CompactID               pgtype.UUID        `json:"compact_id"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
+	TurnID                  pgtype.UUID        `json:"turn_id"`
+	TurnMessageSeq          pgtype.Int8        `json:"turn_message_seq"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -289,7 +291,7 @@ type BotUserGrant struct {
 type BotVisibleHistoryMessage struct {
 	TurnID                  pgtype.UUID        `json:"turn_id"`
 	TurnPosition            int64              `json:"turn_position"`
-	TurnMessageSeq          int64              `json:"turn_message_seq"`
+	TurnMessageSeq          pgtype.Int8        `json:"turn_message_seq"`
 	ID                      pgtype.UUID        `json:"id"`
 	BotID                   pgtype.UUID        `json:"bot_id"`
 	SessionID               pgtype.UUID        `json:"session_id"`
@@ -301,10 +303,10 @@ type BotVisibleHistoryMessage struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
+	CompactID               pgtype.UUID        `json:"compact_id"`
 	SessionMode             string             `json:"session_mode"`
 	RuntimeType             string             `json:"runtime_type"`
 	ModelID                 pgtype.UUID        `json:"model_id"`
-	CompactID               pgtype.UUID        `json:"compact_id"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`

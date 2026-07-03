@@ -46,6 +46,8 @@ CREATE TABLE bot_history_messages (
   runtime_type TEXT NOT NULL DEFAULT 'model',
   event_id TEXT,
   display_text TEXT,
+  turn_id TEXT,
+  turn_message_seq INTEGER,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE bot_history_turns (
@@ -63,62 +65,14 @@ CREATE TABLE bot_history_turns (
   UNIQUE (session_id, position)
 );
 CREATE VIEW bot_visible_history_messages AS
-WITH bounded_turns AS (
-  SELECT
-    t.*,
-    assistant.created_at AS assistant_created_at,
-    assistant.id AS assistant_id,
-    LEAD(COALESCE(req.created_at, assistant.created_at)) OVER (
-      PARTITION BY t.session_id
-      ORDER BY t.position
-    ) AS next_created_at,
-    LEAD(COALESCE(req.id, assistant.id)) OVER (
-      PARTITION BY t.session_id
-      ORDER BY t.position
-    ) AS next_message_id
-  FROM bot_history_turns t
-  LEFT JOIN bot_history_messages req ON req.id = t.request_message_id
-  LEFT JOIN bot_history_messages assistant ON assistant.id = t.assistant_message_id
-),
-active_turns AS (
-  SELECT *
-  FROM bounded_turns
-  WHERE superseded_at IS NULL
-)
-SELECT t.id AS turn_id, t.position AS turn_position, 1 AS turn_message_seq, m.*
-FROM active_turns t
-JOIN bot_history_messages m ON m.id = t.request_message_id
-UNION ALL
-SELECT t.id AS turn_id, t.position AS turn_position, 2 AS turn_message_seq, m.*
-FROM active_turns t
-JOIN bot_history_messages m ON m.id = t.assistant_message_id
-UNION ALL
 SELECT
   t.id AS turn_id,
   t.position AS turn_position,
-  2 + ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY m.created_at, m.id) AS turn_message_seq,
+  m.turn_message_seq,
   m.*
-FROM active_turns t
-JOIN bot_history_messages m
-  ON m.session_id = t.session_id
- AND m.role IN ('assistant', 'tool')
-WHERE t.assistant_message_id IS NOT NULL
-  AND m.id <> t.assistant_message_id
-  AND NOT EXISTS (
-    SELECT 1
-    FROM bot_history_turns anchored
-    WHERE anchored.request_message_id = m.id
-       OR anchored.assistant_message_id = m.id
-  )
-  AND (
-    m.created_at > t.assistant_created_at
-    OR (m.created_at = t.assistant_created_at AND m.id > t.assistant_id)
-  )
-  AND (
-    t.next_created_at IS NULL
-    OR m.created_at < t.next_created_at
-    OR (m.created_at = t.next_created_at AND m.id < t.next_message_id)
-  );
+FROM bot_history_messages m
+JOIN bot_history_turns t ON t.id = m.turn_id
+WHERE t.superseded_at IS NULL;
 `)
 
 	botID := "00000000-0000-0000-0000-000000002001"
@@ -135,13 +89,15 @@ WHERE t.assistant_message_id IS NOT NULL
 		{"00000000-0000-0000-0000-000000002004", "assistant", `{"role":"assistant","content":"hi"}`},
 	} {
 		_, err := conn.ExecContext(ctx, `
-INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, created_at)
-VALUES (?, ?, ?, ?, ?, ?)`,
+INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, turn_id, turn_message_seq, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			item.id,
 			botID,
 			sessionID,
 			item.role,
 			item.content,
+			"00000000-0000-0000-0000-000000002005",
+			map[string]int{"user": 1, "assistant": 2}[item.role],
 			"2026-06-13 19:53:50",
 		)
 		if err != nil {

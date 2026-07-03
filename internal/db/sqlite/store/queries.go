@@ -4140,6 +4140,39 @@ func (q *Queries) BindLatestHistoryTurnAssistant(ctx context.Context, arg pgsqlc
 	return result, nil
 }
 
+func (q *Queries) LinkMessageToHistoryTurn(ctx context.Context, arg pgsqlc.LinkMessageToHistoryTurnParams) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.LinkMessageToHistoryTurnParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return err
+	}
+	return mapQueryErr(q.store.queries.LinkMessageToHistoryTurn(ctx, sqliteArg))
+}
+
+func (q *Queries) AppendMessageToLatestHistoryTurn(ctx context.Context, arg pgsqlc.AppendMessageToLatestHistoryTurnParams) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.AppendMessageToLatestHistoryTurnParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return err
+	}
+	return mapQueryErr(q.store.queries.AppendMessageToLatestHistoryTurn(ctx, sqliteArg))
+}
+
+func (q *Queries) LinkUnassignedMessagesAfterHistoryTurnAssistant(ctx context.Context, turnID pgtype.UUID) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	var sqliteTurnID string
+	if err := convertValue(turnID, &sqliteTurnID); err != nil {
+		return err
+	}
+	return mapQueryErr(q.store.queries.LinkUnassignedMessagesAfterHistoryTurnAssistant(ctx, sqliteTurnID))
+}
+
 func (q *Queries) GetVisibleHistoryTurnByMessage(ctx context.Context, arg pgsqlc.GetVisibleHistoryTurnByMessageParams) (pgsqlc.BotHistoryTurn, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgsqlc.BotHistoryTurn{}, errSQLiteQueriesNotConfigured

@@ -56,6 +56,18 @@ func (*runtimeSnapshotQueries) GetLatestVisibleHistoryTurnBySession(context.Cont
 	return sqlc.BotHistoryTurn{}, nil
 }
 
+func (*runtimeSnapshotQueries) LinkMessageToHistoryTurn(context.Context, sqlc.LinkMessageToHistoryTurnParams) error {
+	return nil
+}
+
+func (*runtimeSnapshotQueries) AppendMessageToLatestHistoryTurn(context.Context, sqlc.AppendMessageToLatestHistoryTurnParams) error {
+	return nil
+}
+
+func (*runtimeSnapshotQueries) LinkUnassignedMessagesAfterHistoryTurnAssistant(context.Context, pgtype.UUID) error {
+	return nil
+}
+
 func TestPersistResolvesRuntimeSnapshotFromSession(t *testing.T) {
 	queries := &runtimeSnapshotQueries{}
 	svc := NewService(nil, queries)
@@ -119,6 +131,18 @@ func (*failingHistoryTurnQueries) BindLatestHistoryTurnAssistant(context.Context
 
 func (*failingHistoryTurnQueries) GetLatestVisibleHistoryTurnBySession(context.Context, pgtype.UUID) (sqlc.BotHistoryTurn, error) {
 	return sqlc.BotHistoryTurn{}, nil
+}
+
+func (*failingHistoryTurnQueries) LinkMessageToHistoryTurn(context.Context, sqlc.LinkMessageToHistoryTurnParams) error {
+	return nil
+}
+
+func (*failingHistoryTurnQueries) AppendMessageToLatestHistoryTurn(context.Context, sqlc.AppendMessageToLatestHistoryTurnParams) error {
+	return nil
+}
+
+func (*failingHistoryTurnQueries) LinkUnassignedMessagesAfterHistoryTurnAssistant(context.Context, pgtype.UUID) error {
+	return nil
 }
 
 func (q *failingHistoryTurnQueries) DeleteMessagesByIDs(_ context.Context, ids []pgtype.UUID) error {

@@ -30,6 +30,8 @@ type historyTurnWriter interface {
 	CreateHistoryTurn(ctx context.Context, arg sqlc.CreateHistoryTurnParams) (sqlc.BotHistoryTurn, error)
 	BindLatestHistoryTurnAssistant(ctx context.Context, arg sqlc.BindLatestHistoryTurnAssistantParams) (sqlc.BotHistoryTurn, error)
 	GetLatestVisibleHistoryTurnBySession(ctx context.Context, sessionID pgtype.UUID) (sqlc.BotHistoryTurn, error)
+	LinkMessageToHistoryTurn(ctx context.Context, arg sqlc.LinkMessageToHistoryTurnParams) error
+	AppendMessageToLatestHistoryTurn(ctx context.Context, arg sqlc.AppendMessageToLatestHistoryTurnParams) error
 }
 
 type messageCleanupQueries interface {
@@ -197,33 +199,69 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, s
 	}
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case "user":
-		if _, err := writer.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
+		turn, err := writer.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
 			BotID:            botID,
 			SessionID:        sessionID,
 			RequestMessageID: messageID,
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("create history turn: %w", err)
 		}
+		if err := writer.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
+			MessageID:      messageID,
+			TurnID:         turn.ID,
+			TurnMessageSeq: pgtype.Int8{Int64: 1, Valid: true},
+		}); err != nil {
+			return fmt.Errorf("link user message to history turn: %w", err)
+		}
 	case "assistant":
-		if _, err := writer.BindLatestHistoryTurnAssistant(ctx, sqlc.BindLatestHistoryTurnAssistantParams{
+		if turn, err := writer.BindLatestHistoryTurnAssistant(ctx, sqlc.BindLatestHistoryTurnAssistantParams{
 			SessionID:          sessionID,
 			AssistantMessageID: messageID,
 		}); err == nil {
+			if err := writer.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
+				MessageID:      messageID,
+				TurnID:         turn.ID,
+				TurnMessageSeq: pgtype.Int8{Int64: 2, Valid: true},
+			}); err != nil {
+				return fmt.Errorf("link assistant message to history turn: %w", err)
+			}
 			return nil
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("bind history turn assistant: %w", err)
 		}
 		if _, err := writer.GetLatestVisibleHistoryTurnBySession(ctx, sessionID); err == nil {
+			if err := writer.AppendMessageToLatestHistoryTurn(ctx, sqlc.AppendMessageToLatestHistoryTurnParams{
+				SessionID: sessionID,
+				MessageID: messageID,
+			}); err != nil {
+				return fmt.Errorf("append assistant message to latest history turn: %w", err)
+			}
 			return nil
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("load latest history turn for assistant: %w", err)
 		}
-		if _, err := writer.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
+		turn, err := writer.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
 			BotID:              botID,
 			SessionID:          sessionID,
 			AssistantMessageID: messageID,
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("create orphan assistant history turn: %w", err)
+		}
+		if err := writer.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
+			MessageID:      messageID,
+			TurnID:         turn.ID,
+			TurnMessageSeq: pgtype.Int8{Int64: 2, Valid: true},
+		}); err != nil {
+			return fmt.Errorf("link orphan assistant message to history turn: %w", err)
+		}
+	case "tool":
+		if err := writer.AppendMessageToLatestHistoryTurn(ctx, sqlc.AppendMessageToLatestHistoryTurnParams{
+			SessionID: sessionID,
+			MessageID: messageID,
+		}); err != nil {
+			return fmt.Errorf("append tool message to latest history turn: %w", err)
 		}
 	}
 	return nil
@@ -671,6 +709,27 @@ func (s *DBService) ReplaceTurn(ctx context.Context, sessionID string, oldTurnID
 	})
 	if err != nil {
 		return HistoryTurn{}, err
+	}
+	if pgRequestMessageID.Valid {
+		if err := s.queries.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
+			MessageID:      pgRequestMessageID,
+			TurnID:         row.ID,
+			TurnMessageSeq: pgtype.Int8{Int64: 1, Valid: true},
+		}); err != nil {
+			return HistoryTurn{}, fmt.Errorf("link replacement request message: %w", err)
+		}
+	}
+	if pgAssistantMessageID.Valid {
+		if err := s.queries.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
+			MessageID:      pgAssistantMessageID,
+			TurnID:         row.ID,
+			TurnMessageSeq: pgtype.Int8{Int64: 2, Valid: true},
+		}); err != nil {
+			return HistoryTurn{}, fmt.Errorf("link replacement assistant message: %w", err)
+		}
+		if err := s.queries.LinkUnassignedMessagesAfterHistoryTurnAssistant(ctx, row.ID); err != nil {
+			return HistoryTurn{}, fmt.Errorf("link replacement tail messages: %w", err)
+		}
 	}
 	return toHistoryTurnFromReplaceRow(row), nil
 }

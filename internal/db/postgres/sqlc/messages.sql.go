@@ -11,6 +11,38 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const appendMessageToLatestHistoryTurn = `-- name: AppendMessageToLatestHistoryTurn :exec
+WITH latest AS (
+  SELECT turns.id, turns.session_id
+  FROM bot_history_turns turns
+  WHERE turns.session_id = $2
+    AND turns.superseded_at IS NULL
+  ORDER BY turns.position DESC
+  LIMIT 1
+)
+UPDATE bot_history_messages m
+SET turn_id = latest.id,
+    turn_message_seq = COALESCE((
+      SELECT MAX(existing.turn_message_seq) + 1
+      FROM bot_history_messages existing
+      WHERE existing.turn_id = latest.id
+    ), 1)
+FROM latest
+WHERE m.id = $1
+  AND m.session_id = latest.session_id
+  AND m.turn_id IS NULL
+`
+
+type AppendMessageToLatestHistoryTurnParams struct {
+	MessageID pgtype.UUID `json:"message_id"`
+	SessionID pgtype.UUID `json:"session_id"`
+}
+
+func (q *Queries) AppendMessageToLatestHistoryTurn(ctx context.Context, arg AppendMessageToLatestHistoryTurnParams) error {
+	_, err := q.db.Exec(ctx, appendMessageToLatestHistoryTurn, arg.MessageID, arg.SessionID)
+	return err
+}
+
 const bindHistoryTurnAssistantByRequest = `-- name: BindHistoryTurnAssistantByRequest :one
 UPDATE bot_history_turns
 SET assistant_message_id = $1,
@@ -402,15 +434,13 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-JOIN bot_history_turns t
-  ON t.session_id = m.session_id
- AND t.superseded_at IS NULL
- AND (t.request_message_id = m.id OR t.assistant_message_id = m.id)
+JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = $1
+  AND t.session_id = $1
   AND m.source_message_id = $2
-ORDER BY t.position DESC, m.created_at DESC, m.id DESC
+ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT 1
 `
 
@@ -490,13 +520,11 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-JOIN bot_history_turns t
-  ON t.session_id = m.session_id
- AND t.superseded_at IS NULL
- AND (t.request_message_id = m.id OR t.assistant_message_id = m.id)
+JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = $1
+  AND t.session_id = $1
   AND m.id = $2
 LIMIT 1
 `
@@ -563,7 +591,7 @@ WHERE t.session_id = $1
   AND t.superseded_at IS NULL
   AND EXISTS (
     SELECT 1
-    FROM bot_visible_history_messages m
+    FROM bot_history_messages m
     WHERE m.turn_id = t.id
       AND m.id = $2
 )
@@ -592,6 +620,56 @@ func (q *Queries) GetVisibleHistoryTurnByMessage(ctx context.Context, arg GetVis
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const linkMessageToHistoryTurn = `-- name: LinkMessageToHistoryTurn :exec
+UPDATE bot_history_messages
+SET turn_id = $1,
+    turn_message_seq = $2
+WHERE id = $3
+`
+
+type LinkMessageToHistoryTurnParams struct {
+	TurnID         pgtype.UUID `json:"turn_id"`
+	TurnMessageSeq pgtype.Int8 `json:"turn_message_seq"`
+	MessageID      pgtype.UUID `json:"message_id"`
+}
+
+func (q *Queries) LinkMessageToHistoryTurn(ctx context.Context, arg LinkMessageToHistoryTurnParams) error {
+	_, err := q.db.Exec(ctx, linkMessageToHistoryTurn, arg.TurnID, arg.TurnMessageSeq, arg.MessageID)
+	return err
+}
+
+const linkUnassignedMessagesAfterHistoryTurnAssistant = `-- name: LinkUnassignedMessagesAfterHistoryTurnAssistant :exec
+WITH target AS (
+  SELECT t.id AS turn_id, t.session_id, assistant.created_at AS assistant_created_at, assistant.id AS assistant_id
+  FROM bot_history_turns t
+  JOIN bot_history_messages assistant ON assistant.id = t.assistant_message_id
+  WHERE t.id = $1
+),
+tail AS (
+  SELECT
+    m.id AS message_id,
+    target.turn_id,
+    2 + ROW_NUMBER() OVER (ORDER BY m.created_at, m.id) AS turn_message_seq
+  FROM target
+  JOIN bot_history_messages m
+    ON m.session_id = target.session_id
+   AND m.role IN ('assistant', 'tool')
+  WHERE m.id <> target.assistant_id
+    AND m.turn_id IS NULL
+    AND (m.created_at, m.id) > (target.assistant_created_at, target.assistant_id)
+)
+UPDATE bot_history_messages m
+SET turn_id = tail.turn_id,
+    turn_message_seq = tail.turn_message_seq
+FROM tail
+WHERE m.id = tail.message_id
+`
+
+func (q *Queries) LinkUnassignedMessagesAfterHistoryTurnAssistant(ctx context.Context, turnID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, linkUnassignedMessagesAfterHistoryTurnAssistant, turnID)
+	return err
 }
 
 const listActiveMessagesSince = `-- name: ListActiveMessagesSince :many
@@ -886,64 +964,6 @@ func (q *Queries) ListMessages(ctx context.Context, botID pgtype.UUID) ([]ListMe
 }
 
 const listMessagesAfterBySession = `-- name: ListMessagesAfterBySession :many
-WITH candidate_turns AS (
-  SELECT t.id, t.bot_id, t.session_id, t.position, t.request_message_id, t.assistant_message_id, t.superseded_by_turn_id, t.superseded_at, t.superseded_reason, t.created_at, t.updated_at
-  FROM bot_history_turns t
-  LEFT JOIN bot_history_messages req ON req.id = t.request_message_id
-  LEFT JOIN bot_history_messages assistant ON assistant.id = t.assistant_message_id
-  WHERE t.session_id = $1
-    AND t.superseded_at IS NULL
-    AND COALESCE(req.created_at, assistant.created_at) > $2
-  ORDER BY t.position ASC
-  LIMIT $3 + 2
-),
-session_turns AS (
-  SELECT
-    t.id, t.bot_id, t.session_id, t.position, t.request_message_id, t.assistant_message_id, t.superseded_by_turn_id, t.superseded_at, t.superseded_reason, t.created_at, t.updated_at,
-    assistant.created_at AS assistant_created_at,
-    assistant.id AS assistant_id,
-    LEAD(COALESCE(req.created_at, assistant.created_at)) OVER (
-      ORDER BY t.position
-    ) AS next_created_at,
-    LEAD(COALESCE(req.id, assistant.id)) OVER (
-      ORDER BY t.position
-    ) AS next_message_id
-  FROM candidate_turns t
-  LEFT JOIN bot_history_messages req ON req.id = t.request_message_id
-  LEFT JOIN bot_history_messages assistant ON assistant.id = t.assistant_message_id
-),
-visible_messages AS (
-  SELECT t.id AS turn_id, t.position AS turn_position, 1::BIGINT AS turn_message_seq, m.id, m.bot_id, m.session_id, m.sender_channel_identity_id, m.sender_account_user_id, m.source_message_id, m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage, m.session_mode, m.runtime_type, m.event_id, m.display_text, m.created_at
-  FROM session_turns t
-  JOIN bot_history_messages m ON m.id = t.request_message_id
-  UNION ALL
-  SELECT t.id AS turn_id, t.position AS turn_position, 2::BIGINT AS turn_message_seq, m.id, m.bot_id, m.session_id, m.sender_channel_identity_id, m.sender_account_user_id, m.source_message_id, m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage, m.session_mode, m.runtime_type, m.event_id, m.display_text, m.created_at
-  FROM session_turns t
-  JOIN bot_history_messages m ON m.id = t.assistant_message_id
-  UNION ALL
-  SELECT
-    t.id AS turn_id,
-    t.position AS turn_position,
-    2 + ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY m.created_at, m.id) AS turn_message_seq,
-    m.id, m.bot_id, m.session_id, m.sender_channel_identity_id, m.sender_account_user_id, m.source_message_id, m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage, m.session_mode, m.runtime_type, m.event_id, m.display_text, m.created_at
-  FROM session_turns t
-  JOIN bot_history_messages m
-    ON m.session_id = t.session_id
-   AND m.role IN ('assistant', 'tool')
-  WHERE t.assistant_message_id IS NOT NULL
-    AND m.id <> t.assistant_message_id
-    AND NOT EXISTS (
-      SELECT 1
-      FROM bot_history_turns anchored
-      WHERE anchored.session_id = t.session_id
-        AND (anchored.request_message_id = m.id OR anchored.assistant_message_id = m.id)
-    )
-    AND (m.created_at, m.id) > (t.assistant_created_at, t.assistant_id)
-    AND (
-      t.next_created_at IS NULL
-      OR (m.created_at, m.id) < (t.next_created_at, t.next_message_id)
-    )
-)
 SELECT
   m.id,
   m.bot_id,
@@ -964,12 +984,14 @@ SELECT
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
-FROM visible_messages m
+FROM bot_history_messages m
+JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = $1
+  AND t.session_id = $1
   AND m.created_at > $2
-ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+ORDER BY t.position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 LIMIT $3
 `
 
@@ -1042,123 +1064,13 @@ func (q *Queries) ListMessagesAfterBySession(ctx context.Context, arg ListMessag
 }
 
 const listMessagesAfterMessageBySession = `-- name: ListMessagesAfterMessageBySession :many
-WITH cursor_turn AS (
-  SELECT t.position
-  FROM bot_history_turns t
-  WHERE t.session_id = $1
-    AND t.superseded_at IS NULL
-    AND (t.request_message_id = $3 OR t.assistant_message_id = $3)
-  LIMIT 1
-),
-candidate_turns AS (
-  SELECT t.id, t.bot_id, t.session_id, t.position, t.request_message_id, t.assistant_message_id, t.superseded_by_turn_id, t.superseded_at, t.superseded_reason, t.created_at, t.updated_at
-  FROM bot_history_turns t
-  CROSS JOIN cursor_turn cursor
-  WHERE t.session_id = $1
-    AND t.superseded_at IS NULL
-    AND t.position >= cursor.position
-  ORDER BY t.position ASC
-  LIMIT $2 + 2
-),
-session_turns AS (
-  SELECT
-    t.id, t.bot_id, t.session_id, t.position, t.request_message_id, t.assistant_message_id, t.superseded_by_turn_id, t.superseded_at, t.superseded_reason, t.created_at, t.updated_at,
-    assistant.created_at AS assistant_created_at,
-    assistant.id AS assistant_id,
-    LEAD(COALESCE(req.created_at, assistant.created_at)) OVER (
-      ORDER BY t.position
-    ) AS next_created_at,
-    LEAD(COALESCE(req.id, assistant.id)) OVER (
-      ORDER BY t.position
-    ) AS next_message_id
-  FROM candidate_turns t
-  LEFT JOIN bot_history_messages req ON req.id = t.request_message_id
-  LEFT JOIN bot_history_messages assistant ON assistant.id = t.assistant_message_id
-),
-visible_messages AS (
-  SELECT t.id AS turn_id, t.position AS turn_position, 1::BIGINT AS turn_message_seq, m.id, m.bot_id, m.session_id, m.sender_channel_identity_id, m.sender_account_user_id, m.source_message_id, m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage, m.session_mode, m.runtime_type, m.event_id, m.display_text, m.created_at
-  FROM session_turns t
-  JOIN bot_history_messages m ON m.id = t.request_message_id
-  UNION ALL
-  SELECT t.id AS turn_id, t.position AS turn_position, 2::BIGINT AS turn_message_seq, m.id, m.bot_id, m.session_id, m.sender_channel_identity_id, m.sender_account_user_id, m.source_message_id, m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage, m.session_mode, m.runtime_type, m.event_id, m.display_text, m.created_at
-  FROM session_turns t
-  JOIN bot_history_messages m ON m.id = t.assistant_message_id
-  UNION ALL
-  SELECT
-    t.id AS turn_id,
-    t.position AS turn_position,
-    2 + ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY m.created_at, m.id) AS turn_message_seq,
-    m.id, m.bot_id, m.session_id, m.sender_channel_identity_id, m.sender_account_user_id, m.source_message_id, m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage, m.session_mode, m.runtime_type, m.event_id, m.display_text, m.created_at
-  FROM session_turns t
-  JOIN bot_history_messages m
-    ON m.session_id = t.session_id
-   AND m.role IN ('assistant', 'tool')
-  WHERE t.assistant_message_id IS NOT NULL
-    AND m.id <> t.assistant_message_id
-    AND NOT EXISTS (
-      SELECT 1
-      FROM bot_history_turns anchored
-      WHERE anchored.session_id = t.session_id
-        AND (anchored.request_message_id = m.id OR anchored.assistant_message_id = m.id)
-    )
-    AND (m.created_at, m.id) > (t.assistant_created_at, t.assistant_id)
-    AND (
-      t.next_created_at IS NULL
-      OR (m.created_at, m.id) < (t.next_created_at, t.next_message_id)
-    )
-),
-cursor_message AS (
-  SELECT
-    t.position AS turn_position,
-    CASE
-      WHEN t.request_message_id = $3 THEN 1::BIGINT
-      WHEN t.assistant_message_id = $3 THEN 2::BIGINT
-      ELSE 2 + (
-        SELECT COUNT(*)
-        FROM bot_history_messages prior
-        WHERE prior.session_id = t.session_id
-          AND prior.role IN ('assistant', 'tool')
-          AND prior.id <> t.assistant_message_id
-          AND NOT EXISTS (
-            SELECT 1
-            FROM bot_history_turns anchored
-            WHERE anchored.session_id = t.session_id
-              AND (anchored.request_message_id = prior.id OR anchored.assistant_message_id = prior.id)
-          )
-          AND (prior.created_at, prior.id) > (t.assistant_created_at, t.assistant_id)
-          AND (prior.created_at, prior.id) <= (m.created_at, m.id)
-          AND (
-            t.next_created_at IS NULL
-            OR (prior.created_at, prior.id) < (t.next_created_at, t.next_message_id)
-          )
-      )
-    END AS turn_message_seq,
-    m.created_at,
-    m.id
-  FROM session_turns t
-  JOIN bot_history_messages m
-    ON m.id = $3
-   AND (
-    m.id = t.request_message_id
-    OR m.id = t.assistant_message_id
-    OR (
-      t.assistant_message_id IS NOT NULL
-      AND m.session_id = t.session_id
-      AND m.role IN ('assistant', 'tool')
-      AND m.id <> t.assistant_message_id
-      AND NOT EXISTS (
-        SELECT 1
-        FROM bot_history_turns anchored
-        WHERE anchored.session_id = t.session_id
-          AND (anchored.request_message_id = m.id OR anchored.assistant_message_id = m.id)
-      )
-      AND (m.created_at, m.id) > (t.assistant_created_at, t.assistant_id)
-      AND (
-        t.next_created_at IS NULL
-        OR (m.created_at, m.id) < (t.next_created_at, t.next_message_id)
-      )
-    )
-   )
+WITH cursor_message AS (
+  SELECT t.position AS turn_position, m.turn_message_seq, m.created_at, m.id
+  FROM bot_history_messages m
+  JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
+  WHERE m.session_id = $1
+    AND t.session_id = $1
+    AND m.id = $3
   LIMIT 1
 )
 SELECT
@@ -1181,14 +1093,16 @@ SELECT
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
-FROM visible_messages m
+FROM bot_history_messages m
+JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
 CROSS JOIN cursor_message cursor
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = $1
-  AND (m.turn_position, m.turn_message_seq, m.created_at, m.id)
+  AND t.session_id = $1
+  AND (t.position, m.turn_message_seq, m.created_at, m.id)
     > (cursor.turn_position, cursor.turn_message_seq, cursor.created_at, cursor.id)
-ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+ORDER BY t.position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 LIMIT $2
 `
 
@@ -1359,64 +1273,6 @@ func (q *Queries) ListMessagesBefore(ctx context.Context, arg ListMessagesBefore
 }
 
 const listMessagesBeforeBySession = `-- name: ListMessagesBeforeBySession :many
-WITH candidate_turns AS (
-  SELECT t.id, t.bot_id, t.session_id, t.position, t.request_message_id, t.assistant_message_id, t.superseded_by_turn_id, t.superseded_at, t.superseded_reason, t.created_at, t.updated_at
-  FROM bot_history_turns t
-  LEFT JOIN bot_history_messages req ON req.id = t.request_message_id
-  LEFT JOIN bot_history_messages assistant ON assistant.id = t.assistant_message_id
-  WHERE t.session_id = $1
-    AND t.superseded_at IS NULL
-    AND COALESCE(req.created_at, assistant.created_at) < $2
-  ORDER BY t.position DESC
-  LIMIT $3 + 2
-),
-session_turns AS (
-  SELECT
-    t.id, t.bot_id, t.session_id, t.position, t.request_message_id, t.assistant_message_id, t.superseded_by_turn_id, t.superseded_at, t.superseded_reason, t.created_at, t.updated_at,
-    assistant.created_at AS assistant_created_at,
-    assistant.id AS assistant_id,
-    LEAD(COALESCE(req.created_at, assistant.created_at)) OVER (
-      ORDER BY t.position
-    ) AS next_created_at,
-    LEAD(COALESCE(req.id, assistant.id)) OVER (
-      ORDER BY t.position
-    ) AS next_message_id
-  FROM candidate_turns t
-  LEFT JOIN bot_history_messages req ON req.id = t.request_message_id
-  LEFT JOIN bot_history_messages assistant ON assistant.id = t.assistant_message_id
-),
-visible_messages AS (
-  SELECT t.id AS turn_id, t.position AS turn_position, 1::BIGINT AS turn_message_seq, m.id, m.bot_id, m.session_id, m.sender_channel_identity_id, m.sender_account_user_id, m.source_message_id, m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage, m.session_mode, m.runtime_type, m.event_id, m.display_text, m.created_at
-  FROM session_turns t
-  JOIN bot_history_messages m ON m.id = t.request_message_id
-  UNION ALL
-  SELECT t.id AS turn_id, t.position AS turn_position, 2::BIGINT AS turn_message_seq, m.id, m.bot_id, m.session_id, m.sender_channel_identity_id, m.sender_account_user_id, m.source_message_id, m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage, m.session_mode, m.runtime_type, m.event_id, m.display_text, m.created_at
-  FROM session_turns t
-  JOIN bot_history_messages m ON m.id = t.assistant_message_id
-  UNION ALL
-  SELECT
-    t.id AS turn_id,
-    t.position AS turn_position,
-    2 + ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY m.created_at, m.id) AS turn_message_seq,
-    m.id, m.bot_id, m.session_id, m.sender_channel_identity_id, m.sender_account_user_id, m.source_message_id, m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage, m.session_mode, m.runtime_type, m.event_id, m.display_text, m.created_at
-  FROM session_turns t
-  JOIN bot_history_messages m
-    ON m.session_id = t.session_id
-   AND m.role IN ('assistant', 'tool')
-  WHERE t.assistant_message_id IS NOT NULL
-    AND m.id <> t.assistant_message_id
-    AND NOT EXISTS (
-      SELECT 1
-      FROM bot_history_turns anchored
-      WHERE anchored.session_id = t.session_id
-        AND (anchored.request_message_id = m.id OR anchored.assistant_message_id = m.id)
-    )
-    AND (m.created_at, m.id) > (t.assistant_created_at, t.assistant_id)
-    AND (
-      t.next_created_at IS NULL
-      OR (m.created_at, m.id) < (t.next_created_at, t.next_message_id)
-    )
-)
 SELECT
   m.id,
   m.bot_id,
@@ -1437,12 +1293,14 @@ SELECT
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
-FROM visible_messages m
+FROM bot_history_messages m
+JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = $1
+  AND t.session_id = $1
   AND m.created_at < $2
-ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT $3
 `
 
@@ -1515,123 +1373,13 @@ func (q *Queries) ListMessagesBeforeBySession(ctx context.Context, arg ListMessa
 }
 
 const listMessagesBeforeMessageBySession = `-- name: ListMessagesBeforeMessageBySession :many
-WITH cursor_turn AS (
-  SELECT t.position
-  FROM bot_history_turns t
-  WHERE t.session_id = $1
-    AND t.superseded_at IS NULL
-    AND (t.request_message_id = $3 OR t.assistant_message_id = $3)
-  LIMIT 1
-),
-candidate_turns AS (
-  SELECT t.id, t.bot_id, t.session_id, t.position, t.request_message_id, t.assistant_message_id, t.superseded_by_turn_id, t.superseded_at, t.superseded_reason, t.created_at, t.updated_at
-  FROM bot_history_turns t
-  CROSS JOIN cursor_turn cursor
-  WHERE t.session_id = $1
-    AND t.superseded_at IS NULL
-    AND t.position <= cursor.position
-  ORDER BY t.position DESC
-  LIMIT $2 + 2
-),
-session_turns AS (
-  SELECT
-    t.id, t.bot_id, t.session_id, t.position, t.request_message_id, t.assistant_message_id, t.superseded_by_turn_id, t.superseded_at, t.superseded_reason, t.created_at, t.updated_at,
-    assistant.created_at AS assistant_created_at,
-    assistant.id AS assistant_id,
-    LEAD(COALESCE(req.created_at, assistant.created_at)) OVER (
-      ORDER BY t.position
-    ) AS next_created_at,
-    LEAD(COALESCE(req.id, assistant.id)) OVER (
-      ORDER BY t.position
-    ) AS next_message_id
-  FROM candidate_turns t
-  LEFT JOIN bot_history_messages req ON req.id = t.request_message_id
-  LEFT JOIN bot_history_messages assistant ON assistant.id = t.assistant_message_id
-),
-visible_messages AS (
-  SELECT t.id AS turn_id, t.position AS turn_position, 1::BIGINT AS turn_message_seq, m.id, m.bot_id, m.session_id, m.sender_channel_identity_id, m.sender_account_user_id, m.source_message_id, m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage, m.session_mode, m.runtime_type, m.event_id, m.display_text, m.created_at
-  FROM session_turns t
-  JOIN bot_history_messages m ON m.id = t.request_message_id
-  UNION ALL
-  SELECT t.id AS turn_id, t.position AS turn_position, 2::BIGINT AS turn_message_seq, m.id, m.bot_id, m.session_id, m.sender_channel_identity_id, m.sender_account_user_id, m.source_message_id, m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage, m.session_mode, m.runtime_type, m.event_id, m.display_text, m.created_at
-  FROM session_turns t
-  JOIN bot_history_messages m ON m.id = t.assistant_message_id
-  UNION ALL
-  SELECT
-    t.id AS turn_id,
-    t.position AS turn_position,
-    2 + ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY m.created_at, m.id) AS turn_message_seq,
-    m.id, m.bot_id, m.session_id, m.sender_channel_identity_id, m.sender_account_user_id, m.source_message_id, m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage, m.session_mode, m.runtime_type, m.event_id, m.display_text, m.created_at
-  FROM session_turns t
-  JOIN bot_history_messages m
-    ON m.session_id = t.session_id
-   AND m.role IN ('assistant', 'tool')
-  WHERE t.assistant_message_id IS NOT NULL
-    AND m.id <> t.assistant_message_id
-    AND NOT EXISTS (
-      SELECT 1
-      FROM bot_history_turns anchored
-      WHERE anchored.session_id = t.session_id
-        AND (anchored.request_message_id = m.id OR anchored.assistant_message_id = m.id)
-    )
-    AND (m.created_at, m.id) > (t.assistant_created_at, t.assistant_id)
-    AND (
-      t.next_created_at IS NULL
-      OR (m.created_at, m.id) < (t.next_created_at, t.next_message_id)
-    )
-),
-cursor_message AS (
-  SELECT
-    t.position AS turn_position,
-    CASE
-      WHEN t.request_message_id = $3 THEN 1::BIGINT
-      WHEN t.assistant_message_id = $3 THEN 2::BIGINT
-      ELSE 2 + (
-        SELECT COUNT(*)
-        FROM bot_history_messages prior
-        WHERE prior.session_id = t.session_id
-          AND prior.role IN ('assistant', 'tool')
-          AND prior.id <> t.assistant_message_id
-          AND NOT EXISTS (
-            SELECT 1
-            FROM bot_history_turns anchored
-            WHERE anchored.session_id = t.session_id
-              AND (anchored.request_message_id = prior.id OR anchored.assistant_message_id = prior.id)
-          )
-          AND (prior.created_at, prior.id) > (t.assistant_created_at, t.assistant_id)
-          AND (prior.created_at, prior.id) <= (m.created_at, m.id)
-          AND (
-            t.next_created_at IS NULL
-            OR (prior.created_at, prior.id) < (t.next_created_at, t.next_message_id)
-          )
-      )
-    END AS turn_message_seq,
-    m.created_at,
-    m.id
-  FROM session_turns t
-  JOIN bot_history_messages m
-    ON m.id = $3
-   AND (
-    m.id = t.request_message_id
-    OR m.id = t.assistant_message_id
-    OR (
-      t.assistant_message_id IS NOT NULL
-      AND m.session_id = t.session_id
-      AND m.role IN ('assistant', 'tool')
-      AND m.id <> t.assistant_message_id
-      AND NOT EXISTS (
-        SELECT 1
-        FROM bot_history_turns anchored
-        WHERE anchored.session_id = t.session_id
-          AND (anchored.request_message_id = m.id OR anchored.assistant_message_id = m.id)
-      )
-      AND (m.created_at, m.id) > (t.assistant_created_at, t.assistant_id)
-      AND (
-        t.next_created_at IS NULL
-        OR (m.created_at, m.id) < (t.next_created_at, t.next_message_id)
-      )
-    )
-   )
+WITH cursor_message AS (
+  SELECT t.position AS turn_position, m.turn_message_seq, m.created_at, m.id
+  FROM bot_history_messages m
+  JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
+  WHERE m.session_id = $1
+    AND t.session_id = $1
+    AND m.id = $3
   LIMIT 1
 )
 SELECT
@@ -1654,14 +1402,16 @@ SELECT
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
-FROM visible_messages m
+FROM bot_history_messages m
+JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
 CROSS JOIN cursor_message cursor
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = $1
-  AND (m.turn_position, m.turn_message_seq, m.created_at, m.id)
+  AND t.session_id = $1
+  AND (t.position, m.turn_message_seq, m.created_at, m.id)
     < (cursor.turn_position, cursor.turn_message_seq, cursor.created_at, cursor.id)
-ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT $2
 `
 
@@ -1921,61 +1671,6 @@ func (q *Queries) ListMessagesLatest(ctx context.Context, arg ListMessagesLatest
 }
 
 const listMessagesLatestBySession = `-- name: ListMessagesLatestBySession :many
-WITH candidate_turns AS (
-  SELECT t.id, t.bot_id, t.session_id, t.position, t.request_message_id, t.assistant_message_id, t.superseded_by_turn_id, t.superseded_at, t.superseded_reason, t.created_at, t.updated_at
-  FROM bot_history_turns t
-  WHERE t.session_id = $1
-    AND t.superseded_at IS NULL
-  ORDER BY t.position DESC
-  LIMIT $2 + 2
-),
-session_turns AS (
-  SELECT
-    t.id, t.bot_id, t.session_id, t.position, t.request_message_id, t.assistant_message_id, t.superseded_by_turn_id, t.superseded_at, t.superseded_reason, t.created_at, t.updated_at,
-    assistant.created_at AS assistant_created_at,
-    assistant.id AS assistant_id,
-    LEAD(COALESCE(req.created_at, assistant.created_at)) OVER (
-      ORDER BY t.position
-    ) AS next_created_at,
-    LEAD(COALESCE(req.id, assistant.id)) OVER (
-      ORDER BY t.position
-    ) AS next_message_id
-  FROM candidate_turns t
-  LEFT JOIN bot_history_messages req ON req.id = t.request_message_id
-  LEFT JOIN bot_history_messages assistant ON assistant.id = t.assistant_message_id
-),
-visible_messages AS (
-  SELECT t.id AS turn_id, t.position AS turn_position, 1::BIGINT AS turn_message_seq, m.id, m.bot_id, m.session_id, m.sender_channel_identity_id, m.sender_account_user_id, m.source_message_id, m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage, m.session_mode, m.runtime_type, m.event_id, m.display_text, m.created_at
-  FROM session_turns t
-  JOIN bot_history_messages m ON m.id = t.request_message_id
-  UNION ALL
-  SELECT t.id AS turn_id, t.position AS turn_position, 2::BIGINT AS turn_message_seq, m.id, m.bot_id, m.session_id, m.sender_channel_identity_id, m.sender_account_user_id, m.source_message_id, m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage, m.session_mode, m.runtime_type, m.event_id, m.display_text, m.created_at
-  FROM session_turns t
-  JOIN bot_history_messages m ON m.id = t.assistant_message_id
-  UNION ALL
-  SELECT
-    t.id AS turn_id,
-    t.position AS turn_position,
-    2 + ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY m.created_at, m.id) AS turn_message_seq,
-    m.id, m.bot_id, m.session_id, m.sender_channel_identity_id, m.sender_account_user_id, m.source_message_id, m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage, m.session_mode, m.runtime_type, m.event_id, m.display_text, m.created_at
-  FROM session_turns t
-  JOIN bot_history_messages m
-    ON m.session_id = t.session_id
-   AND m.role IN ('assistant', 'tool')
-  WHERE t.assistant_message_id IS NOT NULL
-    AND m.id <> t.assistant_message_id
-    AND NOT EXISTS (
-      SELECT 1
-      FROM bot_history_turns anchored
-      WHERE anchored.session_id = t.session_id
-        AND (anchored.request_message_id = m.id OR anchored.assistant_message_id = m.id)
-    )
-    AND (m.created_at, m.id) > (t.assistant_created_at, t.assistant_id)
-    AND (
-      t.next_created_at IS NULL
-      OR (m.created_at, m.id) < (t.next_created_at, t.next_message_id)
-    )
-)
 SELECT
   m.id,
   m.bot_id,
@@ -1996,11 +1691,13 @@ SELECT
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
-FROM visible_messages m
+FROM bot_history_messages m
+JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = $1
-ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+  AND t.session_id = $1
+ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT $2
 `
 
@@ -2490,6 +2187,15 @@ func (q *Queries) ListUncompactedMessagesBySession(ctx context.Context, sessionI
 }
 
 const listVisibleMessagesFromBySession = `-- name: ListVisibleMessagesFromBySession :many
+WITH cursor_message AS (
+  SELECT t.position AS turn_position
+  FROM bot_history_messages m
+  JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
+  WHERE m.session_id = $1
+    AND t.session_id = $1
+    AND m.id = $2
+  LIMIT 1
+)
 SELECT
   m.id,
   m.bot_id,
@@ -2510,18 +2216,15 @@ SELECT
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
-FROM bot_visible_history_messages m
+FROM bot_history_messages m
+JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
+CROSS JOIN cursor_message cursor
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = $1
-  AND m.turn_position >= (
-    SELECT target.turn_position
-    FROM bot_visible_history_messages target
-    WHERE target.session_id = $1
-      AND target.id = $2
-    LIMIT 1
-  )
-ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+  AND t.session_id = $1
+  AND t.position >= cursor.turn_position
+ORDER BY t.position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 `
 
 type ListVisibleMessagesFromBySessionParams struct {
@@ -2649,6 +2352,38 @@ updated AS (
     AND old.session_id = $2
     AND old.superseded_at IS NULL
   RETURNING old.id
+),
+linked_anchors AS (
+  UPDATE bot_history_messages m
+  SET turn_id = replacement.id,
+      turn_message_seq = CASE
+        WHEN m.id = replacement.request_message_id THEN 1
+        WHEN m.id = replacement.assistant_message_id THEN 2
+        ELSE m.turn_message_seq
+      END
+  FROM replacement
+  WHERE m.id = replacement.request_message_id
+     OR m.id = replacement.assistant_message_id
+),
+linked_tail AS (
+  UPDATE bot_history_messages m
+  SET turn_id = tail.turn_id,
+      turn_message_seq = tail.turn_message_seq
+  FROM (
+    SELECT
+      m.id AS message_id,
+      replacement.id AS turn_id,
+      2 + ROW_NUMBER() OVER (ORDER BY m.created_at, m.id) AS turn_message_seq
+    FROM replacement
+    JOIN bot_history_messages assistant ON assistant.id = replacement.assistant_message_id
+    JOIN bot_history_messages m
+      ON m.session_id = replacement.session_id
+     AND m.role IN ('assistant', 'tool')
+    WHERE m.id <> replacement.assistant_message_id
+      AND m.turn_id IS NULL
+      AND (m.created_at, m.id) > (assistant.created_at, assistant.id)
+  ) tail
+  WHERE m.id = tail.message_id
 )
 SELECT replacement.id, replacement.bot_id, replacement.session_id, replacement.position,
   replacement.request_message_id, replacement.assistant_message_id,
