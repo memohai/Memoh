@@ -2034,7 +2034,7 @@
         "global": "全局设置",
         "globalDescription": "Bot 的核心偏好配置。",
         "interaction": "交互方式",
-        "interactionDescription": "配置 Bot 在对话中的行为习惯。",
+        "interactionDescription": "选择对话模型，并配置 Bot 在对话中的行为习惯。",
         "multimedia": "多媒体",
         "multimediaDescription": "配置语音与图片生成等相关模型。",
         "acp": "ACP Agent"

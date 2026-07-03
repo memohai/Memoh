@@ -2016,7 +2016,7 @@
         "global": "グローバル設定",
         "globalDescription": "このBotの中心的な設定。",
         "interaction": "交流",
-        "interactionDescription": "Botが会話に参加する方法を構成します。",
+        "interactionDescription": "チャットModelを選択し、Botが会話に参加する方法を構成します。",
         "multimedia": "マルチメディア",
         "multimediaDescription": "音声と画像の生成Modelを構成します。",
         "acp": "エージェント",
