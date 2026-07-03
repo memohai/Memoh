@@ -47,6 +47,18 @@ func (r *Resolver) tryEnterIdleSessionTurn(_ context.Context, botID, sessionID s
 	return r.makeSessionTurnReleaser(key, lock), true
 }
 
+func (r *Resolver) SessionTurnActive(botID, sessionID string) bool {
+	botID = strings.TrimSpace(botID)
+	sessionID = strings.TrimSpace(sessionID)
+	if r == nil || botID == "" || sessionID == "" {
+		return false
+	}
+	key := sessionTurnKey(botID, sessionID)
+	r.sessionTurnMu.Lock()
+	defer r.sessionTurnMu.Unlock()
+	return r.sessionTurnRefs[key] > 0
+}
+
 func (r *Resolver) sessionTurnLockLocked(key string) *sync.Mutex {
 	if r.sessionTurnRefs == nil {
 		r.sessionTurnRefs = make(map[string]int)

@@ -294,6 +294,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	if strings.TrimSpace(req.ChatID) == "" {
 		return resolvedContext{}, errors.New("chat id is required")
 	}
+	if err := r.rejectRequestedSkillsIfUnsupportedContext(ctx, req); err != nil {
+		return resolvedContext{}, err
+	}
 
 	runCfg, chatModel, provider, err := r.buildBaseRunConfig(ctx, baseRunConfigParams{
 		BotID:             req.BotID,
@@ -329,7 +332,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	// the rendered event stream (RC) + bot turn responses (TR) instead of
 	// loading raw history from bot_history_messages. The current inbound
 	// message is already in the RC, so it must not be appended again.
-	usePipeline := r.pipeline != nil && strings.TrimSpace(req.SessionID) != ""
+	usePipeline := r.pipeline != nil && strings.TrimSpace(req.SessionID) != "" && len(req.RequestedSkills) == 0
 	if usePipeline {
 		if _, loaded := r.pipeline.GetIC(strings.TrimSpace(req.SessionID)); !loaded {
 			usePipeline = false
@@ -397,6 +400,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	}
 	if memoryMsg != nil {
 		messages = append(messages, *memoryMsg)
+	}
+	if requestedSkillMsg := buildRequestedSkillContextMessage(req.RequestedSkills); requestedSkillMsg != nil {
+		messages = append(messages, *requestedSkillMsg)
 	}
 	if !usePipeline {
 		messages = append(messages, reqMessages...)
@@ -486,6 +492,13 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 
 // Chat sends a synchronous chat request and stores the result.
 func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conversation.ChatResponse, error) {
+	if err := rejectReservedSkillMetadataIfPresent(req); err != nil {
+		return conversation.ChatResponse{}, err
+	}
+	if err := r.rejectRequestedSkillsIfUnsupportedContext(ctx, req); err != nil {
+		return conversation.ChatResponse{}, err
+	}
+
 	doneTurn := r.enterSessionTurn(ctx, req.BotID, req.SessionID)
 	defer doneTurn()
 

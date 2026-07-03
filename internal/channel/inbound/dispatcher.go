@@ -51,7 +51,7 @@ type PersistFunc func(ctx context.Context)
 // routeState tracks in-flight agent activity for a single route.
 type routeState struct {
 	mu              sync.Mutex
-	active          bool
+	activeOwners    int
 	injectCh        chan InjectMessage
 	queue           []QueuedTask
 	pendingPersists []PersistFunc
@@ -109,11 +109,11 @@ func (d *RouteDispatcher) IsActive(routeID string) bool {
 	rs := d.getOrCreate(routeID)
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	return rs.active
+	return rs.activeOwners > 0
 }
 
-// MarkActive marks a route as having an active stream and returns the inject
-// channel that the agent should drain via PrepareStep.
+// MarkActive acquires active ownership for a route and returns the shared
+// inject channel that the agent should drain via PrepareStep.
 func (d *RouteDispatcher) MarkActive(routeID string) <-chan InjectMessage {
 	routeID = strings.TrimSpace(routeID)
 	if routeID == "" {
@@ -122,7 +122,7 @@ func (d *RouteDispatcher) MarkActive(routeID string) <-chan InjectMessage {
 	rs := d.getOrCreate(routeID)
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	rs.active = true
+	rs.activeOwners++
 	rs.lastUsed = time.Now()
 	return rs.injectCh
 }
@@ -133,8 +133,8 @@ type MarkDoneResult struct {
 	QueuedTasks     []QueuedTask
 }
 
-// MarkDone marks a route as idle and returns pending persist functions (to be
-// called now that storeRound has completed) and any queued tasks.
+// MarkDone releases active ownership for a route. It returns pending persist
+// functions and queued tasks only when the last active owner exits.
 func (d *RouteDispatcher) MarkDone(routeID string) MarkDoneResult {
 	routeID = strings.TrimSpace(routeID)
 	if routeID == "" {
@@ -143,8 +143,13 @@ func (d *RouteDispatcher) MarkDone(routeID string) MarkDoneResult {
 	rs := d.getOrCreate(routeID)
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	rs.active = false
 	rs.lastUsed = time.Now()
+	if rs.activeOwners > 0 {
+		rs.activeOwners--
+	}
+	if rs.activeOwners > 0 {
+		return MarkDoneResult{}
+	}
 
 	drainInjectCh(rs.injectCh)
 
@@ -187,7 +192,7 @@ func (d *RouteDispatcher) Inject(routeID string, msg InjectMessage) bool {
 	rs := d.getOrCreate(routeID)
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	if !rs.active {
+	if rs.activeOwners == 0 {
 		return false
 	}
 	select {
@@ -234,7 +239,7 @@ func (d *RouteDispatcher) Cleanup(maxAge time.Duration) {
 	cutoff := time.Now().Add(-maxAge)
 	for id, rs := range d.routes {
 		rs.mu.Lock()
-		idle := !rs.active && rs.lastUsed.Before(cutoff) && len(rs.queue) == 0
+		idle := rs.activeOwners == 0 && rs.lastUsed.Before(cutoff) && len(rs.queue) == 0
 		rs.mu.Unlock()
 		if idle {
 			delete(d.routes, id)

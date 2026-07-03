@@ -34,6 +34,8 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/message"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	sessionpkg "github.com/memohai/memoh/internal/session"
+	skillset "github.com/memohai/memoh/internal/skills"
+	"github.com/memohai/memoh/internal/slash"
 )
 
 var base64Std = base64.StdEncoding
@@ -135,6 +137,10 @@ type BotPermissionChecker interface {
 	HasBotPermission(ctx context.Context, botID, accountID, permission string) (bool, error)
 }
 
+type RequestedSkillResolver interface {
+	ResolveTextRequestedSkills(ctx context.Context, botID string, names []string) ([]skillset.ResolvedSkill, error)
+}
+
 // SessionResult carries the minimum fields needed from a session.
 type SessionResult struct {
 	ID                    string
@@ -183,6 +189,7 @@ type ChannelInboundProcessor struct {
 	defaultChatRuntime  DefaultChatRuntimeReader
 	acpAgentSetup       ACPAgentSetupReader
 	permissionChecker   BotPermissionChecker
+	skillResolver       RequestedSkillResolver
 
 	// activeStreams maps "botID:routeID" to a context.CancelFunc for the
 	// currently running agent stream. Used by /stop to abort generation
@@ -299,6 +306,13 @@ func (p *ChannelInboundProcessor) SetCommandHandler(handler *command.Handler) {
 	p.commandHandler = handler
 }
 
+func (p *ChannelInboundProcessor) SetRequestedSkillResolver(resolver RequestedSkillResolver) {
+	if p == nil {
+		return
+	}
+	p.skillResolver = resolver
+}
+
 // SetPipeline configures the DCP pipeline, event store, and discuss driver.
 func (p *ChannelInboundProcessor) SetPipeline(pipeline *pipelinepkg.Pipeline, store *pipelinepkg.EventStore, driver *pipelinepkg.DiscussDriver) {
 	if p == nil {
@@ -399,6 +413,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 		return nil
 	}
+	if err := rejectReservedSkillMetadataInInboundMessage(msg); err != nil {
+		return p.sendSlashError(ctx, sender, msg, slash.CodeReservedSkillMetadata)
+	}
 	state, err := p.requireIdentity(ctx, cfg, msg)
 	if err != nil {
 		return err
@@ -431,6 +448,25 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// In group chats, only process if the message is directed at this bot
 	// (via @mention or reply) to avoid all bots responding to the same command.
 	cmdText := rawTextForCommand(msg, text)
+	slashDecision := slash.Decision{Kind: slash.DecisionNormalChat, Directed: isDirectedAtBot(msg)}
+	if !isToolApprovalCommand(cmdText) && !isUserInputResponseCommand(cmdText) {
+		slashDecision = p.classifyChannelSlash(cmdText, msg, identity)
+	}
+	slashDirected := slashDecision.Directed
+	var pendingSkillIntent *slash.SkillIntent
+	switch slashDecision.Kind {
+	case slash.DecisionRejectNoop:
+		return nil
+	case slash.DecisionSkillIntent:
+		intent := slashDecision.SkillIntent
+		pendingSkillIntent = &intent
+	case slash.DecisionReject, slash.DecisionUnknownSlash, slash.DecisionUnsupportedCommand:
+		code := slashDecision.Code
+		if code == "" {
+			code = slash.CodeUnknownSlash
+		}
+		return p.sendSlashError(ctx, sender, msg, code)
+	}
 
 	// /start, /new, /stop, and /status require channel-layer handling outside
 	// the generic command handler (which runs before route resolution).
@@ -440,7 +476,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// outsider who cannot chat could still reset/stop/inspect the bot's session.
 	// /start is intentionally left ungated: it only returns a static welcome
 	// message and acts as the onboarding entry point for users who cannot chat yet.
-	if isDirectedAtBot(msg) &&
+	if (isDirectedAtBot(msg) || slashDirected) &&
 		(isNewSessionCommand(cmdText) || isStopCommand(cmdText) || isStatusCommand(cmdText)) &&
 		p.commandHandler != nil {
 		ok, accErr := p.commandHandler.CommandAccess(ctx, command.ExecuteInput{
@@ -455,32 +491,32 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		})
 		if accErr != nil || !ok {
 			if p.logger != nil {
-				p.logger.Info("mode command denied by acl — ignored",
+				p.logger.Info("mode command denied by acl",
 					slog.String("channel", msg.Channel.String()),
 					slog.String("bot_id", strings.TrimSpace(identity.BotID)),
 					slog.String("channel_identity_id", strings.TrimSpace(identity.ChannelIdentityID)),
 					slog.Any("error", accErr),
 				)
 			}
-			return nil
+			return p.sendSlashError(ctx, sender, msg, slash.CodePermissionDenied)
 		}
 	}
-	if isStartCommand(cmdText) && isDirectedAtBot(msg) {
+	if isStartCommand(cmdText) && (isDirectedAtBot(msg) || slashDirected) {
 		return p.handleStartCommand(ctx, msg, sender, identity)
 	}
-	if isNewSessionCommand(cmdText) && isDirectedAtBot(msg) {
+	if isNewSessionCommand(cmdText) && (isDirectedAtBot(msg) || slashDirected) {
 		return p.handleNewSessionCommand(ctx, cfg, msg, sender, identity)
 	}
-	if isStopCommand(cmdText) && isDirectedAtBot(msg) {
+	if isStopCommand(cmdText) && (isDirectedAtBot(msg) || slashDirected) {
 		return p.handleStopCommand(ctx, cfg, msg, sender, identity)
 	}
-	if isStatusCommand(cmdText) && isDirectedAtBot(msg) {
+	if isStatusCommand(cmdText) && (isDirectedAtBot(msg) || slashDirected) {
 		return p.handleStatusCommand(ctx, cfg, msg, sender, identity)
 	}
 
 	// Skip generic command handler for mode-prefix commands (/btw, /now, /next)
 	// so they pass through to mode detection below.
-	if p.commandHandler != nil && p.commandHandler.IsCommand(cmdText) && !IsModeCommand(cmdText) && !isToolApprovalCommand(cmdText) && !isUserInputResponseCommand(cmdText) && isDirectedAtBot(msg) {
+	if pendingSkillIntent == nil && p.commandHandler != nil && p.commandHandler.IsCommand(cmdText) && !IsModeCommand(cmdText) && !isToolApprovalCommand(cmdText) && !isUserInputResponseCommand(cmdText) && (isDirectedAtBot(msg) || slashDirected) {
 		loc := p.localizer(ctx, identity.BotID)
 		result, err := p.commandHandler.ExecuteResult(ctx, command.ExecuteInput{
 			BotID:             strings.TrimSpace(identity.BotID),
@@ -524,7 +560,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// Slash-command-shaped input that is NOT a known command (and not a mode
 	// command like /btw, a tool-approval, or /new//stop//status handled above):
 	// reply with a hint instead of forwarding the mistyped command to the model.
-	if isDirectedAtBot(msg) && p.commandHandler != nil &&
+	if pendingSkillIntent == nil && (isDirectedAtBot(msg) || slashDirected) && p.commandHandler != nil &&
 		p.commandHandler.IsCommandShaped(cmdText) &&
 		!p.commandHandler.IsCommand(cmdText) &&
 		!IsModeCommand(cmdText) && !isToolApprovalCommand(cmdText) && !isUserInputResponseCommand(cmdText) {
@@ -621,6 +657,12 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 
 	if !aclAllowed {
+		if pendingSkillIntent != nil {
+			if isDirectedAtBot(msg) || slashDirected {
+				return p.sendSlashError(ctx, sender, msg, slash.CodePermissionDenied)
+			}
+			return nil
+		}
 		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, "")
 		if p.logger != nil {
 			p.logger.Info(
@@ -659,17 +701,73 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if isUserInputResponseCommand(cmdText) && isDirectedAtBot(msg) {
 		return p.handleUserInputResponseCommand(ctx, msg, sender, identity, resolved.RouteID, sessionID, cmdText)
 	}
+	if pendingSkillIntent != nil && p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
+		if p.dispatcher.IsActive(strings.TrimSpace(resolved.RouteID)) {
+			return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
+		}
+	}
 
-	shouldTrigger := shouldTriggerAssistantResponse(msg) || identity.ForceReply
-	if sessionID == "" && p.sessionEnsurer != nil {
-		spec, shouldCreate, specErr := p.defaultSessionSpecForInbound(ctx, identity, msg)
-		if specErr != nil {
-			if p.logger != nil {
-				p.logger.Warn("resolve default session spec failed", slog.Any("error", specErr))
+	var requestedSkillContexts []conversation.RequestedSkillContext
+	var defaultSpec NewSessionSpec
+	var defaultSpecShouldCreate bool
+	var defaultSpecResolved bool
+	if pendingSkillIntent != nil {
+		if sessionID != "" && !sessionSupportsRequestedSkills(SessionResult{Type: sessionType, Runtime: sessionRuntime}) {
+			return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
+		}
+		if sessionID == "" {
+			if p.sessionEnsurer == nil {
+				return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
 			}
-			return p.sendACPFeedbackError(ctx, sender, msg, identity, specErr)
+			spec, shouldCreate, specErr := p.defaultSessionSpecForInbound(ctx, identity, msg)
+			if specErr != nil {
+				if p.logger != nil {
+					p.logger.Warn("resolve default session spec failed", slog.Any("error", specErr))
+				}
+				return p.sendACPFeedbackError(ctx, sender, msg, identity, specErr)
+			}
+			defaultSpec = spec
+			defaultSpecShouldCreate = shouldCreate
+			defaultSpecResolved = true
+			if !shouldCreate || !newSessionSpecSupportsRequestedSkills(spec) {
+				return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
+			}
+		}
+		resolvedSkills, resolveErr := p.resolveChannelRequestedSkills(ctx, identity.BotID, pendingSkillIntent.Names)
+		if resolveErr != nil {
+			code := slashErrorCode(resolveErr)
+			if code == "" {
+				code = slash.CodeUnsupportedSkillSlashContext
+			}
+			return p.sendSlashError(ctx, sender, msg, code)
+		}
+		requestedSkillContexts = requestedSkillContextsFromResolved(resolvedSkills)
+		text = strings.TrimSpace(pendingSkillIntent.Prompt)
+		msg.Message.Text = text
+		if msg.Metadata == nil {
+			msg.Metadata = make(map[string]any)
+		}
+		msg.Metadata["raw_text"] = text
+	}
+
+	shouldTrigger := shouldTriggerAssistantResponse(msg) || identity.ForceReply || pendingSkillIntent != nil
+	if sessionID == "" && p.sessionEnsurer != nil {
+		spec := defaultSpec
+		shouldCreate := defaultSpecShouldCreate
+		if !defaultSpecResolved {
+			var specErr error
+			spec, shouldCreate, specErr = p.defaultSessionSpecForInbound(ctx, identity, msg)
+			if specErr != nil {
+				if p.logger != nil {
+					p.logger.Warn("resolve default session spec failed", slog.Any("error", specErr))
+				}
+				return p.sendACPFeedbackError(ctx, sender, msg, identity, specErr)
+			}
 		}
 		if shouldCreate {
+			if pendingSkillIntent != nil && !newSessionSpecSupportsRequestedSkills(spec) {
+				return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
+			}
 			sess, createErr := p.sessionEnsurer.CreateNewSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), spec)
 			if createErr != nil {
 				if p.logger != nil {
@@ -709,7 +807,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// On first access for a session, replay persisted events to warm the pipeline.
 	var latestRC pipelinepkg.RenderedContext
 	var eventID string
-	if p.pipeline != nil && sessionID != "" {
+	if p.pipeline != nil && sessionID != "" && pendingSkillIntent == nil {
 		if _, loaded := p.pipeline.GetIC(sessionID); !loaded {
 			p.replayPipelineSession(ctx, sessionID)
 		}
@@ -802,6 +900,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// short-circuit here instead of starting a new stream.
 	if p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
 		if p.dispatcher.IsActive(routeID) {
+			if pendingSkillIntent != nil {
+				return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
+			}
 			headerifiedText := flow.FormatUserHeader(flow.UserMessageHeaderInput{
 				MessageID:         strings.TrimSpace(msg.Message.ID),
 				ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
@@ -1042,6 +1143,7 @@ startStream:
 		Channels:                  []string{msg.Channel.String()},
 		UserMessagePersisted:      false,
 		Attachments:               attachments,
+		RequestedSkills:           requestedSkillContexts,
 		OutboundAssetCollector:    assetCollector,
 		EventID:                   eventID,
 	}
@@ -1345,6 +1447,161 @@ func isDirectedAtBot(msg channel.InboundMessage) bool {
 	return metadataBool(msg.Metadata, "is_mentioned") || metadataBool(msg.Metadata, "is_reply_to_bot")
 }
 
+func (p *ChannelInboundProcessor) classifyChannelSlash(text string, msg channel.InboundMessage, identity InboundIdentity) slash.Decision {
+	return slash.Classify(slash.ClassifyInput{
+		Text:           text,
+		HasAttachments: hasSlashControlAttachments(msg),
+		Surface:        slash.SurfaceChannel,
+		IsGroup:        !channel.IsPrivateConversationType(msg.Conversation.Type),
+		Directed:       isDirectedAtBot(msg),
+		SupportsMode:   !isLocalChannelType(msg.Channel),
+		BotAliases:     channelSlashAliases(msg, identity),
+		KnownCommand: func(resource string) bool {
+			return p.commandHandler != nil && p.commandHandler.IsCommand("/"+resource)
+		},
+	})
+}
+
+func hasSlashControlAttachments(msg channel.InboundMessage) bool {
+	if len(msg.Message.Attachments) > 0 {
+		return true
+	}
+	if msg.Message.Reply != nil && len(msg.Message.Reply.Attachments) > 0 {
+		return true
+	}
+	return false
+}
+
+func channelSlashAliases(msg channel.InboundMessage, identity InboundIdentity) []string {
+	aliases := []string{
+		identity.BotID,
+		identity.DisplayName,
+		msg.BotID,
+		msg.ReplyTarget,
+	}
+	for _, key := range []string{"bot_username", "bot_name", "bot_alias"} {
+		if value, ok := msg.Metadata[key].(string); ok {
+			aliases = append(aliases, value)
+		}
+	}
+	out := make([]string, 0, len(aliases))
+	seen := map[string]struct{}{}
+	for _, alias := range aliases {
+		alias = strings.Trim(strings.TrimSpace(alias), "@")
+		if alias == "" {
+			continue
+		}
+		key := strings.ToLower(alias)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, alias)
+	}
+	return out
+}
+
+func (p *ChannelInboundProcessor) sendSlashError(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, code string) error {
+	if code == "" {
+		code = slash.CodeUnknownSlash
+	}
+	out := applyMessageFormat(channel.Message{Text: slashChannelMessage(p.localizer(ctx, msg.BotID), code)}, p.channelCaps(msg.Channel))
+	if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
+		out.Reply = &channel.ReplyRef{MessageID: mid}
+	}
+	return sender.Send(ctx, channel.OutboundMessage{
+		Target:  strings.TrimSpace(msg.ReplyTarget),
+		Message: out,
+	})
+}
+
+func slashChannelMessage(t *i18n.Localizer, code string) string {
+	if key := slashChannelMessageKey(code); key != "" {
+		return t.T(key)
+	}
+	return t.T("slash.error.generic")
+}
+
+func slashChannelMessageKey(code string) string {
+	switch code {
+	case slash.CodeUnknownSlash:
+		return "slash.error.unknownSlash"
+	case slash.CodeUnsupportedWebCommand:
+		return "slash.error.unsupportedWebCommand"
+	case slash.CodeUseSkillChipRequired:
+		return "slash.error.useSkillChipRequired"
+	case slash.CodeInvalidSkillSlashSyntax:
+		return "slash.error.invalidSkillSlashSyntax"
+	case slash.CodeMissingPrompt:
+		return "slash.error.missingPrompt"
+	case slash.CodeRequestedSkillNotFound:
+		return "slash.error.requestedSkillNotFound"
+	case slash.CodeRequestedSkillAmbiguous:
+		return "slash.error.requestedSkillAmbiguous"
+	case slash.CodeRequestedSkillDisabled:
+		return "slash.error.requestedSkillDisabled"
+	case slash.CodeRequestedSkillNotRuntimeUsable:
+		return "slash.error.requestedSkillNotRuntimeUsable"
+	case slash.CodeInvalidSkillRef:
+		return "slash.error.invalidSkillRef"
+	case slash.CodeStaleSkillRef:
+		return "slash.error.staleSkillRef"
+	case slash.CodeTooManyRequestedSkills:
+		return "slash.error.tooManyRequestedSkills"
+	case slash.CodeRequestedSkillContextTooLarge:
+		return "slash.error.requestedSkillContextTooLarge"
+	case slash.CodeSlashAttachmentsUnsupported:
+		return "slash.error.slashAttachmentsUnsupported"
+	case slash.CodeUnsupportedSkillSlashContext:
+		return "slash.error.unsupportedSkillSlashContext"
+	case slash.CodeUnsupportedLegacyEndpoint:
+		return "slash.error.unsupportedLegacyEndpoint"
+	case slash.CodeInvalidQuickActionScope:
+		return "slash.error.invalidQuickActionScope"
+	case slash.CodePermissionDenied:
+		return "slash.error.permissionDenied"
+	case slash.CodeReservedSkillMetadata:
+		return "slash.error.reservedSkillMetadata"
+	default:
+		return ""
+	}
+}
+
+func slashErrorCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	var slashErr slash.Error
+	if errors.As(err, &slashErr) {
+		return slashErr.Code
+	}
+	return ""
+}
+
+func (p *ChannelInboundProcessor) resolveChannelRequestedSkills(ctx context.Context, botID string, names []string) ([]skillset.ResolvedSkill, error) {
+	if p.skillResolver == nil {
+		return nil, slash.NewError(slash.CodeRequestedSkillNotRuntimeUsable)
+	}
+	return p.skillResolver.ResolveTextRequestedSkills(ctx, botID, names)
+}
+
+func requestedSkillContextsFromResolved(items []skillset.ResolvedSkill) []conversation.RequestedSkillContext {
+	out := make([]conversation.RequestedSkillContext, 0, len(items))
+	for _, item := range items {
+		out = append(out, conversation.RequestedSkillContext{
+			Ref:            item.Ref,
+			Name:           item.Name,
+			Description:    item.Description,
+			Content:        item.Content,
+			SourceKind:     item.SourceKind,
+			OpaqueSourceID: item.OpaqueSourceID,
+			ContentHash:    item.ContentHash,
+			Identity:       item.Identity,
+		})
+	}
+	return out
+}
+
 // channelCaps returns the capability matrix for a channel type, or the zero
 // value when no registry is configured.
 func (p *ChannelInboundProcessor) channelCaps(channelType channel.ChannelType) channel.ChannelCapabilities {
@@ -1451,6 +1708,30 @@ func messageReplyMetadata(reply *channel.ReplyRef) map[string]any {
 		return nil
 	}
 	return result
+}
+
+func rejectReservedSkillMetadataInInboundMessage(msg channel.InboundMessage) error {
+	if err := slash.RejectReservedSkillMetadataValue(msg.Message.Metadata); err != nil {
+		return err
+	}
+	for _, part := range msg.Message.Parts {
+		if err := slash.RejectReservedSkillMetadataValue(part.Metadata); err != nil {
+			return err
+		}
+	}
+	for _, att := range msg.Message.Attachments {
+		if err := slash.RejectReservedSkillMetadataValue(att.Metadata); err != nil {
+			return err
+		}
+	}
+	if msg.Message.Reply != nil {
+		for _, att := range msg.Message.Reply.Attachments {
+			if err := slash.RejectReservedSkillMetadataValue(att.Metadata); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func channelAttachmentMetadata(attachments []channel.Attachment) []map[string]any {
@@ -3209,7 +3490,7 @@ func (p *ChannelInboundProcessor) handleToolApprovalCommand(ctx context.Context,
 		explicitID = actionText
 		reason = strings.TrimSpace(strings.Join(parsed.Args, " "))
 	}
-	return p.streamToolApprovalCommand(ctx, msg, sender, identity, approvalRunner, flow.ToolApprovalResponseInput{
+	return p.streamToolApprovalCommand(ctx, msg, sender, identity, routeID, approvalRunner, flow.ToolApprovalResponseInput{
 		BotID:                  strings.TrimSpace(identity.BotID),
 		SessionID:              strings.TrimSpace(sessionID),
 		ActorChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
@@ -3243,7 +3524,7 @@ func (p *ChannelInboundProcessor) handleUserInputResponseCommand(ctx context.Con
 			Message: applyMessageFormat(channel.Message{Text: loc.T("cmd.userInput.parseFailed")}, caps),
 		})
 	}
-	return p.streamUserInputResponseCommand(ctx, msg, sender, identity, userInputRunner, flow.UserInputResponseInput{
+	return p.streamUserInputResponseCommand(ctx, msg, sender, identity, routeID, userInputRunner, flow.UserInputResponseInput{
 		BotID:                  strings.TrimSpace(identity.BotID),
 		SessionID:              strings.TrimSpace(sessionID),
 		ActorChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
@@ -3285,24 +3566,29 @@ func splitFirstCommandField(text string) (head, tail string) {
 	return text, ""
 }
 
-func (p *ChannelInboundProcessor) streamToolApprovalCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, approvalRunner ToolApprovalRunner, input flow.ToolApprovalResponseInput) error {
-	return p.streamContinuationCommand(ctx, msg, sender, identity, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
+func (p *ChannelInboundProcessor) streamToolApprovalCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, approvalRunner ToolApprovalRunner, input flow.ToolApprovalResponseInput) error {
+	return p.streamContinuationCommand(ctx, msg, sender, identity, routeID, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
 		return approvalRunner.RespondToolApproval(runCtx, input, eventCh)
 	})
 }
 
-func (p *ChannelInboundProcessor) streamUserInputResponseCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, userInputRunner UserInputRunner, input flow.UserInputResponseInput) error {
-	return p.streamContinuationCommand(ctx, msg, sender, identity, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
+func (p *ChannelInboundProcessor) streamUserInputResponseCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, userInputRunner UserInputRunner, input flow.UserInputResponseInput) error {
+	return p.streamContinuationCommand(ctx, msg, sender, identity, routeID, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
 		return userInputRunner.RespondUserInput(runCtx, input, eventCh)
 	})
 }
 
 type streamContinuationFunc func(context.Context, chan<- flow.WSStreamEvent) error
 
-func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, run streamContinuationFunc) error {
+func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, run streamContinuationFunc) error {
 	target := strings.TrimSpace(msg.ReplyTarget)
 	if target == "" {
 		return errors.New("reply target missing")
+	}
+	routeID = strings.TrimSpace(routeID)
+	if routeID != "" && p.dispatcher != nil && !isLocalChannelType(msg.Channel) {
+		p.dispatcher.MarkActive(routeID)
+		defer p.drainQueue(context.WithoutCancel(ctx), routeID)
 	}
 	sourceMessageID := strings.TrimSpace(msg.Message.ID)
 	replyRef := &channel.ReplyRef{Target: target}
@@ -4120,6 +4406,18 @@ func (p *ChannelInboundProcessor) requireACPRuntimeActor(_ context.Context, iden
 
 func sessionUsesACPRuntime(sess SessionResult) bool {
 	return strings.TrimSpace(sess.Runtime) == sessionpkg.RuntimeACPAgent || strings.TrimSpace(sess.Type) == sessionpkg.TypeACPAgent
+}
+
+func sessionSupportsRequestedSkills(sess SessionResult) bool {
+	return strings.TrimSpace(sess.Type) == sessionpkg.TypeChat && !sessionUsesACPRuntime(sess)
+}
+
+func newSessionSpecSupportsRequestedSkills(spec NewSessionSpec) bool {
+	typ := strings.TrimSpace(spec.Type)
+	if typ == "" {
+		typ = strings.TrimSpace(spec.Mode)
+	}
+	return typ == sessionpkg.TypeChat && strings.TrimSpace(spec.Runtime) != sessionpkg.RuntimeACPAgent
 }
 
 func sessionRequiresACPRuntimeActor(sess SessionResult) bool {

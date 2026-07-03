@@ -98,18 +98,14 @@
             v-else
             class="space-y-0.5"
           >
-            <Button
+            <div
               v-for="skill in skills"
               :key="skill"
-              variant="ghost"
-              size="sm"
-              class="w-full justify-start gap-1.5 px-2 text-body font-normal"
-              @click="openSkillFile(skill)"
+              class="flex min-h-8 items-center gap-1.5 rounded-md px-2 text-body text-foreground"
             >
               <Sparkles class="size-3.5 shrink-0 text-muted-foreground" />
               <span class="min-w-0 flex-1 truncate text-left">{{ skill }}</span>
-              <ExternalLink class="size-3.5 shrink-0 text-muted-foreground" />
-            </Button>
+            </div>
           </div>
         </div>
       </template>
@@ -118,15 +114,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, ref, toRef } from 'vue'
+import { computed, ref, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useQuery, useQueryCache } from '@pinia/colada'
+import { useQueryCache } from '@pinia/colada'
 import { toast, ScrollArea, Button } from '@memohai/ui'
-import { Sparkles, ExternalLink, Loader2, Minimize2 } from 'lucide-vue-next'
-import { getBotsByBotIdContainerSkills, postBotsByBotIdSessionsBySessionIdCompact } from '@memohai/sdk'
-import type { HandlersSkillItem } from '@memohai/sdk'
+import { Sparkles, Loader2, Minimize2 } from 'lucide-vue-next'
+import { postBotsByBotIdSessionsBySessionIdCompact } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { openInFileManagerKey } from '../composables/useFileManagerProvider'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import SubagentList from './subagent-list.vue'
 
@@ -137,13 +131,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
-const openInFileManager = inject(openInFileManagerKey, undefined)
 const queryCache = useQueryCache()
-
-type SkillItem = HandlersSkillItem & {
-  source_path?: string
-  state?: string
-}
 
 const visibleRef = toRef(props, 'visible')
 const overrideModelIdRef = computed(() => props.overrideModelId ?? '')
@@ -153,21 +141,6 @@ const { info, usedTokens, contextWindow, contextPercent, currentBotId, sessionId
   visible: visibleRef,
   overrideModelId: overrideModelIdRef,
   fallbackContextWindow: fallbackContextWindowRef,
-})
-
-const { data: skillCatalog } = useQuery({
-  key: () => ['bot-skills-catalog', currentBotId.value ?? ''],
-  query: async () => {
-    const { data } = await getBotsByBotIdContainerSkills({
-      path: {
-        bot_id: currentBotId.value!,
-      },
-      throwOnError: true,
-    })
-    return (data.skills || []) as SkillItem[]
-  },
-  enabled: () => !!currentBotId.value && props.visible,
-  refetchOnWindowFocus: false,
 })
 
 const contextBarColor = computed(() => {
@@ -182,23 +155,11 @@ const cacheHitRate = computed(() => {
 })
 
 const skills = computed(() => info.value?.skills ?? [])
-const effectiveSkillPathByName = computed<Record<string, string>>(() => {
-  const out: Record<string, string> = {}
-  for (const item of skillCatalog.value || []) {
-    if (item.state !== 'effective' || !item.name || !item.source_path) continue
-    out[item.name] = item.source_path
-  }
-  return out
-})
 
 function formatTokenCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return String(n)
-}
-
-function openSkillFile(skillName: string) {
-  openInFileManager?.(effectiveSkillPathByName.value[skillName] || `/data/skills/${skillName}/SKILL.md`, false)
 }
 
 const isCompacting = ref(false)

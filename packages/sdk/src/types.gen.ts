@@ -1362,6 +1362,36 @@ export type HandlersChannelMeta = {
     user_config_schema?: ChannelConfigSchema;
 };
 
+export type HandlersCommandActionError = {
+    code?: string;
+    message?: string;
+};
+
+export type HandlersCommandActionListItem = {
+    description?: string;
+    id?: string;
+    kind?: string;
+    title?: string;
+};
+
+export type HandlersCommandActionResult = {
+    items?: Array<HandlersCommandActionListItem>;
+    kind?: string;
+    text?: string;
+    title?: string;
+};
+
+export type HandlersCommandEventResponse = {
+    action_id?: string;
+    composer_scope?: string;
+    error?: HandlersCommandActionError;
+    invocation_id?: string;
+    result?: HandlersCommandActionResult;
+    session_id?: string;
+    terminal?: boolean;
+    type?: string;
+};
+
 export type HandlersContainerCpuMetricsResponse = {
     kernel_nanoseconds?: number;
     usage_nanocores?: number;
@@ -1698,6 +1728,16 @@ export type HandlersProbeResponse = {
     tools?: Array<McpToolDescriptor>;
 };
 
+export type HandlersQuickActionExecuteRequest = {
+    action_id?: string;
+    composer_scope?: string;
+    invocation_id?: string;
+    params?: {
+        [key: string]: unknown;
+    };
+    session_id?: string;
+};
+
 export type HandlersRefreshResponse = {
     access_token?: string;
     expires_at?: string;
@@ -1706,6 +1746,10 @@ export type HandlersRefreshResponse = {
 
 export type HandlersRollbackRequest = {
     version?: number;
+};
+
+export type HandlersSafeSkillsResponse = {
+    skills?: Array<SkillsSafeCatalogItem>;
 };
 
 export type HandlersSessionInfoResponse = {
@@ -2706,6 +2750,15 @@ export type SettingsUpsertRequest = {
     transcription_model_id?: string;
     tts_model_id?: string;
     video_model_id?: string;
+};
+
+export type SkillsSafeCatalogItem = {
+    description?: string;
+    display_name?: string;
+    name?: string;
+    skill_ref?: string;
+    source_kind?: string;
+    state?: string;
 };
 
 export type UserinputUiOption = {
@@ -5247,6 +5300,10 @@ export type GetBotsByBotIdContainerSkillsErrors = {
      */
     400: HandlersErrorResponse;
     /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
      * Not Found
      */
     404: HandlersErrorResponse;
@@ -7603,6 +7660,47 @@ export type PostBotsByBotIdPluginsByIdUninstallResponses = {
 
 export type PostBotsByBotIdPluginsByIdUninstallResponse = PostBotsByBotIdPluginsByIdUninstallResponses[keyof PostBotsByBotIdPluginsByIdUninstallResponses];
 
+export type PostBotsByBotIdQuickActionsExecuteData = {
+    /**
+     * Quick action payload
+     */
+    body: HandlersQuickActionExecuteRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/quick-actions/execute';
+};
+
+export type PostBotsByBotIdQuickActionsExecuteErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdQuickActionsExecuteError = PostBotsByBotIdQuickActionsExecuteErrors[keyof PostBotsByBotIdQuickActionsExecuteErrors];
+
+export type PostBotsByBotIdQuickActionsExecuteResponses = {
+    /**
+     * OK
+     */
+    200: HandlersCommandEventResponse;
+};
+
+export type PostBotsByBotIdQuickActionsExecuteResponse = PostBotsByBotIdQuickActionsExecuteResponses[keyof PostBotsByBotIdQuickActionsExecuteResponses];
+
 export type GetBotsByBotIdScheduleData = {
     body?: never;
     path?: never;
@@ -8541,6 +8639,48 @@ export type PutBotsByBotIdSettingsResponses = {
 };
 
 export type PutBotsByBotIdSettingsResponse = PutBotsByBotIdSettingsResponses[keyof PutBotsByBotIdSettingsResponses];
+
+export type GetBotsByBotIdSkillsCatalogData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/skills/catalog';
+};
+
+export type GetBotsByBotIdSkillsCatalogErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdSkillsCatalogError = GetBotsByBotIdSkillsCatalogErrors[keyof GetBotsByBotIdSkillsCatalogErrors];
+
+export type GetBotsByBotIdSkillsCatalogResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSafeSkillsResponse;
+};
+
+export type GetBotsByBotIdSkillsCatalogResponse = GetBotsByBotIdSkillsCatalogResponses[keyof GetBotsByBotIdSkillsCatalogResponses];
 
 export type PostBotsByBotIdSupermarketInstallPluginData = {
     /**

@@ -27,6 +27,28 @@ func TestParseFileFallbacks(t *testing.T) {
 	}
 }
 
+func TestParseFileMalformedMetadataFailsRuntimeClosed(t *testing.T) {
+	raw := "---\nname: bad-metadata\ndescription: Bad metadata\nmetadata: runtime-visible\n---\n\n# Bad"
+	parsed := ParseFile(raw, "fallback")
+	entry := entryFromParsed(parsed, raw, Root{
+		Path:    ManagedDirPath,
+		Kind:    SourceKindManaged,
+		Managed: true,
+	}, pathJoin(ManagedDirPath, "bad-metadata", "SKILL.md"))
+	entry.State = StateEffective
+	entry = NormalizeRuntimeUsability(entry)
+
+	if parsed.Name != "bad-metadata" {
+		t.Fatalf("parsed.Name = %q, want bad-metadata", parsed.Name)
+	}
+	if entry.RuntimeUsable {
+		t.Fatal("malformed metadata entry is runtime usable, want fail-closed")
+	}
+	if entry.RuntimeUnusableReason != "metadata" {
+		t.Fatalf("RuntimeUnusableReason = %q, want metadata", entry.RuntimeUnusableReason)
+	}
+}
+
 func TestResolveSupportsDisabledFallbackAndShadowing(t *testing.T) {
 	items := []Entry{
 		{Name: "alpha", SourcePath: "/data/skills/alpha/SKILL.md", Managed: true, SourceKind: SourceKindManaged},

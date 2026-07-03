@@ -2935,6 +2935,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -5895,6 +5901,65 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/quick-actions/execute": {
+            "post": {
+                "description": "Runs a typed Web quick action such as help or skill.list and returns a command_result or command_error envelope.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "quick-actions"
+                ],
+                "summary": "Execute a Web quick action",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Quick action payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.QuickActionExecuteRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.CommandEventResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/schedule": {
             "get": {
                 "description": "List schedules for current user",
@@ -6993,6 +7058,55 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/skills/catalog": {
+            "get": {
+                "tags": [
+                    "skills"
+                ],
+                "summary": "List runtime-safe skills for chat-time skill selection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SafeSkillsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -16145,6 +16259,83 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.CommandActionError": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.CommandActionListItem": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.CommandActionResult": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.CommandActionListItem"
+                    }
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.CommandEventResponse": {
+            "type": "object",
+            "properties": {
+                "action_id": {
+                    "type": "string"
+                },
+                "composer_scope": {
+                    "type": "string"
+                },
+                "error": {
+                    "$ref": "#/definitions/handlers.CommandActionError"
+                },
+                "invocation_id": {
+                    "type": "string"
+                },
+                "result": {
+                    "$ref": "#/definitions/handlers.CommandActionResult"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "terminal": {
+                    "type": "boolean"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.ContainerCPUMetricsResponse": {
             "type": "object",
             "properties": {
@@ -16974,6 +17165,27 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.QuickActionExecuteRequest": {
+            "type": "object",
+            "properties": {
+                "action_id": {
+                    "type": "string"
+                },
+                "composer_scope": {
+                    "type": "string"
+                },
+                "invocation_id": {
+                    "type": "string"
+                },
+                "params": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "session_id": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.RefreshResponse": {
             "type": "object",
             "properties": {
@@ -16993,6 +17205,17 @@ const docTemplate = `{
             "properties": {
                 "version": {
                     "type": "integer"
+                }
+            }
+        },
+        "handlers.SafeSkillsResponse": {
+            "type": "object",
+            "properties": {
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/skills.SafeCatalogItem"
+                    }
                 }
             }
         },
@@ -19578,6 +19801,29 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "video_model_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "skills.SafeCatalogItem": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "skill_ref": {
+                    "type": "string"
+                },
+                "source_kind": {
+                    "type": "string"
+                },
+                "state": {
                     "type": "string"
                 }
             }

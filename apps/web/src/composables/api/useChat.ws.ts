@@ -1,5 +1,5 @@
 import { sdkAuthQuery, sdkWebSocketUrl } from '@/lib/api-client'
-import type { ChatAttachment, UIStreamEvent, UIStreamEventHandler } from './useChat.types'
+import type { ChatAttachment, RequestedSkillRequest, UIStreamEvent, UIStreamEventHandler } from './useChat.types'
 
 export interface WSUserInputAnswer {
   question_id: string
@@ -11,9 +11,12 @@ export interface WSUserInputAnswer {
 export interface WSClientMessage {
   type: 'message' | 'abort' | 'tool_approval_response' | 'user_input_response'
   stream_id?: string
+  invocation_id?: string
+  composer_scope?: string
   text?: string
   session_id?: string
   attachments?: ChatAttachment[]
+  requested_skills?: RequestedSkillRequest[]
   model_id?: string
   reasoning_effort?: string
   approval_id?: string
@@ -124,7 +127,15 @@ export function connectWebSocket(
         const parsed = JSON.parse(event.data)
         if (!parsed || typeof parsed !== 'object') return
         const eventType = String(parsed.type ?? '').trim()
-        if (eventType !== 'start' && eventType !== 'message' && eventType !== 'end' && eventType !== 'error') {
+        if (
+          eventType !== 'start'
+          && eventType !== 'message'
+          && eventType !== 'end'
+          && eventType !== 'error'
+          && eventType !== 'session_created'
+          && eventType !== 'command_result'
+          && eventType !== 'command_error'
+        ) {
           return
         }
         onStreamEvent(parsed as UIStreamEvent)

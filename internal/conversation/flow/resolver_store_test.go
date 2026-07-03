@@ -36,3 +36,54 @@ func TestBuildInteractionMetadataIncludesForwardConversation(t *testing.T) {
 		t.Fatalf("unexpected forward metadata: %#v", forward)
 	}
 }
+
+func TestBuildInteractionMetadataIncludesRequestedSkills(t *testing.T) {
+	t.Parallel()
+
+	meta := buildInteractionMetadata(conversation.ChatRequest{
+		RequestedSkills: []conversation.RequestedSkillContext{
+			{
+				Name:           "writer",
+				SourceKind:     "managed",
+				OpaqueSourceID: "src-1",
+				Content:        "raw content must not be persisted in metadata",
+				ContentHash:    "hash-must-not-leak",
+				Ref:            "ref-must-not-leak",
+				Identity:       "managed:src-1:writer",
+			},
+			{
+				Name:           "writer",
+				SourceKind:     "managed",
+				OpaqueSourceID: "src-1",
+				Identity:       "managed:src-1:writer",
+			},
+			{
+				Name:       "reviewer",
+				SourceKind: "plugin",
+			},
+		},
+	})
+
+	raw, ok := meta["model_requested_skills"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected requested skill metadata: %#v", meta["model_requested_skills"])
+	}
+	if len(raw) != 2 {
+		t.Fatalf("expected deduped requested skills, got %#v", raw)
+	}
+	if raw[0]["name"] != "writer" || raw[0]["source_kind"] != "managed" || raw[0]["opaque_source_id"] != "src-1" {
+		t.Fatalf("unexpected first skill metadata: %#v", raw[0])
+	}
+	if _, ok := raw[0]["content"]; ok {
+		t.Fatalf("requested skill metadata leaked content: %#v", raw[0])
+	}
+	if _, ok := raw[0]["content_hash"]; ok {
+		t.Fatalf("requested skill metadata leaked content_hash: %#v", raw[0])
+	}
+	if _, ok := raw[0]["ref"]; ok {
+		t.Fatalf("requested skill metadata leaked ref: %#v", raw[0])
+	}
+	if raw[1]["name"] != "reviewer" || raw[1]["source_kind"] != "plugin" {
+		t.Fatalf("unexpected second skill metadata: %#v", raw[1])
+	}
+}

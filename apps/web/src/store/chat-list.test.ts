@@ -13,6 +13,9 @@ const api = vi.hoisted(() => ({
   fetchBots: vi.fn(),
   fetchMessagesUI: vi.fn(),
   sendLocalChannelMessage: vi.fn(),
+  sendLocalSlashCommand: vi.fn(),
+  executeQuickAction: vi.fn(),
+  fetchSafeSkillCatalog: vi.fn(),
   updateSessionAgent: vi.fn(),
   ensureACPRuntime: vi.fn(),
   createACPRuntime: vi.fn(),
@@ -211,6 +214,9 @@ describe('chat-list store', () => {
     })
     api.closeACPRuntime.mockResolvedValue(undefined)
     api.fetchMessagesUI.mockResolvedValue([])
+    api.executeQuickAction.mockResolvedValue(null)
+    api.sendLocalSlashCommand.mockResolvedValue(null)
+    api.fetchSafeSkillCatalog.mockResolvedValue([])
     sdk.getBotsByBotIdSettings.mockResolvedValue({ data: { chat_runtime: 'model' } })
     api.streamSessionMessageEvents.mockImplementation((_botId: string, _sessionId: string, signal: AbortSignal, onEvent: (event: SessionMessageStreamEvent) => void) => new Promise<void>((resolve) => {
       _sessionMessageHandler = onEvent
@@ -2409,6 +2415,344 @@ describe('chat-list store', () => {
     expect(result).toMatchObject({ ok: true })
     expect(sent).toHaveLength(1)
     expect(sent[0].reasoning_effort).toBe(REASONING_EFFORT_DISABLE)
+  })
+
+  it('keeps late quick action events scoped to the composer that sent them', async () => {
+    api.fetchBots.mockResolvedValueOnce([
+      { id: 'bot-1', status: 'active', name: 'Bot 1' },
+      { id: 'bot-2', status: 'active', name: 'Bot 2' },
+    ])
+    let resolveQuickAction: (value: UIStreamEvent) => void = () => {}
+    api.executeQuickAction.mockImplementationOnce(() => new Promise<UIStreamEvent>((resolve) => {
+      resolveQuickAction = resolve
+    }))
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sendPromise = store.sendMessage('/help', undefined, { composerScope: 'bot-1:draft-a' })
+    await flushPromises()
+
+    api.fetchSession.mockResolvedValueOnce({
+      id: 'session-b',
+      bot_id: 'bot-1',
+      title: 'Session B',
+      type: 'chat',
+    })
+    await store.selectSession('session-b')
+    resolveQuickAction({
+      type: 'command_result',
+      terminal: true,
+      result: { kind: 'text', text: 'Help' },
+    } as UIStreamEvent)
+    await sendPromise
+
+    const draftCommandEvent = store.commandEventForScope({ botId: 'bot-1', composerScope: 'bot-1:draft-a' })
+    expect(draftCommandEvent).toMatchObject({
+      type: 'command_result',
+      bot_id: 'bot-1',
+      composer_scope: 'bot-1:draft-a',
+    })
+    expect(draftCommandEvent?.session_id).toBeUndefined()
+    expect(store.commandEvent).toBeNull()
+  })
+
+  it('does not send selected session ids for sessionless quick actions', async () => {
+    api.executeQuickAction.mockResolvedValueOnce({
+      type: 'command_result',
+      terminal: true,
+      result: { kind: 'text', text: 'Help' },
+    } as UIStreamEvent)
+    api.fetchSession.mockResolvedValueOnce({
+      id: 'session-a',
+      bot_id: 'bot-1',
+      title: 'Session A',
+      type: 'chat',
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await store.selectSession('session-a')
+    const result = await store.sendMessage('/help', undefined, { composerScope: 'bot-1:panel-a' })
+
+    expect(result).toMatchObject({ ok: true })
+    expect(api.executeQuickAction).toHaveBeenCalledWith('bot-1', 'help', expect.objectContaining({
+      composerScope: 'bot-1:panel-a',
+    }))
+    expect(api.executeQuickAction.mock.calls[0]?.[2]).not.toHaveProperty('sessionId')
+  })
+
+  it('keeps quick action transport failures as startup command errors', async () => {
+    api.executeQuickAction.mockRejectedValueOnce(new Error('network unavailable'))
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const result = await store.sendMessage('/help', undefined, { composerScope: 'bot-1:panel-a' })
+
+    expect(result).toMatchObject({
+      ok: false,
+      stage: 'startup',
+      restoreInput: '/help',
+      error: 'network unavailable',
+    })
+    const commandEvent = store.commandEventForScope({ botId: 'bot-1', composerScope: 'bot-1:panel-a' })
+    expect(commandEvent).toMatchObject({
+      type: 'command_error',
+      composer_scope: 'bot-1:panel-a',
+      error: { code: 'generic', message: 'network unavailable' },
+    })
+  })
+
+  it('keeps typed slash transport failures as startup command errors', async () => {
+    api.sendLocalSlashCommand.mockRejectedValueOnce(new Error('server unavailable'))
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const result = await store.sendMessage('/wat', undefined, { composerScope: 'bot-1:panel-a' })
+
+    expect(result).toMatchObject({
+      ok: false,
+      stage: 'startup',
+      restoreInput: '/wat',
+      error: 'server unavailable',
+    })
+    const commandEvent = store.commandEventForScope({ botId: 'bot-1', composerScope: 'bot-1:panel-a' })
+    expect(commandEvent).toMatchObject({
+      type: 'command_error',
+      composer_scope: 'bot-1:panel-a',
+      error: { code: 'generic', message: 'server unavailable' },
+    })
+  })
+
+  it('sends only skill ref and name in requested skill websocket payloads', async () => {
+    sendEvents = [{ type: 'start' } as UIStreamEvent, { type: 'end' } as UIStreamEvent]
+    api.fetchSession.mockResolvedValueOnce({
+      id: 'session-a',
+      bot_id: 'bot-1',
+      title: 'Session A',
+      type: 'chat',
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await store.selectSession('session-a')
+    const result = await store.sendMessage('hello with skill', undefined, {
+      requestedSkills: [{
+        skill_ref: 'ref-alpha',
+        name: 'alpha',
+        display_name: 'Alpha',
+        description: 'Display-only description',
+        source_kind: 'managed',
+        state: 'effective',
+      }],
+      composerScope: 'bot-1:panel-a',
+    })
+
+    expect(result).toMatchObject({ ok: true })
+    expect(sentWSMessages[0]?.requested_skills).toEqual([{
+      skill_ref: 'ref-alpha',
+      name: 'alpha',
+    }])
+    expect(JSON.stringify(sentWSMessages[0]?.requested_skills)).not.toContain('Display-only description')
+    expect(JSON.stringify(sentWSMessages[0]?.requested_skills)).not.toContain('managed')
+  })
+
+  it('does not select a late session_created event after the user switches sessions', async () => {
+    sendEvents = []
+    api.fetchSession.mockImplementation(async (_botId: string, sessionID: string) => ({
+      id: sessionID,
+      bot_id: 'bot-1',
+      title: sessionID,
+      type: 'chat',
+    }))
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sendPromise = store.sendMessage('hello with skill', undefined, {
+      requestedSkills: [{ skill_ref: 'ref-alpha', name: 'alpha' }],
+      composerScope: 'bot-1:draft-a',
+    })
+    await flushPromises()
+    const streamId = sentWSMessages[0]?.stream_id as string
+
+    await store.selectSession('session-b')
+    streamHandler?.({ type: 'session_created', stream_id: streamId, session_id: 'created-session' } as UIStreamEvent)
+    await flushPromises()
+
+    expect(store.sessionId).toBe('session-b')
+    expect(store.knownSessionSummary('created-session')).toBeNull()
+
+    streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'created-session' } as UIStreamEvent)
+    await sendPromise
+
+    expect(store.sessionId).toBe('session-b')
+  })
+
+  it('deletes a deferred draft session when requested skill preflight fails after session_created', async () => {
+    sendEvents = []
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sendPromise = store.sendMessage('hello with skill', undefined, {
+      requestedSkills: [{ skill_ref: 'ref-alpha', name: 'alpha' }],
+      composerScope: 'bot-1:draft-a',
+    })
+    await flushPromises()
+    const streamId = sentWSMessages[0]?.stream_id as string
+
+    streamHandler?.({ type: 'session_created', stream_id: streamId, session_id: 'created-session' } as UIStreamEvent)
+    await flushPromises()
+    expect(store.sessionId).toBe('created-session')
+
+    streamHandler?.({
+      type: 'command_error',
+      invocation_id: streamId,
+      stream_id: streamId,
+      session_id: 'created-session',
+      composer_scope: 'bot-1:draft-a',
+      terminal: true,
+      error: {
+        code: 'unsupported_skill_slash_context',
+        message: 'Requested skills are not supported here.',
+      },
+    } as UIStreamEvent)
+    const result = await sendPromise
+
+    expect(result).toMatchObject({
+      ok: false,
+      stage: 'startup',
+      restoreInput: 'hello with skill',
+    })
+    expect(api.deleteSession).toHaveBeenCalledWith('bot-1', 'created-session')
+    expect(store.deletedSession).toEqual({
+      id: 'created-session',
+      botId: 'bot-1',
+      seq: 1,
+      composerScope: 'bot-1:draft-a',
+    })
+    expect(store.sessionId).toBeNull()
+    expect(store.knownSessionSummary('created-session')).toBeNull()
+    expect(store.messages).toHaveLength(0)
+    const draftCommandEvent = store.commandEventForScope({ botId: 'bot-1', composerScope: 'bot-1:draft-a' })
+    expect(draftCommandEvent).toMatchObject({
+      type: 'command_error',
+      bot_id: 'bot-1',
+      composer_scope: 'bot-1:draft-a',
+    })
+    expect(draftCommandEvent?.session_id).toBeUndefined()
+  })
+
+  it('keeps the current session when deferred draft failure arrives after a session switch', async () => {
+    sendEvents = []
+    api.fetchSession.mockImplementation(async (_botId: string, sessionID: string) => ({
+      id: sessionID,
+      bot_id: 'bot-1',
+      title: sessionID,
+      type: 'chat',
+    }))
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sendPromise = store.sendMessage('hello with skill', undefined, {
+      requestedSkills: [{ skill_ref: 'ref-alpha', name: 'alpha' }],
+      composerScope: 'bot-1:draft-a',
+    })
+    await flushPromises()
+    const streamId = sentWSMessages[0]?.stream_id as string
+
+    await store.selectSession('session-b')
+    streamHandler?.({ type: 'session_created', stream_id: streamId, session_id: 'created-session' } as UIStreamEvent)
+    streamHandler?.({
+      type: 'command_error',
+      invocation_id: streamId,
+      stream_id: streamId,
+      session_id: 'created-session',
+      composer_scope: 'bot-1:draft-a',
+      terminal: true,
+      error: {
+        code: 'unsupported_skill_slash_context',
+        message: 'Requested skills are not supported here.',
+      },
+    } as UIStreamEvent)
+    const result = await sendPromise
+
+    expect(result).toMatchObject({ ok: false, stage: 'startup' })
+    expect(api.deleteSession).toHaveBeenCalledWith('bot-1', 'created-session')
+    expect(store.deletedSession).toEqual({
+      id: 'created-session',
+      botId: 'bot-1',
+      seq: 1,
+      composerScope: 'bot-1:draft-a',
+    })
+    expect(store.sessionId).toBe('session-b')
+    expect(store.knownSessionSummary('created-session')).toBeNull()
+  })
+
+  it('keeps deferred draft websocket errors scoped away from the switched session', async () => {
+    sendEvents = []
+    api.fetchSession.mockImplementation(async (_botId: string, sessionID: string) => ({
+      id: sessionID,
+      bot_id: 'bot-1',
+      title: sessionID,
+      type: 'chat',
+    }))
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sendPromise = store.sendMessage('hello with skill', undefined, {
+      requestedSkills: [{ skill_ref: 'ref-alpha', name: 'alpha' }],
+      composerScope: 'bot-1:draft-a',
+    })
+    await flushPromises()
+    const streamId = sentWSMessages[0]?.stream_id as string
+
+    await store.selectSession('session-b')
+    streamHandler?.({ type: 'session_created', stream_id: streamId, session_id: 'created-session' } as UIStreamEvent)
+    streamHandler?.({ type: 'error', stream_id: streamId, session_id: 'created-session', message: 'model failed' } as UIStreamEvent)
+    const result = await sendPromise
+
+    expect(result).toMatchObject({ ok: false, stage: 'startup', composerScope: 'bot-1:draft-a' })
+    expect(api.deleteSession).toHaveBeenCalledWith('bot-1', 'created-session')
+    expect(store.deletedSession).toEqual({
+      id: 'created-session',
+      botId: 'bot-1',
+      seq: 1,
+      composerScope: 'bot-1:draft-a',
+    })
+    expect(store.sessionId).toBe('session-b')
+    expect(store.startupSendFailure).toBeNull()
+  })
+
+  it('keeps the current command event when an off-scope command event arrives', async () => {
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    api.fetchSession.mockResolvedValueOnce({
+      id: 'session-b',
+      bot_id: 'bot-1',
+      title: 'Session B',
+      type: 'chat',
+    })
+    await store.selectSession('session-b')
+
+    store.showCommandError('current_error', 'Current error', {
+      botId: 'bot-1',
+      sessionId: 'session-b',
+      composerScope: 'bot-1:draft-a',
+    })
+    store.showCommandError('late_error', 'Late draft error', {
+      botId: 'bot-1',
+      composerScope: 'bot-1:draft-a',
+    })
+
+    expect(store.commandEvent).toMatchObject({
+      type: 'command_error',
+      session_id: 'session-b',
+      error: { code: 'current_error' },
+    })
+    expect(store.commandEventForScope({ botId: 'bot-1', composerScope: 'bot-1:draft-a' })).toMatchObject({
+      type: 'command_error',
+      error: { code: 'late_error' },
+    })
   })
 
   it('routes interleaved websocket events by stream id', async () => {

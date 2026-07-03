@@ -24,12 +24,21 @@ import (
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/command"
+	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/media"
 	sessionpkg "github.com/memohai/memoh/internal/session"
+	"github.com/memohai/memoh/internal/slash"
 	"github.com/memohai/memoh/internal/storage"
 )
+
+type fakeSessionTurnActiveChecker map[string]bool
+
+func (f fakeSessionTurnActiveChecker) SessionTurnActive(botID, sessionID string) bool {
+	return f[strings.TrimSpace(botID)+":"+strings.TrimSpace(sessionID)]
+}
 
 func TestFormatLocalStreamEvent_UsesChannelEventShape(t *testing.T) {
 	t.Parallel()
@@ -275,6 +284,66 @@ func TestWSStreamRegistry_HasSessionTracksActiveStreams(t *testing.T) {
 	}
 }
 
+func TestShouldRejectWSRequestedSkillsForActiveStream(t *testing.T) {
+	t.Parallel()
+
+	registry := newWSStreamRegistry()
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := registry.register(&activeWSStream{streamID: "stream-a", sessionID: "session-1", cancel: cancel, abortCh: make(chan struct{}, 1)}); err != nil {
+		t.Fatalf("register stream-a: %v", err)
+	}
+
+	if !shouldRejectWSRequestedSkillsForActiveStream(registry, nil, "bot-1", "session-1", []webRequestedSkill{{Name: "alpha", SkillRef: "ref"}}) {
+		t.Fatal("expected requested skills to reject against an active session")
+	}
+	if shouldRejectWSRequestedSkillsForActiveStream(registry, nil, "bot-1", "session-1", nil) {
+		t.Fatal("ordinary messages should not reject against an active session")
+	}
+	if shouldRejectWSRequestedSkillsForActiveStream(registry, nil, "bot-1", "", []webRequestedSkill{{Name: "alpha", SkillRef: "ref"}}) {
+		t.Fatal("empty session should not reject as active")
+	}
+
+	activeTurns := fakeSessionTurnActiveChecker{"bot-1:session-global": true}
+	if !shouldRejectWSRequestedSkillsForActiveStream(newWSStreamRegistry(), activeTurns, "bot-1", "session-global", []webRequestedSkill{{Name: "alpha", SkillRef: "ref"}}) {
+		t.Fatal("expected requested skills to reject against a globally active session")
+	}
+}
+
+func TestWSRequestedSkillTurnRegistryReserve(t *testing.T) {
+	t.Parallel()
+
+	registry := newWSRequestedSkillTurnRegistry()
+	release, ok := registry.reserve("bot-1", "session-1", "stream-a")
+	if !ok {
+		t.Fatal("first reservation rejected")
+	}
+	if _, ok := registry.reserve("bot-1", "session-1", "stream-b"); ok {
+		t.Fatal("second reservation for same bot/session should reject")
+	}
+	if _, ok := registry.reserve("bot-1", "session-2", "stream-c"); !ok {
+		t.Fatal("different session reservation should be allowed")
+	}
+
+	release()
+	if releaseAgain, ok := registry.reserve("bot-1", "session-1", "stream-d"); !ok {
+		t.Fatal("reservation should be allowed after release")
+	} else {
+		releaseAgain()
+	}
+
+	releaseActive := registry.enter("bot-1", "session-1", "stream-regular")
+	if _, ok := registry.reserve("bot-1", "session-1", "stream-skill"); ok {
+		t.Fatal("requested skill reservation should reject while a regular stream is active")
+	}
+	releaseActive()
+	if releaseAfterActive, ok := registry.reserve("bot-1", "session-1", "stream-skill-2"); !ok {
+		t.Fatal("requested skill reservation should be allowed after regular stream release")
+	} else {
+		releaseAfterActive()
+	}
+}
+
 func TestCanOpenLocalWebSocketAllowsWorkspaceOrManage(t *testing.T) {
 	t.Parallel()
 
@@ -394,6 +463,224 @@ func TestLocalChannelAuthorizeWSSessionAllowsManageAccess(t *testing.T) {
 
 	if err := handler.authorizeWSSession(testEchoContext(currentUser), currentUser, botID, sessionID); err != nil {
 		t.Fatalf("authorizeWSSession() error = %v, want nil", err)
+	}
+}
+
+func TestLocalChannelWSMessageAuthorizesSessionBeforeSlashCommand(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID       = "11111111-1111-1111-1111-111111111111"
+		sessionID   = "22222222-2222-2222-2222-222222222222"
+		currentUser = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+		otherUser   = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+	)
+	queries := localChannelSessionAuthQueries{
+		bot: testBotRow(botID, map[string]any{}),
+		session: sqlc.BotSession{
+			ID:              testUUID(sessionID),
+			BotID:           testUUID(botID),
+			Type:            sessionpkg.TypeChat,
+			CreatedByUserID: testUUID(otherUser),
+			Metadata:        []byte(`{}`),
+		},
+		grants: []sqlc.ListBotUserGrantsForUserRow{
+			{
+				ID:          testUUID("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+				BotID:       testUUID(botID),
+				SubjectType: bots.GrantSubjectUser,
+				UserID:      testUUID(currentUser),
+				Permissions: []byte(`["workspace_exec"]`),
+			},
+		},
+	}
+	handler := &LocalChannelHandler{
+		channelType:    channel.ChannelTypeLocal,
+		botService:     bots.NewService(nil, queries),
+		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
+		sessionService: sessionpkg.NewService(nil, queries, nil),
+		resolver:       &flow.Resolver{},
+		commandHandler: command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil),
+		logger:         slog.Default(),
+	}
+
+	e := echo.New()
+	e.GET("/bots/:bot_id/local/ws", func(c echo.Context) error {
+		c.Set("user", &jwt.Token{
+			Valid: true,
+			Claims: jwt.MapClaims{
+				"sub":     currentUser,
+				"user_id": currentUser,
+			},
+		})
+		return handler.HandleWebSocket(c)
+	})
+	server := httptest.NewServer(e)
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/bots/" + botID + "/local/ws"
+	client, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	if err := client.WriteJSON(map[string]any{
+		"type":       "message",
+		"stream_id":  "stream-1",
+		"session_id": sessionID,
+		"text":       "/help",
+	}); err != nil {
+		t.Fatalf("write ws message: %v", err)
+	}
+
+	var event map[string]any
+	if err := client.ReadJSON(&event); err != nil {
+		t.Fatalf("read ws event: %v", err)
+	}
+	if got := event["type"]; got != "error" {
+		t.Fatalf("event type = %#v, want error; event=%#v", got, event)
+	}
+	if got := event["message"]; got != "session not found" {
+		t.Fatalf("event message = %#v, want session not found; event=%#v", got, event)
+	}
+	if _, ok := event["result"]; ok {
+		t.Fatalf("unexpected command result before session authorization: %#v", event)
+	}
+}
+
+func TestExecuteQuickActionRejectsSessionIDForSessionlessAction(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID       = "11111111-1111-1111-1111-111111111111"
+		sessionID   = "22222222-2222-2222-2222-222222222222"
+		currentUser = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	)
+	queries := localChannelSessionAuthQueries{
+		bot: testBotRow(botID, map[string]any{}),
+		grants: []sqlc.ListBotUserGrantsForUserRow{
+			{
+				ID:          testUUID("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+				BotID:       testUUID(botID),
+				SubjectType: bots.GrantSubjectUser,
+				UserID:      testUUID(currentUser),
+				Permissions: []byte(`["chat"]`),
+			},
+		},
+	}
+	handler := &LocalChannelHandler{
+		botService:     bots.NewService(nil, queries),
+		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
+		logger:         slog.Default(),
+	}
+
+	body := strings.NewReader(`{"action_id":"help","session_id":"` + sessionID + `","invocation_id":"inv-1","composer_scope":"scope-1"}`)
+	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/quick-actions/execute", body)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e := echo.New()
+	c := testAuthContext(e, req, rec, currentUser)
+	c.SetParamNames("bot_id")
+	c.SetParamValues(botID)
+
+	if err := handler.ExecuteQuickAction(c); err != nil {
+		t.Fatalf("ExecuteQuickAction: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var event CommandEventResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &event); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if event.Type != "command_error" {
+		t.Fatalf("event type = %q, want command_error; event=%#v", event.Type, event)
+	}
+	if event.SessionID != "" {
+		t.Fatalf("session id = %q, want empty", event.SessionID)
+	}
+	if event.ActionID != "help" {
+		t.Fatalf("action id = %q, want help", event.ActionID)
+	}
+	if event.InvocationID != "inv-1" {
+		t.Fatalf("invocation id = %q, want inv-1", event.InvocationID)
+	}
+	if event.ComposerScope != "scope-1" {
+		t.Fatalf("composer scope = %q, want scope-1", event.ComposerScope)
+	}
+	if event.Error == nil || event.Error.Code != slash.CodeInvalidQuickActionScope {
+		t.Fatalf("error = %#v, want code %q", event.Error, slash.CodeInvalidQuickActionScope)
+	}
+}
+
+func TestLocalChannelWSSessionSupportsRequestedSkills(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID     = "11111111-1111-1111-1111-111111111111"
+		sessionID = "22222222-2222-2222-2222-222222222222"
+	)
+	tests := []struct {
+		name    string
+		session sqlc.BotSession
+		want    bool
+	}{
+		{
+			name: "model chat",
+			session: sqlc.BotSession{
+				ID:          testUUID(sessionID),
+				BotID:       testUUID(botID),
+				Type:        sessionpkg.TypeChat,
+				SessionMode: sessionpkg.TypeChat,
+				RuntimeType: sessionpkg.RuntimeModel,
+				Metadata:    []byte(`{}`),
+			},
+			want: true,
+		},
+		{
+			name: "discuss",
+			session: sqlc.BotSession{
+				ID:          testUUID(sessionID),
+				BotID:       testUUID(botID),
+				Type:        sessionpkg.TypeDiscuss,
+				SessionMode: sessionpkg.TypeDiscuss,
+				RuntimeType: sessionpkg.RuntimeModel,
+				Metadata:    []byte(`{}`),
+			},
+			want: false,
+		},
+		{
+			name: "acp chat",
+			session: sqlc.BotSession{
+				ID:              testUUID(sessionID),
+				BotID:           testUUID(botID),
+				Type:            sessionpkg.TypeChat,
+				SessionMode:     sessionpkg.TypeChat,
+				RuntimeType:     sessionpkg.RuntimeACPAgent,
+				Metadata:        []byte(`{}`),
+				RuntimeMetadata: []byte(`{}`),
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := &LocalChannelHandler{
+				sessionService: sessionpkg.NewService(nil, localChannelSessionAuthQueries{session: tc.session}, nil),
+			}
+			got, err := handler.wsSessionSupportsRequestedSkills(context.Background(), sessionID)
+			if err != nil {
+				t.Fatalf("wsSessionSupportsRequestedSkills: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("supported = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -528,7 +815,10 @@ func TestParseWSClientAttachments_NormalizesToolStyleInputs(t *testing.T) {
 		json.RawMessage(`"screenshot.png"`),
 		json.RawMessage(`{"url":"data:image/png;base64,AAAA","type":"image"}`),
 	}
-	got := parseWSClientAttachments(rawAttachments)
+	got, err := parseWSClientAttachments(rawAttachments)
+	if err != nil {
+		t.Fatalf("parseWSClientAttachments: %v", err)
+	}
 	if len(got) != 2 {
 		t.Fatalf("expected 2 attachments, got %d", len(got))
 	}
@@ -540,6 +830,18 @@ func TestParseWSClientAttachments_NormalizesToolStyleInputs(t *testing.T) {
 	}
 	if got[1].Mime != "image/png" {
 		t.Fatalf("expected inferred image/png mime, got %q", got[1].Mime)
+	}
+}
+
+func TestParseWSClientAttachmentsRejectsReservedMetadata(t *testing.T) {
+	t.Parallel()
+
+	_, err := parseWSClientAttachments([]json.RawMessage{
+		json.RawMessage(`{"url":"data:image/png;base64,AAAA","type":"image","metadata":{"model_requested_skills":["alpha"]}}`),
+	})
+	var slashErr slash.Error
+	if !errors.As(err, &slashErr) || slashErr.Code != slash.CodeReservedSkillMetadata {
+		t.Fatalf("err = %#v, want %s", err, slash.CodeReservedSkillMetadata)
 	}
 }
 

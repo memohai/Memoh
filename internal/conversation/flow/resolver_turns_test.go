@@ -47,6 +47,22 @@ func TestTryEnterIdleSessionTurnRejectsActiveSession(t *testing.T) {
 	}
 }
 
+func TestSessionTurnActiveTracksActiveTurn(t *testing.T) {
+	resolver := &Resolver{}
+	if resolver.SessionTurnActive("bot-1", "session-1") {
+		t.Fatal("session should not be active before entering a turn")
+	}
+
+	release := resolver.enterSessionTurn(context.Background(), "bot-1", "session-1")
+	if !resolver.SessionTurnActive(" bot-1 ", " session-1 ") {
+		t.Fatal("session should be active while a turn is entered")
+	}
+	release()
+	if resolver.SessionTurnActive("bot-1", "session-1") {
+		t.Fatal("session should not be active after release")
+	}
+}
+
 func TestTryEnterIdleSessionTurnReentersAfterRelease(t *testing.T) {
 	resolver := &Resolver{}
 	release, ok := resolver.tryEnterIdleSessionTurn(context.Background(), "bot-1", "session-1")

@@ -2309,6 +2309,56 @@ definitions:
       user_config_schema:
         $ref: '#/definitions/channel.ConfigSchema'
     type: object
+  handlers.CommandActionError:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
+    type: object
+  handlers.CommandActionListItem:
+    properties:
+      description:
+        type: string
+      id:
+        type: string
+      kind:
+        type: string
+      title:
+        type: string
+    type: object
+  handlers.CommandActionResult:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/handlers.CommandActionListItem'
+        type: array
+      kind:
+        type: string
+      text:
+        type: string
+      title:
+        type: string
+    type: object
+  handlers.CommandEventResponse:
+    properties:
+      action_id:
+        type: string
+      composer_scope:
+        type: string
+      error:
+        $ref: '#/definitions/handlers.CommandActionError'
+      invocation_id:
+        type: string
+      result:
+        $ref: '#/definitions/handlers.CommandActionResult'
+      session_id:
+        type: string
+      terminal:
+        type: boolean
+      type:
+        type: string
+    type: object
   handlers.ContainerCPUMetricsResponse:
     properties:
       kernel_nanoseconds:
@@ -2848,6 +2898,20 @@ definitions:
           $ref: '#/definitions/mcp.ToolDescriptor'
         type: array
     type: object
+  handlers.QuickActionExecuteRequest:
+    properties:
+      action_id:
+        type: string
+      composer_scope:
+        type: string
+      invocation_id:
+        type: string
+      params:
+        additionalProperties: {}
+        type: object
+      session_id:
+        type: string
+    type: object
   handlers.RefreshResponse:
     properties:
       access_token:
@@ -2861,6 +2925,13 @@ definitions:
     properties:
       version:
         type: integer
+    type: object
+  handlers.SafeSkillsResponse:
+    properties:
+      skills:
+        items:
+          $ref: '#/definitions/skills.SafeCatalogItem'
+        type: array
     type: object
   handlers.SessionInfoResponse:
     properties:
@@ -4577,6 +4648,21 @@ definitions:
       tts_model_id:
         type: string
       video_model_id:
+        type: string
+    type: object
+  skills.SafeCatalogItem:
+    properties:
+      description:
+        type: string
+      display_name:
+        type: string
+      name:
+        type: string
+      skill_ref:
+        type: string
+      source_kind:
+        type: string
+      state:
         type: string
     type: object
   userinput.UIOption:
@@ -6591,6 +6677,10 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "404":
           description: Not Found
           schema:
@@ -8534,6 +8624,46 @@ paths:
       summary: Uninstall bot plugin
       tags:
       - plugins
+  /bots/{bot_id}/quick-actions/execute:
+    post:
+      consumes:
+      - application/json
+      description: Runs a typed Web quick action such as help or skill.list and returns
+        a command_result or command_error envelope.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Quick action payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.QuickActionExecuteRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.CommandEventResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Execute a Web quick action
+      tags:
+      - quick-actions
   /bots/{bot_id}/schedule:
     get:
       description: List schedules for current user
@@ -9281,6 +9411,38 @@ paths:
       summary: Update user settings
       tags:
       - settings
+  /bots/{bot_id}/skills/catalog:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SafeSkillsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List runtime-safe skills for chat-time skill selection
+      tags:
+      - skills
   /bots/{bot_id}/supermarket/install-plugin:
     post:
       parameters:

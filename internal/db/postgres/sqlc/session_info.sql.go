@@ -81,21 +81,78 @@ func (q *Queries) GetSessionCacheStats(ctx context.Context, sessionID pgtype.UUI
 }
 
 const getSessionUsedSkills = `-- name: GetSessionUsedSkills :many
-SELECT DISTINCT
-  (part->'input'->>'skillName')::text AS skill_name
-FROM bot_history_messages m,
-  jsonb_array_elements(
+WITH requested AS (
+  SELECT DISTINCT
+    (item->>'name')::text AS skill_name,
+    (
+      'requested:' ||
+      COALESCE(NULLIF(item->>'source_kind', ''), 'unknown') || ':' ||
+      COALESCE(NULLIF(item->>'opaque_source_id', ''), '') || ':' ||
+      (item->>'name')
+    )::text AS skill_identity
+  FROM bot_history_messages m,
+    jsonb_array_elements(
+      CASE WHEN jsonb_typeof(m.metadata->'model_requested_skills') = 'array'
+           THEN m.metadata->'model_requested_skills'
+           ELSE '[]'::jsonb
+      END
+    ) AS item
+  WHERE m.session_id = $1
+    AND m.role = 'user'
+    AND item->>'name' IS NOT NULL
+    AND item->>'name' != ''
+),
+tool_payloads AS (
+  SELECT
     CASE WHEN jsonb_typeof(m.content->'content') = 'array'
          THEN m.content->'content'
+         WHEN jsonb_typeof(m.content) = 'array'
+         THEN m.content
          ELSE '[]'::jsonb
-    END
-  ) AS part
-WHERE m.session_id = $1
-  AND m.role = 'assistant'
-  AND part->>'type' = 'tool-call'
-  AND part->>'toolName' = 'use_skill'
-  AND part->'input'->>'skillName' IS NOT NULL
-  AND part->'input'->>'skillName' != ''
+    END AS content_json
+  FROM bot_history_messages m
+  WHERE m.session_id = $1
+    AND m.role = 'assistant'
+),
+tool_used AS (
+  SELECT DISTINCT
+    COALESCE(
+      part->'input'->>'skillName',
+      part->'input'->>'skill_name',
+      part->'input'->>'name'
+    )::text AS skill_name,
+    (
+      'tool_call:' ||
+      COALESCE(
+        part->'input'->>'skillName',
+        part->'input'->>'skill_name',
+        part->'input'->>'name'
+      )
+    )::text AS skill_identity
+  FROM tool_payloads p,
+    jsonb_array_elements(p.content_json) AS part
+  WHERE part->>'type' = 'tool-call'
+    AND COALESCE(part->>'toolName', part->>'tool_name') = 'use_skill'
+    AND COALESCE(
+      part->'input'->>'skillName',
+      part->'input'->>'skill_name',
+      part->'input'->>'name'
+    ) IS NOT NULL
+    AND COALESCE(
+      part->'input'->>'skillName',
+      part->'input'->>'skill_name',
+      part->'input'->>'name'
+    ) != ''
+),
+skill_rows AS (
+  SELECT skill_identity, skill_name FROM requested
+  UNION ALL
+  SELECT skill_identity, skill_name FROM tool_used
+),
+deduped AS (
+  SELECT DISTINCT skill_identity, skill_name FROM skill_rows
+)
+SELECT DISTINCT skill_name FROM deduped
 ORDER BY skill_name
 `
 

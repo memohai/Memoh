@@ -252,6 +252,75 @@
               class="hidden"
               @change="handleFileInputChange"
             >
+            <Transition
+              enter-active-class="transition-opacity duration-150 ease-out"
+              enter-from-class="opacity-0"
+              enter-to-class="opacity-100"
+              leave-active-class="transition-opacity duration-100 ease-in"
+              leave-from-class="opacity-100"
+              leave-to-class="opacity-0"
+            >
+              <Command
+                v-if="slashPanelOpen"
+                class="absolute inset-x-4 bottom-full z-30 mb-2 max-h-80"
+              >
+                <CommandList>
+                  <CommandGroup
+                    v-if="visibleSlashQuickActions.length"
+                    :heading="$t('chat.slash.quickActions')"
+                  >
+                    <CommandItem
+                      v-for="action in visibleSlashQuickActions"
+                      :key="action.id"
+                      :value="action.label"
+                      @select="selectSlashQuickAction(action.label)"
+                    >
+                      <component
+                        :is="action.icon"
+                        class="size-4 shrink-0 text-muted-foreground"
+                      />
+                      <span class="min-w-0 flex-1">
+                        <span class="block truncate text-control">{{ action.label }}</span>
+                        <span class="block truncate text-caption text-muted-foreground">{{ action.description }}</span>
+                      </span>
+                    </CommandItem>
+                  </CommandGroup>
+                  <CommandSeparator v-if="visibleSlashQuickActions.length && visibleSlashSkills.length" />
+                  <CommandGroup
+                    v-if="visibleSlashSkills.length"
+                    :heading="$t('chat.slash.skills')"
+                  >
+                    <CommandItem
+                      v-for="skill in visibleSlashSkills"
+                      :key="skill.skill_ref"
+                      :value="skill.name"
+                      @select="addRequestedSkill(skill)"
+                    >
+                      <Sparkles class="size-4 shrink-0 text-muted-foreground" />
+                      <span class="min-w-0 flex-1">
+                        <span class="block truncate text-control">{{ skill.display_name || skill.name }}</span>
+                        <span
+                          v-if="skill.description"
+                          class="block truncate text-caption text-muted-foreground"
+                        >{{ skill.description }}</span>
+                      </span>
+                    </CommandItem>
+                  </CommandGroup>
+                  <div
+                    v-if="safeSkillCatalogLoading"
+                    class="py-6 text-center text-body text-muted-foreground"
+                  >
+                    {{ $t('chat.slash.loadingSkills') }}
+                  </div>
+                  <div
+                    v-else-if="!slashPanelHasResults"
+                    class="py-6 text-center text-body text-muted-foreground"
+                  >
+                    {{ $t('chat.slash.noResults') }}
+                  </div>
+                </CommandList>
+              </Command>
+            </Transition>
             <section>
               <Transition
                 enter-active-class="transition-all duration-150 ease-out"
@@ -367,6 +436,72 @@
                 </div>
               </Transition>
               <div
+                v-if="commandPanelEvent"
+                class="mb-2 overflow-hidden rounded-lg border bg-card"
+                :class="commandPanelIsError ? 'border-destructive/30' : 'border-border'"
+              >
+                <div class="flex items-start gap-2 px-3 py-2">
+                  <CircleAlert
+                    v-if="commandPanelIsError"
+                    class="mt-0.5 size-4 shrink-0 text-destructive"
+                  />
+                  <div class="min-w-0 flex-1">
+                    <p
+                      class="truncate text-label font-medium"
+                      :class="commandPanelIsError ? 'text-destructive' : 'text-foreground'"
+                    >
+                      {{ commandPanelTitle }}
+                    </p>
+                    <p
+                      v-if="commandPanelText"
+                      class="mt-0.5 whitespace-pre-wrap break-words text-body text-muted-foreground"
+                    >
+                      {{ commandPanelText }}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    :aria-label="$t('chat.slash.dismiss')"
+                    @click="clearCurrentCommandEvent"
+                  >
+                    <X class="size-3.5" />
+                  </Button>
+                </div>
+                <div
+                  v-if="commandResultItems.length"
+                  class="border-t border-border p-1"
+                >
+                  <Button
+                    v-for="item in commandResultItems"
+                    :key="`${item.kind || 'item'}:${item.id || item.title}`"
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    class="h-auto min-h-8 w-full justify-start gap-2 px-2 py-1.5 text-left"
+                    :disabled="item.kind !== 'skill'"
+                    @click="selectCommandResultItem(item)"
+                  >
+                    <Sparkles
+                      v-if="item.kind === 'skill'"
+                      class="size-3.5 shrink-0 text-muted-foreground"
+                    />
+                    <List
+                      v-else
+                      class="size-3.5 shrink-0 text-muted-foreground"
+                    />
+                    <span class="min-w-0 flex-1">
+                      <span class="block truncate text-body text-foreground">{{ item.title }}</span>
+                      <span
+                        v-if="item.description"
+                        class="block truncate text-caption text-muted-foreground"
+                      >{{ item.description }}</span>
+                    </span>
+                  </Button>
+                </div>
+              </div>
+              <div
                 v-if="composerError"
                 class="mb-2 flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
               >
@@ -430,6 +565,39 @@
                           @preview="preview.isPasted ? (pastedViewerText = preview.pastedText) : openComposerPreview(preview.url)"
                         />
                       </div>
+                    </div>
+                  </div>
+                </Transition>
+
+                <Transition
+                  enter-active-class="transition-opacity duration-150 ease-out"
+                  enter-from-class="opacity-0"
+                  enter-to-class="opacity-100"
+                  leave-active-class="transition-opacity duration-100 ease-in"
+                  leave-from-class="opacity-100"
+                  leave-to-class="opacity-0"
+                >
+                  <div
+                    v-if="requestedSkills.length"
+                    class="order-first flex w-full basis-full flex-wrap gap-1.5 pb-1.5"
+                  >
+                    <div
+                      v-for="skill in requestedSkills"
+                      :key="requestedSkillKey(skill)"
+                      class="flex min-h-8 max-w-full items-center gap-1.5 rounded-full bg-accent py-0.5 pl-2.5 pr-0.5 text-label text-foreground"
+                    >
+                      <Sparkles class="size-3.5 shrink-0 text-muted-foreground" />
+                      <span class="min-w-0 truncate">{{ skill.display_name || skill.name }}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        :aria-label="$t('chat.slash.removeSkill', { name: skill.display_name || skill.name })"
+                        class="shrink-0"
+                        @click="removeRequestedSkill(skill)"
+                      >
+                        <X class="size-3.5" />
+                      </Button>
                     </div>
                   </div>
                 </Transition>
@@ -816,8 +984,12 @@ import {
   SquareCheck,
   Circle,
   CircleDot,
+  Sparkles,
+  X,
+  HelpCircle,
+  List,
 } from 'lucide-vue-next'
-import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle } from '@memohai/ui'
+import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, Command, CommandGroup, CommandItem, CommandList, CommandSeparator } from '@memohai/ui'
 import { useChatStore, type ACPAgentSessionInput } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import { useScroll, useElementBounding, useIntersectionObserver, useStorage } from '@vueuse/core'
@@ -835,7 +1007,7 @@ import SessionInfoRing from './session-info-ring.vue'
 import ChatModelPicker from './chat-model-picker.vue'
 import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
-import type { ChatAttachment, UIUserInput, UIUserInputQuestion, WSUserInputAnswer } from '@/composables/api/useChat'
+import { fetchSafeSkillCatalog, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput, type UIUserInputQuestion, type WSUserInputAnswer } from '@/composables/api/useChat'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, ACP_NO_PROJECT_MODE, acpAgentIcon, createACPNoProjectPath, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig, readRecentACPFolders, rememberACPFolder } from '@/utils/acp'
@@ -1312,6 +1484,148 @@ const composerMenuHasItems = computed(() =>
   (canChangeAgent.value && enabledACPProfiles.value.length > 0) || !activeIsACP.value,
 )
 const activeSessionId = computed(() => activeSession.value?.id ?? '')
+const requestedSkills = ref<RequestedSkillSelection[]>([])
+const { data: safeSkillCatalog, isLoading: safeSkillCatalogLoading } = useQuery({
+  key: () => ['bot-safe-skills-catalog', currentBotId.value ?? ''],
+  query: () => fetchSafeSkillCatalog(currentBotId.value!),
+  enabled: () => !!currentBotId.value && !activeIsACP.value,
+  refetchOnWindowFocus: false,
+})
+const safeSkills = computed(() => safeSkillCatalog.value ?? [])
+
+function requestedSkillKey(skill: Pick<RequestedSkillSelection, 'skill_ref' | 'name'>): string {
+  return skill.skill_ref?.trim() || skill.name.trim()
+}
+
+function addRequestedSkill(skill: RequestedSkillSelection) {
+  const skillRef = skill.skill_ref?.trim()
+  const name = skill.name?.trim()
+  if (!skillRef || !name) return
+  const key = requestedSkillKey({ skill_ref: skillRef, name })
+  if (requestedSkills.value.some(item => requestedSkillKey(item) === key)) return
+  requestedSkills.value = [...requestedSkills.value, {
+    skill_ref: skillRef,
+    name,
+    display_name: skill.display_name?.trim() || undefined,
+    description: skill.description?.trim() || undefined,
+    source_kind: skill.source_kind?.trim() || undefined,
+    state: skill.state?.trim() || undefined,
+  }]
+  if (inputText.value.trimStart().startsWith('/')) {
+    inputText.value = ''
+    saveInputDraft(inputDraftKey.value, '')
+  }
+  chatStore.clearCommandEvent()
+  void nextTick(focusTextarea)
+}
+
+function removeRequestedSkill(skill: RequestedSkillSelection) {
+  const key = requestedSkillKey(skill)
+  requestedSkills.value = requestedSkills.value.filter(item => requestedSkillKey(item) !== key)
+  void nextTick(focusTextarea)
+}
+
+watch([currentBotId, activeSessionId], () => {
+  requestedSkills.value = []
+  chatStore.clearCommandEvent()
+})
+
+const slashQuickActions = computed(() => [
+  {
+    id: 'help',
+    label: '/help',
+    description: t('chat.slash.helpDescription'),
+    icon: HelpCircle,
+  },
+  {
+    id: 'skill.list',
+    label: '/skill list',
+    description: t('chat.slash.skillListDescription'),
+    icon: List,
+  },
+])
+
+const slashQuery = computed(() => {
+  const text = inputText.value
+  if (!text.trimStart().startsWith('/')) return ''
+  const slashIndex = text.indexOf('/')
+  return text.slice(slashIndex + 1).trim().toLowerCase()
+})
+const slashPanelOpen = computed(() =>
+  isActive.value
+  && !!currentBotId.value
+  && !activeChatReadOnly.value
+  && !loadingMessages.value
+  && inputText.value.trimStart().startsWith('/')
+  && !inputText.value.includes('\n'),
+)
+function slashMatches(label: string, description = ''): boolean {
+  const query = slashQuery.value
+  if (!query) return true
+  const haystack = `${label} ${description}`.toLowerCase()
+  return haystack.includes(query)
+}
+const visibleSlashQuickActions = computed(() =>
+  slashQuickActions.value.filter(action => slashMatches(action.label, action.description)),
+)
+const visibleSlashSkills = computed(() =>
+  safeSkills.value.filter(skill => slashMatches(skill.name, skill.description ?? '')),
+)
+const slashPanelHasResults = computed(() =>
+  visibleSlashQuickActions.value.length > 0 || visibleSlashSkills.value.length > 0,
+)
+
+function selectSlashQuickAction(label: string) {
+  inputText.value = label
+  saveInputDraft(inputDraftKey.value, label)
+  void nextTick(() => {
+    focusTextarea()
+    void handleSend()
+  })
+}
+
+function currentPaneCommandScope() {
+  const activeBotId = (currentBotId.value ?? '').trim()
+  const renderedSessionId = (props.sessionId || activeSessionId.value || chatStore.sessionId || '').trim()
+  const paneScope = activeBotId && props.tabId.trim() ? `${activeBotId}:${props.tabId.trim()}` : 'chat'
+  return renderedSessionId
+    ? { botId: activeBotId || undefined, sessionId: renderedSessionId, composerScope: paneScope }
+    : { botId: activeBotId || undefined, composerScope: paneScope }
+}
+
+function clearCurrentCommandEvent() {
+  chatStore.clearCommandEvent(currentPaneCommandScope())
+}
+
+const commandPanelEvent = computed(() => chatStore.commandEventForScope(currentPaneCommandScope()))
+const commandResult = computed(() => commandPanelEvent.value?.type === 'command_result' ? commandPanelEvent.value.result : null)
+const commandError = computed(() => commandPanelEvent.value?.type === 'command_error' ? commandPanelEvent.value.error : null)
+const commandPanelIsError = computed(() => !!commandError.value)
+const commandPanelTitle = computed(() => {
+  if (commandError.value) return t('chat.slash.commandError')
+  return commandResult.value?.title || t('chat.slash.commandResult')
+})
+function localizedCommandErrorMessage(error: CommandActionError): string {
+  const code = error.code.trim()
+  if (code) {
+    const key = `chat.slash.errorMessages.${code}`
+    const translated = t(key)
+    if (translated !== key) return translated
+  }
+  return error.message || t('chat.slash.errorMessages.generic')
+}
+
+const commandPanelText = computed(() => commandError.value ? localizedCommandErrorMessage(commandError.value) : commandResult.value?.text || '')
+const commandResultItems = computed(() => commandResult.value?.items ?? [])
+
+function selectCommandResultItem(item: CommandActionListItem) {
+  if (item.kind !== 'skill' || !item.id?.trim() || !item.title.trim()) return
+  addRequestedSkill({
+    skill_ref: item.id,
+    name: item.title,
+    description: item.description,
+  })
+}
 const {
   runtime: acpRuntime,
   models: acpModels,
@@ -1696,7 +2010,7 @@ const isMultiline = computed(() => textMultiline.value || narrowMultiline.value)
 const compactContentWidth = ref(0)
 const composerInnerWidth = ref(0)
 const composerBoxHeight = ref(0)
-const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.value.length > 0)
+const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.value.length > 0 || requestedSkills.value.length > 0)
 
 // Whether the trailing slot shows the send button at all. In standard chat the
 // SessionInfoRing fills that slot while idle and the send button only reveals
@@ -2046,12 +2360,41 @@ watch([
   isActive,
 ], ([failure]) => {
   if (!failure || !isActive.value) return
-  if (failure.botId && failure.botId !== currentBotId.value) return
-  if (failure.sessionId && failure.sessionId !== chatStore.sessionId) return
-  // This pane carries the session it renders directly now (was derived from tabId
-  // which is the stable panel id, not the session). A draft pane (null) still
-  // accepts the restore for the send it just attempted.
-  if (failure.sessionId && props.sessionId && props.sessionId !== failure.sessionId) return
+  const discardFailure = () => chatStore.clearStartupSendFailure(failure.id)
+  if (failure.botId && failure.botId !== currentBotId.value) {
+    discardFailure()
+    return
+  }
+  const failureScope = failure.composerScope?.trim()
+  const paneScope = inputDraftKey.value || 'chat'
+  const renderedSessionId = (props.sessionId || activeSessionId.value || chatStore.sessionId || '').trim()
+  if (failureScope) {
+    if (failureScope !== paneScope) {
+      discardFailure()
+      return
+    }
+    if (failure.sessionId) {
+      if (renderedSessionId !== failure.sessionId) {
+        discardFailure()
+        return
+      }
+    } else if (renderedSessionId) {
+      discardFailure()
+      return
+    }
+  } else {
+    if (failure.sessionId && failure.sessionId !== chatStore.sessionId) {
+      discardFailure()
+      return
+    }
+    // This pane carries the session it renders directly now (was derived from tabId
+    // which is the stable panel id, not the session). A draft pane (null) still
+    // accepts the restore for the send it just attempted.
+    if (failure.sessionId && props.sessionId && props.sessionId !== failure.sessionId) {
+      discardFailure()
+      return
+    }
+  }
 
   inputText.value = failure.restoreInput
   saveInputDraft(inputDraftKey.value, failure.restoreInput)
@@ -2611,7 +2954,26 @@ async function handleSend() {
   // isAutoScroll.value = true
   const text = inputText.value.trim()
   const files = [...pendingFiles.value]
-  if ((!text && !files.length) || streaming.value || loadingMessages.value || activeChatReadOnly.value) return
+  const skills = [...requestedSkills.value]
+  if ((!text && !files.length && !skills.length) || streaming.value || loadingMessages.value || activeChatReadOnly.value) return
+  if (skills.length && !text) {
+    composerError.value = ''
+    chatStore.showCommandError('missing_prompt', t('chat.slash.missingPrompt'), {
+      botId: currentBotId.value ?? undefined,
+      sessionId: activeSessionId.value || undefined,
+      composerScope: inputDraftKey.value || 'chat',
+    })
+    return
+  }
+  if (text.startsWith('/') && files.length) {
+    composerError.value = ''
+    chatStore.showCommandError('slash_attachments_unsupported', t('chat.slash.attachmentsUnsupported'), {
+      botId: currentBotId.value ?? undefined,
+      sessionId: activeSessionId.value || undefined,
+      composerScope: inputDraftKey.value || 'chat',
+    })
+    return
+  }
   const isNewCommand = /^\/new(?:\s|$)/i.test(text)
   if (defaultACPComposerError.value && !hasExplicitSessionSelection.value && !isNewCommand) {
     composerError.value = defaultACPComposerError.value
@@ -2623,10 +2985,14 @@ async function handleSend() {
   }
 
   const sentDraftKey = inputDraftKey.value
+  const sentComposerScope = inputDraftKey.value || 'chat'
+  const sentBotId = currentBotId.value ?? ''
+  const sentSessionId = activeSessionId.value || ''
   composerError.value = ''
   inputText.value = ''
   saveInputDraft(sentDraftKey, '')
   pendingFiles.value = []
+  requestedSkills.value = []
 
   let attachments: ChatAttachment[] | undefined
   try {
@@ -2636,17 +3002,29 @@ async function handleSend() {
   } catch (error) {
     inputText.value = text
     pendingFiles.value = files
+    requestedSkills.value = skills
     composerError.value = error instanceof Error ? error.message : t('chat.sendFailed')
     return
   }
 
-  const result = await chatStore.sendMessage(text, attachments)
+  const result = await chatStore.sendMessage(text, attachments, {
+    requestedSkills: skills,
+    composerScope: sentComposerScope,
+  })
   if (!result.ok && result.stage === 'startup') {
     const restoreInput = result.restoreInput ?? text
+    const activeRenderedSessionId = (props.sessionId || activeSessionId.value || chatStore.sessionId || '').trim()
+    const stillOriginalComposer = (currentBotId.value ?? '') === sentBotId
+      && (inputDraftKey.value || 'chat') === sentComposerScope
+      && ((!sentSessionId && !activeRenderedSessionId) || (!!sentSessionId && activeRenderedSessionId === sentSessionId))
+    if (!stillOriginalComposer) return
     inputText.value = restoreInput
-    saveInputDraft(inputDraftKey.value || sentDraftKey, restoreInput)
+    saveInputDraft(sentDraftKey, restoreInput)
     pendingFiles.value = files
-    composerError.value = result.error || t('chat.sendFailed')
+    requestedSkills.value = skills
+    if (commandPanelEvent.value?.type !== 'command_error') {
+      composerError.value = result.error || t('chat.sendFailed')
+    }
   }
 }
 </script>

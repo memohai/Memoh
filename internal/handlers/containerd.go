@@ -22,6 +22,7 @@ import (
 	displaypkg "github.com/memohai/memoh/internal/display"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/policy"
+	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
 )
 
@@ -40,6 +41,8 @@ type ContainerdHandler struct {
 	accountService   *accounts.Service
 	policyService    *policy.Service
 	pluginService    PluginInstallationLister
+	skillRefCodec    *skillset.RefCodec
+	skillRefLimits   skillset.ResolveLimits
 	displayService   *displaypkg.Service
 	browserSessions  *browserSessionStore
 }
@@ -264,8 +267,15 @@ func NewContainerdHandler(log *slog.Logger, manager containerWorkspace, cfg conf
 	return h
 }
 
+func (h *ContainerdHandler) SetSkillRefCodec(codec *skillset.RefCodec, limits skillset.ResolveLimits) {
+	h.skillRefCodec = codec
+	h.skillRefLimits = limits
+}
+
 func (h *ContainerdHandler) Register(e *echo.Echo) {
 	e.Pre(h.handleBrowserProxyPre)
+
+	e.GET("/bots/:bot_id/skills/catalog", h.ListSafeSkills)
 
 	group := e.Group("/bots/:bot_id/container")
 	group.POST("", h.CreateContainer)

@@ -492,6 +492,30 @@
       "runToSeeList": "{command} を実行して、利用可能なものを確認します。"
     }
   },
+  "slash": {
+    "error": {
+      "unknownSlash": "不明な slash コマンドです。",
+      "unsupportedWebCommand": "その slash コマンドは Web Chat では利用できません。",
+      "useSkillChipRequired": "requested skill は skill picker のチップから選択してください。",
+      "invalidSkillSlashSyntax": "/skill use の構文が無効です。/skill use <name>[,<name>...] -- <prompt> を使用してください。",
+      "missingPrompt": "prompt がありません。-- の後に内容を追加してください。",
+      "requestedSkillNotFound": "指定された skill が見つかりません。",
+      "requestedSkillAmbiguous": "指定された skill は曖昧です。",
+      "requestedSkillDisabled": "指定された skill は無効です。",
+      "requestedSkillNotRuntimeUsable": "指定された skill はこのチャットでは利用できません。",
+      "invalidSkillRef": "選択された skill は無効です。",
+      "staleSkillRef": "選択された skill が変更されています。もう一度選択してください。",
+      "tooManyRequestedSkills": "指定された skill が多すぎます。",
+      "requestedSkillContextTooLarge": "指定された skill の context が大きすぎます。",
+      "slashAttachmentsUnsupported": "slash コマンドでは添付ファイルを利用できません。",
+      "unsupportedSkillSlashContext": "この context では requested skills を利用できません。",
+      "unsupportedLegacyEndpoint": "この endpoint は requested skills に対応していません。",
+      "invalidQuickActionScope": "このクイック操作は session に紐づけられません。",
+      "permissionDenied": "この slash コマンドを使用する権限がありません。",
+      "reservedSkillMetadata": "予約済みの skill metadata は指定できません。",
+      "generic": "slash コマンドに失敗しました。"
+    }
+  },
   "menu": {
     "start": "ウェルカムメッセージを表示する",
     "help": "使用可能なコマンドを表示する",

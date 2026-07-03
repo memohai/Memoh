@@ -1,5 +1,6 @@
 import { app, dialog } from 'electron'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, request, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { join } from 'node:path'
@@ -16,6 +17,7 @@ import { bundledGStreamerEnv } from './gstreamer'
 import { desktopResourcePath, desktopServerWorkDir, repoRoot } from './paths'
 
 const DEFAULT_SERVER_PORT = 18731
+const SKILL_REF_KEY_PLACEHOLDER = 'CHANGE-ME-TO-A-BASE64-32-BYTE-SKILL-REF-KEY'
 
 // activeSlot is the desktop dev slot keyword set by
 // `mise run desktop:dev -- <keyword>`. Empty (or "default") means the
@@ -267,8 +269,9 @@ function prepareConfig(cwd: string, sourcePath: string, qdrantGrpcBaseUrl: strin
   mkdirSync(cwd, { recursive: true })
   const home = app.getPath('home')
   const source = readFileSync(sourcePath, 'utf8')
-  const contents = applyLocalConfigDefaults(source, cwd, home, providersDir, qdrantGrpcBaseUrl)
   const targetPath = join(cwd, `config${slotSuffix()}.toml`)
+  const existingSkillRefKey = readExistingSkillRefKey(targetPath)
+  const contents = applyLocalConfigDefaults(source, cwd, home, providersDir, qdrantGrpcBaseUrl, existingSkillRefKey)
   writeFileSync(targetPath, contents, { mode: 0o600 })
   return targetPath
 }
@@ -279,8 +282,10 @@ function applyLocalConfigDefaults(
   home: string,
   providersDir: string,
   qdrantGrpcBaseUrl?: string,
+  existingSkillRefKey?: string,
 ): string {
   let next = contents.replaceAll('__HOME__', home)
+  next = next.replaceAll(SKILL_REF_KEY_PLACEHOLDER, existingSkillRefKey || randomBytes(32).toString('base64'))
   const dataDir = slotDataDir()
   next = setTomlString(next, 'container', 'data_root', toAbsoluteConfigPath(cwd, dataDir))
   next = setTomlString(next, 'container', 'runtime_dir', toAbsoluteConfigPath(cwd, slotRuntimeDir()))
@@ -298,6 +303,19 @@ function applyLocalConfigDefaults(
     next = setTomlString(next, 'qdrant', 'base_url', qdrantGrpcBaseUrl)
   }
   return setDockerHostIfEmpty(next, detectDockerHost(home))
+}
+
+function readExistingSkillRefKey(configPath: string): string | undefined {
+  if (!existsSync(configPath)) {
+    return undefined
+  }
+  const contents = readFileSync(configPath, 'utf8')
+  const inline = contents.match(/^\s*keys\s*=\s*\{[^}]*\blocal\s*=\s*"([^"]+)"[^}]*\}/m)
+  if (inline?.[1]) {
+    return inline[1]
+  }
+  const table = contents.match(/^\s*\[skill_ref\.keys\][\s\S]*?^\s*local\s*=\s*"([^"]+)"/m)
+  return table?.[1]
 }
 
 function toAbsoluteConfigPath(cwd: string, value: string): string {

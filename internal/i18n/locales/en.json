@@ -492,6 +492,30 @@
       "runToSeeList": " Run {command} to see what's available."
     }
   },
+  "slash": {
+    "error": {
+      "unknownSlash": "Unknown slash command.",
+      "unsupportedWebCommand": "That slash command is not available in Web chat.",
+      "useSkillChipRequired": "Use the skill picker chip for requested skills.",
+      "invalidSkillSlashSyntax": "Invalid /skill use syntax. Use /skill use <name>[,<name>...] -- <prompt>.",
+      "missingPrompt": "Missing prompt. Add text after --.",
+      "requestedSkillNotFound": "Requested skill was not found.",
+      "requestedSkillAmbiguous": "Requested skill is ambiguous.",
+      "requestedSkillDisabled": "Requested skill is disabled.",
+      "requestedSkillNotRuntimeUsable": "Requested skill is not available for chat.",
+      "invalidSkillRef": "The selected skill is invalid.",
+      "staleSkillRef": "The selected skill changed. Pick it again.",
+      "tooManyRequestedSkills": "Too many skills requested.",
+      "requestedSkillContextTooLarge": "Requested skill context is too large.",
+      "slashAttachmentsUnsupported": "Slash commands do not support attachments.",
+      "unsupportedSkillSlashContext": "Requested skills are not supported in this context.",
+      "unsupportedLegacyEndpoint": "This endpoint does not support requested skills.",
+      "invalidQuickActionScope": "This quick action cannot be scoped to a session.",
+      "permissionDenied": "You do not have permission to use that slash command.",
+      "reservedSkillMetadata": "Reserved skill metadata cannot be supplied.",
+      "generic": "Slash command failed."
+    }
+  },
   "menu": {
     "start": "Show the welcome message",
     "help": "Show available commands",

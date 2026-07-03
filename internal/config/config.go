@@ -51,6 +51,7 @@ type Config struct {
 	Admin         AdminConfig         `toml:"admin"`
 	Auth          AuthConfig          `toml:"auth"`
 	Agent         AgentConfig         `toml:"agent"`
+	SkillRef      SkillRefConfig      `toml:"skill_ref"`
 	Timezone      string              `toml:"timezone"`
 	Database      DatabaseConfig      `toml:"database"`
 	Container     ContainerConfig     `toml:"container"`
@@ -160,6 +161,41 @@ type AdminConfig struct {
 type AuthConfig struct {
 	JWTSecret    string `toml:"jwt_secret"    json:"-"`
 	JWTExpiresIn string `toml:"jwt_expires_in"`
+}
+
+type SkillRefConfig struct {
+	CurrentKID                 string            `toml:"current_kid"`
+	Keys                       map[string]string `toml:"keys" json:"-"`
+	MaxRequestedSkills         int               `toml:"max_requested_skills"`
+	MaxSingleSkillContextBytes int               `toml:"max_single_skill_context_bytes"`
+	MaxTotalSkillContextBytes  int               `toml:"max_total_skill_context_bytes"`
+}
+
+const (
+	DefaultMaxRequestedSkills         = 5
+	DefaultMaxSingleSkillContextBytes = 64 * 1024
+	DefaultMaxTotalSkillContextBytes  = 256 * 1024
+)
+
+func (c SkillRefConfig) EffectiveMaxRequestedSkills() int {
+	if c.MaxRequestedSkills > 0 {
+		return c.MaxRequestedSkills
+	}
+	return DefaultMaxRequestedSkills
+}
+
+func (c SkillRefConfig) EffectiveMaxSingleSkillContextBytes() int {
+	if c.MaxSingleSkillContextBytes > 0 {
+		return c.MaxSingleSkillContextBytes
+	}
+	return DefaultMaxSingleSkillContextBytes
+}
+
+func (c SkillRefConfig) EffectiveMaxTotalSkillContextBytes() int {
+	if c.MaxTotalSkillContextBytes > 0 {
+		return c.MaxTotalSkillContextBytes
+	}
+	return DefaultMaxTotalSkillContextBytes
 }
 
 type AgentConfig struct {
@@ -444,6 +480,11 @@ func Load(path string) (Config, error) {
 			ToolOutputMaxBytes:  DefaultAgentToolOutputBytes,
 			ToolOutputMaxLines:  DefaultAgentToolOutputLines,
 			SystemFilesMaxBytes: DefaultAgentSystemFilesBytes,
+		},
+		SkillRef: SkillRefConfig{
+			MaxRequestedSkills:         DefaultMaxRequestedSkills,
+			MaxSingleSkillContextBytes: DefaultMaxSingleSkillContextBytes,
+			MaxTotalSkillContextBytes:  DefaultMaxTotalSkillContextBytes,
 		},
 		Timezone: DefaultTimezone,
 		Database: DatabaseConfig{

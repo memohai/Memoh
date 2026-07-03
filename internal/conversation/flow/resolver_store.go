@@ -338,10 +338,47 @@ func buildInteractionMetadata(req conversation.ChatRequest) map[string]any {
 	if len(forward) > 0 {
 		meta["forward"] = forward
 	}
+	if requestedSkills := requestedSkillMetadata(req.RequestedSkills); len(requestedSkills) > 0 {
+		meta["model_requested_skills"] = requestedSkills
+	}
 	if len(meta) == 0 {
 		return nil
 	}
 	return meta
+}
+
+func requestedSkillMetadata(items []conversation.RequestedSkillContext) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		key := strings.TrimSpace(item.Identity)
+		if key == "" {
+			key = name + "\x00" + strings.TrimSpace(item.SourceKind) + "\x00" + strings.TrimSpace(item.OpaqueSourceID)
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		entry := map[string]any{"name": name}
+		if sourceKind := strings.TrimSpace(item.SourceKind); sourceKind != "" {
+			entry["source_kind"] = sourceKind
+		}
+		if opaqueSourceID := strings.TrimSpace(item.OpaqueSourceID); opaqueSourceID != "" {
+			entry["opaque_source_id"] = opaqueSourceID
+		}
+		out = append(out, entry)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func chatAttachmentMetadata(attachments []conversation.ChatAttachment) []map[string]any {

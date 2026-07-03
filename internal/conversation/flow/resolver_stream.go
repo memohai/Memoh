@@ -88,6 +88,14 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		if streamReq.RawQuery == "" {
 			streamReq.RawQuery = strings.TrimSpace(streamReq.Query)
 		}
+		if err := rejectReservedSkillMetadataIfPresent(streamReq); err != nil {
+			errCh <- err
+			return
+		}
+		if err := r.rejectRequestedSkillsIfUnsupportedContext(ctx, streamReq); err != nil {
+			errCh <- err
+			return
+		}
 		if ok, err := r.isACPAgentSession(ctx, streamReq); err != nil {
 			r.logger.Error("StreamChat: ACP session check failed",
 				slog.String("bot_id", streamReq.BotID),
@@ -252,6 +260,12 @@ func (r *Resolver) StreamChatWS(
 	eventCh chan<- WSStreamEvent,
 	abortCh <-chan struct{},
 ) error {
+	if err := rejectReservedSkillMetadataIfPresent(req); err != nil {
+		return err
+	}
+	if err := r.rejectRequestedSkillsIfUnsupportedContext(ctx, req); err != nil {
+		return err
+	}
 	if ok, err := r.isACPAgentSession(ctx, req); err != nil {
 		r.logger.Error("StreamChatWS: ACP session check failed",
 			slog.String("bot_id", req.BotID),
