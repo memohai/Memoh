@@ -1004,6 +1004,10 @@ watch([activeTab, botId], ([tab]) => {
            single guiding action — creating is a deliberate step, so it opens a
            focused dialog rather than dumping a form onto the root. -->
       <SettingsSection>
+        <!-- ui-allow-shape: empty-state block, not a data row — a centered
+             (flex-col, py-12) title + description + single CTA that fills the card
+             frame. A SettingsRow is a horizontal label↔control pair; this is a
+             different relationship (a vertical empty state), so it stays hand-written. -->
         <div class="flex min-h-[3.75rem] flex-col items-center justify-center gap-4 px-4 py-12 text-center">
           <div>
             <p class="text-sm font-medium text-foreground">
@@ -1146,6 +1150,10 @@ watch([activeTab, botId], ([tab]) => {
               :sub="m.sub"
             />
           </div>
+          <!-- ui-allow-shape: a standalone note card (its own rounded border + bg-card
+               surface, px-4 not the section's mx-4), shown when runtime metrics are
+               unavailable. Not a section-child SettingsRow: it's a self-contained
+               card, a different surface relationship. Row height only for rhythm. -->
           <div
             v-else
             class="flex min-h-[3.75rem] items-center rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3 text-sm text-muted-foreground"
@@ -1527,6 +1535,11 @@ watch([activeTab, botId], ([tab]) => {
               v-else
               class="overflow-hidden rounded-[var(--radius-menu-shell)] border border-border"
             >
+              <!-- ui-allow-shape: a row INSIDE a self-contained bordered card
+                   (px-4 within the card, not the section's mx-4). SettingsRow is a
+                   direct child of a section surface; these snapshot rows live one
+                   level in, inside their own rounded frame — a different container
+                   relationship, so they stay hand-written. -->
               <div
                 v-for="item in displayedSnapshots"
                 :key="`${item.snapshotter}:${item.runtime_snapshot_name || item.name}`"

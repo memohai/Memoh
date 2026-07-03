@@ -102,7 +102,9 @@
       </FormStack>
     </div>
 
-    <!-- Loading -->
+    <!-- Loading. ui-allow-shape: loading skeleton — borrows the grant-row height
+         to keep the list's space steady (no CLS) until grants load. Not a
+         SettingsRow: it holds a spinner, not a label + control. -->
     <div
       v-if="isLoading"
       class="mx-4 flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 text-sm text-muted-foreground last:border-b-0"

@@ -30,6 +30,9 @@
     </template>
 
     <SettingsSection :title="$t('bots.skills.libraryTitle')">
+      <!-- ui-allow-shape: loading skeleton — borrows the skill-row height to hold
+           the list's space steady (no CLS) until skills load. Not a SettingsRow:
+           it carries a spinner, not a label + control. -->
       <div
         v-if="isLoading"
         class="mx-4 flex min-h-[3.75rem] items-center gap-3 py-3 text-sm text-muted-foreground"

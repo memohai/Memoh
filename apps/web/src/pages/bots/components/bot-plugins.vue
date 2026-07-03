@@ -17,6 +17,9 @@
     </template>
 
     <SettingsSection :title="$t('bots.plugins.installedTitle')">
+      <!-- ui-allow-shape: loading skeleton — matches the plugin-row height so the
+           list keeps its space and doesn't jump (CLS) when plugins arrive. Not a
+           SettingsRow: no label/control, just a centered spinner. -->
       <div
         v-if="loading && !plugins.length"
         class="mx-4 flex min-h-[3.75rem] items-center gap-3 py-3 text-sm text-muted-foreground"

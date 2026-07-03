@@ -50,6 +50,9 @@
           </Popover>
         </SettingsRow>
 
+        <!-- ui-allow-shape: loading skeleton — matches the binding-row height so
+             the list holds its space and doesn't jump (CLS) as bindings load.
+             Not a SettingsRow: spinner only, no label/control. -->
         <div
           v-if="bindingsLoading"
           class="mx-4 flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 text-sm text-muted-foreground last:border-b-0"

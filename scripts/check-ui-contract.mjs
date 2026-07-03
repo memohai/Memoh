@@ -137,6 +137,18 @@ function scan(file, full) {
   const src = readFileSync(file, 'utf8')
   const lines = src.split('\n')
   const codeOf = makeCodeStripper()
+  // Forward window for the shape escape hatch. Unlike px/style — whose token sits
+  // on a line that CAN carry a trailing comment — the shape fingerprint
+  // (min-h-[3.75rem]) always lives inside a Vue element's `class="…"` attribute
+  // line, which cannot hold an inline comment. So `ui-allow-shape` is written as
+  // the element's leading comment (the Vue-natural place for a "why this shape"
+  // note) and suppresses the next min-h within a window of lines. The window must
+  // clear a MULTI-LINE justification comment PLUS the element's multi-attribute
+  // open tag (comment lines → <div → v-for → :key → class), so it is generous (10):
+  // the marker line is the comment's FIRST line, and a good "why" note runs a few
+  // lines. Over-reach is harmless — two distinct 3.75rem rows abutting within ~10
+  // lines is effectively impossible, so a stray second row can't hide behind a mark.
+  let shapeAllowUntil = -1
   lines.forEach((rawLine, i) => {
     const line = codeOf(rawLine)
     const ln = i + 1
@@ -144,7 +156,8 @@ function scan(file, full) {
     // comment survives the code-stripper).
     const allowPx = rawLine.includes('ui-allow-px')
     const allowStyle = rawLine.includes('ui-allow-style')
-    const allowShape = rawLine.includes('ui-allow-shape')
+    if (rawLine.includes('ui-allow-shape')) shapeAllowUntil = i + 10
+    const allowShape = i <= shapeAllowUntil
     for (const tok of line.split(/[\s'"`]+/)) {
       if (!tok) continue
 

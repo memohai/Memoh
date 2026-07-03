@@ -18,7 +18,9 @@
       </Button>
     </SettingsRow>
 
-    <!-- Loading bound identities -->
+    <!-- Loading bound identities. ui-allow-shape: borrows the SettingsRow height
+         only to hold the row's vertical space steady while bindings load, so the
+         list doesn't jump (CLS) when they arrive — it's a skeleton, not a data row. -->
     <div
       v-else-if="isLoading"
       class="mx-4 flex min-h-[3.75rem] items-center justify-center py-3"

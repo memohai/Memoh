@@ -88,6 +88,9 @@
             </div>
           </SettingsRow>
 
+          <!-- ui-allow-shape: loading skeleton — matches the member-row height so
+               the list holds its space and doesn't jump (CLS) while rules/managers
+               load. Not a SettingsRow: spinner only, no label + control. -->
           <div
             v-if="isPendingRules || isPendingManagers"
             class="mx-4 flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 text-sm text-muted-foreground last:border-b-0"
@@ -264,6 +267,10 @@
           </SettingsRow>
 
           <template v-if="advancedOpen">
+            <!-- ui-allow-shape: a bare action row (single right-aligned "add entry"
+                 button, no label/description). SettingsRow is a label↔control pair;
+                 this carries only the trailing control, so composing it would mean a
+                 phantom empty leading column. Borrows the row height for rhythm. -->
             <div
               v-if="!formVisible"
               class="mx-4 flex min-h-[3.75rem] items-center justify-end border-b border-border py-3"

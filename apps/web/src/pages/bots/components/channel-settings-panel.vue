@@ -151,8 +151,7 @@
           <!-- Label on the left; the canonical settings-card disclosure on the
                right — an outline button with a leading chevron that rotates 90°
                when open (same mechanism as the Access rules card). -->
-          <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-transparent">
-            <span class="text-sm font-medium text-foreground">{{ $t('bots.channels.advancedTitle') }}</span>
+          <SettingsRow :label="$t('bots.channels.advancedTitle')">
             <Button
               variant="outline"
               size="sm"
@@ -165,7 +164,7 @@
               />
               {{ isAdvancedExpanded ? $t('bots.channels.collapse') : $t('bots.channels.expandAll') }}
             </Button>
-          </div>
+          </SettingsRow>
           <template v-if="isAdvancedExpanded">
             <ChannelField
               v-for="key in optionalFieldsKeys"
