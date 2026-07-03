@@ -574,11 +574,21 @@ gen_secret() {
   fi
 }
 
+gen_password() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 16
+  elif command -v od >/dev/null 2>&1; then
+    od -An -N16 -tx1 /dev/urandom | tr -d ' \n'
+  else
+    head -c 64 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32
+  fi
+}
+
 # Configuration defaults (expand ~ for paths)
 WORKSPACE_DEFAULT="${HOME:-/tmp}/memoh"
 MEMOH_DATA_DIR_DEFAULT="${HOME:-/tmp}/memoh/data"
 ADMIN_USER="admin"
-ADMIN_PASS="admin123"
+ADMIN_PASS="$(gen_password)"
 JWT_SECRET="$(gen_secret)"
 PG_PASS="memoh123"
 WORKSPACE="$WORKSPACE_DEFAULT"
