@@ -103,7 +103,6 @@ import (
 	"github.com/memohai/memoh/internal/server"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
-	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/storage/providers/containerfs"
 	"github.com/memohai/memoh/internal/storage/providers/fallback"
 	"github.com/memohai/memoh/internal/storage/providers/localfs"
@@ -687,11 +686,6 @@ func provideChannelLifecycleService(channelStore *channel.Store, channelManager 
 func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, pluginService *pluginspkg.Service) *handlers.ContainerdHandler {
 	h := handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
 	h.SetPluginService(pluginService)
-	h.SetRequestedSkillLimits(skillset.ResolveLimits{
-		MaxCount:       cfg.RequestedSkills.EffectiveMaxRequestedSkills(),
-		MaxSingleBytes: cfg.RequestedSkills.EffectiveMaxSingleSkillContextBytes(),
-		MaxTotalBytes:  cfg.RequestedSkills.EffectiveMaxTotalSkillContextBytes(),
-	})
 	return h
 }
 

@@ -46,30 +46,29 @@ const (
 )
 
 type Config struct {
-	Log             LogConfig             `toml:"log"`
-	Server          ServerConfig          `toml:"server"`
-	Admin           AdminConfig           `toml:"admin"`
-	Auth            AuthConfig            `toml:"auth"`
-	Agent           AgentConfig           `toml:"agent"`
-	RequestedSkills RequestedSkillsConfig `toml:"requested_skills"`
-	Timezone        string                `toml:"timezone"`
-	Database        DatabaseConfig        `toml:"database"`
-	Container       ContainerConfig       `toml:"container"`
-	Containerd      ContainerdConfig      `toml:"containerd"`
-	Docker          DockerConfig          `toml:"docker"`
-	Apple           AppleConfig           `toml:"apple"`
-	Local           LocalConfig           `toml:"local"`
-	Workspace       WorkspaceConfig       `toml:"workspace"`
-	Postgres        PostgresConfig        `toml:"postgres"`
-	SQLite          SQLiteConfig          `toml:"sqlite"`
-	Qdrant          QdrantConfig          `toml:"qdrant"`
-	Sparse          SparseConfig          `toml:"sparse"`
-	Registry        RegistryConfig        `toml:"registry"`
-	Supermarket     SupermarketConfig     `toml:"supermarket"`
-	OAuthClients    OAuthClientsConfig    `toml:"oauth_clients"`
-	InstanceID      string                `toml:"instance_id"`
-	BridgeTLS       BridgeTLSConfig       `toml:"bridge_tls"`
-	WebhookTunnel   WebhookTunnelConfig   `toml:"webhook_tunnel"`
+	Log           LogConfig           `toml:"log"`
+	Server        ServerConfig        `toml:"server"`
+	Admin         AdminConfig         `toml:"admin"`
+	Auth          AuthConfig          `toml:"auth"`
+	Agent         AgentConfig         `toml:"agent"`
+	Timezone      string              `toml:"timezone"`
+	Database      DatabaseConfig      `toml:"database"`
+	Container     ContainerConfig     `toml:"container"`
+	Containerd    ContainerdConfig    `toml:"containerd"`
+	Docker        DockerConfig        `toml:"docker"`
+	Apple         AppleConfig         `toml:"apple"`
+	Local         LocalConfig         `toml:"local"`
+	Workspace     WorkspaceConfig     `toml:"workspace"`
+	Postgres      PostgresConfig      `toml:"postgres"`
+	SQLite        SQLiteConfig        `toml:"sqlite"`
+	Qdrant        QdrantConfig        `toml:"qdrant"`
+	Sparse        SparseConfig        `toml:"sparse"`
+	Registry      RegistryConfig      `toml:"registry"`
+	Supermarket   SupermarketConfig   `toml:"supermarket"`
+	OAuthClients  OAuthClientsConfig  `toml:"oauth_clients"`
+	InstanceID    string              `toml:"instance_id"`
+	BridgeTLS     BridgeTLSConfig     `toml:"bridge_tls"`
+	WebhookTunnel WebhookTunnelConfig `toml:"webhook_tunnel"`
 }
 
 const (
@@ -161,39 +160,6 @@ type AdminConfig struct {
 type AuthConfig struct {
 	JWTSecret    string `toml:"jwt_secret"    json:"-"`
 	JWTExpiresIn string `toml:"jwt_expires_in"`
-}
-
-type RequestedSkillsConfig struct {
-	MaxRequestedSkills         int `toml:"max_requested_skills"`
-	MaxSingleSkillContextBytes int `toml:"max_single_skill_context_bytes"`
-	MaxTotalSkillContextBytes  int `toml:"max_total_skill_context_bytes"`
-}
-
-const (
-	DefaultMaxRequestedSkills         = 5
-	DefaultMaxSingleSkillContextBytes = 64 * 1024
-	DefaultMaxTotalSkillContextBytes  = 256 * 1024
-)
-
-func (c RequestedSkillsConfig) EffectiveMaxRequestedSkills() int {
-	if c.MaxRequestedSkills > 0 {
-		return c.MaxRequestedSkills
-	}
-	return DefaultMaxRequestedSkills
-}
-
-func (c RequestedSkillsConfig) EffectiveMaxSingleSkillContextBytes() int {
-	if c.MaxSingleSkillContextBytes > 0 {
-		return c.MaxSingleSkillContextBytes
-	}
-	return DefaultMaxSingleSkillContextBytes
-}
-
-func (c RequestedSkillsConfig) EffectiveMaxTotalSkillContextBytes() int {
-	if c.MaxTotalSkillContextBytes > 0 {
-		return c.MaxTotalSkillContextBytes
-	}
-	return DefaultMaxTotalSkillContextBytes
 }
 
 type AgentConfig struct {
@@ -478,11 +444,6 @@ func Load(path string) (Config, error) {
 			ToolOutputMaxBytes:  DefaultAgentToolOutputBytes,
 			ToolOutputMaxLines:  DefaultAgentToolOutputLines,
 			SystemFilesMaxBytes: DefaultAgentSystemFilesBytes,
-		},
-		RequestedSkills: RequestedSkillsConfig{
-			MaxRequestedSkills:         DefaultMaxRequestedSkills,
-			MaxSingleSkillContextBytes: DefaultMaxSingleSkillContextBytes,
-			MaxTotalSkillContextBytes:  DefaultMaxTotalSkillContextBytes,
 		},
 		Timezone: DefaultTimezone,
 		Database: DatabaseConfig{

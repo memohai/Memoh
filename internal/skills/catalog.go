@@ -27,10 +27,33 @@ type ResolvedSkill struct {
 	Identity       string
 }
 
+// Default requested-skill limits. These are fail-closed safety valves, not
+// product knobs — they are deliberately NOT configurable (a zero-valued
+// ResolveLimits field falls back to its default, so callers can't
+// accidentally run uncapped).
+const (
+	DefaultMaxRequestedSkills         = 5
+	DefaultMaxSingleSkillContextBytes = 64 * 1024
+	DefaultMaxTotalSkillContextBytes  = 256 * 1024
+)
+
 type ResolveLimits struct {
 	MaxCount       int
 	MaxSingleBytes int
 	MaxTotalBytes  int
+}
+
+func (l ResolveLimits) withDefaults() ResolveLimits {
+	if l.MaxCount <= 0 {
+		l.MaxCount = DefaultMaxRequestedSkills
+	}
+	if l.MaxSingleBytes <= 0 {
+		l.MaxSingleBytes = DefaultMaxSingleSkillContextBytes
+	}
+	if l.MaxTotalBytes <= 0 {
+		l.MaxTotalBytes = DefaultMaxTotalSkillContextBytes
+	}
+	return l
 }
 
 func BuildSafeCatalog(entries []Entry) ([]SafeCatalogItem, error) {
@@ -53,12 +76,13 @@ func BuildSafeCatalog(entries []Entry) ([]SafeCatalogItem, error) {
 }
 
 func ResolveTextRequestedSkills(entries []Entry, names []string, limits ResolveLimits) ([]ResolvedSkill, error) {
+	limits = limits.withDefaults()
 	entries = normalizeRuntimeUsabilityEntries(entries)
 	deduped, err := dedupeRequestedNames(names)
 	if err != nil {
 		return nil, err
 	}
-	if limits.MaxCount > 0 && len(deduped) > limits.MaxCount {
+	if len(deduped) > limits.MaxCount {
 		return nil, slash.NewError(slash.CodeTooManyRequestedSkills)
 	}
 	groups := groupEntriesByName(entries)
@@ -78,10 +102,10 @@ func ResolveTextRequestedSkills(entries []Entry, names []string, limits ResolveL
 		}
 		contentBytes := len([]byte(entry.Content))
 		totalBytes += contentBytes
-		if limits.MaxSingleBytes > 0 && contentBytes > limits.MaxSingleBytes {
+		if contentBytes > limits.MaxSingleBytes {
 			return nil, slash.NewError(slash.CodeRequestedSkillContextTooLarge)
 		}
-		if limits.MaxTotalBytes > 0 && totalBytes > limits.MaxTotalBytes {
+		if totalBytes > limits.MaxTotalBytes {
 			return nil, slash.NewError(slash.CodeRequestedSkillContextTooLarge)
 		}
 		out = append(out, resolvedSkill(entry))

@@ -22,28 +22,26 @@ import (
 	displaypkg "github.com/memohai/memoh/internal/display"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/policy"
-	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
 )
 
 type ContainerdHandler struct {
-	manager              containerWorkspace
-	cfg                  config.WorkspaceConfig
-	containerBackend     string
-	logger               *slog.Logger
-	toolGateway          *mcp.ToolGatewayService
-	toolContexts         *mcp.ToolSessionContextStore
-	acpRuntimes          acpRuntimeContextResolver
-	mcpSess              map[string]*mcpSession
-	mcpStdioMu           sync.Mutex
-	mcpStdioSess         map[string]*mcpStdioSession
-	botService           *bots.Service
-	accountService       *accounts.Service
-	policyService        *policy.Service
-	pluginService        PluginInstallationLister
-	requestedSkillLimits skillset.ResolveLimits
-	displayService       *displaypkg.Service
-	browserSessions      *browserSessionStore
+	manager          containerWorkspace
+	cfg              config.WorkspaceConfig
+	containerBackend string
+	logger           *slog.Logger
+	toolGateway      *mcp.ToolGatewayService
+	toolContexts     *mcp.ToolSessionContextStore
+	acpRuntimes      acpRuntimeContextResolver
+	mcpSess          map[string]*mcpSession
+	mcpStdioMu       sync.Mutex
+	mcpStdioSess     map[string]*mcpStdioSession
+	botService       *bots.Service
+	accountService   *accounts.Service
+	policyService    *policy.Service
+	pluginService    PluginInstallationLister
+	displayService   *displaypkg.Service
+	browserSessions  *browserSessionStore
 }
 
 type ContainerGPURequest struct {
@@ -264,10 +262,6 @@ func NewContainerdHandler(log *slog.Logger, manager containerWorkspace, cfg conf
 	}
 	h.displayService = displaypkg.NewService(h.logger, manager)
 	return h
-}
-
-func (h *ContainerdHandler) SetRequestedSkillLimits(limits skillset.ResolveLimits) {
-	h.requestedSkillLimits = limits
 }
 
 func (h *ContainerdHandler) Register(e *echo.Echo) {

@@ -17,11 +17,6 @@ email = "dev@memoh.local"
 jwt_secret = "memoh-dev-secret-do-not-use-in-production"
 jwt_expires_in = "168h"
 
-[requested_skills]
-max_requested_skills = 5
-max_single_skill_context_bytes = 65536
-max_total_skill_context_bytes = 262144
-
 timezone = "UTC"
 
 [database]

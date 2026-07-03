@@ -277,7 +277,7 @@ func (h *ContainerdHandler) ResolveTextRequestedSkills(ctx context.Context, botI
 	if err != nil {
 		return nil, err
 	}
-	return skillset.ResolveTextRequestedSkills(entries, names, h.requestedSkillLimits)
+	return skillset.ResolveTextRequestedSkills(entries, names, skillset.ResolveLimits{})
 }
 
 func (h *ContainerdHandler) listSkillsFromContainer(ctx context.Context, botID string) ([]SkillItem, error) {
