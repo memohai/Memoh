@@ -15,6 +15,13 @@ func TestRejectReservedSkillMetadata(t *testing.T) {
 		"model-context-skills",
 		"MODEL.USED.SKILLS",
 		"loadedSkills",
+		"user_message_kind",
+		"userMessageKind",
+		"skill_activation",
+		"skillActivation",
+		"skill.activation.prompt",
+		"skill-activation-skills",
+		"audit_requested_skills",
 	}
 	for _, key := range tests {
 		t.Run(key, func(t *testing.T) {

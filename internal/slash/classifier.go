@@ -1,13 +1,15 @@
 package slash
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+)
 
 type Surface string
 
 const (
 	SurfaceChannel Surface = "channel"
 	SurfaceWebWS   Surface = "web_ws"
-	SurfaceWebREST Surface = "web_rest"
 )
 
 type DecisionKind string
@@ -68,21 +70,14 @@ func Classify(input ClassifyInput) Decision {
 		return Decision{Kind: DecisionReject, Code: CodeSlashAttachmentsUnsupported, Directed: effectiveDirected}
 	}
 
-	parsed, ok := parseCommand(cmdText, input.BotAliases)
+	parsed, ok := parseSlash(cmdText, input.BotAliases)
 	if !ok {
 		return Decision{Kind: DecisionUnknownSlash, Code: CodeUnknownSlash, Directed: effectiveDirected}
 	}
 	effectiveDirected = effectiveDirected || parsed.Directed
 
 	if parsed.Resource == "skill" && parsed.Action == "use" {
-		if input.Surface == SurfaceWebWS || input.Surface == SurfaceWebREST {
-			return Decision{Kind: DecisionReject, Code: CodeUseSkillChipRequired, Directed: effectiveDirected}
-		}
-		intent, code := parseSkillUse(parsed.Args)
-		if code != "" {
-			return Decision{Kind: DecisionReject, Code: code, Directed: effectiveDirected}
-		}
-		return Decision{Kind: DecisionSkillIntent, Directed: effectiveDirected, Command: parsed.Command(), SkillIntent: intent}
+		return Decision{Kind: DecisionReject, Code: CodeInvalidSkillSlashSyntax, Directed: effectiveDirected}
 	}
 
 	if input.Surface == SurfaceChannel && input.SupportsMode && isModePrefix(parsed.Resource) {
@@ -93,9 +88,9 @@ func Classify(input ClassifyInput) Decision {
 		return Decision{Kind: DecisionNormalChat, Directed: effectiveDirected}
 	}
 
-	if isKnown(input.KnownCommand, parsed.Resource) {
+	if parsed.ValidCommand && isKnown(input.KnownCommand, parsed.Resource) {
 		cmd := parsed.Command()
-		if input.Surface == SurfaceWebWS || input.Surface == SurfaceWebREST {
+		if input.Surface == SurfaceWebWS {
 			if input.WebActionSupported != nil && input.WebActionSupported(parsed.Resource, parsed.Action) {
 				return Decision{Kind: DecisionCommandAction, Directed: effectiveDirected, Command: cmd}
 			}
@@ -104,16 +99,29 @@ func Classify(input ClassifyInput) Decision {
 		return Decision{Kind: DecisionCommandAction, Directed: effectiveDirected, Command: cmd}
 	}
 
+	if isValidSkillSelector(parsed.Selector) {
+		return Decision{
+			Kind:     DecisionSkillIntent,
+			Directed: effectiveDirected,
+			SkillIntent: SkillIntent{
+				Names:  []string{parsed.Selector},
+				Prompt: strings.TrimSpace(parsed.Rest),
+			},
+		}
+	}
+
 	return Decision{Kind: DecisionUnknownSlash, Code: CodeUnknownSlash, Directed: effectiveDirected}
 }
 
 type parsedCommand struct {
-	Resource string
-	Action   string
-	Args     string
-	Rest     string
-	Raw      string
-	Directed bool
+	Resource     string
+	Action       string
+	Args         string
+	Rest         string
+	Raw          string
+	Selector     string
+	Directed     bool
+	ValidCommand bool
 }
 
 func (p parsedCommand) Command() Command {
@@ -165,31 +173,28 @@ func stripLeadingMention(text string, aliases []string) (string, bool) {
 	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), fields[0])), true
 }
 
-func parseCommand(text string, aliases []string) (parsedCommand, bool) {
+func parseSlash(text string, aliases []string) (parsedCommand, bool) {
 	text = strings.TrimSpace(text)
 	if !strings.HasPrefix(text, "/") {
 		return parsedCommand{}, false
 	}
 	raw := text
 	text = strings.TrimPrefix(text, "/")
-	head, rest, _ := strings.Cut(text, " ")
+	head, rest := cutHeadRest(text)
 	head = strings.TrimSpace(head)
 	rest = strings.TrimSpace(rest)
 	if head == "" {
 		return parsedCommand{}, false
 	}
 
-	resource := head
+	selector := head
 	directed := false
 	if before, after, ok := strings.Cut(head, "@"); ok {
 		if !aliasMatches(after, aliases) {
 			return parsedCommand{}, false
 		}
-		resource = before
+		selector = before
 		directed = true
-	}
-	if !isCommandName(resource) {
-		return parsedCommand{}, false
 	}
 
 	action := ""
@@ -199,14 +204,30 @@ func parseCommand(text string, aliases []string) (parsedCommand, bool) {
 		action = strings.TrimSpace(action)
 		args = strings.TrimSpace(args)
 	}
+	validCommand := isCommandName(selector)
+	resource := ""
+	if validCommand {
+		resource = strings.ToLower(selector)
+	}
 	return parsedCommand{
-		Resource: strings.ToLower(resource),
-		Action:   strings.ToLower(action),
-		Args:     args,
-		Rest:     rest,
-		Raw:      raw,
-		Directed: directed,
+		Resource:     resource,
+		Action:       strings.ToLower(action),
+		Args:         args,
+		Rest:         rest,
+		Raw:          raw,
+		Selector:     selector,
+		Directed:     directed,
+		ValidCommand: validCommand,
 	}, true
+}
+
+func cutHeadRest(text string) (string, string) {
+	for i, r := range text {
+		if unicode.IsSpace(r) {
+			return text[:i], text[i:]
+		}
+	}
+	return text, ""
 }
 
 func isKnown(fn func(string) bool, resource string) bool {
@@ -216,56 +237,6 @@ func isKnown(fn func(string) bool, resource string) bool {
 func isModePrefix(resource string) bool {
 	switch resource {
 	case "now", "btw", "next":
-		return true
-	default:
-		return false
-	}
-}
-
-func parseSkillUse(args string) (SkillIntent, string) {
-	selector, prompt, ok := splitSkillUseSelectorPrompt(args)
-	if !ok {
-		return SkillIntent{}, CodeInvalidSkillSlashSyntax
-	}
-	selector = strings.TrimSpace(selector)
-	prompt = strings.TrimSpace(prompt)
-	if selector == "" {
-		return SkillIntent{}, CodeInvalidSkillSlashSyntax
-	}
-	if prompt == "" {
-		return SkillIntent{}, CodeMissingPrompt
-	}
-	parts := strings.Split(selector, ",")
-	names := make([]string, 0, len(parts))
-	for _, part := range parts {
-		name := strings.TrimSpace(part)
-		if !isValidSkillSelector(name) {
-			return SkillIntent{}, CodeInvalidSkillSlashSyntax
-		}
-		names = append(names, name)
-	}
-	return SkillIntent{Names: names, Prompt: prompt}, ""
-}
-
-func splitSkillUseSelectorPrompt(args string) (string, string, bool) {
-	for i := 0; i+1 < len(args); i++ {
-		if args[i] != '-' || args[i+1] != '-' {
-			continue
-		}
-		if i == 0 || !isASCIISpace(args[i-1]) {
-			continue
-		}
-		if i+2 < len(args) && !isASCIISpace(args[i+2]) {
-			continue
-		}
-		return args[:i], args[i+2:], true
-	}
-	return "", "", false
-}
-
-func isASCIISpace(b byte) bool {
-	switch b {
-	case ' ', '\t', '\n', '\r':
 		return true
 	default:
 		return false

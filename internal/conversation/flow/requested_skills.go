@@ -13,7 +13,7 @@ func (r *Resolver) rejectRequestedSkillsIfUnsupportedContext(ctx context.Context
 	if len(req.RequestedSkills) == 0 {
 		return nil
 	}
-	if req.UserMessagePersisted {
+	if req.UserMessagePersisted && req.UserMessageKind != conversation.UserMessageKindSkillActivation {
 		return slash.NewError(slash.CodeUnsupportedSkillSlashContext)
 	}
 	if mode := strings.TrimSpace(req.SessionType); mode != "" && mode != sessionpkg.TypeChat {

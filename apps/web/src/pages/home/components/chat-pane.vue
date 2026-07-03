@@ -262,9 +262,9 @@
             >
               <Command
                 v-if="slashPanelOpen"
-                class="absolute inset-x-4 bottom-full z-30 mb-2 max-h-80"
+                class="absolute inset-x-4 bottom-full z-30 mb-2 h-auto w-auto"
               >
-                <CommandList>
+                <CommandList class="max-h-[min(20rem,45dvh)] overscroll-contain [scrollbar-gutter:stable]">
                   <CommandGroup
                     v-if="visibleSlashQuickActions.length"
                     :heading="$t('chat.slash.quickActions')"
@@ -292,7 +292,7 @@
                   >
                     <CommandItem
                       v-for="skill in visibleSlashSkills"
-                      :key="skill.skill_ref"
+                      :key="skill.name"
                       :value="skill.name"
                       @select="addRequestedSkill(skill)"
                     >
@@ -578,7 +578,7 @@
                   leave-to-class="opacity-0"
                 >
                   <div
-                    v-if="requestedSkills.length"
+                    v-if="skillSlashEnabled && requestedSkills.length"
                     class="order-first flex w-full basis-full flex-wrap gap-1.5 pb-1.5"
                   >
                     <div
@@ -1485,26 +1485,26 @@ const composerMenuHasItems = computed(() =>
 )
 const activeSessionId = computed(() => activeSession.value?.id ?? '')
 const requestedSkills = ref<RequestedSkillSelection[]>([])
+const skillSlashEnabled = computed(() => !activeIsACP.value && !activeIsPendingACP.value)
 const { data: safeSkillCatalog, isLoading: safeSkillCatalogLoading } = useQuery({
   key: () => ['bot-safe-skills-catalog', currentBotId.value ?? ''],
   query: () => fetchSafeSkillCatalog(currentBotId.value!),
-  enabled: () => !!currentBotId.value && !activeIsACP.value,
+  enabled: () => !!currentBotId.value && skillSlashEnabled.value,
   refetchOnWindowFocus: false,
 })
-const safeSkills = computed(() => safeSkillCatalog.value ?? [])
+const safeSkills = computed(() => skillSlashEnabled.value ? safeSkillCatalog.value ?? [] : [])
 
-function requestedSkillKey(skill: Pick<RequestedSkillSelection, 'skill_ref' | 'name'>): string {
-  return skill.skill_ref?.trim() || skill.name.trim()
+function requestedSkillKey(skill: Pick<RequestedSkillSelection, 'name'>): string {
+  return skill.name.trim()
 }
 
 function addRequestedSkill(skill: RequestedSkillSelection) {
-  const skillRef = skill.skill_ref?.trim()
+  if (!skillSlashEnabled.value) return
   const name = skill.name?.trim()
-  if (!skillRef || !name) return
-  const key = requestedSkillKey({ skill_ref: skillRef, name })
+  if (!name) return
+  const key = requestedSkillKey({ name })
   if (requestedSkills.value.some(item => requestedSkillKey(item) === key)) return
   requestedSkills.value = [...requestedSkills.value, {
-    skill_ref: skillRef,
     name,
     display_name: skill.display_name?.trim() || undefined,
     description: skill.description?.trim() || undefined,
@@ -1530,6 +1530,12 @@ watch([currentBotId, activeSessionId], () => {
   chatStore.clearCommandEvent()
 })
 
+watch(skillSlashEnabled, (enabled) => {
+  if (enabled) return
+  requestedSkills.value = []
+  chatStore.clearCommandEvent()
+})
+
 const slashQuickActions = computed(() => [
   {
     id: 'help',
@@ -1537,12 +1543,14 @@ const slashQuickActions = computed(() => [
     description: t('chat.slash.helpDescription'),
     icon: HelpCircle,
   },
-  {
-    id: 'skill.list',
-    label: '/skill list',
-    description: t('chat.slash.skillListDescription'),
-    icon: List,
-  },
+  ...(skillSlashEnabled.value
+    ? [{
+        id: 'skill.list',
+        label: '/skill list',
+        description: t('chat.slash.skillListDescription'),
+        icon: List,
+      }]
+    : []),
 ])
 
 const slashQuery = computed(() => {
@@ -1619,10 +1627,11 @@ const commandPanelText = computed(() => commandError.value ? localizedCommandErr
 const commandResultItems = computed(() => commandResult.value?.items ?? [])
 
 function selectCommandResultItem(item: CommandActionListItem) {
+  if (!skillSlashEnabled.value) return
   if (item.kind !== 'skill' || !item.id?.trim() || !item.title.trim()) return
   addRequestedSkill({
-    skill_ref: item.id,
-    name: item.title,
+    name: item.id.trim(),
+    display_name: item.title,
     description: item.description,
   })
 }
@@ -1803,6 +1812,7 @@ watch(currentBotId, () => {
 watch(activeIsACP, (isACP) => {
   if (isACP) {
     pendingFiles.value = []
+    requestedSkills.value = []
   }
 })
 
@@ -2398,6 +2408,12 @@ watch([
 
   inputText.value = failure.restoreInput
   saveInputDraft(inputDraftKey.value, failure.restoreInput)
+  pendingFiles.value = (failure.restoreAttachments ?? [])
+    .map(attachmentToFile)
+    .filter((file): file is File => file !== null)
+  requestedSkills.value = skillSlashEnabled.value
+    ? (failure.restoreRequestedSkills ?? []).map(skill => ({ ...skill }))
+    : []
   composerError.value = failure.error || t('chat.sendFailed')
   chatStore.clearStartupSendFailure(failure.id)
 }, { immediate: true })
@@ -2853,6 +2869,27 @@ async function fileToAttachment(file: File): Promise<ChatAttachment> {
   })
 }
 
+function attachmentToFile(attachment: ChatAttachment): File | null {
+  const source = attachment.base64?.trim()
+  if (!source) return null
+  try {
+    const commaIndex = source.indexOf(',')
+    const payload = commaIndex >= 0 ? source.slice(commaIndex + 1) : source
+    const meta = commaIndex >= 0 ? source.slice(0, commaIndex) : ''
+    const bytes = atob(payload)
+    const buffer = new Uint8Array(bytes.length)
+    for (let i = 0; i < bytes.length; i += 1) {
+      buffer[i] = bytes.charCodeAt(i)
+    }
+    const inferredMime = meta.match(/^data:([^;,]+)/)?.[1]
+    return new File([buffer], attachment.name?.trim() || 'attachment', {
+      type: attachment.mime?.trim() || inferredMime || 'application/octet-stream',
+    })
+  } catch {
+    return null
+  }
+}
+
 function ensurePendingUserInputDraft(questionId: string): PendingUserInputDraft {
   let draft = pendingUserInputDrafts.value[questionId]
   if (!draft) {
@@ -2952,19 +2989,13 @@ function handlePendingUserInputCancel() {
 async function handleSend() {
   if (!isActive.value) return
   // isAutoScroll.value = true
+  if (!skillSlashEnabled.value && requestedSkills.value.length) {
+    requestedSkills.value = []
+  }
   const text = inputText.value.trim()
   const files = [...pendingFiles.value]
   const skills = [...requestedSkills.value]
   if ((!text && !files.length && !skills.length) || streaming.value || loadingMessages.value || activeChatReadOnly.value) return
-  if (skills.length && !text) {
-    composerError.value = ''
-    chatStore.showCommandError('missing_prompt', t('chat.slash.missingPrompt'), {
-      botId: currentBotId.value ?? undefined,
-      sessionId: activeSessionId.value || undefined,
-      composerScope: inputDraftKey.value || 'chat',
-    })
-    return
-  }
   if (text.startsWith('/') && files.length) {
     composerError.value = ''
     chatStore.showCommandError('slash_attachments_unsupported', t('chat.slash.attachmentsUnsupported'), {

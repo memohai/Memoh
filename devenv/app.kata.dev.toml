@@ -18,9 +18,7 @@ email = "admin@memoh.local"
 jwt_secret = "DEV-CHANGE-ME"
 jwt_expires_in = "168h"
 
-[skill_ref]
-current_kid = "dev"
-keys = { dev = "UzF26piJa+rFEhrpiOJ1M1ceondKh6lfBSveGmXbpj8=" }
+[requested_skills]
 max_requested_skills = 5
 max_single_skill_context_bytes = 65536
 max_total_skill_context_bytes = 262144

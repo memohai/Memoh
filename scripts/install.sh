@@ -57,7 +57,6 @@ fi
 NETWORK_NAME="${COMPOSE_PROJECT_NAME}_memoh-network"
 PROJECT_CONTAINERS="memoh-postgres memoh-migrate memoh-server memoh-web memoh-sparse memoh-qdrant memoh-webhook-tunnel"
 PROJECT_VOLUMES="${COMPOSE_PROJECT_NAME}_postgres_data ${COMPOSE_PROJECT_NAME}_containerd_data ${COMPOSE_PROJECT_NAME}_memoh_data ${COMPOSE_PROJECT_NAME}_server_cni_state ${COMPOSE_PROJECT_NAME}_qdrant_data ${COMPOSE_PROJECT_NAME}_openviking_data"
-SKILL_REF_KEY_PLACEHOLDER="CHANGE-ME-TO-A-BASE64-32-BYTE-SKILL-REF-KEY"
 
 EXISTING_CONFIG_SOURCE=""
 EXISTING_ENV_SOURCE=""
@@ -259,26 +258,6 @@ set_toml_string_value() {
   fi
 }
 
-ensure_skill_ref_config() {
-  file="$1"
-  if grep -q '^[[:space:]]*\[skill_ref\]' "$file"; then
-    if grep -Fq "$SKILL_REF_KEY_PLACEHOLDER" "$file"; then
-      sed -i.bak "s|${SKILL_REF_KEY_PLACEHOLDER}|${SKILL_REF_SECRET}|g" "$file"
-      rm -f "${file}.bak"
-    fi
-    return
-  fi
-  cat >> "$file" <<EOF
-
-[skill_ref]
-current_kid = "primary"
-keys = { primary = "${SKILL_REF_SECRET}" }
-max_requested_skills = 5
-max_single_skill_context_bytes = 65536
-max_total_skill_context_bytes = 262144
-EOF
-}
-
 write_env_value() {
   key="$1"
   value=$(printf '%s' "$2" | sed "s/'/\\\\'/g")
@@ -369,10 +348,6 @@ load_existing_settings() {
 
     value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "auth" "jwt_secret" || true)
     [ -n "$value" ] && JWT_SECRET="$value"
-
-    value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "skill_ref.keys" "primary" || true)
-    [ "$value" = "$SKILL_REF_KEY_PLACEHOLDER" ] && value=""
-    [ -n "$value" ] && SKILL_REF_SECRET="$value"
 
     if [ "$DATABASE_DRIVER_SET" = false ]; then
       value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "database" "driver" || true)
@@ -605,7 +580,6 @@ MEMOH_DATA_DIR_DEFAULT="${HOME:-/tmp}/memoh/data"
 ADMIN_USER="admin"
 ADMIN_PASS="admin123"
 JWT_SECRET="$(gen_secret)"
-SKILL_REF_SECRET="$(gen_secret)"
 PG_PASS="memoh123"
 WORKSPACE="$WORKSPACE_DEFAULT"
 MEMOH_DATA_DIR="$MEMOH_DATA_DIR_DEFAULT"
@@ -792,13 +766,11 @@ if [ "$INSTALL_MODE" = "upgrade" ]; then
   if [ "$EXISTING_CONFIG_SOURCE" != "$PWD/config.toml" ]; then
     cp "$EXISTING_CONFIG_SOURCE" ./config.toml
   fi
-  ensure_skill_ref_config config.toml
 else
   cp conf/app.docker.toml config.toml
   set_toml_string_value config.toml "admin" "username" "$ADMIN_USER"
   set_toml_string_value config.toml "admin" "password" "$ADMIN_PASS"
   set_toml_string_value config.toml "auth" "jwt_secret" "$JWT_SECRET"
-  ensure_skill_ref_config config.toml
   set_toml_string_value config.toml "database" "driver" "$DATABASE_DRIVER"
   set_toml_string_value config.toml "container" "backend" "$CONTAINER_BACKEND"
   set_toml_string_value config.toml "postgres" "password" "$PG_PASS"

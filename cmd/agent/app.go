@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -128,66 +127,6 @@ func provideServerHandler(fn any) any {
 func provideLogger(cfg config.Config) *slog.Logger {
 	logger.Init(cfg.Log.Level, cfg.Log.Format)
 	return logger.L
-}
-
-func provideSkillRefCodec(cfg config.Config) (*skillset.RefCodec, error) {
-	keys := make(map[string][]byte, len(cfg.SkillRef.Keys))
-	for kid, value := range cfg.SkillRef.Keys {
-		kid = strings.TrimSpace(kid)
-		if kid == "" {
-			continue
-		}
-		decoded, err := decodeSkillRefKey(value)
-		if err != nil {
-			return nil, fmt.Errorf("skill_ref key %q: %w", kid, err)
-		}
-		keys[kid] = decoded
-	}
-	codec, err := skillset.NewRefCodec(cfg.SkillRef.CurrentKID, keys)
-	if err != nil {
-		return nil, fmt.Errorf("skill_ref config: %w", err)
-	}
-	return codec, nil
-}
-
-const skillRefKeyPlaceholder = "CHANGE-ME-TO-A-BASE64-32-BYTE-SKILL-REF-KEY"
-
-func decodeSkillRefKey(value string) ([]byte, error) {
-	value = strings.TrimSpace(value)
-	if isSkillRefPlaceholder(value) {
-		return nil, errors.New("key uses the public placeholder value")
-	}
-	value = strings.TrimPrefix(value, "base64:")
-	if isSkillRefPlaceholder(value) {
-		return nil, errors.New("key uses the public placeholder value")
-	}
-	if value == "" {
-		return nil, errors.New("empty key")
-	}
-	encodings := []*base64.Encoding{
-		base64.StdEncoding,
-		base64.RawStdEncoding,
-		base64.URLEncoding,
-		base64.RawURLEncoding,
-	}
-	var lastErr error
-	for _, enc := range encodings {
-		decoded, err := enc.DecodeString(value)
-		if err == nil {
-			switch len(decoded) {
-			case 16, 24, 32:
-				return decoded, nil
-			default:
-				return nil, fmt.Errorf("decoded key has %d bytes, want 16, 24, or 32", len(decoded))
-			}
-		}
-		lastErr = err
-	}
-	return nil, fmt.Errorf("decode base64: %w", lastErr)
-}
-
-func isSkillRefPlaceholder(value string) bool {
-	return strings.TrimSpace(value) == skillRefKeyPlaceholder
 }
 
 func provideContainerService(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, rc *boot.RuntimeConfig) (ctr.Service, error) {
@@ -745,13 +684,13 @@ func provideChannelLifecycleService(channelStore *channel.Store, channelManager 
 	return channel.NewLifecycle(channelStore, channelManager)
 }
 
-func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, pluginService *pluginspkg.Service, skillRefCodec *skillset.RefCodec) *handlers.ContainerdHandler {
+func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, pluginService *pluginspkg.Service) *handlers.ContainerdHandler {
 	h := handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
 	h.SetPluginService(pluginService)
-	h.SetSkillRefCodec(skillRefCodec, skillset.ResolveLimits{
-		MaxCount:       cfg.SkillRef.EffectiveMaxRequestedSkills(),
-		MaxSingleBytes: cfg.SkillRef.EffectiveMaxSingleSkillContextBytes(),
-		MaxTotalBytes:  cfg.SkillRef.EffectiveMaxTotalSkillContextBytes(),
+	h.SetRequestedSkillLimits(skillset.ResolveLimits{
+		MaxCount:       cfg.RequestedSkills.EffectiveMaxRequestedSkills(),
+		MaxSingleBytes: cfg.RequestedSkills.EffectiveMaxSingleSkillContextBytes(),
+		MaxTotalBytes:  cfg.RequestedSkills.EffectiveMaxTotalSkillContextBytes(),
 	})
 	return h
 }
@@ -932,15 +871,10 @@ func provideProviderOAuthHandler(providersService *providers.Service, acpCodexOA
 	return handler
 }
 
-func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service, resolver *flow.Resolver, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service, rc *boot.RuntimeConfig, cfg config.Config, commandHandler *command.Handler, skillRefCodec *skillset.RefCodec, containerdHandler *handlers.ContainerdHandler) *handlers.LocalChannelHandler {
+func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service, resolver *flow.Resolver, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service, rc *boot.RuntimeConfig, commandHandler *command.Handler, containerdHandler *handlers.ContainerdHandler) *handlers.LocalChannelHandler {
 	h := handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, chatService, hub, botService, accountService, sessionService)
 	h.SetResolver(resolver)
 	h.SetCommandHandler(commandHandler)
-	h.SetSkillRefCodec(skillRefCodec, skillset.ResolveLimits{
-		MaxCount:       cfg.SkillRef.EffectiveMaxRequestedSkills(),
-		MaxSingleBytes: cfg.SkillRef.EffectiveMaxSingleSkillContextBytes(),
-		MaxTotalBytes:  cfg.SkillRef.EffectiveMaxTotalSkillContextBytes(),
-	})
 	h.SetRuntimeSkillResolver(containerdHandler)
 	h.SetAuthTokenConfig(rc.JwtSecret, rc.JwtExpiresIn)
 	h.SetMediaService(mediaService)
@@ -1679,6 +1613,21 @@ type commandSkillLoaderAdapter struct {
 
 func (a *commandSkillLoaderAdapter) LoadSkills(ctx context.Context, botID string) ([]command.Skill, error) {
 	items, err := a.handler.LoadSkills(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	skills := make([]command.Skill, len(items))
+	for i, item := range items {
+		skills[i] = command.Skill{Name: item.Name, Description: item.Description}
+	}
+	return skills, nil
+}
+
+// ListRuntimeSkills exposes the runtime-usable safe catalog (the same list the
+// Web slash picker shows) as the command layer's optional RuntimeSkillLister
+// capability, upgrading /skill list to tap-to-activate rows.
+func (a *commandSkillLoaderAdapter) ListRuntimeSkills(ctx context.Context, botID string) ([]command.Skill, error) {
+	items, err := a.handler.ListSafeSkillCatalog(ctx, botID)
 	if err != nil {
 		return nil, err
 	}

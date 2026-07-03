@@ -812,6 +812,133 @@ func TestConvertMessagesToUITurnsKeepsForwardOnlyUserMessage(t *testing.T) {
 	}
 }
 
+func TestConvertMessagesToUITurnsKeepsSkillActivationWithoutPrompt(t *testing.T) {
+	now := time.Now().UTC()
+	turns := ConvertMessagesToUITurns([]messagepkg.Message{{
+		ID:             "user-activation",
+		BotID:          "bot-1",
+		Role:           "user",
+		Content:        json.RawMessage(`{"role":"user","content":[{"type":"text","text":""}]}`),
+		DisplayContent: "",
+		Metadata: map[string]any{
+			"user_message_kind": UserMessageKindSkillActivation,
+			"skill_activation": map[string]any{
+				"skills": []any{map[string]any{
+					"name":         "alpha",
+					"display_name": "Alpha",
+					"description":  "safe summary",
+					"source_kind":  "managed",
+					"state":        "effective",
+				}},
+			},
+		},
+		CreatedAt: now,
+	}})
+	if len(turns) != 1 {
+		t.Fatalf("expected one turn, got %d", len(turns))
+	}
+	if turns[0].UserMessageKind != UserMessageKindSkillActivation {
+		t.Fatalf("kind = %q, want skill_activation", turns[0].UserMessageKind)
+	}
+	if turns[0].Text != "" {
+		t.Fatalf("text = %q, want empty display text", turns[0].Text)
+	}
+	if turns[0].SkillActivation == nil || len(turns[0].SkillActivation.Skills) != 1 {
+		t.Fatalf("skill activation = %#v, want one skill", turns[0].SkillActivation)
+	}
+	if turns[0].SkillActivation.Skills[0].Name != "alpha" || turns[0].SkillActivation.Skills[0].DisplayName != "Alpha" {
+		t.Fatalf("unexpected skill activation payload: %#v", turns[0].SkillActivation.Skills[0])
+	}
+}
+
+func TestConvertMessagesToUITurnsInfersLegacyRequestedSkillActivation(t *testing.T) {
+	now := time.Now().UTC()
+	turns := ConvertMessagesToUITurns([]messagepkg.Message{{
+		ID:             "user-activation",
+		BotID:          "bot-1",
+		Role:           "user",
+		Content:        json.RawMessage(`{"role":"user","content":[{"type":"text","text":""}]}`),
+		DisplayContent: "",
+		Metadata: map[string]any{
+			"model_requested_skills": []any{map[string]any{
+				"name":        "legacy-alpha",
+				"source_kind": "managed",
+			}},
+		},
+		CreatedAt: now,
+	}})
+	if len(turns) != 1 {
+		t.Fatalf("expected one turn, got %d", len(turns))
+	}
+	if turns[0].UserMessageKind != UserMessageKindSkillActivation {
+		t.Fatalf("kind = %q, want skill_activation", turns[0].UserMessageKind)
+	}
+	if turns[0].Text != "" {
+		t.Fatalf("text = %q, want empty display text", turns[0].Text)
+	}
+	if turns[0].SkillActivation == nil || len(turns[0].SkillActivation.Skills) != 1 {
+		t.Fatalf("skill activation = %#v, want one skill", turns[0].SkillActivation)
+	}
+	skill := turns[0].SkillActivation.Skills[0]
+	if skill.Name != "legacy-alpha" || skill.SourceKind != "managed" {
+		t.Fatalf("unexpected inferred skill activation payload: %#v", skill)
+	}
+}
+
+func TestConvertMessagesToUITurnsStripsLegacyRawSlashActivationText(t *testing.T) {
+	now := time.Now().UTC()
+	turns := ConvertMessagesToUITurns([]messagepkg.Message{
+		{
+			ID:      "user-activation-empty",
+			BotID:   "bot-1",
+			Role:    "user",
+			Content: json.RawMessage(`{"role":"user","content":[{"type":"text","text":"/legacy-alpha"}]}`),
+			Metadata: map[string]any{
+				"model_requested_skills": []any{map[string]any{"name": "legacy-alpha"}},
+			},
+			CreatedAt: now,
+		},
+		{
+			ID:             "user-activation-prompt",
+			BotID:          "bot-1",
+			Role:           "user",
+			Content:        json.RawMessage(`{"role":"user","content":[{"type":"text","text":""}]}`),
+			DisplayContent: "/legacy-alpha please add widgets",
+			Metadata: map[string]any{
+				"model_requested_skills": []any{map[string]any{"name": "legacy-alpha"}},
+			},
+			CreatedAt: now.Add(time.Second),
+		},
+		{
+			ID:      "user-activation-marker",
+			BotID:   "bot-1",
+			Role:    "user",
+			Content: json.RawMessage(`{"role":"user","content":[{"type":"text","text":"The user activated the following skill for this turn without an additional prompt: legacy-alpha."}]}`),
+			Metadata: map[string]any{
+				"model_requested_skills": []any{map[string]any{"name": "legacy-alpha"}},
+			},
+			CreatedAt: now.Add(2 * time.Second),
+		},
+	})
+	if len(turns) != 3 {
+		t.Fatalf("expected three turns, got %d", len(turns))
+	}
+	if turns[0].Text != "" {
+		t.Fatalf("first text = %q, want empty text without raw slash", turns[0].Text)
+	}
+	if turns[1].Text != "please add widgets" {
+		t.Fatalf("second text = %q, want stripped prompt", turns[1].Text)
+	}
+	if turns[2].Text != "" {
+		t.Fatalf("third text = %q, want empty text without model marker", turns[2].Text)
+	}
+	for _, turn := range turns {
+		if turn.UserMessageKind != UserMessageKindSkillActivation {
+			t.Fatalf("kind = %q, want skill_activation", turn.UserMessageKind)
+		}
+	}
+}
+
 func TestUIMessageStreamConverterAccumulatesToolProgress(t *testing.T) {
 	converter := NewUIMessageStreamConverter()
 

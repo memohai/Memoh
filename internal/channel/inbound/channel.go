@@ -708,6 +708,10 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 
 	var requestedSkillContexts []conversation.RequestedSkillContext
+	var skillActivation *conversation.SkillActivation
+	userMessageKind := ""
+	userVisibleText := ""
+	modelText := text
 	var defaultSpec NewSessionSpec
 	var defaultSpecShouldCreate bool
 	var defaultSpecResolved bool
@@ -742,12 +746,16 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			return p.sendSlashError(ctx, sender, msg, code)
 		}
 		requestedSkillContexts = requestedSkillContextsFromResolved(resolvedSkills)
+		skillActivation = conversation.NewSkillActivation(requestedSkillContexts, pendingSkillIntent.Prompt)
 		text = strings.TrimSpace(pendingSkillIntent.Prompt)
-		msg.Message.Text = text
+		modelText = strings.TrimSpace(conversation.SkillActivationModelQuery(skillActivation))
+		userMessageKind = conversation.UserMessageKindSkillActivation
+		userVisibleText = strings.TrimSpace(pendingSkillIntent.Prompt)
+		msg.Message.Text = userVisibleText
 		if msg.Metadata == nil {
 			msg.Metadata = make(map[string]any)
 		}
-		msg.Metadata["raw_text"] = text
+		msg.Metadata["raw_text"] = userVisibleText
 	}
 
 	shouldTrigger := shouldTriggerAssistantResponse(msg) || identity.ForceReply || pendingSkillIntent != nil
@@ -872,7 +880,13 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		} else if hadVoiceAttachment && strings.TrimSpace(msg.Message.PlainText()) == "" {
 			msg.Message.Text = formatVoiceTranscriptionUnavailableNotice(resolvedAttachments)
 		}
-		text = strings.TrimSpace(msg.Message.PlainText())
+		if pendingSkillIntent != nil {
+			text = strings.TrimSpace(userVisibleText)
+			modelText = strings.TrimSpace(conversation.SkillActivationModelQuery(skillActivation))
+		} else {
+			text = strings.TrimSpace(msg.Message.PlainText())
+			modelText = text
+		}
 	}
 
 	if !shouldTrigger {
@@ -1072,7 +1086,11 @@ startStream:
 	if p.observer != nil && !isLocalChannelType(msg.Channel) {
 		stream = channel.NewTeeStream(stream, p.observer, strings.TrimSpace(identity.BotID), msg.Channel)
 		// Broadcast the inbound user message so WebUI can display it.
-		p.broadcastInboundMessage(ctx, strings.TrimSpace(identity.BotID), msg, text, identity, resolvedAttachments)
+		broadcastText := text
+		if pendingSkillIntent != nil {
+			broadcastText = userVisibleText
+		}
+		p.broadcastInboundMessage(ctx, strings.TrimSpace(identity.BotID), msg, broadcastText, identity, resolvedAttachments)
 	}
 
 	if err := stream.Push(ctx, channel.StreamEvent{
@@ -1139,6 +1157,12 @@ startStream:
 		ForwardSender:             inboundForwardSender(msg.Message.Forward),
 		ForwardDate:               inboundForwardDate(msg.Message.Forward),
 		Query:                     text,
+		ModelQuery:                modelText,
+		UserMessageKind:           userMessageKind,
+		UserVisibleText:           userVisibleText,
+		SkillActivation:           skillActivation,
+		SkipMemoryExtraction:      pendingSkillIntent != nil && userVisibleText == "",
+		SkipTitleGeneration:       pendingSkillIntent != nil && userVisibleText == "",
 		CurrentChannel:            msg.Channel.String(),
 		Channels:                  []string{msg.Channel.String()},
 		UserMessagePersisted:      false,
@@ -1466,10 +1490,43 @@ func hasSlashControlAttachments(msg channel.InboundMessage) bool {
 	if len(msg.Message.Attachments) > 0 {
 		return true
 	}
-	if msg.Message.Reply != nil && len(msg.Message.Reply.Attachments) > 0 {
+	if replyHasOrMayHaveAttachments(msg.Message.Reply) {
+		return true
+	}
+	if forwardHasOrMayHaveAttachments(msg.Message.Forward) {
 		return true
 	}
 	return false
+}
+
+func replyHasOrMayHaveAttachments(reply *channel.ReplyRef) bool {
+	if reply == nil {
+		return false
+	}
+	if len(reply.Attachments) > 0 {
+		return true
+	}
+	if reply.AttachmentsKnown {
+		return false
+	}
+	return strings.TrimSpace(reply.MessageID) != "" ||
+		strings.TrimSpace(reply.Target) != "" ||
+		strings.TrimSpace(reply.Sender) != "" ||
+		strings.TrimSpace(reply.Preview) != ""
+}
+
+func forwardHasOrMayHaveAttachments(forward *channel.ForwardRef) bool {
+	if forward == nil {
+		return false
+	}
+	if forward.AttachmentsKnown {
+		return false
+	}
+	return strings.TrimSpace(forward.MessageID) != "" ||
+		strings.TrimSpace(forward.FromUserID) != "" ||
+		strings.TrimSpace(forward.FromConversationID) != "" ||
+		strings.TrimSpace(forward.Sender) != "" ||
+		forward.Date > 0
 }
 
 func channelSlashAliases(msg channel.InboundMessage, identity InboundIdentity) []string {
@@ -1528,12 +1585,8 @@ func slashChannelMessageKey(code string) string {
 		return "slash.error.unknownSlash"
 	case slash.CodeUnsupportedWebCommand:
 		return "slash.error.unsupportedWebCommand"
-	case slash.CodeUseSkillChipRequired:
-		return "slash.error.useSkillChipRequired"
 	case slash.CodeInvalidSkillSlashSyntax:
 		return "slash.error.invalidSkillSlashSyntax"
-	case slash.CodeMissingPrompt:
-		return "slash.error.missingPrompt"
 	case slash.CodeRequestedSkillNotFound:
 		return "slash.error.requestedSkillNotFound"
 	case slash.CodeRequestedSkillAmbiguous:
@@ -1542,10 +1595,6 @@ func slashChannelMessageKey(code string) string {
 		return "slash.error.requestedSkillDisabled"
 	case slash.CodeRequestedSkillNotRuntimeUsable:
 		return "slash.error.requestedSkillNotRuntimeUsable"
-	case slash.CodeInvalidSkillRef:
-		return "slash.error.invalidSkillRef"
-	case slash.CodeStaleSkillRef:
-		return "slash.error.staleSkillRef"
 	case slash.CodeTooManyRequestedSkills:
 		return "slash.error.tooManyRequestedSkills"
 	case slash.CodeRequestedSkillContextTooLarge:
@@ -1589,7 +1638,6 @@ func requestedSkillContextsFromResolved(items []skillset.ResolvedSkill) []conver
 	out := make([]conversation.RequestedSkillContext, 0, len(items))
 	for _, item := range items {
 		out = append(out, conversation.RequestedSkillContext{
-			Ref:            item.Ref,
 			Name:           item.Name,
 			Description:    item.Description,
 			Content:        item.Content,

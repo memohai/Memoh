@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/textutil"
@@ -163,7 +164,8 @@ func IsUITurnBoundary(raw messagepkg.Message) bool {
 	attachments := uiAttachmentsFromMessageAssets(raw)
 	reply := uiReplyFromMessage(raw)
 	forward := uiForwardFromMessage(raw)
-	return text != "" || len(attachments) > 0 || reply != nil || forward != nil
+	activation := uiSkillActivationFromMessage(raw)
+	return text != "" || len(attachments) > 0 || reply != nil || forward != nil || activation != nil
 }
 
 // ConvertMessagesToUITurns converts persisted message rows into frontend-friendly turns.
@@ -233,6 +235,11 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			attachments := uiAttachmentsFromMessageAssets(raw)
 			reply := uiReplyFromMessage(raw)
 			forward := uiForwardFromMessage(raw)
+			activation := uiSkillActivationFromMessage(raw)
+			userMessageKind := uiUserMessageKind(raw)
+			if activation != nil && userMessageKind == "" {
+				userMessageKind = UserMessageKindSkillActivation
+			}
 
 			// A background-task completion notification becomes its own system
 			// turn. Flush first so the originating background tool (in the pending
@@ -260,7 +267,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			// action bars). Skip them WITHOUT flushing so the surrounding
 			// assistant/tool messages remain a single turn; only a real, visible
 			// user message below is a turn boundary.
-			if text == "" && len(attachments) == 0 && reply == nil && forward == nil {
+			if text == "" && len(attachments) == 0 && reply == nil && forward == nil && activation == nil {
 				continue
 			}
 			if strings.EqualFold(strings.TrimSpace(text), "[background notification]") {
@@ -272,6 +279,8 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			turn := UITurn{
 				Role:              "user",
 				Text:              text,
+				UserMessageKind:   userMessageKind,
+				SkillActivation:   activation,
 				Attachments:       attachments,
 				Reply:             reply,
 				Forward:           forward,
@@ -429,6 +438,18 @@ func decodePersistedModelMessage(raw messagepkg.Message) ModelMessage {
 
 func extractPersistedMessageText(raw messagepkg.Message, message ModelMessage) string {
 	if strings.EqualFold(raw.Role, "user") {
+		if activation := uiSkillActivationFromMessage(raw); activation != nil {
+			if prompt := strings.TrimSpace(activation.Prompt); prompt != "" {
+				return prompt
+			}
+			if text := strings.TrimSpace(raw.DisplayContent); text != "" {
+				return skillActivationPromptFromPersistedText(text, activation)
+			}
+			if text := strings.TrimSpace(extractTextFromPersistedContent(message.Content)); text != "" {
+				return skillActivationPromptFromPersistedText(text, activation)
+			}
+			return ""
+		}
 		if text := strings.TrimSpace(raw.DisplayContent); text != "" {
 			return text
 		}
@@ -443,6 +464,45 @@ func extractPersistedMessageText(raw messagepkg.Message, message ModelMessage) s
 		return strings.TrimSpace(stripPersistedUserStructuredContext(text))
 	}
 	return strings.TrimSpace(stripPersistedAgentTags(text))
+}
+
+func skillActivationPromptFromPersistedText(text string, activation *SkillActivation) string {
+	text = strings.TrimSpace(stripPersistedUserStructuredContext(text))
+	if text == "" {
+		return ""
+	}
+	if isSkillActivationModelMarker(text) {
+		return ""
+	}
+	if !strings.HasPrefix(text, "/") {
+		return text
+	}
+	head, rest := cutSlashHeadRest(text)
+	selector := strings.TrimPrefix(strings.TrimSpace(head), "/")
+	if before, _, ok := strings.Cut(selector, "@"); ok {
+		selector = before
+	}
+	for _, skill := range activation.Skills {
+		if selector == strings.TrimSpace(skill.Name) {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
+}
+
+func isSkillActivationModelMarker(text string) bool {
+	text = strings.TrimSpace(text)
+	return strings.HasPrefix(text, "The user activated the following skill for this turn without an additional prompt:")
+}
+
+func cutSlashHeadRest(text string) (string, string) {
+	text = strings.TrimSpace(text)
+	for i, r := range text {
+		if unicode.IsSpace(r) {
+			return text[:i], text[i:]
+		}
+	}
+	return text, ""
 }
 
 func stripPersistedUserStructuredContext(text string) string {
@@ -771,6 +831,77 @@ func uiAttachmentsFromMessageAssets(raw messagepkg.Message) []UIAttachment {
 		})
 	}
 	return attachments
+}
+
+func uiUserMessageKind(raw messagepkg.Message) string {
+	return stringFromAny(raw.Metadata["user_message_kind"])
+}
+
+func uiSkillActivationFromMessage(raw messagepkg.Message) *SkillActivation {
+	explicitKind := uiUserMessageKind(raw) == UserMessageKindSkillActivation
+	meta, _ := raw.Metadata["skill_activation"].(map[string]any)
+	if !explicitKind && len(meta) == 0 && raw.Metadata["model_requested_skills"] == nil {
+		return nil
+	}
+
+	activation := SkillActivation{
+		Prompt: stringFromAny(meta["prompt"]),
+	}
+	activation.Skills = append(activation.Skills, skillActivationMetadataSkills(meta["skills"])...)
+	if len(activation.Skills) == 0 {
+		activation.Skills = append(activation.Skills, skillActivationMetadataSkills(raw.Metadata["model_requested_skills"])...)
+	}
+	if len(activation.Skills) == 0 && activation.Prompt == "" {
+		return nil
+	}
+	return &activation
+}
+
+func skillActivationMetadataSkills(value any) []SkillActivationSkill {
+	var skills []SkillActivationSkill
+	for _, item := range skillActivationMetadataItems(value) {
+		name := stringFromAny(item["name"])
+		if name == "" {
+			continue
+		}
+		skills = append(skills, SkillActivationSkill{
+			Name:        name,
+			DisplayName: stringFromAny(item["display_name"]),
+			Description: stringFromAny(item["description"]),
+			SourceKind:  stringFromAny(item["source_kind"]),
+			State:       stringFromAny(item["state"]),
+		})
+	}
+	return skills
+}
+
+func skillActivationMetadataItems(value any) []map[string]any {
+	switch items := value.(type) {
+	case []any:
+		result := make([]map[string]any, 0, len(items))
+		for _, raw := range items {
+			if item, ok := raw.(map[string]any); ok {
+				result = append(result, item)
+				continue
+			}
+			if name, ok := raw.(string); ok && strings.TrimSpace(name) != "" {
+				result = append(result, map[string]any{"name": name})
+			}
+		}
+		return result
+	case []map[string]any:
+		return items
+	case []string:
+		result := make([]map[string]any, 0, len(items))
+		for _, name := range items {
+			if strings.TrimSpace(name) != "" {
+				result = append(result, map[string]any{"name": name})
+			}
+		}
+		return result
+	default:
+		return nil
+	}
 }
 
 func uiReplyFromMessage(raw messagepkg.Message) *UIReplyRef {

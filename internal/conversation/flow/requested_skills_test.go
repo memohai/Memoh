@@ -44,6 +44,29 @@ func TestRejectRequestedSkillsAllowsModelChatSession(t *testing.T) {
 	}
 }
 
+func TestRejectRequestedSkillsAllowsPersistedSkillActivation(t *testing.T) {
+	resolver := &Resolver{
+		sessionService: &fakeBackgroundSessionService{
+			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
+				return session.Session{
+					ID:          sessionID,
+					BotID:       "bot-1",
+					Type:        session.TypeChat,
+					SessionMode: session.TypeChat,
+					RuntimeType: session.RuntimeModel,
+				}, nil
+			},
+		},
+	}
+
+	req := requestedSkillGuardRequest("session-1")
+	req.UserMessagePersisted = true
+	req.UserMessageKind = conversation.UserMessageKindSkillActivation
+	if err := resolver.rejectRequestedSkillsIfUnsupportedContext(context.Background(), req); err != nil {
+		t.Fatalf("rejectRequestedSkillsIfUnsupportedContext() error = %v, want nil", err)
+	}
+}
+
 func TestRejectReservedSkillMetadataIfPresentRejectsAttachments(t *testing.T) {
 	req := conversation.ChatRequest{
 		Attachments: []conversation.ChatAttachment{{

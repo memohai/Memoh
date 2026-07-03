@@ -1,8 +1,6 @@
 package main
 
 import (
-	"encoding/base64"
-	"strings"
 	"testing"
 
 	"github.com/memohai/memoh/internal/channel/inbound"
@@ -54,25 +52,5 @@ func TestNewSessionCreatedByUserIDPrefersCreator(t *testing.T) {
 	})
 	if got != "runtime-owner" {
 		t.Fatalf("created_by_user_id fallback = %q, want runtime-owner", got)
-	}
-}
-
-func TestDecodeSkillRefKeyRejectsPlaceholder(t *testing.T) {
-	if _, err := decodeSkillRefKey(skillRefKeyPlaceholder); err == nil || !strings.Contains(err.Error(), "placeholder") {
-		t.Fatalf("decodeSkillRefKey placeholder err = %v, want placeholder rejection", err)
-	}
-	if _, err := decodeSkillRefKey("base64:" + skillRefKeyPlaceholder); err == nil || !strings.Contains(err.Error(), "placeholder") {
-		t.Fatalf("decodeSkillRefKey prefixed placeholder err = %v, want placeholder rejection", err)
-	}
-}
-
-func TestDecodeSkillRefKeyAcceptsGeneratedKey(t *testing.T) {
-	key := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
-	got, err := decodeSkillRefKey(key)
-	if err != nil {
-		t.Fatalf("decodeSkillRefKey generated key: %v", err)
-	}
-	if len(got) != 32 {
-		t.Fatalf("decoded key len = %d, want 32", len(got))
 	}
 }

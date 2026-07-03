@@ -10,7 +10,9 @@ import (
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
+	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	"github.com/memohai/memoh/internal/settings"
 )
 
 type recordingMessageService struct {
@@ -290,5 +292,109 @@ func TestPersistTerminalSnapshotSkipsUserWhenPipelineContextContainsCurrentMessa
 	}
 	if messages.persisted[0].Role != "assistant" {
 		t.Fatalf("unexpected persisted role: %q", messages.persisted[0].Role)
+	}
+}
+
+func TestPersistTerminalSnapshotHonorsSkipMemoryExtraction(t *testing.T) {
+	t.Parallel()
+
+	memory := &storeRoundMemoryProvider{afterChat: make(chan memprovider.AfterChatRequest, 2)}
+	registry := memprovider.NewRegistry(slog.New(slog.DiscardHandler))
+	registry.Register(storeRoundMemoryProviderID, memory)
+	resolver := &Resolver{
+		messageService:  &recordingMessageService{},
+		memoryRegistry:  registry,
+		settingsService: settings.NewService(slog.New(slog.DiscardHandler), &storeRoundSettingsQueries{}, nil, nil),
+		logger:          slog.New(slog.DiscardHandler),
+	}
+
+	req := conversation.ChatRequest{
+		BotID:     storeRoundBotID,
+		SessionID: "session-1",
+		Query:     "hello",
+	}
+	if err := resolver.persistTerminalSnapshot(
+		context.Background(),
+		req,
+		resolvedContext{},
+		terminalSnapshot{
+			sdkMessages:   []sdk.Message{sdk.AssistantMessage("pong")},
+			visibleOutput: true,
+		},
+	); err != nil {
+		t.Fatalf("persistTerminalSnapshot returned error: %v", err)
+	}
+	select {
+	case <-memory.afterChat:
+	case <-time.After(time.Second):
+		t.Fatal("expected ordinary terminal snapshot to write memory")
+	}
+
+	req.SkipMemoryExtraction = true
+	if err := resolver.persistTerminalSnapshot(
+		context.Background(),
+		req,
+		resolvedContext{},
+		terminalSnapshot{
+			sdkMessages:   []sdk.Message{sdk.AssistantMessage("done")},
+			visibleOutput: true,
+		},
+	); err != nil {
+		t.Fatalf("persistTerminalSnapshot returned error with skip memory: %v", err)
+	}
+	select {
+	case got := <-memory.afterChat:
+		t.Fatalf("expected skip memory extraction to suppress memory write, got %#v", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestPersistTerminalSnapshotSkillActivationWithoutPromptDoesNotStoreModelMarker(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+	activation := &conversation.SkillActivation{
+		Skills: []conversation.SkillActivationSkill{{Name: "alpha", DisplayName: "Alpha", State: "effective"}},
+	}
+	req := conversation.ChatRequest{
+		BotID:                "bot-1",
+		SessionID:            "session-1",
+		ModelQuery:           conversation.SkillActivationModelQuery(activation),
+		UserMessageKind:      conversation.UserMessageKindSkillActivation,
+		SkillActivation:      activation,
+		SkipMemoryExtraction: true,
+	}
+
+	if err := resolver.persistTerminalSnapshot(
+		context.Background(),
+		req,
+		resolvedContext{},
+		terminalSnapshot{
+			sdkMessages:   []sdk.Message{sdk.AssistantMessage("done")},
+			visibleOutput: true,
+		},
+	); err != nil {
+		t.Fatalf("persistTerminalSnapshot returned error: %v", err)
+	}
+
+	if len(messages.persisted) != 2 {
+		t.Fatalf("persisted messages = %d, want user + assistant", len(messages.persisted))
+	}
+	user := messages.persisted[0]
+	if user.Role != "user" {
+		t.Fatalf("first persisted role = %q, want user", user.Role)
+	}
+	if got := persistedTextContent(t, user.Content); got != "" {
+		t.Fatalf("persisted user content = %q, want empty", got)
+	}
+	if user.DisplayText != "" {
+		t.Fatalf("display text = %q, want empty", user.DisplayText)
+	}
+	if user.Metadata["user_message_kind"] != conversation.UserMessageKindSkillActivation {
+		t.Fatalf("metadata kind = %#v, want skill_activation", user.Metadata["user_message_kind"])
 	}
 }

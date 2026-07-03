@@ -112,11 +112,9 @@ export async function fetchSafeSkillCatalog(botId: string): Promise<RequestedSki
     throwOnError: true,
   })
   return (data?.skills ?? []).flatMap((item): RequestedSkillSelection[] => {
-    const skillRef = item.skill_ref?.trim()
     const name = item.name?.trim()
-    if (!skillRef || !name) return []
+    if (!name) return []
     return [{
-      skill_ref: skillRef,
       name,
       display_name: item.display_name?.trim() || undefined,
       description: item.description?.trim() || undefined,
@@ -129,7 +127,7 @@ export async function fetchSafeSkillCatalog(botId: string): Promise<RequestedSki
 export async function executeQuickAction(
   botId: string,
   actionId: string,
-  options: { invocationId?: string; composerScope?: string; sessionId?: string } = {},
+  options: { invocationId?: string; composerScope?: string; sessionId?: string; skillActivationAllowed?: boolean } = {},
 ): Promise<CommandEventResponse> {
   const bid = botId.trim()
   const aid = actionId.trim()
@@ -142,39 +140,14 @@ export async function executeQuickAction(
       invocation_id: options.invocationId?.trim() || undefined,
       composer_scope: options.composerScope?.trim() || undefined,
       session_id: options.sessionId?.trim() || undefined,
+      params: options.skillActivationAllowed === false
+        ? { skill_activation_allowed: false }
+        : undefined,
     },
     throwOnError: true,
   })
   if (isCommandEvent(data)) return data
   throw new Error('invalid quick action response')
-}
-
-export async function sendLocalSlashCommand(
-  botId: string,
-  text: string,
-  attachments?: ChatAttachment[],
-): Promise<CommandEventResponse | null> {
-  const bid = botId.trim()
-  const trimmedText = text.trim()
-  if (!bid) throw new Error('bot id is required')
-  if (!trimmedText) return null
-
-  const msg: ChannelMessage = { text: trimmedText }
-  if (attachments?.length) {
-    msg.attachments = attachments.map((item): ChannelAttachment => ({
-      type: item.type as ChannelAttachment['type'],
-      base64: item.base64,
-      mime: item.mime ?? '',
-      name: item.name ?? '',
-    }))
-  }
-  const { data } = await client.post({
-    url: '/bots/{bot_id}/web/messages',
-    path: { bot_id: bid },
-    body: { message: msg },
-    throwOnError: true,
-  })
-  return isCommandEvent(data) ? data : null
 }
 
 export async function sendLocalChannelMessage(

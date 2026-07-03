@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"path"
@@ -100,9 +99,6 @@ func (h *ContainerdHandler) ListSafeSkills(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionChat)
 	if err != nil {
 		return err
-	}
-	if h.skillRefCodec == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "skill_ref codec not configured")
 	}
 	catalog, err := h.buildSafeSkillCatalog(c.Request().Context(), botID)
 	if err != nil {
@@ -264,41 +260,24 @@ func (h *ContainerdHandler) LoadSkills(ctx context.Context, botID string) ([]Ski
 	return skillItemsFromEntries(items), nil
 }
 
-func (h *ContainerdHandler) ResolveRequestedSkillRefs(ctx context.Context, botID string, refs []skillset.RequestedRef) ([]skillset.ResolvedSkill, error) {
-	if h.skillRefCodec == nil {
-		return nil, errors.New("skill_ref codec not configured")
-	}
-	entries, err := h.listSkillEntriesFromContainer(ctx, botID)
-	if err != nil {
-		return nil, err
-	}
-	return skillset.ResolveRefRequestedSkills(botID, entries, refs, h.skillRefCodec, "", h.skillRefLimits)
-}
-
 func (h *ContainerdHandler) ListSafeSkillCatalog(ctx context.Context, botID string) ([]skillset.SafeCatalogItem, error) {
 	return h.buildSafeSkillCatalog(ctx, botID)
 }
 
 func (h *ContainerdHandler) buildSafeSkillCatalog(ctx context.Context, botID string) ([]skillset.SafeCatalogItem, error) {
-	if h.skillRefCodec == nil {
-		return nil, errors.New("skill_ref codec not configured")
-	}
 	entries, err := h.listSkillEntriesFromContainer(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-	return skillset.BuildSafeCatalog(botID, entries, h.skillRefCodec, "")
+	return skillset.BuildSafeCatalog(entries)
 }
 
 func (h *ContainerdHandler) ResolveTextRequestedSkills(ctx context.Context, botID string, names []string) ([]skillset.ResolvedSkill, error) {
-	if h.skillRefCodec == nil {
-		return nil, errors.New("skill_ref codec not configured")
-	}
 	entries, err := h.listSkillEntriesFromContainer(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-	return skillset.ResolveTextRequestedSkills(botID, entries, names, h.skillRefCodec, "", h.skillRefLimits)
+	return skillset.ResolveTextRequestedSkills(entries, names, h.requestedSkillLimits)
 }
 
 func (h *ContainerdHandler) listSkillsFromContainer(ctx context.Context, botID string) ([]SkillItem, error) {

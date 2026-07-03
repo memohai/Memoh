@@ -14873,6 +14873,9 @@ const docTemplate = `{
         "channel.ForwardRef": {
             "type": "object",
             "properties": {
+                "attachments_known": {
+                    "type": "boolean"
+                },
                 "date": {
                     "type": "integer"
                 },
@@ -15031,6 +15034,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/channel.Attachment"
                     }
+                },
+                "attachments_known": {
+                    "type": "boolean"
                 },
                 "message_id": {
                     "type": "string"
@@ -15329,6 +15335,40 @@ const docTemplate = `{
                 "usage": {}
             }
         },
+        "conversation.SkillActivation": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string"
+                },
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/conversation.SkillActivationSkill"
+                    }
+                }
+            }
+        },
+        "conversation.SkillActivationSkill": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "source_kind": {
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string"
+                }
+            }
+        },
         "conversation.UIAttachment": {
             "type": "object",
             "properties": {
@@ -15579,10 +15619,16 @@ const docTemplate = `{
                 "sender_user_id": {
                     "type": "string"
                 },
+                "skill_activation": {
+                    "$ref": "#/definitions/conversation.SkillActivation"
+                },
                 "text": {
                     "type": "string"
                 },
                 "timestamp": {
+                    "type": "string"
+                },
+                "user_message_kind": {
                     "type": "string"
                 }
             }
@@ -19815,9 +19861,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
-                    "type": "string"
-                },
-                "skill_ref": {
                     "type": "string"
                 },
                 "source_kind": {

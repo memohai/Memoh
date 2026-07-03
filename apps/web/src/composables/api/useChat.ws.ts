@@ -133,6 +133,7 @@ export function connectWebSocket(
           && eventType !== 'end'
           && eventType !== 'error'
           && eventType !== 'session_created'
+          && eventType !== 'user_message'
           && eventType !== 'command_result'
           && eventType !== 'command_error'
         ) {

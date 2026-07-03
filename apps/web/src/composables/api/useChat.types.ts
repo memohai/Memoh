@@ -133,7 +133,6 @@ export interface ChatAttachment {
 }
 
 export interface RequestedSkillSelection {
-  skill_ref: string
   name: string
   display_name?: string
   description?: string
@@ -142,7 +141,6 @@ export interface RequestedSkillSelection {
 }
 
 export interface RequestedSkillRequest {
-  skill_ref: string
   name: string
 }
 
@@ -296,9 +294,24 @@ export interface UIErrorMessage {
 
 export type UIMessage = UITextMessage | UIReasoningMessage | UIToolMessage | UIAttachmentsMessage | UIErrorMessage
 
+export interface UISkillActivationSkill {
+  name: string
+  display_name?: string
+  description?: string
+  source_kind?: string
+  state?: string
+}
+
+export interface UISkillActivation {
+  skills?: UISkillActivationSkill[]
+  prompt?: string
+}
+
 export interface UIUserTurn {
   role: 'user'
   text: string
+  user_message_kind?: string
+  skill_activation?: UISkillActivation
   attachments?: UIAttachment[]
   reply?: UIReplyRef
   forward?: UIForwardRef
@@ -364,12 +377,20 @@ export interface UIStreamSessionCreatedEvent {
   session_id: string
 }
 
+export interface UIStreamUserMessageEvent {
+  type: 'user_message'
+  stream_id?: string
+  session_id?: string
+  data: UIUserTurn
+}
+
 export type UIStreamEvent =
   | UIStreamStartEvent
   | UIStreamMessageEvent
   | UIStreamEndEvent
   | UIStreamErrorEvent
   | UIStreamSessionCreatedEvent
+  | UIStreamUserMessageEvent
   | CommandEventResponse
 
 export type UIStreamEventHandler = (event: UIStreamEvent) => void

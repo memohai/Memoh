@@ -27,24 +27,23 @@ import (
 )
 
 type ContainerdHandler struct {
-	manager          containerWorkspace
-	cfg              config.WorkspaceConfig
-	containerBackend string
-	logger           *slog.Logger
-	toolGateway      *mcp.ToolGatewayService
-	toolContexts     *mcp.ToolSessionContextStore
-	acpRuntimes      acpRuntimeContextResolver
-	mcpSess          map[string]*mcpSession
-	mcpStdioMu       sync.Mutex
-	mcpStdioSess     map[string]*mcpStdioSession
-	botService       *bots.Service
-	accountService   *accounts.Service
-	policyService    *policy.Service
-	pluginService    PluginInstallationLister
-	skillRefCodec    *skillset.RefCodec
-	skillRefLimits   skillset.ResolveLimits
-	displayService   *displaypkg.Service
-	browserSessions  *browserSessionStore
+	manager              containerWorkspace
+	cfg                  config.WorkspaceConfig
+	containerBackend     string
+	logger               *slog.Logger
+	toolGateway          *mcp.ToolGatewayService
+	toolContexts         *mcp.ToolSessionContextStore
+	acpRuntimes          acpRuntimeContextResolver
+	mcpSess              map[string]*mcpSession
+	mcpStdioMu           sync.Mutex
+	mcpStdioSess         map[string]*mcpStdioSession
+	botService           *bots.Service
+	accountService       *accounts.Service
+	policyService        *policy.Service
+	pluginService        PluginInstallationLister
+	requestedSkillLimits skillset.ResolveLimits
+	displayService       *displaypkg.Service
+	browserSessions      *browserSessionStore
 }
 
 type ContainerGPURequest struct {
@@ -267,9 +266,8 @@ func NewContainerdHandler(log *slog.Logger, manager containerWorkspace, cfg conf
 	return h
 }
 
-func (h *ContainerdHandler) SetSkillRefCodec(codec *skillset.RefCodec, limits skillset.ResolveLimits) {
-	h.skillRefCodec = codec
-	h.skillRefLimits = limits
+func (h *ContainerdHandler) SetRequestedSkillLimits(limits skillset.ResolveLimits) {
+	h.requestedSkillLimits = limits
 }
 
 func (h *ContainerdHandler) Register(e *echo.Echo) {

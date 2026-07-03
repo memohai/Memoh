@@ -45,6 +45,7 @@ import {
   type UIReasoningMessage,
   type UIReplyRef,
   type UIForwardRef,
+  type UISkillActivation,
   type UISystemTurn,
   type UITextMessage,
   type UIToolApproval,
@@ -60,7 +61,6 @@ import {
   fetchBots,
   fetchMessagesUI,
   sendLocalChannelMessage,
-  sendLocalSlashCommand,
   streamBotSessionsActivityEvents,
   streamSessionMessageEvents,
   connectWebSocket,
@@ -148,6 +148,8 @@ export interface ChatUserTurn {
   serverId?: string
   role: 'user'
   text: string
+  userMessageKind?: string
+  skillActivation?: UISkillActivation
   attachments: AttachmentItem[]
   reply?: UIReplyRef
   forward?: UIForwardRef
@@ -229,16 +231,25 @@ function currentLocale() {
   return locale === 'zh' || locale === 'ja' ? locale : 'en'
 }
 
-function userInputConnectionLostMessage() {
+function localizedMessages() {
   const locale = currentLocale()
-  const messages = locale === 'zh' ? zhMessages : locale === 'ja' ? jaMessages : enMessages
+  return locale === 'zh' ? zhMessages : locale === 'ja' ? jaMessages : enMessages
+}
+
+function userInputConnectionLostMessage() {
+  const messages = localizedMessages()
   return messages.chat.tools.userInputConnectionLost
 }
 
 function sendFailedMessage() {
-  const locale = currentLocale()
-  const messages = locale === 'zh' ? zhMessages : locale === 'ja' ? jaMessages : enMessages
+  const messages = localizedMessages()
   return messages.chat.sendFailed
+}
+
+function commandErrorMessage(code: string) {
+  const messages = localizedMessages()
+  const errors = messages.chat.slash.errorMessages as Record<string, string>
+  return errors[code] || errors.generic || 'Slash command failed.'
 }
 
 interface PendingAssistantStream {
@@ -265,6 +276,7 @@ export interface SendMessageResult {
   error?: string
   restoreInput?: string
   restoreAttachments?: ChatAttachment[]
+  restoreRequestedSkills?: RequestedSkillSelection[]
   composerScope?: string
 }
 
@@ -325,6 +337,7 @@ interface StartupSendFailure {
   error: string
   restoreInput: string
   restoreAttachments?: ChatAttachment[]
+  restoreRequestedSkills?: RequestedSkillSelection[]
 }
 
 class StreamFailureError extends Error {
@@ -1090,12 +1103,32 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function skillActivationTextFromRaw(text: string, activation: UISkillActivation | undefined): string {
+    const value = text.trim()
+    if (!value || !activation) return value
+    if (value.startsWith('The user activated the following skill for this turn without an additional prompt:')) {
+      return ''
+    }
+    if (!value.startsWith('/')) return value
+    const [head = '', ...rest] = value.split(/\s+/)
+    const selector = head.replace(/^\//, '').split('@')[0]?.trim() ?? ''
+    const matchesSkill = (activation.skills ?? []).some(skill => selector === skill.name?.trim())
+    return matchesSkill ? rest.join(' ').trim() : ''
+  }
+
   function normalizeTurn(turn: UITurn): ChatMessage {
     if (turn.role === 'user') {
+      const userMessageKind = (turn.user_message_kind ?? '').trim()
+        || (turn.skill_activation ? 'skill_activation' : undefined)
+      const text = turn.skill_activation
+        ? skillActivationTextFromRaw(turn.text ?? '', turn.skill_activation)
+        : turn.text ?? ''
       return {
         id: String(turn.id ?? nextId()),
         role: 'user',
-        text: turn.text ?? '',
+        text,
+        userMessageKind,
+        skillActivation: turn.skill_activation,
         attachments: (turn.attachments ?? []).map(normalizeAttachment),
         reply: normalizeReplyRef(turn.reply),
         forward: normalizeForwardRef(turn.forward),
@@ -1728,6 +1761,7 @@ export const useChatStore = defineStore('chat', () => {
       ...failure,
       id: nextId(),
       restoreAttachments: failure.restoreAttachments ? [...failure.restoreAttachments] : undefined,
+      restoreRequestedSkills: failure.restoreRequestedSkills ? failure.restoreRequestedSkills.map(skill => ({ ...skill })) : undefined,
     }
   }
 
@@ -1863,6 +1897,17 @@ export const useChatStore = defineStore('chat', () => {
   function handleWSStreamEvent(event: UIStreamEvent, targetSessionId?: string, sourceBotId = '') {
     if (event.type === 'session_created') {
       handleWSSessionCreated(event, sourceBotId)
+      return
+    }
+    if (event.type === 'user_message') {
+      const sid = (event.session_id ?? targetSessionId ?? sessionId.value ?? '').trim()
+      const bid = sourceBotId || currentBotId.value || ''
+      const streamId = streamIdForEvent(event, sid)
+      appendTurnToSession(bid, sid, normalizeTurn(event.data))
+      const pending = getAssistantStream(streamId)
+      if (pending && !messages.includes(pending.assistantTurn)) {
+        appendTurnToSession(bid || pending.botId, sid || pending.sessionId, pending.assistantTurn)
+      }
       return
     }
     if (event.type === 'command_result' || event.type === 'command_error') {
@@ -3327,7 +3372,7 @@ export const useChatStore = defineStore('chat', () => {
     return ''
   }
 
-  async function handleWebSlashCommand(text: string, attachments?: ChatAttachment[], hasRequestedSkills = false, composerScope = 'chat'): Promise<WebSlashCommandResult> {
+  async function handleWebSlashCommand(text: string, hasRequestedSkills = false, composerScope = 'chat'): Promise<WebSlashCommandResult> {
     if (!isWebSlashInput(text) || hasRequestedSkills) return { kind: 'none' }
     const bid = currentBotId.value ?? ''
     if (!bid) return { kind: 'error', message: 'Bot not selected' }
@@ -3335,14 +3380,16 @@ export const useChatStore = defineStore('chat', () => {
     const scope = composerScope.trim() || 'chat'
 
     const actionID = quickActionIDForSlash(text)
+    if (!actionID) return { kind: 'none' }
+    const skillActivationAllowed = !activeChatTarget.value.isACP
     let event: CommandEventResponse | null
     try {
-      event = actionID
-        ? await executeQuickAction(bid, actionID, {
-            invocationId: createStreamId(),
-            composerScope: scope,
-          })
-        : await sendLocalSlashCommand(bid, text, attachments)
+      event = await executeQuickAction(bid, actionID, {
+        invocationId: createStreamId(),
+        composerScope: scope,
+        sessionId: sid || undefined,
+        skillActivationAllowed,
+      })
     } catch (error) {
       const message = resolveApiErrorMessage(error, 'Slash command failed.')
       showCommandError('generic', message, {
@@ -3410,14 +3457,12 @@ export const useChatStore = defineStore('chat', () => {
     const out: RequestedSkillSelection[] = []
     const seen = new Set<string>()
     for (const item of items) {
-      const skillRef = item.skill_ref?.trim()
       const name = item.name?.trim()
-      if (!skillRef || !name) continue
-      const key = skillRef
+      if (!name) continue
+      const key = name
       if (seen.has(key)) continue
       seen.add(key)
       out.push({
-        skill_ref: skillRef,
         name,
         display_name: item.display_name?.trim() || undefined,
         description: item.description?.trim() || undefined,
@@ -3430,37 +3475,45 @@ export const useChatStore = defineStore('chat', () => {
 
   function requestedSkillRequestsForWire(items: RequestedSkillSelection[]): RequestedSkillRequest[] {
     return items.map(item => ({
-      skill_ref: item.skill_ref,
       name: item.name,
     }))
+  }
+
+  function cloneRequestedSkills(items: RequestedSkillSelection[]): RequestedSkillSelection[] {
+    return items.map(item => ({ ...item }))
   }
 
   async function sendMessage(text: string, attachments?: ChatAttachment[], options: SendMessageOptions = {}): Promise<SendMessageResult> {
     const trimmed = text.trim()
     const requestedSkills = normalizeRequestedSkills(options.requestedSkills)
     const composerScope = options.composerScope?.trim() || 'chat'
-    if (!trimmed && !attachments?.length) return { ok: false, stage: 'startup' }
+    if (!trimmed && !attachments?.length && requestedSkills.length === 0) return { ok: false, stage: 'startup' }
+
+    if (requestedSkills.length > 0 && isWebSlashInput(trimmed)) {
+      const message = commandErrorMessage('invalid_skill_slash_syntax')
+      showCommandError('invalid_skill_slash_syntax', message, currentCommandScope(composerScope))
+      return { ok: false, stage: 'startup', error: message, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills) }
+    }
 
     if (isWebSlashInput(trimmed) && attachments?.length) {
       const message = 'Slash commands do not support attachments.'
       showCommandError('slash_attachments_unsupported', message, currentCommandScope(composerScope))
-      return { ok: false, stage: 'startup', error: message, restoreInput: text, restoreAttachments: attachments }
+      return { ok: false, stage: 'startup', error: message, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills) }
     }
 
     const newCommand = await handleWebNewCommand(trimmed, attachments)
     if (newCommand.kind === 'handled') return { ok: true }
     if (newCommand.kind === 'error') {
-      return { ok: false, stage: 'startup', error: newCommand.message, restoreInput: text, restoreAttachments: attachments }
+      return { ok: false, stage: 'startup', error: newCommand.message, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills) }
     }
-    const slashCommand = await handleWebSlashCommand(trimmed, attachments, requestedSkills.length > 0, composerScope)
+    const slashCommand = await handleWebSlashCommand(trimmed, requestedSkills.length > 0, composerScope)
     if (slashCommand.kind === 'handled') return { ok: true }
     if (slashCommand.kind === 'error') {
-      return { ok: false, stage: 'startup', error: slashCommand.message, restoreInput: text, restoreAttachments: attachments }
+      return { ok: false, stage: 'startup', error: slashCommand.message, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills) }
     }
     clearCommandEvent(currentCommandScope(composerScope))
     if (streaming.value || loadingMessages.value || !currentBotId.value) return { ok: false, stage: 'startup' }
 
-    loading.value = true
     let assistantTurn: ChatAssistantTurn | null = null
     let userTurn: ChatUserTurn | null = null
     let sendBotId = ''
@@ -3468,7 +3521,16 @@ export const useChatStore = defineStore('chat', () => {
     let sendStreamId = ''
 
     const wasDraft = !sessionId.value
-    const deferSessionCreation = requestedSkills.length > 0 && wasDraft
+    const serverSlashActivation = isWebSlashInput(trimmed) && quickActionIDForSlash(trimmed) === ''
+    const serverSkillActivation = requestedSkills.length > 0 || serverSlashActivation
+    if (serverSkillActivation && !sessionId.value && pendingACPSessionInput.value) {
+      const message = commandErrorMessage('unsupported_skill_slash_context')
+      showCommandError('unsupported_skill_slash_context', message, currentCommandScope(composerScope))
+      return { ok: false, stage: 'startup', error: message, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills), composerScope }
+    }
+
+    loading.value = true
+    const deferSessionCreation = serverSkillActivation && wasDraft
     try {
       if (!deferSessionCreation) {
         await ensureActiveSession(wasDraft ? trimmed : undefined)
@@ -3485,10 +3547,12 @@ export const useChatStore = defineStore('chat', () => {
         userSentInSession.value = { id: sid, wasDraft, seq: ++userSendSeq }
       }
 
-      userTurn = createOptimisticUserTurn(trimmed, attachments)
-      messages.push(userTurn)
-      messages.push(createOptimisticAssistantTurn())
-      assistantTurn = messages[messages.length - 1] as ChatAssistantTurn
+      assistantTurn = createOptimisticAssistantTurn()
+      if (!serverSkillActivation) {
+        userTurn = createOptimisticUserTurn(trimmed, attachments)
+        messages.push(userTurn)
+        messages.push(assistantTurn)
+      }
 
       const modelId = overrideModelId.value || undefined
       const effort = overrideReasoningEffort.value
@@ -3519,7 +3583,7 @@ export const useChatStore = defineStore('chat', () => {
         wsCreatedSessionsByStream.delete(sendStreamId)
         if (refreshSessionId) await refreshCurrentSession(bid, refreshSessionId)
       } else {
-        if (requestedSkills.length > 0) throw new StreamFailureError('WebSocket is required for requested skills', 'startup')
+        if (serverSkillActivation) throw new StreamFailureError('WebSocket is required for skill activation', 'startup')
         await sendLocalChannelMessage(bid, trimmed, attachments, { modelId, reasoningEffort })
         await refreshCurrentSession(bid, sid)
       }
@@ -3557,10 +3621,11 @@ export const useChatStore = defineStore('chat', () => {
         const currentSid = (sessionId.value ?? '').trim()
         const stillCurrent = currentBid === bid && (!sid || currentSid === sid)
         const deferredDraftStillCurrent = !(deferSessionCreation && wasDraft && currentSid)
-        if (!isCommandError && stillCurrent && deferredDraftStillCurrent) {
-          rememberStartupSendFailure({ botId: bid, sessionId: sid, composerScope, error: reason, restoreInput: text, restoreAttachments: attachments })
+        const commandErrorRestoredDraft = isCommandError && deferSessionCreation && wasDraft && !currentSid
+        if (stillCurrent && deferredDraftStillCurrent && (!isCommandError || commandErrorRestoredDraft)) {
+          rememberStartupSendFailure({ botId: bid, sessionId: sid, composerScope, error: reason, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills) })
         }
-        return { ok: false, stage, error: reason, restoreInput: text, restoreAttachments: attachments, composerScope }
+        return { ok: false, stage, error: reason, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills), composerScope }
       }
       return { ok: false, stage, error: reason }
     }

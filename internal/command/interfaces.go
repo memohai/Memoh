@@ -20,6 +20,15 @@ type SkillLoader interface {
 	LoadSkills(ctx context.Context, botID string) ([]Skill, error)
 }
 
+// RuntimeSkillLister lists the bot's runtime-usable skills — the same safe
+// catalog the Web slash picker shows (unique, enabled, loadable as model
+// context). Optional capability of SkillLoader implementations: when present,
+// /skill list renders these entries with tap-to-activate buttons instead of
+// the raw full listing, so IM and Web expose one identical skill surface.
+type RuntimeSkillLister interface {
+	ListRuntimeSkills(ctx context.Context, botID string) ([]Skill, error)
+}
+
 // FSEntry represents a file or directory in a container filesystem.
 type FSEntry struct {
 	Name  string

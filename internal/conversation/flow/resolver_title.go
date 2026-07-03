@@ -47,6 +47,9 @@ func (r *Resolver) SetEventPublisher(p messageevent.Publisher) {
 // It is fired asynchronously when a user message is received so the title
 // appears as early as possible without blocking the chat flow.
 func (r *Resolver) maybeGenerateSessionTitle(ctx context.Context, req conversation.ChatRequest, userQuery string) {
+	if req.SkipTitleGeneration {
+		return
+	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	if sessionID == "" || r.sessionService == nil {
 		return

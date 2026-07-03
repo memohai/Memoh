@@ -250,9 +250,14 @@ type ChatRequest struct {
 	UserMessagePersisted      bool             `json:"-"`
 	EventID                   string           `json:"-"`
 	RawQuery                  string           `json:"-"`
+	ModelQuery                string           `json:"-"`
+	UserMessageKind           string           `json:"-"`
+	UserVisibleText           string           `json:"-"`
+	SkillActivation           *SkillActivation `json:"-"`
 	ToolHTTPURL               string           `json:"-"`
 	SessionType               string           `json:"-"`
 	SkipMemoryExtraction      bool             `json:"-"`
+	SkipTitleGeneration       bool             `json:"-"`
 	ForceFreshRuntime         bool             `json:"-"`
 
 	// OutboundAssetCollector returns asset refs accumulated during outbound streaming.
@@ -275,7 +280,6 @@ type ChatRequest struct {
 }
 
 type RequestedSkillContext struct {
-	Ref            string `json:"-"`
 	Name           string `json:"-"`
 	Description    string `json:"-"`
 	Content        string `json:"-"`
@@ -283,6 +287,21 @@ type RequestedSkillContext struct {
 	OpaqueSourceID string `json:"-"`
 	ContentHash    string `json:"-"`
 	Identity       string `json:"-"`
+}
+
+const UserMessageKindSkillActivation = "skill_activation"
+
+type SkillActivationSkill struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name,omitempty"`
+	Description string `json:"description,omitempty"`
+	SourceKind  string `json:"source_kind,omitempty"`
+	State       string `json:"state,omitempty"`
+}
+
+type SkillActivation struct {
+	Skills []SkillActivationSkill `json:"skills,omitempty"`
+	Prompt string                 `json:"prompt,omitempty"`
 }
 
 // InjectMessage carries a user message to be injected into a running agent

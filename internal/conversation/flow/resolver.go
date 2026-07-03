@@ -278,14 +278,15 @@ type resolvedContext struct {
 	runConfig                   agentpkg.RunConfig
 	model                       models.GetResponse
 	provider                    sqlc.Provider
-	query                       string // headerified query
+	query                       string // headerified persistable query
 	userMessageAlreadyInContext bool
 	injectedRecords             *[]conversation.InjectedMessageRecord
 	estimatedTokens             int // estimated input token count for compaction
 }
 
 func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (resolvedContext, error) {
-	if strings.TrimSpace(req.Query) == "" && len(req.Attachments) == 0 {
+	modelQuery := modelQueryText(req)
+	if strings.TrimSpace(modelQuery) == "" && len(req.Attachments) == 0 {
 		return resolvedContext{}, errors.New("query or attachments is required")
 	}
 	if strings.TrimSpace(req.BotID) == "" {
@@ -423,7 +424,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	if tz == nil {
 		tz = time.UTC
 	}
-	headerifiedQuery := FormatUserHeader(UserMessageHeaderInput{
+	headerInput := UserMessageHeaderInput{
 		MessageID:         strings.TrimSpace(req.ExternalMessageID),
 		ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
 		DisplayName:       displayName,
@@ -434,13 +435,21 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		AttachmentPaths:   extractAttachmentPaths(mergedAttachments),
 		Time:              time.Now().In(tz),
 		Timezone:          runCfg.Identity.Timezone,
-	}, req.Query)
+	}
+	headerifiedQuery := ""
+	if strings.TrimSpace(req.Query) != "" {
+		headerifiedQuery = FormatUserHeader(headerInput, req.Query)
+	}
+	headerifiedModelQuery := headerifiedQuery
+	if strings.TrimSpace(modelQuery) != strings.TrimSpace(req.Query) {
+		headerifiedModelQuery = FormatUserHeader(headerInput, modelQuery)
+	}
 	runCfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
 	// When using the pipeline the user message is already in the RC;
 	// don't send it to the LLM again. headerifiedQuery is still kept
 	// for storeRound so the user message gets persisted.
 	if !usePipeline {
-		runCfg.Query = headerifiedQuery
+		runCfg.Query = headerifiedModelQuery
 	}
 	runCfg.InlineImages = extractNativeImageParts(mergedAttachments)
 	runCfg.ContextScope = buildContextFragScope(req, displayName, runCfg.Identity)
@@ -506,9 +515,11 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
 	var err error
-	req, err = r.applyUserMessageHook(ctx, req)
-	if err != nil {
-		return conversation.ChatResponse{}, err
+	if !req.UserMessagePersisted {
+		req, err = r.applyUserMessageHook(ctx, req)
+		if err != nil {
+			return conversation.ChatResponse{}, err
+		}
 	}
 	rc, err := r.resolve(ctx, req)
 	if err != nil {
@@ -531,8 +542,10 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	if rc.userMessageAlreadyInContext {
 		storeReq.UserMessagePersisted = true
 	}
-	roundMessages := prependUserMessage(storeReq.Query, outputMessages)
-	if err := r.storeRound(ctx, storeReq, roundMessages, rc.model.ID); err != nil {
+	roundMessages := prependTurnUserMessage(storeReq, outputMessages)
+	if err := r.storeRoundWithOptions(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
+		SkipMemory: storeReq.SkipMemoryExtraction,
+	}); err != nil {
 		return conversation.ChatResponse{}, err
 	}
 

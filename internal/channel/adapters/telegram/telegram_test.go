@@ -14,6 +14,7 @@ import (
 	tele "gopkg.in/telebot.v4"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/command"
 )
 
 // newStubTelegramBot builds a telebot bot suitable for tests that need a
@@ -299,6 +300,9 @@ func TestBuildTelegramForwardRefFromChannel(t *testing.T) {
 	}
 	if ref.Sender != "Source Channel (@source_channel)" || ref.Date != 1710000000 {
 		t.Fatalf("unexpected forward metadata: %+v", ref)
+	}
+	if !ref.AttachmentsKnown {
+		t.Fatal("expected telegram forward attachment state to be known")
 	}
 }
 
@@ -1793,5 +1797,80 @@ func TestFileNameFromMime(t *testing.T) {
 		if got := fileNameFromMime(tt.mime, tt.fallbackType); got != tt.want {
 			t.Errorf("fileNameFromMime(%q, %q) = %q, want %q", tt.mime, tt.fallbackType, got, tt.want)
 		}
+	}
+}
+
+// TestBuildTelegramSkillActivateCallbackDispatchesFreshTurn pins the
+// tap-to-activate contract on the adapter side: a skill-activation callback
+// synthesizes the bare "/<name>" slash as a NEW directed message (no in-place
+// edit_message_id, so the skill list card survives), and the reply reference
+// to the tapped card asserts AttachmentsKnown so the skill-slash attachment
+// fail-closed rule doesn't reject the tap.
+func TestBuildTelegramSkillActivateCallbackDispatchesFreshTurn(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	update := &tele.Update{
+		ID: 101,
+		Callback: &tele.Callback{
+			ID:     "callback-3",
+			Data:   command.EncodeSkillActivateCallback("flutter-adding-home-screen-widgets"),
+			Sender: &tele.User{ID: 123, Username: "alice"},
+			Message: &tele.Message{
+				ID:   456,
+				Text: "Skills",
+				Chat: &tele.Chat{ID: -10001, Type: tele.ChatGroup, Title: "Test Group"},
+			},
+		},
+	}
+
+	msg, ok := adapter.buildTelegramCallbackInboundMessage(channel.ChannelConfig{}, update)
+	if !ok {
+		t.Fatal("expected callback inbound message")
+	}
+	if got := msg.Message.PlainText(); got != "/flutter-adding-home-screen-widgets" {
+		t.Fatalf("callback text = %q", got)
+	}
+	if mentioned, _ := msg.Metadata["is_mentioned"].(bool); !mentioned {
+		t.Fatalf("metadata = %#v, want directed callback", msg.Metadata)
+	}
+	if editID, ok := msg.Metadata["edit_message_id"]; ok {
+		t.Fatalf("edit_message_id = %v, want absent for a fresh activation turn", editID)
+	}
+	if msg.Message.Reply == nil || !msg.Message.Reply.AttachmentsKnown {
+		t.Fatalf("reply = %+v, want AttachmentsKnown so the slash attachment rule doesn't fail closed", msg.Message.Reply)
+	}
+}
+
+// TestBuildTelegramPaginationCallbackKeepsEditInPlace guards the existing
+// pagination behavior against the skill-activation branch: list-page taps
+// still edit the card in place and stay conservative about reply attachments.
+func TestBuildTelegramPaginationCallbackKeepsEditInPlace(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	update := &tele.Update{
+		ID: 102,
+		Callback: &tele.Callback{
+			ID:     "callback-4",
+			Data:   command.EncodeListCallback("skill", "list", nil, 1),
+			Sender: &tele.User{ID: 123, Username: "alice"},
+			Message: &tele.Message{
+				ID:   456,
+				Text: "Skills",
+				Chat: &tele.Chat{ID: -10001, Type: tele.ChatGroup, Title: "Test Group"},
+			},
+		},
+	}
+
+	msg, ok := adapter.buildTelegramCallbackInboundMessage(channel.ChannelConfig{}, update)
+	if !ok {
+		t.Fatal("expected callback inbound message")
+	}
+	if editID, _ := msg.Metadata["edit_message_id"].(string); editID != "456" {
+		t.Fatalf("edit_message_id = %q, want 456", editID)
+	}
+	if msg.Message.Reply == nil || msg.Message.Reply.AttachmentsKnown {
+		t.Fatalf("reply = %+v, want AttachmentsKnown=false for non-activation callbacks", msg.Message.Reply)
 	}
 }

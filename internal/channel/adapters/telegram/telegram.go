@@ -578,6 +578,7 @@ func (a *TelegramAdapter) buildTelegramCallbackInboundMessage(cfg channel.Channe
 		"callback_query_id": cb.ID,
 	}
 	var text string
+	skillActivation := false
 	if action, approvalID, ok := parseTelegramApprovalCallback(cb.Data); ok {
 		text = "/" + action + " " + approvalID
 		extraMeta["is_mentioned"] = true
@@ -590,11 +591,18 @@ func (a *TelegramAdapter) buildTelegramCallbackInboundMessage(cfg channel.Channe
 			return channel.InboundMessage{}, false
 		}
 		text = syntheticCmd
-		// Re-render the existing message in place rather than posting a new one.
-		extraMeta["edit_message_id"] = strconv.Itoa(cb.Message.ID)
 		// A tap on the bot's own keyboard is by definition directed at the bot,
 		// so the command path runs even in group chats.
 		extraMeta["is_mentioned"] = true
+		if parsed.IsSkillActivation() {
+			// Activation starts a fresh chat turn: reply as a NEW message so
+			// the skill list card (and its keyboard) survives for further taps.
+			skillActivation = true
+		} else {
+			// Pagination/selection: re-render the existing message in place
+			// rather than posting a new one.
+			extraMeta["edit_message_id"] = strconv.Itoa(cb.Message.ID)
+		}
 	} else {
 		return channel.InboundMessage{}, false
 	}
@@ -606,7 +614,14 @@ func (a *TelegramAdapter) buildTelegramCallbackInboundMessage(cfg channel.Channe
 	if !ok {
 		return channel.InboundMessage{}, false
 	}
-	msg.Message.Reply = &channel.ReplyRef{MessageID: replyID}
+	msg.Message.Reply = &channel.ReplyRef{
+		MessageID: replyID,
+		// The tapped card is the bot's own text+keyboard message, so the
+		// adapter can assert it carries no attachments. Without this the
+		// skill-slash attachment fail-closed rule would reject every
+		// tap-to-activate (an unproven reply counts as "may have attachments").
+		AttachmentsKnown: skillActivation,
+	}
 	return msg, true
 }
 
@@ -767,6 +782,7 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 	replyRef := buildTelegramReplyRef(raw, chatID)
 	if replyRef != nil {
 		replyRef.Attachments = a.collectTelegramAttachments(bot, raw.ReplyTo)
+		replyRef.AttachmentsKnown = true
 	}
 	forwardRef := buildTelegramForwardRef(raw)
 	botUsername := ""
@@ -1714,6 +1730,7 @@ func buildTelegramForwardRef(msg *tele.Message) *channel.ForwardRef {
 	if ref.MessageID == "" && ref.FromUserID == "" && ref.FromConversationID == "" && ref.Sender == "" && ref.Date == 0 {
 		return nil
 	}
+	ref.AttachmentsKnown = true
 	return ref
 }
 

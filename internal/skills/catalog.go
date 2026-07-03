@@ -1,15 +1,14 @@
 package skills
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 
 	"github.com/memohai/memoh/internal/slash"
 )
 
-const defaultCatalogScope = "effective"
-
 type SafeCatalogItem struct {
-	SkillRef    string `json:"skill_ref"`
 	Name        string `json:"name"`
 	DisplayName string `json:"display_name"`
 	Description string `json:"description"`
@@ -18,7 +17,6 @@ type SafeCatalogItem struct {
 }
 
 type ResolvedSkill struct {
-	Ref            string
 	Name           string
 	Description    string
 	Content        string
@@ -28,21 +26,13 @@ type ResolvedSkill struct {
 	Identity       string
 }
 
-type RequestedRef struct {
-	SkillRef string
-	Name     string
-}
-
 type ResolveLimits struct {
 	MaxCount       int
 	MaxSingleBytes int
 	MaxTotalBytes  int
 }
 
-func BuildSafeCatalog(botID string, entries []Entry, codec *RefCodec, catalogScope string) ([]SafeCatalogItem, error) {
-	if strings.TrimSpace(catalogScope) == "" {
-		catalogScope = defaultCatalogScope
-	}
+func BuildSafeCatalog(entries []Entry) ([]SafeCatalogItem, error) {
 	entries = normalizeRuntimeUsabilityEntries(entries)
 	groups := groupEntriesByName(entries)
 	out := make([]SafeCatalogItem, 0, len(entries))
@@ -50,12 +40,7 @@ func BuildSafeCatalog(botID string, entries []Entry, codec *RefCodec, catalogSco
 		if !isRuntimeUsableCandidate(entry, groups[entry.Name]) {
 			continue
 		}
-		ref, _, err := mintRef(botID, catalogScope, entry, codec)
-		if err != nil {
-			return nil, err
-		}
 		out = append(out, SafeCatalogItem{
-			SkillRef:    ref,
 			Name:        entry.Name,
 			DisplayName: entry.Name,
 			Description: entry.Description,
@@ -66,93 +51,12 @@ func BuildSafeCatalog(botID string, entries []Entry, codec *RefCodec, catalogSco
 	return out, nil
 }
 
-func ResolveRef(botID string, entries []Entry, codec *RefCodec, catalogScope, name, ref string) (ResolvedSkill, error) {
-	if strings.TrimSpace(catalogScope) == "" {
-		catalogScope = defaultCatalogScope
-	}
+func ResolveTextRequestedSkills(entries []Entry, names []string, limits ResolveLimits) ([]ResolvedSkill, error) {
 	entries = normalizeRuntimeUsabilityEntries(entries)
-	decoded, err := codec.DecodeWithKeyID(ref)
+	deduped, err := dedupeRequestedNames(names)
 	if err != nil {
-		return ResolvedSkill{}, err
+		return nil, err
 	}
-	payload := decoded.Payload
-	if strings.TrimSpace(payload.BotID) != strings.TrimSpace(botID) {
-		return ResolvedSkill{}, slash.NewError(slash.CodeInvalidSkillRef)
-	}
-	if payload.CatalogScope != catalogScope {
-		return ResolvedSkill{}, slash.NewError(slash.CodeStaleSkillRef)
-	}
-	if payload.Name != strings.TrimSpace(name) {
-		return ResolvedSkill{}, slash.NewError(slash.CodeInvalidSkillRef)
-	}
-	groups := groupEntriesByName(entries)
-	group := groups[payload.Name]
-	if len(group) == 0 {
-		return ResolvedSkill{}, slash.NewError(slash.CodeStaleSkillRef)
-	}
-	for _, entry := range group {
-		opaqueSourceID, err := opaqueSourceIDForEntryWithKeyID(codec, decoded.KeyID, entry)
-		if err != nil {
-			return ResolvedSkill{}, err
-		}
-		if entry.SourceKind != payload.SourceKind || opaqueSourceID != payload.OpaqueSourceID {
-			continue
-		}
-		contentHash := contentHashForEntry(entry)
-		if contentHash != payload.ContentHash {
-			return ResolvedSkill{}, slash.NewError(slash.CodeStaleSkillRef)
-		}
-		if code := runtimeRejectCode(entry, group); code != "" {
-			return ResolvedSkill{}, slash.NewError(code)
-		}
-		return resolvedSkill(ref, entry, opaqueSourceID, contentHash), nil
-	}
-	return ResolvedSkill{}, slash.NewError(slash.CodeStaleSkillRef)
-}
-
-func ResolveRefRequestedSkills(botID string, entries []Entry, requests []RequestedRef, codec *RefCodec, catalogScope string, limits ResolveLimits) ([]ResolvedSkill, error) {
-	if strings.TrimSpace(catalogScope) == "" {
-		catalogScope = defaultCatalogScope
-	}
-	out := make([]ResolvedSkill, 0, len(requests))
-	seenIdentity := make(map[string]struct{}, len(requests))
-	totalBytes := 0
-	for _, request := range requests {
-		name := strings.TrimSpace(request.Name)
-		ref := strings.TrimSpace(request.SkillRef)
-		if name == "" || ref == "" {
-			return nil, slash.NewError(slash.CodeInvalidSkillRef)
-		}
-		resolved, err := ResolveRef(botID, entries, codec, catalogScope, name, ref)
-		if err != nil {
-			return nil, err
-		}
-		if _, ok := seenIdentity[resolved.Identity]; ok {
-			continue
-		}
-		seenIdentity[resolved.Identity] = struct{}{}
-		if limits.MaxCount > 0 && len(out)+1 > limits.MaxCount {
-			return nil, slash.NewError(slash.CodeTooManyRequestedSkills)
-		}
-		contentBytes := len([]byte(resolved.Content))
-		totalBytes += contentBytes
-		if limits.MaxSingleBytes > 0 && contentBytes > limits.MaxSingleBytes {
-			return nil, slash.NewError(slash.CodeRequestedSkillContextTooLarge)
-		}
-		if limits.MaxTotalBytes > 0 && totalBytes > limits.MaxTotalBytes {
-			return nil, slash.NewError(slash.CodeRequestedSkillContextTooLarge)
-		}
-		out = append(out, resolved)
-	}
-	return out, nil
-}
-
-func ResolveTextRequestedSkills(botID string, entries []Entry, names []string, codec *RefCodec, catalogScope string, limits ResolveLimits) ([]ResolvedSkill, error) {
-	if strings.TrimSpace(catalogScope) == "" {
-		catalogScope = defaultCatalogScope
-	}
-	entries = normalizeRuntimeUsabilityEntries(entries)
-	deduped := dedupeNames(names)
 	if limits.MaxCount > 0 && len(deduped) > limits.MaxCount {
 		return nil, slash.NewError(slash.CodeTooManyRequestedSkills)
 	}
@@ -179,11 +83,7 @@ func ResolveTextRequestedSkills(botID string, entries []Entry, names []string, c
 		if limits.MaxTotalBytes > 0 && totalBytes > limits.MaxTotalBytes {
 			return nil, slash.NewError(slash.CodeRequestedSkillContextTooLarge)
 		}
-		ref, payload, err := mintRef(botID, catalogScope, entry, codec)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, resolvedSkill(ref, entry, payload.OpaqueSourceID, payload.ContentHash))
+		out = append(out, resolvedSkill(entry))
 	}
 	return out, nil
 }
@@ -200,10 +100,24 @@ func resolveTextCandidate(group []Entry) (Entry, string) {
 	if len(group) == 0 {
 		return Entry{}, slash.CodeRequestedSkillNotFound
 	}
-	if len(group) > 1 {
+	effective := make([]Entry, 0, 1)
+	for _, entry := range group {
+		if entry.State == StateEffective {
+			effective = append(effective, entry)
+		}
+	}
+	if len(effective) > 1 {
 		return Entry{}, slash.CodeRequestedSkillAmbiguous
 	}
-	entry := group[0]
+	if len(effective) == 0 {
+		for _, entry := range group {
+			if entry.State == StateDisabled {
+				return Entry{}, slash.CodeRequestedSkillDisabled
+			}
+		}
+		return Entry{}, slash.CodeRequestedSkillAmbiguous
+	}
+	entry := effective[0]
 	if entry.State == StateDisabled {
 		return Entry{}, slash.CodeRequestedSkillDisabled
 	}
@@ -214,11 +128,20 @@ func resolveTextCandidate(group []Entry) (Entry, string) {
 }
 
 func runtimeRejectCode(entry Entry, group []Entry) string {
-	if len(group) > 1 || entry.State == StateShadowed {
+	if entry.State == StateShadowed {
 		return slash.CodeRequestedSkillAmbiguous
 	}
 	if entry.State == StateDisabled {
 		return slash.CodeRequestedSkillDisabled
+	}
+	effectiveCount := 0
+	for _, item := range group {
+		if item.State == StateEffective {
+			effectiveCount++
+		}
+	}
+	if effectiveCount > 1 {
+		return slash.CodeRequestedSkillAmbiguous
 	}
 	if !isRuntimeUsableEntry(entry) {
 		return slash.CodeRequestedSkillNotRuntimeUsable
@@ -237,52 +160,30 @@ func isRuntimeUsableEntry(entry Entry) bool {
 	return entry.RuntimeUsable
 }
 
-func mintRef(botID, catalogScope string, entry Entry, codec *RefCodec) (string, RefPayload, error) {
-	opaqueSourceID, err := opaqueSourceIDForEntry(codec, entry)
-	if err != nil {
-		return "", RefPayload{}, err
-	}
-	payload := RefPayload{
-		BotID:          strings.TrimSpace(botID),
-		CatalogScope:   catalogScope,
-		Name:           entry.Name,
-		SourceKind:     entry.SourceKind,
-		OpaqueSourceID: opaqueSourceID,
-		ContentHash:    contentHashForEntry(entry),
-	}
-	ref, err := codec.Encode(payload)
-	return ref, payload, err
-}
-
-func opaqueSourceIDForEntry(codec *RefCodec, entry Entry) (string, error) {
-	return codec.OpaqueSourceID(entry.SourceKind, entry.SourceRoot, entry.SourcePath, entry.Name)
-}
-
-func opaqueSourceIDForEntryWithKeyID(codec *RefCodec, kid string, entry Entry) (string, error) {
-	return codec.OpaqueSourceIDWithKeyID(kid, entry.SourceKind, entry.SourceRoot, entry.SourcePath, entry.Name)
-}
-
-func resolvedSkill(ref string, entry Entry, opaqueSourceID string, contentHash string) ResolvedSkill {
-	identity := strings.Join([]string{entry.Name, opaqueSourceID, contentHash}, "|")
+func resolvedSkill(entry Entry) ResolvedSkill {
+	contentHash := contentHashForEntry(entry)
+	identity := strings.Join([]string{entry.Name, entry.SourceKind, entry.SourceRoot, entry.SourcePath, contentHash}, "|")
 	return ResolvedSkill{
-		Ref:            ref,
 		Name:           entry.Name,
 		Description:    entry.Description,
 		Content:        entry.Content,
 		SourceKind:     entry.SourceKind,
-		OpaqueSourceID: opaqueSourceID,
+		OpaqueSourceID: "",
 		ContentHash:    contentHash,
 		Identity:       identity,
 	}
 }
 
-func dedupeNames(names []string) []string {
+func dedupeRequestedNames(names []string) ([]string, error) {
 	out := make([]string, 0, len(names))
 	seen := make(map[string]struct{}, len(names))
 	for _, name := range names {
 		name = strings.TrimSpace(name)
 		if name == "" {
-			continue
+			return nil, slash.NewError(slash.CodeInvalidSkillSlashSyntax)
+		}
+		if !IsValidName(name) {
+			return nil, slash.NewError(slash.CodeInvalidSkillSlashSyntax)
 		}
 		if _, ok := seen[name]; ok {
 			continue
@@ -290,5 +191,14 @@ func dedupeNames(names []string) []string {
 		seen[name] = struct{}{}
 		out = append(out, name)
 	}
-	return out
+	return out, nil
+}
+
+func contentHashForEntry(entry Entry) string {
+	content := entry.Raw
+	if content == "" {
+		content = entry.Content
+	}
+	sum := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(sum[:])
 }

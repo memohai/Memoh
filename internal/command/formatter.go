@@ -179,6 +179,7 @@ type listRecord struct {
 	note     string
 	selected bool
 	action   *ItemAction
+	callback string
 }
 
 // buildListResult slices an in-memory record set for the requested page and
@@ -326,7 +327,7 @@ func WithButtons(r *Result, buttons ...ListItem) *Result {
 }
 
 func listItemFromRecord(r listRecord) ListItem {
-	item := ListItem{Selected: r.selected, Action: r.action}
+	item := ListItem{Selected: r.selected, Action: r.action, Callback: r.callback}
 	if len(r.fields) == 0 {
 		return item
 	}

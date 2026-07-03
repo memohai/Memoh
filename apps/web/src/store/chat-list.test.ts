@@ -13,7 +13,6 @@ const api = vi.hoisted(() => ({
   fetchBots: vi.fn(),
   fetchMessagesUI: vi.fn(),
   sendLocalChannelMessage: vi.fn(),
-  sendLocalSlashCommand: vi.fn(),
   executeQuickAction: vi.fn(),
   fetchSafeSkillCatalog: vi.fn(),
   updateSessionAgent: vi.fn(),
@@ -215,7 +214,6 @@ describe('chat-list store', () => {
     api.closeACPRuntime.mockResolvedValue(undefined)
     api.fetchMessagesUI.mockResolvedValue([])
     api.executeQuickAction.mockResolvedValue(null)
-    api.sendLocalSlashCommand.mockResolvedValue(null)
     api.fetchSafeSkillCatalog.mockResolvedValue([])
     sdk.getBotsByBotIdSettings.mockResolvedValue({ data: { chat_runtime: 'model' } })
     api.streamSessionMessageEvents.mockImplementation((_botId: string, _sessionId: string, signal: AbortSignal, onEvent: (event: SessionMessageStreamEvent) => void) => new Promise<void>((resolve) => {
@@ -2049,6 +2047,94 @@ describe('chat-list store', () => {
     }
   })
 
+  it('hydrates skill activation user turns after a page refresh when kind is omitted', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      {
+        id: 'skill-user-1',
+        role: 'user',
+        text: '/flutter-adding-home-screen-widgets',
+        skill_activation: {
+          skills: [{
+            name: 'flutter-adding-home-screen-widgets',
+            display_name: 'Flutter adding home screen widgets',
+            source_kind: 'managed',
+            state: 'effective',
+          }],
+        },
+        attachments: [],
+        timestamp: '2026-07-03T00:00:00.000Z',
+      },
+      {
+        id: 'skill-user-2',
+        role: 'user',
+        text: '/flutter-adding-home-screen-widgets please add widgets',
+        skill_activation: {
+          skills: [{
+            name: 'flutter-adding-home-screen-widgets',
+            display_name: 'Flutter adding home screen widgets',
+            source_kind: 'managed',
+            state: 'effective',
+          }],
+        },
+        attachments: [],
+        timestamp: '2026-07-03T00:00:01.000Z',
+      },
+      {
+        id: 'skill-user-3',
+        role: 'user',
+        text: 'The user activated the following skill for this turn without an additional prompt: Flutter adding home screen widgets.',
+        skill_activation: {
+          skills: [{
+            name: 'flutter-adding-home-screen-widgets',
+            display_name: 'Flutter adding home screen widgets',
+            source_kind: 'managed',
+            state: 'effective',
+          }],
+        },
+        attachments: [],
+        timestamp: '2026-07-03T00:00:02.000Z',
+      },
+    ])
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+
+    expect(store.messages).toHaveLength(3)
+    expect(store.messages[0]).toMatchObject({
+      id: 'skill-user-1',
+      role: 'user',
+      text: '',
+      userMessageKind: 'skill_activation',
+      skillActivation: {
+        skills: [{
+          name: 'flutter-adding-home-screen-widgets',
+          display_name: 'Flutter adding home screen widgets',
+        }],
+      },
+    })
+    expect(store.messages[1]).toMatchObject({
+      id: 'skill-user-2',
+      role: 'user',
+      text: 'please add widgets',
+      userMessageKind: 'skill_activation',
+      skillActivation: {
+        skills: [{
+          name: 'flutter-adding-home-screen-widgets',
+          display_name: 'Flutter adding home screen widgets',
+        }],
+      },
+    })
+    expect(store.messages[2]).toMatchObject({
+      id: 'skill-user-3',
+      role: 'user',
+      text: '',
+      userMessageKind: 'skill_activation',
+    })
+  })
+
   it('applies live background task output and completion events to existing tool blocks', async () => {
     api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
@@ -2456,7 +2542,7 @@ describe('chat-list store', () => {
     expect(store.commandEvent).toBeNull()
   })
 
-  it('does not send selected session ids for sessionless quick actions', async () => {
+  it('sends selected session ids as quick action capability context', async () => {
     api.executeQuickAction.mockResolvedValueOnce({
       type: 'command_result',
       terminal: true,
@@ -2477,8 +2563,9 @@ describe('chat-list store', () => {
     expect(result).toMatchObject({ ok: true })
     expect(api.executeQuickAction).toHaveBeenCalledWith('bot-1', 'help', expect.objectContaining({
       composerScope: 'bot-1:panel-a',
+      sessionId: 'session-a',
+      skillActivationAllowed: true,
     }))
-    expect(api.executeQuickAction.mock.calls[0]?.[2]).not.toHaveProperty('sessionId')
   })
 
   it('keeps quick action transport failures as startup command errors', async () => {
@@ -2502,8 +2589,11 @@ describe('chat-list store', () => {
     })
   })
 
-  it('keeps typed slash transport failures as startup command errors', async () => {
-    api.sendLocalSlashCommand.mockRejectedValueOnce(new Error('server unavailable'))
+  it('keeps direct skill slash websocket startup failures restorable', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      { type: 'error', message: 'model failed' } as UIStreamEvent,
+    ]
     const store = useChatStore()
 
     await store.selectBot('bot-1')
@@ -2513,17 +2603,115 @@ describe('chat-list store', () => {
       ok: false,
       stage: 'startup',
       restoreInput: '/wat',
-      error: 'server unavailable',
+      error: 'model failed',
     })
-    const commandEvent = store.commandEventForScope({ botId: 'bot-1', composerScope: 'bot-1:panel-a' })
+    expect(sentWSMessages[0]).toMatchObject({
+      type: 'message',
+      text: '/wat',
+      composer_scope: 'bot-1:panel-a',
+    })
+    expect(sentWSMessages[0]?.requested_skills).toBeUndefined()
+  })
+
+  it('rejects direct skill activation in pending ACP drafts before sending websocket chat', async () => {
+    sendEvents = []
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    store.stageACPSession({ agentId: 'codex' })
+    const result = await store.sendMessage('/flutter-adding-home-screen-widgets', undefined, {
+      composerScope: 'bot-1:draft-a',
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      stage: 'startup',
+      restoreInput: '/flutter-adding-home-screen-widgets',
+    })
+    expect(sentWSMessages).toHaveLength(0)
+    expect(api.createSession).not.toHaveBeenCalled()
+    expect(store.loading).toBe(false)
+    const commandEvent = store.commandEventForScope({ botId: 'bot-1', composerScope: 'bot-1:draft-a' })
     expect(commandEvent).toMatchObject({
       type: 'command_error',
-      composer_scope: 'bot-1:panel-a',
-      error: { code: 'generic', message: 'server unavailable' },
+      error: { code: 'unsupported_skill_slash_context' },
     })
   })
 
-  it('sends only skill ref and name in requested skill websocket payloads', async () => {
+  it('rejects skill list quick action in pending ACP drafts without reading the catalog', async () => {
+    api.executeQuickAction.mockResolvedValueOnce({
+      type: 'command_error',
+      terminal: true,
+      composer_scope: 'bot-1:draft-a',
+      error: { code: 'unsupported_skill_slash_context', message: 'unsupported' },
+    } as UIStreamEvent)
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    store.stageACPSession({ agentId: 'codex' })
+    const result = await store.sendMessage('/skill list', undefined, {
+      composerScope: 'bot-1:draft-a',
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      stage: 'startup',
+      restoreInput: '/skill list',
+    })
+    expect(api.executeQuickAction).toHaveBeenCalledWith('bot-1', 'skill.list', expect.objectContaining({
+      composerScope: 'bot-1:draft-a',
+      skillActivationAllowed: false,
+    }))
+    expect(sentWSMessages).toHaveLength(0)
+    expect(store.loading).toBe(false)
+    const commandEvent = store.commandEventForScope({ botId: 'bot-1', composerScope: 'bot-1:draft-a' })
+    expect(commandEvent).toMatchObject({
+      type: 'command_error',
+      error: { code: 'unsupported_skill_slash_context' },
+    })
+  })
+
+  it('shows ACP help without skill entry points', async () => {
+    api.executeQuickAction.mockResolvedValueOnce({
+      type: 'command_result',
+      terminal: true,
+      composer_scope: 'bot-1:draft-a',
+      result: {
+        kind: 'list',
+        items: [{ id: 'help', title: '/help', kind: 'quick_action' }],
+        text: 'Available Web quick actions: /help.',
+      },
+    } as UIStreamEvent)
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    store.stageACPSession({ agentId: 'codex' })
+    const result = await store.sendMessage('/help', undefined, {
+      composerScope: 'bot-1:draft-a',
+    })
+
+    expect(result).toMatchObject({ ok: true })
+    expect(api.executeQuickAction).toHaveBeenCalledWith('bot-1', 'help', expect.objectContaining({
+      composerScope: 'bot-1:draft-a',
+      skillActivationAllowed: false,
+    }))
+    expect(sentWSMessages).toHaveLength(0)
+    const commandEvent = store.commandEventForScope({ botId: 'bot-1', composerScope: 'bot-1:draft-a' })
+    expect(commandEvent).toMatchObject({
+      type: 'command_result',
+      result: {
+        kind: 'list',
+        items: [
+          expect.objectContaining({ id: 'help' }),
+        ],
+      },
+    })
+    expect(commandEvent?.result?.items?.some(item => item.id === 'skill.list')).toBe(false)
+    expect(commandEvent?.result?.text).not.toContain('/skill list')
+    expect(store.loading).toBe(false)
+  })
+
+  it('sends only skill name in requested skill websocket payloads', async () => {
     sendEvents = [{ type: 'start' } as UIStreamEvent, { type: 'end' } as UIStreamEvent]
     api.fetchSession.mockResolvedValueOnce({
       id: 'session-a',
@@ -2537,7 +2725,6 @@ describe('chat-list store', () => {
     await store.selectSession('session-a')
     const result = await store.sendMessage('hello with skill', undefined, {
       requestedSkills: [{
-        skill_ref: 'ref-alpha',
         name: 'alpha',
         display_name: 'Alpha',
         description: 'Display-only description',
@@ -2549,11 +2736,88 @@ describe('chat-list store', () => {
 
     expect(result).toMatchObject({ ok: true })
     expect(sentWSMessages[0]?.requested_skills).toEqual([{
-      skill_ref: 'ref-alpha',
       name: 'alpha',
     }])
     expect(JSON.stringify(sentWSMessages[0]?.requested_skills)).not.toContain('Display-only description')
     expect(JSON.stringify(sentWSMessages[0]?.requested_skills)).not.toContain('managed')
+  })
+
+  it('inserts direct skill activation only after the server user_message ack', async () => {
+    sendEvents = []
+    api.fetchSession.mockResolvedValueOnce({
+      id: 'session-a',
+      bot_id: 'bot-1',
+      title: 'Session A',
+      type: 'chat',
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await store.selectSession('session-a')
+    const sendPromise = store.sendMessage('/flutter-adding-home-screen-widgets', undefined, {
+      composerScope: 'bot-1:panel-a',
+    })
+    await flushPromises()
+    const streamId = sentWSMessages[0]?.stream_id as string
+
+    expect(store.messages).toHaveLength(0)
+    expect(sentWSMessages[0]).toMatchObject({
+      type: 'message',
+      text: '/flutter-adding-home-screen-widgets',
+    })
+    expect(sentWSMessages[0]?.requested_skills).toBeUndefined()
+
+    streamHandler?.({
+      type: 'user_message',
+      stream_id: streamId,
+      session_id: 'session-a',
+      data: {
+        id: 'msg-skill',
+        role: 'user',
+        text: '',
+        user_message_kind: 'skill_activation',
+        skill_activation: {
+          skills: [{
+            name: 'flutter-adding-home-screen-widgets',
+            display_name: 'Flutter adding home screen widgets',
+            description: 'Safe display summary',
+            source_kind: 'managed',
+            state: 'effective',
+          }],
+        },
+        timestamp: '2026-07-03T00:00:00.000Z',
+      },
+    } as UIStreamEvent)
+    await flushPromises()
+
+    expect(store.messages).toHaveLength(2)
+    expect(store.messages[0]).toMatchObject({
+      role: 'user',
+      text: '',
+      userMessageKind: 'skill_activation',
+      skillActivation: {
+        skills: [{
+          name: 'flutter-adding-home-screen-widgets',
+          display_name: 'Flutter adding home screen widgets',
+        }],
+      },
+    })
+    expect(store.messages[1]).toMatchObject({ role: 'assistant', streaming: true })
+
+    streamHandler?.({
+      type: 'message',
+      stream_id: streamId,
+      session_id: 'session-a',
+      data: { id: 1, type: 'text', content: 'Done' },
+    } as UIStreamEvent)
+    expect(store.messages[1]).toMatchObject({
+      role: 'assistant',
+      messages: [{ type: 'text', content: 'Done' }],
+      streaming: true,
+    })
+
+    streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'session-a' } as UIStreamEvent)
+    await expect(sendPromise).resolves.toMatchObject({ ok: true })
   })
 
   it('does not select a late session_created event after the user switches sessions', async () => {
@@ -2568,7 +2832,7 @@ describe('chat-list store', () => {
 
     await store.selectBot('bot-1')
     const sendPromise = store.sendMessage('hello with skill', undefined, {
-      requestedSkills: [{ skill_ref: 'ref-alpha', name: 'alpha' }],
+      requestedSkills: [{ name: 'alpha' }],
       composerScope: 'bot-1:draft-a',
     })
     await flushPromises()
@@ -2590,10 +2854,17 @@ describe('chat-list store', () => {
   it('deletes a deferred draft session when requested skill preflight fails after session_created', async () => {
     sendEvents = []
     const store = useChatStore()
+    const requestedSkill = { name: 'alpha' }
+    const attachment = {
+      type: 'file',
+      base64: 'data:text/plain;base64,aGVsbG8=',
+      mime: 'text/plain',
+      name: 'note.txt',
+    }
 
     await store.selectBot('bot-1')
-    const sendPromise = store.sendMessage('hello with skill', undefined, {
-      requestedSkills: [{ skill_ref: 'ref-alpha', name: 'alpha' }],
+    const sendPromise = store.sendMessage('hello with skill', [attachment], {
+      requestedSkills: [requestedSkill],
       composerScope: 'bot-1:draft-a',
     })
     await flushPromises()
@@ -2621,6 +2892,8 @@ describe('chat-list store', () => {
       ok: false,
       stage: 'startup',
       restoreInput: 'hello with skill',
+      restoreAttachments: [attachment],
+      restoreRequestedSkills: [requestedSkill],
     })
     expect(api.deleteSession).toHaveBeenCalledWith('bot-1', 'created-session')
     expect(store.deletedSession).toEqual({
@@ -2639,6 +2912,13 @@ describe('chat-list store', () => {
       composer_scope: 'bot-1:draft-a',
     })
     expect(draftCommandEvent?.session_id).toBeUndefined()
+    expect(store.startupSendFailure).toMatchObject({
+      botId: 'bot-1',
+      composerScope: 'bot-1:draft-a',
+      restoreInput: 'hello with skill',
+      restoreAttachments: [attachment],
+      restoreRequestedSkills: [requestedSkill],
+    })
   })
 
   it('keeps the current session when deferred draft failure arrives after a session switch', async () => {
@@ -2653,7 +2933,7 @@ describe('chat-list store', () => {
 
     await store.selectBot('bot-1')
     const sendPromise = store.sendMessage('hello with skill', undefined, {
-      requestedSkills: [{ skill_ref: 'ref-alpha', name: 'alpha' }],
+      requestedSkills: [{ name: 'alpha' }],
       composerScope: 'bot-1:draft-a',
     })
     await flushPromises()
@@ -2699,7 +2979,7 @@ describe('chat-list store', () => {
 
     await store.selectBot('bot-1')
     const sendPromise = store.sendMessage('hello with skill', undefined, {
-      requestedSkills: [{ skill_ref: 'ref-alpha', name: 'alpha' }],
+      requestedSkills: [{ name: 'alpha' }],
       composerScope: 'bot-1:draft-a',
     })
     await flushPromises()

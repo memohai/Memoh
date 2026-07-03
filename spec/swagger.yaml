@@ -1376,6 +1376,8 @@ definitions:
     - FieldEnum
   channel.ForwardRef:
     properties:
+      attachments_known:
+        type: boolean
       date:
         type: integer
       from_conversation_id:
@@ -1491,6 +1493,8 @@ definitions:
         items:
           $ref: '#/definitions/channel.Attachment'
         type: array
+      attachments_known:
+        type: boolean
       message_id:
         type: string
       preview:
@@ -1693,6 +1697,28 @@ definitions:
         type: string
       usage: {}
     type: object
+  conversation.SkillActivation:
+    properties:
+      prompt:
+        type: string
+      skills:
+        items:
+          $ref: '#/definitions/conversation.SkillActivationSkill'
+        type: array
+    type: object
+  conversation.SkillActivationSkill:
+    properties:
+      description:
+        type: string
+      display_name:
+        type: string
+      name:
+        type: string
+      source_kind:
+        type: string
+      state:
+        type: string
+    type: object
   conversation.UIAttachment:
     properties:
       base64:
@@ -1861,9 +1887,13 @@ definitions:
         type: string
       sender_user_id:
         type: string
+      skill_activation:
+        $ref: '#/definitions/conversation.SkillActivation'
       text:
         type: string
       timestamp:
+        type: string
+      user_message_kind:
         type: string
     type: object
   conversation.UIUserInput:
@@ -4657,8 +4687,6 @@ definitions:
       display_name:
         type: string
       name:
-        type: string
-      skill_ref:
         type: string
       source_kind:
         type: string

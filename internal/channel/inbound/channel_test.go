@@ -1363,7 +1363,7 @@ func TestChannelInboundProcessorQQAndWeixinWriteCommandsNeedLinkedManager(t *tes
 	}
 }
 
-func TestChannelInboundProcessorRejectsSkillUseBeforeAutoDiscussSession(t *testing.T) {
+func TestChannelInboundProcessorRejectsDirectSkillBeforeAutoDiscussSession(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-use-group"}}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-skill-use-group", RouteID: "route-skill-use-group"}}
@@ -1378,7 +1378,7 @@ func TestChannelInboundProcessorRejectsSkillUseBeforeAutoDiscussSession(t *testi
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
 		Channel:     channel.ChannelType("telegram"),
-		Message:     channel.Message{ID: "msg-1", Text: "@bot /skill use alpha -- hello"},
+		Message:     channel.Message{ID: "msg-1", Text: "@bot /alpha hello"},
 		ReplyTarget: "telegram:group-1",
 		Sender:      channel.Identity{SubjectID: "user-1"},
 		Conversation: channel.Conversation{
@@ -1405,7 +1405,7 @@ func TestChannelInboundProcessorRejectsSkillUseBeforeAutoDiscussSession(t *testi
 	}
 }
 
-func TestChannelInboundProcessorRejectsSkillUseBeforeActiveStreamInjection(t *testing.T) {
+func TestChannelInboundProcessorRejectsDirectSkillBeforeActiveStreamInjection(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-use-active"}}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-skill-use-active", RouteID: "route-skill-use-active"}}
@@ -1421,7 +1421,7 @@ func TestChannelInboundProcessorRejectsSkillUseBeforeActiveStreamInjection(t *te
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
 		Channel:     channel.ChannelType("telegram"),
-		Message:     channel.Message{ID: "msg-1", Text: "@bot /skill use alpha -- hello"},
+		Message:     channel.Message{ID: "msg-1", Text: "@bot /alpha hello"},
 		ReplyTarget: "telegram:group-1",
 		Sender:      channel.Identity{SubjectID: "user-1"},
 		Conversation: channel.Conversation{
@@ -1448,7 +1448,7 @@ func TestChannelInboundProcessorRejectsSkillUseBeforeActiveStreamInjection(t *te
 	}
 }
 
-func TestChannelInboundProcessorRejectsSkillUseDuringContinuationStream(t *testing.T) {
+func TestChannelInboundProcessorRejectsDirectSkillDuringContinuationStream(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{
 		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-use-continuation"},
 		linkedUserIDs:   map[string][]string{"channelIdentity-skill-use-continuation": {"user-1"}},
@@ -1487,7 +1487,7 @@ func TestChannelInboundProcessorRejectsSkillUseDuringContinuationStream(t *testi
 
 	<-gateway.userInputStarted
 	msg := baseMsg
-	msg.Message = channel.Message{ID: "msg-skill", Text: "/skill use alpha -- hello"}
+	msg.Message = channel.Message{ID: "msg-skill", Text: "/alpha hello"}
 	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
 		t.Fatalf("skill slash HandleInbound() error = %v", err)
 	}
@@ -1506,7 +1506,7 @@ func TestChannelInboundProcessorRejectsSkillUseDuringContinuationStream(t *testi
 	}
 }
 
-func TestChannelInboundProcessorSkillUseStartsStreamWithDispatcherInjectCh(t *testing.T) {
+func TestChannelInboundProcessorDirectSkillStartsStreamWithDispatcherInjectCh(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-use-dispatch"}}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-skill-use-dispatch", RouteID: "route-skill-use-dispatch"}}
@@ -1516,7 +1516,6 @@ func TestChannelInboundProcessorSkillUseStartsStreamWithDispatcherInjectCh(t *te
 	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1", Type: sessionpkg.TypeChat, Runtime: sessionpkg.RuntimeModel}})
 	processor.SetDispatcher(NewRouteDispatcher(slog.Default()))
 	skillResolver := &fakeRequestedSkillResolver{items: []skillset.ResolvedSkill{{
-		Ref:        "ref-alpha",
 		Name:       "alpha",
 		Content:    "alpha skill content",
 		SourceKind: "managed",
@@ -1528,7 +1527,7 @@ func TestChannelInboundProcessorSkillUseStartsStreamWithDispatcherInjectCh(t *te
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
 		Channel:     channel.ChannelType("telegram"),
-		Message:     channel.Message{ID: "msg-1", Text: "@bot /skill use alpha -- hello"},
+		Message:     channel.Message{ID: "msg-1", Text: "@bot /alpha hello"},
 		ReplyTarget: "telegram:group-1",
 		Sender:      channel.Identity{SubjectID: "user-1"},
 		Conversation: channel.Conversation{
@@ -1550,6 +1549,12 @@ func TestChannelInboundProcessorSkillUseStartsStreamWithDispatcherInjectCh(t *te
 	if gateway.gotReq.Query != "hello" {
 		t.Fatalf("StreamChat query = %q, want hello", gateway.gotReq.Query)
 	}
+	if gateway.gotReq.UserMessageKind != conversation.UserMessageKindSkillActivation {
+		t.Fatalf("UserMessageKind = %q, want skill_activation", gateway.gotReq.UserMessageKind)
+	}
+	if gateway.gotReq.SkillActivation == nil || len(gateway.gotReq.SkillActivation.Skills) != 1 || gateway.gotReq.SkillActivation.Skills[0].Name != "alpha" {
+		t.Fatalf("SkillActivation = %#v, want alpha", gateway.gotReq.SkillActivation)
+	}
 	if gateway.gotReq.InjectCh == nil {
 		t.Fatal("StreamChat InjectCh is nil, want dispatcher injection channel")
 	}
@@ -1558,6 +1563,196 @@ func TestChannelInboundProcessorSkillUseStartsStreamWithDispatcherInjectCh(t *te
 	}
 	if len(sender.sent) != 0 {
 		t.Fatalf("skill slash stream should not send slash error reply, got %+v", sender.sent)
+	}
+}
+
+func TestChannelInboundProcessorDirectSkillAllowsEmptyPrompt(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-empty-prompt"}}
+	policySvc := &fakePolicyService{}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-skill-empty-prompt", RouteID: "route-skill-empty-prompt"}}
+	gateway := &fakeChatGateway{}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1", Type: sessionpkg.TypeChat, Runtime: sessionpkg.RuntimeModel}})
+	skillResolver := &fakeRequestedSkillResolver{items: []skillset.ResolvedSkill{{
+		Name:       "alpha",
+		Content:    "alpha skill content",
+		SourceKind: "managed",
+		Identity:   "managed|alpha|managed|opaque-alpha",
+	}}}
+	processor.SetRequestedSkillResolver(skillResolver)
+	sender := &fakeReplySender{}
+
+	msg := channel.InboundMessage{
+		BotID:       "bot-1",
+		Channel:     channel.ChannelType("telegram"),
+		Message:     channel.Message{ID: "msg-1", Text: "/alpha"},
+		ReplyTarget: "telegram:dm-1",
+		Sender:      channel.Identity{SubjectID: "user-1"},
+		Conversation: channel.Conversation{
+			ID:   "dm-1",
+			Type: channel.ConversationTypePrivate,
+		},
+	}
+
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("telegram")}, msg, sender); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if skillResolver.calls != 1 {
+		t.Fatalf("skill resolver calls = %d, want 1", skillResolver.calls)
+	}
+	if gateway.gotReq.Query != "" {
+		t.Fatalf("StreamChat query = %q, want empty visible prompt", gateway.gotReq.Query)
+	}
+	if !strings.Contains(gateway.gotReq.ModelQuery, "activated the following skill") {
+		t.Fatalf("StreamChat model query = %q, want activation marker", gateway.gotReq.ModelQuery)
+	}
+	if !gateway.gotReq.SkipMemoryExtraction || !gateway.gotReq.SkipTitleGeneration {
+		t.Fatalf("empty-prompt activation should skip memory/title, got memory=%v title=%v", gateway.gotReq.SkipMemoryExtraction, gateway.gotReq.SkipTitleGeneration)
+	}
+	if len(sender.sent) != 0 {
+		t.Fatalf("skill slash stream should not send slash error reply, got %+v", sender.sent)
+	}
+}
+
+func TestChannelInboundProcessorDirectSkillRejectsReplyWithUnknownAttachmentState(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-reply-unknown"}}
+	policySvc := &fakePolicyService{}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-skill-reply-unknown", RouteID: "route-skill-reply-unknown"}}
+	gateway := &fakeChatGateway{}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1", Type: sessionpkg.TypeChat, Runtime: sessionpkg.RuntimeModel}})
+	skillResolver := &fakeRequestedSkillResolver{items: []skillset.ResolvedSkill{{
+		Name:       "alpha",
+		Content:    "alpha skill content",
+		SourceKind: "managed",
+		Identity:   "managed|alpha|managed|opaque-alpha",
+	}}}
+	processor.SetRequestedSkillResolver(skillResolver)
+	sender := &fakeReplySender{}
+
+	msg := channel.InboundMessage{
+		BotID:   "bot-1",
+		Channel: channel.ChannelType("telegram"),
+		Message: channel.Message{
+			ID:    "msg-1",
+			Text:  "/alpha",
+			Reply: &channel.ReplyRef{MessageID: "source-msg"},
+		},
+		ReplyTarget: "telegram:dm-1",
+		Sender:      channel.Identity{SubjectID: "user-1"},
+		Conversation: channel.Conversation{
+			ID:   "dm-1",
+			Type: channel.ConversationTypePrivate,
+		},
+	}
+
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("telegram")}, msg, sender); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if skillResolver.calls != 0 {
+		t.Fatalf("skill resolver calls = %d, want 0 before reply attachment state is known", skillResolver.calls)
+	}
+	if gateway.gotReq.BotID != "" {
+		t.Fatalf("StreamChat should not run for slash reply with unknown attachment state, got %#v", gateway.gotReq)
+	}
+	if len(sender.sent) != 1 || !strings.Contains(sender.sent[0].Message.PlainText(), "attachment") {
+		t.Fatalf("expected attachment slash error reply, got %+v", sender.sent)
+	}
+}
+
+func TestChannelInboundProcessorDirectSkillAllowsReplyKnownWithoutAttachments(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-reply-known"}}
+	policySvc := &fakePolicyService{}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-skill-reply-known", RouteID: "route-skill-reply-known"}}
+	gateway := &fakeChatGateway{}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1", Type: sessionpkg.TypeChat, Runtime: sessionpkg.RuntimeModel}})
+	skillResolver := &fakeRequestedSkillResolver{items: []skillset.ResolvedSkill{{
+		Name:       "alpha",
+		Content:    "alpha skill content",
+		SourceKind: "managed",
+		Identity:   "managed|alpha|managed|opaque-alpha",
+	}}}
+	processor.SetRequestedSkillResolver(skillResolver)
+	sender := &fakeReplySender{}
+
+	msg := channel.InboundMessage{
+		BotID:   "bot-1",
+		Channel: channel.ChannelType("telegram"),
+		Message: channel.Message{
+			ID:    "msg-1",
+			Text:  "/alpha",
+			Reply: &channel.ReplyRef{MessageID: "source-msg", AttachmentsKnown: true},
+		},
+		ReplyTarget: "telegram:dm-1",
+		Sender:      channel.Identity{SubjectID: "user-1"},
+		Conversation: channel.Conversation{
+			ID:   "dm-1",
+			Type: channel.ConversationTypePrivate,
+		},
+	}
+
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("telegram")}, msg, sender); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if skillResolver.calls != 1 {
+		t.Fatalf("skill resolver calls = %d, want 1", skillResolver.calls)
+	}
+	if gateway.gotReq.SourceReplyToMessageID != "source-msg" {
+		t.Fatalf("SourceReplyToMessageID = %q, want source-msg", gateway.gotReq.SourceReplyToMessageID)
+	}
+	if len(sender.sent) != 0 {
+		t.Fatalf("skill slash stream should not send slash error reply, got %+v", sender.sent)
+	}
+}
+
+func TestChannelInboundProcessorDirectSkillRejectsForwardWithUnknownAttachmentState(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-forward-unknown"}}
+	policySvc := &fakePolicyService{}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-skill-forward-unknown", RouteID: "route-skill-forward-unknown"}}
+	gateway := &fakeChatGateway{}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1", Type: sessionpkg.TypeChat, Runtime: sessionpkg.RuntimeModel}})
+	skillResolver := &fakeRequestedSkillResolver{items: []skillset.ResolvedSkill{{
+		Name:       "alpha",
+		Content:    "alpha skill content",
+		SourceKind: "managed",
+		Identity:   "managed|alpha|managed|opaque-alpha",
+	}}}
+	processor.SetRequestedSkillResolver(skillResolver)
+	sender := &fakeReplySender{}
+
+	msg := channel.InboundMessage{
+		BotID:   "bot-1",
+		Channel: channel.ChannelType("misskey"),
+		Message: channel.Message{
+			ID:      "msg-1",
+			Text:    "/alpha",
+			Forward: &channel.ForwardRef{MessageID: "forward-msg"},
+		},
+		ReplyTarget: "misskey:note-1",
+		Sender:      channel.Identity{SubjectID: "user-1"},
+		Conversation: channel.Conversation{
+			ID:   "note-1",
+			Type: channel.ConversationTypePrivate,
+		},
+	}
+
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("misskey")}, msg, sender); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if skillResolver.calls != 0 {
+		t.Fatalf("skill resolver calls = %d, want 0 before forward attachment state is known", skillResolver.calls)
+	}
+	if gateway.gotReq.BotID != "" {
+		t.Fatalf("StreamChat should not run for slash forward with unknown attachment state, got %#v", gateway.gotReq)
+	}
+	if len(sender.sent) != 1 || !strings.Contains(sender.sent[0].Message.PlainText(), "attachment") {
+		t.Fatalf("expected attachment slash error reply, got %+v", sender.sent)
 	}
 }
 

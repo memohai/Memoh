@@ -48,7 +48,6 @@ func TestBuildInteractionMetadataIncludesRequestedSkills(t *testing.T) {
 				OpaqueSourceID: "src-1",
 				Content:        "raw content must not be persisted in metadata",
 				ContentHash:    "hash-must-not-leak",
-				Ref:            "ref-must-not-leak",
 				Identity:       "managed:src-1:writer",
 			},
 			{
@@ -71,8 +70,11 @@ func TestBuildInteractionMetadataIncludesRequestedSkills(t *testing.T) {
 	if len(raw) != 2 {
 		t.Fatalf("expected deduped requested skills, got %#v", raw)
 	}
-	if raw[0]["name"] != "writer" || raw[0]["source_kind"] != "managed" || raw[0]["opaque_source_id"] != "src-1" {
+	if raw[0]["name"] != "writer" || raw[0]["source_kind"] != "managed" {
 		t.Fatalf("unexpected first skill metadata: %#v", raw[0])
+	}
+	if _, ok := raw[0]["opaque_source_id"]; ok {
+		t.Fatalf("requested skill metadata leaked opaque source id: %#v", raw[0])
 	}
 	if _, ok := raw[0]["content"]; ok {
 		t.Fatalf("requested skill metadata leaked content: %#v", raw[0])
@@ -85,5 +87,57 @@ func TestBuildInteractionMetadataIncludesRequestedSkills(t *testing.T) {
 	}
 	if raw[1]["name"] != "reviewer" || raw[1]["source_kind"] != "plugin" {
 		t.Fatalf("unexpected second skill metadata: %#v", raw[1])
+	}
+}
+
+func TestBuildInteractionMetadataIncludesPublicSkillActivation(t *testing.T) {
+	t.Parallel()
+
+	meta := buildInteractionMetadata(conversation.ChatRequest{
+		UserMessageKind: conversation.UserMessageKindSkillActivation,
+		SkillActivation: &conversation.SkillActivation{
+			Prompt: "do it",
+			Skills: []conversation.SkillActivationSkill{{
+				Name:        "writer",
+				DisplayName: "Writer",
+				Description: "short safe description",
+				SourceKind:  "managed",
+				State:       "effective",
+			}},
+		},
+		RequestedSkills: []conversation.RequestedSkillContext{{
+			Name:           "writer",
+			SourceKind:     "managed",
+			OpaqueSourceID: "opaque-source",
+			Content:        "raw content must not leak",
+			ContentHash:    "hash-must-not-leak",
+			Identity:       "writer|opaque-source|hash",
+		}},
+	})
+
+	if meta["user_message_kind"] != conversation.UserMessageKindSkillActivation {
+		t.Fatalf("user_message_kind = %#v", meta["user_message_kind"])
+	}
+	public, ok := meta["skill_activation"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected public skill activation metadata: %#v", meta["skill_activation"])
+	}
+	if public["prompt"] != "do it" {
+		t.Fatalf("prompt = %#v, want do it", public["prompt"])
+	}
+	skills, ok := public["skills"].([]map[string]any)
+	if !ok || len(skills) != 1 {
+		t.Fatalf("public skills = %#v, want one", public["skills"])
+	}
+	if skills[0]["name"] != "writer" || skills[0]["display_name"] != "Writer" {
+		t.Fatalf("unexpected public skill: %#v", skills[0])
+	}
+	for _, key := range []string{"opaque_source_id", "content", "content_hash", "ref"} {
+		if _, ok := skills[0][key]; ok {
+			t.Fatalf("public skill leaked %s: %#v", key, skills[0])
+		}
+	}
+	if _, ok := meta["audit_requested_skills"]; ok {
+		t.Fatalf("audit metadata leaked into message metadata: %#v", meta["audit_requested_skills"])
 	}
 }

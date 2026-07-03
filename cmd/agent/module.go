@@ -175,7 +175,6 @@ func options() fx.Option {
 			provideServerHandler(handlers.NewPluginsHandler),
 			provideServerHandler(handlers.NewBotBackupHandler),
 			provideOAuthService,
-			provideSkillRefCodec,
 			provideServerHandler(handlers.NewTokenUsageHandler),
 			provideServerHandler(handlers.NewSessionInfoHandler),
 			provideServerHandler(handlers.NewSupermarketHandler),

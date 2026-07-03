@@ -47,9 +47,7 @@ email = "admin@memoh.local"
 jwt_secret = "CHANGE-ME-TO-A-RANDOM-SECRET"
 jwt_expires_in = "168h"
 
-[skill_ref]
-current_kid = "primary"
-keys = { primary = "CHANGE-ME-TO-A-BASE64-32-BYTE-SKILL-REF-KEY" }
+[requested_skills]
 max_requested_skills = 5
 max_single_skill_context_bytes = 65536
 max_total_skill_context_bytes = 262144

@@ -329,6 +329,48 @@ func TestUpdateTypeAndMetadataACPAgentRunsPolicy(t *testing.T) {
 	}
 }
 
+func TestCreatePersistsCanonicalChannelType(t *testing.T) {
+	t.Parallel()
+
+	// Local product surfaces (web composer, bundled CLI) must persist the
+	// canonical "local" channel type: the web UI renders any other non-empty
+	// channel_type as a read-only external channel thread, which is how
+	// WS-created skill-activation sessions lost their composer after refresh.
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{in: "web", want: "local"},
+		{in: "cli", want: "local"},
+		{in: " Web ", want: "local"},
+		{in: "local", want: "local"},
+		{in: "telegram", want: "telegram"},
+		{in: "", want: ""},
+	}
+	for _, tc := range cases {
+		queries := &createACPQueries{}
+		svc := NewService(nil, queries, nil)
+		created, err := svc.Create(context.Background(), CreateInput{
+			BotID:       "00000000-0000-0000-0000-000000000001",
+			ChannelType: tc.in,
+			Type:        TypeChat,
+		})
+		if err != nil {
+			t.Fatalf("Create(channel_type=%q) error = %v", tc.in, err)
+		}
+		got := ""
+		if queries.createParams.ChannelType.Valid {
+			got = queries.createParams.ChannelType.String
+		}
+		if got != tc.want {
+			t.Fatalf("persisted channel_type for input %q = %q, want %q", tc.in, got, tc.want)
+		}
+		if created.ChannelType != tc.want {
+			t.Fatalf("created.ChannelType for input %q = %q, want %q", tc.in, created.ChannelType, tc.want)
+		}
+	}
+}
+
 func TestNormalizeDescriptorAllowsDiscussACP(t *testing.T) {
 	t.Parallel()
 

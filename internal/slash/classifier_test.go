@@ -2,19 +2,54 @@ package slash
 
 import "testing"
 
-func TestClassifyWebSkillUseRequiresChip(t *testing.T) {
+func TestClassifyDirectSkillActivation(t *testing.T) {
 	decision := Classify(ClassifyInput{
-		Text:    "/skill use alpha -- do it",
+		Text:    "/flutter-adding-home-screen-widgets add widgets",
 		Surface: SurfaceWebWS,
 	})
-	if decision.Kind != DecisionReject || decision.Code != CodeUseSkillChipRequired {
-		t.Fatalf("decision = %#v, want reject %s", decision, CodeUseSkillChipRequired)
+	if decision.Kind != DecisionSkillIntent {
+		t.Fatalf("kind = %s, want %s", decision.Kind, DecisionSkillIntent)
+	}
+	if len(decision.SkillIntent.Names) != 1 || decision.SkillIntent.Names[0] != "flutter-adding-home-screen-widgets" {
+		t.Fatalf("names = %#v, want flutter skill", decision.SkillIntent.Names)
+	}
+	if decision.SkillIntent.Prompt != "add widgets" {
+		t.Fatalf("prompt = %q, want add widgets", decision.SkillIntent.Prompt)
 	}
 }
 
-func TestClassifyChannelSkillUse(t *testing.T) {
+func TestClassifyDirectSkillActivationSplitsOnWhitespace(t *testing.T) {
 	decision := Classify(ClassifyInput{
-		Text:       "/skill@Memoh use alpha,beta -- do it",
+		Text:    "/alpha\tadd widgets",
+		Surface: SurfaceWebWS,
+	})
+	if decision.Kind != DecisionSkillIntent {
+		t.Fatalf("kind = %s, want %s: %#v", decision.Kind, DecisionSkillIntent, decision)
+	}
+	if len(decision.SkillIntent.Names) != 1 || decision.SkillIntent.Names[0] != "alpha" {
+		t.Fatalf("names = %#v, want alpha", decision.SkillIntent.Names)
+	}
+	if decision.SkillIntent.Prompt != "add widgets" {
+		t.Fatalf("prompt = %q, want add widgets", decision.SkillIntent.Prompt)
+	}
+}
+
+func TestClassifyDirectSkillActivationAllowsEmptyPrompt(t *testing.T) {
+	decision := Classify(ClassifyInput{
+		Text:    "/flutter-adding-home-screen-widgets",
+		Surface: SurfaceWebWS,
+	})
+	if decision.Kind != DecisionSkillIntent {
+		t.Fatalf("kind = %s, want %s: %#v", decision.Kind, DecisionSkillIntent, decision)
+	}
+	if decision.SkillIntent.Prompt != "" {
+		t.Fatalf("prompt = %q, want empty", decision.SkillIntent.Prompt)
+	}
+}
+
+func TestClassifyChannelDirectSkillActivationWithBotSuffix(t *testing.T) {
+	decision := Classify(ClassifyInput{
+		Text:       "/alpha@Memoh do it",
 		Surface:    SurfaceChannel,
 		IsGroup:    true,
 		BotAliases: []string{"Memoh"},
@@ -25,49 +60,48 @@ func TestClassifyChannelSkillUse(t *testing.T) {
 	if !decision.Directed {
 		t.Fatal("directed = false, want true")
 	}
-	if got := len(decision.SkillIntent.Names); got != 2 {
-		t.Fatalf("names len = %d, want 2", got)
+	if len(decision.SkillIntent.Names) != 1 || decision.SkillIntent.Names[0] != "alpha" {
+		t.Fatalf("names = %#v, want alpha", decision.SkillIntent.Names)
 	}
 	if decision.SkillIntent.Prompt != "do it" {
 		t.Fatalf("prompt = %q", decision.SkillIntent.Prompt)
 	}
 }
 
-func TestClassifyChannelSkillUseAllowsDoubleHyphenInName(t *testing.T) {
+func TestClassifyFixedCommandBeatsSkillSelector(t *testing.T) {
 	decision := Classify(ClassifyInput{
-		Text:    "/skill use my--skill -- do it",
-		Surface: SurfaceChannel,
+		Text:    "/skill list",
+		Surface: SurfaceWebWS,
+		KnownCommand: func(resource string) bool {
+			return resource == "skill"
+		},
+		WebActionSupported: func(resource, action string) bool {
+			return resource == "skill" && action == "list"
+		},
 	})
-	if decision.Kind != DecisionSkillIntent {
-		t.Fatalf("kind = %s, want %s: %#v", decision.Kind, DecisionSkillIntent, decision)
+	if decision.Kind != DecisionCommandAction {
+		t.Fatalf("decision = %#v, want command action", decision)
 	}
-	if len(decision.SkillIntent.Names) != 1 || decision.SkillIntent.Names[0] != "my--skill" {
-		t.Fatalf("names = %#v, want my--skill", decision.SkillIntent.Names)
-	}
-	if decision.SkillIntent.Prompt != "do it" {
-		t.Fatalf("prompt = %q, want do it", decision.SkillIntent.Prompt)
+	if decision.Command.Resource != "skill" || decision.Command.Action != "list" {
+		t.Fatalf("command = %#v, want skill list", decision.Command)
 	}
 }
 
-func TestClassifySkillUseSyntax(t *testing.T) {
-	tests := []struct {
-		name string
-		text string
-		code string
-	}{
-		{name: "missing delimiter", text: "/skill use alpha", code: CodeInvalidSkillSlashSyntax},
-		{name: "missing prompt", text: "/skill use alpha -- ", code: CodeMissingPrompt},
-		{name: "delimiter without leading space", text: "/skill use alpha-- do", code: CodeInvalidSkillSlashSyntax},
-		{name: "delimiter without trailing space", text: "/skill use alpha --do", code: CodeInvalidSkillSlashSyntax},
-		{name: "empty segment", text: "/skill use alpha,,beta -- do", code: CodeInvalidSkillSlashSyntax},
-		{name: "dot", text: "/skill use . -- do", code: CodeInvalidSkillSlashSyntax},
-		{name: "dot dot", text: "/skill use .. -- do", code: CodeInvalidSkillSlashSyntax},
+func TestClassifyLegacySkillUseSyntaxRejects(t *testing.T) {
+	tests := []string{
+		"/skill use alpha -- do it",
+		"/skill@Memoh use alpha -- do it",
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			decision := Classify(ClassifyInput{Text: tt.text, Surface: SurfaceChannel, Directed: true})
-			if decision.Kind != DecisionReject || decision.Code != tt.code {
-				t.Fatalf("decision = %#v, want reject %s", decision, tt.code)
+	for _, text := range tests {
+		t.Run(text, func(t *testing.T) {
+			decision := Classify(ClassifyInput{
+				Text:       text,
+				Surface:    SurfaceChannel,
+				Directed:   true,
+				BotAliases: []string{"Memoh"},
+			})
+			if decision.Kind != DecisionReject || decision.Code != CodeInvalidSkillSlashSyntax {
+				t.Fatalf("decision = %#v, want reject %s", decision, CodeInvalidSkillSlashSyntax)
 			}
 		})
 	}
@@ -136,7 +170,7 @@ func TestClassifyModeSlashRemainderRejects(t *testing.T) {
 }
 
 func TestClassifyUnknownSlash(t *testing.T) {
-	decision := Classify(ClassifyInput{Text: "/wat", Surface: SurfaceWebWS})
+	decision := Classify(ClassifyInput{Text: "/wat?", Surface: SurfaceWebWS})
 	if decision.Kind != DecisionUnknownSlash || decision.Code != CodeUnknownSlash {
 		t.Fatalf("decision = %#v, want unknown slash", decision)
 	}

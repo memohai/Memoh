@@ -27,7 +27,6 @@ import { client } from '@memohai/sdk/client'
 
 import {
   sendLocalChannelMessage,
-  sendLocalSlashCommand,
   streamBotSessionsActivityEvents,
   streamSessionMessageEvents,
 } from './useChat.message-api'
@@ -93,36 +92,6 @@ describe('streamBotSessionsActivityEvents', () => {
 
     expect(onEvent).toHaveBeenCalledTimes(1)
     expect(onEvent).toHaveBeenCalledWith(event)
-  })
-})
-
-describe('sendLocalSlashCommand', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  it('posts slash fallback commands to the Web local-channel endpoint', async () => {
-    vi.mocked(client.post).mockResolvedValue({
-      data: {
-        type: 'command_error',
-        terminal: true,
-        error: { code: 'unknown_slash', message: 'server fallback' },
-      },
-    } as never)
-
-    const event = await sendLocalSlashCommand('bot-1', '/wat')
-
-    expect(client.post).toHaveBeenCalledWith({
-      url: '/bots/{bot_id}/web/messages',
-      path: { bot_id: 'bot-1' },
-      body: { message: { text: '/wat' } },
-      throwOnError: true,
-    })
-    expect(postBotsByBotIdLocalMessages).not.toHaveBeenCalled()
-    expect(event).toMatchObject({
-      type: 'command_error',
-      error: { code: 'unknown_slash' },
-    })
   })
 })
 

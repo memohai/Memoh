@@ -93,6 +93,10 @@ func (a *FeishuAdapter) enrichQuotedMessage(ctx context.Context, cfg channel.Cha
 	}
 	msg.Message.Reply.Sender = senderName
 	msg.Message.Reply.Preview = preview
+	if attachments, known := feishuQuotedAttachments(parent); known {
+		msg.Message.Reply.Attachments = attachments
+		msg.Message.Reply.AttachmentsKnown = true
+	}
 }
 
 // extractFeishuMessageText extracts plain text from a Feishu message object
@@ -126,4 +130,63 @@ func extractFeishuMessageText(msg *larkim.Message) string {
 		return strings.TrimSpace(txt)
 	}
 	return ""
+}
+
+func feishuQuotedAttachments(msg *larkim.Message) ([]channel.Attachment, bool) {
+	if msg == nil || msg.Body == nil || msg.Body.Content == nil {
+		return nil, false
+	}
+	content := strings.TrimSpace(*msg.Body.Content)
+	if content == "" {
+		return nil, false
+	}
+	var contentMap map[string]any
+	if err := json.Unmarshal([]byte(content), &contentMap); err != nil {
+		return nil, false
+	}
+
+	messageID := ptrStr(msg.MessageId)
+	switch ptrStr(msg.MsgType) {
+	case larkim.MsgTypeText:
+		return nil, true
+	case larkim.MsgTypePost:
+		return extractFeishuPostAttachments(contentMap, messageID), true
+	case larkim.MsgTypeImage:
+		key, _ := contentMap["image_key"].(string)
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return nil, false
+		}
+		return []channel.Attachment{channel.NormalizeInboundChannelAttachment(channel.Attachment{
+			Type:           channel.AttachmentImage,
+			PlatformKey:    key,
+			SourcePlatform: Type.String(),
+			Metadata:       map[string]any{"message_id": messageID},
+		})}, true
+	case larkim.MsgTypeFile, larkim.MsgTypeAudio, larkim.MsgTypeMedia:
+		key, _ := contentMap["file_key"].(string)
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return nil, false
+		}
+		name, _ := contentMap["file_name"].(string)
+		mime, _ := contentMap["mime_type"].(string)
+		attType := channel.AttachmentFile
+		switch ptrStr(msg.MsgType) {
+		case larkim.MsgTypeAudio:
+			attType = channel.AttachmentAudio
+		case larkim.MsgTypeMedia:
+			attType = channel.AttachmentVideo
+		}
+		return []channel.Attachment{channel.NormalizeInboundChannelAttachment(channel.Attachment{
+			Type:           attType,
+			PlatformKey:    key,
+			SourcePlatform: Type.String(),
+			Name:           strings.TrimSpace(name),
+			Mime:           strings.TrimSpace(mime),
+			Metadata:       map[string]any{"message_id": messageID},
+		})}, true
+	default:
+		return nil, false
+	}
 }

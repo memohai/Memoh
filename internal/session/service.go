@@ -134,6 +134,23 @@ func (s *Service) SetHookService(h *hooks.Service) {
 	s.hookService = h
 }
 
+// canonicalChannelType maps the product's own inbound surfaces (web composer,
+// bundled CLI) to the single "local" channel type before persisting. The web
+// REST session-create path has always stored "local", and the web UI treats
+// any other non-empty channel_type as an external channel thread (read-only,
+// channel badge), so adapter names like "web"/"cli" must not leak into
+// bot_sessions. External channel adapters (telegram, discord, ...) pass
+// through unchanged. Keep the surface list in sync with isLocalChannelType in
+// internal/channel/inbound.
+func canonicalChannelType(ct string) string {
+	trimmed := strings.TrimSpace(ct)
+	switch strings.ToLower(trimmed) {
+	case "web", "cli":
+		return "local"
+	}
+	return trimmed
+}
+
 // Create creates a new session.
 func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error) {
 	pgBotID, err := dbpkg.ParseUUID(input.BotID)
@@ -151,7 +168,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 	runtimeOwnerUserID := strings.TrimSpace(input.CreatedByUserID)
 
 	channelType := pgtype.Text{}
-	if ct := strings.TrimSpace(input.ChannelType); ct != "" {
+	if ct := canonicalChannelType(input.ChannelType); ct != "" {
 		channelType = pgtype.Text{String: ct, Valid: true}
 	}
 

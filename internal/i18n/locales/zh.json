@@ -355,7 +355,8 @@
     "skill": {
       "title": "技能",
       "unavailable": "此机器人暂无可用技能。",
-      "empty": "尚未添加技能。\n\n技能是机器人可调用的工具。请在 Web 控制台添加。"
+      "empty": "尚未添加技能。\n\n技能是机器人可调用的工具。请在 Web 控制台添加。",
+      "activateHint": "激活技能：`/<技能名> [提示词]`"
     },
     "schedule": {
       "title": "定时任务",
@@ -493,18 +494,14 @@
     }
   },
   "slash": {
-    "error": {
-      "unknownSlash": "未知 slash 命令。",
-      "unsupportedWebCommand": "这个 slash 命令不能在 Web Chat 中使用。",
-      "useSkillChipRequired": "请通过技能选择 chip 发送 requested skill。",
-      "invalidSkillSlashSyntax": "无效的 /skill use 语法。请使用 /skill use <name>[,<name>...] -- <prompt>。",
-      "missingPrompt": "缺少 prompt，请在 -- 后补充内容。",
+      "error": {
+        "unknownSlash": "未知 slash 命令。",
+        "unsupportedWebCommand": "这个 slash 命令不能在 Web Chat 中使用。",
+        "invalidSkillSlashSyntax": "无效的 skill slash 语法。请使用 /<skill-name> [prompt]。",
       "requestedSkillNotFound": "找不到请求的 skill。",
       "requestedSkillAmbiguous": "请求的 skill 存在歧义。",
       "requestedSkillDisabled": "请求的 skill 已被禁用。",
       "requestedSkillNotRuntimeUsable": "请求的 skill 不能用于本次对话。",
-      "invalidSkillRef": "选中的 skill 无效。",
-      "staleSkillRef": "选中的 skill 已变化，请重新选择。",
       "tooManyRequestedSkills": "请求的 skill 数量过多。",
       "requestedSkillContextTooLarge": "请求的 skill 上下文过大。",
       "slashAttachmentsUnsupported": "slash 命令不支持附件。",

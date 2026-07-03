@@ -808,6 +808,7 @@ export type ChannelFieldSchema = {
 export type ChannelFieldType = 'string' | 'secret' | 'bool' | 'number' | 'enum';
 
 export type ChannelForwardRef = {
+    attachments_known?: boolean;
     date?: number;
     from_conversation_id?: string;
     from_user_id?: string;
@@ -851,6 +852,7 @@ export type ChannelMessageTextStyle = 'bold' | 'italic' | 'strikethrough' | 'cod
 
 export type ChannelReplyRef = {
     attachments?: Array<ChannelAttachment>;
+    attachments_known?: boolean;
     message_id?: string;
     preview?: string;
     sender?: string;
@@ -995,6 +997,19 @@ export type CompactionLog = {
     usage?: unknown;
 };
 
+export type ConversationSkillActivation = {
+    prompt?: string;
+    skills?: Array<ConversationSkillActivationSkill>;
+};
+
+export type ConversationSkillActivationSkill = {
+    description?: string;
+    display_name?: string;
+    name?: string;
+    source_kind?: string;
+    state?: string;
+};
+
 export type ConversationUiAttachment = {
     base64?: string;
     bot_id?: string;
@@ -1082,8 +1097,10 @@ export type ConversationUiTurn = {
     sender_avatar_url?: string;
     sender_display_name?: string;
     sender_user_id?: string;
+    skill_activation?: ConversationSkillActivation;
     text?: string;
     timestamp?: string;
+    user_message_kind?: string;
 };
 
 export type ConversationUiUserInput = {
@@ -2756,7 +2773,6 @@ export type SkillsSafeCatalogItem = {
     description?: string;
     display_name?: string;
     name?: string;
-    skill_ref?: string;
     source_kind?: string;
     state?: string;
 };

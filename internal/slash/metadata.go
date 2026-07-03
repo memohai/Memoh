@@ -3,13 +3,23 @@ package slash
 import "strings"
 
 var reservedMetadataKeys = map[string]struct{}{
-	normalizeMetadataKey("requested_skills"):       {},
-	normalizeMetadataKey("requestedSkills"):        {},
-	normalizeMetadataKey("applied_skills"):         {},
-	normalizeMetadataKey("model_requested_skills"): {},
-	normalizeMetadataKey("model_used_skills"):      {},
-	normalizeMetadataKey("model_context_skills"):   {},
-	normalizeMetadataKey("loaded_skills"):          {},
+	normalizeMetadataKey("requested_skills"):        {},
+	normalizeMetadataKey("requestedSkills"):         {},
+	normalizeMetadataKey("model_requested_skills"):  {},
+	normalizeMetadataKey("modelRequestedSkills"):    {},
+	normalizeMetadataKey("applied_skills"):          {},
+	normalizeMetadataKey("model_used_skills"):       {},
+	normalizeMetadataKey("model_context_skills"):    {},
+	normalizeMetadataKey("loaded_skills"):           {},
+	normalizeMetadataKey("user_message_kind"):       {},
+	normalizeMetadataKey("userMessageKind"):         {},
+	normalizeMetadataKey("skill_activation"):        {},
+	normalizeMetadataKey("skillActivation"):         {},
+	normalizeMetadataKey("skill_activation_prompt"): {},
+	normalizeMetadataKey("skillActivationPrompt"):   {},
+	normalizeMetadataKey("skill_activation_skills"): {},
+	normalizeMetadataKey("skillActivationSkills"):   {},
+	normalizeMetadataKey("audit_requested_skills"):  {},
 }
 
 func normalizeMetadataKey(key string) string {
