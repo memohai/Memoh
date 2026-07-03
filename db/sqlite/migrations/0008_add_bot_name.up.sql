@@ -5,6 +5,7 @@
 -- is guaranteed unique and slug-valid; users can rename afterwards.
 
 PRAGMA foreign_keys = OFF;
+PRAGMA legacy_alter_table = ON;
 
 ALTER TABLE bots RENAME TO bots_old;
 
@@ -87,4 +88,5 @@ DROP TABLE bots_old;
 CREATE INDEX IF NOT EXISTS idx_bots_owner_user_id ON bots(owner_user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_name ON bots(name);
 
+PRAGMA legacy_alter_table = OFF;
 PRAGMA foreign_keys = ON;

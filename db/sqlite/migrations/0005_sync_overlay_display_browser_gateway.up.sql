@@ -3,6 +3,7 @@
 -- and 0078 browser gateway removal.
 
 PRAGMA foreign_keys = OFF;
+PRAGMA legacy_alter_table = ON;
 
 BEGIN;
 
@@ -138,4 +139,5 @@ CREATE INDEX IF NOT EXISTS idx_bots_owner_user_id ON bots(owner_user_id);
 
 COMMIT;
 
+PRAGMA legacy_alter_table = OFF;
 PRAGMA foreign_keys = ON;

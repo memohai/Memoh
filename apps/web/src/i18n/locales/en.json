@@ -391,6 +391,7 @@
       "share": "Share",
       "retry": "Try again",
       "fork": "Fork",
+      "createFork": "Create fork",
       "more": "More",
       "readAloud": "Read aloud"
     },
@@ -427,6 +428,9 @@
     "attachFiles": "Attach files",
     "send": "Send",
     "sendFailed": "Message failed to send",
+    "forkFailed": "Failed to fork session",
+    "forkedFrom": "Forked from {session}",
+    "unknownSession": "Unknown session",
     "minimapLabel": "Conversation outline",
     "minimapEarlier": "Earlier messages appear as they load",
     "startChat": "Start Chat",

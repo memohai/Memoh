@@ -7,6 +7,7 @@ import {
   getBotsByBotIdSessionsBySessionIdAcpRuntime,
   postBotsByBotIdAcpRuntimes,
   postBotsByBotIdSessions,
+  postBotsByBotIdSessionsBySessionIdFork,
   postBotsByBotIdSessionsBySessionIdAcpRuntime,
   deleteBotsByBotIdSessionsBySessionId,
   patchBotsByBotIdAcpRuntimesByRuntimeIdModel,
@@ -101,6 +102,21 @@ export async function createSession(botId: string, options?: string | CreateSess
   const { data } = await postBotsByBotIdSessions({
     path: { bot_id: id },
     body,
+    throwOnError: true,
+  })
+  return data as SessionSummary
+}
+
+export async function forkSessionFromMessage(botId: string, sessionId: string, messageId: string): Promise<SessionSummary> {
+  const bid = botId.trim()
+  const sid = sessionId.trim()
+  const mid = messageId.trim()
+  if (!bid) throw new Error('bot id is required')
+  if (!sid) throw new Error('session id is required')
+  if (!mid) throw new Error('message id is required')
+  const { data } = await postBotsByBotIdSessionsBySessionIdFork({
+    path: { bot_id: bid, session_id: sid },
+    body: { message_id: mid },
     throwOnError: true,
   })
   return data as SessionSummary

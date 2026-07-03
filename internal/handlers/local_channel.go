@@ -617,6 +617,7 @@ type wsClientMessage struct {
 	SessionID       string                     `json:"session_id,omitempty"`
 	InvocationID    string                     `json:"invocation_id,omitempty"`
 	ComposerScope   string                     `json:"composer_scope,omitempty"`
+	MessageID       string                     `json:"message_id,omitempty"`
 	Attachments     []json.RawMessage          `json:"attachments,omitempty"`
 	RequestedSkills []webRequestedSkill        `json:"requested_skills,omitempty"`
 	ModelID         string                     `json:"model_id,omitempty"`
@@ -1524,6 +1525,91 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						req.RequestedSkills = preparedActivationReq.RequestedSkills
 					}
 					return h.resolver.StreamChatWS(ctx, req, eventCh, abortCh)
+				},
+			)
+
+		case "retry_message":
+			sessionID := strings.TrimSpace(msg.SessionID)
+			streamID := strings.TrimSpace(msg.StreamID)
+			messageID := strings.TrimSpace(msg.MessageID)
+			if streamID == "" {
+				sendWSError(writer, "", sessionID, "stream_id is required")
+				continue
+			}
+			if sessionID == "" {
+				sendWSError(writer, streamID, "", "session_id is required")
+				continue
+			}
+			if messageID == "" {
+				sendWSError(writer, streamID, sessionID, "message_id is required")
+				continue
+			}
+			if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
+				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				continue
+			}
+
+			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws retry stream error",
+				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error {
+					return h.resolver.RetryLatestMessageWS(ctx, flow.RetryLatestMessageInput{
+						BotID:                  botID,
+						SessionID:              sessionID,
+						StreamID:               streamID,
+						MessageID:              messageID,
+						ActorChannelIdentityID: channelIdentityID,
+						ActorUserID:            channelIdentityID,
+						ChatToken:              bearerToken,
+						Model:                  strings.TrimSpace(msg.ModelID),
+						ReasoningEffort:        strings.TrimSpace(msg.ReasoningEffort),
+						ToolHTTPURL:            buildACPMCPToolsURL(c, botID),
+					}, eventCh, abortCh)
+				},
+			)
+
+		case "edit_message":
+			text := strings.TrimSpace(msg.Text)
+			sessionID := strings.TrimSpace(msg.SessionID)
+			streamID := strings.TrimSpace(msg.StreamID)
+			messageID := strings.TrimSpace(msg.MessageID)
+			chatAttachments := parseWSClientAttachments(msg.Attachments)
+			if streamID == "" {
+				sendWSError(writer, "", sessionID, "stream_id is required")
+				continue
+			}
+			if sessionID == "" {
+				sendWSError(writer, streamID, "", "session_id is required")
+				continue
+			}
+			if messageID == "" {
+				sendWSError(writer, streamID, sessionID, "message_id is required")
+				continue
+			}
+			if text == "" && len(chatAttachments) == 0 {
+				sendWSError(writer, streamID, sessionID, "message text or attachments required")
+				continue
+			}
+			if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
+				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				continue
+			}
+
+			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws edit stream error",
+				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error {
+					ingestedAttachments := h.ingestWSInboundAttachments(ctx, botID, chatAttachments)
+					return h.resolver.EditLatestMessageWS(ctx, flow.EditLatestMessageInput{
+						BotID:                  botID,
+						SessionID:              sessionID,
+						StreamID:               streamID,
+						MessageID:              messageID,
+						Text:                   text,
+						Attachments:            ingestedAttachments,
+						ActorChannelIdentityID: channelIdentityID,
+						ActorUserID:            channelIdentityID,
+						ChatToken:              bearerToken,
+						Model:                  strings.TrimSpace(msg.ModelID),
+						ReasoningEffort:        strings.TrimSpace(msg.ReasoningEffort),
+						ToolHTTPURL:            buildACPMCPToolsURL(c, botID),
+					}, eventCh, abortCh)
 				},
 			)
 

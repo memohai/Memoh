@@ -17,6 +17,7 @@ import (
 )
 
 type messageWithUsage struct {
+	ID                string
 	Message           conversation.ModelMessage
 	UsageInputTokens  *int
 	UsageOutputTokens *int
@@ -62,6 +63,7 @@ func (r *Resolver) loadMessages(ctx context.Context, chatID string, sessionID st
 			}
 		}
 		result = append(result, messageWithUsage{
+			ID:                strings.TrimSpace(m.ID),
 			Message:           mm,
 			UsageInputTokens:  inputTokens,
 			UsageOutputTokens: outputTokens,
@@ -73,6 +75,19 @@ func (r *Resolver) loadMessages(ctx context.Context, chatID string, sessionID st
 		})
 	}
 	return result, nil
+}
+
+func filterMessagesBeforeID(messages []messageWithUsage, messageID string) []messageWithUsage {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return messages
+	}
+	for i, item := range messages {
+		if strings.TrimSpace(item.ID) == messageID {
+			return messages[:i]
+		}
+	}
+	return messages
 }
 
 func dedupePersistedCurrentUserMessage(messages []messageWithUsage, req conversation.ChatRequest) []messageWithUsage {

@@ -189,8 +189,51 @@ func (*fakeAgentMessageService) ListBeforeBySession(context.Context, string, tim
 	return nil, nil
 }
 
+func (*fakeAgentMessageService) ListBeforeMessageBySession(context.Context, string, string, int32) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
 func (*fakeAgentMessageService) LocateByExternalIDBySession(context.Context, string, string, int32, int32) (messagepkg.LocateResult, error) {
 	return messagepkg.LocateResult{}, nil
+}
+
+func (s *fakeAgentMessageService) GetByIDBySession(_ context.Context, sessionID string, messageID string) (messagepkg.Message, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, msg := range s.messages[sessionID] {
+		if msg.ID == messageID {
+			return msg, nil
+		}
+	}
+	return messagepkg.Message{}, nil
+}
+
+func (s *fakeAgentMessageService) ListVisibleFromBySession(_ context.Context, sessionID string, messageID string) ([]messagepkg.Message, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	msgs := s.messages[sessionID]
+	for i, msg := range msgs {
+		if msg.ID == messageID {
+			return append([]messagepkg.Message(nil), msgs[i:]...), nil
+		}
+	}
+	return nil, nil
+}
+
+func (*fakeAgentMessageService) GetVisibleTurnByMessage(context.Context, string, string) (messagepkg.HistoryTurn, error) {
+	return messagepkg.HistoryTurn{}, nil
+}
+
+func (*fakeAgentMessageService) GetLatestVisibleTurnBySession(context.Context, string) (messagepkg.HistoryTurn, error) {
+	return messagepkg.HistoryTurn{}, nil
+}
+
+func (*fakeAgentMessageService) ReplaceTurn(context.Context, string, string, string, string, string) (messagepkg.HistoryTurn, error) {
+	return messagepkg.HistoryTurn{}, nil
+}
+
+func (*fakeAgentMessageService) DeleteByIDs(context.Context, []string) error {
+	return nil
 }
 
 func (*fakeAgentMessageService) DeleteByBot(context.Context, string) error {

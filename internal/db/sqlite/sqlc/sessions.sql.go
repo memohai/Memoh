@@ -130,12 +130,17 @@ func (q *Queries) GetActiveSessionForRoute(ctx context.Context, routeID string) 
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
+
 SELECT id, bot_id, route_id, channel_type, type, title, metadata, parent_session_id, created_at, updated_at, deleted_at, created_by_user_id, session_mode, runtime_type, runtime_metadata
 FROM bot_sessions
 WHERE id = ?1
   AND deleted_at IS NULL
 `
 
+// ForkSessionFromAssistantMessage is implemented in
+// internal/db/sqlite/store/queries.go. SQLite cannot express the PostgreSQL
+// data-modifying CTE used by the production query while preserving the old to
+// new message/turn id mapping in one sqlc-generated statement.
 func (q *Queries) GetSessionByID(ctx context.Context, id string) (BotSession, error) {
 	row := q.db.QueryRowContext(ctx, getSessionByID, id)
 	var i BotSession

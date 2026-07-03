@@ -63,9 +63,45 @@
         </TooltipContent>
       </Tooltip>
 
-      <!-- ASSISTANT role: "more" menu — timestamp only for now. Share, retry,
-           read-aloud, and user edit are intentionally withheld until wired. -->
+      <template v-if="role === 'user' && onEdit">
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              :class="actionIconClass"
+              :aria-label="t('chat.actions.edit')"
+              @click="onEdit"
+            >
+              <PencilLine class="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {{ t('chat.actions.edit') }}
+          </TooltipContent>
+        </Tooltip>
+      </template>
+
       <template v-if="role === 'assistant'">
+        <Tooltip v-if="onRetry">
+          <TooltipTrigger as-child>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              :class="actionIconClass"
+              :aria-label="t('chat.actions.retry')"
+              @click="onRetry"
+            >
+              <RotateCcw class="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {{ t('chat.actions.retry') }}
+          </TooltipContent>
+        </Tooltip>
+
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
             <Button
@@ -91,6 +127,13 @@
             >
               {{ menuTime }}
             </DropdownMenuLabel>
+            <DropdownMenuItem
+              v-if="onFork"
+              @select="onFork"
+            >
+              <ForkSplitIcon class="size-4" />
+              <span>{{ t('chat.actions.createFork') }}</span>
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </template>
@@ -101,9 +144,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { PencilLine, RotateCcw } from 'lucide-vue-next'
 import CopyConnectedIcon from './copy-connected-icon.vue'
 import CheckDrawIcon from './check-draw-icon.vue'
 import DotsIcon from './dots-icon.vue'
+import ForkSplitIcon from './fork-split-icon.vue'
 import {
   Button,
   Tooltip,
@@ -114,6 +159,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuLabel,
+  DropdownMenuItem,
 } from '@memohai/ui'
 import { useClipboard } from '@/composables/useClipboard'
 
@@ -125,16 +171,15 @@ const props = defineProps<{
   persistent?: boolean
   streaming?: boolean
   align?: 'start' | 'end'
+  onRetry?: () => void
+  onEdit?: () => void
+  onFork?: () => void
 }>()
 
 const { t } = useI18n()
 const { copyText: writeClipboard } = useClipboard()
 
-// Rest tint sits just shy of the muted text — nudged ~15% toward the body
-// foreground so the icons read a touch more present than plain muted-foreground,
-// without going to full foreground. color-mix keeps it correct in both themes.
-const actionIconClass
-  = 'text-[color-mix(in_oklab,var(--muted-foreground),var(--foreground)_15%)] hover:text-foreground'
+const actionIconClass = 'text-muted-foreground hover:text-foreground'
 
 const copied = ref(false)
 let resetTimer: ReturnType<typeof setTimeout> | null = null

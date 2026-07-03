@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/acpprofile"
@@ -76,6 +77,9 @@ var (
 	ErrACPAgentNotConfigured  = errors.New("ACP agent is not configured for this bot")
 	ErrACPRuntimeOwnerMissing = errors.New("runtime_owner_account_id is required for acp_agent sessions")
 	ErrACPProjectModeInvalid  = errors.New("unknown ACP project mode")
+	ErrForkSourceNotFound     = errors.New("fork source session not found")
+	ErrForkSourceNotReply     = errors.New("fork source must be a visible assistant reply")
+	ErrForkSourceNotChat      = errors.New("fork source must be a chat session")
 )
 
 func IsKnownType(typ string) bool {
@@ -105,6 +109,15 @@ type CreateInput struct {
 	Metadata        map[string]any
 	RuntimeMetadata map[string]any
 	ParentSessionID string
+	CreatedByUserID string
+}
+
+// ForkFromAssistantInput creates a new chat session from the source session's
+// visible history up to and including the assistant message.
+type ForkFromAssistantInput struct {
+	BotID           string
+	SessionID       string
+	MessageID       string
 	CreatedByUserID string
 }
 
@@ -235,6 +248,76 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 		return Session{}, err
 	}
 	sess := toSession(row)
+	s.publishSessionCreated(sess)
+	s.runSessionStartHook(context.WithoutCancel(ctx), sess)
+	return sess, nil
+}
+
+// ForkFromAssistantMessage creates a new chat session containing the source
+// session's visible linear history through the selected assistant reply.
+func (s *Service) ForkFromAssistantMessage(ctx context.Context, input ForkFromAssistantInput) (Session, error) {
+	pgBotID, err := dbpkg.ParseUUID(input.BotID)
+	if err != nil {
+		return Session{}, fmt.Errorf("invalid bot id: %w", err)
+	}
+	pgSessionID, err := dbpkg.ParseUUID(input.SessionID)
+	if err != nil {
+		return Session{}, fmt.Errorf("invalid session id: %w", err)
+	}
+	pgMessageID, err := dbpkg.ParseUUID(input.MessageID)
+	if err != nil {
+		return Session{}, fmt.Errorf("invalid message id: %w", err)
+	}
+	pgCreatedByUserID, err := parseOptionalUUID(input.CreatedByUserID)
+	if err != nil {
+		return Session{}, fmt.Errorf("invalid created by user id: %w", err)
+	}
+
+	sourceRow, err := s.queries.GetSessionByID(ctx, pgSessionID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Session{}, ErrForkSourceNotFound
+		}
+		return Session{}, err
+	}
+	source := toSession(sourceRow)
+	if source.BotID != pgBotID.String() {
+		return Session{}, ErrForkSourceNotFound
+	}
+	if source.Type != TypeChat {
+		return Session{}, ErrForkSourceNotChat
+	}
+
+	title := strings.TrimSpace(source.Title)
+	if title == "" {
+		title = "Untitled"
+	}
+	meta := nonNilMap(source.Metadata)
+	meta["forked_from"] = map[string]any{
+		"session_id": source.ID,
+		"title":      title,
+		"message_id": pgMessageID.String(),
+	}
+	metaBytes, err := json.Marshal(meta)
+	if err != nil {
+		return Session{}, fmt.Errorf("marshal metadata: %w", err)
+	}
+
+	row, err := s.queries.ForkSessionFromAssistantMessage(ctx, sqlc.ForkSessionFromAssistantMessageParams{
+		SessionID:       pgSessionID,
+		BotID:           pgBotID,
+		MessageID:       pgMessageID,
+		Title:           title + " fork",
+		Metadata:        metaBytes,
+		CreatedByUserID: pgCreatedByUserID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Session{}, ErrForkSourceNotReply
+		}
+		return Session{}, err
+	}
+	sess := toSessionFromForkRow(row)
 	s.publishSessionCreated(sess)
 	s.runSessionStartHook(context.WithoutCancel(ctx), sess)
 	return sess, nil
@@ -810,6 +893,10 @@ func toSession(row sqlc.BotSession) Session {
 		CreatedAt:       row.CreatedAt.Time,
 		UpdatedAt:       row.UpdatedAt.Time,
 	}
+}
+
+func toSessionFromForkRow(row sqlc.ForkSessionFromAssistantMessageRow) Session {
+	return toSession(sqlc.BotSession(row))
 }
 
 func validateACPMetadata(meta map[string]any) error {

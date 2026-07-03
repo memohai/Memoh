@@ -1,0 +1,428 @@
+package message
+
+import (
+	"context"
+	"database/sql"
+	"testing"
+
+	"github.com/memohai/memoh/internal/config"
+	dbpkg "github.com/memohai/memoh/internal/db"
+	sqlitestore "github.com/memohai/memoh/internal/db/sqlite/store"
+)
+
+func TestSQLiteHistoryTurnsRetryReplacementKeepsSameSecondRequestVisible(t *testing.T) {
+	ctx := context.Background()
+	conn, queries := newMessageHistoryTurnSQLite(t)
+	defer func() { _ = conn.Close() }()
+	svc := NewService(nil, queries)
+
+	const (
+		botID     = "00000000-0000-0000-0000-000000003001"
+		sessionID = "00000000-0000-0000-0000-000000003002"
+	)
+	insertMessageHistoryTurnFixtures(t, conn, botID, sessionID)
+
+	user, err := svc.Persist(ctx, PersistInput{
+		BotID:     botID,
+		SessionID: sessionID,
+		Role:      "user",
+		Content:   []byte(`{"role":"user","content":"hello"}`),
+	})
+	if err != nil {
+		t.Fatalf("persist user: %v", err)
+	}
+	assistant, err := svc.Persist(ctx, PersistInput{
+		BotID:     botID,
+		SessionID: sessionID,
+		Role:      "assistant",
+		Content:   []byte(`{"role":"assistant","content":"old"}`),
+	})
+	if err != nil {
+		t.Fatalf("persist assistant: %v", err)
+	}
+	if user.CreatedAt.IsZero() || assistant.CreatedAt.IsZero() {
+		t.Fatalf("persisted message created_at must parse, got user=%v assistant=%v", user.CreatedAt, assistant.CreatedAt)
+	}
+
+	turn, err := svc.GetVisibleTurnByMessage(ctx, sessionID, assistant.ID)
+	if err != nil {
+		t.Fatalf("visible turn by assistant: %v", err)
+	}
+	if turn.RequestMessageID != user.ID {
+		t.Fatalf("turn request = %s, want %s", turn.RequestMessageID, user.ID)
+	}
+	if turn.AssistantMessageID != assistant.ID {
+		t.Fatalf("turn assistant = %s, want %s", turn.AssistantMessageID, assistant.ID)
+	}
+
+	replacement, err := svc.Persist(ctx, PersistInput{
+		BotID:           botID,
+		SessionID:       sessionID,
+		Role:            "assistant",
+		Content:         []byte(`{"role":"assistant","content":"new"}`),
+		SkipHistoryTurn: true,
+	})
+	if err != nil {
+		t.Fatalf("persist replacement assistant: %v", err)
+	}
+	if _, err := svc.ReplaceTurn(ctx, sessionID, turn.ID, user.ID, replacement.ID, "retry"); err != nil {
+		t.Fatalf("replace turn: %v", err)
+	}
+
+	messages, err := svc.ListBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if got := messageIDs(messages); len(got) != 2 || got[0] != user.ID || got[1] != replacement.ID {
+		t.Fatalf("visible message ids = %#v, want user + replacement", got)
+	}
+	if _, err := svc.GetVisibleTurnByMessage(ctx, sessionID, assistant.ID); err == nil {
+		t.Fatal("old assistant still has visible turn after replacement")
+	}
+}
+
+func TestSQLiteHistoryTurnsReplacementKeepsToolTailAndHidesSupersededTail(t *testing.T) {
+	ctx := context.Background()
+	conn, queries := newMessageHistoryTurnSQLite(t)
+	defer func() { _ = conn.Close() }()
+	svc := NewService(nil, queries)
+
+	const (
+		botID     = "00000000-0000-0000-0000-000000003101"
+		sessionID = "00000000-0000-0000-0000-000000003102"
+	)
+	insertMessageHistoryTurnFixtures(t, conn, botID, sessionID)
+
+	firstUser, err := svc.Persist(ctx, PersistInput{
+		BotID:     botID,
+		SessionID: sessionID,
+		Role:      "user",
+		Content:   []byte(`{"role":"user","content":"first"}`),
+	})
+	if err != nil {
+		t.Fatalf("persist first user: %v", err)
+	}
+	firstAssistant, err := svc.Persist(ctx, PersistInput{
+		BotID:     botID,
+		SessionID: sessionID,
+		Role:      "assistant",
+		Content:   []byte(`{"role":"assistant","content":"first answer"}`),
+	})
+	if err != nil {
+		t.Fatalf("persist first assistant: %v", err)
+	}
+	secondUser, err := svc.Persist(ctx, PersistInput{
+		BotID:     botID,
+		SessionID: sessionID,
+		Role:      "user",
+		Content:   []byte(`{"role":"user","content":"second"}`),
+	})
+	if err != nil {
+		t.Fatalf("persist second user: %v", err)
+	}
+	oldAssistant, err := svc.Persist(ctx, PersistInput{
+		BotID:     botID,
+		SessionID: sessionID,
+		Role:      "assistant",
+		Content:   []byte(`{"role":"assistant","content":"old answer"}`),
+	})
+	if err != nil {
+		t.Fatalf("persist old assistant: %v", err)
+	}
+	oldToolTail, err := svc.Persist(ctx, PersistInput{
+		BotID:     botID,
+		SessionID: sessionID,
+		Role:      "tool",
+		Content:   []byte(`{"role":"tool","content":"old tool tail"}`),
+	})
+	if err != nil {
+		t.Fatalf("persist old tool tail: %v", err)
+	}
+
+	oldTurn, err := svc.GetVisibleTurnByMessage(ctx, sessionID, oldAssistant.ID)
+	if err != nil {
+		t.Fatalf("visible old turn: %v", err)
+	}
+	newAssistantAnchor, err := svc.Persist(ctx, PersistInput{
+		BotID:           botID,
+		SessionID:       sessionID,
+		Role:            "assistant",
+		Content:         []byte(`{"role":"assistant","content":"new calls tool"}`),
+		SkipHistoryTurn: true,
+	})
+	if err != nil {
+		t.Fatalf("persist new assistant anchor: %v", err)
+	}
+	newToolTail, err := svc.Persist(ctx, PersistInput{
+		BotID:           botID,
+		SessionID:       sessionID,
+		Role:            "tool",
+		Content:         []byte(`{"role":"tool","content":"new tool tail"}`),
+		SkipHistoryTurn: true,
+	})
+	if err != nil {
+		t.Fatalf("persist new tool tail: %v", err)
+	}
+	newAssistantFinal, err := svc.Persist(ctx, PersistInput{
+		BotID:           botID,
+		SessionID:       sessionID,
+		Role:            "assistant",
+		Content:         []byte(`{"role":"assistant","content":"new final"}`),
+		SkipHistoryTurn: true,
+	})
+	if err != nil {
+		t.Fatalf("persist new assistant final: %v", err)
+	}
+	if _, err := svc.ReplaceTurn(ctx, sessionID, oldTurn.ID, secondUser.ID, newAssistantAnchor.ID, "retry"); err != nil {
+		t.Fatalf("replace turn: %v", err)
+	}
+
+	messages, err := svc.ListBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	want := []string{
+		firstUser.ID,
+		firstAssistant.ID,
+		secondUser.ID,
+		newAssistantAnchor.ID,
+		newToolTail.ID,
+		newAssistantFinal.ID,
+	}
+	if got := messageIDs(messages); !equalStringSlices(got, want) {
+		t.Fatalf("visible message ids = %#v, want %#v; old tool tail %s must stay hidden", got, want, oldToolTail.ID)
+	}
+}
+
+func TestSQLiteDeleteByIDsRemovesUnanchoredReplacementMessages(t *testing.T) {
+	ctx := context.Background()
+	conn, queries := newMessageHistoryTurnSQLite(t)
+	defer func() { _ = conn.Close() }()
+	svc := NewService(nil, queries)
+
+	const (
+		botID     = "00000000-0000-0000-0000-000000003201"
+		sessionID = "00000000-0000-0000-0000-000000003202"
+	)
+	insertMessageHistoryTurnFixtures(t, conn, botID, sessionID)
+
+	user, err := svc.Persist(ctx, PersistInput{
+		BotID:     botID,
+		SessionID: sessionID,
+		Role:      "user",
+		Content:   []byte(`{"role":"user","content":"hello"}`),
+	})
+	if err != nil {
+		t.Fatalf("persist user: %v", err)
+	}
+	assistant, err := svc.Persist(ctx, PersistInput{
+		BotID:     botID,
+		SessionID: sessionID,
+		Role:      "assistant",
+		Content:   []byte(`{"role":"assistant","content":"old"}`),
+	})
+	if err != nil {
+		t.Fatalf("persist assistant: %v", err)
+	}
+	replacement, err := svc.Persist(ctx, PersistInput{
+		BotID:           botID,
+		SessionID:       sessionID,
+		Role:            "assistant",
+		Content:         []byte(`{"role":"assistant","content":"new"}`),
+		SkipHistoryTurn: true,
+	})
+	if err != nil {
+		t.Fatalf("persist replacement assistant: %v", err)
+	}
+	if err := svc.DeleteByIDs(ctx, []string{replacement.ID}); err != nil {
+		t.Fatalf("delete replacement: %v", err)
+	}
+	messages, err := svc.ListBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if got := messageIDs(messages); !equalStringSlices(got, []string{user.ID, assistant.ID}) {
+		t.Fatalf("visible message ids = %#v, want original turn only", got)
+	}
+}
+
+func newMessageHistoryTurnSQLite(t *testing.T) (*sql.DB, *sqlitestore.Queries) {
+	t.Helper()
+	conn, err := dbpkg.OpenSQLite(context.Background(), config.SQLiteConfig{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if _, err := conn.ExecContext(context.Background(), sqliteHistoryTurnTestSchema); err != nil {
+		_ = conn.Close()
+		t.Fatalf("create schema: %v", err)
+	}
+	store, err := sqlitestore.New(conn)
+	if err != nil {
+		_ = conn.Close()
+		t.Fatalf("new sqlite store: %v", err)
+	}
+	return conn, sqlitestore.NewQueries(store)
+}
+
+func insertMessageHistoryTurnFixtures(t *testing.T, conn *sql.DB, botID, sessionID string) {
+	t.Helper()
+	if _, err := conn.ExecContext(context.Background(), `INSERT INTO bots (id) VALUES (?)`, botID); err != nil {
+		t.Fatalf("insert bot: %v", err)
+	}
+	if _, err := conn.ExecContext(context.Background(), `INSERT INTO bot_sessions (id, bot_id, channel_type) VALUES (?, ?, ?)`, sessionID, botID, "local"); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+}
+
+func messageIDs(messages []Message) []string {
+	ids := make([]string, 0, len(messages))
+	for _, msg := range messages {
+		ids = append(ids, msg.ID)
+	}
+	return ids
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+const sqliteHistoryTurnTestSchema = `
+CREATE TABLE bots (
+  id TEXT PRIMARY KEY
+);
+CREATE TABLE channel_identities (
+  id TEXT PRIMARY KEY,
+  display_name TEXT,
+  avatar_url TEXT
+);
+CREATE TABLE bot_sessions (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL,
+  channel_type TEXT,
+  session_mode TEXT NOT NULL DEFAULT 'chat',
+  runtime_type TEXT NOT NULL DEFAULT 'model',
+  parent_session_id TEXT
+);
+CREATE TABLE bot_history_messages (
+  id TEXT PRIMARY KEY DEFAULT (
+    lower(hex(randomblob(4))) || '-' ||
+    lower(hex(randomblob(2))) || '-' ||
+    '4' || substr(lower(hex(randomblob(2))), 2) || '-' ||
+    substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' ||
+    lower(hex(randomblob(6)))
+  ),
+  bot_id TEXT NOT NULL,
+  session_id TEXT,
+  sender_channel_identity_id TEXT,
+  sender_account_user_id TEXT,
+  source_message_id TEXT,
+  source_reply_to_message_id TEXT,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL DEFAULT '{}',
+  metadata TEXT NOT NULL DEFAULT '{}',
+  usage TEXT,
+  compact_id TEXT,
+  session_mode TEXT NOT NULL DEFAULT 'chat',
+  runtime_type TEXT NOT NULL DEFAULT 'model',
+  model_id TEXT,
+  event_id TEXT,
+  display_text TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE bot_history_message_assets (
+  message_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  content_hash TEXT NOT NULL,
+  name TEXT,
+  metadata TEXT NOT NULL DEFAULT '{}'
+);
+CREATE TABLE bot_history_turns (
+  id TEXT PRIMARY KEY DEFAULT (
+    lower(hex(randomblob(4))) || '-' ||
+    lower(hex(randomblob(2))) || '-' ||
+    '4' || substr(lower(hex(randomblob(2))), 2) || '-' ||
+    substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' ||
+    lower(hex(randomblob(6)))
+  ),
+  bot_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  request_message_id TEXT,
+  assistant_message_id TEXT,
+  superseded_by_turn_id TEXT,
+  superseded_at TEXT,
+  superseded_reason TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (session_id, position)
+);
+CREATE INDEX idx_bot_history_turns_session_active
+  ON bot_history_turns(session_id, position)
+  WHERE superseded_at IS NULL;
+CREATE VIEW bot_visible_history_messages AS
+WITH bounded_turns AS (
+  SELECT
+    t.*,
+    assistant.created_at AS assistant_created_at,
+    assistant.id AS assistant_id,
+    LEAD(COALESCE(req.created_at, assistant.created_at)) OVER (
+      PARTITION BY t.session_id
+      ORDER BY t.position
+    ) AS next_created_at,
+    LEAD(COALESCE(req.id, assistant.id)) OVER (
+      PARTITION BY t.session_id
+      ORDER BY t.position
+    ) AS next_message_id
+  FROM bot_history_turns t
+  LEFT JOIN bot_history_messages req ON req.id = t.request_message_id
+  LEFT JOIN bot_history_messages assistant ON assistant.id = t.assistant_message_id
+),
+active_turns AS (
+  SELECT *
+  FROM bounded_turns
+  WHERE superseded_at IS NULL
+)
+SELECT t.id AS turn_id, t.position AS turn_position, 1 AS turn_message_seq, m.*
+FROM active_turns t
+JOIN bot_history_messages m ON m.id = t.request_message_id
+UNION ALL
+SELECT t.id AS turn_id, t.position AS turn_position, 2 AS turn_message_seq, m.*
+FROM active_turns t
+JOIN bot_history_messages m ON m.id = t.assistant_message_id
+UNION ALL
+SELECT
+  t.id AS turn_id,
+  t.position AS turn_position,
+  2 + ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY m.created_at, m.id) AS turn_message_seq,
+  m.*
+FROM active_turns t
+JOIN bot_history_messages m
+  ON m.session_id = t.session_id
+ AND m.role IN ('assistant', 'tool')
+WHERE t.assistant_message_id IS NOT NULL
+  AND m.id <> t.assistant_message_id
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_history_turns anchored
+    WHERE anchored.request_message_id = m.id
+       OR anchored.assistant_message_id = m.id
+  )
+  AND (
+    m.created_at > t.assistant_created_at
+    OR (m.created_at = t.assistant_created_at AND m.id > t.assistant_id)
+  )
+  AND (
+    t.next_created_at IS NULL
+    OR m.created_at < t.next_created_at
+    OR (m.created_at = t.next_created_at AND m.id < t.next_message_id)
+  );
+`

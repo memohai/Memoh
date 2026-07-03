@@ -94,6 +94,263 @@ func (q *Queries) DeleteSessionDiscussCursorsByBot(ctx context.Context, botID pg
 	return err
 }
 
+const forkSessionFromAssistantMessage = `-- name: ForkSessionFromAssistantMessage :one
+WITH source_session AS (
+  SELECT s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
+  FROM bot_sessions s
+  WHERE s.id = $1
+    AND s.bot_id = $2
+    AND s.type = 'chat'
+    AND s.deleted_at IS NULL
+),
+target_turn AS (
+  SELECT
+    t.id,
+    t.position,
+    vm.id AS message_id
+  FROM source_session s
+  JOIN bot_visible_history_messages vm ON vm.session_id = s.id
+    AND vm.id = $3
+    AND vm.role = 'assistant'
+  JOIN bot_history_turns t ON t.id = vm.turn_id
+    AND t.session_id = s.id
+    AND t.superseded_at IS NULL
+  LIMIT 1
+),
+created_session AS (
+  INSERT INTO bot_sessions (
+    bot_id,
+    channel_type,
+    type,
+    session_mode,
+    runtime_type,
+    runtime_metadata,
+    title,
+    metadata,
+    created_by_user_id
+  )
+  SELECT
+    s.bot_id,
+    s.channel_type,
+    s.type,
+    s.session_mode,
+    s.runtime_type,
+    s.runtime_metadata,
+    $4,
+    $5,
+    $6::uuid
+  FROM source_session s
+  JOIN target_turn tt ON true
+  RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+),
+copy_messages AS (
+  SELECT
+    vm.id AS old_message_id,
+    gen_random_uuid() AS new_message_id,
+    vm.sender_channel_identity_id,
+    vm.sender_account_user_id,
+    vm.source_message_id,
+    vm.source_reply_to_message_id,
+    vm.role,
+    vm.content,
+    vm.metadata,
+    vm.usage,
+    vm.session_mode,
+    vm.runtime_type,
+    vm.model_id,
+    vm.display_text,
+    vm.turn_position,
+    vm.turn_message_seq,
+    vm.created_at
+  FROM bot_visible_history_messages vm
+  JOIN target_turn tt ON (
+    vm.turn_position < tt.position
+    OR vm.turn_position = tt.position
+  )
+  WHERE vm.session_id = $1
+  ORDER BY vm.turn_position ASC, vm.turn_message_seq ASC, vm.created_at ASC, vm.id ASC
+),
+inserted_messages AS (
+  INSERT INTO bot_history_messages (
+    id,
+    bot_id,
+    session_id,
+    sender_channel_identity_id,
+    sender_account_user_id,
+    source_message_id,
+    source_reply_to_message_id,
+    role,
+    content,
+    metadata,
+    usage,
+    session_mode,
+    runtime_type,
+    model_id,
+    display_text,
+    created_at
+  )
+  SELECT
+    cm.new_message_id,
+    cs.bot_id,
+    cs.id,
+    cm.sender_channel_identity_id,
+    cm.sender_account_user_id,
+    cm.source_message_id,
+    cm.source_reply_to_message_id,
+    cm.role,
+    cm.content,
+    cm.metadata,
+    cm.usage,
+    cm.session_mode,
+    cm.runtime_type,
+    cm.model_id,
+    cm.display_text,
+    cm.created_at
+  FROM copy_messages cm
+  CROSS JOIN created_session cs
+  RETURNING id
+),
+copy_turns AS (
+  SELECT
+    t.id AS old_turn_id,
+    gen_random_uuid() AS new_turn_id,
+    t.position,
+    t.request_message_id,
+    t.assistant_message_id
+  FROM bot_history_turns t
+  JOIN target_turn tt ON t.position <= tt.position
+  WHERE t.session_id = $1
+    AND t.superseded_at IS NULL
+  ORDER BY t.position ASC
+),
+inserted_turns AS (
+  INSERT INTO bot_history_turns (
+    id,
+    bot_id,
+    session_id,
+    position,
+    request_message_id,
+    assistant_message_id
+  )
+  SELECT
+    ct.new_turn_id,
+    cs.bot_id,
+    cs.id,
+    ct.position,
+    request_message.new_message_id,
+    assistant_message.new_message_id
+  FROM copy_turns ct
+  CROSS JOIN created_session cs
+  LEFT JOIN copy_messages request_message ON request_message.old_message_id = ct.request_message_id
+  LEFT JOIN inserted_messages request_inserted ON request_inserted.id = request_message.new_message_id
+  LEFT JOIN copy_messages assistant_message ON assistant_message.old_message_id = ct.assistant_message_id
+  LEFT JOIN inserted_messages assistant_inserted ON assistant_inserted.id = assistant_message.new_message_id
+  RETURNING id
+),
+copied_assets AS (
+  INSERT INTO bot_history_message_assets (
+    message_id,
+    role,
+    ordinal,
+    content_hash,
+    name,
+    metadata
+  )
+  SELECT
+    cm.new_message_id,
+    a.role,
+    a.ordinal,
+    a.content_hash,
+    a.name,
+    a.metadata
+  FROM bot_history_message_assets a
+  JOIN copy_messages cm ON cm.old_message_id = a.message_id
+  JOIN inserted_messages im ON im.id = cm.new_message_id
+  RETURNING id
+),
+fork_anchor_message AS (
+  SELECT cm.new_message_id
+  FROM copy_messages cm
+  JOIN target_turn tt ON cm.turn_position = tt.position
+  ORDER BY cm.turn_message_seq DESC, cm.created_at DESC, cm.old_message_id DESC
+  LIMIT 1
+),
+updated_session AS (
+  UPDATE bot_sessions s
+  SET metadata = jsonb_set(
+    s.metadata,
+    '{forked_from}',
+    COALESCE(s.metadata->'forked_from', '{}'::jsonb) || jsonb_build_object('fork_message_id', fam.new_message_id::text),
+    true
+  )
+  FROM created_session cs
+  JOIN fork_anchor_message fam ON true
+  WHERE s.id = cs.id
+  RETURNING s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
+)
+SELECT us.id, us.bot_id, us.route_id, us.channel_type, us.type, us.session_mode, us.runtime_type, us.runtime_metadata, us.title, us.metadata, us.parent_session_id, us.created_by_user_id, us.created_at, us.updated_at, us.deleted_at
+FROM updated_session us
+CROSS JOIN (SELECT count(*) AS copied_asset_count FROM copied_assets) copied_asset_counts
+WHERE EXISTS (SELECT 1 FROM inserted_turns)
+`
+
+type ForkSessionFromAssistantMessageParams struct {
+	SessionID       pgtype.UUID `json:"session_id"`
+	BotID           pgtype.UUID `json:"bot_id"`
+	MessageID       pgtype.UUID `json:"message_id"`
+	Title           string      `json:"title"`
+	Metadata        []byte      `json:"metadata"`
+	CreatedByUserID pgtype.UUID `json:"created_by_user_id"`
+}
+
+type ForkSessionFromAssistantMessageRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	BotID           pgtype.UUID        `json:"bot_id"`
+	RouteID         pgtype.UUID        `json:"route_id"`
+	ChannelType     pgtype.Text        `json:"channel_type"`
+	Type            string             `json:"type"`
+	SessionMode     string             `json:"session_mode"`
+	RuntimeType     string             `json:"runtime_type"`
+	RuntimeMetadata []byte             `json:"runtime_metadata"`
+	Title           string             `json:"title"`
+	Metadata        []byte             `json:"metadata"`
+	ParentSessionID pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+}
+
+func (q *Queries) ForkSessionFromAssistantMessage(ctx context.Context, arg ForkSessionFromAssistantMessageParams) (ForkSessionFromAssistantMessageRow, error) {
+	row := q.db.QueryRow(ctx, forkSessionFromAssistantMessage,
+		arg.SessionID,
+		arg.BotID,
+		arg.MessageID,
+		arg.Title,
+		arg.Metadata,
+		arg.CreatedByUserID,
+	)
+	var i ForkSessionFromAssistantMessageRow
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.RouteID,
+		&i.ChannelType,
+		&i.Type,
+		&i.SessionMode,
+		&i.RuntimeType,
+		&i.RuntimeMetadata,
+		&i.Title,
+		&i.Metadata,
+		&i.ParentSessionID,
+		&i.CreatedByUserID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const getActiveSessionForRoute = `-- name: GetActiveSessionForRoute :one
 SELECT s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s

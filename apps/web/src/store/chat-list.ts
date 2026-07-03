@@ -28,6 +28,7 @@ import {
   closeACPRuntime as requestCloseACPRuntime,
   updateSessionAgent as requestUpdateSessionAgent,
   updateSessionTitle as requestUpdateSessionTitle,
+  forkSessionFromMessage as requestForkSessionFromMessage,
   fetchSession,
   fetchSessions,
   type Bot,
@@ -252,6 +253,11 @@ function commandErrorMessage(code: string) {
   return errors[code] || errors.generic || 'Slash command failed.'
 }
 
+function forkFailedMessage() {
+  const messages = localizedMessages()
+  return messages.chat.forkFailed
+}
+
 interface PendingAssistantStream {
   streamId: string
   assistantTurn: ChatAssistantTurn
@@ -387,6 +393,7 @@ export const useChatStore = defineStore('chat', () => {
   // approval doesn't stay locked against retries until a reload.
   const APPROVAL_RESPONSE_TTL_MS = 2 * 60 * 1000
   const approvalResponseStreams = new Map<string, { approvalId: string, silent: boolean, at: number }>()
+  const forkingMessages = new Set<string>()
   const pendingStreams = () => [...pendingAssistantStreams.values()].filter(stream => !stream.done)
   const streamingSessionId = computed(() => {
     const activeSid = (sessionId.value ?? '').trim()
@@ -627,6 +634,43 @@ export const useChatStore = defineStore('chat', () => {
     return sessionLookupRevision.value
   }
 
+  function forkSourceMetadata(session: SessionSummary | null | undefined): Record<string, unknown> | null {
+    const metadata = session?.metadata
+    if (!metadata || typeof metadata !== 'object') return null
+    const raw = (metadata as Record<string, unknown>).forked_from
+    return raw && typeof raw === 'object' ? raw as Record<string, unknown> : null
+  }
+
+  function forkSourceAnchor(session: SessionSummary | null | undefined): string {
+    return String(forkSourceMetadata(session)?.fork_message_id ?? '').trim()
+  }
+
+  function preserveSessionSummary(incoming: SessionSummary, known?: SessionSummary | null): SessionSummary {
+    let next = incoming
+    if (known && !(next.title ?? '').trim() && (known.title ?? '').trim()) {
+      next = { ...next, title: known.title }
+    }
+
+    const knownFork = forkSourceMetadata(known)
+    if (!knownFork || !forkSourceAnchor(known) || forkSourceAnchor(next)) {
+      return next
+    }
+
+    const incomingFork = forkSourceMetadata(next)
+    const metadata = next.metadata && typeof next.metadata === 'object' ? next.metadata : {}
+    return {
+      ...next,
+      metadata: {
+        ...metadata,
+        forked_from: {
+          ...knownFork,
+          ...(incomingFork ?? {}),
+          fork_message_id: knownFork.fork_message_id,
+        },
+      },
+    }
+  }
+
   function replaceSessions(items: SessionSummary[]): SessionSummary[] {
     const currentDeleted = deletedSessionIdsByBot.get((currentBotId.value ?? '').trim())
     // A racing list refresh can fetch a session before the backend's
@@ -639,13 +683,9 @@ export const useChatStore = defineStore('chat', () => {
     // hasn't set one yet," not "title cleared," so preserve our non-empty title
     // instead of letting the refresh erase it (which split the sidebar from
     // the sticky tab title).
-    const merged = items.filter(s => !currentDeleted?.has(s.id)).map(s => {
-      const known = sessionById.get(s.id)
-      if (known && !(s.title ?? '').trim() && (known.title ?? '').trim()) {
-        return { ...s, title: known.title }
-      }
-      return s
-    })
+    const merged = items
+      .filter(s => !currentDeleted?.has(s.id))
+      .map(s => preserveSessionSummary(s, sessionById.get(s.id) ?? rememberedSessions.value[s.id]))
     sessions.value = merged
     sessionById.clear()
     for (const s of merged) sessionById.set(s.id, s)
@@ -656,7 +696,9 @@ export const useChatStore = defineStore('chat', () => {
   function appendSessions(items: SessionSummary[]) {
     if (items.length === 0) return
     const currentDeleted = deletedSessionIdsByBot.get((currentBotId.value ?? '').trim())
-    const fresh = items.filter(s => !sessionById.has(s.id) && !currentDeleted?.has(s.id))
+    const fresh = items
+      .filter(s => !sessionById.has(s.id) && !currentDeleted?.has(s.id))
+      .map(s => preserveSessionSummary(s, rememberedSessions.value[s.id]))
     if (fresh.length === 0) return
     sessions.value = [...sessions.value, ...fresh]
     for (const s of fresh) sessionById.set(s.id, s)
@@ -667,15 +709,17 @@ export const useChatStore = defineStore('chat', () => {
     const currentDeleted = deletedSessionIdsByBot.get((currentBotId.value ?? '').trim())
     if (currentDeleted?.has(updated.id)) return
     const existing = sessionById.get(updated.id)
+    const remembered = rememberedSessions.value[updated.id]
+    const next = preserveSessionSummary(updated, existing ?? remembered)
     if (existing) {
       const rest = sessions.value.filter(session => session.id !== updated.id)
-      sessions.value = [updated, ...rest]
+      sessions.value = [next, ...rest]
     } else {
-      sessions.value = [updated, ...sessions.value]
+      sessions.value = [next, ...sessions.value]
     }
-    sessionById.set(updated.id, updated)
+    sessionById.set(next.id, next)
     markSessionLookupChanged()
-    if (rememberedSessions.value[updated.id]) rememberSession(updated)
+    if (remembered) rememberSession(next)
   }
 
   function rememberSession(updated: SessionSummary) {
@@ -817,6 +861,8 @@ export const useChatStore = defineStore('chat', () => {
     if (ct && ct !== 'local') return true
     return false
   })
+
+  const activeChatCanFork = computed(() => activeSession.value?.type === 'chat')
 
   function acpRuntimeKey(botId: string, targetSessionId: string) {
     const bid = botId.trim()
@@ -1502,9 +1548,60 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function removeTurnFromSession(_botId: string, _targetSessionId: string, turn: ChatMessage) {
+  function isActiveSessionTarget(botId: string, targetSessionId: string): boolean {
+    const bid = botId.trim()
+    const sid = targetSessionId.trim()
+    return Boolean(bid && sid && currentBotId.value === bid && sessionId.value === sid)
+  }
+
+  function refreshLoadingForSession(botId: string, targetSessionId: string) {
+    if (!isActiveSessionTarget(botId, targetSessionId)) return
+    loading.value = isSessionStreaming(targetSessionId)
+  }
+
+  function removeTurnFromSession(botId: string, targetSessionId: string, turn: ChatMessage) {
+    if (botId.trim() && targetSessionId.trim() && !isActiveSessionTarget(botId, targetSessionId)) return
     const idx = messages.indexOf(turn)
     if (idx >= 0) messages.splice(idx, 1)
+  }
+
+  function findMessageIndexForReplacement(turn: ChatMessage): number {
+    const referenceIndex = messages.indexOf(turn)
+    if (referenceIndex >= 0) return referenceIndex
+    const id = serverMessageId(turn)
+    if (!id) return -1
+    return messages.findIndex(message => serverMessageId(message) === id)
+  }
+
+  function replaceTailFromTurn(turn: ChatMessage, replacements: ChatMessage[]): ChatMessage[] {
+    const idx = findMessageIndexForReplacement(turn)
+    if (idx < 0) {
+      messages.push(...replacements)
+      return []
+    }
+    const replaced = messages.slice(idx)
+    messages.splice(idx, messages.length - idx, ...replacements)
+    return replaced
+  }
+
+  function restoreTailFromOptimistic(
+    botId: string,
+    targetSessionId: string,
+    optimisticUserTurn: ChatUserTurn | null,
+    assistantTurn: ChatAssistantTurn,
+    replacedTurns: ChatMessage[],
+  ) {
+    if (!isActiveSessionTarget(botId, targetSessionId)) return
+    const anchor = optimisticUserTurn ?? assistantTurn
+    const idx = findMessageIndexForReplacement(anchor)
+    if (idx >= 0) {
+      const deleteCount = optimisticUserTurn ? 2 : 1
+      messages.splice(idx, deleteCount, ...replacedTurns)
+      return
+    }
+    if (optimisticUserTurn) removeTurnFromSession(botId, targetSessionId, optimisticUserTurn)
+    removeTurnFromSession(botId, targetSessionId, assistantTurn)
+    if (replacedTurns.length > 0) messages.push(...replacedTurns)
   }
 
   function createOptimisticAssistantTurn(): ChatAssistantTurn {
@@ -2042,6 +2139,7 @@ export const useChatStore = defineStore('chat', () => {
     pendingAssistantStreams.clear()
     approvalResponseStreams.clear()
     wsCreatedSessionsByStream.clear()
+    forkingMessages.clear()
     latestBackgroundTasks.clear()
     ephemeralAssistantErrors.clear()
   }
@@ -2386,21 +2484,22 @@ export const useChatStore = defineStore('chat', () => {
     const sid = sessionId.value ?? ''
     if (!bid || !sid || loadingOlder.value || !hasMoreOlder.value) return 0
     const first = messages[0]
-    if (!first?.timestamp) return 0
+    const firstId = serverMessageId(first)
+    if (!firstId) return 0
 
     loadingOlder.value = true
     try {
       // Page through history with cursor advancement. When merged-turn de-dup
       // collapses an entire page to zero net-new entries, we must keep
-      // advancing the `before` cursor (using the earliest timestamp from the
-      // raw server response, not from our local list, otherwise the cursor
-      // never moves and we'd terminate prematurely).
+      // advancing the message-id cursor (using the earliest returned UI turn,
+      // not our local list, otherwise the cursor never moves and we'd
+      // terminate prematurely).
       const MAX_DEDUP_HOPS = 4
-      let cursor = first.timestamp
+      let cursor = firstId
       for (let hop = 0; hop < MAX_DEDUP_HOPS; hop++) {
         const turns = await fetchMessagesUI(bid, sid, {
           limit: PAGE_SIZE,
-          before: cursor,
+          beforeMessageId: cursor,
         })
 
         if (turns.length === 0) {
@@ -2425,13 +2524,9 @@ export const useChatStore = defineStore('chat', () => {
         }
 
         // All returned turns were already present locally. Advance the cursor
-        // past the earliest one we just saw and try again on the next hop.
-        const earliest = normalized.reduce<string | null>((acc, turn) => {
-          const ts = turn.timestamp?.trim()
-          if (!ts) return acc
-          if (!acc || ts < acc) return ts
-          return acc
-        }, null)
+        // past the earliest returned turn and try again on the next hop.
+        const earliestTurn = normalized[0]
+        const earliest = earliestTurn ? serverMessageId(earliestTurn) : ''
         if (!earliest || earliest === cursor) {
           // Pagination cursor cannot advance; bail out to avoid a request loop.
           hasMoreOlder.value = false
@@ -3483,6 +3578,45 @@ export const useChatStore = defineStore('chat', () => {
     return items.map(item => ({ ...item }))
   }
 
+  async function forkMessage(messageId: string): Promise<boolean> {
+    const bid = (currentBotId.value ?? '').trim()
+    const sid = (sessionId.value ?? '').trim()
+    const mid = messageId.trim()
+    if (!bid || !sid || !mid || activeChatReadOnly.value || !activeChatCanFork.value || streaming.value || loadingMessages.value) return false
+
+    const key = `${bid}:${sid}:${mid}`
+    if (forkingMessages.has(key)) return false
+    forkingMessages.add(key)
+    try {
+      const forked = await requestForkSessionFromMessage(bid, sid, mid)
+      upsertSession(forked)
+      rememberSession(forked)
+      void refreshSessionsList(bid)
+
+      const turns = await fetchMessagesUI(bid, forked.id, { limit: PAGE_SIZE })
+      if ((currentBotId.value ?? '').trim() !== bid || (sessionId.value ?? '').trim() !== sid) {
+        return true
+      }
+
+      selectSessionRequestId++
+      clearPendingACPSession()
+      sessionMessagesStream.stop()
+      sessionId.value = forked.id
+      explicitSessionSelection.value = true
+      draftIntent.value = false
+      replaceMessages(turns, forked.id)
+      hasMoreOlder.value = true
+      hasLoadedOlder.value = false
+      startSessionMessagesStream(bid, forked.id)
+      return true
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, forkFailedMessage()))
+      return false
+    } finally {
+      forkingMessages.delete(key)
+    }
+  }
+
   async function sendMessage(text: string, attachments?: ChatAttachment[], options: SendMessageOptions = {}): Promise<SendMessageResult> {
     const trimmed = text.trim()
     const requestedSkills = normalizeRequestedSkills(options.requestedSkills)
@@ -3628,6 +3762,142 @@ export const useChatStore = defineStore('chat', () => {
         return { ok: false, stage, error: reason, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills), composerScope }
       }
       return { ok: false, stage, error: reason }
+    }
+  }
+
+  function serverMessageId(turn: ChatMessage): string {
+    return (turn.serverId ?? turn.id).trim()
+  }
+
+  function hasUserAttachments(turn: ChatMessage): turn is ChatUserTurn {
+    return turn.role === 'user' && turn.attachments.length > 0
+  }
+
+  function latestVisibleUserTurn(): ChatUserTurn | null {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const turn = messages[i]
+      if (turn.role === 'user' && !turn.__optimistic) return turn
+    }
+    return null
+  }
+
+  function latestVisibleAssistantTurn(): ChatAssistantTurn | null {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const turn = messages[i]
+      if (turn.role === 'assistant' && !turn.__optimistic) return turn
+    }
+    return null
+  }
+
+  function isLatestVisibleUserTurn(turn: ChatMessage): turn is ChatUserTurn {
+    if (turn.role !== 'user') return false
+    const latest = latestVisibleUserTurn()
+    return Boolean(latest && serverMessageId(latest) === serverMessageId(turn))
+  }
+
+  function isLatestVisibleAssistantTurn(turn: ChatMessage): turn is ChatAssistantTurn {
+    if (turn.role !== 'assistant') return false
+    const latest = latestVisibleAssistantTurn()
+    return Boolean(latest && serverMessageId(latest) === serverMessageId(turn))
+  }
+
+  async function retryLatestAssistant(messageId: string): Promise<SendMessageResult> {
+    const bid = currentBotId.value ?? ''
+    const sid = sessionId.value ?? ''
+    const targetID = messageId.trim()
+    if (!bid || !sid || !targetID) return { ok: false, stage: 'startup' }
+    if (streaming.value || loadingMessages.value) return { ok: false, stage: 'startup' }
+    const target = messages.find(turn => serverMessageId(turn) === targetID)
+    if (!target || !isLatestVisibleAssistantTurn(target)) return { ok: false, stage: 'startup' }
+
+    const streamId = createStreamId()
+    const assistantTurn = createOptimisticAssistantTurn()
+    const replacedTurns = replaceTailFromTurn(target, [assistantTurn])
+    loading.value = true
+    try {
+      const ws = ensureWebSocket(bid)
+      if (!ws?.connected) {
+        throw new StreamFailureError('WebSocket is not connected', 'startup')
+      }
+      const completion = trackAssistantStream(streamId, assistantTurn, bid, sid)
+      ws.send({
+        type: 'retry_message',
+        stream_id: streamId,
+        session_id: sid,
+        message_id: targetID,
+        model_id: overrideModelId.value || undefined,
+        reasoning_effort: overrideReasoningEffort.value || undefined,
+      })
+      await completion
+      await refreshCurrentSession(bid, sid)
+      refreshLoadingForSession(bid, sid)
+      return { ok: true }
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error('Unknown error')
+      const reason = resolveApiErrorMessage(error, err.message || sendFailedMessage())
+      const stage: SendMessageStage = err instanceof StreamFailureError
+        ? err.stage
+        : (hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
+      forgetAssistantStream(streamId)
+      if (stage === 'startup') {
+        restoreTailFromOptimistic(bid, sid, null, assistantTurn, replacedTurns)
+      } else {
+        finalizeStreamFailure(assistantTurn, bid, sid, err)
+      }
+      refreshLoadingForSession(bid, sid)
+      return { ok: false, stage, error: reason }
+    }
+  }
+
+  async function editLatestUser(messageId: string, text: string): Promise<SendMessageResult> {
+    const trimmed = text.trim()
+    const bid = currentBotId.value ?? ''
+    const sid = sessionId.value ?? ''
+    const targetID = messageId.trim()
+    if (!bid || !sid || !targetID || !trimmed) return { ok: false, stage: 'startup' }
+    if (streaming.value || loadingMessages.value) return { ok: false, stage: 'startup' }
+    const target = messages.find(turn => serverMessageId(turn) === targetID)
+    if (!target || !isLatestVisibleUserTurn(target)) return { ok: false, stage: 'startup' }
+    if (hasUserAttachments(target)) return { ok: false, stage: 'startup' }
+
+    const streamId = createStreamId()
+    const userTurn = createOptimisticUserTurn(trimmed)
+    const assistantTurn = createOptimisticAssistantTurn()
+    const replacedTurns = replaceTailFromTurn(target, [userTurn, assistantTurn])
+    loading.value = true
+    try {
+      const ws = ensureWebSocket(bid)
+      if (!ws?.connected) {
+        throw new StreamFailureError('WebSocket is not connected', 'startup')
+      }
+      const completion = trackAssistantStream(streamId, assistantTurn, bid, sid)
+      ws.send({
+        type: 'edit_message',
+        stream_id: streamId,
+        session_id: sid,
+        message_id: targetID,
+        text: trimmed,
+        model_id: overrideModelId.value || undefined,
+        reasoning_effort: overrideReasoningEffort.value || undefined,
+      })
+      await completion
+      await refreshCurrentSession(bid, sid)
+      refreshLoadingForSession(bid, sid)
+      return { ok: true }
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error('Unknown error')
+      const reason = resolveApiErrorMessage(error, err.message || sendFailedMessage())
+      const stage: SendMessageStage = err instanceof StreamFailureError
+        ? err.stage
+        : (hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
+      forgetAssistantStream(streamId)
+      if (stage === 'startup') {
+        restoreTailFromOptimistic(bid, sid, userTurn, assistantTurn, replacedTurns)
+      } else {
+        finalizeStreamFailure(assistantTurn, bid, sid, err)
+      }
+      refreshLoadingForSession(bid, sid)
+      return { ok: false, stage, error: reason, restoreInput: text }
     }
   }
 
@@ -3787,6 +4057,7 @@ export const useChatStore = defineStore('chat', () => {
     activeSession,
     activeChatTarget,
     activeChatReadOnly,
+    activeChatCanFork,
     knownSessions,
     knownSessionSummary,
     isSessionStreaming,
@@ -3838,7 +4109,10 @@ export const useChatStore = defineStore('chat', () => {
     removeChat: removeSession,
     deleteChat: removeSession,
     renameSession,
+    forkMessage,
     sendMessage,
+    retryLatestAssistant,
+    editLatestUser,
     respondToolApproval,
     respondUserInput,
     clearMessages,

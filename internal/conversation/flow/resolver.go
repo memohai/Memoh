@@ -333,7 +333,10 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	// the rendered event stream (RC) + bot turn responses (TR) instead of
 	// loading raw history from bot_history_messages. The current inbound
 	// message is already in the RC, so it must not be appended again.
-	usePipeline := r.pipeline != nil && strings.TrimSpace(req.SessionID) != "" && len(req.RequestedSkills) == 0
+	usePipeline := r.pipeline != nil &&
+		strings.TrimSpace(req.SessionID) != "" &&
+		strings.TrimSpace(req.HistoryCutoffBeforeMessageID) == "" &&
+		len(req.RequestedSkills) == 0
 	if usePipeline {
 		if _, loaded := r.pipeline.GetIC(strings.TrimSpace(req.SessionID)); !loaded {
 			usePipeline = false
@@ -359,6 +362,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			return resolvedContext{}, loadErr
 		}
 		loaded = pruneHistoryForGateway(loaded)
+		loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
 		loaded = dedupePersistedCurrentUserMessage(loaded, req)
 		loaded = r.replaceCompactedMessages(ctx, loaded)
 		messages, estimatedTokens = trimMessagesByTokens(r.logger, loaded, contextTokenBudget)
@@ -389,6 +393,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 				return resolvedContext{}, loadErr
 			}
 			loaded = pruneHistoryForGateway(loaded)
+			loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
 			loaded = dedupePersistedCurrentUserMessage(loaded, req)
 			loaded = r.replaceCompactedMessages(ctx, loaded)
 			messages, estimatedTokens = trimMessagesByTokens(r.logger, loaded, contextTokenBudget)
@@ -405,7 +410,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	if requestedSkillMsg := buildRequestedSkillContextMessage(req.RequestedSkills); requestedSkillMsg != nil {
 		messages = append(messages, *requestedSkillMsg)
 	}
-	if !usePipeline {
+	if !usePipeline && !req.ReusePersistedUserMessage {
 		messages = append(messages, reqMessages...)
 	}
 	messages = sanitizeMessages(messages)
@@ -448,7 +453,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	// When using the pipeline the user message is already in the RC;
 	// don't send it to the LLM again. headerifiedQuery is still kept
 	// for storeRound so the user message gets persisted.
-	if !usePipeline {
+	if !usePipeline && !req.ReusePersistedUserMessage {
 		runCfg.Query = headerifiedModelQuery
 	}
 	runCfg.InlineImages = extractNativeImageParts(mergedAttachments)

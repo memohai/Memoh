@@ -13,7 +13,7 @@ import (
 
 const countMessagesBySession = `-- name: CountMessagesBySession :one
 SELECT COUNT(*)::bigint AS message_count
-FROM bot_history_messages
+FROM bot_visible_history_messages
 WHERE session_id = $1
 `
 
@@ -27,7 +27,7 @@ func (q *Queries) CountMessagesBySession(ctx context.Context, sessionID pgtype.U
 const getLatestAssistantUsage = `-- name: GetLatestAssistantUsage :one
 SELECT
   COALESCE((m.usage->>'inputTokens')::bigint, 0)::bigint AS input_tokens
-FROM bot_history_messages m
+FROM bot_visible_history_messages m
 WHERE m.session_id = $1
   AND m.role = 'assistant'
   AND m.usage IS NOT NULL
@@ -63,7 +63,7 @@ const getSessionCacheStats = `-- name: GetSessionCacheStats :one
 SELECT
   COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS total_input_tokens,
   COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint), 0)::bigint AS cache_read_tokens
-FROM bot_history_messages m
+FROM bot_visible_history_messages m
 WHERE m.session_id = $1
   AND m.usage IS NOT NULL
 `
@@ -90,7 +90,7 @@ WITH requested AS (
       COALESCE(NULLIF(item->>'opaque_source_id', ''), '') || ':' ||
       (item->>'name')
     )::text AS skill_identity
-  FROM bot_history_messages m,
+  FROM bot_visible_history_messages m,
     jsonb_array_elements(
       CASE WHEN jsonb_typeof(m.metadata->'model_requested_skills') = 'array'
            THEN m.metadata->'model_requested_skills'
@@ -110,7 +110,7 @@ tool_payloads AS (
          THEN m.content
          ELSE '[]'::jsonb
     END AS content_json
-  FROM bot_history_messages m
+  FROM bot_visible_history_messages m
   WHERE m.session_id = $1
     AND m.role = 'assistant'
 ),

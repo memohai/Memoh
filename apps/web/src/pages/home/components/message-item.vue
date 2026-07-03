@@ -153,7 +153,46 @@
           :on-open-media="onOpenMedia"
         />
         <div
-          v-if="isSkillActivationMessage || userBubbleText || message.forward || message.reply"
+          v-if="isEditingUserMessage"
+          class="w-[min(100%,42rem)] bg-muted px-4 py-3 text-foreground"
+          :class="userBubbleRadiusClass"
+        >
+          <Textarea
+            ref="editTextarea"
+            v-model="editDraft"
+            size="lg"
+            class="max-h-52 min-h-20 resize-none rounded-none border-0 bg-transparent p-0 text-foreground shadow-none placeholder:text-muted-foreground focus-visible:ring-0"
+            :aria-label="t('chat.actions.edit')"
+            @keydown.enter.meta.prevent="submitEdit"
+            @keydown.enter.ctrl.prevent="submitEdit"
+            @keydown.escape.stop.prevent="cancelEdit"
+          />
+          <div class="mt-2 flex justify-end gap-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="text"
+              class="px-1"
+              :disabled="editSubmitting"
+              @click="cancelEdit"
+            >
+              {{ t('common.cancel') }}
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="text"
+              class="px-1"
+              :loading="editSubmitting"
+              :disabled="!canSubmitEdit"
+              @click="submitEdit"
+            >
+              {{ t('chat.send') }}
+            </Button>
+          </div>
+        </div>
+        <div
+          v-else-if="isSkillActivationMessage || userBubbleText || message.forward || message.reply"
           :lang="contentLang(userBubbleText || skillActivationNames || skillActivationTitle)"
           class="chat-user-bubble w-fit max-w-full bg-chat-user-bubble px-4 py-3 text-chat-user-bubble-fg whitespace-pre-wrap break-words"
           :class="userBubbleRadiusClass"
@@ -235,6 +274,7 @@
           role="user"
           :copy-text="userCopyText"
           :align="bubbleSelf ? 'end' : 'start'"
+          :on-edit="canEditUserMessage ? handleEdit : undefined"
         />
       </div>
 
@@ -333,6 +373,8 @@
           align="start"
           :persistent="true"
           :streaming="message.streaming"
+          :on-retry="canRetryLatestAssistant ? handleRetry : undefined"
+          :on-fork="canForkAssistantMessage && canForkAssistant ? handleFork : undefined"
         />
       </div>
     </div>
@@ -359,10 +401,10 @@ setCustomComponents({ mermaid: ThemedMermaidBlock })
 </script>
 
 <script setup lang="ts">
-import { computed, toRef, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, ref, toRef, useTemplateRef, watch } from 'vue'
 import { CircleAlert, Sparkles } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
-import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
+import { Avatar, AvatarImage, AvatarFallback, Button, Textarea } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
 import ToolCallGroup from './tool-call-group.vue'
@@ -405,6 +447,8 @@ const codeBlockTheme = computed(() => ({
 const messageEl = useTemplateRef('messageItem')
 const emit = defineEmits<{
   active: [isActive: boolean, { id: string, top: number,  }]
+  editMessage: [messageId: string, text: string, done: (started: boolean) => void]
+  forkMessage: [messageId: string]
 }>()
 
 const props = defineProps<{
@@ -419,6 +463,10 @@ const props = defineProps<{
   botAvatarUrl?: string
   onOpenMedia?: (src: string) => void
   onReplyClick?: (messageId: string) => void
+  onRetryMessage?: (messageId: string) => void
+  canRetryLatestAssistant?: boolean
+  canEditLatestUser?: boolean
+  canForkAssistant?: boolean
   isScrolling: boolean
   isLastMessage?: boolean
 }>()
@@ -442,6 +490,20 @@ const isSelf = computed(() =>
 
 
 const { t, tm, rt, locale } = useI18n()
+const editTextarea = ref<InstanceType<typeof Textarea> | null>(null)
+const isEditingUserMessage = ref(false)
+const editDraft = ref('')
+const editSubmitting = ref(false)
+
+function handleRetry() {
+  const messageId = (props.message.serverId ?? props.message.id).trim()
+  if (messageId) props.onRetryMessage?.(messageId)
+}
+
+function handleFork() {
+  const messageId = (props.message.serverId ?? props.message.id).trim()
+  if (messageId) emit('forkMessage', messageId)
+}
 
 // The pre-stream "running" line picks one phrase and holds it for the turn:
 // seeded by the message id so it stays put across re-renders/refetches instead
@@ -555,6 +617,69 @@ function cleanUserText(content?: string): string {
     .filter((line) => !/^\[attachment:\w+\]\s/.test(line.trim()))
     .join('\n')
     .trim()
+}
+
+const cleanCurrentUserText = computed(() =>
+  props.message.role === 'user' ? cleanUserText(props.message.text) : '',
+)
+
+const canEditUserMessage = computed(() =>
+  props.message.role === 'user'
+  && !props.message.streaming
+  && props.message.__optimistic !== true
+  && props.canEditLatestUser === true
+  && !isSpecialUserMessage.value
+  && props.message.attachments.length === 0
+  && cleanCurrentUserText.value.length > 0
+  && bubbleSelf.value,
+)
+
+const canForkAssistantMessage = computed(() =>
+  props.message.role === 'assistant'
+  && !props.message.streaming
+  && props.message.__optimistic !== true,
+)
+
+const canSubmitEdit = computed(() =>
+  props.message.role === 'user'
+  && props.canEditLatestUser === true
+  && editDraft.value.trim().length > 0
+  && editDraft.value.trim() !== cleanCurrentUserText.value.trim()
+  && !editSubmitting.value,
+)
+
+function handleEdit() {
+  if (!canEditUserMessage.value || props.message.role !== 'user') return
+  editDraft.value = cleanCurrentUserText.value
+  isEditingUserMessage.value = true
+  void nextTick(() => {
+    const el = editTextarea.value?.$el
+    const textarea = el instanceof HTMLTextAreaElement
+      ? el
+      : el?.querySelector?.('textarea')
+    if (!textarea) return
+    textarea.focus()
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+  })
+}
+
+function cancelEdit() {
+  if (editSubmitting.value) return
+  isEditingUserMessage.value = false
+  editDraft.value = ''
+}
+
+async function submitEdit() {
+  if (!canSubmitEdit.value || props.message.role !== 'user') return
+  editSubmitting.value = true
+  const messageId = (props.message.serverId ?? props.message.id).trim()
+  emit('editMessage', messageId, editDraft.value.trim(), (started) => {
+    editSubmitting.value = false
+    if (started) {
+      isEditingUserMessage.value = false
+      editDraft.value = ''
+    }
+  })
 }
 
 // Element-level script tag for BLOCK typography only — leading (CJK packs

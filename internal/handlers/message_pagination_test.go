@@ -56,8 +56,17 @@ func (s *stubMessageService) ListBeforeBySession(_ context.Context, sid string, 
 	return s.before(sid, before, int(limit)), nil
 }
 
+func (s *stubMessageService) ListBeforeMessageBySession(_ context.Context, sid string, beforeMessageID string, limit int32) ([]messagepkg.Message, error) {
+	for _, m := range s.bySession[sid] {
+		if m.ID == beforeMessageID {
+			return s.before(sid, m.CreatedAt, int(limit)), nil
+		}
+	}
+	return nil, nil
+}
+
 func msg(role string, t time.Time) messagepkg.Message {
-	return messagepkg.Message{Role: role, CreatedAt: t, Content: []byte(`{}`)}
+	return messagepkg.Message{ID: role + "-" + t.Format("150405.000000000"), Role: role, CreatedAt: t, Content: []byte(`{}`)}
 }
 
 // userMsg builds a visible user message — IsUITurnBoundary requires non-empty
@@ -65,7 +74,7 @@ func msg(role string, t time.Time) messagepkg.Message {
 // treated as an invisible user ping and NOT a boundary, which would defeat the
 // test.
 func userMsg(t time.Time, text string) messagepkg.Message {
-	return messagepkg.Message{Role: "user", CreatedAt: t, Content: []byte(`{}`), DisplayContent: text}
+	return messagepkg.Message{ID: "user-" + t.Format("150405.000000000"), Role: "user", CreatedAt: t, Content: []byte(`{}`), DisplayContent: text}
 }
 
 // TestExtendToUITurnHead_PreservesMonotonicOrder is the regression test for the

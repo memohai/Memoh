@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -1266,6 +1268,152 @@ func (q *Queries) CreateSession(ctx context.Context, arg pgsqlc.CreateSessionPar
 	return result, nil
 }
 
+func (q *Queries) ForkSessionFromAssistantMessage(ctx context.Context, arg pgsqlc.ForkSessionFromAssistantMessageParams) (pgsqlc.ForkSessionFromAssistantMessageRow, error) {
+	if q == nil || q.store == nil || q.store.db == nil || q.store.queries == nil {
+		return pgsqlc.ForkSessionFromAssistantMessageRow{}, errSQLiteQueriesNotConfigured
+	}
+
+	var sessionID string
+	if err := convertValue(arg.SessionID, &sessionID); err != nil {
+		return pgsqlc.ForkSessionFromAssistantMessageRow{}, err
+	}
+	var botID string
+	if err := convertValue(arg.BotID, &botID); err != nil {
+		return pgsqlc.ForkSessionFromAssistantMessageRow{}, err
+	}
+	var messageID string
+	if err := convertValue(arg.MessageID, &messageID); err != nil {
+		return pgsqlc.ForkSessionFromAssistantMessageRow{}, err
+	}
+
+	tx, err := q.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return pgsqlc.ForkSessionFromAssistantMessageRow{}, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+	qtx := q.store.queries.WithTx(tx)
+
+	source, err := qtx.GetSessionByID(ctx, sessionID)
+	if err != nil {
+		return pgsqlc.ForkSessionFromAssistantMessageRow{}, mapQueryErr(err)
+	}
+	if source.BotID != botID || source.Type != "chat" {
+		return pgsqlc.ForkSessionFromAssistantMessageRow{}, pgx.ErrNoRows
+	}
+
+	forkTarget, err := loadSQLiteForkTarget(ctx, tx, sessionID, messageID)
+	if err != nil {
+		return pgsqlc.ForkSessionFromAssistantMessageRow{}, mapQueryErr(err)
+	}
+	turns, err := sqliteForkVisibleTurns(ctx, tx, sessionID, forkTarget)
+	if err != nil {
+		return pgsqlc.ForkSessionFromAssistantMessageRow{}, mapQueryErr(err)
+	}
+	if len(turns) == 0 {
+		return pgsqlc.ForkSessionFromAssistantMessageRow{}, pgx.ErrNoRows
+	}
+
+	createdByUserID := sql.NullString{}
+	if arg.CreatedByUserID.Valid {
+		createdByUserID = sql.NullString{String: arg.CreatedByUserID.String(), Valid: true}
+	}
+	created, err := qtx.CreateSession(ctx, sqlitesqlc.CreateSessionParams{
+		BotID:           source.BotID,
+		ChannelType:     source.ChannelType,
+		Type:            source.Type,
+		SessionMode:     source.SessionMode,
+		RuntimeType:     source.RuntimeType,
+		RuntimeMetadata: source.RuntimeMetadata,
+		Title:           arg.Title,
+		Metadata:        string(arg.Metadata),
+		CreatedByUserID: createdByUserID,
+	})
+	if err != nil {
+		return pgsqlc.ForkSessionFromAssistantMessageRow{}, mapQueryErr(err)
+	}
+
+	messageIDMap := make(map[string]string)
+	visibleMessageIDs, err := sqliteForkVisibleMessageIDs(ctx, tx, sessionID, forkTarget)
+	if err != nil {
+		return pgsqlc.ForkSessionFromAssistantMessageRow{}, mapQueryErr(err)
+	}
+	for _, sourceMessageID := range visibleMessageIDs {
+		if _, err := sqliteForkCopyMessage(ctx, tx, qtx, sourceMessageID, created.ID, messageIDMap); err != nil {
+			return pgsqlc.ForkSessionFromAssistantMessageRow{}, err
+		}
+	}
+	forkMessageID, err := sqliteForkAnchorMessageID(ctx, tx, sessionID, forkTarget, messageIDMap)
+	if err != nil {
+		return pgsqlc.ForkSessionFromAssistantMessageRow{}, mapQueryErr(err)
+	}
+	if forkMessageID == "" {
+		return pgsqlc.ForkSessionFromAssistantMessageRow{}, pgx.ErrNoRows
+	}
+	patchedMetadata, err := sqliteForkMetadataWithAnchor(created.Metadata, forkMessageID)
+	if err != nil {
+		return pgsqlc.ForkSessionFromAssistantMessageRow{}, err
+	}
+	created, err = qtx.UpdateSessionMetadata(ctx, sqlitesqlc.UpdateSessionMetadataParams{
+		ID:       created.ID,
+		Metadata: patchedMetadata,
+	})
+	if err != nil {
+		return pgsqlc.ForkSessionFromAssistantMessageRow{}, mapQueryErr(err)
+	}
+	for _, turn := range turns {
+		var requestID sql.NullString
+		if turn.RequestMessageID.Valid {
+			requestID = sql.NullString{String: messageIDMap[turn.RequestMessageID.String], Valid: true}
+		}
+		var assistantID sql.NullString
+		if turn.AssistantMessageID.Valid {
+			assistantID = sql.NullString{String: messageIDMap[turn.AssistantMessageID.String], Valid: true}
+		}
+		if _, err := qtx.CreateHistoryTurn(ctx, sqlitesqlc.CreateHistoryTurnParams{
+			BotID:              created.BotID,
+			SessionID:          created.ID,
+			RequestMessageID:   requestID,
+			AssistantMessageID: assistantID,
+		}); err != nil {
+			return pgsqlc.ForkSessionFromAssistantMessageRow{}, mapQueryErr(err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return pgsqlc.ForkSessionFromAssistantMessageRow{}, err
+	}
+	var result pgsqlc.ForkSessionFromAssistantMessageRow
+	if err := convertValue(created, &result); err != nil {
+		return pgsqlc.ForkSessionFromAssistantMessageRow{}, err
+	}
+	return result, nil
+}
+
+func sqliteForkMetadataWithAnchor(metadata, forkMessageID string) (string, error) {
+	var meta map[string]any
+	if strings.TrimSpace(metadata) != "" {
+		if err := json.Unmarshal([]byte(metadata), &meta); err != nil {
+			return "", err
+		}
+	}
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	forkedFrom, _ := meta["forked_from"].(map[string]any)
+	if forkedFrom == nil {
+		forkedFrom = map[string]any{}
+	}
+	forkedFrom["fork_message_id"] = strings.TrimSpace(forkMessageID)
+	meta["forked_from"] = forkedFrom
+	out, err := json.Marshal(meta)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
 func (q *Queries) CreateSessionEvent(ctx context.Context, arg pgsqlc.CreateSessionEventParams) (pgtype.UUID, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgtype.UUID{}, errSQLiteQueriesNotConfigured
@@ -1283,6 +1431,263 @@ func (q *Queries) CreateSessionEvent(ctx context.Context, arg pgsqlc.CreateSessi
 		return pgtype.UUID{}, err
 	}
 	return result, nil
+}
+
+type sqliteForkTurn struct {
+	ID                 string
+	Position           int64
+	RequestMessageID   sql.NullString
+	AssistantMessageID sql.NullString
+}
+
+type sqliteForkTarget struct {
+	Position  int64
+	MessageID string
+}
+
+func sqliteForkVisibleTurns(ctx context.Context, tx *sql.Tx, sessionID string, target sqliteForkTarget) ([]sqliteForkTurn, error) {
+	rows, err := tx.QueryContext(ctx, `
+SELECT id, position, request_message_id, assistant_message_id
+FROM bot_history_turns
+WHERE session_id = ?
+  AND superseded_at IS NULL
+  AND position <= ?
+ORDER BY position ASC
+`, sessionID, target.Position)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	var turns []sqliteForkTurn
+	for rows.Next() {
+		var turn sqliteForkTurn
+		if err := rows.Scan(&turn.ID, &turn.Position, &turn.RequestMessageID, &turn.AssistantMessageID); err != nil {
+			return nil, err
+		}
+		turns = append(turns, turn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return turns, nil
+}
+
+func loadSQLiteForkTarget(ctx context.Context, tx *sql.Tx, sessionID, messageID string) (sqliteForkTarget, error) {
+	row := tx.QueryRowContext(ctx, `
+SELECT vm.turn_position, vm.id
+FROM bot_visible_history_messages vm
+JOIN bot_history_turns t ON t.id = vm.turn_id
+WHERE vm.session_id = ?
+  AND vm.id = ?
+  AND vm.role = 'assistant'
+  AND t.superseded_at IS NULL
+LIMIT 1
+`, sessionID, messageID)
+	var target sqliteForkTarget
+	if err := row.Scan(&target.Position, &target.MessageID); err != nil {
+		return sqliteForkTarget{}, err
+	}
+	return target, nil
+}
+
+func sqliteForkVisibleMessageIDs(ctx context.Context, tx *sql.Tx, sessionID string, target sqliteForkTarget) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `
+SELECT vm.id
+FROM bot_visible_history_messages vm
+WHERE vm.session_id = ?
+  AND (
+    vm.turn_position < ?
+    OR vm.turn_position = ?
+  )
+ORDER BY vm.turn_position ASC, vm.turn_message_seq ASC, vm.created_at ASC, vm.id ASC
+`, sessionID, target.Position, target.Position)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+func sqliteForkAnchorMessageID(ctx context.Context, tx *sql.Tx, sessionID string, target sqliteForkTarget, messageIDMap map[string]string) (string, error) {
+	row := tx.QueryRowContext(ctx, `
+SELECT vm.id
+FROM bot_visible_history_messages vm
+WHERE vm.session_id = ?
+  AND vm.turn_position = ?
+ORDER BY vm.turn_message_seq DESC, vm.created_at DESC, vm.id DESC
+LIMIT 1
+`, sessionID, target.Position)
+	var oldMessageID string
+	if err := row.Scan(&oldMessageID); err != nil {
+		return "", err
+	}
+	return messageIDMap[oldMessageID], nil
+}
+
+func sqliteForkCopyMessage(ctx context.Context, tx *sql.Tx, qtx *sqlitesqlc.Queries, oldMessageID, newSessionID string, messageIDMap map[string]string) (string, error) {
+	if copiedID := messageIDMap[oldMessageID]; copiedID != "" {
+		return copiedID, nil
+	}
+	source, err := sqliteForkGetMessage(ctx, tx, oldMessageID)
+	if err != nil {
+		return "", mapQueryErr(err)
+	}
+	createdID, err := sqliteForkInsertCopiedMessage(ctx, tx, source, newSessionID)
+	if err != nil {
+		return "", mapQueryErr(err)
+	}
+	assets, err := qtx.ListMessageAssets(ctx, oldMessageID)
+	if err != nil {
+		return "", mapQueryErr(err)
+	}
+	for _, asset := range assets {
+		if _, err := qtx.CreateMessageAsset(ctx, sqlitesqlc.CreateMessageAssetParams{
+			MessageID:   createdID,
+			Role:        asset.Role,
+			Ordinal:     asset.Ordinal,
+			ContentHash: asset.ContentHash,
+			Name:        asset.Name,
+			Metadata:    asset.Metadata,
+		}); err != nil {
+			return "", mapQueryErr(err)
+		}
+	}
+	messageIDMap[oldMessageID] = createdID
+	return createdID, nil
+}
+
+type sqliteForkMessage struct {
+	ID                      string
+	BotID                   string
+	SessionID               sql.NullString
+	SenderChannelIdentityID sql.NullString
+	SenderUserID            sql.NullString
+	ExternalMessageID       sql.NullString
+	SourceReplyToMessageID  sql.NullString
+	Role                    string
+	Content                 string
+	Metadata                string
+	Usage                   sql.NullString
+	SessionMode             string
+	RuntimeType             string
+	ModelID                 sql.NullString
+	EventID                 sql.NullString
+	DisplayText             sql.NullString
+	CreatedAt               string
+}
+
+func sqliteForkGetMessage(ctx context.Context, tx *sql.Tx, messageID string) (sqliteForkMessage, error) {
+	row := tx.QueryRowContext(ctx, `
+SELECT id, bot_id, session_id, sender_channel_identity_id, sender_account_user_id,
+  source_message_id, source_reply_to_message_id, role, content, metadata,
+  usage, session_mode, runtime_type, model_id, event_id, display_text, created_at
+FROM bot_history_messages
+WHERE id = ?
+LIMIT 1
+`, messageID)
+	var msg sqliteForkMessage
+	err := row.Scan(
+		&msg.ID,
+		&msg.BotID,
+		&msg.SessionID,
+		&msg.SenderChannelIdentityID,
+		&msg.SenderUserID,
+		&msg.ExternalMessageID,
+		&msg.SourceReplyToMessageID,
+		&msg.Role,
+		&msg.Content,
+		&msg.Metadata,
+		&msg.Usage,
+		&msg.SessionMode,
+		&msg.RuntimeType,
+		&msg.ModelID,
+		&msg.EventID,
+		&msg.DisplayText,
+		&msg.CreatedAt,
+	)
+	return msg, err
+}
+
+func sqliteForkInsertCopiedMessage(ctx context.Context, tx *sql.Tx, source sqliteForkMessage, newSessionID string) (string, error) {
+	newID, err := sqliteGenerateUUID(ctx, tx)
+	if err != nil {
+		return "", err
+	}
+	_, err = tx.ExecContext(ctx, `
+INSERT INTO bot_history_messages (
+  id,
+  bot_id,
+  session_id,
+  sender_channel_identity_id,
+  sender_account_user_id,
+  source_message_id,
+  source_reply_to_message_id,
+  role,
+  content,
+  metadata,
+  usage,
+  session_mode,
+  runtime_type,
+  model_id,
+  event_id,
+  display_text,
+  created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`,
+		newID,
+		source.BotID,
+		sql.NullString{String: newSessionID, Valid: true},
+		source.SenderChannelIdentityID,
+		source.SenderUserID,
+		source.ExternalMessageID,
+		source.SourceReplyToMessageID,
+		source.Role,
+		source.Content,
+		source.Metadata,
+		source.Usage,
+		source.SessionMode,
+		source.RuntimeType,
+		source.ModelID,
+		sql.NullString{},
+		source.DisplayText,
+		source.CreatedAt,
+	)
+	if err != nil {
+		return "", err
+	}
+	return newID, nil
+}
+
+func sqliteGenerateUUID(ctx context.Context, tx *sql.Tx) (string, error) {
+	row := tx.QueryRowContext(ctx, `
+SELECT lower(hex(randomblob(4))) || '-' ||
+  lower(hex(randomblob(2))) || '-' ||
+  '4' || substr(lower(hex(randomblob(2))), 2) || '-' ||
+  substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' ||
+  lower(hex(randomblob(6)))
+`)
+	var id string
+	if err := row.Scan(&id); err != nil {
+		return "", err
+	}
+	return id, nil
 }
 
 func (q *Queries) CreateStorageProvider(ctx context.Context, arg pgsqlc.CreateStorageProviderParams) (pgsqlc.StorageProvider, error) {
@@ -1543,6 +1948,18 @@ func (q *Queries) DeleteMessagesByBot(ctx context.Context, botID pgtype.UUID) er
 		return err
 	}
 	err := q.store.queries.DeleteMessagesByBot(ctx, sqliteBotID)
+	return mapQueryErr(err)
+}
+
+func (q *Queries) DeleteMessagesByIDs(ctx context.Context, ids []pgtype.UUID) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	var sqliteIDs []string
+	if err := convertValue(ids, &sqliteIDs); err != nil {
+		return err
+	}
+	err := q.store.queries.DeleteMessagesByIDs(ctx, sqliteIDs)
 	return mapQueryErr(err)
 }
 
@@ -3666,6 +4083,204 @@ func (q *Queries) ListMessages(ctx context.Context, botID pgtype.UUID) ([]pgsqlc
 	return result, nil
 }
 
+func (q *Queries) CreateHistoryTurn(ctx context.Context, arg pgsqlc.CreateHistoryTurnParams) (pgsqlc.BotHistoryTurn, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotHistoryTurn{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.CreateHistoryTurnParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	out, err := q.store.queries.CreateHistoryTurn(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotHistoryTurn
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) BindHistoryTurnAssistantByRequest(ctx context.Context, arg pgsqlc.BindHistoryTurnAssistantByRequestParams) (pgsqlc.BotHistoryTurn, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotHistoryTurn{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.BindHistoryTurnAssistantByRequestParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	out, err := q.store.queries.BindHistoryTurnAssistantByRequest(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotHistoryTurn
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) BindLatestHistoryTurnAssistant(ctx context.Context, arg pgsqlc.BindLatestHistoryTurnAssistantParams) (pgsqlc.BotHistoryTurn, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotHistoryTurn{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.BindLatestHistoryTurnAssistantParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	out, err := q.store.queries.BindLatestHistoryTurnAssistant(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotHistoryTurn
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) GetVisibleHistoryTurnByMessage(ctx context.Context, arg pgsqlc.GetVisibleHistoryTurnByMessageParams) (pgsqlc.BotHistoryTurn, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotHistoryTurn{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.GetVisibleHistoryTurnByMessageParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	out, err := q.store.queries.GetVisibleHistoryTurnByMessage(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotHistoryTurn
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) GetHistoryTurnByID(ctx context.Context, arg pgsqlc.GetHistoryTurnByIDParams) (pgsqlc.BotHistoryTurn, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotHistoryTurn{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.GetHistoryTurnByIDParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	out, err := q.store.queries.GetHistoryTurnByID(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotHistoryTurn
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) GetLatestVisibleHistoryTurnBySession(ctx context.Context, sessionID pgtype.UUID) (pgsqlc.BotHistoryTurn, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotHistoryTurn{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteSessionID string
+	if err := convertValue(sessionID, &sqliteSessionID); err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	out, err := q.store.queries.GetLatestVisibleHistoryTurnBySession(ctx, sqliteSessionID)
+	if err != nil {
+		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotHistoryTurn
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) SupersedeHistoryTurn(ctx context.Context, arg pgsqlc.SupersedeHistoryTurnParams) (pgsqlc.BotHistoryTurn, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotHistoryTurn{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.SupersedeHistoryTurnParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	out, err := q.store.queries.SupersedeHistoryTurn(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotHistoryTurn
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ReplaceHistoryTurn(ctx context.Context, arg pgsqlc.ReplaceHistoryTurnParams) (pgsqlc.ReplaceHistoryTurnRow, error) {
+	if q == nil || q.store == nil || q.store.db == nil || q.store.queries == nil {
+		return pgsqlc.ReplaceHistoryTurnRow{}, errSQLiteQueriesNotConfigured
+	}
+	tx, err := q.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return pgsqlc.ReplaceHistoryTurnRow{}, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+	qtx := q.store.queries.WithTx(tx)
+
+	var oldTurnID string
+	if err := convertValue(arg.OldTurnID, &oldTurnID); err != nil {
+		return pgsqlc.ReplaceHistoryTurnRow{}, err
+	}
+	var sessionID string
+	if err := convertValue(arg.SessionID, &sessionID); err != nil {
+		return pgsqlc.ReplaceHistoryTurnRow{}, err
+	}
+	oldTurn, err := qtx.GetHistoryTurnByID(ctx, sqlitesqlc.GetHistoryTurnByIDParams{
+		OldTurnID: oldTurnID,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
+	}
+
+	var createArg sqlitesqlc.CreateHistoryTurnParams
+	if err := convertValue(pgsqlc.CreateHistoryTurnParams{
+		SessionID:          arg.SessionID,
+		RequestMessageID:   arg.RequestMessageID,
+		AssistantMessageID: arg.AssistantMessageID,
+	}, &createArg); err != nil {
+		return pgsqlc.ReplaceHistoryTurnRow{}, err
+	}
+	createArg.BotID = oldTurn.BotID
+	created, err := qtx.CreateHistoryTurn(ctx, createArg)
+	if err != nil {
+		return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
+	}
+	var supersedeArg sqlitesqlc.SupersedeHistoryTurnParams
+	if err := convertValue(pgsqlc.SupersedeHistoryTurnParams{
+		OldTurnID:        arg.OldTurnID,
+		SessionID:        arg.SessionID,
+		SupersededAt:     arg.SupersededAt,
+		SupersededReason: arg.SupersededReason,
+	}, &supersedeArg); err != nil {
+		return pgsqlc.ReplaceHistoryTurnRow{}, err
+	}
+	supersedeArg.SupersededByTurnID = sql.NullString{String: created.ID, Valid: strings.TrimSpace(created.ID) != ""}
+	if _, err := qtx.SupersedeHistoryTurn(ctx, supersedeArg); err != nil {
+		return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
+	}
+	if err := tx.Commit(); err != nil {
+		return pgsqlc.ReplaceHistoryTurnRow{}, err
+	}
+	var result pgsqlc.ReplaceHistoryTurnRow
+	if err := convertValue(created, &result); err != nil {
+		return pgsqlc.ReplaceHistoryTurnRow{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) ListMessagesBefore(ctx context.Context, arg pgsqlc.ListMessagesBeforeParams) ([]pgsqlc.ListMessagesBeforeRow, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured
@@ -3704,6 +4319,25 @@ func (q *Queries) GetMessageByExternalIDBySession(ctx context.Context, arg pgsql
 	return result, nil
 }
 
+func (q *Queries) GetMessageByIDBySession(ctx context.Context, arg pgsqlc.GetMessageByIDBySessionParams) (pgsqlc.GetMessageByIDBySessionRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.GetMessageByIDBySessionRow{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.GetMessageByIDBySessionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.GetMessageByIDBySessionRow{}, err
+	}
+	out, err := q.store.queries.GetMessageByIDBySession(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.GetMessageByIDBySessionRow{}, mapQueryErr(err)
+	}
+	var result pgsqlc.GetMessageByIDBySessionRow
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.GetMessageByIDBySessionRow{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) ListMessagesAfterBySession(ctx context.Context, arg pgsqlc.ListMessagesAfterBySessionParams) ([]pgsqlc.ListMessagesAfterBySessionRow, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured
@@ -3723,6 +4357,25 @@ func (q *Queries) ListMessagesAfterBySession(ctx context.Context, arg pgsqlc.Lis
 	return result, nil
 }
 
+func (q *Queries) ListMessagesAfterMessageBySession(ctx context.Context, arg pgsqlc.ListMessagesAfterMessageBySessionParams) ([]pgsqlc.ListMessagesAfterMessageBySessionRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListMessagesAfterMessageBySessionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListMessagesAfterMessageBySession(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListMessagesAfterMessageBySessionRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (q *Queries) ListMessagesBeforeBySession(ctx context.Context, arg pgsqlc.ListMessagesBeforeBySessionParams) ([]pgsqlc.ListMessagesBeforeBySessionRow, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured
@@ -3736,6 +4389,25 @@ func (q *Queries) ListMessagesBeforeBySession(ctx context.Context, arg pgsqlc.Li
 		return nil, mapQueryErr(err)
 	}
 	var result []pgsqlc.ListMessagesBeforeBySessionRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListMessagesBeforeMessageBySession(ctx context.Context, arg pgsqlc.ListMessagesBeforeMessageBySessionParams) ([]pgsqlc.ListMessagesBeforeMessageBySessionRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListMessagesBeforeMessageBySessionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListMessagesBeforeMessageBySession(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListMessagesBeforeMessageBySessionRow
 	if err := convertValue(out, &result); err != nil {
 		return nil, err
 	}
@@ -3793,6 +4465,25 @@ func (q *Queries) ListMessagesLatestBySession(ctx context.Context, arg pgsqlc.Li
 		return nil, mapQueryErr(err)
 	}
 	var result []pgsqlc.ListMessagesLatestBySessionRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListVisibleMessagesFromBySession(ctx context.Context, arg pgsqlc.ListVisibleMessagesFromBySessionParams) ([]pgsqlc.ListVisibleMessagesFromBySessionRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListVisibleMessagesFromBySessionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListVisibleMessagesFromBySession(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListVisibleMessagesFromBySessionRow
 	if err := convertValue(out, &result); err != nil {
 		return nil, err
 	}
@@ -4472,6 +5163,25 @@ func (q *Queries) ListToolApprovalsBySession(ctx context.Context, arg pgsqlc.Lis
 		return nil, err
 	}
 	out, err := q.store.queries.ListToolApprovalsBySession(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ToolApprovalRequest
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListToolApprovalsBySessionToolCalls(ctx context.Context, arg pgsqlc.ListToolApprovalsBySessionToolCallsParams) ([]pgsqlc.ToolApprovalRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListToolApprovalsBySessionToolCallsParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListToolApprovalsBySessionToolCalls(ctx, sqliteArg)
 	if err != nil {
 		return nil, mapQueryErr(err)
 	}
@@ -5991,6 +6701,25 @@ func (q *Queries) ListUserInputsBySession(ctx context.Context, arg pgsqlc.ListUs
 		return nil, err
 	}
 	out, err := q.store.queries.ListUserInputsBySession(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListUserInputsBySessionToolCalls(ctx context.Context, arg pgsqlc.ListUserInputsBySessionToolCallsParams) ([]pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListUserInputsBySessionToolCallsParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListUserInputsBySessionToolCalls(ctx, sqliteArg)
 	if err != nil {
 		return nil, mapQueryErr(err)
 	}

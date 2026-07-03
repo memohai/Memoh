@@ -22,6 +22,11 @@ VALUES (
 )
 RETURNING *;
 
+-- ForkSessionFromAssistantMessage is implemented in
+-- internal/db/sqlite/store/queries.go. SQLite cannot express the PostgreSQL
+-- data-modifying CTE used by the production query while preserving the old to
+-- new message/turn id mapping in one sqlc-generated statement.
+
 -- name: GetSessionByID :one
 SELECT *
 FROM bot_sessions

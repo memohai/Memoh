@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	dbpkg "github.com/memohai/memoh/internal/db"
@@ -23,6 +24,16 @@ type DBService struct {
 	queries   dbstore.Queries
 	logger    *slog.Logger
 	publisher event.Publisher
+}
+
+type historyTurnWriter interface {
+	CreateHistoryTurn(ctx context.Context, arg sqlc.CreateHistoryTurnParams) (sqlc.BotHistoryTurn, error)
+	BindLatestHistoryTurnAssistant(ctx context.Context, arg sqlc.BindLatestHistoryTurnAssistantParams) (sqlc.BotHistoryTurn, error)
+	GetLatestVisibleHistoryTurnBySession(ctx context.Context, sessionID pgtype.UUID) (sqlc.BotHistoryTurn, error)
+}
+
+type messageCleanupQueries interface {
+	DeleteMessagesByIDs(ctx context.Context, ids []pgtype.UUID) error
 }
 
 // NewService creates a message service.
@@ -103,6 +114,12 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 	}
 
 	result := toMessageFromCreate(row)
+	if !input.SkipHistoryTurn {
+		if err := s.persistHistoryTurn(ctx, pgBotID, pgSessionID, row.ID, input.Role); err != nil {
+			s.cleanupPersistedMessage(ctx, row.ID)
+			return Message{}, err
+		}
+	}
 
 	for _, ref := range input.Assets {
 		pgMsgID := row.ID
@@ -151,8 +168,65 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 		result.Assets = assets
 	}
 
-	s.publishMessageCreated(result)
+	if !input.SkipHistoryTurn {
+		s.publishMessageCreated(result)
+	}
 	return result, nil
+}
+
+func (s *DBService) cleanupPersistedMessage(ctx context.Context, messageID pgtype.UUID) {
+	if s == nil || s.queries == nil || !messageID.Valid {
+		return
+	}
+	cleanup, ok := s.queries.(messageCleanupQueries)
+	if !ok {
+		return
+	}
+	if err := cleanup.DeleteMessagesByIDs(ctx, []pgtype.UUID{messageID}); err != nil {
+		s.logger.Error("cleanup message after history turn failure failed", slog.String("message_id", messageID.String()), slog.Any("error", err))
+	}
+}
+
+func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, sessionID pgtype.UUID, messageID pgtype.UUID, role string) error {
+	if s == nil || s.queries == nil || !sessionID.Valid {
+		return nil
+	}
+	writer, ok := s.queries.(historyTurnWriter)
+	if !ok {
+		return nil
+	}
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "user":
+		if _, err := writer.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
+			BotID:            botID,
+			SessionID:        sessionID,
+			RequestMessageID: messageID,
+		}); err != nil {
+			return fmt.Errorf("create history turn: %w", err)
+		}
+	case "assistant":
+		if _, err := writer.BindLatestHistoryTurnAssistant(ctx, sqlc.BindLatestHistoryTurnAssistantParams{
+			SessionID:          sessionID,
+			AssistantMessageID: messageID,
+		}); err == nil {
+			return nil
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("bind history turn assistant: %w", err)
+		}
+		if _, err := writer.GetLatestVisibleHistoryTurnBySession(ctx, sessionID); err == nil {
+			return nil
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("load latest history turn for assistant: %w", err)
+		}
+		if _, err := writer.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
+			BotID:              botID,
+			SessionID:          sessionID,
+			AssistantMessageID: messageID,
+		}); err != nil {
+			return fmt.Errorf("create orphan assistant history turn: %w", err)
+		}
+	}
+	return nil
 }
 
 func resolveRuntimeSnapshotWithQueries(ctx context.Context, queries dbstore.Queries, sessionID pgtype.UUID, sessionMode, runtimeType string) (string, string) {
@@ -418,6 +492,30 @@ func (s *DBService) ListBeforeBySession(ctx context.Context, sessionID string, b
 	return msgs, nil
 }
 
+// ListBeforeMessageBySession returns up to limit session messages before the
+// cursor message in visible turn order.
+func (s *DBService) ListBeforeMessageBySession(ctx context.Context, sessionID string, beforeMessageID string, limit int32) ([]Message, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	pgMessageID, err := dbpkg.ParseUUID(beforeMessageID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListMessagesBeforeMessageBySession(ctx, sqlc.ListMessagesBeforeMessageBySessionParams{
+		SessionID:       pgSessionID,
+		BeforeMessageID: pgMessageID,
+		MaxCount:        limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	msgs := toMessagesFromBeforeMessageBySession(rows)
+	s.enrichAssets(ctx, msgs)
+	return msgs, nil
+}
+
 func (s *DBService) LocateByExternalIDBySession(ctx context.Context, sessionID string, externalMessageID string, beforeLimit int32, afterLimit int32) (LocateResult, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
@@ -443,35 +541,138 @@ func (s *DBService) LocateByExternalIDBySession(ctx context.Context, sessionID s
 	}
 	target := toMessageFromExternalIDBySessionRow(targetRow)
 
-	beforeRows, err := s.queries.ListMessagesBeforeBySession(ctx, sqlc.ListMessagesBeforeBySessionParams{
-		SessionID: pgSessionID,
-		CreatedAt: pgtype.Timestamptz{
-			Time:  target.CreatedAt,
-			Valid: true,
-		},
-		MaxCount: beforeLimit,
+	beforeRows, err := s.queries.ListMessagesBeforeMessageBySession(ctx, sqlc.ListMessagesBeforeMessageBySessionParams{
+		SessionID:       pgSessionID,
+		BeforeMessageID: targetRow.ID,
+		MaxCount:        beforeLimit,
 	})
 	if err != nil {
 		return LocateResult{}, err
 	}
-	afterRows, err := s.queries.ListMessagesAfterBySession(ctx, sqlc.ListMessagesAfterBySessionParams{
-		SessionID: pgSessionID,
-		CreatedAt: pgtype.Timestamptz{
-			Time:  target.CreatedAt,
-			Valid: true,
-		},
-		MaxCount: afterLimit,
+	afterRows, err := s.queries.ListMessagesAfterMessageBySession(ctx, sqlc.ListMessagesAfterMessageBySessionParams{
+		SessionID:      pgSessionID,
+		AfterMessageID: targetRow.ID,
+		MaxCount:       afterLimit,
 	})
 	if err != nil {
 		return LocateResult{}, err
 	}
 
 	messages := make([]Message, 0, len(beforeRows)+1+len(afterRows))
-	messages = append(messages, toMessagesFromBeforeBySession(beforeRows)...)
+	messages = append(messages, toMessagesFromBeforeMessageBySession(beforeRows)...)
 	messages = append(messages, target)
-	messages = append(messages, toMessagesFromAfterBySession(afterRows)...)
+	messages = append(messages, toMessagesFromAfterMessageBySession(afterRows)...)
 	s.enrichAssets(ctx, messages)
 	return LocateResult{Messages: messages, TargetID: target.ID}, nil
+}
+
+func (s *DBService) GetByIDBySession(ctx context.Context, sessionID string, messageID string) (Message, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return Message{}, err
+	}
+	pgMessageID, err := dbpkg.ParseUUID(messageID)
+	if err != nil {
+		return Message{}, err
+	}
+	row, err := s.queries.GetMessageByIDBySession(ctx, sqlc.GetMessageByIDBySessionParams{
+		SessionID: pgSessionID,
+		MessageID: pgMessageID,
+	})
+	if err != nil {
+		return Message{}, err
+	}
+	msg := toMessageFromIDBySessionRow(row)
+	msgs := []Message{msg}
+	s.enrichAssets(ctx, msgs)
+	return msgs[0], nil
+}
+
+func (s *DBService) ListVisibleFromBySession(ctx context.Context, sessionID string, messageID string) ([]Message, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	pgMessageID, err := dbpkg.ParseUUID(messageID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListVisibleMessagesFromBySession(ctx, sqlc.ListVisibleMessagesFromBySessionParams{
+		SessionID: pgSessionID,
+		MessageID: pgMessageID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	msgs := toMessagesFromVisibleFromBySession(rows)
+	s.enrichAssets(ctx, msgs)
+	return msgs, nil
+}
+
+func (s *DBService) GetVisibleTurnByMessage(ctx context.Context, sessionID string, messageID string) (HistoryTurn, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return HistoryTurn{}, err
+	}
+	pgMessageID, err := dbpkg.ParseUUID(messageID)
+	if err != nil {
+		return HistoryTurn{}, err
+	}
+	row, err := s.queries.GetVisibleHistoryTurnByMessage(ctx, sqlc.GetVisibleHistoryTurnByMessageParams{
+		SessionID: pgSessionID,
+		MessageID: pgMessageID,
+	})
+	if err != nil {
+		return HistoryTurn{}, err
+	}
+	return toHistoryTurn(row), nil
+}
+
+func (s *DBService) GetLatestVisibleTurnBySession(ctx context.Context, sessionID string) (HistoryTurn, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return HistoryTurn{}, err
+	}
+	row, err := s.queries.GetLatestVisibleHistoryTurnBySession(ctx, pgSessionID)
+	if err != nil {
+		return HistoryTurn{}, err
+	}
+	return toHistoryTurn(row), nil
+}
+
+func (s *DBService) ReplaceTurn(ctx context.Context, sessionID string, oldTurnID string, requestMessageID string, assistantMessageID string, reason string) (HistoryTurn, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return HistoryTurn{}, err
+	}
+	pgOldTurnID, err := dbpkg.ParseUUID(oldTurnID)
+	if err != nil {
+		return HistoryTurn{}, fmt.Errorf("invalid old turn id: %w", err)
+	}
+	pgRequestMessageID, err := parseOptionalUUID(requestMessageID)
+	if err != nil {
+		return HistoryTurn{}, fmt.Errorf("invalid request message id: %w", err)
+	}
+	pgAssistantMessageID, err := parseOptionalUUID(assistantMessageID)
+	if err != nil {
+		return HistoryTurn{}, fmt.Errorf("invalid assistant message id: %w", err)
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "replace"
+	}
+	row, err := s.queries.ReplaceHistoryTurn(ctx, sqlc.ReplaceHistoryTurnParams{
+		OldTurnID:          pgOldTurnID,
+		SessionID:          pgSessionID,
+		RequestMessageID:   pgRequestMessageID,
+		AssistantMessageID: pgAssistantMessageID,
+		SupersededAt:       pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		SupersededReason:   pgtype.Text{String: reason, Valid: true},
+	})
+	if err != nil {
+		return HistoryTurn{}, err
+	}
+	return toHistoryTurnFromReplaceRow(row), nil
 }
 
 // LinkAssets links asset refs to an existing persisted message.
@@ -513,6 +714,29 @@ func (s *DBService) DeleteByBot(ctx context.Context, botID string) error {
 		return err
 	}
 	return s.queries.DeleteMessagesByBot(ctx, pgBotID)
+}
+
+// DeleteByIDs deletes specific messages by id.
+func (s *DBService) DeleteByIDs(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	pgIDs := make([]pgtype.UUID, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		pgID, err := dbpkg.ParseUUID(id)
+		if err != nil {
+			return err
+		}
+		pgIDs = append(pgIDs, pgID)
+	}
+	if len(pgIDs) == 0 {
+		return nil
+	}
+	return s.queries.DeleteMessagesByIDs(ctx, pgIDs)
 }
 
 // DeleteBySession deletes all messages for a session.
@@ -806,6 +1030,30 @@ func toMessageFromBeforeBySessionRow(row sqlc.ListMessagesBeforeBySessionRow) Me
 	)
 }
 
+func toMessageFromBeforeMessageBySessionRow(row sqlc.ListMessagesBeforeMessageBySessionRow) Message {
+	return toMessageFields(
+		row.ID,
+		row.BotID,
+		row.SessionID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
+		row.Platform,
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
+		row.EventID,
+		row.DisplayText,
+		row.CreatedAt,
+	)
+}
+
 func toMessageFromExternalIDBySessionRow(row sqlc.GetMessageByExternalIDBySessionRow) Message {
 	return toMessageFields(
 		row.ID,
@@ -830,7 +1078,31 @@ func toMessageFromExternalIDBySessionRow(row sqlc.GetMessageByExternalIDBySessio
 	)
 }
 
-func toMessageFromAfterBySessionRow(row sqlc.ListMessagesAfterBySessionRow) Message {
+func toMessageFromIDBySessionRow(row sqlc.GetMessageByIDBySessionRow) Message {
+	return toMessageFields(
+		row.ID,
+		row.BotID,
+		row.SessionID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
+		row.Platform,
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
+		row.EventID,
+		row.DisplayText,
+		row.CreatedAt,
+	)
+}
+
+func toMessageFromAfterMessageBySessionRow(row sqlc.ListMessagesAfterMessageBySessionRow) Message {
 	return toMessageFields(
 		row.ID,
 		row.BotID,
@@ -982,12 +1254,84 @@ func toMessagesFromBeforeBySession(rows []sqlc.ListMessagesBeforeBySessionRow) [
 	return messages
 }
 
-func toMessagesFromAfterBySession(rows []sqlc.ListMessagesAfterBySessionRow) []Message {
+func toMessagesFromBeforeMessageBySession(rows []sqlc.ListMessagesBeforeMessageBySessionRow) []Message {
 	messages := make([]Message, 0, len(rows))
-	for _, row := range rows {
-		messages = append(messages, toMessageFromAfterBySessionRow(row))
+	for i := len(rows) - 1; i >= 0; i-- {
+		messages = append(messages, toMessageFromBeforeMessageBySessionRow(rows[i]))
 	}
 	return messages
+}
+
+func toMessagesFromAfterMessageBySession(rows []sqlc.ListMessagesAfterMessageBySessionRow) []Message {
+	messages := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		messages = append(messages, toMessageFromAfterMessageBySessionRow(row))
+	}
+	return messages
+}
+
+func toMessagesFromVisibleFromBySession(rows []sqlc.ListVisibleMessagesFromBySessionRow) []Message {
+	messages := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		messages = append(messages, toMessageFromVisibleFromBySessionRow(row))
+	}
+	return messages
+}
+
+func toMessageFromVisibleFromBySessionRow(row sqlc.ListVisibleMessagesFromBySessionRow) Message {
+	return toMessageFields(
+		row.ID,
+		row.BotID,
+		row.SessionID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
+		row.Platform,
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
+		row.EventID,
+		row.DisplayText,
+		row.CreatedAt,
+	)
+}
+
+func toHistoryTurn(row sqlc.BotHistoryTurn) HistoryTurn {
+	return HistoryTurn{
+		ID:                 uuidString(row.ID),
+		BotID:              uuidString(row.BotID),
+		SessionID:          uuidString(row.SessionID),
+		Position:           row.Position,
+		RequestMessageID:   uuidString(row.RequestMessageID),
+		AssistantMessageID: uuidString(row.AssistantMessageID),
+		SupersededByTurnID: uuidString(row.SupersededByTurnID),
+		SupersededAt:       timeFromTimestamptz(row.SupersededAt),
+		SupersededReason:   textString(row.SupersededReason),
+		CreatedAt:          timeFromTimestamptz(row.CreatedAt),
+		UpdatedAt:          timeFromTimestamptz(row.UpdatedAt),
+	}
+}
+
+func toHistoryTurnFromReplaceRow(row sqlc.ReplaceHistoryTurnRow) HistoryTurn {
+	return HistoryTurn{
+		ID:                 uuidString(row.ID),
+		BotID:              uuidString(row.BotID),
+		SessionID:          uuidString(row.SessionID),
+		Position:           row.Position,
+		RequestMessageID:   uuidString(row.RequestMessageID),
+		AssistantMessageID: uuidString(row.AssistantMessageID),
+		SupersededByTurnID: uuidString(row.SupersededByTurnID),
+		SupersededAt:       timeFromTimestamptz(row.SupersededAt),
+		SupersededReason:   textString(row.SupersededReason),
+		CreatedAt:          timeFromTimestamptz(row.CreatedAt),
+		UpdatedAt:          timeFromTimestamptz(row.UpdatedAt),
+	}
 }
 
 func parseOptionalUUID(id string) (pgtype.UUID, error) {
@@ -995,6 +1339,27 @@ func parseOptionalUUID(id string) (pgtype.UUID, error) {
 		return pgtype.UUID{}, nil
 	}
 	return dbpkg.ParseUUID(id)
+}
+
+func uuidString(id pgtype.UUID) string {
+	if !id.Valid {
+		return ""
+	}
+	return id.String()
+}
+
+func timeFromTimestamptz(value pgtype.Timestamptz) time.Time {
+	if !value.Valid {
+		return time.Time{}
+	}
+	return value.Time
+}
+
+func textString(value pgtype.Text) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.String
 }
 
 func toPgText(value string) pgtype.Text {

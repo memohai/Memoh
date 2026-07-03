@@ -23,6 +23,8 @@ DROP TABLE IF EXISTS bot_workspace_resource_limits CASCADE;
 DROP TABLE IF EXISTS containers CASCADE;
 DROP TABLE IF EXISTS user_input_requests CASCADE;
 DROP TABLE IF EXISTS tool_approval_requests CASCADE;
+DROP VIEW IF EXISTS bot_visible_history_messages CASCADE;
+DROP TABLE IF EXISTS bot_history_turns CASCADE;
 DROP TABLE IF EXISTS bot_history_messages CASCADE;
 DROP TABLE IF EXISTS bot_session_events CASCADE;
 DROP TABLE IF EXISTS bot_session_discuss_cursors CASCADE;

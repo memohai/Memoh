@@ -187,6 +187,20 @@ type BotHistoryMessageCompact struct {
 	CompletedAt  sql.NullString `json:"completed_at"`
 }
 
+type BotHistoryTurn struct {
+	ID                 string         `json:"id"`
+	BotID              string         `json:"bot_id"`
+	SessionID          string         `json:"session_id"`
+	Position           int64          `json:"position"`
+	RequestMessageID   sql.NullString `json:"request_message_id"`
+	AssistantMessageID sql.NullString `json:"assistant_message_id"`
+	SupersededByTurnID sql.NullString `json:"superseded_by_turn_id"`
+	SupersededAt       sql.NullString `json:"superseded_at"`
+	SupersededReason   sql.NullString `json:"superseded_reason"`
+	CreatedAt          string         `json:"created_at"`
+	UpdatedAt          string         `json:"updated_at"`
+}
+
 type BotPluginInstallation struct {
 	ID          string `json:"id"`
 	BotID       string `json:"bot_id"`
@@ -271,6 +285,30 @@ type BotUserGrant struct {
 	CreatedByUserID sql.NullString `json:"created_by_user_id"`
 	CreatedAt       string         `json:"created_at"`
 	UpdatedAt       string         `json:"updated_at"`
+}
+
+type BotVisibleHistoryMessage struct {
+	TurnID                  string         `json:"turn_id"`
+	TurnPosition            int64          `json:"turn_position"`
+	TurnMessageSeq          int64          `json:"turn_message_seq"`
+	ID                      string         `json:"id"`
+	BotID                   string         `json:"bot_id"`
+	SessionID               sql.NullString `json:"session_id"`
+	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
+	SenderAccountUserID     sql.NullString `json:"sender_account_user_id"`
+	SourceMessageID         sql.NullString `json:"source_message_id"`
+	SourceReplyToMessageID  sql.NullString `json:"source_reply_to_message_id"`
+	Role                    string         `json:"role"`
+	Content                 string         `json:"content"`
+	Metadata                string         `json:"metadata"`
+	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
+	ModelID                 sql.NullString `json:"model_id"`
+	CompactID               sql.NullString `json:"compact_id"`
+	EventID                 sql.NullString `json:"event_id"`
+	DisplayText             sql.NullString `json:"display_text"`
+	CreatedAt               string         `json:"created_at"`
 }
 
 type BotWorkspaceResourceLimit struct {

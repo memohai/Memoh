@@ -12,7 +12,7 @@ import (
 
 const countMessagesBySession = `-- name: CountMessagesBySession :one
 SELECT COUNT(*) AS message_count
-FROM bot_history_messages
+FROM bot_visible_history_messages
 WHERE session_id = ?1
 `
 
@@ -26,7 +26,7 @@ func (q *Queries) CountMessagesBySession(ctx context.Context, sessionID sql.Null
 const getLatestAssistantUsage = `-- name: GetLatestAssistantUsage :one
 SELECT
   COALESCE(CAST(json_extract(m.usage, '$.inputTokens') AS INTEGER), 0) AS input_tokens
-FROM bot_history_messages m
+FROM bot_visible_history_messages m
 WHERE m.session_id = ?1
   AND m.role = 'assistant'
   AND m.usage IS NOT NULL
@@ -63,7 +63,7 @@ const getSessionCacheStats = `-- name: GetSessionCacheStats :one
 SELECT
   COALESCE(SUM(CAST(json_extract(m.usage, '$.inputTokens') AS INTEGER)), 0) AS total_input_tokens,
   COALESCE(SUM(CAST(json_extract(m.usage, '$.inputTokenDetails.cacheReadTokens') AS INTEGER)), 0) AS cache_read_tokens
-FROM bot_history_messages m
+FROM bot_visible_history_messages m
 WHERE m.session_id = ?1
   AND m.usage IS NOT NULL
   AND json_valid(m.usage)
@@ -88,7 +88,7 @@ WITH requested_payloads AS (
          THEN json_extract(m.metadata, '$.model_requested_skills')
          ELSE json('[]')
     END AS skills_json
-  FROM bot_history_messages m
+  FROM bot_visible_history_messages m
   WHERE m.session_id = ?1
     AND m.role = 'user'
 ),
@@ -112,7 +112,7 @@ tool_payloads AS (
          THEN m.content
          ELSE json('[]')
     END AS content_json
-  FROM bot_history_messages m
+  FROM bot_visible_history_messages m
   WHERE m.session_id = ?1
     AND m.role = 'assistant'
 ),

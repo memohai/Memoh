@@ -56,6 +56,33 @@ CREATE TABLE bot_history_messages (
   runtime_type TEXT NOT NULL DEFAULT 'model',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE bot_history_turns (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  request_message_id TEXT,
+  assistant_message_id TEXT,
+  superseded_at TEXT
+);
+CREATE VIEW bot_visible_history_messages AS
+SELECT
+  t.id AS turn_id,
+  t.position AS turn_position,
+  1 AS turn_message_seq,
+  m.*
+FROM bot_history_turns t
+JOIN bot_history_messages m ON m.id = t.request_message_id
+WHERE t.superseded_at IS NULL
+UNION ALL
+SELECT
+  t.id AS turn_id,
+  t.position AS turn_position,
+  2 AS turn_message_seq,
+  m.*
+FROM bot_history_turns t
+JOIN bot_history_messages m ON m.id = t.assistant_message_id
+WHERE t.superseded_at IS NULL;
 `)
 
 	botID := "00000000-0000-0000-0000-000000000001"
@@ -150,6 +177,29 @@ CREATE TABLE bot_history_messages (
 	)
 	if err != nil {
 		t.Fatalf("insert requested skill metadata: %v", err)
+	}
+	for _, item := range []struct {
+		id        string
+		sessionID string
+		position  int
+		requestID string
+		replyID   string
+	}{
+		{"00000000-0000-0000-0000-000000000105", sessionID, 1, "", "00000000-0000-0000-0000-000000000005"},
+		{"00000000-0000-0000-0000-000000000106", sessionID, 2, "00000000-0000-0000-0000-000000000006", ""},
+		{"00000000-0000-0000-0000-000000000109", discussSessionID, 1, "", "00000000-0000-0000-0000-000000000009"},
+	} {
+		_, err = conn.ExecContext(ctx, `INSERT INTO bot_history_turns (id, bot_id, session_id, position, request_message_id, assistant_message_id) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))`,
+			item.id,
+			botID,
+			item.sessionID,
+			item.position,
+			item.requestID,
+			item.replyID,
+		)
+		if err != nil {
+			t.Fatalf("insert history turn %s: %v", item.id, err)
+		}
 	}
 
 	store, err := New(conn)

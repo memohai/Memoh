@@ -48,6 +48,8 @@ CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_mode_runtime_active_updated
   ON bot_sessions(bot_id, session_mode, runtime_type, updated_at DESC, id DESC)
   WHERE deleted_at IS NULL;
 
+DROP VIEW IF EXISTS bot_visible_history_messages;
+
 CREATE TABLE bot_history_messages_new (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,

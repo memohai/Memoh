@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
@@ -125,6 +126,7 @@ func writeSSEJSON(writer io.Writer, flusher http.Flusher, payload any) error {
 // @Param session_id query string true "Session ID"
 // @Param limit query int false "Limit"
 // @Param before query string false "Before"
+// @Param before_message_id query string false "Message ID cursor before which to page"
 // @Param format query string false "Response format: ui returns normalized chat UI turns"
 // @Success 200 {object} map[string][]messagepkg.Message
 // @Success 200 {object} map[string][]conversation.UITurn "when format=ui"
@@ -157,6 +159,12 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 		}
 	}
 
+	beforeMessageID := strings.TrimSpace(c.QueryParam("before_message_id"))
+	if beforeMessageID != "" {
+		if _, err := uuid.Parse(beforeMessageID); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid before_message_id")
+		}
+	}
 	before, hasBefore := parseBeforeParam(c.QueryParam("before"))
 	format := strings.ToLower(strings.TrimSpace(c.QueryParam("format")))
 
@@ -167,12 +175,15 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	botID = bot.ID
 
 	var messages []messagepkg.Message
-	if hasBefore {
+	switch {
+	case beforeMessageID != "":
+		messages, err = h.messageService.ListBeforeMessageBySession(c.Request().Context(), sessionID, beforeMessageID, limit)
+	case hasBefore:
 		// ListBeforeBySession already returns oldest-first (its converter
 		// reverses the DESC DB rows). Do NOT reverse again: the before page
 		// and the turn-head extension both depend on monotonic ASC input.
 		messages, err = h.messageService.ListBeforeBySession(c.Request().Context(), sessionID, before, limit)
-	} else {
+	default:
 		messages, err = h.messageService.ListLatestBySession(c.Request().Context(), sessionID, limit)
 		if err == nil {
 			reverseMessages(messages)
@@ -191,19 +202,7 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
 	if format == "ui" {
 		items := conversation.ConvertMessagesToUITurns(messages)
-		if h.bgManager != nil {
-			conversation.ApplyBackgroundTaskSnapshots(items, h.backgroundTaskSnapshots(botID, sessionID))
-		}
-		if h.toolApproval != nil {
-			if approvals, err := h.toolApproval.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
-				mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(c.Request().Context(), sessionID))
-			}
-		}
-		if h.userInput != nil {
-			if requests, err := h.userInput.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
-				mergeUserInputs(items, requests, h.userInput.CanRespond)
-			}
-		}
+		h.decorateUITurns(c.Request().Context(), botID, sessionID, items)
 		return c.JSON(http.StatusOK, map[string]any{
 			"items": items,
 		})
@@ -269,19 +268,7 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, located.Messages)
 	items := conversation.ConvertMessagesToUITurns(located.Messages)
-	if h.bgManager != nil {
-		conversation.ApplyBackgroundTaskSnapshots(items, h.backgroundTaskSnapshots(botID, sessionID))
-	}
-	if h.toolApproval != nil {
-		if approvals, err := h.toolApproval.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
-			mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(c.Request().Context(), sessionID))
-		}
-	}
-	if h.userInput != nil {
-		if requests, err := h.userInput.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
-			mergeUserInputs(items, requests, h.userInput.CanRespond)
-		}
-	}
+	h.decorateUITurns(c.Request().Context(), botID, sessionID, items)
 	return c.JSON(http.StatusOK, map[string]any{
 		"items":                      items,
 		"target_id":                  located.TargetID,
@@ -358,6 +345,51 @@ func (h *MessageHandler) toolApprovalCanApproveFn(ctx context.Context, sessionID
 		return defaultFn
 	}
 	return h.toolApproval.CanRespond
+}
+
+func (h *MessageHandler) decorateUITurns(ctx context.Context, botID, sessionID string, items []conversation.UITurn) {
+	if len(items) == 0 {
+		return
+	}
+	if h.bgManager != nil {
+		conversation.ApplyBackgroundTaskSnapshots(items, h.backgroundTaskSnapshots(botID, sessionID))
+	}
+	toolCallIDs := toolCallIDsFromUITurns(items)
+	if len(toolCallIDs) == 0 {
+		return
+	}
+	if h.toolApproval != nil {
+		if approvals, err := h.toolApproval.ListBySessionToolCalls(ctx, botID, sessionID, toolCallIDs); err == nil {
+			mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(ctx, sessionID))
+		}
+	}
+	if h.userInput != nil {
+		if requests, err := h.userInput.ListBySessionToolCalls(ctx, botID, sessionID, toolCallIDs); err == nil {
+			mergeUserInputs(items, requests, h.userInput.CanRespond)
+		}
+	}
+}
+
+func toolCallIDsFromUITurns(turns []conversation.UITurn) []string {
+	seen := make(map[string]struct{})
+	var ids []string
+	for _, turn := range turns {
+		for _, msg := range turn.Messages {
+			if msg.Type != conversation.UIMessageTool {
+				continue
+			}
+			id := strings.TrimSpace(msg.ToolCallID)
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func mergeToolApprovals(turns []conversation.UITurn, approvals []toolapproval.Request, canApproveFn func(toolapproval.Request) bool) {
@@ -500,13 +532,13 @@ func reverseMessages(m []messagepkg.Message) {
 func (h *MessageHandler) extendToUITurnHead(ctx context.Context, sessionID string, messages []messagepkg.Message) []messagepkg.Message {
 	const batch = int32(50)
 	const maxRows = 2000
-	// messages is oldest-first (ASC). The cursor is messages[0].CreatedAt - the
-	// oldest row on the current page - and we pull rows older than it.
-	// ListBeforeBySession already returns oldest-first, so prepend each batch
-	// directly; the combined slice stays monotonic and the turn converter (which
-	// scans in order) keeps one reply in a single turn.
+	// messages is oldest-first (ASC). The cursor is the oldest row on the
+	// current page, and we pull rows before that row in visible turn order.
+	// ListBeforeMessageBySession already returns oldest-first, so prepend each
+	// batch directly; the combined slice stays monotonic and the turn converter
+	// (which scans in order) keeps one reply in a single turn.
 	for len(messages) > 0 && len(messages) < maxRows && !conversation.IsUITurnBoundary(messages[0]) {
-		older, err := h.messageService.ListBeforeBySession(ctx, sessionID, messages[0].CreatedAt, batch)
+		older, err := h.messageService.ListBeforeMessageBySession(ctx, sessionID, messages[0].ID, batch)
 		if err != nil || len(older) == 0 {
 			break
 		}

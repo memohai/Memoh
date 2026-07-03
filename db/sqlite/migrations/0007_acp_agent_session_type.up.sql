@@ -2,6 +2,7 @@
 -- Add acp_agent as a first-class bot session type for dedicated ACP sessions.
 
 PRAGMA foreign_keys = OFF;
+PRAGMA legacy_alter_table = ON;
 
 BEGIN;
 
@@ -39,4 +40,5 @@ CREATE INDEX IF NOT EXISTS idx_bot_sessions_parent ON bot_sessions(parent_sessio
 
 COMMIT;
 
+PRAGMA legacy_alter_table = OFF;
 PRAGMA foreign_keys = ON;

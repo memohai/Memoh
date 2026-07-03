@@ -2000,6 +2000,10 @@ export type HandlersEmailOAuthStatusResponse = {
     provider?: string;
 };
 
+export type HandlersForkSessionRequest = {
+    message_id: string;
+};
+
 export type HandlersFsOpResponse = {
     ok?: boolean;
     revision?: string;
@@ -7129,6 +7133,10 @@ export type GetBotsByBotIdMessagesData = {
          */
         before?: string;
         /**
+         * Message ID cursor before which to page
+         */
+        before_message_id?: string;
+        /**
          * Response format: ui returns normalized chat UI turns
          */
         format?: string;
@@ -8312,6 +8320,55 @@ export type PostBotsByBotIdSessionsBySessionIdCompactResponses = {
 };
 
 export type PostBotsByBotIdSessionsBySessionIdCompactResponse = PostBotsByBotIdSessionsBySessionIdCompactResponses[keyof PostBotsByBotIdSessionsBySessionIdCompactResponses];
+
+export type PostBotsByBotIdSessionsBySessionIdForkData = {
+    /**
+     * Fork source message
+     */
+    body: HandlersForkSessionRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Source session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/fork';
+};
+
+export type PostBotsByBotIdSessionsBySessionIdForkErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdSessionsBySessionIdForkError = PostBotsByBotIdSessionsBySessionIdForkErrors[keyof PostBotsByBotIdSessionsBySessionIdForkErrors];
+
+export type PostBotsByBotIdSessionsBySessionIdForkResponses = {
+    /**
+     * Created
+     */
+    201: SessionSession;
+};
+
+export type PostBotsByBotIdSessionsBySessionIdForkResponse = PostBotsByBotIdSessionsBySessionIdForkResponses[keyof PostBotsByBotIdSessionsBySessionIdForkResponses];
 
 export type GetBotsByBotIdSessionsBySessionIdMessagesEventsData = {
     body?: never;

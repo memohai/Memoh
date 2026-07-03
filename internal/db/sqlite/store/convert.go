@@ -403,7 +403,7 @@ func timeValue(value reflect.Value) time.Time {
 		return value.FieldByName("Time").Interface().(time.Time)
 	}
 	raw := stringValue(value)
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05", "2006-01-02"} {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05.999999999", "2006-01-02 15:04:05", "2006-01-02"} {
 		if parsed, err := time.Parse(layout, raw); err == nil {
 			return parsed
 		}

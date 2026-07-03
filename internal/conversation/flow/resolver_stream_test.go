@@ -17,11 +17,12 @@ import (
 
 type recordingMessageService struct {
 	persisted []messagepkg.PersistInput
+	replaced  int
 }
 
 func (s *recordingMessageService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
 	s.persisted = append(s.persisted, input)
-	return messagepkg.Message{ID: "message-id", Role: input.Role}, nil
+	return messagepkg.Message{ID: "message-id", SessionID: input.SessionID, Role: input.Role, Content: input.Content, DisplayContent: input.DisplayText}, nil
 }
 
 func (*recordingMessageService) List(context.Context, string) ([]messagepkg.Message, error) {
@@ -64,8 +65,37 @@ func (*recordingMessageService) ListBeforeBySession(context.Context, string, tim
 	return nil, nil
 }
 
+func (*recordingMessageService) ListBeforeMessageBySession(context.Context, string, string, int32) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
 func (*recordingMessageService) LocateByExternalIDBySession(context.Context, string, string, int32, int32) (messagepkg.LocateResult, error) {
 	return messagepkg.LocateResult{}, nil
+}
+
+func (*recordingMessageService) GetByIDBySession(context.Context, string, string) (messagepkg.Message, error) {
+	return messagepkg.Message{}, nil
+}
+
+func (*recordingMessageService) ListVisibleFromBySession(context.Context, string, string) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
+func (*recordingMessageService) GetVisibleTurnByMessage(context.Context, string, string) (messagepkg.HistoryTurn, error) {
+	return messagepkg.HistoryTurn{}, nil
+}
+
+func (*recordingMessageService) GetLatestVisibleTurnBySession(context.Context, string) (messagepkg.HistoryTurn, error) {
+	return messagepkg.HistoryTurn{}, nil
+}
+
+func (s *recordingMessageService) ReplaceTurn(context.Context, string, string, string, string, string) (messagepkg.HistoryTurn, error) {
+	s.replaced++
+	return messagepkg.HistoryTurn{}, nil
+}
+
+func (*recordingMessageService) DeleteByIDs(context.Context, []string) error {
+	return nil
 }
 
 func (*recordingMessageService) DeleteByBot(context.Context, string) error {
@@ -396,5 +426,30 @@ func TestPersistTerminalSnapshotSkillActivationWithoutPromptDoesNotStoreModelMar
 	}
 	if user.Metadata["user_message_kind"] != conversation.UserMessageKindSkillActivation {
 		t.Fatalf("metadata kind = %#v, want skill_activation", user.Metadata["user_message_kind"])
+	}
+}
+
+func TestReplacePersistedTurnErrorsWhenNoReplacementPersisted(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	err := resolver.replacePersistedTurn(
+		context.Background(),
+		conversation.ChatRequest{SessionID: "session-1"},
+		"turn-1",
+		"request-1",
+		"retry",
+		nil,
+	)
+	if err == nil {
+		t.Fatal("expected replacement error, got nil")
+	}
+	if messages.replaced != 0 {
+		t.Fatalf("ReplaceTurn called %d times, want 0", messages.replaced)
 	}
 }
