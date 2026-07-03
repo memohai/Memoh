@@ -1,9 +1,18 @@
 ---
 name: memoh-spacing
-description: Use when Codex needs to research, audit, define, or migrate Memoh Web spacing systems: semantic spacing roles, spatial relationship maps, interface-slice analysis from screenshots or code, component-wall spacing documentation, and decisions about whether spacing values should become tokens, primitives, local component geometry, or exceptions.
+description: "SUPERSEDED by memoh-ui-owners — do not use for building or migrating UI. This skill is retained ONLY as the historical research record (the cartography/role-taxonomy method that produced the owner vocabulary). For any actual work — composing a settings row / form field / section / tile, or migrating a hand-rolled surface — use memoh-ui-owners instead."
 ---
 
-# Memoh Spacing
+# Memoh Spacing (SUPERSEDED — research record only)
+
+> **This skill is retired.** The spacing system it set out to define is **built and shipped**:
+> ten owner components, the full click-surface + coverage audits, and all migrations are
+> complete (see `docs/design/spacing/owner-vocabulary-census.md`). For building or changing
+> any Memoh Web surface, use **`memoh-ui-owners`** — that is the living contract. This file is
+> kept only because the audits still cite its cartography (`references/cartography.md`,
+> `references/role-taxonomy.md`) as the research trail that derived the owners. Read it to
+> understand *how the vocabulary was discovered*, not *what to do now*.
+
 
 Use this skill to build Memoh's spacing system from real product interfaces. The goal is not to tokenize every `gap-4`; the goal is to name reusable spatial decisions and give them owners.
 

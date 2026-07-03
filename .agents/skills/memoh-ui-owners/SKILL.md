@@ -194,6 +194,16 @@ one-off" → keep it local and say why.
   never a gray or a `/10` alpha. The `check-ui-contract.mjs` guard flags app-scope
   `hover:*`/`bg-*` injections — component chrome belongs in the component (mark a sanctioned
   line with a `/* ui-allow-style */` same-line comment inside the owner, never on a page).
+- **The guard warns on a hand-rolled SettingsRow.** `check-ui-contract.mjs` rule 11 (WARN)
+  flags the literal `min-h-[3.75rem]` anywhere outside `settings/row.vue` and
+  `expandable-row.vue` — because that height only appears when a row was copied out of
+  `SettingsRow` as raw divs. It's a WARN (advisory, doesn't block CI), not a HARD fail,
+  because a genuinely denser/different row *could* land on that number: if a flagged line is
+  a real settings row, compose `<SettingsRow>`; if it's a deliberate different shape or a
+  loading placeholder borrowing the height, silence it with `ui-allow-shape` on the line.
+  This is a **backstop against regression**, not a debt finder — it only catches the
+  SettingsRow slice (that one rare literal); FieldStack / MetricReadout duplication has no
+  such fingerprint and stays a judgment call.
 
 ## Migration discipline (when converting a hand-rolled surface)
 
@@ -210,6 +220,27 @@ one-off" → keep it local and say why.
    (0 *new* violations — pre-existing debt in other files is not yours to fix here), then a
    **human** confirms the rendered page (dark + narrow + `zh` + walk every old interaction).
    The agent's "it should work" is not verification.
+
+### Batch migrations: the shared-file hazard
+
+When many agents migrate different pages **in parallel**, each `.vue` is safely isolated —
+but a migration that adds a validation message writes to the **shared** locale files
+(`apps/web/src/i18n/locales/{zh,en,ja}.json`). Parallel writers to the same JSON don't see
+each other, so two agents adding a `nameRequired` under the same section produce a **silently
+duplicated key** — the JSON still parses, but the later value wins and the earlier one is
+lost. This actually happened: five web-search agents each inserted `webSearch.nameRequired`.
+
+So when you fan out a batch:
+- Treat the locale files as a **contended resource**. Have each agent add only its own new
+  keys under its own file's namespace, never touch existing keys.
+- **After** the batch, before committing, run a path-aware duplicate-key check on all three
+  locales (parse with a hook that flags a key appearing twice in the *same* object — note a
+  key legitimately repeats across *different* objects, e.g. `status`, so scope the check to
+  same-parent siblings). Collapse any true in-object duplicates, keeping one reconciled
+  value. Do not trust "the JSON parses" — a dup parses fine.
+- The cleaner alternative when a batch shares keys: collect the new i18n keys from each
+  agent's report and write them yourself in one pass, rather than letting N agents each edit
+  the same three files.
 
 ## Owner reference
 

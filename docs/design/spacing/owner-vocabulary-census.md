@@ -1,11 +1,45 @@
 # Spacing Owner Vocabulary — Census Result
 
-Date: 2026-07-01
+Date: 2026-07-01 · **Final status updated: 2026-07-03**
 
-Status: **DONE — Phase 3 complete.** The gap map below is the historical decision
-record (kept intact). What actually shipped is recorded in the "Phase 3 outcome"
-section immediately after this note. All six owner gaps were built, verified, and
-mass-applied; the vocabulary is now complete and in use.
+Status: **DONE — vocabulary complete, all known debt migrated.** Everything below this
+block is the historical decision record (Phase-1 gap map → Phase-3 outcome), kept intact.
+The terminal state as of 2026-07-03:
+
+- **10 owners** ship and are in use: PageShell, SettingsSection (+`#footer`), SettingsRow
+  (`stack: never|sm|always`, `align`, `#leading`/`#content`), ExpandableSettingsRow,
+  BackendCard, FieldStack (**v2 — carries vee-validate validation state**), FormStack,
+  MetricReadout, PersonaTile, CalloutBanner (+ the `Empty` atom).
+- **Two audits closed all reachable debt.** The Phase-3 census (35 settings files) →
+  21 files migrated. The **click-surface audit** (`audit/click-surface-audit.md`, 40
+  dialog/popover files) → 36 MISS, all migrated (group-1 plain owners; FieldStack v2 built
+  to absorb the validated fields; group-2 dialogs migrated onto it). The **coverage-closure
+  sweep** (`audit/coverage-sweep.md`, all 282 apps/web `.vue`, 0 skimmed) → 53 more MISS,
+  migrated. Two blind spots the sweep proved and closed: hand-rolled rows *inside*
+  already-migrated files, and whole never-audited domains (onboarding, web-search, people).
+- **A regression backstop shipped.** `check-ui-contract.mjs` rule 11 (WARN) flags the
+  literal `min-h-[3.75rem]` outside the owner files — the rare fingerprint of a copied
+  SettingsRow. It catches only the SettingsRow slice (other owners have no distinctive
+  literal); it is a backstop, not a debt finder.
+- **The building contract is `memoh-ui-owners`** (the skill). The older `memoh-spacing`
+  skill is retired to a research-record role.
+
+### Known remainder (deliberately not migrated)
+
+- **`pages/providers/model-setting.vue` identity header** — no current owner cleanly fits
+  (avatar + truncated title + trailing controls in a shape none of the ten own). Left local;
+  revisit only if a second instance of the exact shape appears (then it earns an owner).
+- **~11 rule-11 WARN hits remain** across `bots/*` (bot-access, bot-container, bot-plugins,
+  bot-skills, bot-user-access, channel-settings-panel) + 2 loading placeholders. The
+  placeholders are correct LOCAL (silence-able with `ui-allow-shape`); the `bots/*` ones are
+  a mix the coverage sweep recorded — a future cleanup pass, or triage each against the
+  "stay hand-written" tells. Not blocking (WARN only).
+
+---
+
+The gap map below is the historical decision record (kept intact). What actually shipped is
+recorded in the "Phase 3 outcome" section immediately after this note. All six owner gaps
+were built, verified, and mass-applied; the vocabulary is now complete and in use.
 
 ## Phase 3 outcome (what shipped)
 
