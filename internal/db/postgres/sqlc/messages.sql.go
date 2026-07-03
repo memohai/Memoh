@@ -1680,14 +1680,6 @@ func (q *Queries) ListMessagesLatest(ctx context.Context, arg ListMessagesLatest
 }
 
 const listMessagesLatestBySession = `-- name: ListMessagesLatestBySession :many
-WITH candidate_turns AS (
-  SELECT id, position
-  FROM bot_history_turns
-  WHERE session_id = $1
-    AND superseded_at IS NULL
-  ORDER BY position DESC
-  LIMIT $2 + 1
-)
 SELECT
   m.id,
   m.bot_id,
@@ -1709,10 +1701,11 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-JOIN candidate_turns t ON t.id = m.turn_id
+JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = $1
+  AND t.session_id = $1
 ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT $2
 `

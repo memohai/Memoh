@@ -140,7 +140,7 @@ VALUES (?, ?, ?, 1, ?, ?, ?, ?)`,
 	}
 }
 
-func TestSQLiteListMessagesLatestAndBeforeMessageUseBoundedTurns(t *testing.T) {
+func TestSQLiteListMessagesLatestAndBeforeMessageUseTurnOrder(t *testing.T) {
 	ctx := context.Background()
 	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
 	if err != nil {

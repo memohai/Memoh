@@ -606,16 +606,30 @@ func (h *MessageHandler) authorizeBotManage(ctx context.Context, channelIdentity
 }
 
 func (h *MessageHandler) authorizeBotMessageAccess(c echo.Context, channelIdentityID, botID string) (bots.Bot, []string, error) {
-	bot, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID)
-	if err != nil {
-		bot, err = AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, bots.PermissionWorkspaceExec)
-		if err != nil {
-			return bots.Bot{}, nil, err
-		}
+	if h.botService == nil || h.accountService == nil {
+		return bots.Bot{}, nil, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
 	}
-	perms, err := h.resolveCurrentUserPermissions(c, channelIdentityID, bot.ID)
+	ctx := c.Request().Context()
+	isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
 	if err != nil {
-		return bots.Bot{}, nil, err
+		return bots.Bot{}, nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	bot, err := h.botService.GetForAccess(ctx, botID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return bots.Bot{}, nil, echo.NewHTTPError(http.StatusNotFound, "bot not found")
+		}
+		return bots.Bot{}, nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	perms, err := h.botService.ResolveUserPermissionsForBot(ctx, bot, channelIdentityID, isAdmin)
+	if err != nil {
+		if errors.Is(err, bots.ErrBotNotFound) {
+			return bots.Bot{}, nil, echo.NewHTTPError(http.StatusNotFound, "bot not found")
+		}
+		return bots.Bot{}, nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if !bots.HasPermission(perms, bots.PermissionChat) && !bots.HasPermission(perms, bots.PermissionWorkspaceExec) {
+		return bots.Bot{}, nil, echo.NewHTTPError(http.StatusForbidden, "bot access denied")
 	}
 	return bot, perms, nil
 }
@@ -636,21 +650,6 @@ func (h *MessageHandler) authorizeMessageSession(c echo.Context, channelIdentity
 		return bots.Bot{}, nil, session.Session{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
 	}
 	return bot, perms, sess, nil
-}
-
-func (h *MessageHandler) resolveCurrentUserPermissions(c echo.Context, channelIdentityID, botID string) ([]string, error) {
-	if h.botService == nil || h.accountService == nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
-	}
-	isAdmin, err := h.accountService.IsAdmin(c.Request().Context(), channelIdentityID)
-	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	perms, err := h.botService.ResolveUserPermissions(c.Request().Context(), botID, channelIdentityID, isAdmin)
-	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return perms, nil
 }
 
 // ServeMedia streams a media asset by bot_id + content_hash with read-access authorization.
