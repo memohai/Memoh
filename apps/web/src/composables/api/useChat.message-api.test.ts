@@ -11,7 +11,7 @@ vi.mock('@memohai/sdk', () => ({
   getBotsByBotIdSessionsEvents: vi.fn(),
   getBotsByBotIdMessages: vi.fn(),
   getBotsByBotIdMessagesLocate: vi.fn(),
-  postBotsByBotIdLocalMessages: vi.fn(),
+  postBotsByBotIdWebMessages: vi.fn(),
 }))
 
 vi.mock('@memohai/sdk/client', () => ({
@@ -21,7 +21,7 @@ vi.mock('@memohai/sdk/client', () => ({
 import {
   getBotsByBotIdSessionsBySessionIdMessagesEvents,
   getBotsByBotIdSessionsEvents,
-  postBotsByBotIdLocalMessages,
+  postBotsByBotIdWebMessages,
 } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
 
@@ -100,17 +100,16 @@ describe('sendLocalChannelMessage', () => {
     vi.clearAllMocks()
   })
 
-  it('posts normal REST fallback messages to the Web local-channel endpoint', async () => {
-    vi.mocked(client.post).mockResolvedValue({ data: undefined } as never)
+  it('posts normal REST fallback messages through the generated Web SDK function', async () => {
+    vi.mocked(postBotsByBotIdWebMessages).mockResolvedValue({ data: undefined } as never)
 
     await sendLocalChannelMessage('bot-1', 'hello')
 
-    expect(client.post).toHaveBeenCalledWith({
-      url: '/bots/{bot_id}/web/messages',
+    expect(postBotsByBotIdWebMessages).toHaveBeenCalledWith({
       path: { bot_id: 'bot-1' },
       body: { message: { text: 'hello' } },
       throwOnError: true,
     })
-    expect(postBotsByBotIdLocalMessages).not.toHaveBeenCalled()
+    expect(client.post).not.toHaveBeenCalled()
   })
 })

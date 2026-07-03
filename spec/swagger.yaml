@@ -7275,110 +7275,6 @@ paths:
       summary: Run bot hooks for a synthetic event
       tags:
       - hooks
-  /bots/{bot_id}/local/messages:
-    post:
-      consumes:
-      - application/json
-      description: Post a user message (with optional attachments) through the local
-        channel pipeline.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Message payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.LocalChannelMessageRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Send a message to a local channel
-      tags:
-      - local-channel
-  /bots/{bot_id}/local/stream:
-    get:
-      description: Open a persistent SSE connection to receive real-time stream events
-        for the given bot.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      produces:
-      - text/event-stream
-      responses:
-        "200":
-          description: SSE stream
-          schema:
-            type: string
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Subscribe to local channel events via SSE
-      tags:
-      - local-channel
-  /bots/{bot_id}/local/ws:
-    get:
-      description: Upgrade to WebSocket for bidirectional chat streaming with abort
-        support.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      responses:
-        "101":
-          description: Switching Protocols
-          schema:
-            type: string
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: WebSocket chat endpoint
-      tags:
-      - local-channel
   /bots/{bot_id}/mcp:
     get:
       description: List MCP connections for a bot
@@ -9987,6 +9883,110 @@ paths:
       summary: List grantable workspace members
       tags:
       - bots
+  /bots/{bot_id}/web/messages:
+    post:
+      consumes:
+      - application/json
+      description: Post a user message (with optional attachments) through the local
+        channel pipeline.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Message payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.LocalChannelMessageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Send a message to a local channel
+      tags:
+      - local-channel
+  /bots/{bot_id}/web/stream:
+    get:
+      description: Open a persistent SSE connection to receive real-time stream events
+        for the given bot.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Subscribe to local channel events via SSE
+      tags:
+      - local-channel
+  /bots/{bot_id}/web/ws:
+    get:
+      description: Upgrade to WebSocket for bidirectional chat streaming with abort
+        support.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "101":
+          description: Switching Protocols
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: WebSocket chat endpoint
+      tags:
+      - local-channel
   /bots/{id}:
     delete:
       description: Delete a bot user (owner/admin only)

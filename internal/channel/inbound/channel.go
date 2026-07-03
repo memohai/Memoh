@@ -413,7 +413,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 		return nil
 	}
-	if err := rejectReservedSkillMetadataInInboundMessage(msg); err != nil {
+	if err := channel.RejectReservedSkillMetadata(msg.Message); err != nil {
 		return p.sendSlashError(ctx, sender, msg, slash.CodeReservedSkillMetadata)
 	}
 	state, err := p.requireIdentity(ctx, cfg, msg)
@@ -745,7 +745,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			}
 			return p.sendSlashError(ctx, sender, msg, code)
 		}
-		requestedSkillContexts = requestedSkillContextsFromResolved(resolvedSkills)
+		requestedSkillContexts = skillset.RequestedSkillContexts(resolvedSkills)
 		skillActivation = conversation.NewSkillActivation(requestedSkillContexts, pendingSkillIntent.Prompt)
 		text = strings.TrimSpace(pendingSkillIntent.Prompt)
 		modelText = strings.TrimSpace(conversation.SkillActivationModelQuery(skillActivation))
@@ -1634,22 +1634,6 @@ func (p *ChannelInboundProcessor) resolveChannelRequestedSkills(ctx context.Cont
 	return p.skillResolver.ResolveTextRequestedSkills(ctx, botID, names)
 }
 
-func requestedSkillContextsFromResolved(items []skillset.ResolvedSkill) []conversation.RequestedSkillContext {
-	out := make([]conversation.RequestedSkillContext, 0, len(items))
-	for _, item := range items {
-		out = append(out, conversation.RequestedSkillContext{
-			Name:           item.Name,
-			Description:    item.Description,
-			Content:        item.Content,
-			SourceKind:     item.SourceKind,
-			OpaqueSourceID: item.OpaqueSourceID,
-			ContentHash:    item.ContentHash,
-			Identity:       item.Identity,
-		})
-	}
-	return out
-}
-
 // channelCaps returns the capability matrix for a channel type, or the zero
 // value when no registry is configured.
 func (p *ChannelInboundProcessor) channelCaps(channelType channel.ChannelType) channel.ChannelCapabilities {
@@ -1756,30 +1740,6 @@ func messageReplyMetadata(reply *channel.ReplyRef) map[string]any {
 		return nil
 	}
 	return result
-}
-
-func rejectReservedSkillMetadataInInboundMessage(msg channel.InboundMessage) error {
-	if err := slash.RejectReservedSkillMetadataValue(msg.Message.Metadata); err != nil {
-		return err
-	}
-	for _, part := range msg.Message.Parts {
-		if err := slash.RejectReservedSkillMetadataValue(part.Metadata); err != nil {
-			return err
-		}
-	}
-	for _, att := range msg.Message.Attachments {
-		if err := slash.RejectReservedSkillMetadataValue(att.Metadata); err != nil {
-			return err
-		}
-	}
-	if msg.Message.Reply != nil {
-		for _, att := range msg.Message.Reply.Attachments {
-			if err := slash.RejectReservedSkillMetadataValue(att.Metadata); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 func channelAttachmentMetadata(attachments []channel.Attachment) []map[string]any {
@@ -4457,7 +4417,7 @@ func sessionUsesACPRuntime(sess SessionResult) bool {
 }
 
 func sessionSupportsRequestedSkills(sess SessionResult) bool {
-	return strings.TrimSpace(sess.Type) == sessionpkg.TypeChat && !sessionUsesACPRuntime(sess)
+	return sessionpkg.SupportsSkillActivation("", sess.Type, sess.Runtime)
 }
 
 func newSessionSpecSupportsRequestedSkills(spec NewSessionSpec) bool {
@@ -4465,7 +4425,7 @@ func newSessionSpecSupportsRequestedSkills(spec NewSessionSpec) bool {
 	if typ == "" {
 		typ = strings.TrimSpace(spec.Mode)
 	}
-	return typ == sessionpkg.TypeChat && strings.TrimSpace(spec.Runtime) != sessionpkg.RuntimeACPAgent
+	return sessionpkg.SupportsSkillActivation("", typ, spec.Runtime)
 }
 
 func sessionRequiresACPRuntimeActor(sess SessionResult) bool {

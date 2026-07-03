@@ -31,11 +31,7 @@ func (r *Resolver) rejectRequestedSkillsIfUnsupportedContext(ctx context.Context
 		return err
 	}
 
-	mode := strings.TrimSpace(sess.SessionMode)
-	if mode == "" {
-		mode = strings.TrimSpace(sess.Type)
-	}
-	if mode != sessionpkg.TypeChat || sessionpkg.IsACPRuntime(sess) {
+	if !sessionpkg.SupportsSkillActivation(sess.SessionMode, sess.Type, sess.RuntimeType) {
 		return slash.NewError(slash.CodeUnsupportedSkillSlashContext)
 	}
 	return nil

@@ -69,7 +69,9 @@ func Classify(input ClassifyInput) Decision {
 
 	parsed, ok := parseSlash(cmdText, input.BotAliases)
 	if !ok {
-		return Decision{Kind: DecisionUnknownSlash, Code: CodeUnknownSlash, Directed: effectiveDirected}
+		// Slash-prefixed but with no parseable head token ("/ what is this"):
+		// prose, not a control message. Let it reach the model as chat.
+		return Decision{Kind: DecisionNormalChat, Directed: effectiveDirected}
 	}
 	effectiveDirected = effectiveDirected || parsed.Directed
 
@@ -116,7 +118,17 @@ func Classify(input ClassifyInput) Decision {
 		}
 	}
 
-	return Decision{Kind: DecisionUnknownSlash, Code: CodeUnknownSlash, Directed: effectiveDirected}
+	// The head token is outside every control grammar: not a known command,
+	// not command-shaped, not a valid skill selector (every command-shaped
+	// token is also a valid selector, so reaching here means the token has
+	// characters no command or skill name can carry — the "/" in a Unix path
+	// or URL, punctuation, non-ASCII). That is prose that happens to start
+	// with a slash ("/etc/hosts what does this line mean"): pass it to the
+	// model as normal chat, mirroring the deliberate path/URL carve-out the
+	// pre-classifier command handler had. Plausible-but-unregistered control
+	// tokens never get here — they classify as skill intents above and fail
+	// closed with requested_skill_not_found at resolve time.
+	return Decision{Kind: DecisionNormalChat, Directed: effectiveDirected}
 }
 
 type parsedCommand struct {

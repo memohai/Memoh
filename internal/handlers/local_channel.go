@@ -343,22 +343,12 @@ func slashUserMessage(code string) string {
 	}
 }
 
-func (h *LocalChannelHandler) resolveWebRequestedSkillContexts(ctx context.Context, botID, _ string, requested []webRequestedSkill) ([]conversation.RequestedSkillContext, error) {
-	if len(requested) == 0 {
-		return nil, nil
-	}
-	if h.skillResolver == nil {
-		return nil, slash.NewError(slash.CodeRequestedSkillNotRuntimeUsable)
-	}
+func (h *LocalChannelHandler) resolveWebRequestedSkillContexts(ctx context.Context, botID string, requested []webRequestedSkill) ([]conversation.RequestedSkillContext, error) {
 	names := make([]string, 0, len(requested))
 	for _, item := range requested {
 		names = append(names, strings.TrimSpace(item.Name))
 	}
-	resolved, err := h.skillResolver.ResolveTextRequestedSkills(ctx, botID, names)
-	if err != nil {
-		return nil, err
-	}
-	return requestedSkillContextsFromSafeResolved(resolved), nil
+	return h.resolveWebTextRequestedSkillContexts(ctx, botID, names)
 }
 
 func (h *LocalChannelHandler) resolveWebTextRequestedSkillContexts(ctx context.Context, botID string, names []string) ([]conversation.RequestedSkillContext, error) {
@@ -372,23 +362,7 @@ func (h *LocalChannelHandler) resolveWebTextRequestedSkillContexts(ctx context.C
 	if err != nil {
 		return nil, err
 	}
-	return requestedSkillContextsFromSafeResolved(resolved), nil
-}
-
-func requestedSkillContextsFromSafeResolved(resolved []skillset.ResolvedSkill) []conversation.RequestedSkillContext {
-	out := make([]conversation.RequestedSkillContext, 0, len(resolved))
-	for _, item := range resolved {
-		out = append(out, conversation.RequestedSkillContext{
-			Name:           item.Name,
-			Description:    item.Description,
-			Content:        item.Content,
-			SourceKind:     item.SourceKind,
-			OpaqueSourceID: item.OpaqueSourceID,
-			ContentHash:    item.ContentHash,
-			Identity:       item.Identity,
-		})
-	}
-	return out
+	return skillset.RequestedSkillContexts(resolved), nil
 }
 
 func (h *LocalChannelHandler) classifyWebSlash(text string, hasAttachments bool, surface slash.Surface) slash.Decision {
@@ -438,30 +412,6 @@ func sendWSCommandResult(writer *wsWriter, msg wsClientMessage, actionID string,
 	writer.SendJSON(event)
 }
 
-func rejectReservedSkillMetadataInLocalMessage(msg channel.Message) error {
-	if err := slash.RejectReservedSkillMetadataValue(msg.Metadata); err != nil {
-		return err
-	}
-	for _, part := range msg.Parts {
-		if err := slash.RejectReservedSkillMetadataValue(part.Metadata); err != nil {
-			return err
-		}
-	}
-	for _, att := range msg.Attachments {
-		if err := slash.RejectReservedSkillMetadataValue(att.Metadata); err != nil {
-			return err
-		}
-	}
-	if msg.Reply != nil {
-		for _, att := range msg.Reply.Attachments {
-			if err := slash.RejectReservedSkillMetadataValue(att.Metadata); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 // StreamMessages godoc
 // @Summary Subscribe to local channel events via SSE
 // @Description Open a persistent SSE connection to receive real-time stream events for the given bot.
@@ -472,7 +422,7 @@ func rejectReservedSkillMetadataInLocalMessage(msg channel.Message) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/local/stream [get].
+// @Router /bots/{bot_id}/web/stream [get].
 func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -561,7 +511,7 @@ type LocalChannelMessageRequest struct {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/local/messages [post].
+// @Router /bots/{bot_id}/web/messages [post].
 func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -598,13 +548,17 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	if req.Message.IsEmpty() {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
 	}
-	if err := rejectReservedSkillMetadataInLocalMessage(req.Message); err != nil {
+	if err := channel.RejectReservedSkillMetadata(req.Message); err != nil {
 		event := commandEvent("", "", "", "")
 		event.Type = "command_error"
 		event.Error = &CommandActionError{Code: slash.CodeReservedSkillMetadata, Message: slashUserMessage(slash.CodeReservedSkillMetadata)}
 		return c.JSON(http.StatusBadRequest, event)
 	}
-	if strings.HasPrefix(strings.TrimSpace(req.Message.PlainText()), "/") {
+	// Slash CONTROL input (commands, skill activation) is WS-only; the legacy
+	// REST endpoint rejects it instead of degrading. Run the shared classifier
+	// rather than a bare "/" prefix check so prose that merely starts with a
+	// slash ("/etc/nginx.conf keeps failing…") still reaches the model.
+	if decision := h.classifyWebSlash(strings.TrimSpace(req.Message.PlainText()), len(req.Message.Attachments) > 0, slash.SurfaceWebWS); decision.Kind != slash.DecisionNormalChat {
 		event := commandEvent("", "", "", "")
 		event.Type = "command_error"
 		event.Error = &CommandActionError{Code: slash.CodeUnsupportedLegacyEndpoint, Message: slashUserMessage(slash.CodeUnsupportedLegacyEndpoint)}
@@ -1114,7 +1068,7 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, ac
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/local/ws [get].
+// @Router /bots/{bot_id}/web/ws [get].
 func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -1389,7 +1343,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			}
 
 			if hasRequestedSkills {
-				requestedSkillContexts, err = h.resolveWebRequestedSkillContexts(streamBaseCtx, botID, text, msg.RequestedSkills)
+				requestedSkillContexts, err = h.resolveWebRequestedSkillContexts(streamBaseCtx, botID, msg.RequestedSkills)
 				if err != nil {
 					code := slashErrorCode(err)
 					if code == "" {
@@ -1600,11 +1554,7 @@ func (h *LocalChannelHandler) wsSessionSupportsRequestedSkills(ctx context.Conte
 	if err != nil {
 		return false, err
 	}
-	mode := strings.TrimSpace(sess.SessionMode)
-	if mode == "" {
-		mode = strings.TrimSpace(sess.Type)
-	}
-	return mode == sessionpkg.TypeChat && !sessionpkg.IsACPRuntime(sess), nil
+	return sessionpkg.SupportsSkillActivation(sess.SessionMode, sess.Type, sess.RuntimeType), nil
 }
 
 func (h *LocalChannelHandler) authorizeWSACPExecution(ctx context.Context, channelIdentityID, botID, sessionID string) (flow.ACPSessionExecutionInfo, error) {

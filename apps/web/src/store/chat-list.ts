@@ -3391,7 +3391,7 @@ export const useChatStore = defineStore('chat', () => {
         skillActivationAllowed,
       })
     } catch (error) {
-      const message = resolveApiErrorMessage(error, 'Slash command failed.')
+      const message = resolveApiErrorMessage(error, commandErrorMessage('generic'))
       showCommandError('generic', message, {
         botId: bid,
         sessionId: sid || undefined,
@@ -3403,7 +3403,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!event) return { kind: 'none' }
     rememberCommandEvent(event, { botId: bid, sessionId: sid || undefined, composerScope: scope })
     if (event.type === 'command_error') {
-      return { kind: 'error', message: event.error?.message || 'Slash command failed.' }
+      return { kind: 'error', message: event.error?.message || commandErrorMessage('generic') }
     }
     return { kind: 'handled' }
   }
@@ -3496,7 +3496,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     if (isWebSlashInput(trimmed) && attachments?.length) {
-      const message = 'Slash commands do not support attachments.'
+      const message = commandErrorMessage('slash_attachments_unsupported')
       showCommandError('slash_attachments_unsupported', message, currentCommandScope(composerScope))
       return { ok: false, stage: 'startup', error: message, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills) }
     }

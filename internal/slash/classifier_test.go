@@ -169,10 +169,27 @@ func TestClassifyModeSlashRemainderRejects(t *testing.T) {
 	}
 }
 
-func TestClassifyUnknownSlash(t *testing.T) {
-	decision := Classify(ClassifyInput{Text: "/wat?", Surface: SurfaceWebWS})
-	if decision.Kind != DecisionUnknownSlash || decision.Code != CodeUnknownSlash {
-		t.Fatalf("decision = %#v, want unknown slash", decision)
+// TestClassifySlashProseFallsThroughToChat pins the path/URL/prose carve-out:
+// a head token outside every control grammar (paths, URLs, punctuation,
+// non-ASCII) is prose that happens to start with a slash and must reach the
+// model as normal chat — the same deliberate exclusion the pre-classifier
+// command handler documented for paths. Plausible control tokens still fail
+// closed (as skill intents that resolve to requested_skill_not_found).
+func TestClassifySlashProseFallsThroughToChat(t *testing.T) {
+	for _, text := range []string{
+		"/wat?",
+		"/etc/hosts what does this line mean",
+		"/https://example.com check this",
+		"/ hello there",
+	} {
+		decision := Classify(ClassifyInput{Text: text, Surface: SurfaceWebWS})
+		if decision.Kind != DecisionNormalChat {
+			t.Fatalf("Classify(%q) = %#v, want normal chat", text, decision)
+		}
+		channelDecision := Classify(ClassifyInput{Text: text, Surface: SurfaceChannel, Directed: true})
+		if channelDecision.Kind != DecisionNormalChat {
+			t.Fatalf("Classify(%q, channel) = %#v, want normal chat", text, channelDecision)
+		}
 	}
 }
 

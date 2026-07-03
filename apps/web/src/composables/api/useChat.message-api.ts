@@ -6,8 +6,9 @@ import {
   getBotsByBotIdSessionsEvents,
   getBotsByBotIdSkillsCatalog,
   postBotsByBotIdQuickActionsExecute,
+  postBotsByBotIdWebMessages,
 } from '@memohai/sdk'
-import type { ChannelAttachment, ChannelMessage } from '@memohai/sdk'
+import type { ChannelAttachment, ChannelMessage, HandlersLocalChannelMessageRequest } from '@memohai/sdk'
 import type {
   BotSessionActivityEvent,
   ChatAttachment,
@@ -169,13 +170,12 @@ export async function sendLocalChannelMessage(
       name: item.name ?? '',
     }))
   }
-  const body: Record<string, unknown> = { message: msg }
+  const body: HandlersLocalChannelMessageRequest = { message: msg }
   if (overrides?.modelId) body.model_id = overrides.modelId
   if (overrides?.reasoningEffort) body.reasoning_effort = overrides.reasoningEffort
-  await client.post({
-    url: '/bots/{bot_id}/web/messages',
+  await postBotsByBotIdWebMessages({
     path: { bot_id: botId.trim() },
-    body: body as { message: ChannelMessage; model_id?: string; reasoning_effort?: string },
+    body,
     throwOnError: true,
   })
 }

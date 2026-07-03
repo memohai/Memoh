@@ -970,6 +970,16 @@ func IsACPRuntime(sess Session) bool {
 	return normalizeRuntimeType(sess.RuntimeType, sess.Type) == RuntimeACPAgent
 }
 
+// SupportsSkillActivation reports whether a session shape can accept
+// user-requested skill activation: chat mode (with the usual legacy-type
+// fallback) on the built-in model runtime. This is the single definition for
+// the rule — the web WS pre-check, the channel inbound gate, and the flow
+// resolver's final guard all call it, so the three surfaces cannot drift.
+func SupportsSkillActivation(sessionMode, legacyType, runtimeType string) bool {
+	return normalizeSessionMode(sessionMode, legacyType) == TypeChat &&
+		normalizeRuntimeType(runtimeType, legacyType) != RuntimeACPAgent
+}
+
 func normalizeSessionMode(mode, legacyType string) string {
 	if IsKnownSessionMode(mode) {
 		return strings.TrimSpace(mode)

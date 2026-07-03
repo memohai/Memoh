@@ -998,7 +998,7 @@ func TestResolveWebRequestedSkillContextsRejectsBlankName(t *testing.T) {
 			},
 		}},
 	}
-	_, err := handler.resolveWebRequestedSkillContexts(context.Background(), "bot-1", "", []webRequestedSkill{{Name: " "}})
+	_, err := handler.resolveWebRequestedSkillContexts(context.Background(), "bot-1", []webRequestedSkill{{Name: " "}})
 	var slashErr slash.Error
 	if !errors.As(err, &slashErr) || slashErr.Code != slash.CodeInvalidSkillSlashSyntax {
 		t.Fatalf("err = %#v, want %s", err, slash.CodeInvalidSkillSlashSyntax)
