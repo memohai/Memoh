@@ -57,6 +57,15 @@ type uiPendingAssistantTurn struct {
 	ToolIndexes map[string]int
 }
 
+type uiDecodedModelMessage struct {
+	ModelMessage
+
+	contentText         string
+	contentTextDecoded  bool
+	contentParts        []uiContentPart
+	contentPartsDecoded bool
+}
+
 // ConvertRawModelMessagesToUIAssistantMessages converts terminal stream payload
 // messages into frontend-friendly assistant UI messages.
 func ConvertRawModelMessagesToUIAssistantMessages(raw json.RawMessage) []UIMessage {
@@ -79,23 +88,24 @@ func ConvertModelMessagesToUIAssistantMessages(messages []ModelMessage) []UIMess
 	}
 
 	for _, modelMessage := range messages {
-		switch strings.ToLower(strings.TrimSpace(modelMessage.Role)) {
+		decoded := decodeUIModelMessage(modelMessage)
+		switch strings.ToLower(strings.TrimSpace(decoded.Role)) {
 		case "assistant":
-			for _, reasoning := range extractPersistedReasoning(modelMessage) {
+			for _, reasoning := range extractPersistedReasoning(&decoded) {
 				appendPendingAssistantMessage(pending, UIMessage{
 					Type:    UIMessageReasoning,
 					Content: reasoning,
 				})
 			}
 
-			if text := extractAssistantStreamMessageText(modelMessage); text != "" {
+			if text := extractAssistantStreamMessageText(&decoded); text != "" {
 				appendPendingAssistantMessage(pending, UIMessage{
 					Type:    UIMessageText,
 					Content: text,
 				})
 			}
 
-			for _, call := range extractPersistedToolCalls(modelMessage) {
+			for _, call := range extractPersistedToolCalls(&decoded) {
 				appendPendingAssistantMessage(pending, UIMessage{
 					Type:       UIMessageTool,
 					Name:       call.Name,
@@ -111,7 +121,7 @@ func ConvertModelMessagesToUIAssistantMessages(messages []ModelMessage) []UIMess
 			}
 
 		case "tool":
-			for _, toolResult := range extractPersistedToolResults(modelMessage) {
+			for _, toolResult := range extractPersistedToolResults(&decoded) {
 				idx, ok := pending.ToolIndexes[toolResult.ToolCallID]
 				if !ok || idx < 0 || idx >= len(pending.Turn.Messages) {
 					continue
@@ -147,8 +157,7 @@ func IsUITurnBoundary(raw messagepkg.Message) bool {
 		return false
 	}
 
-	model := decodePersistedModelMessage(raw)
-	text := extractPersistedMessageText(raw, model)
+	text := extractPersistedMessageText(raw, nil)
 
 	// Background-task completion opens its own system turn.
 	if _, ok := parseBackgroundTaskNotification(text); ok {
@@ -228,10 +237,9 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 	}
 
 	for _, raw := range messages {
-		modelMessage := decodePersistedModelMessage(raw)
 		switch strings.ToLower(strings.TrimSpace(raw.Role)) {
 		case "user":
-			text := extractPersistedMessageText(raw, modelMessage)
+			text := extractPersistedMessageText(raw, nil)
 			attachments := uiAttachmentsFromMessageAssets(raw)
 			reply := uiReplyFromMessage(raw)
 			forward := uiForwardFromMessage(raw)
@@ -297,9 +305,10 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			result = append(result, turn)
 
 		case "assistant":
-			toolCalls := extractPersistedToolCalls(modelMessage)
-			text := extractPersistedMessageText(raw, modelMessage)
-			reasonings := extractPersistedReasoning(modelMessage)
+			modelMessage := decodePersistedModelMessage(raw)
+			toolCalls := extractPersistedToolCalls(&modelMessage)
+			text := extractPersistedMessageText(raw, &modelMessage)
+			reasonings := extractPersistedReasoning(&modelMessage)
 			attachments := uiAttachmentsFromMessageAssets(raw)
 
 			// An assistant turn spans the whole reply to a user message: every
@@ -349,7 +358,8 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 				continue
 			}
 
-			for _, toolResult := range extractPersistedToolResults(modelMessage) {
+			modelMessage := decodePersistedModelMessage(raw)
+			for _, toolResult := range extractPersistedToolResults(&modelMessage) {
 				idx, ok := pending.ToolIndexes[toolResult.ToolCallID]
 				if !ok || idx < 0 || idx >= len(pending.Turn.Messages) {
 					continue
@@ -424,19 +434,23 @@ func upsertPendingToolCall(pending *uiPendingAssistantTurn, call uiExtractedTool
 	}
 }
 
-func decodePersistedModelMessage(raw messagepkg.Message) ModelMessage {
-	var message ModelMessage
-	if err := json.Unmarshal(raw.Content, &message); err != nil {
-		return ModelMessage{
-			Role:    raw.Role,
-			Content: raw.Content,
-		}
-	}
-	message.Role = raw.Role
-	return message
+func decodeUIModelMessage(message ModelMessage) uiDecodedModelMessage {
+	return uiDecodedModelMessage{ModelMessage: message}
 }
 
-func extractPersistedMessageText(raw messagepkg.Message, message ModelMessage) string {
+func decodePersistedModelMessage(raw messagepkg.Message) uiDecodedModelMessage {
+	var message ModelMessage
+	if err := json.Unmarshal(raw.Content, &message); err != nil {
+		return uiDecodedModelMessage{ModelMessage: ModelMessage{
+			Role:    raw.Role,
+			Content: raw.Content,
+		}}
+	}
+	message.Role = raw.Role
+	return uiDecodedModelMessage{ModelMessage: message}
+}
+
+func extractPersistedMessageText(raw messagepkg.Message, message *uiDecodedModelMessage) string {
 	if strings.EqualFold(raw.Role, "user") {
 		if activation := uiSkillActivationFromMessage(raw); activation != nil {
 			if prompt := strings.TrimSpace(activation.Prompt); prompt != "" {
@@ -455,7 +469,11 @@ func extractPersistedMessageText(raw messagepkg.Message, message ModelMessage) s
 		}
 	}
 
-	text := strings.TrimSpace(extractTextFromPersistedContent(message.Content))
+	if message == nil {
+		decoded := decodePersistedModelMessage(raw)
+		message = &decoded
+	}
+	text := strings.TrimSpace(message.textContent())
 	if text == "" {
 		return ""
 	}
@@ -558,21 +576,26 @@ func isPersistedUserContextLine(line string) bool {
 	return strings.HasPrefix(line, "<in-reply-to ") && strings.HasSuffix(line, "</in-reply-to>")
 }
 
-func extractAssistantStreamMessageText(message ModelMessage) string {
-	return strings.TrimSpace(stripPersistedAgentTags(extractTextFromPersistedContent(message.Content)))
+func extractAssistantStreamMessageText(message *uiDecodedModelMessage) string {
+	return strings.TrimSpace(stripPersistedAgentTags(message.textContent()))
 }
 
-func extractTextFromPersistedContent(raw json.RawMessage) string {
-	if len(raw) == 0 {
+func (message *uiDecodedModelMessage) textContent() string {
+	if message == nil || len(message.Content) == 0 {
 		return ""
 	}
+	if message.contentTextDecoded {
+		return message.contentText
+	}
+	message.contentTextDecoded = true
 
 	var text string
-	if err := json.Unmarshal(raw, &text); err == nil {
-		return strings.TrimSpace(text)
+	if err := json.Unmarshal(message.Content, &text); err == nil {
+		message.contentText = strings.TrimSpace(text)
+		return message.contentText
 	}
 
-	parts := extractPersistedContentParts(raw)
+	parts := message.parts()
 	if len(parts) > 0 {
 		lines := make([]string, 0, len(parts))
 		for _, part := range parts {
@@ -591,21 +614,23 @@ func extractTextFromPersistedContent(raw json.RawMessage) string {
 				lines = append(lines, strings.TrimSpace(part.Text))
 			}
 		}
-		return strings.TrimSpace(strings.Join(lines, "\n"))
+		message.contentText = strings.TrimSpace(strings.Join(lines, "\n"))
+		return message.contentText
 	}
 
 	var object map[string]any
-	if err := json.Unmarshal(raw, &object); err == nil {
+	if err := json.Unmarshal(message.Content, &object); err == nil {
 		if value, ok := object["text"].(string); ok {
-			return strings.TrimSpace(value)
+			message.contentText = strings.TrimSpace(value)
+			return message.contentText
 		}
 	}
 
 	return ""
 }
 
-func extractPersistedReasoning(message ModelMessage) []string {
-	parts := extractPersistedContentParts(message.Content)
+func extractPersistedReasoning(message *uiDecodedModelMessage) []string {
+	parts := message.parts()
 	if len(parts) == 0 {
 		return nil
 	}
@@ -622,8 +647,8 @@ func extractPersistedReasoning(message ModelMessage) []string {
 	return reasonings
 }
 
-func extractPersistedToolCalls(message ModelMessage) []uiExtractedToolCall {
-	parts := extractPersistedContentParts(message.Content)
+func extractPersistedToolCalls(message *uiDecodedModelMessage) []uiExtractedToolCall {
+	parts := message.parts()
 	calls := make([]uiExtractedToolCall, 0, len(parts)+len(message.ToolCalls))
 	for _, part := range parts {
 		if strings.ToLower(strings.TrimSpace(part.Type)) != "tool-call" {
@@ -749,8 +774,8 @@ func boolFromAny(value any, fallback bool) bool {
 	return fallback
 }
 
-func extractPersistedToolResults(message ModelMessage) []uiExtractedToolResult {
-	parts := extractPersistedContentParts(message.Content)
+func extractPersistedToolResults(message *uiDecodedModelMessage) []uiExtractedToolResult {
+	parts := message.parts()
 	results := make([]uiExtractedToolResult, 0, len(parts))
 	for _, part := range parts {
 		if strings.ToLower(strings.TrimSpace(part.Type)) != "tool-result" {
@@ -781,6 +806,18 @@ func extractPersistedToolResults(message ModelMessage) []uiExtractedToolResult {
 		ToolCallID: strings.TrimSpace(message.ToolCallID),
 		Output:     output,
 	}}
+}
+
+func (message *uiDecodedModelMessage) parts() []uiContentPart {
+	if message == nil || len(message.Content) == 0 {
+		return nil
+	}
+	if message.contentPartsDecoded {
+		return message.contentParts
+	}
+	message.contentParts = extractPersistedContentParts(message.Content)
+	message.contentPartsDecoded = true
+	return message.contentParts
 }
 
 func extractPersistedContentParts(raw json.RawMessage) []uiContentPart {
