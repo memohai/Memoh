@@ -46,6 +46,8 @@
 //   4. likely hand-rolled icon-button hover (WARN)
 //   8. raw shadow utility (WARN)  9. border-input on a control (WARN)
 //  10. ring-offset-* selection halo (WARN)
+//  11. hand-rolled SettingsRow — min-h-[3.75rem] outside the owner (WARN, apps/web);
+//      escape hatch `ui-allow-shape` for a genuinely different row
 //
 // Run: node scripts/check-ui-contract.mjs   (wired into `mise run lint`)
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -73,6 +75,13 @@ const RADIUS_ALLOW = new Set([
   'rounded-[inherit]',
   'rounded-[2px]',
   'rounded-[calc(var(--radius)-5px)]',
+])
+// The only files allowed to author the canonical settings-row height (3.75rem).
+// Anywhere else that literal appears, a row was hand-rolled instead of composing
+// <SettingsRow> — the 同形异码 the owner vocabulary exists to kill. See rule 11.
+const OWNER_ROW_FILES = new Set([
+  'apps/web/src/components/settings/row.vue',
+  'apps/web/src/components/settings/expandable-row.vue',
 ])
 // Box props (height / padding / gap / space) below this px size are hairlines or
 // indicator bars (a 2px tab underline, a 3px link offset), never a text container —
@@ -135,6 +144,7 @@ function scan(file, full) {
     // comment survives the code-stripper).
     const allowPx = rawLine.includes('ui-allow-px')
     const allowStyle = rawLine.includes('ui-allow-style')
+    const allowShape = rawLine.includes('ui-allow-shape')
     for (const tok of line.split(/[\s'"`]+/)) {
       if (!tok) continue
 
@@ -170,6 +180,17 @@ function scan(file, full) {
         else if (/(?:^|:)shadow-(?:2xs|xs|sm|md|lg|xl|2xl)$/.test(tok))
           appHard.push({ rel, ln, msg: `invented shadow (use an elevation token or shadow-none) → ${tok}` })
       }
+
+      // 11. hand-rolled SettingsRow (WARN). The canonical row height 3.75rem is an
+      //   arbitrary, distinctive literal — it only appears because a row was copied
+      //   out of <SettingsRow> as raw divs instead of composed. Token-level rules
+      //   can't see a whole owner shape, but this one geometry has a rare fingerprint
+      //   that catches the SettingsRow slice of the 同形异码 debt at ~0% false
+      //   positive. WARN, not HARD: a genuinely denser/different row may coincide —
+      //   triage against the "stay hand-written" tells in the owner skill, or silence
+      //   a confirmed-different one with `ui-allow-shape` on the line.
+      if (!full && !allowShape && !OWNER_ROW_FILES.has(rel) && /(?:^|:)min-h-\[3\.75rem\]/.test(tok))
+        warn.push(`${rel}:${ln}  possible hand-rolled SettingsRow (min-h-[3.75rem] outside the owner) — compose <SettingsRow>, or mark ui-allow-shape if it is a genuinely different row → ${tok}`)
 
       // ── contract rules (packages/ui only) ────────────────────────────────
       if (!full) continue
