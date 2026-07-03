@@ -1335,12 +1335,12 @@ func (q *Queries) ForkSessionFromAssistantMessage(ctx context.Context, arg pgsql
 	}
 
 	messageIDMap := make(map[string]string)
-	visibleMessageIDs, err := sqliteForkVisibleMessageIDs(ctx, tx, sessionID, forkTarget)
+	visibleMessages, err := sqliteForkVisibleMessages(ctx, tx, sessionID, forkTarget)
 	if err != nil {
 		return pgsqlc.ForkSessionFromAssistantMessageRow{}, mapQueryErr(err)
 	}
-	for _, sourceMessageID := range visibleMessageIDs {
-		if _, err := sqliteForkCopyMessage(ctx, tx, qtx, sourceMessageID, created.ID, messageIDMap); err != nil {
+	for _, sourceMessage := range visibleMessages {
+		if _, err := sqliteForkCopyMessage(ctx, tx, qtx, sourceMessage.ID, created.ID, messageIDMap); err != nil {
 			return pgsqlc.ForkSessionFromAssistantMessageRow{}, err
 		}
 	}
@@ -1362,6 +1362,7 @@ func (q *Queries) ForkSessionFromAssistantMessage(ctx context.Context, arg pgsql
 	if err != nil {
 		return pgsqlc.ForkSessionFromAssistantMessageRow{}, mapQueryErr(err)
 	}
+	turnIDByPosition := make(map[int64]string, len(turns))
 	for _, turn := range turns {
 		var requestID sql.NullString
 		if turn.RequestMessageID.Valid {
@@ -1371,12 +1372,28 @@ func (q *Queries) ForkSessionFromAssistantMessage(ctx context.Context, arg pgsql
 		if turn.AssistantMessageID.Valid {
 			assistantID = sql.NullString{String: messageIDMap[turn.AssistantMessageID.String], Valid: true}
 		}
-		if _, err := qtx.CreateHistoryTurn(ctx, sqlitesqlc.CreateHistoryTurnParams{
+		createdTurn, err := qtx.CreateHistoryTurn(ctx, sqlitesqlc.CreateHistoryTurnParams{
 			BotID:              created.BotID,
 			SessionID:          created.ID,
 			RequestMessageID:   requestID,
 			AssistantMessageID: assistantID,
-		}); err != nil {
+		})
+		if err != nil {
+			return pgsqlc.ForkSessionFromAssistantMessageRow{}, mapQueryErr(err)
+		}
+		turnIDByPosition[turn.Position] = createdTurn.ID
+	}
+	for _, sourceMessage := range visibleMessages {
+		copiedID := messageIDMap[sourceMessage.ID]
+		turnID := turnIDByPosition[sourceMessage.TurnPosition]
+		if copiedID == "" || turnID == "" {
+			return pgsqlc.ForkSessionFromAssistantMessageRow{}, pgx.ErrNoRows
+		}
+		if _, err := tx.ExecContext(ctx, `
+UPDATE bot_history_messages
+SET turn_id = ?, turn_message_seq = ?
+WHERE id = ?
+`, turnID, sourceMessage.TurnMessageSeq, copiedID); err != nil {
 			return pgsqlc.ForkSessionFromAssistantMessageRow{}, mapQueryErr(err)
 		}
 	}
@@ -1445,6 +1462,12 @@ type sqliteForkTarget struct {
 	MessageID string
 }
 
+type sqliteForkVisibleMessage struct {
+	ID             string
+	TurnPosition   int64
+	TurnMessageSeq int64
+}
+
 func sqliteForkVisibleTurns(ctx context.Context, tx *sql.Tx, sessionID string, target sqliteForkTarget) ([]sqliteForkTurn, error) {
 	rows, err := tx.QueryContext(ctx, `
 SELECT id, position, request_message_id, assistant_message_id
@@ -1493,9 +1516,9 @@ LIMIT 1
 	return target, nil
 }
 
-func sqliteForkVisibleMessageIDs(ctx context.Context, tx *sql.Tx, sessionID string, target sqliteForkTarget) ([]string, error) {
+func sqliteForkVisibleMessages(ctx context.Context, tx *sql.Tx, sessionID string, target sqliteForkTarget) ([]sqliteForkVisibleMessage, error) {
 	rows, err := tx.QueryContext(ctx, `
-SELECT vm.id
+SELECT vm.id, vm.turn_position, vm.turn_message_seq
 FROM bot_visible_history_messages vm
 WHERE vm.session_id = ?
   AND (
@@ -1511,27 +1534,27 @@ ORDER BY vm.turn_position ASC, vm.turn_message_seq ASC, vm.created_at ASC, vm.id
 		_ = rows.Close()
 	}()
 
-	var ids []string
+	var messages []sqliteForkVisibleMessage
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var message sqliteForkVisibleMessage
+		if err := rows.Scan(&message.ID, &message.TurnPosition, &message.TurnMessageSeq); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		messages = append(messages, message)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return ids, nil
+	return messages, nil
 }
 
 func sqliteForkAnchorMessageID(ctx context.Context, tx *sql.Tx, sessionID string, target sqliteForkTarget, messageIDMap map[string]string) (string, error) {
 	row := tx.QueryRowContext(ctx, `
-SELECT vm.id
-FROM bot_visible_history_messages vm
-WHERE vm.session_id = ?
-  AND vm.turn_position = ?
-ORDER BY vm.turn_message_seq DESC, vm.created_at DESC, vm.id DESC
+SELECT t.assistant_message_id
+FROM bot_history_turns t
+WHERE t.session_id = ?
+  AND t.position = ?
+  AND t.superseded_at IS NULL
 LIMIT 1
 `, sessionID, target.Position)
 	var oldMessageID string

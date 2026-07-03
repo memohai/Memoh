@@ -2918,7 +2918,7 @@ describe('chat-list store', () => {
           session_id: 'source-session',
           title: 'Source',
           message_id: 'source-assistant',
-          fork_message_id: 'fork-assistant',
+          fork_message_id: 'fork-final-raw-message',
         },
       },
     })

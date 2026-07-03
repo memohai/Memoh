@@ -58,6 +58,12 @@ INSERT INTO bot_history_turns (id, bot_id, session_id, position, request_message
 VALUES (?, ?, ?, 1, ?, ?)`, turnID, botID, sessionID, userID, assistantID); err != nil {
 		t.Fatalf("insert turn: %v", err)
 	}
+	if _, err := conn.ExecContext(ctx, `
+UPDATE bot_history_messages
+SET turn_id = ?, turn_message_seq = CASE id WHEN ? THEN 1 WHEN ? THEN 2 END
+WHERE id IN (?, ?)`, turnID, userID, assistantID, userID, assistantID); err != nil {
+		t.Fatalf("link source messages: %v", err)
+	}
 
 	store, err := New(conn)
 	if err != nil {
@@ -99,6 +105,7 @@ WHERE session_id = ? AND id = ?
 	if copiedCreatedAt != replyTime {
 		t.Fatalf("copied assistant created_at = %q, want %q", copiedCreatedAt, replyTime)
 	}
+	assertSQLiteForkAnchorVisible(t, ctx, conn, forked.ID.String(), meta.ForkedFrom.ForkMessageID)
 }
 
 func TestSQLiteForkSessionCopiesCompleteAssistantTurn(t *testing.T) {
@@ -148,6 +155,12 @@ INSERT INTO bot_history_turns (id, bot_id, session_id, position, request_message
 VALUES (?, ?, ?, 1, ?, ?)`, turnID, botID, sessionID, userID, assistantID); err != nil {
 		t.Fatalf("insert turn: %v", err)
 	}
+	if _, err := conn.ExecContext(ctx, `
+UPDATE bot_history_messages
+SET turn_id = ?, turn_message_seq = CASE id WHEN ? THEN 1 WHEN ? THEN 2 WHEN ? THEN 3 END
+WHERE id IN (?, ?, ?)`, turnID, userID, assistantID, tailID, userID, assistantID, tailID); err != nil {
+		t.Fatalf("link source messages: %v", err)
+	}
 
 	store, err := New(conn)
 	if err != nil {
@@ -183,8 +196,44 @@ WHERE session_id = ? AND id = ?
 	if err != nil {
 		t.Fatalf("load copied fork anchor: %v", err)
 	}
-	if copiedContent != `{"role":"assistant","content":"final answer"}` {
-		t.Fatalf("fork anchor copied content = %q, want final answer", copiedContent)
+	if copiedContent != `{"role":"assistant","content":"tool call"}` {
+		t.Fatalf("fork anchor copied content = %q, want first assistant message", copiedContent)
+	}
+	assertSQLiteForkAnchorVisible(t, ctx, conn, forked.ID.String(), meta.ForkedFrom.ForkMessageID)
+	assertSQLiteForkCopiedContentVisible(t, ctx, conn, forked.ID.String(), `{"role":"assistant","content":"final answer"}`)
+}
+
+func assertSQLiteForkAnchorVisible(t *testing.T, ctx context.Context, conn *sql.DB, sessionID, messageID string) {
+	t.Helper()
+
+	var visibleCount int
+	err := conn.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM bot_visible_history_messages
+WHERE session_id = ? AND id = ?
+`, sessionID, messageID).Scan(&visibleCount)
+	if err != nil {
+		t.Fatalf("count visible fork anchor: %v", err)
+	}
+	if visibleCount != 1 {
+		t.Fatalf("visible fork anchor count = %d, want 1", visibleCount)
+	}
+}
+
+func assertSQLiteForkCopiedContentVisible(t *testing.T, ctx context.Context, conn *sql.DB, sessionID, content string) {
+	t.Helper()
+
+	var visibleCount int
+	err := conn.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM bot_visible_history_messages
+WHERE session_id = ? AND content = ?
+`, sessionID, content).Scan(&visibleCount)
+	if err != nil {
+		t.Fatalf("count visible copied content: %v", err)
+	}
+	if visibleCount != 1 {
+		t.Fatalf("visible copied content count = %d, want 1", visibleCount)
 	}
 }
 
@@ -219,6 +268,8 @@ CREATE TABLE bot_history_messages (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL,
   session_id TEXT,
+  turn_id TEXT,
+  turn_message_seq INTEGER,
   sender_channel_identity_id TEXT,
   sender_account_user_id TEXT,
   source_message_id TEXT,
@@ -270,29 +321,30 @@ CREATE TABLE bot_history_turns (
   UNIQUE (session_id, position)
 );
 CREATE VIEW bot_visible_history_messages AS
-SELECT t.id AS turn_id, t.position AS turn_position, 1 AS turn_message_seq, m.*
-FROM bot_history_turns t
-JOIN bot_history_messages m ON m.id = t.request_message_id
-WHERE t.superseded_at IS NULL
-UNION ALL
-SELECT t.id AS turn_id, t.position AS turn_position, 2 AS turn_message_seq, m.*
-FROM bot_history_turns t
-JOIN bot_history_messages m ON m.id = t.assistant_message_id
-WHERE t.superseded_at IS NULL
-UNION ALL
 SELECT
   t.id AS turn_id,
   t.position AS turn_position,
-  2 + ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY m.created_at, m.id) AS turn_message_seq,
-  m.*
-FROM bot_history_turns t
-JOIN bot_history_messages anchor ON anchor.id = t.assistant_message_id
-JOIN bot_history_messages m
-  ON m.session_id = t.session_id
- AND m.role IN ('assistant', 'tool')
- AND m.id <> t.assistant_message_id
-WHERE t.superseded_at IS NULL
-  AND (m.created_at > anchor.created_at OR (m.created_at = anchor.created_at AND m.id > anchor.id));
+  m.turn_message_seq,
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id,
+  m.source_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.session_mode,
+  m.runtime_type,
+  m.model_id,
+  m.event_id,
+  m.display_text,
+  m.created_at
+FROM bot_history_messages m
+JOIN bot_history_turns t ON t.id = m.turn_id
+WHERE t.superseded_at IS NULL;
 `
 
 var _ = sql.ErrNoRows

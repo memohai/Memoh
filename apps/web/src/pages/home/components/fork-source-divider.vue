@@ -1,21 +1,19 @@
 <template>
-  <div class="flex items-center gap-3 py-1 text-caption text-border">
+  <div class="flex items-center gap-3 py-1">
     <span
       aria-hidden="true"
       class="h-px flex-1 bg-border"
     />
-    <Button
+    <TextButton
       type="button"
-      variant="ghost"
-      size="text"
-      class="max-w-[min(22rem,70vw)] text-border"
+      class="max-w-[min(22rem,70vw)] text-caption font-normal text-muted-foreground"
       :title="title"
       @click="$emit('openSource')"
     >
       <span class="truncate">
         {{ t('chat.forkedFrom', { session: title }) }}
       </span>
-    </Button>
+    </TextButton>
     <span
       aria-hidden="true"
       class="h-px flex-1 bg-border"
@@ -24,7 +22,7 @@
 </template>
 
 <script setup lang="ts">
-import { Button } from '@memohai/ui'
+import { TextButton } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 
 defineProps<{

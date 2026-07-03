@@ -645,6 +645,54 @@ export const useChatStore = defineStore('chat', () => {
     return String(forkSourceMetadata(session)?.fork_message_id ?? '').trim()
   }
 
+  function forkAnchorFromUITurns(turns: UITurn[], session?: SessionSummary | null): string {
+    const cutoff = Date.parse(session?.created_at ?? '')
+    const hasCutoff = Number.isFinite(cutoff)
+    let fallback = ''
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const turn = turns[i]
+      if (turn.role !== 'assistant') continue
+      const id = String(turn.id ?? '').trim()
+      if (!id) continue
+      if (!fallback) fallback = id
+      if (!hasCutoff) return id
+      const timestamp = Date.parse(turn.timestamp)
+      if (Number.isFinite(timestamp) && timestamp <= cutoff + 1000) return id
+    }
+    return fallback
+  }
+
+  function withForkAnchorFromUITurns(session: SessionSummary, turns: UITurn[]): SessionSummary {
+    const anchor = forkAnchorFromUITurns(turns, session)
+    if (!anchor) return session
+    const fork = forkSourceMetadata(session)
+    if (!fork) return session
+    if (forkSourceAnchor(session) === anchor) return session
+
+    const metadata = session.metadata && typeof session.metadata === 'object' ? session.metadata : {}
+    return {
+      ...session,
+      metadata: {
+        ...metadata,
+        forked_from: {
+          ...fork,
+          fork_message_id: anchor,
+        },
+      },
+    }
+  }
+
+  function syncForkAnchorFromUITurns(targetSessionId: string | undefined, turns: UITurn[]) {
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
+    if (!sid || turns.length === 0) return
+    const known = knownSessionSummary(sid)
+    if (!known || !forkSourceMetadata(known)) return
+    const anchored = withForkAnchorFromUITurns(known, turns)
+    if (anchored === known) return
+    upsertSession(anchored)
+    rememberSession(anchored)
+  }
+
   function preserveSessionSummary(incoming: SessionSummary, known?: SessionSummary | null): SessionSummary {
     let next = incoming
     if (known && !(next.title ?? '').trim() && (known.title ?? '').trim()) {
@@ -1381,6 +1429,7 @@ export const useChatStore = defineStore('chat', () => {
   // touching another session's data, so cross-session caching has no purpose.
 
   function replaceMessages(items: UITurn[], targetSessionId?: string) {
+    syncForkAnchorFromUITurns(targetSessionId, items)
     const next = normalizeTurns(items, targetSessionId)
     messages.splice(0, messages.length, ...next)
   }
@@ -3594,6 +3643,11 @@ export const useChatStore = defineStore('chat', () => {
       void refreshSessionsList(bid)
 
       const turns = await fetchMessagesUI(bid, forked.id, { limit: PAGE_SIZE })
+      const anchoredForked = withForkAnchorFromUITurns(forked, turns)
+      if (anchoredForked !== forked) {
+        upsertSession(anchoredForked)
+        rememberSession(anchoredForked)
+      }
       if ((currentBotId.value ?? '').trim() !== bid || (sessionId.value ?? '').trim() !== sid) {
         return true
       }

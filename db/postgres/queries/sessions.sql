@@ -170,6 +170,16 @@ inserted_turns AS (
   LEFT JOIN inserted_messages assistant_inserted ON assistant_inserted.id = assistant_message.new_message_id
   RETURNING id
 ),
+linked_messages AS (
+  UPDATE bot_history_messages m
+  SET turn_id = inserted_turns.id,
+      turn_message_seq = copy_messages.turn_message_seq
+  FROM copy_messages
+  JOIN copy_turns ON copy_turns.position = copy_messages.turn_position
+  JOIN inserted_turns ON inserted_turns.id = copy_turns.new_turn_id
+  WHERE m.id = copy_messages.new_message_id
+  RETURNING m.id
+),
 copied_assets AS (
   INSERT INTO bot_history_message_assets (
     message_id,
@@ -192,10 +202,10 @@ copied_assets AS (
   RETURNING id
 ),
 fork_anchor_message AS (
-  SELECT cm.new_message_id
-  FROM copy_messages cm
-  JOIN target_turn tt ON cm.turn_position = tt.position
-  ORDER BY cm.turn_message_seq DESC, cm.created_at DESC, cm.old_message_id DESC
+  SELECT assistant_message.new_message_id
+  FROM copy_turns ct
+  JOIN target_turn tt ON tt.id = ct.old_turn_id
+  JOIN copy_messages assistant_message ON assistant_message.old_message_id = ct.assistant_message_id
   LIMIT 1
 ),
 updated_session AS (
@@ -214,6 +224,7 @@ updated_session AS (
 SELECT us.*
 FROM updated_session us
 CROSS JOIN (SELECT count(*) AS copied_asset_count FROM copied_assets) copied_asset_counts
+CROSS JOIN (SELECT count(*) AS linked_message_count FROM linked_messages) linked_message_counts
 WHERE EXISTS (SELECT 1 FROM inserted_turns);
 
 -- name: GetSessionByID :one
