@@ -578,7 +578,6 @@ func (a *TelegramAdapter) buildTelegramCallbackInboundMessage(cfg channel.Channe
 		"callback_query_id": cb.ID,
 	}
 	var text string
-	skillActivation := false
 	if action, approvalID, ok := parseTelegramApprovalCallback(cb.Data); ok {
 		text = "/" + action + " " + approvalID
 		extraMeta["is_mentioned"] = true
@@ -594,13 +593,11 @@ func (a *TelegramAdapter) buildTelegramCallbackInboundMessage(cfg channel.Channe
 		// A tap on the bot's own keyboard is by definition directed at the bot,
 		// so the command path runs even in group chats.
 		extraMeta["is_mentioned"] = true
-		if parsed.IsSkillActivation() {
-			// Activation starts a fresh chat turn: reply as a NEW message so
-			// the skill list card (and its keyboard) survives for further taps.
-			skillActivation = true
-		} else {
+		if !parsed.IsSkillActivation() {
 			// Pagination/selection: re-render the existing message in place
-			// rather than posting a new one.
+			// rather than posting a new one. Skill activation instead starts a
+			// fresh chat turn: reply as a NEW message so the skill list card
+			// (and its keyboard) survives for further taps.
 			extraMeta["edit_message_id"] = strconv.Itoa(cb.Message.ID)
 		}
 	} else {
@@ -616,11 +613,12 @@ func (a *TelegramAdapter) buildTelegramCallbackInboundMessage(cfg channel.Channe
 	}
 	msg.Message.Reply = &channel.ReplyRef{
 		MessageID: replyID,
-		// The tapped card is the bot's own text+keyboard message, so the
-		// adapter can assert it carries no attachments. Without this the
-		// skill-slash attachment fail-closed rule would reject every
-		// tap-to-activate (an unproven reply counts as "may have attachments").
-		AttachmentsKnown: skillActivation,
+		// Every callback tap replies to the bot's own text+keyboard card, so
+		// the adapter can assert the reply carries no attachments regardless
+		// of callback kind. Without this the skill-slash attachment
+		// fail-closed rule would reject tap-to-activate (an unproven reply
+		// counts as "may have attachments").
+		AttachmentsKnown: true,
 	}
 	return msg, true
 }

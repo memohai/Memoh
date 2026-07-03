@@ -437,7 +437,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		Timezone:          runCfg.Identity.Timezone,
 	}
 	headerifiedQuery := ""
-	if strings.TrimSpace(req.Query) != "" {
+	if userQueryNeedsHeader(req, len(mergedAttachments)) {
 		headerifiedQuery = FormatUserHeader(headerInput, req.Query)
 	}
 	headerifiedModelQuery := headerifiedQuery
@@ -1356,6 +1356,21 @@ func anyNumberToByte(value any) (byte, bool) {
 		return 0, false
 	}
 	return byte(parsed), true
+}
+
+// userQueryNeedsHeader reports whether resolve should wrap req.Query in the
+// user message header (sender/channel/time/attachment paths). Text always
+// gets a header. An attachment-only message (no caption) must too: the header
+// is the only thing telling the model who sent what file, and the headerified
+// query is what makes the user turn (with its asset links) persist to history.
+// The one deliberate exception is a no-prompt skill activation, whose stored
+// user content must stay empty (its model text travels via ModelQuery, and
+// display state via skill_activation metadata).
+func userQueryNeedsHeader(req conversation.ChatRequest, attachmentCount int) bool {
+	if strings.TrimSpace(req.Query) != "" {
+		return true
+	}
+	return attachmentCount > 0 && req.UserMessageKind != conversation.UserMessageKindSkillActivation
 }
 
 // extractAttachmentPaths collects container file paths from ALL gateway

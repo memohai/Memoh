@@ -175,3 +175,50 @@ func TestClassifyUnknownSlash(t *testing.T) {
 		t.Fatalf("decision = %#v, want unknown slash", decision)
 	}
 }
+
+// TestClassifyKnownCommandIgnoresAttachments pins the fail-closed scope:
+// fixed commands never consume attachments, so a photo captioned "/status" —
+// or an inline-keyboard tap whose synthetic message carries a reply ref the
+// adapter can't vouch for — still classifies as a command action.
+func TestClassifyKnownCommandIgnoresAttachments(t *testing.T) {
+	decision := Classify(ClassifyInput{
+		Text:           "/status",
+		Surface:        SurfaceChannel,
+		Directed:       true,
+		HasAttachments: true,
+		KnownCommand:   func(resource string) bool { return resource == "status" },
+	})
+	if decision.Kind != DecisionCommandAction || decision.Command.Resource != "status" {
+		t.Fatalf("decision = %#v, want command action for /status with attachments", decision)
+	}
+}
+
+// TestClassifyModePrefixWithAttachmentsStaysNormalChat: "/now" + photo is a
+// normal chat message in now-mode, not a rejected control message.
+func TestClassifyModePrefixWithAttachmentsStaysNormalChat(t *testing.T) {
+	decision := Classify(ClassifyInput{
+		Text:           "/now look at this",
+		Surface:        SurfaceChannel,
+		Directed:       true,
+		SupportsMode:   true,
+		HasAttachments: true,
+	})
+	if decision.Kind != DecisionNormalChat {
+		t.Fatalf("decision = %#v, want normal chat for mode prefix with attachments", decision)
+	}
+}
+
+// TestClassifySkillIntentRejectsAttachments pins the one place the attachment
+// rule must hold: skill activation may not smuggle attachments (or unproven
+// reply/forward attachments) into the requested-skill model context.
+func TestClassifySkillIntentRejectsAttachments(t *testing.T) {
+	decision := Classify(ClassifyInput{
+		Text:           "/alpha do the thing",
+		Surface:        SurfaceChannel,
+		Directed:       true,
+		HasAttachments: true,
+	})
+	if decision.Kind != DecisionReject || decision.Code != CodeSlashAttachmentsUnsupported {
+		t.Fatalf("decision = %#v, want attachment reject for skill intent", decision)
+	}
+}

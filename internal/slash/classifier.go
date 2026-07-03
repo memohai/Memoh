@@ -66,9 +66,6 @@ func Classify(input ClassifyInput) Decision {
 	if input.Surface == SurfaceChannel && input.IsGroup && !effectiveDirected {
 		return Decision{Kind: DecisionRejectNoop, Directed: false}
 	}
-	if input.HasAttachments {
-		return Decision{Kind: DecisionReject, Code: CodeSlashAttachmentsUnsupported, Directed: effectiveDirected}
-	}
 
 	parsed, ok := parseSlash(cmdText, input.BotAliases)
 	if !ok {
@@ -100,6 +97,15 @@ func Classify(input ClassifyInput) Decision {
 	}
 
 	if isValidSkillSelector(parsed.Selector) {
+		// The attachment fail-closed rule protects skill activation only: a
+		// requested-skill turn must not smuggle attachments (or unproven
+		// reply/forward attachments) into the model context. Fixed commands
+		// never consume attachments, so they classify above regardless — a
+		// photo captioned "/status", or a button tap whose synthetic message
+		// carries a reply ref the adapter can't vouch for, still executes.
+		if input.HasAttachments {
+			return Decision{Kind: DecisionReject, Code: CodeSlashAttachmentsUnsupported, Directed: effectiveDirected}
+		}
 		return Decision{
 			Kind:     DecisionSkillIntent,
 			Directed: effectiveDirected,

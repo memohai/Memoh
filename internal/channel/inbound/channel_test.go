@@ -3325,3 +3325,80 @@ func TestMapChannelToChatAttachments(t *testing.T) {
 		t.Fatalf("expected non-asset attachment URL, got %q", mapped[1].URL)
 	}
 }
+
+// TestChannelInboundProcessorCommandExecutesWithUnprovenReplyAttachments pins
+// the interactive-keyboard / reply-thread regression fix: a known fixed
+// command must execute even when the message carries a reply ref whose
+// attachment state the adapter cannot vouch for (AttachmentsKnown=false).
+// This is exactly the shape of (a) a Telegram inline-keyboard tap's synthetic
+// command and (b) a reply-to-message "/status" on adapters that never set
+// AttachmentsKnown (QQ, WeCom, Weixin, Misskey, Slack threads). Only skill
+// activation is attachment fail-closed.
+func TestChannelInboundProcessorCommandExecutesWithUnprovenReplyAttachments(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-cmd-reply"}}
+	policySvc := &fakePolicyService{}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-cmd-reply", RouteID: "route-cmd-reply"}}
+	gateway := &fakeChatGateway{}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{
+		activeSession: SessionResult{ID: "11111111-1111-1111-1111-111111111111", Type: "chat"},
+	})
+	cmdQueries := &fakeCommandQueries{
+		messageCount: 3,
+		usage:        128,
+		cacheRow: dbsqlc.GetSessionCacheStatsRow{
+			CacheReadTokens:  16,
+			TotalInputTokens: 128,
+		},
+	}
+	processor.SetCommandHandler(command.NewHandler(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		cmdQueries,
+		nil,
+		nil,
+		nil,
+	))
+	sender := &fakeReplySender{}
+
+	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("telegram")}
+	msg := channel.InboundMessage{
+		BotID:   "bot-1",
+		Channel: channel.ChannelType("telegram"),
+		Message: channel.Message{
+			Text: "/status",
+			// Reply with unknown attachment state — must NOT block a command.
+			Reply: &channel.ReplyRef{MessageID: "source-msg"},
+		},
+		ReplyTarget: "telegram:dm-1",
+		Sender:      channel.Identity{SubjectID: "user-1"},
+		Conversation: channel.Conversation{
+			ID:   "dm-1",
+			Type: channel.ConversationTypePrivate,
+		},
+	}
+
+	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sender.sent) != 1 {
+		t.Fatalf("expected one status reply, got %d", len(sender.sent))
+	}
+	reply := sender.sent[0].Message.PlainText()
+	if strings.Contains(reply, "attachment") {
+		t.Fatalf("command was rejected by the attachment rule: %q", reply)
+	}
+	if !strings.Contains(reply, "Session Status") {
+		t.Fatalf("expected /status output, got %q", reply)
+	}
+}

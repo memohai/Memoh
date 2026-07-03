@@ -1844,7 +1844,8 @@ func TestBuildTelegramSkillActivateCallbackDispatchesFreshTurn(t *testing.T) {
 
 // TestBuildTelegramPaginationCallbackKeepsEditInPlace guards the existing
 // pagination behavior against the skill-activation branch: list-page taps
-// still edit the card in place and stay conservative about reply attachments.
+// still edit the card in place, and the reply to the bot's own card asserts
+// AttachmentsKnown so no slash fail-closed rule can misfire on a tap.
 func TestBuildTelegramPaginationCallbackKeepsEditInPlace(t *testing.T) {
 	t.Parallel()
 
@@ -1870,7 +1871,7 @@ func TestBuildTelegramPaginationCallbackKeepsEditInPlace(t *testing.T) {
 	if editID, _ := msg.Metadata["edit_message_id"].(string); editID != "456" {
 		t.Fatalf("edit_message_id = %q, want 456", editID)
 	}
-	if msg.Message.Reply == nil || msg.Message.Reply.AttachmentsKnown {
-		t.Fatalf("reply = %+v, want AttachmentsKnown=false for non-activation callbacks", msg.Message.Reply)
+	if msg.Message.Reply == nil || !msg.Message.Reply.AttachmentsKnown {
+		t.Fatalf("reply = %+v, want AttachmentsKnown=true — the tapped card is the bot's own message", msg.Message.Reply)
 	}
 }
