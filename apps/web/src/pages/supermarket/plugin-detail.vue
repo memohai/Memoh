@@ -89,23 +89,25 @@
         v-if="plugin.mcps?.length"
         class="mt-8"
       >
-        <h2 class="text-lg font-semibold">
+        <h2 class="mb-4 text-lg font-semibold">
           {{ $t('supermarket.mcps') }}
           <span class="ml-1 text-muted-foreground">{{ plugin.mcps.length }}</span>
         </h2>
-        <div class="mt-4 divide-y divide-border/60">
-          <div
+        <SettingsSection>
+          <SettingsRow
             v-for="mcp in plugin.mcps"
             :key="mcp.key || mcp.name"
-            class="flex min-w-0 items-center gap-3 py-4"
+            align="start"
           >
-            <div class="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background">
-              <Plug class="size-5 text-muted-foreground" />
-            </div>
-            <div class="min-w-0 flex-1">
+            <template #leading>
+              <div class="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background">
+                <Plug class="size-5 text-muted-foreground" />
+              </div>
+            </template>
+            <template #content>
               <div class="flex flex-wrap items-center gap-2">
                 <p
-                  class="min-w-0 truncate font-medium"
+                  class="min-w-0 truncate text-sm font-medium text-foreground"
                   :title="mcp.display_name || mcp.name || mcp.key"
                 >
                   {{ mcp.display_name || mcp.name || mcp.key }}
@@ -118,47 +120,49 @@
                   {{ authTypeLabel(authTypeForMcp(mcp.key)) }}
                 </Badge>
               </div>
-              <p class="mt-1 break-words text-sm text-muted-foreground">
+              <p class="mt-0.5 break-words text-xs text-muted-foreground">
                 {{ mcp.description || mcp.url || mcp.command || $t('supermarket.noDescription') }}
               </p>
-            </div>
-          </div>
-        </div>
+            </template>
+          </SettingsRow>
+        </SettingsSection>
       </section>
 
       <section
         v-if="pluginSkills.length"
         class="mt-8"
       >
-        <h2 class="text-lg font-semibold">
+        <h2 class="mb-4 text-lg font-semibold">
           {{ $t('supermarket.skillsSection') }}
           <span class="ml-1 text-muted-foreground">{{ pluginSkills.length }}</span>
         </h2>
-        <div class="mt-4 divide-y divide-border/60">
-          <div
+        <SettingsSection>
+          <SettingsRow
             v-for="skill in pluginSkills"
             :key="skillKey(skill)"
-            class="flex min-w-0 items-center gap-3 py-4"
+            align="start"
           >
-            <div class="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background">
-              <Boxes class="size-5 text-muted-foreground" />
-            </div>
-            <div class="min-w-0 flex-1">
+            <template #leading>
+              <div class="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background">
+                <Boxes class="size-5 text-muted-foreground" />
+              </div>
+            </template>
+            <template #content>
               <p
-                class="min-w-0 truncate font-medium"
+                class="min-w-0 truncate text-sm font-medium text-foreground"
                 :title="skillName(skill)"
               >
                 {{ skillName(skill) }}
               </p>
               <p
-                class="mt-1 line-clamp-2 break-words text-sm text-muted-foreground"
+                class="mt-0.5 line-clamp-2 break-words text-xs text-muted-foreground"
                 :title="skillDescription(skill)"
               >
                 {{ skillDescription(skill) }}
               </p>
-            </div>
-          </div>
-        </div>
+            </template>
+          </SettingsRow>
+        </SettingsSection>
       </section>
 
       <section class="mt-10">
@@ -219,6 +223,8 @@ import { ArrowLeft, Boxes, Download, ExternalLink, PackageOpen, Plug } from 'luc
 import { Badge, Button, Spinner, toast } from '@memohai/ui'
 import { getSupermarketPluginsById, type PluginsManifest, type PluginsSkillEntry, type PluginsSkillResource } from '@memohai/sdk'
 import ProviderIcon from '@/components/provider-icon/index.vue'
+import SettingsRow from '@/components/settings/row.vue'
+import SettingsSection from '@/components/settings/section.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import InstallPluginDialog from './components/install-plugin-dialog.vue'
 

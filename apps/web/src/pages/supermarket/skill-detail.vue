@@ -78,24 +78,27 @@
         v-if="skill.files?.length"
         class="mt-8"
       >
-        <h2 class="text-lg font-semibold">
+        <h2 class="mb-4 text-lg font-semibold">
           {{ $t('supermarket.files') }}
           <span class="ml-1 text-muted-foreground">{{ skill.files.length }}</span>
         </h2>
-        <div class="mt-4 divide-y divide-border/60">
-          <div
+        <SettingsSection>
+          <SettingsRow
             v-for="file in skill.files"
             :key="file"
-            class="flex items-center gap-3 py-4"
           >
-            <div class="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background">
-              <FileText class="size-5 text-muted-foreground" />
-            </div>
-            <p class="min-w-0 flex-1 break-words text-sm font-medium">
-              {{ file }}
-            </p>
-          </div>
-        </div>
+            <template #leading>
+              <div class="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background">
+                <FileText class="size-5 text-muted-foreground" />
+              </div>
+            </template>
+            <template #content>
+              <p class="min-w-0 break-words text-sm font-medium">
+                {{ file }}
+              </p>
+            </template>
+          </SettingsRow>
+        </SettingsSection>
       </section>
 
       <section
@@ -161,6 +164,8 @@ import { useI18n } from 'vue-i18n'
 import { ArrowLeft, Download, ExternalLink, FileText, Zap } from 'lucide-vue-next'
 import { Badge, Button, Spinner, toast } from '@memohai/ui'
 import { getSupermarketSkillsById, type HandlersSupermarketSkillEntry } from '@memohai/sdk'
+import SettingsRow from '@/components/settings/row.vue'
+import SettingsSection from '@/components/settings/section.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import InstallSkillDialog from './components/install-skill-dialog.vue'
 

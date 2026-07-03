@@ -160,29 +160,20 @@
         </div>
 
         <!-- Metric tiles: CPU / memory / storage. '--' shows for any metric the
-             backend hasn't sampled, so a value is never faked as 0. -->
+             backend hasn't sampled, so a value is never faked as 0. Caller owns
+             the grid; each cell is a framed MetricReadout (same shape as the
+             Container tab's identical runtime tile row). -->
         <div
           v-if="runtimeHasMetrics"
           class="grid grid-cols-3 gap-3"
         >
-          <div
+          <MetricReadout
             v-for="m in runtimeMetricCards"
             :key="m.key"
-            class="rounded-[var(--radius-menu-shell)] border border-border bg-card px-3 py-2.5"
-          >
-            <p class="text-[11px] text-muted-foreground">
-              {{ m.label }}
-            </p>
-            <p class="mt-0.5 text-lg font-semibold tabular-nums text-foreground">
-              {{ m.value }}
-            </p>
-            <p
-              v-if="m.sub"
-              class="text-[11px] tabular-nums text-muted-foreground"
-            >
-              {{ m.sub }}
-            </p>
-          </div>
+            :label="m.label"
+            :value="m.value"
+            :sub="m.sub"
+          />
         </div>
 
         <!-- Why there's no metric grid: backend can't sample, or the container
@@ -297,6 +288,7 @@ import BotChecksPanel from './bot-checks-panel.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import MetricReadout from '@/components/settings/metric-readout.vue'
 import CalloutBanner from '@/components/callout-banner/index.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'

@@ -1,16 +1,12 @@
 <template>
   <div class="space-y-4">
-    <div
+    <FieldContent
       v-for="schemaField in visibleFields"
       :key="schemaField.key"
-      class="space-y-2"
-    >
-      <FieldContent
-        :field="schemaField"
-        :id-prefix="idPrefix"
-        :disabled="disabled"
-      />
-    </div>
+      :field="schemaField"
+      :id-prefix="idPrefix"
+      :disabled="disabled"
+    />
 
     <div
       v-if="collapsedFields.length"
@@ -29,17 +25,13 @@
       </button>
 
       <template v-if="showCollapsed">
-        <div
+        <FieldContent
           v-for="schemaField in collapsedFields"
           :key="schemaField.key"
-          class="space-y-2"
-        >
-          <FieldContent
-            :field="schemaField"
-            :id-prefix="idPrefix"
-            :disabled="disabled"
-          />
-        </div>
+          :field="schemaField"
+          :id-prefix="idPrefix"
+          :disabled="disabled"
+        />
       </template>
     </div>
   </div>
@@ -60,6 +52,7 @@ import {
 import { computed, defineComponent, h, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown, ChevronRight, Eye, EyeOff } from 'lucide-vue-next'
+import FieldStack from '@/components/settings/field-stack.vue'
 import type { ConfigSchema, ConfigSchemaField } from './types'
 import { cloneConfig, getPathValue, setPathValue } from './utils'
 
@@ -135,27 +128,12 @@ const FieldContent = defineComponent({
       const fieldId = `${fieldProps.idPrefix}-${field.key}`
       const isLabelFor = field.type !== 'bool' && field.type !== 'enum' ? fieldId : undefined
 
-      const children: ReturnType<typeof h>[] = []
-
-      // Label
-      children.push(
-        h(Label, { for: isLabelFor }, () => [
-          field.title || field.key,
-          !field.required
-            ? h('span', { class: 'text-xs text-muted-foreground ml-1' }, `(${t('common.optional')})`)
-            : null,
-        ]),
-      )
-
-      // Description
-      if (field.description) {
-        children.push(h('p', { class: 'text-xs text-muted-foreground' }, field.description))
-      }
+      const controlChildren: ReturnType<typeof h>[] = []
 
       // Input
       if (field.type === 'secret') {
         const isVisible = visibleSecrets[field.key]
-        children.push(
+        controlChildren.push(
           h('div', { class: 'relative' }, [
             h(Input, {
               id: fieldId,
@@ -175,7 +153,7 @@ const FieldContent = defineComponent({
           ]),
         )
       } else if (field.type === 'bool') {
-        children.push(
+        controlChildren.push(
           h(Switch, {
             modelValue: !!getValue(field.key),
             disabled: fieldProps.disabled || field.readonly,
@@ -183,7 +161,7 @@ const FieldContent = defineComponent({
           }),
         )
       } else if (field.type === 'number') {
-        children.push(
+        controlChildren.push(
           h(Input, {
             id: fieldId,
             modelValue: numberValue(field.key),
@@ -198,7 +176,7 @@ const FieldContent = defineComponent({
           }),
         )
       } else if (field.type === 'enum' && field.enum) {
-        children.push(
+        controlChildren.push(
           h(Select, {
             modelValue: stringValue(field.key),
             disabled: fieldProps.disabled || field.readonly,
@@ -215,7 +193,7 @@ const FieldContent = defineComponent({
           ]),
         )
       } else if (field.type === 'textarea' || field.multiline) {
-        children.push(
+        controlChildren.push(
           h(Textarea, {
             id: fieldId,
             modelValue: stringValue(field.key),
@@ -227,7 +205,7 @@ const FieldContent = defineComponent({
           }),
         )
       } else {
-        children.push(
+        controlChildren.push(
           h(Input, {
             id: fieldId,
             modelValue: stringValue(field.key),
@@ -240,7 +218,18 @@ const FieldContent = defineComponent({
         )
       }
 
-      return children
+      return h(FieldStack, {
+        for: isLabelFor,
+        help: field.description || undefined,
+      }, {
+        label: () => h(Label, { for: isLabelFor }, () => [
+          field.title || field.key,
+          !field.required
+            ? h('span', { class: 'text-xs text-muted-foreground ml-1' }, `(${t('common.optional')})`)
+            : null,
+        ]),
+        default: () => controlChildren,
+      })
     }
   },
 })

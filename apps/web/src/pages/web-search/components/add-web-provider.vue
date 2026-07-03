@@ -28,13 +28,10 @@
             v-slot="{ componentField }"
             name="name"
           >
-            <FormItem>
-              <Label
-                class="mb-2"
-                for="web-provider-create-name"
-              >
-                {{ $t('common.name') }}
-              </Label>
+            <FieldStack
+              :label="$t('common.name')"
+              for="web-provider-create-name"
+            >
               <FormControl>
                 <Input
                   id="web-provider-create-name"
@@ -44,19 +41,16 @@
                   :aria-label="$t('common.name')"
                 />
               </FormControl>
-            </FormItem>
+            </FieldStack>
           </FormField>
           <FormField
             v-slot="{ componentField }"
             name="target"
           >
-            <FormItem>
-              <Label
-                class="mb-2"
-                for="web-provider-create-type"
-              >
-                {{ $t('webSearch.provider') }}
-              </Label>
+            <FieldStack
+              :label="$t('webSearch.provider')"
+              for="web-provider-create-type"
+            >
               <FormControl>
                 <Select v-bind="componentField">
                   <SelectTrigger
@@ -89,7 +83,7 @@
                   </SelectContent>
                 </Select>
               </FormControl>
-            </FormItem>
+            </FieldStack>
           </FormField>
         </div>
       </template>
@@ -103,7 +97,6 @@ import {
   Input,
   FormField,
   FormControl,
-  FormItem,
   Select,
   SelectTrigger,
   SelectValue,
@@ -111,7 +104,6 @@ import {
   SelectGroup,
   SelectItem,
   SelectLabel,
-  Label,
 } from '@memohai/ui'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
@@ -122,6 +114,7 @@ import type { FetchprovidersCreateRequest, SearchprovidersCreateRequest } from '
 import { useI18n } from 'vue-i18n'
 import { Plus } from 'lucide-vue-next'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 
@@ -195,8 +188,8 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
 })
 
 const providerSchema = toTypedSchema(z.object({
-  name: z.string().min(1),
-  target: z.string().min(1),
+  name: z.string().min(1, t('webSearch.nameRequired')),
+  target: z.string().min(1, t('webSearch.providerRequired')),
 }))
 
 const form = useForm({

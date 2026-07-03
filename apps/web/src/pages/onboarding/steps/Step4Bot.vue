@@ -40,6 +40,7 @@ import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import AvatarEditDialog from '@/pages/bots/components/avatar-edit-dialog.vue'
 import BotCreateTerminal from '@/pages/bots/components/bot-create-terminal.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
 import { useStepTransition, nextFrame } from '../useStepTransition'
 import { ONBOARDING_KEYS } from '../constants'
 import { clearACPSelection, readACPSelection, type OnboardingACPSelection } from './useACPSetup'
@@ -446,18 +447,22 @@ function skipOAuth() {
                   </button>
                 </div>
                 <div class="flex-1 min-w-0">
-                  <Label class="mb-2">
-                    {{ $t('bots.displayName') }}
-                    <span
-                      v-if="!form.display_name.trim()"
-                      class="text-destructive"
-                    >*</span>
-                  </Label>
-                  <Input
-                    v-model="form.display_name"
-                    type="text"
-                    :placeholder="$t('bots.displayNamePlaceholder')"
-                  />
+                  <FieldStack>
+                    <template #label>
+                      <Label>
+                        {{ $t('bots.displayName') }}
+                        <span
+                          v-if="!form.display_name.trim()"
+                          class="text-destructive"
+                        >*</span>
+                      </Label>
+                    </template>
+                    <Input
+                      v-model="form.display_name"
+                      type="text"
+                      :placeholder="$t('bots.displayNamePlaceholder')"
+                    />
+                  </FieldStack>
                 </div>
               </div>
             </div>
@@ -520,25 +525,27 @@ function skipOAuth() {
                 :class="workspaceVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
               >
                 <div class="flex flex-col gap-4">
-                  <div>
-                    <div class="mb-2 flex items-center gap-2">
-                      <Label>{{ $t('bots.workspaceBackend') }}</Label>
-                      <Tooltip>
-                        <TooltipTrigger as-child>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            class="size-5 text-muted-foreground hover:text-foreground"
-                          >
-                            <CircleHelp class="size-3.5" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent class="max-w-80 text-left leading-relaxed">
-                          {{ $t('bots.workspaceBackendHint') }}
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
+                  <FieldStack>
+                    <template #label>
+                      <div class="flex items-center gap-2">
+                        <Label>{{ $t('bots.workspaceBackend') }}</Label>
+                        <Tooltip>
+                          <TooltipTrigger as-child>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              class="size-5 text-muted-foreground hover:text-foreground"
+                            >
+                              <CircleHelp class="size-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent class="max-w-80 text-left leading-relaxed">
+                            {{ $t('bots.workspaceBackendHint') }}
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
+                    </template>
                     <Select v-model="form.workspace_backend">
                       <SelectTrigger class="w-full">
                         <SelectValue :placeholder="$t('bots.workspaceBackend')" />
@@ -552,7 +559,7 @@ function skipOAuth() {
                         </SelectItem>
                       </SelectContent>
                     </Select>
-                  </div>
+                  </FieldStack>
 
                   <div
                     v-if="isLocalWorkspace"

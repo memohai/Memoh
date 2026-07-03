@@ -23,70 +23,66 @@
         </Button>
       </template>
       <template #body>
-        <div class="flex-col gap-3 flex mt-4">
-          <FormField
-            v-slot="{ componentField }"
-            name="name"
-          >
-            <FormItem>
-              <Label
-                class="mb-2"
-                :for="'search-provider-create-name'"
+        <div class="mt-4">
+          <FormStack>
+            <FormField
+              v-slot="{ componentField }"
+              name="name"
+            >
+              <FieldStack
+                :label="$t('common.name')"
+                for="search-provider-create-name"
               >
-                {{ $t('common.name') }}
-              </Label>
-              <FormControl>
-                <Input
-                  :id="'search-provider-create-name'"
-                  type="text"
-                  :placeholder="$t('common.namePlaceholder')"
-                  v-bind="componentField"
-                  :aria-label="$t('common.name')"
-                />
-              </FormControl>
-            </FormItem>
-          </FormField>
-          <FormField
-            v-slot="{ componentField }"
-            name="provider"
-          >
-            <FormItem>
-              <Label
-                class="mb-2"
-                :for="'search-provider-create-type'"
+                <FormControl>
+                  <Input
+                    id="search-provider-create-name"
+                    type="text"
+                    :placeholder="$t('common.namePlaceholder')"
+                    v-bind="componentField"
+                    :aria-label="$t('common.name')"
+                  />
+                </FormControl>
+              </FieldStack>
+            </FormField>
+            <FormField
+              v-slot="{ componentField }"
+              name="provider"
+            >
+              <FieldStack
+                :label="$t('webSearch.provider')"
+                for="search-provider-create-type"
               >
-                {{ $t('webSearch.provider') }}
-              </Label>
-              <FormControl>
-                <Select v-bind="componentField">
-                  <SelectTrigger
-                    :id="'search-provider-create-type'"
-                    class="w-full"
-                    :aria-label="$t('webSearch.provider')"
-                  >
-                    <SelectValue :placeholder="$t('common.typePlaceholder')" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem
-                        v-for="type in PROVIDER_TYPES"
-                        :key="type"
-                        :value="type"
-                      >
-                        <span class="flex items-center gap-2">
-                          <SearchProviderLogo
-                            :provider="type"
-                            size="xs"
-                          />
-                          <span>{{ $t(`webSearch.providerNames.${type}`, type) }}</span>
-                        </span>
-                      </SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </FormControl>
-            </FormItem>
-          </FormField>
+                <FormControl>
+                  <Select v-bind="componentField">
+                    <SelectTrigger
+                      id="search-provider-create-type"
+                      class="w-full"
+                      :aria-label="$t('webSearch.provider')"
+                    >
+                      <SelectValue :placeholder="$t('common.typePlaceholder')" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectItem
+                          v-for="type in PROVIDER_TYPES"
+                          :key="type"
+                          :value="type"
+                        >
+                          <span class="flex items-center gap-2">
+                            <SearchProviderLogo
+                              :provider="type"
+                              size="xs"
+                            />
+                            <span>{{ $t(`webSearch.providerNames.${type}`, type) }}</span>
+                          </span>
+                        </SelectItem>
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </FormControl>
+              </FieldStack>
+            </FormField>
+          </FormStack>
         </div>
       </template>
     </FormDialogShell>
@@ -99,14 +95,12 @@ import {
   Input,
   FormField,
   FormControl,
-  FormItem,
   Select,
   SelectTrigger,
   SelectValue,
   SelectContent,
   SelectGroup,
   SelectItem,
-  Label,
 } from '@memohai/ui'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
@@ -119,6 +113,8 @@ import { Plus } from 'lucide-vue-next'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
+import FormStack from '@/components/settings/form-stack.vue'
 
 const PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily', 'sogou', 'serper', 'searxng', 'jina', 'exa', 'bocha', 'duckduckgo', 'yandex'] as const
 
@@ -141,8 +137,8 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
 })
 
 const providerSchema = toTypedSchema(z.object({
-  name: z.string().min(1),
-  provider: z.string().min(1),
+  name: z.string().min(1, t('webSearch.nameRequired')),
+  provider: z.string().min(1, t('webSearch.providerRequired')),
 }))
 
 const form = useForm({

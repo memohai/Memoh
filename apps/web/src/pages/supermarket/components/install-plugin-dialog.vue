@@ -76,25 +76,26 @@
           v-if="variables.length"
           class="space-y-3"
         >
-          <div
+          <FieldStack
             v-for="item in variables"
             :key="item.key"
-            class="space-y-1.5"
           >
-            <label class="text-xs font-medium">
-              {{ item.key }}
-              <span
-                v-if="item.required"
-                class="text-destructive"
-              >*</span>
-            </label>
+            <template #label>
+              <Label>
+                {{ item.key }}
+                <span
+                  v-if="item.required"
+                  class="text-destructive"
+                >*</span>
+              </Label>
+            </template>
             <Input
               v-model="variableValues[item.key || '']"
               :type="item.secret ? 'password' : 'text'"
               class="h-8 text-xs"
               :placeholder="item.description || item.key"
             />
-          </div>
+          </FieldStack>
         </div>
       </div>
       <DialogFooter>
@@ -128,7 +129,7 @@ import { useRouter } from 'vue-router'
 import { Boxes } from 'lucide-vue-next'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
-  Button, Spinner, Badge, Input, toast,
+  Button, Spinner, Badge, Input, Label, toast,
 } from '@memohai/ui'
 import {
   getBotsByBotIdPluginsByIdOauthStatus,

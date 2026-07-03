@@ -28,39 +28,33 @@
             v-slot="{ componentField }"
             name="name"
           >
-            <FormItem>
-              <Label
-                class="mb-2"
-                :for="'fetch-provider-create-name'"
-              >
-                {{ $t('common.name') }}
-              </Label>
+            <FieldStack
+              :label="$t('common.name')"
+              for="fetch-provider-create-name"
+            >
               <FormControl>
                 <Input
-                  :id="'fetch-provider-create-name'"
+                  id="fetch-provider-create-name"
                   type="text"
                   :placeholder="$t('common.namePlaceholder')"
                   v-bind="componentField"
                   :aria-label="$t('common.name')"
                 />
               </FormControl>
-            </FormItem>
+            </FieldStack>
           </FormField>
           <FormField
             v-slot="{ componentField }"
             name="provider"
           >
-            <FormItem>
-              <Label
-                class="mb-2"
-                :for="'fetch-provider-create-type'"
-              >
-                {{ $t('webSearch.fetchProvider') }}
-              </Label>
+            <FieldStack
+              :label="$t('webSearch.fetchProvider')"
+              for="fetch-provider-create-type"
+            >
               <FormControl>
                 <Select v-bind="componentField">
                   <SelectTrigger
-                    :id="'fetch-provider-create-type'"
+                    id="fetch-provider-create-type"
                     class="w-full"
                     :aria-label="$t('webSearch.fetchProvider')"
                   >
@@ -85,7 +79,7 @@
                   </SelectContent>
                 </Select>
               </FormControl>
-            </FormItem>
+            </FieldStack>
           </FormField>
         </div>
       </template>
@@ -99,14 +93,12 @@ import {
   Input,
   FormField,
   FormControl,
-  FormItem,
   Select,
   SelectTrigger,
   SelectValue,
   SelectContent,
   SelectGroup,
   SelectItem,
-  Label,
 } from '@memohai/ui'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
@@ -117,6 +109,7 @@ import type { FetchprovidersCreateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { Plus } from 'lucide-vue-next'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 
@@ -141,8 +134,8 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
 })
 
 const providerSchema = toTypedSchema(z.object({
-  name: z.string().min(1),
-  provider: z.string().min(1),
+  name: z.string().min(1, t('webSearch.nameRequired')),
+  provider: z.string().min(1, t('webSearch.fetchProviderRequired')),
 }))
 
 const form = useForm({

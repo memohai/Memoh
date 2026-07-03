@@ -19,6 +19,8 @@ import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import CreateModel from '@/components/create-model/index.vue'
 import ModelItem from '@/pages/providers/components/model-item.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
+import FormStack from '@/components/settings/form-stack.vue'
 import { onboardingProviderPresets as providerPresets, type ProviderPreset } from '@/constants/provider-presets'
 import {
   HERMES_CUSTOM_MODEL_VALUE,
@@ -484,41 +486,49 @@ onMounted(() => {
       </div>
 
       <div class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1">
-        <div class="space-y-4">
+        <FormStack>
           <div
             class="transition-all duration-[200ms] ease-out delay-[20ms]"
             :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
           >
-            <Label class="mb-2 block text-sm font-medium">
-              {{ t('onboarding.provider.form.name') }}
-            </Label>
-            <Input
-              v-model="formValues.name"
-              :placeholder="t('onboarding.provider.form.namePlaceholder')"
-            />
+            <FieldStack>
+              <template #label>
+                <Label class="text-sm font-medium">
+                  {{ t('onboarding.provider.form.name') }}
+                </Label>
+              </template>
+              <Input
+                v-model="formValues.name"
+                :placeholder="t('onboarding.provider.form.namePlaceholder')"
+              />
+            </FieldStack>
           </div>
           <div
             v-if="!selectedPreset"
             class="transition-all duration-[200ms] ease-out delay-[40ms]"
             :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
           >
-            <Label class="mb-2 block text-sm font-medium">
-              {{ t('onboarding.provider.form.clientType') }}
-            </Label>
-            <Select v-model="formValues.client_type">
-              <SelectTrigger class="w-full">
-                <SelectValue :placeholder="t('onboarding.provider.form.clientTypePlaceholder')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  v-for="ct in availableClientTypes"
-                  :key="ct.value"
-                  :value="ct.value"
-                >
-                  {{ ct.label }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <FieldStack>
+              <template #label>
+                <Label class="text-sm font-medium">
+                  {{ t('onboarding.provider.form.clientType') }}
+                </Label>
+              </template>
+              <Select v-model="formValues.client_type">
+                <SelectTrigger class="w-full">
+                  <SelectValue :placeholder="t('onboarding.provider.form.clientTypePlaceholder')" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="ct in availableClientTypes"
+                    :key="ct.value"
+                    :value="ct.value"
+                  >
+                    {{ ct.label }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </FieldStack>
           </div>
           <div
             class="transition-all duration-[200ms] ease-out"
@@ -527,15 +537,19 @@ onMounted(() => {
               selectedPreset ? 'delay-[40ms]' : 'delay-[60ms]',
             ]"
           >
-            <Label class="mb-2 block text-sm font-medium">
-              {{ t('onboarding.provider.form.apiKey') }}
-            </Label>
-            <Input
-              v-model="formValues.api_key"
-              type="password"
-              autocomplete="off"
-              :placeholder="t('onboarding.provider.form.apiKeyPlaceholder')"
-            />
+            <FieldStack>
+              <template #label>
+                <Label class="text-sm font-medium">
+                  {{ t('onboarding.provider.form.apiKey') }}
+                </Label>
+              </template>
+              <Input
+                v-model="formValues.api_key"
+                type="password"
+                autocomplete="off"
+                :placeholder="t('onboarding.provider.form.apiKeyPlaceholder')"
+              />
+            </FieldStack>
           </div>
           <div
             class="transition-all duration-[200ms] ease-out"
@@ -544,15 +558,19 @@ onMounted(() => {
               selectedPreset ? 'delay-[60ms]' : 'delay-[80ms]',
             ]"
           >
-            <Label class="mb-2 block text-sm font-medium">
-              {{ t('onboarding.provider.form.baseUrl') }}
-            </Label>
-            <Input
-              v-model="formValues.base_url"
-              :placeholder="baseUrlPlaceholder"
-            />
+            <FieldStack>
+              <template #label>
+                <Label class="text-sm font-medium">
+                  {{ t('onboarding.provider.form.baseUrl') }}
+                </Label>
+              </template>
+              <Input
+                v-model="formValues.base_url"
+                :placeholder="baseUrlPlaceholder"
+              />
+            </FieldStack>
           </div>
-        </div>
+        </FormStack>
 
         <p
           v-if="formError"
@@ -741,26 +759,30 @@ onMounted(() => {
       </div>
 
       <div class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1">
-        <div class="space-y-4">
+        <FormStack>
           <div
             class="transition-all duration-[200ms] ease-out delay-[20ms]"
             :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
           >
-            <Label class="mb-2 block text-sm font-medium">
-              {{ t('onboarding.provider.acp.setupMode') }}
-            </Label>
-            <div class="grid grid-cols-3 gap-2">
-              <button
-                v-for="m in acpSetupModes(selectedAcpProfile)"
-                :key="m"
-                type="button"
-                class="min-h-10 rounded-lg border px-3 py-2 text-sm font-medium leading-tight transition-colors"
-                :class="acpSetupMode === m ? 'border-foreground bg-foreground text-background' : 'border-border bg-background text-foreground hover:bg-accent/40'"
-                @click="setAcpSetupMode(m)"
-              >
-                {{ acpSetupModeLabel(m, selectedAcpProfile) }}
-              </button>
-            </div>
+            <FieldStack>
+              <template #label>
+                <Label class="text-sm font-medium">
+                  {{ t('onboarding.provider.acp.setupMode') }}
+                </Label>
+              </template>
+              <div class="grid grid-cols-3 gap-2">
+                <button
+                  v-for="m in acpSetupModes(selectedAcpProfile)"
+                  :key="m"
+                  type="button"
+                  class="min-h-10 rounded-lg border px-3 py-2 text-sm font-medium leading-tight transition-colors"
+                  :class="acpSetupMode === m ? 'border-foreground bg-foreground text-background' : 'border-border bg-background text-foreground hover:bg-accent/40'"
+                  @click="setAcpSetupMode(m)"
+                >
+                  {{ acpSetupModeLabel(m, selectedAcpProfile) }}
+                </button>
+              </div>
+            </FieldStack>
           </div>
 
           <div
@@ -770,71 +792,75 @@ onMounted(() => {
             :style="{ transitionDelay: `${40 + index * 20}ms` }"
             :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
           >
-            <Label class="mb-2 block text-sm font-medium">
-              {{ field.label || field.id }}
-            </Label>
-            <Select
-              v-if="isAcpHermesProviderField(field)"
-              :model-value="acpHermesProvider()"
-              @update:model-value="(value) => setAcpHermesProvider(String(value))"
-            >
-              <SelectTrigger class="w-full">
-                <SelectValue :placeholder="t('bots.settings.acpHermesProviderPlaceholder')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  v-for="provider in HERMES_PROVIDER_PRESETS"
-                  :key="provider.value"
-                  :value="provider.value"
-                >
-                  {{ t(provider.labelKey) }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <template v-else-if="isAcpHermesModelField(field)">
+            <FieldStack>
+              <template #label>
+                <Label class="text-sm font-medium">
+                  {{ field.label || field.id }}
+                </Label>
+              </template>
               <Select
-                :model-value="acpHermesModelSelect()"
-                @update:model-value="(value) => setAcpHermesModel(String(value))"
+                v-if="isAcpHermesProviderField(field)"
+                :model-value="acpHermesProvider()"
+                @update:model-value="(value) => setAcpHermesProvider(String(value))"
               >
                 <SelectTrigger class="w-full">
-                  <SelectValue :placeholder="t('bots.settings.acpHermesModelPlaceholder')" />
+                  <SelectValue :placeholder="t('bots.settings.acpHermesProviderPlaceholder')" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem
-                    v-for="model in acpHermesModelOptions()"
-                    :key="model.value"
-                    :value="model.value"
+                    v-for="provider in HERMES_PROVIDER_PRESETS"
+                    :key="provider.value"
+                    :value="provider.value"
                   >
-                    {{ model.label }}
-                  </SelectItem>
-                  <SelectItem :value="HERMES_CUSTOM_MODEL_VALUE">
-                    {{ t('bots.settings.acpHermesCustomModel') }}
+                    {{ t(provider.labelKey) }}
                   </SelectItem>
                 </SelectContent>
               </Select>
+              <template v-else-if="isAcpHermesModelField(field)">
+                <Select
+                  :model-value="acpHermesModelSelect()"
+                  @update:model-value="(value) => setAcpHermesModel(String(value))"
+                >
+                  <SelectTrigger class="w-full">
+                    <SelectValue :placeholder="t('bots.settings.acpHermesModelPlaceholder')" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="model in acpHermesModelOptions()"
+                      :key="model.value"
+                      :value="model.value"
+                    >
+                      {{ model.label }}
+                    </SelectItem>
+                    <SelectItem :value="HERMES_CUSTOM_MODEL_VALUE">
+                      {{ t('bots.settings.acpHermesCustomModel') }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input
+                  v-if="acpHermesUsingCustomModel()"
+                  class="mt-2"
+                  :model-value="acpManaged.model || ''"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  autocorrect="off"
+                  spellcheck="false"
+                  :placeholder="t('bots.settings.acpHermesCustomModelPlaceholder')"
+                  @update:model-value="(val) => setAcpManaged(field.id, String(val ?? ''))"
+                />
+              </template>
               <Input
-                v-if="acpHermesUsingCustomModel()"
-                class="mt-2"
-                :model-value="acpManaged.model || ''"
+                v-else
+                :model-value="acpManaged[field.id || ''] || ''"
+                :type="acpInputType(field.type)"
                 autocomplete="off"
                 autocapitalize="off"
                 autocorrect="off"
                 spellcheck="false"
-                :placeholder="t('bots.settings.acpHermesCustomModelPlaceholder')"
+                :placeholder="acpManagedPlaceholder(field)"
                 @update:model-value="(val) => setAcpManaged(field.id, String(val ?? ''))"
               />
-            </template>
-            <Input
-              v-else
-              :model-value="acpManaged[field.id || ''] || ''"
-              :type="acpInputType(field.type)"
-              autocomplete="off"
-              autocapitalize="off"
-              autocorrect="off"
-              spellcheck="false"
-              :placeholder="acpManagedPlaceholder(field)"
-              @update:model-value="(val) => setAcpManaged(field.id, String(val ?? ''))"
-            />
+            </FieldStack>
           </div>
 
           <div
@@ -852,7 +878,7 @@ onMounted(() => {
           >
             {{ isAcpHermesProfile(selectedAcpProfile) ? t('bots.settings.acpHermesSelfModeHint') : t('onboarding.provider.acp.selfHint') }}
           </div>
-        </div>
+        </FormStack>
 
         <p
           v-if="acpError"

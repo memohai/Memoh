@@ -35,44 +35,41 @@
 
     <Separator />
 
-    <div class="space-y-2">
-      <Label>{{ $t('memory.name') }}</Label>
-      <Input
-        v-model="form.name"
-        :placeholder="$t('memory.namePlaceholder')"
-      />
-    </div>
-
-    <div
-      v-if="providerSchema"
-      class="grid gap-4 md:grid-cols-2"
-    >
-      <div
-        v-for="(fieldSchema, fieldKey) in providerSchema.fields"
-        :key="fieldKey"
-        class="space-y-2"
-        :class="isWideField(fieldKey, fieldSchema) ? 'md:col-span-2' : ''"
-      >
-        <Label>
-          {{ fieldSchema.title || fieldKey }}
-          <span
-            v-if="fieldSchema.required"
-            class="text-destructive"
-          >*</span>
-        </Label>
-        <p
-          v-if="fieldSchema.description"
-          class="text-xs text-muted-foreground"
-        >
-          {{ fieldSchema.description }}
-        </p>
+    <FormStack>
+      <FieldStack :label="$t('memory.name')">
         <Input
-          v-model="configForm[fieldKey]"
-          :type="fieldSchema.secret ? 'password' : 'text'"
-          :placeholder="fieldSchema.example ? String(fieldSchema.example) : ''"
+          v-model="form.name"
+          :placeholder="$t('memory.namePlaceholder')"
         />
+      </FieldStack>
+
+      <div
+        v-if="providerSchema"
+        class="grid gap-4 md:grid-cols-2"
+      >
+        <FieldStack
+          v-for="(fieldSchema, fieldKey) in providerSchema.fields"
+          :key="fieldKey"
+          :help="fieldSchema.description"
+          :class="isWideField(fieldKey, fieldSchema) ? 'md:col-span-2' : ''"
+        >
+          <template #label>
+            <Label>
+              {{ fieldSchema.title || fieldKey }}
+              <span
+                v-if="fieldSchema.required"
+                class="text-destructive"
+              >*</span>
+            </Label>
+          </template>
+          <Input
+            v-model="configForm[fieldKey]"
+            :type="fieldSchema.secret ? 'password' : 'text'"
+            :placeholder="fieldSchema.example ? String(fieldSchema.example) : ''"
+          />
+        </FieldStack>
       </div>
-    </div>
+    </FormStack>
 
     <div class="flex justify-end">
       <Button
@@ -105,6 +102,8 @@ import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import SettingsShell from '@/components/settings-shell/index.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
+import FormStack from '@/components/settings/form-stack.vue'
 
 const { t } = useI18n()
 const queryCache = useQueryCache()

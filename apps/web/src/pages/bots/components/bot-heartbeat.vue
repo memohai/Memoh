@@ -31,10 +31,10 @@
 
           <!-- Model is a power-user override (it defaults to the bot's chat model), so it
                stays folded behind Advanced rather than occupying space the moment you enable.
-               Canonical settings-card disclosure: label left, outline button with a chevron
-               that rotates 90° on the right (same as the channel Advanced / Access cards). -->
-          <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
-            <span class="text-sm font-medium text-foreground">{{ $t('bots.heartbeat.advanced') }}</span>
+               The toggle reveals a SIBLING row below it (not a body it owns), so this stays a
+               plain SettingsRow with the disclosure button in its trailing slot rather than
+               ExpandableSettingsRow — same as the channel Advanced / Access cards. -->
+          <SettingsRow :label="$t('bots.heartbeat.advanced')">
             <Button
               variant="outline"
               size="sm"
@@ -47,7 +47,7 @@
               />
               {{ advancedOpen ? $t('common.collapse') : $t('common.expand') }}
             </Button>
-          </div>
+          </SettingsRow>
 
           <SettingsRow
             v-if="advancedOpen"
@@ -105,13 +105,10 @@
       </SettingsSection>
 
       <SettingsSection :title="$t('bots.heartbeat.title')">
-        <div
+        <SettingsRow
           v-if="totalCount > 0"
-          class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3"
+          :label="$t('common.status')"
         >
-          <span class="text-sm font-medium text-foreground">
-            {{ $t('common.status') }}
-          </span>
           <Select v-model="statusFilter">
             <SelectTrigger class="w-32">
               <SelectValue />
@@ -131,7 +128,7 @@
               </SelectItem>
             </SelectContent>
           </Select>
-        </div>
+        </SettingsRow>
 
         <div
           v-if="isLoading && logs.length === 0"
@@ -282,15 +279,10 @@
         v-if="logs.length > 0"
         :title="$t('common.dangerZone')"
       >
-        <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 py-3">
-          <div class="min-w-0">
-            <div class="text-sm font-medium text-foreground">
-              {{ $t('bots.heartbeat.clearLogs') }}
-            </div>
-            <p class="mt-0.5 text-xs text-muted-foreground">
-              {{ $t('bots.heartbeat.clearConfirm') }}
-            </p>
-          </div>
+        <SettingsRow
+          :label="$t('bots.heartbeat.clearLogs')"
+          :description="$t('bots.heartbeat.clearConfirm')"
+        >
           <ConfirmPopover
             :message="$t('bots.heartbeat.clearConfirm')"
             :loading="isClearing"
@@ -308,7 +300,7 @@
               </Button>
             </template>
           </ConfirmPopover>
-        </div>
+        </SettingsRow>
       </SettingsSection>
     </div>
   </PageShell>

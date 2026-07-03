@@ -46,7 +46,10 @@
               name="name"
             >
               <SettingsRow :label="$t('common.name')">
-                <FormItem class="w-80">
+                <FieldStack
+                  class="w-80"
+                  for="email-provider-name"
+                >
                   <FormControl>
                     <Input
                       id="email-provider-name"
@@ -55,8 +58,7 @@
                       v-bind="componentField"
                     />
                   </FormControl>
-                  <FormMessage />
-                </FormItem>
+                </FieldStack>
               </SettingsRow>
             </FormField>
 
@@ -213,8 +215,6 @@ import {
   Button,
   FormControl,
   FormField,
-  FormItem,
-  FormMessage,
   Select,
   SelectTrigger,
   SelectValue,
@@ -228,6 +228,7 @@ import LoadingButton from '@/components/loading-button/index.vue'
 import SettingsShell from '@/components/settings-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
 import EmailProviderIcon from '@/components/email-provider-icon/index.vue'
 import { computed, inject, reactive, ref, watch } from 'vue'
 import { toast } from '@memohai/ui'
@@ -290,7 +291,7 @@ const revokeLoading = ref(false)
 const queryCache = useQueryCache()
 
 const schema = toTypedSchema(z.object({
-  name: z.string().min(1),
+  name: z.string().min(1, t('provider.nameRequired')),
 }))
 
 const form = useForm({ validationSchema: schema })

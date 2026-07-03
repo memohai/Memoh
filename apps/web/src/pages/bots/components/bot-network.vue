@@ -35,44 +35,48 @@
             </div>
           </SettingsRow>
 
-          <!-- One distilled status line; raw diagnostics live behind Details. -->
-          <div
-            v-if="needsSaveForStatus"
-            class="mx-4 flex min-h-[3.75rem] items-center gap-2.5 border-b border-border py-3"
-          >
-            <span class="size-1.5 shrink-0 rounded-sm bg-warning" />
-            <p class="text-sm text-muted-foreground">
-              {{ $t('bots.settings.networkStatusPendingSave') }}
-            </p>
-          </div>
-          <div
-            v-else-if="isNetworkStatusLoading && !networkStatusData"
-            class="mx-4 flex min-h-[3.75rem] items-center gap-2 border-b border-border py-3 text-sm text-muted-foreground"
-          >
-            <Spinner class="size-4" />
-            <span>{{ $t('common.loading') }}</span>
-          </div>
-          <div
-            v-else-if="networkStatusLine"
-            class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3"
-          >
-            <div class="flex min-w-0 items-center gap-2.5">
-              <span
-                class="size-1.5 shrink-0 rounded-sm"
-                :class="statusDotClass"
-              />
-              <div class="min-w-0">
-                <div class="truncate text-sm font-medium text-foreground">
-                  {{ networkStatusLine.label }}
-                </div>
-                <div
-                  v-if="networkStatusLine.detail"
-                  class="truncate font-mono text-xs text-muted-foreground"
-                >
-                  {{ networkStatusLine.detail }}
+          <!-- One distilled status line; raw diagnostics live behind Details.
+               Three mutually-exclusive states of one logical row (pending-save
+               / loading / resolved) share SettingsRow's geometry via #content;
+               only the resolved state has trailing action buttons. -->
+          <SettingsRow v-if="needsSaveForStatus">
+            <template #content>
+              <div class="flex items-center gap-2.5">
+                <span class="size-1.5 shrink-0 rounded-sm bg-warning" />
+                <p class="text-sm text-muted-foreground">
+                  {{ $t('bots.settings.networkStatusPendingSave') }}
+                </p>
+              </div>
+            </template>
+          </SettingsRow>
+          <SettingsRow v-else-if="isNetworkStatusLoading && !networkStatusData">
+            <template #content>
+              <div class="flex items-center gap-2 text-sm text-muted-foreground">
+                <Spinner class="size-4" />
+                <span>{{ $t('common.loading') }}</span>
+              </div>
+            </template>
+          </SettingsRow>
+          <SettingsRow v-else-if="networkStatusLine">
+            <template #content>
+              <div class="flex min-w-0 items-center gap-2.5">
+                <span
+                  class="size-1.5 shrink-0 rounded-sm"
+                  :class="statusDotClass"
+                />
+                <div class="min-w-0">
+                  <div class="truncate text-sm font-medium text-foreground">
+                    {{ networkStatusLine.label }}
+                  </div>
+                  <div
+                    v-if="networkStatusLine.detail"
+                    class="truncate font-mono text-xs text-muted-foreground"
+                  >
+                    {{ networkStatusLine.detail }}
+                  </div>
                 </div>
               </div>
-            </div>
+            </template>
             <div class="flex shrink-0 items-center gap-2">
               <Button
                 v-if="overlayState === 'needs_login' && overlayAuthURL"
@@ -90,7 +94,7 @@
                 {{ $t('common.details') }}
               </Button>
             </div>
-          </div>
+          </SettingsRow>
 
           <div v-if="showOverlayConfig">
             <template v-if="primarySchema?.fields?.length">
