@@ -267,8 +267,8 @@ function prepareConfig(cwd: string, sourcePath: string, qdrantGrpcBaseUrl: strin
   mkdirSync(cwd, { recursive: true })
   const home = app.getPath('home')
   const source = readFileSync(sourcePath, 'utf8')
-  const targetPath = join(cwd, `config${slotSuffix()}.toml`)
   const contents = applyLocalConfigDefaults(source, cwd, home, providersDir, qdrantGrpcBaseUrl)
+  const targetPath = join(cwd, `config${slotSuffix()}.toml`)
   writeFileSync(targetPath, contents, { mode: 0o600 })
   return targetPath
 }
