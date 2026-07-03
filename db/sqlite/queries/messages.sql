@@ -383,6 +383,16 @@ WITH cursor_message AS (
     AND t.session_id = sqlc.arg(session_id)
     AND m.id = sqlc.arg(before_message_id)
   LIMIT 1
+),
+candidate_turns AS (
+  SELECT t.id, t.position
+  FROM bot_history_turns t
+  CROSS JOIN cursor_message cursor
+  WHERE t.session_id = sqlc.arg(session_id)
+    AND t.superseded_at IS NULL
+    AND t.position <= cursor.turn_position
+  ORDER BY t.position DESC
+  LIMIT sqlc.arg(max_count) + 1
 )
 SELECT
   m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
@@ -396,12 +406,11 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
+JOIN candidate_turns t ON t.id = m.turn_id
 CROSS JOIN cursor_message cursor
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
-  AND t.session_id = sqlc.arg(session_id)
   AND (
     t.position < cursor.turn_position
     OR (t.position = cursor.turn_position AND m.turn_message_seq < cursor.turn_message_seq)
@@ -431,6 +440,14 @@ ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id 
 LIMIT sqlc.arg(max_count);
 
 -- name: ListMessagesLatestBySession :many
+WITH candidate_turns AS (
+  SELECT id, position
+  FROM bot_history_turns
+  WHERE session_id = sqlc.arg(session_id)
+    AND superseded_at IS NULL
+  ORDER BY position DESC
+  LIMIT sqlc.arg(max_count) + 1
+)
 SELECT
   m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
@@ -443,11 +460,10 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
+JOIN candidate_turns t ON t.id = m.turn_id
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
-  AND t.session_id = sqlc.arg(session_id)
 ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
 
