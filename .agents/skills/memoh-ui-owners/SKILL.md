@@ -1,6 +1,6 @@
 ---
 name: memoh-ui-owners
-description: Read this BEFORE writing or editing any apps/web (Memoh web frontend) settings page, bot-detail tab, dialog/popover/sheet form, config panel, list row, or detail surface — i.e. almost any Vue markup that is not pure chat. Memoh has ten owner components (SettingsRow, SettingsSection, FieldStack, PageShell, MetricReadout, PersonaTile, CalloutBanner, ExpandableSettingsRow, BackendCard, FormStack) that own all recurring spacing. Use this skill whenever you are about to build a settings row, a form field (label + input), a section card, a Save/Cancel footer, a stat tile, a warning banner, an "Advanced" disclosure, an empty state, or a whole page frame — even if the user just says "add a settings page", "make a dialog", "add a toggle row", "build this form", or "add a field", without mentioning spacing or components. Hand-writing a row/field/card/tile out of raw `<div class="flex … border-b …">` is the #1 recurring mistake in this codebase (同形异码); compose an owner instead so spacing can never drift. The skill also says when a shape must STAY hand-written (a genuinely different spatial relationship, e.g. a denser list row). Pairs with memoh-web (page-level) and packages/ui/AGENTS.md (atom-level).
+description: Read this BEFORE writing or editing any apps/web (Memoh web frontend) settings page, bot-detail tab, dialog/popover/sheet form, config panel, list row, or detail surface — i.e. almost any Vue markup that is not pure chat. Memoh has twelve owner components (SettingsRow, SettingsSection, FieldStack, PageShell, MetricReadout, PersonaTile, CalloutBanner, ExpandableSettingsRow, BackendCard, FormStack, PanePlaceholder, InlineLoadingRow) that own all recurring spacing. Use this skill whenever you are about to build a settings row, a form field (label + input), a section card, a Save/Cancel footer, a stat tile, a warning banner, an "Advanced" disclosure, an empty state, a loading state, or a whole page frame — even if the user just says "add a settings page", "make a dialog", "add a toggle row", "build this form", or "add a field", without mentioning spacing or components. Hand-writing a row/field/card/tile out of raw `<div class="flex … border-b …">` is the #1 recurring mistake in this codebase (同形异码); compose an owner instead so spacing can never drift. The skill also says when a shape must STAY hand-written (a genuinely different spatial relationship, e.g. a denser list row). Pairs with memoh-web (page-level) and packages/ui/AGENTS.md (atom-level).
 ---
 
 # Memoh UI — Spacing Owner Vocabulary
@@ -29,7 +29,7 @@ because there is only one copy of its spacing.
 > `<div class="space-y-1.5"><Label/>…` for a field — **stop.** That shape has an owner.
 > Compose the owner.
 
-## The ten owners
+## The twelve owners
 
 Import paths are exact. All live under `apps/web/src/components/`.
 
@@ -127,10 +127,36 @@ A framed warning / destructive notice. Props: `tone: 'warning' | 'destructive'`,
 `description`, `clickable` (whole surface becomes a button with a lead-in chevron). Slots:
 `#icon`, default (trailing action).
 
+### Loading & placeholder (the four-rung ladder)
+
+Loading states have exactly four homes; pick by *where* the loading lives, and the
+choices are mutually exclusive — no two rungs ever fit the same call site:
+
+```
+Just the glyph, no text (rare, e.g. sidebar)       → <Spinner> atom, keep local
+Inside a button that triggered the work            → Button :loading (+ loading-mode)
+An in-flow row: spinner + muted text, left-aligned → InlineLoadingRow
+A whole pane/panel with nothing else to show       → PanePlaceholder (centered fill)
+```
+
+**PanePlaceholder** · `pane-placeholder/index.vue`
+The centered fill for a pane's content area, three states: `loading` (horizontal
+spinner + text), default empty (vertical `#icon` + text + `#action`), `title` (emphasized
+two-line block, e.g. "Select a bot"). Deliberately **not** the `@memohai/ui` `Empty`
+(that's the dashed/solid framed card for in-page empties); PanePlaceholder is for the
+frameless center of a panel that has nothing else. Parent must give it height.
+
+**InlineLoadingRow** · `inline-loading-row/index.vue`
+A left-aligned, in-flow "spinner + muted text" row that occupies one line where content
+will appear (list head, settings row content, panel top). Props: `size: 'sm' | 'md'`
+(text-xs/3.5 vs text-sm/4), `bordered` (the rounded-md framed variant used by backup /
+import read-states). Positioning padding (`px-2`, `py-8`) stays with the **caller** via
+class passthrough. Not for centered fills — that's PanePlaceholder.
+
 ### Plus one atom you already have
 
-**Empty** (`@memohai/ui`) — the empty state. Fold `py-12`/`py-16` as needed. Loading and
-empty states must still draw their frame so nothing reflows.
+**Empty** (`@memohai/ui`) — the framed in-page empty state card. Fold `py-12`/`py-16` as
+needed. Loading and empty states must still draw their frame so nothing reflows.
 
 ## Which owner? — a decision map
 
@@ -144,7 +170,10 @@ A stat / number tile?                           → MetricReadout (you own the g
 A vertical, centered entity/add tile?           → PersonaTile
 A warning / destructive framed notice?          → CalloutBanner
 The page frame itself?                          → PageShell
-An empty / loading state?                        → Empty (draw the frame)
+A pane with nothing to show (loading/empty)?    → PanePlaceholder (centered fill)
+An in-flow loading row (spinner + text)?        → InlineLoadingRow
+Loading inside the triggering button?           → Button :loading
+An in-page framed empty state?                  → Empty (draw the frame)
 ```
 
 ## When to STAY hand-written (do not force an owner)
@@ -162,8 +191,12 @@ Keep a shape local when its relationship genuinely differs. The tells:
 - **A genuinely one-off compound block.** OAuth device-flow, a drag-drop upload target, a
   Monaco/JSON editor, a snapshot input, a link-code countdown, the single real data table
   — no owner covers these; hand-write them.
-- **A centered placeholder** borrowing a row's `min-height` so the panel doesn't reflow —
-  a Spinner/Skeleton block, not a row.
+- **A centered framed placeholder paired with a sibling state** — e.g. a `min-h` framed
+  loading block whose twin is a framed empty state in the same slot (bot-container's
+  workspace card). The frame + pairing is the relationship; PanePlaceholder (frameless
+  pane fill) would break the pair. Keep both local.
+- **A compound progress block** (spinner + phase text + progress bar, e.g.
+  container-create-progress) — that's a composition, not a loading row.
 - **A trivial muted `<p>`** no-results line.
 
 If you're unsure whether two shapes share a relationship, judge by **geometry + context**,
