@@ -51,10 +51,9 @@
           </SettingsRow>
           <SettingsRow v-else-if="isNetworkStatusLoading && !networkStatusData">
             <template #content>
-              <div class="flex items-center gap-2 text-sm text-muted-foreground">
-                <Spinner class="size-4" />
-                <span>{{ $t('common.loading') }}</span>
-              </div>
+              <InlineLoadingRow size="md">
+                {{ $t('common.loading') }}
+              </InlineLoadingRow>
             </template>
           </SettingsRow>
           <SettingsRow v-else-if="networkStatusLine">
@@ -552,7 +551,6 @@ import {
   InputGroupButton,
   InputGroupInput,
   Label,
-  Spinner,
   Switch,
   Input,
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -573,6 +571,7 @@ import SettingsRow from '@/components/settings/row.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import OverlayProviderSelect from './network-provider-select.vue'
 import NetworkNodeSelect from './network-node-select.vue'
 import MonacoEditor from '@/components/monaco-editor/index.vue'

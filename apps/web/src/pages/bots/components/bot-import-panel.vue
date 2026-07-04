@@ -8,7 +8,6 @@ import {
   AvatarImage,
   Button,
   Input,
-  Spinner,
   Tabs,
   TabsList,
   TabsTrigger,
@@ -23,6 +22,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatFileSize } from '@/components/file-manager/utils'
 import { uploadWithProgress } from '@/lib/upload-with-progress'
 import BackupSectionCards from './backup-section-cards.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 
 type SectionState = 'skip' | 'merge' | 'replace'
 
@@ -281,13 +281,12 @@ async function handleImport() {
       </div>
 
       <!-- Reading backup -->
-      <div
+      <InlineLoadingRow
         v-if="selectedFile && previewing"
-        class="flex items-center gap-2 rounded-md border border-border/60 bg-background p-3 text-xs text-muted-foreground"
+        bordered
       >
-        <Spinner />
         {{ t('bots.backup.reading') }}
-      </div>
+      </InlineLoadingRow>
 
       <!-- Backup unreadable / unsupported -->
       <div

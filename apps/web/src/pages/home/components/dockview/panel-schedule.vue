@@ -10,13 +10,12 @@
         </h1>
       </header>
 
-      <div
+      <InlineLoadingRow
         v-if="isLoading"
-        class="flex items-center gap-2 px-2 text-xs text-muted-foreground"
+        class="px-2"
       >
-        <Spinner class="size-3.5" />
-        <span>{{ t('common.loading') }}</span>
-      </div>
+        {{ t('common.loading') }}
+      </InlineLoadingRow>
 
       <ScheduleEditor
         v-else
@@ -79,7 +78,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Spinner,
 } from '@memohai/ui'
 import {
   deleteBotsByBotIdScheduleById,
@@ -90,6 +88,7 @@ import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import ScheduleEditor from '@/pages/bots/components/schedule-editor.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 
 const props = defineProps<{
   params: {

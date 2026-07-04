@@ -13,7 +13,6 @@ import {
   DialogTitle,
   Input,
   Label,
-  Spinner,
 } from '@memohai/ui'
 import {
   postBotsByBotIdBackupExport,
@@ -23,6 +22,7 @@ import {
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import BotImportPanel from './bot-import-panel.vue'
 import BackupSectionCards from './backup-section-cards.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 
 const props = defineProps<{
   botId: string
@@ -169,13 +169,12 @@ function handleImported(botId: string) {
           <p class="mb-2 text-[11px] font-medium text-muted-foreground">
             {{ t('bots.backup.selectSectionsExport') }}
           </p>
-          <div
+          <InlineLoadingRow
             v-if="summarizing"
-            class="flex items-center gap-2 rounded-md border border-border/60 bg-background p-3 text-xs text-muted-foreground"
+            bordered
           >
-            <Spinner />
             {{ t('bots.backup.reading') }}
-          </div>
+          </InlineLoadingRow>
           <div
             v-else
             class="flex-1 overflow-y-auto px-0.5"

@@ -46,6 +46,7 @@ import {
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ContainerCreateProgress from './container-create-progress.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
@@ -979,13 +980,13 @@ watch([activeTab, botId], ([tab]) => {
          open and visible, so there is no manual "refresh" to push onto the user. -->
 
     <!-- Loading -->
-    <div
+    <InlineLoadingRow
       v-if="containerLoading && !containerInfo && !containerMissing"
-      class="flex items-center gap-2 px-2 py-8 text-sm text-muted-foreground"
+      size="md"
+      class="px-2 py-8"
     >
-      <Spinner class="size-4" />
-      <span>{{ $t('common.loading') }}</span>
-    </div>
+      {{ $t('common.loading') }}
+    </InlineLoadingRow>
 
     <!-- ────────────── EMPTY STATE (no workspace) ────────────── -->
     <template v-else-if="containerMissing">

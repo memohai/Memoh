@@ -36,13 +36,12 @@
     </template>
 
     <!-- Loading -->
-    <div
+    <InlineLoadingRow
       v-if="isLoading && schedules.length === 0"
-      class="flex items-center gap-2 px-2 text-xs text-muted-foreground"
+      class="px-2"
     >
-      <Spinner class="size-3.5" />
-      <span>{{ $t('common.loading') }}</span>
-    </div>
+      {{ $t('common.loading') }}
+    </InlineLoadingRow>
 
     <!-- Empty -->
     <div
@@ -143,7 +142,7 @@ import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
-  Button, Spinner,
+  Button,
   Dialog, DialogContent, DialogScrollContent, DialogHeader, DialogTitle, DialogFooter,
   DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuItem,
 } from '@memohai/ui'
@@ -159,6 +158,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { describeCron, nextRuns } from '@/utils/cron-pattern'
 import ScheduleEditor from './schedule-editor.vue'
 import ScheduleListItem from './schedule-list-item.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 
 const props = defineProps<{
   botId: string
