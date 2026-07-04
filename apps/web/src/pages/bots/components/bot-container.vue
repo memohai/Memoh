@@ -1049,12 +1049,9 @@ watch([activeTab, botId], ([tab]) => {
               size="sm"
               class="shrink-0 self-start sm:self-auto"
               :disabled="containerBusy || botLifecyclePending"
+              :loading="containerAction === 'recreate'"
               @click="handleRecreateContainer"
             >
-              <Spinner
-                v-if="containerAction === 'recreate'"
-                class="size-4"
-              />
               {{ $t('bots.container.legacyRecreate') }}
             </Button>
           </CalloutBanner>
@@ -1094,11 +1091,8 @@ watch([activeTab, botId], ([tab]) => {
                   variant="outline"
                   size="sm"
                   :disabled="containerBusy || botLifecyclePending"
+                  :loading="containerAction === 'recreate'"
                 >
-                  <Spinner
-                    v-if="containerAction === 'recreate'"
-                    class="size-4"
-                  />
                   {{ $t('bots.container.resourceLimits.recreateNow') }}
                 </Button>
               </template>
@@ -1211,12 +1205,9 @@ watch([activeTab, botId], ([tab]) => {
               variant="outline"
               size="sm"
               :disabled="containerBusy || botLifecyclePending"
+              :loading="containerAction === 'start' || containerAction === 'stop'"
               @click="isContainerTaskRunning ? (stopDialogOpen = true) : handleStartContainer()"
             >
-              <Spinner
-                v-if="containerAction === 'start' || containerAction === 'stop'"
-                class="size-4"
-              />
               {{ isContainerTaskRunning ? $t('bots.container.actions.stop') : $t('bots.container.actions.start') }}
             </Button>
           </SettingsRow>
@@ -1361,12 +1352,9 @@ watch([activeTab, botId], ([tab]) => {
             </DialogClose>
             <Button
               type="submit"
-              :disabled="containerAction === 'create' || botLifecyclePending"
+              :disabled="botLifecyclePending"
+              :loading="containerAction === 'create'"
             >
-              <Spinner
-                v-if="containerAction === 'create'"
-                class="size-4"
-              />
               {{ $t('bots.container.refactored.createSubmit') }}
             </Button>
           </DialogFooter>
@@ -1434,12 +1422,9 @@ watch([activeTab, botId], ([tab]) => {
             </DialogClose>
             <Button
               type="submit"
-              :disabled="resourceLimitsSaving || botLifecyclePending"
+              :disabled="botLifecyclePending"
+              :loading="resourceLimitsSaving"
             >
-              <Spinner
-                v-if="resourceLimitsSaving"
-                class="size-4"
-              />
               {{ $t('bots.container.resourceLimits.save') }}
             </Button>
           </DialogFooter>
@@ -1478,11 +1463,8 @@ watch([activeTab, botId], ([tab]) => {
                   variant="outline"
                   size="sm"
                   :disabled="containerBusy || botLifecyclePending"
+                  :loading="containerAction === 'restore'"
                 >
-                  <Spinner
-                    v-if="containerAction === 'restore'"
-                    class="size-4"
-                  />
                   {{ $t('bots.container.actions.restoreData') }}
                 </Button>
               </template>
@@ -1505,12 +1487,9 @@ watch([activeTab, botId], ([tab]) => {
               />
               <Button
                 :disabled="containerBusy || snapshotsLoading || botLifecyclePending"
+                :loading="containerAction === 'snapshot'"
                 @click="handleCreateSnapshot"
               >
-                <Spinner
-                  v-if="containerAction === 'snapshot'"
-                  class="size-4"
-                />
                 {{ $t('bots.container.actions.snapshot') }}
               </Button>
             </div>
@@ -1564,11 +1543,8 @@ watch([activeTab, botId], ([tab]) => {
                       variant="ghost"
                       size="sm"
                       :disabled="containerBusy || botLifecyclePending"
+                      :loading="containerAction === 'rollback' && rollbackVersion === item.version"
                     >
-                      <Spinner
-                        v-if="containerAction === 'rollback' && rollbackVersion === item.version"
-                        class="size-4"
-                      />
                       {{ $t('bots.container.actions.rollback') }}
                     </Button>
                   </template>
@@ -1676,12 +1652,9 @@ watch([activeTab, botId], ([tab]) => {
           </DialogClose>
           <Button
             :disabled="containerBusy || botLifecyclePending"
+            :loading="containerAction === 'stop'"
             @click="confirmStopContainer"
           >
-            <Spinner
-              v-if="containerAction === 'stop'"
-              class="size-4"
-            />
             {{ $t('bots.container.actions.stop') }}
           </Button>
         </DialogFooter>
@@ -1731,12 +1704,9 @@ watch([activeTab, botId], ([tab]) => {
           <Button
             variant="destructive"
             :disabled="containerBusy || botLifecyclePending"
+            :loading="containerAction === 'delete' || containerAction === 'delete-preserve'"
             @click="confirmDeleteContainer"
           >
-            <Spinner
-              v-if="containerAction === 'delete' || containerAction === 'delete-preserve'"
-              class="size-4"
-            />
             {{ $t('bots.container.actions.delete') }}
           </Button>
         </DialogFooter>

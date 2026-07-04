@@ -139,53 +139,38 @@
               v-if="skill.state === 'disabled'"
               variant="ghost"
               size="icon-sm"
+              loading-mode="icon"
+              :loading="isSkillActionPending(skill, 'enable')"
               :disabled="isActioning"
               :aria-label="$t('bots.skills.enableAction')"
               @click="handleSkillAction('enable', skill)"
             >
-              <Spinner
-                v-if="isSkillActionPending(skill, 'enable')"
-                class="size-3"
-              />
-              <EyeOff
-                v-else
-                class="size-3.5"
-              />
+              <EyeOff class="size-3.5" />
             </Button>
             <Button
               v-else
               variant="ghost"
               size="icon-sm"
+              loading-mode="icon"
+              :loading="isSkillActionPending(skill, 'disable')"
               :disabled="isActioning"
               :aria-label="$t('bots.skills.disableAction')"
               @click="handleSkillAction('disable', skill)"
             >
-              <Spinner
-                v-if="isSkillActionPending(skill, 'disable')"
-                class="size-3"
-              />
-              <Eye
-                v-else
-                class="size-3.5"
-              />
+              <Eye class="size-3.5" />
             </Button>
 
             <Button
               v-if="!skill.managed"
               variant="ghost"
               size="icon-sm"
+              loading-mode="icon"
+              :loading="isSkillActionPending(skill, 'adopt')"
               :disabled="isActioning || skill.state === 'shadowed'"
               :aria-label="skill.state === 'shadowed' ? $t('bots.skills.adoptBlocked') : $t('bots.skills.adoptAction')"
               @click="handleSkillAction('adopt', skill)"
             >
-              <Spinner
-                v-if="isSkillActionPending(skill, 'adopt')"
-                class="size-3"
-              />
-              <ArrowDownToLine
-                v-else
-                class="size-3.5"
-              />
+              <ArrowDownToLine class="size-3.5" />
             </Button>
 
             <ConfirmPopover
@@ -249,13 +234,10 @@
           <Button
             size="sm"
             class="min-w-24"
-            :disabled="!canSave || isSaving"
+            :disabled="!canSave"
+            :loading="isSaving"
             @click="handleSave"
           >
-            <Spinner
-              v-if="isSaving"
-              class="size-3"
-            />
             {{ $t('common.confirm') }}
           </Button>
         </DialogFooter>
@@ -348,12 +330,9 @@
               size="sm"
               class="min-w-24"
               :disabled="!canSaveDiscoveryRoots"
+              :loading="isSavingDiscoveryRoots"
               @click="handleSaveDiscoveryRoots"
             >
-              <Spinner
-                v-if="isSavingDiscoveryRoots"
-                class="size-3"
-              />
               {{ $t('common.confirm') }}
             </Button>
           </div>
