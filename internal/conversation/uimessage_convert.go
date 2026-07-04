@@ -69,10 +69,12 @@ type uiPendingAssistantTurn struct {
 type uiDecodedModelMessage struct {
 	ModelMessage
 
-	contentText         string
-	contentTextDecoded  bool
-	contentParts        []uiContentPart
-	contentPartsDecoded bool
+	contentText             string
+	contentTextDecoded      bool
+	contentParts            []uiContentPart
+	contentPartsDecoded     bool
+	toolResultOutput        any
+	toolResultOutputDecoded bool
 }
 
 // ConvertRawModelMessagesToUIAssistantMessages converts terminal stream payload
@@ -462,6 +464,13 @@ func decodeUIModelMessage(message ModelMessage) uiDecodedModelMessage {
 }
 
 func decodePersistedModelMessage(raw messagepkg.Message) uiDecodedModelMessage {
+	if firstJSONByte(raw.Content) != '{' {
+		return uiDecodedModelMessage{ModelMessage: ModelMessage{
+			Role:    raw.Role,
+			Content: raw.Content,
+		}}
+	}
+
 	var message ModelMessage
 	if err := json.Unmarshal(raw.Content, &message); err != nil {
 		return uiDecodedModelMessage{ModelMessage: ModelMessage{
@@ -538,10 +547,12 @@ func extractTextFromPersistedContent(raw json.RawMessage) string {
 		return ""
 	}
 
-	var modelMessage ModelMessage
-	if err := json.Unmarshal(raw, &modelMessage); err == nil && len(modelMessage.Content) > 0 {
-		decoded := decodeUIModelMessage(modelMessage)
-		return decoded.textContent()
+	if firstJSONByte(raw) == '{' {
+		var modelMessage ModelMessage
+		if err := json.Unmarshal(raw, &modelMessage); err == nil && len(modelMessage.Content) > 0 {
+			decoded := decodeUIModelMessage(modelMessage)
+			return decoded.textContent()
+		}
 	}
 
 	decoded := decodeUIModelMessage(ModelMessage{Content: raw})
@@ -653,44 +664,61 @@ func (message *uiDecodedModelMessage) textContent() string {
 	}
 	message.contentTextDecoded = true
 
-	var text string
-	if err := json.Unmarshal(message.Content, &text); err == nil {
-		message.contentText = strings.TrimSpace(text)
-		return message.contentText
-	}
-
-	parts := message.parts()
-	if len(parts) > 0 {
-		lines := make([]string, 0, len(parts))
-		for _, part := range parts {
-			partType := strings.ToLower(strings.TrimSpace(part.Type))
-			if partType == "reasoning" {
-				continue
-			}
-			switch {
-			case partType == "text" && strings.TrimSpace(part.Text) != "":
-				lines = append(lines, strings.TrimSpace(part.Text))
-			case partType == "link" && strings.TrimSpace(part.URL) != "":
-				lines = append(lines, strings.TrimSpace(part.URL))
-			case partType == "emoji" && strings.TrimSpace(part.Emoji) != "":
-				lines = append(lines, strings.TrimSpace(part.Emoji))
-			case strings.TrimSpace(part.Text) != "":
-				lines = append(lines, strings.TrimSpace(part.Text))
-			}
-		}
-		message.contentText = strings.TrimSpace(strings.Join(lines, "\n"))
-		return message.contentText
-	}
-
-	var object map[string]any
-	if err := json.Unmarshal(message.Content, &object); err == nil {
-		if value, ok := object["text"].(string); ok {
-			message.contentText = strings.TrimSpace(value)
+	jsonKind := firstJSONByte(message.Content)
+	switch jsonKind {
+	case '"':
+		var text string
+		if err := json.Unmarshal(message.Content, &text); err == nil {
+			message.contentText = strings.TrimSpace(text)
 			return message.contentText
+		}
+	case '[', '{':
+		if parts := message.parts(); len(parts) > 0 {
+			message.contentText = textFromUIParts(parts)
+			return message.contentText
+		}
+		if jsonKind == '{' {
+			var object struct {
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal(message.Content, &object); err == nil {
+				message.contentText = strings.TrimSpace(object.Text)
+				return message.contentText
+			}
 		}
 	}
 
 	return ""
+}
+
+func textFromUIParts(parts []uiContentPart) string {
+	var builder strings.Builder
+	for _, part := range parts {
+		partType := strings.TrimSpace(part.Type)
+		if strings.EqualFold(partType, "reasoning") {
+			continue
+		}
+
+		var text string
+		switch {
+		case strings.EqualFold(partType, "text") && strings.TrimSpace(part.Text) != "":
+			text = strings.TrimSpace(part.Text)
+		case strings.EqualFold(partType, "link") && strings.TrimSpace(part.URL) != "":
+			text = strings.TrimSpace(part.URL)
+		case strings.EqualFold(partType, "emoji") && strings.TrimSpace(part.Emoji) != "":
+			text = strings.TrimSpace(part.Emoji)
+		case strings.TrimSpace(part.Text) != "":
+			text = strings.TrimSpace(part.Text)
+		}
+		if text == "" {
+			continue
+		}
+		if builder.Len() > 0 {
+			builder.WriteByte('\n')
+		}
+		builder.WriteString(text)
+	}
+	return builder.String()
 }
 
 func extractPersistedReasoning(message *uiDecodedModelMessage) []string {
@@ -701,7 +729,7 @@ func extractPersistedReasoning(message *uiDecodedModelMessage) []string {
 
 	reasonings := make([]string, 0, len(parts))
 	for _, part := range parts {
-		if strings.ToLower(strings.TrimSpace(part.Type)) != "reasoning" {
+		if !strings.EqualFold(strings.TrimSpace(part.Type), "reasoning") {
 			continue
 		}
 		if text := strings.TrimSpace(part.Text); text != "" {
@@ -715,7 +743,7 @@ func extractPersistedToolCalls(message *uiDecodedModelMessage) []uiExtractedTool
 	parts := message.parts()
 	calls := make([]uiExtractedToolCall, 0, len(parts)+len(message.ToolCalls))
 	for _, part := range parts {
-		if strings.ToLower(strings.TrimSpace(part.Type)) != "tool-call" {
+		if !strings.EqualFold(strings.TrimSpace(part.Type), "tool-call") {
 			continue
 		}
 		calls = append(calls, uiExtractedToolCall{
@@ -842,7 +870,7 @@ func extractPersistedToolResults(message *uiDecodedModelMessage) []uiExtractedTo
 	parts := message.parts()
 	results := make([]uiExtractedToolResult, 0, len(parts))
 	for _, part := range parts {
-		if strings.ToLower(strings.TrimSpace(part.Type)) != "tool-result" {
+		if !strings.EqualFold(strings.TrimSpace(part.Type), "tool-result") {
 			continue
 		}
 		output := part.Output
@@ -862,14 +890,27 @@ func extractPersistedToolResults(message *uiDecodedModelMessage) []uiExtractedTo
 		return nil
 	}
 
+	return []uiExtractedToolResult{{
+		ToolCallID: strings.TrimSpace(message.ToolCallID),
+		Output:     message.decodedToolResultOutput(),
+	}}
+}
+
+func (message *uiDecodedModelMessage) decodedToolResultOutput() any {
+	if message == nil {
+		return nil
+	}
+	if message.toolResultOutputDecoded {
+		return message.toolResultOutput
+	}
+	message.toolResultOutputDecoded = true
+
 	var output any
 	if err := json.Unmarshal(message.Content, &output); err != nil {
 		output = strings.TrimSpace(string(message.Content))
 	}
-	return []uiExtractedToolResult{{
-		ToolCallID: strings.TrimSpace(message.ToolCallID),
-		Output:     output,
-	}}
+	message.toolResultOutput = output
+	return message.toolResultOutput
 }
 
 func (message *uiDecodedModelMessage) parts() []uiContentPart {
@@ -889,27 +930,45 @@ func extractPersistedContentParts(raw json.RawMessage) []uiContentPart {
 		return nil
 	}
 
-	var parts []uiContentPart
-	if err := json.Unmarshal(raw, &parts); err == nil {
-		return parts
-	}
-
-	var encoded string
-	if err := json.Unmarshal(raw, &encoded); err == nil {
-		trimmed := strings.TrimSpace(encoded)
-		if strings.HasPrefix(trimmed, "[") && json.Unmarshal([]byte(trimmed), &parts) == nil {
+	switch firstJSONByte(raw) {
+	case '[':
+		var parts []uiContentPart
+		if err := json.Unmarshal(raw, &parts); err == nil {
 			return parts
+		}
+	case '"':
+		var encoded string
+		if err := json.Unmarshal(raw, &encoded); err == nil {
+			trimmed := strings.TrimSpace(encoded)
+			if strings.HasPrefix(trimmed, "[") {
+				var parts []uiContentPart
+				if json.Unmarshal([]byte(trimmed), &parts) == nil {
+					return parts
+				}
+			}
+		}
+	case '{':
+		var object struct {
+			Content json.RawMessage `json:"content"`
+		}
+		if err := json.Unmarshal(raw, &object); err == nil && len(object.Content) > 0 {
+			return extractPersistedContentParts(object.Content)
 		}
 	}
 
-	var object struct {
-		Content json.RawMessage `json:"content"`
-	}
-	if err := json.Unmarshal(raw, &object); err == nil && len(object.Content) > 0 {
-		return extractPersistedContentParts(object.Content)
-	}
-
 	return nil
+}
+
+func firstJSONByte(raw json.RawMessage) byte {
+	for _, b := range raw {
+		switch b {
+		case ' ', '\n', '\r', '\t':
+			continue
+		default:
+			return b
+		}
+	}
+	return 0
 }
 
 func uiAttachmentsFromMessageAssets(raw messagepkg.Message) []UIAttachment {
