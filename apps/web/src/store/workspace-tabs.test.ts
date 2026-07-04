@@ -107,14 +107,17 @@ interface FakeGroup {
 function createFakeDock() {
   const panels: FakePanel[] = []
   const removeListeners: Array<(panel: FakePanel) => void> = []
-  const activePanelListeners: Array<(event: { activePanel: FakePanel | undefined }) => void> = []
+  // Mirror dockview v7's real onDidActivePanelChange payload: `{ panel, origin }`.
+  // The old fake used `{ activePanel }` (the v6 shape); that masked the v6→v7
+  // rename bug because the store read the same wrong field the fake emitted.
+  const activePanelListeners: Array<(event: { panel: FakePanel | undefined }) => void> = []
   const layoutListeners: Array<() => void> = []
   const closeVetoPanelIds = new Set<string>()
   let activePanel: FakePanel | null = null
   const setActivePanel = (panel: FakePanel | null) => {
     if (activePanel === panel) return
     activePanel = panel
-    activePanelListeners.forEach(listener => listener({ activePanel: panel ?? undefined }))
+    activePanelListeners.forEach(listener => listener({ panel: panel ?? undefined }))
   }
   const noopDisposable = () => ({ dispose: () => {} })
   const layoutDisposable = (listener: () => void) => {
@@ -131,7 +134,7 @@ function createFakeDock() {
       layoutListeners.forEach(listener => listener())
     })
   }
-  const activePanelDisposable = (listener: (event: { activePanel: FakePanel | undefined }) => void) => {
+  const activePanelDisposable = (listener: (event: { panel: FakePanel | undefined }) => void) => {
     activePanelListeners.push(listener)
     return {
       dispose: () => {
