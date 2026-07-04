@@ -378,12 +378,12 @@ func newPendingAssistantTurn(raw messagepkg.Message) *uiPendingAssistantTurn {
 	return &uiPendingAssistantTurn{
 		Turn: UITurn{
 			Role:              "assistant",
+			Messages:          make([]UIMessage, 0, 4),
 			Timestamp:         raw.CreatedAt,
 			Platform:          resolveUIPersistencePlatform(raw),
 			ExternalMessageID: strings.TrimSpace(raw.ExternalMessageID),
 			ID:                strings.TrimSpace(raw.ID),
 		},
-		ToolIndexes: map[string]int{},
 	}
 }
 
@@ -430,6 +430,9 @@ func upsertPendingToolCall(pending *uiPendingAssistantTurn, call uiExtractedTool
 	}
 	appendPendingAssistantMessage(pending, block)
 	if call.ID != "" {
+		if pending.ToolIndexes == nil {
+			pending.ToolIndexes = make(map[string]int, 1)
+		}
 		pending.ToolIndexes[call.ID] = len(pending.Turn.Messages) - 1
 	}
 }
@@ -1105,10 +1108,20 @@ func resolveUIPersistencePlatform(raw messagepkg.Message) string {
 }
 
 func stripPersistedYAMLHeader(text string) string {
+	if !strings.HasPrefix(text, "---\n") {
+		return text
+	}
 	return strings.TrimSpace(uiMessageYAMLHeaderRe.ReplaceAllString(text, ""))
 }
 
 func stripPersistedAgentTags(text string) string {
+	if !strings.Contains(text, "<") {
+		trimmed := strings.TrimSpace(text)
+		if !strings.Contains(trimmed, "\n\n\n") {
+			return trimmed
+		}
+		return strings.TrimSpace(uiMessageCollapsedNewlinesRe.ReplaceAllString(trimmed, "\n\n"))
+	}
 	stripped := uiMessageAgentTagsRe.ReplaceAllString(text, "")
 	return strings.TrimSpace(uiMessageCollapsedNewlinesRe.ReplaceAllString(stripped, "\n\n"))
 }
@@ -1246,6 +1259,9 @@ func isBackgroundToolStillRunning(message UIMessage) bool {
 }
 
 func parseBackgroundTaskNotification(text string) (UIBackgroundTask, bool) {
+	if !strings.Contains(text, "<task-notification>") {
+		return UIBackgroundTask{}, false
+	}
 	match := uiTaskNotificationRe.FindStringSubmatch(text)
 	if len(match) < 2 {
 		return UIBackgroundTask{}, false
@@ -1288,12 +1304,18 @@ func parseBackgroundTaskNotification(text string) (UIBackgroundTask, bool) {
 }
 
 func extractUITaskNotificationTag(body, tag string) string {
-	re := regexp.MustCompile(`(?s)<` + regexp.QuoteMeta(tag) + `>\s*(.*?)\s*</` + regexp.QuoteMeta(tag) + `>`)
-	match := re.FindStringSubmatch(body)
-	if len(match) < 2 {
+	open := "<" + tag + ">"
+	closeTag := "</" + tag + ">"
+	start := strings.Index(body, open)
+	if start < 0 {
 		return ""
 	}
-	return match[1]
+	start += len(open)
+	end := strings.Index(body[start:], closeTag)
+	if end < 0 {
+		return ""
+	}
+	return body[start : start+end]
 }
 
 func toolResultMap(output any) (map[string]any, bool) {

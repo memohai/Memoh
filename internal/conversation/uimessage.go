@@ -137,8 +137,16 @@ type UIMessageStreamEvent struct {
 	Metadata    map[string]any
 }
 
+var (
+	uiBoolTrue  = true
+	uiBoolFalse = false
+)
+
 func uiBoolPtr(v bool) *bool {
-	return &v
+	if v {
+		return &uiBoolTrue
+	}
+	return &uiBoolFalse
 }
 
 func normalizeUIAttachmentType(kind, mime string) string {

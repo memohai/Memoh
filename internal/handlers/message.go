@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -358,20 +359,38 @@ func (h *MessageHandler) decorateUITurns(ctx context.Context, botID, sessionID s
 	if len(toolCallIDs) == 0 {
 		return
 	}
+	var wg sync.WaitGroup
+	var approvals []toolapproval.Request
+	var requests []userinput.Request
 	if h.toolApproval != nil {
-		if approvals, err := h.toolApproval.ListBySessionToolCalls(ctx, botID, sessionID, toolCallIDs); err == nil {
-			mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(ctx, sessionID))
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if rows, err := h.toolApproval.ListBySessionToolCalls(ctx, botID, sessionID, toolCallIDs); err == nil {
+				approvals = rows
+			}
+		}()
 	}
 	if h.userInput != nil {
-		if requests, err := h.userInput.ListBySessionToolCalls(ctx, botID, sessionID, toolCallIDs); err == nil {
-			mergeUserInputs(items, requests, h.userInput.CanRespond)
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if rows, err := h.userInput.ListBySessionToolCalls(ctx, botID, sessionID, toolCallIDs); err == nil {
+				requests = rows
+			}
+		}()
+	}
+	wg.Wait()
+	if len(approvals) > 0 {
+		mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(ctx, sessionID))
+	}
+	if len(requests) > 0 {
+		mergeUserInputs(items, requests, h.userInput.CanRespond)
 	}
 }
 
 func toolCallIDsFromUITurns(turns []conversation.UITurn) []string {
-	seen := make(map[string]struct{})
+	var seen map[string]struct{}
 	var ids []string
 	for _, turn := range turns {
 		for _, msg := range turn.Messages {
@@ -381,6 +400,9 @@ func toolCallIDsFromUITurns(turns []conversation.UITurn) []string {
 			id := strings.TrimSpace(msg.ToolCallID)
 			if id == "" {
 				continue
+			}
+			if seen == nil {
+				seen = make(map[string]struct{}, 4)
 			}
 			if _, ok := seen[id]; ok {
 				continue
