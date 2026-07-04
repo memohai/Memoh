@@ -2,16 +2,11 @@
   <div class="flex-1 flex flex-col h-full min-w-0 relative">
     <div
       v-if="!currentBotId"
-      class="flex-1 flex items-center justify-center"
+      class="flex-1"
     >
-      <div class="text-center">
-        <p class="text-xs font-medium text-foreground">
-          {{ $t('chat.selectBot') }}
-        </p>
-        <p class="mt-1 text-xs text-muted-foreground">
-          {{ $t('chat.selectBotHint') }}
-        </p>
-      </div>
+      <PanePlaceholder :title="$t('chat.selectBot')">
+        {{ $t('chat.selectBotHint') }}
+      </PanePlaceholder>
     </div>
 
     <template v-else>
@@ -1007,6 +1002,7 @@ import type { AcpclientModelInfo, AcpprofilePublicProfile, ModelsGetResponse, Pr
 import { useI18n } from 'vue-i18n'
 import MessageItem from './message-item.vue'
 import ChatAttachmentCard from './chat-attachment-card.vue'
+import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 import { animateScrollTo } from './chat-minimap'
 import BgTaskPill from './bg-task-pill.vue'
 import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'

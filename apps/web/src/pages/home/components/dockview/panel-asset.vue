@@ -1,13 +1,12 @@
 <template>
   <div class="flex h-full w-full flex-col bg-surface-editor">
     <div class="min-h-0 flex-1">
-      <div
+      <PanePlaceholder
         v-if="loading"
-        class="flex h-full items-center justify-center text-muted-foreground"
+        loading
       >
-        <Spinner class="mr-2" />
         {{ t('common.loading') }}
-      </div>
+      </PanePlaceholder>
 
       <MonacoEditor
         v-else-if="isText"
@@ -28,24 +27,25 @@
         >
       </div>
 
-      <div
-        v-else
-        class="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground"
-      >
-        <File class="size-12 opacity-30" />
-        <p class="text-xs">
-          {{ t('bots.files.previewNotAvailable') }}
-        </p>
-        <Button
+      <PanePlaceholder v-else>
+        <template #icon>
+          <File class="size-12 opacity-30" />
+        </template>
+        {{ t('bots.files.previewNotAvailable') }}
+        <template
           v-if="renderUrl"
-          variant="outline"
-          size="sm"
-          @click="handleDownload"
+          #action
         >
-          <Download class="mr-1.5 size-3" />
-          {{ t('bots.files.download') }}
-        </Button>
-      </div>
+          <Button
+            variant="outline"
+            size="sm"
+            @click="handleDownload"
+          >
+            <Download class="mr-1.5 size-3" />
+            {{ t('bots.files.download') }}
+          </Button>
+        </template>
+      </PanePlaceholder>
     </div>
   </div>
 </template>
@@ -54,9 +54,10 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { File, Download } from 'lucide-vue-next'
-import { Button, Spinner, toast } from '@memohai/ui'
+import { Button, toast } from '@memohai/ui'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
+import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 import { isTextFile, isImageFile } from '@/components/file-manager/utils'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { resolveApiErrorMessage } from '@/utils/api-error'
