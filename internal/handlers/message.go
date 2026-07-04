@@ -184,6 +184,11 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 		// reverses the DESC DB rows). Do NOT reverse again: the before page
 		// and the turn-head extension both depend on monotonic ASC input.
 		messages, err = h.messageService.ListBeforeBySession(c.Request().Context(), sessionID, before, limit)
+	case format == "ui":
+		messages, err = h.listLatestUIBySession(c.Request().Context(), sessionID, limit)
+		if err == nil {
+			reverseMessages(messages)
+		}
 	default:
 		messages, err = h.messageService.ListLatestBySession(c.Request().Context(), sessionID, limit)
 		if err == nil {
@@ -209,6 +214,17 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 		})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"items": messages})
+}
+
+type latestUIMessageLister interface {
+	ListLatestUIBySession(ctx context.Context, sessionID string, limit int32) ([]messagepkg.Message, error)
+}
+
+func (h *MessageHandler) listLatestUIBySession(ctx context.Context, sessionID string, limit int32) ([]messagepkg.Message, error) {
+	if svc, ok := h.messageService.(latestUIMessageLister); ok {
+		return svc.ListLatestUIBySession(ctx, sessionID, limit)
+	}
+	return h.messageService.ListLatestBySession(ctx, sessionID, limit)
 }
 
 // LocateMessage godoc

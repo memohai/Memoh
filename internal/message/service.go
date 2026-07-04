@@ -511,6 +511,25 @@ func (s *DBService) ListLatestBySession(ctx context.Context, sessionID string, l
 	return msgs, nil
 }
 
+// ListLatestUIBySession returns the latest N session messages using the lighter
+// field set needed by format=ui rendering.
+func (s *DBService) ListLatestUIBySession(ctx context.Context, sessionID string, limit int32) ([]Message, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListMessagesLatestUIBySession(ctx, sqlc.ListMessagesLatestUIBySessionParams{
+		SessionID: pgSessionID,
+		MaxCount:  limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	msgs := toMessagesFromLatestUIBySession(rows)
+	s.enrichAssets(ctx, msgs)
+	return msgs, nil
+}
+
 // ListBeforeBySession returns up to limit session messages older than before.
 func (s *DBService) ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, limit int32) ([]Message, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
@@ -1057,6 +1076,30 @@ func toMessageFromLatestBySessionRow(row sqlc.ListMessagesLatestBySessionRow) Me
 	)
 }
 
+func toMessageFromLatestUIBySessionRow(row sqlc.ListMessagesLatestUIBySessionRow) Message {
+	return toMessageFields(
+		row.ID,
+		row.BotID,
+		row.SessionID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
+		row.Platform,
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		nil,
+		"",
+		"",
+		pgtype.UUID{},
+		row.DisplayText,
+		row.CreatedAt,
+	)
+}
+
 func toMessageFromBeforeRow(row sqlc.ListMessagesBeforeRow) Message {
 	return toMessageFields(
 		row.ID,
@@ -1308,6 +1351,14 @@ func toMessagesFromLatestBySession(rows []sqlc.ListMessagesLatestBySessionRow) [
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
 		messages = append(messages, toMessageFromLatestBySessionRow(row))
+	}
+	return messages
+}
+
+func toMessagesFromLatestUIBySession(rows []sqlc.ListMessagesLatestUIBySessionRow) []Message {
+	messages := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		messages = append(messages, toMessageFromLatestUIBySessionRow(row))
 	}
 	return messages
 }

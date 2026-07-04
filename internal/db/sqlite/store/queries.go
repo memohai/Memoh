@@ -4584,6 +4584,25 @@ func (q *Queries) ListMessagesLatestBySession(ctx context.Context, arg pgsqlc.Li
 	return result, nil
 }
 
+func (q *Queries) ListMessagesLatestUIBySession(ctx context.Context, arg pgsqlc.ListMessagesLatestUIBySessionParams) ([]pgsqlc.ListMessagesLatestUIBySessionRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListMessagesLatestUIBySessionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListMessagesLatestUIBySession(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListMessagesLatestUIBySessionRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (q *Queries) ListVisibleMessagesFromBySession(ctx context.Context, arg pgsqlc.ListVisibleMessagesFromBySessionParams) ([]pgsqlc.ListVisibleMessagesFromBySessionRow, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured

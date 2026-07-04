@@ -2007,6 +2007,88 @@ func (q *Queries) ListMessagesLatestBySession(ctx context.Context, arg ListMessa
 	return items, nil
 }
 
+const listMessagesLatestUIBySession = `-- name: ListMessagesLatestUIBySession :many
+SELECT
+  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id, m.role, m.content, m.metadata,
+  m.display_text, m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = ?1
+  AND t.session_id = ?1
+ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+LIMIT ?2
+`
+
+type ListMessagesLatestUIBySessionParams struct {
+	SessionID sql.NullString `json:"session_id"`
+	MaxCount  int64          `json:"max_count"`
+}
+
+type ListMessagesLatestUIBySessionRow struct {
+	ID                      string         `json:"id"`
+	BotID                   string         `json:"bot_id"`
+	SessionID               sql.NullString `json:"session_id"`
+	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
+	SenderUserID            sql.NullString `json:"sender_user_id"`
+	ExternalMessageID       sql.NullString `json:"external_message_id"`
+	SourceReplyToMessageID  sql.NullString `json:"source_reply_to_message_id"`
+	Role                    string         `json:"role"`
+	Content                 string         `json:"content"`
+	Metadata                string         `json:"metadata"`
+	DisplayText             sql.NullString `json:"display_text"`
+	CreatedAt               string         `json:"created_at"`
+	SenderDisplayName       sql.NullString `json:"sender_display_name"`
+	SenderAvatarUrl         sql.NullString `json:"sender_avatar_url"`
+	Platform                sql.NullString `json:"platform"`
+}
+
+func (q *Queries) ListMessagesLatestUIBySession(ctx context.Context, arg ListMessagesLatestUIBySessionParams) ([]ListMessagesLatestUIBySessionRow, error) {
+	rows, err := q.db.QueryContext(ctx, listMessagesLatestUIBySession, arg.SessionID, arg.MaxCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMessagesLatestUIBySessionRow
+	for rows.Next() {
+		var i ListMessagesLatestUIBySessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.DisplayText,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMessagesSince = `-- name: ListMessagesSince :many
 SELECT
   m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
