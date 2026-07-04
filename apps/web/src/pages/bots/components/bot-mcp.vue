@@ -195,13 +195,10 @@
           </DialogClose>
           <Button
             class="min-w-24"
-            :disabled="importSubmitting || !importJson.trim()"
+            :disabled="!importJson.trim()"
+            :loading="importSubmitting"
             @click="executeImport"
           >
-            <Spinner
-              v-if="importSubmitting"
-              class="size-4"
-            />
             {{ $t('mcp.blindImport') }}
           </Button>
         </div>
@@ -216,7 +213,7 @@ import { useI18n } from 'vue-i18n'
 import {
   Badge, Button, Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle, Empty, EmptyContent, EmptyDescription, EmptyTitle,
-  InputGroup, InputGroupAddon, InputGroupInput, Skeleton, Spinner, toast, Tooltip,
+  InputGroup, InputGroupAddon, InputGroupInput, Skeleton, toast, Tooltip,
   TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@memohai/ui'
 import { ChevronLeft, ChevronRight, Globe, Plus, Search, Terminal, Upload } from 'lucide-vue-next'

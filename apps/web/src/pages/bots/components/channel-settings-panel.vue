@@ -34,23 +34,17 @@
           variant="outline"
           size="sm"
           :disabled="isBusy"
+          :loading="action === 'toggle'"
           @click="handleToggleDisabled"
         >
-          <Spinner
-            v-if="action === 'toggle'"
-            class="size-4"
-          />
           {{ form.disabled ? $t('bots.channels.actionEnable') : $t('bots.channels.actionDisable') }}
         </Button>
         <Button
           size="sm"
           :disabled="(!isFormDirty && isEditMode) || isBusy"
+          :loading="action === 'save'"
           @click="handleSave"
         >
-          <Spinner
-            v-if="action === 'save'"
-            class="size-4"
-          />
           {{ action === 'save' ? $t('bots.channels.verifying') : $t('bots.settings.save') }}
         </Button>
       </div>
@@ -102,12 +96,9 @@
                 variant="outline"
                 class="shrink-0"
                 :disabled="isBusy"
+                :loading="action === 'webhook'"
                 @click="handleSetLineWebhookEndpoint"
               >
-                <Spinner
-                  v-if="action === 'webhook'"
-                  class="size-4"
-                />
                 {{ action === 'webhook' ? $t('bots.channels.lineWebhookSetting') : $t('bots.channels.lineWebhookSet') }}
               </Button>
             </div>
@@ -200,11 +191,8 @@
               variant="destructive"
               size="sm"
               :disabled="isBusy"
+              :loading="action === 'delete'"
             >
-              <Spinner
-                v-if="action === 'delete'"
-                class="size-4"
-              />
               {{ $t('common.delete') }}
             </Button>
           </template>
@@ -215,7 +203,7 @@
 </template>
 
 <script setup lang="ts">
-import { Button, Input, Spinner } from '@memohai/ui'
+import { Button, Input } from '@memohai/ui'
 import { ChevronRight } from 'lucide-vue-next'
 import { reactive, watch, computed, ref } from 'vue'
 import { toast } from '@memohai/ui'

@@ -49,14 +49,11 @@
           <Button
             variant="outline"
             size="sm"
-            :disabled="!isSelectedMemoryProviderPersisted || isRebuilding || !memoryStatus?.can_manual_sync"
+            :disabled="!isSelectedMemoryProviderPersisted || !memoryStatus?.can_manual_sync"
+            :loading="isRebuilding"
             class="h-7 px-3 text-xs"
             @click="$emit('sync-memory')"
           >
-            <Spinner
-              v-if="isRebuilding"
-              class="mr-1.5 size-3"
-            />
             {{ $t('bots.settings.memorySyncAction') }}
           </Button>
           <Button

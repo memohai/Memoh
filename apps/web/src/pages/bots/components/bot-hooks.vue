@@ -24,17 +24,11 @@
       <Button
         size="sm"
         class="h-8 gap-1.5"
-        :disabled="!canSave || saving"
+        :disabled="!canSave"
+        :loading="saving"
         @click="void save()"
       >
-        <Spinner
-          v-if="saving"
-          class="size-3.5"
-        />
-        <Save
-          v-else
-          class="size-3.5"
-        />
+        <Save class="size-3.5" />
         {{ $t('bots.hooks.save') }}
       </Button>
     </template>
@@ -183,17 +177,11 @@
             <Button
               size="sm"
               class="h-8 gap-1.5"
-              :disabled="!canRunTest || testing"
+              :disabled="!canRunTest"
+              :loading="testing"
               @click="void runTest()"
             >
-              <Spinner
-                v-if="testing"
-                class="size-3.5"
-              />
-              <Play
-                v-else
-                class="size-3.5"
-              />
+              <Play class="size-3.5" />
               {{ $t('bots.hooks.runTest') }}
             </Button>
           </div>
@@ -220,7 +208,6 @@ import {
   SelectTrigger,
   SelectValue,
   Skeleton,
-  Spinner,
   Textarea,
   toast,
 } from '@memohai/ui'
