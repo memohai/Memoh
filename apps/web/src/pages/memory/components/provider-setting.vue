@@ -4,85 +4,92 @@
     width="narrow"
     class="space-y-6"
   >
-    <div class="flex items-center justify-between gap-3">
-      <div class="min-w-0">
-        <h3 class="truncate text-sm font-semibold">
+    <!-- Header card: identity + the single destructive action, mirroring the
+         provider-detail header language (icon · name/type · confirm-gated
+         delete) instead of a bare title above a hairline. -->
+    <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
+      <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
+        <Brain class="size-5 text-muted-foreground" />
+      </span>
+      <div class="min-w-0 flex-1">
+        <h3 class="truncate text-sm font-semibold text-foreground">
           {{ curProvider.name }}
         </h3>
-        <p class="mt-0.5 text-xs text-muted-foreground">
+        <p class="mt-0.5 truncate text-xs text-muted-foreground">
           {{ $t(`memory.providerNames.${curProvider.provider}`, curProvider.provider ?? '') }}
         </p>
       </div>
       <ConfirmPopover
         :message="$t('memory.deleteConfirm')"
+        :loading="deleteLoading"
         @confirm="handleDelete"
       >
         <template #trigger>
           <Button
-            variant="outline"
-            size="sm"
-            :disabled="deleteLoading"
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            class="text-muted-foreground"
+            :aria-label="$t('common.delete')"
           >
-            <Spinner
-              v-if="deleteLoading"
-              class="mr-1.5"
-            />
-            {{ $t('common.delete') }}
+            <Trash2 class="size-4" />
           </Button>
         </template>
       </ConfirmPopover>
-    </div>
+    </section>
 
-    <Separator />
+    <!-- Config card: the name plus the backend's dynamic schema fields, laid out
+         as a form block inside the card and committed via the footer's Save —
+         not a button floating below the card. Titleless: the header card already
+         names the backend, so a "Configuration" title would just add a rung. -->
+    <SettingsSection>
+      <div class="p-4">
+        <FormStack>
+          <FieldStack :label="$t('memory.name')">
+            <Input
+              v-model="form.name"
+              :placeholder="$t('memory.namePlaceholder')"
+            />
+          </FieldStack>
 
-    <FormStack>
-      <FieldStack :label="$t('memory.name')">
-        <Input
-          v-model="form.name"
-          :placeholder="$t('memory.namePlaceholder')"
-        />
-      </FieldStack>
-
-      <div
-        v-if="providerSchema"
-        class="grid gap-4 md:grid-cols-2"
-      >
-        <FieldStack
-          v-for="(fieldSchema, fieldKey) in providerSchema.fields"
-          :key="fieldKey"
-          :help="fieldSchema.description"
-          :class="isWideField(fieldKey, fieldSchema) ? 'md:col-span-2' : ''"
-        >
-          <template #label>
-            <Label>
-              {{ fieldSchema.title || fieldKey }}
-              <span
-                v-if="fieldSchema.required"
-                class="text-destructive"
-              >*</span>
-            </Label>
-          </template>
-          <Input
-            v-model="configForm[fieldKey]"
-            :type="fieldSchema.secret ? 'password' : 'text'"
-            :placeholder="fieldSchema.example ? String(fieldSchema.example) : ''"
-          />
-        </FieldStack>
+          <div
+            v-if="providerSchema"
+            class="grid gap-4 md:grid-cols-2"
+          >
+            <FieldStack
+              v-for="(fieldSchema, fieldKey) in providerSchema.fields"
+              :key="fieldKey"
+              :help="fieldSchema.description"
+              :class="isWideField(fieldKey, fieldSchema) ? 'md:col-span-2' : ''"
+            >
+              <template #label>
+                <Label>
+                  {{ fieldSchema.title || fieldKey }}
+                  <span
+                    v-if="fieldSchema.required"
+                    class="text-destructive"
+                  >*</span>
+                </Label>
+              </template>
+              <Input
+                v-model="configForm[fieldKey]"
+                :type="fieldSchema.secret ? 'password' : 'text'"
+                :placeholder="fieldSchema.example ? String(fieldSchema.example) : ''"
+              />
+            </FieldStack>
+          </div>
+        </FormStack>
       </div>
-    </FormStack>
 
-    <div class="flex justify-end">
-      <Button
-        :disabled="saveLoading"
-        @click="handleSave"
-      >
-        <Spinner
-          v-if="saveLoading"
-          class="mr-1.5"
-        />
-        {{ $t('common.save') }}
-      </Button>
-    </div>
+      <template #footer>
+        <LoadingButton
+          :loading="saveLoading"
+          @click="handleSave"
+        >
+          {{ $t('common.save') }}
+        </LoadingButton>
+      </template>
+    </SettingsSection>
   </SettingsShell>
 </template>
 
@@ -92,16 +99,17 @@ import {
   Button,
   Input,
   Label,
-  Separator,
-  Spinner,
 } from '@memohai/ui'
+import { Brain, Trash2 } from 'lucide-vue-next'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { getMemoryProvidersMeta, putMemoryProvidersById, deleteMemoryProvidersById } from '@memohai/sdk'
 import type { AdaptersProviderGetResponse, AdaptersProviderMeta } from '@memohai/sdk'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import LoadingButton from '@/components/loading-button/index.vue'
 import SettingsShell from '@/components/settings-shell/index.vue'
+import SettingsSection from '@/components/settings/section.vue'
 import FieldStack from '@/components/settings/field-stack.vue'
 import FormStack from '@/components/settings/form-stack.vue'
 

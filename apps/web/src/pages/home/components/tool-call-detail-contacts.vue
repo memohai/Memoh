@@ -12,12 +12,15 @@
         <span class="text-foreground truncate flex-1">
           {{ item.display_name || item.username || item.target }}
         </span>
-        <span
+        <Badge
           v-if="item.platform"
-          class="text-caption text-muted-foreground font-mono shrink-0 rounded bg-muted/30 px-1 py-0.5"
+          variant="secondary"
+          size="sm"
+          font="mono"
+          class="shrink-0"
         >
           {{ item.platform }}
-        </span>
+        </Badge>
       </div>
     </div>
     <p
@@ -32,6 +35,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Badge } from '@memohai/ui'
 import type { ToolCallBlock } from '@/store/chat-list'
 
 interface Contact {

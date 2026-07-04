@@ -1,44 +1,50 @@
 <template>
-  <div class="space-y-5">
-    <div class="space-y-2">
-      <div>
-        <h2 class="text-sm font-medium text-foreground">
-          {{ $t('memory.modeLabel') }}
-        </h2>
-        <p class="text-xs text-muted-foreground">
-          {{ $t('memory.modeHint') }}
-        </p>
-      </div>
-
+  <!-- Titleless card: the mode row's own label carries the name, so a section
+       title would just echo it one rung up. The whole built-in memory config
+       lives in one continuous white card — mode, the model it needs, and the
+       live index status — instead of floating bare on the page background. -->
+  <SettingsSection>
+    <!-- Memory mode is the hero. The row description flips with the selected
+         mode, so switching gives immediate in-place feedback about what that
+         mode does — no separate floating explainer line under the control. -->
+    <SettingsRow
+      :label="$t('memory.modeLabel')"
+      :description="$t(`memory.modeDescriptions.${mode}`)"
+      stack="sm"
+      align="start"
+    >
       <SegmentedControl
         :model-value="mode"
         :items="modeItems"
         :aria-label="$t('memory.modeLabel')"
-        class="w-fit"
         @update:model-value="(value) => (mode = value as MemoryMode)"
       />
-    </div>
+    </SettingsRow>
 
-    <p class="text-xs text-muted-foreground">
-      {{ $t(`memory.modeDescriptions.${mode}`) }}
-    </p>
-
-    <div
+    <!-- Keyword mode leans on the optional sparse retrieval service, so a bot
+         owner who picks it needs the one actionable fact: how to turn that
+         service on. Shown at selection time — that's when the prerequisite
+         matters — as a plain info row with no control. -->
+    <SettingsRow
       v-if="mode === 'sparse'"
-      class="rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground"
     >
-      {{ $t('memory.sparseInstallHint') }}
-    </div>
-
-    <div
-      v-if="mode === 'dense'"
-      class="space-y-3 rounded-lg border border-border bg-card p-4"
-    >
-      <div class="space-y-2">
-        <Label>{{ $t('memory.denseEmbeddingModel') }}</Label>
+      <template #content>
         <p class="text-xs text-muted-foreground">
-          {{ $t('memory.denseEmbeddingModelDescription') }}
+          {{ $t('memory.sparseInstallHint') }}
         </p>
+      </template>
+    </SettingsRow>
+
+    <!-- Semantic mode vectorizes memories, so it needs an embedding model.
+         Shown only for that mode; the storage backend it writes to is
+         implementation trivia and stays out of the copy. -->
+    <SettingsRow
+      v-if="mode === 'dense'"
+      :label="$t('memory.denseEmbeddingModel')"
+      :description="$t('memory.denseEmbeddingModelDescription')"
+      stack="sm"
+    >
+      <div class="w-full sm:w-64">
         <ModelSelect
           v-model="embeddingModelId"
           :models="models"
@@ -47,54 +53,28 @@
           :placeholder="$t('memory.denseEmbeddingModel')"
         />
       </div>
-      <div class="rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
-        {{ $t('memory.denseQdrantHint') }}
-      </div>
-    </div>
+    </SettingsRow>
 
-    <div
-      v-if="collections.length > 0"
-      class="grid gap-3 sm:grid-cols-2"
+    <!-- Live index status: a distilled read of what's actually provisioned —
+         entries stored + one health badge — keyed to the SAVED mode, not the
+         draft, so it reflects reality. When memory is off there is no index to
+         report, so the row disappears entirely rather than showing empty tiles. -->
+    <SettingsRow
+      v-for="collection in activeCollections"
+      :key="collection.name"
+      :label="collectionLabel(collection)"
+      :description="$t('memory.entriesStored', { count: collection.points ?? 0 })"
     >
-      <div
-        v-for="collection in collections"
-        :key="collection.name"
-        class="space-y-1 rounded-lg border border-border bg-background/70 p-4"
-      >
-        <div class="flex items-center justify-between gap-3">
-          <p class="break-all text-xs font-medium text-foreground">
-            {{ collection.name }}
-          </p>
-          <span
-            class="text-xs"
-            :class="collection.qdrant?.ok ? 'text-foreground' : 'text-destructive'"
-          >
-            {{ collection.qdrant?.ok ? $t('memory.collectionHealthy') : $t('memory.collectionUnavailable') }}
-          </span>
-        </div>
-        <p class="text-2xl font-semibold text-foreground">
-          {{ collection.points ?? 0 }}
-        </p>
-        <p class="text-xs text-muted-foreground">
-          {{ $t('memory.collectionPoints') }}
-        </p>
-      </div>
-    </div>
-
-    <div class="flex justify-end">
-      <LoadingButton
-        :loading="saveLoading"
-        @click="handleSave"
-      >
-        {{ $t('common.save') }}
-      </LoadingButton>
-    </div>
-  </div>
+      <Badge :variant="collection.qdrant?.ok ? 'success' : 'destructive'">
+        {{ collection.qdrant?.ok ? $t('memory.collectionHealthy') : $t('memory.collectionUnavailable') }}
+      </Badge>
+    </SettingsRow>
+  </SettingsSection>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Label, SegmentedControl, type SegmentedItem, toast } from '@memohai/ui'
+import { Badge, SegmentedControl, type SegmentedItem, toast } from '@memohai/ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   getModels,
@@ -105,10 +85,12 @@ import {
 } from '@memohai/sdk'
 import type { AdaptersProviderGetResponse, AdaptersProviderStatusResponse } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import LoadingButton from '@/components/loading-button/index.vue'
+import SettingsSection from '@/components/settings/section.vue'
+import SettingsRow from '@/components/settings/row.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
 
 type MemoryMode = 'off' | 'sparse' | 'dense'
+type Collection = NonNullable<AdaptersProviderStatusResponse['collections']>[number]
 
 const props = defineProps<{
   provider?: AdaptersProviderGetResponse | null
@@ -156,6 +138,45 @@ const modeItems = computed<SegmentedItem<MemoryMode>[]>(() => [
   { value: 'dense', label: t('memory.modeNames.dense') },
 ])
 
+// The persisted state, used both to gate Save (draft vs saved) and to decide
+// which index status is worth showing — the status query describes what's
+// actually provisioned, which tracks the saved mode, not the in-flight draft.
+const savedMode = computed<MemoryMode>(() => {
+  const config = (props.provider?.config ?? {}) as Record<string, unknown>
+  const m = config.memory_mode
+  return m === 'sparse' || m === 'dense' ? m : 'off'
+})
+const savedEmbeddingModelId = computed(() => {
+  const config = (props.provider?.config ?? {}) as Record<string, unknown>
+  return typeof config.embedding_model_id === 'string' ? config.embedding_model_id : ''
+})
+
+const hasChanges = computed(() => {
+  if (mode.value !== savedMode.value) return true
+  // Embedding choice only matters (and only counts as a change) in dense mode.
+  if (mode.value === 'dense' && embeddingModelId.value !== savedEmbeddingModelId.value) return true
+  return false
+})
+
+// The status endpoint can return every provisioned collection at once (both the
+// keyword and semantic indexes), so narrow it to the one the saved mode uses;
+// showing the inactive index's "Unavailable" is pure noise. Fall back to
+// whatever came back if the name heuristic misses, so status never silently
+// vanishes on an unexpected collection name.
+const activeCollections = computed<Collection[]>(() => {
+  if (savedMode.value === 'off') return []
+  const wanted = savedMode.value === 'sparse' ? 'sparse' : 'dense'
+  const matched = collections.value.filter((c) => (c.name ?? '').toLowerCase().includes(wanted))
+  return matched.length > 0 ? matched : collections.value
+})
+
+function collectionLabel(collection: Collection): string {
+  const name = (collection.name ?? '').toLowerCase()
+  if (name.includes('dense')) return t('memory.semanticIndex')
+  if (name.includes('sparse')) return t('memory.keywordIndex')
+  return collection.name ?? ''
+}
+
 watch(() => props.provider, (val) => {
   const config = (val?.config ?? {}) as Record<string, unknown>
   const nextMode = config.memory_mode
@@ -194,4 +215,10 @@ async function handleSave() {
     saveLoading.value = false
   }
 }
+
+// The Save control lives in the page header (PageShell #actions), the house
+// pattern for a root page's manual save (mirrors bot-tool-approval) — not a
+// footer band inside this card, which would leave an empty strip below a single
+// row. The parent drives that button from this exposed state.
+defineExpose({ hasChanges, saveLoading, save: handleSave })
 </script>

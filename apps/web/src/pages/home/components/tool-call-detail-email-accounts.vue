@@ -10,10 +10,15 @@
         class="flex items-center gap-2 text-xs"
       >
         <span class="text-foreground truncate flex-1">{{ item.email || item.id }}</span>
-        <span
+        <Badge
           v-if="item.provider"
-          class="text-caption text-muted-foreground font-mono shrink-0 rounded bg-muted/30 px-1 py-0.5"
-        >{{ item.provider }}</span>
+          variant="secondary"
+          size="sm"
+          font="mono"
+          class="shrink-0"
+        >
+          {{ item.provider }}
+        </Badge>
       </div>
     </div>
     <p
@@ -28,6 +33,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Badge } from '@memohai/ui'
 import type { ToolCallBlock } from '@/store/chat-list'
 
 interface AccountItem {

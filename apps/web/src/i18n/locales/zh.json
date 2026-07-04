@@ -1097,6 +1097,9 @@
     "sparseQdrantCollectionDescription": "稀疏模式会写入对应的 Qdrant collection。当前/默认 collection：{collection}。",
     "denseQdrantCollectionDescription": "稠密模式会写入对应的 Qdrant collection。当前/默认 collection：{collection}。",
     "collectionPoints": "Collection 中的点数",
+    "entriesStored": "已存储 {count} 条",
+    "keywordIndex": "关键词索引",
+    "semanticIndex": "语义索引",
     "collectionExists": "Collection 已存在",
     "collectionMissing": "Collection 尚未创建",
     "collectionHealthy": "正常",
@@ -1107,9 +1110,9 @@
       "dense": "语义"
     },
     "modeDescriptions": {
-      "off": "不建立长期记忆索引，仅保留基础的文件记忆。",
-      "sparse": "用关键词匹配检索记忆，依赖可选的稀疏检索服务。",
-      "dense": "用向量模型把记忆转成向量，按语义相近度检索。"
+      "off": "仅保留基础文件记忆，不建长期索引。",
+      "sparse": "按关键词匹配检索。",
+      "dense": "用向量模型按语义相近度检索。"
     },
     "providerNames": {
       "builtin": "内置",
@@ -1143,7 +1146,6 @@
   },
   "video": {
     "title": "视频",
-    "providersTitle": "视频生成",
     "providersHint": "通过 OpenRouter、ModelArk 或 Volcengine 生成视频。",
     "empty": "暂无视频后端，添加服务商后即可启用视频生成。",
     "models": "视频模型",

@@ -1046,6 +1046,9 @@
     "sparseQdrantCollectionDescription": "スパース モードは Qdrant コレクションに書き込みます。現在/デフォルトのコレクション: {collection}。",
     "denseQdrantCollectionDescription": "デンス モードは Qdrant コレクションに書き込みます。現在/デフォルトのコレクション: {collection}。",
     "collectionPoints": "コレクション内のポイント数",
+    "entriesStored": "{count} 件を保存済み",
+    "keywordIndex": "キーワードインデックス",
+    "semanticIndex": "セマンティックインデックス",
     "collectionExists": "コレクションが存在します",
     "collectionMissing": "コレクションはまだ作成されていません",
     "collectionHealthy": "正常",
@@ -1056,9 +1059,9 @@
       "dense": "セマンティック"
     },
     "modeDescriptions": {
-      "off": "長期記憶インデックスを作成せず、基本的なファイルメモリのみを保持します。",
-      "sparse": "オプションのスパース検索サービスを使用して、キーワードで記憶を照合します。",
-      "dense": "埋め込みモデルを使用して記憶をベクトルに変換し、意味の類似性で検索します。"
+      "off": "基本的なファイルメモリのみを保持し、長期インデックスは作成しません。",
+      "sparse": "キーワードの一致で検索します。",
+      "dense": "埋め込みモデルを使い、意味の類似性で検索します。"
     },
     "providerNames": {
       "builtin": "内蔵",
@@ -1092,7 +1095,6 @@
   },
   "video": {
     "title": "動画",
-    "providersTitle": "動画生成",
     "providersHint": "OpenRouter、ModelArk、Volcengine で動画を生成します。",
     "empty": "動画バックエンドがまだありません。プロバイダーを追加すると動画生成を有効にできます。",
     "models": "動画 Model",

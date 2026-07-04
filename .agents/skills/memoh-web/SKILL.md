@@ -236,6 +236,12 @@ A divider has two different jobs and two different widths; using the wrong one i
 The test: is this line separating **items within one surface** (inset) or **splitting the
 container itself** (full-bleed)? Answer that before you place a divider.
 
+**A "divider I never drew" is usually a misplaced `#footer`.** If a hairline appears to float
+under a single row over an empty strip, you almost certainly put a `SettingsSection #footer`
+(Save band) on a *root-page* card — its full-bleed `border-t` plus the lone row's own inset
+`border-b` read as a stray line. The line is real chrome in the wrong home: a root page's Save
+belongs in `PageShell #actions`, not a card footer (§ 8). Fix the home, not the line.
+
 ### Dark mode is not a task — it is the absence of hardcoded color
 
 **Read this twice. This is the single most-skipped requirement, and nothing will catch it for
@@ -638,6 +644,18 @@ to an action — **must be the same height**. A short search field beside a tall
 real bug we shipped before. Build the search with `InputGroup` and the action with `Button`
 at the matching size, then verify the heights actually line up.
 
+**A control-bearing row's height must not swing with its own interaction.** The trap: a
+`SettingsRow` whose `:description` flips with the control's *value* — a mode `SegmentedControl`
+whose blurb changes per selection. `SettingsRow` sets a `min-h` floor, so a longer variant wraps
+to a second line and the whole row — control included — visibly jumps taller as the user toggles.
+That is content-driving-layout (§ Engineering correctness) fired by a click. The fix is almost
+always **the copy, not the layout**: keep such a per-value blurb short enough to hold one line so
+the height is stable — do **not** over-engineer it (splitting the blurb into its own row, or
+reserving a fixed two-line height, is usually worse than tightening the words). Scope note: this
+is about *interaction-driven* jumps, not every height difference. A genuinely sparse page whose
+row is simply taller because its **static** copy runs long is fine — let it grow; don't chase a
+uniform row height for its own sake.
+
 ### 5. No redundant or fighting controls
 
 Two controls that solve the same job and contradict each other is a defect, not a feature.
@@ -702,6 +720,24 @@ hoarding edits behind a button.
 - **Toast timing in general:** toasts are for *explicit* user actions (save / delete / create)
   and for *errors that need attention.* Never fire them for ambient, automatic, or background
   changes. One toast per action, not one per keystroke.
+- **A manual Save belongs where the page type puts it — copy the right *page shape*, not the
+  first footer you find.** The two homes are not interchangeable, and picking by "some page does
+  this" instead of "which page *shape* is this" produces a real defect:
+  - **Root page (`PageShell`) → Save in the header `#actions`.** The model is `bot-tool-approval`:
+    `<Button :disabled="!hasChanges || saving">{{ saveChanges }}</Button>` in `#actions`, disabled
+    when synced. If the save-driving state lives in a child component, `defineExpose({ hasChanges,
+    saveLoading, save })` and read it off the child `ref` — do **not** hoist all the page logic up.
+  - **Detail form (`SettingsShell` / `DetailPane`) → Save in the section's `#footer` band.** That
+    footer exists to *close a form card* (`provider-form`, the web-search/email/video detail
+    settings). It is a detail-page device.
+  - **The failure this prevents (lived):** a Memory *root* page copied the detail form's
+    `SettingsSection #footer` Save. On the common `Off` state the card held exactly one
+    `SettingsRow` + the footer band, so the row's own inset `border-b` hairline was left stranded
+    above an empty strip with a Save floating at its right — read as "a hand-drawn divider and a
+    random button in the card." The hairline was never hand-drawn; the *footer was in the wrong
+    home*. Moving Save to `#actions` and deleting the footer made both the strip and the "stray
+    line" vanish at once (one wrong root, two symptoms — § Engineering correctness). Before you
+    place a Save, name the page type first.
 
 ### 9. Earn the space — show only what's actionable, and only card it when it's a group
 

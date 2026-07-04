@@ -19,11 +19,7 @@
         <AlertDescription>{{ loadError }}</AlertDescription>
       </Alert>
 
-      <section class="space-y-2.5">
-        <h2 class="px-2 text-[13px] font-medium text-muted-foreground">
-          {{ membersTitle }}
-        </h2>
-
+      <SettingsSection :title="membersTitle">
         <Table>
           <TableHeader>
             <TableRow>
@@ -157,7 +153,7 @@
             </TableRow>
           </TableBody>
         </Table>
-      </section>
+      </SettingsSection>
     </div>
 
     <Dialog v-model:open="createDialogOpen">
@@ -386,6 +382,7 @@ import {
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import PageShell from '@/components/page-shell/index.vue'
+import SettingsSection from '@/components/settings/section.vue'
 import FieldStack from '@/components/settings/field-stack.vue'
 import FormStack from '@/components/settings/form-stack.vue'
 import { useUserStore } from '@/store/user'

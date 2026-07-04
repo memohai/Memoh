@@ -36,10 +36,21 @@ export const badgeVariants = cva(
         // compact chip doesn't read as cramped, without growing to the full default px-2.
         sm: 'px-[0.4375rem] py-0',
       },
+      // Opt-in monospace for chips that carry a technical value — a match score,
+      // a cron pattern, a platform/provider key. Orthogonal to the base font-medium
+      // (that sets weight, this sets family), so mono chips stay medium-weight. Kept
+      // as a variant rather than left to callers' `class` so the tool-call surface's
+      // "technical metadata reads as mono" convention lands on one owner instead of
+      // being hand-rolled per detail panel.
+      font: {
+        sans: '',
+        mono: 'font-mono',
+      },
     },
     defaultVariants: {
       variant: 'default',
       size: 'default',
+      font: 'sans',
     },
   },
 )

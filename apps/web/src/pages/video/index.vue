@@ -10,6 +10,7 @@ import AddProvider from '@/components/add-provider/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import BackendCard from '@/components/settings/backend-card.vue'
 import DetailPane from '@/components/settings/detail-pane.vue'
+import PageShell from '@/components/page-shell/index.vue'
 import { useViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 import VideoProviderSetting from './provider-setting.vue'
@@ -77,70 +78,57 @@ watch(providers, (list) => {
 
 <template>
   <SwapTransition :direction="direction">
-    <section
+    <!-- Single provider group — same shell as the providers gallery: PageShell owns
+         the title, the hint (as its description), and the Add action; the body is a
+         bare BackendCard grid. NOT a SectionGroup — that owner is only for pages that
+         stack SEVERAL provider groups (voice TTS/STT, web-search search/fetch). The
+         page-level "视频生成" heading was dropped: title + description already say it. -->
+    <PageShell
       v-if="view === 'list'"
-      class="mx-auto max-w-3xl px-6 pt-10 pb-12 space-y-8"
+      :title="t('video.title')"
+      :description="t('video.providersHint')"
     >
-      <h1 class="px-2 text-lg font-semibold">
-        {{ t('video.title') }}
-      </h1>
+      <template #actions>
+        <Button @click="openStatus.addOpen = true">
+          <Plus class="size-4" />
+          {{ t('common.add') }}
+        </Button>
+      </template>
 
-      <section class="space-y-2.5">
-        <div class="flex items-center justify-between gap-4">
-          <div class="min-w-0 px-2">
-            <h2 class="text-sm font-medium text-foreground">
-              {{ t('video.providersTitle') }}
-            </h2>
-            <p class="text-xs text-muted-foreground">
-              {{ t('video.providersHint') }}
-            </p>
-          </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            class="shrink-0"
-            @click="openStatus.addOpen = true"
-          >
-            <Plus class="size-4" />
-            {{ t('common.add') }}
-          </Button>
-        </div>
-
-        <div
-          v-if="providers.length > 0"
-          class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+      <div
+        v-if="providers.length > 0"
+        class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+      >
+        <BackendCard
+          v-for="provider in providers"
+          :key="provider.id"
+          :name="provider.name ?? ''"
+          :enabled="provider.enable !== false"
+          @click="openProvider(provider)"
         >
-          <BackendCard
-            v-for="provider in providers"
-            :key="provider.id"
-            :name="provider.name ?? ''"
-            :enabled="provider.enable !== false"
-            @click="openProvider(provider)"
-          >
-            <template #leading>
-              <span class="flex size-10 items-center justify-center rounded-full bg-muted">
-                <ProviderIcon
-                  v-if="provider.icon"
-                  :icon="provider.icon"
-                  size="1.5em"
-                />
-                <span
-                  v-else
-                  class="text-xs font-medium text-muted-foreground"
-                >
-                  {{ getInitials(provider.name) }}
-                </span>
+          <template #leading>
+            <span class="flex size-10 items-center justify-center rounded-full bg-muted">
+              <ProviderIcon
+                v-if="provider.icon"
+                :icon="provider.icon"
+                size="1.5em"
+              />
+              <span
+                v-else
+                class="text-xs font-medium text-muted-foreground"
+              >
+                {{ getInitials(provider.name) }}
               </span>
-            </template>
-          </BackendCard>
-        </div>
-        <p
-          v-else
-          class="px-2 text-xs text-muted-foreground"
-        >
-          {{ t('video.empty') }}
-        </p>
-      </section>
+            </span>
+          </template>
+        </BackendCard>
+      </div>
+      <p
+        v-else
+        class="px-2 text-xs text-muted-foreground"
+      >
+        {{ t('video.empty') }}
+      </p>
 
       <AddProvider
         v-model:open="openStatus.addOpen"
@@ -149,7 +137,7 @@ watch(providers, (list) => {
         :providers="addProviderNames"
         :import-models="importVideoModels"
       />
-    </section>
+    </PageShell>
 
     <DetailPane
       v-else

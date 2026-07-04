@@ -190,18 +190,15 @@
           </EmptyHeader>
         </Empty>
 
-        <section class="space-y-2.5">
-          <div class="flex min-h-7 items-center justify-between gap-2 px-2">
-            <h2 class="text-[13px] font-medium text-muted-foreground">
-              {{ $t('usage.records') }}
-            </h2>
-            <span
-              v-if="recordsPaginationSummary"
-              class="text-xs text-muted-foreground tabular-nums"
-            >
+        <SettingsSection :title="$t('usage.records')">
+          <template
+            v-if="recordsPaginationSummary"
+            #actions
+          >
+            <span class="text-xs text-muted-foreground tabular-nums">
               {{ recordsPaginationSummary }}
             </span>
-          </div>
+          </template>
 
           <Table>
             <TableHeader>
@@ -263,42 +260,46 @@
               </template>
             </TableBody>
           </Table>
+        </SettingsSection>
 
-          <div
-            v-if="recordsTotalPages > 1"
-            class="flex justify-end"
+        <!-- Pagination lives OUTSIDE the section card: it's the table's pager, not
+             a row of the card. Kept justify-end below the card so it doesn't fight
+             the card's edge; the record-count summary moved up into the section
+             #actions header. -->
+        <div
+          v-if="recordsTotalPages > 1"
+          class="flex justify-end"
+        >
+          <Pagination
+            :total="recordsTotal"
+            :items-per-page="RECORDS_PAGE_SIZE"
+            :sibling-count="1"
+            :page="recordsPageNumber"
+            show-edges
+            @update:page="setRecordsPage"
           >
-            <Pagination
-              :total="recordsTotal"
-              :items-per-page="RECORDS_PAGE_SIZE"
-              :sibling-count="1"
-              :page="recordsPageNumber"
-              show-edges
-              @update:page="setRecordsPage"
-            >
-              <PaginationContent v-slot="{ items }">
-                <PaginationFirst />
-                <PaginationPrevious />
-                <template
-                  v-for="(item, index) in items"
-                  :key="index"
-                >
-                  <PaginationEllipsis
-                    v-if="item.type === 'ellipsis'"
-                    :index="index"
-                  />
-                  <PaginationItem
-                    v-else
-                    :value="item.value"
-                    :is-active="item.value === recordsPageNumber"
-                  />
-                </template>
-                <PaginationNext />
-                <PaginationLast />
-              </PaginationContent>
-            </Pagination>
-          </div>
-        </section>
+            <PaginationContent v-slot="{ items }">
+              <PaginationFirst />
+              <PaginationPrevious />
+              <template
+                v-for="(item, index) in items"
+                :key="index"
+              >
+                <PaginationEllipsis
+                  v-if="item.type === 'ellipsis'"
+                  :index="index"
+                />
+                <PaginationItem
+                  v-else
+                  :value="item.value"
+                  :is-active="item.value === recordsPageNumber"
+                />
+              </template>
+              <PaginationNext />
+              <PaginationLast />
+            </PaginationContent>
+          </Pagination>
+        </div>
       </template>
     </div>
   </PageShell>

@@ -1097,6 +1097,9 @@
     "sparseQdrantCollectionDescription": "Sparse mode writes to the Qdrant collection. Current/default collection: {collection}.",
     "denseQdrantCollectionDescription": "Dense mode writes to the Qdrant collection. Current/default collection: {collection}.",
     "collectionPoints": "Points in collection",
+    "entriesStored": "{count} entries stored",
+    "keywordIndex": "Keyword index",
+    "semanticIndex": "Semantic index",
     "collectionExists": "Collection exists",
     "collectionMissing": "Collection not created yet",
     "collectionHealthy": "Healthy",
@@ -1107,9 +1110,9 @@
       "dense": "Semantic"
     },
     "modeDescriptions": {
-      "off": "Don't build a long-term memory index; keep only the basic file memory.",
-      "sparse": "Match memories by keyword, using the optional sparse retrieval service.",
-      "dense": "Turn memories into vectors with an embedding model and retrieve by semantic similarity."
+      "off": "Keep only basic file memory; no long-term index.",
+      "sparse": "Recall by keyword match.",
+      "dense": "Recall by semantic similarity using an embedding model."
     },
     "providerNames": {
       "builtin": "Built-in",
@@ -1143,7 +1146,6 @@
   },
   "video": {
     "title": "Video",
-    "providersTitle": "Video generation",
     "providersHint": "Generate videos through OpenRouter, ModelArk, or Volcengine.",
     "empty": "No video backends yet. Add a provider to enable video generation.",
     "models": "Video Models",

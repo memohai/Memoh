@@ -13,6 +13,8 @@ import ProviderSetting from './components/provider-setting.vue'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 import BackendCard from '@/components/settings/backend-card.vue'
 import DetailPane from '@/components/settings/detail-pane.vue'
+import PageShell from '@/components/page-shell/index.vue'
+import SectionGroup from '@/components/section-group/index.vue'
 import { useViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 
@@ -107,116 +109,103 @@ watch(fetchProviders, (list) => {
 
 <template>
   <SwapTransition :direction="direction">
-    <!-- Two provider sections -->
-    <section
+    <!-- Two provider sections (search + fetch). Twin of the voice/video provider
+         pages: PageShell title bar + SectionGroup per provider kind. -->
+    <PageShell
       v-if="view === 'list'"
-      class="mx-auto max-w-3xl px-6 pt-10 pb-12 space-y-8"
+      :title="t('webSearch.title')"
     >
-      <h1 class="px-2 text-lg font-semibold">
-        {{ t('webSearch.title') }}
-      </h1>
+      <div class="space-y-8">
+        <!-- Search providers -->
+        <SectionGroup
+          :title="t('webSearch.searchProviders')"
+          :description="t('webSearch.searchHint')"
+        >
+          <template #actions>
+            <Button
+              variant="secondary"
+              size="sm"
+              @click="openStatus.addSearchOpen = true"
+            >
+              <Plus class="size-4" />
+              {{ t('common.add') }}
+            </Button>
+          </template>
 
-      <!-- Search providers -->
-      <section class="space-y-2.5">
-        <div class="flex items-center justify-between gap-4">
-          <div class="min-w-0 px-2">
-            <h2 class="text-label font-medium text-foreground">
-              {{ t('webSearch.searchProviders') }}
-            </h2>
-            <p class="text-xs text-muted-foreground">
-              {{ t('webSearch.searchHint') }}
-            </p>
+          <div
+            v-if="providers.length > 0"
+            class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+          >
+            <BackendCard
+              v-for="provider in providers"
+              :key="provider.id"
+              :name="provider.name ?? ''"
+              :enabled="provider.enable !== false"
+              @click="openProvider(provider)"
+            >
+              <template #leading>
+                <span class="flex size-10 items-center justify-center">
+                  <SearchProviderLogo
+                    :provider="provider.provider || ''"
+                    size="md"
+                  />
+                </span>
+              </template>
+            </BackendCard>
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            class="shrink-0"
-            @click="openStatus.addSearchOpen = true"
+          <p
+            v-else
+            class="px-2 text-xs text-muted-foreground"
           >
-            <Plus class="size-4" />
-            {{ t('common.add') }}
-          </Button>
-        </div>
+            {{ t('webSearch.empty') }}
+          </p>
+        </SectionGroup>
 
-        <div
-          v-if="providers.length > 0"
-          class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+        <!-- Fetch providers -->
+        <SectionGroup
+          :title="t('webSearch.fetchProviders')"
+          :description="t('webSearch.fetchHint')"
         >
-          <BackendCard
-            v-for="provider in providers"
-            :key="provider.id"
-            :name="provider.name ?? ''"
-            :enabled="provider.enable !== false"
-            @click="openProvider(provider)"
+          <template #actions>
+            <Button
+              variant="secondary"
+              size="sm"
+              @click="openStatus.addFetchOpen = true"
+            >
+              <Plus class="size-4" />
+              {{ t('common.add') }}
+            </Button>
+          </template>
+
+          <div
+            v-if="fetchProviders.length > 0"
+            class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
-            <template #leading>
-              <span class="flex size-10 items-center justify-center">
-                <SearchProviderLogo
-                  :provider="provider.provider || ''"
-                  size="md"
-                />
-              </span>
-            </template>
-          </BackendCard>
-        </div>
-        <p
-          v-else
-          class="px-2 text-xs text-muted-foreground"
-        >
-          {{ t('webSearch.empty') }}
-        </p>
-      </section>
-
-      <!-- Fetch providers -->
-      <section class="space-y-2.5">
-        <div class="flex items-center justify-between gap-4">
-          <div class="min-w-0 px-2">
-            <h2 class="text-label font-medium text-foreground">
-              {{ t('webSearch.fetchProviders') }}
-            </h2>
-            <p class="text-xs text-muted-foreground">
-              {{ t('webSearch.fetchHint') }}
-            </p>
+            <BackendCard
+              v-for="provider in fetchProviders"
+              :key="provider.id"
+              :name="provider.name ?? ''"
+              :enabled="provider.enable !== false"
+              @click="openFetchProvider(provider)"
+            >
+              <template #leading>
+                <span class="flex size-10 items-center justify-center">
+                  <SearchProviderLogo
+                    :provider="provider.provider || ''"
+                    size="md"
+                  />
+                </span>
+              </template>
+            </BackendCard>
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            class="shrink-0"
-            @click="openStatus.addFetchOpen = true"
+          <p
+            v-else
+            class="px-2 text-xs text-muted-foreground"
           >
-            <Plus class="size-4" />
-            {{ t('common.add') }}
-          </Button>
-        </div>
-
-        <div
-          v-if="fetchProviders.length > 0"
-          class="grid grid-cols-1 gap-3 sm:grid-cols-2"
-        >
-          <BackendCard
-            v-for="provider in fetchProviders"
-            :key="provider.id"
-            :name="provider.name ?? ''"
-            :enabled="provider.enable !== false"
-            @click="openFetchProvider(provider)"
-          >
-            <template #leading>
-              <span class="flex size-10 items-center justify-center">
-                <SearchProviderLogo
-                  :provider="provider.provider || ''"
-                  size="md"
-                />
-              </span>
-            </template>
-          </BackendCard>
-        </div>
-        <p
-          v-else
-          class="px-2 text-xs text-muted-foreground"
-        >
-          {{ t('webSearch.emptyFetch') }}
-        </p>
-      </section>
+            {{ t('webSearch.emptyFetch') }}
+          </p>
+        </SectionGroup>
+      </div>
 
       <AddSearchProvider
         v-model:open="openStatus.addSearchOpen"
@@ -226,7 +215,7 @@ watch(fetchProviders, (list) => {
         v-model:open="openStatus.addFetchOpen"
         hide-trigger
       />
-    </section>
+    </PageShell>
 
     <!-- Provider detail -->
     <DetailPane
