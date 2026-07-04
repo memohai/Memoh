@@ -23,12 +23,8 @@
           <Button
             variant="destructive"
             size="sm"
-            :disabled="deleteLoading"
+            :loading="deleteLoading"
           >
-            <Spinner
-              v-if="deleteLoading"
-              class="mr-1.5 size-3"
-            />
             {{ $t('bots.settings.deleteBot') }}
           </Button>
         </template>
@@ -38,7 +34,7 @@
 </template>
 
 <script setup lang="ts">
-import { Button, Spinner } from '@memohai/ui'
+import { Button } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'

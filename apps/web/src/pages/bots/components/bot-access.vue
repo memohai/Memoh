@@ -531,12 +531,8 @@
                   <Button
                     type="submit"
                     size="sm"
-                    :disabled="isSavingRule"
+                    :loading="isSavingRule"
                   >
-                    <Spinner
-                      v-if="isSavingRule"
-                      class="size-3"
-                    />
                     {{ $t('bots.access.saveAndEnable') }}
                   </Button>
                 </div>

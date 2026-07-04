@@ -221,12 +221,9 @@ function handleImported(botId: string) {
           </DialogClose>
           <Button
             :disabled="!canExport"
+            :loading="exporting"
             @click="handleExport"
           >
-            <Spinner
-              v-if="exporting"
-              class="mr-1.5"
-            />
             {{ t('common.export') }}
           </Button>
         </DialogFooter>

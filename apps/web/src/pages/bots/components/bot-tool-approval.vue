@@ -6,13 +6,10 @@
   >
     <template #actions>
       <Button
-        :disabled="!hasChanges || saveLoading"
+        :disabled="!hasChanges"
+        :loading="saveLoading"
         @click="handleSave"
       >
-        <Spinner
-          v-if="saveLoading"
-          class="size-3"
-        />
         {{ $t('common.saveChanges') }}
       </Button>
     </template>
@@ -103,7 +100,6 @@
 import {
   Textarea,
   Button,
-  Spinner,
   Switch,
   SegmentedControl,
 } from '@memohai/ui'

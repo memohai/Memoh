@@ -259,12 +259,9 @@
         </Button>
         <Button
           type="submit"
-          :disabled="!canSubmit || isSaving"
+          :disabled="!canSubmit"
+          :loading="isSaving"
         >
-          <Spinner
-            v-if="isSaving"
-            class="mr-1.5 size-4"
-          />
           {{ mode === 'create' ? t('common.create') : t('common.confirm') }}
         </Button>
       </div>
@@ -286,7 +283,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Spinner,
   Switch,
   Textarea,
   TimeInput,

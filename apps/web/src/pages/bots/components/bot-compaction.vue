@@ -348,13 +348,9 @@ onBeforeUnmount(() => {
           </Button>
           <Button
             size="sm"
-            :disabled="isSaving"
+            :loading="isSaving"
             @click="handleSaveSettings"
           >
-            <Spinner
-              v-if="isSaving"
-              class="size-3"
-            />
             {{ $t('common.saveChanges') }}
           </Button>
         </template>
@@ -569,12 +565,8 @@ onBeforeUnmount(() => {
               <Button
                 variant="destructive"
                 size="sm"
-                :disabled="isClearing"
+                :loading="isClearing"
               >
-                <Spinner
-                  v-if="isClearing"
-                  class="size-3"
-                />
                 {{ $t('bots.compaction.clearLogs') }}
               </Button>
             </template>

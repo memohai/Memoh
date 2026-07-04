@@ -389,17 +389,12 @@
               variant="outline"
               size="icon-sm"
               :aria-label="$t('common.refresh')"
-              :disabled="!shouldLoadNodeOptions || isNodeListLoading"
+              loading-mode="icon"
+              :loading="isNodeListLoading"
+              :disabled="!shouldLoadNodeOptions"
               @click="handleRefreshNodes"
             >
-              <Spinner
-                v-if="isNodeListLoading"
-                class="size-3"
-              />
-              <RefreshCw
-                v-else
-                class="size-3.5"
-              />
+              <RefreshCw class="size-3.5" />
             </Button>
           </div>
         </SettingsRow>
@@ -418,13 +413,9 @@
         </Button>
         <Button
           size="sm"
-          :disabled="isSaving"
+          :loading="isSaving"
           @click="handleSave"
         >
-          <Spinner
-            v-if="isSaving"
-            class="size-3"
-          />
           {{ $t('common.save') }}
         </Button>
       </div>
@@ -541,12 +532,8 @@
               <Button
                 variant="destructive"
                 size="sm"
-                :disabled="isLoggingOut"
+                :loading="isLoggingOut"
               >
-                <Spinner
-                  v-if="isLoggingOut"
-                  class="size-3"
-                />
                 {{ $t('bots.settings.networkLogout') }}
               </Button>
             </template>
