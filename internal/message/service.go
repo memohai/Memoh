@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -36,8 +37,19 @@ type historyTurnWriter interface {
 	AppendMessageToLatestHistoryTurn(ctx context.Context, arg sqlc.AppendMessageToLatestHistoryTurnParams) error
 }
 
+type directHistoryTurnWriter interface {
+	CreateHistoryTurnWithID(ctx context.Context, arg sqlc.CreateHistoryTurnWithIDParams) (sqlc.BotHistoryTurn, error)
+	CreateMessageInHistoryTurnByRequest(ctx context.Context, arg sqlc.CreateMessageInHistoryTurnByRequestParams) (sqlc.CreateMessageInHistoryTurnByRequestRow, error)
+	CreateMessageWithTurn(ctx context.Context, arg sqlc.CreateMessageWithTurnParams) (sqlc.CreateMessageWithTurnRow, error)
+	BindHistoryTurnAssistantByRequest(ctx context.Context, arg sqlc.BindHistoryTurnAssistantByRequestParams) (sqlc.BotHistoryTurn, error)
+}
+
 type messageCleanupQueries interface {
 	DeleteMessagesByIDs(ctx context.Context, ids []pgtype.UUID) error
+}
+
+type transactionalQueries interface {
+	InTx(ctx context.Context, fn func(dbstore.Queries) error) error
 }
 
 // NewService creates a message service.
@@ -58,6 +70,38 @@ func NewService(log *slog.Logger, queries dbstore.Queries, publishers ...event.P
 
 // Persist writes a single message to bot_history_messages.
 func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, error) {
+	if txer, ok := s.queries.(transactionalQueries); ok && shouldPersistMessageInTx(input) {
+		var result Message
+		if err := txer.InTx(ctx, func(queries dbstore.Queries) error {
+			txService := *s
+			txService.queries = queries
+			var err error
+			result, err = txService.persist(ctx, input)
+			return err
+		}); err != nil {
+			return Message{}, err
+		}
+		if !input.SkipHistoryTurn {
+			s.publishMessageCreated(result)
+		}
+		return result, nil
+	}
+
+	result, err := s.persist(ctx, input)
+	if err != nil {
+		return Message{}, err
+	}
+	if !input.SkipHistoryTurn {
+		s.publishMessageCreated(result)
+	}
+	return result, nil
+}
+
+func shouldPersistMessageInTx(input PersistInput) bool {
+	return !input.SkipHistoryTurn || len(input.Assets) > 0
+}
+
+func (s *DBService) persist(ctx context.Context, input PersistInput) (Message, error) {
 	pgBotID, err := dbpkg.ParseUUID(input.BotID)
 	if err != nil {
 		return Message{}, fmt.Errorf("invalid bot id: %w", err)
@@ -96,7 +140,7 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 
 	sessionMode, runtimeType := resolveRuntimeSnapshotWithQueries(ctx, s.queries, pgSessionID, input.SessionMode, input.RuntimeType)
 
-	row, err := s.queries.CreateMessage(ctx, sqlc.CreateMessageParams{
+	createArg := sqlc.CreateMessageParams{
 		BotID:                   pgBotID,
 		SessionID:               pgSessionID,
 		SenderChannelIdentityID: pgSenderChannelIdentityID,
@@ -112,26 +156,131 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 		ModelID:                 pgModelID,
 		EventID:                 pgEventID,
 		DisplayText:             toPgText(input.DisplayText),
-	})
+	}
+
+	var pgTurnRequestMessageID pgtype.UUID
+	if !input.SkipHistoryTurn {
+		pgTurnRequestMessageID, err = parseOptionalUUID(input.TurnRequestMessageID)
+		if err != nil {
+			return Message{}, fmt.Errorf("invalid turn request message id: %w", err)
+		}
+		if direct, ok := s.queries.(directHistoryTurnWriter); ok && pgSessionID.Valid {
+			result, pgMsgID, handled, err := s.persistDirectHistoryMessage(ctx, direct, createArg, input.Role, pgTurnRequestMessageID)
+			if err != nil {
+				return Message{}, err
+			}
+			if handled {
+				return s.finishPersistedMessage(ctx, result, pgMsgID, input.Assets)
+			}
+		}
+	}
+
+	row, err := s.queries.CreateMessage(ctx, createArg)
 	if err != nil {
 		return Message{}, err
 	}
 
 	result := toMessageFromCreate(row)
 	if !input.SkipHistoryTurn {
-		pgTurnRequestMessageID, err := parseOptionalUUID(input.TurnRequestMessageID)
-		if err != nil {
-			s.cleanupPersistedMessage(ctx, row.ID)
-			return Message{}, fmt.Errorf("invalid turn request message id: %w", err)
-		}
 		if err := s.persistHistoryTurn(ctx, pgBotID, pgSessionID, row.ID, input.Role, pgTurnRequestMessageID); err != nil {
 			s.cleanupPersistedMessage(ctx, row.ID)
 			return Message{}, err
 		}
 	}
 
-	for _, ref := range input.Assets {
-		pgMsgID := row.ID
+	return s.finishPersistedMessage(ctx, result, row.ID, input.Assets)
+}
+
+func (s *DBService) persistDirectHistoryMessage(
+	ctx context.Context,
+	writer directHistoryTurnWriter,
+	createArg sqlc.CreateMessageParams,
+	role string,
+	requestMessageID pgtype.UUID,
+) (Message, pgtype.UUID, bool, error) {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "user":
+		messageID := newPGUUID()
+		turnID := newPGUUID()
+		row, err := writer.CreateMessageWithTurn(ctx, sqlc.CreateMessageWithTurnParams{
+			MessageID:               messageID,
+			BotID:                   createArg.BotID,
+			SessionID:               createArg.SessionID,
+			SenderChannelIdentityID: createArg.SenderChannelIdentityID,
+			SenderUserID:            createArg.SenderUserID,
+			ExternalMessageID:       createArg.ExternalMessageID,
+			SourceReplyToMessageID:  createArg.SourceReplyToMessageID,
+			Role:                    createArg.Role,
+			Content:                 createArg.Content,
+			Metadata:                createArg.Metadata,
+			Usage:                   createArg.Usage,
+			SessionMode:             createArg.SessionMode,
+			RuntimeType:             createArg.RuntimeType,
+			ModelID:                 createArg.ModelID,
+			EventID:                 createArg.EventID,
+			DisplayText:             createArg.DisplayText,
+			TurnID:                  turnID,
+			TurnMessageSeq:          pgtype.Int8{Int64: 1, Valid: true},
+		})
+		if err != nil {
+			return Message{}, pgtype.UUID{}, true, err
+		}
+		if _, err := writer.CreateHistoryTurnWithID(ctx, sqlc.CreateHistoryTurnWithIDParams{
+			TurnID:           turnID,
+			BotID:            createArg.BotID,
+			SessionID:        createArg.SessionID,
+			RequestMessageID: messageID,
+		}); err != nil {
+			s.cleanupPersistedMessage(ctx, messageID)
+			return Message{}, pgtype.UUID{}, true, fmt.Errorf("create history turn: %w", err)
+		}
+		return toMessageFromCreateWithTurn(row), messageID, true, nil
+	case "assistant", "tool":
+		if !requestMessageID.Valid {
+			return Message{}, pgtype.UUID{}, false, nil
+		}
+		row, err := writer.CreateMessageInHistoryTurnByRequest(ctx, sqlc.CreateMessageInHistoryTurnByRequestParams{
+			Role:                    createArg.Role,
+			SessionID:               createArg.SessionID,
+			RequestMessageID:        requestMessageID,
+			BotID:                   createArg.BotID,
+			SenderChannelIdentityID: createArg.SenderChannelIdentityID,
+			SenderUserID:            createArg.SenderUserID,
+			ExternalMessageID:       createArg.ExternalMessageID,
+			SourceReplyToMessageID:  createArg.SourceReplyToMessageID,
+			Content:                 createArg.Content,
+			Metadata:                createArg.Metadata,
+			Usage:                   createArg.Usage,
+			SessionMode:             createArg.SessionMode,
+			RuntimeType:             createArg.RuntimeType,
+			ModelID:                 createArg.ModelID,
+			EventID:                 createArg.EventID,
+			DisplayText:             createArg.DisplayText,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Message{}, pgtype.UUID{}, false, nil
+		}
+		if err != nil {
+			return Message{}, pgtype.UUID{}, true, err
+		}
+		if strings.ToLower(strings.TrimSpace(role)) == "assistant" {
+			if _, err := writer.BindHistoryTurnAssistantByRequest(ctx, sqlc.BindHistoryTurnAssistantByRequestParams{
+				SessionID:          createArg.SessionID,
+				RequestMessageID:   requestMessageID,
+				AssistantMessageID: row.ID,
+			}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				s.cleanupPersistedMessage(ctx, row.ID)
+				return Message{}, pgtype.UUID{}, true, fmt.Errorf("bind history turn assistant by request: %w", err)
+			}
+		}
+		return toMessageFromCreateInHistoryTurnByRequest(row), row.ID, true, nil
+	default:
+		return Message{}, pgtype.UUID{}, false, nil
+	}
+}
+
+func (s *DBService) finishPersistedMessage(ctx context.Context, result Message, pgMsgID pgtype.UUID, assets []AssetRef) (Message, error) {
+	for _, ref := range assets {
 		role := ref.Role
 		if strings.TrimSpace(role) == "" {
 			role = "attachment"
@@ -156,14 +305,14 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 		}
 	}
 
-	if len(input.Assets) > 0 {
-		assets := make([]MessageAsset, 0, len(input.Assets))
-		for _, ref := range input.Assets {
+	if len(assets) > 0 {
+		messageAssets := make([]MessageAsset, 0, len(assets))
+		for _, ref := range assets {
 			ch := strings.TrimSpace(ref.ContentHash)
 			if ch == "" {
 				continue
 			}
-			assets = append(assets, MessageAsset{
+			messageAssets = append(messageAssets, MessageAsset{
 				ContentHash: ch,
 				Role:        coalesce(ref.Role, "attachment"),
 				Ordinal:     ref.Ordinal,
@@ -174,13 +323,15 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 				Metadata:    ref.Metadata,
 			})
 		}
-		result.Assets = assets
+		result.Assets = messageAssets
 	}
 
-	if !input.SkipHistoryTurn {
-		s.publishMessageCreated(result)
-	}
 	return result, nil
+}
+
+func newPGUUID() pgtype.UUID {
+	id := uuid.New()
+	return pgtype.UUID{Bytes: id, Valid: true}
 }
 
 func (s *DBService) cleanupPersistedMessage(ctx context.Context, messageID pgtype.UUID) {
@@ -891,6 +1042,54 @@ func (s *DBService) DeleteBySession(ctx context.Context, sessionID string) error
 // --- Conversion helpers ---
 
 func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
+	return toMessageFields(
+		row.ID,
+		row.BotID,
+		row.SessionID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		pgtype.Text{},
+		pgtype.Text{},
+		extractPlatformFromMetadata(row.Metadata),
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
+		row.EventID,
+		row.DisplayText,
+		row.CreatedAt,
+	)
+}
+
+func toMessageFromCreateWithTurn(row sqlc.CreateMessageWithTurnRow) Message {
+	return toMessageFields(
+		row.ID,
+		row.BotID,
+		row.SessionID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		pgtype.Text{},
+		pgtype.Text{},
+		extractPlatformFromMetadata(row.Metadata),
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
+		row.EventID,
+		row.DisplayText,
+		row.CreatedAt,
+	)
+}
+
+func toMessageFromCreateInHistoryTurnByRequest(row sqlc.CreateMessageInHistoryTurnByRequestRow) Message {
 	return toMessageFields(
 		row.ID,
 		row.BotID,

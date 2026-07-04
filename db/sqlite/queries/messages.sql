@@ -44,6 +44,113 @@ RETURNING
   source_reply_to_message_id, role, content, metadata, usage, session_mode, runtime_type,
   event_id, display_text, created_at;
 
+-- name: CreateMessageWithTurn :one
+INSERT INTO bot_history_messages (
+  id, bot_id, session_id, sender_channel_identity_id, sender_account_user_id,
+  source_message_id, source_reply_to_message_id, role, content, metadata,
+  usage, session_mode, runtime_type, model_id, event_id, display_text,
+  turn_id, turn_message_seq, created_at
+)
+VALUES (
+  sqlc.arg(message_id),
+  sqlc.arg(bot_id),
+  sqlc.narg(session_id),
+  sqlc.narg(sender_channel_identity_id),
+  sqlc.narg(sender_user_id),
+  sqlc.narg(external_message_id),
+  sqlc.narg(source_reply_to_message_id),
+  sqlc.arg(role),
+  sqlc.arg(content),
+  sqlc.arg(metadata),
+  sqlc.arg(usage),
+  sqlc.arg(session_mode),
+  sqlc.arg(runtime_type),
+  sqlc.narg(model_id),
+  sqlc.narg(event_id),
+  sqlc.narg(display_text),
+  sqlc.arg(turn_id),
+  sqlc.arg(turn_message_seq),
+  strftime(
+    '%Y-%m-%d %H:%M:%f',
+    max(
+      julianday('now'),
+      COALESCE((
+        SELECT MAX(julianday(created_at)) + (1.0 / 86400000.0)
+        FROM bot_history_messages
+        WHERE session_id = sqlc.narg(session_id)
+      ), julianday('now'))
+    )
+  )
+)
+RETURNING
+  id, bot_id, session_id, sender_channel_identity_id,
+  sender_account_user_id AS sender_user_id,
+  source_message_id AS external_message_id,
+  source_reply_to_message_id, role, content, metadata, usage, session_mode, runtime_type,
+  event_id, display_text, created_at;
+
+-- name: CreateMessageInHistoryTurnByRequest :one
+INSERT INTO bot_history_messages (
+  id, bot_id, session_id, sender_channel_identity_id, sender_account_user_id,
+  source_message_id, source_reply_to_message_id, role, content, metadata,
+  usage, session_mode, runtime_type, model_id, event_id, display_text,
+  turn_id, turn_message_seq, created_at
+)
+SELECT
+  lower(hex(randomblob(4))) || '-' ||
+  lower(hex(randomblob(2))) || '-' ||
+  '4' || substr(lower(hex(randomblob(2))), 2) || '-' ||
+  substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' ||
+  lower(hex(randomblob(6))),
+  sqlc.arg(bot_id),
+  target.session_id,
+  sqlc.narg(sender_channel_identity_id),
+  sqlc.narg(sender_user_id),
+  sqlc.narg(external_message_id),
+  sqlc.narg(source_reply_to_message_id),
+  sqlc.arg(role),
+  sqlc.arg(content),
+  sqlc.arg(metadata),
+  sqlc.arg(usage),
+  sqlc.arg(session_mode),
+  sqlc.arg(runtime_type),
+  sqlc.narg(model_id),
+  sqlc.narg(event_id),
+  sqlc.narg(display_text),
+  target.id,
+  CASE
+    WHEN sqlc.arg(role) = 'assistant' AND target.assistant_message_id IS NULL THEN 2
+    ELSE COALESCE((
+      SELECT existing.turn_message_seq + 1
+      FROM bot_history_messages existing
+      WHERE existing.turn_id = target.id
+      ORDER BY existing.turn_message_seq DESC
+      LIMIT 1
+    ), 1)
+  END,
+  strftime(
+    '%Y-%m-%d %H:%M:%f',
+    max(
+      julianday('now'),
+      COALESCE((
+        SELECT MAX(julianday(created_at)) + (1.0 / 86400000.0)
+        FROM bot_history_messages
+        WHERE session_id = target.session_id
+      ), julianday('now'))
+    )
+  )
+FROM bot_history_turns target
+WHERE target.session_id = sqlc.arg(session_id)
+  AND target.request_message_id = sqlc.arg(request_message_id)
+  AND target.superseded_at IS NULL
+LIMIT 1
+RETURNING
+  id, bot_id, session_id, sender_channel_identity_id,
+  sender_account_user_id AS sender_user_id,
+  source_message_id AS external_message_id,
+  source_reply_to_message_id, role, content, metadata, usage, session_mode, runtime_type,
+  event_id, display_text, created_at;
+
 -- name: CreateHistoryTurn :one
 INSERT INTO bot_history_turns (
   id,
@@ -59,6 +166,32 @@ VALUES (
   '4' || substr(lower(hex(randomblob(2))), 2) || '-' ||
   substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' ||
   lower(hex(randomblob(6))),
+  sqlc.arg(bot_id),
+  sqlc.arg(session_id),
+  COALESCE((
+    SELECT position + 1
+    FROM bot_history_turns
+    WHERE session_id = sqlc.arg(session_id)
+    ORDER BY position DESC
+    LIMIT 1
+  ), 1),
+  sqlc.narg(request_message_id),
+  sqlc.narg(assistant_message_id)
+)
+RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
+  superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at;
+
+-- name: CreateHistoryTurnWithID :one
+INSERT INTO bot_history_turns (
+  id,
+  bot_id,
+  session_id,
+  position,
+  request_message_id,
+  assistant_message_id
+)
+VALUES (
+  sqlc.arg(turn_id),
   sqlc.arg(bot_id),
   sqlc.arg(session_id),
   COALESCE((

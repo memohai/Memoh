@@ -51,6 +51,163 @@ RETURNING
   display_text,
   created_at;
 
+-- name: CreateMessageWithTurn :one
+INSERT INTO bot_history_messages (
+  id,
+  bot_id,
+  session_id,
+  sender_channel_identity_id,
+  sender_account_user_id,
+  source_message_id,
+  source_reply_to_message_id,
+  role,
+  content,
+  metadata,
+  usage,
+  session_mode,
+  runtime_type,
+  model_id,
+  event_id,
+  display_text,
+  turn_id,
+  turn_message_seq
+)
+VALUES (
+  sqlc.arg(message_id),
+  sqlc.arg(bot_id),
+  sqlc.narg(session_id)::uuid,
+  sqlc.narg(sender_channel_identity_id)::uuid,
+  sqlc.narg(sender_user_id)::uuid,
+  sqlc.narg(external_message_id)::text,
+  sqlc.narg(source_reply_to_message_id)::text,
+  sqlc.arg(role),
+  sqlc.arg(content),
+  sqlc.arg(metadata),
+  sqlc.arg(usage),
+  sqlc.arg(session_mode),
+  sqlc.arg(runtime_type),
+  sqlc.narg(model_id)::uuid,
+  sqlc.narg(event_id)::uuid,
+  sqlc.narg(display_text)::text,
+  sqlc.arg(turn_id),
+  sqlc.arg(turn_message_seq)
+)
+RETURNING
+  id,
+  bot_id,
+  session_id,
+  sender_channel_identity_id,
+  sender_account_user_id AS sender_user_id,
+  source_message_id AS external_message_id,
+  source_reply_to_message_id,
+  role,
+  content,
+  metadata,
+  usage,
+  session_mode,
+  runtime_type,
+  event_id,
+  display_text,
+  created_at;
+
+-- name: CreateMessageInHistoryTurnByRequest :one
+WITH target AS (
+  SELECT
+    turns.id,
+    turns.session_id,
+    turns.assistant_message_id,
+    CASE
+      WHEN sqlc.arg(role)::text = 'assistant' AND turns.assistant_message_id IS NULL THEN 2
+      ELSE COALESCE((
+        SELECT existing.turn_message_seq + 1
+        FROM bot_history_messages existing
+        WHERE existing.turn_id = turns.id
+        ORDER BY existing.turn_message_seq DESC
+        LIMIT 1
+      ), 1)
+    END AS turn_message_seq
+  FROM bot_history_turns turns
+  WHERE turns.session_id = sqlc.arg(session_id)
+    AND turns.request_message_id = sqlc.arg(request_message_id)
+    AND turns.superseded_at IS NULL
+  LIMIT 1
+),
+inserted AS (
+  INSERT INTO bot_history_messages (
+    bot_id,
+    session_id,
+    sender_channel_identity_id,
+    sender_account_user_id,
+    source_message_id,
+    source_reply_to_message_id,
+    role,
+    content,
+    metadata,
+    usage,
+    session_mode,
+    runtime_type,
+    model_id,
+    event_id,
+    display_text,
+    turn_id,
+    turn_message_seq
+  )
+  SELECT
+    sqlc.arg(bot_id),
+    target.session_id,
+    sqlc.narg(sender_channel_identity_id)::uuid,
+    sqlc.narg(sender_user_id)::uuid,
+    sqlc.narg(external_message_id)::text,
+    sqlc.narg(source_reply_to_message_id)::text,
+    sqlc.arg(role)::text,
+    sqlc.arg(content),
+    sqlc.arg(metadata),
+    sqlc.arg(usage),
+    sqlc.arg(session_mode),
+    sqlc.arg(runtime_type),
+    sqlc.narg(model_id)::uuid,
+    sqlc.narg(event_id)::uuid,
+    sqlc.narg(display_text)::text,
+    target.id,
+    target.turn_message_seq
+  FROM target
+  RETURNING
+    id,
+    bot_id,
+    session_id,
+    sender_channel_identity_id,
+    sender_account_user_id AS sender_user_id,
+    source_message_id AS external_message_id,
+    source_reply_to_message_id,
+    role,
+    content,
+    metadata,
+    usage,
+    session_mode,
+    runtime_type,
+    event_id,
+    display_text,
+    created_at
+)
+SELECT
+  inserted.id,
+  inserted.bot_id,
+  inserted.session_id,
+  inserted.sender_channel_identity_id,
+  inserted.sender_user_id,
+  inserted.external_message_id,
+  inserted.source_reply_to_message_id,
+  inserted.role,
+  inserted.content,
+  inserted.metadata,
+  inserted.usage,
+  inserted.session_mode,
+  inserted.runtime_type,
+  inserted.event_id,
+  inserted.display_text,
+  inserted.created_at
+FROM inserted;
+
 -- name: CreateHistoryTurn :one
 INSERT INTO bot_history_turns (
   bot_id,
@@ -60,6 +217,32 @@ INSERT INTO bot_history_turns (
   assistant_message_id
 )
 VALUES (
+  sqlc.arg(bot_id),
+  sqlc.arg(session_id),
+  COALESCE((
+    SELECT position + 1
+    FROM bot_history_turns
+    WHERE session_id = sqlc.arg(session_id)
+    ORDER BY position DESC
+    LIMIT 1
+  ), 1),
+  sqlc.narg(request_message_id)::uuid,
+  sqlc.narg(assistant_message_id)::uuid
+)
+RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
+  superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at;
+
+-- name: CreateHistoryTurnWithID :one
+INSERT INTO bot_history_turns (
+  id,
+  bot_id,
+  session_id,
+  position,
+  request_message_id,
+  assistant_message_id
+)
+VALUES (
+  sqlc.arg(turn_id),
   sqlc.arg(bot_id),
   sqlc.arg(session_id),
   COALESCE((

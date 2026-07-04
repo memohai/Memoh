@@ -253,6 +253,66 @@ func (q *Queries) CreateHistoryTurn(ctx context.Context, arg CreateHistoryTurnPa
 	return i, err
 }
 
+const createHistoryTurnWithID = `-- name: CreateHistoryTurnWithID :one
+INSERT INTO bot_history_turns (
+  id,
+  bot_id,
+  session_id,
+  position,
+  request_message_id,
+  assistant_message_id
+)
+VALUES (
+  ?1,
+  ?2,
+  ?3,
+  COALESCE((
+    SELECT position + 1
+    FROM bot_history_turns
+    WHERE session_id = ?3
+    ORDER BY position DESC
+    LIMIT 1
+  ), 1),
+  ?4,
+  ?5
+)
+RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
+  superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at
+`
+
+type CreateHistoryTurnWithIDParams struct {
+	TurnID             string         `json:"turn_id"`
+	BotID              string         `json:"bot_id"`
+	SessionID          string         `json:"session_id"`
+	RequestMessageID   sql.NullString `json:"request_message_id"`
+	AssistantMessageID sql.NullString `json:"assistant_message_id"`
+}
+
+func (q *Queries) CreateHistoryTurnWithID(ctx context.Context, arg CreateHistoryTurnWithIDParams) (BotHistoryTurn, error) {
+	row := q.db.QueryRowContext(ctx, createHistoryTurnWithID,
+		arg.TurnID,
+		arg.BotID,
+		arg.SessionID,
+		arg.RequestMessageID,
+		arg.AssistantMessageID,
+	)
+	var i BotHistoryTurn
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.SessionID,
+		&i.Position,
+		&i.RequestMessageID,
+		&i.AssistantMessageID,
+		&i.SupersededByTurnID,
+		&i.SupersededAt,
+		&i.SupersededReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createMessage = `-- name: CreateMessage :one
 INSERT INTO bot_history_messages (
   id, bot_id, session_id, sender_channel_identity_id, sender_account_user_id,
@@ -356,6 +416,277 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 		arg.DisplayText,
 	)
 	var i CreateMessageRow
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.SessionID,
+		&i.SenderChannelIdentityID,
+		&i.SenderAccountUserID,
+		&i.SourceMessageID,
+		&i.SourceReplyToMessageID,
+		&i.Role,
+		&i.Content,
+		&i.Metadata,
+		&i.Usage,
+		&i.SessionMode,
+		&i.RuntimeType,
+		&i.EventID,
+		&i.DisplayText,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createMessageInHistoryTurnByRequest = `-- name: CreateMessageInHistoryTurnByRequest :one
+INSERT INTO bot_history_messages (
+  id, bot_id, session_id, sender_channel_identity_id, sender_account_user_id,
+  source_message_id, source_reply_to_message_id, role, content, metadata,
+  usage, session_mode, runtime_type, model_id, event_id, display_text,
+  turn_id, turn_message_seq, created_at
+)
+SELECT
+  lower(hex(randomblob(4))) || '-' ||
+  lower(hex(randomblob(2))) || '-' ||
+  '4' || substr(lower(hex(randomblob(2))), 2) || '-' ||
+  substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' ||
+  lower(hex(randomblob(6))),
+  ?1,
+  target.session_id,
+  ?2,
+  ?3,
+  ?4,
+  ?5,
+  ?6,
+  ?7,
+  ?8,
+  ?9,
+  ?10,
+  ?11,
+  ?12,
+  ?13,
+  ?14,
+  target.id,
+  CASE
+    WHEN ?6 = 'assistant' AND target.assistant_message_id IS NULL THEN 2
+    ELSE COALESCE((
+      SELECT existing.turn_message_seq + 1
+      FROM bot_history_messages existing
+      WHERE existing.turn_id = target.id
+      ORDER BY existing.turn_message_seq DESC
+      LIMIT 1
+    ), 1)
+  END,
+  strftime(
+    '%Y-%m-%d %H:%M:%f',
+    max(
+      julianday('now'),
+      COALESCE((
+        SELECT MAX(julianday(created_at)) + (1.0 / 86400000.0)
+        FROM bot_history_messages
+        WHERE session_id = target.session_id
+      ), julianday('now'))
+    )
+  )
+FROM bot_history_turns target
+WHERE target.session_id = ?15
+  AND target.request_message_id = ?16
+  AND target.superseded_at IS NULL
+LIMIT 1
+RETURNING
+  id, bot_id, session_id, sender_channel_identity_id,
+  sender_account_user_id AS sender_user_id,
+  source_message_id AS external_message_id,
+  source_reply_to_message_id, role, content, metadata, usage, session_mode, runtime_type,
+  event_id, display_text, created_at
+`
+
+type CreateMessageInHistoryTurnByRequestParams struct {
+	BotID                   string         `json:"bot_id"`
+	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
+	SenderUserID            sql.NullString `json:"sender_user_id"`
+	ExternalMessageID       sql.NullString `json:"external_message_id"`
+	SourceReplyToMessageID  sql.NullString `json:"source_reply_to_message_id"`
+	Role                    string         `json:"role"`
+	Content                 string         `json:"content"`
+	Metadata                string         `json:"metadata"`
+	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
+	ModelID                 sql.NullString `json:"model_id"`
+	EventID                 sql.NullString `json:"event_id"`
+	DisplayText             sql.NullString `json:"display_text"`
+	SessionID               string         `json:"session_id"`
+	RequestMessageID        sql.NullString `json:"request_message_id"`
+}
+
+type CreateMessageInHistoryTurnByRequestRow struct {
+	ID                      string         `json:"id"`
+	BotID                   string         `json:"bot_id"`
+	SessionID               sql.NullString `json:"session_id"`
+	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
+	SenderAccountUserID     sql.NullString `json:"sender_account_user_id"`
+	SourceMessageID         sql.NullString `json:"source_message_id"`
+	SourceReplyToMessageID  sql.NullString `json:"source_reply_to_message_id"`
+	Role                    string         `json:"role"`
+	Content                 string         `json:"content"`
+	Metadata                string         `json:"metadata"`
+	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
+	EventID                 sql.NullString `json:"event_id"`
+	DisplayText             sql.NullString `json:"display_text"`
+	CreatedAt               string         `json:"created_at"`
+}
+
+func (q *Queries) CreateMessageInHistoryTurnByRequest(ctx context.Context, arg CreateMessageInHistoryTurnByRequestParams) (CreateMessageInHistoryTurnByRequestRow, error) {
+	row := q.db.QueryRowContext(ctx, createMessageInHistoryTurnByRequest,
+		arg.BotID,
+		arg.SenderChannelIdentityID,
+		arg.SenderUserID,
+		arg.ExternalMessageID,
+		arg.SourceReplyToMessageID,
+		arg.Role,
+		arg.Content,
+		arg.Metadata,
+		arg.Usage,
+		arg.SessionMode,
+		arg.RuntimeType,
+		arg.ModelID,
+		arg.EventID,
+		arg.DisplayText,
+		arg.SessionID,
+		arg.RequestMessageID,
+	)
+	var i CreateMessageInHistoryTurnByRequestRow
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.SessionID,
+		&i.SenderChannelIdentityID,
+		&i.SenderAccountUserID,
+		&i.SourceMessageID,
+		&i.SourceReplyToMessageID,
+		&i.Role,
+		&i.Content,
+		&i.Metadata,
+		&i.Usage,
+		&i.SessionMode,
+		&i.RuntimeType,
+		&i.EventID,
+		&i.DisplayText,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createMessageWithTurn = `-- name: CreateMessageWithTurn :one
+INSERT INTO bot_history_messages (
+  id, bot_id, session_id, sender_channel_identity_id, sender_account_user_id,
+  source_message_id, source_reply_to_message_id, role, content, metadata,
+  usage, session_mode, runtime_type, model_id, event_id, display_text,
+  turn_id, turn_message_seq, created_at
+)
+VALUES (
+  ?1,
+  ?2,
+  ?3,
+  ?4,
+  ?5,
+  ?6,
+  ?7,
+  ?8,
+  ?9,
+  ?10,
+  ?11,
+  ?12,
+  ?13,
+  ?14,
+  ?15,
+  ?16,
+  ?17,
+  ?18,
+  strftime(
+    '%Y-%m-%d %H:%M:%f',
+    max(
+      julianday('now'),
+      COALESCE((
+        SELECT MAX(julianday(created_at)) + (1.0 / 86400000.0)
+        FROM bot_history_messages
+        WHERE session_id = ?3
+      ), julianday('now'))
+    )
+  )
+)
+RETURNING
+  id, bot_id, session_id, sender_channel_identity_id,
+  sender_account_user_id AS sender_user_id,
+  source_message_id AS external_message_id,
+  source_reply_to_message_id, role, content, metadata, usage, session_mode, runtime_type,
+  event_id, display_text, created_at
+`
+
+type CreateMessageWithTurnParams struct {
+	MessageID               string         `json:"message_id"`
+	BotID                   string         `json:"bot_id"`
+	SessionID               sql.NullString `json:"session_id"`
+	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
+	SenderUserID            sql.NullString `json:"sender_user_id"`
+	ExternalMessageID       sql.NullString `json:"external_message_id"`
+	SourceReplyToMessageID  sql.NullString `json:"source_reply_to_message_id"`
+	Role                    string         `json:"role"`
+	Content                 string         `json:"content"`
+	Metadata                string         `json:"metadata"`
+	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
+	ModelID                 sql.NullString `json:"model_id"`
+	EventID                 sql.NullString `json:"event_id"`
+	DisplayText             sql.NullString `json:"display_text"`
+	TurnID                  sql.NullString `json:"turn_id"`
+	TurnMessageSeq          sql.NullInt64  `json:"turn_message_seq"`
+}
+
+type CreateMessageWithTurnRow struct {
+	ID                      string         `json:"id"`
+	BotID                   string         `json:"bot_id"`
+	SessionID               sql.NullString `json:"session_id"`
+	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
+	SenderAccountUserID     sql.NullString `json:"sender_account_user_id"`
+	SourceMessageID         sql.NullString `json:"source_message_id"`
+	SourceReplyToMessageID  sql.NullString `json:"source_reply_to_message_id"`
+	Role                    string         `json:"role"`
+	Content                 string         `json:"content"`
+	Metadata                string         `json:"metadata"`
+	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
+	EventID                 sql.NullString `json:"event_id"`
+	DisplayText             sql.NullString `json:"display_text"`
+	CreatedAt               string         `json:"created_at"`
+}
+
+func (q *Queries) CreateMessageWithTurn(ctx context.Context, arg CreateMessageWithTurnParams) (CreateMessageWithTurnRow, error) {
+	row := q.db.QueryRowContext(ctx, createMessageWithTurn,
+		arg.MessageID,
+		arg.BotID,
+		arg.SessionID,
+		arg.SenderChannelIdentityID,
+		arg.SenderUserID,
+		arg.ExternalMessageID,
+		arg.SourceReplyToMessageID,
+		arg.Role,
+		arg.Content,
+		arg.Metadata,
+		arg.Usage,
+		arg.SessionMode,
+		arg.RuntimeType,
+		arg.ModelID,
+		arg.EventID,
+		arg.DisplayText,
+		arg.TurnID,
+		arg.TurnMessageSeq,
+	)
+	var i CreateMessageWithTurnRow
 	err := row.Scan(
 		&i.ID,
 		&i.BotID,
