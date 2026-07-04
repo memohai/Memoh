@@ -41,6 +41,12 @@ type Provider interface {
 	Usage(ctx context.Context, filters map[string]any) (UsageResponse, error)
 }
 
+// MemoryVersionProvider is implemented by providers that can expose a cheap
+// cache-busting version for the bot's memory source of truth.
+type MemoryVersionProvider interface {
+	MemoryVersion(ctx context.Context, botID string) string
+}
+
 // SourceSyncProvider is implemented by providers that can report runtime status
 // and rebuild derived storage from a canonical source of truth.
 type SourceSyncProvider interface {

@@ -181,7 +181,7 @@ func acpContextSystemFiles(files []agentpkg.SystemFile, maxBytes int) []acpConte
 		title, ok := titles[name]
 		if !ok {
 			if strings.HasPrefix(name, "memory/") && strings.HasSuffix(name, ".md") {
-				title = "Daily Memory - " + strings.TrimPrefix(name, "memory/")
+				title = "Memory Concept - " + strings.TrimPrefix(name, "memory/")
 			} else {
 				continue
 			}

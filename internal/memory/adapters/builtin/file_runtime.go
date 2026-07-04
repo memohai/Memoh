@@ -60,7 +60,7 @@ func (r *fileRuntime) Add(ctx context.Context, req adapters.AddRequest) (adapter
 	if err := r.store.PersistMemories(ctx, botID, itemsToPersist, req.Filters); err != nil {
 		return adapters.SearchResponse{}, err
 	}
-	return adapters.SearchResponse{Results: []adapters.MemoryItem{item}}, nil
+	return adapters.SearchResponse{Results: []adapters.MemoryItem{item}, RetrievalMode: "file"}, nil
 }
 
 func (r *fileRuntime) Search(ctx context.Context, req adapters.SearchRequest) (adapters.SearchResponse, error) {
@@ -92,7 +92,7 @@ func (r *fileRuntime) Search(ctx context.Context, req adapters.SearchRequest) (a
 	if req.Limit > 0 && len(results) > req.Limit {
 		results = results[:req.Limit]
 	}
-	return adapters.SearchResponse{Results: results}, nil
+	return adapters.SearchResponse{Results: results, RetrievalMode: "file"}, nil
 }
 
 func (r *fileRuntime) GetAll(ctx context.Context, req adapters.GetAllRequest) (adapters.SearchResponse, error) {
@@ -111,7 +111,7 @@ func (r *fileRuntime) GetAll(ctx context.Context, req adapters.GetAllRequest) (a
 	if req.Limit > 0 && len(items) > req.Limit {
 		items = items[:req.Limit]
 	}
-	return adapters.SearchResponse{Results: memoryItemsFromStore(items)}, nil
+	return adapters.SearchResponse{Results: memoryItemsFromStore(items), RetrievalMode: "file"}, nil
 }
 
 func (r *fileRuntime) Update(ctx context.Context, req adapters.UpdateRequest) (adapters.MemoryItem, error) {

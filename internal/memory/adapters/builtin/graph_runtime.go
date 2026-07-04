@@ -66,6 +66,13 @@ func (r *graphRuntime) SetSemanticIndex(index *pgvectorIndex) {
 
 func (*graphRuntime) Mode() string { return string(ModeGraph) }
 
+func (r *graphRuntime) MemoryVersion(_ context.Context, botID string) string {
+	if r == nil || r.cache == nil {
+		return ""
+	}
+	return r.cache.version(strings.TrimSpace(botID))
+}
+
 // ---- helpers ----
 
 func (r *graphRuntime) syncAndInvalidate(ctx context.Context, botID string) {
@@ -157,7 +164,11 @@ func (r *graphRuntime) Search(ctx context.Context, req adapters.SearchRequest) (
 
 	// Reliability fallback: degrade to file-lexical over the derived Markdown.
 	r.logger.Warn("graph search failed, falling back to file lexical", "bot_id", botID, "err", graphErr)
-	return r.searchFileFallback(ctx, botID, req.Query, limit)
+	fallback, err := r.searchFileFallback(ctx, botID, req.Query, limit)
+	if fallback.FallbackReason == "" {
+		fallback.FallbackReason = "graph_error"
+	}
+	return fallback, err
 }
 
 // searchGraph runs seed-then-expand: lexical-score nodes -> top-K seeds ->
@@ -268,7 +279,7 @@ func (r *graphRuntime) searchGraph(ctx context.Context, botID, query string, lim
 			relations = append(relations, map[string]any{"from": parts[0], "to": parts[1], "rel": parts[2]})
 		}
 	}
-	return adapters.SearchResponse{Results: results, Relations: relations}, nil
+	return adapters.SearchResponse{Results: results, Relations: relations, RetrievalMode: "graph"}, nil
 }
 
 // searchFileFallback is the reliability fallback: read the derived Markdown via
@@ -303,7 +314,7 @@ func (r *graphRuntime) searchFileFallback(ctx context.Context, botID, query stri
 	if limit > 0 && len(results) > limit {
 		results = results[:limit]
 	}
-	return adapters.SearchResponse{Results: results}, nil
+	return adapters.SearchResponse{Results: results, RetrievalMode: "file_fallback"}, nil
 }
 
 func (r *graphRuntime) GetAll(ctx context.Context, req adapters.GetAllRequest) (adapters.SearchResponse, error) {
@@ -318,7 +329,11 @@ func (r *graphRuntime) GetAll(ctx context.Context, req adapters.GetAllRequest) (
 	if err != nil {
 		// Fallback to derived files if the store is unavailable.
 		r.logger.Warn("graph GetAll failed, falling back to files", "bot_id", botID, "err", err)
-		return r.searchFileFallback(ctx, botID, "", req.Limit)
+		fallback, fallbackErr := r.searchFileFallback(ctx, botID, "", req.Limit)
+		if fallback.FallbackReason == "" {
+			fallback.FallbackReason = "graph_error"
+		}
+		return fallback, fallbackErr
 	}
 	out := make([]adapters.MemoryItem, 0, len(nodes))
 	for _, n := range nodes {
@@ -328,7 +343,7 @@ func (r *graphRuntime) GetAll(ctx context.Context, req adapters.GetAllRequest) (
 	if req.Limit > 0 && len(out) > req.Limit {
 		out = out[:req.Limit]
 	}
-	return adapters.SearchResponse{Results: out}, nil
+	return adapters.SearchResponse{Results: out, RetrievalMode: "graph"}, nil
 }
 
 func (r *graphRuntime) Update(ctx context.Context, req adapters.UpdateRequest) (adapters.MemoryItem, error) {

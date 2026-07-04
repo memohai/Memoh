@@ -127,6 +127,19 @@ func intFromConfig(m map[string]any, key string) int {
 
 func (*BuiltinProvider) Type() string { return BuiltinType }
 
+func (p *BuiltinProvider) MemoryVersion(ctx context.Context, botID string) string {
+	if p == nil || p.service == nil {
+		return ""
+	}
+	versioned, ok := p.service.(interface {
+		MemoryVersion(context.Context, string) string
+	})
+	if !ok {
+		return ""
+	}
+	return versioned.MemoryVersion(ctx, botID)
+}
+
 func (p *BuiltinProvider) SemanticCompactCapability() adapters.MemoryCompactCapability {
 	if p.service == nil {
 		return adapters.MemoryCompactCapability{Reason: "memory runtime not configured"}
@@ -191,7 +204,7 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req adapters.BeforeC
 	})
 	if err != nil {
 		p.logger.Warn("memory search for context failed", slog.Any("error", err))
-		return nil, nil
+		return nil, err
 	}
 
 	candidates := deduplicateAndSort(resp.Results)
@@ -221,7 +234,15 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req adapters.BeforeC
 	if payload == "" {
 		return nil, nil
 	}
-	return &adapters.BeforeChatResult{ContextText: payload}, nil
+	retrievalMode := strings.TrimSpace(resp.RetrievalMode)
+	if retrievalMode == "" {
+		retrievalMode = strings.TrimSpace(p.service.Mode())
+	}
+	return &adapters.BeforeChatResult{
+		ContextText:    payload,
+		RetrievalMode:  retrievalMode,
+		FallbackReason: strings.TrimSpace(resp.FallbackReason),
+	}, nil
 }
 
 func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req adapters.AfterChatRequest) error {

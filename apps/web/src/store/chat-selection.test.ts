@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 describe('chat-selection store', () => {
@@ -13,15 +13,22 @@ describe('chat-selection store', () => {
       removeItem: (key: string) => storage.delete(key),
       clear: () => storage.clear(),
     }
+    class StorageMock {}
+    vi.stubGlobal('Storage', StorageMock)
     vi.stubGlobal('localStorage', localStorageMock)
     vi.stubGlobal('document', {})
     vi.stubGlobal('window', {
       localStorage: localStorageMock,
+      Storage: StorageMock,
       document: {},
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
     })
     setActivePinia(createPinia())
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('does not migrate a legacy stored session id into an explicit selection', async () => {

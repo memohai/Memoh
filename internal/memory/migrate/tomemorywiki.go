@@ -7,12 +7,11 @@ package migrate
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 
+	memslug "github.com/memohai/memoh/internal/memory/slug"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
 
@@ -279,76 +278,18 @@ func buildRefEdges(nodes []NodeSpec) []EdgeSpec {
 
 // NodeSlug returns the human/LLM-friendly slug used in wiki cross-references.
 func NodeSlug(id, subject, topic string) string {
-	if slug := Slugify(subject); slug != "" {
-		return slug
-	}
-	if slug := Slugify(topic); slug != "" {
-		return slug
-	}
-	if idx := strings.LastIndex(id, ":"); idx >= 0 && idx+1 < len(id) {
-		return Slugify(id[idx+1:])
-	}
-	return Slugify(id)
+	return memslug.NodeSlug(id, subject, topic)
 }
 
 // Slugify normalizes a user/LLM-facing memory label for [[slug]] links.
 func Slugify(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	if s == "" {
-		return ""
-	}
-	var b strings.Builder
-	lastDash := false
-	for _, r := range s {
-		switch {
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
-			b.WriteRune(r)
-			lastDash = false
-		default:
-			if !lastDash && b.Len() > 0 {
-				b.WriteByte('-')
-				lastDash = true
-			}
-		}
-	}
-	return strings.Trim(b.String(), "-")
+	return memslug.Slugify(s)
 }
 
-var (
-	wikiLinkRe = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
-	mdLinkRe   = regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
-)
-
 // ParseMemoryLinks extracts referenced slugs from a memory body. It supports
-// [[slug]] and [label](slug). HTTP(S) links are ignored.
+// [[slug]] and markdown links. HTTP(S) links are ignored.
 func ParseMemoryLinks(body string) []string {
-	var slugs []string
-	seen := map[string]bool{}
-	collect := func(raw string) {
-		slug := Slugify(raw)
-		if slug == "" || seen[slug] {
-			return
-		}
-		seen[slug] = true
-		slugs = append(slugs, slug)
-	}
-	for _, m := range wikiLinkRe.FindAllStringSubmatch(body, -1) {
-		if len(m) > 1 {
-			collect(m[1])
-		}
-	}
-	for _, m := range mdLinkRe.FindAllStringSubmatch(body, -1) {
-		if len(m) <= 1 {
-			continue
-		}
-		href := strings.TrimSpace(m[1])
-		lower := strings.ToLower(href)
-		if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
-			continue
-		}
-		collect(href)
-	}
-	return slugs
+	return memslug.ParseMemoryLinks(body)
 }
 
 // indexBy groups nodes sharing the same non-empty key.

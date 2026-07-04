@@ -60,6 +60,10 @@ vi.mock('@memohai/ui', async () => {
     AvatarImage: Passthrough,
     Button,
     Spinner: Passthrough,
+    toast: {
+      error: () => {},
+      success: () => {},
+    },
   }
 })
 

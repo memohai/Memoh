@@ -14,7 +14,9 @@ type BeforeChatRequest struct {
 
 // BeforeChatResult contains memory context to inject into the conversation.
 type BeforeChatResult struct {
-	ContextText string // formatted text to inject as a user message
+	ContextText    string // formatted text to inject as a user message
+	RetrievalMode  string // graph, file_fallback, mem0, etc.
+	FallbackReason string // non-empty when the provider degraded to another retrieval path
 }
 
 // AfterChatRequest is passed to OnAfterChat after receiving the gateway response.
@@ -99,8 +101,10 @@ type MemoryItem struct {
 }
 
 type SearchResponse struct {
-	Results   []MemoryItem `json:"results"`
-	Relations []any        `json:"relations,omitempty"`
+	Results        []MemoryItem `json:"results"`
+	Relations      []any        `json:"relations,omitempty"`
+	RetrievalMode  string       `json:"retrieval_mode,omitempty"`
+	FallbackReason string       `json:"fallback_reason,omitempty"`
 }
 
 type DeleteResponse struct {

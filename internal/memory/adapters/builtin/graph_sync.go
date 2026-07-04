@@ -16,12 +16,12 @@ import (
 
 // graphSync regenerates the agent-facing Markdown derived view for a bot from
 // its PG wiki nodes. The PG graph is the source of truth; the Markdown files
-// exist purely so the agent (which reads /data/memory/*.md via real open()
-// syscalls inside its container) sees the same content.
+// exist purely so the agent (which reads /data/memory/<layer>/<slug>.md via
+// real open() syscalls inside its container) sees the same content.
 //
 // Syncs are serialized per botID so concurrent writes do not race on the same
-// daily file. Failures are best-effort: PG remains authoritative, so a sync
-// error is logged, not returned to the caller (graphRuntime swallows it).
+// memory bundle. Failures are best-effort: PG remains authoritative, so a
+// sync error is logged, not returned to the caller (graphRuntime swallows it).
 type graphSync struct {
 	fs     memoryStore
 	logger *slog.Logger
@@ -48,10 +48,10 @@ func (s *graphSync) botLock(botID string) *sync.Mutex {
 	return m
 }
 
-// syncMarkdownFromNodes regenerates /data/memory/*.md + MEMORY.md for botID
-// from the given node set. It is the PG->file direction only. The file->PG
-// direction (agent-authored edits) is handled by the existing storefs write
-// path the builtin provider already intercepts.
+// syncMarkdownFromNodes regenerates /data/memory/<layer>/<slug>.md + MEMORY.md
+// for botID from the given node set. It is the PG->file direction only. The
+// file->PG direction (agent-authored edits) is handled by the existing storefs
+// write path the builtin provider already intercepts.
 //
 // The caller passes the authoritative node list (already read from the store);
 // this avoids a second ListNodes round-trip and lets the caller hold the most

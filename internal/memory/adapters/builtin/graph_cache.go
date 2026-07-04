@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -56,12 +57,16 @@ func (g *botGraph) nodeSlice() []migrate.NodeSpec {
 // WikiStore. It is safe for concurrent use. A write to the store should call
 // invalidate(botID) so the next read rebuilds.
 type graphCache struct {
-	mu     sync.RWMutex
-	graphs map[string]*botGraph
+	mu       sync.RWMutex
+	graphs   map[string]*botGraph
+	versions map[string]uint64
 }
 
 func newGraphCache() *graphCache {
-	return &graphCache{graphs: make(map[string]*botGraph)}
+	return &graphCache{
+		graphs:   make(map[string]*botGraph),
+		versions: make(map[string]uint64),
+	}
 }
 
 // getOrBuild returns the cached graph for botID, rebuilding it from store if
@@ -96,7 +101,18 @@ func (c *graphCache) getOrBuild(ctx context.Context, botID string, store wikisto
 func (c *graphCache) invalidate(botID string) {
 	c.mu.Lock()
 	delete(c.graphs, botID)
+	c.versions[botID]++
 	c.mu.Unlock()
+}
+
+func (c *graphCache) version(botID string) string {
+	if c == nil {
+		return ""
+	}
+	c.mu.RLock()
+	version := c.versions[botID]
+	c.mu.RUnlock()
+	return strconv.FormatUint(version, 10)
 }
 
 // buildBotGraph constructs a botGraph from node + edge specs. Edges are added

@@ -89,6 +89,12 @@ func newPGVectorIndex(logger *slog.Logger, providerConfig map[string]any, querie
 	if err != nil {
 		return nil, fmt.Errorf("pgvector semantic index: parse dsn: %w", err)
 	}
+	// Bootstrap the schema on a plain connection first: RegisterTypes fails on
+	// a fresh database where the vector type does not exist yet, so the
+	// extension must be created before the typed pool opens its first conn.
+	if err := bootstrapPgvectorSchema(context.Background(), poolCfg.ConnConfig); err != nil {
+		return nil, err
+	}
 	poolCfg.AfterConnect = pgxvec.RegisterTypes
 	pool, err := pgxpool.NewWithConfig(context.Background(), poolCfg)
 	if err != nil {
@@ -114,6 +120,21 @@ func (r *pgvectorIndex) Name() string {
 		return ""
 	}
 	return "pgvector"
+}
+
+// bootstrapPgvectorSchema creates the vector extension and embeddings table
+// over a one-off untyped connection, so the typed pool can register the
+// vector type on its first connection even against a fresh database.
+func bootstrapPgvectorSchema(ctx context.Context, connCfg *pgx.ConnConfig) error {
+	conn, err := pgx.ConnectConfig(ctx, connCfg)
+	if err != nil {
+		return fmt.Errorf("pgvector semantic index: bootstrap connect: %w", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	if _, err := conn.Exec(ctx, pgvectorSchemaSQL); err != nil {
+		return fmt.Errorf("pgvector semantic index: bootstrap schema: %w", err)
+	}
+	return nil
 }
 
 func (r *pgvectorIndex) ensureStore(ctx context.Context) error {
