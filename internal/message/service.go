@@ -239,11 +239,7 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, s
 			} else if !errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("bind history turn assistant by request: %w", err)
 			}
-			if _, err := writer.AppendMessageToHistoryTurnByRequest(ctx, sqlc.AppendMessageToHistoryTurnByRequestParams{
-				SessionID:        sessionID,
-				RequestMessageID: requestMessageID,
-				MessageID:        messageID,
-			}); err == nil {
+			if err := appendMessageToHistoryTurnByRequest(ctx, writer, sessionID, requestMessageID, messageID); err == nil {
 				return nil
 			} else if !errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("append assistant message to requested history turn: %w", err)
@@ -291,6 +287,13 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, s
 			return fmt.Errorf("link orphan assistant message to history turn: %w", err)
 		}
 	case "tool":
+		if requestMessageID.Valid {
+			if err := appendMessageToHistoryTurnByRequest(ctx, writer, sessionID, requestMessageID, messageID); err == nil {
+				return nil
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("append tool message to requested history turn: %w", err)
+			}
+		}
 		if err := writer.AppendMessageToLatestHistoryTurn(ctx, sqlc.AppendMessageToLatestHistoryTurnParams{
 			SessionID: sessionID,
 			MessageID: messageID,
@@ -299,6 +302,15 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, s
 		}
 	}
 	return nil
+}
+
+func appendMessageToHistoryTurnByRequest(ctx context.Context, writer historyTurnWriter, sessionID pgtype.UUID, requestMessageID pgtype.UUID, messageID pgtype.UUID) error {
+	_, err := writer.AppendMessageToHistoryTurnByRequest(ctx, sqlc.AppendMessageToHistoryTurnByRequestParams{
+		SessionID:        sessionID,
+		RequestMessageID: requestMessageID,
+		MessageID:        messageID,
+	})
+	return err
 }
 
 func resolveRuntimeSnapshotWithQueries(ctx context.Context, queries dbstore.Queries, sessionID pgtype.UUID, sessionMode, runtimeType string) (string, string) {
