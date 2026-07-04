@@ -4193,45 +4193,6 @@ func (q *Queries) AppendMessageToHistoryTurnByRequest(ctx context.Context, arg p
 	return result, nil
 }
 
-func (q *Queries) AppendMessagesToHistoryTurnByRequest(ctx context.Context, arg pgsqlc.AppendMessagesToHistoryTurnByRequestParams) ([]pgtype.UUID, error) {
-	if q == nil || q.store == nil || q.store.queries == nil {
-		return nil, errSQLiteQueriesNotConfigured
-	}
-	var sqliteArg sqlitesqlc.AppendMessagesToHistoryTurnByRequestParams
-	if err := convertValue(arg.SessionID, &sqliteArg.SessionID); err != nil {
-		return nil, err
-	}
-	if err := convertValue(arg.RequestMessageID, &sqliteArg.RequestMessageID); err != nil {
-		return nil, err
-	}
-	messageIDs := make([]string, 0, len(arg.MessageIds))
-	for _, id := range arg.MessageIds {
-		var sqliteID string
-		if err := convertValue(id, &sqliteID); err != nil {
-			return nil, err
-		}
-		messageIDs = append(messageIDs, sqliteID)
-	}
-	idsJSON, err := json.Marshal(messageIDs)
-	if err != nil {
-		return nil, err
-	}
-	sqliteArg.MessageIdsJson = string(idsJSON)
-	out, err := q.store.queries.AppendMessagesToHistoryTurnByRequest(ctx, sqliteArg)
-	if err != nil {
-		return nil, mapQueryErr(err)
-	}
-	result := make([]pgtype.UUID, 0, len(out))
-	for _, id := range out {
-		var pgID pgtype.UUID
-		if err := convertValue(id, &pgID); err != nil {
-			return nil, err
-		}
-		result = append(result, pgID)
-	}
-	return result, nil
-}
-
 func (q *Queries) AppendMessageToLatestHistoryTurn(ctx context.Context, arg pgsqlc.AppendMessageToLatestHistoryTurnParams) error {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return errSQLiteQueriesNotConfigured

@@ -44,7 +44,7 @@ WHERE bot_history_messages.id = ?3
     WHERE t.session_id = ?1
       AND t.request_message_id = ?2
       AND t.superseded_at IS NULL
-)
+  )
 RETURNING id
 `
 
@@ -98,76 +98,6 @@ type AppendMessageToLatestHistoryTurnParams struct {
 func (q *Queries) AppendMessageToLatestHistoryTurn(ctx context.Context, arg AppendMessageToLatestHistoryTurnParams) error {
 	_, err := q.db.ExecContext(ctx, appendMessageToLatestHistoryTurn, arg.SessionID, arg.MessageID)
 	return err
-}
-
-const appendMessagesToHistoryTurnByRequest = `-- name: AppendMessagesToHistoryTurnByRequest :many
-UPDATE bot_history_messages
-SET turn_id = (
-      SELECT t.id
-      FROM bot_history_turns t
-      WHERE t.session_id = ?1
-        AND t.request_message_id = ?2
-        AND t.superseded_at IS NULL
-      LIMIT 1
-    ),
-    turn_message_seq = COALESCE((
-      SELECT existing.turn_message_seq
-      FROM bot_history_messages existing
-      WHERE existing.turn_id = (
-        SELECT t.id
-        FROM bot_history_turns t
-        WHERE t.session_id = ?1
-          AND t.request_message_id = ?2
-          AND t.superseded_at IS NULL
-        LIMIT 1
-      )
-      ORDER BY existing.turn_message_seq DESC
-      LIMIT 1
-    ), 0) + (
-      SELECT CAST(key AS INTEGER) + 1
-      FROM json_each(?3)
-      WHERE value = bot_history_messages.id
-    )
-WHERE bot_history_messages.id IN (SELECT value FROM json_each(?3))
-  AND bot_history_messages.session_id = ?1
-  AND bot_history_messages.turn_id IS NULL
-  AND EXISTS (
-    SELECT 1
-    FROM bot_history_turns t
-    WHERE t.session_id = ?1
-      AND t.request_message_id = ?2
-      AND t.superseded_at IS NULL
-  )
-RETURNING id
-`
-
-type AppendMessagesToHistoryTurnByRequestParams struct {
-	SessionID        string         `json:"session_id"`
-	RequestMessageID sql.NullString `json:"request_message_id"`
-	MessageIdsJson   interface{}    `json:"message_ids_json"`
-}
-
-func (q *Queries) AppendMessagesToHistoryTurnByRequest(ctx context.Context, arg AppendMessagesToHistoryTurnByRequestParams) ([]string, error) {
-	rows, err := q.db.QueryContext(ctx, appendMessagesToHistoryTurnByRequest, arg.SessionID, arg.RequestMessageID, arg.MessageIdsJson)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const bindHistoryTurnAssistantByRequest = `-- name: BindHistoryTurnAssistantByRequest :one

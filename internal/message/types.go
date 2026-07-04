@@ -103,11 +103,6 @@ type Writer interface {
 	Persist(ctx context.Context, input PersistInput) (Message, error)
 }
 
-// BatchWriter persists multiple messages when a caller can preserve message order.
-type BatchWriter interface {
-	PersistBatch(ctx context.Context, inputs []PersistInput) ([]Message, error)
-}
-
 // Service defines message read/write behavior.
 type Service interface {
 	Writer

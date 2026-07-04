@@ -28,7 +28,6 @@ type DBService struct {
 
 type historyTurnWriter interface {
 	AppendMessageToHistoryTurnByRequest(ctx context.Context, arg sqlc.AppendMessageToHistoryTurnByRequestParams) (pgtype.UUID, error)
-	AppendMessagesToHistoryTurnByRequest(ctx context.Context, arg sqlc.AppendMessagesToHistoryTurnByRequestParams) ([]pgtype.UUID, error)
 	CreateHistoryTurn(ctx context.Context, arg sqlc.CreateHistoryTurnParams) (sqlc.BotHistoryTurn, error)
 	BindHistoryTurnAssistantByRequest(ctx context.Context, arg sqlc.BindHistoryTurnAssistantByRequestParams) (sqlc.BotHistoryTurn, error)
 	BindLatestHistoryTurnAssistant(ctx context.Context, arg sqlc.BindLatestHistoryTurnAssistantParams) (sqlc.BotHistoryTurn, error)
@@ -184,113 +183,6 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 	return result, nil
 }
 
-// PersistBatch writes ordered messages. It optimizes the common agent tail path
-// where assistant/tool messages all belong to the same already-created request turn.
-func (s *DBService) PersistBatch(ctx context.Context, inputs []PersistInput) ([]Message, error) {
-	if len(inputs) == 0 {
-		return nil, nil
-	}
-	if !canPersistRequestTailBatch(inputs) {
-		return s.persistBatchIndividually(ctx, inputs)
-	}
-	writer, ok := s.queries.(historyTurnWriter)
-	if !ok {
-		return s.persistBatchIndividually(ctx, inputs)
-	}
-
-	messages := make([]Message, 0, len(inputs))
-	first, err := s.Persist(ctx, inputs[0])
-	if err != nil {
-		return messages, err
-	}
-	messages = append(messages, first)
-	if len(inputs) == 1 {
-		return messages, nil
-	}
-
-	tailIDs := make([]pgtype.UUID, 0, len(inputs)-1)
-	for _, input := range inputs[1:] {
-		tailInput := input
-		tailInput.SkipHistoryTurn = true
-		msg, err := s.Persist(ctx, tailInput)
-		if err != nil {
-			s.cleanupPersistedMessages(ctx, tailIDs)
-			return messages, err
-		}
-		messages = append(messages, msg)
-		pgID, err := dbpkg.ParseUUID(msg.ID)
-		if err != nil {
-			s.cleanupPersistedMessages(ctx, tailIDs)
-			return messages[:1], fmt.Errorf("parse persisted tail message id: %w", err)
-		}
-		tailIDs = append(tailIDs, pgID)
-	}
-
-	sessionID, err := dbpkg.ParseUUID(inputs[0].SessionID)
-	if err != nil {
-		s.cleanupPersistedMessages(ctx, tailIDs)
-		return messages[:1], fmt.Errorf("invalid session id: %w", err)
-	}
-	requestMessageID, err := dbpkg.ParseUUID(inputs[0].TurnRequestMessageID)
-	if err != nil {
-		s.cleanupPersistedMessages(ctx, tailIDs)
-		return messages[:1], fmt.Errorf("invalid turn request message id: %w", err)
-	}
-	linked, err := writer.AppendMessagesToHistoryTurnByRequest(ctx, sqlc.AppendMessagesToHistoryTurnByRequestParams{
-		SessionID:        sessionID,
-		RequestMessageID: requestMessageID,
-		MessageIds:       tailIDs,
-	})
-	if err != nil {
-		s.cleanupPersistedMessages(ctx, tailIDs)
-		return messages[:1], fmt.Errorf("append tail messages to requested history turn: %w", err)
-	}
-	if len(linked) != len(tailIDs) {
-		s.cleanupPersistedMessages(ctx, tailIDs)
-		return messages[:1], fmt.Errorf("append tail messages to requested history turn: linked %d of %d messages", len(linked), len(tailIDs))
-	}
-	for _, msg := range messages[1:] {
-		s.publishMessageCreated(msg)
-	}
-	return messages, nil
-}
-
-func canPersistRequestTailBatch(inputs []PersistInput) bool {
-	if len(inputs) < 2 {
-		return false
-	}
-	requestMessageID := strings.TrimSpace(inputs[0].TurnRequestMessageID)
-	sessionID := strings.TrimSpace(inputs[0].SessionID)
-	if requestMessageID == "" || sessionID == "" || inputs[0].SkipHistoryTurn {
-		return false
-	}
-	for _, input := range inputs {
-		if input.SkipHistoryTurn ||
-			strings.TrimSpace(input.SessionID) != sessionID ||
-			strings.TrimSpace(input.TurnRequestMessageID) != requestMessageID {
-			return false
-		}
-		switch strings.ToLower(strings.TrimSpace(input.Role)) {
-		case "assistant", "tool":
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-func (s *DBService) persistBatchIndividually(ctx context.Context, inputs []PersistInput) ([]Message, error) {
-	messages := make([]Message, 0, len(inputs))
-	for _, input := range inputs {
-		msg, err := s.Persist(ctx, input)
-		if err != nil {
-			return messages, err
-		}
-		messages = append(messages, msg)
-	}
-	return messages, nil
-}
-
 func (s *DBService) cleanupPersistedMessage(ctx context.Context, messageID pgtype.UUID) {
 	if s == nil || s.queries == nil || !messageID.Valid {
 		return
@@ -301,19 +193,6 @@ func (s *DBService) cleanupPersistedMessage(ctx context.Context, messageID pgtyp
 	}
 	if err := cleanup.DeleteMessagesByIDs(ctx, []pgtype.UUID{messageID}); err != nil {
 		s.logger.Error("cleanup message after history turn failure failed", slog.String("message_id", messageID.String()), slog.Any("error", err))
-	}
-}
-
-func (s *DBService) cleanupPersistedMessages(ctx context.Context, messageIDs []pgtype.UUID) {
-	if len(messageIDs) == 0 {
-		return
-	}
-	cleanup, ok := s.queries.(messageCleanupQueries)
-	if !ok {
-		return
-	}
-	if err := cleanup.DeleteMessagesByIDs(ctx, messageIDs); err != nil {
-		s.logger.Error("cleanup messages after history turn batch failure failed", slog.Int("message_count", len(messageIDs)), slog.Any("error", err))
 	}
 }
 

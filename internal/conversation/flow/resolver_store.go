@@ -146,30 +146,6 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 	if req.UserMessagePersisted || req.ReusePersistedUserMessage {
 		turnRequestMessageID = strings.TrimSpace(req.PersistedUserMessageID)
 	}
-	var pendingTail []messagepkg.PersistInput
-	flushPendingTail := func() {
-		if len(pendingTail) == 0 {
-			return
-		}
-		inputs := pendingTail
-		pendingTail = nil
-		if batchWriter, ok := r.messageService.(messagepkg.BatchWriter); ok && len(inputs) > 1 {
-			persistedMessages, err := batchWriter.PersistBatch(ctx, inputs)
-			if err != nil {
-				r.logger.Warn("persist message batch failed", slog.Any("error", err))
-			}
-			persisted = append(persisted, persistedMessages...)
-			return
-		}
-		for _, input := range inputs {
-			persistedMessage, err := r.messageService.Persist(ctx, input)
-			if err != nil {
-				r.logger.Warn("persist message failed", slog.Any("error", err))
-				continue
-			}
-			persisted = append(persisted, persistedMessage)
-		}
-	}
 	for i, msg := range messages {
 		msg = normalizeUserMessageContent(msg)
 
@@ -249,7 +225,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		if extraMeta := opts.MessageMetadataByIndex[i]; len(extraMeta) > 0 {
 			persistMeta = mergeMetadata(persistMeta, extraMeta)
 		}
-		persistInput := messagepkg.PersistInput{
+		persistedMessage, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
 			BotID:                   req.BotID,
 			SessionID:               req.SessionID,
 			SenderChannelIdentityID: messageSenderChannelIdentityID,
@@ -266,13 +242,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			DisplayText:             displayText,
 			TurnRequestMessageID:    turnRequestMessageID,
 			SkipHistoryTurn:         req.SkipHistoryTurn,
-		}
-		if isBatchableRequestTailPersistInput(persistInput) {
-			pendingTail = append(pendingTail, persistInput)
-			continue
-		}
-		flushPendingTail()
-		persistedMessage, err := r.messageService.Persist(ctx, persistInput)
+		})
 		if err != nil {
 			r.logger.Warn("persist message failed", slog.Any("error", err))
 			continue
@@ -282,20 +252,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		}
 		persisted = append(persisted, persistedMessage)
 	}
-	flushPendingTail()
 	return persisted
-}
-
-func isBatchableRequestTailPersistInput(input messagepkg.PersistInput) bool {
-	if input.SkipHistoryTurn || strings.TrimSpace(input.TurnRequestMessageID) == "" {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(input.Role)) {
-	case "assistant", "tool":
-		return true
-	default:
-		return false
-	}
 }
 
 // outboundAssetRefsToMessageRefs converts outbound asset refs from the streaming
