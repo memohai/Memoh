@@ -1,13 +1,11 @@
 <template>
-  <Card
-    class="group flex cursor-pointer flex-row items-start gap-3 p-4 transition-colors"
-    role="button"
-    tabindex="0"
-    @click="openDetail"
-    @keydown.enter.prevent="openDetail"
-    @keydown.space.prevent="openDetail"
+  <MarketItemCard
+    :name="plugin.name"
+    :description="plugin.description"
+    :homepage="plugin.homepage"
+    @open="openDetail"
   >
-    <div class="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md bg-accent">
+    <template #leading>
       <ProviderIcon
         v-if="iconValue"
         :icon="iconValue"
@@ -20,37 +18,11 @@
         v-else
         class="size-4 text-muted-foreground"
       />
-    </div>
+    </template>
 
-    <div class="min-w-0 flex-1">
-      <div class="flex items-center gap-1.5">
-        <h3
-          class="truncate text-sm font-medium"
-          :title="plugin.name"
-        >
-          {{ plugin.name }}
-        </h3>
-        <a
-          v-if="plugin.homepage"
-          :href="plugin.homepage"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
-          @click.stop
-        >
-          <ExternalLink class="size-3" />
-        </a>
-      </div>
-      <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">
-        {{ plugin.description }}
-      </p>
-    </div>
-
-    <div
+    <template
       v-if="$slots.actions || props.showInstall"
-      class="shrink-0"
-      @click.stop
-      @keydown.stop
+      #actions
     >
       <slot name="actions">
         <Button
@@ -63,17 +35,18 @@
           {{ $t('supermarket.install') }}
         </Button>
       </slot>
-    </div>
-  </Card>
+    </template>
+  </MarketItemCard>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { Download, ExternalLink, PackageOpen } from 'lucide-vue-next'
-import { Card, Button } from '@memohai/ui'
+import { Download, PackageOpen } from 'lucide-vue-next'
+import { Button } from '@memohai/ui'
 import type { PluginsManifest } from '@memohai/sdk'
 import ProviderIcon from '@/components/provider-icon/index.vue'
+import MarketItemCard from './market-item-card.vue'
 
 const props = withDefaults(defineProps<{
   plugin: PluginsManifest

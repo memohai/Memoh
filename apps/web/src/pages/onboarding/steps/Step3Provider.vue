@@ -21,6 +21,7 @@ import CreateModel from '@/components/create-model/index.vue'
 import ModelItem from '@/pages/providers/components/model-item.vue'
 import FieldStack from '@/components/settings/field-stack.vue'
 import FormStack from '@/components/settings/form-stack.vue'
+import ChoiceTile from '../components/choice-tile.vue'
 import { onboardingProviderPresets as providerPresets, type ProviderPreset } from '@/constants/provider-presets'
 import {
   HERMES_CUSTOM_MODEL_VALUE,
@@ -396,45 +397,42 @@ onMounted(() => {
           class="grid grid-cols-3 gap-3 transition-all duration-[350ms] ease-out delay-[140ms]"
           :class="gridVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
         >
-          <button
-            type="button"
-            class="h-16 rounded-lg border border-dashed border-border bg-background px-3 flex items-center gap-2.5 text-muted-foreground transition-colors hover:border-foreground/50 hover:text-foreground"
+          <ChoiceTile
+            variant="dashed"
+            :label="t('onboarding.provider.custom')"
             @click="openForm(null)"
           >
-            <Plus class="size-5 shrink-0" />
-            <span class="text-sm font-medium truncate">{{ t('onboarding.provider.custom') }}</span>
-          </button>
-          <button
+            <template #icon>
+              <Plus class="size-5 shrink-0" />
+            </template>
+          </ChoiceTile>
+          <ChoiceTile
             v-for="preset in providerPresets"
             :key="preset.id"
-            type="button"
-            class="h-16 rounded-lg border border-border bg-background px-3 flex items-center gap-2.5 transition-colors hover:border-muted-foreground/50 hover:bg-accent/40"
+            :label="preset.name"
             @click="openForm(preset)"
           >
-            <ProviderIcon
-              v-if="preset.icon"
-              :icon="preset.icon"
-              size="22"
-            />
-            <span class="text-sm font-medium truncate">
-              {{ preset.name }}
-            </span>
-          </button>
-          <button
+            <template #icon>
+              <ProviderIcon
+                v-if="preset.icon"
+                :icon="preset.icon"
+                size="22"
+              />
+            </template>
+          </ChoiceTile>
+          <ChoiceTile
             v-for="profile in acpProfiles"
             :key="`acp-${profile.id}`"
-            type="button"
-            class="h-16 rounded-lg border border-border bg-background px-3 flex items-center gap-2.5 transition-colors hover:border-muted-foreground/50 hover:bg-accent/40"
+            :label="profile.display_name || profile.id"
             @click="openAcpForm(profile)"
           >
-            <component
-              :is="acpAgentIcon(profile.id, true)"
-              class="size-[22px] shrink-0"
-            />
-            <span class="text-sm font-medium truncate">
-              {{ profile.display_name || profile.id }}
-            </span>
-          </button>
+            <template #icon>
+              <component
+                :is="acpAgentIcon(profile.id, true)"
+                class="size-[22px] shrink-0"
+              />
+            </template>
+          </ChoiceTile>
         </div>
       </div>
 

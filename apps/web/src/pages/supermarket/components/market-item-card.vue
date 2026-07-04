@@ -1,0 +1,73 @@
+<template>
+  <!-- 超市列表卡的形状 owner:plugin-card / skill-card 原本各手写一份同形结构,
+       且 hover 反馈只有 skill 那份有(plugin 卡悬停无任何反馈,是可见 bug)。
+       归一后:图标槽(#leading)+ 标题 + 主页外链 + 两行截断描述 + 尾部动作槽(#actions)。
+       根是 Card[role=button](两处原本就这么写,天然避开 button 嵌套陷阱),
+       整卡点击/回车/空格 → emit('open');#actions 区域 stop 掉冒泡,内部按钮不触发 open。
+       业务(路由跳转、SDK 类型、安装逻辑)留在调用方,这里只own形状。 -->
+  <Card
+    :class="rootClass"
+    role="button"
+    tabindex="0"
+    @click="$emit('open')"
+    @keydown.enter.prevent="$emit('open')"
+    @keydown.space.prevent="$emit('open')"
+  >
+    <!-- overflow-hidden:外链图标图片可能非方形,靠它裁进圆角盒(原 plugin 卡就有,skill 卡漏了) -->
+    <div class="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md bg-accent">
+      <slot name="leading" />
+    </div>
+
+    <div class="min-w-0 flex-1">
+      <div class="flex items-center gap-1.5">
+        <h3
+          class="truncate text-sm font-medium"
+          :title="name"
+        >
+          {{ name }}
+        </h3>
+        <a
+          v-if="homepage"
+          :href="homepage"
+          target="_blank"
+          rel="noopener noreferrer"
+          :class="homepageLinkClass"
+          @click.stop
+        >
+          <ExternalLink class="size-3" />
+        </a>
+      </div>
+      <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">
+        {{ description }}
+      </p>
+    </div>
+
+    <div
+      v-if="$slots.actions"
+      class="shrink-0"
+      @click.stop
+      @keydown.stop
+    >
+      <slot name="actions" />
+    </div>
+  </Card>
+</template>
+
+<script setup lang="ts">
+import { ExternalLink } from 'lucide-vue-next'
+import { Card } from '@memohai/ui'
+
+// 整卡可点,hover 是刻意的 owner 级交互反馈(修掉 plugin 卡原本没有反馈的 bug)
+const rootClass = 'group flex cursor-pointer flex-row items-start gap-3 p-4 transition-colors hover:border-foreground/20 hover:bg-accent/20' /* ui-allow-style */
+const homepageLinkClass = 'shrink-0 text-muted-foreground transition-colors hover:text-foreground' /* ui-allow-style */
+
+defineProps<{
+  name?: string
+  description?: string
+  homepage?: string
+}>()
+
+defineEmits<{
+  open: []
+}>()
+</script>
