@@ -142,6 +142,10 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 	}
 
 	persisted := make([]messagepkg.Message, 0, len(messages))
+	turnRequestMessageID := ""
+	if req.UserMessagePersisted || req.ReusePersistedUserMessage {
+		turnRequestMessageID = strings.TrimSpace(req.PersistedUserMessageID)
+	}
 	for i, msg := range messages {
 		msg = normalizeUserMessageContent(msg)
 
@@ -236,11 +240,15 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			ModelID:                 modelID,
 			EventID:                 messageEventID,
 			DisplayText:             displayText,
+			TurnRequestMessageID:    turnRequestMessageID,
 			SkipHistoryTurn:         req.SkipHistoryTurn,
 		})
 		if err != nil {
 			r.logger.Warn("persist message failed", slog.Any("error", err))
 			continue
+		}
+		if msg.Role == "user" && !req.SkipHistoryTurn {
+			turnRequestMessageID = persistedMessage.ID
 		}
 		persisted = append(persisted, persistedMessage)
 	}

@@ -48,6 +48,10 @@ func (*runtimeSnapshotQueries) CreateHistoryTurn(context.Context, sqlc.CreateHis
 	return sqlc.BotHistoryTurn{}, nil
 }
 
+func (*runtimeSnapshotQueries) BindHistoryTurnAssistantByRequest(context.Context, sqlc.BindHistoryTurnAssistantByRequestParams) (sqlc.BotHistoryTurn, error) {
+	return sqlc.BotHistoryTurn{}, nil
+}
+
 func (*runtimeSnapshotQueries) BindLatestHistoryTurnAssistant(context.Context, sqlc.BindLatestHistoryTurnAssistantParams) (sqlc.BotHistoryTurn, error) {
 	return sqlc.BotHistoryTurn{}, nil
 }
@@ -123,6 +127,10 @@ func (*failingHistoryTurnQueries) CreateMessage(_ context.Context, arg sqlc.Crea
 
 func (*failingHistoryTurnQueries) CreateHistoryTurn(context.Context, sqlc.CreateHistoryTurnParams) (sqlc.BotHistoryTurn, error) {
 	return sqlc.BotHistoryTurn{}, errors.New("boom")
+}
+
+func (*failingHistoryTurnQueries) BindHistoryTurnAssistantByRequest(context.Context, sqlc.BindHistoryTurnAssistantByRequestParams) (sqlc.BotHistoryTurn, error) {
+	return sqlc.BotHistoryTurn{}, nil
 }
 
 func (*failingHistoryTurnQueries) BindLatestHistoryTurnAssistant(context.Context, sqlc.BindLatestHistoryTurnAssistantParams) (sqlc.BotHistoryTurn, error) {

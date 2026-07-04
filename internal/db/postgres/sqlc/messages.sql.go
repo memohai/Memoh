@@ -146,9 +146,11 @@ VALUES (
   $1,
   $2,
   COALESCE((
-    SELECT MAX(position) + 1
+    SELECT position + 1
     FROM bot_history_turns
     WHERE session_id = $2
+    ORDER BY position DESC
+    LIMIT 1
   ), 1),
   $3::uuid,
   $4::uuid
@@ -2720,9 +2722,11 @@ replacement AS (
     old_turn.bot_id,
     old_turn.session_id,
     COALESCE((
-      SELECT MAX(position) + 1
+      SELECT position + 1
       FROM bot_history_turns
       WHERE session_id = old_turn.session_id
+      ORDER BY position DESC
+      LIMIT 1
     ), 1),
     $3::uuid,
     $4::uuid

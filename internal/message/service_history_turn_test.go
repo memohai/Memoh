@@ -81,6 +81,59 @@ func TestSQLiteHistoryTurnsRetryReplacementKeepsSameSecondRequestVisible(t *test
 	}
 }
 
+func TestSQLiteHistoryTurnsAssistantBindsRequestedPendingTurn(t *testing.T) {
+	ctx := context.Background()
+	conn, queries := newMessageHistoryTurnSQLite(t)
+	defer func() { _ = conn.Close() }()
+	svc := NewService(nil, queries)
+
+	const (
+		botID     = "00000000-0000-0000-0000-000000003101"
+		sessionID = "00000000-0000-0000-0000-000000003102"
+	)
+	insertMessageHistoryTurnFixtures(t, conn, botID, sessionID)
+
+	firstUser, err := svc.Persist(ctx, PersistInput{
+		BotID:     botID,
+		SessionID: sessionID,
+		Role:      "user",
+		Content:   []byte(`{"role":"user","content":"first"}`),
+	})
+	if err != nil {
+		t.Fatalf("persist first user: %v", err)
+	}
+	secondUser, err := svc.Persist(ctx, PersistInput{
+		BotID:     botID,
+		SessionID: sessionID,
+		Role:      "user",
+		Content:   []byte(`{"role":"user","content":"second"}`),
+	})
+	if err != nil {
+		t.Fatalf("persist second user: %v", err)
+	}
+	assistant, err := svc.Persist(ctx, PersistInput{
+		BotID:                botID,
+		SessionID:            sessionID,
+		Role:                 "assistant",
+		Content:              []byte(`{"role":"assistant","content":"answer first"}`),
+		TurnRequestMessageID: firstUser.ID,
+	})
+	if err != nil {
+		t.Fatalf("persist requested assistant: %v", err)
+	}
+
+	turn, err := svc.GetVisibleTurnByMessage(ctx, sessionID, assistant.ID)
+	if err != nil {
+		t.Fatalf("visible turn by requested assistant: %v", err)
+	}
+	if turn.RequestMessageID != firstUser.ID {
+		t.Fatalf("turn request = %s, want first user %s", turn.RequestMessageID, firstUser.ID)
+	}
+	if turn.RequestMessageID == secondUser.ID {
+		t.Fatalf("assistant was bound to latest pending user %s instead of requested user", secondUser.ID)
+	}
+}
+
 func TestSQLiteHistoryTurnsReplacementKeepsToolTailAndHidesSupersededTail(t *testing.T) {
 	ctx := context.Background()
 	conn, queries := newMessageHistoryTurnSQLite(t)

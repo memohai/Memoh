@@ -157,9 +157,11 @@ VALUES (
   ?1,
   ?2,
   COALESCE((
-    SELECT MAX(position) + 1
+    SELECT position + 1
     FROM bot_history_turns
     WHERE session_id = ?2
+    ORDER BY position DESC
+    LIMIT 1
   ), 1),
   ?3,
   ?4

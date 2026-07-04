@@ -63,9 +63,11 @@ VALUES (
   sqlc.arg(bot_id),
   sqlc.arg(session_id),
   COALESCE((
-    SELECT MAX(position) + 1
+    SELECT position + 1
     FROM bot_history_turns
     WHERE session_id = sqlc.arg(session_id)
+    ORDER BY position DESC
+    LIMIT 1
   ), 1),
   sqlc.narg(request_message_id)::uuid,
   sqlc.narg(assistant_message_id)::uuid
@@ -207,9 +209,11 @@ replacement AS (
     old_turn.bot_id,
     old_turn.session_id,
     COALESCE((
-      SELECT MAX(position) + 1
+      SELECT position + 1
       FROM bot_history_turns
       WHERE session_id = old_turn.session_id
+      ORDER BY position DESC
+      LIMIT 1
     ), 1),
     sqlc.narg(request_message_id)::uuid,
     sqlc.narg(assistant_message_id)::uuid

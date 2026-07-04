@@ -89,6 +89,7 @@ type PersistInput struct {
 	ModelID                 string
 	EventID                 string
 	DisplayText             string
+	TurnRequestMessageID    string
 	SkipHistoryTurn         bool
 }
 

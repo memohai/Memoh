@@ -28,6 +28,7 @@ type DBService struct {
 
 type historyTurnWriter interface {
 	CreateHistoryTurn(ctx context.Context, arg sqlc.CreateHistoryTurnParams) (sqlc.BotHistoryTurn, error)
+	BindHistoryTurnAssistantByRequest(ctx context.Context, arg sqlc.BindHistoryTurnAssistantByRequestParams) (sqlc.BotHistoryTurn, error)
 	BindLatestHistoryTurnAssistant(ctx context.Context, arg sqlc.BindLatestHistoryTurnAssistantParams) (sqlc.BotHistoryTurn, error)
 	GetLatestVisibleHistoryTurnBySession(ctx context.Context, sessionID pgtype.UUID) (sqlc.BotHistoryTurn, error)
 	LinkMessageToHistoryTurn(ctx context.Context, arg sqlc.LinkMessageToHistoryTurnParams) error
@@ -117,7 +118,12 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 
 	result := toMessageFromCreate(row)
 	if !input.SkipHistoryTurn {
-		if err := s.persistHistoryTurn(ctx, pgBotID, pgSessionID, row.ID, input.Role); err != nil {
+		pgTurnRequestMessageID, err := parseOptionalUUID(input.TurnRequestMessageID)
+		if err != nil {
+			s.cleanupPersistedMessage(ctx, row.ID)
+			return Message{}, fmt.Errorf("invalid turn request message id: %w", err)
+		}
+		if err := s.persistHistoryTurn(ctx, pgBotID, pgSessionID, row.ID, input.Role, pgTurnRequestMessageID); err != nil {
 			s.cleanupPersistedMessage(ctx, row.ID)
 			return Message{}, err
 		}
@@ -189,7 +195,7 @@ func (s *DBService) cleanupPersistedMessage(ctx context.Context, messageID pgtyp
 	}
 }
 
-func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, sessionID pgtype.UUID, messageID pgtype.UUID, role string) error {
+func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, sessionID pgtype.UUID, messageID pgtype.UUID, role string, requestMessageID pgtype.UUID) error {
 	if s == nil || s.queries == nil || !sessionID.Valid {
 		return nil
 	}
@@ -215,6 +221,24 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, s
 			return fmt.Errorf("link user message to history turn: %w", err)
 		}
 	case "assistant":
+		if requestMessageID.Valid {
+			if turn, err := writer.BindHistoryTurnAssistantByRequest(ctx, sqlc.BindHistoryTurnAssistantByRequestParams{
+				SessionID:          sessionID,
+				RequestMessageID:   requestMessageID,
+				AssistantMessageID: messageID,
+			}); err == nil {
+				if err := writer.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
+					MessageID:      messageID,
+					TurnID:         turn.ID,
+					TurnMessageSeq: pgtype.Int8{Int64: 2, Valid: true},
+				}); err != nil {
+					return fmt.Errorf("link assistant message to requested history turn: %w", err)
+				}
+				return nil
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("bind history turn assistant by request: %w", err)
+			}
+		}
 		if turn, err := writer.BindLatestHistoryTurnAssistant(ctx, sqlc.BindLatestHistoryTurnAssistantParams{
 			SessionID:          sessionID,
 			AssistantMessageID: messageID,

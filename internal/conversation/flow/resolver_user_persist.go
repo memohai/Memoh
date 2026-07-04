@@ -25,6 +25,8 @@ func (r *Resolver) ApplyUserMessageHookAndPersistUserTurn(ctx context.Context, r
 	if err != nil {
 		return nextReq, messagepkg.Message{}, err
 	}
+	nextReq.UserMessagePersisted = true
+	nextReq.PersistedUserMessageID = persisted.ID
 	return nextReq, persisted, nil
 }
 

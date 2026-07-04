@@ -421,7 +421,7 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 		return req
 	}
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
-	_, err = r.messageService.Persist(ctx, messagepkg.PersistInput{
+	persisted, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
 		BotID:                   req.BotID,
 		SessionID:               req.SessionID,
 		SenderChannelIdentityID: senderChannelIdentityID,
@@ -443,6 +443,7 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 		return req
 	}
 	req.UserMessagePersisted = true
+	req.PersistedUserMessageID = persisted.ID
 	return req
 }
 

@@ -1433,6 +1433,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			}
 			var ingestedActivationAttachments []conversation.ChatAttachment
 			userMessagePersisted := false
+			persistedUserMessageID := ""
 			externalMessageID := ""
 			var preparedActivationReq *conversation.ChatRequest
 			if hasSkillActivation {
@@ -1465,6 +1466,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					continue
 				}
 				preparedActivationReq = &preparedReq
+				persistedUserMessageID = persisted.ID
 				turns := conversation.ConvertMessagesToUITurns([]messagepkg.Message{persisted})
 				if len(turns) > 0 {
 					writer.SendJSON(wsOutboundEvent{
@@ -1502,6 +1504,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						UserVisibleText:         userVisibleText,
 						SkillActivation:         skillActivation,
 						UserMessagePersisted:    userMessagePersisted,
+						PersistedUserMessageID:  persistedUserMessageID,
 						Token:                   streamToken,
 						ChatToken:               bearerToken,
 						CurrentChannel:          h.channelType.String(),
@@ -1523,6 +1526,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						req.UserVisibleText = preparedActivationReq.UserVisibleText
 						req.SkillActivation = preparedActivationReq.SkillActivation
 						req.RequestedSkills = preparedActivationReq.RequestedSkills
+						req.PersistedUserMessageID = preparedActivationReq.PersistedUserMessageID
 					}
 					return h.resolver.StreamChatWS(ctx, req, eventCh, abortCh)
 				},
