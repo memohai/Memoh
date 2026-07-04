@@ -28,12 +28,9 @@
           </DialogClose>
           <Button
             type="submit"
-            :disabled="submitDisabled || loading"
+            :disabled="submitDisabled"
+            :loading="loading"
           >
-            <Spinner
-              v-if="loading"
-              class="mr-1"
-            />
             {{ submitText }}
           </Button>
         </DialogFooter>
@@ -53,7 +50,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-  Spinner
 } from '@memohai/ui'
 
 
