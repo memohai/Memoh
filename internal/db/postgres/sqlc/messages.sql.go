@@ -24,10 +24,14 @@ next_seq AS (
   SELECT
     target.id,
     target.session_id,
-    COALESCE(MAX(existing.turn_message_seq) + 1, 1) AS turn_message_seq
+    COALESCE((
+      SELECT existing.turn_message_seq + 1
+      FROM bot_history_messages existing
+      WHERE existing.turn_id = target.id
+      ORDER BY existing.turn_message_seq DESC
+      LIMIT 1
+    ), 1) AS turn_message_seq
   FROM target
-  LEFT JOIN bot_history_messages existing ON existing.turn_id = target.id
-  GROUP BY target.id, target.session_id
 )
 UPDATE bot_history_messages m
 SET turn_id = next_seq.id,
@@ -64,9 +68,11 @@ WITH latest AS (
 UPDATE bot_history_messages m
 SET turn_id = latest.id,
     turn_message_seq = COALESCE((
-      SELECT MAX(existing.turn_message_seq) + 1
+      SELECT existing.turn_message_seq + 1
       FROM bot_history_messages existing
       WHERE existing.turn_id = latest.id
+      ORDER BY existing.turn_message_seq DESC
+      LIMIT 1
     ), 1)
 FROM latest
 WHERE m.id = $1

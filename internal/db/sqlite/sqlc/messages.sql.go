@@ -22,7 +22,7 @@ SET turn_id = (
       LIMIT 1
     ),
     turn_message_seq = COALESCE((
-      SELECT MAX(existing.turn_message_seq) + 1
+      SELECT existing.turn_message_seq + 1
       FROM bot_history_messages existing
       WHERE existing.turn_id = (
         SELECT t.id
@@ -32,6 +32,8 @@ SET turn_id = (
           AND t.superseded_at IS NULL
         LIMIT 1
       )
+      ORDER BY existing.turn_message_seq DESC
+      LIMIT 1
     ), 1)
 WHERE bot_history_messages.id = ?3
   AND bot_history_messages.session_id = ?1
@@ -70,7 +72,7 @@ SET turn_id = (
       LIMIT 1
     ),
     turn_message_seq = COALESCE((
-      SELECT MAX(existing.turn_message_seq) + 1
+      SELECT existing.turn_message_seq + 1
       FROM bot_history_messages existing
       WHERE existing.turn_id = (
         SELECT latest.id
@@ -80,6 +82,8 @@ SET turn_id = (
         ORDER BY latest.position DESC
         LIMIT 1
       )
+      ORDER BY existing.turn_message_seq DESC
+      LIMIT 1
     ), 1)
 WHERE bot_history_messages.id = ?2
   AND bot_history_messages.session_id = ?1
