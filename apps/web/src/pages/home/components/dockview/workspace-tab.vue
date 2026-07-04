@@ -37,12 +37,18 @@
       ]"
     >{{ title }}</span>
     <!-- Unsaved-changes dot: sits in the close slot at rest so the affordance never
-         shifts; hovering fades it out as the close button fades in.
-         Painted over the same fade as the button so a long title dissolves behind
-         it instead of colliding with the glyph. -->
+         shifts; hovering fades it out as the close button fades in. It borrows the
+         close-fade GEOMETRY (identical top/bottom/right) so the dot sits exactly
+         where the close button will appear — no positional jump on hover — but the
+         `is-dot` modifier strips the fade's paint. The grey blot is a HOVER
+         affordance (it dissolves the title under the close glyph); on an inactive
+         tab --tab-hover-bg resolves to the hover overlay (--surface-chrome-hover),
+         so painting it at rest smeared grey behind the dot on a tab that is neither
+         active nor hovered. At rest we want the dot ALONE; the blot returns exactly
+         when the close button does (this layer fades out as that one fades in). -->
     <div
       v-if="isDirty"
-      class="close-fade pointer-events-none absolute right-[var(--tab-close-edge)] z-[2] flex items-center pl-6 pr-0 opacity-100 group-hover/tab:opacity-0"
+      class="close-fade is-dot pointer-events-none absolute right-[var(--tab-close-edge)] z-[2] flex items-center pl-6 pr-0 opacity-100 group-hover/tab:opacity-0"
     >
       <span class="flex size-5 items-center justify-center">
         <span
@@ -386,5 +392,15 @@ function fmt(value: number) {
 .group\/tab:hover .close-fade,
 .group\/tab:focus-within .close-fade {
   transition: opacity var(--tab-hover-duration, 150ms) ease-out;
+}
+
+/* Dirty-dot slot: reuse close-fade for GEOMETRY ONLY, never its paint. The fade is
+ * a hover affordance (blots the title under the close button); this layer is shown
+ * only at rest (opacity-100, fading to 0 on hover), so painting the fade here put a
+ * grey smear behind the dot on an inactive tab — off-hover, --tab-hover-bg resolves
+ * to the hover overlay, not the tab's own fill. Higher specificity than .close-fade
+ * so it wins regardless of source order. */
+.close-fade.is-dot {
+  background: none;
 }
 </style>
