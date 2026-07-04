@@ -107,13 +107,9 @@
           </Button>
           <Button
             variant="destructive"
-            :disabled="isDeleting"
+            :loading="isDeleting"
             @click="confirmDelete"
           >
-            <Spinner
-              v-if="isDeleting"
-              class="mr-1.5 size-4"
-            />
             {{ t('bots.schedule.delete') }}
           </Button>
         </DialogFooter>

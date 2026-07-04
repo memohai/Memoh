@@ -66,13 +66,10 @@
           </Button>
         </DialogClose>
         <Button
-          :disabled="!hasInput || isMismatch || saving"
+          :disabled="!hasInput || isMismatch"
+          :loading="saving"
           @click="onSubmit"
         >
-          <Spinner
-            v-if="saving"
-            class="mr-2 size-3.5"
-          />
           {{ $t('settings.updatePassword') }}
         </Button>
       </DialogFooter>
@@ -91,7 +88,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-  Spinner,
 } from '@memohai/ui'
 import FieldStack from '@/components/settings/field-stack.vue'
 import FormStack from '@/components/settings/form-stack.vue'

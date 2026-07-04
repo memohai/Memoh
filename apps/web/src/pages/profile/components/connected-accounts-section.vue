@@ -87,17 +87,10 @@
           variant="outline"
           size="sm"
           class="shrink-0"
-          :disabled="issuing"
+          :loading="issuing"
           @click="onIssue"
         >
-          <Spinner
-            v-if="issuing"
-            class="mr-1.5 size-3.5"
-          />
-          <Plus
-            v-else
-            class="mr-1.5 size-3.5"
-          />
+          <Plus class="mr-1.5 size-3.5" />
           {{ $t('settings.connectedAccounts.connect') }}
         </Button>
       </SettingsRow>
@@ -149,17 +142,10 @@
             variant="outline"
             size="sm"
             class="shrink-0"
-            :disabled="issuing"
+            :loading="issuing"
             @click="onIssue"
           >
-            <Spinner
-              v-if="issuing"
-              class="mr-1.5 size-3.5"
-            />
-            <RefreshCw
-              v-else
-              class="mr-1.5 size-3.5"
-            />
+            <RefreshCw class="mr-1.5 size-3.5" />
             {{ $t('settings.connectedAccounts.connect') }}
           </Button>
         </div>

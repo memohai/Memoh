@@ -191,13 +191,10 @@
             {{ t('common.cancel') }}
           </Button>
           <Button
-            :disabled="!newFileName.trim() || newFileLoading"
+            :disabled="!newFileName.trim()"
+            :loading="newFileLoading"
             @click="handleNewFile"
           >
-            <Spinner
-              v-if="newFileLoading"
-              class="mr-1"
-            />
             {{ t('common.confirm') }}
           </Button>
         </DialogFooter>
@@ -224,13 +221,10 @@
             {{ t('common.cancel') }}
           </Button>
           <Button
-            :disabled="!mkdirName.trim() || mkdirLoading"
+            :disabled="!mkdirName.trim()"
+            :loading="mkdirLoading"
             @click="handleMkdir"
           >
-            <Spinner
-              v-if="mkdirLoading"
-              class="mr-1"
-            />
             {{ t('common.confirm') }}
           </Button>
         </DialogFooter>
@@ -257,13 +251,10 @@
             {{ t('common.cancel') }}
           </Button>
           <Button
-            :disabled="!renameNewName.trim() || renameLoading"
+            :disabled="!renameNewName.trim()"
+            :loading="renameLoading"
             @click="handleRename"
           >
-            <Spinner
-              v-if="renameLoading"
-              class="mr-1"
-            />
             {{ t('common.confirm') }}
           </Button>
         </DialogFooter>
@@ -288,13 +279,9 @@
           </Button>
           <Button
             variant="destructive"
-            :disabled="deleteLoading"
+            :loading="deleteLoading"
             @click="handleDelete"
           >
-            <Spinner
-              v-if="deleteLoading"
-              class="mr-1"
-            />
             {{ t('bots.files.delete') }}
           </Button>
         </DialogFooter>
@@ -319,13 +306,9 @@
           </Button>
           <Button
             variant="destructive"
-            :disabled="batchDeleteLoading"
+            :loading="batchDeleteLoading"
             @click="handleBatchDelete"
           >
-            <Spinner
-              v-if="batchDeleteLoading"
-              class="mr-1"
-            />
             {{ t('bots.files.delete') }}
           </Button>
         </DialogFooter>
@@ -356,7 +339,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
-  Spinner,
   ScrollArea,
 } from '@memohai/ui'
 import {
