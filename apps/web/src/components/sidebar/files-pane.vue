@@ -579,6 +579,16 @@ function handleOpenFile(entry: HandlersFsFileInfo) {
   workspaceTabs.openFile(entry.path)
 }
 
+function handleOpenFilePinned(entry: HandlersFsFileInfo) {
+  if (!entry.path) return
+  workspaceTabs.openFilePinned(entry.path)
+}
+
+function handleOpenFileToSide(entry: HandlersFsFileInfo) {
+  if (!entry.path) return
+  workspaceTabs.openFileToSide(entry.path)
+}
+
 // ---- upload --------------------------------------------------------------
 
 const uploadTarget = ref(rootPath)
@@ -1084,6 +1094,8 @@ provide(FileTreeKey, {
   isSelected,
   toggleSelect: toggleSelection,
   openFile: handleOpenFile,
+  openFilePinned: handleOpenFilePinned,
+  openFileToSide: handleOpenFileToSide,
   requestDownload: handleDownload,
   requestRename: openRenameDialog,
   requestDelete: openDeleteDialog,

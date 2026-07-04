@@ -5,9 +5,11 @@ import { useDark } from '@vueuse/core'
 import {
   ChevronRight,
   Download,
+  File,
   FileArchive,
   FolderPlus,
   LoaderCircle,
+  SplitSquareHorizontal,
   SquarePen,
   Trash2,
   Upload,
@@ -152,6 +154,20 @@ function onCheckbox(checked: boolean | 'indeterminate') {
       </div>
     </ContextMenuTrigger>
     <ContextMenuContent>
+      <template v-if="!entry.isDir">
+        <ContextMenuItem
+          :disabled="isActive"
+          @select="tree.openFilePinned(entry)"
+        >
+          <File class="mr-2 size-3.5" />
+          {{ t('common.open') }}
+        </ContextMenuItem>
+        <ContextMenuItem @select="tree.openFileToSide(entry)">
+          <SplitSquareHorizontal class="mr-2 size-3.5" />
+          {{ t('bots.files.openToSide') }}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+      </template>
       <template v-if="entry.isDir && canWrite">
         <ContextMenuItem @select="tree.requestNewFolder(entry)">
           <FolderPlus class="mr-2 size-3.5" />

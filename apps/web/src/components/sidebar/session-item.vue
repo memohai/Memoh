@@ -1,106 +1,140 @@
 <template>
-  <div
-    role="button"
-    tabindex="0"
-    class="group relative flex items-center min-h-[2.125rem] w-full rounded-[9px] px-[11px] text-left transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-    :class="isActive ? 'bg-sidebar-accent' : 'hover:bg-[color:var(--sidebar-hover)]'"
-    :title="hoverTitle"
-    @click="$emit('select', session)"
-    @keydown.enter.prevent="$emit('select', session)"
-    @keydown.space.prevent="$emit('select', session)"
-  >
-    <!-- Native session rows stay text-only. ACP rows carry only the agent icon
-         because Recent now mixes local model chats with external-agent chats. -->
-    <span
-      v-if="isACPSession"
-      class="mr-2 flex size-4 shrink-0 items-center justify-center text-muted-foreground"
-      role="img"
-      :aria-label="acpAgentLabel"
-    >
-      <component
-        :is="acpAgentIcon(acpAgentId, true)"
-        class="size-4"
-        aria-hidden="true"
-      />
-    </span>
-
-    <!-- Title runs are split CJK vs Latin so the title renders with the SAME
-         per-script treatment as the chat body (.sidebar-cjk / .sidebar-latin reuse
-         the --chat-*-body weight + Latin size/tracking). The only thing dropped vs
-         the body is streaming — a title is a static one-line label. -->
-    <span class="flex-1 min-w-0 truncate text-control text-foreground dark:text-[color:oklch(0.92_0_0)]"><span
-      v-for="(run, i) in titleRuns"
-      :key="i"
-      :class="run.script === 'cjk' ? 'sidebar-cjk' : 'sidebar-latin'"
-    >{{ run.text }}</span></span>
-
-    <!-- Trailing slot: spinner and the actions button share one 24px right
-         slot so they sit at the same center and never both show at once. The
-         spinner reserves the slot in flow (keeps the title tail clear while
-         streaming and stops the title from jumping on hover); the actions
-         button is the same size-6 box anchored to the same right edge, and on
-         row hover or while the menu is open it fades in as the spinner fades
-         out — streaming + hover no longer stacks the two icons. -->
-    <div class="relative ml-1.5 flex h-6 shrink-0 items-center justify-end">
+  <ContextMenu>
+    <ContextMenuTrigger as-child>
       <div
-        v-if="streaming"
-        class="flex h-6 w-6 items-center justify-center transition-opacity duration-150 group-hover:opacity-0"
-        :class="menuOpen ? 'opacity-0' : 'opacity-100'"
+        role="button"
+        tabindex="0"
+        class="group relative flex items-center min-h-[2.125rem] w-full rounded-[9px] px-[11px] text-left transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        :class="isActive ? 'bg-sidebar-accent' : 'hover:bg-[color:var(--sidebar-hover)]'"
+        :title="hoverTitle"
+        @click="$emit('select', session)"
+        @keydown.enter.prevent="$emit('select', session)"
+        @keydown.space.prevent="$emit('select', session)"
       >
-        <LoaderCircle
-          class="size-3 animate-spin text-muted-foreground"
-          :aria-label="t('chat.sessionStreaming')"
-        />
-      </div>
-
-      <DropdownMenu v-model:open="menuOpen">
-        <DropdownMenuTrigger as-child>
-          <!-- Plain button (not <Button variant="ghost">): the ghost chip color
-               (--btn-ghost-hover) is the same gray as the row's own hover, so the
-               button's hover was invisible while sitting on a hovered row. A
-               translucent foreground mix darkens whatever is behind it, so the
-               chip reads clearly on top of both the hover and active row fills. -->
-          <button
-            type="button"
-            class="absolute inset-y-0 right-0 my-auto inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none transition-[opacity,background-color,color] duration-150 hover:bg-[color-mix(in_oklab,var(--foreground)_12%,transparent)] hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-[color-mix(in_oklab,var(--foreground)_12%,transparent)] data-[state=open]:text-foreground"
-            :class="menuOpen ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto'"
-            :aria-label="t('chat.sessionActions')"
-            @click.stop
-            @keydown.enter.stop
-            @keydown.space.stop
-          >
-            <MoreHorizontal class="size-4" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          @click.stop
+        <!-- Native session rows stay text-only. ACP rows carry only the agent icon
+             because Recent now mixes local model chats with external-agent chats. -->
+        <span
+          v-if="isACPSession"
+          class="mr-2 flex size-4 shrink-0 items-center justify-center text-muted-foreground"
+          role="img"
+          :aria-label="acpAgentLabel"
         >
-          <DropdownMenuItem
-            @select="$emit('rename', session)"
+          <component
+            :is="acpAgentIcon(acpAgentId, true)"
+            class="size-4"
+            aria-hidden="true"
+          />
+        </span>
+
+        <!-- Title runs are split CJK vs Latin so the title renders with the SAME
+             per-script treatment as the chat body (.sidebar-cjk / .sidebar-latin reuse
+             the --chat-*-body weight + Latin size/tracking). The only thing dropped vs
+             the body is streaming — a title is a static one-line label. -->
+        <span class="flex-1 min-w-0 truncate text-control text-foreground dark:text-[color:oklch(0.92_0_0)]"><span
+          v-for="(run, i) in titleRuns"
+          :key="i"
+          :class="run.script === 'cjk' ? 'sidebar-cjk' : 'sidebar-latin'"
+        >{{ run.text }}</span></span>
+
+        <!-- Trailing slot: spinner and the actions button share one 24px right
+             slot so they sit at the same center and never both show at once. The
+             spinner reserves the slot in flow (keeps the title tail clear while
+             streaming and stops the title from jumping on hover); the actions
+             button is the same size-6 box anchored to the same right edge, and on
+             row hover or while the menu is open it fades in as the spinner fades
+             out — streaming + hover no longer stacks the two icons. -->
+        <div class="relative ml-1.5 flex h-6 shrink-0 items-center justify-end">
+          <div
+            v-if="streaming"
+            class="flex h-6 w-6 items-center justify-center transition-opacity duration-150 group-hover:opacity-0"
+            :class="menuOpen ? 'opacity-0' : 'opacity-100'"
           >
-            <Pencil class="mr-2 size-3.5" />
-            {{ t('common.rename') }}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            variant="destructive"
-            @select="$emit('delete', session)"
-          >
-            <Trash2 class="mr-2 size-3.5" />
-            {{ t('common.delete') }}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
-  </div>
+            <LoaderCircle
+              class="size-3 animate-spin text-muted-foreground"
+              :aria-label="t('chat.sessionStreaming')"
+            />
+          </div>
+
+          <DropdownMenu v-model:open="menuOpen">
+            <DropdownMenuTrigger as-child>
+              <!-- Plain button (not <Button variant="ghost">): the ghost chip color
+                   (--btn-ghost-hover) is the same gray as the row's own hover, so the
+                   button's hover was invisible while sitting on a hovered row. A
+                   translucent foreground mix darkens whatever is behind it, so the
+                   chip reads clearly on top of both the hover and active row fills. -->
+              <button
+                type="button"
+                class="absolute inset-y-0 right-0 my-auto inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none transition-[opacity,background-color,color] duration-150 hover:bg-[color-mix(in_oklab,var(--foreground)_12%,transparent)] hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-[color-mix(in_oklab,var(--foreground)_12%,transparent)] data-[state=open]:text-foreground"
+                :class="menuOpen ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto'"
+                :aria-label="t('chat.sessionActions')"
+                @click.stop
+                @keydown.enter.stop
+                @keydown.space.stop
+              >
+                <MoreHorizontal class="size-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              @click.stop
+            >
+              <DropdownMenuItem
+                @select="$emit('rename', session)"
+              >
+                <Pencil class="mr-2 size-3.5" />
+                {{ t('common.rename') }}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                variant="destructive"
+                @select="$emit('delete', session)"
+              >
+                <Trash2 class="mr-2 size-3.5" />
+                {{ t('common.delete') }}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+    </ContextMenuTrigger>
+    <!-- Right-click menu: Open opens the session as its own pinned tab (a single
+         click reuses the ephemeral preview slot; an explicit right-click means
+         "give me a separate tab"). Rename/Delete reuse the same emits as the
+         hover three-dot button so both affordances stay in sync. -->
+    <ContextMenuContent>
+      <ContextMenuItem
+        :disabled="isActive"
+        @select="$emit('openNewTab', session)"
+      >
+        <MessageSquare class="mr-2 size-3.5" />
+        {{ t('common.open') }}
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem @select="$emit('rename', session)">
+        <Pencil class="mr-2 size-3.5" />
+        {{ t('common.rename') }}
+      </ContextMenuItem>
+      <ContextMenuItem
+        variant="destructive"
+        @select="$emit('delete', session)"
+      >
+        <Trash2 class="mr-2 size-3.5" />
+        {{ t('common.delete') }}
+      </ContextMenuItem>
+    </ContextMenuContent>
+  </ContextMenu>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { LoaderCircle, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
+import { LoaderCircle, MessageSquare, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { SessionSummary } from '@/composables/api/useChat'
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
@@ -118,6 +152,7 @@ const props = defineProps<{
 
 defineEmits<{
   select: [session: SessionSummary]
+  openNewTab: [session: SessionSummary]
   rename: [session: SessionSummary]
   delete: [session: SessionSummary]
 }>()

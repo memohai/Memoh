@@ -64,6 +64,7 @@
                 :is-active="sessionId === vRow.session.id"
                 :streaming="chatStore.isSessionStreaming(vRow.session.id)"
                 @select="handleSelect"
+                @open-new-tab="handleOpenNewTab"
                 @rename="openRenameSessionDialog"
                 @delete="confirmDeleteSession"
               />
@@ -302,6 +303,14 @@ watch(currentBotId, () => {
 function handleSelect(session: SessionSummary) {
   // Opening (or focusing) the tab activates it, which selects the session.
   workspaceTabs.openSessionChat({
+    sessionId: session.id,
+    title: (session.title ?? '').trim() || t('chat.untitledSession'),
+  })
+}
+
+// Right-click "Open": a separate pinned tab instead of reusing the preview slot.
+function handleOpenNewTab(session: SessionSummary) {
+  workspaceTabs.openSessionChatPinned({
     sessionId: session.id,
     title: (session.title ?? '').trim() || t('chat.untitledSession'),
   })
