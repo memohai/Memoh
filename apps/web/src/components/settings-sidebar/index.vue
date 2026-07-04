@@ -68,7 +68,7 @@
           v-if="integrationsNavItems.length"
           class="px-[16px] pt-4 pb-0"
         >
-          <SidebarGroupLabel class="h-6! pl-[14px]! pr-3! font-[475] text-muted-foreground">
+          <SidebarGroupLabel size="compact">
             {{ t('sidebar.group.integrations') }}
           </SidebarGroupLabel>
           <SidebarGroupContent class="pt-0">
@@ -100,7 +100,7 @@
           v-if="accountNavItems.length"
           class="px-[16px] pt-4 pb-0"
         >
-          <SidebarGroupLabel class="h-6! pl-[14px]! pr-3! font-[475] text-muted-foreground">
+          <SidebarGroupLabel size="compact">
             {{ t('sidebar.group.account') }}
           </SidebarGroupLabel>
           <SidebarGroupContent class="pt-0">
