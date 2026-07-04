@@ -203,6 +203,10 @@ type MemoryStatusResponse struct {
 	VectorIndex       string                  `json:"vector_index,omitempty"`
 	Encoder           HealthStatus            `json:"encoder"`
 	Pgvector          HealthStatus            `json:"pgvector"`
+	// Degraded reports that the semantic seed index is behind the wiki store
+	// (failed upserts are queued for retry); graph recall still works.
+	Degraded        bool `json:"degraded"`
+	RetryQueueDepth int  `json:"retry_queue_depth"`
 }
 
 // Memory provider admin types.

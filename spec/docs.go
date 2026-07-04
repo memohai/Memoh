@@ -13528,6 +13528,10 @@ const docTemplate = `{
                 "compact": {
                     "$ref": "#/definitions/adapters.MemoryCompactCapability"
                 },
+                "degraded": {
+                    "description": "Degraded reports that the semantic seed index is behind the wiki store\n(failed upserts are queued for retry); graph recall still works.",
+                    "type": "boolean"
+                },
                 "edge_count": {
                     "type": "integer"
                 },
@@ -13551,6 +13555,9 @@ const docTemplate = `{
                 },
                 "provider_type": {
                     "type": "string"
+                },
+                "retry_queue_depth": {
+                    "type": "integer"
                 },
                 "source_count": {
                     "type": "integer"

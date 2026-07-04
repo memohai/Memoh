@@ -228,6 +228,11 @@ export type AdaptersMemoryItem = {
 export type AdaptersMemoryStatusResponse = {
     can_manual_sync?: boolean;
     compact?: AdaptersMemoryCompactCapability;
+    /**
+     * Degraded reports that the semantic seed index is behind the wiki store
+     * (failed upserts are queued for retry); graph recall still works.
+     */
+    degraded?: boolean;
     edge_count?: number;
     encoder?: AdaptersHealthStatus;
     indexed_count?: number;
@@ -236,6 +241,7 @@ export type AdaptersMemoryStatusResponse = {
     overview_path?: string;
     pgvector?: AdaptersHealthStatus;
     provider_type?: string;
+    retry_queue_depth?: number;
     source_count?: number;
     source_dir?: string;
     vector_index?: string;

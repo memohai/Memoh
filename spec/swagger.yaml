@@ -374,6 +374,11 @@ definitions:
         type: boolean
       compact:
         $ref: '#/definitions/adapters.MemoryCompactCapability'
+      degraded:
+        description: |-
+          Degraded reports that the semantic seed index is behind the wiki store
+          (failed upserts are queued for retry); graph recall still works.
+        type: boolean
       edge_count:
         type: integer
       encoder:
@@ -390,6 +395,8 @@ definitions:
         $ref: '#/definitions/adapters.HealthStatus'
       provider_type:
         type: string
+      retry_queue_depth:
+        type: integer
       source_count:
         type: integer
       source_dir:

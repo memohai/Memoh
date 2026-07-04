@@ -32,6 +32,7 @@ type graphRuntime struct {
 	cache    *graphCache
 	syncer   *graphSync
 	semantic *pgvectorIndex
+	retry    *semanticRetryQueue
 	logger   *slog.Logger
 }
 
@@ -46,6 +47,7 @@ func NewGraphRuntime(logger *slog.Logger, wikiStore wikistore.Store, fs memorySt
 		fs:     fs,
 		cache:  newGraphCache(),
 		syncer: newGraphSync(fs, logger),
+		retry:  newSemanticRetryQueue(logger),
 		logger: logger.With("runtime", "graph"),
 	}
 }
@@ -57,6 +59,9 @@ func (r *graphRuntime) SetSemanticIndex(index *pgvectorIndex) {
 		return
 	}
 	r.semantic = index
+	// Failed upserts go to a small per-runtime retry queue; the background
+	// loop drains it so the seed index converges without failing writes.
+	r.retry.start(index)
 }
 
 func (*graphRuntime) Mode() string { return string(ModeGraph) }
@@ -90,8 +95,12 @@ func (r *graphRuntime) semanticUpsertBestEffort(botID string, n migrate.NodeSpec
 	ctx, cancel := context.WithTimeout(context.Background(), semanticEmbedTimeout)
 	defer cancel()
 	if err := r.semantic.Upsert(ctx, botID, n.ID, n.Body, n.Hash); err != nil {
-		r.logger.Debug("graph: pgvector upsert failed; semantic seed index is degraded", "bot_id", botID, "node_id", n.ID, "err", err)
+		r.logger.Debug("graph: pgvector upsert failed; queued for retry", "bot_id", botID, "node_id", n.ID, "err", err)
+		r.retry.enqueue(semanticRetryEntry{botID: botID, nodeID: n.ID, body: n.Body, hash: n.Hash})
+		return
 	}
+	// A fresh successful write supersedes any stale pending retry for the node.
+	r.retry.discard(botID, []string{n.ID})
 }
 
 // ---- Runtime: CRUD ----
@@ -379,6 +388,9 @@ func (r *graphRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (ada
 		deletedByBot[botID] = append(deletedByBot[botID], memoryID)
 		r.syncAndInvalidate(ctx, botID)
 	}
+	for botID, ids := range deletedByBot {
+		r.retry.discard(botID, ids)
+	}
 	if r.semantic != nil {
 		semanticCtx, cancel := context.WithTimeout(ctx, semanticEmbedTimeout)
 		defer cancel()
@@ -407,6 +419,7 @@ func (r *graphRuntime) DeleteAll(ctx context.Context, req adapters.DeleteAllRequ
 			r.logger.Warn("graph: remove derived markdown failed", "bot_id", botID, "err", err)
 		}
 	}
+	r.retry.discardBot(botID)
 	if r.semantic != nil {
 		auxCtx, cancel := context.WithTimeout(ctx, semanticEmbedTimeout)
 		defer cancel()
@@ -456,6 +469,7 @@ func (r *graphRuntime) Compact(ctx context.Context, filters map[string]any, rati
 		droppedIDs = append(droppedIDs, n.ID)
 	}
 	kept := nodes[:target]
+	r.retry.discard(botID, droppedIDs)
 	if r.semantic != nil && len(droppedIDs) > 0 {
 		auxCtx, cancel := context.WithTimeout(ctx, semanticEmbedTimeout)
 		defer cancel()
@@ -516,6 +530,7 @@ func (r *graphRuntime) CompactWithLLM(ctx context.Context, filters map[string]an
 	if err := r.store.DeleteAllNodes(ctx, botID); err != nil {
 		return adapters.CompactResult{}, fmt.Errorf("graph runtime: compact clear: %w", err)
 	}
+	r.retry.discardBot(botID)
 	if r.semantic != nil {
 		auxCtx, cancel := context.WithTimeout(ctx, semanticEmbedTimeout)
 		defer cancel()
@@ -600,6 +615,8 @@ func (r *graphRuntime) Status(ctx context.Context, botID string) (adapters.Memor
 				resp.IndexedCount = count
 			}
 		}
+		resp.RetryQueueDepth = r.retry.depth(botID)
+		resp.Degraded = resp.RetryQueueDepth > 0 || !resp.Pgvector.OK
 	}
 	if r.fs != nil {
 		if fc, err := r.fs.CountMemoryFiles(ctx, botID); err == nil {
@@ -621,6 +638,7 @@ func (r *graphRuntime) Rebuild(ctx context.Context, botID string) (adapters.Rebu
 	count, _ := r.store.CountNodes(ctx, botID)
 	result := adapters.RebuildResult{FsCount: len(nodes), StorageCount: count}
 	if r.semantic != nil {
+		r.retry.discardBot(botID)
 		if err := r.semantic.DeleteBot(ctx, botID); err != nil {
 			r.logger.Debug("graph: pgvector rebuild clear failed", "bot_id", botID, "err", err)
 		}
