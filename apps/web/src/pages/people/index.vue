@@ -270,13 +270,9 @@
           </Button>
           <Button
             type="button"
-            :disabled="creating"
+            :loading="creating"
             @click="createUser"
           >
-            <Spinner
-              v-if="creating"
-              class="size-4"
-            />
             {{ t('common.create') }}
           </Button>
         </DialogFooter>
@@ -328,13 +324,9 @@
           </Button>
           <Button
             type="button"
-            :disabled="resettingPassword"
+            :loading="resettingPassword"
             @click="resetPassword"
           >
-            <Spinner
-              v-if="resettingPassword"
-              class="size-4"
-            />
             {{ t('people.resetPassword') }}
           </Button>
         </DialogFooter>
@@ -371,7 +363,6 @@ import {
   SelectTrigger,
   SelectValue,
   Skeleton,
-  Spinner,
   Switch,
   Table,
   TableBody,

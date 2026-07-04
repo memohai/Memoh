@@ -43,13 +43,10 @@
           </Button>
         </DialogClose>
         <Button
-          :disabled="!selectedBotId || installing"
+          :disabled="!selectedBotId"
+          :loading="installing"
           @click="handleInstall"
         >
-          <Spinner
-            v-if="installing"
-            class="mr-2 size-4"
-          />
           {{ installing ? $t('supermarket.installing') : $t('supermarket.install') }}
         </Button>
       </DialogFooter>
@@ -63,7 +60,7 @@ import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
-  Button, Spinner,
+  Button,
 } from '@memohai/ui'
 import {
   postBotsByBotIdSupermarketInstallSkill,

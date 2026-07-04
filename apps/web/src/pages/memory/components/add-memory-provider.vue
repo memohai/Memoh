@@ -58,13 +58,10 @@
           {{ $t('common.cancel') }}
         </Button>
         <Button
-          :disabled="!form.name.trim() || !form.provider || loading"
+          :disabled="!form.name.trim() || !form.provider"
+          :loading="loading"
           @click="handleCreate"
         >
-          <Spinner
-            v-if="loading"
-            class="mr-1.5"
-          />
           {{ $t('common.confirm') }}
         </Button>
       </DialogFooter>
@@ -78,7 +75,6 @@ import { reactive, ref } from 'vue'
 import {
   Button,
   Input,
-  Spinner,
   Dialog,
   DialogContent,
   DialogHeader,

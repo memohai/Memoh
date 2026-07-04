@@ -108,13 +108,10 @@
           </Button>
         </DialogClose>
         <Button
-          :disabled="!canInstall || installing"
+          :disabled="!canInstall"
+          :loading="installing"
           @click="handleInstall"
         >
-          <Spinner
-            v-if="installing"
-            class="mr-2 size-4"
-          />
           {{ installing ? $t('supermarket.installing') : $t('supermarket.install') }}
         </Button>
       </DialogFooter>
@@ -129,7 +126,7 @@ import { useRouter } from 'vue-router'
 import { Boxes } from 'lucide-vue-next'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
-  Button, Spinner, Badge, Input, Label, toast,
+  Button, Badge, Input, Label, toast,
 } from '@memohai/ui'
 import {
   getBotsByBotIdPluginsByIdOauthStatus,
