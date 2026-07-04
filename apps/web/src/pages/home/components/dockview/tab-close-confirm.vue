@@ -3,7 +3,10 @@
     :open="!!pending"
     @update:open="onOpenChange"
   >
-    <DialogContent class="sm:max-w-[420px]">
+    <DialogContent
+      class="sm:max-w-[420px]"
+      @close-auto-focus="onCloseAutoFocus"
+    >
       <DialogHeader>
         <DialogTitle>{{ t('chat.unsaved.title', { name: pending?.title ?? '' }) }}</DialogTitle>
         <DialogDescription>{{ t('chat.unsaved.description') }}</DialogDescription>
@@ -71,5 +74,22 @@ async function onSave() {
 
 function onOpenChange(open: boolean) {
   if (!open) resolve('cancel')
+}
+
+// This dialog is opened imperatively from the store (no DialogTrigger); the element
+// focused when it opened is the tab's X close button, which is hover/focus-only.
+// Reka's default closeAutoFocus returns focus THERE on close, flipping the tab's
+// :focus-within on so the X stays lit after the pointer has left — most jarring on
+// Cancel, where nothing closed yet the tab reads as "closing".
+//
+// We prevent that default, but must NOT let focus fall to <body>: a keyboard user
+// who opened this via Tab→Enter (and batch-close, one dialog per dirty tab) would
+// lose their place entirely. Instead hand focus to the dock's active panel — the
+// surface the user is left looking at — so the affordance settles AND keyboard
+// context survives. Guard the call: no active panel (empty dock) simply no-ops,
+// leaving focus wherever the browser puts it rather than throwing.
+function onCloseAutoFocus(event: Event) {
+  event.preventDefault()
+  store.api?.activePanel?.focus()
 }
 </script>
