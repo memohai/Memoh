@@ -8,6 +8,7 @@ import {
 import {
   Box,
   Globe,
+  Inbox,
   Plus,
   Search,
   Settings2,
@@ -15,6 +16,8 @@ import {
 } from 'lucide-vue-next'
 import PageShell from '@/components/page-shell/index.vue'
 import BackendCard from '@/components/settings/backend-card.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
+import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SectionShell from '../components/SectionShell.vue'
@@ -161,6 +164,57 @@ const primitiveRungs = [
               </span>
             </template>
           </BackendCard>
+        </div>
+      </Specimen>
+
+      <Specimen
+        label="<PanePlaceholder>"
+        note="centered fill for a whole pane: loading / empty (icon + action) / title emphasis — NOT for inline rows"
+      >
+        <div class="grid w-full grid-cols-1 gap-3 sm:grid-cols-3">
+          <div class="h-40 rounded-md border border-border bg-background">
+            <PanePlaceholder loading>
+              Loading…
+            </PanePlaceholder>
+          </div>
+          <div class="h-40 rounded-md border border-border bg-background">
+            <PanePlaceholder>
+              <template #icon>
+                <Inbox class="size-10 opacity-30" />
+              </template>
+              No items yet
+              <template #action>
+                <Button
+                  variant="outline"
+                  size="sm"
+                >
+                  Refresh
+                </Button>
+              </template>
+            </PanePlaceholder>
+          </div>
+          <div class="h-40 rounded-md border border-border bg-background">
+            <PanePlaceholder title="Select a bot">
+              Pick one from the sidebar to start chatting.
+            </PanePlaceholder>
+          </div>
+        </div>
+      </Specimen>
+
+      <Specimen
+        label="<InlineLoadingRow>"
+        note="left-aligned in-flow loading row; positioning padding stays with the caller · centered fill → PanePlaceholder · in a button → Button :loading · bare glyph → Spinner"
+      >
+        <div class="flex w-full flex-col gap-3">
+          <InlineLoadingRow>
+            Loading…
+          </InlineLoadingRow>
+          <InlineLoadingRow size="md">
+            Loading workspace…
+          </InlineLoadingRow>
+          <InlineLoadingRow bordered>
+            Reading backup file…
+          </InlineLoadingRow>
         </div>
       </Specimen>
 
