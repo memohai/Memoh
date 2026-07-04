@@ -102,7 +102,7 @@ func TestExtendToUITurnHead_PreservesMonotonicOrder(t *testing.T) {
 	latest := svc.latest(sessionID, 30)
 	reverseMessages(latest) // mirrors the handler's latest-page branch
 	before := len(latest)
-	got := h.extendToUITurnHead(context.Background(), sessionID, latest)
+	got := h.extendToUITurnHead(context.Background(), sessionID, latest, 30)
 
 	if len(got) <= before {
 		t.Fatalf("extendToUITurnHead did not pull back the turn head: got %d, had %d", len(got), before)
@@ -137,12 +137,36 @@ func TestExtendToUITurnHead_StopsAtBoundary(t *testing.T) {
 
 	latest := svc.latest(sessionID, 5) // 5 newest = all assistant, no boundary
 	reverseMessages(latest)
-	got := h.extendToUITurnHead(context.Background(), sessionID, latest)
+	got := h.extendToUITurnHead(context.Background(), sessionID, latest, 5)
 	// Must pull back exactly the one user boundary and stop — 6 total, not more.
 	if len(got) != 6 {
 		t.Fatalf("expected exactly the user boundary + 5 assistant = 6, got %d (over-pulled?)", len(got))
 	}
 	if got[0].Role != "user" {
 		t.Fatalf("expected head to be the user boundary, got role %q", got[0].Role)
+	}
+}
+
+func TestExtendToUITurnHead_CapsPathologicalTurn(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC)
+	const sessionID = "s3"
+	var all []messagepkg.Message
+	all = append(all, userMsg(base, "hello"))
+	for i := 1; i <= 500; i++ {
+		all = append(all, msg("assistant", base.Add(time.Duration(i)*time.Second)))
+	}
+	svc := &stubMessageService{bySession: map[string][]messagepkg.Message{sessionID: all}}
+	h := &MessageHandler{messageService: svc, logger: slog.Default()}
+
+	latest := svc.latest(sessionID, 30)
+	reverseMessages(latest)
+	got := h.extendToUITurnHead(context.Background(), sessionID, latest, 30)
+
+	if len(got) != uiTurnHeadExtensionLimit(30, 30) {
+		t.Fatalf("expected extension to stop at cap, got %d", len(got))
+	}
+	if got[0].Role == "user" {
+		t.Fatalf("expected pathological turn to remain capped before reaching the user boundary")
 	}
 }

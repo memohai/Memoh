@@ -200,7 +200,7 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	// reply as several turns/action bars. Extend the head back to a real turn
 	// boundary so a turn is never split across pages.
 	if format == "ui" && sessionID != "" && len(messages) > 0 {
-		messages = h.extendToUITurnHead(c.Request().Context(), sessionID, messages)
+		messages = h.extendToUITurnHead(c.Request().Context(), sessionID, messages, limit)
 	}
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
 	if format == "ui" {
@@ -577,14 +577,13 @@ func reverseMessages(m []messagepkg.Message) {
 // `since=` cursor could force a multi-megabyte replay of bot history.
 // extendToUITurnHead prepends older session messages (oldest-first) until the
 // slice starts on a real UI turn boundary — a visible user message or a
-// background-task system turn. A turn is the unit of an action bar and is
-// indivisible, so when a fixed-size page lands in the middle of an assistant
-// turn we pull the turn's earlier rows back in. This makes the page larger than
-// `limit`, which is fine: the frontend already pages by turns, not rows. The
-// row cap guards against a single pathologically long turn.
-func (h *MessageHandler) extendToUITurnHead(ctx context.Context, sessionID string, messages []messagepkg.Message) []messagepkg.Message {
+// background-task system turn. A turn is the unit of an action bar, so when a
+// fixed-size page lands in the middle of an assistant turn we pull the turn's
+// earlier rows back in. The extension budget keeps one pathologically long turn
+// from turning a small UI page into a multi-thousand-row response.
+func (h *MessageHandler) extendToUITurnHead(ctx context.Context, sessionID string, messages []messagepkg.Message, limit int32) []messagepkg.Message {
 	const batch = int32(50)
-	const maxRows = 2000
+	maxRows := uiTurnHeadExtensionLimit(len(messages), limit)
 	// messages is oldest-first (ASC). The cursor is the oldest row on the
 	// current page, and we pull rows before that row in visible turn order.
 	// ListBeforeMessageBySession already returns oldest-first, so prepend each
@@ -595,12 +594,41 @@ func (h *MessageHandler) extendToUITurnHead(ctx context.Context, sessionID strin
 		if err != nil || len(older) == 0 {
 			break
 		}
+		fetched := len(older)
+		if overflow := len(messages) + len(older) - maxRows; overflow > 0 {
+			older = older[overflow:]
+		}
+		if len(older) == 0 {
+			break
+		}
 		messages = append(older, messages...)
-		if len(older) < int(batch) {
+		if fetched < int(batch) {
 			break // reached the start of the session
 		}
 	}
 	return messages
+}
+
+func uiTurnHeadExtensionLimit(currentRows int, limit int32) int {
+	const maxExtendedRows = 200
+	pageRows := int(limit)
+	if pageRows <= 0 {
+		pageRows = currentRows
+	}
+	if pageRows < currentRows {
+		pageRows = currentRows
+	}
+	maxRows := pageRows * 4
+	if minRows := pageRows + 50; maxRows < minRows {
+		maxRows = minRows
+	}
+	if maxRows > maxExtendedRows {
+		maxRows = maxExtendedRows
+	}
+	if maxRows < currentRows {
+		return currentRows
+	}
+	return maxRows
 }
 
 // DeleteMessages godoc
