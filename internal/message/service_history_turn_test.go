@@ -132,6 +132,23 @@ func TestSQLiteHistoryTurnsAssistantBindsRequestedPendingTurn(t *testing.T) {
 	if turn.RequestMessageID == secondUser.ID {
 		t.Fatalf("assistant was bound to latest pending user %s instead of requested user", secondUser.ID)
 	}
+	finalAssistant, err := svc.Persist(ctx, PersistInput{
+		BotID:                botID,
+		SessionID:            sessionID,
+		Role:                 "assistant",
+		Content:              []byte(`{"role":"assistant","content":"final first"}`),
+		TurnRequestMessageID: firstUser.ID,
+	})
+	if err != nil {
+		t.Fatalf("persist final assistant for requested turn: %v", err)
+	}
+	finalTurn, err := svc.GetVisibleTurnByMessage(ctx, sessionID, finalAssistant.ID)
+	if err != nil {
+		t.Fatalf("visible turn by final assistant: %v", err)
+	}
+	if finalTurn.ID != turn.ID {
+		t.Fatalf("final assistant turn = %s, want first assistant turn %s", finalTurn.ID, turn.ID)
+	}
 }
 
 func TestSQLiteHistoryTurnsReplacementKeepsToolTailAndHidesSupersededTail(t *testing.T) {

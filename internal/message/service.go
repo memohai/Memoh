@@ -27,6 +27,7 @@ type DBService struct {
 }
 
 type historyTurnWriter interface {
+	AppendMessageToHistoryTurnByRequest(ctx context.Context, arg sqlc.AppendMessageToHistoryTurnByRequestParams) (pgtype.UUID, error)
 	CreateHistoryTurn(ctx context.Context, arg sqlc.CreateHistoryTurnParams) (sqlc.BotHistoryTurn, error)
 	BindHistoryTurnAssistantByRequest(ctx context.Context, arg sqlc.BindHistoryTurnAssistantByRequestParams) (sqlc.BotHistoryTurn, error)
 	BindLatestHistoryTurnAssistant(ctx context.Context, arg sqlc.BindLatestHistoryTurnAssistantParams) (sqlc.BotHistoryTurn, error)
@@ -237,6 +238,15 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, s
 				return nil
 			} else if !errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("bind history turn assistant by request: %w", err)
+			}
+			if _, err := writer.AppendMessageToHistoryTurnByRequest(ctx, sqlc.AppendMessageToHistoryTurnByRequestParams{
+				SessionID:        sessionID,
+				RequestMessageID: requestMessageID,
+				MessageID:        messageID,
+			}); err == nil {
+				return nil
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("append assistant message to requested history turn: %w", err)
 			}
 		}
 		if turn, err := writer.BindLatestHistoryTurnAssistant(ctx, sqlc.BindLatestHistoryTurnAssistantParams{

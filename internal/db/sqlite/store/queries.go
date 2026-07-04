@@ -4174,6 +4174,25 @@ func (q *Queries) LinkMessageToHistoryTurn(ctx context.Context, arg pgsqlc.LinkM
 	return mapQueryErr(q.store.queries.LinkMessageToHistoryTurn(ctx, sqliteArg))
 }
 
+func (q *Queries) AppendMessageToHistoryTurnByRequest(ctx context.Context, arg pgsqlc.AppendMessageToHistoryTurnByRequestParams) (pgtype.UUID, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgtype.UUID{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.AppendMessageToHistoryTurnByRequestParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgtype.UUID{}, err
+	}
+	out, err := q.store.queries.AppendMessageToHistoryTurnByRequest(ctx, sqliteArg)
+	if err != nil {
+		return pgtype.UUID{}, mapQueryErr(err)
+	}
+	var result pgtype.UUID
+	if err := convertValue(out, &result); err != nil {
+		return pgtype.UUID{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) AppendMessageToLatestHistoryTurn(ctx context.Context, arg pgsqlc.AppendMessageToLatestHistoryTurnParams) error {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return errSQLiteQueriesNotConfigured

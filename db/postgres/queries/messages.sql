@@ -109,6 +109,33 @@ SET turn_id = sqlc.arg(turn_id),
     turn_message_seq = sqlc.arg(turn_message_seq)
 WHERE id = sqlc.arg(message_id);
 
+-- name: AppendMessageToHistoryTurnByRequest :one
+WITH target AS (
+  SELECT turns.id, turns.session_id
+  FROM bot_history_turns turns
+  WHERE turns.session_id = sqlc.arg(session_id)
+    AND turns.request_message_id = sqlc.arg(request_message_id)
+    AND turns.superseded_at IS NULL
+  LIMIT 1
+),
+next_seq AS (
+  SELECT
+    target.id,
+    target.session_id,
+    COALESCE(MAX(existing.turn_message_seq) + 1, 1) AS turn_message_seq
+  FROM target
+  LEFT JOIN bot_history_messages existing ON existing.turn_id = target.id
+  GROUP BY target.id, target.session_id
+)
+UPDATE bot_history_messages m
+SET turn_id = next_seq.id,
+    turn_message_seq = next_seq.turn_message_seq
+FROM next_seq
+WHERE m.id = sqlc.arg(message_id)
+  AND m.session_id = next_seq.session_id
+  AND m.turn_id IS NULL
+RETURNING m.id;
+
 -- name: AppendMessageToLatestHistoryTurn :exec
 WITH latest AS (
   SELECT turns.id, turns.session_id

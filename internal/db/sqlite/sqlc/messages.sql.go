@@ -11,6 +11,54 @@ import (
 	"strings"
 )
 
+const appendMessageToHistoryTurnByRequest = `-- name: AppendMessageToHistoryTurnByRequest :one
+UPDATE bot_history_messages
+SET turn_id = (
+      SELECT t.id
+      FROM bot_history_turns t
+      WHERE t.session_id = ?1
+        AND t.request_message_id = ?2
+        AND t.superseded_at IS NULL
+      LIMIT 1
+    ),
+    turn_message_seq = COALESCE((
+      SELECT MAX(existing.turn_message_seq) + 1
+      FROM bot_history_messages existing
+      WHERE existing.turn_id = (
+        SELECT t.id
+        FROM bot_history_turns t
+        WHERE t.session_id = ?1
+          AND t.request_message_id = ?2
+          AND t.superseded_at IS NULL
+        LIMIT 1
+      )
+    ), 1)
+WHERE bot_history_messages.id = ?3
+  AND bot_history_messages.session_id = ?1
+  AND bot_history_messages.turn_id IS NULL
+  AND EXISTS (
+    SELECT 1
+    FROM bot_history_turns t
+    WHERE t.session_id = ?1
+      AND t.request_message_id = ?2
+      AND t.superseded_at IS NULL
+  )
+RETURNING id
+`
+
+type AppendMessageToHistoryTurnByRequestParams struct {
+	SessionID        string         `json:"session_id"`
+	RequestMessageID sql.NullString `json:"request_message_id"`
+	MessageID        string         `json:"message_id"`
+}
+
+func (q *Queries) AppendMessageToHistoryTurnByRequest(ctx context.Context, arg AppendMessageToHistoryTurnByRequestParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, appendMessageToHistoryTurnByRequest, arg.SessionID, arg.RequestMessageID, arg.MessageID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
 const appendMessageToLatestHistoryTurn = `-- name: AppendMessageToLatestHistoryTurn :exec
 UPDATE bot_history_messages
 SET turn_id = (

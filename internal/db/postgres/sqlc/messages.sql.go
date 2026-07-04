@@ -11,6 +11,47 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const appendMessageToHistoryTurnByRequest = `-- name: AppendMessageToHistoryTurnByRequest :one
+WITH target AS (
+  SELECT turns.id, turns.session_id
+  FROM bot_history_turns turns
+  WHERE turns.session_id = $2
+    AND turns.request_message_id = $3
+    AND turns.superseded_at IS NULL
+  LIMIT 1
+),
+next_seq AS (
+  SELECT
+    target.id,
+    target.session_id,
+    COALESCE(MAX(existing.turn_message_seq) + 1, 1) AS turn_message_seq
+  FROM target
+  LEFT JOIN bot_history_messages existing ON existing.turn_id = target.id
+  GROUP BY target.id, target.session_id
+)
+UPDATE bot_history_messages m
+SET turn_id = next_seq.id,
+    turn_message_seq = next_seq.turn_message_seq
+FROM next_seq
+WHERE m.id = $1
+  AND m.session_id = next_seq.session_id
+  AND m.turn_id IS NULL
+RETURNING m.id
+`
+
+type AppendMessageToHistoryTurnByRequestParams struct {
+	MessageID        pgtype.UUID `json:"message_id"`
+	SessionID        pgtype.UUID `json:"session_id"`
+	RequestMessageID pgtype.UUID `json:"request_message_id"`
+}
+
+func (q *Queries) AppendMessageToHistoryTurnByRequest(ctx context.Context, arg AppendMessageToHistoryTurnByRequestParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, appendMessageToHistoryTurnByRequest, arg.MessageID, arg.SessionID, arg.RequestMessageID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const appendMessageToLatestHistoryTurn = `-- name: AppendMessageToLatestHistoryTurn :exec
 WITH latest AS (
   SELECT turns.id, turns.session_id
