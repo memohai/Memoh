@@ -169,7 +169,7 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	before, hasBefore := parseBeforeParam(c.QueryParam("before"))
 	format := strings.ToLower(strings.TrimSpace(c.QueryParam("format")))
 
-	bot, _, _, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
+	bot, _, sess, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
 	if err != nil {
 		return err
 	}
@@ -185,10 +185,7 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 		// and the turn-head extension both depend on monotonic ASC input.
 		messages, err = h.messageService.ListBeforeBySession(c.Request().Context(), sessionID, before, limit)
 	case format == "ui":
-		messages, err = h.listLatestUIBySession(c.Request().Context(), sessionID, limit)
-		if err == nil {
-			reverseMessages(messages)
-		}
+		messages, err = h.listLatestUIPageBySession(c.Request().Context(), sessionID, limit)
 	default:
 		messages, err = h.messageService.ListLatestBySession(c.Request().Context(), sessionID, limit)
 		if err == nil {
@@ -208,7 +205,7 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
 	if format == "ui" {
 		items := conversation.ConvertMessagesToUITurns(messages)
-		h.decorateUITurns(c.Request().Context(), botID, sessionID, items)
+		h.decorateUITurns(c.Request().Context(), botID, sessionID, sess, items)
 		return c.JSON(http.StatusOK, map[string]any{
 			"items": items,
 		})
@@ -225,6 +222,28 @@ func (h *MessageHandler) listLatestUIBySession(ctx context.Context, sessionID st
 		return svc.ListLatestUIBySession(ctx, sessionID, limit)
 	}
 	return h.messageService.ListLatestBySession(ctx, sessionID, limit)
+}
+
+func (h *MessageHandler) listLatestUIPageBySession(ctx context.Context, sessionID string, limit int32) ([]messagepkg.Message, error) {
+	const lookbackRows = int32(50)
+	fetchLimit := limit
+	if fetchLimit > 0 {
+		fetchLimit += lookbackRows
+	}
+	messages, err := h.listLatestUIBySession(ctx, sessionID, fetchLimit)
+	if err != nil {
+		return nil, err
+	}
+	reverseMessages(messages)
+	if limit <= 0 || len(messages) <= int(limit) {
+		return messages, nil
+	}
+
+	start := len(messages) - int(limit)
+	for start > 0 && !conversation.IsUITurnBoundary(messages[start]) {
+		start--
+	}
+	return messages[start:], nil
 }
 
 // LocateMessage godoc
@@ -260,7 +279,7 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 	if sessionID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
 	}
-	bot, _, _, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
+	bot, _, sess, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
 	if err != nil {
 		return err
 	}
@@ -285,7 +304,7 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, located.Messages)
 	items := conversation.ConvertMessagesToUITurns(located.Messages)
-	h.decorateUITurns(c.Request().Context(), botID, sessionID, items)
+	h.decorateUITurns(c.Request().Context(), botID, sessionID, sess, items)
 	return c.JSON(http.StatusOK, map[string]any{
 		"items":                      items,
 		"target_id":                  located.TargetID,
@@ -350,21 +369,17 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
-func (h *MessageHandler) toolApprovalCanApproveFn(ctx context.Context, sessionID string) func(toolapproval.Request) bool {
+func (h *MessageHandler) toolApprovalCanApproveFn(sess session.Session) func(toolapproval.Request) bool {
 	defaultFn := func(req toolapproval.Request) bool {
 		return toolapproval.CanApprove(req.Status)
 	}
-	if h == nil || h.toolApproval == nil || h.sessionService == nil || strings.TrimSpace(sessionID) == "" {
-		return defaultFn
-	}
-	sess, err := h.sessionService.Get(ctx, sessionID)
-	if err != nil || !session.IsACPRuntime(sess) {
+	if h == nil || h.toolApproval == nil || !session.IsACPRuntime(sess) {
 		return defaultFn
 	}
 	return h.toolApproval.CanRespond
 }
 
-func (h *MessageHandler) decorateUITurns(ctx context.Context, botID, sessionID string, items []conversation.UITurn) {
+func (h *MessageHandler) decorateUITurns(ctx context.Context, botID, sessionID string, sess session.Session, items []conversation.UITurn) {
 	if len(items) == 0 {
 		return
 	}
@@ -398,7 +413,7 @@ func (h *MessageHandler) decorateUITurns(ctx context.Context, botID, sessionID s
 	}
 	wg.Wait()
 	if len(approvals) > 0 {
-		mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(ctx, sessionID))
+		mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(sess))
 	}
 	if len(requests) > 0 {
 		mergeUserInputs(items, requests, h.userInput.CanRespond)

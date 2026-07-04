@@ -34,6 +34,7 @@ type Message struct {
 	Role                    string          `json:"role"`
 	Content                 json.RawMessage `json:"content"`
 	Metadata                map[string]any  `json:"metadata,omitempty"`
+	RawMetadata             json.RawMessage `json:"-"`
 	Usage                   json.RawMessage `json:"usage,omitempty"`
 	SessionMode             string          `json:"session_mode,omitempty"`
 	RuntimeType             string          `json:"runtime_type,omitempty"`

@@ -156,6 +156,7 @@ func IsUITurnBoundary(raw messagepkg.Message) bool {
 	if !strings.EqualFold(strings.TrimSpace(raw.Role), "user") {
 		return false
 	}
+	ensurePersistedMetadata(&raw)
 
 	text := extractPersistedMessageText(raw, nil)
 
@@ -236,9 +237,11 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 		pending = nil
 	}
 
-	for _, raw := range messages {
+	for i := range messages {
+		raw := messages[i]
 		switch strings.ToLower(strings.TrimSpace(raw.Role)) {
 		case "user":
+			ensurePersistedMetadata(&raw)
 			text := extractPersistedMessageText(raw, nil)
 			attachments := uiAttachmentsFromMessageAssets(raw)
 			reply := uiReplyFromMessage(raw)
@@ -305,6 +308,9 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			result = append(result, turn)
 
 		case "assistant":
+			if strings.TrimSpace(raw.Platform) == "" {
+				ensurePersistedMetadata(&raw)
+			}
 			modelMessage := decodePersistedModelMessage(raw)
 			toolCalls := extractPersistedToolCalls(&modelMessage)
 			text := extractPersistedMessageText(raw, &modelMessage)
@@ -450,6 +456,16 @@ func decodePersistedModelMessage(raw messagepkg.Message) uiDecodedModelMessage {
 	}
 	message.Role = raw.Role
 	return uiDecodedModelMessage{ModelMessage: message}
+}
+
+func ensurePersistedMetadata(raw *messagepkg.Message) {
+	if raw == nil || raw.Metadata != nil || len(raw.RawMetadata) == 0 {
+		return
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(raw.RawMetadata, &metadata); err == nil && len(metadata) > 0 {
+		raw.Metadata = metadata
+	}
 }
 
 func extractPersistedMessageText(raw messagepkg.Message, message *uiDecodedModelMessage) string {

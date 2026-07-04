@@ -1123,7 +1123,7 @@ func toMessageFromLatestBySessionRow(row sqlc.ListMessagesLatestBySessionRow) Me
 }
 
 func toMessageFromLatestUIBySessionRow(row sqlc.ListMessagesLatestUIBySessionRow) Message {
-	return toMessageFields(
+	return toMessageFieldsWithMetadataMode(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -1143,6 +1143,7 @@ func toMessageFromLatestUIBySessionRow(row sqlc.ListMessagesLatestUIBySessionRow
 		pgtype.UUID{},
 		row.DisplayText,
 		row.CreatedAt,
+		false,
 	)
 }
 
@@ -1311,6 +1312,52 @@ func toMessageFields(
 	displayText pgtype.Text,
 	createdAt pgtype.Timestamptz,
 ) Message {
+	return toMessageFieldsWithMetadataMode(
+		id,
+		botID,
+		sessionID,
+		senderChannelIdentityID,
+		senderUserID,
+		senderDisplayName,
+		senderAvatarURL,
+		platform,
+		externalMessageID,
+		sourceReplyToMessageID,
+		role,
+		content,
+		metadata,
+		usage,
+		sessionMode,
+		runtimeType,
+		eventID,
+		displayText,
+		createdAt,
+		true,
+	)
+}
+
+func toMessageFieldsWithMetadataMode(
+	id pgtype.UUID,
+	botID pgtype.UUID,
+	sessionID pgtype.UUID,
+	senderChannelIdentityID pgtype.UUID,
+	senderUserID pgtype.UUID,
+	senderDisplayName pgtype.Text,
+	senderAvatarURL pgtype.Text,
+	platform pgtype.Text,
+	externalMessageID pgtype.Text,
+	sourceReplyToMessageID pgtype.Text,
+	role string,
+	content []byte,
+	metadata []byte,
+	usage []byte,
+	sessionMode string,
+	runtimeType string,
+	eventID pgtype.UUID,
+	displayText pgtype.Text,
+	createdAt pgtype.Timestamptz,
+	parseMetadata bool,
+) Message {
 	m := Message{
 		ID:                      id.String(),
 		BotID:                   botID.String(),
@@ -1324,7 +1371,7 @@ func toMessageFields(
 		SourceReplyToMessageID:  dbpkg.TextToString(sourceReplyToMessageID),
 		Role:                    role,
 		Content:                 json.RawMessage(content),
-		Metadata:                parseJSONMap(metadata),
+		RawMetadata:             json.RawMessage(metadata),
 		Usage:                   json.RawMessage(usage),
 		SessionMode:             sessionMode,
 		RuntimeType:             runtimeType,
@@ -1333,6 +1380,9 @@ func toMessageFields(
 	}
 	if eventID.Valid {
 		m.EventID = eventID.String()
+	}
+	if parseMetadata {
+		m.Metadata = parseJSONMap(metadata)
 	}
 	return m
 }
