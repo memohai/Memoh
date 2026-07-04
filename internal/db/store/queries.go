@@ -245,6 +245,7 @@ type Queries interface {
 	ListMessageAssets(ctx context.Context, messageID pgtype.UUID) ([]dbsqlc.ListMessageAssetsRow, error)
 	ListMessageAssetsBatch(ctx context.Context, messageIds []pgtype.UUID) ([]dbsqlc.ListMessageAssetsBatchRow, error)
 	AppendMessageToHistoryTurnByRequest(ctx context.Context, arg dbsqlc.AppendMessageToHistoryTurnByRequestParams) (pgtype.UUID, error)
+	AppendMessagesToHistoryTurnByRequest(ctx context.Context, arg dbsqlc.AppendMessagesToHistoryTurnByRequestParams) ([]pgtype.UUID, error)
 	AppendMessageToLatestHistoryTurn(ctx context.Context, arg dbsqlc.AppendMessageToLatestHistoryTurnParams) error
 	BindHistoryTurnAssistantByRequest(ctx context.Context, arg dbsqlc.BindHistoryTurnAssistantByRequestParams) (dbsqlc.BotHistoryTurn, error)
 	BindLatestHistoryTurnAssistant(ctx context.Context, arg dbsqlc.BindLatestHistoryTurnAssistantParams) (dbsqlc.BotHistoryTurn, error)

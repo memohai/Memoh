@@ -140,6 +140,44 @@ WHERE m.id = sqlc.arg(message_id)
   AND m.turn_id IS NULL
 RETURNING m.id;
 
+-- name: AppendMessagesToHistoryTurnByRequest :many
+WITH target AS (
+  SELECT turns.id, turns.session_id
+  FROM bot_history_turns turns
+  WHERE turns.session_id = sqlc.arg(session_id)
+    AND turns.request_message_id = sqlc.arg(request_message_id)
+    AND turns.superseded_at IS NULL
+  LIMIT 1
+),
+input_messages AS (
+  SELECT ids.message_id, ids.ordinal
+  FROM unnest(sqlc.arg(message_ids)::uuid[]) WITH ORDINALITY AS ids(message_id, ordinal)
+),
+next_seq AS (
+  SELECT
+    target.id,
+    target.session_id,
+    COALESCE((
+      SELECT existing.turn_message_seq
+      FROM bot_history_messages existing
+      WHERE existing.turn_id = target.id
+      ORDER BY existing.turn_message_seq DESC
+      LIMIT 1
+    ), 0) AS last_turn_message_seq
+  FROM target
+),
+updated AS (
+  UPDATE bot_history_messages m
+  SET turn_id = next_seq.id,
+      turn_message_seq = next_seq.last_turn_message_seq + input_messages.ordinal
+  FROM next_seq, input_messages
+  WHERE m.id = input_messages.message_id
+    AND m.session_id = next_seq.session_id
+    AND m.turn_id IS NULL
+  RETURNING m.id
+)
+SELECT id FROM updated;
+
 -- name: AppendMessageToLatestHistoryTurn :exec
 WITH latest AS (
   SELECT turns.id, turns.session_id

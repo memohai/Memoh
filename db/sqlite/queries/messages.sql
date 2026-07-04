@@ -141,6 +141,46 @@ WHERE bot_history_messages.id = sqlc.arg(message_id)
     WHERE t.session_id = sqlc.arg(session_id)
       AND t.request_message_id = sqlc.arg(request_message_id)
       AND t.superseded_at IS NULL
+)
+RETURNING id;
+
+-- name: AppendMessagesToHistoryTurnByRequest :many
+UPDATE bot_history_messages
+SET turn_id = (
+      SELECT t.id
+      FROM bot_history_turns t
+      WHERE t.session_id = sqlc.arg(session_id)
+        AND t.request_message_id = sqlc.arg(request_message_id)
+        AND t.superseded_at IS NULL
+      LIMIT 1
+    ),
+    turn_message_seq = COALESCE((
+      SELECT existing.turn_message_seq
+      FROM bot_history_messages existing
+      WHERE existing.turn_id = (
+        SELECT t.id
+        FROM bot_history_turns t
+        WHERE t.session_id = sqlc.arg(session_id)
+          AND t.request_message_id = sqlc.arg(request_message_id)
+          AND t.superseded_at IS NULL
+        LIMIT 1
+      )
+      ORDER BY existing.turn_message_seq DESC
+      LIMIT 1
+    ), 0) + (
+      SELECT CAST(key AS INTEGER) + 1
+      FROM json_each(sqlc.arg(message_ids_json))
+      WHERE value = bot_history_messages.id
+    )
+WHERE bot_history_messages.id IN (SELECT value FROM json_each(sqlc.arg(message_ids_json)))
+  AND bot_history_messages.session_id = sqlc.arg(session_id)
+  AND bot_history_messages.turn_id IS NULL
+  AND EXISTS (
+    SELECT 1
+    FROM bot_history_turns t
+    WHERE t.session_id = sqlc.arg(session_id)
+      AND t.request_message_id = sqlc.arg(request_message_id)
+      AND t.superseded_at IS NULL
   )
 RETURNING id;
 
