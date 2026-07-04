@@ -116,6 +116,7 @@ func shouldPersistMessageInTx(input PersistInput) bool {
 
 type preparedPersistMessage struct {
 	createArg            sqlc.CreateMessageParams
+	metadata             map[string]any
 	botID                pgtype.UUID
 	sessionID            pgtype.UUID
 	turnRequestMessageID pgtype.UUID
@@ -148,7 +149,8 @@ func (s *DBService) preparePersistMessage(ctx context.Context, input PersistInpu
 		return preparedPersistMessage{}, fmt.Errorf("invalid event id: %w", err)
 	}
 
-	metaBytes, err := json.Marshal(nonNilMap(input.Metadata))
+	metadata := nonNilMap(input.Metadata)
+	metaBytes, err := json.Marshal(metadata)
 	if err != nil {
 		return preparedPersistMessage{}, fmt.Errorf("marshal message metadata: %w", err)
 	}
@@ -177,6 +179,7 @@ func (s *DBService) preparePersistMessage(ctx context.Context, input PersistInpu
 			EventID:                 pgEventID,
 			DisplayText:             toPgText(input.DisplayText),
 		},
+		metadata:  metadata,
 		botID:     pgBotID,
 		sessionID: pgSessionID,
 	}
@@ -211,7 +214,7 @@ func (s *DBService) persistDirectWithoutTx(ctx context.Context, input PersistInp
 	if !prepared.sessionID.Valid {
 		return Message{}, false, nil
 	}
-	result, pgMsgID, handled, err := persistDirectHistoryMessage(ctx, direct, prepared.createArg, input.Role, prepared.turnRequestMessageID)
+	result, pgMsgID, handled, err := persistDirectHistoryMessage(ctx, direct, prepared.createArg, prepared.metadata, input.Role, prepared.turnRequestMessageID)
 	if err != nil {
 		return Message{}, true, err
 	}
@@ -236,7 +239,7 @@ func (s *DBService) persist(ctx context.Context, input PersistInput) (Message, e
 	if !input.SkipHistoryTurn {
 		pgTurnRequestMessageID = prepared.turnRequestMessageID
 		if direct, ok := s.queries.(directHistoryTurnWriter); ok && prepared.sessionID.Valid {
-			result, pgMsgID, handled, err := persistDirectHistoryMessage(ctx, direct, createArg, input.Role, pgTurnRequestMessageID)
+			result, pgMsgID, handled, err := persistDirectHistoryMessage(ctx, direct, createArg, prepared.metadata, input.Role, pgTurnRequestMessageID)
 			if err != nil {
 				return Message{}, err
 			}
@@ -266,6 +269,7 @@ func persistDirectHistoryMessage(
 	ctx context.Context,
 	writer directHistoryTurnWriter,
 	createArg sqlc.CreateMessageParams,
+	metadata map[string]any,
 	role string,
 	requestMessageID pgtype.UUID,
 ) (Message, pgtype.UUID, bool, error) {
@@ -296,7 +300,7 @@ func persistDirectHistoryMessage(
 		if err != nil {
 			return Message{}, pgtype.UUID{}, true, err
 		}
-		return toMessageFromCreateWithHistoryTurn(row), messageID, true, nil
+		return toMessageFromCreateWithHistoryTurn(row, createArg, metadata), messageID, true, nil
 	case "assistant", "tool":
 		if !requestMessageID.Valid {
 			return Message{}, pgtype.UUID{}, false, nil
@@ -325,7 +329,7 @@ func persistDirectHistoryMessage(
 		if err != nil {
 			return Message{}, pgtype.UUID{}, true, err
 		}
-		return toMessageFromCreateInHistoryTurnByRequestAndBind(row), row.ID, true, nil
+		return toMessageFromCreateInHistoryTurnByRequestAndBind(row, createArg, metadata), row.ID, true, nil
 	default:
 		return Message{}, pgtype.UUID{}, false, nil
 	}
@@ -1111,56 +1115,62 @@ func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
 	)
 }
 
-func toMessageFromCreateWithHistoryTurn(row sqlc.CreateMessageWithHistoryTurnRow) Message {
-	return toMessageFields(
+func toMessageFromCreateWithHistoryTurn(row sqlc.CreateMessageWithHistoryTurnRow, createArg sqlc.CreateMessageParams, metadata map[string]any) Message {
+	return toMessageFieldsWithMetadata(
 		row.ID,
-		row.BotID,
-		row.SessionID,
-		row.SenderChannelIdentityID,
-		row.SenderUserID,
+		createArg.BotID,
+		createArg.SessionID,
+		createArg.SenderChannelIdentityID,
+		createArg.SenderUserID,
 		pgtype.Text{},
 		pgtype.Text{},
-		extractPlatformFromMetadata(row.Metadata),
-		row.ExternalMessageID,
-		row.SourceReplyToMessageID,
-		row.Role,
-		row.Content,
-		row.Metadata,
-		row.Usage,
-		row.SessionMode,
-		row.RuntimeType,
-		row.EventID,
-		row.DisplayText,
+		extractPlatformFromMetadataMap(metadata),
+		createArg.ExternalMessageID,
+		createArg.SourceReplyToMessageID,
+		createArg.Role,
+		createArg.Content,
+		createArg.Metadata,
+		createArg.Usage,
+		createArg.SessionMode,
+		createArg.RuntimeType,
+		createArg.EventID,
+		createArg.DisplayText,
 		row.CreatedAt,
+		metadata,
 	)
 }
 
-func toMessageFromCreateInHistoryTurnByRequestAndBind(row sqlc.CreateMessageInHistoryTurnByRequestAndBindRow) Message {
-	return toMessageFields(
+func toMessageFromCreateInHistoryTurnByRequestAndBind(row sqlc.CreateMessageInHistoryTurnByRequestAndBindRow, createArg sqlc.CreateMessageParams, metadata map[string]any) Message {
+	return toMessageFieldsWithMetadata(
 		row.ID,
-		row.BotID,
-		row.SessionID,
-		row.SenderChannelIdentityID,
-		row.SenderUserID,
+		createArg.BotID,
+		createArg.SessionID,
+		createArg.SenderChannelIdentityID,
+		createArg.SenderUserID,
 		pgtype.Text{},
 		pgtype.Text{},
-		extractPlatformFromMetadata(row.Metadata),
-		row.ExternalMessageID,
-		row.SourceReplyToMessageID,
-		row.Role,
-		row.Content,
-		row.Metadata,
-		row.Usage,
-		row.SessionMode,
-		row.RuntimeType,
-		row.EventID,
-		row.DisplayText,
+		extractPlatformFromMetadataMap(metadata),
+		createArg.ExternalMessageID,
+		createArg.SourceReplyToMessageID,
+		createArg.Role,
+		createArg.Content,
+		createArg.Metadata,
+		createArg.Usage,
+		createArg.SessionMode,
+		createArg.RuntimeType,
+		createArg.EventID,
+		createArg.DisplayText,
 		row.CreatedAt,
+		metadata,
 	)
 }
 
 func extractPlatformFromMetadata(metadata []byte) pgtype.Text {
 	m := parseJSONMap(metadata)
+	return extractPlatformFromMetadataMap(m)
+}
+
+func extractPlatformFromMetadataMap(m map[string]any) pgtype.Text {
 	if v, ok := m["platform"].(string); ok && strings.TrimSpace(v) != "" {
 		return pgtype.Text{String: strings.TrimSpace(v), Valid: true}
 	}
@@ -1603,6 +1613,54 @@ func toMessageFields(
 		createdAt,
 		true,
 	)
+}
+
+func toMessageFieldsWithMetadata(
+	id pgtype.UUID,
+	botID pgtype.UUID,
+	sessionID pgtype.UUID,
+	senderChannelIdentityID pgtype.UUID,
+	senderUserID pgtype.UUID,
+	senderDisplayName pgtype.Text,
+	senderAvatarURL pgtype.Text,
+	platform pgtype.Text,
+	externalMessageID pgtype.Text,
+	sourceReplyToMessageID pgtype.Text,
+	role string,
+	content []byte,
+	rawMetadata []byte,
+	usage []byte,
+	sessionMode string,
+	runtimeType string,
+	eventID pgtype.UUID,
+	displayText pgtype.Text,
+	createdAt pgtype.Timestamptz,
+	metadata map[string]any,
+) Message {
+	m := toMessageFieldsWithMetadataMode(
+		id,
+		botID,
+		sessionID,
+		senderChannelIdentityID,
+		senderUserID,
+		senderDisplayName,
+		senderAvatarURL,
+		platform,
+		externalMessageID,
+		sourceReplyToMessageID,
+		role,
+		content,
+		rawMetadata,
+		usage,
+		sessionMode,
+		runtimeType,
+		eventID,
+		displayText,
+		createdAt,
+		false,
+	)
+	m.Metadata = metadata
+	return m
 }
 
 func toMessageFieldsWithMetadataMode(

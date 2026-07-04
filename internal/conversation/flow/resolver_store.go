@@ -125,6 +125,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 	}
 	meta := buildRouteMetadata(req)
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
+	sessionMode, runtimeType := r.persistSessionRuntimeSnapshot(ctx, req)
 
 	// Determine the last assistant message index for outbound asset attachment.
 	lastAssistantIdx := -1
@@ -240,6 +241,8 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			ModelID:                 modelID,
 			EventID:                 messageEventID,
 			DisplayText:             displayText,
+			SessionMode:             sessionMode,
+			RuntimeType:             runtimeType,
 			TurnRequestMessageID:    turnRequestMessageID,
 			SkipHistoryTurn:         req.SkipHistoryTurn,
 		})
@@ -253,6 +256,31 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		persisted = append(persisted, persistedMessage)
 	}
 	return persisted
+}
+
+func (r *Resolver) persistSessionRuntimeSnapshot(ctx context.Context, req conversation.ChatRequest) (string, string) {
+	sessionMode := strings.TrimSpace(req.SessionType)
+	runtimeType := strings.TrimSpace(req.RuntimeType)
+	if sessionMode != "" && runtimeType != "" {
+		return sessionMode, runtimeType
+	}
+	if r != nil && r.sessionService != nil && strings.TrimSpace(req.SessionID) != "" {
+		if sess, err := r.sessionService.Get(ctx, req.SessionID); err == nil {
+			if sessionMode == "" {
+				sessionMode = strings.TrimSpace(sess.SessionMode)
+			}
+			if runtimeType == "" {
+				runtimeType = strings.TrimSpace(sess.RuntimeType)
+			}
+		}
+	}
+	if sessionMode == "" {
+		sessionMode = "chat"
+	}
+	if runtimeType == "" {
+		runtimeType = "model"
+	}
+	return sessionMode, runtimeType
 }
 
 // outboundAssetRefsToMessageRefs converts outbound asset refs from the streaming

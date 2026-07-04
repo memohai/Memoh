@@ -258,6 +258,7 @@ type ChatRequest struct {
 	SkillActivation              *SkillActivation `json:"-"`
 	ToolHTTPURL                  string           `json:"-"`
 	SessionType                  string           `json:"-"`
+	RuntimeType                  string           `json:"-"`
 	SkipMemoryExtraction         bool             `json:"-"`
 	SkipHistoryTurn              bool             `json:"-"`
 	SkipTitleGeneration          bool             `json:"-"`

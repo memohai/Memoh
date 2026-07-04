@@ -669,20 +669,7 @@ inserted AS (
   FROM target
   RETURNING
     id,
-    bot_id,
-    session_id,
-    sender_channel_identity_id,
-    sender_account_user_id AS sender_user_id,
-    source_message_id AS external_message_id,
-    source_reply_to_message_id,
     role,
-    content,
-    metadata,
-    usage,
-    session_mode,
-    runtime_type,
-    event_id,
-    display_text,
     created_at
 ),
 bound AS (
@@ -699,20 +686,6 @@ bound AS (
 )
 SELECT
   inserted.id,
-  inserted.bot_id,
-  inserted.session_id,
-  inserted.sender_channel_identity_id,
-  inserted.sender_user_id,
-  inserted.external_message_id,
-  inserted.source_reply_to_message_id,
-  inserted.role,
-  inserted.content,
-  inserted.metadata,
-  inserted.usage,
-  inserted.session_mode,
-  inserted.runtime_type,
-  inserted.event_id,
-  inserted.display_text,
   inserted.created_at
 FROM inserted
 LEFT JOIN bound ON true
@@ -738,22 +711,8 @@ type CreateMessageInHistoryTurnByRequestAndBindParams struct {
 }
 
 type CreateMessageInHistoryTurnByRequestAndBindRow struct {
-	ID                      pgtype.UUID        `json:"id"`
-	BotID                   pgtype.UUID        `json:"bot_id"`
-	SessionID               pgtype.UUID        `json:"session_id"`
-	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
-	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
-	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
-	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
-	Role                    string             `json:"role"`
-	Content                 []byte             `json:"content"`
-	Metadata                []byte             `json:"metadata"`
-	Usage                   []byte             `json:"usage"`
-	SessionMode             string             `json:"session_mode"`
-	RuntimeType             string             `json:"runtime_type"`
-	EventID                 pgtype.UUID        `json:"event_id"`
-	DisplayText             pgtype.Text        `json:"display_text"`
-	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	ID        pgtype.UUID        `json:"id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) CreateMessageInHistoryTurnByRequestAndBind(ctx context.Context, arg CreateMessageInHistoryTurnByRequestAndBindParams) (CreateMessageInHistoryTurnByRequestAndBindRow, error) {
@@ -776,24 +735,7 @@ func (q *Queries) CreateMessageInHistoryTurnByRequestAndBind(ctx context.Context
 		arg.DisplayText,
 	)
 	var i CreateMessageInHistoryTurnByRequestAndBindRow
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.SessionID,
-		&i.SenderChannelIdentityID,
-		&i.SenderUserID,
-		&i.ExternalMessageID,
-		&i.SourceReplyToMessageID,
-		&i.Role,
-		&i.Content,
-		&i.Metadata,
-		&i.Usage,
-		&i.SessionMode,
-		&i.RuntimeType,
-		&i.EventID,
-		&i.DisplayText,
-		&i.CreatedAt,
-	)
+	err := row.Scan(&i.ID, &i.CreatedAt)
 	return i, err
 }
 
@@ -841,20 +783,6 @@ WITH inserted_message AS (
   )
   RETURNING
     id,
-    bot_id,
-    session_id,
-    sender_channel_identity_id,
-    sender_account_user_id AS sender_user_id,
-    source_message_id AS external_message_id,
-    source_reply_to_message_id,
-    role,
-    content,
-    metadata,
-    usage,
-    session_mode,
-    runtime_type,
-    event_id,
-    display_text,
     created_at
 ),
 inserted_turn AS (
@@ -884,20 +812,6 @@ inserted_turn AS (
 )
 SELECT
   inserted_message.id,
-  inserted_message.bot_id,
-  inserted_message.session_id,
-  inserted_message.sender_channel_identity_id,
-  inserted_message.sender_user_id,
-  inserted_message.external_message_id,
-  inserted_message.source_reply_to_message_id,
-  inserted_message.role,
-  inserted_message.content,
-  inserted_message.metadata,
-  inserted_message.usage,
-  inserted_message.session_mode,
-  inserted_message.runtime_type,
-  inserted_message.event_id,
-  inserted_message.display_text,
   inserted_message.created_at
 FROM inserted_message
 JOIN inserted_turn ON true
@@ -925,22 +839,8 @@ type CreateMessageWithHistoryTurnParams struct {
 }
 
 type CreateMessageWithHistoryTurnRow struct {
-	ID                      pgtype.UUID        `json:"id"`
-	BotID                   pgtype.UUID        `json:"bot_id"`
-	SessionID               pgtype.UUID        `json:"session_id"`
-	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
-	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
-	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
-	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
-	Role                    string             `json:"role"`
-	Content                 []byte             `json:"content"`
-	Metadata                []byte             `json:"metadata"`
-	Usage                   []byte             `json:"usage"`
-	SessionMode             string             `json:"session_mode"`
-	RuntimeType             string             `json:"runtime_type"`
-	EventID                 pgtype.UUID        `json:"event_id"`
-	DisplayText             pgtype.Text        `json:"display_text"`
-	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	ID        pgtype.UUID        `json:"id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) CreateMessageWithHistoryTurn(ctx context.Context, arg CreateMessageWithHistoryTurnParams) (CreateMessageWithHistoryTurnRow, error) {
@@ -965,24 +865,7 @@ func (q *Queries) CreateMessageWithHistoryTurn(ctx context.Context, arg CreateMe
 		arg.TurnMessageSeq,
 	)
 	var i CreateMessageWithHistoryTurnRow
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.SessionID,
-		&i.SenderChannelIdentityID,
-		&i.SenderUserID,
-		&i.ExternalMessageID,
-		&i.SourceReplyToMessageID,
-		&i.Role,
-		&i.Content,
-		&i.Metadata,
-		&i.Usage,
-		&i.SessionMode,
-		&i.RuntimeType,
-		&i.EventID,
-		&i.DisplayText,
-		&i.CreatedAt,
-	)
+	err := row.Scan(&i.ID, &i.CreatedAt)
 	return i, err
 }
 

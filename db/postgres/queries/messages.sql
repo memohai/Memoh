@@ -154,20 +154,6 @@ WITH inserted_message AS (
   )
   RETURNING
     id,
-    bot_id,
-    session_id,
-    sender_channel_identity_id,
-    sender_account_user_id AS sender_user_id,
-    source_message_id AS external_message_id,
-    source_reply_to_message_id,
-    role,
-    content,
-    metadata,
-    usage,
-    session_mode,
-    runtime_type,
-    event_id,
-    display_text,
     created_at
 ),
 inserted_turn AS (
@@ -197,20 +183,6 @@ inserted_turn AS (
 )
 SELECT
   inserted_message.id,
-  inserted_message.bot_id,
-  inserted_message.session_id,
-  inserted_message.sender_channel_identity_id,
-  inserted_message.sender_user_id,
-  inserted_message.external_message_id,
-  inserted_message.source_reply_to_message_id,
-  inserted_message.role,
-  inserted_message.content,
-  inserted_message.metadata,
-  inserted_message.usage,
-  inserted_message.session_mode,
-  inserted_message.runtime_type,
-  inserted_message.event_id,
-  inserted_message.display_text,
   inserted_message.created_at
 FROM inserted_message
 JOIN inserted_turn ON true;
@@ -376,20 +348,7 @@ inserted AS (
   FROM target
   RETURNING
     id,
-    bot_id,
-    session_id,
-    sender_channel_identity_id,
-    sender_account_user_id AS sender_user_id,
-    source_message_id AS external_message_id,
-    source_reply_to_message_id,
     role,
-    content,
-    metadata,
-    usage,
-    session_mode,
-    runtime_type,
-    event_id,
-    display_text,
     created_at
 ),
 bound AS (
@@ -406,20 +365,6 @@ bound AS (
 )
 SELECT
   inserted.id,
-  inserted.bot_id,
-  inserted.session_id,
-  inserted.sender_channel_identity_id,
-  inserted.sender_user_id,
-  inserted.external_message_id,
-  inserted.source_reply_to_message_id,
-  inserted.role,
-  inserted.content,
-  inserted.metadata,
-  inserted.usage,
-  inserted.session_mode,
-  inserted.runtime_type,
-  inserted.event_id,
-  inserted.display_text,
   inserted.created_at
 FROM inserted
 LEFT JOIN bound ON true;
