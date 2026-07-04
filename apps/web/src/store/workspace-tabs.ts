@@ -843,6 +843,16 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     )
   }
 
+  function resetDeletedChatPanelToDraft(panel: { id: string, api: { updateParameters(params: Record<string, unknown>): void, setTitle(title: string): void } }) {
+    const explicitSelection = chatStore.hasExplicitSessionSelection === true
+    panel.api.updateParameters({ sessionId: null, explicitSelection })
+    panel.api.setTitle(DEFAULT_CHAT_TITLE)
+    markEphemeral(panel.id)
+    if (api.value?.activePanel?.id === panel.id) {
+      chatStore.selectDraft({ explicitSelection })
+    }
+  }
+
   function isDeletedSessionForCurrentBot(sid: string | null): boolean {
     const bid = (currentBotId.value ?? '').trim()
     if (!bid || !sid) return false
@@ -1049,14 +1059,20 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const bid = (targetBotId ?? loadedBotId ?? currentBotId.value ?? '').trim()
     if (!dock || !bid) return
     if (!targetBotId && loadedBotId && loadedBotId !== bid) return
-    const deletedSessionIds = deletedSessionIdsByBot.get(bid)
-    if (!deletedSessionIds || deletedSessionIds.size === 0) return
-    const closingPanels: Array<{ id: string }> = []
-    for (const panel of [...dock.panels]) {
-      if (panelComponentOf(panel.id) !== 'chat') continue
-      const sid = panelSessionId(panel)
-      if (!sid || !deletedSessionIds.has(sid)) continue
-      reconcilingDeletedChatPanelIds.add(panel.id)
+	    const deletedSessionIds = deletedSessionIdsByBot.get(bid)
+	    if (!deletedSessionIds || deletedSessionIds.size === 0) return
+	    const latestDeleted = chatStore.deletedSession
+	    const resetComposerScope = latestDeleted?.botId === bid ? latestDeleted.composerScope?.trim() : ''
+	    const closingPanels: Array<{ id: string }> = []
+	    for (const panel of [...dock.panels]) {
+	      if (panelComponentOf(panel.id) !== 'chat') continue
+	      const sid = panelSessionId(panel)
+	      if (!sid || !deletedSessionIds.has(sid)) continue
+	      if (resetComposerScope && resetComposerScope === `${bid}:${panel.id}`) {
+	        resetDeletedChatPanelToDraft(panel)
+	        continue
+	      }
+	      reconcilingDeletedChatPanelIds.add(panel.id)
       closingPanels.push({ id: panel.id })
       holdDeletedChatActivation()
       panel.api.close()

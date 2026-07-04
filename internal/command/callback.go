@@ -23,6 +23,7 @@ const (
 	callbackKindModelSelect   = "model_select"
 	callbackKindRange         = "range"
 	callbackKindConfirmNew    = "confirm_new"
+	callbackKindSkillActivate = "skill_activate"
 	callbackKindDismiss       = "dismiss"
 	callbackKindNoop          = "noop"
 )
@@ -47,6 +48,12 @@ func IsInteractiveCallback(data string) bool {
 
 // IsDismiss reports whether the callback closes the interactive message.
 func (p ParsedCallback) IsDismiss() bool { return p.Kind == callbackKindDismiss }
+
+// IsSkillActivation reports whether the callback activates a skill. Unlike
+// pagination/selection callbacks, activation starts a fresh chat turn: adapters
+// must dispatch it as a new directed message instead of editing the tapped
+// card in place.
+func (p ParsedCallback) IsSkillActivation() bool { return p.Kind == callbackKindSkillActivate }
 
 // IsNoop reports whether the callback is inert (e.g. the page indicator).
 func (p ParsedCallback) IsNoop() bool { return p.Kind == callbackKindNoop }
@@ -114,6 +121,23 @@ func EncodeModelSelectCallback(modelDBID string) string {
 // Layout: "m~rg~{resource}~{action}~{rangeKey}".
 func EncodeRangeCallback(resource, action, rangeKey string) string {
 	return fmt.Sprintf("%srg~%s~%s~%s", callbackNamespace, resource, action, rangeKey)
+}
+
+// EncodeSkillActivateCallback builds the callback_data for a tap-to-activate
+// skill row on /skill list. Layout: "m~sk~{name}". Tapping re-dispatches the
+// canonical "/{name}" skill slash, so the activation runs through the exact
+// same classify→resolve→activate pipeline as a typed slash — permissions and
+// runtime-usability are judged at tap time, never baked into the keyboard.
+// Names too long for Telegram's 64-byte limit are stashed like list args
+// ("#<hash>"); a stash miss after restart/rollover simply invalidates the
+// stale button (the user re-runs /skill list).
+func EncodeSkillActivateCallback(name string) string {
+	base := callbackNamespace + "sk~"
+	encoded := base + url.QueryEscape(strings.TrimSpace(name))
+	if len(encoded) <= telegramCallbackLimit {
+		return encoded
+	}
+	return base + "#" + stashArgs(url.QueryEscape(strings.TrimSpace(name)))
 }
 
 // EncodeConfirmNewCallback builds the callback_data for confirming a /new reset.
@@ -184,6 +208,22 @@ func DecodeCallback(data string) (ParsedCallback, bool) {
 			return ParsedCallback{}, false
 		}
 		return ParsedCallback{Kind: callbackKindConfirmNew, Action: mode}, true
+	case strings.HasPrefix(body, "sk~"):
+		token := strings.TrimPrefix(body, "sk~")
+		if strings.HasPrefix(token, "#") {
+			hash := strings.TrimPrefix(token, "#")
+			argsStashMu.Lock()
+			token = argsStash[hash]
+			argsStashMu.Unlock()
+		}
+		name, err := url.QueryUnescape(token)
+		if err != nil || strings.TrimSpace(name) == "" {
+			// Undecodable or stash-expired button: report "not ours" so the
+			// adapter acknowledges the tap and does nothing, instead of
+			// dispatching a broken activation.
+			return ParsedCallback{}, false
+		}
+		return ParsedCallback{Kind: callbackKindSkillActivate, SelectID: strings.TrimSpace(name)}, true
 	}
 	return ParsedCallback{}, false
 }
@@ -206,6 +246,12 @@ func (p ParsedCallback) SyntheticCommand() string {
 		return fmt.Sprintf("/%s %s --range %s", p.Resource, p.Action, p.Range)
 	case callbackKindConfirmNew:
 		return fmt.Sprintf("/new %s --confirm", p.Action)
+	case callbackKindSkillActivate:
+		name := strings.TrimSpace(p.SelectID)
+		if name == "" {
+			return ""
+		}
+		return "/" + name
 	default:
 		return ""
 	}

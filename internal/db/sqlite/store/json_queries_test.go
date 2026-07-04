@@ -49,6 +49,7 @@ CREATE TABLE bot_history_messages (
   session_id TEXT,
   role TEXT NOT NULL,
   content TEXT NOT NULL DEFAULT '{}',
+  metadata TEXT NOT NULL DEFAULT '{}',
   usage TEXT,
   model_id TEXT,
   session_mode TEXT NOT NULL DEFAULT 'chat',
@@ -136,6 +137,20 @@ CREATE TABLE bot_history_messages (
 			t.Fatalf("insert empty usage %s: %v", item.role, err)
 		}
 	}
+	_, err = conn.ExecContext(ctx, `INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, metadata, usage, model_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"00000000-0000-0000-0000-000000000010",
+		botID,
+		sessionID,
+		"user",
+		`{"role":"user","content":"use beta too"}`,
+		`{"model_requested_skills":[{"name":"beta"},{"name":"alpha"}]}`,
+		"",
+		nil,
+		"2026-05-01 01:02:00",
+	)
+	if err != nil {
+		t.Fatalf("insert requested skill metadata: %v", err)
+	}
 
 	store, err := New(conn)
 	if err != nil {
@@ -212,8 +227,8 @@ CREATE TABLE bot_history_messages (
 	if err != nil {
 		t.Fatalf("used skills: %v", err)
 	}
-	if len(skills) != 1 || skills[0] != "alpha" {
-		t.Fatalf("skills = %#v, want [alpha]", skills)
+	if len(skills) != 2 || skills[0] != "alpha" || skills[1] != "beta" {
+		t.Fatalf("skills = %#v, want [alpha beta]", skills)
 	}
 }
 

@@ -132,6 +132,48 @@ export interface ChatAttachment {
   name?: string
 }
 
+export interface RequestedSkillSelection {
+  name: string
+  display_name?: string
+  description?: string
+  source_kind?: string
+  state?: string
+}
+
+export interface RequestedSkillRequest {
+  name: string
+}
+
+export interface CommandActionListItem {
+  id?: string
+  title: string
+  description?: string
+  kind?: string
+}
+
+export interface CommandActionResult {
+  kind: string
+  title?: string
+  text?: string
+  items?: CommandActionListItem[]
+}
+
+export interface CommandActionError {
+  code: string
+  message: string
+}
+
+export interface CommandEventResponse {
+  type: 'command_result' | 'command_error'
+  invocation_id?: string
+  composer_scope?: string
+  session_id?: string
+  action_id?: string
+  terminal: boolean
+  result?: CommandActionResult
+  error?: CommandActionError
+}
+
 export interface UIAttachment {
   id?: string
   type: string
@@ -252,9 +294,24 @@ export interface UIErrorMessage {
 
 export type UIMessage = UITextMessage | UIReasoningMessage | UIToolMessage | UIAttachmentsMessage | UIErrorMessage
 
+export interface UISkillActivationSkill {
+  name: string
+  display_name?: string
+  description?: string
+  source_kind?: string
+  state?: string
+}
+
+export interface UISkillActivation {
+  skills?: UISkillActivationSkill[]
+  prompt?: string
+}
+
 export interface UIUserTurn {
   role: 'user'
   text: string
+  user_message_kind?: string
+  skill_activation?: UISkillActivation
   attachments?: UIAttachment[]
   reply?: UIReplyRef
   forward?: UIForwardRef
@@ -314,10 +371,26 @@ export interface UIStreamErrorEvent {
   feedback?: unknown
 }
 
+export interface UIStreamSessionCreatedEvent {
+  type: 'session_created'
+  stream_id?: string
+  session_id: string
+}
+
+export interface UIStreamUserMessageEvent {
+  type: 'user_message'
+  stream_id?: string
+  session_id?: string
+  data: UIUserTurn
+}
+
 export type UIStreamEvent =
   | UIStreamStartEvent
   | UIStreamMessageEvent
   | UIStreamEndEvent
   | UIStreamErrorEvent
+  | UIStreamSessionCreatedEvent
+  | UIStreamUserMessageEvent
+  | CommandEventResponse
 
 export type UIStreamEventHandler = (event: UIStreamEvent) => void

@@ -49,7 +49,7 @@
       >
         <BackgroundTaskBlock :task="message.backgroundTask" />
         <p
-          class="text-xs text-muted-foreground/80 mt-1"
+          class="text-caption text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -153,14 +153,35 @@
           :on-open-media="onOpenMedia"
         />
         <div
-          v-if="cleanUserText(message.text) || message.forward || message.reply"
-          :lang="contentLang(cleanUserText(message.text))"
+          v-if="isSkillActivationMessage || userBubbleText || message.forward || message.reply"
+          :lang="contentLang(userBubbleText || skillActivationNames || skillActivationTitle)"
           class="chat-user-bubble w-fit max-w-full bg-chat-user-bubble px-4 py-3 text-chat-user-bubble-fg whitespace-pre-wrap break-words"
           :class="userBubbleRadiusClass"
         >
           <div
+            v-if="isSkillActivationMessage"
+            class="flex min-w-0 items-start gap-2"
+          >
+            <Sparkles
+              aria-hidden="true"
+              class="mt-0.5 size-3.5 shrink-0"
+            />
+            <div class="min-w-0 space-y-0.5">
+              <p class="text-caption font-medium leading-snug">
+                {{ skillActivationTitle }}
+              </p>
+              <p
+                v-if="skillActivationNames"
+                class="text-body leading-snug break-words"
+              >
+                {{ skillActivationNames }}
+              </p>
+            </div>
+          </div>
+          <div
             v-if="message.forward"
-            class="mb-1 text-[11px] font-medium leading-snug text-muted-foreground"
+            class="text-[11px] font-medium leading-snug text-muted-foreground"
+            :class="isSkillActivationMessage ? 'mt-2 mb-1' : 'mb-1'"
           >
             {{ t('chat.forwardedFrom', { sender: forwardSenderLabel }) }}
           </div>
@@ -204,8 +225,9 @@
             </div>
           </button>
           <CollapsibleUserText
-            v-if="cleanUserText(message.text)"
-            :text="cleanUserText(message.text)"
+            v-if="userBubbleText"
+            :class="isSkillActivationMessage ? 'mt-2' : ''"
+            :text="userBubbleText"
           />
         </div>
         <MessageActions
@@ -338,7 +360,7 @@ setCustomComponents({ mermaid: ThemedMermaidBlock })
 
 <script setup lang="ts">
 import { computed, toRef, useTemplateRef, watch } from 'vue'
-import { CircleAlert } from 'lucide-vue-next'
+import { CircleAlert, Sparkles } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
 import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
@@ -464,6 +486,52 @@ const replyPreviewLabel = computed(() => {
   const preview = props.message.reply?.preview?.trim()
   if (preview) return preview
   return replyThumbnailSrc.value ? t('chat.replyPhoto') : ''
+})
+
+const skillActivation = computed(() => {
+  if (props.message.role !== 'user') return null
+  if (props.message.userMessageKind !== 'skill_activation' && !props.message.skillActivation) return null
+  return props.message.skillActivation ?? null
+})
+
+const isSkillActivationMessage = computed(() => skillActivation.value !== null)
+
+const skillActivationSkills = computed(() => skillActivation.value?.skills ?? [])
+
+const skillActivationDisplayNames = computed(() =>
+  skillActivationSkills.value
+    .map(skill => (skill.display_name || skill.name || '').trim())
+    .filter(Boolean),
+)
+
+const skillActivationTitle = computed(() =>
+  skillActivationDisplayNames.value.length > 1
+    ? t('chat.skillActivation.titleMany')
+    : t('chat.skillActivation.title'),
+)
+
+const skillActivationNames = computed(() => {
+  return skillActivationDisplayNames.value.join(', ')
+})
+
+const skillActivationPrompt = computed(() => skillActivation.value?.prompt?.trim() ?? '')
+
+const userBubbleText = computed(() => {
+  if (props.message.role !== 'user') return ''
+  const text = cleanUserText(props.message.text)
+  if (!isSkillActivationMessage.value) return text
+  if (skillActivationPrompt.value) return skillActivationPrompt.value
+  if (text.startsWith('/') || text.startsWith('The user activated the following skill for this turn without an additional prompt:')) {
+    return ''
+  }
+  return text
+})
+
+const skillActivationCopyText = computed(() => {
+  if (!skillActivation.value) return ''
+  const prompt = userBubbleText.value
+  if (prompt) return prompt
+  return skillActivationNames.value || skillActivationTitle.value
 })
 
 function isImageAttachment(att: AttachmentItem): boolean {
@@ -701,7 +769,9 @@ const calendarTimestamp = computed(() =>
 )
 
 const userCopyText = computed(() =>
-  props.message.role === 'user' ? cleanUserText(props.message.text) : '',
+  props.message.role === 'user'
+    ? (isSkillActivationMessage.value ? skillActivationCopyText.value : userBubbleText.value)
+    : '',
 )
 const assistantPlainText = computed(() => {
   if (props.message.role !== 'assistant') return ''

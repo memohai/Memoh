@@ -309,11 +309,12 @@ type ThreadRef struct {
 
 // ReplyRef points to a message being replied to.
 type ReplyRef struct {
-	Target      string       `json:"target,omitempty"`
-	MessageID   string       `json:"message_id,omitempty"`
-	Sender      string       `json:"sender,omitempty"`
-	Preview     string       `json:"preview,omitempty"`
-	Attachments []Attachment `json:"attachments,omitempty"`
+	Target           string       `json:"target,omitempty"`
+	MessageID        string       `json:"message_id,omitempty"`
+	Sender           string       `json:"sender,omitempty"`
+	Preview          string       `json:"preview,omitempty"`
+	Attachments      []Attachment `json:"attachments,omitempty"`
+	AttachmentsKnown bool         `json:"attachments_known,omitempty"`
 }
 
 // ForwardRef describes the structured origin of a forwarded message.
@@ -323,6 +324,7 @@ type ForwardRef struct {
 	FromConversationID string `json:"from_conversation_id,omitempty"`
 	Sender             string `json:"sender,omitempty"`
 	Date               int64  `json:"date,omitempty"`
+	AttachmentsKnown   bool   `json:"attachments_known,omitempty"`
 }
 
 // Message is the unified message structure used across all channels.

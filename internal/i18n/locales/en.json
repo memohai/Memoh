@@ -355,7 +355,8 @@
     "skill": {
       "title": "Skills",
       "unavailable": "Skills aren't available for this bot.",
-      "empty": "No skills yet.\n\nSkills are reusable tools the bot can call. Add them in the web dashboard."
+      "empty": "No skills yet.\n\nSkills are reusable tools the bot can call. Add them in the web dashboard.",
+      "activateHint": "Activate a skill: `/<skill-name> [prompt]`"
     },
     "schedule": {
       "title": "Schedules",
@@ -490,6 +491,26 @@
       "generic": "⚠️ Couldn't complete {command} right now. Try again in a moment.",
       "genericNoResource": "⚠️ Something went wrong. Try again in a moment.",
       "runToSeeList": " Run {command} to see what's available."
+    }
+  },
+  "slash": {
+      "error": {
+        "unknownSlash": "Unknown slash command.",
+        "unsupportedWebCommand": "That slash command is not available in Web chat.",
+        "invalidSkillSlashSyntax": "Invalid skill slash syntax. Use /<skill-name> [prompt].",
+      "requestedSkillNotFound": "Requested skill was not found.",
+      "requestedSkillAmbiguous": "Requested skill is ambiguous.",
+      "requestedSkillDisabled": "Requested skill is disabled.",
+      "requestedSkillNotRuntimeUsable": "Requested skill is not available for chat.",
+      "tooManyRequestedSkills": "Too many skills requested.",
+      "requestedSkillContextTooLarge": "Requested skill context is too large.",
+      "slashAttachmentsUnsupported": "Slash commands do not support attachments.",
+      "unsupportedSkillSlashContext": "Requested skills are not supported in this context.",
+      "unsupportedLegacyEndpoint": "This endpoint does not support requested skills.",
+      "invalidQuickActionScope": "This quick action cannot be scoped to a session.",
+      "permissionDenied": "You do not have permission to use that slash command.",
+      "reservedSkillMetadata": "Reserved skill metadata cannot be supplied.",
+      "generic": "Slash command failed."
     }
   },
   "menu": {

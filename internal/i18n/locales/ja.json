@@ -355,7 +355,8 @@
     "skill": {
       "title": "Skill",
       "unavailable": "このBotではSkillを使用できません。",
-      "empty": "まだSkillはありません。\n\nSkillは、Botが呼び出すことができる再利用可能なToolです。それらを Web ダッシュボードに追加します。"
+      "empty": "まだSkillはありません。\n\nSkillは、Botが呼び出すことができる再利用可能なToolです。それらを Web ダッシュボードに追加します。",
+      "activateHint": "Skillを有効化: `/<skill-name> [プロンプト]`"
     },
     "schedule": {
       "title": "スケジュール",
@@ -490,6 +491,26 @@
       "generic": "⚠️ 現在 {command} を完了できませんでした。しばらくしてからもう一度試してください。",
       "genericNoResource": "⚠️何か問題が発生しました。しばらくしてからもう一度試してください。",
       "runToSeeList": "{command} を実行して、利用可能なものを確認します。"
+    }
+  },
+  "slash": {
+      "error": {
+        "unknownSlash": "不明な slash コマンドです。",
+        "unsupportedWebCommand": "その slash コマンドは Web Chat では利用できません。",
+        "invalidSkillSlashSyntax": "skill slash の構文が無効です。/<skill-name> [prompt] を使用してください。",
+      "requestedSkillNotFound": "指定された skill が見つかりません。",
+      "requestedSkillAmbiguous": "指定された skill は曖昧です。",
+      "requestedSkillDisabled": "指定された skill は無効です。",
+      "requestedSkillNotRuntimeUsable": "指定された skill はこのチャットでは利用できません。",
+      "tooManyRequestedSkills": "指定された skill が多すぎます。",
+      "requestedSkillContextTooLarge": "指定された skill の context が大きすぎます。",
+      "slashAttachmentsUnsupported": "slash コマンドでは添付ファイルを利用できません。",
+      "unsupportedSkillSlashContext": "この context では requested skills を利用できません。",
+      "unsupportedLegacyEndpoint": "この endpoint は requested skills に対応していません。",
+      "invalidQuickActionScope": "このクイック操作は session に紐づけられません。",
+      "permissionDenied": "この slash コマンドを使用する権限がありません。",
+      "reservedSkillMetadata": "予約済みの skill metadata は指定できません。",
+      "generic": "slash コマンドに失敗しました。"
     }
   },
   "menu": {

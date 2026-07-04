@@ -87,6 +87,8 @@ type UITurn struct {
 	Kind              string            `json:"kind,omitempty"`
 	Messages          []UIMessage       `json:"messages,omitempty"`
 	Text              string            `json:"text,omitempty"`
+	UserMessageKind   string            `json:"user_message_kind,omitempty"`
+	SkillActivation   *SkillActivation  `json:"skill_activation,omitempty"`
 	Attachments       []UIAttachment    `json:"attachments,omitempty"`
 	Reply             *UIReplyRef       `json:"reply,omitempty"`
 	Forward           *UIForwardRef     `json:"forward,omitempty"`

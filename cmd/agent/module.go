@@ -109,6 +109,7 @@ func options() fx.Option {
 			local.NewRouteHub,
 			provideChannelRegistry,
 			channel.NewStore,
+			provideCommandHandler,
 			provideChannelRouter,
 			provideChannelManager,
 			provideChannelLifecycleService,

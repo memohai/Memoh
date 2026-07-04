@@ -79,6 +79,25 @@ func prependUserMessage(query string, output []conversation.ModelMessage) []conv
 	return append(round, output...)
 }
 
+func prependTurnUserMessage(req conversation.ChatRequest, output []conversation.ModelMessage) []conversation.ModelMessage {
+	if strings.TrimSpace(req.Query) == "" && req.UserMessageKind != conversation.UserMessageKindSkillActivation {
+		return output
+	}
+	round := make([]conversation.ModelMessage, 0, 1+len(output))
+	round = append(round, conversation.ModelMessage{
+		Role:    "user",
+		Content: conversation.NewTextContent(req.Query),
+	})
+	return append(round, output...)
+}
+
+func modelQueryText(req conversation.ChatRequest) string {
+	if strings.TrimSpace(req.ModelQuery) != "" {
+		return req.ModelQuery
+	}
+	return req.Query
+}
+
 // modelMessagesToSDKMessages converts a slice of persistence messages to SDK messages.
 func modelMessagesToSDKMessages(msgs []conversation.ModelMessage) []sdk.Message {
 	result := make([]sdk.Message, 0, len(msgs))

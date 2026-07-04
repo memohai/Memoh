@@ -71,11 +71,18 @@ type ListView struct {
 }
 
 // ListItem is one row in a ListView. Action is nil for display-only rows.
+//
+// Callback optionally carries pre-encoded callback_data for button-capable
+// renderers; when set it takes precedence over Action as the button value.
+// Rows with only Callback stay out of the no-button fallback trailer (which
+// derives typeable hints from Action), so such callers must carry the
+// typeable form in the body text instead.
 type ListItem struct {
 	Label    string
 	Detail   string
 	Selected bool
 	Action   *ItemAction
+	Callback string
 }
 
 // ItemAction triggers a command when a row is tapped.

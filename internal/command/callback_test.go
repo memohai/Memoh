@@ -272,3 +272,54 @@ func TestRangeCallbackRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// TestSkillActivateCallbackRoundTrip pins the tap-to-activate encoding: a
+// /skill list row button decodes back to the exact canonical skill name, and
+// the synthetic command is the bare "/<name>" skill slash (no --page artifact,
+// no resource/action wrapper) so it re-enters the normal skill-intent pipeline.
+func TestSkillActivateCallbackRoundTrip(t *testing.T) {
+	name := "flutter-adding-home-screen-widgets"
+	data := EncodeSkillActivateCallback(name)
+	if len(data) > telegramCallbackLimit {
+		t.Fatalf("callback %q = %d bytes > %d", data, len(data), telegramCallbackLimit)
+	}
+	if !IsInteractiveCallback(data) {
+		t.Fatalf("IsInteractiveCallback(%q) = false", data)
+	}
+	parsed, ok := DecodeCallback(data)
+	if !ok || !parsed.IsSkillActivation() {
+		t.Fatalf("decode %q -> %+v ok=%v", data, parsed, ok)
+	}
+	if parsed.SelectID != name {
+		t.Errorf("SelectID = %q, want %q", parsed.SelectID, name)
+	}
+	if got, want := parsed.SyntheticCommand(), "/"+name; got != want {
+		t.Errorf("SyntheticCommand = %q, want %q", got, want)
+	}
+}
+
+// TestSkillActivateCallbackLongNameStashes covers names that would breach
+// Telegram's 64-byte callback_data ceiling: the name goes through the bounded
+// stash and still decodes to the original.
+func TestSkillActivateCallbackLongNameStashes(t *testing.T) {
+	name := strings.Repeat("very-long-skill-", 6) + "name" // 100 bytes
+	data := EncodeSkillActivateCallback(name)
+	if len(data) > telegramCallbackLimit {
+		t.Fatalf("stashed callback %q = %d bytes > %d", data, len(data), telegramCallbackLimit)
+	}
+	parsed, ok := DecodeCallback(data)
+	if !ok || !parsed.IsSkillActivation() || parsed.SelectID != name {
+		t.Fatalf("decode %q -> %+v ok=%v, want SelectID %q", data, parsed, ok, name)
+	}
+}
+
+// TestSkillActivateCallbackStashMissInvalidates: a stale stash token (process
+// restart, FIFO rollover) must invalidate the button rather than dispatch a
+// broken or empty activation.
+func TestSkillActivateCallbackStashMissInvalidates(t *testing.T) {
+	for _, data := range []string{"m~sk~#nosuchhash", "m~sk~", "m~sk~%zz"} {
+		if parsed, ok := DecodeCallback(data); ok {
+			t.Errorf("DecodeCallback(%q) = %+v ok=true, want invalid", data, parsed)
+		}
+	}
+}

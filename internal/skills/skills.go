@@ -41,17 +41,21 @@ const (
 )
 
 type Entry struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Content     string         `json:"content"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	Raw         string         `json:"raw"`
-	SourcePath  string         `json:"source_path,omitempty"`
-	SourceRoot  string         `json:"source_root,omitempty"`
-	SourceKind  string         `json:"source_kind,omitempty"`
-	Managed     bool           `json:"managed,omitempty"`
-	State       string         `json:"state,omitempty"`
-	ShadowedBy  string         `json:"shadowed_by,omitempty"`
+	Name                     string         `json:"name"`
+	Description              string         `json:"description"`
+	Content                  string         `json:"content"`
+	Metadata                 map[string]any `json:"metadata,omitempty"`
+	Raw                      string         `json:"raw"`
+	SourcePath               string         `json:"source_path,omitempty"`
+	SourceRoot               string         `json:"source_root,omitempty"`
+	SourceKind               string         `json:"source_kind,omitempty"`
+	Managed                  bool           `json:"managed,omitempty"`
+	State                    string         `json:"state,omitempty"`
+	ShadowedBy               string         `json:"shadowed_by,omitempty"`
+	RuntimeUsable            bool           `json:"runtime_usable,omitempty"`
+	RuntimeUnusableReason    string         `json:"runtime_unusable_reason,omitempty"`
+	RuntimeUsabilityChecked  bool           `json:"runtime_usability_checked,omitempty"`
+	runtimeMetadataMalformed bool
 }
 
 type ActionRequest struct {
@@ -60,10 +64,11 @@ type ActionRequest struct {
 }
 
 type Parsed struct {
-	Name        string
-	Description string
-	Content     string
-	Metadata    map[string]any
+	Name                     string
+	Description              string
+	Content                  string
+	Metadata                 map[string]any
+	runtimeMetadataMalformed bool
 }
 
 type Root struct {
@@ -224,6 +229,81 @@ func LoadEffectiveWithPluginRoots(ctx context.Context, client fileClient, rawCom
 	return out, nil
 }
 
+func normalizeRuntimeUsabilityEntries(entries []Entry) []Entry {
+	if len(entries) == 0 {
+		return entries
+	}
+	out := make([]Entry, len(entries))
+	for i, entry := range entries {
+		out[i] = NormalizeRuntimeUsability(entry)
+	}
+	return out
+}
+
+// NormalizeRuntimeUsability stores the registry-authoritative runtime usability
+// decision on an Entry so catalog and resolver code do not reinterpret raw metadata.
+func NormalizeRuntimeUsability(entry Entry) Entry {
+	usable, reason := computeRuntimeUsability(entry)
+	entry.RuntimeUsable = usable
+	entry.RuntimeUnusableReason = reason
+	entry.RuntimeUsabilityChecked = true
+	return entry
+}
+
+func computeRuntimeUsability(entry Entry) (bool, string) {
+	if entry.State != StateEffective {
+		return false, "state"
+	}
+	if !IsValidName(entry.Name) {
+		return false, "name"
+	}
+	if strings.TrimSpace(entry.Content) == "" {
+		return false, "content"
+	}
+	switch entry.SourceKind {
+	case SourceKindManaged, SourceKindLegacy, SourceKindCompat, SourceKindPlugin:
+	default:
+		return false, "source_kind"
+	}
+	if entry.runtimeMetadataMalformed {
+		return false, "metadata"
+	}
+	for _, key := range []string{"hidden", "internal", "internal_only", "subagent_only"} {
+		blocked, ok := metadataBool(entry.Metadata, key)
+		if !ok {
+			return false, "metadata"
+		}
+		if blocked {
+			return false, key
+		}
+	}
+	return true, ""
+}
+
+func metadataBool(metadata map[string]any, key string) (bool, bool) {
+	if metadata == nil {
+		return false, true
+	}
+	value, ok := metadata[key]
+	if !ok {
+		return false, true
+	}
+	switch v := value.(type) {
+	case bool:
+		return v, true
+	case string:
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "true", "yes", "1":
+			return true, true
+		case "false", "no", "0", "":
+			return false, true
+		}
+		return false, false
+	default:
+		return false, false
+	}
+}
+
 func ApplyAction(ctx context.Context, client fileClient, rawCompatRoots []string, req ActionRequest) error {
 	return ApplyActionWithPluginRoots(ctx, client, rawCompatRoots, nil, req)
 }
@@ -367,6 +447,7 @@ func ParseFile(raw string, fallbackName string) Parsed {
 	}
 	closingIdx := strings.Index(rest, "\n---")
 	if closingIdx < 0 {
+		result.runtimeMetadataMalformed = true
 		return normalizeParsed(result)
 	}
 
@@ -376,18 +457,25 @@ func ParseFile(raw string, fallbackName string) Parsed {
 	result.Content = body
 
 	var fm struct {
-		Name        string         `yaml:"name"`
-		Description string         `yaml:"description"`
-		Metadata    map[string]any `yaml:"metadata"`
+		Name        string `yaml:"name"`
+		Description string `yaml:"description"`
+		Metadata    any    `yaml:"metadata"`
 	}
 	if err := yaml.Unmarshal([]byte(frontmatterRaw), &fm); err != nil {
+		result.runtimeMetadataMalformed = true
 		return normalizeParsed(result)
 	}
 	if strings.TrimSpace(fm.Name) != "" {
 		result.Name = strings.TrimSpace(fm.Name)
 	}
 	result.Description = strings.TrimSpace(fm.Description)
-	result.Metadata = fm.Metadata
+	switch metadata := fm.Metadata.(type) {
+	case nil:
+	case map[string]any:
+		result.Metadata = metadata
+	default:
+		result.runtimeMetadataMalformed = true
+	}
 	return normalizeParsed(result)
 }
 
@@ -491,18 +579,18 @@ func resolve(items []Entry, overrides map[string]indexOverride) []Entry {
 		for i := range group {
 			if overrides[group[i].SourcePath].Disabled {
 				group[i].State = StateDisabled
-				out = append(out, group[i])
+				out = append(out, NormalizeRuntimeUsability(group[i]))
 				continue
 			}
 			if effectivePath == "" {
 				group[i].State = StateEffective
 				effectivePath = group[i].SourcePath
-				out = append(out, group[i])
+				out = append(out, NormalizeRuntimeUsability(group[i]))
 				continue
 			}
 			group[i].State = StateShadowed
 			group[i].ShadowedBy = effectivePath
-			out = append(out, group[i])
+			out = append(out, NormalizeRuntimeUsability(group[i]))
 		}
 	}
 
@@ -539,15 +627,16 @@ func stateRank(state string) int {
 
 func entryFromParsed(parsed Parsed, raw string, root Root, sourcePath string) Entry {
 	return Entry{
-		Name:        parsed.Name,
-		Description: parsed.Description,
-		Content:     parsed.Content,
-		Metadata:    parsed.Metadata,
-		Raw:         raw,
-		SourcePath:  sourcePath,
-		SourceRoot:  root.Path,
-		SourceKind:  root.Kind,
-		Managed:     root.Managed,
+		Name:                     parsed.Name,
+		Description:              parsed.Description,
+		Content:                  parsed.Content,
+		Metadata:                 parsed.Metadata,
+		Raw:                      raw,
+		SourcePath:               sourcePath,
+		SourceRoot:               root.Path,
+		SourceKind:               root.Kind,
+		Managed:                  root.Managed,
+		runtimeMetadataMalformed: parsed.runtimeMetadataMalformed,
 	}
 }
 

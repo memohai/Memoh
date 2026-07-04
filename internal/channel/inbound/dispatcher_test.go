@@ -155,6 +155,41 @@ func TestRouteDispatcher_QueueAndDrain(t *testing.T) {
 	}
 }
 
+func TestRouteDispatcher_OverlappingActiveOwners(t *testing.T) {
+	d := NewRouteDispatcher(slog.Default())
+	routeID := "route-1"
+
+	d.MarkActive(routeID)
+	d.MarkActive(routeID)
+	d.Enqueue(routeID, QueuedTask{Text: "queued"})
+	d.AddPendingPersist(routeID, func(context.Context) {})
+
+	first := d.MarkDone(routeID)
+	if len(first.QueuedTasks) != 0 {
+		t.Fatalf("expected no queued tasks while an owner remains active, got %d", len(first.QueuedTasks))
+	}
+	if len(first.PendingPersists) != 0 {
+		t.Fatalf("expected no pending persists while an owner remains active, got %d", len(first.PendingPersists))
+	}
+	if !d.IsActive(routeID) {
+		t.Fatal("expected route to stay active until the last owner exits")
+	}
+	if !d.Inject(routeID, InjectMessage{Text: "still active"}) {
+		t.Fatal("expected inject to remain available while an owner remains active")
+	}
+
+	second := d.MarkDone(routeID)
+	if d.IsActive(routeID) {
+		t.Fatal("expected route to be inactive after the last owner exits")
+	}
+	if len(second.QueuedTasks) != 1 || second.QueuedTasks[0].Text != "queued" {
+		t.Fatalf("expected queued task on final release, got %v", second.QueuedTasks)
+	}
+	if len(second.PendingPersists) != 1 {
+		t.Fatalf("expected pending persist on final release, got %d", len(second.PendingPersists))
+	}
+}
+
 func TestRouteDispatcher_MarkDoneReturnsNilWhenEmpty(t *testing.T) {
 	d := NewRouteDispatcher(slog.Default())
 	routeID := "route-1"

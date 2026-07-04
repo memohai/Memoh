@@ -62,7 +62,7 @@ func (r *Resolver) storeRoundWithOptions(ctx context.Context, req conversation.C
 	}
 
 	r.storeMessages(ctx, req, filtered, modelID, opts)
-	if !opts.SkipMemory {
+	if !opts.SkipMemory && !req.SkipMemoryExtraction {
 		go r.storeMemory(context.WithoutCancel(ctx), req, filtered)
 	}
 
@@ -179,15 +179,22 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			// turn (the read-tool case), and falsely linked unrelated
 			// messages to the same inbound IM event.
 			ownText := strings.TrimSpace(msg.TextContent())
-			isOriginalQuery := ownText != "" && ownText == strings.TrimSpace(req.Query)
+			isOriginalSkillActivation := req.UserMessageKind == conversation.UserMessageKindSkillActivation &&
+				strings.TrimSpace(req.Query) == "" &&
+				ownText == "" &&
+				i == 0
+			isOriginalQuery := (ownText != "" && ownText == strings.TrimSpace(req.Query)) || isOriginalSkillActivation
 
 			if isOriginalQuery {
 				externalMessageID = req.ExternalMessageID
 				sourceReplyToMessageID = req.SourceReplyToMessageID
 				messageEventID = req.EventID
-				if req.RawQuery != "" {
+				switch {
+				case strings.TrimSpace(req.UserVisibleText) != "" || req.UserMessageKind == conversation.UserMessageKindSkillActivation:
+					displayText = strings.TrimSpace(req.UserVisibleText)
+				case req.RawQuery != "":
 					displayText = req.RawQuery
-				} else {
+				default:
 					displayText = strings.TrimSpace(req.Query)
 				}
 				assets = chatAttachmentsToAssetRefs(req.Attachments)
@@ -338,10 +345,88 @@ func buildInteractionMetadata(req conversation.ChatRequest) map[string]any {
 	if len(forward) > 0 {
 		meta["forward"] = forward
 	}
+	if requestedSkills := publicRequestedSkillMetadata(req.RequestedSkills); len(requestedSkills) > 0 {
+		meta["model_requested_skills"] = requestedSkills
+	}
+	if kind := strings.TrimSpace(req.UserMessageKind); kind != "" {
+		meta["user_message_kind"] = kind
+	}
+	if activation := publicSkillActivationMetadata(req.SkillActivation); activation != nil {
+		meta["skill_activation"] = activation
+	}
 	if len(meta) == 0 {
 		return nil
 	}
 	return meta
+}
+
+func publicSkillActivationMetadata(activation *conversation.SkillActivation) map[string]any {
+	if activation == nil {
+		return nil
+	}
+	out := map[string]any{}
+	if prompt := strings.TrimSpace(activation.Prompt); prompt != "" {
+		out["prompt"] = prompt
+	}
+	skills := make([]map[string]any, 0, len(activation.Skills))
+	for _, skill := range activation.Skills {
+		name := strings.TrimSpace(skill.Name)
+		if name == "" {
+			continue
+		}
+		item := map[string]any{"name": name}
+		if displayName := strings.TrimSpace(skill.DisplayName); displayName != "" {
+			item["display_name"] = displayName
+		}
+		if description := strings.TrimSpace(skill.Description); description != "" {
+			item["description"] = description
+		}
+		if sourceKind := strings.TrimSpace(skill.SourceKind); sourceKind != "" {
+			item["source_kind"] = sourceKind
+		}
+		if state := strings.TrimSpace(skill.State); state != "" {
+			item["state"] = state
+		}
+		skills = append(skills, item)
+	}
+	if len(skills) > 0 {
+		out["skills"] = skills
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func publicRequestedSkillMetadata(items []conversation.RequestedSkillContext) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		key := strings.TrimSpace(item.Identity)
+		if key == "" {
+			key = name + "\x00" + strings.TrimSpace(item.SourceKind) + "\x00" + strings.TrimSpace(item.OpaqueSourceID)
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		entry := map[string]any{"name": name}
+		if sourceKind := strings.TrimSpace(item.SourceKind); sourceKind != "" {
+			entry["source_kind"] = sourceKind
+		}
+		out = append(out, entry)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func chatAttachmentMetadata(attachments []conversation.ChatAttachment) []map[string]any {

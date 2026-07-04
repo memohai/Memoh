@@ -355,7 +355,8 @@
     "skill": {
       "title": "技能",
       "unavailable": "此机器人暂无可用技能。",
-      "empty": "尚未添加技能。\n\n技能是机器人可调用的工具。请在 Web 控制台添加。"
+      "empty": "尚未添加技能。\n\n技能是机器人可调用的工具。请在 Web 控制台添加。",
+      "activateHint": "激活技能：`/<技能名> [提示词]`"
     },
     "schedule": {
       "title": "定时任务",
@@ -490,6 +491,26 @@
       "generic": "⚠️ 暂时无法完成 {command}，请稍后再试。",
       "genericNoResource": "⚠️ 出了点问题，请稍后再试。",
       "runToSeeList": " 用 {command} 查看可用项。"
+    }
+  },
+  "slash": {
+      "error": {
+        "unknownSlash": "未知 slash 命令。",
+        "unsupportedWebCommand": "这个 slash 命令不能在 Web Chat 中使用。",
+        "invalidSkillSlashSyntax": "无效的 skill slash 语法。请使用 /<skill-name> [prompt]。",
+      "requestedSkillNotFound": "找不到请求的 skill。",
+      "requestedSkillAmbiguous": "请求的 skill 存在歧义。",
+      "requestedSkillDisabled": "请求的 skill 已被禁用。",
+      "requestedSkillNotRuntimeUsable": "请求的 skill 不能用于本次对话。",
+      "tooManyRequestedSkills": "请求的 skill 数量过多。",
+      "requestedSkillContextTooLarge": "请求的 skill 上下文过大。",
+      "slashAttachmentsUnsupported": "slash 命令不支持附件。",
+      "unsupportedSkillSlashContext": "当前上下文不支持 requested skills。",
+      "unsupportedLegacyEndpoint": "该端点不支持 requested skills。",
+      "invalidQuickActionScope": "该快捷操作不能绑定到 session。",
+      "permissionDenied": "你没有权限使用该 slash 命令。",
+      "reservedSkillMetadata": "不能提交保留的 skill metadata。",
+      "generic": "slash 命令执行失败。"
     }
   },
   "menu": {

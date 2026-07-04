@@ -33,6 +33,10 @@ type SkillsResponse struct {
 	Skills []SkillItem `json:"skills"`
 }
 
+type SafeSkillsResponse struct {
+	Skills []skillset.SafeCatalogItem `json:"skills"`
+}
+
 type SkillsUpsertRequest struct {
 	Skills []string `json:"skills"`
 }
@@ -64,11 +68,12 @@ func (h *ContainerdHandler) SetPluginService(service PluginInstallationLister) {
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} SkillsResponse
 // @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/skills [get].
 func (h *ContainerdHandler) ListSkills(c echo.Context) error {
-	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceRead)
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionManage)
 	if err != nil {
 		return err
 	}
@@ -78,6 +83,28 @@ func (h *ContainerdHandler) ListSkills(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, SkillsResponse{Skills: skills})
+}
+
+// ListSafeSkills godoc
+// @Summary List runtime-safe skills for chat-time skill selection
+// @Tags skills
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {object} SafeSkillsResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/skills/catalog [get].
+func (h *ContainerdHandler) ListSafeSkills(c echo.Context) error {
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionChat)
+	if err != nil {
+		return err
+	}
+	catalog, err := h.buildSafeSkillCatalog(c.Request().Context(), botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, SafeSkillsResponse{Skills: catalog})
 }
 
 // UpsertSkills godoc
@@ -233,7 +260,35 @@ func (h *ContainerdHandler) LoadSkills(ctx context.Context, botID string) ([]Ski
 	return skillItemsFromEntries(items), nil
 }
 
+func (h *ContainerdHandler) ListSafeSkillCatalog(ctx context.Context, botID string) ([]skillset.SafeCatalogItem, error) {
+	return h.buildSafeSkillCatalog(ctx, botID)
+}
+
+func (h *ContainerdHandler) buildSafeSkillCatalog(ctx context.Context, botID string) ([]skillset.SafeCatalogItem, error) {
+	entries, err := h.listSkillEntriesFromContainer(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	return skillset.BuildSafeCatalog(entries)
+}
+
+func (h *ContainerdHandler) ResolveTextRequestedSkills(ctx context.Context, botID string, names []string) ([]skillset.ResolvedSkill, error) {
+	entries, err := h.listSkillEntriesFromContainer(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	return skillset.ResolveTextRequestedSkills(entries, names, skillset.ResolveLimits{})
+}
+
 func (h *ContainerdHandler) listSkillsFromContainer(ctx context.Context, botID string) ([]SkillItem, error) {
+	items, err := h.listSkillEntriesFromContainer(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	return skillItemsFromEntries(items), nil
+}
+
+func (h *ContainerdHandler) listSkillEntriesFromContainer(ctx context.Context, botID string) ([]skillset.Entry, error) {
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
 		return nil, err
@@ -246,7 +301,7 @@ func (h *ContainerdHandler) listSkillsFromContainer(ctx context.Context, botID s
 	if err != nil {
 		return nil, err
 	}
-	return skillItemsFromEntries(items), nil
+	return items, nil
 }
 
 func (h *ContainerdHandler) skillDiscoveryRoots(ctx context.Context, botID string) ([]string, []string, error) {

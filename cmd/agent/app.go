@@ -578,28 +578,16 @@ func provideChannelRouter(
 	botService *bots.Service,
 	accountService *accounts.Service,
 	aclService *acl.Service,
-	channelAccessService *channelaccess.Service,
 	policyService *policy.Service,
 	mediaService *media.Service,
 	audioService *audiopkg.Service,
 	settingsService *settings.Service,
-	scheduleService *schedule.Service,
-	mcpConnService *mcp.ConnectionService,
-	modelsService *models.Service,
-	providersService *providers.Service,
-	memProvService *memprovider.Service,
-	searchProvService *searchproviders.Service,
-	emailService *emailpkg.Service,
-	emailOutboxService *emailpkg.OutboxService,
-	heartbeatService *heartbeat.Service,
-	compactionService *compaction.Service,
-	queries dbstore.Queries,
-	containerdHandler *handlers.ContainerdHandler,
-	provider bridge.Provider,
 	pipeline *pipelinepkg.Pipeline,
 	eventStore *pipelinepkg.EventStore,
 	discussDriver *pipelinepkg.DiscussDriver,
 	rc *boot.RuntimeConfig,
+	cmdHandler *command.Handler,
+	containerdHandler *handlers.ContainerdHandler,
 ) *inbound.ChannelInboundProcessor {
 	adapter, ok := registry.Get(qq.Type)
 	if !ok {
@@ -628,6 +616,31 @@ func provideChannelRouter(
 	processor.SetDefaultChatRuntime(&settingsDefaultChatRuntime{settings: settingsService})
 	processor.SetACPAgentSetupReader(&botACPAgentSetupReader{bots: botService})
 	processor.SetBotPermissionChecker(&botPermissionCheckerAdapter{bots: botService, accounts: accountService})
+	processor.SetCommandHandler(cmdHandler)
+	processor.SetRequestedSkillResolver(containerdHandler)
+	return processor
+}
+
+func provideCommandHandler(
+	log *slog.Logger,
+	botService *bots.Service,
+	channelAccessService *channelaccess.Service,
+	scheduleService *schedule.Service,
+	settingsService *settings.Service,
+	mcpConnService *mcp.ConnectionService,
+	modelsService *models.Service,
+	providersService *providers.Service,
+	memProvService *memprovider.Service,
+	searchProvService *searchproviders.Service,
+	emailService *emailpkg.Service,
+	emailOutboxService *emailpkg.OutboxService,
+	heartbeatService *heartbeat.Service,
+	queries dbstore.Queries,
+	aclService *acl.Service,
+	containerdHandler *handlers.ContainerdHandler,
+	provider bridge.Provider,
+	compactionService *compaction.Service,
+) *command.Handler {
 	cmdHandler := command.NewHandler(
 		log,
 		&command.BotMemberRoleAdapter{BotService: botService, ManageResolver: channelAccessService},
@@ -648,8 +661,7 @@ func provideChannelRouter(
 	)
 	cmdHandler.SetCompactionService(compactionService, queries)
 	cmdHandler.SetLinkConsumer(channelAccessService)
-	processor.SetCommandHandler(cmdHandler)
-	return processor
+	return cmdHandler
 }
 
 func provideChannelManager(log *slog.Logger, registry *channel.Registry, channelStore *channel.Store, channelRouter *inbound.ChannelInboundProcessor, mediaService *media.Service) *channel.Manager {
@@ -853,9 +865,11 @@ func provideProviderOAuthHandler(providersService *providers.Service, acpCodexOA
 	return handler
 }
 
-func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service, resolver *flow.Resolver, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service, rc *boot.RuntimeConfig) *handlers.LocalChannelHandler {
+func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service, resolver *flow.Resolver, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service, rc *boot.RuntimeConfig, commandHandler *command.Handler, containerdHandler *handlers.ContainerdHandler) *handlers.LocalChannelHandler {
 	h := handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, chatService, hub, botService, accountService, sessionService)
 	h.SetResolver(resolver)
+	h.SetCommandHandler(commandHandler)
+	h.SetRuntimeSkillResolver(containerdHandler)
 	h.SetAuthTokenConfig(rc.JwtSecret, rc.JwtExpiresIn)
 	h.SetMediaService(mediaService)
 	h.SetSpeechService(audioService, &settingsSpeechModelResolver{settings: settingsService})
@@ -1593,6 +1607,21 @@ type commandSkillLoaderAdapter struct {
 
 func (a *commandSkillLoaderAdapter) LoadSkills(ctx context.Context, botID string) ([]command.Skill, error) {
 	items, err := a.handler.LoadSkills(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	skills := make([]command.Skill, len(items))
+	for i, item := range items {
+		skills[i] = command.Skill{Name: item.Name, Description: item.Description}
+	}
+	return skills, nil
+}
+
+// ListRuntimeSkills exposes the runtime-usable safe catalog (the same list the
+// Web slash picker shows) as the command layer's optional RuntimeSkillLister
+// capability, upgrading /skill list to tap-to-activate rows.
+func (a *commandSkillLoaderAdapter) ListRuntimeSkills(ctx context.Context, botID string) ([]command.Skill, error) {
+	items, err := a.handler.ListSafeSkillCatalog(ctx, botID)
 	if err != nil {
 		return nil, err
 	}

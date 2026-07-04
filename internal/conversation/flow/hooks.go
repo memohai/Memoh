@@ -38,6 +38,15 @@ func (r *Resolver) applyUserMessageHook(ctx context.Context, req conversation.Ch
 			Content: conversation.NewTextContent(formatResolverHookContext(hooks.EventUserMessageReceived, res.AppendContext)),
 		})
 	}
+	// The reserved-skill-metadata guard runs at the resolver entrypoints
+	// BEFORE this hook, so hook-modified messages must be re-checked here.
+	// Today the only mutation is the metadata-less text append above, but the
+	// guard is a security boundary (reserved keys are trusted downstream as
+	// server-authored state) and must hold for any future hook capability
+	// that can shape message content or metadata.
+	if err := rejectReservedSkillMetadataIfPresent(req); err != nil {
+		return req, err
+	}
 	return req, nil
 }
 

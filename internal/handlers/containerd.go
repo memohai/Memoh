@@ -267,6 +267,8 @@ func NewContainerdHandler(log *slog.Logger, manager containerWorkspace, cfg conf
 func (h *ContainerdHandler) Register(e *echo.Echo) {
 	e.Pre(h.handleBrowserProxyPre)
 
+	e.GET("/bots/:bot_id/skills/catalog", h.ListSafeSkills)
+
 	group := e.Group("/bots/:bot_id/container")
 	group.POST("", h.CreateContainer)
 	group.GET("", h.GetContainer)

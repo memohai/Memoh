@@ -4,14 +4,18 @@ import {
   getBotsByBotIdMessagesLocate,
   getBotsByBotIdSessionsBySessionIdMessagesEvents,
   getBotsByBotIdSessionsEvents,
-  postBotsByBotIdLocalMessages,
+  getBotsByBotIdSkillsCatalog,
+  postBotsByBotIdQuickActionsExecute,
+  postBotsByBotIdWebMessages,
 } from '@memohai/sdk'
-import type { ChannelAttachment, ChannelMessage } from '@memohai/sdk'
+import type { ChannelAttachment, ChannelMessage, HandlersLocalChannelMessageRequest } from '@memohai/sdk'
 import type {
   BotSessionActivityEvent,
   ChatAttachment,
+  CommandEventResponse,
   FetchMessagesOptions,
   Message,
+  RequestedSkillSelection,
   SessionMessageStreamEvent,
   UITurn,
 } from './useChat.types'
@@ -95,6 +99,58 @@ export interface SendMessageOverrides {
   reasoningEffort?: string
 }
 
+function isCommandEvent(value: unknown): value is CommandEventResponse {
+  if (!value || typeof value !== 'object') return false
+  const type = String((value as { type?: unknown }).type ?? '').trim()
+  return type === 'command_result' || type === 'command_error'
+}
+
+export async function fetchSafeSkillCatalog(botId: string): Promise<RequestedSkillSelection[]> {
+  const bid = botId.trim()
+  if (!bid) return []
+  const { data } = await getBotsByBotIdSkillsCatalog({
+    path: { bot_id: bid },
+    throwOnError: true,
+  })
+  return (data?.skills ?? []).flatMap((item): RequestedSkillSelection[] => {
+    const name = item.name?.trim()
+    if (!name) return []
+    return [{
+      name,
+      display_name: item.display_name?.trim() || undefined,
+      description: item.description?.trim() || undefined,
+      source_kind: item.source_kind?.trim() || undefined,
+      state: item.state?.trim() || undefined,
+    }]
+  })
+}
+
+export async function executeQuickAction(
+  botId: string,
+  actionId: string,
+  options: { invocationId?: string; composerScope?: string; sessionId?: string; skillActivationAllowed?: boolean } = {},
+): Promise<CommandEventResponse> {
+  const bid = botId.trim()
+  const aid = actionId.trim()
+  if (!bid) throw new Error('bot id is required')
+  if (!aid) throw new Error('action id is required')
+  const { data } = await postBotsByBotIdQuickActionsExecute({
+    path: { bot_id: bid },
+    body: {
+      action_id: aid,
+      invocation_id: options.invocationId?.trim() || undefined,
+      composer_scope: options.composerScope?.trim() || undefined,
+      session_id: options.sessionId?.trim() || undefined,
+      params: options.skillActivationAllowed === false
+        ? { skill_activation_allowed: false }
+        : undefined,
+    },
+    throwOnError: true,
+  })
+  if (isCommandEvent(data)) return data
+  throw new Error('invalid quick action response')
+}
+
 export async function sendLocalChannelMessage(
   botId: string,
   text: string,
@@ -114,12 +170,12 @@ export async function sendLocalChannelMessage(
       name: item.name ?? '',
     }))
   }
-  const body: Record<string, unknown> = { message: msg }
+  const body: HandlersLocalChannelMessageRequest = { message: msg }
   if (overrides?.modelId) body.model_id = overrides.modelId
   if (overrides?.reasoningEffort) body.reasoning_effort = overrides.reasoningEffort
-  await postBotsByBotIdLocalMessages({
-    path: { bot_id: botId },
-    body: body as { message: ChannelMessage; model_id?: string; reasoning_effort?: string },
+  await postBotsByBotIdWebMessages({
+    path: { bot_id: botId.trim() },
+    body,
     throwOnError: true,
   })
 }

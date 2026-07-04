@@ -35,6 +35,7 @@ import {
   type SessionSummary,
   type SessionMessageStreamEvent,
   type ChatAttachment,
+  type CommandEventResponse,
   type ChatWebSocket,
   type UIAttachment,
   type UIAttachmentsMessage,
@@ -44,15 +45,19 @@ import {
   type UIReasoningMessage,
   type UIReplyRef,
   type UIForwardRef,
+  type UISkillActivation,
   type UISystemTurn,
   type UITextMessage,
   type UIToolApproval,
   type UIToolMessage,
   type UIUserInput,
+  type RequestedSkillSelection,
   type WSUserInputAnswer,
   type UITurn,
   type UIUserTurn,
   type UIStreamEvent,
+  type RequestedSkillRequest,
+  executeQuickAction,
   fetchBots,
   fetchMessagesUI,
   sendLocalChannelMessage,
@@ -143,6 +148,8 @@ export interface ChatUserTurn {
   serverId?: string
   role: 'user'
   text: string
+  userMessageKind?: string
+  skillActivation?: UISkillActivation
   attachments: AttachmentItem[]
   reply?: UIReplyRef
   forward?: UIForwardRef
@@ -224,16 +231,25 @@ function currentLocale() {
   return locale === 'zh' || locale === 'ja' ? locale : 'en'
 }
 
-function userInputConnectionLostMessage() {
+function localizedMessages() {
   const locale = currentLocale()
-  const messages = locale === 'zh' ? zhMessages : locale === 'ja' ? jaMessages : enMessages
+  return locale === 'zh' ? zhMessages : locale === 'ja' ? jaMessages : enMessages
+}
+
+function userInputConnectionLostMessage() {
+  const messages = localizedMessages()
   return messages.chat.tools.userInputConnectionLost
 }
 
 function sendFailedMessage() {
-  const locale = currentLocale()
-  const messages = locale === 'zh' ? zhMessages : locale === 'ja' ? jaMessages : enMessages
+  const messages = localizedMessages()
   return messages.chat.sendFailed
+}
+
+function commandErrorMessage(code: string) {
+  const messages = localizedMessages()
+  const errors = messages.chat.slash.errorMessages as Record<string, string>
+  return errors[code] || errors.generic || 'Slash command failed.'
 }
 
 interface PendingAssistantStream {
@@ -241,6 +257,7 @@ interface PendingAssistantStream {
   assistantTurn: ChatAssistantTurn
   botId: string
   sessionId: string
+  composerScope: string
   done: boolean
   resolve: () => void
   reject: (err: Error) => void
@@ -259,9 +276,21 @@ export interface SendMessageResult {
   error?: string
   restoreInput?: string
   restoreAttachments?: ChatAttachment[]
+  restoreRequestedSkills?: RequestedSkillSelection[]
+  composerScope?: string
+}
+
+export interface SendMessageOptions {
+  requestedSkills?: RequestedSkillSelection[]
+  composerScope?: string
 }
 
 type WebNewCommandResult =
+  | { kind: 'none' }
+  | { kind: 'handled' }
+  | { kind: 'error'; message: string }
+
+type WebSlashCommandResult =
   | { kind: 'none' }
   | { kind: 'handled' }
   | { kind: 'error'; message: string }
@@ -304,9 +333,11 @@ interface StartupSendFailure {
   id: string
   botId: string
   sessionId: string
+  composerScope?: string
   error: string
   restoreInput: string
   restoreAttachments?: ChatAttachment[]
+  restoreRequestedSkills?: RequestedSkillSelection[]
 }
 
 class StreamFailureError extends Error {
@@ -317,6 +348,23 @@ class StreamFailureError extends Error {
     this.name = 'StreamFailureError'
     this.stage = stage
   }
+}
+
+class CommandStreamError extends StreamFailureError {
+  constructor(message: string) {
+    super(message, 'startup')
+    this.name = 'CommandStreamError'
+  }
+}
+
+type StoreCommandEvent = CommandEventResponse & {
+  bot_id?: string
+}
+
+interface CommandEventScope {
+  botId?: string
+  sessionId?: string
+  composerScope?: string
 }
 
 interface EphemeralAssistantError {
@@ -376,6 +424,7 @@ export const useChatStore = defineStore('chat', () => {
   const overrideModelId = ref<string>('')
   const overrideReasoningEffort = ref<string>('')
   const startupSendFailure = ref<StartupSendFailure | null>(null)
+  const commandEvents = ref<Record<string, StoreCommandEvent>>({})
   // Bumps when the user sends a message, carrying the resolved session id and
   // whether that send just promoted a draft (created the session). The workspace
   // tab store watches this to pin the chat tab — a session you have sent in is no
@@ -385,7 +434,7 @@ export const useChatStore = defineStore('chat', () => {
   // Bumps after a session delete succeeds. Consumers that own per-session UI
   // chrome must not infer deletion from the paginated session list: a valid open
   // tab can fall off the current page without being deleted.
-  const deletedSession = ref<{ id: string, botId: string, seq: number } | null>(null)
+  const deletedSession = ref<{ id: string, botId: string, seq: number, composerScope?: string } | null>(null)
   let deletedSessionSeq = 0
 
   // Bumps every time a fs-mutating tool call (write/edit/apply_patch/exec) finishes for the
@@ -526,6 +575,7 @@ export const useChatStore = defineStore('chat', () => {
   let sessionListRefreshPromise: { botId: string; promise: Promise<void> } | null = null
   const latestBackgroundTasks = new Map<string, BackgroundTask>()
   const ephemeralAssistantErrors = new Map<string, EphemeralAssistantError[]>()
+  const wsCreatedSessionsByStream = new Map<string, string>()
   // Two independent streams replace the deleted bot-wide messages SSE:
   // - sessionMessagesStream follows the active sessionId and feeds the
   //   transcript (server pushes a small backlog + live messages for that
@@ -701,6 +751,47 @@ export const useChatStore = defineStore('chat', () => {
     sessionById.delete(id)
     markSessionLookupChanged()
     forgetRememberedSession(id)
+  }
+
+  async function cleanupFailedDeferredSession(botId: string, targetSessionId: string, fallbackComposerScope = '') {
+    const bid = botId.trim()
+    const sid = targetSessionId.trim()
+    if (!bid || !sid) return
+
+    const sessionCommandKey = commandEventKey({ botId: bid, sessionId: sid })
+    const sessionCommandEvent = commandEvents.value[sessionCommandKey]
+    const composerScope = sessionCommandEvent?.composer_scope?.trim() || fallbackComposerScope.trim()
+    if (sessionCommandEvent) {
+      const scoped = { ...sessionCommandEvent }
+      delete scoped.session_id
+      const next = { ...commandEvents.value }
+      delete next[sessionCommandKey]
+      next[commandEventKey({ botId: bid, composerScope: scoped.composer_scope || 'chat' })] = scoped
+      commandEvents.value = next
+    }
+    markSessionDeleted(bid, sid)
+    const deletedSignal: { id: string, botId: string, seq: number, composerScope?: string } = { id: sid, botId: bid, seq: ++deletedSessionSeq }
+    if (composerScope) deletedSignal.composerScope = composerScope
+    deletedSession.value = deletedSignal
+    clearACPRuntimeStatus(bid, sid)
+    if ((currentBotId.value ?? '').trim() === bid) {
+      removeSessionFromList(sid)
+      if ((sessionId.value ?? '').trim() === sid) {
+        sessionId.value = null
+        explicitSessionSelection.value = false
+        draftIntent.value = true
+        sessionMessagesStream.stop()
+        replaceMessages([])
+        hasMoreOlder.value = false
+        hasLoadedOlder.value = false
+      }
+    }
+
+    try {
+      await requestDeleteSession(bid, sid)
+    } catch {
+      // Best-effort cleanup: the send failure result is the user-facing error.
+    }
   }
 
   function fallbackSessionAfterDelete(mode: SidebarSessionMode): SessionSummary | null {
@@ -1012,12 +1103,32 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function skillActivationTextFromRaw(text: string, activation: UISkillActivation | undefined): string {
+    const value = text.trim()
+    if (!value || !activation) return value
+    if (value.startsWith('The user activated the following skill for this turn without an additional prompt:')) {
+      return ''
+    }
+    if (!value.startsWith('/')) return value
+    const [head = '', ...rest] = value.split(/\s+/)
+    const selector = head.replace(/^\//, '').split('@')[0]?.trim() ?? ''
+    const matchesSkill = (activation.skills ?? []).some(skill => selector === skill.name?.trim())
+    return matchesSkill ? rest.join(' ').trim() : ''
+  }
+
   function normalizeTurn(turn: UITurn): ChatMessage {
     if (turn.role === 'user') {
+      const userMessageKind = (turn.user_message_kind ?? '').trim()
+        || (turn.skill_activation ? 'skill_activation' : undefined)
+      const text = turn.skill_activation
+        ? skillActivationTextFromRaw(turn.text ?? '', turn.skill_activation)
+        : turn.text ?? ''
       return {
         id: String(turn.id ?? nextId()),
         role: 'user',
-        text: turn.text ?? '',
+        text,
+        userMessageKind,
+        skillActivation: turn.skill_activation,
         attachments: (turn.attachments ?? []).map(normalizeAttachment),
         reply: normalizeReplyRef(turn.reply),
         forward: normalizeForwardRef(turn.forward),
@@ -1327,7 +1438,7 @@ export const useChatStore = defineStore('chat', () => {
     return activeIds.length === 1 ? activeIds[0]! : fallbackStreamId(sid)
   }
 
-  function trackAssistantStream(streamId: string, assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string): Promise<void> {
+  function trackAssistantStream(streamId: string, assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string, composerScope = 'chat'): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const id = streamId.trim()
       if (!id) {
@@ -1343,6 +1454,7 @@ export const useChatStore = defineStore('chat', () => {
         assistantTurn,
         botId,
         sessionId: targetSessionId.trim(),
+        composerScope: composerScope.trim() || 'chat',
         done: false,
         resolve,
         reject,
@@ -1606,17 +1718,131 @@ export const useChatStore = defineStore('chat', () => {
     appendAssistantError(assistantTurn, botId, targetSessionId, error.message)
   }
 
+  function latestOptimisticUserText(): string {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const message = messages[i]
+      if (message?.role === 'user') return message.text.trim()
+    }
+    return ''
+  }
+
+  function handleWSSessionCreated(event: { stream_id?: string; session_id: string }, sourceBotId = '') {
+    const sid = event.session_id.trim()
+    const pending = event.stream_id ? getAssistantStream(event.stream_id) : undefined
+    const bid = (pending?.botId || sourceBotId || currentBotId.value || '').trim()
+    if (!bid || !sid) return
+    const streamId = event.stream_id?.trim()
+    if (streamId) wsCreatedSessionsByStream.set(streamId, sid)
+    bindAssistantStreamSession(event.stream_id, sid)
+    if ((currentBotId.value ?? '').trim() !== bid) return
+    if (sessionId.value && sessionId.value !== sid) return
+
+    const now = new Date().toISOString()
+    if (!knownSessionSummary(sid)) {
+      upsertSession({
+        id: sid,
+        bot_id: bid,
+        type: 'chat',
+        session_mode: 'chat',
+        runtime_type: 'model',
+        title: provisionalSessionTitle(latestOptimisticUserText()),
+        created_at: now,
+        updated_at: now,
+      })
+    }
+    sessionId.value = sid
+    explicitSessionSelection.value = true
+    draftIntent.value = false
+    userSentInSession.value = { id: sid, wasDraft: true, seq: ++userSendSeq }
+  }
+
   function rememberStartupSendFailure(failure: Omit<StartupSendFailure, 'id'>) {
     startupSendFailure.value = {
       ...failure,
       id: nextId(),
       restoreAttachments: failure.restoreAttachments ? [...failure.restoreAttachments] : undefined,
+      restoreRequestedSkills: failure.restoreRequestedSkills ? failure.restoreRequestedSkills.map(skill => ({ ...skill })) : undefined,
     }
   }
 
   function clearStartupSendFailure(id?: string) {
     if (!id || startupSendFailure.value?.id === id) {
       startupSendFailure.value = null
+    }
+  }
+
+  function currentCommandScope(composerScope = 'chat'): CommandEventScope {
+    return {
+      botId: currentBotId.value ?? undefined,
+      sessionId: sessionId.value ?? undefined,
+      composerScope,
+    }
+  }
+
+  function commandEventKey(scope: CommandEventScope) {
+    const bid = (scope.botId ?? '').trim()
+    const sid = (scope.sessionId ?? '').trim()
+    if (bid && sid) return `session:${bid}:${sid}`
+    return `composer:${bid}:${(scope.composerScope ?? 'chat').trim() || 'chat'}`
+  }
+
+  function commandEventForScope(scope: CommandEventScope = currentCommandScope()): StoreCommandEvent | null {
+    return commandEvents.value[commandEventKey(scope)] ?? null
+  }
+
+  const commandEvent = computed(() => commandEventForScope())
+
+  function rememberCommandEvent(event: CommandEventResponse | null, scope: CommandEventScope = {}) {
+    if (!event) {
+      clearCommandEvent(scope)
+      return
+    }
+    const scoped: StoreCommandEvent = {
+      ...event,
+      composer_scope: event.composer_scope || scope.composerScope || 'chat',
+    }
+    const bid = (scope.botId ?? '').trim()
+    if (bid) scoped.bot_id = bid
+    if (!scoped.session_id) {
+      const sid = (scope.sessionId ?? '').trim()
+      if (sid) scoped.session_id = sid
+    }
+    const key = commandEventKey({
+      botId: scoped.bot_id || scope.botId,
+      sessionId: scoped.session_id,
+      composerScope: scoped.composer_scope,
+    })
+    commandEvents.value = {
+      ...commandEvents.value,
+      [key]: scoped,
+    }
+  }
+
+  function showCommandError(code: string, message: string, scope: CommandEventScope = currentCommandScope()) {
+    rememberCommandEvent({
+      type: 'command_error',
+      invocation_id: createStreamId(),
+      composer_scope: scope.composerScope || 'chat',
+      terminal: true,
+      error: { code, message },
+    }, scope)
+  }
+
+  function clearCommandEvent(scope: CommandEventScope = currentCommandScope()) {
+    const key = commandEventKey(scope)
+    if (!commandEvents.value[key]) return
+    const next = { ...commandEvents.value }
+    delete next[key]
+    commandEvents.value = next
+  }
+
+  function bindAssistantStreamSession(streamId: string | undefined, targetSessionId: string) {
+    const id = streamId?.trim()
+    const sid = targetSessionId.trim()
+    if (!id || !sid) return
+    const stream = pendingAssistantStreams.get(id)
+    if (stream && !stream.sessionId) {
+      stream.sessionId = sid
     }
   }
 
@@ -1668,7 +1894,40 @@ export const useChatStore = defineStore('chat', () => {
     if (approvalId) markToolApprovalDecision(approvalId, 'pending')
   }
 
-  function handleWSStreamEvent(event: UIStreamEvent, targetSessionId?: string) {
+  function handleWSStreamEvent(event: UIStreamEvent, targetSessionId?: string, sourceBotId = '') {
+    if (event.type === 'session_created') {
+      handleWSSessionCreated(event, sourceBotId)
+      return
+    }
+    if (event.type === 'user_message') {
+      const sid = (event.session_id ?? targetSessionId ?? sessionId.value ?? '').trim()
+      const bid = sourceBotId || currentBotId.value || ''
+      const streamId = streamIdForEvent(event, sid)
+      appendTurnToSession(bid, sid, normalizeTurn(event.data))
+      const pending = getAssistantStream(streamId)
+      if (pending && !messages.includes(pending.assistantTurn)) {
+        appendTurnToSession(bid || pending.botId, sid || pending.sessionId, pending.assistantTurn)
+      }
+      return
+    }
+    if (event.type === 'command_result' || event.type === 'command_error') {
+      const invocationId = event.invocation_id?.trim() ?? ''
+      const pending = invocationId ? getAssistantStream(invocationId) : undefined
+      rememberCommandEvent(event, {
+        botId: pending?.botId || sourceBotId,
+        sessionId: event.session_id || pending?.sessionId || targetSessionId,
+        composerScope: pending?.composerScope || event.composer_scope,
+      })
+      if (event.type === 'command_error' && invocationId) {
+        if (pending) {
+          const message = event.error?.message || 'slash command failed'
+          rejectAssistantStream(invocationId, new CommandStreamError(message))
+          loading.value = isSessionStreaming(sessionId.value)
+        }
+      }
+      return
+    }
+
     const sid = (event.session_id ?? targetSessionId ?? sessionId.value ?? '').trim()
     const streamId = streamIdForEvent(event, sid)
 
@@ -1772,6 +2031,7 @@ export const useChatStore = defineStore('chat', () => {
     overrideModelId.value = ''
     overrideReasoningEffort.value = ''
     startupSendFailure.value = null
+    commandEvents.value = {}
     cancelPendingFsBump()
     fsChangedAt.value = 0
     lastFsChange.value = null
@@ -1781,6 +2041,7 @@ export const useChatStore = defineStore('chat', () => {
 
     pendingAssistantStreams.clear()
     approvalResponseStreams.clear()
+    wsCreatedSessionsByStream.clear()
     latestBackgroundTasks.clear()
     ephemeralAssistantErrors.clear()
   }
@@ -1789,7 +2050,7 @@ export const useChatStore = defineStore('chat', () => {
     const bid = targetBotId.trim()
     stopWebSocket()
     if (!bid) return
-    activeWs = connectWebSocket(bid, handleWSStreamEvent)
+    activeWs = connectWebSocket(bid, event => handleWSStreamEvent(event, undefined, bid))
   }
 
   function ensureWebSocket(targetBotId: string): ChatWebSocket | null {
@@ -3098,6 +3359,55 @@ export const useChatStore = defineStore('chat', () => {
     return { kind: 'handled' }
   }
 
+  function isWebSlashInput(text: string): boolean {
+    return text.trim().startsWith('/')
+  }
+
+  function quickActionIDForSlash(text: string): string {
+    const parts = text.trim().split(/\s+/)
+    const command = parts[0]?.toLowerCase() ?? ''
+    const action = parts[1]?.toLowerCase() ?? ''
+    if (command === '/help' && !action) return 'help'
+    if (command === '/skill' && (!action || action === 'list')) return 'skill.list'
+    return ''
+  }
+
+  async function handleWebSlashCommand(text: string, hasRequestedSkills = false, composerScope = 'chat'): Promise<WebSlashCommandResult> {
+    if (!isWebSlashInput(text) || hasRequestedSkills) return { kind: 'none' }
+    const bid = currentBotId.value ?? ''
+    if (!bid) return { kind: 'error', message: 'Bot not selected' }
+    const sid = sessionId.value ?? ''
+    const scope = composerScope.trim() || 'chat'
+
+    const actionID = quickActionIDForSlash(text)
+    if (!actionID) return { kind: 'none' }
+    const skillActivationAllowed = !activeChatTarget.value.isACP
+    let event: CommandEventResponse | null
+    try {
+      event = await executeQuickAction(bid, actionID, {
+        invocationId: createStreamId(),
+        composerScope: scope,
+        sessionId: sid || undefined,
+        skillActivationAllowed,
+      })
+    } catch (error) {
+      const message = resolveApiErrorMessage(error, commandErrorMessage('generic'))
+      showCommandError('generic', message, {
+        botId: bid,
+        sessionId: sid || undefined,
+        composerScope: scope,
+      })
+      return { kind: 'error', message }
+    }
+
+    if (!event) return { kind: 'none' }
+    rememberCommandEvent(event, { botId: bid, sessionId: sid || undefined, composerScope: scope })
+    if (event.type === 'command_error') {
+      return { kind: 'error', message: event.error?.message || commandErrorMessage('generic') }
+    }
+    return { kind: 'handled' }
+  }
+
   async function removeSession(targetSessionId: string, options: { fallbackMode?: SidebarSessionMode } = {}) {
     const delId = targetSessionId.trim()
     if (!delId) return
@@ -3142,18 +3452,68 @@ export const useChatStore = defineStore('chat', () => {
     return updated
   }
 
-  async function sendMessage(text: string, attachments?: ChatAttachment[]): Promise<SendMessageResult> {
+  function normalizeRequestedSkills(items?: RequestedSkillSelection[]): RequestedSkillSelection[] {
+    if (!items?.length) return []
+    const out: RequestedSkillSelection[] = []
+    const seen = new Set<string>()
+    for (const item of items) {
+      const name = item.name?.trim()
+      if (!name) continue
+      const key = name
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push({
+        name,
+        display_name: item.display_name?.trim() || undefined,
+        description: item.description?.trim() || undefined,
+        source_kind: item.source_kind?.trim() || undefined,
+        state: item.state?.trim() || undefined,
+      })
+    }
+    return out
+  }
+
+  function requestedSkillRequestsForWire(items: RequestedSkillSelection[]): RequestedSkillRequest[] {
+    return items.map(item => ({
+      name: item.name,
+    }))
+  }
+
+  function cloneRequestedSkills(items: RequestedSkillSelection[]): RequestedSkillSelection[] {
+    return items.map(item => ({ ...item }))
+  }
+
+  async function sendMessage(text: string, attachments?: ChatAttachment[], options: SendMessageOptions = {}): Promise<SendMessageResult> {
     const trimmed = text.trim()
-    if (!trimmed && !attachments?.length) return { ok: false, stage: 'startup' }
+    const requestedSkills = normalizeRequestedSkills(options.requestedSkills)
+    const composerScope = options.composerScope?.trim() || 'chat'
+    if (!trimmed && !attachments?.length && requestedSkills.length === 0) return { ok: false, stage: 'startup' }
+
+    if (requestedSkills.length > 0 && isWebSlashInput(trimmed)) {
+      const message = commandErrorMessage('invalid_skill_slash_syntax')
+      showCommandError('invalid_skill_slash_syntax', message, currentCommandScope(composerScope))
+      return { ok: false, stage: 'startup', error: message, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills) }
+    }
+
+    if (isWebSlashInput(trimmed) && attachments?.length) {
+      const message = commandErrorMessage('slash_attachments_unsupported')
+      showCommandError('slash_attachments_unsupported', message, currentCommandScope(composerScope))
+      return { ok: false, stage: 'startup', error: message, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills) }
+    }
 
     const newCommand = await handleWebNewCommand(trimmed, attachments)
     if (newCommand.kind === 'handled') return { ok: true }
     if (newCommand.kind === 'error') {
-      return { ok: false, stage: 'startup', error: newCommand.message, restoreInput: text, restoreAttachments: attachments }
+      return { ok: false, stage: 'startup', error: newCommand.message, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills) }
     }
+    const slashCommand = await handleWebSlashCommand(trimmed, requestedSkills.length > 0, composerScope)
+    if (slashCommand.kind === 'handled') return { ok: true }
+    if (slashCommand.kind === 'error') {
+      return { ok: false, stage: 'startup', error: slashCommand.message, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills) }
+    }
+    clearCommandEvent(currentCommandScope(composerScope))
     if (streaming.value || loadingMessages.value || !currentBotId.value) return { ok: false, stage: 'startup' }
 
-    loading.value = true
     let assistantTurn: ChatAssistantTurn | null = null
     let userTurn: ChatUserTurn | null = null
     let sendBotId = ''
@@ -3161,21 +3521,38 @@ export const useChatStore = defineStore('chat', () => {
     let sendStreamId = ''
 
     const wasDraft = !sessionId.value
+    const serverSlashActivation = isWebSlashInput(trimmed) && quickActionIDForSlash(trimmed) === ''
+    const serverSkillActivation = requestedSkills.length > 0 || serverSlashActivation
+    if (serverSkillActivation && !sessionId.value && pendingACPSessionInput.value) {
+      const message = commandErrorMessage('unsupported_skill_slash_context')
+      showCommandError('unsupported_skill_slash_context', message, currentCommandScope(composerScope))
+      return { ok: false, stage: 'startup', error: message, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills), composerScope }
+    }
+
+    loading.value = true
+    const deferSessionCreation = serverSkillActivation && wasDraft
     try {
-      await ensureActiveSession(wasDraft ? trimmed : undefined)
+      if (!deferSessionCreation) {
+        await ensureActiveSession(wasDraft ? trimmed : undefined)
+      }
 
       const bid = currentBotId.value!
-      const sid = sessionId.value!
+      const sid = sessionId.value ?? ''
+      if (!sid && !deferSessionCreation) throw new Error('Session not selected')
       sendBotId = bid
       sendSessionId = sid
       sendStreamId = createStreamId()
       // Tell the tab store to pin (and, for a draft, repoint) this session's tab.
-      userSentInSession.value = { id: sid, wasDraft, seq: ++userSendSeq }
+      if (sid) {
+        userSentInSession.value = { id: sid, wasDraft, seq: ++userSendSeq }
+      }
 
-      userTurn = createOptimisticUserTurn(trimmed, attachments)
-      messages.push(userTurn)
-      messages.push(createOptimisticAssistantTurn())
-      assistantTurn = messages[messages.length - 1] as ChatAssistantTurn
+      assistantTurn = createOptimisticAssistantTurn()
+      if (!serverSkillActivation) {
+        userTurn = createOptimisticUserTurn(trimmed, attachments)
+        messages.push(userTurn)
+        messages.push(assistantTurn)
+      }
 
       const modelId = overrideModelId.value || undefined
       const effort = overrideReasoningEffort.value
@@ -3186,19 +3563,27 @@ export const useChatStore = defineStore('chat', () => {
         if (!ws.connected) {
           throw new StreamFailureError('WebSocket is not connected', 'startup')
         }
-        const completion = trackAssistantStream(sendStreamId, assistantTurn, bid, sid)
+        const completion = trackAssistantStream(sendStreamId, assistantTurn, bid, sid, composerScope)
         ws.send({
           type: 'message',
           stream_id: sendStreamId,
+          invocation_id: sendStreamId,
+          composer_scope: composerScope,
           text: trimmed,
-          session_id: sid,
+          session_id: sid || undefined,
           attachments,
+          requested_skills: requestedSkills.length ? requestedSkillRequestsForWire(requestedSkills) : undefined,
           model_id: modelId,
           reasoning_effort: reasoningEffort,
         })
         await completion
-        await refreshCurrentSession(bid, sid)
+        const createdSessionId = wsCreatedSessionsByStream.get(sendStreamId) ?? ''
+        const fallbackActiveSessionId = (currentBotId.value ?? '').trim() === bid ? sessionId.value ?? '' : ''
+        const refreshSessionId = sendSessionId || createdSessionId || fallbackActiveSessionId
+        wsCreatedSessionsByStream.delete(sendStreamId)
+        if (refreshSessionId) await refreshCurrentSession(bid, refreshSessionId)
       } else {
+        if (serverSkillActivation) throw new StreamFailureError('WebSocket is required for skill activation', 'startup')
         await sendLocalChannelMessage(bid, trimmed, attachments, { modelId, reasoningEffort })
         await refreshCurrentSession(bid, sid)
       }
@@ -3209,25 +3594,38 @@ export const useChatStore = defineStore('chat', () => {
     } catch (error) {
       const err = error instanceof Error ? error : new Error('Unknown error')
       const isAbort = err.name === 'AbortError'
+      const isCommandError = err instanceof CommandStreamError
       const reason = resolveApiErrorMessage(error, err.message || sendFailedMessage())
       const stage: SendMessageStage = err instanceof StreamFailureError
         ? err.stage
         : (assistantTurn && hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
+      const createdSessionId = sendStreamId ? wsCreatedSessionsByStream.get(sendStreamId) ?? '' : ''
       const bid = sendBotId || currentBotId.value || ''
-      const sid = sendSessionId || sessionId.value || ''
+      const sid = sendSessionId || (deferSessionCreation ? '' : sessionId.value || '')
 
       if (assistantTurn) finalizeStreamFailure(assistantTurn, bid, sid, err)
       if (!isAbort && stage === 'startup' && userTurn) {
         removeTurnFromSession(bid, sid, userTurn)
       }
+      if (!isAbort && stage === 'startup' && deferSessionCreation && wasDraft && createdSessionId) {
+        await cleanupFailedDeferredSession(bid, createdSessionId, composerScope)
+      }
 
       if (sendStreamId) forgetAssistantStream(sendStreamId)
+      if (sendStreamId) wsCreatedSessionsByStream.delete(sendStreamId)
       loading.value = false
 
       if (isAbort) return { ok: false, stage: 'stream', error: reason }
       if (stage === 'startup') {
-        rememberStartupSendFailure({ botId: bid, sessionId: sid, error: reason, restoreInput: text, restoreAttachments: attachments })
-        return { ok: false, stage, error: reason, restoreInput: text, restoreAttachments: attachments }
+        const currentBid = (currentBotId.value ?? '').trim()
+        const currentSid = (sessionId.value ?? '').trim()
+        const stillCurrent = currentBid === bid && (!sid || currentSid === sid)
+        const deferredDraftStillCurrent = !(deferSessionCreation && wasDraft && currentSid)
+        const commandErrorRestoredDraft = isCommandError && deferSessionCreation && wasDraft && !currentSid
+        if (stillCurrent && deferredDraftStillCurrent && (!isCommandError || commandErrorRestoredDraft)) {
+          rememberStartupSendFailure({ botId: bid, sessionId: sid, composerScope, error: reason, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills) })
+        }
+        return { ok: false, stage, error: reason, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills), composerScope }
       }
       return { ok: false, stage, error: reason }
     }
@@ -3404,6 +3802,9 @@ export const useChatStore = defineStore('chat', () => {
     overrideModelId,
     overrideReasoningEffort,
     startupSendFailure,
+    commandEvent,
+    commandEventForScope,
+    showCommandError,
     fsChangedAt,
     lastFsChange,
     lastFsEvents,
@@ -3446,6 +3847,7 @@ export const useChatStore = defineStore('chat', () => {
     findMessageIdByExternalId,
     locateMessageByExternalId,
     clearStartupSendFailure,
+    clearCommandEvent,
     abort,
   }
 })

@@ -250,9 +250,14 @@ type ChatRequest struct {
 	UserMessagePersisted      bool             `json:"-"`
 	EventID                   string           `json:"-"`
 	RawQuery                  string           `json:"-"`
+	ModelQuery                string           `json:"-"`
+	UserMessageKind           string           `json:"-"`
+	UserVisibleText           string           `json:"-"`
+	SkillActivation           *SkillActivation `json:"-"`
 	ToolHTTPURL               string           `json:"-"`
 	SessionType               string           `json:"-"`
 	SkipMemoryExtraction      bool             `json:"-"`
+	SkipTitleGeneration       bool             `json:"-"`
 	ForceFreshRuntime         bool             `json:"-"`
 
 	// OutboundAssetCollector returns asset refs accumulated during outbound streaming.
@@ -263,14 +268,40 @@ type ChatRequest struct {
 	// between tool rounds via the PrepareStep hook. Nil means no injection.
 	InjectCh <-chan InjectMessage `json:"-"`
 
-	Query           string           `json:"query"`
-	Model           string           `json:"model,omitempty"`
-	Provider        string           `json:"provider,omitempty"`
-	ReasoningEffort string           `json:"reasoning_effort,omitempty"`
-	Channels        []string         `json:"channels,omitempty"`
-	CurrentChannel  string           `json:"current_channel,omitempty"`
-	Messages        []ModelMessage   `json:"messages,omitempty"`
-	Attachments     []ChatAttachment `json:"attachments,omitempty"`
+	Query           string                  `json:"query"`
+	Model           string                  `json:"model,omitempty"`
+	Provider        string                  `json:"provider,omitempty"`
+	ReasoningEffort string                  `json:"reasoning_effort,omitempty"`
+	Channels        []string                `json:"channels,omitempty"`
+	CurrentChannel  string                  `json:"current_channel,omitempty"`
+	Messages        []ModelMessage          `json:"messages,omitempty"`
+	Attachments     []ChatAttachment        `json:"attachments,omitempty"`
+	RequestedSkills []RequestedSkillContext `json:"-"`
+}
+
+type RequestedSkillContext struct {
+	Name           string `json:"-"`
+	Description    string `json:"-"`
+	Content        string `json:"-"`
+	SourceKind     string `json:"-"`
+	OpaqueSourceID string `json:"-"`
+	ContentHash    string `json:"-"`
+	Identity       string `json:"-"`
+}
+
+const UserMessageKindSkillActivation = "skill_activation"
+
+type SkillActivationSkill struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name,omitempty"`
+	Description string `json:"description,omitempty"`
+	SourceKind  string `json:"source_kind,omitempty"`
+	State       string `json:"state,omitempty"`
+}
+
+type SkillActivation struct {
+	Skills []SkillActivationSkill `json:"skills,omitempty"`
+	Prompt string                 `json:"prompt,omitempty"`
 }
 
 // InjectMessage carries a user message to be injected into a running agent

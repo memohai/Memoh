@@ -278,14 +278,15 @@ type resolvedContext struct {
 	runConfig                   agentpkg.RunConfig
 	model                       models.GetResponse
 	provider                    sqlc.Provider
-	query                       string // headerified query
+	query                       string // headerified persistable query
 	userMessageAlreadyInContext bool
 	injectedRecords             *[]conversation.InjectedMessageRecord
 	estimatedTokens             int // estimated input token count for compaction
 }
 
 func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (resolvedContext, error) {
-	if strings.TrimSpace(req.Query) == "" && len(req.Attachments) == 0 {
+	modelQuery := modelQueryText(req)
+	if strings.TrimSpace(modelQuery) == "" && len(req.Attachments) == 0 {
 		return resolvedContext{}, errors.New("query or attachments is required")
 	}
 	if strings.TrimSpace(req.BotID) == "" {
@@ -293,6 +294,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	}
 	if strings.TrimSpace(req.ChatID) == "" {
 		return resolvedContext{}, errors.New("chat id is required")
+	}
+	if err := r.rejectRequestedSkillsIfUnsupportedContext(ctx, req); err != nil {
+		return resolvedContext{}, err
 	}
 
 	runCfg, chatModel, provider, err := r.buildBaseRunConfig(ctx, baseRunConfigParams{
@@ -329,7 +333,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	// the rendered event stream (RC) + bot turn responses (TR) instead of
 	// loading raw history from bot_history_messages. The current inbound
 	// message is already in the RC, so it must not be appended again.
-	usePipeline := r.pipeline != nil && strings.TrimSpace(req.SessionID) != ""
+	usePipeline := r.pipeline != nil && strings.TrimSpace(req.SessionID) != "" && len(req.RequestedSkills) == 0
 	if usePipeline {
 		if _, loaded := r.pipeline.GetIC(strings.TrimSpace(req.SessionID)); !loaded {
 			usePipeline = false
@@ -398,6 +402,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	if memoryMsg != nil {
 		messages = append(messages, *memoryMsg)
 	}
+	if requestedSkillMsg := buildRequestedSkillContextMessage(req.RequestedSkills); requestedSkillMsg != nil {
+		messages = append(messages, *requestedSkillMsg)
+	}
 	if !usePipeline {
 		messages = append(messages, reqMessages...)
 	}
@@ -417,7 +424,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	if tz == nil {
 		tz = time.UTC
 	}
-	headerifiedQuery := FormatUserHeader(UserMessageHeaderInput{
+	headerInput := UserMessageHeaderInput{
 		MessageID:         strings.TrimSpace(req.ExternalMessageID),
 		ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
 		DisplayName:       displayName,
@@ -428,13 +435,21 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		AttachmentPaths:   extractAttachmentPaths(mergedAttachments),
 		Time:              time.Now().In(tz),
 		Timezone:          runCfg.Identity.Timezone,
-	}, req.Query)
+	}
+	headerifiedQuery := ""
+	if userQueryNeedsHeader(req, len(mergedAttachments)) {
+		headerifiedQuery = FormatUserHeader(headerInput, req.Query)
+	}
+	headerifiedModelQuery := headerifiedQuery
+	if strings.TrimSpace(modelQuery) != strings.TrimSpace(req.Query) {
+		headerifiedModelQuery = FormatUserHeader(headerInput, modelQuery)
+	}
 	runCfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
 	// When using the pipeline the user message is already in the RC;
 	// don't send it to the LLM again. headerifiedQuery is still kept
 	// for storeRound so the user message gets persisted.
 	if !usePipeline {
-		runCfg.Query = headerifiedQuery
+		runCfg.Query = headerifiedModelQuery
 	}
 	runCfg.InlineImages = extractNativeImageParts(mergedAttachments)
 	runCfg.ContextScope = buildContextFragScope(req, displayName, runCfg.Identity)
@@ -486,6 +501,13 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 
 // Chat sends a synchronous chat request and stores the result.
 func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conversation.ChatResponse, error) {
+	if err := rejectReservedSkillMetadataIfPresent(req); err != nil {
+		return conversation.ChatResponse{}, err
+	}
+	if err := r.rejectRequestedSkillsIfUnsupportedContext(ctx, req); err != nil {
+		return conversation.ChatResponse{}, err
+	}
+
 	doneTurn := r.enterSessionTurn(ctx, req.BotID, req.SessionID)
 	defer doneTurn()
 
@@ -493,9 +515,11 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
 	var err error
-	req, err = r.applyUserMessageHook(ctx, req)
-	if err != nil {
-		return conversation.ChatResponse{}, err
+	if !req.UserMessagePersisted {
+		req, err = r.applyUserMessageHook(ctx, req)
+		if err != nil {
+			return conversation.ChatResponse{}, err
+		}
 	}
 	rc, err := r.resolve(ctx, req)
 	if err != nil {
@@ -518,8 +542,10 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	if rc.userMessageAlreadyInContext {
 		storeReq.UserMessagePersisted = true
 	}
-	roundMessages := prependUserMessage(storeReq.Query, outputMessages)
-	if err := r.storeRound(ctx, storeReq, roundMessages, rc.model.ID); err != nil {
+	roundMessages := prependTurnUserMessage(storeReq, outputMessages)
+	if err := r.storeRoundWithOptions(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
+		SkipMemory: storeReq.SkipMemoryExtraction,
+	}); err != nil {
 		return conversation.ChatResponse{}, err
 	}
 
@@ -1330,6 +1356,21 @@ func anyNumberToByte(value any) (byte, bool) {
 		return 0, false
 	}
 	return byte(parsed), true
+}
+
+// userQueryNeedsHeader reports whether resolve should wrap req.Query in the
+// user message header (sender/channel/time/attachment paths). Text always
+// gets a header. An attachment-only message (no caption) must too: the header
+// is the only thing telling the model who sent what file, and the headerified
+// query is what makes the user turn (with its asset links) persist to history.
+// The one deliberate exception is a no-prompt skill activation, whose stored
+// user content must stay empty (its model text travels via ModelQuery, and
+// display state via skill_activation metadata).
+func userQueryNeedsHeader(req conversation.ChatRequest, attachmentCount int) bool {
+	if strings.TrimSpace(req.Query) != "" {
+		return true
+	}
+	return attachmentCount > 0 && req.UserMessageKind != conversation.UserMessageKindSkillActivation
 }
 
 // extractAttachmentPaths collects container file paths from ALL gateway

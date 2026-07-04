@@ -88,6 +88,14 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		if streamReq.RawQuery == "" {
 			streamReq.RawQuery = strings.TrimSpace(streamReq.Query)
 		}
+		if err := rejectReservedSkillMetadataIfPresent(streamReq); err != nil {
+			errCh <- err
+			return
+		}
+		if err := r.rejectRequestedSkillsIfUnsupportedContext(ctx, streamReq); err != nil {
+			errCh <- err
+			return
+		}
 		if ok, err := r.isACPAgentSession(ctx, streamReq); err != nil {
 			r.logger.Error("StreamChat: ACP session check failed",
 				slog.String("bot_id", streamReq.BotID),
@@ -107,15 +115,18 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		if streamReq.RawQuery == "" {
 			streamReq.RawQuery = strings.TrimSpace(streamReq.Query)
 		}
-		streamReq, err := r.applyUserMessageHook(ctx, streamReq)
-		if err != nil {
-			r.logger.Error("agent stream user message hook failed",
-				slog.String("bot_id", streamReq.BotID),
-				slog.String("chat_id", streamReq.ChatID),
-				slog.Any("error", err),
-			)
-			errCh <- err
-			return
+		var err error
+		if !streamReq.UserMessagePersisted {
+			streamReq, err = r.applyUserMessageHook(ctx, streamReq)
+			if err != nil {
+				r.logger.Error("agent stream user message hook failed",
+					slog.String("bot_id", streamReq.BotID),
+					slog.String("chat_id", streamReq.ChatID),
+					slog.Any("error", err),
+				)
+				errCh <- err
+				return
+			}
 		}
 		rc, err := r.resolve(ctx, streamReq)
 		if err != nil {
@@ -252,6 +263,12 @@ func (r *Resolver) StreamChatWS(
 	eventCh chan<- WSStreamEvent,
 	abortCh <-chan struct{},
 ) error {
+	if err := rejectReservedSkillMetadataIfPresent(req); err != nil {
+		return err
+	}
+	if err := r.rejectRequestedSkillsIfUnsupportedContext(ctx, req); err != nil {
+		return err
+	}
 	if ok, err := r.isACPAgentSession(ctx, req); err != nil {
 		r.logger.Error("StreamChatWS: ACP session check failed",
 			slog.String("bot_id", req.BotID),
@@ -270,13 +287,15 @@ func (r *Resolver) StreamChatWS(
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
 	var err error
-	req, err = r.applyUserMessageHook(ctx, req)
-	if err != nil {
-		r.logger.Error("StreamChatWS: user message hook failed",
-			slog.String("bot_id", req.BotID),
-			slog.Any("error", err),
-		)
-		return err
+	if !req.UserMessagePersisted {
+		req, err = r.applyUserMessageHook(ctx, req)
+		if err != nil {
+			r.logger.Error("StreamChatWS: user message hook failed",
+				slog.String("bot_id", req.BotID),
+				slog.Any("error", err),
+			)
+			return err
+		}
 	}
 	rc, err := r.resolve(ctx, req)
 	if err != nil {
@@ -432,7 +451,7 @@ func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation
 	if rc.userMessageAlreadyInContext {
 		storeReq.UserMessagePersisted = true
 	}
-	roundMessages := prependUserMessage(storeReq.Query, outputMessages)
+	roundMessages := prependTurnUserMessage(storeReq, outputMessages)
 
 	if rc.injectedRecords != nil && len(*rc.injectedRecords) > 0 {
 		roundMessages = interleaveInjectedMessages(roundMessages, *rc.injectedRecords)

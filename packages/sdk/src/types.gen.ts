@@ -808,6 +808,7 @@ export type ChannelFieldSchema = {
 export type ChannelFieldType = 'string' | 'secret' | 'bool' | 'number' | 'enum';
 
 export type ChannelForwardRef = {
+    attachments_known?: boolean;
     date?: number;
     from_conversation_id?: string;
     from_user_id?: string;
@@ -851,6 +852,7 @@ export type ChannelMessageTextStyle = 'bold' | 'italic' | 'strikethrough' | 'cod
 
 export type ChannelReplyRef = {
     attachments?: Array<ChannelAttachment>;
+    attachments_known?: boolean;
     message_id?: string;
     preview?: string;
     sender?: string;
@@ -995,6 +997,19 @@ export type CompactionLog = {
     usage?: unknown;
 };
 
+export type ConversationSkillActivation = {
+    prompt?: string;
+    skills?: Array<ConversationSkillActivationSkill>;
+};
+
+export type ConversationSkillActivationSkill = {
+    description?: string;
+    display_name?: string;
+    name?: string;
+    source_kind?: string;
+    state?: string;
+};
+
 export type ConversationUiAttachment = {
     base64?: string;
     bot_id?: string;
@@ -1082,8 +1097,10 @@ export type ConversationUiTurn = {
     sender_avatar_url?: string;
     sender_display_name?: string;
     sender_user_id?: string;
+    skill_activation?: ConversationSkillActivation;
     text?: string;
     timestamp?: string;
+    user_message_kind?: string;
 };
 
 export type ConversationUiUserInput = {
@@ -1360,6 +1377,36 @@ export type HandlersChannelMeta = {
     target_spec?: ChannelTargetSpec;
     type?: string;
     user_config_schema?: ChannelConfigSchema;
+};
+
+export type HandlersCommandActionError = {
+    code?: string;
+    message?: string;
+};
+
+export type HandlersCommandActionListItem = {
+    description?: string;
+    id?: string;
+    kind?: string;
+    title?: string;
+};
+
+export type HandlersCommandActionResult = {
+    items?: Array<HandlersCommandActionListItem>;
+    kind?: string;
+    text?: string;
+    title?: string;
+};
+
+export type HandlersCommandEventResponse = {
+    action_id?: string;
+    composer_scope?: string;
+    error?: HandlersCommandActionError;
+    invocation_id?: string;
+    result?: HandlersCommandActionResult;
+    session_id?: string;
+    terminal?: boolean;
+    type?: string;
 };
 
 export type HandlersContainerCpuMetricsResponse = {
@@ -1698,6 +1745,16 @@ export type HandlersProbeResponse = {
     tools?: Array<McpToolDescriptor>;
 };
 
+export type HandlersQuickActionExecuteRequest = {
+    action_id?: string;
+    composer_scope?: string;
+    invocation_id?: string;
+    params?: {
+        [key: string]: unknown;
+    };
+    session_id?: string;
+};
+
 export type HandlersRefreshResponse = {
     access_token?: string;
     expires_at?: string;
@@ -1706,6 +1763,10 @@ export type HandlersRefreshResponse = {
 
 export type HandlersRollbackRequest = {
     version?: number;
+};
+
+export type HandlersSafeSkillsResponse = {
+    skills?: Array<SkillsSafeCatalogItem>;
 };
 
 export type HandlersSessionInfoResponse = {
@@ -2706,6 +2767,14 @@ export type SettingsUpsertRequest = {
     transcription_model_id?: string;
     tts_model_id?: string;
     video_model_id?: string;
+};
+
+export type SkillsSafeCatalogItem = {
+    description?: string;
+    display_name?: string;
+    name?: string;
+    source_kind?: string;
+    state?: string;
 };
 
 export type UserinputUiOption = {
@@ -5247,6 +5316,10 @@ export type GetBotsByBotIdContainerSkillsErrors = {
      */
     400: HandlersErrorResponse;
     /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
      * Not Found
      */
     404: HandlersErrorResponse;
@@ -5972,116 +6045,6 @@ export type PostBotsByBotIdHooksTestResponses = {
 };
 
 export type PostBotsByBotIdHooksTestResponse = PostBotsByBotIdHooksTestResponses[keyof PostBotsByBotIdHooksTestResponses];
-
-export type PostBotsByBotIdLocalMessagesData = {
-    /**
-     * Message payload
-     */
-    body: HandlersLocalChannelMessageRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/local/messages';
-};
-
-export type PostBotsByBotIdLocalMessagesErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostBotsByBotIdLocalMessagesError = PostBotsByBotIdLocalMessagesErrors[keyof PostBotsByBotIdLocalMessagesErrors];
-
-export type PostBotsByBotIdLocalMessagesResponses = {
-    /**
-     * OK
-     */
-    200: {
-        [key: string]: string;
-    };
-};
-
-export type PostBotsByBotIdLocalMessagesResponse = PostBotsByBotIdLocalMessagesResponses[keyof PostBotsByBotIdLocalMessagesResponses];
-
-export type GetBotsByBotIdLocalStreamData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/local/stream';
-};
-
-export type GetBotsByBotIdLocalStreamErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdLocalStreamError = GetBotsByBotIdLocalStreamErrors[keyof GetBotsByBotIdLocalStreamErrors];
-
-export type GetBotsByBotIdLocalStreamResponses = {
-    /**
-     * SSE stream
-     */
-    200: string;
-};
-
-export type GetBotsByBotIdLocalStreamResponse = GetBotsByBotIdLocalStreamResponses[keyof GetBotsByBotIdLocalStreamResponses];
-
-export type GetBotsByBotIdLocalWsData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/local/ws';
-};
-
-export type GetBotsByBotIdLocalWsErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdLocalWsError = GetBotsByBotIdLocalWsErrors[keyof GetBotsByBotIdLocalWsErrors];
 
 export type GetBotsByBotIdMcpData = {
     body?: never;
@@ -7603,6 +7566,47 @@ export type PostBotsByBotIdPluginsByIdUninstallResponses = {
 
 export type PostBotsByBotIdPluginsByIdUninstallResponse = PostBotsByBotIdPluginsByIdUninstallResponses[keyof PostBotsByBotIdPluginsByIdUninstallResponses];
 
+export type PostBotsByBotIdQuickActionsExecuteData = {
+    /**
+     * Quick action payload
+     */
+    body: HandlersQuickActionExecuteRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/quick-actions/execute';
+};
+
+export type PostBotsByBotIdQuickActionsExecuteErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdQuickActionsExecuteError = PostBotsByBotIdQuickActionsExecuteErrors[keyof PostBotsByBotIdQuickActionsExecuteErrors];
+
+export type PostBotsByBotIdQuickActionsExecuteResponses = {
+    /**
+     * OK
+     */
+    200: HandlersCommandEventResponse;
+};
+
+export type PostBotsByBotIdQuickActionsExecuteResponse = PostBotsByBotIdQuickActionsExecuteResponses[keyof PostBotsByBotIdQuickActionsExecuteResponses];
+
 export type GetBotsByBotIdScheduleData = {
     body?: never;
     path?: never;
@@ -8542,6 +8546,48 @@ export type PutBotsByBotIdSettingsResponses = {
 
 export type PutBotsByBotIdSettingsResponse = PutBotsByBotIdSettingsResponses[keyof PutBotsByBotIdSettingsResponses];
 
+export type GetBotsByBotIdSkillsCatalogData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/skills/catalog';
+};
+
+export type GetBotsByBotIdSkillsCatalogErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdSkillsCatalogError = GetBotsByBotIdSkillsCatalogErrors[keyof GetBotsByBotIdSkillsCatalogErrors];
+
+export type GetBotsByBotIdSkillsCatalogResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSafeSkillsResponse;
+};
+
+export type GetBotsByBotIdSkillsCatalogResponse = GetBotsByBotIdSkillsCatalogResponses[keyof GetBotsByBotIdSkillsCatalogResponses];
+
 export type PostBotsByBotIdSupermarketInstallPluginData = {
     /**
      * Install plugin request
@@ -9142,6 +9188,116 @@ export type PutBotsByBotIdUserAccessByGrantIdResponses = {
 };
 
 export type PutBotsByBotIdUserAccessByGrantIdResponse = PutBotsByBotIdUserAccessByGrantIdResponses[keyof PutBotsByBotIdUserAccessByGrantIdResponses];
+
+export type PostBotsByBotIdWebMessagesData = {
+    /**
+     * Message payload
+     */
+    body: HandlersLocalChannelMessageRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/web/messages';
+};
+
+export type PostBotsByBotIdWebMessagesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdWebMessagesError = PostBotsByBotIdWebMessagesErrors[keyof PostBotsByBotIdWebMessagesErrors];
+
+export type PostBotsByBotIdWebMessagesResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: string;
+    };
+};
+
+export type PostBotsByBotIdWebMessagesResponse = PostBotsByBotIdWebMessagesResponses[keyof PostBotsByBotIdWebMessagesResponses];
+
+export type GetBotsByBotIdWebStreamData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/web/stream';
+};
+
+export type GetBotsByBotIdWebStreamErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdWebStreamError = GetBotsByBotIdWebStreamErrors[keyof GetBotsByBotIdWebStreamErrors];
+
+export type GetBotsByBotIdWebStreamResponses = {
+    /**
+     * SSE stream
+     */
+    200: string;
+};
+
+export type GetBotsByBotIdWebStreamResponse = GetBotsByBotIdWebStreamResponses[keyof GetBotsByBotIdWebStreamResponses];
+
+export type GetBotsByBotIdWebWsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/web/ws';
+};
+
+export type GetBotsByBotIdWebWsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdWebWsError = GetBotsByBotIdWebWsErrors[keyof GetBotsByBotIdWebWsErrors];
 
 export type DeleteBotsByIdData = {
     body?: never;

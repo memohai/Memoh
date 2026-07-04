@@ -260,17 +260,21 @@ func renderListView(text string, lv *command.ListView, t *i18n.Localizer) channe
 	row := 0
 
 	for _, item := range lv.Items {
-		if item.Action == nil {
+		if item.Action == nil && item.Callback == "" {
 			continue
 		}
 		label := item.Label
 		if item.Selected {
 			label = "✓ " + label
 		}
+		value := item.Callback
+		if value == "" {
+			value = command.EncodeListCallback(item.Action.Resource, item.Action.Action, item.Action.Args, 0)
+		}
 		actions = append(actions, channel.Action{
 			Type:  actionTypeCallback,
 			Label: truncateButtonLabel(label),
-			Value: command.EncodeListCallback(item.Action.Resource, item.Action.Action, item.Action.Args, 0),
+			Value: value,
 			Row:   row,
 		})
 		row++

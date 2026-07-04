@@ -34,6 +34,10 @@ func (r *Resolver) resolveMemoryProvider(ctx context.Context, botID string) memp
 }
 
 func (r *Resolver) loadMemoryContextMessage(ctx context.Context, req conversation.ChatRequest) *conversation.ModelMessage {
+	query := strings.TrimSpace(req.Query)
+	if query == "" {
+		return nil
+	}
 	p := r.resolveMemoryProvider(ctx, req.BotID)
 	if p == nil {
 		return nil
@@ -41,7 +45,7 @@ func (r *Resolver) loadMemoryContextMessage(ctx context.Context, req conversatio
 	before, err := r.runChatHook(ctx, req, hooks.EventBeforeMemorySearch, func(hreq *hooks.Request) {
 		hreq.Memory = map[string]any{
 			"scope": "before_chat",
-			"query": strings.TrimSpace(req.Query),
+			"query": query,
 		}
 	})
 	if err != nil {
@@ -51,7 +55,7 @@ func (r *Resolver) loadMemoryContextMessage(ctx context.Context, req conversatio
 		}
 	}
 	result, err := p.OnBeforeChat(ctx, memprovider.BeforeChatRequest{
-		Query:  req.Query,
+		Query:  query,
 		BotID:  req.BotID,
 		ChatID: req.ChatID,
 	})
@@ -63,7 +67,7 @@ func (r *Resolver) loadMemoryContextMessage(ctx context.Context, req conversatio
 		after, err := r.runChatHook(ctx, req, hooks.EventAfterMemorySearch, func(hreq *hooks.Request) {
 			hreq.Memory = map[string]any{
 				"scope":        "before_chat",
-				"query":        strings.TrimSpace(req.Query),
+				"query":        query,
 				"result_count": 0,
 			}
 		})
@@ -81,7 +85,7 @@ func (r *Resolver) loadMemoryContextMessage(ctx context.Context, req conversatio
 	after, err := r.runChatHook(ctx, req, hooks.EventAfterMemorySearch, func(hreq *hooks.Request) {
 		hreq.Memory = map[string]any{
 			"scope":         "before_chat",
-			"query":         strings.TrimSpace(req.Query),
+			"query":         query,
 			"result_count":  1,
 			"context_bytes": len(result.ContextText),
 		}

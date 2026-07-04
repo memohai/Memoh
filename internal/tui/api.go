@@ -198,9 +198,11 @@ func (c *Client) StreamChat(ctx context.Context, req ChatRequest, onEvent func(C
 
 	for {
 		var envelope struct {
-			Type    string          `json:"type"`
-			Message string          `json:"message,omitempty"`
-			Data    json.RawMessage `json:"data,omitempty"`
+			Type    string           `json:"type"`
+			Message string           `json:"message,omitempty"`
+			Data    json.RawMessage  `json:"data,omitempty"`
+			Result  *wsCommandResult `json:"result,omitempty"`
+			Error   *wsCommandError  `json:"error,omitempty"`
 		}
 		if err := wsjson.Read(ctx, conn, &envelope); err != nil {
 			if websocket.CloseStatus(err) == websocket.StatusNormalClosure {
@@ -230,8 +232,91 @@ func (c *Client) StreamChat(ctx context.Context, req ChatRequest, onEvent func(C
 			if err := onEvent(ChatEvent{Type: "message", Data: uiMessage}); err != nil {
 				return err
 			}
+		// Slash input (e.g. "/help", "/skill list") is answered by the server
+		// with a single terminal command event instead of a start/end stream.
+		// Surface it through the existing message/error vocabulary and finish
+		// the call — without these cases the read loop would block forever
+		// waiting for an "end" that never comes.
+		case "command_error":
+			text := commandErrorText(envelope.Error)
+			if err := onEvent(ChatEvent{Type: "error", Message: text}); err != nil {
+				return err
+			}
+			return errors.New(text)
+		case "command_result":
+			if err := onEvent(ChatEvent{Type: "message", Data: conversation.UIMessage{
+				Type:    conversation.UIMessageText,
+				Content: commandResultText(envelope.Result),
+			}}); err != nil {
+				return err
+			}
+			if err := onEvent(ChatEvent{Type: "end"}); err != nil {
+				return err
+			}
+			return nil
 		}
 	}
+}
+
+// wsCommandResult mirrors the command_result payload of the web WS protocol
+// (handlers.CommandActionResult).
+type wsCommandResult struct {
+	Title string `json:"title,omitempty"`
+	Text  string `json:"text,omitempty"`
+	Items []struct {
+		Title       string `json:"title"`
+		Description string `json:"description,omitempty"`
+	} `json:"items,omitempty"`
+}
+
+// wsCommandError mirrors the command_error payload of the web WS protocol
+// (handlers.CommandActionError).
+type wsCommandError struct {
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+func commandErrorText(e *wsCommandError) string {
+	if e == nil {
+		return "command failed"
+	}
+	if msg := strings.TrimSpace(e.Message); msg != "" {
+		return msg
+	}
+	if code := strings.TrimSpace(e.Code); code != "" {
+		return code
+	}
+	return "command failed"
+}
+
+func commandResultText(r *wsCommandResult) string {
+	if r == nil {
+		return ""
+	}
+	var b strings.Builder
+	if title := strings.TrimSpace(r.Title); title != "" {
+		b.WriteString("**" + title + "**")
+	}
+	if text := strings.TrimSpace(r.Text); text != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(text)
+	}
+	for _, item := range r.Items {
+		title := strings.TrimSpace(item.Title)
+		if title == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString("- " + title)
+		if desc := strings.TrimSpace(item.Description); desc != "" {
+			b.WriteString(" — " + desc)
+		}
+	}
+	return b.String()
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, body any, out any) error {

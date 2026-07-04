@@ -82,7 +82,7 @@ const chatStoreMock = vi.hoisted(() => ({
   sessions: [] as Array<{ id: string, title?: string }>,
   knownSessions: [] as Array<{ id: string, title?: string, type?: string }>,
   createNewSession: vi.fn(async () => {}),
-  deletedSession: undefined as unknown as ReturnType<typeof ref<{ id: string, botId: string, seq: number } | null>>,
+  deletedSession: undefined as unknown as ReturnType<typeof ref<{ id: string, botId: string, seq: number, composerScope?: string } | null>>,
   pendingACPSessionInput: undefined as unknown as ReturnType<typeof ref<Record<string, unknown> | null>>,
   selectSession: vi.fn(async (sessionId: string, options?: { explicitSelection?: boolean }) => {
     useChatSelectionStore().setSession(sessionId, options)
@@ -410,9 +410,9 @@ describe('workspace layout store', () => {
     })
   })
 
-  function emitDeletedSession(id: string, botId = 'bot-1') {
+  function emitDeletedSession(id: string, botId = 'bot-1', composerScope?: string) {
     const prevSeq = chatStoreMock.deletedSession.value?.seq ?? 0
-    chatStoreMock.deletedSession.value = { id, botId, seq: prevSeq + 1 }
+    chatStoreMock.deletedSession.value = { id, botId, seq: prevSeq + 1, composerScope }
   }
 
   it('opens browser panels and updates their address', () => {
@@ -784,6 +784,30 @@ describe('workspace layout store', () => {
     expect(nextChatPanel?.params.sessionId).toBe('s2')
     expect(nextChatPanel?.title).toBe('Next session')
     expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
+  })
+
+  it('resets a failed deferred-session chat panel to draft when its composer scope matches', async () => {
+    const selection = useChatSelectionStore()
+    selection.setSession('s1')
+    chatStoreMock.sessionId = null
+    chatStoreMock.sessions.push({ id: 's1', title: 'Created then failed' })
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 's1', title: 'Created then failed' })
+    const panel = dock.panels.find(panel => panel.component === 'chat')!
+    store.pinPanel(panel.id)
+
+    selection.setSession(null)
+    emitDeletedSession('s1', 'bot-1', `bot-1:${panel.id}`)
+    await nextTick()
+
+    expect(dock.getPanel(panel.id)).toBe(panel)
+    expect(panel.params.sessionId ?? null).toBeNull()
+    expect(panel.title).toBe('New Session')
+    expect(store.ephemeralPanels[panel.id]).toBe(true)
+    expect(chatStoreMock.selectDraft).toHaveBeenCalled()
   })
 
   it('does not let deleted-tab auto-activation override the fallback session', async () => {

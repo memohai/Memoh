@@ -182,9 +182,10 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 		if m.ReferencedMessage != nil {
 			ref := m.ReferencedMessage
 			replyRef = &channel.ReplyRef{
-				MessageID:   ref.ID,
-				Target:      m.ChannelID,
-				Attachments: a.collectAttachments(ref),
+				MessageID:        ref.ID,
+				Target:           m.ChannelID,
+				Attachments:      a.collectAttachments(ref),
+				AttachmentsKnown: true,
 			}
 			if ref.Author != nil {
 				replyRef.Sender = strings.TrimSpace(ref.Author.Username)
