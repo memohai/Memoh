@@ -104,6 +104,12 @@ type Writer interface {
 	Persist(ctx context.Context, input PersistInput) (Message, error)
 }
 
+// ToolTailRoundPersister optionally persists a complete
+// user -> assistant(tool-call) -> tool -> assistant(final) round in one write.
+type ToolTailRoundPersister interface {
+	PersistToolTailRound(ctx context.Context, inputs []PersistInput) ([]Message, bool, error)
+}
+
 // Service defines message read/write behavior.
 type Service interface {
 	Writer

@@ -1012,6 +1012,309 @@ func (q *Queries) CreateMessageWithTurn(ctx context.Context, arg CreateMessageWi
 	return i, err
 }
 
+const createToolTailRound = `-- name: CreateToolTailRound :many
+WITH input_rows(
+  turn_message_seq,
+  message_id,
+  sender_channel_identity_id,
+  sender_user_id,
+  external_message_id,
+  source_reply_to_message_id,
+  role,
+  content,
+  metadata,
+  usage,
+  session_mode,
+  runtime_type,
+  model_id,
+  event_id,
+  display_text
+) AS (
+  VALUES
+      (
+        1::bigint,
+        $1::uuid,
+        $2::uuid,
+        $3::uuid,
+        $4::text,
+        $5::text,
+        'user'::text,
+        $6::jsonb,
+        $7::jsonb,
+        $8::jsonb,
+        $9::text,
+        $10::text,
+        $11::uuid,
+        $12::uuid,
+        $13::text
+      ),
+      (
+        2::bigint,
+        $14::uuid,
+        $15::uuid,
+        $16::uuid,
+        $17::text,
+        $18::text,
+        'assistant'::text,
+        $19::jsonb,
+        $20::jsonb,
+        $21::jsonb,
+        $22::text,
+        $23::text,
+        $24::uuid,
+        $25::uuid,
+        $26::text
+      ),
+      (
+        3::bigint,
+        $27::uuid,
+        $28::uuid,
+        $29::uuid,
+        $30::text,
+        $31::text,
+        'tool'::text,
+        $32::jsonb,
+        $33::jsonb,
+        $34::jsonb,
+        $35::text,
+        $36::text,
+        $37::uuid,
+        $38::uuid,
+        $39::text
+      ),
+      (
+        4::bigint,
+        $40::uuid,
+        $41::uuid,
+        $42::uuid,
+        $43::text,
+        $44::text,
+        'assistant'::text,
+        $45::jsonb,
+        $46::jsonb,
+        $47::jsonb,
+        $48::text,
+        $49::text,
+        $50::uuid,
+        $51::uuid,
+        $52::text
+      )
+),
+inserted_messages AS (
+  INSERT INTO bot_history_messages (
+    id,
+    bot_id,
+    session_id,
+    sender_channel_identity_id,
+    sender_account_user_id,
+    source_message_id,
+    source_reply_to_message_id,
+    role,
+    content,
+    metadata,
+    usage,
+    session_mode,
+    runtime_type,
+    model_id,
+    event_id,
+    display_text,
+    turn_id,
+    turn_message_seq
+  )
+  SELECT
+    input.message_id,
+    $53,
+    $54,
+    input.sender_channel_identity_id,
+    input.sender_user_id,
+    input.external_message_id,
+    input.source_reply_to_message_id,
+    input.role,
+    input.content,
+    input.metadata,
+    input.usage,
+    input.session_mode,
+    input.runtime_type,
+    input.model_id,
+    input.event_id,
+    input.display_text,
+    $55,
+    input.turn_message_seq
+  FROM input_rows input
+  RETURNING id, created_at, turn_message_seq
+),
+inserted_turn AS (
+  INSERT INTO bot_history_turns (
+    id,
+    bot_id,
+    session_id,
+    position,
+    request_message_id,
+    assistant_message_id
+  )
+  SELECT
+    $55,
+    $53,
+    $54,
+    COALESCE((
+      SELECT position + 1
+      FROM bot_history_turns
+      WHERE session_id = $54
+      ORDER BY position DESC
+      LIMIT 1
+    ), 1),
+    user_message.id,
+    tool_call_assistant.id
+  FROM inserted_messages user_message
+  JOIN inserted_messages tool_call_assistant ON tool_call_assistant.turn_message_seq = 2
+  WHERE user_message.turn_message_seq = 1
+  RETURNING id
+)
+SELECT inserted_messages.id, inserted_messages.created_at
+FROM inserted_messages
+JOIN inserted_turn ON true
+ORDER BY inserted_messages.turn_message_seq
+`
+
+type CreateToolTailRoundParams struct {
+	UserMessageID                            pgtype.UUID `json:"user_message_id"`
+	UserSenderChannelIdentityID              pgtype.UUID `json:"user_sender_channel_identity_id"`
+	UserSenderUserID                         pgtype.UUID `json:"user_sender_user_id"`
+	UserExternalMessageID                    pgtype.Text `json:"user_external_message_id"`
+	UserSourceReplyToMessageID               pgtype.Text `json:"user_source_reply_to_message_id"`
+	UserContent                              []byte      `json:"user_content"`
+	UserMetadata                             []byte      `json:"user_metadata"`
+	UserUsage                                []byte      `json:"user_usage"`
+	UserSessionMode                          string      `json:"user_session_mode"`
+	UserRuntimeType                          string      `json:"user_runtime_type"`
+	UserModelID                              pgtype.UUID `json:"user_model_id"`
+	UserEventID                              pgtype.UUID `json:"user_event_id"`
+	UserDisplayText                          pgtype.Text `json:"user_display_text"`
+	ToolCallAssistantMessageID               pgtype.UUID `json:"tool_call_assistant_message_id"`
+	ToolCallAssistantSenderChannelIdentityID pgtype.UUID `json:"tool_call_assistant_sender_channel_identity_id"`
+	ToolCallAssistantSenderUserID            pgtype.UUID `json:"tool_call_assistant_sender_user_id"`
+	ToolCallAssistantExternalMessageID       pgtype.Text `json:"tool_call_assistant_external_message_id"`
+	ToolCallAssistantSourceReplyToMessageID  pgtype.Text `json:"tool_call_assistant_source_reply_to_message_id"`
+	ToolCallAssistantContent                 []byte      `json:"tool_call_assistant_content"`
+	ToolCallAssistantMetadata                []byte      `json:"tool_call_assistant_metadata"`
+	ToolCallAssistantUsage                   []byte      `json:"tool_call_assistant_usage"`
+	ToolCallAssistantSessionMode             string      `json:"tool_call_assistant_session_mode"`
+	ToolCallAssistantRuntimeType             string      `json:"tool_call_assistant_runtime_type"`
+	ToolCallAssistantModelID                 pgtype.UUID `json:"tool_call_assistant_model_id"`
+	ToolCallAssistantEventID                 pgtype.UUID `json:"tool_call_assistant_event_id"`
+	ToolCallAssistantDisplayText             pgtype.Text `json:"tool_call_assistant_display_text"`
+	ToolMessageID                            pgtype.UUID `json:"tool_message_id"`
+	ToolSenderChannelIdentityID              pgtype.UUID `json:"tool_sender_channel_identity_id"`
+	ToolSenderUserID                         pgtype.UUID `json:"tool_sender_user_id"`
+	ToolExternalMessageID                    pgtype.Text `json:"tool_external_message_id"`
+	ToolSourceReplyToMessageID               pgtype.Text `json:"tool_source_reply_to_message_id"`
+	ToolContent                              []byte      `json:"tool_content"`
+	ToolMetadata                             []byte      `json:"tool_metadata"`
+	ToolUsage                                []byte      `json:"tool_usage"`
+	ToolSessionMode                          string      `json:"tool_session_mode"`
+	ToolRuntimeType                          string      `json:"tool_runtime_type"`
+	ToolModelID                              pgtype.UUID `json:"tool_model_id"`
+	ToolEventID                              pgtype.UUID `json:"tool_event_id"`
+	ToolDisplayText                          pgtype.Text `json:"tool_display_text"`
+	FinalAssistantMessageID                  pgtype.UUID `json:"final_assistant_message_id"`
+	FinalAssistantSenderChannelIdentityID    pgtype.UUID `json:"final_assistant_sender_channel_identity_id"`
+	FinalAssistantSenderUserID               pgtype.UUID `json:"final_assistant_sender_user_id"`
+	FinalAssistantExternalMessageID          pgtype.Text `json:"final_assistant_external_message_id"`
+	FinalAssistantSourceReplyToMessageID     pgtype.Text `json:"final_assistant_source_reply_to_message_id"`
+	FinalAssistantContent                    []byte      `json:"final_assistant_content"`
+	FinalAssistantMetadata                   []byte      `json:"final_assistant_metadata"`
+	FinalAssistantUsage                      []byte      `json:"final_assistant_usage"`
+	FinalAssistantSessionMode                string      `json:"final_assistant_session_mode"`
+	FinalAssistantRuntimeType                string      `json:"final_assistant_runtime_type"`
+	FinalAssistantModelID                    pgtype.UUID `json:"final_assistant_model_id"`
+	FinalAssistantEventID                    pgtype.UUID `json:"final_assistant_event_id"`
+	FinalAssistantDisplayText                pgtype.Text `json:"final_assistant_display_text"`
+	BotID                                    pgtype.UUID `json:"bot_id"`
+	SessionID                                pgtype.UUID `json:"session_id"`
+	TurnID                                   pgtype.UUID `json:"turn_id"`
+}
+
+type CreateToolTailRoundRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) CreateToolTailRound(ctx context.Context, arg CreateToolTailRoundParams) ([]CreateToolTailRoundRow, error) {
+	rows, err := q.db.Query(ctx, createToolTailRound,
+		arg.UserMessageID,
+		arg.UserSenderChannelIdentityID,
+		arg.UserSenderUserID,
+		arg.UserExternalMessageID,
+		arg.UserSourceReplyToMessageID,
+		arg.UserContent,
+		arg.UserMetadata,
+		arg.UserUsage,
+		arg.UserSessionMode,
+		arg.UserRuntimeType,
+		arg.UserModelID,
+		arg.UserEventID,
+		arg.UserDisplayText,
+		arg.ToolCallAssistantMessageID,
+		arg.ToolCallAssistantSenderChannelIdentityID,
+		arg.ToolCallAssistantSenderUserID,
+		arg.ToolCallAssistantExternalMessageID,
+		arg.ToolCallAssistantSourceReplyToMessageID,
+		arg.ToolCallAssistantContent,
+		arg.ToolCallAssistantMetadata,
+		arg.ToolCallAssistantUsage,
+		arg.ToolCallAssistantSessionMode,
+		arg.ToolCallAssistantRuntimeType,
+		arg.ToolCallAssistantModelID,
+		arg.ToolCallAssistantEventID,
+		arg.ToolCallAssistantDisplayText,
+		arg.ToolMessageID,
+		arg.ToolSenderChannelIdentityID,
+		arg.ToolSenderUserID,
+		arg.ToolExternalMessageID,
+		arg.ToolSourceReplyToMessageID,
+		arg.ToolContent,
+		arg.ToolMetadata,
+		arg.ToolUsage,
+		arg.ToolSessionMode,
+		arg.ToolRuntimeType,
+		arg.ToolModelID,
+		arg.ToolEventID,
+		arg.ToolDisplayText,
+		arg.FinalAssistantMessageID,
+		arg.FinalAssistantSenderChannelIdentityID,
+		arg.FinalAssistantSenderUserID,
+		arg.FinalAssistantExternalMessageID,
+		arg.FinalAssistantSourceReplyToMessageID,
+		arg.FinalAssistantContent,
+		arg.FinalAssistantMetadata,
+		arg.FinalAssistantUsage,
+		arg.FinalAssistantSessionMode,
+		arg.FinalAssistantRuntimeType,
+		arg.FinalAssistantModelID,
+		arg.FinalAssistantEventID,
+		arg.FinalAssistantDisplayText,
+		arg.BotID,
+		arg.SessionID,
+		arg.TurnID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CreateToolTailRoundRow
+	for rows.Next() {
+		var i CreateToolTailRoundRow
+		if err := rows.Scan(&i.ID, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteMessagesByBot = `-- name: DeleteMessagesByBot :exec
 DELETE FROM bot_history_messages
 WHERE bot_id = $1

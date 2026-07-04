@@ -142,11 +142,11 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		outboundAssets = outboundAssetRefsToMessageRefs(req.OutboundAssetCollector())
 	}
 
-	persisted := make([]messagepkg.Message, 0, len(messages))
 	turnRequestMessageID := ""
 	if req.UserMessagePersisted || req.ReusePersistedUserMessage {
 		turnRequestMessageID = strings.TrimSpace(req.PersistedUserMessageID)
 	}
+	persistInputs := make([]messagepkg.PersistInput, 0, len(messages))
 	for i, msg := range messages {
 		msg = normalizeUserMessageContent(msg)
 
@@ -226,7 +226,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		if extraMeta := opts.MessageMetadataByIndex[i]; len(extraMeta) > 0 {
 			persistMeta = mergeMetadata(persistMeta, extraMeta)
 		}
-		persistedMessage, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
+		persistInputs = append(persistInputs, messagepkg.PersistInput{
 			BotID:                   req.BotID,
 			SessionID:               req.SessionID,
 			SenderChannelIdentityID: messageSenderChannelIdentityID,
@@ -246,11 +246,32 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			TurnRequestMessageID:    turnRequestMessageID,
 			SkipHistoryTurn:         req.SkipHistoryTurn,
 		})
+	}
+	if batcher, ok := r.messageService.(messagepkg.ToolTailRoundPersister); ok {
+		if persisted, handled, err := batcher.PersistToolTailRound(ctx, persistInputs); handled || err != nil {
+			if err != nil {
+				r.logger.Warn("persist tool tail round failed", slog.Any("error", err))
+				return nil
+			}
+			return persisted
+		}
+	}
+	return r.persistMessageInputs(ctx, persistInputs, turnRequestMessageID)
+}
+
+func (r *Resolver) persistMessageInputs(ctx context.Context, inputs []messagepkg.PersistInput, initialTurnRequestMessageID string) []messagepkg.Message {
+	persisted := make([]messagepkg.Message, 0, len(inputs))
+	turnRequestMessageID := strings.TrimSpace(initialTurnRequestMessageID)
+	for _, input := range inputs {
+		if !input.SkipHistoryTurn {
+			input.TurnRequestMessageID = turnRequestMessageID
+		}
+		persistedMessage, err := r.messageService.Persist(ctx, input)
 		if err != nil {
 			r.logger.Warn("persist message failed", slog.Any("error", err))
 			continue
 		}
-		if msg.Role == "user" && !req.SkipHistoryTurn {
+		if strings.EqualFold(strings.TrimSpace(input.Role), "user") && !input.SkipHistoryTurn {
 			turnRequestMessageID = persistedMessage.ID
 		}
 		persisted = append(persisted, persistedMessage)

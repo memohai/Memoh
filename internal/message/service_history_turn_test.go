@@ -476,6 +476,7 @@ func newMessageHistoryTurnSQLite(t *testing.T) (*sql.DB, *sqlitestore.Queries) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	conn.SetMaxOpenConns(1)
 	if _, err := conn.ExecContext(context.Background(), sqliteHistoryTurnTestSchema); err != nil {
 		_ = conn.Close()
 		t.Fatalf("create schema: %v", err)

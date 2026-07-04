@@ -369,6 +369,169 @@ SELECT
 FROM inserted
 LEFT JOIN bound ON true;
 
+-- name: CreateToolTailRound :many
+WITH input_rows(
+  turn_message_seq,
+  message_id,
+  sender_channel_identity_id,
+  sender_user_id,
+  external_message_id,
+  source_reply_to_message_id,
+  role,
+  content,
+  metadata,
+  usage,
+  session_mode,
+  runtime_type,
+  model_id,
+  event_id,
+  display_text
+) AS (
+  VALUES
+      (
+        1::bigint,
+        sqlc.arg(user_message_id)::uuid,
+        sqlc.narg(user_sender_channel_identity_id)::uuid,
+        sqlc.narg(user_sender_user_id)::uuid,
+        sqlc.narg(user_external_message_id)::text,
+        sqlc.narg(user_source_reply_to_message_id)::text,
+        'user'::text,
+        sqlc.arg(user_content)::jsonb,
+        sqlc.arg(user_metadata)::jsonb,
+        sqlc.arg(user_usage)::jsonb,
+        sqlc.arg(user_session_mode)::text,
+        sqlc.arg(user_runtime_type)::text,
+        sqlc.narg(user_model_id)::uuid,
+        sqlc.narg(user_event_id)::uuid,
+        sqlc.narg(user_display_text)::text
+      ),
+      (
+        2::bigint,
+        sqlc.arg(tool_call_assistant_message_id)::uuid,
+        sqlc.narg(tool_call_assistant_sender_channel_identity_id)::uuid,
+        sqlc.narg(tool_call_assistant_sender_user_id)::uuid,
+        sqlc.narg(tool_call_assistant_external_message_id)::text,
+        sqlc.narg(tool_call_assistant_source_reply_to_message_id)::text,
+        'assistant'::text,
+        sqlc.arg(tool_call_assistant_content)::jsonb,
+        sqlc.arg(tool_call_assistant_metadata)::jsonb,
+        sqlc.arg(tool_call_assistant_usage)::jsonb,
+        sqlc.arg(tool_call_assistant_session_mode)::text,
+        sqlc.arg(tool_call_assistant_runtime_type)::text,
+        sqlc.narg(tool_call_assistant_model_id)::uuid,
+        sqlc.narg(tool_call_assistant_event_id)::uuid,
+        sqlc.narg(tool_call_assistant_display_text)::text
+      ),
+      (
+        3::bigint,
+        sqlc.arg(tool_message_id)::uuid,
+        sqlc.narg(tool_sender_channel_identity_id)::uuid,
+        sqlc.narg(tool_sender_user_id)::uuid,
+        sqlc.narg(tool_external_message_id)::text,
+        sqlc.narg(tool_source_reply_to_message_id)::text,
+        'tool'::text,
+        sqlc.arg(tool_content)::jsonb,
+        sqlc.arg(tool_metadata)::jsonb,
+        sqlc.arg(tool_usage)::jsonb,
+        sqlc.arg(tool_session_mode)::text,
+        sqlc.arg(tool_runtime_type)::text,
+        sqlc.narg(tool_model_id)::uuid,
+        sqlc.narg(tool_event_id)::uuid,
+        sqlc.narg(tool_display_text)::text
+      ),
+      (
+        4::bigint,
+        sqlc.arg(final_assistant_message_id)::uuid,
+        sqlc.narg(final_assistant_sender_channel_identity_id)::uuid,
+        sqlc.narg(final_assistant_sender_user_id)::uuid,
+        sqlc.narg(final_assistant_external_message_id)::text,
+        sqlc.narg(final_assistant_source_reply_to_message_id)::text,
+        'assistant'::text,
+        sqlc.arg(final_assistant_content)::jsonb,
+        sqlc.arg(final_assistant_metadata)::jsonb,
+        sqlc.arg(final_assistant_usage)::jsonb,
+        sqlc.arg(final_assistant_session_mode)::text,
+        sqlc.arg(final_assistant_runtime_type)::text,
+        sqlc.narg(final_assistant_model_id)::uuid,
+        sqlc.narg(final_assistant_event_id)::uuid,
+        sqlc.narg(final_assistant_display_text)::text
+      )
+),
+inserted_messages AS (
+  INSERT INTO bot_history_messages (
+    id,
+    bot_id,
+    session_id,
+    sender_channel_identity_id,
+    sender_account_user_id,
+    source_message_id,
+    source_reply_to_message_id,
+    role,
+    content,
+    metadata,
+    usage,
+    session_mode,
+    runtime_type,
+    model_id,
+    event_id,
+    display_text,
+    turn_id,
+    turn_message_seq
+  )
+  SELECT
+    input.message_id,
+    sqlc.arg(bot_id),
+    sqlc.arg(session_id),
+    input.sender_channel_identity_id,
+    input.sender_user_id,
+    input.external_message_id,
+    input.source_reply_to_message_id,
+    input.role,
+    input.content,
+    input.metadata,
+    input.usage,
+    input.session_mode,
+    input.runtime_type,
+    input.model_id,
+    input.event_id,
+    input.display_text,
+    sqlc.arg(turn_id),
+    input.turn_message_seq
+  FROM input_rows input
+  RETURNING id, created_at, turn_message_seq
+),
+inserted_turn AS (
+  INSERT INTO bot_history_turns (
+    id,
+    bot_id,
+    session_id,
+    position,
+    request_message_id,
+    assistant_message_id
+  )
+  SELECT
+    sqlc.arg(turn_id),
+    sqlc.arg(bot_id),
+    sqlc.arg(session_id),
+    COALESCE((
+      SELECT position + 1
+      FROM bot_history_turns
+      WHERE session_id = sqlc.arg(session_id)
+      ORDER BY position DESC
+      LIMIT 1
+    ), 1),
+    user_message.id,
+    tool_call_assistant.id
+  FROM inserted_messages user_message
+  JOIN inserted_messages tool_call_assistant ON tool_call_assistant.turn_message_seq = 2
+  WHERE user_message.turn_message_seq = 1
+  RETURNING id
+)
+SELECT inserted_messages.id, inserted_messages.created_at
+FROM inserted_messages
+JOIN inserted_turn ON true
+ORDER BY inserted_messages.turn_message_seq;
+
 -- name: CreateHistoryTurn :one
 INSERT INTO bot_history_turns (
   bot_id,

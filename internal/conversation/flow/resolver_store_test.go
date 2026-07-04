@@ -1,9 +1,12 @@
 package flow
 
 import (
+	"context"
+	"log/slog"
 	"testing"
 
 	"github.com/memohai/memoh/internal/conversation"
+	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
 func TestBuildInteractionMetadataIncludesForwardConversation(t *testing.T) {
@@ -139,5 +142,48 @@ func TestBuildInteractionMetadataIncludesPublicSkillActivation(t *testing.T) {
 	}
 	if _, ok := meta["audit_requested_skills"]; ok {
 		t.Fatalf("audit metadata leaked into message metadata: %#v", meta["audit_requested_skills"])
+	}
+}
+
+type batchRecordingMessageService struct {
+	recordingMessageService
+	batchInputs []messagepkg.PersistInput
+}
+
+func (s *batchRecordingMessageService) PersistToolTailRound(_ context.Context, inputs []messagepkg.PersistInput) ([]messagepkg.Message, bool, error) {
+	s.batchInputs = append(s.batchInputs, inputs...)
+	return recordedMessages(inputs), true, nil
+}
+
+func TestStoreMessagesUsesToolTailBatch(t *testing.T) {
+	t.Parallel()
+
+	messages := &batchRecordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	persisted := resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID:       storeRoundBotID,
+		SessionID:   "33333333-3333-3333-3333-333333333333",
+		Query:       "hello",
+		SessionType: "chat",
+		RuntimeType: "model",
+	}, []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("hello")},
+		{Role: "assistant", Content: conversation.NewTextContent("call tool")},
+		{Role: "tool", Content: conversation.NewTextContent("tool result")},
+		{Role: "assistant", Content: conversation.NewTextContent("done")},
+	}, "", storeRoundOptions{})
+
+	if len(messages.batchInputs) != 4 {
+		t.Fatalf("batch inputs = %d, want 4", len(messages.batchInputs))
+	}
+	if len(messages.persisted) != 0 {
+		t.Fatalf("fallback Persist called %d times, want 0", len(messages.persisted))
+	}
+	if len(persisted) != 4 {
+		t.Fatalf("persisted messages = %d, want 4", len(persisted))
 	}
 }

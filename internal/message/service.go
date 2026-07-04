@@ -47,6 +47,11 @@ type atomicDirectHistoryTurnWriter interface {
 	SupportsAtomicDirectHistoryTurnWrites() bool
 }
 
+type toolTailRoundWriter interface {
+	CreateToolTailRound(ctx context.Context, arg sqlc.CreateToolTailRoundParams) ([]sqlc.CreateToolTailRoundRow, error)
+	SupportsAtomicDirectHistoryTurnWrites() bool
+}
+
 type messageCleanupQueries interface {
 	DeleteMessagesByIDs(ctx context.Context, ids []pgtype.UUID) error
 }
@@ -108,6 +113,131 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 		s.publishMessageCreated(result)
 	}
 	return result, nil
+}
+
+// PersistToolTailRound writes the common user -> assistant(tool-call) -> tool
+// -> assistant(final) round with one PostgreSQL statement. Unsupported stores
+// or non-matching inputs return handled=false so callers can use Persist.
+func (s *DBService) PersistToolTailRound(ctx context.Context, inputs []PersistInput) ([]Message, bool, error) {
+	if s == nil || s.queries == nil || !isToolTailRoundShape(inputs) {
+		return nil, false, nil
+	}
+	writer, ok := s.queries.(toolTailRoundWriter)
+	if !ok || !writer.SupportsAtomicDirectHistoryTurnWrites() {
+		return nil, false, nil
+	}
+
+	prepared := make([]preparedPersistMessage, len(inputs))
+	for i, input := range inputs {
+		input.TurnRequestMessageID = ""
+		item, err := s.preparePersistMessage(ctx, input)
+		if err != nil {
+			return nil, true, err
+		}
+		if !item.sessionID.Valid {
+			return nil, false, nil
+		}
+		if i > 0 && (item.botID != prepared[0].botID || item.sessionID != prepared[0].sessionID) {
+			return nil, false, nil
+		}
+		prepared[i] = item
+	}
+
+	messageIDs := [4]pgtype.UUID{newPGUUID(), newPGUUID(), newPGUUID(), newPGUUID()}
+	turnID := newPGUUID()
+	rows, err := writer.CreateToolTailRound(ctx, sqlc.CreateToolTailRoundParams{
+		UserMessageID:                            messageIDs[0],
+		UserSenderChannelIdentityID:              prepared[0].createArg.SenderChannelIdentityID,
+		UserSenderUserID:                         prepared[0].createArg.SenderUserID,
+		UserExternalMessageID:                    prepared[0].createArg.ExternalMessageID,
+		UserSourceReplyToMessageID:               prepared[0].createArg.SourceReplyToMessageID,
+		UserContent:                              prepared[0].createArg.Content,
+		UserMetadata:                             prepared[0].createArg.Metadata,
+		UserUsage:                                prepared[0].createArg.Usage,
+		UserSessionMode:                          prepared[0].createArg.SessionMode,
+		UserRuntimeType:                          prepared[0].createArg.RuntimeType,
+		UserModelID:                              prepared[0].createArg.ModelID,
+		UserEventID:                              prepared[0].createArg.EventID,
+		UserDisplayText:                          prepared[0].createArg.DisplayText,
+		ToolCallAssistantMessageID:               messageIDs[1],
+		ToolCallAssistantSenderChannelIdentityID: prepared[1].createArg.SenderChannelIdentityID,
+		ToolCallAssistantSenderUserID:            prepared[1].createArg.SenderUserID,
+		ToolCallAssistantExternalMessageID:       prepared[1].createArg.ExternalMessageID,
+		ToolCallAssistantSourceReplyToMessageID:  prepared[1].createArg.SourceReplyToMessageID,
+		ToolCallAssistantContent:                 prepared[1].createArg.Content,
+		ToolCallAssistantMetadata:                prepared[1].createArg.Metadata,
+		ToolCallAssistantUsage:                   prepared[1].createArg.Usage,
+		ToolCallAssistantSessionMode:             prepared[1].createArg.SessionMode,
+		ToolCallAssistantRuntimeType:             prepared[1].createArg.RuntimeType,
+		ToolCallAssistantModelID:                 prepared[1].createArg.ModelID,
+		ToolCallAssistantEventID:                 prepared[1].createArg.EventID,
+		ToolCallAssistantDisplayText:             prepared[1].createArg.DisplayText,
+		ToolMessageID:                            messageIDs[2],
+		ToolSenderChannelIdentityID:              prepared[2].createArg.SenderChannelIdentityID,
+		ToolSenderUserID:                         prepared[2].createArg.SenderUserID,
+		ToolExternalMessageID:                    prepared[2].createArg.ExternalMessageID,
+		ToolSourceReplyToMessageID:               prepared[2].createArg.SourceReplyToMessageID,
+		ToolContent:                              prepared[2].createArg.Content,
+		ToolMetadata:                             prepared[2].createArg.Metadata,
+		ToolUsage:                                prepared[2].createArg.Usage,
+		ToolSessionMode:                          prepared[2].createArg.SessionMode,
+		ToolRuntimeType:                          prepared[2].createArg.RuntimeType,
+		ToolModelID:                              prepared[2].createArg.ModelID,
+		ToolEventID:                              prepared[2].createArg.EventID,
+		ToolDisplayText:                          prepared[2].createArg.DisplayText,
+		FinalAssistantMessageID:                  messageIDs[3],
+		FinalAssistantSenderChannelIdentityID:    prepared[3].createArg.SenderChannelIdentityID,
+		FinalAssistantSenderUserID:               prepared[3].createArg.SenderUserID,
+		FinalAssistantExternalMessageID:          prepared[3].createArg.ExternalMessageID,
+		FinalAssistantSourceReplyToMessageID:     prepared[3].createArg.SourceReplyToMessageID,
+		FinalAssistantContent:                    prepared[3].createArg.Content,
+		FinalAssistantMetadata:                   prepared[3].createArg.Metadata,
+		FinalAssistantUsage:                      prepared[3].createArg.Usage,
+		FinalAssistantSessionMode:                prepared[3].createArg.SessionMode,
+		FinalAssistantRuntimeType:                prepared[3].createArg.RuntimeType,
+		FinalAssistantModelID:                    prepared[3].createArg.ModelID,
+		FinalAssistantEventID:                    prepared[3].createArg.EventID,
+		FinalAssistantDisplayText:                prepared[3].createArg.DisplayText,
+		BotID:                                    prepared[0].botID,
+		SessionID:                                prepared[0].sessionID,
+		TurnID:                                   turnID,
+	})
+	if err != nil {
+		return nil, true, err
+	}
+	if len(rows) != len(prepared) {
+		return nil, true, fmt.Errorf("create tool tail round returned %d messages, want %d", len(rows), len(prepared))
+	}
+
+	messages := make([]Message, len(rows))
+	for i, row := range rows {
+		messages[i] = toMessageFromToolTailRound(row, prepared[i].createArg, prepared[i].metadata)
+		s.publishMessageCreated(messages[i])
+	}
+	return messages, true, nil
+}
+
+func isToolTailRoundShape(inputs []PersistInput) bool {
+	if len(inputs) != 4 {
+		return false
+	}
+	if strings.TrimSpace(inputs[0].BotID) == "" || strings.TrimSpace(inputs[0].SessionID) == "" {
+		return false
+	}
+	expectedRoles := [4]string{"user", "assistant", "tool", "assistant"}
+	for i, input := range inputs {
+		if input.SkipHistoryTurn || len(input.Assets) > 0 {
+			return false
+		}
+		if !strings.EqualFold(strings.TrimSpace(input.Role), expectedRoles[i]) {
+			return false
+		}
+		if strings.TrimSpace(input.BotID) != strings.TrimSpace(inputs[0].BotID) ||
+			strings.TrimSpace(input.SessionID) != strings.TrimSpace(inputs[0].SessionID) {
+			return false
+		}
+	}
+	return true
 }
 
 func shouldPersistMessageInTx(input PersistInput) bool {
@@ -1141,6 +1271,31 @@ func toMessageFromCreateWithHistoryTurn(row sqlc.CreateMessageWithHistoryTurnRow
 }
 
 func toMessageFromCreateInHistoryTurnByRequestAndBind(row sqlc.CreateMessageInHistoryTurnByRequestAndBindRow, createArg sqlc.CreateMessageParams, metadata map[string]any) Message {
+	return toMessageFieldsWithMetadata(
+		row.ID,
+		createArg.BotID,
+		createArg.SessionID,
+		createArg.SenderChannelIdentityID,
+		createArg.SenderUserID,
+		pgtype.Text{},
+		pgtype.Text{},
+		extractPlatformFromMetadataMap(metadata),
+		createArg.ExternalMessageID,
+		createArg.SourceReplyToMessageID,
+		createArg.Role,
+		createArg.Content,
+		createArg.Metadata,
+		createArg.Usage,
+		createArg.SessionMode,
+		createArg.RuntimeType,
+		createArg.EventID,
+		createArg.DisplayText,
+		row.CreatedAt,
+		metadata,
+	)
+}
+
+func toMessageFromToolTailRound(row sqlc.CreateToolTailRoundRow, createArg sqlc.CreateMessageParams, metadata map[string]any) Message {
 	return toMessageFieldsWithMetadata(
 		row.ID,
 		createArg.BotID,
