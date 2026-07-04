@@ -49,8 +49,14 @@
    * .dockview-theme-dark/light, which .dockview-theme-memoh does NOT extend, so
    * it must be re-declared here. The void/pane centre drop is rendered entirely
    * by dockview's default anchor/selection styles using this colour — no custom
-   * override below. Only the tab-to-tab insertion line is themed (brand colour). */
-  --dv-drag-over-background-color: rgba(83, 89, 93, 0.3);
+   * override below. Only the tab-to-tab insertion line is themed (brand colour).
+   *
+   * Deliberately a neutral scrim, NOT a brand/semantic token: this is dockview's
+   * own drop wash dimmed to fit our chrome, and it must stay chromatically neutral
+   * (a tinted --sidebar-accent read wrong here). Named so it isn't a bare literal
+   * buried in the variable map; the value is the intended 0.3-alpha neutral grey. */
+  --dock-drop-scrim: rgba(83, 89, 93, 0.3);
+  --dv-drag-over-background-color: var(--dock-drop-scrim);
   --dv-drag-over-border-color: transparent;
 
   --dv-icon-hover-background-color: var(--ui-hover);
@@ -537,14 +543,16 @@
 }
 
 /* Dockview renders the "+" actions after the tabs, so its static divider normally
- * paints over a tab-edge drop line. During header drops, lift the source layer of
- * the caret above the actions layer instead of hiding the divider. */
-.dockview-theme-memoh .dv-tabs-and-actions-container > .dv-scrollable,
+ * paints over a tab-edge drop line. Lift the void (which holds the strip's slack
+ * and its drop wash) above the actions layer during a drop so the caret shows.
+ * (The former .dv-scrollable sibling of this rule is gone: chat-workspace sets
+ * scrollbars:'native', so dockview never creates the .dv-scrollable wrapper — the
+ * tabs list is the header's direct child. Per-tab drops use .dv-tab.dv-drop-target
+ * below.) */
 .dockview-theme-memoh .dv-void-container {
   position: relative;
 }
 
-.dockview-theme-memoh .dv-tabs-and-actions-container > .dv-scrollable:has(.dv-drop-target),
 .dockview-theme-memoh .dv-void-container.dv-drop-target {
   z-index: calc(var(--dv-overlay-z-index, 999) + 1);
 }
@@ -786,6 +794,16 @@
 }
 .dockview-theme-memoh .memoh-terminal-group .dv-left-actions-container::before {
   content: none;
+}
+
+/* The void's editor claw-back (margin-right:-1×--tab-edge-pad) cancels the editor
+ * tabs-container's flare padding so the drop zone reaches the actions flush. The
+ * terminal strip carries no such flare padding (its tabs-container uses a flat
+ * 3px inset, and terminal chips have no active-flare geometry), so inheriting the
+ * negative margin would pull the void 8px PAST its content edge — a phantom
+ * overhang under the "+". Zero it for terminal groups; they need no claw-back. */
+.dockview-theme-memoh .memoh-terminal-group .dv-void-container {
+  margin-right: 0;
 }
 
 .dockview-theme-memoh .memoh-terminal-group .dv-pre-actions-container {
