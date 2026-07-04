@@ -5,7 +5,7 @@
     @auxclick.middle.prevent="close"
   >
     <svg
-      v-if="isActive"
+      v-if="isVisible"
       class="active-tab-shape z-0"
       :viewBox="activeTabViewBox"
       :style="activeTabShapeStyle"
@@ -37,12 +37,18 @@
       ]"
     >{{ title }}</span>
     <!-- Unsaved-changes dot: sits in the close slot at rest so the affordance never
-         shifts; hovering fades it out as the close button fades in.
-         Painted over the same fade as the button so a long title dissolves behind
-         it instead of colliding with the glyph. -->
+         shifts; hovering fades it out as the close button fades in. It borrows the
+         close-fade GEOMETRY (identical top/bottom/right) so the dot sits exactly
+         where the close button will appear — no positional jump on hover — but the
+         `is-dot` modifier strips the fade's paint. The grey blot is a HOVER
+         affordance (it dissolves the title under the close glyph); on an inactive
+         tab --tab-hover-bg resolves to the hover overlay (--surface-chrome-hover),
+         so painting it at rest smeared grey behind the dot on a tab that is neither
+         active nor hovered. At rest we want the dot ALONE; the blot returns exactly
+         when the close button does (this layer fades out as that one fades in). -->
     <div
       v-if="isDirty"
-      class="close-fade pointer-events-none absolute right-[var(--tab-close-edge)] z-[2] flex items-center pl-6 pr-0 opacity-100 group-hover/tab:opacity-0"
+      class="close-fade is-dot pointer-events-none absolute right-[var(--tab-close-edge)] z-[2] flex items-center pl-6 pr-0 opacity-100 group-hover/tab:opacity-0"
     >
       <span class="flex size-5 items-center justify-center">
         <span
@@ -51,14 +57,17 @@
         />
       </span>
     </div>
-    <!-- Close affordance: hover-only, absolutely positioned so it never reserves a
-         slot or resizes the chip (geometry is identical hovered or not). It paints
-         the chip's own OPAQUE hover colour (--tab-hover-bg) as a left→right fade, so
-         the title dissolves into the chip and nothing stays legible under the
-         button. The fade layer is click-through; only the button takes pointer
-         events. Keyboard focus reveals it for a11y; middle-click closes without it. -->
+    <!-- Close affordance: RESIDENT on the active tab (fills the reserved slot so it
+         never reads as an empty gap), hover/focus-only on inactive tabs. Absolutely
+         positioned so it never reserves a slot or resizes the chip (geometry is
+         identical hovered or not). It paints the chip's own OPAQUE hover colour
+         (--tab-hover-bg) as a left→right fade, so the title dissolves into the chip
+         and nothing stays legible under the button. The fade layer is click-through;
+         only the button takes pointer events. Keyboard focus reveals it for a11y;
+         middle-click closes without it. -->
     <div
-      class="close-fade pointer-events-none absolute right-[var(--tab-close-edge)] z-[2] flex items-center pl-6 pr-0 opacity-0 group-hover/tab:opacity-100 focus-within:opacity-100"
+      class="close-fade pointer-events-none absolute right-[var(--tab-close-edge)] z-[2] flex items-center pl-6 pr-0 group-hover/tab:opacity-100 focus-within:opacity-100"
+      :class="showResidentClose ? 'opacity-100' : 'opacity-0'"
     >
       <!-- No own hover fill: the close affordance is read through the left→right
            fade (which already paints the chip's hover surface) plus the icon
@@ -103,6 +112,14 @@ const rootEl = ref<HTMLElement | null>(null)
 const panelId = props.params.api.id
 const title = ref(props.params.api.title ?? '')
 const isActive = ref(props.params.api.isActive)
+// Per-group active: this tab is its group's visible panel (every group has one).
+// Drives the active SHAPE (SVG), the resident close slot, and the seam/hover CSS
+// via the .memoh-tab-active class toggled on the .dv-tab wrapper. isActive is
+// layout-level (only the focused group's active tab) and is kept ONLY for label
+// colour — the focused group's active tab reads brighter, inactive groups' active
+// tabs stay dim. dockview's own .dv-active-tab is isActive-scoped, so it can't
+// carry this per-group signal the shape needs.
+const isVisible = ref(props.params.api.isVisible)
 // First-paint placeholder ONLY — these mirror the CSS contract (200≈12.5rem tab,
 // 35 = 40px strip − 5px inset, 8 = --tab-radius, 1px stroke) just so the active
 // SVG has a sane shape for the one frame before onMounted measures the real DOM.
@@ -128,6 +145,13 @@ let pendingShapeFrame = 0
 // Unsaved-changes flag for file panels — read from the store's reactive map, so
 // the dot, the sidebar badge and the close dialog never drift apart.
 const isDirty = computed(() => !!workspaceTabs.fileDirty[panelId])
+// The close slot is reserved on every tab (the right inset), so on an inactive tab
+// at rest it just reads as empty space. The ACTIVE tab fills that slot with a
+// resident X — its close affordance is always there, not hover-only, so the
+// reserved gap never looks accidental. A dirty active tab keeps showing the unsaved
+// dot at rest instead (the X still fades in on hover over the same slot), so the two
+// signals never fight for the slot.
+const showResidentClose = computed(() => isVisible.value && !isDirty.value)
 // Ephemeral preview tabs still get replaced in place when another
 // preview-eligible tab opens into the same group (see workspace-tabs store), but
 // the state is no longer surfaced visually — there is no italic or other marker.
@@ -138,9 +162,21 @@ const disposables = [
   }),
   props.params.api.onDidActiveChange((event) => {
     isActive.value = event.isActive
-    if (event.isActive) scheduleActiveTabShapeUpdate()
+  }),
+  props.params.api.onDidVisibilityChange((event) => {
+    isVisible.value = event.isVisible
+    if (event.isVisible) scheduleActiveTabShapeUpdate()
   }),
   props.params.containerApi.onDidLayoutChange(() => {
+    // Re-tag on every layout change, not just visibility flips. When a tab is
+    // MOVED or SPLIT into another group, dockview reuses this component's tab
+    // element inside a brand-new .dv-tab wrapper (tabs.js setContent) without
+    // remounting the Vue instance; and if the tab was active in both the old and
+    // new group, isVisible stays true→true so onDidVisibilityChange never fires.
+    // Without this, the moved active tab would render its SVG shape (v-if still
+    // true) on a wrapper the CSS reads as inactive — doubled hover/divider pixels.
+    // Layout change covers move/split/reorder and re-resolves the current wrapper.
+    syncGroupActiveClass()
     scheduleActiveTabShapeUpdate()
   }),
 ]
@@ -150,8 +186,12 @@ const disposables = [
 onMounted(() => {
   title.value = props.params.api.title ?? title.value
   isActive.value = props.params.api.isActive
+  isVisible.value = props.params.api.isVisible
   nextTick(() => {
     installShapeObserver()
+    // Set the group-active class only after the tab's .dv-tab ancestor exists;
+    // closest() returns null before the wrapper is in the DOM.
+    syncGroupActiveClass()
     window.addEventListener('resize', scheduleActiveTabShapeUpdate)
     scheduleActiveTabShapeUpdate()
   })
@@ -167,12 +207,26 @@ onBeforeUnmount(() => {
   if (pendingShapeFrame) cancelAnimationFrame(pendingShapeFrame)
   resizeObserver?.disconnect()
   window.removeEventListener('resize', scheduleActiveTabShapeUpdate)
+  // Clear the imperatively-set class so it can't linger on a .dv-tab wrapper that
+  // dockview later reuses for a different (e.g. terminal) tab component that never
+  // sets it — otherwise a stale active style could survive the swap.
+  rootEl.value?.closest('.dv-tab')?.classList.remove('memoh-tab-active')
   for (const d of disposables) d.dispose()
 })
 
-watch(isActive, (active) => {
+watch(isVisible, (active) => {
+  syncGroupActiveClass()
   if (active) nextTick(scheduleActiveTabShapeUpdate)
 })
+
+// Mirror isVisible onto the .dv-tab wrapper as a class the theme CSS can target.
+// dockview's own .dv-active-tab is isActive-scoped (layout-level, one tab total),
+// so it can't express "this tab is its group's active panel" — which is what the
+// seam/hover/shape rules need, since every group's active tab wears the shape.
+function syncGroupActiveClass() {
+  const tab = rootEl.value?.closest<HTMLElement>('.dv-tab')
+  if (tab) tab.classList.toggle('memoh-tab-active', isVisible.value)
+}
 
 function installShapeObserver() {
   const root = rootEl.value
@@ -186,7 +240,7 @@ function installShapeObserver() {
 }
 
 function scheduleActiveTabShapeUpdate() {
-  if (!isActive.value || pendingShapeFrame) return
+  if (!isVisible.value || pendingShapeFrame) return
 
   pendingShapeFrame = requestAnimationFrame(() => {
     pendingShapeFrame = 0
@@ -338,5 +392,15 @@ function fmt(value: number) {
 .group\/tab:hover .close-fade,
 .group\/tab:focus-within .close-fade {
   transition: opacity var(--tab-hover-duration, 150ms) ease-out;
+}
+
+/* Dirty-dot slot: reuse close-fade for GEOMETRY ONLY, never its paint. The fade is
+ * a hover affordance (blots the title under the close button); this layer is shown
+ * only at rest (opacity-100, fading to 0 on hover), so painting the fade here put a
+ * grey smear behind the dot on an inactive tab — off-hover, --tab-hover-bg resolves
+ * to the hover overlay, not the tab's own fill. Higher specificity than .close-fade
+ * so it wins regardless of source order. */
+.close-fade.is-dot {
+  background: none;
 }
 </style>

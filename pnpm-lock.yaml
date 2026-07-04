@@ -4,6 +4,14 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  dockview-core@7.0.2:
+    hash: 8195455b5e4bc151ac7c9ca7beae0706d3f9bc46cddcceb43d4ece5ca47f6f61
+    path: patches/dockview-core@7.0.2.patch
+  dockview-vue@7.0.2:
+    hash: ed0eefdb14161c24622f84cfcd1f3470577cc96fd973705c7e09d1c643452b07
+    path: patches/dockview-vue@7.0.2.patch
+
 importers:
 
   .:
@@ -227,8 +235,8 @@ importers:
         specifier: ^3.14.0
         version: 3.14.0
       dockview-vue:
-        specifier: ^6.6.1
-        version: 6.6.1(vue@3.5.26(typescript@5.9.3))
+        specifier: ^7.0.2
+        version: 7.0.2(patch_hash=ed0eefdb14161c24622f84cfcd1f3470577cc96fd973705c7e09d1c643452b07)(vue@3.5.26(typescript@5.9.3))
       dotenv:
         specifier: ^17.2.3
         version: 17.2.3
@@ -3450,13 +3458,16 @@ packages:
     os: [darwin]
     hasBin: true
 
-  dockview-core@6.6.1:
-    resolution: {integrity: sha512-WuNoO2wl3rGI8MaTuvmfgViek4WafHLD9Kf//Hw69g8TgAHSpAWr6RW15kU6U9vwtQxIi/YBxQNcIA5RzQ46Fw==}
+  dockview-core@7.0.2:
+    resolution: {integrity: sha512-i666ndkUdT4U+Bo2Yu3d6KwCJNqe21VJ0oschdgcXucZ5TquzBFX94zcUBEfg4IewTv2BuiPJ7r/2JTGLLv6ig==}
 
-  dockview-vue@6.6.1:
-    resolution: {integrity: sha512-Uv7HCWwQMoNitwuvj89oDnZQ7ZduOiuxbeZtaLCW+hUqoeAWSF2BU7zexv8Jc0TtsfJTJ4giMrX3/PF2IjUhKw==}
+  dockview-vue@7.0.2:
+    resolution: {integrity: sha512-O1ta/OhISPSu6sF1VQBWdDLyRbmJC0I2onixqXH/ZSSk8/t9OUsB9X9VuXP3g3D+a3THI3eRJEJyDazTAxEF8g==}
     peerDependencies:
       vue: ^3.4.0
+
+  dockview@7.0.2:
+    resolution: {integrity: sha512-QhgbJ7RTFsWvrs1lQZKPGCLTGjKU7kI5ZWX5lwU03arM9lIoQlbfv1b/uQ7V5zTkRw7JDndEqjKMgEFw2I8Kow==}
 
   doctypes@1.1.0:
     resolution: {integrity: sha512-LLBi6pEqS6Do3EKQ3J0NqHWV5hhb78Pi8vvESYwyOy2c31ZEZVdtitdzsQsKb7878PEERhzUk0ftqGhG6Mz+pQ==}
@@ -8850,12 +8861,16 @@ snapshots:
       verror: 1.10.1
     optional: true
 
-  dockview-core@6.6.1: {}
+  dockview-core@7.0.2(patch_hash=8195455b5e4bc151ac7c9ca7beae0706d3f9bc46cddcceb43d4ece5ca47f6f61): {}
 
-  dockview-vue@6.6.1(vue@3.5.26(typescript@5.9.3)):
+  dockview-vue@7.0.2(patch_hash=ed0eefdb14161c24622f84cfcd1f3470577cc96fd973705c7e09d1c643452b07)(vue@3.5.26(typescript@5.9.3)):
     dependencies:
-      dockview-core: 6.6.1
+      dockview: 7.0.2
       vue: 3.5.26(typescript@5.9.3)
+
+  dockview@7.0.2:
+    dependencies:
+      dockview-core: 7.0.2(patch_hash=8195455b5e4bc151ac7c9ca7beae0706d3f9bc46cddcceb43d4ece5ca47f6f61)
 
   doctypes@1.1.0: {}
 

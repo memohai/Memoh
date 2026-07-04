@@ -442,7 +442,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     for (const d of apiDisposables) d.dispose()
     api.value = dock
     apiDisposables = [
-      dock.onDidActivePanelChange((panel) => {
+      dock.onDidActivePanelChange((event) => {
+        // dockview v7 renamed this event's payload field: v6 fired the panel on
+        // `event.activePanel`, v7 fires `{ panel, origin }`. Reading the old name
+        // yields undefined every time, silently nulling activePanelId on every
+        // tab switch — which desyncs the sidebar file-tree highlight (its only
+        // consumer via activeId). Use `event.panel`.
+        const panel = event.panel
         activePanelId.value = panel?.id ?? null
         const group = panel?.group
         if (group && !isTerminalOnlyGroup(group)) {
