@@ -1549,7 +1549,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				continue
 			}
 
-			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws retry stream error",
+			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws retry stream error", nil,
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error {
 					return h.resolver.RetryLatestMessageWS(ctx, flow.RetryLatestMessageInput{
 						BotID:                  botID,
@@ -1571,7 +1571,6 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			sessionID := strings.TrimSpace(msg.SessionID)
 			streamID := strings.TrimSpace(msg.StreamID)
 			messageID := strings.TrimSpace(msg.MessageID)
-			chatAttachments := parseWSClientAttachments(msg.Attachments)
 			if streamID == "" {
 				sendWSError(writer, "", sessionID, "stream_id is required")
 				continue
@@ -1584,6 +1583,15 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, streamID, sessionID, "message_id is required")
 				continue
 			}
+			chatAttachments, attachmentErr := parseWSClientAttachments(msg.Attachments)
+			if attachmentErr != nil {
+				code := slashErrorCode(attachmentErr)
+				if code == "" {
+					code = slash.CodeReservedSkillMetadata
+				}
+				sendWSCommandError(writer, msg, code)
+				continue
+			}
 			if text == "" && len(chatAttachments) == 0 {
 				sendWSError(writer, streamID, sessionID, "message text or attachments required")
 				continue
@@ -1593,7 +1601,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				continue
 			}
 
-			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws edit stream error",
+			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws edit stream error", nil,
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error {
 					ingestedAttachments := h.ingestWSInboundAttachments(ctx, botID, chatAttachments)
 					return h.resolver.EditLatestMessageWS(ctx, flow.EditLatestMessageInput{

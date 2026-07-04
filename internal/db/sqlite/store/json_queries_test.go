@@ -187,6 +187,7 @@ WHERE t.superseded_at IS NULL;
 	}{
 		{"00000000-0000-0000-0000-000000000105", sessionID, 1, "", "00000000-0000-0000-0000-000000000005"},
 		{"00000000-0000-0000-0000-000000000106", sessionID, 2, "00000000-0000-0000-0000-000000000006", ""},
+		{"00000000-0000-0000-0000-000000000110", sessionID, 3, "00000000-0000-0000-0000-000000000010", ""},
 		{"00000000-0000-0000-0000-000000000109", discussSessionID, 1, "", "00000000-0000-0000-0000-000000000009"},
 	} {
 		_, err = conn.ExecContext(ctx, `INSERT INTO bot_history_turns (id, bot_id, session_id, position, request_message_id, assistant_message_id) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))`,

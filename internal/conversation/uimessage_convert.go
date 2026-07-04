@@ -459,7 +459,11 @@ func extractPersistedMessageText(raw messagepkg.Message, message *uiDecodedModel
 			if text := strings.TrimSpace(raw.DisplayContent); text != "" {
 				return skillActivationPromptFromPersistedText(text, activation)
 			}
-			if text := strings.TrimSpace(extractTextFromPersistedContent(message.Content)); text != "" {
+			content := raw.Content
+			if message != nil {
+				content = message.Content
+			}
+			if text := strings.TrimSpace(extractTextFromPersistedContent(content)); text != "" {
 				return skillActivationPromptFromPersistedText(text, activation)
 			}
 			return ""
@@ -482,6 +486,21 @@ func extractPersistedMessageText(raw messagepkg.Message, message *uiDecodedModel
 		return strings.TrimSpace(stripPersistedUserStructuredContext(text))
 	}
 	return strings.TrimSpace(stripPersistedAgentTags(text))
+}
+
+func extractTextFromPersistedContent(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+
+	var modelMessage ModelMessage
+	if err := json.Unmarshal(raw, &modelMessage); err == nil && len(modelMessage.Content) > 0 {
+		decoded := decodeUIModelMessage(modelMessage)
+		return decoded.textContent()
+	}
+
+	decoded := decodeUIModelMessage(ModelMessage{Content: raw})
+	return decoded.textContent()
 }
 
 func skillActivationPromptFromPersistedText(text string, activation *SkillActivation) string {
