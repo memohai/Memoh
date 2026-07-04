@@ -331,13 +331,10 @@ async function handleImport() {
             />
             <Button
               size="sm"
-              :disabled="!passphrase || previewing"
+              :disabled="!passphrase"
+              :loading="previewing"
               @click="loadPreview"
             >
-              <Spinner
-                v-if="previewing"
-                class="mr-1.5"
-              />
               {{ previewing ? t('bots.backup.unlocking') : t('bots.backup.unlock') }}
             </Button>
           </div>
@@ -451,12 +448,9 @@ async function handleImport() {
         <Button
           size="sm"
           :disabled="!canImport"
+          :loading="importing"
           @click="handleImport"
         >
-          <Spinner
-            v-if="importing"
-            class="mr-1.5"
-          />
           {{ t('common.import') }}
         </Button>
       </div>

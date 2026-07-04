@@ -113,13 +113,9 @@
               {{ $t('common.cancel') }}
             </Button>
             <Button
-              :disabled="compactLoading"
+              :loading="compactLoading"
               @click="handleCompact"
             >
-              <Spinner
-                v-if="compactLoading"
-                class="mr-1 size-3"
-              />
               {{ $t('common.confirm') }}
             </Button>
           </div>
@@ -284,12 +280,9 @@
               </DialogClose>
               <Button
                 type="submit"
-                :disabled="actionLoading || !dialogContent.trim()"
+                :disabled="!dialogContent.trim()"
+                :loading="actionLoading"
               >
-                <Spinner
-                  v-if="actionLoading"
-                  class="size-3"
-                />
                 {{ editingId ? $t('common.save') : $t('common.confirm') }}
               </Button>
             </div>
@@ -307,7 +300,6 @@ import { DateFormatter, getLocalTimeZone, today } from '@internationalized/date'
 import { computed, onMounted, ref, watch } from 'vue'
 import {
   Button,
-  Spinner,
   Textarea,
   Dialog,
   DialogScrollContent,

@@ -89,13 +89,10 @@
           </Button>
           <Button
             size="sm"
-            :disabled="!canSubmit || isSaving"
+            :disabled="!canSubmit"
+            :loading="isSaving"
             @click="handleCreate"
           >
-            <Spinner
-              v-if="isSaving"
-              class="mr-1.5 size-3.5"
-            />
             {{ $t('common.save') }}
           </Button>
         </div>

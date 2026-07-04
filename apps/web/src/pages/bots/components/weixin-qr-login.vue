@@ -17,17 +17,10 @@
       class="flex flex-col items-center gap-3 py-4"
     >
       <Button
-        :disabled="isStarting"
+        :loading="isStarting"
         @click="startLogin"
       >
-        <Spinner
-          v-if="isStarting"
-          class="mr-1.5"
-        />
-        <QrCode
-          v-else
-          class="mr-1.5 size-3.5"
-        />
+        <QrCode class="mr-1.5 size-3.5" />
         {{ $t('bots.channels.weixinQr.startScan') }}
       </Button>
     </div>
