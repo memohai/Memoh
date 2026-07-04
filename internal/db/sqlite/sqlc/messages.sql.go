@@ -618,6 +618,45 @@ func (q *Queries) GetVisibleHistoryTurnByMessage(ctx context.Context, arg GetVis
 	return i, err
 }
 
+const getVisibleMessageCursorByExternalIDBySession = `-- name: GetVisibleMessageCursorByExternalIDBySession :one
+SELECT
+  m.id,
+  t.position AS turn_position,
+  m.turn_message_seq,
+  m.created_at
+FROM bot_history_messages m
+JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
+WHERE m.session_id = ?1
+  AND t.session_id = ?1
+  AND m.source_message_id = ?2
+ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+LIMIT 1
+`
+
+type GetVisibleMessageCursorByExternalIDBySessionParams struct {
+	SessionID         sql.NullString `json:"session_id"`
+	ExternalMessageID sql.NullString `json:"external_message_id"`
+}
+
+type GetVisibleMessageCursorByExternalIDBySessionRow struct {
+	ID             string        `json:"id"`
+	TurnPosition   int64         `json:"turn_position"`
+	TurnMessageSeq sql.NullInt64 `json:"turn_message_seq"`
+	CreatedAt      string        `json:"created_at"`
+}
+
+func (q *Queries) GetVisibleMessageCursorByExternalIDBySession(ctx context.Context, arg GetVisibleMessageCursorByExternalIDBySessionParams) (GetVisibleMessageCursorByExternalIDBySessionRow, error) {
+	row := q.db.QueryRowContext(ctx, getVisibleMessageCursorByExternalIDBySession, arg.SessionID, arg.ExternalMessageID)
+	var i GetVisibleMessageCursorByExternalIDBySessionRow
+	err := row.Scan(
+		&i.ID,
+		&i.TurnPosition,
+		&i.TurnMessageSeq,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const linkMessageToHistoryTurn = `-- name: LinkMessageToHistoryTurn :exec
 UPDATE bot_history_messages
 SET turn_id = ?1,
@@ -1047,15 +1086,15 @@ func (q *Queries) ListMessagesAfterBySession(ctx context.Context, arg ListMessag
 	return items, nil
 }
 
-const listMessagesAfterMessageBySession = `-- name: ListMessagesAfterMessageBySession :many
-WITH cursor_message AS (
-  SELECT t.position AS turn_position, m.turn_message_seq, m.created_at, m.id
-  FROM bot_history_messages m
-  JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
-  WHERE m.session_id = ?1
-    AND t.session_id = ?1
-    AND m.id = ?3
-  LIMIT 1
+const listMessagesAfterCursorBySession = `-- name: ListMessagesAfterCursorBySession :many
+WITH candidate_turns AS (
+  SELECT t.id, t.position
+  FROM bot_history_turns t
+  WHERE t.session_id = ?1
+    AND t.superseded_at IS NULL
+    AND t.position >= ?2
+  ORDER BY t.position ASC
+  LIMIT ?6 + 1
 )
 SELECT
   m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
@@ -1069,12 +1108,137 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
+JOIN candidate_turns t ON t.id = m.turn_id
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = ?1
+  AND (
+    t.position > ?2
+    OR (t.position = ?2 AND m.turn_message_seq > ?3)
+    OR (t.position = ?2 AND m.turn_message_seq = ?3 AND julianday(m.created_at) > julianday(?4))
+    OR (t.position = ?2 AND m.turn_message_seq = ?3 AND julianday(m.created_at) = julianday(?4) AND m.id > ?5)
+  )
+ORDER BY t.position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+LIMIT ?6
+`
+
+type ListMessagesAfterCursorBySessionParams struct {
+	SessionID            sql.NullString `json:"session_id"`
+	CursorTurnPosition   int64          `json:"cursor_turn_position"`
+	CursorTurnMessageSeq sql.NullInt64  `json:"cursor_turn_message_seq"`
+	CursorCreatedAt      interface{}    `json:"cursor_created_at"`
+	CursorMessageID      string         `json:"cursor_message_id"`
+	MaxCount             int64          `json:"max_count"`
+}
+
+type ListMessagesAfterCursorBySessionRow struct {
+	ID                      string         `json:"id"`
+	BotID                   string         `json:"bot_id"`
+	SessionID               sql.NullString `json:"session_id"`
+	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
+	SenderUserID            sql.NullString `json:"sender_user_id"`
+	ExternalMessageID       sql.NullString `json:"external_message_id"`
+	SourceReplyToMessageID  sql.NullString `json:"source_reply_to_message_id"`
+	Role                    string         `json:"role"`
+	Content                 string         `json:"content"`
+	Metadata                string         `json:"metadata"`
+	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
+	EventID                 sql.NullString `json:"event_id"`
+	DisplayText             sql.NullString `json:"display_text"`
+	CreatedAt               string         `json:"created_at"`
+	SenderDisplayName       sql.NullString `json:"sender_display_name"`
+	SenderAvatarUrl         sql.NullString `json:"sender_avatar_url"`
+	Platform                sql.NullString `json:"platform"`
+}
+
+func (q *Queries) ListMessagesAfterCursorBySession(ctx context.Context, arg ListMessagesAfterCursorBySessionParams) ([]ListMessagesAfterCursorBySessionRow, error) {
+	rows, err := q.db.QueryContext(ctx, listMessagesAfterCursorBySession,
+		arg.SessionID,
+		arg.CursorTurnPosition,
+		arg.CursorTurnMessageSeq,
+		arg.CursorCreatedAt,
+		arg.CursorMessageID,
+		arg.MaxCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMessagesAfterCursorBySessionRow
+	for rows.Next() {
+		var i ListMessagesAfterCursorBySessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
+			&i.EventID,
+			&i.DisplayText,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMessagesAfterMessageBySession = `-- name: ListMessagesAfterMessageBySession :many
+WITH cursor_message AS (
+  SELECT t.position AS turn_position, m.turn_message_seq, m.created_at, m.id
+  FROM bot_history_messages m
+  JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
+  WHERE m.session_id = ?1
+    AND t.session_id = ?1
+    AND m.id = ?3
+  LIMIT 1
+),
+candidate_turns AS (
+  SELECT t.id, t.position
+  FROM bot_history_turns t
+  WHERE t.session_id = ?1
+    AND t.superseded_at IS NULL
+    AND t.position >= (SELECT cursor_message.turn_position FROM cursor_message)
+  ORDER BY t.position ASC
+  LIMIT ?2 + 1
+)
+SELECT
+  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.session_mode,
+  m.runtime_type,
+  m.event_id, m.display_text, m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+JOIN candidate_turns t ON t.id = m.turn_id
 CROSS JOIN cursor_message cursor
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = ?1
-  AND t.session_id = ?1
   AND (
     t.position > cursor.turn_position
     OR (t.position = cursor.turn_position AND m.turn_message_seq > cursor.turn_message_seq)
@@ -1342,6 +1506,123 @@ func (q *Queries) ListMessagesBeforeBySession(ctx context.Context, arg ListMessa
 	return items, nil
 }
 
+const listMessagesBeforeCursorBySession = `-- name: ListMessagesBeforeCursorBySession :many
+WITH candidate_turns AS (
+  SELECT t.id, t.position
+  FROM bot_history_turns t
+  WHERE t.session_id = ?1
+    AND t.superseded_at IS NULL
+    AND t.position <= ?2
+  ORDER BY t.position DESC
+  LIMIT ?6 + 1
+)
+SELECT
+  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.session_mode,
+  m.runtime_type,
+  m.event_id, m.display_text, m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+JOIN candidate_turns t ON t.id = m.turn_id
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = ?1
+  AND (
+    t.position < ?2
+    OR (t.position = ?2 AND m.turn_message_seq < ?3)
+    OR (t.position = ?2 AND m.turn_message_seq = ?3 AND julianday(m.created_at) < julianday(?4))
+    OR (t.position = ?2 AND m.turn_message_seq = ?3 AND julianday(m.created_at) = julianday(?4) AND m.id < ?5)
+  )
+ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+LIMIT ?6
+`
+
+type ListMessagesBeforeCursorBySessionParams struct {
+	SessionID            sql.NullString `json:"session_id"`
+	CursorTurnPosition   int64          `json:"cursor_turn_position"`
+	CursorTurnMessageSeq sql.NullInt64  `json:"cursor_turn_message_seq"`
+	CursorCreatedAt      interface{}    `json:"cursor_created_at"`
+	CursorMessageID      string         `json:"cursor_message_id"`
+	MaxCount             int64          `json:"max_count"`
+}
+
+type ListMessagesBeforeCursorBySessionRow struct {
+	ID                      string         `json:"id"`
+	BotID                   string         `json:"bot_id"`
+	SessionID               sql.NullString `json:"session_id"`
+	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
+	SenderUserID            sql.NullString `json:"sender_user_id"`
+	ExternalMessageID       sql.NullString `json:"external_message_id"`
+	SourceReplyToMessageID  sql.NullString `json:"source_reply_to_message_id"`
+	Role                    string         `json:"role"`
+	Content                 string         `json:"content"`
+	Metadata                string         `json:"metadata"`
+	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
+	EventID                 sql.NullString `json:"event_id"`
+	DisplayText             sql.NullString `json:"display_text"`
+	CreatedAt               string         `json:"created_at"`
+	SenderDisplayName       sql.NullString `json:"sender_display_name"`
+	SenderAvatarUrl         sql.NullString `json:"sender_avatar_url"`
+	Platform                sql.NullString `json:"platform"`
+}
+
+func (q *Queries) ListMessagesBeforeCursorBySession(ctx context.Context, arg ListMessagesBeforeCursorBySessionParams) ([]ListMessagesBeforeCursorBySessionRow, error) {
+	rows, err := q.db.QueryContext(ctx, listMessagesBeforeCursorBySession,
+		arg.SessionID,
+		arg.CursorTurnPosition,
+		arg.CursorTurnMessageSeq,
+		arg.CursorCreatedAt,
+		arg.CursorMessageID,
+		arg.MaxCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMessagesBeforeCursorBySessionRow
+	for rows.Next() {
+		var i ListMessagesBeforeCursorBySessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
+			&i.EventID,
+			&i.DisplayText,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMessagesBeforeMessageBySession = `-- name: ListMessagesBeforeMessageBySession :many
 WITH cursor_message AS (
   SELECT t.position AS turn_position, m.turn_message_seq, m.created_at, m.id
@@ -1355,10 +1636,9 @@ WITH cursor_message AS (
 candidate_turns AS (
   SELECT t.id, t.position
   FROM bot_history_turns t
-  CROSS JOIN cursor_message cursor
   WHERE t.session_id = ?1
     AND t.superseded_at IS NULL
-    AND t.position <= cursor.turn_position
+    AND t.position <= (SELECT cursor_message.turn_position FROM cursor_message)
   ORDER BY t.position DESC
   LIMIT ?2 + 1
 )

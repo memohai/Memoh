@@ -4375,6 +4375,25 @@ func (q *Queries) GetMessageByExternalIDBySession(ctx context.Context, arg pgsql
 	return result, nil
 }
 
+func (q *Queries) GetVisibleMessageCursorByExternalIDBySession(ctx context.Context, arg pgsqlc.GetVisibleMessageCursorByExternalIDBySessionParams) (pgsqlc.GetVisibleMessageCursorByExternalIDBySessionRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.GetVisibleMessageCursorByExternalIDBySessionRow{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.GetVisibleMessageCursorByExternalIDBySessionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.GetVisibleMessageCursorByExternalIDBySessionRow{}, err
+	}
+	out, err := q.store.queries.GetVisibleMessageCursorByExternalIDBySession(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.GetVisibleMessageCursorByExternalIDBySessionRow{}, mapQueryErr(err)
+	}
+	var result pgsqlc.GetVisibleMessageCursorByExternalIDBySessionRow
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.GetVisibleMessageCursorByExternalIDBySessionRow{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) GetMessageByIDBySession(ctx context.Context, arg pgsqlc.GetMessageByIDBySessionParams) (pgsqlc.GetMessageByIDBySessionRow, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgsqlc.GetMessageByIDBySessionRow{}, errSQLiteQueriesNotConfigured
@@ -4407,6 +4426,25 @@ func (q *Queries) ListMessagesAfterBySession(ctx context.Context, arg pgsqlc.Lis
 		return nil, mapQueryErr(err)
 	}
 	var result []pgsqlc.ListMessagesAfterBySessionRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListMessagesAfterCursorBySession(ctx context.Context, arg pgsqlc.ListMessagesAfterCursorBySessionParams) ([]pgsqlc.ListMessagesAfterCursorBySessionRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListMessagesAfterCursorBySessionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListMessagesAfterCursorBySession(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListMessagesAfterCursorBySessionRow
 	if err := convertValue(out, &result); err != nil {
 		return nil, err
 	}
@@ -4464,6 +4502,25 @@ func (q *Queries) ListMessagesBeforeMessageBySession(ctx context.Context, arg pg
 		return nil, mapQueryErr(err)
 	}
 	var result []pgsqlc.ListMessagesBeforeMessageBySessionRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListMessagesBeforeCursorBySession(ctx context.Context, arg pgsqlc.ListMessagesBeforeCursorBySessionParams) ([]pgsqlc.ListMessagesBeforeCursorBySessionRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListMessagesBeforeCursorBySessionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListMessagesBeforeCursorBySession(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListMessagesBeforeCursorBySessionRow
 	if err := convertValue(out, &result); err != nil {
 		return nil, err
 	}

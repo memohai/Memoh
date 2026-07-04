@@ -570,36 +570,52 @@ func (s *DBService) LocateByExternalIDBySession(ctx context.Context, sessionID s
 		afterLimit = 0
 	}
 
-	targetRow, err := s.queries.GetMessageByExternalIDBySession(ctx, sqlc.GetMessageByExternalIDBySessionParams{
+	cursor, err := s.queries.GetVisibleMessageCursorByExternalIDBySession(ctx, sqlc.GetVisibleMessageCursorByExternalIDBySessionParams{
 		SessionID:         pgSessionID,
 		ExternalMessageID: toPgText(externalMessageID),
 	})
 	if err != nil {
 		return LocateResult{}, err
 	}
-	target := toMessageFromExternalIDBySessionRow(targetRow)
-
-	beforeRows, err := s.queries.ListMessagesBeforeMessageBySession(ctx, sqlc.ListMessagesBeforeMessageBySessionParams{
-		SessionID:       pgSessionID,
-		BeforeMessageID: targetRow.ID,
-		MaxCount:        beforeLimit,
+	if !cursor.TurnMessageSeq.Valid {
+		return LocateResult{}, errors.New("message cursor missing turn sequence")
+	}
+	targetRow, err := s.queries.GetMessageByIDBySession(ctx, sqlc.GetMessageByIDBySessionParams{
+		SessionID: pgSessionID,
+		MessageID: cursor.ID,
 	})
 	if err != nil {
 		return LocateResult{}, err
 	}
-	afterRows, err := s.queries.ListMessagesAfterMessageBySession(ctx, sqlc.ListMessagesAfterMessageBySessionParams{
-		SessionID:      pgSessionID,
-		AfterMessageID: targetRow.ID,
-		MaxCount:       afterLimit,
+	target := toMessageFromIDBySessionRow(targetRow)
+
+	beforeRows, err := s.queries.ListMessagesBeforeCursorBySession(ctx, sqlc.ListMessagesBeforeCursorBySessionParams{
+		SessionID:            pgSessionID,
+		CursorTurnPosition:   cursor.TurnPosition,
+		CursorTurnMessageSeq: cursor.TurnMessageSeq.Int64,
+		CursorCreatedAt:      cursor.CreatedAt,
+		CursorMessageID:      cursor.ID,
+		MaxCount:             beforeLimit,
+	})
+	if err != nil {
+		return LocateResult{}, err
+	}
+	afterRows, err := s.queries.ListMessagesAfterCursorBySession(ctx, sqlc.ListMessagesAfterCursorBySessionParams{
+		SessionID:            pgSessionID,
+		CursorTurnPosition:   cursor.TurnPosition,
+		CursorTurnMessageSeq: cursor.TurnMessageSeq.Int64,
+		CursorCreatedAt:      cursor.CreatedAt,
+		CursorMessageID:      cursor.ID,
+		MaxCount:             afterLimit,
 	})
 	if err != nil {
 		return LocateResult{}, err
 	}
 
 	messages := make([]Message, 0, len(beforeRows)+1+len(afterRows))
-	messages = append(messages, toMessagesFromBeforeMessageBySession(beforeRows)...)
+	messages = append(messages, toMessagesFromBeforeCursorBySession(beforeRows)...)
 	messages = append(messages, target)
-	messages = append(messages, toMessagesFromAfterMessageBySession(afterRows)...)
+	messages = append(messages, toMessagesFromAfterCursorBySession(afterRows)...)
 	s.enrichAssets(ctx, messages)
 	return LocateResult{Messages: messages, TargetID: target.ID}, nil
 }
@@ -1113,7 +1129,7 @@ func toMessageFromBeforeMessageBySessionRow(row sqlc.ListMessagesBeforeMessageBy
 	)
 }
 
-func toMessageFromExternalIDBySessionRow(row sqlc.GetMessageByExternalIDBySessionRow) Message {
+func toMessageFromBeforeCursorBySessionRow(row sqlc.ListMessagesBeforeCursorBySessionRow) Message {
 	return toMessageFields(
 		row.ID,
 		row.BotID,
@@ -1161,7 +1177,7 @@ func toMessageFromIDBySessionRow(row sqlc.GetMessageByIDBySessionRow) Message {
 	)
 }
 
-func toMessageFromAfterMessageBySessionRow(row sqlc.ListMessagesAfterMessageBySessionRow) Message {
+func toMessageFromAfterCursorBySessionRow(row sqlc.ListMessagesAfterCursorBySessionRow) Message {
 	return toMessageFields(
 		row.ID,
 		row.BotID,
@@ -1321,10 +1337,18 @@ func toMessagesFromBeforeMessageBySession(rows []sqlc.ListMessagesBeforeMessageB
 	return messages
 }
 
-func toMessagesFromAfterMessageBySession(rows []sqlc.ListMessagesAfterMessageBySessionRow) []Message {
+func toMessagesFromBeforeCursorBySession(rows []sqlc.ListMessagesBeforeCursorBySessionRow) []Message {
+	messages := make([]Message, 0, len(rows))
+	for i := len(rows) - 1; i >= 0; i-- {
+		messages = append(messages, toMessageFromBeforeCursorBySessionRow(rows[i]))
+	}
+	return messages
+}
+
+func toMessagesFromAfterCursorBySession(rows []sqlc.ListMessagesAfterCursorBySessionRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
-		messages = append(messages, toMessageFromAfterMessageBySessionRow(row))
+		messages = append(messages, toMessageFromAfterCursorBySessionRow(row))
 	}
 	return messages
 }
