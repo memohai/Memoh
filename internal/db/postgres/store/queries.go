@@ -23,6 +23,10 @@ func NewQueriesWithPool(pool *pgxpool.Pool, queries *dbsqlc.Queries) *Queries {
 	return &Queries{Queries: queries, pool: pool}
 }
 
+func (*Queries) SupportsAtomicDirectHistoryTurnWrites() bool {
+	return true
+}
+
 func (q *Queries) WithTx(tx pgx.Tx) dbstore.Queries {
 	if q == nil {
 		return nil

@@ -1157,6 +1157,39 @@ WHERE m.session_id = sqlc.arg(session_id)
 ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT 1;
 
+-- name: GetLocatedMessageByExternalIDBySession :one
+SELECT
+  m.id,
+  t.position AS turn_position,
+  m.turn_message_seq,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.session_mode,
+  m.runtime_type,
+  m.event_id,
+  m.display_text,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = sqlc.arg(session_id)
+  AND t.session_id = sqlc.arg(session_id)
+  AND m.source_message_id = sqlc.arg(external_message_id)
+ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+LIMIT 1;
+
 -- name: ListMessagesAfterBySession :many
 SELECT
   m.id,

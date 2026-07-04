@@ -386,6 +386,90 @@ func TestSQLiteDeleteByIDsRemovesUnanchoredReplacementMessages(t *testing.T) {
 	}
 }
 
+func TestSQLiteLocateByExternalIDReturnsTargetWindowInVisibleOrder(t *testing.T) {
+	ctx := context.Background()
+	conn, queries := newMessageHistoryTurnSQLite(t)
+	defer func() { _ = conn.Close() }()
+	svc := NewService(nil, queries)
+
+	const (
+		botID     = "00000000-0000-0000-0000-000000003301"
+		sessionID = "00000000-0000-0000-0000-000000003302"
+	)
+	insertMessageHistoryTurnFixtures(t, conn, botID, sessionID)
+
+	user1, err := svc.Persist(ctx, PersistInput{
+		BotID:             botID,
+		SessionID:         sessionID,
+		Role:              "user",
+		Content:           []byte(`{"role":"user","content":"first"}`),
+		ExternalMessageID: "external-user-1",
+	})
+	if err != nil {
+		t.Fatalf("persist user1: %v", err)
+	}
+	assistant1, err := svc.Persist(ctx, PersistInput{
+		BotID:             botID,
+		SessionID:         sessionID,
+		Role:              "assistant",
+		Content:           []byte(`{"role":"assistant","content":"first answer"}`),
+		ExternalMessageID: "external-assistant-1",
+	})
+	if err != nil {
+		t.Fatalf("persist assistant1: %v", err)
+	}
+	user2, err := svc.Persist(ctx, PersistInput{
+		BotID:             botID,
+		SessionID:         sessionID,
+		Role:              "user",
+		Content:           []byte(`{"role":"user","content":"second"}`),
+		ExternalMessageID: "external-user-2",
+	})
+	if err != nil {
+		t.Fatalf("persist user2: %v", err)
+	}
+	target, err := svc.Persist(ctx, PersistInput{
+		BotID:             botID,
+		SessionID:         sessionID,
+		Role:              "assistant",
+		Content:           []byte(`{"role":"assistant","content":"target answer"}`),
+		ExternalMessageID: "external-target",
+	})
+	if err != nil {
+		t.Fatalf("persist target: %v", err)
+	}
+	user3, err := svc.Persist(ctx, PersistInput{
+		BotID:             botID,
+		SessionID:         sessionID,
+		Role:              "user",
+		Content:           []byte(`{"role":"user","content":"third"}`),
+		ExternalMessageID: "external-user-3",
+	})
+	if err != nil {
+		t.Fatalf("persist user3: %v", err)
+	}
+	if _, err := svc.Persist(ctx, PersistInput{
+		BotID:             botID,
+		SessionID:         sessionID,
+		Role:              "assistant",
+		Content:           []byte(`{"role":"assistant","content":"third answer"}`),
+		ExternalMessageID: "external-assistant-3",
+	}); err != nil {
+		t.Fatalf("persist assistant3: %v", err)
+	}
+
+	located, err := svc.LocateByExternalIDBySession(ctx, sessionID, "external-target", 1, 1)
+	if err != nil {
+		t.Fatalf("locate target: %v", err)
+	}
+	if located.TargetID != target.ID {
+		t.Fatalf("target id = %s, want %s", located.TargetID, target.ID)
+	}
+	if got, want := messageIDs(located.Messages), []string{user2.ID, target.ID, user3.ID}; !equalStringSlices(got, want) {
+		t.Fatalf("located message ids = %#v, want %#v; previous turn %s/%s should be outside the 1-message window", got, want, user1.ID, assistant1.ID)
+	}
+}
+
 func newMessageHistoryTurnSQLite(t *testing.T) (*sql.DB, *sqlitestore.Queries) {
 	t.Helper()
 	conn, err := dbpkg.OpenSQLite(context.Background(), config.SQLiteConfig{DSN: ":memory:"})

@@ -1222,6 +1222,98 @@ func (q *Queries) GetLatestVisibleHistoryTurnBySession(ctx context.Context, sess
 	return i, err
 }
 
+const getLocatedMessageByExternalIDBySession = `-- name: GetLocatedMessageByExternalIDBySession :one
+SELECT
+  m.id,
+  t.position AS turn_position,
+  m.turn_message_seq,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.session_mode,
+  m.runtime_type,
+  m.event_id,
+  m.display_text,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = $1
+  AND t.session_id = $1
+  AND m.source_message_id = $2
+ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+LIMIT 1
+`
+
+type GetLocatedMessageByExternalIDBySessionParams struct {
+	SessionID         pgtype.UUID `json:"session_id"`
+	ExternalMessageID pgtype.Text `json:"external_message_id"`
+}
+
+type GetLocatedMessageByExternalIDBySessionRow struct {
+	ID                      pgtype.UUID        `json:"id"`
+	TurnPosition            int64              `json:"turn_position"`
+	TurnMessageSeq          pgtype.Int8        `json:"turn_message_seq"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
+	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
+	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
+	Role                    string             `json:"role"`
+	Content                 []byte             `json:"content"`
+	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
+	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
+	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
+	Platform                pgtype.Text        `json:"platform"`
+}
+
+func (q *Queries) GetLocatedMessageByExternalIDBySession(ctx context.Context, arg GetLocatedMessageByExternalIDBySessionParams) (GetLocatedMessageByExternalIDBySessionRow, error) {
+	row := q.db.QueryRow(ctx, getLocatedMessageByExternalIDBySession, arg.SessionID, arg.ExternalMessageID)
+	var i GetLocatedMessageByExternalIDBySessionRow
+	err := row.Scan(
+		&i.ID,
+		&i.TurnPosition,
+		&i.TurnMessageSeq,
+		&i.BotID,
+		&i.SessionID,
+		&i.SenderChannelIdentityID,
+		&i.SenderUserID,
+		&i.ExternalMessageID,
+		&i.SourceReplyToMessageID,
+		&i.Role,
+		&i.Content,
+		&i.Metadata,
+		&i.Usage,
+		&i.SessionMode,
+		&i.RuntimeType,
+		&i.EventID,
+		&i.DisplayText,
+		&i.CreatedAt,
+		&i.SenderDisplayName,
+		&i.SenderAvatarUrl,
+		&i.Platform,
+	)
+	return i, err
+}
+
 const getMessageByExternalIDBySession = `-- name: GetMessageByExternalIDBySession :one
 SELECT
   m.id,

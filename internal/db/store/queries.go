@@ -252,6 +252,7 @@ type Queries interface {
 	LinkUnassignedMessagesAfterHistoryTurnAssistant(ctx context.Context, turnID pgtype.UUID) error
 	ListMessages(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.ListMessagesRow, error)
 	GetMessageByExternalIDBySession(ctx context.Context, arg dbsqlc.GetMessageByExternalIDBySessionParams) (dbsqlc.GetMessageByExternalIDBySessionRow, error)
+	GetLocatedMessageByExternalIDBySession(ctx context.Context, arg dbsqlc.GetLocatedMessageByExternalIDBySessionParams) (dbsqlc.GetLocatedMessageByExternalIDBySessionRow, error)
 	GetVisibleMessageCursorByExternalIDBySession(ctx context.Context, arg dbsqlc.GetVisibleMessageCursorByExternalIDBySessionParams) (dbsqlc.GetVisibleMessageCursorByExternalIDBySessionRow, error)
 	ListMessagesAfterBySession(ctx context.Context, arg dbsqlc.ListMessagesAfterBySessionParams) ([]dbsqlc.ListMessagesAfterBySessionRow, error)
 	ListMessagesAfterCursorBySession(ctx context.Context, arg dbsqlc.ListMessagesAfterCursorBySessionParams) ([]dbsqlc.ListMessagesAfterCursorBySessionRow, error)

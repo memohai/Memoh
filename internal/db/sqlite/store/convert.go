@@ -67,6 +67,10 @@ func assignValue(src reflect.Value, dst reflect.Value) error {
 		dst.Set(sqlNullString(stringValue(src), validValue(src)))
 		return nil
 	}
+	if isSQLNullInt64(dst.Type()) {
+		dst.Set(sqlNullInt64(intValue(src), validValue(src)))
+		return nil
+	}
 	if isPGText(dst.Type()) {
 		dst.Set(pgText(stringValue(src), validValue(src)))
 		return nil
@@ -419,6 +423,10 @@ func isSQLNullString(t reflect.Type) bool {
 	return t == reflect.TypeOf(sql.NullString{})
 }
 
+func isSQLNullInt64(t reflect.Type) bool {
+	return t == reflect.TypeOf(sql.NullInt64{})
+}
+
 func isPGUUID(t reflect.Type) bool {
 	return t.PkgPath() == "github.com/jackc/pgx/v5/pgtype" && t.Name() == "UUID"
 }
@@ -433,6 +441,10 @@ func isPGDate(t reflect.Type) bool {
 
 func sqlNullString(value string, valid bool) reflect.Value {
 	return reflect.ValueOf(sql.NullString{String: value, Valid: valid})
+}
+
+func sqlNullInt64(value int64, valid bool) reflect.Value {
+	return reflect.ValueOf(sql.NullInt64{Int64: value, Valid: valid})
 }
 
 func pgText(value string, valid bool) reflect.Value {
