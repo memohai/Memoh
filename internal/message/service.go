@@ -38,10 +38,8 @@ type historyTurnWriter interface {
 }
 
 type directHistoryTurnWriter interface {
-	CreateHistoryTurnWithID(ctx context.Context, arg sqlc.CreateHistoryTurnWithIDParams) (sqlc.BotHistoryTurn, error)
-	CreateMessageInHistoryTurnByRequest(ctx context.Context, arg sqlc.CreateMessageInHistoryTurnByRequestParams) (sqlc.CreateMessageInHistoryTurnByRequestRow, error)
-	CreateMessageWithTurn(ctx context.Context, arg sqlc.CreateMessageWithTurnParams) (sqlc.CreateMessageWithTurnRow, error)
-	BindHistoryTurnAssistantByRequest(ctx context.Context, arg sqlc.BindHistoryTurnAssistantByRequestParams) (sqlc.BotHistoryTurn, error)
+	CreateMessageInHistoryTurnByRequestAndBind(ctx context.Context, arg sqlc.CreateMessageInHistoryTurnByRequestAndBindParams) (sqlc.CreateMessageInHistoryTurnByRequestAndBindRow, error)
+	CreateMessageWithHistoryTurn(ctx context.Context, arg sqlc.CreateMessageWithHistoryTurnParams) (sqlc.CreateMessageWithHistoryTurnRow, error)
 }
 
 type messageCleanupQueries interface {
@@ -165,7 +163,7 @@ func (s *DBService) persist(ctx context.Context, input PersistInput) (Message, e
 			return Message{}, fmt.Errorf("invalid turn request message id: %w", err)
 		}
 		if direct, ok := s.queries.(directHistoryTurnWriter); ok && pgSessionID.Valid {
-			result, pgMsgID, handled, err := s.persistDirectHistoryMessage(ctx, direct, createArg, input.Role, pgTurnRequestMessageID)
+			result, pgMsgID, handled, err := persistDirectHistoryMessage(ctx, direct, createArg, input.Role, pgTurnRequestMessageID)
 			if err != nil {
 				return Message{}, err
 			}
@@ -191,7 +189,7 @@ func (s *DBService) persist(ctx context.Context, input PersistInput) (Message, e
 	return s.finishPersistedMessage(ctx, result, row.ID, input.Assets)
 }
 
-func (s *DBService) persistDirectHistoryMessage(
+func persistDirectHistoryMessage(
 	ctx context.Context,
 	writer directHistoryTurnWriter,
 	createArg sqlc.CreateMessageParams,
@@ -202,7 +200,7 @@ func (s *DBService) persistDirectHistoryMessage(
 	case "user":
 		messageID := newPGUUID()
 		turnID := newPGUUID()
-		row, err := writer.CreateMessageWithTurn(ctx, sqlc.CreateMessageWithTurnParams{
+		row, err := writer.CreateMessageWithHistoryTurn(ctx, sqlc.CreateMessageWithHistoryTurnParams{
 			MessageID:               messageID,
 			BotID:                   createArg.BotID,
 			SessionID:               createArg.SessionID,
@@ -225,21 +223,12 @@ func (s *DBService) persistDirectHistoryMessage(
 		if err != nil {
 			return Message{}, pgtype.UUID{}, true, err
 		}
-		if _, err := writer.CreateHistoryTurnWithID(ctx, sqlc.CreateHistoryTurnWithIDParams{
-			TurnID:           turnID,
-			BotID:            createArg.BotID,
-			SessionID:        createArg.SessionID,
-			RequestMessageID: messageID,
-		}); err != nil {
-			s.cleanupPersistedMessage(ctx, messageID)
-			return Message{}, pgtype.UUID{}, true, fmt.Errorf("create history turn: %w", err)
-		}
-		return toMessageFromCreateWithTurn(row), messageID, true, nil
+		return toMessageFromCreateWithHistoryTurn(row), messageID, true, nil
 	case "assistant", "tool":
 		if !requestMessageID.Valid {
 			return Message{}, pgtype.UUID{}, false, nil
 		}
-		row, err := writer.CreateMessageInHistoryTurnByRequest(ctx, sqlc.CreateMessageInHistoryTurnByRequestParams{
+		row, err := writer.CreateMessageInHistoryTurnByRequestAndBind(ctx, sqlc.CreateMessageInHistoryTurnByRequestAndBindParams{
 			Role:                    createArg.Role,
 			SessionID:               createArg.SessionID,
 			RequestMessageID:        requestMessageID,
@@ -263,17 +252,7 @@ func (s *DBService) persistDirectHistoryMessage(
 		if err != nil {
 			return Message{}, pgtype.UUID{}, true, err
 		}
-		if strings.ToLower(strings.TrimSpace(role)) == "assistant" {
-			if _, err := writer.BindHistoryTurnAssistantByRequest(ctx, sqlc.BindHistoryTurnAssistantByRequestParams{
-				SessionID:          createArg.SessionID,
-				RequestMessageID:   requestMessageID,
-				AssistantMessageID: row.ID,
-			}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				s.cleanupPersistedMessage(ctx, row.ID)
-				return Message{}, pgtype.UUID{}, true, fmt.Errorf("bind history turn assistant by request: %w", err)
-			}
-		}
-		return toMessageFromCreateInHistoryTurnByRequest(row), row.ID, true, nil
+		return toMessageFromCreateInHistoryTurnByRequestAndBind(row), row.ID, true, nil
 	default:
 		return Message{}, pgtype.UUID{}, false, nil
 	}
@@ -1065,7 +1044,7 @@ func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
 	)
 }
 
-func toMessageFromCreateWithTurn(row sqlc.CreateMessageWithTurnRow) Message {
+func toMessageFromCreateWithHistoryTurn(row sqlc.CreateMessageWithHistoryTurnRow) Message {
 	return toMessageFields(
 		row.ID,
 		row.BotID,
@@ -1089,7 +1068,7 @@ func toMessageFromCreateWithTurn(row sqlc.CreateMessageWithTurnRow) Message {
 	)
 }
 
-func toMessageFromCreateInHistoryTurnByRequest(row sqlc.CreateMessageInHistoryTurnByRequestRow) Message {
+func toMessageFromCreateInHistoryTurnByRequestAndBind(row sqlc.CreateMessageInHistoryTurnByRequestAndBindRow) Message {
 	return toMessageFields(
 		row.ID,
 		row.BotID,

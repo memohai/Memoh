@@ -1153,6 +1153,55 @@ func (q *Queries) CreateMessageInHistoryTurnByRequest(ctx context.Context, arg p
 	return result, nil
 }
 
+func (q *Queries) CreateMessageInHistoryTurnByRequestAndBind(ctx context.Context, arg pgsqlc.CreateMessageInHistoryTurnByRequestAndBindParams) (pgsqlc.CreateMessageInHistoryTurnByRequestAndBindRow, error) {
+	var createArg pgsqlc.CreateMessageInHistoryTurnByRequestParams
+	if err := convertValue(arg, &createArg); err != nil {
+		return pgsqlc.CreateMessageInHistoryTurnByRequestAndBindRow{}, err
+	}
+	row, err := q.CreateMessageInHistoryTurnByRequest(ctx, createArg)
+	if err != nil {
+		return pgsqlc.CreateMessageInHistoryTurnByRequestAndBindRow{}, err
+	}
+	if strings.EqualFold(strings.TrimSpace(arg.Role), "assistant") {
+		if _, err := q.BindHistoryTurnAssistantByRequest(ctx, pgsqlc.BindHistoryTurnAssistantByRequestParams{
+			SessionID:          arg.SessionID,
+			RequestMessageID:   arg.RequestMessageID,
+			AssistantMessageID: row.ID,
+		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return pgsqlc.CreateMessageInHistoryTurnByRequestAndBindRow{}, err
+		}
+	}
+	var result pgsqlc.CreateMessageInHistoryTurnByRequestAndBindRow
+	if err := convertValue(row, &result); err != nil {
+		return pgsqlc.CreateMessageInHistoryTurnByRequestAndBindRow{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) CreateMessageWithHistoryTurn(ctx context.Context, arg pgsqlc.CreateMessageWithHistoryTurnParams) (pgsqlc.CreateMessageWithHistoryTurnRow, error) {
+	var createArg pgsqlc.CreateMessageWithTurnParams
+	if err := convertValue(arg, &createArg); err != nil {
+		return pgsqlc.CreateMessageWithHistoryTurnRow{}, err
+	}
+	row, err := q.CreateMessageWithTurn(ctx, createArg)
+	if err != nil {
+		return pgsqlc.CreateMessageWithHistoryTurnRow{}, err
+	}
+	if _, err := q.CreateHistoryTurnWithID(ctx, pgsqlc.CreateHistoryTurnWithIDParams{
+		TurnID:           arg.TurnID,
+		BotID:            arg.BotID,
+		SessionID:        arg.SessionID,
+		RequestMessageID: arg.MessageID,
+	}); err != nil {
+		return pgsqlc.CreateMessageWithHistoryTurnRow{}, err
+	}
+	var result pgsqlc.CreateMessageWithHistoryTurnRow
+	if err := convertValue(row, &result); err != nil {
+		return pgsqlc.CreateMessageWithHistoryTurnRow{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) CreateMessageAsset(ctx context.Context, arg pgsqlc.CreateMessageAssetParams) (pgsqlc.BotHistoryMessageAsset, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgsqlc.BotHistoryMessageAsset{}, errSQLiteQueriesNotConfigured

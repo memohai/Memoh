@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"bytes"
 	"encoding/json"
 	"regexp"
 	"strconv"
@@ -18,6 +19,14 @@ var (
 	uiMessageAgentTagsRe         = regexp.MustCompile(`(?s)<attachments>.*?</attachments>|<reactions>.*?</reactions>|<speech>.*?</speech>`)
 	uiMessageCollapsedNewlinesRe = regexp.MustCompile(`\n{3,}`)
 	uiTaskNotificationRe         = regexp.MustCompile(`(?s)<task-notification>\s*(.*?)\s*</task-notification>`)
+	uiMetadataParseKeys          = [][]byte{
+		[]byte(`"forward"`),
+		[]byte(`"model_requested_skills"`),
+		[]byte(`"platform"`),
+		[]byte(`"reply"`),
+		[]byte(`"skill_activation"`),
+		[]byte(`"user_message_kind"`),
+	}
 )
 
 type uiContentPart struct {
@@ -182,7 +191,7 @@ func IsUITurnBoundary(raw messagepkg.Message) bool {
 func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 	result := make([]UITurn, 0, len(messages))
 	var pending *uiPendingAssistantTurn
-	backgroundToolRefs := map[string]uiBackgroundToolRef{}
+	var backgroundToolRefs map[string]uiBackgroundToolRef
 
 	registerBackgroundTools := func(turnIndex int) {
 		if turnIndex < 0 || turnIndex >= len(result) {
@@ -196,11 +205,17 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			if taskID == "" {
 				continue
 			}
+			if backgroundToolRefs == nil {
+				backgroundToolRefs = make(map[string]uiBackgroundToolRef, 1)
+			}
 			backgroundToolRefs[taskID] = uiBackgroundToolRef{TurnIndex: turnIndex, MessageIndex: msgIndex}
 		}
 	}
 
 	completeBackgroundTool := func(task UIBackgroundTask) {
+		if len(backgroundToolRefs) == 0 {
+			return
+		}
 		taskID := strings.TrimSpace(task.TaskID)
 		if taskID == "" {
 			return
@@ -462,10 +477,22 @@ func ensurePersistedMetadata(raw *messagepkg.Message) {
 	if raw == nil || raw.Metadata != nil || len(raw.RawMetadata) == 0 {
 		return
 	}
+	if !mayContainUIMetadata(raw.RawMetadata) {
+		return
+	}
 	var metadata map[string]any
 	if err := json.Unmarshal(raw.RawMetadata, &metadata); err == nil && len(metadata) > 0 {
 		raw.Metadata = metadata
 	}
+}
+
+func mayContainUIMetadata(metadata json.RawMessage) bool {
+	for _, key := range uiMetadataParseKeys {
+		if bytes.Contains(metadata, key) {
+			return true
+		}
+	}
+	return false
 }
 
 func extractPersistedMessageText(raw messagepkg.Message, message *uiDecodedModelMessage) string {
