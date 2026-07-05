@@ -85,7 +85,10 @@
     "editJson": "編集JSON",
     "actionRequired": "必要なアクション",
     "preview": "プレビュー",
-    "raw": "ソース"
+    "raw": "ソース",
+    "hide": "非表示",
+    "show": "表示",
+    "saveChanges": "変更を保存"
   },
   "auth": {
     "welcome": "おかえり",
@@ -1893,6 +1896,7 @@
       "compareLoadFailed": "比較用のワークスペースのバージョンを読み込めませんでした"
     },
     "email": {
+      "bindingsDescription": "この Bot が利用できる設定済みメールプロバイダーを選択します。",
       "title": "Email",
       "subtitle": "メールプロバイダーの連携を管理し、受信トレイと送信トレイを表示します。",
       "bindings": "バインディング",
@@ -1919,6 +1923,12 @@
       "sentAt": "送信済み"
     },
     "container": {
+      "refactored": {
+        "issueLegacyTitle": "旧アーキテクチャを検出しました",
+        "issueLegacyHint": "完全な互換性のために再作成してください。データは自動的に保持されます。",
+        "issueRecreateTitle": "リソース上限の反映には再構築が必要です",
+        "issueRecreateHint": "CPU やメモリのハード上限は Workspace を再構築するまで反映されません。/data は保持されますが、実行中のセッションは停止します。"
+      },
       "title": "容器",
       "subtitle": "このBotのランタイム環境を管理します。",
       "botNotReady": "Botのライフサイクル移行が進行中です。Containerアクションが無効になりました。",
@@ -2454,6 +2464,7 @@
       "lastObserved": "最後に見た"
     },
     "channels": {
+      "advancedTitle": "詳細設定",
       "title": "プラットフォーム",
       "addChannel": "プラットフォームの追加",
       "selectType": "プラットフォームの種類を選択してください",
@@ -2528,6 +2539,8 @@
       }
     },
     "memory": {
+      "lastUpdated": "最終更新",
+      "totalCount": "メモリー総数",
       "unsavedChanges": "未保存の変更",
       "emptyHistory": "利用可能な履歴はありません。",
       "title": "メモリを管理",
@@ -2595,6 +2608,7 @@
       }
     },
     "skills": {
+      "shadowedHint": "同名のマネージドコピーがこのソースより優先されます。",
       "title": "Skill",
       "discoveryTitle": "Skillパス",
       "discoveryDescription": "このBotが管理対象Skillを保存する場所と、どの外部パスがスキャンされるかを管理します。",
@@ -2653,6 +2667,7 @@
       "intro": "このBotのカスタム能力を構成します。マネージド Skillが優先されます。"
     },
     "compaction": {
+      "advanced": "詳細設定",
       "title": "圧縮ログ",
       "loadFailed": "圧縮ログのロードに失敗しました",
       "empty": "圧縮ログがありません",
@@ -2670,6 +2685,7 @@
       "filterAll": "全て"
     },
     "heartbeat": {
+      "advanced": "詳細設定",
       "title": "ハートビートログ",
       "loadFailed": "ハートビートログのロードに失敗しました",
       "empty": "ハートビートログがありません",
