@@ -49,7 +49,7 @@ INSERT INTO bot_history_messages (
   id, bot_id, session_id, sender_channel_identity_id, sender_account_user_id,
   source_message_id, source_reply_to_message_id, role, content, metadata,
   usage, session_mode, runtime_type, model_id, event_id, display_text,
-  turn_id, turn_message_seq, created_at
+  turn_id, turn_position, turn_message_seq, turn_visible, created_at
 )
 VALUES (
   sqlc.arg(message_id),
@@ -69,7 +69,17 @@ VALUES (
   sqlc.narg(event_id),
   sqlc.narg(display_text),
   sqlc.arg(turn_id),
+  (
+    SELECT position
+    FROM bot_history_turns
+    WHERE id = sqlc.arg(turn_id)
+  ),
   sqlc.arg(turn_message_seq),
+  COALESCE((
+    SELECT CASE WHEN superseded_at IS NULL THEN 1 ELSE 0 END
+    FROM bot_history_turns
+    WHERE id = sqlc.arg(turn_id)
+  ), 0),
   strftime(
     '%Y-%m-%d %H:%M:%f',
     max(
@@ -94,7 +104,7 @@ INSERT INTO bot_history_messages (
   id, bot_id, session_id, sender_channel_identity_id, sender_account_user_id,
   source_message_id, source_reply_to_message_id, role, content, metadata,
   usage, session_mode, runtime_type, model_id, event_id, display_text,
-  turn_id, turn_message_seq, created_at
+  turn_id, turn_position, turn_message_seq, turn_visible, created_at
 )
 SELECT
   lower(hex(randomblob(4))) || '-' ||
@@ -118,6 +128,7 @@ SELECT
   sqlc.narg(event_id),
   sqlc.narg(display_text),
   target.id,
+  target.position,
   CASE
     WHEN sqlc.arg(role) = 'assistant' AND target.assistant_message_id IS NULL THEN 2
     ELSE COALESCE((
@@ -128,6 +139,7 @@ SELECT
       LIMIT 1
     ), 1)
   END,
+  1,
   strftime(
     '%Y-%m-%d %H:%M:%f',
     max(
@@ -238,8 +250,18 @@ RETURNING id, bot_id, session_id, position, request_message_id, assistant_messag
 -- name: LinkMessageToHistoryTurn :exec
 UPDATE bot_history_messages
 SET turn_id = sqlc.arg(turn_id),
+    turn_position = (
+      SELECT position
+      FROM bot_history_turns
+      WHERE id = sqlc.arg(turn_id)
+    ),
+    turn_visible = COALESCE((
+      SELECT CASE WHEN superseded_at IS NULL THEN 1 ELSE 0 END
+      FROM bot_history_turns
+      WHERE id = sqlc.arg(turn_id)
+    ), 0),
     turn_message_seq = sqlc.arg(turn_message_seq)
-WHERE id = sqlc.arg(message_id);
+WHERE bot_history_messages.id = sqlc.arg(message_id);
 
 -- name: AppendMessageToHistoryTurnByRequest :one
 UPDATE bot_history_messages
@@ -251,6 +273,15 @@ SET turn_id = (
         AND t.superseded_at IS NULL
       LIMIT 1
     ),
+    turn_position = (
+      SELECT t.position
+      FROM bot_history_turns t
+      WHERE t.session_id = sqlc.arg(session_id)
+        AND t.request_message_id = sqlc.arg(request_message_id)
+        AND t.superseded_at IS NULL
+      LIMIT 1
+    ),
+    turn_visible = 1,
     turn_message_seq = COALESCE((
       SELECT existing.turn_message_seq + 1
       FROM bot_history_messages existing
@@ -287,6 +318,23 @@ SET turn_id = (
       ORDER BY latest.position DESC
       LIMIT 1
     ),
+    turn_position = (
+      SELECT latest.position
+      FROM bot_history_turns latest
+      WHERE latest.session_id = sqlc.arg(session_id)
+        AND latest.superseded_at IS NULL
+      ORDER BY latest.position DESC
+      LIMIT 1
+    ),
+    turn_visible = CASE
+      WHEN EXISTS (
+        SELECT 1
+        FROM bot_history_turns latest
+        WHERE latest.session_id = sqlc.arg(session_id)
+          AND latest.superseded_at IS NULL
+      ) THEN 1
+      ELSE 0
+    END,
     turn_message_seq = COALESCE((
       SELECT existing.turn_message_seq + 1
       FROM bot_history_messages existing
@@ -312,6 +360,12 @@ SET turn_id = (
       FROM bot_history_turns t
       WHERE t.id = sqlc.arg(turn_id)
     ),
+    turn_position = (
+      SELECT t.position
+      FROM bot_history_turns t
+      WHERE t.id = sqlc.arg(turn_id)
+    ),
+    turn_visible = 1,
     turn_message_seq = (
       SELECT 2 + COUNT(*)
       FROM bot_history_messages prior
@@ -388,6 +442,11 @@ WHERE id = sqlc.arg(old_turn_id)
   AND superseded_at IS NULL
 RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
   superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at;
+
+-- name: HideMessagesByHistoryTurn :exec
+UPDATE bot_history_messages
+SET turn_visible = 0
+WHERE turn_id = sqlc.arg(turn_id);
 
 -- name: ListMessages :many
 SELECT
@@ -538,33 +597,28 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
-  AND t.session_id = sqlc.arg(session_id)
+  AND m.turn_visible = 1
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL
   AND julianday(m.created_at) < julianday(sqlc.arg(created_at))
-ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: ListMessagesBeforeMessageBySession :many
 WITH cursor_message AS (
-  SELECT t.position AS turn_position, m.turn_message_seq, m.created_at, m.id
+  SELECT m.turn_position, m.turn_message_seq, m.created_at, m.id
   FROM bot_history_messages m
-  JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
   WHERE m.session_id = sqlc.arg(session_id)
-    AND t.session_id = sqlc.arg(session_id)
+    AND m.turn_visible = 1
+    AND m.turn_id IS NOT NULL
+    AND m.turn_position IS NOT NULL
+    AND m.turn_message_seq IS NOT NULL
     AND m.id = sqlc.arg(before_message_id)
   LIMIT 1
-),
-candidate_turns AS (
-  SELECT t.id, t.position
-  FROM bot_history_turns t
-  WHERE t.session_id = sqlc.arg(session_id)
-    AND t.superseded_at IS NULL
-    AND t.position <= (SELECT cursor_message.turn_position FROM cursor_message)
-  ORDER BY t.position DESC
-  LIMIT sqlc.arg(max_count) + 1
 )
 SELECT
   m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
@@ -578,18 +632,21 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-JOIN candidate_turns t ON t.id = m.turn_id
 CROSS JOIN cursor_message cursor
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.turn_visible = 1
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL
   AND (
-    t.position < cursor.turn_position
-    OR (t.position = cursor.turn_position AND m.turn_message_seq < cursor.turn_message_seq)
-    OR (t.position = cursor.turn_position AND m.turn_message_seq = cursor.turn_message_seq AND julianday(m.created_at) < julianday(cursor.created_at))
-    OR (t.position = cursor.turn_position AND m.turn_message_seq = cursor.turn_message_seq AND julianday(m.created_at) = julianday(cursor.created_at) AND m.id < cursor.id)
+    m.turn_position < cursor.turn_position
+    OR (m.turn_position = cursor.turn_position AND m.turn_message_seq < cursor.turn_message_seq)
+    OR (m.turn_position = cursor.turn_position AND m.turn_message_seq = cursor.turn_message_seq AND julianday(m.created_at) < julianday(cursor.created_at))
+    OR (m.turn_position = cursor.turn_position AND m.turn_message_seq = cursor.turn_message_seq AND julianday(m.created_at) = julianday(cursor.created_at) AND m.id < cursor.id)
   )
-ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: ListMessagesLatest :many
@@ -624,12 +681,14 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
-  AND t.session_id = sqlc.arg(session_id)
-ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+  AND m.turn_visible = 1
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL
+ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: ListMessagesLatestUIBySession :many
@@ -643,12 +702,14 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
-  AND t.session_id = sqlc.arg(session_id)
-ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+  AND m.turn_visible = 1
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL
+ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: GetMessageByIDBySession :one
@@ -664,11 +725,10 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
-  AND t.session_id = sqlc.arg(session_id)
+  AND m.turn_visible = 1
   AND m.id = sqlc.arg(message_id)
 LIMIT 1;
 
@@ -685,33 +745,37 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
-  AND t.session_id = sqlc.arg(session_id)
+  AND m.turn_visible = 1
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL
   AND m.source_message_id = sqlc.arg(external_message_id)
-ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT 1;
 
 -- name: GetVisibleMessageCursorByExternalIDBySession :one
 SELECT
   m.id,
-  t.position AS turn_position,
+  m.turn_position,
   m.turn_message_seq,
   m.created_at
 FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
 WHERE m.session_id = sqlc.arg(session_id)
-  AND t.session_id = sqlc.arg(session_id)
+  AND m.turn_visible = 1
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL
   AND m.source_message_id = sqlc.arg(external_message_id)
-ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT 1;
 
 -- name: GetLocatedMessageByExternalIDBySession :one
 SELECT
   m.id,
-  t.position AS turn_position,
+  m.turn_position,
   m.turn_message_seq,
   m.bot_id,
   m.session_id,
@@ -732,76 +796,68 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
-  AND t.session_id = sqlc.arg(session_id)
+  AND m.turn_visible = 1
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL
   AND m.source_message_id = sqlc.arg(external_message_id)
-ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT 1;
 
 -- name: LocateMessagesWindowByExternalIDBySession :many
 WITH target AS (
   SELECT
     m.id,
-    t.position AS turn_position,
+    m.turn_position,
     m.turn_message_seq,
     m.created_at
   FROM bot_history_messages m
-  JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
   WHERE m.session_id = sqlc.arg(session_id)
-    AND t.session_id = sqlc.arg(session_id)
+    AND m.turn_visible = 1
+    AND m.turn_id IS NOT NULL
+    AND m.turn_position IS NOT NULL
+    AND m.turn_message_seq IS NOT NULL
     AND m.source_message_id = sqlc.arg(external_message_id)
-  ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+  ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
   LIMIT 1
-),
-before_candidate_turns AS (
-  SELECT t.id, t.position
-  FROM bot_history_turns t
-  WHERE t.session_id = sqlc.arg(session_id)
-    AND t.superseded_at IS NULL
-    AND t.position <= (SELECT turn_position FROM target)
-  ORDER BY t.position DESC
-  LIMIT sqlc.arg(before_limit) + 1
 ),
 before_rows AS (
   SELECT m.id
   FROM bot_history_messages m
-  JOIN before_candidate_turns t ON t.id = m.turn_id
   CROSS JOIN target
   WHERE m.session_id = sqlc.arg(session_id)
+    AND m.turn_visible = 1
+    AND m.turn_id IS NOT NULL
+    AND m.turn_position IS NOT NULL
+    AND m.turn_message_seq IS NOT NULL
     AND (
-      t.position < target.turn_position
-      OR (t.position = target.turn_position AND m.turn_message_seq < target.turn_message_seq)
-      OR (t.position = target.turn_position AND m.turn_message_seq = target.turn_message_seq AND julianday(m.created_at) < julianday(target.created_at))
-      OR (t.position = target.turn_position AND m.turn_message_seq = target.turn_message_seq AND julianday(m.created_at) = julianday(target.created_at) AND m.id < target.id)
+      m.turn_position < target.turn_position
+      OR (m.turn_position = target.turn_position AND m.turn_message_seq < target.turn_message_seq)
+      OR (m.turn_position = target.turn_position AND m.turn_message_seq = target.turn_message_seq AND julianday(m.created_at) < julianday(target.created_at))
+      OR (m.turn_position = target.turn_position AND m.turn_message_seq = target.turn_message_seq AND julianday(m.created_at) = julianday(target.created_at) AND m.id < target.id)
     )
-  ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+  ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
   LIMIT sqlc.arg(before_limit)
-),
-after_candidate_turns AS (
-  SELECT t.id, t.position
-  FROM bot_history_turns t
-  WHERE t.session_id = sqlc.arg(session_id)
-    AND t.superseded_at IS NULL
-    AND t.position >= (SELECT turn_position FROM target)
-  ORDER BY t.position ASC
-  LIMIT sqlc.arg(after_limit) + 1
 ),
 after_rows AS (
   SELECT m.id
   FROM bot_history_messages m
-  JOIN after_candidate_turns t ON t.id = m.turn_id
   CROSS JOIN target
   WHERE m.session_id = sqlc.arg(session_id)
+    AND m.turn_visible = 1
+    AND m.turn_id IS NOT NULL
+    AND m.turn_position IS NOT NULL
+    AND m.turn_message_seq IS NOT NULL
     AND (
-      t.position > target.turn_position
-      OR (t.position = target.turn_position AND m.turn_message_seq > target.turn_message_seq)
-      OR (t.position = target.turn_position AND m.turn_message_seq = target.turn_message_seq AND julianday(m.created_at) > julianday(target.created_at))
-      OR (t.position = target.turn_position AND m.turn_message_seq = target.turn_message_seq AND julianday(m.created_at) = julianday(target.created_at) AND m.id > target.id)
+      m.turn_position > target.turn_position
+      OR (m.turn_position = target.turn_position AND m.turn_message_seq > target.turn_message_seq)
+      OR (m.turn_position = target.turn_position AND m.turn_message_seq = target.turn_message_seq AND julianday(m.created_at) > julianday(target.created_at))
+      OR (m.turn_position = target.turn_position AND m.turn_message_seq = target.turn_message_seq AND julianday(m.created_at) = julianday(target.created_at) AND m.id > target.id)
     )
-  ORDER BY t.position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+  ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
   LIMIT sqlc.arg(after_limit)
 ),
 window_rows AS (
@@ -836,12 +892,11 @@ SELECT
 FROM window_rows w
 CROSS JOIN target
 JOIN bot_history_messages m ON m.id = w.id
-JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
-  AND t.session_id = sqlc.arg(session_id)
-ORDER BY t.position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
+  AND m.turn_visible = 1
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
 
 -- name: ListMessagesAfterBySession :many
 SELECT
@@ -856,33 +911,28 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
-  AND t.session_id = sqlc.arg(session_id)
+  AND m.turn_visible = 1
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL
   AND julianday(m.created_at) > julianday(sqlc.arg(created_at))
-ORDER BY t.position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 LIMIT sqlc.arg(max_count);
 
 -- name: ListMessagesAfterMessageBySession :many
 WITH cursor_message AS (
-  SELECT t.position AS turn_position, m.turn_message_seq, m.created_at, m.id
+  SELECT m.turn_position, m.turn_message_seq, m.created_at, m.id
   FROM bot_history_messages m
-  JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
   WHERE m.session_id = sqlc.arg(session_id)
-    AND t.session_id = sqlc.arg(session_id)
+    AND m.turn_visible = 1
+    AND m.turn_id IS NOT NULL
+    AND m.turn_position IS NOT NULL
+    AND m.turn_message_seq IS NOT NULL
     AND m.id = sqlc.arg(after_message_id)
   LIMIT 1
-),
-candidate_turns AS (
-  SELECT t.id, t.position
-  FROM bot_history_turns t
-  WHERE t.session_id = sqlc.arg(session_id)
-    AND t.superseded_at IS NULL
-    AND t.position >= (SELECT cursor_message.turn_position FROM cursor_message)
-  ORDER BY t.position ASC
-  LIMIT sqlc.arg(max_count) + 1
 )
 SELECT
   m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
@@ -896,30 +946,24 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-JOIN candidate_turns t ON t.id = m.turn_id
 CROSS JOIN cursor_message cursor
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.turn_visible = 1
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL
   AND (
-    t.position > cursor.turn_position
-    OR (t.position = cursor.turn_position AND m.turn_message_seq > cursor.turn_message_seq)
-    OR (t.position = cursor.turn_position AND m.turn_message_seq = cursor.turn_message_seq AND julianday(m.created_at) > julianday(cursor.created_at))
-    OR (t.position = cursor.turn_position AND m.turn_message_seq = cursor.turn_message_seq AND julianday(m.created_at) = julianday(cursor.created_at) AND m.id > cursor.id)
+    m.turn_position > cursor.turn_position
+    OR (m.turn_position = cursor.turn_position AND m.turn_message_seq > cursor.turn_message_seq)
+    OR (m.turn_position = cursor.turn_position AND m.turn_message_seq = cursor.turn_message_seq AND julianday(m.created_at) > julianday(cursor.created_at))
+    OR (m.turn_position = cursor.turn_position AND m.turn_message_seq = cursor.turn_message_seq AND julianday(m.created_at) = julianday(cursor.created_at) AND m.id > cursor.id)
   )
-ORDER BY t.position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 LIMIT sqlc.arg(max_count);
 
 -- name: ListMessagesBeforeCursorBySession :many
-WITH candidate_turns AS (
-  SELECT t.id, t.position
-  FROM bot_history_turns t
-  WHERE t.session_id = sqlc.arg(session_id)
-    AND t.superseded_at IS NULL
-    AND t.position <= sqlc.arg(cursor_turn_position)
-  ORDER BY t.position DESC
-  LIMIT sqlc.arg(max_count) + 1
-)
 SELECT
   m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
@@ -932,29 +976,23 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-JOIN candidate_turns t ON t.id = m.turn_id
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.turn_visible = 1
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL
   AND (
-    t.position < sqlc.arg(cursor_turn_position)
-    OR (t.position = sqlc.arg(cursor_turn_position) AND m.turn_message_seq < sqlc.arg(cursor_turn_message_seq))
-    OR (t.position = sqlc.arg(cursor_turn_position) AND m.turn_message_seq = sqlc.arg(cursor_turn_message_seq) AND julianday(m.created_at) < julianday(sqlc.arg(cursor_created_at)))
-    OR (t.position = sqlc.arg(cursor_turn_position) AND m.turn_message_seq = sqlc.arg(cursor_turn_message_seq) AND julianday(m.created_at) = julianday(sqlc.arg(cursor_created_at)) AND m.id < sqlc.arg(cursor_message_id))
+    m.turn_position < sqlc.arg(cursor_turn_position)
+    OR (m.turn_position = sqlc.arg(cursor_turn_position) AND m.turn_message_seq < sqlc.arg(cursor_turn_message_seq))
+    OR (m.turn_position = sqlc.arg(cursor_turn_position) AND m.turn_message_seq = sqlc.arg(cursor_turn_message_seq) AND julianday(m.created_at) < julianday(sqlc.arg(cursor_created_at)))
+    OR (m.turn_position = sqlc.arg(cursor_turn_position) AND m.turn_message_seq = sqlc.arg(cursor_turn_message_seq) AND julianday(m.created_at) = julianday(sqlc.arg(cursor_created_at)) AND m.id < sqlc.arg(cursor_message_id))
   )
-ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: ListMessagesAfterCursorBySession :many
-WITH candidate_turns AS (
-  SELECT t.id, t.position
-  FROM bot_history_turns t
-  WHERE t.session_id = sqlc.arg(session_id)
-    AND t.superseded_at IS NULL
-    AND t.position >= sqlc.arg(cursor_turn_position)
-  ORDER BY t.position ASC
-  LIMIT sqlc.arg(max_count) + 1
-)
 SELECT
   m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
@@ -967,26 +1005,30 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-JOIN candidate_turns t ON t.id = m.turn_id
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.turn_visible = 1
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL
   AND (
-    t.position > sqlc.arg(cursor_turn_position)
-    OR (t.position = sqlc.arg(cursor_turn_position) AND m.turn_message_seq > sqlc.arg(cursor_turn_message_seq))
-    OR (t.position = sqlc.arg(cursor_turn_position) AND m.turn_message_seq = sqlc.arg(cursor_turn_message_seq) AND julianday(m.created_at) > julianday(sqlc.arg(cursor_created_at)))
-    OR (t.position = sqlc.arg(cursor_turn_position) AND m.turn_message_seq = sqlc.arg(cursor_turn_message_seq) AND julianday(m.created_at) = julianday(sqlc.arg(cursor_created_at)) AND m.id > sqlc.arg(cursor_message_id))
+    m.turn_position > sqlc.arg(cursor_turn_position)
+    OR (m.turn_position = sqlc.arg(cursor_turn_position) AND m.turn_message_seq > sqlc.arg(cursor_turn_message_seq))
+    OR (m.turn_position = sqlc.arg(cursor_turn_position) AND m.turn_message_seq = sqlc.arg(cursor_turn_message_seq) AND julianday(m.created_at) > julianday(sqlc.arg(cursor_created_at)))
+    OR (m.turn_position = sqlc.arg(cursor_turn_position) AND m.turn_message_seq = sqlc.arg(cursor_turn_message_seq) AND julianday(m.created_at) = julianday(sqlc.arg(cursor_created_at)) AND m.id > sqlc.arg(cursor_message_id))
   )
-ORDER BY t.position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 LIMIT sqlc.arg(max_count);
 
 -- name: ListVisibleMessagesFromBySession :many
 WITH cursor_message AS (
-  SELECT t.position AS turn_position
+  SELECT m.turn_position
   FROM bot_history_messages m
-  JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
   WHERE m.session_id = sqlc.arg(session_id)
-    AND t.session_id = sqlc.arg(session_id)
+    AND m.turn_visible = 1
+    AND m.turn_id IS NOT NULL
+    AND m.turn_position IS NOT NULL
     AND m.id = sqlc.arg(message_id)
   LIMIT 1
 )
@@ -1002,14 +1044,16 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
 CROSS JOIN cursor_message cursor
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
-  AND t.session_id = sqlc.arg(session_id)
-  AND t.position >= cursor.turn_position
-ORDER BY t.position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
+  AND m.turn_visible = 1
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL
+  AND m.turn_position >= cursor.turn_position
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
 
 -- name: CountMessagesByBot :one
 SELECT COUNT(*) FROM bot_visible_history_messages

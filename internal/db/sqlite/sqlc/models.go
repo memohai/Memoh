@@ -162,6 +162,8 @@ type BotHistoryMessage struct {
 	CreatedAt               string         `json:"created_at"`
 	TurnID                  sql.NullString `json:"turn_id"`
 	TurnMessageSeq          sql.NullInt64  `json:"turn_message_seq"`
+	TurnPosition            sql.NullInt64  `json:"turn_position"`
+	TurnVisible             int64          `json:"turn_visible"`
 }
 
 type BotHistoryMessageAsset struct {
@@ -290,8 +292,8 @@ type BotUserGrant struct {
 }
 
 type BotVisibleHistoryMessage struct {
-	TurnID                  string         `json:"turn_id"`
-	TurnPosition            int64          `json:"turn_position"`
+	TurnID                  sql.NullString `json:"turn_id"`
+	TurnPosition            sql.NullInt64  `json:"turn_position"`
 	TurnMessageSeq          sql.NullInt64  `json:"turn_message_seq"`
 	ID                      string         `json:"id"`
 	BotID                   string         `json:"bot_id"`

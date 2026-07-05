@@ -159,7 +159,9 @@ type BotHistoryMessage struct {
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	TurnID                  pgtype.UUID        `json:"turn_id"`
+	TurnPosition            pgtype.Int8        `json:"turn_position"`
 	TurnMessageSeq          pgtype.Int8        `json:"turn_message_seq"`
+	TurnVisible             bool               `json:"turn_visible"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -290,7 +292,7 @@ type BotUserGrant struct {
 
 type BotVisibleHistoryMessage struct {
 	TurnID                  pgtype.UUID        `json:"turn_id"`
-	TurnPosition            int64              `json:"turn_position"`
+	TurnPosition            pgtype.Int8        `json:"turn_position"`
 	TurnMessageSeq          pgtype.Int8        `json:"turn_message_seq"`
 	ID                      pgtype.UUID        `json:"id"`
 	BotID                   pgtype.UUID        `json:"bot_id"`

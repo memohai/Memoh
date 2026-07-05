@@ -47,7 +47,9 @@ CREATE TABLE bot_history_messages (
   event_id TEXT,
   display_text TEXT,
   turn_id TEXT,
+  turn_position INTEGER,
   turn_message_seq INTEGER,
+  turn_visible INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE bot_history_turns (
@@ -66,13 +68,12 @@ CREATE TABLE bot_history_turns (
 );
 CREATE VIEW bot_visible_history_messages AS
 SELECT
-  t.id AS turn_id,
-  t.position AS turn_position,
+  m.turn_id,
+  m.turn_position,
   m.turn_message_seq,
   m.*
 FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id
-WHERE t.superseded_at IS NULL;
+WHERE m.turn_visible = 1;
 `)
 
 	botID := "00000000-0000-0000-0000-000000002001"
@@ -89,14 +90,15 @@ WHERE t.superseded_at IS NULL;
 		{"00000000-0000-0000-0000-000000002004", "assistant", `{"role":"assistant","content":"hi"}`},
 	} {
 		_, err := conn.ExecContext(ctx, `
-INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, turn_id, turn_message_seq, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, turn_id, turn_position, turn_message_seq, turn_visible, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
 			item.id,
 			botID,
 			sessionID,
 			item.role,
 			item.content,
 			"00000000-0000-0000-0000-000000002005",
+			1,
 			map[string]int{"user": 1, "assistant": 2}[item.role],
 			"2026-06-13 19:53:50",
 		)
@@ -173,8 +175,8 @@ func TestSQLiteListMessagesLatestAndBeforeMessageUseTurnOrder(t *testing.T) {
 	for i := range messageIDs {
 		createdAt := time.Date(2026, 6, 14, 10, i, 0, 0, time.UTC).Format("2006-01-02 15:04:05")
 		if _, err := conn.ExecContext(ctx, `
-INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, turn_id, turn_message_seq, created_at)
-VALUES (?, ?, ?, 'user', '{}', ?, 1, ?)`, messageIDs[i], botID, sessionID, turnIDs[i], createdAt); err != nil {
+INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, turn_id, turn_position, turn_message_seq, turn_visible, created_at)
+VALUES (?, ?, ?, 'user', '{}', ?, ?, 1, 1, ?)`, messageIDs[i], botID, sessionID, turnIDs[i], i+1, createdAt); err != nil {
 			t.Fatalf("insert message %d: %v", i, err)
 		}
 		if _, err := conn.ExecContext(ctx, `
@@ -273,7 +275,9 @@ CREATE TABLE bot_history_messages (
   event_id TEXT,
   display_text TEXT,
   turn_id TEXT,
+  turn_position INTEGER,
   turn_message_seq INTEGER,
+  turn_visible INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE bot_history_turns (
@@ -292,11 +296,10 @@ CREATE TABLE bot_history_turns (
 );
 CREATE VIEW bot_visible_history_messages AS
 SELECT
-  t.id AS turn_id,
-  t.position AS turn_position,
+  m.turn_id,
+  m.turn_position,
   m.turn_message_seq,
   m.*
 FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id
-WHERE t.superseded_at IS NULL;
+WHERE m.turn_visible = 1;
 `

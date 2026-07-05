@@ -614,7 +614,9 @@ CREATE TABLE bot_history_messages (
   event_id TEXT,
   display_text TEXT,
   turn_id TEXT,
+  turn_position INTEGER,
   turn_message_seq INTEGER,
+  turn_visible INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE bot_history_message_assets (
@@ -650,12 +652,11 @@ CREATE INDEX idx_bot_history_turns_session_active
   WHERE superseded_at IS NULL;
 CREATE VIEW bot_visible_history_messages AS
 SELECT
-  t.id AS turn_id,
-  t.position AS turn_position,
+  m.turn_id,
+  m.turn_position,
   m.turn_message_seq,
   m.*
 FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id
-WHERE t.superseded_at IS NULL;
+WHERE m.turn_visible = 1;
 
 `

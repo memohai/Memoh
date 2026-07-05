@@ -1195,6 +1195,13 @@ func (q *Queries) CreateMessageWithHistoryTurn(ctx context.Context, arg pgsqlc.C
 	}); err != nil {
 		return pgsqlc.CreateMessageWithHistoryTurnRow{}, err
 	}
+	if err := q.LinkMessageToHistoryTurn(ctx, pgsqlc.LinkMessageToHistoryTurnParams{
+		MessageID:      arg.MessageID,
+		TurnID:         arg.TurnID,
+		TurnMessageSeq: arg.TurnMessageSeq,
+	}); err != nil {
+		return pgsqlc.CreateMessageWithHistoryTurnRow{}, err
+	}
 	var result pgsqlc.CreateMessageWithHistoryTurnRow
 	if err := convertValue(row, &result); err != nil {
 		return pgsqlc.CreateMessageWithHistoryTurnRow{}, err
@@ -4408,6 +4415,9 @@ func (q *Queries) SupersedeHistoryTurn(ctx context.Context, arg pgsqlc.Supersede
 	if err != nil {
 		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
 	}
+	if err := q.store.queries.HideMessagesByHistoryTurn(ctx, sql.NullString{String: out.ID, Valid: strings.TrimSpace(out.ID) != ""}); err != nil {
+		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
+	}
 	var result pgsqlc.BotHistoryTurn
 	if err := convertValue(out, &result); err != nil {
 		return pgsqlc.BotHistoryTurn{}, err
@@ -4468,6 +4478,9 @@ func (q *Queries) ReplaceHistoryTurn(ctx context.Context, arg pgsqlc.ReplaceHist
 	}
 	supersedeArg.SupersededByTurnID = sql.NullString{String: created.ID, Valid: strings.TrimSpace(created.ID) != ""}
 	if _, err := qtx.SupersedeHistoryTurn(ctx, supersedeArg); err != nil {
+		return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
+	}
+	if err := qtx.HideMessagesByHistoryTurn(ctx, sql.NullString{String: oldTurn.ID, Valid: strings.TrimSpace(oldTurn.ID) != ""}); err != nil {
 		return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
 	}
 	if err := tx.Commit(); err != nil {
