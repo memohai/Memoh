@@ -2538,6 +2538,178 @@ describe('chat-list store', () => {
     expect(store.messages.map(message => message.id)).toEqual(['user-1', 'assistant-new'])
   })
 
+  it('moves fork divider anchor to the previous inherited assistant when retry replaces the fork anchor', async () => {
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{
+        id: 'fork-session',
+        bot_id: 'bot-1',
+        title: 'Fork',
+        type: 'chat',
+        created_at: '2026-05-17T08:00:05.000Z',
+        metadata: {
+          forked_from: {
+            session_id: 'source-session',
+            title: 'Source',
+            message_id: 'source-assistant',
+            fork_message_id: 'assistant-old',
+          },
+        },
+      }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      {
+        id: 'user-1',
+        role: 'user',
+        text: 'first',
+        attachments: [],
+        timestamp: '2026-05-17T08:00:00.000Z',
+      },
+      {
+        id: 'assistant-prev',
+        role: 'assistant',
+        messages: [{ id: 1, type: 'text', content: 'previous answer' }],
+        timestamp: '2026-05-17T08:00:01.000Z',
+        streaming: false,
+      },
+      {
+        id: 'user-2',
+        role: 'user',
+        text: 'second',
+        attachments: [],
+        timestamp: '2026-05-17T08:00:02.000Z',
+      },
+      {
+        id: 'assistant-old',
+        role: 'assistant',
+        messages: [{ id: 1, type: 'text', content: 'old answer' }],
+        timestamp: '2026-05-17T08:00:03.000Z',
+        streaming: false,
+      },
+    ])
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const retry = store.retryLatestAssistant('assistant-old')
+    await flushPromises()
+
+    expect(store.activeChatTarget.metadata.forked_from).toMatchObject({
+      fork_message_id: 'assistant-prev',
+    })
+
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      {
+        id: 'user-1',
+        role: 'user',
+        text: 'first',
+        attachments: [],
+        timestamp: '2026-05-17T08:00:00.000Z',
+      },
+      {
+        id: 'assistant-prev',
+        role: 'assistant',
+        messages: [{ id: 1, type: 'text', content: 'previous answer' }],
+        timestamp: '2026-05-17T08:00:01.000Z',
+        streaming: false,
+      },
+      {
+        id: 'user-2',
+        role: 'user',
+        text: 'second',
+        attachments: [],
+        timestamp: '2026-05-17T08:00:02.000Z',
+      },
+      {
+        id: 'assistant-new',
+        role: 'assistant',
+        messages: [{ id: 1, type: 'text', content: 'new answer' }],
+        timestamp: '2026-05-17T08:00:06.000Z',
+        streaming: false,
+      },
+    ])
+    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    await retry
+    await flushPromises()
+
+    expect(store.activeChatTarget.metadata.forked_from).toMatchObject({
+      fork_message_id: 'assistant-prev',
+    })
+  })
+
+  it('clears fork divider anchor when retry replaces the only inherited assistant', async () => {
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{
+        id: 'fork-session',
+        bot_id: 'bot-1',
+        title: 'Fork',
+        type: 'chat',
+        created_at: '2026-05-17T08:00:05.000Z',
+        metadata: {
+          forked_from: {
+            session_id: 'source-session',
+            title: 'Source',
+            message_id: 'source-assistant',
+            fork_message_id: 'assistant-old',
+          },
+        },
+      }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      {
+        id: 'user-1',
+        role: 'user',
+        text: 'hello',
+        attachments: [],
+        timestamp: '2026-05-17T08:00:00.000Z',
+      },
+      {
+        id: 'assistant-old',
+        role: 'assistant',
+        messages: [{ id: 1, type: 'text', content: 'old answer' }],
+        timestamp: '2026-05-17T08:00:01.000Z',
+        streaming: false,
+      },
+    ])
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const retry = store.retryLatestAssistant('assistant-old')
+    await flushPromises()
+
+    expect(store.activeChatTarget.metadata.forked_from).toMatchObject({
+      session_id: 'source-session',
+      message_id: 'source-assistant',
+    })
+    expect((store.activeChatTarget.metadata.forked_from as Record<string, unknown>).fork_message_id).toBeUndefined()
+
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      {
+        id: 'user-1',
+        role: 'user',
+        text: 'hello',
+        attachments: [],
+        timestamp: '2026-05-17T08:00:00.000Z',
+      },
+      {
+        id: 'assistant-new',
+        role: 'assistant',
+        messages: [{ id: 1, type: 'text', content: 'new answer' }],
+        timestamp: '2026-05-17T08:00:06.000Z',
+        streaming: false,
+      },
+    ])
+    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    await retry
+    await flushPromises()
+
+    expect((store.activeChatTarget.metadata.forked_from as Record<string, unknown>).fork_message_id).toBeUndefined()
+  })
+
   it('restores the old assistant when retry fails before streaming starts', async () => {
     sendEvents = [{ type: 'error', message: 'model failed' } as UIStreamEvent]
     api.fetchSessions.mockResolvedValueOnce({

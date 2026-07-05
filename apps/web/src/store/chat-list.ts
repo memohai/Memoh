@@ -648,18 +648,16 @@ export const useChatStore = defineStore('chat', () => {
   function forkAnchorFromUITurns(turns: UITurn[], session?: SessionSummary | null): string {
     const cutoff = Date.parse(session?.created_at ?? '')
     const hasCutoff = Number.isFinite(cutoff)
-    let fallback = ''
     for (let i = turns.length - 1; i >= 0; i--) {
       const turn = turns[i]
       if (turn.role !== 'assistant') continue
       const id = String(turn.id ?? '').trim()
       if (!id) continue
-      if (!fallback) fallback = id
       if (!hasCutoff) return id
       const timestamp = Date.parse(turn.timestamp)
-      if (Number.isFinite(timestamp) && timestamp <= cutoff + 1000) return id
+      if (Number.isFinite(timestamp) && timestamp <= cutoff) return id
     }
-    return fallback
+    return ''
   }
 
   function withForkAnchorFromUITurns(session: SessionSummary, turns: UITurn[]): SessionSummary {
@@ -691,6 +689,71 @@ export const useChatStore = defineStore('chat', () => {
     if (anchored === known) return
     upsertSession(anchored)
     rememberSession(anchored)
+  }
+
+  function forkMessageCandidates(message: ChatMessage): string[] {
+    const out = [
+      message.serverId,
+      message.id,
+      message.role === 'system' ? undefined : message.externalMessageId,
+    ]
+      .map(value => value?.trim() ?? '')
+      .filter(Boolean)
+    return Array.from(new Set(out))
+  }
+
+  function messageMatchesForkAnchor(message: ChatMessage, anchor: string): boolean {
+    const target = anchor.trim()
+    return Boolean(target) && forkMessageCandidates(message).includes(target)
+  }
+
+  function latestInheritedAssistantBefore(index: number, session?: SessionSummary | null): string {
+    const cutoff = Date.parse(session?.created_at ?? '')
+    const hasCutoff = Number.isFinite(cutoff)
+    for (let i = index - 1; i >= 0; i--) {
+      const message = messages[i]
+      if (message?.role !== 'assistant') continue
+      if (hasCutoff) {
+        const timestamp = Date.parse(message.timestamp)
+        if (!Number.isFinite(timestamp) || timestamp > cutoff) continue
+      }
+      return serverMessageId(message) || message.id
+    }
+    return ''
+  }
+
+  function updateForkAnchorForRetriedMessage(targetSessionId: string, target: ChatMessage): (() => void) | null {
+    const sid = targetSessionId.trim()
+    if (!sid) return null
+    const known = knownSessionSummary(sid)
+    const fork = forkSourceMetadata(known)
+    const currentAnchor = String(fork?.fork_message_id ?? '').trim()
+    if (!known || !fork || !currentAnchor || !messageMatchesForkAnchor(target, currentAnchor)) return null
+
+    const targetIndex = messages.indexOf(target)
+    const nextAnchor = targetIndex >= 0 ? latestInheritedAssistantBefore(targetIndex, known) : ''
+    if (nextAnchor === currentAnchor) return null
+
+    const metadata = known.metadata && typeof known.metadata === 'object' ? known.metadata : {}
+    const nextFork = { ...fork }
+    if (nextAnchor) {
+      nextFork.fork_message_id = nextAnchor
+    } else {
+      delete nextFork.fork_message_id
+    }
+    const next = {
+      ...known,
+      metadata: {
+        ...metadata,
+        forked_from: nextFork,
+      },
+    }
+    replaceKnownSessionSummary(next)
+    rememberSession(next)
+    return () => {
+      replaceKnownSessionSummary(known)
+      rememberSession(known)
+    }
   }
 
   function preserveSessionSummary(incoming: SessionSummary, known?: SessionSummary | null): SessionSummary {
@@ -768,6 +831,16 @@ export const useChatStore = defineStore('chat', () => {
     sessionById.set(next.id, next)
     markSessionLookupChanged()
     if (remembered) rememberSession(next)
+  }
+
+  function replaceKnownSessionSummary(updated: SessionSummary) {
+    const currentDeleted = deletedSessionIdsByBot.get((currentBotId.value ?? '').trim())
+    if (currentDeleted?.has(updated.id)) return
+    if (sessionById.has(updated.id)) {
+      sessions.value = sessions.value.map(session => (session.id === updated.id ? updated : session))
+    }
+    sessionById.set(updated.id, updated)
+    markSessionLookupChanged()
   }
 
   function rememberSession(updated: SessionSummary) {
@@ -3866,6 +3939,7 @@ export const useChatStore = defineStore('chat', () => {
 
     const streamId = createStreamId()
     const assistantTurn = createOptimisticAssistantTurn()
+    const restoreForkAnchor = updateForkAnchorForRetriedMessage(sid, target)
     const replacedTurns = replaceTailFromTurn(target, [assistantTurn])
     loading.value = true
     try {
@@ -3894,6 +3968,7 @@ export const useChatStore = defineStore('chat', () => {
         : (hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
       forgetAssistantStream(streamId)
       if (stage === 'startup') {
+        restoreForkAnchor?.()
         restoreTailFromOptimistic(bid, sid, null, assistantTurn, replacedTurns)
       } else {
         finalizeStreamFailure(assistantTurn, bid, sid, err)

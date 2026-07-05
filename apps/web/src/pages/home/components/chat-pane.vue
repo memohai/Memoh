@@ -64,6 +64,12 @@
                 v-for="(msg, index) in messages"
                 :key="msg.id"
               >
+                <ForkSourceDivider
+                  v-if="showForkSourceDividerBefore(index)"
+                  :title="forkSourceTitle"
+                  @open-source="handleForkSourceClick"
+                />
+
                 <div
                   :data-message-id="msg.id"
                   :data-external-message-id="(msg.role === 'user' || msg.role === 'assistant') ? msg.externalMessageId : undefined"
@@ -1553,6 +1559,12 @@ function showForkSourceDividerAfter(message: ChatMessage, index: number): boolea
   return Boolean(forkSource.value)
     && index === forkSourceDividerAfterIndex.value
     && messages.value[index] === message
+}
+
+function showForkSourceDividerBefore(index: number): boolean {
+  return Boolean(forkSource.value)
+    && !forkSource.value?.forkMessageId
+    && index === 0
 }
 const { isLocalDesktop, load: loadDesktopRuntime } = useDesktopRuntime()
 void loadDesktopRuntime()
