@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useMonaco } from 'stream-monaco'
 import { useSettingsStore } from '@/store/settings'
+import DiffTitleBar from '@/components/diff-title-bar/index.vue'
 import { getLanguageByFilename } from '@/components/file-manager/utils'
 
 // Side-by-side Monaco diff editor used by the Compare view inside the file
@@ -107,14 +108,11 @@ watch(
 
 <template>
   <div class="flex h-full flex-col overflow-hidden bg-surface-editor">
-    <div
-      v-if="originalTitle || modifiedTitle"
-      class="flex shrink-0 items-center justify-between gap-3 border-b border-border px-3 py-1.5 text-caption text-muted-foreground"
-    >
+    <DiffTitleBar v-if="originalTitle || modifiedTitle">
       <span class="min-w-0 flex-1 truncate">{{ originalTitle }}</span>
       <span class="text-muted-foreground/60">↔</span>
       <span class="min-w-0 flex-1 truncate text-right">{{ modifiedTitle }}</span>
-    </div>
+    </DiffTitleBar>
     <div
       ref="containerRef"
       class="min-h-0 flex-1 overflow-hidden bg-surface-editor"

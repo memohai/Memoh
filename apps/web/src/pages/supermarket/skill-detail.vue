@@ -27,48 +27,16 @@
     </div>
 
     <template v-else>
-      <div class="mb-6 flex items-center justify-between gap-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          class="-ml-2"
-          @click="router.push({ name: 'supermarket' })"
-        >
-          <ArrowLeft class="size-4" />
-          {{ $t('common.back') }}
-        </Button>
-        <Button
-          size="sm"
-          @click="installDialogOpen = true"
-        >
-          <Download class="size-4" />
-          {{ $t('supermarket.installToBot') }}
-        </Button>
-      </div>
-
-      <header class="space-y-4">
-        <div class="flex items-start gap-4">
-          <div class="flex size-16 shrink-0 items-center justify-center rounded-md border bg-background shadow-sm">
-            <Zap class="size-8 text-muted-foreground" />
-          </div>
-          <div class="min-w-0 flex-1">
-            <h1 class="break-words text-3xl font-semibold leading-tight">
-              {{ skill.name || skill.id }}
-            </h1>
-          </div>
-        </div>
-
-        <div class="flex flex-wrap gap-1.5">
-          <Badge
-            v-for="tag in skill.metadata?.tags"
-            :key="tag"
-            variant="secondary"
-            size="sm"
-          >
-            {{ tag }}
-          </Badge>
-        </div>
-      </header>
+      <MarketDetailHeader
+        :name="skill.name || skill.id"
+        :tags="skill.metadata?.tags"
+        @back="router.push({ name: 'supermarket' })"
+        @install="installDialogOpen = true"
+      >
+        <template #icon>
+          <Zap class="size-8 text-muted-foreground" />
+        </template>
+      </MarketDetailHeader>
 
       <p class="mt-8 max-w-4xl text-base leading-7 text-muted-foreground">
         {{ skill.description || $t('supermarket.noDescription') }}
@@ -158,29 +126,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, Download, ExternalLink, FileText, Zap } from 'lucide-vue-next'
-import { Badge, Button, Spinner, toast } from '@memohai/ui'
+import { ArrowLeft, ExternalLink, FileText, Zap } from 'lucide-vue-next'
+import { Button, Spinner, toast } from '@memohai/ui'
 import { getSupermarketSkillsById, type HandlersSupermarketSkillEntry } from '@memohai/sdk'
 import SettingsRow from '@/components/settings/row.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import InstallSkillDialog from './components/install-skill-dialog.vue'
-
-const InfoItem = defineComponent({
-  props: {
-    label: { type: String, required: true },
-    value: { type: String, required: true },
-  },
-  setup(props) {
-    return () => h('div', { class: 'space-y-1' }, [
-      h('p', { class: 'text-sm text-muted-foreground' }, props.label),
-      h('p', { class: 'break-words text-sm font-medium' }, props.value),
-    ])
-  },
-})
+import InfoItem from './components/info-item.vue'
+import MarketDetailHeader from './components/market-detail-header.vue'
 
 const route = useRoute()
 const router = useRouter()

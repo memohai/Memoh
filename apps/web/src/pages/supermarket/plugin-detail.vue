@@ -27,59 +27,27 @@
     </div>
 
     <template v-else>
-      <div class="mb-6 flex items-center justify-between gap-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          class="-ml-2"
-          @click="router.push({ name: 'supermarket' })"
-        >
-          <ArrowLeft class="size-4" />
-          {{ $t('common.back') }}
-        </Button>
-        <Button
-          size="sm"
-          @click="installDialogOpen = true"
-        >
-          <Download class="size-4" />
-          {{ $t('supermarket.installToBot') }}
-        </Button>
-      </div>
-
-      <header class="space-y-4">
-        <div class="flex items-start gap-4">
-          <div class="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-background shadow-sm">
-            <ProviderIcon
-              v-if="iconValue"
-              :icon="iconValue"
-              size="34"
-              class="size-9 object-contain"
-            >
-              <PackageOpen class="size-8 text-muted-foreground" />
-            </ProviderIcon>
-            <PackageOpen
-              v-else
-              class="size-8 text-muted-foreground"
-            />
-          </div>
-          <div class="min-w-0 flex-1">
-            <h1 class="break-words text-3xl font-semibold leading-tight">
-              {{ plugin.name || plugin.id }}
-            </h1>
-          </div>
-        </div>
-
-        <div class="flex flex-wrap gap-1.5">
-          <Badge
-            v-for="tag in plugin.tags"
-            :key="tag"
-            variant="secondary"
-            size="sm"
+      <MarketDetailHeader
+        :name="plugin.name || plugin.id"
+        :tags="plugin.tags"
+        @back="router.push({ name: 'supermarket' })"
+        @install="installDialogOpen = true"
+      >
+        <template #icon>
+          <ProviderIcon
+            v-if="iconValue"
+            :icon="iconValue"
+            size="34"
+            class="size-9 object-contain"
           >
-            {{ tag }}
-          </Badge>
-        </div>
-      </header>
+            <PackageOpen class="size-8 text-muted-foreground" />
+          </ProviderIcon>
+          <PackageOpen
+            v-else
+            class="size-8 text-muted-foreground"
+          />
+        </template>
+      </MarketDetailHeader>
 
       <p class="mt-8 max-w-4xl text-base leading-7 text-muted-foreground">
         {{ plugin.description || $t('supermarket.noDescription') }}
@@ -216,10 +184,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, Boxes, Download, ExternalLink, PackageOpen, Plug } from 'lucide-vue-next'
+import { ArrowLeft, Boxes, ExternalLink, PackageOpen, Plug } from 'lucide-vue-next'
 import { Badge, Button, Spinner, toast } from '@memohai/ui'
 import { getSupermarketPluginsById, type PluginsManifest, type PluginsSkillEntry, type PluginsSkillResource } from '@memohai/sdk'
 import ProviderIcon from '@/components/provider-icon/index.vue'
@@ -227,21 +195,10 @@ import SettingsRow from '@/components/settings/row.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import InstallPluginDialog from './components/install-plugin-dialog.vue'
+import InfoItem from './components/info-item.vue'
+import MarketDetailHeader from './components/market-detail-header.vue'
 
 type PluginSkill = PluginsSkillEntry | PluginsSkillResource
-
-const InfoItem = defineComponent({
-  props: {
-    label: { type: String, required: true },
-    value: { type: String, required: true },
-  },
-  setup(props) {
-    return () => h('div', { class: 'space-y-1' }, [
-      h('p', { class: 'text-sm text-muted-foreground' }, props.label),
-      h('p', { class: 'break-words text-sm font-medium' }, props.value),
-    ])
-  },
-})
 
 const route = useRoute()
 const router = useRouter()

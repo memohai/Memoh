@@ -27,6 +27,7 @@ import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
 import MonacoDiff from '@/components/monaco-editor/diff.vue'
+import DiffTitleBar from '@/components/diff-title-bar/index.vue'
 import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { formatRelativeTime } from '@/utils/date-time'
@@ -819,7 +820,7 @@ onBeforeUnmount(() => {
         v-if="conflictState === 'compare'"
         class="flex h-full flex-col"
       >
-        <div class="flex shrink-0 items-center justify-between gap-3 border-b border-border px-3 py-1.5 text-caption text-muted-foreground">
+        <DiffTitleBar>
           <span class="min-w-0 truncate">
             <span>{{ t('bots.files.compare.yours') }} ↔ {{ t('bots.files.compare.disk') }}</span>
             <span
@@ -831,7 +832,7 @@ onBeforeUnmount(() => {
               aria-atomic="true"
             >· {{ t('bots.files.compare.staleNotice') }}</span>
           </span>
-          <div class="flex items-center gap-1.5">
+          <template #actions>
             <Button
               v-if="compareStale"
               variant="ghost"
@@ -875,8 +876,8 @@ onBeforeUnmount(() => {
               />
               {{ t('bots.files.compare.close') }}
             </Button>
-          </div>
-        </div>
+          </template>
+        </DiffTitleBar>
         <MonacoDiff
           :original="compareDiskContent"
           :modified="content"
