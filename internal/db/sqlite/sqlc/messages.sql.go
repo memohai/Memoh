@@ -3066,6 +3066,190 @@ func (q *Queries) ListVisibleMessagesFromBySession(ctx context.Context, arg List
 	return items, nil
 }
 
+const locateMessagesWindowByExternalIDBySession = `-- name: LocateMessagesWindowByExternalIDBySession :many
+WITH target AS (
+  SELECT
+    m.id,
+    t.position AS turn_position,
+    m.turn_message_seq,
+    m.created_at
+  FROM bot_history_messages m
+  JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
+  WHERE m.session_id = ?1
+    AND t.session_id = ?1
+    AND m.source_message_id = ?2
+  ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+  LIMIT 1
+),
+before_candidate_turns AS (
+  SELECT t.id, t.position
+  FROM bot_history_turns t
+  WHERE t.session_id = ?1
+    AND t.superseded_at IS NULL
+    AND t.position <= (SELECT turn_position FROM target)
+  ORDER BY t.position DESC
+  LIMIT ?3 + 1
+),
+before_rows AS (
+  SELECT m.id
+  FROM bot_history_messages m
+  JOIN before_candidate_turns t ON t.id = m.turn_id
+  CROSS JOIN target
+  WHERE m.session_id = ?1
+    AND (
+      t.position < target.turn_position
+      OR (t.position = target.turn_position AND m.turn_message_seq < target.turn_message_seq)
+      OR (t.position = target.turn_position AND m.turn_message_seq = target.turn_message_seq AND julianday(m.created_at) < julianday(target.created_at))
+      OR (t.position = target.turn_position AND m.turn_message_seq = target.turn_message_seq AND julianday(m.created_at) = julianday(target.created_at) AND m.id < target.id)
+    )
+  ORDER BY t.position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+  LIMIT ?3
+),
+after_candidate_turns AS (
+  SELECT t.id, t.position
+  FROM bot_history_turns t
+  WHERE t.session_id = ?1
+    AND t.superseded_at IS NULL
+    AND t.position >= (SELECT turn_position FROM target)
+  ORDER BY t.position ASC
+  LIMIT ?4 + 1
+),
+after_rows AS (
+  SELECT m.id
+  FROM bot_history_messages m
+  JOIN after_candidate_turns t ON t.id = m.turn_id
+  CROSS JOIN target
+  WHERE m.session_id = ?1
+    AND (
+      t.position > target.turn_position
+      OR (t.position = target.turn_position AND m.turn_message_seq > target.turn_message_seq)
+      OR (t.position = target.turn_position AND m.turn_message_seq = target.turn_message_seq AND julianday(m.created_at) > julianday(target.created_at))
+      OR (t.position = target.turn_position AND m.turn_message_seq = target.turn_message_seq AND julianday(m.created_at) = julianday(target.created_at) AND m.id > target.id)
+    )
+  ORDER BY t.position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+  LIMIT ?4
+),
+window_rows AS (
+  SELECT id FROM before_rows
+  UNION ALL
+  SELECT id FROM target
+  UNION ALL
+  SELECT id FROM after_rows
+)
+SELECT
+  target.id AS target_id,
+  target.turn_message_seq AS target_turn_message_seq,
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.session_mode,
+  m.runtime_type,
+  m.event_id,
+  m.display_text,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM window_rows w
+CROSS JOIN target
+JOIN bot_history_messages m ON m.id = w.id
+JOIN bot_history_turns t ON t.id = m.turn_id AND t.superseded_at IS NULL
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = ?1
+  AND t.session_id = ?1
+ORDER BY t.position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+`
+
+type LocateMessagesWindowByExternalIDBySessionParams struct {
+	SessionID         sql.NullString `json:"session_id"`
+	ExternalMessageID sql.NullString `json:"external_message_id"`
+	BeforeLimit       interface{}    `json:"before_limit"`
+	AfterLimit        interface{}    `json:"after_limit"`
+}
+
+type LocateMessagesWindowByExternalIDBySessionRow struct {
+	TargetID                string         `json:"target_id"`
+	TargetTurnMessageSeq    sql.NullInt64  `json:"target_turn_message_seq"`
+	ID                      string         `json:"id"`
+	BotID                   string         `json:"bot_id"`
+	SessionID               sql.NullString `json:"session_id"`
+	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
+	SenderUserID            sql.NullString `json:"sender_user_id"`
+	ExternalMessageID       sql.NullString `json:"external_message_id"`
+	SourceReplyToMessageID  sql.NullString `json:"source_reply_to_message_id"`
+	Role                    string         `json:"role"`
+	Content                 string         `json:"content"`
+	Metadata                string         `json:"metadata"`
+	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
+	EventID                 sql.NullString `json:"event_id"`
+	DisplayText             sql.NullString `json:"display_text"`
+	CreatedAt               string         `json:"created_at"`
+	SenderDisplayName       sql.NullString `json:"sender_display_name"`
+	SenderAvatarUrl         sql.NullString `json:"sender_avatar_url"`
+	Platform                sql.NullString `json:"platform"`
+}
+
+func (q *Queries) LocateMessagesWindowByExternalIDBySession(ctx context.Context, arg LocateMessagesWindowByExternalIDBySessionParams) ([]LocateMessagesWindowByExternalIDBySessionRow, error) {
+	rows, err := q.db.QueryContext(ctx, locateMessagesWindowByExternalIDBySession,
+		arg.SessionID,
+		arg.ExternalMessageID,
+		arg.BeforeLimit,
+		arg.AfterLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LocateMessagesWindowByExternalIDBySessionRow
+	for rows.Next() {
+		var i LocateMessagesWindowByExternalIDBySessionRow
+		if err := rows.Scan(
+			&i.TargetID,
+			&i.TargetTurnMessageSeq,
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
+			&i.EventID,
+			&i.DisplayText,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markMessagesCompacted = `-- name: MarkMessagesCompacted :exec
 UPDATE bot_history_messages
 SET compact_id = ?1

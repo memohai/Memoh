@@ -4556,6 +4556,25 @@ func (q *Queries) GetLocatedMessageByExternalIDBySession(ctx context.Context, ar
 	return result, nil
 }
 
+func (q *Queries) LocateMessagesWindowByExternalIDBySession(ctx context.Context, arg pgsqlc.LocateMessagesWindowByExternalIDBySessionParams) ([]pgsqlc.LocateMessagesWindowByExternalIDBySessionRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.LocateMessagesWindowByExternalIDBySessionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.LocateMessagesWindowByExternalIDBySession(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.LocateMessagesWindowByExternalIDBySessionRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (q *Queries) GetMessageByIDBySession(ctx context.Context, arg pgsqlc.GetMessageByIDBySessionParams) (pgsqlc.GetMessageByIDBySessionRow, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgsqlc.GetMessageByIDBySessionRow{}, errSQLiteQueriesNotConfigured

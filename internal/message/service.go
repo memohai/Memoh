@@ -972,48 +972,25 @@ func (s *DBService) LocateByExternalIDBySession(ctx context.Context, sessionID s
 		afterLimit = 0
 	}
 
-	targetRow, err := s.queries.GetLocatedMessageByExternalIDBySession(ctx, sqlc.GetLocatedMessageByExternalIDBySessionParams{
+	rows, err := s.queries.LocateMessagesWindowByExternalIDBySession(ctx, sqlc.LocateMessagesWindowByExternalIDBySessionParams{
 		SessionID:         pgSessionID,
 		ExternalMessageID: toPgText(externalMessageID),
+		BeforeLimit:       beforeLimit,
+		AfterLimit:        afterLimit,
 	})
 	if err != nil {
 		return LocateResult{}, err
 	}
-	if !targetRow.TurnMessageSeq.Valid {
+	if len(rows) == 0 {
+		return LocateResult{}, pgx.ErrNoRows
+	}
+	if !rows[0].TargetTurnMessageSeq.Valid {
 		return LocateResult{}, errors.New("message cursor missing turn sequence")
 	}
-	target := toMessageFromLocatedMessageByExternalIDBySessionRow(targetRow)
-
-	beforeRows, err := s.queries.ListMessagesBeforeCursorBySession(ctx, sqlc.ListMessagesBeforeCursorBySessionParams{
-		SessionID:            pgSessionID,
-		CursorTurnPosition:   targetRow.TurnPosition,
-		CursorTurnMessageSeq: targetRow.TurnMessageSeq.Int64,
-		CursorCreatedAt:      targetRow.CreatedAt,
-		CursorMessageID:      targetRow.ID,
-		MaxCount:             beforeLimit,
-	})
-	if err != nil {
-		return LocateResult{}, err
-	}
-	afterRows, err := s.queries.ListMessagesAfterCursorBySession(ctx, sqlc.ListMessagesAfterCursorBySessionParams{
-		SessionID:            pgSessionID,
-		CursorTurnPosition:   targetRow.TurnPosition,
-		CursorTurnMessageSeq: targetRow.TurnMessageSeq.Int64,
-		CursorCreatedAt:      targetRow.CreatedAt,
-		CursorMessageID:      targetRow.ID,
-		MaxCount:             afterLimit,
-	})
-	if err != nil {
-		return LocateResult{}, err
-	}
-
-	messages := make([]Message, 0, len(beforeRows)+1+len(afterRows))
-	messages = append(messages, toMessagesFromBeforeCursorBySession(beforeRows)...)
-	messages = append(messages, target)
-	messages = append(messages, toMessagesFromAfterCursorBySession(afterRows)...)
+	messages := toMessagesFromLocateWindowByExternalIDBySession(rows)
 
 	s.enrichAssets(ctx, messages)
-	return LocateResult{Messages: messages, TargetID: target.ID}, nil
+	return LocateResult{Messages: messages, TargetID: uuidString(rows[0].TargetID)}, nil
 }
 
 func (s *DBService) GetByIDBySession(ctx context.Context, sessionID string, messageID string) (Message, error) {
@@ -1629,30 +1606,6 @@ func toMessageFromBeforeMessageBySessionRow(row sqlc.ListMessagesBeforeMessageBy
 	)
 }
 
-func toMessageFromBeforeCursorBySessionRow(row sqlc.ListMessagesBeforeCursorBySessionRow) Message {
-	return toMessageFields(
-		row.ID,
-		row.BotID,
-		row.SessionID,
-		row.SenderChannelIdentityID,
-		row.SenderUserID,
-		row.SenderDisplayName,
-		row.SenderAvatarUrl,
-		row.Platform,
-		row.ExternalMessageID,
-		row.SourceReplyToMessageID,
-		row.Role,
-		row.Content,
-		row.Metadata,
-		row.Usage,
-		row.SessionMode,
-		row.RuntimeType,
-		row.EventID,
-		row.DisplayText,
-		row.CreatedAt,
-	)
-}
-
 func toMessageFromIDBySessionRow(row sqlc.GetMessageByIDBySessionRow) Message {
 	return toMessageFields(
 		row.ID,
@@ -1677,31 +1630,7 @@ func toMessageFromIDBySessionRow(row sqlc.GetMessageByIDBySessionRow) Message {
 	)
 }
 
-func toMessageFromAfterCursorBySessionRow(row sqlc.ListMessagesAfterCursorBySessionRow) Message {
-	return toMessageFields(
-		row.ID,
-		row.BotID,
-		row.SessionID,
-		row.SenderChannelIdentityID,
-		row.SenderUserID,
-		row.SenderDisplayName,
-		row.SenderAvatarUrl,
-		row.Platform,
-		row.ExternalMessageID,
-		row.SourceReplyToMessageID,
-		row.Role,
-		row.Content,
-		row.Metadata,
-		row.Usage,
-		row.SessionMode,
-		row.RuntimeType,
-		row.EventID,
-		row.DisplayText,
-		row.CreatedAt,
-	)
-}
-
-func toMessageFromLocatedMessageByExternalIDBySessionRow(row sqlc.GetLocatedMessageByExternalIDBySessionRow) Message {
+func toMessageFromLocateWindowByExternalIDBySessionRow(row sqlc.LocateMessagesWindowByExternalIDBySessionRow) Message {
 	return toMessageFields(
 		row.ID,
 		row.BotID,
@@ -1966,18 +1895,10 @@ func toMessagesFromBeforeMessageBySession(rows []sqlc.ListMessagesBeforeMessageB
 	return messages
 }
 
-func toMessagesFromBeforeCursorBySession(rows []sqlc.ListMessagesBeforeCursorBySessionRow) []Message {
-	messages := make([]Message, 0, len(rows))
-	for i := len(rows) - 1; i >= 0; i-- {
-		messages = append(messages, toMessageFromBeforeCursorBySessionRow(rows[i]))
-	}
-	return messages
-}
-
-func toMessagesFromAfterCursorBySession(rows []sqlc.ListMessagesAfterCursorBySessionRow) []Message {
+func toMessagesFromLocateWindowByExternalIDBySession(rows []sqlc.LocateMessagesWindowByExternalIDBySessionRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
-		messages = append(messages, toMessageFromAfterCursorBySessionRow(row))
+		messages = append(messages, toMessageFromLocateWindowByExternalIDBySessionRow(row))
 	}
 	return messages
 }

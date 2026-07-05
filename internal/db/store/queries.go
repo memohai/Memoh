@@ -254,6 +254,7 @@ type Queries interface {
 	GetMessageByExternalIDBySession(ctx context.Context, arg dbsqlc.GetMessageByExternalIDBySessionParams) (dbsqlc.GetMessageByExternalIDBySessionRow, error)
 	GetLocatedMessageByExternalIDBySession(ctx context.Context, arg dbsqlc.GetLocatedMessageByExternalIDBySessionParams) (dbsqlc.GetLocatedMessageByExternalIDBySessionRow, error)
 	GetVisibleMessageCursorByExternalIDBySession(ctx context.Context, arg dbsqlc.GetVisibleMessageCursorByExternalIDBySessionParams) (dbsqlc.GetVisibleMessageCursorByExternalIDBySessionRow, error)
+	LocateMessagesWindowByExternalIDBySession(ctx context.Context, arg dbsqlc.LocateMessagesWindowByExternalIDBySessionParams) ([]dbsqlc.LocateMessagesWindowByExternalIDBySessionRow, error)
 	ListMessagesAfterBySession(ctx context.Context, arg dbsqlc.ListMessagesAfterBySessionParams) ([]dbsqlc.ListMessagesAfterBySessionRow, error)
 	ListMessagesAfterCursorBySession(ctx context.Context, arg dbsqlc.ListMessagesAfterCursorBySessionParams) ([]dbsqlc.ListMessagesAfterCursorBySessionRow, error)
 	ListMessagesAfterMessageBySession(ctx context.Context, arg dbsqlc.ListMessagesAfterMessageBySessionParams) ([]dbsqlc.ListMessagesAfterMessageBySessionRow, error)

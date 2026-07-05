@@ -470,6 +470,59 @@ func TestSQLiteLocateByExternalIDReturnsTargetWindowInVisibleOrder(t *testing.T)
 	}
 }
 
+func TestSQLiteLocateByExternalIDZeroWindowReturnsOnlyTarget(t *testing.T) {
+	ctx := context.Background()
+	conn, queries := newMessageHistoryTurnSQLite(t)
+	defer func() { _ = conn.Close() }()
+	svc := NewService(nil, queries)
+
+	const (
+		botID     = "00000000-0000-0000-0000-000000003401"
+		sessionID = "00000000-0000-0000-0000-000000003402"
+	)
+	insertMessageHistoryTurnFixtures(t, conn, botID, sessionID)
+
+	if _, err := svc.Persist(ctx, PersistInput{
+		BotID:             botID,
+		SessionID:         sessionID,
+		Role:              "user",
+		Content:           []byte(`{"role":"user","content":"before"}`),
+		ExternalMessageID: "external-before",
+	}); err != nil {
+		t.Fatalf("persist before user: %v", err)
+	}
+	target, err := svc.Persist(ctx, PersistInput{
+		BotID:             botID,
+		SessionID:         sessionID,
+		Role:              "assistant",
+		Content:           []byte(`{"role":"assistant","content":"target"}`),
+		ExternalMessageID: "external-target-zero-window",
+	})
+	if err != nil {
+		t.Fatalf("persist target: %v", err)
+	}
+	if _, err := svc.Persist(ctx, PersistInput{
+		BotID:             botID,
+		SessionID:         sessionID,
+		Role:              "user",
+		Content:           []byte(`{"role":"user","content":"after"}`),
+		ExternalMessageID: "external-after",
+	}); err != nil {
+		t.Fatalf("persist after user: %v", err)
+	}
+
+	located, err := svc.LocateByExternalIDBySession(ctx, sessionID, "external-target-zero-window", 0, 0)
+	if err != nil {
+		t.Fatalf("locate target: %v", err)
+	}
+	if located.TargetID != target.ID {
+		t.Fatalf("target id = %s, want %s", located.TargetID, target.ID)
+	}
+	if got, want := messageIDs(located.Messages), []string{target.ID}; !equalStringSlices(got, want) {
+		t.Fatalf("located message ids = %#v, want %#v", got, want)
+	}
+}
+
 func newMessageHistoryTurnSQLite(t *testing.T) (*sql.DB, *sqlitestore.Queries) {
 	t.Helper()
 	conn, err := dbpkg.OpenSQLite(context.Background(), config.SQLiteConfig{DSN: ":memory:"})
