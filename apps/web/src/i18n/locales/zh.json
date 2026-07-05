@@ -430,6 +430,12 @@
     "sendFailed": "消息发送失败",
     "forkFailed": "分叉会话失败",
     "forkedFrom": "分叉自 {session}",
+    "forkDialog": {
+      "title": "创建分叉",
+      "description": "为新会话设置一个名字。",
+      "namePlaceholder": "新的会话名称",
+      "defaultTitle": "{session} 分叉"
+    },
     "unknownSession": "未知会话",
     "minimapLabel": "对话导航",
     "minimapEarlier": "更早的消息加载后显示",

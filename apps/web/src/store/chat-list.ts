@@ -3627,7 +3627,7 @@ export const useChatStore = defineStore('chat', () => {
     return items.map(item => ({ ...item }))
   }
 
-  async function forkMessage(messageId: string): Promise<boolean> {
+  async function forkMessage(messageId: string, options: { title?: string } = {}): Promise<boolean> {
     const bid = (currentBotId.value ?? '').trim()
     const sid = (sessionId.value ?? '').trim()
     const mid = messageId.trim()
@@ -3637,7 +3637,7 @@ export const useChatStore = defineStore('chat', () => {
     if (forkingMessages.has(key)) return false
     forkingMessages.add(key)
     try {
-      const forked = await requestForkSessionFromMessage(bid, sid, mid)
+      const forked = await requestForkSessionFromMessage(bid, sid, mid, { title: options.title })
       upsertSession(forked)
       rememberSession(forked)
       void refreshSessionsList(bid)

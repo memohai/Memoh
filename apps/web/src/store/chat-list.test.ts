@@ -2942,10 +2942,11 @@ describe('chat-list store', () => {
 
     await store.selectBot('bot-1')
     await flushPromises()
-    const ok = await store.forkMessage('source-assistant')
+    const ok = await store.forkMessage('source-assistant', { title: 'Custom fork name' })
     await flushPromises()
 
     expect(ok).toBe(true)
+    expect(api.forkSessionFromMessage).toHaveBeenCalledWith('bot-1', 'source-session', 'source-assistant', { title: 'Custom fork name' })
     expect(store.sessionId).toBe('fork-session')
     expect(store.messages.map(message => message.id)).toEqual(['fork-user', 'fork-assistant'])
     expect(store.activeChatTarget.metadata.forked_from).toMatchObject({

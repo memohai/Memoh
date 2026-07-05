@@ -79,6 +79,7 @@ type updateSessionRequest struct {
 
 type forkSessionRequest struct {
 	MessageID string `json:"message_id" validate:"required"`
+	Title     string `json:"title,omitempty"`
 }
 
 // CreateSession godoc
@@ -211,6 +212,7 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 		BotID:           bot.ID,
 		SessionID:       source.ID,
 		MessageID:       messageID,
+		Title:           strings.TrimSpace(req.Title),
 		CreatedByUserID: channelIdentityID,
 	})
 	if err != nil {

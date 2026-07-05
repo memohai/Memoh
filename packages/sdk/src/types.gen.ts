@@ -2002,6 +2002,7 @@ export type HandlersEmailOAuthStatusResponse = {
 
 export type HandlersForkSessionRequest = {
     message_id: string;
+    title?: string;
 };
 
 export type HandlersFsOpResponse = {

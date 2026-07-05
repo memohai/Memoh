@@ -17923,6 +17923,9 @@
             "properties": {
                 "message_id": {
                     "type": "string"
+                },
+                "title": {
+                    "type": "string"
                 }
             }
         },

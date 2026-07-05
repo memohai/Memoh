@@ -3353,6 +3353,8 @@ definitions:
     properties:
       message_id:
         type: string
+      title:
+        type: string
     required:
     - message_id
     type: object

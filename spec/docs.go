@@ -17932,6 +17932,9 @@ const docTemplate = `{
             "properties": {
                 "message_id": {
                     "type": "string"
+                },
+                "title": {
+                    "type": "string"
                 }
             }
         },

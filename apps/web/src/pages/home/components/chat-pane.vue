@@ -170,6 +170,40 @@
         </DialogContent>
       </Dialog>
 
+      <Dialog v-model:open="forkDialogOpen">
+        <DialogContent class="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{{ $t('chat.forkDialog.title') }}</DialogTitle>
+            <DialogDescription>{{ $t('chat.forkDialog.description') }}</DialogDescription>
+          </DialogHeader>
+          <form
+            class="space-y-4"
+            @submit.prevent="handleCreateFork"
+          >
+            <Input
+              v-model="forkSessionTitle"
+              :aria-label="$t('chat.forkDialog.namePlaceholder')"
+              :placeholder="$t('chat.forkDialog.namePlaceholder')"
+              :disabled="forkSubmitting"
+              maxlength="120"
+              autofocus
+            />
+            <DialogFooter>
+              <Button
+                type="submit"
+                :disabled="!forkSessionTitle.trim() || forkSubmitting"
+              >
+                <LoaderCircle
+                  v-if="forkSubmitting"
+                  class="mr-1 size-3 animate-spin"
+                />
+                {{ $t('common.create') }}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       <!-- The composer is a single instance reused in both layouts: pinned to
            the bottom once a conversation exists, or lifted to the vertical
            centre (with a greeting above it) while the chat is still empty, so a
@@ -1005,7 +1039,7 @@ import {
   Package,
   SquarePen,
 } from 'lucide-vue-next'
-import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner } from '@memohai/ui'
+import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner } from '@memohai/ui'
 import { useChatStore, type ACPAgentSessionInput, type ChatMessage } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import { useScroll, useElementBounding, useIntersectionObserver, useStorage } from '@vueuse/core'
@@ -1262,6 +1296,10 @@ onBeforeUnmount(() => {
 })
 
 const composerError = ref('')
+const forkDialogOpen = ref(false)
+const pendingForkMessageId = ref('')
+const forkSessionTitle = ref('')
+const forkSubmitting = ref(false)
 const pendingUserInputDrafts = ref<Record<string, PendingUserInputDraft>>({})
 const modelPopoverOpen = ref(false)
 const agentPopoverOpen = ref(false)
@@ -2995,9 +3033,35 @@ async function handleForkSourceClick() {
   await chatStore.selectSession(source.sessionId, { explicitSelection: true })
 }
 
-async function handleForkMessage(messageId: string) {
+function defaultForkSessionTitle() {
+  const sourceTitle = activeSession.value?.title?.trim() || t('chat.unknownSession')
+  return t('chat.forkDialog.defaultTitle', { session: sourceTitle })
+}
+
+function handleForkMessage(messageId: string) {
   composerError.value = ''
-  await chatStore.forkMessage(messageId)
+  const id = messageId.trim()
+  if (!id) return
+  pendingForkMessageId.value = id
+  forkSessionTitle.value = defaultForkSessionTitle()
+  forkDialogOpen.value = true
+}
+
+async function handleCreateFork() {
+  const messageId = pendingForkMessageId.value.trim()
+  const title = forkSessionTitle.value.trim()
+  if (!messageId || !title || forkSubmitting.value) return
+  composerError.value = ''
+  forkSubmitting.value = true
+  try {
+    const ok = await chatStore.forkMessage(messageId, { title })
+    if (ok) {
+      forkDialogOpen.value = false
+      pendingForkMessageId.value = ''
+    }
+  } finally {
+    forkSubmitting.value = false
+  }
 }
 
 // Keyboard bridges into the two composer list surfaces (slash picker, command

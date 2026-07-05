@@ -118,6 +118,7 @@ type ForkFromAssistantInput struct {
 	BotID           string
 	SessionID       string
 	MessageID       string
+	Title           string
 	CreatedByUserID string
 }
 
@@ -292,6 +293,10 @@ func (s *Service) ForkFromAssistantMessage(ctx context.Context, input ForkFromAs
 	if title == "" {
 		title = "Untitled"
 	}
+	forkTitle := strings.TrimSpace(input.Title)
+	if forkTitle == "" {
+		forkTitle = title + " fork"
+	}
 	meta := nonNilMap(source.Metadata)
 	meta["forked_from"] = map[string]any{
 		"session_id": source.ID,
@@ -307,7 +312,7 @@ func (s *Service) ForkFromAssistantMessage(ctx context.Context, input ForkFromAs
 		SessionID:       pgSessionID,
 		BotID:           pgBotID,
 		MessageID:       pgMessageID,
-		Title:           title + " fork",
+		Title:           forkTitle,
 		Metadata:        metaBytes,
 		CreatedByUserID: pgCreatedByUserID,
 	})
