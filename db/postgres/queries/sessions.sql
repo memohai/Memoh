@@ -137,7 +137,8 @@ copy_turns AS (
   SELECT
     t.id AS old_turn_id,
     gen_random_uuid() AS new_turn_id,
-    t.position,
+    t.position AS old_position,
+    ROW_NUMBER() OVER (ORDER BY t.position ASC)::bigint AS new_position,
     t.request_message_id,
     t.assistant_message_id
   FROM bot_history_turns t
@@ -159,7 +160,7 @@ inserted_turns AS (
     ct.new_turn_id,
     cs.bot_id,
     cs.id,
-    ct.position,
+    ct.new_position,
     request_message.new_message_id,
     assistant_message.new_message_id
   FROM copy_turns ct
@@ -168,17 +169,25 @@ inserted_turns AS (
   LEFT JOIN inserted_messages request_inserted ON request_inserted.id = request_message.new_message_id
   LEFT JOIN copy_messages assistant_message ON assistant_message.old_message_id = ct.assistant_message_id
   LEFT JOIN inserted_messages assistant_inserted ON assistant_inserted.id = assistant_message.new_message_id
-  RETURNING id
+  RETURNING id, position
 ),
 linked_messages AS (
   UPDATE bot_history_messages m
   SET turn_id = inserted_turns.id,
+      turn_position = inserted_turns.position,
+      turn_visible = true,
       turn_message_seq = copy_messages.turn_message_seq
   FROM copy_messages
-  JOIN copy_turns ON copy_turns.position = copy_messages.turn_position
+  JOIN copy_turns ON copy_turns.old_position = copy_messages.turn_position
   JOIN inserted_turns ON inserted_turns.id = copy_turns.new_turn_id
   WHERE m.id = copy_messages.new_message_id
   RETURNING m.id
+),
+copy_message_counts AS (
+  SELECT count(*) AS count FROM copy_messages
+),
+linked_message_counts AS (
+  SELECT count(*) AS count FROM linked_messages
 ),
 copied_assets AS (
   INSERT INTO bot_history_message_assets (
@@ -224,8 +233,10 @@ updated_session AS (
 SELECT us.*
 FROM updated_session us
 CROSS JOIN (SELECT count(*) AS copied_asset_count FROM copied_assets) copied_asset_counts
-CROSS JOIN (SELECT count(*) AS linked_message_count FROM linked_messages) linked_message_counts
-WHERE EXISTS (SELECT 1 FROM inserted_turns);
+CROSS JOIN copy_message_counts
+CROSS JOIN linked_message_counts
+WHERE EXISTS (SELECT 1 FROM inserted_turns)
+  AND linked_message_counts.count = copy_message_counts.count;
 
 -- name: GetSessionByID :one
 SELECT *

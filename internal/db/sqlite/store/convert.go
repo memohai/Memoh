@@ -87,6 +87,18 @@ func assignValue(src reflect.Value, dst reflect.Value) error {
 		dst.Set(pgDate(timeValue(src), validValue(src)))
 		return nil
 	}
+	if isPGInt8(dst.Type()) {
+		dst.Set(pgInt8(intValue(src), validValue(src)))
+		return nil
+	}
+	if isPGInt4(dst.Type()) {
+		dst.Set(pgInt4(intValue(src), validValue(src)))
+		return nil
+	}
+	if isPGInt2(dst.Type()) {
+		dst.Set(pgInt2(intValue(src), validValue(src)))
+		return nil
+	}
 	switch dst.Kind() {
 	case reflect.String:
 		dst.SetString(stringValue(src))
@@ -228,7 +240,10 @@ func validValue(value reflect.Value) bool {
 	if value.Type() == reflect.TypeOf(sql.NullString{}) {
 		return value.FieldByName("Valid").Bool()
 	}
-	if isPGText(value.Type()) || isPGUUID(value.Type()) || isPGTimestamptz(value.Type()) {
+	if value.Type() == reflect.TypeOf(sql.NullInt64{}) {
+		return value.FieldByName("Valid").Bool()
+	}
+	if isPGText(value.Type()) || isPGUUID(value.Type()) || isPGTimestamptz(value.Type()) || isPGDate(value.Type()) || isPGInt(value.Type()) {
 		return value.FieldByName("Valid").Bool()
 	}
 	return true
@@ -249,6 +264,12 @@ func stringValue(value reflect.Value) string {
 			return ""
 		}
 		return value.FieldByName("String").String()
+	}
+	if value.Type() == reflect.TypeOf(sql.NullInt64{}) {
+		if !value.FieldByName("Valid").Bool() {
+			return ""
+		}
+		return strconv.FormatInt(value.FieldByName("Int64").Int(), 10)
 	}
 	if isPGText(value.Type()) {
 		if !value.FieldByName("Valid").Bool() {
@@ -312,6 +333,9 @@ func interfaceValue(value reflect.Value) any {
 	if value.Type() == reflect.TypeOf(sql.NullString{}) || isPGText(value.Type()) || isPGUUID(value.Type()) || isPGTimestamptz(value.Type()) || isPGDate(value.Type()) {
 		return stringValue(value)
 	}
+	if value.Type() == reflect.TypeOf(sql.NullInt64{}) || isPGInt(value.Type()) {
+		return intValue(value)
+	}
 	if value.Kind() == reflect.Slice && value.Type().Elem().Kind() == reflect.Uint8 {
 		return string(value.Bytes())
 	}
@@ -359,6 +383,30 @@ func intValue(value reflect.Value) int64 {
 			return 0
 		}
 		value = value.Elem()
+	}
+	if value.Type() == reflect.TypeOf(sql.NullInt64{}) {
+		if !value.FieldByName("Valid").Bool() {
+			return 0
+		}
+		return value.FieldByName("Int64").Int()
+	}
+	if isPGInt8(value.Type()) {
+		if !value.FieldByName("Valid").Bool() {
+			return 0
+		}
+		return value.FieldByName("Int64").Int()
+	}
+	if isPGInt4(value.Type()) {
+		if !value.FieldByName("Valid").Bool() {
+			return 0
+		}
+		return value.FieldByName("Int32").Int()
+	}
+	if isPGInt2(value.Type()) {
+		if !value.FieldByName("Valid").Bool() {
+			return 0
+		}
+		return value.FieldByName("Int16").Int()
 	}
 	switch value.Kind() {
 	case reflect.Bool:
@@ -415,6 +463,10 @@ func timeValue(value reflect.Value) time.Time {
 	return time.Time{}
 }
 
+func isPGInt(t reflect.Type) bool {
+	return isPGInt8(t) || isPGInt4(t) || isPGInt2(t)
+}
+
 func isPGText(t reflect.Type) bool {
 	return t.PkgPath() == "github.com/jackc/pgx/v5/pgtype" && t.Name() == "Text"
 }
@@ -437,6 +489,18 @@ func isPGTimestamptz(t reflect.Type) bool {
 
 func isPGDate(t reflect.Type) bool {
 	return t.PkgPath() == "github.com/jackc/pgx/v5/pgtype" && t.Name() == "Date"
+}
+
+func isPGInt8(t reflect.Type) bool {
+	return t.PkgPath() == "github.com/jackc/pgx/v5/pgtype" && t.Name() == "Int8"
+}
+
+func isPGInt4(t reflect.Type) bool {
+	return t.PkgPath() == "github.com/jackc/pgx/v5/pgtype" && t.Name() == "Int4"
+}
+
+func isPGInt2(t reflect.Type) bool {
+	return t.PkgPath() == "github.com/jackc/pgx/v5/pgtype" && t.Name() == "Int2"
 }
 
 func sqlNullString(value string, valid bool) reflect.Value {
@@ -465,4 +529,22 @@ func pgTimestamptz(value time.Time, valid bool) reflect.Value {
 
 func pgDate(value time.Time, valid bool) reflect.Value {
 	return reflect.ValueOf(pgtype.Date{Time: value, Valid: valid && !value.IsZero()})
+}
+
+func pgInt8(value int64, valid bool) reflect.Value {
+	return reflect.ValueOf(pgtype.Int8{Int64: value, Valid: valid})
+}
+
+func pgInt4(value int64, valid bool) reflect.Value {
+	if value < math.MinInt32 || value > math.MaxInt32 {
+		return reflect.ValueOf(pgtype.Int4{})
+	}
+	return reflect.ValueOf(pgtype.Int4{Int32: int32(value), Valid: valid}) // #nosec G115 -- guarded by Int32 bounds check above.
+}
+
+func pgInt2(value int64, valid bool) reflect.Value {
+	if value < math.MinInt16 || value > math.MaxInt16 {
+		return reflect.ValueOf(pgtype.Int2{})
+	}
+	return reflect.ValueOf(pgtype.Int2{Int16: int16(value), Valid: valid}) // #nosec G115 -- guarded by Int16 bounds check above.
 }

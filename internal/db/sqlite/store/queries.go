@@ -1474,7 +1474,11 @@ func (q *Queries) ForkSessionFromAssistantMessage(ctx context.Context, arg pgsql
 	if err != nil {
 		return pgsqlc.ForkSessionFromAssistantMessageRow{}, mapQueryErr(err)
 	}
-	turnIDByPosition := make(map[int64]string, len(turns))
+	type createdForkTurn struct {
+		ID       string
+		Position int64
+	}
+	turnBySourcePosition := make(map[int64]createdForkTurn, len(turns))
 	for _, turn := range turns {
 		var requestID sql.NullString
 		if turn.RequestMessageID.Valid {
@@ -1493,20 +1497,31 @@ func (q *Queries) ForkSessionFromAssistantMessage(ctx context.Context, arg pgsql
 		if err != nil {
 			return pgsqlc.ForkSessionFromAssistantMessageRow{}, mapQueryErr(err)
 		}
-		turnIDByPosition[turn.Position] = createdTurn.ID
+		turnBySourcePosition[turn.Position] = createdForkTurn{
+			ID:       createdTurn.ID,
+			Position: createdTurn.Position,
+		}
 	}
 	for _, sourceMessage := range visibleMessages {
 		copiedID := messageIDMap[sourceMessage.ID]
-		turnID := turnIDByPosition[sourceMessage.TurnPosition]
-		if copiedID == "" || turnID == "" {
+		turnRef := turnBySourcePosition[sourceMessage.TurnPosition]
+		if copiedID == "" || turnRef.ID == "" {
 			return pgsqlc.ForkSessionFromAssistantMessageRow{}, pgx.ErrNoRows
 		}
-		if _, err := tx.ExecContext(ctx, `
+		result, err := tx.ExecContext(ctx, `
 UPDATE bot_history_messages
-SET turn_id = ?, turn_message_seq = ?
+SET turn_id = ?, turn_position = ?, turn_message_seq = ?, turn_visible = 1
 WHERE id = ?
-`, turnID, sourceMessage.TurnMessageSeq, copiedID); err != nil {
+`, turnRef.ID, turnRef.Position, sourceMessage.TurnMessageSeq, copiedID)
+		if err != nil {
 			return pgsqlc.ForkSessionFromAssistantMessageRow{}, mapQueryErr(err)
+		}
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return pgsqlc.ForkSessionFromAssistantMessageRow{}, err
+		}
+		if rowsAffected != 1 {
+			return pgsqlc.ForkSessionFromAssistantMessageRow{}, pgx.ErrNoRows
 		}
 	}
 
@@ -4343,7 +4358,7 @@ func (q *Queries) LinkUnassignedMessagesAfterHistoryTurnAssistant(ctx context.Co
 	if err := convertValue(turnID, &sqliteTurnID); err != nil {
 		return err
 	}
-	return mapQueryErr(q.store.queries.LinkUnassignedMessagesAfterHistoryTurnAssistant(ctx, sqliteTurnID))
+	return mapQueryErr(linkUnassignedMessagesAfterHistoryTurnAssistantStable(ctx, q.store.db, sqliteTurnID))
 }
 
 func (q *Queries) GetVisibleHistoryTurnByMessage(ctx context.Context, arg pgsqlc.GetVisibleHistoryTurnByMessageParams) (pgsqlc.BotHistoryTurn, error) {
@@ -4483,6 +4498,20 @@ func (q *Queries) ReplaceHistoryTurn(ctx context.Context, arg pgsqlc.ReplaceHist
 	if err := qtx.HideMessagesByHistoryTurn(ctx, sql.NullString{String: oldTurn.ID, Valid: strings.TrimSpace(oldTurn.ID) != ""}); err != nil {
 		return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
 	}
+	replacementTurnID := sql.NullString{String: created.ID, Valid: strings.TrimSpace(created.ID) != ""}
+	if createArg.RequestMessageID.Valid && strings.TrimSpace(createArg.RequestMessageID.String) != "" {
+		if err := linkMessageToHistoryTurnChecked(ctx, tx, sessionID, replacementTurnID, createArg.RequestMessageID.String, 1); err != nil {
+			return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
+		}
+	}
+	if createArg.AssistantMessageID.Valid && strings.TrimSpace(createArg.AssistantMessageID.String) != "" {
+		if err := linkMessageToHistoryTurnChecked(ctx, tx, sessionID, replacementTurnID, createArg.AssistantMessageID.String, 2); err != nil {
+			return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
+		}
+		if err := linkUnassignedMessagesAfterHistoryTurnAssistantStable(ctx, tx, created.ID); err != nil {
+			return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return pgsqlc.ReplaceHistoryTurnRow{}, err
 	}
@@ -4491,6 +4520,116 @@ func (q *Queries) ReplaceHistoryTurn(ctx context.Context, arg pgsqlc.ReplaceHist
 		return pgsqlc.ReplaceHistoryTurnRow{}, err
 	}
 	return result, nil
+}
+
+func linkMessageToHistoryTurnChecked(ctx context.Context, tx *sql.Tx, sessionID string, turnID sql.NullString, messageID string, turnMessageSeq int64) error {
+	if tx == nil || strings.TrimSpace(sessionID) == "" || !turnID.Valid || strings.TrimSpace(turnID.String) == "" || strings.TrimSpace(messageID) == "" {
+		return pgx.ErrNoRows
+	}
+	result, err := tx.ExecContext(ctx, `
+UPDATE bot_history_messages
+SET turn_id = ?1,
+    turn_position = (
+      SELECT position
+      FROM bot_history_turns
+      WHERE id = ?1
+    ),
+    turn_visible = COALESCE((
+      SELECT CASE WHEN superseded_at IS NULL THEN 1 ELSE 0 END
+      FROM bot_history_turns
+      WHERE id = ?1
+    ), 0),
+    turn_message_seq = ?2
+WHERE id = ?3
+  AND session_id = ?4
+  AND EXISTS (
+    SELECT 1
+    FROM bot_history_turns
+    WHERE id = ?1
+      AND session_id = ?4
+  )
+`, turnID.String, turnMessageSeq, messageID, sessionID)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected != 1 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+type sqliteQueryExecer interface {
+	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
+	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
+}
+
+func linkUnassignedMessagesAfterHistoryTurnAssistantStable(ctx context.Context, db sqliteQueryExecer, turnID string) error {
+	if db == nil || strings.TrimSpace(turnID) == "" {
+		return pgx.ErrNoRows
+	}
+	rows, err := db.QueryContext(ctx, `
+SELECT m.id, t.position
+FROM bot_history_turns t
+JOIN bot_history_messages assistant ON assistant.id = t.assistant_message_id
+JOIN bot_history_messages m
+  ON m.session_id = t.session_id
+ AND m.role IN ('assistant', 'tool')
+WHERE t.id = ?1
+  AND m.id <> assistant.id
+  AND m.turn_id IS NULL
+  AND (
+    m.created_at > assistant.created_at
+    OR (m.created_at = assistant.created_at AND m.id > assistant.id)
+  )
+ORDER BY m.created_at, m.id
+`, turnID)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+	type tailMessage struct {
+		id       string
+		position int64
+	}
+	var tail []tailMessage
+	for rows.Next() {
+		var item tailMessage
+		if err := rows.Scan(&item.id, &item.position); err != nil {
+			return err
+		}
+		tail = append(tail, item)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i, item := range tail {
+		result, err := db.ExecContext(ctx, `
+UPDATE bot_history_messages
+SET turn_id = ?1,
+    turn_position = ?2,
+    turn_visible = 1,
+    turn_message_seq = ?3
+WHERE id = ?4
+  AND turn_id IS NULL
+`, turnID, item.position, int64(i+3), item.id)
+		if err != nil {
+			return err
+		}
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rowsAffected != 1 {
+			return pgx.ErrNoRows
+		}
+	}
+	return nil
 }
 
 func (q *Queries) ListMessagesBefore(ctx context.Context, arg pgsqlc.ListMessagesBeforeParams) ([]pgsqlc.ListMessagesBeforeRow, error) {

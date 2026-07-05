@@ -4036,6 +4036,24 @@ replacement AS (
     $3::uuid,
     $4::uuid
   FROM old_turn
+  WHERE (
+      $3::uuid IS NULL
+      OR EXISTS (
+        SELECT 1
+        FROM bot_history_messages request_message
+        WHERE request_message.id = $3::uuid
+          AND request_message.session_id = old_turn.session_id
+      )
+    )
+    AND (
+      $4::uuid IS NULL
+      OR EXISTS (
+        SELECT 1
+        FROM bot_history_messages assistant_message
+        WHERE assistant_message.id = $4::uuid
+          AND assistant_message.session_id = old_turn.session_id
+      )
+    )
   RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
     superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at
 ),
@@ -4054,8 +4072,10 @@ updated AS (
 hidden_old_messages AS (
   UPDATE bot_history_messages m
   SET turn_visible = false
-  FROM updated
+  FROM updated, replacement
   WHERE m.turn_id = updated.id
+    AND m.id IS DISTINCT FROM replacement.request_message_id
+    AND m.id IS DISTINCT FROM replacement.assistant_message_id
   RETURNING m.id
 ),
 hidden_done AS (
@@ -4075,6 +4095,7 @@ linked_anchors AS (
   CROSS JOIN hidden_done
   WHERE m.id = replacement.request_message_id
      OR m.id = replacement.assistant_message_id
+  RETURNING m.id
 ),
 linked_tail AS (
   UPDATE bot_history_messages m
@@ -4098,6 +4119,13 @@ linked_tail AS (
       AND (m.created_at, m.id) > (assistant.created_at, assistant.id)
   ) tail
   WHERE m.id = tail.message_id
+  RETURNING m.id
+),
+linked_anchors_done AS (
+  SELECT COUNT(*) AS count FROM linked_anchors
+),
+linked_tail_done AS (
+  SELECT COUNT(*) AS count FROM linked_tail
 )
 SELECT replacement.id, replacement.bot_id, replacement.session_id, replacement.position,
   replacement.request_message_id, replacement.assistant_message_id,
@@ -4105,6 +4133,8 @@ SELECT replacement.id, replacement.bot_id, replacement.session_id, replacement.p
   replacement.superseded_reason, replacement.created_at, replacement.updated_at
 FROM replacement
 JOIN updated ON true
+CROSS JOIN linked_anchors_done
+CROSS JOIN linked_tail_done
 `
 
 type ReplaceHistoryTurnParams struct {

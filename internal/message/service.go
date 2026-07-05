@@ -1099,27 +1099,6 @@ func (s *DBService) ReplaceTurn(ctx context.Context, sessionID string, oldTurnID
 	if err != nil {
 		return HistoryTurn{}, err
 	}
-	if pgRequestMessageID.Valid {
-		if err := s.queries.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
-			MessageID:      pgRequestMessageID,
-			TurnID:         row.ID,
-			TurnMessageSeq: pgtype.Int8{Int64: 1, Valid: true},
-		}); err != nil {
-			return HistoryTurn{}, fmt.Errorf("link replacement request message: %w", err)
-		}
-	}
-	if pgAssistantMessageID.Valid {
-		if err := s.queries.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
-			MessageID:      pgAssistantMessageID,
-			TurnID:         row.ID,
-			TurnMessageSeq: pgtype.Int8{Int64: 2, Valid: true},
-		}); err != nil {
-			return HistoryTurn{}, fmt.Errorf("link replacement assistant message: %w", err)
-		}
-		if err := s.queries.LinkUnassignedMessagesAfterHistoryTurnAssistant(ctx, row.ID); err != nil {
-			return HistoryTurn{}, fmt.Errorf("link replacement tail messages: %w", err)
-		}
-	}
 	return toHistoryTurnFromReplaceRow(row), nil
 }
 

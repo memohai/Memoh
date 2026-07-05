@@ -366,6 +366,7 @@ func (r *Resolver) streamChatWSResultWithHooks(
 	var toolCallCount int
 	var hasVisibleOutput bool
 	var persistedMessages []messagepkg.Message
+	postPersistApplied := false
 	for event := range agentEventCh {
 		idleCancel.Reset() // each event resets the idle timer
 
@@ -407,6 +408,13 @@ func (r *Resolver) streamChatWSResultWithHooks(
 					}
 				}
 			}
+		}
+
+		if event.IsTerminal() && postPersist != nil && !postPersistApplied {
+			if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
+				return persistedMessages, err
+			}
+			postPersistApplied = true
 		}
 
 		if !clientGone {
@@ -453,7 +461,7 @@ func (r *Resolver) streamChatWSResultWithHooks(
 		}
 	}
 
-	if postPersist != nil {
+	if postPersist != nil && !postPersistApplied {
 		if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
 			return persistedMessages, err
 		}

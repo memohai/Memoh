@@ -60,7 +60,10 @@ VALUES (?, ?, ?, 1, ?, ?)`, turnID, botID, sessionID, userID, assistantID); err 
 	}
 	if _, err := conn.ExecContext(ctx, `
 UPDATE bot_history_messages
-SET turn_id = ?, turn_message_seq = CASE id WHEN ? THEN 1 WHEN ? THEN 2 END
+SET turn_id = ?,
+    turn_position = 1,
+    turn_visible = 1,
+    turn_message_seq = CASE id WHEN ? THEN 1 WHEN ? THEN 2 END
 WHERE id IN (?, ?)`, turnID, userID, assistantID, userID, assistantID); err != nil {
 		t.Fatalf("link source messages: %v", err)
 	}
@@ -125,6 +128,7 @@ func TestSQLiteForkSessionCopiesCompleteAssistantTurn(t *testing.T) {
 		assistantID = "00000000-0000-0000-0000-000000004104"
 		tailID      = "00000000-0000-0000-0000-000000004105"
 		turnID      = "00000000-0000-0000-0000-000000004106"
+		turnPos     = int64(7)
 	)
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bots (id) VALUES (?)`, botID); err != nil {
 		t.Fatalf("insert bot: %v", err)
@@ -152,13 +156,16 @@ VALUES (?, ?, ?, ?, ?, ?)`, item.id, botID, sessionID, item.role, item.content, 
 	}
 	if _, err := conn.ExecContext(ctx, `
 INSERT INTO bot_history_turns (id, bot_id, session_id, position, request_message_id, assistant_message_id)
-VALUES (?, ?, ?, 1, ?, ?)`, turnID, botID, sessionID, userID, assistantID); err != nil {
+VALUES (?, ?, ?, ?, ?, ?)`, turnID, botID, sessionID, turnPos, userID, assistantID); err != nil {
 		t.Fatalf("insert turn: %v", err)
 	}
 	if _, err := conn.ExecContext(ctx, `
 UPDATE bot_history_messages
-SET turn_id = ?, turn_message_seq = CASE id WHEN ? THEN 1 WHEN ? THEN 2 WHEN ? THEN 3 END
-WHERE id IN (?, ?, ?)`, turnID, userID, assistantID, tailID, userID, assistantID, tailID); err != nil {
+SET turn_id = ?,
+    turn_position = ?,
+    turn_visible = 1,
+    turn_message_seq = CASE id WHEN ? THEN 1 WHEN ? THEN 2 WHEN ? THEN 3 END
+WHERE id IN (?, ?, ?)`, turnID, turnPos, userID, assistantID, tailID, userID, assistantID, tailID); err != nil {
 		t.Fatalf("link source messages: %v", err)
 	}
 
@@ -201,6 +208,7 @@ WHERE session_id = ? AND id = ?
 	}
 	assertSQLiteForkAnchorVisible(t, ctx, conn, forked.ID.String(), meta.ForkedFrom.ForkMessageID)
 	assertSQLiteForkCopiedContentVisible(t, ctx, conn, forked.ID.String(), `{"role":"assistant","content":"final answer"}`)
+	assertSQLiteForkMessagePositionsMatchTurns(t, ctx, conn, forked.ID.String())
 }
 
 func assertSQLiteForkAnchorVisible(t *testing.T, ctx context.Context, conn *sql.DB, sessionID, messageID string) {
@@ -237,6 +245,25 @@ WHERE session_id = ? AND content = ?
 	}
 }
 
+func assertSQLiteForkMessagePositionsMatchTurns(t *testing.T, ctx context.Context, conn *sql.DB, sessionID string) {
+	t.Helper()
+
+	var mismatchCount int
+	err := conn.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM bot_history_messages m
+JOIN bot_history_turns t ON t.id = m.turn_id
+WHERE m.session_id = ?
+  AND m.turn_position IS NOT t.position
+`, sessionID).Scan(&mismatchCount)
+	if err != nil {
+		t.Fatalf("count fork turn_position mismatches: %v", err)
+	}
+	if mismatchCount != 0 {
+		t.Fatalf("fork copied message turn_position mismatches linked turn count = %d, want 0", mismatchCount)
+	}
+}
+
 const sqliteForkSessionTestSchema = `
 CREATE TABLE bots (
   id TEXT PRIMARY KEY
@@ -269,7 +296,9 @@ CREATE TABLE bot_history_messages (
   bot_id TEXT NOT NULL,
   session_id TEXT,
   turn_id TEXT,
+  turn_position INTEGER,
   turn_message_seq INTEGER,
+  turn_visible INTEGER NOT NULL DEFAULT 0,
   sender_channel_identity_id TEXT,
   sender_account_user_id TEXT,
   source_message_id TEXT,
@@ -322,8 +351,8 @@ CREATE TABLE bot_history_turns (
 );
 CREATE VIEW bot_visible_history_messages AS
 SELECT
-  t.id AS turn_id,
-  t.position AS turn_position,
+  m.turn_id,
+  m.turn_position,
   m.turn_message_seq,
   m.id,
   m.bot_id,
@@ -343,8 +372,7 @@ SELECT
   m.display_text,
   m.created_at
 FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id
-WHERE t.superseded_at IS NULL;
+WHERE m.turn_visible = 1;
 `
 
 var _ = sql.ErrNoRows

@@ -650,6 +650,9 @@ CREATE TABLE bot_history_turns (
 CREATE INDEX idx_bot_history_turns_session_active
   ON bot_history_turns(session_id, position)
   WHERE superseded_at IS NULL;
+CREATE UNIQUE INDEX idx_bot_history_messages_turn_seq_unique
+  ON bot_history_messages(turn_id, turn_message_seq)
+  WHERE turn_id IS NOT NULL AND turn_message_seq IS NOT NULL;
 CREATE VIEW bot_visible_history_messages AS
 SELECT
   m.turn_id,
