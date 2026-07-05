@@ -587,6 +587,7 @@ CREATE TABLE bot_sessions (
   channel_type TEXT,
   session_mode TEXT NOT NULL DEFAULT 'chat',
   runtime_type TEXT NOT NULL DEFAULT 'model',
+  next_turn_position INTEGER NOT NULL DEFAULT 1,
   parent_session_id TEXT
 );
 CREATE TABLE bot_history_messages (

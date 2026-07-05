@@ -106,6 +106,11 @@ UPDATE bot_sessions
 SET updated_at = CURRENT_TIMESTAMP
 WHERE id = sqlc.arg(id) AND deleted_at IS NULL;
 
+-- name: SetSessionNextTurnPosition :exec
+UPDATE bot_sessions
+SET next_turn_position = sqlc.arg(next_turn_position)
+WHERE id = sqlc.arg(session_id);
+
 -- name: GetSessionDiscussCursor :one
 SELECT *
 FROM bot_session_discuss_cursors

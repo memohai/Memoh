@@ -99,6 +99,12 @@ RETURNING
   source_reply_to_message_id, role, content, metadata, usage, session_mode, runtime_type,
   event_id, display_text, created_at;
 
+-- name: AllocateSessionTurnPosition :one
+UPDATE bot_sessions
+SET next_turn_position = next_turn_position + 1
+WHERE id = sqlc.arg(session_id)
+RETURNING next_turn_position - 1 AS position;
+
 -- name: CreateMessageInHistoryTurnByRequest :one
 INSERT INTO bot_history_messages (
   id, bot_id, session_id, sender_channel_identity_id, sender_account_user_id,
@@ -213,6 +219,26 @@ VALUES (
     ORDER BY position DESC
     LIMIT 1
   ), 1),
+  sqlc.narg(request_message_id),
+  sqlc.narg(assistant_message_id)
+)
+RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
+  superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at;
+
+-- name: CreateHistoryTurnWithIDAtPosition :one
+INSERT INTO bot_history_turns (
+  id,
+  bot_id,
+  session_id,
+  position,
+  request_message_id,
+  assistant_message_id
+)
+VALUES (
+  sqlc.arg(turn_id),
+  sqlc.arg(bot_id),
+  sqlc.arg(session_id),
+  sqlc.arg(turn_position),
   sqlc.narg(request_message_id),
   sqlc.narg(assistant_message_id)
 )
@@ -609,17 +635,6 @@ ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id 
 LIMIT sqlc.arg(max_count);
 
 -- name: ListMessagesBeforeMessageBySession :many
-WITH cursor_message AS (
-  SELECT m.turn_position, m.turn_message_seq, m.created_at, m.id
-  FROM bot_history_messages m
-  WHERE m.session_id = sqlc.arg(session_id)
-    AND m.turn_visible = 1
-    AND m.turn_id IS NOT NULL
-    AND m.turn_position IS NOT NULL
-    AND m.turn_message_seq IS NOT NULL
-    AND m.id = sqlc.arg(before_message_id)
-  LIMIT 1
-)
 SELECT
   m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
@@ -632,7 +647,6 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-CROSS JOIN cursor_message cursor
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
@@ -640,11 +654,17 @@ WHERE m.session_id = sqlc.arg(session_id)
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
   AND m.turn_message_seq IS NOT NULL
-  AND (
-    m.turn_position < cursor.turn_position
-    OR (m.turn_position = cursor.turn_position AND m.turn_message_seq < cursor.turn_message_seq)
-    OR (m.turn_position = cursor.turn_position AND m.turn_message_seq = cursor.turn_message_seq AND julianday(m.created_at) < julianday(cursor.created_at))
-    OR (m.turn_position = cursor.turn_position AND m.turn_message_seq = cursor.turn_message_seq AND julianday(m.created_at) = julianday(cursor.created_at) AND m.id < cursor.id)
+  AND (m.turn_position, m.turn_message_seq, julianday(m.created_at), m.id)
+    < (
+      SELECT c.turn_position, c.turn_message_seq, julianday(c.created_at), c.id
+      FROM bot_history_messages c
+      WHERE c.session_id = sqlc.arg(session_id)
+        AND c.turn_visible = 1
+        AND c.turn_id IS NOT NULL
+        AND c.turn_position IS NOT NULL
+        AND c.turn_message_seq IS NOT NULL
+        AND c.id = sqlc.arg(before_message_id)
+      LIMIT 1
   )
 ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
@@ -770,6 +790,21 @@ WHERE m.session_id = sqlc.arg(session_id)
   AND m.turn_message_seq IS NOT NULL
   AND m.source_message_id = sqlc.arg(external_message_id)
 ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+LIMIT 1;
+
+-- name: GetVisibleMessageCursorByIDBySession :one
+SELECT
+  m.id,
+  m.turn_position,
+  m.turn_message_seq,
+  m.created_at
+FROM bot_history_messages m
+WHERE m.session_id = sqlc.arg(session_id)
+  AND m.turn_visible = 1
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL
+  AND m.id = sqlc.arg(message_id)
 LIMIT 1;
 
 -- name: GetLocatedMessageByExternalIDBySession :one
@@ -923,17 +958,6 @@ ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 LIMIT sqlc.arg(max_count);
 
 -- name: ListMessagesAfterMessageBySession :many
-WITH cursor_message AS (
-  SELECT m.turn_position, m.turn_message_seq, m.created_at, m.id
-  FROM bot_history_messages m
-  WHERE m.session_id = sqlc.arg(session_id)
-    AND m.turn_visible = 1
-    AND m.turn_id IS NOT NULL
-    AND m.turn_position IS NOT NULL
-    AND m.turn_message_seq IS NOT NULL
-    AND m.id = sqlc.arg(after_message_id)
-  LIMIT 1
-)
 SELECT
   m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
@@ -946,7 +970,6 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-CROSS JOIN cursor_message cursor
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
@@ -954,11 +977,17 @@ WHERE m.session_id = sqlc.arg(session_id)
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
   AND m.turn_message_seq IS NOT NULL
-  AND (
-    m.turn_position > cursor.turn_position
-    OR (m.turn_position = cursor.turn_position AND m.turn_message_seq > cursor.turn_message_seq)
-    OR (m.turn_position = cursor.turn_position AND m.turn_message_seq = cursor.turn_message_seq AND julianday(m.created_at) > julianday(cursor.created_at))
-    OR (m.turn_position = cursor.turn_position AND m.turn_message_seq = cursor.turn_message_seq AND julianday(m.created_at) = julianday(cursor.created_at) AND m.id > cursor.id)
+  AND (m.turn_position, m.turn_message_seq, julianday(m.created_at), m.id)
+    > (
+      SELECT c.turn_position, c.turn_message_seq, julianday(c.created_at), c.id
+      FROM bot_history_messages c
+      WHERE c.session_id = sqlc.arg(session_id)
+        AND c.turn_visible = 1
+        AND c.turn_id IS NOT NULL
+        AND c.turn_position IS NOT NULL
+        AND c.turn_message_seq IS NOT NULL
+        AND c.id = sqlc.arg(after_message_id)
+      LIMIT 1
   )
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 LIMIT sqlc.arg(max_count);

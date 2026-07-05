@@ -943,15 +943,28 @@ func (s *DBService) ListBeforeMessageBySession(ctx context.Context, sessionID st
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListMessagesBeforeMessageBySession(ctx, sqlc.ListMessagesBeforeMessageBySessionParams{
-		SessionID:       pgSessionID,
-		BeforeMessageID: pgMessageID,
-		MaxCount:        limit,
+	cursor, err := s.queries.GetVisibleMessageCursorByIDBySession(ctx, sqlc.GetVisibleMessageCursorByIDBySessionParams{
+		SessionID: pgSessionID,
+		MessageID: pgMessageID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return []Message{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListMessagesBeforeCursorBySession(ctx, sqlc.ListMessagesBeforeCursorBySessionParams{
+		SessionID:            pgSessionID,
+		CursorTurnPosition:   cursor.TurnPosition.Int64,
+		CursorTurnMessageSeq: cursor.TurnMessageSeq.Int64,
+		CursorCreatedAt:      cursor.CreatedAt,
+		CursorMessageID:      cursor.ID,
+		MaxCount:             limit,
 	})
 	if err != nil {
 		return nil, err
 	}
-	msgs := toMessagesFromBeforeMessageBySession(rows)
+	msgs := toMessagesFromBeforeCursorBySession(rows)
 	s.enrichAssets(ctx, msgs)
 	return msgs, nil
 }
@@ -1561,7 +1574,7 @@ func toMessageFromBeforeBySessionRow(row sqlc.ListMessagesBeforeBySessionRow) Me
 	)
 }
 
-func toMessageFromBeforeMessageBySessionRow(row sqlc.ListMessagesBeforeMessageBySessionRow) Message {
+func toMessageFromBeforeCursorBySessionRow(row sqlc.ListMessagesBeforeCursorBySessionRow) Message {
 	return toMessageFields(
 		row.ID,
 		row.BotID,
@@ -1866,10 +1879,10 @@ func toMessagesFromBeforeBySession(rows []sqlc.ListMessagesBeforeBySessionRow) [
 	return messages
 }
 
-func toMessagesFromBeforeMessageBySession(rows []sqlc.ListMessagesBeforeMessageBySessionRow) []Message {
+func toMessagesFromBeforeCursorBySession(rows []sqlc.ListMessagesBeforeCursorBySessionRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for i := len(rows) - 1; i >= 0; i-- {
-		messages = append(messages, toMessageFromBeforeMessageBySessionRow(rows[i]))
+		messages = append(messages, toMessageFromBeforeCursorBySessionRow(rows[i]))
 	}
 	return messages
 }

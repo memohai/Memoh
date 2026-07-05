@@ -50,6 +50,7 @@ created_session AS (
     runtime_metadata,
     title,
     metadata,
+    next_turn_position,
     created_by_user_id
   )
   SELECT
@@ -61,6 +62,7 @@ created_session AS (
     s.runtime_metadata,
     sqlc.arg(title),
     sqlc.arg(metadata),
+    tt.position + 1,
     sqlc.narg(created_by_user_id)::uuid
   FROM source_session s
   JOIN target_turn tt ON true
@@ -356,6 +358,11 @@ WHERE id = sqlc.arg(id) AND deleted_at IS NULL;
 UPDATE bot_sessions
 SET updated_at = now()
 WHERE id = sqlc.arg(id) AND deleted_at IS NULL;
+
+-- name: SetSessionNextTurnPosition :exec
+UPDATE bot_sessions
+SET next_turn_position = sqlc.arg(next_turn_position)::bigint
+WHERE id = sqlc.arg(session_id);
 
 -- name: GetSessionDiscussCursor :one
 SELECT *

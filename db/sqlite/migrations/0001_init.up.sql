@@ -453,6 +453,7 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   runtime_metadata TEXT NOT NULL DEFAULT '{}',
   title TEXT NOT NULL DEFAULT '',
   metadata TEXT NOT NULL DEFAULT '{}',
+  next_turn_position INTEGER NOT NULL DEFAULT 1,
   parent_session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
   created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

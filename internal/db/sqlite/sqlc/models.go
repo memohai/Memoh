@@ -233,21 +233,22 @@ type BotPluginResource struct {
 }
 
 type BotSession struct {
-	ID              string         `json:"id"`
-	BotID           string         `json:"bot_id"`
-	RouteID         sql.NullString `json:"route_id"`
-	ChannelType     sql.NullString `json:"channel_type"`
-	Type            string         `json:"type"`
-	Title           string         `json:"title"`
-	Metadata        string         `json:"metadata"`
-	ParentSessionID sql.NullString `json:"parent_session_id"`
-	CreatedAt       string         `json:"created_at"`
-	UpdatedAt       string         `json:"updated_at"`
-	DeletedAt       sql.NullString `json:"deleted_at"`
-	CreatedByUserID sql.NullString `json:"created_by_user_id"`
-	SessionMode     string         `json:"session_mode"`
-	RuntimeType     string         `json:"runtime_type"`
-	RuntimeMetadata string         `json:"runtime_metadata"`
+	ID               string         `json:"id"`
+	BotID            string         `json:"bot_id"`
+	RouteID          sql.NullString `json:"route_id"`
+	ChannelType      sql.NullString `json:"channel_type"`
+	Type             string         `json:"type"`
+	Title            string         `json:"title"`
+	Metadata         string         `json:"metadata"`
+	ParentSessionID  sql.NullString `json:"parent_session_id"`
+	CreatedAt        string         `json:"created_at"`
+	UpdatedAt        string         `json:"updated_at"`
+	DeletedAt        sql.NullString `json:"deleted_at"`
+	CreatedByUserID  sql.NullString `json:"created_by_user_id"`
+	SessionMode      string         `json:"session_mode"`
+	RuntimeType      string         `json:"runtime_type"`
+	RuntimeMetadata  string         `json:"runtime_metadata"`
+	NextTurnPosition int64          `json:"next_turn_position"`
 }
 
 type BotSessionDiscussCursor struct {

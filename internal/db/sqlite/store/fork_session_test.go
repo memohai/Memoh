@@ -285,6 +285,7 @@ CREATE TABLE bot_sessions (
   runtime_metadata TEXT NOT NULL DEFAULT '{}',
   title TEXT NOT NULL DEFAULT '',
   metadata TEXT NOT NULL DEFAULT '{}',
+  next_turn_position INTEGER NOT NULL DEFAULT 1,
   parent_session_id TEXT,
   created_by_user_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

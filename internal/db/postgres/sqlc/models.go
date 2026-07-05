@@ -232,21 +232,22 @@ type BotPluginResource struct {
 }
 
 type BotSession struct {
-	ID              pgtype.UUID        `json:"id"`
-	BotID           pgtype.UUID        `json:"bot_id"`
-	RouteID         pgtype.UUID        `json:"route_id"`
-	ChannelType     pgtype.Text        `json:"channel_type"`
-	Type            string             `json:"type"`
-	SessionMode     string             `json:"session_mode"`
-	RuntimeType     string             `json:"runtime_type"`
-	RuntimeMetadata []byte             `json:"runtime_metadata"`
-	Title           string             `json:"title"`
-	Metadata        []byte             `json:"metadata"`
-	ParentSessionID pgtype.UUID        `json:"parent_session_id"`
-	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	ID               pgtype.UUID        `json:"id"`
+	BotID            pgtype.UUID        `json:"bot_id"`
+	RouteID          pgtype.UUID        `json:"route_id"`
+	ChannelType      pgtype.Text        `json:"channel_type"`
+	Type             string             `json:"type"`
+	SessionMode      string             `json:"session_mode"`
+	RuntimeType      string             `json:"runtime_type"`
+	RuntimeMetadata  []byte             `json:"runtime_metadata"`
+	Title            string             `json:"title"`
+	Metadata         []byte             `json:"metadata"`
+	NextTurnPosition int64              `json:"next_turn_position"`
+	ParentSessionID  pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID  pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type BotSessionDiscussCursor struct {

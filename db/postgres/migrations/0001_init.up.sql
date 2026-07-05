@@ -457,6 +457,7 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   runtime_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   title TEXT NOT NULL DEFAULT '',
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  next_turn_position BIGINT NOT NULL DEFAULT 1,
   parent_session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
   created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
