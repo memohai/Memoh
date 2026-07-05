@@ -113,7 +113,7 @@
         v-if="isLoading"
         class="flex justify-center py-3"
       >
-        <LoaderCircle class="size-3.5 animate-spin text-muted-foreground" />
+        <Spinner class="size-3.5" />
       </div>
       <div
         v-if="!isLoading && bots.length === 0"
@@ -161,8 +161,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  Spinner,
 } from '@memohai/ui'
-import { Check, ChevronsUpDown, GripVertical, LoaderCircle, Plus, Settings2 } from 'lucide-vue-next'
+import { Check, ChevronsUpDown, GripVertical, Plus, Settings2 } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat-list'
 import { usePinnedBots } from '@/composables/usePinnedBots'
 

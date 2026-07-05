@@ -582,12 +582,24 @@ only read wrong stacked together:
   a toggle label, or its description. (This is also the no-foreign-product-name rule: the UI
   speaks the user's language, not the runtime's.)
 
-**Copy is bilingual, and that is a layout constraint, not just a translation chore.** Every
-user-facing string goes through an i18n key with **both** `en` and `zh` written — no hardcoded
-text. But the two languages have different shapes: Chinese is denser and wider per glyph,
-English runs longer. A row that fits perfectly in English can wrap or overflow in Chinese (and
-vice versa), which silently breaks same-row height (§ 4) and narrow-screen reflow. So write and
-**eyeball both locales**, and design the layout to survive the longer/wider of the two.
+**Copy is trilingual — en, zh, AND ja — and that is a layout constraint, not just a
+translation chore.** Every user-facing string goes through an i18n key with **all three**
+locales written (`apps/web/src/i18n/locales/{en,zh,ja}.json`) — no hardcoded text. The
+recurring failure is real and embarrassing: agents write en+zh and **forget ja**, or reference
+an existing key that was itself added without ja — the Japanese UI then renders the raw key
+string (`bots.memory.lastUpdated`) in production. A 2026-07 parity sweep found 14 such keys
+referenced by freshly-written templates. So the rule has two halves:
+- **Writing a new key:** add it to all three files in the same edit, placeholders (`{count}`,
+  `{agent}`) identical across locales. For Japanese, use natural phrasing but keep the product
+  terms Japanese users read in English (Bot, Workspace, Skill, MCP…).
+- **Referencing an existing key:** existence in en does NOT mean it exists in ja — grep the key
+  in all three locale files before using it; if ja is missing, fill it as part of your change.
+Before finishing, verify every key your diff references resolves in all three locales.
+The two languages' shapes also constrain layout: Chinese is denser and wider per glyph, English
+runs longer, Japanese sits between but often longest with particles. A row that fits perfectly
+in English can wrap or overflow in Chinese (and vice versa), which silently breaks same-row
+height (§ 4) and narrow-screen reflow. So write and **eyeball all locales**, and design the
+layout to survive the longest of the three.
 
 **An error message follows a formula: what happened · why · how to fix.** "Email needs an @
 symbol" beats "Invalid input"; "We couldn't reach the server — check your connection and retry"

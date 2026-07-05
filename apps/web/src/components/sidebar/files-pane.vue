@@ -1,14 +1,15 @@
 <template>
   <div class="group/tree flex flex-col h-full min-w-0">
     <!-- Section header: aligns with the Chat ("Quick Actions") and Schedule
-         group headers — same mt-2 top inset, text-xs/550 type — so the first
-         label in each capsule shares one baseline. Horizontal indent
-         (mx-1 pl-[11px]) is preserved to stay over the tree's chevron column;
-         do not switch to px-2 or the header text drifts off the icon column. -->
-    <div class="group/pane-header flex min-h-[1.6875rem] shrink-0 items-center mx-1 pl-[11px] mt-2 select-none">
-      <span class="min-w-0 flex-1 truncate text-xs font-[550] tracking-[-0.02em] text-muted-foreground/80">
-        {{ botName || t('bots.files.panelTitle') }}
-      </span>
+         group headers via SidebarPanelHeader (same mt-2 top inset, same label
+         type) so the first label in each capsule shares one baseline.
+         Horizontal indent (mx-1 pl-[11px]) stays on the CONTAINER to sit over
+         the tree's chevron column; do not switch to px-2 or the header text
+         drifts off the icon column. -->
+    <SidebarPanelHeader
+      class="group/pane-header min-h-[1.6875rem] mx-1 pl-[11px] mt-2"
+      :label="botName || t('bots.files.panelTitle')"
+    >
       <div class="flex items-center gap-0.5 pr-1 opacity-0 transition-opacity duration-150 group-hover/pane-header:opacity-100">
         <Button
           v-if="canWrite"
@@ -61,7 +62,7 @@
           <RefreshCw class="size-4" />
         </Button>
       </div>
-    </div>
+    </SidebarPanelHeader>
     <!-- Batch ops bar: shown when items are selected -->
     <div
       v-if="selectedCount > 0"
@@ -354,6 +355,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { joinPath, parentPath } from '@/components/file-manager/utils'
 import FileTree from '@/components/file-manager/file-tree.vue'
+import SidebarPanelHeader from './panel-header.vue'
 import { FileTreeKey } from '@/components/file-manager/file-tree-context'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { useChatStore } from '@/store/chat-list'

@@ -126,17 +126,12 @@
       <div class="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-sidebar to-transparent" />
     </div>
 
-    <!-- Settings, pinned to the bottom. Shares the same action-row geometry as
-         New Session / Bot Settings above: container px-2 + button px-[11px]
-         aligns the icon column, while h-9 + gap-[9px] keeps the footer action
-         from reading like a separate control family. No top border — the list
-         above fades into it instead. -->
+    <!-- Settings, pinned to the bottom. Same action-row owner as New Session /
+         Bot Settings above (SidebarNavButton owns the icon-column geometry).
+         No top border — the list above fades into it instead. -->
     <div class="shrink-0 px-2 pt-1 pb-2">
-      <Button
-        variant="ghost"
-        block
-        class="h-9 justify-start gap-[9px] px-[11px] text-control font-medium text-foreground/92 dark:text-[color:oklch(0.86_0_0)]"
-        :class="isSettingsActive && 'bg-sidebar-accent text-foreground!'"
+      <SidebarNavButton
+        :active="isSettingsActive"
         :aria-label="t('sidebar.settings')"
         @click="router.push('/settings')"
       >
@@ -145,7 +140,7 @@
           class="size-[18px]"
         />
         {{ t('sidebar.settings') }}
-      </Button>
+      </SidebarNavButton>
     </div>
 
     <!-- Width resize handle -->
@@ -174,6 +169,7 @@ import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore, type SidebarView } from '@/store/workspace-tabs'
 import { hasBotPermission } from '@/utils/bot-permissions'
 import BotSwitcher from './bot-switcher.vue'
+import SidebarNavButton from './nav-button.vue'
 import PanelSessions from './panel-sessions.vue'
 import PanelFiles from './panel-files.vue'
 import PanelSchedule from './panel-schedule.vue'

@@ -171,6 +171,20 @@ Same discipline, narrower home — compose these when working on their surface:
   muted/warning tones, optional #icon — NOT CalloutBanner, which is the
   page-level title+description+action banner; forcing hints into it was
   adjudicated as over-merging).
+- **app sidebar** (`components/sidebar/`): `panel-header.vue` (panel group
+  header row — owns the label type `text-xs font-[550] tracking-tight
+  muted/80` that files-pane/schedule/sessions each hand-synced; container
+  geometry (mt/h/min-h) and indent (`pl-[11px]` label column vs container
+  `mx-1 pl-[11px]` chevron column) stay with callers; recents' header is an
+  interactive DropdownMenu TextButton — different relationship, local),
+  `nav-button.vue` (the h-9 icon-column action row — was byte-identical ×3
+  in index/panel-sessions; `active` prop for the settings-row highlight;
+  icon passed by caller as `size-[18px]` stroke 1.75). Deliberately NOT
+  built: a ListRow owner for session-item/bot-switcher/search-dialog rows —
+  the three keep different heights, radii, and hover tokens on purpose
+  (sidebar-hover vs bot-row-tint vs ui-hover are distinct design tokens)
+  and bot-switcher must stay a bare div for sortablejs; a class-only util
+  owning just "flex row + rounded" would not earn its keep.
 - **supermarket** (`pages/supermarket/components/`): `market-item-card.vue`
   (list card: leading icon box + title + homepage link + `#actions`).
 - **chat tool-call** (`pages/home/components/tool-detail/`): `empty-row.vue`,

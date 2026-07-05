@@ -1,18 +1,15 @@
 <template>
   <div class="flex flex-col h-full min-w-0">
-    <div class="shrink-0 px-2 pb-0.5 pt-2">
-      <span class="pl-[11px] text-xs font-[550] tracking-[-0.02em] text-muted-foreground/80">
-        {{ t('chat.quickActions') }}
-      </span>
-    </div>
+    <SidebarPanelHeader
+      :label="t('chat.quickActions')"
+      label-class="pl-[11px]"
+      class="px-2 pb-0.5 pt-2"
+    />
     <!-- Action rows share the sidebar icon column: px-[11px] + 18px icon puts the
          glyph at x=19 and the label at x=45, matching the nav tab, session rows
          and Settings so icons line up vertically and labels share one x. -->
     <div class="flex flex-col px-2 pb-0.5 shrink-0">
-      <Button
-        variant="ghost"
-        block
-        class="h-9 justify-start gap-[9px] px-[11px] text-control font-medium text-foreground/92 dark:text-[color:oklch(0.86_0_0)]"
+      <SidebarNavButton
         :disabled="!currentBotId"
         @click="handleNewSession"
       >
@@ -21,11 +18,8 @@
           class="size-[18px]"
         />
         {{ t('chat.newSession') }}
-      </Button>
-      <Button
-        variant="ghost"
-        block
-        class="h-9 justify-start gap-[9px] px-[11px] text-control font-medium text-foreground/92 dark:text-[color:oklch(0.86_0_0)]"
+      </SidebarNavButton>
+      <SidebarNavButton
         :disabled="!currentBotId"
         @click="handleBotSettings"
       >
@@ -34,7 +28,7 @@
           class="size-[18px]"
         />
         {{ t('chat.botSettings') }}
-      </Button>
+      </SidebarNavButton>
     </div>
 
     <!--
@@ -86,10 +80,11 @@ import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { Button } from '@memohai/ui'
 import { SquarePen, Settings2 } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import SidebarPanelHeader from './panel-header.vue'
+import SidebarNavButton from './nav-button.vue'
 import Recents from './recents.vue'
 
 const { t } = useI18n()

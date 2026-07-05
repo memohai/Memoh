@@ -45,10 +45,11 @@
           :key="group.key"
         >
           <!-- Group header: time label + gear (first group only) -->
-          <div class="flex h-8 items-center px-2 mt-2">
-            <span class="flex-1 pl-[11px] text-xs font-[550] tracking-[-0.02em] text-muted-foreground/80">
-              {{ group.label }}
-            </span>
+          <SidebarPanelHeader
+            class="h-8 px-2 mt-2"
+            :label="group.label"
+            label-class="pl-[11px]"
+          >
             <Button
               v-if="groupIdx === 0"
               variant="ghost"
@@ -64,7 +65,7 @@
                 class="size-[15px]"
               />
             </Button>
-          </div>
+          </SidebarPanelHeader>
 
           <!-- Cards in group -->
           <div class="px-2 pb-1 space-y-1.5">
@@ -136,6 +137,7 @@ import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { describeCron, nextRuns } from '@/utils/cron-pattern'
 import ScheduleListItem from '@/pages/bots/components/schedule-list-item.vue'
+import SidebarPanelHeader from './panel-header.vue'
 
 const { t, locale } = useI18n()
 const chatStore = useChatStore()

@@ -87,9 +87,7 @@
             v-if="loadingMoreSessions"
             class="flex justify-center py-3"
           >
-            <LoaderCircle
-              class="size-4 animate-spin text-muted-foreground"
-            />
+            <Spinner class="size-4" />
           </div>
 
           <div
@@ -101,11 +99,9 @@
 
           <div
             v-if="loadingChats"
-            class="flex justify-center py-4"
+            class="flex justify-center py-3"
           >
-            <LoaderCircle
-              class="size-4 animate-spin text-muted-foreground"
-            />
+            <Spinner class="size-4" />
           </div>
         </div>
       </div>
@@ -127,13 +123,9 @@
           </Button>
           <Button
             variant="destructive"
-            :disabled="deleteSessionLoading"
+            :loading="deleteSessionLoading"
             @click="handleDeleteSession"
           >
-            <LoaderCircle
-              v-if="deleteSessionLoading"
-              class="mr-1 size-3 animate-spin"
-            />
             {{ t('common.confirm') }}
           </Button>
         </DialogFooter>
@@ -167,12 +159,9 @@
             </Button>
             <Button
               type="submit"
-              :disabled="!renameSessionTitle.trim() || renameSessionLoading"
+              :disabled="!renameSessionTitle.trim()"
+              :loading="renameSessionLoading"
             >
-              <LoaderCircle
-                v-if="renameSessionLoading"
-                class="mr-1 size-3 animate-spin"
-              />
               {{ t('common.confirm') }}
             </Button>
           </DialogFooter>
@@ -184,7 +173,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
-import { Check, ChevronDown, LoaderCircle } from 'lucide-vue-next'
+import { Check, ChevronDown } from 'lucide-vue-next'
 import { useLocalStorage } from '@vueuse/core'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useIntersectionObserver } from '@vueuse/core'
@@ -199,6 +188,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   Button,
   TextButton,
+  Spinner,
   Input,
   DropdownMenu,
   DropdownMenuTrigger,
