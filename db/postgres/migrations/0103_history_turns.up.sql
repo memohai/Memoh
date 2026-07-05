@@ -1,9 +1,11 @@
 -- 0103_history_turns
--- Add linear history turns for stable retry/edit replacement.
+-- Add linear history turns, hot message turn read model, and session turn position allocator.
 
 ALTER TABLE bot_history_messages
   ADD COLUMN IF NOT EXISTS turn_id UUID,
-  ADD COLUMN IF NOT EXISTS turn_message_seq BIGINT;
+  ADD COLUMN IF NOT EXISTS turn_message_seq BIGINT,
+  ADD COLUMN IF NOT EXISTS turn_position BIGINT,
+  ADD COLUMN IF NOT EXISTS turn_visible BOOLEAN NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS bot_history_turns (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -168,10 +170,31 @@ SET turn_id = tail.turn_id,
 FROM tail_messages tail
 WHERE m.id = tail.message_id;
 
+UPDATE bot_history_messages m
+SET turn_position = t.position,
+    turn_visible = (t.superseded_at IS NULL)
+FROM bot_history_turns t
+WHERE m.turn_id = t.id;
+
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_visible_session_order
+  ON bot_history_messages(session_id, turn_position DESC, turn_message_seq DESC, created_at DESC, id DESC)
+  WHERE turn_visible = true
+    AND turn_id IS NOT NULL
+    AND turn_position IS NOT NULL
+    AND turn_message_seq IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_visible_session_source_order
+  ON bot_history_messages(session_id, source_message_id, turn_position DESC, turn_message_seq DESC, created_at DESC, id DESC)
+  WHERE turn_visible = true
+    AND source_message_id IS NOT NULL
+    AND turn_id IS NOT NULL
+    AND turn_position IS NOT NULL
+    AND turn_message_seq IS NOT NULL;
+
 CREATE OR REPLACE VIEW bot_visible_history_messages AS
 SELECT
-  t.id AS turn_id,
-  t.position AS turn_position,
+  m.turn_id,
+  m.turn_position,
   m.turn_message_seq,
   m.id,
   m.bot_id,
@@ -192,5 +215,19 @@ SELECT
   m.display_text,
   m.created_at
 FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id
-WHERE t.superseded_at IS NULL;
+WHERE m.turn_visible = true
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL;
+
+ALTER TABLE bot_sessions
+  ADD COLUMN IF NOT EXISTS next_turn_position BIGINT NOT NULL DEFAULT 1;
+
+UPDATE bot_sessions s
+SET next_turn_position = GREATEST(s.next_turn_position, turns.next_position)
+FROM (
+  SELECT session_id, MAX(position) + 1 AS next_position
+  FROM bot_history_turns
+  GROUP BY session_id
+) turns
+WHERE s.id = turns.session_id;

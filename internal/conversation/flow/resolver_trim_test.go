@@ -173,6 +173,50 @@ func TestTrimMessagesByTokens_EstimatesFallback(t *testing.T) {
 	}
 }
 
+func TestTrimMessagesByTokens_PreservesRequiredMessage(t *testing.T) {
+	t.Parallel()
+
+	longText := make([]byte, 400)
+	for i := range longText {
+		longText[i] = 'x'
+	}
+	messages := []messageWithUsage{
+		{
+			ID:       "required-user",
+			Required: true,
+			Message: conversation.ModelMessage{
+				Role:    "user",
+				Content: conversation.NewTextContent("retry this exact prompt"),
+			},
+		},
+		{
+			ID: "old-assistant",
+			Message: conversation.ModelMessage{
+				Role:    "assistant",
+				Content: conversation.NewTextContent(string(longText)),
+			},
+		},
+		{
+			ID: "new-assistant",
+			Message: conversation.ModelMessage{
+				Role:    "assistant",
+				Content: conversation.NewTextContent("recent reply"),
+			},
+		},
+	}
+
+	trimmed, _ := trimMessagesByTokens(nil, messages, 5)
+	if len(trimmed) < 2 {
+		t.Fatalf("expected system notice and required prompt, got %d", len(trimmed))
+	}
+	if trimmed[0].Role != "system" {
+		t.Fatalf("first message role = %q, want system", trimmed[0].Role)
+	}
+	if trimmed[1].Role != "user" || trimmed[1].TextContent() != "retry this exact prompt" {
+		t.Fatalf("required message was not preserved in order: %+v", trimmed)
+	}
+}
+
 func TestStripToolMessages_RemovesAssistantToolCallContentParts(t *testing.T) {
 	t.Parallel()
 

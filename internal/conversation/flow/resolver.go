@@ -364,6 +364,14 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		loaded = pruneHistoryForGateway(loaded)
 		loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
 		loaded = dedupePersistedCurrentUserMessage(loaded, req)
+		loaded, loadErr = r.ensureRequiredHistoryMessage(ctx, loaded, req)
+		if loadErr != nil {
+			r.logger.Error("resolve: load required history message failed",
+				slog.String("bot_id", req.BotID),
+				slog.Any("error", loadErr),
+			)
+			return resolvedContext{}, loadErr
+		}
 		loaded = r.replaceCompactedMessages(ctx, loaded)
 		messages, estimatedTokens = trimMessagesByTokens(r.logger, loaded, contextTokenBudget)
 		// When context reaches 70% of the contextTokenBudget (the user-configured
@@ -395,6 +403,14 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			loaded = pruneHistoryForGateway(loaded)
 			loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
 			loaded = dedupePersistedCurrentUserMessage(loaded, req)
+			loaded, loadErr = r.ensureRequiredHistoryMessage(ctx, loaded, req)
+			if loadErr != nil {
+				r.logger.Error("resolve: reload required history message failed",
+					slog.String("bot_id", req.BotID),
+					slog.Any("error", loadErr),
+				)
+				return resolvedContext{}, loadErr
+			}
 			loaded = r.replaceCompactedMessages(ctx, loaded)
 			messages, estimatedTokens = trimMessagesByTokens(r.logger, loaded, contextTokenBudget)
 			// Remove tool messages from the recent context — they are large

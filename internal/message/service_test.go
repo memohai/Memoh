@@ -64,8 +64,8 @@ func (*runtimeSnapshotQueries) GetLatestVisibleHistoryTurnBySession(context.Cont
 	return sqlc.BotHistoryTurn{}, nil
 }
 
-func (*runtimeSnapshotQueries) LinkMessageToHistoryTurn(context.Context, sqlc.LinkMessageToHistoryTurnParams) error {
-	return nil
+func (*runtimeSnapshotQueries) LinkMessageToHistoryTurn(_ context.Context, arg sqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error) {
+	return arg.MessageID, nil
 }
 
 func (*runtimeSnapshotQueries) AppendMessageToLatestHistoryTurn(context.Context, sqlc.AppendMessageToLatestHistoryTurnParams) error {
@@ -149,8 +149,8 @@ func (*failingHistoryTurnQueries) GetLatestVisibleHistoryTurnBySession(context.C
 	return sqlc.BotHistoryTurn{}, nil
 }
 
-func (*failingHistoryTurnQueries) LinkMessageToHistoryTurn(context.Context, sqlc.LinkMessageToHistoryTurnParams) error {
-	return nil
+func (*failingHistoryTurnQueries) LinkMessageToHistoryTurn(_ context.Context, arg sqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error) {
+	return arg.MessageID, nil
 }
 
 func (*failingHistoryTurnQueries) AppendMessageToLatestHistoryTurn(context.Context, sqlc.AppendMessageToLatestHistoryTurnParams) error {

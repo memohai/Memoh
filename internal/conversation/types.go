@@ -264,6 +264,7 @@ type ChatRequest struct {
 	SkipTitleGeneration          bool             `json:"-"`
 	ForceFreshRuntime            bool             `json:"-"`
 	HistoryCutoffBeforeMessageID string           `json:"-"`
+	RequiredHistoryMessageID     string           `json:"-"`
 
 	// OutboundAssetCollector returns asset refs accumulated during outbound streaming.
 	// Set by the inbound channel processor; called by the resolver at persist time.

@@ -50,7 +50,6 @@ created_session AS (
     runtime_metadata,
     title,
     metadata,
-    next_turn_position,
     created_by_user_id
   )
   SELECT
@@ -62,7 +61,6 @@ created_session AS (
     s.runtime_metadata,
     sqlc.arg(title),
     sqlc.arg(metadata),
-    tt.position + 1,
     sqlc.narg(created_by_user_id)::uuid
   FROM source_session s
   JOIN target_turn tt ON true
@@ -191,6 +189,10 @@ copy_message_counts AS (
 linked_message_counts AS (
   SELECT count(*) AS count FROM linked_messages
 ),
+next_turn_position AS (
+  SELECT COALESCE(MAX(position), 0) + 1 AS value
+  FROM inserted_turns
+),
 copied_assets AS (
   INSERT INTO bot_history_message_assets (
     message_id,
@@ -221,14 +223,16 @@ fork_anchor_message AS (
 ),
 updated_session AS (
   UPDATE bot_sessions s
-  SET metadata = jsonb_set(
-    s.metadata,
-    '{forked_from}',
-    COALESCE(s.metadata->'forked_from', '{}'::jsonb) || jsonb_build_object('fork_message_id', fam.new_message_id::text),
-    true
-  )
+  SET next_turn_position = ntp.value,
+      metadata = jsonb_set(
+        s.metadata,
+        '{forked_from}',
+        COALESCE(s.metadata->'forked_from', '{}'::jsonb) || jsonb_build_object('fork_message_id', fam.new_message_id::text),
+        true
+      )
   FROM created_session cs
   JOIN fork_anchor_message fam ON true
+  CROSS JOIN next_turn_position ntp
   WHERE s.id = cs.id
   RETURNING s.*
 )

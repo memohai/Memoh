@@ -1313,6 +1313,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		return err
 	}
 	messageMap := map[string]pgtype.UUID{}
+	restoredMessages := make([]restoredHistoryMessage, 0, len(messages))
 	for _, item := range messages {
 		sessionID := pgtype.UUID{}
 		var descriptor restoredHistoryDescriptor
@@ -1356,7 +1357,17 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			return fmt.Errorf("message: %w", err)
 		}
 		messageMap[item.ID.String()] = created.ID
+		if created.ID.Valid && sessionID.Valid {
+			restoredMessages = append(restoredMessages, restoredHistoryMessage{
+				id:        created.ID,
+				sessionID: sessionID,
+				role:      created.Role,
+			})
+		}
 		state.counts[SectionHistory]++
+	}
+	if err := rebuildRestoredHistoryTurns(ctx, q, pgBotID, restoredMessages); err != nil {
+		return err
 	}
 
 	if includeAssets {
@@ -1387,6 +1398,110 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		if err := tx.Commit(ctx); err != nil {
 			return fmt.Errorf("commit history tx: %w", err)
 		}
+	}
+	return nil
+}
+
+type restoredHistoryMessage struct {
+	id        pgtype.UUID
+	sessionID pgtype.UUID
+	role      string
+}
+
+type restoredHistoryTurnQueries interface {
+	CreateHistoryTurn(ctx context.Context, arg sqlc.CreateHistoryTurnParams) (sqlc.BotHistoryTurn, error)
+	BindHistoryTurnAssistantByRequest(ctx context.Context, arg sqlc.BindHistoryTurnAssistantByRequestParams) (sqlc.BotHistoryTurn, error)
+	LinkMessageToHistoryTurn(ctx context.Context, arg sqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error)
+}
+
+type restoredTurnState struct {
+	turnID         pgtype.UUID
+	requestID      pgtype.UUID
+	assistantBound bool
+	seq            int64
+}
+
+func rebuildRestoredHistoryTurns(ctx context.Context, q restoredHistoryTurnQueries, botID pgtype.UUID, messages []restoredHistoryMessage) error {
+	if q == nil || !botID.Valid || len(messages) == 0 {
+		return nil
+	}
+	states := make(map[string]*restoredTurnState)
+	for _, msg := range messages {
+		if !msg.id.Valid || !msg.sessionID.Valid {
+			continue
+		}
+		sessionKey := msg.sessionID.String()
+		state := states[sessionKey]
+		role := strings.ToLower(strings.TrimSpace(msg.role))
+		switch role {
+		case "user":
+			turn, err := q.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
+				BotID:            botID,
+				SessionID:        msg.sessionID,
+				RequestMessageID: msg.id,
+			})
+			if err != nil {
+				return fmt.Errorf("create restored history turn: %w", err)
+			}
+			state = &restoredTurnState{turnID: turn.ID, requestID: msg.id, seq: 1}
+			states[sessionKey] = state
+		case "assistant":
+			if state == nil || !state.turnID.Valid {
+				turn, err := q.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
+					BotID:              botID,
+					SessionID:          msg.sessionID,
+					AssistantMessageID: msg.id,
+				})
+				if err != nil {
+					return fmt.Errorf("create restored orphan assistant turn: %w", err)
+				}
+				state = &restoredTurnState{turnID: turn.ID, assistantBound: true, seq: 2}
+				states[sessionKey] = state
+			} else {
+				if !state.assistantBound && state.requestID.Valid {
+					if _, err := q.BindHistoryTurnAssistantByRequest(ctx, sqlc.BindHistoryTurnAssistantByRequestParams{
+						SessionID:          msg.sessionID,
+						RequestMessageID:   state.requestID,
+						AssistantMessageID: msg.id,
+					}); err != nil {
+						return fmt.Errorf("bind restored assistant turn: %w", err)
+					}
+					state.assistantBound = true
+				}
+				state.seq++
+			}
+		default:
+			if state == nil || !state.turnID.Valid {
+				turn, err := q.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
+					BotID:     botID,
+					SessionID: msg.sessionID,
+				})
+				if err != nil {
+					return fmt.Errorf("create restored message turn: %w", err)
+				}
+				state = &restoredTurnState{turnID: turn.ID, seq: 1}
+				states[sessionKey] = state
+			} else {
+				state.seq++
+			}
+		}
+		if err := linkRestoredHistoryMessage(ctx, q, state.turnID, msg.id, state.seq); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func linkRestoredHistoryMessage(ctx context.Context, q restoredHistoryTurnQueries, turnID pgtype.UUID, messageID pgtype.UUID, seq int64) error {
+	if !turnID.Valid || !messageID.Valid || seq <= 0 {
+		return nil
+	}
+	if _, err := q.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
+		TurnID:         turnID,
+		MessageID:      messageID,
+		TurnMessageSeq: pgtype.Int8{Int64: seq, Valid: true},
+	}); err != nil {
+		return fmt.Errorf("link restored history message: %w", err)
 	}
 	return nil
 }

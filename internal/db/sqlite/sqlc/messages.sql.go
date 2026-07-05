@@ -248,15 +248,9 @@ VALUES (
   lower(hex(randomblob(6))),
   ?1,
   ?2,
-  COALESCE((
-    SELECT position + 1
-    FROM bot_history_turns
-    WHERE session_id = ?2
-    ORDER BY position DESC
-    LIMIT 1
-  ), 1),
   ?3,
-  ?4
+  ?4,
+  ?5
 )
 RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
   superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at
@@ -265,6 +259,7 @@ RETURNING id, bot_id, session_id, position, request_message_id, assistant_messag
 type CreateHistoryTurnParams struct {
 	BotID              string         `json:"bot_id"`
 	SessionID          string         `json:"session_id"`
+	TurnPosition       int64          `json:"turn_position"`
 	RequestMessageID   sql.NullString `json:"request_message_id"`
 	AssistantMessageID sql.NullString `json:"assistant_message_id"`
 }
@@ -273,6 +268,7 @@ func (q *Queries) CreateHistoryTurn(ctx context.Context, arg CreateHistoryTurnPa
 	row := q.db.QueryRowContext(ctx, createHistoryTurn,
 		arg.BotID,
 		arg.SessionID,
+		arg.TurnPosition,
 		arg.RequestMessageID,
 		arg.AssistantMessageID,
 	)
@@ -306,15 +302,9 @@ VALUES (
   ?1,
   ?2,
   ?3,
-  COALESCE((
-    SELECT position + 1
-    FROM bot_history_turns
-    WHERE session_id = ?3
-    ORDER BY position DESC
-    LIMIT 1
-  ), 1),
   ?4,
-  ?5
+  ?5,
+  ?6
 )
 RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
   superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at
@@ -324,6 +314,7 @@ type CreateHistoryTurnWithIDParams struct {
 	TurnID             string         `json:"turn_id"`
 	BotID              string         `json:"bot_id"`
 	SessionID          string         `json:"session_id"`
+	TurnPosition       int64          `json:"turn_position"`
 	RequestMessageID   sql.NullString `json:"request_message_id"`
 	AssistantMessageID sql.NullString `json:"assistant_message_id"`
 }
@@ -333,6 +324,7 @@ func (q *Queries) CreateHistoryTurnWithID(ctx context.Context, arg CreateHistory
 		arg.TurnID,
 		arg.BotID,
 		arg.SessionID,
+		arg.TurnPosition,
 		arg.RequestMessageID,
 		arg.AssistantMessageID,
 	)
@@ -702,12 +694,12 @@ VALUES (
   ?15,
   ?16,
   ?17,
-  (
+  COALESCE(CAST(?18 AS INTEGER), (
     SELECT position
     FROM bot_history_turns
     WHERE id = ?17
-  ),
-  ?18,
+  )),
+  ?19,
   COALESCE((
     SELECT CASE WHEN superseded_at IS NULL THEN 1 ELSE 0 END
     FROM bot_history_turns
@@ -751,6 +743,7 @@ type CreateMessageWithTurnParams struct {
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
 	TurnID                  sql.NullString `json:"turn_id"`
+	TurnPosition            sql.NullInt64  `json:"turn_position"`
 	TurnMessageSeq          sql.NullInt64  `json:"turn_message_seq"`
 }
 
@@ -792,6 +785,7 @@ func (q *Queries) CreateMessageWithTurn(ctx context.Context, arg CreateMessageWi
 		arg.EventID,
 		arg.DisplayText,
 		arg.TurnID,
+		arg.TurnPosition,
 		arg.TurnMessageSeq,
 	)
 	var i CreateMessageWithTurnRow
@@ -1298,7 +1292,7 @@ func (q *Queries) HideMessagesByHistoryTurn(ctx context.Context, turnID sql.Null
 	return err
 }
 
-const linkMessageToHistoryTurn = `-- name: LinkMessageToHistoryTurn :exec
+const linkMessageToHistoryTurn = `-- name: LinkMessageToHistoryTurn :one
 UPDATE bot_history_messages
 SET turn_id = ?1,
     turn_position = (
@@ -1313,6 +1307,12 @@ SET turn_id = ?1,
     ), 0),
     turn_message_seq = ?2
 WHERE bot_history_messages.id = ?3
+  AND EXISTS (
+    SELECT 1
+    FROM bot_history_turns
+    WHERE id = ?1
+  )
+RETURNING id
 `
 
 type LinkMessageToHistoryTurnParams struct {
@@ -1321,9 +1321,11 @@ type LinkMessageToHistoryTurnParams struct {
 	MessageID      string         `json:"message_id"`
 }
 
-func (q *Queries) LinkMessageToHistoryTurn(ctx context.Context, arg LinkMessageToHistoryTurnParams) error {
-	_, err := q.db.ExecContext(ctx, linkMessageToHistoryTurn, arg.TurnID, arg.TurnMessageSeq, arg.MessageID)
-	return err
+func (q *Queries) LinkMessageToHistoryTurn(ctx context.Context, arg LinkMessageToHistoryTurnParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, linkMessageToHistoryTurn, arg.TurnID, arg.TurnMessageSeq, arg.MessageID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
 }
 
 const linkUnassignedMessagesAfterHistoryTurnAssistant = `-- name: LinkUnassignedMessagesAfterHistoryTurnAssistant :exec
@@ -3138,7 +3140,7 @@ SELECT
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
   m.session_mode,
   m.runtime_type,
-  m.event_id, m.display_text, m.created_at,
+  m.event_id, m.display_text, m.compact_id, m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
@@ -3176,6 +3178,7 @@ type ListVisibleMessagesFromBySessionRow struct {
 	RuntimeType             string         `json:"runtime_type"`
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
+	CompactID               sql.NullString `json:"compact_id"`
 	CreatedAt               string         `json:"created_at"`
 	SenderDisplayName       sql.NullString `json:"sender_display_name"`
 	SenderAvatarUrl         sql.NullString `json:"sender_avatar_url"`
@@ -3207,6 +3210,7 @@ func (q *Queries) ListVisibleMessagesFromBySession(ctx context.Context, arg List
 			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
+			&i.CompactID,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,

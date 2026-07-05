@@ -605,7 +605,10 @@ SELECT
   m.display_text,
   m.created_at
 FROM bot_history_messages m
-WHERE m.turn_visible = true;
+WHERE m.turn_visible = true
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS bot_session_discuss_cursors (
   session_id UUID NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,

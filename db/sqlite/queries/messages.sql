@@ -69,11 +69,11 @@ VALUES (
   sqlc.narg(event_id),
   sqlc.narg(display_text),
   sqlc.arg(turn_id),
-  (
+  COALESCE(CAST(sqlc.narg(turn_position) AS INTEGER), (
     SELECT position
     FROM bot_history_turns
     WHERE id = sqlc.arg(turn_id)
-  ),
+  )),
   sqlc.arg(turn_message_seq),
   COALESCE((
     SELECT CASE WHEN superseded_at IS NULL THEN 1 ELSE 0 END
@@ -186,13 +186,7 @@ VALUES (
   lower(hex(randomblob(6))),
   sqlc.arg(bot_id),
   sqlc.arg(session_id),
-  COALESCE((
-    SELECT position + 1
-    FROM bot_history_turns
-    WHERE session_id = sqlc.arg(session_id)
-    ORDER BY position DESC
-    LIMIT 1
-  ), 1),
+  sqlc.arg(turn_position),
   sqlc.narg(request_message_id),
   sqlc.narg(assistant_message_id)
 )
@@ -212,13 +206,7 @@ VALUES (
   sqlc.arg(turn_id),
   sqlc.arg(bot_id),
   sqlc.arg(session_id),
-  COALESCE((
-    SELECT position + 1
-    FROM bot_history_turns
-    WHERE session_id = sqlc.arg(session_id)
-    ORDER BY position DESC
-    LIMIT 1
-  ), 1),
+  sqlc.arg(turn_position),
   sqlc.narg(request_message_id),
   sqlc.narg(assistant_message_id)
 )
@@ -273,7 +261,7 @@ WHERE id = (
 RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
   superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at;
 
--- name: LinkMessageToHistoryTurn :exec
+-- name: LinkMessageToHistoryTurn :one
 UPDATE bot_history_messages
 SET turn_id = sqlc.arg(turn_id),
     turn_position = (
@@ -287,7 +275,13 @@ SET turn_id = sqlc.arg(turn_id),
       WHERE id = sqlc.arg(turn_id)
     ), 0),
     turn_message_seq = sqlc.arg(turn_message_seq)
-WHERE bot_history_messages.id = sqlc.arg(message_id);
+WHERE bot_history_messages.id = sqlc.arg(message_id)
+  AND EXISTS (
+    SELECT 1
+    FROM bot_history_turns
+    WHERE id = sqlc.arg(turn_id)
+  )
+RETURNING id;
 
 -- name: AppendMessageToHistoryTurnByRequest :one
 UPDATE bot_history_messages
@@ -1068,7 +1062,7 @@ SELECT
   m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
   m.session_mode,
   m.runtime_type,
-  m.event_id, m.display_text, m.created_at,
+  m.event_id, m.display_text, m.compact_id, m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform

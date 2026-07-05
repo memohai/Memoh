@@ -248,7 +248,7 @@ type Queries interface {
 	AppendMessageToLatestHistoryTurn(ctx context.Context, arg dbsqlc.AppendMessageToLatestHistoryTurnParams) error
 	BindHistoryTurnAssistantByRequest(ctx context.Context, arg dbsqlc.BindHistoryTurnAssistantByRequestParams) (dbsqlc.BotHistoryTurn, error)
 	BindLatestHistoryTurnAssistant(ctx context.Context, arg dbsqlc.BindLatestHistoryTurnAssistantParams) (dbsqlc.BotHistoryTurn, error)
-	LinkMessageToHistoryTurn(ctx context.Context, arg dbsqlc.LinkMessageToHistoryTurnParams) error
+	LinkMessageToHistoryTurn(ctx context.Context, arg dbsqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error)
 	LinkUnassignedMessagesAfterHistoryTurnAssistant(ctx context.Context, turnID pgtype.UUID) error
 	ListMessages(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.ListMessagesRow, error)
 	GetMessageByExternalIDBySession(ctx context.Context, arg dbsqlc.GetMessageByExternalIDBySessionParams) (dbsqlc.GetMessageByExternalIDBySessionRow, error)

@@ -649,7 +649,7 @@ WHERE id = (
 RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
   superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at;
 
--- name: LinkMessageToHistoryTurn :exec
+-- name: LinkMessageToHistoryTurn :one
 UPDATE bot_history_messages m
 SET turn_id = t.id,
     turn_position = t.position,
@@ -657,7 +657,8 @@ SET turn_id = t.id,
     turn_visible = (t.superseded_at IS NULL)
 FROM bot_history_turns t
 WHERE m.id = sqlc.arg(message_id)
-  AND t.id = sqlc.arg(turn_id);
+  AND t.id = sqlc.arg(turn_id)
+RETURNING m.id;
 
 -- name: AppendMessageToHistoryTurnByRequest :one
 WITH target AS (
@@ -788,11 +789,46 @@ WITH old_turn AS (
     AND t.superseded_at IS NULL
   FOR UPDATE
 ),
+replacement_input AS (
+  SELECT
+    old_turn.*,
+    sqlc.narg(request_message_id)::uuid AS replacement_request_message_id,
+    sqlc.narg(assistant_message_id)::uuid AS replacement_assistant_message_id
+  FROM old_turn
+  WHERE (
+      sqlc.narg(request_message_id)::uuid IS NULL
+      OR EXISTS (
+        SELECT 1
+        FROM bot_history_messages request_message
+        WHERE request_message.id = sqlc.narg(request_message_id)::uuid
+          AND request_message.session_id = old_turn.session_id
+          AND request_message.role = 'user'
+          AND (
+            request_message.turn_id IS NULL
+            OR request_message.turn_id = old_turn.id
+          )
+        FOR UPDATE
+      )
+    )
+    AND (
+      sqlc.narg(assistant_message_id)::uuid IS NULL
+      OR EXISTS (
+        SELECT 1
+        FROM bot_history_messages assistant_message
+        WHERE assistant_message.id = sqlc.narg(assistant_message_id)::uuid
+          AND assistant_message.session_id = old_turn.session_id
+          AND assistant_message.role = 'assistant'
+          AND assistant_message.turn_id IS NULL
+        FOR UPDATE
+      )
+    )
+),
 next_position AS (
   UPDATE bot_sessions s
   SET next_turn_position = next_turn_position + 1
-  FROM old_turn
-  WHERE s.id = old_turn.session_id
+  FROM replacement_input
+  WHERE s.id = replacement_input.session_id
+    AND s.next_turn_position = replacement_input.position + 1
   RETURNING s.next_turn_position - 1 AS position
 ),
 replacement AS (
@@ -804,31 +840,13 @@ replacement AS (
     assistant_message_id
   )
   SELECT
-    old_turn.bot_id,
-    old_turn.session_id,
+    replacement_input.bot_id,
+    replacement_input.session_id,
     next_position.position,
-    sqlc.narg(request_message_id)::uuid,
-    sqlc.narg(assistant_message_id)::uuid
-  FROM old_turn
+    replacement_input.replacement_request_message_id,
+    replacement_input.replacement_assistant_message_id
+  FROM replacement_input
   CROSS JOIN next_position
-  WHERE (
-      sqlc.narg(request_message_id)::uuid IS NULL
-      OR EXISTS (
-        SELECT 1
-        FROM bot_history_messages request_message
-        WHERE request_message.id = sqlc.narg(request_message_id)::uuid
-          AND request_message.session_id = old_turn.session_id
-      )
-    )
-    AND (
-      sqlc.narg(assistant_message_id)::uuid IS NULL
-      OR EXISTS (
-        SELECT 1
-        FROM bot_history_messages assistant_message
-        WHERE assistant_message.id = sqlc.narg(assistant_message_id)::uuid
-          AND assistant_message.session_id = old_turn.session_id
-      )
-    )
   RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
     superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at
 ),
@@ -868,8 +886,20 @@ linked_anchors AS (
       turn_visible = true
   FROM replacement
   CROSS JOIN hidden_done
-  WHERE m.id = replacement.request_message_id
-     OR m.id = replacement.assistant_message_id
+  JOIN updated ON true
+  WHERE (
+      m.id = replacement.request_message_id
+      AND m.role = 'user'
+      AND (
+        m.turn_id IS NULL
+        OR m.turn_id = updated.id
+      )
+    )
+    OR (
+      m.id = replacement.assistant_message_id
+      AND m.role = 'assistant'
+      AND m.turn_id IS NULL
+    )
   RETURNING m.id
 ),
 linked_tail AS (
@@ -1687,6 +1717,7 @@ SELECT
   m.runtime_type,
   m.event_id,
   m.display_text,
+  m.compact_id,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,

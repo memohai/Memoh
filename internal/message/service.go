@@ -33,7 +33,7 @@ type historyTurnWriter interface {
 	BindHistoryTurnAssistantByRequest(ctx context.Context, arg sqlc.BindHistoryTurnAssistantByRequestParams) (sqlc.BotHistoryTurn, error)
 	BindLatestHistoryTurnAssistant(ctx context.Context, arg sqlc.BindLatestHistoryTurnAssistantParams) (sqlc.BotHistoryTurn, error)
 	GetLatestVisibleHistoryTurnBySession(ctx context.Context, sessionID pgtype.UUID) (sqlc.BotHistoryTurn, error)
-	LinkMessageToHistoryTurn(ctx context.Context, arg sqlc.LinkMessageToHistoryTurnParams) error
+	LinkMessageToHistoryTurn(ctx context.Context, arg sqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error)
 	AppendMessageToLatestHistoryTurn(ctx context.Context, arg sqlc.AppendMessageToLatestHistoryTurnParams) error
 }
 
@@ -551,7 +551,7 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, s
 		if err != nil {
 			return fmt.Errorf("create history turn: %w", err)
 		}
-		if err := writer.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
+		if _, err := writer.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
 			MessageID:      messageID,
 			TurnID:         turn.ID,
 			TurnMessageSeq: pgtype.Int8{Int64: 1, Valid: true},
@@ -565,7 +565,7 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, s
 				RequestMessageID:   requestMessageID,
 				AssistantMessageID: messageID,
 			}); err == nil {
-				if err := writer.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
+				if _, err := writer.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
 					MessageID:      messageID,
 					TurnID:         turn.ID,
 					TurnMessageSeq: pgtype.Int8{Int64: 2, Valid: true},
@@ -586,7 +586,7 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, s
 			SessionID:          sessionID,
 			AssistantMessageID: messageID,
 		}); err == nil {
-			if err := writer.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
+			if _, err := writer.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
 				MessageID:      messageID,
 				TurnID:         turn.ID,
 				TurnMessageSeq: pgtype.Int8{Int64: 2, Valid: true},
@@ -616,7 +616,7 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, s
 		if err != nil {
 			return fmt.Errorf("create orphan assistant history turn: %w", err)
 		}
-		if err := writer.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
+		if _, err := writer.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
 			MessageID:      messageID,
 			TurnID:         turn.ID,
 			TurnMessageSeq: pgtype.Int8{Int64: 2, Valid: true},
@@ -1904,7 +1904,7 @@ func toMessagesFromVisibleFromBySession(rows []sqlc.ListVisibleMessagesFromBySes
 }
 
 func toMessageFromVisibleFromBySessionRow(row sqlc.ListVisibleMessagesFromBySessionRow) Message {
-	return toMessageFields(
+	m := toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -1925,6 +1925,10 @@ func toMessageFromVisibleFromBySessionRow(row sqlc.ListVisibleMessagesFromBySess
 		row.DisplayText,
 		row.CreatedAt,
 	)
+	if row.CompactID.Valid {
+		m.CompactID = row.CompactID.String()
+	}
+	return m
 }
 
 func toHistoryTurn(row sqlc.BotHistoryTurn) HistoryTurn {

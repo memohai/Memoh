@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -17,10 +18,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	_ "modernc.org/sqlite"
 
 	"github.com/memohai/memoh/internal/acpprofile"
 	"github.com/memohai/memoh/internal/bots"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	sqlitestore "github.com/memohai/memoh/internal/db/sqlite/store"
 	modelpkg "github.com/memohai/memoh/internal/models"
 	settingspkg "github.com/memohai/memoh/internal/settings"
@@ -191,6 +194,258 @@ VALUES (?, ?, 'personal', ?, ?, 1, 'ready', ?)`, botID, ownerID, "hermes-bot", "
 	}
 	if !containsWarning(manifest.Warnings, "ACP managed secrets were excluded") {
 		t.Fatalf("manifest warnings = %v, want ACP secret warning", manifest.Warnings)
+	}
+}
+
+func TestRebuildRestoredHistoryTurnsLinksVisibleLinearTurns(t *testing.T) {
+	ctx := context.Background()
+	botID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000701")
+	sessionID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000702")
+	userID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000711")
+	assistantID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000712")
+	toolID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000713")
+	finalID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000714")
+	nextUserID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000715")
+	nextAssistantID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000716")
+	q := &recordingRestoredTurnQueries{}
+
+	err := rebuildRestoredHistoryTurns(ctx, q, botID, []restoredHistoryMessage{
+		{id: userID, sessionID: sessionID, role: "user"},
+		{id: assistantID, sessionID: sessionID, role: "assistant"},
+		{id: toolID, sessionID: sessionID, role: "tool"},
+		{id: finalID, sessionID: sessionID, role: "assistant"},
+		{id: nextUserID, sessionID: sessionID, role: "user"},
+		{id: nextAssistantID, sessionID: sessionID, role: "assistant"},
+	})
+	if err != nil {
+		t.Fatalf("rebuildRestoredHistoryTurns() error = %v", err)
+	}
+	if got, want := len(q.turns), 2; got != want {
+		t.Fatalf("created turns = %d, want %d", got, want)
+	}
+	if got := q.turns[0].RequestMessageID.String(); got != userID.String() {
+		t.Fatalf("first request message = %s, want %s", got, userID.String())
+	}
+	if got := q.turns[1].RequestMessageID.String(); got != nextUserID.String() {
+		t.Fatalf("second request message = %s, want %s", got, nextUserID.String())
+	}
+	if got, want := len(q.binds), 2; got != want {
+		t.Fatalf("assistant binds = %d, want %d", got, want)
+	}
+	if got := q.binds[0].AssistantMessageID.String(); got != assistantID.String() {
+		t.Fatalf("first assistant bind = %s, want %s", got, assistantID.String())
+	}
+	wantSeq := []int64{1, 2, 3, 4, 1, 2}
+	if got, want := len(q.links), len(wantSeq); got != want {
+		t.Fatalf("links = %d, want %d", got, want)
+	}
+	for i, want := range wantSeq {
+		if got := q.links[i].TurnMessageSeq.Int64; got != want {
+			t.Fatalf("link %d seq = %d, want %d", i, got, want)
+		}
+	}
+}
+
+func TestRebuildRestoredHistoryTurnsKeepsOrphanAssistantSeq(t *testing.T) {
+	ctx := context.Background()
+	botID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000741")
+	sessionID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000742")
+	assistantID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000743")
+	toolID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000744")
+	finalID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000745")
+	q := &recordingRestoredTurnQueries{}
+
+	err := rebuildRestoredHistoryTurns(ctx, q, botID, []restoredHistoryMessage{
+		{id: assistantID, sessionID: sessionID, role: "assistant"},
+		{id: toolID, sessionID: sessionID, role: "tool"},
+		{id: finalID, sessionID: sessionID, role: "assistant"},
+	})
+	if err != nil {
+		t.Fatalf("rebuildRestoredHistoryTurns() error = %v", err)
+	}
+	if got, want := len(q.turns), 1; got != want {
+		t.Fatalf("created turns = %d, want %d", got, want)
+	}
+	if got := q.turns[0].AssistantMessageID.String(); got != assistantID.String() {
+		t.Fatalf("orphan assistant message = %s, want %s", got, assistantID.String())
+	}
+	wantSeq := []int64{2, 3, 4}
+	if got, want := len(q.links), len(wantSeq); got != want {
+		t.Fatalf("links = %d, want %d", got, want)
+	}
+	for i, want := range wantSeq {
+		if got := q.links[i].TurnMessageSeq.Int64; got != want {
+			t.Fatalf("link %d seq = %d, want %d", i, got, want)
+		}
+	}
+}
+
+func TestRebuildRestoredHistoryTurnsMakesImportedMessagesVisible(t *testing.T) {
+	ctx := context.Background()
+	conn, queries := newBotBackupExportTestDB(t)
+	const ownerID = "00000000-0000-0000-0000-000000000721"
+	const botID = "00000000-0000-0000-0000-000000000722"
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO users (id, username, email, role)
+VALUES (?, ?, ?, ?)`, ownerID, "import-owner", "import-owner@example.com", "member"); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bots (id, owner_user_id, type, name, display_name, is_active, status, metadata)
+VALUES (?, ?, 'personal', ?, ?, 1, 'ready', '{}')`, botID, ownerID, "import-bot", "Import Bot"); err != nil {
+		t.Fatalf("insert bot: %v", err)
+	}
+	pgBotID := mustTestPGUUID(t, botID)
+	session, err := queries.CreateSession(ctx, dbsqlc.CreateSessionParams{
+		BotID:           pgBotID,
+		ChannelType:     pgtype.Text{String: "local", Valid: true},
+		Type:            "chat",
+		SessionMode:     "chat",
+		RuntimeType:     "model",
+		RuntimeMetadata: []byte(`{}`),
+		Title:           "Imported",
+		Metadata:        []byte(`{}`),
+		CreatedByUserID: mustTestPGUUID(t, ownerID),
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	userMessage, err := queries.CreateMessage(ctx, dbsqlc.CreateMessageParams{
+		BotID:       pgBotID,
+		SessionID:   session.ID,
+		Role:        "user",
+		Content:     []byte(`{"role":"user","content":"hello"}`),
+		Metadata:    []byte(`{}`),
+		Usage:       []byte(`{}`),
+		SessionMode: "chat",
+		RuntimeType: "model",
+		DisplayText: pgtype.Text{String: "hello", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("create user message: %v", err)
+	}
+	assistantMessage, err := queries.CreateMessage(ctx, dbsqlc.CreateMessageParams{
+		BotID:       pgBotID,
+		SessionID:   session.ID,
+		Role:        "assistant",
+		Content:     []byte(`{"role":"assistant","content":"world"}`),
+		Metadata:    []byte(`{}`),
+		Usage:       []byte(`{}`),
+		SessionMode: "chat",
+		RuntimeType: "model",
+		DisplayText: pgtype.Text{String: "world", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("create assistant message: %v", err)
+	}
+	if rows, err := queries.ListMessagesBySession(ctx, session.ID); err != nil {
+		t.Fatalf("list messages before rebuild: %v", err)
+	} else if len(rows) != 0 {
+		t.Fatalf("visible messages before rebuild = %d, want 0", len(rows))
+	}
+
+	if err := rebuildRestoredHistoryTurns(ctx, queries, pgBotID, []restoredHistoryMessage{
+		{id: userMessage.ID, sessionID: session.ID, role: userMessage.Role},
+		{id: assistantMessage.ID, sessionID: session.ID, role: assistantMessage.Role},
+	}); err != nil {
+		t.Fatalf("rebuild restored turns: %v", err)
+	}
+	rows, err := queries.ListMessagesBySession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("list messages after rebuild: %v", err)
+	}
+	if got, want := len(rows), 2; got != want {
+		t.Fatalf("visible messages after rebuild = %d, want %d", got, want)
+	}
+	if rows[0].ID != userMessage.ID || rows[1].ID != assistantMessage.ID {
+		t.Fatalf("visible message order = [%s %s], want [%s %s]", rows[0].ID.String(), rows[1].ID.String(), userMessage.ID.String(), assistantMessage.ID.String())
+	}
+}
+
+func TestRestoreHistoryRebuildsImportedReadModel(t *testing.T) {
+	ctx := context.Background()
+	conn, queries := newBotBackupExportTestDB(t)
+	const ownerID = "00000000-0000-0000-0000-000000000731"
+	const botID = "00000000-0000-0000-0000-000000000732"
+	sourceSessionID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000733")
+	sourceUserID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000734")
+	sourceAssistantID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000735")
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO users (id, username, email, role)
+VALUES (?, ?, ?, ?)`, ownerID, "restore-owner", "restore-owner@example.com", "member"); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bots (id, owner_user_id, type, name, display_name, is_active, status, metadata)
+VALUES (?, ?, 'personal', ?, ?, 1, 'ready', '{}')`, botID, ownerID, "restore-bot", "Restore Bot"); err != nil {
+		t.Fatalf("insert bot: %v", err)
+	}
+
+	state := &importState{
+		entries: map[string]backupZipEntry{
+			"history/sessions.json": jsonEntry(t, []dbsqlc.ListSessionsByBotRow{{
+				ID:              sourceSessionID,
+				BotID:           mustTestPGUUID(t, botID),
+				ChannelType:     pgtype.Text{String: "local", Valid: true},
+				Type:            "chat",
+				SessionMode:     "chat",
+				RuntimeType:     "model",
+				RuntimeMetadata: []byte(`{}`),
+				Title:           "Restored",
+				Metadata:        []byte(`{}`),
+			}}),
+			"history/messages.json": jsonEntry(t, []dbsqlc.ListMessagesRow{
+				{
+					ID:          sourceUserID,
+					BotID:       mustTestPGUUID(t, botID),
+					SessionID:   sourceSessionID,
+					Role:        "user",
+					Content:     []byte(`{"role":"user","content":"hello"}`),
+					Metadata:    []byte(`{}`),
+					Usage:       []byte(`{}`),
+					SessionMode: "chat",
+					RuntimeType: "model",
+					DisplayText: pgtype.Text{String: "hello", Valid: true},
+				},
+				{
+					ID:          sourceAssistantID,
+					BotID:       mustTestPGUUID(t, botID),
+					SessionID:   sourceSessionID,
+					Role:        "assistant",
+					Content:     []byte(`{"role":"assistant","content":"world"}`),
+					Metadata:    []byte(`{}`),
+					Usage:       []byte(`{}`),
+					SessionMode: "chat",
+					RuntimeType: "model",
+					DisplayText: pgtype.Text{String: "world", Valid: true},
+				},
+			}),
+		},
+		counts: map[Section]int{},
+	}
+	service := &Service{queries: queries}
+	if err := service.restoreHistory(ctx, ownerID, botID, state, false, false); err != nil {
+		t.Fatalf("restoreHistory() error = %v", err)
+	}
+	sessions, err := queries.ListSessionsByBot(ctx, mustTestPGUUID(t, botID))
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if got, want := len(sessions), 1; got != want {
+		t.Fatalf("restored sessions = %d, want %d", got, want)
+	}
+	rows, err := queries.ListMessagesBySession(ctx, sessions[0].ID)
+	if err != nil {
+		t.Fatalf("list restored messages: %v", err)
+	}
+	if got, want := len(rows), 2; got != want {
+		t.Fatalf("visible restored messages = %d, want %d", got, want)
+	}
+	if rows[0].Role != "user" || rows[1].Role != "assistant" {
+		t.Fatalf("restored roles = [%s %s], want [user assistant]", rows[0].Role, rows[1].Role)
+	}
+	if got := state.counts[SectionHistory]; got != 2 {
+		t.Fatalf("history count = %d, want 2", got)
 	}
 }
 
@@ -391,6 +646,61 @@ func makeProfileImportBundle(t *testing.T, profile bots.Bot) []byte {
 		t.Fatalf("close zip: %v", err)
 	}
 	return buf.Bytes()
+}
+
+func jsonEntry(t *testing.T, value any) backupZipEntry {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal backup entry: %v", err)
+	}
+	return backupZipEntry{data: raw}
+}
+
+type recordingRestoredTurnQueries struct {
+	turns []dbsqlc.CreateHistoryTurnParams
+	binds []dbsqlc.BindHistoryTurnAssistantByRequestParams
+	links []dbsqlc.LinkMessageToHistoryTurnParams
+}
+
+func (q *recordingRestoredTurnQueries) CreateHistoryTurn(_ context.Context, arg dbsqlc.CreateHistoryTurnParams) (dbsqlc.BotHistoryTurn, error) {
+	q.turns = append(q.turns, arg)
+	return dbsqlc.BotHistoryTurn{ID: mustPGUUID(fmt.Sprintf("00000000-0000-0000-0000-%012d", len(q.turns)))}, nil
+}
+
+func (q *recordingRestoredTurnQueries) BindHistoryTurnAssistantByRequest(_ context.Context, arg dbsqlc.BindHistoryTurnAssistantByRequestParams) (dbsqlc.BotHistoryTurn, error) {
+	q.binds = append(q.binds, arg)
+	return dbsqlc.BotHistoryTurn{}, nil
+}
+
+func (q *recordingRestoredTurnQueries) LinkMessageToHistoryTurn(_ context.Context, arg dbsqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error) {
+	q.links = append(q.links, arg)
+	return arg.MessageID, nil
+}
+
+func mustTestPGUUID(t *testing.T, value string) pgtype.UUID {
+	t.Helper()
+	out, err := parsePGUUID(value)
+	if err != nil {
+		t.Fatalf("parse uuid %q: %v", value, err)
+	}
+	return out
+}
+
+func mustPGUUID(value string) pgtype.UUID {
+	out, err := parsePGUUID(value)
+	if err != nil {
+		panic(err)
+	}
+	return out
+}
+
+func parsePGUUID(value string) (pgtype.UUID, error) {
+	var out pgtype.UUID
+	if err := out.Scan(value); err != nil {
+		return pgtype.UUID{}, err
+	}
+	return out, nil
 }
 
 func newBotBackupModelTestDB(t *testing.T) (*sql.DB, *sqlitestore.Queries) {

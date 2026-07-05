@@ -99,8 +99,10 @@ func (r *Resolver) RetryLatestMessageWS(ctx context.Context, input RetryLatestMe
 		ReasoningEffort:              strings.TrimSpace(input.ReasoningEffort),
 		ToolHTTPURL:                  strings.TrimSpace(input.ToolHTTPURL),
 		ReusePersistedUserMessage:    true,
+		PersistedUserMessageID:       requestMessage.ID,
 		SkipHistoryTurn:              true,
 		HistoryCutoffBeforeMessageID: cutoffMessageID,
+		RequiredHistoryMessageID:     requestMessage.ID,
 	}
 	return r.streamReplacementWS(ctx, req, turn.ID, requestMessage.ID, "retry", eventCh, abortCh)
 }

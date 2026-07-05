@@ -1857,7 +1857,7 @@ func (q *Queries) HideMessagesByHistoryTurn(ctx context.Context, turnID pgtype.U
 	return err
 }
 
-const linkMessageToHistoryTurn = `-- name: LinkMessageToHistoryTurn :exec
+const linkMessageToHistoryTurn = `-- name: LinkMessageToHistoryTurn :one
 UPDATE bot_history_messages m
 SET turn_id = t.id,
     turn_position = t.position,
@@ -1866,6 +1866,7 @@ SET turn_id = t.id,
 FROM bot_history_turns t
 WHERE m.id = $2
   AND t.id = $3
+RETURNING m.id
 `
 
 type LinkMessageToHistoryTurnParams struct {
@@ -1874,9 +1875,11 @@ type LinkMessageToHistoryTurnParams struct {
 	TurnID         pgtype.UUID `json:"turn_id"`
 }
 
-func (q *Queries) LinkMessageToHistoryTurn(ctx context.Context, arg LinkMessageToHistoryTurnParams) error {
-	_, err := q.db.Exec(ctx, linkMessageToHistoryTurn, arg.TurnMessageSeq, arg.MessageID, arg.TurnID)
-	return err
+func (q *Queries) LinkMessageToHistoryTurn(ctx context.Context, arg LinkMessageToHistoryTurnParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, linkMessageToHistoryTurn, arg.TurnMessageSeq, arg.MessageID, arg.TurnID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const linkUnassignedMessagesAfterHistoryTurnAssistant = `-- name: LinkUnassignedMessagesAfterHistoryTurnAssistant :exec
@@ -3789,6 +3792,7 @@ SELECT
   m.runtime_type,
   m.event_id,
   m.display_text,
+  m.compact_id,
   m.created_at,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
@@ -3827,6 +3831,7 @@ type ListVisibleMessagesFromBySessionRow struct {
 	RuntimeType             string             `json:"runtime_type"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
+	CompactID               pgtype.UUID        `json:"compact_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
@@ -3858,6 +3863,7 @@ func (q *Queries) ListVisibleMessagesFromBySession(ctx context.Context, arg List
 			&i.RuntimeType,
 			&i.EventID,
 			&i.DisplayText,
+			&i.CompactID,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
@@ -4060,11 +4066,46 @@ WITH old_turn AS (
     AND t.superseded_at IS NULL
   FOR UPDATE
 ),
+replacement_input AS (
+  SELECT
+    old_turn.id, old_turn.bot_id, old_turn.session_id, old_turn.position, old_turn.request_message_id, old_turn.assistant_message_id, old_turn.superseded_by_turn_id, old_turn.superseded_at, old_turn.superseded_reason, old_turn.created_at, old_turn.updated_at,
+    $3::uuid AS replacement_request_message_id,
+    $4::uuid AS replacement_assistant_message_id
+  FROM old_turn
+  WHERE (
+      $3::uuid IS NULL
+      OR EXISTS (
+        SELECT 1
+        FROM bot_history_messages request_message
+        WHERE request_message.id = $3::uuid
+          AND request_message.session_id = old_turn.session_id
+          AND request_message.role = 'user'
+          AND (
+            request_message.turn_id IS NULL
+            OR request_message.turn_id = old_turn.id
+          )
+        FOR UPDATE
+      )
+    )
+    AND (
+      $4::uuid IS NULL
+      OR EXISTS (
+        SELECT 1
+        FROM bot_history_messages assistant_message
+        WHERE assistant_message.id = $4::uuid
+          AND assistant_message.session_id = old_turn.session_id
+          AND assistant_message.role = 'assistant'
+          AND assistant_message.turn_id IS NULL
+        FOR UPDATE
+      )
+    )
+),
 next_position AS (
   UPDATE bot_sessions s
   SET next_turn_position = next_turn_position + 1
-  FROM old_turn
-  WHERE s.id = old_turn.session_id
+  FROM replacement_input
+  WHERE s.id = replacement_input.session_id
+    AND s.next_turn_position = replacement_input.position + 1
   RETURNING s.next_turn_position - 1 AS position
 ),
 replacement AS (
@@ -4076,31 +4117,13 @@ replacement AS (
     assistant_message_id
   )
   SELECT
-    old_turn.bot_id,
-    old_turn.session_id,
+    replacement_input.bot_id,
+    replacement_input.session_id,
     next_position.position,
-    $3::uuid,
-    $4::uuid
-  FROM old_turn
+    replacement_input.replacement_request_message_id,
+    replacement_input.replacement_assistant_message_id
+  FROM replacement_input
   CROSS JOIN next_position
-  WHERE (
-      $3::uuid IS NULL
-      OR EXISTS (
-        SELECT 1
-        FROM bot_history_messages request_message
-        WHERE request_message.id = $3::uuid
-          AND request_message.session_id = old_turn.session_id
-      )
-    )
-    AND (
-      $4::uuid IS NULL
-      OR EXISTS (
-        SELECT 1
-        FROM bot_history_messages assistant_message
-        WHERE assistant_message.id = $4::uuid
-          AND assistant_message.session_id = old_turn.session_id
-      )
-    )
   RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
     superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at
 ),
@@ -4140,8 +4163,20 @@ linked_anchors AS (
       turn_visible = true
   FROM replacement
   CROSS JOIN hidden_done
-  WHERE m.id = replacement.request_message_id
-     OR m.id = replacement.assistant_message_id
+  JOIN updated ON true
+  WHERE (
+      m.id = replacement.request_message_id
+      AND m.role = 'user'
+      AND (
+        m.turn_id IS NULL
+        OR m.turn_id = updated.id
+      )
+    )
+    OR (
+      m.id = replacement.assistant_message_id
+      AND m.role = 'assistant'
+      AND m.turn_id IS NULL
+    )
   RETURNING m.id
 ),
 linked_tail AS (

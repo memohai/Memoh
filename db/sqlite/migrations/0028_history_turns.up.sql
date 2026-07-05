@@ -1,8 +1,15 @@
 -- 0028_history_turns
--- Add linear history turns for stable retry/edit replacement.
+-- Add linear history turns, hot message turn read model, and session turn position allocator.
+
+BEGIN;
+
+ALTER TABLE bot_sessions
+  ADD COLUMN next_turn_position INTEGER NOT NULL DEFAULT 1;
 
 ALTER TABLE bot_history_messages ADD COLUMN turn_id TEXT;
 ALTER TABLE bot_history_messages ADD COLUMN turn_message_seq INTEGER;
+ALTER TABLE bot_history_messages ADD COLUMN turn_position INTEGER;
+ALTER TABLE bot_history_messages ADD COLUMN turn_visible INTEGER NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS bot_history_turns (
   id TEXT PRIMARY KEY,
@@ -186,12 +193,37 @@ SET turn_id = (
     )
 WHERE id IN (SELECT message_id FROM tail_messages);
 
+UPDATE bot_history_messages
+SET turn_position = (
+      SELECT t.position FROM bot_history_turns t WHERE t.id = bot_history_messages.turn_id
+    ),
+    turn_visible = COALESCE((
+      SELECT CASE WHEN t.superseded_at IS NULL THEN 1 ELSE 0 END
+      FROM bot_history_turns t
+      WHERE t.id = bot_history_messages.turn_id
+    ), 0)
+WHERE turn_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_visible_session_order
+  ON bot_history_messages(session_id, turn_position DESC, turn_message_seq DESC, created_at DESC, id DESC)
+  WHERE turn_visible = 1
+    AND turn_id IS NOT NULL
+    AND turn_position IS NOT NULL
+    AND turn_message_seq IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_visible_session_source_order
+  ON bot_history_messages(session_id, source_message_id, turn_position DESC, turn_message_seq DESC, created_at DESC, id DESC)
+  WHERE turn_visible = 1
+    AND source_message_id IS NOT NULL
+    AND turn_id IS NOT NULL
+    AND turn_position IS NOT NULL
+    AND turn_message_seq IS NOT NULL;
+
 DROP VIEW IF EXISTS bot_visible_history_messages;
 
 CREATE VIEW IF NOT EXISTS bot_visible_history_messages AS
 SELECT
-  t.id AS turn_id,
-  t.position AS turn_position,
+  m.turn_id,
+  m.turn_position,
   m.turn_message_seq,
   m.id,
   m.bot_id,
@@ -212,5 +244,19 @@ SELECT
   m.display_text,
   m.created_at
 FROM bot_history_messages m
-JOIN bot_history_turns t ON t.id = m.turn_id
-WHERE t.superseded_at IS NULL;
+WHERE m.turn_visible = 1
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL;
+
+UPDATE bot_sessions
+SET next_turn_position = MAX(
+  next_turn_position,
+  COALESCE((
+    SELECT MAX(position) + 1
+    FROM bot_history_turns
+    WHERE bot_history_turns.session_id = bot_sessions.id
+  ), 1)
+);
+
+COMMIT;
