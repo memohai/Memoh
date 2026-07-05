@@ -12,16 +12,12 @@
     >
       {{ from }}
     </div>
-    <pre
-      v-if="body"
-      class="text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-60 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
-    >{{ body }}</pre>
-    <p
-      v-if="!subject && !from && !body"
-      class="text-xs text-muted-foreground italic"
-    >
+    <PreviewBox v-if="body">
+      {{ body }}
+    </PreviewBox>
+    <EmptyRow v-if="!subject && !from && !body">
       {{ t('chat.tools.detail.noEmail') }}
-    </p>
+    </EmptyRow>
   </div>
 </template>
 
@@ -29,6 +25,8 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
+import EmptyRow from './tool-detail/empty-row.vue'
+import PreviewBox from './tool-detail/preview-box.vue'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()

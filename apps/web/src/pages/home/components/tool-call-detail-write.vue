@@ -12,12 +12,9 @@
       :filename="filePath"
       class="max-h-96 overflow-y-auto overflow-x-auto text-xs leading-relaxed"
     />
-    <p
-      v-else
-      class="text-xs text-muted-foreground italic"
-    >
+    <EmptyRow v-else>
       {{ t('chat.tools.detail.noContent') }}
-    </p>
+    </EmptyRow>
   </div>
 </template>
 
@@ -26,6 +23,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
 import CodeBlock from './code-block.vue'
+import EmptyRow from './tool-detail/empty-row.vue'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()

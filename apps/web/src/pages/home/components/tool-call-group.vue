@@ -15,23 +15,19 @@
     v-else
     class="text-[0.90625rem] font-[400]"
   >
-    <button
-      class="group/h flex items-center gap-1.5 w-full text-left transition-colors duration-75 cursor-pointer py-px text-cop-title hover:text-foreground select-none"
-      @click="toggle"
+    <HeaderRow
+      :open="open"
+      @toggle="toggle"
     >
       <span
         class="min-w-0 truncate tracking-[0.01em]"
         :class="running ? 'tool-shimmer-text' : ''"
       >{{ headerLabel }}</span>
-      <ChevronDown
-        v-if="open"
-        class="size-3.5 shrink-0 ml-0.5 opacity-50 group-hover/h:opacity-100"
+      <ExpandChevron
+        :open="open"
+        class="ml-0.5"
       />
-      <ChevronRight
-        v-else
-        class="size-3.5 shrink-0 ml-0.5 opacity-50 group-hover/h:opacity-100"
-      />
-    </button>
+    </HeaderRow>
 
     <CollapseSection :open="open">
       <!-- Card body sets the in-card type scale (one notch below the root-level
@@ -42,7 +38,10 @@
            capsule. Individual tool details (diffs, file content, exec output) keep
            their own small scroll bounds for truly large blobs, but the capsule
            itself never introduces a second scrollbar. -->
-      <div class="mt-1 rounded-md bg-muted px-2.5 py-1.5 space-y-0.5 text-[0.84375rem] leading-snug">
+      <Capsule
+        density="compact"
+        class="mt-1 space-y-0.5 text-[0.84375rem] leading-snug"
+      >
         <template
           v-for="(item, i) in items"
           :key="item.id"
@@ -59,14 +58,13 @@
             in-group
           />
         </template>
-      </div>
+      </Capsule>
     </CollapseSection>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { ContentBlock, ThinkingBlock as ThinkingBlockType, ToolCallBlock as ToolCallBlockType } from '@/store/chat-list'
 import { getToolDisplay, isGuiTool } from './tool-call-registry'
@@ -74,6 +72,9 @@ import ToolCallInline from './tool-call-inline.vue'
 import ThinkingBlock from './thinking-block.vue'
 import CollapseSection from './collapse-section.vue'
 import { getCollapseOpen, groupCollapseKey, setCollapseOpen } from './process-collapse'
+import HeaderRow from './tool-detail/header-row.vue'
+import ExpandChevron from './tool-detail/expand-chevron.vue'
+import Capsule from './tool-detail/capsule.vue'
 
 const props = defineProps<{
   // Ordered run of tool + reasoning blocks belonging to one process segment.

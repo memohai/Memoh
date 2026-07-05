@@ -58,10 +58,9 @@
         >
           <span class="font-mono">{{ result.task_id }}</span>
         </p>
-        <pre
-          v-if="result.text"
-          class="text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-32 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
-        >{{ result.text }}</pre>
+        <PreviewBox v-if="result.text">
+          {{ result.text }}
+        </PreviewBox>
         <p
           v-if="result.error"
           class="text-xs text-destructive"
@@ -71,12 +70,9 @@
       </div>
     </div>
 
-    <p
-      v-else
-      class="text-xs text-muted-foreground italic"
-    >
+    <EmptyRow v-else>
       {{ t('chat.tools.detail.noTasks') }}
-    </p>
+    </EmptyRow>
   </div>
 </template>
 
@@ -87,6 +83,8 @@ import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/store/chat-list'
 import type { ToolCallBlock } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import EmptyRow from './tool-detail/empty-row.vue'
+import PreviewBox from './tool-detail/preview-box.vue'
 
 interface AgentResult {
   agent_id?: string

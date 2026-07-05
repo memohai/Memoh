@@ -31,10 +31,9 @@
       {{ t('chat.tools.detail.refCount', { count: refCount }) }}
     </div>
 
-    <pre
-      v-if="snapshotText"
-      class="text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
-    >{{ snapshotText }}</pre>
+    <PreviewBox v-if="snapshotText">
+      {{ snapshotText }}
+    </PreviewBox>
 
     <div
       v-if="screenshotPath"
@@ -49,12 +48,9 @@
       >{{ screenshotPath }}</span>
     </div>
 
-    <p
-      v-if="!targetRef && !coordinates && !refCount && !snapshotText && !screenshotPath"
-      class="text-xs text-muted-foreground italic"
-    >
+    <EmptyRow v-if="!targetRef && !coordinates && !refCount && !snapshotText && !screenshotPath">
       {{ t('chat.tools.detail.noData') }}
-    </p>
+    </EmptyRow>
   </div>
 </template>
 
@@ -62,6 +58,8 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
+import EmptyRow from './tool-detail/empty-row.vue'
+import PreviewBox from './tool-detail/preview-box.vue'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()

@@ -21,12 +21,9 @@
         </Badge>
       </div>
     </div>
-    <p
-      v-else
-      class="text-xs text-muted-foreground italic"
-    >
+    <EmptyRow v-else>
       {{ t('chat.tools.detail.noAccounts') }}
-    </p>
+    </EmptyRow>
   </div>
 </template>
 
@@ -35,6 +32,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Badge } from '@memohai/ui'
 import type { ToolCallBlock } from '@/store/chat-list'
+import EmptyRow from './tool-detail/empty-row.vue'
 
 interface AccountItem {
   id?: string

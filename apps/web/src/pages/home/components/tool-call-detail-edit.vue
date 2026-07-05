@@ -13,12 +13,9 @@
       v-html="shiki.html.value"
     />
     <!-- eslint-enable vue/no-v-html -->
-    <p
-      v-else
-      class="text-xs text-muted-foreground italic"
-    >
+    <EmptyRow v-else>
       {{ t('chat.tools.detail.noChanges') }}
-    </p>
+    </EmptyRow>
   </div>
 </template>
 
@@ -28,6 +25,7 @@ import { LoaderCircle } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
 import { extractFilename, useShikiHighlighter } from '@/composables/useShikiHighlighter'
+import EmptyRow from './tool-detail/empty-row.vue'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()

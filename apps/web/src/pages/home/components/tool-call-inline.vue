@@ -3,15 +3,12 @@
     class="font-[400]"
     :class="inGroup ? '' : 'text-[0.90625rem]'"
   >
-    <div
+    <HeaderRow
       v-if="expandable"
-      role="button"
-      tabindex="0"
-      class="group flex items-center gap-1.5 w-full text-left transition-colors cursor-pointer py-px select-none"
-      :class="rowClass"
-      @click="toggleOpen"
-      @keydown.enter.prevent="toggleOpen"
-      @keydown.space.prevent="toggleOpen"
+      :open="open"
+      nested
+      :tone="display.isError ? 'error' : 'cop'"
+      @toggle="toggleOpen"
     >
       <span
         v-if="showActionLabel"
@@ -53,15 +50,11 @@
         v-if="userInputLabel"
         class="font-mono shrink-0 text-xs text-warning-foreground"
       >{{ userInputLabel }}</span>
-      <ChevronRight
-        v-if="!open"
-        class="size-3.5 shrink-0 ml-0.5 opacity-60 group-hover:opacity-100"
+      <ExpandChevron
+        :open="open"
+        class="ml-0.5"
       />
-      <ChevronDown
-        v-else
-        class="size-3.5 shrink-0 ml-0.5 opacity-60 group-hover:opacity-100"
-      />
-    </div>
+    </HeaderRow>
 
     <div
       v-else
@@ -114,7 +107,12 @@
       v-if="expandable"
       :open="open && !isPending"
     >
-      <div :class="detailClass">
+      <!-- 'inline' detail (half-embedded key:value list) is not the capsule
+           shape — just indentation, no filled surface. -->
+      <div
+        v-if="display.detailVariant === 'inline'"
+        class="mt-1 pl-3 font-[400]"
+      >
         <component
           :is="display.detail"
           v-if="display.detail"
@@ -125,6 +123,39 @@
           :block="block"
         />
       </div>
+      <!-- inGroup: a card nested inside the group's own muted capsule needs a
+           visibly different fill (bg-card, not bg-muted) so it reads as one
+           layer up — a genuinely different surface, not a padding drift of
+           the capsule shape below, so it stays hand-written. -->
+      <div
+        v-else-if="inGroup"
+        class="mt-1.5 rounded-sm bg-card px-2.5 py-2 font-[400]"
+      >
+        <component
+          :is="display.detail"
+          v-if="display.detail"
+          :block="block"
+        />
+        <ToolCallDetailGeneric
+          v-else
+          :block="block"
+        />
+      </div>
+      <Capsule
+        v-else
+        density="detail"
+        class="mt-1.5 font-[400]"
+      >
+        <component
+          :is="display.detail"
+          v-if="display.detail"
+          :block="block"
+        />
+        <ToolCallDetailGeneric
+          v-else
+          :block="block"
+        />
+      </Capsule>
     </CollapseSection>
 
     <div
@@ -152,7 +183,6 @@
 
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
-import { ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { Button } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
@@ -166,21 +196,13 @@ import {
 import ToolCallDetailGeneric from './tool-call-detail-generic.vue'
 import CollapseSection from './collapse-section.vue'
 import { getCollapseOpen, setCollapseOpen, toolCollapseKey } from './process-collapse'
+import HeaderRow from './tool-detail/header-row.vue'
+import ExpandChevron from './tool-detail/expand-chevron.vue'
+import Capsule from './tool-detail/capsule.vue'
 
 const props = defineProps<{ block: ToolCallBlock, inGroup?: boolean }>()
 const { t } = useI18n()
 const chatStore = useChatStore()
-
-// Two detail styles:
-//  - 'inline' = half-embedded key:value list (params), just indented, no card.
-//  - 'card'  = output/diff/file content on a fill surface (card-in-card by color).
-// Detail text sits one small step above body text so dense output stays readable.
-const detailClass = computed(() => {
-  if (display.value.detailVariant === 'inline') return 'mt-1 pl-3 font-[400]'
-  return props.inGroup
-    ? 'mt-1.5 rounded-sm bg-card px-2.5 py-2 font-[400]'
-    : 'mt-1.5 rounded-md bg-muted px-3 py-2 font-[400]'
-})
 
 const openInFileManager = inject(openInFileManagerKey, undefined)
 

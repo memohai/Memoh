@@ -46,10 +46,9 @@
       {{ title }}
     </div>
 
-    <pre
-      v-if="textPreview"
-      class="text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
-    >{{ textPreview }}</pre>
+    <PreviewBox v-if="textPreview">
+      {{ textPreview }}
+    </PreviewBox>
 
     <div
       v-if="screenshotPath"
@@ -64,12 +63,9 @@
       >{{ screenshotPath }}</span>
     </div>
 
-    <p
-      v-if="!targetRef && !selector && !url && !title && !textPreview && !screenshotPath"
-      class="text-xs text-muted-foreground italic"
-    >
+    <EmptyRow v-if="!targetRef && !selector && !url && !title && !textPreview && !screenshotPath">
       {{ t('chat.tools.detail.noData') }}
-    </p>
+    </EmptyRow>
   </div>
 </template>
 
@@ -77,6 +73,8 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
+import EmptyRow from './tool-detail/empty-row.vue'
+import PreviewBox from './tool-detail/preview-box.vue'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()

@@ -20,12 +20,9 @@
     >
       {{ resultText }}
     </div>
-    <p
-      v-if="!inputEntries.length && !resultText && !errorText"
-      class="text-muted-foreground italic"
-    >
+    <EmptyRow v-if="!inputEntries.length && !resultText && !errorText">
       {{ t('chat.tools.detail.noData') }}
-    </p>
+    </EmptyRow>
   </div>
 </template>
 
@@ -33,6 +30,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
+import EmptyRow from './tool-detail/empty-row.vue'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
