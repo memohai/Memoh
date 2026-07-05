@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { Plug, AudioLines, Globe, AlertTriangle } from 'lucide-vue-next'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { nextFrame } from '../useStepTransition'
+import StepExitShell from '../components/step-exit-shell.vue'
 import { safeSessionGet, safeSessionRemove, safeSessionSet } from '@/utils/safe-storage'
 import { ONBOARDING_KEYS } from '../constants'
 import { readACPSelection } from './useACPSetup'
@@ -42,9 +43,9 @@ async function handleComplete() {
 </script>
 
 <template>
-  <div
-    class="text-center transition-all duration-[175ms] ease-out"
-    :class="exiting ? 'scale-[0.88] opacity-0' : 'scale-100 opacity-100'"
+  <StepExitShell
+    class="text-center"
+    :exiting="exiting"
   >
     <h2
       class="text-5xl font-semibold tracking-tight mb-4 transition-all duration-[350ms] ease-out"
@@ -106,5 +107,5 @@ async function handleComplete() {
         {{ t('onboarding.complete.action') }}
       </button>
     </div>
-  </div>
+  </StepExitShell>
 </template>

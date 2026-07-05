@@ -157,12 +157,17 @@ class passthrough. Not for centered fills — that's PanePlaceholder.
 
 Same discipline, narrower home — compose these when working on their surface:
 
-- **onboarding** (`pages/onboarding/components/`): `step-frame.vue` (wizard exit
-  shell + 35rem body + title structure; each step's box pt and title mb are
-  deliberately hand-tuned per page and passed via `bodyClass`/`titleClass` —
-  do NOT flatten them), `footer-nav.vue` (prev/next pair, `#prev`/`#next`
-  escape hatches for Transition+Spinner CTAs), `choice-tile.vue` (h-16
-  icon+label grid tile, solid/dashed).
+- **onboarding** (`pages/onboarding/components/`): `step-exit-shell.vue` (the
+  wizard exit animation wrapper — the ONLY owner of the scale+opacity exit
+  transition; every Step*.vue template root wraps in it. It sits above
+  StepFrame because Step3's three frame variants share one shell),
+  `step-frame.vue` (35rem body + title structure; each step's title mb is
+  deliberately hand-tuned per page and passed via `titleClass` — do NOT
+  flatten it; `bodyClass` is currently Step3-only for its mode-switch
+  transition), `footer-nav.vue` (prev/next pair, min-w next button so long
+  labels grow; `#next` escape hatch only for CTAs that need a keyed
+  Transition label swap), `choice-tile.vue` (h-16 icon+label grid tile,
+  solid/dashed).
 - **supermarket** (`pages/supermarket/components/`): `market-item-card.vue`
   (list card: leading icon box + title + homepage link + `#actions`).
 - **chat tool-call** (`pages/home/components/tool-detail/`): `empty-row.vue`,

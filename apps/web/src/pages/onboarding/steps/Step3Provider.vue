@@ -23,6 +23,7 @@ import FieldStack from '@/components/settings/field-stack.vue'
 import FormStack from '@/components/settings/form-stack.vue'
 import ChoiceTile from '../components/choice-tile.vue'
 import StepFrame from '../components/step-frame.vue'
+import StepExitShell from '../components/step-exit-shell.vue'
 import FooterNav from '../components/footer-nav.vue'
 import { onboardingProviderPresets as providerPresets, type ProviderPreset } from '@/constants/provider-presets'
 import {
@@ -372,10 +373,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <div
-    class="transition-all duration-[175ms] ease-out"
-    :class="exiting ? 'scale-[0.88] opacity-0' : 'scale-100 opacity-100'"
-  >
+  <!-- 三个模式变体共用一个退出壳,所以壳在 StepFrame 之上而非各 frame 自带 -->
+  <StepExitShell :exiting="exiting">
     <StepFrame
       v-if="mode === 'list'"
       :title="t('onboarding.provider.title')"
@@ -904,5 +903,5 @@ onMounted(() => {
         </template>
       </FooterNav>
     </StepFrame>
-  </div>
+  </StepExitShell>
 </template>

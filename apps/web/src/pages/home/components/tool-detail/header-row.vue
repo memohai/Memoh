@@ -58,6 +58,12 @@ const toneClass = computed(() => {
 })
 
 function onKeydown(event: KeyboardEvent) {
+  // Keyboard events target the focused element. If that isn't the row itself,
+  // focus sits on a nested interactive child (e.g. inline's "open in files"
+  // button) — let the child's native activation run instead of also toggling
+  // the row. This is the keyboard half of the button-in-button problem; the
+  // mouse half is the child's own @click.stop.
+  if (event.target !== event.currentTarget) return
   if (event.key !== 'Enter' && event.key !== ' ') return
   event.preventDefault()
   emit('toggle')

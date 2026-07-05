@@ -37,7 +37,9 @@ import { Spinner } from '@memohai/ui'
 
 // hover/disabled 是 owner 级刻意交互反馈,不属于页面注入
 const prevClass = 'inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring' /* ui-allow-style */
-const nextClass = 'inline-flex h-[2.625rem] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2' /* ui-allow-style */
+// min-w 而非固定 w:长文案(zh、"准备环境中"类标签)要能撑开按钮;
+// 固定宽度曾迫使 Step4 整段重抄按钮 markup 来换成 min-w
+const nextClass = 'inline-flex h-[2.625rem] min-w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2' /* ui-allow-style */
 
 withDefaults(defineProps<{
   prevLabel?: string

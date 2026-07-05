@@ -45,6 +45,7 @@ import { useStepTransition, nextFrame } from '../useStepTransition'
 import { ONBOARDING_KEYS } from '../constants'
 import { clearACPSelection, readACPSelection, type OnboardingACPSelection } from './useACPSetup'
 import StepFrame from '../components/step-frame.vue'
+import StepExitShell from '../components/step-exit-shell.vue'
 import FooterNav from '../components/footer-nav.vue'
 
 const { t } = useI18n()
@@ -397,453 +398,444 @@ function skipOAuth() {
 
 <template>
   <TooltipProvider :delay-duration="0">
-    <StepFrame
-      :title="t('onboarding.bot.title')"
-      title-class="mb-8"
-      :visible="visible"
-      :exiting="exiting"
-    >
-      <div
-        v-show="oauthPhase !== 'pending'"
-        class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1"
+    <StepExitShell :exiting="exiting">
+      <StepFrame
+        :title="t('onboarding.bot.title')"
+        title-class="mb-8"
+        :visible="visible"
       >
-        <form
-          @submit.prevent="handleSubmit"
+        <div
+          v-show="oauthPhase !== 'pending'"
+          class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1"
         >
-          <div
-            class="transition-all duration-[350ms] ease-out delay-[60ms]"
-            :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+          <form
+            @submit.prevent="handleSubmit"
           >
-            <div class="flex items-center gap-4">
-              <div class="group/avatar relative size-16 shrink-0 rounded-full overflow-hidden cursor-pointer border border-border">
-                <Avatar class="size-16 rounded-full">
-                  <AvatarImage
-                    v-if="form.avatar_url?.trim()"
-                    :src="form.avatar_url.trim()"
-                    :alt="form.display_name"
-                  />
-                  <AvatarFallback class="text-xl text-muted-foreground">
-                    <Bot
-                      v-if="!form.display_name.trim()"
-                      class="size-7"
-                    />
-                    <template v-else>
-                      {{ avatarFallback }}
-                    </template>
-                  </AvatarFallback>
-                </Avatar>
-                <button
-                  type="button"
-                  class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100"
-                  :title="$t('common.edit')"
-                  :aria-label="$t('common.edit')"
-                  @click="avatarDialogOpen = true"
-                >
-                  <SquarePen class="size-6 text-white" />
-                </button>
-              </div>
-              <div class="flex-1 min-w-0">
-                <FieldStack>
-                  <template #label>
-                    <Label>
-                      {{ $t('bots.displayName') }}
-                      <span
-                        v-if="!form.display_name.trim()"
-                        class="text-destructive"
-                      >*</span>
-                    </Label>
-                  </template>
-                  <Input
-                    v-model="form.display_name"
-                    type="text"
-                    :placeholder="$t('bots.displayNamePlaceholder')"
-                  />
-                </FieldStack>
-              </div>
-            </div>
-          </div>
-
-          <div
-            class="transition-all duration-[350ms] ease-out delay-[100ms]"
-            :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-          >
-            <Separator class="my-6" />
-          </div>
-
-          <div
-            v-if="isACPSelected"
-            class="flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5 transition-all duration-[350ms] ease-out delay-[120ms]"
-            :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-          >
-            <component
-              :is="acpAgentIcon(acpAgentId, true)"
-              class="size-5 shrink-0"
-            />
-            <p class="text-sm text-muted-foreground">
-              {{ t('onboarding.bot.acp.banner', { agent: acpAgentName }) }}
-            </p>
-          </div>
-          <div
-            v-else
-            class="transition-all duration-[350ms] ease-out delay-[120ms]"
-            :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-          >
-            <div class="mb-2 flex items-center gap-2">
-              <Label>{{ $t('bots.settings.chatModel') }}</Label>
-              <Tooltip>
-                <TooltipTrigger as-child>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    class="size-5 text-muted-foreground hover:text-foreground"
-                  >
-                    <CircleHelp class="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent class="max-w-80 text-left leading-relaxed">
-                  {{ $t('onboarding.bot.model.hint') }}
-                </TooltipContent>
-              </Tooltip>
-            </div>
-            <ModelSelect
-              v-model="form.chat_model_id"
-              :models="models"
-              :providers="providers"
-              model-type="chat"
-              :placeholder="$t('onboarding.bot.model.selectPlaceholder')"
-            />
-          </div>
-
-          <template v-if="allowLocalWorkspaceCreate">
             <div
-              class="transition-all duration-[350ms] ease-out delay-[140ms] mt-6"
-              :class="workspaceVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+              class="transition-all duration-[350ms] ease-out delay-[60ms]"
+              :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
             >
-              <div class="flex flex-col gap-4">
-                <FieldStack>
-                  <template #label>
-                    <div class="flex items-center gap-2">
-                      <Label>{{ $t('bots.workspaceBackend') }}</Label>
-                      <Tooltip>
-                        <TooltipTrigger as-child>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            class="size-5 text-muted-foreground hover:text-foreground"
-                          >
-                            <CircleHelp class="size-3.5" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent class="max-w-80 text-left leading-relaxed">
-                          {{ $t('bots.workspaceBackendHint') }}
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </template>
-                  <Select v-model="form.workspace_backend">
-                    <SelectTrigger class="w-full">
-                      <SelectValue :placeholder="$t('bots.workspaceBackend')" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="container">
-                        {{ $t('bots.workspaceBackends.container') }}
-                      </SelectItem>
-                      <SelectItem value="local">
-                        {{ $t('bots.workspaceBackends.local') }}
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </FieldStack>
-
-                <div
-                  v-if="isLocalWorkspace"
-                  class="rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-xs text-warning-foreground"
-                >
-                  {{ $t('bots.localWorkspaceWarning') }}
+              <div class="flex items-center gap-4">
+                <div class="group/avatar relative size-16 shrink-0 rounded-full overflow-hidden cursor-pointer border border-border">
+                  <Avatar class="size-16 rounded-full">
+                    <AvatarImage
+                      v-if="form.avatar_url?.trim()"
+                      :src="form.avatar_url.trim()"
+                      :alt="form.display_name"
+                    />
+                    <AvatarFallback class="text-xl text-muted-foreground">
+                      <Bot
+                        v-if="!form.display_name.trim()"
+                        class="size-7"
+                      />
+                      <template v-else>
+                        {{ avatarFallback }}
+                      </template>
+                    </AvatarFallback>
+                  </Avatar>
+                  <button
+                    type="button"
+                    class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100"
+                    :title="$t('common.edit')"
+                    :aria-label="$t('common.edit')"
+                    @click="avatarDialogOpen = true"
+                  >
+                    <SquarePen class="size-6 text-white" />
+                  </button>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <FieldStack>
+                    <template #label>
+                      <Label>
+                        {{ $t('bots.displayName') }}
+                        <span
+                          v-if="!form.display_name.trim()"
+                          class="text-destructive"
+                        >*</span>
+                      </Label>
+                    </template>
+                    <Input
+                      v-model="form.display_name"
+                      type="text"
+                      :placeholder="$t('bots.displayNamePlaceholder')"
+                    />
+                  </FieldStack>
                 </div>
               </div>
             </div>
-          </template>
 
-          <div
-            v-if="acpSelfRequiresLocalWorkspace"
-            class="rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-xs text-warning-foreground mt-6 transition-all duration-[350ms] ease-out delay-[180ms]"
-            :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-          >
-            {{ t('onboarding.bot.acp.selfRequiresLocalWorkspace', { agent: acpAgentName }) }}
-          </div>
-
-          <div
-            v-if="!isLocalWorkspace && !acpSelfRequiresLocalWorkspace"
-            class="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground mt-6 transition-all duration-[350ms] ease-out delay-[200ms]"
-            :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-          >
-            {{ $t('bots.createBotWaitHint') }}
-          </div>
-          <div
-            v-if="!isLocalWorkspace && (createStatus === 'creating' || createStatus === 'error') && terminalLines.length"
-            class="mt-3 transition-all duration-[350ms] ease-out delay-[220ms]"
-            :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-          >
-            <BotCreateTerminal :lines="terminalLines" />
-          </div>
-        </form>
-      </div>
-
-      <div
-        v-if="oauthPhase === 'pending'"
-        class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1"
-      >
-        <div
-          class="flex items-center gap-3 transition-all duration-[350ms] ease-out"
-          :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-        >
-          <component
-            :is="acpAgentIcon(acpAgentId, true)"
-            class="size-7 shrink-0"
-          />
-          <div>
-            <h3 class="text-lg font-semibold">
-              {{ t('onboarding.bot.acp.oauthTitle', { agent: acpAgentName }) }}
-            </h3>
-            <p
-              class="text-xs"
-              :class="oauthStatusTextClass"
-            >
-              {{ oauthStatusText }}
-            </p>
-          </div>
-        </div>
-
-        <p
-          class="mt-4 text-sm text-muted-foreground leading-relaxed transition-all duration-[350ms] ease-out delay-[60ms]"
-          :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-        >
-          {{ t('onboarding.bot.acp.oauthDescription') }}
-        </p>
-
-        <div
-          v-if="isCodexAgent(acpAgentId)"
-          class="mt-5 space-y-3 transition-all duration-[350ms] ease-out delay-[100ms]"
-          :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-        >
-          <div
-            class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center"
-          >
-            <Button
-              type="button"
-              variant="outline"
-              :disabled="codexAuthorizing"
-              @click="authorizeCodexFlow"
-            >
-              <LoaderCircle
-                v-if="authorizingCodex"
-                class="size-4 animate-spin"
-              />
-              {{ t('onboarding.bot.acp.oauthAuthorizeChatGPT') }}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              :disabled="codexAuthorizing"
-              @click="authorizeCodexDeviceFlow"
-            >
-              <LoaderCircle
-                v-if="authorizingCodexDevice"
-                class="size-4 animate-spin"
-              />
-              {{ t('onboarding.bot.acp.oauthAuthorizeChatGPTDevice') }}
-            </Button>
-            <Button
-              v-if="codexDevicePending"
-              type="button"
-              variant="ghost"
-              @click="cancelCodexDeviceFlow"
-            >
-              {{ t('common.cancel') }}
-            </Button>
-          </div>
-
-          <div
-            v-if="codexDevicePanelVisible"
-            class="space-y-3 rounded-md bg-accent p-3 text-left"
-          >
-            <p class="text-sm text-muted-foreground">
-              {{ t('onboarding.bot.acp.oauthDeviceHint') }}
-            </p>
             <div
-              v-if="codexDeviceVerificationReady"
-              class="space-y-1"
+              class="transition-all duration-[350ms] ease-out delay-[100ms]"
+              :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
             >
-              <div class="text-sm font-medium">
-                {{ t('provider.oauth.deviceVerificationUri') }}
-              </div>
-              <code class="block break-all rounded-md bg-background px-2 py-1 text-sm select-all">{{ codexDeviceSession.verification_url }}</code>
+              <Separator class="my-6" />
+            </div>
+
+            <div
+              v-if="isACPSelected"
+              class="flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5 transition-all duration-[350ms] ease-out delay-[120ms]"
+              :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+            >
+              <component
+                :is="acpAgentIcon(acpAgentId, true)"
+                class="size-5 shrink-0"
+              />
+              <p class="text-sm text-muted-foreground">
+                {{ t('onboarding.bot.acp.banner', { agent: acpAgentName }) }}
+              </p>
             </div>
             <div
-              v-if="codexDeviceVerificationReady"
-              class="space-y-1"
+              v-else
+              class="transition-all duration-[350ms] ease-out delay-[120ms]"
+              :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
             >
-              <div class="text-sm font-medium">
-                {{ t('provider.oauth.deviceUserCode') }}
+              <div class="mb-2 flex items-center gap-2">
+                <Label>{{ $t('bots.settings.chatModel') }}</Label>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      class="size-5 text-muted-foreground hover:text-foreground"
+                    >
+                      <CircleHelp class="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent class="max-w-80 text-left leading-relaxed">
+                    {{ $t('onboarding.bot.model.hint') }}
+                  </TooltipContent>
+                </Tooltip>
               </div>
-              <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <code class="block min-w-0 flex-1 rounded-md bg-background px-2 py-1 font-mono text-sm select-all">{{ codexDeviceSession.user_code }}</code>
+              <ModelSelect
+                v-model="form.chat_model_id"
+                :models="models"
+                :providers="providers"
+                model-type="chat"
+                :placeholder="$t('onboarding.bot.model.selectPlaceholder')"
+              />
+            </div>
+
+            <template v-if="allowLocalWorkspaceCreate">
+              <div
+                class="transition-all duration-[350ms] ease-out delay-[140ms] mt-6"
+                :class="workspaceVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+              >
+                <div class="flex flex-col gap-4">
+                  <FieldStack>
+                    <template #label>
+                      <div class="flex items-center gap-2">
+                        <Label>{{ $t('bots.workspaceBackend') }}</Label>
+                        <Tooltip>
+                          <TooltipTrigger as-child>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              class="size-5 text-muted-foreground hover:text-foreground"
+                            >
+                              <CircleHelp class="size-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent class="max-w-80 text-left leading-relaxed">
+                            {{ $t('bots.workspaceBackendHint') }}
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
+                    </template>
+                    <Select v-model="form.workspace_backend">
+                      <SelectTrigger class="w-full">
+                        <SelectValue :placeholder="$t('bots.workspaceBackend')" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="container">
+                          {{ $t('bots.workspaceBackends.container') }}
+                        </SelectItem>
+                        <SelectItem value="local">
+                          {{ $t('bots.workspaceBackends.local') }}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </FieldStack>
+
+                  <div
+                    v-if="isLocalWorkspace"
+                    class="rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-xs text-warning-foreground"
+                  >
+                    {{ $t('bots.localWorkspaceWarning') }}
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <div
+              v-if="acpSelfRequiresLocalWorkspace"
+              class="rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-xs text-warning-foreground mt-6 transition-all duration-[350ms] ease-out delay-[180ms]"
+              :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+            >
+              {{ t('onboarding.bot.acp.selfRequiresLocalWorkspace', { agent: acpAgentName }) }}
+            </div>
+
+            <div
+              v-if="!isLocalWorkspace && !acpSelfRequiresLocalWorkspace"
+              class="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground mt-6 transition-all duration-[350ms] ease-out delay-[200ms]"
+              :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+            >
+              {{ $t('bots.createBotWaitHint') }}
+            </div>
+            <div
+              v-if="!isLocalWorkspace && (createStatus === 'creating' || createStatus === 'error') && terminalLines.length"
+              class="mt-3 transition-all duration-[350ms] ease-out delay-[220ms]"
+              :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+            >
+              <BotCreateTerminal :lines="terminalLines" />
+            </div>
+          </form>
+        </div>
+
+        <div
+          v-if="oauthPhase === 'pending'"
+          class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1"
+        >
+          <div
+            class="flex items-center gap-3 transition-all duration-[350ms] ease-out"
+            :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+          >
+            <component
+              :is="acpAgentIcon(acpAgentId, true)"
+              class="size-7 shrink-0"
+            />
+            <div>
+              <h3 class="text-lg font-semibold">
+                {{ t('onboarding.bot.acp.oauthTitle', { agent: acpAgentName }) }}
+              </h3>
+              <p
+                class="text-xs"
+                :class="oauthStatusTextClass"
+              >
+                {{ oauthStatusText }}
+              </p>
+            </div>
+          </div>
+
+          <p
+            class="mt-4 text-sm text-muted-foreground leading-relaxed transition-all duration-[350ms] ease-out delay-[60ms]"
+            :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+          >
+            {{ t('onboarding.bot.acp.oauthDescription') }}
+          </p>
+
+          <div
+            v-if="isCodexAgent(acpAgentId)"
+            class="mt-5 space-y-3 transition-all duration-[350ms] ease-out delay-[100ms]"
+            :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+          >
+            <div
+              class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center"
+            >
+              <Button
+                type="button"
+                variant="outline"
+                :disabled="codexAuthorizing"
+                @click="authorizeCodexFlow"
+              >
+                <LoaderCircle
+                  v-if="authorizingCodex"
+                  class="size-4 animate-spin"
+                />
+                {{ t('onboarding.bot.acp.oauthAuthorizeChatGPT') }}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                :disabled="codexAuthorizing"
+                @click="authorizeCodexDeviceFlow"
+              >
+                <LoaderCircle
+                  v-if="authorizingCodexDevice"
+                  class="size-4 animate-spin"
+                />
+                {{ t('onboarding.bot.acp.oauthAuthorizeChatGPTDevice') }}
+              </Button>
+              <Button
+                v-if="codexDevicePending"
+                type="button"
+                variant="ghost"
+                @click="cancelCodexDeviceFlow"
+              >
+                {{ t('common.cancel') }}
+              </Button>
+            </div>
+
+            <div
+              v-if="codexDevicePanelVisible"
+              class="space-y-3 rounded-md bg-accent p-3 text-left"
+            >
+              <p class="text-sm text-muted-foreground">
+                {{ t('onboarding.bot.acp.oauthDeviceHint') }}
+              </p>
+              <div
+                v-if="codexDeviceVerificationReady"
+                class="space-y-1"
+              >
+                <div class="text-sm font-medium">
+                  {{ t('provider.oauth.deviceVerificationUri') }}
+                </div>
+                <code class="block break-all rounded-md bg-background px-2 py-1 text-sm select-all">{{ codexDeviceSession.verification_url }}</code>
+              </div>
+              <div
+                v-if="codexDeviceVerificationReady"
+                class="space-y-1"
+              >
+                <div class="text-sm font-medium">
+                  {{ t('provider.oauth.deviceUserCode') }}
+                </div>
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <code class="block min-w-0 flex-1 rounded-md bg-background px-2 py-1 font-mono text-sm select-all">{{ codexDeviceSession.user_code }}</code>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    class="shrink-0"
+                    @click="openCodexDeviceVerificationFlow"
+                  >
+                    <Copy class="size-4" />
+                    {{ t('onboarding.bot.acp.oauthDeviceCopyOpen') }}
+                  </Button>
+                </div>
+              </div>
+              <div
+                v-if="codexDeviceSession.expires_at"
+                class="text-xs text-muted-foreground"
+              >
+                {{ t('provider.oauth.deviceExpiresAt') }}: {{ codexDeviceSession.expires_at }}
+              </div>
+              <div
+                v-if="codexDevicePending"
+                class="flex items-center gap-2 text-sm text-foreground"
+              >
+                <LoaderCircle class="size-4 animate-spin" />
+                <span>{{ t('provider.oauth.status.pendingDevice') }}</span>
+              </div>
+              <p
+                v-else-if="codexDeviceSession.status === 'error' && codexDeviceSession.error"
+                class="text-sm text-destructive"
+              >
+                {{ codexDeviceSession.error }}
+              </p>
+              <p
+                v-else-if="codexDeviceSession.status === 'expired'"
+                class="text-sm text-destructive"
+              >
+                {{ t('onboarding.bot.acp.oauthDeviceExpired') }}
+              </p>
+            </div>
+          </div>
+
+          <div
+            v-else-if="isClaudeCodeAgent(acpAgentId)"
+            class="mt-5 space-y-3 transition-all duration-[350ms] ease-out delay-[100ms]"
+            :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+          >
+            <Button
+              type="button"
+              variant="outline"
+              class="h-10"
+              :disabled="authorizingClaude"
+              @click="authorizeClaudeFlow"
+            >
+              <LoaderCircle
+                v-if="authorizingClaude"
+                class="size-4 animate-spin"
+              />
+              {{ t('onboarding.bot.acp.oauthAuthorizeClaude') }}
+            </Button>
+
+            <div
+              v-if="claudeSessionId && !oauthAuthorized"
+              class="space-y-2"
+            >
+              <p class="text-xs text-muted-foreground leading-relaxed">
+                {{ t('onboarding.bot.acp.oauthCodeHint') }}
+              </p>
+              <div class="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  v-model="claudeCode"
+                  :placeholder="t('onboarding.bot.acp.oauthCodePlaceholder')"
+                  class="h-10 min-w-0 flex-1"
+                />
                 <Button
                   type="button"
-                  variant="outline"
-                  class="shrink-0"
-                  @click="openCodexDeviceVerificationFlow"
+                  class="h-10 shrink-0"
+                  :disabled="exchangingClaude"
+                  @click="exchangeClaudeFlow"
                 >
-                  <Copy class="size-4" />
-                  {{ t('onboarding.bot.acp.oauthDeviceCopyOpen') }}
+                  <LoaderCircle
+                    v-if="exchangingClaude"
+                    class="size-4 animate-spin"
+                  />
+                  {{ t('onboarding.bot.acp.oauthExchange') }}
                 </Button>
               </div>
             </div>
-            <div
-              v-if="codexDeviceSession.expires_at"
-              class="text-xs text-muted-foreground"
-            >
-              {{ t('provider.oauth.deviceExpiresAt') }}: {{ codexDeviceSession.expires_at }}
-            </div>
-            <div
-              v-if="codexDevicePending"
-              class="flex items-center gap-2 text-sm text-foreground"
-            >
-              <LoaderCircle class="size-4 animate-spin" />
-              <span>{{ t('provider.oauth.status.pendingDevice') }}</span>
-            </div>
-            <p
-              v-else-if="codexDeviceSession.status === 'error' && codexDeviceSession.error"
-              class="text-sm text-destructive"
-            >
-              {{ codexDeviceSession.error }}
-            </p>
-            <p
-              v-else-if="codexDeviceSession.status === 'expired'"
-              class="text-sm text-destructive"
-            >
-              {{ t('onboarding.bot.acp.oauthDeviceExpired') }}
-            </p>
           </div>
         </div>
 
-        <div
-          v-else-if="isClaudeCodeAgent(acpAgentId)"
-          class="mt-5 space-y-3 transition-all duration-[350ms] ease-out delay-[100ms]"
-          :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+        <FooterNav
+          v-if="oauthPhase !== 'pending'"
+          class="delay-[220ms]"
+          :visible="visible"
+          :prev-label="t('onboarding.prev')"
+          @prev="leave(prevStep)"
         >
-          <Button
-            type="button"
-            variant="outline"
-            class="h-10"
-            :disabled="authorizingClaude"
-            @click="authorizeClaudeFlow"
-          >
-            <LoaderCircle
-              v-if="authorizingClaude"
-              class="size-4 animate-spin"
-            />
-            {{ t('onboarding.bot.acp.oauthAuthorizeClaude') }}
-          </Button>
-
-          <div
-            v-if="claudeSessionId && !oauthAuthorized"
-            class="space-y-2"
-          >
-            <p class="text-xs text-muted-foreground leading-relaxed">
-              {{ t('onboarding.bot.acp.oauthCodeHint') }}
-            </p>
-            <div class="flex flex-col gap-2 sm:flex-row">
-              <Input
-                v-model="claudeCode"
-                :placeholder="t('onboarding.bot.acp.oauthCodePlaceholder')"
-                class="h-10 min-w-0 flex-1"
-              />
-              <Button
-                type="button"
-                class="h-10 shrink-0"
-                :disabled="exchangingClaude"
-                @click="exchangeClaudeFlow"
-              >
-                <LoaderCircle
-                  v-if="exchangingClaude"
-                  class="size-4 animate-spin"
-                />
-                {{ t('onboarding.bot.acp.oauthExchange') }}
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <FooterNav
-        v-if="oauthPhase !== 'pending'"
-        class="delay-[220ms]"
-        :visible="visible"
-        :prev-label="t('onboarding.prev')"
-        @prev="leave(prevStep)"
-      >
-        <template #next>
-          <!-- CTA carries its own Transition + Spinner for the label swap
-                 (preparingEnvironment ↔ next), and a min-w rather than the
-                 owner's fixed w-[180px] so the longer "preparing" label can
-                 grow the button — kept local via the #next escape hatch. -->
-          <button
-            type="button"
-            class="inline-flex h-[2.625rem] min-w-[180px] items-center justify-center gap-2 rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
-            :disabled="!canSubmit || submitting"
-            @click="handleSubmit"
-          >
-            <Transition
-              mode="out-in"
-              enter-active-class="transition-all duration-[160ms] ease-out"
-              enter-from-class="opacity-0 translate-y-1"
-              enter-to-class="opacity-100 translate-y-0"
-              leave-active-class="transition-all duration-[140ms] ease-in"
-              leave-from-class="opacity-100 translate-y-0"
-              leave-to-class="opacity-0 -translate-y-1"
+          <template #next>
+            <!-- CTA carries its own Transition + Spinner for the label swap
+                 (preparingEnvironment ↔ next) — the owner's default next
+                 button can't express a keyed label transition, so this stays
+                 local via the #next escape hatch. -->
+            <button
+              type="button"
+              class="inline-flex h-[2.625rem] min-w-[180px] items-center justify-center gap-2 rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              :disabled="!canSubmit || submitting"
+              @click="handleSubmit"
             >
-              <span
-                :key="ctaLabel"
-                class="inline-flex items-center gap-2"
+              <Transition
+                mode="out-in"
+                enter-active-class="transition-all duration-[160ms] ease-out"
+                enter-from-class="opacity-0 translate-y-1"
+                enter-to-class="opacity-100 translate-y-0"
+                leave-active-class="transition-all duration-[140ms] ease-in"
+                leave-from-class="opacity-100 translate-y-0"
+                leave-to-class="opacity-0 -translate-y-1"
               >
-                <Spinner v-if="isContainerSubmitting" />
-                {{ ctaLabel }}
-              </span>
-            </Transition>
-          </button>
-        </template>
-      </FooterNav>
+                <span
+                  :key="ctaLabel"
+                  class="inline-flex items-center gap-2"
+                >
+                  <Spinner v-if="isContainerSubmitting" />
+                  {{ ctaLabel }}
+                </span>
+              </Transition>
+            </button>
+          </template>
+        </FooterNav>
 
-      <FooterNav
-        v-else
-        class="delay-[140ms]"
-        :visible="oauthVisible"
-        :prev-label="t('onboarding.bot.acp.oauthSkip')"
-        @prev="skipOAuth"
-      >
-        <template #next>
-          <!-- min-w (not the owner's fixed w-[180px]) so the label can
-                 grow; kept local via the #next escape hatch. -->
-          <button
-            type="button"
-            class="inline-flex h-[2.625rem] min-w-[180px] items-center justify-center gap-2 rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
-            :disabled="!oauthAuthorized"
-            @click="continueFromOAuth"
-          >
-            {{ t('onboarding.next') }}
-          </button>
-        </template>
-      </FooterNav>
+        <FooterNav
+          v-else
+          class="delay-[140ms]"
+          :visible="oauthVisible"
+          :prev-label="t('onboarding.bot.acp.oauthSkip')"
+          :next-label="t('onboarding.next')"
+          :next-disabled="!oauthAuthorized"
+          @prev="skipOAuth"
+          @next="continueFromOAuth"
+        />
 
-      <AvatarEditDialog
-        v-model:open="avatarDialogOpen"
-        v-model:avatar-url="form.avatar_url"
-        :fallback-text="avatarFallback"
-      />
-    </StepFrame>
+        <AvatarEditDialog
+          v-model:open="avatarDialogOpen"
+          v-model:avatar-url="form.avatar_url"
+          :fallback-text="avatarFallback"
+        />
+      </StepFrame>
+    </StepExitShell>
   </TooltipProvider>
 </template>
