@@ -153,6 +153,23 @@ will appear (list head, settings row content, panel top). Props: `size: 'sm' | '
 import read-states). Positioning padding (`px-2`, `py-8`) stays with the **caller** via
 class passthrough. Not for centered fills — that's PanePlaceholder.
 
+### Surface-scoped owners (live next to their surface, not in components/)
+
+Same discipline, narrower home — compose these when working on their surface:
+
+- **onboarding** (`pages/onboarding/components/`): `step-frame.vue` (wizard exit
+  shell + 35rem body + title; owns the no-pt geometry that killed the
+  step-to-step title jump), `footer-nav.vue` (prev/next pair, `#prev`/`#next`
+  escape hatches for Transition+Spinner CTAs), `choice-tile.vue` (h-16
+  icon+label grid tile, solid/dashed).
+- **supermarket** (`pages/supermarket/components/`): `market-item-card.vue`
+  (list card: leading icon box + title + homepage link + `#actions`).
+- **chat tool-call** (`pages/home/components/tool-detail/`): `empty-row.vue`,
+  `preview-box.vue` (max-h-48), `header-row.vue` (collapsible row, tone axis,
+  `nested` for button-in-button), `expand-chevron.vue`, `capsule.vue`
+  (compact/detail density). Read each file's head comment for its stay-local
+  exceptions before adding new tool detail panels.
+
 ### Plus one atom you already have
 
 **Empty** (`@memohai/ui`) — the framed in-page empty state card. Fold `py-12`/`py-16` as
