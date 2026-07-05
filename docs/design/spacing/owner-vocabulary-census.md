@@ -44,6 +44,10 @@ The terminal state as of 2026-07-05:
   composer buttons) — pure prop adoption, hand-off-able; 59 files already migrated.
 - **Round icon buttons in chat-pane** (×6) — need a design call; other round-button
   stay-locals carry head comments recording their reasons.
+- **Dense model-list navigation rows** (`transcription/speech/video provider-setting`,
+  3-file family) — the non-settings sweep's correction: these are clickable navigation
+  rows, NOT SettingsRow misses; they await a list-row owner decision (same family as
+  `providers/model-item.vue`). Unbuilt; the three files still hand-sync the shape.
 
 ---
 

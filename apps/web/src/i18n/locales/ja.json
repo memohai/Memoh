@@ -1396,11 +1396,6 @@
       },
       "restoreSecurity": "ツール承認を有効にする",
       "examples": "例",
-      "status": {
-        "active": "アクティブ",
-        "implicitDeny": "暗黙的な拒否",
-        "sealed": "封鎖済み"
-      },
       "dangerZone": "危険な操作",
       "dangerZoneDesc": "主要なセキュリティポリシーを管理します。",
       "resetDefaults": "デフォルトにリセット",

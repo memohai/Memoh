@@ -119,6 +119,10 @@ import { describeCron, nextRuns } from '@/utils/cron-pattern'
 import ScheduleListItem from '@/pages/bots/components/schedule-list-item.vue'
 import ConfirmDeleteDialog from '@/components/confirm-delete-dialog/index.vue'
 import SidebarPanelHeader from './panel-header.vue'
+// The narrow native scrollbar this template's `sidebar-scroll` class relies on.
+// Without this import the class was silently inert (it used to be defined only
+// inside recents.vue's scoped style, which never reaches this component).
+import '@/styles/sidebar-scroll.css'
 
 const { t, locale } = useI18n()
 const chatStore = useChatStore()

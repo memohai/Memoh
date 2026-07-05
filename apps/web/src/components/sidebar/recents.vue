@@ -186,6 +186,9 @@ import {
 } from '@memohai/ui'
 import SessionItem from './session-item.vue'
 import ConfirmDeleteDialog from '@/components/confirm-delete-dialog/index.vue'
+// The narrow native scrollbar for sidebar scroll panes — shared with
+// panel-schedule.vue, so it must not live in this file's scoped style.
+import '@/styles/sidebar-scroll.css'
 
 const { t } = useI18n()
 const chatStore = useChatStore()
@@ -338,26 +341,3 @@ async function handleDeleteSession() {
   }
 }
 </script>
-
-<style scoped>
-/* Sidebar-specific native scroll bar: narrow so it doesn't dominate the tight
- * session list. The 2px transparent border + padding-box clip insets the thumb
- * to a ~4px sliver — visible on hover/scroll but not a constant presence. The
- * extra pr-3 on the inner container keeps the session hover chip off the bar. */
-.sidebar-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklab, var(--foreground) 18%, transparent) transparent;
-}
-.sidebar-scroll::-webkit-scrollbar {
-  width: 8px;
-}
-.sidebar-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-.sidebar-scroll::-webkit-scrollbar-thumb {
-  background-color: color-mix(in oklab, var(--foreground) 18%, transparent);
-  background-clip: padding-box;
-  border: 2px solid transparent;
-  border-radius: 9999px;
-}
-</style>
