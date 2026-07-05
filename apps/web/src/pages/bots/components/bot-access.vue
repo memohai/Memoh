@@ -88,16 +88,15 @@
             </div>
           </SettingsRow>
 
-          <!-- ui-allow-shape: loading skeleton — matches the member-row height so
-               the list holds its space and doesn't jump (CLS) while rules/managers
-               load. Not a SettingsRow: spinner only, no label + control. -->
-          <div
+          <!-- Loading skeleton — matches the member-row height so the list holds
+               its space and doesn't jump (CLS) while rules/managers load. -->
+          <InlineLoadingRow
             v-if="isPendingRules || isPendingManagers"
-            class="mx-4 flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 text-sm text-muted-foreground last:border-b-0"
+            size="md"
+            class="mx-4 min-h-[3.75rem] border-b border-border py-3 last:border-b-0"
           >
-            <Spinner class="size-4" />
             {{ $t('common.loading') }}
-          </div>
+          </InlineLoadingRow>
 
           <Empty
             v-else-if="members.length === 0"
@@ -575,7 +574,6 @@ import {
   Avatar,
   AvatarImage,
   AvatarFallback,
-  Spinner,
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -594,6 +592,7 @@ import {
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import PageShell from '@/components/page-shell/index.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import BotUserAccess from './bot-user-access.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'

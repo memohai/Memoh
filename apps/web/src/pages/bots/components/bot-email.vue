@@ -50,16 +50,15 @@
           </Popover>
         </SettingsRow>
 
-        <!-- ui-allow-shape: loading skeleton — matches the binding-row height so
-             the list holds its space and doesn't jump (CLS) as bindings load.
-             Not a SettingsRow: spinner only, no label/control. -->
-        <div
+        <!-- Loading skeleton — matches the binding-row height so the list holds
+             its space and doesn't jump (CLS) as bindings load. -->
+        <InlineLoadingRow
           v-if="bindingsLoading"
-          class="mx-4 flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 text-sm text-muted-foreground last:border-b-0"
+          size="md"
+          class="mx-4 min-h-[3.75rem] border-b border-border py-3 last:border-b-0"
         >
-          <Spinner class="size-4" />
-          <span>{{ $t('common.loading') }}</span>
-        </div>
+          {{ $t('common.loading') }}
+        </InlineLoadingRow>
 
         <Empty
           v-else-if="!bindings?.length"
@@ -230,6 +229,7 @@ import { formatDateTime } from '@/utils/date-time'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import PageShell from '@/components/page-shell/index.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import EmailProviderIcon from '@/components/email-provider-icon/index.vue'
 
 const props = defineProps<{ botId: string }>()

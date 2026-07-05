@@ -1,5 +1,8 @@
 <template>
   <Popover v-model:open="open">
+    <!-- 不走 Button shape="circle":这是承载 SVG 进度环 + hover 展开 popover
+         的复合触发器,刻意无 hover 填充(安静的状态环,不是操作钮);
+         rounded-full 几何与 circle 令牌一致,chrome 关系不同,留在本地。 -->
     <PopoverTrigger
       as="button"
       type="button"

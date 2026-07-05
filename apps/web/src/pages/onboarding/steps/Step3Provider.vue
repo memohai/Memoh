@@ -24,6 +24,7 @@ import FormStack from '@/components/settings/form-stack.vue'
 import ChoiceTile from '../components/choice-tile.vue'
 import StepFrame from '../components/step-frame.vue'
 import StepExitShell from '../components/step-exit-shell.vue'
+import HintBox from '../components/hint-box.vue'
 import FooterNav from '../components/footer-nav.vue'
 import { onboardingProviderPresets as providerPresets, type ProviderPreset } from '@/constants/provider-presets'
 import {
@@ -859,21 +860,21 @@ onMounted(() => {
             </FieldStack>
           </div>
 
-          <div
+          <HintBox
             v-if="acpSetupMode === 'oauth'"
-            class="rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground leading-relaxed transition-all duration-[200ms] ease-out delay-[40ms]"
+            class="transition-all duration-[200ms] ease-out delay-[40ms]"
             :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
           >
             {{ t('onboarding.provider.acp.oauthDeferredHint') }}
-          </div>
+          </HintBox>
 
-          <div
+          <HintBox
             v-else-if="acpSetupMode === 'self'"
-            class="rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground leading-relaxed transition-all duration-[200ms] ease-out delay-[40ms]"
+            class="transition-all duration-[200ms] ease-out delay-[40ms]"
             :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
           >
             {{ isAcpHermesProfile(selectedAcpProfile) ? t('bots.settings.acpHermesSelfModeHint') : t('onboarding.provider.acp.selfHint') }}
-          </div>
+          </HintBox>
         </FormStack>
 
         <p

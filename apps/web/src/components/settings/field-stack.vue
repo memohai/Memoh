@@ -34,9 +34,29 @@
          <FormField>, it takes over FormItem's job: it provides the form-item id
          (so a FormControl wrapping the control resolves ids and aria-invalid/
          aria-describedby) and renders the field's error inline. Standalone
-         FieldStacks provide an id nobody consumes and render none of this. -->
+         FieldStacks provide an id nobody consumes and render none of this.
+         `reserveError` keeps a fixed-height slot drawn even with no error, so
+         a validation message appearing doesn't shift the content below (the
+         add-platform dialog reserved this pre-migration); the wrapper div only
+         exists in that mode — an always-present empty div would eat a space-y
+         rung of its own. -->
+    <div
+      v-if="fieldContext && reserveError"
+      class="min-h-5"
+    >
+      <ErrorMessage
+        :id="`${id}-form-item-message`"
+        v-slot="{ message }"
+        as="p"
+        :name="fieldName"
+        class="text-destructive flex items-center gap-1.5 text-label leading-snug"
+      >
+        <CircleAlert class="size-3.5 shrink-0" />
+        <span>{{ message }}</span>
+      </ErrorMessage>
+    </div>
     <ErrorMessage
-      v-if="fieldContext"
+      v-else-if="fieldContext"
       :id="`${id}-form-item-message`"
       v-slot="{ message }"
       as="p"
@@ -62,10 +82,14 @@ const props = withDefaults(defineProps<{
   // it defaults to the FormControl-assigned form-item id.
   for?: string
   help?: string
+  // Draw a fixed-height error slot even when valid, so the message appearing
+  // doesn't push content down (dialogs whose footer would jump).
+  reserveError?: boolean
 }>(), {
   label: '',
   for: undefined,
   help: '',
+  reserveError: false,
 })
 
 const id = useId()

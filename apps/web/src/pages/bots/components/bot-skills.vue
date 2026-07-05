@@ -30,16 +30,15 @@
     </template>
 
     <SettingsSection :title="$t('bots.skills.libraryTitle')">
-      <!-- ui-allow-shape: loading skeleton — borrows the skill-row height to hold
-           the list's space steady (no CLS) until skills load. Not a SettingsRow:
-           it carries a spinner, not a label + control. -->
-      <div
+      <!-- Loading skeleton — borrows the skill-row height to hold the list's
+           space steady (no CLS) until skills load. -->
+      <InlineLoadingRow
         v-if="isLoading"
-        class="mx-4 flex min-h-[3.75rem] items-center gap-3 py-3 text-sm text-muted-foreground"
+        size="md"
+        class="mx-4 min-h-[3.75rem] py-3"
       >
-        <Spinner class="size-4" />
         {{ $t('common.loading') }}
-      </div>
+      </InlineLoadingRow>
 
       <Empty
         v-else-if="!skills.length"
@@ -353,12 +352,13 @@ import {
   Button,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose,
   Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle,
-  Label, Spinner, Textarea,
+  Label, Textarea,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import FieldStack from '@/components/settings/field-stack.vue'
 import FormStack from '@/components/settings/form-stack.vue'
 import PageShell from '@/components/page-shell/index.vue'

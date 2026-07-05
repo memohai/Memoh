@@ -167,7 +167,10 @@ Same discipline, narrower home — compose these when working on their surface:
   transition), `footer-nav.vue` (prev/next pair, min-w next button so long
   labels grow; `#next` escape hatch only for CTAs that need a keyed
   Transition label swap), `choice-tile.vue` (h-16 icon+label grid tile,
-  solid/dashed).
+  solid/dashed), `hint-box.vue` (single-line text-xs form hint,
+  muted/warning tones, optional #icon — NOT CalloutBanner, which is the
+  page-level title+description+action banner; forcing hints into it was
+  adjudicated as over-merging).
 - **supermarket** (`pages/supermarket/components/`): `market-item-card.vue`
   (list card: leading icon box + title + homepage link + `#actions`).
 - **chat tool-call** (`pages/home/components/tool-detail/`): `empty-row.vue`,

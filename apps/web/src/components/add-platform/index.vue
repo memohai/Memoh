@@ -27,6 +27,7 @@
             <FieldStack
               :label="$t('platform.name')"
               for="platform-create-name"
+              reserve-error
             >
               <FormControl>
                 <Input
@@ -45,7 +46,10 @@
             v-slot="{ componentField }"
             name="config"
           >
-            <FieldStack :label="$t('platform.config')">
+            <FieldStack
+              :label="$t('platform.config')"
+              reserve-error
+            >
               <FormControl>
                 <TagsInput
                   :add-on-blur="true"

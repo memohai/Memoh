@@ -5,6 +5,7 @@ import { Plug, AudioLines, Globe, AlertTriangle } from 'lucide-vue-next'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { nextFrame } from '../useStepTransition'
 import StepExitShell from '../components/step-exit-shell.vue'
+import HintBox from '../components/hint-box.vue'
 import { safeSessionGet, safeSessionRemove, safeSessionSet } from '@/utils/safe-storage'
 import { ONBOARDING_KEYS } from '../constants'
 import { readACPSelection } from './useACPSetup'
@@ -87,12 +88,17 @@ async function handleComplete() {
       class="mb-8 flex justify-center transition-all duration-[350ms] ease-out delay-[200ms]"
       :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
     >
-      <div class="inline-flex items-start gap-2.5 rounded-lg border border-warning-border bg-warning-soft px-4 py-3 text-left">
-        <AlertTriangle class="size-4 shrink-0 text-warning-foreground mt-0.5" />
-        <p class="text-xs text-muted-foreground leading-relaxed">
+      <HintBox
+        tone="warning"
+        class="inline-block text-left"
+      >
+        <template #icon>
+          <AlertTriangle class="size-4 shrink-0 text-warning-foreground mt-0.5" />
+        </template>
+        <p class="text-muted-foreground">
           {{ t('onboarding.complete.noProviderWarning') }}
         </p>
-      </div>
+      </HintBox>
     </div>
 
     <div

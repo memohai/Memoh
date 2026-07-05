@@ -99,16 +99,15 @@
       </FormStack>
     </div>
 
-    <!-- Loading. ui-allow-shape: loading skeleton — borrows the grant-row height
-         to keep the list's space steady (no CLS) until grants load. Not a
-         SettingsRow: it holds a spinner, not a label + control. -->
-    <div
+    <!-- Loading skeleton — borrows the grant-row height to keep the list's
+         space steady (no CLS) until grants load. -->
+    <InlineLoadingRow
       v-if="isLoading"
-      class="mx-4 flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 text-sm text-muted-foreground last:border-b-0"
+      size="md"
+      class="mx-4 min-h-[3.75rem] border-b border-border py-3 last:border-b-0"
     >
-      <Spinner class="size-4" />
       {{ $t('common.loading') }}
-    </div>
+    </InlineLoadingRow>
 
     <Empty
       v-else-if="grants.length === 0"
@@ -215,7 +214,6 @@ import {
   AvatarImage,
   toast,
   AvatarFallback,
-  Spinner,
   Badge,
   Empty,
   EmptyDescription,
@@ -230,6 +228,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { BOT_PERMISSION_ORDER, expandBotPermissions, type BotPermission } from '@/utils/bot-permissions'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import FormStack from '@/components/settings/form-stack.vue'
 import FieldStack from '@/components/settings/field-stack.vue'
 import {

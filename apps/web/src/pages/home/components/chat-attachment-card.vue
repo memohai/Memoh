@@ -111,7 +111,9 @@
       </template>
     </div>
 
-    <!-- Remove (composer only) -->
+    <!-- Remove (composer only). 不走 Button shape="circle":size-5 角标钮,
+         hover 才浮现(opacity-0 group-hover),贴在卡片角上,和普通图标操作钮
+         关系不同;rounded-full 几何与 circle 令牌一致,留在本地。 -->
     <button
       v-if="removable"
       type="button"

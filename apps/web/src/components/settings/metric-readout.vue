@@ -4,7 +4,9 @@
        is the same content bare, for a stat that sits directly on a surface
        (bot-overview usage). Shared min-h so a cold-load tile doesn't jump. -->
   <div :class="framed ? 'flex min-h-[4.375rem] flex-col rounded-[var(--radius-menu-shell)] border border-border bg-card p-3' : 'flex flex-col'">
-    <p class="text-caption text-muted-foreground">
+    <!-- tracking-tight:紧凑指标标签的原有字距(context-card 8 块原样如此),
+         统一后 bot-overview 的标签一并收紧。 -->
+    <p class="text-caption tracking-tight text-muted-foreground">
       {{ label }}
     </p>
 

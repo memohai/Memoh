@@ -46,6 +46,7 @@ import { ONBOARDING_KEYS } from '../constants'
 import { clearACPSelection, readACPSelection, type OnboardingACPSelection } from './useACPSetup'
 import StepFrame from '../components/step-frame.vue'
 import StepExitShell from '../components/step-exit-shell.vue'
+import HintBox from '../components/hint-box.vue'
 import FooterNav from '../components/footer-nav.vue'
 
 const { t } = useI18n()
@@ -471,6 +472,8 @@ function skipOAuth() {
               <Separator class="my-6" />
             </div>
 
+            <!-- ACP 身份横幅:带品牌图标的 text-sm 状态行,不是 HintBox 那种
+                 text-xs 表单提示 —— 关系不同,留在本地。 -->
             <div
               v-if="isACPSelected"
               class="flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5 transition-all duration-[350ms] ease-out delay-[120ms]"
@@ -558,31 +561,32 @@ function skipOAuth() {
                     </Select>
                   </FieldStack>
 
-                  <div
+                  <HintBox
                     v-if="isLocalWorkspace"
-                    class="rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-xs text-warning-foreground"
+                    tone="warning"
                   >
                     {{ $t('bots.localWorkspaceWarning') }}
-                  </div>
+                  </HintBox>
                 </div>
               </div>
             </template>
 
-            <div
+            <HintBox
               v-if="acpSelfRequiresLocalWorkspace"
-              class="rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-xs text-warning-foreground mt-6 transition-all duration-[350ms] ease-out delay-[180ms]"
+              tone="warning"
+              class="mt-6 transition-all duration-[350ms] ease-out delay-[180ms]"
               :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
             >
               {{ t('onboarding.bot.acp.selfRequiresLocalWorkspace', { agent: acpAgentName }) }}
-            </div>
+            </HintBox>
 
-            <div
+            <HintBox
               v-if="!isLocalWorkspace && !acpSelfRequiresLocalWorkspace"
-              class="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground mt-6 transition-all duration-[350ms] ease-out delay-[200ms]"
+              class="mt-6 transition-all duration-[350ms] ease-out delay-[200ms]"
               :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
             >
               {{ $t('bots.createBotWaitHint') }}
-            </div>
+            </HintBox>
             <div
               v-if="!isLocalWorkspace && (createStatus === 'creating' || createStatus === 'error') && terminalLines.length"
               class="mt-3 transition-all duration-[350ms] ease-out delay-[220ms]"

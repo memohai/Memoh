@@ -17,16 +17,15 @@
     </template>
 
     <SettingsSection :title="$t('bots.plugins.installedTitle')">
-      <!-- ui-allow-shape: loading skeleton — matches the plugin-row height so the
-           list keeps its space and doesn't jump (CLS) when plugins arrive. Not a
-           SettingsRow: no label/control, just a centered spinner. -->
-      <div
+      <!-- Loading skeleton — matches the plugin-row height so the list keeps
+           its space and doesn't jump (CLS) when plugins arrive. -->
+      <InlineLoadingRow
         v-if="loading && !plugins.length"
-        class="mx-4 flex min-h-[3.75rem] items-center gap-3 py-3 text-sm text-muted-foreground"
+        size="md"
+        class="mx-4 min-h-[3.75rem] py-3"
       >
-        <Spinner class="size-4" />
         {{ $t('common.loading') }}
-      </div>
+      </InlineLoadingRow>
 
       <Empty
         v-else-if="!plugins.length"
@@ -137,7 +136,8 @@ import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { ExternalLink, PackageOpen, Store } from 'lucide-vue-next'
-import { Badge, Button, Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle, Spinner, Switch, toast } from '@memohai/ui'
+import { Badge, Button, Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle, Switch, toast } from '@memohai/ui'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import {
   getBotsByBotIdPlugins,
   getBotsByBotIdPluginsByIdOauthStatus,
