@@ -22,6 +22,8 @@ import ModelItem from '@/pages/providers/components/model-item.vue'
 import FieldStack from '@/components/settings/field-stack.vue'
 import FormStack from '@/components/settings/form-stack.vue'
 import ChoiceTile from '../components/choice-tile.vue'
+import StepFrame from '../components/step-frame.vue'
+import FooterNav from '../components/footer-nav.vue'
 import { onboardingProviderPresets as providerPresets, type ProviderPreset } from '@/constants/provider-presets'
 import {
   HERMES_CUSTOM_MODEL_VALUE,
@@ -374,21 +376,17 @@ onMounted(() => {
     class="transition-all duration-[175ms] ease-out"
     :class="exiting ? 'scale-[0.88] opacity-0' : 'scale-100 opacity-100'"
   >
-    <div
+    <StepFrame
       v-if="mode === 'list'"
-      class="text-left pt-24 h-[35rem] max-h-[calc(100dvh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
-      :class="listVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0'"
+      :title="t('onboarding.provider.title')"
+      :visible="visible"
+      :body-class="['transition-all duration-[175ms] ease-out', listVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
     >
-      <h2
-        class="text-3xl font-semibold mb-3 transition-all duration-[350ms] ease-out"
-        :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-      >
-        {{ t('onboarding.provider.title') }}
-      </h2>
-
+      <!-- list 模式标题 mb 从 mb-3 提到 owner 的 mb-6;下方描述 p 的 mb 由
+           mb-6 减到 mb-3,标题→网格总间距保持约 36px 不变。 -->
       <div>
         <p
-          class="text-sm text-muted-foreground leading-relaxed mb-6 transition-all duration-[350ms] ease-out delay-[60ms]"
+          class="text-sm text-muted-foreground leading-relaxed mb-3 transition-all duration-[350ms] ease-out delay-[60ms]"
           :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
         >
           {{ t('onboarding.provider.description') }}
@@ -436,52 +434,46 @@ onMounted(() => {
         </div>
       </div>
 
-      <div
-        class="mt-auto pt-12 flex items-center justify-end gap-3 transition-all duration-[350ms] ease-out delay-[220ms]"
-        :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-      >
-        <button
-          class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          @click="leave(prevStep)"
-        >
-          {{ t('onboarding.prev') }}
-        </button>
-        <button
-          class="inline-flex h-[2.625rem] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          @click="onSkipStep"
-        >
-          {{ ctaLabel }}
-        </button>
-      </div>
-    </div>
+      <FooterNav
+        class="delay-[220ms]"
+        :visible="visible"
+        :prev-label="t('onboarding.prev')"
+        :next-label="ctaLabel"
+        @prev="leave(prevStep)"
+        @next="onSkipStep"
+      />
+    </StepFrame>
 
-    <div
+    <StepFrame
       v-else-if="mode === 'form'"
-      class="text-left pt-24 h-[35rem] max-h-[calc(100dvh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
-      :class="formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0'"
+      :visible="visible"
+      :body-class="['transition-all duration-[175ms] ease-out', formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
     >
-      <div
-        class="mb-8 flex items-center gap-3 transition-all duration-[200ms] ease-out"
-        :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-      >
-        <button
-          type="button"
-          class="-ml-1.5 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          :disabled="submitting"
-          :aria-label="t('onboarding.prev')"
-          @click="backToList"
+      <!-- form/acp 模式有返回箭头+图标+标题的头行,而非纯 h2,走 #header slot -->
+      <template #header>
+        <div
+          class="mb-8 flex items-center gap-3 transition-all duration-[200ms] ease-out"
+          :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
         >
-          <ArrowLeft class="size-4" />
-        </button>
-        <ProviderIcon
-          v-if="selectedPreset?.icon"
-          :icon="selectedPreset.icon"
-          size="28"
-        />
-        <h2 class="text-2xl font-semibold">
-          {{ selectedPreset ? selectedPreset.name : t('onboarding.provider.custom') }}
-        </h2>
-      </div>
+          <button
+            type="button"
+            class="-ml-1.5 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            :disabled="submitting"
+            :aria-label="t('onboarding.prev')"
+            @click="backToList"
+          >
+            <ArrowLeft class="size-4" />
+          </button>
+          <ProviderIcon
+            v-if="selectedPreset?.icon"
+            :icon="selectedPreset.icon"
+            size="28"
+          />
+          <h2 class="text-2xl font-semibold">
+            {{ selectedPreset ? selectedPreset.name : t('onboarding.provider.custom') }}
+          </h2>
+        </div>
+      </template>
 
       <div class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1">
         <FormStack>
@@ -689,72 +681,80 @@ onMounted(() => {
         </div>
       </div>
 
-      <div
-        class="mt-auto pt-12 flex items-center justify-end gap-3 transition-all duration-[200ms] ease-out"
-        :class="[
-          formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3',
-          selectedPreset ? 'delay-[80ms]' : 'delay-[100ms]',
-        ]"
+      <FooterNav
+        :class="selectedPreset ? 'delay-[80ms]' : 'delay-[100ms]'"
+        :visible="formContentVisible"
       >
-        <button
-          class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
-          :disabled="submitting"
-          @click="backToList"
-        >
-          {{ t('onboarding.provider.form.cancel') }}
-        </button>
-        <button
-          class="inline-flex h-[2.625rem] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
-          :disabled="formCtaDisabled"
-          @click="saveAndNext"
-        >
-          <Transition
-            mode="out-in"
-            enter-active-class="transition-all duration-[160ms] ease-out"
-            enter-from-class="opacity-0 translate-y-1"
-            enter-to-class="opacity-100 translate-y-0"
-            leave-active-class="transition-all duration-[140ms] ease-in"
-            leave-from-class="opacity-100 translate-y-0"
-            leave-to-class="opacity-0 -translate-y-1"
+        <template #prev>
+          <button
+            type="button"
+            class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="submitting"
+            @click="backToList"
           >
-            <span
-              :key="formCtaLabel"
-              class="inline-flex items-center gap-2"
+            {{ t('onboarding.provider.form.cancel') }}
+          </button>
+        </template>
+        <template #next>
+          <!-- CTA label carries its own Transition + Spinner; FooterNav's
+               plain :next-loading prop can't express the label-swap, so this
+               button stays local via the #next escape hatch. -->
+          <button
+            type="button"
+            class="inline-flex h-[2.625rem] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
+            :disabled="formCtaDisabled"
+            @click="saveAndNext"
+          >
+            <Transition
+              mode="out-in"
+              enter-active-class="transition-all duration-[160ms] ease-out"
+              enter-from-class="opacity-0 translate-y-1"
+              enter-to-class="opacity-100 translate-y-0"
+              leave-active-class="transition-all duration-[140ms] ease-in"
+              leave-from-class="opacity-100 translate-y-0"
+              leave-to-class="opacity-0 -translate-y-1"
             >
-              <Spinner v-if="submitting" />
-              {{ formCtaLabel }}
-            </span>
-          </Transition>
-        </button>
-      </div>
-    </div>
+              <span
+                :key="formCtaLabel"
+                class="inline-flex items-center gap-2"
+              >
+                <Spinner v-if="submitting" />
+                {{ formCtaLabel }}
+              </span>
+            </Transition>
+          </button>
+        </template>
+      </FooterNav>
+    </StepFrame>
 
-    <div
+    <StepFrame
       v-else-if="mode === 'acp' && selectedAcpProfile"
-      class="text-left pt-24 h-[35rem] max-h-[calc(100dvh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
-      :class="formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0'"
+      :visible="visible"
+      :body-class="['transition-all duration-[175ms] ease-out', formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
     >
-      <div
-        class="mb-8 flex items-center gap-3 transition-all duration-[200ms] ease-out"
-        :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-      >
-        <button
-          type="button"
-          class="-ml-1.5 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          :disabled="acpSubmitting"
-          :aria-label="t('onboarding.prev')"
-          @click="backToList"
+      <template #header>
+        <div
+          class="mb-8 flex items-center gap-3 transition-all duration-[200ms] ease-out"
+          :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
         >
-          <ArrowLeft class="size-4" />
-        </button>
-        <component
-          :is="acpAgentIcon(selectedAcpProfile.id, true)"
-          class="size-7 shrink-0"
-        />
-        <h2 class="text-2xl font-semibold">
-          {{ selectedAcpProfile.display_name || selectedAcpProfile.id }}
-        </h2>
-      </div>
+          <button
+            type="button"
+            class="-ml-1.5 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            :disabled="acpSubmitting"
+            :aria-label="t('onboarding.prev')"
+            @click="backToList"
+          >
+            <ArrowLeft class="size-4" />
+          </button>
+          <component
+            :is="acpAgentIcon(selectedAcpProfile.id, true)"
+            class="size-7 shrink-0"
+          />
+          <h2 class="text-2xl font-semibold">
+            {{ selectedAcpProfile.display_name || selectedAcpProfile.id }}
+          </h2>
+        </div>
+      </template>
 
       <div class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1">
         <FormStack>
@@ -886,25 +886,24 @@ onMounted(() => {
         </p>
       </div>
 
-      <div
-        class="mt-auto pt-12 flex items-center justify-end gap-3 transition-all duration-[200ms] ease-out delay-[80ms]"
-        :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+      <FooterNav
+        class="delay-[80ms]"
+        :visible="formContentVisible"
+        :next-label="t('onboarding.next')"
+        :next-disabled="acpSubmitting"
+        @next="saveAcpAndNext"
       >
-        <button
-          class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
-          :disabled="acpSubmitting"
-          @click="backToList"
-        >
-          {{ t('onboarding.provider.form.cancel') }}
-        </button>
-        <button
-          class="inline-flex h-[2.625rem] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
-          :disabled="acpSubmitting"
-          @click="saveAcpAndNext"
-        >
-          {{ t('onboarding.next') }}
-        </button>
-      </div>
-    </div>
+        <template #prev>
+          <button
+            type="button"
+            class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="acpSubmitting"
+            @click="backToList"
+          >
+            {{ t('onboarding.provider.form.cancel') }}
+          </button>
+        </template>
+      </FooterNav>
+    </StepFrame>
   </div>
 </template>

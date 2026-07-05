@@ -10,6 +10,8 @@ import FieldStack from '@/components/settings/field-stack.vue'
 import { colorSchemes } from '@/constants/color-schemes'
 import type { Locale } from '@/i18n'
 import { useStepTransition } from '../useStepTransition'
+import StepFrame from '../components/step-frame.vue'
+import FooterNav from '../components/footer-nav.vue'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
@@ -20,18 +22,12 @@ const { visible, exiting, leave } = useStepTransition()
 </script>
 
 <template>
-  <div
-    class="transition-all duration-[175ms] ease-out"
-    :class="exiting ? 'scale-[0.88] opacity-0' : 'scale-100 opacity-100'"
+  <StepFrame
+    :title="t('onboarding.appearance.title')"
+    :visible="visible"
+    :exiting="exiting"
   >
-    <div class="text-left h-[35rem] max-h-[calc(100dvh-7rem)] flex flex-col">
-      <h2
-        class="text-3xl font-semibold mb-8 transition-all duration-[350ms] ease-out"
-        :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-      >
-        {{ t('onboarding.appearance.title') }}
-      </h2>
-
+    <template #default>
       <div class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1 space-y-6">
         <div
           class="transition-all duration-[350ms] ease-out delay-[80ms]"
@@ -108,23 +104,14 @@ const { visible, exiting, leave } = useStepTransition()
         </div>
       </div>
 
-      <div
-        class="mt-auto pt-12 flex items-center justify-end gap-3 transition-all duration-[350ms] ease-out delay-[320ms]"
-        :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-      >
-        <button
-          class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          @click="leave(prevStep)"
-        >
-          {{ t('onboarding.prev') }}
-        </button>
-        <button
-          class="inline-flex h-[2.625rem] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          @click="leave(nextStep)"
-        >
-          {{ t('onboarding.next') }}
-        </button>
-      </div>
-    </div>
-  </div>
+      <FooterNav
+        class="delay-[320ms]"
+        :visible="visible"
+        :prev-label="t('onboarding.prev')"
+        :next-label="t('onboarding.next')"
+        @prev="leave(prevStep)"
+        @next="leave(nextStep)"
+      />
+    </template>
+  </StepFrame>
 </template>
