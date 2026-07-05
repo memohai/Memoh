@@ -399,7 +399,7 @@ function skipOAuth() {
   <TooltipProvider :delay-duration="0">
     <StepFrame
       :title="t('onboarding.bot.title')"
-      body-class="pt-16"
+      title-class="mb-8"
       :visible="visible"
       :exiting="exiting"
     >

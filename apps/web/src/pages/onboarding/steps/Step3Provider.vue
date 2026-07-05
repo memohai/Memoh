@@ -381,7 +381,7 @@ onMounted(() => {
       :title="t('onboarding.provider.title')"
       title-class="mb-3"
       :visible="visible"
-      :body-class="['pt-24 transition-all duration-[175ms] ease-out', listVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
+      :body-class="['pt-16 transition-all duration-[175ms] ease-out', listVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
     >
       <div>
         <p
