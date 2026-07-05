@@ -107,30 +107,13 @@
       </div>
     </div>
 
-    <Dialog v-model:open="deleteSessionDialogOpen">
-      <DialogContent class="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{{ t('chat.deleteSession') }}</DialogTitle>
-          <DialogDescription>{{ t('chat.deleteSessionConfirm') }}</DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button
-            variant="outline"
-            :disabled="deleteSessionLoading"
-            @click="deleteSessionDialogOpen = false"
-          >
-            {{ t('common.cancel') }}
-          </Button>
-          <Button
-            variant="destructive"
-            :loading="deleteSessionLoading"
-            @click="handleDeleteSession"
-          >
-            {{ t('common.confirm') }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ConfirmDeleteDialog
+      v-model:open="deleteSessionDialogOpen"
+      :title="t('chat.deleteSession')"
+      :description="t('chat.deleteSessionConfirm')"
+      :loading="deleteSessionLoading"
+      @confirm="handleDeleteSession"
+    />
 
     <Dialog v-model:open="renameSessionDialogOpen">
       <DialogContent class="sm:max-w-md">
@@ -202,6 +185,7 @@ import {
   DialogFooter,
 } from '@memohai/ui'
 import SessionItem from './session-item.vue'
+import ConfirmDeleteDialog from '@/components/confirm-delete-dialog/index.vue'
 
 const { t } = useI18n()
 const chatStore = useChatStore()

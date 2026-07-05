@@ -1,35 +1,35 @@
 <template>
-  <div class="flex flex-col h-full w-full bg-surface-editor">
-    <PanelBreadcrumb :path="filePath" />
-    <div class="flex-1 min-h-0">
-      <!-- Full-area spinner only on the first load. Reloads keep the rendered
-           markdown/html mounted and swap content in place. -->
-      <PanePlaceholder
-        v-if="loading && !loaded"
-        loading
-      >
-        {{ t('common.loading') }}
-      </PanePlaceholder>
+  <DockPanelFrame editor-surface>
+    <template #header>
+      <PanelBreadcrumb :path="filePath" />
+    </template>
+    <!-- Full-area spinner only on the first load. Reloads keep the rendered
+         markdown/html mounted and swap content in place. -->
+    <PanePlaceholder
+      v-if="loading && !loaded"
+      loading
+    >
+      {{ t('common.loading') }}
+    </PanePlaceholder>
 
-      <MarkdownPreview
-        v-else-if="isMd"
-        :content="content"
-        class="h-full"
-      />
-      <HtmlPreview
-        v-else-if="isHtml"
-        :content="content"
-        class="h-full"
-      />
+    <MarkdownPreview
+      v-else-if="isMd"
+      :content="content"
+      class="h-full"
+    />
+    <HtmlPreview
+      v-else-if="isHtml"
+      :content="content"
+      class="h-full"
+    />
 
-      <PanePlaceholder v-else>
-        <template #icon>
-          <FileText class="size-10 opacity-30" />
-        </template>
-        {{ t('bots.files.previewNotAvailable') }}
-      </PanePlaceholder>
-    </div>
-  </div>
+    <PanePlaceholder v-else>
+      <template #icon>
+        <FileText class="size-10 opacity-30" />
+      </template>
+      {{ t('bots.files.previewNotAvailable') }}
+    </PanePlaceholder>
+  </DockPanelFrame>
 </template>
 
 <script setup lang="ts">
@@ -45,6 +45,7 @@ import { isMarkdownFile, isHtmlFile } from '@/components/file-manager/utils'
 import { useChatStore } from '@/store/chat-list'
 import { usePanelVisible } from './use-panel-visible'
 import PanelBreadcrumb from './panel-breadcrumb.vue'
+import DockPanelFrame from './panel-frame.vue'
 import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 
 const MarkdownPreview = defineAsyncComponent(() => import('@/components/markdown-preview/index.vue'))

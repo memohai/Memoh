@@ -153,6 +153,17 @@ will appear (list head, settings row content, panel top). Props: `size: 'sm' | '
 import read-states). Positioning padding (`px-2`, `py-8`) stays with the **caller** via
 class passthrough. Not for centered fills — that's PanePlaceholder.
 
+### Dialogs
+
+**ConfirmDeleteDialog** · `confirm-delete-dialog/index.vue`
+The delete-confirmation dialog: `sm:max-w-sm`, title + optional `DialogDescription`,
+outline cancel + destructive confirm. Props: `open` (v-model), `title`, `description`,
+`confirmLabel` (defaults to `common.confirm`), `loading` (confirm shows spinner, cancel
+disables so the dialog can't close mid-request). Emits `confirm` — the **caller** owns
+the actual delete call and closes on success. Copy is caller i18n; the component owns
+only skeleton + behavior. Do not hand-roll a Dialog+two-buttons confirm again; if a
+confirm needs a form or extra body content it is not this owner.
+
 ### Surface-scoped owners (live next to their surface, not in components/)
 
 Same discipline, narrower home — compose these when working on their surface:
@@ -187,6 +198,13 @@ Same discipline, narrower home — compose these when working on their surface:
   owning just "flex row + rounded" would not earn its keep.
 - **supermarket** (`pages/supermarket/components/`): `market-item-card.vue`
   (list card: leading icon box + title + homepage link + `#actions`).
+- **dockview** (`pages/home/components/dockview/`): `panel-frame.vue`
+  (DockPanelFrame — the host shell every `panel-*.vue` root wraps in:
+  `relative flex h-full w-full flex-col` + a `min-h-0 flex-1` content layer
+  so panes never re-derive the flex-overflow incantation. `editorSurface`
+  prop for the `bg-surface-editor` panels (file/preview/asset); `#header`
+  for a top strip like PanelBreadcrumb. New dock panels compose it — never
+  hand-write the shell).
 - **chat tool-call** (`pages/home/components/tool-detail/`): `empty-row.vue`,
   `preview-box.vue` (max-h-48), `header-row.vue` (collapsible row, tone axis,
   `nested` for button-in-button), `expand-chevron.vue`, `capsule.vue`

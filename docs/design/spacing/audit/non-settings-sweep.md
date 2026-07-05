@@ -285,6 +285,10 @@ _(all 5 auditors in — final dedup ranking below)_
 
 ## FINAL DEDUP RANKING (cross-auditor merge)
 
+> **2026-07-05 状态注记:这份 ranking 是历史决策记录,不是待办清单。** Tier A 已全部落地,
+> Tier B/C/D 大半落地或已裁决 —— 以文末《EXECUTION LOG — Tier A/B passes (2026-07-04/05)》
+> 为准;与该日志矛盾的表格行,以日志为最终状态。
+
 The value of running all five in parallel: the same shapes surfaced from *different*
 surfaces, and only a global merge reveals which are truly system-wide. Candidates that ≥2
 auditors hit independently (⭐) are the strongest owner cases.
@@ -383,3 +387,36 @@ Assembly by group count:
 - eslint --fix clean on all touched files; vue-tsc (`apps/web/tsconfig.json`) clean.
 - UI contract guard: 9 violations = the pre-existing baseline (sidebar ×6,
   video/provider-setting ×2 incl. count line); zero new.
+
+---
+
+## EXECUTION LOG — Tier A/B passes (2026-07-04/05)
+
+本轮把 ranking 里的候选逐个落地或裁决;这是本文件的最终状态记录。
+
+### 已建 owner(与落点)
+| Owner | 落点 | 备注 |
+|---|---|---|
+| **PanePlaceholder**(=EmptyStateNotice 合并) | `components/pane-placeholder/` | 四档 loading 梯子的"面级占位"档 |
+| **InlineLoadingRow** | `components/inline-loading-row/` | 行内左对齐加载行;bots/* ×5 + dockview + chat-pane 模型 popover ×2 采用。bots/* 5 处 class 里保留 `min-h-[3.75rem]`(借 SettingsRow 行高防回流)并以 `ui-allow-shape` 注释豁免 rule-11 |
+| **SidebarPanelHeader** | `components/sidebar/panel-header.vue` | files-pane / panel-schedule / panel-sessions;recents 的头是交互 DropdownMenu,留局部 |
+| **SidebarNavButton** | `components/sidebar/nav-button.vue` | 3 处 byte-identical 收进 owner;px 常量随 owner 走,清掉了 sidebar/index.vue 的 guard px 超额 |
+| **DockPanelFrame** | `pages/home/components/dockview/panel-frame.vue` | 7/7 面板迁移;根恒 relative,`editorSurface` prop 收编辑器底色,`#header` 放面包屑 |
+| **ConfirmDeleteDialog** | `components/confirm-delete-dialog/` | recents + 两份 panel-schedule(后两者原本近逐字节复制);统一 sm:max-w-sm、DialogDescription、删除中禁用取消 |
+| **StepExitShell / StepFrame / FooterNav / HintBox** | `pages/onboarding/components/` | 向导骨架族;HintBox 是 CalloutBanner ×7 被裁决 over-merge 后的正确落点(见上一节 Plan corrections) |
+
+### 已修 / 已裁决
+- **Button `:loading` 采用**:59 文件 spinner→prop 迁移(disabled 语义等价已验证);
+  chat-pane 组合器按钮里的 spinner 换 icon 两处(:470/:547)属 C 档长尾,未动。
+- **MarketItemCard hover bug**、**Badge font="mono"**、**SidebarGroupLabel compact**、
+  **Button shape 轴**:前几轮已落。
+- **ListRow / menu-row:裁决不建。** 三处 hover token(`--sidebar-hover`/`--bot-row-tint`/
+  `--ui-hover`)、高度、radius 是各自 surface 的设计意图,不是意外漂移;理由已录
+  memoh-ui-owners skill。
+- **ChoiceTile / ToolDetailPanel 族**:未建。ChoiceTile 3 处零漂移(低风险);tool-call
+  族等 chat UI revamp 方向定了再动(与在途 chat PR 地盘重叠)。
+- **type-token guard 维度**(`text-[0.9rem]` 不落 `--text-*`):仍是待决策项,未加。
+
+### Verification(本轮)
+- vue-tsc 0;eslint --fix 过全部触碰文件。
+- guard:rule-11 WARN 0;✗ 仅剩 `video/provider-setting.vue` 1 个预存 file-group。

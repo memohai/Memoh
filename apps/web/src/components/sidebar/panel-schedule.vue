@@ -88,34 +88,15 @@
     </div>
 
     <!-- Delete confirmation -->
-    <Dialog
+    <ConfirmDeleteDialog
       :open="!!deleteTarget"
+      :title="t('bots.schedule.deleteTitle')"
+      :description="t('bots.schedule.deleteConfirm', { name: deleteTarget?.name ?? '' })"
+      :confirm-label="t('bots.schedule.delete')"
+      :loading="isDeleting"
       @update:open="(v) => { if (!v) deleteTarget = null }"
-    >
-      <DialogContent class="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>{{ t('bots.schedule.deleteTitle') }}</DialogTitle>
-        </DialogHeader>
-        <p class="text-sm text-muted-foreground">
-          {{ t('bots.schedule.deleteConfirm', { name: deleteTarget?.name ?? '' }) }}
-        </p>
-        <DialogFooter class="gap-2">
-          <Button
-            variant="outline"
-            @click="deleteTarget = null"
-          >
-            {{ t('common.cancel') }}
-          </Button>
-          <Button
-            variant="destructive"
-            :loading="isDeleting"
-            @click="confirmDelete"
-          >
-            {{ t('bots.schedule.delete') }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      @confirm="confirmDelete"
+    />
   </div>
 </template>
 
@@ -128,7 +109,6 @@ import { toast } from '@memohai/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
   Button, Spinner,
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@memohai/ui'
 import { getBotsByBotIdSchedule, deleteBotsByBotIdScheduleById, putBotsByBotIdScheduleById } from '@memohai/sdk'
 import type { ScheduleSchedule } from '@memohai/sdk'
@@ -137,6 +117,7 @@ import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { describeCron, nextRuns } from '@/utils/cron-pattern'
 import ScheduleListItem from '@/pages/bots/components/schedule-list-item.vue'
+import ConfirmDeleteDialog from '@/components/confirm-delete-dialog/index.vue'
 import SidebarPanelHeader from './panel-header.vue'
 
 const { t, locale } = useI18n()

@@ -1,53 +1,51 @@
 <template>
-  <div class="flex h-full w-full flex-col bg-surface-editor">
-    <div class="min-h-0 flex-1">
-      <PanePlaceholder
-        v-if="loading"
-        loading
+  <DockPanelFrame editor-surface>
+    <PanePlaceholder
+      v-if="loading"
+      loading
+    >
+      {{ t('common.loading') }}
+    </PanePlaceholder>
+
+    <MonacoEditor
+      v-else-if="isText"
+      v-model="content"
+      :filename="name"
+      readonly
+      class="h-full"
+    />
+
+    <div
+      v-else-if="isImage && renderUrl"
+      class="flex h-full items-center justify-center overflow-auto bg-muted/30 p-4"
+    >
+      <img
+        :src="renderUrl"
+        :alt="name"
+        class="max-h-full max-w-full rounded-md object-contain"
       >
-        {{ t('common.loading') }}
-      </PanePlaceholder>
-
-      <MonacoEditor
-        v-else-if="isText"
-        v-model="content"
-        :filename="name"
-        readonly
-        class="h-full"
-      />
-
-      <div
-        v-else-if="isImage && renderUrl"
-        class="flex h-full items-center justify-center overflow-auto bg-muted/30 p-4"
-      >
-        <img
-          :src="renderUrl"
-          :alt="name"
-          class="max-h-full max-w-full rounded-md object-contain"
-        >
-      </div>
-
-      <PanePlaceholder v-else>
-        <template #icon>
-          <File class="size-12 opacity-30" />
-        </template>
-        {{ t('bots.files.previewNotAvailable') }}
-        <template
-          v-if="renderUrl"
-          #action
-        >
-          <Button
-            variant="outline"
-            size="sm"
-            @click="handleDownload"
-          >
-            <Download class="mr-1.5 size-3" />
-            {{ t('bots.files.download') }}
-          </Button>
-        </template>
-      </PanePlaceholder>
     </div>
-  </div>
+
+    <PanePlaceholder v-else>
+      <template #icon>
+        <File class="size-12 opacity-30" />
+      </template>
+      {{ t('bots.files.previewNotAvailable') }}
+      <template
+        v-if="renderUrl"
+        #action
+      >
+        <Button
+          variant="outline"
+          size="sm"
+          @click="handleDownload"
+        >
+          <Download class="mr-1.5 size-3" />
+          {{ t('bots.files.download') }}
+        </Button>
+      </template>
+    </PanePlaceholder>
+  </DockPanelFrame>
 </template>
 
 <script setup lang="ts">
@@ -58,6 +56,7 @@ import { Button, toast } from '@memohai/ui'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
 import PanePlaceholder from '@/components/pane-placeholder/index.vue'
+import DockPanelFrame from './panel-frame.vue'
 import { isTextFile, isImageFile } from '@/components/file-manager/utils'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { resolveApiErrorMessage } from '@/utils/api-error'

@@ -2,8 +2,10 @@
 
 Date: 2026-07-01
 
-Status: evidence note. The authoritative migration contract is
-`docs/design/spacing/spacing-contract-v1.md`.
+Status: historical evidence note (research phase). The authoritative building contract
+is now the `memoh-ui-owners` skill; the terminal state of what shipped lives in
+`docs/design/spacing/owner-vocabulary-census.md`. `spacing-contract-v1.md` remains as
+the research-era draft this note originally pointed to.
 
 ## Current Completion
 

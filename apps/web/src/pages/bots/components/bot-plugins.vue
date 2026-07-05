@@ -17,8 +17,8 @@
     </template>
 
     <SettingsSection :title="$t('bots.plugins.installedTitle')">
-      <!-- Loading skeleton — matches the plugin-row height so the list keeps
-           its space and doesn't jump (CLS) when plugins arrive. -->
+      <!-- ui-allow-shape: loading skeleton — matches the plugin-row height so the
+           list keeps its space and doesn't jump (CLS) when plugins arrive. -->
       <InlineLoadingRow
         v-if="loading && !plugins.length"
         size="md"

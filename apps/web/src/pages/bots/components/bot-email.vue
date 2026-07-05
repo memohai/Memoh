@@ -50,8 +50,8 @@
           </Popover>
         </SettingsRow>
 
-        <!-- Loading skeleton — matches the binding-row height so the list holds
-             its space and doesn't jump (CLS) as bindings load. -->
+        <!-- ui-allow-shape: loading skeleton — matches the binding-row height so the
+             list holds its space and doesn't jump (CLS) as bindings load. -->
         <InlineLoadingRow
           v-if="bindingsLoading"
           size="md"

@@ -88,8 +88,8 @@
             </div>
           </SettingsRow>
 
-          <!-- Loading skeleton — matches the member-row height so the list holds
-               its space and doesn't jump (CLS) while rules/managers load. -->
+          <!-- ui-allow-shape: loading skeleton — matches the member-row height so the
+               list holds its space and doesn't jump (CLS) while rules/managers load. -->
           <InlineLoadingRow
             v-if="isPendingRules || isPendingManagers"
             size="md"

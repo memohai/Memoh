@@ -99,8 +99,8 @@
       </FormStack>
     </div>
 
-    <!-- Loading skeleton — borrows the grant-row height to keep the list's
-         space steady (no CLS) until grants load. -->
+    <!-- ui-allow-shape: loading skeleton — borrows the grant-row height to keep
+         the list's space steady (no CLS) until grants load. -->
     <InlineLoadingRow
       v-if="isLoading"
       size="md"

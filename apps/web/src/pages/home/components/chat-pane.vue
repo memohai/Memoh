@@ -35,7 +35,7 @@
                 v-if="loadingOlder"
                 class="flex justify-center py-2"
               >
-                <LoaderCircle class="size-3.5 animate-spin text-muted-foreground" />
+                <Spinner class="size-3.5" />
               </div>
 
               <!-- Read-only sessions (subagent / system / synced channel
@@ -740,13 +740,12 @@
                             class="mt-0.5 size-3 shrink-0 text-muted-foreground"
                           />
                         </button>
-                        <div
+                        <InlineLoadingRow
                           v-if="acpModelsLoading"
-                          class="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
+                          class="px-2 py-3"
                         >
-                          <LoaderCircle class="size-3 animate-spin" />
                           {{ $t('common.loading') }}
-                        </div>
+                        </InlineLoadingRow>
                         <div
                           v-else-if="!pendingACPModelOptions.length"
                           class="px-2 py-3 text-xs text-muted-foreground"
@@ -783,13 +782,12 @@
                         v-else-if="activeIsACP"
                         class="max-h-80 overflow-y-auto p-1"
                       >
-                        <div
+                        <InlineLoadingRow
                           v-if="acpModelsLoading"
-                          class="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
+                          class="px-2 py-3"
                         >
-                          <LoaderCircle class="size-3 animate-spin" />
                           {{ $t('common.loading') }}
-                        </div>
+                        </InlineLoadingRow>
                         <div
                           v-else-if="!acpModels.length"
                           class="px-2 py-3 text-xs text-muted-foreground"
@@ -992,7 +990,7 @@ import {
   Package,
   SquarePen,
 } from 'lucide-vue-next'
-import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator } from '@memohai/ui'
+import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner } from '@memohai/ui'
 import { useChatStore, type ACPAgentSessionInput } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import { useScroll, useElementBounding, useIntersectionObserver, useStorage } from '@vueuse/core'
@@ -1003,6 +1001,7 @@ import { useI18n } from 'vue-i18n'
 import MessageItem from './message-item.vue'
 import ChatAttachmentCard from './chat-attachment-card.vue'
 import PanePlaceholder from '@/components/pane-placeholder/index.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import { animateScrollTo } from './chat-minimap'
 import BgTaskPill from './bg-task-pill.vue'
 import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'

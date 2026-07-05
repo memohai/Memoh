@@ -1,15 +1,13 @@
 <template>
-  <div class="flex flex-col relative h-full w-full">
-    <div class="flex-1 min-h-0">
-      <TerminalPane
-        v-if="mounted && currentBotId"
-        :key="`terminal-pane:${currentBotId}:${props.params.api.id}`"
-        :bot-id="currentBotId"
-        :tab-id="props.params.api.id"
-        :active="visible"
-      />
-    </div>
-  </div>
+  <DockPanelFrame>
+    <TerminalPane
+      v-if="mounted && currentBotId"
+      :key="`terminal-pane:${currentBotId}:${props.params.api.id}`"
+      :bot-id="currentBotId"
+      :tab-id="props.params.api.id"
+      :active="visible"
+    />
+  </DockPanelFrame>
 </template>
 
 <script setup lang="ts">
@@ -19,6 +17,7 @@ import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
 import TerminalPane from '../terminal-pane.vue'
 import { usePanelVisible } from './use-panel-visible'
+import DockPanelFrame from './panel-frame.vue'
 
 const props = defineProps<{
   params: {

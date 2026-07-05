@@ -30,8 +30,8 @@
     </template>
 
     <SettingsSection :title="$t('bots.skills.libraryTitle')">
-      <!-- Loading skeleton — borrows the skill-row height to hold the list's
-           space steady (no CLS) until skills load. -->
+      <!-- ui-allow-shape: loading skeleton — borrows the skill-row height to hold
+           the list's space steady (no CLS) until skills load. -->
       <InlineLoadingRow
         v-if="isLoading"
         size="md"
