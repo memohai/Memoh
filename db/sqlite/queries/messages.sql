@@ -268,11 +268,13 @@ SET turn_id = sqlc.arg(turn_id),
       SELECT position
       FROM bot_history_turns
       WHERE id = sqlc.arg(turn_id)
+        AND session_id = bot_history_messages.session_id
     ),
     turn_visible = COALESCE((
       SELECT CASE WHEN superseded_at IS NULL THEN 1 ELSE 0 END
       FROM bot_history_turns
       WHERE id = sqlc.arg(turn_id)
+        AND session_id = bot_history_messages.session_id
     ), 0),
     turn_message_seq = sqlc.arg(turn_message_seq)
 WHERE bot_history_messages.id = sqlc.arg(message_id)
@@ -280,6 +282,7 @@ WHERE bot_history_messages.id = sqlc.arg(message_id)
     SELECT 1
     FROM bot_history_turns
     WHERE id = sqlc.arg(turn_id)
+      AND session_id = bot_history_messages.session_id
   )
 RETURNING id;
 

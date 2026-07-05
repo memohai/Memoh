@@ -1299,11 +1299,13 @@ SET turn_id = ?1,
       SELECT position
       FROM bot_history_turns
       WHERE id = ?1
+        AND session_id = bot_history_messages.session_id
     ),
     turn_visible = COALESCE((
       SELECT CASE WHEN superseded_at IS NULL THEN 1 ELSE 0 END
       FROM bot_history_turns
       WHERE id = ?1
+        AND session_id = bot_history_messages.session_id
     ), 0),
     turn_message_seq = ?2
 WHERE bot_history_messages.id = ?3
@@ -1311,6 +1313,7 @@ WHERE bot_history_messages.id = ?3
     SELECT 1
     FROM bot_history_turns
     WHERE id = ?1
+      AND session_id = bot_history_messages.session_id
   )
 RETURNING id
 `

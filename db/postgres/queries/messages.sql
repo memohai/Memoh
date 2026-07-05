@@ -658,6 +658,7 @@ SET turn_id = t.id,
 FROM bot_history_turns t
 WHERE m.id = sqlc.arg(message_id)
   AND t.id = sqlc.arg(turn_id)
+  AND m.session_id = t.session_id
 RETURNING m.id;
 
 -- name: AppendMessageToHistoryTurnByRequest :one

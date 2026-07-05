@@ -1866,6 +1866,7 @@ SET turn_id = t.id,
 FROM bot_history_turns t
 WHERE m.id = $2
   AND t.id = $3
+  AND m.session_id = t.session_id
 RETURNING m.id
 `
 

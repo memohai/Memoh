@@ -392,6 +392,33 @@ VALUES (?, ?, ?, 'user', '{}')`, messageID, botID, sessionID); err != nil {
 	if linkedTurn.Valid {
 		t.Fatalf("message linked to missing turn %q", linkedTurn.String)
 	}
+
+	otherSessionID := "00000000-0000-0000-0000-000000004705"
+	otherTurnID := "00000000-0000-0000-0000-000000004706"
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, bot_id, next_turn_position) VALUES (?, ?, 2)`, otherSessionID, botID); err != nil {
+		t.Fatalf("insert other session: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bot_history_turns (id, bot_id, session_id, position)
+VALUES (?, ?, ?, 1)`, otherTurnID, botID, otherSessionID); err != nil {
+		t.Fatalf("insert other turn: %v", err)
+	}
+
+	_, err = q.LinkMessageToHistoryTurn(ctx, pgsqlc.LinkMessageToHistoryTurnParams{
+		MessageID:      pgUUIDFromString(t, messageID),
+		TurnID:         pgUUIDFromString(t, otherTurnID),
+		TurnMessageSeq: pgtype.Int8{Int64: 1, Valid: true},
+	})
+	if err == nil {
+		t.Fatal("cross-session link succeeded, want error")
+	}
+	linkedTurn = sql.NullString{}
+	if err := conn.QueryRowContext(ctx, `SELECT turn_id FROM bot_history_messages WHERE id = ?`, messageID).Scan(&linkedTurn); err != nil {
+		t.Fatalf("select linked turn after cross-session link: %v", err)
+	}
+	if linkedTurn.Valid {
+		t.Fatalf("message linked to cross-session turn %q", linkedTurn.String)
+	}
 }
 
 func pgUUIDFromString(t *testing.T, value string) pgtype.UUID {
