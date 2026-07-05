@@ -498,7 +498,7 @@ func (r *Resolver) persistTerminalSnapshotResult(ctx context.Context, req conver
 	}
 
 	storeReq := req
-	if rc.userMessageAlreadyInContext || req.ReusePersistedUserMessage {
+	if req.ReusePersistedUserMessage {
 		storeReq.UserMessagePersisted = true
 	}
 	roundMessages := prependTurnUserMessage(storeReq, outputMessages)

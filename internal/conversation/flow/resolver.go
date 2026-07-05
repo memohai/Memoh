@@ -544,9 +544,6 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 
 	outputMessages := sdkMessagesToModelMessages(result.Messages)
 	storeReq := req
-	if rc.userMessageAlreadyInContext {
-		storeReq.UserMessagePersisted = true
-	}
 	roundMessages := prependTurnUserMessage(storeReq, outputMessages)
 	if err := r.storeRoundWithOptions(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
 		SkipMemory: storeReq.SkipMemoryExtraction,

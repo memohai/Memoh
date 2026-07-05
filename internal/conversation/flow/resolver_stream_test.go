@@ -291,7 +291,7 @@ func TestHasVisibleAgentStreamOutputIgnoresLifecycleOnlyEvents(t *testing.T) {
 	}
 }
 
-func TestPersistTerminalSnapshotSkipsUserWhenPipelineContextContainsCurrentMessage(t *testing.T) {
+func TestPersistTerminalSnapshotPersistsUserWhenPipelineContextContainsCurrentMessage(t *testing.T) {
 	t.Parallel()
 
 	messages := &recordingMessageService{}
@@ -317,11 +317,14 @@ func TestPersistTerminalSnapshotSkipsUserWhenPipelineContextContainsCurrentMessa
 		t.Fatalf("persistTerminalSnapshot returned error: %v", err)
 	}
 
-	if len(messages.persisted) != 1 {
-		t.Fatalf("expected only assistant output to persist, got %#v", messages.persisted)
+	if len(messages.persisted) != 2 {
+		t.Fatalf("expected user and assistant output to persist, got %#v", messages.persisted)
 	}
-	if messages.persisted[0].Role != "assistant" {
-		t.Fatalf("unexpected persisted role: %q", messages.persisted[0].Role)
+	if messages.persisted[0].Role != "user" {
+		t.Fatalf("unexpected first persisted role: %q", messages.persisted[0].Role)
+	}
+	if messages.persisted[1].Role != "assistant" {
+		t.Fatalf("unexpected second persisted role: %q", messages.persisted[1].Role)
 	}
 }
 

@@ -151,6 +151,81 @@ func TestSQLiteHistoryTurnsAssistantBindsRequestedPendingTurn(t *testing.T) {
 	}
 }
 
+func TestSQLiteHistoryTurnsConsecutiveRoundsStaySeparate(t *testing.T) {
+	ctx := context.Background()
+	conn, queries := newMessageHistoryTurnSQLite(t)
+	defer func() { _ = conn.Close() }()
+	svc := NewService(nil, queries)
+
+	const (
+		botID     = "00000000-0000-0000-0000-000000003121"
+		sessionID = "00000000-0000-0000-0000-000000003122"
+	)
+	insertMessageHistoryTurnFixtures(t, conn, botID, sessionID)
+
+	firstUser, err := svc.Persist(ctx, PersistInput{
+		BotID:     botID,
+		SessionID: sessionID,
+		Role:      "user",
+		Content:   []byte(`{"role":"user","content":"first"}`),
+	})
+	if err != nil {
+		t.Fatalf("persist first user: %v", err)
+	}
+	firstAssistant, err := svc.Persist(ctx, PersistInput{
+		BotID:                botID,
+		SessionID:            sessionID,
+		Role:                 "assistant",
+		Content:              []byte(`{"role":"assistant","content":"answer first"}`),
+		TurnRequestMessageID: firstUser.ID,
+	})
+	if err != nil {
+		t.Fatalf("persist first assistant: %v", err)
+	}
+	secondUser, err := svc.Persist(ctx, PersistInput{
+		BotID:     botID,
+		SessionID: sessionID,
+		Role:      "user",
+		Content:   []byte(`{"role":"user","content":"second"}`),
+	})
+	if err != nil {
+		t.Fatalf("persist second user: %v", err)
+	}
+	secondAssistant, err := svc.Persist(ctx, PersistInput{
+		BotID:                botID,
+		SessionID:            sessionID,
+		Role:                 "assistant",
+		Content:              []byte(`{"role":"assistant","content":"answer second"}`),
+		TurnRequestMessageID: secondUser.ID,
+	})
+	if err != nil {
+		t.Fatalf("persist second assistant: %v", err)
+	}
+
+	messages, err := svc.ListBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	want := []string{firstUser.ID, firstAssistant.ID, secondUser.ID, secondAssistant.ID}
+	if got := messageIDs(messages); !equalStringSlices(got, want) {
+		t.Fatalf("visible message ids = %#v, want %#v", got, want)
+	}
+	firstTurn, err := svc.GetVisibleTurnByMessage(ctx, sessionID, firstAssistant.ID)
+	if err != nil {
+		t.Fatalf("visible turn by first assistant: %v", err)
+	}
+	secondTurn, err := svc.GetVisibleTurnByMessage(ctx, sessionID, secondAssistant.ID)
+	if err != nil {
+		t.Fatalf("visible turn by second assistant: %v", err)
+	}
+	if firstTurn.ID == secondTurn.ID {
+		t.Fatalf("assistants share turn %s, want separate turns", firstTurn.ID)
+	}
+	if secondTurn.RequestMessageID != secondUser.ID {
+		t.Fatalf("second turn request = %s, want second user %s", secondTurn.RequestMessageID, secondUser.ID)
+	}
+}
+
 func TestSQLiteHistoryTurnsToolTailAppendsToRequestedTurn(t *testing.T) {
 	ctx := context.Background()
 	conn, queries := newMessageHistoryTurnSQLite(t)
