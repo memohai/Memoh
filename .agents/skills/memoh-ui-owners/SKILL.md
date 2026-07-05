@@ -158,8 +158,9 @@ class passthrough. Not for centered fills — that's PanePlaceholder.
 Same discipline, narrower home — compose these when working on their surface:
 
 - **onboarding** (`pages/onboarding/components/`): `step-frame.vue` (wizard exit
-  shell + 35rem body + title; owns the no-pt geometry that killed the
-  step-to-step title jump), `footer-nav.vue` (prev/next pair, `#prev`/`#next`
+  shell + 35rem body + title structure; each step's box pt and title mb are
+  deliberately hand-tuned per page and passed via `bodyClass`/`titleClass` —
+  do NOT flatten them), `footer-nav.vue` (prev/next pair, `#prev`/`#next`
   escape hatches for Transition+Spinner CTAs), `choice-tile.vue` (h-16
   icon+label grid tile, solid/dashed).
 - **supermarket** (`pages/supermarket/components/`): `market-item-card.vue`

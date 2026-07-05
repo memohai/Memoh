@@ -1,7 +1,7 @@
 <template>
-  <!-- 这是 wizard 步骤帧的 owner;之前 Step2/3/4 各手写一份,盒内 pt 漂移
-       (none/pt-24/pt-16) 导致切步时标题跳动;owner 统一为无 pt + mb-6,标题在
-       每一步同一 y。 -->
+  <!-- wizard 步骤帧的 owner:退出动画壳 + 35rem 盒 + 标题结构。
+       各步的盒顶 pt 与标题 mb 是逐页单独调过的视觉位置(不是漂移),
+       由调用方经 bodyClass / titleClass 传入,owner 不强行统一。 -->
   <div
     class="transition-all duration-[175ms] ease-out"
     :class="exiting ? 'scale-[0.88] opacity-0' : 'scale-100 opacity-100'"
@@ -12,8 +12,8 @@
     >
       <h2
         v-if="title"
-        class="text-3xl font-semibold mb-6 transition-all duration-[350ms] ease-out"
-        :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+        class="text-3xl font-semibold transition-all duration-[350ms] ease-out"
+        :class="[titleClass, visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3']"
       >
         {{ title }}
       </h2>
@@ -28,6 +28,8 @@ withDefaults(defineProps<{
   title?: string
   visible?: boolean
   exiting?: boolean
+  // 标题下边距,逐页单独调的值(Step2 mb-8 / Step3 mb-3 / Step4 mb-6)
+  titleClass?: string
   // Step3 renders three mode variants (list/form/acp), each with its own
   // scale-fade transition on the body div (a second animation layer on top
   // of the exit shell above). Passed through as-is (array/object/string, same
@@ -38,6 +40,7 @@ withDefaults(defineProps<{
   title: '',
   visible: false,
   exiting: false,
+  titleClass: 'mb-6',
   bodyClass: undefined,
 })
 </script>

@@ -379,14 +379,13 @@ onMounted(() => {
     <StepFrame
       v-if="mode === 'list'"
       :title="t('onboarding.provider.title')"
+      title-class="mb-3"
       :visible="visible"
-      :body-class="['transition-all duration-[175ms] ease-out', listVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
+      :body-class="['pt-24 transition-all duration-[175ms] ease-out', listVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
     >
-      <!-- list 模式标题 mb 从 mb-3 提到 owner 的 mb-6;下方描述 p 的 mb 由
-           mb-6 减到 mb-3,标题→网格总间距保持约 36px 不变。 -->
       <div>
         <p
-          class="text-sm text-muted-foreground leading-relaxed mb-3 transition-all duration-[350ms] ease-out delay-[60ms]"
+          class="text-sm text-muted-foreground leading-relaxed mb-6 transition-all duration-[350ms] ease-out delay-[60ms]"
           :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
         >
           {{ t('onboarding.provider.description') }}
@@ -447,7 +446,7 @@ onMounted(() => {
     <StepFrame
       v-else-if="mode === 'form'"
       :visible="visible"
-      :body-class="['transition-all duration-[175ms] ease-out', formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
+      :body-class="['pt-24 transition-all duration-[175ms] ease-out', formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
     >
       <!-- form/acp 模式有返回箭头+图标+标题的头行,而非纯 h2,走 #header slot -->
       <template #header>
@@ -730,7 +729,7 @@ onMounted(() => {
     <StepFrame
       v-else-if="mode === 'acp' && selectedAcpProfile"
       :visible="visible"
-      :body-class="['transition-all duration-[175ms] ease-out', formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
+      :body-class="['pt-24 transition-all duration-[175ms] ease-out', formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
     >
       <template #header>
         <div

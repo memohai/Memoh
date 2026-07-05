@@ -24,6 +24,7 @@ const { visible, exiting, leave } = useStepTransition()
 <template>
   <StepFrame
     :title="t('onboarding.appearance.title')"
+    title-class="mb-8"
     :visible="visible"
     :exiting="exiting"
   >
