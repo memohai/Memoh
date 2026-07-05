@@ -446,7 +446,7 @@ onMounted(() => {
     <StepFrame
       v-else-if="mode === 'form'"
       :visible="visible"
-      :body-class="['pt-24 transition-all duration-[175ms] ease-out', formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
+      :body-class="['pt-16 transition-all duration-[175ms] ease-out', formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
     >
       <!-- form/acp 模式有返回箭头+图标+标题的头行,而非纯 h2,走 #header slot -->
       <template #header>
@@ -729,7 +729,7 @@ onMounted(() => {
     <StepFrame
       v-else-if="mode === 'acp' && selectedAcpProfile"
       :visible="visible"
-      :body-class="['pt-24 transition-all duration-[175ms] ease-out', formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
+      :body-class="['pt-16 transition-all duration-[175ms] ease-out', formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
     >
       <template #header>
         <div
