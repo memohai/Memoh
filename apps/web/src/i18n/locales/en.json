@@ -90,8 +90,7 @@
     "unsaved": "Unsaved",
     "editJson": "Edit JSON",
     "actionRequired": "Action Required",
-    "preview": "Preview",
-    "raw": "Source"
+    "preview": "Preview"
   },
   "auth": {
     "welcome": "Welcome Back",
@@ -438,8 +437,6 @@
       "defaultTitle": "{session} fork"
     },
     "unknownSession": "Unknown session",
-    "minimapLabel": "Conversation outline",
-    "minimapEarlier": "Earlier messages appear as they load",
     "startChat": "Start Chat",
     "noBot": "No bots available, please create a bot first",
     "newChat": "New Session",

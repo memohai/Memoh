@@ -4162,13 +4162,6 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function clearMessages() {
-    abort()
-    replaceMessages([])
-    hasMoreOlder.value = false
-    hasLoadedOlder.value = false
-  }
-
   const chats = sessions
   const chatId = sessionId
 
@@ -4256,7 +4249,6 @@ export const useChatStore = defineStore('chat', () => {
     editLatestUser,
     respondToolApproval,
     respondUserInput,
-    clearMessages,
     resetUserScopedState,
     loadOlderMessages,
     findMessageIdByExternalId,

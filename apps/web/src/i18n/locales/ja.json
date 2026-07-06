@@ -85,7 +85,6 @@
     "editJson": "編集JSON",
     "actionRequired": "必要なアクション",
     "preview": "プレビュー",
-    "raw": "ソース",
     "hide": "非表示",
     "show": "表示",
     "saveChanges": "変更を保存"
@@ -407,8 +406,6 @@
       "defaultTitle": "{session} のフォーク"
     },
     "unknownSession": "不明なセッション",
-    "minimapLabel": "会話の概要",
-    "minimapEarlier": "以前のメッセージがロード中に表示される",
     "startChat": "チャットを開始する",
     "noBot": "利用可能なBotがありません。最初にBotを作成してください",
     "newChat": "新しいセッション",

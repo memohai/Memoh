@@ -108,9 +108,6 @@ importers:
       '@vue/tsconfig':
         specifier: ^0.8.1
         version: 0.8.1(typescript@5.9.3)(vue@3.5.26(typescript@5.9.3))
-      animate.css:
-        specifier: ^4.1.1
-        version: 4.1.1
       electron:
         specifier: ^42.0.0
         version: 42.5.0
@@ -225,9 +222,6 @@ importers:
       '@xterm/xterm':
         specifier: ^6.0.0
         version: 6.0.0
-      animate.css:
-        specifier: ^4.1.1
-        version: 4.1.1
       cron-parser:
         specifier: ^5.5.0
         version: 5.5.0
@@ -237,9 +231,6 @@ importers:
       dockview-vue:
         specifier: ^7.0.2
         version: 7.0.2(patch_hash=ed0eefdb14161c24622f84cfcd1f3470577cc96fd973705c7e09d1c643452b07)(vue@3.5.26(typescript@5.9.3))
-      dotenv:
-        specifier: ^17.2.3
-        version: 17.2.3
       echarts:
         specifier: ^6.0.0
         version: 6.0.0
@@ -258,12 +249,6 @@ importers:
       misans-vf:
         specifier: 1.0.0
         version: 1.0.0
-      modern-css-reset:
-        specifier: ^1.4.0
-        version: 1.4.0
-      moment:
-        specifier: ^2.30.1
-        version: 2.30.1
       monaco-editor:
         specifier: ^0.52.2
         version: 0.52.2
@@ -316,9 +301,6 @@ importers:
       '@memohai/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@types/moment':
-        specifier: ^2.13.0
-        version: 2.13.0
       '@types/node':
         specifier: ^24.10.1
         version: 24.10.4
@@ -2363,10 +2345,6 @@ packages:
   '@types/mdx@2.0.13':
     resolution: {integrity: sha512-+OWZQfAYyio6YkJb3HLxDrvnx6SWWDbC0zVPfBRzUk0/nqoDyf6dNxQi3eArPe8rJ473nobTMQ/8Zk+LxJ+Yuw==}
 
-  '@types/moment@2.13.0':
-    resolution: {integrity: sha512-DyuyYGpV6r+4Z1bUznLi/Y7HpGn4iQ4IVcGn8zrr1P4KotKLdH0sbK1TFR6RGyX6B+G8u83wCzL+bpawKU/hdQ==}
-    deprecated: This is a stub types definition for Moment (https://github.com/moment/moment). Moment provides its own type definitions, so you don't need @types/moment installed!
-
   '@types/ms@2.1.0':
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
 
@@ -2784,9 +2762,6 @@ packages:
 
   alien-signals@3.1.2:
     resolution: {integrity: sha512-d9dYqZTS90WLiU0I5c6DHj/HcKkF8ZyGN3G5x8wSbslulz70KOxaqCT0hQCo9KOyhVqzqGojvNdJXoTumZOtcw==}
-
-  animate.css@4.1.1:
-    resolution: {integrity: sha512-+mRmCTv6SbCmtYJCN4faJMNFVNN5EuCTTprDTAo7YzIGji2KADmakjVA3+8mVDkZ2Bf09vayB35lSQIex2+QaQ==}
 
   ansi-colors@4.1.3:
     resolution: {integrity: sha512-/6w/C21Pm1A7aZitlI5Ni/2J6FFQN8i1Cvz3kHABAAbw93v/NlvKdVOqz7CCWz/3iv/JplRSEEZ83XION15ovw==}
@@ -4491,12 +4466,6 @@ packages:
 
   mlly@1.8.0:
     resolution: {integrity: sha512-l8D9ODSRWLe2KHJSifWGwBqpTZXIXTeo8mlKjY+E2HAakaTeNpqAyBZ8GSqLzHgw4XmHmC8whvpjJNMbFZN7/g==}
-
-  modern-css-reset@1.4.0:
-    resolution: {integrity: sha512-0crZmSFmrxkI7159rvQWjpDhy0u4+Awg/iOycJdlVn0RSeft/a+6BrQHR3IqvmdK25sqt0o6Z5Ap7cWgUee2rw==}
-
-  moment@2.30.1:
-    resolution: {integrity: sha512-uEmtNhbDOrWPFS+hdjFCBfy9f2YoyzRpwcl+DqpC6taX21FzsTLQVbMV/W7PzNSX6x/bhC1zA3c2UQ5NzH6how==}
 
   monaco-editor@0.52.2:
     resolution: {integrity: sha512-GEQWEZmfkOGLdd3XK8ryrfWz3AIP8YymVXiPHEdewrUq7mh0qrKrfHLNCXcbB6sTnMLnOZ3ztSiKcciFUkIJwQ==}
@@ -7591,10 +7560,6 @@ snapshots:
 
   '@types/mdx@2.0.13': {}
 
-  '@types/moment@2.13.0':
-    dependencies:
-      moment: 2.30.1
-
   '@types/ms@2.1.0': {}
 
   '@types/node@24.10.4':
@@ -8114,8 +8079,6 @@ snapshots:
   alien-signals@2.0.8: {}
 
   alien-signals@3.1.2: {}
-
-  animate.css@4.1.1: {}
 
   ansi-colors@4.1.3: {}
 
@@ -9992,10 +9955,6 @@ snapshots:
       pathe: 2.0.3
       pkg-types: 1.3.1
       ufo: 1.6.2
-
-  modern-css-reset@1.4.0: {}
-
-  moment@2.30.1: {}
 
   monaco-editor@0.52.2: {}
 

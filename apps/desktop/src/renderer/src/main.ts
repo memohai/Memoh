@@ -23,7 +23,6 @@ import '@fontsource-variable/inter'
 import 'markstream-vue/index.css'
 import '@memohai/web/style.css'
 import './desktop-shell.css'
-import 'animate.css'
 import 'katex/dist/katex.min.css'
 
 import App from './chat/App.vue'

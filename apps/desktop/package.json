@@ -63,7 +63,6 @@
     "@vee-validate/zod": "^4.15.1",
     "@vitejs/plugin-vue": "^6.0.5",
     "@vue/tsconfig": "^0.8.1",
-    "animate.css": "^4.1.1",
     "electron": "^42.0.0",
     "electron-builder": "^26.0.12",
     "electron-vite": "^4.0.0",

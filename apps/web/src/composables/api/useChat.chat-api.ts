@@ -1,10 +1,8 @@
 import {
   getBots,
-  deleteBotsByBotIdMessages,
   deleteBotsByBotIdAcpRuntimesByRuntimeId,
   getBotsByBotIdSessions,
   getBotsByBotIdSessionsBySessionId,
-  getBotsByBotIdSessionsBySessionIdAcpRuntime,
   postBotsByBotIdAcpRuntimes,
   postBotsByBotIdSessions,
   postBotsByBotIdSessionsBySessionIdFork,
@@ -170,14 +168,6 @@ export async function ensureACPRuntime(botId: string, sessionId: string): Promis
   return data as AcpagentRuntimeStatus
 }
 
-export async function getACPRuntime(botId: string, sessionId: string): Promise<AcpagentRuntimeStatus> {
-  const { data } = await getBotsByBotIdSessionsBySessionIdAcpRuntime({
-    path: { bot_id: botId.trim(), session_id: sessionId.trim() },
-    throwOnError: true,
-  })
-  return data as AcpagentRuntimeStatus
-}
-
 export async function setACPRuntimeModel(botId: string, sessionId: string, modelId: string): Promise<AcpagentRuntimeStatus> {
   const { data } = await patchBotsByBotIdSessionsBySessionIdAcpRuntimeModel({
     path: { bot_id: botId.trim(), session_id: sessionId.trim() },
@@ -219,13 +209,6 @@ export async function closeACPRuntime(botId: string, runtimeId: string): Promise
 export async function deleteSession(botId: string, sessionId: string): Promise<void> {
   await deleteBotsByBotIdSessionsBySessionId({
     path: { bot_id: botId.trim(), session_id: sessionId.trim() },
-    throwOnError: true,
-  })
-}
-
-export async function deleteAllMessages(botId: string): Promise<void> {
-  await deleteBotsByBotIdMessages({
-    path: { bot_id: botId },
     throwOnError: true,
   })
 }
