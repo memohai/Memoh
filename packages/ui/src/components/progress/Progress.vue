@@ -31,7 +31,7 @@ const value = computed(() => props.modelValue ?? 0)
   >
     <ProgressIndicator
       data-slot="progress-indicator"
-      class="size-full flex-1 rounded-full bg-[color:var(--accent-blue-fill)] transition-transform duration-300 ease-out will-change-transform"
+      class="size-full flex-1 rounded-full bg-accent-blue-fill transition-transform duration-300 ease-out will-change-transform"
       :style="`transform: translateX(-${100 - value}%);`"
     />
   </ProgressRoot>

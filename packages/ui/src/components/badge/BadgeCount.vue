@@ -28,7 +28,7 @@ const badgeCountVariants = cva(
     variants: {
       variant: {
         default: 'bg-foreground text-background',
-        destructive: 'bg-[var(--accent-red-fill)] text-[var(--accent-red-foreground)]',
+        destructive: 'bg-accent-red-fill text-accent-red-foreground',
       },
     },
     defaultVariants: {
