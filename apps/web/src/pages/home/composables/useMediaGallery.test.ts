@@ -73,13 +73,13 @@ describe('useMediaGallery', () => {
   })
 
   it('uses the SDK base URL for stored media assets', () => {
-    client.setConfig({ baseUrl: 'http://127.0.0.1:18731' })
+    client.setConfig({ baseUrl: 'http://127.0.0.1:18080' })
     localStorage.setItem('token', 'token with spaces')
 
     expect(resolveUrl({
       type: 'image',
       bot_id: 'bot 1',
       content_hash: 'sha256:asset/1',
-    })).toBe('http://127.0.0.1:18731/bots/bot%201/media/sha256%3Aasset%2F1?token=token%20with%20spaces')
+    })).toBe('http://127.0.0.1:18080/bots/bot%201/media/sha256%3Aasset%2F1?token=token%20with%20spaces')
   })
 })

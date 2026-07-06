@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build online (${{ matrix.platform }})
+    name: Build desktop (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:
@@ -73,10 +73,10 @@ jobs:
           echo "CSC_KEY_PASSWORD=$APPLE_CERTIFICATE_PASSWORD" >> "$GITHUB_ENV"
           echo "has_cert=true" >> "$GITHUB_OUTPUT"
 
-      - name: Build desktop online (unpacked smoke)
+      - name: Build desktop (unpacked smoke)
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ steps.mac-signing.outputs.has_cert == 'true' && 'true' || 'false' }}
-        run: pnpm --filter @memohai/desktop build:dir:online
+        run: pnpm --filter @memohai/desktop build:dir
 
       - name: Verify macOS signature
         if: ${{ startsWith(matrix.platform, 'macos-') && steps.mac-signing.outputs.has_cert == 'true' }}

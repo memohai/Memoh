@@ -53,10 +53,6 @@ async function bootstrap() {
   })
 
   const status = await window.api.desktop.getServerStatus()
-  const token = await window.api.desktop.authToken()
-  if (token) {
-    localStorage.setItem('token', token)
-  }
   setupApiClient({
     baseUrl: status.baseUrl || 'http://127.0.0.1:0',
     onUnauthorized: () => router.replace({ name: 'Login' }),

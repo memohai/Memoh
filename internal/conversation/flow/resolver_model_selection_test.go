@@ -1,15 +1,8 @@
 package flow
 
 import (
-	"context"
-	"database/sql"
-	"log/slog"
-	"strings"
 	"testing"
 
-	_ "modernc.org/sqlite"
-
-	sqlitestore "github.com/memohai/memoh/internal/db/sqlite/store"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/settings"
 )
@@ -136,38 +129,6 @@ func TestSupportsImageInputForModel(t *testing.T) {
 	plainModel := models.GetResponse{}
 	if supportsImageInputForModel(plainModel) {
 		t.Fatal("model without vision compatibility should not support image input")
-	}
-}
-
-func TestFetchChatModelRejectsDisabledModel(t *testing.T) {
-	ctx := context.Background()
-	conn, queries := newModelSelectionTestDB(t)
-	modelsService := models.NewService(slog.New(slog.DiscardHandler), queries)
-	resolver := &Resolver{modelsService: modelsService, queries: queries}
-
-	const providerID = "00000000-0000-0000-0000-000000000101"
-	insertModelSelectionProvider(t, conn, providerID, "openai-completions", true)
-	insertModelSelectionModel(t, conn, "00000000-0000-0000-0000-000000000102", "gpt-disabled", providerID, models.ModelTypeChat, false)
-
-	_, _, err := resolver.fetchChatModel(ctx, "gpt-disabled")
-	if err == nil || !strings.Contains(err.Error(), "disabled") {
-		t.Fatalf("fetchChatModel disabled model error = %v, want disabled error", err)
-	}
-}
-
-func TestFetchChatModelRejectsDisabledProvider(t *testing.T) {
-	ctx := context.Background()
-	conn, queries := newModelSelectionTestDB(t)
-	modelsService := models.NewService(slog.New(slog.DiscardHandler), queries)
-	resolver := &Resolver{modelsService: modelsService, queries: queries}
-
-	const providerID = "00000000-0000-0000-0000-000000000201"
-	insertModelSelectionProvider(t, conn, providerID, "openai-completions", false)
-	insertModelSelectionModel(t, conn, "00000000-0000-0000-0000-000000000202", "gpt-provider-disabled", providerID, models.ModelTypeChat, true)
-
-	_, _, err := resolver.fetchChatModel(ctx, "gpt-provider-disabled")
-	if err == nil || !strings.Contains(err.Error(), "provider") || !strings.Contains(err.Error(), "disabled") {
-		t.Fatalf("fetchChatModel disabled provider error = %v, want provider disabled error", err)
 	}
 }
 
@@ -355,98 +316,5 @@ func TestResolveReasoningConfig(t *testing.T) {
 				t.Fatalf("expected %#v, got %#v", tt.want, got)
 			}
 		})
-	}
-}
-
-func newModelSelectionTestDB(t *testing.T) (*sql.DB, *sqlitestore.Queries) {
-	t.Helper()
-	conn, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-	execModelSelectionSchema(t, conn)
-	store, err := sqlitestore.New(conn)
-	if err != nil {
-		t.Fatalf("new sqlite store: %v", err)
-	}
-	return conn, sqlitestore.NewQueries(store)
-}
-
-func execModelSelectionSchema(t *testing.T, conn *sql.DB) {
-	t.Helper()
-	_, err := conn.ExecContext(context.Background(), `
-CREATE TABLE providers (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  client_type TEXT NOT NULL DEFAULT 'openai-completions',
-  icon TEXT,
-  enable INTEGER NOT NULL DEFAULT 1,
-  config TEXT NOT NULL DEFAULT '{}',
-  metadata TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT providers_name_unique UNIQUE (name)
-);
-
-CREATE TABLE models (
-  id TEXT PRIMARY KEY,
-  model_id TEXT NOT NULL,
-  name TEXT,
-  provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
-  type TEXT NOT NULL DEFAULT 'chat',
-  enable INTEGER NOT NULL DEFAULT 1,
-  config TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT models_provider_id_model_id_unique UNIQUE (provider_id, model_id)
-);
-`)
-	if err != nil {
-		t.Fatalf("exec model selection schema: %v", err)
-	}
-}
-
-func insertModelSelectionProvider(t *testing.T, conn *sql.DB, id string, clientType string, enable bool) {
-	t.Helper()
-	enableValue := 0
-	if enable {
-		enableValue = 1
-	}
-	_, err := conn.ExecContext(context.Background(), `
-INSERT INTO providers (id, name, client_type, icon, enable, config, metadata)
-VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id,
-		"provider-"+id,
-		clientType,
-		"",
-		enableValue,
-		`{}`,
-		`{}`,
-	)
-	if err != nil {
-		t.Fatalf("insert provider: %v", err)
-	}
-}
-
-func insertModelSelectionModel(t *testing.T, conn *sql.DB, id string, modelID string, providerID string, modelType models.ModelType, enable bool) {
-	t.Helper()
-	enableValue := 0
-	if enable {
-		enableValue = 1
-	}
-	_, err := conn.ExecContext(context.Background(), `
-INSERT INTO models (id, model_id, name, provider_id, type, enable, config)
-VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id,
-		modelID,
-		modelID,
-		providerID,
-		string(modelType),
-		enableValue,
-		`{}`,
-	)
-	if err != nil {
-		t.Fatalf("insert model: %v", err)
 	}
 }

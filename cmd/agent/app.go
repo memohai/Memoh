@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -62,7 +61,6 @@ import (
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/db"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	sqlitestore "github.com/memohai/memoh/internal/db/sqlite/store"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	emailgeneric "github.com/memohai/memoh/internal/email/adapters/generic"
@@ -166,22 +164,6 @@ func provideDBConn(lc fx.Lifecycle, cfg config.Config) (*pgxpool.Pool, error) {
 	return conn, nil
 }
 
-func provideSQLiteConn(lc fx.Lifecycle, cfg config.Config) (*sql.DB, error) {
-	if db.DriverFromConfig(cfg) != db.DriverSQLite {
-		return nil, nil
-	}
-	conn, err := db.OpenSQLite(context.Background(), cfg.SQLite)
-	if err != nil {
-		return nil, fmt.Errorf("sqlite connect: %w", err)
-	}
-	lc.Append(fx.Hook{
-		OnStop: func(_ context.Context) error {
-			return conn.Close()
-		},
-	})
-	return conn, nil
-}
-
 func providePostgresStore(conn *pgxpool.Pool) (*postgresstore.Store, error) {
 	if conn == nil {
 		return nil, nil
@@ -206,45 +188,18 @@ func provideNetworkService(log *slog.Logger, queries dbstore.Queries, registry *
 	return netctl.NewService(log, queries, registry, service, rc.ContainerBackend, cfg.Workspace.CNIBinaryDir, cfg.Workspace.CNIConfigDir, cfg.Workspace.DataRoot)
 }
 
-func provideSQLiteStore(conn *sql.DB) (*sqlitestore.Store, error) {
-	if conn == nil {
-		return nil, nil
+func provideDBQueries(postgresStore *postgresstore.Store) (dbstore.Queries, error) {
+	if postgresStore == nil {
+		return nil, errors.New("postgres store not configured")
 	}
-	return sqlitestore.New(conn)
+	return postgresstore.NewQueries(postgresStore.SQLC()), nil
 }
 
-func provideDBQueries(cfg config.Config, postgresStore *postgresstore.Store, sqliteStore *sqlitestore.Store) (dbstore.Queries, error) {
-	switch db.DriverFromConfig(cfg) {
-	case db.DriverPostgres:
-		if postgresStore == nil {
-			return nil, errors.New("postgres store not configured")
-		}
-		return postgresstore.NewQueries(postgresStore.SQLC()), nil
-	case db.DriverSQLite:
-		if sqliteStore == nil {
-			return nil, errors.New("sqlite store not configured")
-		}
-		return sqlitestore.NewQueries(sqliteStore), nil
-	default:
-		return nil, fmt.Errorf("unsupported database driver %q", db.DriverFromConfig(cfg))
+func provideAccountStore(postgresStore *postgresstore.Store) (dbstore.AccountStore, error) {
+	if postgresStore == nil {
+		return nil, errors.New("postgres account store not configured")
 	}
-}
-
-func provideAccountStore(cfg config.Config, postgresStore *postgresstore.Store, sqliteStore *sqlitestore.Store) (dbstore.AccountStore, error) {
-	switch db.DriverFromConfig(cfg) {
-	case db.DriverPostgres:
-		if postgresStore == nil {
-			return nil, errors.New("postgres account store not configured")
-		}
-		return postgresStore, nil
-	case db.DriverSQLite:
-		if sqliteStore == nil {
-			return nil, errors.New("sqlite account store not configured")
-		}
-		return sqliteStore, nil
-	default:
-		return nil, fmt.Errorf("unsupported database driver %q", db.DriverFromConfig(cfg))
-	}
+	return postgresStore, nil
 }
 
 func provideAccountService(log *slog.Logger, accountStore dbstore.AccountStore, emailService *emailpkg.Service) *accounts.Service {

@@ -10,27 +10,7 @@ const require = createRequire(import.meta.url)
 
 const defaultPort = 8082
 const defaultHost = '127.0.0.1'
-const desktopRuntimeMode = resolveDesktopRuntimeMode(
-  process.env.MEMOH_DESKTOP_RUNTIME_MODE ?? process.env.MEMOH_DESKTOP_FLAVOR,
-)
-const defaultApiBaseUrl = process.env.VITE_API_URL ?? (
-  desktopRuntimeMode === 'remote' ? 'http://localhost:18080' : 'http://localhost:8080'
-)
-
-function resolveDesktopRuntimeMode(value: string | undefined): 'local' | 'remote' {
-  switch (value?.trim()) {
-    case 'remote':
-    case 'online':
-      return 'remote'
-    case 'local':
-    case 'offline':
-    case undefined:
-    case '':
-      return 'local'
-    default:
-      throw new Error(`Unsupported desktop runtime mode: ${value}`)
-  }
-}
+const defaultApiBaseUrl = process.env.MEMOH_DESKTOP_BASE_URL ?? process.env.VITE_API_URL ?? 'http://localhost:18080'
 
 function resolveProxyTarget(command: 'build' | 'serve'): { port: number; host: string; baseUrl: string } {
   const configuredProxyTarget = process.env.MEMOH_WEB_PROXY_TARGET?.trim()
@@ -41,11 +21,7 @@ function resolveProxyTarget(command: 'build' | 'serve'): { port: number; host: s
   let host = defaultHost
   let baseUrl = configuredProxyTarget || defaultApiBaseUrl
 
-  const shouldReadConfig = command !== 'build' && (
-    desktopRuntimeMode !== 'remote'
-    || Boolean(configuredProxyTarget)
-    || Boolean(configuredPath)
-  )
+  const shouldReadConfig = command !== 'build' && (Boolean(configuredProxyTarget) || Boolean(configuredPath))
 
   if (shouldReadConfig) {
     try {
@@ -65,14 +41,6 @@ function resolveProxyTarget(command: 'build' | 'serve'): { port: number; host: s
     } catch {
       // fall back to env/default values when config.toml is unavailable.
     }
-  }
-
-  // Dev slot override: when launched via `mise run desktop:dev -- <keyword>`,
-  // MEMOH_WEB_PORT pins the Vite dev server port for that slot so multiple
-  // worktrees/slots can run side by side without clashing on 8082.
-  const slotWebPort = Number.parseInt(process.env.MEMOH_WEB_PORT?.trim() ?? '', 10)
-  if (Number.isInteger(slotWebPort) && slotWebPort > 0) {
-    port = slotWebPort
   }
 
   return { port, host, baseUrl }
@@ -95,21 +63,12 @@ export default defineConfig(async ({ command }) => {
   return {
     main: {
       plugins: [externalizeDepsPlugin({ exclude: bundledElectronToolkit })],
-      define: {
-        __MEMOH_DESKTOP_RUNTIME_MODE__: JSON.stringify(desktopRuntimeMode),
-      },
     },
     preload: {
       plugins: [externalizeDepsPlugin({ exclude: bundledElectronToolkit })],
-      define: {
-        __MEMOH_DESKTOP_RUNTIME_MODE__: JSON.stringify(desktopRuntimeMode),
-      },
     },
     renderer: {
       root: resolve(__dirname, 'src/renderer'),
-      define: {
-        __MEMOH_DESKTOP_RUNTIME_MODE__: JSON.stringify(desktopRuntimeMode),
-      },
       // Reuse apps/web/public so absolute-path assets (e.g. /logo.svg) resolve
       // when web modules are imported directly from the desktop renderer.
       publicDir: resolve(__dirname, '../web/public'),

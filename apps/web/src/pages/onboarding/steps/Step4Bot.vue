@@ -119,7 +119,6 @@ const allowLocalWorkspaceCreate = computed(() =>
   canCreateLocalWorkspace({
     serverLocalWorkspaceEnabled: capabilities.localWorkspaceEnabled,
     host: desktopRuntime.host.value,
-    desktopRuntimeMode: desktopRuntime.desktopRuntimeMode.value,
   }),
 )
 

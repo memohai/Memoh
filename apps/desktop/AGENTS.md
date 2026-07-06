@@ -2,691 +2,146 @@
 
 ## Overview
 
-`@memohai/desktop` is the Memoh Electron desktop application. It does **not**
-re-implement the UI — it reuses Vue components, stores, router pieces, and
-styles from `@memohai/web` and assembles its own Electron shell on top.
+`@memohai/desktop` is the Memoh Electron Desktop client for Memoh Cloud or a
+hosted Memoh server. It reuses Vue pages, stores, i18n, API setup, and design
+tokens from `@memohai/web`, but owns the native Electron shell: windows, tray,
+menus, keyboard integration, cache invalidation, preload IPC, and the renderer
+bootstrap.
 
-Desktop is also the native local-client boundary. The main process manages a
-local `memoh-server` on `127.0.0.1:18731`, prepares SQLite/local-workspace
-configuration, starts embedded Qdrant, owns tray reopen/quit behavior, and
-bundles the CLI, bridge runtime, provider templates, Qdrant, and display media
-runtime resources. Do not describe it as only a Web shell.
-
-The desktop renderer starts at `src/renderer/src/main.ts` from
-`src/renderer/index.html`. It owns the desktop router, Pinia, Pinia Colada,
-and keyboard registry. `chat/App.vue` keeps the chat surface mounted while
-settings pages are active so dock state, scroll position, and workspace panels
-stay intact.
+Desktop does not start a local server, package database files, embed Qdrant, or
+ship a companion CLI. Use `MEMOH_DESKTOP_BASE_URL` to point the app at the target
+server. The default dev target is `http://localhost:18080`.
 
 ## Tech Stack
 
 | Category | Technology |
 |----------|-----------|
-| Shell | [Electron](https://www.electronjs.org/) (^34) |
-| Bundler | [electron-vite](https://electron-vite.github.io/) (^4) — orchestrates main + preload + renderer Vite builds |
-| Renderer build | Vite 8 + `@vitejs/plugin-vue` + `@tailwindcss/vite` |
-| Packager | electron-builder (^26) → `.dmg` / `.zip` (mac), `.AppImage` / `.deb` / `.rpm` (linux), NSIS (win) |
-| Vue ecosystem | Vue 3, Vue Router 4 (`createMemoryHistory`), Pinia 3, `@pinia/colada`, vue-i18n, vue-sonner |
-| Reused workspace packages | `@memohai/web`, `@memohai/ui`, `@memohai/sdk`, `@memohai/icon`, `@memohai/config` |
-| Preload helpers | `@electron-toolkit/preload`, `@electron-toolkit/utils` |
-| Local runtime | Bundled Go `memoh-server`, desktop CLI, bridge runtime/templates, provider templates, SQLite config, embedded Qdrant |
-| Display media runtime | GStreamer bundle where supported (currently macOS universal; optional Windows bundle via `GSTREAMER_ENABLE_WINDOWS_BUNDLE`) |
-| Icon pipeline | `sharp` (PNG / resize) + `png-to-ico` (Windows) + `iconutil` (macOS, system tool) |
-| Type checking | TypeScript ~5.9 strict + `vue-tsc` for the renderer |
+| Shell | Electron 34 |
+| Bundler | electron-vite 4 |
+| Renderer | Vue 3 + Vite 8 + Tailwind CSS 4 |
+| Packager | electron-builder 26 |
+| Reused packages | `@memohai/web`, `@memohai/ui`, `@memohai/sdk`, `@memohai/icon`, `@memohai/config` |
+| Type checking | TypeScript + `vue-tsc` |
 
 ## Directory Structure
 
 ```
 apps/desktop/
-├── electron.vite.config.ts        # Single config file: main / preload / renderer Vite configs
-├── electron-builder.yml            # Packager config (appId, targets, icons, asarUnpack)
+├── electron.vite.config.ts        # main / preload / renderer Vite config
+├── electron-builder.yml           # single Desktop package config
 ├── package.json
-├── tsconfig.json                   # Solution file (references node + web)
-├── tsconfig.node.json              # Main + preload typecheck (NodeNext-bundler)
-├── tsconfig.web.json               # Renderer typecheck (DOM, with @memohai/* path stubs)
-├── README.md                       # User-facing dev/build guide
-├── AGENTS.md                       # This file
-│
-├── src/
-│   ├── main/
-│   │   ├── index.ts                # Main process: renderer bootstrap, tray, IPC, app lifecycle
-│   │   ├── local-server.ts         # Managed local server startup, config, migrations, OAuth callback proxy
-│   │   ├── qdrant.ts               # Embedded Qdrant process, ports, pid, config, storage
-│   │   ├── daemon.ts               # Shared pid/liveness helpers for server and Qdrant
-│   │   ├── cli-integration.ts      # PATH install/uninstall/status for bundled CLI
-│   │   ├── gstreamer.ts            # Packaged display media runtime environment
-│   │   └── paths.ts                # Repo/resource/userData path helpers
-│   ├── preload/
-│   │   ├── index.ts                # Preload bridge — exposes renderer APIs
-│   │   └── global.d.ts             # Renderer API typings
-│   └── renderer/
-│       ├── index.html              # Renderer root
-│       ├── src/
-│       │   ├── main.ts             # Renderer bootstrap (createApp, plugins, router, i18n)
-│       │   ├── env.d.ts            # vite/client + *.vue ambient module
-│       │   ├── chat/
-│       │   │   ├── App.vue         # Renderer root: persistent chat surface + settings pages
-│       │   │   └── router.ts       # Chat/settings routes, auth guard, memory history
-│       │   └── shared/
-│       │       └── settings-routes.ts  # Single source of truth for desktop settings routes
-│       └── types/
-│           ├── web-stubs.d.ts      # Path-mapped stub for @memohai/web/* — see "Type Stubbing"
-│           └── ui-stubs.d.ts       # Path-mapped stub for @memohai/ui (Toaster, SidebarInset)
-│
 ├── scripts/
-│   ├── build.mjs                   # Prepares runtime targets, then runs electron-vite/electron-builder
-│   ├── install-icon-tools.mjs      # Installs isolated icon generator dependencies
-│   ├── prepare-local-server.mjs    # Builds server/CLI/bridge and copies config/providers
-│   ├── prepare-qdrant.mjs          # Downloads/prepares Qdrant per release target
-│   └── prepare-gstreamer.mjs       # Downloads/prepares display media runtime where supported
-│
-├── icon-tools/
-│   ├── build-icons.mjs             # Regenerates icns / ico / png from apps/web/public/logo.svg
-│   ├── package.json                # Isolated sharp/png-to-ico dependencies
-│   └── pnpm-lock.yaml              # Lockfile for icon generator dependencies
-│
+│   ├── build.mjs                  # electron-vite build + electron-builder
+│   └── install-icon-tools.mjs      # isolated icon generator dependencies
+├── src/
+│   ├── main/index.ts              # Electron main process and IPC handlers
+│   ├── preload/index.ts           # typed renderer bridge
+│   ├── preload/global.d.ts        # renderer API typings
+│   └── renderer/
+│       ├── src/main.ts            # Vue renderer bootstrap
+│       ├── src/chat/App.vue       # persistent shell root
+│       └── types/                 # local stubs for reused web/ui exports
 ├── resources/
-│   ├── icon.png                    # 512×512 — runtime BrowserWindow.icon + macOS dock.setIcon
-│   ├── tray-icon.png               # Runtime tray icon
-│   ├── server/                     # memoh-server binary
-│   ├── cli/                        # memoh CLI binary
-│   ├── runtime/                    # Linux bridge binary + templates for bot workspaces
-│   ├── config/                     # app.local.toml template
-│   ├── providers/                  # Provider registry YAML templates
-│   ├── qdrant/                     # Qdrant binaries by target
-│   └── gstreamer/                  # Display media runtime by target
-│
-├── build/                          # Packager input assets (gitignored at root, re-included here)
-│   ├── icon.icns                   # macOS bundle icon
-│   ├── icon.ico                    # Windows installer icon
-│   └── icon.png                    # 1024×1024 source for Linux + ico master
-│
-├── out/                            # electron-vite output (main, preload, renderer bundles) — gitignored
-└── dist/                           # electron-builder output (installers / unpacked apps) — gitignored
+│   ├── icon.png
+│   └── tray-icon.png
+└── build/                         # packager input icons
 ```
 
 ## Reuse from @memohai/web
 
-The renderer is **not** a thin shell that imports `@memohai/web/main` —
-desktop owns its own bootstrap. It reuses building blocks via subpath
-exports declared in `apps/web/package.json`:
+The renderer imports web modules through public subpath exports in
+`apps/web/package.json`, including:
 
-| Subpath | Purpose |
-|---------|---------|
-| `@memohai/web/style.css` | Tailwind + design tokens |
-| `@memohai/web/i18n` | vue-i18n instance |
-| `@memohai/web/api-client` | `setupApiClient({ onUnauthorized })` SDK setup |
-| `@memohai/web/store/settings` | Theme + locale store (registered for side effects) |
-| `@memohai/web/lib/desktop-shell` | `DesktopShellKey` injection key |
-| `@memohai/web/layout/main-layout/index.vue` | Outer sidebar layout |
-| `@memohai/web/components/sidebar/index.vue` | Bot list sidebar |
-| `@memohai/web/components/settings-sidebar/index.vue` | Settings navigation |
-| `@memohai/web/pages/**/*.vue` | Routed pages (home, bots, providers, …) |
+- `@memohai/web/style.css`
+- `@memohai/web/i18n`
+- `@memohai/web/api-client`
+- `@memohai/web/store/settings`
+- `@memohai/web/lib/desktop-shell`
+- `@memohai/web/layout/main-layout/index.vue`
+- `@memohai/web/components/sidebar/index.vue`
+- `@memohai/web/components/settings-sidebar/index.vue`
+- `@memohai/web/pages/**/*.vue`
 
-Vite resolves these at bundle time via the package's `exports` field.
-**TypeScript does not** — see [Type Stubbing](#type-stubbing) below.
-
-### Why managed bootstrap, not full reuse
-
-Desktop needs to do things `@memohai/web/main.ts` cannot: provide an
-`InjectionKey` so reusable components know they're in the Electron shell,
-own its own memory-history router, connect Electron menu and IPC-delivered
-keyboard commands into the shared command registry, and install desktop-only
-renderer setup such as cache synchronization without changing the web bundle.
-
-`@memohai/web/api-client`'s `setupApiClient(options)` accepts an
-`onUnauthorized` callback for exactly this reason — never hard-code redirect
-behaviour into `@memohai/web`.
+Do not import the full web `main.ts`. Desktop has its own bootstrap so it can use
+memory-history routing, provide `DesktopShellKey`, wire native menus into the
+shared command registry, and keep native cache synchronization out of the web
+bundle.
 
 ## Type Stubbing
 
-`vue-tsc` follows symlinks. Without intervention, typechecking the desktop
-renderer would descend into `apps/web/src/` and `packages/ui/src/`, surfacing
-strict-template warnings in code that isn't desktop's responsibility (each
-of those packages has its own CI scope).
+`vue-tsc` follows symlinks. Desktop's renderer typecheck is intentionally scoped
+with `tsconfig.web.json` path stubs:
 
-Solution: `tsconfig.web.json` sets `paths` to redirect `@memohai/web/*` to
-`src/renderer/types/web-stubs.d.ts` and `@memohai/ui` to
-`src/renderer/types/ui-stubs.d.ts`. The stubs declare just enough surface
-(component shape, store shape, router/i18n types) for desktop's own code to
-typecheck.
+- `src/renderer/types/web-stubs.d.ts` for `@memohai/web/*`
+- `src/renderer/types/ui-stubs.d.ts` for `@memohai/ui`
 
-**Vite ignores `tsconfig` `paths`** — at runtime it follows the package's
-real `exports` field. So bundle behaviour is unchanged; only `vue-tsc`
-follows the stubs.
+When adding a new reused web or UI import, update the matching stub. Keep the
+runtime import specifier and the typecheck stub aligned; do not switch to private
+source aliases just to silence type errors.
 
-The typecheck import graph must still mirror the runtime import graph. When
-desktop reuses workspace package exports, source files must import through
-the same public module specifiers that Vite bundles at runtime, and the
-renderer stubs must model that same surface. Do not paper over `vue-tsc`
-errors by swapping imports to aliases or private source paths unless both
-Vite and `tsconfig.web.json` intentionally resolve that specifier to the
-same module. A resolver mismatch can make one pipeline pass while the other
-fails, or make typecheck validate a different module than the one packaged
-at runtime.
+## Main Process
 
-When you add a new `@memohai/web/*` import in the desktop renderer, add a
-matching `declare module` to `web-stubs.d.ts`. The wildcard
-`declare module '@memohai/web/*.vue'` already covers any `.vue` SFC reached
-through the wildcard `./*` export.
+`src/main/index.ts` owns:
 
-When you import a new component directly from `@memohai/ui`, add that
-component to `ui-stubs.d.ts` as well. The package may export it correctly,
-but desktop's renderer typecheck only sees the stubbed surface.
+- app identity and single-instance behavior
+- BrowserWindow creation and macOS chrome
+- tray creation and dock/menu focus behavior
+- native menu accelerators
+- external URL handling
+- cache invalidation broadcast
+- renderer `/api` proxy target via `MEMOH_DESKTOP_BASE_URL`
 
-## App Lifecycle
+The preload bridge is the only renderer API surface for Electron/main-process
+behavior. Keep it small and typed in both `src/preload/index.ts` and
+`src/preload/global.d.ts`.
 
-### Main process (`src/main/index.ts`)
+Current Desktop IPC includes:
 
-- The main process creates the renderer, tray, native menu, and IPC handlers.
-- Renderer code stays browser-grade through `webPreferences` (sandbox: false, contextIsolation: true, nodeIntegration: false). Anything that needs Node/Electron APIs must go through IPC.
-- `createAppTray()` installs the system tray. Clicking the tray opens/focuses chat; `Quit Memoh` calls the normal `app.quit()` path.
-- `before-quit` is the authoritative shutdown path: it closes the provider OAuth callback proxy, stops the managed local server, stops embedded Qdrant, destroys the tray, and then exits.
+- `desktop:server-status`
+- `desktop:api-base-url`
+- `desktop:set-menu-accelerators`
+- `desktop:open-external-url`
+- `desktop:broadcast-invalidate`
+- `window:close-self`
 
-### IPC surface (`src/preload/index.ts`)
+Do not add IPC for local database auth, project-folder picking, server lifecycle,
+or CLI installation.
 
-The preload bridge is the renderer's only Electron/main-process API. Keep
-the surface small and typed in `src/preload/index.ts`: desktop runtime helpers
-belong under `window.api.desktop`, and renderer lifecycle hooks belong under
-`window.api.window`. Add entries only when a renderer feature truly needs
-main-process access.
+## Renderer
 
-## Desktop Shell Awareness — `DesktopShellKey`
+`src/renderer/src/main.ts` creates the Vue app, installs the reused web plugins,
+sets the SDK base URL from the main-process status, and registers desktop cache
+sync. Authentication belongs to the hosted server flow; the renderer should not
+inject local auto-login tokens.
 
-Reusable web layouts/components need to know when they're hosted inside the
-Electron shell — to reserve space for the macOS traffic lights, disable
-small-screen auto-collapse, etc. — without depending on Electron at runtime.
+`chat/App.vue` provides `DesktopShellKey` so reused web components can adapt to
+Electron chrome without importing Electron.
 
-Pattern:
+## Commands
 
-1. `apps/web/src/lib/desktop-shell.ts` defines and exports
-   `DesktopShellKey: InjectionKey<boolean>`.
-2. Web (`apps/web/src/main.ts`) does **not** provide it → `inject(...,
-   false)` falls back to `false`.
-3. Desktop renderer root (`chat/App.vue`) calls `provide(DesktopShellKey, true)`.
-4. Consumers (`components/sidebar`, `components/settings-sidebar`,
-   `layout/main-layout`, `pages/home/components/chat-area`) inject and gate
-   their desktop affordances on the result.
-
-Adding a new desktop affordance to a web component is a four-step
-checklist: `inject(DesktopShellKey, false)` → conditional template branch →
-add a `declare module '@memohai/web/...'` stub if it's a new export →
-update both Web/CI and desktop typecheck.
-
-## macOS Chrome
-
-On `process.platform === 'darwin'` only, the desktop chrome opts in to:
-
-```ts
-{ titleBarStyle: 'hidden', trafficLightPosition: { x: 14, y: 12 } }
+```bash
+pnpm --filter @memohai/desktop dev
+pnpm --filter @memohai/desktop typecheck
+pnpm --filter @memohai/desktop build:dir
+pnpm --filter @memohai/desktop build
 ```
 
-The native titlebar is hidden but the traffic lights remain at a fixed
-position. Drag regions are handled in the renderer so the chrome looks
-intentional rather than introducing an empty grey gap above the page content:
+`build:dir` is the CI smoke path for an unpacked app. Packaged output goes to
+`apps/desktop/dist/`.
 
-- **Both sidebars** (`components/sidebar/index.vue`,
-  `components/settings-sidebar/index.vue`) render their existing
-  36px-tall (`h-9`) `position:fixed` drag header above the sidebar
-  body when `topInset` is true, marked `[-webkit-app-region:drag]`
-  with `pl-[78px]` to clear the traffic lights. Interactive elements
-  inside (e.g. the chat sidebar `+` button) opt out with explicit
-  `[-webkit-app-region:no-drag]` wrappers.
+## Packaging Rules
 
-- **Main section** renders a single 36px full-width drag strip at the
-  top of `pages/main-section/index.vue` (gated on the macOS desktop
-  shell), clearing the traffic lights. The workspace shell below it
-  (activity rail + side panel + dockview tabs) needs no per-column drag
-  handling.
+`electron-builder.yml` is the only Desktop packaging config. The product name is
+`Memoh`, and packaged resources should only include the Electron application,
+icons, and compiled app bundles. Do not add server binaries, CLI binaries,
+database files, provider templates, workspace runtimes, Qdrant, or media
+runtimes to Desktop packaging.
 
-- **Settings routes** use `SettingsSidebar` and bot-detail
-  `MasterDetailSidebarLayout` traffic-light reserves when `DesktopShellKey`
-  is true, while detail panes use small top drag strips in existing padding.
-  Visible controls stay outside drag regions with explicit
-  `[-webkit-app-region:no-drag]` where needed.
+## Icons
 
-## electron-vite Configuration
-
-`electron.vite.config.ts` defines three Vite configs in one file:
-
-| Section | Notable settings |
-|---------|------------------|
-| `main` | `externalizeDepsPlugin()` (don't bundle node_modules into the main bundle) |
-| `preload` | Same `externalizeDepsPlugin()` |
-| `renderer` | `root: src/renderer`, `publicDir: ../web/public` (so `/logo.svg` resolves), `resolve.alias` mirrors `apps/web/vite.config.ts` (`@` → `apps/web/src`, `#` → `packages/ui/src`), single HTML entry (`index`), `optimizeDeps.entries` starts from `src/renderer/src/main.ts`, dev-only `/api` proxy reading port + base URL from `@memohai/config` |
-
-### Important runtime gotcha — preload extension
-
-`apps/desktop/package.json` has `"type": "module"`, so electron-vite emits
-the preload as `out/preload/index.mjs` (not `.js`). The main process **must**
-load `../preload/index.mjs`. Loading the wrong extension does not throw —
-Electron silently fails to attach the preload, and `window.api` ends up
-`undefined` in the renderer. This is captured in:
-
-```ts
-const PRELOAD_FILE = '../preload/index.mjs'
-```
-
-If you ever change the package's module type, also update this constant.
-
-### Dev-server proxy
-
-In dev (`pnpm --filter @memohai/desktop dev`), the renderer Vite server
-listens on the port configured in `config.toml` (default 8082) and proxies
-`/api/*` to the backend's `getBaseUrl(config)`. `MEMOH_WEB_PROXY_TARGET` env
-var overrides the proxy target.
-
-## Local Server, Qdrant, and Workspace Runtime
-
-Desktop starts its own local backend instead of depending on an external
-deploy/server stack. `src/main/local-server.ts` is the startup gate:
-
-1. In dev, it builds `./cmd/agent` into `apps/desktop/local-server/bin/`.
-   In packaged apps, it resolves `Resources/server/memoh-server`.
-2. It renders `userData/config.toml` from `resources/config/app.local.toml`,
-   setting SQLite, local workspace, Docker socket, registry providers, and
-   the embedded Qdrant gRPC URL.
-3. It syncs or prepares the bridge runtime/templates, runs `migrate up`,
-   starts `memoh-server serve` on `127.0.0.1:18731`, writes
-   `local-server.pid.json`, and appends to `local-server.log`.
-4. It exposes `desktop:server-status`, `desktop:api-base-url`, and
-   `desktop:auth-token` over IPC so renderer API setup can target the
-   managed local server.
-
-`src/main/qdrant.ts` owns embedded Qdrant. It stores runtime state under
-`userData/qdrant/` (`ports.json`, `qdrant.pid.json`, `config.yaml`,
-`qdrant.log`, `storage/`), probes `/healthz`, reuses a healthy managed
-process when possible, and selects new ports when persisted ports collide.
-
-`scripts/build.mjs` prepares platform-specific resources before
-`electron-builder`: Qdrant for the target platform, GStreamer for supported
-display targets, and local server resources with
-`MEMOH_DESKTOP_BUNDLE_TARGET`. `electron-builder.yml` then packages
-`server`, `cli`, `runtime`, `config`, `providers`, `qdrant`, and
-`gstreamer` through `extraResources`.
-
-Desktop local workspaces are trusted host folders configured through
-`[local]` in `app.local.toml`; they are not container-isolated. Container
-workspaces still use the backend selected by `[container]` (Docker by
-default in local desktop config), and the bridge runtime remains a Linux
-binary because it runs inside bot workspace containers.
-
-Workspace Browser Use and Computer Use are bot/runtime features, not
-Electron UI automation. Browser Use controls the headed workspace
-Chrome/Chromium instance over CDP, while Computer Use drives the workspace
-desktop via screenshots and pointer/keyboard input. Headless Playwright can
-still run as an ordinary workspace command, but it is separate from the
-headed display path.
-
-### Dev Slots (multi-worktree parallel dev)
-
-Dev-only. Lets a full-stack developer run several desktop dev instances in
-parallel (e.g. one per git worktree / feature branch) without sharing one
-SQLite database and being forced to migrate up/down on every branch switch.
-
-- No keyword (`mise run desktop:dev`): the **default slot**. Unchanged
-  historical behavior — `userData/local-server/data/local/memoh.db`, server
-  `:18731`, web `8082`, `config.toml` / `local-server.pid.json` /
-  `local-server.log`. Existing users and the packaged app are unaffected.
-- With a keyword (`mise run desktop:dev -- bind`): an **isolated slot**,
-  reused by that keyword. Each keyword gets its own SQLite DB, ports, pid,
-  log, and rendered config. Schema version follows the keyword, so switching
-  worktrees never requires a manual downgrade.
-
-How the keyword flows (argument outside, env var inside):
-
-```
-mise run desktop:dev -- bind
-  -> go run ./cmd/agent slot env bind   # resolve + persist ports (free-port scan)
-  -> export MEMOH_SLOT / MEMOH_SLOT_SERVER_PORT / MEMOH_WEB_PORT / MEMOH_WEB_PROXY_TARGET
-  -> pnpm dev (electron-vite)
-       - electron.vite.config.ts: MEMOH_WEB_PORT pins the Vite dev port
-       - src/main/local-server.ts: MEMOH_SLOT picks data dir / pid / log /
-         config name; MEMOH_SLOT_SERVER_PORT sets [server].addr and the
-         LOCAL_SERVER_BASE_URL the renderer reaches via desktop:api-base-url
-```
-
-Port registry: `cmd/agent slot` (Go, no external deps) owns
-`userData/dev-slots.json`. `slot resolve <name>` allocates the next free
-server/web ports from the 18731 / 8082 baselines (skipping registry-used and
-currently-bound ports), persists them, and reuses the same pair forever.
-`slot env <name>` prints `KEY=VALUE` lines for the mise task to `eval`;
-`slot list` shows all slots. Per-slot files under `userData`:
-`local-server.<slot>.pid.json`, `local-server.<slot>.log`,
-`local-server/config.<slot>.toml`, and data under
-`local-server/data/instances/<slot>/` (including the dev server binary at
-`.../<slot>/bin/memoh-server`, so parallel worktrees on different branches
-don't build different binaries to the same shared path).
-
-Port semantics: different keywords -> different ports, can run side by side;
-the same keyword must run in only one place at a time (it is one database).
-
-Known limitations (v1, dev-only):
-
-- Embedded Qdrant is shared across slots. It only cross-contaminates if you
-  duplicate a DB so two slots use identical bot ids and both write memory;
-  quitting one running instance stops the shared Qdrant for the others.
-- The provider OAuth callback proxy binds a single fixed port (1455); only
-  one running slot gets it.
-- The ACP tools proxy binds a single fixed port (18732), shared across slots.
-  The allocator reserves it so no slot's server is handed 18732, but the proxy
-  itself is not partitioned per slot.
-- The `memoh` CLI and the packaged app only target the default slot.
-- Renderer `localStorage` (token, selection) is not partitioned per slot, so
-  the first request after switching slots may 401 and require a re-login.
-
-## Routing
-
-The desktop renderer uses `createMemoryHistory()` — the `file://` runtime
-makes `createWebHistory()` impractical.
-
-### Chat router (`src/renderer/src/chat/router.ts`)
-
-| Path | Name | Component |
-|------|------|-----------|
-| `/` | `home` | `@memohai/web/pages/home/index.vue` |
-| `/bot/:botName?/:sessionId?` | `bot` | no-op route; persistent `MainSection` owns chat UI |
-| `/chat/:botName?/:sessionId?` | redirect | legacy chat URL redirect to `/bot/...` |
-| `/login` | `Login` | `@memohai/web/pages/login/index.vue` |
-| `/oauth/mcp/callback` | `oauth-mcp-callback` | `@memohai/web/pages/oauth/mcp-callback.vue` |
-| `/settings/...` (every entry from `shared/settings-routes.ts`) | mirror of settings name | `@memohai/web/pages/settings-section/index.vue` children |
-
-Desktop builds those settings children from `shared/settings-routes.ts` so
-path-based and name-based navigation resolve in the same router as chat.
-Chat routes render `null` in the router because `chat/App.vue` keeps
-`MainSection` mounted persistently whenever the active route is chat or
-settings. Settings routes mount the real settings pages while the chat
-surface remains attached behind them.
-
-Three guards in `beforeEach`:
-
-1. `/login` while already logged in → redirect to `/`.
-2. Any route without `localStorage.token` → redirect to `Login`.
-3. Onboarding redirects incomplete users to `/onboarding`.
-
-Plus an `onError` handler that reloads on dynamic-import chunk load failures
-(covers the case where the dev server restarts mid-session).
-
-## Icon Pipeline
-
-Icon assets are checked in under `build/` and `resources/`. The packager and
-runtime consume those files directly, so the default workspace install does not
-need the icon generator's image-processing dependencies. When the logo changes,
-`icon-tools/build-icons.mjs` rasterizes `apps/web/public/logo.svg` into every icon
-asset the packager needs. This installs the generator dependencies in
-`apps/desktop/icon-tools/`:
+Checked-in icons live in `build/` and `resources/`. Regenerate them only when the
+brand mark changes:
 
 ```bash
 pnpm --filter @memohai/desktop icons
 ```
-
-Outputs (all derived from a single 1024×1024 master with 14% safe-area
-padding to clear macOS Big Sur+ squircle masks):
-
-| File | Used by |
-|------|---------|
-| `build/icon.png` (1024) | electron-builder Linux (`.AppImage` / `.deb` / `.rpm`) + ico master |
-| `build/icon.icns` | electron-builder macOS bundle |
-| `build/icon.ico` | electron-builder Windows installer |
-| `resources/icon.png` (512) | Runtime `BrowserWindow.icon` + macOS `app.dock.setIcon` |
-
-`build/icon.icns` requires `iconutil` (macOS only); the script logs and
-skips it on other platforms. `resources/` is `asarUnpack`ed by
-electron-builder so the runtime icon is dereferenceable from disk.
-
-## Build & Distribution
-
-| Command | Output | Notes |
-|---------|--------|-------|
-| `pnpm --filter @memohai/desktop dev` | dev server + main process watch | Prepares current Qdrant/GStreamer resources first; renderer hot-reload; main needs window restart on changes |
-| `pnpm --filter @memohai/desktop preview` (or `mise run desktop:preview`) | production renderer bundle + main process | Builds `out/` then runs `electron-vite preview` — no Vite dev server, no HMR, no `optimizeDeps`. Closest "what a user sees" frontend while still backed by the local dev Go server (built from source because `!app.isPackaged`). Use to reproduce/triage prod-only rendering issues without a full package build |
-| `pnpm --filter @memohai/desktop build` | `dist/` installers (current platform) | Runs `scripts/build.mjs`: prepare Qdrant/GStreamer/local-server resources, electron-vite build, then electron-builder |
-| `pnpm --filter @memohai/desktop build:dir` | `dist/<platform>-unpacked/` | Skip installer; smoke-test packaged app |
-| `pnpm --filter @memohai/desktop build:mac` | DMG (arm64 + x64) | Requires darwin |
-| `pnpm --filter @memohai/desktop build:linux:x64` | AppImage + deb + rpm | x64 |
-| `pnpm --filter @memohai/desktop build:win:x64` | NSIS installer | x64 |
-| `pnpm --filter @memohai/desktop typecheck` | (no output) | Runs `typecheck:node` then `typecheck:web` |
-
-Ports / hosts during dev come from the same `config.toml` the rest of the
-stack reads (via `@memohai/config`). The repo-level `mise run desktop:dev`
-task is the recommended entrypoint when contributing.
-
-Packaged macOS and Windows x64 builds prepare and include the display
-GStreamer runtime under `Resources/gstreamer`. Linux builds currently rely on
-system GStreamer when available.
-
-## macOS DMG installer (double-click self-install)
-
-The macOS DMG is styled as a **double-click-to-install** disk image, not a
-drag-to-Applications one. What a mounted DMG shows is a **Finder window**, not
-an installer program — the only customizable surface is a background image plus
-icon size/position. The traffic lights, title bar (= volume name), and status
-bar belong to Finder and cannot be changed.
-
-### Design source and background pipeline (`dmg/`)
-
-The background is generated, not hand-drawn, mirroring the `icon-tools/` pattern
-(checked-in source + script → output into `build/`):
-
-- `dmg/prototype.html` — single-file, inline-CSS design source. Renders **only
-  decoration**: title, subtitle, brand glow. It deliberately leaves the icon
-  slot empty — the app icon is a Finder **live icon** placed by
-  `electron-builder.yml` `dmg.contents`; drawing it into the background would
-  double it. A `?export` query param hides the alignment placeholder.
-- `dmg/render.swift` — HTML→PNG via the system WebKit (`swift`, zero third-party
-  deps; same engine family as the Electron renderer, so it is high-fidelity and
-  more reliable here than headless Chrome). Has a 15s timeout guard.
-- `dmg/make-preview-dmg.sh` — builds a throwaway preview DMG with **system tools
-  only** (`hdiutil` + Finder AppleScript layout) so you can eyeball the real
-  mounted window (background + icon position + Finder chrome) without a full
-  app build. The placeholder `.app` inside is an unsigned bash-script shell —
-  Gatekeeper will reject launching it; that is expected, it exists only to prove
-  the **layout**. Its `330/286` icon coordinates are the source of truth mirrored
-  into `dmg.contents`.
-- `build/background.png` (660×440) + `build/background@2x.png` (1320×880) —
-  generated outputs consumed by electron-builder. To regenerate after editing
-  `prototype.html`, re-render at native 660×440 then `sips`-resize to the exact
-  1× / 2× sizes.
-
-### electron-builder `dmg` block
-
-`dmg.contents` lists **only the app icon** (`type: file`). Supplying explicit
-contents suppresses electron-builder's default `/Applications` symlink — a
-double-click DMG has no drag target. `title` sets the volume/window title;
-`window` matches the background's logical size.
-
-### Self-install startup-order constraint (critical)
-
-`src/main/self-install.ts::maybeSelfInstallMacOS()` runs as **step 0** inside
-`app.whenReady()`, **before** `ensureLocalServer()` / Qdrant / window / tray.
-On first launch the app runs from the read-only DMG volume (possibly an App
-Translocation random path). If it returns `true` (a move+relaunch was
-triggered), `whenReady` must `return` immediately — otherwise the dying DMG
-instance would spawn the local server/Qdrant from the mounted volume and leave
-orphan processes after the relaunch. Guards: darwin + packaged + not already in
-`/Applications`; any failure/cancel degrades to running in place, never blocks
-launch. **If you reorder `whenReady`, keep self-install first.**
-
-
-
-The Memoh CLI (Go, source at `cmd/memoh/`) ships inside the desktop
-app bundle alongside the server. It is the **desktop edition** of the
-CLI — there are no docker-compose / login subcommands; everything
-operates on the local server the desktop already manages.
-
-### Layout in the packaged app
-
-```
-Memoh Local.app/Contents/Resources/
-├── server/memoh-server     # backend binary spawned by main process or `memoh start`
-├── cli/memoh               # CLI binary; PATH symlink resolves here
-├── runtime/                # bridge binary + templates
-├── config/app.local.toml    # local desktop server config template
-├── providers/               # provider registry YAML templates
-├── qdrant/<target>/qdrant   # embedded Qdrant binary for packaged target
-├── gstreamer/<target>/...   # display media runtime where bundled
-└── …
-```
-
-### Build pipeline
-
-`scripts/prepare-local-server.mjs` runs three `go build` invocations:
-`./cmd/agent` → `resources/server/memoh-server`, `./cmd/memoh` →
-`resources/cli/memoh`, and `./cmd/bridge` → `resources/runtime/bridge`
-(`linux/$arch`, because the bridge runs inside workspace containers). The
-server and CLI are built for `MEMOH_DESKTOP_BUNDLE_TARGET`, so Windows
-packages contain `memoh-server.exe` and `memoh.exe`. The script also copies
-`conf/app.local.toml` and `conf/providers/`; `electron-builder.yml`'s
-`extraResources` block then maps each directory into `Contents/Resources/`
-of the app bundle.
-
-### Shared filesystem contract
-
-CLI and main process cooperate purely through files under
-`app.getPath('userData')` (= `~/Library/Application Support/Memoh Local` on
-macOS — see `productName` pinning below):
-
-| File | Owner | Used by |
-|------|-------|---------|
-| `config.toml` | desktop main (renders from `resources/config/app.local.toml` on first launch) | both — server's `CONFIG_PATH`, CLI's `[admin]` source |
-| `local-server.pid.json` | whoever spawned the server (desktop or CLI) | both — graceful stop / liveness probe |
-| `local-server.log` | server itself (stdout/stderr append) | both — `memoh logs`, desktop log dump |
-| `qdrant/ports.json` | desktop main | desktop main — persisted HTTP/gRPC ports |
-| `qdrant/config.yaml` | desktop main | embedded Qdrant process |
-| `qdrant/qdrant.pid.json` | desktop main (CLI never spawns qdrant on its own) | desktop main only |
-| `qdrant/qdrant.log` | embedded Qdrant | desktop diagnostics |
-| `qdrant/storage/` | embedded Qdrant | local memory vector storage |
-| `cli-token.json` | CLI (after self-login against `[admin]`) | CLI only |
-| `cli-prefs.json` | desktop main (records `dontAskAgain` for the install prompt) | desktop main only |
-
-The pid JSON shape is deliberately identical between
-`apps/desktop/src/main/daemon.ts` and
-`internal/tui/local/service.go`, so `memoh stop` can kill a server
-that desktop spawned and vice versa.
-
-### productName pinning
-
-`electron-builder.online.yml` names the online app `Memoh`, while
-`electron-builder.yml` names the local/offline app `Memoh Local`.
-`src/main/index.ts` mirrors those names through `app.setName(...)` and
-migrates legacy userData before any userData path is resolved. The Go CLI
-hard-codes the local product name in
-`internal/tui/local/paths.go::productName`. **If you ever rename the
-local app, both sides must change in lockstep** — otherwise CLI and
-desktop will read/write different userData directories and silently
-diverge.
-
-### PATH integration (`src/main/cli-integration.ts`)
-
-`detectCliState()` runs `which memoh` (`where` on Windows) plus
-`fs.realpathSync` to bucket the install into one of:
-`installed-current` (symlink resolves to this app's `Resources/cli`),
-`installed-stale` (resolves to a different `Memoh Local.app` or old `Memoh.app`), `installed-foreign`
-(resolves to some other `memoh` — homebrew, manual go build, etc.),
-or `not-installed`.
-
-`installCli()` is platform-specific:
-
-- **macOS**: `osascript … with administrator privileges` to create
-  `/usr/local/bin/memoh` symlink. Triggers the system password prompt.
-- **Linux**: writes `~/.local/bin/memoh` symlink (no admin); if that
-  dir is not on PATH the renderer / first-launch prompt surfaces a
-  hint via `linuxPathHint()`.
-- **Windows**: `setx Path …` updates `HKCU\Environment\Path` (no
-  admin required) — Windows broadcasts `WM_SETTINGCHANGE`
-  automatically so newly opened shells pick it up. Existing terminals
-  must be restarted.
-
-`runCliInstallCheck()` runs once after `app.whenReady()`:
-`installed-current` → no-op; `installed-stale` → silent reinstall;
-otherwise (and not `dontAskAgain`) → three-button dialog `Install /
-Skip / Don't ask again`. The Tools / app menu item
-`Install Command Line Tool…` (label flips to `Reinstall…` once
-installed) always provides a manual path; an `Uninstall Command Line
-Tool` sibling is enabled when the symlink is current.
-
-### IPC surface
-
-```
-window.api.desktop.getCliStatus(): Promise<CliStatusPayload>
-window.api.desktop.installCli(): Promise<CliStatusPayload>
-window.api.desktop.uninstallCli(): Promise<CliStatusPayload>
-```
-
-Reserved for a future settings-page "CLI integration" card; not yet
-consumed by the renderer.
-
-### CLI command surface
-
-| Command | Channel | Notes |
-|---------|---------|-------|
-| `memoh` (default) / `memoh tui` | HTTP + WebSocket | Bubble Tea TUI; auto self-login |
-| `memoh chat --bot --message [--session]` | HTTP + WebSocket | One-shot streaming chat |
-| `memoh bots create / delete` | HTTP REST | |
-| `memoh start [--wait]` | spawn binary | Resolves bundled `memoh-server`, fails with a hint if `userData/config.toml` is missing |
-| `memoh stop` | SIGTERM via pid file | |
-| `memoh restart` | stop + start | |
-| `memoh status` | HTTP `GET /ping` + pid liveness | |
-| `memoh logs [-f] [-n N]` | tail `local-server.log` | |
-| `memoh version` | local | |
-
-`--server URL` overrides the default `http://127.0.0.1:18731` and
-disables auto self-login (advanced; the user is expected to manage
-auth out-of-band).
-
-## Native Dependencies
-
-`electron`, `electron-winstaller`, and `esbuild` all require
-`postinstall` scripts to be allowed (they install or compile native
-binaries). They are listed in the **root** `pnpm-workspace.yaml` under
-`onlyBuiltDependencies` — if `pnpm install` ever fails with `Error:
-Electron uninstall` or `esbuild` missing its native binary, that's the
-list to check.
-
-## Development Rules
-
-- **Do not edit `@memohai/web` to make desktop work.** If web doesn't
-  expose what you need, add a new subpath export to
-  `apps/web/package.json` and a matching stub in
-  `src/renderer/types/web-stubs.d.ts`. Web should remain shippable as a
-  pure browser app.
-- **Keep desktop settings routes in sync.** Reused web components may
-  navigate with either `/settings/...` paths or named routes such as
-  `{ name: 'bot-detail' }`. Update `shared/settings-routes.ts` when Web
-  adds or renames a settings page.
-- **Provide `DesktopShellKey` at the renderer App root, not deeper.** Web
-  must keep injecting `false` (the default fallback) — never provide it
-  from any web component.
-- **All renderer code is browser-grade.** Need a node/Electron API in the
-  renderer? Add an IPC handler in `src/main/index.ts`, a passthrough in
-  `src/preload/index.ts`, then update `MemohApi` (the type derived from
-  `api`) and `src/preload/global.d.ts`. Don't reach for `nodeIntegration:
-  true`.
-- **Persist user state through the existing web Pinia stores** (chat-
-  selection, user, settings) — they're already configured with
-  `pinia-plugin-persistedstate`. Don't add desktop-only persistence layers without a
-  compelling reason.
-- **Update both `tsconfig.web.json` paths and `web-stubs.d.ts`** when adding
-  a new `@memohai/web/foo` import. Forgetting the stub yields
-  `TS2307: Cannot find module` even though the bundle works.
-- **Keep typecheck resolution and runtime resolution isomorphic.** Desktop
-  renderer code must import reused workspace modules through the same public
-  specifiers that Vite bundles at runtime, then model that surface in the
-  stubs. Do not mix in alternate aliases or private source paths unless both
-  Vite and `tsconfig.web.json` intentionally resolve them to the same target.
-- **Update `ui-stubs.d.ts` for direct `@memohai/ui` imports.** A component
-  exported by the real UI package still needs to exist in the desktop stub
-  if desktop imports it directly.
-- **Run `pnpm --filter @memohai/desktop typecheck` after every renderer
-  change.** It's fast (only types desktop's own code thanks to the stubs)
-  and catches the common drift cases (missing stub, wrong store/component
-  shape, untyped IPC arg).
-- **Update this file** when you add an IPC handler, subpath reuse, build
-  target, or platform-specific affordance — the desktop shell is small
-  enough that out-of-date docs become obviously wrong fast.
-
-## Cross-References
-
-- Repo root: `/AGENTS.md` (overall architecture, server-side packages, db conventions).
-- Web: `apps/web/AGENTS.md` (component / store / page conventions; consumed wholesale here).
-- Design system: `packages/ui/DESIGN.md` (tokens, elevation, spacing — applies to desktop-rendered surfaces).

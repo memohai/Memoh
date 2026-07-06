@@ -239,9 +239,7 @@ declare module '@memohai/web/utils/timezones' {
 
 declare module '@memohai/web/lib/desktop-shell' {
   import type { InjectionKey } from 'vue'
-  export type DesktopRuntimeMode = 'local' | 'remote'
   export const DesktopShellKey: InjectionKey<boolean>
-  export const DesktopRuntimeModeKey: InjectionKey<DesktopRuntimeMode>
 }
 
 declare module '@memohai/web/composables/useBackOr' {

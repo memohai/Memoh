@@ -1,6 +1,5 @@
 import {
   app,
-  dialog,
   Menu,
   shell,
   BrowserWindow,
@@ -12,150 +11,21 @@ import {
   type MenuItemConstructorOptions,
 } from 'electron'
 import { join } from 'node:path'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import iconPng from '../../resources/icon.png?asset'
 import trayIconPng from '../../resources/tray-icon.png?asset'
-import { stopEmbeddedQdrant } from './qdrant'
-import {
-  defaultWorkspacePath,
-  ensureLocalServer,
-  ensureProviderOAuthCallbackProxy,
-  getDesktopAuthToken,
-  getLocalServerStatus,
-  stopManagedServer,
-  stopProviderOAuthCallbackProxy,
-} from './local-server'
-import {
-  detectCliState,
-  installCli,
-  linuxPathHint,
-  readCliPrefs,
-  uninstallCli,
-  writeCliPrefs,
-  type CliStatus,
-} from './cli-integration'
 import { acceleratorForCommand, appKeyboardCommands, type AppKeyboardCommand } from '../shared/keyboard-commands'
 import { dispatchFocusedWindowCommand } from './window-commands'
 import { dispatchRendererNavigate } from './window-navigation'
 import { maybeSelfInstallMacOS } from './self-install'
 
-type DesktopRuntimeMode = 'local' | 'remote'
-
-const DESKTOP_RUNTIME_MODE: DesktopRuntimeMode = __MEMOH_DESKTOP_RUNTIME_MODE__ === 'remote' ? 'remote' : 'local'
-const ONLINE_PRODUCT_NAME = 'Memoh'
-const LOCAL_PRODUCT_NAME = 'Memoh Local'
-const LEGACY_REMOTE_PRODUCT_NAME = 'Memoh Online'
-const LEGACY_LOCAL_PRODUCT_NAME = 'Memoh'
-const DESKTOP_PRODUCT_NAME = DESKTOP_RUNTIME_MODE === 'remote' ? ONLINE_PRODUCT_NAME : LOCAL_PRODUCT_NAME
-const DEFAULT_REMOTE_BASE_URL = is.dev ? 'http://localhost:18080' : 'http://localhost:8080'
+const DESKTOP_PRODUCT_NAME = 'Memoh'
+const DEFAULT_BASE_URL = 'http://localhost:18080'
 const guardedExternalLinkWebContents = new WeakSet<Electron.WebContents>()
-
-interface RemoteProfile {
-  baseUrl?: string
-}
-
-const LOCAL_USER_DATA_ENTRIES = [
-  'config.toml',
-  'local-server',
-  'local-server.log',
-  'local-server.pid.json',
-  'qdrant',
-  'gstreamer',
-  'cli-token.json',
-  'cli-prefs.json',
-  'window-state.json',
-]
-
-function platformUserDataBaseDirectory(): string {
-  const home = app.getPath('home')
-  switch (process.platform) {
-    case 'darwin': {
-      return join(home, 'Library', 'Application Support')
-    }
-    case 'win32': {
-      return process.env.APPDATA || join(home, 'AppData', 'Roaming')
-    }
-    default: {
-      return process.env.XDG_CONFIG_HOME || join(home, '.config')
-    }
-  }
-}
-
-function productUserDataDirectory(productName: string): string {
-  return join(platformUserDataBaseDirectory(), productName)
-}
-
-function legacyPackageUserDataDirectory(): string {
-  return join(platformUserDataBaseDirectory(), '@memohai', 'desktop')
-}
-
-function moveUserDataEntries(source: string, target: string, entries: string[]): void {
-  if (!existsSync(source)) return
-  mkdirSync(target, { recursive: true })
-  for (const entry of entries) {
-    const sourcePath = join(source, entry)
-    const targetPath = join(target, entry)
-    if (!existsSync(sourcePath) || existsSync(targetPath)) continue
-    renameSync(sourcePath, targetPath)
-  }
-}
-
-function hasLocalUserData(source: string): boolean {
-  return LOCAL_USER_DATA_ENTRIES.some((entry) => existsSync(join(source, entry)))
-}
-
-function migrateWholeUserDataDirectory(source: string, target: string): boolean {
-  if (!existsSync(source) || existsSync(target)) return false
-  try {
-    renameSync(source, target)
-    return true
-  } catch (error) {
-    console.error('failed to migrate userData directory', { from: source, to: target, error })
-    return false
-  }
-}
-
-function migrateRemoteUserDataDirectory(): void {
-  const legacy = productUserDataDirectory(LEGACY_REMOTE_PRODUCT_NAME)
-  const modern = productUserDataDirectory(ONLINE_PRODUCT_NAME)
-  if (migrateWholeUserDataDirectory(legacy, modern)) return
-  try {
-    moveUserDataEntries(legacy, modern, ['remote-profile.json', 'window-state.json'])
-  } catch (error) {
-    console.error('failed to migrate remote userData entries', { from: legacy, to: modern, error })
-  }
-}
-
-function migrateLocalUserDataDirectory(): void {
-  const modern = productUserDataDirectory(LOCAL_PRODUCT_NAME)
-  const legacyPackage = legacyPackageUserDataDirectory()
-  const legacyLocal = productUserDataDirectory(LEGACY_LOCAL_PRODUCT_NAME)
-
-  if (!migrateWholeUserDataDirectory(legacyPackage, modern)) {
-    try {
-      moveUserDataEntries(legacyPackage, modern, LOCAL_USER_DATA_ENTRIES)
-    } catch (error) {
-      console.error('failed to migrate package userData entries', { from: legacyPackage, to: modern, error })
-    }
-  }
-
-  if (!existsSync(legacyLocal) || !hasLocalUserData(legacyLocal)) return
-  if (!existsSync(join(legacyLocal, 'remote-profile.json')) && migrateWholeUserDataDirectory(legacyLocal, modern)) return
-  try {
-    moveUserDataEntries(legacyLocal, modern, LOCAL_USER_DATA_ENTRIES)
-  } catch (error) {
-    console.error('failed to migrate local userData entries', { from: legacyLocal, to: modern, error })
-  }
-}
 
 // Must run before anything resolves `app.getPath('userData')`.
 app.setName(DESKTOP_PRODUCT_NAME)
-if (DESKTOP_RUNTIME_MODE === 'remote') {
-  migrateRemoteUserDataDirectory()
-} else {
-  migrateLocalUserDataDirectory()
-}
 
 const CHAT_DEFAULTS = { width: 1280, height: 800, minWidth: 960, minHeight: 600 }
 type WindowKind = 'chat'
@@ -182,32 +52,8 @@ type TraySettingsItem = {
 
 let chatWindow: BrowserWindow | null = null
 let appTray: Tray | null = null
-
-let stoppingLocalProcesses = false
+let isQuitting = false
 let windowStatesCache: StoredWindowStates | null = null
-
-function isRemoteMode(): boolean {
-  return DESKTOP_RUNTIME_MODE === 'remote'
-}
-
-function remoteProfilePath(): string {
-  return join(app.getPath('userData'), 'remote-profile.json')
-}
-
-function readRemoteProfile(): RemoteProfile {
-  if (!isRemoteMode()) return {}
-  const path = remoteProfilePath()
-  if (!existsSync(path)) return {}
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as RemoteProfile
-    return {
-      baseUrl: typeof parsed.baseUrl === 'string' ? normalizeRemoteBaseUrl(parsed.baseUrl) : undefined,
-    }
-  } catch (error) {
-    console.error('failed to read remote desktop profile', error)
-    return {}
-  }
-}
 
 function windowStatePath(): string {
   return join(app.getPath('userData'), 'window-state.json')
@@ -291,14 +137,7 @@ function restoreWindowMaximized(window: BrowserWindow, kind: WindowKind): void {
   }
 }
 
-function getDesktopApiBaseUrl(): string {
-  if (!isRemoteMode()) {
-    return getLocalServerStatus().baseUrl
-  }
-  return configuredRemoteBaseUrl()
-}
-
-function normalizeRemoteBaseUrl(raw: string): string {
+function normalizeBaseUrl(raw: string): string {
   let value = raw.trim()
   if (!value) {
     throw new Error('Server URL is required')
@@ -316,70 +155,26 @@ function normalizeRemoteBaseUrl(raw: string): string {
   return url.toString().replace(/\/$/, '')
 }
 
-function configuredRemoteBaseUrl(): string {
+function getDesktopApiBaseUrl(): string {
   const configured =
-    process.env.MEMOH_DESKTOP_REMOTE_BASE_URL?.trim()
+    process.env.MEMOH_DESKTOP_BASE_URL?.trim()
     || process.env.MEMOH_WEB_PROXY_TARGET?.trim()
     || process.env.VITE_API_URL?.trim()
-    || readRemoteProfile().baseUrl
-    || DEFAULT_REMOTE_BASE_URL
-  return normalizeRemoteBaseUrl(configured)
+    || DEFAULT_BASE_URL
+  return normalizeBaseUrl(configured)
 }
 
 function getDesktopServerStatus() {
-  if (!isRemoteMode()) {
-    return {
-      mode: DESKTOP_RUNTIME_MODE,
-      ...getLocalServerStatus(),
-    }
-  }
   const baseUrl = getDesktopApiBaseUrl()
   return {
-    mode: DESKTOP_RUNTIME_MODE,
     baseUrl,
     ready: baseUrl !== '',
     managed: false,
   }
 }
 
-async function stopLocalProcesses(): Promise<void> {
-  if (isRemoteMode()) return
-  await stopProviderOAuthCallbackProxy()
-  await stopManagedServer()
-  await stopEmbeddedQdrant()
-}
-
-function hideDesktopSurfacesForQuit(): void {
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (window.isDestroyed()) continue
-    window.hide()
-    window.destroy()
-  }
-  appTray?.destroy()
-  appTray = null
-  if (process.platform === 'darwin' && app.dock) {
-    app.dock.hide()
-  }
-}
-
-app.on('before-quit', (event) => {
-  if (stoppingLocalProcesses) return
-  stoppingLocalProcesses = true
-  event.preventDefault()
-  hideDesktopSurfacesForQuit()
-  void stopLocalProcesses()
-    .catch((error) => {
-      console.error('failed to stop local desktop processes', error)
-    })
-    .finally(() => app.exit(0))
-})
-
-app.on('will-quit', () => {
-  if (stoppingLocalProcesses) return
-  stoppingLocalProcesses = true
-  void stopLocalProcesses().catch((error) => {
-    console.error('failed to stop local desktop processes', error)
-  })
+app.on('before-quit', () => {
+  isQuitting = true
 })
 
 function applyExternalLinkHandler(window: BrowserWindow): void {
@@ -465,7 +260,6 @@ function openBotWorkspace(botId: string): void {
   if (!id) return
   const window = ensureWindow('chat')
   focusWindow(window)
-  // The identifier may be a bot name or UUID; both resolve on the chat page.
   const target = `/bot/${encodeURIComponent(id)}`
   dispatchRendererNavigate(window, target)
 }
@@ -544,35 +338,8 @@ function buildTrayMenu(bots: TrayBot[] = []): Electron.Menu {
   ])
 }
 
-function normalizeTrayBots(payload: unknown): TrayBot[] {
-  if (!payload || typeof payload !== 'object') return []
-  const items = (payload as { items?: unknown }).items
-  if (!Array.isArray(items)) return []
-  return items.flatMap((item): TrayBot[] => {
-    if (!item || typeof item !== 'object') return []
-    const record = item as { id?: unknown; display_name?: unknown; name?: unknown }
-    const id = typeof record.id === 'string' ? record.id.trim() : ''
-    if (!id) return []
-    const displayName =
-      (typeof record.display_name === 'string' ? record.display_name.trim() : '') ||
-      (typeof record.name === 'string' ? record.name.trim() : '') ||
-      id
-    return [{ id, displayName }]
-  })
-}
-
 async function fetchTrayBots(): Promise<TrayBot[]> {
-  if (isRemoteMode()) return []
-  const baseUrl = getDesktopApiBaseUrl()
-  if (!baseUrl) return []
-  const token = await getDesktopAuthToken()
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/bots`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  })
-  if (!response.ok) {
-    throw new Error(`GET /bots failed with ${response.status}`)
-  }
-  return normalizeTrayBots(await response.json())
+  return []
 }
 
 function setTrayMenu(bots: TrayBot[] = []): void {
@@ -623,16 +390,10 @@ function createAppTray(): void {
 // output is what wires the IPC bridge into the renderer.
 const PRELOAD_FILE = '../preload/index.mjs'
 
-// On macOS we hide the system titlebar but keep the native traffic lights.
-// A transparent window background prevents the hidden titlebar area from
-// flashing or retaining the default white backing above the renderer.
 function macWindowChromeOptions(tabbingIdentifier: string): Partial<Electron.BrowserWindowConstructorOptions> {
   if (process.platform !== 'darwin') return {}
   return {
     titleBarStyle: 'hidden',
-    // Electron 42 renders the macOS traffic lights slightly larger than the
-    // previous runtime. y is the lights' top-left; y=13 keeps their visual
-    // center aligned with the 40px chrome strip's midline.
     trafficLightPosition: { x: 14, y: 13 },
     transparent: true,
     backgroundColor: '#00000000',
@@ -657,16 +418,12 @@ function createChatWindow(): BrowserWindow {
   })
   attachWindowStatePersistence(window, 'chat', CHAT_DEFAULTS)
 
-  // ready-to-show fires on initial load AND every subsequent full reload
-  // (including HMR-triggered full page reloads during AI-assisted editing).
-  // Guarding with `once` ensures the window shows only on the first load —
-  // it will never steal focus again on subsequent reloads.
   window.once('ready-to-show', () => {
     restoreWindowMaximized(window, 'chat')
     window.show()
   })
   window.on('close', (event) => {
-    if (stoppingLocalProcesses) return
+    if (isQuitting) return
     event.preventDefault()
     window.hide()
   })
@@ -690,19 +447,12 @@ function focusWindow(window: BrowserWindow): void {
   window.focus()
 }
 
-// Renderer-supplied menu accelerators take precedence over the static table.
-// Keyed by command id (kebab-case AppKeyboardCommand). The renderer pushes the
-// current set whenever the Keyboard Shortcuts store mutates, and we rebuild
-// the menu so the native item's label and matching combo stay in sync.
 const menuAcceleratorOverrides = new Map<string, string>()
 
 function effectiveMenuAccelerator(command: AppKeyboardCommand): string | undefined {
   return menuAcceleratorOverrides.get(command) ?? acceleratorForCommand(command)
 }
 
-// Derive the native Close accelerator from the renderer-pushed overrides,
-// falling back to the shared binding table's default. The focused window
-// decides whether the command closes an app tab or the window.
 function closeWindowMenuItem(): MenuItemConstructorOptions {
   return {
     label: 'Close',
@@ -717,183 +467,7 @@ function closeWindowMenuItem(): MenuItemConstructorOptions {
   }
 }
 
-// CLI install / menu helpers — kept above the whenReady block so the
-// Promise chain can call them without forward-declaration noise.
-
-async function runCliInstallCheck(): Promise<void> {
-  if (isRemoteMode()) return
-  // In dev (mise run desktop:dev / electron-vite dev) we skip the
-  // auto-prompt entirely. The CLI binary is built lazily by
-  // `installCli()` via `go build ./cmd/memoh`, so it works if the
-  // developer explicitly clicks the menu, but we don't nag on every
-  // hot-reload.
-  if (!app.isPackaged) return
-
-  let status: CliStatus
-  try {
-    status = await detectCliState()
-  } catch (error) {
-    console.error('failed to detect cli state', error)
-    return
-  }
-  if (status.state === 'installed-current') return
-  if (status.state === 'installed-stale') {
-    try {
-      await installCli()
-      await rebuildAppMenu()
-    } catch (error) {
-      console.error('silent cli reinstall failed', error)
-    }
-    return
-  }
-  const prefs = readCliPrefs()
-  if (prefs.dontAskAgain) return
-  if (status.state === 'installed-foreign') return // never overwrite a non-Memoh memoh
-
-  const detail = process.platform === 'win32'
-    ? 'A `memoh` directory will be added to your user PATH (no admin required). Open a new terminal afterwards.'
-    : process.platform === 'darwin'
-      ? 'macOS will prompt for your administrator password to create /usr/local/bin/memoh.'
-      : `A symlink will be created at ${join(app.getPath('home'), '.local', 'bin', 'memoh')}.${linuxPathHint() ? ' ' + linuxPathHint() : ''}`
-
-  const result = await dialog.showMessageBox({
-    type: 'question',
-    buttons: ['Install', 'Skip', 'Don\u2019t ask again'],
-    defaultId: 0,
-    cancelId: 1,
-    title: 'Install Memoh CLI?',
-    message: 'Install the `memoh` command-line tool?',
-    detail,
-    noLink: true,
-  })
-  if (result.response === 0) {
-    try {
-      await installCli()
-      await rebuildAppMenu()
-      await dialog.showMessageBox({
-        type: 'info',
-        message: 'Memoh CLI installed.',
-        detail: 'Run `memoh --help` in a new terminal to get started.',
-      })
-    } catch (error) {
-      await dialog.showMessageBox({
-        type: 'error',
-        message: 'Failed to install Memoh CLI',
-        detail: error instanceof Error ? error.message : String(error),
-      })
-    }
-  } else if (result.response === 2) {
-    writeCliPrefs({ ...prefs, dontAskAgain: true })
-  }
-}
-
 async function rebuildAppMenu(): Promise<void> {
-  if (isRemoteMode()) {
-    const template: MenuItemConstructorOptions[] = []
-    if (process.platform === 'darwin') {
-      template.push({
-        label: app.name,
-        submenu: [
-          { role: 'about' },
-          { type: 'separator' },
-          {
-            label: 'Memoh Settings…',
-            click: openMemohSettings,
-          },
-          { type: 'separator' },
-          { role: 'services' },
-          { type: 'separator' },
-          { role: 'hide' },
-          { role: 'hideOthers' },
-          { role: 'unhide' },
-          { type: 'separator' },
-          { role: 'quit' },
-        ],
-      })
-    }
-    template.push(
-      {
-        label: 'Edit',
-        submenu: [
-          { role: 'undo' },
-          { role: 'redo' },
-          { type: 'separator' },
-          { role: 'cut' },
-          { role: 'copy' },
-          { role: 'paste' },
-          { role: 'selectAll' },
-        ],
-      },
-      {
-        label: 'View',
-        submenu: [
-          { role: 'reload' },
-          { role: 'forceReload' },
-          { role: 'toggleDevTools' },
-          { type: 'separator' },
-          { role: 'resetZoom' },
-          { role: 'zoomIn' },
-          { role: 'zoomOut' },
-          { type: 'separator' },
-          { role: 'togglefullscreen' },
-        ],
-      },
-      {
-        label: 'Window',
-        submenu: [
-          { role: 'minimize' },
-          closeWindowMenuItem(),
-        ],
-      },
-    )
-    Menu.setApplicationMenu(Menu.buildFromTemplate(template))
-    return
-  }
-
-  let cliStatus: CliStatus | null = null
-  try {
-    cliStatus = await detectCliState()
-  } catch {
-    cliStatus = null
-  }
-  const isInstalled = cliStatus?.state === 'installed-current'
-  const cliMenuItem: MenuItemConstructorOptions = {
-    label: isInstalled ? 'Reinstall Command Line Tool…' : 'Install Command Line Tool…',
-    click: async () => {
-      try {
-        await installCli()
-        await rebuildAppMenu()
-        await dialog.showMessageBox({
-          type: 'info',
-          message: 'Memoh CLI installed.',
-          detail: 'Run `memoh --help` in a new terminal to get started.',
-        })
-      } catch (error) {
-        await dialog.showMessageBox({
-          type: 'error',
-          message: 'Failed to install Memoh CLI',
-          detail: error instanceof Error ? error.message : String(error),
-        })
-      }
-    },
-  }
-  const uninstallItem: MenuItemConstructorOptions = {
-    label: 'Uninstall Command Line Tool',
-    enabled: isInstalled,
-    click: async () => {
-      try {
-        await uninstallCli()
-        await rebuildAppMenu()
-      } catch (error) {
-        await dialog.showMessageBox({
-          type: 'error',
-          message: 'Failed to uninstall Memoh CLI',
-          detail: error instanceof Error ? error.message : String(error),
-        })
-      }
-    },
-  }
-
   const template: MenuItemConstructorOptions[] = []
   if (process.platform === 'darwin') {
     template.push({
@@ -901,8 +475,10 @@ async function rebuildAppMenu(): Promise<void> {
       submenu: [
         { role: 'about' },
         { type: 'separator' },
-        cliMenuItem,
-        uninstallItem,
+        {
+          label: 'Memoh Settings...',
+          click: openMemohSettings,
+        },
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
@@ -949,27 +525,14 @@ async function rebuildAppMenu(): Promise<void> {
       ],
     },
   )
-  if (process.platform !== 'darwin') {
-    template.push({
-      label: 'Tools',
-      submenu: [cliMenuItem, uninstallItem],
-    })
-  }
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
 app.whenReady().then(async () => {
-  // 第 0 步:macOS 双击自安装。若从 DMG 触发了搬家 + 重启,立即 return,
-  // 绝不让将死的 DMG 实例继续拉起本地 server / Qdrant(否则留孤儿进程)。
-  // 必须早于 ensureLocalServer / 建窗口 / tray。
   if (maybeSelfInstallMacOS()) return
 
-  electronApp.setAppUserModelId(isRemoteMode() ? 'ai.memoh.desktop.online' : 'ai.memoh.desktop')
-  if (!isRemoteMode()) {
-    await ensureLocalServer()
-    await ensureProviderOAuthCallbackProxy()
-  }
+  electronApp.setAppUserModelId('ai.memoh.desktop')
 
   if (process.platform === 'darwin' && app.dock && is.dev) {
     app.dock.setIcon(iconPng)
@@ -988,33 +551,6 @@ app.whenReady().then(async () => {
   })
   ipcMain.handle('desktop:server-status', () => getDesktopServerStatus())
   ipcMain.handle('desktop:api-base-url', () => getDesktopApiBaseUrl())
-  ipcMain.handle('desktop:auth-token', () => isRemoteMode() ? '' : getDesktopAuthToken())
-  ipcMain.handle('desktop:default-workspace-path', (_event, rawDisplayName: unknown) => {
-    if (isRemoteMode()) return ''
-    return defaultWorkspacePath(typeof rawDisplayName === 'string' ? rawDisplayName : '')
-  })
-  // A local-mode agent session runs inside a real host folder, so the composer
-  // can offer the OS directory picker and bind the chosen path. In remote mode
-  // the project lives on the server, where a host path is meaningless, so the
-  // picker is withheld and this returns nothing.
-  ipcMain.handle('desktop:open-project-folder', async (event) => {
-    if (isRemoteMode()) return null
-    const owner = BrowserWindow.fromWebContents(event.sender) ?? BrowserWindow.getFocusedWindow()
-    const result = owner
-      ? await dialog.showOpenDialog(owner, { properties: ['openDirectory', 'createDirectory'] })
-      : await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
-    if (result.canceled) return null
-    return result.filePaths[0] ?? null
-  })
-  ipcMain.handle('desktop:cli-status', () => detectCliState())
-  ipcMain.handle('desktop:cli-install', async () => {
-    await installCli()
-    return detectCliState()
-  })
-  ipcMain.handle('desktop:cli-uninstall', async () => {
-    await uninstallCli()
-    return detectCliState()
-  })
   ipcMain.handle('desktop:set-menu-accelerators', async (_event, rawPayload: unknown) => {
     if (!rawPayload || typeof rawPayload !== 'object') return
     const incoming = new Map<string, string>()
@@ -1039,12 +575,6 @@ app.whenReady().then(async () => {
     await rebuildAppMenu()
   })
   ipcMain.handle('desktop:open-external-url', (_event, rawURL: unknown) => openExternalUrl(rawURL))
-
-  // Renderer cache invalidation broadcast. Settings routes share the primary
-  // renderer cache, but auxiliary renderers can still exist in desktop builds;
-  // when one renderer invalidates Pinia Colada queries, this fans the
-  // serializable filter out to siblings. The sender is excluded so we don't
-  // echo back into the originating renderer.
   ipcMain.handle('desktop:broadcast-invalidate', (event, payload: unknown) => {
     const senderId = event.sender.id
     for (const target of BrowserWindow.getAllWindows()) {
@@ -1062,10 +592,8 @@ app.whenReady().then(async () => {
   })
 
   await rebuildAppMenu()
-  void runCliInstallCheck()
 })
 
 app.on('window-all-closed', () => {
-  if (stoppingLocalProcesses) return
   if (process.platform !== 'darwin') app.quit()
 })

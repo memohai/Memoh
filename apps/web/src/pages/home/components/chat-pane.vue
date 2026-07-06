@@ -1017,7 +1017,6 @@ import { useACPRuntime } from '@/composables/useACPRuntime'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, ACP_NO_PROJECT_MODE, acpAgentIcon, createACPNoProjectPath, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig, readRecentACPFolders, rememberACPFolder } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { canPickProjectFolder, pickProjectFolder } from '@/utils/desktop-runtime'
-import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { hasBotPermission } from '@/utils/bot-permissions'
 
 interface PendingUserInputDraft {
@@ -1421,14 +1420,12 @@ function folderBasename(path: string): string {
   const parts = path.split('/').filter(Boolean)
   return parts[parts.length - 1] ?? path
 }
-const { isLocalDesktop, load: loadDesktopRuntime } = useDesktopRuntime()
-void loadDesktopRuntime()
 const projectFolderMenuOpen = ref(false)
 const recentACPFolders = ref<string[]>(readRecentACPFolders())
 const currentACPProjectPath = computed(() => String(activeSessionMetadata.value.project_path ?? '').trim())
 const activeProjectIsNone = computed(() => isACPNoProject(activeSessionMetadata.value))
 const canChooseProjectFolder = computed(() =>
-  activeIsACP.value && canChangeAgent.value && isLocalDesktop.value && canPickProjectFolder(),
+  activeIsACP.value && canChangeAgent.value && canPickProjectFolder(),
 )
 const projectFolderOptions = computed(() => {
   const list = [...recentACPFolders.value]

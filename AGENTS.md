@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Memoh is a multi-member, structured long-memory AI agent platform with isolated workspace runtimes. Users can create AI bots and chat with them via Telegram, Discord, Lark (Feishu), DingTalk, WeChat, Matrix, Email, and more. Each bot can use an independent container workspace, or a trusted local workspace in desktop/local mode, allowing it to edit files, execute commands, run tools, and build itself while keeping runtime ownership explicit.
+Memoh is a multi-member, structured long-memory AI agent platform with isolated workspace runtimes. Users can create AI bots and chat with them via Telegram, Discord, Lark (Feishu), DingTalk, WeChat, Matrix, Email, and more. Each bot can use an independent container workspace, or trusted local workspace support when explicitly enabled on the server, allowing it to edit files, execute commands, run tools, and build itself while keeping runtime ownership explicit.
 
 The public documentation site is maintained separately in `memohai/memoh-docs`.
 
@@ -15,12 +15,12 @@ Deploy/server mode consists of two core services:
 | **Server** (Backend) | Go + Echo | 8080 | Main service: REST API, auth, database, container management, **in-process AI agent** |
 | **Web** (Frontend) | Vue 3 + Vite | 8082 | Management UI: visual configuration for Bots, Models, Channels, etc. |
 
-The native desktop client is a separate distribution boundary, not just a hosted Web shell. `apps/desktop` reuses `@memohai/web` modules, but owns the Electron shell, system tray behavior, local server lifecycle, embedded Qdrant startup, bundled CLI installation, and packaged resources. In desktop mode the app starts and stops a local `memoh-server` on `127.0.0.1:18731` with its own SQLite data, provider templates, bridge runtime, and Qdrant process under the user's app data directory.
+The native desktop client is a separate distribution boundary for Memoh Cloud or a hosted Memoh server. `apps/desktop` reuses `@memohai/web` modules, but owns the Electron shell, system tray behavior, menus, preload IPC, cache invalidation, and packaged application resources.
 
 Infrastructure dependencies:
-- **PostgreSQL or SQLite** — Relational data storage
-- **Qdrant** — Vector database for memory semantic search; external in deploy/server mode, embedded and managed by the desktop client for local desktop mode
-- **Workspace runtime** — Isolated containers per bot via Docker, containerd v2, or Apple Virtualization, plus trusted local workspaces for desktop/local development
+- **PostgreSQL** — Relational data storage
+- **Qdrant** — Vector database for memory semantic search
+- **Workspace runtime** — Isolated containers per bot via Docker, containerd v2, or Apple Virtualization, plus trusted local workspaces when server configuration enables them
 
 ## Tech Stack
 
@@ -28,12 +28,11 @@ Infrastructure dependencies:
 - **Framework**: Echo (HTTP)
 - **Dependency Injection**: Uber FX
 - **AI SDK**: [Twilight AI](https://github.com/memohai/twilight-ai) (Go LLM SDK — OpenAI, Anthropic, Google)
-- **Database Drivers**: pgx/v5 (PostgreSQL), modernc.org/sqlite (SQLite)
+- **Database Driver**: pgx/v5 (PostgreSQL)
 - **Code Generation**: sqlc (SQL → Go)
 - **API Docs**: Swagger/OpenAPI (swaggo)
 - **MCP**: modelcontextprotocol/go-sdk
 - **Containers / Workspaces**: Docker / containerd v2 / Apple Virtualization adapters, plus trusted local workspace routing
-- **TUI**: Charm libraries (bubbletea, glamour, lipgloss) for CLI interactive mode
 
 ### Frontend (TypeScript)
 - **Framework**: Vue 3 (Composition API)
@@ -43,7 +42,7 @@ Infrastructure dependencies:
 - **Icons**: lucide-vue-next + `@memohai/icon` (brand/provider icons)
 - **i18n**: vue-i18n
 - **Markdown**: markstream-vue + Shiki + Mermaid + KaTeX
-- **Desktop**: Electron 34 + [electron-vite](https://electron-vite.github.io/) 4 native client, reusing `@memohai/web` modules while managing the desktop renderer, local server lifecycle, embedded Qdrant, bundled CLI, tray behavior, and packaged runtime resources
+- **Desktop**: Electron 34 + [electron-vite](https://electron-vite.github.io/) 4 native client, reusing `@memohai/web` modules while managing the desktop renderer, tray behavior, menus, and preload IPC
 - **Package Manager**: pnpm monorepo
 
 ### Tooling
@@ -62,8 +61,7 @@ Memoh/
 │   ├── agent/                  #   Main backend server (main.go, FX wiring)
 │   ├── bridge/                 #   In-container gRPC bridge (UDS-based, runs inside bot containers; supervises optional display/browser helpers)
 │   │   └── template/           #     Prompt templates for bridge (TOOLS.md, SOUL.md, IDENTITY.md, etc.)
-│   ├── mcp/                    #   MCP stdio transport binary
-│   └── memoh/                  #   Desktop companion CLI (Cobra: chat, tui, bots, start/stop/restart/status/logs, version) — bundled into Memoh Local.app, talks to the local 18731 server
+│   └── mcp/                    #   MCP stdio transport binary
 ├── internal/                   # Go backend core code (domain packages)
 │   ├── accounts/               #   User account management (CRUD, password hashing)
 │   ├── acl/                    #   Access control list (source-aware chat trigger ACL)
@@ -168,7 +166,7 @@ Memoh/
 │       ├── bridge/             #     gRPC client for in-container bridge service
 │       └── bridgepb/           #     Protobuf definitions (bridge.proto)
 ├── apps/                       # Application services
-│   ├── desktop/                #   Native Electron app (@memohai/desktop): renderer, tray, local server, embedded Qdrant, bundled CLI/runtime
+│   ├── desktop/                #   Native Electron app (@memohai/desktop): hosted-server renderer, tray, menus, preload IPC
 │   └── web/                    #   Main web app (@memohai/web, Vue 3) — see apps/web/AGENTS.md
 ├── packages/                   # Shared TypeScript libraries
 │   ├── ui/                     #   Shared UI component library (@memohai/ui)
@@ -179,12 +177,9 @@ Memoh/
 │   └── a11y-cli/               #   AT-SPI accessibility helper used by Computer Use
 ├── spec/                       # OpenAPI specifications (swagger.json, swagger.yaml)
 ├── db/                         # Database
-│   ├── postgres/               #   PostgreSQL SQL resources
-│   │   ├── migrations/         #   SQL migration files (PostgreSQL 0001–0092+, SQLite 0001–0017+)
-│   │   └── queries/            #   SQL query files (sqlc input)
-│   └── sqlite/                 #   SQLite SQL resources (parallel backend track)
-│       ├── migrations/         #   SQLite migration files
-│       └── queries/            #   SQLite query files (sqlc input)
+│   └── postgres/               #   PostgreSQL SQL resources
+│       ├── migrations/         #   SQL migration files
+│       └── queries/            #   SQL query files (sqlc input)
 ├── conf/                       # Configuration
 │   ├── providers/              #   Provider YAML templates (openai, anthropic, codex, github-copilot, etc.)
 │   ├── app.example.toml        #   Default config template
@@ -216,7 +211,7 @@ Before making changes to a directory, check whether that directory (or its neare
 
 Key local developer guides:
 - `apps/web/AGENTS.md` — web frontend architecture, routing, page conventions, and i18n rules.
-- `apps/desktop/AGENTS.md` — Electron shell, local server lifecycle, bundled CLI.
+- `apps/desktop/AGENTS.md` — Electron shell, hosted-server bootstrap, tray/menu/preload rules.
 - `packages/ui/AGENTS.md` — design language contract: tokens, radius, shadow, motion, and the UI contract guard.
 
 ### README Localization
@@ -242,24 +237,18 @@ Bot persona templates (not developer guides):
 |---------|-------------|
 | `mise run dev` | Start the containerized dev environment (all services) |
 | `mise run dev:minify` | Start dev environment with minified services |
-| `mise run dev:sqlite` | Start SQLite-backed development environment |
-| `mise run dev:sqlite:minify` | Start SQLite-backed development environment with minified services |
 | `mise run dev:selinux` | Start dev environment on SELinux systems |
 | `mise run dev:down` | Stop the dev environment |
-| `mise run dev:down:sqlite` | Stop SQLite development environment |
 | `mise run dev:logs` | View dev environment logs |
-| `mise run dev:logs:sqlite` | View SQLite development logs |
 | `mise run dev:restart` | Restart a service (e.g. `-- server`) |
-| `mise run dev:restart:sqlite` | Restart a SQLite dev service (e.g. `-- server`) |
 | `mise run setup` | Install dependencies + workspace toolkit |
-| `mise run sqlc-generate` | Regenerate Go code after modifying SQL files |
+| `mise run sqlc-generate` | Regenerate PostgreSQL sqlc code after modifying SQL files |
 | `mise run swagger-generate` | Generate Swagger documentation |
 | `mise run sdk-generate` | Generate TypeScript SDK (depends on swagger-generate) |
 | `mise run icons-generate` | Generate icon Vue components from SVG sources |
 | `mise run db-up` | Initialize and migrate the database |
 | `mise run db-down` | Drop the database |
 | `mise run build-embedded-assets` | Build and stage embedded web assets |
-| `mise run build-unified` | Build memoh CLI locally |
 | `mise run bridge:build` | Rebuild bridge binary in dev container |
 | `mise run a11y-cli:build` | Build the Rust AT-SPI helper used by Computer Use (Linux output) |
 | `mise run a11y-cli:check` | Run `cargo check` for the a11y-cli crate |
@@ -284,26 +273,22 @@ docker compose up -d        # Start all services
 ```
 
 Production deploy services are `postgres`, `migrate`, `server`, and `web`.
-Optional profiles: `qdrant` (vector DB), `sparse` (BM25 search). This is distinct from the native desktop client, which manages its own local server and embedded Qdrant instead of using the Compose web/server split.
+Optional profiles: `qdrant` (vector DB), `sparse` (BM25 search). Desktop connects to Memoh Cloud or this hosted server instead of running its own server.
 
 ## Key Development Rules
 
 ### Database, sqlc & Migrations
 
-1. **PostgreSQL SQL queries** are defined in `db/postgres/queries/*.sql`; **SQLite SQL queries** live in `db/sqlite/queries/*.sql`.
-2. All Go files under `internal/db/postgres/sqlc/` and `internal/db/sqlite/sqlc/` are auto-generated by sqlc. **DO NOT modify them manually.**
-3. **Always update both database backends together.** Any schema or query change must update the PostgreSQL and SQLite equivalents in the same change unless the code path is explicitly backend-specific and documented.
-4. After modifying any SQL files (migrations or queries), run `mise run sqlc-generate` to update both generated Go packages.
+1. **PostgreSQL SQL queries** are defined in `db/postgres/queries/*.sql`.
+2. All Go files under `internal/db/postgres/sqlc/` are auto-generated by sqlc. **DO NOT modify them manually.**
+3. After modifying any SQL files (migrations or queries), run `mise run sqlc-generate` to update generated Go code.
 
 #### Migration Rules
 
-PostgreSQL migrations live in `db/postgres/migrations/` and follow a dual-update convention:
+PostgreSQL migrations live in `db/postgres/migrations/`:
 
 - **PostgreSQL `0001_init.up.sql` is the canonical full PostgreSQL schema.** It always contains the complete, up-to-date PostgreSQL database definition (all tables, indexes, constraints, etc.). When adding PostgreSQL schema changes, you must **also update `db/postgres/migrations/0001_init.up.sql`** to reflect the final state.
-- **SQLite `0001_init.up.sql` is the canonical full SQLite schema.** SQLite currently uses a single baseline migration at `db/sqlite/migrations/0001_init.up.sql`; when adding schema changes, update this file and its paired down migration.
 - **Incremental PostgreSQL migration files** (`0002_`, `0003_`, ...) contain only the diff needed to upgrade an existing PostgreSQL database. They exist for environments that already have the schema and need to apply only the delta.
-- **Both PostgreSQL and SQLite must be kept in sync**: every schema change requires updating PostgreSQL `0001_init.up.sql`, adding the next PostgreSQL incremental migration pair, and updating SQLite `0001_init.up.sql` / `0001_init.down.sql` to the equivalent final schema.
-- **Both query sets must be kept in sync**: every query change in `db/postgres/queries/*.sql` must have an equivalent SQLite query change in `db/sqlite/queries/*.sql`, with dialect differences handled deliberately (`jsonb` vs JSON1, casts, `ILIKE`, `FOR UPDATE`, date/time functions, arrays).
 - **Naming**: `{NNNN}_{description}.up.sql` and `{NNNN}_{description}.down.sql`, where `{NNNN}` is a zero-padded sequential number (e.g., `0005`). Always use the next available number.
 - **Paired files**: Every incremental migration **must** have both an `.up.sql` (apply) and a `.down.sql` (rollback) file.
 - **Header comment**: Each file should start with a comment indicating the migration name and a brief description:
@@ -313,7 +298,7 @@ PostgreSQL migrations live in `db/postgres/migrations/` and follow a dual-update
   ```
 - **Idempotent DDL**: Use `IF NOT EXISTS` / `IF EXISTS` guards (e.g., `CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `DROP TABLE IF EXISTS`) so migrations are safe to re-run.
 - **Down migration must fully reverse up**: The `.down.sql` must cleanly undo everything its `.up.sql` does, in reverse order.
-- **After creating or modifying migrations**, run `mise run sqlc-generate` to regenerate both Go SQLC packages, then validate both migration tracks (`mise run db-up` for PostgreSQL and SQLite migration/dev tasks where relevant).
+- **After creating or modifying migrations**, run `mise run sqlc-generate` to regenerate Go sqlc code, then validate the PostgreSQL migration path.
 
 ### API Development Workflow
 
@@ -351,18 +336,15 @@ PostgreSQL migrations live in `db/postgres/migrations/` and follow a dual-update
 
 ### Desktop App
 
-- `apps/desktop/` is an [electron-vite](https://electron-vite.github.io/) project (`@memohai/desktop`) with its own managed renderer bootstrap. It reuses exported `@memohai/web` pages, layouts, stores, i18n, API setup, and design tokens, but owns the Electron shell instead of importing the full web `main.ts`.
+- `apps/desktop/` is an [electron-vite](https://electron-vite.github.io/) project (`@memohai/desktop`) with its own managed renderer bootstrap for Memoh Cloud or a hosted Memoh server. It reuses exported `@memohai/web` pages, layouts, stores, i18n, API setup, and design tokens, but owns the Electron shell instead of importing the full web `main.ts`.
 - The desktop app boots its renderer with a memory-history router, desktop shell injection, native menu/keyboard integration, native chrome, and system tray reopen/quit behavior.
-- `src/main/local-server.ts` is the local server startup gate: it prepares a local SQLite config, starts embedded Qdrant, builds or resolves the bundled `memoh-server`, runs migrations, starts the server on `127.0.0.1:18731`, and writes `local-server.pid.json` / `local-server.log` under `userData`.
-- `src/main/qdrant.ts` manages the embedded Qdrant process and per-user `qdrant/ports.json`, `qdrant.pid.json`, `config.yaml`, and storage directory. Tray Quit and normal app quit both reuse the main-process shutdown path to stop the managed server, OAuth callback proxy, and embedded Qdrant.
-- Packaging is handled by `electron-builder` (config in `apps/desktop/electron-builder.yml`); output lands in `apps/desktop/dist/`. Packaged resources include `server`, `cli`, `runtime`, `config`, provider templates, Qdrant, and GStreamer assets.
-- The Memoh CLI (`cmd/memoh/`) is bundled into the app at `Resources/cli/memoh` next to `Resources/server/memoh-server`. On first launch (and via the `Install Command Line Tool…` menu item) the main process offers to add `memoh` to PATH (`/usr/local/bin/memoh` symlink on macOS, `~/.local/bin/memoh` on Linux, HKCU PATH on Windows). The CLI talks to the local server at `127.0.0.1:18731`, self-logs in with the `[admin]` credentials in `userData/config.toml`, and shares the same pid file (`local-server.pid.json`) so either side can `start`/`stop` the server. See `apps/desktop/AGENTS.md` § Bundled CLI.
-- The online desktop product name is `Memoh`; the local/offline desktop product name is `Memoh Local`, so local userData lives at `~/Library/Application Support/Memoh Local/` (macOS), `%APPDATA%\Memoh Local\` (Windows), `~/.config/Memoh Local/` (Linux). The Go CLI hard-codes the local product name in `internal/tui/local/paths.go`; if you ever rename the local app, both sides must change together.
+- Desktop connects to the target server through `MEMOH_DESKTOP_BASE_URL` and must not start a server, package database files, embed Qdrant, or install a companion CLI.
+- Packaging is handled by `electron-builder` (config in `apps/desktop/electron-builder.yml`); output lands in `apps/desktop/dist/`.
 - When desktop needs to diverge from the web experience, extend the desktop bootstrap or add explicit `@memohai/web` subpath exports plus desktop type stubs. Do **not** fork `apps/web` itself.
 
 ### Container / Workspace Management
 
-- Each bot can have an isolated **workspace container** for file editing, command execution, MCP tool hosting, and optional headed browser/desktop display sessions. Desktop/local mode can also enable **trusted local workspaces** that run directly on the host with the server process permissions.
+- Each bot can have an isolated **workspace container** for file editing, command execution, MCP tool hosting, and optional headed browser/desktop display sessions. Trusted local workspaces can run directly on the host when the server enables them.
 - Container workspaces communicate with the host via a **gRPC bridge** over Unix Domain Sockets (UDS), not TCP. Local workspaces are routed through the same higher-level workspace interfaces but skip container isolation.
 - The bridge binary (`cmd/bridge/`) runs inside each container, mounting runtime binaries from `$WORKSPACE_RUNTIME_DIR` and UDS sockets from `/run/memoh/`. When display is enabled it can supervise Xvnc and a headed Chrome/Chromium process with CDP on port `9222`; the web UI then exposes a Display pane backed by screenshots/WebRTC/input forwarding. Treat VNC as the container desktop transport, not as the whole browser automation feature.
 - Container images are standard base images (debian, alpine, ubuntu, etc.) — no dedicated MCP Docker image needed.
@@ -451,12 +433,11 @@ The main configuration file is `config.toml` (copied from `conf/app.example.toml
 - `[server]` — HTTP listen address
 - `[admin]` — Admin account credentials
 - `[auth]` — JWT authentication settings
-- `[database]` — Database backend selection (`postgres` or `sqlite`)
+- `[database]` — Database backend selection (`postgres`)
 - `[container]` — Workspace container backend selection (`docker`, `containerd`, `apple`) and common workspace image/data/runtime/CNI settings
 - `[containerd]` / `[docker]` / `[apple]` — Backend-specific runtime configuration
-- `[local]` — Trusted local workspace support for desktop/local development (not container-isolated)
+- `[local]` — Trusted local workspace support when explicitly enabled (not container-isolated)
 - `[postgres]` — PostgreSQL connection
-- `[sqlite]` — SQLite database file and WAL/lock settings
 - `[qdrant]` — Qdrant vector database connection
 - `[sparse]` — Sparse (BM25) search service connection
 - `[web]` — Web frontend address

@@ -1,18 +1,15 @@
-import type { DesktopRuntimeMode, HostSurface } from './desktop-runtime'
+import type { HostSurface } from './desktop-runtime'
 
 export type BotWorkspaceBackend = 'container' | 'local' | 'unknown'
 
 export interface BotDetailsTabRule {
   value: string
-  remoteOnly?: boolean
-  localOnly?: boolean
   containerWorkspaceOnly?: boolean
   hideForLocalWorkspace?: boolean
 }
 
 export interface BotDetailsTabPolicyContext {
   host: HostSurface
-  desktopRuntimeMode: DesktopRuntimeMode | null
   canManageBot: boolean
   botWorkspaceBackend: BotWorkspaceBackend
   serverCapabilities?: {
@@ -31,8 +28,6 @@ export function filterBotDetailsTabs<T extends BotDetailsTabRule>(
   }
 
   return tabs.filter((tab) => {
-    if (tab.remoteOnly && context.desktopRuntimeMode !== 'remote') return false
-    if (tab.localOnly && context.desktopRuntimeMode !== 'local') return false
     if (tab.hideForLocalWorkspace && context.botWorkspaceBackend === 'local') return false
     if (tab.containerWorkspaceOnly && context.botWorkspaceBackend === 'local') return false
     return true

@@ -415,7 +415,6 @@ const tabList = computed(() => {
   }>
   return filterBotDetailsTabs(tabs, {
     host: desktopRuntime.host.value,
-    desktopRuntimeMode: desktopRuntime.desktopRuntimeMode.value,
     canManageBot: canManageBot.value,
     botWorkspaceBackend: botWorkspaceBackend.value,
     serverCapabilities: {

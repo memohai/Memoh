@@ -1,6 +1,9 @@
 # @memohai/desktop
 
-Memoh desktop application built with [electron-vite](https://electron-vite.github.io/).
+Memoh Desktop is the native client for Memoh Cloud or a hosted Memoh server. It
+is built with [electron-vite](https://electron-vite.github.io/) and owns the
+Electron shell, tray, window/menu behavior, native cache invalidation, and
+renderer bootstrap. It does not start or package a local server.
 
 The renderer owns its own `src/renderer/src/main.ts`, root component, and
 router. It imports reusable building blocks from `@memohai/web` (pages,
@@ -23,16 +26,12 @@ locally. Desktop-only renderer setup belongs in this entry, not in
 ```bash
 # from repo root
 pnpm --filter @memohai/desktop dev
-pnpm --filter @memohai/desktop dev:remote
 # or via mise
 mise run desktop:dev
-mise run desktop:dev:remote
 ```
 
-`MEMOH_WEB_PROXY_TARGET` overrides the backend that the renderer's `/api` proxy points
-at (defaults to whatever `config.toml` / `conf/app.docker.toml` declares).
-Remote desktop dev defaults to `http://localhost:18080`; override it with
-`MEMOH_DESKTOP_REMOTE_BASE_URL`.
+`MEMOH_DESKTOP_BASE_URL` overrides the server that Desktop connects to. Dev
+defaults to `http://localhost:18080`.
 
 ## Build
 
@@ -42,10 +41,6 @@ pnpm --filter @memohai/desktop build:dir       # unpacked app dir (CI smoke test
 ```
 
 Output goes to `apps/desktop/dist/`.
-
-Packaged macOS and Windows x64 builds include the display GStreamer runtime used
-by the local server. Linux builds continue to use system GStreamer when
-available.
 
 ## Icons
 

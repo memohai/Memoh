@@ -8,7 +8,6 @@ allowBuilds:
   vue-demi: true
 
 onlyBuiltDependencies:
-  - sqlite3
   - electron
   - electron-winstaller
   - esbuild
