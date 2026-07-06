@@ -18,6 +18,11 @@
 //     hover:/active: fills, raw colors or shadow-* onto a component tag forks that
 //     source — the exact drift where one control hovers differently than its
 //     neighbour. Existing debt is grandfathered; new injection HARD-fails.
+//   · INVALID-COLOR rule — packages/ui AND apps/web (both scopes, no ratchet).
+//     hsl(var(--x)) wrapping an oklch token is an invalid color function; the
+//     browser drops the whole declaration silently (no error, no fallback),
+//     which is how it survives visual QA. No escape hatch — there is no
+//     legitimate hsl(var(--x)) post-oklch-migration.
 //
 // px rules — HARD FAIL (exit 1):
 //   · text-[Npx]      font-size never scales        → use a --text-* token
@@ -213,6 +218,17 @@ function scan(file, full) {
         if ((m = tok.match(/(?:^|:)(?:gap(?:-[xy])?|space-[xy])-\[(\d+(?:\.\d+)?)px\]/)) && Number(m[1]) >= MIN_BOX_PX)
           pxHard.push({ rel, ln, msg: `px gap/space won't scale (use the rem spacing scale) → ${tok}` })
       }
+
+      // ── invalid oklch-era leftover (BOTH scopes; HARD, no ratchet) ───────
+      //   Tokens moved from hsl components to oklch; wrapping a var(--x)
+      //   reference in hsl(...) is an invalid color function that the browser
+      //   silently drops the WHOLE declaration for — no console warning, no
+      //   visible fallback. Caught two live instances this way (sidebar rail
+      //   hover outline, about-page link color) that survived visual QA
+      //   because nothing errors. No escape hatch: there is no legitimate
+      //   reason to wrap an oklch var() in hsl() post-migration.
+      if (/hsl\(var\(--/.test(tok))
+        hard.push(`${rel}:${ln}  oklch token wrapped in hsl() is invalid — the browser drops the whole declaration; use var(--x) directly → ${tok}`)
 
       // ── app-scope injection rules (apps/web only; ratcheted) ─────────────
       //   The library owns interaction chrome (style.css ::before), color (palette

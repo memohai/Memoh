@@ -291,6 +291,6 @@ async function recheck() {
 
 .about-notes :deep(.markdown-renderer a.link-node:hover) {
   opacity: 1;
-  color: hsl(var(--primary));
+  color: var(--primary);
 }
 </style>

@@ -1,3 +1,9 @@
+// LEGACY — unmigrated shadcn-vue import (23 files in this directory). Hand-rolls
+// its own button chrome and focus-ring vocabulary instead of the Button /
+// field-edge contracts documented in packages/ui/AGENTS.md § Reference status.
+// Do NOT copy styling patterns from here; production usage is limited to
+// settings-sidebar (via master-detail-sidebar-layout → settings-section /
+// bots/detail.vue). See AGENTS.md for the full rationale.
 import type { VariantProps } from 'class-variance-authority'
 import type { HTMLAttributes } from 'vue'
 import { cva } from 'class-variance-authority'
@@ -52,7 +58,7 @@ export const sidebarMenuButtonVariants = cva(
       variant: {
         default: 'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
         outline:
-          'bg-background shadow-[0_0_0_1px_hsl(var(--sidebar-border))] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-[0_0_0_1px_hsl(var(--sidebar-accent))]',
+          'bg-background shadow-[0_0_0_1px_var(--sidebar-border)] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-[0_0_0_1px_var(--sidebar-accent)]',
       },
       size: {
         default: 'h-9 text-body',

@@ -211,6 +211,14 @@ prose use `variant="link"`; for a control-sized action use a normal `<Button>`.
 - **Legacy (do NOT use as reference):** Badge, Alert (semantic fills) — and any
   component not listed as Reference above. When in doubt, ask; do not
   pattern-match off legacy.
+- **`components/sidebar/` (do NOT copy its styling):** the entire directory (23
+  files) is an unmigrated shadcn-vue import — it hand-rolls its own button
+  chrome and a separate focus-ring vocabulary instead of the Button/field-edge
+  contracts above, and it is where the invalid `hsl(var(--sidebar-border))`
+  shadow shipped (browser silently drops the whole declaration — see the
+  `check-ui-contract.mjs` oklch-leftover rule). Production usage is limited to
+  `settings-sidebar` (via `master-detail-sidebar-layout` → `settings-section` /
+  `bots/detail.vue`). Copy patterns from the Reference list, not from here.
 
 ## Color
 
