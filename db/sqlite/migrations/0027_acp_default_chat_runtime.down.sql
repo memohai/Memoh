@@ -30,7 +30,6 @@ DROP TABLE IF EXISTS bot_session_discuss_cursors;
 DROP INDEX IF EXISTS idx_bot_sessions_bot_mode_runtime_active_updated;
 
 DROP VIEW IF EXISTS bot_visible_history_messages;
-DROP VIEW IF EXISTS bot_history_turns;
 
 ALTER TABLE bot_history_messages DROP COLUMN runtime_type;
 ALTER TABLE bot_history_messages DROP COLUMN session_mode;

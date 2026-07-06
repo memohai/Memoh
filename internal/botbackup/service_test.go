@@ -25,6 +25,7 @@ import (
 	"github.com/memohai/memoh/internal/bots"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	sqlitestore "github.com/memohai/memoh/internal/db/sqlite/store"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	modelpkg "github.com/memohai/memoh/internal/models"
 	settingspkg "github.com/memohai/memoh/internal/settings"
 )
@@ -432,17 +433,13 @@ func TestCollectHistoryExportsSupersededMessagesAndTurns(t *testing.T) {
 	if got, want := len(messages), 3; got != want {
 		t.Fatalf("exported messages = %d, want %d", got, want)
 	}
-	turns, ok := history.Turns.([]dbsqlc.BotHistoryTurn)
-	if !ok {
-		t.Fatalf("history turns type = %T", history.Turns)
-	}
-	if got, want := len(turns), 2; got != want {
-		t.Fatalf("exported turns = %d, want %d", got, want)
-	}
 	foundHiddenOld := false
 	for _, msg := range messages {
 		if msg.ID.String() == oldAssistant.ID.String() {
-			foundHiddenOld = !msg.TurnVisible && msg.TurnID.String() == oldTurn.ID.String()
+			foundHiddenOld = !msg.TurnVisible &&
+				msg.TurnID.String() == oldTurn.ID.String() &&
+				msg.TurnSupersededByTurnID.String() == newTurn.ID.String() &&
+				msg.TurnSupersededAt.Valid
 		}
 	}
 	if !foundHiddenOld {
@@ -462,6 +459,10 @@ func TestRestoreHistoryImportsFullSupersededTurnHistory(t *testing.T) {
 	sourceNewAssistantID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000776")
 	sourceOldTurnID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000777")
 	sourceNewTurnID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000778")
+	oldAssistantRow := backupTestFullMessage(t, botID, sourceSessionID, sourceOldAssistantID, sourceOldTurnID, 1, 2, false, "assistant", "old")
+	oldAssistantRow.TurnSupersededByTurnID = sourceNewTurnID
+	oldAssistantRow.TurnSupersededAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
+	oldAssistantRow.TurnSupersededReason = pgtype.Text{String: "retry", Valid: true}
 	state := &importState{
 		entries: map[string]backupZipEntry{
 			"history/sessions.json": jsonEntry(t, []dbsqlc.ListSessionsByBotRow{{
@@ -476,29 +477,9 @@ func TestRestoreHistoryImportsFullSupersededTurnHistory(t *testing.T) {
 				Metadata:        []byte(`{}`),
 			}}),
 			"history/messages.json": jsonEntry(t, []dbsqlc.ListAllMessagesForBackupRow{
-				backupTestFullMessage(t, botID, sourceSessionID, sourceUserID, sourceNewTurnID, 1, true, "user", "hello"),
-				backupTestFullMessage(t, botID, sourceSessionID, sourceOldAssistantID, sourceOldTurnID, 2, false, "assistant", "old"),
-				backupTestFullMessage(t, botID, sourceSessionID, sourceNewAssistantID, sourceNewTurnID, 2, true, "assistant", "new"),
-			}),
-			"history/turns.json": jsonEntry(t, []dbsqlc.BotHistoryTurn{
-				{
-					ID:                 sourceOldTurnID,
-					BotID:              mustTestPGUUID(t, botID),
-					SessionID:          sourceSessionID,
-					Position:           1,
-					AssistantMessageID: sourceOldAssistantID,
-					SupersededByTurnID: sourceNewTurnID,
-					SupersededAt:       pgtype.Timestamptz{Time: time.Now(), Valid: true},
-					SupersededReason:   "retry",
-				},
-				{
-					ID:                 sourceNewTurnID,
-					BotID:              mustTestPGUUID(t, botID),
-					SessionID:          sourceSessionID,
-					Position:           2,
-					RequestMessageID:   sourceUserID,
-					AssistantMessageID: sourceNewAssistantID,
-				},
+				backupTestFullMessage(t, botID, sourceSessionID, sourceUserID, sourceNewTurnID, 2, 1, true, "user", "hello"),
+				oldAssistantRow,
+				backupTestFullMessage(t, botID, sourceSessionID, sourceNewAssistantID, sourceNewTurnID, 2, 2, true, "assistant", "new"),
 			}),
 		},
 		counts: map[Section]int{},
@@ -811,14 +792,14 @@ type recordingRestoredTurnQueries struct {
 	links []dbsqlc.LinkMessageToHistoryTurnParams
 }
 
-func (q *recordingRestoredTurnQueries) CreateHistoryTurn(_ context.Context, arg dbsqlc.CreateHistoryTurnParams) (dbsqlc.BotHistoryTurn, error) {
+func (q *recordingRestoredTurnQueries) CreateHistoryTurn(_ context.Context, arg dbsqlc.CreateHistoryTurnParams) (dbstore.HistoryTurn, error) {
 	q.turns = append(q.turns, arg)
-	return dbsqlc.BotHistoryTurn{ID: mustPGUUID(fmt.Sprintf("00000000-0000-0000-0000-%012d", len(q.turns)))}, nil
+	return dbstore.HistoryTurn{ID: mustPGUUID(fmt.Sprintf("00000000-0000-0000-0000-%012d", len(q.turns)))}, nil
 }
 
-func (q *recordingRestoredTurnQueries) BindHistoryTurnAssistantByRequest(_ context.Context, arg dbsqlc.BindHistoryTurnAssistantByRequestParams) (dbsqlc.BotHistoryTurn, error) {
+func (q *recordingRestoredTurnQueries) BindHistoryTurnAssistantByRequest(_ context.Context, arg dbsqlc.BindHistoryTurnAssistantByRequestParams) (dbstore.HistoryTurn, error) {
 	q.binds = append(q.binds, arg)
-	return dbsqlc.BotHistoryTurn{}, nil
+	return dbstore.HistoryTurn{}, nil
 }
 
 func (q *recordingRestoredTurnQueries) LinkMessageToHistoryTurn(_ context.Context, arg dbsqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error) {
@@ -991,7 +972,7 @@ func linkBackupTestMessage(t *testing.T, ctx context.Context, queries *sqlitesto
 	}
 }
 
-func backupTestFullMessage(t *testing.T, botID string, sessionID, messageID, turnID pgtype.UUID, seq int64, visible bool, role, text string) dbsqlc.ListAllMessagesForBackupRow {
+func backupTestFullMessage(t *testing.T, botID string, sessionID, messageID, turnID pgtype.UUID, position, seq int64, visible bool, role, text string) dbsqlc.ListAllMessagesForBackupRow {
 	t.Helper()
 	return dbsqlc.ListAllMessagesForBackupRow{
 		ID:             messageID,
@@ -1005,7 +986,7 @@ func backupTestFullMessage(t *testing.T, botID string, sessionID, messageID, tur
 		RuntimeType:    "model",
 		DisplayText:    pgtype.Text{String: text, Valid: true},
 		TurnID:         turnID,
-		TurnPosition:   pgtype.Int8{Int64: 1, Valid: true},
+		TurnPosition:   pgtype.Int8{Int64: position, Valid: true},
 		TurnMessageSeq: pgtype.Int8{Int64: seq, Valid: true},
 		TurnVisible:    visible,
 	}

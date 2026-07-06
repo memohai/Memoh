@@ -45,24 +45,24 @@ func (q *runtimeSnapshotQueries) CreateMessage(_ context.Context, arg sqlc.Creat
 	}, nil
 }
 
-func (*runtimeSnapshotQueries) CreateHistoryTurn(context.Context, sqlc.CreateHistoryTurnParams) (sqlc.BotHistoryTurn, error) {
-	return sqlc.BotHistoryTurn{}, nil
+func (*runtimeSnapshotQueries) CreateHistoryTurn(context.Context, sqlc.CreateHistoryTurnParams) (dbstore.HistoryTurn, error) {
+	return dbstore.HistoryTurn{}, nil
 }
 
 func (*runtimeSnapshotQueries) AppendMessageToHistoryTurnByRequest(context.Context, sqlc.AppendMessageToHistoryTurnByRequestParams) (pgtype.UUID, error) {
 	return pgtype.UUID{}, nil
 }
 
-func (*runtimeSnapshotQueries) BindHistoryTurnAssistantByRequest(context.Context, sqlc.BindHistoryTurnAssistantByRequestParams) (sqlc.BotHistoryTurn, error) {
-	return sqlc.BotHistoryTurn{}, nil
+func (*runtimeSnapshotQueries) BindHistoryTurnAssistantByRequest(context.Context, sqlc.BindHistoryTurnAssistantByRequestParams) (dbstore.HistoryTurn, error) {
+	return dbstore.HistoryTurn{}, nil
 }
 
-func (*runtimeSnapshotQueries) BindLatestHistoryTurnAssistant(context.Context, sqlc.BindLatestHistoryTurnAssistantParams) (sqlc.BotHistoryTurn, error) {
-	return sqlc.BotHistoryTurn{}, nil
+func (*runtimeSnapshotQueries) BindLatestHistoryTurnAssistant(context.Context, sqlc.BindLatestHistoryTurnAssistantParams) (dbstore.HistoryTurn, error) {
+	return dbstore.HistoryTurn{}, nil
 }
 
-func (*runtimeSnapshotQueries) GetLatestVisibleHistoryTurnBySession(context.Context, pgtype.UUID) (sqlc.BotHistoryTurn, error) {
-	return sqlc.BotHistoryTurn{}, nil
+func (*runtimeSnapshotQueries) GetLatestVisibleHistoryTurnBySession(context.Context, pgtype.UUID) (dbstore.HistoryTurn, error) {
+	return dbstore.HistoryTurn{}, nil
 }
 
 func (*runtimeSnapshotQueries) LinkMessageToHistoryTurn(_ context.Context, arg sqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error) {
@@ -130,24 +130,24 @@ func (*failingHistoryTurnQueries) CreateMessage(_ context.Context, arg sqlc.Crea
 	}, nil
 }
 
-func (*failingHistoryTurnQueries) CreateHistoryTurn(context.Context, sqlc.CreateHistoryTurnParams) (sqlc.BotHistoryTurn, error) {
-	return sqlc.BotHistoryTurn{}, errors.New("boom")
+func (*failingHistoryTurnQueries) CreateHistoryTurn(context.Context, sqlc.CreateHistoryTurnParams) (dbstore.HistoryTurn, error) {
+	return dbstore.HistoryTurn{}, errors.New("boom")
 }
 
 func (*failingHistoryTurnQueries) AppendMessageToHistoryTurnByRequest(context.Context, sqlc.AppendMessageToHistoryTurnByRequestParams) (pgtype.UUID, error) {
 	return pgtype.UUID{}, nil
 }
 
-func (*failingHistoryTurnQueries) BindHistoryTurnAssistantByRequest(context.Context, sqlc.BindHistoryTurnAssistantByRequestParams) (sqlc.BotHistoryTurn, error) {
-	return sqlc.BotHistoryTurn{}, nil
+func (*failingHistoryTurnQueries) BindHistoryTurnAssistantByRequest(context.Context, sqlc.BindHistoryTurnAssistantByRequestParams) (dbstore.HistoryTurn, error) {
+	return dbstore.HistoryTurn{}, nil
 }
 
-func (*failingHistoryTurnQueries) BindLatestHistoryTurnAssistant(context.Context, sqlc.BindLatestHistoryTurnAssistantParams) (sqlc.BotHistoryTurn, error) {
-	return sqlc.BotHistoryTurn{}, nil
+func (*failingHistoryTurnQueries) BindLatestHistoryTurnAssistant(context.Context, sqlc.BindLatestHistoryTurnAssistantParams) (dbstore.HistoryTurn, error) {
+	return dbstore.HistoryTurn{}, nil
 }
 
-func (*failingHistoryTurnQueries) GetLatestVisibleHistoryTurnBySession(context.Context, pgtype.UUID) (sqlc.BotHistoryTurn, error) {
-	return sqlc.BotHistoryTurn{}, nil
+func (*failingHistoryTurnQueries) GetLatestVisibleHistoryTurnBySession(context.Context, pgtype.UUID) (dbstore.HistoryTurn, error) {
+	return dbstore.HistoryTurn{}, nil
 }
 
 func (*failingHistoryTurnQueries) LinkMessageToHistoryTurn(_ context.Context, arg sqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error) {
@@ -232,8 +232,8 @@ func (*retryTurnSequenceQueries) CreateMessage(_ context.Context, arg sqlc.Creat
 	}, nil
 }
 
-func (*retryTurnSequenceQueries) CreateHistoryTurn(_ context.Context, arg sqlc.CreateHistoryTurnParams) (sqlc.BotHistoryTurn, error) {
-	return sqlc.BotHistoryTurn{
+func (*retryTurnSequenceQueries) CreateHistoryTurn(_ context.Context, arg sqlc.CreateHistoryTurnParams) (dbstore.HistoryTurn, error) {
+	return dbstore.HistoryTurn{
 		ID:        testMessageUUID("66666666-6666-6666-6666-666666666666"),
 		BotID:     arg.BotID,
 		SessionID: arg.SessionID,
@@ -245,8 +245,8 @@ func (*retryTurnSequenceQueries) AppendMessageToHistoryTurnByRequest(context.Con
 	return pgtype.UUID{}, nil
 }
 
-func (*retryTurnSequenceQueries) BindHistoryTurnAssistantByRequest(_ context.Context, arg sqlc.BindHistoryTurnAssistantByRequestParams) (sqlc.BotHistoryTurn, error) {
-	return sqlc.BotHistoryTurn{
+func (*retryTurnSequenceQueries) BindHistoryTurnAssistantByRequest(_ context.Context, arg sqlc.BindHistoryTurnAssistantByRequestParams) (dbstore.HistoryTurn, error) {
+	return dbstore.HistoryTurn{
 		ID:                 testMessageUUID("66666666-6666-6666-6666-666666666666"),
 		SessionID:          arg.SessionID,
 		RequestMessageID:   arg.RequestMessageID,
@@ -255,12 +255,12 @@ func (*retryTurnSequenceQueries) BindHistoryTurnAssistantByRequest(_ context.Con
 	}, nil
 }
 
-func (*retryTurnSequenceQueries) BindLatestHistoryTurnAssistant(context.Context, sqlc.BindLatestHistoryTurnAssistantParams) (sqlc.BotHistoryTurn, error) {
-	return sqlc.BotHistoryTurn{}, nil
+func (*retryTurnSequenceQueries) BindLatestHistoryTurnAssistant(context.Context, sqlc.BindLatestHistoryTurnAssistantParams) (dbstore.HistoryTurn, error) {
+	return dbstore.HistoryTurn{}, nil
 }
 
-func (*retryTurnSequenceQueries) GetLatestVisibleHistoryTurnBySession(context.Context, pgtype.UUID) (sqlc.BotHistoryTurn, error) {
-	return sqlc.BotHistoryTurn{}, nil
+func (*retryTurnSequenceQueries) GetLatestVisibleHistoryTurnBySession(context.Context, pgtype.UUID) (dbstore.HistoryTurn, error) {
+	return dbstore.HistoryTurn{}, nil
 }
 
 func (q *retryTurnSequenceQueries) LinkMessageToHistoryTurn(_ context.Context, arg sqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error) {

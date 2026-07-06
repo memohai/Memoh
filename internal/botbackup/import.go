@@ -26,6 +26,7 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	fetchpkg "github.com/memohai/memoh/internal/fetchproviders"
 	"github.com/memohai/memoh/internal/mcp"
@@ -1369,19 +1370,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		}
 		state.counts[SectionHistory]++
 	}
-	if hasEntry(state.entries, "history/turns.json") {
-		turns, err := readEntry[[]sqlc.BotHistoryTurn](state, "history/turns.json")
-		if err != nil {
-			return err
-		}
-		if len(turns) > 0 {
-			if err := restoreFullHistoryTurns(ctx, q, pgBotID, turns, messages, sessionMap, messageMap); err != nil {
-				return err
-			}
-		} else if err := rebuildRestoredHistoryTurns(ctx, q, pgBotID, restoredMessages); err != nil {
-			return err
-		}
-	} else if err := rebuildRestoredHistoryTurns(ctx, q, pgBotID, restoredMessages); err != nil {
+	if err := restoreHistoryTurnReadModelFromMessages(ctx, q, pgBotID, messages, sessionMap, messageMap, restoredMessages); err != nil {
 		return err
 	}
 	if err := rebindRestoredSessionMetadata(ctx, q, sessions, sessionMap, sessionMetadata, messageMap); err != nil {
@@ -1427,8 +1416,8 @@ type restoredHistoryMessage struct {
 }
 
 type restoredHistoryTurnQueries interface {
-	CreateHistoryTurn(ctx context.Context, arg sqlc.CreateHistoryTurnParams) (sqlc.BotHistoryTurn, error)
-	BindHistoryTurnAssistantByRequest(ctx context.Context, arg sqlc.BindHistoryTurnAssistantByRequestParams) (sqlc.BotHistoryTurn, error)
+	CreateHistoryTurn(ctx context.Context, arg sqlc.CreateHistoryTurnParams) (dbstore.HistoryTurn, error)
+	BindHistoryTurnAssistantByRequest(ctx context.Context, arg sqlc.BindHistoryTurnAssistantByRequestParams) (dbstore.HistoryTurn, error)
 	LinkMessageToHistoryTurn(ctx context.Context, arg sqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error)
 }
 
@@ -1436,10 +1425,11 @@ type restoredHistoryMessageLinker interface {
 	LinkMessageToHistoryTurn(ctx context.Context, arg sqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error)
 }
 
-type restoredFullHistoryTurnQueries interface {
-	CreateHistoryTurnWithIDAtPosition(ctx context.Context, arg sqlc.CreateHistoryTurnWithIDAtPositionParams) (sqlc.BotHistoryTurn, error)
+type restoredMessageTurnReadModelQueries interface {
+	restoredHistoryTurnQueries
+	CreateHistoryTurnWithIDAtPosition(ctx context.Context, arg sqlc.CreateHistoryTurnWithIDAtPositionParams) (dbstore.HistoryTurn, error)
 	LinkMessageToHistoryTurn(ctx context.Context, arg sqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error)
-	SupersedeHistoryTurn(ctx context.Context, arg sqlc.SupersedeHistoryTurnParams) (sqlc.BotHistoryTurn, error)
+	SupersedeHistoryTurn(ctx context.Context, arg sqlc.SupersedeHistoryTurnParams) (dbstore.HistoryTurn, error)
 	HideMessagesByHistoryTurn(ctx context.Context, turnID pgtype.UUID) error
 	SetSessionNextTurnPosition(ctx context.Context, arg sqlc.SetSessionNextTurnPositionParams) error
 }
@@ -1455,98 +1445,151 @@ type restoredTurnState struct {
 	seq            int64
 }
 
-func restoreFullHistoryTurns(
+type restoredMessageTurnGroup struct {
+	oldTurnID             pgtype.UUID
+	newTurnID             pgtype.UUID
+	sessionID             pgtype.UUID
+	position              int64
+	requestMessageID      pgtype.UUID
+	assistantMessageID    pgtype.UUID
+	rows                  []restoredMessageTurnRow
+	visible               bool
+	supersededByOldTurnID pgtype.UUID
+	supersededAt          pgtype.Timestamptz
+	supersededReason      pgtype.Text
+}
+
+type restoredMessageTurnRow struct {
+	messageID pgtype.UUID
+	seq       int64
+	createdAt pgtype.Timestamptz
+}
+
+func restoreHistoryTurnReadModelFromMessages(
 	ctx context.Context,
-	q restoredFullHistoryTurnQueries,
+	q restoredMessageTurnReadModelQueries,
 	botID pgtype.UUID,
-	turns []sqlc.BotHistoryTurn,
 	messages []sqlc.ListAllMessagesForBackupRow,
 	sessionMap map[string]pgtype.UUID,
 	messageMap map[string]pgtype.UUID,
+	fallback []restoredHistoryMessage,
 ) error {
-	if q == nil || !botID.Valid || len(turns) == 0 {
+	if q == nil || !botID.Valid || len(messages) == 0 {
 		return nil
 	}
-	sort.SliceStable(turns, func(i, j int) bool {
-		if turns[i].SessionID.String() != turns[j].SessionID.String() {
-			return turns[i].SessionID.String() < turns[j].SessionID.String()
+	groupsByOldTurnID := make(map[string]*restoredMessageTurnGroup)
+	for _, item := range messages {
+		if !item.ID.Valid || !item.SessionID.Valid || !item.TurnID.Valid || !item.TurnPosition.Valid || !item.TurnMessageSeq.Valid || item.TurnMessageSeq.Int64 <= 0 {
+			continue
 		}
-		if turns[i].Position != turns[j].Position {
-			return turns[i].Position < turns[j].Position
+		sessionID := sessionMap[item.SessionID.String()]
+		messageID := messageMap[item.ID.String()]
+		if !sessionID.Valid || !messageID.Valid {
+			continue
 		}
-		return turns[i].ID.String() < turns[j].ID.String()
+		oldTurnKey := item.TurnID.String()
+		group := groupsByOldTurnID[oldTurnKey]
+		position := item.TurnPosition.Int64
+		if position <= 0 {
+			continue
+		}
+		if group == nil {
+			group = &restoredMessageTurnGroup{
+				oldTurnID: item.TurnID,
+				newTurnID: newRestoredPGUUID(),
+				sessionID: sessionID,
+				position:  position,
+			}
+			groupsByOldTurnID[oldTurnKey] = group
+		}
+		group.visible = group.visible || item.TurnVisible
+		switch {
+		case item.TurnMessageSeq.Int64 == 1 && strings.EqualFold(strings.TrimSpace(item.Role), "user") && !group.requestMessageID.Valid:
+			group.requestMessageID = messageID
+		case item.TurnMessageSeq.Int64 == 2 && strings.EqualFold(strings.TrimSpace(item.Role), "assistant") && !group.assistantMessageID.Valid:
+			group.assistantMessageID = messageID
+		}
+		if item.TurnSupersededAt.Valid && (!group.supersededAt.Valid || item.TurnSupersededAt.Time.After(group.supersededAt.Time)) {
+			group.supersededAt = item.TurnSupersededAt
+			group.supersededByOldTurnID = item.TurnSupersededByTurnID
+			group.supersededReason = item.TurnSupersededReason
+		}
+		group.rows = append(group.rows, restoredMessageTurnRow{
+			messageID: messageID,
+			seq:       item.TurnMessageSeq.Int64,
+			createdAt: item.CreatedAt,
+		})
+	}
+	if len(groupsByOldTurnID) == 0 {
+		return rebuildRestoredHistoryTurns(ctx, q, botID, fallback)
+	}
+	groups := make([]*restoredMessageTurnGroup, 0, len(groupsByOldTurnID))
+	for _, group := range groupsByOldTurnID {
+		if !group.requestMessageID.Valid && !group.assistantMessageID.Valid && len(group.rows) > 0 {
+			group.assistantMessageID = group.rows[0].messageID
+		}
+		groups = append(groups, group)
+	}
+	sort.SliceStable(groups, func(i, j int) bool {
+		if groups[i].sessionID.String() != groups[j].sessionID.String() {
+			return groups[i].sessionID.String() < groups[j].sessionID.String()
+		}
+		if groups[i].position != groups[j].position {
+			return groups[i].position < groups[j].position
+		}
+		return groups[i].oldTurnID.String() < groups[j].oldTurnID.String()
 	})
 
-	turnMap := make(map[string]pgtype.UUID, len(turns))
+	turnMap := make(map[string]pgtype.UUID, len(groups))
 	sessionNextPosition := map[string]int64{}
-	for _, item := range turns {
-		if !item.ID.Valid || !item.SessionID.Valid {
-			continue
+	for _, group := range groups {
+		if _, err := q.CreateHistoryTurnWithIDAtPosition(ctx, sqlc.CreateHistoryTurnWithIDAtPositionParams{
+			TurnID:             group.newTurnID,
+			BotID:              botID,
+			SessionID:          group.sessionID,
+			TurnPosition:       group.position,
+			RequestMessageID:   group.requestMessageID,
+			AssistantMessageID: group.assistantMessageID,
+		}); err != nil {
+			return fmt.Errorf("restore message turn read model: %w", err)
 		}
-		sessionID := sessionMap[item.SessionID.String()]
-		if !sessionID.Valid {
-			continue
-		}
-		position := item.Position
-		if position <= 0 {
-			position = sessionNextPosition[sessionID.String()]
-			if position <= 0 {
-				position = 1
+		turnMap[group.oldTurnID.String()] = group.newTurnID
+		sort.SliceStable(group.rows, func(i, j int) bool {
+			if group.rows[i].seq != group.rows[j].seq {
+				return group.rows[i].seq < group.rows[j].seq
+			}
+			if !group.rows[i].createdAt.Time.Equal(group.rows[j].createdAt.Time) {
+				return group.rows[i].createdAt.Time.Before(group.rows[j].createdAt.Time)
+			}
+			return group.rows[i].messageID.String() < group.rows[j].messageID.String()
+		})
+		for _, row := range group.rows {
+			if err := linkRestoredHistoryMessage(ctx, q, group.newTurnID, row.messageID, row.seq); err != nil {
+				return err
 			}
 		}
-		requestID := mappedPGUUID(messageMap, item.RequestMessageID)
-		assistantID := mappedPGUUID(messageMap, item.AssistantMessageID)
-		created, err := q.CreateHistoryTurnWithIDAtPosition(ctx, sqlc.CreateHistoryTurnWithIDAtPositionParams{
-			TurnID:             newRestoredPGUUID(),
-			BotID:              botID,
-			SessionID:          sessionID,
-			TurnPosition:       position,
-			RequestMessageID:   requestID,
-			AssistantMessageID: assistantID,
-		})
-		if err != nil {
-			return fmt.Errorf("restore history turn: %w", err)
-		}
-		turnMap[item.ID.String()] = created.ID
-		if next := position + 1; next > sessionNextPosition[sessionID.String()] {
-			sessionNextPosition[sessionID.String()] = next
+		if next := group.position + 1; next > sessionNextPosition[group.sessionID.String()] {
+			sessionNextPosition[group.sessionID.String()] = next
 		}
 	}
 
-	for _, item := range messages {
-		if !item.ID.Valid || !item.TurnID.Valid || !item.TurnMessageSeq.Valid || item.TurnMessageSeq.Int64 <= 0 {
+	for _, group := range groups {
+		if group.supersededAt.Valid {
+			if _, err := q.SupersedeHistoryTurn(ctx, sqlc.SupersedeHistoryTurnParams{
+				OldTurnID:          group.newTurnID,
+				SessionID:          group.sessionID,
+				SupersededByTurnID: mappedPGUUID(turnMap, group.supersededByOldTurnID),
+				SupersededAt:       group.supersededAt,
+				SupersededReason:   group.supersededReason,
+			}); err != nil {
+				return fmt.Errorf("restore superseded message turn: %w", err)
+			}
 			continue
 		}
-		messageID := messageMap[item.ID.String()]
-		turnID := turnMap[item.TurnID.String()]
-		if !messageID.Valid || !turnID.Valid {
-			continue
-		}
-		if err := linkRestoredHistoryMessage(ctx, q, turnID, messageID, item.TurnMessageSeq.Int64); err != nil {
-			return err
-		}
-	}
-
-	for _, item := range turns {
-		if !item.ID.Valid || !item.SessionID.Valid || !item.SupersededAt.Valid {
-			continue
-		}
-		oldTurnID := turnMap[item.ID.String()]
-		sessionID := sessionMap[item.SessionID.String()]
-		if !oldTurnID.Valid || !sessionID.Valid {
-			continue
-		}
-		if _, err := q.SupersedeHistoryTurn(ctx, sqlc.SupersedeHistoryTurnParams{
-			OldTurnID:          oldTurnID,
-			SessionID:          sessionID,
-			SupersededByTurnID: mappedPGUUID(turnMap, item.SupersededByTurnID),
-			SupersededAt:       item.SupersededAt,
-			SupersededReason:   pgtype.Text{String: item.SupersededReason, Valid: strings.TrimSpace(item.SupersededReason) != ""},
-		}); err != nil {
-			return fmt.Errorf("restore superseded history turn: %w", err)
-		}
-		if err := q.HideMessagesByHistoryTurn(ctx, oldTurnID); err != nil {
-			return fmt.Errorf("hide restored superseded messages: %w", err)
+		if !group.visible {
+			if err := q.HideMessagesByHistoryTurn(ctx, group.newTurnID); err != nil {
+				return fmt.Errorf("hide restored message turn: %w", err)
+			}
 		}
 	}
 
@@ -1632,13 +1675,14 @@ func rebuildRestoredHistoryTurns(ctx context.Context, q restoredHistoryTurnQueri
 		default:
 			if state == nil || !state.turnID.Valid {
 				turn, err := q.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
-					BotID:     botID,
-					SessionID: msg.sessionID,
+					BotID:              botID,
+					SessionID:          msg.sessionID,
+					AssistantMessageID: msg.id,
 				})
 				if err != nil {
 					return fmt.Errorf("create restored message turn: %w", err)
 				}
-				state = &restoredTurnState{turnID: turn.ID, seq: 1}
+				state = &restoredTurnState{turnID: turn.ID, assistantBound: true, seq: 2}
 				states[sessionKey] = state
 			} else {
 				state.seq++

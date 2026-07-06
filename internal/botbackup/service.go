@@ -221,9 +221,6 @@ func (s *Service) Export(ctx context.Context, botID string, opts ExportOptions, 
 		if err := writer.writeJSON("history/messages.json", "bot_messages", data.History.Messages, opts); err != nil {
 			return err
 		}
-		if err := writer.writeJSON("history/turns.json", "bot_history_turns", data.History.Turns, opts); err != nil {
-			return err
-		}
 		if err := writer.writeJSON("history/discuss_cursors.json", "bot_session_discuss_cursors", data.History.DiscussCursors, opts); err != nil {
 			return err
 		}
@@ -502,11 +499,6 @@ func (s *Service) collectHistory(ctx context.Context, botID string, includeAsset
 		history.SessionEvents = events
 	} else {
 		warnings = append(warnings, "session events export failed: "+err.Error())
-	}
-	if turns, err := s.queries.ListHistoryTurnsByBot(ctx, pgBotID); err == nil {
-		history.Turns = turns
-	} else {
-		warnings = append(warnings, "history turns export failed: "+err.Error())
 	}
 	if messages, err := s.queries.ListAllMessagesForBackup(ctx, pgBotID); err == nil {
 		history.Messages = messages

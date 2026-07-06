@@ -193,20 +193,6 @@ type BotHistoryMessageCompact struct {
 	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
 }
 
-type BotHistoryTurn struct {
-	ID                 pgtype.UUID        `json:"id"`
-	BotID              pgtype.UUID        `json:"bot_id"`
-	SessionID          pgtype.UUID        `json:"session_id"`
-	Position           int64              `json:"position"`
-	RequestMessageID   pgtype.UUID        `json:"request_message_id"`
-	AssistantMessageID pgtype.UUID        `json:"assistant_message_id"`
-	SupersededByTurnID pgtype.UUID        `json:"superseded_by_turn_id"`
-	SupersededAt       pgtype.Timestamptz `json:"superseded_at"`
-	SupersededReason   string             `json:"superseded_reason"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-}
-
 type BotPluginInstallation struct {
 	ID          pgtype.UUID        `json:"id"`
 	BotID       pgtype.UUID        `json:"bot_id"`

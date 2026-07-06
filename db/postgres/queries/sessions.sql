@@ -28,16 +28,15 @@ WITH source_session AS (
 ),
 target_turn AS (
   SELECT
-    t.id,
-    t.position,
+    vm.turn_id AS id,
+    vm.turn_position AS position,
     vm.id AS message_id
   FROM source_session s
   JOIN bot_visible_history_messages vm ON vm.session_id = s.id
     AND vm.id = sqlc.arg(message_id)
     AND vm.role = 'assistant'
-  JOIN bot_history_turns t ON t.id = vm.turn_id
-    AND t.session_id = s.id
-    AND t.superseded_at IS NULL
+    AND vm.turn_id IS NOT NULL
+    AND vm.turn_position IS NOT NULL
   LIMIT 1
 ),
 created_session AS (
@@ -96,17 +95,15 @@ copy_messages AS (
 ),
 copy_turns AS (
   SELECT
-    t.id AS old_turn_id,
+    cm.old_turn_id,
     gen_random_uuid() AS new_turn_id,
-    t.position AS old_position,
-    ROW_NUMBER() OVER (ORDER BY t.position ASC)::bigint AS new_position,
-    t.request_message_id,
-    t.assistant_message_id
-  FROM bot_history_turns t
-  JOIN target_turn tt ON t.position <= tt.position
-  WHERE t.session_id = sqlc.arg(session_id)
-    AND t.superseded_at IS NULL
-  ORDER BY t.position ASC
+    cm.turn_position AS old_position,
+    ROW_NUMBER() OVER (ORDER BY cm.turn_position ASC)::bigint AS new_position
+  FROM (
+    SELECT DISTINCT old_turn_id, turn_position
+    FROM copy_messages
+  ) cm
+  ORDER BY cm.turn_position ASC
 ),
 inserted_messages AS (
   INSERT INTO bot_history_messages (

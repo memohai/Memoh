@@ -132,9 +132,11 @@ WHERE id = ?`, messageID).Scan(&messageTurnID, &messageTurnPosition, &messageTur
 	var turnPosition int64
 	var requestMessageID string
 	if err := conn.QueryRowContext(ctx, `
-SELECT position, request_message_id
-FROM bot_history_turns
-WHERE id = ?`, turnID).Scan(&turnPosition, &requestMessageID); err != nil {
+SELECT turn_position, id
+FROM bot_history_messages
+WHERE turn_id = ?
+  AND role = 'user'
+  AND turn_message_seq = 1`, turnID).Scan(&turnPosition, &requestMessageID); err != nil {
 		t.Fatalf("select created turn: %v", err)
 	}
 	if turnPosition != 7 || requestMessageID != messageID {
@@ -292,7 +294,7 @@ VALUES
 		t.Fatal("replace stale turn succeeded, want error")
 	}
 	var supersededCount int
-	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM bot_history_turns WHERE superseded_at IS NOT NULL`).Scan(&supersededCount); err != nil {
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(DISTINCT turn_id) FROM bot_history_messages WHERE turn_superseded_at IS NOT NULL`).Scan(&supersededCount); err != nil {
 		t.Fatalf("count superseded turns: %v", err)
 	}
 	if supersededCount != 0 {
@@ -358,7 +360,7 @@ VALUES (?, ?, ?, 'assistant', '{}')`, wrongRoleMessageID, botID, sessionID); err
 		t.Fatalf("next_turn_position after invalid anchor = %d, want 2", nextPosition)
 	}
 	var turnCount int
-	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM bot_history_turns`).Scan(&turnCount); err != nil {
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(DISTINCT turn_id) FROM bot_history_messages WHERE turn_id IS NOT NULL`).Scan(&turnCount); err != nil {
 		t.Fatalf("count turns: %v", err)
 	}
 	if turnCount != 1 {
@@ -483,63 +485,4 @@ CREATE TABLE bot_history_messages (
 CREATE UNIQUE INDEX idx_bot_history_messages_turn_seq_unique
   ON bot_history_messages(turn_id, turn_message_seq)
   WHERE turn_id IS NOT NULL AND turn_message_seq IS NOT NULL;
-CREATE VIEW bot_history_turns AS
-SELECT
-  m.turn_id AS id,
-  (
-    SELECT first_message.bot_id
-    FROM bot_history_messages first_message
-    WHERE first_message.turn_id = m.turn_id
-      AND first_message.session_id = m.session_id
-    ORDER BY first_message.turn_message_seq ASC, first_message.created_at ASC, first_message.id ASC
-    LIMIT 1
-  ) AS bot_id,
-  m.session_id,
-  m.turn_position AS position,
-  COALESCE((
-    SELECT request_message.id
-    FROM bot_history_messages request_message
-    WHERE request_message.turn_id = m.turn_id
-      AND request_message.session_id = m.session_id
-      AND request_message.role = 'user'
-      AND request_message.turn_message_seq = 1
-    ORDER BY request_message.created_at ASC, request_message.id ASC
-    LIMIT 1
-  ), '') AS request_message_id,
-  COALESCE((
-    SELECT assistant_message.id
-    FROM bot_history_messages assistant_message
-    WHERE assistant_message.turn_id = m.turn_id
-      AND assistant_message.session_id = m.session_id
-      AND assistant_message.role = 'assistant'
-      AND assistant_message.turn_message_seq = 2
-    ORDER BY assistant_message.created_at ASC, assistant_message.id ASC
-    LIMIT 1
-  ), '') AS assistant_message_id,
-  (
-    SELECT superseded_message.turn_superseded_by_turn_id
-    FROM bot_history_messages superseded_message
-    WHERE superseded_message.turn_id = m.turn_id
-      AND superseded_message.session_id = m.session_id
-      AND superseded_message.turn_superseded_by_turn_id IS NOT NULL
-    ORDER BY superseded_message.turn_superseded_at DESC, superseded_message.created_at DESC, superseded_message.id DESC
-    LIMIT 1
-  ) AS superseded_by_turn_id,
-  MAX(m.turn_superseded_at) AS superseded_at,
-  (
-    SELECT superseded_message.turn_superseded_reason
-    FROM bot_history_messages superseded_message
-    WHERE superseded_message.turn_id = m.turn_id
-      AND superseded_message.session_id = m.session_id
-      AND superseded_message.turn_superseded_reason IS NOT NULL
-    ORDER BY superseded_message.turn_superseded_at DESC, superseded_message.created_at DESC, superseded_message.id DESC
-    LIMIT 1
-  ) AS superseded_reason,
-  MIN(m.created_at) AS created_at,
-  COALESCE(MAX(m.turn_superseded_at), MAX(m.created_at)) AS updated_at
-FROM bot_history_messages m
-WHERE m.turn_id IS NOT NULL
-  AND m.turn_position IS NOT NULL
-  AND m.session_id IS NOT NULL
-GROUP BY m.turn_id, m.session_id, m.turn_position;
 `

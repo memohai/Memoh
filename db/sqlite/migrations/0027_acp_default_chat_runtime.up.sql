@@ -49,7 +49,6 @@ CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_mode_runtime_active_updated
   WHERE deleted_at IS NULL;
 
 DROP VIEW IF EXISTS bot_visible_history_messages;
-DROP VIEW IF EXISTS bot_history_turns;
 
 CREATE TABLE bot_history_messages_new (
   id TEXT PRIMARY KEY,

@@ -559,28 +559,6 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_source
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_reply
   ON bot_history_messages(session_id, source_reply_to_message_id);
 
--- bot_history_turns is a compatibility view. The physical turn read/lifecycle
--- model lives on bot_history_messages so hot pagination and append writes stay
--- single-table.
-CREATE OR REPLACE VIEW bot_history_turns AS
-SELECT
-  m.turn_id::uuid AS id,
-  ((ARRAY_AGG(m.bot_id ORDER BY m.turn_message_seq ASC, m.created_at ASC, m.id ASC))[1])::uuid AS bot_id,
-  m.session_id::uuid AS session_id,
-  m.turn_position::bigint AS position,
-  ((ARRAY_AGG(m.id ORDER BY m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'user' AND m.turn_message_seq = 1))[1])::uuid AS request_message_id,
-  ((ARRAY_AGG(m.id ORDER BY m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'assistant' AND m.turn_message_seq = 2))[1])::uuid AS assistant_message_id,
-  ((ARRAY_AGG(m.turn_superseded_by_turn_id ORDER BY m.turn_superseded_at DESC NULLS LAST, m.created_at DESC, m.id DESC) FILTER (WHERE m.turn_superseded_by_turn_id IS NOT NULL))[1])::uuid AS superseded_by_turn_id,
-  MAX(m.turn_superseded_at)::timestamptz AS superseded_at,
-  COALESCE(((ARRAY_AGG(m.turn_superseded_reason ORDER BY m.turn_superseded_at DESC NULLS LAST, m.created_at DESC, m.id DESC) FILTER (WHERE m.turn_superseded_reason IS NOT NULL))[1])::text, ''::text)::text AS superseded_reason,
-  MIN(m.created_at)::timestamptz AS created_at,
-  COALESCE(MAX(m.turn_superseded_at), MAX(m.created_at))::timestamptz AS updated_at
-FROM bot_history_messages m
-WHERE m.turn_id IS NOT NULL
-  AND m.turn_position IS NOT NULL
-  AND m.session_id IS NOT NULL
-GROUP BY m.turn_id, m.session_id, m.turn_position;
-
 CREATE OR REPLACE VIEW bot_visible_history_messages AS
 SELECT
   m.turn_id,

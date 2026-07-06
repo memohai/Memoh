@@ -30,10 +30,10 @@ type DBService struct {
 
 type historyTurnWriter interface {
 	AppendMessageToHistoryTurnByRequest(ctx context.Context, arg sqlc.AppendMessageToHistoryTurnByRequestParams) (pgtype.UUID, error)
-	CreateHistoryTurn(ctx context.Context, arg sqlc.CreateHistoryTurnParams) (sqlc.BotHistoryTurn, error)
-	BindHistoryTurnAssistantByRequest(ctx context.Context, arg sqlc.BindHistoryTurnAssistantByRequestParams) (sqlc.BotHistoryTurn, error)
-	BindLatestHistoryTurnAssistant(ctx context.Context, arg sqlc.BindLatestHistoryTurnAssistantParams) (sqlc.BotHistoryTurn, error)
-	GetLatestVisibleHistoryTurnBySession(ctx context.Context, sessionID pgtype.UUID) (sqlc.BotHistoryTurn, error)
+	CreateHistoryTurn(ctx context.Context, arg sqlc.CreateHistoryTurnParams) (dbstore.HistoryTurn, error)
+	BindHistoryTurnAssistantByRequest(ctx context.Context, arg sqlc.BindHistoryTurnAssistantByRequestParams) (dbstore.HistoryTurn, error)
+	BindLatestHistoryTurnAssistant(ctx context.Context, arg sqlc.BindLatestHistoryTurnAssistantParams) (dbstore.HistoryTurn, error)
+	GetLatestVisibleHistoryTurnBySession(ctx context.Context, sessionID pgtype.UUID) (dbstore.HistoryTurn, error)
 	LinkMessageToHistoryTurn(ctx context.Context, arg sqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error)
 	AppendMessageToLatestHistoryTurn(ctx context.Context, arg sqlc.AppendMessageToLatestHistoryTurnParams) (pgtype.UUID, error)
 }
@@ -1961,7 +1961,7 @@ func toMessageFromVisibleFromBySessionRow(row sqlc.ListVisibleMessagesFromBySess
 	return m
 }
 
-func toHistoryTurn(row sqlc.BotHistoryTurn) HistoryTurn {
+func toHistoryTurn(row dbstore.HistoryTurn) HistoryTurn {
 	return HistoryTurn{
 		ID:                 uuidString(row.ID),
 		BotID:              uuidString(row.BotID),

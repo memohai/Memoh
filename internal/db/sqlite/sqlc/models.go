@@ -194,20 +194,6 @@ type BotHistoryMessageCompact struct {
 	CompletedAt  sql.NullString `json:"completed_at"`
 }
 
-type BotHistoryTurn struct {
-	ID                 sql.NullString `json:"id"`
-	BotID              string         `json:"bot_id"`
-	SessionID          sql.NullString `json:"session_id"`
-	Position           sql.NullInt64  `json:"position"`
-	RequestMessageID   interface{}    `json:"request_message_id"`
-	AssistantMessageID interface{}    `json:"assistant_message_id"`
-	SupersededByTurnID sql.NullString `json:"superseded_by_turn_id"`
-	SupersededAt       interface{}    `json:"superseded_at"`
-	SupersededReason   sql.NullString `json:"superseded_reason"`
-	CreatedAt          interface{}    `json:"created_at"`
-	UpdatedAt          interface{}    `json:"updated_at"`
-}
-
 type BotPluginInstallation struct {
 	ID          string `json:"id"`
 	BotID       string `json:"bot_id"`

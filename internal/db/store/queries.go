@@ -9,6 +9,20 @@ import (
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
 
+type HistoryTurn struct {
+	ID                 pgtype.UUID        `json:"id"`
+	BotID              pgtype.UUID        `json:"bot_id"`
+	SessionID          pgtype.UUID        `json:"session_id"`
+	Position           int64              `json:"position"`
+	RequestMessageID   pgtype.UUID        `json:"request_message_id"`
+	AssistantMessageID pgtype.UUID        `json:"assistant_message_id"`
+	SupersededByTurnID pgtype.UUID        `json:"superseded_by_turn_id"`
+	SupersededAt       pgtype.Timestamptz `json:"superseded_at"`
+	SupersededReason   string             `json:"superseded_reason"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
 // Queries is the transitional database interface implemented by sqlc-backed stores.
 // Domain-specific stores should replace this broad interface module by module.
 type Queries interface {
@@ -71,8 +85,8 @@ type Queries interface {
 	CreateManagedMCPConnection(ctx context.Context, arg dbsqlc.CreateManagedMCPConnectionParams) (dbsqlc.McpConnection, error)
 	CreateMCPConnection(ctx context.Context, arg dbsqlc.CreateMCPConnectionParams) (dbsqlc.McpConnection, error)
 	CreateMemoryProvider(ctx context.Context, arg dbsqlc.CreateMemoryProviderParams) (dbsqlc.MemoryProvider, error)
-	CreateHistoryTurn(ctx context.Context, arg dbsqlc.CreateHistoryTurnParams) (dbsqlc.BotHistoryTurn, error)
-	CreateHistoryTurnWithIDAtPosition(ctx context.Context, arg dbsqlc.CreateHistoryTurnWithIDAtPositionParams) (dbsqlc.BotHistoryTurn, error)
+	CreateHistoryTurn(ctx context.Context, arg dbsqlc.CreateHistoryTurnParams) (HistoryTurn, error)
+	CreateHistoryTurnWithIDAtPosition(ctx context.Context, arg dbsqlc.CreateHistoryTurnWithIDAtPositionParams) (HistoryTurn, error)
 	CreateMessage(ctx context.Context, arg dbsqlc.CreateMessageParams) (dbsqlc.CreateMessageRow, error)
 	CreateMessageAsset(ctx context.Context, arg dbsqlc.CreateMessageAssetParams) (dbsqlc.BotHistoryMessageAsset, error)
 	CreateModel(ctx context.Context, arg dbsqlc.CreateModelParams) (dbsqlc.Model, error)
@@ -141,8 +155,8 @@ type Queries interface {
 	GetBotOverlayConfig(ctx context.Context, id pgtype.UUID) (dbsqlc.GetBotOverlayConfigRow, error)
 	GetBotPluginInstallationByID(ctx context.Context, arg dbsqlc.GetBotPluginInstallationByIDParams) (dbsqlc.BotPluginInstallation, error)
 	GetBotStorageBinding(ctx context.Context, botID pgtype.UUID) (dbsqlc.BotStorageBinding, error)
-	GetHistoryTurnByID(ctx context.Context, arg dbsqlc.GetHistoryTurnByIDParams) (dbsqlc.BotHistoryTurn, error)
-	GetVisibleHistoryTurnByMessage(ctx context.Context, arg dbsqlc.GetVisibleHistoryTurnByMessageParams) (dbsqlc.BotHistoryTurn, error)
+	GetHistoryTurnByID(ctx context.Context, arg dbsqlc.GetHistoryTurnByIDParams) (HistoryTurn, error)
+	GetVisibleHistoryTurnByMessage(ctx context.Context, arg dbsqlc.GetVisibleHistoryTurnByMessageParams) (HistoryTurn, error)
 	GetChannelIdentityByChannelSubject(ctx context.Context, arg dbsqlc.GetChannelIdentityByChannelSubjectParams) (dbsqlc.ChannelIdentity, error)
 	GetChannelIdentityByID(ctx context.Context, id pgtype.UUID) (dbsqlc.ChannelIdentity, error)
 	GetChannelIdentityByIDForUpdate(ctx context.Context, id pgtype.UUID) (dbsqlc.ChannelIdentity, error)
@@ -164,7 +178,7 @@ type Queries interface {
 	GetFetchProviderByID(ctx context.Context, id pgtype.UUID) (dbsqlc.FetchProvider, error)
 	GetFetchProviderByName(ctx context.Context, name string) (dbsqlc.FetchProvider, error)
 	GetLatestAssistantUsage(ctx context.Context, sessionID pgtype.UUID) (int64, error)
-	GetLatestVisibleHistoryTurnBySession(ctx context.Context, sessionID pgtype.UUID) (dbsqlc.BotHistoryTurn, error)
+	GetLatestVisibleHistoryTurnBySession(ctx context.Context, sessionID pgtype.UUID) (HistoryTurn, error)
 	GetLatestPendingToolApprovalBySession(ctx context.Context, arg dbsqlc.GetLatestPendingToolApprovalBySessionParams) (dbsqlc.ToolApprovalRequest, error)
 	GetLatestPendingUserInputBySession(ctx context.Context, arg dbsqlc.GetLatestPendingUserInputBySessionParams) (dbsqlc.UserInputRequest, error)
 	GetMessageByIDBySession(ctx context.Context, arg dbsqlc.GetMessageByIDBySessionParams) (dbsqlc.GetMessageByIDBySessionRow, error)
@@ -247,13 +261,13 @@ type Queries interface {
 	ListMessageAssetsBatch(ctx context.Context, messageIds []pgtype.UUID) ([]dbsqlc.ListMessageAssetsBatchRow, error)
 	AppendMessageToHistoryTurnByRequest(ctx context.Context, arg dbsqlc.AppendMessageToHistoryTurnByRequestParams) (pgtype.UUID, error)
 	AppendMessageToLatestHistoryTurn(ctx context.Context, arg dbsqlc.AppendMessageToLatestHistoryTurnParams) (pgtype.UUID, error)
-	BindHistoryTurnAssistantByRequest(ctx context.Context, arg dbsqlc.BindHistoryTurnAssistantByRequestParams) (dbsqlc.BotHistoryTurn, error)
-	BindLatestHistoryTurnAssistant(ctx context.Context, arg dbsqlc.BindLatestHistoryTurnAssistantParams) (dbsqlc.BotHistoryTurn, error)
+	BindHistoryTurnAssistantByRequest(ctx context.Context, arg dbsqlc.BindHistoryTurnAssistantByRequestParams) (HistoryTurn, error)
+	BindLatestHistoryTurnAssistant(ctx context.Context, arg dbsqlc.BindLatestHistoryTurnAssistantParams) (HistoryTurn, error)
 	LinkMessageToHistoryTurn(ctx context.Context, arg dbsqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error)
 	LinkUnassignedMessagesAfterHistoryTurnAssistant(ctx context.Context, turnID pgtype.UUID) error
 	HideMessagesByHistoryTurn(ctx context.Context, turnID pgtype.UUID) error
 	ListAllMessagesForBackup(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.ListAllMessagesForBackupRow, error)
-	ListHistoryTurnsByBot(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.BotHistoryTurn, error)
+	ListHistoryTurnsByBot(ctx context.Context, botID pgtype.UUID) ([]HistoryTurn, error)
 	ListMessages(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.ListMessagesRow, error)
 	GetMessageByExternalIDBySession(ctx context.Context, arg dbsqlc.GetMessageByExternalIDBySessionParams) (dbsqlc.GetMessageByExternalIDBySessionRow, error)
 	GetLocatedMessageByExternalIDBySession(ctx context.Context, arg dbsqlc.GetLocatedMessageByExternalIDBySessionParams) (dbsqlc.GetLocatedMessageByExternalIDBySessionRow, error)
@@ -386,7 +400,7 @@ type Queries interface {
 	UpdateUserInputPromptMessage(ctx context.Context, arg dbsqlc.UpdateUserInputPromptMessageParams) (dbsqlc.UserInputRequest, error)
 	UpdateUserInputToolResultMessage(ctx context.Context, arg dbsqlc.UpdateUserInputToolResultMessageParams) (dbsqlc.UserInputRequest, error)
 	ReplaceHistoryTurn(ctx context.Context, arg dbsqlc.ReplaceHistoryTurnParams) (dbsqlc.ReplaceHistoryTurnRow, error)
-	SupersedeHistoryTurn(ctx context.Context, arg dbsqlc.SupersedeHistoryTurnParams) (dbsqlc.BotHistoryTurn, error)
+	SupersedeHistoryTurn(ctx context.Context, arg dbsqlc.SupersedeHistoryTurnParams) (HistoryTurn, error)
 	UpdateUserProviderOAuthState(ctx context.Context, arg dbsqlc.UpdateUserProviderOAuthStateParams) error
 	UpsertAccountByUsername(ctx context.Context, arg dbsqlc.UpsertAccountByUsernameParams) (dbsqlc.User, error)
 	UpsertBotChannelConfig(ctx context.Context, arg dbsqlc.UpsertBotChannelConfigParams) (dbsqlc.BotChannelConfig, error)
