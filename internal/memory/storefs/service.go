@@ -244,11 +244,9 @@ func (s *Service) RebuildFiles(ctx context.Context, botID string, items []Memory
 	// Markdown view is a pure projection of the DB, so any agent-authored files
 	// under /data/memory that have not been ingested as DB nodes are lost.
 	//
-	// Data-loss mitigation lives one layer up: graphRuntime.syncAndInvalidate
-	// calls IngestMarkdownFiles BEFORE this rebuild, so agent-authored files
-	// become DB nodes first and are then re-projected here. Callers that bypass
-	// the graph runtime (e.g. legacy file-runtime compact) must ensure files
-	// are ingested first if they want agent content preserved.
+	// Data-loss mitigation lives one layer up: graphRuntime.Rebuild calls
+	// IngestMarkdownFiles BEFORE this rebuild, so agent-authored files become
+	// DB nodes first and are then re-projected here.
 	if err := s.deleteFile(ctx, botID, memoryDirPath(), true); err != nil && !isNotFound(err) {
 		return err
 	}
@@ -260,19 +258,6 @@ func (s *Service) RebuildFiles(ctx context.Context, botID string, items []Memory
 		}
 	}
 	return s.SyncOverview(ctx, botID)
-}
-
-func (s *Service) ArchiveAndRebuildFiles(ctx context.Context, botID string, active []MemoryItem, archived []MemoryItem, filters map[string]any) error {
-	if s.provider == nil {
-		return ErrNotConfigured
-	}
-	if len(archived) > 0 {
-		now := time.Now().UTC()
-		if err := s.writeMemoryDay(ctx, botID, memoryArchivePath(now), archived); err != nil {
-			return err
-		}
-	}
-	return s.RebuildFiles(ctx, botID, active, filters)
 }
 
 func (s *Service) RemoveMemories(ctx context.Context, botID string, ids []string) error {
@@ -560,9 +545,6 @@ func (s *Service) removeIDsFromFiles(ctx context.Context, botID string, removals
 
 func memoryOverviewPath() string { return path.Join(config.DefaultDataMount, "MEMORY.md") }
 func memoryDirPath() string      { return path.Join(config.DefaultDataMount, "memory") }
-func memoryArchivePath(t time.Time) string {
-	return path.Join(config.DefaultDataMount, "memory_archive", t.UTC().Format("20060102T150405.000000000Z")+".md")
-}
 
 func memoryConceptPath(layer, slug string) string {
 	layer = conceptLayerName(layer)

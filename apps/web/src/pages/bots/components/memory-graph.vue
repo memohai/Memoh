@@ -14,34 +14,32 @@
         class="flex shrink-0 gap-4 text-xs text-muted-foreground"
       >
         <span>{{ graphData.nodes.length }} {{ $t('memory.graphNodes') }}</span>
-        <span>{{ graphData.edges.length }} {{ $t('memory.graphEdges') }}</span>
+        <span>{{ visibleGraphEdges.length }} {{ $t('memory.graphEdges') }}</span>
       </div>
     </div>
 
-    <div
-      v-if="loading"
-      class="flex h-80 items-center justify-center text-sm text-muted-foreground"
-    >
-      {{ $t('common.loading') }}
-    </div>
-
-    <div
-      v-else-if="graphData && graphData.nodes.length > 0"
-      class="relative h-[30rem] overflow-hidden rounded-lg border border-border bg-card"
-    >
+    <div class="relative h-[30rem] overflow-hidden rounded-[var(--radius-card)] border border-border bg-card">
+      <div
+        v-if="loading"
+        class="flex size-full items-center justify-center text-sm text-muted-foreground"
+      >
+        {{ $t('common.loading') }}
+      </div>
       <VChart
+        v-else-if="graphData && graphData.nodes.length > 0"
         :option="chartOption"
-        autoresize
+        :autoresize="chartAutoresize"
+        :update-options="chartUpdateOptions"
         class="size-full"
         @click="handleNodeClick"
       />
-    </div>
 
-    <div
-      v-else
-      class="flex h-80 items-center justify-center text-sm text-muted-foreground"
-    >
-      {{ $t('memory.graphEmpty') }}
+      <div
+        v-else
+        class="flex size-full items-center justify-center text-sm text-muted-foreground"
+      >
+        {{ $t('memory.graphEmpty') }}
+      </div>
     </div>
 
     <Dialog
@@ -116,6 +114,12 @@ interface ChartNodeData extends GraphNode {
   itemStyle: { color: string }
 }
 
+interface GraphEdgeCandidate extends GraphEdge {
+  source: string
+  target: string
+  strength: number
+}
+
 interface ChartTheme {
   label: string
   line: string
@@ -125,12 +129,15 @@ interface ChartTheme {
 }
 
 const props = defineProps<{ botId: string }>()
+const MAX_VISIBLE_EDGES_PER_NODE = 4
 
 const isDark = useDark()
 const loading = ref(true)
 const graphData = ref<GraphData | null>(null)
 const selectedNode = ref<GraphNode | null>(null)
 let fetchSeq = 0
+const chartAutoresize = { throttle: 120 }
+const chartUpdateOptions = { lazyUpdate: true }
 
 const colorCanvas = typeof document !== 'undefined'
   ? document.createElement('canvas').getContext('2d', { willReadFrequently: true })
@@ -181,12 +188,46 @@ const chartTheme = computed<ChartTheme>(() => {
 
 const selectedNodeTitle = computed(() => selectedNode.value ? displayName(selectedNode.value) : '')
 
+const graphEdges = computed<GraphEdgeCandidate[]>(() => {
+  const edges = graphData.value?.edges ?? []
+  return edges
+    .filter((edge): edge is GraphEdge & { source: string; target: string } => !!edge.source && !!edge.target)
+    .map((edge) => ({
+      ...edge,
+      strength: graphEdgeStrength(edge),
+    }))
+})
+
+const visibleGraphEdges = computed<GraphEdgeCandidate[]>(() => {
+  const degree = new Map<string, number>()
+  const selected: GraphEdgeCandidate[] = []
+
+  for (const edge of [...graphEdges.value].sort(compareGraphEdges)) {
+    const sourceDegree = degree.get(edge.source) ?? 0
+    const targetDegree = degree.get(edge.target) ?? 0
+    if (sourceDegree >= MAX_VISIBLE_EDGES_PER_NODE || targetDegree >= MAX_VISIBLE_EDGES_PER_NODE) {
+      continue
+    }
+    selected.push(edge)
+    degree.set(edge.source, sourceDegree + 1)
+    degree.set(edge.target, targetDegree + 1)
+  }
+
+  return selected.sort((a, b) => {
+    if (a.source !== b.source) return a.source < b.source ? -1 : 1
+    if (a.target !== b.target) return a.target < b.target ? -1 : 1
+    return graphRelRank(a.rel) - graphRelRank(b.rel)
+  })
+})
+
 const chartOption = computed(() => {
   if (!graphData.value || graphData.value.nodes.length === 0) return {}
   const theme = chartTheme.value
   const nodes = graphData.value.nodes.filter((node): node is GraphNode & { id: string } => !!node.id)
-  const edges = graphData.value.edges.filter((edge): edge is GraphEdge & { source: string; target: string } => !!edge.source && !!edge.target)
+  const edges = visibleGraphEdges.value
   return {
+    animation: false,
+    animationDurationUpdate: 0,
     tooltip: {
       trigger: 'item',
       formatter: (params: { dataType?: string; data?: ChartNodeData }) => {
@@ -211,9 +252,11 @@ const chartOption = computed(() => {
         formatter: (params: { data?: ChartNodeData }) => params.data?.displayName ?? '',
       },
       force: {
+        initLayout: 'circular',
         repulsion: 200,
         edgeLength: [60, 160],
         gravity: 0.08,
+        layoutAnimation: false,
       },
       lineStyle: {
         color: theme.line,
@@ -228,7 +271,7 @@ const chartOption = computed(() => {
         ...node,
         name: node.id,
         displayName: displayName(node),
-        symbolSize: 30,
+        symbolSize: graphNodeSize(node.count),
         itemStyle: {
           color: subjectColor(node.subject || node.slug || node.topic, theme),
         },
@@ -236,10 +279,66 @@ const chartOption = computed(() => {
       links: edges.map((edge) => ({
         source: edge.source,
         target: edge.target,
+        value: edge.strength,
+        lineStyle: {
+          width: graphEdgeWidth(edge.strength),
+          opacity: graphEdgeOpacity(edge.strength),
+        },
       })),
     }],
   }
 })
+
+function compareGraphEdges(a: GraphEdgeCandidate, b: GraphEdgeCandidate): number {
+  if (a.strength !== b.strength) return b.strength - a.strength
+  const relRank = graphRelRank(a.rel) - graphRelRank(b.rel)
+  if (relRank !== 0) return relRank
+  if (a.source !== b.source) return a.source < b.source ? -1 : 1
+  if (a.target !== b.target) return a.target < b.target ? -1 : 1
+  return 0
+}
+
+function graphEdgeStrength(edge: GraphEdge): number {
+  const weight = Number(edge.weight)
+  if (Number.isFinite(weight) && weight > 0) return weight
+  const count = Number(edge.count)
+  if (Number.isFinite(count) && count > 0) return count
+  return graphRelWeight(edge.rel)
+}
+
+function graphRelWeight(rel: string | undefined): number {
+  switch (rel) {
+    case 'refs': return 1.2
+    case 'same_profile': return 1
+    case 'same_topic': return 0.8
+    case 'same_day': return 0.5
+    default: return 0.4
+  }
+}
+
+function graphRelRank(rel: string | undefined): number {
+  switch (rel) {
+    case 'refs': return 0
+    case 'same_profile': return 1
+    case 'same_topic': return 2
+    case 'same_day': return 3
+    default: return 100
+  }
+}
+
+function graphEdgeWidth(strength: number): number {
+  return Math.min(3, 0.8 + Math.log2(strength + 1) * 0.55)
+}
+
+function graphEdgeOpacity(strength: number): number {
+  return Math.min(0.72, 0.32 + Math.log2(strength + 1) * 0.08)
+}
+
+function graphNodeSize(count: number | undefined): number {
+  const value = Number(count)
+  if (!Number.isFinite(value) || value <= 1) return 30
+  return Math.min(46, 30 + Math.log2(value) * 6)
+}
 
 function displayName(node: GraphNode): string {
   return node.slug || node.subject || node.label || node.id || ''

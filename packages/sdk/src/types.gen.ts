@@ -2008,15 +2008,20 @@ export type HandlersFsOpResponse = {
 };
 
 export type HandlersGraphEdge = {
+    count?: number;
     rel?: string;
+    rels?: Array<string>;
     source?: string;
     target?: string;
+    weight?: number;
 };
 
 export type HandlersGraphNode = {
+    count?: number;
     id?: string;
     label?: string;
     memory?: string;
+    memory_ids?: Array<string>;
     metadata?: {
         [key: string]: unknown;
     };

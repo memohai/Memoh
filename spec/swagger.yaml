@@ -3365,21 +3365,35 @@ definitions:
     type: object
   handlers.graphEdge:
     properties:
+      count:
+        type: integer
       rel:
         type: string
+      rels:
+        items:
+          type: string
+        type: array
       source:
         type: string
       target:
         type: string
+      weight:
+        type: number
     type: object
   handlers.graphNode:
     properties:
+      count:
+        type: integer
       id:
         type: string
       label:
         type: string
       memory:
         type: string
+      memory_ids:
+        items:
+          type: string
+        type: array
       metadata:
         additionalProperties: {}
         type: object

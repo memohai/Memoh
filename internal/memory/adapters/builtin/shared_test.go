@@ -49,6 +49,16 @@ func TestRuntimeBotIDFromMemoryID(t *testing.T) {
 	}
 }
 
+func TestRuntimeLocalMemoryID(t *testing.T) {
+	t.Parallel()
+	if got := runtimeLocalMemoryID("bot-1:mem_123"); got != "mem_123" {
+		t.Fatalf("expected mem_123, got %q", got)
+	}
+	if got := runtimeLocalMemoryID("mem_123"); got != "mem_123" {
+		t.Fatalf("expected bare id to pass through, got %q", got)
+	}
+}
+
 func TestCanonicalStoreItem(t *testing.T) {
 	t.Parallel()
 	item := storefs.MemoryItem{

@@ -194,74 +194,8 @@ func (r *fileRuntime) DeleteAll(ctx context.Context, req adapters.DeleteAllReque
 	return adapters.DeleteResponse{Message: "All memories deleted successfully!"}, nil
 }
 
-func (r *fileRuntime) Compact(ctx context.Context, filters map[string]any, ratio float64, _ int) (adapters.CompactResult, error) {
-	botID, err := runtimeBotID("", filters)
-	if err != nil {
-		return adapters.CompactResult{}, err
-	}
-	if ratio <= 0 || ratio > 1 {
-		return adapters.CompactResult{}, errors.New("ratio must be in range (0, 1]")
-	}
-	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
-	if err != nil {
-		return adapters.CompactResult{}, err
-	}
-	before := len(items)
-	if before == 0 {
-		return adapters.CompactResult{BeforeCount: 0, AfterCount: 0, Ratio: ratio, Results: []adapters.MemoryItem{}}, nil
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt > items[j].UpdatedAt })
-	target := int(float64(before) * ratio)
-	if target < 1 {
-		target = 1
-	}
-	if target > before {
-		target = before
-	}
-	keptStore := append([]storefs.MemoryItem(nil), items[:target]...)
-	if err := r.store.RebuildFiles(ctx, botID, keptStore, filters); err != nil {
-		return adapters.CompactResult{}, err
-	}
-	kept := memoryItemsFromStore(keptStore)
-	return adapters.CompactResult{
-		BeforeCount: before,
-		AfterCount:  len(kept),
-		Ratio:       ratio,
-		Results:     kept,
-	}, nil
-}
-
-func (r *fileRuntime) CompactWithLLM(ctx context.Context, filters map[string]any, ratio float64, decayDays int, llm adapters.LLM) (adapters.CompactResult, error) {
-	botID, err := runtimeBotID("", filters)
-	if err != nil {
-		return adapters.CompactResult{}, err
-	}
-	if ratio <= 0 || ratio > 1 {
-		return adapters.CompactResult{}, errors.New("ratio must be in range (0, 1]")
-	}
-	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
-	if err != nil {
-		return adapters.CompactResult{}, err
-	}
-	before := len(items)
-	if before == 0 {
-		return adapters.CompactResult{BeforeCount: 0, AfterCount: 0, Ratio: ratio, Results: []adapters.MemoryItem{}}, nil
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt > items[j].UpdatedAt })
-	compactedStore, archivedStore, err := compactStoreItemsWithLLM(ctx, botID, items, ratio, decayDays, llm)
-	if err != nil {
-		return adapters.CompactResult{}, err
-	}
-	if err := r.store.ArchiveAndRebuildFiles(ctx, botID, compactedStore, archivedStore, filters); err != nil {
-		return adapters.CompactResult{}, err
-	}
-	compacted := memoryItemsFromStore(compactedStore)
-	return adapters.CompactResult{
-		BeforeCount: before,
-		AfterCount:  len(compacted),
-		Ratio:       ratio,
-		Results:     compacted,
-	}, nil
+func (*fileRuntime) Compact(_ context.Context, _ map[string]any, _ float64, _ int) (adapters.CompactResult, error) {
+	return adapters.CompactResult{}, errors.New("file runtime compact is disabled; use graph runtime")
 }
 
 func (r *fileRuntime) Usage(ctx context.Context, filters map[string]any) (adapters.UsageResponse, error) {

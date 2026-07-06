@@ -14,7 +14,6 @@ import (
 	"github.com/memohai/memoh/internal/config"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/memory/migrate"
-	storefs "github.com/memohai/memoh/internal/memory/storefs"
 	"github.com/memohai/memoh/internal/memory/wikistore"
 )
 
@@ -362,15 +361,24 @@ func (r *graphRuntime) Update(ctx context.Context, req adapters.UpdateRequest) (
 	if botID == "" {
 		return adapters.MemoryItem{}, errors.New("graph runtime: invalid memory_id")
 	}
-	existing, err := r.store.GetNode(ctx, botID, memoryID)
+	existing, storedID, err := r.resolveNodeByMemoryID(ctx, botID, memoryID)
 	if err != nil {
 		return adapters.MemoryItem{}, fmt.Errorf("graph runtime: get node: %w", err)
 	}
+	existing.ID = memoryID
 	existing.Body = text
 	existing.Hash = runtimeHash(text)
 	saved, err := r.store.UpsertNode(ctx, existing)
 	if err != nil {
 		return adapters.MemoryItem{}, fmt.Errorf("graph runtime: update node: %w", err)
+	}
+	if storedID != memoryID {
+		if err := r.store.DeleteNode(ctx, botID, storedID); err != nil {
+			return adapters.MemoryItem{}, fmt.Errorf("graph runtime: delete legacy node: %w", err)
+		}
+		if r.semantic != nil {
+			r.discardSemanticNodes(ctx, botID, []string{storedID})
+		}
 	}
 	r.semanticUpsertBestEffort(botID, saved) //nolint:contextcheck // async semantic upsert uses its own bounded context
 	r.syncAndInvalidate(ctx, botID)
@@ -397,10 +405,20 @@ func (r *graphRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (ada
 		if botID == "" {
 			continue
 		}
-		if err := r.store.DeleteNode(ctx, botID, memoryID); err != nil {
+		_, storedID, err := r.resolveNodeByMemoryID(ctx, botID, memoryID)
+		if err != nil {
+			if !errors.Is(err, wikistore.ErrNodeNotFound) {
+				return adapters.DeleteResponse{}, fmt.Errorf("graph runtime: get node for delete: %w", err)
+			}
+			storedID = memoryID
+		}
+		if err := r.store.DeleteNode(ctx, botID, storedID); err != nil {
 			return adapters.DeleteResponse{}, fmt.Errorf("graph runtime: delete node: %w", err)
 		}
-		deletedByBot[botID] = append(deletedByBot[botID], memoryID)
+		deletedByBot[botID] = append(deletedByBot[botID], storedID)
+		if storedID != memoryID {
+			deletedByBot[botID] = append(deletedByBot[botID], memoryID)
+		}
 		r.syncAndInvalidate(ctx, botID)
 	}
 	for botID, ids := range deletedByBot {
@@ -416,6 +434,40 @@ func (r *graphRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (ada
 		}
 	}
 	return adapters.DeleteResponse{Message: "Memories deleted successfully!"}, nil
+}
+
+func (r *graphRuntime) resolveNodeByMemoryID(ctx context.Context, botID, memoryID string) (migrate.NodeSpec, string, error) {
+	memoryID = strings.TrimSpace(memoryID)
+	node, err := r.store.GetNode(ctx, botID, memoryID)
+	if err == nil {
+		return node, memoryID, nil
+	}
+	if !errors.Is(err, wikistore.ErrNodeNotFound) {
+		return migrate.NodeSpec{}, "", err
+	}
+	legacyID := runtimeLocalMemoryID(memoryID)
+	if legacyID == "" || legacyID == memoryID {
+		return migrate.NodeSpec{}, "", err
+	}
+	node, legacyErr := r.store.GetNode(ctx, botID, legacyID)
+	if legacyErr != nil {
+		if errors.Is(legacyErr, wikistore.ErrNodeNotFound) {
+			return migrate.NodeSpec{}, "", err
+		}
+		return migrate.NodeSpec{}, "", legacyErr
+	}
+	return node, legacyID, nil
+}
+
+func (r *graphRuntime) discardSemanticNodes(ctx context.Context, botID string, nodeIDs []string) {
+	if r.semantic == nil || len(nodeIDs) == 0 {
+		return
+	}
+	semanticCtx, cancel := context.WithTimeout(ctx, semanticEmbedTimeout)
+	defer cancel()
+	if err := r.semantic.DeleteNodes(semanticCtx, botID, nodeIDs); err != nil {
+		r.logger.Debug("graph: pgvector delete failed", "bot_id", botID, "err", err)
+	}
 }
 
 func (r *graphRuntime) DeleteAll(ctx context.Context, req adapters.DeleteAllRequest) (adapters.DeleteResponse, error) {
@@ -444,138 +496,6 @@ func (r *graphRuntime) DeleteAll(ctx context.Context, req adapters.DeleteAllRequ
 	}
 	r.cache.invalidate(botID)
 	return adapters.DeleteResponse{Message: "All memories deleted successfully!"}, nil
-}
-
-// ---- Runtime: compact ----
-
-func (r *graphRuntime) Compact(ctx context.Context, filters map[string]any, ratio float64, _ int) (adapters.CompactResult, error) {
-	if r.store == nil {
-		return adapters.CompactResult{}, errors.New("graph runtime: wiki store not configured")
-	}
-	botID, err := runtimeBotID("", filters)
-	if err != nil {
-		return adapters.CompactResult{}, err
-	}
-	if ratio <= 0 || ratio > 1 {
-		return adapters.CompactResult{}, errors.New("ratio must be in range (0, 1]")
-	}
-	nodes, err := r.store.ListNodes(ctx, botID)
-	if err != nil {
-		return adapters.CompactResult{}, fmt.Errorf("graph runtime: list nodes: %w", err)
-	}
-	before := len(nodes)
-	if before == 0 {
-		return adapters.CompactResult{BeforeCount: 0, AfterCount: 0, Ratio: ratio, Results: []adapters.MemoryItem{}}, nil
-	}
-	// Keep newest target nodes, drop the oldest tail.
-	sort.Slice(nodes, func(i, j int) bool { return nodes[i].CapturedAt.After(nodes[j].CapturedAt) })
-	target := int(float64(before) * ratio)
-	if target < 1 {
-		target = 1
-	}
-	if target > before {
-		target = before
-	}
-	droppedIDs := make([]string, 0, len(nodes)-target)
-	for _, n := range nodes[target:] {
-		if err := r.store.DeleteNode(ctx, botID, n.ID); err != nil {
-			return adapters.CompactResult{}, fmt.Errorf("graph runtime: compact delete: %w", err)
-		}
-		droppedIDs = append(droppedIDs, n.ID)
-	}
-	kept := nodes[:target]
-	r.retry.discard(botID, droppedIDs)
-	if r.semantic != nil && len(droppedIDs) > 0 {
-		auxCtx, cancel := context.WithTimeout(ctx, semanticEmbedTimeout)
-		defer cancel()
-		if err := r.semantic.DeleteNodes(auxCtx, botID, droppedIDs); err != nil {
-			r.logger.Debug("graph: pgvector compact delete failed", "bot_id", botID, "err", err)
-		}
-	}
-	r.syncAndInvalidate(ctx, botID)
-	items := make([]adapters.MemoryItem, 0, len(kept))
-	for _, n := range kept {
-		items = append(items, nodeSpecToMemoryItem(n))
-	}
-	return adapters.CompactResult{BeforeCount: before, AfterCount: len(kept), Ratio: ratio, Results: items}, nil
-}
-
-// CompactWithLLM lets the builtin provider advertise semantic compact
-// capability for the graph runtime. It summarizes the node set via the LLM,
-// upserts the resulting facts as fresh nodes, and deletes the originals.
-func (r *graphRuntime) CompactWithLLM(ctx context.Context, filters map[string]any, ratio float64, decayDays int, llm adapters.LLM) (adapters.CompactResult, error) {
-	if r.store == nil {
-		return adapters.CompactResult{}, errors.New("graph runtime: wiki store not configured")
-	}
-	botID, err := runtimeBotID("", filters)
-	if err != nil {
-		return adapters.CompactResult{}, err
-	}
-	if ratio <= 0 || ratio > 1 {
-		return adapters.CompactResult{}, errors.New("ratio must be in range (0, 1]")
-	}
-	nodes, err := r.store.ListNodes(ctx, botID)
-	if err != nil {
-		return adapters.CompactResult{}, fmt.Errorf("graph runtime: list nodes: %w", err)
-	}
-	before := len(nodes)
-	if before == 0 {
-		return adapters.CompactResult{BeforeCount: 0, AfterCount: 0, Ratio: ratio, Results: []adapters.MemoryItem{}}, nil
-	}
-	sort.Slice(nodes, func(i, j int) bool { return nodes[i].CapturedAt.After(nodes[j].CapturedAt) })
-
-	// Build compact candidates as store items for the shared compact helper.
-	storeItems := make([]storefs.MemoryItem, 0, before)
-	for _, n := range nodes {
-		storeItems = append(storeItems, storefs.MemoryItem{
-			ID:        n.ID,
-			Memory:    n.Body,
-			Hash:      n.Hash,
-			CreatedAt: formatNodeTime(n.CapturedAt),
-			UpdatedAt: formatNodeTime(n.CapturedAt),
-			Metadata:  buildNodeMetadata(n),
-		})
-	}
-	compacted, _, err := compactStoreItemsWithLLM(ctx, botID, storeItems, ratio, decayDays, llm)
-	if err != nil {
-		return adapters.CompactResult{}, fmt.Errorf("graph runtime: llm compact: %w", err)
-	}
-
-	// Reconcile PG: delete all originals, upsert the compacted facts as new nodes.
-	if err := r.store.DeleteAllNodes(ctx, botID); err != nil {
-		return adapters.CompactResult{}, fmt.Errorf("graph runtime: compact clear: %w", err)
-	}
-	r.retry.discardBot(botID)
-	if r.semantic != nil {
-		auxCtx, cancel := context.WithTimeout(ctx, semanticEmbedTimeout)
-		defer cancel()
-		if err := r.semantic.DeleteBot(auxCtx, botID); err != nil {
-			r.logger.Debug("graph: pgvector compact clear failed", "bot_id", botID, "err", err)
-		}
-	}
-	now := time.Now().UTC()
-	for _, fact := range compacted {
-		spec := memoryItemToNodeSpec(adapters.MemoryItem{
-			ID:        runtimeMemoryID(botID, now),
-			Memory:    fact.Memory,
-			Hash:      runtimeHash(fact.Memory),
-			CreatedAt: now.Format(time.RFC3339),
-			UpdatedAt: now.Format(time.RFC3339),
-			Metadata:  fact.Metadata,
-		}, botID)
-		if _, err := r.store.UpsertNode(ctx, spec); err != nil {
-			r.logger.Warn("graph: compact upsert failed", "bot_id", botID, "err", err)
-		} else {
-			r.semanticUpsertBestEffort(botID, spec) //nolint:contextcheck // async semantic upsert uses its own bounded context
-		}
-	}
-	keptNodes, _ := r.store.ListNodes(ctx, botID)
-	r.syncAndInvalidate(ctx, botID)
-	items := make([]adapters.MemoryItem, 0, len(keptNodes))
-	for _, n := range keptNodes {
-		items = append(items, nodeSpecToMemoryItem(n))
-	}
-	return adapters.CompactResult{BeforeCount: before, AfterCount: len(keptNodes), Ratio: ratio, Results: items}, nil
 }
 
 // ---- Runtime: usage / status / rebuild ----

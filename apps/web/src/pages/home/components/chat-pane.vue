@@ -201,9 +201,9 @@
                 type="submit"
                 :disabled="!forkSessionTitle.trim() || forkSubmitting"
               >
-                <LoaderCircle
+                <Spinner
                   v-if="forkSubmitting"
-                  class="mr-1 size-3 animate-spin"
+                  class="mr-1 size-3"
                 />
                 {{ $t('common.create') }}
               </Button>
@@ -688,9 +688,9 @@
                       :class="isMultiline ? 'self-end' : 'self-center'"
                       :aria-label="$t('chat.composerActions')"
                     >
-                      <LoaderCircle
+                      <Spinner
                         v-if="agentChanging"
-                        class="size-4 animate-spin"
+                        class="size-4"
                       />
                       <Plus
                         v-else
@@ -765,9 +765,9 @@
                         class="composer-pill-press h-9 min-w-0 gap-1 rounded-full px-3 text-muted-foreground"
                         :style="{ maxWidth: `${modelTriggerMaxWidth}px` }"
                       >
-                        <LoaderCircle
+                        <Spinner
                           v-if="acpModelChanging || acpModelsLoading"
-                          class="size-3.5 shrink-0 animate-spin"
+                          class="size-3.5 shrink-0"
                         />
                         <span
                           ref="modelLabelEl"
@@ -973,7 +973,6 @@
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount, onMounted, useTemplateRef, watchEffect, watch, nextTick, onActivated, onDeactivated } from 'vue'
 import {
-  LoaderCircle,
   Paperclip,
   Plus,
   ChevronDown,

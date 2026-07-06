@@ -300,7 +300,7 @@
       class="space-y-6"
     >
       <SettingsSection
-        v-for="group in filteredGroups"
+        v-for="group in visibleGroups"
         :key="group.date"
         :title="group.label"
       >
@@ -312,6 +312,12 @@
           @edit="openEditDialog(item)"
         />
       </SettingsSection>
+      <div
+        v-if="hasMoreVisibleMemories"
+        ref="memoryLoadMoreSentinel"
+        aria-hidden="true"
+        class="h-px"
+      />
     </div>
 
     <!-- Unified create / edit dialog. House form standard: DialogTitle, single
@@ -395,6 +401,7 @@
 import { AlertTriangle, Brain, CalendarDays, Plus, RefreshCw, Search, Trash2, X } from 'lucide-vue-next'
 import type { DateRange } from 'reka-ui'
 import { DateFormatter, getLocalTimeZone, today } from '@internationalized/date'
+import { useIntersectionObserver } from '@vueuse/core'
 import { computed, ref, watch } from 'vue'
 import {
   Button,
@@ -508,9 +515,29 @@ const {
 const searchInput = ref('')
 const searchResults = ref<MemoryItem[]>([])
 let searchDebounce: ReturnType<typeof setTimeout> | null = null
+const MEMORY_RENDER_BATCH_SIZE = 30
+const visibleMemoryCount = ref(MEMORY_RENDER_BATCH_SIZE)
+const memoryLoadMoreSentinel = ref<HTMLElement | null>(null)
 
 const memoriesForGroups = computed(() => filtered.value as unknown as MemoryItem[])
 const { groups: filteredGroups, stats } = useMemoryGroups(memoriesForGroups, computed(() => locale.value))
+const filteredMemoryCount = computed(() => filteredGroups.value.reduce((count, group) => count + group.items.length, 0))
+const visibleGroups = computed(() => {
+  let remaining = visibleMemoryCount.value
+  const groups: Array<(typeof filteredGroups.value)[number]> = []
+
+  for (const group of filteredGroups.value) {
+    if (remaining <= 0) break
+    const items = group.items.slice(0, remaining)
+    if (items.length > 0) {
+      groups.push({ ...group, items })
+      remaining -= items.length
+    }
+  }
+
+  return groups
+})
+const hasMoreVisibleMemories = computed(() => visibleMemoryCount.value < filteredMemoryCount.value)
 
 const compactCapability = computed(() => memoryStatus.value?.compact)
 const canSemanticCompact = computed(() => compactCapability.value?.semantic === true)
@@ -639,6 +666,14 @@ function clearSearch() {
   if (searchDebounce) clearTimeout(searchDebounce)
 }
 
+function loadMoreVisibleMemories() {
+  if (!hasMoreVisibleMemories.value) return
+  visibleMemoryCount.value = Math.min(
+    visibleMemoryCount.value + MEMORY_RENDER_BATCH_SIZE,
+    filteredMemoryCount.value,
+  )
+}
+
 async function handleIngest() {
   ingestLoading.value = true
   try {
@@ -753,4 +788,20 @@ watch(() => props.botId, () => {
   void loadMemories()
   void loadMemoryStatus()
 }, { immediate: true })
+
+watch(filteredGroups, () => {
+  visibleMemoryCount.value = MEMORY_RENDER_BATCH_SIZE
+}, { flush: 'sync' })
+
+useIntersectionObserver(
+  memoryLoadMoreSentinel,
+  ([entry]) => {
+    if (!entry?.isIntersecting) return
+    loadMoreVisibleMemories()
+  },
+  {
+    rootMargin: '0px 0px 480px 0px',
+    threshold: 0,
+  },
+)
 </script>

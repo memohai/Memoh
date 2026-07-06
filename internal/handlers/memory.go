@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -265,7 +266,7 @@ func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 		}
 		results = append(results, resp.Results...)
 	}
-	results = deduplicateMemoryItems(results)
+	results = deduplicateMemoryItems(botID, results)
 	return c.JSON(http.StatusOK, memprovider.SearchResponse{Results: results})
 }
 
@@ -311,27 +312,32 @@ func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 		}
 		allResults = append(allResults, resp.Results...)
 	}
-	allResults = deduplicateMemoryItems(allResults)
+	allResults = deduplicateMemoryItems(botID, allResults)
 
 	return c.JSON(http.StatusOK, memprovider.SearchResponse{Results: allResults})
 }
 
 // graphNode is one node in the memory graph view.
 type graphNode struct {
-	ID       string         `json:"id"`
-	Label    string         `json:"label"`
-	Slug     string         `json:"slug"`
-	Memory   string         `json:"memory"`
-	Subject  string         `json:"subject,omitempty"`
-	Topic    string         `json:"topic,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	ID        string         `json:"id"`
+	Label     string         `json:"label"`
+	Slug      string         `json:"slug"`
+	Memory    string         `json:"memory"`
+	Subject   string         `json:"subject,omitempty"`
+	Topic     string         `json:"topic,omitempty"`
+	Count     int            `json:"count,omitempty"`
+	MemoryIDs []string       `json:"memory_ids,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
 }
 
 // graphEdge is one edge in the memory graph view.
 type graphEdge struct {
-	Source string `json:"source"`
-	Target string `json:"target"`
-	Rel    string `json:"rel"`
+	Source string   `json:"source"`
+	Target string   `json:"target"`
+	Rel    string   `json:"rel"`
+	Rels   []string `json:"rels,omitempty"`
+	Count  int      `json:"count"`
+	Weight float64  `json:"weight"`
 }
 
 // graphResponse is the payload for the memory graph view.
@@ -379,49 +385,212 @@ func (h *MemoryHandler) ChatGraph(c echo.Context) error {
 		}
 		allResults = append(allResults, resp.Results...)
 	}
-	allResults = deduplicateMemoryItems(allResults)
+	allResults = deduplicateMemoryItems(botID, allResults)
 
-	nodes := make([]graphNode, 0, len(allResults))
-	nodeSpecs := make([]migrate.NodeSpec, 0, len(allResults))
-	for _, item := range allResults {
-		label := item.Memory
-		if len(label) > 40 {
-			label = label[:37] + "..."
-		}
-		subject := ""
-		topic := ""
-		if item.Metadata != nil {
-			if s, ok := item.Metadata["subject"].(string); ok {
-				subject = s
-			}
-			if t, ok := item.Metadata["topic"].(string); ok {
-				topic = t
-			}
-		}
-		slug := migrate.NodeSlug(item.ID, subject, topic)
-		nodes = append(nodes, graphNode{
-			ID:       item.ID,
-			Label:    label,
-			Slug:     slug,
-			Memory:   item.Memory,
-			Subject:  subject,
-			Topic:    topic,
-			Metadata: item.Metadata,
-		})
-		nodeSpecs = append(nodeSpecs, memoryItemToGraphNodeSpec(botID, item))
-	}
-
-	derivedEdges := migrate.PlanFromNodes(nodeSpecs)
-	edges := make([]graphEdge, 0, len(derivedEdges))
-	for _, edge := range derivedEdges {
-		edges = append(edges, graphEdge{
-			Source: edge.SrcNode,
-			Target: edge.DstNode,
-			Rel:    string(edge.Rel),
-		})
-	}
+	nodes, nodeSpecs, sourceToConcept := buildGraphProjection(botID, allResults)
+	edges := aggregateGraphEdges(projectGraphEdges(migrate.PlanFromNodes(nodeSpecs), sourceToConcept))
 
 	return c.JSON(http.StatusOK, graphResponse{Nodes: nodes, Edges: edges})
+}
+
+func buildGraphProjection(botID string, items []memprovider.MemoryItem) ([]graphNode, []migrate.NodeSpec, map[string]string) {
+	type conceptBucket struct {
+		id        string
+		slug      string
+		count     int
+		memoryIDs []string
+		item      memprovider.MemoryItem
+		spec      migrate.NodeSpec
+	}
+
+	buckets := map[string]*conceptBucket{}
+	order := []string{}
+	nodeSpecs := make([]migrate.NodeSpec, 0, len(items))
+	sourceToConcept := make(map[string]string, len(items))
+
+	for _, item := range items {
+		item = canonicalizeMemoryItem(botID, item)
+		spec := memoryItemToGraphNodeSpec(botID, item)
+		if spec.ID == "" {
+			continue
+		}
+		nodeSpecs = append(nodeSpecs, spec)
+
+		slug := migrate.NodeSlug(spec.ID, spec.Subject, spec.Topic)
+		conceptID := slug
+		if conceptID == "" {
+			conceptID = spec.ID
+		}
+		sourceToConcept[spec.ID] = conceptID
+
+		bucket := buckets[conceptID]
+		if bucket == nil {
+			bucket = &conceptBucket{id: conceptID, slug: slug, item: item, spec: spec}
+			buckets[conceptID] = bucket
+			order = append(order, conceptID)
+		}
+		bucket.count++
+		bucket.memoryIDs = append(bucket.memoryIDs, item.ID)
+		if graphMemoryItemRank(item, spec) > graphMemoryItemRank(bucket.item, bucket.spec) {
+			bucket.item = item
+			bucket.spec = spec
+		}
+	}
+
+	nodes := make([]graphNode, 0, len(order))
+	for _, conceptID := range order {
+		bucket := buckets[conceptID]
+		sort.Strings(bucket.memoryIDs)
+		nodes = append(nodes, graphNode{
+			ID:        bucket.id,
+			Label:     graphNodeLabel(bucket.item, bucket.spec),
+			Slug:      bucket.slug,
+			Memory:    strings.TrimSpace(bucket.item.Memory),
+			Subject:   bucket.spec.Subject,
+			Topic:     bucket.spec.Topic,
+			Count:     bucket.count,
+			MemoryIDs: bucket.memoryIDs,
+			Metadata:  bucket.item.Metadata,
+		})
+	}
+	sort.Slice(nodes, func(i, j int) bool {
+		if nodes[i].Slug != nodes[j].Slug {
+			return nodes[i].Slug < nodes[j].Slug
+		}
+		return nodes[i].ID < nodes[j].ID
+	})
+	return nodes, nodeSpecs, sourceToConcept
+}
+
+func projectGraphEdges(edges []migrate.EdgeSpec, sourceToConcept map[string]string) []migrate.EdgeSpec {
+	if len(edges) == 0 {
+		return nil
+	}
+	projected := make([]migrate.EdgeSpec, 0, len(edges))
+	for _, edge := range edges {
+		source := sourceToConcept[strings.TrimSpace(edge.SrcNode)]
+		target := sourceToConcept[strings.TrimSpace(edge.DstNode)]
+		if source == "" || target == "" || source == target {
+			continue
+		}
+		edge.SrcNode = source
+		edge.DstNode = target
+		projected = append(projected, edge)
+	}
+	return projected
+}
+
+func graphNodeLabel(item memprovider.MemoryItem, spec migrate.NodeSpec) string {
+	label := strings.TrimSpace(spec.Subject)
+	if label == "" {
+		label = strings.TrimSpace(spec.Topic)
+	}
+	if label == "" {
+		label = strings.TrimSpace(item.Memory)
+	}
+	if len(label) > 40 {
+		label = label[:37] + "..."
+	}
+	return label
+}
+
+func aggregateGraphEdges(edges []migrate.EdgeSpec) []graphEdge {
+	type edgeBucket struct {
+		source string
+		target string
+		count  int
+		weight float64
+		rels   map[string]float64
+	}
+
+	buckets := make(map[string]*edgeBucket)
+	for _, edge := range edges {
+		source := strings.TrimSpace(edge.SrcNode)
+		target := strings.TrimSpace(edge.DstNode)
+		if source == "" || target == "" || source == target {
+			continue
+		}
+		if target < source {
+			source, target = target, source
+		}
+
+		key := source + "\x00" + target
+		bucket := buckets[key]
+		if bucket == nil {
+			bucket = &edgeBucket{
+				source: source,
+				target: target,
+				rels:   map[string]float64{},
+			}
+			buckets[key] = bucket
+		}
+
+		rel := strings.TrimSpace(string(edge.Rel))
+		if rel == "" {
+			rel = "related"
+		}
+		weight := float64(edge.Weight)
+		if weight <= 0 {
+			weight = 1
+		}
+		bucket.count++
+		bucket.weight += weight
+		bucket.rels[rel] += weight
+	}
+
+	out := make([]graphEdge, 0, len(buckets))
+	for _, bucket := range buckets {
+		rels := make([]string, 0, len(bucket.rels))
+		for rel := range bucket.rels {
+			rels = append(rels, rel)
+		}
+		sort.Slice(rels, func(i, j int) bool {
+			left := bucket.rels[rels[i]]
+			right := bucket.rels[rels[j]]
+			if left != right {
+				return left > right
+			}
+			if graphRelRank(rels[i]) != graphRelRank(rels[j]) {
+				return graphRelRank(rels[i]) < graphRelRank(rels[j])
+			}
+			return rels[i] < rels[j]
+		})
+		primaryRel := ""
+		if len(rels) > 0 {
+			primaryRel = rels[0]
+		}
+		out = append(out, graphEdge{
+			Source: bucket.source,
+			Target: bucket.target,
+			Rel:    primaryRel,
+			Rels:   rels,
+			Count:  bucket.count,
+			Weight: bucket.weight,
+		})
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Source != out[j].Source {
+			return out[i].Source < out[j].Source
+		}
+		return out[i].Target < out[j].Target
+	})
+	return out
+}
+
+func graphRelRank(rel string) int {
+	switch migrate.EdgeRel(rel) {
+	case migrate.EdgeRefs:
+		return 0
+	case migrate.EdgeSameProfile:
+		return 1
+	case migrate.EdgeSameTopic:
+		return 2
+	case migrate.EdgeSameDay:
+		return 3
+	default:
+		return 100
+	}
 }
 
 func memoryItemToGraphNodeSpec(botID string, item memprovider.MemoryItem) migrate.NodeSpec {
@@ -920,20 +1089,98 @@ func semanticCompactCapability(provider memprovider.Provider) memprovider.Memory
 	return capability
 }
 
-func deduplicateMemoryItems(items []memprovider.MemoryItem) []memprovider.MemoryItem {
+func deduplicateMemoryItems(botID string, items []memprovider.MemoryItem) []memprovider.MemoryItem {
 	if len(items) == 0 {
 		return items
 	}
-	seen := make(map[string]struct{}, len(items))
-	result := make([]memprovider.MemoryItem, 0, len(items))
+	seen := make(map[string]memprovider.MemoryItem, len(items))
+	order := make([]string, 0, len(items))
 	for _, item := range items {
-		if _, ok := seen[item.ID]; ok {
+		item = canonicalizeMemoryItem(botID, item)
+		if item.ID == "" {
 			continue
 		}
-		seen[item.ID] = struct{}{}
-		result = append(result, item)
+		if existing, ok := seen[item.ID]; ok {
+			if memoryItemRank(item) > memoryItemRank(existing) {
+				seen[item.ID] = item
+			}
+			continue
+		}
+		seen[item.ID] = item
+		order = append(order, item.ID)
+	}
+	result := make([]memprovider.MemoryItem, 0, len(order))
+	for _, id := range order {
+		result = append(result, seen[id])
 	}
 	return result
+}
+
+func canonicalizeMemoryItem(botID string, item memprovider.MemoryItem) memprovider.MemoryItem {
+	item.ID = canonicalMemoryID(botID, item.ID)
+	if strings.TrimSpace(item.BotID) == "" {
+		item.BotID = strings.TrimSpace(botID)
+	}
+	return item
+}
+
+func canonicalMemoryID(botID, id string) string {
+	botID = strings.TrimSpace(botID)
+	localID := localMemoryID(id)
+	if localID == "" {
+		return ""
+	}
+	if botID == "" {
+		return localID
+	}
+	return botID + ":" + localID
+}
+
+func localMemoryID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
+	}
+	if idx := strings.Index(id, ":"); idx >= 0 && idx+1 < len(id) {
+		return strings.TrimSpace(id[idx+1:])
+	}
+	return id
+}
+
+func memoryItemRank(item memprovider.MemoryItem) int {
+	score := len(strings.TrimSpace(item.Memory))
+	if strings.TrimSpace(item.Hash) != "" {
+		score += 50
+	}
+	if strings.TrimSpace(item.CreatedAt) != "" {
+		score += 10
+	}
+	if strings.TrimSpace(item.UpdatedAt) != "" {
+		score += 10
+	}
+	if item.Metadata != nil {
+		score += len(item.Metadata) * 2
+		for _, key := range []string{"subject", "topic", "layer", "profile_ref", "confidence"} {
+			if graphMetadataString(item.Metadata, key) != "" {
+				score += 20
+			}
+		}
+	}
+	return score
+}
+
+func graphMemoryItemRank(item memprovider.MemoryItem, spec migrate.NodeSpec) int {
+	score := memoryItemRank(item)
+	if strings.TrimSpace(spec.Subject) != "" {
+		score += 40
+	}
+	if strings.TrimSpace(spec.Topic) != "" {
+		score += 20
+	}
+	if spec.Layer != "" {
+		score += 10
+	}
+	return score
 }
 
 func (*MemoryHandler) requireChannelIdentityID(c echo.Context) (string, error) {

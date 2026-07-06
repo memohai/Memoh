@@ -51,10 +51,6 @@ func (*ingestFakeStore) RemoveAllMemories(context.Context, string) error        
 func (*ingestFakeStore) RebuildFiles(context.Context, string, []storefs.MemoryItem, map[string]any) error {
 	return nil
 }
-
-func (*ingestFakeStore) ArchiveAndRebuildFiles(context.Context, string, []storefs.MemoryItem, []storefs.MemoryItem, map[string]any) error {
-	return nil
-}
 func (*ingestFakeStore) SyncOverview(context.Context, string) error { return nil }
 func (s *ingestFakeStore) CountMemoryFiles(context.Context, string) (int, error) {
 	return len(s.items), nil

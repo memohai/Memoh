@@ -75,8 +75,7 @@ type IngestResult struct {
 }
 
 // SemanticCompactProvider is implemented by providers that can apply Memoh's
-// semantic memory compact contract: LLM merge, source archive, and derived
-// storage rebuild under the selected bot scope.
+// semantic memory compact contract under the selected bot scope.
 type SemanticCompactProvider interface {
 	SemanticCompactCapability() MemoryCompactCapability
 }

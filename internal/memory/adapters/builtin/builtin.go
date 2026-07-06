@@ -153,7 +153,7 @@ func (p *BuiltinProvider) SemanticCompactCapability() adapters.MemoryCompactCapa
 	mode := strings.TrimSpace(p.service.Mode())
 	return adapters.MemoryCompactCapability{
 		Semantic:     true,
-		Archive:      true,
+		Archive:      mode != ModeGraph,
 		RebuildIndex: mode == "graph",
 	}
 }

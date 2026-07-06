@@ -11,8 +11,7 @@ import (
 // fakeStore is an in-memory implementation of the memoryStore interface used by
 // the file runtime tests in this package.
 type fakeStore struct {
-	items   map[string]storefs.MemoryItem
-	archive []storefs.MemoryItem
+	items map[string]storefs.MemoryItem
 }
 
 func newFakeStore(items ...storefs.MemoryItem) *fakeStore {
@@ -69,11 +68,6 @@ func (s *fakeStore) RebuildFiles(_ context.Context, _ string, items []storefs.Me
 		s.items[item.ID] = item
 	}
 	return nil
-}
-
-func (s *fakeStore) ArchiveAndRebuildFiles(ctx context.Context, _ string, active []storefs.MemoryItem, archived []storefs.MemoryItem, _ map[string]any) error {
-	s.archive = append([]storefs.MemoryItem(nil), archived...)
-	return s.RebuildFiles(ctx, "", active, nil)
 }
 
 func (*fakeStore) SyncOverview(context.Context, string) error { return nil }

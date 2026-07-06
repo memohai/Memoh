@@ -30,7 +30,6 @@ type memoryStore interface {
 	RemoveMemories(ctx context.Context, botID string, ids []string) error
 	RemoveAllMemories(ctx context.Context, botID string) error
 	RebuildFiles(ctx context.Context, botID string, items []storefs.MemoryItem, filters map[string]any) error
-	ArchiveAndRebuildFiles(ctx context.Context, botID string, active []storefs.MemoryItem, archived []storefs.MemoryItem, filters map[string]any) error
 	SyncOverview(ctx context.Context, botID string) error
 	CountMemoryFiles(ctx context.Context, botID string) (int, error)
 }
@@ -106,6 +105,17 @@ func runtimeBotIDFromMemoryID(memoryID string) string {
 		return ""
 	}
 	return strings.TrimSpace(parts[0])
+}
+
+func runtimeLocalMemoryID(memoryID string) string {
+	memoryID = strings.TrimSpace(memoryID)
+	if memoryID == "" {
+		return ""
+	}
+	if idx := strings.Index(memoryID, ":"); idx >= 0 && idx+1 < len(memoryID) {
+		return strings.TrimSpace(memoryID[idx+1:])
+	}
+	return memoryID
 }
 
 func runtimeText(message string, messages []adapters.Message) string {

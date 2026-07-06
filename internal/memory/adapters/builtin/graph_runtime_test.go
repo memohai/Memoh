@@ -10,6 +10,7 @@ import (
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/memory/migrate"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
+	"github.com/memohai/memoh/internal/memory/wikistore"
 )
 
 var errForced = errors.New("forced store error for test")
@@ -33,7 +34,7 @@ func (s *fakeWikiStore) GetNode(_ context.Context, _, nodeID string) (migrate.No
 	if n, ok := s.nodes[nodeID]; ok {
 		return n, nil
 	}
-	return migrate.NodeSpec{}, errForced
+	return migrate.NodeSpec{}, wikistore.ErrNodeNotFound
 }
 
 func (s *fakeWikiStore) ListNodes(_ context.Context, _ string) ([]migrate.NodeSpec, error) {
@@ -243,6 +244,297 @@ func TestGraphRuntimeSearchExpandsRefs(t *testing.T) {
 	}
 	if !foundRefs {
 		t.Fatal("Search did not report the refs relation")
+	}
+}
+
+func TestGraphRuntimeUpdateCanonicalIDMigratesLegacyBareNode(t *testing.T) {
+	t.Parallel()
+	store := newFakeWikiStore()
+	rt := NewGraphRuntime(nil, store, newFakeStore())
+	ctx := context.Background()
+	botID := "bot-1"
+	store.nodes["mem_legacy"] = migrate.NodeSpec{
+		ID:    "mem_legacy",
+		BotID: botID,
+		Body:  "old body",
+		Layer: migrate.LayerNote,
+	}
+
+	item, err := rt.Update(ctx, adapters.UpdateRequest{
+		MemoryID: botID + ":mem_legacy",
+		Memory:   "new body",
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if item.ID != botID+":mem_legacy" {
+		t.Fatalf("updated id = %q", item.ID)
+	}
+	if _, ok := store.nodes["mem_legacy"]; ok {
+		t.Fatal("legacy bare node still exists after canonical update")
+	}
+	saved, ok := store.nodes[botID+":mem_legacy"]
+	if !ok {
+		t.Fatalf("canonical node missing: %#v", store.nodes)
+	}
+	if saved.Body != "new body" {
+		t.Fatalf("saved body = %q", saved.Body)
+	}
+}
+
+func TestGraphRuntimeDeleteCanonicalIDRemovesLegacyBareNode(t *testing.T) {
+	t.Parallel()
+	store := newFakeWikiStore()
+	rt := NewGraphRuntime(nil, store, newFakeStore())
+	ctx := context.Background()
+	botID := "bot-1"
+	store.nodes["mem_legacy"] = migrate.NodeSpec{
+		ID:    "mem_legacy",
+		BotID: botID,
+		Body:  "old body",
+		Layer: migrate.LayerNote,
+	}
+
+	if _, err := rt.Delete(ctx, botID+":mem_legacy"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, ok := store.nodes["mem_legacy"]; ok {
+		t.Fatal("legacy bare node still exists after canonical delete")
+	}
+}
+
+func TestGraphRuntimeCompactCanonicalizesLegacyBareIDs(t *testing.T) {
+	t.Parallel()
+	store := newFakeWikiStore()
+	rt := NewGraphRuntime(nil, store, newFakeStore())
+	ctx := context.Background()
+	botID := "bot-1"
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	store.nodes["mem_legacy"] = migrate.NodeSpec{
+		ID:         "mem_legacy",
+		BotID:      botID,
+		Body:       "Legacy memory survives under the canonical ID.",
+		Layer:      migrate.LayerNote,
+		CapturedAt: now,
+	}
+	store.nodes[botID+":mem_other"] = migrate.NodeSpec{
+		ID:         botID + ":mem_other",
+		BotID:      botID,
+		Body:       "Another memory stays separate.",
+		Layer:      migrate.LayerNote,
+		CapturedAt: now.Add(time.Minute),
+	}
+
+	result, err := rt.Compact(ctx, map[string]any{"bot_id": botID}, 1, 0)
+	if err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if result.BeforeCount != 2 || result.AfterCount != 2 {
+		t.Fatalf("Compact counts = %d/%d, want 2/2", result.BeforeCount, result.AfterCount)
+	}
+	if _, ok := store.nodes["mem_legacy"]; ok {
+		t.Fatal("legacy bare node still exists after compact")
+	}
+	if _, ok := store.nodes[botID+":mem_legacy"]; !ok {
+		t.Fatalf("canonical legacy node missing: %#v", store.nodes)
+	}
+}
+
+func TestGraphRuntimeCompactWithLLMMergesConceptNodes(t *testing.T) {
+	t.Parallel()
+	store := newFakeWikiStore()
+	rt := NewGraphRuntime(nil, store, newFakeStore())
+	ctx := context.Background()
+	botID := "bot-1"
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	store.nodes[botID+":mem_alice_1"] = migrate.NodeSpec{
+		ID:         botID + ":mem_alice_1",
+		BotID:      botID,
+		Body:       "Alice likes tea.",
+		Layer:      migrate.LayerNote,
+		Subject:    "Alice",
+		Topic:      "drinks",
+		Metadata:   map[string]any{"subject": "Alice", "topic": "drinks"},
+		CapturedAt: now.Add(-2 * time.Hour),
+	}
+	store.nodes["mem_alice_2"] = migrate.NodeSpec{
+		ID:         "mem_alice_2",
+		BotID:      botID,
+		Body:       "Alice prefers oolong tea.",
+		Layer:      migrate.LayerNote,
+		Subject:    "Alice",
+		Topic:      "drinks",
+		Metadata:   map[string]any{"subject": "Alice", "topic": "drinks"},
+		CapturedAt: now.Add(-time.Hour),
+	}
+	store.nodes[botID+":mem_bob"] = migrate.NodeSpec{
+		ID:         botID + ":mem_bob",
+		BotID:      botID,
+		Body:       "Bob uses Vim.",
+		Layer:      migrate.LayerNote,
+		Subject:    "Bob",
+		Metadata:   map[string]any{"subject": "Bob"},
+		CapturedAt: now,
+	}
+	llm := &fakeLLM{compactFunc: func(req adapters.CompactRequest) adapters.CompactResponse {
+		if req.BotID != botID {
+			t.Errorf("Compact BotID = %q, want %q", req.BotID, botID)
+		}
+		if req.TargetCount != 1 {
+			t.Errorf("Compact TargetCount = %d, want 1", req.TargetCount)
+		}
+		if len(req.Memories) != 2 {
+			t.Errorf("Compact memories = %d, want 2", len(req.Memories))
+		}
+		for _, memory := range req.Memories {
+			if !strings.HasPrefix(memory.ID, botID+":") {
+				t.Errorf("Compact candidate id = %q, want canonical bot prefix", memory.ID)
+			}
+		}
+		return adapters.CompactResponse{Facts: []string{"Alice likes tea and prefers oolong."}}
+	}}
+
+	result, err := rt.CompactWithLLM(ctx, map[string]any{"bot_id": botID}, 1, 0, llm)
+	if err != nil {
+		t.Fatalf("CompactWithLLM: %v", err)
+	}
+	if result.BeforeCount != 3 || result.AfterCount != 2 {
+		t.Fatalf("CompactWithLLM counts = %d/%d, want 3/2", result.BeforeCount, result.AfterCount)
+	}
+	if llm.compactCalls != 1 {
+		t.Fatalf("LLM compact calls = %d, want 1", llm.compactCalls)
+	}
+	if _, ok := store.nodes["mem_alice_2"]; ok {
+		t.Fatal("legacy bare Alice node still exists after compact")
+	}
+
+	aliceNodes := graphTestNodesBySubject(store.nodes, "Alice")
+	if len(aliceNodes) != 1 {
+		t.Fatalf("Alice node count = %d, want 1: %#v", len(aliceNodes), aliceNodes)
+	}
+	alice := aliceNodes[0]
+	if alice.Body != "Alice likes tea and prefers oolong." {
+		t.Fatalf("Alice body = %q", alice.Body)
+	}
+	sourceIDs := graphTestMetadataStrings(t, alice.Metadata, "compaction_source_ids")
+	graphTestRequireStrings(t, sourceIDs, botID+":mem_alice_1", botID+":mem_alice_2")
+	if got := alice.Metadata["compaction_strategy"]; got != "concept_merge" {
+		t.Fatalf("compaction_strategy = %#v, want concept_merge", got)
+	}
+	for id := range store.nodes {
+		if !strings.HasPrefix(id, botID+":") {
+			t.Fatalf("store still contains non-canonical id %q", id)
+		}
+	}
+}
+
+func TestGraphRuntimeCompactWithLLMPreservesProtectedConceptNodes(t *testing.T) {
+	t.Parallel()
+	store := newFakeWikiStore()
+	rt := NewGraphRuntime(nil, store, newFakeStore())
+	ctx := context.Background()
+	botID := "bot-1"
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	store.nodes[botID+":mem_pinned"] = migrate.NodeSpec{
+		ID:         botID + ":mem_pinned",
+		BotID:      botID,
+		Body:       "Pinned Alice memory must not be rewritten.",
+		Layer:      migrate.LayerNote,
+		Subject:    "Alice",
+		Metadata:   map[string]any{"subject": "Alice", "pinned": true},
+		CapturedAt: now,
+	}
+	store.nodes[botID+":mem_a"] = migrate.NodeSpec{
+		ID:         botID + ":mem_a",
+		BotID:      botID,
+		Body:       "Alice likes tea.",
+		Layer:      migrate.LayerNote,
+		Subject:    "Alice",
+		Metadata:   map[string]any{"subject": "Alice"},
+		CapturedAt: now.Add(-2 * time.Hour),
+	}
+	store.nodes[botID+":mem_b"] = migrate.NodeSpec{
+		ID:         botID + ":mem_b",
+		BotID:      botID,
+		Body:       "Alice prefers oolong.",
+		Layer:      migrate.LayerNote,
+		Subject:    "Alice",
+		Metadata:   map[string]any{"subject": "Alice"},
+		CapturedAt: now.Add(-time.Hour),
+	}
+	llm := &fakeLLM{compactFunc: func(req adapters.CompactRequest) adapters.CompactResponse {
+		for _, memory := range req.Memories {
+			if memory.ID == botID+":mem_pinned" {
+				t.Errorf("protected node was sent to compact LLM")
+			}
+		}
+		return adapters.CompactResponse{Facts: []string{"Alice likes tea and prefers oolong."}}
+	}}
+
+	result, err := rt.CompactWithLLM(ctx, map[string]any{"bot_id": botID}, 1, 0, llm)
+	if err != nil {
+		t.Fatalf("CompactWithLLM: %v", err)
+	}
+	if result.BeforeCount != 3 || result.AfterCount != 2 {
+		t.Fatalf("CompactWithLLM counts = %d/%d, want 3/2", result.BeforeCount, result.AfterCount)
+	}
+	pinned, ok := store.nodes[botID+":mem_pinned"]
+	if !ok {
+		t.Fatal("pinned node missing after compact")
+	}
+	if pinned.Body != "Pinned Alice memory must not be rewritten." {
+		t.Fatalf("pinned body = %q", pinned.Body)
+	}
+	if llm.compactCalls != 1 {
+		t.Fatalf("LLM compact calls = %d, want 1", llm.compactCalls)
+	}
+}
+
+func graphTestNodesBySubject(nodes map[string]migrate.NodeSpec, subject string) []migrate.NodeSpec {
+	out := make([]migrate.NodeSpec, 0)
+	for _, node := range nodes {
+		if node.Subject == subject {
+			out = append(out, node)
+		}
+	}
+	return out
+}
+
+func graphTestMetadataStrings(t *testing.T, metadata map[string]any, key string) []string {
+	t.Helper()
+	raw, ok := metadata[key]
+	if !ok {
+		t.Fatalf("metadata missing %q: %#v", key, metadata)
+	}
+	switch values := raw.(type) {
+	case []string:
+		return values
+	case []any:
+		out := make([]string, 0, len(values))
+		for _, value := range values {
+			s, ok := value.(string)
+			if !ok {
+				t.Fatalf("metadata %q entry has type %T, want string", key, value)
+			}
+			out = append(out, strings.TrimSpace(s))
+		}
+		return out
+	default:
+		t.Fatalf("metadata %q has type %T, want string list", key, raw)
+		return nil
+	}
+}
+
+func graphTestRequireStrings(t *testing.T, got []string, want ...string) {
+	t.Helper()
+	seen := make(map[string]struct{}, len(got))
+	for _, value := range got {
+		seen[value] = struct{}{}
+	}
+	for _, value := range want {
+		if _, ok := seen[value]; !ok {
+			t.Fatalf("string list %v missing %q", got, value)
+		}
 	}
 }
 

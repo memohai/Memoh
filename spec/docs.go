@@ -18118,20 +18118,35 @@ const docTemplate = `{
         "handlers.graphEdge": {
             "type": "object",
             "properties": {
+                "count": {
+                    "type": "integer"
+                },
                 "rel": {
                     "type": "string"
+                },
+                "rels": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "source": {
                     "type": "string"
                 },
                 "target": {
                     "type": "string"
+                },
+                "weight": {
+                    "type": "number"
                 }
             }
         },
         "handlers.graphNode": {
             "type": "object",
             "properties": {
+                "count": {
+                    "type": "integer"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -18140,6 +18155,12 @@ const docTemplate = `{
                 },
                 "memory": {
                     "type": "string"
+                },
+                "memory_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "metadata": {
                     "type": "object",
