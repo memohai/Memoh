@@ -935,11 +935,19 @@ escape to the fixed dialog surface, tinting the whole dialog on hover.)
 Never let fragments of both forms coexist (a left title AND a centered element AND a
 full-width divider under a lone button was the original mess).
 
-**Canonical skeletons — fill the blanks, hand-write nothing.** An ActionCard entry plus its
-focused dialog is ALL library parts; if you find yourself typing a `grid-rows-[…]` or
+**Canonical skeletons — fill the blanks, hand-write nothing.** Two ORTHOGONAL vocabularies
+compose here, and the classification matters: the **focused-dialog family belongs to
+`Dialog`** (`DialogPanel` / `DialogViewHeader` / `DialogBody` / `AutoHeight` — usable from
+ANY opener: a button, a menu item, a shortcut), while **`ActionCard` is just one opener** —
+an entry-point card that emits a click and doesn't know what opens. Don't mentally file the
+dialog anatomy "under ActionCard"; they merely co-star in these skeletons because a named
+entry → focused dialog is the house pattern for burying a page facet. If you find yourself
+typing a `grid-rows-[…]` or
 `max-h-[80dvh]` class, stop — that knob already exists as a `DialogPanel` prop.
 
-Form (a), workbench (one focused settings surface — e.g. an "Advanced settings" facet):
+Form (a), workbench (one focused settings surface — e.g. an "Advanced settings" facet).
+The `<section>` entry block is the ActionCard *opener*, shown here because it is the usual
+pairing — the `<Dialog>` half stands alone when the opener is something else:
 
 ```vue
 <section class="space-y-2.5">
