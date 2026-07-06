@@ -12,6 +12,7 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	messageevent "github.com/memohai/memoh/internal/message/event"
 )
 
 type RetryLatestMessageInput struct {
@@ -236,7 +237,41 @@ func (r *Resolver) replacePersistedTurn(
 		return fmt.Errorf("replace history turn: %w", err)
 	}
 	r.applyForkAnchorUpdate(context.WithoutCancel(ctx), req.SessionID, forkAnchorUpdate)
+	r.publishReplacementMessageCreated(req.BotID, persisted)
 	return nil
+}
+
+func (r *Resolver) publishReplacementMessageCreated(botID string, persisted []messagepkg.Message) {
+	if r == nil || r.eventPublisher == nil || len(persisted) == 0 {
+		return
+	}
+	var latest messagepkg.Message
+	for i := len(persisted) - 1; i >= 0; i-- {
+		if strings.TrimSpace(persisted[i].ID) == "" {
+			continue
+		}
+		latest = persisted[i]
+		break
+	}
+	if strings.TrimSpace(latest.ID) == "" {
+		return
+	}
+	eventBotID := strings.TrimSpace(botID)
+	if eventBotID == "" {
+		eventBotID = strings.TrimSpace(latest.BotID)
+	}
+	data, err := json.Marshal(latest)
+	if err != nil {
+		if r.logger != nil {
+			r.logger.Warn("marshal replacement message event failed", slog.Any("error", err))
+		}
+		return
+	}
+	r.eventPublisher.Publish(messageevent.Event{
+		Type:  messageevent.EventTypeMessageCreated,
+		BotID: eventBotID,
+		Data:  data,
+	})
 }
 
 type forkAnchorUpdate struct {

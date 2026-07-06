@@ -113,7 +113,7 @@ type CreateInput struct {
 }
 
 // ForkFromAssistantInput creates a new chat session from the source session's
-// visible history up to and including the assistant message.
+// visible history through the assistant message's turn.
 type ForkFromAssistantInput struct {
 	BotID           string
 	SessionID       string
@@ -255,7 +255,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 }
 
 // ForkFromAssistantMessage creates a new chat session containing the source
-// session's visible linear history through the selected assistant reply.
+// session's visible linear history through the selected assistant turn.
 func (s *Service) ForkFromAssistantMessage(ctx context.Context, input ForkFromAssistantInput) (Session, error) {
 	pgBotID, err := dbpkg.ParseUUID(input.BotID)
 	if err != nil {

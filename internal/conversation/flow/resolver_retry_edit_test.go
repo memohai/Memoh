@@ -2,12 +2,14 @@ package flow
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	messageevent "github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/session"
 )
 
@@ -85,6 +87,54 @@ func TestReplacePersistedTurnMovesForkAnchorMetadata(t *testing.T) {
 	}
 	if got := fork["source_extra_key"]; got != "kept" {
 		t.Fatalf("source_extra_key = %#v, want kept", got)
+	}
+}
+
+type recordingEventPublisher struct {
+	events []messageevent.Event
+}
+
+func (p *recordingEventPublisher) Publish(event messageevent.Event) {
+	p.events = append(p.events, event)
+}
+
+func TestReplacePersistedTurnPublishesReplacementMessageEvent(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	events := &recordingEventPublisher{}
+	resolver := &Resolver{
+		messageService: messages,
+		eventPublisher: events,
+		logger:         slog.Default(),
+	}
+
+	err := resolver.replacePersistedTurn(context.Background(), conversation.ChatRequest{
+		BotID:     "bot-1",
+		SessionID: "session-1",
+	}, "old-turn", "user-new", "retry", []messagepkg.Message{
+		{ID: "user-new", BotID: "bot-1", SessionID: "session-1", Role: "user"},
+		{ID: "assistant-new", BotID: "bot-1", SessionID: "session-1", Role: "assistant", CreatedAt: time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)},
+	})
+	if err != nil {
+		t.Fatalf("replace persisted turn: %v", err)
+	}
+	if len(events.events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(events.events))
+	}
+	event := events.events[0]
+	if event.Type != messageevent.EventTypeMessageCreated {
+		t.Fatalf("event type = %q, want %q", event.Type, messageevent.EventTypeMessageCreated)
+	}
+	if event.BotID != "bot-1" {
+		t.Fatalf("event bot id = %q, want bot-1", event.BotID)
+	}
+	var payload messagepkg.Message
+	if err := json.Unmarshal(event.Data, &payload); err != nil {
+		t.Fatalf("unmarshal event payload: %v", err)
+	}
+	if payload.ID != "assistant-new" || payload.SessionID != "session-1" {
+		t.Fatalf("payload = %#v, want assistant-new in session-1", payload)
 	}
 }
 
