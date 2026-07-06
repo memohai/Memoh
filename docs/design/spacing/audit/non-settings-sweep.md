@@ -413,8 +413,11 @@ Assembly by group count:
 - **ListRow / menu-row:裁决不建。** 三处 hover token(`--sidebar-hover`/`--bot-row-tint`/
   `--ui-hover`)、高度、radius 是各自 surface 的设计意图,不是意外漂移;理由已录
   memoh-ui-owners skill。
-- **ChoiceTile / ToolDetailPanel 族**:未建。ChoiceTile 3 处零漂移(低风险);tool-call
-  族等 chat UI revamp 方向定了再动(与在途 chat PR 地盘重叠)。
+- **ChoiceTile / tool-call detail 族:后续轮已建**(本行写下时"未建"的判断随后被执行,
+  据实更正)。ChoiceTile 在 `1443d3a7b` 落地 `pages/onboarding/components/choice-tile.vue`
+  (Step3 ×3);tool-call detail 层 5 owner(EmptyRow/PreviewBox/HeaderRow/ExpandChevron/
+  Capsule)在 `4af8c38ee` 落地并全量采用。仍等 chat UI revamp 的只剩 detail 层之外的
+  chat surface 本体(message rows / composer / chat-pane 圆钮)。
 - **type-token guard 维度**(`text-[0.9rem]` 不落 `--text-*`):仍是待决策项,未加。
 
 ### Verification(本轮)

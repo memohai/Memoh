@@ -6,7 +6,8 @@ description: "SUPERSEDED by memoh-ui-owners — do not use for building or migra
 # Memoh Spacing (SUPERSEDED — research record only)
 
 > **This skill is retired.** The spacing system it set out to define is **built and shipped**:
-> ten owner components, the full click-surface + coverage audits, and all migrations are
+> the owner-component vocabulary (twelve core owners plus the surface-scoped families), the
+> full click-surface + coverage audits, and all migrations are
 > complete (see `docs/design/spacing/owner-vocabulary-census.md`). For building or changing
 > any Memoh Web surface, use **`memoh-ui-owners`** — that is the living contract. This file is
 > kept only because the audits still cite its cartography (`references/cartography.md`,
@@ -24,16 +25,17 @@ Memoh may not have a gold reference page yet. Do not require one before making p
 
 ## Required Context
 
-For migration or implementation work, read
-`/Users/qqqqqf/Documents/Memoh-spacing/docs/design/spacing/spacing-contract-v1.md`
-first. It is the authoritative V1 contract. Older spacing documents are evidence and
-working notes, not competing contracts.
+For migration or implementation work, use the `memoh-ui-owners` skill — it is the
+authoritative building contract. `docs/design/spacing/spacing-contract-v1.md` is the
+research-era draft that preceded it; read it as evidence of how the contract was
+derived, not as competing guidance. Older spacing documents are likewise evidence
+and working notes.
 
 Before changing or proposing anything in `apps/web` or `packages/ui`, read:
 
-1. `/Users/qqqqqf/Documents/Memoh-spacing/.agents/skills/memoh-web/SKILL.md`
-2. `/Users/qqqqqf/Documents/Memoh-spacing/.agents/skills/memoh-web/reference.md`
-3. `/Users/qqqqqf/Documents/Memoh-spacing/packages/ui/AGENTS.md`
+1. `.agents/skills/memoh-web/SKILL.md`
+2. `.agents/skills/memoh-web/reference.md`
+3. `packages/ui/AGENTS.md`
 4. The nearest `AGENTS.md` for any directory being audited or edited.
 
 Use this skill together with `memoh-web` for frontend work. `memoh-web` governs current page/component rules; this skill governs spacing-system discovery and role design.

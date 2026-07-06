@@ -1,6 +1,6 @@
 ---
 name: memoh-ui-owners
-description: Read this BEFORE writing or editing any apps/web (Memoh web frontend) settings page, bot-detail tab, dialog/popover/sheet form, config panel, list row, or detail surface — i.e. almost any Vue markup that is not pure chat. Memoh has twelve owner components (SettingsRow, SettingsSection, FieldStack, PageShell, MetricReadout, PersonaTile, CalloutBanner, ExpandableSettingsRow, BackendCard, FormStack, PanePlaceholder, InlineLoadingRow) that own all recurring spacing. Use this skill whenever you are about to build a settings row, a form field (label + input), a section card, a Save/Cancel footer, a stat tile, a warning banner, an "Advanced" disclosure, an empty state, a loading state, or a whole page frame — even if the user just says "add a settings page", "make a dialog", "add a toggle row", "build this form", or "add a field", without mentioning spacing or components. Hand-writing a row/field/card/tile out of raw `<div class="flex … border-b …">` is the #1 recurring mistake in this codebase (同形异码); compose an owner instead so spacing can never drift. The skill also says when a shape must STAY hand-written (a genuinely different spatial relationship, e.g. a denser list row). Pairs with memoh-web (page-level) and packages/ui/AGENTS.md (atom-level).
+description: Read this BEFORE writing or editing any apps/web (Memoh web frontend) settings page, bot-detail tab, dialog/popover/sheet form, config panel, list row, or detail surface — i.e. almost any Vue markup that is not pure chat. Memoh has a core owner vocabulary (SettingsRow, SettingsSection, FieldStack, PageShell, MetricReadout, PersonaTile, CalloutBanner, ExpandableSettingsRow, BackendCard, FormStack, PanePlaceholder, InlineLoadingRow, ConfirmDeleteDialog, SectionGroup) that owns all recurring spacing. Use this skill whenever you are about to build a settings row, a form field (label + input), a section card, a Save/Cancel footer, a stat tile, a warning banner, an "Advanced" disclosure, an empty state, a loading state, a delete confirm, or a whole page frame — even if the user just says "add a settings page", "make a dialog", "add a toggle row", "build this form", or "add a field", without mentioning spacing or components. Hand-writing a row/field/card/tile out of raw `<div class="flex … border-b …">` is the #1 recurring mistake in this codebase (同形异码); compose an owner instead so spacing can never drift. The skill also says when a shape must STAY hand-written (a genuinely different spatial relationship, e.g. a denser list row). Pairs with memoh-web (page-level) and packages/ui/AGENTS.md (atom-level).
 ---
 
 # Memoh UI — Spacing Owner Vocabulary
@@ -11,7 +11,7 @@ This skill is the **composition layer** between the page-level rules in
 `memoh-web` tells you *how a page reads*. `packages/ui/AGENTS.md` tells you *how one
 control looks*. This file tells you the piece in between: **when you need a row, a
 field, a section, a tile, a disclosure, an object card, or a warning — you compose one
-of ten owner components instead of hand-writing it from `<div>`s.**
+of the owner components below instead of hand-writing it from `<div>`s.**
 
 ## Why this exists (the one idea)
 
@@ -29,7 +29,7 @@ because there is only one copy of its spacing.
 > `<div class="space-y-1.5"><Label/>…` for a field — **stop.** That shape has an owner.
 > Compose the owner.
 
-## The twelve owners
+## The core owners
 
 Import paths are exact. All live under `apps/web/src/components/`.
 
@@ -45,6 +45,16 @@ A grey section label above a bordered white card. Props: `title`. Slots: `#actio
 (header toolbar, right of the title), default (the rows), `#footer` (an action band —
 Save/Cancel or pagination — rendered *inside* the card with a top hairline). A card is a
 `SettingsSection`; you never hand-roll `rounded-… border bg-card`.
+
+**SectionGroup** · `section-group/index.vue`
+A titled content group: a **foreground** section label (+ optional hint, `#actions`
+toolbar) heading a BARE body — typically a BackendCard grid. Deliberately NOT
+SettingsSection (muted label + bordered card): SectionGroup is the page-content tier,
+its body already carries its own borders, so it adds no card and there is no
+card-in-card. Use ONLY on pages stacking SEVERAL such groups (voice TTS/STT,
+web-search search/fetch); a single-group gallery page lets PageShell own the
+title/hint/action directly — wrapping its one group here would duplicate the page
+title at a second tier.
 
 ### Rows (things inside a section card)
 
@@ -197,7 +207,18 @@ Same discipline, narrower home — compose these when working on their surface:
   and bot-switcher must stay a bare div for sortablejs; a class-only util
   owning just "flex row + rounded" would not earn its keep.
 - **supermarket** (`pages/supermarket/components/`): `market-item-card.vue`
-  (list card: leading icon box + title + homepage link + `#actions`).
+  (list card: leading icon box + title + homepage link + `#actions`),
+  `market-detail-header.vue` (detail-page header: back/install action row +
+  `#icon` box + title + tag badges; copy is deliberately baked in — read its
+  head comment for the fork rule if a third detail-page kind ever appears),
+  `info-item.vue` (the label-over-value entry in the detail Information
+  section — was a byte-identical inline `h()` component in both detail pages).
+- **editor / file compare** (`components/diff-title-bar/index.vue`):
+  `DiffTitleBar` — the title strip above a Monaco diff. Owns ONLY the
+  container (layout, hairline, padding, type, muted ink); content comes via
+  the default slot + optional `#actions`. 2 callers (file-viewer compare,
+  monaco diff); per its head comment, a third caller needing a different
+  container should inline or fork, not grow props here.
 - **dockview** (`pages/home/components/dockview/`): `panel-frame.vue`
   (DockPanelFrame — the host shell every `panel-*.vue` root wraps in:
   `relative flex h-full w-full flex-col` + a `min-h-0 flex-1` content layer
@@ -223,6 +244,8 @@ Need a bordered card holding rows?              → SettingsSection
   a row: label + a control on one line?         → SettingsRow
   a row whose header expands a body it owns?    → ExpandableSettingsRow
   a clickable "pick this object" row?           → BackendCard
+Several titled groups of bare (self-bordered)
+  content on one page (provider grids)?         → SectionGroup
 A stacked form field (label above control)?     → FieldStack (wrap a run in FormStack)
 A stat / number tile?                           → MetricReadout (you own the grid)
 A vertical, centered entity/add tile?           → PersonaTile
@@ -231,6 +254,7 @@ The page frame itself?                          → PageShell
 A pane with nothing to show (loading/empty)?    → PanePlaceholder (centered fill)
 An in-flow loading row (spinner + text)?        → InlineLoadingRow
 Loading inside the triggering button?           → Button :loading
+A delete confirmation dialog?                   → ConfirmDeleteDialog
 An in-page framed empty state?                  → Empty (draw the frame)
 ```
 

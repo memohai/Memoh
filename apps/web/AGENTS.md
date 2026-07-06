@@ -12,6 +12,12 @@ Before writing or changing anything under `apps/web` — pages, components, layo
 
 - **Skill**: `.agents/skills/memoh-web/SKILL.md`
 - **Lookup**: `.agents/skills/memoh-web/reference.md` (recipes, reference-page map, component picker)
+- **Owner vocabulary**: `.agents/skills/memoh-ui-owners/SKILL.md` — the composition layer.
+  Every recurring spatial shape (settings row, form field, section card, stat tile, banner,
+  loading/empty state, delete confirm, page frame…) has exactly ONE owner component; compose
+  the owner instead of hand-writing `<div class="flex … border-b …">`. That file is the
+  authoritative list of owners, the decision map, and the rules for when a shape deliberately
+  stays hand-written.
 
 This skill is the page-level companion to `packages/ui/AGENTS.md` (atom-level tokens and components). It covers the white-floating-card design language, `@memohai/ui` composition rules, copy discipline, empty/loading states, layout patterns, and the verification checklist. Do not skip it for "small" UI edits — the non-negotiables there apply to every surface in this package.
 

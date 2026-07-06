@@ -35,11 +35,13 @@ The terminal state as of 2026-07-05:
 ### Known remainder (deliberately not migrated)
 
 - **`pages/providers/model-setting.vue` identity header** — no current owner cleanly fits
-  (avatar + truncated title + trailing controls in a shape none of the ten own). Left local;
+  (avatar + truncated title + trailing controls in a shape none of the owners cover). Left local;
   revisit only if a second instance of the exact shape appears (then it earns an owner).
-- **Chat tool-call family** (ToolDetailPanel / preview box / chevron, ~21+ sites) — audit
-  evidence recorded in `audit/non-settings-sweep.md`; deferred until the chat UI revamp
-  direction settles (overlaps in-flight chat PRs).
+- **Chat tool-call detail layer — no longer deferred.** The 5 surface-scoped owners
+  (EmptyRow / PreviewBox / HeaderRow / ExpandChevron / Capsule, `pages/home/components/
+  tool-detail/`) shipped in `4af8c38ee` and are adopted across every `tool-call-detail-*`
+  panel. What stays deferred to the chat UI revamp is the chat *surface* beyond the
+  detail layer — message rows, composer, and the round chat-pane buttons listed below.
 - **Spinner→`Button :loading` long tail** (~C-tier estimate 80+ sites incl. chat-pane
   composer buttons) — pure prop adoption, hand-off-able; 59 files already migrated.
 - **Round icon buttons in chat-pane** (×6) — need a design call; other round-button

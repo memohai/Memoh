@@ -2,11 +2,14 @@
 
 Date: 2026-07-01
 
-Status: authoritative migration contract.
+Status: historical — the research-era draft that the shipped system was built from.
+The authoritative building contract is now the `memoh-ui-owners` skill
+(`.agents/skills/memoh-ui-owners/SKILL.md`); the terminal state of what shipped lives
+in `docs/design/spacing/owner-vocabulary-census.md`. Read this file as evidence of how
+the contract was derived, not as competing guidance.
 
-This file is the source of truth for the first Memoh spacing migration. Older files in
-`docs/design/spacing/` are evidence and working notes. Use this contract when deciding
-what to implement, what to migrate, and what to leave alone.
+This file was the source of truth for the first Memoh spacing migration. Older files in
+`docs/design/spacing/` are evidence and working notes.
 
 ## Decision
 

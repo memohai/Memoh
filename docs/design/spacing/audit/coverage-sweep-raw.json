@@ -692,7 +692,7 @@
       "queuedAt": 1783058948594,
       "attempt": 1,
       "lastToolName": "Bash",
-      "lastToolSummary": "cd /Users/qqqqqf/Documents/Memoh-spacing echo \"=== looser p…",
+      "lastToolSummary": "cd <repo-root> echo \"=== looser p…",
       "promptPreview": "Assess whether Memoh's UI contract guard is SUFFICIENT for the spacing-owner debt class. Read, in order:\n1. scripts/check-ui-contract.mjs — the guard. Understand exactly what it flags (raw colors, shadows, off-scale radius, px, app-scope hover/bg injection) and its escape hatches / baselines.\n2. packages/ui/AGENTS.md — the design-token contract it enforces.\n3. .agents/skills/memoh-ui-owners/SKILL.…",
       "lastProgressAt": 1783059074123,
       "tokens": 85382,
