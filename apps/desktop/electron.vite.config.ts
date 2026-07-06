@@ -2,6 +2,7 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import type { PluginOption } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
+import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
@@ -113,7 +114,27 @@ export default defineConfig(async ({ command }) => {
       // Reuse apps/web/public so absolute-path assets (e.g. /logo.svg) resolve
       // when web modules are imported directly from the desktop renderer.
       publicDir: resolve(__dirname, '../web/public'),
-      plugins: [...devtoolsPlugins, vue(), tailwindcss()],
+      plugins: [
+        // Same startup guard as apps/web/vite.config.ts: verify pnpm
+        // patchedDependencies content and sweep dep-optimizer caches built
+        // from pre-patch code. The desktop renderer imports web modules
+        // (dockview included) and keeps its own .vite cache, so it is
+        // exposed to the same cache-poisoning path — see that file for the
+        // full rationale.
+        {
+          name: 'memoh:verify-patched-deps',
+          configResolved() {
+            execFileSync(
+              process.execPath,
+              [fileURLToPath(new URL('../../scripts/check-patched-deps.mjs', import.meta.url))],
+              { stdio: 'inherit' },
+            )
+          },
+        },
+        ...devtoolsPlugins,
+        vue(),
+        tailwindcss(),
+      ],
       resolve: {
         alias: {
           '@renderer': fileURLToPath(new URL('./src/renderer/src', import.meta.url)),
