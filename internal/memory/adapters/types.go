@@ -205,8 +205,8 @@ type MemoryStatusResponse struct {
 	EdgeCount         int                     `json:"edge_count"`
 	IndexedCount      int                     `json:"indexed_count"`
 	VectorIndex       string                  `json:"vector_index,omitempty"`
-	Encoder           HealthStatus            `json:"encoder"`
-	Pgvector          HealthStatus            `json:"pgvector"`
+	Encoder           *HealthStatus           `json:"encoder,omitempty"`
+	Pgvector          *HealthStatus           `json:"pgvector,omitempty"`
 	// Degraded reports that the semantic seed index is behind the wiki store
 	// (failed upserts are queued for retry); graph recall still works.
 	Degraded        bool `json:"degraded"`

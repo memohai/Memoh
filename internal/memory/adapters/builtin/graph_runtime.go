@@ -623,15 +623,15 @@ func (r *graphRuntime) Status(ctx context.Context, botID string) (adapters.Memor
 	if r.semantic != nil {
 		resp.VectorIndex = r.semantic.Name()
 		if err := r.semantic.Health(ctx); err != nil {
-			resp.Pgvector = adapters.HealthStatus{Error: err.Error()}
+			resp.Pgvector = &adapters.HealthStatus{Error: err.Error()}
 		} else {
-			resp.Pgvector = adapters.HealthStatus{OK: true}
+			resp.Pgvector = &adapters.HealthStatus{OK: true}
 			if count, err := r.semantic.Count(ctx, botID); err == nil {
 				resp.IndexedCount = count
 			}
 		}
 		resp.RetryQueueDepth = r.retry.depth(botID)
-		resp.Degraded = resp.RetryQueueDepth > 0 || !resp.Pgvector.OK
+		resp.Degraded = resp.RetryQueueDepth > 0 || resp.Pgvector == nil || !resp.Pgvector.OK
 	}
 	if r.fs != nil {
 		if fc, err := r.fs.CountMemoryFiles(ctx, botID); err == nil {
