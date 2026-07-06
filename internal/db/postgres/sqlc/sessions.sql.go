@@ -265,9 +265,8 @@ copied_assets AS (
 ),
 fork_anchor_message AS (
   SELECT assistant_message.new_message_id
-  FROM copy_turns ct
-  JOIN target_turn tt ON tt.id = ct.old_turn_id
-  JOIN copy_messages assistant_message ON assistant_message.old_message_id = ct.assistant_message_id
+  FROM target_turn tt
+  JOIN copy_messages assistant_message ON assistant_message.old_message_id = tt.message_id
   LIMIT 1
 ),
 updated_session AS (

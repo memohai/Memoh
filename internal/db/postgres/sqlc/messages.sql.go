@@ -4792,6 +4792,8 @@ updated AS (
   WHERE old.turn_id = $1
     AND old.session_id = $2
     AND old.turn_superseded_at IS NULL
+    AND old.id IS DISTINCT FROM replacement.request_message_id
+    AND old.id IS DISTINCT FROM replacement.assistant_message_id
   RETURNING old.turn_id
 ),
 updated_turn AS (
