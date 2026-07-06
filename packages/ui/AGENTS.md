@@ -312,6 +312,51 @@ Two DIFFERENT states with two different expressions — do not conflate them:
   real control (`as="a"` / `as="button"`); selection still goes through an
   indicator, not a background.
 
+## Selected state
+
+A THIRD state, distinct from both of the above: a control that IS its own
+persistent choice, with **no separate indicator slot** — the control's own
+chrome has to show which one is current (a theme-picker button, the sidebar's
+current-session row). Token pair: `--selected-bg` (`--overlay-hover-strong`,
+one ladder step above `--ui-hover`/`--sidebar-hover` — an idle selected control
+must always read deeper than a merely-hovered one) and `--selected-border`
+(`--foreground`, button chrome only). Carrier: the `[data-selected]` attribute,
+never a page-injected utility class onto the control box.
+
+- **`[data-button]` (outline/secondary variants)** — `[data-selected]` swaps the
+  resting fill/ring on the same `::before` shell that already owns hover/press
+  (`style.css`), so which one wins when a selected control is also hovered or
+  pressed is decided by the cascade engine, not by two layers of utility
+  classes fighting for the box. This replaces the old pattern of injecting
+  `border-foreground bg-accent text-foreground` onto a `<Button>` from the
+  page — that pattern silently fought the hover chrome for the same pixels;
+  data-driven chrome can't.
+- **Non-button surfaces** (sidebar rows, list rows not wearing `<Button>`) — a
+  standalone `[data-selected]` rule applies `--selected-bg` with no
+  ring/border; these rows never had one.
+- **vs Highlight / indicator-selection (§ above)** — those are for rows that
+  DO have an indicator slot (menu items, Select/Command rows): the highlight
+  just follows the pointer, the chosen value shows via a check/dot, never a
+  persistent background. `--selected-bg` is for controls with no indicator to
+  fall back on. Do not reach for `--ui-selected` here — that name is already
+  the roving highlight, a different state.
+- **vs Pressed** — `--ui-pressed`/`:active` is transient, gone the instant the
+  pointer releases. Selected is durable until the user picks something else. A
+  control can be both at once (pressing a currently-selected button); the
+  chrome engine's cascade decides which reads through, not a hand-tuned class.
+- **vs active-route** — `nav-button.vue`'s `active` prop (the Settings row,
+  keyed off `route.path`) and the sidebar's horizontal view-switcher tabs
+  (`data-[active=true]`, keyed off in-memory view state) are a SEPARATE,
+  not-yet-migrated concept: both still render on the plain `--sidebar-accent`
+  token via a hand-written class, not `[data-selected]`. Do not casually fold
+  them into `--selected-bg` — the sidebar current-session row was deliberately
+  moved one ladder step deeper than `--sidebar-accent` (see `session-item.vue`)
+  precisely so "this is the session I'm in" reads stronger than "this is the
+  nav section I'm in"; unifying the tokens would either flatten that signal or
+  deepen the nav/tab active state without a design call. If route-level or
+  view-switcher "active" ever gets its own legislation, that's a follow-up
+  decision, not a silent side effect of this one.
+
 ## Radius
 
 - Use the scale only: `rounded-2xs/xs/sm/md/lg/xl` = `--radius-*`

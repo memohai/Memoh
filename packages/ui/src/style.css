@@ -87,6 +87,19 @@
       background-color 0.06s ease-out,
       box-shadow 0.06s ease-out;
   }
+  /* Selected — the persistent "this is the current value" fill, on the SAME
+     ::before shell as hover/press below (never a class injected onto the
+     Button box — that anti-pattern is what this replaces) so priority against
+     them is decided by cascade, not by two layers of utility classes fighting.
+     Declared BEFORE :hover on purpose: both rules tie on specificity ([data-button]
+     + :is() + one more selector + ::before), so source order breaks the tie —
+     :hover, coming next, wins on a hovered+selected button. Selected must never
+     look "stuck"; hover always has to read as live feedback, even on the
+     current value. See AGENTS.md "Selected state". */
+  [data-button]:is([data-variant="outline"], [data-variant="secondary"])[data-selected]::before {
+    background-color: var(--selected-bg);
+    box-shadow: inset 0 0 0 1px var(--selected-border);
+  }
   [data-button]:is([data-variant="outline"], [data-variant="secondary"]):hover::before {
     background-color: var(--btn-secondary-overlay);
     box-shadow: none;
@@ -119,6 +132,19 @@
   [data-slot="button-group"] > [data-button]:is([data-variant="outline"], [data-variant="secondary"]):active::before {
     background-color: var(--ui-pressed);
     transition-duration: 40ms;
+  }
+
+  /* ── Selected, non-button surfaces ────────────────────────────────────────
+     Same --selected-bg fill as the [data-button] rule above, but for elements
+     that never wear [data-button] (sidebar rows, list rows) — no ring/border,
+     because these rows never had one. Scoped away from [data-button] for
+     clarity, though it wouldn't collide anyway: a bg-transparent utility on an
+     outline/secondary Button box already wins over any @layer components rule
+     here (utilities always beat components in this file — see the menu-border
+     note below), so a stray [data-selected] on a Button would be a no-op, not
+     a double-fill. */
+  [data-selected]:not([data-button]) {
+    background-color: var(--selected-bg);
   }
 
   /* ── Form fields: text input / textarea / select trigger / native select ─────
@@ -958,6 +984,17 @@
      a touch denser than the default overlay so it still reads on the card. */
   --btn-ghost-hover-on-popover: color-mix(in oklab, var(--foreground) 13%, transparent);
   --sidebar-hover:       var(--overlay-hover-light);
+  /* Selected/current — a persistent "this IS the chosen value" fill for
+     controls with NO separate indicator slot (theme picker button, sidebar
+     current-session row). Deliberately NOT --ui-selected — that name is
+     already the roving menu-item highlight above, a different state (see
+     AGENTS.md "Selected state"). One ladder step above --ui-hover/
+     --sidebar-hover on purpose: an idle selected control must always read
+     deeper than a merely-hovered one — a numeric guarantee, not a hand-tuned
+     color. --selected-border only matters on [data-button] chrome (below);
+     non-button consumers of --selected-bg never draw it. */
+  --selected-bg:     var(--overlay-hover-strong);
+  --selected-border: var(--foreground);
   /* Segmented control surfaces: track is a warm-tinted solid chip (not an
      overlay — needs an opaque fill for the pill shape). */
   --segment-track: oklch(0.945 0 0);

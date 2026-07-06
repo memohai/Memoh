@@ -63,6 +63,10 @@ function runLoad(key: string) {
   setTimeout(() => { loading.value[key] = false }, 1600)
 }
 
+// Selected state demo — mirrors the real onboarding theme picker (Step2Appearance.vue),
+// the one call site [data-selected] actually replaced an injected bg-accent/border-foreground class.
+const selectedTheme = ref<'light' | 'dark'>('light')
+
 // Segmented control: now a REAL @memohai/ui component (the hand-rolled carryover
 // that used to live here was productionized into SegmentedControl).
 const range = ref('week')
@@ -405,6 +409,29 @@ const fmtTint = ref({ bold: true, italic: false, underline: false, strike: false
                 >
                   <RefreshCw /> Ghost
                 </Button>
+              </div>
+            </div>
+
+            <div class="flex flex-col gap-3 border-t border-border pt-6">
+              <span class="text-caption font-medium uppercase tracking-wide text-muted-foreground">Selected state · [data-selected] on outline (click to pick)</span>
+              <div class="flex flex-wrap items-center gap-3">
+                <Button
+                  variant="outline"
+                  :class="shapeClass"
+                  :data-selected="selectedTheme === 'light' ? '' : undefined"
+                  @click="selectedTheme = 'light'"
+                >
+                  Light
+                </Button>
+                <Button
+                  variant="outline"
+                  :class="shapeClass"
+                  :data-selected="selectedTheme === 'dark' ? '' : undefined"
+                  @click="selectedTheme = 'dark'"
+                >
+                  Dark
+                </Button>
+                <span class="text-caption text-muted-foreground">no injected class — fill/ring live on style.css chrome, same shell as hover/press</span>
               </div>
             </div>
 
