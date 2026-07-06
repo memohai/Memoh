@@ -310,7 +310,7 @@ function scan(file, full) {
       //   `ui-allow-alpha` for a call site with no repeated role yet (nothing
       //   to name a token after) or a deliberate one-off.
       if (!allowAlpha &&
-          /(?:^|:)(?:bg|text|border|divide|ring|shadow|from|to|via)-(?:muted|accent|border|foreground|background|destructive|warning|primary|success|info|card|popover|sidebar[a-z-]*)\/[0-9]+$/.test(tok))
+          /(?:^|:)(?:bg|text|border|divide|ring|shadow|from|to|via)-(?:muted|accent|border|foreground|background|destructive|warning|primary|success|info|card|popover|sidebar[a-z-]*)(?:-foreground)?\/[0-9]+$/.test(tok))
         alphaHard.push({ rel, ln, msg: `hand-written alpha (use a -soft/-border/-muted token, or add one — see packages/ui/AGENTS.md § Alpha policy) → ${tok}` })
 
       // ── app-scope injection rules (apps/web only; ratcheted) ─────────────

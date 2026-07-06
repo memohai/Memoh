@@ -64,7 +64,7 @@ function runLoad(key: string) {
 }
 
 // Selected state demo — mirrors the real onboarding theme picker (Step2Appearance.vue),
-// the one call site [data-selected] actually replaced an injected bg-accent/border-foreground class.
+// the one call site [data-ui-selected] actually replaced an injected bg-accent/border-foreground class.
 const selectedTheme = ref<'light' | 'dark'>('light')
 
 // Segmented control: now a REAL @memohai/ui component (the hand-rolled carryover
@@ -413,12 +413,12 @@ const fmtTint = ref({ bold: true, italic: false, underline: false, strike: false
             </div>
 
             <div class="flex flex-col gap-3 border-t border-border pt-6">
-              <span class="text-caption font-medium uppercase tracking-wide text-muted-foreground">Selected state · [data-selected] on outline (click to pick)</span>
+              <span class="text-caption font-medium uppercase tracking-wide text-muted-foreground">Selected state · [data-ui-selected] on outline (click to pick)</span>
               <div class="flex flex-wrap items-center gap-3">
                 <Button
                   variant="outline"
                   :class="shapeClass"
-                  :data-selected="selectedTheme === 'light' ? '' : undefined"
+                  :data-ui-selected="selectedTheme === 'light' ? '' : undefined"
                   @click="selectedTheme = 'light'"
                 >
                   Light
@@ -426,7 +426,7 @@ const fmtTint = ref({ bold: true, italic: false, underline: false, strike: false
                 <Button
                   variant="outline"
                   :class="shapeClass"
-                  :data-selected="selectedTheme === 'dark' ? '' : undefined"
+                  :data-ui-selected="selectedTheme === 'dark' ? '' : undefined"
                   @click="selectedTheme = 'dark'"
                 >
                   Dark

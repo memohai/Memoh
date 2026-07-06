@@ -8,7 +8,7 @@
   "apps/web/src/pages/bots/new.vue": 1,
   "apps/web/src/pages/home/components/background-task-block.vue": 1,
   "apps/web/src/pages/home/components/bg-task-pill.vue": 1,
-  "apps/web/src/pages/home/components/chat-pane.vue": 2,
+  "apps/web/src/pages/home/components/chat-pane.vue": 3,
   "apps/web/src/pages/home/components/tool-call-detail-apply-patch.vue": 1,
   "apps/web/src/pages/home/components/tool-call-detail-edit.vue": 1
 }

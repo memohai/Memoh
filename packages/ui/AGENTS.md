@@ -320,10 +320,16 @@ chrome has to show which one is current (a theme-picker button, the sidebar's
 current-session row). Token pair: `--selected-bg` (`--overlay-hover-strong`,
 one ladder step above `--ui-hover`/`--sidebar-hover` — an idle selected control
 must always read deeper than a merely-hovered one) and `--selected-border`
-(`--foreground`, button chrome only). Carrier: the `[data-selected]` attribute,
-never a page-injected utility class onto the control box.
+(`--foreground`, button chrome only). Carrier: the `[data-ui-selected]` attribute,
+never a page-injected utility class onto the control box. The `ui-` prefix is
+load-bearing, twice over: a bare `data-selected` is reka-ui's own attribute
+(emitted natively on CalendarCellTrigger / PaginationListItem / TreeItem — a
+global rule on it restyles calendar range days and pagination chips), and
+`--ui-selected` the *token* is already taken by the menus' roving highlight
+above. Both collisions are real; do not "simplify" the name in either
+direction.
 
-- **`[data-button]` (outline/secondary variants)** — `[data-selected]` swaps the
+- **`[data-button]` (outline/secondary variants)** — `[data-ui-selected]` swaps the
   resting fill/ring on the same `::before` shell that already owns hover/press
   (`style.css`), so which one wins when a selected control is also hovered or
   pressed is decided by the cascade engine, not by two layers of utility
@@ -332,7 +338,7 @@ never a page-injected utility class onto the control box.
   page — that pattern silently fought the hover chrome for the same pixels;
   data-driven chrome can't.
 - **Non-button surfaces** (sidebar rows, list rows not wearing `<Button>`) — a
-  standalone `[data-selected]` rule applies `--selected-bg` with no
+  standalone `[data-ui-selected]` rule applies `--selected-bg` with no
   ring/border; these rows never had one.
 - **vs Highlight / indicator-selection (§ above)** — those are for rows that
   DO have an indicator slot (menu items, Select/Command rows): the highlight
@@ -348,7 +354,7 @@ never a page-injected utility class onto the control box.
   keyed off `route.path`) and the sidebar's horizontal view-switcher tabs
   (`data-[active=true]`, keyed off in-memory view state) are a SEPARATE,
   not-yet-migrated concept: both still render on the plain `--sidebar-accent`
-  token via a hand-written class, not `[data-selected]`. Do not casually fold
+  token via a hand-written class, not `[data-ui-selected]`. Do not casually fold
   them into `--selected-bg` — the sidebar current-session row was deliberately
   moved one ladder step deeper than `--sidebar-accent` (see `session-item.vue`)
   precisely so "this is the session I'm in" reads stronger than "this is the
@@ -436,7 +442,7 @@ dark. Tooltip carries no border at all — its solid fill is its own edge.
 ## Layering / z-index — the "z 梯"
 
 - **Five semantic tiers, not eleven ad-hoc numbers.** Before this ladder the
-  codebase had 26 files, 35+ call sites, and 11 distinct raw values (`z-10`,
+  codebase had 26 files, 45 call sites, and 11 distinct raw values (`z-10`,
   `z-20`, `z-30`, `z-40`, `z-50`, `z-[100]`, `z-[1]`, `z-[2]`, raw
   `z-index: 0/1/9999`) with no relationship to each other — every new floating
   element guessed a number. Tokens are defined in `style.css`'s `@theme

@@ -6,7 +6,7 @@
         tabindex="0"
         class="group relative flex items-center min-h-[2.125rem] w-full rounded-[9px] px-[11px] text-left transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         :class="isActive ? '' : 'hover:bg-[color:var(--sidebar-hover)]'"
-        :data-selected="isActive ? '' : undefined"
+        :data-ui-selected="isActive ? '' : undefined"
         :title="hoverTitle"
         @click="$emit('select', session)"
         @keydown.enter.prevent="$emit('select', session)"

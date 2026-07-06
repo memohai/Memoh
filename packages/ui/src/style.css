@@ -95,8 +95,12 @@
      + :is() + one more selector + ::before), so source order breaks the tie —
      :hover, coming next, wins on a hovered+selected button. Selected must never
      look "stuck"; hover always has to read as live feedback, even on the
-     current value. See AGENTS.md "Selected state". */
-  [data-button]:is([data-variant="outline"], [data-variant="secondary"])[data-selected]::before {
+     current value. See AGENTS.md "Selected state".
+     data-UI-selected, not data-selected: reka-ui emits a native data-selected
+     on CalendarCellTrigger / PaginationListItem / TreeItem, so a bare
+     [data-selected] here would silently restyle every calendar range day and
+     pagination current-page chip. Our own namespace keeps this rule opt-in. */
+  [data-button]:is([data-variant="outline"], [data-variant="secondary"])[data-ui-selected]::before {
     background-color: var(--selected-bg);
     box-shadow: inset 0 0 0 1px var(--selected-border);
   }
@@ -137,13 +141,16 @@
   /* ── Selected, non-button surfaces ────────────────────────────────────────
      Same --selected-bg fill as the [data-button] rule above, but for elements
      that never wear [data-button] (sidebar rows, list rows) — no ring/border,
-     because these rows never had one. Scoped away from [data-button] for
-     clarity, though it wouldn't collide anyway: a bg-transparent utility on an
+     because these rows never had one. data-UI-selected (see the button rule
+     above): a bare [data-selected] would also catch reka-ui's native attribute
+     on calendar/pagination/tree internals and break e.g. the RangeCalendar's
+     continuous selection band. Scoped away from [data-button] for clarity,
+     though it wouldn't collide anyway: a bg-transparent utility on an
      outline/secondary Button box already wins over any @layer components rule
      here (utilities always beat components in this file — see the menu-border
-     note below), so a stray [data-selected] on a Button would be a no-op, not
-     a double-fill. */
-  [data-selected]:not([data-button]) {
+     note below), so a stray [data-ui-selected] on a Button would be a no-op,
+     not a double-fill. */
+  [data-ui-selected]:not([data-button]) {
     background-color: var(--selected-bg);
   }
 
