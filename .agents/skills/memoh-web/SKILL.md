@@ -353,6 +353,32 @@ already existed. Three rules, in order:
    composition will do, stop and say so — name what's missing and why — get agreement, then
    build it once in the shared layer. Never silently spawn a one-off component mid-page.
 
+**A component is a component — patterns that co-star are not families.** Each component is a
+standalone contract with its own identity; two components appearing together in a house
+pattern does NOT make one belong to the other. Worked example: the focused-dialog family
+(`DialogPanel` / `DialogViewHeader` / `DialogBody`) and `ActionCard` almost always ship
+together — a named entry card opening a focused dialog — yet they are ORTHOGONAL: the dialog
+anatomy belongs to `Dialog` and opens from any trigger (a toolbar button opens the bot-mcp
+Import panel; a shortcut could too), and ActionCard is just one opener that emits a click and
+doesn't know what opens. Filing the dialog primitives "under ActionCard" would have invented
+a false dependency — a future agent would think "no ActionCard, so I can't use DialogPanel"
+and hand-roll a dialog shell, or worse, bolt an ActionCard on just to unlock the dialog. The
+general tests, because the NEXT case won't look like this one:
+
+- **Independence test:** can A be used, correctly and completely, without B ever existing?
+  If yes, A is not B's child — don't name it, file it, or document it as one.
+- **Ownership test:** when A and B co-star, who owns the seam? The answer is "a PATTERN in
+  this skill" (a documented composition, like the ActionCard → focused-dialog skeletons) —
+  never a component absorbed into the other's namespace, props, or docs section.
+- **Coupling smells to reject on sight:** a component whose props exist only to serve one
+  sibling (`forDialog`, `insideCard`); a component importing a sibling it doesn't render;
+  docs/exports that nest one standalone contract under another's heading; a name that bakes
+  in the co-star (`ActionCardDialog`) when both halves are independently reusable.
+
+Patterns live in this skill as *compositions of named parts*; components live in the library
+as *parts that don't know their co-stars*. Keep those two layers straight and the next
+accidental marriage never happens.
+
 Then pick the right component instead of bending the wrong one. See `reference.md` §
 Component picker for the full decision table and the icon/badge/tooltip rules. The
 recurring failures to avoid:
