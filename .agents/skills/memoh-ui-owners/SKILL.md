@@ -1,6 +1,6 @@
 ---
 name: memoh-ui-owners
-description: Read this BEFORE writing or editing any apps/web (Memoh web frontend) settings page, bot-detail tab, dialog/popover/sheet form, config panel, list row, or detail surface — i.e. almost any Vue markup that is not pure chat. Memoh has a core owner vocabulary (SettingsRow, SettingsSection, FieldStack, PageShell, MetricReadout, PersonaTile, CalloutBanner, ExpandableSettingsRow, BackendCard, FormStack, PanePlaceholder, InlineLoadingRow, ConfirmDeleteDialog, SectionGroup) that owns all recurring spacing. Use this skill whenever you are about to build a settings row, a form field (label + input), a section card, a Save/Cancel footer, a stat tile, a warning banner, an "Advanced" disclosure, an empty state, a loading state, a delete confirm, or a whole page frame — even if the user just says "add a settings page", "make a dialog", "add a toggle row", "build this form", or "add a field", without mentioning spacing or components. Hand-writing a row/field/card/tile out of raw `<div class="flex … border-b …">` is the #1 recurring mistake in this codebase (同形异码); compose an owner instead so spacing can never drift. The skill also says when a shape must STAY hand-written (a genuinely different spatial relationship, e.g. a denser list row). Pairs with memoh-web (page-level) and packages/ui/AGENTS.md (atom-level).
+description: Read this BEFORE writing or editing any apps/web (Memoh web frontend) settings page, bot-detail tab, dialog/popover/sheet form, config panel, list row, or detail surface — i.e. almost any Vue markup that is not pure chat. Memoh has a core owner vocabulary (SettingsRow, SettingsSection, FieldStack, PageShell, MetricReadout, PersonaTile, CalloutBanner, ExpandableSettingsRow, BackendCard, ModelListRow, FormStack, PanePlaceholder, InlineLoadingRow, ConfirmDeleteDialog, SectionGroup) that owns all recurring spacing. Use this skill whenever you are about to build a settings row, a form field (label + input), a section card, a Save/Cancel footer, a stat tile, a warning banner, an "Advanced" disclosure, an empty state, a loading state, a delete confirm, or a whole page frame — even if the user just says "add a settings page", "make a dialog", "add a toggle row", "build this form", or "add a field", without mentioning spacing or components. Hand-writing a row/field/card/tile out of raw `<div class="flex … border-b …">` is the #1 recurring mistake in this codebase (同形异码); compose an owner instead so spacing can never drift. The skill also says when a shape must STAY hand-written (a genuinely different spatial relationship, e.g. a denser list row). Pairs with memoh-web (page-level) and packages/ui/AGENTS.md (atom-level).
 ---
 
 # Memoh UI — Spacing Owner Vocabulary
@@ -85,6 +85,23 @@ below.)
 A clickable **horizontal** object-entry card (its root is a real `<button>`). Props:
 `name`, `subtitle`, `enabled` (draws a status dot). Slots: `#leading` (icon), `#trailing`
 (default: a chevron). For "pick a provider / backend / storage" object rows.
+
+**ModelListRow** · `settings/model-list-row.vue`
+A dense **clickable navigation** row inside a bordered card: name (+ optional secondary
+id text when a custom display name hides it) on the left, a decorative trailing glyph
+(default: gear) on the right, whole row is a real `<button>` (same root contract as
+BackendCard). Props: `label`, `meta?`, `last?` (own its own trailing hairline instead of
+`:last-child`, since the divider is a sibling element, not a border on the row — see the
+component's head comment for why), `disabled?`. Slot: `#trailing`. Emits `click` (a
+multi-root template disables Vue's attrs/listener fallthrough, so it can't rely on a bare
+`@click` passthrough). Built to close the transcription/speech/video provider-setting.vue
+"dense model-list navigation row" gap recorded in the owner-vocabulary-census (those three
+hand-synced the exact shape; two were byte-identical, the third only differed by nesting
+the click handler on a trailing ghost Button instead of the row itself — a trivial, not
+deliberate, divergence). **Do NOT reach for it for `providers/model-item.vue`** — that row
+carries inline enable/test/delete actions, a capability badge, and a status line, a
+materially richer interaction contract than "click to open the edit dialog"; it stays its
+own hand-built component.
 
 ### Fields (vertical form controls)
 
@@ -244,6 +261,11 @@ Need a bordered card holding rows?              → SettingsSection
   a row: label + a control on one line?         → SettingsRow
   a row whose header expands a body it owns?    → ExpandableSettingsRow
   a clickable "pick this object" row?           → BackendCard
+  a dense clickable "open the editor" row?      → ModelListRow (whole row is a <button>;
+                                                    if it needs several INLINE actions
+                                                    instead of one navigate-away click,
+                                                    that's a different relationship —
+                                                    see providers/model-item.vue)
 Several titled groups of bare (self-bordered)
   content on one page (provider grids)?         → SectionGroup
 A stacked form field (label above control)?     → FieldStack (wrap a run in FormStack)
@@ -310,15 +332,23 @@ one-off" → keep it local and say why.
   `hover:*`/`bg-*` injections — component chrome belongs in the component (mark a sanctioned
   line with a `/* ui-allow-style */` same-line comment inside the owner, never on a page).
 - **The guard warns on a hand-rolled SettingsRow.** `check-ui-contract.mjs` rule 11 (WARN)
-  flags the literal `min-h-[3.75rem]` anywhere outside `settings/row.vue` and
-  `expandable-row.vue` — because that height only appears when a row was copied out of
-  `SettingsRow` as raw divs. It's a WARN (advisory, doesn't block CI), not a HARD fail,
-  because a genuinely denser/different row *could* land on that number: if a flagged line is
-  a real settings row, compose `<SettingsRow>`; if it's a deliberate different shape or a
-  loading placeholder borrowing the height, silence it with `ui-allow-shape` on the line.
-  This is a **backstop against regression**, not a debt finder — it only catches the
-  SettingsRow slice (that one rare literal); FieldStack / MetricReadout duplication has no
-  such fingerprint and stays a judgment call.
+  flags `min-h-[3.75rem]` — and its bare-scale twin `min-h-15` — anywhere outside
+  `settings/row.vue` and `expandable-row.vue`, because that height only appears when a row
+  was copied out of `SettingsRow` as raw divs. It's a WARN (advisory, doesn't block CI), not
+  a HARD fail, because a genuinely denser/different row *could* land on that number: if a
+  flagged line is a real settings row, compose `<SettingsRow>`; if it's a deliberate
+  different shape or a loading placeholder borrowing the height, silence it with
+  `ui-allow-shape` on the line — **and the marker must carry its reason on the same line**
+  (`ui-allow-shape: <what this is and why no owner fits>`); a bare marker is itself flagged.
+- **The guard ratchets hand-spun loaders.** Rule 12 treats a literal `animate-spin` in
+  apps/web as a loader that skipped the four-rung ladder (every rung renders through
+  `Spinner` / `Button :loading` / `InlineLoadingRow` / `PanePlaceholder`, none of which
+  emit that literal from app code). Existing long-tail sites are grandfathered in
+  `scripts/ui-spin-baseline.json`; a NEW bare `animate-spin` hard-fails — pick a rung, or
+  mark a sanctioned exception with `ui-allow-spin` on the line. Together these are a
+  **backstop against regression**, not a debt finder — they catch the SettingsRow and
+  loader slices (the rare literals); FieldStack / MetricReadout duplication has no such
+  fingerprint and stays a judgment call.
 
 ## Migration discipline (when converting a hand-rolled surface)
 

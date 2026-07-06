@@ -1,34 +1,44 @@
 # Spacing Owner Vocabulary — Census Result
 
-Date: 2026-07-01 · **Final status updated: 2026-07-05**
+Date: 2026-07-01 · **Final status updated: 2026-07-06**
 
 Status: **DONE — vocabulary complete, all known debt migrated.** Everything below this
 block is the historical decision record (Phase-1 gap map → Phase-3 outcome), kept intact.
-The terminal state as of 2026-07-05:
+The terminal state as of 2026-07-06:
 
-- **Settings vocabulary (10 owners)** ships and is in use: PageShell, SettingsSection
+- **Settings vocabulary (11 owners)** ships and is in use: PageShell, SettingsSection
   (+`#footer`), SettingsRow (`stack: never|sm|always`, `align`, `#leading`/`#content`),
-  ExpandableSettingsRow, BackendCard, FieldStack (**v2 — carries vee-validate validation
-  state**), FormStack, MetricReadout, PersonaTile, CalloutBanner (+ the `Empty` atom).
+  ExpandableSettingsRow, BackendCard, ModelListRow (2026-07-06: the dense clickable
+  model-row family, see Known remainder), FieldStack (**v2 — carries vee-validate
+  validation state**), FormStack, MetricReadout, PersonaTile, CalloutBanner (+ the
+  `Empty` atom).
 - **Non-settings vocabulary added (2026-07-04/05)** from the non-settings sweep
   (`audit/non-settings-sweep.md`, execution log at the end of that file): PanePlaceholder,
   InlineLoadingRow, SectionGroup, SidebarPanelHeader, SidebarNavButton, DockPanelFrame,
   ConfirmDeleteDialog, and the onboarding wizard family (StepExitShell / StepFrame /
-  FooterNav / HintBox). The building contract for all of these is the `memoh-ui-owners`
-  skill.
-- **Three audits closed all reachable debt.** The Phase-3 census (35 settings files) →
-  21 files migrated. The **click-surface audit** (`audit/click-surface-audit.md`, 40
-  dialog/popover files) → 36 MISS, all migrated (group-1 plain owners; FieldStack v2 built
-  to absorb the validated fields; group-2 dialogs migrated onto it). The **coverage-closure
-  sweep** (`audit/coverage-sweep.md`, all 282 apps/web `.vue`, 0 skimmed) → 53 more MISS,
-  migrated. The **non-settings sweep** then covered the surfaces the settings vocabulary
-  never owned (sidebar, dockview, onboarding, chat loaders).
-- **A regression backstop shipped.** `check-ui-contract.mjs` rule 11 (WARN) flags the
-  literal `min-h-[3.75rem]` outside the owner files — the rare fingerprint of a copied
-  SettingsRow. It catches only the SettingsRow slice (other owners have no distinctive
-  literal); it is a backstop, not a debt finder. WARN count is held at **zero**: the five
-  legitimate borrowers (loading placeholders matching row height to avoid reflow) carry
-  `ui-allow-shape` justification comments.
+  FooterNav / ChoiceTile / HintBox). The building contract for all of these is the
+  `memoh-ui-owners` skill.
+- **Three audits closed all reachable debt, and a post-review residual pass (2026-07-06)
+  drained what they missed.** The Phase-3 census (35 settings files) → 21 files migrated.
+  The **click-surface audit** (`audit/click-surface-audit.md`, 40 dialog/popover files) →
+  36 MISS, all migrated (group-1 plain owners; FieldStack v2 built to absorb the validated
+  fields; group-2 dialogs migrated onto it). The **coverage-closure sweep**
+  (`audit/coverage-sweep.md`, all 282 apps/web `.vue`, 0 skimmed) → 53 more MISS, migrated.
+  The **non-settings sweep** then covered the surfaces the settings vocabulary never owned
+  (sidebar, dockview, onboarding, chat loaders). The residual pass caught the sites that
+  slipped every earlier net — mostly loading shapes judged "correctly local" *before*
+  InlineLoadingRow/PanePlaceholder existed (2026-07-04) and never re-judged: supermarket
+  list/detail loaders, bot-compaction/bot-heartbeat's byte-identical pair, file-tree,
+  browser-pane/panel-files placeholders, appearance's two hand rows, keyboard-shortcuts'
+  hand page shell. Corrections are annotated in `coverage-sweep.md` where the stale
+  verdicts sit.
+- **A regression backstop shipped, then hardened.** `check-ui-contract.mjs` rule 11 (WARN)
+  flags `min-h-[3.75rem]` — and its bare-scale twin `min-h-15` — outside the owner files;
+  the `ui-allow-shape` escape now requires a written reason on the marker line. Rule 12
+  ratchets bare `animate-spin` (a loader that skipped the four-rung ladder) via
+  `ui-spin-baseline.json` — new hand-spun loaders hard-fail. These catch the SettingsRow
+  and loader slices (the rare literals); they are backstops, not debt finders. WARN count
+  is held at **zero**.
 - **The building contract is `memoh-ui-owners`** (the skill). The older `memoh-spacing`
   skill is retired to a research-record role.
 
@@ -42,14 +52,29 @@ The terminal state as of 2026-07-05:
   tool-detail/`) shipped in `4af8c38ee` and are adopted across every `tool-call-detail-*`
   panel. What stays deferred to the chat UI revamp is the chat *surface* beyond the
   detail layer — message rows, composer, and the round chat-pane buttons listed below.
-- **Spinner→`Button :loading` long tail** (~C-tier estimate 80+ sites incl. chat-pane
-  composer buttons) — pure prop adoption, hand-off-able; 59 files already migrated.
+- **Spinner→`Button :loading` long tail — drained to the deferred chat surface (2026-07-06).**
+  The settings/onboarding/about slices adopted `:loading` (Step4Bot, settings-acp-detail,
+  mcp-server-detail, session-info-panel, about — mutual-lock `:disabled` semantics preserved
+  where the loading boolean wasn't the whole story), and guard rule 12 now ratchets bare
+  `animate-spin` so the tail can't regrow. What remains lives in `ui-spin-baseline.json`
+  (14 sites, 12 files): the deferred chat surface (chat-pane, bg-task-pill,
+  background-task-block, tool-call-detail-*) plus verified bare-glyph rungs (input-affix
+  checks, tree-node loaders, status badges) that no owner should absorb.
 - **Round icon buttons in chat-pane** (×6) — need a design call; other round-button
   stay-locals carry head comments recording their reasons.
-- **Dense model-list navigation rows** (`transcription/speech/video provider-setting`,
-  3-file family) — the non-settings sweep's correction: these are clickable navigation
-  rows, NOT SettingsRow misses; they await a list-row owner decision (same family as
-  `providers/model-item.vue`). Unbuilt; the three files still hand-sync the shape.
+- **Dense model-list navigation rows — RESOLVED, owner built.** The 3-file family
+  (`transcription/provider-setting.vue`, `speech/components/provider-setting.vue`,
+  `video/provider-setting.vue`) hand-synced the same clickable navigation-row shape:
+  transcription and speech were byte-identical; video only differed by nesting the click
+  handler on a trailing ghost Button instead of making the whole row a `<button>` — a
+  trivial divergence (per `batch-A-raw.json`'s own read), not a deliberate one. Built
+  `ModelListRow` (`apps/web/src/components/settings/model-list-row.vue`, whole-row
+  `<button>`, same root contract as BackendCard) and migrated all three onto it.
+  **`providers/model-item.vue` stays separate, deliberately** — it carries inline
+  enable/test/delete actions, a capability badge, and a status line, a materially richer
+  interaction contract than "click to open the edit dialog," so forcing it onto the same
+  owner would have been unifying two different relationships, not one. Recorded in
+  `memoh-ui-owners` SKILL.md (Rows section + decision map).
 
 ---
 

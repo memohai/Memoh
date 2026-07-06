@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import {
+  Avatar,
+  AvatarFallback,
   Badge,
   Button,
   Input,
@@ -14,14 +16,39 @@ import {
   Settings2,
   Terminal,
 } from 'lucide-vue-next'
+import { ref } from 'vue'
+import CalloutBanner from '@/components/callout-banner/index.vue'
+import ConfirmDeleteDialog from '@/components/confirm-delete-dialog/index.vue'
 import PageShell from '@/components/page-shell/index.vue'
+import PersonaTile from '@/components/persona-tile/index.vue'
+import SectionGroup from '@/components/section-group/index.vue'
 import BackendCard from '@/components/settings/backend-card.vue'
+import ExpandableSettingsRow from '@/components/settings/expandable-row.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
+import FormStack from '@/components/settings/form-stack.vue'
+import MetricReadout from '@/components/settings/metric-readout.vue'
 import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SectionShell from '../components/SectionShell.vue'
 import Specimen from '../components/Specimen.vue'
+
+// Demo-only state for the two interactive specimens below (ExpandableSettingsRow,
+// ConfirmDeleteDialog) — the wall needs a real ref to wire v-model against, same as
+// any real caller, but there's no backing data so the confirm handler just fakes a
+// short async delete instead of calling a store action.
+const expandableOpen = ref(false)
+const confirmDeleteOpen = ref(false)
+const confirmDeleteLoading = ref(false)
+
+function onConfirmDeleteDemo() {
+  confirmDeleteLoading.value = true
+  setTimeout(() => {
+    confirmDeleteLoading.value = false
+    confirmDeleteOpen.value = false
+  }, 600)
+}
 
 const primitiveRungs = [
   { name: '0.5', value: '2px', class: 'w-0.5', use: 'optical nudge' },
@@ -216,6 +243,196 @@ const primitiveRungs = [
             Reading backup file…
           </InlineLoadingRow>
         </div>
+      </Specimen>
+
+      <Specimen
+        label="<FieldStack> + <FormStack>"
+        note="label sits ABOVE the control (space-y-1.5) — distinct from SettingsRow, which puts it BESIDE; FormStack owns the field-to-field rhythm (space-y-4) for a run of them"
+      >
+        <FormStack class="w-full">
+          <FieldStack
+            label="Display name"
+            for="dev-field-name"
+          >
+            <Input
+              id="dev-field-name"
+              placeholder="Assistant"
+            />
+          </FieldStack>
+          <FieldStack
+            label="Webhook URL"
+            for="dev-field-webhook"
+            help="Delivered as a POST with the event payload."
+          >
+            <Input
+              id="dev-field-webhook"
+              placeholder="https://"
+            />
+          </FieldStack>
+        </FormStack>
+      </Specimen>
+
+      <Specimen
+        label="<MetricReadout>"
+        note="one cell — the CALLER owns the grid (grid-cols-3 / sm:grid-cols-4); status swaps the value line for a signal dot + label"
+      >
+        <div class="grid w-full grid-cols-3 gap-3">
+          <MetricReadout
+            label="CPU"
+            value="12%"
+            sub="of 2 cores"
+          />
+          <MetricReadout
+            label="Workspace"
+            value="Connected"
+            status="ok"
+          />
+          <MetricReadout
+            label="Container"
+            value="Unreachable"
+            status="error"
+          />
+        </div>
+      </Specimen>
+
+      <Specimen
+        label="<PersonaTile>"
+        note="vertical, centered entity/add tile — the counterpart to horizontal BackendCard; do not confuse the two"
+      >
+        <div class="flex w-full flex-wrap gap-3">
+          <PersonaTile name="Aria">
+            <template #media>
+              <Avatar class="size-14">
+                <AvatarFallback>A</AvatarFallback>
+              </Avatar>
+            </template>
+          </PersonaTile>
+          <PersonaTile
+            name="Add bot"
+            variant="add"
+          >
+            <template #media>
+              <Plus class="size-6" />
+            </template>
+          </PersonaTile>
+        </div>
+      </Specimen>
+
+      <Specimen
+        label="<CalloutBanner>"
+        note="framed warning/destructive notice; clickable turns the whole surface into a button with a lead-in chevron — the trailing slot is then usually empty"
+      >
+        <div class="flex w-full flex-col gap-3">
+          <CalloutBanner
+            tone="warning"
+            title="No search provider configured"
+            description="Web search tools are disabled until one is added."
+          >
+            <Button
+              variant="outline"
+              size="sm"
+            >
+              Add provider
+            </Button>
+          </CalloutBanner>
+          <CalloutBanner
+            tone="destructive"
+            clickable
+            title="3 checks failing"
+            description="View diagnostics for details."
+          />
+        </div>
+      </Specimen>
+
+      <Specimen
+        label="<ExpandableSettingsRow>"
+        note="the whole header toggles a body it OWNS, reusing SettingsRow's skeleton as a real <button> — a toggle over a sibling block it doesn't own is not this owner"
+      >
+        <SettingsSection
+          title="Advanced"
+          class="w-full"
+        >
+          <ExpandableSettingsRow
+            v-model:open="expandableOpen"
+            label="Advanced"
+            description="Override the compaction model for this bot."
+          >
+            <template #expanded>
+              <FieldStack
+                label="Compaction model"
+                help="Falls back to the bot's default chat model."
+              >
+                <Input placeholder="gpt-4o-mini" />
+              </FieldStack>
+            </template>
+          </ExpandableSettingsRow>
+        </SettingsSection>
+      </Specimen>
+
+      <Specimen
+        label="<ConfirmDeleteDialog>"
+        note="sm:max-w-sm confirm skeleton; the CALLER owns the delete call and closes on success — do not hand-roll a Dialog + two-button confirm again"
+      >
+        <Button
+          variant="outline"
+          size="sm"
+          @click="confirmDeleteOpen = true"
+        >
+          Delete session
+        </Button>
+        <ConfirmDeleteDialog
+          v-model:open="confirmDeleteOpen"
+          title="Delete this session?"
+          description="This can't be undone."
+          :loading="confirmDeleteLoading"
+          @confirm="onConfirmDeleteDemo"
+        />
+      </Specimen>
+
+      <Specimen
+        label="<SectionGroup>"
+        note="foreground label heading a BARE body (no card of its own) — for pages stacking SEVERAL groups (voice, web-search); a single-group gallery page lets PageShell own the title instead"
+        class="xl:col-span-2"
+      >
+        <SectionGroup
+          title="Speaking (TTS)"
+          description="Providers used to generate voice replies."
+          class="w-full"
+        >
+          <template #actions>
+            <Button
+              variant="secondary"
+              size="sm"
+            >
+              <Plus class="size-4" />
+              Add
+            </Button>
+          </template>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <BackendCard
+              name="ElevenLabs"
+              subtitle="Realistic voice synthesis"
+              enabled
+            >
+              <template #leading>
+                <span class="flex size-9 items-center justify-center rounded-full bg-muted text-foreground">
+                  <Globe class="size-4" />
+                </span>
+              </template>
+            </BackendCard>
+
+            <BackendCard
+              name="Azure Speech"
+              subtitle="Cloud text-to-speech"
+            >
+              <template #leading>
+                <span class="flex size-9 items-center justify-center rounded-full bg-muted text-foreground">
+                  <Terminal class="size-4" />
+                </span>
+              </template>
+            </BackendCard>
+          </div>
+        </SectionGroup>
       </Specimen>
 
       <Specimen
