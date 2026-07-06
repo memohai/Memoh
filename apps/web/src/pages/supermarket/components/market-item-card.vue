@@ -3,7 +3,8 @@
        且 hover 反馈只有 skill 那份有(plugin 卡悬停无任何反馈,是可见 bug)。
        归一后:图标槽(#leading)+ 标题 + 主页外链 + 两行截断描述 + 尾部动作槽(#actions)。
        根是 Card[role=button](两处原本就这么写,天然避开 button 嵌套陷阱),
-       整卡点击/回车/空格 → emit('open');#actions 区域 stop 掉冒泡,内部按钮不触发 open。
+       整卡点击/回车/空格 → emit('open');#actions 区域和主页外链要同时 stop 掉 click 和
+       keydown——根的 keydown.enter.prevent 会吞掉嵌套交互元素的原生回车激活,只 stop click 不够。
        业务(路由跳转、SDK 类型、安装逻辑)留在调用方,这里只own形状。 -->
   <Card
     :class="rootClass"
@@ -33,6 +34,7 @@
           rel="noopener noreferrer"
           :class="homepageLinkClass"
           @click.stop
+          @keydown.stop
         >
           <ExternalLink class="size-3" />
         </a>

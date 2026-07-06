@@ -2,7 +2,9 @@
   <!-- One metric tile. The caller owns the grid (grid-cols-3 / sm:grid-cols-4);
        this is a single cell, never the grid. `framed` draws the tile box; unframed
        is the same content bare, for a stat that sits directly on a surface
-       (bot-overview usage). Shared min-h so a cold-load tile doesn't jump. -->
+       (no current caller uses it — kept as the escape hatch for bare stats so
+       the next one doesn't fork the tile). Shared min-h so a cold-load tile
+       doesn't jump. -->
   <div :class="framed ? 'flex min-h-[4.375rem] flex-col rounded-[var(--radius-menu-shell)] border border-border bg-card p-3' : 'flex flex-col'">
     <!-- tracking-tight:紧凑指标标签的原有字距(context-card 8 块原样如此),
          统一后 bot-overview 的标签一并收紧。 -->
@@ -39,9 +41,11 @@
       </slot>
     </p>
 
+    <!-- truncate + tabular-nums:sub 行是 "X / Y" 类限值,长 locale 文案必须裁行
+         而不是换行——一换行整格变高,grid 里三格就不齐了(共享 min-h 防的正是这个)。 -->
     <p
       v-if="sub"
-      class="mt-1 text-caption text-muted-foreground"
+      class="mt-1 truncate text-caption tabular-nums text-muted-foreground"
     >
       {{ sub }}
     </p>
