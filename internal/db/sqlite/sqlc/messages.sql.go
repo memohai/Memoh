@@ -1353,14 +1353,8 @@ SET turn_id = (
         AND prior.role IN ('assistant', 'tool')
         AND prior.id <> assistant.id
         AND prior.turn_id IS NULL
-        AND (
-          prior.created_at < bot_history_messages.created_at
-          OR (prior.created_at = bot_history_messages.created_at AND prior.id <= bot_history_messages.id)
-        )
-        AND (
-          prior.created_at > assistant.created_at
-          OR (prior.created_at = assistant.created_at AND prior.id > assistant.id)
-        )
+        AND prior.rowid <= bot_history_messages.rowid
+        AND prior.rowid > assistant.rowid
     )
 WHERE bot_history_messages.turn_id IS NULL
   AND bot_history_messages.role IN ('assistant', 'tool')
@@ -1371,10 +1365,7 @@ WHERE bot_history_messages.turn_id IS NULL
     WHERE t.id = ?1
       AND bot_history_messages.session_id = t.session_id
       AND bot_history_messages.id <> assistant.id
-      AND (
-        bot_history_messages.created_at > assistant.created_at
-        OR (bot_history_messages.created_at = assistant.created_at AND bot_history_messages.id > assistant.id)
-      )
+      AND bot_history_messages.rowid > assistant.rowid
   )
 `
 

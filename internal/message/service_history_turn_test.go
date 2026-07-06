@@ -696,6 +696,7 @@ CREATE TABLE bot_history_messages (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE bot_history_message_assets (
+  id TEXT PRIMARY KEY,
   message_id TEXT NOT NULL,
   role TEXT NOT NULL,
   ordinal INTEGER NOT NULL,

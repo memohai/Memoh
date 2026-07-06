@@ -4840,11 +4840,8 @@ JOIN bot_history_messages m
 WHERE t.id = ?1
   AND m.id <> assistant.id
   AND m.turn_id IS NULL
-  AND (
-    m.created_at > assistant.created_at
-    OR (m.created_at = assistant.created_at AND m.id > assistant.id)
-  )
-ORDER BY m.created_at, m.id
+  AND m.rowid > assistant.rowid
+ORDER BY m.rowid
 `, turnID)
 	if err != nil {
 		return err
