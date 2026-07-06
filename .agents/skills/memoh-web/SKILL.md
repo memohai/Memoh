@@ -427,6 +427,33 @@ recurring failures to avoid:
 
 ## Compose, don't style — the extension boundary
 
+**First, the root principle everything below derives from.** A component library and its
+design tokens exist for exactly one reason: **callers write no magic values, so the
+system's maintainer can change ONE number in ONE place and every caller benefits.** Every
+magic string a caller must hand-copy — a `grid-rows-[…]` recipe, a raw hex, an arbitrary
+`h-[37px]`, a prop pairing that only works if you remember it — is a defect in the SYSTEM,
+not a chore for the caller. It means N call sites now pin that value, the maintainer's
+one-place edit no longer reaches them, and each copy is one more chance to mis-copy a
+fragment and resurrect a solved bug. This cuts both ways:
+
+- **When USING a component:** if correct usage requires you to hand-write a layout/style
+  string or memorize an unenforced pairing, do not dutifully copy it — the component is
+  incomplete. (Live example: `DialogPanel` exists because the focused-dialog shell was a
+  copy-me class string, `max-h-[80dvh] grid-rows-[auto_minmax(0,1fr)]…` plus a
+  remember-to-disable-the-corner-close rule; every consumer had to transcribe it
+  perfectly. The fix was never "copy it more carefully" — it was making the recipe BE the
+  component, with the pairing enforced by a prop.)
+- **When DESIGNING a component:** the acceptance test is "a caller who has never read the
+  implementation fills in content — title, icon, fields — and hand-writes zero
+  layout/appearance CSS." Knobs are **enumerated props** (`width="2xl" | "3xl"`), never
+  free-text class strings: an enum forces the next rung to be added in the library,
+  deliberately, instead of invented per page.
+- **When you FIND a violation you cannot fix in this task:** say so to the human you are
+  working with, explicitly — "this component still requires callers to hand-write X, which
+  breaks the one-place-to-change guarantee." That escalation is not noise; it is the most
+  fundamental defect class in this codebase, and the human decides whether to stop and fix
+  the system or knowingly take the debt. Never silently absorb it into your page.
+
 This is the page-layer half of `packages/ui/AGENTS.md` § *Compose, don't style* (read it for
 the ownership table + the four override planes). Component discipline above says *which*
 component to use; this says how you are allowed to **add to** one — because the moment you

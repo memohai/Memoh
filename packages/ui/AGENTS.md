@@ -45,6 +45,20 @@ The test: for any value, *"where does it live?"* must have exactly **one** answe
 value in two homes is debt. *How* these homes fight the moment you ignore the boundary is the
 next section.
 
+**Why locality is the whole game — one place to change, everyone benefits.** Tokens and
+components exist so a maintainer edits ONE value and every caller updates for free. Every
+magic string a caller must copy to use a component correctly — a layout-class recipe, an
+unenforced prop pairing — breaks that guarantee: the value is now pinned at N call sites,
+out of the maintainer's reach, and each copy can mis-transcribe a fragment and resurrect a
+solved bug. So the acceptance test for a NEW component is: *a caller who never read the
+implementation fills in content only — zero layout/appearance CSS.* Expose knobs as
+**enumerated props** (`width="2xl" | "3xl"`), never free-text classes — the enum forces the
+next rung to be added HERE, deliberately, not invented per page. And when you meet an
+existing component that fails this test, tell the human explicitly instead of copying the
+recipe one more time — that report is the highest-value defect signal this contract has.
+(Case study: `DialogPanel` — the focused-dialog shell was a hand-copied
+`max-h-[80dvh] grid-rows-[…]` string until it became a component.)
+
 ## The cascade has four override planes (read before you "just add a class")
 
 The recurring frustration — *"my CSS does nothing / something else wins / the conflict is
