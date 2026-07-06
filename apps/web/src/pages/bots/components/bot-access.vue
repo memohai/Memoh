@@ -269,19 +269,15 @@
           <DialogPanel view-swap>
             <!-- Header follows the "centered title needs both flanks
                  balanced" rule (memoh-web skill § dialog header fork), via the
-                 shared DialogViewHeader: centered when the form view's back
-                 chevron (left) or a populated list (body weight below)
-                 anchors it; the bare empty state flushes left. The built-in
-                 corner close is disabled (DialogPanel view-swap) so
-                 DialogViewHeader can put back / title / close on ONE
-                 centerline. The form is a VIEW SWAP, never its own titled
-                 card (card-in-card). -->
-            <DialogViewHeader
-              :centered="centerDialogTitle"
-              :show-back="formVisible"
-              :back-label="$t('common.back')"
-              @back="formVisible = false"
-            >
+                 shared DialogViewHeader: centered over a populated LIST (the
+                 body weight below anchors it); the form view and the bare
+                 empty state flush LEFT — the form is a workbench (one focused
+                 form, house-default left title; tried centered + back chevron
+                 and it read odd), and its way back is the footer Cancel. The
+                 built-in corner close is disabled (DialogPanel view-swap) so
+                 DialogViewHeader keeps title / close on ONE centerline. The
+                 form is a VIEW SWAP, never its own titled card (card-in-card). -->
+            <DialogViewHeader :centered="centerDialogTitle">
               {{ formVisible ? (editingRule ? $t('bots.access.editRule') : addListEntryLabel) : $t('bots.access.advanced.entryTitle') }}
             </DialogViewHeader>
 
@@ -466,7 +462,8 @@
                   </EmptyContent>
                 </Empty>
 
-                <!-- Form view: title + back live in the DialogHeader, so this
+                <!-- Form view: the title lives in the DialogViewHeader and the
+                   way back is the footer Cancel, so this
                    section carries NO title bar and NO border of its own — it is
                    the dialog's single view while open, not a bordered sub-card. -->
                 <section
@@ -1515,7 +1512,13 @@ const filteredAdvancedRules = computed(() => {
 // empty state has neither (no chevron, only a centered "No rules" block), so a
 // centered title would float untethered — it drops to the workbench default
 // (title left, close right). See the memoh-web skill § dialog header fork.
-const centerDialogTitle = computed(() => formVisible.value || advancedRules.value.length > 0)
+// Centered ONLY over a populated list (its body weight anchors the title;
+// human-reviewed as the golden list form). The form view is a workbench —
+// left title, no back chevron (tried centered+chevron, read odd; footer
+// Cancel is the way back) — and the bare empty state has nothing to anchor
+// a centered title either. An all-states-left variant and a table-layout
+// list were both tried and rejected on sight.
+const centerDialogTitle = computed(() => !formVisible.value && advancedRules.value.length > 0)
 
 const identityOptions = computed(() =>
   (identityCandidates.value?.items ?? [])

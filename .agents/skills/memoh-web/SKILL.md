@@ -1000,12 +1000,9 @@ Form (b), list-management (a collection with add/edit drill-in):
 ```vue
 <Dialog v-model:open="open">
   <DialogPanel view-swap>
-    <DialogViewHeader
-      :centered="formVisible || items.length > 0"
-      :show-back="formVisible"
-      :back-label="$t('common.back')"
-      @back="formVisible = false"
-    >
+    <!-- centered only over a populated LIST; form view + empty state flush left.
+         The way back from the form is the footer Cancel, not a header chevron. -->
+    <DialogViewHeader :centered="!formVisible && items.length > 0">
       {{ formVisible ? actionTitle : listTitle }}
     </DialogViewHeader>
     <DialogBody>
@@ -1021,15 +1018,26 @@ Form (b), list-management (a collection with add/edit drill-in):
 **A centered title needs BOTH flanks balanced — otherwise it flushes left.** Form (b) is not
 "always centered": the centering is only earned when something anchors each side of the title.
 So the SAME dialog switches between (a) and (b) by state:
-- **Form view** — the back chevron on the left balances the close on the right → centered.
-- **Populated list** — the list body below gives the header visual weight to sit centered above → centered.
-- **Bare empty state** — no chevron, no rows, just a centered "No X" block below → a centered
+- **Populated list** — the list body below gives the header visual weight to sit centered
+  above → centered. Two variants were tried against this and rejected on human review
+  (2026-07-06), don't re-derive them: an all-states-LEFT title (over the stacked
+  avatar-row list the centered title simply looks better), and a `Table`-layout list
+  (columns + heads instead of avatar rows — which would have made left the natural title,
+  but the table itself read worse in a dialog; the row list is the golden list form).
+- **Form view (drill-in)** — a workbench: ONE focused form, so it takes the house-default
+  LEFT title. We tried centering it with a back chevron balancing the close (the flanks
+  were technically anchored) and it still read odd on sight — a lone form doesn't have the
+  body weight that earns centering, and the chevron existed only to justify it. Adjudicated
+  2026-07-06: no back chevron; the footer **Cancel** is the way back to the list.
+- **Bare empty state** — no rows, just a centered "No X" block below → a centered
   title would float untethered, so it drops to workbench (a): title flush-LEFT, close right.
-Drive it with one predicate (`centerDialogTitle = formVisible || items.length > 0`) passed to
-`DialogViewHeader`'s `centered` prop (with `show-back` for the form-view chevron). This
+Drive it with one predicate (`centerDialogTitle = !formVisible && items.length > 0`) passed to
+`DialogViewHeader`'s `centered` prop. This
 "centering must be anchored, never decorative" is the general law behind the fork — apply it
 wherever a title could center. The component deliberately does NOT guess from data; the
-caller owns the predicate.
+caller owns the predicate. (`show-back` remains available for dialogs whose drill-in view
+genuinely needs an in-header back — e.g. a multi-level browse — but a plain add/edit form
+is not that.)
 
 **The scrolling dialog body is `DialogBody`, and it fades at the scroll edges.** Inside a
 `DialogPanel` (the capped focused-dialog shell — its props own `max-h-[80dvh]`, the grid
