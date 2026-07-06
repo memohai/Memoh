@@ -1,12 +1,11 @@
 <template>
   <div class="mx-auto max-w-5xl px-4 py-6 md:px-6 md:py-8">
-    <div
+    <InlineLoadingRow
       v-if="loading"
-      class="flex items-center justify-center py-16 text-xs text-muted-foreground"
+      class="justify-center py-16"
     >
-      <Spinner class="mr-2" />
       {{ $t('common.loading') }}
-    </div>
+    </InlineLoadingRow>
 
     <div
       v-else-if="!plugin"
@@ -188,11 +187,12 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ArrowLeft, Boxes, ExternalLink, PackageOpen, Plug } from 'lucide-vue-next'
-import { Badge, Button, Spinner, toast } from '@memohai/ui'
+import { Badge, Button, toast } from '@memohai/ui'
 import { getSupermarketPluginsById, type PluginsManifest, type PluginsSkillEntry, type PluginsSkillResource } from '@memohai/sdk'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import SettingsSection from '@/components/settings/section.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import InstallPluginDialog from './components/install-plugin-dialog.vue'
 import InfoItem from './components/info-item.vue'

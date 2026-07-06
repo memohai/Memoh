@@ -1,7 +1,10 @@
 <template>
   <PageShell :title="$t('sidebar.profile')">
     <div class="space-y-8">
-      <!-- Skeleton loading state -->
+      <!-- Stay-local (not SettingsRow): skeleton screens have no owner yet —
+           skeleton-shimmer isn't on the four-rung loading ladder. These rows
+           borrow SettingsRow's geometry (mx-4/border-b/py-3.5/last:border-b-0)
+           only so the real content doesn't reflow once it swaps in. -->
       <template v-if="loadingInitial">
         <div class="overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card">
           <div

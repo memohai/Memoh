@@ -126,13 +126,13 @@
           </Select>
         </SettingsRow>
 
-        <div
+        <InlineLoadingRow
           v-if="isLoading && logs.length === 0"
-          class="mx-4 flex min-h-[12rem] items-center justify-center gap-2 py-12 text-sm text-muted-foreground"
+          size="md"
+          class="px-2 py-8"
         >
-          <Spinner class="size-4" />
           {{ $t('common.loading') }}
-        </div>
+        </InlineLoadingRow>
 
         <Empty
           v-else-if="!isLoading && totalCount === 0 && !savedEnabled"
@@ -308,13 +308,14 @@ import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import {
-  Badge, Button, Empty, EmptyDescription, EmptyHeader, EmptyTitle, Spinner, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Input,
+  Badge, Button, Empty, EmptyDescription, EmptyHeader, EmptyTitle, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Input,
   Pagination, PaginationContent, PaginationEllipsis,
   PaginationFirst, PaginationItem, PaginationLast,
   PaginationNext, PaginationPrevious,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import PageShell from '@/components/page-shell/index.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import ModelSelect from './model-select.vue'
 import {
   getBotsByBotIdSettings, putBotsByBotIdSettings,

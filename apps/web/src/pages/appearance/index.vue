@@ -163,16 +163,12 @@
           />
         </SettingsRow>
 
-        <div class="mx-4 border-b border-border py-3 last:border-b-0">
-          <div class="min-w-0">
-            <div class="text-sm font-medium text-foreground">
-              {{ t('settings.appearance.codeHighlight') }}
-            </div>
-            <p class="mt-0.5 text-xs text-muted-foreground">
-              {{ t('settings.appearance.codeHighlightDescription') }}
-            </p>
-          </div>
-          <div class="mt-3 grid gap-3 sm:grid-cols-2">
+        <SettingsRow
+          stack="always"
+          :label="t('settings.appearance.codeHighlight')"
+          :description="t('settings.appearance.codeHighlightDescription')"
+        >
+          <div class="grid gap-3 sm:grid-cols-2">
             <div class="space-y-2">
               <SearchableSelectPopover
                 v-model="shikiThemeLightSelection"
@@ -222,60 +218,61 @@
               </div>
             </div>
           </div>
-        </div>
+        </SettingsRow>
       </SettingsSection>
 
       <SettingsSection :title="t('settings.appearance.diagrams')">
-        <div class="mx-4 border-b border-border py-3 last:border-b-0">
-          <div class="flex min-h-[2.25rem] items-center justify-between gap-4">
-            <div class="min-w-0">
-              <div class="text-sm font-medium text-foreground">
-                {{ t('settings.appearance.mermaidTheme') }}
-              </div>
-              <p class="mt-0.5 text-xs text-muted-foreground">
-                {{ t('settings.appearance.mermaidThemeDescription') }}
-              </p>
+        <!-- align="start" top-aligns the Select with the label instead of centering
+             it against the whole row: the #content body grows tall (label + description
+             + the diagram preview stacked below), so a centered control would drift
+             toward the preview's vertical middle instead of sitting beside the title. -->
+        <SettingsRow align="start">
+          <template #content>
+            <div class="text-sm font-medium text-foreground">
+              {{ t('settings.appearance.mermaidTheme') }}
             </div>
-            <div class="shrink-0">
-              <Select
-                :model-value="mermaidTheme"
-                @update:model-value="(value) => value && setMermaidTheme(value as MermaidTheme)"
+            <p class="mt-0.5 text-xs text-muted-foreground">
+              {{ t('settings.appearance.mermaidThemeDescription') }}
+            </p>
+            <div class="appearance-mermaid-preview pointer-events-none mt-3">
+              <MarkdownRender
+                :key="mermaidPreviewKey"
+                :content="MERMAID_PREVIEW_CONTENT"
+                :is-dark="isDark"
+                :typewriter="false"
+                :fade="false"
+                :mermaid-props="MERMAID_PREVIEW_PROPS"
+                custom-id="appearance-mermaid-preview"
+              />
+            </div>
+          </template>
+
+          <Select
+            :model-value="mermaidTheme"
+            @update:model-value="(value) => value && setMermaidTheme(value as MermaidTheme)"
+          >
+            <SelectTrigger
+              size="sm"
+              class="min-w-36"
+            >
+              <SelectValue>
+                {{ mermaidThemeLabels[mermaidTheme] }}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent
+              align="end"
+              :align-offset="0"
+            >
+              <SelectItem
+                v-for="value in MERMAID_THEMES"
+                :key="value"
+                :value="value"
               >
-                <SelectTrigger
-                  size="sm"
-                  class="min-w-36"
-                >
-                  <SelectValue>
-                    {{ mermaidThemeLabels[mermaidTheme] }}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent
-                  align="end"
-                  :align-offset="0"
-                >
-                  <SelectItem
-                    v-for="value in MERMAID_THEMES"
-                    :key="value"
-                    :value="value"
-                  >
-                    {{ mermaidThemeLabels[value] }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div class="appearance-mermaid-preview pointer-events-none mt-3">
-            <MarkdownRender
-              :key="mermaidPreviewKey"
-              :content="MERMAID_PREVIEW_CONTENT"
-              :is-dark="isDark"
-              :typewriter="false"
-              :fade="false"
-              :mermaid-props="MERMAID_PREVIEW_PROPS"
-              custom-id="appearance-mermaid-preview"
-            />
-          </div>
-        </div>
+                {{ mermaidThemeLabels[value] }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingsRow>
       </SettingsSection>
     </div>
   </PageShell>

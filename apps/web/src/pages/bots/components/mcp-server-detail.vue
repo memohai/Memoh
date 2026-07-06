@@ -303,7 +303,8 @@
 
             <Button
               v-if="!oauthStatus?.has_token"
-              :disabled="oauthDiscovering || oauthAuthorizing"
+              :loading="oauthDiscovering || oauthAuthorizing"
+              loading-mode="manual"
               @click="handleOAuthFlow"
             >
               <Loader2
@@ -387,13 +388,10 @@
         {{ probing ? $t('common.cancel') : $t('mcp.probe') }}
       </Button>
       <Button
-        :disabled="saving || probing"
+        :disabled="probing"
+        :loading="saving"
         @click="handleSave"
       >
-        <Loader2
-          v-if="saving"
-          class="size-4 animate-spin"
-        />
         {{ serverId ? $t('common.save') : $t('mcp.createServer') }}
       </Button>
     </div>

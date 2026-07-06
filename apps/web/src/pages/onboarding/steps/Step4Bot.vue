@@ -18,7 +18,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@memohai/ui'
-import { SquarePen, CircleHelp, Bot, Copy, LoaderCircle } from 'lucide-vue-next'
+import { SquarePen, CircleHelp, Bot, Copy } from 'lucide-vue-next'
 import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
@@ -41,6 +41,7 @@ import AvatarEditDialog from '@/pages/bots/components/avatar-edit-dialog.vue'
 import BotCreateTerminal from '@/pages/bots/components/bot-create-terminal.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
 import FieldStack from '@/components/settings/field-stack.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import { useStepTransition, nextFrame } from '../useStepTransition'
 import { ONBOARDING_KEYS } from '../constants'
 import { clearACPSelection, readACPSelection, type OnboardingACPSelection } from './useACPSetup'
@@ -641,24 +642,18 @@ function skipOAuth() {
                 type="button"
                 variant="outline"
                 :disabled="codexAuthorizing"
+                :loading="authorizingCodex"
                 @click="authorizeCodexFlow"
               >
-                <LoaderCircle
-                  v-if="authorizingCodex"
-                  class="size-4 animate-spin"
-                />
                 {{ t('onboarding.bot.acp.oauthAuthorizeChatGPT') }}
               </Button>
               <Button
                 type="button"
                 variant="outline"
                 :disabled="codexAuthorizing"
+                :loading="authorizingCodexDevice"
                 @click="authorizeCodexDeviceFlow"
               >
-                <LoaderCircle
-                  v-if="authorizingCodexDevice"
-                  class="size-4 animate-spin"
-                />
                 {{ t('onboarding.bot.acp.oauthAuthorizeChatGPTDevice') }}
               </Button>
               <Button
@@ -713,13 +708,12 @@ function skipOAuth() {
               >
                 {{ t('provider.oauth.deviceExpiresAt') }}: {{ codexDeviceSession.expires_at }}
               </div>
-              <div
+              <InlineLoadingRow
                 v-if="codexDevicePending"
-                class="flex items-center gap-2 text-sm text-foreground"
+                size="md"
               >
-                <LoaderCircle class="size-4 animate-spin" />
-                <span>{{ t('provider.oauth.status.pendingDevice') }}</span>
-              </div>
+                {{ t('provider.oauth.status.pendingDevice') }}
+              </InlineLoadingRow>
               <p
                 v-else-if="codexDeviceSession.status === 'error' && codexDeviceSession.error"
                 class="text-sm text-destructive"
@@ -744,13 +738,9 @@ function skipOAuth() {
               type="button"
               variant="outline"
               class="h-10"
-              :disabled="authorizingClaude"
+              :loading="authorizingClaude"
               @click="authorizeClaudeFlow"
             >
-              <LoaderCircle
-                v-if="authorizingClaude"
-                class="size-4 animate-spin"
-              />
               {{ t('onboarding.bot.acp.oauthAuthorizeClaude') }}
             </Button>
 
@@ -770,13 +760,9 @@ function skipOAuth() {
                 <Button
                   type="button"
                   class="h-10 shrink-0"
-                  :disabled="exchangingClaude"
+                  :loading="exchangingClaude"
                   @click="exchangeClaudeFlow"
                 >
-                  <LoaderCircle
-                    v-if="exchangingClaude"
-                    class="size-4 animate-spin"
-                  />
                   {{ t('onboarding.bot.acp.oauthExchange') }}
                 </Button>
               </div>

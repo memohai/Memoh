@@ -22,11 +22,20 @@
     v-else-if="title"
     class="flex h-full items-center justify-center px-6 text-center"
   >
-    <div>
+    <!-- max-w-md caps the two-line block at the width the strictest current
+         caller (browser-pane's status message) needs, so a long subtitle wraps
+         instead of stretching edge-to-edge. -->
+    <div class="max-w-md">
       <p class="text-xs font-medium text-foreground">
         {{ title }}
       </p>
-      <p class="mt-1 text-xs text-muted-foreground">
+      <!-- Guarded like the icon-variant branch below: a caller with no subtitle
+           slot content must not render an empty muted line. break-words matches
+           the icon branch's wrapping behavior for long text. -->
+      <p
+        v-if="$slots.default"
+        class="mt-1 break-words text-xs text-muted-foreground"
+      >
         <slot />
       </p>
     </div>

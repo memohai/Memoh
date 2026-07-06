@@ -53,22 +53,28 @@
         sandbox="allow-downloads allow-forms allow-modals allow-popups allow-same-origin allow-scripts"
         @load="handleFrameLoad"
       />
-      <div
+      <!-- PanePlaceholder's title/loading/empty branches are a mutually-exclusive
+           v-if/v-else-if/v-else chain, so exactly one renders — Vue forwards the
+           passed-through `class` to whichever branch is active, same as a single-root
+           component. That lets `absolute inset-0` land directly on the owner instead
+           of an extra wrapper div. -->
+      <PanePlaceholder
         v-else
-        class="absolute inset-0 flex items-center justify-center px-6"
+        :title="emptyTitle"
+        class="absolute inset-0"
       >
-        <div class="max-w-md text-center">
-          <p class="text-xs font-medium text-foreground">
-            {{ emptyTitle }}
-          </p>
-          <p
-            v-if="statusMessage"
-            class="mt-1 text-xs text-muted-foreground break-words"
-          >
-            {{ statusMessage }}
-          </p>
-        </div>
-      </div>
+        <!-- #default must be named explicitly: a bare `<template v-if>` compiles as
+             always-present implicit slot content ($slots.default stays truthy even
+             when the condition is false), which defeats the owner's empty-subtitle
+             guard. A named template + v-if compiles to a conditional slot entry, so
+             the subtitle <p> truly disappears while connecting/idle. -->
+        <template
+          v-if="statusMessage"
+          #default
+        >
+          {{ statusMessage }}
+        </template>
+      </PanePlaceholder>
     </div>
   </div>
 </template>
@@ -78,6 +84,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button, Input } from '@memohai/ui'
 import { ArrowRight, Globe, RefreshCw } from 'lucide-vue-next'
+import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 import { sdkApiUrl } from '@/lib/api-client'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { defaultBrowserAddress, parseBrowserAddress } from '@/utils/browser-address'

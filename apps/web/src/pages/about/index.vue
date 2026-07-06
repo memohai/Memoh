@@ -100,13 +100,11 @@
               v-else
               variant="secondary"
               size="sm"
-              :disabled="update.checking"
+              :loading="update.checking"
+              loading-mode="icon"
               @click="recheck"
             >
-              <RefreshCw
-                class="size-3.5"
-                :class="{ 'animate-spin': update.checking }"
-              />
+              <RefreshCw class="size-3.5" />
               {{ update.checking ? $t('about.checking') : $t('about.checkForUpdates') }}
             </Button>
           </div>

@@ -53,24 +53,18 @@
                   type="button"
                   variant="outline"
                   :disabled="codexAuthorizing"
+                  :loading="authorizingCodexOAuth"
                   @click="handleAuthorize"
                 >
-                  <LoaderCircle
-                    v-if="authorizingCodexOAuth"
-                    class="size-4 animate-spin"
-                  />
                   {{ $t('bots.settings.acpOAuthAuthorizeCodex') }}
                 </Button>
                 <Button
                   type="button"
                   variant="outline"
                   :disabled="codexAuthorizing"
+                  :loading="authorizingCodexDevice"
                   @click="handleAuthorizeDevice"
                 >
-                  <LoaderCircle
-                    v-if="authorizingCodexDevice"
-                    class="size-4 animate-spin"
-                  />
                   {{ $t('bots.settings.acpCodexDeviceAuthorize') }}
                 </Button>
               </div>
@@ -118,13 +112,12 @@
               >
                 {{ $t('provider.oauth.deviceExpiresAt') }}: {{ codexDevicePanelSession.expires_at }}
               </div>
-              <div
+              <InlineLoadingRow
                 v-if="codexDevicePending"
-                class="flex items-center gap-2 text-sm text-foreground"
+                size="md"
               >
-                <LoaderCircle class="size-4 animate-spin" />
-                <span>{{ $t('provider.oauth.status.pendingDevice') }}</span>
-              </div>
+                {{ $t('provider.oauth.status.pendingDevice') }}
+              </InlineLoadingRow>
               <p
                 v-else-if="codexDevicePanelSession?.status === 'error' && codexDevicePanelSession.error"
                 class="text-sm text-destructive"
@@ -155,13 +148,9 @@
                 type="button"
                 variant="outline"
                 class="shrink-0"
-                :disabled="authorizingClaudeOAuth"
+                :loading="authorizingClaudeOAuth"
                 @click="handleAuthorizeClaude"
               >
-                <LoaderCircle
-                  v-if="authorizingClaudeOAuth"
-                  class="size-4 animate-spin"
-                />
                 {{ $t('bots.settings.acpOAuthAuthorizeClaudeCode') }}
               </Button>
             </div>
@@ -182,13 +171,9 @@
                 <Button
                   type="button"
                   class="shrink-0"
-                  :disabled="exchangingClaudeOAuth"
+                  :loading="exchangingClaudeOAuth"
                   @click="handleExchangeClaudeOAuth"
                 >
-                  <LoaderCircle
-                    v-if="exchangingClaudeOAuth"
-                    class="size-4 animate-spin"
-                  />
                   {{ $t('bots.settings.acpClaudeOAuthExchange') }}
                 </Button>
               </div>
@@ -307,7 +292,7 @@ import {
   SelectValue,
   type SegmentedItem,
 } from '@memohai/ui'
-import { Copy, LoaderCircle } from 'lucide-vue-next'
+import { Copy } from 'lucide-vue-next'
 import {
   type AcpprofileManagedField,
   type AcpprofilePublicProfile,
@@ -338,6 +323,7 @@ import { oauthStatusTextKey } from '@/utils/oauth/status-text'
 import SettingsSection from '@/components/settings/section.vue'
 import FieldStack from '@/components/settings/field-stack.vue'
 import FormStack from '@/components/settings/form-stack.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 
 const props = defineProps<{
   botId: string
