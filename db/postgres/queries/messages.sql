@@ -621,6 +621,26 @@ FROM next_position
 RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
   superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at;
 
+-- name: CreateHistoryTurnWithIDAtPosition :one
+INSERT INTO bot_history_turns (
+  id,
+  bot_id,
+  session_id,
+  position,
+  request_message_id,
+  assistant_message_id
+)
+VALUES (
+  sqlc.arg(turn_id),
+  sqlc.arg(bot_id),
+  sqlc.arg(session_id),
+  sqlc.arg(turn_position),
+  sqlc.narg(request_message_id)::uuid,
+  sqlc.narg(assistant_message_id)::uuid
+)
+RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
+  superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at;
+
 -- name: BindHistoryTurnAssistantByRequest :one
 UPDATE bot_history_turns
 SET assistant_message_id = sqlc.arg(assistant_message_id),
@@ -984,8 +1004,46 @@ FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
-ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+ORDER BY m.created_at ASC, m.id ASC
 LIMIT 10000;
+
+-- name: ListAllMessagesForBackup :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.session_mode,
+  m.runtime_type,
+  m.event_id,
+  m.display_text,
+  m.created_at,
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
+  m.turn_visible,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.bot_id = sqlc.arg(bot_id)
+ORDER BY m.created_at ASC, m.id ASC;
+
+-- name: ListHistoryTurnsByBot :many
+SELECT id, bot_id, session_id, position, request_message_id, assistant_message_id,
+  superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at
+FROM bot_history_turns
+WHERE bot_id = sqlc.arg(bot_id)
+ORDER BY session_id ASC, position ASC, id ASC;
 
 -- name: ListMessagesBySession :many
 SELECT
@@ -1041,7 +1099,7 @@ LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
   AND m.created_at >= sqlc.arg(created_at)
-ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
+ORDER BY m.created_at ASC, m.id ASC;
 
 -- name: ListMessagesSinceBySession :many
 SELECT
@@ -1099,7 +1157,7 @@ LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
   AND m.created_at >= sqlc.arg(created_at)
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
-ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
+ORDER BY m.created_at ASC, m.id ASC;
 
 -- name: ListActiveMessagesSinceBySession :many
 SELECT
@@ -1157,7 +1215,7 @@ LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
   AND m.created_at < sqlc.arg(created_at)
-ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+ORDER BY m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: ListMessagesBeforeBySession :many
@@ -1262,7 +1320,7 @@ FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
-ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+ORDER BY m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: ListMessagesLatestBySession :many
@@ -1866,7 +1924,7 @@ WHERE m.bot_id = sqlc.arg(bot_id)
       ELSE ''
     END
   ) ILIKE '%' || sqlc.narg(keyword)::text || '%')
-ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+ORDER BY m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: MarkMessagesCompacted :exec

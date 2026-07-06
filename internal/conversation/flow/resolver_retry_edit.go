@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/conversation"
@@ -228,12 +229,158 @@ func (r *Resolver) replacePersistedTurn(
 	if strings.TrimSpace(requestMessageID) == "" {
 		requestMessageID = firstUserID(persisted)
 	}
+	forkAnchorUpdate := r.prepareForkAnchorUpdate(ctx, req.SessionID, req.HistoryCutoffBeforeMessageID)
 	if _, err := r.messageService.ReplaceTurn(context.WithoutCancel(ctx), req.SessionID, oldTurnID, requestMessageID, replacementID, reason); err != nil {
 		r.logger.Error("replace history turn failed", slog.String("reason", reason), slog.Any("error", err))
 		r.cleanupReplacementMessages(ctx, persisted)
 		return fmt.Errorf("replace history turn: %w", err)
 	}
+	r.applyForkAnchorUpdate(context.WithoutCancel(ctx), req.SessionID, forkAnchorUpdate)
 	return nil
+}
+
+type forkAnchorUpdate struct {
+	metadata map[string]any
+}
+
+func (r *Resolver) prepareForkAnchorUpdate(ctx context.Context, sessionID string, replacedTailStartMessageID string) *forkAnchorUpdate {
+	sessionID = strings.TrimSpace(sessionID)
+	replacedTailStartMessageID = strings.TrimSpace(replacedTailStartMessageID)
+	if r == nil || r.sessionService == nil || r.messageService == nil || sessionID == "" || replacedTailStartMessageID == "" {
+		return nil
+	}
+
+	sess, err := r.sessionService.Get(ctx, sessionID)
+	if err != nil {
+		r.logForkAnchorUpdateWarning("load session for fork anchor update failed", sessionID, err)
+		return nil
+	}
+	fork, ok := forkedFromMetadata(sess.Metadata)
+	if !ok {
+		return nil
+	}
+	currentAnchor := forkMetadataString(fork, "fork_message_id")
+	if currentAnchor == "" {
+		return nil
+	}
+
+	replacedTail, err := r.messageService.ListVisibleFromBySession(ctx, sessionID, replacedTailStartMessageID)
+	if err != nil {
+		r.logForkAnchorUpdateWarning("load replaced tail for fork anchor update failed", sessionID, err)
+		return nil
+	}
+	if !messagesContainAnchor(replacedTail, currentAnchor) {
+		return nil
+	}
+
+	nextAnchor := r.latestInheritedAssistantBefore(ctx, sessionID, replacedTailStartMessageID, sess.CreatedAt)
+	if nextAnchor == currentAnchor {
+		return nil
+	}
+
+	nextFork := cloneMetadataMap(fork)
+	if nextAnchor != "" {
+		nextFork["fork_message_id"] = nextAnchor
+	} else {
+		delete(nextFork, "fork_message_id")
+	}
+
+	nextMetadata := cloneMetadataMap(sess.Metadata)
+	nextMetadata["forked_from"] = nextFork
+	return &forkAnchorUpdate{metadata: nextMetadata}
+}
+
+func (r *Resolver) applyForkAnchorUpdate(ctx context.Context, sessionID string, update *forkAnchorUpdate) {
+	sessionID = strings.TrimSpace(sessionID)
+	if r == nil || r.sessionService == nil || update == nil || sessionID == "" {
+		return
+	}
+	if _, err := r.sessionService.UpdateMetadata(ctx, sessionID, update.metadata); err != nil {
+		r.logForkAnchorUpdateWarning("persist fork anchor update failed", sessionID, err)
+	}
+}
+
+func (r *Resolver) latestInheritedAssistantBefore(ctx context.Context, sessionID string, beforeMessageID string, sessionCreatedAt time.Time) string {
+	messages, err := r.messageService.ListBeforeMessageBySession(ctx, sessionID, beforeMessageID, 10000)
+	if err != nil {
+		r.logForkAnchorUpdateWarning("load previous messages for fork anchor update failed", sessionID, err)
+		return ""
+	}
+	hasCutoff := !sessionCreatedAt.IsZero()
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if !strings.EqualFold(strings.TrimSpace(msg.Role), "assistant") {
+			continue
+		}
+		if hasCutoff && (msg.CreatedAt.IsZero() || msg.CreatedAt.After(sessionCreatedAt)) {
+			continue
+		}
+		return strings.TrimSpace(msg.ID)
+	}
+	return ""
+}
+
+func messagesContainAnchor(messages []messagepkg.Message, anchor string) bool {
+	anchor = strings.TrimSpace(anchor)
+	if anchor == "" {
+		return false
+	}
+	for _, msg := range messages {
+		if strings.TrimSpace(msg.ID) == anchor || strings.TrimSpace(msg.ExternalMessageID) == anchor {
+			return true
+		}
+	}
+	return false
+}
+
+func forkedFromMetadata(metadata map[string]any) (map[string]any, bool) {
+	raw, ok := metadata["forked_from"]
+	if !ok || raw == nil {
+		return nil, false
+	}
+	switch value := raw.(type) {
+	case map[string]any:
+		return value, true
+	case map[string]string:
+		out := make(map[string]any, len(value))
+		for key, item := range value {
+			out[key] = item
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+func forkMetadataString(metadata map[string]any, key string) string {
+	if metadata == nil {
+		return ""
+	}
+	value, ok := metadata[key]
+	if !ok || value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text)
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func cloneMetadataMap(metadata map[string]any) map[string]any {
+	if metadata == nil {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(metadata))
+	for key, value := range metadata {
+		out[key] = value
+	}
+	return out
+}
+
+func (r *Resolver) logForkAnchorUpdateWarning(message string, sessionID string, err error) {
+	if r != nil && r.logger != nil {
+		r.logger.Warn("fork anchor update skipped", slog.String("reason", message), slog.String("session_id", sessionID), slog.Any("error", err))
+	}
 }
 
 func (r *Resolver) cleanupReplacementMessages(ctx context.Context, persisted []messagepkg.Message) {

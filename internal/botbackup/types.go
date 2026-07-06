@@ -236,6 +236,7 @@ type backupDependencies struct {
 type backupHistory struct {
 	Sessions       any `json:"sessions,omitempty"`
 	Messages       any `json:"messages,omitempty"`
+	Turns          any `json:"turns,omitempty"`
 	DiscussCursors any `json:"discuss_cursors,omitempty"`
 	SessionEvents  any `json:"session_events,omitempty"`
 	Assets         any `json:"assets,omitempty"`

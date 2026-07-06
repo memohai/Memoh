@@ -316,6 +316,62 @@ func (q *Queries) CreateHistoryTurnWithID(ctx context.Context, arg CreateHistory
 	return i, err
 }
 
+const createHistoryTurnWithIDAtPosition = `-- name: CreateHistoryTurnWithIDAtPosition :one
+INSERT INTO bot_history_turns (
+  id,
+  bot_id,
+  session_id,
+  position,
+  request_message_id,
+  assistant_message_id
+)
+VALUES (
+  $1,
+  $2,
+  $3,
+  $4,
+  $5::uuid,
+  $6::uuid
+)
+RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
+  superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at
+`
+
+type CreateHistoryTurnWithIDAtPositionParams struct {
+	TurnID             pgtype.UUID `json:"turn_id"`
+	BotID              pgtype.UUID `json:"bot_id"`
+	SessionID          pgtype.UUID `json:"session_id"`
+	TurnPosition       int64       `json:"turn_position"`
+	RequestMessageID   pgtype.UUID `json:"request_message_id"`
+	AssistantMessageID pgtype.UUID `json:"assistant_message_id"`
+}
+
+func (q *Queries) CreateHistoryTurnWithIDAtPosition(ctx context.Context, arg CreateHistoryTurnWithIDAtPositionParams) (BotHistoryTurn, error) {
+	row := q.db.QueryRow(ctx, createHistoryTurnWithIDAtPosition,
+		arg.TurnID,
+		arg.BotID,
+		arg.SessionID,
+		arg.TurnPosition,
+		arg.RequestMessageID,
+		arg.AssistantMessageID,
+	)
+	var i BotHistoryTurn
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.SessionID,
+		&i.Position,
+		&i.RequestMessageID,
+		&i.AssistantMessageID,
+		&i.SupersededByTurnID,
+		&i.SupersededAt,
+		&i.SupersededReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createMessage = `-- name: CreateMessage :one
 INSERT INTO bot_history_messages (
   bot_id,
@@ -1946,7 +2002,7 @@ LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = $1
   AND m.created_at >= $2
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
-ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+ORDER BY m.created_at ASC, m.id ASC
 `
 
 type ListActiveMessagesSinceParams struct {
@@ -2118,6 +2174,148 @@ func (q *Queries) ListActiveMessagesSinceBySession(ctx context.Context, arg List
 	return items, nil
 }
 
+const listAllMessagesForBackup = `-- name: ListAllMessagesForBackup :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.session_mode,
+  m.runtime_type,
+  m.event_id,
+  m.display_text,
+  m.created_at,
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
+  m.turn_visible,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.bot_id = $1
+ORDER BY m.created_at ASC, m.id ASC
+`
+
+type ListAllMessagesForBackupRow struct {
+	ID                      pgtype.UUID        `json:"id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
+	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
+	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
+	Role                    string             `json:"role"`
+	Content                 []byte             `json:"content"`
+	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
+	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	TurnID                  pgtype.UUID        `json:"turn_id"`
+	TurnPosition            pgtype.Int8        `json:"turn_position"`
+	TurnMessageSeq          pgtype.Int8        `json:"turn_message_seq"`
+	TurnVisible             bool               `json:"turn_visible"`
+	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
+	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
+	Platform                pgtype.Text        `json:"platform"`
+}
+
+func (q *Queries) ListAllMessagesForBackup(ctx context.Context, botID pgtype.UUID) ([]ListAllMessagesForBackupRow, error) {
+	rows, err := q.db.Query(ctx, listAllMessagesForBackup, botID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAllMessagesForBackupRow
+	for rows.Next() {
+		var i ListAllMessagesForBackupRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
+			&i.EventID,
+			&i.DisplayText,
+			&i.CreatedAt,
+			&i.TurnID,
+			&i.TurnPosition,
+			&i.TurnMessageSeq,
+			&i.TurnVisible,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listHistoryTurnsByBot = `-- name: ListHistoryTurnsByBot :many
+SELECT id, bot_id, session_id, position, request_message_id, assistant_message_id,
+  superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at
+FROM bot_history_turns
+WHERE bot_id = $1
+ORDER BY session_id ASC, position ASC, id ASC
+`
+
+func (q *Queries) ListHistoryTurnsByBot(ctx context.Context, botID pgtype.UUID) ([]BotHistoryTurn, error) {
+	rows, err := q.db.Query(ctx, listHistoryTurnsByBot, botID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BotHistoryTurn
+	for rows.Next() {
+		var i BotHistoryTurn
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.Position,
+			&i.RequestMessageID,
+			&i.AssistantMessageID,
+			&i.SupersededByTurnID,
+			&i.SupersededAt,
+			&i.SupersededReason,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMessages = `-- name: ListMessages :many
 SELECT
   m.id,
@@ -2143,7 +2341,7 @@ FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = $1
-ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+ORDER BY m.created_at ASC, m.id ASC
 LIMIT 10000
 `
 
@@ -2568,7 +2766,7 @@ LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = $1
   AND m.created_at < $2
-ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+ORDER BY m.created_at DESC, m.id DESC
 LIMIT $3
 `
 
@@ -3089,7 +3287,7 @@ FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = $1
-ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+ORDER BY m.created_at DESC, m.id DESC
 LIMIT $2
 `
 
@@ -3374,7 +3572,7 @@ LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = $1
   AND m.created_at >= $2
-ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+ORDER BY m.created_at ASC, m.id ASC
 `
 
 type ListMessagesSinceParams struct {
@@ -4300,7 +4498,7 @@ WHERE m.bot_id = $1
       ELSE ''
     END
   ) ILIKE '%' || $7::text || '%')
-ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+ORDER BY m.created_at DESC, m.id DESC
 LIMIT $8
 `
 

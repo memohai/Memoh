@@ -771,7 +771,7 @@ func TestConvertMessagesToUITurnsParsesRawReplyMetadata(t *testing.T) {
 			Role:    "user",
 			Content: mustUIRawJSON(t, "hello"),
 		}),
-		RawMetadata: json.RawMessage(`{"benchmark_marker":"local","reply":{"message_id":"reply-raw","sender":"Original Sender","preview":"quoted text"}}`),
+		RawMetadata: json.RawMessage(`{"reply":{"message_id":"reply-raw","sender":"Original Sender","preview":"quoted text"}}`),
 		CreatedAt:   now,
 	}})
 

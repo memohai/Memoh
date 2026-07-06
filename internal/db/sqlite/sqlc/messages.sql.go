@@ -1401,7 +1401,7 @@ LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = ?1
   AND julianday(m.created_at) >= julianday(?2)
   AND (json_extract(m.metadata, '$.trigger_mode') IS NULL OR json_extract(m.metadata, '$.trigger_mode') != 'passive_sync')
-ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+ORDER BY m.created_at ASC, m.id ASC
 `
 
 type ListActiveMessagesSinceParams struct {
@@ -1569,6 +1569,145 @@ func (q *Queries) ListActiveMessagesSinceBySession(ctx context.Context, arg List
 	return items, nil
 }
 
+const listAllMessagesForBackup = `-- name: ListAllMessagesForBackup :many
+SELECT
+  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.session_mode,
+  m.runtime_type,
+  m.event_id, m.display_text, m.created_at,
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
+  m.turn_visible,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.bot_id = ?1
+ORDER BY m.created_at ASC, m.id ASC
+`
+
+type ListAllMessagesForBackupRow struct {
+	ID                      string         `json:"id"`
+	BotID                   string         `json:"bot_id"`
+	SessionID               sql.NullString `json:"session_id"`
+	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
+	SenderUserID            sql.NullString `json:"sender_user_id"`
+	ExternalMessageID       sql.NullString `json:"external_message_id"`
+	SourceReplyToMessageID  sql.NullString `json:"source_reply_to_message_id"`
+	Role                    string         `json:"role"`
+	Content                 string         `json:"content"`
+	Metadata                string         `json:"metadata"`
+	Usage                   sql.NullString `json:"usage"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
+	EventID                 sql.NullString `json:"event_id"`
+	DisplayText             sql.NullString `json:"display_text"`
+	CreatedAt               string         `json:"created_at"`
+	TurnID                  sql.NullString `json:"turn_id"`
+	TurnPosition            sql.NullInt64  `json:"turn_position"`
+	TurnMessageSeq          sql.NullInt64  `json:"turn_message_seq"`
+	TurnVisible             int64          `json:"turn_visible"`
+	SenderDisplayName       sql.NullString `json:"sender_display_name"`
+	SenderAvatarUrl         sql.NullString `json:"sender_avatar_url"`
+	Platform                sql.NullString `json:"platform"`
+}
+
+func (q *Queries) ListAllMessagesForBackup(ctx context.Context, botID string) ([]ListAllMessagesForBackupRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAllMessagesForBackup, botID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAllMessagesForBackupRow
+	for rows.Next() {
+		var i ListAllMessagesForBackupRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
+			&i.EventID,
+			&i.DisplayText,
+			&i.CreatedAt,
+			&i.TurnID,
+			&i.TurnPosition,
+			&i.TurnMessageSeq,
+			&i.TurnVisible,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listHistoryTurnsByBot = `-- name: ListHistoryTurnsByBot :many
+SELECT id, bot_id, session_id, position, request_message_id, assistant_message_id,
+  superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at
+FROM bot_history_turns
+WHERE bot_id = ?1
+ORDER BY session_id ASC, position ASC, id ASC
+`
+
+func (q *Queries) ListHistoryTurnsByBot(ctx context.Context, botID string) ([]BotHistoryTurn, error) {
+	rows, err := q.db.QueryContext(ctx, listHistoryTurnsByBot, botID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BotHistoryTurn
+	for rows.Next() {
+		var i BotHistoryTurn
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.Position,
+			&i.RequestMessageID,
+			&i.AssistantMessageID,
+			&i.SupersededByTurnID,
+			&i.SupersededAt,
+			&i.SupersededReason,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMessages = `-- name: ListMessages :many
 SELECT
   m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
@@ -1585,7 +1724,7 @@ FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = ?1
-ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+ORDER BY m.created_at ASC, m.id ASC
 LIMIT 10000
 `
 
@@ -1985,7 +2124,7 @@ LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = ?1
   AND julianday(m.created_at) < julianday(?2)
-ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+ORDER BY m.created_at DESC, m.id DESC
 LIMIT ?3
 `
 
@@ -2475,7 +2614,7 @@ FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = ?1
-ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+ORDER BY m.created_at DESC, m.id DESC
 LIMIT ?2
 `
 
@@ -2744,7 +2883,7 @@ LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = ?1
   AND julianday(m.created_at) >= julianday(?2)
-ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+ORDER BY m.created_at ASC, m.id ASC
 `
 
 type ListMessagesSinceParams struct {
@@ -3460,7 +3599,7 @@ WHERE m.bot_id = ?1
       ELSE ''
     END
   ) LIKE '%' || ?7 || '%')
-ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+ORDER BY m.created_at DESC, m.id DESC
 LIMIT ?8
 `
 

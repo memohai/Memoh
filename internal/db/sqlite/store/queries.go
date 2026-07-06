@@ -4301,6 +4301,44 @@ func (q *Queries) ListMessages(ctx context.Context, botID pgtype.UUID) ([]pgsqlc
 	return result, nil
 }
 
+func (q *Queries) ListAllMessagesForBackup(ctx context.Context, botID pgtype.UUID) ([]pgsqlc.ListAllMessagesForBackupRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteBotID string
+	if err := convertValue(botID, &sqliteBotID); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListAllMessagesForBackup(ctx, sqliteBotID)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListAllMessagesForBackupRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListHistoryTurnsByBot(ctx context.Context, botID pgtype.UUID) ([]pgsqlc.BotHistoryTurn, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteBotID string
+	if err := convertValue(botID, &sqliteBotID); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListHistoryTurnsByBot(ctx, sqliteBotID)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.BotHistoryTurn
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (q *Queries) CreateHistoryTurn(ctx context.Context, arg pgsqlc.CreateHistoryTurnParams) (pgsqlc.BotHistoryTurn, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgsqlc.BotHistoryTurn{}, errSQLiteQueriesNotConfigured
@@ -4393,6 +4431,25 @@ func createSQLiteHistoryTurnWithID(ctx context.Context, queries *sqlitesqlc.Quer
 	}
 	arg.TurnPosition = position
 	out, err := queries.CreateHistoryTurnWithID(ctx, arg)
+	if err != nil {
+		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotHistoryTurn
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) CreateHistoryTurnWithIDAtPosition(ctx context.Context, arg pgsqlc.CreateHistoryTurnWithIDAtPositionParams) (pgsqlc.BotHistoryTurn, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotHistoryTurn{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.CreateHistoryTurnWithIDAtPositionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	out, err := q.store.queries.CreateHistoryTurnWithIDAtPosition(ctx, sqliteArg)
 	if err != nil {
 		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
 	}
@@ -4578,6 +4635,20 @@ func (q *Queries) SupersedeHistoryTurn(ctx context.Context, arg pgsqlc.Supersede
 		return pgsqlc.BotHistoryTurn{}, err
 	}
 	return result, nil
+}
+
+func (q *Queries) HideMessagesByHistoryTurn(ctx context.Context, turnID pgtype.UUID) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	var sqliteTurnID sql.NullString
+	if err := convertValue(turnID, &sqliteTurnID); err != nil {
+		return err
+	}
+	if err := q.store.queries.HideMessagesByHistoryTurn(ctx, sqliteTurnID); err != nil {
+		return mapQueryErr(err)
+	}
+	return nil
 }
 
 func (q *Queries) ReplaceHistoryTurn(ctx context.Context, arg pgsqlc.ReplaceHistoryTurnParams) (pgsqlc.ReplaceHistoryTurnRow, error) {
@@ -6197,6 +6268,18 @@ func (q *Queries) SetRouteActiveSession(ctx context.Context, arg pgsqlc.SetRoute
 		return err
 	}
 	err := q.store.queries.SetRouteActiveSession(ctx, sqliteArg)
+	return mapQueryErr(err)
+}
+
+func (q *Queries) SetSessionNextTurnPosition(ctx context.Context, arg pgsqlc.SetSessionNextTurnPositionParams) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.SetSessionNextTurnPositionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return err
+	}
+	err := q.store.queries.SetSessionNextTurnPosition(ctx, sqliteArg)
 	return mapQueryErr(err)
 }
 
