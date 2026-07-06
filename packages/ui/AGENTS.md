@@ -752,7 +752,9 @@ pass with `node scripts/check-ui-contract.mjs --write-baseline`.
   `DialogContent` — that recipe string is exactly what this component
   encapsulates (dropping the `minmax(0,1fr)` overflows the cap; keeping the
   corner close in a view-swap dialog lands it ~12px off the title
-  centerline). Knobs: `width` (`'2xl'` default · `'3xl'` editor-heavy),
+  centerline). Knobs: `width` (mode-scoped default: `2xl` workbench · `xl`
+  view-swap, whose slim-row list reads sparse a rung wider; `'lg'` one-field
+  forms · `'3xl'` editor-heavy),
   `grow` (fixed `h-[80dvh]` for bodies with no intrinsic height — editors),
   `view-swap` (header is a `DialogViewHeader`, so the built-in corner close
   is disabled — the pairing is enforced by the prop, not by memory),

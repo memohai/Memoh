@@ -302,11 +302,11 @@
                   v-if="!formVisible && advancedRules.length"
                   class="flex items-center gap-3 pt-1 pb-3"
                 >
-                  <!-- Search fills the row up to the add button: this dialog is
-                       wide (2xl) and a capped search left a dead void between
-                       the two anchors that read as a layout mistake, not
-                       balance. Full-bleed search + trailing action is the
-                       arrangement that holds at this width. -->
+                  <!-- Search fills the row up to the add button: a capped
+                       search left a dead void between the two anchors that
+                       read as a layout mistake, not balance. Full-bleed
+                       search + trailing action is the arrangement that holds
+                       at panel width. -->
                   <InputGroup
                     size="sm"
                     class="min-w-0 flex-1"

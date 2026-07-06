@@ -16,9 +16,10 @@
 //   (b) view-swap  — <DialogPanel view-swap> + DialogViewHeader + DialogBody(AutoHeight)
 //
 // Props are the ONLY knobs a caller should need:
-// - width:   panel width rung. '2xl' is the house default for a focused
-//   dialog; 'lg' for a one-or-two-field form (a 2xl panel around one field
-//   reads barren); '3xl' for editor-heavy bodies (Monaco import).
+// - width:   panel width rung. Defaults are MODE-SCOPED (see effectiveWidth):
+//   2xl for workbench, xl for view-swap; 'lg' for a one-or-two-field form
+//   (a 2xl panel around one field reads barren); '3xl' for editor-heavy
+//   bodies (Monaco import).
 // - grow:    false (default) → max-h-[80dvh], panel hugs its content and the
 //   cap only bites when content is tall. true → h-[80dvh] fixed — required
 //   when the body has NO intrinsic height (an editor/iframe that must be
@@ -32,6 +33,7 @@
 //   space at the panel bottom).
 import type { DialogContentEmits, DialogContentProps } from 'reka-ui'
 import type { HTMLAttributes } from 'vue'
+import { computed } from 'vue'
 import { reactiveOmit } from '@vueuse/core'
 import { useForwardPropsEmits } from 'reka-ui'
 import { cn } from '#/lib/utils'
@@ -43,8 +45,9 @@ defineOptions({
 
 const props = withDefaults(defineProps<DialogContentProps & {
   class?: HTMLAttributes['class']
-  /** Panel width rung. Add rungs here deliberately — not per-page. */
-  width?: 'lg' | '2xl' | '3xl'
+  /** Panel width rung. Add rungs here deliberately — not per-page.
+   *  Omit to inherit the mode default: 2xl workbench · xl view-swap. */
+  width?: 'lg' | 'xl' | '2xl' | '3xl'
   /** Fixed 80dvh height for bodies with no intrinsic height (editors). */
   grow?: boolean
   /** View-swap dialog: header is a DialogViewHeader, so the built-in corner
@@ -53,7 +56,7 @@ const props = withDefaults(defineProps<DialogContentProps & {
   /** Reserve a third grid row for a DialogFooter. */
   footer?: boolean
 }>(), {
-  width: '2xl',
+  width: undefined,
   grow: false,
   viewSwap: false,
   footer: false,
@@ -66,9 +69,19 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
 // Full literal strings (not interpolation) so Tailwind's scanner sees them.
 const WIDTH = {
   'lg': 'sm:max-w-lg',
+  'xl': 'sm:max-w-xl',
   '2xl': 'sm:max-w-2xl',
   '3xl': 'sm:max-w-3xl',
 } as const
+
+// Mode-scoped default width (only when the caller omits `width`):
+// - workbench (default) → 2xl: section-formed bodies (side-by-side previews,
+//   field grids — e.g. appearance Code & diagrams) need the room.
+// - view-swap → xl, one rung narrower: its list body is a centered-title
+//   stack of slim rows + a search/add toolbar; at 2xl the rows stretch and
+//   the layout reads sparse (human-adjudicated 2026-07-06). An explicit
+//   `width` always wins — this is a default, not a cap.
+const effectiveWidth = computed(() => props.width ?? (props.viewSwap ? 'xl' : '2xl'))
 </script>
 
 <template>
@@ -78,7 +91,7 @@ const WIDTH = {
     :class="cn(
       grow ? 'h-[80dvh]' : 'max-h-[80dvh]',
       footer ? 'grid-rows-[auto_minmax(0,1fr)_auto]' : 'grid-rows-[auto_minmax(0,1fr)]',
-      WIDTH[width],
+      WIDTH[effectiveWidth],
       props.class,
     )"
   >
