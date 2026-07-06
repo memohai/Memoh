@@ -150,34 +150,15 @@
           </div>
 
           <template v-else>
-            <div
+            <ModelListRow
               v-for="(model, index) in providerModels"
               :key="model.id"
-            >
-              <div class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
-                <span class="min-w-0 truncate">
-                  <span class="text-sm font-medium">{{ model.name || model.model_id }}</span>
-                  <span
-                    v-if="model.name && model.name !== model.model_id"
-                    class="ml-2 text-xs text-muted-foreground"
-                  >{{ model.model_id }}</span>
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  :disabled="!model.id"
-                  :aria-label="$t('common.edit')"
-                  @click="openModelEditor(model)"
-                >
-                  <Settings class="size-4" />
-                </Button>
-              </div>
-              <div
-                v-if="index < providerModels.length - 1"
-                class="mx-4 border-b border-border"
-              />
-            </div>
+              :label="model.name || model.model_id || ''"
+              :meta="model.name && model.name !== model.model_id ? model.model_id : ''"
+              :last="index === providerModels.length - 1"
+              :disabled="!model.id"
+              @click="openModelEditor(model)"
+            />
           </template>
         </div>
       </section>
@@ -260,7 +241,6 @@ import {
   Spinner,
   Switch,
 } from '@memohai/ui'
-import { Settings } from 'lucide-vue-next'
 import { computed, inject, reactive, ref, watch } from 'vue'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
@@ -274,6 +254,7 @@ import SettingsShell from '@/components/settings-shell/index.vue'
 import PasswordInput from '@/components/password-input/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import ModelListRow from '@/components/settings/model-list-row.vue'
 import FieldStack from '@/components/settings/field-stack.vue'
 import FormStack from '@/components/settings/form-stack.vue'
 

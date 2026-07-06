@@ -163,29 +163,14 @@
         </div>
 
         <template v-else>
-          <div
+          <ModelListRow
             v-for="(model, index) in providerModels"
             :key="model.id"
-          >
-            <button
-              type="button"
-              class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-accent"
-              @click="openModelEditor(model)"
-            >
-              <span class="min-w-0 truncate">
-                <span class="text-sm font-medium">{{ model.name || model.model_id }}</span>
-                <span
-                  v-if="model.name && model.name !== model.model_id"
-                  class="ml-2 text-xs text-muted-foreground"
-                >{{ model.model_id }}</span>
-              </span>
-              <Settings class="size-4 shrink-0 text-muted-foreground/60" />
-            </button>
-            <div
-              v-if="index < providerModels.length - 1"
-              class="mx-4 border-b border-border"
-            />
-          </div>
+            :label="model.name || model.model_id || ''"
+            :meta="model.name && model.name !== model.model_id ? model.model_id : ''"
+            :last="index === providerModels.length - 1"
+            @click="openModelEditor(model)"
+          />
         </template>
       </SettingsSection>
 
@@ -229,7 +214,7 @@ import {
   Switch,
 } from '@memohai/ui'
 import ModelConfigEditor from './model-config-editor.vue'
-import { Eye, EyeOff, Settings } from 'lucide-vue-next'
+import { Eye, EyeOff } from 'lucide-vue-next'
 import { computed, inject, reactive, ref, watch } from 'vue'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
@@ -242,6 +227,7 @@ import CreateModel from '@/components/create-model/index.vue'
 import SettingsShell from '@/components/settings-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import ModelListRow from '@/components/settings/model-list-row.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 interface SpeechFieldSchema {
