@@ -6,7 +6,7 @@
     />
     <TextButton
       type="button"
-      class="max-w-[min(22rem,70vw)] text-caption font-normal text-muted-foreground"
+      class="max-w-[min(22rem,70vw)] text-caption font-[400] text-cop-title"
       :title="title"
       :disabled="disabled"
       @click="handleOpenSource"
