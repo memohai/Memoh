@@ -32,8 +32,12 @@ async function flush() {
 }
 
 const PREVIEW_CONTENT = `\`\`\`mermaid
-flowchart LR
-  A([Idea]) --> B{Pick a theme}
+pie
+  title Theme palette
+  "Chat" : 38
+  "Memory" : 27
+  "Tools" : 20
+  "Skills" : 15
 \`\`\``
 
 describe('appearance preview render path (real MarkdownRender + custom-id)', () => {

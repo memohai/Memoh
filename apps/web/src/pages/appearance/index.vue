@@ -321,11 +321,12 @@ enableMermaid()
 setCustomComponents({ mermaid: ThemedMermaidBlock })
 
 const MERMAID_PREVIEW_CONTENT = `\`\`\`mermaid
-flowchart LR
-  A([Idea]) --> B{Pick a theme}
-  B -->|Auto| C[Match interface]
-  B -->|Forest| D[Forest]
-  B -->|Neutral| E[Neutral]
+pie
+  title Theme palette
+  "Chat" : 38
+  "Memory" : 27
+  "Tools" : 20
+  "Skills" : 15
 \`\`\``
 
 // Hide every chrome control on the preview's mermaid block; we want just the
@@ -483,8 +484,13 @@ function commitCodeFontFamilyDraft() {
   border-radius: 0;
   background: transparent;
 }
+/* markstream windows tall diagrams into a fixed min-height preview (360px) and
+   clips the overflow, which cut off the bottom of the square-ish pie. Raise the
+   window so the whole pie (~450px at full width) shows; min-height overrides
+   markstream's inline height without fighting its resize transitions. */
 .appearance-mermaid-preview :deep(.mermaid-preview-area) {
   background: transparent;
+  min-height: 470px;
 }
 
 /* The shiki preview keeps the theme's inline background-color on <pre>, so
