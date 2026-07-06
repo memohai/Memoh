@@ -1056,6 +1056,13 @@ nests INSIDE `DialogBody`, never the other way around.
 > `bot-access.vue`. The shell primitives (`DialogViewHeader`, `DialogBody`, `AutoHeight`) are
 > already in `@memohai/ui` — compose those; if a second full list-management dialog appears,
 > consider lifting the body composition too.
+>
+> Same status for the ActionCard **entry section block** (`<section class="space-y-2.5">` +
+> the `px-2 text-label` h2) in skeleton (a): known hand-written debt, kept correct by copying
+> the skeleton verbatim. Already at 4 labeled call sites (appearance, bot-access, heartbeat,
+> compaction) — past the lift threshold; deliberately deferred out of the primitives PR as a
+> small follow-up. Whoever adds the 5th copy: stop, lift it into an owner instead (likely
+> extending the SettingsSection family).
 
 **Size controls deliberately — not "all small," not "all large."** The height ladder is
 `sm` h-8 · default h-9 · `lg` h-10. **Default (h-9, full height) is the norm**, and it is the
