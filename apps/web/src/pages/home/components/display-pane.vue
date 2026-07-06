@@ -180,6 +180,13 @@
         </template>
       </div>
     </div>
+    <!-- Stay-local (not PanePlaceholder): this is one branch of a state machine
+         shared with the prepareProgress compound card above it — the two are
+         mutually exclusive views over the same video surface, not an
+         independent empty/loading pane. It's also positioned absolutely over
+         a live <video>, which PanePlaceholder (a frameless CONTENT-area fill)
+         doesn't model. Splitting one state machine across an owner + a hand
+         card would fragment it instead of unifying it. -->
     <div
       v-if="!prepareProgress && (status !== 'connected' || !videoReady)"
       class="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center"

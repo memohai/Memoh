@@ -8,13 +8,12 @@
         <DialogTitle>{{ $t('supermarket.pluginInstallTitle') }}</DialogTitle>
       </DialogHeader>
       <div class="space-y-4 py-2">
-        <div class="space-y-1.5">
-          <label class="text-xs font-medium">{{ $t('supermarket.selectBot') }}</label>
+        <FieldStack :label="$t('supermarket.selectBot')">
           <BotSelect
             v-model="selectedBotId"
             trigger-class="w-full"
           />
-        </div>
+        </FieldStack>
 
         <div
           v-if="plugin"
@@ -77,25 +76,26 @@
           v-if="variables.length"
           class="space-y-3"
         >
-          <div
+          <FieldStack
             v-for="item in variables"
             :key="item.key"
-            class="space-y-1.5"
           >
-            <label class="text-xs font-medium">
-              {{ item.key }}
-              <span
-                v-if="item.required"
-                class="text-destructive"
-              >*</span>
-            </label>
+            <template #label>
+              <Label>
+                {{ item.key }}
+                <span
+                  v-if="item.required"
+                  class="text-destructive"
+                >*</span>
+              </Label>
+            </template>
             <Input
               v-model="variableValues[item.key || '']"
               :type="item.secret ? 'password' : 'text'"
               class="h-8 text-xs"
               :placeholder="item.description || item.key"
             />
-          </div>
+          </FieldStack>
         </div>
       </div>
       <DialogFooter>
@@ -108,13 +108,10 @@
           </Button>
         </DialogClose>
         <Button
-          :disabled="!canInstall || installing"
+          :disabled="!canInstall"
+          :loading="installing"
           @click="handleInstall"
         >
-          <Spinner
-            v-if="installing"
-            class="mr-2 size-4"
-          />
           {{ installing ? $t('supermarket.installing') : $t('supermarket.install') }}
         </Button>
       </DialogFooter>
@@ -129,7 +126,7 @@ import { useRouter } from 'vue-router'
 import { Boxes } from 'lucide-vue-next'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
-  Button, Spinner, Badge, Input, toast,
+  Button, Badge, Input, Label, toast,
 } from '@memohai/ui'
 import {
   getBotsByBotIdPluginsByIdOauthStatus,
@@ -145,6 +142,7 @@ import { client } from '@memohai/sdk/client'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { emitBotPluginsUpdated } from '@/utils/bot-plugin-events'
 import BotSelect from '@/components/bot-select/index.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
 
 const props = defineProps<{
   open: boolean

@@ -87,9 +87,7 @@
             v-if="loadingMoreSessions"
             class="flex justify-center py-3"
           >
-            <LoaderCircle
-              class="size-4 animate-spin text-muted-foreground"
-            />
+            <Spinner class="size-4" />
           </div>
 
           <div
@@ -101,44 +99,21 @@
 
           <div
             v-if="loadingChats"
-            class="flex justify-center py-4"
+            class="flex justify-center py-3"
           >
-            <LoaderCircle
-              class="size-4 animate-spin text-muted-foreground"
-            />
+            <Spinner class="size-4" />
           </div>
         </div>
       </div>
     </div>
 
-    <Dialog v-model:open="deleteSessionDialogOpen">
-      <DialogContent class="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{{ t('chat.deleteSession') }}</DialogTitle>
-          <DialogDescription>{{ t('chat.deleteSessionConfirm') }}</DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button
-            variant="outline"
-            :disabled="deleteSessionLoading"
-            @click="deleteSessionDialogOpen = false"
-          >
-            {{ t('common.cancel') }}
-          </Button>
-          <Button
-            variant="destructive"
-            :disabled="deleteSessionLoading"
-            @click="handleDeleteSession"
-          >
-            <LoaderCircle
-              v-if="deleteSessionLoading"
-              class="mr-1 size-3 animate-spin"
-            />
-            {{ t('common.confirm') }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ConfirmDeleteDialog
+      v-model:open="deleteSessionDialogOpen"
+      :title="t('chat.deleteSession')"
+      :description="t('chat.deleteSessionConfirm')"
+      :loading="deleteSessionLoading"
+      @confirm="handleDeleteSession"
+    />
 
     <Dialog v-model:open="renameSessionDialogOpen">
       <DialogContent class="sm:max-w-md">
@@ -167,12 +142,9 @@
             </Button>
             <Button
               type="submit"
-              :disabled="!renameSessionTitle.trim() || renameSessionLoading"
+              :disabled="!renameSessionTitle.trim()"
+              :loading="renameSessionLoading"
             >
-              <LoaderCircle
-                v-if="renameSessionLoading"
-                class="mr-1 size-3 animate-spin"
-              />
               {{ t('common.confirm') }}
             </Button>
           </DialogFooter>
@@ -184,7 +156,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
-import { Check, ChevronDown, LoaderCircle } from 'lucide-vue-next'
+import { Check, ChevronDown } from 'lucide-vue-next'
 import { useLocalStorage } from '@vueuse/core'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useIntersectionObserver } from '@vueuse/core'
@@ -199,6 +171,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   Button,
   TextButton,
+  Spinner,
   Input,
   DropdownMenu,
   DropdownMenuTrigger,
@@ -212,6 +185,10 @@ import {
   DialogFooter,
 } from '@memohai/ui'
 import SessionItem from './session-item.vue'
+import ConfirmDeleteDialog from '@/components/confirm-delete-dialog/index.vue'
+// The narrow native scrollbar for sidebar scroll panes — shared with
+// panel-schedule.vue, so it must not live in this file's scoped style.
+import '@/styles/sidebar-scroll.css'
 
 const { t } = useI18n()
 const chatStore = useChatStore()
@@ -364,26 +341,3 @@ async function handleDeleteSession() {
   }
 }
 </script>
-
-<style scoped>
-/* Sidebar-specific native scroll bar: narrow so it doesn't dominate the tight
- * session list. The 2px transparent border + padding-box clip insets the thumb
- * to a ~4px sliver — visible on hover/scroll but not a constant presence. The
- * extra pr-3 on the inner container keeps the session hover chip off the bar. */
-.sidebar-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklab, var(--foreground) 18%, transparent) transparent;
-}
-.sidebar-scroll::-webkit-scrollbar {
-  width: 8px;
-}
-.sidebar-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-.sidebar-scroll::-webkit-scrollbar-thumb {
-  background-color: color-mix(in oklab, var(--foreground) 18%, transparent);
-  background-clip: padding-box;
-  border: 2px solid transparent;
-  border-radius: 9999px;
-}
-</style>

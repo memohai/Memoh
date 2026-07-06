@@ -14,13 +14,10 @@
         </div>
       </Transition>
       <Button
-        :disabled="!hasChanges || saveLoading || !nameValid"
+        :disabled="!hasChanges || !nameValid"
+        :loading="saveLoading"
         @click="handleSave"
       >
-        <Spinner
-          v-if="saveLoading"
-          class="mr-1.5 size-3"
-        />
         {{ $t('bots.settings.save') }}
       </Button>
     </template>
@@ -129,7 +126,6 @@
 import {
   Button,
   Input,
-  Spinner,
 } from '@memohai/ui'
 import { Check, X, LoaderCircle } from 'lucide-vue-next'
 import { reactive, ref, computed, watch, onMounted, onActivated, nextTick } from 'vue'

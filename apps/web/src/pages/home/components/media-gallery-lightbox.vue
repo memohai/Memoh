@@ -12,7 +12,10 @@
         tabindex="-1"
         @click.self="close"
       >
-        <!-- Close -->
+        <!-- Close. 这三个圆形控制钮不走 Button shape="circle":它们是悬浮在
+             媒体遮罩上的浮层按钮,墨色随 appearance(dark=白系/frost=前景系)
+             切换,Button 的 variant 体系没有这一档;rounded-full 几何与
+             circle 令牌一致,只是 chrome 关系不同,留在本地。 -->
         <button
           ref="closeButtonRef"
           type="button"

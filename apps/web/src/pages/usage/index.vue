@@ -83,9 +83,11 @@
       </SettingsSection>
 
       <template v-if="!selectedBotId">
-        <p class="px-2 py-12 text-center text-sm text-muted-foreground">
-          {{ $t('usage.selectBotPlaceholder') }}
-        </p>
+        <Empty class="py-12">
+          <EmptyHeader>
+            <EmptyTitle>{{ $t('usage.selectBotPlaceholder') }}</EmptyTitle>
+          </EmptyHeader>
+        </Empty>
       </template>
 
       <template v-else-if="isLoading">
@@ -99,48 +101,32 @@
           <h2 class="px-2 text-[13px] font-medium text-muted-foreground">
             {{ $t('usage.overview') }}
           </h2>
-          <div class="grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-border sm:grid-cols-4">
-            <div class="bg-card px-4 py-3.5">
-              <p class="text-xs text-muted-foreground">
-                {{ $t('usage.totalInputTokens') }}
-              </p>
-              <p class="mt-1 text-xl font-semibold tabular-nums">
-                {{ formatNumber(summary.totalInputTokens) }}
-              </p>
-            </div>
-            <div class="bg-card px-4 py-3.5">
-              <p class="text-xs text-muted-foreground">
-                {{ $t('usage.totalOutputTokens') }}
-              </p>
-              <p class="mt-1 text-xl font-semibold tabular-nums">
-                {{ formatNumber(summary.totalOutputTokens) }}
-              </p>
-            </div>
-            <div class="bg-card px-4 py-3.5">
-              <p class="text-xs text-muted-foreground">
-                {{ $t('usage.avgCacheHitRate') }}
-              </p>
-              <p class="mt-1 text-xl font-semibold tabular-nums">
-                {{ summary.avgCacheHitRate }}
-              </p>
-            </div>
-            <div class="bg-card px-4 py-3.5">
-              <p class="text-xs text-muted-foreground">
-                {{ $t('usage.totalReasoningTokens') }}
-              </p>
-              <p class="mt-1 text-xl font-semibold tabular-nums">
-                {{ formatNumber(summary.totalReasoningTokens) }}
-              </p>
-            </div>
+          <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <MetricReadout
+              :label="$t('usage.totalInputTokens')"
+              :value="formatNumber(summary.totalInputTokens)"
+            />
+            <MetricReadout
+              :label="$t('usage.totalOutputTokens')"
+              :value="formatNumber(summary.totalOutputTokens)"
+            />
+            <MetricReadout
+              :label="$t('usage.avgCacheHitRate')"
+              :value="summary.avgCacheHitRate"
+            />
+            <MetricReadout
+              :label="$t('usage.totalReasoningTokens')"
+              :value="formatNumber(summary.totalReasoningTokens)"
+            />
           </div>
         </section>
 
         <template v-if="hasData">
-          <ChartCard
+          <SettingsSection
             v-if="byModelData.length > 0"
             :title="$t('usage.modelDistribution')"
           >
-            <template #action>
+            <template #actions>
               <Select v-model="modelChartType">
                 <SelectTrigger
                   size="sm"
@@ -160,56 +146,59 @@
             </template>
             <VChart
               :key="modelChartType"
+              class="p-4"
               style="height: 300px; width: 100%"
               :option="modelChartOption"
               autoresize
             />
-          </ChartCard>
+          </SettingsSection>
 
-          <ChartCard :title="$t('usage.dailyTokens')">
+          <SettingsSection :title="$t('usage.dailyTokens')">
             <VChart
+              class="p-4"
               style="height: 300px; width: 100%"
               :option="dailyTokensOption"
               autoresize
             />
-          </ChartCard>
+          </SettingsSection>
 
-          <ChartCard :title="$t('usage.cacheBreakdown')">
+          <SettingsSection :title="$t('usage.cacheBreakdown')">
             <VChart
+              class="p-4"
               style="height: 300px; width: 100%"
               :option="cacheBreakdownOption"
               autoresize
             />
-          </ChartCard>
+          </SettingsSection>
 
-          <ChartCard :title="$t('usage.cacheHitRate')">
+          <SettingsSection :title="$t('usage.cacheHitRate')">
             <VChart
+              class="p-4"
               style="height: 300px; width: 100%"
               :option="cacheHitRateOption"
               autoresize
             />
-          </ChartCard>
+          </SettingsSection>
         </template>
 
-        <p
+        <Empty
           v-else
-          class="px-2 py-12 text-center text-sm text-muted-foreground"
+          class="py-12"
         >
-          {{ $t('usage.noData') }}
-        </p>
+          <EmptyHeader>
+            <EmptyTitle>{{ $t('usage.noData') }}</EmptyTitle>
+          </EmptyHeader>
+        </Empty>
 
-        <section class="space-y-2.5">
-          <div class="flex min-h-7 items-center justify-between gap-2 px-2">
-            <h2 class="text-[13px] font-medium text-muted-foreground">
-              {{ $t('usage.records') }}
-            </h2>
-            <span
-              v-if="recordsPaginationSummary"
-              class="text-xs text-muted-foreground tabular-nums"
-            >
+        <SettingsSection :title="$t('usage.records')">
+          <template
+            v-if="recordsPaginationSummary"
+            #actions
+          >
+            <span class="text-xs text-muted-foreground tabular-nums">
               {{ recordsPaginationSummary }}
             </span>
-          </div>
+          </template>
 
           <Table>
             <TableHeader>
@@ -271,42 +260,46 @@
               </template>
             </TableBody>
           </Table>
+        </SettingsSection>
 
-          <div
-            v-if="recordsTotalPages > 1"
-            class="flex justify-end"
+        <!-- Pagination lives OUTSIDE the section card: it's the table's pager, not
+             a row of the card. Kept justify-end below the card so it doesn't fight
+             the card's edge; the record-count summary moved up into the section
+             #actions header. -->
+        <div
+          v-if="recordsTotalPages > 1"
+          class="flex justify-end"
+        >
+          <Pagination
+            :total="recordsTotal"
+            :items-per-page="RECORDS_PAGE_SIZE"
+            :sibling-count="1"
+            :page="recordsPageNumber"
+            show-edges
+            @update:page="setRecordsPage"
           >
-            <Pagination
-              :total="recordsTotal"
-              :items-per-page="RECORDS_PAGE_SIZE"
-              :sibling-count="1"
-              :page="recordsPageNumber"
-              show-edges
-              @update:page="setRecordsPage"
-            >
-              <PaginationContent v-slot="{ items }">
-                <PaginationFirst />
-                <PaginationPrevious />
-                <template
-                  v-for="(item, index) in items"
-                  :key="index"
-                >
-                  <PaginationEllipsis
-                    v-if="item.type === 'ellipsis'"
-                    :index="index"
-                  />
-                  <PaginationItem
-                    v-else
-                    :value="item.value"
-                    :is-active="item.value === recordsPageNumber"
-                  />
-                </template>
-                <PaginationNext />
-                <PaginationLast />
-              </PaginationContent>
-            </Pagination>
-          </div>
-        </section>
+            <PaginationContent v-slot="{ items }">
+              <PaginationFirst />
+              <PaginationPrevious />
+              <template
+                v-for="(item, index) in items"
+                :key="index"
+              >
+                <PaginationEllipsis
+                  v-if="item.type === 'ellipsis'"
+                  :index="index"
+                />
+                <PaginationItem
+                  v-else
+                  :value="item.value"
+                  :is-active="item.value === recordsPageNumber"
+                />
+              </template>
+              <PaginationNext />
+              <PaginationLast />
+            </PaginationContent>
+          </Pagination>
+        </div>
       </template>
     </div>
   </PageShell>
@@ -331,6 +324,9 @@ import {
   type DateRange,
   DateRangePicker,
   type DateRangePreset,
+  Empty,
+  EmptyHeader,
+  EmptyTitle,
   Pagination,
   PaginationContent,
   PaginationEllipsis,
@@ -356,8 +352,8 @@ import { getBotsQuery } from '@memohai/sdk/colada'
 import { getBotsByBotIdTokenUsage, getBotsByBotIdTokenUsageRecords } from '@memohai/sdk'
 import BotSelect from '@/components/bot-select/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
+import MetricReadout from '@/components/settings/metric-readout.vue'
 import { useChatSelectionStore } from '@/store/chat-selection'
-import ChartCard from './components/chart-card.vue'
 import type { HandlersDailyTokenUsage, HandlersModelTokenUsage, HandlersTokenUsageRecord } from '@memohai/sdk'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { formatDateTimeShort } from '@/utils/date-time'

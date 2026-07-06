@@ -1,36 +1,25 @@
 <template>
-  <!-- Overview is the bot's "lobby", modeled on a real product dashboard (à la
-       Cursor): where it's reachable (platforms), the couple of settings worth
-       surfacing (model + memory), then a usage visualization built from actual
-       data (token stat row + a daily bar chart). No filler rows that just
-       mirror the left nav. Health checks stay demoted to an issue banner +
-       dialog so a healthy bot reads calm. Outer shell mirrors the Appearance
-       page (max-w-3xl, h1.text-lg.mb-6.px-2, space-y-8); the bot tab container
-       adds px-6 pt-4 pb-4, so pt-6/pb-8 here match its pt-10/pb-12. -->
-  <div class="mx-auto max-w-3xl pt-6 pb-8">
-    <h1 class="mb-6 px-2 text-lg font-semibold">
-      {{ $t('bots.tabs.overview') }}
-    </h1>
-
+  <!-- Overview is the bot's "lobby", modeled on a real product dashboard:
+       where it's reachable (platforms), the couple of settings worth surfacing
+       (model + memory), then a usage visualization built from actual data
+       (token stat row + a daily bar chart). No filler rows that just mirror the
+       left nav. Health checks stay demoted to an issue banner + dialog so a
+       healthy bot reads calm. PageShell owns the max-w-3xl column, the tab
+       vertical rhythm, and the title, so this page never hand-rolls the shell. -->
+  <PageShell
+    variant="tab"
+    :title="$t('bots.tabs.overview')"
+  >
     <div class="space-y-8">
       <!-- Issue banner: only when the bot needs attention; opens diagnostics. -->
-      <button
+      <CalloutBanner
         v-if="hasIssue"
-        type="button"
-        class="flex w-full items-center gap-3 rounded-[var(--radius-menu-shell)] border border-destructive/30 bg-destructive/5 px-4 py-3 text-left transition-colors hover:bg-destructive/10"
+        tone="destructive"
+        clickable
+        :title="issueTitle"
+        :description="$t('bots.overview.issueHint')"
         @click="checksOpen = true"
-      >
-        <AlertCircle class="size-4 shrink-0 text-destructive" />
-        <div class="min-w-0 flex-1">
-          <p class="text-sm font-medium text-foreground">
-            {{ issueTitle }}
-          </p>
-          <p class="text-xs text-muted-foreground">
-            {{ $t('bots.overview.issueHint') }}
-          </p>
-        </div>
-        <ChevronRight class="size-4 shrink-0 text-muted-foreground" />
-      </button>
+      />
 
       <!-- Reminders: setup steps the user still needs to do, that no other
            surface already nags about (Platforms owns "connect", the banner owns
@@ -40,38 +29,26 @@
            Row mirrors the Platforms "Connect" layout exactly — a real outline
            Button on the right, not a text affordance — so the two setup nudges
            read as the same kind of action. -->
-      <section
+      <SettingsSection
         v-if="reminders.length > 0"
-        class="space-y-2.5"
+        :title="$t('bots.overview.remindersTitle')"
       >
-        <h2 class="px-2 text-[13px] font-medium text-muted-foreground">
-          {{ $t('bots.overview.remindersTitle') }}
-        </h2>
-        <div class="overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card">
-          <div
-            v-for="r in reminders"
-            :key="r.key"
-            class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0"
+        <SettingsRow
+          v-for="r in reminders"
+          :key="r.key"
+          :label="r.title"
+          :description="r.hint"
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            class="shrink-0"
+            @click="go(r.tab, r.section)"
           >
-            <div class="min-w-0">
-              <div class="text-sm font-medium text-foreground">
-                {{ r.title }}
-              </div>
-              <p class="mt-0.5 text-xs text-muted-foreground">
-                {{ r.hint }}
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              class="shrink-0"
-              @click="go(r.tab, r.section)"
-            >
-              {{ r.action }}
-            </Button>
-          </div>
-        </div>
-      </section>
+            {{ r.action }}
+          </Button>
+        </SettingsRow>
+      </SettingsSection>
 
       <!-- Platforms is deliberately low-weight: a healthy, connected bot does
            NOT need to be told "you connected Telegram" — the user did that.
@@ -87,29 +64,25 @@
         v-if="showPlatforms"
         :title="$t('bots.overview.platformsTitle')"
       >
-        <div
+        <SettingsRow
           v-if="channelsLoading && configuredChannels.length === 0"
-          class="mx-4 flex min-h-[3.75rem] items-center gap-3 py-3"
         >
-          <Skeleton class="size-7 shrink-0 rounded-md" />
-          <div class="flex-1 space-y-1.5">
-            <Skeleton class="h-3.5 w-40" />
-            <Skeleton class="h-3 w-56" />
-          </div>
-        </div>
-
-        <div
-          v-else-if="configuredChannels.length === 0"
-          class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 py-3"
-        >
-          <div class="min-w-0">
-            <div class="text-sm font-medium text-foreground">
-              {{ $t('bots.overview.platformsEmpty') }}
+          <template #leading>
+            <Skeleton class="size-7 rounded-md" />
+          </template>
+          <template #content>
+            <div class="space-y-1.5">
+              <Skeleton class="h-3.5 w-40" />
+              <Skeleton class="h-3 w-56" />
             </div>
-            <p class="mt-0.5 text-xs text-muted-foreground">
-              {{ $t('bots.overview.platformsEmptyHint') }}
-            </p>
-          </div>
+          </template>
+        </SettingsRow>
+
+        <SettingsRow
+          v-else-if="configuredChannels.length === 0"
+          :label="$t('bots.overview.platformsEmpty')"
+          :description="$t('bots.overview.platformsEmptyHint')"
+        >
           <Button
             variant="outline"
             size="sm"
@@ -118,31 +91,34 @@
           >
             {{ $t('bots.overview.connectAction') }}
           </Button>
-        </div>
+        </SettingsRow>
 
         <template v-else>
-          <div
+          <SettingsRow
             v-for="item in configuredChannels"
             :key="item.meta.type"
-            class="mx-4 flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 last:border-b-0"
           >
-            <span class="flex size-7 shrink-0 items-center justify-center">
-              <ChannelIcon
-                :channel="item.meta.type as string"
-                size="1.25em"
-              />
-            </span>
-            <span class="flex-1 truncate text-sm font-medium text-foreground">
-              {{ channelTitle(item.meta) }}
-            </span>
-            <span class="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <template #leading>
+              <span class="flex size-7 items-center justify-center">
+                <ChannelIcon
+                  :channel="item.meta.type as string"
+                  size="1.25em"
+                />
+              </span>
+            </template>
+            <template #content>
+              <span class="truncate text-sm font-medium text-foreground">
+                {{ channelTitle(item.meta) }}
+              </span>
+            </template>
+            <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
               <span
                 class="size-1.5 rounded-full"
                 :class="item.config?.disabled ? 'bg-muted-foreground/40' : 'bg-success'"
               />
               {{ item.config?.disabled ? $t('bots.channels.configured') : $t('bots.channels.statusActive') }}
             </span>
-          </div>
+          </SettingsRow>
         </template>
       </SettingsSection>
 
@@ -184,29 +160,20 @@
         </div>
 
         <!-- Metric tiles: CPU / memory / storage. '--' shows for any metric the
-             backend hasn't sampled, so a value is never faked as 0. -->
+             backend hasn't sampled, so a value is never faked as 0. Caller owns
+             the grid; each cell is a framed MetricReadout (same shape as the
+             Container tab's identical runtime tile row). -->
         <div
           v-if="runtimeHasMetrics"
           class="grid grid-cols-3 gap-3"
         >
-          <div
+          <MetricReadout
             v-for="m in runtimeMetricCards"
             :key="m.key"
-            class="rounded-[var(--radius-menu-shell)] border border-border bg-card px-3 py-2.5"
-          >
-            <p class="text-[11px] text-muted-foreground">
-              {{ m.label }}
-            </p>
-            <p class="mt-0.5 text-lg font-semibold tabular-nums text-foreground">
-              {{ m.value }}
-            </p>
-            <p
-              v-if="m.sub"
-              class="text-[11px] tabular-nums text-muted-foreground"
-            >
-              {{ m.sub }}
-            </p>
-          </div>
+            :label="m.label"
+            :value="m.value"
+            :sub="m.sub"
+          />
         </div>
 
         <!-- Why there's no metric grid: backend can't sample, or the container
@@ -288,7 +255,7 @@
         :bot-id="botId"
       />
     </div>
-  </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
@@ -303,7 +270,6 @@ import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/compon
 import VChart from 'vue-echarts'
 import { useDark } from '@vueuse/core'
 import { Badge, Button, Skeleton } from '@memohai/ui'
-import { AlertCircle, ChevronRight } from 'lucide-vue-next'
 import {
   getBotsById,
   getBotsByBotIdSettings,
@@ -319,8 +285,11 @@ import {
   type HandlersDailyTokenUsage,
 } from '@memohai/sdk'
 import BotChecksPanel from './bot-checks-panel.vue'
+import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import MetricReadout from '@/components/settings/metric-readout.vue'
+import CalloutBanner from '@/components/callout-banner/index.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'

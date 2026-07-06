@@ -54,6 +54,7 @@
 
         <form
           v-else
+          id="fetch-provider-form"
           @submit="editProvider"
         >
           <div>
@@ -62,17 +63,20 @@
               name="name"
             >
               <SettingsRow :label="$t('common.name')">
-                <FormItem class="w-80">
+                <FieldStack
+                  class="w-80"
+                  for="fetch-provider-name"
+                >
                   <FormControl>
                     <Input
+                      id="fetch-provider-name"
                       type="text"
                       :placeholder="$t('common.namePlaceholder')"
                       :aria-label="$t('common.name')"
                       v-bind="componentField"
                     />
                   </FormControl>
-                  <FormMessage />
-                </FormItem>
+                </FieldStack>
               </SettingsRow>
             </FormField>
 
@@ -89,17 +93,21 @@
               {{ $t('webSearch.unsupportedProvider') }}
             </div>
           </div>
-
-          <div class="mx-4 flex items-center justify-end border-t border-border py-3">
-            <LoadingButton
-              type="submit"
-              size="sm"
-              :loading="editLoading"
-            >
-              {{ $t('provider.saveChanges') }}
-            </LoadingButton>
-          </div>
         </form>
+
+        <template
+          v-if="!isNative"
+          #footer
+        >
+          <LoadingButton
+            type="submit"
+            form="fetch-provider-form"
+            size="sm"
+            :loading="editLoading"
+          >
+            {{ $t('provider.saveChanges') }}
+          </LoadingButton>
+        </template>
       </SettingsSection>
     </div>
   </SettingsShell>
@@ -111,8 +119,6 @@ import {
   Button,
   FormControl,
   FormField,
-  FormItem,
-  FormMessage,
   Switch,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
@@ -120,6 +126,7 @@ import LoadingButton from '@/components/loading-button/index.vue'
 import SettingsShell from '@/components/settings-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
 import JinaReaderSettings from './jina-reader-settings.vue'
 import CloudflareMarkdownSettings from './cloudflare-markdown-settings.vue'
 import { Trash2 } from 'lucide-vue-next'
@@ -143,7 +150,7 @@ const enableLoading = ref(false)
 const queryCache = useQueryCache()
 
 const providerSchema = toTypedSchema(z.object({
-  name: z.string().min(1),
+  name: z.string().min(1, t('webSearch.nameRequired')),
   provider: z.string().min(1),
 }))
 

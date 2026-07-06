@@ -46,9 +46,12 @@ import {
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ContainerCreateProgress from './container-create-progress.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import MetricReadout from '@/components/settings/metric-readout.vue'
+import CalloutBanner from '@/components/callout-banner/index.vue'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { useCapabilitiesStore } from '@/store/capabilities'
@@ -977,13 +980,13 @@ watch([activeTab, botId], ([tab]) => {
          open and visible, so there is no manual "refresh" to push onto the user. -->
 
     <!-- Loading -->
-    <div
+    <InlineLoadingRow
       v-if="containerLoading && !containerInfo && !containerMissing"
-      class="flex items-center gap-2 px-2 py-8 text-sm text-muted-foreground"
+      size="md"
+      class="px-2 py-8"
     >
-      <Spinner class="size-4" />
-      <span>{{ $t('common.loading') }}</span>
-    </div>
+      {{ $t('common.loading') }}
+    </InlineLoadingRow>
 
     <!-- ────────────── EMPTY STATE (no workspace) ────────────── -->
     <template v-else-if="containerMissing">
@@ -1002,6 +1005,10 @@ watch([activeTab, botId], ([tab]) => {
            single guiding action — creating is a deliberate step, so it opens a
            focused dialog rather than dumping a form onto the root. -->
       <SettingsSection>
+        <!-- ui-allow-shape: empty-state block, not a data row — a centered
+             (flex-col, py-12) title + description + single CTA that fills the card
+             frame. A SettingsRow is a horizontal label↔control pair; this is a
+             different relationship (a vertical empty state), so it stays hand-written. -->
         <div class="flex min-h-[3.75rem] flex-col items-center justify-center gap-4 px-4 py-12 text-center">
           <div>
             <p class="text-sm font-medium text-foreground">
@@ -1032,35 +1039,23 @@ watch([activeTab, botId], ([tab]) => {
           class="space-y-3"
         >
           <!-- Legacy architecture -->
-          <div
+          <CalloutBanner
             v-if="isLegacy"
-            class="flex flex-col gap-3 rounded-[var(--radius-menu-shell)] border border-warning-border bg-warning-soft px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+            tone="warning"
+            :title="$t('bots.container.refactored.issueLegacyTitle')"
+            :description="$t('bots.container.refactored.issueLegacyHint')"
           >
-            <div class="flex min-w-0 items-start gap-3">
-              <AlertCircle class="mt-0.5 size-4 shrink-0 text-warning-foreground" />
-              <div class="min-w-0">
-                <p class="text-sm font-medium text-foreground">
-                  {{ $t('bots.container.refactored.issueLegacyTitle') }}
-                </p>
-                <p class="mt-0.5 text-xs text-muted-foreground">
-                  {{ $t('bots.container.refactored.issueLegacyHint') }}
-                </p>
-              </div>
-            </div>
             <Button
               variant="outline"
               size="sm"
               class="shrink-0 self-start sm:self-auto"
               :disabled="containerBusy || botLifecyclePending"
+              :loading="containerAction === 'recreate'"
               @click="handleRecreateContainer"
             >
-              <Spinner
-                v-if="containerAction === 'recreate'"
-                class="size-4"
-              />
               {{ $t('bots.container.legacyRecreate') }}
             </Button>
-          </div>
+          </CalloutBanner>
 
           <!-- Recreate progress -->
           <ContainerCreateProgress
@@ -1071,61 +1066,46 @@ watch([activeTab, botId], ([tab]) => {
           />
 
           <!-- Resource-limits pending-rebuild -->
-          <div
+          <CalloutBanner
             v-if="resourceLimitApplyPromptVisible"
-            class="flex flex-col gap-3 rounded-[var(--radius-menu-shell)] border border-warning-border bg-warning-soft px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+            tone="warning"
+            :title="$t('bots.container.refactored.issueRecreateTitle')"
+            :description="$t('bots.container.refactored.issueRecreateHint')"
           >
-            <div class="min-w-0">
-              <p class="text-sm font-medium text-foreground">
-                {{ $t('bots.container.refactored.issueRecreateTitle') }}
-              </p>
-              <p class="mt-0.5 text-xs text-muted-foreground">
-                {{ $t('bots.container.refactored.issueRecreateHint') }}
-              </p>
-            </div>
-            <div class="flex shrink-0 items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                :disabled="containerBusy || botLifecyclePending"
-                @click="resourceLimitApplyPromptVisible = false"
-              >
-                {{ $t('bots.container.resourceLimits.saveForLater') }}
-              </Button>
-              <ConfirmPopover
-                :title="$t('bots.container.resourceLimits.recreateConfirmTitle')"
-                :message="$t('bots.container.resourceLimits.recreateConfirm')"
-                :confirm-text="$t('bots.container.resourceLimits.recreateNow')"
-                :loading="containerAction === 'recreate'"
-                @confirm="handleApplyResourceLimitsNow"
-              >
-                <template #trigger>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    :disabled="containerBusy || botLifecyclePending"
-                  >
-                    <Spinner
-                      v-if="containerAction === 'recreate'"
-                      class="size-4"
-                    />
-                    {{ $t('bots.container.resourceLimits.recreateNow') }}
-                  </Button>
-                </template>
-              </ConfirmPopover>
-            </div>
-          </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              :disabled="containerBusy || botLifecyclePending"
+              @click="resourceLimitApplyPromptVisible = false"
+            >
+              {{ $t('bots.container.resourceLimits.saveForLater') }}
+            </Button>
+            <ConfirmPopover
+              :title="$t('bots.container.resourceLimits.recreateConfirmTitle')"
+              :message="$t('bots.container.resourceLimits.recreateConfirm')"
+              :confirm-text="$t('bots.container.resourceLimits.recreateNow')"
+              :loading="containerAction === 'recreate'"
+              @confirm="handleApplyResourceLimitsNow"
+            >
+              <template #trigger>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  :disabled="containerBusy || botLifecyclePending"
+                  :loading="containerAction === 'recreate'"
+                >
+                  {{ $t('bots.container.resourceLimits.recreateNow') }}
+                </Button>
+              </template>
+            </ConfirmPopover>
+          </CalloutBanner>
 
-          <!-- Storage soft-limit exceeded -->
-          <div
+          <!-- Storage soft-limit exceeded: a title-only warning, no action -->
+          <CalloutBanner
             v-if="storageSoftLimitExceeded"
-            class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-warning-border bg-warning-soft px-4 py-3"
-          >
-            <AlertCircle class="size-4 shrink-0 text-warning-foreground" />
-            <p class="text-sm text-warning-foreground">
-              {{ $t('bots.container.resourceLimits.storageSoftExceeded') }}
-            </p>
-          </div>
+            tone="warning"
+            :title="$t('bots.container.resourceLimits.storageSoftExceeded')"
+          />
         </div>
 
         <!-- ─── Container: status + usage, the one thing a glance comes for ─── -->
@@ -1150,31 +1130,25 @@ watch([activeTab, botId], ([tab]) => {
             </span>
           </div>
 
-          <!-- Three sibling cards with breathing room — calmer than hairline-joined
-               tiles for a three-value readout. -->
+          <!-- Three sibling tiles with breathing room — calmer than hairline-joined
+               tiles for a three-value readout. Caller owns the grid; each cell is a
+               framed MetricReadout. -->
           <div
             v-if="runtimeHasMetrics"
             class="grid grid-cols-3 gap-3"
           >
-            <div
+            <MetricReadout
               v-for="m in runtimeMetricCards"
               :key="m.key"
-              class="min-w-0 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3.5"
-            >
-              <p class="text-xs text-muted-foreground">
-                {{ m.label }}
-              </p>
-              <p class="mt-1 text-xl font-semibold tabular-nums text-foreground">
-                {{ m.value }}
-              </p>
-              <p
-                v-if="m.sub"
-                class="mt-0.5 truncate text-caption tabular-nums text-muted-foreground"
-              >
-                {{ m.sub }}
-              </p>
-            </div>
+              :label="m.label"
+              :value="m.value"
+              :sub="m.sub"
+            />
           </div>
+          <!-- ui-allow-shape: a standalone note card (its own rounded border + bg-card
+               surface, px-4 not the section's mx-4), shown when runtime metrics are
+               unavailable. Not a section-child SettingsRow: it's a self-contained
+               card, a different surface relationship. Row height only for rhythm. -->
           <div
             v-else
             class="flex min-h-[3.75rem] items-center rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3 text-sm text-muted-foreground"
@@ -1232,12 +1206,9 @@ watch([activeTab, botId], ([tab]) => {
               variant="outline"
               size="sm"
               :disabled="containerBusy || botLifecyclePending"
+              :loading="containerAction === 'start' || containerAction === 'stop'"
               @click="isContainerTaskRunning ? (stopDialogOpen = true) : handleStartContainer()"
             >
-              <Spinner
-                v-if="containerAction === 'start' || containerAction === 'stop'"
-                class="size-4"
-              />
               {{ isContainerTaskRunning ? $t('bots.container.actions.stop') : $t('bots.container.actions.start') }}
             </Button>
           </SettingsRow>
@@ -1382,12 +1353,9 @@ watch([activeTab, botId], ([tab]) => {
             </DialogClose>
             <Button
               type="submit"
-              :disabled="containerAction === 'create' || botLifecyclePending"
+              :disabled="botLifecyclePending"
+              :loading="containerAction === 'create'"
             >
-              <Spinner
-                v-if="containerAction === 'create'"
-                class="size-4"
-              />
               {{ $t('bots.container.refactored.createSubmit') }}
             </Button>
           </DialogFooter>
@@ -1455,12 +1423,9 @@ watch([activeTab, botId], ([tab]) => {
             </DialogClose>
             <Button
               type="submit"
-              :disabled="resourceLimitsSaving || botLifecyclePending"
+              :disabled="botLifecyclePending"
+              :loading="resourceLimitsSaving"
             >
-              <Spinner
-                v-if="resourceLimitsSaving"
-                class="size-4"
-              />
               {{ $t('bots.container.resourceLimits.save') }}
             </Button>
           </DialogFooter>
@@ -1499,11 +1464,8 @@ watch([activeTab, botId], ([tab]) => {
                   variant="outline"
                   size="sm"
                   :disabled="containerBusy || botLifecyclePending"
+                  :loading="containerAction === 'restore'"
                 >
-                  <Spinner
-                    v-if="containerAction === 'restore'"
-                    class="size-4"
-                  />
                   {{ $t('bots.container.actions.restoreData') }}
                 </Button>
               </template>
@@ -1526,12 +1488,9 @@ watch([activeTab, botId], ([tab]) => {
               />
               <Button
                 :disabled="containerBusy || snapshotsLoading || botLifecyclePending"
+                :loading="containerAction === 'snapshot'"
                 @click="handleCreateSnapshot"
               >
-                <Spinner
-                  v-if="containerAction === 'snapshot'"
-                  class="size-4"
-                />
                 {{ $t('bots.container.actions.snapshot') }}
               </Button>
             </div>
@@ -1556,6 +1515,11 @@ watch([activeTab, botId], ([tab]) => {
               v-else
               class="overflow-hidden rounded-[var(--radius-menu-shell)] border border-border"
             >
+              <!-- ui-allow-shape: a row INSIDE a self-contained bordered card
+                   (px-4 within the card, not the section's mx-4). SettingsRow is a
+                   direct child of a section surface; these snapshot rows live one
+                   level in, inside their own rounded frame — a different container
+                   relationship, so they stay hand-written. -->
               <div
                 v-for="item in displayedSnapshots"
                 :key="`${item.snapshotter}:${item.runtime_snapshot_name || item.name}`"
@@ -1580,11 +1544,8 @@ watch([activeTab, botId], ([tab]) => {
                       variant="ghost"
                       size="sm"
                       :disabled="containerBusy || botLifecyclePending"
+                      :loading="containerAction === 'rollback' && rollbackVersion === item.version"
                     >
-                      <Spinner
-                        v-if="containerAction === 'rollback' && rollbackVersion === item.version"
-                        class="size-4"
-                      />
                       {{ $t('bots.container.actions.rollback') }}
                     </Button>
                   </template>
@@ -1692,12 +1653,9 @@ watch([activeTab, botId], ([tab]) => {
           </DialogClose>
           <Button
             :disabled="containerBusy || botLifecyclePending"
+            :loading="containerAction === 'stop'"
             @click="confirmStopContainer"
           >
-            <Spinner
-              v-if="containerAction === 'stop'"
-              class="size-4"
-            />
             {{ $t('bots.container.actions.stop') }}
           </Button>
         </DialogFooter>
@@ -1747,12 +1705,9 @@ watch([activeTab, botId], ([tab]) => {
           <Button
             variant="destructive"
             :disabled="containerBusy || botLifecyclePending"
+            :loading="containerAction === 'delete' || containerAction === 'delete-preserve'"
             @click="confirmDeleteContainer"
           >
-            <Spinner
-              v-if="containerAction === 'delete' || containerAction === 'delete-preserve'"
-              class="size-4"
-            />
             {{ $t('bots.container.actions.delete') }}
           </Button>
         </DialogFooter>

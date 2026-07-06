@@ -1,18 +1,16 @@
 <template>
-  <div class="flex flex-col relative h-full w-full">
-    <div class="flex-1 min-h-0">
-      <DisplayPane
-        v-if="currentBotId"
-        :key="currentBotId"
-        :bot-id="currentBotId"
-        :tab-id="props.params.api.id"
-        :title="props.params.api.title ?? ''"
-        :active="visible"
-        @close="props.params.api.close()"
-        @snapshot="handleSnapshot"
-      />
-    </div>
-  </div>
+  <DockPanelFrame>
+    <DisplayPane
+      v-if="currentBotId"
+      :key="currentBotId"
+      :bot-id="currentBotId"
+      :tab-id="props.params.api.id"
+      :title="props.params.api.title ?? ''"
+      :active="visible"
+      @close="props.params.api.close()"
+      @snapshot="handleSnapshot"
+    />
+  </DockPanelFrame>
 </template>
 
 <script setup lang="ts">
@@ -22,6 +20,7 @@ import { useChatStore } from '@/store/chat-list'
 import { useDisplaySnapshotsStore } from '@/store/display-snapshots'
 import DisplayPane from '../display-pane.vue'
 import { usePanelVisible } from './use-panel-visible'
+import DockPanelFrame from './panel-frame.vue'
 
 // No KeepAlive/v-if: the WebRTC video element must stay attached. The panel
 // is added with renderer 'always'.

@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { ChevronRight } from 'lucide-vue-next'
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import {
-  Button, Badge, Empty, EmptyDescription, EmptyHeader, EmptyTitle, Spinner, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Input, Slider,
+  Button, Badge, Empty, EmptyDescription, EmptyHeader, EmptyTitle, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Input, Slider,
   Pagination, PaginationContent, PaginationEllipsis,
   PaginationFirst, PaginationItem, PaginationLast,
   PaginationNext, PaginationPrevious,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import PageShell from '@/components/page-shell/index.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import ModelSelect from './model-select.vue'
 import {
   getBotsByBotIdSettings, putBotsByBotIdSettings,
@@ -23,6 +23,8 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import ExpandableSettingsRow from '@/components/settings/expandable-row.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
 import type { Ref } from 'vue'
 
 const props = defineProps<{
@@ -297,39 +299,27 @@ onBeforeUnmount(() => {
           </SettingsRow>
 
           <!-- Model is a power-user override (it defaults to the bot's chat model), so it
-               stays folded behind Advanced rather than occupying space the moment you enable.
-               Canonical settings-card disclosure: label left, outline button with a chevron
-               that rotates 90° on the right (same as the channel Advanced / Access cards). -->
-          <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
-            <span class="text-sm font-medium text-foreground">{{ $t('bots.compaction.advanced') }}</span>
-            <Button
-              variant="outline"
-              size="sm"
-              class="shrink-0"
-              @click="advancedOpen = !advancedOpen"
-            >
-              <ChevronRight
-                class="size-4 transition-transform"
-                :class="advancedOpen ? 'rotate-90' : ''"
-              />
-              {{ advancedOpen ? $t('common.collapse') : $t('common.expand') }}
-            </Button>
-          </div>
-
-          <SettingsRow
-            v-if="advancedOpen"
-            :label="$t('bots.settings.compactionModel')"
-            :description="$t('bots.settings.compactionModelDescription')"
+               stays folded behind Advanced rather than occupying space the moment you enable. -->
+          <ExpandableSettingsRow
+            v-model:open="advancedOpen"
+            :label="$t('bots.compaction.advanced')"
           >
-            <ModelSelect
-              v-model="settingsForm.compaction_model_id"
-              :models="models"
-              :providers="providers"
-              model-type="chat"
-              :placeholder="$t('bots.settings.compactionModelPlaceholder')"
-              class="w-72 shrink-0"
-            />
-          </SettingsRow>
+            <template #expanded>
+              <FieldStack
+                :label="$t('bots.settings.compactionModel')"
+                :help="$t('bots.settings.compactionModelDescription')"
+              >
+                <ModelSelect
+                  v-model="settingsForm.compaction_model_id"
+                  :models="models"
+                  :providers="providers"
+                  model-type="chat"
+                  :placeholder="$t('bots.settings.compactionModelPlaceholder')"
+                  class="w-72"
+                />
+              </FieldStack>
+            </template>
+          </ExpandableSettingsRow>
         </template>
 
         <!-- Turning the toggle off is a pending change, not an instant stop — say so, so the
@@ -345,9 +335,9 @@ onBeforeUnmount(() => {
 
         <!-- Save is the result of pending changes, not a permanent fixture: the footer only
              exists while there is something to commit. -->
-        <div
+        <template
           v-if="settingsChanged"
-          class="flex items-center justify-end gap-2 px-4 py-3"
+          #footer
         >
           <Button
             variant="ghost"
@@ -359,26 +349,19 @@ onBeforeUnmount(() => {
           </Button>
           <Button
             size="sm"
-            :disabled="isSaving"
+            :loading="isSaving"
             @click="handleSaveSettings"
           >
-            <Spinner
-              v-if="isSaving"
-              class="size-3"
-            />
             {{ $t('common.saveChanges') }}
           </Button>
-        </div>
+        </template>
       </SettingsSection>
 
       <SettingsSection :title="$t('bots.compaction.title')">
-        <div
+        <SettingsRow
           v-if="totalCount > 0"
-          class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3"
+          :label="$t('common.status')"
         >
-          <span class="text-sm font-medium text-foreground">
-            {{ $t('common.status') }}
-          </span>
           <Select v-model="statusFilter">
             <SelectTrigger class="w-32">
               <SelectValue />
@@ -398,15 +381,18 @@ onBeforeUnmount(() => {
               </SelectItem>
             </SelectContent>
           </Select>
-        </div>
+        </SettingsRow>
 
-        <div
+        <!-- ui-allow-shape: loading skeleton — matches the log-row height so the
+             card reads as "a list row loading", same family form as bot-email /
+             bot-plugins, instead of a tall half-empty box. -->
+        <InlineLoadingRow
           v-if="isLoading && logs.length === 0"
-          class="mx-4 flex min-h-[12rem] items-center justify-center gap-2 py-12 text-sm text-muted-foreground"
+          size="md"
+          class="mx-4 min-h-[3.75rem] border-b border-border py-3 last:border-b-0"
         >
-          <Spinner class="size-4" />
           {{ $t('common.loading') }}
-        </div>
+        </InlineLoadingRow>
 
         <Empty
           v-else-if="!isLoading && totalCount === 0 && !savedEnabled"
@@ -569,15 +555,10 @@ onBeforeUnmount(() => {
         v-if="logs.length > 0"
         :title="$t('common.dangerZone')"
       >
-        <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 py-3">
-          <div class="min-w-0">
-            <div class="text-sm font-medium text-foreground">
-              {{ $t('bots.compaction.clearLogs') }}
-            </div>
-            <p class="mt-0.5 text-xs text-muted-foreground">
-              {{ $t('bots.compaction.clearConfirm') }}
-            </p>
-          </div>
+        <SettingsRow
+          :label="$t('bots.compaction.clearLogs')"
+          :description="$t('bots.compaction.clearConfirm')"
+        >
           <ConfirmPopover
             :message="$t('bots.compaction.clearConfirm')"
             :loading="isClearing"
@@ -588,17 +569,13 @@ onBeforeUnmount(() => {
               <Button
                 variant="destructive"
                 size="sm"
-                :disabled="isClearing"
+                :loading="isClearing"
               >
-                <Spinner
-                  v-if="isClearing"
-                  class="size-3"
-                />
                 {{ $t('bots.compaction.clearLogs') }}
               </Button>
             </template>
           </ConfirmPopover>
-        </div>
+        </SettingsRow>
       </SettingsSection>
     </div>
   </PageShell>

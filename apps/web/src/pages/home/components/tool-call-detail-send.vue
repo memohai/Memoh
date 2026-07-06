@@ -43,12 +43,9 @@
       >{{ replyTo }}</span>
     </div>
 
-    <p
-      v-if="!text && !attachments.length && !replyTo"
-      class="text-xs text-muted-foreground italic"
-    >
+    <EmptyRow v-if="!text && !attachments.length && !replyTo">
       {{ t('chat.tools.detail.noContent') }}
-    </p>
+    </EmptyRow>
   </div>
 </template>
 
@@ -57,6 +54,7 @@ import { computed } from 'vue'
 import { CornerDownRight, Paperclip } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
+import EmptyRow from './tool-detail/empty-row.vue'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()

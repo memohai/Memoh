@@ -7,12 +7,10 @@
     :bot-name="currentBot?.display_name || currentBot?.name || ''"
     :active="sidebarView === 'files' && workbenchOpen"
   />
-  <div
+  <PanePlaceholder
     v-else
-    class="flex items-center justify-center h-full text-xs text-muted-foreground"
-  >
-    {{ t('chat.selectBotHint') }}
-  </div>
+    :title="t('chat.selectBotHint')"
+  />
 </template>
 
 <script setup lang="ts">
@@ -22,6 +20,7 @@ import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { hasBotPermission } from '@/utils/bot-permissions'
+import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 import FilesPane from './files-pane.vue'
 
 const { t } = useI18n()

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Memoh Spacing"
+  short_description: "Map and define Memoh spacing roles"
+  default_prompt: "Use $memoh-spacing to map spacing relationships in a Memoh interface slice and propose semantic roles."

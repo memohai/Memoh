@@ -68,25 +68,20 @@
           :key="bot.id"
           :bot="bot"
         />
-        <!-- Create tile: same shell as a BotCard, but its body sits at the
-             canvas level (bg-background) instead of floating like a real card
-             (bg-card) — lower visual weight purely through elevation, no
-             structural change. Hover lifts it up to the card surface. -->
-        <button
+        <!-- Create tile: the add companion, so a single bot is never a lonely
+             card. Hidden while filtering. -->
+        <PersonaTile
           v-if="!searchText"
-          type="button"
-          class="flex w-52 flex-col items-center rounded-[var(--radius-menu-shell)] border border-border bg-background p-5 text-center text-muted-foreground transition-colors hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          variant="add"
+          :name="$t('bots.createBot')"
           @click="router.push({ name: 'bot-new' })"
         >
-          <div class="flex size-14 shrink-0 items-center justify-center rounded-full bg-[color:var(--accent-gray-soft-active)]">
-            <Plus class="size-6" />
-          </div>
-          <div class="mt-3 w-full min-w-0">
-            <div class="truncate text-sm font-medium">
-              {{ $t('bots.createBot') }}
+          <template #media>
+            <div class="flex size-14 items-center justify-center rounded-full bg-[color:var(--accent-gray-soft-active)]">
+              <Plus class="size-6" />
             </div>
-          </div>
-        </button>
+          </template>
+        </PersonaTile>
       </div>
 
       <!-- Bots exist but the search matched none -->

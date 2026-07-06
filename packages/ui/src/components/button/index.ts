@@ -80,10 +80,22 @@ export const buttonVariants = cva(
         // chrome from style.css applies unchanged.
         text: 'h-auto gap-1.5 rounded-sm px-1.5 py-[0.3125rem] leading-none [&_svg:not([class*=size-])]:size-3',
       },
+      // SHAPE is orthogonal to size: size sets the box (height + padding), shape
+      // only overrides the corner. `circle` turns any size into a pill/round by
+      // forcing rounded-full over the size's rounded-md — the house pattern for a
+      // round icon button (paired with size="icon"/"icon-sm") was to hand-write
+      // `class="rounded-full"` on every call site; this makes it a first-class prop
+      // so the corner is owned, not re-typed. Because buttonClass runs through cn()
+      // (tailwind-merge), the later rounded-full wins over any earlier rounded-md.
+      shape: {
+        default: '',
+        circle: 'rounded-full',
+      },
     },
     defaultVariants: {
       variant: 'default',
       size: 'default',
+      shape: 'default',
     },
   },
 )
@@ -115,3 +127,8 @@ export const buttonSizeKeys = [
   'icon-lg',
   'text',
 ] as const satisfies readonly NonNullable<ButtonVariants['size']>[]
+
+export const buttonShapeKeys = [
+  'default',
+  'circle',
+] as const satisfies readonly NonNullable<ButtonVariants['shape']>[]

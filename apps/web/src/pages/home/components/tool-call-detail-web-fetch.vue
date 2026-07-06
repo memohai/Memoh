@@ -24,16 +24,12 @@
     >
       {{ excerpt }}
     </div>
-    <pre
-      v-if="contentPreview"
-      class="text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
-    >{{ contentPreview }}</pre>
-    <p
-      v-if="!format && !title && !excerpt && !contentPreview"
-      class="text-xs text-muted-foreground italic"
-    >
+    <PreviewBox v-if="contentPreview">
+      {{ contentPreview }}
+    </PreviewBox>
+    <EmptyRow v-if="!format && !title && !excerpt && !contentPreview">
       {{ t('chat.tools.detail.noPreview') }}
-    </p>
+    </EmptyRow>
   </div>
 </template>
 
@@ -41,6 +37,8 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
+import EmptyRow from './tool-detail/empty-row.vue'
+import PreviewBox from './tool-detail/preview-box.vue'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()

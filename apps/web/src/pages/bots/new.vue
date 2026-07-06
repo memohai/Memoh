@@ -305,9 +305,9 @@
         </Button>
         <Button
           type="submit"
-          :disabled="!canSubmit || isCreateFlowBlocked"
+          :disabled="!canSubmit"
+          :loading="isCreateFlowBlocked"
         >
-          <Spinner v-if="isCreateFlowBlocked" />
           {{ isCreateFlowBlocked ? $t('bots.createBotSettingUp') : $t('bots.createBot') }}
         </Button>
       </div>
@@ -335,7 +335,6 @@ import {
   SelectTrigger,
   SelectValue,
   Separator,
-  Spinner,
   Tabs,
   TabsList,
   TabsTrigger,

@@ -163,16 +163,12 @@
           />
         </SettingsRow>
 
-        <div class="mx-4 border-b border-border py-3 last:border-b-0">
-          <div class="min-w-0">
-            <div class="text-sm font-medium text-foreground">
-              {{ t('settings.appearance.codeHighlight') }}
-            </div>
-            <p class="mt-0.5 text-xs text-muted-foreground">
-              {{ t('settings.appearance.codeHighlightDescription') }}
-            </p>
-          </div>
-          <div class="mt-3 grid gap-3 sm:grid-cols-2">
+        <SettingsRow
+          stack="always"
+          :label="t('settings.appearance.codeHighlight')"
+          :description="t('settings.appearance.codeHighlightDescription')"
+        >
+          <div class="grid gap-3 sm:grid-cols-2">
             <div class="space-y-2">
               <SearchableSelectPopover
                 v-model="shikiThemeLightSelection"
@@ -222,10 +218,18 @@
               </div>
             </div>
           </div>
-        </div>
+        </SettingsRow>
       </SettingsSection>
 
       <SettingsSection :title="t('settings.appearance.diagrams')">
+        <!-- Stay-local (adjudicated 2026-07-06 after a visual regression): this is a
+             THREE-piece row — (label+description | Select) on one line, plus a
+             full-row-width diagram preview below. SettingsRow models two pieces;
+             putting the preview inside #content bounds it to the content column
+             (left of the Select), so the centered diagram drifts left of the card's
+             axis. One caller only — if a second full-bleed-preview row ever appears,
+             consider a SettingsRow #below slot; until then the shape stays
+             hand-written. -->
         <div class="mx-4 border-b border-border py-3 last:border-b-0">
           <div class="flex min-h-[2.25rem] items-center justify-between gap-4">
             <div class="min-w-0">

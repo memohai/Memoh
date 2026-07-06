@@ -1,12 +1,11 @@
 <template>
   <div class="mx-auto max-w-5xl px-4 py-6 md:px-6 md:py-8">
-    <div
+    <InlineLoadingRow
       v-if="loading"
-      class="flex items-center justify-center py-16 text-xs text-muted-foreground"
+      class="justify-center py-16"
     >
-      <Spinner class="mr-2" />
       {{ $t('common.loading') }}
-    </div>
+    </InlineLoadingRow>
 
     <div
       v-else-if="!plugin"
@@ -27,59 +26,27 @@
     </div>
 
     <template v-else>
-      <div class="mb-6 flex items-center justify-between gap-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          class="-ml-2"
-          @click="router.push({ name: 'supermarket' })"
-        >
-          <ArrowLeft class="size-4" />
-          {{ $t('common.back') }}
-        </Button>
-        <Button
-          size="sm"
-          @click="installDialogOpen = true"
-        >
-          <Download class="size-4" />
-          {{ $t('supermarket.installToBot') }}
-        </Button>
-      </div>
-
-      <header class="space-y-4">
-        <div class="flex items-start gap-4">
-          <div class="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-background shadow-sm">
-            <ProviderIcon
-              v-if="iconValue"
-              :icon="iconValue"
-              size="34"
-              class="size-9 object-contain"
-            >
-              <PackageOpen class="size-8 text-muted-foreground" />
-            </ProviderIcon>
-            <PackageOpen
-              v-else
-              class="size-8 text-muted-foreground"
-            />
-          </div>
-          <div class="min-w-0 flex-1">
-            <h1 class="break-words text-3xl font-semibold leading-tight">
-              {{ plugin.name || plugin.id }}
-            </h1>
-          </div>
-        </div>
-
-        <div class="flex flex-wrap gap-1.5">
-          <Badge
-            v-for="tag in plugin.tags"
-            :key="tag"
-            variant="secondary"
-            size="sm"
+      <MarketDetailHeader
+        :name="plugin.name || plugin.id"
+        :tags="plugin.tags"
+        @back="router.push({ name: 'supermarket' })"
+        @install="installDialogOpen = true"
+      >
+        <template #icon>
+          <ProviderIcon
+            v-if="iconValue"
+            :icon="iconValue"
+            size="34"
+            class="size-9 object-contain"
           >
-            {{ tag }}
-          </Badge>
-        </div>
-      </header>
+            <PackageOpen class="size-8 text-muted-foreground" />
+          </ProviderIcon>
+          <PackageOpen
+            v-else
+            class="size-8 text-muted-foreground"
+          />
+        </template>
+      </MarketDetailHeader>
 
       <p class="mt-8 max-w-4xl text-base leading-7 text-muted-foreground">
         {{ plugin.description || $t('supermarket.noDescription') }}
@@ -89,23 +56,25 @@
         v-if="plugin.mcps?.length"
         class="mt-8"
       >
-        <h2 class="text-lg font-semibold">
+        <h2 class="mb-4 text-lg font-semibold">
           {{ $t('supermarket.mcps') }}
           <span class="ml-1 text-muted-foreground">{{ plugin.mcps.length }}</span>
         </h2>
-        <div class="mt-4 divide-y divide-border/60">
-          <div
+        <SettingsSection>
+          <SettingsRow
             v-for="mcp in plugin.mcps"
             :key="mcp.key || mcp.name"
-            class="flex min-w-0 items-center gap-3 py-4"
+            align="start"
           >
-            <div class="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background">
-              <Plug class="size-5 text-muted-foreground" />
-            </div>
-            <div class="min-w-0 flex-1">
+            <template #leading>
+              <div class="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background">
+                <Plug class="size-5 text-muted-foreground" />
+              </div>
+            </template>
+            <template #content>
               <div class="flex flex-wrap items-center gap-2">
                 <p
-                  class="min-w-0 truncate font-medium"
+                  class="min-w-0 truncate text-sm font-medium text-foreground"
                   :title="mcp.display_name || mcp.name || mcp.key"
                 >
                   {{ mcp.display_name || mcp.name || mcp.key }}
@@ -118,47 +87,49 @@
                   {{ authTypeLabel(authTypeForMcp(mcp.key)) }}
                 </Badge>
               </div>
-              <p class="mt-1 break-words text-sm text-muted-foreground">
+              <p class="mt-0.5 break-words text-xs text-muted-foreground">
                 {{ mcp.description || mcp.url || mcp.command || $t('supermarket.noDescription') }}
               </p>
-            </div>
-          </div>
-        </div>
+            </template>
+          </SettingsRow>
+        </SettingsSection>
       </section>
 
       <section
         v-if="pluginSkills.length"
         class="mt-8"
       >
-        <h2 class="text-lg font-semibold">
+        <h2 class="mb-4 text-lg font-semibold">
           {{ $t('supermarket.skillsSection') }}
           <span class="ml-1 text-muted-foreground">{{ pluginSkills.length }}</span>
         </h2>
-        <div class="mt-4 divide-y divide-border/60">
-          <div
+        <SettingsSection>
+          <SettingsRow
             v-for="skill in pluginSkills"
             :key="skillKey(skill)"
-            class="flex min-w-0 items-center gap-3 py-4"
+            align="start"
           >
-            <div class="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background">
-              <Boxes class="size-5 text-muted-foreground" />
-            </div>
-            <div class="min-w-0 flex-1">
+            <template #leading>
+              <div class="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background">
+                <Boxes class="size-5 text-muted-foreground" />
+              </div>
+            </template>
+            <template #content>
               <p
-                class="min-w-0 truncate font-medium"
+                class="min-w-0 truncate text-sm font-medium text-foreground"
                 :title="skillName(skill)"
               >
                 {{ skillName(skill) }}
               </p>
               <p
-                class="mt-1 line-clamp-2 break-words text-sm text-muted-foreground"
+                class="mt-0.5 line-clamp-2 break-words text-xs text-muted-foreground"
                 :title="skillDescription(skill)"
               >
                 {{ skillDescription(skill) }}
               </p>
-            </div>
-          </div>
-        </div>
+            </template>
+          </SettingsRow>
+        </SettingsSection>
       </section>
 
       <section class="mt-10">
@@ -212,30 +183,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, Boxes, Download, ExternalLink, PackageOpen, Plug } from 'lucide-vue-next'
-import { Badge, Button, Spinner, toast } from '@memohai/ui'
+import { ArrowLeft, Boxes, ExternalLink, PackageOpen, Plug } from 'lucide-vue-next'
+import { Badge, Button, toast } from '@memohai/ui'
 import { getSupermarketPluginsById, type PluginsManifest, type PluginsSkillEntry, type PluginsSkillResource } from '@memohai/sdk'
 import ProviderIcon from '@/components/provider-icon/index.vue'
+import SettingsRow from '@/components/settings/row.vue'
+import SettingsSection from '@/components/settings/section.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import InstallPluginDialog from './components/install-plugin-dialog.vue'
+import InfoItem from './components/info-item.vue'
+import MarketDetailHeader from './components/market-detail-header.vue'
 
 type PluginSkill = PluginsSkillEntry | PluginsSkillResource
-
-const InfoItem = defineComponent({
-  props: {
-    label: { type: String, required: true },
-    value: { type: String, required: true },
-  },
-  setup(props) {
-    return () => h('div', { class: 'space-y-1' }, [
-      h('p', { class: 'text-sm text-muted-foreground' }, props.label),
-      h('p', { class: 'break-words text-sm font-medium' }, props.value),
-    ])
-  },
-})
 
 const route = useRoute()
 const router = useRouter()

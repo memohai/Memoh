@@ -1,43 +1,41 @@
 <template>
-  <div class="flex h-full w-full flex-col bg-surface-editor">
-    <div class="min-h-0 flex-1">
-      <div
-        v-if="loading"
-        class="flex h-full items-center justify-center text-muted-foreground"
-      >
-        <Spinner class="mr-2" />
-        {{ t('common.loading') }}
-      </div>
+  <DockPanelFrame editor-surface>
+    <PanePlaceholder
+      v-if="loading"
+      loading
+    >
+      {{ t('common.loading') }}
+    </PanePlaceholder>
 
-      <MonacoEditor
-        v-else-if="isText"
-        v-model="content"
-        :filename="name"
-        readonly
-        class="h-full"
-      />
+    <MonacoEditor
+      v-else-if="isText"
+      v-model="content"
+      :filename="name"
+      readonly
+      class="h-full"
+    />
 
-      <div
-        v-else-if="isImage && renderUrl"
-        class="flex h-full items-center justify-center overflow-auto bg-muted/30 p-4"
+    <div
+      v-else-if="isImage && renderUrl"
+      class="flex h-full items-center justify-center overflow-auto bg-muted/30 p-4"
+    >
+      <img
+        :src="renderUrl"
+        :alt="name"
+        class="max-h-full max-w-full rounded-md object-contain"
       >
-        <img
-          :src="renderUrl"
-          :alt="name"
-          class="max-h-full max-w-full rounded-md object-contain"
-        >
-      </div>
+    </div>
 
-      <div
-        v-else
-        class="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground"
-      >
+    <PanePlaceholder v-else>
+      <template #icon>
         <File class="size-12 opacity-30" />
-        <p class="text-xs">
-          {{ t('bots.files.previewNotAvailable') }}
-        </p>
+      </template>
+      {{ t('bots.files.previewNotAvailable') }}
+      <template
+        v-if="renderUrl"
+        #action
+      >
         <Button
-          v-if="renderUrl"
           variant="outline"
           size="sm"
           @click="handleDownload"
@@ -45,18 +43,20 @@
           <Download class="mr-1.5 size-3" />
           {{ t('bots.files.download') }}
         </Button>
-      </div>
-    </div>
-  </div>
+      </template>
+    </PanePlaceholder>
+  </DockPanelFrame>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { File, Download } from 'lucide-vue-next'
-import { Button, Spinner, toast } from '@memohai/ui'
+import { Button, toast } from '@memohai/ui'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
+import PanePlaceholder from '@/components/pane-placeholder/index.vue'
+import DockPanelFrame from './panel-frame.vue'
 import { isTextFile, isImageFile } from '@/components/file-manager/utils'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { resolveApiErrorMessage } from '@/utils/api-error'

@@ -10,13 +10,12 @@
         </h1>
       </header>
 
-      <div
+      <InlineLoadingRow
         v-if="isLoading"
-        class="flex items-center gap-2 px-2 text-xs text-muted-foreground"
+        class="px-2"
       >
-        <Spinner class="size-3.5" />
-        <span>{{ t('common.loading') }}</span>
-      </div>
+        {{ t('common.loading') }}
+      </InlineLoadingRow>
 
       <ScheduleEditor
         v-else
@@ -35,38 +34,15 @@
       {{ t('chat.noBotSelected') }}
     </div>
 
-    <Dialog
+    <ConfirmDeleteDialog
       :open="!!deleteTarget"
+      :title="t('bots.schedule.deleteTitle')"
+      :description="t('bots.schedule.deleteConfirm', { name: deleteTarget?.name ?? '' })"
+      :confirm-label="t('bots.schedule.delete')"
+      :loading="isDeleting"
       @update:open="(v) => { if (!v) deleteTarget = null }"
-    >
-      <DialogContent class="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>{{ t('bots.schedule.deleteTitle') }}</DialogTitle>
-        </DialogHeader>
-        <p class="text-sm text-muted-foreground">
-          {{ t('bots.schedule.deleteConfirm', { name: deleteTarget?.name ?? '' }) }}
-        </p>
-        <DialogFooter class="gap-2">
-          <Button
-            variant="outline"
-            @click="deleteTarget = null"
-          >
-            {{ t('common.cancel') }}
-          </Button>
-          <Button
-            variant="destructive"
-            :disabled="isDeleting"
-            @click="confirmDelete"
-          >
-            <Spinner
-              v-if="isDeleting"
-              class="mr-1.5 size-4"
-            />
-            {{ t('bots.schedule.delete') }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      @confirm="confirmDelete"
+    />
   </div>
 </template>
 
@@ -77,15 +53,6 @@ import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  Spinner,
-} from '@memohai/ui'
-import {
   deleteBotsByBotIdScheduleById,
   getBotsByBotIdScheduleById,
 } from '@memohai/sdk'
@@ -94,6 +61,8 @@ import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import ScheduleEditor from '@/pages/bots/components/schedule-editor.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
+import ConfirmDeleteDialog from '@/components/confirm-delete-dialog/index.vue'
 
 const props = defineProps<{
   params: {

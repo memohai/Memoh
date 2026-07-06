@@ -11,10 +11,15 @@
       >
         <div class="flex items-center gap-2">
           <span class="text-foreground truncate flex-1">{{ item.name || item.id || t('chat.tools.detail.unnamedSchedule') }}</span>
-          <span
+          <Badge
             v-if="item.pattern"
-            class="text-caption text-muted-foreground font-mono shrink-0 rounded bg-muted/30 px-1 py-0.5"
-          >{{ item.pattern }}</span>
+            variant="secondary"
+            size="sm"
+            font="mono"
+            class="shrink-0"
+          >
+            {{ item.pattern }}
+          </Badge>
         </div>
         <span
           v-if="item.prompt"
@@ -22,19 +27,18 @@
         >{{ item.prompt }}</span>
       </div>
     </div>
-    <p
-      v-else
-      class="text-xs text-muted-foreground italic"
-    >
+    <EmptyRow v-else>
       {{ t('chat.tools.detail.noSchedules') }}
-    </p>
+    </EmptyRow>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Badge } from '@memohai/ui'
 import type { ToolCallBlock } from '@/store/chat-list'
+import EmptyRow from './tool-detail/empty-row.vue'
 
 interface ScheduleItem {
   id?: string

@@ -53,13 +53,9 @@
               type="button"
               size="sm"
               :variant="variant"
-              :disabled="loading"
+              :loading="loading"
               @click="$emit('confirm'); close()"
             >
-              <Spinner
-                v-if="loading"
-                class="size-3.5"
-              />
               {{ confirmText || $t('common.confirm') }}
             </Button>
           </div>
@@ -75,7 +71,6 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-  Spinner,
 } from '@memohai/ui'
 
 withDefaults(defineProps<{

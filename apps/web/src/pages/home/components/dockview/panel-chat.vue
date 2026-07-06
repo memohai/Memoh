@@ -1,17 +1,15 @@
 <template>
-  <div class="flex flex-col h-full w-full">
-    <div class="flex-1 min-h-0">
-      <KeepAlive>
-        <ChatPane
-          v-if="visible"
-          :key="`chat-pane:${currentBotId}:${panelId}`"
-          :tab-id="panelId"
-          :session-id="paramsSessionId"
-          :active="visible"
-        />
-      </KeepAlive>
-    </div>
-  </div>
+  <DockPanelFrame>
+    <KeepAlive>
+      <ChatPane
+        v-if="visible"
+        :key="`chat-pane:${currentBotId}:${panelId}`"
+        :tab-id="panelId"
+        :session-id="paramsSessionId"
+        :active="visible"
+      />
+    </KeepAlive>
+  </DockPanelFrame>
 </template>
 
 <script setup lang="ts">
@@ -21,6 +19,7 @@ import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
 import ChatPane from '../chat-pane.vue'
 import { usePanelVisible } from './use-panel-visible'
+import DockPanelFrame from './panel-frame.vue'
 
 // A per-session chat tab. The panel id (chat:<n>) is stable for the tab's whole
 // life; the session it renders lives in params.sessionId (null = unsaved draft)

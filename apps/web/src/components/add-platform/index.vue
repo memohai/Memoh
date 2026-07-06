@@ -24,22 +24,21 @@
             v-slot="{ componentField }"
             name="name"
           >
-            <FormItem>
-              <FormLabel class="mb-2">
-                {{ $t('platform.name') }}
-              </FormLabel>
+            <FieldStack
+              :label="$t('platform.name')"
+              for="platform-create-name"
+              reserve-error
+            >
               <FormControl>
                 <Input
+                  id="platform-create-name"
                   type="text"
                   :placeholder="$t('platform.namePlaceholder')"
                   v-bind="componentField"
                   autocomplete="name"
                 />
               </FormControl>
-              <blockquote class="h-5">
-                <FormMessage />
-              </blockquote>
-            </FormItem>
+            </FieldStack>
           </FormField>
 
           <!-- Config (key:value tags) -->
@@ -47,10 +46,10 @@
             v-slot="{ componentField }"
             name="config"
           >
-            <FormItem>
-              <FormLabel class="mb-2">
-                {{ $t('platform.config') }}
-              </FormLabel>
+            <FieldStack
+              :label="$t('platform.config')"
+              reserve-error
+            >
               <FormControl>
                 <TagsInput
                   :add-on-blur="true"
@@ -72,10 +71,7 @@
                   />
                 </TagsInput>
               </FormControl>
-              <blockquote class="h-5">
-                <FormMessage />
-              </blockquote>
-            </FormItem>
+            </FieldStack>
           </FormField>
 
           <!-- Active -->
@@ -83,20 +79,14 @@
             v-slot="{ componentField }"
             name="active"
           >
-            <FormItem>
-              <FormLabel class="mb-2">
-                {{ $t('platform.active') }}
-              </FormLabel>
+            <FieldStack :label="$t('platform.active')">
               <FormControl>
                 <Switch
                   :model-value="componentField.modelValue"
                   @update:model-value="componentField['onUpdate:modelValue']"
                 />
               </FormControl>
-              <blockquote class="h-5">
-                <FormMessage />
-              </blockquote>
-            </FormItem>
+            </FieldStack>
           </FormField>
         </div>
       </template>
@@ -110,9 +100,6 @@ import {
   Input,
   FormField,
   FormControl,
-  FormItem,
-  FormLabel,
-  FormMessage,
   TagsInput,
   TagsInputInput,
   TagsInputItem,
@@ -127,6 +114,7 @@ import { useI18n } from 'vue-i18n'
 import { useKeyValueTags } from '@/composables/useKeyValueTags'
 import { useCreatePlatform } from '@/composables/api/usePlatform'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 
 const configTags = useKeyValueTags()
@@ -135,7 +123,7 @@ const { t } = useI18n()
 const { run } = useDialogMutation()
 
 const validationSchema = toTypedSchema(z.object({
-  name: z.string().min(1),
+  name: z.string().min(1, t('platform.nameRequired')),
   config: z.looseObject({}),
   active: z.coerce.boolean(),
 }))

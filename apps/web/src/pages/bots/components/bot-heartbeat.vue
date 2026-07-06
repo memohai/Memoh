@@ -31,10 +31,10 @@
 
           <!-- Model is a power-user override (it defaults to the bot's chat model), so it
                stays folded behind Advanced rather than occupying space the moment you enable.
-               Canonical settings-card disclosure: label left, outline button with a chevron
-               that rotates 90° on the right (same as the channel Advanced / Access cards). -->
-          <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
-            <span class="text-sm font-medium text-foreground">{{ $t('bots.heartbeat.advanced') }}</span>
+               The toggle reveals a SIBLING row below it (not a body it owns), so this stays a
+               plain SettingsRow with the disclosure button in its trailing slot rather than
+               ExpandableSettingsRow — same as the channel Advanced / Access cards. -->
+          <SettingsRow :label="$t('bots.heartbeat.advanced')">
             <Button
               variant="outline"
               size="sm"
@@ -47,7 +47,7 @@
               />
               {{ advancedOpen ? $t('common.collapse') : $t('common.expand') }}
             </Button>
-          </div>
+          </SettingsRow>
 
           <SettingsRow
             v-if="advancedOpen"
@@ -92,26 +92,19 @@
           </Button>
           <Button
             size="sm"
-            :disabled="isSaving"
+            :loading="isSaving"
             @click="handleSaveSettings"
           >
-            <Spinner
-              v-if="isSaving"
-              class="size-3"
-            />
             {{ $t('common.saveChanges') }}
           </Button>
         </div>
       </SettingsSection>
 
       <SettingsSection :title="$t('bots.heartbeat.title')">
-        <div
+        <SettingsRow
           v-if="totalCount > 0"
-          class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3"
+          :label="$t('common.status')"
         >
-          <span class="text-sm font-medium text-foreground">
-            {{ $t('common.status') }}
-          </span>
           <Select v-model="statusFilter">
             <SelectTrigger class="w-32">
               <SelectValue />
@@ -131,15 +124,18 @@
               </SelectItem>
             </SelectContent>
           </Select>
-        </div>
+        </SettingsRow>
 
-        <div
+        <!-- ui-allow-shape: loading skeleton — matches the log-row height so the
+             card reads as "a list row loading", same family form as bot-email /
+             bot-plugins, instead of a tall half-empty box. -->
+        <InlineLoadingRow
           v-if="isLoading && logs.length === 0"
-          class="mx-4 flex min-h-[12rem] items-center justify-center gap-2 py-12 text-sm text-muted-foreground"
+          size="md"
+          class="mx-4 min-h-[3.75rem] border-b border-border py-3 last:border-b-0"
         >
-          <Spinner class="size-4" />
           {{ $t('common.loading') }}
-        </div>
+        </InlineLoadingRow>
 
         <Empty
           v-else-if="!isLoading && totalCount === 0 && !savedEnabled"
@@ -172,79 +168,71 @@
         </Empty>
 
         <div v-else>
-          <div
+          <ExpandableSettingsRow
             v-for="log in filteredLogs"
             :key="log.id"
-            class="mx-4 border-b border-border py-3 last:border-b-0"
+            :open="!!log.id && expandedIds.has(log.id)"
+            @update:open="toggleExpand(log.id)"
           >
-            <button
-              type="button"
-              class="flex w-full items-center justify-between gap-3 text-left"
-              @click="toggleExpand(log.id)"
-            >
-              <div class="min-w-0">
-                <div class="flex items-center gap-2">
-                  <Badge
-                    :variant="statusVariant(log.status)"
-                    size="sm"
+            <template #content>
+              <div class="flex items-center gap-2">
+                <Badge
+                  :variant="statusVariant(log.status)"
+                  size="sm"
+                >
+                  {{ statusLabel(log.status) }}
+                </Badge>
+                <span class="text-xs tabular-nums text-muted-foreground">
+                  {{ formatDateTime(log.started_at) }}
+                </span>
+              </div>
+              <!-- Preview line only while collapsed; the expanded panel shows the
+                   full result, so the truncated echo would be redundant. -->
+              <p
+                v-if="!expandedIds.has(log.id!)"
+                class="mt-1 truncate text-xs"
+                :class="log.status === 'error' ? 'text-destructive' : 'text-muted-foreground'"
+              >
+                {{ log.status === 'error' ? (log.error_message || $t('bots.heartbeat.noResult')) : (truncateText(log.result_text) || $t('bots.heartbeat.noResult')) }}
+              </p>
+            </template>
+
+            <template #trailing>
+              <span class="text-xs tabular-nums text-muted-foreground">
+                {{ formatDuration(log.started_at, log.completed_at) }}
+              </span>
+            </template>
+
+            <template #expanded>
+              <div class="space-y-3">
+                <div class="overflow-hidden rounded-md border border-border bg-card p-3">
+                  <pre class="whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-foreground">{{ log.result_text || $t('bots.heartbeat.noResult') }}</pre>
+                </div>
+
+                <div
+                  v-if="log.error_message"
+                  class="rounded-md border border-border bg-card p-3"
+                >
+                  <p class="font-mono text-xs leading-normal text-destructive">
+                    {{ log.error_message }}
+                  </p>
+                </div>
+
+                <div
+                  v-if="log.usage"
+                  class="flex flex-wrap gap-2"
+                >
+                  <span
+                    v-for="(val, key) in (log.usage as any)"
+                    :key="key"
+                    class="rounded-sm border border-border px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground"
                   >
-                    {{ statusLabel(log.status) }}
-                  </Badge>
-                  <span class="text-xs tabular-nums text-muted-foreground">
-                    {{ formatDateTime(log.started_at) }}
+                    {{ key }}: {{ val }}
                   </span>
                 </div>
-                <p
-                  v-if="!expandedIds.has(log.id!)"
-                  class="mt-1 truncate text-xs"
-                  :class="log.status === 'error' ? 'text-destructive' : 'text-muted-foreground'"
-                >
-                  {{ log.status === 'error' ? (log.error_message || $t('bots.heartbeat.noResult')) : (truncateText(log.result_text) || $t('bots.heartbeat.noResult')) }}
-                </p>
               </div>
-
-              <div class="flex shrink-0 items-center gap-3">
-                <span class="text-xs tabular-nums text-muted-foreground">
-                  {{ formatDuration(log.started_at, log.completed_at) }}
-                </span>
-                <ChevronDown
-                  class="size-4 text-muted-foreground transition-transform"
-                  :class="{ 'rotate-180': log.id && expandedIds.has(log.id) }"
-                />
-              </div>
-            </button>
-
-            <div
-              v-if="log.id && expandedIds.has(log.id)"
-              class="mt-3 space-y-3"
-            >
-              <div class="overflow-hidden rounded-md border border-border bg-card p-3">
-                <pre class="whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-foreground">{{ log.result_text || $t('bots.heartbeat.noResult') }}</pre>
-              </div>
-
-              <div
-                v-if="log.error_message"
-                class="rounded-md border border-border bg-card p-3"
-              >
-                <p class="font-mono text-xs leading-normal text-destructive">
-                  {{ log.error_message }}
-                </p>
-              </div>
-
-              <div
-                v-if="log.usage"
-                class="flex flex-wrap gap-2"
-              >
-                <span
-                  v-for="(val, key) in (log.usage as any)"
-                  :key="key"
-                  class="rounded-sm border border-border px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground"
-                >
-                  {{ key }}: {{ val }}
-                </span>
-              </div>
-            </div>
-          </div>
+            </template>
+          </ExpandableSettingsRow>
         </div>
 
         <div
@@ -290,15 +278,10 @@
         v-if="logs.length > 0"
         :title="$t('common.dangerZone')"
       >
-        <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 py-3">
-          <div class="min-w-0">
-            <div class="text-sm font-medium text-foreground">
-              {{ $t('bots.heartbeat.clearLogs') }}
-            </div>
-            <p class="mt-0.5 text-xs text-muted-foreground">
-              {{ $t('bots.heartbeat.clearConfirm') }}
-            </p>
-          </div>
+        <SettingsRow
+          :label="$t('bots.heartbeat.clearLogs')"
+          :description="$t('bots.heartbeat.clearConfirm')"
+        >
           <ConfirmPopover
             :message="$t('bots.heartbeat.clearConfirm')"
             :loading="isClearing"
@@ -316,25 +299,26 @@
               </Button>
             </template>
           </ConfirmPopover>
-        </div>
+        </SettingsRow>
       </SettingsSection>
     </div>
   </PageShell>
 </template>
 
 <script setup lang="ts">
-import { Trash2, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import { Trash2, ChevronRight } from 'lucide-vue-next'
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import {
-  Badge, Button, Empty, EmptyDescription, EmptyHeader, EmptyTitle, Spinner, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Input,
+  Badge, Button, Empty, EmptyDescription, EmptyHeader, EmptyTitle, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Input,
   Pagination, PaginationContent, PaginationEllipsis,
   PaginationFirst, PaginationItem, PaginationLast,
   PaginationNext, PaginationPrevious,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import PageShell from '@/components/page-shell/index.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import ModelSelect from './model-select.vue'
 import {
   getBotsByBotIdSettings, putBotsByBotIdSettings,
@@ -347,6 +331,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import ExpandableSettingsRow from '@/components/settings/expandable-row.vue'
 import type { Ref } from 'vue'
 
 const props = defineProps<{

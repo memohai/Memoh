@@ -64,17 +64,12 @@
           variant="secondary"
           size="sm"
           class="mt-3 w-full"
-          :disabled="!sessionId || usedTokens <= 0 || isCompacting"
+          :disabled="!sessionId || usedTokens <= 0"
+          :loading="isCompacting"
+          loading-mode="icon"
           @click="triggerCompact"
         >
-          <Loader2
-            v-if="isCompacting"
-            class="size-3.5 animate-spin"
-          />
-          <Minimize2
-            v-else
-            class="size-3.5"
-          />
+          <Minimize2 class="size-3.5" />
           {{ $t('chat.compactNow') }}
         </Button>
 
@@ -116,7 +111,7 @@
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
 import { ScrollArea, Button } from '@memohai/ui'
-import { Sparkles, Loader2, Minimize2 } from 'lucide-vue-next'
+import { Sparkles, Minimize2 } from 'lucide-vue-next'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import SubagentList from './subagent-list.vue'
 

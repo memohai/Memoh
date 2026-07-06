@@ -10,6 +10,8 @@ import AddProvider from '@/components/add-provider/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import BackendCard from '@/components/settings/backend-card.vue'
 import DetailPane from '@/components/settings/detail-pane.vue'
+import PageShell from '@/components/page-shell/index.vue'
+import SectionGroup from '@/components/section-group/index.vue'
 import { useViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 import SpeechSetting from '@/pages/speech/components/provider-setting.vue'
@@ -129,129 +131,115 @@ watch(transcriptionProviders, (list) => {
 <template>
   <SwapTransition :direction="direction">
     <!-- Two capability sections -->
-    <section
+    <PageShell
       v-if="view === 'list'"
-      class="mx-auto max-w-3xl px-6 pt-10 pb-12 space-y-8"
+      :title="t('voice.title')"
     >
-      <h1 class="px-2 text-lg font-semibold">
-        {{ t('voice.title') }}
-      </h1>
-
-      <!-- Speaking (TTS) -->
-      <section class="space-y-2.5">
-        <div class="flex items-center justify-between gap-4">
-          <div class="min-w-0 px-2">
-            <h2 class="text-[13px] font-medium text-foreground">
-              {{ t('voice.speakTitle') }}
-            </h2>
-            <p class="text-xs text-muted-foreground">
-              {{ t('voice.speakHint') }}
-            </p>
-          </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            class="shrink-0"
-            @click="openStatus.addSpeechOpen = true"
-          >
-            <Plus class="size-4" />
-            {{ t('common.add') }}
-          </Button>
-        </div>
-
-        <div
-          v-if="speechProviders.length > 0"
-          class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+      <div class="space-y-8">
+        <!-- Speaking (TTS) -->
+        <SectionGroup
+          :title="t('voice.speakTitle')"
+          :description="t('voice.speakHint')"
         >
-          <BackendCard
-            v-for="provider in speechProviders"
-            :key="provider.id"
-            :name="provider.name ?? ''"
-            :enabled="provider.enable !== false"
-            @click="openSpeech(provider)"
+          <template #actions>
+            <Button
+              variant="secondary"
+              size="sm"
+              @click="openStatus.addSpeechOpen = true"
+            >
+              <Plus class="size-4" />
+              {{ t('common.add') }}
+            </Button>
+          </template>
+
+          <div
+            v-if="speechProviders.length > 0"
+            class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
-            <template #leading>
-              <span class="flex size-10 items-center justify-center rounded-full bg-muted">
-                <ProviderIcon
-                  v-if="provider.icon"
-                  :icon="provider.icon"
-                  size="1.5em"
-                />
-                <span
-                  v-else
-                  class="text-xs font-medium text-muted-foreground"
-                >
-                  {{ getInitials(provider.name) }}
+            <BackendCard
+              v-for="provider in speechProviders"
+              :key="provider.id"
+              :name="provider.name ?? ''"
+              :enabled="provider.enable !== false"
+              @click="openSpeech(provider)"
+            >
+              <template #leading>
+                <span class="flex size-10 items-center justify-center rounded-full bg-muted">
+                  <ProviderIcon
+                    v-if="provider.icon"
+                    :icon="provider.icon"
+                    size="1.5em"
+                  />
+                  <span
+                    v-else
+                    class="text-xs font-medium text-muted-foreground"
+                  >
+                    {{ getInitials(provider.name) }}
+                  </span>
                 </span>
-              </span>
-            </template>
-          </BackendCard>
-        </div>
-        <p
-          v-else
-          class="px-2 text-xs text-muted-foreground"
-        >
-          {{ t('voice.empty') }}
-        </p>
-      </section>
-
-      <!-- Listening (STT) -->
-      <section class="space-y-2.5">
-        <div class="flex items-center justify-between gap-4">
-          <div class="min-w-0 px-2">
-            <h2 class="text-[13px] font-medium text-foreground">
-              {{ t('voice.listenTitle') }}
-            </h2>
-            <p class="text-xs text-muted-foreground">
-              {{ t('voice.listenHint') }}
-            </p>
+              </template>
+            </BackendCard>
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            class="shrink-0"
-            @click="openStatus.addTranscriptionOpen = true"
+          <p
+            v-else
+            class="px-2 text-xs text-muted-foreground"
           >
-            <Plus class="size-4" />
-            {{ t('common.add') }}
-          </Button>
-        </div>
+            {{ t('voice.empty') }}
+          </p>
+        </SectionGroup>
 
-        <div
-          v-if="transcriptionProviders.length > 0"
-          class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+        <!-- Listening (STT) -->
+        <SectionGroup
+          :title="t('voice.listenTitle')"
+          :description="t('voice.listenHint')"
         >
-          <BackendCard
-            v-for="provider in transcriptionProviders"
-            :key="provider.id"
-            :name="provider.name ?? ''"
-            :enabled="provider.enable !== false"
-            @click="openTranscription(provider)"
+          <template #actions>
+            <Button
+              variant="secondary"
+              size="sm"
+              @click="openStatus.addTranscriptionOpen = true"
+            >
+              <Plus class="size-4" />
+              {{ t('common.add') }}
+            </Button>
+          </template>
+
+          <div
+            v-if="transcriptionProviders.length > 0"
+            class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
-            <template #leading>
-              <span class="flex size-10 items-center justify-center rounded-full bg-muted">
-                <ProviderIcon
-                  v-if="provider.icon"
-                  :icon="provider.icon"
-                  size="1.5em"
-                />
-                <span
-                  v-else
-                  class="text-xs font-medium text-muted-foreground"
-                >
-                  {{ getInitials(provider.name) }}
+            <BackendCard
+              v-for="provider in transcriptionProviders"
+              :key="provider.id"
+              :name="provider.name ?? ''"
+              :enabled="provider.enable !== false"
+              @click="openTranscription(provider)"
+            >
+              <template #leading>
+                <span class="flex size-10 items-center justify-center rounded-full bg-muted">
+                  <ProviderIcon
+                    v-if="provider.icon"
+                    :icon="provider.icon"
+                    size="1.5em"
+                  />
+                  <span
+                    v-else
+                    class="text-xs font-medium text-muted-foreground"
+                  >
+                    {{ getInitials(provider.name) }}
+                  </span>
                 </span>
-              </span>
-            </template>
-          </BackendCard>
-        </div>
-        <p
-          v-else
-          class="px-2 text-xs text-muted-foreground"
-        >
-          {{ t('voice.empty') }}
-        </p>
-      </section>
+              </template>
+            </BackendCard>
+          </div>
+          <p
+            v-else
+            class="px-2 text-xs text-muted-foreground"
+          >
+            {{ t('voice.empty') }}
+          </p>
+        </SectionGroup>
+      </div>
 
       <AddProvider
         v-model:open="openStatus.addSpeechOpen"
@@ -267,7 +255,7 @@ watch(transcriptionProviders, (list) => {
         :providers="addProviderNames"
         :import-models="importTranscriptionModels"
       />
-    </section>
+    </PageShell>
 
     <!-- Voice backend detail -->
     <DetailPane

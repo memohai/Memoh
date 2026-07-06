@@ -64,12 +64,9 @@
       </div>
     </div>
 
-    <p
-      v-if="!sessionId && !status && !cdpUrl && !targets.length"
-      class="text-xs text-muted-foreground italic"
-    >
+    <EmptyRow v-if="!sessionId && !status && !cdpUrl && !targets.length">
       {{ t('chat.tools.detail.noData') }}
-    </p>
+    </EmptyRow>
   </div>
 </template>
 
@@ -77,6 +74,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
+import EmptyRow from './tool-detail/empty-row.vue'
 
 interface RemoteTarget {
   title?: string

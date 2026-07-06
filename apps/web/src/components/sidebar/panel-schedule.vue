@@ -45,15 +45,17 @@
           :key="group.key"
         >
           <!-- Group header: time label + gear (first group only) -->
-          <div class="flex h-8 items-center px-2 mt-2">
-            <span class="flex-1 pl-[11px] text-xs font-[550] tracking-[-0.02em] text-muted-foreground/80">
-              {{ group.label }}
-            </span>
+          <SidebarPanelHeader
+            class="h-8 px-2 mt-2"
+            :label="group.label"
+            label-class="pl-[11px]"
+          >
             <Button
               v-if="groupIdx === 0"
               variant="ghost"
               size="icon-sm"
-              class="shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+              shape="circle"
+              class="shrink-0 text-muted-foreground hover:text-foreground"
               :title="t('bots.schedule.create')"
               :aria-label="t('bots.schedule.create')"
               @click="handleManage"
@@ -63,7 +65,7 @@
                 class="size-[15px]"
               />
             </Button>
-          </div>
+          </SidebarPanelHeader>
 
           <!-- Cards in group -->
           <div class="px-2 pb-1 space-y-1.5">
@@ -86,38 +88,15 @@
     </div>
 
     <!-- Delete confirmation -->
-    <Dialog
+    <ConfirmDeleteDialog
       :open="!!deleteTarget"
+      :title="t('bots.schedule.deleteTitle')"
+      :description="t('bots.schedule.deleteConfirm', { name: deleteTarget?.name ?? '' })"
+      :confirm-label="t('bots.schedule.delete')"
+      :loading="isDeleting"
       @update:open="(v) => { if (!v) deleteTarget = null }"
-    >
-      <DialogContent class="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>{{ t('bots.schedule.deleteTitle') }}</DialogTitle>
-        </DialogHeader>
-        <p class="text-sm text-muted-foreground">
-          {{ t('bots.schedule.deleteConfirm', { name: deleteTarget?.name ?? '' }) }}
-        </p>
-        <DialogFooter class="gap-2">
-          <Button
-            variant="outline"
-            @click="deleteTarget = null"
-          >
-            {{ t('common.cancel') }}
-          </Button>
-          <Button
-            variant="destructive"
-            :disabled="isDeleting"
-            @click="confirmDelete"
-          >
-            <Spinner
-              v-if="isDeleting"
-              class="mr-1.5 size-4"
-            />
-            {{ t('bots.schedule.delete') }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      @confirm="confirmDelete"
+    />
   </div>
 </template>
 
@@ -130,7 +109,6 @@ import { toast } from '@memohai/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
   Button, Spinner,
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@memohai/ui'
 import { getBotsByBotIdSchedule, deleteBotsByBotIdScheduleById, putBotsByBotIdScheduleById } from '@memohai/sdk'
 import type { ScheduleSchedule } from '@memohai/sdk'
@@ -139,6 +117,12 @@ import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { describeCron, nextRuns } from '@/utils/cron-pattern'
 import ScheduleListItem from '@/pages/bots/components/schedule-list-item.vue'
+import ConfirmDeleteDialog from '@/components/confirm-delete-dialog/index.vue'
+import SidebarPanelHeader from './panel-header.vue'
+// The narrow native scrollbar this template's `sidebar-scroll` class relies on.
+// Without this import the class was silently inert (it used to be defined only
+// inside recents.vue's scoped style, which never reaches this component).
+import '@/styles/sidebar-scroll.css'
 
 const { t, locale } = useI18n()
 const chatStore = useChatStore()

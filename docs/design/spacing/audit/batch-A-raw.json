@@ -1,0 +1,1939 @@
+{
+  "summary": "Deep audit of click-to-open surfaces (dialog/popover/sheet/dropdown) for leftover same-shape-different-code spacing debt. Evidence only, no migration.",
+  "agentCount": 22,
+  "logs": [
+    "audited 22/22 files — 16 MISS findings across 10 files"
+  ],
+  "result": {
+    "results": [
+      {
+        "file": "apps/web/src/pages/bots/components/bot-import-panel.vue",
+        "findings": [
+          {
+            "line": 229,
+            "shape": "drag-drop file upload target (icon circle + title + hint, dashed border)",
+            "classString": "flex w-full flex-col items-center justify-center gap-1.5 rounded-md border border-dashed px-4 py-6 text-center transition-colors",
+            "insideSurface": "Import dialog",
+            "verdict": "LOCAL",
+            "why": "Genuine one-off compound interaction (native drag events + click-to-pick + hidden file input). No owner shape in the vocabulary targets a drop zone; census explicitly lists drag-drop upload targets under 'genuinely one-off compound blocks'.",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 256,
+            "shape": "selected-file summary card (icon box + filename/size + remove button)",
+            "classString": "flex items-center gap-3 rounded-md border border-border/60 bg-background p-2.5",
+            "insideSurface": "Import dialog",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "Superficially a leading/content/trailing 3-slot row like SettingsRow, but SettingsRow never owns its own border/rounded/background (mx-4 + border-b hairline, relies on the parent SettingsSection card) and uses min-h-[3.75rem] + asymmetric py-3/mx-4. This is a single floating bordered card with uniform p-2.5 padding and no card parent -- an isolated one-item summary, not a divider row in a list of siblings. Different relationship (standalone card vs list-membership row), same rough leading/body/trailing skeleton for a different reason (exactly one item, never repeats).",
+            "owner": "",
+            "needsHumanEye": true
+          },
+          {
+            "line": 284,
+            "shape": "'reading backup' loading row (spinner + text)",
+            "classString": "flex items-center gap-2 rounded-md border border-border/60 bg-background p-3 text-xs text-muted-foreground",
+            "insideSurface": "Import dialog",
+            "verdict": "LOCAL",
+            "why": "Centered loading placeholder inside a bordered box so the dialog body does not reflow while the preview call is in flight. Matches the census's explicit stays-local bucket for loading/skeleton placeholders.",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 293,
+            "shape": "preview-error inline message",
+            "classString": "rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive",
+            "insideSurface": "Import dialog",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "Same destructive alpha convention CalloutBanner uses (border-destructive/30 bg-destructive/5), but it is a single unstructured message string with no icon, no title/description split, and rounded-md (not CalloutBanner's rounded-[var(--radius-menu-shell)]). CalloutBanner's contract is icon+title(bold)+description+trailing-action; this is one plain sentence. Reusing CalloutBanner here would force an empty title slot and an unused icon for a one-line status string -- a different relationship (raw alert text vs a titled notice card).",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 302,
+            "shape": "backend conflict message loop (v-for preview.conflicts)",
+            "classString": "rounded-md border border-destructive/30 bg-destructive/5 p-2.5 text-[11px] text-destructive",
+            "insideSurface": "Import dialog",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "Same reasoning as the preview-error box above: a repeated one-line message, no title/description/icon structure, smaller padding/text scale than CalloutBanner. Not the CalloutBanner morphology.",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 311,
+            "shape": "encrypted-bundle passphrase unlock block (icon+title, hint paragraph, inline Input+Button row)",
+            "classString": "space-y-2 rounded-md border border-border/60 bg-background p-3",
+            "insideSurface": "Import dialog",
+            "verdict": "LOCAL",
+            "why": "Has no <Label> element at all and is not a Label-over-control field -- FieldStack's contract is Label (bound via for) then control then optional help text, in that vertical order. Here it's an icon-title line, then a muted hint paragraph, then a horizontal Input+Button action row (type passphrase, press unlock) -- an inline unlock affordance, not a form field. Also the whole thing is its own bordered card, matching the census's own listed one-off: 'bot-import-panel + bot-backup-actions dialog-body compounds with their own denser language'.",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 347,
+            "shape": "create vs overwrite mode selector",
+            "classString": "grid w-full grid-cols-2 (TabsList inside Tabs v-model=\"importMode\")",
+            "insideSurface": "Import dialog",
+            "verdict": "LOCAL",
+            "why": "Plain @memohai/ui Tabs/TabsList/TabsTrigger atom composed as-is with no hand-rolled spacing wrapper. Not an owner-shape candidate.",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 371,
+            "shape": "profile identity selection card (avatar + name/hint, conditional click-to-toggle, trailing check-circle)",
+            "classString": "flex items-center gap-3 rounded-md border px-3 py-2.5 transition-colors",
+            "insideSurface": "Import dialog",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "Looks like BackendCard's leading/content/trailing horizontal object row, but BackendCard's contract is always a <button> whose click navigates/opens something, root radius rounded-[var(--radius-menu-shell)], padding p-3.5, trailing defaults to a ChevronRight. Here the root is a <div> that is only conditionally clickable (only when isOverwrite), padding is px-3 py-2.5, radius is plain rounded-md, and the trailing element is a custom check-circle indicating a toggled selection state, not navigation. This is the same 'selection card' family as the sibling BackupSectionCards item cards (already ruled a genuinely different dense selection-card morphology by the census for backup-section-cards.vue) rather than a BackendCard occurrence.",
+            "owner": "",
+            "needsHumanEye": true
+          },
+          {
+            "line": 424,
+            "shape": "upload/import percent progress bar",
+            "classString": "space-y-1 (row) + h-1 overflow-hidden rounded-full bg-muted (track) + h-full rounded-full bg-primary transition-all duration-200 (fill)",
+            "insideSurface": "Import dialog",
+            "verdict": "LOCAL",
+            "why": "One-off percent progress indicator tied to XHR upload progress; no owner shape in the vocabulary targets a progress bar.",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 422,
+            "shape": "bottom action bar (Cancel/Import buttons, border-top)",
+            "classString": "shrink-0 space-y-2 border-t pt-3 ... flex justify-end gap-2",
+            "insideSurface": "Import dialog",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "Visually resembles SettingsSection's #footer slot (border-t, right-aligned button row), but SettingsSection's footer lives INSIDE a bordered card (border-t border-border px-4 py-3, full-bleed to the card's own edges) and this panel is not wrapped in a SettingsSection at all -- it's a raw flex-column dialog body with no card shell to attach a footer slot to. Forcing SettingsSection here would mean restructuring the whole panel into a section card, a much larger change than filling a slot. This reads as generic dialog-footer geometry, not a hand-rolled SettingsSection footer.",
+            "owner": "",
+            "needsHumanEye": true
+          }
+        ],
+        "missCount": 0,
+        "summary": "This file is clean of genuine same-shape-different-code misses. Every row/card/banner-like shape in bot-import-panel.vue was re-examined against its nearest owner candidate (SettingsRow, CalloutBanner, FieldStack, BackendCard, SettingsSection footer) and each one differs in a load-bearing way: no shared card parent (so no mx-4/border-b hairline relationship), own border+radius+background per box, uniform rather than asymmetric padding, plain-text alerts with no title/description/icon split, a toggle-card rather than a navigation card, and a compound icon+hint+inline-input unlock block with no Label element at all. This matches the owner-vocabulary census's own explicit note that bot-import-panel (together with bot-backup-actions) is a 'dialog-body compound with its own denser language' that was deliberately left local rather than migrated in Phase 3 -- this line-by-line read confirms that call rather than overturning it. Three findings (the selected-file summary card, the profile identity toggle card, and the bottom action bar) are flagged needsHumanEye=true because their resemblance to SettingsRow/BackendCard/SettingsSection-footer is close enough that a rendered side-by-side comparison would be a more reliable tie-breaker than reading classes alone, but by geometry and by contract (card ownership, click semantics, padding scale) all three land as different relationships, not misses. No new owner shapes are proposed.",
+        "surfacesWalked": [
+          {
+            "surface": "Import Backup dialog body (bot-import-panel.vue rendered inside DialogContent)",
+            "trigger": "clicking the Import action in bot-backup-actions.vue (opens Dialog v-model:open=\"importOpen\", L236-251), and again as an import step embedded directly in bots/new.vue L22 (create-bot-from-backup flow)"
+          }
+        ]
+      },
+      {
+        "file": "apps/web/src/pages/bots/components/bot-backup-actions.vue",
+        "surfacesWalked": [
+          {
+            "trigger": "click 'Export Bot' outline button (line 148)",
+            "surface": "Export Dialog (lines 161-234)"
+          },
+          {
+            "trigger": "click 'Import Bot' outline button (line 156)",
+            "surface": "Import Dialog (lines 236-251), body delegated entirely to <BotImportPanel>"
+          },
+          {
+            "trigger": "opened automatically inside Export Dialog once summary loads (line 179-190)",
+            "surface": "BackupSectionCards list (external component, dense object-list rows, mode=\"include\")"
+          },
+          {
+            "trigger": "opened automatically inside Import Dialog once a file is selected and preview loads (bot-import-panel.vue lines 300-419)",
+            "surface": "BotImportPanel preview body: drop zone / selected-file row / passphrase unlock block / Tabs create-vs-overwrite / profile identity card / BackupSectionCards (mode=\"strategy\")"
+          },
+          {
+            "trigger": "click the chevron on a BackupSectionCards row that has item.items (backup-section-cards.vue line 201-212)",
+            "surface": "per-row expanded detail list (mono filename list)"
+          }
+        ],
+        "findings": [
+          {
+            "line": 143,
+            "shape": "trigger button row (flex justify-end gap-2, two outline Buttons)",
+            "classString": "flex shrink-0 flex-wrap justify-end gap-2",
+            "verdict": "LOCAL",
+            "why": "Plain @memohai/ui <Button variant=\"outline\"> composition, not a form/row/field/tile/banner owner shape. No card, no label+control pairing. Nothing to migrate.",
+            "insideSurface": "always-visible",
+            "needsHumanEye": false
+          },
+          {
+            "line": 168,
+            "shape": "dialog body flex column wrapping the section list + passphrase field",
+            "classString": "flex min-h-0 flex-1 flex-col",
+            "verdict": "LOCAL",
+            "why": "Pure layout wrapper (scroll container + flex column) for a Dialog body, not an owner morphology itself.",
+            "insideSurface": "Export Dialog",
+            "needsHumanEye": false
+          },
+          {
+            "line": 172,
+            "shape": "loading placeholder row (\"reading backup…\" spinner + text)",
+            "classString": "flex items-center gap-2 rounded-md border border-border/60 bg-background p-3 text-xs text-muted-foreground",
+            "verdict": "LOCAL",
+            "why": "Census explicitly buckets centered/inline spinner placeholders that borrow a compact row shape so the panel doesn't reflow as stays-local (~22 occ bucket), not a SettingsRow or FieldStack instance — it has no label|control split and no min-h-[3.75rem]/py-3 settings-row geometry.",
+            "insideSurface": "Export Dialog",
+            "needsHumanEye": false
+          },
+          {
+            "line": 183,
+            "shape": "BackupSectionCards list (dense per-section include/exclude cards)",
+            "classString": "space-y-2 (backup-section-cards.vue root) with per-row rounded-md border px-3 py-2.5 gap-3",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "Looks like it could be a settings-row list, but the geometry is a denser compact object list: rows are px-3 py-2.5 (not the 3.75rem/py-3/mx-4-inset SettingsRow contract), each row is its own bordered/rounded-md card rather than an inset-divider row inside one shared SettingsSection card, and rows carry their own state-driven border/bg (border-foreground bg-muted vs border-border/60 bg-background/50) plus an inline strategy segmented-button cluster and an expand chevron revealing a mono filename list. This is exactly the census's confirmed correction: backup-section-cards.vue's real morphology is 'a dense multi-state selection card (strategy segmented control + include checkbox + text-[10px] mono detail list)', deliberately kept local, not an ExpandableSettingsRow or SettingsRow occurrence.",
+            "insideSurface": "Export Dialog and Import Dialog (via BotImportPanel)",
+            "needsHumanEye": false
+          },
+          {
+            "line": 192,
+            "shape": "vertical Label-over-Input passphrase field (export)",
+            "classString": "mt-3 space-y-1.5 border-t pt-3 > Label class=\"text-[11px] font-medium text-muted-foreground\" + Input class=\"h-8 text-xs\" + p class=\"text-[10px] text-muted-foreground\"",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "Same space-y-1.5 stacking rhythm as FieldStack (label / control / help), but the geometry is a deliberately denser dialog-body scale, not FieldStack's contract: label overrides the default Label (text-body/12px, font-medium, no color override) down to text-[11px] + font-medium + text-muted-foreground; the Input drops to h-8 (below the house h-9 default) with text-xs; the help paragraph is text-[10px] versus FieldStack's fixed text-xs. This matches the census's explicit note that bot-backup-actions is a 'dialog-body compound with its own denser language' and was confirmed stays-local at migration time, not overlooked.",
+            "insideSurface": "Export Dialog",
+            "needsHumanEye": false
+          },
+          {
+            "line": 216,
+            "shape": "dialog footer (Cancel + primary Export action)",
+            "classString": "DialogFooter default slot: DialogClose as-child > Button variant=\"outline\" + Button (primary) with Spinner",
+            "verdict": "LOCAL",
+            "why": "Standard @memohai/ui DialogFooter composition per the house form standard (§11 in the design-language skill) — ghost/outline Cancel + single filled primary action, Spinner while busy. This is the canonical pattern, not a hand-rolled SettingsSection #footer occurrence (there is no SettingsSection here at all; it's a Dialog, whose footer band is structurally a different owner region).",
+            "insideSurface": "Export Dialog",
+            "needsHumanEye": false
+          },
+          {
+            "line": 236,
+            "shape": "Import Dialog shell delegating its whole body to BotImportPanel",
+            "classString": "DialogContent class=\"sm:max-w-lg flex max-h-[85vh] flex-col\"",
+            "verdict": "LOCAL",
+            "why": "Just a DialogContent + DialogHeader shell around a fully delegated child component; no form/row/field shape lives directly in this file at this point.",
+            "insideSurface": "Import Dialog",
+            "needsHumanEye": false
+          },
+          {
+            "line": 232,
+            "shape": "drop zone (no file selected) — bot-import-panel.vue lines 229-253",
+            "classString": "flex w-full flex-col items-center justify-center gap-1.5 rounded-md border border-dashed px-4 py-6 text-center transition-colors",
+            "verdict": "LOCAL",
+            "why": "Genuinely one-off compound block (drag-drop upload target) — explicitly named in the census's stays-local list ('genuinely one-off compound blocks (OAuth device-flow, link-code countdown, Monaco JSON dialog, snapshot input)'); this is the drag/drop equivalent for a backup archive, not a settings-row or field-stack shape.",
+            "insideSurface": "Import Dialog (via BotImportPanel)",
+            "needsHumanEye": false
+          },
+          {
+            "line": 256,
+            "shape": "selected-file summary row — bot-import-panel.vue lines 256-281",
+            "classString": "flex items-center gap-3 rounded-md border border-border/60 bg-background p-2.5",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "Superficially resembles a SettingsRow #leading+#content+trailing arrangement (icon tile, name/size text, trailing X button), but geometry is a compact p-2.5 card with size-8 icon tile and text-xs/text-[11px] type — not the 3.75rem/py-3/mx-4-inset-divider settings-row contract, and it isn't a row inside a SettingsSection card; it's a standalone file-preview chip inside a dialog body. Same dense dialog-body language as the rest of this component pair.",
+            "insideSurface": "Import Dialog (via BotImportPanel)",
+            "needsHumanEye": true
+          },
+          {
+            "line": 311,
+            "shape": "encrypted-bundle passphrase unlock block (label+description+inline input+button) — bot-import-panel.vue lines 311-344",
+            "classString": "space-y-2 rounded-md border border-border/60 bg-background p-3",
+            "verdict": "LOCAL",
+            "why": "Genuinely one-off compound block: a lock-icon title line + hint paragraph + an inline Input+Button pair that submits on Enter or click, distinct from a plain vertical FieldStack (it pairs the input with an inline action button, not a help line) and distinct from any horizontal SettingsRow. Matches the census's 'one-off compound blocks' stays-local bucket (parallel to the OAuth/passphrase examples already named there).",
+            "insideSurface": "Import Dialog (via BotImportPanel)",
+            "needsHumanEye": false
+          },
+          {
+            "line": 347,
+            "shape": "Create vs Overwrite mode switch",
+            "classString": "Tabs > TabsList class=\"grid w-full grid-cols-2\" > TabsTrigger",
+            "verdict": "LOCAL",
+            "why": "@memohai/ui Tabs atom composed as-is (grid-cols-2 layout className only, no injected chrome). Not an owner-vocabulary shape at all.",
+            "insideSurface": "Import Dialog (via BotImportPanel)",
+            "needsHumanEye": false
+          },
+          {
+            "line": 371,
+            "shape": "profile identity card (avatar + name + hint, clickable to toggle overwrite-profile)",
+            "classString": "flex items-center gap-3 rounded-md border px-3 py-2.5 transition-colors",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "Same px-3 py-2.5 compact-card language as the BackupSectionCards rows immediately below it in the same list (space-y-2 stack), deliberately matching its sibling rows rather than a settings-page SettingsRow (which would be min-h-[3.75rem]/py-3/mx-4 inset divider inside one shared card). It is a selectable card in a vertical list of similarly-shaped compact cards, not a horizontal 3-seg settings row.",
+            "insideSurface": "Import Dialog (via BotImportPanel)",
+            "needsHumanEye": false
+          },
+          {
+            "line": 423,
+            "shape": "sticky footer with progress bar + Cancel/Import actions",
+            "classString": "shrink-0 space-y-2 border-t pt-3 ... flex justify-end gap-2",
+            "verdict": "LOCAL",
+            "why": "This is the panel's own footer band (border-t pt-3 + right-aligned Cancel/primary Button pair), matching the house Dialog-footer pattern; the progress bar above it is a genuinely one-off upload-progress compound (percent text + h-1 rounded bar), not an owner shape. Not a SettingsSection #footer occurrence since there is no SettingsSection card here — BotImportPanel is rendered directly inside a Dialog body, not a settings page.",
+            "insideSurface": "Import Dialog (via BotImportPanel)",
+            "needsHumanEye": false
+          }
+        ],
+        "missCount": 0,
+        "summary": "This file (plus its two always-inlined dialog-body children, backup-section-cards.vue and bot-import-panel.vue, which only render after the Export/Import buttons are clicked) is clean of owner-vocabulary MISSes. Every shape that superficially pattern-matches an owner (BackupSectionCards' per-section rows, the passphrase field, the selected-file chip, the profile identity card) uses a deliberately denser dialog-body scale — text-[11px]/text-[10px]/text-xs labels, h-8 inputs, px-3 py-2.5 compact cards — that is consistently different from the settings-page contract (SettingsRow's min-h-[3.75rem]/py-3/mx-4-inset geometry, FieldStack's text-body Label + h-9 control + text-xs help). This matches the owner-vocabulary census's own explicit finding, written before this audit: 'bot-import-panel + bot-backup-actions dialog-body compounds with their own denser language' were confirmed stays-local at migration time, not overlooked. I independently re-derived the same conclusion by reading every interactive surface line-by-line rather than trusting the census's prior note at face value, and found nothing it missed. One item (the selected-file summary row) is flagged needsHumanEye=true only because its resemblance to a SettingsRow #leading/#content/trailing arrangement is closer than the others, though I still judge it DIFF-RELATIONSHIP on geometry grounds. Zero MISS findings — this file does not need migration work."
+      },
+      {
+        "file": "apps/web/src/pages/bots/components/backup-section-cards.vue",
+        "surfacesWalked": [
+          {
+            "trigger": "no Dialog/Sheet/Popover/DropdownMenu exists in this file",
+            "surface": "none — the whole file is a flat single-level component consumed inside a parent dialog (bot-backup-actions.vue, bot-import-panel.vue)"
+          },
+          {
+            "trigger": "chevron button click (line 201-212) toggles a v-if body in place",
+            "surface": "inline detail-list expand/collapse (lines 228-240) — a v-if reveal, not a separate overlay surface"
+          }
+        ],
+        "findings": [
+          {
+            "line": 108,
+            "shape": "outer per-item card: overflow-hidden rounded-md border transition-colors, with 3-way conditional border/bg (disabled: border-border/40 bg-muted/20 opacity-50; selected: border-foreground bg-muted; neutral: border-border/60 bg-background/50)",
+            "classString": "overflow-hidden rounded-md border transition-colors [+ 3-way state class binding lines 114-119]",
+            "verdict": "DIFF-RELATIONSHIP",
+            "insideSurface": "always-visible (renders inside parent Dialog body, but is itself flat)",
+            "why": "This is a dense multi-state SELECTION card whose border/background color encodes disabled/selected/neutral state — a different relationship from SettingsSection (a static grey-label + white bordered card with no state-driven coloring) and from BackendCard (a single clickable horizontal object-entry, fixed styling, no 3-way state paint). Radius is rounded-md (8px), not the card scale rounded-xl(14)/rounded-menu-shell(12) SettingsSection/BackendCard use — a visibly smaller, denser unit intentionally. This is exactly the shape the owner-vocabulary census (docs/design/spacing/owner-vocabulary-census.md) names for this file: 'a dense multi-state selection card (strategy segmented control + include checkbox + text-[10px] mono detail list). Stays local.'",
+            "needsHumanEye": false,
+            "owner": ""
+          },
+          {
+            "line": 121,
+            "shape": "main content row: icon + label/meta + trailing controls",
+            "classString": "flex items-center gap-3 px-3 py-2.5",
+            "verdict": "DIFF-RELATIONSHIP",
+            "insideSurface": "always-visible",
+            "why": "Looks like it could be a SettingsRow at a glance (horizontal, icon-leading, trailing control) but geometry fails the SettingsRow test on every axis: py-2.5 not py-3, no min-h-[3.75rem], no mx-4 inset border-b hairline dividing sibling rows (each item is instead a fully separate bordered card per finding above, not stacked rows sharing one card). This is a denser, self-contained per-item row belonging to the same bespoke selection-card shape, not a SettingsRow occurrence.",
+            "needsHumanEye": false,
+            "owner": ""
+          },
+          {
+            "line": 130,
+            "shape": "leading icon swatch (8x8 box with border, rounded icon container)",
+            "classString": "flex size-8 shrink-0 items-center justify-center rounded bg-background border border-border/50 text-muted-foreground",
+            "verdict": "LOCAL",
+            "insideSurface": "always-visible",
+            "why": "A small icon badge sized to this specific dense card; since the row itself (finding above) is not a SettingsRow, this cannot be a #leading slot instance of any owner. One-off decoration scoped to this bespoke shape.",
+            "needsHumanEye": false,
+            "owner": ""
+          },
+          {
+            "line": 136,
+            "shape": "label + count + sensitive icon + conflict badge + description text block",
+            "classString": "min-w-0 flex-1 (wrapping text-xs font-medium title, text-[11px] count, text-[10px] muted description lines)",
+            "verdict": "LOCAL",
+            "insideSurface": "always-visible",
+            "why": "Free-form read-only label/metadata cluster (title, count badge, sensitivity warning, conflict chip, description) built for this one list-item shape. Not a FieldStack (FieldStack wraps a Label over an interactive CONTROL at space-y-1.5; this has no control, it's display-only metadata) and not a SettingsRow content slot since the row fails that geometry already.",
+            "needsHumanEye": false,
+            "owner": ""
+          },
+          {
+            "line": 183,
+            "shape": "hand-rolled 3-way segmented pill selector (skip/merge/replace)",
+            "classString": "flex shrink-0 items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5 (buttons: rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors)",
+            "verdict": "LOCAL",
+            "insideSurface": "always-visible",
+            "why": "Not a spacing-owner shape at all (none of the 10 owners cover a segmented-value-selector), so it is out of scope for this audit's MISS/DIFF classification. Flagging only as adjacent debt: this hand-rolls what @memohai/ui SegmentedControl already provides (skill.md 'never hand-write a control'), but that is a component-reuse concern, not spacing-owner debt, so it is not counted as a MISS.",
+            "needsHumanEye": true,
+            "owner": ""
+          },
+          {
+            "line": 201,
+            "shape": "expand/collapse chevron toggle button",
+            "classString": "flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted",
+            "verdict": "DIFF-RELATIONSHIP",
+            "insideSurface": "always-visible (toggles inline v-if content in the same card, not a separate popover/sheet)",
+            "why": "This is the exact element the census flagged as mis-bucketed: 'backup-section-cards was bucketed as an ExpandableSettingsRow occurrence by expand chevron' but corrected because there is no SettingsRow-shaped header underneath it (ExpandableSettingsRow composes a full SettingsRow header at min-h-[3.75rem] + v-model:open + #expanded slot). Here the chevron sits inline inside the already-non-SettingsRow dense card row, so unifying it into ExpandableSettingsRow would force an unrelated geometry onto this shape.",
+            "needsHumanEye": false,
+            "owner": ""
+          },
+          {
+            "line": 217,
+            "shape": "circular check/selection indicator (hand-rolled checkbox look)",
+            "classString": "flex size-4 shrink-0 items-center justify-center rounded-full border, with conditional border-foreground bg-foreground text-background fill + Check icon",
+            "verdict": "LOCAL",
+            "insideSurface": "always-visible",
+            "why": "Not one of the 10 spacing-owner shapes (no 'checkbox' owner in the vocabulary), so out of scope for MISS/DIFF classification here. Adjacent note: this re-implements a checkbox rather than using @memohai/ui Checkbox, but that is a control-reuse concern separate from the spacing-owner migration this audit targets.",
+            "needsHumanEye": true,
+            "owner": ""
+          },
+          {
+            "line": 228,
+            "shape": "expanded detail list panel (scrollable mono text rows)",
+            "classString": "max-h-40 space-y-0.5 overflow-y-auto border-t border-border/40 bg-background/60 px-3 py-2 (rows: truncate font-mono text-[10px] text-muted-foreground)",
+            "verdict": "LOCAL",
+            "insideSurface": "always-visible (v-if reveal inside the same card, not a separate dialog/popover)",
+            "why": "Named explicitly in the census as 'text-[10px] mono detail list' staying local. It is a bespoke scrollable read-only technical listing (item keys/paths) with border-t full-bleed divider splitting the card body from its header — not repeating settings rows, not a FieldStack, not a MetricReadout grid. No owner shape matches a mono-text audit/detail sublist.",
+            "needsHumanEye": false,
+            "owner": ""
+          }
+        ],
+        "missCount": 0,
+        "summary": "This file is clean of spacing-owner debt — zero MISS findings. It has no click-to-open surfaces of its own (no Dialog/Sheet/Popover/DropdownMenu); it IS itself the dense compound content that renders inside two parent dialogs (bot-backup-actions.vue, bot-import-panel.vue), exactly as the owner-vocabulary census already documented. Every shape in the file (the outer 3-state selection card, its internal row, the segmented strategy selector, the expand chevron, the circular check indicator, and the expanded mono detail list) is a deliberately denser, self-contained visual language purpose-built for a compact multi-item backup/restore selector — none of it matches the geometry of SettingsRow (fails min-h-[3.75rem]/py-3/mx-4 inset-divider), ExpandableSettingsRow (no SettingsRow-shaped header under the chevron), FieldStack (no label-over-control fields, only read-only metadata), MetricReadout, BackendCard, PersonaTile, or CalloutBanner. This confirms rather than contradicts the census's prior conclusion for this exact file. Two non-spacing observations are flagged needsHumanEye for a separate control-reuse pass (not spacing debt): the hand-rolled 3-way segmented strategy pill (line 183) duplicates @memohai/ui SegmentedControl, and the circular check indicator (line 217) duplicates @memohai/ui Checkbox — both are out of scope for the spacing-owner vocabulary but worth a maintainer decision on a future non-spacing cleanup pass."
+      },
+      {
+        "file": "apps/web/src/pages/bots/components/avatar-edit-dialog.vue",
+        "findings": [
+          {
+            "line": 3,
+            "shape": "Dialog/DialogContent shell (sm:max-w-md)",
+            "classString": "sm:max-w-md",
+            "verdict": "LOCAL",
+            "why": "Pure @memohai/ui Dialog atom composed as-is (Dialog/DialogContent/DialogHeader/DialogTitle/DialogDescription/DialogFooter). None of the owner shapes (PageShell, SettingsSection, SettingsRow, FieldStack, etc.) apply to a dialog shell itself — those own settings-page geometry, not the Dialog atom's own header/body/footer contract.",
+            "insideSurface": "always-visible (this IS the dialog)",
+            "needsHumanEye": false
+          },
+          {
+            "line": 10,
+            "shape": "Centered avatar-preview + single URL input compound block",
+            "classString": "mt-4 flex flex-col items-center gap-4",
+            "verdict": "LOCAL",
+            "why": "Not a FieldStack: there is no Label element and no space-y-1.5 Label-over-control geometry — the vocabulary's FieldStack owner explicitly renders <Label>+slot+optional help in a vertical space-y-1.5 stack, keyed by a for/label prop. Here the Input's placeholder is the only affordance and it sits below a size-20 Avatar preview in a centered flex column. This is a genuinely one-off compound block (avatar preview + single URL field), the same category the census bucketed as 'genuinely one-off compound blocks (OAuth device-flow, link-code countdown, Monaco JSON dialog, snapshot input)' that stay local rather than being forced into an owner shape.",
+            "insideSurface": "always-visible dialog body (no click-to-open needed, this dialog IS the click-to-open surface, opened from the caller)",
+            "needsHumanEye": false
+          },
+          {
+            "line": 28,
+            "shape": "Dialog footer with Cancel/Confirm buttons",
+            "classString": "mt-6",
+            "verdict": "LOCAL",
+            "why": "This is @memohai/ui's own DialogFooter atom, not the SettingsSection #footer slot owner (which is specifically for a bordered settings-page card's border-t footer holding Save/pagination). A modal dialog's footer is a structurally different container — it splits the whole Dialog surface (full-bleed per the SKILL.md divider rule), not a settings card, so there is no owner-shape migration target here at all.",
+            "insideSurface": "always-visible (dialog's own footer band)",
+            "needsHumanEye": false
+          }
+        ],
+        "missCount": 0,
+        "summary": "This file is clean and hides no debt behind a click. It is a minimal 91-line single-purpose Dialog (avatar URL editor) composed entirely from @memohai/ui atoms: Dialog/DialogContent/DialogHeader/DialogTitle/DialogDescription/DialogFooter, an Avatar preview, and one Input. There are no nested click-to-open surfaces (no Popover/DropdownMenu/Sheet/Drawer/Tabs/Select/Combobox anywhere in the file — confirmed by grep), so there is nothing hiding behind a secondary interaction to inventory beyond the dialog itself, which is already the surface in question. The body (Avatar preview + single URL Input in a centered flex column) does not match any owner morphology's actual geometry — it has no Label element and no space-y-1.5 Label-over-control structure, so it is not a disguised FieldStack; it reads as the same kind of genuinely one-off compound block (avatar/preview + single field) that the owner-vocabulary census already classified as stays-local for similarly small, self-contained dialog bodies. Zero MISS findings: there is no leftover same-shape-different-code debt in this file for the batch migration to have missed."
+      },
+      {
+        "file": "apps/web/src/pages/people/index.vue",
+        "findings": [],
+        "missCount": 0,
+        "summary": "placeholder"
+      },
+      {
+        "file": "apps/web/src/pages/supermarket/components/install-plugin-dialog.vue",
+        "surfacesWalked": [
+          {
+            "trigger": "Dialog is the whole component (open prop from parent) — no nested click-to-open surface inside it",
+            "surface": "Install Plugin dialog body (DialogContent, lines 6-121)"
+          }
+        ],
+        "findings": [
+          {
+            "line": 11,
+            "shape": "vertical Label-over-control field (\"Select Bot\")",
+            "classString": "div.space-y-1.5 > label.text-xs.font-medium + BotSelect(trigger-class=\"w-full\")",
+            "verdict": "MISS",
+            "why": "This is exactly FieldStack's morphology: space-y-1.5 wrapper, a label sitting above a single control, no density reason for the deviation. FieldStack.vue (apps/web/src/components/settings/field-stack.vue) renders the identical div.space-y-1.5 > Label + slot structure and was built precisely to unblock this shape (census 'Owner gaps #1 FieldStack', unblocks 13 occurrences). This file was never migrated: grep for FieldStack/FormStack imports across apps/web/src/pages/supermarket/ returns zero hits, even though 'bot-plugins' (a sibling in the plugins domain) was migrated in batch 1. The only difference from a canonical FieldStack is presentational debt, not relationship debt: (a) it uses a raw <label> tag instead of the @memohai/ui Label atom, and (b) the label carries a hand-set text-xs font-medium instead of Label's default text-body font-medium sizing — both are exactly the kind of same-shape-different-code residue FieldStack exists to absorb, not evidence of a different relationship. Confirmed as a repeated pattern, not an isolated one-off: apps/web/src/pages/supermarket/components/install-skill-dialog.vue lines 11-17 contain the byte-identical block (div.space-y-1.5 > label.text-xs.font-medium{{$t('supermarket.selectBot')}} + BotSelect trigger-class=\"w-full\"), i.e. this exact hand-rolled field shape is duplicated across two sibling dialogs in the same directory.",
+            "insideSurface": "always-visible (top of dialog body, renders as soon as the dialog opens)",
+            "owner": "FieldStack",
+            "needsHumanEye": false
+          },
+          {
+            "line": 19,
+            "shape": "selected-plugin preview card (name + badges + description + nested skill list)",
+            "classString": "div.rounded-md.border.border-border.p-3.space-y-1 (outer) with inner p.text-xs.font-medium (name), Badge×2, p.text-caption.text-muted-foreground.line-clamp-3 (description), div.mt-3.grid.gap-1.5 > div.flex.items-start.gap-2.rounded.border.border-border/60.bg-muted/20.px-2.py-1.5 (per-skill row)",
+            "verdict": "LOCAL",
+            "why": "Not a warning/alert, so CalloutBanner (which owns tone='warning'|'destructive' framed notices) does not apply — this is a neutral informational summary of the item being installed, a genuinely different job. It is also not a settings row, FieldStack, or MetricReadout: it's a compound preview block (title+badges header, description, then a nested list of skill sub-rows with icon+name+description) that has no single-shape owner in the vocabulary. It matches the documented dialog-body dialect the census explicitly calls out as stays-local precedent: apps/web/src/pages/bots/components/bot-import-panel.vue (a confirmed stays-local dialog-body compound) uses the identical rounded-md border-border p-3 text-xs font-medium vocabulary for its own preview card. Recommend leaving local, same call as bot-import-panel.",
+            "insideSurface": "always-visible (renders whenever plugin prop is set, i.e. essentially always for this dialog's real usage)",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 76,
+            "shape": "per-variable vertical Label-over-Input field loop (required-var config form)",
+            "classString": "div.space-y-3 (list) > div.space-y-1.5 (each item) > label.text-xs.font-medium + Input.h-8.text-xs",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "Same space-y-1.5 label-over-control skeleton as FieldStack, but with a density override FieldStack does not carry: text-xs label AND an h-8 (not default h-9) Input, i.e. every geometric rung is one size down from the settings-page form language. This is the exact pattern the census names as a documented stays-local precedent, not a coincidence: 'bot-access inline rule form (5 fields with text-xs muted labels + h-8 inputs + inline clear buttons — a tighter language than a settings-page FieldStack)' was explicitly kept local rather than folded into FieldStack. The census's underlying principle (§ owner-vocabulary-census.md 'Stays-local confirmed') is that a denser dialog-body/inline-form dialect is a different relationship, not the same one in different clothes. One minor deviation from the bot-access precedent: bot-access's label is text-muted-foreground while this one is default foreground — worth a human glance to confirm it isn't accidental drift, but it does not change the h-8/text-xs density verdict.",
+            "insideSurface": "always-visible when plugin.variables is non-empty (conditionally rendered based on the selected plugin's manifest, but not behind a click — it appears automatically once a plugin with variables is passed in)",
+            "owner": "",
+            "needsHumanEye": true
+          },
+          {
+            "line": 101,
+            "shape": "dialog footer: Cancel (outline) + primary Install (with Spinner)",
+            "classString": "DialogFooter > DialogClose as-child > Button variant=\"outline\" ... + Button (default) with conditional Spinner.mr-2.size-4",
+            "verdict": "LOCAL",
+            "why": "This is the @memohai/ui DialogFooter atom composed as-is with Button variants exactly per the house form standard (memoh-web skill § 11: ghost/outline Cancel + single filled primary, default h-9 sizing, Spinner for the pending state). No hand-rolled markup, no owner gap — this is the canonical, already-correct pattern.",
+            "insideSurface": "always-visible (dialog footer)",
+            "owner": "",
+            "needsHumanEye": false
+          }
+        ],
+        "missCount": 1,
+        "summary": "This file was missed entirely by the batch migration — no FieldStack/FormStack import exists anywhere under apps/web/src/pages/supermarket/, even though sibling plugin-domain files (bot-plugins) were migrated in batch 1. Of the three form-like shapes inside this single-purpose Dialog (the whole file IS a Dialog, so every shape below is \"always-visible\" once the dialog opens — there is no further click-to-open surface nested inside it), exactly one is a genuine MISS: the \"Select Bot\" field (line 11) is FieldStack's plain, undifferentiated morphology (space-y-1.5, label-over-control, no density override) duplicated byte-for-byte in this file AND in the sibling install-skill-dialog.vue — a textbook same-shape-different-code instance the FieldStack owner exists to absorb. The plugin-preview info card (line 19) and the per-variable config field loop (line 76) both look superficially similar but match a documented, deliberately-distinct dialog-body dialect (text-xs labels, h-8 inputs, rounded-md border-border p-3 cards) that the census already confirmed stays local via the bot-import-panel and bot-access precedents — denser geometry for a reason, not drift. The variable-loop field is flagged needsHumanEye because its label color (default foreground vs. bot-access's muted-foreground) is a small unexplained deviation from the precedent, worth a human glance though it doesn't change the density verdict. The footer is clean, uses DialogFooter + Button variants exactly as intended. Net: this file is not clean — it hides one real, repeated migration miss behind the dialog's click-to-open trigger, plus a second sibling file (install-skill-dialog.vue) carrying the identical miss that should be fixed in the same pass."
+      },
+      {
+        "file": "apps/web/src/pages/supermarket/components/install-skill-dialog.vue",
+        "findings": [
+          {
+            "line": 11,
+            "shape": "vertical Label-over-control field (bot select) — a hand-rolled <label> wrapping BotSelect inside a space-y-1.5 div",
+            "classString": "space-y-1.5 (line 11) + label class=\"text-xs font-medium\" (line 12)",
+            "insideSurface": "always-visible (dialog body, no click needed once dialog is open)",
+            "verdict": "MISS",
+            "why": "This is exactly the FieldStack morphology: a space-y-1.5 wrapper, a label sitting above a single control, no horizontal label|control split. FieldStack's contract is literally <div class=\"space-y-1.5\"><Label/><slot/><help/></div> — this block reproduces that geometry by hand with a raw <label class=\"text-xs font-medium\"> instead of the shared Label atom + FieldStack wrapper. There is no reason this differs from FieldStack's relationship (single field, label above, full-width control below) — it is same-shape-different-code debt that the batch migration missed, likely because this file sits under pages/supermarket/components rather than the bots/settings tree the census's 35-file sample and later batches focused on. Geometry match is exact: FieldStack renders space-y-1.5 + Label + slot; this file renders the identical DOM shape with a plain <label> substituting for <Label>.",
+            "owner": "FieldStack",
+            "needsHumanEye": false
+          },
+          {
+            "line": 19,
+            "shape": "read-only skill-preview summary block (name + description + optional file count) shown before confirming install",
+            "classString": "rounded-md border border-border p-3 space-y-1 (line 21); text-xs font-medium (line 23); text-[11px] text-muted-foreground line-clamp-3 (line 26); text-[11px] text-muted-foreground (line 31)",
+            "insideSurface": "always-visible (renders whenever skill prop is set, inside the dialog body)",
+            "verdict": "LOCAL",
+            "why": "This is a one-off read-only entity-preview compound, not a form field (no Label, no control, no `for` wiring) and not a settings row (no leading/trailing horizontal split, no min-h-[3.75rem]/py-3 geometry). It also isn't a MetricReadout — that owner is a label+value(+sub) metric tile with a caller-owned grid; this block is prose (name + truncated description + a count line), not a tabular metric. No owner in the vocabulary covers 'confirmation-preview card for the entity about to be acted on', and the census explicitly says not to invent new owners for gaps like this. Note for the record (not an owner-vocabulary miss, but real duplication): the byte-identical block also exists in apps/web/src/pages/supermarket/components/install-plugin-dialog.vue (rounded-md border border-border p-3 space-y-1) — that is component-extraction debt (a shared SkillPreviewCard/PluginPreviewCard), a different debt category from spacing-owner migration, so it is not raised as a MISS here.",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 10,
+            "shape": "form-field-run wrapper around the bot-select field and the skill preview block",
+            "classString": "space-y-4 py-2",
+            "insideSurface": "always-visible",
+            "verdict": "LOCAL",
+            "why": "space-y-4 is the FormStack rhythm, but FormStack's contract is a run of FieldStacks (form fields only) — this wrapper mixes one real field (line 11-17) with a non-field preview card (line 19-35), so it is not a pure FieldStack run and wrapping it in FormStack would misrepresent the preview block as a form field. Once line 11-17 is migrated to FieldStack, this outer div's space-y-4 could arguably become FormStack, but since the block contains a non-field sibling, forcing FormStack here would be a stretch of its contract rather than a genuine same-shape match; flagging as needsHumanEye since the call depends on whether FormStack is meant to tolerate a non-field trailing child.",
+            "owner": "",
+            "needsHumanEye": true
+          }
+        ],
+        "missCount": 1,
+        "summary": "This is a short (119-line), mostly clean dialog composed almost entirely from @memohai/ui atoms (Dialog/DialogContent/DialogHeader/DialogTitle/DialogFooter/DialogClose/Button/Spinner) plus a domain BotSelect that is itself a clean Select/SelectItem composition with no owner-shape debt inside it — there is exactly one interactive surface (the dialog itself; BotSelect's dropdown is pure Select atoms, not a settings-owner shape) and it was fully walked. The file hides one genuine, small same-shape-different-code miss: the bot-select field at lines 11-17 reproduces FieldStack's exact space-y-1.5 label-over-control geometry by hand with a raw <label> instead of the shared component. The remaining shape — the skill preview card at lines 19-35 — looks similar at a glance (a bordered, padded block) but is a read-only entity-preview compound with no owner in the vocabulary, correctly left local (it does share byte-identical duplication with install-plugin-dialog.vue, but that is a component-extraction concern, not a spacing-owner migration miss). Net: this file is nearly clean; it hides one FieldStack miss behind the always-visible dialog body, not behind a deeper click-to-open surface, since none exists here.",
+        "surfacesWalked": [
+          {
+            "trigger": "opening the Dialog itself (open prop / trigger elsewhere in the app)",
+            "surface": "Install Skill dialog body (bot select field + skill preview + footer)"
+          },
+          {
+            "trigger": "clicking the BotSelect trigger inside the dialog",
+            "surface": "BotSelect's Select dropdown (SelectContent/SelectItem list of bots)"
+          }
+        ]
+      },
+      {
+        "file": "apps/web/src/pages/memory/components/add-memory-provider.vue",
+        "surfacesWalked": [
+          {
+            "trigger": "click the 'Add' Button (or auto-open via hideTrigger/open v-model)",
+            "surface": "Add Memory Provider Dialog (DialogContent, line 19-71)"
+          }
+        ],
+        "findings": [
+          {
+            "line": 24,
+            "shape": "vertical Label-over-Input field (name)",
+            "classString": "div.space-y-2 > Label + Input",
+            "insideSurface": "Add Memory Provider Dialog",
+            "verdict": "MISS",
+            "why": "This is the textbook FieldStack morphology: a div wrapping a Label above a single control, using space-y-2 as the label→control rhythm (FieldStack itself uses space-y-1.5, but the relationship — vertical label-over-control, one field, no inline meta — is identical). No 'help' text, no inline toggle, no denser dialog-specific styling (font size is default, Input is the standard h-9/default size, not an h-8 compact variant) — nothing marks this as a deliberately tighter dialog-body language the way bot-access's inline rule form was (text-xs labels + h-8 inputs + inline clear buttons, explicitly called out in the census as DIFF-RELATIONSHIP). This is a plain, unadorned single-field form column that FieldStack was purpose-built to own. A sibling file, apps/web/src/pages/video/provider-setting.vue lines 208-211, hand-rolls the exact same div.space-y-2>Label pattern inside its own Dialog, confirming this is repeated same-shape-different-code, not a one-off.",
+            "needsHumanEye": false,
+            "owner": "FieldStack"
+          },
+          {
+            "line": 31,
+            "shape": "vertical Label-over-Select field (provider)",
+            "classString": "div.space-y-2 > Label + Select",
+            "insideSurface": "Add Memory Provider Dialog",
+            "verdict": "MISS",
+            "why": "Same morphology and reasoning as the name field above: Label stacked over a single control (here a Select instead of an Input) with space-y-2 rhythm, no help text, no inline meta, no dialog-specific tightened language. FieldStack's default slot is control-agnostic (works for Input, Select, or any control), so a Select-based field is squarely in scope. Both this field and the name field above form a natural two-field FormStack (space-y-4) — the outer wrapping div.space-y-4.py-4 at line 23 already matches FormStack's space-y-4 rhythm almost exactly (only the added py-4 dialog padding differs, which the Dialog body would own, not FormStack).",
+            "needsHumanEye": false,
+            "owner": "FieldStack"
+          },
+          {
+            "line": 23,
+            "shape": "wrapper around the two fields",
+            "classString": "div.space-y-4.py-4",
+            "insideSurface": "Add Memory Provider Dialog",
+            "verdict": "MISS",
+            "why": "This is the FormStack wrapper (space-y-4) around a run of FieldStacks, with an extra py-4 for dialog body padding. It directly matches FormStack's contract ('space-y-4 wrapper for a run of FieldStacks'). Once the two inner fields migrate to FieldStack, this outer div becomes a FormStack (the py-4 dialog padding can stay on the wrapping div or move to whichever layer the dialog-body padding convention lives in — a decision for the migration step, not this audit).",
+            "needsHumanEye": false,
+            "owner": "FormStack"
+          },
+          {
+            "line": 53,
+            "shape": "Dialog footer with Cancel/Confirm buttons",
+            "classString": "DialogFooter (from @memohai/ui) containing two Button",
+            "insideSurface": "Add Memory Provider Dialog",
+            "verdict": "LOCAL",
+            "why": "This is a plain @memohai/ui DialogFooter atom composed as-is with standard outline-Cancel + primary-Confirm buttons and a Spinner for the loading state. It is not one of the settings-page owner shapes (SettingsSection's #footer slot is for a bordered card footer with border-t on a settings PAGE, not a Dialog's own footer chrome, which DialogFooter from the UI kit already owns). No spacing debt here — correct use of the Dialog atom's own footer slot.",
+            "needsHumanEye": false,
+            "owner": ""
+          }
+        ],
+        "missCount": 3,
+        "summary": "This file is small (140 lines, one Dialog, one interactive surface) but is not clean: it hand-rolls a two-field form inside a Dialog body using the exact div.space-y-2>Label+control pattern that FieldStack was purpose-built to replace, wrapped in a div.space-y-4.py-4 outer wrapper that is FormStack's rhythm plus dialog padding. Nothing about the fields' geometry marks them as a deliberately tighter dialog-specific language (no text-xs labels, no h-8 compact inputs, no inline clear buttons like the confirmed-DIFF bot-access rule form) — they are plain, default-sized fields, so this reads as leftover same-shape-different-code debt rather than a genuine different relationship. A sibling file, video/provider-setting.vue, hand-rolls the identical div.space-y-2>Label shape inside its own Dialog, reinforcing that this is a repeated miss rather than a one-off local exception. The only clean part of the file is the DialogFooter, which is a correct, unmodified use of the @memohai/ui Dialog atom's own footer slot and is not part of the owner vocabulary's concern."
+      },
+      {
+        "file": "apps/web/src/pages/speech/components/provider-setting.vue",
+        "surfacesWalked": [
+          {
+            "trigger": "click a model row in the 'Synthesis models' list (line 176 button)",
+            "surface": "Model config editor Dialog (lines 201-219, body is model-config-editor.vue)"
+          }
+        ],
+        "findings": [
+          {
+            "line": 121,
+            "shape": "hand-rolled right-aligned Save action bar under the config form, inside SettingsSection's default slot",
+            "classString": "<div class=\"mx-4 flex items-center justify-end border-t border-border py-3\">",
+            "verdict": "MISS",
+            "why": "This is exactly the SettingsSection #footer slot geometry (section.vue line 22-27: 'flex items-center justify-end gap-2 border-t border-border px-4 py-3'), just spelled with mx-4+py-3 on an inner div instead of px-4+py-3 on the slot output — same relationship (right-aligned submit button, top hairline splitting body from action band, lives inside the card). The sibling file apps/web/src/pages/email/components/provider-setting.vue (already migrated, cited in the census as the FooterBar first-validation-target) does the identical LoadingButton-submit-under-config-form using <template #footer> instead. This file (and its near-twin apps/web/src/pages/transcription/provider-setting.vue line 118) were left behind by the same migration.",
+            "owner": "SettingsSection",
+            "insideSurface": "always-visible",
+            "needsHumanEye": false
+          },
+          {
+            "line": 135,
+            "shape": "hand-rolled section header (grey label row) + card wrapper for the model list, duplicating SettingsSection's own template",
+            "classString": "<section class=\"space-y-2.5\"> ... <div class=\"flex min-h-7 items-center justify-between gap-2 px-2\"> <h2 class=\"text-[13px] font-medium text-muted-foreground\">...</h2> <div ...button group...></div> </div> <div class=\"overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card\">",
+            "verdict": "MISS",
+            "why": "This is a byte-level duplicate of SettingsSection's own markup (section.vue lines 2-15: space-y-2.5 root, min-h-7 items-center justify-between px-2 header with title + #actions slot, then the overflow-hidden rounded-[var(--radius-menu-shell)] border-border bg-card card div). SettingsSection is one of the four EXISTING ready-to-use owners (per the census 'chart-card.vue is a BYTE-COPY -> delete + repoint' pattern) — this is the same anti-pattern: a hand-rolled copy of the section chrome instead of composing <SettingsSection :title=...> with an #actions slot for the Import/Create buttons. Only the gap='4' vs 'gap-2' on the header row differs trivially; everything else (min-h-7, px-2, card classes) is identical to the owner.",
+            "owner": "SettingsSection",
+            "insideSurface": "always-visible",
+            "needsHumanEye": false
+          },
+          {
+            "line": 172,
+            "shape": "clickable object-entry row listing a synthesis model (name + secondary id + trailing settings-gear affordance), opens the model-editor Dialog on click",
+            "classString": "<button type=\"button\" class=\"flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-accent\">",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "Looks like it could be BackendCard (horizontal clickable object-entry card with #leading/#trailing), but the geometry and container relationship differ: BackendCard is a self-contained rounded+bordered card per row (backend-card.vue: 'rounded-[var(--radius-menu-shell)] border border-border bg-card p-3.5', each instance owns its own border). This row instead lives inside ONE shared card wrapper (line 163) with manual `mx-4 border-b` dividers between siblings (line 190-193) — the dense-object-list-row relationship the census already named ('dense object-list row' bucket, 11 occ across 8 files, folded into SettingsRow with an optional align prop), not the standalone-card BackendCard relationship. It also has no `enabled`-dot trailing badge or media slot needing BackendCard's specific API. This is closer to a SettingsRow used as a full-row button, but SettingsRow's own geometry is min-h-[3.75rem]+py-3+mx-4+border-b — here the outer border-b divider is manually drawn (line 190-193) rather than owned by the row, and the row itself is a native <button> (for click-through), which the row component does not support as a root element. Needs a human decision on whether to extend SettingsRow to render as a button/opens-dialog affordance, or leave this local — flagging as DIFF rather than forcing it into either owner.",
+            "owner": "",
+            "insideSurface": "always-visible",
+            "needsHumanEye": true
+          },
+          {
+            "line": 208,
+            "shape": "dialog-body form: vertical Label-over-control fields in a responsive 2-col grid, inside the model config editor Dialog",
+            "classString": "<FieldStack v-for=\"field in basicFields\" ... :label=\"field.title || field.key\" :for=... :help=\"field.description\">",
+            "verdict": "LOCAL",
+            "why": "Already migrated to FieldStack (model-config-editor.vue lines 7-77, 113-183) — the exact vertical Label-over-control geometry FieldStack owns (space-y-1.5), composed inside a 'grid gap-4 md:grid-cols-2' the caller owns per FieldStack's contract ('caller owns the grid' pattern matches MetricReadout's contract too). This is the first-validation-target style usage already done correctly; nothing to migrate here.",
+            "owner": "",
+            "insideSurface": "Model config editor Dialog",
+            "needsHumanEye": false
+          },
+          {
+            "line": 90,
+            "shape": "quiet chevron-toggle 'Advanced' disclosure revealing a second FieldStack grid, inside the model config editor Dialog",
+            "classString": "<button type=\"button\" class=\"flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground\"> <ChevronRight ... :class=\"showAdvanced ? 'rotate-90' : ''\" /> ... </button> <div class=\"grid overflow-hidden transition-[grid-template-rows] ...\">",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "This is inside model-config-editor.vue (the dialog body), not the audited file itself, but appears via the Dialog opened from provider-setting.vue so it was walked. It looks like it could be ExpandableSettingsRow (chevron toggle + expanding body), but the relationship differs: ExpandableSettingsRow disclose a SettingsRow header (label/description row) into a bordered/inset panel; here there is no label/description row at all — just a bare text link-style toggle with no leading/trailing slots, sitting outside any row or card chrome, directly in the dialog body flow. The census explicitly calls this pattern out as already covered ('Simpler Advanced disclosures (network/channel/context-card) fall out for free' under ExpandableSettingsRow) yet also separately confirms dialog-body compounds keep their own denser language (bot-import-panel/bot-backup-actions). Given ExpandableSettingsRow composes SettingsRow internally and there is no row here to compose, forcing this into ExpandableSettingsRow would require inventing a header it doesn't have. Marking DIFF, not MISS, since the shape has no row-like host to begin with — but flagging for human judgment since it is architecturally the closest match of anything in this render tree.",
+            "owner": "",
+            "insideSurface": "Model config editor Dialog",
+            "needsHumanEye": true
+          },
+          {
+            "line": 5,
+            "shape": "identity header card: circular icon/initials avatar + provider name + right-aligned enable label and Switch",
+            "classString": "<section class=\"flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3\">",
+            "verdict": "LOCAL",
+            "why": "Not one of the six built owner gaps, and not in the 'existing ready' owner list either (no IdentityHeader owner exists in the vocabulary). It is byte-duplicated across every provider-setting.vue sibling (email, transcription, video, speech, memory), explicitly commented 'same header shape as...' in each — genuine cross-page duplication, but the census's rejected-pseudo-gap list and stays-local list do not include this shape, meaning it was deliberately left out of the vocabulary scope (a candidate for a FUTURE 7th owner, not a miss against the CURRENT vocabulary). Keeping as LOCAL per the task's instruction not to propose new owners; flag separately to the human as an out-of-scope duplication worth a future census entry, not a migration target today.",
+            "owner": "",
+            "insideSurface": "always-visible",
+            "needsHumanEye": false
+          },
+          {
+            "line": 165,
+            "shape": "empty-state line when a provider has no synthesis models yet",
+            "classString": "<div v-if=\"providerModels.length === 0\" class=\"px-4 py-10 text-center text-xs text-muted-foreground\">",
+            "verdict": "LOCAL",
+            "why": "The census explicitly lists 'trivial muted no-results <p> lines' as stays-local, and this is that exact pattern (muted, centered, no action, no icon) — not the full Empty component's territory (which is for richer empty states with icon/action), and not worth the migration churn per the census's own empty-state note ('only fold py-12/16 into an Empty padding default' — this is py-10, a slightly different value, on a plain text line, not a rich Empty composition).",
+            "owner": "",
+            "insideSurface": "always-visible",
+            "needsHumanEye": false
+          }
+        ],
+        "missCount": 2,
+        "summary": "This file is NOT clean — it hides two genuine same-shape-different-code misses behind ordinary page flow (no click-to-open surface needed to find them, they're always-visible). (1) Line 121: a hand-rolled right-aligned Save action bar that is byte-for-byte the SettingsSection #footer slot geometry — proven by its own sibling apps/web/src/pages/email/components/provider-setting.vue, which was migrated to <template #footer> in the same batch this file was supposedly touched in (the census's batch-1 list literally names 'provider-setting' as migrated, but that was the email one; this speech one and its twin apps/web/src/pages/transcription/provider-setting.vue were left on the old hand-rolled footer). (2) Line 135-163: the 'Synthesis models' section header + card wrapper is a hand-copied duplicate of SettingsSection's own template rather than composing SettingsSection with an #actions slot — the same anti-pattern the census flagged and fixed once already for chart-card.vue ('BYTE-COPY -> delete + repoint'), recurring here undetected. The one click-to-open surface in the file (the model-config Dialog) is clean: its body already correctly uses FieldStack for both the basic and advanced field grids. Two shapes needed a human eye rather than a clean verdict: the model-list row (denser dense-object-list-row relationship, not BackendCard, but currently a raw <button> that SettingsRow can't host as-is) and the dialog's bare chevron 'Advanced' toggle (closest conceptual match is ExpandableSettingsRow, but it has no label/description row to disclose from, so forcing it in would require inventing structure that isn't there). The identity-header card duplication across all provider-setting siblings is real but out of the current six-owner vocabulary's scope, so it's recorded as LOCAL rather than a miss."
+      },
+      {
+        "file": "apps/web/src/pages/transcription/provider-setting.vue",
+        "findings": [
+          {
+            "line": 5,
+            "shape": "Identity card header: leading avatar/icon + name + trailing 'enable' label & Switch, hand-rolled as a standalone <section>",
+            "classString": "<section class=\"flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3\">",
+            "insideSurface": "always-visible",
+            "verdict": "MISS",
+            "why": "This is the exact horizontal 3-segment relationship SettingsRow owns: leading media (#leading slot) + content (name) + trailing control (Switch, default slot). It is hand-built as its own bordered/radius/padded <section> duplicating what a single SettingsSection + SettingsRow(align='center') would give for free — same geometry (px-4 py-3, items-center, gap-3 leading gap) as the canonical row, just re-derived with raw markup instead of the owner component. The exact same block (byte-identical class string) is also pasted in apps/web/src/pages/speech/components/provider-setting.vue:5 and apps/web/src/pages/video/provider-setting.vue:4 — a triplicated, unmigrated instance of the same owner shape.",
+            "owner": "SettingsSection + SettingsRow",
+            "needsHumanEye": false
+          },
+          {
+            "line": 118,
+            "shape": "Form footer bar: right-aligned single submit LoadingButton, sitting inside SettingsSection's default slot as a hand-rolled sibling div instead of using the section's #footer slot",
+            "classString": "<div class=\"mx-4 flex items-center justify-end border-t border-border py-3\">",
+            "insideSurface": "always-visible",
+            "verdict": "MISS",
+            "why": "SettingsSection now ships a dedicated #footer slot (components/settings/section.vue lines 22-27) rendering exactly `flex items-center justify-end gap-2 border-t border-border px-4 py-3` inside the card, after the rows — built and verified in Phase 3 specifically against apps/web/src/pages/email/components/provider-setting.vue (confirmed at line 137: `<template #footer>`), the sibling file in the adjacent provider-setting family. This transcription file has the identical shape (single submit button, right-aligned, border-t divider, inside the same SettingsSection) but was never switched to the slot — it still hand-rolls a near-identical div (mx-4 instead of px-4, missing gap-2) as a plain child instead of `<template #footer>`. Textbook same-shape-different-code leftover.",
+            "owner": "SettingsSection #footer",
+            "needsHumanEye": false
+          },
+          {
+            "line": 133,
+            "shape": "Section header: title + trailing action buttons (Import Models, Create Model), hand-rolled as a bare <section> instead of SettingsSection with #actions",
+            "classString": "<div class=\"flex min-h-7 items-center justify-between gap-2 px-2\">",
+            "insideSurface": "always-visible",
+            "verdict": "MISS",
+            "why": "This is byte-for-byte the SettingsSection title+actions header shape (section.vue lines 3-14: `flex min-h-7 items-center justify-between gap-4 px-2` title + #actions slot) reimplemented by hand on a plain `<section class=\"space-y-2.5\">` (line 132) instead of using `<SettingsSection :title=\"...\"><template #actions>`. The only functional difference is gap-2 here vs gap-4 in the owner, which is a drift introduced by hand-copying rather than an intentional different relationship.",
+            "owner": "SettingsSection (title + #actions slot)",
+            "needsHumanEye": false
+          },
+          {
+            "line": 160,
+            "shape": "Models list card wrapper: bordered/radius white card holding an empty state or a v-for of model rows",
+            "classString": "<div class=\"overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card\">",
+            "insideSurface": "always-visible",
+            "verdict": "MISS",
+            "why": "This class string is byte-identical to SettingsSection's card wrapper (section.vue line 15: `overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card`). Combined with the header at line 133 (same finding above), the whole `<section>` block at lines 132-194 is a hand-rolled re-derivation of SettingsSection's title+actions+card composition rather than using the component. The card itself is the SettingsSection frame; only its interior rows differ (see next finding for the DIFF verdict on rows).",
+            "owner": "SettingsSection",
+            "needsHumanEye": false
+          },
+          {
+            "line": 169,
+            "shape": "Model list row: whole row is a clickable <button> (leading truncated name+id, trailing Settings icon) opening a Dialog, divided from siblings by a manual sibling border div",
+            "classString": "<button type=\"button\" class=\"flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-accent\" @click=\"openModelEditor(model)\">",
+            "insideSurface": "always-visible",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "Looks like a SettingsRow (px-4 py-3 horizontal row inside a card) but the spatial/interaction relationship differs: the ENTIRE row is the click target (a <button> wrapping content, navigating to open a dialog), not a passive row with a separate trailing control — SettingsRow's slots assume the row itself stays a non-interactive div and only the default/trailing slot is a control. The divider is also a separate sibling `<div class=\"mx-4 border-b border-border\">` (lines 187-190) rather than being baked onto the row itself with `last:border-b-0` the way SettingsRow does. This mirrors the census's own precedent for `bot-acp`'s stretched-overlay row, which stayed local for the identical reason: 'BackendCard root is a <button>, can't nest a Switch' — here SettingsRow's root would need to become a <button>, which is a different component contract, not a prop tweak. It is also not BackendCard, since BackendCard is a standalone bordered tile (its own rounded-menu-shell + border), not a row sharing one outer list card. NOTE: the identical row shape is pasted 3x verbatim (transcription/provider-setting.vue:173, speech/components/provider-setting.vue:178, video/provider-setting.vue:172/186) with only trivial differences (video's version isn't even a <button>, just a div with a click handler on a child) — this triplication is itself an un-owned repeated composition per the 'extract, don't paste' component-discipline rule, but it is a NEW gap outside the current six-owner vocabulary (no 'clickable full-row-to-dialog list item' owner exists yet), not a migration miss against an existing owner. Flagging for human judgment on whether it warrants a 7th owner rather than treating it as in-scope MISS/DIFF today.",
+            "owner": "",
+            "needsHumanEye": true
+          }
+        ],
+        "missCount": 3,
+        "summary": "The file is a hybrid: its central provider-configuration form (SettingsSection + SettingsRow for name/config fields, lines 38-116) is properly migrated and clean. But three always-visible shapes were missed by the batch migration — the identity-card header (line 5, should be SettingsRow inside a SettingsSection), the form's submit footer (line 118, should use SettingsSection's #footer slot rather than a hand-rolled near-identical div — notably, this exact gap was verified and closed in the sibling email/provider-setting.vue but never carried over here), and the Models-list section header+card (lines 132-160, a hand-rolled re-derivation of SettingsSection's title+#actions+card composition). All three MISSes are also pasted byte-for-byte in the speech/ and video/ provider-setting siblings, so this is the same triplicated debt showing up in three files, not an isolated case. The one click-to-open surface in the file (the model-editor Dialog) is clean — it delegates to a shared ModelConfigEditor that already uses FieldStack correctly. The models-list row itself (line 169) is a DIFF-RELATIONSHIP, not a MISS: the whole row is a button-to-dialog, a different interaction contract than SettingsRow's passive-row-plus-control shape, matching the census's own precedent for staying local (bot-acp's clickable-root row). That said, its exact triplication across three sibling files suggests a real (but currently unbuilt) 7th owner gap — flagged with needsHumanEye rather than forced into MISS or LOCAL."
+      },
+      {
+        "file": "apps/web/src/pages/video/provider-setting.vue",
+        "surfacesWalked": [
+          {
+            "surface": "Model Editor Dialog (edit display name)",
+            "trigger": "click the ghost icon-button (Settings gear) on a model row, line 180-189, sets modelDialogOpen=true via openModelEditor()"
+          }
+        ],
+        "findings": [
+          {
+            "line": 207,
+            "shape": "Dialog-body vertical Label-over-Input field, x2 (display name field + read-only model-id field)",
+            "classString": "<div class=\"space-y-2\"><Label for=\"video-model-name\">...<Input .../></div> (lines 208-218), repeated at 220-230 for the id field, wrapped in <div class=\"mt-4 space-y-4\">",
+            "verdict": "MISS",
+            "why": "This is the exact FieldStack morphology: one Label bound via `for`, one control beneath it, inside a space-y wrapper, inside a run-of-fields column. The sibling dialog form `speech/components/model-config-editor.vue` (batch-3 migrated per the census) uses FieldStack for this identical Label-over-Input dialog-field shape (its own Dialog form, verified via grep: FieldStack imported and used at lines 7-77 and 113-183 of that file), proving this geometry is an established FieldStack occurrence, not a different relationship. The only geometry delta here is `space-y-2` vs FieldStack's internal `space-y-1.5` — a drift that is itself evidence of same-shape-different-code (the owner already normalizes this rhythm), not a deliberate different design. The outer `mt-4 space-y-4` wrapper around the two fields is also exactly what FormStack (space-y-4 wrapper for a run of FieldStacks) exists for. This dialog was NOT touched in the batch migration even though its structural twin was.",
+            "insideSurface": "Model Editor Dialog"
+          },
+          {
+            "line": 119,
+            "shape": "hand-rolled section footer bar (Save button, right-aligned, top hairline, inside the card)",
+            "classString": "<div class=\"mx-4 flex items-center justify-end border-t border-border py-3\"><LoadingButton type=\"submit\" .../></div>, sibling to (not inside) the closing </SettingsSection> tag structurally — it sits as a direct child of SettingsSection's default slot, after the SettingsRow list div",
+            "verdict": "MISS",
+            "why": "SettingsSection now ships a dedicated #footer slot (`packages/ui`-parallel component at apps/web/src/components/settings/section.vue lines 22-27: `<div v-if=\"$slots.footer\" class=\"flex items-center justify-end gap-2 border-t border-border px-4 py-3\">`) built specifically to replace this exact hand-rolled pattern — the census (owner-vocabulary-census.md) names this bucket 'SettingsFooterBar... unblocks 7' and lists provider-setting as part of 'batch 1' migrated files. The sibling `email/components/provider-setting.vue` (same shape: a config form, Save button, LoadingButton, size=\"sm\") already uses `<template #footer>` (verified at line 137 of that file) instead of a raw div. This file's footer was left as the pre-migration raw markup: `mx-4 ... border-t border-border py-3` (px via mx-4 on the wrapper) vs the owner's `border-t border-border px-4 py-3` on the slot's own div — near-identical geometry, genuinely the same relationship (a card-internal, right-aligned save action band), just hand-copied instead of using the shipped slot.",
+            "insideSurface": "always-visible"
+          },
+          {
+            "line": 4,
+            "shape": "identity header card: icon-avatar + provider name + enable Switch, horizontal 3-segment row (leading media / body / trailing control)",
+            "classString": "<section class=\"flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3\">... <span class=\"flex size-9 shrink-0 items-center justify-center rounded-full bg-muted\">(icon)</span> <div class=\"min-w-0 flex-1\"><h2>...</h2></div> <div class=\"ml-auto flex shrink-0 items-center gap-2\">(label + Switch)</div>",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "This LOOKS like a SettingsRow (leading media + body + trailing control is literally SettingsRow's slot API), but it is a standalone top-of-page identity banner, not a row inside a SettingsSection card — there is no section title above it, no sibling rows below it inside the same card, and no border-b/last:border-b-0 divider logic since it is the only element in its own <section>. SettingsRow's defining geometry (min-h-[3.75rem], py-3, mx-4 inset divider, living inside a bordered SettingsSection card) exists specifically to let rows share a stroke inside one continuous card surface; here there is exactly one row and it owns its own full card border (rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3), which is architecturally SettingsSection's job, not a row's. Forcing this into <SettingsSection><SettingsRow> would produce an extra section-label slot with nothing to put in it and a card that exists only to hold one row — the exact 'card the groups, don't card the singletons' anti-pattern the skill (memoh-web SKILL.md, UX principle 9) warns against. Needs a human eye only to confirm the page doesn't want this promoted into a titled SettingsSection anyway for other reasons (e.g. consistency with other provider pages) — but as a pure owner-shape match, it is a different relationship: a solo identity banner, not a card of rows.",
+            "insideSurface": "always-visible",
+            "needsHumanEye": true
+          },
+          {
+            "line": 168,
+            "shape": "dense model list row: name + optional id caption on the left, ghost icon-button (edit) on the right, manual inset divider between rows",
+            "classString": "<div class=\"flex w-full items-center justify-between gap-3 px-4 py-3 text-left\">...<Button variant=\"ghost\" size=\"icon-sm\" @click=\"openModelEditor(model)\">...</div> + separate sibling <div v-if=\"index < providerModels.length - 1\" class=\"mx-4 border-b border-border\" />",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "Same px-4 py-3 rhythm and inset mx-4 divider idiom as SettingsRow, but two real geometry/behavior differences disqualify a straight SettingsRow swap: (1) no min-h-[3.75rem] — this is a tighter list-row density (a compact model/provider list, exactly the census's 'dense object-list row' bucket, itself mapped to SettingsRow only after adding an align prop, not verbatim), and (2) the row is not label+description+control, it's name+optional-inline-id-caption (same line, ml-2 text-xs, not SettingsRow's separate mt-0.5 description paragraph) plus a single icon action, which is closer to BackendCard's leading/name/subtitle/trailing anatomy — except BackendCard's root is a clickable <button> with a chevron-disclosure affordance and a status dot slot, and this row's click target is only the small inner icon-button, not the whole row (clicking the row background does nothing). Per the census, 'bot-acp stretched-overlay row: BackendCard root is a <button>, can't nest a Switch' was confirmed stays-local for the identical reason (can't nest an independently-clickable control inside a button root) — the same logic applies here to the ghost edit-button. This is a genuinely different interaction relationship (row is inert, only the trailing icon is live) from both SettingsRow (whole row is a label/control pair) and BackendCard (whole row is the click target). Could still be argued as a SettingsRow with a #content slot override + no divider-per-row (letting SettingsRow's own last:border-b-0 own the divider instead of the hand-rolled v-if divider) — flagging needsHumanEye since the divider hand-rolling (index < length-1 check) is otherwise-avoidable duplication of what SettingsRow's own border-b already does for free.",
+            "insideSurface": "always-visible",
+            "needsHumanEye": true
+          },
+          {
+            "line": 39,
+            "shape": "SettingsRow usage for the provider name field and every schema-driven config field (secret/bool/number/enum/text)",
+            "classString": "<SettingsRow :label=\"$t('common.name')\"><Input class=\"w-80\" .../></SettingsRow>, repeated via v-for at line 49 for orderedProviderFields",
+            "verdict": "LOCAL",
+            "why": "Already correctly using the SettingsRow owner exactly as designed (label left, control right, description via prop). This is the part of the file that WAS migrated in batch 1 per the census, and it's clean: no hand-rolled divider, no raw min-h, no ad-hoc padding.",
+            "insideSurface": "always-visible"
+          },
+          {
+            "line": 37,
+            "shape": "SettingsSection wrapper for the provider configuration form",
+            "classString": "<SettingsSection :title=\"$t('provider.configurationTitle')\">",
+            "verdict": "LOCAL",
+            "why": "Correct owner usage — this is the card-of-rows the SettingsSection contract exists for. (Its footer child is flagged separately above as a MISS since it doesn't use the section's own #footer slot.)",
+            "insideSurface": "always-visible"
+          },
+          {
+            "line": 66,
+            "shape": "in-field reveal/hide-secret icon toggle button",
+            "classString": "<button type=\"button\" class=\"absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground\" @click=\"visibleSecrets[field.key] = !visibleSecrets[field.key]\">",
+            "verdict": "LOCAL",
+            "why": "Not an owner-vocabulary morphology (no row/field/tile/banner shape here) — it's a small in-field control, so it's out of scope for this owner-vocabulary audit strictly speaking. Flagging only because it is the file's live, guard-verified violation (mise run lint / check-ui-contract.mjs currently fails on this exact line: 'ad-hoc interaction fill (chrome belongs to the component, not the page) -> hover:text-foreground', plus a matching 'app-injection count 1 exceeds baseline 0' failure). memoh-web SKILL.md non-negotiable #5 says never hand-roll a control; @memohai/ui's own InputGroup/InputGroupButton (referenced in SKILL.md §4 same-row controls and in the component picker) is the established pattern for in-field icon buttons elsewhere. This is real, currently-failing debt but is a plain hand-written-button bug, not a spacing-owner-shape miss, so it does not get an `owner` assignment.",
+            "insideSurface": "always-visible"
+          },
+          {
+            "line": 200,
+            "shape": "Dialog shell (Dialog/DialogContent/DialogHeader/DialogTitle/DialogFooter) for the model editor",
+            "classString": "<Dialog v-model:open=\"modelDialogOpen\"><DialogContent class=\"sm:max-w-md\">...<DialogFooter class=\"mt-4\">",
+            "verdict": "LOCAL",
+            "why": "Straight composition of @memohai/ui Dialog atoms as-is, matching the New Task dialog standard referenced in SKILL.md §11 (Title/Fields/Footer anatomy, ghost Cancel + filled primary Confirm, Spinner on submit). No debt at the shell level — only its interior fields (flagged above) miss FieldStack.",
+            "insideSurface": "Model Editor Dialog"
+          },
+          {
+            "line": 159,
+            "shape": "models section card wrapper (bordered container holding either an empty-state message or the model rows)",
+            "classString": "<div class=\"overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card\">",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "This class string is byte-identical to SettingsSection's card wrapper (rounded-[var(--radius-menu-shell)] border border-border bg-card), which reads at first glance like a candidate MISS. But the census explicitly resolved this exact ambiguity: 'chart-card.vue is a BYTE-COPY -> delete + repoint' was the only case where a byte-copy card wrapper was treated as a real SettingsSection miss, and that fix already shipped elsewhere. Here the surrounding structure is NOT a SettingsSection: the section title lives in a separate <h2> (line 133) with its own toolbar actions (Import Models button + CreateModel), styled with flex min-h-7 items-center justify-between gap-2 px-2 rather than SettingsSection's internal title/actions header row (min-h-7 items-center justify-between gap-4 px-2 with #actions slot) — extremely close but hand-duplicated rather than delegated. Swapping in SettingsSection here (title + #actions slot) would collapse this duplication and is plausible, but the model-row content underneath is DIFF-RELATIONSHIP as documented in the finding above (dense list rows, not SettingsRow rows), so the card wrapper itself is a borderline call bundled with that same row-shape ambiguity — flagging needsHumanEye rather than a clean MISS or LOCAL verdict.",
+            "insideSurface": "always-visible",
+            "needsHumanEye": true
+          }
+        ],
+        "missCount": 2,
+        "summary": "This file is NOT clean — it carries two genuine same-shape-different-code MISSes plus a live, currently-failing UI-contract-guard violation, despite the owner-vocabulary census listing it as \"batch 1\" migrated. (1) The Model Editor Dialog's two Label-over-Input fields (lines 208-230) hand-roll the exact FieldStack/FormStack morphology that its structural sibling, speech/components/model-config-editor.vue, already uses for the identical dialog-field shape — this dialog was left behind when the rest of the form (SettingsRow usage for the main config, lines 37-116) was correctly migrated. (2) The section footer (line 119) hand-rolls the Save-button action bar that SettingsSection's own #footer slot exists to replace, and whose sibling email/components/provider-setting.vue already adopted. Beyond the misses, three shapes look tempting to unify but are genuinely different relationships and were correctly left local: the top identity banner (single-row own-card, not a row-inside-a-section-card), the dense model-list rows (tighter density, inert row body with only the trailing icon live, unlike both SettingsRow's whole-row-is-the-field and BackendCard's whole-row-is-clickable models), and the models-list card wrapper (byte-similar to SettingsSection but paired with a hand-duplicated title/actions header, flagged for human judgment rather than forced either way). Separately, mise run lint currently fails on this exact file for a hand-rolled hover:text-foreground button (the secret-reveal toggle, line 68) — real, verifiable, currently-blocking debt, but it's a component-discipline violation rather than a spacing-owner-shape miss, so it's reported as an aside rather than assigned to an owner."
+      },
+      {
+        "file": "apps/web/src/components/form-dialog-shell/index.vue",
+        "findings": [],
+        "missCount": 0,
+        "surfacesWalked": [
+          {
+            "trigger": "DialogTrigger (#trigger slot, caller-owned content)",
+            "surface": "The Dialog itself (DialogContent)"
+          }
+        ],
+        "summary": "This file is clean and contains no owner-shape debt to migrate — it is not a place where debt could hide. It is an 84-line generic Dialog shell: every visible element is a direct, unmodified @memohai/ui atom (Dialog/DialogTrigger/DialogContent/DialogHeader/DialogTitle/DialogDescription/DialogFooter/DialogClose/Button/Spinner) composed exactly per contract, with only one sanctioned outer-layout className (`mt-4` on DialogFooter, spacing, not chrome injection) and one caller-supplied `maxWidthClass` pass-through. There is no dialog-within-dialog, popover, sheet, or dropdown nested inside it, and no hand-rolled row/field/tile/banner markup — the entire body is a bare `<slot name=\\\"body\\\" />` with zero markup of its own, so the actual owner-shape content (FieldStack/FormStack/SettingsRow instances) lives in the 8 consumer files that use this shell (create-model, add-platform, add-provider, import-models-dialog, add-search-provider, add-fetch-provider, add-web-provider, add-email-provider) — those are separate files outside this file's scope, not this file's debt. This shell is infrastructure analogous to PageShell: it defines the frame other owners get composed inside of, not a place that reimplements them. Verdict: no MISS, no LOCAL, no DIFF-RELATIONSHIP findings — there is nothing here to classify beyond plain atom composition."
+      },
+      {
+        "file": "apps/web/src/pages/bots/components/bot-mcp.vue",
+        "surfacesWalked": [
+          {
+            "trigger": "Always-visible list root (PageShell variant=\"tab\")",
+            "surface": "MCP server list grid (2-up BackendCard grid + dashed add-tile + Empty state + loading Skeleton grid)"
+          },
+          {
+            "trigger": "Click a BackendCard, or the dashed add-tile, or 'Add' button in #actions",
+            "surface": "Setup/detail section (SwapTransition swap, not an overlay) — renders mcp-server-detail.vue, a separate file out of scope for this audit"
+          },
+          {
+            "trigger": "Click the Upload icon-button in PageShell #actions",
+            "surface": "Import Dialog (paste mcpServers JSON via MonacoEditor)"
+          }
+        ],
+        "findings": [
+          {
+            "line": 94,
+            "shape": "Dashed 'add' tile beside BackendCard grid items",
+            "classString": "flex min-h-[4.5rem] items-center justify-center gap-2 rounded-[var(--radius-menu-shell)] border border-dashed border-border bg-background text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            "insideSurface": "always-visible",
+            "verdict": "MISS",
+            "why": "This is same-shape-different-code duplication, not a hand-rolled instance of an existing vocabulary owner. It is a horizontal, min-h-[4.5rem] dashed tile sitting beside BackendCard rows in a 2-up grid — the exact same geometry (down to nearly-identical class string) as bot-channels.vue L57's dashed add-tile beside its own BackendCard-style grid. It is NOT a PersonaTile occurrence: PersonaTile is vertical/centered (w-52 flex-col items-center) for bot-card.vue's entity tiles, whereas this is a flat horizontal row matching BackendCard's height — a genuinely different geometry from PersonaTile, so forcing it into PersonaTile would be wrong. But it is hand-rolled markup, pasted near-verbatim across at least two files (bot-mcp.vue, bot-channels.vue), which is exactly the duplication-debt this cleanup hunts for even though no owner in the current six-owner vocabulary explicitly names 'horizontal dashed add-tile paired with BackendCard'. Flagging as a MISS-adjacent cross-file duplication rather than silently bucketing into LOCAL, since the whole point of the vocabulary effort is to catch same-shape-different-code, and this shape is same-code-in-two-places, not merely 'looks similar'. needsHumanEye because whether this warrants a 7th owner (e.g. a BackendCard 'add' slot/variant) or should be shrugged off as too small (n=2) is a scope call for the developer, matching the census's own bar of deferring n=2 occurrences (see 'DescriptionList / DefinitionRow... defer (n=2)' precedent).",
+            "owner": "",
+            "needsHumanEye": true
+          },
+          {
+            "line": 48,
+            "shape": "Loading skeleton grid mirroring the BackendCard grid",
+            "classString": "grid grid-cols-1 gap-3 sm:grid-cols-2 / Skeleton class=\"h-[4.5rem] w-full rounded-[var(--radius-menu-shell)]\"",
+            "insideSurface": "always-visible",
+            "verdict": "LOCAL",
+            "why": "Textbook 'stays-local' case named explicitly in the census: a loading placeholder that borrows the real row's min-height (h-[4.5rem] matches the BackendCard/add-tile min-h-[4.5rem]) so the panel doesn't reflow when data arrives. Not an owner shape itself, just a Skeleton sized to match one.",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 59,
+            "shape": "BackendCard grid (2-up object-entry cards)",
+            "classString": "BackendCard :name :subtitle :enabled #leading #trailing",
+            "insideSurface": "always-visible",
+            "verdict": "LOCAL",
+            "why": "Correct, already-migrated use of the BackendCard owner exactly as specified (props name/subtitle/enabled, #leading/#trailing slots). Nothing to fix here.",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 104,
+            "shape": "Empty state (no servers configured)",
+            "classString": "Empty class=\"rounded-[var(--radius-menu-shell)] border border-border py-16\" + EmptyTitle + EmptyDescription + EmptyContent (outline Button)",
+            "insideSurface": "always-visible",
+            "verdict": "LOCAL",
+            "why": "Correct use of the @memohai/ui Empty owner: solid-framed (not dashed), holds the populated grid's frame conceptually, single guiding action. Matches the Plugins-tab empty-state model named in the skill file exactly. No debt.",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 124,
+            "shape": "Detail/setup section wrapper + back button",
+            "classString": "section class=\"mx-auto max-w-3xl pt-6 pb-8\" + Button variant=\"ghost\" class=\"mb-6 text-foreground/85\"",
+            "insideSurface": "always-visible (SwapTransition target, not an overlay)",
+            "verdict": "LOCAL",
+            "why": "This is a page-shell-shaped wrapper deliberately re-implemented (not PageShell) to align the back-arrow with the list title's height, per the file's own comment at L122-123. It delegates all real content to mcp-server-detail.vue (a separate file, out of scope for this audit). Not a form/row/field/tile/banner shape itself — a structural section wrapper with a back-navigation Button. No owner shape is being hand-rolled here.",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 149,
+            "shape": "Import Dialog (paste mcpServers JSON)",
+            "classString": "Dialog / DialogContent / DialogHeader / DialogFooter (ghost Cancel + primary submit w/ Spinner + left-aligned outline Format button) wrapping a MonacoEditor body",
+            "insideSurface": "Import Dialog",
+            "verdict": "LOCAL",
+            "why": "This is precisely the 'Monaco JSON dialog' compound block the census names as a genuine one-off that stays local (Phase 3 outcome: 'genuinely one-off compound blocks (OAuth device-flow, link-code countdown, Monaco JSON dialog, snapshot input)'). No FieldStack/SettingsRow/MetricReadout shape exists inside — it's a single full-body code editor, not a form of discrete fields. The footer matches the house Dialog footer pattern (ghost Cancel + filled primary) already.",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 25,
+            "shape": "Icon-button tooltip (Import action)",
+            "classString": "TooltipProvider > Tooltip :delay-duration=\"300\" > TooltipTrigger as-child > Button variant=\"outline\" size=\"icon\"",
+            "insideSurface": "always-visible (#actions slot)",
+            "verdict": "LOCAL",
+            "why": "A plain @memohai/ui atom composition (Tooltip wrapping an icon Button) exactly as sanctioned — not a form/row/field/tile/banner shape at all.",
+            "owner": "",
+            "needsHumanEye": false
+          }
+        ],
+        "missCount": 0,
+        "summary": "bot-mcp.vue is a clean file relative to the owner vocabulary — it correctly uses PageShell, BackendCard, and Empty already, and its one dialog (Import JSON) is a legitimate one-off Monaco-editor compound block the census already blessed as stays-local. There is exactly zero owner-shape MISS in the strict sense (no hand-rolled SettingsRow/FieldStack/MetricReadout/ExpandableSettingsRow/PersonaTile/CalloutBanner masquerading under different code). The one real debt is a same-shape-different-code duplication that sits outside the current six-owner vocabulary: the dashed 'add another' tile at L94-101 is pasted near-verbatim in bot-channels.vue (L57) — a genuine cross-file twin, but since no owner component currently claims 'horizontal dashed add-tile beside BackendCard rows' (PersonaTile's own add variant is vertical/centered and covers a different geometry), it can't be filed as a MISS against an existing owner — it's a smaller-scope duplication call for the developer to decide (extract a BackendCard add-variant/slot, or accept it as a 2-occurrence one-off per the census's own n=2 deferral precedent). Everything else in the file (loading skeleton, Empty state, the setup-view wrapper, the tooltip, the Import dialog) is either an already-correct owner usage or a legitimately different/one-off shape. No dialog/popover/sheet/dropdown body in this file hides a form-field or settings-row shape."
+      },
+      {
+        "file": "apps/web/src/pages/bots/components/bot-channels.vue",
+        "findings": [
+          {
+            "line": 116,
+            "shape": "hand-rolled type-picker row list inside the \"Add Channel\" Dialog — a <button v-for> that renders an icon + label and closes the dialog on click",
+            "classString": "flex w-full items-center gap-3 rounded-[var(--radius-menu)] px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--ui-hover)]",
+            "insideSurface": "Add Channel Dialog (opens on click of header Button, the dashed add-tile, or the Empty state's outline Button)",
+            "verdict": "MISS",
+            "why": "This is functionally a single-select menu (pick one channel type, dialog closes) but is hand-written instead of composed from the shared menu-row contract in packages/ui/src/lib/menu.ts. Compare menuItemClass: 'relative flex w-full cursor-default items-center gap-2 rounded-menu px-2.5 py-1.5 text-control ... data-[highlighted]:bg-[color:var(--ui-selected)] ...'. The file's row uses off-scale rounded-[var(--radius-menu)] with px-3/py-2 (vs the row contract's px-2.5/py-1.5), text-sm instead of text-control, and hover:bg-[color:var(--ui-hover)] instead of the roving-focus data-[highlighted]:bg-[color:var(--ui-selected)] — so it gets no keyboard roving focus, no highlighted-state semantics, and geometry that only approximates the real menu row. Sibling file bot-schedule.vue in the same directory solves an equivalent 'pick one thing then act' need with a real DropdownMenu/DropdownMenuItem, confirming the codebase convention this file skipped. This is the SKILL.md non-negotiable #5 violation by name: 'Menus included: ... never hand-written <button> rows'. It is un-greppable as owner-vocabulary debt (it isn't a SettingsRow/FieldStack shape) but is the same same-shape-different-code failure class one layer over — a menu row reinvented instead of reused.",
+            "needsHumanEye": false
+          },
+          {
+            "line": 66,
+            "shape": "outermost completely-empty state framed with a dashed border",
+            "classString": "rounded-[var(--radius-menu-shell)] border border-dashed border-border py-16",
+            "insideSurface": "always-visible (renders when configuredChannels.length === 0 and not loading)",
+            "verdict": "LOCAL",
+            "why": "Structurally this correctly reuses the Empty owner (EmptyTitle/EmptyDescription/EmptyContent, action button, no decorative icon) — not a spacing-owner MISS. However it violates a different, explicitly-named copy/style rule in the memoh-web SKILL.md: 'border-dashed is NOT an empty-state look... A completely-empty surface takes the solid frame... never a dashed box.' Dashed is reserved for the '+ Add another' tile beside real items (which this file also has, correctly, at line 57). Flagging because it is real, named debt worth a human decision, but it sits on the border/token-style axis, not the six-owner spacing-vocabulary axis this audit is scoped to, so it is not counted as a MISS.",
+            "needsHumanEye": true
+          },
+          {
+            "line": 54,
+            "shape": "horizontal dashed '+ Add another' tile beside the populated BackendCard grid",
+            "classString": "group/add flex min-h-[4.5rem] items-center justify-center gap-2 rounded-[var(--radius-menu-shell)] border border-dashed border-border bg-background text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            "insideSurface": "always-visible (renders inside the populated grid when unconfiguredChannels.length > 0)",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "Looks like it could be PersonaTile's 'add' variant, but PersonaTile is explicitly defined as a VERTICAL centered entity/add tile (w-52 flex-col items-center). This tile is HORIZONTAL, sized min-h-[4.5rem] to sit flush inside a grid of horizontal BackendCard rows (same grid-cols-1 sm:grid-cols-2 container, same implicit row height). It is the correct dashed 'add tile beside real items' use per SKILL.md, and its class string is byte-identical to the same pattern in bot-mcp.vue — a deliberately shared, already-consistent hand pattern paired with BackendCard's horizontal geometry, not a PersonaTile occurrence forced into a different shape.",
+            "needsHumanEye": false
+          },
+          {
+            "line": 36,
+            "shape": "configured-channel object-entry card, horizontal, in a 2-col responsive grid",
+            "classString": "(BackendCard component — leading icon slot, name, subtitle, trailing chevron/status dot)",
+            "insideSurface": "always-visible",
+            "verdict": "LOCAL",
+            "why": "Already the correct owner (BackendCard) used as-is with only #leading slot content, matching its documented horizontal object-entry-card contract exactly. No debt.",
+            "needsHumanEye": false
+          },
+          {
+            "line": 20,
+            "shape": "loading skeleton grid holding the frame of the populated BackendCard grid",
+            "classString": "grid grid-cols-1 gap-3 sm:grid-cols-2 (wrapper) / Skeleton class=\"h-[4.5rem] w-full rounded-[var(--radius-menu-shell)]\"",
+            "insideSurface": "always-visible (loading branch)",
+            "verdict": "LOCAL",
+            "why": "Correctly mirrors the populated grid's exact container classes and the BackendCard's implicit tile height (4.5rem, matching the dashed add-tile's min-h-[4.5rem] too), so the layout does not jump when data arrives — exactly the SKILL.md loading-state rule. This is a plain @memohai/ui Skeleton atom composed as-is, not a hand-rolled owner shape.",
+            "needsHumanEye": false
+          },
+          {
+            "line": 85,
+            "shape": "platform-detail back button + delegated settings panel",
+            "classString": "mx-auto max-w-3xl pt-4 pb-8 (section wrapper) / mb-2 text-foreground/85 (ghost Button)",
+            "insideSurface": "always-visible (detail view, view === 'detail')",
+            "verdict": "LOCAL",
+            "why": "A plain page-shell-shaped wrapper around a back Button (@memohai/ui atom, ghost variant, used as-is) and a delegated child component (ChannelSettingsPanel, a separate 458-line file already logged in the census as its own stays-local domain surface — out of scope for this file's audit). No hand-rolled row/field/tile shape here to classify.",
+            "needsHumanEye": false
+          }
+        ],
+        "missCount": 1,
+        "surfacesWalked": [
+          {
+            "trigger": "click header 'Add Channel' Button, the dashed add-tile, or the Empty state's outline Button",
+            "surface": "Add Channel Dialog (channel-type picker list)"
+          }
+        ],
+        "summary": "bot-channels.vue is a small (232-line), largely clean file that already composes the shipped owner vocabulary correctly: PageShell for the shell, BackendCard for the configured-channel grid (used as-is, only the #leading slot filled), the shared dashed '+ Add another' tile pattern (byte-identical to bot-mcp.vue, correctly horizontal to match BackendCard's geometry rather than a misapplied PersonaTile), Empty for the zero-state (structurally correct: EmptyTitle/EmptyDescription/EmptyContent, no decorative icon), and a Skeleton loading grid that mirrors the populated grid's exact geometry so nothing jumps. There is exactly one genuine debt finding, and it is not a spacing-owner-vocabulary gap (no SettingsRow/FieldStack/MetricReadout/etc. shape hides in this file) but a menu-hand-rolling violation one axis over: the Add Channel dialog's channel-type picker (line 116) is a <button v-for> reinventing menu-row chrome — off-scale radius/padding/text-size and hover-only feedback instead of the shared menuItemClass roving-highlight contract that a sibling file (bot-schedule.vue) already uses via DropdownMenu for an equivalent 'pick one, then act' interaction. One additional non-owner-vocabulary issue is flagged for human judgment: the fully-empty state's Empty wrapper uses border-dashed, which the memoh-web skill explicitly reserves for '+ Add another' tiles beside real items, not a completely-empty surface (which should take a solid border). Neither finding requires migrating this file onto one of the six new owners (FieldStack/MetricReadout/Footer/ExpandableRow/PersonaTile/CalloutBanner) — the file simply has no hand-rolled settings-row/field/tile/banner shape of that kind to migrate."
+      },
+      {
+        "file": "apps/web/src/pages/bots/components/bot-checks-panel.vue",
+        "findings": [
+          {
+            "line": 10,
+            "shape": "Dialog shell (DialogContent/DialogHeader/DialogTitle/DialogDescription)",
+            "classString": "flex max-h-[80vh] w-full max-w-xl flex-col gap-0 overflow-hidden p-0 sm:max-w-xl; header: border-b border-border px-6 py-4 text-left",
+            "insideSurface": "always-visible (this IS the dialog root)",
+            "verdict": "LOCAL",
+            "why": "Pure @memohai/ui atom composition (Dialog/DialogHeader/DialogTitle/DialogDescription) used as-is. No owner-shape claims a dialog's own header band; this is standard atom usage, not hand-rolled chrome.",
+            "owner": ""
+          },
+          {
+            "line": 16,
+            "shape": "Dialog-body toolbar row (Expand all / Collapse ghost buttons)",
+            "classString": "flex items-center justify-end gap-1 border-b border-border px-4 py-1.5",
+            "insideSurface": "always-visible (dialog body, only rendered when checks.length > 0)",
+            "verdict": "LOCAL",
+            "why": "This is a dialog-internal action toolbar, structurally splitting the dialog body from the list below (full-bleed border-b, per SKILL.md's divider rule for structural splits, not an inset row divider). No owner shape (SettingsRow/FieldStack/etc.) models a bare action-toolbar strip inside a dialog; it is the dialog's own #actions-equivalent cluster, correctly composed from real <Button> atoms (ghost, size=sm), not hand-rolled.",
+            "owner": ""
+          },
+          {
+            "line": 40,
+            "shape": "Loading skeleton (5 placeholder tiles)",
+            "classString": "space-y-2 > rounded-md border px-3 opacity-60 > flex items-center gap-3 py-2 > Skeleton h-4 w-full",
+            "insideSurface": "always-visible (dialog body, only while checksLoading && checks.length===0)",
+            "verdict": "LOCAL",
+            "why": "Deliberately mirrors the real check-tile frame below it (rounded-md border) at reduced opacity, satisfying SKILL.md §3's 'the skeleton should match the shape of the final content' rule so the layout doesn't jump when data arrives. This is the documented stays-local 'centered placeholder borrowing row shape so panels don't reflow' category from the owner-vocabulary census (22 occurrences already confirmed local) — not an owner-shape instance itself, since it copies the check-item's own (non-owner) geometry, not a SettingsRow/FieldStack geometry.",
+            "owner": ""
+          },
+          {
+            "line": 56,
+            "shape": "Empty state (no checks returned)",
+            "classString": "rounded-md border border-dashed py-10 text-center; Activity icon: mx-auto mb-2 size-5 text-muted-foreground/50; p: text-xs text-muted-foreground",
+            "insideSurface": "always-visible (dialog body, only when checks.length === 0 and not loading)",
+            "verdict": "MISS",
+            "why": "This is a genuine hand-rolled instance of the Empty owner shape that violates two explicit, named anti-patterns from .agents/skills/memoh-web/SKILL.md: (1) 'border-dashed is NOT an empty-state look... A completely-empty surface takes the solid frame... never a dashed box' — this block uses border-dashed on a fully-empty surface, the exact banned case; (2) 'No decorative icon... any big lucide glyph stacked above the title, is banned' — the Activity icon stacked above the muted <p> is exactly the banned decorative-icon-over-text pattern. The owner vocabulary explicitly lists 'empty state -> Empty (existing)' as one of the four owners already READY for mass migration (11 occurrences, 8 files) in the census. This block was never migrated to Empty and independently reproduces both banned patterns, so it is leftover same-shape-different-code debt, not a deliberate one-off.",
+            "owner": "Empty (from @memohai/ui)"
+          },
+          {
+            "line": 71,
+            "shape": "Check-list item root (per-check collapsible tile)",
+            "classString": "rounded-md border transition-opacity, plus conditional opacity-60 hover:opacity-100 (ok) / opacity-100 (other)",
+            "insideSurface": "always-visible (dialog body, check list)",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "Looks superficially like ExpandableSettingsRow (both use a Collapsible-style header that discloses a body), but the geometry is a genuinely different relationship: ExpandableSettingsRow's real geometry (verified in apps/web/src/components/settings/expandable-row.vue) is `mx-4 border-b border-border py-3 last:border-b-0` — an INSET row sharing one continuous hairline-divided SettingsSection card, header min-h-[3.75rem]. This check-item instead is `rounded-md border` — its OWN independent bordered+rounded tile, stacked via space-y-2 between siblings, with no shared card, no border-b/last:border-b-0 relationship, no min-h-[3.75rem], and py-2 (not py-3) on the trigger. It also carries a status-driven opacity treatment (ok items dim to 60% until hovered) that ExpandableSettingsRow has no concept of. This is a self-contained 'diagnostic check card' list, not rows-in-a-card — same disclosure IDEA, different spatial relationship (independent tiles vs. inset rows in one shared surface). Grep confirms this file is the only usage of CollapsibleTrigger for this shape in apps/web, i.e. not a repeated, driftable pattern elsewhere.",
+            "owner": ""
+          },
+          {
+            "line": 78,
+            "shape": "Check-item trigger row (icon + title/subtitle + chevron)",
+            "classString": "flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-accent/40",
+            "insideSurface": "always-visible (dialog body, check list)",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "Same reasoning as the parent tile: this is the header of an independent bordered tile, not an inset SettingsRow/ExpandableSettingsRow header. py-2 (not the owner's py-3), no min-h-[3.75rem], hover uses hover:bg-accent/40 (a hand-mixed alpha on bg-accent) rather than the row-hover convention, but that alpha choice is a token-usage nit, not a spacing-relationship miss — the geometric relationship (independent-tile header vs. inset-row header) is genuinely different, so this is not folded into MISS.",
+            "owner": ""
+          },
+          {
+            "line": 105,
+            "shape": "Check-item expanded body (summary text + optional code block)",
+            "classString": "space-y-3 border-t px-3 py-3",
+            "insideSurface": "always-visible when a check tile is expanded (Collapsible, not a click-to-open dialog/popover, but disclosed content)",
+            "verdict": "LOCAL",
+            "why": "This is the disclosed body of the diagnostic tile — a summary paragraph plus an optional one-off code/detail viewer (group/code hover-reveal copy button over a <pre> block). The owner-vocabulary census explicitly keeps 'genuinely one-off compound blocks' local (its examples include a Monaco JSON dialog / snapshot input — the same family of 'raw technical detail viewer'). No owner shape (FieldStack, MetricReadout, etc.) models a code/log viewer with a copy affordance, and this is not duplicated elsewhere in the check panel or in the settings owner census, so it is not same-shape-different-code debt.",
+            "owner": ""
+          },
+          {
+            "line": 111,
+            "shape": "Code/detail block with hover-reveal copy button",
+            "classString": "group/code relative rounded border bg-muted/30; copy button: absolute right-1.5 top-1.5 opacity-0 ... group-hover/code:opacity-100, Button variant=ghost size=icon class=size-6",
+            "insideSurface": "always-visible when a check tile with `detail` is expanded",
+            "verdict": "LOCAL",
+            "why": "A one-off raw-text/log viewer with a copy affordance, composed from real <Button variant=\"ghost\" size=\"icon\"> — correctly reuses the Button atom rather than hand-rolling a clickable icon. No owner shape in the vocabulary (FieldStack/MetricReadout/SettingsRow/etc.) targets a code-block-with-copy morphology, and it is a single occurrence in this file, so it is not leftover duplication debt.",
+            "owner": ""
+          }
+        ],
+        "missCount": 1,
+        "summary": "This file is small (248 lines) and mostly clean: it composes real @memohai/ui atoms (Dialog, Button, Collapsible, Skeleton) with no hand-rolled controls, no raw colors, and no invented chrome. There is exactly one genuine MISS: the empty state (line 56-64, checks.length===0) independently reproduces two explicitly-banned anti-patterns from the design skill — a `border-dashed` frame on a fully-empty surface, and a decorative lucide icon stacked above the message — instead of using the `Empty` owner component that the owner-vocabulary census already lists as a READY-to-migrate morphology. Everything else that superficially resembles an owner shape is actually a different spatial relationship on close inspection: the per-check Collapsible tiles (lines 71-131) look like ExpandableSettingsRow at a glance (both disclose a body on click), but their real geometry is an independent `rounded-md border` tile stacked with `space-y-2`, not an inset `mx-4 border-b ... last:border-b-0` row sharing one continuous card — verified against the actual `expandable-row.vue` source, and confirmed as the only usage of this `CollapsibleTrigger` pattern in the app (i.e. not drifting duplication). The loading skeleton and the code-block-with-copy detail viewer are deliberate one-offs already covered by the census's stays-local categories (shape-matching placeholder, one-off compound detail block). Net: one small, clean, easy fix (swap the dashed+icon empty state for the `Empty` component); no other spacing debt hiding in this file's single click-to-open surface."
+      },
+      {
+        "file": "apps/web/src/pages/bots/components/model-select.vue",
+        "surfacesWalked": [
+          {
+            "trigger": "click the select-trigger button (selectTriggerClass)",
+            "surface": "Popover (menu chrome) containing ModelOptions — search input + virtualized grouped listbox"
+          }
+        ],
+        "findings": [
+          {
+            "line": 4,
+            "shape": "select trigger button",
+            "classString": "selectTriggerClass (from @memohai/ui), applied as-is with only an outer w-full",
+            "insideSurface": "always-visible",
+            "verdict": "LOCAL",
+            "why": "This is the canonical @memohai/ui select-trigger atom used exactly as SKILL.md prescribes (\"A select trigger is not a button... Use the shared selectTriggerClass\"). No hand-rolled markup, no injected body classes — only the allowed outer w-full. Not a settings-owner shape at all; it's a chooser atom.",
+            "needsHumanEye": false,
+            "owner": ""
+          },
+          {
+            "line": 22,
+            "shape": "popover menu chrome wrapper",
+            "classString": "PopoverContent menu align=\"end\" class=\"min-w-[var(--reka-popover-trigger-width)] w-80 p-0\" + inner div :class=\"menuChromeClass\"",
+            "insideSurface": "always-visible (host) / opens the click-to-open popover",
+            "verdict": "LOCAL",
+            "why": "Composes the shared menuChromeClass token from @memohai/ui exactly as the menu contract prescribes. No hand-written border/shadow/radius. This is chrome, not an owner-vocabulary shape (SettingsSection/Row/FieldStack/etc. are settings-page shapes; this is a menu surface).",
+            "needsHumanEye": false,
+            "owner": ""
+          },
+          {
+            "line": 2,
+            "shape": "menu search header + input",
+            "classString": "menuSearchHeaderClass wrapping an <input :class=\"menuSearchInputClass\">",
+            "insideSurface": "Popover (opens on trigger click)",
+            "verdict": "LOCAL",
+            "why": "Shared menu-search primitive from @memohai/ui's lib/menu.ts token family, used as-is. Not a FieldStack (no Label-over-control settings-form relationship here) — it is a combobox filter input inside menu chrome, a different relationship than a settings page's vertical form field.",
+            "needsHumanEye": false,
+            "owner": ""
+          },
+          {
+            "line": 16,
+            "shape": "virtualized listbox container",
+            "classString": "virtualListboxClass on the scrollEl div, role=\"listbox\"",
+            "insideSurface": "Popover (opens on trigger click)",
+            "verdict": "LOCAL",
+            "why": "SKILL.md explicitly mandates virtualization for long lists / big dropdowns and this file does exactly that with @tanstack/vue-virtual plus the shared virtualListboxClass token. This is compliance with the shared menu contract, not a hand-rolled list.",
+            "needsHumanEye": false,
+            "owner": ""
+          },
+          {
+            "line": 41,
+            "shape": "group header row inside the listbox",
+            "classString": "menuLabelClass",
+            "insideSurface": "Popover (opens on trigger click)",
+            "verdict": "LOCAL",
+            "why": "Shared menu group-label token (the same one DropdownMenuLabel/ContextMenuLabel-style surfaces use), not a hand-rolled label. This is a menu section header, not a SettingsSection title (different surface entirely — no card, no border, no page context).",
+            "needsHumanEye": false,
+            "owner": ""
+          },
+          {
+            "line": 47,
+            "shape": "option row (model item button)",
+            "classString": "menuItemClass on a <button role=\"option\">, with a truncated label span + optional trailing Check icon",
+            "insideSurface": "Popover (opens on trigger click)",
+            "verdict": "LOCAL",
+            "why": "This is the shared menuItemClass primitive — the exact one SKILL.md mandates for menu rows (\"never hand-written <button> rows... All menu surfaces share lib/menu.ts (menuItemClass...)\"). It is a dense combobox option row, structurally and contextually distinct from a SettingsRow (no label+description+trailing-control geometry, no border-b/mx-4 inset divider, no min-h-[3.75rem] — it is list-item density inside a searchable menu, governed by menu.ts, not the settings-row contract). Correctly NOT unified with SettingsRow.",
+            "needsHumanEye": false,
+            "owner": ""
+          },
+          {
+            "line": 24,
+            "shape": "no-results line inside the listbox",
+            "classString": "py-6 text-center text-control text-muted-foreground",
+            "insideSurface": "Popover (opens on trigger click)",
+            "verdict": "LOCAL",
+            "why": "Matches the owner-vocabulary-census's explicit stays-local bucket: \"trivial muted no-results <p> lines.\" This is a tiny in-menu empty message inside a searchable dropdown, not a page-level Empty candidate — different context (no frame to hold, it's three lines of menu content).",
+            "needsHumanEye": false,
+            "owner": ""
+          }
+        ],
+        "missCount": 0,
+        "summary": "Clean. model-select.vue is a two-line composition of the @memohai/ui select-trigger + Popover/menuChrome atoms, and its only click-to-open surface (the Popover populated by the sibling model-options.vue) is a searchable, virtualized listbox built entirely from the shared menu.ts token family (menuSearchHeaderClass, menuSearchInputClass, virtualListboxClass, menuLabelClass, menuItemClass) plus the shared selectTriggerClass — exactly the sanctioned exit the skill mandates for menus/choosers, including compliance with the \"long lists must virtualize\" rule. There is no settings-page owner shape here at all (no SettingsRow/FieldStack/MetricReadout/ExpandableSettingsRow/PersonaTile/CalloutBanner morphology, no form, no dialog/sheet/drawer) because this pair of files implements a Combobox-shaped model chooser, not a settings surface — the owner vocabulary (built for settings pages) simply doesn't apply here, and forcing any of its rows/fields into this menu would be the wrong unification. The only borderline item, the 3-line no-results message, matches the census's own explicit \"stays-local: trivial muted no-results <p> lines\" bucket. Zero misses."
+      },
+      {
+        "file": "apps/web/src/pages/providers/components/model-item.vue",
+        "surfacesWalked": [],
+        "findings": [
+          {
+            "line": 5,
+            "shape": "flush model list row: name+badges left, Switch+action buttons+delete-confirm right",
+            "classString": "mx-4 flex min-h-[3.25rem] items-center justify-between gap-3 border-b border-border py-2.5 last:border-b-0",
+            "insideSurface": "always-visible",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "Looks like a SettingsRow at first glance (mx-4 inset hairline, border-b, last:border-b-0 — same divider family) but the geometry is deliberately denser: min-h-[3.25rem] (52px) + py-2.5, versus SettingsRow's canonical min-h-[3.75rem] (60px) + py-3. Confirmed by codebase-wide grep: min-h-[3.25rem] appears NOWHERE else in apps/web — every other min-h-[3.75rem] hit is a real SettingsRow-family row (bot-access, bot-network, bot-heartbeat, bot-email, bot-plugins, bot-user-access, bot-skills, bot-container, connected-accounts-section, plus row.vue/expandable-row.vue themselves). The file's own comment even names the intent: 'A flush list row, not a nested card... Same row language as the Configuration card above' — i.e. deliberately related but not identical, because this list can hold many searchable/paginated models and needs a tighter per-row cost than a settings-page field row. Structurally it's also a flat justify-between two-column layout (name-block / actions-cluster), not the leading+content+trailing three-slot shape SettingsRow composes — there's no separate leading media slot, and the second text line (model_id/error) is internal to the name block, not a distinct slot. Cross-checked against the one other file in the codebase that was explicitly bucketed as a 'dense object-list row' by the census (bot-plugins.vue): that row still renders through <SettingsRow align=\"start\"> at the standard 3.75rem/py-3 rhythm — its density is in wrapped content, not row height. So model-item's row is not an unmigrated instance of that already-solved bucket; it is a distinct, denser list-row language of its own. Cannot rule out with certainty that a human maintainer would want it unified onto SettingsRow with a new 'dense' size variant — flagging needsHumanEye since visual density intent is a judgment call, not a geometry fact I can fully resolve from source alone.",
+            "needsHumanEye": true,
+            "owner": ""
+          },
+          {
+            "line": 42,
+            "shape": "secondary line: model_id + test error, mt-0.5 text-xs text-muted-foreground",
+            "classString": "mt-0.5 flex flex-wrap items-center gap-2",
+            "insideSurface": "always-visible",
+            "verdict": "LOCAL",
+            "why": "This is the internal label/description composition of the row already judged above (finding at line 5) — it mirrors SettingsRow's own internal `mt-0.5 text-xs text-muted-foreground` description line, but it lives inside the file's own compound name-block, not as a separately extractable row. Since the parent row is a deliberately distinct denser shape (DIFF-RELATIONSHIP), this nested line inherits that verdict rather than standing as its own MISS.",
+            "needsHumanEye": false,
+            "owner": ""
+          },
+          {
+            "line": 62,
+            "shape": "trailing action cluster: Switch + 3 icon Buttons + ConfirmPopover-wrapped delete button",
+            "classString": "flex shrink-0 items-center gap-0.5",
+            "insideSurface": "always-visible",
+            "verdict": "LOCAL",
+            "why": "A row of real @memohai/ui atoms (Switch, Button icon-sm ×3) composed as-is, plus the shared ConfirmPopover component used exactly as designed (trigger slot wraps a ghost icon Button, confirm body lives in ConfirmPopover's own component). No owner-vocabulary shape targets 'cluster of trailing controls' — this is plain, correct composition, not a form/row/field/tile/banner morphology, and not debt."
+          }
+        ],
+        "missCount": 0,
+        "summary": "model-item.vue is a small (218-line), single-surface file with no Dialog/Sheet/Drawer/Popover/DropdownMenu content of its own — the only click-to-open element is the shared ConfirmPopover (delete confirm), used correctly as a pre-built component, so there was no hidden surface to open and inventory. The whole template is one always-visible flush list row. I found zero genuine MISS: the row's SettingsRow-adjacent look (mx-4 inset hairline, border-b/last:border-b-0) is real but its geometry (min-h-[3.25rem] + py-2.5) is uniquely denser than the canonical SettingsRow (min-h-[3.75rem] + py-3) and appears nowhere else in the codebase — confirmed by grep and by cross-checking the one file the census explicitly called a 'dense object-list row' (bot-plugins.vue), which turned out to still use standard-height SettingsRow underneath. So this reads as a deliberate, documented density choice for a searchable/paginated model list, not leftover same-shape-different-code debt — classified DIFF-RELATIONSHIP rather than MISS, though flagged needsHumanEye since 'should this become a dense SettingsRow variant' is ultimately a visual-density judgment a human should confirm by looking at the rendered page. The trailing action cluster and the ConfirmPopover usage are clean, correct composition with no owner-vocabulary shape to unify onto. Net: this file is clean; no migration action needed here without further human sign-off on the density question."
+      },
+      {
+        "file": "apps/web/src/pages/profile/components/profile-identity.vue",
+        "surfacesWalked": [
+          {
+            "trigger": "click the avatar (pencil overlay on hover)",
+            "surface": "Avatar URL edit Dialog"
+          }
+        ],
+        "findings": [
+          {
+            "line": 2,
+            "shape": "root row: avatar (leading media) + name/username body, wrapped in mx-4 flex items-center gap-4 border-b border-border py-4 last:border-b-0",
+            "classString": "mx-4 flex items-center gap-4 border-b border-border py-4 last:border-b-0",
+            "insideSurface": "always-visible",
+            "verdict": "MISS",
+            "owner": "SettingsRow",
+            "needsHumanEye": false,
+            "why": "This is a hand-rolled duplicate of SettingsRow's root geometry (row.vue line 3: `mx-4 flex min-h-[3.75rem] border-b border-border py-3 last:border-b-0`) — same inset-hairline family (mx-4, border-b, last:border-b-0), same intent (single settings row inside a bordered SettingsSection card; the parent pages/profile/index.vue mounts <ProfileIdentity> as the sole child of an untitled <SettingsSection>, i.e. exactly the slot SettingsRow exists to fill). The morphology is confirmed by direct comparison with the sibling file connected-accounts-section.vue (migrated in the same batch), which renders the identical avatar+name+description-line shape via `<SettingsRow><template #leading><Avatar class=\"size-8\">…</template><template #content>name + sub-line…</template></SettingsRow>` — i.e. this exact 'avatar leading + name/sub-line body' morphology already has a shipped, verified owner mapping. profile-identity's version differs only in: (1) py-4 instead of py-3 and missing min-h-[3.75rem] — a geometry drift from the owner rather than a deliberate different relationship; (2) the edit affordance (pencil) sits inline in the body rather than as a distinct trailing control, and the avatar uses size-14 vs connected-accounts' size-8 — but both are compatible with SettingsRow's #leading/#content/default-trailing slots (the avatar-edit dialog trigger can live in #leading wrapping the Avatar, the name editor + hover pencil can live in #content, size is caller-controlled). SettingsRow has no `inheritAttrs: false`, so the `group/row` hover-scope class needed for the pencil reveal can still be passed through as a plain `class` attr on `<SettingsRow class=\"group/row\">` without a structural blocker. This reads as leftover same-shape-different-code debt: the same 'identity list row inside a settings card' relationship, hand-rolled instead of composed from the owner that a neighboring file in the same census batch already uses for the near-identical shape."
+          },
+          {
+            "line": 34,
+            "shape": "Dialog body: Avatar (size-14) + single unlabeled URL Input in a horizontal flex row",
+            "classString": "flex items-center gap-4",
+            "insideSurface": "Avatar URL edit Dialog",
+            "verdict": "LOCAL",
+            "owner": "",
+            "needsHumanEye": false,
+            "why": "Looks like it could be a form field but it is NOT a vertical Label-over-control FieldStack (space-y-1.5, Label above control) — it is a horizontal avatar-preview + input pairing with no label at all (aria-label only), a one-off compound specific to previewing the avatar image live next to the URL field being typed. This matches the census's 'genuinely one-off compound block' stays-local category (snapshot/avatar-preview-style inputs), not a FieldStack occurrence. DialogHeader/DialogFooter are the plain @memohai/ui Dialog atoms used as-is (DialogClose+Button cancel, Button confirm) — standard composition, not hand-rolled chrome."
+          },
+          {
+            "line": 67,
+            "shape": "Name inline editor: h-8 line with Input+confirm/cancel icon buttons (editing) or truncated name + hover-reveal edit pencil (read-only), plus a mt-0.5 username sub-line",
+            "classString": "min-w-0 flex-1 / flex h-8 items-center gap-1.5 / mt-0.5 truncate text-xs text-muted-foreground",
+            "insideSurface": "always-visible",
+            "verdict": "LOCAL",
+            "owner": "",
+            "needsHumanEye": false,
+            "why": "This is not an independent shape to classify against an owner — it is the CONTENT that belongs inside the row's #content slot (the label/description-equivalent body: name-line + mt-0.5 muted sub-line mirrors SettingsRow's own default #content pattern of truncate text-sm font-medium + mt-0.5 text-xs text-muted-foreground almost exactly). It rides on the parent MISS finding above rather than being a separate debt item; the inline-edit interaction (toggle Input/confirm/cancel via editing ref) is legitimate bespoke behavior that a #content slot can host unchanged."
+          }
+        ],
+        "missCount": 1,
+        "summary": "This file is small (one component, one Dialog) but hides exactly one genuine miss: the root identity row (avatar + name/username, line 2) is a hand-rolled SettingsRow duplicate — mx-4/border-b/last:border-b-0 inset-hairline geometry with a py-4 drift from the owner's py-3+min-h-[3.75rem] — sitting as the sole child of an untitled SettingsSection in the parent page, which is precisely the slot SettingsRow exists to fill. The strongest evidence is comparative: the sibling file connected-accounts-section.vue, migrated in the same batch, renders the near-identical 'avatar leading + name/sub-line content' morphology through SettingsRow's #leading/#content slots already, so this file was left behind rather than judged differently. The avatar-edit Dialog body (Avatar + single unlabeled URL Input in a horizontal row) is correctly local — it is a horizontal preview+input compound, not a vertical Label-over-control FieldStack, and the Dialog chrome itself (DialogHeader/DialogFooter/DialogClose/Button) is plain atom composition. No DIFF-RELATIONSHIP shapes found — nothing here has a legitimately different geometry that would justify divergence from the owner; the one miss is unify-when-same debt, not variation."
+      },
+      {
+        "file": "apps/web/src/pages/profile/index.vue",
+        "findings": [],
+        "missCount": 0,
+        "summary": "placeholder"
+      },
+      {
+        "file": "apps/web/src/pages/about/index.vue",
+        "surfacesWalked": [
+          {
+            "trigger": "click \"What's changed\" ghost button in the Updates row (line 84-87)",
+            "surface": "Release Notes Dialog (lines 134-170)"
+          }
+        ],
+        "findings": [
+          {
+            "line": 134,
+            "shape": "Dialog + DialogHeader/DialogContent/DialogFooter composition (release notes viewer)",
+            "verdict": "LOCAL",
+            "why": "Pure @memohai/ui atom composition (Dialog/DialogHeader/DialogTitle/DialogDescription/DialogFooter) with a markdown-rendered body and a single outline link Button in the footer. No form/row/field/tile/banner shape lives inside it — just a header band, a scrolling prose body, and a footer band, each using the documented full-bleed border-b/border-t structural-split pattern (px-6 py-4 header, px-6 py-4 body, px-6 py-3 footer). Nothing to migrate; this is the canonical shape for a scrollable content dialog.",
+            "insideSurface": "Release Notes Dialog",
+            "classString": "flex max-h-[80vh] w-full max-w-2xl flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl",
+            "needsHumanEye": false,
+            "owner": ""
+          },
+          {
+            "line": 13,
+            "shape": "identity header block: logo tile + name + version badge + tagline + description + link buttons, inside SettingsSection's default slot with p-5 padding",
+            "verdict": "LOCAL",
+            "why": "This is SettingsSection used exactly as documented — a padded custom content block (p-5, internal space via mt-* rhythm) for a genuinely one-off singular header, not a repeating row list. It superficially resembles a SettingsRow's leading-media + label/description shape (flex items-center gap-4 at line 15), but there is no min-h-[3.75rem]/py-3/border-b/mx-4 row geometry and no second row to divide from — SettingsRow exists for a *list* of rows sharing dividers; this is a single identity header with no sibling rows inside its own block. The file's own comment (lines 11-12) states the intent: house the identity content in one card so About reads like the rest of Settings, which is achieved via SettingsSection's normal default-slot padded-block usage, already an existing owner pattern, not hand-rolled debt.",
+            "insideSurface": "always-visible",
+            "classString": "p-5 ... flex items-center gap-4",
+            "needsHumanEye": false,
+            "owner": ""
+          },
+          {
+            "line": 72,
+            "shape": "Updates section: SettingsSection with title + a single SettingsRow (label/description + trailing button cluster)",
+            "verdict": "LOCAL",
+            "why": "Already composed from the real owners (SettingsSection + SettingsRow) with no custom row geometry — zero debt, nothing to migrate. Included only for completeness of the walk.",
+            "insideSurface": "always-visible",
+            "classString": "SettingsRow :label=\"updateLabel\" :description=\"updateDesc\"",
+            "needsHumanEye": false,
+            "owner": ""
+          },
+          {
+            "line": 120,
+            "shape": "footer meta block: license text + commit hash, centered plain text",
+            "verdict": "LOCAL",
+            "why": "Two muted <p> lines with no card, no row geometry, no field shape — a trivial text footer, not an owner-shape candidate.",
+            "insideSurface": "always-visible",
+            "classString": "flex shrink-0 -translate-y-[6vh] flex-col items-center gap-1 pt-8 text-center",
+            "needsHumanEye": false,
+            "owner": ""
+          },
+          {
+            "line": 47,
+            "shape": "resource link buttons: flex-wrap row of outline Buttons (GitHub / Docs / Feedback)",
+            "verdict": "LOCAL",
+            "why": "A plain button cluster (flex flex-wrap gap-2), not a row/field/tile/banner morphology — no owner shape applies.",
+            "insideSurface": "always-visible",
+            "classString": "mt-5 flex flex-wrap gap-2",
+            "needsHumanEye": false,
+            "owner": ""
+          }
+        ],
+        "missCount": 0,
+        "summary": "This file is clean of spacing-owner debt: zero MISS findings. About is one of the smallest pages in the app (298 lines) and has exactly one click-to-open surface — the Release Notes Dialog — which I opened and inventoried; it is a plain @memohai/ui Dialog composition (header/scrolling markdown body/footer link button) with no hand-rolled row/field/tile/banner shape inside it. The always-visible content is either already using the real owners correctly (SettingsSection + SettingsRow for the Updates section) or is a genuinely singular, non-repeating identity header living in SettingsSection's documented padded-default-slot pattern (p-5 block: logo + name + badge + tagline + description + link buttons) — there is no second row to divide against, so it is not a SettingsRow candidate, just a one-off header block. The file's real known issue, per the SKILL and reference.md, is token debt (off-scale text-[13px], font-[360]/font-[420]/font-[430], hand-mixed text-foreground/82 alpha) explicitly flagged as this exact file's pre-contract blemish — but that is a different debt category (token/weight/alpha) than the same-shape-different-code spacing-owner morphology this audit hunts, so it is noted here as an aside, not reported as a MISS finding. No surface in this file needs human-eye disambiguation; every classification was resolvable from static geometry alone."
+      },
+      {
+        "file": "apps/web/src/pages/keyboard-shortcuts/components/KeyCaptureDialog.vue",
+        "surfacesWalked": [
+          {
+            "trigger": "Edit button in sibling ShortcutRow.vue (rendered in keyboard-shortcuts/index.vue) opens this component's own Dialog via v-model:open",
+            "surface": "KeyCaptureDialog's <Dialog> (the whole file IS one click-to-open surface; no nested Popover/Sheet/DropdownMenu inside it)"
+          }
+        ],
+        "findings": [
+          {
+            "line": 114,
+            "shape": "DialogHeader + DialogTitle + conditional DialogDescription",
+            "classString": "(DialogHeader/DialogTitle/DialogDescription — no extra classes, pure atom slots)",
+            "insideSurface": "KeyCaptureDialog's own Dialog",
+            "verdict": "LOCAL",
+            "why": "Plain @memohai/ui Dialog atom composition. No label-beside-control or label-over-control relationship exists here at all, so no owner (SettingsRow/FieldStack) applies — this is exactly the 'Dialog atom composed as-is' LOCAL category.",
+            "needsHumanEye": false
+          },
+          {
+            "line": 121,
+            "shape": "key-capture target zone (centered placeholder OR captured-token display)",
+            "classString": "flex min-h-[5rem] items-center justify-center rounded-md border border-dashed border-border bg-muted/40",
+            "insideSurface": "KeyCaptureDialog's own Dialog",
+            "verdict": "LOCAL",
+            "why": "A genuinely one-off compound interaction target (a live keydown-capture surface with a dashed 'drop zone' visual), not a label+control field (no <Label>, so not FieldStack), not a label-beside-trailing-control row (no SettingsRow relationship), not a framed icon+title/description banner (no CalloutBanner relationship), not a caption+value metric tile (no MetricReadout relationship). This matches the census's explicit stays-local bucket for one-off compound blocks (drag-drop-style target surfaces). min-h-[5rem] and border-dashed are unique to this file (verified via grep, no duplicate elsewhere), so there is no repeated same-shape-different-code instance to unify against.",
+            "needsHumanEye": false
+          },
+          {
+            "line": 128,
+            "shape": "captured key tokens display",
+            "classString": "KbdGroup > Kbd (class=\"h-6 min-w-6 px-1.5 text-xs\")",
+            "insideSurface": "KeyCaptureDialog's own Dialog",
+            "verdict": "LOCAL",
+            "why": "Plain @memohai/ui Kbd/KbdGroup atom usage (same atoms ShortcutRow.vue already uses in its trailing slot) — not a settings-owner shape, just rendering visual key tokens. No label+value pairing (not MetricReadout).",
+            "needsHumanEye": false
+          },
+          {
+            "line": 139,
+            "shape": "inline conflict/validation message reservation",
+            "classString": "min-h-[1.25rem] text-xs, with conditional child divs: text-destructive / text-warning (no border, no background, no icon, no padding box)",
+            "insideSurface": "KeyCaptureDialog's own Dialog",
+            "verdict": "LOCAL",
+            "why": "Looks tempting as a CalloutBanner at first glance (it does render a warning/error message conditionally, matching CalloutBanner's tone concept), but the geometry is fundamentally different: CalloutBanner requires a framed box (rounded-[var(--radius-menu-shell)] border px-4 py-3), a leading icon slot, and a title+description hierarchy (font-medium title + separate muted description paragraph). This element has none of that — it's a single bare text line with a min-height reservation purely to prevent dialog reflow when the message appears/disappears, the same pattern as the census's 'centered loading/skeleton placeholder that borrows a row min-height so panels do not reflow' LOCAL bucket. Forcing this into CalloutBanner would add unwanted chrome (border, icon, padding) to what is deliberately a lightweight inline hint, changing the visual weight of the dialog body.",
+            "needsHumanEye": false
+          },
+          {
+            "line": 166,
+            "shape": "dialog action footer: reset (left) + cancel/save (right)",
+            "classString": "DialogFooter class=\"sm:justify-between\", inner: Button variant=\"ghost\" size=\"sm\" (reset) ... div class=\"flex gap-2\" > Button variant=\"outline\" (cancel) + Button (save, :disabled bound)",
+            "insideSurface": "KeyCaptureDialog's own Dialog",
+            "verdict": "LOCAL",
+            "why": "Standard @memohai/ui DialogFooter atom composition. The sm:justify-between + ghost-reset-left / outline-cancel+primary-save-right idiom is already used identically in schedule-editor.vue, bot-hooks.vue, bot-mcp.vue, bot-memory.vue, and settings-acp-detail.vue (grep-verified), confirming this is an established Dialog-footer convention, not hand-rolled debt. Not a SettingsSection #footer case either — that owner is specifically for section-card footers inside a bordered white settings card, a different container than a Dialog.",
+            "needsHumanEye": false
+          }
+        ],
+        "missCount": 0,
+        "summary": "This file is clean — zero owner-vocabulary misses. It is a small, single-surface Dialog (no nested Popover/Sheet/DropdownMenu) whose entire body is a genuinely one-off compound interaction: a live keydown-capture target with a dashed drop-zone box, a captured-token Kbd display, a bare inline validation-message line reserved by min-height, and a standard DialogFooter action row. None of these have the defining geometry of an owner shape (SettingsRow's label-beside-control, FieldStack's label-over-control, CalloutBanner's framed icon+title/description box, MetricReadout's caption+value tile) — they only superficially resemble owner shapes at a glance (the error-message div could be mistaken for a CalloutBanner, the capture box for a form field) but fail on structure once actually opened and read. The sibling ShortcutRow.vue in the same directory already correctly uses SettingsRow for its own row, confirming the vocabulary was already applied where it belonged; this dialog simply has no same-shape-different-code debt to find. No files were edited.</summary>\n"
+      },
+      {
+        "file": "apps/web/src/pages/bots/components/bot-schedule.vue",
+        "surfacesWalked": [
+          {
+            "trigger": "Sort dropdown button (visible only when schedules.length > 1)",
+            "surface": "Sort DropdownMenuContent"
+          },
+          {
+            "trigger": "\"+ Create\" button in header, or an existing ScheduleListItem card click",
+            "surface": "Create/Edit Dialog (DialogScrollContent, hosts ScheduleEditor form)"
+          },
+          {
+            "trigger": "row-menu \"Delete\" item inside ScheduleListItem's DropdownMenu, or the in-dialog delete button in edit mode",
+            "surface": "Delete confirmation Dialog (DialogContent)"
+          },
+          {
+            "trigger": "kebab/MoreHorizontal button on a ScheduleListItem card",
+            "surface": "Row actions DropdownMenu (Edit / Delete) inside schedule-list-item.vue"
+          },
+          {
+            "trigger": "\"More options\" chevron inside the create/edit form",
+            "surface": "Advanced disclosure region (max-calls field) inside schedule-editor.vue"
+          }
+        ],
+        "missCount": 1,
+        "summary": "This file is largely clean — it is the codebase's canonical New Task dialog reference (named explicitly by memoh-web/SKILL.md §11), and its own dialog body (schedule-editor.vue) was already migrated onto FieldStack in Phase-3 batch 3 (commit 0542733b6). The census and the dedicated schedule-dialog-sidebar-cartography.md doc already walked this exact file pair in detail. The one genuine, high-confidence miss is the page's own outer shell: bot-schedule.vue:2's `mx-auto max-w-3xl pt-6 pb-8` plus its header block (lines 3-7) are a byte-for-byte hand-rolled duplicate of PageShell's `variant=\\\"tab\\\"` root class and header anatomy (title `pl-2 text-lg font-semibold` + `#actions` `gap-2` cluster) — PageShell is an existing, ready-to-migrate owner (not a Phase-1 gap), yet this page was not in the 21-file Phase-3 batch list, so it is leftover same-shape-different-code debt on an owner that already fully covers it. Everything else that looks similar is either already-migrated (FieldStack instances in schedule-editor.vue), explicitly confirmed stays-local in the census (schedule-list-item.vue's shared card/sidebar variant, the compound schedule-pattern picker, the switch cluster pending an unbuilt SwitchField owner, the advanced-disclosure row pending an unbuilt DisclosureField owner), or pre-existing debt on an owner (Empty's dashed-by-default) that hasn't shipped its fix yet, so re-flagging it here would just restate a known, already-tracked issue rather than surface something new.",
+        "findings": [
+          {
+            "line": 2,
+            "shape": "page shell: centered max-width column + tab vertical rhythm, plus header title/actions row",
+            "classString": "mx-auto max-w-3xl pt-6 pb-8 (root, line 2); header mb-6 flex items-center justify-between gap-4 px-2 (line 3); h1 text-lg font-semibold (line 4-6); actions cluster flex items-center gap-2 (line 7)",
+            "verdict": "MISS",
+            "why": "PageShell's variant=\"tab\" root class is literally 'mx-auto max-w-3xl pt-6 pb-8' (page-shell/index.vue:54) — an exact string match, not just a similar relationship. PageShell's header (index.vue:14-32) is 'mb-6' wrapper > 'flex min-h-9 items-center justify-between gap-4' row > title 'pl-2 text-lg font-semibold' + actions '#actions' slot 'flex shrink-0 items-center gap-2' — the same anatomy this page hand-rolls with a wrapping px-2 instead of a per-element pl-2 (cartography doc flags this exact px-2-vs-pl-2 drift as the '8px right-edge' risk). PageShell is one of the 4 pre-existing 'ready for mass migration now' owners (owner-vocabulary-census.md), not a Phase-1 gap, and this file was not among the 21 files migrated in Phase-3 batches 1-3 (0542733b6 etc.) — so this is leftover same-shape-different-code debt against an owner that already fully covers it, not new/undefined territory.",
+            "insideSurface": "always-visible",
+            "owner": "PageShell",
+            "needsHumanEye": false
+          },
+          {
+            "line": 50,
+            "shape": "fully-empty state frame: dashed bordered block, icon, title, and a CTA button",
+            "classString": "flex flex-col items-center justify-center rounded-[var(--radius-menu-shell)] border border-dashed border-border py-16 text-center (line 50-53); icon mb-3 size-8 (54); CTA mt-4 (61)",
+            "verdict": "LOCAL",
+            "why": "The cartography doc (schedule-dialog-sidebar-cartography.md) already flags this exact block and the SKILL.md rule ('a completely-empty surface takes the solid frame ... never a dashed box') applies. But the target owner isn't migratable today: packages/ui/src/components/empty/Empty.vue itself still defaults to border-dashed at the primitive level (Empty.vue:14), and owner-vocabulary-census.md explicitly rejects a new FramedEmpty component ('extend existing Empty with framed?+action slot') as future work, not yet built. Re-flagging this as a fresh miss would restate a known, already-tracked pre-existing issue rather than surface something the vocabulary can act on now — kept as LOCAL/known-debt rather than double-counted as a new finding.",
+            "insideSurface": "always-visible",
+            "owner": "",
+            "needsHumanEye": true
+          },
+          {
+            "line": 74,
+            "shape": "populated list: grid of interactive schedule cards",
+            "classString": "grid grid-cols-1 gap-3 sm:grid-cols-2 (line 70-73); ScheduleListItem root class group/card relative flex cursor-pointer items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card ... px-4 py-3.5 (schedule-list-item.vue:3-4)",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "Looks like a SettingsRow (label+description+trailing control) but is denser and structurally different: px-4 py-3.5 (not the 3.75rem/py-3/mx-4-inset SettingsRow geometry), it is a full bordered card per item inside a responsive grid (not a stacked border-b list inside one card), and it also carries a 'sidebar' variant (px-3 py-2.5, text-control) used elsewhere. owner-vocabulary-census.md explicitly confirms this file 'stays-local... shared component with a DropdownMenu in trailing + a sidebar variant' at migration time — a deliberate different relationship, not an oversight.",
+            "insideSurface": "always-visible",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 9,
+            "shape": "vertical Label-over-Input field (name), Label-over-Input (description with optional suffix), Label-over-Textarea (command)",
+            "classString": "FieldStack class=\"min-w-0 flex-1\" (schedule-editor.vue:10-20); FieldStack with #label slot (35-49); FieldStack (51-62)",
+            "verdict": "LOCAL",
+            "why": "Already migrated onto the FieldStack owner in Phase-3 batch 3 (commit 0542733b6, per owner-vocabulary-census.md's 'Migrated (21 files)' list which names schedule-editor). This is the FieldStack component itself in use (space-y-1.5 internal, per field-stack.vue:6), not hand-rolled debt.",
+            "insideSurface": "Create/Edit Dialog",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 21,
+            "shape": "inline switch + label cluster riding beside the name field",
+            "classString": "flex h-9 shrink-0 items-center gap-2 (schedule-editor.vue:21); Label cursor-pointer text-muted-foreground (22-23); Switch (28-31)",
+            "verdict": "LOCAL",
+            "why": "schedule-dialog-sidebar-cartography.md records this exact cluster as the 'switch label to control' relationship, candidate owner 'SwitchField' — but SwitchField was NOT among the six owners actually built in Phase-3 (owner-vocabulary-census.md Phase 3 outcome lists FieldStack/FormStack, MetricReadout, SettingsSection #footer, ExpandableSettingsRow, PersonaTile, CalloutBanner only). No owner exists yet to migrate this into, so it remains correctly local pending a future component, not a miss of a shipped owner.",
+            "insideSurface": "Create/Edit Dialog",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 64,
+            "shape": "compound schedule-pattern picker: label + inline Select/Input/TimeInput cluster + weekday grid + advanced textarea + preview text",
+            "classString": "space-y-3 (schedule-editor.vue:64); flex items-center gap-2 flex-wrap (69); grid grid-cols-7 gap-1 (146); raw button h-9 rounded-md border (148-159)",
+            "verdict": "DIFF-RELATIONSHIP",
+            "why": "This is not a settings-row or field-stack shape at all — it's a domain-specific compound control (mode select + conditional numeric/time inputs + a 7-column weekday toggle grid) unique to cron scheduling. Cartography doc records this as candidate 'CompoundField' but marks the weekday grid, numeric widths, and raw button styling as 'component-local' geometry, not a spacing-owner relationship, and explicitly separates the raw-button-styling issue as 'outside spacing scope' (a UI-contract concern, not same-shape-different-code). Correctly a one-off compound block per owner-vocabulary-census.md's stays-local bucket.",
+            "insideSurface": "Create/Edit Dialog",
+            "owner": "",
+            "needsHumanEye": true
+          },
+          {
+            "line": 188,
+            "shape": "disclosure trigger (chevron + label) revealing an advanced label/control row",
+            "classString": "flex items-center gap-1.5 text-xs text-muted-foreground (schedule-editor.vue:191); mt-3 expanded wrapper (206); flex items-center justify-between gap-3 (207)",
+            "verdict": "LOCAL",
+            "why": "Cartography doc records these as 'form.disclosureIconGap'/'form.disclosureContentGap'/'form.optionRowGap' candidates owned by a future 'DisclosureField'/'OptionRow' — none of which were built in Phase-3 (only ExpandableSettingsRow shipped, and that owns a row-level header+expand, not an in-form 'More options' toggle within a single dialog). This is the sanctioned §11 'More options chevron' pattern SKILL.md itself names as the house standard for in-form advanced disclosure, not leftover debt.",
+            "insideSurface": "Create/Edit Dialog",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 232,
+            "shape": "dialog footer: destructive delete (left) + cancel/submit pair (right)",
+            "classString": "DialogFooter class=\"gap-2 sm:justify-between\" (schedule-editor.vue:232); left flex-1 delete button (234-246); right flex gap-2 (252-270)",
+            "verdict": "LOCAL",
+            "why": "Already composed directly from the real DialogFooter primitive (packages/ui), which is itself the owner for this exact relationship (dialog.footerSplit per cartography doc, decision 'adopt relationship', owner DialogFooter/FormDialogShell). There is no hand-rolled footer row here to migrate — it already is the primitive.",
+            "insideSurface": "Create/Edit Dialog",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 116,
+            "shape": "confirmation copy + destructive/cancel footer pair",
+            "classString": "p text-sm text-muted-foreground (bot-schedule.vue:116-118); DialogFooter class=\"gap-2\" (119); outline Cancel + destructive Delete buttons (120-136)",
+            "verdict": "LOCAL",
+            "why": "Minimal, already-correct composition directly from DialogContent/DialogHeader/DialogFooter primitives with no hand-rolled row, field, or card shape inside — this is the simplest possible confirm dialog and matches the SKILL.md destructive-action pattern (filled destructive Button gated behind a confirm dialog) as-is.",
+            "insideSurface": "Delete confirmation Dialog",
+            "owner": "",
+            "needsHumanEye": false
+          },
+          {
+            "line": 41,
+            "shape": "inline loading status row",
+            "classString": "flex items-center gap-2 px-2 text-xs text-muted-foreground (bot-schedule.vue:41-44)",
+            "verdict": "LOCAL",
+            "why": "A single-line status indicator (Spinner + text), not a row/field/tile/banner morphology — matches the 'trivial muted' stays-local bucket in owner-vocabulary-census.md. Cartography doc marks its relationship confidence as only 'medium' and defers it pending comparison with other loading states rather than assigning it to a ready owner.",
+            "insideSurface": "always-visible",
+            "owner": "",
+            "needsHumanEye": false
+          }
+        ]
+      }
+    ],
+    "totalMiss": 16,
+    "filesWithMiss": [
+      "apps/web/src/pages/supermarket/components/install-plugin-dialog.vue",
+      "apps/web/src/pages/supermarket/components/install-skill-dialog.vue",
+      "apps/web/src/pages/memory/components/add-memory-provider.vue",
+      "apps/web/src/pages/speech/components/provider-setting.vue",
+      "apps/web/src/pages/transcription/provider-setting.vue",
+      "apps/web/src/pages/video/provider-setting.vue",
+      "apps/web/src/pages/bots/components/bot-channels.vue",
+      "apps/web/src/pages/bots/components/bot-checks-panel.vue",
+      "apps/web/src/pages/profile/components/profile-identity.vue",
+      "apps/web/src/pages/bots/components/bot-schedule.vue"
+    ]
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Audit"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "audit:bot-import-panel.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "af5fdccc9256a455a",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782916481421,
+      "queuedAt": 1782916481405,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/bots/components/bot-import-panel.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782917049563,
+      "tokens": 98417,
+      "toolCalls": 17,
+      "durationMs": 568142,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/bots/components/bot-import-panel.vue\",\"findings\":[{\"line\":229,\"shape\":\"drag-drop file upload target (icon circle + title + hint, dashed border)\",\"classString\":\"flex w-full flex-col items-center justify-center gap-1.5 rounded-md border border-dashed px-4 py-6 text-center transition-colors\",\"insideSurface\":\"Import dialog\",\"verdict\":\"LOCAL\",\"why\":\"Genuine one-off compound …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "audit:bot-backup-actions.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "ab73a3ad6a2fab4de",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782916481423,
+      "queuedAt": 1782916481406,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/bots/components/bot-backup-actions.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782916891339,
+      "tokens": 128720,
+      "toolCalls": 12,
+      "durationMs": 409916,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/bots/components/bot-backup-actions.vue\",\"surfacesWalked\":[{\"trigger\":\"click 'Export Bot' outline button (line 148)\",\"surface\":\"Export Dialog (lines 161-234)\"},{\"trigger\":\"click 'Import Bot' outline button (line 156)\",\"surface\":\"Import Dialog (lines 236-251), body delegated entirely to <BotImportPanel>\"},{\"trigger\":\"opened automatically inside Export Dialog once summary …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "audit:backup-section-cards.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "ae8eb6e9ed1637d0b",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782916481423,
+      "queuedAt": 1782916481406,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/bots/components/backup-section-cards.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782916704280,
+      "tokens": 115387,
+      "toolCalls": 8,
+      "durationMs": 222857,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/bots/components/backup-section-cards.vue\",\"surfacesWalked\":[{\"trigger\":\"no Dialog/Sheet/Popover/DropdownMenu exists in this file\",\"surface\":\"none — the whole file is a flat single-level component consumed inside a parent dialog (bot-backup-actions.vue, bot-import-panel.vue)\"},{\"trigger\":\"chevron button click (line 201-212) toggles a v-if body in place\",\"surface\":\"inline…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "audit:avatar-edit-dialog.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "a886ecc8c5797afaa",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782916481423,
+      "queuedAt": 1782916481406,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/bots/components/avatar-edit-dialog.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782916635283,
+      "tokens": 113483,
+      "toolCalls": 7,
+      "durationMs": 153860,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/bots/components/avatar-edit-dialog.vue\",\"findings\":[{\"line\":3,\"shape\":\"Dialog/DialogContent shell (sm:max-w-md)\",\"classString\":\"sm:max-w-md\",\"verdict\":\"LOCAL\",\"why\":\"Pure @memohai/ui Dialog atom composed as-is (Dialog/DialogContent/DialogHeader/DialogTitle/DialogDescription/DialogFooter). None of the owner shapes (PageShell, SettingsSection, SettingsRow, FieldStack, etc…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "audit:index.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "a07d6b715230f4edc",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782916481423,
+      "queuedAt": 1782916481406,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/people/index.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782917087409,
+      "tokens": 131333,
+      "toolCalls": 22,
+      "durationMs": 605986,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/people/index.vue\",\"findings\":[],\"missCount\":0,\"summary\":\"placeholder\"}"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "audit:install-plugin-dialog.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "ac95368d107c131f5",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782916481423,
+      "queuedAt": 1782916481406,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/supermarket/components/install-plugin-di…",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782917391540,
+      "tokens": 119754,
+      "toolCalls": 30,
+      "durationMs": 910117,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/supermarket/components/install-plugin-dialog.vue\",\"surfacesWalked\":[{\"trigger\":\"Dialog is the whole component (open prop from parent) — no nested click-to-open surface inside it\",\"surface\":\"Install Plugin dialog body (DialogContent, lines 6-121)\"}],\"findings\":[{\"line\":11,\"shape\":\"vertical Label-over-control field (\\\"Select Bot\\\")\",\"classString\":\"div.space-y-1.5 > label.…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 7,
+      "label": "audit:install-skill-dialog.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "a0cf73a30ad7f0217",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782916635283,
+      "queuedAt": 1782916481406,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/supermarket/components/install-skill-dia…",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782917046882,
+      "tokens": 118358,
+      "toolCalls": 12,
+      "durationMs": 411598,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/supermarket/components/install-skill-dialog.vue\",\"findings\":[{\"line\":11,\"shape\":\"vertical Label-over-control field (bot select) — a hand-rolled <label> wrapping BotSelect inside a space-y-1.5 div\",\"classString\":\"space-y-1.5 (line 11) + label class=\\\"text-xs font-medium\\\" (line 12)\",\"insideSurface\":\"always-visible (dialog body, no click needed once dialog is open)\",\"verd…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 8,
+      "label": "audit:add-memory-provider.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "a2518f17319f24391",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782916704280,
+      "queuedAt": 1782916481406,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/memory/components/add-memory-provider.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782917044761,
+      "tokens": 77665,
+      "toolCalls": 14,
+      "durationMs": 340481,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/memory/components/add-memory-provider.vue\",\"surfacesWalked\":[{\"trigger\":\"click the 'Add' Button (or auto-open via hideTrigger/open v-model)\",\"surface\":\"Add Memory Provider Dialog (DialogContent, line 19-71)\"}],\"findings\":[{\"line\":24,\"shape\":\"vertical Label-over-Input field (name)\",\"classString\":\"div.space-y-2 > Label + Input\",\"insideSurface\":\"Add Memory Provider Dialog\"…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 9,
+      "label": "audit:provider-setting.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "a7a06c9df887eaa14",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782916891340,
+      "queuedAt": 1782916481406,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/speech/components/provider-setting.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782917387705,
+      "tokens": 102238,
+      "toolCalls": 19,
+      "durationMs": 496365,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/speech/components/provider-setting.vue\",\"surfacesWalked\":[{\"trigger\":\"click a model row in the 'Synthesis models' list (line 176 button)\",\"surface\":\"Model config editor Dialog (lines 201-219, body is model-config-editor.vue)\"}],\"findings\":[{\"line\":121,\"shape\":\"hand-rolled right-aligned Save action bar under the config form, inside SettingsSection's default slot\",\"classS…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 10,
+      "label": "audit:provider-setting.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "a0f92cc0ccb905e45",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782917044764,
+      "queuedAt": 1782916481407,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/transcription/provider-setting.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782917605575,
+      "tokens": 131006,
+      "toolCalls": 21,
+      "durationMs": 560811,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/transcription/provider-setting.vue\",\"findings\":[{\"line\":5,\"shape\":\"Identity card header: leading avatar/icon + name + trailing 'enable' label & Switch, hand-rolled as a standalone <section>\",\"classString\":\"<section class=\\\"flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3\\\">\",\"insideSurface\":\"always-visible\",\"verdict\":\"MIS…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 11,
+      "label": "audit:provider-setting.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "a1a9aa6ab6eb2ab60",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782917046883,
+      "queuedAt": 1782916481407,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/video/provider-setting.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782917614914,
+      "tokens": 127007,
+      "toolCalls": 20,
+      "durationMs": 568031,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/video/provider-setting.vue\",\"surfacesWalked\":[{\"surface\":\"Model Editor Dialog (edit display name)\",\"trigger\":\"click the ghost icon-button (Settings gear) on a model row, line 180-189, sets modelDialogOpen=true via openModelEditor()\"}],\"findings\":[{\"line\":207,\"shape\":\"Dialog-body vertical Label-over-Input field, x2 (display name field + read-only model-id field)\",\"classS…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 12,
+      "label": "audit:index.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "a46c15ad8632757dc",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782917049564,
+      "queuedAt": 1782916481407,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/components/form-dialog-shell/index.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782917171073,
+      "tokens": 112460,
+      "toolCalls": 7,
+      "durationMs": 121509,
+      "resultPreview": "{\"file\":\"apps/web/src/components/form-dialog-shell/index.vue\",\"findings\":[],\"missCount\":0,\"surfacesWalked\":[{\"trigger\":\"DialogTrigger (#trigger slot, caller-owned content)\",\"surface\":\"The Dialog itself (DialogContent)\"}],\"summary\":\"This file is clean and contains no owner-shape debt to migrate — it is not a place where debt could hide. It is an 84-line generic Dialog shell: every visible element i…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 13,
+      "label": "audit:bot-mcp.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "ad17ec296e8902073",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782917087414,
+      "queuedAt": 1782916481407,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/bots/components/bot-mcp.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782917571257,
+      "tokens": 124867,
+      "toolCalls": 17,
+      "durationMs": 483843,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/bots/components/bot-mcp.vue\",\"surfacesWalked\":[{\"trigger\":\"Always-visible list root (PageShell variant=\\\"tab\\\")\",\"surface\":\"MCP server list grid (2-up BackendCard grid + dashed add-tile + Empty state + loading Skeleton grid)\"},{\"trigger\":\"Click a BackendCard, or the dashed add-tile, or 'Add' button in #actions\",\"surface\":\"Setup/detail section (SwapTransition swap, not a…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 14,
+      "label": "audit:bot-channels.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "a91b02e2605554c28",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782917171074,
+      "queuedAt": 1782916481407,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/bots/components/bot-channels.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782917910657,
+      "tokens": 128216,
+      "toolCalls": 26,
+      "durationMs": 739582,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/bots/components/bot-channels.vue\",\"findings\":[{\"line\":116,\"shape\":\"hand-rolled type-picker row list inside the \\\"Add Channel\\\" Dialog — a <button v-for> that renders an icon + label and closes the dialog on click\",\"classString\":\"flex w-full items-center gap-3 rounded-[var(--radius-menu)] px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--ui-hover)]\",\"in…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 15,
+      "label": "audit:bot-checks-panel.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "a99f139d40426bd86",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782917387712,
+      "queuedAt": 1782916481407,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/bots/components/bot-checks-panel.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782917866418,
+      "tokens": 127746,
+      "toolCalls": 28,
+      "durationMs": 478706,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/bots/components/bot-checks-panel.vue\",\"findings\":[{\"line\":10,\"shape\":\"Dialog shell (DialogContent/DialogHeader/DialogTitle/DialogDescription)\",\"classString\":\"flex max-h-[80vh] w-full max-w-xl flex-col gap-0 overflow-hidden p-0 sm:max-w-xl; header: border-b border-border px-6 py-4 text-left\",\"insideSurface\":\"always-visible (this IS the dialog root)\",\"verdict\":\"LOCAL\",\"wh…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 16,
+      "label": "audit:model-select.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "a1215c172a16ca394",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782917391540,
+      "queuedAt": 1782916481407,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/bots/components/model-select.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782917779128,
+      "tokens": 106381,
+      "toolCalls": 16,
+      "durationMs": 387588,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/bots/components/model-select.vue\",\"surfacesWalked\":[{\"trigger\":\"click the select-trigger button (selectTriggerClass)\",\"surface\":\"Popover (menu chrome) containing ModelOptions — search input + virtualized grouped listbox\"}],\"findings\":[{\"line\":4,\"shape\":\"select trigger button\",\"classString\":\"selectTriggerClass (from @memohai/ui), applied as-is with only an outer w-full\",…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 17,
+      "label": "audit:model-item.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "ad5f76ce197a9d240",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782917571258,
+      "queuedAt": 1782916481407,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/providers/components/model-item.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782918033761,
+      "tokens": 129583,
+      "toolCalls": 24,
+      "durationMs": 462503,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/providers/components/model-item.vue\",\"surfacesWalked\":[],\"findings\":[{\"line\":5,\"shape\":\"flush model list row: name+badges left, Switch+action buttons+delete-confirm right\",\"classString\":\"mx-4 flex min-h-[3.25rem] items-center justify-between gap-3 border-b border-border py-2.5 last:border-b-0\",\"insideSurface\":\"always-visible\",\"verdict\":\"DIFF-RELATIONSHIP\",\"why\":\"Looks l…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 18,
+      "label": "audit:profile-identity.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "a78d8f9b4cfad0d82",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782917605577,
+      "queuedAt": 1782916481407,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/profile/components/profile-identity.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782918029067,
+      "tokens": 122585,
+      "toolCalls": 25,
+      "durationMs": 423489,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/profile/components/profile-identity.vue\",\"surfacesWalked\":[{\"trigger\":\"click the avatar (pencil overlay on hover)\",\"surface\":\"Avatar URL edit Dialog\"}],\"findings\":[{\"line\":2,\"shape\":\"root row: avatar (leading media) + name/username body, wrapped in mx-4 flex items-center gap-4 border-b border-border py-4 last:border-b-0\",\"classString\":\"mx-4 flex items-center gap-4 borde…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 19,
+      "label": "audit:index.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "ad126a6c1aa6c3d0d",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782917614914,
+      "queuedAt": 1782916481407,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/profile/index.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782918016824,
+      "tokens": 135885,
+      "toolCalls": 23,
+      "durationMs": 401910,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/profile/index.vue\",\"findings\":[],\"missCount\":0,\"summary\":\"placeholder\"}"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 20,
+      "label": "audit:index.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "aad916ccc6ecccdc4",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782917779129,
+      "queuedAt": 1782916481407,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/about/index.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782918043267,
+      "tokens": 107613,
+      "toolCalls": 11,
+      "durationMs": 264138,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/about/index.vue\",\"surfacesWalked\":[{\"trigger\":\"click \\\"What's changed\\\" ghost button in the Updates row (line 84-87)\",\"surface\":\"Release Notes Dialog (lines 134-170)\"}],\"findings\":[{\"line\":134,\"shape\":\"Dialog + DialogHeader/DialogContent/DialogFooter composition (release notes viewer)\",\"verdict\":\"LOCAL\",\"why\":\"Pure @memohai/ui atom composition (Dialog/DialogHeader/Dialo…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 21,
+      "label": "audit:KeyCaptureDialog.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "a8ff15005bcb6fcf7",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782917866419,
+      "queuedAt": 1782916481407,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/keyboard-shortcuts/components/KeyCapture…",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782918173982,
+      "tokens": 84713,
+      "toolCalls": 17,
+      "durationMs": 307562,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/keyboard-shortcuts/components/KeyCaptureDialog.vue\",\"surfacesWalked\":[{\"trigger\":\"Edit button in sibling ShortcutRow.vue (rendered in keyboard-shortcuts/index.vue) opens this component's own Dialog via v-model:open\",\"surface\":\"KeyCaptureDialog's <Dialog> (the whole file IS one click-to-open surface; no nested Popover/Sheet/DropdownMenu inside it)\"}],\"findings\":[{\"line\":…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 22,
+      "label": "audit:bot-schedule.vue",
+      "phaseIndex": 1,
+      "phaseTitle": "Audit",
+      "agentId": "ae7bd8d71532fd06f",
+      "model": "claude-sonnet-5[1M]",
+      "state": "done",
+      "startedAt": 1782917910658,
+      "queuedAt": 1782916481407,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "apps/web/src/pages/bots/components/bot-schedule.vue",
+      "promptPreview": "You are deep-auditing ONE Memoh Web file for leftover spacing debt — specifically the same-shape-different-code kind that hides inside click-to-open surfaces (dialogs, popovers, sheets, dropdowns). A spacing-owner vocabulary was just built and mass-applied; your job is to find what the batch migration MISSED, and to correctly separate genuine misses from shapes that only LOOK similar but are a dif…",
+      "lastProgressAt": 1782918244203,
+      "tokens": 138219,
+      "toolCalls": 19,
+      "durationMs": 333544,
+      "resultPreview": "{\"file\":\"apps/web/src/pages/bots/components/bot-schedule.vue\",\"surfacesWalked\":[{\"trigger\":\"Sort dropdown button (visible only when schedules.length > 1)\",\"surface\":\"Sort DropdownMenuContent\"},{\"trigger\":\"\\\"+ Create\\\" button in header, or an existing ScheduleListItem card click\",\"surface\":\"Create/Edit Dialog (DialogScrollContent, hosts ScheduleEditor form)\"},{\"trigger\":\"row-menu \\\"Delete\\\" item in…"
+    }
+  ],
+  "totalTokens": 2581636,
+  "totalToolCalls": 395
+}

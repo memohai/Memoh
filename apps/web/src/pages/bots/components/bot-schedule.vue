@@ -1,50 +1,47 @@
 <template>
-  <div class="mx-auto max-w-3xl pt-6 pb-8">
-    <header class="mb-6 flex items-center justify-between gap-4 px-2">
-      <h1 class="text-lg font-semibold">
-        {{ $t('bots.schedule.title') }}
-      </h1>
-      <div class="flex items-center gap-2">
-        <DropdownMenu v-if="schedules.length > 1">
-          <DropdownMenuTrigger as-child>
-            <Button
-              variant="ghost"
-              class="text-muted-foreground"
-            >
-              <ArrowUpDown class="size-3.5" />
-              {{ currentSortLabel }}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              v-for="opt in SORT_OPTIONS"
-              :key="opt.key"
-              class="justify-between gap-4"
-              @select="sortKey = opt.key"
-            >
-              {{ $t(opt.labelKey) }}
-              <Check
-                class="size-3.5 shrink-0"
-                :class="sortKey === opt.key ? 'opacity-100' : 'opacity-0'"
-              />
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <Button @click="handleNew">
-          <Plus class="size-4" />
-          {{ $t('bots.schedule.create') }}
-        </Button>
-      </div>
-    </header>
+  <PageShell
+    variant="tab"
+    :title="$t('bots.schedule.title')"
+  >
+    <template #actions>
+      <DropdownMenu v-if="schedules.length > 1">
+        <DropdownMenuTrigger as-child>
+          <Button
+            variant="ghost"
+            class="text-muted-foreground"
+          >
+            <ArrowUpDown class="size-3.5" />
+            {{ currentSortLabel }}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            v-for="opt in SORT_OPTIONS"
+            :key="opt.key"
+            class="justify-between gap-4"
+            @select="sortKey = opt.key"
+          >
+            {{ $t(opt.labelKey) }}
+            <Check
+              class="size-3.5 shrink-0"
+              :class="sortKey === opt.key ? 'opacity-100' : 'opacity-0'"
+            />
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Button @click="handleNew">
+        <Plus class="size-4" />
+        {{ $t('bots.schedule.create') }}
+      </Button>
+    </template>
 
     <!-- Loading -->
-    <div
+    <InlineLoadingRow
       v-if="isLoading && schedules.length === 0"
-      class="flex items-center gap-2 px-2 text-xs text-muted-foreground"
+      class="px-2"
     >
-      <Spinner class="size-3.5" />
-      <span>{{ $t('common.loading') }}</span>
-    </div>
+      {{ $t('common.loading') }}
+    </InlineLoadingRow>
 
     <!-- Empty -->
     <div
@@ -125,19 +122,15 @@
           </Button>
           <Button
             variant="destructive"
-            :disabled="isDeleting"
+            :loading="isDeleting"
             @click="confirmDelete"
           >
-            <Spinner
-              v-if="isDeleting"
-              class="mr-1.5 size-4"
-            />
             {{ $t('bots.schedule.delete') }}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
@@ -149,7 +142,7 @@ import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
-  Button, Spinner,
+  Button,
   Dialog, DialogContent, DialogScrollContent, DialogHeader, DialogTitle, DialogFooter,
   DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuItem,
 } from '@memohai/ui'
@@ -160,10 +153,12 @@ import {
   putBotsByBotIdScheduleById,
 } from '@memohai/sdk'
 import type { ScheduleSchedule } from '@memohai/sdk'
+import PageShell from '@/components/page-shell/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { describeCron, nextRuns } from '@/utils/cron-pattern'
 import ScheduleEditor from './schedule-editor.vue'
 import ScheduleListItem from './schedule-list-item.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 
 const props = defineProps<{
   botId: string

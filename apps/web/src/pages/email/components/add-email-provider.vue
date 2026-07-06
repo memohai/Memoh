@@ -25,37 +25,37 @@
         </Button>
       </template>
       <template #body>
-        <div class="flex-col gap-3 flex mt-4">
+        <FormStack class="mt-4">
           <FormField
             v-slot="{ componentField }"
             name="name"
           >
-            <FormItem>
-              <Label :for="'email-provider-name'">
-                {{ $t('common.name') }}
-              </Label>
+            <FieldStack
+              :label="$t('common.name')"
+              for="email-provider-name"
+            >
               <FormControl>
                 <Input
-                  :id="'email-provider-name'"
+                  id="email-provider-name"
                   type="text"
                   :placeholder="$t('common.namePlaceholder')"
                   v-bind="componentField"
                 />
               </FormControl>
-            </FormItem>
+            </FieldStack>
           </FormField>
           <FormField
             v-slot="{ componentField }"
             name="provider"
           >
-            <FormItem>
-              <Label :for=" 'email-provider-type'">
-                {{ $t('email.providerType') }}
-              </Label>
+            <FieldStack
+              :label="$t('email.providerType')"
+              for="email-provider-type"
+            >
               <FormControl>
                 <Select v-bind="componentField">
                   <SelectTrigger
-                    :id="'email-provider-type'"
+                    id="email-provider-type"
                     class="w-full"
                   >
                     <SelectValue :placeholder="$t('common.typePlaceholder')" />
@@ -79,9 +79,9 @@
                   </SelectContent>
                 </Select>
               </FormControl>
-            </FormItem>
+            </FieldStack>
           </FormField>
-        </div>
+        </FormStack>
       </template>
     </FormDialogShell>
   </section>
@@ -93,14 +93,12 @@ import {
   Input,
   FormField,
   FormControl,
-  FormItem,
   Select,
   SelectTrigger,
   SelectValue,
   SelectContent,
   SelectGroup,
   SelectItem,
-  Label,
 } from '@memohai/ui'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
@@ -111,6 +109,8 @@ import type { EmailCreateProviderRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { Plus } from 'lucide-vue-next'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
+import FormStack from '@/components/settings/form-stack.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import EmailProviderIcon from '@/components/email-provider-icon/index.vue'
 
@@ -141,8 +141,8 @@ const { mutateAsync: createMutation, isLoading } = useMutation({
 })
 
 const schema = toTypedSchema(z.object({
-  name: z.string().min(1),
-  provider: z.string().min(1),
+  name: z.string().min(1, t('email.nameRequired')),
+  provider: z.string().min(1, t('email.providerTypeRequired')),
 }))
 
 const form = useForm({ validationSchema: schema })

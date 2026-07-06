@@ -1,0 +1,28 @@
+/* Sidebar-specific native scroll bar: narrow so it doesn't dominate the tight
+ * list panes. The 2px transparent border + padding-box clip insets the thumb
+ * to a ~4px sliver — visible on hover/scroll but not a constant presence.
+ * Callers keep extra right padding (e.g. recents' pr-3) so hover chips stay
+ * off the bar.
+ *
+ * Deliberately a shared stylesheet, NOT a `<style scoped>` block: the class is
+ * used by BOTH sidebar/recents.vue and sidebar/panel-schedule.vue. It first
+ * lived in recents' scoped style, which silently did nothing for
+ * panel-schedule (scoped selectors only match the defining component's DOM).
+ * Import this file from every component that puts `sidebar-scroll` on a
+ * scroll container. */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--foreground) 18%, transparent) transparent;
+}
+.sidebar-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: color-mix(in oklab, var(--foreground) 18%, transparent);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 9999px;
+}

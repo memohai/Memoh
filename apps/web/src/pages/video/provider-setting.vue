@@ -52,28 +52,13 @@
               :label="field.title || field.key"
               :description="field.description"
             >
-              <div
+              <PasswordInput
                 v-if="field.type === 'secret'"
-                class="relative w-80"
-              >
-                <Input
-                  :id="`video-provider-${field.key}`"
-                  v-model="providerConfig[field.key] as string"
-                  :type="visibleSecrets[field.key] ? 'text' : 'password'"
-                  class="pr-9"
-                  :placeholder="field.example ? String(field.example) : ''"
-                />
-                <button
-                  type="button"
-                  class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
-                >
-                  <component
-                    :is="visibleSecrets[field.key] ? EyeOff : Eye"
-                    class="size-3.5"
-                  />
-                </button>
-              </div>
+                :id="`video-provider-${field.key}`"
+                v-model="providerConfig[field.key] as string"
+                class="w-80"
+                :placeholder="field.example ? String(field.example) : ''"
+              />
               <Switch
                 v-else-if="field.type === 'bool'"
                 :model-value="!!providerConfig[field.key]"
@@ -116,7 +101,7 @@
             </SettingsRow>
           </div>
 
-          <div class="mx-4 flex items-center justify-end border-t border-border py-3">
+          <template #footer>
             <LoadingButton
               type="submit"
               size="sm"
@@ -124,7 +109,7 @@
             >
               {{ $t('provider.saveChanges') }}
             </LoadingButton>
-          </div>
+          </template>
         </SettingsSection>
       </form>
 
@@ -165,34 +150,15 @@
           </div>
 
           <template v-else>
-            <div
+            <ModelListRow
               v-for="(model, index) in providerModels"
               :key="model.id"
-            >
-              <div class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
-                <span class="min-w-0 truncate">
-                  <span class="text-sm font-medium">{{ model.name || model.model_id }}</span>
-                  <span
-                    v-if="model.name && model.name !== model.model_id"
-                    class="ml-2 text-xs text-muted-foreground"
-                  >{{ model.model_id }}</span>
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  :disabled="!model.id"
-                  :aria-label="$t('common.edit')"
-                  @click="openModelEditor(model)"
-                >
-                  <Settings class="size-4" />
-                </Button>
-              </div>
-              <div
-                v-if="index < providerModels.length - 1"
-                class="mx-4 border-b border-border"
-              />
-            </div>
+              :label="model.name || model.model_id || ''"
+              :meta="model.name && model.name !== model.model_id ? model.model_id : ''"
+              :last="index === providerModels.length - 1"
+              :disabled="!model.id"
+              @click="openModelEditor(model)"
+            />
           </template>
         </div>
       </section>
@@ -204,31 +170,31 @@
               <DialogTitle>{{ $t('models.editModel') }}</DialogTitle>
             </DialogHeader>
 
-            <div class="mt-4 space-y-4">
-              <div class="space-y-2">
-                <Label for="video-model-name">
-                  {{ $t('models.displayName') }}
-                </Label>
+            <FormStack class="mt-4">
+              <FieldStack
+                :label="$t('models.displayName')"
+                for="video-model-name"
+              >
                 <Input
                   id="video-model-name"
                   v-model="modelForm.name"
                   type="text"
                   :placeholder="$t('models.displayNamePlaceholder')"
                 />
-              </div>
+              </FieldStack>
 
-              <div class="space-y-2">
-                <Label for="video-model-id">
-                  {{ $t('models.model') }}
-                </Label>
+              <FieldStack
+                :label="$t('models.model')"
+                for="video-model-id"
+              >
                 <Input
                   id="video-model-id"
                   :model-value="editingModel?.model_id ?? ''"
                   type="text"
                   disabled
                 />
-              </div>
-            </div>
+              </FieldStack>
+            </FormStack>
 
             <DialogFooter class="mt-4">
               <DialogClose as-child>
@@ -267,7 +233,6 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
-  Label,
   Select,
   SelectContent,
   SelectItem,
@@ -276,7 +241,6 @@ import {
   Spinner,
   Switch,
 } from '@memohai/ui'
-import { Eye, EyeOff, Settings } from 'lucide-vue-next'
 import { computed, inject, reactive, ref, watch } from 'vue'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
@@ -287,8 +251,12 @@ import LoadingButton from '@/components/loading-button/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import CreateModel from '@/components/create-model/index.vue'
 import SettingsShell from '@/components/settings-shell/index.vue'
+import PasswordInput from '@/components/password-input/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import ModelListRow from '@/components/settings/model-list-row.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
+import FormStack from '@/components/settings/form-stack.vue'
 
 interface VideoFieldSchema {
   key: string
@@ -323,7 +291,6 @@ const curProvider = inject('curVideoProvider', ref<VideoProviderResponse>())
 const curProviderId = computed(() => curProvider.value?.id)
 const providerName = ref('')
 const providerConfig = reactive<Record<string, unknown>>({})
-const visibleSecrets = reactive<Record<string, boolean>>({})
 const enableLoading = ref(false)
 const saveLoading = ref(false)
 const importLoading = ref(false)

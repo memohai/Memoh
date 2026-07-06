@@ -27,7 +27,11 @@ the *how*; these are the *must*.
    `--ui-selected` / `bg-accent`) — never a gray or a `/10` alpha.
 4. **Build from the shared shell + primitives.** Centered `max-w-3xl` with gutters;
    `SettingsSection` / `SettingsRow` white cards — one hairline, role-map radius, inset
-   dividers, deliberate spacing rhythm, and **no hover-rise** on cards.
+   dividers, deliberate spacing rhythm, and **no hover-rise** on cards. The full **owner
+   vocabulary** — which recurring shapes (row, field, section, tile, banner, loading/empty
+   state, delete confirm, page frame…) have an owner component, the decision map, and when a
+   shape deliberately stays hand-written — lives in `.agents/skills/memoh-ui-owners/SKILL.md`;
+   read it before building any of those shapes.
 5. **Reuse a component — never hand-write one.** Compose from the real `@memohai/ui` atoms
    (Select / Combobox / Tooltip / icon `Button` / `Empty`) and the existing shared parts; never
    re-skin one, hand-roll an equivalent, or rebuild a control out of raw `<div>`s. **Menus
@@ -235,6 +239,12 @@ A divider has two different jobs and two different widths; using the wrong one i
 
 The test: is this line separating **items within one surface** (inset) or **splitting the
 container itself** (full-bleed)? Answer that before you place a divider.
+
+**A "divider I never drew" is usually a misplaced `#footer`.** If a hairline appears to float
+under a single row over an empty strip, you almost certainly put a `SettingsSection #footer`
+(Save band) on a *root-page* card — its full-bleed `border-t` plus the lone row's own inset
+`border-b` read as a stray line. The line is real chrome in the wrong home: a root page's Save
+belongs in `PageShell #actions`, not a card footer (§ 8). Fix the home, not the line.
 
 ### Dark mode is not a task — it is the absence of hardcoded color
 
@@ -576,12 +586,24 @@ only read wrong stacked together:
   a toggle label, or its description. (This is also the no-foreign-product-name rule: the UI
   speaks the user's language, not the runtime's.)
 
-**Copy is bilingual, and that is a layout constraint, not just a translation chore.** Every
-user-facing string goes through an i18n key with **both** `en` and `zh` written — no hardcoded
-text. But the two languages have different shapes: Chinese is denser and wider per glyph,
-English runs longer. A row that fits perfectly in English can wrap or overflow in Chinese (and
-vice versa), which silently breaks same-row height (§ 4) and narrow-screen reflow. So write and
-**eyeball both locales**, and design the layout to survive the longer/wider of the two.
+**Copy is trilingual — en, zh, AND ja — and that is a layout constraint, not just a
+translation chore.** Every user-facing string goes through an i18n key with **all three**
+locales written (`apps/web/src/i18n/locales/{en,zh,ja}.json`) — no hardcoded text. The
+recurring failure is real and embarrassing: agents write en+zh and **forget ja**, or reference
+an existing key that was itself added without ja — the Japanese UI then renders the raw key
+string (`bots.memory.lastUpdated`) in production. A 2026-07 parity sweep found 14 such keys
+referenced by freshly-written templates. So the rule has two halves:
+- **Writing a new key:** add it to all three files in the same edit, placeholders (`{count}`,
+  `{agent}`) identical across locales. For Japanese, use natural phrasing but keep the product
+  terms Japanese users read in English (Bot, Workspace, Skill, MCP…).
+- **Referencing an existing key:** existence in en does NOT mean it exists in ja — grep the key
+  in all three locale files before using it; if ja is missing, fill it as part of your change.
+Before finishing, verify every key your diff references resolves in all three locales.
+The two languages' shapes also constrain layout: Chinese is denser and wider per glyph, English
+runs longer, Japanese sits between but often longest with particles. A row that fits perfectly
+in English can wrap or overflow in Chinese (and vice versa), which silently breaks same-row
+height (§ 4) and narrow-screen reflow. So write and **eyeball all locales**, and design the
+layout to survive the longest of the three.
 
 **An error message follows a formula: what happened · why · how to fix.** "Email needs an @
 symbol" beats "Invalid input"; "We couldn't reach the server — check your connection and retry"
@@ -637,6 +659,18 @@ Anything sitting on one visual line — a search box next to an "Add" button, a 
 to an action — **must be the same height**. A short search field beside a tall button is a
 real bug we shipped before. Build the search with `InputGroup` and the action with `Button`
 at the matching size, then verify the heights actually line up.
+
+**A control-bearing row's height must not swing with its own interaction.** The trap: a
+`SettingsRow` whose `:description` flips with the control's *value* — a mode `SegmentedControl`
+whose blurb changes per selection. `SettingsRow` sets a `min-h` floor, so a longer variant wraps
+to a second line and the whole row — control included — visibly jumps taller as the user toggles.
+That is content-driving-layout (§ Engineering correctness) fired by a click. The fix is almost
+always **the copy, not the layout**: keep such a per-value blurb short enough to hold one line so
+the height is stable — do **not** over-engineer it (splitting the blurb into its own row, or
+reserving a fixed two-line height, is usually worse than tightening the words). Scope note: this
+is about *interaction-driven* jumps, not every height difference. A genuinely sparse page whose
+row is simply taller because its **static** copy runs long is fine — let it grow; don't chase a
+uniform row height for its own sake.
 
 ### 5. No redundant or fighting controls
 
@@ -702,6 +736,24 @@ hoarding edits behind a button.
 - **Toast timing in general:** toasts are for *explicit* user actions (save / delete / create)
   and for *errors that need attention.* Never fire them for ambient, automatic, or background
   changes. One toast per action, not one per keystroke.
+- **A manual Save belongs where the page type puts it — copy the right *page shape*, not the
+  first footer you find.** The two homes are not interchangeable, and picking by "some page does
+  this" instead of "which page *shape* is this" produces a real defect:
+  - **Root page (`PageShell`) → Save in the header `#actions`.** The model is `bot-tool-approval`:
+    `<Button :disabled="!hasChanges || saving">{{ saveChanges }}</Button>` in `#actions`, disabled
+    when synced. If the save-driving state lives in a child component, `defineExpose({ hasChanges,
+    saveLoading, save })` and read it off the child `ref` — do **not** hoist all the page logic up.
+  - **Detail form (`SettingsShell` / `DetailPane`) → Save in the section's `#footer` band.** That
+    footer exists to *close a form card* (`provider-form`, the web-search/email/video detail
+    settings). It is a detail-page device.
+  - **The failure this prevents (lived):** a Memory *root* page copied the detail form's
+    `SettingsSection #footer` Save. On the common `Off` state the card held exactly one
+    `SettingsRow` + the footer band, so the row's own inset `border-b` hairline was left stranded
+    above an empty strip with a Save floating at its right — read as "a hand-drawn divider and a
+    random button in the card." The hairline was never hand-drawn; the *footer was in the wrong
+    home*. Moving Save to `#actions` and deleting the footer made both the strip and the "stray
+    line" vanish at once (one wrong root, two symptoms — § Engineering correctness). Before you
+    place a Save, name the page type first.
 
 ### 9. Earn the space — show only what's actionable, and only card it when it's a group
 

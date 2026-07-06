@@ -50,12 +50,9 @@
     />
     <!-- eslint-enable vue/no-v-html -->
 
-    <p
-      v-if="!summary && !files.length && !patchText && !errorText"
-      class="text-muted-foreground italic"
-    >
+    <EmptyRow v-if="!summary && !files.length && !patchText && !errorText">
       {{ t('chat.tools.detail.noData') }}
-    </p>
+    </EmptyRow>
   </div>
 </template>
 
@@ -65,6 +62,7 @@ import { LoaderCircle } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
 import { useShikiHighlighter } from '@/composables/useShikiHighlighter'
+import EmptyRow from './tool-detail/empty-row.vue'
 
 type PatchOperation = 'add' | 'modify' | 'delete'
 

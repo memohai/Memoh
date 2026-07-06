@@ -85,7 +85,10 @@
     "editJson": "編集JSON",
     "actionRequired": "必要なアクション",
     "preview": "プレビュー",
-    "raw": "ソース"
+    "raw": "ソース",
+    "hide": "非表示",
+    "show": "表示",
+    "saveChanges": "変更を保存"
   },
   "auth": {
     "welcome": "おかえり",
@@ -852,12 +855,15 @@
     "emptyDescription": "手動で追加するか、このプロバイダーから完全なリストをインポートします。",
     "clientType": "クライアントの種類",
     "clientTypePlaceholder": "クライアントの種類を選択してください",
+    "typeRequired": "種類を選択してください",
     "model": "モデル ID",
     "modelPlaceholder": "例: gpt-4o",
+    "modelIdRequired": "モデル ID を入力してください",
     "displayName": "表示名",
     "displayNamePlaceholder": "カスタム表示名",
     "dimensions": "寸法",
     "dimensionsPlaceholder": "例: 1536",
+    "dimensionsMin": "次元数は 0 より大きい値にしてください",
     "compatibilities": "互換性",
     "compatibility": {
       "vision": "ビジョン",
@@ -867,6 +873,7 @@
     },
     "contextWindow": "コンテキストウィンドウ",
     "contextWindowPlaceholder": "例: 128000",
+    "contextWindowMin": "コンテキストウィンドウは 0 より大きい値にしてください",
     "testModel": "モデルをテスト",
     "enable": "モデルを有効化",
     "toggleFailed": "モデルの更新に失敗しました",
@@ -893,6 +900,10 @@
     "customProvider": "カスタムプロバイダー",
     "apiKey": "APIキー",
     "apiKeyPlaceholder": "APIキーを入力",
+    "nameRequired": "名前を入力してください",
+    "clientTypeRequired": "クライアントの種類を選択してください",
+    "apiKeyRequired": "APIキーを入力してください",
+    "urlRequired": "ベースURLを入力してください",
     "url": "ベースURL",
     "urlPlaceholder": "ベース URL を入力",
     "deleteConfirm": "このプロバイダーを削除してもよろしいですか？",
@@ -964,7 +975,10 @@
     "empty": "検索プロバイダーがありません",
     "emptyFetch": "フェッチプロバイダーがありません",
     "provider": "タイプ",
+    "nameRequired": "名前を入力してください",
+    "providerRequired": "タイプを選択してください",
     "fetchProvider": "取得プロバイダーの種類",
+    "fetchProviderRequired": "取得プロバイダーの種類を選択してください",
     "accountId": "アカウント ID",
     "apiToken": "API トークン",
     "searchProviders": "検索",
@@ -1035,6 +1049,9 @@
     "sparseQdrantCollectionDescription": "スパース モードは Qdrant コレクションに書き込みます。現在/デフォルトのコレクション: {collection}。",
     "denseQdrantCollectionDescription": "デンス モードは Qdrant コレクションに書き込みます。現在/デフォルトのコレクション: {collection}。",
     "collectionPoints": "コレクション内のポイント数",
+    "entriesStored": "{count} 件を保存済み",
+    "keywordIndex": "キーワードインデックス",
+    "semanticIndex": "セマンティックインデックス",
     "collectionExists": "コレクションが存在します",
     "collectionMissing": "コレクションはまだ作成されていません",
     "collectionHealthy": "正常",
@@ -1045,9 +1062,9 @@
       "dense": "セマンティック"
     },
     "modeDescriptions": {
-      "off": "長期記憶インデックスを作成せず、基本的なファイルメモリのみを保持します。",
-      "sparse": "オプションのスパース検索サービスを使用して、キーワードで記憶を照合します。",
-      "dense": "埋め込みモデルを使用して記憶をベクトルに変換し、意味の類似性で検索します。"
+      "off": "基本的なファイルメモリのみを保持し、長期インデックスは作成しません。",
+      "sparse": "キーワードの一致で検索します。",
+      "dense": "埋め込みモデルを使い、意味の類似性で検索します。"
     },
     "providerNames": {
       "builtin": "内蔵",
@@ -1081,7 +1098,6 @@
   },
   "video": {
     "title": "動画",
-    "providersTitle": "動画生成",
     "providersHint": "OpenRouter、ModelArk、Volcengine で動画を生成します。",
     "empty": "動画バックエンドがまだありません。プロバイダーを追加すると動画生成を有効にできます。",
     "models": "動画 Model",
@@ -1161,6 +1177,8 @@
     "title": "メール",
     "add": "メールを追加",
     "providerType": "プロバイダーの種類",
+    "nameRequired": "名前を入力してください",
+    "providerTypeRequired": "プロバイダーの種類を選択してください",
     "searchPlaceholder": "メールプロバイダーを検索...",
     "emptyTitle": "メールがありません",
     "emptyDescription": "メールプロバイダーを追加して、Bot のメール機能を有効にします",
@@ -1378,11 +1396,6 @@
       },
       "restoreSecurity": "ツール承認を有効にする",
       "examples": "例",
-      "status": {
-        "active": "アクティブ",
-        "implicitDeny": "暗黙的な拒否",
-        "sealed": "封鎖済み"
-      },
       "dangerZone": "危険な操作",
       "dangerZoneDesc": "主要なセキュリティポリシーを管理します。",
       "resetDefaults": "デフォルトにリセット",
@@ -1878,6 +1891,7 @@
       "compareLoadFailed": "比較用のワークスペースのバージョンを読み込めませんでした"
     },
     "email": {
+      "bindingsDescription": "この Bot が利用できる設定済みメールプロバイダーを選択します。",
       "title": "Email",
       "subtitle": "メールプロバイダーの連携を管理し、受信トレイと送信トレイを表示します。",
       "bindings": "バインディング",
@@ -1904,6 +1918,12 @@
       "sentAt": "送信済み"
     },
     "container": {
+      "refactored": {
+        "issueLegacyTitle": "旧アーキテクチャを検出しました",
+        "issueLegacyHint": "完全な互換性のために再作成してください。データは自動的に保持されます。",
+        "issueRecreateTitle": "リソース上限の反映には再構築が必要です",
+        "issueRecreateHint": "CPU やメモリのハード上限は Workspace を再構築するまで反映されません。/data は保持されますが、実行中のセッションは停止します。"
+      },
       "title": "容器",
       "subtitle": "このBotのランタイム環境を管理します。",
       "botNotReady": "Botのライフサイクル移行が進行中です。Containerアクションが無効になりました。",
@@ -2439,6 +2459,7 @@
       "lastObserved": "最後に見た"
     },
     "channels": {
+      "advancedTitle": "詳細設定",
       "title": "プラットフォーム",
       "addChannel": "プラットフォームの追加",
       "selectType": "プラットフォームの種類を選択してください",
@@ -2513,6 +2534,8 @@
       }
     },
     "memory": {
+      "lastUpdated": "最終更新",
+      "totalCount": "メモリー総数",
       "unsavedChanges": "未保存の変更",
       "emptyHistory": "利用可能な履歴はありません。",
       "title": "メモリを管理",
@@ -2580,6 +2603,7 @@
       }
     },
     "skills": {
+      "shadowedHint": "同名のマネージドコピーがこのソースより優先されます。",
       "title": "Skill",
       "discoveryTitle": "Skillパス",
       "discoveryDescription": "このBotが管理対象Skillを保存する場所と、どの外部パスがスキャンされるかを管理します。",
@@ -2638,6 +2662,7 @@
       "intro": "このBotのカスタム能力を構成します。マネージド Skillが優先されます。"
     },
     "compaction": {
+      "advanced": "詳細設定",
       "title": "圧縮ログ",
       "loadFailed": "圧縮ログのロードに失敗しました",
       "empty": "圧縮ログがありません",
@@ -2655,6 +2680,7 @@
       "filterAll": "全て"
     },
     "heartbeat": {
+      "advanced": "詳細設定",
       "title": "ハートビートログ",
       "loadFailed": "ハートビートログのロードに失敗しました",
       "empty": "ハートビートログがありません",
@@ -2720,30 +2746,10 @@
         "descriptionPlaceholder": "このタスクの内容",
         "command": "指示",
         "commandPlaceholder": "実行命令",
-        "commandHint": "このコマンドは、トリガー時にメッセージとしてBotに送信されます。",
         "pattern": "スケジュール",
-        "mode": "モード",
-        "everyMinutes": "N分ごと",
-        "atMinute": "特定の分に",
-        "hour": "時間",
-        "hours": "営業時間",
-        "hoursHint": "時間帯を選択します。",
-        "minute": "分",
-        "weekdays": "平日",
-        "monthDays": "月日",
-        "month": "月",
-        "monthDay": "日",
         "maxCalls": "実行制限",
-        "maxCallsUnlimited": "制限なし",
         "enabled": "タスクを有効にする",
-        "visualBuilder": "ビジュアルビルダー",
-        "cronCode": "クロン式",
-        "manualEditHint": "手動編集はビジュアル ビルダーと同期します。",
-        "patternPreview": "パターンのプレビュー",
-        "nextRuns": "次の実行 ({tz})",
-        "invalidPattern": "無効なパターン",
-        "advancedPattern": "クロン式",
-        "advancedHint": "標準の Cron 形式と @daily 記述子をサポートします。"
+        "invalidPattern": "無効なパターン"
       },
       "mode": {
         "minutes": "N分ごと",
@@ -2919,6 +2925,7 @@
     "addDescription": "新しいプラットフォーム接続を追加します。",
     "name": "名前",
     "namePlaceholder": "プラットフォーム名を入力してください",
+    "nameRequired": "名前を入力してください",
     "config": "構成",
     "configPlaceholder": "設定を入力（key:value）",
     "active": "アクティブ",

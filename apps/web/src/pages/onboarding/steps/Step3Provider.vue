@@ -19,6 +19,13 @@ import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import CreateModel from '@/components/create-model/index.vue'
 import ModelItem from '@/pages/providers/components/model-item.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
+import FormStack from '@/components/settings/form-stack.vue'
+import ChoiceTile from '../components/choice-tile.vue'
+import StepFrame from '../components/step-frame.vue'
+import StepExitShell from '../components/step-exit-shell.vue'
+import HintBox from '../components/hint-box.vue'
+import FooterNav from '../components/footer-nav.vue'
 import { onboardingProviderPresets as providerPresets, type ProviderPreset } from '@/constants/provider-presets'
 import {
   HERMES_CUSTOM_MODEL_VALUE,
@@ -367,22 +374,15 @@ onMounted(() => {
 </script>
 
 <template>
-  <div
-    class="transition-all duration-[175ms] ease-out"
-    :class="exiting ? 'scale-[0.88] opacity-0' : 'scale-100 opacity-100'"
-  >
-    <div
+  <!-- 三个模式变体共用一个退出壳,所以壳在 StepFrame 之上而非各 frame 自带 -->
+  <StepExitShell :exiting="exiting">
+    <StepFrame
       v-if="mode === 'list'"
-      class="text-left pt-24 h-[35rem] max-h-[calc(100dvh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
-      :class="listVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0'"
+      :title="t('onboarding.provider.title')"
+      title-class="mb-3"
+      :visible="visible"
+      :body-class="['pt-16 transition-all duration-[175ms] ease-out', listVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
     >
-      <h2
-        class="text-3xl font-semibold mb-3 transition-all duration-[350ms] ease-out"
-        :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-      >
-        {{ t('onboarding.provider.title') }}
-      </h2>
-
       <div>
         <p
           class="text-sm text-muted-foreground leading-relaxed mb-6 transition-all duration-[350ms] ease-out delay-[60ms]"
@@ -394,131 +394,130 @@ onMounted(() => {
           class="grid grid-cols-3 gap-3 transition-all duration-[350ms] ease-out delay-[140ms]"
           :class="gridVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
         >
-          <button
-            type="button"
-            class="h-16 rounded-lg border border-dashed border-border bg-background px-3 flex items-center gap-2.5 text-muted-foreground transition-colors hover:border-foreground/50 hover:text-foreground"
+          <ChoiceTile
+            variant="dashed"
+            :label="t('onboarding.provider.custom')"
             @click="openForm(null)"
           >
-            <Plus class="size-5 shrink-0" />
-            <span class="text-sm font-medium truncate">{{ t('onboarding.provider.custom') }}</span>
-          </button>
-          <button
+            <template #icon>
+              <Plus class="size-5 shrink-0" />
+            </template>
+          </ChoiceTile>
+          <ChoiceTile
             v-for="preset in providerPresets"
             :key="preset.id"
-            type="button"
-            class="h-16 rounded-lg border border-border bg-background px-3 flex items-center gap-2.5 transition-colors hover:border-muted-foreground/50 hover:bg-accent/40"
+            :label="preset.name"
             @click="openForm(preset)"
           >
-            <ProviderIcon
-              v-if="preset.icon"
-              :icon="preset.icon"
-              size="22"
-            />
-            <span class="text-sm font-medium truncate">
-              {{ preset.name }}
-            </span>
-          </button>
-          <button
+            <template #icon>
+              <ProviderIcon
+                v-if="preset.icon"
+                :icon="preset.icon"
+                size="22"
+              />
+            </template>
+          </ChoiceTile>
+          <ChoiceTile
             v-for="profile in acpProfiles"
             :key="`acp-${profile.id}`"
-            type="button"
-            class="h-16 rounded-lg border border-border bg-background px-3 flex items-center gap-2.5 transition-colors hover:border-muted-foreground/50 hover:bg-accent/40"
+            :label="profile.display_name || profile.id"
             @click="openAcpForm(profile)"
           >
-            <component
-              :is="acpAgentIcon(profile.id, true)"
-              class="size-[22px] shrink-0"
-            />
-            <span class="text-sm font-medium truncate">
-              {{ profile.display_name || profile.id }}
-            </span>
-          </button>
+            <template #icon>
+              <component
+                :is="acpAgentIcon(profile.id, true)"
+                class="size-[22px] shrink-0"
+              />
+            </template>
+          </ChoiceTile>
         </div>
       </div>
 
-      <div
-        class="mt-auto pt-12 flex items-center justify-end gap-3 transition-all duration-[350ms] ease-out delay-[220ms]"
-        :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-      >
-        <button
-          class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          @click="leave(prevStep)"
-        >
-          {{ t('onboarding.prev') }}
-        </button>
-        <button
-          class="inline-flex h-[2.625rem] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          @click="onSkipStep"
-        >
-          {{ ctaLabel }}
-        </button>
-      </div>
-    </div>
+      <FooterNav
+        class="delay-[220ms]"
+        :visible="visible"
+        :prev-label="t('onboarding.prev')"
+        :next-label="ctaLabel"
+        @prev="leave(prevStep)"
+        @next="onSkipStep"
+      />
+    </StepFrame>
 
-    <div
+    <StepFrame
       v-else-if="mode === 'form'"
-      class="text-left pt-24 h-[35rem] max-h-[calc(100dvh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
-      :class="formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0'"
+      :visible="visible"
+      :body-class="['pt-16 transition-all duration-[175ms] ease-out', formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
     >
-      <div
-        class="mb-8 flex items-center gap-3 transition-all duration-[200ms] ease-out"
-        :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-      >
-        <button
-          type="button"
-          class="-ml-1.5 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          :disabled="submitting"
-          :aria-label="t('onboarding.prev')"
-          @click="backToList"
+      <!-- form/acp 模式有返回箭头+图标+标题的头行,而非纯 h2,走 #header slot -->
+      <template #header>
+        <div
+          class="mb-8 flex items-center gap-3 transition-all duration-[200ms] ease-out"
+          :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
         >
-          <ArrowLeft class="size-4" />
-        </button>
-        <ProviderIcon
-          v-if="selectedPreset?.icon"
-          :icon="selectedPreset.icon"
-          size="28"
-        />
-        <h2 class="text-2xl font-semibold">
-          {{ selectedPreset ? selectedPreset.name : t('onboarding.provider.custom') }}
-        </h2>
-      </div>
+          <button
+            type="button"
+            class="-ml-1.5 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            :disabled="submitting"
+            :aria-label="t('onboarding.prev')"
+            @click="backToList"
+          >
+            <ArrowLeft class="size-4" />
+          </button>
+          <ProviderIcon
+            v-if="selectedPreset?.icon"
+            :icon="selectedPreset.icon"
+            size="28"
+          />
+          <h2 class="text-2xl font-semibold">
+            {{ selectedPreset ? selectedPreset.name : t('onboarding.provider.custom') }}
+          </h2>
+        </div>
+      </template>
 
       <div class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1">
-        <div class="space-y-4">
+        <FormStack>
           <div
             class="transition-all duration-[200ms] ease-out delay-[20ms]"
             :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
           >
-            <Label class="mb-2 block text-sm font-medium">
-              {{ t('onboarding.provider.form.name') }}
-            </Label>
-            <Input
-              v-model="formValues.name"
-              :placeholder="t('onboarding.provider.form.namePlaceholder')"
-            />
+            <FieldStack>
+              <template #label>
+                <Label class="text-sm font-medium">
+                  {{ t('onboarding.provider.form.name') }}
+                </Label>
+              </template>
+              <Input
+                v-model="formValues.name"
+                :placeholder="t('onboarding.provider.form.namePlaceholder')"
+              />
+            </FieldStack>
           </div>
           <div
             v-if="!selectedPreset"
             class="transition-all duration-[200ms] ease-out delay-[40ms]"
             :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
           >
-            <Label class="mb-2 block text-sm font-medium">
-              {{ t('onboarding.provider.form.clientType') }}
-            </Label>
-            <Select v-model="formValues.client_type">
-              <SelectTrigger class="w-full">
-                <SelectValue :placeholder="t('onboarding.provider.form.clientTypePlaceholder')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  v-for="ct in availableClientTypes"
-                  :key="ct.value"
-                  :value="ct.value"
-                >
-                  {{ ct.label }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <FieldStack>
+              <template #label>
+                <Label class="text-sm font-medium">
+                  {{ t('onboarding.provider.form.clientType') }}
+                </Label>
+              </template>
+              <Select v-model="formValues.client_type">
+                <SelectTrigger class="w-full">
+                  <SelectValue :placeholder="t('onboarding.provider.form.clientTypePlaceholder')" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="ct in availableClientTypes"
+                    :key="ct.value"
+                    :value="ct.value"
+                  >
+                    {{ ct.label }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </FieldStack>
           </div>
           <div
             class="transition-all duration-[200ms] ease-out"
@@ -527,15 +526,19 @@ onMounted(() => {
               selectedPreset ? 'delay-[40ms]' : 'delay-[60ms]',
             ]"
           >
-            <Label class="mb-2 block text-sm font-medium">
-              {{ t('onboarding.provider.form.apiKey') }}
-            </Label>
-            <Input
-              v-model="formValues.api_key"
-              type="password"
-              autocomplete="off"
-              :placeholder="t('onboarding.provider.form.apiKeyPlaceholder')"
-            />
+            <FieldStack>
+              <template #label>
+                <Label class="text-sm font-medium">
+                  {{ t('onboarding.provider.form.apiKey') }}
+                </Label>
+              </template>
+              <Input
+                v-model="formValues.api_key"
+                type="password"
+                autocomplete="off"
+                :placeholder="t('onboarding.provider.form.apiKeyPlaceholder')"
+              />
+            </FieldStack>
           </div>
           <div
             class="transition-all duration-[200ms] ease-out"
@@ -544,15 +547,19 @@ onMounted(() => {
               selectedPreset ? 'delay-[60ms]' : 'delay-[80ms]',
             ]"
           >
-            <Label class="mb-2 block text-sm font-medium">
-              {{ t('onboarding.provider.form.baseUrl') }}
-            </Label>
-            <Input
-              v-model="formValues.base_url"
-              :placeholder="baseUrlPlaceholder"
-            />
+            <FieldStack>
+              <template #label>
+                <Label class="text-sm font-medium">
+                  {{ t('onboarding.provider.form.baseUrl') }}
+                </Label>
+              </template>
+              <Input
+                v-model="formValues.base_url"
+                :placeholder="baseUrlPlaceholder"
+              />
+            </FieldStack>
           </div>
-        </div>
+        </FormStack>
 
         <p
           v-if="formError"
@@ -673,94 +680,106 @@ onMounted(() => {
         </div>
       </div>
 
-      <div
-        class="mt-auto pt-12 flex items-center justify-end gap-3 transition-all duration-[200ms] ease-out"
-        :class="[
-          formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3',
-          selectedPreset ? 'delay-[80ms]' : 'delay-[100ms]',
-        ]"
+      <FooterNav
+        :class="selectedPreset ? 'delay-[80ms]' : 'delay-[100ms]'"
+        :visible="formContentVisible"
       >
-        <button
-          class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
-          :disabled="submitting"
-          @click="backToList"
-        >
-          {{ t('onboarding.provider.form.cancel') }}
-        </button>
-        <button
-          class="inline-flex h-[2.625rem] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
-          :disabled="formCtaDisabled"
-          @click="saveAndNext"
-        >
-          <Transition
-            mode="out-in"
-            enter-active-class="transition-all duration-[160ms] ease-out"
-            enter-from-class="opacity-0 translate-y-1"
-            enter-to-class="opacity-100 translate-y-0"
-            leave-active-class="transition-all duration-[140ms] ease-in"
-            leave-from-class="opacity-100 translate-y-0"
-            leave-to-class="opacity-0 -translate-y-1"
+        <template #prev>
+          <button
+            type="button"
+            class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="submitting"
+            @click="backToList"
           >
-            <span
-              :key="formCtaLabel"
-              class="inline-flex items-center gap-2"
+            {{ t('onboarding.provider.form.cancel') }}
+          </button>
+        </template>
+        <template #next>
+          <!-- CTA label carries its own Transition + Spinner; FooterNav's
+               plain :next-loading prop can't express the label-swap, so this
+               button stays local via the #next escape hatch. -->
+          <button
+            type="button"
+            class="inline-flex h-[2.625rem] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
+            :disabled="formCtaDisabled"
+            @click="saveAndNext"
+          >
+            <Transition
+              mode="out-in"
+              enter-active-class="transition-all duration-[160ms] ease-out"
+              enter-from-class="opacity-0 translate-y-1"
+              enter-to-class="opacity-100 translate-y-0"
+              leave-active-class="transition-all duration-[140ms] ease-in"
+              leave-from-class="opacity-100 translate-y-0"
+              leave-to-class="opacity-0 -translate-y-1"
             >
-              <Spinner v-if="submitting" />
-              {{ formCtaLabel }}
-            </span>
-          </Transition>
-        </button>
-      </div>
-    </div>
+              <span
+                :key="formCtaLabel"
+                class="inline-flex items-center gap-2"
+              >
+                <Spinner v-if="submitting" />
+                {{ formCtaLabel }}
+              </span>
+            </Transition>
+          </button>
+        </template>
+      </FooterNav>
+    </StepFrame>
 
-    <div
+    <StepFrame
       v-else-if="mode === 'acp' && selectedAcpProfile"
-      class="text-left pt-24 h-[35rem] max-h-[calc(100dvh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
-      :class="formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0'"
+      :visible="visible"
+      :body-class="['pt-16 transition-all duration-[175ms] ease-out', formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
     >
-      <div
-        class="mb-8 flex items-center gap-3 transition-all duration-[200ms] ease-out"
-        :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-      >
-        <button
-          type="button"
-          class="-ml-1.5 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          :disabled="acpSubmitting"
-          :aria-label="t('onboarding.prev')"
-          @click="backToList"
+      <template #header>
+        <div
+          class="mb-8 flex items-center gap-3 transition-all duration-[200ms] ease-out"
+          :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
         >
-          <ArrowLeft class="size-4" />
-        </button>
-        <component
-          :is="acpAgentIcon(selectedAcpProfile.id, true)"
-          class="size-7 shrink-0"
-        />
-        <h2 class="text-2xl font-semibold">
-          {{ selectedAcpProfile.display_name || selectedAcpProfile.id }}
-        </h2>
-      </div>
+          <button
+            type="button"
+            class="-ml-1.5 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            :disabled="acpSubmitting"
+            :aria-label="t('onboarding.prev')"
+            @click="backToList"
+          >
+            <ArrowLeft class="size-4" />
+          </button>
+          <component
+            :is="acpAgentIcon(selectedAcpProfile.id, true)"
+            class="size-7 shrink-0"
+          />
+          <h2 class="text-2xl font-semibold">
+            {{ selectedAcpProfile.display_name || selectedAcpProfile.id }}
+          </h2>
+        </div>
+      </template>
 
       <div class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1">
-        <div class="space-y-4">
+        <FormStack>
           <div
             class="transition-all duration-[200ms] ease-out delay-[20ms]"
             :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
           >
-            <Label class="mb-2 block text-sm font-medium">
-              {{ t('onboarding.provider.acp.setupMode') }}
-            </Label>
-            <div class="grid grid-cols-3 gap-2">
-              <button
-                v-for="m in acpSetupModes(selectedAcpProfile)"
-                :key="m"
-                type="button"
-                class="min-h-10 rounded-lg border px-3 py-2 text-sm font-medium leading-tight transition-colors"
-                :class="acpSetupMode === m ? 'border-foreground bg-foreground text-background' : 'border-border bg-background text-foreground hover:bg-accent/40'"
-                @click="setAcpSetupMode(m)"
-              >
-                {{ acpSetupModeLabel(m, selectedAcpProfile) }}
-              </button>
-            </div>
+            <FieldStack>
+              <template #label>
+                <Label class="text-sm font-medium">
+                  {{ t('onboarding.provider.acp.setupMode') }}
+                </Label>
+              </template>
+              <div class="grid grid-cols-3 gap-2">
+                <button
+                  v-for="m in acpSetupModes(selectedAcpProfile)"
+                  :key="m"
+                  type="button"
+                  class="min-h-10 rounded-lg border px-3 py-2 text-sm font-medium leading-tight transition-colors"
+                  :class="acpSetupMode === m ? 'border-foreground bg-foreground text-background' : 'border-border bg-background text-foreground hover:bg-accent/40'"
+                  @click="setAcpSetupMode(m)"
+                >
+                  {{ acpSetupModeLabel(m, selectedAcpProfile) }}
+                </button>
+              </div>
+            </FieldStack>
           </div>
 
           <div
@@ -770,89 +789,93 @@ onMounted(() => {
             :style="{ transitionDelay: `${40 + index * 20}ms` }"
             :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
           >
-            <Label class="mb-2 block text-sm font-medium">
-              {{ field.label || field.id }}
-            </Label>
-            <Select
-              v-if="isAcpHermesProviderField(field)"
-              :model-value="acpHermesProvider()"
-              @update:model-value="(value) => setAcpHermesProvider(String(value))"
-            >
-              <SelectTrigger class="w-full">
-                <SelectValue :placeholder="t('bots.settings.acpHermesProviderPlaceholder')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  v-for="provider in HERMES_PROVIDER_PRESETS"
-                  :key="provider.value"
-                  :value="provider.value"
-                >
-                  {{ t(provider.labelKey) }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <template v-else-if="isAcpHermesModelField(field)">
+            <FieldStack>
+              <template #label>
+                <Label class="text-sm font-medium">
+                  {{ field.label || field.id }}
+                </Label>
+              </template>
               <Select
-                :model-value="acpHermesModelSelect()"
-                @update:model-value="(value) => setAcpHermesModel(String(value))"
+                v-if="isAcpHermesProviderField(field)"
+                :model-value="acpHermesProvider()"
+                @update:model-value="(value) => setAcpHermesProvider(String(value))"
               >
                 <SelectTrigger class="w-full">
-                  <SelectValue :placeholder="t('bots.settings.acpHermesModelPlaceholder')" />
+                  <SelectValue :placeholder="t('bots.settings.acpHermesProviderPlaceholder')" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem
-                    v-for="model in acpHermesModelOptions()"
-                    :key="model.value"
-                    :value="model.value"
+                    v-for="provider in HERMES_PROVIDER_PRESETS"
+                    :key="provider.value"
+                    :value="provider.value"
                   >
-                    {{ model.label }}
-                  </SelectItem>
-                  <SelectItem :value="HERMES_CUSTOM_MODEL_VALUE">
-                    {{ t('bots.settings.acpHermesCustomModel') }}
+                    {{ t(provider.labelKey) }}
                   </SelectItem>
                 </SelectContent>
               </Select>
+              <template v-else-if="isAcpHermesModelField(field)">
+                <Select
+                  :model-value="acpHermesModelSelect()"
+                  @update:model-value="(value) => setAcpHermesModel(String(value))"
+                >
+                  <SelectTrigger class="w-full">
+                    <SelectValue :placeholder="t('bots.settings.acpHermesModelPlaceholder')" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="model in acpHermesModelOptions()"
+                      :key="model.value"
+                      :value="model.value"
+                    >
+                      {{ model.label }}
+                    </SelectItem>
+                    <SelectItem :value="HERMES_CUSTOM_MODEL_VALUE">
+                      {{ t('bots.settings.acpHermesCustomModel') }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input
+                  v-if="acpHermesUsingCustomModel()"
+                  class="mt-2"
+                  :model-value="acpManaged.model || ''"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  autocorrect="off"
+                  spellcheck="false"
+                  :placeholder="t('bots.settings.acpHermesCustomModelPlaceholder')"
+                  @update:model-value="(val) => setAcpManaged(field.id, String(val ?? ''))"
+                />
+              </template>
               <Input
-                v-if="acpHermesUsingCustomModel()"
-                class="mt-2"
-                :model-value="acpManaged.model || ''"
+                v-else
+                :model-value="acpManaged[field.id || ''] || ''"
+                :type="acpInputType(field.type)"
                 autocomplete="off"
                 autocapitalize="off"
                 autocorrect="off"
                 spellcheck="false"
-                :placeholder="t('bots.settings.acpHermesCustomModelPlaceholder')"
+                :placeholder="acpManagedPlaceholder(field)"
                 @update:model-value="(val) => setAcpManaged(field.id, String(val ?? ''))"
               />
-            </template>
-            <Input
-              v-else
-              :model-value="acpManaged[field.id || ''] || ''"
-              :type="acpInputType(field.type)"
-              autocomplete="off"
-              autocapitalize="off"
-              autocorrect="off"
-              spellcheck="false"
-              :placeholder="acpManagedPlaceholder(field)"
-              @update:model-value="(val) => setAcpManaged(field.id, String(val ?? ''))"
-            />
+            </FieldStack>
           </div>
 
-          <div
+          <HintBox
             v-if="acpSetupMode === 'oauth'"
-            class="rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground leading-relaxed transition-all duration-[200ms] ease-out delay-[40ms]"
+            class="transition-all duration-[200ms] ease-out delay-[40ms]"
             :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
           >
             {{ t('onboarding.provider.acp.oauthDeferredHint') }}
-          </div>
+          </HintBox>
 
-          <div
+          <HintBox
             v-else-if="acpSetupMode === 'self'"
-            class="rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground leading-relaxed transition-all duration-[200ms] ease-out delay-[40ms]"
+            class="transition-all duration-[200ms] ease-out delay-[40ms]"
             :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
           >
             {{ isAcpHermesProfile(selectedAcpProfile) ? t('bots.settings.acpHermesSelfModeHint') : t('onboarding.provider.acp.selfHint') }}
-          </div>
-        </div>
+          </HintBox>
+        </FormStack>
 
         <p
           v-if="acpError"
@@ -862,25 +885,24 @@ onMounted(() => {
         </p>
       </div>
 
-      <div
-        class="mt-auto pt-12 flex items-center justify-end gap-3 transition-all duration-[200ms] ease-out delay-[80ms]"
-        :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+      <FooterNav
+        class="delay-[80ms]"
+        :visible="formContentVisible"
+        :next-label="t('onboarding.next')"
+        :next-disabled="acpSubmitting"
+        @next="saveAcpAndNext"
       >
-        <button
-          class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
-          :disabled="acpSubmitting"
-          @click="backToList"
-        >
-          {{ t('onboarding.provider.form.cancel') }}
-        </button>
-        <button
-          class="inline-flex h-[2.625rem] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
-          :disabled="acpSubmitting"
-          @click="saveAcpAndNext"
-        >
-          {{ t('onboarding.next') }}
-        </button>
-      </div>
-    </div>
-  </div>
+        <template #prev>
+          <button
+            type="button"
+            class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="acpSubmitting"
+            @click="backToList"
+          >
+            {{ t('onboarding.provider.form.cancel') }}
+          </button>
+        </template>
+      </FooterNav>
+    </StepFrame>
+  </StepExitShell>
 </template>

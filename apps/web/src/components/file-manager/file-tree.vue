@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { inject, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { LoaderCircle } from 'lucide-vue-next'
 import type { HandlersFsFileInfo } from '@memohai/sdk'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import { sortDirsFirst } from './utils'
 import { FileTreeKey } from './file-tree-context'
 import FileTreeNode from './file-tree-node.vue'
@@ -31,13 +31,12 @@ watch(() => ctx!.refreshKey.value, load)
 
 <template>
   <div class="py-1">
-    <div
+    <InlineLoadingRow
       v-if="loading && nodes.length === 0"
-      class="flex items-center justify-center py-10 text-muted-foreground"
+      class="justify-center py-10"
     >
-      <LoaderCircle class="mr-2 size-4 animate-spin" />
-      <span class="text-xs">{{ t('common.loading') }}</span>
-    </div>
+      {{ t('common.loading') }}
+    </InlineLoadingRow>
 
     <div
       v-else-if="loaded && nodes.length === 0"

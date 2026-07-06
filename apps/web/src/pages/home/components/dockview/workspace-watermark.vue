@@ -1,18 +1,14 @@
 <template>
-  <div class="flex h-full w-full items-center justify-center bg-background">
-    <div class="text-center px-6">
-      <p class="text-xs font-medium text-foreground">
-        {{ t('chat.workspaceEmpty') }}
-      </p>
-      <p class="mt-1 text-xs text-muted-foreground">
-        {{ t('chat.workspaceEmptyHint') }}
-      </p>
-    </div>
+  <div class="h-full w-full bg-background">
+    <PanePlaceholder :title="t('chat.workspaceEmpty')">
+      {{ t('chat.workspaceEmptyHint') }}
+    </PanePlaceholder>
   </div>
 </template>
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 
 const { t } = useI18n()
 </script>

@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { nextFrame } from '../useStepTransition'
+import StepExitShell from '../components/step-exit-shell.vue'
 import { safeLocalGet, safeLocalSet } from '@/utils/safe-storage'
 import { ONBOARDING_KEYS } from '../constants'
 
@@ -143,10 +144,7 @@ const skipAnimation = () => {
 </script>
 
 <template>
-  <div
-    class="transition-all duration-[175ms] ease-out"
-    :class="exiting ? 'scale-[0.88] opacity-0' : 'scale-100 opacity-100'"
-  >
+  <StepExitShell :exiting="exiting">
     <div class="relative w-full flex flex-col items-center justify-center">
       <!-- Animation stage -->
       <div class="relative flex items-center justify-center w-full h-[100px]">
@@ -220,5 +218,5 @@ const skipAnimation = () => {
         </div>
       </div>
     </div>
-  </div>
+  </StepExitShell>
 </template>

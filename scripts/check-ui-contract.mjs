@@ -46,6 +46,17 @@
 //   4. likely hand-rolled icon-button hover (WARN)
 //   8. raw shadow utility (WARN)  9. border-input on a control (WARN)
 //  10. ring-offset-* selection halo (WARN)
+//  11. hand-rolled SettingsRow — min-h-[3.75rem] (or its bare-scale twin min-h-15)
+//      outside the owner (WARN, apps/web); escape hatch `ui-allow-shape` for a
+//      genuinely different row — the marker must carry a written reason (enforced)
+//  12. hand-spun loader — a literal `animate-spin` in apps/web (ratcheted). Every
+//      sanctioned loading state renders through an owner (`Spinner` atom /
+//      `Button :loading` / `InlineLoadingRow` / `PanePlaceholder`), and none of
+//      those emit the literal from app code — so a bare `animate-spin` is a
+//      hand-rolled loader skipping the four-rung ladder. Existing long-tail debt
+//      is grandfathered in scripts/ui-spin-baseline.json; adding more HARD-fails.
+//      Deliberate exceptions (bare-glyph rung, deferred chat surfaces) use
+//      `ui-allow-spin` on the line.
 //
 // Run: node scripts/check-ui-contract.mjs   (wired into `mise run lint`)
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -63,6 +74,7 @@ const APP_DIRS = ['apps/web/src']
 const EXT = /\.(vue|ts)$/
 const PX_BASELINE_PATH = join(ROOT, 'scripts/ui-px-baseline.json')
 const APP_BASELINE_PATH = join(ROOT, 'scripts/ui-app-baseline.json')
+const SPIN_BASELINE_PATH = join(ROOT, 'scripts/ui-spin-baseline.json')
 const WRITE_BASELINE = process.argv.includes('--write-baseline')
 
 // Exact arbitrary-radius tokens that are legitimately allowed.
@@ -74,6 +86,21 @@ const RADIUS_ALLOW = new Set([
   'rounded-[2px]',
   'rounded-[calc(var(--radius)-5px)]',
 ])
+// The only files allowed to author the canonical settings-row height (3.75rem).
+// Anywhere else that literal appears, a row was hand-rolled instead of composing
+// <SettingsRow> — the 同形异码 the owner vocabulary exists to kill. See rule 11.
+const OWNER_ROW_FILES = new Set([
+  'apps/web/src/components/settings/row.vue',
+  'apps/web/src/components/settings/expandable-row.vue',
+])
+// The only app files allowed to render a spinner directly (the four-rung loading
+// ladder's owners). Everywhere else `animate-spin` means a loader was hand-spun
+// instead of composed — see rule 12. The Spinner ATOM lives in packages/ui (outside
+// app scope), so this set is just the app-side owners that wrap it with layout.
+const OWNER_SPIN_FILES = new Set([
+  'apps/web/src/components/inline-loading-row/index.vue',
+  'apps/web/src/components/pane-placeholder/index.vue',
+])
 // Box props (height / padding / gap / space) below this px size are hairlines or
 // indicator bars (a 2px tab underline, a 3px link offset), never a text container —
 // so they are decorative and not flagged. 5px+ is where a real text box starts.
@@ -84,8 +111,10 @@ const warn = []
 // Ratcheted candidates — collected per family so the baseline can grandfather existing
 // debt before promoting overflow into `hard`. pxHard: text-coupled px (both scopes).
 // appHard: app-scope injection — interaction / raw color / invented shadow (apps/web).
+// spinHard: hand-spun loaders — bare `animate-spin` outside the loading owners (apps/web).
 const pxHard = []
 const appHard = []
+const spinHard = []
 
 function walk(dir, full) {
   for (const name of readdirSync(dir)) {
@@ -128,6 +157,18 @@ function scan(file, full) {
   const src = readFileSync(file, 'utf8')
   const lines = src.split('\n')
   const codeOf = makeCodeStripper()
+  // Forward window for the shape escape hatch. Unlike px/style — whose token sits
+  // on a line that CAN carry a trailing comment — the shape fingerprint
+  // (min-h-[3.75rem]) always lives inside a Vue element's `class="…"` attribute
+  // line, which cannot hold an inline comment. So `ui-allow-shape` is written as
+  // the element's leading comment (the Vue-natural place for a "why this shape"
+  // note) and suppresses the next min-h within a window of lines. The window must
+  // clear a MULTI-LINE justification comment PLUS the element's multi-attribute
+  // open tag (comment lines → <div → v-for → :key → class), so it is generous (10):
+  // the marker line is the comment's FIRST line, and a good "why" note runs a few
+  // lines. Over-reach is harmless — two distinct 3.75rem rows abutting within ~10
+  // lines is effectively impossible, so a stray second row can't hide behind a mark.
+  let shapeAllowUntil = -1
   lines.forEach((rawLine, i) => {
     const line = codeOf(rawLine)
     const ln = i + 1
@@ -135,6 +176,24 @@ function scan(file, full) {
     // comment survives the code-stripper).
     const allowPx = rawLine.includes('ui-allow-px')
     const allowStyle = rawLine.includes('ui-allow-style')
+    const allowSpin = rawLine.includes('ui-allow-spin')
+    if (rawLine.includes('ui-allow-shape')) {
+      shapeAllowUntil = i + 10
+      // The exemption only earns its keep with the WHY written next to it — a bare
+      // marker is indistinguishable from "silenced the guard to make it shut up",
+      // and the recorded reason is what lets the next reader re-judge the shape.
+      // Every legitimate marker in the codebase already reads
+      // `ui-allow-shape: <reason…>`; enforce that form (≥ 15 chars of reason).
+      const after = rawLine
+        .slice(rawLine.indexOf('ui-allow-shape') + 'ui-allow-shape'.length)
+        .replace(/-->.*$/, '')
+        .replace(/\*\/.*$/, '')
+        .replace(/^[\s:：—–-]+/, '')
+        .trim()
+      if (after.length < 15)
+        warn.push(`${rel}:${ln}  ui-allow-shape without a written reason — the marker must carry its why on the same line ("ui-allow-shape: <what this shape is and why no owner fits>")`)
+    }
+    const allowShape = i <= shapeAllowUntil
     for (const tok of line.split(/[\s'"`]+/)) {
       if (!tok) continue
 
@@ -170,6 +229,29 @@ function scan(file, full) {
         else if (/(?:^|:)shadow-(?:2xs|xs|sm|md|lg|xl|2xl)$/.test(tok))
           appHard.push({ rel, ln, msg: `invented shadow (use an elevation token or shadow-none) → ${tok}` })
       }
+
+      // 11. hand-rolled SettingsRow (WARN). The canonical row height 3.75rem is an
+      //   arbitrary, distinctive literal — it only appears because a row was copied
+      //   out of <SettingsRow> as raw divs instead of composed. Token-level rules
+      //   can't see a whole owner shape, but this one geometry has a rare fingerprint
+      //   that catches the SettingsRow slice of the 同形异码 debt at ~0% false
+      //   positive. WARN, not HARD: a genuinely denser/different row may coincide —
+      //   triage against the "stay hand-written" tells in the owner skill, or silence
+      //   a confirmed-different one with `ui-allow-shape` on the line. `min-h-15` is
+      //   the Tailwind-v4 bare-scale spelling of the same 3.75rem — same fingerprint,
+      //   same rule, or the guard is trivially dodged by dropping the brackets.
+      if (!full && !allowShape && !OWNER_ROW_FILES.has(rel) && /(?:^|:)min-h-(?:\[3\.75rem\]|15$)/.test(tok))
+        warn.push(`${rel}:${ln}  possible hand-rolled SettingsRow (min-h-[3.75rem]/min-h-15 outside the owner) — compose <SettingsRow>, or mark ui-allow-shape if it is a genuinely different row → ${tok}`)
+
+      // 12. hand-spun loader (ratcheted). All four rungs of the loading ladder render
+      //   their spinner through an owner (Spinner atom / Button :loading /
+      //   InlineLoadingRow / PanePlaceholder) and none of them emit the literal
+      //   `animate-spin` from app code — so a bare `animate-spin` in apps/web is a
+      //   loader hand-rolled past the ladder. Existing long-tail debt (deferred chat
+      //   surfaces, bare-glyph sites) is grandfathered in ui-spin-baseline.json;
+      //   NEW hand-spun loaders hard-fail. Sanctioned exception → `ui-allow-spin`.
+      if (!full && !allowSpin && !OWNER_SPIN_FILES.has(rel) && /(?:^|:)animate-spin$/.test(tok))
+        spinHard.push({ rel, ln, msg: `hand-spun loader (pick a rung: Spinner atom / Button :loading / InlineLoadingRow / PanePlaceholder) → ${tok}` })
 
       // ── contract rules (packages/ui only) ────────────────────────────────
       if (!full) continue
@@ -274,15 +356,18 @@ function ratchet(byFile, path, items, label, allowTag) {
 
 const pxByFile = countByFile(pxHard)
 const appByFile = countByFile(appHard)
+const spinByFile = countByFile(spinHard)
 
 if (WRITE_BASELINE) {
   writeBaseline(PX_BASELINE_PATH, pxByFile, 'px')
   writeBaseline(APP_BASELINE_PATH, appByFile, 'app-injection')
+  writeBaseline(SPIN_BASELINE_PATH, spinByFile, 'hand-spun-loader')
   process.exit(0)
 }
 
 const pxGrand = ratchet(pxByFile, PX_BASELINE_PATH, pxHard, 'px', 'ui-allow-px')
 const appGrand = ratchet(appByFile, APP_BASELINE_PATH, appHard, 'app-injection', 'ui-allow-style')
+const spinGrand = ratchet(spinByFile, SPIN_BASELINE_PATH, spinHard, 'hand-spun-loader', 'ui-allow-spin')
 
 if (warn.length) {
   console.warn(`\n⚠ UI contract — ${warn.length} warning(s):`)
@@ -292,6 +377,8 @@ if (pxGrand)
   console.log(`\nℹ px baseline: ${pxGrand} grandfathered px violation(s) remaining — burn down per cluster, then re-run with --write-baseline`)
 if (appGrand)
   console.log(`ℹ app-injection baseline: ${appGrand} grandfathered injection(s) remaining — burn down per cluster, then re-run with --write-baseline`)
+if (spinGrand)
+  console.log(`ℹ hand-spun-loader baseline: ${spinGrand} grandfathered loader(s) remaining — adopt a loading-ladder rung per cluster, then re-run with --write-baseline`)
 if (hard.length) {
   console.error(`\n✗ UI contract — ${hard.length} violation(s):`)
   for (const h of hard) console.error(`  ${h}`)

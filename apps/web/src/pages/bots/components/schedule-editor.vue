@@ -3,17 +3,21 @@
     class="space-y-4"
     @submit.prevent="handleSubmit"
   >
+    <!-- Name + enable toggle share one aligned row: the toggle rides beside the
+         input (items-end), not the label, so it stays a sibling of the field
+         rather than living in the FieldStack label slot. -->
     <div class="flex items-end gap-3">
-      <div class="min-w-0 flex-1 space-y-1.5">
-        <Label for="sched-name">
-          {{ t('bots.schedule.form.name') }}
-        </Label>
+      <FieldStack
+        class="min-w-0 flex-1"
+        :label="t('bots.schedule.form.name')"
+        for="sched-name"
+      >
         <Input
           id="sched-name"
           v-model="form.name"
           :placeholder="t('bots.schedule.form.namePlaceholder')"
         />
-      </div>
+      </FieldStack>
       <div class="flex h-9 shrink-0 items-center gap-2">
         <Label
           class="cursor-pointer text-muted-foreground"
@@ -28,22 +32,26 @@
       </div>
     </div>
 
-    <div class="space-y-1.5">
-      <Label for="sched-desc">
-        {{ t('bots.schedule.form.description') }}
-        <span class="ml-1 text-caption text-muted-foreground font-normal">({{ t('common.optional') }})</span>
-      </Label>
+    <FieldStack>
+      <!-- Label carries an (optional) suffix, so it rides the #label slot to keep
+           its exact markup rather than the plain-text default label. -->
+      <template #label>
+        <Label for="sched-desc">
+          {{ t('bots.schedule.form.description') }}
+          <span class="ml-1 text-caption text-muted-foreground font-normal">({{ t('common.optional') }})</span>
+        </Label>
+      </template>
       <Input
         id="sched-desc"
         v-model="form.description"
         :placeholder="t('bots.schedule.form.descriptionPlaceholder')"
       />
-    </div>
+    </FieldStack>
 
-    <div class="space-y-1.5">
-      <Label for="sched-command">
-        {{ t('bots.schedule.form.command') }}
-      </Label>
+    <FieldStack
+      :label="t('bots.schedule.form.command')"
+      for="sched-command"
+    >
       <Textarea
         id="sched-command"
         v-model="form.command"
@@ -51,7 +59,7 @@
         :placeholder="t('bots.schedule.form.commandPlaceholder')"
         rows="3"
       />
-    </div>
+    </FieldStack>
 
     <div class="space-y-3">
       <Label>
@@ -251,12 +259,9 @@
         </Button>
         <Button
           type="submit"
-          :disabled="!canSubmit || isSaving"
+          :disabled="!canSubmit"
+          :loading="isSaving"
         >
-          <Spinner
-            v-if="isSaving"
-            class="mr-1.5 size-4"
-          />
           {{ mode === 'create' ? t('common.create') : t('common.confirm') }}
         </Button>
       </div>
@@ -278,7 +283,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Spinner,
   Switch,
   Textarea,
   TimeInput,
@@ -290,6 +294,7 @@ import {
 } from '@memohai/sdk'
 import type { ScheduleCreateRequest, ScheduleSchedule, ScheduleUpdateRequest } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import FieldStack from '@/components/settings/field-stack.vue'
 import {
   describeCron,
   defaultScheduleFormState,

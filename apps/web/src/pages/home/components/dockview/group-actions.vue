@@ -7,7 +7,8 @@
     <Button
       v-if="previewPath"
       variant="ghost"
-      class="size-7 shrink-0 rounded-full p-0 text-muted-foreground hover:text-foreground"
+      shape="circle"
+      class="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
       :title="t('chat.openPreviewToSide')"
       :aria-label="t('chat.openPreviewToSide')"
       @click="openPreviewToSide"

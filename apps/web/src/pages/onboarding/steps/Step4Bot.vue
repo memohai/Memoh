@@ -18,7 +18,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@memohai/ui'
-import { SquarePen, CircleHelp, Bot, Copy, LoaderCircle } from 'lucide-vue-next'
+import { SquarePen, CircleHelp, Bot, Copy } from 'lucide-vue-next'
 import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
@@ -40,9 +40,15 @@ import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import AvatarEditDialog from '@/pages/bots/components/avatar-edit-dialog.vue'
 import BotCreateTerminal from '@/pages/bots/components/bot-create-terminal.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import { useStepTransition, nextFrame } from '../useStepTransition'
 import { ONBOARDING_KEYS } from '../constants'
 import { clearACPSelection, readACPSelection, type OnboardingACPSelection } from './useACPSetup'
+import StepFrame from '../components/step-frame.vue'
+import StepExitShell from '../components/step-exit-shell.vue'
+import HintBox from '../components/hint-box.vue'
+import FooterNav from '../components/footer-nav.vue'
 
 const { t } = useI18n()
 const { nextStep, prevStep } = useOnboarding()
@@ -394,18 +400,12 @@ function skipOAuth() {
 
 <template>
   <TooltipProvider :delay-duration="0">
-    <div
-      class="transition-all duration-[175ms] ease-out"
-      :class="exiting ? 'scale-[0.88] opacity-0' : 'scale-100 opacity-100'"
-    >
-      <div class="text-left pt-16 h-[35rem] max-h-[calc(100dvh-7rem)] flex flex-col">
-        <h2
-          class="text-3xl font-semibold mb-6 transition-all duration-[350ms] ease-out"
-          :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-        >
-          {{ t('onboarding.bot.title') }}
-        </h2>
-
+    <StepExitShell :exiting="exiting">
+      <StepFrame
+        :title="t('onboarding.bot.title')"
+        title-class="mb-8"
+        :visible="visible"
+      >
         <div
           v-show="oauthPhase !== 'pending'"
           class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1"
@@ -446,18 +446,22 @@ function skipOAuth() {
                   </button>
                 </div>
                 <div class="flex-1 min-w-0">
-                  <Label class="mb-2">
-                    {{ $t('bots.displayName') }}
-                    <span
-                      v-if="!form.display_name.trim()"
-                      class="text-destructive"
-                    >*</span>
-                  </Label>
-                  <Input
-                    v-model="form.display_name"
-                    type="text"
-                    :placeholder="$t('bots.displayNamePlaceholder')"
-                  />
+                  <FieldStack>
+                    <template #label>
+                      <Label>
+                        {{ $t('bots.displayName') }}
+                        <span
+                          v-if="!form.display_name.trim()"
+                          class="text-destructive"
+                        >*</span>
+                      </Label>
+                    </template>
+                    <Input
+                      v-model="form.display_name"
+                      type="text"
+                      :placeholder="$t('bots.displayNamePlaceholder')"
+                    />
+                  </FieldStack>
                 </div>
               </div>
             </div>
@@ -469,6 +473,8 @@ function skipOAuth() {
               <Separator class="my-6" />
             </div>
 
+            <!-- ACP 身份横幅:带品牌图标的 text-sm 状态行,不是 HintBox 那种
+                 text-xs 表单提示 —— 关系不同,留在本地。 -->
             <div
               v-if="isACPSelected"
               class="flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5 transition-all duration-[350ms] ease-out delay-[120ms]"
@@ -520,25 +526,27 @@ function skipOAuth() {
                 :class="workspaceVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
               >
                 <div class="flex flex-col gap-4">
-                  <div>
-                    <div class="mb-2 flex items-center gap-2">
-                      <Label>{{ $t('bots.workspaceBackend') }}</Label>
-                      <Tooltip>
-                        <TooltipTrigger as-child>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            class="size-5 text-muted-foreground hover:text-foreground"
-                          >
-                            <CircleHelp class="size-3.5" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent class="max-w-80 text-left leading-relaxed">
-                          {{ $t('bots.workspaceBackendHint') }}
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
+                  <FieldStack>
+                    <template #label>
+                      <div class="flex items-center gap-2">
+                        <Label>{{ $t('bots.workspaceBackend') }}</Label>
+                        <Tooltip>
+                          <TooltipTrigger as-child>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              class="size-5 text-muted-foreground hover:text-foreground"
+                            >
+                              <CircleHelp class="size-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent class="max-w-80 text-left leading-relaxed">
+                            {{ $t('bots.workspaceBackendHint') }}
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
+                    </template>
                     <Select v-model="form.workspace_backend">
                       <SelectTrigger class="w-full">
                         <SelectValue :placeholder="$t('bots.workspaceBackend')" />
@@ -552,33 +560,34 @@ function skipOAuth() {
                         </SelectItem>
                       </SelectContent>
                     </Select>
-                  </div>
+                  </FieldStack>
 
-                  <div
+                  <HintBox
                     v-if="isLocalWorkspace"
-                    class="rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-xs text-warning-foreground"
+                    tone="warning"
                   >
                     {{ $t('bots.localWorkspaceWarning') }}
-                  </div>
+                  </HintBox>
                 </div>
               </div>
             </template>
 
-            <div
+            <HintBox
               v-if="acpSelfRequiresLocalWorkspace"
-              class="rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-xs text-warning-foreground mt-6 transition-all duration-[350ms] ease-out delay-[180ms]"
+              tone="warning"
+              class="mt-6 transition-all duration-[350ms] ease-out delay-[180ms]"
               :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
             >
               {{ t('onboarding.bot.acp.selfRequiresLocalWorkspace', { agent: acpAgentName }) }}
-            </div>
+            </HintBox>
 
-            <div
+            <HintBox
               v-if="!isLocalWorkspace && !acpSelfRequiresLocalWorkspace"
-              class="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground mt-6 transition-all duration-[350ms] ease-out delay-[200ms]"
+              class="mt-6 transition-all duration-[350ms] ease-out delay-[200ms]"
               :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
             >
               {{ $t('bots.createBotWaitHint') }}
-            </div>
+            </HintBox>
             <div
               v-if="!isLocalWorkspace && (createStatus === 'creating' || createStatus === 'error') && terminalLines.length"
               class="mt-3 transition-all duration-[350ms] ease-out delay-[220ms]"
@@ -633,24 +642,18 @@ function skipOAuth() {
                 type="button"
                 variant="outline"
                 :disabled="codexAuthorizing"
+                :loading="authorizingCodex"
                 @click="authorizeCodexFlow"
               >
-                <LoaderCircle
-                  v-if="authorizingCodex"
-                  class="size-4 animate-spin"
-                />
                 {{ t('onboarding.bot.acp.oauthAuthorizeChatGPT') }}
               </Button>
               <Button
                 type="button"
                 variant="outline"
                 :disabled="codexAuthorizing"
+                :loading="authorizingCodexDevice"
                 @click="authorizeCodexDeviceFlow"
               >
-                <LoaderCircle
-                  v-if="authorizingCodexDevice"
-                  class="size-4 animate-spin"
-                />
                 {{ t('onboarding.bot.acp.oauthAuthorizeChatGPTDevice') }}
               </Button>
               <Button
@@ -705,13 +708,12 @@ function skipOAuth() {
               >
                 {{ t('provider.oauth.deviceExpiresAt') }}: {{ codexDeviceSession.expires_at }}
               </div>
-              <div
+              <InlineLoadingRow
                 v-if="codexDevicePending"
-                class="flex items-center gap-2 text-sm text-foreground"
+                size="md"
               >
-                <LoaderCircle class="size-4 animate-spin" />
-                <span>{{ t('provider.oauth.status.pendingDevice') }}</span>
-              </div>
+                {{ t('provider.oauth.status.pendingDevice') }}
+              </InlineLoadingRow>
               <p
                 v-else-if="codexDeviceSession.status === 'error' && codexDeviceSession.error"
                 class="text-sm text-destructive"
@@ -736,13 +738,9 @@ function skipOAuth() {
               type="button"
               variant="outline"
               class="h-10"
-              :disabled="authorizingClaude"
+              :loading="authorizingClaude"
               @click="authorizeClaudeFlow"
             >
-              <LoaderCircle
-                v-if="authorizingClaude"
-                class="size-4 animate-spin"
-              />
               {{ t('onboarding.bot.acp.oauthAuthorizeClaude') }}
             </Button>
 
@@ -762,13 +760,9 @@ function skipOAuth() {
                 <Button
                   type="button"
                   class="h-10 shrink-0"
-                  :disabled="exchangingClaude"
+                  :loading="exchangingClaude"
                   @click="exchangeClaudeFlow"
                 >
-                  <LoaderCircle
-                    v-if="exchangingClaude"
-                    class="size-4 animate-spin"
-                  />
                   {{ t('onboarding.bot.acp.oauthExchange') }}
                 </Button>
               </div>
@@ -776,68 +770,62 @@ function skipOAuth() {
           </div>
         </div>
 
-        <div
+        <FooterNav
           v-if="oauthPhase !== 'pending'"
-          class="mt-auto pt-12 flex items-center justify-end gap-3 transition-all duration-[350ms] ease-out delay-[220ms]"
-          :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+          class="delay-[220ms]"
+          :visible="visible"
+          :prev-label="t('onboarding.prev')"
+          @prev="leave(prevStep)"
         >
-          <button
-            class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
-            @click="leave(prevStep)"
-          >
-            {{ t('onboarding.prev') }}
-          </button>
-          <button
-            class="inline-flex h-[2.625rem] min-w-[180px] items-center justify-center gap-2 rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
-            :disabled="!canSubmit || submitting"
-            @click="handleSubmit"
-          >
-            <Transition
-              mode="out-in"
-              enter-active-class="transition-all duration-[160ms] ease-out"
-              enter-from-class="opacity-0 translate-y-1"
-              enter-to-class="opacity-100 translate-y-0"
-              leave-active-class="transition-all duration-[140ms] ease-in"
-              leave-from-class="opacity-100 translate-y-0"
-              leave-to-class="opacity-0 -translate-y-1"
+          <template #next>
+            <!-- CTA carries its own Transition + Spinner for the label swap
+                 (preparingEnvironment ↔ next) — the owner's default next
+                 button can't express a keyed label transition, so this stays
+                 local via the #next escape hatch. -->
+            <button
+              type="button"
+              class="inline-flex h-[2.625rem] min-w-[180px] items-center justify-center gap-2 rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              :disabled="!canSubmit || submitting"
+              @click="handleSubmit"
             >
-              <span
-                :key="ctaLabel"
-                class="inline-flex items-center gap-2"
+              <Transition
+                mode="out-in"
+                enter-active-class="transition-all duration-[160ms] ease-out"
+                enter-from-class="opacity-0 translate-y-1"
+                enter-to-class="opacity-100 translate-y-0"
+                leave-active-class="transition-all duration-[140ms] ease-in"
+                leave-from-class="opacity-100 translate-y-0"
+                leave-to-class="opacity-0 -translate-y-1"
               >
-                <Spinner v-if="isContainerSubmitting" />
-                {{ ctaLabel }}
-              </span>
-            </Transition>
-          </button>
-        </div>
+                <span
+                  :key="ctaLabel"
+                  class="inline-flex items-center gap-2"
+                >
+                  <Spinner v-if="isContainerSubmitting" />
+                  {{ ctaLabel }}
+                </span>
+              </Transition>
+            </button>
+          </template>
+        </FooterNav>
 
-        <div
+        <FooterNav
           v-else
-          class="mt-auto pt-12 flex items-center justify-end gap-3 transition-all duration-[350ms] ease-out delay-[140ms]"
-          :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-        >
-          <button
-            class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            @click="skipOAuth"
-          >
-            {{ t('onboarding.bot.acp.oauthSkip') }}
-          </button>
-          <button
-            class="inline-flex h-[2.625rem] min-w-[180px] items-center justify-center gap-2 rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
-            :disabled="!oauthAuthorized"
-            @click="continueFromOAuth"
-          >
-            {{ t('onboarding.next') }}
-          </button>
-        </div>
+          class="delay-[140ms]"
+          :visible="oauthVisible"
+          :prev-label="t('onboarding.bot.acp.oauthSkip')"
+          :next-label="t('onboarding.next')"
+          :next-disabled="!oauthAuthorized"
+          @prev="skipOAuth"
+          @next="continueFromOAuth"
+        />
 
         <AvatarEditDialog
           v-model:open="avatarDialogOpen"
           v-model:avatar-url="form.avatar_url"
           :fallback-text="avatarFallback"
         />
-      </div>
-    </div>
+      </StepFrame>
+    </StepExitShell>
   </TooltipProvider>
 </template>

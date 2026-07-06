@@ -6,32 +6,24 @@
   >
     <template #actions>
       <Button
-        :disabled="!hasChanges || saveLoading"
+        :disabled="!hasChanges"
+        :loading="saveLoading"
         @click="handleSave"
       >
-        <Spinner
-          v-if="saveLoading"
-          class="size-3"
-        />
         {{ $t('common.saveChanges') }}
       </Button>
     </template>
 
     <div class="space-y-8">
       <!-- Status card: the page's center of gravity. The toggle controls whether any
-           prompt ever fires; the body and the summary line below it tell the user what
-           that means right now, so the rules table doesn't have to re-explain it. -->
+           prompt ever fires; the body tells the user what that means right now. -->
       <SettingsSection>
-        <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
-          <div class="min-w-0 text-sm font-medium text-foreground">
-            {{ form.tool_approval_config.enabled ? $t('bots.toolApproval.status.on') : $t('bots.toolApproval.status.off') }}
-          </div>
+        <SettingsRow :label="form.tool_approval_config.enabled ? $t('bots.toolApproval.status.on') : $t('bots.toolApproval.status.off')">
           <Switch
-            class="shrink-0"
             :model-value="form.tool_approval_config.enabled"
             @update:model-value="(val) => form.tool_approval_config.enabled = !!val"
           />
-        </div>
+        </SettingsRow>
       </SettingsSection>
 
       <!-- Tool rules: a summary row per tool, with at most one inline editor open at a
@@ -49,82 +41,56 @@
           </Button>
         </template>
 
-        <template
+        <ExpandableSettingsRow
           v-for="tool in approvalTools"
           :key="tool"
+          :label="$t(`bots.toolApproval.toolNames.${tool}`)"
+          :open="expandedTool === tool"
+          @update:open="(val) => setExpanded(tool, val)"
         >
-          <div class="mx-4 flex min-h-[3.75rem] items-center gap-4 border-b border-border py-3 last:border-b-0">
-            <div class="min-w-0 flex-1">
-              <div class="text-sm font-medium text-foreground">
-                {{ $t(`bots.toolApproval.toolNames.${tool}`) }}
-              </div>
-            </div>
-
-            <span class="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+          <template #trailing>
+            <span class="hidden text-xs text-muted-foreground sm:inline">
               {{ toolApprovalPolicy(tool).require_approval ? $t('bots.toolApproval.behavior.review') : $t('bots.toolApproval.behavior.auto') }}
             </span>
+          </template>
 
-            <Button
-              variant="outline"
-              size="sm"
-              class="shrink-0"
-              @click="toggleExpanded(tool)"
-            >
-              <ChevronRight
-                class="size-4 transition-transform"
-                :class="expandedTool === tool ? 'rotate-90' : ''"
-              />
-              {{ expandedTool === tool ? $t('common.collapse') : $t('common.edit') }}
-            </Button>
-          </div>
+          <template #expanded>
+            <FormStack>
+              <FieldStack :label="$t('bots.toolApproval.behavior.label')">
+                <SegmentedControl
+                  :model-value="toolApprovalPolicy(tool).require_approval ? 'review' : 'auto'"
+                  :items="behaviorItems"
+                  :aria-label="$t('bots.toolApproval.behavior.label')"
+                  class="w-full sm:w-fit"
+                  @update:model-value="(val) => toolApprovalPolicy(tool).require_approval = val === 'review'"
+                />
+              </FieldStack>
 
-          <div
-            v-if="expandedTool === tool"
-            class="mx-4 space-y-4 border-b border-border py-4 last:border-b-0"
-          >
-            <div class="space-y-1.5">
-              <Label class="text-xs font-medium text-muted-foreground">
-                {{ $t('bots.toolApproval.behavior.label') }}
-              </Label>
-              <SegmentedControl
-                :model-value="toolApprovalPolicy(tool).require_approval ? 'review' : 'auto'"
-                :items="behaviorItems"
-                :aria-label="$t('bots.toolApproval.behavior.label')"
-                class="w-full sm:w-fit"
-                @update:model-value="(val) => toolApprovalPolicy(tool).require_approval = val === 'review'"
-              />
-            </div>
+              <!-- Auto-approve exceptions only make sense when the default is to review.
+                   An auto-by-default tool would treat them as redundant, so they're hidden. -->
+              <FieldStack
+                v-if="toolApprovalPolicy(tool).require_approval"
+                :label="tool === 'exec' ? $t('bots.toolApproval.autoApprove.commandsTitle') : $t('bots.toolApproval.autoApprove.pathsTitle')"
+              >
+                <Textarea
+                  :model-value="bypassText(tool)"
+                  :placeholder="tool === 'exec' ? $t('bots.toolApproval.placeholders.execCommands') : $t('bots.toolApproval.placeholders.filePaths')"
+                  class="min-h-24 resize-none font-mono text-xs"
+                  @update:model-value="(val) => updateBypass(tool, String(val))"
+                />
+              </FieldStack>
 
-            <!-- Auto-approve exceptions only make sense when the default is to review.
-                 An auto-by-default tool would treat them as redundant, so they're hidden. -->
-            <div
-              v-if="toolApprovalPolicy(tool).require_approval"
-              class="space-y-1.5"
-            >
-              <Label class="text-xs font-medium text-muted-foreground">
-                {{ tool === 'exec' ? $t('bots.toolApproval.autoApprove.commandsTitle') : $t('bots.toolApproval.autoApprove.pathsTitle') }}
-              </Label>
-              <Textarea
-                :model-value="bypassText(tool)"
-                :placeholder="tool === 'exec' ? $t('bots.toolApproval.placeholders.execCommands') : $t('bots.toolApproval.placeholders.filePaths')"
-                class="min-h-24 resize-none font-mono text-xs"
-                @update:model-value="(val) => updateBypass(tool, String(val))"
-              />
-            </div>
-
-            <div class="space-y-1.5">
-              <Label class="text-xs font-medium text-muted-foreground">
-                {{ tool === 'exec' ? $t('bots.toolApproval.review.commandsTitle') : $t('bots.toolApproval.review.pathsTitle') }}
-              </Label>
-              <Textarea
-                :model-value="forceReviewText(tool)"
-                :placeholder="tool === 'exec' ? $t('bots.toolApproval.placeholders.execReview') : $t('bots.toolApproval.placeholders.fileReview')"
-                class="min-h-24 resize-none font-mono text-xs"
-                @update:model-value="(val) => updateForceReview(tool, String(val))"
-              />
-            </div>
-          </div>
-        </template>
+              <FieldStack :label="tool === 'exec' ? $t('bots.toolApproval.review.commandsTitle') : $t('bots.toolApproval.review.pathsTitle')">
+                <Textarea
+                  :model-value="forceReviewText(tool)"
+                  :placeholder="tool === 'exec' ? $t('bots.toolApproval.placeholders.execReview') : $t('bots.toolApproval.placeholders.fileReview')"
+                  class="min-h-24 resize-none font-mono text-xs"
+                  @update:model-value="(val) => updateForceReview(tool, String(val))"
+                />
+              </FieldStack>
+            </FormStack>
+          </template>
+        </ExpandableSettingsRow>
       </SettingsSection>
     </div>
   </PageShell>
@@ -132,14 +98,12 @@
 
 <script setup lang="ts">
 import {
-  Label,
   Textarea,
   Button,
-  Spinner,
   Switch,
   SegmentedControl,
 } from '@memohai/ui'
-import { ChevronRight, RotateCcw } from 'lucide-vue-next'
+import { RotateCcw } from 'lucide-vue-next'
 import { reactive, computed, watch, ref } from 'vue'
 import type { Ref } from 'vue'
 import { toast } from '@memohai/ui'
@@ -149,6 +113,10 @@ import { getBotsByBotIdSettings, putBotsByBotIdSettings } from '@memohai/sdk'
 import type { SettingsSettings } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import SettingsSection from '@/components/settings/section.vue'
+import SettingsRow from '@/components/settings/row.vue'
+import ExpandableSettingsRow from '@/components/settings/expandable-row.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
+import FormStack from '@/components/settings/form-stack.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import {
   defaultToolApprovalConfig,
@@ -197,6 +165,12 @@ const form = reactive<{ tool_approval_config: ToolApprovalConfig }>({
 })
 
 const expandedTool = ref<ApprovalTool | null>(null)
+
+// At most one editor open at a time: opening a row collapses any other. Each
+// row is a controlled ExpandableSettingsRow driven off this single ref.
+function setExpanded(tool: ApprovalTool, open: boolean) {
+  expandedTool.value = open ? tool : (expandedTool.value === tool ? null : expandedTool.value)
+}
 
 const behaviorItems = computed(() => [
   { value: 'review', label: t('bots.toolApproval.behavior.review') },
@@ -249,10 +223,6 @@ function updateForceReview(tool: ApprovalTool, raw: string) {
   } else {
     form.tool_approval_config[tool].force_review_globs = values
   }
-}
-
-function toggleExpanded(tool: ApprovalTool) {
-  expandedTool.value = expandedTool.value === tool ? null : tool
 }
 
 function resetToRecommended() {

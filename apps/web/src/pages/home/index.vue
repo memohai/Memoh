@@ -3,16 +3,11 @@
     <ChatWorkspace v-if="currentBotId" />
     <div
       v-else
-      class="flex-1 flex items-center justify-center bg-card"
+      class="flex-1 bg-card"
     >
-      <div class="text-center px-6">
-        <p class="text-xs font-medium text-foreground">
-          {{ t('chat.selectBot') }}
-        </p>
-        <p class="mt-1 text-xs text-muted-foreground">
-          {{ t('chat.selectBotHint') }}
-        </p>
-      </div>
+      <PanePlaceholder :title="t('chat.selectBot')">
+        {{ t('chat.selectBotHint') }}
+      </PanePlaceholder>
     </div>
   </div>
 </template>
@@ -27,6 +22,7 @@ import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { ACP_NO_PROJECT_MODE, createACPNoProjectPath, normalizeACPAgentID } from '@/utils/acp'
 import ChatWorkspace from './components/chat-workspace.vue'
+import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 
 const route = useRoute()
 const router = useRouter()

@@ -11,7 +11,8 @@
     <Button
       variant="ghost"
       size="icon-sm"
-      class="size-7 rounded-full text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
+      shape="circle"
+      class="size-7 text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
       :title="workbenchOpen ? t('chat.topBar.hideWorkbench') : t('chat.topBar.showWorkbench')"
       :aria-label="workbenchOpen ? t('chat.topBar.hideWorkbench') : t('chat.topBar.showWorkbench')"
       :aria-pressed="workbenchOpen"
@@ -31,7 +32,8 @@
     <Button
       variant="ghost"
       size="icon-sm"
-      class="size-7 rounded-full text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
+      shape="circle"
+      class="size-7 text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
       :title="t('chat.topBar.goBack')"
       :aria-label="t('chat.topBar.goBack')"
       @click="router.go(-1)"
@@ -44,7 +46,8 @@
     <Button
       variant="ghost"
       size="icon-sm"
-      class="size-7 rounded-full text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
+      shape="circle"
+      class="size-7 text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
       :title="t('chat.topBar.goForward')"
       :aria-label="t('chat.topBar.goForward')"
       @click="router.go(1)"

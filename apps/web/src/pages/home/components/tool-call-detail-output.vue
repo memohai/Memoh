@@ -5,12 +5,9 @@
     :filename="highlightFilename"
     class="text-[12px] leading-relaxed whitespace-pre overflow-x-auto max-h-72 overflow-y-auto"
   />
-  <p
-    v-else
-    class="text-xs text-muted-foreground italic"
-  >
+  <EmptyRow v-else>
     {{ t('chat.tools.detail.noOutput') }}
-  </p>
+  </EmptyRow>
 </template>
 
 <script setup lang="ts">
@@ -18,6 +15,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
 import CodeBlock from './code-block.vue'
+import EmptyRow from './tool-detail/empty-row.vue'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()

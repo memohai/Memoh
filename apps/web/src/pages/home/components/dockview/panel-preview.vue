@@ -1,39 +1,35 @@
 <template>
-  <div class="flex flex-col h-full w-full bg-surface-editor">
-    <PanelBreadcrumb :path="filePath" />
-    <div class="flex-1 min-h-0">
-      <!-- Full-area spinner only on the first load. Reloads keep the rendered
-           markdown/html mounted and swap content in place. -->
-      <div
-        v-if="loading && !loaded"
-        class="flex h-full items-center justify-center text-muted-foreground"
-      >
-        <Spinner class="mr-2" />
-        {{ t('common.loading') }}
-      </div>
+  <DockPanelFrame editor-surface>
+    <template #header>
+      <PanelBreadcrumb :path="filePath" />
+    </template>
+    <!-- Full-area spinner only on the first load. Reloads keep the rendered
+         markdown/html mounted and swap content in place. -->
+    <PanePlaceholder
+      v-if="loading && !loaded"
+      loading
+    >
+      {{ t('common.loading') }}
+    </PanePlaceholder>
 
-      <MarkdownPreview
-        v-else-if="isMd"
-        :content="content"
-        class="h-full"
-      />
-      <HtmlPreview
-        v-else-if="isHtml"
-        :content="content"
-        class="h-full"
-      />
+    <MarkdownPreview
+      v-else-if="isMd"
+      :content="content"
+      class="h-full"
+    />
+    <HtmlPreview
+      v-else-if="isHtml"
+      :content="content"
+      class="h-full"
+    />
 
-      <div
-        v-else
-        class="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground"
-      >
+    <PanePlaceholder v-else>
+      <template #icon>
         <FileText class="size-10 opacity-30" />
-        <p class="text-xs">
-          {{ t('bots.files.previewNotAvailable') }}
-        </p>
-      </div>
-    </div>
-  </div>
+      </template>
+      {{ t('bots.files.previewNotAvailable') }}
+    </PanePlaceholder>
+  </DockPanelFrame>
 </template>
 
 <script setup lang="ts">
@@ -41,7 +37,7 @@ import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch 
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { FileText } from 'lucide-vue-next'
-import { Spinner, toast } from '@memohai/ui'
+import { toast } from '@memohai/ui'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import { getBotsByBotIdContainerFsRead } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -49,6 +45,8 @@ import { isMarkdownFile, isHtmlFile } from '@/components/file-manager/utils'
 import { useChatStore } from '@/store/chat-list'
 import { usePanelVisible } from './use-panel-visible'
 import PanelBreadcrumb from './panel-breadcrumb.vue'
+import DockPanelFrame from './panel-frame.vue'
+import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 
 const MarkdownPreview = defineAsyncComponent(() => import('@/components/markdown-preview/index.vue'))
 const HtmlPreview = defineAsyncComponent(() => import('@/components/html-preview/index.vue'))

@@ -1,216 +1,198 @@
 <template>
-  <div class="mx-auto max-w-3xl space-y-6 pt-6 pb-8">
-    <header class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-      <div class="min-w-0 space-y-1">
-        <h2 class="text-base font-semibold text-foreground">
-          {{ $t('bots.hooks.title') }}
-        </h2>
-        <p class="max-w-2xl text-sm leading-5 text-muted-foreground">
-          {{ $t('bots.hooks.subtitle') }}
-        </p>
-      </div>
+  <PageShell
+    variant="tab"
+    :title="$t('bots.hooks.title')"
+    :description="$t('bots.hooks.subtitle')"
+  >
+    <template #actions>
+      <span
+        v-if="hasChanges"
+        class="text-xs text-muted-foreground"
+      >
+        {{ $t('common.unsaved') }}
+      </span>
+      <Button
+        variant="secondary"
+        size="sm"
+        class="h-8 gap-1.5"
+        :disabled="loading"
+        @click="void reload()"
+      >
+        <RefreshCw class="size-3.5" />
+        {{ $t('bots.hooks.reload') }}
+      </Button>
+      <Button
+        size="sm"
+        class="h-8 gap-1.5"
+        :disabled="!canSave"
+        :loading="saving"
+        @click="void save()"
+      >
+        <Save class="size-3.5" />
+        {{ $t('bots.hooks.save') }}
+      </Button>
+    </template>
 
-      <div class="flex shrink-0 items-center gap-2">
-        <Badge
-          v-if="hasChanges"
-          variant="outline"
-          class="h-7 rounded-[var(--radius-menu-shell)] px-2 text-xs"
-        >
-          {{ $t('common.unsaved') }}
-        </Badge>
-        <Button
-          variant="secondary"
-          size="sm"
-          class="h-8 gap-1.5"
-          :disabled="loading"
-          @click="void reload()"
-        >
-          <RefreshCw class="size-3.5" />
-          {{ $t('bots.hooks.reload') }}
-        </Button>
-        <Button
-          size="sm"
-          class="h-8 gap-1.5"
-          :disabled="!canSave || saving"
-          @click="void save()"
-        >
-          <Spinner
-            v-if="saving"
-            class="size-3.5"
-          />
-          <Save
-            v-else
-            class="size-3.5"
-          />
-          {{ $t('bots.hooks.save') }}
-        </Button>
-      </div>
-    </header>
-
-    <SettingsSection :title="$t('bots.hooks.statusSection')">
-      <SettingsRow
-        :label="$t('bots.hooks.filePath')"
-        :description="configPath"
-      >
-        <Badge
-          variant="outline"
-          class="rounded-[var(--radius-menu-shell)]"
-        >
-          {{ configExists ? $t('bots.hooks.present') : $t('bots.hooks.missing') }}
-        </Badge>
-      </SettingsRow>
-      <SettingsRow
-        :label="$t('common.status')"
-        :description="statusDescription"
-      >
-        <Badge
-          :variant="configEnabled ? 'default' : 'secondary'"
-          class="rounded-[var(--radius-menu-shell)]"
-        >
-          {{ configEnabled ? $t('common.active') : $t('common.inactive') }}
-        </Badge>
-      </SettingsRow>
-      <SettingsRow
-        :label="$t('bots.hooks.rules')"
-        :description="$t('bots.hooks.rulesDescription')"
-      >
-        <div class="flex items-center gap-3 text-sm tabular-nums">
-          <span class="text-foreground">{{ enabledHooksCount }}</span>
-          <span class="text-muted-foreground">/</span>
-          <span class="text-muted-foreground">{{ hooksCount }}</span>
-        </div>
-      </SettingsRow>
-      <SettingsRow
-        :label="$t('bots.hooks.actions')"
-        :description="$t('bots.hooks.actionsDescription')"
-      >
-        <span class="text-sm tabular-nums text-foreground">{{ actionsCount }}</span>
-      </SettingsRow>
-    </SettingsSection>
-
-    <SettingsSection :title="$t('bots.hooks.eventsSection')">
-      <div class="px-4 py-4">
-        <div
-          v-if="eventsLoading"
-          class="grid gap-2 sm:grid-cols-2"
-        >
-          <Skeleton
-            v-for="idx in 8"
-            :key="idx"
-            class="h-7 rounded-[var(--radius-menu-shell)]"
-          />
-        </div>
-        <div
-          v-else
-          class="flex flex-wrap gap-2"
+    <div class="space-y-8">
+      <SettingsSection :title="$t('bots.hooks.statusSection')">
+        <SettingsRow
+          :label="$t('bots.hooks.filePath')"
+          :description="configPath"
         >
           <Badge
-            v-for="event in eventItems"
-            :key="event.name"
-            :variant="event.runtime_supported ? 'default' : 'outline'"
+            variant="outline"
             class="rounded-[var(--radius-menu-shell)]"
           >
-            {{ event.name }}
+            {{ configExists ? $t('bots.hooks.present') : $t('bots.hooks.missing') }}
           </Badge>
-        </div>
-      </div>
-    </SettingsSection>
-
-    <SettingsSection :title="$t('bots.hooks.editorSection')">
-      <div class="space-y-3 px-4 py-4">
-        <div class="flex items-center justify-between gap-3">
-          <div class="min-w-0">
-            <div class="text-sm font-medium text-foreground">
-              {{ $t('bots.hooks.jsonConfig') }}
-            </div>
-            <p class="mt-0.5 text-xs text-muted-foreground">
-              {{ editorHint }}
-            </p>
+        </SettingsRow>
+        <SettingsRow
+          :label="$t('common.status')"
+          :description="statusDescription"
+        >
+          <Badge
+            :variant="configEnabled ? 'default' : 'secondary'"
+            class="rounded-[var(--radius-menu-shell)]"
+          >
+            {{ configEnabled ? $t('common.active') : $t('common.inactive') }}
+          </Badge>
+        </SettingsRow>
+        <SettingsRow
+          :label="$t('bots.hooks.rules')"
+          :description="$t('bots.hooks.rulesDescription')"
+        >
+          <div class="flex items-center gap-3 text-sm tabular-nums">
+            <span class="text-foreground">{{ enabledHooksCount }}</span>
+            <span class="text-muted-foreground">/</span>
+            <span class="text-muted-foreground">{{ hooksCount }}</span>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            class="h-8 gap-1.5"
-            @click="applyTemplate"
-          >
-            <FileJson class="size-3.5" />
-            {{ $t('bots.hooks.template') }}
-          </Button>
-        </div>
-        <Textarea
-          v-model="editor"
-          class="min-h-[24rem] resize-y font-mono text-xs leading-5"
-          spellcheck="false"
-        />
-      </div>
-    </SettingsSection>
+        </SettingsRow>
+        <SettingsRow
+          :label="$t('bots.hooks.actions')"
+          :description="$t('bots.hooks.actionsDescription')"
+        >
+          <span class="text-sm tabular-nums text-foreground">{{ actionsCount }}</span>
+        </SettingsRow>
+      </SettingsSection>
 
-    <SettingsSection :title="$t('bots.hooks.testSection')">
-      <SettingsRow
-        :label="$t('bots.hooks.testEvent')"
-        :description="$t('bots.hooks.testEventDescription')"
-      >
-        <Select v-model="testEvent">
-          <SelectTrigger
-            size="sm"
-            class="w-56"
+      <SettingsSection :title="$t('bots.hooks.eventsSection')">
+        <div class="px-4 py-4">
+          <div
+            v-if="eventsLoading"
+            class="grid gap-2 sm:grid-cols-2"
           >
-            <SelectValue :placeholder="$t('bots.hooks.selectEvent')" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem
+            <Skeleton
+              v-for="idx in 8"
+              :key="idx"
+              class="h-7 rounded-[var(--radius-menu-shell)]"
+            />
+          </div>
+          <div
+            v-else
+            class="flex flex-wrap gap-2"
+          >
+            <Badge
               v-for="event in eventItems"
               :key="event.name"
-              :value="event.name"
+              :variant="event.runtime_supported ? 'default' : 'outline'"
+              class="rounded-[var(--radius-menu-shell)]"
             >
               {{ event.name }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
-      </SettingsRow>
-      <div class="space-y-3 px-4 py-4">
-        <Textarea
-          v-model="testPayload"
-          class="min-h-32 resize-y font-mono text-xs leading-5"
-          spellcheck="false"
-        />
-        <div class="flex items-center justify-between gap-3">
-          <p
-            v-if="testPayloadError"
-            class="text-xs text-destructive"
-          >
-            {{ testPayloadError }}
-          </p>
-          <span
-            v-else
-            class="text-xs text-muted-foreground"
-          >
-            {{ $t('bots.hooks.testReady') }}
-          </span>
-          <Button
-            size="sm"
-            class="h-8 gap-1.5"
-            :disabled="!canRunTest || testing"
-            @click="void runTest()"
-          >
-            <Spinner
-              v-if="testing"
-              class="size-3.5"
-            />
-            <Play
-              v-else
-              class="size-3.5"
-            />
-            {{ $t('bots.hooks.runTest') }}
-          </Button>
+            </Badge>
+          </div>
         </div>
-        <pre
-          v-if="testResult"
-          class="max-h-72 overflow-auto rounded-[var(--radius-menu-shell)] border border-border bg-muted/30 p-3 text-xs leading-5 text-foreground"
-        >{{ testResult }}</pre>
-      </div>
-    </SettingsSection>
-  </div>
+      </SettingsSection>
+
+      <SettingsSection :title="$t('bots.hooks.editorSection')">
+        <div class="space-y-3 px-4 py-4">
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <div class="text-sm font-medium text-foreground">
+                {{ $t('bots.hooks.jsonConfig') }}
+              </div>
+              <p class="mt-0.5 text-xs text-muted-foreground">
+                {{ editorHint }}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              class="h-8 gap-1.5"
+              @click="applyTemplate"
+            >
+              <FileJson class="size-3.5" />
+              {{ $t('bots.hooks.template') }}
+            </Button>
+          </div>
+          <Textarea
+            v-model="editor"
+            class="min-h-[24rem] resize-y font-mono text-xs leading-5"
+            spellcheck="false"
+          />
+        </div>
+      </SettingsSection>
+
+      <SettingsSection :title="$t('bots.hooks.testSection')">
+        <SettingsRow
+          :label="$t('bots.hooks.testEvent')"
+          :description="$t('bots.hooks.testEventDescription')"
+        >
+          <Select v-model="testEvent">
+            <SelectTrigger
+              size="sm"
+              class="w-56"
+            >
+              <SelectValue :placeholder="$t('bots.hooks.selectEvent')" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem
+                v-for="event in eventItems"
+                :key="event.name"
+                :value="event.name"
+              >
+                {{ event.name }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+        <div class="space-y-3 px-4 py-4">
+          <Textarea
+            v-model="testPayload"
+            class="min-h-32 resize-y font-mono text-xs leading-5"
+            spellcheck="false"
+          />
+          <div class="flex items-center justify-between gap-3">
+            <p
+              v-if="testPayloadError"
+              class="text-xs text-destructive"
+            >
+              {{ testPayloadError }}
+            </p>
+            <span
+              v-else
+              class="text-xs text-muted-foreground"
+            >
+              {{ $t('bots.hooks.testReady') }}
+            </span>
+            <Button
+              size="sm"
+              class="h-8 gap-1.5"
+              :disabled="!canRunTest"
+              :loading="testing"
+              @click="void runTest()"
+            >
+              <Play class="size-3.5" />
+              {{ $t('bots.hooks.runTest') }}
+            </Button>
+          </div>
+          <pre
+            v-if="testResult"
+            class="max-h-72 overflow-auto rounded-[var(--radius-menu-shell)] border border-border bg-muted/30 p-3 text-xs leading-5 text-foreground"
+          >{{ testResult }}</pre>
+        </div>
+      </SettingsSection>
+    </div>
+  </PageShell>
 </template>
 
 <script setup lang="ts">
@@ -226,7 +208,6 @@ import {
   SelectTrigger,
   SelectValue,
   Skeleton,
-  Spinner,
   Textarea,
   toast,
 } from '@memohai/ui'
@@ -238,6 +219,7 @@ import {
   postBotsByBotIdHooksTest,
 } from '@memohai/sdk'
 import type { HandlersHookEventInfo } from '@memohai/sdk'
+import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'

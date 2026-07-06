@@ -118,7 +118,7 @@
             </SettingsRow>
           </div>
 
-          <div class="mx-4 flex items-center justify-end border-t border-border py-3">
+          <template #footer>
             <LoadingButton
               type="submit"
               size="sm"
@@ -126,75 +126,53 @@
             >
               {{ $t('provider.saveChanges') }}
             </LoadingButton>
-          </div>
+          </template>
         </SettingsSection>
       </form>
 
       <!-- Synthesis models: a list; editing a model opens a dialog (the same
            shape as the provider's model management), not an inline accordion. -->
-      <section class="space-y-2.5">
-        <div class="flex min-h-7 items-center justify-between gap-2 px-2">
-          <h2 class="text-[13px] font-medium text-muted-foreground">
-            {{ $t('speech.synthesis.models') }}
-          </h2>
-          <div
-            v-if="curProviderId"
-            class="flex items-center gap-2"
+      <SettingsSection :title="$t('speech.synthesis.models')">
+        <template
+          v-if="curProviderId"
+          #actions
+        >
+          <LoadingButton
+            type="button"
+            variant="outline"
+            size="sm"
+            :loading="importLoading"
+            @click="handleImportModels"
           >
-            <LoadingButton
-              type="button"
-              variant="outline"
-              size="sm"
-              :loading="importLoading"
-              @click="handleImportModels"
-            >
-              {{ $t('speech.importModels') }}
-            </LoadingButton>
-            <CreateModel
-              :id="curProviderId"
-              default-type="speech"
-              hide-type
-              :type-options="speechTypeOptions"
-              :invalidate-keys="['speech-provider-models', 'speech-models']"
-            />
-          </div>
+            {{ $t('speech.importModels') }}
+          </LoadingButton>
+          <CreateModel
+            :id="curProviderId"
+            default-type="speech"
+            hide-type
+            :type-options="speechTypeOptions"
+            :invalidate-keys="['speech-provider-models', 'speech-models']"
+          />
+        </template>
+
+        <div
+          v-if="providerModels.length === 0"
+          class="px-4 py-10 text-center text-xs text-muted-foreground"
+        >
+          {{ $t('speech.noModels') }}
         </div>
 
-        <div class="overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card">
-          <div
-            v-if="providerModels.length === 0"
-            class="px-4 py-10 text-center text-xs text-muted-foreground"
-          >
-            {{ $t('speech.noModels') }}
-          </div>
-
-          <template v-else>
-            <div
-              v-for="(model, index) in providerModels"
-              :key="model.id"
-            >
-              <button
-                type="button"
-                class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-accent"
-                @click="openModelEditor(model)"
-              >
-                <span class="min-w-0 truncate">
-                  <span class="text-sm font-medium">{{ model.name || model.model_id }}</span>
-                  <span
-                    v-if="model.name && model.name !== model.model_id"
-                    class="ml-2 text-xs text-muted-foreground"
-                  >{{ model.model_id }}</span>
-                </span>
-                <Settings class="size-4 shrink-0 text-muted-foreground/60" />
-              </button>
-              <div
-                v-if="index < providerModels.length - 1"
-                class="mx-4 border-b border-border"
-              />
-            </div>
-          </template>
-        </div>
-      </section>
+        <template v-else>
+          <ModelListRow
+            v-for="(model, index) in providerModels"
+            :key="model.id"
+            :label="model.name || model.model_id || ''"
+            :meta="model.name && model.name !== model.model_id ? model.model_id : ''"
+            :last="index === providerModels.length - 1"
+            @click="openModelEditor(model)"
+          />
+        </template>
+      </SettingsSection>
 
       <!-- Editing opens the config editor in a dialog rather than expanding the
            row in place. -->
@@ -236,7 +214,7 @@ import {
   Switch,
 } from '@memohai/ui'
 import ModelConfigEditor from './model-config-editor.vue'
-import { Eye, EyeOff, Settings } from 'lucide-vue-next'
+import { Eye, EyeOff } from 'lucide-vue-next'
 import { computed, inject, reactive, ref, watch } from 'vue'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
@@ -249,6 +227,7 @@ import CreateModel from '@/components/create-model/index.vue'
 import SettingsShell from '@/components/settings-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import ModelListRow from '@/components/settings/model-list-row.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 interface SpeechFieldSchema {

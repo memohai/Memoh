@@ -28,15 +28,10 @@
         class="space-y-8"
       >
         <SettingsSection>
-          <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
-            <div class="min-w-0">
-              <div class="text-sm font-medium text-foreground">
-                {{ $t('bots.access.modeTitle') }}
-              </div>
-              <p class="mt-0.5 text-xs text-muted-foreground">
-                {{ isBlacklistMode ? $t('bots.access.blacklistModeDescription') : $t('bots.access.whitelistModeDescription') }}
-              </p>
-            </div>
+          <SettingsRow
+            :label="$t('bots.access.modeTitle')"
+            :description="isBlacklistMode ? $t('bots.access.blacklistModeDescription') : $t('bots.access.whitelistModeDescription')"
+          >
             <SegmentedControl
               :model-value="defaultEffectDraft"
               :items="accessModeItems"
@@ -44,19 +39,14 @@
               class="shrink-0"
               @update:model-value="(value) => handleSetDefaultEffect(String(value))"
             />
-          </div>
+          </SettingsRow>
         </SettingsSection>
 
         <SettingsSection>
-          <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
-            <div class="min-w-0">
-              <div class="text-sm font-medium text-foreground">
-                {{ $t('bots.access.members.title') }}
-              </div>
-              <p class="mt-0.5 text-xs text-muted-foreground">
-                {{ $t('bots.access.members.subtitle') }}
-              </p>
-            </div>
+          <SettingsRow
+            :label="$t('bots.access.members.title')"
+            :description="$t('bots.access.members.subtitle')"
+          >
             <!-- Inline add-member select, same shape as the model picker in
                  settings: a w-56 select-trigger that opens a search menu. Picking
                  an option adds it immediately; the card layout never swaps. -->
@@ -96,15 +86,17 @@
                 </template>
               </SearchableSelectPopover>
             </div>
-          </div>
+          </SettingsRow>
 
-          <div
+          <!-- ui-allow-shape: loading skeleton — matches the member-row height so the
+               list holds its space and doesn't jump (CLS) while rules/managers load. -->
+          <InlineLoadingRow
             v-if="isPendingRules || isPendingManagers"
-            class="mx-4 flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 text-sm text-muted-foreground last:border-b-0"
+            size="md"
+            class="mx-4 min-h-[3.75rem] border-b border-border py-3 last:border-b-0"
           >
-            <Spinner class="size-4" />
             {{ $t('common.loading') }}
-          </div>
+          </InlineLoadingRow>
 
           <Empty
             v-else-if="members.length === 0"
@@ -117,21 +109,22 @@
           </Empty>
 
           <template v-else>
-            <div
+            <SettingsRow
               v-for="member in members"
               :key="member.channelIdentityId"
-              class="mx-4 flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 last:border-b-0"
             >
-              <Avatar class="size-7 shrink-0">
-                <AvatarImage
-                  :src="member.avatarUrl || ''"
-                  :alt="member.label"
-                />
-                <AvatarFallback class="text-caption">
-                  {{ member.label.slice(0, 2).toUpperCase() }}
-                </AvatarFallback>
-              </Avatar>
-              <div class="min-w-0 flex-1">
+              <template #leading>
+                <Avatar class="size-7 shrink-0">
+                  <AvatarImage
+                    :src="member.avatarUrl || ''"
+                    :alt="member.label"
+                  />
+                  <AvatarFallback class="text-caption">
+                    {{ member.label.slice(0, 2).toUpperCase() }}
+                  </AvatarFallback>
+                </Avatar>
+              </template>
+              <template #content>
                 <div class="flex items-center gap-1.5">
                   <span class="truncate text-sm font-medium text-foreground">
                     {{ member.label }}
@@ -148,9 +141,9 @@
                   <span>{{ formatPlatformName(member.channelType) }}</span>
                   <span v-if="member.kind === 'group'"> · {{ $t('bots.access.members.groupBadge') }}</span>
                 </div>
-              </div>
+              </template>
 
-              <div class="flex shrink-0 items-center gap-3">
+              <div class="flex items-center gap-3">
                 <label class="flex cursor-pointer items-center gap-1.5 text-xs text-foreground">
                   <Checkbox
                     :model-value="member.chat"
@@ -246,20 +239,18 @@
                   </template>
                 </ConfirmPopover>
               </div>
-            </div>
+            </SettingsRow>
           </template>
         </SettingsSection>
 
         <SettingsSection>
-          <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
-            <div class="min-w-0">
-              <div class="text-sm font-medium text-foreground">
-                {{ $t('bots.access.rulesTitle') }}
-              </div>
-              <p class="mt-0.5 text-xs text-muted-foreground">
-                {{ $t('bots.access.rulesEmptyDescription') }}
-              </p>
-            </div>
+          <!-- The advanced toggle reveals a SIBLING block (the rules list + add
+               form) below, not a body this row owns — so it's a plain row with a
+               toggling button, not an ExpandableRow. -->
+          <SettingsRow
+            :label="$t('bots.access.rulesTitle')"
+            :description="$t('bots.access.rulesEmptyDescription')"
+          >
             <Button
               variant="outline"
               size="sm"
@@ -272,9 +263,13 @@
               />
               {{ advancedOpen ? $t('bots.access.advanced.hide') : $t('bots.access.advanced.show') }}
             </Button>
-          </div>
+          </SettingsRow>
 
           <template v-if="advancedOpen">
+            <!-- ui-allow-shape: a bare action row (single right-aligned "add entry"
+                 button, no label/description). SettingsRow is a label↔control pair;
+                 this carries only the trailing control, so composing it would mean a
+                 phantom empty leading column. Borrows the row height for rhythm. -->
             <div
               v-if="!formVisible"
               class="mx-4 flex min-h-[3.75rem] items-center justify-end border-b border-border py-3"
@@ -290,40 +285,41 @@
             </div>
 
             <template v-if="advancedRules.length">
-              <div
+              <SettingsRow
                 v-for="rule in advancedRules"
                 :key="rule.id"
-                class="mx-4 flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 last:border-b-0"
               >
-                <div
-                  v-if="rule.subject_channel_type"
-                  class="flex size-8 shrink-0 items-center justify-center text-muted-foreground"
-                >
-                  <ChannelIcon
-                    :channel="rule.subject_channel_type"
-                    size="1em"
-                  />
-                </div>
-                <Avatar
-                  v-else-if="rule.channel_identity_id"
-                  class="size-8 shrink-0"
-                >
-                  <AvatarImage
-                    :src="rule.channel_identity_avatar_url || ''"
-                    :alt="describeRuleTarget(rule)"
-                  />
-                  <AvatarFallback class="text-caption">
-                    {{ ruleTargetFallback(rule) }}
-                  </AvatarFallback>
-                </Avatar>
-                <div
-                  v-else
-                  class="flex size-8 shrink-0 items-center justify-center text-muted-foreground"
-                >
-                  <Users class="size-4" />
-                </div>
+                <template #leading>
+                  <div
+                    v-if="rule.subject_channel_type"
+                    class="flex size-8 shrink-0 items-center justify-center text-muted-foreground"
+                  >
+                    <ChannelIcon
+                      :channel="rule.subject_channel_type"
+                      size="1em"
+                    />
+                  </div>
+                  <Avatar
+                    v-else-if="rule.channel_identity_id"
+                    class="size-8 shrink-0"
+                  >
+                    <AvatarImage
+                      :src="rule.channel_identity_avatar_url || ''"
+                      :alt="describeRuleTarget(rule)"
+                    />
+                    <AvatarFallback class="text-caption">
+                      {{ ruleTargetFallback(rule) }}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div
+                    v-else
+                    class="flex size-8 shrink-0 items-center justify-center text-muted-foreground"
+                  >
+                    <Users class="size-4" />
+                  </div>
+                </template>
 
-                <div class="min-w-0 flex-1">
+                <template #content>
                   <div class="flex min-w-0 items-center gap-2">
                     <p class="truncate text-sm font-medium text-foreground">
                       {{ describeRuleTarget(rule) }}
@@ -342,9 +338,9 @@
                       <span class="truncate">{{ ruleScopeDetail(rule) }}</span>
                     </template>
                   </div>
-                </div>
+                </template>
 
-                <div class="flex shrink-0 items-center gap-1">
+                <div class="flex items-center gap-1">
                   <Button
                     variant="ghost"
                     size="icon-sm"
@@ -380,7 +376,7 @@
                     </template>
                   </ConfirmPopover>
                 </div>
-              </div>
+              </SettingsRow>
             </template>
 
             <Empty
@@ -534,12 +530,8 @@
                   <Button
                     type="submit"
                     size="sm"
-                    :disabled="isSavingRule"
+                    :loading="isSavingRule"
                   >
-                    <Spinner
-                      v-if="isSavingRule"
-                      class="size-3"
-                    />
                     {{ $t('bots.access.saveAndEnable') }}
                   </Button>
                 </div>
@@ -582,7 +574,6 @@ import {
   Avatar,
   AvatarImage,
   AvatarFallback,
-  Spinner,
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -601,11 +592,13 @@ import {
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import PageShell from '@/components/page-shell/index.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import BotUserAccess from './bot-user-access.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import SettingsSection from '@/components/settings/section.vue'
+import SettingsRow from '@/components/settings/row.vue'
 import type { AclObservedConversationCandidate, AclRule, AclSourceScope, ChannelaccessManager, HandlersChannelMeta } from '@memohai/sdk'
 import {
   getChannels,

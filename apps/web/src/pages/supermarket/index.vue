@@ -41,13 +41,12 @@
 
         <!-- Plugins Tab -->
         <TabsContent value="plugins">
-          <div
+          <InlineLoadingRow
             v-if="pluginsLoading"
-            class="flex items-center justify-center py-8 text-xs text-muted-foreground"
+            class="justify-center py-8"
           >
-            <Spinner class="mr-2" />
             {{ $t('common.loading') }}
-          </div>
+          </InlineLoadingRow>
 
           <div
             v-else-if="!plugins.length"
@@ -71,13 +70,12 @@
 
         <!-- Skills Tab -->
         <TabsContent value="skills">
-          <div
+          <InlineLoadingRow
             v-if="skillsLoading"
-            class="flex items-center justify-center py-8 text-xs text-muted-foreground"
+            class="justify-center py-8"
           >
-            <Spinner class="mr-2" />
             {{ $t('common.loading') }}
-          </div>
+          </InlineLoadingRow>
 
           <div
             v-else-if="!skills.length"
@@ -119,7 +117,7 @@
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Search, Github } from 'lucide-vue-next'
-import { Input, Spinner, Button, Tabs, TabsList, TabsTrigger, TabsContent } from '@memohai/ui'
+import { Input, Button, Tabs, TabsList, TabsTrigger, TabsContent } from '@memohai/ui'
 import {
   getSupermarketPlugins,
   getSupermarketSkills,
@@ -129,6 +127,7 @@ import {
 import { toast } from '@memohai/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import PageShell from '@/components/page-shell/index.vue'
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import PluginCard from './components/plugin-card.vue'
 import SkillCard from './components/skill-card.vue'
 import InstallPluginDialog from './components/install-plugin-dialog.vue'

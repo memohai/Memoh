@@ -8,13 +8,12 @@
         <DialogTitle>{{ $t('supermarket.skillInstallTitle') }}</DialogTitle>
       </DialogHeader>
       <div class="space-y-4 py-2">
-        <div class="space-y-1.5">
-          <label class="text-xs font-medium">{{ $t('supermarket.selectBot') }}</label>
+        <FieldStack :label="$t('supermarket.selectBot')">
           <BotSelect
             v-model="selectedBotId"
             trigger-class="w-full"
           />
-        </div>
+        </FieldStack>
 
         <div
           v-if="skill"
@@ -44,13 +43,10 @@
           </Button>
         </DialogClose>
         <Button
-          :disabled="!selectedBotId || installing"
+          :disabled="!selectedBotId"
+          :loading="installing"
           @click="handleInstall"
         >
-          <Spinner
-            v-if="installing"
-            class="mr-2 size-4"
-          />
           {{ installing ? $t('supermarket.installing') : $t('supermarket.install') }}
         </Button>
       </DialogFooter>
@@ -64,7 +60,7 @@ import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
-  Button, Spinner,
+  Button,
 } from '@memohai/ui'
 import {
   postBotsByBotIdSupermarketInstallSkill,
@@ -72,6 +68,7 @@ import {
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import BotSelect from '@/components/bot-select/index.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
 
 const props = defineProps<{
   open: boolean

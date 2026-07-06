@@ -39,12 +39,9 @@
       v-if="fallbackText"
       class="text-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-72 overflow-y-auto"
     >{{ fallbackText }}</pre>
-    <p
-      v-if="!progressText && !backgroundOutput && !stdout && !stderr && !errorText && !fallbackText"
-      class="text-muted-foreground italic"
-    >
+    <EmptyRow v-if="!progressText && !backgroundOutput && !stdout && !stderr && !errorText && !fallbackText">
       {{ isBackgroundActive ? t('chat.tools.detail.waitingOutput') : t('chat.tools.detail.noOutput') }}
-    </p>
+    </EmptyRow>
   </div>
 </template>
 
@@ -52,6 +49,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
+import EmptyRow from './tool-detail/empty-row.vue'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()

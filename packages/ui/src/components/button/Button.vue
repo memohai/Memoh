@@ -11,6 +11,10 @@ import { buttonVariants } from '.'
 interface Props extends PrimitiveProps {
   variant?: ButtonVariants['variant']
   size?: ButtonVariants['size']
+  /** Corner shape, orthogonal to size. `circle` forces rounded-full over the
+   *  size's rounded-md — use with size="icon"/"icon-sm" for a round icon button
+   *  instead of hand-writing `class="rounded-full"` at the call site. */
+  shape?: ButtonVariants['shape']
   /** Stretch to the full width of the parent. Full-width buttons (primary AND
    *  ghost) swap the press-scale for a color-press — a uniform scale on a wide
    *  button lurches sideways. */
@@ -49,7 +53,7 @@ const isDisabled = computed(() =>
 const resolvedVariant = computed<ButtonVariants['variant']>(() => props.variant ?? 'default')
 const buttonClass = computed(() =>
   cn(
-    buttonVariants({ variant: resolvedVariant.value, size: props.size }),
+    buttonVariants({ variant: resolvedVariant.value, size: props.size, shape: props.shape }),
     props.block && 'w-full',
     props.class,
   ),

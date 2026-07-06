@@ -52,7 +52,7 @@
               name="name"
             >
               <SettingsRow :label="$t('common.name')">
-                <FormItem class="w-80">
+                <FieldStack class="w-80">
                   <FormControl>
                     <Input
                       type="text"
@@ -61,8 +61,7 @@
                       v-bind="componentField"
                     />
                   </FormControl>
-                  <FormMessage />
-                </FormItem>
+                </FieldStack>
               </SettingsRow>
             </FormField>
 
@@ -111,7 +110,7 @@
             </div>
           </div>
 
-          <div class="mx-4 flex items-center justify-end border-t border-border py-3">
+          <template #footer>
             <LoadingButton
               type="submit"
               size="sm"
@@ -119,7 +118,7 @@
             >
               {{ $t('provider.saveChanges') }}
             </LoadingButton>
-          </div>
+          </template>
         </SettingsSection>
       </form>
     </div>
@@ -132,8 +131,6 @@ import {
   Button,
   FormControl,
   FormField,
-  FormItem,
-  FormMessage,
   Switch,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
@@ -141,6 +138,7 @@ import LoadingButton from '@/components/loading-button/index.vue'
 import SettingsShell from '@/components/settings-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
 import BraveSettings from './brave-settings.vue'
 import BingSettings from './bing-settings.vue'
 import GoogleSettings from './google-settings.vue'
@@ -174,7 +172,7 @@ const queryCache = useQueryCache()
 
 // ---- form ----
 const providerSchema = toTypedSchema(z.object({
-  name: z.string().min(1),
+  name: z.string().min(1, t('webSearch.nameRequired')),
   provider: z.string().min(1),
 }))
 

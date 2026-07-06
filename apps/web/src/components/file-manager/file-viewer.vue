@@ -16,7 +16,7 @@ import {
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import { File, FileX, Download, RefreshCw, GitCompare, X } from 'lucide-vue-next'
-import { Button, Spinner } from '@memohai/ui'
+import { Button } from '@memohai/ui'
 import {
   getBotsByBotIdContainerFs,
   getBotsByBotIdContainerFsRead,
@@ -27,6 +27,8 @@ import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
 import MonacoDiff from '@/components/monaco-editor/diff.vue'
+import DiffTitleBar from '@/components/diff-title-bar/index.vue'
+import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { formatRelativeTime } from '@/utils/date-time'
 import { isTextFile, isImageFile } from './utils'
@@ -818,7 +820,7 @@ onBeforeUnmount(() => {
         v-if="conflictState === 'compare'"
         class="flex h-full flex-col"
       >
-        <div class="flex shrink-0 items-center justify-between gap-3 border-b border-border px-3 py-1.5 text-caption text-muted-foreground">
+        <DiffTitleBar>
           <span class="min-w-0 truncate">
             <span>{{ t('bots.files.compare.yours') }} ↔ {{ t('bots.files.compare.disk') }}</span>
             <span
@@ -830,7 +832,7 @@ onBeforeUnmount(() => {
               aria-atomic="true"
             >· {{ t('bots.files.compare.staleNotice') }}</span>
           </span>
-          <div class="flex items-center gap-1.5">
+          <template #actions>
             <Button
               v-if="compareStale"
               variant="ghost"
@@ -874,8 +876,8 @@ onBeforeUnmount(() => {
               />
               {{ t('bots.files.compare.close') }}
             </Button>
-          </div>
-        </div>
+          </template>
+        </DiffTitleBar>
         <MonacoDiff
           :original="compareDiskContent"
           :modified="content"
@@ -888,14 +890,13 @@ onBeforeUnmount(() => {
 
       <!-- Full-area spinner only on the FIRST load for this path (nothing else
            to show). Subsequent reloads keep the editor/image mounted and let
-           the content swap in place, matching VS Code's external-change UX. -->
-      <div
+           the content swap in place — the external-change UX of a code editor. -->
+      <PanePlaceholder
         v-else-if="loading && !loaded"
-        class="flex h-full items-center justify-center text-muted-foreground"
+        loading
       >
-        <Spinner class="mr-2" />
         {{ t('common.loading') }}
-      </div>
+      </PanePlaceholder>
 
       <MonacoEditor
         v-else-if="isText"
@@ -906,15 +907,12 @@ onBeforeUnmount(() => {
         class="h-full"
       />
 
-      <div
-        v-else-if="isImage && diskState === 'deleted'"
-        class="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground"
-      >
-        <FileX class="size-12 opacity-40 text-destructive" />
-        <p class="text-xs">
-          {{ t('bots.files.imageDeleted') }}
-        </p>
-      </div>
+      <PanePlaceholder v-else-if="isImage && diskState === 'deleted'">
+        <template #icon>
+          <FileX class="size-12 text-destructive opacity-40" />
+        </template>
+        {{ t('bots.files.imageDeleted') }}
+      </PanePlaceholder>
 
       <div
         v-else-if="isImage && imageUrl"
@@ -927,23 +925,22 @@ onBeforeUnmount(() => {
         >
       </div>
 
-      <div
-        v-else
-        class="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground"
-      >
-        <File class="size-12 opacity-30" />
-        <p class="text-xs">
-          {{ t('bots.files.previewNotAvailable') }}
-        </p>
-        <Button
-          variant="outline"
-          size="sm"
-          @click="handleDownload"
-        >
-          <Download class="mr-1.5 size-3" />
-          {{ t('bots.files.download') }}
-        </Button>
-      </div>
+      <PanePlaceholder v-else>
+        <template #icon>
+          <File class="size-12 opacity-30" />
+        </template>
+        {{ t('bots.files.previewNotAvailable') }}
+        <template #action>
+          <Button
+            variant="outline"
+            size="sm"
+            @click="handleDownload"
+          >
+            <Download class="mr-1.5 size-3" />
+            {{ t('bots.files.download') }}
+          </Button>
+        </template>
+      </PanePlaceholder>
     </div>
   </div>
 </template>

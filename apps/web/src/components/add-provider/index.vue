@@ -28,12 +28,7 @@
         <div
           class="flex-col gap-3 flex mt-4"
         >
-          <div>
-            <Label
-              class="mb-2"
-            >
-              {{ $t('provider.preset') }}
-            </Label>
+          <FieldStack :label="$t('provider.preset')">
             <SearchableSelectPopover
               :model-value="selectedPresetId"
               :options="providerPresetOptions"
@@ -61,19 +56,16 @@
                 />
               </template>
             </SearchableSelectPopover>
-          </div>
+          </FieldStack>
 
           <FormField
             v-slot="{ componentField }"
             name="name"
           >
-            <FormItem>
-              <Label
-                class="mb-2"
-                for="provider-create-name"
-              >
-                {{ $t('common.name') }}
-              </Label>
+            <FieldStack
+              :label="$t('common.name')"
+              for="provider-create-name"
+            >
               <FormControl>
                 <Input
                   id="provider-create-name"
@@ -83,20 +75,17 @@
                   :aria-label="$t('common.name')"
                 />
               </FormControl>
-            </FormItem>
+            </FieldStack>
           </FormField>
           <FormField
             v-if="apiKeyRequired"
             v-slot="{ componentField }"
             name="api_key"
           >
-            <FormItem>
-              <Label
-                class="mb-2"
-                for="provider-create-api-key"
-              >
-                {{ $t('provider.apiKey') }}
-              </Label>
+            <FieldStack
+              :label="$t('provider.apiKey')"
+              for="provider-create-api-key"
+            >
               <FormControl>
                 <Input
                   id="provider-create-api-key"
@@ -106,7 +95,7 @@
                   :aria-label="$t('provider.apiKey')"
                 />
               </FormControl>
-            </FormItem>
+            </FieldStack>
           </FormField>
           <div
             v-else-if="isOAuthClientType(form.values.client_type)"
@@ -119,13 +108,10 @@
             v-slot="{ componentField }"
             name="base_url"
           >
-            <FormItem>
-              <Label
-                class="mb-2"
-                for="provider-create-base-url"
-              >
-                {{ $t('provider.url') }}
-              </Label>
+            <FieldStack
+              :label="$t('provider.url')"
+              for="provider-create-base-url"
+            >
               <FormControl>
                 <Input
                   id="provider-create-base-url"
@@ -135,7 +121,7 @@
                   :aria-label="$t('provider.url')"
                 />
               </FormControl>
-            </FormItem>
+            </FieldStack>
           </FormField>
 
           <FormField
@@ -144,10 +130,7 @@
             name="client_type"
             keep-value
           >
-            <FormItem>
-              <Label class="mb-2">
-                {{ $t('provider.clientType') }}
-              </Label>
+            <FieldStack :label="$t('provider.clientType')">
               <FormControl>
                 <SearchableSelectPopover
                   :model-value="value"
@@ -156,7 +139,7 @@
                   @update:model-value="handleChange"
                 />
               </FormControl>
-            </FormItem>
+            </FieldStack>
           </FormField>
 
           <Separator />
@@ -207,6 +190,7 @@ import type { ProvidersCreateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { Plus } from 'lucide-vue-next'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import { LLM_CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
@@ -339,8 +323,8 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
 const providerSchema = toTypedSchema(z.object({
   api_key: z.string().optional(),
   base_url: z.string().optional(),
-  name: z.string().min(1),
-  client_type: z.string().min(1),
+  name: z.string().min(1, t('provider.nameRequired')),
+  client_type: z.string().min(1, t('provider.clientTypeRequired')),
   auto_import: z.boolean().optional(),
 }).superRefine((value, ctx) => {
   const requiresApiKey = !isOAuthClientType(value.client_type) && selectedPreset.value?.requiresApiKey !== false
@@ -348,7 +332,7 @@ const providerSchema = toTypedSchema(z.object({
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['api_key'],
-      message: 'API key is required',
+      message: t('provider.apiKeyRequired'),
     })
   }
   const requiresBaseUrl = value.client_type !== 'github-copilot' && selectedPreset.value?.requiresBaseUrl !== false
@@ -356,7 +340,7 @@ const providerSchema = toTypedSchema(z.object({
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['base_url'],
-      message: 'Base URL is required',
+      message: t('provider.urlRequired'),
     })
   }
 }))

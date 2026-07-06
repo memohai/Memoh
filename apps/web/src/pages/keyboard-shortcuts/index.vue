@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@memohai/ui'
+import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import KeyCaptureDialog from './components/KeyCaptureDialog.vue'
 import ShortcutRow from './components/ShortcutRow.vue'
@@ -37,11 +38,11 @@ const hasAnyOverride = computed(() => Object.keys(store.overrides).length > 0)
 </script>
 
 <template>
-  <section class="mx-auto max-w-3xl px-6 pt-10 pb-12">
-    <div class="mb-2 flex items-end justify-between px-2">
-      <h1 class="text-lg font-semibold">
-        {{ t('settings.keyboard.title') }}
-      </h1>
+  <PageShell
+    :title="t('settings.keyboard.title')"
+    :description="t('settings.keyboard.intro')"
+  >
+    <template #actions>
       <Button
         v-if="hasAnyOverride"
         variant="ghost"
@@ -50,11 +51,7 @@ const hasAnyOverride = computed(() => Object.keys(store.overrides).length > 0)
       >
         {{ t('settings.keyboard.resetAll') }}
       </Button>
-    </div>
-
-    <p class="mb-6 px-2 text-sm text-muted-foreground">
-      {{ t('settings.keyboard.intro') }}
-    </p>
+    </template>
 
     <div class="space-y-8">
       <SettingsSection
@@ -87,5 +84,5 @@ const hasAnyOverride = computed(() => Object.keys(store.overrides).length > 0)
       :command="editingCommand"
       :i18n-key="editingI18nKey"
     />
-  </section>
+  </PageShell>
 </template>

@@ -19,11 +19,7 @@
         <AlertDescription>{{ loadError }}</AlertDescription>
       </Alert>
 
-      <section class="space-y-2.5">
-        <h2 class="px-2 text-[13px] font-medium text-muted-foreground">
-          {{ membersTitle }}
-        </h2>
-
+      <SettingsSection :title="membersTitle">
         <Table>
           <TableHeader>
             <TableRow>
@@ -157,7 +153,7 @@
             </TableRow>
           </TableBody>
         </Table>
-      </section>
+      </SettingsSection>
     </div>
 
     <Dialog v-model:open="createDialogOpen">
@@ -169,28 +165,34 @@
           <DialogTitle>{{ t('people.newMember') }}</DialogTitle>
         </DialogHeader>
 
-        <div class="grid gap-4">
-          <div class="grid gap-2">
-            <Label for="people-create-username">{{ t('auth.username') }}</Label>
+        <FormStack>
+          <FieldStack
+            :label="t('auth.username')"
+            for="people-create-username"
+          >
             <Input
               id="people-create-username"
               v-model="createForm.username"
               autocomplete="off"
               :placeholder="t('people.usernamePlaceholder')"
             />
-          </div>
+          </FieldStack>
           <div class="grid gap-2 sm:grid-cols-2">
-            <div class="grid gap-2">
-              <Label for="people-create-display-name">{{ t('settings.displayName') }}</Label>
+            <FieldStack
+              :label="t('settings.displayName')"
+              for="people-create-display-name"
+            >
               <Input
                 id="people-create-display-name"
                 v-model="createForm.displayName"
                 autocomplete="off"
                 :placeholder="t('people.displayNamePlaceholder')"
               />
-            </div>
-            <div class="grid gap-2">
-              <Label for="people-create-email">{{ t('people.email') }}</Label>
+            </FieldStack>
+            <FieldStack
+              :label="t('people.email')"
+              for="people-create-email"
+            >
               <Input
                 id="people-create-email"
                 v-model="createForm.email"
@@ -198,30 +200,37 @@
                 autocomplete="off"
                 :placeholder="t('people.emailPlaceholder')"
               />
-            </div>
+            </FieldStack>
           </div>
           <div class="grid gap-2 sm:grid-cols-2">
-            <div class="grid gap-2">
-              <Label for="people-create-password">{{ t('auth.password') }}</Label>
+            <FieldStack
+              :label="t('auth.password')"
+              for="people-create-password"
+            >
               <Input
                 id="people-create-password"
                 v-model="createForm.password"
                 type="password"
                 autocomplete="new-password"
               />
-            </div>
-            <div class="grid gap-2">
-              <Label for="people-create-confirm-password">{{ t('settings.confirmPassword') }}</Label>
+            </FieldStack>
+            <FieldStack
+              :label="t('settings.confirmPassword')"
+              for="people-create-confirm-password"
+            >
               <Input
                 id="people-create-confirm-password"
                 v-model="createForm.confirmPassword"
                 type="password"
                 autocomplete="new-password"
               />
-            </div>
+            </FieldStack>
           </div>
-          <div class="grid gap-2 w-fit">
-            <Label for="people-create-role">{{ t('people.role') }}</Label>
+          <FieldStack
+            class="w-fit"
+            :label="t('people.role')"
+            for="people-create-role"
+          >
             <Select v-model="createForm.role">
               <SelectTrigger id="people-create-role">
                 <SelectValue />
@@ -235,7 +244,7 @@
                 </SelectItem>
               </SelectContent>
             </Select>
-          </div>
+          </FieldStack>
           <div class="flex items-center justify-between gap-4 border-t pt-4">
             <div class="space-y-0.5">
               <Label>{{ t('people.activeOnCreate') }}</Label>
@@ -248,7 +257,7 @@
               class="shrink-0"
             />
           </div>
-        </div>
+        </FormStack>
 
         <DialogFooter class="mt-2">
           <Button
@@ -261,13 +270,9 @@
           </Button>
           <Button
             type="button"
-            :disabled="creating"
+            :loading="creating"
             @click="createUser"
           >
-            <Spinner
-              v-if="creating"
-              class="size-4"
-            />
             {{ t('common.create') }}
           </Button>
         </DialogFooter>
@@ -283,26 +288,30 @@
           </DialogDescription>
         </DialogHeader>
 
-        <div class="grid gap-4">
-          <div class="grid gap-2">
-            <Label for="people-reset-password">{{ t('settings.newPassword') }}</Label>
+        <FormStack>
+          <FieldStack
+            :label="t('settings.newPassword')"
+            for="people-reset-password"
+          >
             <Input
               id="people-reset-password"
               v-model="resetForm.password"
               type="password"
               autocomplete="new-password"
             />
-          </div>
-          <div class="grid gap-2">
-            <Label for="people-reset-confirm-password">{{ t('settings.confirmPassword') }}</Label>
+          </FieldStack>
+          <FieldStack
+            :label="t('settings.confirmPassword')"
+            for="people-reset-confirm-password"
+          >
             <Input
               id="people-reset-confirm-password"
               v-model="resetForm.confirmPassword"
               type="password"
               autocomplete="new-password"
             />
-          </div>
-        </div>
+          </FieldStack>
+        </FormStack>
 
         <DialogFooter>
           <Button
@@ -315,13 +324,9 @@
           </Button>
           <Button
             type="button"
-            :disabled="resettingPassword"
+            :loading="resettingPassword"
             @click="resetPassword"
           >
-            <Spinner
-              v-if="resettingPassword"
-              class="size-4"
-            />
             {{ t('people.resetPassword') }}
           </Button>
         </DialogFooter>
@@ -358,7 +363,6 @@ import {
   SelectTrigger,
   SelectValue,
   Skeleton,
-  Spinner,
   Switch,
   Table,
   TableBody,
@@ -369,6 +373,9 @@ import {
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import PageShell from '@/components/page-shell/index.vue'
+import SettingsSection from '@/components/settings/section.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
+import FormStack from '@/components/settings/form-stack.vue'
 import { useUserStore } from '@/store/user'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'

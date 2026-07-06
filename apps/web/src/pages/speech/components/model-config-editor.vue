@@ -4,22 +4,14 @@
       v-if="basicFields.length > 0"
       class="grid gap-4 md:grid-cols-2"
     >
-      <section
+      <FieldStack
         v-for="field in basicFields"
         :key="field.key"
-        class="space-y-1.5"
+        :label="field.title || field.key"
+        :for="field.type === 'bool' || field.type === 'enum' ? undefined : `tts-field-${field.key}`"
+        :help="field.description"
         :class="isWideField(field) ? 'md:col-span-2' : ''"
       >
-        <Label :for="field.type === 'bool' || field.type === 'enum' ? undefined : `tts-field-${field.key}`">
-          {{ field.title || field.key }}
-        </Label>
-        <p
-          v-if="field.description"
-          class="text-xs text-muted-foreground"
-        >
-          {{ field.description }}
-        </p>
-
         <div
           v-if="field.type === 'secret'"
           class="relative"
@@ -82,7 +74,7 @@
           type="text"
           :placeholder="field.example ? String(field.example) : ''"
         />
-      </section>
+      </FieldStack>
     </div>
 
     <div
@@ -118,22 +110,14 @@
               {{ mode === 'transcription' ? $t('transcription.advanced.description') : $t('speech.advanced.description') }}
             </p>
             <div class="grid gap-4 md:grid-cols-2">
-              <section
+              <FieldStack
                 v-for="field in advancedFields"
                 :key="field.key"
-                class="space-y-1.5"
+                :label="field.title || field.key"
+                :for="field.type === 'bool' || field.type === 'enum' ? undefined : `tts-field-${field.key}`"
+                :help="field.description"
                 :class="isWideField(field) ? 'md:col-span-2' : ''"
               >
-                <Label :for="field.type === 'bool' || field.type === 'enum' ? undefined : `tts-field-${field.key}`">
-                  {{ field.title || field.key }}
-                </Label>
-                <p
-                  v-if="field.description"
-                  class="text-xs text-muted-foreground"
-                >
-                  {{ field.description }}
-                </p>
-
                 <div
                   v-if="field.type === 'secret'"
                   class="relative"
@@ -196,7 +180,7 @@
                   type="text"
                   :placeholder="field.example ? String(field.example) : ''"
                 />
-              </section>
+              </FieldStack>
             </div>
           </div>
         </div>
@@ -318,6 +302,7 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import LoadingButton from '@/components/loading-button/index.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
 
 interface SpeechFieldSchema {
   key: string

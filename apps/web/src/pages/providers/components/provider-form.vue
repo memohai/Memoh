@@ -139,70 +139,68 @@
         </FormField>
       </div>
 
-      <!-- Footer row: an inset top rule (same hairline as the field rows above)
-           closes the card; the actions sit on the right. -->
-      <div class="mx-4 flex items-center justify-end gap-2 border-t border-border py-3">
-        <div class="flex items-center gap-2">
-          <HoverCard :open-delay="120">
-            <HoverCardTrigger as-child>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                loading-mode="manual"
-                :loading="testLoading"
-                :disabled="!props.provider?.id"
-                @click="runTest"
-              >
-                <Spinner
-                  v-if="testLoading"
-                  class="size-4"
-                />
-                <svg
-                  v-else-if="testStatus === 'ok'"
-                  class="check-draw size-4 text-success"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M4 12.5 9 17.5 20 6.5"
-                    pathLength="1"
-                  />
-                </svg>
-                <AlertCircle
-                  v-else-if="testStatus === 'error'"
-                  class="size-4 text-destructive"
-                />
-                <RefreshCw
-                  v-else
-                  class="size-4"
-                />
-                {{ $t('provider.testConnection') }}
-              </Button>
-            </HoverCardTrigger>
-            <HoverCardContent
-              v-if="testError"
-              class="w-80 text-xs text-destructive whitespace-pre-wrap break-words"
+      <!-- Actions close the card via the section's footer band (its top hairline
+           spans the card and its inset padding matches the field rows above). -->
+      <template #footer>
+        <HoverCard :open-delay="120">
+          <HoverCardTrigger as-child>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              loading-mode="manual"
+              :loading="testLoading"
+              :disabled="!props.provider?.id"
+              @click="runTest"
             >
-              {{ testError }}
-            </HoverCardContent>
-          </HoverCard>
-
-          <LoadingButton
-            type="submit"
-            size="sm"
-            :loading="editLoading"
-            :disabled="!hasChanges || !form.meta.value.valid"
+              <Spinner
+                v-if="testLoading"
+                class="size-4"
+              />
+              <svg
+                v-else-if="testStatus === 'ok'"
+                class="check-draw size-4 text-success"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path
+                  d="M4 12.5 9 17.5 20 6.5"
+                  pathLength="1"
+                />
+              </svg>
+              <AlertCircle
+                v-else-if="testStatus === 'error'"
+                class="size-4 text-destructive"
+              />
+              <RefreshCw
+                v-else
+                class="size-4"
+              />
+              {{ $t('provider.testConnection') }}
+            </Button>
+          </HoverCardTrigger>
+          <HoverCardContent
+            v-if="testError"
+            class="w-80 text-xs text-destructive whitespace-pre-wrap break-words"
           >
-            {{ $t('provider.saveChanges') }}
-          </LoadingButton>
-        </div>
-      </div>
+            {{ testError }}
+          </HoverCardContent>
+        </HoverCard>
+
+        <LoadingButton
+          type="submit"
+          size="sm"
+          :loading="editLoading"
+          :disabled="!hasChanges || !form.meta.value.valid"
+        >
+          {{ $t('provider.saveChanges') }}
+        </LoadingButton>
+      </template>
     </SettingsSection>
 
     <!-- OAuth -->

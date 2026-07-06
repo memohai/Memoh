@@ -53,15 +53,12 @@
         </div>
 
         <!-- Empty -->
-        <div
+        <Empty
           v-else-if="checks.length === 0"
-          class="rounded-md border border-dashed py-10 text-center"
+          class="py-10"
         >
-          <Activity class="mx-auto mb-2 size-5 text-muted-foreground/50" />
-          <p class="text-xs text-muted-foreground">
-            {{ $t('bots.checks.empty') }}
-          </p>
-        </div>
+          <EmptyTitle>{{ $t('bots.checks.empty') }}</EmptyTitle>
+        </Empty>
 
         <!-- Check list -->
         <div
@@ -148,6 +145,8 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  Empty,
+  EmptyTitle,
   Skeleton,
   toast,
 } from '@memohai/ui'
@@ -156,7 +155,6 @@ import {
   AlertTriangle,
   XCircle,
   ChevronRight,
-  Activity,
   Copy,
   HelpCircle,
 } from 'lucide-vue-next'
