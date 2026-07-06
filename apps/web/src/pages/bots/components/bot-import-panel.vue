@@ -231,7 +231,7 @@ async function handleImport() {
         type="button"
         class="flex w-full flex-col items-center justify-center gap-1.5 rounded-md border border-dashed px-4 py-6 text-center transition-colors"
         :class="[
-          dragActive ? 'border-primary bg-primary/5' : 'border-border/60 hover:border-primary/50 hover:bg-muted/40',
+          dragActive ? 'border-primary bg-primary/5' : 'border-border-soft hover:border-primary/50 hover:bg-muted/40',
           disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
         ]"
         :disabled="disabled"
@@ -255,7 +255,7 @@ async function handleImport() {
       <!-- Selected file -->
       <div
         v-else
-        class="flex items-center gap-3 rounded-md border border-border/60 bg-background p-2.5"
+        class="flex items-center gap-3 rounded-md border border-border-soft bg-background p-2.5"
       >
         <div class="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
           <FileArchive class="size-4" />
@@ -291,7 +291,7 @@ async function handleImport() {
       <!-- Backup unreadable / unsupported -->
       <div
         v-else-if="selectedFile && previewError"
-        class="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive"
+        class="rounded-md border border-destructive-border bg-destructive-soft p-3 text-xs text-destructive"
       >
         {{ previewError }}
       </div>
@@ -301,7 +301,7 @@ async function handleImport() {
         <div
           v-for="conflict in preview.conflicts || []"
           :key="conflict"
-          class="rounded-md border border-destructive/30 bg-destructive/5 p-2.5 text-[11px] text-destructive"
+          class="rounded-md border border-destructive-border bg-destructive-soft p-2.5 text-[11px] text-destructive"
         >
           {{ conflict }}
         </div>
@@ -309,7 +309,7 @@ async function handleImport() {
         <!-- Encrypted bundle: prompt for the passphrase before anything else -->
         <div
           v-if="needsPassphrase"
-          class="space-y-2 rounded-md border border-border/60 bg-background p-3"
+          class="space-y-2 rounded-md border border-border-soft bg-background p-3"
         >
           <div class="flex items-center gap-2 text-xs font-medium">
             <Lock class="size-3.5 text-muted-foreground" />
@@ -368,8 +368,8 @@ async function handleImport() {
             class="flex items-center gap-3 rounded-md border px-3 py-2.5 transition-colors"
             :class="[
               isOverwrite
-                ? (overwriteProfile ? 'border-foreground bg-muted cursor-pointer' : 'border-border/60 bg-background/50 hover:bg-muted/30 cursor-pointer')
-                : 'border-border/60 bg-background/50',
+                ? (overwriteProfile ? 'border-foreground bg-muted cursor-pointer' : 'border-border-soft bg-background/50 hover:bg-muted/30 cursor-pointer')
+                : 'border-border-soft bg-background/50',
             ]"
             @click="isOverwrite && !busy && (overwriteProfile = !overwriteProfile)"
           >

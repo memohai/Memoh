@@ -858,6 +858,14 @@
   --secondary-foreground: oklch(0.21 0.004 95);
   --muted: oklch(0.968 0 0);
   --muted-foreground: oklch(0.52 0.006 95);
+  /* Alpha policy soft tier — the missing "soft" rung for neutral hint boxes/tip
+     rows, parallel to --success-soft/--warning-soft/--info-soft. color-mix (not
+     a hand-picked literal like those) so it is PIXEL-IDENTICAL to the
+     `bg-muted/40` call sites it replaces — Tailwind's own opacity modifier
+     compiles to this exact color-mix form (verified against the compiled
+     output), and a single declaration here already tracks --muted's .dark /
+     per-scheme overrides at use-time, so it needs no redeclaration below. */
+  --muted-soft: color-mix(in oklab, var(--muted) 40%, transparent);
   /* Skeleton shimmer mid-stop — one hair DARKER than --muted (0.967) so the sliding
      seam is a calm shadow, not a bright flash, on the light gray block. */
   --skeleton-mid: oklch(0.93 0.002 286);
@@ -868,7 +876,18 @@
   --accent-foreground: oklch(0.21 0.004 95);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0.001 286);
+  /* Alpha policy: the destructive family has no -soft/-border pair (unlike
+     success/warning/info) because the banner/callout call sites that needed one
+     hand-wrote `bg-destructive/5 border-destructive/30` instead — the exact gap
+     this policy exists to close. color-mix keeps both PIXEL-IDENTICAL to those
+     call sites (see --muted-soft above for why color-mix, not a literal). */
+  --destructive-soft: color-mix(in oklab, var(--destructive) 5%, transparent);
+  --destructive-border: color-mix(in oklab, var(--destructive) 30%, transparent);
   --border: oklch(0.915 0.0045 72);
+  /* Alpha policy: the soft/faint divider and card-edge rung — same color-mix
+     reasoning as --muted-soft/--destructive-soft, reproducing `border-border/60`
+     exactly (both as a bare divider and as a de-emphasized card outline). */
+  --border-soft: color-mix(in oklab, var(--border) 60%, transparent);
   --input: oklch(0.915 0.0045 72);
   --ring: oklch(57.5% 0 0deg / 1);
   --chart-1: oklch(0.646 0.222 41.116);
@@ -1680,11 +1699,15 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-muted-soft: var(--muted-soft);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-destructive-border: var(--destructive-border);
   --color-border: var(--border);
+  --color-border-soft: var(--border-soft);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-chart-1: var(--chart-1);

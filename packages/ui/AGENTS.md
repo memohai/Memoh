@@ -533,6 +533,73 @@ in-flight state either — confirm against the rules above).
 The guard WARNs on red lines 2 / 5 / 7 (string-detectable); the existing HARD
 checks already cover raw color, arbitrary radius, and invented box-shadow.
 
+## Alpha policy
+
+Red line 6 above ("hand-written alpha is a dirty pattern") existed as prose with
+no mechanical teeth: the guard's raw-color regex only catches bracket/hex
+literals (`bg-[#fff]`, `text-[rgba(...)]`), not Tailwind's built-in `/NN` suffix
+on a semantic color name (`text-foreground/92`, `bg-muted/40`). That blind spot
+let hand-picked alpha values accumulate — the same visual role (a faint divider,
+a muted label, a soft destructive banner) re-derived independently at each call
+site, each with its own guessed percentage, silently drifting apart.
+
+**The rule: transparency is a token, same as color.** If a component or page
+needs a translucent tint of a semantic color, it reaches for a `-soft` /
+`-border` / `-muted` token (below), never a raw `/NN` suffix. Need a shade this
+system doesn't have? Add the token (color-mix off the base semantic color, so
+it tracks `.dark` / per-scheme overrides automatically — see the token
+definitions in `style.css` for the pattern), then use it. Don't invent the
+percentage inline.
+
+**Allowlist — the suffix is legitimate here, not a violation:**
+
+- `ring-ring/<alpha>` — the focus ring (pre-existing exemption, § Interaction model).
+- Overlay scrims (`bg-black/50`, lightbox chrome) — a full-bleed dimming layer
+  behind a modal/lightbox is its own role, disconnected from any semantic
+  surface color; forcing it onto a token family built for tinting a surface
+  would be the wrong abstraction. Still hand-written on purpose, not debt.
+- The neutral **interaction overlay ladder** (`--overlay-hover`, `--ui-pressed`,
+  etc., § Color) — already tokens, already alpha-based; nothing to migrate.
+
+**Soft-tier tokens (first batch — color-mix, not hand-picked, so each is
+PIXEL-IDENTICAL to the `/NN` call sites it replaces):**
+
+| Token | Formula | Replaces | Role |
+|---|---|---|---|
+| `--muted-soft` | `color-mix(in oklab, var(--muted) 40%, transparent)` | `bg-muted/40` | Neutral hint/tip box background (the missing soft rung for `--muted`, parallel to `--success-soft` etc.) |
+| `--border-soft` | `color-mix(in oklab, var(--border) 60%, transparent)` | `border-border/60` | De-emphasized divider or card edge — softer than the structural `--border` |
+| `--destructive-soft` | `color-mix(in oklab, var(--destructive) 5%, transparent)` | `bg-destructive/5` | Destructive banner/callout background fill (the gap `--success-soft`/`--warning-soft`/`--info-soft` had no destructive counterpart for) |
+| `--destructive-border` | `color-mix(in oklab, var(--destructive) 30%, transparent)` | `border-destructive/30` | Destructive banner/callout border, and a destructive badge/status outline |
+
+Each is registered in the `@theme inline` block so it composes as an ordinary
+utility: `bg-muted-soft`, `border-border-soft`, `bg-destructive-soft`,
+`border-destructive-border`.
+
+(`text-foreground/92` — the sidebar row label — was considered for a fifth
+token, but its only LIVE call site is `SidebarNavButton`'s `rowClass`, already
+the single owner the header comment documents consolidating 3 prior
+duplicates; two apparent siblings in `panel-sessions.vue` sit inside a
+`<!-- archived experiment -->` comment block, not rendered markup. One
+consumer doesn't earn a global token — the line keeps its `/92` with a same-line
+`ui-allow-alpha`, consistent with the `ui-allow-style`/`ui-allow-px` markers
+already on it for the same "reviewed, owned exception" reason.)
+
+Not every `/NN` found in the codebase belongs to one of these four yet — some
+are single-occurrence (no repeated role to name a token after), some need a
+design call on which value is canonical when two or three percentages compete
+for the same role, and some are chat-surface files intentionally left alone
+pending a larger revamp. Those stay hand-written for now, grandfathered by the
+guard's ratchet (below) so they don't block on this pass, but also can't grow.
+
+**Guard**: `scripts/check-ui-contract.mjs` HARD-fails a semantic-color `/NN`
+suffix (`bg|text|border|divide|ring|shadow|from|to|via` on
+`muted|accent|border|foreground|background|destructive|warning|primary|success|info|card|popover|sidebar*`)
+in both `packages/ui` and `apps/web`, except the allowlist above. Existing debt
+is grandfathered in `scripts/ui-alpha-baseline.json` — a ratchet, same shape as
+the px / app-injection / hand-spun-loader baselines: a file keeps its recorded
+count, adding more (or a brand-new file) HARD-fails. Regenerate after a cleanup
+pass with `node scripts/check-ui-contract.mjs --write-baseline`.
+
 ## Motion & Tailwind v4 gotchas
 
 - **Tailwind v4 maps `translate-x/y`, `scale`, `rotate` to the standalone CSS

@@ -570,7 +570,7 @@ onMounted(() => {
 
         <div
           v-if="errorState"
-          class="mt-5 rounded-lg border border-destructive/30 bg-destructive/5 p-4"
+          class="mt-5 rounded-lg border border-destructive-border bg-destructive-soft p-4"
         >
           <div class="flex items-start gap-3">
             <AlertCircle class="size-5 shrink-0 text-destructive mt-0.5" />

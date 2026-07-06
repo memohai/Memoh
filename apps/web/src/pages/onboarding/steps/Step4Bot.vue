@@ -477,7 +477,7 @@ function skipOAuth() {
                  text-xs 表单提示 —— 关系不同,留在本地。 -->
             <div
               v-if="isACPSelected"
-              class="flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5 transition-all duration-[350ms] ease-out delay-[120ms]"
+              class="flex items-center gap-3 rounded-lg border border-border bg-muted-soft px-3 py-2.5 transition-all duration-[350ms] ease-out delay-[120ms]"
               :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
             >
               <component

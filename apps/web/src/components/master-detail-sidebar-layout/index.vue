@@ -22,7 +22,7 @@
           class="flex-1 flex flex-col overflow-hidden min-h-0"
           :class="flush
             ? 'bg-sidebar border-r border-sidebar-border'
-            : 'border border-border/60 bg-muted/10 rounded-lg'"
+            : 'border border-border-soft bg-muted/10 rounded-lg'"
         >
           <!-- Integrated Header (if provided) -->
           <div

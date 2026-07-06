@@ -121,9 +121,9 @@ const blueFillButtonClass = 'inline-flex h-8 items-center gap-1.5 rounded-md bg-
       >
         <span class="text-xs font-medium text-foreground">{{ h.name }}</span>
         <span :class="['h-8 rounded-md', HUE_CLASSES[h.name].bg]" />
-        <span :class="['h-8 rounded-md border border-border/60', HUE_CLASSES[h.name].soft]" />
-        <span :class="['h-8 rounded-md border border-border/60', HUE_CLASSES[h.name].softHover]" />
-        <span :class="['h-8 rounded-md border border-border/60', HUE_CLASSES[h.name].softActive]" />
+        <span :class="['h-8 rounded-md border border-border-soft', HUE_CLASSES[h.name].soft]" />
+        <span :class="['h-8 rounded-md border border-border-soft', HUE_CLASSES[h.name].softHover]" />
+        <span :class="['h-8 rounded-md border border-border-soft', HUE_CLASSES[h.name].softActive]" />
         <span :class="['h-8 rounded-md border-2 bg-background', HUE_CLASSES[h.name].border]" />
       </div>
     </div>

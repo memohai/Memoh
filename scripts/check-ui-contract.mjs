@@ -30,6 +30,17 @@
 //     `z-index: N` CSS literal (not wrapped in var()) WARNs. Escape hatch:
 //     `ui-allow-z` for a genuine context-internal exception (an element only
 //     ordered against its own children/siblings, never another component).
+//   · ALPHA rules — packages/ui AND apps/web (both scopes, ratcheted). Tailwind's
+//     built-in `/NN` opacity suffix on a semantic color name (`text-foreground/92`,
+//     `bg-muted/40`) is hand-written alpha the raw-color regex above cannot see
+//     (that regex only catches bracket/hex literals) — packages/ui/AGENTS.md
+//     "Alpha policy" names this the structural blind spot that let the same
+//     visual role re-derive its own percentage at every call site instead of
+//     sharing one token. A bare `PREFIX-color/NN` HARD-fails unless allowlisted
+//     (`ring-ring/*` is naturally excluded — "ring" isn't in the color list below
+//     — and overlay scrims / the neutral `--overlay-*` ladder don't match this
+//     shape at all). Existing debt is grandfathered in ui-alpha-baseline.json,
+//     same ratchet shape as px/app-injection/spin. Escape hatch: `ui-allow-alpha`.
 //
 // px rules — HARD FAIL (exit 1):
 //   · text-[Npx]      font-size never scales        → use a --text-* token
@@ -42,11 +53,13 @@
 //   size-/blur-/rounded-* (never a text box). Escape hatch: put `ui-allow-px` in a
 //   comment on the SAME line for a sanctioned exception (e.g. a fixed chart height).
 //
-// BASELINE RATCHET (two app families): scripts/ui-px-baseline.json (text-coupled px)
-//   and scripts/ui-app-baseline.json (app-scope injection) record the violation count
-//   per file. A file may keep its grandfathered count, but ADDING more (count grows,
-//   or a brand-new file) HARD-fails — so new code can't regress while existing debt is
-//   burned down per cluster. Regenerate BOTH after a cleanup pass with:
+// BASELINE RATCHET (per-family): scripts/ui-px-baseline.json (text-coupled px),
+//   scripts/ui-app-baseline.json (app-scope injection), scripts/ui-spin-baseline.json
+//   (hand-spun loaders), and scripts/ui-alpha-baseline.json (hand-written alpha)
+//   each record the violation count per file. A file may keep its grandfathered
+//   count, but ADDING more (count grows, or a brand-new file) HARD-fails — so new
+//   code can't regress while existing debt is burned down per cluster. Regenerate
+//   ALL of them after a cleanup pass with:
 //     node scripts/check-ui-contract.mjs --write-baseline
 //
 // CONTRACT rules (packages/ui), unchanged:
@@ -69,6 +82,16 @@
 //      is grandfathered in scripts/ui-spin-baseline.json; adding more HARD-fails.
 //      Deliberate exceptions (bare-glyph rung, deferred chat surfaces) use
 //      `ui-allow-spin` on the line.
+//  13. hand-written alpha — a semantic-color `/NN` suffix (`text-foreground/92`,
+//      `bg-muted/40`) in packages/ui OR apps/web (ratcheted, both scopes — the
+//      only rule family that is). packages/ui/AGENTS.md "Alpha policy" is the
+//      rationale: transparency should come from a `-soft`/`-border`/`-muted`
+//      token, not a hand-picked percentage re-derived at each call site.
+//      Allowlisted: `ring-ring/*` (not matched — "ring" isn't in the color
+//      list), overlay scrims, and the neutral `--overlay-*` ladder (none of
+//      these match the semantic-color shape this rule scans for). Existing
+//      debt is grandfathered in scripts/ui-alpha-baseline.json; adding more
+//      HARD-fails. Escape hatch: `ui-allow-alpha` on the line.
 //
 // Run: node scripts/check-ui-contract.mjs   (wired into `mise run lint`)
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -87,6 +110,7 @@ const EXT = /\.(vue|ts)$/
 const PX_BASELINE_PATH = join(ROOT, 'scripts/ui-px-baseline.json')
 const APP_BASELINE_PATH = join(ROOT, 'scripts/ui-app-baseline.json')
 const SPIN_BASELINE_PATH = join(ROOT, 'scripts/ui-spin-baseline.json')
+const ALPHA_BASELINE_PATH = join(ROOT, 'scripts/ui-alpha-baseline.json')
 const WRITE_BASELINE = process.argv.includes('--write-baseline')
 
 // Exact arbitrary-radius tokens that are legitimately allowed.
@@ -128,9 +152,11 @@ const warn = []
 // debt before promoting overflow into `hard`. pxHard: text-coupled px (both scopes).
 // appHard: app-scope injection — interaction / raw color / invented shadow (apps/web).
 // spinHard: hand-spun loaders — bare `animate-spin` outside the loading owners (apps/web).
+// alphaHard: hand-written semantic-color `/NN` alpha (both scopes — see rule 13).
 const pxHard = []
 const appHard = []
 const spinHard = []
+const alphaHard = []
 
 function walk(dir, full) {
   for (const name of readdirSync(dir)) {
@@ -196,6 +222,7 @@ function scan(file, full) {
     const allowPx = rawLine.includes('ui-allow-px')
     const allowStyle = rawLine.includes('ui-allow-style')
     const allowSpin = rawLine.includes('ui-allow-spin')
+    const allowAlpha = rawLine.includes('ui-allow-alpha')
     if (rawLine.includes('ui-allow-shape')) {
       shapeAllowUntil = i + 10
       // The exemption only earns its keep with the WHY written next to it — a bare
@@ -267,6 +294,24 @@ function scan(file, full) {
       //   component against ITS OWN children, never another component.
       if (!allowZ && (/(?:^|:)z-(?:10|20|30|40|50)$/.test(tok) || /(?:^|:)z-\[[^\]]+\]$/.test(tok)))
         hard.push(`${rel}:${ln}  raw z-index utility off the ladder (use z-(--z-raised / --z-sticky / --z-panel / --z-overlay / --z-top)) → ${tok}`)
+
+      // ── hand-written alpha (BOTH scopes; ratcheted) ──────────────────────
+      //   packages/ui/AGENTS.md "Alpha policy": a semantic-color name carrying
+      //   Tailwind's built-in `/NN` opacity suffix is hand-picked transparency
+      //   the raw-color regex (rule 5/6, bracket/hex only) cannot see. Every
+      //   role this shape can express already has, or should get, a
+      //   `-soft`/`-border`/`-muted` token (color-mix off the base semantic
+      //   color, so it tracks .dark / per-scheme automatically and reproduces
+      //   the exact pixel the /NN call site produced). `ring-ring` is naturally
+      //   excluded — "ring" is not one of the color names below — so the
+      //   pre-existing focus-ring exemption needs no special-case code; overlay
+      //   scrims and the neutral --overlay-* ladder don't match this shape
+      //   either (they're not a semantic-color/NN pair). Escape hatch:
+      //   `ui-allow-alpha` for a call site with no repeated role yet (nothing
+      //   to name a token after) or a deliberate one-off.
+      if (!allowAlpha &&
+          /(?:^|:)(?:bg|text|border|divide|ring|shadow|from|to|via)-(?:muted|accent|border|foreground|background|destructive|warning|primary|success|info|card|popover|sidebar[a-z-]*)\/[0-9]+$/.test(tok))
+        alphaHard.push({ rel, ln, msg: `hand-written alpha (use a -soft/-border/-muted token, or add one — see packages/ui/AGENTS.md § Alpha policy) → ${tok}` })
 
       // ── app-scope injection rules (apps/web only; ratcheted) ─────────────
       //   The library owns interaction chrome (style.css ::before), color (palette
@@ -444,17 +489,20 @@ function ratchet(byFile, path, items, label, allowTag) {
 const pxByFile = countByFile(pxHard)
 const appByFile = countByFile(appHard)
 const spinByFile = countByFile(spinHard)
+const alphaByFile = countByFile(alphaHard)
 
 if (WRITE_BASELINE) {
   writeBaseline(PX_BASELINE_PATH, pxByFile, 'px')
   writeBaseline(APP_BASELINE_PATH, appByFile, 'app-injection')
   writeBaseline(SPIN_BASELINE_PATH, spinByFile, 'hand-spun-loader')
+  writeBaseline(ALPHA_BASELINE_PATH, alphaByFile, 'alpha')
   process.exit(0)
 }
 
 const pxGrand = ratchet(pxByFile, PX_BASELINE_PATH, pxHard, 'px', 'ui-allow-px')
 const appGrand = ratchet(appByFile, APP_BASELINE_PATH, appHard, 'app-injection', 'ui-allow-style')
 const spinGrand = ratchet(spinByFile, SPIN_BASELINE_PATH, spinHard, 'hand-spun-loader', 'ui-allow-spin')
+const alphaGrand = ratchet(alphaByFile, ALPHA_BASELINE_PATH, alphaHard, 'alpha', 'ui-allow-alpha')
 
 if (warn.length) {
   console.warn(`\n⚠ UI contract — ${warn.length} warning(s):`)
@@ -466,6 +514,8 @@ if (appGrand)
   console.log(`ℹ app-injection baseline: ${appGrand} grandfathered injection(s) remaining — burn down per cluster, then re-run with --write-baseline`)
 if (spinGrand)
   console.log(`ℹ hand-spun-loader baseline: ${spinGrand} grandfathered loader(s) remaining — adopt a loading-ladder rung per cluster, then re-run with --write-baseline`)
+if (alphaGrand)
+  console.log(`ℹ alpha baseline: ${alphaGrand} grandfathered hand-written alpha value(s) remaining — burn down per cluster, then re-run with --write-baseline`)
 if (hard.length) {
   console.error(`\n✗ UI contract — ${hard.length} violation(s):`)
   for (const h of hard) console.error(`  ${h}`)

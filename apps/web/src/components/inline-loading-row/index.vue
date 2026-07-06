@@ -12,7 +12,7 @@
     :class="[
       'flex items-center gap-2 text-muted-foreground',
       size === 'md' ? 'text-sm' : 'text-xs',
-      bordered && 'rounded-md border border-border/60 bg-background p-3',
+      bordered && 'rounded-md border border-border-soft bg-background p-3',
       surface === 'card-row' && 'mx-4 min-h-[3.75rem] border-b border-border py-3 last:border-b-0',
       surface === 'tab' && 'px-2 py-8',
     ]"
