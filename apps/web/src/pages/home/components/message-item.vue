@@ -270,6 +270,7 @@
           />
         </div>
         <MessageActions
+          v-if="!isEditingUserMessage"
           class="-mt-1"
           role="user"
           :copy-text="userCopyText"
