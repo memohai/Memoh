@@ -15,7 +15,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "vitest",
-    "prepare": "husky"
+    "prepare": "husky",
+    "postinstall": "node scripts/check-patched-deps.mjs"
   },
   "keywords": [],
   "author": "",
