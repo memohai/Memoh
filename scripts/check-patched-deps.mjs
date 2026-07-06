@@ -90,36 +90,43 @@ function extractMarkers(patchFile) {
   return markers
 }
 
-/** Locate the installed package dir for a patched spec ("name@version").
- * Scoped names use pnpm's `+` encoding in the .pnpm directory. The glob over
- * `_patch_hash=` suffixes is intentional: we don't recompute the hash — the
- * whole point is to distrust it and read the content instead. */
-function findInstalledDir(spec) {
+/** Locate every installed dir for a patched spec ("name@version").
+ * Scoped names use pnpm's `+` encoding in the .pnpm directory. Plural on
+ * purpose: peer-dependency variants materialize as separate `_patch_hash=…_…`
+ * directories and EACH copy must carry the patch. The glob over the hash
+ * suffix is intentional: we don't recompute the hash — the whole point is to
+ * distrust it and read the content instead. */
+function findInstalledDirs(spec) {
   const at = spec.lastIndexOf('@')
   const name = spec.slice(0, at)
   const encoded = name.replace(/\//g, '+')
   const pnpmDir = path.join(repoRoot, 'node_modules', '.pnpm')
-  if (!fs.existsSync(pnpmDir)) return null
+  if (!fs.existsSync(pnpmDir)) return []
   const prefix = `${encoded}@${spec.slice(at + 1)}_patch_hash=`
-  const match = fs.readdirSync(pnpmDir).find((d) => d.startsWith(prefix))
-  return match ? path.join(pnpmDir, match, 'node_modules', name) : null
+  return fs
+    .readdirSync(pnpmDir)
+    .filter((d) => d.startsWith(prefix))
+    .map((d) => path.join(pnpmDir, d, 'node_modules', name))
 }
 
 const failures = []
 for (const { spec, patchPath } of readPatchedDependencies()) {
-  const installedDir = findInstalledDir(spec)
-  if (!installedDir) {
+  const installedDirs = findInstalledDirs(spec)
+  if (installedDirs.length === 0) {
     failures.push(`${spec}: no _patch_hash directory found in node_modules/.pnpm (patch not applied at all?)`)
     continue
   }
-  for (const { file, line } of extractMarkers(path.join(repoRoot, patchPath))) {
-    const target = path.join(installedDir, file)
-    if (!fs.existsSync(target)) {
-      failures.push(`${spec}: patched file missing: ${file}`)
-      continue
-    }
-    if (!fs.readFileSync(target, 'utf8').includes(line)) {
-      failures.push(`${spec}: ${file} does not contain the patch's added code — directory is named as patched but holds unpatched content`)
+  const markers = extractMarkers(path.join(repoRoot, patchPath))
+  for (const installedDir of installedDirs) {
+    for (const { file, line } of markers) {
+      const target = path.join(installedDir, file)
+      if (!fs.existsSync(target)) {
+        failures.push(`${spec}: patched file missing: ${file}`)
+        continue
+      }
+      if (!fs.readFileSync(target, 'utf8').includes(line)) {
+        failures.push(`${spec}: ${file} does not contain the patch's added code — directory is named as patched but holds unpatched content`)
+      }
     }
   }
 }
@@ -130,9 +137,13 @@ if (failures.length > 0) {
   console.error(
     '\nThe pnpm cache has served stale/corrupted content for a patched package.' +
       '\nRecover with:' +
-      '\n  rm -rf node_modules/.pnpm node_modules/.modules.yaml .pnpm-store' +
+      '\n  rm -rf node_modules/.pnpm node_modules/.modules.yaml .pnpm-store apps/*/node_modules/.vite' +
       '\n  pnpm install' +
-      '\n(inside the dev container if you develop via devenv/docker-compose).',
+      '\n(inside the dev container if you develop via devenv/docker-compose).' +
+      "\nClearing apps/*/node_modules/.vite matters: the dep optimizer's cache key is" +
+      '\nthe lockfile, which a cache-poisoning incident does NOT change, so a bundle' +
+      '\nbuilt from the poisoned install would otherwise be served even after the' +
+      '\nreinstall fixes node_modules.',
   )
   process.exit(1)
 }

@@ -150,6 +150,11 @@ services:
     working_dir: /workspace/apps/web
     command: ["pnpm", "exec", "vite", "--host", "0.0.0.0", "--port", "8082"]
     environment:
+      # Same store as the deps service: any `pnpm install` run inside this
+      # container (debugging, one-off upgrades) must NOT fall back to the
+      # default store logic, or it re-creates the host-shared repo-root store
+      # this env var exists to eliminate.
+      npm_config_store_dir: /workspace/node_modules/.pnpm-store
       MEMOH_CONFIG_PATH: /workspace/devenv/app.dev.toml
       MEMOH_WEB_PROXY_TARGET: http://server:8080
     volumes:
