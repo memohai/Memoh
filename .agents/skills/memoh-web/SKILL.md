@@ -382,6 +382,16 @@ recurring failures to avoid:
   reads as cheap chrome and cheapens the page. Ship none by default; when a spot genuinely seems
   to want one, **clear it with the developer before adding it** rather than sprinkling icons on
   your own judgment.
+- **Never reuse a bordered/filled primitive as a leading icon inside a card that already has its
+  own border.** `ItemMedia variant="icon"` and any similar tile primitive bake in their own
+  `border` — that is correct where they're designed to stand alone, but dropping one inside a card
+  that already carries `border-border` stacks TWO strokes on one visual unit, visible at once. This
+  is the "chrome layers stacked on a control" violation (§ The one rule — clean vs dirty) hiding
+  behind an otherwise-correct instinct ("reuse, don't hand-roll") — it slips past review because the
+  primitive is real and contract-listed, not hand-rolled CSS. When you need an icon at a specific
+  *footprint* (e.g. matching an adjacent control's size so two rows carry comparable weight), borrow
+  only the size (`flex items-center justify-center` at whatever size fits) — never the primitive's
+  border/bg. See `reference.md` § Dirty → clean for the full case (`ActionCard`'s icon slot).
 - **`BadgeCount`:** `destructive` red dot pinned to an icon corner = alert/unread; `default`
   neutral count rides a tab/filter/segment; a flat list row uses a plain muted numeral, no bubble.
 - **`Tooltip`:** always the `@memohai/ui` `Tooltip`. A hand-rolled or legacy tooltip is a bug.
@@ -845,6 +855,88 @@ There is one house form, and the **New Task dialog** (`bot-schedule.vue`'s creat
 - **Footer:** a ghost **Cancel** + a single filled primary (Create / Confirm); a destructive
   delete, when present, sits far left. Validate on **submit**, not on blur (§ 2) — gate the
   primary with a `canSubmit` and surface the error only when they try.
+
+**A dialog that swaps between views (a list and an add/edit form) has ONE header, and the
+swap is animated.** When a dialog holds a list plus a form the user drills into, the form is a
+**view swap inside the same dialog**, not a second card dropped into the body. The rules, all
+learned from the Access → Advanced rules dialog that broke them:
+
+- **The `Dialog` owns the only header.** The form view must NOT grow its own `<h3>` title +
+  close/cancel `X` — stacking a title bar on top of the `DialogTitle` + the built-in close
+  button is the **card-in-card / double-header** bug. Instead the single `DialogTitle` tracks
+  the active view (list title vs. the action name), and a back **chevron** in the header pops
+  to the list. Likewise a form that is the dialog's *whole* view carries no border/divider of
+  its own (no `border-b` sub-card frame, no footer `border-t` above the buttons) — those
+  dividers only make sense separating peers *inside* a populated body, not framing the sole
+  view. The `DialogContent` edge is already the frame.
+- **The list view's toolbar is a balanced row, not a floating button.** A populated list gets
+  one toolbar row above it: a `sm` search `InputGroup` on the left and the `+ Add` outline
+  button on the right — the search input is functional (rules/entries filter) *and* it is what
+  visually balances the row, so the add button never floats alone in a right-aligned void. In
+  a wide dialog (`sm:max-w-2xl`) the search **fills the row** (`min-w-0 flex-1`) up to the add
+  button — a capped-width search leaves a dead void between the anchors that reads as a layout
+  mistake (tried, rejected on sight). No divider under the toolbar; spacing alone separates it
+  from the first row (same as the models list toolbar). When the search matches nothing, show
+  a quiet muted line ("no match") — NOT the "No X yet" empty state, which would mislead (items
+  exist). When the list is truly empty, there is no toolbar at all: the guiding action lives
+  inside the `Empty` block (§ 3).
+- **Each view renders ALONE.** Every list-view branch (toolbar, rows, empty, no-match) must be
+  gated on `!formVisible` as well as its own condition — a `v-if` that only checks the data
+  (`items.length`) leaks the list rows *above* the form view, and their `border-b` shows up as
+  a mystery divider under the form title. The form is the dialog's only body while open.
+- **Wrap the swapping body in `@memohai/ui`'s `<AutoHeight>`** so list→form height changes
+  tween (220ms house spring) instead of hard-cutting — a dialog that jumps size on every
+  drill-in reads as broken. `AutoHeight` is the height-tween primitive (see
+  `packages/ui/AGENTS.md` § Motion); keep it *inside* the `overflow-y-auto` scroll element,
+  never as the scroller itself.
+
+**Dialog headers fork into exactly two forms — pick one, don't blend.** (a) **Workbench
+dialog**: title top-LEFT + close top-right — the house default for a dialog that is one
+focused form (New Task, settings forms); what `DialogHeader` + `DialogTitle` render
+naturally. (b) **List-management dialog**: title CENTERED, close top-right, body led by the
+search+add toolbar above. For form (b), use `@memohai/ui`'s **`DialogViewHeader`** — do NOT
+hand-write the grid, and do NOT keep the built-in corner close (it pins at `top-3` while the
+title row sits below the content padding, so their centerlines miss by ~12px and the header
+reads broken the moment a back chevron joins). Pass `:show-close-button="false"` on
+`DialogContent`, then `<DialogViewHeader :centered="…" :show-back="…" :back-label="$t('common.back')"
+@back="…">{{ title }}</DialogViewHeader>` lays back / title / close in ONE
+`grid-cols-[2rem_1fr_2rem]` row with all three glyphs on a single centerline. (The traps it
+bakes in, for anyone tempted to hand-roll: equal side columns with a spacer `<span>` when no
+chevron; the inline close stays **`relative`, NEVER `static`** — its ghost hover wash is an
+absolute `::before{inset:0}` that needs the button as containing block, and `static` lets it
+escape to the fixed `DialogContent`, tinting the whole dialog on hover.)
+Never let fragments of both forms coexist (a left title AND a centered element AND a
+full-width divider under a lone button was the original mess).
+
+**A centered title needs BOTH flanks balanced — otherwise it flushes left.** Form (b) is not
+"always centered": the centering is only earned when something anchors each side of the title.
+So the SAME dialog switches between (a) and (b) by state:
+- **Form view** — the back chevron on the left balances the close on the right → centered.
+- **Populated list** — the list body below gives the header visual weight to sit centered above → centered.
+- **Bare empty state** — no chevron, no rows, just a centered "No X" block below → a centered
+  title would float untethered, so it drops to workbench (a): title flush-LEFT, close right.
+Drive it with one predicate (`centerDialogTitle = formVisible || items.length > 0`) passed to
+`DialogViewHeader`'s `centered` prop (with `show-back` for the form-view chevron). This
+"centering must be anchored, never decorative" is the general law behind the fork — apply it
+wherever a title could center. The component deliberately does NOT guess from data; the
+caller owns the predicate.
+
+**The scrolling dialog body is `DialogBody`, and it fades at the scroll edges.** For the
+capped-panel shell (`DialogContent class="max-h-[80dvh] grid-rows-[auto_minmax(0,1fr)]"`),
+the body row is `@memohai/ui`'s `<DialogBody>` — it owns the `-mr-3 pr-3` scroll-gutter trick
+AND a stateful scroll-edge fade: content continuing past the box fades out over the last
+16px, each edge only while more content actually exists in that direction (top of scroll → no
+top fade; bottom reached → fade dissolves; content shorter than the box → no fade at all),
+and the fade's own appearance eases (200ms) instead of popping. Don't hand-write the plain
+`overflow-y-auto` div (hard-clips content mid-line at the row boundary — reads brutal) or a
+static `[mask-image:…]` fade (eats the first/last lines even at the scroll ends). `AutoHeight`
+nests INSIDE `DialogBody`, never the other way around.
+
+> The remaining hand-written part of the list-management pattern is the body composition
+> (search+add toolbar, rows, empty/no-match states, AutoHeight'd list↔form swap) in
+> `bot-access.vue`. The shell primitives (`DialogViewHeader`, `DialogBody`, `AutoHeight`) are
+> already in `@memohai/ui` — compose those; if a second full list-management dialog appears,
+> consider lifting the body composition too.
 
 **Size controls deliberately — not "all small," not "all large."** The height ladder is
 `sm` h-8 · default h-9 · `lg` h-10. **Default (h-9, full height) is the norm**, and it is the

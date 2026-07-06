@@ -145,16 +145,22 @@
     </section>
   </SwapTransition>
 
-  <!-- Import: paste a standard mcpServers JSON; same-name servers are updated. -->
+  <!-- Import: paste a standard mcpServers JSON; same-name servers are updated.
+       Same unified shell as the other focused dialogs (appearance / access):
+       fixed 80dvh panel, grid rows header/body/footer, the default p-6 +
+       DialogContent edge as the only frame — no full-bleed border-b/border-t
+       bars (dividers separate peers inside a body, they don't frame the
+       shell). Fixed height (not max-h): Monaco has no intrinsic height, so
+       the body row must be given one to fill. -->
   <Dialog v-model:open="importOpen">
-    <DialogContent class="flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden p-0 sm:h-[70vh] sm:max-w-3xl">
-      <DialogHeader class="shrink-0 border-b border-border p-4">
+    <DialogContent class="h-[80dvh] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-3xl">
+      <DialogHeader>
         <DialogTitle>{{ $t('mcp.importSandbox') }}</DialogTitle>
         <DialogDescription>{{ $t('mcp.importHint') }}</DialogDescription>
       </DialogHeader>
 
-      <div class="min-h-0 flex-1 p-4">
-        <div class="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-menu-shell)] border border-border">
+      <div class="flex min-h-0 flex-col">
+        <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-menu-shell)] border border-border">
           <MonacoEditor
             v-model="importJson"
             language="json"
@@ -176,7 +182,7 @@
         </p>
       </div>
 
-      <DialogFooter class="shrink-0 items-center gap-2 border-t border-border p-4 sm:justify-between">
+      <DialogFooter class="items-center gap-2 sm:justify-between">
         <Button
           variant="outline"
           :disabled="importSubmitting"

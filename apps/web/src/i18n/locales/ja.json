@@ -235,7 +235,9 @@
       "codeHighlightDescription": "コードブロックとエディタに適用される配色。",
       "diagrams": "ダイアグラム",
       "mermaidTheme": "Mermaid テーマ",
-      "mermaidThemeDescription": "レンダリング済みの Mermaid 図表に適用されます。"
+      "mermaidThemeDescription": "レンダリング済みの Mermaid 図表に適用されます。",
+      "advanced": "詳細",
+      "advancedEntryTitle": "コードとダイアグラム"
     },
     "keyboard": {
       "title": "キーボードショートカット",
@@ -2348,8 +2350,7 @@
         "removeFailed": "メンバーの削除に失敗しました"
       },
       "advanced": {
-        "show": "詳細ルールを表示する",
-        "hide": "詳細ルールを非表示にする"
+        "entryTitle": "詳細ルール"
       },
       "defaultEffectTitle": "デフォルトの効果",
       "defaultEffectDescription": "受信メッセージに一致するルールがない場合に適用されます。",
@@ -2372,8 +2373,6 @@
       "blacklistEmptyDescription": "アクティブなブロックはありません。他のルールに当てはまらない人も参加できます。",
       "whitelistEmpty": "ホワイトリストが空です",
       "whitelistEmptyDescription": "まだ許可されたエントリはありません。他のルールに一致しない人はブロックされます。",
-      "blacklistPreview": "{target} をブラックリストに追加します。",
-      "whitelistPreview": "{target} をホワイトリストに追加します。",
       "platformQuestion": "これはどのプラットフォームに対応していますか?",
       "userQuestion": "これはどのユーザーに適用されますか?",
       "allPlatforms": "すべてのプラットフォーム",
@@ -2395,6 +2394,8 @@
       "editRule": "ルールの編集",
       "rulesEmpty": "ルールなし",
       "rulesEmptyDescription": "デフォルトの動作をオーバーライドするルールを追加します。",
+      "searchRules": "ルールを検索…",
+      "searchNoMatch": "検索に一致するルールがありません。",
       "enabled": "有効",
       "effect": "アクション",
       "matchTarget": "適用対象",

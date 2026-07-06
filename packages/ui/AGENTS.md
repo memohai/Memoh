@@ -197,13 +197,69 @@ which silently leaves the SVG at its 24px intrinsic size.)
 of hand-rolling a hover on text. For an underlined inline link inside running
 prose use `variant="link"`; for a control-sized action use a normal `<Button>`.
 
+### "A card that DOES something / goes somewhere" = `<ActionCard>`
+
+The recurring need to offer an **entry point** — a card that, when clicked, takes
+the user to a next surface (a slide-in detail, a focused dialog, an external URL)
+— is NOT a display card with an `@click` bolted on, and NOT a `<Button>` stretched
+to card width. It is its own affordance: `<ActionCard>`. It wears the same
+white-card language (`bg-card`, one `border-border` hairline, flat) so it sits
+among ordinary cards, but three marks make it read as *action*, not
+*information*:
+
+- a **required leading icon** (the `#icon` slot — the caller passes a lucide
+  component; the card bakes in no glyph, so it never becomes icon-abuse the card
+  can't justify), colored `text-foreground` — the SAME weight as the title, not
+  muted, so it doesn't lose contrast under the (deliberately subtle) hover fill,
+- a **required trailing forward chevron** (`ChevronRight`, overridable via
+  `#trailing` — e.g. an `ArrowUpRight` for an external link), kept muted per the
+  system-wide directional-glyph convention,
+- the **whole card** reacts to the pointer: hover/press change the fill across the
+  entire surface with the bespoke `--action-card-hover` / `--action-card-active`
+  pair — NOT the shared overlay ladder. ActionCard is the one control whose hover
+  surface is a whole card, and at that area even the ladder's lightest rung read
+  too strong on dark, so it gets its own measured-delta wash (defined + justified
+  in `style.css` `:root`; ~9 RGB delta on the card fill). At a snappy 15ms.
+
+**Radius is `--radius-menu-shell` (12px), NOT the generic Card family's
+`--radius-xl` (14px).** ActionCard is almost always adjacent to `SettingsSection`
+rows or the app-layer `BackendCard` (both 12px) — sharing their corner keeps a
+mixed list of ActionCards and settings rows reading as one system instead of two
+subtly different rounds. It is set as a plain CSS property on
+`[data-slot="action-card"]` in `style.css` (mirroring how the Toast shell sets the
+same token) rather than a Tailwind `rounded-[…]` class, because the guard
+HARD-fails arbitrary-radius Tailwind tokens inside `packages/ui`.
+
+Two things make this contract-clean where a hand-rolled clickable card is not:
+
+1. **The hover fill is a `::before` neutral overlay, not a `bg-*` swap.** `--card`
+   (white) ≠ `--background`, so `hover:bg-[var(--ui-hover)]` on the card body would
+   *replace* the white fill and bleed the page surface through the hover (the trap
+   the `bg-accent/30` hand-hack in the old app-layer `BackendCard` danced around).
+   The overlay lives on a `z-index:-1` `::before` (style.css,
+   `data-slot="action-card"`), composited **over** `bg-card` and **under** the
+   content, so the whole card darkens in light / lightens in dark, scheme-agnostic,
+   no `dark:` override. Same mechanism as the ghost button.
+2. **No press-scale — this is a large content card.** The "no hover-rise" rule
+   forbids a big card lifting/shrinking; the press reads purely through a deeper
+   fill (`--ui-pressed`), like a table row. Press-scale stays on small
+   buttons/rail items only.
+
+It is **presentation-agnostic**: it only says "this is an action entry" and emits
+a click / is a link (`as="a"` + `href` for external). The next surface is the
+caller's choice. This is the component the page contract's "named entry point →
+focused surface" pattern (SKILL §9/§12) was missing — reach for it instead of
+stashing whole features behind an in-card "Advanced" disclosure, or re-skinning a
+list row (`Item` / the app-layer `BackendCard`) whose meaning is "one of many
+peers", not "one door to somewhere else".
+
 ## Reference status (new vs legacy)
 
 > Confirm / extend this list with the maintainer before treating anything as gospel.
 
 - **Reference (refactored — copy these):** Button, Input, Textarea, Select /
   SelectTrigger, NativeSelect, Checkbox, Switch, NumberField, InputGroup, Field,
-  SegmentedControl, Toggle.
+  SegmentedControl, Toggle, ActionCard.
 - **In progress / upcoming:** Slider, RadioGroup, Select menu surface, Combobox,
   PinInput, InputOTP, TagsInput (mid-refactor — their pre-refactor code is a
   textbook § Dirty patterns exhibit; check it in git, do not copy the in-flight
@@ -661,9 +717,47 @@ pass with `node scripts/check-ui-contract.mjs --write-baseline`.
   `style.css` interaction blocks already animate `translate` / `scale` directly —
   follow that, do not assume v3 `transform`.
 - Duration palette in use: field edge ~70ms · switch ~110ms · button color
-  ~150ms · toggle release 160ms / press 40ms · button press-scale 255ms (springy
-  `linear(...)`) · segmented thumb 250ms. Keep new motion within this range and
-  sync co-moving properties (e.g. switch track color + thumb glide both 110ms).
+  ~150ms · toggle release 160ms / press 40ms · accordion reveal 180ms · AutoHeight
+  swap 220ms · button press-scale 255ms (springy `linear(...)`) · segmented thumb
+  250ms. Keep new motion within this range and sync co-moving properties (e.g.
+  switch track color + thumb glide both 110ms).
+- **`AutoHeight` — height tween for content swaps.** When a container's content
+  changes size in place (a dialog's list↔form view swap, a section revealing
+  fields), wrap it in `<AutoHeight>` so the height animates (220ms, house spring
+  `cubic-bezier(0.32, 0.72, 0, 1)` — a straight ease reads mechanical at this
+  size) instead of hard-cutting. It measures its slot via `ResizeObserver` and
+  sets an explicit px height on a `overflow-hidden` root; first paint does not
+  animate (reveals as a plain cut, like `SwapTransition`), and
+  `prefers-reduced-motion` drops the transition. **It is NOT the scroll
+  container** — its clip would trap overflow with no scrollbar; keep the
+  `overflow-y-auto` element as a separate ancestor and put `AutoHeight` inside
+  it. Popovers/selects inside the slot portal to `<body>`, so they are never
+  clipped.
+- **`DialogBody` — the scrollable body row of a capped dialog.** For
+  `DialogContent class="max-h-[80dvh] grid-rows-[auto_minmax(0,1fr)]"`, the
+  body row is `<DialogBody>`: it owns the `-mr-3 pr-3` scroll gutter AND a
+  stateful scroll-edge fade — content continuing past the box fades out over
+  the last 16px, and each edge only fades while more content exists in that
+  direction (top of scroll → no top fade; bottom reached → no bottom fade;
+  short content → no fade). The fade distance is a registered `@property`
+  `<length>` so its appearance eases (200ms) instead of popping;
+  `prefers-reduced-motion` drops the transition. Do NOT hand-write
+  `[mask-image:linear-gradient(...)]` scroll fades in dialogs — that mask is
+  static (fades even at the scroll ends); use this. Nest `AutoHeight` INSIDE
+  it, never the other way (AutoHeight can't scroll, DialogBody can't clip a
+  height tween).
+- **`DialogViewHeader` — back / title / close on ONE centerline.** For a
+  dialog that swaps views (list ↔ drill-in form) or any header where the
+  built-in corner close (`top-3`) would sit off the title's centerline. Caller
+  passes `:show-close-button="false"` on `DialogContent`; this header renders
+  the close inline (kept `relative`, NEVER `static` — the ghost hover
+  `::before{inset:0}` needs the button as containing block or it tints the
+  whole dialog). `centered` + `showBack` are driven by the CALLER's predicate:
+  a centered title must be anchored on both flanks (back chevron, or body
+  weight below) — bare empty states flush left. Title is the default slot;
+  `backLabel` takes the localized aria-label; emits `back`.
+
+
 
 ## Framework versions (do not assume older)
 

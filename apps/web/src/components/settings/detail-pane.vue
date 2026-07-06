@@ -1,19 +1,17 @@
 <template>
   <div>
-    <!-- Back row, width-matched to the reused detail body below (which brings its
-         own SettingsShell) so the arrow lines up with the content's left edge. -->
+    <!-- Back row, width-matched to the reused detail body below (which brings
+         its own SettingsShell) so the header shares the content's rails. The
+         button itself (geometry, alignment, hover-chip overhang) is
+         SettingsBackButton — one shared spec, tuned there only. -->
     <div
       class="mx-auto w-full px-4 pt-4 md:px-6 md:pt-6"
       :class="widthClass"
     >
-      <Button
-        variant="ghost"
-        class="max-w-full text-foreground/85"
+      <SettingsBackButton
+        :label="backLabel"
         @click="emit('back')"
-      >
-        <ChevronLeft class="size-4 shrink-0" />
-        <span class="min-w-0 truncate">{{ backLabel }}</span>
-      </Button>
+      />
     </div>
 
     <slot />
@@ -22,8 +20,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Button } from '@memohai/ui'
-import { ChevronLeft } from 'lucide-vue-next'
+import SettingsBackButton from '@/components/settings/back-button.vue'
 
 const props = withDefaults(defineProps<{
   backLabel: string

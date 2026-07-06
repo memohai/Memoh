@@ -40,7 +40,13 @@ const curTranscription = ref<AudioSpeechProviderResponse>()
 provide('curTtsProvider', curTts)
 provide('curTranscriptionProvider', curTranscription)
 
-const { view, direction, openDetail, backToList } = useViewSwap()
+// 'detail' query key: see useViewSwap.ts — makes re-clicking Voice in the
+// settings sidebar while a provider's detail is open actually navigate back.
+// detailKind (which of the two provider kinds) stays a local ref, not mirrored
+// into the query: the only way `view` flips to 'detail' is openSpeech/
+// openTranscription below, which always set detailKind first — there is no
+// path where the query alone drives view into 'detail' with detailKind unset.
+const { view, direction, openDetail, backToList } = useViewSwap('detail')
 const detailKind = ref<'speech' | 'transcription'>('speech')
 const openStatus = reactive({ addSpeechOpen: false, addTranscriptionOpen: false })
 
