@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	dbpkg "github.com/memohai/memoh/internal/db"
@@ -78,12 +79,28 @@ func NewService(log *slog.Logger, queries dbstore.Queries, publishers ...event.P
 
 // Persist writes a single message to bot_history_messages.
 func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, error) {
+	const maxTurnSequenceRetries = 3
+	var lastErr error
+	for attempt := 0; attempt < maxTurnSequenceRetries; attempt++ {
+		result, err := s.persistOnce(ctx, input)
+		if err == nil {
+			if !input.SkipHistoryTurn {
+				s.publishMessageCreated(result)
+			}
+			return result, nil
+		}
+		if !isTurnSequenceUniqueViolation(err) {
+			return Message{}, err
+		}
+		lastErr = err
+	}
+	return Message{}, lastErr
+}
+
+func (s *DBService) persistOnce(ctx context.Context, input PersistInput) (Message, error) {
 	if result, handled, err := s.persistDirectWithoutTx(ctx, input); handled || err != nil {
 		if err != nil {
 			return Message{}, err
-		}
-		if !input.SkipHistoryTurn {
-			s.publishMessageCreated(result)
 		}
 		return result, nil
 	}
@@ -99,9 +116,6 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 		}); err != nil {
 			return Message{}, err
 		}
-		if !input.SkipHistoryTurn {
-			s.publishMessageCreated(result)
-		}
 		return result, nil
 	}
 
@@ -109,10 +123,20 @@ func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, e
 	if err != nil {
 		return Message{}, err
 	}
-	if !input.SkipHistoryTurn {
-		s.publishMessageCreated(result)
-	}
 	return result, nil
+}
+
+func isTurnSequenceUniqueViolation(err error) bool {
+	if !dbpkg.IsUniqueViolation(err) {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.ConstraintName == "idx_bot_history_messages_turn_seq_unique" {
+		return true
+	}
+	text := err.Error()
+	return strings.Contains(text, "idx_bot_history_messages_turn_seq_unique") ||
+		strings.Contains(text, "bot_history_messages.turn_id, bot_history_messages.turn_message_seq")
 }
 
 // PersistToolTailRound writes the common user -> assistant(tool-call) -> tool

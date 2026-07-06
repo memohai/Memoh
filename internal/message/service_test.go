@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -196,6 +197,119 @@ func TestPersistCleansUpMessageWhenHistoryTurnFails(t *testing.T) {
 	}
 	if len(publisher.events) != 0 {
 		t.Fatalf("published events = %d, want 0", len(publisher.events))
+	}
+}
+
+type retryTurnSequenceQueries struct {
+	dbstore.Queries
+
+	linkAttempts int
+	deleted      []pgtype.UUID
+}
+
+func (*retryTurnSequenceQueries) GetSessionByID(_ context.Context, id pgtype.UUID) (sqlc.BotSession, error) {
+	return sqlc.BotSession{
+		ID:          id,
+		Type:        "chat",
+		SessionMode: "chat",
+		RuntimeType: "model",
+	}, nil
+}
+
+func (*retryTurnSequenceQueries) CreateMessage(_ context.Context, arg sqlc.CreateMessageParams) (sqlc.CreateMessageRow, error) {
+	return sqlc.CreateMessageRow{
+		ID:          testMessageUUID("55555555-5555-5555-5555-555555555555"),
+		BotID:       arg.BotID,
+		SessionID:   arg.SessionID,
+		Role:        arg.Role,
+		Content:     arg.Content,
+		Metadata:    arg.Metadata,
+		Usage:       arg.Usage,
+		SessionMode: arg.SessionMode,
+		RuntimeType: arg.RuntimeType,
+		DisplayText: arg.DisplayText,
+		CreatedAt:   pgtype.Timestamptz{Valid: true},
+	}, nil
+}
+
+func (*retryTurnSequenceQueries) CreateHistoryTurn(_ context.Context, arg sqlc.CreateHistoryTurnParams) (sqlc.BotHistoryTurn, error) {
+	return sqlc.BotHistoryTurn{
+		ID:        testMessageUUID("66666666-6666-6666-6666-666666666666"),
+		BotID:     arg.BotID,
+		SessionID: arg.SessionID,
+		Position:  1,
+	}, nil
+}
+
+func (*retryTurnSequenceQueries) AppendMessageToHistoryTurnByRequest(context.Context, sqlc.AppendMessageToHistoryTurnByRequestParams) (pgtype.UUID, error) {
+	return pgtype.UUID{}, nil
+}
+
+func (*retryTurnSequenceQueries) BindHistoryTurnAssistantByRequest(_ context.Context, arg sqlc.BindHistoryTurnAssistantByRequestParams) (sqlc.BotHistoryTurn, error) {
+	return sqlc.BotHistoryTurn{
+		ID:                 testMessageUUID("66666666-6666-6666-6666-666666666666"),
+		SessionID:          arg.SessionID,
+		RequestMessageID:   arg.RequestMessageID,
+		AssistantMessageID: arg.AssistantMessageID,
+		Position:           1,
+	}, nil
+}
+
+func (*retryTurnSequenceQueries) BindLatestHistoryTurnAssistant(context.Context, sqlc.BindLatestHistoryTurnAssistantParams) (sqlc.BotHistoryTurn, error) {
+	return sqlc.BotHistoryTurn{}, nil
+}
+
+func (*retryTurnSequenceQueries) GetLatestVisibleHistoryTurnBySession(context.Context, pgtype.UUID) (sqlc.BotHistoryTurn, error) {
+	return sqlc.BotHistoryTurn{}, nil
+}
+
+func (q *retryTurnSequenceQueries) LinkMessageToHistoryTurn(_ context.Context, arg sqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error) {
+	q.linkAttempts++
+	if q.linkAttempts == 1 {
+		return pgtype.UUID{}, &pgconn.PgError{Code: "23505", ConstraintName: "idx_bot_history_messages_turn_seq_unique"}
+	}
+	return arg.MessageID, nil
+}
+
+func (*retryTurnSequenceQueries) AppendMessageToLatestHistoryTurn(context.Context, sqlc.AppendMessageToLatestHistoryTurnParams) error {
+	return nil
+}
+
+func (*retryTurnSequenceQueries) LinkUnassignedMessagesAfterHistoryTurnAssistant(context.Context, pgtype.UUID) error {
+	return nil
+}
+
+func (q *retryTurnSequenceQueries) DeleteMessagesByIDs(_ context.Context, ids []pgtype.UUID) error {
+	q.deleted = append(q.deleted, ids...)
+	return nil
+}
+
+func TestPersistRetriesTurnSequenceUniqueViolation(t *testing.T) {
+	queries := &retryTurnSequenceQueries{}
+	publisher := &recordingPublisher{}
+	svc := NewService(nil, queries, publisher)
+
+	msg, err := svc.Persist(context.Background(), PersistInput{
+		BotID:                "11111111-1111-1111-1111-111111111111",
+		SessionID:            "22222222-2222-2222-2222-222222222222",
+		Role:                 "assistant",
+		Content:              []byte(`{"type":"text","text":"hello"}`),
+		TurnRequestMessageID: "77777777-7777-7777-7777-777777777777",
+	})
+	if err != nil {
+		t.Fatalf("Persist() error = %v", err)
+	}
+	if msg.ID != "55555555-5555-5555-5555-555555555555" {
+		t.Fatalf("message id = %s", msg.ID)
+	}
+	if queries.linkAttempts != 2 {
+		t.Fatalf("link attempts = %d, want 2", queries.linkAttempts)
+	}
+	if len(queries.deleted) != 1 {
+		t.Fatalf("deleted messages = %d, want 1", len(queries.deleted))
+	}
+	if len(publisher.events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(publisher.events))
 	}
 }
 

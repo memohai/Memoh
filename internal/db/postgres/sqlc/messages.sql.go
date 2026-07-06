@@ -33,6 +33,7 @@ WITH target AS (
     AND turns.request_message_id = $3
     AND turns.superseded_at IS NULL
   LIMIT 1
+  FOR UPDATE
 ),
 next_seq AS (
   SELECT
@@ -81,6 +82,7 @@ WITH latest AS (
     AND turns.superseded_at IS NULL
   ORDER BY turns.position DESC
   LIMIT 1
+  FOR UPDATE
 )
 UPDATE bot_history_messages m
 SET turn_id = latest.id,
@@ -525,6 +527,7 @@ WITH target AS (
     AND turns.request_message_id = $3
     AND turns.superseded_at IS NULL
   LIMIT 1
+  FOR UPDATE
 ),
 inserted AS (
   INSERT INTO bot_history_messages (
@@ -708,6 +711,7 @@ WITH target AS (
     AND turns.request_message_id = $3
     AND turns.superseded_at IS NULL
   LIMIT 1
+  FOR UPDATE
 ),
 inserted AS (
   INSERT INTO bot_history_messages (
