@@ -383,10 +383,13 @@ onBeforeUnmount(() => {
           </Select>
         </SettingsRow>
 
+        <!-- ui-allow-shape: loading skeleton — matches the log-row height so the
+             card reads as "a list row loading", same family form as bot-email /
+             bot-plugins, instead of a tall half-empty box. -->
         <InlineLoadingRow
           v-if="isLoading && logs.length === 0"
           size="md"
-          class="px-2 py-8"
+          class="mx-4 min-h-[3.75rem] border-b border-border py-3 last:border-b-0"
         >
           {{ $t('common.loading') }}
         </InlineLoadingRow>

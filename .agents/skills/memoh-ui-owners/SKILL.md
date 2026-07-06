@@ -179,6 +179,13 @@ will appear (list head, settings row content, panel top). Props: `size: 'sm' | '
 (text-xs/3.5 vs text-sm/4), `bordered` (the rounded-md framed variant used by backup /
 import read-states). Positioning padding (`px-2`, `py-8`) stays with the **caller** via
 class passthrough. Not for centered fills — that's PanePlaceholder.
+**The caller classes must match the surface family, not just any precedent:** loading a
+list INSIDE a SettingsSection card borrows the row form
+(`mx-4 min-h-[3.75rem] border-b border-border py-3 last:border-b-0` + `ui-allow-shape`
+comment — the bot-email/bot-plugins family, reads as "a list row, loading"); `px-2 py-8`
+is the whole-TAB loading form (bot-container, no card around it). Mixing them up puts a
+short left-aligned line in a tall card — a real 2026-07-06 regression: the card read as
+a half-empty box until re-aligned to the in-card family.
 
 ### Dialogs
 
@@ -302,6 +309,13 @@ Keep a shape local when its relationship genuinely differs. The tells:
 - **A compound progress block** (spinner + phase text + progress bar, e.g.
   container-create-progress) — that's a composition, not a loading row.
 - **A trivial muted `<p>`** no-results line.
+- **A three-piece row: (label | control) line + a full-ROW-width block below** (the
+  appearance mermaid row: label|Select with the diagram preview spanning the whole row
+  underneath). SettingsRow models TWO pieces — body and trailing control. Stuffing the
+  third piece into `#content` bounds it to the content column (left of the control) and
+  a centered preview drifts left of the card's axis. Learned from a real 2026-07-06
+  visual regression: migrated, caught in review, reverted. Keep such rows local until a
+  second instance earns a `#below` slot.
 
 If you're unsure whether two shapes share a relationship, judge by **geometry + context**,
 not by class-string similarity. When the answer is "same shape, same size, same surface" →

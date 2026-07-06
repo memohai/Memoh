@@ -309,6 +309,7 @@ The two systemic blind spots this proves:
   - reach: SettingsSection 'settings.appearance.diagrams', the only row in that section — reached directly on page load, no dialog/v-if gating
   - `mx-4 border-b border-border py-3 last:border-b-0`
   - why: Same border/padding/inset class string as SettingsRow's root and as the adjacent typography section's rows; the only reason it isn't already SettingsRow is the extra preview content below the label+control line, which #content already exists to solve.
+  - **Correction (2026-07-06): recommendation tried and REVERTED.** Putting the preview inside `#content` bounds it to the content column (left of the Select) — the centered mermaid diagram drifted left of the card's axis (visual regression caught in review). This row is a THREE-piece shape — (label | Select) line + a full-ROW-width preview below — which SettingsRow's two-piece model cannot express. Re-adjudicated stay-local; reason recorded in the file's head comment. The code-highlight row above (a true two-piece `stack="always"` shape) stays migrated.
 
 ## DIFF-RELATIONSHIP notes (NOT debt — do not unify)
 

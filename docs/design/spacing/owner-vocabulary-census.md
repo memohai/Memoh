@@ -29,7 +29,10 @@ The terminal state as of 2026-07-06:
   slipped every earlier net — mostly loading shapes judged "correctly local" *before*
   InlineLoadingRow/PanePlaceholder existed (2026-07-04) and never re-judged: supermarket
   list/detail loaders, bot-compaction/bot-heartbeat's byte-identical pair, file-tree,
-  browser-pane/panel-files placeholders, appearance's two hand rows, keyboard-shortcuts'
+  browser-pane/panel-files placeholders, appearance's code-highlight row (its mermaid
+  sibling was TRIED on SettingsRow and reverted after visual review — it's a three-piece
+  row whose full-width preview the owner can't model; reason recorded in-file), and
+  keyboard-shortcuts'
   hand page shell. Corrections are annotated in `coverage-sweep.md` where the stale
   verdicts sit.
 - **A regression backstop shipped, then hardened.** `check-ui-contract.mjs` rule 11 (WARN)
