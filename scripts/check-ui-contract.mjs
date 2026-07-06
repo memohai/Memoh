@@ -94,9 +94,13 @@ const RADIUS_ALLOW = new Set([
 // The only files allowed to author the canonical settings-row height (3.75rem).
 // Anywhere else that literal appears, a row was hand-rolled instead of composing
 // <SettingsRow> — the 同形异码 the owner vocabulary exists to kill. See rule 11.
+// inline-loading-row/index.vue joined 2026-07-06: its `card-row` surface prop
+// renders the identical row height for a loading placeholder, so the literal now
+// has a second legitimate owner instead of being hand-copied onto every caller.
 const OWNER_ROW_FILES = new Set([
   'apps/web/src/components/settings/row.vue',
   'apps/web/src/components/settings/expandable-row.vue',
+  'apps/web/src/components/inline-loading-row/index.vue',
 ])
 // The only app files allowed to render a spinner directly (the four-rung loading
 // ladder's owners). Everywhere else `animate-spin` means a loader was hand-spun

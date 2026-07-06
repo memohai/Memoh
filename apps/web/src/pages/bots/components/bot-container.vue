@@ -983,7 +983,7 @@ watch([activeTab, botId], ([tab]) => {
     <InlineLoadingRow
       v-if="containerLoading && !containerInfo && !containerMissing"
       size="md"
-      class="px-2 py-8"
+      surface="tab"
     >
       {{ $t('common.loading') }}
     </InlineLoadingRow>

@@ -50,12 +50,10 @@
           </Popover>
         </SettingsRow>
 
-        <!-- ui-allow-shape: loading skeleton — matches the binding-row height so the
-             list holds its space and doesn't jump (CLS) as bindings load. -->
         <InlineLoadingRow
           v-if="bindingsLoading"
           size="md"
-          class="mx-4 min-h-[3.75rem] border-b border-border py-3 last:border-b-0"
+          surface="card-row"
         >
           {{ $t('common.loading') }}
         </InlineLoadingRow>
