@@ -39,10 +39,20 @@ export const providerPresets: ProviderPreset[] = [
   {
     id: 'zai',
     name: 'Z.AI GLM',
+    registryName: '智谱AI / Z.AI / GLM',
     clientType: 'openai-completions',
     baseUrl: 'https://api.z.ai/api/paas/v4',
     icon: 'zhipu-color',
     source: 'zai.yaml',
+  },
+  {
+    id: 'zhipu',
+    name: 'Zhipu AI',
+    registryName: '智谱AI / BigModel / GLM',
+    clientType: 'openai-completions',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    icon: 'zhipu-color',
+    source: 'zhipu.yaml',
   },
   {
     id: 'together',
