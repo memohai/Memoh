@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 import { createRequire } from 'module'
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'url'
 
 // https://vite.dev/config/
@@ -65,6 +66,27 @@ export default defineConfig(({ command }) => {
 
   return {
     plugins: [
+      // Guard against pnpm patchedDependencies cache poisoning at vite
+      // startup, not only at install time: the lockfile rarely changes, so a
+      // dev can pull a fix and restart vite without ever re-running `pnpm
+      // install` (where the root postinstall guard lives). configResolved
+      // runs before the dep optimizer reads its cache, so the script can
+      // also delete an optimizer cache built from pre-patch code (its cache
+      // key is the lockfile, which poisoning does not change). Runs as a
+      // child process — the script is repo-root plain JS shared with
+      // postinstall; importing it here would drag root files into this
+      // package's TS project for no gain. Non-zero exit fails dev/build
+      // loudly with the recovery recipe on stderr.
+      {
+        name: 'memoh:verify-patched-deps',
+        configResolved() {
+          execFileSync(
+            process.execPath,
+            [fileURLToPath(new URL('../../scripts/check-patched-deps.mjs', import.meta.url))],
+            { stdio: 'inherit' },
+          )
+        },
+      },
       vue(),
       tailwindcss(),
     ],
