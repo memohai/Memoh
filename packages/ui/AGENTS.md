@@ -733,9 +733,19 @@ pass with `node scripts/check-ui-contract.mjs --write-baseline`.
   `overflow-y-auto` element as a separate ancestor and put `AutoHeight` inside
   it. Popovers/selects inside the slot portal to `<body>`, so they are never
   clipped.
-- **`DialogBody` — the scrollable body row of a capped dialog.** For
-  `DialogContent class="max-h-[80dvh] grid-rows-[auto_minmax(0,1fr)]"`, the
-  body row is `<DialogBody>`: it owns the `-mr-3 pr-3` scroll gutter AND a
+- **`DialogPanel` — the capped focused-dialog shell.** NEVER hand-write
+  `max-h-[80dvh] grid-rows-[auto_minmax(0,1fr)] sm:max-w-*` onto a
+  `DialogContent` — that recipe string is exactly what this component
+  encapsulates (dropping the `minmax(0,1fr)` overflows the cap; keeping the
+  corner close in a view-swap dialog lands it ~12px off the title
+  centerline). Knobs: `width` (`'2xl'` default · `'3xl'` editor-heavy),
+  `grow` (fixed `h-[80dvh]` for bodies with no intrinsic height — editors),
+  `view-swap` (header is a `DialogViewHeader`, so the built-in corner close
+  is disabled — the pairing is enforced by the prop, not by memory),
+  `footer` (adds the third grid row for a `DialogFooter`).
+- **`DialogBody` — the scrollable body row of a capped dialog.** Inside a
+  `DialogPanel`, the body row is `<DialogBody>`: it owns the `-mr-3 pr-3`
+  scroll gutter AND a
   stateful scroll-edge fade — content continuing past the box fades out over
   the last 16px, and each edge only fades while more content exists in that
   direction (top of scroll → no top fade; bottom reached → no bottom fade;
@@ -748,9 +758,10 @@ pass with `node scripts/check-ui-contract.mjs --write-baseline`.
   height tween).
 - **`DialogViewHeader` — back / title / close on ONE centerline.** For a
   dialog that swaps views (list ↔ drill-in form) or any header where the
-  built-in corner close (`top-3`) would sit off the title's centerline. Caller
-  passes `:show-close-button="false"` on `DialogContent`; this header renders
-  the close inline (kept `relative`, NEVER `static` — the ghost hover
+  built-in corner close (`top-3`) would sit off the title's centerline. Pair
+  it with `DialogPanel view-swap` (which disables the corner close); this
+  header renders the close inline (kept `relative`, NEVER `static` — the
+  ghost hover
   `::before{inset:0}` needs the button as containing block or it tints the
   whole dialog). `centered` + `showBack` are driven by the CALLER's predicate:
   a centered title must be anchored on both flanks (back chevron, or body

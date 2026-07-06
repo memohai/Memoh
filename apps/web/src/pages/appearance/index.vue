@@ -186,16 +186,13 @@
     </div>
   </PageShell>
 
-  <!-- Code & diagrams dialog. DialogContent (fixed, centered), NOT
+  <!-- Code & diagrams dialog. DialogPanel (capped focused shell), NOT
        DialogScrollContent — that variant scrolls the whole overlay, so a tall
        dialog grows past the viewport and drags the PAGE scrollbar (rejected).
-       Here the panel is capped at 80dvh and only the BODY row scrolls:
-       grid-rows-[auto_minmax(0,1fr)] gives the header its height and lets the
-       body shrink (minmax 0 beats the grid's default min-content floor, which
-       would otherwise refuse to shrink and overflow the cap). Stays mounted
-       outside any conditional so open/close never loses highlighter state. -->
+       Only the DialogBody row scrolls. Stays mounted outside any conditional
+       so open/close never loses highlighter state. -->
   <Dialog v-model:open="advancedOpen">
-    <DialogContent class="max-h-[80dvh] grid-rows-[auto_minmax(0,1fr)] sm:max-w-2xl">
+    <DialogPanel>
       <DialogHeader>
         <DialogTitle>{{ t('settings.appearance.advancedEntryTitle') }}</DialogTitle>
       </DialogHeader>
@@ -322,7 +319,7 @@
           </div>
         </section>
       </DialogBody>
-    </DialogContent>
+    </DialogPanel>
   </Dialog>
 
   <!-- Mermaid warm-up: renders the same diagram once, offscreen, as soon as
@@ -355,8 +352,8 @@ import {
   ActionCard,
   Dialog,
   DialogBody,
-  DialogContent,
   DialogHeader,
+  DialogPanel,
   DialogTitle,
   Input,
   SegmentedControl,

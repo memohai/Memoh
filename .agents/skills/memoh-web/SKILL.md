@@ -897,16 +897,65 @@ naturally. (b) **List-management dialog**: title CENTERED, close top-right, body
 search+add toolbar above. For form (b), use `@memohai/ui`'s **`DialogViewHeader`** — do NOT
 hand-write the grid, and do NOT keep the built-in corner close (it pins at `top-3` while the
 title row sits below the content padding, so their centerlines miss by ~12px and the header
-reads broken the moment a back chevron joins). Pass `:show-close-button="false"` on
-`DialogContent`, then `<DialogViewHeader :centered="…" :show-back="…" :back-label="$t('common.back')"
+reads broken the moment a back chevron joins). `DialogPanel view-swap` disables the corner
+close for you; then `<DialogViewHeader :centered="…" :show-back="…" :back-label="$t('common.back')"
 @back="…">{{ title }}</DialogViewHeader>` lays back / title / close in ONE
 `grid-cols-[2rem_1fr_2rem]` row with all three glyphs on a single centerline. (The traps it
 bakes in, for anyone tempted to hand-roll: equal side columns with a spacer `<span>` when no
 chevron; the inline close stays **`relative`, NEVER `static`** — its ghost hover wash is an
 absolute `::before{inset:0}` that needs the button as containing block, and `static` lets it
-escape to the fixed `DialogContent`, tinting the whole dialog on hover.)
+escape to the fixed dialog surface, tinting the whole dialog on hover.)
 Never let fragments of both forms coexist (a left title AND a centered element AND a
 full-width divider under a lone button was the original mess).
+
+**Canonical skeletons — fill the blanks, hand-write nothing.** An ActionCard entry plus its
+focused dialog is ALL library parts; if you find yourself typing a `grid-rows-[…]` or
+`max-h-[80dvh]` class, stop — that knob already exists as a `DialogPanel` prop.
+
+Form (a), workbench (one focused settings surface — e.g. an "Advanced settings" facet):
+
+```vue
+<section class="space-y-2.5">
+  <h2 class="px-2 text-label font-medium text-muted-foreground">{{ t('…sectionLabel') }}</h2>
+  <ActionCard :title="t('…entryTitle')" @click="open = true">
+    <template #icon><SlidersHorizontal /></template>
+  </ActionCard>
+</section>
+
+<Dialog v-model:open="open">
+  <DialogPanel>                     <!-- width="3xl" / grow / footer as needed -->
+    <DialogHeader>
+      <DialogTitle>{{ t('…entryTitle') }}</DialogTitle>
+    </DialogHeader>
+    <DialogBody class="space-y-6">
+      <!-- your sections / FieldStack rows -->
+    </DialogBody>
+  </DialogPanel>
+</Dialog>
+```
+
+Form (b), list-management (a collection with add/edit drill-in):
+
+```vue
+<Dialog v-model:open="open">
+  <DialogPanel view-swap>
+    <DialogViewHeader
+      :centered="formVisible || items.length > 0"
+      :show-back="formVisible"
+      :back-label="$t('common.back')"
+      @back="formVisible = false"
+    >
+      {{ formVisible ? actionTitle : listTitle }}
+    </DialogViewHeader>
+    <DialogBody>
+      <AutoHeight>
+        <!-- list view (toolbar + rows + empty), each branch gated on !formVisible -->
+        <!-- form view -->
+      </AutoHeight>
+    </DialogBody>
+  </DialogPanel>
+</Dialog>
+```
 
 **A centered title needs BOTH flanks balanced — otherwise it flushes left.** Form (b) is not
 "always centered": the centering is only earned when something anchors each side of the title.
@@ -921,8 +970,9 @@ Drive it with one predicate (`centerDialogTitle = formVisible || items.length > 
 wherever a title could center. The component deliberately does NOT guess from data; the
 caller owns the predicate.
 
-**The scrolling dialog body is `DialogBody`, and it fades at the scroll edges.** For the
-capped-panel shell (`DialogContent class="max-h-[80dvh] grid-rows-[auto_minmax(0,1fr)]"`),
+**The scrolling dialog body is `DialogBody`, and it fades at the scroll edges.** Inside a
+`DialogPanel` (the capped focused-dialog shell — its props own `max-h-[80dvh]`, the grid
+rows, width rungs, and the view-swap corner-close pairing; NEVER retype those classes),
 the body row is `@memohai/ui`'s `<DialogBody>` — it owns the `-mr-3 pr-3` scroll-gutter trick
 AND a stateful scroll-edge fade: content continuing past the box fades out over the last
 16px, each edge only while more content actually exists in that direction (top of scroll → no

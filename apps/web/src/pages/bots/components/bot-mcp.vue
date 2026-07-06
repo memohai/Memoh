@@ -146,14 +146,17 @@
   </SwapTransition>
 
   <!-- Import: paste a standard mcpServers JSON; same-name servers are updated.
-       Same unified shell as the other focused dialogs (appearance / access):
-       fixed 80dvh panel, grid rows header/body/footer, the default p-6 +
-       DialogContent edge as the only frame — no full-bleed border-b/border-t
-       bars (dividers separate peers inside a body, they don't frame the
-       shell). Fixed height (not max-h): Monaco has no intrinsic height, so
-       the body row must be given one to fill. -->
+       Same unified DialogPanel shell as the other focused dialogs (appearance /
+       access) — no full-bleed border-b/border-t bars (dividers separate peers
+       inside a body, they don't frame the shell). `grow` (fixed height, not
+       max-h): Monaco has no intrinsic height, so the body row must be given
+       one to fill. -->
   <Dialog v-model:open="importOpen">
-    <DialogContent class="h-[80dvh] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-3xl">
+    <DialogPanel
+      grow
+      footer
+      width="3xl"
+    >
       <DialogHeader>
         <DialogTitle>{{ $t('mcp.importSandbox') }}</DialogTitle>
         <DialogDescription>{{ $t('mcp.importHint') }}</DialogDescription>
@@ -209,7 +212,7 @@
           </Button>
         </div>
       </DialogFooter>
-    </DialogContent>
+    </DialogPanel>
   </Dialog>
 </template>
 
@@ -217,8 +220,8 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  Badge, Button, Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter,
-  DialogHeader, DialogTitle, Empty, EmptyContent, EmptyDescription, EmptyTitle,
+  Badge, Button, Dialog, DialogClose, DialogDescription, DialogFooter,
+  DialogHeader, DialogPanel, DialogTitle, Empty, EmptyContent, EmptyDescription, EmptyTitle,
   InputGroup, InputGroupAddon, InputGroupInput, Skeleton, toast, Tooltip,
   TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@memohai/ui'

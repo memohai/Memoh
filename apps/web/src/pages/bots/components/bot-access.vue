@@ -262,21 +262,17 @@
         </section>
 
         <!-- Advanced rules dialog: the full list + add/edit form. Behavior is
-             unchanged from the old sub-surface — only the container. Panel is
-             capped at 80dvh with only the body row scrolling (same pattern as
-             the appearance Code & diagrams dialog — see the comment there for
-             why NOT DialogScrollContent). -->
+             unchanged from the old sub-surface — only the container. view-swap
+             panel: DialogViewHeader renders the close inline, so DialogPanel
+             disables the built-in corner close. -->
         <Dialog v-model:open="rulesOpen">
-          <DialogContent
-            class="max-h-[80dvh] grid-rows-[auto_minmax(0,1fr)] sm:max-w-2xl"
-            :show-close-button="false"
-          >
+          <DialogPanel view-swap>
             <!-- Header follows the "centered title needs both flanks
                  balanced" rule (memoh-web skill § dialog header fork), via the
                  shared DialogViewHeader: centered when the form view's back
                  chevron (left) or a populated list (body weight below)
                  anchors it; the bare empty state flushes left. The built-in
-                 corner close is disabled (:show-close-button=false above) so
+                 corner close is disabled (DialogPanel view-swap) so
                  DialogViewHeader can put back / title / close on ONE
                  centerline. The form is a VIEW SWAP, never its own titled
                  card (card-in-card). -->
@@ -605,7 +601,7 @@
                 </section>
               </AutoHeight>
             </DialogBody>
-          </DialogContent>
+          </DialogPanel>
         </Dialog>
       </TabsContent>
 
@@ -641,7 +637,7 @@ import {
   Button,
   Dialog,
   DialogBody,
-  DialogContent,
+  DialogPanel,
   DialogViewHeader,
   Input,
   InputGroup,
