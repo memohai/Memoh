@@ -399,6 +399,7 @@
     "sendFailed": "メッセージの送信に失敗しました",
     "forkFailed": "セッションのフォークに失敗しました",
     "forkedFrom": "{session} からフォーク",
+    "forkSourceUnavailable": "元のセッションは存在しないか、削除されています。",
     "forkDialog": {
       "title": "フォークを作成",
       "description": "新しいセッションの名前を設定します。",

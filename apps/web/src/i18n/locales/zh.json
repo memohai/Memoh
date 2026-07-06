@@ -430,6 +430,7 @@
     "sendFailed": "消息发送失败",
     "forkFailed": "分叉会话失败",
     "forkedFrom": "分叉自 {session}",
+    "forkSourceUnavailable": "原始会话不存在或已被删除。",
     "forkDialog": {
       "title": "创建分叉",
       "description": "为新会话设置一个名字。",

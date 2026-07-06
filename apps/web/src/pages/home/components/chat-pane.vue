@@ -67,6 +67,7 @@
                 <ForkSourceDivider
                   v-if="showForkSourceDividerBefore(index)"
                   :title="forkSourceTitle"
+                  :disabled="openingForkSource"
                   @open-source="handleForkSourceClick"
                 />
 
@@ -102,6 +103,7 @@
                 <ForkSourceDivider
                   v-if="showForkSourceDividerAfter(msg, index)"
                   :title="forkSourceTitle"
+                  :disabled="openingForkSource"
                   @open-source="handleForkSourceClick"
                 />
               </template>
@@ -1045,7 +1047,7 @@ import {
   Package,
   SquarePen,
 } from 'lucide-vue-next'
-import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner } from '@memohai/ui'
+import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner, toast } from '@memohai/ui'
 import { useChatStore, type ACPAgentSessionInput, type ChatMessage } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import { useScroll, useElementBounding, useIntersectionObserver, useStorage } from '@vueuse/core'
@@ -1067,7 +1069,7 @@ import { useSessionInfo } from '../composables/useSessionInfo'
 import ChatModelPicker from './chat-model-picker.vue'
 import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
-import { fetchSafeSkillCatalog, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput, type UIUserInputQuestion, type WSUserInputAnswer } from '@/composables/api/useChat'
+import { fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput, type UIUserInputQuestion, type WSUserInputAnswer } from '@/composables/api/useChat'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, ACP_NO_PROJECT_MODE, acpAgentIcon, createACPNoProjectPath, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig, readRecentACPFolders, rememberACPFolder } from '@/utils/acp'
@@ -1515,6 +1517,7 @@ const forkSource = computed<ForkSourceMeta | null>(() => {
   }
 })
 const forkSourceTitle = computed(() => forkSource.value?.title ?? '')
+const openingForkSource = ref(false)
 const forkSourceDividerAfterIndex = computed<number | null>(() => {
   const source = forkSource.value
   if (!source || messages.value.length === 0) return null
@@ -3041,8 +3044,17 @@ async function handleReplyJump(messageId: string) {
 
 async function handleForkSourceClick() {
   const source = forkSource.value
-  if (!source) return
-  await chatStore.selectSession(source.sessionId, { explicitSelection: true })
+  const botId = currentBotId.value?.trim() ?? ''
+  if (!source || !botId || openingForkSource.value) return
+  openingForkSource.value = true
+  try {
+    await fetchSession(botId, source.sessionId)
+    await chatStore.selectSession(source.sessionId, { explicitSelection: true })
+  } catch {
+    toast.error(t('chat.forkSourceUnavailable'))
+  } finally {
+    openingForkSource.value = false
+  }
 }
 
 function defaultForkSessionTitle() {

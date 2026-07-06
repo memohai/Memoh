@@ -8,7 +8,8 @@
       type="button"
       class="max-w-[min(22rem,70vw)] text-caption font-normal text-muted-foreground"
       :title="title"
-      @click="$emit('openSource')"
+      :disabled="disabled"
+      @click="handleOpenSource"
     >
       <span class="truncate">
         {{ t('chat.forkedFrom', { session: title }) }}
@@ -25,13 +26,19 @@
 import { TextButton } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 
-defineProps<{
+const props = defineProps<{
   title: string
+  disabled?: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   openSource: []
 }>()
 
 const { t } = useI18n()
+
+function handleOpenSource() {
+  if (props.disabled) return
+  emit('openSource')
+}
 </script>

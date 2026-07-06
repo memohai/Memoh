@@ -430,6 +430,7 @@
     "sendFailed": "Message failed to send",
     "forkFailed": "Failed to fork session",
     "forkedFrom": "Forked from {session}",
+    "forkSourceUnavailable": "The original session no longer exists or was deleted.",
     "forkDialog": {
       "title": "Create fork",
       "description": "Set a name for the new session.",
