@@ -1541,7 +1541,7 @@ func restoreFullHistoryTurns(
 			SessionID:          sessionID,
 			SupersededByTurnID: mappedPGUUID(turnMap, item.SupersededByTurnID),
 			SupersededAt:       item.SupersededAt,
-			SupersededReason:   item.SupersededReason,
+			SupersededReason:   pgtype.Text{String: item.SupersededReason, Valid: strings.TrimSpace(item.SupersededReason) != ""},
 		}); err != nil {
 			return fmt.Errorf("restore superseded history turn: %w", err)
 		}

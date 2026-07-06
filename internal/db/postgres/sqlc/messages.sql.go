@@ -27,33 +27,35 @@ func (q *Queries) AllocateSessionTurnPosition(ctx context.Context, sessionID pgt
 
 const appendMessageToHistoryTurnByRequest = `-- name: AppendMessageToHistoryTurnByRequest :one
 WITH target AS (
-  SELECT turns.id, turns.session_id, turns.position
-  FROM bot_history_turns turns
-  WHERE turns.session_id = $2
-    AND turns.request_message_id = $3
-    AND turns.superseded_at IS NULL
+  SELECT request.turn_id, request.session_id, request.turn_position
+  FROM bot_history_messages request
+  WHERE request.session_id = $2
+    AND request.id = $3
+    AND request.turn_id IS NOT NULL
+    AND request.turn_position IS NOT NULL
+    AND request.turn_visible = true
   LIMIT 1
   FOR UPDATE
 ),
 next_seq AS (
-  SELECT
-    target.id,
-    target.session_id,
-    target.position,
-    COALESCE((
-      SELECT existing.turn_message_seq + 1
-      FROM bot_history_messages existing
-      WHERE existing.turn_id = target.id
-      ORDER BY existing.turn_message_seq DESC
-      LIMIT 1
-    ), 1) AS turn_message_seq
+  UPDATE bot_sessions s
+  SET next_turn_position = next_turn_position + 1
   FROM target
+  WHERE s.id = target.session_id
+  RETURNING
+    target.turn_id,
+    target.session_id,
+    target.turn_position,
+    s.next_turn_position - 1 AS turn_message_seq
 )
 UPDATE bot_history_messages m
-SET turn_id = next_seq.id,
-    turn_position = next_seq.position,
+SET turn_id = next_seq.turn_id,
+    turn_position = next_seq.turn_position,
     turn_visible = true,
-    turn_message_seq = next_seq.turn_message_seq
+    turn_message_seq = next_seq.turn_message_seq,
+    turn_superseded_by_turn_id = NULL,
+    turn_superseded_at = NULL,
+    turn_superseded_reason = NULL
 FROM next_seq
 WHERE m.id = $1
   AND m.session_id = next_seq.session_id
@@ -74,31 +76,43 @@ func (q *Queries) AppendMessageToHistoryTurnByRequest(ctx context.Context, arg A
 	return id, err
 }
 
-const appendMessageToLatestHistoryTurn = `-- name: AppendMessageToLatestHistoryTurn :exec
+const appendMessageToLatestHistoryTurn = `-- name: AppendMessageToLatestHistoryTurn :one
 WITH latest AS (
-  SELECT turns.id, turns.session_id, turns.position
-  FROM bot_history_turns turns
-  WHERE turns.session_id = $2
-    AND turns.superseded_at IS NULL
-  ORDER BY turns.position DESC
+  SELECT visible.turn_id, visible.session_id, visible.turn_position
+  FROM bot_history_messages visible
+  WHERE visible.session_id = $2
+    AND visible.turn_id IS NOT NULL
+    AND visible.turn_position IS NOT NULL
+    AND visible.turn_message_seq IS NOT NULL
+    AND visible.turn_visible = true
+  ORDER BY visible.turn_position DESC, visible.turn_message_seq DESC
   LIMIT 1
   FOR UPDATE
+),
+next_seq AS (
+  UPDATE bot_sessions s
+  SET next_turn_position = next_turn_position + 1
+  FROM latest
+  WHERE s.id = latest.session_id
+  RETURNING
+    latest.turn_id,
+    latest.session_id,
+    latest.turn_position,
+    s.next_turn_position - 1 AS turn_message_seq
 )
 UPDATE bot_history_messages m
-SET turn_id = latest.id,
-    turn_position = latest.position,
+SET turn_id = next_seq.turn_id,
+    turn_position = next_seq.turn_position,
     turn_visible = true,
-    turn_message_seq = COALESCE((
-      SELECT existing.turn_message_seq + 1
-      FROM bot_history_messages existing
-      WHERE existing.turn_id = latest.id
-      ORDER BY existing.turn_message_seq DESC
-      LIMIT 1
-    ), 1)
-FROM latest
+    turn_message_seq = next_seq.turn_message_seq,
+    turn_superseded_by_turn_id = NULL,
+    turn_superseded_at = NULL,
+    turn_superseded_reason = NULL
+FROM next_seq
 WHERE m.id = $1
-  AND m.session_id = latest.session_id
+  AND m.session_id = next_seq.session_id
   AND m.turn_id IS NULL
+RETURNING m.id
 `
 
 type AppendMessageToLatestHistoryTurnParams struct {
@@ -106,31 +120,60 @@ type AppendMessageToLatestHistoryTurnParams struct {
 	SessionID pgtype.UUID `json:"session_id"`
 }
 
-func (q *Queries) AppendMessageToLatestHistoryTurn(ctx context.Context, arg AppendMessageToLatestHistoryTurnParams) error {
-	_, err := q.db.Exec(ctx, appendMessageToLatestHistoryTurn, arg.MessageID, arg.SessionID)
-	return err
+func (q *Queries) AppendMessageToLatestHistoryTurn(ctx context.Context, arg AppendMessageToLatestHistoryTurnParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, appendMessageToLatestHistoryTurn, arg.MessageID, arg.SessionID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const bindHistoryTurnAssistantByRequest = `-- name: BindHistoryTurnAssistantByRequest :one
-UPDATE bot_history_turns
-SET assistant_message_id = $1,
-    updated_at = now()
-WHERE session_id = $2
-  AND request_message_id = $3
-  AND assistant_message_id IS NULL
-  AND superseded_at IS NULL
-RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
-  superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at
+WITH target AS (
+  SELECT request.turn_id, request.session_id, request.turn_position
+  FROM bot_history_messages request
+  WHERE request.session_id = $1
+    AND request.id = $2
+    AND request.turn_id IS NOT NULL
+    AND request.turn_visible = true
+    AND NOT EXISTS (
+      SELECT 1
+      FROM bot_history_messages assistant
+      WHERE assistant.turn_id = request.turn_id
+        AND assistant.role = 'assistant'
+        AND assistant.turn_message_seq = 2
+        AND assistant.turn_visible = true
+    )
+  LIMIT 1
+  FOR UPDATE
+),
+linked AS (
+  UPDATE bot_history_messages assistant
+  SET turn_id = target.turn_id,
+      turn_position = target.turn_position,
+      turn_message_seq = 2,
+      turn_visible = true,
+      turn_superseded_by_turn_id = NULL,
+      turn_superseded_at = NULL,
+      turn_superseded_reason = NULL
+  FROM target
+  WHERE assistant.id = $3
+    AND assistant.session_id = target.session_id
+  RETURNING target.turn_id
+)
+SELECT t.id, t.bot_id, t.session_id, t.position, t.request_message_id, t.assistant_message_id,
+  t.superseded_by_turn_id, t.superseded_at, t.superseded_reason, t.created_at, t.updated_at
+FROM linked
+JOIN bot_history_turns t ON t.id = linked.turn_id
 `
 
 type BindHistoryTurnAssistantByRequestParams struct {
-	AssistantMessageID pgtype.UUID `json:"assistant_message_id"`
 	SessionID          pgtype.UUID `json:"session_id"`
 	RequestMessageID   pgtype.UUID `json:"request_message_id"`
+	AssistantMessageID pgtype.UUID `json:"assistant_message_id"`
 }
 
 func (q *Queries) BindHistoryTurnAssistantByRequest(ctx context.Context, arg BindHistoryTurnAssistantByRequestParams) (BotHistoryTurn, error) {
-	row := q.db.QueryRow(ctx, bindHistoryTurnAssistantByRequest, arg.AssistantMessageID, arg.SessionID, arg.RequestMessageID)
+	row := q.db.QueryRow(ctx, bindHistoryTurnAssistantByRequest, arg.SessionID, arg.RequestMessageID, arg.AssistantMessageID)
 	var i BotHistoryTurn
 	err := row.Scan(
 		&i.ID,
@@ -149,30 +192,53 @@ func (q *Queries) BindHistoryTurnAssistantByRequest(ctx context.Context, arg Bin
 }
 
 const bindLatestHistoryTurnAssistant = `-- name: BindLatestHistoryTurnAssistant :one
-UPDATE bot_history_turns
-SET assistant_message_id = $1,
-    updated_at = now()
-WHERE id = (
-  SELECT pending.id
-  FROM bot_history_turns pending
-  WHERE pending.session_id = $2
-    AND pending.request_message_id IS NOT NULL
-    AND pending.assistant_message_id IS NULL
-    AND pending.superseded_at IS NULL
-  ORDER BY pending.position DESC
+WITH target AS (
+  SELECT request.turn_id, request.session_id, request.turn_position
+  FROM bot_history_messages request
+  WHERE request.session_id = $1
+    AND request.role = 'user'
+    AND request.turn_message_seq = 1
+    AND request.turn_id IS NOT NULL
+    AND request.turn_visible = true
+    AND NOT EXISTS (
+      SELECT 1
+      FROM bot_history_messages assistant
+      WHERE assistant.turn_id = request.turn_id
+        AND assistant.role = 'assistant'
+        AND assistant.turn_message_seq = 2
+        AND assistant.turn_visible = true
+    )
+  ORDER BY request.turn_position DESC
   LIMIT 1
+  FOR UPDATE
+),
+linked AS (
+  UPDATE bot_history_messages assistant
+  SET turn_id = target.turn_id,
+      turn_position = target.turn_position,
+      turn_message_seq = 2,
+      turn_visible = true,
+      turn_superseded_by_turn_id = NULL,
+      turn_superseded_at = NULL,
+      turn_superseded_reason = NULL
+  FROM target
+  WHERE assistant.id = $2
+    AND assistant.session_id = target.session_id
+  RETURNING target.turn_id
 )
-RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
-  superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at
+SELECT t.id, t.bot_id, t.session_id, t.position, t.request_message_id, t.assistant_message_id,
+  t.superseded_by_turn_id, t.superseded_at, t.superseded_reason, t.created_at, t.updated_at
+FROM linked
+JOIN bot_history_turns t ON t.id = linked.turn_id
 `
 
 type BindLatestHistoryTurnAssistantParams struct {
-	AssistantMessageID pgtype.UUID `json:"assistant_message_id"`
 	SessionID          pgtype.UUID `json:"session_id"`
+	AssistantMessageID pgtype.UUID `json:"assistant_message_id"`
 }
 
 func (q *Queries) BindLatestHistoryTurnAssistant(ctx context.Context, arg BindLatestHistoryTurnAssistantParams) (BotHistoryTurn, error) {
-	row := q.db.QueryRow(ctx, bindLatestHistoryTurnAssistant, arg.AssistantMessageID, arg.SessionID)
+	row := q.db.QueryRow(ctx, bindLatestHistoryTurnAssistant, arg.SessionID, arg.AssistantMessageID)
 	var i BotHistoryTurn
 	err := row.Scan(
 		&i.ID,
@@ -206,38 +272,66 @@ const createHistoryTurn = `-- name: CreateHistoryTurn :one
 WITH next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
-  WHERE id = $2
+  WHERE bot_sessions.id = $1
   RETURNING next_turn_position - 1 AS position
+),
+input AS (
+  SELECT
+    gen_random_uuid() AS turn_id,
+    $2::uuid AS bot_id,
+    $1::uuid AS session_id,
+    next_position.position,
+    $3::uuid AS request_message_id,
+    $4::uuid AS assistant_message_id
+  FROM next_position
+),
+linked_request AS (
+  UPDATE bot_history_messages m
+  SET turn_id = input.turn_id,
+      turn_position = input.position,
+      turn_message_seq = 1,
+      turn_visible = true,
+      turn_superseded_by_turn_id = NULL,
+      turn_superseded_at = NULL,
+      turn_superseded_reason = NULL
+  FROM input
+  WHERE m.id = input.request_message_id
+    AND m.session_id = input.session_id
+  RETURNING m.id
+),
+linked_assistant AS (
+  UPDATE bot_history_messages m
+  SET turn_id = input.turn_id,
+      turn_position = input.position,
+      turn_message_seq = 2,
+      turn_visible = true,
+      turn_superseded_by_turn_id = NULL,
+      turn_superseded_at = NULL,
+      turn_superseded_reason = NULL
+  FROM input
+  WHERE m.id = input.assistant_message_id
+    AND m.session_id = input.session_id
+  RETURNING m.id
 )
-INSERT INTO bot_history_turns (
-  bot_id,
-  session_id,
-  position,
-  request_message_id,
-  assistant_message_id
-)
-SELECT
-  $1,
-  $2,
-  next_position.position,
-  $3::uuid,
-  $4::uuid
-FROM next_position
-RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
-  superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at
+SELECT t.id, t.bot_id, t.session_id, t.position, t.request_message_id, t.assistant_message_id,
+  t.superseded_by_turn_id, t.superseded_at, t.superseded_reason, t.created_at, t.updated_at
+FROM input
+JOIN bot_history_turns t ON t.id = input.turn_id
+CROSS JOIN (SELECT COUNT(*) FROM linked_request) request_done
+CROSS JOIN (SELECT COUNT(*) FROM linked_assistant) assistant_done
 `
 
 type CreateHistoryTurnParams struct {
-	BotID              pgtype.UUID `json:"bot_id"`
 	SessionID          pgtype.UUID `json:"session_id"`
+	BotID              pgtype.UUID `json:"bot_id"`
 	RequestMessageID   pgtype.UUID `json:"request_message_id"`
 	AssistantMessageID pgtype.UUID `json:"assistant_message_id"`
 }
 
 func (q *Queries) CreateHistoryTurn(ctx context.Context, arg CreateHistoryTurnParams) (BotHistoryTurn, error) {
 	row := q.db.QueryRow(ctx, createHistoryTurn,
-		arg.BotID,
 		arg.SessionID,
+		arg.BotID,
 		arg.RequestMessageID,
 		arg.AssistantMessageID,
 	)
@@ -262,42 +356,68 @@ const createHistoryTurnWithID = `-- name: CreateHistoryTurnWithID :one
 WITH next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
-  WHERE id = $3
+  WHERE bot_sessions.id = $1
   RETURNING next_turn_position - 1 AS position
+),
+input AS (
+  SELECT
+    $2::uuid AS turn_id,
+    $3::uuid AS bot_id,
+    $1::uuid AS session_id,
+    next_position.position,
+    $4::uuid AS request_message_id,
+    $5::uuid AS assistant_message_id
+  FROM next_position
+),
+linked_request AS (
+  UPDATE bot_history_messages m
+  SET turn_id = input.turn_id,
+      turn_position = input.position,
+      turn_message_seq = 1,
+      turn_visible = true,
+      turn_superseded_by_turn_id = NULL,
+      turn_superseded_at = NULL,
+      turn_superseded_reason = NULL
+  FROM input
+  WHERE m.id = input.request_message_id
+    AND m.session_id = input.session_id
+  RETURNING m.id
+),
+linked_assistant AS (
+  UPDATE bot_history_messages m
+  SET turn_id = input.turn_id,
+      turn_position = input.position,
+      turn_message_seq = 2,
+      turn_visible = true,
+      turn_superseded_by_turn_id = NULL,
+      turn_superseded_at = NULL,
+      turn_superseded_reason = NULL
+  FROM input
+  WHERE m.id = input.assistant_message_id
+    AND m.session_id = input.session_id
+  RETURNING m.id
 )
-INSERT INTO bot_history_turns (
-  id,
-  bot_id,
-  session_id,
-  position,
-  request_message_id,
-  assistant_message_id
-)
-SELECT
-  $1,
-  $2,
-  $3,
-  next_position.position,
-  $4::uuid,
-  $5::uuid
-FROM next_position
-RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
-  superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at
+SELECT t.id, t.bot_id, t.session_id, t.position, t.request_message_id, t.assistant_message_id,
+  t.superseded_by_turn_id, t.superseded_at, t.superseded_reason, t.created_at, t.updated_at
+FROM input
+JOIN bot_history_turns t ON t.id = input.turn_id
+CROSS JOIN (SELECT COUNT(*) FROM linked_request) request_done
+CROSS JOIN (SELECT COUNT(*) FROM linked_assistant) assistant_done
 `
 
 type CreateHistoryTurnWithIDParams struct {
+	SessionID          pgtype.UUID `json:"session_id"`
 	TurnID             pgtype.UUID `json:"turn_id"`
 	BotID              pgtype.UUID `json:"bot_id"`
-	SessionID          pgtype.UUID `json:"session_id"`
 	RequestMessageID   pgtype.UUID `json:"request_message_id"`
 	AssistantMessageID pgtype.UUID `json:"assistant_message_id"`
 }
 
 func (q *Queries) CreateHistoryTurnWithID(ctx context.Context, arg CreateHistoryTurnWithIDParams) (BotHistoryTurn, error) {
 	row := q.db.QueryRow(ctx, createHistoryTurnWithID,
+		arg.SessionID,
 		arg.TurnID,
 		arg.BotID,
-		arg.SessionID,
 		arg.RequestMessageID,
 		arg.AssistantMessageID,
 	)
@@ -508,24 +628,32 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 const createMessageInHistoryTurnByRequest = `-- name: CreateMessageInHistoryTurnByRequest :one
 WITH target AS (
   SELECT
-    turns.id,
+    turns.turn_id,
     turns.session_id,
-    turns.position,
-    turns.assistant_message_id,
+    turns.turn_position,
     CASE
-      WHEN $1::text = 'assistant' AND turns.assistant_message_id IS NULL THEN 2
+      WHEN $1::text = 'assistant' AND NOT EXISTS (
+        SELECT 1
+        FROM bot_history_messages assistant
+        WHERE assistant.turn_id = turns.turn_id
+          AND assistant.role = 'assistant'
+          AND assistant.turn_message_seq = 2
+          AND assistant.turn_visible = true
+      ) THEN 2
       ELSE COALESCE((
         SELECT existing.turn_message_seq + 1
         FROM bot_history_messages existing
-        WHERE existing.turn_id = turns.id
+        WHERE existing.turn_id = turns.turn_id
         ORDER BY existing.turn_message_seq DESC
         LIMIT 1
       ), 1)
     END AS turn_message_seq
-  FROM bot_history_turns turns
+  FROM bot_history_messages turns
   WHERE turns.session_id = $2
-    AND turns.request_message_id = $3
-    AND turns.superseded_at IS NULL
+    AND turns.id = $3
+    AND turns.turn_id IS NOT NULL
+    AND turns.turn_position IS NOT NULL
+    AND turns.turn_visible = true
   LIMIT 1
   FOR UPDATE
 ),
@@ -567,8 +695,8 @@ inserted AS (
     $14::uuid,
     $15::uuid,
     $16::text,
-    target.id,
-    target.position,
+    target.turn_id,
+    target.turn_position,
     target.turn_message_seq,
     true
   FROM target
@@ -692,24 +820,32 @@ func (q *Queries) CreateMessageInHistoryTurnByRequest(ctx context.Context, arg C
 const createMessageInHistoryTurnByRequestAndBind = `-- name: CreateMessageInHistoryTurnByRequestAndBind :one
 WITH target AS (
   SELECT
-    turns.id,
+    turns.turn_id,
     turns.session_id,
-    turns.position,
-    turns.assistant_message_id,
+    turns.turn_position,
     CASE
-      WHEN $1::text = 'assistant' AND turns.assistant_message_id IS NULL THEN 2
+      WHEN $1::text = 'assistant' AND NOT EXISTS (
+        SELECT 1
+        FROM bot_history_messages assistant
+        WHERE assistant.turn_id = turns.turn_id
+          AND assistant.role = 'assistant'
+          AND assistant.turn_message_seq = 2
+          AND assistant.turn_visible = true
+      ) THEN 2
       ELSE COALESCE((
         SELECT existing.turn_message_seq + 1
         FROM bot_history_messages existing
-        WHERE existing.turn_id = turns.id
+        WHERE existing.turn_id = turns.turn_id
         ORDER BY existing.turn_message_seq DESC
         LIMIT 1
       ), 1)
     END AS turn_message_seq
-  FROM bot_history_turns turns
+  FROM bot_history_messages turns
   WHERE turns.session_id = $2
-    AND turns.request_message_id = $3
-    AND turns.superseded_at IS NULL
+    AND turns.id = $3
+    AND turns.turn_id IS NOT NULL
+    AND turns.turn_position IS NOT NULL
+    AND turns.turn_visible = true
   LIMIT 1
   FOR UPDATE
 ),
@@ -751,8 +887,8 @@ inserted AS (
     $14::uuid,
     $15::uuid,
     $16::text,
-    target.id,
-    target.position,
+    target.turn_id,
+    target.turn_position,
     target.turn_message_seq,
     true
   FROM target
@@ -760,24 +896,12 @@ inserted AS (
     id,
     role,
     created_at
-),
-bound AS (
-  UPDATE bot_history_turns turns
-  SET assistant_message_id = inserted.id,
-      updated_at = now()
-  FROM inserted, target
-  WHERE turns.id = target.id
-    AND inserted.role = 'assistant'
-    AND target.assistant_message_id IS NULL
-    AND turns.assistant_message_id IS NULL
-    AND turns.superseded_at IS NULL
-  RETURNING turns.id
 )
 SELECT
   inserted.id,
   inserted.created_at
 FROM inserted
-LEFT JOIN bound ON true
+JOIN target ON true
 `
 
 type CreateMessageInHistoryTurnByRequestAndBindParams struct {
@@ -883,32 +1007,11 @@ inserted_message AS (
   RETURNING
     id,
     created_at
-),
-inserted_turn AS (
-  INSERT INTO bot_history_turns (
-    id,
-    bot_id,
-    session_id,
-    position,
-    request_message_id,
-    assistant_message_id
-  )
-  SELECT
-    $17,
-    $3,
-    $1,
-    next_position.position,
-    inserted_message.id,
-    NULL::uuid
-  FROM inserted_message
-  CROSS JOIN next_position
-  RETURNING id
 )
 SELECT
   inserted_message.id,
   inserted_message.created_at
 FROM inserted_message
-JOIN inserted_turn ON true
 `
 
 type CreateMessageWithHistoryTurnParams struct {
@@ -1005,17 +1108,19 @@ VALUES (
   $16::text,
   $17,
   (
-    SELECT position
-    FROM bot_history_turns
-    WHERE id = $17
+    SELECT existing.turn_position
+    FROM bot_history_messages existing
+    WHERE existing.turn_id = $17
+      AND existing.turn_position IS NOT NULL
+    ORDER BY existing.turn_message_seq ASC, existing.created_at ASC, existing.id ASC
+    LIMIT 1
   ),
   $18,
-  EXISTS (
-    SELECT 1
-    FROM bot_history_turns
-    WHERE id = $17
-      AND superseded_at IS NULL
-  )
+  COALESCE((
+    SELECT bool_or(existing.turn_visible)
+    FROM bot_history_messages existing
+    WHERE existing.turn_id = $17
+  ), false)
 )
 RETURNING
   id,
@@ -1259,32 +1364,9 @@ inserted_messages AS (
     true
   FROM input_rows input, next_position
   RETURNING id, created_at, turn_message_seq
-),
-inserted_turn AS (
-  INSERT INTO bot_history_turns (
-    id,
-    bot_id,
-    session_id,
-    position,
-    request_message_id,
-    assistant_message_id
-  )
-  SELECT
-    $55,
-    $54,
-    $53,
-    next_position.position,
-    user_message.id,
-    tool_call_assistant.id
-  FROM inserted_messages user_message
-  JOIN inserted_messages tool_call_assistant ON tool_call_assistant.turn_message_seq = 2
-  CROSS JOIN next_position
-  WHERE user_message.turn_message_seq = 1
-  RETURNING id
 )
 SELECT inserted_messages.id, inserted_messages.created_at
 FROM inserted_messages
-JOIN inserted_turn ON true
 ORDER BY inserted_messages.turn_message_seq
 `
 
@@ -1918,15 +2000,29 @@ func (q *Queries) HideMessagesByHistoryTurn(ctx context.Context, turnID pgtype.U
 }
 
 const linkMessageToHistoryTurn = `-- name: LinkMessageToHistoryTurn :one
+WITH target AS (
+  SELECT
+    existing.turn_id,
+    existing.session_id,
+    existing.turn_position,
+    bool_or(existing.turn_visible) AS turn_visible
+  FROM bot_history_messages existing
+  WHERE existing.turn_id = $3
+    AND existing.turn_position IS NOT NULL
+  GROUP BY existing.turn_id, existing.session_id, existing.turn_position
+  LIMIT 1
+)
 UPDATE bot_history_messages m
-SET turn_id = t.id,
-    turn_position = t.position,
+SET turn_id = target.turn_id,
+    turn_position = target.turn_position,
     turn_message_seq = $1,
-    turn_visible = (t.superseded_at IS NULL)
-FROM bot_history_turns t
+    turn_visible = target.turn_visible,
+    turn_superseded_by_turn_id = NULL,
+    turn_superseded_at = NULL,
+    turn_superseded_reason = NULL
+FROM target
 WHERE m.id = $2
-  AND t.id = $3
-  AND m.session_id = t.session_id
+  AND m.session_id = target.session_id
 RETURNING m.id
 `
 
@@ -4244,6 +4340,25 @@ func (q *Queries) LocateMessagesWindowByExternalIDBySession(ctx context.Context,
 	return items, nil
 }
 
+const lockHistoryTurnAppendByRequest = `-- name: LockHistoryTurnAppendByRequest :exec
+SELECT pg_advisory_xact_lock(hashtextextended(m.turn_id::text, 0))
+FROM bot_history_messages m
+WHERE m.session_id = $1
+  AND m.id = $2
+  AND m.turn_id IS NOT NULL
+LIMIT 1
+`
+
+type LockHistoryTurnAppendByRequestParams struct {
+	SessionID        pgtype.UUID `json:"session_id"`
+	RequestMessageID pgtype.UUID `json:"request_message_id"`
+}
+
+func (q *Queries) LockHistoryTurnAppendByRequest(ctx context.Context, arg LockHistoryTurnAppendByRequestParams) error {
+	_, err := q.db.Exec(ctx, lockHistoryTurnAppendByRequest, arg.SessionID, arg.RequestMessageID)
+	return err
+}
+
 const markMessagesCompacted = `-- name: MarkMessagesCompacted :exec
 UPDATE bot_history_messages
 SET compact_id = $1
@@ -4267,7 +4382,23 @@ WITH old_turn AS (
   WHERE t.id = $1
     AND t.session_id = $2
     AND t.superseded_at IS NULL
+),
+old_lock AS (
+  SELECT m.id
+  FROM bot_history_messages m
+  JOIN old_turn ON old_turn.id = m.turn_id
   FOR UPDATE
+),
+old_lock_guard AS (
+  SELECT COUNT(*) AS count FROM old_lock
+),
+latest_turn AS (
+  SELECT t.id
+  FROM bot_history_turns t
+  WHERE t.session_id = $2
+    AND t.superseded_at IS NULL
+  ORDER BY t.position DESC
+  LIMIT 1
 ),
 replacement_input AS (
   SELECT
@@ -4275,6 +4406,8 @@ replacement_input AS (
     $3::uuid AS replacement_request_message_id,
     $4::uuid AS replacement_assistant_message_id
   FROM old_turn
+  JOIN latest_turn ON latest_turn.id = old_turn.id
+  CROSS JOIN old_lock_guard
   WHERE (
       $3::uuid IS NULL
       OR EXISTS (
@@ -4312,41 +4445,40 @@ next_position AS (
   RETURNING s.next_turn_position - 1 AS position
 ),
 replacement AS (
-  INSERT INTO bot_history_turns (
-    bot_id,
-    session_id,
-    position,
-    request_message_id,
-    assistant_message_id
-  )
   SELECT
+    gen_random_uuid() AS id,
     replacement_input.bot_id,
     replacement_input.session_id,
-    next_position.position,
-    replacement_input.replacement_request_message_id,
-    replacement_input.replacement_assistant_message_id
+    next_position.position::bigint AS position,
+    replacement_input.replacement_request_message_id AS request_message_id,
+    replacement_input.replacement_assistant_message_id AS assistant_message_id,
+    NULL::uuid AS superseded_by_turn_id,
+    NULL::timestamptz AS superseded_at,
+    NULL::text AS superseded_reason,
+    now()::timestamptz AS created_at,
+    now()::timestamptz AS updated_at
   FROM replacement_input
   CROSS JOIN next_position
-  RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
-    superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at
 ),
 updated AS (
-  UPDATE bot_history_turns old
-  SET superseded_by_turn_id = replacement.id,
-      superseded_at = $5,
-      superseded_reason = $6,
-      updated_at = now()
+  UPDATE bot_history_messages old
+  SET turn_superseded_by_turn_id = replacement.id,
+      turn_superseded_at = $5,
+      turn_superseded_reason = $6
   FROM replacement
-  WHERE old.id = $1
+  WHERE old.turn_id = $1
     AND old.session_id = $2
-    AND old.superseded_at IS NULL
-  RETURNING old.id
+    AND old.turn_superseded_at IS NULL
+  RETURNING old.turn_id
+),
+updated_turn AS (
+  SELECT DISTINCT turn_id AS id FROM updated
 ),
 hidden_old_messages AS (
   UPDATE bot_history_messages m
   SET turn_visible = false
-  FROM updated, replacement
-  WHERE m.turn_id = updated.id
+  FROM updated_turn, replacement
+  WHERE m.turn_id = updated_turn.id
     AND m.id IS DISTINCT FROM replacement.request_message_id
     AND m.id IS DISTINCT FROM replacement.assistant_message_id
   RETURNING m.id
@@ -4363,16 +4495,19 @@ linked_anchors AS (
         WHEN m.id = replacement.assistant_message_id THEN 2
         ELSE m.turn_message_seq
       END,
-      turn_visible = true
+      turn_visible = true,
+      turn_superseded_by_turn_id = NULL,
+      turn_superseded_at = NULL,
+      turn_superseded_reason = NULL
   FROM replacement
   CROSS JOIN hidden_done
-  JOIN updated ON true
+  JOIN updated_turn ON true
   WHERE (
       m.id = replacement.request_message_id
       AND m.role = 'user'
       AND (
         m.turn_id IS NULL
-        OR m.turn_id = updated.id
+        OR m.turn_id = updated_turn.id
       )
     )
     OR (
@@ -4387,7 +4522,10 @@ linked_tail AS (
   SET turn_id = tail.turn_id,
       turn_position = tail.turn_position,
       turn_visible = true,
-      turn_message_seq = tail.turn_message_seq
+      turn_message_seq = tail.turn_message_seq,
+      turn_superseded_by_turn_id = NULL,
+      turn_superseded_at = NULL,
+      turn_superseded_reason = NULL
   FROM (
     SELECT
       m.id AS message_id,
@@ -4412,12 +4550,12 @@ linked_anchors_done AS (
 linked_tail_done AS (
   SELECT COUNT(*) AS count FROM linked_tail
 )
-SELECT replacement.id, replacement.bot_id, replacement.session_id, replacement.position,
+SELECT replacement.id, replacement.bot_id, replacement.session_id, replacement.position::bigint AS position,
   replacement.request_message_id, replacement.assistant_message_id,
   replacement.superseded_by_turn_id, replacement.superseded_at,
-  replacement.superseded_reason, replacement.created_at, replacement.updated_at
+  replacement.superseded_reason, replacement.created_at::timestamptz AS created_at, replacement.updated_at::timestamptz AS updated_at
 FROM replacement
-JOIN updated ON true
+JOIN updated_turn ON true
 CROSS JOIN linked_anchors_done
 CROSS JOIN linked_tail_done
 `
@@ -4569,16 +4707,22 @@ func (q *Queries) SearchMessages(ctx context.Context, arg SearchMessagesParams) 
 }
 
 const supersedeHistoryTurn = `-- name: SupersedeHistoryTurn :one
-UPDATE bot_history_turns
-SET superseded_by_turn_id = $1,
-    superseded_at = $2,
-    superseded_reason = $3,
-    updated_at = now()
-WHERE id = $4
-  AND session_id = $5
-  AND superseded_at IS NULL
-RETURNING id, bot_id, session_id, position, request_message_id, assistant_message_id,
-  superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at
+WITH updated AS (
+  UPDATE bot_history_messages m
+  SET turn_superseded_by_turn_id = $1,
+      turn_superseded_at = $2,
+      turn_superseded_reason = $3,
+      turn_visible = false
+  WHERE m.turn_id = $4
+    AND m.session_id = $5
+    AND m.turn_superseded_at IS NULL
+  RETURNING m.turn_id
+)
+SELECT t.id, t.bot_id, t.session_id, t.position, t.request_message_id, t.assistant_message_id,
+  t.superseded_by_turn_id, t.superseded_at, t.superseded_reason, t.created_at, t.updated_at
+FROM bot_history_turns t
+WHERE t.id IN (SELECT turn_id FROM updated)
+LIMIT 1
 `
 
 type SupersedeHistoryTurnParams struct {

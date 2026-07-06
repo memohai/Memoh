@@ -160,6 +160,7 @@ copy_messages AS (
     vm.runtime_type,
     vm.model_id,
     vm.display_text,
+    vm.turn_id AS old_turn_id,
     vm.turn_position,
     vm.turn_message_seq,
     vm.created_at
@@ -170,6 +171,20 @@ copy_messages AS (
   )
   WHERE vm.session_id = $1
   ORDER BY vm.turn_position ASC, vm.turn_message_seq ASC, vm.created_at ASC, vm.id ASC
+),
+copy_turns AS (
+  SELECT
+    t.id AS old_turn_id,
+    gen_random_uuid() AS new_turn_id,
+    t.position AS old_position,
+    ROW_NUMBER() OVER (ORDER BY t.position ASC)::bigint AS new_position,
+    t.request_message_id,
+    t.assistant_message_id
+  FROM bot_history_turns t
+  JOIN target_turn tt ON t.position <= tt.position
+  WHERE t.session_id = $1
+    AND t.superseded_at IS NULL
+  ORDER BY t.position ASC
 ),
 inserted_messages AS (
   INSERT INTO bot_history_messages (
@@ -188,6 +203,10 @@ inserted_messages AS (
     runtime_type,
     model_id,
     display_text,
+    turn_id,
+    turn_position,
+    turn_message_seq,
+    turn_visible,
     created_at
   )
   SELECT
@@ -206,70 +225,25 @@ inserted_messages AS (
     cm.runtime_type,
     cm.model_id,
     cm.display_text,
+    ct.new_turn_id,
+    ct.new_position,
+    cm.turn_message_seq,
+    true,
     cm.created_at
   FROM copy_messages cm
+  JOIN copy_turns ct ON ct.old_turn_id = cm.old_turn_id
   CROSS JOIN created_session cs
   RETURNING id
-),
-copy_turns AS (
-  SELECT
-    t.id AS old_turn_id,
-    gen_random_uuid() AS new_turn_id,
-    t.position AS old_position,
-    ROW_NUMBER() OVER (ORDER BY t.position ASC)::bigint AS new_position,
-    t.request_message_id,
-    t.assistant_message_id
-  FROM bot_history_turns t
-  JOIN target_turn tt ON t.position <= tt.position
-  WHERE t.session_id = $1
-    AND t.superseded_at IS NULL
-  ORDER BY t.position ASC
-),
-inserted_turns AS (
-  INSERT INTO bot_history_turns (
-    id,
-    bot_id,
-    session_id,
-    position,
-    request_message_id,
-    assistant_message_id
-  )
-  SELECT
-    ct.new_turn_id,
-    cs.bot_id,
-    cs.id,
-    ct.new_position,
-    request_message.new_message_id,
-    assistant_message.new_message_id
-  FROM copy_turns ct
-  CROSS JOIN created_session cs
-  LEFT JOIN copy_messages request_message ON request_message.old_message_id = ct.request_message_id
-  LEFT JOIN inserted_messages request_inserted ON request_inserted.id = request_message.new_message_id
-  LEFT JOIN copy_messages assistant_message ON assistant_message.old_message_id = ct.assistant_message_id
-  LEFT JOIN inserted_messages assistant_inserted ON assistant_inserted.id = assistant_message.new_message_id
-  RETURNING id, position
-),
-linked_messages AS (
-  UPDATE bot_history_messages m
-  SET turn_id = inserted_turns.id,
-      turn_position = inserted_turns.position,
-      turn_visible = true,
-      turn_message_seq = copy_messages.turn_message_seq
-  FROM copy_messages
-  JOIN copy_turns ON copy_turns.old_position = copy_messages.turn_position
-  JOIN inserted_turns ON inserted_turns.id = copy_turns.new_turn_id
-  WHERE m.id = copy_messages.new_message_id
-  RETURNING m.id
 ),
 copy_message_counts AS (
   SELECT count(*) AS count FROM copy_messages
 ),
-linked_message_counts AS (
-  SELECT count(*) AS count FROM linked_messages
+inserted_message_counts AS (
+  SELECT count(*) AS count FROM inserted_messages
 ),
 next_turn_position AS (
-  SELECT COALESCE(MAX(position), 0) + 1 AS value
-  FROM inserted_turns
+  SELECT COALESCE(MAX(new_position), 0) + 1 AS value
+  FROM copy_turns
 ),
 copied_assets AS (
   INSERT INTO bot_history_message_assets (
@@ -318,9 +292,9 @@ SELECT us.id, us.bot_id, us.route_id, us.channel_type, us.type, us.session_mode,
 FROM updated_session us
 CROSS JOIN (SELECT count(*) AS copied_asset_count FROM copied_assets) copied_asset_counts
 CROSS JOIN copy_message_counts
-CROSS JOIN linked_message_counts
-WHERE EXISTS (SELECT 1 FROM inserted_turns)
-  AND linked_message_counts.count = copy_message_counts.count
+CROSS JOIN inserted_message_counts
+WHERE EXISTS (SELECT 1 FROM copy_turns)
+  AND inserted_message_counts.count = copy_message_counts.count
 `
 
 type ForkSessionFromAssistantMessageParams struct {

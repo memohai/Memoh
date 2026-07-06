@@ -164,6 +164,9 @@ type BotHistoryMessage struct {
 	TurnMessageSeq          sql.NullInt64  `json:"turn_message_seq"`
 	TurnPosition            sql.NullInt64  `json:"turn_position"`
 	TurnVisible             int64          `json:"turn_visible"`
+	TurnSupersededByTurnID  sql.NullString `json:"turn_superseded_by_turn_id"`
+	TurnSupersededAt        sql.NullString `json:"turn_superseded_at"`
+	TurnSupersededReason    sql.NullString `json:"turn_superseded_reason"`
 }
 
 type BotHistoryMessageAsset struct {
@@ -192,17 +195,17 @@ type BotHistoryMessageCompact struct {
 }
 
 type BotHistoryTurn struct {
-	ID                 string         `json:"id"`
+	ID                 sql.NullString `json:"id"`
 	BotID              string         `json:"bot_id"`
-	SessionID          string         `json:"session_id"`
-	Position           int64          `json:"position"`
-	RequestMessageID   sql.NullString `json:"request_message_id"`
-	AssistantMessageID sql.NullString `json:"assistant_message_id"`
+	SessionID          sql.NullString `json:"session_id"`
+	Position           sql.NullInt64  `json:"position"`
+	RequestMessageID   interface{}    `json:"request_message_id"`
+	AssistantMessageID interface{}    `json:"assistant_message_id"`
 	SupersededByTurnID sql.NullString `json:"superseded_by_turn_id"`
-	SupersededAt       sql.NullString `json:"superseded_at"`
+	SupersededAt       interface{}    `json:"superseded_at"`
 	SupersededReason   sql.NullString `json:"superseded_reason"`
-	CreatedAt          string         `json:"created_at"`
-	UpdatedAt          string         `json:"updated_at"`
+	CreatedAt          interface{}    `json:"created_at"`
+	UpdatedAt          interface{}    `json:"updated_at"`
 }
 
 type BotPluginInstallation struct {

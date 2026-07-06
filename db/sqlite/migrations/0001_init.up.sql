@@ -520,6 +520,9 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   turn_position INTEGER,
   turn_message_seq INTEGER,
   turn_visible INTEGER NOT NULL DEFAULT 0,
+  turn_superseded_by_turn_id TEXT,
+  turn_superseded_at TEXT,
+  turn_superseded_reason TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -553,30 +556,68 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_source
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_reply
   ON bot_history_messages(session_id, source_reply_to_message_id);
 
--- bot_history_turns: linear visible history units for a session.
-CREATE TABLE IF NOT EXISTS bot_history_turns (
-  id TEXT PRIMARY KEY,
-  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
-  position INTEGER NOT NULL,
-  request_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
-  assistant_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
-  superseded_by_turn_id TEXT REFERENCES bot_history_turns(id) ON DELETE SET NULL,
-  superseded_at TEXT,
-  superseded_reason TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (session_id, position)
-);
-CREATE INDEX IF NOT EXISTS idx_bot_history_turns_session_active
-  ON bot_history_turns(session_id, position)
-  WHERE superseded_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_bot_history_turns_request_message
-  ON bot_history_turns(request_message_id)
-  WHERE request_message_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_bot_history_turns_assistant_message
-  ON bot_history_turns(assistant_message_id)
-  WHERE assistant_message_id IS NOT NULL;
+-- bot_history_turns is a compatibility view. The physical turn read/lifecycle
+-- model lives on bot_history_messages so hot pagination and append writes stay
+-- single-table.
+CREATE VIEW IF NOT EXISTS bot_history_turns AS
+SELECT
+  m.turn_id AS id,
+  (
+    SELECT first_message.bot_id
+    FROM bot_history_messages first_message
+    WHERE first_message.turn_id = m.turn_id
+      AND first_message.session_id = m.session_id
+    ORDER BY first_message.turn_message_seq ASC, first_message.created_at ASC, first_message.id ASC
+    LIMIT 1
+  ) AS bot_id,
+  m.session_id,
+  m.turn_position AS position,
+  COALESCE((
+    SELECT request_message.id
+    FROM bot_history_messages request_message
+    WHERE request_message.turn_id = m.turn_id
+      AND request_message.session_id = m.session_id
+      AND request_message.role = 'user'
+      AND request_message.turn_message_seq = 1
+    ORDER BY request_message.created_at ASC, request_message.id ASC
+    LIMIT 1
+  ), '') AS request_message_id,
+  COALESCE((
+    SELECT assistant_message.id
+    FROM bot_history_messages assistant_message
+    WHERE assistant_message.turn_id = m.turn_id
+      AND assistant_message.session_id = m.session_id
+      AND assistant_message.role = 'assistant'
+      AND assistant_message.turn_message_seq = 2
+    ORDER BY assistant_message.created_at ASC, assistant_message.id ASC
+    LIMIT 1
+  ), '') AS assistant_message_id,
+  (
+    SELECT superseded_message.turn_superseded_by_turn_id
+    FROM bot_history_messages superseded_message
+    WHERE superseded_message.turn_id = m.turn_id
+      AND superseded_message.session_id = m.session_id
+      AND superseded_message.turn_superseded_by_turn_id IS NOT NULL
+    ORDER BY superseded_message.turn_superseded_at DESC, superseded_message.created_at DESC, superseded_message.id DESC
+    LIMIT 1
+  ) AS superseded_by_turn_id,
+  MAX(m.turn_superseded_at) AS superseded_at,
+  (
+    SELECT superseded_message.turn_superseded_reason
+    FROM bot_history_messages superseded_message
+    WHERE superseded_message.turn_id = m.turn_id
+      AND superseded_message.session_id = m.session_id
+      AND superseded_message.turn_superseded_reason IS NOT NULL
+    ORDER BY superseded_message.turn_superseded_at DESC, superseded_message.created_at DESC, superseded_message.id DESC
+    LIMIT 1
+  ) AS superseded_reason,
+  MIN(m.created_at) AS created_at,
+  COALESCE(MAX(m.turn_superseded_at), MAX(m.created_at)) AS updated_at
+FROM bot_history_messages m
+WHERE m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.session_id IS NOT NULL
+GROUP BY m.turn_id, m.session_id, m.turn_position;
 
 CREATE VIEW IF NOT EXISTS bot_visible_history_messages AS
 SELECT

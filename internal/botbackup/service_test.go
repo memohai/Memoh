@@ -489,7 +489,7 @@ func TestRestoreHistoryImportsFullSupersededTurnHistory(t *testing.T) {
 					AssistantMessageID: sourceOldAssistantID,
 					SupersededByTurnID: sourceNewTurnID,
 					SupersededAt:       pgtype.Timestamptz{Time: time.Now(), Valid: true},
-					SupersededReason:   pgtype.Text{String: "retry", Valid: true},
+					SupersededReason:   "retry",
 				},
 				{
 					ID:                 sourceNewTurnID,

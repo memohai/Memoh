@@ -35,8 +35,10 @@ func TestSQLiteCreateMessageWithHistoryTurnRollsBackOnTurnFailure(t *testing.T) 
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, bot_id, next_turn_position) VALUES (?, ?, 7)`, sessionID, botID); err != nil {
 		t.Fatalf("insert session: %v", err)
 	}
-	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_history_turns (id, bot_id, session_id, position) VALUES (?, ?, ?, 1)`, turnID, botID, sessionID); err != nil {
-		t.Fatalf("insert existing turn: %v", err)
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, turn_id, turn_position, turn_message_seq, turn_visible)
+VALUES (?, ?, ?, 'user', '{}', ?, 1, 1, 1)`, "00000000-0000-0000-0000-000000004005", botID, sessionID, turnID); err != nil {
+		t.Fatalf("insert existing turn message: %v", err)
 	}
 
 	_, err = q.CreateMessageWithHistoryTurn(ctx, pgsqlc.CreateMessageWithHistoryTurnParams{
@@ -166,17 +168,20 @@ func TestSQLiteCreateHistoryTurnUsesSessionAllocator(t *testing.T) {
 
 	botID := "00000000-0000-0000-0000-000000004101"
 	sessionID := "00000000-0000-0000-0000-000000004102"
-	existingTurnID := "00000000-0000-0000-0000-000000004103"
+	requestMessageID := "00000000-0000-0000-0000-000000004103"
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, bot_id, next_turn_position) VALUES (?, ?, 7)`, sessionID, botID); err != nil {
 		t.Fatalf("insert session: %v", err)
 	}
-	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_history_turns (id, bot_id, session_id, position) VALUES (?, ?, ?, 1)`, existingTurnID, botID, sessionID); err != nil {
-		t.Fatalf("insert existing turn: %v", err)
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bot_history_messages (id, bot_id, session_id, role, content)
+VALUES (?, ?, ?, 'user', '{}')`, requestMessageID, botID, sessionID); err != nil {
+		t.Fatalf("insert request message: %v", err)
 	}
 
 	turn, err := q.CreateHistoryTurn(ctx, pgsqlc.CreateHistoryTurnParams{
-		BotID:     pgUUIDFromString(t, botID),
-		SessionID: pgUUIDFromString(t, sessionID),
+		BotID:            pgUUIDFromString(t, botID),
+		SessionID:        pgUUIDFromString(t, sessionID),
+		RequestMessageID: pgUUIDFromString(t, requestMessageID),
 	})
 	if err != nil {
 		t.Fatalf("create history turn: %v", err)
@@ -212,17 +217,26 @@ func TestSQLiteCreateHistoryTurnWithIDRollsBackAllocatorOnInsertFailure(t *testi
 	botID := "00000000-0000-0000-0000-000000004201"
 	sessionID := "00000000-0000-0000-0000-000000004202"
 	turnID := "00000000-0000-0000-0000-000000004203"
+	requestMessageID := "00000000-0000-0000-0000-000000004204"
 	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id, bot_id, next_turn_position) VALUES (?, ?, 7)`, sessionID, botID); err != nil {
 		t.Fatalf("insert session: %v", err)
 	}
-	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_history_turns (id, bot_id, session_id, position) VALUES (?, ?, ?, 1)`, turnID, botID, sessionID); err != nil {
-		t.Fatalf("insert existing turn: %v", err)
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, turn_id, turn_position, turn_message_seq, turn_visible)
+VALUES (?, ?, ?, 'user', '{}', ?, 1, 1, 1)`, "00000000-0000-0000-0000-000000004205", botID, sessionID, turnID); err != nil {
+		t.Fatalf("insert existing turn message: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+INSERT INTO bot_history_messages (id, bot_id, session_id, role, content)
+VALUES (?, ?, ?, 'user', '{}')`, requestMessageID, botID, sessionID); err != nil {
+		t.Fatalf("insert request message: %v", err)
 	}
 
 	_, err = q.CreateHistoryTurnWithID(ctx, pgsqlc.CreateHistoryTurnWithIDParams{
-		TurnID:    pgUUIDFromString(t, turnID),
-		BotID:     pgUUIDFromString(t, botID),
-		SessionID: pgUUIDFromString(t, sessionID),
+		TurnID:           pgUUIDFromString(t, turnID),
+		BotID:            pgUUIDFromString(t, botID),
+		SessionID:        pgUUIDFromString(t, sessionID),
+		RequestMessageID: pgUUIDFromString(t, requestMessageID),
 	})
 	if err == nil {
 		t.Fatal("create duplicate history turn succeeded, want error")
@@ -260,9 +274,13 @@ func TestSQLiteReplaceHistoryTurnRequiresLatestVisibleTurn(t *testing.T) {
 		t.Fatalf("insert session: %v", err)
 	}
 	if _, err := conn.ExecContext(ctx, `
-INSERT INTO bot_history_turns (id, bot_id, session_id, position)
-VALUES (?, ?, ?, 1), (?, ?, ?, 2)`, oldTurnID, botID, sessionID, newerTurnID, botID, sessionID); err != nil {
-		t.Fatalf("insert turns: %v", err)
+INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, turn_id, turn_position, turn_message_seq, turn_visible)
+VALUES
+  (?, ?, ?, 'user', '{}', ?, 1, 1, 1),
+  (?, ?, ?, 'user', '{}', ?, 2, 1, 1)`,
+		"00000000-0000-0000-0000-000000004505", botID, sessionID, oldTurnID,
+		"00000000-0000-0000-0000-000000004506", botID, sessionID, newerTurnID); err != nil {
+		t.Fatalf("insert turn messages: %v", err)
 	}
 
 	_, err = q.ReplaceHistoryTurn(ctx, pgsqlc.ReplaceHistoryTurnParams{
@@ -313,9 +331,9 @@ func TestSQLiteReplaceHistoryTurnValidatesAnchorsBeforeAllocating(t *testing.T) 
 		t.Fatalf("insert session: %v", err)
 	}
 	if _, err := conn.ExecContext(ctx, `
-INSERT INTO bot_history_turns (id, bot_id, session_id, position)
-VALUES (?, ?, ?, 1)`, oldTurnID, botID, sessionID); err != nil {
-		t.Fatalf("insert old turn: %v", err)
+INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, turn_id, turn_position, turn_message_seq, turn_visible)
+VALUES (?, ?, ?, 'user', '{}', ?, 1, 1, 1)`, "00000000-0000-0000-0000-000000004605", botID, sessionID, oldTurnID); err != nil {
+		t.Fatalf("insert old turn message: %v", err)
 	}
 	if _, err := conn.ExecContext(ctx, `
 INSERT INTO bot_history_messages (id, bot_id, session_id, role, content)
@@ -399,9 +417,9 @@ VALUES (?, ?, ?, 'user', '{}')`, messageID, botID, sessionID); err != nil {
 		t.Fatalf("insert other session: %v", err)
 	}
 	if _, err := conn.ExecContext(ctx, `
-INSERT INTO bot_history_turns (id, bot_id, session_id, position)
-VALUES (?, ?, ?, 1)`, otherTurnID, botID, otherSessionID); err != nil {
-		t.Fatalf("insert other turn: %v", err)
+INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, turn_id, turn_position, turn_message_seq, turn_visible)
+VALUES (?, ?, ?, 'user', '{}', ?, 1, 1, 1)`, "00000000-0000-0000-0000-000000004707", botID, otherSessionID, otherTurnID); err != nil {
+		t.Fatalf("insert other turn message: %v", err)
 	}
 
 	_, err = q.LinkMessageToHistoryTurn(ctx, pgsqlc.LinkMessageToHistoryTurnParams{
@@ -457,20 +475,71 @@ CREATE TABLE bot_history_messages (
   turn_position INTEGER,
   turn_message_seq INTEGER,
   turn_visible INTEGER NOT NULL DEFAULT 0,
+  turn_superseded_by_turn_id TEXT,
+  turn_superseded_at TEXT,
+  turn_superseded_reason TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE TABLE bot_history_turns (
-  id TEXT PRIMARY KEY,
-  bot_id TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  position INTEGER NOT NULL,
-  request_message_id TEXT,
-  assistant_message_id TEXT,
-  superseded_by_turn_id TEXT,
-  superseded_at TEXT,
-  superseded_reason TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (session_id, position)
-);
+CREATE UNIQUE INDEX idx_bot_history_messages_turn_seq_unique
+  ON bot_history_messages(turn_id, turn_message_seq)
+  WHERE turn_id IS NOT NULL AND turn_message_seq IS NOT NULL;
+CREATE VIEW bot_history_turns AS
+SELECT
+  m.turn_id AS id,
+  (
+    SELECT first_message.bot_id
+    FROM bot_history_messages first_message
+    WHERE first_message.turn_id = m.turn_id
+      AND first_message.session_id = m.session_id
+    ORDER BY first_message.turn_message_seq ASC, first_message.created_at ASC, first_message.id ASC
+    LIMIT 1
+  ) AS bot_id,
+  m.session_id,
+  m.turn_position AS position,
+  COALESCE((
+    SELECT request_message.id
+    FROM bot_history_messages request_message
+    WHERE request_message.turn_id = m.turn_id
+      AND request_message.session_id = m.session_id
+      AND request_message.role = 'user'
+      AND request_message.turn_message_seq = 1
+    ORDER BY request_message.created_at ASC, request_message.id ASC
+    LIMIT 1
+  ), '') AS request_message_id,
+  COALESCE((
+    SELECT assistant_message.id
+    FROM bot_history_messages assistant_message
+    WHERE assistant_message.turn_id = m.turn_id
+      AND assistant_message.session_id = m.session_id
+      AND assistant_message.role = 'assistant'
+      AND assistant_message.turn_message_seq = 2
+    ORDER BY assistant_message.created_at ASC, assistant_message.id ASC
+    LIMIT 1
+  ), '') AS assistant_message_id,
+  (
+    SELECT superseded_message.turn_superseded_by_turn_id
+    FROM bot_history_messages superseded_message
+    WHERE superseded_message.turn_id = m.turn_id
+      AND superseded_message.session_id = m.session_id
+      AND superseded_message.turn_superseded_by_turn_id IS NOT NULL
+    ORDER BY superseded_message.turn_superseded_at DESC, superseded_message.created_at DESC, superseded_message.id DESC
+    LIMIT 1
+  ) AS superseded_by_turn_id,
+  MAX(m.turn_superseded_at) AS superseded_at,
+  (
+    SELECT superseded_message.turn_superseded_reason
+    FROM bot_history_messages superseded_message
+    WHERE superseded_message.turn_id = m.turn_id
+      AND superseded_message.session_id = m.session_id
+      AND superseded_message.turn_superseded_reason IS NOT NULL
+    ORDER BY superseded_message.turn_superseded_at DESC, superseded_message.created_at DESC, superseded_message.id DESC
+    LIMIT 1
+  ) AS superseded_reason,
+  MIN(m.created_at) AS created_at,
+  COALESCE(MAX(m.turn_superseded_at), MAX(m.created_at)) AS updated_at
+FROM bot_history_messages m
+WHERE m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.session_id IS NOT NULL
+GROUP BY m.turn_id, m.session_id, m.turn_position;
 `

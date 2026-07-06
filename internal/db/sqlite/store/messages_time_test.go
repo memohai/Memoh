@@ -52,20 +52,6 @@ CREATE TABLE bot_history_messages (
   turn_visible INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE TABLE bot_history_turns (
-  id TEXT PRIMARY KEY,
-  bot_id TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  position INTEGER NOT NULL,
-  request_message_id TEXT,
-  assistant_message_id TEXT,
-  superseded_by_turn_id TEXT,
-  superseded_at TEXT,
-  superseded_reason TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (session_id, position)
-);
 CREATE VIEW bot_visible_history_messages AS
 SELECT
   m.turn_id,
@@ -106,20 +92,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
 			t.Fatalf("insert message %s: %v", item.id, err)
 		}
 	}
-	if _, err := conn.ExecContext(ctx, `
-INSERT INTO bot_history_turns (id, bot_id, session_id, position, request_message_id, assistant_message_id, created_at, updated_at)
-VALUES (?, ?, ?, 1, ?, ?, ?, ?)`,
-		"00000000-0000-0000-0000-000000002005",
-		botID,
-		sessionID,
-		"00000000-0000-0000-0000-000000002003",
-		"00000000-0000-0000-0000-000000002004",
-		"2026-06-13 19:53:50",
-		"2026-06-13 19:53:50",
-	); err != nil {
-		t.Fatalf("insert turn: %v", err)
-	}
-
 	store, err := New(conn)
 	if err != nil {
 		t.Fatalf("new store: %v", err)
@@ -178,11 +150,6 @@ func TestSQLiteListMessagesLatestAndBeforeMessageUseTurnOrder(t *testing.T) {
 INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, turn_id, turn_position, turn_message_seq, turn_visible, created_at)
 VALUES (?, ?, ?, 'user', '{}', ?, ?, 1, 1, ?)`, messageIDs[i], botID, sessionID, turnIDs[i], i+1, createdAt); err != nil {
 			t.Fatalf("insert message %d: %v", i, err)
-		}
-		if _, err := conn.ExecContext(ctx, `
-INSERT INTO bot_history_turns (id, bot_id, session_id, position, request_message_id, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)`, turnIDs[i], botID, sessionID, i+1, messageIDs[i], createdAt, createdAt); err != nil {
-			t.Fatalf("insert turn %d: %v", i, err)
 		}
 	}
 
@@ -279,20 +246,6 @@ CREATE TABLE bot_history_messages (
   turn_message_seq INTEGER,
   turn_visible INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE bot_history_turns (
-  id TEXT PRIMARY KEY,
-  bot_id TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  position INTEGER NOT NULL,
-  request_message_id TEXT,
-  assistant_message_id TEXT,
-  superseded_by_turn_id TEXT,
-  superseded_at TEXT,
-  superseded_reason TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (session_id, position)
 );
 CREATE VIEW bot_visible_history_messages AS
 SELECT

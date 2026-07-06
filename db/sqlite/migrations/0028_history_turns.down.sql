@@ -16,19 +16,19 @@ SELECT 0 WHERE EXISTS (SELECT 1 FROM bot_sessions WHERE type = 'acp_agent');
 DROP TABLE _memoh_acp_session_type_down_guard;
 
 DROP VIEW IF EXISTS bot_visible_history_messages;
+DROP VIEW IF EXISTS bot_history_turns;
 
 DROP INDEX IF EXISTS idx_bot_history_messages_visible_session_source_order;
 DROP INDEX IF EXISTS idx_bot_history_messages_visible_session_order;
 
-DROP INDEX IF EXISTS idx_bot_history_turns_assistant_message;
-DROP INDEX IF EXISTS idx_bot_history_turns_request_message;
-DROP INDEX IF EXISTS idx_bot_history_turns_session_active;
 DROP INDEX IF EXISTS idx_bot_history_messages_turn_seq_unique;
 DROP INDEX IF EXISTS idx_bot_history_messages_turn;
 DROP INDEX IF EXISTS idx_bot_history_messages_session_role_created;
-DROP TABLE IF EXISTS bot_history_turns;
 ALTER TABLE bot_sessions
   DROP COLUMN next_turn_position;
+ALTER TABLE bot_history_messages DROP COLUMN turn_superseded_reason;
+ALTER TABLE bot_history_messages DROP COLUMN turn_superseded_at;
+ALTER TABLE bot_history_messages DROP COLUMN turn_superseded_by_turn_id;
 ALTER TABLE bot_history_messages DROP COLUMN turn_visible;
 ALTER TABLE bot_history_messages DROP COLUMN turn_position;
 ALTER TABLE bot_history_messages DROP COLUMN turn_message_seq;

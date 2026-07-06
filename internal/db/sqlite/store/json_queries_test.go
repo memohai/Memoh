@@ -54,35 +54,23 @@ CREATE TABLE bot_history_messages (
   model_id TEXT,
   session_mode TEXT NOT NULL DEFAULT 'chat',
   runtime_type TEXT NOT NULL DEFAULT 'model',
+  turn_id TEXT,
+  turn_position INTEGER,
+  turn_message_seq INTEGER,
+  turn_visible INTEGER NOT NULL DEFAULT 0,
+  turn_superseded_by_turn_id TEXT,
+  turn_superseded_at TEXT,
+  turn_superseded_reason TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE bot_history_turns (
-  id TEXT PRIMARY KEY,
-  bot_id TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  position INTEGER NOT NULL,
-  request_message_id TEXT,
-  assistant_message_id TEXT,
-  superseded_at TEXT
 );
 CREATE VIEW bot_visible_history_messages AS
 SELECT
-  t.id AS turn_id,
-  t.position AS turn_position,
-  1 AS turn_message_seq,
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
   m.*
-FROM bot_history_turns t
-JOIN bot_history_messages m ON m.id = t.request_message_id
-WHERE t.superseded_at IS NULL
-UNION ALL
-SELECT
-  t.id AS turn_id,
-  t.position AS turn_position,
-  2 AS turn_message_seq,
-  m.*
-FROM bot_history_turns t
-JOIN bot_history_messages m ON m.id = t.assistant_message_id
-WHERE t.superseded_at IS NULL;
+FROM bot_history_messages m
+WHERE m.turn_visible = 1;
 `)
 
 	botID := "00000000-0000-0000-0000-000000000001"
@@ -190,16 +178,23 @@ WHERE t.superseded_at IS NULL;
 		{"00000000-0000-0000-0000-000000000110", sessionID, 3, "00000000-0000-0000-0000-000000000010", ""},
 		{"00000000-0000-0000-0000-000000000109", discussSessionID, 1, "", "00000000-0000-0000-0000-000000000009"},
 	} {
-		_, err = conn.ExecContext(ctx, `INSERT INTO bot_history_turns (id, bot_id, session_id, position, request_message_id, assistant_message_id) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))`,
-			item.id,
-			botID,
-			item.sessionID,
-			item.position,
-			item.requestID,
-			item.replyID,
-		)
-		if err != nil {
-			t.Fatalf("insert history turn %s: %v", item.id, err)
+		if item.requestID != "" {
+			_, err = conn.ExecContext(ctx, `
+UPDATE bot_history_messages
+SET turn_id = ?, turn_position = ?, turn_message_seq = 1, turn_visible = 1
+WHERE id = ?`, item.id, item.position, item.requestID)
+			if err != nil {
+				t.Fatalf("link request turn %s: %v", item.id, err)
+			}
+		}
+		if item.replyID != "" {
+			_, err = conn.ExecContext(ctx, `
+UPDATE bot_history_messages
+SET turn_id = ?, turn_position = ?, turn_message_seq = 2, turn_visible = 1
+WHERE id = ?`, item.id, item.position, item.replyID)
+			if err != nil {
+				t.Fatalf("link reply turn %s: %v", item.id, err)
+			}
 		}
 	}
 

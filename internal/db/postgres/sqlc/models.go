@@ -162,6 +162,9 @@ type BotHistoryMessage struct {
 	TurnPosition            pgtype.Int8        `json:"turn_position"`
 	TurnMessageSeq          pgtype.Int8        `json:"turn_message_seq"`
 	TurnVisible             bool               `json:"turn_visible"`
+	TurnSupersededByTurnID  pgtype.UUID        `json:"turn_superseded_by_turn_id"`
+	TurnSupersededAt        pgtype.Timestamptz `json:"turn_superseded_at"`
+	TurnSupersededReason    pgtype.Text        `json:"turn_superseded_reason"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -199,7 +202,7 @@ type BotHistoryTurn struct {
 	AssistantMessageID pgtype.UUID        `json:"assistant_message_id"`
 	SupersededByTurnID pgtype.UUID        `json:"superseded_by_turn_id"`
 	SupersededAt       pgtype.Timestamptz `json:"superseded_at"`
-	SupersededReason   pgtype.Text        `json:"superseded_reason"`
+	SupersededReason   string             `json:"superseded_reason"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }

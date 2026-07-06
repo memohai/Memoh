@@ -69,8 +69,8 @@ func (*runtimeSnapshotQueries) LinkMessageToHistoryTurn(_ context.Context, arg s
 	return arg.MessageID, nil
 }
 
-func (*runtimeSnapshotQueries) AppendMessageToLatestHistoryTurn(context.Context, sqlc.AppendMessageToLatestHistoryTurnParams) error {
-	return nil
+func (*runtimeSnapshotQueries) AppendMessageToLatestHistoryTurn(_ context.Context, arg sqlc.AppendMessageToLatestHistoryTurnParams) (pgtype.UUID, error) {
+	return arg.MessageID, nil
 }
 
 func (*runtimeSnapshotQueries) LinkUnassignedMessagesAfterHistoryTurnAssistant(context.Context, pgtype.UUID) error {
@@ -154,8 +154,8 @@ func (*failingHistoryTurnQueries) LinkMessageToHistoryTurn(_ context.Context, ar
 	return arg.MessageID, nil
 }
 
-func (*failingHistoryTurnQueries) AppendMessageToLatestHistoryTurn(context.Context, sqlc.AppendMessageToLatestHistoryTurnParams) error {
-	return nil
+func (*failingHistoryTurnQueries) AppendMessageToLatestHistoryTurn(_ context.Context, arg sqlc.AppendMessageToLatestHistoryTurnParams) (pgtype.UUID, error) {
+	return arg.MessageID, nil
 }
 
 func (*failingHistoryTurnQueries) LinkUnassignedMessagesAfterHistoryTurnAssistant(context.Context, pgtype.UUID) error {
@@ -271,8 +271,8 @@ func (q *retryTurnSequenceQueries) LinkMessageToHistoryTurn(_ context.Context, a
 	return arg.MessageID, nil
 }
 
-func (*retryTurnSequenceQueries) AppendMessageToLatestHistoryTurn(context.Context, sqlc.AppendMessageToLatestHistoryTurnParams) error {
-	return nil
+func (*retryTurnSequenceQueries) AppendMessageToLatestHistoryTurn(_ context.Context, arg sqlc.AppendMessageToLatestHistoryTurnParams) (pgtype.UUID, error) {
+	return arg.MessageID, nil
 }
 
 func (*retryTurnSequenceQueries) LinkUnassignedMessagesAfterHistoryTurnAssistant(context.Context, pgtype.UUID) error {

@@ -54,11 +54,6 @@ VALUES (?, ?, ?, ?, ?, ?)`, item.id, botID, sessionID, item.role, item.content, 
 		}
 	}
 	if _, err := conn.ExecContext(ctx, `
-INSERT INTO bot_history_turns (id, bot_id, session_id, position, request_message_id, assistant_message_id)
-VALUES (?, ?, ?, 1, ?, ?)`, turnID, botID, sessionID, userID, assistantID); err != nil {
-		t.Fatalf("insert turn: %v", err)
-	}
-	if _, err := conn.ExecContext(ctx, `
 UPDATE bot_history_messages
 SET turn_id = ?,
     turn_position = 1,
@@ -153,11 +148,6 @@ INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, created
 VALUES (?, ?, ?, ?, ?, ?)`, item.id, botID, sessionID, item.role, item.content, item.createdAt); err != nil {
 			t.Fatalf("insert message %s: %v", item.id, err)
 		}
-	}
-	if _, err := conn.ExecContext(ctx, `
-INSERT INTO bot_history_turns (id, bot_id, session_id, position, request_message_id, assistant_message_id)
-VALUES (?, ?, ?, ?, ?, ?)`, turnID, botID, sessionID, turnPos, userID, assistantID); err != nil {
-		t.Fatalf("insert turn: %v", err)
 	}
 	if _, err := conn.ExecContext(ctx, `
 UPDATE bot_history_messages
@@ -300,6 +290,9 @@ CREATE TABLE bot_history_messages (
   turn_position INTEGER,
   turn_message_seq INTEGER,
   turn_visible INTEGER NOT NULL DEFAULT 0,
+  turn_superseded_by_turn_id TEXT,
+  turn_superseded_at TEXT,
+  turn_superseded_reason TEXT,
   sender_channel_identity_id TEXT,
   sender_account_user_id TEXT,
   source_message_id TEXT,
@@ -330,26 +323,65 @@ CREATE TABLE bot_history_message_assets (
   name TEXT NOT NULL DEFAULT '',
   metadata TEXT NOT NULL DEFAULT '{}'
 );
-CREATE TABLE bot_history_turns (
-  id TEXT PRIMARY KEY DEFAULT (
-    lower(hex(randomblob(4))) || '-' ||
-    lower(hex(randomblob(2))) || '-' ||
-    '4' || substr(lower(hex(randomblob(2))), 2) || '-' ||
-    substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' ||
-    lower(hex(randomblob(6)))
-  ),
-  bot_id TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  position INTEGER NOT NULL,
-  request_message_id TEXT,
-  assistant_message_id TEXT,
-  superseded_by_turn_id TEXT,
-  superseded_at TEXT,
-  superseded_reason TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (session_id, position)
-);
+CREATE VIEW bot_history_turns AS
+SELECT
+  m.turn_id AS id,
+  (
+    SELECT first_message.bot_id
+    FROM bot_history_messages first_message
+    WHERE first_message.turn_id = m.turn_id
+      AND first_message.session_id = m.session_id
+    ORDER BY first_message.turn_message_seq ASC, first_message.created_at ASC, first_message.id ASC
+    LIMIT 1
+  ) AS bot_id,
+  m.session_id,
+  m.turn_position AS position,
+  COALESCE((
+    SELECT request_message.id
+    FROM bot_history_messages request_message
+    WHERE request_message.turn_id = m.turn_id
+      AND request_message.session_id = m.session_id
+      AND request_message.role = 'user'
+      AND request_message.turn_message_seq = 1
+    ORDER BY request_message.created_at ASC, request_message.id ASC
+    LIMIT 1
+  ), '') AS request_message_id,
+  COALESCE((
+    SELECT assistant_message.id
+    FROM bot_history_messages assistant_message
+    WHERE assistant_message.turn_id = m.turn_id
+      AND assistant_message.session_id = m.session_id
+      AND assistant_message.role = 'assistant'
+      AND assistant_message.turn_message_seq = 2
+    ORDER BY assistant_message.created_at ASC, assistant_message.id ASC
+    LIMIT 1
+  ), '') AS assistant_message_id,
+  (
+    SELECT superseded_message.turn_superseded_by_turn_id
+    FROM bot_history_messages superseded_message
+    WHERE superseded_message.turn_id = m.turn_id
+      AND superseded_message.session_id = m.session_id
+      AND superseded_message.turn_superseded_by_turn_id IS NOT NULL
+    ORDER BY superseded_message.turn_superseded_at DESC, superseded_message.created_at DESC, superseded_message.id DESC
+    LIMIT 1
+  ) AS superseded_by_turn_id,
+  MAX(m.turn_superseded_at) AS superseded_at,
+  (
+    SELECT superseded_message.turn_superseded_reason
+    FROM bot_history_messages superseded_message
+    WHERE superseded_message.turn_id = m.turn_id
+      AND superseded_message.session_id = m.session_id
+      AND superseded_message.turn_superseded_reason IS NOT NULL
+    ORDER BY superseded_message.turn_superseded_at DESC, superseded_message.created_at DESC, superseded_message.id DESC
+    LIMIT 1
+  ) AS superseded_reason,
+  MIN(m.created_at) AS created_at,
+  COALESCE(MAX(m.turn_superseded_at), MAX(m.created_at)) AS updated_at
+FROM bot_history_messages m
+WHERE m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.session_id IS NOT NULL
+GROUP BY m.turn_id, m.session_id, m.turn_position;
 CREATE VIEW bot_visible_history_messages AS
 SELECT
   m.turn_id,

@@ -1,36 +1,15 @@
 -- 0103_history_turns
--- Add linear history turns, hot message turn read model, and session turn position allocator.
+-- Add single-table history turn read/lifecycle model and session turn position allocator.
 
 ALTER TABLE bot_history_messages
   ADD COLUMN IF NOT EXISTS turn_id UUID,
   ADD COLUMN IF NOT EXISTS turn_message_seq BIGINT,
   ADD COLUMN IF NOT EXISTS turn_position BIGINT,
-  ADD COLUMN IF NOT EXISTS turn_visible BOOLEAN NOT NULL DEFAULT false;
+  ADD COLUMN IF NOT EXISTS turn_visible BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS turn_superseded_by_turn_id UUID,
+  ADD COLUMN IF NOT EXISTS turn_superseded_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS turn_superseded_reason TEXT;
 
-CREATE TABLE IF NOT EXISTS bot_history_turns (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  session_id UUID NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
-  position BIGINT NOT NULL,
-  request_message_id UUID REFERENCES bot_history_messages(id) ON DELETE SET NULL,
-  assistant_message_id UUID REFERENCES bot_history_messages(id) ON DELETE SET NULL,
-  superseded_by_turn_id UUID REFERENCES bot_history_turns(id) ON DELETE SET NULL,
-  superseded_at TIMESTAMPTZ,
-  superseded_reason TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (session_id, position)
-);
-
-CREATE INDEX IF NOT EXISTS idx_bot_history_turns_session_active
-  ON bot_history_turns(session_id, position)
-  WHERE superseded_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_bot_history_turns_request_message
-  ON bot_history_turns(request_message_id)
-  WHERE request_message_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_bot_history_turns_assistant_message
-  ON bot_history_turns(assistant_message_id)
-  WHERE assistant_message_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_role_created
   ON bot_history_messages(session_id, role, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_turn
@@ -40,6 +19,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_messages_turn_seq_unique
   ON bot_history_messages(turn_id, turn_message_seq)
   WHERE turn_id IS NOT NULL AND turn_message_seq IS NOT NULL;
 
+DROP TABLE IF EXISTS _memoh_history_turn_backfill;
+CREATE TEMP TABLE _memoh_history_turn_backfill AS
 WITH ordered AS (
   SELECT
     m.*,
@@ -67,6 +48,7 @@ grouped AS (
 ),
 turns AS (
   SELECT
+    gen_random_uuid() AS turn_id,
     bot_id,
     session_id,
     turn_group,
@@ -75,54 +57,38 @@ turns AS (
     (ARRAY_AGG(id ORDER BY created_at, id) FILTER (WHERE role = 'assistant'))[1] AS assistant_message_id
   FROM grouped
   GROUP BY bot_id, session_id, turn_group
-),
-positioned AS (
-  SELECT
-    *,
-    ROW_NUMBER() OVER (
-      PARTITION BY session_id
-      ORDER BY created_at, turn_group
-    ) AS position
-  FROM turns
-)
-INSERT INTO bot_history_turns (
-  bot_id,
-  session_id,
-  position,
-  request_message_id,
-  assistant_message_id,
-  created_at,
-  updated_at
 )
 SELECT
-  bot_id,
-  session_id,
-  position,
-  request_message_id,
-  assistant_message_id,
-  created_at,
-  created_at
-FROM positioned
-ON CONFLICT (session_id, position) DO NOTHING;
+  *,
+  ROW_NUMBER() OVER (
+    PARTITION BY session_id
+    ORDER BY created_at, turn_group
+  ) AS position
+FROM turns;
 
 UPDATE bot_history_messages m
-SET turn_id = t.id,
-    turn_message_seq = 1
-FROM bot_history_turns t
+SET turn_id = t.turn_id,
+    turn_message_seq = 1,
+    turn_position = t.position,
+    turn_visible = true
+FROM _memoh_history_turn_backfill t
 WHERE m.id = t.request_message_id
   AND m.turn_id IS NULL;
 
 UPDATE bot_history_messages m
-SET turn_id = t.id,
-    turn_message_seq = 2
-FROM bot_history_turns t
+SET turn_id = t.turn_id,
+    turn_message_seq = 2,
+    turn_position = t.position,
+    turn_visible = true
+FROM _memoh_history_turn_backfill t
 WHERE m.id = t.assistant_message_id
   AND m.turn_id IS NULL;
 
 WITH bounded_turns AS (
   SELECT
-    t.id,
+    t.turn_id,
     t.session_id,
+    t.position,
     assistant.created_at AS assistant_created_at,
     assistant.id AS assistant_id,
     LEAD(COALESCE(req.created_at, assistant.created_at)) OVER (
@@ -133,16 +99,17 @@ WITH bounded_turns AS (
       PARTITION BY t.session_id
       ORDER BY t.position
     ) AS next_message_id
-  FROM bot_history_turns t
+  FROM _memoh_history_turn_backfill t
   LEFT JOIN bot_history_messages req ON req.id = t.request_message_id
   LEFT JOIN bot_history_messages assistant ON assistant.id = t.assistant_message_id
 ),
 tail_messages AS (
   SELECT
     m.id AS message_id,
-    t.id AS turn_id,
+    t.turn_id,
+    t.position,
     2 + ROW_NUMBER() OVER (
-      PARTITION BY t.id
+      PARTITION BY t.turn_id
       ORDER BY m.created_at, m.id
     ) AS turn_message_seq
   FROM bounded_turns t
@@ -154,7 +121,7 @@ tail_messages AS (
     AND m.turn_id IS NULL
     AND NOT EXISTS (
       SELECT 1
-      FROM bot_history_turns anchored
+      FROM _memoh_history_turn_backfill anchored
       WHERE anchored.request_message_id = m.id
          OR anchored.assistant_message_id = m.id
     )
@@ -166,15 +133,11 @@ tail_messages AS (
 )
 UPDATE bot_history_messages m
 SET turn_id = tail.turn_id,
-    turn_message_seq = tail.turn_message_seq
+    turn_message_seq = tail.turn_message_seq,
+    turn_position = tail.position,
+    turn_visible = true
 FROM tail_messages tail
 WHERE m.id = tail.message_id;
-
-UPDATE bot_history_messages m
-SET turn_position = t.position,
-    turn_visible = (t.superseded_at IS NULL)
-FROM bot_history_turns t
-WHERE m.turn_id = t.id;
 
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_visible_session_order
   ON bot_history_messages(session_id, turn_position DESC, turn_message_seq DESC, created_at DESC, id DESC)
@@ -190,6 +153,26 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_messages_visible_session_source_order
     AND turn_id IS NOT NULL
     AND turn_position IS NOT NULL
     AND turn_message_seq IS NOT NULL;
+
+DROP VIEW IF EXISTS bot_history_turns;
+CREATE OR REPLACE VIEW bot_history_turns AS
+SELECT
+  m.turn_id::uuid AS id,
+  ((ARRAY_AGG(m.bot_id ORDER BY m.turn_message_seq ASC, m.created_at ASC, m.id ASC))[1])::uuid AS bot_id,
+  m.session_id::uuid AS session_id,
+  m.turn_position::bigint AS position,
+  ((ARRAY_AGG(m.id ORDER BY m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'user' AND m.turn_message_seq = 1))[1])::uuid AS request_message_id,
+  ((ARRAY_AGG(m.id ORDER BY m.created_at ASC, m.id ASC) FILTER (WHERE m.role = 'assistant' AND m.turn_message_seq = 2))[1])::uuid AS assistant_message_id,
+  ((ARRAY_AGG(m.turn_superseded_by_turn_id ORDER BY m.turn_superseded_at DESC NULLS LAST, m.created_at DESC, m.id DESC) FILTER (WHERE m.turn_superseded_by_turn_id IS NOT NULL))[1])::uuid AS superseded_by_turn_id,
+  MAX(m.turn_superseded_at)::timestamptz AS superseded_at,
+  COALESCE(((ARRAY_AGG(m.turn_superseded_reason ORDER BY m.turn_superseded_at DESC NULLS LAST, m.created_at DESC, m.id DESC) FILTER (WHERE m.turn_superseded_reason IS NOT NULL))[1])::text, ''::text)::text AS superseded_reason,
+  MIN(m.created_at)::timestamptz AS created_at,
+  COALESCE(MAX(m.turn_superseded_at), MAX(m.created_at))::timestamptz AS updated_at
+FROM bot_history_messages m
+WHERE m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.session_id IS NOT NULL
+GROUP BY m.turn_id, m.session_id, m.turn_position;
 
 CREATE OR REPLACE VIEW bot_visible_history_messages AS
 SELECT
@@ -226,8 +209,12 @@ ALTER TABLE bot_sessions
 UPDATE bot_sessions s
 SET next_turn_position = GREATEST(s.next_turn_position, turns.next_position)
 FROM (
-  SELECT session_id, MAX(position) + 1 AS next_position
-  FROM bot_history_turns
+  SELECT session_id, MAX(GREATEST(turn_position, turn_message_seq)) + 1 AS next_position
+  FROM bot_history_messages
+  WHERE turn_position IS NOT NULL
+    AND turn_message_seq IS NOT NULL
   GROUP BY session_id
 ) turns
 WHERE s.id = turns.session_id;
+
+DROP TABLE IF EXISTS _memoh_history_turn_backfill;

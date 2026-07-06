@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -40,7 +41,7 @@ func (q *Queries) InTx(ctx context.Context, fn func(dbstore.Queries) error) erro
 	defer func() {
 		_ = tx.Rollback()
 	}()
-	qtx := NewQueries(newWithQueries(q.store.db, q.store.queries.WithTx(tx), true))
+	qtx := NewQueries(newWithQueries(q.store.db, tx, q.store.queries.WithTx(tx), true))
 	if err := fn(qtx); err != nil {
 		return err
 	}
@@ -1241,30 +1242,6 @@ func createSQLiteMessageWithHistoryTurn(ctx context.Context, queries *sqlitesqlc
 	if err != nil {
 		return pgsqlc.CreateMessageWithHistoryTurnRow{}, mapQueryErr(err)
 	}
-	var turnArg sqlitesqlc.CreateHistoryTurnWithIDAtPositionParams
-	if err := convertValue(pgsqlc.CreateHistoryTurnWithIDParams{
-		TurnID:           arg.TurnID,
-		BotID:            arg.BotID,
-		SessionID:        arg.SessionID,
-		RequestMessageID: arg.MessageID,
-	}, &turnArg); err != nil {
-		return pgsqlc.CreateMessageWithHistoryTurnRow{}, err
-	}
-	turnArg.TurnPosition = turnPosition
-	if _, err := queries.CreateHistoryTurnWithIDAtPosition(ctx, turnArg); err != nil {
-		return pgsqlc.CreateMessageWithHistoryTurnRow{}, mapQueryErr(err)
-	}
-	var linkArg sqlitesqlc.LinkMessageToHistoryTurnParams
-	if err := convertValue(pgsqlc.LinkMessageToHistoryTurnParams{
-		MessageID:      arg.MessageID,
-		TurnID:         arg.TurnID,
-		TurnMessageSeq: arg.TurnMessageSeq,
-	}, &linkArg); err != nil {
-		return pgsqlc.CreateMessageWithHistoryTurnRow{}, err
-	}
-	if _, err := queries.LinkMessageToHistoryTurn(ctx, linkArg); err != nil {
-		return pgsqlc.CreateMessageWithHistoryTurnRow{}, mapQueryErr(err)
-	}
 	var result pgsqlc.CreateMessageWithHistoryTurnRow
 	if err := convertValue(row, &result); err != nil {
 		return pgsqlc.CreateMessageWithHistoryTurnRow{}, err
@@ -1543,31 +1520,13 @@ func (q *Queries) ForkSessionFromAssistantMessage(ctx context.Context, arg pgsql
 	}
 	turnBySourcePosition := make(map[int64]createdForkTurn, len(turns))
 	for _, turn := range turns {
-		var requestID sql.NullString
-		if turn.RequestMessageID.Valid {
-			requestID = sql.NullString{String: messageIDMap[turn.RequestMessageID.String], Valid: true}
-		}
-		var assistantID sql.NullString
-		if turn.AssistantMessageID.Valid {
-			assistantID = sql.NullString{String: messageIDMap[turn.AssistantMessageID.String], Valid: true}
-		}
 		turnPosition, err := qtx.AllocateSessionTurnPosition(ctx, created.ID)
 		if err != nil {
 			return pgsqlc.ForkSessionFromAssistantMessageRow{}, mapQueryErr(err)
 		}
-		createdTurn, err := qtx.CreateHistoryTurn(ctx, sqlitesqlc.CreateHistoryTurnParams{
-			BotID:              created.BotID,
-			SessionID:          created.ID,
-			TurnPosition:       turnPosition,
-			RequestMessageID:   requestID,
-			AssistantMessageID: assistantID,
-		})
-		if err != nil {
-			return pgsqlc.ForkSessionFromAssistantMessageRow{}, mapQueryErr(err)
-		}
 		turnBySourcePosition[turn.Position] = createdForkTurn{
-			ID:       createdTurn.ID,
-			Position: createdTurn.Position,
+			ID:       uuid.NewString(),
+			Position: turnPosition,
 		}
 	}
 	for _, sourceMessage := range visibleMessages {
@@ -4348,7 +4307,7 @@ func (q *Queries) CreateHistoryTurn(ctx context.Context, arg pgsqlc.CreateHistor
 		return pgsqlc.BotHistoryTurn{}, err
 	}
 	if q.store.inTx {
-		return createSQLiteHistoryTurn(ctx, q.store.queries, sqliteArg)
+		return createSQLiteHistoryTurn(ctx, q.store.dbtx, q.store.queries, sqliteArg)
 	}
 	if q.store.db == nil {
 		return pgsqlc.BotHistoryTurn{}, errSQLiteQueriesNotConfigured
@@ -4360,7 +4319,7 @@ func (q *Queries) CreateHistoryTurn(ctx context.Context, arg pgsqlc.CreateHistor
 	defer func() {
 		_ = tx.Rollback()
 	}()
-	result, err := createSQLiteHistoryTurn(ctx, q.store.queries.WithTx(tx), sqliteArg)
+	result, err := createSQLiteHistoryTurn(ctx, tx, q.store.queries.WithTx(tx), sqliteArg)
 	if err != nil {
 		return pgsqlc.BotHistoryTurn{}, err
 	}
@@ -4370,24 +4329,22 @@ func (q *Queries) CreateHistoryTurn(ctx context.Context, arg pgsqlc.CreateHistor
 	return result, nil
 }
 
-func createSQLiteHistoryTurn(ctx context.Context, queries *sqlitesqlc.Queries, arg sqlitesqlc.CreateHistoryTurnParams) (pgsqlc.BotHistoryTurn, error) {
-	if queries == nil {
+func createSQLiteHistoryTurn(ctx context.Context, dbtx sqlitesqlc.DBTX, queries *sqlitesqlc.Queries, arg sqlitesqlc.CreateHistoryTurnParams) (pgsqlc.BotHistoryTurn, error) {
+	if dbtx == nil || queries == nil {
 		return pgsqlc.BotHistoryTurn{}, errSQLiteQueriesNotConfigured
 	}
-	position, err := queries.AllocateSessionTurnPosition(ctx, arg.SessionID)
+	if !arg.SessionID.Valid {
+		return pgsqlc.BotHistoryTurn{}, pgx.ErrNoRows
+	}
+	position, err := allocateSQLiteTurnPosition(ctx, queries, arg.SessionID.String, arg.TurnPosition)
 	if err != nil {
 		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
 	}
-	arg.TurnPosition = position
-	out, err := queries.CreateHistoryTurn(ctx, arg)
+	input, err := sqliteHistoryTurnInputFromCreate(arg, uuid.NewString(), position)
 	if err != nil {
-		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
-	}
-	var result pgsqlc.BotHistoryTurn
-	if err := convertValue(out, &result); err != nil {
 		return pgsqlc.BotHistoryTurn{}, err
 	}
-	return result, nil
+	return createSQLiteHistoryTurnFromInput(ctx, dbtx, input)
 }
 
 func (q *Queries) CreateHistoryTurnWithID(ctx context.Context, arg pgsqlc.CreateHistoryTurnWithIDParams) (pgsqlc.BotHistoryTurn, error) {
@@ -4399,7 +4356,7 @@ func (q *Queries) CreateHistoryTurnWithID(ctx context.Context, arg pgsqlc.Create
 		return pgsqlc.BotHistoryTurn{}, err
 	}
 	if q.store.inTx {
-		return createSQLiteHistoryTurnWithID(ctx, q.store.queries, sqliteArg)
+		return createSQLiteHistoryTurnWithID(ctx, q.store.dbtx, q.store.queries, sqliteArg)
 	}
 	if q.store.db == nil {
 		return pgsqlc.BotHistoryTurn{}, errSQLiteQueriesNotConfigured
@@ -4411,7 +4368,7 @@ func (q *Queries) CreateHistoryTurnWithID(ctx context.Context, arg pgsqlc.Create
 	defer func() {
 		_ = tx.Rollback()
 	}()
-	result, err := createSQLiteHistoryTurnWithID(ctx, q.store.queries.WithTx(tx), sqliteArg)
+	result, err := createSQLiteHistoryTurnWithID(ctx, tx, q.store.queries.WithTx(tx), sqliteArg)
 	if err != nil {
 		return pgsqlc.BotHistoryTurn{}, err
 	}
@@ -4421,24 +4378,22 @@ func (q *Queries) CreateHistoryTurnWithID(ctx context.Context, arg pgsqlc.Create
 	return result, nil
 }
 
-func createSQLiteHistoryTurnWithID(ctx context.Context, queries *sqlitesqlc.Queries, arg sqlitesqlc.CreateHistoryTurnWithIDParams) (pgsqlc.BotHistoryTurn, error) {
-	if queries == nil {
+func createSQLiteHistoryTurnWithID(ctx context.Context, dbtx sqlitesqlc.DBTX, queries *sqlitesqlc.Queries, arg sqlitesqlc.CreateHistoryTurnWithIDParams) (pgsqlc.BotHistoryTurn, error) {
+	if dbtx == nil || queries == nil {
 		return pgsqlc.BotHistoryTurn{}, errSQLiteQueriesNotConfigured
 	}
-	position, err := queries.AllocateSessionTurnPosition(ctx, arg.SessionID)
+	if !arg.SessionID.Valid {
+		return pgsqlc.BotHistoryTurn{}, pgx.ErrNoRows
+	}
+	position, err := allocateSQLiteTurnPosition(ctx, queries, arg.SessionID.String, arg.TurnPosition)
 	if err != nil {
 		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
 	}
-	arg.TurnPosition = position
-	out, err := queries.CreateHistoryTurnWithID(ctx, arg)
+	input, err := sqliteHistoryTurnInputFromCreateWithID(arg, position)
 	if err != nil {
-		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
-	}
-	var result pgsqlc.BotHistoryTurn
-	if err := convertValue(out, &result); err != nil {
 		return pgsqlc.BotHistoryTurn{}, err
 	}
-	return result, nil
+	return createSQLiteHistoryTurnFromInput(ctx, dbtx, input)
 }
 
 func (q *Queries) CreateHistoryTurnWithIDAtPosition(ctx context.Context, arg pgsqlc.CreateHistoryTurnWithIDAtPositionParams) (pgsqlc.BotHistoryTurn, error) {
@@ -4449,15 +4404,387 @@ func (q *Queries) CreateHistoryTurnWithIDAtPosition(ctx context.Context, arg pgs
 	if err := convertValue(arg, &sqliteArg); err != nil {
 		return pgsqlc.BotHistoryTurn{}, err
 	}
-	out, err := q.store.queries.CreateHistoryTurnWithIDAtPosition(ctx, sqliteArg)
+	createArg := sqlitesqlc.CreateHistoryTurnWithIDParams(sqliteArg)
+	if q.store.inTx {
+		return createSQLiteHistoryTurnWithID(ctx, q.store.dbtx, q.store.queries, createArg)
+	}
+	if q.store.db == nil {
+		return pgsqlc.BotHistoryTurn{}, errSQLiteQueriesNotConfigured
+	}
+	tx, err := q.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+	result, err := createSQLiteHistoryTurnWithID(ctx, tx, q.store.queries.WithTx(tx), createArg)
+	if err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	return result, nil
+}
+
+type sqliteHistoryTurnInput struct {
+	turnID             string
+	botID              string
+	sessionID          string
+	position           int64
+	requestMessageID   sql.NullString
+	assistantMessageID sql.NullString
+}
+
+func allocateSQLiteTurnPosition(ctx context.Context, queries *sqlitesqlc.Queries, sessionID string, requested sql.NullInt64) (int64, error) {
+	if requested.Valid {
+		return requested.Int64, nil
+	}
+	return queries.AllocateSessionTurnPosition(ctx, sessionID)
+}
+
+func sqliteHistoryTurnInputFromCreate(arg sqlitesqlc.CreateHistoryTurnParams, turnID string, position int64) (sqliteHistoryTurnInput, error) {
+	requestID, err := sqliteNullStringFromValue(arg.RequestMessageID)
+	if err != nil {
+		return sqliteHistoryTurnInput{}, err
+	}
+	assistantID, err := sqliteNullStringFromValue(arg.AssistantMessageID)
+	if err != nil {
+		return sqliteHistoryTurnInput{}, err
+	}
+	return sqliteHistoryTurnInput{
+		turnID:             turnID,
+		botID:              arg.BotID,
+		sessionID:          arg.SessionID.String,
+		position:           position,
+		requestMessageID:   requestID,
+		assistantMessageID: assistantID,
+	}, nil
+}
+
+func sqliteHistoryTurnInputFromCreateWithID(arg sqlitesqlc.CreateHistoryTurnWithIDParams, position int64) (sqliteHistoryTurnInput, error) {
+	requestID, err := sqliteNullStringFromValue(arg.RequestMessageID)
+	if err != nil {
+		return sqliteHistoryTurnInput{}, err
+	}
+	assistantID, err := sqliteNullStringFromValue(arg.AssistantMessageID)
+	if err != nil {
+		return sqliteHistoryTurnInput{}, err
+	}
+	if !arg.TurnID.Valid || strings.TrimSpace(arg.TurnID.String) == "" {
+		return sqliteHistoryTurnInput{}, pgx.ErrNoRows
+	}
+	return sqliteHistoryTurnInput{
+		turnID:             arg.TurnID.String,
+		botID:              arg.BotID,
+		sessionID:          arg.SessionID.String,
+		position:           position,
+		requestMessageID:   requestID,
+		assistantMessageID: assistantID,
+	}, nil
+}
+
+func sqliteNullStringFromValue(value any) (sql.NullString, error) {
+	var out sql.NullString
+	if err := convertValue(value, &out); err != nil {
+		return sql.NullString{}, err
+	}
+	out.String = strings.TrimSpace(out.String)
+	out.Valid = out.Valid && out.String != ""
+	return out, nil
+}
+
+func createSQLiteHistoryTurnFromInput(ctx context.Context, dbtx sqlitesqlc.DBTX, input sqliteHistoryTurnInput) (pgsqlc.BotHistoryTurn, error) {
+	if strings.TrimSpace(input.turnID) == "" || strings.TrimSpace(input.sessionID) == "" {
+		return pgsqlc.BotHistoryTurn{}, pgx.ErrNoRows
+	}
+	linked := int64(0)
+	if input.requestMessageID.Valid {
+		affected, err := linkSQLiteHistoryTurnAnchor(ctx, dbtx, input.sessionID, input.turnID, input.position, input.requestMessageID.String, 1)
+		if err != nil {
+			return pgsqlc.BotHistoryTurn{}, err
+		}
+		linked += affected
+	}
+	if input.assistantMessageID.Valid {
+		affected, err := linkSQLiteHistoryTurnAnchor(ctx, dbtx, input.sessionID, input.turnID, input.position, input.assistantMessageID.String, 2)
+		if err != nil {
+			return pgsqlc.BotHistoryTurn{}, err
+		}
+		linked += affected
+	}
+	if linked == 0 {
+		return pgsqlc.BotHistoryTurn{}, pgx.ErrNoRows
+	}
+	return selectSQLiteHistoryTurnByID(ctx, dbtx, input.turnID, input.sessionID, false)
+}
+
+func linkSQLiteHistoryTurnAnchor(ctx context.Context, dbtx sqlitesqlc.DBTX, sessionID string, turnID string, position int64, messageID string, seq int64) (int64, error) {
+	result, err := dbtx.ExecContext(ctx, `
+UPDATE bot_history_messages
+SET turn_id = ?1,
+    turn_position = ?2,
+    turn_message_seq = ?3,
+    turn_visible = 1,
+    turn_superseded_by_turn_id = NULL,
+    turn_superseded_at = NULL,
+    turn_superseded_reason = NULL
+WHERE id = ?4
+  AND session_id = ?5
+`, turnID, position, seq, messageID, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+func selectSQLiteHistoryTurnByID(ctx context.Context, dbtx sqlitesqlc.DBTX, turnID string, sessionID string, visibleOnly bool) (pgsqlc.BotHistoryTurn, error) {
+	query := `
+SELECT id, bot_id, session_id, position, request_message_id, assistant_message_id,
+  superseded_by_turn_id, superseded_at, superseded_reason, created_at, updated_at
+FROM bot_history_turns
+WHERE id = ?1
+  AND session_id = ?2`
+	args := []any{turnID, sessionID}
+	if visibleOnly {
+		query += `
+  AND superseded_at IS NULL`
+	}
+	query += `
+LIMIT 1`
+	var row sqlitesqlc.BotHistoryTurn
+	err := dbtx.QueryRowContext(ctx, query, args...).Scan(
+		&row.ID,
+		&row.BotID,
+		&row.SessionID,
+		&row.Position,
+		&row.RequestMessageID,
+		&row.AssistantMessageID,
+		&row.SupersededByTurnID,
+		&row.SupersededAt,
+		&row.SupersededReason,
+		&row.CreatedAt,
+		&row.UpdatedAt,
+	)
 	if err != nil {
 		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
 	}
 	var result pgsqlc.BotHistoryTurn
-	if err := convertValue(out, &result); err != nil {
+	if err := convertValue(row, &result); err != nil {
 		return pgsqlc.BotHistoryTurn{}, err
 	}
 	return result, nil
+}
+
+func bindSQLiteHistoryTurnAssistantByRequest(ctx context.Context, dbtx sqlitesqlc.DBTX, arg sqlitesqlc.BindHistoryTurnAssistantByRequestParams) (pgsqlc.BotHistoryTurn, error) {
+	if dbtx == nil {
+		return pgsqlc.BotHistoryTurn{}, errSQLiteQueriesNotConfigured
+	}
+	requestID, err := sqliteNullStringFromValue(arg.RequestMessageID)
+	if err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	assistantID, err := sqliteNullStringFromValue(arg.AssistantMessageID)
+	if err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	if !arg.SessionID.Valid || !requestID.Valid || !assistantID.Valid {
+		return pgsqlc.BotHistoryTurn{}, pgx.ErrNoRows
+	}
+	var turnID string
+	var position int64
+	if err := dbtx.QueryRowContext(ctx, `
+SELECT request.turn_id, request.turn_position
+FROM bot_history_messages request
+WHERE request.session_id = ?1
+  AND request.id = ?2
+  AND request.turn_id IS NOT NULL
+  AND request.turn_position IS NOT NULL
+  AND request.turn_visible = 1
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_history_messages assistant
+    WHERE assistant.turn_id = request.turn_id
+      AND assistant.role = 'assistant'
+      AND assistant.turn_message_seq = 2
+      AND assistant.turn_visible = 1
+  )
+LIMIT 1
+`, arg.SessionID.String, requestID.String).Scan(&turnID, &position); err != nil {
+		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
+	}
+	affected, err := linkSQLiteHistoryTurnAnchor(ctx, dbtx, arg.SessionID.String, turnID, position, assistantID.String, 2)
+	if err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	if affected != 1 {
+		return pgsqlc.BotHistoryTurn{}, pgx.ErrNoRows
+	}
+	return selectSQLiteHistoryTurnByID(ctx, dbtx, turnID, arg.SessionID.String, true)
+}
+
+func bindSQLiteLatestHistoryTurnAssistant(ctx context.Context, dbtx sqlitesqlc.DBTX, arg sqlitesqlc.BindLatestHistoryTurnAssistantParams) (pgsqlc.BotHistoryTurn, error) {
+	if dbtx == nil {
+		return pgsqlc.BotHistoryTurn{}, errSQLiteQueriesNotConfigured
+	}
+	assistantID, err := sqliteNullStringFromValue(arg.AssistantMessageID)
+	if err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	if !arg.SessionID.Valid || !assistantID.Valid {
+		return pgsqlc.BotHistoryTurn{}, pgx.ErrNoRows
+	}
+	var turnID string
+	var position int64
+	if err := dbtx.QueryRowContext(ctx, `
+SELECT request.turn_id, request.turn_position
+FROM bot_history_messages request
+WHERE request.session_id = ?1
+  AND request.role = 'user'
+  AND request.turn_message_seq = 1
+  AND request.turn_id IS NOT NULL
+  AND request.turn_position IS NOT NULL
+  AND request.turn_visible = 1
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_history_messages assistant
+    WHERE assistant.turn_id = request.turn_id
+      AND assistant.role = 'assistant'
+      AND assistant.turn_message_seq = 2
+      AND assistant.turn_visible = 1
+  )
+ORDER BY request.turn_position DESC
+LIMIT 1
+`, arg.SessionID.String).Scan(&turnID, &position); err != nil {
+		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
+	}
+	affected, err := linkSQLiteHistoryTurnAnchor(ctx, dbtx, arg.SessionID.String, turnID, position, assistantID.String, 2)
+	if err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	if affected != 1 {
+		return pgsqlc.BotHistoryTurn{}, pgx.ErrNoRows
+	}
+	return selectSQLiteHistoryTurnByID(ctx, dbtx, turnID, arg.SessionID.String, true)
+}
+
+func appendSQLiteMessageToHistoryTurnByRequest(ctx context.Context, dbtx sqlitesqlc.DBTX, queries *sqlitesqlc.Queries, arg sqlitesqlc.AppendMessageToHistoryTurnByRequestParams) (string, error) {
+	if dbtx == nil || queries == nil {
+		return "", errSQLiteQueriesNotConfigured
+	}
+	requestID, err := sqliteNullStringFromValue(arg.RequestMessageID)
+	if err != nil {
+		return "", err
+	}
+	if !arg.SessionID.Valid || !requestID.Valid || strings.TrimSpace(arg.MessageID) == "" {
+		return "", pgx.ErrNoRows
+	}
+	var turnID string
+	var position int64
+	if err := dbtx.QueryRowContext(ctx, `
+SELECT request.turn_id, request.turn_position
+FROM bot_history_messages request
+WHERE request.session_id = ?1
+  AND request.id = ?2
+  AND request.turn_id IS NOT NULL
+  AND request.turn_position IS NOT NULL
+  AND request.turn_visible = 1
+LIMIT 1
+`, arg.SessionID.String, requestID.String).Scan(&turnID, &position); err != nil {
+		return "", mapQueryErr(err)
+	}
+	seq, err := queries.AllocateSessionTurnPosition(ctx, arg.SessionID.String)
+	if err != nil {
+		return "", err
+	}
+	return appendSQLiteMessageToTurn(ctx, dbtx, arg.SessionID.String, turnID, position, arg.MessageID, seq)
+}
+
+func appendSQLiteMessageToLatestHistoryTurn(ctx context.Context, dbtx sqlitesqlc.DBTX, queries *sqlitesqlc.Queries, arg sqlitesqlc.AppendMessageToLatestHistoryTurnParams) (string, error) {
+	if dbtx == nil || queries == nil {
+		return "", errSQLiteQueriesNotConfigured
+	}
+	if !arg.SessionID.Valid || strings.TrimSpace(arg.MessageID) == "" {
+		return "", pgx.ErrNoRows
+	}
+	var turnID string
+	var position int64
+	if err := dbtx.QueryRowContext(ctx, `
+SELECT visible.turn_id, visible.turn_position
+FROM bot_history_messages visible
+WHERE visible.session_id = ?1
+  AND visible.turn_id IS NOT NULL
+  AND visible.turn_position IS NOT NULL
+  AND visible.turn_message_seq IS NOT NULL
+  AND visible.turn_visible = 1
+ORDER BY visible.turn_position DESC, visible.turn_message_seq DESC
+LIMIT 1
+`, arg.SessionID.String).Scan(&turnID, &position); err != nil {
+		return "", mapQueryErr(err)
+	}
+	seq, err := queries.AllocateSessionTurnPosition(ctx, arg.SessionID.String)
+	if err != nil {
+		return "", err
+	}
+	return appendSQLiteMessageToTurn(ctx, dbtx, arg.SessionID.String, turnID, position, arg.MessageID, seq)
+}
+
+func appendSQLiteMessageToTurn(ctx context.Context, dbtx sqlitesqlc.DBTX, sessionID string, turnID string, position int64, messageID string, seq int64) (string, error) {
+	result, err := dbtx.ExecContext(ctx, `
+UPDATE bot_history_messages
+SET turn_id = ?1,
+    turn_position = ?2,
+    turn_visible = 1,
+    turn_message_seq = ?3,
+    turn_superseded_by_turn_id = NULL,
+    turn_superseded_at = NULL,
+    turn_superseded_reason = NULL
+WHERE id = ?4
+  AND session_id = ?5
+  AND turn_id IS NULL
+`, turnID, position, seq, messageID, sessionID)
+	if err != nil {
+		return "", err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return "", err
+	}
+	if rowsAffected != 1 {
+		return "", pgx.ErrNoRows
+	}
+	return messageID, nil
+}
+
+func supersedeSQLiteHistoryTurn(ctx context.Context, dbtx sqlitesqlc.DBTX, arg sqlitesqlc.SupersedeHistoryTurnParams) (pgsqlc.BotHistoryTurn, error) {
+	if dbtx == nil {
+		return pgsqlc.BotHistoryTurn{}, errSQLiteQueriesNotConfigured
+	}
+	if !arg.OldTurnID.Valid || !arg.SessionID.Valid || strings.TrimSpace(arg.OldTurnID.String) == "" || strings.TrimSpace(arg.SessionID.String) == "" {
+		return pgsqlc.BotHistoryTurn{}, pgx.ErrNoRows
+	}
+	result, err := dbtx.ExecContext(ctx, `
+UPDATE bot_history_messages
+SET turn_superseded_by_turn_id = ?1,
+    turn_superseded_at = ?2,
+    turn_superseded_reason = ?3,
+    turn_visible = 0
+WHERE turn_id = ?4
+  AND session_id = ?5
+  AND turn_superseded_at IS NULL
+`, arg.SupersededByTurnID, arg.SupersededAt, arg.SupersededReason, arg.OldTurnID.String, arg.SessionID.String)
+	if err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return pgsqlc.BotHistoryTurn{}, err
+	}
+	if rowsAffected == 0 {
+		return pgsqlc.BotHistoryTurn{}, pgx.ErrNoRows
+	}
+	return selectSQLiteHistoryTurnByID(ctx, dbtx, arg.OldTurnID.String, arg.SessionID.String, false)
 }
 
 func (q *Queries) BindHistoryTurnAssistantByRequest(ctx context.Context, arg pgsqlc.BindHistoryTurnAssistantByRequestParams) (pgsqlc.BotHistoryTurn, error) {
@@ -4468,15 +4795,7 @@ func (q *Queries) BindHistoryTurnAssistantByRequest(ctx context.Context, arg pgs
 	if err := convertValue(arg, &sqliteArg); err != nil {
 		return pgsqlc.BotHistoryTurn{}, err
 	}
-	out, err := q.store.queries.BindHistoryTurnAssistantByRequest(ctx, sqliteArg)
-	if err != nil {
-		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
-	}
-	var result pgsqlc.BotHistoryTurn
-	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.BotHistoryTurn{}, err
-	}
-	return result, nil
+	return bindSQLiteHistoryTurnAssistantByRequest(ctx, q.store.dbtx, sqliteArg)
 }
 
 func (q *Queries) BindLatestHistoryTurnAssistant(ctx context.Context, arg pgsqlc.BindLatestHistoryTurnAssistantParams) (pgsqlc.BotHistoryTurn, error) {
@@ -4487,15 +4806,7 @@ func (q *Queries) BindLatestHistoryTurnAssistant(ctx context.Context, arg pgsqlc
 	if err := convertValue(arg, &sqliteArg); err != nil {
 		return pgsqlc.BotHistoryTurn{}, err
 	}
-	out, err := q.store.queries.BindLatestHistoryTurnAssistant(ctx, sqliteArg)
-	if err != nil {
-		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
-	}
-	var result pgsqlc.BotHistoryTurn
-	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.BotHistoryTurn{}, err
-	}
-	return result, nil
+	return bindSQLiteLatestHistoryTurnAssistant(ctx, q.store.dbtx, sqliteArg)
 }
 
 func (q *Queries) LinkMessageToHistoryTurn(ctx context.Context, arg pgsqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error) {
@@ -4525,7 +4836,7 @@ func (q *Queries) AppendMessageToHistoryTurnByRequest(ctx context.Context, arg p
 	if err := convertValue(arg, &sqliteArg); err != nil {
 		return pgtype.UUID{}, err
 	}
-	out, err := q.store.queries.AppendMessageToHistoryTurnByRequest(ctx, sqliteArg)
+	out, err := appendSQLiteMessageToHistoryTurnByRequest(ctx, q.store.dbtx, q.store.queries, sqliteArg)
 	if err != nil {
 		return pgtype.UUID{}, mapQueryErr(err)
 	}
@@ -4536,15 +4847,23 @@ func (q *Queries) AppendMessageToHistoryTurnByRequest(ctx context.Context, arg p
 	return result, nil
 }
 
-func (q *Queries) AppendMessageToLatestHistoryTurn(ctx context.Context, arg pgsqlc.AppendMessageToLatestHistoryTurnParams) error {
+func (q *Queries) AppendMessageToLatestHistoryTurn(ctx context.Context, arg pgsqlc.AppendMessageToLatestHistoryTurnParams) (pgtype.UUID, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return errSQLiteQueriesNotConfigured
+		return pgtype.UUID{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.AppendMessageToLatestHistoryTurnParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return err
+		return pgtype.UUID{}, err
 	}
-	return mapQueryErr(q.store.queries.AppendMessageToLatestHistoryTurn(ctx, sqliteArg))
+	out, err := appendSQLiteMessageToLatestHistoryTurn(ctx, q.store.dbtx, q.store.queries, sqliteArg)
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	var result pgtype.UUID
+	if err := convertValue(out, &result); err != nil {
+		return pgtype.UUID{}, err
+	}
+	return result, nil
 }
 
 func (q *Queries) LinkUnassignedMessagesAfterHistoryTurnAssistant(ctx context.Context, turnID pgtype.UUID) error {
@@ -4555,7 +4874,7 @@ func (q *Queries) LinkUnassignedMessagesAfterHistoryTurnAssistant(ctx context.Co
 	if err := convertValue(turnID, &sqliteTurnID); err != nil {
 		return err
 	}
-	return mapQueryErr(linkUnassignedMessagesAfterHistoryTurnAssistantStable(ctx, q.store.db, sqliteTurnID))
+	return mapQueryErr(linkUnassignedMessagesAfterHistoryTurnAssistantStable(ctx, q.store.dbtx, sqliteTurnID))
 }
 
 func (q *Queries) GetVisibleHistoryTurnByMessage(ctx context.Context, arg pgsqlc.GetVisibleHistoryTurnByMessageParams) (pgsqlc.BotHistoryTurn, error) {
@@ -4604,7 +4923,7 @@ func (q *Queries) GetLatestVisibleHistoryTurnBySession(ctx context.Context, sess
 	if err := convertValue(sessionID, &sqliteSessionID); err != nil {
 		return pgsqlc.BotHistoryTurn{}, err
 	}
-	out, err := q.store.queries.GetLatestVisibleHistoryTurnBySession(ctx, sqliteSessionID)
+	out, err := q.store.queries.GetLatestVisibleHistoryTurnBySession(ctx, sql.NullString{String: sqliteSessionID, Valid: strings.TrimSpace(sqliteSessionID) != ""})
 	if err != nil {
 		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
 	}
@@ -4623,18 +4942,7 @@ func (q *Queries) SupersedeHistoryTurn(ctx context.Context, arg pgsqlc.Supersede
 	if err := convertValue(arg, &sqliteArg); err != nil {
 		return pgsqlc.BotHistoryTurn{}, err
 	}
-	out, err := q.store.queries.SupersedeHistoryTurn(ctx, sqliteArg)
-	if err != nil {
-		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
-	}
-	if err := q.store.queries.HideMessagesByHistoryTurn(ctx, sql.NullString{String: out.ID, Valid: strings.TrimSpace(out.ID) != ""}); err != nil {
-		return pgsqlc.BotHistoryTurn{}, mapQueryErr(err)
-	}
-	var result pgsqlc.BotHistoryTurn
-	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.BotHistoryTurn{}, err
-	}
-	return result, nil
+	return supersedeSQLiteHistoryTurn(ctx, q.store.dbtx, sqliteArg)
 }
 
 func (q *Queries) HideMessagesByHistoryTurn(ctx context.Context, turnID pgtype.UUID) error {
@@ -4649,6 +4957,18 @@ func (q *Queries) HideMessagesByHistoryTurn(ctx context.Context, turnID pgtype.U
 		return mapQueryErr(err)
 	}
 	return nil
+}
+
+func (q *Queries) SetSessionNextTurnPosition(ctx context.Context, arg pgsqlc.SetSessionNextTurnPositionParams) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.SetSessionNextTurnPositionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return err
+	}
+	err := q.store.queries.SetSessionNextTurnPosition(ctx, sqliteArg)
+	return mapQueryErr(err)
 }
 
 func (q *Queries) ReplaceHistoryTurn(ctx context.Context, arg pgsqlc.ReplaceHistoryTurnParams) (pgsqlc.ReplaceHistoryTurnRow, error) {
@@ -4673,17 +4993,17 @@ func (q *Queries) ReplaceHistoryTurn(ctx context.Context, arg pgsqlc.ReplaceHist
 		return pgsqlc.ReplaceHistoryTurnRow{}, err
 	}
 	oldTurn, err := qtx.GetHistoryTurnByID(ctx, sqlitesqlc.GetHistoryTurnByIDParams{
-		OldTurnID: oldTurnID,
-		SessionID: sessionID,
+		OldTurnID: sql.NullString{String: oldTurnID, Valid: strings.TrimSpace(oldTurnID) != ""},
+		SessionID: sql.NullString{String: sessionID, Valid: strings.TrimSpace(sessionID) != ""},
 	})
 	if err != nil {
 		return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
 	}
-	latestTurn, err := qtx.GetLatestVisibleHistoryTurnBySession(ctx, sessionID)
+	latestTurn, err := qtx.GetLatestVisibleHistoryTurnBySession(ctx, sql.NullString{String: sessionID, Valid: strings.TrimSpace(sessionID) != ""})
 	if err != nil {
 		return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
 	}
-	if strings.TrimSpace(latestTurn.ID) != strings.TrimSpace(oldTurn.ID) {
+	if strings.TrimSpace(latestTurn.ID.String) != strings.TrimSpace(oldTurn.ID.String) {
 		return pgsqlc.ReplaceHistoryTurnRow{}, pgx.ErrNoRows
 	}
 
@@ -4696,20 +5016,32 @@ func (q *Queries) ReplaceHistoryTurn(ctx context.Context, arg pgsqlc.ReplaceHist
 		return pgsqlc.ReplaceHistoryTurnRow{}, err
 	}
 	createArg.BotID = oldTurn.BotID
-	if err := validateSQLiteReplacementAnchor(ctx, tx, sessionID, oldTurnID, createArg.RequestMessageID, "user", true); err != nil {
+	var requestMessageID sql.NullString
+	if err := convertValue(arg.RequestMessageID, &requestMessageID); err != nil {
+		return pgsqlc.ReplaceHistoryTurnRow{}, err
+	}
+	var assistantMessageID sql.NullString
+	if err := convertValue(arg.AssistantMessageID, &assistantMessageID); err != nil {
+		return pgsqlc.ReplaceHistoryTurnRow{}, err
+	}
+	if err := validateSQLiteReplacementAnchor(ctx, tx, sessionID, oldTurnID, requestMessageID, "user", true); err != nil {
 		return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
 	}
-	if err := validateSQLiteReplacementAnchor(ctx, tx, sessionID, oldTurnID, createArg.AssistantMessageID, "assistant", false); err != nil {
+	if err := validateSQLiteReplacementAnchor(ctx, tx, sessionID, oldTurnID, assistantMessageID, "assistant", false); err != nil {
 		return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
 	}
 	turnPosition, err := qtx.AllocateSessionTurnPosition(ctx, sessionID)
 	if err != nil {
 		return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
 	}
-	createArg.TurnPosition = turnPosition
-	created, err := qtx.CreateHistoryTurn(ctx, createArg)
+	createArg.TurnPosition = sql.NullInt64{Int64: turnPosition, Valid: true}
+	created, err := createSQLiteHistoryTurn(ctx, tx, qtx, createArg)
 	if err != nil {
 		return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
+	}
+	var createdTurnID string
+	if err := convertValue(created.ID, &createdTurnID); err != nil {
+		return pgsqlc.ReplaceHistoryTurnRow{}, err
 	}
 	var supersedeArg sqlitesqlc.SupersedeHistoryTurnParams
 	if err := convertValue(pgsqlc.SupersedeHistoryTurnParams{
@@ -4720,24 +5052,21 @@ func (q *Queries) ReplaceHistoryTurn(ctx context.Context, arg pgsqlc.ReplaceHist
 	}, &supersedeArg); err != nil {
 		return pgsqlc.ReplaceHistoryTurnRow{}, err
 	}
-	supersedeArg.SupersededByTurnID = sql.NullString{String: created.ID, Valid: strings.TrimSpace(created.ID) != ""}
-	if _, err := qtx.SupersedeHistoryTurn(ctx, supersedeArg); err != nil {
+	supersedeArg.SupersededByTurnID = sql.NullString{String: createdTurnID, Valid: strings.TrimSpace(createdTurnID) != ""}
+	if _, err := supersedeSQLiteHistoryTurn(ctx, tx, supersedeArg); err != nil {
 		return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
 	}
-	if err := qtx.HideMessagesByHistoryTurn(ctx, sql.NullString{String: oldTurn.ID, Valid: strings.TrimSpace(oldTurn.ID) != ""}); err != nil {
-		return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
-	}
-	replacementTurnID := sql.NullString{String: created.ID, Valid: strings.TrimSpace(created.ID) != ""}
-	if createArg.RequestMessageID.Valid && strings.TrimSpace(createArg.RequestMessageID.String) != "" {
-		if err := linkMessageToHistoryTurnChecked(ctx, tx, sessionID, replacementTurnID, createArg.RequestMessageID.String, 1); err != nil {
+	replacementTurnID := sql.NullString{String: createdTurnID, Valid: strings.TrimSpace(createdTurnID) != ""}
+	if requestMessageID.Valid && strings.TrimSpace(requestMessageID.String) != "" {
+		if err := linkMessageToHistoryTurnChecked(ctx, tx, sessionID, replacementTurnID, requestMessageID.String, 1); err != nil {
 			return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
 		}
 	}
-	if createArg.AssistantMessageID.Valid && strings.TrimSpace(createArg.AssistantMessageID.String) != "" {
-		if err := linkMessageToHistoryTurnChecked(ctx, tx, sessionID, replacementTurnID, createArg.AssistantMessageID.String, 2); err != nil {
+	if assistantMessageID.Valid && strings.TrimSpace(assistantMessageID.String) != "" {
+		if err := linkMessageToHistoryTurnChecked(ctx, tx, sessionID, replacementTurnID, assistantMessageID.String, 2); err != nil {
 			return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
 		}
-		if err := linkUnassignedMessagesAfterHistoryTurnAssistantStable(ctx, tx, created.ID); err != nil {
+		if err := linkUnassignedMessagesAfterHistoryTurnAssistantStable(ctx, tx, createdTurnID); err != nil {
 			return pgsqlc.ReplaceHistoryTurnRow{}, mapQueryErr(err)
 		}
 	}
@@ -4798,7 +5127,10 @@ SET turn_id = ?1,
       FROM bot_history_turns
       WHERE id = ?1
     ), 0),
-    turn_message_seq = ?2
+    turn_message_seq = ?2,
+    turn_superseded_by_turn_id = NULL,
+    turn_superseded_at = NULL,
+    turn_superseded_reason = NULL
 WHERE id = ?3
   AND session_id = ?4
   AND EXISTS (
@@ -4840,8 +5172,11 @@ JOIN bot_history_messages m
 WHERE t.id = ?1
   AND m.id <> assistant.id
   AND m.turn_id IS NULL
-  AND m.rowid > assistant.rowid
-ORDER BY m.rowid
+  AND (
+    m.created_at > assistant.created_at
+    OR (m.created_at = assistant.created_at AND m.rowid > assistant.rowid)
+  )
+ORDER BY m.created_at, m.rowid
 `, turnID)
 	if err != nil {
 		return err
@@ -4870,7 +5205,10 @@ UPDATE bot_history_messages
 SET turn_id = ?1,
     turn_position = ?2,
     turn_visible = 1,
-    turn_message_seq = ?3
+    turn_message_seq = ?3,
+    turn_superseded_by_turn_id = NULL,
+    turn_superseded_at = NULL,
+    turn_superseded_reason = NULL
 WHERE id = ?4
   AND turn_id IS NULL
 `, turnID, item.position, int64(i+3), item.id)
@@ -6265,18 +6603,6 @@ func (q *Queries) SetRouteActiveSession(ctx context.Context, arg pgsqlc.SetRoute
 		return err
 	}
 	err := q.store.queries.SetRouteActiveSession(ctx, sqliteArg)
-	return mapQueryErr(err)
-}
-
-func (q *Queries) SetSessionNextTurnPosition(ctx context.Context, arg pgsqlc.SetSessionNextTurnPositionParams) error {
-	if q == nil || q.store == nil || q.store.queries == nil {
-		return errSQLiteQueriesNotConfigured
-	}
-	var sqliteArg sqlitesqlc.SetSessionNextTurnPositionParams
-	if err := convertValue(arg, &sqliteArg); err != nil {
-		return err
-	}
-	err := q.store.queries.SetSessionNextTurnPosition(ctx, sqliteArg)
 	return mapQueryErr(err)
 }
 

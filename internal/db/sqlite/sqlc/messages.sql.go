@@ -72,8 +72,8 @@ RETURNING id
 `
 
 type AppendMessageToHistoryTurnByRequestParams struct {
-	SessionID        string         `json:"session_id"`
-	RequestMessageID sql.NullString `json:"request_message_id"`
+	SessionID        sql.NullString `json:"session_id"`
+	RequestMessageID interface{}    `json:"request_message_id"`
 	MessageID        string         `json:"message_id"`
 }
 
@@ -131,8 +131,8 @@ WHERE bot_history_messages.id = ?2
 `
 
 type AppendMessageToLatestHistoryTurnParams struct {
-	SessionID string `json:"session_id"`
-	MessageID string `json:"message_id"`
+	SessionID sql.NullString `json:"session_id"`
+	MessageID string         `json:"message_id"`
 }
 
 func (q *Queries) AppendMessageToLatestHistoryTurn(ctx context.Context, arg AppendMessageToLatestHistoryTurnParams) error {
@@ -153,9 +153,9 @@ RETURNING id, bot_id, session_id, position, request_message_id, assistant_messag
 `
 
 type BindHistoryTurnAssistantByRequestParams struct {
-	AssistantMessageID sql.NullString `json:"assistant_message_id"`
-	SessionID          string         `json:"session_id"`
-	RequestMessageID   sql.NullString `json:"request_message_id"`
+	AssistantMessageID interface{}    `json:"assistant_message_id"`
+	SessionID          sql.NullString `json:"session_id"`
+	RequestMessageID   interface{}    `json:"request_message_id"`
 }
 
 func (q *Queries) BindHistoryTurnAssistantByRequest(ctx context.Context, arg BindHistoryTurnAssistantByRequestParams) (BotHistoryTurn, error) {
@@ -196,8 +196,8 @@ RETURNING id, bot_id, session_id, position, request_message_id, assistant_messag
 `
 
 type BindLatestHistoryTurnAssistantParams struct {
-	AssistantMessageID sql.NullString `json:"assistant_message_id"`
-	SessionID          string         `json:"session_id"`
+	AssistantMessageID interface{}    `json:"assistant_message_id"`
+	SessionID          sql.NullString `json:"session_id"`
 }
 
 func (q *Queries) BindLatestHistoryTurnAssistant(ctx context.Context, arg BindLatestHistoryTurnAssistantParams) (BotHistoryTurn, error) {
@@ -258,10 +258,10 @@ RETURNING id, bot_id, session_id, position, request_message_id, assistant_messag
 
 type CreateHistoryTurnParams struct {
 	BotID              string         `json:"bot_id"`
-	SessionID          string         `json:"session_id"`
-	TurnPosition       int64          `json:"turn_position"`
-	RequestMessageID   sql.NullString `json:"request_message_id"`
-	AssistantMessageID sql.NullString `json:"assistant_message_id"`
+	SessionID          sql.NullString `json:"session_id"`
+	TurnPosition       sql.NullInt64  `json:"turn_position"`
+	RequestMessageID   interface{}    `json:"request_message_id"`
+	AssistantMessageID interface{}    `json:"assistant_message_id"`
 }
 
 func (q *Queries) CreateHistoryTurn(ctx context.Context, arg CreateHistoryTurnParams) (BotHistoryTurn, error) {
@@ -311,12 +311,12 @@ RETURNING id, bot_id, session_id, position, request_message_id, assistant_messag
 `
 
 type CreateHistoryTurnWithIDParams struct {
-	TurnID             string         `json:"turn_id"`
+	TurnID             sql.NullString `json:"turn_id"`
 	BotID              string         `json:"bot_id"`
-	SessionID          string         `json:"session_id"`
-	TurnPosition       int64          `json:"turn_position"`
-	RequestMessageID   sql.NullString `json:"request_message_id"`
-	AssistantMessageID sql.NullString `json:"assistant_message_id"`
+	SessionID          sql.NullString `json:"session_id"`
+	TurnPosition       sql.NullInt64  `json:"turn_position"`
+	RequestMessageID   interface{}    `json:"request_message_id"`
+	AssistantMessageID interface{}    `json:"assistant_message_id"`
 }
 
 func (q *Queries) CreateHistoryTurnWithID(ctx context.Context, arg CreateHistoryTurnWithIDParams) (BotHistoryTurn, error) {
@@ -367,12 +367,12 @@ RETURNING id, bot_id, session_id, position, request_message_id, assistant_messag
 `
 
 type CreateHistoryTurnWithIDAtPositionParams struct {
-	TurnID             string         `json:"turn_id"`
+	TurnID             sql.NullString `json:"turn_id"`
 	BotID              string         `json:"bot_id"`
-	SessionID          string         `json:"session_id"`
-	TurnPosition       int64          `json:"turn_position"`
-	RequestMessageID   sql.NullString `json:"request_message_id"`
-	AssistantMessageID sql.NullString `json:"assistant_message_id"`
+	SessionID          sql.NullString `json:"session_id"`
+	TurnPosition       sql.NullInt64  `json:"turn_position"`
+	RequestMessageID   interface{}    `json:"request_message_id"`
+	AssistantMessageID interface{}    `json:"assistant_message_id"`
 }
 
 func (q *Queries) CreateHistoryTurnWithIDAtPosition(ctx context.Context, arg CreateHistoryTurnWithIDAtPositionParams) (BotHistoryTurn, error) {
@@ -605,8 +605,8 @@ type CreateMessageInHistoryTurnByRequestParams struct {
 	ModelID                 sql.NullString `json:"model_id"`
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
-	SessionID               string         `json:"session_id"`
-	RequestMessageID        sql.NullString `json:"request_message_id"`
+	SessionID               sql.NullString `json:"session_id"`
+	RequestMessageID        interface{}    `json:"request_message_id"`
 }
 
 type CreateMessageInHistoryTurnByRequestRow struct {
@@ -700,11 +700,14 @@ VALUES (
     WHERE id = ?17
   )),
   ?19,
-  COALESCE((
+  CASE
+    WHEN CAST(?18 AS INTEGER) IS NOT NULL THEN 1
+    ELSE COALESCE((
     SELECT CASE WHEN superseded_at IS NULL THEN 1 ELSE 0 END
     FROM bot_history_turns
     WHERE id = ?17
-  ), 0),
+    ), 0)
+  END,
   strftime(
     '%Y-%m-%d %H:%M:%f',
     max(
@@ -861,8 +864,8 @@ LIMIT 1
 `
 
 type GetHistoryTurnByIDParams struct {
-	OldTurnID string `json:"old_turn_id"`
-	SessionID string `json:"session_id"`
+	OldTurnID sql.NullString `json:"old_turn_id"`
+	SessionID sql.NullString `json:"session_id"`
 }
 
 func (q *Queries) GetHistoryTurnByID(ctx context.Context, arg GetHistoryTurnByIDParams) (BotHistoryTurn, error) {
@@ -894,7 +897,7 @@ ORDER BY position DESC
 LIMIT 1
 `
 
-func (q *Queries) GetLatestVisibleHistoryTurnBySession(ctx context.Context, sessionID string) (BotHistoryTurn, error) {
+func (q *Queries) GetLatestVisibleHistoryTurnBySession(ctx context.Context, sessionID sql.NullString) (BotHistoryTurn, error) {
 	row := q.db.QueryRowContext(ctx, getLatestVisibleHistoryTurnBySession, sessionID)
 	var i BotHistoryTurn
 	err := row.Scan(
@@ -1177,8 +1180,8 @@ LIMIT 1
 `
 
 type GetVisibleHistoryTurnByMessageParams struct {
-	SessionID string `json:"session_id"`
-	MessageID string `json:"message_id"`
+	SessionID sql.NullString `json:"session_id"`
+	MessageID string         `json:"message_id"`
 }
 
 func (q *Queries) GetVisibleHistoryTurnByMessage(ctx context.Context, arg GetVisibleHistoryTurnByMessageParams) (BotHistoryTurn, error) {
@@ -1307,7 +1310,10 @@ SET turn_id = ?1,
       WHERE id = ?1
         AND session_id = bot_history_messages.session_id
     ), 0),
-    turn_message_seq = ?2
+    turn_message_seq = ?2,
+    turn_superseded_by_turn_id = NULL,
+    turn_superseded_at = NULL,
+    turn_superseded_reason = NULL
 WHERE bot_history_messages.id = ?3
   AND EXISTS (
     SELECT 1
@@ -1344,6 +1350,9 @@ SET turn_id = (
       WHERE t.id = ?1
     ),
     turn_visible = 1,
+    turn_superseded_by_turn_id = NULL,
+    turn_superseded_at = NULL,
+    turn_superseded_reason = NULL,
     turn_message_seq = (
       SELECT 2 + COUNT(*)
       FROM bot_history_messages prior
@@ -1353,8 +1362,14 @@ SET turn_id = (
         AND prior.role IN ('assistant', 'tool')
         AND prior.id <> assistant.id
         AND prior.turn_id IS NULL
-        AND prior.rowid <= bot_history_messages.rowid
-        AND prior.rowid > assistant.rowid
+        AND (
+          prior.created_at < bot_history_messages.created_at
+          OR (prior.created_at = bot_history_messages.created_at AND prior.rowid <= bot_history_messages.rowid)
+        )
+        AND (
+          prior.created_at > assistant.created_at
+          OR (prior.created_at = assistant.created_at AND prior.rowid > assistant.rowid)
+        )
     )
 WHERE bot_history_messages.turn_id IS NULL
   AND bot_history_messages.role IN ('assistant', 'tool')
@@ -1365,11 +1380,14 @@ WHERE bot_history_messages.turn_id IS NULL
     WHERE t.id = ?1
       AND bot_history_messages.session_id = t.session_id
       AND bot_history_messages.id <> assistant.id
-      AND bot_history_messages.rowid > assistant.rowid
+      AND (
+        bot_history_messages.created_at > assistant.created_at
+        OR (bot_history_messages.created_at = assistant.created_at AND bot_history_messages.rowid > assistant.rowid)
+      )
   )
 `
 
-func (q *Queries) LinkUnassignedMessagesAfterHistoryTurnAssistant(ctx context.Context, turnID string) error {
+func (q *Queries) LinkUnassignedMessagesAfterHistoryTurnAssistant(ctx context.Context, turnID sql.NullString) error {
 	_, err := q.db.ExecContext(ctx, linkUnassignedMessagesAfterHistoryTurnAssistant, turnID)
 	return err
 }
@@ -1392,7 +1410,7 @@ LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = ?1
   AND julianday(m.created_at) >= julianday(?2)
   AND (json_extract(m.metadata, '$.trigger_mode') IS NULL OR json_extract(m.metadata, '$.trigger_mode') != 'passive_sync')
-ORDER BY m.created_at ASC, m.id ASC
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 `
 
 type ListActiveMessagesSinceParams struct {
@@ -1715,7 +1733,7 @@ FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = ?1
-ORDER BY m.created_at ASC, m.id ASC
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 LIMIT 10000
 `
 
@@ -2115,7 +2133,7 @@ LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = ?1
   AND julianday(m.created_at) < julianday(?2)
-ORDER BY m.created_at DESC, m.id DESC
+ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT ?3
 `
 
@@ -2605,7 +2623,7 @@ FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = ?1
-ORDER BY m.created_at DESC, m.id DESC
+ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT ?2
 `
 
@@ -2874,7 +2892,7 @@ LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = ?1
   AND julianday(m.created_at) >= julianday(?2)
-ORDER BY m.created_at ASC, m.id ASC
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 `
 
 type ListMessagesSinceParams struct {
@@ -3590,7 +3608,7 @@ WHERE m.bot_id = ?1
       ELSE ''
     END
   ) LIKE '%' || ?7 || '%')
-ORDER BY m.created_at DESC, m.id DESC
+ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
 LIMIT ?8
 `
 
@@ -3674,10 +3692,10 @@ RETURNING id, bot_id, session_id, position, request_message_id, assistant_messag
 
 type SupersedeHistoryTurnParams struct {
 	SupersededByTurnID sql.NullString `json:"superseded_by_turn_id"`
-	SupersededAt       sql.NullString `json:"superseded_at"`
+	SupersededAt       interface{}    `json:"superseded_at"`
 	SupersededReason   sql.NullString `json:"superseded_reason"`
-	OldTurnID          string         `json:"old_turn_id"`
-	SessionID          string         `json:"session_id"`
+	OldTurnID          sql.NullString `json:"old_turn_id"`
+	SessionID          sql.NullString `json:"session_id"`
 }
 
 func (q *Queries) SupersedeHistoryTurn(ctx context.Context, arg SupersedeHistoryTurnParams) (BotHistoryTurn, error) {

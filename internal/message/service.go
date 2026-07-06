@@ -35,7 +35,11 @@ type historyTurnWriter interface {
 	BindLatestHistoryTurnAssistant(ctx context.Context, arg sqlc.BindLatestHistoryTurnAssistantParams) (sqlc.BotHistoryTurn, error)
 	GetLatestVisibleHistoryTurnBySession(ctx context.Context, sessionID pgtype.UUID) (sqlc.BotHistoryTurn, error)
 	LinkMessageToHistoryTurn(ctx context.Context, arg sqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error)
-	AppendMessageToLatestHistoryTurn(ctx context.Context, arg sqlc.AppendMessageToLatestHistoryTurnParams) error
+	AppendMessageToLatestHistoryTurn(ctx context.Context, arg sqlc.AppendMessageToLatestHistoryTurnParams) (pgtype.UUID, error)
+}
+
+type historyTurnAppendLocker interface {
+	LockHistoryTurnAppendByRequest(ctx context.Context, arg sqlc.LockHistoryTurnAppendByRequestParams) error
 }
 
 type directHistoryTurnWriter interface {
@@ -584,6 +588,9 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, s
 		}
 	case "assistant":
 		if requestMessageID.Valid {
+			if err := lockHistoryTurnAppendByRequest(ctx, writer, sessionID, requestMessageID); err != nil {
+				return fmt.Errorf("lock requested history turn append: %w", err)
+			}
 			if turn, err := writer.BindHistoryTurnAssistantByRequest(ctx, sqlc.BindHistoryTurnAssistantByRequestParams{
 				SessionID:          sessionID,
 				RequestMessageID:   requestMessageID,
@@ -606,31 +613,13 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, s
 				return fmt.Errorf("append assistant message to requested history turn: %w", err)
 			}
 		}
-		if turn, err := writer.BindLatestHistoryTurnAssistant(ctx, sqlc.BindLatestHistoryTurnAssistantParams{
-			SessionID:          sessionID,
-			AssistantMessageID: messageID,
+		if _, err := writer.AppendMessageToLatestHistoryTurn(ctx, sqlc.AppendMessageToLatestHistoryTurnParams{
+			SessionID: sessionID,
+			MessageID: messageID,
 		}); err == nil {
-			if _, err := writer.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
-				MessageID:      messageID,
-				TurnID:         turn.ID,
-				TurnMessageSeq: pgtype.Int8{Int64: 2, Valid: true},
-			}); err != nil {
-				return fmt.Errorf("link assistant message to history turn: %w", err)
-			}
 			return nil
 		} else if !errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("bind history turn assistant: %w", err)
-		}
-		if _, err := writer.GetLatestVisibleHistoryTurnBySession(ctx, sessionID); err == nil {
-			if err := writer.AppendMessageToLatestHistoryTurn(ctx, sqlc.AppendMessageToLatestHistoryTurnParams{
-				SessionID: sessionID,
-				MessageID: messageID,
-			}); err != nil {
-				return fmt.Errorf("append assistant message to latest history turn: %w", err)
-			}
-			return nil
-		} else if !errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("load latest history turn for assistant: %w", err)
+			return fmt.Errorf("append assistant message to latest history turn: %w", err)
 		}
 		turn, err := writer.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
 			BotID:              botID,
@@ -649,13 +638,16 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, s
 		}
 	case "tool":
 		if requestMessageID.Valid {
+			if err := lockHistoryTurnAppendByRequest(ctx, writer, sessionID, requestMessageID); err != nil {
+				return fmt.Errorf("lock requested history turn append: %w", err)
+			}
 			if err := appendMessageToHistoryTurnByRequest(ctx, writer, sessionID, requestMessageID, messageID); err == nil {
 				return nil
 			} else if !errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("append tool message to requested history turn: %w", err)
 			}
 		}
-		if err := writer.AppendMessageToLatestHistoryTurn(ctx, sqlc.AppendMessageToLatestHistoryTurnParams{
+		if _, err := writer.AppendMessageToLatestHistoryTurn(ctx, sqlc.AppendMessageToLatestHistoryTurnParams{
 			SessionID: sessionID,
 			MessageID: messageID,
 		}); err != nil {
@@ -663,6 +655,20 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, botID pgtype.UUID, s
 		}
 	}
 	return nil
+}
+
+func lockHistoryTurnAppendByRequest(ctx context.Context, writer historyTurnWriter, sessionID pgtype.UUID, requestMessageID pgtype.UUID) error {
+	if !sessionID.Valid || !requestMessageID.Valid {
+		return nil
+	}
+	locker, ok := writer.(historyTurnAppendLocker)
+	if !ok {
+		return nil
+	}
+	return locker.LockHistoryTurnAppendByRequest(ctx, sqlc.LockHistoryTurnAppendByRequestParams{
+		SessionID:        sessionID,
+		RequestMessageID: requestMessageID,
+	})
 }
 
 func appendMessageToHistoryTurnByRequest(ctx context.Context, writer historyTurnWriter, sessionID pgtype.UUID, requestMessageID pgtype.UUID, messageID pgtype.UUID) error {
@@ -1965,7 +1971,7 @@ func toHistoryTurn(row sqlc.BotHistoryTurn) HistoryTurn {
 		AssistantMessageID: uuidString(row.AssistantMessageID),
 		SupersededByTurnID: uuidString(row.SupersededByTurnID),
 		SupersededAt:       timeFromTimestamptz(row.SupersededAt),
-		SupersededReason:   textString(row.SupersededReason),
+		SupersededReason:   row.SupersededReason,
 		CreatedAt:          timeFromTimestamptz(row.CreatedAt),
 		UpdatedAt:          timeFromTimestamptz(row.UpdatedAt),
 	}
