@@ -28,41 +28,6 @@
               <span class="text-sm text-muted-foreground">{{ $t('bots.heartbeat.intervalUnit') }}</span>
             </div>
           </SettingsRow>
-
-          <!-- Model is a power-user override (it defaults to the bot's chat model), so it
-               stays folded behind Advanced rather than occupying space the moment you enable.
-               The toggle reveals a SIBLING row below it (not a body it owns), so this stays a
-               plain SettingsRow with the disclosure button in its trailing slot rather than
-               ExpandableSettingsRow — same as the channel Advanced / Access cards. -->
-          <SettingsRow :label="$t('bots.heartbeat.advanced')">
-            <Button
-              variant="outline"
-              size="sm"
-              class="shrink-0"
-              @click="advancedOpen = !advancedOpen"
-            >
-              <ChevronRight
-                class="size-4 transition-transform"
-                :class="advancedOpen ? 'rotate-90' : ''"
-              />
-              {{ advancedOpen ? $t('common.collapse') : $t('common.expand') }}
-            </Button>
-          </SettingsRow>
-
-          <SettingsRow
-            v-if="advancedOpen"
-            :label="$t('bots.settings.heartbeatModel')"
-            :description="$t('bots.settings.heartbeatModelDescription')"
-          >
-            <ModelSelect
-              v-model="settingsForm.heartbeat_model_id"
-              :models="models"
-              :providers="providers"
-              model-type="chat"
-              :placeholder="$t('bots.settings.heartbeatModelPlaceholder')"
-              class="w-72 shrink-0"
-            />
-          </SettingsRow>
         </template>
 
         <!-- Turning the toggle off is a pending change, not an instant stop — say so, so the
@@ -99,6 +64,32 @@
           </Button>
         </div>
       </SettingsSection>
+
+      <!-- Model override is a power-user facet (defaults to the bot's chat
+           model), so it lives behind a named ActionCard entry opening a
+           focused dialog — the house replacement for the old in-card
+           "Advanced" expand row. Draft semantics unchanged: the dialog edits
+           the same settingsForm, and the settings card's footer Save commits. -->
+      <section
+        v-if="settingsForm.heartbeat_enabled"
+        class="space-y-2.5"
+      >
+        <h2 class="px-2 text-label font-medium text-muted-foreground">
+          {{ $t('bots.heartbeat.advanced') }}
+        </h2>
+        <!-- Slim single-line entry, per the ActionCard contract: NO description
+             (it would grow the row past the 48px rung) — the dialog's own
+             DialogDescription carries the explanation. Box = the house icon
+             for "model" (providers page: Boxes count / Box empty state). -->
+        <ActionCard
+          :title="$t('bots.settings.heartbeatModel')"
+          @click="advancedOpen = true"
+        >
+          <template #icon>
+            <Box />
+          </template>
+        </ActionCard>
+      </section>
 
       <SettingsSection :title="$t('bots.heartbeat.title')">
         <SettingsRow
@@ -300,15 +291,39 @@
       </SettingsSection>
     </div>
   </PageShell>
+
+  <!-- Advanced model override dialog (workbench form). Edits settingsForm
+       directly — the Save/Cancel footer on the settings card remains the
+       single commit point, so closing this dialog never loses or applies
+       anything by itself. -->
+  <Dialog v-model:open="advancedOpen">
+    <DialogPanel width="lg">
+      <DialogHeader>
+        <DialogTitle>{{ $t('bots.settings.heartbeatModel') }}</DialogTitle>
+        <DialogDescription>{{ $t('bots.settings.heartbeatModelDescription') }}</DialogDescription>
+      </DialogHeader>
+      <DialogBody>
+        <ModelSelect
+          v-model="settingsForm.heartbeat_model_id"
+          :models="models"
+          :providers="providers"
+          model-type="chat"
+          :placeholder="$t('bots.settings.heartbeatModelPlaceholder')"
+          class="w-full"
+        />
+      </DialogBody>
+    </DialogPanel>
+  </Dialog>
 </template>
 
 <script setup lang="ts">
-import { Trash2, ChevronRight } from 'lucide-vue-next'
+import { Trash2, Box } from 'lucide-vue-next'
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import {
-  Badge, Button, Empty, EmptyDescription, EmptyHeader, EmptyTitle, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Input,
+  ActionCard, Badge, Button, Dialog, DialogBody, DialogDescription, DialogHeader, DialogPanel, DialogTitle,
+  Empty, EmptyDescription, EmptyHeader, EmptyTitle, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Input,
   Pagination, PaginationContent, PaginationEllipsis,
   PaginationFirst, PaginationItem, PaginationLast,
   PaginationNext, PaginationPrevious,

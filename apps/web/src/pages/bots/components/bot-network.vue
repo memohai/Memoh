@@ -222,153 +222,24 @@
                 </div>
               </SettingsRow>
             </template>
-
-            <!-- The advanced toggle is a plain row whose button reveals a SIBLING
-                 block below (the grouped advanced fields), not an ExpandableRow
-                 whose body it owns — the grouped fields render as their own
-                 settings rows with their own dividers, so they stay outside. -->
-            <SettingsRow
-              v-if="advancedSchema?.fields?.length"
-              :label="$t('common.advanced')"
-              :description="$t('common.allOptional')"
-            >
-              <Button
-                variant="outline"
-                size="sm"
-                class="shrink-0"
-                @click="showAdvancedConfig = !showAdvancedConfig"
-              >
-                <ChevronRight
-                  class="size-4 transition-transform"
-                  :class="showAdvancedConfig ? 'rotate-90' : ''"
-                />
-                {{ showAdvancedConfig ? $t('common.hide') : $t('common.show') }}
-              </Button>
-            </SettingsRow>
-
-            <template v-if="showAdvancedConfig">
-              <div
-                v-for="group in advancedSchemaGroups"
-                :key="group.title"
-              >
-                <div class="mx-4 pb-1 pt-3 text-xs font-medium text-muted-foreground">
-                  {{ group.title }}
-                </div>
-
-                <SettingsRow
-                  v-for="field in group.fields"
-                  :key="field.key"
-                  :stack="isMultilineField(field) ? 'always' : 'never'"
-                >
-                  <template #content>
-                    <Label
-                      :for="`bot-network-config-advanced-${field.key}`"
-                      class="text-sm font-medium text-foreground"
-                    >
-                      {{ field.title || field.key }}
-                    </Label>
-                    <p
-                      v-if="field.description"
-                      class="mt-0.5 text-xs text-muted-foreground"
-                    >
-                      {{ field.description }}
-                    </p>
-                  </template>
-
-                  <div :class="isMultilineField(field) ? 'w-full' : 'w-full sm:w-80'">
-                    <Textarea
-                      v-if="isMultilineField(field)"
-                      :id="`bot-network-config-advanced-${field.key}`"
-                      :model-value="stringValue(field)"
-                      :placeholder="placeholderOf(field)"
-                      :readonly="field.readonly"
-                      rows="4"
-                      class="min-h-24 resize-none"
-                      @update:model-value="(val: string) => updateValue(field.key, val)"
-                    />
-
-                    <Switch
-                      v-else-if="field.type === 'bool'"
-                      :model-value="!!getFieldValue(field)"
-                      :disabled="field.readonly"
-                      @update:model-value="(val: boolean) => updateValue(field.key, !!val)"
-                    />
-
-                    <Select
-                      v-else-if="field.type === 'enum' && field.enum"
-                      :model-value="stringValue(field)"
-                      :disabled="field.readonly"
-                      @update:model-value="(val: string) => updateValue(field.key, val)"
-                    >
-                      <SelectTrigger
-                        size="sm"
-                        class="w-full"
-                      >
-                        <SelectValue :placeholder="placeholderOf(field)" />
-                      </SelectTrigger>
-                      <SelectContent class="w-[--reka-select-trigger-width]">
-                        <SelectItem
-                          v-for="option in field.enum"
-                          :key="option"
-                          :value="option"
-                        >
-                          {{ option }}
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-
-                    <InputGroup v-else-if="field.type === 'secret'">
-                      <InputGroupInput
-                        :id="`bot-network-config-advanced-${field.key}`"
-                        :model-value="stringValue(field)"
-                        :type="visibleSecrets[field.key] ? 'text' : 'password'"
-                        :placeholder="placeholderOf(field)"
-                        :readonly="field.readonly"
-                        @update:model-value="(val: string) => updateValue(field.key, val)"
-                      />
-                      <InputGroupAddon align="inline-end">
-                        <InputGroupButton
-                          size="icon-xs"
-                          variant="quiet"
-                          :aria-label="$t('common.preview')"
-                          @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
-                        >
-                          <component :is="visibleSecrets[field.key] ? EyeOff : Eye" />
-                        </InputGroupButton>
-                      </InputGroupAddon>
-                    </InputGroup>
-
-                    <Input
-                      v-else-if="field.type === 'number'"
-                      :id="`bot-network-config-advanced-${field.key}`"
-                      :model-value="numberValue(field)"
-                      type="number"
-                      :placeholder="placeholderOf(field)"
-                      :readonly="field.readonly"
-                      :min="field.constraint?.min"
-                      :max="field.constraint?.max"
-                      :step="field.constraint?.step ?? 1"
-                      class="h-8 w-full tabular-nums"
-                      @update:model-value="(val: string) => updateNumber(field.key, val)"
-                    />
-
-                    <Input
-                      v-else
-                      :id="`bot-network-config-advanced-${field.key}`"
-                      :model-value="stringValue(field)"
-                      type="text"
-                      :placeholder="placeholderOf(field)"
-                      :readonly="field.readonly"
-                      class="h-8 w-full"
-                      @update:model-value="(val: string) => updateValue(field.key, val)"
-                    />
-                  </div>
-                </SettingsRow>
-              </div>
-            </template>
           </div>
         </template>
       </SettingsSection>
+
+      <!-- Advanced overlay fields behind a named ActionCard entry opening a
+           focused dialog — the house replacement for the old in-card
+           "Advanced" expand row. Slim single-line entry (no description, per
+           the ActionCard contract); the dialog's DialogDescription carries
+           the "all optional" note. -->
+      <ActionCard
+        v-if="showOverlayConfig && advancedSchema?.fields?.length"
+        :title="$t('common.advanced')"
+        @click="showAdvancedConfig = true"
+      >
+        <template #icon>
+          <SlidersHorizontal />
+        </template>
+      </ActionCard>
 
       <SettingsSection
         v-if="showExitNodeSelector"
@@ -419,6 +290,140 @@
         </Button>
       </div>
     </div>
+
+    <!-- Advanced overlay fields dialog (workbench form). The schema-driven
+         rows move here UNCHANGED from the old in-card expand — same
+         SettingsRow renderer, only the container changed. Draft semantics
+         unchanged: edits land in the same config draft; the page's
+         Save/Cancel bar remains the commit point. -->
+    <Dialog v-model:open="showAdvancedConfig">
+      <DialogPanel>
+        <DialogHeader>
+          <DialogTitle>{{ $t('common.advanced') }}</DialogTitle>
+          <DialogDescription>{{ $t('common.allOptional') }}</DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <div
+            v-for="group in advancedSchemaGroups"
+            :key="group.title"
+          >
+            <div class="mx-4 pb-1 pt-3 text-xs font-medium text-muted-foreground">
+              {{ group.title }}
+            </div>
+
+            <SettingsRow
+              v-for="field in group.fields"
+              :key="field.key"
+              :stack="isMultilineField(field) ? 'always' : 'never'"
+            >
+              <template #content>
+                <Label
+                  :for="`bot-network-config-advanced-${field.key}`"
+                  class="text-sm font-medium text-foreground"
+                >
+                  {{ field.title || field.key }}
+                </Label>
+                <p
+                  v-if="field.description"
+                  class="mt-0.5 text-xs text-muted-foreground"
+                >
+                  {{ field.description }}
+                </p>
+              </template>
+
+              <div :class="isMultilineField(field) ? 'w-full' : 'w-full sm:w-80'">
+                <Textarea
+                  v-if="isMultilineField(field)"
+                  :id="`bot-network-config-advanced-${field.key}`"
+                  :model-value="stringValue(field)"
+                  :placeholder="placeholderOf(field)"
+                  :readonly="field.readonly"
+                  rows="4"
+                  class="min-h-24 resize-none"
+                  @update:model-value="(val: string) => updateValue(field.key, val)"
+                />
+
+                <Switch
+                  v-else-if="field.type === 'bool'"
+                  :model-value="!!getFieldValue(field)"
+                  :disabled="field.readonly"
+                  @update:model-value="(val: boolean) => updateValue(field.key, !!val)"
+                />
+
+                <Select
+                  v-else-if="field.type === 'enum' && field.enum"
+                  :model-value="stringValue(field)"
+                  :disabled="field.readonly"
+                  @update:model-value="(val: string) => updateValue(field.key, val)"
+                >
+                  <SelectTrigger
+                    size="sm"
+                    class="w-full"
+                  >
+                    <SelectValue :placeholder="placeholderOf(field)" />
+                  </SelectTrigger>
+                  <SelectContent class="w-[--reka-select-trigger-width]">
+                    <SelectItem
+                      v-for="option in field.enum"
+                      :key="option"
+                      :value="option"
+                    >
+                      {{ option }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <InputGroup v-else-if="field.type === 'secret'">
+                  <InputGroupInput
+                    :id="`bot-network-config-advanced-${field.key}`"
+                    :model-value="stringValue(field)"
+                    :type="visibleSecrets[field.key] ? 'text' : 'password'"
+                    :placeholder="placeholderOf(field)"
+                    :readonly="field.readonly"
+                    @update:model-value="(val: string) => updateValue(field.key, val)"
+                  />
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupButton
+                      size="icon-xs"
+                      variant="quiet"
+                      :aria-label="$t('common.preview')"
+                      @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
+                    >
+                      <component :is="visibleSecrets[field.key] ? EyeOff : Eye" />
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                </InputGroup>
+
+                <Input
+                  v-else-if="field.type === 'number'"
+                  :id="`bot-network-config-advanced-${field.key}`"
+                  :model-value="numberValue(field)"
+                  type="number"
+                  :placeholder="placeholderOf(field)"
+                  :readonly="field.readonly"
+                  :min="field.constraint?.min"
+                  :max="field.constraint?.max"
+                  :step="field.constraint?.step ?? 1"
+                  class="h-8 w-full tabular-nums"
+                  @update:model-value="(val: string) => updateNumber(field.key, val)"
+                />
+
+                <Input
+                  v-else
+                  :id="`bot-network-config-advanced-${field.key}`"
+                  :model-value="stringValue(field)"
+                  type="text"
+                  :placeholder="placeholderOf(field)"
+                  :readonly="field.readonly"
+                  class="h-8 w-full"
+                  @update:model-value="(val: string) => updateValue(field.key, val)"
+                />
+              </div>
+            </SettingsRow>
+          </div>
+        </DialogBody>
+      </DialogPanel>
+    </Dialog>
 
     <Dialog v-model:open="isEditorDialogOpen">
       <DialogContent class="flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden p-0 sm:h-[70vh] sm:max-w-3xl">
@@ -545,6 +550,7 @@
 
 <script setup lang="ts">
 import {
+  ActionCard,
   Button,
   InputGroup,
   InputGroupAddon,
@@ -555,9 +561,9 @@ import {
   Input,
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
   Textarea,
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose,
+  Dialog, DialogBody, DialogContent, DialogHeader, DialogPanel, DialogTitle, DialogDescription, DialogFooter, DialogClose,
 } from '@memohai/ui'
-import { SquarePen, Eye, EyeOff, RefreshCw, ChevronRight } from 'lucide-vue-next'
+import { SquarePen, Eye, EyeOff, RefreshCw, SlidersHorizontal } from 'lucide-vue-next'
 import { reactive, computed, watch, nextTick, onBeforeUnmount, ref } from 'vue'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'

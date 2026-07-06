@@ -12,7 +12,15 @@
       </h2>
       <slot name="actions" />
     </div>
-    <div class="overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card">
+    <!-- When a footer is present it becomes the card's REAL last child, so the
+         row above it loses its :last-child border-b-0 escape and its inset
+         hairline stacks against the footer's full-bleed border-t — two lines
+         fighting. The nth-last-child(2) rule hands the "I'm last" treatment to
+         whatever element sits directly above the footer. -->
+    <div
+      class="overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card"
+      :class="$slots.footer ? '[&>:nth-last-child(2)]:border-b-0' : ''"
+    >
       <slot />
       <!-- Footer: a right-aligned action bar (Save/Cancel) or a pagination strip.
            Lives INSIDE the card, after the rows, so its top hairline meets both

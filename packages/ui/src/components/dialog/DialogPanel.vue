@@ -17,7 +17,8 @@
 //
 // Props are the ONLY knobs a caller should need:
 // - width:   panel width rung. '2xl' is the house default for a focused
-//   dialog; '3xl' for editor-heavy bodies (Monaco import).
+//   dialog; 'lg' for a one-or-two-field form (a 2xl panel around one field
+//   reads barren); '3xl' for editor-heavy bodies (Monaco import).
 // - grow:    false (default) → max-h-[80dvh], panel hugs its content and the
 //   cap only bites when content is tall. true → h-[80dvh] fixed — required
 //   when the body has NO intrinsic height (an editor/iframe that must be
@@ -43,7 +44,7 @@ defineOptions({
 const props = withDefaults(defineProps<DialogContentProps & {
   class?: HTMLAttributes['class']
   /** Panel width rung. Add rungs here deliberately — not per-page. */
-  width?: '2xl' | '3xl'
+  width?: 'lg' | '2xl' | '3xl'
   /** Fixed 80dvh height for bodies with no intrinsic height (editors). */
   grow?: boolean
   /** View-swap dialog: header is a DialogViewHeader, so the built-in corner
@@ -64,6 +65,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
 
 // Full literal strings (not interpolation) so Tailwind's scanner sees them.
 const WIDTH = {
+  'lg': 'sm:max-w-lg',
   '2xl': 'sm:max-w-2xl',
   '3xl': 'sm:max-w-3xl',
 } as const
