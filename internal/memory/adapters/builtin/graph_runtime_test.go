@@ -301,3 +301,36 @@ func (errWikiStore) CountEdges(context.Context, string) (int, error)          { 
 func (errWikiStore) RebuildDerivedEdges(context.Context, string) (int, error) {
 	return 0, errForced
 }
+
+// TestGraphRuntimeSearchCJKSentence is the end-to-end regression for the
+// Chinese-word-segmentation bug: a whole Chinese sentence used to collapse into
+// a single token under strings.Fields and never matched a stored memory body.
+// With segment.LexicalScore (gse), "语言"/"交流" split out and seed the node.
+func TestGraphRuntimeSearchCJKSentence(t *testing.T) {
+	t.Parallel()
+	store := newFakeWikiStore()
+	rt := NewGraphRuntime(nil, store, newFakeStore())
+
+	botID := "graph-bot-cjk"
+	ctx := context.Background()
+
+	if _, err := rt.Add(ctx, adapters.AddRequest{
+		BotID:   botID,
+		Message: "用户使用中文交流",
+	}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	// A full Chinese sentence query (no spaces). Pre-fix this scored 0 and
+	// returned no results.
+	resp, err := rt.Search(ctx, adapters.SearchRequest{BotID: botID, Query: "你还记得我用什么语言交流吗？", Limit: 5})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(resp.Results) == 0 {
+		t.Fatal("CJK sentence search returned no results; expected the 中文交流 memory to surface")
+	}
+	if !strings.Contains(resp.Results[0].Memory, "中文交流") {
+		t.Fatalf("CJK search result = %q, want the 中文交流 memory", resp.Results[0].Memory)
+	}
+}

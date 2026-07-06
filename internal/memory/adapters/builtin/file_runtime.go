@@ -10,6 +10,7 @@ import (
 
 	"github.com/memohai/memoh/internal/config"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
+	memseg "github.com/memohai/memoh/internal/memory/segment"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
 
@@ -326,23 +327,11 @@ func (r *fileRuntime) Rebuild(ctx context.Context, botID string) (adapters.Rebui
 	}, nil
 }
 
+// fileRuntimeScore scores a candidate memory body against a query. It delegates
+// to segment.LexicalScore so CJK text is segmented via gse (Chinese has no
+// inter-word spaces, so whitespace-only splitting collapsed a whole sentence
+// into one token that never matched). The graph cache reuses this scorer via
+// graphLexicalScore; both now share the same CJK-aware implementation.
 func fileRuntimeScore(query, memory string) float64 {
-	if query == "" {
-		return 1
-	}
-	memory = strings.ToLower(memory)
-	if strings.Contains(memory, query) {
-		return 1
-	}
-	tokens := strings.Fields(query)
-	if len(tokens) == 0 {
-		return 0
-	}
-	hits := 0
-	for _, token := range tokens {
-		if strings.Contains(memory, token) {
-			hits++
-		}
-	}
-	return float64(hits) / float64(len(tokens))
+	return memseg.LexicalScore(query, memory)
 }

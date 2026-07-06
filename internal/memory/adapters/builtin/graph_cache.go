@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/memohai/memoh/internal/memory/migrate"
+	memseg "github.com/memohai/memoh/internal/memory/segment"
 	"github.com/memohai/memoh/internal/memory/wikistore"
 )
 
@@ -167,26 +167,11 @@ func graphContentHash(nodes []migrate.NodeSpec, edges []migrate.EdgeSpec) string
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
-// score is a small helper for lexical scoring reuse: it mirrors fileRuntimeScore
-// but operates on arbitrary body/query strings (UTF-8 safe via strings.Fields).
+// graphLexicalScore scores body against query for the graph seed/expand phase.
+// It delegates to segment.LexicalScore, which splits CJK text via gse (Chinese
+// has no inter-word spaces, so whitespace-only splitting collapsed a whole
+// sentence into a single token that never matched) while keeping Latin/numeric
+// runs on the whitespace-split path.
 func graphLexicalScore(query, body string) float64 {
-	query = strings.ToLower(strings.TrimSpace(query))
-	if query == "" {
-		return 1
-	}
-	body = strings.ToLower(body)
-	if strings.Contains(body, query) {
-		return 1
-	}
-	tokens := strings.Fields(query)
-	if len(tokens) == 0 {
-		return 0
-	}
-	hits := 0
-	for _, token := range tokens {
-		if strings.Contains(body, token) {
-			hits++
-		}
-	}
-	return float64(hits) / float64(len(tokens))
+	return memseg.LexicalScore(query, body)
 }
