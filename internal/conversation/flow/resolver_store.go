@@ -25,12 +25,17 @@ type storeRoundOptions struct {
 }
 
 func (r *Resolver) storeRoundWithOptions(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) error {
+	_, err := r.storeRoundWithOptionsResult(ctx, req, messages, modelID, opts)
+	return err
+}
+
+func (r *Resolver) storeRoundWithOptionsResult(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) ([]messagepkg.Message, error) {
 	fullRound := make([]conversation.ModelMessage, 0, len(messages))
 
 	// When the user message was already persisted by a channel adapter, skip
 	// the duplicate from the round. Otherwise keep it so that user + assistant
 	// messages are written atomically (deferred persistence).
-	skipUserQuery := req.UserMessagePersisted
+	skipUserQuery := req.UserMessagePersisted || req.ReusePersistedUserMessage
 	for _, m := range messages {
 		if skipUserQuery && m.Role == "user" && strings.TrimSpace(m.TextContent()) == strings.TrimSpace(req.Query) {
 			skipUserQuery = false // only skip the first matching user message
@@ -58,15 +63,15 @@ func (r *Resolver) storeRoundWithOptions(ctx context.Context, req conversation.C
 	}
 
 	if len(filtered) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	r.storeMessages(ctx, req, filtered, modelID, opts)
+	persisted := r.storeMessages(ctx, req, filtered, modelID, opts)
 	if !opts.SkipMemory && !req.SkipMemoryExtraction {
 		go r.storeMemory(context.WithoutCancel(ctx), req, filtered)
 	}
 
-	return nil
+	return persisted, nil
 }
 
 // isEmptyAssistantMessage returns true if an assistant message has no
@@ -105,12 +110,12 @@ func (r *Resolver) StoreRound(ctx context.Context, botID, sessionID, channelIden
 	return r.storeRound(ctx, req, modelMessages, modelID)
 }
 
-func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) {
+func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) []messagepkg.Message {
 	if r.messageService == nil {
-		return
+		return nil
 	}
 	if strings.TrimSpace(req.BotID) == "" {
-		return
+		return nil
 	}
 
 	// Check bot setting for full tool result persistence.
@@ -120,6 +125,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 	}
 	meta := buildRouteMetadata(req)
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
+	sessionMode, runtimeType := r.persistSessionRuntimeSnapshot(ctx, req)
 
 	// Determine the last assistant message index for outbound asset attachment.
 	lastAssistantIdx := -1
@@ -136,6 +142,11 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		outboundAssets = outboundAssetRefsToMessageRefs(req.OutboundAssetCollector())
 	}
 
+	turnRequestMessageID := ""
+	if req.UserMessagePersisted || req.ReusePersistedUserMessage {
+		turnRequestMessageID = strings.TrimSpace(req.PersistedUserMessageID)
+	}
+	persistInputs := make([]messagepkg.PersistInput, 0, len(messages))
 	for i, msg := range messages {
 		msg = normalizeUserMessageContent(msg)
 
@@ -215,7 +226,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		if extraMeta := opts.MessageMetadataByIndex[i]; len(extraMeta) > 0 {
 			persistMeta = mergeMetadata(persistMeta, extraMeta)
 		}
-		if _, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
+		persistInputs = append(persistInputs, messagepkg.PersistInput{
 			BotID:                   req.BotID,
 			SessionID:               req.SessionID,
 			SenderChannelIdentityID: messageSenderChannelIdentityID,
@@ -230,10 +241,67 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			ModelID:                 modelID,
 			EventID:                 messageEventID,
 			DisplayText:             displayText,
-		}); err != nil {
-			r.logger.Warn("persist message failed", slog.Any("error", err))
+			SessionMode:             sessionMode,
+			RuntimeType:             runtimeType,
+			TurnRequestMessageID:    turnRequestMessageID,
+			SkipHistoryTurn:         req.SkipHistoryTurn,
+		})
+	}
+	if batcher, ok := r.messageService.(messagepkg.ToolTailRoundPersister); ok {
+		if persisted, handled, err := batcher.PersistToolTailRound(ctx, persistInputs); handled || err != nil {
+			if err != nil {
+				r.logger.Warn("persist tool tail round failed", slog.Any("error", err))
+				return nil
+			}
+			return persisted
 		}
 	}
+	return r.persistMessageInputs(ctx, persistInputs, turnRequestMessageID)
+}
+
+func (r *Resolver) persistMessageInputs(ctx context.Context, inputs []messagepkg.PersistInput, initialTurnRequestMessageID string) []messagepkg.Message {
+	persisted := make([]messagepkg.Message, 0, len(inputs))
+	turnRequestMessageID := strings.TrimSpace(initialTurnRequestMessageID)
+	for _, input := range inputs {
+		if !input.SkipHistoryTurn {
+			input.TurnRequestMessageID = turnRequestMessageID
+		}
+		persistedMessage, err := r.messageService.Persist(ctx, input)
+		if err != nil {
+			r.logger.Warn("persist message failed", slog.Any("error", err))
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(input.Role), "user") && !input.SkipHistoryTurn {
+			turnRequestMessageID = persistedMessage.ID
+		}
+		persisted = append(persisted, persistedMessage)
+	}
+	return persisted
+}
+
+func (r *Resolver) persistSessionRuntimeSnapshot(ctx context.Context, req conversation.ChatRequest) (string, string) {
+	sessionMode := strings.TrimSpace(req.SessionType)
+	runtimeType := strings.TrimSpace(req.RuntimeType)
+	if sessionMode != "" && runtimeType != "" {
+		return sessionMode, runtimeType
+	}
+	if r != nil && r.sessionService != nil && strings.TrimSpace(req.SessionID) != "" {
+		if sess, err := r.sessionService.Get(ctx, req.SessionID); err == nil {
+			if sessionMode == "" {
+				sessionMode = strings.TrimSpace(sess.SessionMode)
+			}
+			if runtimeType == "" {
+				runtimeType = strings.TrimSpace(sess.RuntimeType)
+			}
+		}
+	}
+	if sessionMode == "" {
+		sessionMode = "chat"
+	}
+	if runtimeType == "" {
+		runtimeType = "model"
+	}
+	return sessionMode, runtimeType
 }
 
 // outboundAssetRefsToMessageRefs converts outbound asset refs from the streaming

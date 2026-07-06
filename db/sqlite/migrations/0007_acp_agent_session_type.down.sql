@@ -11,6 +11,7 @@ SELECT 0 WHERE EXISTS (SELECT 1 FROM bot_sessions WHERE type = 'acp_agent');
 DROP TABLE _memoh_acp_session_type_down_guard;
 
 PRAGMA foreign_keys = OFF;
+PRAGMA legacy_alter_table = ON;
 
 BEGIN;
 
@@ -48,4 +49,5 @@ CREATE INDEX IF NOT EXISTS idx_bot_sessions_parent ON bot_sessions(parent_sessio
 
 COMMIT;
 
+PRAGMA legacy_alter_table = OFF;
 PRAGMA foreign_keys = ON;

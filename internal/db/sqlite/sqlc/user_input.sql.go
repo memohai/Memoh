@@ -8,6 +8,7 @@ package sqlc
 import (
 	"context"
 	"database/sql"
+	"strings"
 )
 
 const cancelPendingUserInputsBySession = `-- name: CancelPendingUserInputsBySession :many
@@ -633,6 +634,84 @@ type ListUserInputsBySessionParams struct {
 
 func (q *Queries) ListUserInputsBySession(ctx context.Context, arg ListUserInputsBySessionParams) ([]UserInputRequest, error) {
 	rows, err := q.db.QueryContext(ctx, listUserInputsBySession, arg.BotID, arg.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UserInputRequest
+	for rows.Next() {
+		var i UserInputRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.RouteID,
+			&i.ChannelIdentityID,
+			&i.ToolCallID,
+			&i.ToolName,
+			&i.ShortID,
+			&i.Status,
+			&i.InputJson,
+			&i.UiPayloadJson,
+			&i.ResultJson,
+			&i.ProviderMetadata,
+			&i.RequestedByChannelIdentityID,
+			&i.RespondedByChannelIdentityID,
+			&i.AssistantMessageID,
+			&i.ToolResultMessageID,
+			&i.PromptMessageID,
+			&i.PromptExternalMessageID,
+			&i.SourcePlatform,
+			&i.ReplyTarget,
+			&i.ConversationType,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.RespondedAt,
+			&i.CanceledAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserInputsBySessionToolCalls = `-- name: ListUserInputsBySessionToolCalls :many
+SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at
+FROM user_input_requests
+WHERE bot_id = ?1
+  AND session_id = ?2
+  AND tool_call_id IN (/*SLICE:tool_call_ids*/?)
+ORDER BY created_at ASC, short_id ASC
+`
+
+type ListUserInputsBySessionToolCallsParams struct {
+	BotID       string   `json:"bot_id"`
+	SessionID   string   `json:"session_id"`
+	ToolCallIds []string `json:"tool_call_ids"`
+}
+
+func (q *Queries) ListUserInputsBySessionToolCalls(ctx context.Context, arg ListUserInputsBySessionToolCallsParams) ([]UserInputRequest, error) {
+	query := listUserInputsBySessionToolCalls
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.BotID)
+	queryParams = append(queryParams, arg.SessionID)
+	if len(arg.ToolCallIds) > 0 {
+		for _, v := range arg.ToolCallIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:tool_call_ids*/?", strings.Repeat(",?", len(arg.ToolCallIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:tool_call_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
 	if err != nil {
 		return nil, err
 	}

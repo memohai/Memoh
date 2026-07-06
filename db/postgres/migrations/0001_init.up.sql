@@ -457,6 +457,7 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   runtime_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   title TEXT NOT NULL DEFAULT '',
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  next_turn_position BIGINT NOT NULL DEFAULT 1,
   parent_session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
   created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -518,6 +519,13 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   compact_id UUID,
   event_id UUID REFERENCES bot_session_events(id) ON DELETE SET NULL,
   display_text TEXT,
+  turn_id UUID,
+  turn_position BIGINT,
+  turn_message_seq BIGINT,
+  turn_visible BOOLEAN NOT NULL DEFAULT false,
+  turn_superseded_by_turn_id UUID,
+  turn_superseded_at TIMESTAMPTZ,
+  turn_superseded_reason TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -525,10 +533,60 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_messages_bot_created ON bot_history_m
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_compact ON bot_history_messages(compact_id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session
   ON bot_history_messages(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_role_created
+  ON bot_history_messages(session_id, role, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_turn
+  ON bot_history_messages(turn_id, turn_message_seq, created_at, id)
+  WHERE turn_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_history_messages_turn_seq_unique
+  ON bot_history_messages(turn_id, turn_message_seq)
+  WHERE turn_id IS NOT NULL AND turn_message_seq IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_visible_session_order
+  ON bot_history_messages(session_id, turn_position DESC, turn_message_seq DESC, created_at DESC, id DESC)
+  WHERE turn_visible = true
+    AND turn_id IS NOT NULL
+    AND turn_position IS NOT NULL
+    AND turn_message_seq IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_visible_session_source_order
+  ON bot_history_messages(session_id, source_message_id, turn_position DESC, turn_message_seq DESC, created_at DESC, id DESC)
+  WHERE turn_visible = true
+    AND source_message_id IS NOT NULL
+    AND turn_id IS NOT NULL
+    AND turn_position IS NOT NULL
+    AND turn_message_seq IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_source
   ON bot_history_messages(session_id, source_message_id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_reply
   ON bot_history_messages(session_id, source_reply_to_message_id);
+
+CREATE OR REPLACE VIEW bot_visible_history_messages AS
+SELECT
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id,
+  m.source_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.compact_id,
+  m.session_mode,
+  m.runtime_type,
+  m.model_id,
+  m.event_id,
+  m.display_text,
+  m.created_at
+FROM bot_history_messages m
+WHERE m.turn_visible = true
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS bot_session_discuss_cursors (
   session_id UUID NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,

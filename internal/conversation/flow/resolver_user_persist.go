@@ -25,6 +25,8 @@ func (r *Resolver) ApplyUserMessageHookAndPersistUserTurn(ctx context.Context, r
 	if err != nil {
 		return nextReq, messagepkg.Message{}, err
 	}
+	nextReq.UserMessagePersisted = true
+	nextReq.PersistedUserMessageID = persisted.ID
 	return nextReq, persisted, nil
 }
 
@@ -56,6 +58,7 @@ func (r *Resolver) persistUserTurn(ctx context.Context, req conversation.ChatReq
 		displayText = strings.TrimSpace(req.RawQuery)
 	}
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
+	sessionMode, runtimeType := r.persistSessionRuntimeSnapshot(ctx, req)
 	return r.messageService.Persist(ctx, messagepkg.PersistInput{
 		BotID:                   req.BotID,
 		SessionID:               req.SessionID,
@@ -69,6 +72,8 @@ func (r *Resolver) persistUserTurn(ctx context.Context, req conversation.ChatReq
 		Assets:                  chatAttachmentsToAssetRefs(req.Attachments),
 		EventID:                 req.EventID,
 		DisplayText:             displayText,
+		SessionMode:             sessionMode,
+		RuntimeType:             runtimeType,
 	})
 }
 

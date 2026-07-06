@@ -8,6 +8,7 @@ package sqlc
 import (
 	"context"
 	"database/sql"
+	"strings"
 )
 
 const approveToolApprovalRequest = `-- name: ApproveToolApprovalRequest :one
@@ -467,6 +468,79 @@ type ListToolApprovalsBySessionParams struct {
 
 func (q *Queries) ListToolApprovalsBySession(ctx context.Context, arg ListToolApprovalsBySessionParams) ([]ToolApprovalRequest, error) {
 	rows, err := q.db.QueryContext(ctx, listToolApprovalsBySession, arg.BotID, arg.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ToolApprovalRequest
+	for rows.Next() {
+		var i ToolApprovalRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.RouteID,
+			&i.ChannelIdentityID,
+			&i.ToolCallID,
+			&i.ToolName,
+			&i.Operation,
+			&i.ToolInput,
+			&i.ShortID,
+			&i.Status,
+			&i.DecisionReason,
+			&i.RequestedByChannelIdentityID,
+			&i.DecidedByChannelIdentityID,
+			&i.RequestedMessageID,
+			&i.PromptMessageID,
+			&i.PromptExternalMessageID,
+			&i.SourcePlatform,
+			&i.ReplyTarget,
+			&i.ConversationType,
+			&i.CreatedAt,
+			&i.DecidedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listToolApprovalsBySessionToolCalls = `-- name: ListToolApprovalsBySessionToolCalls :many
+SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
+FROM tool_approval_requests
+WHERE bot_id = ?1
+  AND session_id = ?2
+  AND tool_call_id IN (/*SLICE:tool_call_ids*/?)
+ORDER BY created_at ASC, short_id ASC
+`
+
+type ListToolApprovalsBySessionToolCallsParams struct {
+	BotID       string   `json:"bot_id"`
+	SessionID   string   `json:"session_id"`
+	ToolCallIds []string `json:"tool_call_ids"`
+}
+
+func (q *Queries) ListToolApprovalsBySessionToolCalls(ctx context.Context, arg ListToolApprovalsBySessionToolCallsParams) ([]ToolApprovalRequest, error) {
+	query := listToolApprovalsBySessionToolCalls
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.BotID)
+	queryParams = append(queryParams, arg.SessionID)
+	if len(arg.ToolCallIds) > 0 {
+		for _, v := range arg.ToolCallIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:tool_call_ids*/?", strings.Repeat(",?", len(arg.ToolCallIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:tool_call_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
 	if err != nil {
 		return nil, err
 	}

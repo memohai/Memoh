@@ -160,6 +160,13 @@ type BotHistoryMessage struct {
 	EventID                 sql.NullString `json:"event_id"`
 	DisplayText             sql.NullString `json:"display_text"`
 	CreatedAt               string         `json:"created_at"`
+	TurnID                  sql.NullString `json:"turn_id"`
+	TurnMessageSeq          sql.NullInt64  `json:"turn_message_seq"`
+	TurnPosition            sql.NullInt64  `json:"turn_position"`
+	TurnVisible             int64          `json:"turn_visible"`
+	TurnSupersededByTurnID  sql.NullString `json:"turn_superseded_by_turn_id"`
+	TurnSupersededAt        sql.NullString `json:"turn_superseded_at"`
+	TurnSupersededReason    sql.NullString `json:"turn_superseded_reason"`
 }
 
 type BotHistoryMessageAsset struct {
@@ -215,21 +222,22 @@ type BotPluginResource struct {
 }
 
 type BotSession struct {
-	ID              string         `json:"id"`
-	BotID           string         `json:"bot_id"`
-	RouteID         sql.NullString `json:"route_id"`
-	ChannelType     sql.NullString `json:"channel_type"`
-	Type            string         `json:"type"`
-	Title           string         `json:"title"`
-	Metadata        string         `json:"metadata"`
-	ParentSessionID sql.NullString `json:"parent_session_id"`
-	CreatedAt       string         `json:"created_at"`
-	UpdatedAt       string         `json:"updated_at"`
-	DeletedAt       sql.NullString `json:"deleted_at"`
-	CreatedByUserID sql.NullString `json:"created_by_user_id"`
-	SessionMode     string         `json:"session_mode"`
-	RuntimeType     string         `json:"runtime_type"`
-	RuntimeMetadata string         `json:"runtime_metadata"`
+	ID               string         `json:"id"`
+	BotID            string         `json:"bot_id"`
+	RouteID          sql.NullString `json:"route_id"`
+	ChannelType      sql.NullString `json:"channel_type"`
+	Type             string         `json:"type"`
+	Title            string         `json:"title"`
+	Metadata         string         `json:"metadata"`
+	ParentSessionID  sql.NullString `json:"parent_session_id"`
+	CreatedAt        string         `json:"created_at"`
+	UpdatedAt        string         `json:"updated_at"`
+	DeletedAt        sql.NullString `json:"deleted_at"`
+	CreatedByUserID  sql.NullString `json:"created_by_user_id"`
+	SessionMode      string         `json:"session_mode"`
+	RuntimeType      string         `json:"runtime_type"`
+	RuntimeMetadata  string         `json:"runtime_metadata"`
+	NextTurnPosition int64          `json:"next_turn_position"`
 }
 
 type BotSessionDiscussCursor struct {
@@ -271,6 +279,30 @@ type BotUserGrant struct {
 	CreatedByUserID sql.NullString `json:"created_by_user_id"`
 	CreatedAt       string         `json:"created_at"`
 	UpdatedAt       string         `json:"updated_at"`
+}
+
+type BotVisibleHistoryMessage struct {
+	TurnID                  sql.NullString `json:"turn_id"`
+	TurnPosition            sql.NullInt64  `json:"turn_position"`
+	TurnMessageSeq          sql.NullInt64  `json:"turn_message_seq"`
+	ID                      string         `json:"id"`
+	BotID                   string         `json:"bot_id"`
+	SessionID               sql.NullString `json:"session_id"`
+	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
+	SenderAccountUserID     sql.NullString `json:"sender_account_user_id"`
+	SourceMessageID         sql.NullString `json:"source_message_id"`
+	SourceReplyToMessageID  sql.NullString `json:"source_reply_to_message_id"`
+	Role                    string         `json:"role"`
+	Content                 string         `json:"content"`
+	Metadata                string         `json:"metadata"`
+	Usage                   sql.NullString `json:"usage"`
+	CompactID               sql.NullString `json:"compact_id"`
+	SessionMode             string         `json:"session_mode"`
+	RuntimeType             string         `json:"runtime_type"`
+	ModelID                 sql.NullString `json:"model_id"`
+	EventID                 sql.NullString `json:"event_id"`
+	DisplayText             sql.NullString `json:"display_text"`
+	CreatedAt               string         `json:"created_at"`
 }
 
 type BotWorkspaceResourceLimit struct {

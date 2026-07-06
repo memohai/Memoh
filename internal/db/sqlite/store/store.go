@@ -9,7 +9,9 @@ import (
 
 type Store struct {
 	db      *sql.DB
+	dbtx    sqlitesqlc.DBTX
 	queries *sqlitesqlc.Queries
+	inTx    bool
 }
 
 func New(db *sql.DB) (*Store, error) {
@@ -20,9 +22,15 @@ func New(db *sql.DB) (*Store, error) {
 }
 
 func NewWithQueries(db *sql.DB, queries *sqlitesqlc.Queries) *Store {
+	return newWithQueries(db, db, queries, false)
+}
+
+func newWithQueries(db *sql.DB, dbtx sqlitesqlc.DBTX, queries *sqlitesqlc.Queries, inTx bool) *Store {
 	return &Store{
 		db:      db,
+		dbtx:    dbtx,
 		queries: queries,
+		inTx:    inTx,
 	}
 }
 

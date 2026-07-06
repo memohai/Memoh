@@ -391,6 +391,7 @@
       "share": "分享",
       "retry": "重试",
       "fork": "分叉",
+      "createFork": "创建分叉",
       "more": "更多",
       "readAloud": "朗读"
     },
@@ -427,6 +428,16 @@
     "attachFiles": "上传文件",
     "send": "发送",
     "sendFailed": "消息发送失败",
+    "forkFailed": "分叉会话失败",
+    "forkedFrom": "分叉自 {session}",
+    "forkSourceUnavailable": "原始会话不存在或已被删除。",
+    "forkDialog": {
+      "title": "创建分叉",
+      "description": "为新会话设置一个名字。",
+      "namePlaceholder": "新的会话名称",
+      "defaultTitle": "{session} 分叉"
+    },
+    "unknownSession": "未知会话",
     "minimapLabel": "对话导航",
     "minimapEarlier": "更早的消息加载后显示",
     "startChat": "开始聊天",

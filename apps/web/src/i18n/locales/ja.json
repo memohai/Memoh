@@ -373,6 +373,7 @@
       "share": "共有",
       "retry": "もう一度試す",
       "fork": "フォーク",
+      "createFork": "フォークを作成",
       "more": "その他",
       "readAloud": "読み上げ"
     },
@@ -396,6 +397,16 @@
     "attachFiles": "ファイルを添付する",
     "send": "送信",
     "sendFailed": "メッセージの送信に失敗しました",
+    "forkFailed": "セッションのフォークに失敗しました",
+    "forkedFrom": "{session} からフォーク",
+    "forkSourceUnavailable": "元のセッションは存在しないか、削除されています。",
+    "forkDialog": {
+      "title": "フォークを作成",
+      "description": "新しいセッションの名前を設定します。",
+      "namePlaceholder": "新しいセッション名",
+      "defaultTitle": "{session} のフォーク"
+    },
+    "unknownSession": "不明なセッション",
     "minimapLabel": "会話の概要",
     "minimapEarlier": "以前のメッセージがロード中に表示される",
     "startChat": "チャットを開始する",

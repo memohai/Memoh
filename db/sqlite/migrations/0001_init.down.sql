@@ -27,6 +27,7 @@ DROP TABLE IF EXISTS bot_workspace_resource_limits;
 DROP TABLE IF EXISTS containers;
 DROP TABLE IF EXISTS user_input_requests;
 DROP TABLE IF EXISTS tool_approval_requests;
+DROP VIEW IF EXISTS bot_visible_history_messages;
 DROP TABLE IF EXISTS bot_history_messages;
 DROP TABLE IF EXISTS bot_session_events;
 DROP TABLE IF EXISTS bot_session_discuss_cursors;

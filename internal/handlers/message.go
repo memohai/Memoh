@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
@@ -125,6 +127,7 @@ func writeSSEJSON(writer io.Writer, flusher http.Flusher, payload any) error {
 // @Param session_id query string true "Session ID"
 // @Param limit query int false "Limit"
 // @Param before query string false "Before"
+// @Param before_message_id query string false "Message ID cursor before which to page"
 // @Param format query string false "Response format: ui returns normalized chat UI turns"
 // @Success 200 {object} map[string][]messagepkg.Message
 // @Success 200 {object} map[string][]conversation.UITurn "when format=ui"
@@ -157,22 +160,33 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 		}
 	}
 
+	beforeMessageID := strings.TrimSpace(c.QueryParam("before_message_id"))
+	if beforeMessageID != "" {
+		if _, err := uuid.Parse(beforeMessageID); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid before_message_id")
+		}
+	}
 	before, hasBefore := parseBeforeParam(c.QueryParam("before"))
 	format := strings.ToLower(strings.TrimSpace(c.QueryParam("format")))
 
-	bot, _, _, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
+	bot, _, sess, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
 	if err != nil {
 		return err
 	}
 	botID = bot.ID
 
 	var messages []messagepkg.Message
-	if hasBefore {
+	switch {
+	case beforeMessageID != "":
+		messages, err = h.messageService.ListBeforeMessageBySession(c.Request().Context(), sessionID, beforeMessageID, limit)
+	case hasBefore:
 		// ListBeforeBySession already returns oldest-first (its converter
 		// reverses the DESC DB rows). Do NOT reverse again: the before page
 		// and the turn-head extension both depend on monotonic ASC input.
 		messages, err = h.messageService.ListBeforeBySession(c.Request().Context(), sessionID, before, limit)
-	} else {
+	case format == "ui":
+		messages, err = h.listLatestUIPageBySession(c.Request().Context(), sessionID, limit)
+	default:
 		messages, err = h.messageService.ListLatestBySession(c.Request().Context(), sessionID, limit)
 		if err == nil {
 			reverseMessages(messages)
@@ -186,29 +200,50 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	// reply as several turns/action bars. Extend the head back to a real turn
 	// boundary so a turn is never split across pages.
 	if format == "ui" && sessionID != "" && len(messages) > 0 {
-		messages = h.extendToUITurnHead(c.Request().Context(), sessionID, messages)
+		messages = h.extendToUITurnHead(c.Request().Context(), sessionID, messages, limit)
 	}
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
 	if format == "ui" {
 		items := conversation.ConvertMessagesToUITurns(messages)
-		if h.bgManager != nil {
-			conversation.ApplyBackgroundTaskSnapshots(items, h.backgroundTaskSnapshots(botID, sessionID))
-		}
-		if h.toolApproval != nil {
-			if approvals, err := h.toolApproval.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
-				mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(c.Request().Context(), sessionID))
-			}
-		}
-		if h.userInput != nil {
-			if requests, err := h.userInput.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
-				mergeUserInputs(items, requests, h.userInput.CanRespond)
-			}
-		}
+		h.decorateUITurns(c.Request().Context(), botID, sessionID, sess, items)
 		return c.JSON(http.StatusOK, map[string]any{
 			"items": items,
 		})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"items": messages})
+}
+
+type latestUIMessageLister interface {
+	ListLatestUIBySession(ctx context.Context, sessionID string, limit int32) ([]messagepkg.Message, error)
+}
+
+func (h *MessageHandler) listLatestUIBySession(ctx context.Context, sessionID string, limit int32) ([]messagepkg.Message, error) {
+	if svc, ok := h.messageService.(latestUIMessageLister); ok {
+		return svc.ListLatestUIBySession(ctx, sessionID, limit)
+	}
+	return h.messageService.ListLatestBySession(ctx, sessionID, limit)
+}
+
+func (h *MessageHandler) listLatestUIPageBySession(ctx context.Context, sessionID string, limit int32) ([]messagepkg.Message, error) {
+	const lookbackRows = int32(50)
+	fetchLimit := limit
+	if fetchLimit > 0 {
+		fetchLimit += lookbackRows
+	}
+	messages, err := h.listLatestUIBySession(ctx, sessionID, fetchLimit)
+	if err != nil {
+		return nil, err
+	}
+	reverseMessages(messages)
+	if limit <= 0 || len(messages) <= int(limit) {
+		return messages, nil
+	}
+
+	start := len(messages) - int(limit)
+	for start > 0 && !conversation.IsUITurnBoundary(messages[start]) {
+		start--
+	}
+	return messages[start:], nil
 }
 
 // LocateMessage godoc
@@ -244,7 +279,7 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 	if sessionID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
 	}
-	bot, _, _, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
+	bot, _, sess, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
 	if err != nil {
 		return err
 	}
@@ -269,19 +304,7 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, located.Messages)
 	items := conversation.ConvertMessagesToUITurns(located.Messages)
-	if h.bgManager != nil {
-		conversation.ApplyBackgroundTaskSnapshots(items, h.backgroundTaskSnapshots(botID, sessionID))
-	}
-	if h.toolApproval != nil {
-		if approvals, err := h.toolApproval.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
-			mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(c.Request().Context(), sessionID))
-		}
-	}
-	if h.userInput != nil {
-		if requests, err := h.userInput.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
-			mergeUserInputs(items, requests, h.userInput.CanRespond)
-		}
-	}
+	h.decorateUITurns(c.Request().Context(), botID, sessionID, sess, items)
 	return c.JSON(http.StatusOK, map[string]any{
 		"items":                      items,
 		"target_id":                  located.TargetID,
@@ -346,18 +369,80 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
-func (h *MessageHandler) toolApprovalCanApproveFn(ctx context.Context, sessionID string) func(toolapproval.Request) bool {
+func (h *MessageHandler) toolApprovalCanApproveFn(sess session.Session) func(toolapproval.Request) bool {
 	defaultFn := func(req toolapproval.Request) bool {
 		return toolapproval.CanApprove(req.Status)
 	}
-	if h == nil || h.toolApproval == nil || h.sessionService == nil || strings.TrimSpace(sessionID) == "" {
-		return defaultFn
-	}
-	sess, err := h.sessionService.Get(ctx, sessionID)
-	if err != nil || !session.IsACPRuntime(sess) {
+	if h == nil || h.toolApproval == nil || !session.IsACPRuntime(sess) {
 		return defaultFn
 	}
 	return h.toolApproval.CanRespond
+}
+
+func (h *MessageHandler) decorateUITurns(ctx context.Context, botID, sessionID string, sess session.Session, items []conversation.UITurn) {
+	if len(items) == 0 {
+		return
+	}
+	if h.bgManager != nil {
+		conversation.ApplyBackgroundTaskSnapshots(items, h.backgroundTaskSnapshots(botID, sessionID))
+	}
+	toolCallIDs := toolCallIDsFromUITurns(items)
+	if len(toolCallIDs) == 0 {
+		return
+	}
+	var wg sync.WaitGroup
+	var approvals []toolapproval.Request
+	var requests []userinput.Request
+	if h.toolApproval != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if rows, err := h.toolApproval.ListBySessionToolCalls(ctx, botID, sessionID, toolCallIDs); err == nil {
+				approvals = rows
+			}
+		}()
+	}
+	if h.userInput != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if rows, err := h.userInput.ListBySessionToolCalls(ctx, botID, sessionID, toolCallIDs); err == nil {
+				requests = rows
+			}
+		}()
+	}
+	wg.Wait()
+	if len(approvals) > 0 {
+		mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(sess))
+	}
+	if len(requests) > 0 {
+		mergeUserInputs(items, requests, h.userInput.CanRespond)
+	}
+}
+
+func toolCallIDsFromUITurns(turns []conversation.UITurn) []string {
+	var seen map[string]struct{}
+	var ids []string
+	for _, turn := range turns {
+		for _, msg := range turn.Messages {
+			if msg.Type != conversation.UIMessageTool {
+				continue
+			}
+			id := strings.TrimSpace(msg.ToolCallID)
+			if id == "" {
+				continue
+			}
+			if seen == nil {
+				seen = make(map[string]struct{}, 4)
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func mergeToolApprovals(turns []conversation.UITurn, approvals []toolapproval.Request, canApproveFn func(toolapproval.Request) bool) {
@@ -492,30 +577,58 @@ func reverseMessages(m []messagepkg.Message) {
 // `since=` cursor could force a multi-megabyte replay of bot history.
 // extendToUITurnHead prepends older session messages (oldest-first) until the
 // slice starts on a real UI turn boundary — a visible user message or a
-// background-task system turn. A turn is the unit of an action bar and is
-// indivisible, so when a fixed-size page lands in the middle of an assistant
-// turn we pull the turn's earlier rows back in. This makes the page larger than
-// `limit`, which is fine: the frontend already pages by turns, not rows. The
-// row cap guards against a single pathologically long turn.
-func (h *MessageHandler) extendToUITurnHead(ctx context.Context, sessionID string, messages []messagepkg.Message) []messagepkg.Message {
+// background-task system turn. A turn is the unit of an action bar, so when a
+// fixed-size page lands in the middle of an assistant turn we pull the turn's
+// earlier rows back in. The extension budget keeps one pathologically long turn
+// from turning a small UI page into a multi-thousand-row response.
+func (h *MessageHandler) extendToUITurnHead(ctx context.Context, sessionID string, messages []messagepkg.Message, limit int32) []messagepkg.Message {
 	const batch = int32(50)
-	const maxRows = 2000
-	// messages is oldest-first (ASC). The cursor is messages[0].CreatedAt - the
-	// oldest row on the current page - and we pull rows older than it.
-	// ListBeforeBySession already returns oldest-first, so prepend each batch
-	// directly; the combined slice stays monotonic and the turn converter (which
-	// scans in order) keeps one reply in a single turn.
+	maxRows := uiTurnHeadExtensionLimit(len(messages), limit)
+	// messages is oldest-first (ASC). The cursor is the oldest row on the
+	// current page, and we pull rows before that row in visible turn order.
+	// ListBeforeMessageBySession already returns oldest-first, so prepend each
+	// batch directly; the combined slice stays monotonic and the turn converter
+	// (which scans in order) keeps one reply in a single turn.
 	for len(messages) > 0 && len(messages) < maxRows && !conversation.IsUITurnBoundary(messages[0]) {
-		older, err := h.messageService.ListBeforeBySession(ctx, sessionID, messages[0].CreatedAt, batch)
+		older, err := h.messageService.ListBeforeMessageBySession(ctx, sessionID, messages[0].ID, batch)
 		if err != nil || len(older) == 0 {
 			break
 		}
+		fetched := len(older)
+		if overflow := len(messages) + len(older) - maxRows; overflow > 0 {
+			older = older[overflow:]
+		}
+		if len(older) == 0 {
+			break
+		}
 		messages = append(older, messages...)
-		if len(older) < int(batch) {
+		if fetched < int(batch) {
 			break // reached the start of the session
 		}
 	}
 	return messages
+}
+
+func uiTurnHeadExtensionLimit(currentRows int, limit int32) int {
+	const maxExtendedRows = 200
+	pageRows := int(limit)
+	if pageRows <= 0 {
+		pageRows = currentRows
+	}
+	if pageRows < currentRows {
+		pageRows = currentRows
+	}
+	maxRows := pageRows * 4
+	if minRows := pageRows + 50; maxRows < minRows {
+		maxRows = minRows
+	}
+	if maxRows > maxExtendedRows {
+		maxRows = maxExtendedRows
+	}
+	if maxRows < currentRows {
+		return currentRows
+	}
+	return maxRows
 }
 
 // DeleteMessages godoc
@@ -574,16 +687,30 @@ func (h *MessageHandler) authorizeBotManage(ctx context.Context, channelIdentity
 }
 
 func (h *MessageHandler) authorizeBotMessageAccess(c echo.Context, channelIdentityID, botID string) (bots.Bot, []string, error) {
-	bot, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID)
-	if err != nil {
-		bot, err = AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, bots.PermissionWorkspaceExec)
-		if err != nil {
-			return bots.Bot{}, nil, err
-		}
+	if h.botService == nil || h.accountService == nil {
+		return bots.Bot{}, nil, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
 	}
-	perms, err := h.resolveCurrentUserPermissions(c, channelIdentityID, bot.ID)
+	ctx := c.Request().Context()
+	isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
 	if err != nil {
-		return bots.Bot{}, nil, err
+		return bots.Bot{}, nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	bot, err := h.botService.GetForAccess(ctx, botID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return bots.Bot{}, nil, echo.NewHTTPError(http.StatusNotFound, "bot not found")
+		}
+		return bots.Bot{}, nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	perms, err := h.botService.ResolveUserPermissionsForBot(ctx, bot, channelIdentityID, isAdmin)
+	if err != nil {
+		if errors.Is(err, bots.ErrBotNotFound) {
+			return bots.Bot{}, nil, echo.NewHTTPError(http.StatusNotFound, "bot not found")
+		}
+		return bots.Bot{}, nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if !bots.HasPermission(perms, bots.PermissionChat) && !bots.HasPermission(perms, bots.PermissionWorkspaceExec) {
+		return bots.Bot{}, nil, echo.NewHTTPError(http.StatusForbidden, "bot access denied")
 	}
 	return bot, perms, nil
 }
@@ -604,21 +731,6 @@ func (h *MessageHandler) authorizeMessageSession(c echo.Context, channelIdentity
 		return bots.Bot{}, nil, session.Session{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
 	}
 	return bot, perms, sess, nil
-}
-
-func (h *MessageHandler) resolveCurrentUserPermissions(c echo.Context, channelIdentityID, botID string) ([]string, error) {
-	if h.botService == nil || h.accountService == nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
-	}
-	isAdmin, err := h.accountService.IsAdmin(c.Request().Context(), channelIdentityID)
-	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	perms, err := h.botService.ResolveUserPermissions(c.Request().Context(), botID, channelIdentityID, isAdmin)
-	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return perms, nil
 }
 
 // ServeMedia streams a media asset by bot_id + content_hash with read-access authorization.

@@ -22,6 +22,11 @@ VALUES (
 )
 RETURNING *;
 
+-- ForkSessionFromAssistantMessage is implemented in
+-- internal/db/sqlite/store/queries.go. SQLite cannot express the PostgreSQL
+-- data-modifying CTE used by the production query while preserving the old to
+-- new message/turn id mapping in one sqlc-generated statement.
+
 -- name: GetSessionByID :one
 SELECT *
 FROM bot_sessions
@@ -100,6 +105,11 @@ WHERE id = sqlc.arg(id) AND deleted_at IS NULL;
 UPDATE bot_sessions
 SET updated_at = CURRENT_TIMESTAMP
 WHERE id = sqlc.arg(id) AND deleted_at IS NULL;
+
+-- name: SetSessionNextTurnPosition :exec
+UPDATE bot_sessions
+SET next_turn_position = sqlc.arg(next_turn_position)
+WHERE id = sqlc.arg(session_id);
 
 -- name: GetSessionDiscussCursor :one
 SELECT *

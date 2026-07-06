@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	fetchpkg "github.com/memohai/memoh/internal/fetchproviders"
 	"github.com/memohai/memoh/internal/mcp"
@@ -1192,6 +1194,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 
 	sessionMap := map[string]pgtype.UUID{}
 	sessionDescriptors := map[string]restoredHistoryDescriptor{}
+	sessionMetadata := map[string][]byte{}
 	sessions, err := readEntry[[]sqlc.ListSessionsByBotRow](state, "history/sessions.json")
 	if err != nil {
 		return err
@@ -1224,6 +1227,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		}
 		sessionMap[item.ID.String()] = created.ID
 		sessionDescriptors[item.ID.String()] = restoredHistoryDescriptor{sessionMode: sessionMode, runtimeType: runtimeType}
+		sessionMetadata[item.ID.String()] = created.Metadata
 		return nil
 	}
 	pendingSessions := append([]sqlc.ListSessionsByBotRow(nil), sessions...)
@@ -1308,11 +1312,12 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		}
 	}
 
-	messages, err := readEntry[[]sqlc.ListMessagesRow](state, "history/messages.json")
+	messages, err := readEntry[[]sqlc.ListAllMessagesForBackupRow](state, "history/messages.json")
 	if err != nil {
 		return err
 	}
 	messageMap := map[string]pgtype.UUID{}
+	restoredMessages := make([]restoredHistoryMessage, 0, len(messages))
 	for _, item := range messages {
 		sessionID := pgtype.UUID{}
 		var descriptor restoredHistoryDescriptor
@@ -1356,7 +1361,20 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			return fmt.Errorf("message: %w", err)
 		}
 		messageMap[item.ID.String()] = created.ID
+		if created.ID.Valid && sessionID.Valid {
+			restoredMessages = append(restoredMessages, restoredHistoryMessage{
+				id:        created.ID,
+				sessionID: sessionID,
+				role:      created.Role,
+			})
+		}
 		state.counts[SectionHistory]++
+	}
+	if err := restoreHistoryTurnReadModelFromMessages(ctx, q, pgBotID, messages, sessionMap, messageMap, restoredMessages); err != nil {
+		return err
+	}
+	if err := rebindRestoredSessionMetadata(ctx, q, sessions, sessionMap, sessionMetadata, messageMap); err != nil {
+		return err
 	}
 
 	if includeAssets {
@@ -1389,6 +1407,393 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		}
 	}
 	return nil
+}
+
+type restoredHistoryMessage struct {
+	id        pgtype.UUID
+	sessionID pgtype.UUID
+	role      string
+}
+
+type restoredHistoryTurnQueries interface {
+	CreateHistoryTurn(ctx context.Context, arg sqlc.CreateHistoryTurnParams) (dbstore.HistoryTurn, error)
+	BindHistoryTurnAssistantByRequest(ctx context.Context, arg sqlc.BindHistoryTurnAssistantByRequestParams) (dbstore.HistoryTurn, error)
+	LinkMessageToHistoryTurn(ctx context.Context, arg sqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error)
+}
+
+type restoredHistoryMessageLinker interface {
+	LinkMessageToHistoryTurn(ctx context.Context, arg sqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error)
+}
+
+type restoredMessageTurnReadModelQueries interface {
+	restoredHistoryTurnQueries
+	CreateHistoryTurnWithIDAtPosition(ctx context.Context, arg sqlc.CreateHistoryTurnWithIDAtPositionParams) (dbstore.HistoryTurn, error)
+	LinkMessageToHistoryTurn(ctx context.Context, arg sqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error)
+	SupersedeHistoryTurn(ctx context.Context, arg sqlc.SupersedeHistoryTurnParams) (dbstore.HistoryTurn, error)
+	HideMessagesByHistoryTurn(ctx context.Context, turnID pgtype.UUID) error
+	SetSessionNextTurnPosition(ctx context.Context, arg sqlc.SetSessionNextTurnPositionParams) error
+}
+
+type restoredSessionMetadataQueries interface {
+	UpdateSessionMetadata(ctx context.Context, arg sqlc.UpdateSessionMetadataParams) (sqlc.BotSession, error)
+}
+
+type restoredTurnState struct {
+	turnID         pgtype.UUID
+	requestID      pgtype.UUID
+	assistantBound bool
+	seq            int64
+}
+
+type restoredMessageTurnGroup struct {
+	oldTurnID             pgtype.UUID
+	newTurnID             pgtype.UUID
+	sessionID             pgtype.UUID
+	position              int64
+	requestMessageID      pgtype.UUID
+	assistantMessageID    pgtype.UUID
+	rows                  []restoredMessageTurnRow
+	visible               bool
+	supersededByOldTurnID pgtype.UUID
+	supersededAt          pgtype.Timestamptz
+	supersededReason      pgtype.Text
+}
+
+type restoredMessageTurnRow struct {
+	messageID pgtype.UUID
+	seq       int64
+	createdAt pgtype.Timestamptz
+}
+
+func restoreHistoryTurnReadModelFromMessages(
+	ctx context.Context,
+	q restoredMessageTurnReadModelQueries,
+	botID pgtype.UUID,
+	messages []sqlc.ListAllMessagesForBackupRow,
+	sessionMap map[string]pgtype.UUID,
+	messageMap map[string]pgtype.UUID,
+	fallback []restoredHistoryMessage,
+) error {
+	if q == nil || !botID.Valid || len(messages) == 0 {
+		return nil
+	}
+	groupsByOldTurnID := make(map[string]*restoredMessageTurnGroup)
+	for _, item := range messages {
+		if !item.ID.Valid || !item.SessionID.Valid || !item.TurnID.Valid || !item.TurnPosition.Valid || !item.TurnMessageSeq.Valid || item.TurnMessageSeq.Int64 <= 0 {
+			continue
+		}
+		sessionID := sessionMap[item.SessionID.String()]
+		messageID := messageMap[item.ID.String()]
+		if !sessionID.Valid || !messageID.Valid {
+			continue
+		}
+		oldTurnKey := item.TurnID.String()
+		group := groupsByOldTurnID[oldTurnKey]
+		position := item.TurnPosition.Int64
+		if position <= 0 {
+			continue
+		}
+		if group == nil {
+			group = &restoredMessageTurnGroup{
+				oldTurnID: item.TurnID,
+				newTurnID: newRestoredPGUUID(),
+				sessionID: sessionID,
+				position:  position,
+			}
+			groupsByOldTurnID[oldTurnKey] = group
+		}
+		group.visible = group.visible || item.TurnVisible
+		switch {
+		case item.TurnMessageSeq.Int64 == 1 && strings.EqualFold(strings.TrimSpace(item.Role), "user") && !group.requestMessageID.Valid:
+			group.requestMessageID = messageID
+		case item.TurnMessageSeq.Int64 == 2 && strings.EqualFold(strings.TrimSpace(item.Role), "assistant") && !group.assistantMessageID.Valid:
+			group.assistantMessageID = messageID
+		}
+		if item.TurnSupersededAt.Valid && (!group.supersededAt.Valid || item.TurnSupersededAt.Time.After(group.supersededAt.Time)) {
+			group.supersededAt = item.TurnSupersededAt
+			group.supersededByOldTurnID = item.TurnSupersededByTurnID
+			group.supersededReason = item.TurnSupersededReason
+		}
+		group.rows = append(group.rows, restoredMessageTurnRow{
+			messageID: messageID,
+			seq:       item.TurnMessageSeq.Int64,
+			createdAt: item.CreatedAt,
+		})
+	}
+	if len(groupsByOldTurnID) == 0 {
+		return rebuildRestoredHistoryTurns(ctx, q, botID, fallback)
+	}
+	groups := make([]*restoredMessageTurnGroup, 0, len(groupsByOldTurnID))
+	for _, group := range groupsByOldTurnID {
+		if !group.requestMessageID.Valid && !group.assistantMessageID.Valid && len(group.rows) > 0 {
+			group.assistantMessageID = group.rows[0].messageID
+		}
+		groups = append(groups, group)
+	}
+	sort.SliceStable(groups, func(i, j int) bool {
+		if groups[i].sessionID.String() != groups[j].sessionID.String() {
+			return groups[i].sessionID.String() < groups[j].sessionID.String()
+		}
+		if groups[i].position != groups[j].position {
+			return groups[i].position < groups[j].position
+		}
+		return groups[i].oldTurnID.String() < groups[j].oldTurnID.String()
+	})
+
+	turnMap := make(map[string]pgtype.UUID, len(groups))
+	sessionNextPosition := map[string]int64{}
+	for _, group := range groups {
+		if _, err := q.CreateHistoryTurnWithIDAtPosition(ctx, sqlc.CreateHistoryTurnWithIDAtPositionParams{
+			TurnID:             group.newTurnID,
+			BotID:              botID,
+			SessionID:          group.sessionID,
+			TurnPosition:       group.position,
+			RequestMessageID:   group.requestMessageID,
+			AssistantMessageID: group.assistantMessageID,
+		}); err != nil {
+			return fmt.Errorf("restore message turn read model: %w", err)
+		}
+		turnMap[group.oldTurnID.String()] = group.newTurnID
+		sort.SliceStable(group.rows, func(i, j int) bool {
+			if group.rows[i].seq != group.rows[j].seq {
+				return group.rows[i].seq < group.rows[j].seq
+			}
+			if !group.rows[i].createdAt.Time.Equal(group.rows[j].createdAt.Time) {
+				return group.rows[i].createdAt.Time.Before(group.rows[j].createdAt.Time)
+			}
+			return group.rows[i].messageID.String() < group.rows[j].messageID.String()
+		})
+		for _, row := range group.rows {
+			if err := linkRestoredHistoryMessage(ctx, q, group.newTurnID, row.messageID, row.seq); err != nil {
+				return err
+			}
+		}
+		if next := group.position + 1; next > sessionNextPosition[group.sessionID.String()] {
+			sessionNextPosition[group.sessionID.String()] = next
+		}
+	}
+
+	for _, group := range groups {
+		if group.supersededAt.Valid {
+			if _, err := q.SupersedeHistoryTurn(ctx, sqlc.SupersedeHistoryTurnParams{
+				OldTurnID:          group.newTurnID,
+				SessionID:          group.sessionID,
+				SupersededByTurnID: mappedPGUUID(turnMap, group.supersededByOldTurnID),
+				SupersededAt:       group.supersededAt,
+				SupersededReason:   group.supersededReason,
+			}); err != nil {
+				return fmt.Errorf("restore superseded message turn: %w", err)
+			}
+			continue
+		}
+		if !group.visible {
+			if err := q.HideMessagesByHistoryTurn(ctx, group.newTurnID); err != nil {
+				return fmt.Errorf("hide restored message turn: %w", err)
+			}
+		}
+	}
+
+	for sessionKey, nextPosition := range sessionNextPosition {
+		if nextPosition <= 0 {
+			continue
+		}
+		sessionID, err := db.ParseUUID(sessionKey)
+		if err != nil {
+			return err
+		}
+		if err := q.SetSessionNextTurnPosition(ctx, sqlc.SetSessionNextTurnPositionParams{
+			SessionID:        sessionID,
+			NextTurnPosition: nextPosition,
+		}); err != nil {
+			return fmt.Errorf("restore session next turn position: %w", err)
+		}
+	}
+	return nil
+}
+
+func mappedPGUUID(idMap map[string]pgtype.UUID, oldID pgtype.UUID) pgtype.UUID {
+	if !oldID.Valid {
+		return pgtype.UUID{}
+	}
+	return idMap[oldID.String()]
+}
+
+func newRestoredPGUUID() pgtype.UUID {
+	id := uuid.New()
+	return pgtype.UUID{Bytes: id, Valid: true}
+}
+
+func rebuildRestoredHistoryTurns(ctx context.Context, q restoredHistoryTurnQueries, botID pgtype.UUID, messages []restoredHistoryMessage) error {
+	if q == nil || !botID.Valid || len(messages) == 0 {
+		return nil
+	}
+	states := make(map[string]*restoredTurnState)
+	for _, msg := range messages {
+		if !msg.id.Valid || !msg.sessionID.Valid {
+			continue
+		}
+		sessionKey := msg.sessionID.String()
+		state := states[sessionKey]
+		role := strings.ToLower(strings.TrimSpace(msg.role))
+		switch role {
+		case "user":
+			turn, err := q.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
+				BotID:            botID,
+				SessionID:        msg.sessionID,
+				RequestMessageID: msg.id,
+			})
+			if err != nil {
+				return fmt.Errorf("create restored history turn: %w", err)
+			}
+			state = &restoredTurnState{turnID: turn.ID, requestID: msg.id, seq: 1}
+			states[sessionKey] = state
+		case "assistant":
+			if state == nil || !state.turnID.Valid {
+				turn, err := q.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
+					BotID:              botID,
+					SessionID:          msg.sessionID,
+					AssistantMessageID: msg.id,
+				})
+				if err != nil {
+					return fmt.Errorf("create restored orphan assistant turn: %w", err)
+				}
+				state = &restoredTurnState{turnID: turn.ID, assistantBound: true, seq: 2}
+				states[sessionKey] = state
+			} else {
+				if !state.assistantBound && state.requestID.Valid {
+					if _, err := q.BindHistoryTurnAssistantByRequest(ctx, sqlc.BindHistoryTurnAssistantByRequestParams{
+						SessionID:          msg.sessionID,
+						RequestMessageID:   state.requestID,
+						AssistantMessageID: msg.id,
+					}); err != nil {
+						return fmt.Errorf("bind restored assistant turn: %w", err)
+					}
+					state.assistantBound = true
+				}
+				state.seq++
+			}
+		default:
+			if state == nil || !state.turnID.Valid {
+				turn, err := q.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
+					BotID:              botID,
+					SessionID:          msg.sessionID,
+					AssistantMessageID: msg.id,
+				})
+				if err != nil {
+					return fmt.Errorf("create restored message turn: %w", err)
+				}
+				state = &restoredTurnState{turnID: turn.ID, assistantBound: true, seq: 2}
+				states[sessionKey] = state
+			} else {
+				state.seq++
+			}
+		}
+		if err := linkRestoredHistoryMessage(ctx, q, state.turnID, msg.id, state.seq); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func linkRestoredHistoryMessage(ctx context.Context, q restoredHistoryMessageLinker, turnID pgtype.UUID, messageID pgtype.UUID, seq int64) error {
+	if !turnID.Valid || !messageID.Valid || seq <= 0 {
+		return nil
+	}
+	if _, err := q.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
+		TurnID:         turnID,
+		MessageID:      messageID,
+		TurnMessageSeq: pgtype.Int8{Int64: seq, Valid: true},
+	}); err != nil {
+		return fmt.Errorf("link restored history message: %w", err)
+	}
+	return nil
+}
+
+func rebindRestoredSessionMetadata(
+	ctx context.Context,
+	q restoredSessionMetadataQueries,
+	sessions []sqlc.ListSessionsByBotRow,
+	sessionMap map[string]pgtype.UUID,
+	sessionMetadata map[string][]byte,
+	messageMap map[string]pgtype.UUID,
+) error {
+	if q == nil || len(sessions) == 0 {
+		return nil
+	}
+	for _, item := range sessions {
+		oldSessionID := item.ID.String()
+		newSessionID := sessionMap[oldSessionID]
+		if !newSessionID.Valid {
+			continue
+		}
+		raw := sessionMetadata[oldSessionID]
+		if len(raw) == 0 {
+			raw = item.Metadata
+		}
+		metadata, changed := rebindRestoredForkMetadata(raw, sessionMap, messageMap)
+		if !changed {
+			continue
+		}
+		if _, err := q.UpdateSessionMetadata(ctx, sqlc.UpdateSessionMetadataParams{
+			ID:       newSessionID,
+			Metadata: metadata,
+		}); err != nil {
+			return fmt.Errorf("restore session metadata: %w", err)
+		}
+	}
+	return nil
+}
+
+func rebindRestoredForkMetadata(raw []byte, sessionMap map[string]pgtype.UUID, messageMap map[string]pgtype.UUID) ([]byte, bool) {
+	var metadata map[string]any
+	if err := json.Unmarshal(defaultJSONMap(raw), &metadata); err != nil || metadata == nil {
+		return raw, false
+	}
+	forkRaw, ok := metadata["forked_from"]
+	if !ok {
+		return raw, false
+	}
+	fork, ok := forkRaw.(map[string]any)
+	if !ok || fork == nil {
+		return raw, false
+	}
+	changed := remapForkMetadataID(fork, "session_id", sessionMap)
+	if remapForkMetadataID(fork, "message_id", messageMap) {
+		changed = true
+	}
+	if remapForkMetadataID(fork, "fork_message_id", messageMap) {
+		changed = true
+	}
+	if !changed {
+		return raw, false
+	}
+	metadata["forked_from"] = fork
+	out, err := json.Marshal(metadata)
+	if err != nil {
+		return raw, false
+	}
+	return out, true
+}
+
+func remapForkMetadataID(fork map[string]any, key string, idMap map[string]pgtype.UUID) bool {
+	value, ok := fork[key].(string)
+	if !ok {
+		return false
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	mapped := idMap[value]
+	if !mapped.Valid {
+		return false
+	}
+	next := mapped.String()
+	if next == value {
+		return false
+	}
+	fork[key] = next
+	return true
 }
 
 func (s *Service) ensureProvider(ctx context.Context, item providerpkg.GetResponse) (string, error) {

@@ -1,12 +1,12 @@
 -- name: CountMessagesBySession :one
 SELECT COUNT(*) AS message_count
-FROM bot_history_messages
+FROM bot_visible_history_messages
 WHERE session_id = sqlc.arg(session_id);
 
 -- name: GetLatestAssistantUsage :one
 SELECT
   COALESCE(CAST(json_extract(m.usage, '$.inputTokens') AS INTEGER), 0) AS input_tokens
-FROM bot_history_messages m
+FROM bot_visible_history_messages m
 WHERE m.session_id = sqlc.arg(session_id)
   AND m.role = 'assistant'
   AND m.usage IS NOT NULL
@@ -18,7 +18,7 @@ LIMIT 1;
 SELECT
   COALESCE(SUM(CAST(json_extract(m.usage, '$.inputTokens') AS INTEGER)), 0) AS total_input_tokens,
   COALESCE(SUM(CAST(json_extract(m.usage, '$.inputTokenDetails.cacheReadTokens') AS INTEGER)), 0) AS cache_read_tokens
-FROM bot_history_messages m
+FROM bot_visible_history_messages m
 WHERE m.session_id = sqlc.arg(session_id)
   AND m.usage IS NOT NULL
   AND json_valid(m.usage);
@@ -39,7 +39,7 @@ WITH requested_payloads AS (
          THEN json_extract(m.metadata, '$.model_requested_skills')
          ELSE json('[]')
     END AS skills_json
-  FROM bot_history_messages m
+  FROM bot_visible_history_messages m
   WHERE m.session_id = sqlc.arg(session_id)
     AND m.role = 'user'
 ),
@@ -63,7 +63,7 @@ tool_payloads AS (
          THEN m.content
          ELSE json('[]')
     END AS content_json
-  FROM bot_history_messages m
+  FROM bot_visible_history_messages m
   WHERE m.session_id = sqlc.arg(session_id)
     AND m.role = 'assistant'
 ),

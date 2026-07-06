@@ -2,6 +2,7 @@
 -- Reverse the bot name column by rebuilding the bots table without it.
 
 PRAGMA foreign_keys = OFF;
+PRAGMA legacy_alter_table = ON;
 
 DROP INDEX IF EXISTS idx_bots_name;
 
@@ -79,4 +80,5 @@ DROP TABLE bots_old;
 
 CREATE INDEX IF NOT EXISTS idx_bots_owner_user_id ON bots(owner_user_id);
 
+PRAGMA legacy_alter_table = OFF;
 PRAGMA foreign_keys = ON;

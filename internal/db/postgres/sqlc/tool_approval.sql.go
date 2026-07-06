@@ -508,6 +508,64 @@ func (q *Queries) ListToolApprovalsBySession(ctx context.Context, arg ListToolAp
 	return items, nil
 }
 
+const listToolApprovalsBySessionToolCalls = `-- name: ListToolApprovalsBySessionToolCalls :many
+SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at
+FROM tool_approval_requests
+WHERE bot_id = $1
+  AND session_id = $2
+  AND tool_call_id = ANY($3::text[])
+ORDER BY created_at ASC, short_id ASC
+`
+
+type ListToolApprovalsBySessionToolCallsParams struct {
+	BotID       pgtype.UUID `json:"bot_id"`
+	SessionID   pgtype.UUID `json:"session_id"`
+	ToolCallIds []string    `json:"tool_call_ids"`
+}
+
+func (q *Queries) ListToolApprovalsBySessionToolCalls(ctx context.Context, arg ListToolApprovalsBySessionToolCallsParams) ([]ToolApprovalRequest, error) {
+	rows, err := q.db.Query(ctx, listToolApprovalsBySessionToolCalls, arg.BotID, arg.SessionID, arg.ToolCallIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ToolApprovalRequest
+	for rows.Next() {
+		var i ToolApprovalRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.RouteID,
+			&i.ChannelIdentityID,
+			&i.ToolCallID,
+			&i.ToolName,
+			&i.Operation,
+			&i.ToolInput,
+			&i.ShortID,
+			&i.Status,
+			&i.DecisionReason,
+			&i.RequestedByChannelIdentityID,
+			&i.DecidedByChannelIdentityID,
+			&i.RequestedMessageID,
+			&i.PromptMessageID,
+			&i.PromptExternalMessageID,
+			&i.SourcePlatform,
+			&i.ReplyTarget,
+			&i.ConversationType,
+			&i.CreatedAt,
+			&i.DecidedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const rejectToolApprovalRequest = `-- name: RejectToolApprovalRequest :one
 UPDATE tool_approval_requests
 SET status = 'rejected',

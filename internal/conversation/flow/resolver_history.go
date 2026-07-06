@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 )
 
 type messageWithUsage struct {
+	ID                string
 	Message           conversation.ModelMessage
 	UsageInputTokens  *int
 	UsageOutputTokens *int
@@ -25,6 +27,7 @@ type messageWithUsage struct {
 	Platform          string
 	SenderChannelID   string
 	CompactID         string
+	Required          bool
 }
 
 func (r *Resolver) loadMessages(ctx context.Context, chatID string, sessionID string, maxContextMinutes int) ([]messageWithUsage, error) {
@@ -44,35 +47,118 @@ func (r *Resolver) loadMessages(ctx context.Context, chatID string, sessionID st
 	}
 	var result []messageWithUsage
 	for _, m := range msgs {
-		var mm conversation.ModelMessage
-		if err := json.Unmarshal(m.Content, &mm); err != nil {
-			r.logger.Warn("loadMessages: content unmarshal failed, treating as raw text",
-				slog.String("chat_id", chatID), slog.Any("error", err))
-			mm = conversation.ModelMessage{Role: m.Role, Content: m.Content}
-		} else {
-			mm.Role = m.Role
-		}
-		var inputTokens *int
-		var outputTokens *int
-		if len(m.Usage) > 0 {
-			var u usageInfo
-			if json.Unmarshal(m.Usage, &u) == nil {
-				inputTokens = u.InputTokens
-				outputTokens = u.OutputTokens
-			}
-		}
-		result = append(result, messageWithUsage{
-			Message:           mm,
-			UsageInputTokens:  inputTokens,
-			UsageOutputTokens: outputTokens,
-			SessionID:         strings.TrimSpace(m.SessionID),
-			ExternalMessageID: strings.TrimSpace(m.ExternalMessageID),
-			Platform:          strings.TrimSpace(m.Platform),
-			SenderChannelID:   strings.TrimSpace(m.SenderChannelIdentityID),
-			CompactID:         strings.TrimSpace(m.CompactID),
-		})
+		result = append(result, r.messageWithUsageFromPersisted(chatID, m))
 	}
 	return result, nil
+}
+
+func (r *Resolver) messageWithUsageFromPersisted(chatID string, m messagepkg.Message) messageWithUsage {
+	var mm conversation.ModelMessage
+	if err := json.Unmarshal(m.Content, &mm); err != nil {
+		r.logger.Warn("loadMessages: content unmarshal failed, treating as raw text",
+			slog.String("chat_id", chatID), slog.Any("error", err))
+		mm = conversation.ModelMessage{Role: m.Role, Content: m.Content}
+	} else {
+		mm.Role = m.Role
+	}
+	var inputTokens *int
+	var outputTokens *int
+	if len(m.Usage) > 0 {
+		var u usageInfo
+		if json.Unmarshal(m.Usage, &u) == nil {
+			inputTokens = u.InputTokens
+			outputTokens = u.OutputTokens
+		}
+	}
+	return messageWithUsage{
+		ID:                strings.TrimSpace(m.ID),
+		Message:           mm,
+		UsageInputTokens:  inputTokens,
+		UsageOutputTokens: outputTokens,
+		SessionID:         strings.TrimSpace(m.SessionID),
+		ExternalMessageID: strings.TrimSpace(m.ExternalMessageID),
+		Platform:          strings.TrimSpace(m.Platform),
+		SenderChannelID:   strings.TrimSpace(m.SenderChannelIdentityID),
+		CompactID:         strings.TrimSpace(m.CompactID),
+	}
+}
+
+func (r *Resolver) ensureRequiredHistoryMessage(ctx context.Context, messages []messageWithUsage, req conversation.ChatRequest) ([]messageWithUsage, error) {
+	messageID := strings.TrimSpace(req.RequiredHistoryMessageID)
+	if messageID == "" || r.messageService == nil || strings.TrimSpace(req.SessionID) == "" {
+		return messages, nil
+	}
+	for i, item := range messages {
+		if strings.TrimSpace(item.ID) == messageID {
+			messages[i].Required = true
+			return messages, nil
+		}
+	}
+	window, err := r.messageService.ListVisibleFromBySession(ctx, req.SessionID, messageID)
+	if err != nil {
+		return nil, err
+	}
+	required := make([]messageWithUsage, 0, len(window))
+	for _, msg := range window {
+		required = append(required, r.messageWithUsageFromPersisted(req.ChatID, msg))
+	}
+	required = pruneHistoryForGateway(required)
+	required = filterMessagesBeforeID(required, req.HistoryCutoffBeforeMessageID)
+	if !containsMessageWithUsage(required, messageID) {
+		return nil, errors.New("required history message is not visible")
+	}
+	for i := range required {
+		if strings.TrimSpace(required[i].ID) == messageID {
+			required[i].Required = true
+		}
+	}
+	return mergeRequiredHistoryWindow(messages, required), nil
+}
+
+func containsMessageWithUsage(messages []messageWithUsage, messageID string) bool {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return false
+	}
+	for _, item := range messages {
+		if strings.TrimSpace(item.ID) == messageID {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeRequiredHistoryWindow(messages []messageWithUsage, required []messageWithUsage) []messageWithUsage {
+	if len(required) == 0 {
+		return messages
+	}
+	requiredIDs := make(map[string]struct{}, len(required))
+	for _, item := range required {
+		if id := strings.TrimSpace(item.ID); id != "" {
+			requiredIDs[id] = struct{}{}
+		}
+	}
+	merged := make([]messageWithUsage, 0, len(messages)+len(required))
+	for _, item := range messages {
+		if _, ok := requiredIDs[strings.TrimSpace(item.ID)]; ok {
+			continue
+		}
+		merged = append(merged, item)
+	}
+	return append(merged, required...)
+}
+
+func filterMessagesBeforeID(messages []messageWithUsage, messageID string) []messageWithUsage {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return messages
+	}
+	for i, item := range messages {
+		if strings.TrimSpace(item.ID) == messageID {
+			return messages[:i]
+		}
+	}
+	return messages
 }
 
 func dedupePersistedCurrentUserMessage(messages []messageWithUsage, req conversation.ChatRequest) []messageWithUsage {
@@ -137,11 +223,11 @@ func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxToke
 	// token costs. Each message's cost represents the tokens it occupies in the
 	// context window (not the output tokens it generated). We use a character-
 	// based estimate for all messages since this measures context window impact.
-	totalTokens := 0
+	scannedTokens := 0
 	cutoff := 0
 	for i := len(messages) - 1; i >= 0; i-- {
-		totalTokens += estimateMessageTokens(messages[i].Message)
-		if totalTokens > maxTokens {
+		scannedTokens += estimateMessageTokens(messages[i].Message)
+		if scannedTokens > maxTokens {
 			cutoff = i + 1
 			break
 		}
@@ -153,6 +239,7 @@ func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxToke
 	for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].Message.Role), "tool") {
 		cutoff++
 	}
+	cutoff, totalTokens := fitRequiredMessagesWithinBudget(messages, cutoff, maxTokens)
 
 	if cutoff > 0 && log != nil {
 		log.Info("trimMessagesByTokens: context trimmed",
@@ -164,7 +251,8 @@ func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxToke
 		)
 	}
 
-	result := make([]conversation.ModelMessage, 0, len(messages)-cutoff)
+	requiredPrefix := requiredMessagesBeforeCutoff(messages, cutoff)
+	result := make([]conversation.ModelMessage, 0, len(messages)-cutoff+len(requiredPrefix))
 	if cutoff > 0 {
 		// Add a truncation notice at the beginning so the LLM knows earlier
 		// context was trimmed and it can use tools (memory, search) to look up
@@ -178,10 +266,60 @@ func trimMessagesByTokens(log *slog.Logger, messages []messageWithUsage, maxToke
 			),
 		})
 	}
+	for _, m := range requiredPrefix {
+		result = append(result, m.Message)
+	}
 	for _, m := range messages[cutoff:] {
 		result = append(result, m.Message)
 	}
 	return result, totalTokens
+}
+
+func fitRequiredMessagesWithinBudget(messages []messageWithUsage, cutoff int, maxTokens int) (int, int) {
+	if maxTokens <= 0 || len(messages) == 0 {
+		return cutoff, estimateMessagesTokens(messages)
+	}
+	if cutoff < 0 {
+		cutoff = 0
+	}
+	if cutoff > len(messages) {
+		cutoff = len(messages)
+	}
+	for {
+		requiredPrefix := requiredMessagesBeforeCutoff(messages, cutoff)
+		totalTokens := estimateMessagesTokens(requiredPrefix) + estimateMessagesTokens(messages[cutoff:])
+		if totalTokens <= maxTokens || cutoff >= len(messages) {
+			return cutoff, totalTokens
+		}
+		cutoff++
+		for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].Message.Role), "tool") {
+			cutoff++
+		}
+	}
+}
+
+func estimateMessagesTokens(messages []messageWithUsage) int {
+	total := 0
+	for _, m := range messages {
+		total += estimateMessageTokens(m.Message)
+	}
+	return total
+}
+
+func requiredMessagesBeforeCutoff(messages []messageWithUsage, cutoff int) []messageWithUsage {
+	if cutoff <= 0 {
+		return nil
+	}
+	if cutoff > len(messages) {
+		cutoff = len(messages)
+	}
+	var required []messageWithUsage
+	for _, m := range messages[:cutoff] {
+		if m.Required {
+			required = append(required, m)
+		}
+	}
+	return required
 }
 
 func (r *Resolver) replaceCompactedMessages(ctx context.Context, messages []messageWithUsage) []messageWithUsage {
@@ -190,9 +328,13 @@ func (r *Resolver) replaceCompactedMessages(ctx context.Context, messages []mess
 	}
 
 	compactGroups := make(map[string][]int) // compact_id -> indices
+	requiredCompactGroups := make(map[string]bool)
 	for i, m := range messages {
 		if m.CompactID != "" {
 			compactGroups[m.CompactID] = append(compactGroups[m.CompactID], i)
+			if m.Required {
+				requiredCompactGroups[m.CompactID] = true
+			}
 		}
 	}
 	if len(compactGroups) == 0 {
@@ -226,6 +368,12 @@ func (r *Resolver) replaceCompactedMessages(ctx context.Context, messages []mess
 			continue
 		}
 		replaced[m.CompactID] = true
+		if requiredCompactGroups[m.CompactID] {
+			for _, idx := range compactGroups[m.CompactID] {
+				result = append(result, messages[idx])
+			}
+			continue
+		}
 		summary, ok := summaries[m.CompactID]
 		if !ok || summary == "" {
 			for _, idx := range compactGroups[m.CompactID] {

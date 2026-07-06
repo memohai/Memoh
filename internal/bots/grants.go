@@ -206,9 +206,26 @@ func (s *Service) ResolveUserPermissions(ctx context.Context, botID, userID stri
 		}
 		return nil, err
 	}
+	bot, err := toBot(asSQLCBot(row))
+	if err != nil {
+		return nil, err
+	}
+	return s.ResolveUserPermissionsForBot(ctx, bot, userID, isAdmin)
+}
+
+// ResolveUserPermissionsForBot resolves permissions using an already-loaded bot
+// row. Hot read paths use this to avoid loading the same bot twice.
+func (s *Service) ResolveUserPermissionsForBot(ctx context.Context, bot Bot, userID string, isAdmin bool) ([]string, error) {
+	if s.queries == nil {
+		return nil, errors.New("bot queries not configured")
+	}
 	uid := strings.TrimSpace(userID)
-	if isAdmin || row.OwnerUserID.String() == uid {
+	if isAdmin || bot.OwnerUserID == uid {
 		return allPermissions(), nil
+	}
+	botUUID, err := db.ParseUUID(bot.ID)
+	if err != nil {
+		return nil, err
 	}
 	var userUUID pgtype.UUID
 	if uid != "" {

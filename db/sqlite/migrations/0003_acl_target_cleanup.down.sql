@@ -2,6 +2,7 @@
 -- Restore ACL target kind and ordering fields.
 
 PRAGMA foreign_keys = OFF;
+PRAGMA legacy_alter_table = ON;
 
 BEGIN;
 
@@ -85,4 +86,5 @@ CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_subject_channel_type ON bot_acl_rul
 
 COMMIT;
 
+PRAGMA legacy_alter_table = OFF;
 PRAGMA foreign_keys = ON;

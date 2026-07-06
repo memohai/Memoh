@@ -760,6 +760,29 @@ func TestConvertMessagesToUITurnsIncludesReplyAndForwardMetadata(t *testing.T) {
 	}
 }
 
+func TestConvertMessagesToUITurnsParsesRawReplyMetadata(t *testing.T) {
+	now := time.Now().UTC()
+	turns := ConvertMessagesToUITurns([]messagepkg.Message{{
+		ID:        "user-raw-reply",
+		BotID:     "bot-1",
+		SessionID: "session-1",
+		Role:      "user",
+		Content: mustUIMessageJSON(t, ModelMessage{
+			Role:    "user",
+			Content: mustUIRawJSON(t, "hello"),
+		}),
+		RawMetadata: json.RawMessage(`{"reply":{"message_id":"reply-raw","sender":"Original Sender","preview":"quoted text"}}`),
+		CreatedAt:   now,
+	}})
+
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 turn, got %d", len(turns))
+	}
+	if turns[0].Reply == nil || turns[0].Reply.MessageID != "reply-raw" || turns[0].Reply.Preview != "quoted text" {
+		t.Fatalf("unexpected reply metadata: %#v", turns[0].Reply)
+	}
+}
+
 func TestConvertMessagesToUITurnsTruncatesReplyPreview(t *testing.T) {
 	now := time.Now().UTC()
 	longPreview := strings.Repeat("预览", 80)

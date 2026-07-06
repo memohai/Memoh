@@ -17,6 +17,203 @@ VALUES (
 )
 RETURNING *;
 
+-- name: ForkSessionFromAssistantMessage :one
+WITH source_session AS (
+  SELECT s.*
+  FROM bot_sessions s
+  WHERE s.id = sqlc.arg(session_id)
+    AND s.bot_id = sqlc.arg(bot_id)
+    AND s.type = 'chat'
+    AND s.deleted_at IS NULL
+),
+target_turn AS (
+  SELECT
+    vm.turn_id AS id,
+    vm.turn_position AS position,
+    vm.id AS message_id
+  FROM source_session s
+  JOIN bot_visible_history_messages vm ON vm.session_id = s.id
+    AND vm.id = sqlc.arg(message_id)
+    AND vm.role = 'assistant'
+    AND vm.turn_id IS NOT NULL
+    AND vm.turn_position IS NOT NULL
+  LIMIT 1
+),
+created_session AS (
+  INSERT INTO bot_sessions (
+    bot_id,
+    channel_type,
+    type,
+    session_mode,
+    runtime_type,
+    runtime_metadata,
+    title,
+    metadata,
+    created_by_user_id
+  )
+  SELECT
+    s.bot_id,
+    s.channel_type,
+    s.type,
+    s.session_mode,
+    s.runtime_type,
+    s.runtime_metadata,
+    sqlc.arg(title),
+    sqlc.arg(metadata),
+    sqlc.narg(created_by_user_id)::uuid
+  FROM source_session s
+  JOIN target_turn tt ON true
+  RETURNING *
+),
+copy_messages AS (
+  SELECT
+    vm.id AS old_message_id,
+    gen_random_uuid() AS new_message_id,
+    vm.sender_channel_identity_id,
+    vm.sender_account_user_id,
+    vm.source_message_id,
+    vm.source_reply_to_message_id,
+    vm.role,
+    vm.content,
+    vm.metadata,
+    vm.usage,
+    vm.session_mode,
+    vm.runtime_type,
+    vm.model_id,
+    vm.display_text,
+    vm.turn_id AS old_turn_id,
+    vm.turn_position,
+    vm.turn_message_seq,
+    vm.created_at
+  FROM bot_visible_history_messages vm
+  JOIN target_turn tt ON (
+    vm.turn_position < tt.position
+    OR vm.turn_position = tt.position
+  )
+  WHERE vm.session_id = sqlc.arg(session_id)
+  ORDER BY vm.turn_position ASC, vm.turn_message_seq ASC, vm.created_at ASC, vm.id ASC
+),
+copy_turns AS (
+  SELECT
+    cm.old_turn_id,
+    gen_random_uuid() AS new_turn_id,
+    cm.turn_position AS old_position,
+    ROW_NUMBER() OVER (ORDER BY cm.turn_position ASC)::bigint AS new_position
+  FROM (
+    SELECT DISTINCT old_turn_id, turn_position
+    FROM copy_messages
+  ) cm
+  ORDER BY cm.turn_position ASC
+),
+inserted_messages AS (
+  INSERT INTO bot_history_messages (
+    id,
+    bot_id,
+    session_id,
+    sender_channel_identity_id,
+    sender_account_user_id,
+    source_message_id,
+    source_reply_to_message_id,
+    role,
+    content,
+    metadata,
+    usage,
+    session_mode,
+    runtime_type,
+    model_id,
+    display_text,
+    turn_id,
+    turn_position,
+    turn_message_seq,
+    turn_visible,
+    created_at
+  )
+  SELECT
+    cm.new_message_id,
+    cs.bot_id,
+    cs.id,
+    cm.sender_channel_identity_id,
+    cm.sender_account_user_id,
+    cm.source_message_id,
+    cm.source_reply_to_message_id,
+    cm.role,
+    cm.content,
+    cm.metadata,
+    cm.usage,
+    cm.session_mode,
+    cm.runtime_type,
+    cm.model_id,
+    cm.display_text,
+    ct.new_turn_id,
+    ct.new_position,
+    cm.turn_message_seq,
+    true,
+    cm.created_at
+  FROM copy_messages cm
+  JOIN copy_turns ct ON ct.old_turn_id = cm.old_turn_id
+  CROSS JOIN created_session cs
+  RETURNING id
+),
+copy_message_counts AS (
+  SELECT count(*) AS count FROM copy_messages
+),
+inserted_message_counts AS (
+  SELECT count(*) AS count FROM inserted_messages
+),
+next_turn_position AS (
+  SELECT COALESCE(MAX(new_position), 0) + 1 AS value
+  FROM copy_turns
+),
+copied_assets AS (
+  INSERT INTO bot_history_message_assets (
+    message_id,
+    role,
+    ordinal,
+    content_hash,
+    name,
+    metadata
+  )
+  SELECT
+    cm.new_message_id,
+    a.role,
+    a.ordinal,
+    a.content_hash,
+    a.name,
+    a.metadata
+  FROM bot_history_message_assets a
+  JOIN copy_messages cm ON cm.old_message_id = a.message_id
+  JOIN inserted_messages im ON im.id = cm.new_message_id
+  RETURNING id
+),
+fork_anchor_message AS (
+  SELECT assistant_message.new_message_id
+  FROM target_turn tt
+  JOIN copy_messages assistant_message ON assistant_message.old_message_id = tt.message_id
+  LIMIT 1
+),
+updated_session AS (
+  UPDATE bot_sessions s
+  SET next_turn_position = ntp.value,
+      metadata = jsonb_set(
+        s.metadata,
+        '{forked_from}',
+        COALESCE(s.metadata->'forked_from', '{}'::jsonb) || jsonb_build_object('fork_message_id', fam.new_message_id::text),
+        true
+      )
+  FROM created_session cs
+  JOIN fork_anchor_message fam ON true
+  CROSS JOIN next_turn_position ntp
+  WHERE s.id = cs.id
+  RETURNING s.*
+)
+SELECT us.*
+FROM updated_session us
+CROSS JOIN (SELECT count(*) AS copied_asset_count FROM copied_assets) copied_asset_counts
+CROSS JOIN copy_message_counts
+CROSS JOIN inserted_message_counts
+WHERE EXISTS (SELECT 1 FROM copy_turns)
+  AND inserted_message_counts.count = copy_message_counts.count;
+
 -- name: GetSessionByID :one
 SELECT *
 FROM bot_sessions
@@ -135,6 +332,11 @@ WHERE id = sqlc.arg(id) AND deleted_at IS NULL;
 UPDATE bot_sessions
 SET updated_at = now()
 WHERE id = sqlc.arg(id) AND deleted_at IS NULL;
+
+-- name: SetSessionNextTurnPosition :exec
+UPDATE bot_sessions
+SET next_turn_position = sqlc.arg(next_turn_position)::bigint
+WHERE id = sqlc.arg(session_id);
 
 -- name: GetSessionDiscussCursor :one
 SELECT *

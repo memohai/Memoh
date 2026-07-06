@@ -119,3 +119,11 @@ FROM tool_approval_requests
 WHERE bot_id = sqlc.arg(bot_id)
   AND session_id = sqlc.arg(session_id)
 ORDER BY created_at ASC, short_id ASC;
+
+-- name: ListToolApprovalsBySessionToolCalls :many
+SELECT *
+FROM tool_approval_requests
+WHERE bot_id = sqlc.arg(bot_id)
+  AND session_id = sqlc.arg(session_id)
+  AND tool_call_id IN (sqlc.slice(tool_call_ids))
+ORDER BY created_at ASC, short_id ASC;

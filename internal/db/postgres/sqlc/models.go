@@ -158,6 +158,13 @@ type BotHistoryMessage struct {
 	CompactID               pgtype.UUID        `json:"compact_id"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
+	TurnID                  pgtype.UUID        `json:"turn_id"`
+	TurnPosition            pgtype.Int8        `json:"turn_position"`
+	TurnMessageSeq          pgtype.Int8        `json:"turn_message_seq"`
+	TurnVisible             bool               `json:"turn_visible"`
+	TurnSupersededByTurnID  pgtype.UUID        `json:"turn_superseded_by_turn_id"`
+	TurnSupersededAt        pgtype.Timestamptz `json:"turn_superseded_at"`
+	TurnSupersededReason    pgtype.Text        `json:"turn_superseded_reason"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -214,21 +221,22 @@ type BotPluginResource struct {
 }
 
 type BotSession struct {
-	ID              pgtype.UUID        `json:"id"`
-	BotID           pgtype.UUID        `json:"bot_id"`
-	RouteID         pgtype.UUID        `json:"route_id"`
-	ChannelType     pgtype.Text        `json:"channel_type"`
-	Type            string             `json:"type"`
-	SessionMode     string             `json:"session_mode"`
-	RuntimeType     string             `json:"runtime_type"`
-	RuntimeMetadata []byte             `json:"runtime_metadata"`
-	Title           string             `json:"title"`
-	Metadata        []byte             `json:"metadata"`
-	ParentSessionID pgtype.UUID        `json:"parent_session_id"`
-	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	ID               pgtype.UUID        `json:"id"`
+	BotID            pgtype.UUID        `json:"bot_id"`
+	RouteID          pgtype.UUID        `json:"route_id"`
+	ChannelType      pgtype.Text        `json:"channel_type"`
+	Type             string             `json:"type"`
+	SessionMode      string             `json:"session_mode"`
+	RuntimeType      string             `json:"runtime_type"`
+	RuntimeMetadata  []byte             `json:"runtime_metadata"`
+	Title            string             `json:"title"`
+	Metadata         []byte             `json:"metadata"`
+	NextTurnPosition int64              `json:"next_turn_position"`
+	ParentSessionID  pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID  pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type BotSessionDiscussCursor struct {
@@ -270,6 +278,30 @@ type BotUserGrant struct {
 	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type BotVisibleHistoryMessage struct {
+	TurnID                  pgtype.UUID        `json:"turn_id"`
+	TurnPosition            pgtype.Int8        `json:"turn_position"`
+	TurnMessageSeq          pgtype.Int8        `json:"turn_message_seq"`
+	ID                      pgtype.UUID        `json:"id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	SenderAccountUserID     pgtype.UUID        `json:"sender_account_user_id"`
+	SourceMessageID         pgtype.Text        `json:"source_message_id"`
+	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
+	Role                    string             `json:"role"`
+	Content                 []byte             `json:"content"`
+	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
+	CompactID               pgtype.UUID        `json:"compact_id"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
+	ModelID                 pgtype.UUID        `json:"model_id"`
+	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
 type BotWorkspaceResourceLimit struct {

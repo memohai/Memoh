@@ -178,3 +178,11 @@ FROM user_input_requests
 WHERE bot_id = ?
   AND session_id = ?
 ORDER BY created_at ASC, short_id ASC;
+
+-- name: ListUserInputsBySessionToolCalls :many
+SELECT *
+FROM user_input_requests
+WHERE bot_id = sqlc.arg(bot_id)
+  AND session_id = sqlc.arg(session_id)
+  AND tool_call_id IN (sqlc.slice(tool_call_ids))
+ORDER BY created_at ASC, short_id ASC;

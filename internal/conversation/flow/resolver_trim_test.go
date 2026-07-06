@@ -40,7 +40,7 @@ func TestTrimMessagesByTokens_DropsLeadingOrphanTool(t *testing.T) {
 			Message: conversation.ModelMessage{
 				Role:       "tool",
 				ToolCallID: "call-1",
-				Content:    conversation.NewTextContent("2"),
+				Content:    conversation.NewTextContent("2222"),
 			},
 		},
 		{
@@ -52,17 +52,20 @@ func TestTrimMessagesByTokens_DropsLeadingOrphanTool(t *testing.T) {
 		},
 	}
 
-	// Budget 70: assistant(60) fits, adding assistant-tool-call(50) exceeds →
-	// cutoff lands on the tool message which must be skipped.
-	// NOTE: estimateMessageTokens uses character-based estimation (not UsageOutputTokens),
-	// so all messages fit within budget=70. This test verifies the orphan-tool skip logic
-	// still works correctly when trimming does occur.
-	trimmed, _ := trimMessagesByTokens(nil, messages, 70)
-	if len(trimmed) == 0 {
-		t.Fatal("expected non-empty trimmed messages")
+	// Budget 2: newest assistant and tool result fit, adding the older assistant
+	// tool call exceeds the budget. The cutoff initially lands on the tool result,
+	// which must be skipped to avoid an orphan tool message.
+	trimmed, _ := trimMessagesByTokens(nil, messages, 2)
+	if len(trimmed) != 2 {
+		t.Fatalf("expected truncation notice and latest assistant, got %d messages: %+v", len(trimmed), trimmed)
 	}
-	if trimmed[0].Role == "tool" {
-		t.Fatal("expected first trimmed message not to be tool")
+	if trimmed[0].Role != "system" || trimmed[1].Role != "assistant" {
+		t.Fatalf("expected [system, assistant], got %+v", trimmed)
+	}
+	for _, msg := range trimmed {
+		if msg.Role == "tool" {
+			t.Fatalf("expected orphan tool to be skipped, got %+v", trimmed)
+		}
 	}
 }
 
@@ -170,6 +173,50 @@ func TestTrimMessagesByTokens_EstimatesFallback(t *testing.T) {
 	// The key check is that the long user message was removed.
 	if len(trimmed) != 2 || trimmed[0].Role != "system" || trimmed[1].Role != "assistant" {
 		t.Fatalf("expected [system notice, assistant message], got %d messages: %+v", len(trimmed), trimmed)
+	}
+}
+
+func TestTrimMessagesByTokens_PreservesRequiredMessage(t *testing.T) {
+	t.Parallel()
+
+	longText := make([]byte, 400)
+	for i := range longText {
+		longText[i] = 'x'
+	}
+	messages := []messageWithUsage{
+		{
+			ID:       "required-user",
+			Required: true,
+			Message: conversation.ModelMessage{
+				Role:    "user",
+				Content: conversation.NewTextContent("retry this exact prompt"),
+			},
+		},
+		{
+			ID: "old-assistant",
+			Message: conversation.ModelMessage{
+				Role:    "assistant",
+				Content: conversation.NewTextContent(string(longText)),
+			},
+		},
+		{
+			ID: "new-assistant",
+			Message: conversation.ModelMessage{
+				Role:    "assistant",
+				Content: conversation.NewTextContent("recent reply"),
+			},
+		},
+	}
+
+	trimmed, _ := trimMessagesByTokens(nil, messages, 5)
+	if len(trimmed) < 2 {
+		t.Fatalf("expected system notice and required prompt, got %d", len(trimmed))
+	}
+	if trimmed[0].Role != "system" {
+		t.Fatalf("first message role = %q, want system", trimmed[0].Role)
+	}
+	if trimmed[1].Role != "user" || trimmed[1].TextContent() != "retry this exact prompt" {
+		t.Fatalf("required message was not preserved in order: %+v", trimmed)
 	}
 }
 
