@@ -4,7 +4,7 @@
   >
     <DotMatrixBg class="login-dots absolute inset-0 pointer-events-none" />
 
-    <div class="absolute top-6 left-6 flex items-center gap-2.5 z-10">
+    <div class="absolute top-6 left-6 flex items-center gap-2.5 z-(--z-raised)">
       <img
         src="/logo.svg"
         class="size-7"
@@ -15,7 +15,7 @@
     </div>
 
     <section
-      class="relative z-10 w-full max-w-[20.5rem] flex flex-col items-center gap-8 transition-all duration-[175ms] ease-out"
+      class="relative z-(--z-raised) w-full max-w-[20.5rem] flex flex-col items-center gap-8 transition-all duration-[175ms] ease-out"
       :class="exiting ? 'scale-[0.88] opacity-0' : 'scale-100 opacity-100'"
     >
       <div class="flex flex-col items-center gap-3">

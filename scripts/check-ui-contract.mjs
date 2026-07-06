@@ -23,6 +23,13 @@
 //     browser drops the whole declaration silently (no error, no fallback),
 //     which is how it survives visual QA. No escape hatch — there is no
 //     legitimate hsl(var(--x)) post-oklch-migration.
+//   · Z-INDEX rules — packages/ui AND apps/web (both scopes, no baseline). The
+//     z-index ladder (packages/ui/AGENTS.md "z 梯") replaced 11 ad-hoc raw
+//     values with 5 semantic tiers; a bare z-10/20/30/40/50 or z-[N] utility
+//     HARD-fails (the ladder started at zero debt and stays there), and a raw
+//     `z-index: N` CSS literal (not wrapped in var()) WARNs. Escape hatch:
+//     `ui-allow-z` for a genuine context-internal exception (an element only
+//     ordered against its own children/siblings, never another component).
 //
 // px rules — HARD FAIL (exit 1):
 //   · text-[Npx]      font-size never scales        → use a --text-* token
@@ -178,6 +185,9 @@ function scan(file, full) {
   // lines. Over-reach is harmless — two distinct 3.75rem rows abutting within ~10
   // lines is effectively impossible, so a stray second row can't hide behind a mark.
   let shapeAllowUntil = -1
+  // Forward window for the z-index ladder escape hatch — declared alongside
+  // shapeAllowUntil; see the ui-allow-z comment below for why it needs a window.
+  let zAllowUntil = -1
   lines.forEach((rawLine, i) => {
     const line = codeOf(rawLine)
     const ln = i + 1
@@ -203,6 +213,17 @@ function scan(file, full) {
         warn.push(`${rel}:${ln}  ui-allow-shape without a written reason — the marker must carry its why on the same line ("ui-allow-shape: <what this shape is and why no owner fits>")`)
     }
     const allowShape = i <= shapeAllowUntil
+    // Forward window for the z-index ladder's escape hatch — same trick as
+    // ui-allow-shape and for the same reason: z-[1]/z-[2] usually live inside
+    // a class="…" attribute (or a long cva() string) that can't carry a
+    // trailing comment, so `ui-allow-z` is written as a leading comment and
+    // suppresses the ladder check for a window of lines. Wider than
+    // ui-allow-shape's (20 vs 10): the tab-local-paint-order exception this
+    // exists for (workspace-tab.vue) carries a long multi-paragraph WHY above
+    // each element, so the marker-to-class gap runs longer than a typical
+    // one-line shape comment.
+    if (rawLine.includes('ui-allow-z')) zAllowUntil = i + 20
+    const allowZ = i <= zAllowUntil
     for (const tok of line.split(/[\s'"`]+/)) {
       if (!tok) continue
 
@@ -233,6 +254,19 @@ function scan(file, full) {
       //   reason to wrap an oklch var() in hsl() post-migration.
       if (/hsl\(var\(--/.test(tok))
         hard.push(`${rel}:${ln}  oklch token wrapped in hsl() is invalid — the browser drops the whole declaration; use var(--x) directly → ${tok}`)
+
+      // ── z-index ladder (BOTH scopes; HARD, no baseline) ──────────────────
+      //   packages/ui/AGENTS.md "z 梯": five semantic tiers (--z-raised/-sticky/
+      //   -panel/-overlay/-top) replaced 11 ad-hoc raw values. A bare
+      //   z-10/20/30/40/50 or bracket-escaped z-[N] utility means a new
+      //   floating element picked a number instead of a tier — exactly how the
+      //   pre-ladder chaos accumulated. No baseline: the migration that
+      //   introduced this rule already folded every legitimate call site onto
+      //   a token, so any further hit is NEW debt, not grandfathered history.
+      //   Escape hatch: `ui-allow-z` for the rare value that only orders a
+      //   component against ITS OWN children, never another component.
+      if (!allowZ && (/(?:^|:)z-(?:10|20|30|40|50)$/.test(tok) || /(?:^|:)z-\[[^\]]+\]$/.test(tok)))
+        hard.push(`${rel}:${ln}  raw z-index utility off the ladder (use z-(--z-raised / --z-sticky / --z-panel / --z-overlay / --z-top)) → ${tok}`)
 
       // ── app-scope injection rules (apps/web only; ratcheted) ─────────────
       //   The library owns interaction chrome (style.css ::before), color (palette
@@ -340,9 +374,42 @@ function scanCss(file) {
   })
 }
 
+// z-index ladder — raw CSS literal (WARN, both scopes). A standalone pass, not
+// folded into scanCss above: scanCss's color/shadow HARD rules are packages/ui-
+// only (the library is their single source) and would misfire on apps/web CSS
+// files' unrelated, never-audited color literals (e.g. dockview-theme.css's
+// --dock-drop-scrim rgba()) if reused wholesale. This pass checks ONLY for a
+// bare `z-index: N` outside var() — WARN, not HARD, because raw CSS can't carry
+// the same same-line marker trick as a Tailwind class (`z-index: 0; /* ui-allow-z */`
+// IS valid CSS, but our own authored exceptions read better as a leading
+// block comment) — so it uses the identical forward-window escape as the
+// z-index Tailwind-utility rule in scan() above (widened to 12: the longest
+// authored exception, the toaster's uncapped 9999 in style.css, carries a
+// multi-line WHY that runs longer than the other z-index comments).
+// Deliberately excludes negative literals (`z-index: -1`) — that idiom pins a
+// pseudo-element BEHIND its own parent's paint (button ::before chrome), never
+// a "which global tier" question, so it was never part of this ladder's scope
+// (see Plan 003's own enumeration regex, which used [0-9]+ with no leading -).
+const Z_INDEX_LITERAL = /z-index:\s*([0-9]+)/
+function scanZIndexCss(file) {
+  const rel = relative(ROOT, file)
+  const lines = readFileSync(file, 'utf8').split('\n')
+  let zAllowUntil = -1
+  lines.forEach((line, i) => {
+    const ln = i + 1
+    if (line.includes('ui-allow-z')) zAllowUntil = i + 12
+    const allowZ = i <= zAllowUntil
+    const m = line.match(Z_INDEX_LITERAL)
+    if (m && !allowZ)
+      warn.push(`${rel}:${ln}  raw z-index literal (use var(--z-raised / --z-sticky / --z-panel / --z-overlay / --z-top), or mark ui-allow-z for a local paint-order exception) → z-index: ${m[1]}`)
+  })
+}
+
 for (const d of FULL_DIRS) walk(join(ROOT, d), true)
 for (const d of APP_DIRS) walk(join(ROOT, d), false)
 scanCss(join(ROOT, 'packages/ui/src/style.css'))
+scanZIndexCss(join(ROOT, 'packages/ui/src/style.css'))
+scanZIndexCss(join(ROOT, 'apps/web/src/styles/dockview-theme.css'))
 
 // ── baseline ratchets ────────────────────────────────────────────────────────
 // Per family: count violations per file, then either (re)write the baseline or

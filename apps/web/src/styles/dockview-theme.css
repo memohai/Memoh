@@ -295,6 +295,11 @@
 }
 
 .dockview-theme-memoh .dv-tab.dv-drop-target {
+  /* ui-allow-z: not on the z-index ladder (packages/ui/AGENTS.md "z 梯"): the
+     999 fallback is dockview's own CSS variable contract
+     (--dv-overlay-z-index), read by the library's internal overlay stacking —
+     not a value we chose, so renaming it onto our token would decouple it
+     from what dockview expects. */
   z-index: calc(var(--dv-overlay-z-index, 999) + 1);
 }
 
@@ -310,6 +315,13 @@
   right: var(--tab-hover-inset);
   bottom: var(--tab-hover-inset);
   left: var(--tab-hover-inset);
+  /* ui-allow-z: not on the z-index ladder (packages/ui/AGENTS.md "z 梯"): this
+   * ::before, the ::after divider below, and workspace-tab.vue's z-[1]/z-[2]
+   * all live inside ONE tab's local paint order (svg shape → label → this
+   * hover fill → the divider → the dirty-dot/close-fade), never compared
+   * against another component's z-index. Renaming any one onto a global
+   * token without the others would desync this set — they only make sense
+   * read together. */
   z-index: 0;
   border-radius: var(--tab-hover-radius);
   background-color: var(--surface-chrome-hover);
@@ -341,6 +353,8 @@
   height: var(--tab-divider-height);
   width: var(--tab-divider-width);
   background-color: var(--tab-divider);
+  /* ui-allow-z: same local-paint-order exception as the ::before above — see
+   * that comment. */
   z-index: 0;
   pointer-events: none;
 }

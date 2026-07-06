@@ -599,6 +599,10 @@
     position: absolute;
     top: 0;
     left: 0;
+    /* ui-allow-z: not on the z-index ladder (see the "z-index ladder" comment
+       at this file's @theme block): this only orders the sliding thumb UNDER
+       its own sibling item labels within one segmented control — never
+       compared against another component's z-index. */
     z-index: 0;
     pointer-events: none;
     border-radius: calc(var(--radius) - 0.125rem);
@@ -615,6 +619,8 @@
   }
   [data-slot="segmented"] [data-segment-item] {
     position: relative;
+    /* ui-allow-z: same local-paint-order exception as [data-segment-thumb]
+       above: lifts the item label ABOVE the sibling thumb, nothing more. */
     z-index: 1;
     display: inline-flex;
     align-items: center;
@@ -1877,6 +1883,26 @@
   --color-accent-blue-foreground: var(--accent-blue-foreground);
   --color-accent-red-fill: var(--accent-red-fill);
   --color-accent-red-foreground: var(--accent-red-foreground);
+
+  /* z-index ladder (legislated in packages/ui/AGENTS.md, "z 梯" section) — five
+     semantic layers replacing 11 previously ad-hoc values. Pure rename: each
+     token's value is whatever number already dominated that role pre-migration,
+     so folding a call site onto its token changes NO computed z-index. Author
+     new floating UI against one of these five; there is no "in-between" tier —
+     needing one means picking a tier, not inventing a number. Consumed via the
+     v4 CSS-variable shorthand: z-(--z-raised), or `z-index: var(--z-raised);`
+     in raw CSS. (0/1/2-valued paint-order tricks that only ever compare a
+     component against ITS OWN children — never against another component's
+     z-index — are deliberately left off this ladder; leave a comment at the
+     call site instead of a token, see e.g. style.css's [data-segment-thumb].) */
+  --z-raised: 10; /* local elevation: sticky top-fades, resize rails, overlay badges */
+  --z-sticky: 20; /* sticky bars and hand-rolled popovers/rails within a panel */
+  --z-panel: 30; /* panel-level floats: composer, minimap, display-pane menus */
+  --z-overlay: 50; /* every Radix floating layer (dialog/sheet/popover/tooltip/menu)
+    plus App.vue's settings-section switch (was bare z-40 pre-ladder; it must
+    outrank the chat pane's own --z-panel floats it stays mounted above, so it
+    takes overlay rank, not panel — see the comment at that call site) */
+  --z-top: 100; /* lightbox / full-screen top layer */
 }
 
 @layer base {
@@ -1948,6 +1974,15 @@
    Two layout variants: single (no description) and rich (has description). */
 .memoh-toaster {
   position: fixed;
+  /* ui-allow-z: NOT folded into --z-top, despite the ladder's catch-all
+     guidance to fold stray values — doing so ties the toast with the media
+     lightbox (also Teleport'd to body, also --z-top), which previously never
+     happened (9999 unconditionally beat the lightbox's 100). A tie between
+     two Teleport-to-body layers is resolved by mount order, not an explicit
+     rank — exactly the hidden-DOM-order dependency this migration is
+     supposed to remove, not introduce. Kept raw and uncapped so a toast
+     always wins over every ladder tier, including --z-top, with no
+     coincidental tie. */
   z-index: 9999;
   display: flex;
   flex-direction: column;

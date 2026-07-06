@@ -55,7 +55,7 @@
         <slot name="detail" />
       </section>
 
-      <div class="absolute right-4 top-0 h-10 z-20 md:hidden flex items-center">
+      <div class="absolute right-4 top-0 h-10 z-(--z-sticky) md:hidden flex items-center">
         <Menu
           class="cursor-pointer p-2 size-9"
           @click="mobileOpen = !mobileOpen"

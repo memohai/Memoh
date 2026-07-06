@@ -14,7 +14,7 @@
         <section class="absolute inset-0">
           <div
             aria-hidden="true"
-            class="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-surface-editor to-transparent"
+            class="pointer-events-none absolute inset-x-0 top-0 z-(--z-raised) h-10 bg-gradient-to-b from-surface-editor to-transparent"
           />
           <ScrollArea
             ref="scrollContainer"
@@ -112,7 +112,7 @@
 
           <div
             v-if="showScrollRail"
-            class="group/rail hidden md:flex absolute inset-y-0 right-4 z-10 w-96 flex-col items-end justify-center pointer-events-none"
+            class="group/rail hidden md:flex absolute inset-y-0 right-4 z-(--z-raised) w-96 flex-col items-end justify-center pointer-events-none"
             @mouseenter="scheduleRailOpen"
             @mouseleave="scheduleRailClose"
           >
@@ -224,7 +224,7 @@
            column edge-for-edge at every width. -->
       <div
         v-if="!activeChatReadOnly"
-        class="pointer-events-none absolute z-30"
+        class="pointer-events-none absolute z-(--z-panel)"
         :class="isWelcome
           ? 'inset-0 flex flex-col items-center justify-start pt-[38dvh]'
           : 'inset-x-0 bottom-0 pt-2 pb-8'"
@@ -271,7 +271,7 @@
               <BgTaskPill
                 v-if="bgTaskPill"
                 :pill="bgTaskPill"
-                class="absolute left-0 bottom-full z-20 mb-2 max-w-[calc(50%-2rem)]"
+                class="absolute left-0 bottom-full z-(--z-sticky) mb-2 max-w-[calc(50%-2rem)]"
                 @jump="scrollToOffscreen"
               />
             </Transition>
@@ -289,7 +289,7 @@
                 type="button"
                 size="icon"
                 variant="ghost"
-                class="absolute left-1/2 bottom-full z-20 mb-4 size-9 -translate-x-1/2 rounded-full border border-border bg-card text-foreground"
+                class="absolute left-1/2 bottom-full z-(--z-sticky) mb-4 size-9 -translate-x-1/2 rounded-full border border-border bg-card text-foreground"
                 aria-label="Scroll to latest message"
                 @click="scrollToBottom"
               >
@@ -314,7 +314,7 @@
             >
               <Command
                 v-if="slashPanelOpen"
-                class="absolute inset-x-4 bottom-full z-30 mb-2 h-auto w-auto"
+                class="absolute inset-x-4 bottom-full z-(--z-panel) mb-2 h-auto w-auto"
               >
                 <CommandKeyBridge ref="slashPickerBridge">
                   <CommandList class="max-h-[min(20rem,45dvh)] overscroll-contain [scrollbar-gutter:stable]">

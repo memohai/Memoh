@@ -388,6 +388,51 @@ dark. Tooltip carries no border at all — its solid fill is its own edge.
 - Flat controls and Cards carry NO shadow. Tooltip carries none. A `shadow-none`
   fighting an inherited shadow, or an invented `shadow-xs`, is the dirty tell.
 
+## Layering / z-index — the "z 梯"
+
+- **Five semantic tiers, not eleven ad-hoc numbers.** Before this ladder the
+  codebase had 26 files, 35+ call sites, and 11 distinct raw values (`z-10`,
+  `z-20`, `z-30`, `z-40`, `z-50`, `z-[100]`, `z-[1]`, `z-[2]`, raw
+  `z-index: 0/1/9999`) with no relationship to each other — every new floating
+  element guessed a number. Tokens are defined in `style.css`'s `@theme
+  inline` block; each token's VALUE is whatever number already dominated that
+  role pre-ladder, so adopting one is a pure rename, never a re-ranking.
+
+  | Token | Value | Role |
+  |---|---|---|
+  | `--z-raised` | 10 | Local elevation: sticky top-fades, resize rails, overlay badges |
+  | `--z-sticky` | 20 | Sticky bars and hand-rolled popovers/rails within a panel |
+  | `--z-panel` | 30 | Panel-level floats: composer, minimap, app-level view switches |
+  | `--z-overlay` | 50 | Every Radix floating layer: dialog/sheet/popover/tooltip/menu |
+  | `--z-top` | 100 | Lightbox / full-screen top layer |
+
+- **Consume via the Tailwind v4 CSS-variable shorthand**: `z-(--z-overlay)` in
+  a class list (same pattern as this codebase's existing
+  `origin-(--reka-popover-content-transform-origin)` / `w-(--sidebar-width)`),
+  or `z-index: var(--z-overlay);` in raw CSS.
+- **There is no "in-between" tier.** Wanting a value between two tiers is a
+  design question — pick a tier, don't invent a number. `toast` is the one
+  intentional exception: it stays a raw `z-index: 9999` (see
+  `.memoh-toaster` in `style.css`) specifically so it wins over the
+  `--z-top` lightbox too, which a shared tier value can't guarantee once two
+  Teleport-rendered layers tie.
+- **Context-internal ordering is NOT on this ladder.** A handful of `0`/`1`/`2`
+  values (and dockview's own `--dv-overlay-z-index` fallback) only order an
+  element against its OWN children/siblings inside one component's stacking
+  context — never against another component's z-index. Forcing one of these
+  onto a global tier would claim a rank it doesn't have. Each is marked
+  `ui-allow-z` at the call site with a written reason (see
+  `[data-segment-thumb]` in `style.css`, `.tabs-thumb` in `TabsList.vue`, the
+  tab paint order in `dockview-theme.css` / `workspace-tab.vue`, and the
+  focus-ring lift in `button-group/index.ts`) — copy that pattern, don't grep
+  a token onto them.
+- **Guard**: `check-ui-contract.mjs` HARD-fails a bare `z-10/20/30/40/50` or
+  `z-[N]` utility in both `packages/ui` and `apps/web` (no baseline — the
+  ladder started this migration at zero and stays there) and WARNs on any raw
+  `z-index: N` CSS literal outside `var()`. Mark `ui-allow-z` (with a reason)
+  for a genuine context-internal exception; there is no other escape hatch.
+
+
 ## Typography
 
 - Size: the `--text-*` scale only (line-height + tracking baked in):
