@@ -1563,7 +1563,7 @@ function showForkSourceDividerAfter(message: ChatMessage, index: number): boolea
 
 function showForkSourceDividerBefore(index: number): boolean {
   return Boolean(forkSource.value)
-    && !forkSource.value?.forkMessageId
+    && (!forkSource.value?.forkMessageId || forkSourceDividerAfterIndex.value === null)
     && index === 0
 }
 const { isLocalDesktop, load: loadDesktopRuntime } = useDesktopRuntime()

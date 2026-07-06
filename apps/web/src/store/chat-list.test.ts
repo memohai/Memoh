@@ -2710,6 +2710,106 @@ describe('chat-list store', () => {
     expect((store.activeChatTarget.metadata.forked_from as Record<string, unknown>).fork_message_id).toBeUndefined()
   })
 
+  it('moves fork divider anchor when edit replaces the fork anchor tail', async () => {
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{
+        id: 'fork-session',
+        bot_id: 'bot-1',
+        title: 'Fork',
+        type: 'chat',
+        created_at: '2026-05-17T08:00:05.000Z',
+        metadata: {
+          forked_from: {
+            session_id: 'source-session',
+            title: 'Source',
+            message_id: 'source-assistant',
+            fork_message_id: 'assistant-old',
+          },
+        },
+      }],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      {
+        id: 'user-1',
+        role: 'user',
+        text: 'first',
+        attachments: [],
+        timestamp: '2026-05-17T08:00:00.000Z',
+      },
+      {
+        id: 'assistant-prev',
+        role: 'assistant',
+        messages: [{ id: 1, type: 'text', content: 'previous answer' }],
+        timestamp: '2026-05-17T08:00:01.000Z',
+        streaming: false,
+      },
+      {
+        id: 'user-2',
+        role: 'user',
+        text: 'second',
+        attachments: [],
+        timestamp: '2026-05-17T08:00:02.000Z',
+      },
+      {
+        id: 'assistant-old',
+        role: 'assistant',
+        messages: [{ id: 1, type: 'text', content: 'old answer' }],
+        timestamp: '2026-05-17T08:00:03.000Z',
+        streaming: false,
+      },
+    ])
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const edit = store.editLatestUser('user-2', 'edited second')
+    await flushPromises()
+
+    expect(store.activeChatTarget.metadata.forked_from).toMatchObject({
+      fork_message_id: 'assistant-prev',
+    })
+
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      {
+        id: 'user-1',
+        role: 'user',
+        text: 'first',
+        attachments: [],
+        timestamp: '2026-05-17T08:00:00.000Z',
+      },
+      {
+        id: 'assistant-prev',
+        role: 'assistant',
+        messages: [{ id: 1, type: 'text', content: 'previous answer' }],
+        timestamp: '2026-05-17T08:00:01.000Z',
+        streaming: false,
+      },
+      {
+        id: 'user-new',
+        role: 'user',
+        text: 'edited second',
+        attachments: [],
+        timestamp: '2026-05-17T08:00:06.000Z',
+      },
+      {
+        id: 'assistant-new',
+        role: 'assistant',
+        messages: [{ id: 1, type: 'text', content: 'new answer' }],
+        timestamp: '2026-05-17T08:00:07.000Z',
+        streaming: false,
+      },
+    ])
+    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    await edit
+    await flushPromises()
+
+    expect(store.activeChatTarget.metadata.forked_from).toMatchObject({
+      fork_message_id: 'assistant-prev',
+    })
+  })
+
   it('restores the old assistant when retry fails before streaming starts', async () => {
     sendEvents = [{ type: 'error', message: 'model failed' } as UIStreamEvent]
     api.fetchSessions.mockResolvedValueOnce({
@@ -3205,6 +3305,74 @@ describe('chat-list store', () => {
     expect(store.knownSessionSummary('fork-session')?.metadata?.forked_from).toMatchObject({
       fork_message_id: 'fork-assistant',
     })
+  })
+
+  it('does not write a fork response into the active store after switching sessions', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'source-session', bot_id: 'bot-1', title: 'Source', type: 'chat' },
+        { id: 'other-session', bot_id: 'bot-1', title: 'Other', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    api.fetchMessagesUI.mockImplementation((_botId: string, sessionId: string) => {
+      if (sessionId === 'source-session') {
+        return Promise.resolve([
+          {
+            id: 'source-assistant',
+            role: 'assistant' as const,
+            messages: [{ id: 1, type: 'text' as const, content: 'answer' }],
+            timestamp: '2026-05-17T08:00:01.000Z',
+            streaming: false,
+          },
+        ])
+      }
+      if (sessionId === 'other-session') {
+        return Promise.resolve([
+          {
+            id: 'other-user',
+            role: 'user' as const,
+            text: 'other',
+            attachments: [],
+            timestamp: '2026-05-17T09:00:00.000Z',
+          },
+        ])
+      }
+      return Promise.resolve([])
+    })
+    let resolveFork!: (session: unknown) => void
+    api.forkSessionFromMessage.mockReturnValueOnce(new Promise(resolve => {
+      resolveFork = resolve
+    }))
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const fork = store.forkMessage('source-assistant')
+    await flushPromises()
+    await store.selectSession('other-session')
+    await flushPromises()
+    resolveFork({
+      id: 'fork-session',
+      bot_id: 'bot-1',
+      title: 'Source fork',
+      type: 'chat',
+      metadata: {
+        forked_from: {
+          session_id: 'source-session',
+          title: 'Source',
+          message_id: 'source-assistant',
+        },
+      },
+    })
+    const ok = await fork
+    await flushPromises()
+
+    expect(ok).toBe(true)
+    expect(store.sessionId).toBe('other-session')
+    expect(store.messages.map(message => message.id)).toEqual(['other-user'])
+    expect(store.knownSessionSummary('fork-session')).toBeNull()
+    expect(api.fetchMessagesUI).not.toHaveBeenCalledWith('bot-1', 'fork-session', expect.anything())
   })
 
   it('does not fork non-chat sessions', async () => {

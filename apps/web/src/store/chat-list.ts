@@ -722,16 +722,21 @@ export const useChatStore = defineStore('chat', () => {
     return ''
   }
 
-  function updateForkAnchorForRetriedMessage(targetSessionId: string, target: ChatMessage): (() => void) | null {
+  function updateForkAnchorForReplacedMessage(targetSessionId: string, target: ChatMessage): (() => void) | null {
     const sid = targetSessionId.trim()
     if (!sid) return null
     const known = knownSessionSummary(sid)
     const fork = forkSourceMetadata(known)
     const currentAnchor = String(fork?.fork_message_id ?? '').trim()
-    if (!known || !fork || !currentAnchor || !messageMatchesForkAnchor(target, currentAnchor)) return null
+    if (!known || !fork || !currentAnchor) return null
 
     const targetIndex = messages.indexOf(target)
-    const nextAnchor = targetIndex >= 0 ? latestInheritedAssistantBefore(targetIndex, known) : ''
+    if (targetIndex < 0) return null
+    const replacedTailContainsAnchor = messages
+      .slice(targetIndex)
+      .some(message => messageMatchesForkAnchor(message, currentAnchor))
+    if (!replacedTailContainsAnchor) return null
+    const nextAnchor = latestInheritedAssistantBefore(targetIndex, known)
     if (nextAnchor === currentAnchor) return null
 
     const metadata = known.metadata && typeof known.metadata === 'object' ? known.metadata : {}
@@ -3711,6 +3716,11 @@ export const useChatStore = defineStore('chat', () => {
     forkingMessages.add(key)
     try {
       const forked = await requestForkSessionFromMessage(bid, sid, mid, { title: options.title })
+      if ((currentBotId.value ?? '').trim() !== bid || (sessionId.value ?? '').trim() !== sid) {
+        void refreshSessionsList(bid)
+        return true
+      }
+
       upsertSession(forked)
       rememberSession(forked)
       void refreshSessionsList(bid)
@@ -3939,7 +3949,7 @@ export const useChatStore = defineStore('chat', () => {
 
     const streamId = createStreamId()
     const assistantTurn = createOptimisticAssistantTurn()
-    const restoreForkAnchor = updateForkAnchorForRetriedMessage(sid, target)
+    const restoreForkAnchor = updateForkAnchorForReplacedMessage(sid, target)
     const replacedTurns = replaceTailFromTurn(target, [assistantTurn])
     loading.value = true
     try {
@@ -3992,6 +4002,7 @@ export const useChatStore = defineStore('chat', () => {
     const streamId = createStreamId()
     const userTurn = createOptimisticUserTurn(trimmed)
     const assistantTurn = createOptimisticAssistantTurn()
+    const restoreForkAnchor = updateForkAnchorForReplacedMessage(sid, target)
     const replacedTurns = replaceTailFromTurn(target, [userTurn, assistantTurn])
     loading.value = true
     try {
@@ -4021,6 +4032,7 @@ export const useChatStore = defineStore('chat', () => {
         : (hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
       forgetAssistantStream(streamId)
       if (stage === 'startup') {
+        restoreForkAnchor?.()
         restoreTailFromOptimistic(bid, sid, userTurn, assistantTurn, replacedTurns)
       } else {
         finalizeStreamFailure(assistantTurn, bid, sid, err)
