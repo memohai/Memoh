@@ -601,7 +601,12 @@ WORKSPACE=$(cd "$WORKSPACE" && pwd)
 
 detect_existing_installation
 load_existing_settings
-normalize_database_driver_or_exit
+# Fail fast only for an explicitly requested driver (flag or env). A driver
+# inherited from an old config is judged after the install mode is known,
+# so a legacy sqlite install can still choose reinstall.
+if [ "$DATABASE_DRIVER_SET" = true ]; then
+  normalize_database_driver_or_exit
+fi
 normalize_container_backend_or_exit
 prompt_install_mode
 
@@ -617,6 +622,21 @@ case "$INSTALL_MODE" in
     exit 1
     ;;
 esac
+
+# A driver inherited from an old config is validated only once the install
+# mode is known: upgrade must keep the old database, so an unsupported
+# legacy driver (e.g. sqlite) is fatal there, while fresh and reinstall
+# discard the old state and fall back to PostgreSQL.
+if [ "$DATABASE_DRIVER_SET" = false ] && ! normalize_database_driver "$DATABASE_DRIVER" >/dev/null 2>&1; then
+  if [ "$INSTALL_MODE" = "upgrade" ]; then
+    echo "${RED}Error: existing installation uses unsupported database driver '${DATABASE_DRIVER}'. Memoh now supports postgres only.${NC}"
+    echo "Run again with MEMOH_INSTALL_MODE=reinstall to wipe the old state and start on PostgreSQL."
+    exit 1
+  fi
+  echo "${YELLOW}ℹ Existing config uses unsupported database driver '${DATABASE_DRIVER}'; ${INSTALL_MODE} install will use PostgreSQL.${NC}"
+  DATABASE_DRIVER="postgres"
+fi
+normalize_database_driver_or_exit
 
 if [ "$INSTALL_MODE" = "upgrade" ] && [ -z "$EXISTING_CONFIG_SOURCE" ]; then
   echo "${RED}Error: Upgrade mode requires an existing config.toml to reuse.${NC}"

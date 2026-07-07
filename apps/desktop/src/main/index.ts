@@ -155,11 +155,29 @@ function normalizeBaseUrl(raw: string): string {
   return url.toString().replace(/\/$/, '')
 }
 
+// Legacy fallback: the pre-unified "Memoh" (online) build persisted the
+// user's chosen server URL in userData/remote-profile.json. Nothing writes
+// this file anymore, but existing installs still rely on it, so it stays
+// ahead of the localhost default (environment variables win).
+function readLegacyProfileBaseUrl(): string {
+  const path = join(app.getPath('userData'), 'remote-profile.json')
+  if (!existsSync(path)) return ''
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { baseUrl?: unknown }
+    if (typeof parsed.baseUrl !== 'string' || !parsed.baseUrl.trim()) return ''
+    return normalizeBaseUrl(parsed.baseUrl)
+  } catch (error) {
+    console.error('failed to read legacy remote desktop profile', error)
+    return ''
+  }
+}
+
 function getDesktopApiBaseUrl(): string {
   const configured =
     process.env.MEMOH_DESKTOP_BASE_URL?.trim()
     || process.env.MEMOH_WEB_PROXY_TARGET?.trim()
     || process.env.VITE_API_URL?.trim()
+    || readLegacyProfileBaseUrl()
     || DEFAULT_BASE_URL
   return normalizeBaseUrl(configured)
 }
