@@ -2346,3 +2346,14 @@ SELECT
 FROM bot_history_messages m
 WHERE m.compact_id = $1
 ORDER BY m.created_at ASC, m.id ASC;
+
+-- name: ListMessageRefsByCompactID :many
+-- Refs-only counterpart of ListMessagesByCompactID: builds compaction summary
+-- coverage without pulling every compacted row's full content/usage.
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id
+FROM bot_history_messages m
+WHERE m.compact_id = $1
+ORDER BY m.created_at ASC, m.id ASC;

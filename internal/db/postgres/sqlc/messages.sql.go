@@ -2717,6 +2717,44 @@ func (q *Queries) ListHistoryTurnsByBot(ctx context.Context, botID pgtype.UUID) 
 	return items, nil
 }
 
+const listMessageRefsByCompactID = `-- name: ListMessageRefsByCompactID :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id
+FROM bot_history_messages m
+WHERE m.compact_id = $1
+ORDER BY m.created_at ASC, m.id ASC
+`
+
+type ListMessageRefsByCompactIDRow struct {
+	ID        pgtype.UUID `json:"id"`
+	BotID     pgtype.UUID `json:"bot_id"`
+	SessionID pgtype.UUID `json:"session_id"`
+}
+
+// Refs-only counterpart of ListMessagesByCompactID: builds compaction summary
+// coverage without pulling every compacted row's full content/usage.
+func (q *Queries) ListMessageRefsByCompactID(ctx context.Context, compactID pgtype.UUID) ([]ListMessageRefsByCompactIDRow, error) {
+	rows, err := q.db.Query(ctx, listMessageRefsByCompactID, compactID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMessageRefsByCompactIDRow
+	for rows.Next() {
+		var i ListMessageRefsByCompactIDRow
+		if err := rows.Scan(&i.ID, &i.BotID, &i.SessionID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMessages = `-- name: ListMessages :many
 SELECT
   m.id,

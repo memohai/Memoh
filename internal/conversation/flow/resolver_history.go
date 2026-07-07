@@ -417,11 +417,11 @@ func (r *Resolver) replaceCompactedMessages(ctx context.Context, sessionID strin
 		}
 	}
 	messages = replaceCompactedHistoryRecords(messages, summaries, scope)
-	sessionSummaries := r.summaryRecordsFromCompactionLogs(ctx, missingCompactionLogs(messages, logs), scope)
-	if len(sessionSummaries) == 0 {
-		return messages
+	sessionSummaries := summaryRecordsFromCompactionLogs(missingCompactionLogs(messages, logs), scope)
+	if len(sessionSummaries) > 0 {
+		messages = prependMissingCompactionSummaries(messages, sessionSummaries)
 	}
-	return prependMissingCompactionSummaries(messages, sessionSummaries)
+	return r.refreshCompactedSummaryCoverage(ctx, messages)
 }
 
 // missingCompactionLogs filters the session logs down to those not already
@@ -480,7 +480,7 @@ func (r *Resolver) replaceRecentCompactedMessages(ctx context.Context, scope con
 		}
 	}
 
-	return replaceCompactedHistoryRecords(messages, summaries, scope)
+	return r.refreshCompactedSummaryCoverage(ctx, replaceCompactedHistoryRecords(messages, summaries, scope))
 }
 
 func (r *Resolver) listSessionCompactionLogs(ctx context.Context, sessionID string) []sqlc.BotHistoryMessageCompact {
@@ -501,7 +501,7 @@ func (r *Resolver) listSessionCompactionLogs(ctx context.Context, sessionID stri
 	return logs
 }
 
-func (r *Resolver) summaryRecordsFromCompactionLogs(ctx context.Context, logs []sqlc.BotHistoryMessageCompact, scope contextfrag.Scope) []historyfrag.HistoryRecord {
+func summaryRecordsFromCompactionLogs(logs []sqlc.BotHistoryMessageCompact, scope contextfrag.Scope) []historyfrag.HistoryRecord {
 	if len(logs) == 0 {
 		return nil
 	}
@@ -521,33 +521,53 @@ func (r *Resolver) summaryRecordsFromCompactionLogs(ctx context.Context, logs []
 		if logScope.SessionID == "" {
 			logScope.SessionID = pgUUIDString(log.SessionID)
 		}
-		coveredRefs := r.coveredRefsForCompact(ctx, log.ID, logScope)
-		records = append(records, historyfrag.SummaryRecord(compactID, log.Summary, coveredRefs, logScope))
+		// Coverage is filled in afterward by refreshCompactedSummaryCoverage, once
+		// per compact group, from the refs-only query.
+		records = append(records, historyfrag.SummaryRecord(compactID, log.Summary, nil, logScope))
 	}
 	return records
 }
 
-func (r *Resolver) coveredRefsForCompact(ctx context.Context, compactID pgtype.UUID, scope contextfrag.Scope) []contextfrag.ContextRef {
+// refreshCompactedSummaryCoverage recomputes each compaction summary's
+// CoveredRefs from the full compact group via a refs-only query, so coverage
+// is complete even when a group straddles the load window and no full-content
+// row fetch is needed just to keep the refs.
+func (r *Resolver) refreshCompactedSummaryCoverage(ctx context.Context, messages []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
+	if r.queries == nil {
+		return messages
+	}
+	for i := range messages {
+		record := &messages[i]
+		if record.SourceKind != historyfrag.SourceCompactionLog || record.Kind != contextfrag.KindConversationSummary {
+			continue
+		}
+		compactID, err := db.ParseUUID(record.CompactID)
+		if err != nil {
+			continue
+		}
+		coverage := contextfrag.NewSummaryCoverage(record.Ref, r.coveredRefsForCompact(ctx, compactID))
+		record.Coverage = &coverage
+	}
+	return messages
+}
+
+func (r *Resolver) coveredRefsForCompact(ctx context.Context, compactID pgtype.UUID) []contextfrag.ContextRef {
 	if r.queries == nil || !compactID.Valid {
 		return nil
 	}
-	rows, err := r.queries.ListMessagesByCompactID(ctx, compactID)
+	rows, err := r.queries.ListMessageRefsByCompactID(ctx, compactID)
 	if err != nil {
 		if r.logger != nil {
-			r.logger.Warn("loadSessionCompactionSummaries: failed to load compacted message refs", slog.String("compact_id", pgUUIDString(compactID)), slog.Any("error", err))
+			r.logger.Warn("coveredRefsForCompact: failed to load compacted message refs", slog.String("compact_id", pgUUIDString(compactID)), slog.Any("error", err))
 		}
 		return nil
 	}
 	refs := make([]contextfrag.ContextRef, 0, len(rows))
 	for _, row := range rows {
-		record, err := historyfrag.FromDBMessage(messageFromCompactRow(row), historyfrag.ScopeFallback{
-			ConversationType: scope.ConversationType,
-			ConversationName: scope.ConversationName,
-			ReplyTarget:      scope.ReplyTarget,
-		})
+		record, err := historyfrag.FromDBMessage(messageFromCompactRefRow(row), historyfrag.ScopeFallback{})
 		if err != nil {
 			if r.logger != nil {
-				r.logger.Warn("loadSessionCompactionSummaries: skipped compacted message ref", slog.String("compact_id", pgUUIDString(compactID)), slog.Any("error", err))
+				r.logger.Warn("coveredRefsForCompact: skipped compacted message ref", slog.String("compact_id", pgUUIDString(compactID)), slog.Any("error", err))
 			}
 			continue
 		}
@@ -556,22 +576,11 @@ func (r *Resolver) coveredRefsForCompact(ctx context.Context, compactID pgtype.U
 	return refs
 }
 
-func messageFromCompactRow(row sqlc.ListMessagesByCompactIDRow) messagepkg.Message {
+func messageFromCompactRefRow(row sqlc.ListMessageRefsByCompactIDRow) messagepkg.Message {
 	return messagepkg.Message{
-		ID:                      pgUUIDString(row.ID),
-		BotID:                   pgUUIDString(row.BotID),
-		SessionID:               pgUUIDString(row.SessionID),
-		SenderChannelIdentityID: pgUUIDString(row.SenderChannelIdentityID),
-		SenderUserID:            pgUUIDString(row.SenderUserID),
-		ExternalMessageID:       pgTextString(row.ExternalMessageID),
-		SourceReplyToMessageID:  pgTextString(row.SourceReplyToMessageID),
-		Role:                    strings.TrimSpace(row.Role),
-		Content:                 json.RawMessage(row.Content),
-		Usage:                   json.RawMessage(row.Usage),
-		CompactID:               pgUUIDString(row.CompactID),
-		EventID:                 pgUUIDString(row.EventID),
-		DisplayContent:          pgTextString(row.DisplayText),
-		CreatedAt:               row.CreatedAt.Time,
+		ID:        pgUUIDString(row.ID),
+		BotID:     pgUUIDString(row.BotID),
+		SessionID: pgUUIDString(row.SessionID),
 	}
 }
 
@@ -623,13 +632,6 @@ func pgUUIDString(value pgtype.UUID) string {
 		return ""
 	}
 	return parsed.String()
-}
-
-func pgTextString(value pgtype.Text) string {
-	if !value.Valid {
-		return ""
-	}
-	return strings.TrimSpace(value.String)
 }
 
 func replaceCompactedHistoryRecords(messages []historyfrag.HistoryRecord, summaries map[string]string, scope contextfrag.Scope) []historyfrag.HistoryRecord {

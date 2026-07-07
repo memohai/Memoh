@@ -324,19 +324,15 @@ func TestReplaceCompactedMessagesLoadsSessionSummaryCoverageFromCompactedRows(t 
 				Summary:   "older condensed context",
 			},
 		},
-		covered: map[pgtype.UUID][]sqlc.ListMessagesByCompactIDRow{
+		refs: map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow{
 			mustPGUUID(t, compactID): {
 				{
-					ID:      mustPGUUID(t, "00000000-0000-0000-0000-000000000401"),
-					BotID:   mustPGUUID(t, "00000000-0000-0000-0000-000000000001"),
-					Role:    "user",
-					Content: []byte(`"covered user"`),
+					ID:    mustPGUUID(t, "00000000-0000-0000-0000-000000000401"),
+					BotID: mustPGUUID(t, "00000000-0000-0000-0000-000000000001"),
 				},
 				{
-					ID:      mustPGUUID(t, "00000000-0000-0000-0000-000000000402"),
-					BotID:   mustPGUUID(t, "00000000-0000-0000-0000-000000000001"),
-					Role:    "assistant",
-					Content: []byte(`"covered assistant"`),
+					ID:    mustPGUUID(t, "00000000-0000-0000-0000-000000000402"),
+					BotID: mustPGUUID(t, "00000000-0000-0000-0000-000000000001"),
 				},
 			},
 		},
@@ -355,9 +351,61 @@ func TestReplaceCompactedMessagesLoadsSessionSummaryCoverageFromCompactedRows(t 
 		got[0].Coverage.CoveredRefs[1].ID != "00000000-0000-0000-0000-000000000402" {
 		t.Fatalf("covered refs mismatch: %#v", got[0].Coverage.CoveredRefs)
 	}
+	if len(queries.coveredCalls) != 0 {
+		t.Fatalf("coverage path must not request full message content, called: %#v", queries.coveredCalls)
+	}
 	frags := historyContextFragsForMessages(historyfrag.ToModelMessages(got), got)
 	if len(frags) != 1 || frags[0].Coverage == nil || len(frags[0].Coverage.CoveredRefs) != 2 {
 		t.Fatalf("summary frag lost loaded coverage: %#v", frags)
+	}
+}
+
+func TestReplaceCompactedMessagesInWindowGroupCoversRowsOutsideLoadWindow(t *testing.T) {
+	t.Parallel()
+
+	sessionID := "00000000-0000-0000-0000-00000000f007"
+	compactID := "00000000-0000-0000-0000-00000000c007"
+	queries := &recordingCompactionLogQueries{
+		logs: []sqlc.BotHistoryMessageCompact{
+			{
+				ID:        mustPGUUID(t, compactID),
+				SessionID: mustPGUUID(t, sessionID),
+				Status:    "ok",
+				Summary:   "condensed context",
+			},
+		},
+		refs: map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow{
+			mustPGUUID(t, compactID): {
+				{ID: mustPGUUID(t, "00000000-0000-0000-0000-000000000501")},
+				{ID: mustPGUUID(t, "00000000-0000-0000-0000-000000000502")},
+			},
+		},
+	}
+	resolver := &Resolver{queries: queries}
+	// Only the newer half of the compact group is inside the loaded window; row
+	// ...501 already aged out of the 24h load slice but is still part of the group.
+	recent := []historyfrag.HistoryRecord{
+		historyRecord("00000000-0000-0000-0000-000000000502", conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("old")}, func(r *historyfrag.HistoryRecord) {
+			r.CompactID = compactID
+		}),
+	}
+
+	got := resolver.replaceCompactedMessages(context.Background(), sessionID, contextfrag.Scope{BotID: "bot-1", SessionID: sessionID}, recent)
+
+	if len(got) != 1 || got[0].Kind != contextfrag.KindConversationSummary {
+		t.Fatalf("expected single in-window summary record, got %#v", got)
+	}
+	if got[0].Coverage == nil || len(got[0].Coverage.CoveredRefs) != 2 {
+		t.Fatalf("in-window summary should cover the full compact group, got %#v", got[0].Coverage)
+	}
+	if got[0].Coverage.CoveredRefs[0].ID != "00000000-0000-0000-0000-000000000501" {
+		t.Fatalf("covered refs should include the row outside the load window: %#v", got[0].Coverage.CoveredRefs)
+	}
+	if len(queries.coveredCalls) != 0 {
+		t.Fatalf("coverage path must not request full message content, called: %#v", queries.coveredCalls)
+	}
+	if len(queries.refCalls) != 1 || queries.refCalls[0] != mustPGUUID(t, compactID) {
+		t.Fatalf("refs-only query should be called once for the compact group, got: %#v", queries.refCalls)
 	}
 }
 
@@ -381,6 +429,10 @@ func TestReplaceCompactedMessagesResolvesInWindowGroupsFromSessionLogs(t *testin
 				Status:    "ok",
 				Summary:   "aged-out condensed context",
 			},
+		},
+		refs: map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow{
+			mustPGUUID(t, inWindowCompact):    {{ID: mustPGUUID(t, "00000000-0000-0000-0000-000000000600")}},
+			mustPGUUID(t, outOfWindowCompact): {{ID: mustPGUUID(t, "00000000-0000-0000-0000-000000000601")}},
 		},
 	}
 	resolver := &Resolver{queries: queries}
@@ -410,9 +462,19 @@ func TestReplaceCompactedMessagesResolvesInWindowGroupsFromSessionLogs(t *testin
 	if got[2].DBMessageID != "row-current" {
 		t.Fatalf("recent row lost or reordered: %#v", got)
 	}
-	for _, called := range queries.coveredCalls {
-		if called == mustPGUUID(t, inWindowCompact) {
-			t.Fatal("covered-ref lookup must be skipped for groups already replaced in-window")
+	if len(queries.coveredCalls) != 0 {
+		t.Fatalf("coverage path must not request full message content, called: %#v", queries.coveredCalls)
+	}
+	wantRefCalls := map[pgtype.UUID]bool{
+		mustPGUUID(t, inWindowCompact):    true,
+		mustPGUUID(t, outOfWindowCompact): true,
+	}
+	if len(queries.refCalls) != len(wantRefCalls) {
+		t.Fatalf("refs-only query calls = %#v, want exactly one per compact group %#v", queries.refCalls, wantRefCalls)
+	}
+	for _, called := range queries.refCalls {
+		if !wantRefCalls[called] {
+			t.Fatalf("unexpected refs-only query for compact id: %#v", called)
 		}
 	}
 }
@@ -630,9 +692,11 @@ type recordingCompactionLogQueries struct {
 	dbstore.Queries
 	logs         []sqlc.BotHistoryMessageCompact
 	covered      map[pgtype.UUID][]sqlc.ListMessagesByCompactIDRow
+	refs         map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow
 	sessionID    pgtype.UUID
 	listCalls    int
 	coveredCalls []pgtype.UUID
+	refCalls     []pgtype.UUID
 }
 
 func (q *recordingCompactionLogQueries) ListCompactionLogsBySession(_ context.Context, sessionID pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
@@ -644,6 +708,11 @@ func (q *recordingCompactionLogQueries) ListCompactionLogsBySession(_ context.Co
 func (q *recordingCompactionLogQueries) ListMessagesByCompactID(_ context.Context, compactID pgtype.UUID) ([]sqlc.ListMessagesByCompactIDRow, error) {
 	q.coveredCalls = append(q.coveredCalls, compactID)
 	return q.covered[compactID], nil
+}
+
+func (q *recordingCompactionLogQueries) ListMessageRefsByCompactID(_ context.Context, compactID pgtype.UUID) ([]sqlc.ListMessageRefsByCompactIDRow, error) {
+	q.refCalls = append(q.refCalls, compactID)
+	return q.refs[compactID], nil
 }
 
 func mustPGUUID(t *testing.T, value string) pgtype.UUID {
