@@ -62,7 +62,7 @@ func TestReplaceCompactedHistoryRecordsUsesLegacySummaryRecord(t *testing.T) {
 		historyRecord("row-3", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("new")}, nil),
 	}
 
-	got := replaceCompactedHistoryRecords(records, map[string]string{"compact-1": "condensed"})
+	got := replaceCompactedHistoryRecords(records, map[string]string{"compact-1": "condensed"}, contextfrag.Scope{})
 	wantMessages := []conversation.ModelMessage{
 		{Role: "user", Content: conversation.NewTextContent("<summary>\ncondensed\n</summary>")},
 		{Role: "user", Content: conversation.NewTextContent("new")},
@@ -88,6 +88,45 @@ func TestReplaceCompactedHistoryRecordsUsesLegacySummaryRecord(t *testing.T) {
 	}
 }
 
+func TestReplaceCompactedHistoryRecordsScopesSummaryToConversationNotFirstSender(t *testing.T) {
+	t.Parallel()
+
+	records := []historyfrag.HistoryRecord{
+		historyRecord("row-1", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("old 1")}, func(record *historyfrag.HistoryRecord) {
+			record.CompactID = "compact-1"
+			record.Scope = contextfrag.Scope{
+				BotID:             "bot-1",
+				ChatID:            "chat-1",
+				SessionID:         "sess-1",
+				ChannelIdentityID: "sender-1",
+				DisplayName:       "Alice",
+				CurrentMessageID:  "msg-1",
+				EventID:           "evt-1",
+				ReplyToMessageID:  "msg-0",
+			}
+		}),
+		historyRecord("row-2", conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("old 2")}, func(record *historyfrag.HistoryRecord) {
+			record.CompactID = "compact-1"
+		}),
+	}
+
+	conversationScope := compactionSummaryScope("bot-1", "chat-1", "sess-1", "group", "Dev Chat", "target-1")
+	got := replaceCompactedHistoryRecords(records, map[string]string{"compact-1": "condensed"}, conversationScope)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(got))
+	}
+
+	scope := got[0].Scope
+	if scope.ChannelIdentityID != "" || scope.DisplayName != "" || scope.CurrentMessageID != "" ||
+		scope.EventID != "" || scope.ReplyToMessageID != "" {
+		t.Fatalf("summary scope must not carry first sender's identity: %#v", scope)
+	}
+	if scope.BotID != "bot-1" || scope.ChatID != "chat-1" || scope.SessionID != "sess-1" ||
+		scope.ConversationType != "group" || scope.ConversationName != "Dev Chat" || scope.ReplyTarget != "target-1" {
+		t.Fatalf("summary scope must carry conversation topology: %#v", scope)
+	}
+}
+
 func TestReplaceCompactedHistoryRecordsKeepsOriginalGroupWithoutSummary(t *testing.T) {
 	t.Parallel()
 
@@ -100,12 +139,12 @@ func TestReplaceCompactedHistoryRecordsKeepsOriginalGroupWithoutSummary(t *testi
 		}),
 	}
 
-	gotMissing := replaceCompactedHistoryRecords(records, map[string]string{})
+	gotMissing := replaceCompactedHistoryRecords(records, map[string]string{}, contextfrag.Scope{})
 	if gotMessages := historyfrag.ToModelMessages(gotMissing); !reflect.DeepEqual(gotMessages, historyfrag.ToModelMessages(records)) {
 		t.Fatalf("missing summary should keep original group:\ngot  %#v\nwant %#v", gotMessages, historyfrag.ToModelMessages(records))
 	}
 
-	gotEmpty := replaceCompactedHistoryRecords(records, map[string]string{"compact-1": ""})
+	gotEmpty := replaceCompactedHistoryRecords(records, map[string]string{"compact-1": ""}, contextfrag.Scope{})
 	if gotMessages := historyfrag.ToModelMessages(gotEmpty); !reflect.DeepEqual(gotMessages, historyfrag.ToModelMessages(records)) {
 		t.Fatalf("empty summary should keep original group:\ngot  %#v\nwant %#v", gotMessages, historyfrag.ToModelMessages(records))
 	}
@@ -172,7 +211,7 @@ func TestHistoryRecordPathPreservesLegacyResolverMessagePipeline(t *testing.T) {
 		CurrentChannel:          "telegram",
 		SourceChannelIdentityID: "sender-1",
 	})
-	records = replaceCompactedHistoryRecords(records, map[string]string{"compact-ok": "condensed"})
+	records = replaceCompactedHistoryRecords(records, map[string]string{"compact-ok": "condensed"}, contextfrag.Scope{})
 	got, tokens := trimMessagesByTokens(nil, records, 0)
 
 	want := []conversation.ModelMessage{

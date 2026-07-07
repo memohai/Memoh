@@ -10,6 +10,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/historyfrag"
@@ -308,7 +309,18 @@ func requiredMessagesBeforeCutoff(messages []historyfrag.HistoryRecord, cutoff i
 	return required
 }
 
-func (r *Resolver) replaceCompactedMessages(ctx context.Context, messages []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
+func compactionSummaryScope(botID, chatID, sessionID, conversationType, conversationName, replyTarget string) contextfrag.Scope {
+	return contextfrag.Scope{
+		BotID:            strings.TrimSpace(botID),
+		ChatID:           strings.TrimSpace(chatID),
+		SessionID:        strings.TrimSpace(sessionID),
+		ConversationType: strings.TrimSpace(conversationType),
+		ConversationName: strings.TrimSpace(conversationName),
+		ReplyTarget:      strings.TrimSpace(replyTarget),
+	}
+}
+
+func (r *Resolver) replaceCompactedMessages(ctx context.Context, scope contextfrag.Scope, messages []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
 	if r.queries == nil {
 		return messages
 	}
@@ -339,10 +351,10 @@ func (r *Resolver) replaceCompactedMessages(ctx context.Context, messages []hist
 		}
 	}
 
-	return replaceCompactedHistoryRecords(messages, summaries)
+	return replaceCompactedHistoryRecords(messages, summaries, scope)
 }
 
-func replaceCompactedHistoryRecords(messages []historyfrag.HistoryRecord, summaries map[string]string) []historyfrag.HistoryRecord {
+func replaceCompactedHistoryRecords(messages []historyfrag.HistoryRecord, summaries map[string]string, scope contextfrag.Scope) []historyfrag.HistoryRecord {
 	compactGroups := make(map[string][]int)
 	requiredCompactGroups := make(map[string]bool)
 	for i, m := range messages {
@@ -381,7 +393,7 @@ func replaceCompactedHistoryRecords(messages []historyfrag.HistoryRecord, summar
 			}
 			continue
 		}
-		result = append(result, historyfrag.LegacySummaryRecord(m.CompactID, summary, m.Scope))
+		result = append(result, historyfrag.LegacySummaryRecord(m.CompactID, summary, scope))
 	}
 	return result
 }

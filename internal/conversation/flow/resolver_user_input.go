@@ -294,7 +294,7 @@ func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.R
 		return err
 	}
 	loaded = pruneHistoryForGateway(loaded)
-	loaded = r.replaceCompactedMessages(ctx, loaded)
+	loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(firstNonEmpty(req.BotID, input.BotID), "", req.SessionID, req.ConversationType, "", req.ReplyTarget), loaded)
 	messages, _ := trimMessagesByTokens(r.logger, loaded, 0)
 
 	cfg := resolved.RunConfig
