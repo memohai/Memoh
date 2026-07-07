@@ -374,7 +374,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			)
 			return resolvedContext{}, loadErr
 		}
-		loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
+		loaded = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
 		messages, historyRecords, estimatedTokens = trimMessagesAndRecordsByTokens(r.logger, loaded, contextTokenBudget)
 		// When context reaches 70% of the contextTokenBudget (the user-configured
 		// budget cap), run synchronous compaction before sending the request.
@@ -416,7 +416,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 					)
 					return resolvedContext{}, loadErr
 				}
-				loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
+				loaded = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
 				messages, historyRecords, estimatedTokens = trimMessagesAndRecordsByTokens(r.logger, loaded, contextTokenBudget)
 				// Remove tool messages from the recent context — they are large
 				// and unnecessary when we already have a summary. Keep only

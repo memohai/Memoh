@@ -9,11 +9,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/historyfrag"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
@@ -151,6 +154,17 @@ func filterMessagesBeforeID(messages []historyfrag.HistoryRecord, messageID stri
 		}
 	}
 	return messages
+}
+
+func compactionSummaryScope(botID, chatID, sessionID, conversationType, conversationName, replyTarget string) contextfrag.Scope {
+	return contextfrag.Scope{
+		BotID:            strings.TrimSpace(botID),
+		ChatID:           strings.TrimSpace(chatID),
+		SessionID:        strings.TrimSpace(sessionID),
+		ConversationType: strings.TrimSpace(conversationType),
+		ConversationName: strings.TrimSpace(conversationName),
+		ReplyTarget:      strings.TrimSpace(replyTarget),
+	}
 }
 
 func dedupePersistedCurrentUserMessage(messages []historyfrag.HistoryRecord, req conversation.ChatRequest) []historyfrag.HistoryRecord {
@@ -365,7 +379,16 @@ func sameModelMessage(a conversation.ModelMessage, b conversation.ModelMessage) 
 		string(a.Content) == string(b.Content)
 }
 
-func (r *Resolver) replaceCompactedMessages(ctx context.Context, scope contextfrag.Scope, messages []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
+func (r *Resolver) replaceCompactedMessages(ctx context.Context, sessionID string, scope contextfrag.Scope, messages []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
+	messages = r.replaceRecentCompactedMessages(ctx, scope, messages)
+	sessionSummaries := r.loadSessionCompactionSummaries(ctx, sessionID, scope)
+	if len(sessionSummaries) == 0 {
+		return messages
+	}
+	return prependMissingCompactionSummaries(messages, sessionSummaries)
+}
+
+func (r *Resolver) replaceRecentCompactedMessages(ctx context.Context, scope contextfrag.Scope, messages []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
 	if r.queries == nil {
 		return messages
 	}
@@ -397,6 +420,102 @@ func (r *Resolver) replaceCompactedMessages(ctx context.Context, scope contextfr
 	}
 
 	return replaceCompactedHistoryRecords(messages, summaries, scope)
+}
+
+func (r *Resolver) loadSessionCompactionSummaries(ctx context.Context, sessionID string, scope contextfrag.Scope) []historyfrag.HistoryRecord {
+	if r.queries == nil || strings.TrimSpace(sessionID) == "" {
+		return nil
+	}
+	sessionUUID, err := db.ParseUUID(sessionID)
+	if err != nil {
+		if r.logger != nil {
+			r.logger.Warn("loadSessionCompactionSummaries: invalid session id", slog.String("session_id", sessionID), slog.Any("error", err))
+		}
+		return nil
+	}
+	logs, err := r.queries.ListCompactionLogsBySession(ctx, sessionUUID)
+	if err != nil {
+		if r.logger != nil {
+			r.logger.Warn("loadSessionCompactionSummaries: failed to load compaction logs", slog.String("session_id", sessionID), slog.Any("error", err))
+		}
+		return nil
+	}
+	return summaryRecordsFromCompactionLogs(logs, scope)
+}
+
+func summaryRecordsFromCompactionLogs(logs []sqlc.BotHistoryMessageCompact, scope contextfrag.Scope) []historyfrag.HistoryRecord {
+	if len(logs) == 0 {
+		return nil
+	}
+	records := make([]historyfrag.HistoryRecord, 0, len(logs))
+	for _, log := range logs {
+		if log.Status != "ok" || strings.TrimSpace(log.Summary) == "" {
+			continue
+		}
+		compactID := pgUUIDString(log.ID)
+		if compactID == "" {
+			continue
+		}
+		logScope := scope
+		if logScope.BotID == "" {
+			logScope.BotID = pgUUIDString(log.BotID)
+		}
+		if logScope.SessionID == "" {
+			logScope.SessionID = pgUUIDString(log.SessionID)
+		}
+		records = append(records, historyfrag.SummaryRecord(compactID, log.Summary, nil, logScope))
+	}
+	return records
+}
+
+func prependMissingCompactionSummaries(messages []historyfrag.HistoryRecord, summaries []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
+	if len(summaries) == 0 {
+		return messages
+	}
+	seen := make(map[string]struct{}, len(messages))
+	for _, record := range messages {
+		if id := strings.TrimSpace(record.CompactID); id != "" {
+			seen[id] = struct{}{}
+		}
+		if record.SourceKind == historyfrag.SourceCompactionLog {
+			if id := strings.TrimSpace(record.Ref.ID); id != "" {
+				seen[id] = struct{}{}
+			}
+		}
+	}
+	missing := make([]historyfrag.HistoryRecord, 0, len(summaries))
+	for _, summary := range summaries {
+		id := strings.TrimSpace(summary.CompactID)
+		if id == "" {
+			id = strings.TrimSpace(summary.Ref.ID)
+		}
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		missing = append(missing, summary)
+	}
+	if len(missing) == 0 {
+		return messages
+	}
+	out := make([]historyfrag.HistoryRecord, 0, len(missing)+len(messages))
+	out = append(out, missing...)
+	out = append(out, messages...)
+	return out
+}
+
+func pgUUIDString(value pgtype.UUID) string {
+	if !value.Valid {
+		return ""
+	}
+	parsed, err := uuid.FromBytes(value.Bytes[:])
+	if err != nil {
+		return ""
+	}
+	return parsed.String()
 }
 
 func replaceCompactedHistoryRecords(messages []historyfrag.HistoryRecord, summaries map[string]string, scope contextfrag.Scope) []historyfrag.HistoryRecord {

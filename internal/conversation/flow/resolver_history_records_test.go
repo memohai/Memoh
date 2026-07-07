@@ -1,16 +1,21 @@
 package flow
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/db"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/historyfrag"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/toolapproval"
@@ -266,6 +271,45 @@ func TestHistoryContextFragsUseRetainedSummaryRecordsAfterTrim(t *testing.T) {
 	}
 }
 
+func TestReplaceCompactedMessagesLoadsSessionSummaryWithoutRecentRows(t *testing.T) {
+	t.Parallel()
+
+	sessionID := "00000000-0000-0000-0000-00000000f003"
+	compactID := "00000000-0000-0000-0000-00000000c003"
+	queries := &recordingCompactionLogQueries{
+		logs: []sqlc.BotHistoryMessageCompact{
+			{
+				ID:        mustPGUUID(t, compactID),
+				SessionID: mustPGUUID(t, sessionID),
+				Status:    "ok",
+				Summary:   "older condensed context",
+			},
+		},
+	}
+	resolver := &Resolver{queries: queries}
+	recent := []historyfrag.HistoryRecord{
+		historyRecord("row-current", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("current")}, nil),
+	}
+
+	got := resolver.replaceCompactedMessages(context.Background(), sessionID, contextfrag.Scope{BotID: "bot-1", SessionID: sessionID}, recent)
+
+	if queries.sessionID != mustPGUUID(t, sessionID) {
+		t.Fatalf("queried session id = %#v, want %s", queries.sessionID, sessionID)
+	}
+	if len(got) != 2 {
+		t.Fatalf("records = %d, want summary plus recent row: %#v", len(got), got)
+	}
+	if got[0].CompactID != compactID || got[0].Kind != contextfrag.KindConversationSummary || got[0].Lifecycle != historyfrag.LifecycleActiveSummary {
+		t.Fatalf("first record is not loaded active summary: %#v", got[0])
+	}
+	if got[0].ModelMessage.TextContent() != "<summary>\nolder condensed context\n</summary>" {
+		t.Fatalf("summary text mismatch: %q", got[0].ModelMessage.TextContent())
+	}
+	if got[1].DBMessageID != "row-current" {
+		t.Fatalf("recent row lost or reordered: %#v", got)
+	}
+}
+
 func TestHistoryRecordPathPreservesLegacyResolverMessagePipeline(t *testing.T) {
 	t.Parallel()
 
@@ -457,4 +501,24 @@ func historyRecord(id string, msg conversation.ModelMessage, mutate func(*histor
 		mutate(&record)
 	}
 	return record
+}
+
+type recordingCompactionLogQueries struct {
+	dbstore.Queries
+	logs      []sqlc.BotHistoryMessageCompact
+	sessionID pgtype.UUID
+}
+
+func (q *recordingCompactionLogQueries) ListCompactionLogsBySession(_ context.Context, sessionID pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
+	q.sessionID = sessionID
+	return q.logs, nil
+}
+
+func mustPGUUID(t *testing.T, value string) pgtype.UUID {
+	t.Helper()
+	id, err := db.ParseUUID(value)
+	if err != nil {
+		t.Fatalf("parse uuid %q: %v", value, err)
+	}
+	return id
 }

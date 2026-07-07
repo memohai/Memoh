@@ -277,7 +277,7 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 		return err
 	}
 	loaded = pruneHistoryForGateway(loaded)
-	loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(firstNonEmpty(approval.BotID, input.BotID), "", approval.SessionID, approval.ConversationType, "", approval.ReplyTarget), loaded)
+	loaded = r.replaceCompactedMessages(ctx, approval.SessionID, compactionSummaryScope(firstNonEmpty(approval.BotID, input.BotID), "", approval.SessionID, approval.ConversationType, "", approval.ReplyTarget), loaded)
 	messages, retained, _ := trimMessagesAndRecordsByTokens(r.logger, loaded, 0)
 	messages = sanitizeMessages(messages)
 
