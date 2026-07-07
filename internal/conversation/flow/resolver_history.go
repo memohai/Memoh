@@ -677,7 +677,7 @@ func replaceCompactedHistoryRecords(messages []historyfrag.HistoryRecord, summar
 		for _, idx := range compactGroups[m.CompactID] {
 			coveredRefs = append(coveredRefs, messages[idx].Ref)
 		}
-		result = append(result, historyfrag.SummaryRecord(m.CompactID, summary, coveredRefs, m.Scope))
+		result = append(result, historyfrag.SummaryRecord(m.CompactID, summary, coveredRefs, scope))
 	}
 	return result
 }
