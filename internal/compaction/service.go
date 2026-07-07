@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -24,14 +25,21 @@ import (
 // MarkMessagesCompacted.
 var errEmptySummary = errors.New("compaction: model returned an empty summary")
 
+// compactionFailureCooldown bounds how often a session may retry compaction
+// after a failure, so a persistently failing model can't burn an LLM call on
+// every blocking sync backstop or async trigger.
+const compactionFailureCooldown = 5 * time.Minute
+
 // Service manages context compaction for bot conversations.
 type Service struct {
 	queries     dbstore.Queries
 	hookService *hooks.Service
 	logger      *slog.Logger
+	nowFn       func() time.Time
 
 	inflightMu sync.Mutex
 	inflight   map[string]struct{}
+	failedAt   map[string]time.Time
 }
 
 // NewService creates a new compaction Service.
@@ -39,7 +47,9 @@ func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 	return &Service{
 		queries:  queries,
 		logger:   log,
+		nowFn:    time.Now,
 		inflight: make(map[string]struct{}),
+		failedAt: make(map[string]time.Time),
 	}
 }
 
@@ -60,6 +70,30 @@ func (s *Service) endSessionCompaction(sessionID string) {
 	s.inflightMu.Lock()
 	defer s.inflightMu.Unlock()
 	delete(s.inflight, sessionID)
+}
+
+// inFailureCooldown reports whether sessionID failed compaction recently
+// enough that a new attempt should be skipped.
+func (s *Service) inFailureCooldown(sessionID string) bool {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	failedAt, ok := s.failedAt[sessionID]
+	if !ok {
+		return false
+	}
+	return s.nowFn().Sub(failedAt) < compactionFailureCooldown
+}
+
+func (s *Service) recordCompactionFailure(sessionID string) {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	s.failedAt[sessionID] = s.nowFn()
+}
+
+func (s *Service) clearCompactionFailure(sessionID string) {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	delete(s.failedAt, sessionID)
 }
 
 func (s *Service) SetHookService(h *hooks.Service) {
@@ -87,6 +121,13 @@ func (s *Service) RunCompactionSync(ctx context.Context, cfg TriggerConfig) erro
 }
 
 func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) error {
+	if s.inFailureCooldown(cfg.SessionID) {
+		s.logger.Info("compaction: session in failure cooldown, skipping",
+			slog.String("bot_id", cfg.BotID),
+			slog.String("session_id", cfg.SessionID),
+		)
+		return nil
+	}
 	if !s.beginSessionCompaction(cfg.SessionID) {
 		s.logger.Info("compaction: already in flight for session, skipping",
 			slog.String("bot_id", cfg.BotID),
@@ -101,6 +142,11 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) error {
 	}
 	var compactErr error
 	defer func() {
+		if compactErr != nil {
+			s.recordCompactionFailure(cfg.SessionID)
+		} else {
+			s.clearCompactionFailure(cfg.SessionID)
+		}
 		extra := map[string]any{}
 		if compactErr != nil {
 			extra["error"] = compactErr.Error()

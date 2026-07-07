@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -310,6 +311,75 @@ func TestDoCompactionEmptySummaryRecordsErrorWithoutMarking(t *testing.T) {
 	}
 	if !q.created || q.completed.Status != "error" {
 		t.Fatalf("an empty summary must leave an error log row (created=%v status=%q)", q.created, q.completed.Status)
+	}
+}
+
+func TestRunCompactionFailureCooldownSkipsImmediateRetry(t *testing.T) {
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	svc := newMachineryService(q)
+	now := time.Now()
+	svc.nowFn = func() time.Time { return now }
+
+	cfg := machineryConfig(&stubModel{}, 450)
+	fail := &failingModel{}
+	cfg.HTTPClient = &http.Client{Transport: fail}
+
+	if err := svc.RunCompactionSync(context.Background(), cfg); err == nil {
+		t.Fatal("first attempt must run and fail")
+	}
+	if fail.calls != 1 {
+		t.Fatalf("calls = %d, want 1", fail.calls)
+	}
+
+	if err := svc.RunCompactionSync(context.Background(), cfg); err != nil {
+		t.Fatalf("cooldown skip must not surface an error: %v", err)
+	}
+	if fail.calls != 1 {
+		t.Fatalf("immediate retry within cooldown must be skipped, calls=%d", fail.calls)
+	}
+
+	now = now.Add(compactionFailureCooldown + time.Second)
+	if err := svc.RunCompactionSync(context.Background(), cfg); err == nil {
+		t.Fatal("attempt after cooldown must run and fail again")
+	}
+	if fail.calls != 2 {
+		t.Fatalf("attempt after cooldown should run, calls=%d", fail.calls)
+	}
+}
+
+func TestRunCompactionFailureCooldownClearsOnSuccess(t *testing.T) {
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	svc := newMachineryService(q)
+	now := time.Now()
+	svc.nowFn = func() time.Time { return now }
+
+	sessionCfg := machineryConfig(&stubModel{}, 450)
+
+	failCfg := sessionCfg
+	failCfg.HTTPClient = &http.Client{Transport: &failingModel{}}
+	if err := svc.RunCompactionSync(context.Background(), failCfg); err == nil {
+		t.Fatal("expected initial failure")
+	}
+
+	now = now.Add(compactionFailureCooldown + time.Second)
+	successStub := &stubModel{summary: "recovered"}
+	successCfg := sessionCfg
+	successCfg.HTTPClient = &http.Client{Transport: successStub}
+	if err := svc.RunCompactionSync(context.Background(), successCfg); err != nil {
+		t.Fatalf("attempt after cooldown should succeed: %v", err)
+	}
+	if successStub.calls != 1 {
+		t.Fatalf("success attempt should have called the model once, got %d", successStub.calls)
+	}
+
+	retryFail := &failingModel{}
+	retryCfg := sessionCfg
+	retryCfg.HTTPClient = &http.Client{Transport: retryFail}
+	if err := svc.RunCompactionSync(context.Background(), retryCfg); err == nil {
+		t.Fatal("expected failure from immediate retry model")
+	}
+	if retryFail.calls != 1 {
+		t.Fatalf("success must have cleared the cooldown, allowing an immediate retry; calls=%d", retryFail.calls)
 	}
 }
 
