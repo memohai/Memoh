@@ -49,11 +49,11 @@ const options = computed<SearchableSelectOption[]>(() => {
     keywords: [t('common.none')],
   }
   const providerOptions = props.providers.map((provider) => ({
-    value: provider.id || '',
-    label: provider.name || provider.id || '',
-    description: provider.provider === 'builtin'
-      ? t(`memory.modeNames.${provider.config?.memory_mode || 'off'}`)
-      : provider.provider,
+	    value: provider.id || '',
+	    label: provider.name || provider.id || '',
+	    description: provider.provider === 'builtin'
+	      ? t(`memory.modeNames.${provider.config?.memory_mode || 'graph'}`)
+	      : provider.provider,
     keywords: [
       provider.name ?? '',
       provider.provider ?? '',

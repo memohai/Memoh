@@ -14,7 +14,9 @@ type BeforeChatRequest struct {
 
 // BeforeChatResult contains memory context to inject into the conversation.
 type BeforeChatResult struct {
-	ContextText string // formatted text to inject as a user message
+	ContextText    string // formatted text to inject as a user message
+	RetrievalMode  string // graph, file_fallback, mem0, etc.
+	FallbackReason string // non-empty when the provider degraded to another retrieval path
 }
 
 // AfterChatRequest is passed to OnAfterChat after receiving the gateway response.
@@ -85,62 +87,24 @@ type DeleteAllRequest struct {
 	Filters map[string]any `json:"filters,omitempty"`
 }
 
-type EmbedInput struct {
-	Text     string `json:"text,omitempty"`
-	ImageURL string `json:"image_url,omitempty"`
-	VideoURL string `json:"video_url,omitempty"`
-}
-
-type EmbedUpsertRequest struct {
-	Type     string         `json:"type"`
-	Provider string         `json:"provider,omitempty"`
-	Model    string         `json:"model,omitempty"`
-	Input    EmbedInput     `json:"input"`
-	Source   string         `json:"source,omitempty"`
-	BotID    string         `json:"bot_id,omitempty"`
-	AgentID  string         `json:"agent_id,omitempty"`
-	RunID    string         `json:"run_id,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-	Filters  map[string]any `json:"filters,omitempty"`
-}
-
-type EmbedUpsertResponse struct {
-	Item       MemoryItem `json:"item"`
-	Provider   string     `json:"provider"`
-	Model      string     `json:"model"`
-	Dimensions int        `json:"dimensions"`
-}
-
 type MemoryItem struct {
-	ID          string         `json:"id"`
-	Memory      string         `json:"memory"`
-	Hash        string         `json:"hash,omitempty"`
-	CreatedAt   string         `json:"created_at,omitempty"`
-	UpdatedAt   string         `json:"updated_at,omitempty"`
-	Score       float64        `json:"score,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	BotID       string         `json:"bot_id,omitempty"`
-	AgentID     string         `json:"agent_id,omitempty"`
-	RunID       string         `json:"run_id,omitempty"`
-	TopKBuckets []TopKBucket   `json:"top_k_buckets,omitempty"`
-	CDFCurve    []CDFPoint     `json:"cdf_curve,omitempty"`
-}
-
-// TopKBucket represents one bar in the Top-K sparse dimension bar chart.
-type TopKBucket struct {
-	Index uint32  `json:"index"` // sparse dimension index (term hash)
-	Value float32 `json:"value"` // weight (term frequency)
-}
-
-// CDFPoint represents one point on the cumulative contribution curve.
-type CDFPoint struct {
-	K          int     `json:"k"`          // rank position (1-based, sorted by value desc)
-	Cumulative float64 `json:"cumulative"` // cumulative weight fraction [0.0, 1.0]
+	ID        string         `json:"id"`
+	Memory    string         `json:"memory"`
+	Hash      string         `json:"hash,omitempty"`
+	CreatedAt string         `json:"created_at,omitempty"`
+	UpdatedAt string         `json:"updated_at,omitempty"`
+	Score     float64        `json:"score,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	BotID     string         `json:"bot_id,omitempty"`
+	AgentID   string         `json:"agent_id,omitempty"`
+	RunID     string         `json:"run_id,omitempty"`
 }
 
 type SearchResponse struct {
-	Results   []MemoryItem `json:"results"`
-	Relations []any        `json:"relations,omitempty"`
+	Results        []MemoryItem `json:"results"`
+	Relations      []any        `json:"relations,omitempty"`
+	RetrievalMode  string       `json:"retrieval_mode,omitempty"`
+	FallbackReason string       `json:"fallback_reason,omitempty"`
 }
 
 type DeleteResponse struct {
@@ -205,7 +169,6 @@ type CompactResult struct {
 
 type MemoryCompactCapability struct {
 	Semantic     bool   `json:"semantic"`
-	Native       bool   `json:"native,omitempty"`
 	Archive      bool   `json:"archive,omitempty"`
 	RebuildIndex bool   `json:"rebuild_index,omitempty"`
 	Reason       string `json:"reason,omitempty"`
@@ -237,12 +200,17 @@ type MemoryStatusResponse struct {
 	CanManualSync     bool                    `json:"can_manual_sync"`
 	SourceDir         string                  `json:"source_dir,omitempty"`
 	OverviewPath      string                  `json:"overview_path,omitempty"`
-	MarkdownFileCount int                     `json:"markdown_file_count,omitempty"`
-	SourceCount       int                     `json:"source_count,omitempty"`
-	IndexedCount      int                     `json:"indexed_count,omitempty"`
-	QdrantCollection  string                  `json:"qdrant_collection,omitempty"`
-	Encoder           HealthStatus            `json:"encoder"`
-	Qdrant            HealthStatus            `json:"qdrant"`
+	MarkdownFileCount int                     `json:"markdown_file_count"`
+	SourceCount       int                     `json:"source_count"`
+	EdgeCount         int                     `json:"edge_count"`
+	IndexedCount      int                     `json:"indexed_count"`
+	VectorIndex       string                  `json:"vector_index,omitempty"`
+	Encoder           *HealthStatus           `json:"encoder,omitempty"`
+	Pgvector          *HealthStatus           `json:"pgvector,omitempty"`
+	// Degraded reports that the semantic seed index is behind the wiki store
+	// (failed upserts are queued for retry); graph recall still works.
+	Degraded        bool `json:"degraded"`
+	RetryQueueDepth int  `json:"retry_queue_depth"`
 }
 
 // Memory provider admin types.
@@ -298,7 +266,7 @@ type ProviderCollectionStatus struct {
 	Name   string       `json:"name"`
 	Exists bool         `json:"exists"`
 	Points int          `json:"points"`
-	Qdrant HealthStatus `json:"qdrant"`
+	Health HealthStatus `json:"health"`
 }
 
 type ProviderStatusResponse struct {

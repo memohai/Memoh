@@ -7,12 +7,11 @@ import (
 	"testing"
 
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
-	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
 
 func TestFileRuntimeRejectsEmptyMemoryWithoutHTTPError(t *testing.T) {
 	t.Parallel()
-	runtime := newFileRuntime(newFakeSparseStore())
+	runtime := newFileRuntime(newFakeStore())
 
 	_, err := runtime.Add(context.Background(), adapters.AddRequest{BotID: "bot-1"})
 	if err == nil {
@@ -26,23 +25,11 @@ func TestFileRuntimeRejectsEmptyMemoryWithoutHTTPError(t *testing.T) {
 	}
 }
 
-func TestFileRuntimeCompactWithLLMArchivesSourceMemories(t *testing.T) {
+func TestFileRuntimeCompactIsDisabled(t *testing.T) {
 	t.Parallel()
-	store := newFakeSparseStore(
-		storefs.MemoryItem{ID: "bot-1:mem_1", Memory: "Ran likes green tea", CreatedAt: "2026-06-01T00:00:00Z", UpdatedAt: "2026-06-01T00:00:00Z"},
-		storefs.MemoryItem{ID: "bot-1:mem_2", Memory: "Ran likes oolong tea", CreatedAt: "2026-06-02T00:00:00Z", UpdatedAt: "2026-06-02T00:00:00Z"},
-	)
-	runtime := newFileRuntime(store)
-	llm := &fakeLLM{compactFacts: []string{"Ran likes tea."}}
+	runtime := newFileRuntime(newFakeStore())
 
-	result, err := runtime.CompactWithLLM(context.Background(), map[string]any{"bot_id": "bot-1"}, 0.5, 0, llm)
-	if err != nil {
-		t.Fatalf("CompactWithLLM() error = %v", err)
-	}
-	if result.BeforeCount != 2 || result.AfterCount != 1 {
-		t.Fatalf("unexpected compact counts: %+v", result)
-	}
-	if len(store.archive) != 2 {
-		t.Fatalf("archived source memories = %d, want 2", len(store.archive))
+	if _, err := runtime.Compact(context.Background(), map[string]any{"bot_id": "bot-1"}, 0.5, 0); err == nil {
+		t.Fatal("expected file runtime compact to be disabled")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -622,25 +623,40 @@ func startSkillsTestBridgeServer(t *testing.T, dataRoot, botID string) {
 
 func (s *skillsTestBridgeServer) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.ListDirResponse, error) {
 	_, localPath := s.resolvePath(req.GetPath())
-	entries, err := os.ReadDir(localPath)
-	if err != nil {
-		return nil, toStatusError(err, req.GetPath())
-	}
-
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-	resp := make([]*pb.FileEntry, 0, len(entries))
-	for _, entry := range entries {
-		info, err := entry.Info()
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "stat %s: %v", entry.Name(), err)
-		}
-		resp = append(resp, &pb.FileEntry{
-			Path:    entry.Name(),
-			IsDir:   entry.IsDir(),
-			Size:    info.Size(),
-			Mode:    info.Mode().String(),
-			ModTime: info.ModTime().UTC().Format(time.RFC3339),
+	var resp []*pb.FileEntry
+	if req.GetRecursive() {
+		err := filepath.WalkDir(localPath, func(current string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			rel, err := filepath.Rel(localPath, current)
+			if err != nil || rel == "." {
+				return nil
+			}
+			fileEntry, err := skillsTestFileEntry(filepath.ToSlash(rel), entry)
+			if err != nil {
+				return err
+			}
+			resp = append(resp, fileEntry)
+			return nil
 		})
+		if err != nil {
+			return nil, toStatusError(err, req.GetPath())
+		}
+	} else {
+		entries, err := os.ReadDir(localPath)
+		if err != nil {
+			return nil, toStatusError(err, req.GetPath())
+		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+		resp = make([]*pb.FileEntry, 0, len(entries))
+		for _, entry := range entries {
+			fileEntry, err := skillsTestFileEntry(entry.Name(), entry)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "stat %s: %v", entry.Name(), err)
+			}
+			resp = append(resp, fileEntry)
+		}
 	}
 	if len(resp) > 1<<31-1 {
 		return nil, status.Error(codes.Internal, "too many entries")
@@ -650,6 +666,20 @@ func (s *skillsTestBridgeServer) ListDir(_ context.Context, req *pb.ListDirReque
 	return &pb.ListDirResponse{
 		Entries:    resp,
 		TotalCount: totalCount,
+	}, nil
+}
+
+func skillsTestFileEntry(entryPath string, entry fs.DirEntry) (*pb.FileEntry, error) {
+	info, err := entry.Info()
+	if err != nil {
+		return nil, err
+	}
+	return &pb.FileEntry{
+		Path:    entryPath,
+		IsDir:   entry.IsDir(),
+		Size:    info.Size(),
+		Mode:    info.Mode().String(),
+		ModTime: info.ModTime().UTC().Format(time.RFC3339),
 	}, nil
 }
 

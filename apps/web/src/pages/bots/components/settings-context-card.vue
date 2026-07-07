@@ -117,22 +117,25 @@
             </template>
           </MetricReadout>
 
-          <MetricReadout :label="$t('bots.settings.memoryIndexedEntries')">
-            <template #value>
-              <span class="text-base font-mono font-semibold text-foreground leading-none">
-                {{ statusCardData.indexed_count ?? 0 }}
-              </span>
-            </template>
-          </MetricReadout>
+          <MetricReadout
+            :label="selectedMemoryProviderType === 'builtin' ? $t('bots.settings.memoryGraphEdges') : $t('bots.settings.memoryIndexedEntries')"
+            :value="String(selectedMemoryProviderType === 'builtin' ? (statusCardData.edge_count ?? 0) : (statusCardData.indexed_count ?? 0))"
+          />
 
           <MetricReadout
-            v-if="showQdrantDetails"
-            :label="$t('bots.settings.memoryQdrantCollection')"
+            v-if="showPgvectorDetails"
+            :label="$t('bots.settings.memorySemanticEntries')"
+            :value="String(statusCardData.indexed_count ?? 0)"
+          />
+
+          <MetricReadout
+            v-if="showPgvectorDetails"
+            :label="$t('bots.settings.memoryVectorIndex')"
             class="sm:col-span-1"
           >
             <template #value>
               <span class="text-xs font-mono font-medium text-foreground break-all leading-snug">
-                {{ statusCardData.qdrant_collection || '-' }}
+                {{ statusCardData.vector_index || '-' }}
               </span>
             </template>
           </MetricReadout>
@@ -148,12 +151,12 @@
           </MetricReadout>
 
           <MetricReadout
-            v-if="showQdrantHealth"
-            :label="$t('bots.settings.memoryQdrantHealth')"
-            :status="statusCardData.qdrant?.ok ? 'ok' : 'error'"
+            v-if="showPgvectorHealth"
+            :label="$t('bots.settings.memoryPgvectorHealth')"
+            :status="statusCardData.pgvector?.ok ? 'ok' : 'error'"
           >
             <template #value>
-              {{ healthLabel(statusCardData.qdrant?.ok, statusCardData.qdrant?.error) }}
+              {{ healthLabel(statusCardData.pgvector?.ok, statusCardData.pgvector?.error) }}
             </template>
           </MetricReadout>
         </template>
@@ -212,42 +215,24 @@ const selectedBuiltinMemoryProvider = computed(() =>
 const selectedMem0MemoryProvider = computed(() =>
   selectedMemoryProvider.value?.provider === 'mem0' ? selectedMemoryProvider.value : null,
 )
-const selectedBuiltinMemoryMode = computed(() =>
-  (selectedBuiltinMemoryProvider.value?.config as Record<string, string> | undefined)?.memory_mode || 'off',
-)
 const isSelectedMemoryProviderPersisted = computed(() =>
   !!props.form.memory_provider_id && props.form.memory_provider_id === props.persistedMemoryProviderID,
 )
-const showBuiltinIndexedMemoryStatus = computed(() =>
-  selectedBuiltinMemoryMode.value === 'sparse' || selectedBuiltinMemoryMode.value === 'dense',
-)
+const showBuiltinIndexedMemoryStatus = computed(() => !!selectedBuiltinMemoryProvider.value)
 const showMemoryProviderStatusCard = computed(() =>
   showBuiltinIndexedMemoryStatus.value || !!selectedMem0MemoryProvider.value,
 )
 
-const indexedMemoryStatusTitle = computed(() =>
-  selectedMemoryProviderType.value === 'mem0'
-    ? t('bots.settings.mem0StatusTitle')
-    : selectedBuiltinMemoryMode.value === 'dense'
-    ? t('bots.settings.denseStatusTitle')
-    : t('bots.settings.sparseStatusTitle'),
-)
+const indexedMemoryStatusTitle = computed(() => {
+  if (selectedMemoryProviderType.value === 'mem0') return t('bots.settings.mem0StatusTitle')
+  return t('bots.settings.graphStatusTitle')
+})
 
 const statusCardData = computed(() => props.memoryStatus)
-const showQdrantDetails = computed(() =>
-  selectedBuiltinMemoryMode.value === 'sparse' || selectedBuiltinMemoryMode.value === 'dense',
-)
-const showEncoderHealth = computed(() =>
-  selectedBuiltinMemoryMode.value === 'sparse' || selectedBuiltinMemoryMode.value === 'dense',
-)
-const showQdrantHealth = computed(() =>
-  selectedBuiltinMemoryMode.value === 'sparse' || selectedBuiltinMemoryMode.value === 'dense',
-)
-const encoderHealthLabel = computed(() =>
-  selectedBuiltinMemoryMode.value === 'dense'
-    ? t('bots.settings.memoryDenseEmbeddingHealth')
-    : t('bots.settings.memoryEncoderHealth'),
-)
+const showPgvectorDetails = computed(() => !!statusCardData.value?.vector_index)
+const showEncoderHealth = computed(() => false)
+const showPgvectorHealth = computed(() => !!statusCardData.value?.vector_index)
+const encoderHealthLabel = computed(() => '')
 
 function healthLabel(ok: boolean | undefined, error?: string) {
   if (ok) return t('bots.settings.memoryHealthOk')

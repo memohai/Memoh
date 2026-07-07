@@ -2,15 +2,12 @@ package builtin
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/memohai/memoh/internal/config"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/memory/sparse"
-	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
 
 func TestBuiltinProviderNilService(t *testing.T) {
@@ -32,12 +29,10 @@ func TestBuiltinProviderNilService(t *testing.T) {
 	}
 }
 
-func TestBuiltinProviderSemanticCompactCapability(t *testing.T) {
+func TestBuiltinProviderFileRuntimeDoesNotAdvertiseSemanticCompact(t *testing.T) {
 	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	store := newFakeStore()
+	runtime := newFileRuntime(store)
 	p := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
 
 	withoutLLM := p.SemanticCompactCapability()
@@ -50,26 +45,35 @@ func TestBuiltinProviderSemanticCompactCapability(t *testing.T) {
 
 	p.SetLLM(&fakeLLM{})
 	withLLM := p.SemanticCompactCapability()
-	if !withLLM.Semantic {
-		t.Fatalf("semantic compact should be available with LLM and runtime support: %+v", withLLM)
+	if withLLM.Semantic {
+		t.Fatalf("file runtime should not advertise semantic compact: %+v", withLLM)
 	}
-	if !withLLM.Archive {
-		t.Fatalf("semantic compact should advertise source archive support: %+v", withLLM)
+	if !strings.Contains(withLLM.Reason, "does not support semantic compact") {
+		t.Fatalf("file runtime compact reason = %q", withLLM.Reason)
 	}
-	if !withLLM.RebuildIndex {
-		t.Fatalf("semantic compact should advertise index rebuild support for indexed runtime: %+v", withLLM)
+}
+
+func TestBuiltinProviderSemanticCompactCapabilityWithGraphRuntime(t *testing.T) {
+	t.Parallel()
+	provider := NewBuiltinProvider(slog.Default(), NewGraphRuntime(nil, newFakeWikiStore(), newFakeStore()), nil, nil)
+	provider.SetLLM(&fakeLLM{})
+
+	capability := provider.SemanticCompactCapability()
+	if !capability.Semantic {
+		t.Fatalf("graph semantic compact should be available with LLM: %+v", capability)
 	}
-	if withLLM.Reason != "" {
-		t.Fatalf("available semantic compact should not include unavailable reason: %+v", withLLM)
+	if capability.Archive {
+		t.Fatalf("graph compact should not advertise archive support without a graph archive store: %+v", capability)
+	}
+	if !capability.RebuildIndex {
+		t.Fatalf("graph compact should advertise index rebuild support: %+v", capability)
 	}
 }
 
 func TestBuiltinProviderOnBeforeChatEmptyQuery(t *testing.T) {
 	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	store := newFakeStore()
+	runtime := newFileRuntime(store)
 	p := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
 
 	result, err := p.OnBeforeChat(context.Background(), adapters.BeforeChatRequest{
@@ -86,10 +90,8 @@ func TestBuiltinProviderOnBeforeChatEmptyQuery(t *testing.T) {
 
 func TestBuiltinProviderContextPackingProducesMemoryContextTags(t *testing.T) {
 	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	store := newFakeStore()
+	runtime := newFileRuntime(store)
 	p := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
 
 	_ = p.OnAfterChat(context.Background(), adapters.AfterChatRequest{
@@ -151,25 +153,25 @@ func TestBuiltinProviderApplyProviderConfigNil(t *testing.T) {
 
 func TestBuiltinProviderCompactUsesLLMResults(t *testing.T) {
 	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	store := newFakeSparseStore(
-		storefs.MemoryItem{ID: "bot-1:mem_1", Memory: "Ran likes black tea", CreatedAt: "2026-06-01T00:00:00Z", UpdatedAt: "2026-06-01T00:00:00Z"},
-		storefs.MemoryItem{ID: "bot-1:mem_2", Memory: "Ran likes oolong tea", CreatedAt: "2026-06-02T00:00:00Z", UpdatedAt: "2026-06-02T00:00:00Z"},
-		storefs.MemoryItem{ID: "bot-1:mem_3", Memory: "Ran works in Berlin", CreatedAt: "2026-06-03T00:00:00Z", UpdatedAt: "2026-06-03T00:00:00Z"},
-		storefs.MemoryItem{ID: "bot-1:mem_4", Memory: "Ran uses Vim", CreatedAt: "2026-06-04T00:00:00Z", UpdatedAt: "2026-06-04T00:00:00Z"},
-	)
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	store := newFakeWikiStore()
+	runtime := NewGraphRuntime(nil, store, newFakeStore())
 	llm := &fakeLLM{
-		compactFacts: []string{
-			"Ran likes tea, especially black tea and oolong.",
-			"Ran works in Berlin.",
-		},
+		compactFacts: []string{"Ran likes tea, especially black tea and oolong."},
 	}
 	provider := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
 	provider.SetLLM(llm)
+	ctx := context.Background()
+	for _, memory := range []string{"Ran likes black tea", "Ran likes oolong tea"} {
+		if _, err := provider.Add(ctx, adapters.AddRequest{
+			BotID:    "bot-1",
+			Message:  memory,
+			Metadata: map[string]any{"subject": "Ran tea"},
+		}); err != nil {
+			t.Fatalf("seed graph memory: %v", err)
+		}
+	}
 
-	result, err := provider.Compact(context.Background(), map[string]any{"bot_id": "bot-1"}, 0.5, 30)
+	result, err := provider.Compact(ctx, map[string]any{"bot_id": "bot-1"}, 1, 30)
 	if err != nil {
 		t.Fatalf("Compact() error = %v", err)
 	}
@@ -180,135 +182,34 @@ func TestBuiltinProviderCompactUsesLLMResults(t *testing.T) {
 		t.Fatalf("expected one compact request, got %d", len(llm.compactReqs))
 	}
 	req := llm.compactReqs[0]
-	if req.TargetCount != 2 {
-		t.Fatalf("expected target_count=2, got %d", req.TargetCount)
+	if req.TargetCount != 1 {
+		t.Fatalf("expected target_count=1, got %d", req.TargetCount)
 	}
 	if req.DecayDays != 30 {
 		t.Fatalf("expected decay_days=30, got %d", req.DecayDays)
 	}
-	if len(req.Memories) != 4 {
-		t.Fatalf("expected 4 candidate memories, got %d", len(req.Memories))
+	if len(req.Memories) != 2 {
+		t.Fatalf("expected 2 candidate memories, got %d", len(req.Memories))
 	}
-	if result.BeforeCount != 4 || result.AfterCount != 2 {
+	if result.BeforeCount != 2 || result.AfterCount != 1 {
 		t.Fatalf("unexpected counts: before=%d after=%d", result.BeforeCount, result.AfterCount)
 	}
-	got := map[string]bool{}
-	for _, item := range store.items {
-		got[item.Memory] = true
+	all, err := provider.GetAll(ctx, adapters.GetAllRequest{BotID: "bot-1"})
+	if err != nil {
+		t.Fatalf("GetAll after compact: %v", err)
 	}
-	for _, fact := range llm.compactFacts {
-		if !got[fact] {
-			t.Fatalf("expected compacted fact %q in store, got %#v", fact, got)
-		}
-	}
-	if len(store.archive) != 4 {
-		t.Fatalf("expected 4 archived source memories, got %d", len(store.archive))
-	}
-	for _, item := range store.archive {
-		if item.Metadata["compacted_at"] == nil {
-			t.Fatalf("expected archived memory %s to record compacted_at metadata: %#v", item.ID, item.Metadata)
-		}
-		if item.Metadata["superseded_by"] == nil {
-			t.Fatalf("expected archived memory %s to record superseded_by metadata: %#v", item.ID, item.Metadata)
-		}
+	if len(all.Results) != 1 || all.Results[0].Memory != llm.compactFacts[0] {
+		t.Fatalf("graph compact results = %#v", all.Results)
 	}
 }
 
 func TestBuiltinProviderCompactRequiresSemanticCompactCapability(t *testing.T) {
 	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	store := newFakeSparseStore(
-		storefs.MemoryItem{ID: "bot-1:mem_1", Memory: "Ran likes black tea", CreatedAt: "2026-06-01T00:00:00Z", UpdatedAt: "2026-06-01T00:00:00Z"},
-		storefs.MemoryItem{ID: "bot-1:mem_2", Memory: "Ran likes oolong tea", CreatedAt: "2026-06-02T00:00:00Z", UpdatedAt: "2026-06-02T00:00:00Z"},
-	)
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	runtime := newFileRuntime(newFakeStore())
 	provider := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
 
 	if _, err := provider.Compact(context.Background(), map[string]any{"bot_id": "bot-1"}, 0.5, 0); err == nil {
-		t.Fatal("expected compact without LLM to fail instead of truncating memories")
-	}
-}
-
-func TestBuiltinProviderCompactPreservesPinnedMemories(t *testing.T) {
-	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	store := newFakeSparseStore(
-		storefs.MemoryItem{ID: "bot-1:mem_1", Memory: "Pinned preference", Metadata: map[string]any{"pinned": true}, CreatedAt: "2026-06-01T00:00:00Z", UpdatedAt: "2026-06-01T00:00:00Z"},
-		storefs.MemoryItem{ID: "bot-1:mem_2", Memory: "Read-only profile", Metadata: map[string]any{"read_only": "true"}, CreatedAt: "2026-06-02T00:00:00Z", UpdatedAt: "2026-06-02T00:00:00Z"},
-		storefs.MemoryItem{ID: "bot-1:mem_3", Memory: "Ran likes green tea", CreatedAt: "2026-06-03T00:00:00Z", UpdatedAt: "2026-06-03T00:00:00Z"},
-		storefs.MemoryItem{ID: "bot-1:mem_4", Memory: "Ran likes oolong tea", CreatedAt: "2026-06-04T00:00:00Z", UpdatedAt: "2026-06-04T00:00:00Z"},
-	)
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
-	llm := &fakeLLM{compactFacts: []string{"Ran likes tea."}}
-	provider := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
-	provider.SetLLM(llm)
-
-	result, err := provider.Compact(context.Background(), map[string]any{"bot_id": "bot-1"}, 0.5, 0)
-	if err != nil {
-		t.Fatalf("Compact() error = %v", err)
-	}
-	if result.BeforeCount != 4 || result.AfterCount != 3 {
-		t.Fatalf("unexpected counts: before=%d after=%d", result.BeforeCount, result.AfterCount)
-	}
-	if len(llm.compactReqs) != 1 || len(llm.compactReqs[0].Memories) != 2 {
-		t.Fatalf("expected only 2 compactable memories sent to LLM, got %#v", llm.compactReqs)
-	}
-	if _, ok := store.items["bot-1:mem_1"]; !ok {
-		t.Fatal("expected pinned memory to remain active")
-	}
-	if _, ok := store.items["bot-1:mem_2"]; !ok {
-		t.Fatal("expected read-only memory to remain active")
-	}
-	if len(store.archive) != 2 {
-		t.Fatalf("expected only compactable memories archived, got %d", len(store.archive))
-	}
-}
-
-func TestBuiltinProviderCompactBatchesOversizedInputs(t *testing.T) {
-	t.Parallel()
-	encoder := &fakeSparseEncoder{}
-	index := newFakeSparseIndex(encoder)
-	items := make([]storefs.MemoryItem, 0, 24)
-	for i := 0; i < 24; i++ {
-		items = append(items, storefs.MemoryItem{
-			ID:        fmt.Sprintf("bot-1:mem_%02d", i),
-			Memory:    fmt.Sprintf("memory %02d %s", i, strings.Repeat("x", 1600)),
-			CreatedAt: "2026-06-01T00:00:00Z",
-			UpdatedAt: "2026-06-01T00:00:00Z",
-		})
-	}
-	store := newFakeSparseStore(items...)
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
-	llm := &fakeLLM{}
-	llm.compactFunc = func(_ adapters.CompactRequest) adapters.CompactResponse {
-		return adapters.CompactResponse{Facts: []string{
-			fmt.Sprintf("summary call %02d a", llm.compactCalls),
-			fmt.Sprintf("summary call %02d b", llm.compactCalls),
-			fmt.Sprintf("summary call %02d c", llm.compactCalls),
-		}}
-	}
-	provider := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
-	provider.SetLLM(llm)
-
-	result, err := provider.Compact(context.Background(), map[string]any{"bot_id": "bot-1"}, 0.25, 0)
-	if err != nil {
-		t.Fatalf("Compact() error = %v", err)
-	}
-	if llm.compactCalls < 2 {
-		t.Fatalf("expected oversized input to be compacted in batches, got %d call(s)", llm.compactCalls)
-	}
-	for _, req := range llm.compactReqs {
-		if chars := compactCandidateChars(req.Memories); chars > compactMaxCandidateChars && len(req.Memories) > 1 {
-			t.Fatalf("compact request exceeded budget: chars=%d memories=%d", chars, len(req.Memories))
-		}
-	}
-	if result.AfterCount > 6 {
-		t.Fatalf("expected final compacted count <= 6, got %d", result.AfterCount)
-	}
-	if len(store.archive) != 24 {
-		t.Fatalf("expected all source memories archived, got %d", len(store.archive))
+		t.Fatal("expected file runtime compact to fail instead of truncating memories")
 	}
 }
 
@@ -372,43 +273,35 @@ func TestBuiltinProviderCRUDErrorsWithNilService(t *testing.T) {
 	}
 }
 
-func TestNewBuiltinRuntimeFromConfig_DefaultReturnsFileRuntime(t *testing.T) {
+func TestNewBuiltinRuntimeFromConfig_DefaultIsGraphRequiringWikiStore(t *testing.T) {
 	t.Parallel()
-	rt, err := NewBuiltinRuntimeFromConfig(nil, nil, nil, nil, defaultTestConfig())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rt.Mode() != string(ModeOff) {
-		t.Fatalf("expected file runtime in mode off, got %q", rt.Mode())
+	// Default mode is now graph, so without a wiki store it must error.
+	if _, err := NewBuiltinRuntimeFromConfig(nil, nil, nil, nil, defaultTestConfig(), nil); err == nil {
+		t.Fatal("expected error for default (graph) mode without wiki store")
 	}
 }
 
-func TestNewBuiltinRuntimeFromConfig_DenseErrorPropagates(t *testing.T) {
+func TestNewBuiltinRuntimeFromConfig_LegacyDenseConfigUsesGraphWithoutAuxIndex(t *testing.T) {
 	t.Parallel()
 	cfg := map[string]any{"memory_mode": "dense"}
-	_, err := NewBuiltinRuntimeFromConfig(nil, cfg, nil, nil, defaultTestConfig())
-	if err == nil {
-		t.Fatal("expected error for dense mode without embedding_model_id")
+	rt, err := NewBuiltinRuntimeFromConfig(nil, cfg, nil, nil, defaultTestConfig(), newFakeWikiStore())
+	if err != nil {
+		t.Fatalf("legacy dense config should fall back to graph without auxiliary index: %v", err)
+	}
+	if rt.Mode() != ModeGraph {
+		t.Fatalf("Mode = %q, want %q", rt.Mode(), ModeGraph)
 	}
 }
 
-func TestNewBuiltinRuntimeFromConfig_SparseErrorPropagates(t *testing.T) {
+func TestNewBuiltinRuntimeFromConfig_GraphRequiresWikiStore(t *testing.T) {
 	t.Parallel()
-	cfg := map[string]any{"memory_mode": "sparse"}
-	_, err := NewBuiltinRuntimeFromConfig(nil, cfg, nil, nil, defaultTestConfig())
-	if err == nil {
-		t.Fatal("expected error for sparse mode without encoder base URL")
+	cfg := map[string]any{"memory_mode": "graph"}
+	// No wiki store -> error.
+	if _, err := NewBuiltinRuntimeFromConfig(nil, cfg, nil, nil, defaultTestConfig(), nil); err == nil {
+		t.Fatal("expected error for graph mode without wiki store")
 	}
 }
 
 func defaultTestConfig() config.Config {
 	return config.Config{}
-}
-
-// Fakes from sparse_runtime_test.go are in the same package and accessible.
-
-var _ sparseEncoder = (*fakeSparseEncoder)(nil)
-
-func init() {
-	_ = sparse.SparseVector{}
 }

@@ -56,13 +56,14 @@ password = "memoh123"
 database = "memoh"
 sslmode = "disable"
 
-[qdrant]
-base_url = "http://qdrant:6334"
-api_key = ""
-timeout_seconds = 10
-
-[sparse]
-base_url = "http://sparse:8085"
+[pgvector]
+enabled = true
+host = "127.0.0.1"
+port = 5433
+user = "memoh"
+password = "memoh123"
+database = "memoh_vector"
+sslmode = "disable"
 
 [registry]
 providers_dir = "conf/providers"

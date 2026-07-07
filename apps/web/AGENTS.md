@@ -4,7 +4,7 @@
 
 `@memohai/web` is the browser management UI for Memoh, built with Vue 3 + Vite. It provides the chat interface for interacting with bots, plus visual configuration for bots, models, channels, memory, workspace display, and more.
 
-In deploy/server mode this package is served as the standalone Web frontend. The native desktop client reuses many of the same pages, stores, routes, i18n files, API client helpers, and design tokens through `@memohai/web` exports, but desktop owns Electron windows, local server startup, embedded Qdrant, tray behavior, and bundled resources. Keep Web usable as a pure browser app.
+In deploy/server mode this package is served as the standalone Web frontend. The native desktop client reuses many of the same pages, stores, routes, i18n files, API client helpers, and design tokens through `@memohai/web` exports, but desktop owns Electron windows, local server startup, tray behavior, and bundled resources. Keep Web usable as a pure browser app.
 
 ## Agent Skill (required)
 

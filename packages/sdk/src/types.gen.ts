@@ -187,17 +187,6 @@ export type AcpprofilePublicProfile = {
     supported_backends?: Array<string>;
 };
 
-export type AdaptersCdfPoint = {
-    /**
-     * cumulative weight fraction [0.0, 1.0]
-     */
-    cumulative?: number;
-    /**
-     * rank position (1-based, sorted by value desc)
-     */
-    k?: number;
-};
-
 export type AdaptersCompactResult = {
     after_count?: number;
     before_count?: number;
@@ -214,9 +203,21 @@ export type AdaptersHealthStatus = {
     ok?: boolean;
 };
 
+export type AdaptersIngestResult = {
+    /**
+     * Ingested is the number of memory nodes written to the store (inserts +
+     * updates; re-ingesting an unchanged file counts as an update).
+     */
+    ingested?: number;
+    /**
+     * Skipped is the number of source items that parsed to empty content or
+     * failed to persist.
+     */
+    skipped?: number;
+};
+
 export type AdaptersMemoryCompactCapability = {
     archive?: boolean;
-    native?: boolean;
     reason?: string;
     rebuild_index?: boolean;
     semantic?: boolean;
@@ -225,7 +226,6 @@ export type AdaptersMemoryCompactCapability = {
 export type AdaptersMemoryItem = {
     agent_id?: string;
     bot_id?: string;
-    cdf_curve?: Array<AdaptersCdfPoint>;
     created_at?: string;
     hash?: string;
     id?: string;
@@ -235,23 +235,29 @@ export type AdaptersMemoryItem = {
     };
     run_id?: string;
     score?: number;
-    top_k_buckets?: Array<AdaptersTopKBucket>;
     updated_at?: string;
 };
 
 export type AdaptersMemoryStatusResponse = {
     can_manual_sync?: boolean;
     compact?: AdaptersMemoryCompactCapability;
+    /**
+     * Degraded reports that the semantic seed index is behind the wiki store
+     * (failed upserts are queued for retry); graph recall still works.
+     */
+    degraded?: boolean;
+    edge_count?: number;
     encoder?: AdaptersHealthStatus;
     indexed_count?: number;
     markdown_file_count?: number;
     memory_mode?: string;
     overview_path?: string;
+    pgvector?: AdaptersHealthStatus;
     provider_type?: string;
-    qdrant?: AdaptersHealthStatus;
-    qdrant_collection?: string;
+    retry_queue_depth?: number;
     source_count?: number;
     source_dir?: string;
+    vector_index?: string;
 };
 
 export type AdaptersMessage = {
@@ -261,9 +267,9 @@ export type AdaptersMessage = {
 
 export type AdaptersProviderCollectionStatus = {
     exists?: boolean;
+    health?: AdaptersHealthStatus;
     name?: string;
     points?: number;
-    qdrant?: AdaptersHealthStatus;
 };
 
 export type AdaptersProviderConfigSchema = {
@@ -331,19 +337,10 @@ export type AdaptersRebuildResult = {
 };
 
 export type AdaptersSearchResponse = {
+    fallback_reason?: string;
     relations?: Array<unknown>;
     results?: Array<AdaptersMemoryItem>;
-};
-
-export type AdaptersTopKBucket = {
-    /**
-     * sparse dimension index (term hash)
-     */
-    index?: number;
-    /**
-     * weight (term frequency)
-     */
-    value?: number;
+    retrieval_mode?: string;
 };
 
 export type AdaptersUsageResponse = {
@@ -2010,6 +2007,34 @@ export type HandlersFsOpResponse = {
     revision?: string;
 };
 
+export type HandlersGraphEdge = {
+    count?: number;
+    rel?: string;
+    rels?: Array<string>;
+    source?: string;
+    target?: string;
+    weight?: number;
+};
+
+export type HandlersGraphNode = {
+    count?: number;
+    id?: string;
+    label?: string;
+    memory?: string;
+    memory_ids?: Array<string>;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    slug?: string;
+    subject?: string;
+    topic?: string;
+};
+
+export type HandlersGraphResponse = {
+    edges?: Array<HandlersGraphEdge>;
+    nodes?: Array<HandlersGraphNode>;
+};
+
 export type HandlersListSessionsResponse = {
     items?: Array<SessionSession>;
     next_cursor?: string;
@@ -2049,6 +2074,10 @@ export type HandlersMemorySearchPayload = {
     query?: string;
     run_id?: string;
     sources?: Array<string>;
+};
+
+export type HandlersMemoryUpdatePayload = {
+    memory?: string;
 };
 
 export type HandlersOauthAuthorizeRequest = {
@@ -6847,6 +6876,90 @@ export type PostBotsByBotIdMemoryCompactResponses = {
 
 export type PostBotsByBotIdMemoryCompactResponse = PostBotsByBotIdMemoryCompactResponses[keyof PostBotsByBotIdMemoryCompactResponses];
 
+export type GetBotsByBotIdMemoryGraphData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/memory/graph';
+};
+
+export type GetBotsByBotIdMemoryGraphErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdMemoryGraphError = GetBotsByBotIdMemoryGraphErrors[keyof GetBotsByBotIdMemoryGraphErrors];
+
+export type GetBotsByBotIdMemoryGraphResponses = {
+    /**
+     * OK
+     */
+    200: HandlersGraphResponse;
+};
+
+export type GetBotsByBotIdMemoryGraphResponse = GetBotsByBotIdMemoryGraphResponses[keyof GetBotsByBotIdMemoryGraphResponses];
+
+export type PostBotsByBotIdMemoryIngestData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/memory/ingest';
+};
+
+export type PostBotsByBotIdMemoryIngestErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdMemoryIngestError = PostBotsByBotIdMemoryIngestErrors[keyof PostBotsByBotIdMemoryIngestErrors];
+
+export type PostBotsByBotIdMemoryIngestResponses = {
+    /**
+     * OK
+     */
+    200: AdaptersIngestResult;
+};
+
+export type PostBotsByBotIdMemoryIngestResponse = PostBotsByBotIdMemoryIngestResponses[keyof PostBotsByBotIdMemoryIngestResponses];
+
 export type PostBotsByBotIdMemoryRebuildData = {
     body?: never;
     path: {
@@ -7075,6 +7188,55 @@ export type DeleteBotsByBotIdMemoryByIdResponses = {
 };
 
 export type DeleteBotsByBotIdMemoryByIdResponse = DeleteBotsByBotIdMemoryByIdResponses[keyof DeleteBotsByBotIdMemoryByIdResponses];
+
+export type PutBotsByBotIdMemoryByMemoryIdData = {
+    /**
+     * Update request
+     */
+    body: HandlersMemoryUpdatePayload;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Memory ID
+         */
+        memory_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/memory/{memory_id}';
+};
+
+export type PutBotsByBotIdMemoryByMemoryIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdMemoryByMemoryIdError = PutBotsByBotIdMemoryByMemoryIdErrors[keyof PutBotsByBotIdMemoryByMemoryIdErrors];
+
+export type PutBotsByBotIdMemoryByMemoryIdResponses = {
+    /**
+     * OK
+     */
+    200: AdaptersMemoryItem;
+};
+
+export type PutBotsByBotIdMemoryByMemoryIdResponse = PutBotsByBotIdMemoryByMemoryIdResponses[keyof PutBotsByBotIdMemoryByMemoryIdResponses];
 
 export type DeleteBotsByBotIdMessagesData = {
     body?: never;

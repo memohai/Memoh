@@ -308,15 +308,6 @@ definitions:
           type: string
         type: array
     type: object
-  adapters.CDFPoint:
-    properties:
-      cumulative:
-        description: cumulative weight fraction [0.0, 1.0]
-        type: number
-      k:
-        description: rank position (1-based, sorted by value desc)
-        type: integer
-    type: object
   adapters.CompactResult:
     properties:
       after_count:
@@ -342,11 +333,22 @@ definitions:
       ok:
         type: boolean
     type: object
+  adapters.IngestResult:
+    properties:
+      ingested:
+        description: |-
+          Ingested is the number of memory nodes written to the store (inserts +
+          updates; re-ingesting an unchanged file counts as an update).
+        type: integer
+      skipped:
+        description: |-
+          Skipped is the number of source items that parsed to empty content or
+          failed to persist.
+        type: integer
+    type: object
   adapters.MemoryCompactCapability:
     properties:
       archive:
-        type: boolean
-      native:
         type: boolean
       reason:
         type: string
@@ -361,10 +363,6 @@ definitions:
         type: string
       bot_id:
         type: string
-      cdf_curve:
-        items:
-          $ref: '#/definitions/adapters.CDFPoint'
-        type: array
       created_at:
         type: string
       hash:
@@ -380,10 +378,6 @@ definitions:
         type: string
       score:
         type: number
-      top_k_buckets:
-        items:
-          $ref: '#/definitions/adapters.TopKBucket'
-        type: array
       updated_at:
         type: string
     type: object
@@ -393,6 +387,13 @@ definitions:
         type: boolean
       compact:
         $ref: '#/definitions/adapters.MemoryCompactCapability'
+      degraded:
+        description: |-
+          Degraded reports that the semantic seed index is behind the wiki store
+          (failed upserts are queued for retry); graph recall still works.
+        type: boolean
+      edge_count:
+        type: integer
       encoder:
         $ref: '#/definitions/adapters.HealthStatus'
       indexed_count:
@@ -403,15 +404,17 @@ definitions:
         type: string
       overview_path:
         type: string
+      pgvector:
+        $ref: '#/definitions/adapters.HealthStatus'
       provider_type:
         type: string
-      qdrant:
-        $ref: '#/definitions/adapters.HealthStatus'
-      qdrant_collection:
-        type: string
+      retry_queue_depth:
+        type: integer
       source_count:
         type: integer
       source_dir:
+        type: string
+      vector_index:
         type: string
     type: object
   adapters.Message:
@@ -425,12 +428,12 @@ definitions:
     properties:
       exists:
         type: boolean
+      health:
+        $ref: '#/definitions/adapters.HealthStatus'
       name:
         type: string
       points:
         type: integer
-      qdrant:
-        $ref: '#/definitions/adapters.HealthStatus'
     type: object
   adapters.ProviderConfigSchema:
     properties:
@@ -534,6 +537,8 @@ definitions:
     type: object
   adapters.SearchResponse:
     properties:
+      fallback_reason:
+        type: string
       relations:
         items: {}
         type: array
@@ -541,15 +546,8 @@ definitions:
         items:
           $ref: '#/definitions/adapters.MemoryItem'
         type: array
-    type: object
-  adapters.TopKBucket:
-    properties:
-      index:
-        description: sparse dimension index (term hash)
-        type: integer
-      value:
-        description: weight (term frequency)
-        type: number
+      retrieval_mode:
+        type: string
     type: object
   adapters.UsageResponse:
     properties:
@@ -3365,6 +3363,58 @@ definitions:
       revision:
         type: string
     type: object
+  handlers.graphEdge:
+    properties:
+      count:
+        type: integer
+      rel:
+        type: string
+      rels:
+        items:
+          type: string
+        type: array
+      source:
+        type: string
+      target:
+        type: string
+      weight:
+        type: number
+    type: object
+  handlers.graphNode:
+    properties:
+      count:
+        type: integer
+      id:
+        type: string
+      label:
+        type: string
+      memory:
+        type: string
+      memory_ids:
+        items:
+          type: string
+        type: array
+      metadata:
+        additionalProperties: {}
+        type: object
+      slug:
+        type: string
+      subject:
+        type: string
+      topic:
+        type: string
+    type: object
+  handlers.graphResponse:
+    properties:
+      edges:
+        items:
+          $ref: '#/definitions/handlers.graphEdge'
+        type: array
+      nodes:
+        items:
+          $ref: '#/definitions/handlers.graphNode'
+        type: array
+    type: object
   handlers.listSessionsResponse:
     properties:
       items:
@@ -3430,6 +3480,11 @@ definitions:
         items:
           type: string
         type: array
+    type: object
+  handlers.memoryUpdatePayload:
+    properties:
+      memory:
+        type: string
     type: object
   handlers.oauthAuthorizeRequest:
     properties:
@@ -7936,6 +7991,56 @@ paths:
       summary: Delete a single memory
       tags:
       - memory
+  /bots/{bot_id}/memory/{memory_id}:
+    put:
+      consumes:
+      - application/json
+      description: Update the body of an existing memory entry in place (preserves
+        id, layer, metadata). Replaces the legacy client-side delete-then-add edit
+        emulation.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Memory ID
+        in: path
+        name: memory_id
+        required: true
+        type: string
+      - description: Update request
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.memoryUpdatePayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/adapters.MemoryItem'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update a single memory by id
+      tags:
+      - memory
   /bots/{bot_id}/memory/compact:
     post:
       consumes:
@@ -7989,6 +8094,78 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Compact memories
+      tags:
+      - memory
+  /bots/{bot_id}/memory/graph:
+    get:
+      description: Get derived memory graph nodes and edges for a bot.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.graphResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get memory graph
+      tags:
+      - memory
+  /bots/{bot_id}/memory/ingest:
+    post:
+      description: Read /data/memory/*.md the bot (or its agent) wrote directly and
+        upsert them as DB memory nodes, so they become searchable and survive the
+        next derived-view rebuild. Idempotent (ON CONFLICT id DO UPDATE).
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/adapters.IngestResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Ingest agent-authored memory markdown into the wiki store
       tags:
       - memory
   /bots/{bot_id}/memory/rebuild:

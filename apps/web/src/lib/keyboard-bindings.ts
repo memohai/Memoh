@@ -142,7 +142,7 @@ export function resolveBindingKey(
  */
 export function detectPlatform(
   navigatorLike: { platform?: string; userAgent?: string } | undefined =
-    typeof navigator === 'undefined' ? undefined : navigator,
+    typeof window === 'undefined' ? undefined : window.navigator,
 ): KeyboardPlatform {
   const haystack = `${navigatorLike?.platform ?? ''} ${navigatorLike?.userAgent ?? ''}`
   if (/mac/i.test(haystack)) return 'mac'

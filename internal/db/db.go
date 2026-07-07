@@ -19,5 +19,9 @@ func Open(ctx context.Context, cfg config.Config) (*pgxpool.Pool, error) {
 }
 
 func OpenPostgres(ctx context.Context, cfg config.PostgresConfig) (*pgxpool.Pool, error) {
-	return pgxpool.New(ctx, DSN(cfg))
+	poolCfg, err := pgxpool.ParseConfig(DSN(cfg))
+	if err != nil {
+		return nil, err
+	}
+	return pgxpool.NewWithConfig(ctx, poolCfg)
 }

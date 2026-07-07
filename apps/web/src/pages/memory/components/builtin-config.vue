@@ -1,85 +1,81 @@
 <template>
-  <!-- Titleless card: the mode row's own label carries the name, so a section
-       title would just echo it one rung up. The whole built-in memory config
-       lives in one continuous white card — mode, the model it needs, and the
-       live index status — instead of floating bare on the page background. -->
-  <SettingsSection>
-    <!-- Memory mode is the hero. The row description flips with the selected
-         mode, so switching gives immediate in-place feedback about what that
-         mode does — no separate floating explainer line under the control. -->
-    <SettingsRow
-      :label="$t('memory.modeLabel')"
-      :description="$t(`memory.modeDescriptions.${mode}`)"
-      stack="sm"
-      align="start"
-    >
-      <SegmentedControl
-        :model-value="mode"
-        :items="modeItems"
-        :aria-label="$t('memory.modeLabel')"
-        @update:model-value="(value) => (mode = value as MemoryMode)"
-      />
-    </SettingsRow>
+  <div class="space-y-2.5">
+    <!-- Section header: title + description sit ABOVE the card (not as a row
+         inside it), so there is no in-card hairline slicing under the title. -->
+    <div class="flex min-h-7 items-center gap-4 px-2">
+      <h2 class="text-label font-medium text-muted-foreground">
+        {{ $t('memory.graphTitle') }}
+      </h2>
+    </div>
+    <p class="px-2 text-body text-muted-foreground">
+      {{ $t('memory.graphDescription') }}
+    </p>
 
-    <!-- Keyword mode leans on the optional sparse retrieval service, so a bot
-         owner who picks it needs the one actionable fact: how to turn that
-         service on. Shown at selection time — that's when the prerequisite
-         matters — as a plain info row with no control. -->
-    <SettingsRow
-      v-if="mode === 'sparse'"
-    >
-      <template #content>
-        <p class="text-xs text-muted-foreground">
-          {{ $t('memory.sparseInstallHint') }}
-        </p>
-      </template>
-    </SettingsRow>
-
-    <!-- Semantic mode vectorizes memories, so it needs an embedding model.
-         Shown only for that mode; the storage backend it writes to is
-         implementation trivia and stays out of the copy. -->
-    <SettingsRow
-      v-if="mode === 'dense'"
-      :label="$t('memory.denseEmbeddingModel')"
-      :description="$t('memory.denseEmbeddingModelDescription')"
-      stack="sm"
-    >
-      <div class="w-full sm:w-64">
-        <ModelSelect
-          v-model="embeddingModelId"
-          :models="models"
-          :providers="providers"
-          model-type="embedding"
-          :placeholder="$t('memory.denseEmbeddingModel')"
+    <SettingsSection>
+      <!-- Cold-load skeleton: bare tiles (no frame) so they sit on the card
+           surface without card-in-card nesting. -->
+      <div
+        v-if="!graphStatus"
+        class="grid grid-cols-1 gap-4 px-4 py-4 sm:grid-cols-2"
+      >
+        <Skeleton
+          v-for="n in 2"
+          :key="n"
+          class="h-8 w-full rounded-[var(--radius-control)]"
         />
       </div>
-    </SettingsRow>
 
-    <!-- Live index status: a distilled read of what's actually provisioned —
-         entries stored + one health badge — keyed to the SAVED mode, not the
-         draft, so it reflects reality. When memory is off there is no index to
-         report, so the row disappears entirely rather than showing empty tiles. -->
-    <SettingsRow
-      v-for="collection in activeCollections"
-      :key="collection.name"
-      :label="collectionLabel(collection)"
-      :description="$t('memory.entriesStored', { count: collection.points ?? 0 })"
-    >
-      <Badge :variant="collection.qdrant?.ok ? 'success' : 'destructive'">
-        {{ collection.qdrant?.ok ? $t('memory.collectionHealthy') : $t('memory.collectionUnavailable') }}
-      </Badge>
-    </SettingsRow>
-  </SettingsSection>
+      <!-- Configuration overview: unframed tiles live directly on the card
+         surface (the card is the container; the tiles don't redraw a border).
+         This is a *provider-level* settings page, so it shows the provider's
+         configured state, NOT per-bot counts — those live on each bot's memory
+         tab. The embedding model itself is chosen in the row below, so it is
+         intentionally NOT a tile (no duplicated info). -->
+      <div
+        v-else
+        class="grid grid-cols-1 gap-4 px-4 py-4 sm:grid-cols-2"
+      >
+        <MetricReadout
+          :framed="false"
+          :label="$t('memory.modeLabel')"
+          :value="modeLabel"
+        />
+        <MetricReadout
+          :framed="false"
+          :label="$t('memory.semanticIndexTitle')"
+          :status="semanticReadiness"
+          :value="semanticReadinessLabel"
+        />
+      </div>
+
+      <SettingsRow
+        :label="$t('memory.semanticEmbeddingModel')"
+        :description="$t('memory.semanticIndexDescription')"
+        stack="sm"
+        align="start"
+      >
+        <div class="w-full sm:w-64">
+          <ModelSelect
+            v-model="embeddingModelId"
+            :models="models"
+            :providers="providers"
+            model-type="embedding"
+            :placeholder="$t('memory.semanticEmbeddingModelPlaceholder')"
+          />
+        </div>
+      </SettingsRow>
+    </SettingsSection>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Badge, SegmentedControl, type SegmentedItem, toast } from '@memohai/ui'
+import { Skeleton, toast } from '@memohai/ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
+  getMemoryProvidersByIdStatus,
   getModels,
   getProviders,
-  getMemoryProvidersByIdStatus,
   postMemoryProviders,
   putMemoryProvidersById,
 } from '@memohai/sdk'
@@ -87,10 +83,8 @@ import type { AdaptersProviderGetResponse, AdaptersProviderStatusResponse } from
 import { useI18n } from 'vue-i18n'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import MetricReadout from '@/components/settings/metric-readout.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
-
-type MemoryMode = 'off' | 'sparse' | 'dense'
-type Collection = NonNullable<AdaptersProviderStatusResponse['collections']>[number]
 
 const props = defineProps<{
   provider?: AdaptersProviderGetResponse | null
@@ -98,10 +92,8 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
-
-const mode = ref<MemoryMode>('off')
-const embeddingModelId = ref('')
 const saveLoading = ref(false)
+const embeddingModelId = ref('')
 
 const { data: modelData } = useQuery({
   key: () => ['models'],
@@ -110,6 +102,7 @@ const { data: modelData } = useQuery({
     return data
   },
 })
+
 const { data: providerData } = useQuery({
   key: () => ['providers'],
   query: async () => {
@@ -117,6 +110,7 @@ const { data: providerData } = useQuery({
     return data
   },
 })
+
 const { data: statusData } = useQuery({
   key: () => ['memory-provider-status', props.provider?.id ?? ''],
   query: async () => {
@@ -130,66 +124,41 @@ const { data: statusData } = useQuery({
 
 const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
-const collections = computed(() => (statusData.value as AdaptersProviderStatusResponse | null)?.collections ?? [])
-
-const modeItems = computed<SegmentedItem<MemoryMode>[]>(() => [
-  { value: 'off', label: t('memory.modeNames.off') },
-  { value: 'sparse', label: t('memory.modeNames.sparse') },
-  { value: 'dense', label: t('memory.modeNames.dense') },
-])
-
-// The persisted state, used both to gate Save (draft vs saved) and to decide
-// which index status is worth showing — the status query describes what's
-// actually provisioned, which tracks the saved mode, not the in-flight draft.
-const savedMode = computed<MemoryMode>(() => {
-  const config = (props.provider?.config ?? {}) as Record<string, unknown>
-  const m = config.memory_mode
-  return m === 'sparse' || m === 'dense' ? m : 'off'
+const graphStatus = computed(() => statusData.value as AdaptersProviderStatusResponse | null)
+// Mode tile: the configured memory mode, falling back to the built-in default
+// ('graph') when the provider config hasn't been saved yet.
+const modeLabel = computed(() => {
+  const mode = graphStatus.value?.memory_mode || 'graph'
+  return t(`memory.modeNames.${mode}`, mode)
 })
+// Semantic-index tile reflects *readiness* (an embedding model has been chosen),
+// not a live pgvector health probe — this is a provider-config page, not a
+// per-bot status. 'ok' once a model is set; neutral (no dot) otherwise. The
+// model itself is picked in the Embedding Model row below, so it is not a tile.
+const hasEmbeddingModel = computed(() => Boolean(graphStatus.value?.embedding_model_id?.trim()))
+const semanticReadiness = computed<'ok' | undefined>(() => hasEmbeddingModel.value ? 'ok' : undefined)
+const semanticReadinessLabel = computed(() => hasEmbeddingModel.value ? t('memory.semanticIndexHealthy') : t('memory.notConfigured'))
 const savedEmbeddingModelId = computed(() => {
   const config = (props.provider?.config ?? {}) as Record<string, unknown>
   return typeof config.embedding_model_id === 'string' ? config.embedding_model_id : ''
 })
-
 const hasChanges = computed(() => {
-  if (mode.value !== savedMode.value) return true
-  // Embedding choice only matters (and only counts as a change) in dense mode.
-  if (mode.value === 'dense' && embeddingModelId.value !== savedEmbeddingModelId.value) return true
-  return false
+  const config = (props.provider?.config ?? {}) as Record<string, unknown>
+  if (!props.provider?.id || config.memory_mode !== 'graph') return true
+  return embeddingModelId.value.trim() !== savedEmbeddingModelId.value
 })
 
-// The status endpoint can return every provisioned collection at once (both the
-// keyword and semantic indexes), so narrow it to the one the saved mode uses;
-// showing the inactive index's "Unavailable" is pure noise. Fall back to
-// whatever came back if the name heuristic misses, so status never silently
-// vanishes on an unexpected collection name.
-const activeCollections = computed<Collection[]>(() => {
-  if (savedMode.value === 'off') return []
-  const wanted = savedMode.value === 'sparse' ? 'sparse' : 'dense'
-  const matched = collections.value.filter((c) => (c.name ?? '').toLowerCase().includes(wanted))
-  return matched.length > 0 ? matched : collections.value
-})
-
-function collectionLabel(collection: Collection): string {
-  const name = (collection.name ?? '').toLowerCase()
-  if (name.includes('dense')) return t('memory.semanticIndex')
-  if (name.includes('sparse')) return t('memory.keywordIndex')
-  return collection.name ?? ''
-}
-
-watch(() => props.provider, (val) => {
-  const config = (val?.config ?? {}) as Record<string, unknown>
-  const nextMode = config.memory_mode
-  mode.value = nextMode === 'sparse' || nextMode === 'dense' ? nextMode : 'off'
+watch(() => props.provider, (provider) => {
+  const config = (provider?.config ?? {}) as Record<string, unknown>
   embeddingModelId.value = typeof config.embedding_model_id === 'string' ? config.embedding_model_id : ''
 }, { immediate: true })
 
 async function handleSave() {
   saveLoading.value = true
   try {
-    const config: Record<string, unknown> = { memory_mode: mode.value }
-    if (mode.value === 'dense' && embeddingModelId.value) {
-      config.embedding_model_id = embeddingModelId.value
+    const config: Record<string, unknown> = { memory_mode: 'graph' }
+    if (embeddingModelId.value.trim()) {
+      config.embedding_model_id = embeddingModelId.value.trim()
     }
     if (props.provider?.id) {
       await putMemoryProvidersById({
@@ -209,16 +178,12 @@ async function handleSave() {
       queryCache.invalidateQueries({ key: ['memory-provider-status', props.provider.id] })
     }
   } catch (error) {
-    console.error('Failed to save memory mode:', error)
+    console.error('Failed to save memory provider:', error)
     toast.error(t('common.saveFailed'))
   } finally {
     saveLoading.value = false
   }
 }
 
-// The Save control lives in the page header (PageShell #actions), the house
-// pattern for a root page's manual save (mirrors bot-tool-approval) — not a
-// footer band inside this card, which would leave an empty strip below a single
-// row. The parent drives that button from this exposed state.
 defineExpose({ hasChanges, saveLoading, save: handleSave })
 </script>

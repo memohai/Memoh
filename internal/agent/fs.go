@@ -50,21 +50,10 @@ func (f *FSClient) ReadTextSafe(ctx context.Context, path string) string {
 // LoadSystemFiles loads the standard set of system files from the bot container.
 func (f *FSClient) LoadSystemFiles(ctx context.Context) []SystemFile {
 	home := "/data"
-	now := time.Now()
-	if f.now != nil {
-		now = f.now()
-	}
-	pad := func(n int) string { return fmt.Sprintf("%02d", n) }
-	today := fmt.Sprintf("%d-%s-%s", now.Year(), pad(int(now.Month())), pad(now.Day()))
-	yesterday := now.AddDate(0, 0, -1)
-	yesterdayStr := fmt.Sprintf("%d-%s-%s", yesterday.Year(), pad(int(yesterday.Month())), pad(yesterday.Day()))
-
 	filenames := []string{
 		"AGENTS.md",
 		"MEMORY.md",
 		"PROFILES.md",
-		"memory/" + today + ".md",
-		"memory/" + yesterdayStr + ".md",
 	}
 
 	files := make([]SystemFile, len(filenames))

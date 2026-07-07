@@ -127,6 +127,19 @@ func intFromConfig(m map[string]any, key string) int {
 
 func (*BuiltinProvider) Type() string { return BuiltinType }
 
+func (p *BuiltinProvider) MemoryVersion(ctx context.Context, botID string) string {
+	if p == nil || p.service == nil {
+		return ""
+	}
+	versioned, ok := p.service.(interface {
+		MemoryVersion(context.Context, string) string
+	})
+	if !ok {
+		return ""
+	}
+	return versioned.MemoryVersion(ctx, botID)
+}
+
 func (p *BuiltinProvider) SemanticCompactCapability() adapters.MemoryCompactCapability {
 	if p.service == nil {
 		return adapters.MemoryCompactCapability{Reason: "memory runtime not configured"}
@@ -140,8 +153,8 @@ func (p *BuiltinProvider) SemanticCompactCapability() adapters.MemoryCompactCapa
 	mode := strings.TrimSpace(p.service.Mode())
 	return adapters.MemoryCompactCapability{
 		Semantic:     true,
-		Archive:      true,
-		RebuildIndex: mode == "dense" || mode == "sparse",
+		Archive:      mode != ModeGraph,
+		RebuildIndex: mode == "graph",
 	}
 }
 
@@ -191,7 +204,7 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req adapters.BeforeC
 	})
 	if err != nil {
 		p.logger.Warn("memory search for context failed", slog.Any("error", err))
-		return nil, nil
+		return nil, err
 	}
 
 	candidates := deduplicateAndSort(resp.Results)
@@ -221,7 +234,15 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req adapters.BeforeC
 	if payload == "" {
 		return nil, nil
 	}
-	return &adapters.BeforeChatResult{ContextText: payload}, nil
+	retrievalMode := strings.TrimSpace(resp.RetrievalMode)
+	if retrievalMode == "" {
+		retrievalMode = strings.TrimSpace(p.service.Mode())
+	}
+	return &adapters.BeforeChatResult{
+		ContextText:    payload,
+		RetrievalMode:  retrievalMode,
+		FallbackReason: strings.TrimSpace(resp.FallbackReason),
+	}, nil
 }
 
 func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req adapters.AfterChatRequest) error {
@@ -492,4 +513,29 @@ func (p *BuiltinProvider) Rebuild(ctx context.Context, botID string) (adapters.R
 		return adapters.RebuildResult{}, errors.New("memory runtime not configured")
 	}
 	return p.service.Rebuild(ctx, botID)
+}
+
+// markdownIngestor is the optional Runtime capability for ingesting agent-
+// authored Markdown files back into the DB as nodes. Only the graph runtime
+// implements it (the file runtime treats files as the source of truth).
+type markdownIngestor interface {
+	IngestMarkdownFiles(ctx context.Context, botID string) (IngestResult, error)
+}
+
+// IngestFromMarkdown implements adapters.MarkdownIngestProvider. It imports
+// /data/memory/*.md into the wiki store so agent-authored files become
+// searchable DB nodes (and survive the next derived-view rebuild).
+func (p *BuiltinProvider) IngestFromMarkdown(ctx context.Context, botID string) (adapters.IngestResult, error) {
+	if p.service == nil {
+		return adapters.IngestResult{}, errors.New("memory runtime not configured")
+	}
+	ing, ok := p.service.(markdownIngestor)
+	if !ok {
+		return adapters.IngestResult{}, errors.New("selected memory runtime does not support markdown ingest")
+	}
+	res, err := ing.IngestMarkdownFiles(ctx, botID)
+	if err != nil {
+		return adapters.IngestResult{}, err
+	}
+	return adapters.IngestResult{Ingested: res.Ingested, Skipped: res.Skipped}, nil
 }

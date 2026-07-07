@@ -84,6 +84,7 @@ import (
 	memopenviking "github.com/memohai/memoh/internal/memory/adapters/openviking"
 	"github.com/memohai/memoh/internal/memory/memllm"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
+	"github.com/memohai/memoh/internal/memory/wikistore"
 	"github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/messaging"
@@ -208,6 +209,16 @@ func provideAccountService(log *slog.Logger, accountStore dbstore.AccountStore, 
 	return svc
 }
 
+// provideWikiStore wires the PostgreSQL memory wiki store. Returns a pointer
+// so FX can inject nil-safe into providers that may run without a wiki store.
+func provideWikiStore(postgresStore *postgresstore.Store) (*wikistore.Store, error) {
+	if postgresStore == nil {
+		return nil, errors.New("postgres wiki store not configured")
+	}
+	ws := wikistore.Store(wikistore.NewPostgres(postgresStore.SQLC()))
+	return &ws, nil
+}
+
 func provideBridgeProvider(manage *workspace.Manager) bridge.Provider {
 	return manage
 }
@@ -252,11 +263,15 @@ func provideMemoryLLM(modelsService *models.Service, settingsService *settings.S
 	}
 }
 
-func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, accountService *accounts.Service, provider bridge.Provider, queries dbstore.Queries, cfg config.Config) *memprovider.Registry {
+func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, accountService *accounts.Service, provider bridge.Provider, queries dbstore.Queries, cfg config.Config, wikiStore *wikistore.Store) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
 	fileStore := storefs.New(log, provider)
 	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
-		runtime, err := membuiltin.NewBuiltinRuntimeFromConfig(log, providerConfig, fileStore, queries, cfg)
+		var ws wikistore.Store
+		if wikiStore != nil {
+			ws = *wikiStore
+		}
+		runtime, err := membuiltin.NewBuiltinRuntimeFromConfig(log, providerConfig, fileStore, queries, cfg, ws)
 		if err != nil {
 			return nil, err
 		}
@@ -271,7 +286,17 @@ func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatSe
 	registry.RegisterFactory(string(memprovider.ProviderOpenViking), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
 		return memopenviking.NewOpenVikingProvider(log, providerConfig)
 	})
-	defaultProvider := membuiltin.NewBuiltinProvider(log, membuiltin.NewFileRuntime(fileStore), chatService, accountService)
+	// Default provider for bots without an explicit memory_provider_id. Uses the
+	// graph runtime (PG nodes/edges as source of truth) when a wiki store is
+	// wired; falls back to the file runtime otherwise (e.g. bootstrap before the
+	// DB is ready).
+	var defaultRuntime membuiltin.Runtime
+	if wikiStore != nil {
+		defaultRuntime = membuiltin.NewGraphRuntime(log, *wikiStore, fileStore)
+	} else {
+		defaultRuntime = membuiltin.NewFileRuntime(fileStore)
+	}
+	defaultProvider := membuiltin.NewBuiltinProvider(log, defaultRuntime, chatService, accountService)
 	defaultProvider.SetLLM(llm)
 	registry.Register("__builtin_default__", defaultProvider)
 	return registry

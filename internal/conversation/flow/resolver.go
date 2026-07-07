@@ -81,30 +81,32 @@ type botPermissionChecker interface {
 
 // Resolver orchestrates chat with the internal agent.
 type Resolver struct {
-	agent             *agentpkg.Agent
-	modelsService     *models.Service
-	queries           dbstore.Queries
-	memoryRegistry    *memprovider.Registry
-	conversationSvc   ConversationSettingsReader
-	messageService    messagepkg.Service
-	settingsService   *settings.Service
-	accountService    *accounts.Service
-	sessionService    SessionService
-	acpPool           acpPrompter
-	compactionService *compaction.Service
-	eventPublisher    messageevent.Publisher
-	skillLoader       SkillLoader
-	assetLoader       gatewayAssetLoader
-	channelStore      botChannelConfigReader
-	botPermissions    botPermissionChecker
-	pipeline          *pipelinepkg.Pipeline
-	streamHTTPClient  *http.Client
-	bgManager         *background.Manager
-	toolApproval      *toolapproval.Service
-	userInput         userInputService
-	hookService       *hooks.Service
-	acpPromptMu       sync.Mutex
-	acpPromptHubs     map[string]*acpActivePromptHub
+	agent              *agentpkg.Agent
+	modelsService      *models.Service
+	queries            dbstore.Queries
+	memoryRegistry     *memprovider.Registry
+	conversationSvc    ConversationSettingsReader
+	messageService     messagepkg.Service
+	settingsService    *settings.Service
+	accountService     *accounts.Service
+	sessionService     SessionService
+	acpPool            acpPrompter
+	compactionService  *compaction.Service
+	eventPublisher     messageevent.Publisher
+	skillLoader        SkillLoader
+	assetLoader        gatewayAssetLoader
+	channelStore       botChannelConfigReader
+	botPermissions     botPermissionChecker
+	pipeline           *pipelinepkg.Pipeline
+	streamHTTPClient   *http.Client
+	bgManager          *background.Manager
+	toolApproval       *toolapproval.Service
+	userInput          userInputService
+	hookService        *hooks.Service
+	memoryContextMu    sync.Mutex
+	memoryContextCache *memprovider.MemoryContextCache
+	acpPromptMu        sync.Mutex
+	acpPromptHubs      map[string]*acpActivePromptHub
 	// continueUserInputFn overrides the chat-flow resume after a user input
 	// response; nil means storeUserInputResultAndContinue. Test seam.
 	continueUserInputFn func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
@@ -112,6 +114,7 @@ type Resolver struct {
 	sessionTurnRefs     map[string]int // key: "botID:sessionID" → active turn refcount
 	sessionTurnLocks    map[string]*sync.Mutex
 	timeout             time.Duration
+	memorySearchTimeout time.Duration
 	clockLocation       *time.Location
 	logger              *slog.Logger
 }
@@ -155,19 +158,20 @@ func NewResolver(
 	}
 
 	return &Resolver{
-		agent:            a,
-		modelsService:    modelsService,
-		queries:          queries,
-		conversationSvc:  conversationSvc,
-		messageService:   messageService,
-		settingsService:  settingsService,
-		accountService:   accountService,
-		streamHTTPClient: streamHTTPClient,
-		sessionTurnRefs:  make(map[string]int),
-		sessionTurnLocks: make(map[string]*sync.Mutex),
-		timeout:          timeout,
-		clockLocation:    clockLocation,
-		logger:           log.With(slog.String("service", "conversation_resolver")),
+		agent:               a,
+		modelsService:       modelsService,
+		queries:             queries,
+		conversationSvc:     conversationSvc,
+		messageService:      messageService,
+		settingsService:     settingsService,
+		accountService:      accountService,
+		streamHTTPClient:    streamHTTPClient,
+		sessionTurnRefs:     make(map[string]int),
+		sessionTurnLocks:    make(map[string]*sync.Mutex),
+		timeout:             timeout,
+		memorySearchTimeout: defaultMemorySearchTimeout,
+		clockLocation:       clockLocation,
+		logger:              log.With(slog.String("service", "conversation_resolver")),
 	}
 }
 

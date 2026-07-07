@@ -35,7 +35,7 @@ func TestRenderACPContextMarkdownIncludesDynamicRuntimeAndMemory(t *testing.T) {
 			{Filename: "TOOLS.md", Content: "Do not inject normal tool prompt."},
 			{Filename: "MEMORY.md", Content: "User prefers small patches."},
 			{Filename: "PROFILES.md", Content: "Alice is the project owner."},
-			{Filename: "memory/2026-06-01.md", Content: "Today we discussed ACP context."},
+			{Filename: "memory/preference/alice-profile.md", Content: "Alice prefers small, reviewable patches."},
 		},
 	})
 
@@ -58,8 +58,8 @@ func TestRenderACPContextMarkdownIncludesDynamicRuntimeAndMemory(t *testing.T) {
 		"User prefers small patches.",
 		"## Profiles",
 		"Alice is the project owner.",
-		"## Daily Memory - 2026-06-01.md",
-		"Today we discussed ACP context.",
+		"## Memory Concept - preference/alice-profile.md",
+		"Alice prefers small, reviewable patches.",
 		"This virtual resource is already embedded",
 	} {
 		if !strings.Contains(got, want) {

@@ -2,27 +2,34 @@ package builtin
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
-
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
-	qdrantclient "github.com/memohai/memoh/internal/memory/qdrant"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
+
+// memoryIDSeq is a process-wide monotonic counter appended to memory IDs so
+// that two Add calls landing in the same wall-clock nanosecond still produce
+// distinct IDs. The wall-clock nanosecond remains the dominant component, so
+// IDs stay human-readable and roughly time-ordered; the sequence only breaks
+// ties when the clock has not advanced.
+var memoryIDSeq uint64
 
 // memoryStore is the markdown file store consumed by the builtin runtimes.
 type memoryStore interface {
 	PersistMemories(ctx context.Context, botID string, items []storefs.MemoryItem, filters map[string]any) error
 	ReadAllMemoryFiles(ctx context.Context, botID string) ([]storefs.MemoryItem, error)
+	ReadAllMemoryFilesForIngest(ctx context.Context, botID string) ([]storefs.MemoryItem, error)
 	RemoveMemories(ctx context.Context, botID string, ids []string) error
 	RemoveAllMemories(ctx context.Context, botID string) error
 	RebuildFiles(ctx context.Context, botID string, items []storefs.MemoryItem, filters map[string]any) error
-	ArchiveAndRebuildFiles(ctx context.Context, botID string, active []storefs.MemoryItem, archived []storefs.MemoryItem, filters map[string]any) error
 	SyncOverview(ctx context.Context, botID string) error
 	CountMemoryFiles(ctx context.Context, botID string) (int, error)
 }
@@ -34,39 +41,6 @@ func canonicalStoreItem(item storefs.MemoryItem) storefs.MemoryItem {
 		item.Hash = runtimeHash(item.Memory)
 	}
 	return item
-}
-
-func runtimePayload(botID string, item storefs.MemoryItem) map[string]string {
-	item = canonicalStoreItem(item)
-	payload := map[string]string{
-		"memory":          item.Memory,
-		"bot_id":          strings.TrimSpace(botID),
-		"source_entry_id": item.ID,
-		"hash":            item.Hash,
-	}
-	if item.CreatedAt != "" {
-		payload["created_at"] = item.CreatedAt
-	}
-	if item.UpdatedAt != "" {
-		payload["updated_at"] = item.UpdatedAt
-	}
-	for _, key := range []string{"profile_user_id", "profile_channel_identity_id", "profile_display_name", "profile_ref"} {
-		if v, ok := item.Metadata[key]; ok {
-			if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
-				payload[key] = strings.TrimSpace(s)
-			}
-		}
-	}
-	return payload
-}
-
-func payloadMatches(existing, expected map[string]string) bool {
-	for key, value := range expected {
-		if strings.TrimSpace(existing[key]) != strings.TrimSpace(value) {
-			return false
-		}
-	}
-	return true
 }
 
 func storeItemFromMemoryItem(item adapters.MemoryItem) storefs.MemoryItem {
@@ -111,33 +85,6 @@ func memoryItemsFromStore(items []storefs.MemoryItem) []adapters.MemoryItem {
 	return out
 }
 
-func resultToItem(r qdrantclient.SearchResult) adapters.MemoryItem {
-	item := adapters.MemoryItem{
-		ID:    r.ID,
-		Score: r.Score,
-	}
-	if r.Payload != nil {
-		if sourceID := strings.TrimSpace(r.Payload["source_entry_id"]); sourceID != "" {
-			item.ID = sourceID
-		}
-		item.Memory = r.Payload["memory"]
-		item.Hash = r.Payload["hash"]
-		item.BotID = r.Payload["bot_id"]
-		item.CreatedAt = r.Payload["created_at"]
-		item.UpdatedAt = r.Payload["updated_at"]
-		meta := map[string]any{}
-		for _, key := range []string{"profile_user_id", "profile_channel_identity_id", "profile_display_name", "profile_ref"} {
-			if v := strings.TrimSpace(r.Payload[key]); v != "" {
-				meta[key] = v
-			}
-		}
-		if len(meta) > 0 {
-			item.Metadata = meta
-		}
-	}
-	return item
-}
-
 func runtimeBotID(botID string, filters map[string]any) (string, error) {
 	botID = strings.TrimSpace(botID)
 	if botID == "" {
@@ -158,6 +105,17 @@ func runtimeBotIDFromMemoryID(memoryID string) string {
 		return ""
 	}
 	return strings.TrimSpace(parts[0])
+}
+
+func runtimeLocalMemoryID(memoryID string) string {
+	memoryID = strings.TrimSpace(memoryID)
+	if memoryID == "" {
+		return ""
+	}
+	if idx := strings.Index(memoryID, ":"); idx >= 0 && idx+1 < len(memoryID) {
+		return strings.TrimSpace(memoryID[idx+1:])
+	}
+	return memoryID
 }
 
 func runtimeText(message string, messages []adapters.Message) string {
@@ -181,11 +139,16 @@ func runtimeText(message string, messages []adapters.Message) string {
 }
 
 func runtimeMemoryID(botID string, now time.Time) string {
-	return botID + ":" + "mem_" + strconv.FormatInt(now.UnixNano(), 10)
+	seq := atomic.AddUint64(&memoryIDSeq, 1)
+	return botID + ":" + "mem_" + strconv.FormatInt(now.UnixNano(), 10) + "_" + strconv.FormatUint(seq, 36)
 }
 
-func runtimePointID(botID, sourceID string) string {
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.TrimSpace(botID)+"\n"+strings.TrimSpace(sourceID))).String()
+// runtimeHash returns a stable SHA-256 hex digest of a trimmed memory body.
+// It is shared by the dense and file runtimes (and the upcoming graph runtime)
+// for content-addressing memory items.
+func runtimeHash(text string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(text)))
+	return hex.EncodeToString(sum[:])
 }
 
 func runtimeFilterString(m map[string]any, key string) string {

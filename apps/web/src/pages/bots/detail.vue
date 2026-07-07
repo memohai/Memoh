@@ -436,7 +436,7 @@ const searchIndex = computed(() => {
     { tab: 'general', key: 'bots.settings.dangerZone', keywords: ['delete', 'remove'] },
     { tab: 'container', key: 'bots.container.dataTitle', keywords: ['docker', 'image', 'gpu', 'volume'] },
     { tab: 'container', key: 'bots.container.metricsTitle', keywords: ['cpu', 'ram', 'storage'] },
-    { tab: 'memory', key: 'bots.memory.title', keywords: ['vector', 'database', 'qdrant', 'embed'] },
+    { tab: 'memory', key: 'bots.memory.title', keywords: ['vector', 'database', 'pgvector', 'embed'] },
     { tab: 'channels', key: 'bots.channels.configured', keywords: ['telegram', 'discord', 'wechat', 'slack'] },
     { tab: 'access', key: 'bots.access.title', keywords: ['permissions', 'acl', 'rules', 'allow', 'deny'] },
     { tab: 'tool-approval', key: 'bots.toolApproval.title', keywords: ['mcp', 'tools', 'review', 'bypass', 'approval'] },
@@ -458,7 +458,7 @@ const searchIndex = computed(() => {
 const normalizedQuery = computed(() => searchQuery.value.trim().toLowerCase())
 
 // Match a tab against the search box: its title, its tab key, and the keyword
-// index so deep settings (e.g. "telegram", "qdrant") still surface the tab.
+// index so deep settings (e.g. "telegram", "pgvector") still surface the tab.
 function tabMatches(tab: { value: string, label: string }): boolean {
   const q = normalizedQuery.value
   if (!q) return true

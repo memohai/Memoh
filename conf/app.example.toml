@@ -141,13 +141,16 @@ password = "memoh123"
 database = "memoh"
 sslmode = "disable"
 
-[qdrant]
-base_url = "http://127.0.0.1:6334"
-api_key = ""
-timeout_seconds = 10
-
-[sparse]
-base_url = "http://127.0.0.1:8085"
+## pgvector auxiliary index database (optional). When enabled, Memoh maintains
+## a semantic seed vector index in a separate Postgres + pgvector service.
+[pgvector]
+enabled = false
+host = "127.0.0.1"
+port = 5432
+user = "memoh"
+password = ""
+database = "memoh_vector"
+sslmode = "disable"
 
 [registry]
 providers_dir = "conf/providers"

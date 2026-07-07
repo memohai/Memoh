@@ -1,13 +1,11 @@
 services:
   postgres:
     image: memoh.cn/library/postgres:18-alpine
-  qdrant:
-    image: memoh.cn/qdrant/qdrant:latest
+  pgvector:
+    image: memoh.cn/pgvector/pgvector:pg18
   migrate:
     image: memoh.cn/memohai/server:latest
   server:
     image: memoh.cn/memohai/server:latest
   web:
     image: memoh.cn/memohai/web:latest
-  sparse:
-    image: memoh.cn/memohai/sparse:latest

@@ -4838,6 +4838,112 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/memory/graph": {
+            "get": {
+                "description": "Get derived memory graph nodes and edges for a bot.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "memory"
+                ],
+                "summary": "Get memory graph",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.graphResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/memory/ingest": {
+            "post": {
+                "description": "Read /data/memory/*.md the bot (or its agent) wrote directly and upsert them as DB memory nodes, so they become searchable and survive the next derived-view rebuild. Idempotent (ON CONFLICT id DO UPDATE).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "memory"
+                ],
+                "summary": "Ingest agent-authored memory markdown into the wiki store",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/adapters.IngestResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/memory/rebuild": {
             "post": {
                 "description": "Read memory files from the container filesystem (source of truth) and restore missing entries to memory storage",
@@ -5111,6 +5217,78 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/adapters.DeleteResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/memory/{memory_id}": {
+            "put": {
+                "description": "Update the body of an existing memory entry in place (preserves id, layer, metadata). Replaces the legacy client-side delete-then-add edit emulation.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "memory"
+                ],
+                "summary": "Update a single memory by id",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Memory ID",
+                        "name": "memory_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Update request",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.memoryUpdatePayload"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/adapters.MemoryItem"
                         }
                     },
                     "400": {
@@ -13380,19 +13558,6 @@ const docTemplate = `{
                 }
             }
         },
-        "adapters.CDFPoint": {
-            "type": "object",
-            "properties": {
-                "cumulative": {
-                    "description": "cumulative weight fraction [0.0, 1.0]",
-                    "type": "number"
-                },
-                "k": {
-                    "description": "rank position (1-based, sorted by value desc)",
-                    "type": "integer"
-                }
-            }
-        },
         "adapters.CompactResult": {
             "type": "object",
             "properties": {
@@ -13432,13 +13597,23 @@ const docTemplate = `{
                 }
             }
         },
+        "adapters.IngestResult": {
+            "type": "object",
+            "properties": {
+                "ingested": {
+                    "description": "Ingested is the number of memory nodes written to the store (inserts +\nupdates; re-ingesting an unchanged file counts as an update).",
+                    "type": "integer"
+                },
+                "skipped": {
+                    "description": "Skipped is the number of source items that parsed to empty content or\nfailed to persist.",
+                    "type": "integer"
+                }
+            }
+        },
         "adapters.MemoryCompactCapability": {
             "type": "object",
             "properties": {
                 "archive": {
-                    "type": "boolean"
-                },
-                "native": {
                     "type": "boolean"
                 },
                 "reason": {
@@ -13460,12 +13635,6 @@ const docTemplate = `{
                 },
                 "bot_id": {
                     "type": "string"
-                },
-                "cdf_curve": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/adapters.CDFPoint"
-                    }
                 },
                 "created_at": {
                     "type": "string"
@@ -13489,12 +13658,6 @@ const docTemplate = `{
                 "score": {
                     "type": "number"
                 },
-                "top_k_buckets": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/adapters.TopKBucket"
-                    }
-                },
                 "updated_at": {
                     "type": "string"
                 }
@@ -13508,6 +13671,13 @@ const docTemplate = `{
                 },
                 "compact": {
                     "$ref": "#/definitions/adapters.MemoryCompactCapability"
+                },
+                "degraded": {
+                    "description": "Degraded reports that the semantic seed index is behind the wiki store\n(failed upserts are queued for retry); graph recall still works.",
+                    "type": "boolean"
+                },
+                "edge_count": {
+                    "type": "integer"
                 },
                 "encoder": {
                     "$ref": "#/definitions/adapters.HealthStatus"
@@ -13524,19 +13694,22 @@ const docTemplate = `{
                 "overview_path": {
                     "type": "string"
                 },
+                "pgvector": {
+                    "$ref": "#/definitions/adapters.HealthStatus"
+                },
                 "provider_type": {
                     "type": "string"
                 },
-                "qdrant": {
-                    "$ref": "#/definitions/adapters.HealthStatus"
-                },
-                "qdrant_collection": {
-                    "type": "string"
+                "retry_queue_depth": {
+                    "type": "integer"
                 },
                 "source_count": {
                     "type": "integer"
                 },
                 "source_dir": {
+                    "type": "string"
+                },
+                "vector_index": {
                     "type": "string"
                 }
             }
@@ -13558,14 +13731,14 @@ const docTemplate = `{
                 "exists": {
                     "type": "boolean"
                 },
+                "health": {
+                    "$ref": "#/definitions/adapters.HealthStatus"
+                },
                 "name": {
                     "type": "string"
                 },
                 "points": {
                     "type": "integer"
-                },
-                "qdrant": {
-                    "$ref": "#/definitions/adapters.HealthStatus"
                 }
             }
         },
@@ -13722,6 +13895,9 @@ const docTemplate = `{
         "adapters.SearchResponse": {
             "type": "object",
             "properties": {
+                "fallback_reason": {
+                    "type": "string"
+                },
                 "relations": {
                     "type": "array",
                     "items": {}
@@ -13731,19 +13907,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/adapters.MemoryItem"
                     }
-                }
-            }
-        },
-        "adapters.TopKBucket": {
-            "type": "object",
-            "properties": {
-                "index": {
-                    "description": "sparse dimension index (term hash)",
-                    "type": "integer"
                 },
-                "value": {
-                    "description": "weight (term frequency)",
-                    "type": "number"
+                "retrieval_mode": {
+                    "type": "string"
                 }
             }
         },
@@ -17949,6 +18115,85 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.graphEdge": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "rel": {
+                    "type": "string"
+                },
+                "rels": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "source": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "weight": {
+                    "type": "number"
+                }
+            }
+        },
+        "handlers.graphNode": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "memory": {
+                    "type": "string"
+                },
+                "memory_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "topic": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.graphResponse": {
+            "type": "object",
+            "properties": {
+                "edges": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.graphEdge"
+                    }
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.graphNode"
+                    }
+                }
+            }
+        },
         "handlers.listSessionsResponse": {
             "type": "object",
             "properties": {
@@ -18046,6 +18291,14 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "handlers.memoryUpdatePayload": {
+            "type": "object",
+            "properties": {
+                "memory": {
+                    "type": "string"
                 }
             }
         },
