@@ -5,13 +5,19 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/memohai/memoh/internal/bots"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 func TestReadZipEntriesRejectsZipSlip(t *testing.T) {
@@ -80,6 +86,124 @@ func TestWriteJSONPreservesSensitiveValues(t *testing.T) {
 	}
 }
 
+func TestRebuildRestoredHistoryTurnsLinksVisibleLinearTurns(t *testing.T) {
+	ctx := context.Background()
+	botID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000701")
+	sessionID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000702")
+	userID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000711")
+	assistantID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000712")
+	toolID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000713")
+	finalID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000714")
+	nextUserID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000715")
+	nextAssistantID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000716")
+	q := &recordingRestoredTurnQueries{}
+
+	err := rebuildRestoredHistoryTurns(ctx, q, botID, []restoredHistoryMessage{
+		{id: userID, sessionID: sessionID, role: "user"},
+		{id: assistantID, sessionID: sessionID, role: "assistant"},
+		{id: toolID, sessionID: sessionID, role: "tool"},
+		{id: finalID, sessionID: sessionID, role: "assistant"},
+		{id: nextUserID, sessionID: sessionID, role: "user"},
+		{id: nextAssistantID, sessionID: sessionID, role: "assistant"},
+	})
+	if err != nil {
+		t.Fatalf("rebuildRestoredHistoryTurns() error = %v", err)
+	}
+	if got, want := len(q.turns), 2; got != want {
+		t.Fatalf("created turns = %d, want %d", got, want)
+	}
+	if got := q.turns[0].RequestMessageID.String(); got != userID.String() {
+		t.Fatalf("first request message = %s, want %s", got, userID.String())
+	}
+	if got := q.turns[1].RequestMessageID.String(); got != nextUserID.String() {
+		t.Fatalf("second request message = %s, want %s", got, nextUserID.String())
+	}
+	if got, want := len(q.binds), 2; got != want {
+		t.Fatalf("assistant binds = %d, want %d", got, want)
+	}
+	if got := q.binds[0].AssistantMessageID.String(); got != assistantID.String() {
+		t.Fatalf("first assistant bind = %s, want %s", got, assistantID.String())
+	}
+	wantSeq := []int64{1, 2, 3, 4, 1, 2}
+	if got, want := len(q.links), len(wantSeq); got != want {
+		t.Fatalf("links = %d, want %d", got, want)
+	}
+	for i, want := range wantSeq {
+		if got := q.links[i].TurnMessageSeq.Int64; got != want {
+			t.Fatalf("link %d seq = %d, want %d", i, got, want)
+		}
+	}
+}
+
+func TestRebuildRestoredHistoryTurnsKeepsOrphanAssistantSeq(t *testing.T) {
+	ctx := context.Background()
+	botID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000741")
+	sessionID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000742")
+	assistantID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000743")
+	toolID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000744")
+	finalID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000745")
+	q := &recordingRestoredTurnQueries{}
+
+	err := rebuildRestoredHistoryTurns(ctx, q, botID, []restoredHistoryMessage{
+		{id: assistantID, sessionID: sessionID, role: "assistant"},
+		{id: toolID, sessionID: sessionID, role: "tool"},
+		{id: finalID, sessionID: sessionID, role: "assistant"},
+	})
+	if err != nil {
+		t.Fatalf("rebuildRestoredHistoryTurns() error = %v", err)
+	}
+	if got, want := len(q.turns), 1; got != want {
+		t.Fatalf("created turns = %d, want %d", got, want)
+	}
+	if got := q.turns[0].AssistantMessageID.String(); got != assistantID.String() {
+		t.Fatalf("orphan assistant message = %s, want %s", got, assistantID.String())
+	}
+	wantSeq := []int64{2, 3, 4}
+	if got, want := len(q.links), len(wantSeq); got != want {
+		t.Fatalf("links = %d, want %d", got, want)
+	}
+	for i, want := range wantSeq {
+		if got := q.links[i].TurnMessageSeq.Int64; got != want {
+			t.Fatalf("link %d seq = %d, want %d", i, got, want)
+		}
+	}
+}
+
+func TestRebindRestoredForkMetadataMapsImportedIDs(t *testing.T) {
+	oldSessionID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000781")
+	newSessionID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000782")
+	oldMessageID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000783")
+	newMessageID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000784")
+	oldForkMessageID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000785")
+	newForkMessageID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000786")
+	raw := []byte(`{"forked_from":{"session_id":"` + oldSessionID.String() + `","message_id":"` + oldMessageID.String() + `","fork_message_id":"` + oldForkMessageID.String() + `"}}`)
+
+	got, changed := rebindRestoredForkMetadata(raw, map[string]pgtype.UUID{
+		oldSessionID.String(): newSessionID,
+	}, map[string]pgtype.UUID{
+		oldMessageID.String():     newMessageID,
+		oldForkMessageID.String(): newForkMessageID,
+	})
+	if !changed {
+		t.Fatal("rebindRestoredForkMetadata changed = false, want true")
+	}
+	var decoded struct {
+		ForkedFrom struct {
+			SessionID     string `json:"session_id"`
+			MessageID     string `json:"message_id"`
+			ForkMessageID string `json:"fork_message_id"`
+		} `json:"forked_from"`
+	}
+	if err := json.Unmarshal(got, &decoded); err != nil {
+		t.Fatalf("unmarshal rebound metadata: %v", err)
+	}
+	if decoded.ForkedFrom.SessionID != newSessionID.String() ||
+		decoded.ForkedFrom.MessageID != newMessageID.String() ||
+		decoded.ForkedFrom.ForkMessageID != newForkMessageID.String() {
+		t.Fatalf("rebound fork metadata = %+v", decoded.ForkedFrom)
+	}
+}
+
 func TestScrubImportedProfileACPSecrets(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
@@ -134,6 +258,52 @@ func TestScrubImportedProfileACPSecrets(t *testing.T) {
 			}
 		})
 	}
+}
+
+type recordingRestoredTurnQueries struct {
+	turns []dbsqlc.CreateHistoryTurnParams
+	binds []dbsqlc.BindHistoryTurnAssistantByRequestParams
+	links []dbsqlc.LinkMessageToHistoryTurnParams
+}
+
+func (q *recordingRestoredTurnQueries) CreateHistoryTurn(_ context.Context, arg dbsqlc.CreateHistoryTurnParams) (dbstore.HistoryTurn, error) {
+	q.turns = append(q.turns, arg)
+	return dbstore.HistoryTurn{ID: mustPGUUID(fmt.Sprintf("00000000-0000-0000-0000-%012d", len(q.turns)))}, nil
+}
+
+func (q *recordingRestoredTurnQueries) BindHistoryTurnAssistantByRequest(_ context.Context, arg dbsqlc.BindHistoryTurnAssistantByRequestParams) (dbstore.HistoryTurn, error) {
+	q.binds = append(q.binds, arg)
+	return dbstore.HistoryTurn{}, nil
+}
+
+func (q *recordingRestoredTurnQueries) LinkMessageToHistoryTurn(_ context.Context, arg dbsqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error) {
+	q.links = append(q.links, arg)
+	return arg.MessageID, nil
+}
+
+func mustTestPGUUID(t *testing.T, value string) pgtype.UUID {
+	t.Helper()
+	out, err := parsePGUUID(value)
+	if err != nil {
+		t.Fatalf("parse uuid %q: %v", value, err)
+	}
+	return out
+}
+
+func mustPGUUID(value string) pgtype.UUID {
+	out, err := parsePGUUID(value)
+	if err != nil {
+		panic(err)
+	}
+	return out
+}
+
+func parsePGUUID(value string) (pgtype.UUID, error) {
+	var out pgtype.UUID
+	if err := out.Scan(value); err != nil {
+		return pgtype.UUID{}, err
+	}
+	return out, nil
 }
 
 func TestWorkspaceStoredVerbatimAsTarGz(t *testing.T) {

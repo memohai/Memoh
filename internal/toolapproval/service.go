@@ -455,6 +455,34 @@ func (s *Service) ListBySession(ctx context.Context, botID, sessionID string) ([
 	return s.listBySession(ctx, botID, sessionID, false)
 }
 
+func (s *Service) ListBySessionToolCalls(ctx context.Context, botID, sessionID string, toolCallIDs []string) ([]Request, error) {
+	toolCallIDs = normalizeToolCallIDs(toolCallIDs)
+	if len(toolCallIDs) == 0 {
+		return nil, nil
+	}
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return nil, err
+	}
+	pgSessionID, err := db.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListToolApprovalsBySessionToolCalls(ctx, sqlc.ListToolApprovalsBySessionToolCallsParams{
+		BotID:       pgBotID,
+		SessionID:   pgSessionID,
+		ToolCallIds: toolCallIDs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Request, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, requestFromRow(row))
+	}
+	return result, nil
+}
+
 func (s *Service) listBySession(ctx context.Context, botID, sessionID string, pendingOnly bool) ([]Request, error) {
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -484,6 +512,26 @@ func (s *Service) listBySession(ctx context.Context, botID, sessionID string, pe
 		result = append(result, requestFromRow(row))
 	}
 	return result, nil
+}
+
+func normalizeToolCallIDs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(ids))
+	result := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	return result
 }
 
 func requestFromRowOrErr(row sqlc.ToolApprovalRequest, err error) (Request, error) {

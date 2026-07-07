@@ -192,7 +192,7 @@ func provideDBQueries(postgresStore *postgresstore.Store) (dbstore.Queries, erro
 	if postgresStore == nil {
 		return nil, errors.New("postgres store not configured")
 	}
-	return postgresstore.NewQueries(postgresStore.SQLC()), nil
+	return postgresstore.NewQueriesWithPool(postgresStore.Pool(), postgresStore.SQLC()), nil
 }
 
 func provideAccountStore(postgresStore *postgresstore.Store) (dbstore.AccountStore, error) {

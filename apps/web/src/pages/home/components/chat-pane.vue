@@ -60,30 +60,53 @@
                 </p>
               </div>
 
-              <div
+              <template
                 v-for="(msg, index) in messages"
                 :key="msg.id"
-                :data-message-id="msg.id"
-                :data-external-message-id="(msg.role === 'user' || msg.role === 'assistant') ? msg.externalMessageId : undefined"
-                class="transition-[background-color] duration-500 scroll-mt-2 px-2 -mx-2"
-                :class="highlightedMessageId === msg.id ? 'bg-muted/45' : ''"
-                :data-anchor="msg.id"
               >
-                <MessageItem
-                  :message="msg"
-                  :session-type="activeSession?.type"
-                  :bot-id="currentBotId"
-                  :channel-thread="isChannelThread"
-                  :channel-platform="channelPlatform"
-                  :bot-name="currentBot?.name"
-                  :bot-avatar-url="currentBot?.avatar_url"
-                  :on-open-media="galleryOpenBySrc"
-                  :on-reply-click="handleReplyJump"
-                  :is-scrolling="isScrolling"
-                  :is-last-message="index === messages.length - 1"
-                  @active="isActiveEl"
+                <ForkSourceDivider
+                  v-if="showForkSourceDividerBefore(index)"
+                  :title="forkSourceTitle"
+                  :disabled="openingForkSource"
+                  @open-source="handleForkSourceClick"
                 />
-              </div>
+
+                <div
+                  :data-message-id="msg.id"
+                  :data-external-message-id="(msg.role === 'user' || msg.role === 'assistant') ? msg.externalMessageId : undefined"
+                  class="transition-[background-color] duration-500 scroll-mt-2 px-2 -mx-2"
+                  :class="highlightedMessageId === msg.id ? 'bg-muted/45' : ''"
+                  :data-anchor="msg.id"
+                >
+                  <MessageItem
+                    :message="msg"
+                    :session-type="activeSession?.type"
+                    :bot-id="currentBotId"
+                    :channel-thread="isChannelThread"
+                    :channel-platform="channelPlatform"
+                    :bot-name="currentBot?.name"
+                    :bot-avatar-url="currentBot?.avatar_url"
+                    :on-open-media="galleryOpenBySrc"
+                    :on-reply-click="handleReplyJump"
+                    :on-retry-message="handleRetryMessage"
+                    :can-retry-latest-assistant="latestRetryableAssistantId === ((msg.serverId ?? msg.id).trim())"
+                    :can-edit-latest-user="latestEditableUserId === ((msg.serverId ?? msg.id).trim())"
+                    :can-fork-assistant="canForkAssistant"
+                    :is-scrolling="isScrolling"
+                    :is-last-message="index === messages.length - 1"
+                    @active="isActiveEl"
+                    @edit-message="handleEditMessage"
+                    @fork-message="handleForkMessage"
+                  />
+                </div>
+
+                <ForkSourceDivider
+                  v-if="showForkSourceDividerAfter(msg, index)"
+                  :title="forkSourceTitle"
+                  :disabled="openingForkSource"
+                  @open-source="handleForkSourceClick"
+                />
+              </template>
             </div>
           </ScrollArea>
 
@@ -152,6 +175,40 @@
             <DialogTitle>{{ $t('chat.pastedViewerTitle') }}</DialogTitle>
           </DialogHeader>
           <pre class="max-h-[60vh] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-surface-composer p-3 text-caption leading-relaxed text-foreground">{{ pastedViewerText }}</pre>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog v-model:open="forkDialogOpen">
+        <DialogContent class="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{{ $t('chat.forkDialog.title') }}</DialogTitle>
+            <DialogDescription>{{ $t('chat.forkDialog.description') }}</DialogDescription>
+          </DialogHeader>
+          <form
+            class="space-y-4"
+            @submit.prevent="handleCreateFork"
+          >
+            <Input
+              v-model="forkSessionTitle"
+              :aria-label="$t('chat.forkDialog.namePlaceholder')"
+              :placeholder="$t('chat.forkDialog.namePlaceholder')"
+              :disabled="forkSubmitting"
+              maxlength="120"
+              autofocus
+            />
+            <DialogFooter>
+              <Button
+                type="submit"
+                :disabled="!forkSessionTitle.trim() || forkSubmitting"
+              >
+                <LoaderCircle
+                  v-if="forkSubmitting"
+                  class="mr-1 size-3 animate-spin"
+                />
+                {{ $t('common.create') }}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
@@ -936,8 +993,8 @@ import {
   Package,
   SquarePen,
 } from 'lucide-vue-next'
-import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner } from '@memohai/ui'
-import { useChatStore, type ACPAgentSessionInput } from '@/store/chat-list'
+import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner, toast } from '@memohai/ui'
+import { useChatStore, type ACPAgentSessionInput, type ChatMessage } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import { useScroll, useElementBounding, useIntersectionObserver, useStorage } from '@vueuse/core'
 import { useQuery } from '@pinia/colada'
@@ -950,6 +1007,7 @@ import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import { animateScrollTo } from './chat-minimap'
 import BgTaskPill from './bg-task-pill.vue'
+import ForkSourceDivider from './fork-source-divider.vue'
 import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
 import MediaGalleryLightbox, { type MediaGalleryItem } from './media-gallery-lightbox.vue'
 import SessionInfoRing from './session-info-ring.vue'
@@ -957,7 +1015,7 @@ import { useSessionInfo } from '../composables/useSessionInfo'
 import ChatModelPicker from './chat-model-picker.vue'
 import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
-import { fetchSafeSkillCatalog, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput, type UIUserInputQuestion, type WSUserInputAnswer } from '@/composables/api/useChat'
+import { fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput, type UIUserInputQuestion, type WSUserInputAnswer } from '@/composables/api/useChat'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
@@ -1190,6 +1248,10 @@ onBeforeUnmount(() => {
 })
 
 const composerError = ref('')
+const forkDialogOpen = ref(false)
+const pendingForkMessageId = ref('')
+const forkSessionTitle = ref('')
+const forkSubmitting = ref(false)
 const pendingUserInputDrafts = ref<Record<string, PendingUserInputDraft>>({})
 const modelPopoverOpen = ref(false)
 const agentPopoverOpen = ref(false)
@@ -1205,6 +1267,7 @@ const {
   activeSession,
   activeChatTarget,
   activeChatReadOnly,
+  activeChatCanFork,
   loadingOlder,
   loadingChats,
   loadingMessages,
@@ -1269,6 +1332,35 @@ const pendingUserInput = computed<UIUserInput | null>(() => {
 })
 
 const pendingUserInputQuestions = computed(() => pendingUserInput.value?.questions ?? [])
+
+const canForkAssistant = computed(() =>
+  !streaming.value
+  && !loadingMessages.value
+  && !activeChatReadOnly.value
+  && activeChatCanFork.value,
+)
+
+const latestRetryableAssistantId = computed(() => {
+  if (streaming.value || loadingMessages.value || activeChatReadOnly.value) return ''
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const message = messages.value[i]
+    if (message?.role === 'assistant' && !message.streaming && !message.__optimistic) {
+      return (message.serverId ?? message.id).trim()
+    }
+  }
+  return ''
+})
+
+const latestEditableUserId = computed(() => {
+  if (streaming.value || loadingMessages.value || activeChatReadOnly.value) return ''
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const message = messages.value[i]
+    if (message?.role === 'user' && !message.streaming && !message.__optimistic) {
+      return (message.serverId ?? message.id).trim()
+    }
+  }
+  return ''
+})
 
 // All questions must be answered per kind before submit; null means incomplete.
 const pendingUserInputAnswers = computed<WSUserInputAnswer[] | null>(() => {
@@ -1338,6 +1430,13 @@ const currentBot = computed(() => bots.value.find(bot => bot.id === currentBotId
 const channelPlatform = computed(() => (activeSession.value?.channel_type ?? '').trim().toLowerCase())
 const isChannelThread = computed(() => !!channelPlatform.value && channelPlatform.value !== 'local')
 
+interface ForkSourceMeta {
+  sessionId: string
+  title: string
+  sourceMessageId?: string
+  forkMessageId?: string
+}
+
 const acpProfiles = computed<AcpprofilePublicProfile[]>(() => acpProfileData.value?.items ?? [])
 const currentBotMetadata = computed(() => currentBot.value?.metadata as Record<string, unknown> | undefined)
 const enabledACPProfiles = computed(() =>
@@ -1345,6 +1444,32 @@ const enabledACPProfiles = computed(() =>
 )
 
 const activeSessionMetadata = computed<Record<string, unknown>>(() => activeChatTarget.value.metadata)
+const forkSource = computed<ForkSourceMeta | null>(() => {
+  const raw = activeSessionMetadata.value.forked_from
+  if (!raw || typeof raw !== 'object') return null
+  const record = raw as Record<string, unknown>
+  const sessionId = String(record.session_id ?? '').trim()
+  if (!sessionId) return null
+  const title = String(record.title ?? '').trim() || t('chat.unknownSession')
+  const sourceMessageId = String(record.message_id ?? '').trim()
+  const forkMessageId = String(record.fork_message_id ?? '').trim()
+  return {
+    sessionId,
+    title,
+    ...(sourceMessageId ? { sourceMessageId } : {}),
+    ...(forkMessageId ? { forkMessageId } : {}),
+  }
+})
+const forkSourceTitle = computed(() => forkSource.value?.title ?? '')
+const openingForkSource = ref(false)
+const forkSourceDividerAfterIndex = computed<number | null>(() => {
+  const source = forkSource.value
+  if (!source || messages.value.length === 0) return null
+  const forkMessageId = source.forkMessageId?.trim()
+  if (!forkMessageId) return null
+  const index = messages.value.findIndex(messageMatchesForkSource)
+  return index >= 0 ? index : null
+})
 const activeIsPendingACP = computed(() => activeChatTarget.value.isPendingACP)
 const activeIsACP = computed(() => activeChatTarget.value.isACP)
 const activeACPAgentId = computed(() => normalizeACPAgentID(activeSessionMetadata.value.acp_agent_id))
@@ -1355,6 +1480,30 @@ const activeACPProjectLabel = computed(() => {
   return path ? parts[parts.length - 1] ?? path : t('chat.noProject')
 })
 const canChangeAgent = computed(() => !streaming.value && messages.value.length === 0)
+
+
+function messageMatchesForkSource(message: ChatMessage): boolean {
+  const forkMessageId = forkSource.value?.forkMessageId?.trim()
+  if (!forkMessageId) return false
+  const candidates = [
+    message.serverId,
+    message.id,
+    message.role === 'system' ? undefined : message.externalMessageId,
+  ]
+  return candidates.some(candidate => candidate?.trim() === forkMessageId)
+}
+
+function showForkSourceDividerAfter(message: ChatMessage, index: number): boolean {
+  return Boolean(forkSource.value)
+    && index === forkSourceDividerAfterIndex.value
+    && messages.value[index] === message
+}
+
+function showForkSourceDividerBefore(index: number): boolean {
+  return Boolean(forkSource.value)
+    && (!forkSource.value?.forkMessageId || forkSourceDividerAfterIndex.value === null)
+    && index === 0
+}
 
 // The composer's "+" menu is worth showing only when it can do something:
 // switch the agent (empty session with ACP profiles) or attach files (Memoh
@@ -2770,6 +2919,52 @@ async function handleReplyJump(messageId: string) {
   }
 }
 
+async function handleForkSourceClick() {
+  const source = forkSource.value
+  const botId = currentBotId.value?.trim() ?? ''
+  if (!source || !botId || openingForkSource.value) return
+  openingForkSource.value = true
+  try {
+    await fetchSession(botId, source.sessionId)
+    await chatStore.selectSession(source.sessionId, { explicitSelection: true })
+  } catch {
+    toast.error(t('chat.forkSourceUnavailable'))
+  } finally {
+    openingForkSource.value = false
+  }
+}
+
+function defaultForkSessionTitle() {
+  const sourceTitle = activeSession.value?.title?.trim() || t('chat.unknownSession')
+  return t('chat.forkDialog.defaultTitle', { session: sourceTitle })
+}
+
+function handleForkMessage(messageId: string) {
+  composerError.value = ''
+  const id = messageId.trim()
+  if (!id) return
+  pendingForkMessageId.value = id
+  forkSessionTitle.value = defaultForkSessionTitle()
+  forkDialogOpen.value = true
+}
+
+async function handleCreateFork() {
+  const messageId = pendingForkMessageId.value.trim()
+  const title = forkSessionTitle.value.trim()
+  if (!messageId || !title || forkSubmitting.value) return
+  composerError.value = ''
+  forkSubmitting.value = true
+  try {
+    const ok = await chatStore.forkMessage(messageId, { title })
+    if (ok) {
+      forkDialogOpen.value = false
+      pendingForkMessageId.value = ''
+    }
+  } finally {
+    forkSubmitting.value = false
+  }
+}
+
 // Keyboard bridges into the two composer list surfaces (slash picker, command
 // panel results). The composer textarea keeps focus the whole time — like
 // reka's ListboxFilter, the bridge runs the listbox in virtual-highlight mode
@@ -2982,6 +3177,27 @@ function handlePendingUserInputCancel() {
     canceled: true,
     reason: 'user_canceled',
   })
+}
+
+async function handleRetryMessage(messageId: string) {
+  composerError.value = ''
+  const result = await chatStore.retryLatestAssistant(messageId)
+  if (!result.ok && result.error) {
+    composerError.value = result.error
+  }
+}
+
+async function handleEditMessage(messageId: string, text: string, done?: (started: boolean) => void) {
+  composerError.value = ''
+  try {
+    const result = await chatStore.editLatestUser(messageId, text)
+    if (!result.ok && result.error) {
+      composerError.value = result.error
+    }
+    done?.(result.ok || result.stage === 'stream')
+  } catch {
+    done?.(false)
+  }
 }
 
 async function handleSend() {

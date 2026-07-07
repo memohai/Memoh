@@ -9,12 +9,13 @@ export interface WSUserInputAnswer {
 }
 
 export interface WSClientMessage {
-  type: 'message' | 'abort' | 'tool_approval_response' | 'user_input_response'
+  type: 'message' | 'abort' | 'tool_approval_response' | 'user_input_response' | 'retry_message' | 'edit_message'
   stream_id?: string
   invocation_id?: string
   composer_scope?: string
   text?: string
   session_id?: string
+  message_id?: string
   attachments?: ChatAttachment[]
   requested_skills?: RequestedSkillRequest[]
   model_id?: string

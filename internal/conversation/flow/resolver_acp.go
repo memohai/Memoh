@@ -421,7 +421,8 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 		return req
 	}
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
-	_, err = r.messageService.Persist(ctx, messagepkg.PersistInput{
+	sessionMode, runtimeType := r.persistSessionRuntimeSnapshot(ctx, req)
+	persisted, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
 		BotID:                   req.BotID,
 		SessionID:               req.SessionID,
 		SenderChannelIdentityID: senderChannelIdentityID,
@@ -434,6 +435,8 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 		Assets:                  chatAttachmentsToAssetRefs(req.Attachments),
 		EventID:                 req.EventID,
 		DisplayText:             displayText,
+		SessionMode:             sessionMode,
+		RuntimeType:             runtimeType,
 	})
 	if err != nil {
 		r.logger.Warn("persist ACP leading user message failed",
@@ -443,6 +446,7 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 		return req
 	}
 	req.UserMessagePersisted = true
+	req.PersistedUserMessageID = persisted.ID
 	return req
 }
 
@@ -451,6 +455,7 @@ func (r *Resolver) persistACPDecisionProjection(ctx context.Context, req convers
 		return false
 	}
 	output := sdkMessagesToModelMessages(acpclient.TranscriptFromEvents([]event.StreamEvent{ev}, ""))
+	sessionMode, runtimeType := r.persistSessionRuntimeSnapshot(ctx, req)
 	for _, msg := range output {
 		if msg.Role != "assistant" {
 			continue
@@ -469,6 +474,8 @@ func (r *Resolver) persistACPDecisionProjection(ctx context.Context, req convers
 			Role:                    "assistant",
 			Content:                 content,
 			Metadata:                buildRouteMetadata(req),
+			SessionMode:             sessionMode,
+			RuntimeType:             runtimeType,
 		}); err != nil {
 			r.logger.Warn("persist ACP decision projection failed",
 				slog.String("bot_id", req.BotID),

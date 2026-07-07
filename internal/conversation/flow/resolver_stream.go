@@ -11,6 +11,7 @@ import (
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
+	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
 // WSStreamEvent represents a raw JSON event forwarded from the agent.
@@ -221,7 +222,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		if !stored {
 			switch {
 			case hasSnapshot:
-				r.persistPartialResult(ctx, streamReq, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
+				_ = r.persistPartialResult(ctx, streamReq, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
 			default:
 				r.logger.Info("skip persisting failed startup stream",
 					slog.String("bot_id", streamReq.BotID),
@@ -263,11 +264,32 @@ func (r *Resolver) StreamChatWS(
 	eventCh chan<- WSStreamEvent,
 	abortCh <-chan struct{},
 ) error {
+	_, err := r.streamChatWSResult(ctx, req, eventCh, abortCh)
+	return err
+}
+
+func (r *Resolver) streamChatWSResult(
+	ctx context.Context,
+	req conversation.ChatRequest,
+	eventCh chan<- WSStreamEvent,
+	abortCh <-chan struct{},
+) ([]messagepkg.Message, error) {
+	return r.streamChatWSResultWithHooks(ctx, req, eventCh, abortCh, nil, nil)
+}
+
+func (r *Resolver) streamChatWSResultWithHooks(
+	ctx context.Context,
+	req conversation.ChatRequest,
+	eventCh chan<- WSStreamEvent,
+	abortCh <-chan struct{},
+	preflight func(context.Context) error,
+	postPersist func(context.Context, []messagepkg.Message) error,
+) ([]messagepkg.Message, error) {
 	if err := rejectReservedSkillMetadataIfPresent(req); err != nil {
-		return err
+		return nil, err
 	}
 	if err := r.rejectRequestedSkillsIfUnsupportedContext(ctx, req); err != nil {
-		return err
+		return nil, err
 	}
 	if ok, err := r.isACPAgentSession(ctx, req); err != nil {
 		r.logger.Error("StreamChatWS: ACP session check failed",
@@ -275,26 +297,32 @@ func (r *Resolver) StreamChatWS(
 			slog.String("session_id", req.SessionID),
 			slog.Any("error", err),
 		)
-		return err
+		return nil, err
 	} else if ok {
-		return r.streamACPAgentWS(ctx, req, eventCh, abortCh)
+		return nil, r.streamACPAgentWS(ctx, req, eventCh, abortCh)
 	}
 
 	doneTurn := r.enterSessionTurn(ctx, req.BotID, req.SessionID)
 	defer doneTurn()
 
+	if preflight != nil {
+		if err := preflight(ctx); err != nil {
+			return nil, err
+		}
+	}
+
 	if req.RawQuery == "" {
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
 	var err error
-	if !req.UserMessagePersisted {
+	if !req.UserMessagePersisted && !req.ReusePersistedUserMessage {
 		req, err = r.applyUserMessageHook(ctx, req)
 		if err != nil {
 			r.logger.Error("StreamChatWS: user message hook failed",
 				slog.String("bot_id", req.BotID),
 				slog.Any("error", err),
 			)
-			return err
+			return nil, err
 		}
 	}
 	rc, err := r.resolve(ctx, req)
@@ -303,7 +331,7 @@ func (r *Resolver) StreamChatWS(
 			slog.String("bot_id", req.BotID),
 			slog.Any("error", err),
 		)
-		return fmt.Errorf("resolve: %w", err)
+		return nil, fmt.Errorf("resolve: %w", err)
 	}
 	req.Query = rc.query
 
@@ -337,6 +365,8 @@ func (r *Resolver) StreamChatWS(
 	var hasSnapshot bool
 	var toolCallCount int
 	var hasVisibleOutput bool
+	var persistedMessages []messagepkg.Message
+	postPersistApplied := false
 	for event := range agentEventCh {
 		idleCancel.Reset() // each event resets the idle timer
 
@@ -369,13 +399,22 @@ func (r *Resolver) StreamChatWS(
 				lastSnapshot = snap
 				hasSnapshot = true
 				if !stored {
-					if storeErr := r.persistTerminalSnapshot(context.WithoutCancel(ctx), req, rc, snap); storeErr != nil {
+					persisted, storeErr := r.persistTerminalSnapshotResult(context.WithoutCancel(ctx), req, rc, snap)
+					if storeErr != nil {
 						r.logger.Error("ws persist failed", slog.Any("error", storeErr))
 					} else {
+						persistedMessages = persisted
 						stored = true
 					}
 				}
 			}
+		}
+
+		if event.IsTerminal() && postPersist != nil && !postPersistApplied {
+			if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
+				return persistedMessages, err
+			}
+			postPersistApplied = true
 		}
 
 		if !clientGone {
@@ -391,7 +430,7 @@ func (r *Resolver) StreamChatWS(
 	if !stored {
 		switch {
 		case hasSnapshot:
-			r.persistPartialResult(ctx, req, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
+			persistedMessages = r.persistPartialResult(ctx, req, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
 		default:
 			r.logger.Info("skip persisting failed startup ws stream",
 				slog.String("bot_id", req.BotID),
@@ -422,13 +461,24 @@ func (r *Resolver) StreamChatWS(
 		}
 	}
 
-	return nil
+	if postPersist != nil && !postPersistApplied {
+		if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
+			return persistedMessages, err
+		}
+	}
+
+	return persistedMessages, nil
 }
 
 // persistTerminalSnapshot stores the SDK messages produced by an agent run
 // (or partial run) into bot history. Triggers compaction when usage data
 // indicates the context is large.
 func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, snap terminalSnapshot) error {
+	_, err := r.persistTerminalSnapshotResult(ctx, req, rc, snap)
+	return err
+}
+
+func (r *Resolver) persistTerminalSnapshotResult(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, snap terminalSnapshot) ([]messagepkg.Message, error) {
 	outputMessages := sdkMessagesToModelMessages(snap.sdkMessages)
 	if snap.aborted && !snap.visibleOutput {
 		r.logger.Info("skip persisting aborted terminal snapshot before visible output",
@@ -436,7 +486,7 @@ func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation
 			slog.String("chat_id", req.ChatID),
 			slog.Int("messages", len(outputMessages)),
 		)
-		return nil
+		return nil, nil
 	}
 	if !hasPersistableAssistantOutput(outputMessages) {
 		r.logger.Info("skip persisting terminal snapshot without assistant output",
@@ -444,11 +494,11 @@ func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation
 			slog.String("chat_id", req.ChatID),
 			slog.Int("messages", len(outputMessages)),
 		)
-		return nil
+		return nil, nil
 	}
 
 	storeReq := req
-	if rc.userMessageAlreadyInContext {
+	if req.ReusePersistedUserMessage {
 		storeReq.UserMessagePersisted = true
 	}
 	roundMessages := prependTurnUserMessage(storeReq, outputMessages)
@@ -457,17 +507,18 @@ func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation
 		roundMessages = interleaveInjectedMessages(roundMessages, *rc.injectedRecords)
 	}
 
-	if err := r.storeRoundWithOptions(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
+	persisted, err := r.storeRoundWithOptionsResult(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
 		AllowPendingToolCalls: snap.deferredToolID != "",
-	}); err != nil {
-		return err
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	if inputTokens := extractInputTokensFromUsage(snap.usage); inputTokens > 0 {
 		go r.maybeCompact(context.WithoutCancel(ctx), req, rc, inputTokens)
 	}
 
-	return nil
+	return persisted, nil
 }
 
 func hasPersistableAssistantOutput(messages []conversation.ModelMessage) bool {
@@ -496,7 +547,7 @@ func (r *Resolver) persistPartialResult(
 	toolCallCount int,
 	wasIdleTimeout bool,
 	hasVisibleOutput bool,
-) {
+) []messagepkg.Message {
 	persistCtx := context.WithoutCancel(ctx)
 
 	if len(partialMessages) > 0 {
@@ -504,7 +555,7 @@ func (r *Resolver) persistPartialResult(
 		// synthetic error tool_results for any tool_calls that never received
 		// a real result, preserving the assistant ↔ tool pairing required by
 		// downstream provider serializers (especially Anthropic).
-		err := r.persistTerminalSnapshot(persistCtx, req, rc, terminalSnapshot{
+		persisted, err := r.persistTerminalSnapshotResult(persistCtx, req, rc, terminalSnapshot{
 			sdkMessages:   partialMessages,
 			aborted:       !hasVisibleOutput,
 			visibleOutput: hasVisibleOutput,
@@ -522,7 +573,7 @@ func (r *Resolver) persistPartialResult(
 			if rc.estimatedTokens > 0 {
 				r.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
 			}
-			return
+			return persisted
 		}
 		r.logger.Error("failed to persist partial agent messages",
 			slog.String("bot_id", req.BotID),
@@ -540,6 +591,7 @@ func (r *Resolver) persistPartialResult(
 	if rc.estimatedTokens > 0 {
 		r.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
 	}
+	return nil
 }
 
 // interleaveInjectedMessages inserts injected user messages at their correct

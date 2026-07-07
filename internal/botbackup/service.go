@@ -500,7 +500,7 @@ func (s *Service) collectHistory(ctx context.Context, botID string, includeAsset
 	} else {
 		warnings = append(warnings, "session events export failed: "+err.Error())
 	}
-	if messages, err := s.queries.ListMessages(ctx, pgBotID); err == nil {
+	if messages, err := s.queries.ListAllMessagesForBackup(ctx, pgBotID); err == nil {
 		history.Messages = messages
 		if includeAssets {
 			messageIDs := make([]pgtype.UUID, 0, len(messages))

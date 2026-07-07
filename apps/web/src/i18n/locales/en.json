@@ -391,6 +391,7 @@
       "share": "Share",
       "retry": "Try again",
       "fork": "Fork",
+      "createFork": "Create fork",
       "more": "More",
       "readAloud": "Read aloud"
     },
@@ -427,6 +428,16 @@
     "attachFiles": "Attach files",
     "send": "Send",
     "sendFailed": "Message failed to send",
+    "forkFailed": "Failed to fork session",
+    "forkedFrom": "Forked from {session}",
+    "forkSourceUnavailable": "The original session no longer exists or was deleted.",
+    "forkDialog": {
+      "title": "Create fork",
+      "description": "Set a name for the new session.",
+      "namePlaceholder": "New session name",
+      "defaultTitle": "{session} fork"
+    },
+    "unknownSession": "Unknown session",
     "minimapLabel": "Conversation outline",
     "minimapEarlier": "Earlier messages appear as they load",
     "startChat": "Start Chat",
