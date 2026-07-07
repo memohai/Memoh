@@ -63,7 +63,13 @@ function readPatchedDependencies() {
     if (inBlock) {
       const m = line.match(/^\s+(\S+?):\s*(\S+)\s*$/)
       if (m) {
-        entries.push({ spec: m[1], patchPath: m[2] })
+        // pnpm quotes keys that start with @ ('@scope/pkg@1.0.0': …) — strip
+        // the quotes, or the spec never matches any .pnpm directory name and
+        // every install fails the moment the first scoped patch lands.
+        entries.push({
+          spec: m[1].replace(/^['"]|['"]$/g, ''),
+          patchPath: m[2].replace(/^['"]|['"]$/g, ''),
+        })
         continue
       }
       // Any non-indented, non-empty line ends the block.
@@ -115,15 +121,18 @@ function extractMarkers(patchFile) {
  * suffix is intentional: we don't recompute the hash — the whole point is to
  * distrust it and read the content instead. */
 function findInstalledDirs(spec) {
+  // Versionless specs are legal pnpm keys: `pkg` has no `@` at all and
+  // `@scope/pkg` has its only `@` at index 0 — in both cases the whole spec
+  // is the name and ANY version may carry the patch.
   const at = spec.lastIndexOf('@')
-  const name = spec.slice(0, at)
+  const name = at > 0 ? spec.slice(0, at) : spec
   const encoded = name.replace(/\//g, '+')
   const pnpmDir = path.join(repoRoot, 'node_modules', '.pnpm')
   if (!fs.existsSync(pnpmDir)) return []
-  const prefix = `${encoded}@${spec.slice(at + 1)}_patch_hash=`
+  const prefix = at > 0 ? `${encoded}@${spec.slice(at + 1)}_patch_hash=` : `${encoded}@`
   return fs
     .readdirSync(pnpmDir)
-    .filter((d) => d.startsWith(prefix))
+    .filter((d) => d.startsWith(prefix) && d.includes('_patch_hash='))
     .map((d) => path.join(pnpmDir, d, 'node_modules', name))
 }
 
@@ -135,10 +144,24 @@ function verifyInstalled() {
       failures.push(`${spec}: no _patch_hash directory found in node_modules/.pnpm (patch not applied at all?)`)
       continue
     }
-    const markers = extractMarkers(path.join(repoRoot, patchPath))
+    let markers
+    try {
+      markers = extractMarkers(path.join(repoRoot, patchPath))
+    } catch (err) {
+      failures.push(`${spec}: cannot read patch file ${patchPath}: ${err.message}`)
+      continue
+    }
+    // Refuse to certify what we cannot check: a patch that yields no
+    // verifiable added-line marker (corrupted file, exotic diff shape) must
+    // fail loudly — passing on directory presence alone would hollow out the
+    // "exit 0 = installed content carries the patch" invariant.
+    const verifiable = markers.filter((m) => m.added.trim())
+    if (verifiable.length === 0) {
+      failures.push(`${spec}: no verifiable added-line marker could be extracted from ${patchPath} — refusing to certify the install`)
+      continue
+    }
     for (const installedDir of installedDirs) {
-      for (const { file, added } of markers) {
-        if (!added.trim()) continue
+      for (const { file, added } of verifiable) {
         const target = path.join(installedDir, file)
         if (!fs.existsSync(target)) {
           failures.push(`${spec}: patched file missing: ${file}`)
@@ -163,7 +186,15 @@ function sweepStaleViteCaches() {
   const squash = (s) => s.replace(/\s+/g, '')
   const markers = []
   for (const { spec, patchPath } of readPatchedDependencies()) {
-    for (const { removed } of extractMarkers(path.join(repoRoot, patchPath))) {
+    // Unreadable patch → verifyInstalled already failed the run with a clear
+    // message; the sweep just skips it instead of crashing twice.
+    let extracted
+    try {
+      extracted = extractMarkers(path.join(repoRoot, patchPath))
+    } catch {
+      continue
+    }
+    for (const { removed } of extracted) {
       const m = squash(removed)
       if (m.length >= 20) markers.push({ spec, m })
     }
@@ -188,12 +219,28 @@ function sweepStaleViteCaches() {
     let stale = null
     while (stack.length > 0 && !stale) {
       const dir = stack.pop()
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      // The .vite dirs sit on the bind mount, shared by host vite, container
+      // vite and desktop electron-vite: another process may rotate temp files
+      // mid-scan. Transient IO errors (ENOENT, broken symlink named *.js)
+      // must skip the entry, not crash the guard — the sweep is a self-heal
+      // step, so a file it couldn't read is simply not evidence of staleness.
+      let dirEntries
+      try {
+        dirEntries = fs.readdirSync(dir, { withFileTypes: true })
+      } catch {
+        continue
+      }
+      for (const entry of dirEntries) {
         const p = path.join(dir, entry.name)
         if (entry.isDirectory()) {
           stack.push(p)
         } else if (entry.name.endsWith('.js')) {
-          const content = squash(fs.readFileSync(p, 'utf8'))
+          let content
+          try {
+            content = squash(fs.readFileSync(p, 'utf8'))
+          } catch {
+            continue
+          }
           const hit = markers.find(({ m }) => content.includes(m))
           if (hit) {
             stale = { file: p, spec: hit.spec }
@@ -217,18 +264,31 @@ if (failures.length > 0) {
   console.error(
     '\nThe pnpm cache has served stale/corrupted content for a patched package.' +
       '\nRecover with:' +
-      '\n  rm -rf node_modules/.pnpm node_modules/.modules.yaml .pnpm-store apps/*/node_modules/.vite' +
+      '\n  rm -rf node_modules/.pnpm node_modules/.pnpm-store node_modules/.modules.yaml \\' +
+      '\n         node_modules/.vite apps/*/node_modules/.vite .pnpm-store' +
       '\n  pnpm install' +
-      '\n(inside the dev container if you develop via devenv/docker-compose).' +
-      "\nClearing apps/*/node_modules/.vite matters: the dep optimizer's cache key is" +
-      '\nthe lockfile, which a cache-poisoning incident does NOT change, so a bundle' +
-      '\nbuilt from the poisoned install would otherwise be served even after the' +
-      '\nreinstall fixes node_modules.',
+      '\n(inside the dev container if you develop via devenv/docker-compose;' +
+      '\nfor Docker image builds the pnpm store is a BuildKit cache mount —' +
+      '\nclear it with `docker builder prune` instead).' +
+      '\nnode_modules/.pnpm-store must go too: the poison lives in the STORE' +
+      '\nentry, so reinstalling from the same store just re-links the bad copy.' +
+      "\nClearing the .vite dirs matters: the dep optimizer's cache key is" +
+      '\nthe lockfile, which a cache-poisoning incident does NOT change, so a' +
+      '\nbundle built from the poisoned install would otherwise be served even' +
+      '\nafter the reinstall fixes node_modules.',
   )
   process.exit(1)
 }
 
-const sweptDirs = sweepStaleViteCaches()
+// The sweep is a self-heal step, not a certification: an unexpected error
+// here (permissions, races on the shared bind mount) downgrades to a warning
+// instead of failing a dev whose INSTALL was just verified healthy above.
+let sweptDirs = []
+try {
+  sweptDirs = sweepStaleViteCaches()
+} catch (err) {
+  console.warn(`⚠ stale dep-optimizer cache sweep skipped: ${err.message}`)
+}
 for (const { cacheDir, spec } of sweptDirs) {
   console.warn(
     `⚠ removed stale dep-optimizer cache ${path.relative(repoRoot, cacheDir)} — ` +
