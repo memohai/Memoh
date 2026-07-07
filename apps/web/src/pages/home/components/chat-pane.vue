@@ -94,7 +94,7 @@
                     :can-fork-assistant="canForkAssistant"
                     :is-scrolling="isScrolling"
                     :is-last-message="index === messages.length - 1"
-                    @active="isActiveEl"
+                    @active="onMessageActive"
                     @edit-message="handleEditMessage"
                     @fork-message="handleForkMessage"
                   />
