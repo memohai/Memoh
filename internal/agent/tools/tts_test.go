@@ -43,7 +43,7 @@ func TestExecSpeakRequiresTargetBeforeLoadingSettings(t *testing.T) {
 	_, err := provider.execSpeak(context.Background(), SessionContext{
 		BotID:           "bot_1",
 		CurrentPlatform: "telegram",
-	}, map[string]any{
+	}, "call-test", map[string]any{
 		"text": "hello",
 	})
 	if err == nil || !strings.Contains(err.Error(), "target is required") {
@@ -59,7 +59,7 @@ func TestExecSpeakWithDifferentPlatformDoesNotReuseCurrentTarget(t *testing.T) {
 		BotID:           "bot_1",
 		CurrentPlatform: "telegram",
 		ReplyTarget:     "telegram-chat-1",
-	}, map[string]any{
+	}, "call-test", map[string]any{
 		"platform": "discord",
 		"text":     "hello",
 	})
@@ -100,7 +100,7 @@ func TestExecSpeakCurrentConversationCollectingEmitterUsesChannelAdapter(t *test
 		Emitter: func(ToolStreamEvent) {
 			emitted = true
 		},
-	}, map[string]any{
+	}, "call-test", map[string]any{
 		"text": "hello",
 	})
 	if err != nil {
@@ -134,7 +134,7 @@ func TestExecSpeakCurrentConversationLiveStreamUsesEmitter(t *testing.T) {
 		Emitter: func(ToolStreamEvent) {
 			emitted++
 		},
-	}, map[string]any{
+	}, "call-test", map[string]any{
 		"text": "hello",
 	})
 	if err != nil {
@@ -167,7 +167,7 @@ func TestExecSpeakDiscussCurrentTargetUsesChannelAdapter(t *testing.T) {
 		Emitter: func(ToolStreamEvent) {
 			emitted = true
 		},
-	}, map[string]any{
+	}, "call-test", map[string]any{
 		"platform": "telegram",
 		"target":   "chat-1",
 		"text":     "hello",

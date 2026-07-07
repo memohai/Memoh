@@ -198,4 +198,6 @@ require (
 	tags.cncf.io/container-device-interface/specs-go v1.1.0 // indirect
 )
 
+replace github.com/memohai/twilight-ai => github.com/akazwz/twilight-ai v0.4.1-0.20260707044248-a3b78173e729
+
 tool github.com/swaggo/swag/cmd/swag

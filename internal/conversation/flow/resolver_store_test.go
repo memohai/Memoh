@@ -187,3 +187,20 @@ func TestStoreMessagesUsesToolTailBatch(t *testing.T) {
 		t.Fatalf("persisted messages = %d, want 4", len(persisted))
 	}
 }
+
+func TestFindAssistantMessageForToolCall(t *testing.T) {
+	t.Parallel()
+
+	msgs := []messagepkg.Message{
+		{ID: "m3", Role: "assistant", Content: []byte(`{"role":"assistant","content":[{"type":"text","text":"done, see call-1 above"}]}`)},
+		{ID: "m2", Role: "tool", Content: []byte(`{"role":"tool","content":[{"type":"tool-result","toolCallId":"call-1"}]}`)},
+		{ID: "m1", Role: "assistant", Content: []byte(`{"role":"assistant","content":[{"type":"tool-call","toolCallId":"call-1","toolName":"generate_image"}]}`)},
+	}
+
+	if got := findAssistantMessageForToolCall(msgs, "call-1"); got != "m1" {
+		t.Fatalf("findAssistantMessageForToolCall = %q, want m1 (assistant tool-call row, not tool row or echoed text)", got)
+	}
+	if got := findAssistantMessageForToolCall(msgs, "call-404"); got != "" {
+		t.Fatalf("findAssistantMessageForToolCall unknown id = %q, want empty", got)
+	}
+}

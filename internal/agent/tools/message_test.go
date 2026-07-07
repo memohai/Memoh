@@ -159,7 +159,7 @@ func TestExecSendDiscussTextUsesChannelAdapter(t *testing.T) {
 		SessionType:     sessionmode.Discuss,
 		CurrentPlatform: "telegram",
 		ReplyTarget:     "chat-1",
-	}, map[string]any{
+	}, "call-test", map[string]any{
 		"text": "observed reply",
 	})
 	if err != nil {
@@ -187,7 +187,7 @@ func TestExecSendDiscussExplicitTargetReportsTargetDelivery(t *testing.T) {
 		SessionType:     sessionmode.Discuss,
 		CurrentPlatform: "telegram",
 		ReplyTarget:     "chat-1",
-	}, map[string]any{
+	}, "call-test", map[string]any{
 		"target": "chat-2",
 		"text":   "cross target",
 	})
@@ -213,7 +213,7 @@ func TestExecSendCurrentConversationWithoutEmitterUsesChannelAdapter(t *testing.
 		SessionType:     sessionmode.Chat,
 		CurrentPlatform: "telegram",
 		ReplyTarget:     "chat-1",
-	}, map[string]any{
+	}, "call-test", map[string]any{
 		"attachments": []any{"screenshot.png"},
 	})
 	if err != nil {
@@ -251,7 +251,7 @@ func TestExecSendCurrentConversationCollectingEmitterUsesChannelAdapter(t *testi
 		Emitter: func(ToolStreamEvent) {
 			emitted = true
 		},
-	}, map[string]any{
+	}, "call-test", map[string]any{
 		"attachments": []any{"screenshot.png"},
 	})
 	if err != nil {
@@ -287,7 +287,7 @@ func TestExecSendCurrentConversationLiveStreamUsesEmitter(t *testing.T) {
 		Emitter: func(ToolStreamEvent) {
 			emitted++
 		},
-	}, map[string]any{
+	}, "call-test", map[string]any{
 		"attachments": []any{"screenshot.png"},
 	})
 	if err != nil {

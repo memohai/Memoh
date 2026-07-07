@@ -544,9 +544,13 @@ func (r *Resolver) resolvePersistSenderIDs(ctx context.Context, req conversation
 	return senderChannelIdentityID, senderUserID
 }
 
-// LinkOutboundAssets links bot-generated assets to the latest assistant
-// message. When sessionID is provided, the search is scoped to that session;
-// otherwise it falls back to a bot-wide search.
+// LinkOutboundAssets links bot-generated assets to the assistant message that
+// produced them. Assets carrying a `tool_call_id` metadata entry are anchored
+// to the assistant message containing that tool call, so a history rebuild
+// keeps the live ordering (e.g. a generated image stays above the closing
+// text). Assets without one fall back to the latest assistant message. When
+// sessionID is provided, the search is scoped to that session; otherwise it
+// falls back to a bot-wide search.
 // Used by the WebSocket path where attachment ingestion happens after message
 // persistence.
 func (r *Resolver) LinkOutboundAssets(ctx context.Context, botID, sessionID string, assets []messagepkg.AssetRef) {
@@ -557,22 +561,75 @@ func (r *Resolver) LinkOutboundAssets(ctx context.Context, botID, sessionID stri
 		msgs []messagepkg.Message
 		err  error
 	)
+	// A single turn can span many rows (the originating tool-call assistant
+	// message, its tool-result row, and any follow-up assistant/tool messages
+	// such as sending the image to several channels). The window must comfortably
+	// cover a whole turn so tool-call anchoring below finds the originating
+	// message instead of silently falling back to the latest assistant message.
+	const anchorSearchWindow = 50
 	if strings.TrimSpace(sessionID) != "" {
-		msgs, err = r.messageService.ListLatestBySession(ctx, sessionID, 5)
+		msgs, err = r.messageService.ListLatestBySession(ctx, sessionID, anchorSearchWindow)
 	} else {
-		msgs, err = r.messageService.ListLatest(ctx, botID, 5)
+		msgs, err = r.messageService.ListLatest(ctx, botID, anchorSearchWindow)
 	}
 	if err != nil {
 		r.logger.Warn("LinkOutboundAssets: list latest failed", slog.Any("error", err))
 		return
 	}
+
+	latestAssistantID := ""
 	for _, msg := range msgs {
 		if msg.Role == "assistant" {
-			if linkErr := r.messageService.LinkAssets(ctx, msg.ID, assets); linkErr != nil {
-				r.logger.Warn("LinkOutboundAssets: link failed", slog.Any("error", linkErr))
-			}
-			return
+			latestAssistantID = msg.ID
+			break
 		}
 	}
-	r.logger.Warn("LinkOutboundAssets: no assistant message found", slog.String("bot_id", botID))
+	if latestAssistantID == "" {
+		r.logger.Warn("LinkOutboundAssets: no assistant message found", slog.String("bot_id", botID))
+		return
+	}
+
+	byMessage := map[string][]messagepkg.AssetRef{}
+	var order []string
+	for _, asset := range assets {
+		targetID := latestAssistantID
+		if toolCallID, _ := asset.Metadata["tool_call_id"].(string); strings.TrimSpace(toolCallID) != "" {
+			if id := findAssistantMessageForToolCall(msgs, strings.TrimSpace(toolCallID)); id != "" {
+				targetID = id
+			} else {
+				r.logger.Debug("LinkOutboundAssets: tool call not found in search window, anchoring to latest assistant",
+					slog.String("tool_call_id", strings.TrimSpace(toolCallID)))
+			}
+		}
+		if _, ok := byMessage[targetID]; !ok {
+			order = append(order, targetID)
+		}
+		byMessage[targetID] = append(byMessage[targetID], asset)
+	}
+	for _, id := range order {
+		group := byMessage[id]
+		for i := range group {
+			group[i].Ordinal = i
+		}
+		if linkErr := r.messageService.LinkAssets(ctx, id, group); linkErr != nil {
+			r.logger.Warn("LinkOutboundAssets: link failed", slog.Any("error", linkErr))
+		}
+	}
+}
+
+// findAssistantMessageForToolCall returns the ID of the assistant message
+// whose serialized content contains the given tool call ID as an exact JSON
+// string token. Tool call IDs are unique opaque tokens, so a quoted match
+// cannot collide with ordinary reply text.
+func findAssistantMessageForToolCall(msgs []messagepkg.Message, toolCallID string) string {
+	needle := `"` + toolCallID + `"`
+	for _, msg := range msgs {
+		if msg.Role != "assistant" || len(msg.Content) == 0 {
+			continue
+		}
+		if strings.Contains(string(msg.Content), needle) {
+			return msg.ID
+		}
+	}
+	return ""
 }

@@ -112,7 +112,7 @@ func (p *TTSProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.
 				"required": required,
 			},
 			Execute: func(execCtx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execSpeak(execCtx.Context, sess, inputAsMap(input))
+				return p.execSpeak(execCtx.Context, sess, execCtx.ToolCallID, inputAsMap(input))
 			},
 		},
 	}, nil
@@ -131,7 +131,7 @@ func speakToolPromptMetadata(session SessionContext) (description string, platfo
 		[]string{"text", "platform", "target"}
 }
 
-func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, toolCallID string, args map[string]any) (any, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
 		return nil, errors.New("bot_id is required")
@@ -173,7 +173,8 @@ func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, arg
 	// Same-conversation: emit the synthesized audio as a voice attachment.
 	if isSameConv && session.CanUseLocalMessagingShortcut() {
 		session.Emitter(ToolStreamEvent{
-			Type: StreamEventAttachment,
+			Type:       StreamEventAttachment,
+			ToolCallID: toolCallID,
 			Attachments: []Attachment{{
 				Type: "voice",
 				URL:  dataURL,

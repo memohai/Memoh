@@ -194,11 +194,12 @@ func TestBuiltInToolsHaveUsageGuidanceOrExplicitExemption(t *testing.T) {
 		ToolBrowserRemoteSession(): "browser",
 
 		ToolAskUser(): "user-input",
+
+		ToolGenerateImage(): "image-gen",
 	}
 	exempt := map[ToolName]string{
 		ToolWebSearch():         "self-describing one-shot search tool",
 		ToolWebFetch():          "self-describing one-shot fetch tool",
-		ToolGenerateImage():     "self-describing media generation tool",
 		ToolGenerateVideo():     "self-describing media generation tool",
 		ToolTranscribeAudio():   "self-describing media transcription tool",
 		ToolListEmailAccounts(): "email tool descriptions carry account/read/write semantics",

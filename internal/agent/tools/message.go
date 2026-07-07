@@ -91,7 +91,7 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 				"required": sendRequired,
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execSend(ctx.Context, sess, inputAsMap(input))
+				return p.execSend(ctx.Context, sess, ctx.ToolCallID, inputAsMap(input))
 			},
 		})
 	}
@@ -308,7 +308,7 @@ func reactToolPromptMetadata(session SessionContext) (description string, platfo
 		[]string{"message_id", "platform", "target"}
 }
 
-func (p *MessageProvider) execSend(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *MessageProvider) execSend(ctx context.Context, session SessionContext, toolCallID string, args map[string]any) (any, error) {
 	if session.SessionType == sessionmode.Discuss {
 		sendResult, err := p.exec.SendDirect(ctx, toMessagingSession(session), "", args)
 		if err != nil {
@@ -332,6 +332,7 @@ func (p *MessageProvider) execSend(ctx context.Context, session SessionContext, 
 		if len(atts) > 0 {
 			session.Emitter(ToolStreamEvent{
 				Type:        StreamEventAttachment,
+				ToolCallID:  toolCallID,
 				Attachments: atts,
 			})
 		}

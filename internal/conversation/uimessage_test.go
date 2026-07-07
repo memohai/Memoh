@@ -1509,3 +1509,188 @@ func mustUIMessageJSON(t *testing.T, message ModelMessage) json.RawMessage {
 	}
 	return data
 }
+
+func TestConvertTerminalMessagesReusesLiveBlockIDsAroundAttachments(t *testing.T) {
+	converter := NewUIMessageStreamConverter()
+
+	// Live stream: tool call starts, emits an attachment mid-execution, then
+	// the closing text streams in. IDs: tool=0, attachments=1, text=2.
+	converter.HandleEvent(UIMessageStreamEvent{Type: "tool_call_start", ToolCallID: "call-1", ToolName: "generate_image"})
+	attachmentBlocks := converter.HandleEvent(UIMessageStreamEvent{Type: "attachment_delta", Attachments: []UIAttachment{{Type: "image", ContentHash: "hash-1"}}})
+	if len(attachmentBlocks) != 1 || attachmentBlocks[0].ID != 1 {
+		t.Fatalf("attachment block = %#v, want id 1", attachmentBlocks)
+	}
+	converter.HandleEvent(UIMessageStreamEvent{Type: "tool_call_end", ToolCallID: "call-1", ToolName: "generate_image"})
+	textBlocks := converter.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: "done"})
+	if len(textBlocks) != 1 || textBlocks[0].ID != 2 {
+		t.Fatalf("text block = %#v, want id 2", textBlocks)
+	}
+
+	// Terminal snapshot regenerates only tool + text; without ID alignment the
+	// text would land on id 1 and overwrite the attachment block client-side.
+	raw := mustUIRawJSON(t, []ModelMessage{
+		{
+			Role: "assistant",
+			Content: mustUIRawJSON(t, []map[string]any{
+				{"type": "tool-call", "toolCallId": "call-1", "toolName": "generate_image", "input": map[string]any{"prompt": "a cat"}},
+			}),
+		},
+		{
+			Role: "tool",
+			Content: mustUIRawJSON(t, []map[string]any{
+				{"type": "tool-result", "toolCallId": "call-1", "toolName": "generate_image", "result": map[string]any{"path": "/data/generated-images/1.png"}},
+			}),
+		},
+		{
+			Role: "assistant",
+			Content: mustUIRawJSON(t, []map[string]any{
+				{"type": "text", "text": "done"},
+			}),
+		},
+	})
+
+	blocks := converter.ConvertTerminalMessages(raw)
+	if len(blocks) != 2 {
+		t.Fatalf("expected 2 terminal blocks, got %d: %#v", len(blocks), blocks)
+	}
+	if blocks[0].Type != UIMessageTool || blocks[0].ID != 0 {
+		t.Fatalf("tool block = %#v, want live id 0", blocks[0])
+	}
+	if blocks[1].Type != UIMessageText || blocks[1].ID != 2 {
+		t.Fatalf("text block = %#v, want live id 2 (must not collide with attachment id 1)", blocks[1])
+	}
+}
+
+func TestConvertTerminalMessagesAllocatesFreshIDsForUnseenBlocks(t *testing.T) {
+	converter := NewUIMessageStreamConverter()
+
+	// No live blocks at all (e.g. events dropped): snapshot still renders with
+	// sequential fresh IDs.
+	raw := mustUIRawJSON(t, []ModelMessage{
+		{
+			Role: "assistant",
+			Content: mustUIRawJSON(t, []map[string]any{
+				{"type": "text", "text": "hello"},
+			}),
+		},
+	})
+	blocks := converter.ConvertTerminalMessages(raw)
+	if len(blocks) != 1 || blocks[0].ID != 0 || blocks[0].Type != UIMessageText {
+		t.Fatalf("blocks = %#v, want one fresh text block with id 0", blocks)
+	}
+}
+
+func TestConvertTerminalMessagesAfterRetryIgnoresDiscardedAttemptBlocks(t *testing.T) {
+	converter := NewUIMessageStreamConverter()
+
+	// Attempt 1 streams a text block (ID 0), then the attempt is retried.
+	converter.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: "partial attempt one"})
+	converter.HandleEvent(UIMessageStreamEvent{Type: "retry"})
+
+	// Attempt 2 streams tool (ID 1), an attachment (ID 2), and the final text (ID 3).
+	converter.HandleEvent(UIMessageStreamEvent{Type: "tool_call_start", ToolCallID: "call-1", ToolName: "generate_image"})
+	converter.HandleEvent(UIMessageStreamEvent{Type: "attachment_delta", Attachments: []UIAttachment{{Type: "image", ContentHash: "hash-1"}}})
+	converter.HandleEvent(UIMessageStreamEvent{Type: "tool_call_end", ToolCallID: "call-1", ToolName: "generate_image"})
+	textBlocks := converter.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: "final answer"})
+	if len(textBlocks) != 1 {
+		t.Fatalf("expected 1 text block, got %d", len(textBlocks))
+	}
+	finalTextID := textBlocks[0].ID
+
+	// finalMessages hold only attempt 2 (tool-call + final text).
+	raw := mustUIRawJSON(t, []ModelMessage{
+		{
+			Role: "assistant",
+			Content: mustUIRawJSON(t, []map[string]any{
+				{"type": "tool-call", "toolCallId": "call-1", "toolName": "generate_image", "input": map[string]any{"prompt": "a cat"}},
+			}),
+		},
+		{
+			Role: "tool",
+			Content: mustUIRawJSON(t, []map[string]any{
+				{"type": "tool-result", "toolCallId": "call-1", "toolName": "generate_image", "result": map[string]any{"path": "/data/generated-images/1.png"}},
+			}),
+		},
+		{
+			Role: "assistant",
+			Content: mustUIRawJSON(t, []map[string]any{
+				{"type": "text", "text": "final answer"},
+			}),
+		},
+	})
+
+	blocks := converter.ConvertTerminalMessages(raw)
+	if len(blocks) != 2 {
+		t.Fatalf("expected 2 terminal blocks, got %d: %#v", len(blocks), blocks)
+	}
+	// The final text must reuse the live final text block ID (attempt 2), not
+	// the discarded attempt-1 text block (ID 0), so it does not overwrite it.
+	var terminalText *UIMessage
+	for i := range blocks {
+		if blocks[i].Type == UIMessageText {
+			terminalText = &blocks[i]
+		}
+	}
+	if terminalText == nil {
+		t.Fatal("expected a terminal text block")
+	}
+	if terminalText.ID != finalTextID {
+		t.Fatalf("terminal text ID = %d, want live final text ID %d (retry must clear the discarded attempt's block)", terminalText.ID, finalTextID)
+	}
+	if terminalText.ID == 0 {
+		t.Fatal("terminal text must not reuse the discarded attempt-1 block ID 0")
+	}
+}
+
+func TestConvertTerminalMessagesSkipsTagOnlyLiveTextBlocks(t *testing.T) {
+	converter := NewUIMessageStreamConverter()
+
+	// Live: a standalone text segment that is entirely inline agent tags
+	// (ID 0), then a tool call (ID 1), then the real reply (ID 2). The terminal
+	// snapshot strips the tags and drops the empty text block, so it contains
+	// only the tool call and the real reply.
+	converter.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: `<attachments>{"path":"/tmp/a.png"}</attachments>`})
+	converter.HandleEvent(UIMessageStreamEvent{Type: "text_end"})
+	converter.HandleEvent(UIMessageStreamEvent{Type: "tool_call_start", ToolCallID: "call-1", ToolName: "generate_image"})
+	converter.HandleEvent(UIMessageStreamEvent{Type: "tool_call_end", ToolCallID: "call-1", ToolName: "generate_image"})
+	textBlocks := converter.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: "here you go"})
+	if len(textBlocks) != 1 {
+		t.Fatalf("expected 1 live text block, got %d", len(textBlocks))
+	}
+	realTextID := textBlocks[0].ID
+
+	raw := mustUIRawJSON(t, []ModelMessage{
+		{
+			Role: "assistant",
+			Content: mustUIRawJSON(t, []map[string]any{
+				{"type": "tool-call", "toolCallId": "call-1", "toolName": "generate_image", "input": map[string]any{"prompt": "a cat"}},
+			}),
+		},
+		{
+			Role: "tool",
+			Content: mustUIRawJSON(t, []map[string]any{
+				{"type": "tool-result", "toolCallId": "call-1", "toolName": "generate_image", "result": map[string]any{"path": "/tmp/a.png"}},
+			}),
+		},
+		{
+			Role: "assistant",
+			Content: mustUIRawJSON(t, []map[string]any{
+				{"type": "text", "text": "here you go"},
+			}),
+		},
+	})
+
+	blocks := converter.ConvertTerminalMessages(raw)
+	var terminalText *UIMessage
+	for i := range blocks {
+		if blocks[i].Type == UIMessageText {
+			terminalText = &blocks[i]
+		}
+	}
+	if terminalText == nil {
+		t.Fatal("expected a terminal text block")
+	}
+	if terminalText.ID != realTextID {
+		t.Fatalf("terminal text ID = %d, want %d (must skip the tag-only live block, not overwrite it)", terminalText.ID, realTextID)
+	}
+}

@@ -982,7 +982,7 @@ func (h *LocalChannelHandler) forwardWSStreamEvents(ctx, assetCtx context.Contex
 				})
 				continue
 			case agentpkg.EventAgentEnd, agentpkg.EventAgentAbort:
-				for _, uiMessage := range conversation.ConvertRawModelMessagesToUIAssistantMessages(streamEvent.Messages) {
+				for _, uiMessage := range converter.ConvertTerminalMessages(streamEvent.Messages) {
 					writer.SendJSON(wsOutboundEvent{
 						Type:      "message",
 						StreamID:  streamID,
@@ -1979,11 +1979,13 @@ func (h *LocalChannelHandler) buildTtsAttachment(ctx context.Context, botID, con
 func extractAssetRefsFromProcessedEvent(event json.RawMessage) []messagepkg.AssetRef {
 	var envelope struct {
 		Type        string           `json:"type"`
+		ToolCallID  string           `json:"toolCallId"`
 		Attachments []map[string]any `json:"attachments"`
 	}
 	if err := json.Unmarshal(event, &envelope); err != nil || envelope.Type != "attachment_delta" {
 		return nil
 	}
+	toolCallID := strings.TrimSpace(envelope.ToolCallID)
 	var refs []messagepkg.AssetRef
 	for i, att := range envelope.Attachments {
 		bundle := attachmentpkg.BundleFromMap(att)
@@ -1995,6 +1997,14 @@ func extractAssetRefsFromProcessedEvent(event json.RawMessage) []messagepkg.Asse
 		if name == "" && bundle.Metadata != nil {
 			name, _ = bundle.Metadata["name"].(string)
 		}
+		metadata := bundle.Metadata
+		if toolCallID != "" {
+			metadata = maps.Clone(metadata)
+			if metadata == nil {
+				metadata = map[string]any{}
+			}
+			metadata["tool_call_id"] = toolCallID
+		}
 		ref := messagepkg.AssetRef{
 			ContentHash: ch,
 			Role:        "attachment",
@@ -2002,7 +2012,7 @@ func extractAssetRefsFromProcessedEvent(event json.RawMessage) []messagepkg.Asse
 			Name:        name,
 			Mime:        strings.TrimSpace(bundle.Mime),
 			SizeBytes:   bundle.Size,
-			Metadata:    bundle.Metadata,
+			Metadata:    metadata,
 		}
 		ref.StorageKey = attachmentpkg.MetadataString(bundle.Metadata, attachmentpkg.MetadataKeyStorageKey)
 		refs = append(refs, ref)
