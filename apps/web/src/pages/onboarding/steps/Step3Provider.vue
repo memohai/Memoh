@@ -57,12 +57,11 @@ const capabilities = useCapabilitiesStore()
 const desktopRuntime = useDesktopRuntime()
 
 // Local workspace creation means "self" can run against host credentials.
-// Remote desktop connects to a server elsewhere, so it should use BYOK defaults.
+// Desktop connects to a hosted server, so it should use BYOK defaults.
 const allowLocalWorkspaceCreate = computed(() =>
   canCreateLocalWorkspace({
     serverLocalWorkspaceEnabled: capabilities.localWorkspaceEnabled,
     host: desktopRuntime.host.value,
-    desktopRuntimeMode: desktopRuntime.desktopRuntimeMode.value,
   }),
 )
 
@@ -151,8 +150,8 @@ function onSkipStep() {
 }
 
 async function openAcpForm(profile: AcpprofilePublicProfile) {
-  // Resolve deployment and desktop runtime policy before branching so remote
-  // desktop does not pick the local "self" default when clicked early.
+  // Resolve deployment policy before branching so Desktop does not pick the
+  // local "self" default when clicked early.
   await Promise.all([capabilities.load(), desktopRuntime.load()])
 
   selectedAcpProfile.value = profile
@@ -164,9 +163,9 @@ async function openAcpForm(profile: AcpprofilePublicProfile) {
     if (id) acpManaged[id] = ''
   }
   const modes = acpSetupModes(profile)
-  // Desktop/local already has a logged-in CLI, so "use local config" (self) is
-  // the recommended default and BYOK (oauth / api_key) is the secondary path.
-  // Clean container workspaces have no credentials, so they default to api_key.
+  // A browser-managed local workspace can use host credentials. Desktop and
+  // clean container workspaces have no bundled host credentials, so they default
+  // to BYOK.
   const preferred = allowLocalWorkspaceCreate.value ? 'self' : 'api_key'
   acpSetupMode.value = modes.includes(preferred) ? preferred : (modes[0] ?? defaultSetupMode(profile))
   if (isAcpHermesProfile(profile) && acpSetupMode.value === 'api_key') {

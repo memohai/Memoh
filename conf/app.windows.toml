@@ -20,9 +20,7 @@ jwt_expires_in = "168h"
 timezone = "UTC"
 
 [database]
-# Supported values: "postgres" or "sqlite".
-# SQLite is useful for single-node testing. Use PostgreSQL when you want to
-# match the default Docker deployment.
+# Memoh now supports PostgreSQL only.
 driver = "postgres"
 
 [container]
@@ -49,19 +47,12 @@ runtime_type = "io.containerd.runc.v2"
 host = ""
 
 [postgres]
-# Used only when [database].driver = "postgres".
 host = "127.0.0.1"
 port = 5432
 user = "memoh"
 password = "memoh123"
 database = "memoh"
 sslmode = "disable"
-
-[sqlite]
-# Used only when [database].driver = "sqlite".
-path = "data/memoh.db"
-wal = true
-busy_timeout_ms = 5000
 
 [qdrant]
 base_url = "http://127.0.0.1:6334"

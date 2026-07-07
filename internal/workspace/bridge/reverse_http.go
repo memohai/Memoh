@@ -124,7 +124,7 @@ func handleReverseHTTPRequest(ctx context.Context, handler http.Handler, request
 	if !strings.HasPrefix(target, "/") {
 		target = "/" + target
 	}
-	// Echo rejects synthetic host names in some desktop/local-server paths.
+	// Echo rejects synthetic host names in some hosted-server paths.
 	httpReq, err := http.NewRequestWithContext(ctx, method, "http://127.0.0.1"+target, bytes.NewReader(request.GetBody()))
 	if err != nil {
 		return nil, err

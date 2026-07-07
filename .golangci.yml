@@ -44,7 +44,6 @@ linters:
     generated: lax
     paths:
       - internal/db/postgres/sqlc
-      - internal/db/sqlite/sqlc
       - ^.*\.(pb|l|y)\.go$
   settings:
     govet:

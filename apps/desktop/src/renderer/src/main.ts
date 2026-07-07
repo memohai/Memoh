@@ -53,10 +53,6 @@ async function bootstrap() {
   })
 
   const status = await window.api.desktop.getServerStatus()
-  const token = await window.api.desktop.authToken()
-  if (token) {
-    localStorage.setItem('token', token)
-  }
   setupApiClient({
     baseUrl: status.baseUrl || 'http://127.0.0.1:0',
     onUnauthorized: () => router.replace({ name: 'Login' }),
@@ -128,6 +124,22 @@ async function bootstrap() {
     if (head === 'bots' || head === 'bot') {
       void chatStore.refreshBots()
     }
+  })
+
+  // Mirror the chat store's bot list into the native tray menu. The main
+  // process holds no credentials, so the renderer — owner of the
+  // authenticated SDK session — pushes the list whenever it changes
+  // (initial fetch, invalidation-driven refreshes, sign-out clearing it).
+  watchEffect(() => {
+    const trayBots = chatStore.bots
+      .map(bot => ({
+        id: (bot.id ?? '').trim(),
+        displayName: bot.display_name?.trim() || bot.name?.trim() || (bot.id ?? '').trim(),
+      }))
+      .filter(bot => bot.id)
+    window.api.desktop.setTrayBots(trayBots).catch((error) => {
+      console.warn('failed to push tray bots to main', error)
+    })
   })
 
   app.mount('#app')

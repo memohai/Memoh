@@ -2,7 +2,6 @@ package providers
 
 import (
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -13,10 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	sqlitestore "github.com/memohai/memoh/internal/db/sqlite/store"
 	"github.com/memohai/memoh/internal/models"
 )
 
@@ -182,96 +178,6 @@ func TestIsHiddenRegistryTemplate(t *testing.T) {
 				t.Fatalf("isHiddenRegistryTemplate() = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestCreateActivatesHiddenRegistryTemplate(t *testing.T) {
-	ctx := context.Background()
-	conn, queries := newProviderServiceTestQueries(t)
-
-	const providerID = "00000000-0000-0000-0000-000000000101"
-	_, err := conn.ExecContext(ctx, `
-INSERT INTO providers (id, name, client_type, icon, enable, config, metadata)
-VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		providerID,
-		"DeepSeek",
-		string(models.ClientTypeOpenAICompletions),
-		"deepseek-color",
-		0,
-		`{"base_url":"https://api.deepseek.com/v1"}`,
-		`{"registry":{"source":"deepseek.yaml"}}`,
-	)
-	if err != nil {
-		t.Fatalf("insert hidden template provider: %v", err)
-	}
-	_, err = conn.ExecContext(ctx, `
-INSERT INTO models (id, model_id, name, provider_id, type, config)
-VALUES (?, ?, ?, ?, ?, ?)`,
-		"00000000-0000-0000-0000-000000000102",
-		"deepseek-chat",
-		"DeepSeek Chat",
-		providerID,
-		string(models.ModelTypeChat),
-		`{}`,
-	)
-	if err != nil {
-		t.Fatalf("insert hidden template model: %v", err)
-	}
-
-	service := &Service{queries: queries}
-	resp, err := service.Create(ctx, CreateRequest{
-		Name:       "DeepSeek",
-		ClientType: string(models.ClientTypeOpenAICompletions),
-		Icon:       "deepseek-color",
-		Config: map[string]any{
-			"base_url": "https://api.deepseek.com/v1",
-			"api_key":  "sk-new",
-		},
-		Metadata: map[string]any{
-			"preset": map[string]any{
-				"id":     "deepseek",
-				"source": "deepseek.yaml",
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("create provider from hidden template: %v", err)
-	}
-	if resp.ID != providerID {
-		t.Fatalf("provider id = %s, want activated template id %s", resp.ID, providerID)
-	}
-	if !resp.Enable {
-		t.Fatal("provider should be enabled")
-	}
-	if _, ok := resp.Metadata["registry"]; ok {
-		t.Fatalf("registry metadata should be removed from activated provider: %#v", resp.Metadata)
-	}
-
-	raw, err := queries.GetProviderByName(ctx, "DeepSeek")
-	if err != nil {
-		t.Fatalf("get provider by name: %v", err)
-	}
-	cfg := providerConfig(raw.Config)
-	if cfg["api_key"] != "sk-new" {
-		t.Fatalf("api_key = %#v, want stored credential", cfg["api_key"])
-	}
-	providerUUID, err := db.ParseUUID(providerID)
-	if err != nil {
-		t.Fatalf("parse provider id: %v", err)
-	}
-	providerModels, err := queries.ListModelsByProviderID(ctx, providerUUID)
-	if err != nil {
-		t.Fatalf("list provider models: %v", err)
-	}
-	if len(providerModels) != 1 || providerModels[0].ModelID != "deepseek-chat" {
-		t.Fatalf("provider models = %#v, want existing template model retained", providerModels)
-	}
-	list, err := service.List(ctx)
-	if err != nil {
-		t.Fatalf("list providers: %v", err)
-	}
-	if len(list) != 1 || list[0].Name != "DeepSeek" {
-		t.Fatalf("visible providers = %#v, want activated provider", list)
 	}
 }
 
@@ -939,55 +845,4 @@ func TestFetchRemoteModelsViaSDK(t *testing.T) {
 			t.Fatalf("expected Name to fall back to ID when DisplayName is empty, got %q", remoteModels[0].Name)
 		}
 	})
-}
-
-func newProviderServiceTestQueries(t *testing.T) (*sql.DB, *sqlitestore.Queries) {
-	t.Helper()
-	ctx := context.Background()
-	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-
-	execProviderServiceSchema(t, conn)
-	store, err := sqlitestore.New(conn)
-	if err != nil {
-		t.Fatalf("new sqlite store: %v", err)
-	}
-	return conn, sqlitestore.NewQueries(store)
-}
-
-func execProviderServiceSchema(t *testing.T, conn *sql.DB) {
-	t.Helper()
-	_, err := conn.ExecContext(context.Background(), `
-CREATE TABLE providers (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  client_type TEXT NOT NULL DEFAULT 'openai-completions',
-  icon TEXT,
-  enable INTEGER NOT NULL DEFAULT 1,
-  config TEXT NOT NULL DEFAULT '{}',
-  metadata TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT providers_name_unique UNIQUE (name)
-);
-
-CREATE TABLE models (
-  id TEXT PRIMARY KEY,
-  model_id TEXT NOT NULL,
-  name TEXT,
-  provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
-  type TEXT NOT NULL DEFAULT 'chat',
-  enable INTEGER NOT NULL DEFAULT 1,
-  config TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT models_provider_id_model_id_unique UNIQUE (provider_id, model_id)
-);
-`)
-	if err != nil {
-		t.Fatalf("exec provider schema: %v", err)
-	}
 }

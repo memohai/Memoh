@@ -4,11 +4,10 @@ import { RouterView, useRouter, useRoute } from 'vue-router'
 import { Toaster } from '@memohai/ui'
 import { useSettingsStore } from '@memohai/web/store/settings'
 import { useUpdateStore } from '@memohai/web/store/update'
-import { DesktopShellKey, DesktopRuntimeModeKey } from '@memohai/web/lib/desktop-shell'
+import { DesktopShellKey } from '@memohai/web/lib/desktop-shell'
 import MainSection from '@memohai/web/pages/main-section/index.vue'
 
 provide(DesktopShellKey, true)
-provide(DesktopRuntimeModeKey, __MEMOH_DESKTOP_RUNTIME_MODE__)
 useSettingsStore()
 const updateStore = useUpdateStore()
 

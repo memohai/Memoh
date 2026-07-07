@@ -1143,11 +1143,10 @@ func (s *Service) restoreEmailBindings(ctx context.Context, botID string, state 
 	return nil
 }
 
-// restoreHistory recreates sessions, messages and (optionally) assets. The whole
-// batch runs inside a single transaction on PostgreSQL so a failure leaves no
-// partial history (on SQLite the pool is nil and writes degrade to best-effort,
-// matching the rest of the codebase). When replace is set, existing conversation
-// state is cleared first so the import is a real replacement, not a partial append.
+// restoreHistory recreates sessions, messages and (optionally) assets in a
+// single transaction so a failure leaves no partial history. When replace is
+// set, existing conversation state is cleared first so the import is a real
+// replacement, not a partial append.
 func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string, state *importState, includeAssets, replace bool) error {
 	if s.queries == nil {
 		return nil

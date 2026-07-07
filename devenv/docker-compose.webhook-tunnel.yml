@@ -13,10 +13,10 @@ services:
     environment:
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
       HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
-      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},server,memoh-dev-server,memoh-dev-sqlite-server"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},server,memoh-dev-server"
       http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
       https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
-      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},server,memoh-dev-server,memoh-dev-sqlite-server"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},server,memoh-dev-server"
     ports:
       - "${MEMOH_DEV_WEBHOOK_TUNNEL_METRICS_PORT:-18735}:18735"
     depends_on:

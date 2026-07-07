@@ -640,8 +640,6 @@
     "agentSwitchFailed": "エージェントの切り替えに失敗しました",
     "modelSwitchFailed": "モデルの切り替えに失敗しました",
     "noProject": "プロジェクトに含まれていません",
-    "projectFolder": "プロジェクトフォルダー",
-    "chooseFolder": "フォルダーを選択…",
     "noModels": "利用可能なモデルはありません",
     "acpAttachmentsUnsupported": "ACPセッションでは、添付ファイルはまだサポートされていません。",
     "defaultACPLoading": "デフォルトAgentはまだ読み込み中です。少し待ってからもう一度お試しください。",

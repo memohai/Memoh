@@ -9,12 +9,6 @@ curl -fsSL https://memoh.sh | sh
 The script prompts for configuration, generates `config.toml`, and starts all services.
 Run it as your normal user. The script will use `sudo docker` internally only when Docker requires it.
 
-For a lightweight single-node install backed by SQLite:
-
-```bash
-curl -fsSL https://memoh.sh | MEMOH_DATABASE_DRIVER=sqlite sh
-```
-
 The one-click Docker Compose installer uses the `containerd` workspace backend. Docker and Apple workspace backends are available for manual deployments by editing `[container].backend` in `config.toml`.
 
 ## Manual Install
@@ -115,11 +109,9 @@ docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml \
 Recommended changes for production:
 - `admin.password` — Admin password
 - `auth.jwt_secret` — JWT secret (generate with `openssl rand -base64 32`)
-- `database.driver` — `postgres` for the default deployment, or `sqlite` for a single-node install
+- `database.driver` — `postgres`
 - `container.backend` — `containerd` for the official Docker Compose stack; use `docker` or `apple` only for matching manual deployments
 - `postgres.password` — Database password (also set `POSTGRES_PASSWORD` env var)
-
-SQLite deployments should use `docker-compose.sqlite.yml`; the database file lives in the `memoh_data` Docker volume.
 
 ## Common Commands
 

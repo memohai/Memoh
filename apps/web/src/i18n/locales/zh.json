@@ -674,8 +674,6 @@
     "modelOptions": "选项",
     "modelEffort": "强度",
     "noProject": "不在项目中",
-    "projectFolder": "项目文件夹",
-    "chooseFolder": "选择文件夹…",
     "noModels": "暂无可用模型",
     "acpAttachmentsUnsupported": "ACP 会话暂不支持附件。",
     "defaultACPLoading": "默认 Agent 仍在加载，请稍后重试。",

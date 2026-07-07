@@ -891,61 +891,8 @@
                     </PopoverContent>
                   </Popover>
 
-                  <DropdownMenu
-                    v-if="canChooseProjectFolder"
-                    v-model:open="projectFolderMenuOpen"
-                  >
-                    <DropdownMenuTrigger as-child>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        :disabled="agentChanging"
-                        class="composer-pill-press h-9 min-w-0 max-w-40 gap-1 rounded-full px-3 text-muted-foreground"
-                      >
-                        <component
-                          :is="activeProjectIsNone ? Folder : FolderOpen"
-                          class="size-3.5 shrink-0"
-                        />
-                        <span
-                          ref="acpProjectLabelEl"
-                          class="min-w-0 truncate text-label"
-                        >{{ activeACPProjectLabel }}</span>
-                        <ChevronDown class="size-3.5 shrink-0 opacity-50" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent
-                      class="w-64"
-                      align="end"
-                      side="top"
-                    >
-                      <DropdownMenuLabel>{{ $t('chat.projectFolder') }}</DropdownMenuLabel>
-                      <DropdownMenuItem @select="selectACPNoProject">
-                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.noProject') }}</span>
-                        <Check
-                          v-if="activeProjectIsNone"
-                          class="ml-auto"
-                        />
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        v-for="folder in projectFolderOptions"
-                        :key="folder"
-                        :title="folder"
-                        @select="selectACPProjectFolder(folder)"
-                      >
-                        <span class="min-w-0 flex-1 truncate">{{ folderBasename(folder) }}</span>
-                        <Check
-                          v-if="!activeProjectIsNone && folder === currentACPProjectPath"
-                          class="ml-auto"
-                        />
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem @select="onChooseProjectFolder">
-                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.chooseFolder') }}</span>
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
                   <Button
-                    v-else-if="activeIsACP"
+                    v-if="activeIsACP"
                     type="button"
                     variant="ghost"
                     class="h-9 min-w-0 max-w-40 gap-1 rounded-full px-3 text-muted-foreground"
@@ -1033,7 +980,6 @@ import {
   CircleAlert,
   ArrowDown,
   Check,
-  Folder,
   FolderOpen,
   Square,
   SquareCheck,
@@ -1072,10 +1018,8 @@ import { useMediaGallery } from '../composables/useMediaGallery'
 import { fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput, type UIUserInputQuestion, type WSUserInputAnswer } from '@/composables/api/useChat'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
-import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, ACP_NO_PROJECT_MODE, acpAgentIcon, createACPNoProjectPath, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig, readRecentACPFolders, rememberACPFolder } from '@/utils/acp'
+import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { canPickProjectFolder, pickProjectFolder } from '@/utils/desktop-runtime'
-import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { hasBotPermission } from '@/utils/bot-permissions'
 
 interface PendingUserInputDraft {
@@ -1537,15 +1481,6 @@ const activeACPProjectLabel = computed(() => {
 })
 const canChangeAgent = computed(() => !streaming.value && messages.value.length === 0)
 
-// Project folder picker. A host folder only maps to the agent's working
-// directory when the agent runs on a local desktop workspace; in remote/web
-// mode the path is fixed server-side, so the pill stays a read-only marker.
-// Mirrors the agent switcher's gate — the runtime binds its folder on the first
-// turn, so the choice is offered only while the session is still empty.
-function folderBasename(path: string): string {
-  const parts = path.split('/').filter(Boolean)
-  return parts[parts.length - 1] ?? path
-}
 
 function messageMatchesForkSource(message: ChatMessage): boolean {
   const forkMessageId = forkSource.value?.forkMessageId?.trim()
@@ -1569,65 +1504,7 @@ function showForkSourceDividerBefore(index: number): boolean {
     && (!forkSource.value?.forkMessageId || forkSourceDividerAfterIndex.value === null)
     && index === 0
 }
-const { isLocalDesktop, load: loadDesktopRuntime } = useDesktopRuntime()
-void loadDesktopRuntime()
-const projectFolderMenuOpen = ref(false)
-const recentACPFolders = ref<string[]>(readRecentACPFolders())
-const currentACPProjectPath = computed(() => String(activeSessionMetadata.value.project_path ?? '').trim())
-const activeProjectIsNone = computed(() => isACPNoProject(activeSessionMetadata.value))
-const canChooseProjectFolder = computed(() =>
-  activeIsACP.value && canChangeAgent.value && isLocalDesktop.value && canPickProjectFolder(),
-)
-const projectFolderOptions = computed(() => {
-  const list = [...recentACPFolders.value]
-  const current = currentACPProjectPath.value
-  if (current && !activeProjectIsNone.value && !list.includes(current)) list.unshift(current)
-  return list
-})
 
-watch(projectFolderMenuOpen, (open) => {
-  if (open) recentACPFolders.value = readRecentACPFolders()
-})
-
-async function applyACPProject(projectMode: string, projectPath: string) {
-  const agentId = activeACPAgentId.value
-  if (!agentId || agentChanging.value || !canChangeAgent.value) return
-  projectFolderMenuOpen.value = false
-  agentChanging.value = true
-  composerError.value = ''
-  try {
-    if (chatStore.sessionId) {
-      await withAgentSwitchTimeout(chatStore.updateCurrentSessionAgent({ agentId, projectMode, projectPath }))
-    }
-    else {
-      chatStore.stageACPSession({ agentId, projectMode, projectPath })
-      await withAgentSwitchTimeout(chatStore.ensurePendingACPRuntime())
-    }
-    pendingFiles.value = []
-  }
-  catch (error) {
-    composerError.value = agentSwitchErrorMessage(error)
-  }
-  finally {
-    agentChanging.value = false
-  }
-}
-
-function selectACPProjectFolder(path: string) {
-  const next = path.trim()
-  if (next) void applyACPProject(ACP_DEFAULT_PROJECT_MODE, next)
-}
-
-function selectACPNoProject() {
-  void applyACPProject(ACP_NO_PROJECT_MODE, createACPNoProjectPath())
-}
-
-async function onChooseProjectFolder() {
-  const path = await pickProjectFolder()
-  if (!path) return
-  recentACPFolders.value = rememberACPFolder(path)
-  void applyACPProject(ACP_DEFAULT_PROJECT_MODE, path)
-}
 // The composer's "+" menu is worth showing only when it can do something:
 // switch the agent (empty session with ACP profiles) or attach files (Memoh
 // mode). An in-progress ACP chat has neither, so the trigger is hidden rather

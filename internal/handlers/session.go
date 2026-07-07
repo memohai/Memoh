@@ -401,11 +401,8 @@ func parseSessionParentIDParam(raw string) (string, error) {
 }
 
 // encodeSessionCursor packs the keyset cursor as base64(updated_at|id) where
-// the timestamp is RFC3339Nano. The full nanosecond precision is preserved on
-// the wire and on Postgres, but the SQLite backend compares updated_at at
-// second precision because CURRENT_TIMESTAMP stores it that way — that
-// truncation is intentional and only matters when two rows share the same
-// second, where the id tiebreak in the SQL handles uniqueness.
+// the timestamp is RFC3339Nano. The id tiebreak in the SQL handles uniqueness
+// when two rows share the same timestamp.
 func encodeSessionCursor(c session.SessionCursor) string {
 	raw := c.UpdatedAt.UTC().Format(time.RFC3339Nano) + "|" + c.ID
 	return base64.RawURLEncoding.EncodeToString([]byte(raw))

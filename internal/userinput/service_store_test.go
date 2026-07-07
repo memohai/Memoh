@@ -2,112 +2,220 @@ package userinput
 
 import (
 	"context"
-	"database/sql"
 	"errors"
+	"log/slog"
+	"sort"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/db"
-	sqlitestore "github.com/memohai/memoh/internal/db/sqlite/store"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/decision"
 )
 
 const (
-	testBotID     = "00000000-0000-0000-0000-000000002001"
-	testSessionID = "00000000-0000-0000-0000-000000002002"
+	storeTestBotID     = "00000000-0000-0000-0000-000000002001"
+	storeTestSessionID = "00000000-0000-0000-0000-000000002002"
 )
 
-func newSQLiteUserInputService(t *testing.T) *Service {
-	t.Helper()
-	ctx := context.Background()
-	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	// One :memory: database per pooled connection - force a single shared
-	// connection so the waiter goroutine sees the schema.
-	conn.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = conn.Close() })
+// fakeUserInputQueries is an in-memory stand-in for the user_input_requests
+// table. It embeds dbstore.Queries so any method the Service is not expected
+// to call panics, and mirrors the SQL semantics in
+// db/postgres/queries/user_input.sql that the Service relies on:
+//
+//   - CreateUserInputRequest upserts on (session_id, tool_call_id). The
+//     conflict update only applies while the existing row is pending and
+//     unexpired; otherwise the guarded RETURNING matches nothing and the
+//     call yields pgx.ErrNoRows, which the Service disambiguates via
+//     GetUserInputRequestBySessionToolCall.
+//   - Submit/Cancel are guarded by status='pending' AND (expires_at IS NULL
+//     OR expires_at > now()) and yield pgx.ErrNoRows when the guard fails.
+//   - Pending lookups exclude expired rows.
+type fakeUserInputQueries struct {
+	dbstore.Queries
 
-	execTestSchema(t, conn, `
-CREATE TABLE bots (
-  id TEXT PRIMARY KEY
-);
-CREATE TABLE bot_sessions (
-  id TEXT PRIMARY KEY
-);
-CREATE TABLE bot_channel_routes (
-  id TEXT PRIMARY KEY
-);
-CREATE TABLE channel_identities (
-  id TEXT PRIMARY KEY
-);
-CREATE TABLE bot_history_messages (
-  id TEXT PRIMARY KEY
-);
-CREATE TABLE user_input_requests (
-  id TEXT PRIMARY KEY,
-  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
-  route_id TEXT REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
-  channel_identity_id TEXT REFERENCES channel_identities(id) ON DELETE SET NULL,
-  tool_call_id TEXT NOT NULL,
-  tool_name TEXT NOT NULL DEFAULT 'ask_user',
-  short_id INTEGER NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending',
-  input_json TEXT NOT NULL,
-  ui_payload_json TEXT NOT NULL DEFAULT '{}',
-  result_json TEXT NOT NULL DEFAULT '{}',
-  provider_metadata TEXT NOT NULL DEFAULT '{}',
-  requested_by_channel_identity_id TEXT REFERENCES channel_identities(id) ON DELETE SET NULL,
-  responded_by_channel_identity_id TEXT REFERENCES channel_identities(id) ON DELETE SET NULL,
-  assistant_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
-  tool_result_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
-  prompt_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
-  prompt_external_message_id TEXT NOT NULL DEFAULT '',
-  source_platform TEXT NOT NULL DEFAULT '',
-  reply_target TEXT NOT NULL DEFAULT '',
-  conversation_type TEXT NOT NULL DEFAULT '',
-  expires_at TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  responded_at TEXT,
-  canceled_at TEXT,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT user_input_tool_name_check CHECK (tool_name = 'ask_user'),
-  CONSTRAINT user_input_status_check CHECK (status IN ('pending', 'submitted', 'canceled', 'expired', 'failed')),
-  CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id)
-);
-CREATE UNIQUE INDEX user_input_tool_call_unique
-  ON user_input_requests(session_id, tool_call_id);
-`)
-	if _, err := conn.ExecContext(ctx, `INSERT INTO bots (id) VALUES (?)`, testBotID); err != nil {
-		t.Fatalf("insert bot: %v", err)
-	}
-	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id) VALUES (?)`, testSessionID); err != nil {
-		t.Fatalf("insert session: %v", err)
-	}
-
-	store, err := sqlitestore.New(conn)
-	if err != nil {
-		t.Fatalf("new store: %v", err)
-	}
-	return NewService(nil, sqlitestore.NewQueries(store))
+	mu        sync.Mutex
+	rows      map[string]*sqlc.UserInputRequest // request id -> row
+	byCall    map[string]string                 // session|tool_call -> request id
+	nextShort map[string]int32                  // session -> last issued short_id
 }
 
-func execTestSchema(t *testing.T, conn *sql.DB, statement string) {
-	t.Helper()
-	if _, err := conn.ExecContext(context.Background(), statement); err != nil {
-		t.Fatalf("exec schema: %v", err)
+func newFakeUserInputQueries() *fakeUserInputQueries {
+	return &fakeUserInputQueries{
+		rows:      map[string]*sqlc.UserInputRequest{},
+		byCall:    map[string]string{},
+		nextShort: map[string]int32{},
 	}
 }
 
-func createTestPending(t *testing.T, svc *Service, expiresAt *time.Time) Request {
+func storeUUIDKey(id pgtype.UUID) string {
+	return uuid.UUID(id.Bytes).String()
+}
+
+func storeCallKey(sessionID pgtype.UUID, toolCallID string) string {
+	return storeUUIDKey(sessionID) + "|" + toolCallID
+}
+
+// storeRowIsLivePending mirrors the SQL guard
+// status = 'pending' AND (expires_at IS NULL OR expires_at > now()).
+func storeRowIsLivePending(row *sqlc.UserInputRequest, now time.Time) bool {
+	return row.Status == StatusPending && (!row.ExpiresAt.Valid || row.ExpiresAt.Time.After(now))
+}
+
+func (q *fakeUserInputQueries) CreateUserInputRequest(_ context.Context, arg sqlc.CreateUserInputRequestParams) (sqlc.UserInputRequest, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	now := time.Now()
+	if id, ok := q.byCall[storeCallKey(arg.SessionID, arg.ToolCallID)]; ok {
+		row := q.rows[id]
+		if !storeRowIsLivePending(row, now) {
+			// ON CONFLICT DO UPDATE ... WHERE status='pending' matched no row.
+			return sqlc.UserInputRequest{}, pgx.ErrNoRows
+		}
+		row.InputJson = arg.InputJson
+		row.UiPayloadJson = arg.UiPayloadJson
+		row.ProviderMetadata = arg.ProviderMetadata
+		row.RequestedByChannelIdentityID = arg.RequestedByChannelIdentityID
+		row.SourcePlatform = arg.SourcePlatform
+		row.ReplyTarget = arg.ReplyTarget
+		row.ConversationType = arg.ConversationType
+		row.ExpiresAt = arg.ExpiresAt
+		row.UpdatedAt = pgtype.Timestamptz{Time: now, Valid: true}
+		return *row, nil
+	}
+	sessionKey := storeUUIDKey(arg.SessionID)
+	q.nextShort[sessionKey]++
+	row := &sqlc.UserInputRequest{
+		ID:                           pgtype.UUID{Bytes: [16]byte(uuid.New()), Valid: true},
+		BotID:                        arg.BotID,
+		SessionID:                    arg.SessionID,
+		RouteID:                      arg.RouteID,
+		ChannelIdentityID:            arg.ChannelIdentityID,
+		ToolCallID:                   arg.ToolCallID,
+		ToolName:                     arg.ToolName,
+		ShortID:                      q.nextShort[sessionKey],
+		Status:                       StatusPending,
+		InputJson:                    arg.InputJson,
+		UiPayloadJson:                arg.UiPayloadJson,
+		ResultJson:                   []byte("{}"),
+		ProviderMetadata:             arg.ProviderMetadata,
+		RequestedByChannelIdentityID: arg.RequestedByChannelIdentityID,
+		SourcePlatform:               arg.SourcePlatform,
+		ReplyTarget:                  arg.ReplyTarget,
+		ConversationType:             arg.ConversationType,
+		ExpiresAt:                    arg.ExpiresAt,
+		CreatedAt:                    pgtype.Timestamptz{Time: now, Valid: true},
+		UpdatedAt:                    pgtype.Timestamptz{Time: now, Valid: true},
+	}
+	q.rows[storeUUIDKey(row.ID)] = row
+	q.byCall[storeCallKey(arg.SessionID, arg.ToolCallID)] = storeUUIDKey(row.ID)
+	return *row, nil
+}
+
+func (q *fakeUserInputQueries) GetUserInputRequest(_ context.Context, id pgtype.UUID) (sqlc.UserInputRequest, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	row, ok := q.rows[storeUUIDKey(id)]
+	if !ok {
+		return sqlc.UserInputRequest{}, pgx.ErrNoRows
+	}
+	return *row, nil
+}
+
+func (q *fakeUserInputQueries) GetUserInputRequestBySessionToolCall(_ context.Context, arg sqlc.GetUserInputRequestBySessionToolCallParams) (sqlc.UserInputRequest, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	id, ok := q.byCall[storeCallKey(arg.SessionID, arg.ToolCallID)]
+	if !ok {
+		return sqlc.UserInputRequest{}, pgx.ErrNoRows
+	}
+	return *q.rows[id], nil
+}
+
+func (q *fakeUserInputQueries) SubmitUserInputRequest(_ context.Context, arg sqlc.SubmitUserInputRequestParams) (sqlc.UserInputRequest, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	now := time.Now()
+	row, ok := q.rows[storeUUIDKey(arg.ID)]
+	if !ok || !storeRowIsLivePending(row, now) {
+		return sqlc.UserInputRequest{}, pgx.ErrNoRows
+	}
+	stamp := pgtype.Timestamptz{Time: now, Valid: true}
+	row.Status = StatusSubmitted
+	row.ResultJson = arg.ResultJson
+	row.RespondedByChannelIdentityID = arg.RespondedByChannelIdentityID
+	row.RespondedAt = stamp
+	row.UpdatedAt = stamp
+	return *row, nil
+}
+
+func (q *fakeUserInputQueries) CancelUserInputRequest(_ context.Context, arg sqlc.CancelUserInputRequestParams) (sqlc.UserInputRequest, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	now := time.Now()
+	row, ok := q.rows[storeUUIDKey(arg.ID)]
+	if !ok || !storeRowIsLivePending(row, now) {
+		return sqlc.UserInputRequest{}, pgx.ErrNoRows
+	}
+	stamp := pgtype.Timestamptz{Time: now, Valid: true}
+	row.Status = StatusCanceled
+	row.ResultJson = arg.ResultJson
+	row.RespondedByChannelIdentityID = arg.RespondedByChannelIdentityID
+	row.RespondedAt = stamp
+	row.CanceledAt = stamp
+	row.UpdatedAt = stamp
+	return *row, nil
+}
+
+func (q *fakeUserInputQueries) GetLatestPendingUserInputBySession(_ context.Context, arg sqlc.GetLatestPendingUserInputBySessionParams) (sqlc.UserInputRequest, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	now := time.Now()
+	var latest *sqlc.UserInputRequest
+	for _, row := range q.rows {
+		if row.BotID != arg.BotID || row.SessionID != arg.SessionID || !storeRowIsLivePending(row, now) {
+			continue
+		}
+		if latest == nil || row.ShortID > latest.ShortID {
+			latest = row
+		}
+	}
+	if latest == nil {
+		return sqlc.UserInputRequest{}, pgx.ErrNoRows
+	}
+	return *latest, nil
+}
+
+func (q *fakeUserInputQueries) ListPendingUserInputsBySession(_ context.Context, arg sqlc.ListPendingUserInputsBySessionParams) ([]sqlc.UserInputRequest, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	now := time.Now()
+	var rows []sqlc.UserInputRequest
+	for _, row := range q.rows {
+		if row.BotID == arg.BotID && row.SessionID == arg.SessionID && storeRowIsLivePending(row, now) {
+			rows = append(rows, *row)
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].ShortID < rows[j].ShortID })
+	return rows, nil
+}
+
+func newStoreUserInputService(t *testing.T) *Service {
+	t.Helper()
+	return NewService(slog.New(slog.DiscardHandler), newFakeUserInputQueries())
+}
+
+func createStorePending(t *testing.T, svc *Service, expiresAt *time.Time, callID string) Request {
 	t.Helper()
 	req, err := svc.CreatePending(context.Background(), CreatePendingInput{
-		BotID:      testBotID,
-		SessionID:  testSessionID,
-		ToolCallID: "call-1",
+		BotID:      storeTestBotID,
+		SessionID:  storeTestSessionID,
+		ToolCallID: callID,
 		Input: map[string]any{
 			"questions": []any{
 				map[string]any{
@@ -129,11 +237,10 @@ func createTestPending(t *testing.T, svc *Service, expiresAt *time.Time) Request
 }
 
 func TestServiceSubmitLifecycleNotifiesWaiter(t *testing.T) {
-	// Not parallel: concurrent :memory: opens race in modernc sqlite's
-	// global initializer and fail under -race.
+	t.Parallel()
 
-	svc := newSQLiteUserInputService(t)
-	req := createTestPending(t, svc, nil)
+	svc := newStoreUserInputService(t)
+	req := createStorePending(t, svc, nil, "call-1")
 	if req.Status != StatusPending || len(req.UIPayload.Questions) != 1 {
 		t.Fatalf("unexpected pending request: %#v", req)
 	}
@@ -202,47 +309,11 @@ func TestServiceSubmitLifecycleNotifiesWaiter(t *testing.T) {
 	}
 }
 
-func TestServiceCreatePendingDoesNotReuseTerminalRequest(t *testing.T) {
-	// Not parallel: concurrent :memory: opens race in modernc sqlite's
-	// global initializer and fail under -race.
-
-	svc := newSQLiteUserInputService(t)
-	req := createTestPending(t, svc, nil)
-	if _, err := svc.Submit(context.Background(), SubmitInput{
-		RequestID: req.ID,
-		Answers:   []QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
-	}); err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-
-	_, err := svc.CreatePending(context.Background(), CreatePendingInput{
-		BotID:      testBotID,
-		SessionID:  testSessionID,
-		ToolCallID: "call-1",
-		Input: map[string]any{
-			"questions": []any{
-				map[string]any{
-					"text": "Which plan?",
-					"kind": QuestionKindSingleSelect,
-					"options": []any{
-						map[string]any{"label": "Plan A"},
-						map[string]any{"label": "Plan B"},
-					},
-				},
-			},
-		},
-	})
-	if !errors.Is(err, ErrAlreadyDecided) {
-		t.Fatalf("CreatePending() error = %v, want ErrAlreadyDecided", err)
-	}
-}
-
 func TestServiceWaitForRegisteredResponseUsesExistingWaiter(t *testing.T) {
-	// Not parallel: concurrent :memory: opens race in modernc sqlite's
-	// global initializer and fail under -race.
+	t.Parallel()
 
-	svc := newSQLiteUserInputService(t)
-	req := createTestPending(t, svc, nil)
+	svc := newStoreUserInputService(t)
+	req := createStorePending(t, svc, nil, "call-1")
 	release := svc.RegisterWaiter(req.ID)
 	defer release()
 
@@ -283,11 +354,10 @@ func TestServiceWaitForRegisteredResponseUsesExistingWaiter(t *testing.T) {
 }
 
 func TestServiceCancelNotifiesWaiter(t *testing.T) {
-	// Not parallel: concurrent :memory: opens race in modernc sqlite's
-	// global initializer and fail under -race.
+	t.Parallel()
 
-	svc := newSQLiteUserInputService(t)
-	req := createTestPending(t, svc, nil)
+	svc := newStoreUserInputService(t)
+	req := createStorePending(t, svc, nil, "call-1")
 
 	waitCtx, cancel := context.WithTimeout(context.Background(), decision.DefaultFallbackInterval/5)
 	defer cancel()
@@ -331,14 +401,13 @@ func TestServiceCancelNotifiesWaiter(t *testing.T) {
 }
 
 func TestServiceCreatePendingIsIdempotentPerToolCall(t *testing.T) {
-	// Not parallel: concurrent :memory: opens race in modernc sqlite's
-	// global initializer and fail under -race.
+	t.Parallel()
 
-	svc := newSQLiteUserInputService(t)
-	first := createTestPending(t, svc, nil)
+	svc := newStoreUserInputService(t)
+	first := createStorePending(t, svc, nil, "call-1")
 	second, err := svc.CreatePending(context.Background(), CreatePendingInput{
-		BotID:      testBotID,
-		SessionID:  testSessionID,
+		BotID:      storeTestBotID,
+		SessionID:  storeTestSessionID,
 		ToolCallID: "call-1",
 		Input: map[string]any{
 			"questions": []any{
@@ -363,8 +432,8 @@ func TestServiceCreatePendingIsIdempotentPerToolCall(t *testing.T) {
 		t.Fatalf("submit duplicate row: %v", err)
 	}
 	_, err = svc.CreatePending(context.Background(), CreatePendingInput{
-		BotID:      testBotID,
-		SessionID:  testSessionID,
+		BotID:      storeTestBotID,
+		SessionID:  storeTestSessionID,
 		ToolCallID: "call-1",
 		Input: map[string]any{
 			"questions": []any{
@@ -378,11 +447,10 @@ func TestServiceCreatePendingIsIdempotentPerToolCall(t *testing.T) {
 }
 
 func TestServiceWaitPrefersResolutionOverContextCancel(t *testing.T) {
-	// Not parallel: concurrent :memory: opens race in modernc sqlite's
-	// global initializer and fail under -race.
+	t.Parallel()
 
-	svc := newSQLiteUserInputService(t)
-	req := createTestPending(t, svc, nil)
+	svc := newStoreUserInputService(t)
+	req := createStorePending(t, svc, nil, "call-1")
 
 	waitCtx, cancelWait := context.WithCancel(context.Background())
 	defer cancelWait()
@@ -424,11 +492,10 @@ func TestServiceWaitPrefersResolutionOverContextCancel(t *testing.T) {
 }
 
 func TestServiceCancelAfterDecisionReturnsAlreadyDecided(t *testing.T) {
-	// Not parallel: concurrent :memory: opens race in modernc sqlite's
-	// global initializer and fail under -race.
+	t.Parallel()
 
-	svc := newSQLiteUserInputService(t)
-	req := createTestPending(t, svc, nil)
+	svc := newStoreUserInputService(t)
+	req := createStorePending(t, svc, nil, "call-1")
 
 	if _, err := svc.Submit(context.Background(), SubmitInput{
 		RequestID: req.ID,
@@ -445,12 +512,11 @@ func TestServiceCancelAfterDecisionReturnsAlreadyDecided(t *testing.T) {
 }
 
 func TestServiceExpiredRequestIsClosed(t *testing.T) {
-	// Not parallel: concurrent :memory: opens race in modernc sqlite's
-	// global initializer and fail under -race.
+	t.Parallel()
 
-	svc := newSQLiteUserInputService(t)
+	svc := newStoreUserInputService(t)
 	expired := time.Now().Add(-time.Minute)
-	req := createTestPending(t, svc, &expired)
+	req := createStorePending(t, svc, &expired, "call-1")
 
 	got, err := svc.Get(context.Background(), req.ID)
 	if err != nil {
@@ -468,13 +534,13 @@ func TestServiceExpiredRequestIsClosed(t *testing.T) {
 	}
 
 	if _, err := svc.ResolveTarget(context.Background(), ResolveInput{
-		BotID:     testBotID,
-		SessionID: testSessionID,
+		BotID:     storeTestBotID,
+		SessionID: storeTestSessionID,
 	}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("resolve target error = %v, want ErrNotFound", err)
 	}
 
-	pending, err := svc.ListPendingBySession(context.Background(), testBotID, testSessionID)
+	pending, err := svc.ListPendingBySession(context.Background(), storeTestBotID, storeTestSessionID)
 	if err != nil {
 		t.Fatalf("list pending: %v", err)
 	}
@@ -484,7 +550,7 @@ func TestServiceExpiredRequestIsClosed(t *testing.T) {
 
 	// A future expiry must keep the request answerable.
 	future := time.Now().Add(time.Hour)
-	live := createTestPendingWithCallID(t, svc, &future, "call-2")
+	live := createStorePending(t, svc, &future, "call-2")
 	gotLive, err := svc.Get(context.Background(), live.ID)
 	if err != nil {
 		t.Fatalf("get live: %v", err)
@@ -501,13 +567,12 @@ func TestServiceExpiredRequestIsClosed(t *testing.T) {
 }
 
 func TestServiceACPMCPMarkerRoundtrip(t *testing.T) {
-	// Not parallel: concurrent :memory: opens race in modernc sqlite's
-	// global initializer and fail under -race.
+	t.Parallel()
 
-	svc := newSQLiteUserInputService(t)
+	svc := newStoreUserInputService(t)
 	marked, err := svc.CreatePending(context.Background(), CreatePendingInput{
-		BotID:            testBotID,
-		SessionID:        testSessionID,
+		BotID:            storeTestBotID,
+		SessionID:        storeTestSessionID,
 		ToolCallID:       "acp-mcp-call",
 		ProviderMetadata: map[string]any{"source": ProviderSourceACPMCP},
 		Input: map[string]any{
@@ -527,7 +592,7 @@ func TestServiceACPMCPMarkerRoundtrip(t *testing.T) {
 		t.Fatalf("IsACPMCPRequest = false after round trip, metadata = %#v", got.ProviderMetadata)
 	}
 
-	plain := createTestPendingWithCallID(t, svc, nil, "native-call")
+	plain := createStorePending(t, svc, nil, "native-call")
 	gotPlain, err := svc.Get(context.Background(), plain.ID)
 	if err != nil {
 		t.Fatalf("get native pending: %v", err)
@@ -535,30 +600,4 @@ func TestServiceACPMCPMarkerRoundtrip(t *testing.T) {
 	if IsACPMCPRequest(gotPlain) {
 		t.Fatalf("native request misclassified as ACP/MCP: %#v", gotPlain.ProviderMetadata)
 	}
-}
-
-func createTestPendingWithCallID(t *testing.T, svc *Service, expiresAt *time.Time, callID string) Request {
-	t.Helper()
-	req, err := svc.CreatePending(context.Background(), CreatePendingInput{
-		BotID:      testBotID,
-		SessionID:  testSessionID,
-		ToolCallID: callID,
-		Input: map[string]any{
-			"questions": []any{
-				map[string]any{
-					"text": "Which plan?",
-					"kind": QuestionKindSingleSelect,
-					"options": []any{
-						map[string]any{"label": "Plan A"},
-						map[string]any{"label": "Plan B"},
-					},
-				},
-			},
-		},
-		ExpiresAt: expiresAt,
-	})
-	if err != nil {
-		t.Fatalf("create pending: %v", err)
-	}
-	return req
 }

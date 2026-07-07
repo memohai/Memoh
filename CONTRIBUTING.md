@@ -40,14 +40,10 @@ Default host ports are shifted away from the production compose stack: Web `1808
 ```bash
 mise run dev                              # Start all services
 mise run dev:minify                       # Start the minified dev stack
-mise run dev:sqlite                       # Start the SQLite dev stack
 mise run dev:selinux                      # Start all services on SELinux hosts
 mise run dev:down                         # Stop the dev stack
-mise run dev:down:sqlite                  # Stop the SQLite dev stack
 mise run dev:logs                         # View dev logs
-mise run dev:logs:sqlite                  # View SQLite dev logs
 mise run dev:restart -- server            # Restart a specific service
-mise run dev:restart:sqlite -- server     # Restart a SQLite dev service
 mise run bridge:build                     # Rebuild the bridge binary in the dev container
 ```
 
@@ -57,11 +53,8 @@ mise run bridge:build                     # Rebuild the bridge binary in the dev
 | ------- | ----------- |
 | `mise run setup` | Install dependencies and prepare local tooling |
 | `mise run dev` | Start the containerized PostgreSQL dev environment |
-| `mise run dev:sqlite` | Start the containerized SQLite dev environment |
-| `mise run dev:down` | Stop the PostgreSQL dev environment |
-| `mise run dev:down:sqlite` | Stop the SQLite dev environment |
-| `mise run dev:logs` | View PostgreSQL dev logs |
-| `mise run dev:logs:sqlite` | View SQLite dev logs |
+| `mise run dev:down` | Stop the dev environment |
+| `mise run dev:logs` | View dev logs |
 | `mise run dev:restart -- server` | Restart a specific dev service |
 | `mise run bridge:build` | Rebuild the workspace bridge binary in the dev container |
 | `mise run db-up` | Run database migrations |
@@ -103,11 +96,11 @@ For frontend-only changes, `pnpm lint` and `pnpm test --run` are usually enough.
 
 ## SQL, API, and SDK Changes
 
-Database changes must keep PostgreSQL and SQLite in sync:
+Database changes target PostgreSQL:
 
-1. Update both `db/postgres/...` and `db/sqlite/...`.
+1. Update `db/postgres/...`.
 2. Add the next PostgreSQL incremental migration pair when the schema changes.
-3. Update the canonical baseline migrations for both database backends.
+3. Update the canonical PostgreSQL baseline migration.
 4. Run `mise run sqlc-generate`.
 
 API handler changes should update the OpenAPI spec and generated SDK:
@@ -117,7 +110,7 @@ mise run swagger-generate
 mise run sdk-generate
 ```
 
-Generated files under `internal/db/**/sqlc/` and `packages/sdk/` should be committed only when they result from the matching SQL or API source changes.
+Generated files under `internal/db/postgres/sqlc/` and `packages/sdk/` should be committed only when they result from the matching SQL or API source changes.
 
 ## Windows Notes
 
