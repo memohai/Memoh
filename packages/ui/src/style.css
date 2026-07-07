@@ -87,6 +87,23 @@
       background-color 0.06s ease-out,
       box-shadow 0.06s ease-out;
   }
+  /* Selected — the persistent "this is the current value" fill, on the SAME
+     ::before shell as hover/press below (never a class injected onto the
+     Button box — that anti-pattern is what this replaces) so priority against
+     them is decided by cascade, not by two layers of utility classes fighting.
+     Declared BEFORE :hover on purpose: both rules tie on specificity ([data-button]
+     + :is() + one more selector + ::before), so source order breaks the tie —
+     :hover, coming next, wins on a hovered+selected button. Selected must never
+     look "stuck"; hover always has to read as live feedback, even on the
+     current value. See AGENTS.md "Selected state".
+     data-UI-selected, not data-selected: reka-ui emits a native data-selected
+     on CalendarCellTrigger / PaginationListItem / TreeItem, so a bare
+     [data-selected] here would silently restyle every calendar range day and
+     pagination current-page chip. Our own namespace keeps this rule opt-in. */
+  [data-button]:is([data-variant="outline"], [data-variant="secondary"])[data-ui-selected]::before {
+    background-color: var(--selected-bg);
+    box-shadow: inset 0 0 0 1px var(--selected-border);
+  }
   [data-button]:is([data-variant="outline"], [data-variant="secondary"]):hover::before {
     background-color: var(--btn-secondary-overlay);
     box-shadow: none;
@@ -119,6 +136,22 @@
   [data-slot="button-group"] > [data-button]:is([data-variant="outline"], [data-variant="secondary"]):active::before {
     background-color: var(--ui-pressed);
     transition-duration: 40ms;
+  }
+
+  /* ── Selected, non-button surfaces ────────────────────────────────────────
+     Same --selected-bg fill as the [data-button] rule above, but for elements
+     that never wear [data-button] (sidebar rows, list rows) — no ring/border,
+     because these rows never had one. data-UI-selected (see the button rule
+     above): a bare [data-selected] would also catch reka-ui's native attribute
+     on calendar/pagination/tree internals and break e.g. the RangeCalendar's
+     continuous selection band. Scoped away from [data-button] for clarity,
+     though it wouldn't collide anyway: a bg-transparent utility on an
+     outline/secondary Button box already wins over any @layer components rule
+     here (utilities always beat components in this file — see the menu-border
+     note below), so a stray [data-ui-selected] on a Button would be a no-op,
+     not a double-fill. */
+  [data-ui-selected]:not([data-button]) {
+    background-color: var(--selected-bg);
   }
 
   /* ── Form fields: text input / textarea / select trigger / native select ─────
@@ -599,6 +632,10 @@
     position: absolute;
     top: 0;
     left: 0;
+    /* ui-allow-z: not on the z-index ladder (see the "z-index ladder" comment
+       at this file's @theme block): this only orders the sliding thumb UNDER
+       its own sibling item labels within one segmented control — never
+       compared against another component's z-index. */
     z-index: 0;
     pointer-events: none;
     border-radius: calc(var(--radius) - 0.125rem);
@@ -615,6 +652,8 @@
   }
   [data-slot="segmented"] [data-segment-item] {
     position: relative;
+    /* ui-allow-z: same local-paint-order exception as [data-segment-thumb]
+       above: lifts the item label ABOVE the sibling thumb, nothing more. */
     z-index: 1;
     display: inline-flex;
     align-items: center;
@@ -852,6 +891,14 @@
   --secondary-foreground: oklch(0.21 0.004 95);
   --muted: oklch(0.968 0 0);
   --muted-foreground: oklch(0.52 0.006 95);
+  /* Alpha policy soft tier — the missing "soft" rung for neutral hint boxes/tip
+     rows, parallel to --success-soft/--warning-soft/--info-soft. color-mix (not
+     a hand-picked literal like those) so it is PIXEL-IDENTICAL to the
+     `bg-muted/40` call sites it replaces — Tailwind's own opacity modifier
+     compiles to this exact color-mix form (verified against the compiled
+     output), and a single declaration here already tracks --muted's .dark /
+     per-scheme overrides at use-time, so it needs no redeclaration below. */
+  --muted-soft: color-mix(in oklab, var(--muted) 40%, transparent);
   /* Skeleton shimmer mid-stop — one hair DARKER than --muted (0.967) so the sliding
      seam is a calm shadow, not a bright flash, on the light gray block. */
   --skeleton-mid: oklch(0.93 0.002 286);
@@ -862,7 +909,18 @@
   --accent-foreground: oklch(0.21 0.004 95);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0.001 286);
+  /* Alpha policy: the destructive family has no -soft/-border pair (unlike
+     success/warning/info) because the banner/callout call sites that needed one
+     hand-wrote `bg-destructive/5 border-destructive/30` instead — the exact gap
+     this policy exists to close. color-mix keeps both PIXEL-IDENTICAL to those
+     call sites (see --muted-soft above for why color-mix, not a literal). */
+  --destructive-soft: color-mix(in oklab, var(--destructive) 5%, transparent);
+  --destructive-border: color-mix(in oklab, var(--destructive) 30%, transparent);
   --border: oklch(0.915 0.0045 72);
+  /* Alpha policy: the soft/faint divider and card-edge rung — same color-mix
+     reasoning as --muted-soft/--destructive-soft, reproducing `border-border/60`
+     exactly (both as a bare divider and as a de-emphasized card outline). */
+  --border-soft: color-mix(in oklab, var(--border) 60%, transparent);
   --input: oklch(0.915 0.0045 72);
   --ring: oklch(57.5% 0 0deg / 1);
   --chart-1: oklch(0.646 0.222 41.116);
@@ -933,6 +991,17 @@
      a touch denser than the default overlay so it still reads on the card. */
   --btn-ghost-hover-on-popover: color-mix(in oklab, var(--foreground) 13%, transparent);
   --sidebar-hover:       var(--overlay-hover-light);
+  /* Selected/current — a persistent "this IS the chosen value" fill for
+     controls with NO separate indicator slot (theme picker button, sidebar
+     current-session row). Deliberately NOT --ui-selected — that name is
+     already the roving menu-item highlight above, a different state (see
+     AGENTS.md "Selected state"). One ladder step above --ui-hover/
+     --sidebar-hover on purpose: an idle selected control must always read
+     deeper than a merely-hovered one — a numeric guarantee, not a hand-tuned
+     color. --selected-border only matters on [data-button] chrome (below);
+     non-button consumers of --selected-bg never draw it. */
+  --selected-bg:     var(--overlay-hover-strong);
+  --selected-border: var(--foreground);
   /* Segmented control surfaces: track is a warm-tinted solid chip (not an
      overlay — needs an opaque fill for the pill shape). */
   --segment-track: oklch(0.945 0 0);
@@ -1674,11 +1743,15 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-muted-soft: var(--muted-soft);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-destructive-border: var(--destructive-border);
   --color-border: var(--border);
+  --color-border-soft: var(--border-soft);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-chart-1: var(--chart-1);
@@ -1805,6 +1878,98 @@
   --color-diff-add-border: var(--diff-add-border);
   --color-diff-remove: var(--diff-remove);
   --color-diff-remove-border: var(--diff-remove-border);
+
+  /* Accent-hue palette (ramp model documented at style.css:993) — mapped so
+     bg-accent-<hue>[-variant] / text-accent-<hue>[-variant] utilities exist
+     and consumers stop reaching for arbitrary-value var() bracket escapes. */
+  --color-accent-gray: var(--accent-gray);
+  --color-accent-gray-soft: var(--accent-gray-soft);
+  --color-accent-gray-soft-hover: var(--accent-gray-soft-hover);
+  --color-accent-gray-soft-active: var(--accent-gray-soft-active);
+  --color-accent-gray-border: var(--accent-gray-border);
+  --color-accent-gray-deep: var(--accent-gray-deep);
+  --color-accent-brown: var(--accent-brown);
+  --color-accent-brown-soft: var(--accent-brown-soft);
+  --color-accent-brown-soft-hover: var(--accent-brown-soft-hover);
+  --color-accent-brown-soft-active: var(--accent-brown-soft-active);
+  --color-accent-brown-border: var(--accent-brown-border);
+  --color-accent-brown-deep: var(--accent-brown-deep);
+  --color-accent-orange: var(--accent-orange);
+  --color-accent-orange-soft: var(--accent-orange-soft);
+  --color-accent-orange-soft-hover: var(--accent-orange-soft-hover);
+  --color-accent-orange-soft-active: var(--accent-orange-soft-active);
+  --color-accent-orange-border: var(--accent-orange-border);
+  --color-accent-orange-deep: var(--accent-orange-deep);
+  --color-accent-yellow: var(--accent-yellow);
+  --color-accent-yellow-soft: var(--accent-yellow-soft);
+  --color-accent-yellow-soft-hover: var(--accent-yellow-soft-hover);
+  --color-accent-yellow-soft-active: var(--accent-yellow-soft-active);
+  --color-accent-yellow-border: var(--accent-yellow-border);
+  --color-accent-yellow-deep: var(--accent-yellow-deep);
+  --color-accent-green: var(--accent-green);
+  --color-accent-green-soft: var(--accent-green-soft);
+  --color-accent-green-soft-hover: var(--accent-green-soft-hover);
+  --color-accent-green-soft-active: var(--accent-green-soft-active);
+  --color-accent-green-border: var(--accent-green-border);
+  --color-accent-green-deep: var(--accent-green-deep);
+  --color-accent-teal: var(--accent-teal);
+  --color-accent-teal-soft: var(--accent-teal-soft);
+  --color-accent-teal-soft-hover: var(--accent-teal-soft-hover);
+  --color-accent-teal-soft-active: var(--accent-teal-soft-active);
+  --color-accent-teal-border: var(--accent-teal-border);
+  --color-accent-teal-deep: var(--accent-teal-deep);
+  --color-accent-blue: var(--accent-blue);
+  --color-accent-blue-soft: var(--accent-blue-soft);
+  --color-accent-blue-soft-hover: var(--accent-blue-soft-hover);
+  --color-accent-blue-soft-active: var(--accent-blue-soft-active);
+  --color-accent-blue-border: var(--accent-blue-border);
+  --color-accent-blue-deep: var(--accent-blue-deep);
+  --color-accent-purple: var(--accent-purple);
+  --color-accent-purple-soft: var(--accent-purple-soft);
+  --color-accent-purple-soft-hover: var(--accent-purple-soft-hover);
+  --color-accent-purple-soft-active: var(--accent-purple-soft-active);
+  --color-accent-purple-border: var(--accent-purple-border);
+  --color-accent-purple-deep: var(--accent-purple-deep);
+  --color-accent-pink: var(--accent-pink);
+  --color-accent-pink-soft: var(--accent-pink-soft);
+  --color-accent-pink-soft-hover: var(--accent-pink-soft-hover);
+  --color-accent-pink-soft-active: var(--accent-pink-soft-active);
+  --color-accent-pink-border: var(--accent-pink-border);
+  --color-accent-pink-deep: var(--accent-pink-deep);
+  --color-accent-red: var(--accent-red);
+  --color-accent-red-soft: var(--accent-red-soft);
+  --color-accent-red-soft-hover: var(--accent-red-soft-hover);
+  --color-accent-red-soft-active: var(--accent-red-soft-active);
+  --color-accent-red-border: var(--accent-red-border);
+  --color-accent-red-deep: var(--accent-red-deep);
+  /* Blue's saturated solid-fill trio (white-text chip) + red's alert-fill pair —
+     not part of the hue ramp, but still bracket-escaped at every call site. */
+  --color-accent-blue-fill: var(--accent-blue-fill);
+  --color-accent-blue-fill-hover: var(--accent-blue-fill-hover);
+  --color-accent-blue-fill-active: var(--accent-blue-fill-active);
+  --color-accent-blue-foreground: var(--accent-blue-foreground);
+  --color-accent-red-fill: var(--accent-red-fill);
+  --color-accent-red-foreground: var(--accent-red-foreground);
+
+  /* z-index ladder (legislated in packages/ui/AGENTS.md, "z 梯" section) — five
+     semantic layers replacing 11 previously ad-hoc values. Pure rename: each
+     token's value is whatever number already dominated that role pre-migration,
+     so folding a call site onto its token changes NO computed z-index. Author
+     new floating UI against one of these five; there is no "in-between" tier —
+     needing one means picking a tier, not inventing a number. Consumed via the
+     v4 CSS-variable shorthand: z-(--z-raised), or `z-index: var(--z-raised);`
+     in raw CSS. (0/1/2-valued paint-order tricks that only ever compare a
+     component against ITS OWN children — never against another component's
+     z-index — are deliberately left off this ladder; leave a comment at the
+     call site instead of a token, see e.g. style.css's [data-segment-thumb].) */
+  --z-raised: 10; /* local elevation: sticky top-fades, resize rails, overlay badges */
+  --z-sticky: 20; /* sticky bars and hand-rolled popovers/rails within a panel */
+  --z-panel: 30; /* panel-level floats: composer, minimap, display-pane menus */
+  --z-overlay: 50; /* every Radix floating layer (dialog/sheet/popover/tooltip/menu)
+    plus App.vue's settings-section switch (was bare z-40 pre-ladder; it must
+    outrank the chat pane's own --z-panel floats it stays mounted above, so it
+    takes overlay rank, not panel — see the comment at that call site) */
+  --z-top: 100; /* lightbox / full-screen top layer */
 }
 
 @layer base {
@@ -1876,6 +2041,15 @@
    Two layout variants: single (no description) and rich (has description). */
 .memoh-toaster {
   position: fixed;
+  /* ui-allow-z: NOT folded into --z-top, despite the ladder's catch-all
+     guidance to fold stray values — doing so ties the toast with the media
+     lightbox (also Teleport'd to body, also --z-top), which previously never
+     happened (9999 unconditionally beat the lightbox's 100). A tie between
+     two Teleport-to-body layers is resolved by mount order, not an explicit
+     rank — exactly the hidden-DOM-order dependency this migration is
+     supposed to remove, not introduce. Kept raw and uncapped so a toast
+     always wins over every ladder tier, including --z-top, with no
+     coincidental tie. */
   z-index: 9999;
   display: flex;
   flex-direction: column;

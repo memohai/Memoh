@@ -20,9 +20,7 @@ jwt_expires_in = "168h"
 timezone = "UTC"
 
 [database]
-# Supported values: "postgres" or "sqlite".
-# SQLite is often the simplest local option on macOS. Use PostgreSQL when you
-# need an external database or want to match production more closely.
+# Memoh now supports PostgreSQL only.
 driver = "postgres"
 
 [container]
@@ -41,19 +39,12 @@ socket_path = ""
 binary_path = ""
 
 [postgres]
-# Used only when [database].driver = "postgres".
 host = "127.0.0.1"
 port = 5432
 user = "memoh"
 password = "memoh123"
 database = "memoh"
 sslmode = "disable"
-
-[sqlite]
-# Used only when [database].driver = "sqlite".
-path = "data/memoh.db"
-wal = true
-busy_timeout_ms = 5000
 
 [qdrant]
 base_url = "http://127.0.0.1:6334"

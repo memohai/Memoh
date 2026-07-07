@@ -1,4 +1,7 @@
 <template>
+  <!-- ui-allow-z: tab-local paint order (shape → label → hover-fill → divider
+       → dot/close), never compared against another component's z-index — see
+       dockview-theme.css's ::before/::after for the other half of this stack. -->
   <div
     ref="rootEl"
     class="group/tab relative z-[1] flex h-full min-w-0 items-center overflow-visible pr-[var(--tab-close-reserve)] pb-[var(--tab-inset)] pl-[var(--tab-pad-inline)]"
@@ -25,7 +28,9 @@
         vector-effect="non-scaling-stroke"
       />
     </svg>
-    <!-- Active state is signalled by text colour, fill, and the connected chip
+    <!-- ui-allow-z: same tab-local stack as the root div above — this label
+         only needs to sit above the active-tab SVG fill, nothing global.
+         Active state is signalled by text colour, fill, and the connected chip
          shape, not by weight or size. Every tab is the same height. Label and
          close share the strip's one optical centre (see the geometry contract in
          dockview-theme.css): the tab's top inset plus this bottom padding give
@@ -36,7 +41,9 @@
         isActive ? 'text-foreground' : 'text-muted-foreground',
       ]"
     >{{ title }}</span>
-    <!-- Unsaved-changes dot: sits in the close slot at rest so the affordance never
+    <!-- ui-allow-z: same tab-local stack — this dot only orders against its own
+         tab's SVG/label/hover-fill siblings.
+         Unsaved-changes dot: sits in the close slot at rest so the affordance never
          shifts; hovering fades it out as the close button fades in. It borrows the
          close-fade GEOMETRY (identical top/bottom/right) so the dot sits exactly
          where the close button will appear — no positional jump on hover — but the
@@ -57,7 +64,9 @@
         />
       </span>
     </div>
-    <!-- Close affordance: RESIDENT on the active tab (fills the reserved slot so it
+    <!-- ui-allow-z: same tab-local stack — this close affordance only orders
+         against its own tab's SVG/label/hover-fill/dot siblings.
+         Close affordance: RESIDENT on the active tab (fills the reserved slot so it
          never reads as an empty gap), hover/focus-only on inactive tabs. Absolutely
          positioned so it never reserves a slot or resizes the chip (geometry is
          identical hovered or not). It paints the chip's own OPAQUE hover colour

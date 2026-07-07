@@ -29,9 +29,7 @@ jwt_expires_in = "168h"
 timezone = "UTC"
 
 [database]
-# Supported values: "postgres" or "sqlite".
-# Keep "postgres" for multi-user/production deployments. Use "sqlite" for a
-# lightweight single-node install; the database file is stored in memoh_data.
+# Memoh now supports PostgreSQL only.
 driver = "postgres"
 
 [container]
@@ -69,7 +67,7 @@ default_workspace_parent = "~/.memoh/workspaces"
 metadata_root = ""
 allow_absolute_paths = false
 
-## Postgres configuration. Used only when [database].driver = "postgres".
+## Postgres configuration.
 [postgres]
 host = "postgres"
 port = 5432
@@ -77,16 +75,6 @@ user = "memoh"
 password = "memoh123"
 database = "memoh"
 sslmode = "disable"
-
-[sqlite]
-# Used only when [database].driver = "sqlite".
-# This path is inside the server and migrate containers and is backed by the
-# Docker volume named memoh_data.
-path = "/opt/memoh/data/memoh.db"
-# WAL is recommended for SQLite because Memoh can read and write concurrently.
-wal = true
-# Wait up to this many milliseconds when another connection holds a write lock.
-busy_timeout_ms = 5000
 
 ## Qdrant configuration
 [qdrant]

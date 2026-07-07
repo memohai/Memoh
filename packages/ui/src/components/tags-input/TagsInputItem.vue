@@ -27,7 +27,7 @@ const forwardedProps = useForwardProps(delegatedProps)
       // Active = selected and about-to-delete (Backspace). Instead of a black ring
       // (a strong signal we reserve for decided, important controls), it shifts to
       // the destructive soft tint — same flat-pill language, now reading as remove.
-      'data-[state=active]:bg-[var(--accent-red-soft-active)] data-[state=active]:text-[var(--accent-red-deep)]',
+      'data-[state=active]:bg-accent-red-soft-active data-[state=active]:text-accent-red-deep',
       props.class,
     )"
   >

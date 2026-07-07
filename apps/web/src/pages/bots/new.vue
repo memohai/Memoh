@@ -289,7 +289,7 @@
       </div>
 
       <!-- Hint -->
-      <div class="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground mt-6">
+      <div class="rounded-md border bg-muted-soft px-3 py-2 text-xs text-muted-foreground mt-6">
         {{ $t('bots.createBotWaitHint') }}
       </div>
 
@@ -357,7 +357,7 @@ import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { aclPresetOptions, defaultAclPreset } from '@/constants/acl-presets'
 import { emptyTimezoneValue } from '@/utils/timezones'
-import { canCreateLocalWorkspace, desktopApiBridge } from '@/utils/desktop-runtime'
+import { canCreateLocalWorkspace } from '@/utils/desktop-runtime'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import ModelSelect from './components/model-select.vue'
@@ -383,7 +383,6 @@ const allowLocalWorkspaceCreate = computed(() =>
   canCreateLocalWorkspace({
     serverLocalWorkspaceEnabled: capabilities.localWorkspaceEnabled,
     host: desktopRuntime.host.value,
-    desktopRuntimeMode: desktopRuntime.desktopRuntimeMode.value,
   }),
 )
 
@@ -479,18 +478,6 @@ watch(allowLocalWorkspaceCreate, (enabled) => {
     localPathTouched.value = false
   }
 }, { immediate: true })
-
-watch([() => form.display_name, () => form.workspace_backend], async ([displayName, backend]) => {
-  if (!allowLocalWorkspaceCreate.value || backend !== 'local' || !displayName?.trim()) return
-  try {
-    const path = await desktopApiBridge()?.desktop?.defaultWorkspacePath?.(displayName.trim())
-    if (path && !localPathTouched.value) {
-      form.local_workspace_path = path
-    }
-  } catch {
-    // Not in Electron or IPC unavailable
-  }
-})
 
 watch(() => form.local_workspace_path, () => {
   if (!allowLocalWorkspaceCreate.value || form.workspace_backend !== 'local') return

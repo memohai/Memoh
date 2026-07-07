@@ -90,8 +90,7 @@
     "unsaved": "未保存",
     "editJson": "编辑 JSON",
     "actionRequired": "需要操作",
-    "preview": "预览",
-    "raw": "源码"
+    "preview": "预览"
   },
   "auth": {
     "welcome": "欢迎回来",
@@ -391,6 +390,7 @@
       "share": "分享",
       "retry": "重试",
       "fork": "分叉",
+      "createFork": "创建分叉",
       "more": "更多",
       "readAloud": "朗读"
     },
@@ -427,8 +427,16 @@
     "attachFiles": "上传文件",
     "send": "发送",
     "sendFailed": "消息发送失败",
-    "minimapLabel": "对话导航",
-    "minimapEarlier": "更早的消息加载后显示",
+    "forkFailed": "分叉会话失败",
+    "forkedFrom": "分叉自 {session}",
+    "forkSourceUnavailable": "原始会话不存在或已被删除。",
+    "forkDialog": {
+      "title": "创建分叉",
+      "description": "为新会话设置一个名字。",
+      "namePlaceholder": "新的会话名称",
+      "defaultTitle": "{session} 分叉"
+    },
+    "unknownSession": "未知会话",
     "startChat": "开始聊天",
     "noBot": "暂无可用 Bot，请先创建 Bot",
     "newChat": "新会话",
@@ -663,8 +671,6 @@
     "modelOptions": "选项",
     "modelEffort": "强度",
     "noProject": "不在项目中",
-    "projectFolder": "项目文件夹",
-    "chooseFolder": "选择文件夹…",
     "noModels": "暂无可用模型",
     "acpAttachmentsUnsupported": "ACP 会话暂不支持附件。",
     "defaultACPLoading": "默认 Agent 仍在加载，请稍后重试。",

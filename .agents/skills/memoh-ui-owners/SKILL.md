@@ -177,15 +177,16 @@ frameless center of a panel that has nothing else. Parent must give it height.
 A left-aligned, in-flow "spinner + muted text" row that occupies one line where content
 will appear (list head, settings row content, panel top). Props: `size: 'sm' | 'md'`
 (text-xs/3.5 vs text-sm/4), `bordered` (the rounded-md framed variant used by backup /
-import read-states). Positioning padding (`px-2`, `py-8`) stays with the **caller** via
-class passthrough. Not for centered fills — that's PanePlaceholder.
-**The caller classes must match the surface family, not just any precedent:** loading a
-list INSIDE a SettingsSection card borrows the row form
-(`mx-4 min-h-[3.75rem] border-b border-border py-3 last:border-b-0` + `ui-allow-shape`
-comment — the bot-email/bot-plugins family, reads as "a list row, loading"); `px-2 py-8`
-is the whole-TAB loading form (bot-container, no card around it). Mixing them up puts a
-short left-aligned line in a tall card — a real 2026-07-06 regression: the card read as
-a half-empty box until re-aligned to the in-card family.
+import read-states), `surface: 'card-row' | 'tab'`. Not for centered fills — that's
+PanePlaceholder.
+**Use `surface` to pick the positioning family — never hand-write it as a class again:**
+`surface="card-row"` for a loading list INSIDE a SettingsSection card (bordered row form,
+reads as "a list row, loading"); `surface="tab"` for the whole-TAB loading form (no card
+around it, e.g. bot-container). A real 2026-07-06 regression mixed these up by hand
+(caller literally copied the wrong family's class string) — the card read as a half-empty
+box until re-aligned. The two named forms now live in the component so a caller cannot
+copy the wrong one; a genuinely different, unnamed positioning need still passes plain
+class (single root node, merges with the component's base class).
 
 ### Dialogs
 

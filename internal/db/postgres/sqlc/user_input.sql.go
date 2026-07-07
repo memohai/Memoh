@@ -680,6 +680,69 @@ func (q *Queries) ListUserInputsBySession(ctx context.Context, arg ListUserInput
 	return items, nil
 }
 
+const listUserInputsBySessionToolCalls = `-- name: ListUserInputsBySessionToolCalls :many
+SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at
+FROM user_input_requests
+WHERE bot_id = $1
+  AND session_id = $2
+  AND tool_call_id = ANY($3::text[])
+ORDER BY created_at ASC, short_id ASC
+`
+
+type ListUserInputsBySessionToolCallsParams struct {
+	BotID       pgtype.UUID `json:"bot_id"`
+	SessionID   pgtype.UUID `json:"session_id"`
+	ToolCallIds []string    `json:"tool_call_ids"`
+}
+
+func (q *Queries) ListUserInputsBySessionToolCalls(ctx context.Context, arg ListUserInputsBySessionToolCallsParams) ([]UserInputRequest, error) {
+	rows, err := q.db.Query(ctx, listUserInputsBySessionToolCalls, arg.BotID, arg.SessionID, arg.ToolCallIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UserInputRequest
+	for rows.Next() {
+		var i UserInputRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.RouteID,
+			&i.ChannelIdentityID,
+			&i.ToolCallID,
+			&i.ToolName,
+			&i.ShortID,
+			&i.Status,
+			&i.InputJson,
+			&i.UiPayloadJson,
+			&i.ResultJson,
+			&i.ProviderMetadata,
+			&i.RequestedByChannelIdentityID,
+			&i.RespondedByChannelIdentityID,
+			&i.AssistantMessageID,
+			&i.ToolResultMessageID,
+			&i.PromptMessageID,
+			&i.PromptExternalMessageID,
+			&i.SourcePlatform,
+			&i.ReplyTarget,
+			&i.ConversationType,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.RespondedAt,
+			&i.CanceledAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const submitUserInputRequest = `-- name: SubmitUserInputRequest :one
 UPDATE user_input_requests
 SET status = 'submitted',

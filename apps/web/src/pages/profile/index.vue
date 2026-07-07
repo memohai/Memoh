@@ -57,10 +57,7 @@
         <!-- Connected IM Accounts -->
         <ConnectedAccountsSection />
 
-        <!-- Card 3 · Session: user id + sign out (low-frequency, kept at the bottom).
-             Sign-out is hidden only in the local desktop shell, which auto-logs
-             in via [admin] and has no login screen to return to. The remote
-             desktop shell and the browser keep it available. -->
+        <!-- Card 3 · Session: user id + sign out (low-frequency, kept at the bottom). -->
         <SettingsSection :title="$t('settings.sessionSection')">
           <SettingsRow :label="$t('settings.userID')">
             <div class="flex items-center gap-1 text-sm text-muted-foreground">
@@ -108,7 +105,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
@@ -129,7 +126,6 @@ import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePassw
 import { useUserStore } from '@/store/user'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
-import { DesktopShellKey, DesktopRuntimeModeKey } from '@/lib/desktop-shell'
 
 type UserAccount = AccountsAccount
 
@@ -138,13 +134,7 @@ const router = useRouter()
 const userStore = useUserStore()
 const { userInfo, exitLogin, patchUserInfo } = userStore
 
-// In the local desktop shell the app auto-logs in via [admin] and has no
-// login screen to return to, so sign-out is hidden there. The remote desktop
-// shell (and the browser) talks to a real server with user accounts, so
-// sign-out stays available. Connected Accounts stays available either way.
-const desktopShell = inject(DesktopShellKey, false)
-const desktopRuntimeMode = inject(DesktopRuntimeModeKey, 'local')
-const canSignOut = !desktopShell || desktopRuntimeMode === 'remote'
+const canSignOut = true
 
 // ---- User data ----
 const account = ref<UserAccount | null>(null)

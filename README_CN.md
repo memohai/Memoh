@@ -73,13 +73,13 @@ docker compose up -d
 
 ### Desktop
 
-macOS、Windows、Linux 原生客户端。[下载 Memoh Desktop](https://memoh.ai/desktop)
+连接 Memoh Cloud 或自托管服务器的 macOS、Windows、Linux 原生客户端。[下载 Memoh Desktop](https://memoh.ai/desktop)
 
 ## 为什么选 Memoh？
 
 - **每个 Agent 一台电脑**：独立容器，自带文件系统、网络、桌面和浏览器
 - **多用户、多机器人**：给自己跑一个，给家人各部署一个，在一台机器上同时跑一群
-- **轻量**：边缘设备也能跑，算力走云端，数据留本地
+- **轻量**：可以自托管在自己的基础设施上，也可以连接 Memoh Cloud
 
 ## 功能概览
 

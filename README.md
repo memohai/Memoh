@@ -76,13 +76,13 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for custom configuration and production setup
 
 ### Desktop
 
-A native client for macOS, Windows, and Linux. [Download Memoh Desktop](https://memoh.ai/desktop)
+A native client for macOS, Windows, and Linux that connects to Memoh Cloud or your hosted server. [Download Memoh Desktop](https://memoh.ai/desktop)
 
 ## Why Memoh?
 
 - **Every agent gets its own computer**: An isolated container with its own filesystem, network, desktop, and browser.
 - **Multi-user, multi-bot**: Run one for yourself, deploy one for each family member, run a fleet on a single machine.
-- **Lightweight**: Runs on edge devices. Inference in the cloud, data stays local.
+- **Lightweight**: Self-host the server on your own infrastructure, or connect through Memoh Cloud.
 
 ## Features
 

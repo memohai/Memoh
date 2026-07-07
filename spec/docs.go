@@ -5179,6 +5179,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Message ID cursor before which to page",
+                        "name": "before_message_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Response format: ui returns normalized chat UI turns",
                         "name": "format",
                         "in": "query"
@@ -6633,6 +6639,71 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/sessions/{session_id}/fork": {
+            "post": {
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Fork a chat session from an assistant reply",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Source session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fork source message",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.forkSessionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/session.Session"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -17849,6 +17920,20 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "provider": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.forkSessionRequest": {
+            "type": "object",
+            "required": [
+                "message_id"
+            ],
+            "properties": {
+                "message_id": {
+                    "type": "string"
+                },
+                "title": {
                     "type": "string"
                 }
             }

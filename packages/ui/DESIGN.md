@@ -19,11 +19,11 @@ A modern, clean, and highly functional interface designed for the Memoh AI Agent
 
 ## Typography
 
-- **Headline Font**: Inter / Noto Sans SC / Noto Sans JP
-- **Body Font**: Inter / Noto Sans SC / Noto Sans JP
-- **Mono Font**: Geist Mono / Menlo (used for code blocks, component names in collapsibles, and tags like `thinking`, `tool_call`)
+- **Headline Font**: Inter Variable / Inter / MiSans / PingFang SC / Hiragino Sans GB / Microsoft YaHei UI / Noto Sans SC (the `--font-sans` stack in `style.css`; there is no Japanese-specific face — CJK glyphs fall through to the same Simplified-Chinese-tuned stack).
+- **Body Font**: same as Headline (`--font-sans`).
+- **Mono Font**: unset in the library — falls through to Tailwind's default stack (`ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`; Menlo is a fallback member, not the primary face). Web additionally lets users override `--font-mono` at runtime via Settings → Typography (`apps/web/src/store/settings/typography.ts`), defaulting to `ui-monospace, monospace`.
 
-Headlines and key labels use medium/semibold weights. Body text uses regular weight at 14px. Inputs use 16px to prevent iOS zoom. Secondary information uses 11px or 12px.
+Headlines and key labels use medium/semibold weights. Body text uses regular weight at 14px. Inputs size via the `size` prop's token ladder, not a fixed value — `sm` uses `text-body` (12px), `default` uses `text-label` (13px), `lg` uses `text-control` (14px); see `sizeClass` in `Input.vue`. Secondary information uses 11px or 12px.
 
 ## Elevation
 
@@ -53,7 +53,7 @@ The system employs a **bimodal elevation strategy**:
   - Inside a **rounded-rectangle** surface (toolbar, input row, card) the hover chip is a **rounded rectangle** (matches the host's `rounded-md`).
   - Inside a **pill / capsule** (a tag chip, a count-style pill) the hover chip is a **pure circle** (`rounded-full`) — never a rounded rectangle. The hover chip must echo the curvature of the thing it sits in.
   - **Colour is never hand-rolled.** The hover fill deepens along the *same ramp the host capsule is built from*: a gray chip (`--accent-gray-soft-active`) deepens to that ramp's next stop (`--accent-gray-border`). Do not borrow the standalone ghost `--btn-ghost-hover` here — it is tuned for a white page and disappears on an already-tinted chip. Icon is `muted-foreground` at rest, `foreground` on hover/focus.
-- **Inputs**: Flat design. 1px `border`, pure `background` fill, 8px/10px outer radius. Text must be `text-[16px]`. Focus state uses a stark black/grey ring, **not** primary purple.
+- **Inputs**: Flat design. 1px `border`, pure `background` fill, 8px/10px outer radius. Text sizes via the `size` prop (`sm` 12px / `default` 13px / `lg` 14px), never a fixed 16px. Focus is not a ring — the 1px field edge swaps color in place (`--field-edge-rest` → `--field-edge-solid`, a near-black ~0.78-alpha hairline) on focus; an outer ring or a grown border width is the anti-pattern (see `packages/ui/AGENTS.md` § Borders & field edge).
 - **Checkboxes/Radios**: Flat, soft background (`bg-background`). 1px `border`. The checked state marker (tick/dot) is `foreground` (charcoal), avoiding brand colors.
 - **Separators**: Uniformly use the 1px `border` color. Do not use padding/margins that detach them from the container edges (e.g., use full width `border-b` in menus instead of `<Separator mx-1>`).
 - **Skeleton**: Flat `bg-muted` block, `rounded-lg`. The loading shimmer is a **single synchronized seam** across a whole cluster (avatar + lines read as one loading surface, never independent per-block pulses) — the "one paper, many windows" model. Implementation lives entirely in `style.css` on `[data-slot="skeleton"]`: a two-close-gray gradient (`--muted` → `--skeleton-mid` → `--muted`) on a **viewport-anchored** sheet (`background-attachment: fixed`), tiled at `--skeleton-tile` (640px) and repeated, animated by exactly one tile width so it loops seamlessly. Because every block samples the *same* viewport-anchored sheet by its own position, the seam stays in sync without any wrapper component. Tile narrower than a typical row → a fresh seam revisits each cluster every cycle (short gap, not a viewport-wide wait). Tune speed via the `2s` duration, gap via `--skeleton-tile`. Reduced-motion freezes to flat `--muted`. **Two deliberate trade-offs of the `fixed` technique**: (1) iOS Safari ignores `background-attachment: fixed` and degrades to element-anchored — the shimmer still animates but loses cross-block sync there; (2) a `transform`/`filter`/`will-change` ancestor re-anchors the `fixed` sheet to that box instead of the viewport (sync holds within the subtree, but tile size/gap is then relative to that box). Both are acceptable for a Chromium desktop-first product; **do not "fix" this into a per-element gradient** — that reintroduces the independent-pulse look this avoids.

@@ -115,7 +115,7 @@ const visibleSections = computed(() => props.sections.filter(s => iconMap[s.key]
           ? 'border-border/40 bg-muted/20 opacity-50'
           : mode === 'include' && stateOf(item.key) !== 'skip'
             ? 'border-foreground bg-muted'
-            : 'border-border/60 bg-background/50',
+            : 'border-border-soft bg-background/50',
       ]"
     >
       <div class="flex items-center gap-3 px-3 py-2.5">
@@ -180,7 +180,7 @@ const visibleSections = computed(() => props.sections.filter(s => iconMap[s.key]
         <!-- Strategy selector (overwrite) -->
         <div
           v-if="mode === 'strategy' && isAvailable(item)"
-          class="flex shrink-0 items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5"
+          class="flex shrink-0 items-center gap-0.5 rounded-md border border-border-soft bg-background p-0.5"
         >
           <button
             v-for="opt in strategyOptions(item.key)"

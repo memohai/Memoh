@@ -23,8 +23,8 @@ Usage: scripts/release.sh [options]
 Options:
   --os <os>             Target OS (default: current GOOS)
   --arch <arch>         Target ARCH (default: current GOARCH)
-  --version <version>   Version string injected into the memoh CLI
-  --commit-hash <sha>   Commit hash injected into the memoh CLI
+  --version <version>   Version string injected into memoh-server
+  --commit-hash <sha>   Commit hash injected into memoh-server
   --output-dir <dir>    Output directory for release artifacts
   --prepare-assets      Only prepare embedded assets, do not build archive
 EOF
@@ -113,8 +113,8 @@ build_archive() {
     ext=".exe"
   fi
 
-  local binary_name="memoh${ext}"
-  local target_dir="$OUTPUT_DIR/memoh_${VERSION}_${TARGET_OS}_${TARGET_ARCH}"
+  local binary_name="memoh-server${ext}"
+  local target_dir="$OUTPUT_DIR/memoh-server_${VERSION}_${TARGET_OS}_${TARGET_ARCH}"
   mkdir -p "$target_dir"
 
   log "building binary ${TARGET_OS}/${TARGET_ARCH}"
@@ -123,12 +123,12 @@ build_archive() {
     -trimpath \
     -ldflags "-s -w -X github.com/memohai/memoh/internal/version.Version=${VERSION} -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH} -X github.com/memohai/memoh/internal/version.BuildTime=${BUILD_TIME}" \
     -o "$target_dir/$binary_name" \
-    "$ROOT_DIR/cmd/memoh"
+    "$ROOT_DIR/cmd/agent"
 
   if [[ "$TARGET_OS" == "windows" ]]; then
-    (cd "$OUTPUT_DIR" && zip -q -r "memoh_${VERSION}_${TARGET_OS}_${TARGET_ARCH}.zip" "memoh_${VERSION}_${TARGET_OS}_${TARGET_ARCH}")
+    (cd "$OUTPUT_DIR" && zip -q -r "memoh-server_${VERSION}_${TARGET_OS}_${TARGET_ARCH}.zip" "memoh-server_${VERSION}_${TARGET_OS}_${TARGET_ARCH}")
   else
-    tar -C "$OUTPUT_DIR" -czf "$OUTPUT_DIR/memoh_${VERSION}_${TARGET_OS}_${TARGET_ARCH}.tar.gz" "memoh_${VERSION}_${TARGET_OS}_${TARGET_ARCH}"
+    tar -C "$OUTPUT_DIR" -czf "$OUTPUT_DIR/memoh-server_${VERSION}_${TARGET_OS}_${TARGET_ARCH}.tar.gz" "memoh-server_${VERSION}_${TARGET_OS}_${TARGET_ARCH}"
   fi
 
   log "archive created (${TARGET_OS}-${TARGET_ARCH})"

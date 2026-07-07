@@ -30,7 +30,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       data-slot="tooltip-content"
       v-bind="{ ...forwarded, ...$attrs }"
       :class="cn(
-        'z-50 w-fit max-w-80 rounded-sm px-2 py-1 text-body font-medium whitespace-normal break-words',
+        'z-(--z-overlay) w-fit max-w-80 rounded-sm px-2 py-1 text-body font-medium whitespace-normal break-words',
         'bg-[color:var(--tooltip)] text-[color:var(--tooltip-foreground)]',
         props.class
       )"

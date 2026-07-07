@@ -6,24 +6,18 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
-	"log/slog"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/acpprofile"
 	"github.com/memohai/memoh/internal/bots"
-	sqlitestore "github.com/memohai/memoh/internal/db/sqlite/store"
-	modelpkg "github.com/memohai/memoh/internal/models"
-	settingspkg "github.com/memohai/memoh/internal/settings"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 func TestReadZipEntriesRejectsZipSlip(t *testing.T) {
@@ -61,64 +55,6 @@ func TestNormalizeExportOptionsDefaultsAllSections(t *testing.T) {
 	}
 }
 
-func TestImportDependenciesLegacyModelEnableCompatibility(t *testing.T) {
-	t.Run("missing enable defaults to true", func(t *testing.T) {
-		ctx := context.Background()
-		conn, queries := newBotBackupModelTestDB(t)
-		const providerID = "00000000-0000-0000-0000-000000000501"
-		insertBotBackupProvider(t, conn, providerID)
-		modelsService := modelpkg.NewService(slog.New(slog.DiscardHandler), queries)
-		service := &Service{models: modelsService}
-		state := &importState{
-			entries: map[string]backupZipEntry{
-				"dependencies/models.json": {
-					data: []byte(`[{"id":"old-model","model_id":"legacy-gpt","name":"Legacy GPT","provider_id":"00000000-0000-0000-0000-000000000501","type":"chat","config":{}}]`),
-				},
-			},
-		}
-
-		deps, err := service.importDependencies(ctx, state)
-		if err != nil {
-			t.Fatalf("importDependencies() error = %v", err)
-		}
-		created, err := modelsService.GetByID(ctx, deps.models["old-model"])
-		if err != nil {
-			t.Fatalf("GetByID() error = %v", err)
-		}
-		if !created.Enable {
-			t.Fatalf("legacy backup model imported disabled, want enabled")
-		}
-	})
-
-	t.Run("explicit false stays disabled", func(t *testing.T) {
-		ctx := context.Background()
-		conn, queries := newBotBackupModelTestDB(t)
-		const providerID = "00000000-0000-0000-0000-000000000601"
-		insertBotBackupProvider(t, conn, providerID)
-		modelsService := modelpkg.NewService(slog.New(slog.DiscardHandler), queries)
-		service := &Service{models: modelsService}
-		state := &importState{
-			entries: map[string]backupZipEntry{
-				"dependencies/models.json": {
-					data: []byte(`[{"id":"old-model","model_id":"disabled-gpt","name":"Disabled GPT","provider_id":"00000000-0000-0000-0000-000000000601","type":"chat","enable":false,"config":{}}]`),
-				},
-			},
-		}
-
-		deps, err := service.importDependencies(ctx, state)
-		if err != nil {
-			t.Fatalf("importDependencies() error = %v", err)
-		}
-		created, err := modelsService.GetByID(ctx, deps.models["old-model"])
-		if err != nil {
-			t.Fatalf("GetByID() error = %v", err)
-		}
-		if created.Enable {
-			t.Fatalf("disabled backup model imported enabled, want disabled")
-		}
-	})
-}
-
 func TestWriteJSONPreservesSensitiveValues(t *testing.T) {
 	var buf bytes.Buffer
 	manifest := Manifest{}
@@ -150,47 +86,121 @@ func TestWriteJSONPreservesSensitiveValues(t *testing.T) {
 	}
 }
 
-func TestExportScrubsACPManagedSecretsFromProfile(t *testing.T) {
+func TestRebuildRestoredHistoryTurnsLinksVisibleLinearTurns(t *testing.T) {
 	ctx := context.Background()
-	conn, queries := newBotBackupExportTestDB(t)
-	const ownerID = "00000000-0000-0000-0000-000000000101"
-	const botID = "00000000-0000-0000-0000-000000000102"
-	metadata := `{"acp":{"agents":{"hermes":{"enabled":true,"setup_mode":"api_key","managed":{"provider":"openrouter","model":"nousresearch/hermes","api_key":"secret-value"}}}}}`
-	if _, err := conn.ExecContext(ctx, `
-INSERT INTO users (id, username, email, role)
-VALUES (?, ?, ?, ?)`, ownerID, "owner", "owner@example.com", "member"); err != nil {
-		t.Fatalf("insert user: %v", err)
-	}
-	if _, err := conn.ExecContext(ctx, `
-INSERT INTO bots (id, owner_user_id, type, name, display_name, is_active, status, metadata)
-VALUES (?, ?, 'personal', ?, ?, 1, 'ready', ?)`, botID, ownerID, "hermes-bot", "Hermes Bot", metadata); err != nil {
-		t.Fatalf("insert bot: %v", err)
-	}
+	botID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000701")
+	sessionID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000702")
+	userID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000711")
+	assistantID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000712")
+	toolID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000713")
+	finalID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000714")
+	nextUserID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000715")
+	nextAssistantID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000716")
+	q := &recordingRestoredTurnQueries{}
 
-	service := New(Params{
-		Queries:  queries,
-		Bots:     bots.NewService(slog.New(slog.DiscardHandler), queries),
-		Settings: settingspkg.NewService(slog.New(slog.DiscardHandler), queries, nil, nil),
+	err := rebuildRestoredHistoryTurns(ctx, q, botID, []restoredHistoryMessage{
+		{id: userID, sessionID: sessionID, role: "user"},
+		{id: assistantID, sessionID: sessionID, role: "assistant"},
+		{id: toolID, sessionID: sessionID, role: "tool"},
+		{id: finalID, sessionID: sessionID, role: "assistant"},
+		{id: nextUserID, sessionID: sessionID, role: "user"},
+		{id: nextAssistantID, sessionID: sessionID, role: "assistant"},
 	})
-	var out bytes.Buffer
-	if err := service.Export(ctx, botID, ExportOptions{Sections: []Section{SectionProfile}}, &out); err != nil {
-		t.Fatalf("Export() error = %v", err)
-	}
-
-	entries, err := readZipEntries(out.Bytes())
 	if err != nil {
-		t.Fatalf("readZipEntries() error = %v", err)
+		t.Fatalf("rebuildRestoredHistoryTurns() error = %v", err)
 	}
-	profileRaw := string(entries["bot/profile.json"].data)
-	if strings.Contains(profileRaw, "secret-value") || strings.Contains(profileRaw, `"api_key":`) {
-		t.Fatalf("bot/profile.json leaked ACP secret: %s", profileRaw)
+	if got, want := len(q.turns), 2; got != want {
+		t.Fatalf("created turns = %d, want %d", got, want)
 	}
-	var manifest Manifest
-	if err := json.Unmarshal(entries[ManifestPath].data, &manifest); err != nil {
-		t.Fatalf("unmarshal manifest: %v", err)
+	if got := q.turns[0].RequestMessageID.String(); got != userID.String() {
+		t.Fatalf("first request message = %s, want %s", got, userID.String())
 	}
-	if !containsWarning(manifest.Warnings, "ACP managed secrets were excluded") {
-		t.Fatalf("manifest warnings = %v, want ACP secret warning", manifest.Warnings)
+	if got := q.turns[1].RequestMessageID.String(); got != nextUserID.String() {
+		t.Fatalf("second request message = %s, want %s", got, nextUserID.String())
+	}
+	if got, want := len(q.binds), 2; got != want {
+		t.Fatalf("assistant binds = %d, want %d", got, want)
+	}
+	if got := q.binds[0].AssistantMessageID.String(); got != assistantID.String() {
+		t.Fatalf("first assistant bind = %s, want %s", got, assistantID.String())
+	}
+	wantSeq := []int64{1, 2, 3, 4, 1, 2}
+	if got, want := len(q.links), len(wantSeq); got != want {
+		t.Fatalf("links = %d, want %d", got, want)
+	}
+	for i, want := range wantSeq {
+		if got := q.links[i].TurnMessageSeq.Int64; got != want {
+			t.Fatalf("link %d seq = %d, want %d", i, got, want)
+		}
+	}
+}
+
+func TestRebuildRestoredHistoryTurnsKeepsOrphanAssistantSeq(t *testing.T) {
+	ctx := context.Background()
+	botID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000741")
+	sessionID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000742")
+	assistantID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000743")
+	toolID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000744")
+	finalID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000745")
+	q := &recordingRestoredTurnQueries{}
+
+	err := rebuildRestoredHistoryTurns(ctx, q, botID, []restoredHistoryMessage{
+		{id: assistantID, sessionID: sessionID, role: "assistant"},
+		{id: toolID, sessionID: sessionID, role: "tool"},
+		{id: finalID, sessionID: sessionID, role: "assistant"},
+	})
+	if err != nil {
+		t.Fatalf("rebuildRestoredHistoryTurns() error = %v", err)
+	}
+	if got, want := len(q.turns), 1; got != want {
+		t.Fatalf("created turns = %d, want %d", got, want)
+	}
+	if got := q.turns[0].AssistantMessageID.String(); got != assistantID.String() {
+		t.Fatalf("orphan assistant message = %s, want %s", got, assistantID.String())
+	}
+	wantSeq := []int64{2, 3, 4}
+	if got, want := len(q.links), len(wantSeq); got != want {
+		t.Fatalf("links = %d, want %d", got, want)
+	}
+	for i, want := range wantSeq {
+		if got := q.links[i].TurnMessageSeq.Int64; got != want {
+			t.Fatalf("link %d seq = %d, want %d", i, got, want)
+		}
+	}
+}
+
+func TestRebindRestoredForkMetadataMapsImportedIDs(t *testing.T) {
+	oldSessionID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000781")
+	newSessionID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000782")
+	oldMessageID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000783")
+	newMessageID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000784")
+	oldForkMessageID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000785")
+	newForkMessageID := mustTestPGUUID(t, "00000000-0000-0000-0000-000000000786")
+	raw := []byte(`{"forked_from":{"session_id":"` + oldSessionID.String() + `","message_id":"` + oldMessageID.String() + `","fork_message_id":"` + oldForkMessageID.String() + `"}}`)
+
+	got, changed := rebindRestoredForkMetadata(raw, map[string]pgtype.UUID{
+		oldSessionID.String(): newSessionID,
+	}, map[string]pgtype.UUID{
+		oldMessageID.String():     newMessageID,
+		oldForkMessageID.String(): newForkMessageID,
+	})
+	if !changed {
+		t.Fatal("rebindRestoredForkMetadata changed = false, want true")
+	}
+	var decoded struct {
+		ForkedFrom struct {
+			SessionID     string `json:"session_id"`
+			MessageID     string `json:"message_id"`
+			ForkMessageID string `json:"fork_message_id"`
+		} `json:"forked_from"`
+	}
+	if err := json.Unmarshal(got, &decoded); err != nil {
+		t.Fatalf("unmarshal rebound metadata: %v", err)
+	}
+	if decoded.ForkedFrom.SessionID != newSessionID.String() ||
+		decoded.ForkedFrom.MessageID != newMessageID.String() ||
+		decoded.ForkedFrom.ForkMessageID != newForkMessageID.String() {
+		t.Fatalf("rebound fork metadata = %+v", decoded.ForkedFrom)
 	}
 }
 
@@ -250,251 +260,50 @@ func TestScrubImportedProfileACPSecrets(t *testing.T) {
 	}
 }
 
-func TestImportOverwriteScrubsACPSecretsAndClosesRuntimes(t *testing.T) {
-	ctx := context.Background()
-	conn, queries := newBotBackupExportTestDB(t)
-	const ownerID = "00000000-0000-0000-0000-000000000201"
-	const targetBotID = "00000000-0000-0000-0000-000000000202"
-	const sourceBotID = "00000000-0000-0000-0000-000000000203"
-	targetMetadata := `{"acp":{"agents":{"hermes":{"enabled":true,"setup_mode":"api_key","managed":{"provider":"openrouter","model":"target-model","api_key":"target-secret","base_url":"https://target.example"}}}}}`
-	sourceProfile := bots.Bot{
-		ID:          sourceBotID,
-		DisplayName: "Imported Hermes",
-		Timezone:    "UTC",
-		IsActive:    true,
-		Metadata: map[string]any{
-			"acp": map[string]any{
-				"agents": map[string]any{
-					"hermes": map[string]any{
-						"enabled":    true,
-						"setup_mode": "api_key",
-						"managed": map[string]any{
-							"provider": "openrouter",
-							"model":    "source-model",
-							"api_key":  "source-secret",
-						},
-					},
-				},
-			},
-		},
-	}
-	if _, err := conn.ExecContext(ctx, `
-INSERT INTO users (id, username, email, role)
-VALUES (?, ?, ?, ?)`, ownerID, "owner", "owner@example.com", "member"); err != nil {
-		t.Fatalf("insert user: %v", err)
-	}
-	if _, err := conn.ExecContext(ctx, `
-INSERT INTO bots (id, owner_user_id, type, name, display_name, is_active, status, metadata)
-VALUES (?, ?, 'personal', ?, ?, 1, 'ready', ?)`, targetBotID, ownerID, "target-hermes", "Target Hermes", targetMetadata); err != nil {
-		t.Fatalf("insert target bot: %v", err)
-	}
-
-	closer := &recordingACPRuntimeCloser{}
-	service := New(Params{
-		Queries:     queries,
-		Bots:        bots.NewService(slog.New(slog.DiscardHandler), queries),
-		ACPRuntimes: closer,
-	})
-	result, err := service.Import(ctx, ownerID, makeProfileImportBundle(t, sourceProfile), ImportOptions{
-		Mode:        ImportModeOverwrite,
-		TargetBotID: targetBotID,
-		Sections: map[Section]ImportStrategy{
-			SectionProfile: StrategyMerge,
-		},
-	}, "")
-	if err != nil {
-		t.Fatalf("Import() error = %v", err)
-	}
-	if result.BotID != targetBotID || result.Created {
-		t.Fatalf("Import() result = %+v, want overwrite target", result)
-	}
-	if !containsWarning(result.Warnings, "ACP managed secrets were excluded") {
-		t.Fatalf("warnings = %v, want ACP secret warning", result.Warnings)
-	}
-	var rawMetadata string
-	if err := conn.QueryRowContext(ctx, `SELECT metadata FROM bots WHERE id = ?`, targetBotID).Scan(&rawMetadata); err != nil {
-		t.Fatalf("select target metadata: %v", err)
-	}
-	if strings.Contains(rawMetadata, "target-secret") || strings.Contains(rawMetadata, "source-secret") {
-		t.Fatalf("overwrite import retained ACP secret metadata: %s", rawMetadata)
-	}
-	var metadata map[string]any
-	if err := json.Unmarshal([]byte(rawMetadata), &metadata); err != nil {
-		t.Fatalf("unmarshal target metadata: %v", err)
-	}
-	setup := acpprofile.ParseAgentSetup(metadata, acpprofile.AgentHermesID)
-	if _, ok := setup.Managed["api_key"]; ok {
-		t.Fatalf("overwrite import retained managed api_key: %s", rawMetadata)
-	}
-	if got := setup.Managed["model"]; got != "source-model" {
-		t.Fatalf("imported Hermes model = %q, want source-model", got)
-	}
-	if !closer.hasCall(targetBotID, acpprofile.AgentHermesID) {
-		t.Fatalf("runtime closer calls = %#v, missing Hermes close for target bot", closer.calls)
-	}
+type recordingRestoredTurnQueries struct {
+	turns []dbsqlc.CreateHistoryTurnParams
+	binds []dbsqlc.BindHistoryTurnAssistantByRequestParams
+	links []dbsqlc.LinkMessageToHistoryTurnParams
 }
 
-type recordingACPRuntimeCloser struct {
-	calls []string
+func (q *recordingRestoredTurnQueries) CreateHistoryTurn(_ context.Context, arg dbsqlc.CreateHistoryTurnParams) (dbstore.HistoryTurn, error) {
+	q.turns = append(q.turns, arg)
+	return dbstore.HistoryTurn{ID: mustPGUUID(fmt.Sprintf("00000000-0000-0000-0000-%012d", len(q.turns)))}, nil
 }
 
-func (r *recordingACPRuntimeCloser) CloseBotAgentRuntimes(botID, agentID string) error {
-	r.calls = append(r.calls, botID+"/"+agentID)
-	return nil
+func (q *recordingRestoredTurnQueries) BindHistoryTurnAssistantByRequest(_ context.Context, arg dbsqlc.BindHistoryTurnAssistantByRequestParams) (dbstore.HistoryTurn, error) {
+	q.binds = append(q.binds, arg)
+	return dbstore.HistoryTurn{}, nil
 }
 
-func (r *recordingACPRuntimeCloser) hasCall(botID, agentID string) bool {
-	want := botID + "/" + agentID
-	for _, call := range r.calls {
-		if call == want {
-			return true
-		}
-	}
-	return false
+func (q *recordingRestoredTurnQueries) LinkMessageToHistoryTurn(_ context.Context, arg dbsqlc.LinkMessageToHistoryTurnParams) (pgtype.UUID, error) {
+	q.links = append(q.links, arg)
+	return arg.MessageID, nil
 }
 
-func makeProfileImportBundle(t *testing.T, profile bots.Bot) []byte {
+func mustTestPGUUID(t *testing.T, value string) pgtype.UUID {
 	t.Helper()
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	profileRaw, err := json.Marshal(profile)
+	out, err := parsePGUUID(value)
 	if err != nil {
-		t.Fatalf("marshal profile: %v", err)
+		t.Fatalf("parse uuid %q: %v", value, err)
 	}
-	w, err := zw.Create("bot/profile.json")
-	if err != nil {
-		t.Fatalf("create profile entry: %v", err)
-	}
-	if _, err := w.Write(profileRaw); err != nil {
-		t.Fatalf("write profile entry: %v", err)
-	}
-	manifestRaw, err := json.Marshal(Manifest{
-		SchemaVersion: BackupSchemaVersion,
-		SourceBotID:   profile.ID,
-		SourceBotName: profile.DisplayName,
-		Entries: []ManifestEntry{{
-			Path: "bot/profile.json",
-			Type: "bot_profile",
-		}},
-	})
-	if err != nil {
-		t.Fatalf("marshal manifest: %v", err)
-	}
-	w, err = zw.Create(ManifestPath)
-	if err != nil {
-		t.Fatalf("create manifest entry: %v", err)
-	}
-	if _, err := w.Write(manifestRaw); err != nil {
-		t.Fatalf("write manifest entry: %v", err)
-	}
-	if err := zw.Close(); err != nil {
-		t.Fatalf("close zip: %v", err)
-	}
-	return buf.Bytes()
+	return out
 }
 
-func newBotBackupModelTestDB(t *testing.T) (*sql.DB, *sqlitestore.Queries) {
-	t.Helper()
-	conn, err := sql.Open("sqlite", ":memory:")
+func mustPGUUID(value string) pgtype.UUID {
+	out, err := parsePGUUID(value)
 	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
+		panic(err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
-	execBotBackupModelSchema(t, conn)
-	store, err := sqlitestore.New(conn)
-	if err != nil {
-		t.Fatalf("new sqlite store: %v", err)
-	}
-	return conn, sqlitestore.NewQueries(store)
+	return out
 }
 
-func newBotBackupExportTestDB(t *testing.T) (*sql.DB, *sqlitestore.Queries) {
-	t.Helper()
-	conn, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
+func parsePGUUID(value string) (pgtype.UUID, error) {
+	var out pgtype.UUID
+	if err := out.Scan(value); err != nil {
+		return pgtype.UUID{}, err
 	}
-	t.Cleanup(func() { _ = conn.Close() })
-	migrationPaths, err := filepath.Glob(filepath.Join("..", "..", "db", "sqlite", "migrations", "*.up.sql"))
-	if err != nil {
-		t.Fatalf("glob sqlite migrations: %v", err)
-	}
-	sort.Strings(migrationPaths)
-	for _, schemaPath := range migrationPaths {
-		schema, err := os.ReadFile(schemaPath) //nolint:gosec // test fixture path
-		if err != nil {
-			t.Fatalf("read sqlite schema %s: %v", schemaPath, err)
-		}
-		if _, err := conn.ExecContext(context.Background(), string(schema)); err != nil {
-			t.Fatalf("exec sqlite schema %s: %v", schemaPath, err)
-		}
-	}
-	store, err := sqlitestore.New(conn)
-	if err != nil {
-		t.Fatalf("new sqlite store: %v", err)
-	}
-	return conn, sqlitestore.NewQueries(store)
-}
-
-func execBotBackupModelSchema(t *testing.T, conn *sql.DB) {
-	t.Helper()
-	_, err := conn.ExecContext(context.Background(), `
-CREATE TABLE providers (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  client_type TEXT NOT NULL DEFAULT 'openai-completions',
-  icon TEXT,
-  enable INTEGER NOT NULL DEFAULT 1,
-  config TEXT NOT NULL DEFAULT '{}',
-  metadata TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT providers_name_unique UNIQUE (name)
-);
-
-CREATE TABLE models (
-  id TEXT PRIMARY KEY,
-  model_id TEXT NOT NULL,
-  name TEXT,
-  provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
-  type TEXT NOT NULL DEFAULT 'chat',
-  enable INTEGER NOT NULL DEFAULT 1,
-  config TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT models_provider_id_model_id_unique UNIQUE (provider_id, model_id)
-);
-`)
-	if err != nil {
-		t.Fatalf("exec botbackup model schema: %v", err)
-	}
-}
-
-func insertBotBackupProvider(t *testing.T, conn *sql.DB, id string) {
-	t.Helper()
-	_, err := conn.ExecContext(context.Background(), `
-INSERT INTO providers (id, name, client_type, icon, enable, config, metadata)
-VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id,
-		"provider-"+id,
-		string(modelpkg.ClientTypeOpenAICompletions),
-		"",
-		1,
-		`{}`,
-		`{}`,
-	)
-	if err != nil {
-		t.Fatalf("insert botbackup provider: %v", err)
-	}
-}
-
-func containsWarning(warnings []string, want string) bool {
-	for _, item := range warnings {
-		if strings.Contains(item, want) {
-			return true
-		}
-	}
-	return false
+	return out, nil
 }
 
 func TestWorkspaceStoredVerbatimAsTarGz(t *testing.T) {

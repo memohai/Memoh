@@ -51,9 +51,10 @@
               class="size-5"
             />
             <!-- Green dot: on + ready (healthy state — small, says nothing more). -->
-            <span
+            <StatusDot
               v-if="agentRowState(profile) === 'on_ready'"
-              class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full bg-success ring-2 ring-card"
+              status="success"
+              class="absolute -bottom-0.5 -right-0.5 size-2.5! ring-2 ring-card"
             />
           </span>
 
@@ -141,6 +142,7 @@ import type { Ref } from 'vue'
 import SettingsAcpDetail from './settings-acp-detail.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import SwapTransition from '@/components/settings/swap-transition.vue'
+import StatusDot from '@/components/status-dot/index.vue'
 import { useViewSwap } from '@/composables/useViewSwap'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {

@@ -1,10 +1,9 @@
 <template>
   <!-- A framed warning/alert callout: leading icon + title/description body +
-       trailing action(s). Two tones. `warning` uses the soft-token triplet
-       (bg/border/foreground) the codebase already uses for lifecycle notices;
-       `destructive` has no soft token in the scale, so it reuses the established
-       alpha convention (border-destructive/30 bg-destructive/5) that the issue
-       banners already ship — keeping one look, not inventing a second.
+       trailing action(s). Two tones, both a soft-token triplet (bg/border/
+       foreground) — warning uses the codebase's existing lifecycle-notice
+       tokens, destructive uses `--destructive-soft`/`--destructive-border`
+       (packages/ui/AGENTS.md § Alpha policy) — one look, not two.
        Stacks on narrow, becomes a row at sm. When `clickable`, the whole surface
        is a button that opens something (a diagnostics dialog); the trailing slot
        is then usually empty and a chevron leads the user in. -->
@@ -62,11 +61,10 @@ const props = withDefaults(defineProps<{
 })
 
 // Full literal class strings per tone — Tailwind scans source text, so a runtime
-// concat would never be generated. warning has a soft-token triplet; destructive
-// does not, so it reuses the established alpha convention.
+// concat would never be generated. Both tones now use a soft-token triplet.
 const toneClass = computed(() =>
   props.tone === 'destructive'
-    ? 'border-destructive/30 bg-destructive/5'
+    ? 'border-destructive-border bg-destructive-soft'
     : 'border-warning-border bg-warning-soft',
 )
 

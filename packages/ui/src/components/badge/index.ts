@@ -16,17 +16,17 @@ export const badgeVariants = cva(
     variants: {
       variant: {
         default:
-          'bg-[var(--accent-gray-soft-active)] text-[var(--accent-gray-deep)] [a&]:hover:bg-[var(--accent-gray-border)]',
+          'bg-accent-gray-soft-active text-accent-gray-deep [a&]:hover:bg-accent-gray-border',
         secondary:
-          'bg-[var(--accent-gray-soft-hover)] text-[var(--accent-gray-deep)] [a&]:hover:bg-[var(--accent-gray-soft-active)]',
+          'bg-accent-gray-soft-hover text-accent-gray-deep [a&]:hover:bg-accent-gray-soft-active',
         destructive:
-          'bg-[var(--accent-red-soft-active)] text-[var(--accent-red-deep)] [a&]:hover:bg-[var(--accent-red-border)]',
+          'bg-accent-red-soft-active text-accent-red-deep [a&]:hover:bg-accent-red-border',
         success:
-          'bg-[var(--accent-green-soft-active)] text-[var(--accent-green-deep)] [a&]:hover:bg-[var(--accent-green-border)]',
+          'bg-accent-green-soft-active text-accent-green-deep [a&]:hover:bg-accent-green-border',
         warning:
-          'bg-[var(--accent-yellow-soft-active)] text-[var(--accent-yellow-deep)] [a&]:hover:bg-[var(--accent-yellow-border)]',
+          'bg-accent-yellow-soft-active text-accent-yellow-deep [a&]:hover:bg-accent-yellow-border',
         info:
-          'bg-[var(--accent-blue-soft-active)] text-[var(--accent-blue-deep)] [a&]:hover:bg-[var(--accent-blue-border)]',
+          'bg-accent-blue-soft-active text-accent-blue-deep [a&]:hover:bg-accent-blue-border',
         outline:
           'border border-border bg-background text-foreground [a&]:hover:bg-accent',
       },

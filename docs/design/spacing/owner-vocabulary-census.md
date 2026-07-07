@@ -1,5 +1,11 @@
 # Spacing Owner Vocabulary — Census Result
 
+> This file is the only spacing research document kept in `docs/design/spacing/`. The
+> other 18 process artifacts (cartography, raw audit batches, historical contract
+> drafts) and the `memoh-spacing` skill were removed from HEAD in 2026-07 — their value
+> was already captured in the vocabulary and decisions recorded below; git history has
+> the rest if it's ever needed.
+
 Date: 2026-07-01 · **Final status updated: 2026-07-06**
 
 Status: **DONE — vocabulary complete, all known debt migrated.** Everything below this
@@ -12,18 +18,17 @@ The terminal state as of 2026-07-06:
   model-row family, see Known remainder), FieldStack (**v2 — carries vee-validate
   validation state**), FormStack, MetricReadout, PersonaTile, CalloutBanner (+ the
   `Empty` atom).
-- **Non-settings vocabulary added (2026-07-04/05)** from the non-settings sweep
-  (`audit/non-settings-sweep.md`, execution log at the end of that file): PanePlaceholder,
+- **Non-settings vocabulary added (2026-07-04/05)** from the non-settings sweep: PanePlaceholder,
   InlineLoadingRow, SectionGroup, SidebarPanelHeader, SidebarNavButton, DockPanelFrame,
   ConfirmDeleteDialog, and the onboarding wizard family (StepExitShell / StepFrame /
   FooterNav / ChoiceTile / HintBox). The building contract for all of these is the
   `memoh-ui-owners` skill.
 - **Three audits closed all reachable debt, and a post-review residual pass (2026-07-06)
   drained what they missed.** The Phase-3 census (35 settings files) → 21 files migrated.
-  The **click-surface audit** (`audit/click-surface-audit.md`, 40 dialog/popover files) →
+  The **click-surface audit** (40 dialog/popover files) →
   36 MISS, all migrated (group-1 plain owners; FieldStack v2 built to absorb the validated
   fields; group-2 dialogs migrated onto it). The **coverage-closure sweep**
-  (`audit/coverage-sweep.md`, all 282 apps/web `.vue`, 0 skimmed) → 53 more MISS, migrated.
+  (all 282 apps/web `.vue`, 0 skimmed) → 53 more MISS, migrated.
   The **non-settings sweep** then covered the surfaces the settings vocabulary never owned
   (sidebar, dockview, onboarding, chat loaders). The residual pass caught the sites that
   slipped every earlier net — mostly loading shapes judged "correctly local" *before*
@@ -33,8 +38,7 @@ The terminal state as of 2026-07-06:
   sibling was TRIED on SettingsRow and reverted after visual review — it's a three-piece
   row whose full-width preview the owner can't model; reason recorded in-file), and
   keyboard-shortcuts'
-  hand page shell. Corrections are annotated in `coverage-sweep.md` where the stale
-  verdicts sit.
+  hand page shell — the corrections to each stale verdict are captured in the list above.
 - **A regression backstop shipped, then hardened.** `check-ui-contract.mjs` rule 11 (WARN)
   flags `min-h-[3.75rem]` — and its bare-scale twin `min-h-15` — outside the owner files;
   the `ui-allow-shape` escape now requires a written reason on the marker line. Rule 12
@@ -43,7 +47,9 @@ The terminal state as of 2026-07-06:
   and loader slices (the rare literals); they are backstops, not debt finders. WARN count
   is held at **zero**.
 - **The building contract is `memoh-ui-owners`** (the skill). The older `memoh-spacing`
-  skill is retired to a research-record role.
+  skill (the cartography/role-taxonomy method that derived this vocabulary) has been
+  deleted from the repo (2026-07); its history is recoverable from git if the research
+  trail is ever needed again.
 
 ### Known remainder (deliberately not migrated)
 
@@ -70,7 +76,7 @@ The terminal state as of 2026-07-06:
   `video/provider-setting.vue`) hand-synced the same clickable navigation-row shape:
   transcription and speech were byte-identical; video only differed by nesting the click
   handler on a trailing ghost Button instead of making the whole row a `<button>` — a
-  trivial divergence (per `batch-A-raw.json`'s own read), not a deliberate one. Built
+  trivial divergence, not a deliberate one, per the original audit's read. Built
   `ModelListRow` (`apps/web/src/components/settings/model-list-row.vue`, whole-row
   `<button>`, same root contract as BackendCard) and migrated all three onto it.
   **`providers/model-item.vue` stays separate, deliberately** — it carries inline

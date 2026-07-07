@@ -68,7 +68,7 @@ const { visible, exiting, leave } = useStepTransition()
                   type="button"
                   variant="outline"
                   class="justify-start gap-2"
-                  :class="theme === 'light' ? 'border-foreground bg-accent text-foreground' : ''"
+                  :data-ui-selected="theme === 'light' ? '' : undefined"
                   @click="setTheme('light')"
                 >
                   <Sun class="size-4" />
@@ -78,7 +78,7 @@ const { visible, exiting, leave } = useStepTransition()
                   type="button"
                   variant="outline"
                   class="justify-start gap-2"
-                  :class="theme === 'dark' ? 'border-foreground bg-accent text-foreground' : ''"
+                  :data-ui-selected="theme === 'dark' ? '' : undefined"
                   @click="setTheme('dark')"
                 >
                   <Moon class="size-4" />

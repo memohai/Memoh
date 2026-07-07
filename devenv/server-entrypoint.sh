@@ -9,6 +9,14 @@ if [ ! -d /opt/memoh/runtime/toolkit/node-glibc ]; then
   exit 1
 fi
 
+DEV_TZ="${TZ:-UTC}"
+if [ ! -f "/usr/share/zoneinfo/$DEV_TZ" ]; then
+  echo "WARN: timezone '$DEV_TZ' not found, falling back to UTC." >&2
+  DEV_TZ="UTC"
+fi
+ln -snf "/usr/share/zoneinfo/$DEV_TZ" /etc/localtime
+printf '%s\n' "$DEV_TZ" > /etc/timezone
+
 # Clean up stale CNI state from previous runs. After a container restart the
 # cni0 bridge may linger with a zeroed MAC (00:00:00:00:00:00), causing the
 # bridge plugin to fail with "could not set bridge's mac: invalid argument".

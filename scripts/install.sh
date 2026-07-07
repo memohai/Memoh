@@ -179,7 +179,6 @@ normalize_database_driver() {
   driver=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   case "$driver" in
     postgres|postgresql) printf '%s' "postgres" ;;
-    sqlite|sqlite3) printf '%s' "sqlite" ;;
     *) return 1 ;;
   esac
 }
@@ -187,7 +186,7 @@ normalize_database_driver() {
 normalize_database_driver_or_exit() {
   normalized_database_driver=$(normalize_database_driver "$DATABASE_DRIVER" || true)
   if [ -z "$normalized_database_driver" ]; then
-    echo "${RED}Error: unsupported database driver '${DATABASE_DRIVER}'. Use postgres or sqlite.${NC}"
+    echo "${RED}Error: unsupported database driver '${DATABASE_DRIVER}'. Memoh now supports postgres only.${NC}"
     exit 1
   fi
   DATABASE_DRIVER="$normalized_database_driver"
@@ -514,11 +513,7 @@ cleanup_existing_installation() {
 show_failure_logs() {
   echo ""
   echo "${RED}Startup failed. Recent database, migration, and server logs:${NC}"
-  if [ "$DATABASE_DRIVER" = "sqlite" ]; then
-    log_services="migrate server"
-  else
-    log_services="postgres migrate server"
-  fi
+  log_services="postgres migrate server"
   $DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES logs --no-color --tail=200 $log_services || true
 }
 
@@ -606,7 +601,12 @@ WORKSPACE=$(cd "$WORKSPACE" && pwd)
 
 detect_existing_installation
 load_existing_settings
-normalize_database_driver_or_exit
+# Fail fast only for an explicitly requested driver (flag or env). A driver
+# inherited from an old config is judged after the install mode is known,
+# so a legacy sqlite install can still choose reinstall.
+if [ "$DATABASE_DRIVER_SET" = true ]; then
+  normalize_database_driver_or_exit
+fi
 normalize_container_backend_or_exit
 prompt_install_mode
 
@@ -622,6 +622,21 @@ case "$INSTALL_MODE" in
     exit 1
     ;;
 esac
+
+# A driver inherited from an old config is validated only once the install
+# mode is known: upgrade must keep the old database, so an unsupported
+# legacy driver (e.g. sqlite) is fatal there, while fresh and reinstall
+# discard the old state and fall back to PostgreSQL.
+if [ "$DATABASE_DRIVER_SET" = false ] && ! normalize_database_driver "$DATABASE_DRIVER" >/dev/null 2>&1; then
+  if [ "$INSTALL_MODE" = "upgrade" ]; then
+    echo "${RED}Error: existing installation uses unsupported database driver '${DATABASE_DRIVER}'. Memoh now supports postgres only.${NC}"
+    echo "Run again with MEMOH_INSTALL_MODE=reinstall to wipe the old state and start on PostgreSQL."
+    exit 1
+  fi
+  echo "${YELLOW}ℹ Existing config uses unsupported database driver '${DATABASE_DRIVER}'; ${INSTALL_MODE} install will use PostgreSQL.${NC}"
+  DATABASE_DRIVER="postgres"
+fi
+normalize_database_driver_or_exit
 
 if [ "$INSTALL_MODE" = "upgrade" ] && [ -z "$EXISTING_CONFIG_SOURCE" ]; then
   echo "${RED}Error: Upgrade mode requires an existing config.toml to reuse.${NC}"
@@ -658,30 +673,13 @@ if [ "$SILENT" = false ] && [ "$INSTALL_MODE" != "upgrade" ]; then
   [ -n "$input" ] && JWT_SECRET="$input"
 
   echo "" > /dev/tty
-  echo "  Database backend:" > /dev/tty
-  echo "    1) PostgreSQL (recommended for production and multi-user installs)" > /dev/tty
-  echo "    2) SQLite (lightweight single-node install)" > /dev/tty
-  case "$DATABASE_DRIVER" in
-    sqlite) database_default="2" ;;
-    *) database_default="1" ;;
-  esac
-  printf "  Database backend [%s]: " "$database_default" > /dev/tty
-  read -r input < /dev/tty || true
-  case "$input" in
-    2|sqlite|SQLite|sqlite3|SQLite3) DATABASE_DRIVER="sqlite" ;;
-    1|postgres|Postgres|postgresql|PostgreSQL) DATABASE_DRIVER="postgres" ;;
-    "") ;;
-    *) DATABASE_DRIVER="postgres" ;;
-  esac
+  echo "  Database backend: PostgreSQL" > /dev/tty
+  DATABASE_DRIVER="postgres"
   normalize_database_driver_or_exit
 
-  if [ "$DATABASE_DRIVER" = "postgres" ]; then
-    printf "  Postgres password [%s]: " "$PG_PASS" > /dev/tty
-    read -r input < /dev/tty || true
-    [ -n "$input" ] && PG_PASS="$input"
-  else
-    echo "  SQLite database: /opt/memoh/data/memoh.db inside the persistent memoh_data volume" > /dev/tty
-  fi
+  printf "  Postgres password [%s]: " "$PG_PASS" > /dev/tty
+  read -r input < /dev/tty || true
+  [ -n "$input" ] && PG_PASS="$input"
 
   echo "  Workspace backend: containerd (Docker Compose default; starts an embedded containerd inside memoh-server)" > /dev/tty
   echo "  Other backends such as docker and apple are configured manually in config.toml." > /dev/tty
@@ -728,21 +726,16 @@ else
     CLONED_FRESH=true
 fi
 
-if [ "$DATABASE_DRIVER" = "sqlite" ]; then
-  COMPOSE_FILE_NAME="docker-compose.sqlite.yml"
-  CN_COMPOSE_FILE_NAME="docker/docker-compose.sqlite.cn.yml"
-else
-  COMPOSE_FILE_NAME="docker-compose.yml"
-  CN_COMPOSE_FILE_NAME="docker/docker-compose.cn.yml"
-fi
+COMPOSE_FILE_NAME="docker-compose.yml"
+CN_COMPOSE_FILE_NAME="docker/docker-compose.cn.yml"
 if [ ! -f "$COMPOSE_FILE_NAME" ]; then
   echo "${RED}Error: ${COMPOSE_FILE_NAME} is missing in ${MEMOH_VERSION:-the selected checkout}.${NC}"
-  echo "Use a newer Memoh version or choose MEMOH_DATABASE_DRIVER=postgres."
+  echo "Use a newer Memoh version."
   exit 1
 fi
 if [ "$USE_CN_MIRROR" = true ] && [ ! -f "$CN_COMPOSE_FILE_NAME" ]; then
   echo "${RED}Error: ${CN_COMPOSE_FILE_NAME} is missing in ${MEMOH_VERSION:-the selected checkout}.${NC}"
-  echo "Use a newer Memoh version, disable USE_CN_MIRROR, or choose MEMOH_DATABASE_DRIVER=postgres."
+  echo "Use a newer Memoh version or disable USE_CN_MIRROR."
   exit 1
 fi
 

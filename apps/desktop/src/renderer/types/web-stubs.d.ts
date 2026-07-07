@@ -195,9 +195,15 @@ declare module '@memohai/web/store/user' {
 }
 
 declare module '@memohai/web/store/chat-list' {
-  // Desktop only needs to re-pull the bot snapshot when a sibling window
-  // invalidates bot config, so the composer's agent menu stays current.
+  // Desktop needs the bot snapshot for two things: re-pulling it when a
+  // sibling window invalidates bot config (composer agent menu), and
+  // mirroring the list into the native tray's Bots submenu.
   export function useChatStore(pinia?: unknown): {
+    bots: Array<{
+      id?: string
+      name?: string
+      display_name?: string
+    }>
     refreshBots: () => Promise<void>
   }
 }
@@ -239,9 +245,7 @@ declare module '@memohai/web/utils/timezones' {
 
 declare module '@memohai/web/lib/desktop-shell' {
   import type { InjectionKey } from 'vue'
-  export type DesktopRuntimeMode = 'local' | 'remote'
   export const DesktopShellKey: InjectionKey<boolean>
-  export const DesktopRuntimeModeKey: InjectionKey<DesktopRuntimeMode>
 }
 
 declare module '@memohai/web/composables/useBackOr' {

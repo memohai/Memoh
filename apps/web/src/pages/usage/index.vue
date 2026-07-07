@@ -455,6 +455,16 @@ const modelIdFilter = computed(() =>
   selectedModelId.value === 'all' ? undefined : selectedModelId.value,
 )
 
+type UsageBucketType = 'chat' | 'discuss' | 'acp_agent' | 'heartbeat' | 'schedule'
+type SessionTypeFilter = UsageBucketType
+
+// Declared before the first useQuery below: Pinia Colada evaluates `key`
+// synchronously during setup, so referencing a later `const` would hit the
+// temporal dead zone and crash the whole route component.
+const sessionTypeFilter = computed(() =>
+  selectedSessionType.value === 'all' ? null : selectedSessionType.value as SessionTypeFilter,
+)
+
 const { data: usageData, asyncStatus, refetch } = useQuery({
   key: () => ['token-usage', selectedBotId.value, dateFrom.value, dateTo.value, modelIdFilter.value ?? '', sessionTypeFilter.value ?? ''],
   query: async () => {
@@ -486,13 +496,6 @@ const byModelData = computed<HandlersModelTokenUsage[]>(() => usageData.value?.b
 
 const modelOptions = computed(() =>
   byModelData.value.filter(m => m.model_id),
-)
-
-type UsageBucketType = 'chat' | 'discuss' | 'acp_agent' | 'heartbeat' | 'schedule'
-type SessionTypeFilter = UsageBucketType
-
-const sessionTypeFilter = computed(() =>
-  selectedSessionType.value === 'all' ? null : selectedSessionType.value as SessionTypeFilter,
 )
 
 const recordsPageNumber = computed(() => {

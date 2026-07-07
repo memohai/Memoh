@@ -25,10 +25,11 @@ const (
 	titleGenerateTimeout     = 60 * time.Second
 )
 
-// SessionService is the interface the resolver uses for session title updates.
+// SessionService is the interface the resolver uses for session metadata updates.
 type SessionService interface {
 	Get(ctx context.Context, sessionID string) (session.Session, error)
 	UpdateTitle(ctx context.Context, sessionID, title string) (session.Session, error)
+	UpdateMetadata(ctx context.Context, sessionID string, metadata map[string]any) (session.Session, error)
 }
 
 // SetSessionService configures the session service used for auto title generation.

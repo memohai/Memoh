@@ -184,3 +184,11 @@ FROM user_input_requests
 WHERE bot_id = $1
   AND session_id = $2
 ORDER BY created_at ASC, short_id ASC;
+
+-- name: ListUserInputsBySessionToolCalls :many
+SELECT *
+FROM user_input_requests
+WHERE bot_id = sqlc.arg(bot_id)
+  AND session_id = sqlc.arg(session_id)
+  AND tool_call_id = ANY(sqlc.arg(tool_call_ids)::text[])
+ORDER BY created_at ASC, short_id ASC;

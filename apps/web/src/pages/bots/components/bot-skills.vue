@@ -30,12 +30,13 @@
     </template>
 
     <SettingsSection :title="$t('bots.skills.libraryTitle')">
-      <!-- ui-allow-shape: loading skeleton — borrows the skill-row height to hold
-           the list's space steady (no CLS) until skills load. -->
+      <!-- Loading borrows the skill-row height to hold the list's space steady
+           (no CLS) until skills load — same card-row family as the row list it
+           stands in for. -->
       <InlineLoadingRow
         v-if="isLoading"
         size="md"
-        class="mx-4 min-h-[3.75rem] py-3"
+        surface="card-row"
       >
         {{ $t('common.loading') }}
       </InlineLoadingRow>

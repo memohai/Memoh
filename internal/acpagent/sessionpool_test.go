@@ -1546,11 +1546,11 @@ func TestSessionPoolUsesRequestToolURLForLocalWorkspace(t *testing.T) {
 	pool := newSessionPool(nil, nil, nil)
 	pool.SetToolGateway(mcp.NewToolGatewayService(nil, nil))
 
-	got, err := pool.resolveToolHTTPURL("http://127.0.0.1:18731/bots/bot-1/tools", bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendLocal})
+	got, err := pool.resolveToolHTTPURL("http://127.0.0.1:18080/bots/bot-1/tools", bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendLocal})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "http://127.0.0.1:18731/bots/bot-1/tools" {
+	if got != "http://127.0.0.1:18080/bots/bot-1/tools" {
 		t.Fatalf("local ToolHTTPURL = %q", got)
 	}
 }

@@ -5,9 +5,10 @@
   >
     <span class="relative shrink-0">
       <slot name="leading" />
-      <span
+      <StatusDot
         v-if="enabled"
-        class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full bg-success ring-2 ring-card"
+        status="success"
+        class="absolute -bottom-0.5 -right-0.5 size-2.5! ring-2 ring-card"
       />
     </span>
 
@@ -31,6 +32,7 @@
 
 <script setup lang="ts">
 import { ChevronRight } from 'lucide-vue-next'
+import StatusDot from '@/components/status-dot/index.vue'
 
 withDefaults(defineProps<{
   name: string

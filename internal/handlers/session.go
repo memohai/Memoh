@@ -49,6 +49,7 @@ func (h *SessionHandler) Register(e *echo.Echo) {
 	g.POST("", h.CreateSession)
 	g.GET("", h.ListSessions)
 	g.GET("/:session_id", h.GetSession)
+	g.POST("/:session_id/fork", h.ForkSession)
 	g.PATCH("/:session_id", h.UpdateSession)
 	g.DELETE("/:session_id", h.DeleteSession)
 }
@@ -74,6 +75,11 @@ type updateSessionRequest struct {
 	RuntimeType     *string        `json:"runtime_type,omitempty"`
 	Metadata        map[string]any `json:"metadata,omitempty"`
 	RuntimeMetadata map[string]any `json:"runtime_metadata,omitempty"`
+}
+
+type forkSessionRequest struct {
+	MessageID string `json:"message_id" validate:"required"`
+	Title     string `json:"title,omitempty"`
 }
 
 // CreateSession godoc
@@ -155,6 +161,64 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 		}
 	}
 	return c.JSON(http.StatusCreated, sess)
+}
+
+// ForkSession godoc
+// @Summary Fork a chat session from an assistant reply
+// @Tags sessions
+// @Param bot_id path string true "Bot ID"
+// @Param session_id path string true "Source session ID"
+// @Param body body forkSessionRequest true "Fork source message"
+// @Success 201 {object} session.Session
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Router /bots/{bot_id}/sessions/{session_id}/fork [post].
+func (h *SessionHandler) ForkSession(c echo.Context) error {
+	channelIdentityID, err := RequireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	sessionID := strings.TrimSpace(c.Param("session_id"))
+	if sessionID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+	}
+	bot, _, source, err := h.authorizeSession(c, channelIdentityID, botID, sessionID)
+	if err != nil {
+		return err
+	}
+	if source.Type != session.TypeChat {
+		return echo.NewHTTPError(http.StatusConflict, "only chat sessions can be forked")
+	}
+
+	var req forkSessionRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	messageID := strings.TrimSpace(req.MessageID)
+	if messageID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "message_id is required")
+	}
+	if _, err := uuid.Parse(messageID); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid message_id")
+	}
+
+	forked, err := h.sessionService.ForkFromAssistantMessage(c.Request().Context(), session.ForkFromAssistantInput{
+		BotID:           bot.ID,
+		SessionID:       source.ID,
+		MessageID:       messageID,
+		Title:           strings.TrimSpace(req.Title),
+		CreatedByUserID: channelIdentityID,
+	})
+	if err != nil {
+		return sessionForkError(err)
+	}
+	return c.JSON(http.StatusCreated, forked)
 }
 
 // ListSessions godoc
@@ -337,11 +401,8 @@ func parseSessionParentIDParam(raw string) (string, error) {
 }
 
 // encodeSessionCursor packs the keyset cursor as base64(updated_at|id) where
-// the timestamp is RFC3339Nano. The full nanosecond precision is preserved on
-// the wire and on Postgres, but the SQLite backend compares updated_at at
-// second precision because CURRENT_TIMESTAMP stores it that way — that
-// truncation is intentional and only matters when two rows share the same
-// second, where the id tiebreak in the SQL handles uniqueness.
+// the timestamp is RFC3339Nano. The id tiebreak in the SQL handles uniqueness
+// when two rows share the same timestamp.
 func encodeSessionCursor(c session.SessionCursor) string {
 	raw := c.UpdatedAt.UTC().Format(time.RFC3339Nano) + "|" + c.ID
 	return base64.RawURLEncoding.EncodeToString([]byte(raw))
@@ -753,6 +814,19 @@ func sessionServiceError(err error) error {
 		return echo.NewHTTPError(feedback.HTTPStatus, feedback)
 	default:
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+}
+
+func sessionForkError(err error) error {
+	switch {
+	case errors.Is(err, session.ErrForkSourceNotFound):
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+	case errors.Is(err, session.ErrForkSourceNotReply):
+		return echo.NewHTTPError(http.StatusConflict, "message is not a visible assistant reply")
+	case errors.Is(err, session.ErrForkSourceNotChat):
+		return echo.NewHTTPError(http.StatusConflict, "only chat sessions can be forked")
+	default:
+		return sessionServiceError(err)
 	}
 }
 

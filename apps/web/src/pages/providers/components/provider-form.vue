@@ -252,7 +252,7 @@
             && !oauthStatus?.has_token
             && oauthStatus?.device?.user_code
             && oauthStatus?.device?.verification_uri"
-          class="rounded-md bg-muted/40 p-3 space-y-2"
+          class="rounded-md bg-muted-soft p-3 space-y-2"
         >
           <div class="text-muted-foreground">
             {{ $t('provider.oauth.githubDeviceHint') }}
@@ -293,7 +293,7 @@
         </div>
         <div
           v-if="form.values.client_type === 'github-copilot' && oauthStatus?.has_token && !oauthExpired"
-          class="rounded-md bg-muted/40 p-3 space-y-1"
+          class="rounded-md bg-muted-soft p-3 space-y-1"
         >
           <div class="font-medium">
             {{ $t('provider.oauth.connectedAccount') }}

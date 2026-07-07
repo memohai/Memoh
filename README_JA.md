@@ -75,13 +75,13 @@ docker compose up -d
 
 ### Desktop
 
-macOS、Windows、Linux 向けのネイティブクライアント。[Memoh Desktop をダウンロード](https://memoh.ai/desktop)
+Memoh Cloud または自分でホストした Server に接続する macOS、Windows、Linux 向けのネイティブクライアント。[Memoh Desktop をダウンロード](https://memoh.ai/desktop)
 
 ## Memoh を選ぶ理由
 
 - **すべての Agent に専用コンピューター**: 専用のファイルシステム、ネットワーク、Desktop、Browser を備えた隔離 Container。
 - **Multi-user, multi-bot**: 自分用に 1 つ、家族やチームメンバーごとに 1 つ、または 1 台のマシンで複数の Bot をまとめて運用できます。
-- **軽量**: Edge device でも動作します。推論は cloud に任せ、データは local に残せます。
+- **軽量**: 自分のインフラにセルフホストすることも、Memoh Cloud に接続することもできます。
 
 ## Features
 

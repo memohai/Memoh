@@ -909,11 +909,11 @@ func TestBuildACPMCPToolsURLUsesOnlyExplicitOrLoopbackBaseURL(t *testing.T) {
 	})
 
 	t.Run("loopback request host", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18731/acp-runtime", nil)
+		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18080/acp-runtime", nil)
 		req.Header.Set("X-Forwarded-Host", "evil.example")
 		req.Header.Set("X-Forwarded-Proto", "https")
 		got := buildACPMCPToolsURLFromRequest(req, botID)
-		want := "http://127.0.0.1:18731/bots/" + botID + "/tools"
+		want := "http://127.0.0.1:18080/bots/" + botID + "/tools"
 		if got != want {
 			t.Fatalf("tools URL = %q, want %q", got, want)
 		}

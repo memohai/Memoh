@@ -193,6 +193,9 @@ const indicatorStyle = computed(() => {
   position: absolute;
   top: 0;
   left: 0;
+  /* ui-allow-z: not on the z-index ladder (packages/ui/AGENTS.md "z 梯"): local
+     paint order against this thumb's own sibling triggers below, same as
+     style.css's [data-segment-thumb]/[data-segment-item] this was ported from. */
   z-index: 0;
   border-radius: calc(var(--radius) - 0.125rem);
   background-color: var(--segment-thumb);
@@ -208,6 +211,7 @@ const indicatorStyle = computed(() => {
 /* ── pill triggers: full parity with [data-segment-item] in style.css ─────── */
 [data-variant="pill"] :deep([data-slot="tabs-trigger"]) {
   position: relative;
+  /* ui-allow-z: same local-paint-order exception as .tabs-thumb above. */
   z-index: 1;
   height: 1.75rem;
   padding-inline: 0.75rem;

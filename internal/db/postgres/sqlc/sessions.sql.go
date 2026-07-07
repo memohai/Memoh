@@ -28,7 +28,7 @@ VALUES (
   $10::uuid,
   $11::uuid
 )
-RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
 `
 
 type CreateSessionParams struct {
@@ -71,6 +71,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (B
 		&i.RuntimeMetadata,
 		&i.Title,
 		&i.Metadata,
+		&i.NextTurnPosition,
 		&i.ParentSessionID,
 		&i.CreatedByUserID,
 		&i.CreatedAt,
@@ -94,8 +95,265 @@ func (q *Queries) DeleteSessionDiscussCursorsByBot(ctx context.Context, botID pg
 	return err
 }
 
+const forkSessionFromAssistantMessage = `-- name: ForkSessionFromAssistantMessage :one
+WITH source_session AS (
+  SELECT s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata, s.next_turn_position, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
+  FROM bot_sessions s
+  WHERE s.id = $1
+    AND s.bot_id = $2
+    AND s.type = 'chat'
+    AND s.deleted_at IS NULL
+),
+target_turn AS (
+  SELECT
+    vm.turn_id AS id,
+    vm.turn_position AS position,
+    vm.id AS message_id
+  FROM source_session s
+  JOIN bot_visible_history_messages vm ON vm.session_id = s.id
+    AND vm.id = $3
+    AND vm.role = 'assistant'
+    AND vm.turn_id IS NOT NULL
+    AND vm.turn_position IS NOT NULL
+  LIMIT 1
+),
+created_session AS (
+  INSERT INTO bot_sessions (
+    bot_id,
+    channel_type,
+    type,
+    session_mode,
+    runtime_type,
+    runtime_metadata,
+    title,
+    metadata,
+    created_by_user_id
+  )
+  SELECT
+    s.bot_id,
+    s.channel_type,
+    s.type,
+    s.session_mode,
+    s.runtime_type,
+    s.runtime_metadata,
+    $4,
+    $5,
+    $6::uuid
+  FROM source_session s
+  JOIN target_turn tt ON true
+  RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+),
+copy_messages AS (
+  SELECT
+    vm.id AS old_message_id,
+    gen_random_uuid() AS new_message_id,
+    vm.sender_channel_identity_id,
+    vm.sender_account_user_id,
+    vm.source_message_id,
+    vm.source_reply_to_message_id,
+    vm.role,
+    vm.content,
+    vm.metadata,
+    vm.usage,
+    vm.session_mode,
+    vm.runtime_type,
+    vm.model_id,
+    vm.display_text,
+    vm.turn_id AS old_turn_id,
+    vm.turn_position,
+    vm.turn_message_seq,
+    vm.created_at
+  FROM bot_visible_history_messages vm
+  JOIN target_turn tt ON (
+    vm.turn_position < tt.position
+    OR vm.turn_position = tt.position
+  )
+  WHERE vm.session_id = $1
+  ORDER BY vm.turn_position ASC, vm.turn_message_seq ASC, vm.created_at ASC, vm.id ASC
+),
+copy_turns AS (
+  SELECT
+    cm.old_turn_id,
+    gen_random_uuid() AS new_turn_id,
+    cm.turn_position AS old_position,
+    ROW_NUMBER() OVER (ORDER BY cm.turn_position ASC)::bigint AS new_position
+  FROM (
+    SELECT DISTINCT old_turn_id, turn_position
+    FROM copy_messages
+  ) cm
+  ORDER BY cm.turn_position ASC
+),
+inserted_messages AS (
+  INSERT INTO bot_history_messages (
+    id,
+    bot_id,
+    session_id,
+    sender_channel_identity_id,
+    sender_account_user_id,
+    source_message_id,
+    source_reply_to_message_id,
+    role,
+    content,
+    metadata,
+    usage,
+    session_mode,
+    runtime_type,
+    model_id,
+    display_text,
+    turn_id,
+    turn_position,
+    turn_message_seq,
+    turn_visible,
+    created_at
+  )
+  SELECT
+    cm.new_message_id,
+    cs.bot_id,
+    cs.id,
+    cm.sender_channel_identity_id,
+    cm.sender_account_user_id,
+    cm.source_message_id,
+    cm.source_reply_to_message_id,
+    cm.role,
+    cm.content,
+    cm.metadata,
+    cm.usage,
+    cm.session_mode,
+    cm.runtime_type,
+    cm.model_id,
+    cm.display_text,
+    ct.new_turn_id,
+    ct.new_position,
+    cm.turn_message_seq,
+    true,
+    cm.created_at
+  FROM copy_messages cm
+  JOIN copy_turns ct ON ct.old_turn_id = cm.old_turn_id
+  CROSS JOIN created_session cs
+  RETURNING id
+),
+copy_message_counts AS (
+  SELECT count(*) AS count FROM copy_messages
+),
+inserted_message_counts AS (
+  SELECT count(*) AS count FROM inserted_messages
+),
+next_turn_position AS (
+  SELECT COALESCE(MAX(new_position), 0) + 1 AS value
+  FROM copy_turns
+),
+copied_assets AS (
+  INSERT INTO bot_history_message_assets (
+    message_id,
+    role,
+    ordinal,
+    content_hash,
+    name,
+    metadata
+  )
+  SELECT
+    cm.new_message_id,
+    a.role,
+    a.ordinal,
+    a.content_hash,
+    a.name,
+    a.metadata
+  FROM bot_history_message_assets a
+  JOIN copy_messages cm ON cm.old_message_id = a.message_id
+  JOIN inserted_messages im ON im.id = cm.new_message_id
+  RETURNING id
+),
+fork_anchor_message AS (
+  SELECT assistant_message.new_message_id
+  FROM target_turn tt
+  JOIN copy_messages assistant_message ON assistant_message.old_message_id = tt.message_id
+  LIMIT 1
+),
+updated_session AS (
+  UPDATE bot_sessions s
+  SET next_turn_position = ntp.value,
+      metadata = jsonb_set(
+        s.metadata,
+        '{forked_from}',
+        COALESCE(s.metadata->'forked_from', '{}'::jsonb) || jsonb_build_object('fork_message_id', fam.new_message_id::text),
+        true
+      )
+  FROM created_session cs
+  JOIN fork_anchor_message fam ON true
+  CROSS JOIN next_turn_position ntp
+  WHERE s.id = cs.id
+  RETURNING s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata, s.next_turn_position, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
+)
+SELECT us.id, us.bot_id, us.route_id, us.channel_type, us.type, us.session_mode, us.runtime_type, us.runtime_metadata, us.title, us.metadata, us.next_turn_position, us.parent_session_id, us.created_by_user_id, us.created_at, us.updated_at, us.deleted_at
+FROM updated_session us
+CROSS JOIN (SELECT count(*) AS copied_asset_count FROM copied_assets) copied_asset_counts
+CROSS JOIN copy_message_counts
+CROSS JOIN inserted_message_counts
+WHERE EXISTS (SELECT 1 FROM copy_turns)
+  AND inserted_message_counts.count = copy_message_counts.count
+`
+
+type ForkSessionFromAssistantMessageParams struct {
+	SessionID       pgtype.UUID `json:"session_id"`
+	BotID           pgtype.UUID `json:"bot_id"`
+	MessageID       pgtype.UUID `json:"message_id"`
+	Title           string      `json:"title"`
+	Metadata        []byte      `json:"metadata"`
+	CreatedByUserID pgtype.UUID `json:"created_by_user_id"`
+}
+
+type ForkSessionFromAssistantMessageRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	BotID            pgtype.UUID        `json:"bot_id"`
+	RouteID          pgtype.UUID        `json:"route_id"`
+	ChannelType      pgtype.Text        `json:"channel_type"`
+	Type             string             `json:"type"`
+	SessionMode      string             `json:"session_mode"`
+	RuntimeType      string             `json:"runtime_type"`
+	RuntimeMetadata  []byte             `json:"runtime_metadata"`
+	Title            string             `json:"title"`
+	Metadata         []byte             `json:"metadata"`
+	NextTurnPosition int64              `json:"next_turn_position"`
+	ParentSessionID  pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID  pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
+}
+
+func (q *Queries) ForkSessionFromAssistantMessage(ctx context.Context, arg ForkSessionFromAssistantMessageParams) (ForkSessionFromAssistantMessageRow, error) {
+	row := q.db.QueryRow(ctx, forkSessionFromAssistantMessage,
+		arg.SessionID,
+		arg.BotID,
+		arg.MessageID,
+		arg.Title,
+		arg.Metadata,
+		arg.CreatedByUserID,
+	)
+	var i ForkSessionFromAssistantMessageRow
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.RouteID,
+		&i.ChannelType,
+		&i.Type,
+		&i.SessionMode,
+		&i.RuntimeType,
+		&i.RuntimeMetadata,
+		&i.Title,
+		&i.Metadata,
+		&i.NextTurnPosition,
+		&i.ParentSessionID,
+		&i.CreatedByUserID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const getActiveSessionForRoute = `-- name: GetActiveSessionForRoute :one
-SELECT s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
+SELECT s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata, s.next_turn_position, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
 JOIN bot_channel_routes r ON r.active_session_id = s.id
 WHERE r.id = $1
@@ -116,6 +374,7 @@ func (q *Queries) GetActiveSessionForRoute(ctx context.Context, routeID pgtype.U
 		&i.RuntimeMetadata,
 		&i.Title,
 		&i.Metadata,
+		&i.NextTurnPosition,
 		&i.ParentSessionID,
 		&i.CreatedByUserID,
 		&i.CreatedAt,
@@ -126,7 +385,7 @@ func (q *Queries) GetActiveSessionForRoute(ctx context.Context, routeID pgtype.U
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
 FROM bot_sessions
 WHERE id = $1
   AND deleted_at IS NULL
@@ -146,6 +405,7 @@ func (q *Queries) GetSessionByID(ctx context.Context, id pgtype.UUID) (BotSessio
 		&i.RuntimeMetadata,
 		&i.Title,
 		&i.Metadata,
+		&i.NextTurnPosition,
 		&i.ParentSessionID,
 		&i.CreatedByUserID,
 		&i.CreatedAt,
@@ -573,7 +833,7 @@ func (q *Queries) ListSessionsByBotPaged(ctx context.Context, arg ListSessionsBy
 }
 
 const listSessionsByRoute = `-- name: ListSessionsByRoute :many
-SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
 FROM bot_sessions
 WHERE route_id = $1
   AND deleted_at IS NULL
@@ -600,6 +860,7 @@ func (q *Queries) ListSessionsByRoute(ctx context.Context, routeID pgtype.UUID) 
 			&i.RuntimeMetadata,
 			&i.Title,
 			&i.Metadata,
+			&i.NextTurnPosition,
 			&i.ParentSessionID,
 			&i.CreatedByUserID,
 			&i.CreatedAt,
@@ -617,7 +878,7 @@ func (q *Queries) ListSessionsByRoute(ctx context.Context, routeID pgtype.UUID) 
 }
 
 const listSubagentSessionsByParent = `-- name: ListSubagentSessionsByParent :many
-SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
 FROM bot_sessions
 WHERE parent_session_id = $1
   AND deleted_at IS NULL
@@ -644,6 +905,7 @@ func (q *Queries) ListSubagentSessionsByParent(ctx context.Context, parentSessio
 			&i.RuntimeMetadata,
 			&i.Title,
 			&i.Metadata,
+			&i.NextTurnPosition,
 			&i.ParentSessionID,
 			&i.CreatedByUserID,
 			&i.CreatedAt,
@@ -658,6 +920,22 @@ func (q *Queries) ListSubagentSessionsByParent(ctx context.Context, parentSessio
 		return nil, err
 	}
 	return items, nil
+}
+
+const setSessionNextTurnPosition = `-- name: SetSessionNextTurnPosition :exec
+UPDATE bot_sessions
+SET next_turn_position = $1::bigint
+WHERE id = $2
+`
+
+type SetSessionNextTurnPositionParams struct {
+	NextTurnPosition int64       `json:"next_turn_position"`
+	SessionID        pgtype.UUID `json:"session_id"`
+}
+
+func (q *Queries) SetSessionNextTurnPosition(ctx context.Context, arg SetSessionNextTurnPositionParams) error {
+	_, err := q.db.Exec(ctx, setSessionNextTurnPosition, arg.NextTurnPosition, arg.SessionID)
+	return err
 }
 
 const softDeleteSession = `-- name: SoftDeleteSession :exec
@@ -697,7 +975,7 @@ const updateSessionMetadata = `-- name: UpdateSessionMetadata :one
 UPDATE bot_sessions
 SET metadata = $1, updated_at = now()
 WHERE id = $2 AND deleted_at IS NULL
-RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
 `
 
 type UpdateSessionMetadataParams struct {
@@ -719,6 +997,7 @@ func (q *Queries) UpdateSessionMetadata(ctx context.Context, arg UpdateSessionMe
 		&i.RuntimeMetadata,
 		&i.Title,
 		&i.Metadata,
+		&i.NextTurnPosition,
 		&i.ParentSessionID,
 		&i.CreatedByUserID,
 		&i.CreatedAt,
@@ -732,7 +1011,7 @@ const updateSessionTitle = `-- name: UpdateSessionTitle :one
 UPDATE bot_sessions
 SET title = $1, updated_at = now()
 WHERE id = $2 AND deleted_at IS NULL
-RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
 `
 
 type UpdateSessionTitleParams struct {
@@ -754,6 +1033,7 @@ func (q *Queries) UpdateSessionTitle(ctx context.Context, arg UpdateSessionTitle
 		&i.RuntimeMetadata,
 		&i.Title,
 		&i.Metadata,
+		&i.NextTurnPosition,
 		&i.ParentSessionID,
 		&i.CreatedByUserID,
 		&i.CreatedAt,
@@ -772,7 +1052,7 @@ SET type = $1,
     metadata = $5,
     updated_at = now()
 WHERE id = $6 AND deleted_at IS NULL
-RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at
 `
 
 type UpdateSessionTypeAndMetadataParams struct {
@@ -805,6 +1085,7 @@ func (q *Queries) UpdateSessionTypeAndMetadata(ctx context.Context, arg UpdateSe
 		&i.RuntimeMetadata,
 		&i.Title,
 		&i.Metadata,
+		&i.NextTurnPosition,
 		&i.ParentSessionID,
 		&i.CreatedByUserID,
 		&i.CreatedAt,

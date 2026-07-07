@@ -18,7 +18,7 @@
 // Size/position vars (--reka-*-available-height, trigger-width, transform-origin)
 // are reka-specific and appended inline by each Content wrapper.
 export const menuContentClass
-  = 'bg-popover text-popover-foreground border border-[color:var(--border-menu)] rounded-menu-shell shadow-[var(--shadow-dropdown)] z-50 overflow-x-hidden overflow-y-auto '
+  = 'bg-popover text-popover-foreground border border-[color:var(--border-menu)] rounded-menu-shell shadow-[var(--shadow-dropdown)] z-(--z-overlay) overflow-x-hidden overflow-y-auto '
     + 'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 '
     + 'duration-75'
 
@@ -35,7 +35,8 @@ export const menuSlideClass
 export const menuViewportClass = 'flex flex-col gap-0.5 p-1.5'
 
 // Chrome-only subset of menuContentClass, for the inner panel div of a menu host
-// (Popover with `menu`). The host carries z-50 / overflow / animation on its own
+// (Popover with `menu`). The host carries the overlay-tier z-index (--z-overlay)
+// / overflow / animation on its own
 // box; this carries only the hairline + shadow + radius + surface tokens that the
 // inner div also needs, so the chrome quartet isn't hand-copied at every call site.
 export const menuChromeClass

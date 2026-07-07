@@ -51,7 +51,7 @@
             <div
               v-for="skill in pluginSkills"
               :key="skillKey(skill)"
-              class="flex min-w-0 items-start gap-2 rounded border border-border/60 bg-muted/20 px-2 py-1.5"
+              class="flex min-w-0 items-start gap-2 rounded border border-border-soft bg-muted/20 px-2 py-1.5"
             >
               <Boxes class="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
               <div class="min-w-0 flex-1">

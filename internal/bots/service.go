@@ -207,6 +207,26 @@ func (s *Service) Get(ctx context.Context, identifier string) (Bot, error) {
 	})
 }
 
+// GetForAccess returns a bot row for hot authorization paths without attaching
+// runtime check summaries.
+func (s *Service) GetForAccess(ctx context.Context, identifier string) (Bot, error) {
+	if s.queries == nil {
+		return Bot{}, errors.New("bot queries not configured")
+	}
+	trimmed := strings.TrimSpace(identifier)
+	var row any
+	var err error
+	if botUUID, parseErr := db.ParseUUID(trimmed); parseErr == nil {
+		row, err = s.queries.GetBotByID(ctx, botUUID)
+	} else {
+		row, err = s.queries.GetBotByName(ctx, normalizeName(trimmed))
+	}
+	if err != nil {
+		return Bot{}, err
+	}
+	return toBot(asSQLCBot(row))
+}
+
 func (s *Service) getByRow(ctx context.Context, fetch func() (any, error)) (Bot, error) {
 	row, err := fetch()
 	if err != nil {

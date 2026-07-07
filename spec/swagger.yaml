@@ -3349,6 +3349,15 @@ definitions:
       provider:
         type: string
     type: object
+  handlers.forkSessionRequest:
+    properties:
+      message_id:
+        type: string
+      title:
+        type: string
+    required:
+    - message_id
+    type: object
   handlers.fsOpResponse:
     properties:
       ok:
@@ -8194,6 +8203,10 @@ paths:
         in: query
         name: before
         type: string
+      - description: Message ID cursor before which to page
+        in: query
+        name: before_message_id
+        type: string
       - description: 'Response format: ui returns normalized chat UI turns'
         in: query
         name: format
@@ -9111,6 +9124,49 @@ paths:
       summary: Trigger immediate context compaction
       tags:
       - compaction
+  /bots/{bot_id}/sessions/{session_id}/fork:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Source session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Fork source message
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.forkSessionRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/session.Session'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Fork a chat session from an assistant reply
+      tags:
+      - sessions
   /bots/{bot_id}/sessions/{session_id}/messages/events:
     get:
       description: |-

@@ -243,7 +243,7 @@
             <div class="shrink-0">
               <Select
                 :model-value="mermaidTheme"
-                @update:model-value="(value) => value && setMermaidTheme(value as MermaidTheme)"
+                @update:model-value="(value) => isMermaidTheme(value) && setMermaidTheme(value)"
               >
                 <SelectTrigger
                   size="sm"
@@ -270,7 +270,6 @@
           </div>
           <div class="appearance-mermaid-preview pointer-events-none mt-3">
             <MarkdownRender
-              :key="mermaidPreviewKey"
               :content="MERMAID_PREVIEW_CONTENT"
               :is-dark="isDark"
               :typewriter="false"
@@ -298,7 +297,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@memohai/ui'
-import { useDark } from '@vueuse/core'
 import { Monitor, Moon, Sun } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -315,6 +313,7 @@ import type { SearchableSelectOption } from '@/components/searchable-select-popo
 import ThemedMermaidBlock from '@/components/themed-mermaid-block/index.vue'
 import { colorSchemes, type ColorSchemeId, type ColorSchemeOption } from '@/constants/color-schemes'
 import { MERMAID_THEMES, type MermaidTheme, useSettingsStore, type ThemePreference } from '@/store/settings'
+import { isMermaidTheme } from '@/store/settings/mermaid'
 import { listBundledShikiThemes } from '@/store/settings/shiki-theme'
 import { cssFontFamilyDeclaration, DEFAULT_CODE_FONT_FAMILY, DEFAULT_CODE_FONT_SIZE_PX, DEFAULT_UI_FONT_SIZE_PX, normalizeCodeFontSizePx } from '@/store/settings/typography'
 
@@ -322,11 +321,12 @@ enableMermaid()
 setCustomComponents({ mermaid: ThemedMermaidBlock })
 
 const MERMAID_PREVIEW_CONTENT = `\`\`\`mermaid
-flowchart LR
-  A([Idea]) --> B{Pick a theme}
-  B -->|Auto| C[Match interface]
-  B -->|Forest| D[Forest]
-  B -->|Neutral| E[Neutral]
+pie
+  title Theme palette
+  "Chat" : 38
+  "Memory" : 27
+  "Tools" : 20
+  "Skills" : 15
 \`\`\``
 
 // Hide every chrome control on the preview's mermaid block; we want just the
@@ -344,9 +344,8 @@ const MERMAID_PREVIEW_PROPS = {
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
-const { language, theme, colorScheme, uiFontFamily, codeFontFamily, uiFontSizePx, codeFontSizePx, shikiThemeLight, shikiThemeDark, mermaidTheme, defaultUiFontFamily, defaultCodeFontFamily } = storeToRefs(settingsStore)
+const { language, theme, colorScheme, uiFontFamily, codeFontFamily, uiFontSizePx, codeFontSizePx, shikiThemeLight, shikiThemeDark, mermaidTheme, defaultUiFontFamily, defaultCodeFontFamily, isDark } = storeToRefs(settingsStore)
 const { setLanguage, setTheme, setColorScheme, setUiFontFamily, setCodeFontFamily, setUiFontSizePx, setCodeFontSizePx, setShikiTheme, setMermaidTheme } = settingsStore
-const isDark = useDark()
 
 const mermaidThemeLabels: Record<MermaidTheme, string> = {
   auto: 'Auto',
@@ -355,10 +354,6 @@ const mermaidThemeLabels: Record<MermaidTheme, string> = {
   forest: 'Forest',
   neutral: 'Neutral',
 }
-
-// Mermaid renders to SVG once per source+theme; force a remount when either
-// changes so the preview reflects the picked theme immediately.
-const mermaidPreviewKey = computed(() => `${mermaidTheme.value}:${isDark.value ? 'dark' : 'light'}`)
 
 const allShikiThemes = listBundledShikiThemes()
 const lightShikiThemeOptions = computed<SearchableSelectOption[]>(() =>
@@ -489,8 +484,13 @@ function commitCodeFontFamilyDraft() {
   border-radius: 0;
   background: transparent;
 }
+/* markstream windows tall diagrams into a fixed min-height preview (360px) and
+   clips the overflow, which cut off the bottom of the square-ish pie. Raise the
+   window so the whole pie (~450px at full width) shows; min-height overrides
+   markstream's inline height without fighting its resize transitions. */
 .appearance-mermaid-preview :deep(.mermaid-preview-area) {
   background: transparent;
+  min-height: 470px;
 }
 
 /* The shiki preview keeps the theme's inline background-color on <pre>, so

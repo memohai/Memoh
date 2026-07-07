@@ -34,6 +34,7 @@ type Message struct {
 	Role                    string          `json:"role"`
 	Content                 json.RawMessage `json:"content"`
 	Metadata                map[string]any  `json:"metadata,omitempty"`
+	RawMetadata             json.RawMessage `json:"-"`
 	Usage                   json.RawMessage `json:"usage,omitempty"`
 	SessionMode             string          `json:"session_mode,omitempty"`
 	RuntimeType             string          `json:"runtime_type,omitempty"`
@@ -42,6 +43,20 @@ type Message struct {
 	EventID                 string          `json:"event_id,omitempty"`
 	DisplayContent          string          `json:"display_content,omitempty"`
 	CreatedAt               time.Time       `json:"created_at"`
+}
+
+type HistoryTurn struct {
+	ID                 string    `json:"id"`
+	BotID              string    `json:"bot_id"`
+	SessionID          string    `json:"session_id"`
+	Position           int64     `json:"position"`
+	RequestMessageID   string    `json:"request_message_id,omitempty"`
+	AssistantMessageID string    `json:"assistant_message_id,omitempty"`
+	SupersededByTurnID string    `json:"superseded_by_turn_id,omitempty"`
+	SupersededAt       time.Time `json:"superseded_at,omitempty"`
+	SupersededReason   string    `json:"superseded_reason,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 // AssetRef links a media asset to a persisted message.
@@ -75,6 +90,8 @@ type PersistInput struct {
 	ModelID                 string
 	EventID                 string
 	DisplayText             string
+	TurnRequestMessageID    string
+	SkipHistoryTurn         bool
 }
 
 type LocateResult struct {
@@ -85,6 +102,12 @@ type LocateResult struct {
 // Writer defines write behavior needed by the inbound router.
 type Writer interface {
 	Persist(ctx context.Context, input PersistInput) (Message, error)
+}
+
+// ToolTailRoundPersister optionally persists a complete
+// user -> assistant(tool-call) -> tool -> assistant(final) round in one write.
+type ToolTailRoundPersister interface {
+	PersistToolTailRound(ctx context.Context, inputs []PersistInput) ([]Message, bool, error)
 }
 
 // Service defines message read/write behavior.
@@ -100,7 +123,14 @@ type Service interface {
 	ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
 	ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]Message, error)
 	ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, limit int32) ([]Message, error)
+	ListBeforeMessageBySession(ctx context.Context, sessionID string, beforeMessageID string, limit int32) ([]Message, error)
 	LocateByExternalIDBySession(ctx context.Context, sessionID string, externalMessageID string, beforeLimit int32, afterLimit int32) (LocateResult, error)
+	GetByIDBySession(ctx context.Context, sessionID string, messageID string) (Message, error)
+	ListVisibleFromBySession(ctx context.Context, sessionID string, messageID string) ([]Message, error)
+	GetVisibleTurnByMessage(ctx context.Context, sessionID string, messageID string) (HistoryTurn, error)
+	GetLatestVisibleTurnBySession(ctx context.Context, sessionID string) (HistoryTurn, error)
+	ReplaceTurn(ctx context.Context, sessionID string, oldTurnID string, requestMessageID string, assistantMessageID string, reason string) (HistoryTurn, error)
+	DeleteByIDs(ctx context.Context, ids []string) error
 	DeleteByBot(ctx context.Context, botID string) error
 	DeleteBySession(ctx context.Context, sessionID string) error
 	LinkAssets(ctx context.Context, messageID string, assets []AssetRef) error

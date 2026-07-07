@@ -85,7 +85,6 @@
     "editJson": "編集JSON",
     "actionRequired": "必要なアクション",
     "preview": "プレビュー",
-    "raw": "ソース",
     "hide": "非表示",
     "show": "表示",
     "saveChanges": "変更を保存"
@@ -373,6 +372,7 @@
       "share": "共有",
       "retry": "もう一度試す",
       "fork": "フォーク",
+      "createFork": "フォークを作成",
       "more": "その他",
       "readAloud": "読み上げ"
     },
@@ -396,8 +396,16 @@
     "attachFiles": "ファイルを添付する",
     "send": "送信",
     "sendFailed": "メッセージの送信に失敗しました",
-    "minimapLabel": "会話の概要",
-    "minimapEarlier": "以前のメッセージがロード中に表示される",
+    "forkFailed": "セッションのフォークに失敗しました",
+    "forkedFrom": "{session} からフォーク",
+    "forkSourceUnavailable": "元のセッションは存在しないか、削除されています。",
+    "forkDialog": {
+      "title": "フォークを作成",
+      "description": "新しいセッションの名前を設定します。",
+      "namePlaceholder": "新しいセッション名",
+      "defaultTitle": "{session} のフォーク"
+    },
+    "unknownSession": "不明なセッション",
     "startChat": "チャットを開始する",
     "noBot": "利用可能なBotがありません。最初にBotを作成してください",
     "newChat": "新しいセッション",
@@ -629,8 +637,6 @@
     "agentSwitchFailed": "エージェントの切り替えに失敗しました",
     "modelSwitchFailed": "モデルの切り替えに失敗しました",
     "noProject": "プロジェクトに含まれていません",
-    "projectFolder": "プロジェクトフォルダー",
-    "chooseFolder": "フォルダーを選択…",
     "noModels": "利用可能なモデルはありません",
     "acpAttachmentsUnsupported": "ACPセッションでは、添付ファイルはまだサポートされていません。",
     "defaultACPLoading": "デフォルトAgentはまだ読み込み中です。少し待ってからもう一度お試しください。",

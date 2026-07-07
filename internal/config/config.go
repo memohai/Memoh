@@ -26,8 +26,6 @@ const (
 	DefaultPGUser                = "postgres"
 	DefaultPGDatabase            = "memoh"
 	DefaultPGSSLMode             = "disable"
-	DefaultSQLitePath            = "data/memoh.db"
-	DefaultSQLiteBusyMS          = 5000
 	DefaultQdrantURL             = "http://127.0.0.1:6334"
 	DefaultQdrantCollection      = "memory"
 	DefaultRuntimeDir            = "/opt/memoh/runtime"
@@ -60,7 +58,6 @@ type Config struct {
 	Local         LocalConfig         `toml:"local"`
 	Workspace     WorkspaceConfig     `toml:"workspace"`
 	Postgres      PostgresConfig      `toml:"postgres"`
-	SQLite        SQLiteConfig        `toml:"sqlite"`
 	Qdrant        QdrantConfig        `toml:"qdrant"`
 	Sparse        SparseConfig        `toml:"sparse"`
 	Registry      RegistryConfig      `toml:"registry"`
@@ -352,20 +349,6 @@ type PostgresConfig struct {
 	SSLMode  string `toml:"sslmode"`
 }
 
-type SQLiteConfig struct {
-	Path          string `toml:"path"`
-	DSN           string `toml:"dsn"`
-	WAL           bool   `toml:"wal"`
-	BusyTimeoutMS int    `toml:"busy_timeout_ms"`
-}
-
-func (c SQLiteConfig) PathOrDefault() string {
-	if path := strings.TrimSpace(c.Path); path != "" {
-		return absPath(path)
-	}
-	return absPath(DefaultSQLitePath)
-}
-
 type QdrantConfig struct {
 	BaseURL        string `toml:"base_url"`
 	APIKey         string `toml:"api_key" json:"-"`
@@ -466,11 +449,6 @@ func Load(path string) (Config, error) {
 			Database: DefaultPGDatabase,
 			SSLMode:  DefaultPGSSLMode,
 		},
-		SQLite: SQLiteConfig{
-			Path:          DefaultSQLitePath,
-			WAL:           true,
-			BusyTimeoutMS: DefaultSQLiteBusyMS,
-		},
 	}
 
 	if path == "" {
@@ -532,6 +510,9 @@ func Load(path string) (Config, error) {
 }
 
 func (cfg Config) validate() error {
+	if cfg.Database.DriverOrDefault() != DefaultDatabaseDriver {
+		return fmt.Errorf("unsupported database driver %q", cfg.Database.DriverOrDefault())
+	}
 	if err := cfg.WebhookTunnel.Validate(); err != nil {
 		return err
 	}
@@ -583,9 +564,6 @@ func (cfg *Config) resolvePaths() {
 	cfg.Workspace = cfg.Container.WorkspaceConfig
 	if strings.TrimSpace(cfg.Local.MetadataRoot) != "" {
 		cfg.Local.MetadataRoot = cfg.Local.MetadataPath(cfg.Workspace.DataRoot)
-	}
-	if strings.TrimSpace(cfg.SQLite.DSN) == "" {
-		cfg.SQLite.Path = cfg.SQLite.PathOrDefault()
 	}
 	if strings.TrimSpace(cfg.Registry.ProvidersDir) != "" {
 		cfg.Registry.ProvidersDir = cfg.Registry.ProvidersPath()

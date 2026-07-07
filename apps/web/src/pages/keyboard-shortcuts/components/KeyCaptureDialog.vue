@@ -118,7 +118,7 @@ function handleCancel() {
         </DialogDescription>
       </DialogHeader>
 
-      <div class="flex min-h-[5rem] items-center justify-center rounded-md border border-dashed border-border bg-muted/40">
+      <div class="flex min-h-[5rem] items-center justify-center rounded-md border border-dashed border-border bg-muted-soft">
         <div
           v-if="!captured"
           class="text-sm text-muted-foreground"

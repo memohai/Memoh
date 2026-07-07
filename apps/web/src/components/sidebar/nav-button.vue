@@ -20,7 +20,7 @@ import { Button } from '@memohai/ui'
 
 // 行几何 + 墨色是 owner 级刻意 chrome,不属于页面注入;px 值是 sidebar
 // 图标列的对齐常量(见头注释),不是可换算成 rem 刻度的间距
-const rowClass = 'h-9 justify-start gap-[9px] px-[11px] text-control font-medium text-foreground/92 dark:text-[color:oklch(0.86_0_0)]' /* ui-allow-style */ /* ui-allow-px */
+const rowClass = 'h-9 justify-start gap-[9px] px-[11px] text-control font-medium text-foreground/92 dark:text-[color:oklch(0.86_0_0)]' /* ui-allow-style */ /* ui-allow-px */ /* ui-allow-alpha: sole owner (see header comment) — one consumer doesn't earn a global -soft token */
 const activeClass = 'bg-sidebar-accent text-foreground!' /* ui-allow-style */
 
 withDefaults(defineProps<{

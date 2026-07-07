@@ -19,48 +19,19 @@ export interface RendererInvalidatePayload {
   refetchActive?: boolean | 'all'
 }
 
-// Bundled CLI status — mirrors CliStatus in main/cli-integration.ts.
-// Kept inline rather than imported to avoid pulling main-process modules
-// into the preload bundle.
-export interface CliStatusPayload {
-  state: 'not-installed' | 'installed-current' | 'installed-stale' | 'installed-foreign'
-  source: string
-  target: string | null
-  error?: string
-}
-
-export type DesktopRuntimeMode = 'local' | 'remote'
-
 // Renderer-facing API surface. Keep this intentionally small — it is the
 // full security boundary between chromium renderer processes and the
 // node-privileged main process.
 const api = {
   desktop: {
     getServerStatus: (): Promise<{
-      mode: DesktopRuntimeMode
       baseUrl: string
       ready: boolean
       managed: boolean
       error?: string
-      qdrant?: {
-        grpcBaseUrl: string
-        httpBaseUrl: string
-        ready: boolean
-      }
     }> =>
       ipcRenderer.invoke('desktop:server-status'),
     apiBaseUrl: (): Promise<string> => ipcRenderer.invoke('desktop:api-base-url'),
-    authToken: (): Promise<string> => ipcRenderer.invoke('desktop:auth-token'),
-    defaultWorkspacePath: (displayName: string): Promise<string> =>
-      ipcRenderer.invoke('desktop:default-workspace-path', displayName),
-    // Open the OS directory picker so a local agent session can target a real
-    // working folder. Resolves to the chosen path, or null when cancelled or
-    // unavailable (remote mode).
-    openProjectFolder: (): Promise<string | null> =>
-      ipcRenderer.invoke('desktop:open-project-folder'),
-    getCliStatus: (): Promise<CliStatusPayload> => ipcRenderer.invoke('desktop:cli-status'),
-    installCli: (): Promise<CliStatusPayload> => ipcRenderer.invoke('desktop:cli-install'),
-    uninstallCli: (): Promise<CliStatusPayload> => ipcRenderer.invoke('desktop:cli-uninstall'),
     // Push the renderer's authoritative menu accelerators (derived from the
     // Keyboard Shortcuts store) so the main process can rebuild native menu
     // items with the user's bindings instead of the static table defaults.
@@ -72,6 +43,12 @@ const api = {
     // without sharing JS heap state.
     broadcastInvalidate: (payload: RendererInvalidatePayload): Promise<void> =>
       ipcRenderer.invoke('desktop:broadcast-invalidate', payload),
+    // Push the renderer's bot list so the main process can populate the
+    // tray's Bots submenu. Main never talks to the server itself — the
+    // renderer owns the authenticated SDK session, so it is the only side
+    // that can produce this list.
+    setTrayBots: (bots: Array<{ id: string, displayName: string }>): Promise<void> =>
+      ipcRenderer.invoke('desktop:set-tray-bots', bots),
     // Subscribe to invalidation events forwarded from sibling renderers.
     // Listener lives for the entire renderer lifetime.
     onInvalidate: (cb: (payload: RendererInvalidatePayload) => void): void => {

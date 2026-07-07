@@ -1,12 +1,11 @@
 import {
   getBots,
-  deleteBotsByBotIdMessages,
   deleteBotsByBotIdAcpRuntimesByRuntimeId,
   getBotsByBotIdSessions,
   getBotsByBotIdSessionsBySessionId,
-  getBotsByBotIdSessionsBySessionIdAcpRuntime,
   postBotsByBotIdAcpRuntimes,
   postBotsByBotIdSessions,
+  postBotsByBotIdSessionsBySessionIdFork,
   postBotsByBotIdSessionsBySessionIdAcpRuntime,
   deleteBotsByBotIdSessionsBySessionId,
   patchBotsByBotIdAcpRuntimesByRuntimeIdModel,
@@ -106,6 +105,29 @@ export async function createSession(botId: string, options?: string | CreateSess
   return data as SessionSummary
 }
 
+export interface ForkSessionOptions {
+  title?: string
+}
+
+export async function forkSessionFromMessage(botId: string, sessionId: string, messageId: string, options?: ForkSessionOptions): Promise<SessionSummary> {
+  const bid = botId.trim()
+  const sid = sessionId.trim()
+  const mid = messageId.trim()
+  const title = options?.title?.trim() ?? ''
+  if (!bid) throw new Error('bot id is required')
+  if (!sid) throw new Error('session id is required')
+  if (!mid) throw new Error('message id is required')
+  const { data } = await postBotsByBotIdSessionsBySessionIdFork({
+    path: { bot_id: bid, session_id: sid },
+    body: {
+      message_id: mid,
+      ...(title ? { title } : {}),
+    },
+    throwOnError: true,
+  })
+  return data as SessionSummary
+}
+
 export async function updateSessionTitle(botId: string, sessionId: string, title: string): Promise<SessionSummary> {
   const { data } = await patchBotsByBotIdSessionsBySessionId({
     path: { bot_id: botId.trim(), session_id: sessionId.trim() },
@@ -140,14 +162,6 @@ export async function updateSessionAgent(botId: string, sessionId: string, optio
 
 export async function ensureACPRuntime(botId: string, sessionId: string): Promise<AcpagentRuntimeStatus> {
   const { data } = await postBotsByBotIdSessionsBySessionIdAcpRuntime({
-    path: { bot_id: botId.trim(), session_id: sessionId.trim() },
-    throwOnError: true,
-  })
-  return data as AcpagentRuntimeStatus
-}
-
-export async function getACPRuntime(botId: string, sessionId: string): Promise<AcpagentRuntimeStatus> {
-  const { data } = await getBotsByBotIdSessionsBySessionIdAcpRuntime({
     path: { bot_id: botId.trim(), session_id: sessionId.trim() },
     throwOnError: true,
   })
@@ -195,13 +209,6 @@ export async function closeACPRuntime(botId: string, runtimeId: string): Promise
 export async function deleteSession(botId: string, sessionId: string): Promise<void> {
   await deleteBotsByBotIdSessionsBySessionId({
     path: { bot_id: botId.trim(), session_id: sessionId.trim() },
-    throwOnError: true,
-  })
-}
-
-export async function deleteAllMessages(botId: string): Promise<void> {
-  await deleteBotsByBotIdMessages({
-    path: { bot_id: botId },
     throwOnError: true,
   })
 }

@@ -7,9 +7,9 @@ services:
       POSTGRES_DB: memoh
       POSTGRES_USER: memoh
       POSTGRES_PASSWORD: memoh123
+      TZ: "${MEMOH_DEV_TZ:-UTC}"
     volumes:
       - postgres_data:/var/lib/postgresql
-      - /etc/localtime:/etc/localtime:ro
     ports:
       - "${MEMOH_DEV_POSTGRES_PORT:-15432}:5432"
     healthcheck:
@@ -101,6 +101,7 @@ services:
     environment:
       CONFIG_PATH: /workspace/devenv/app.dev.toml
       GOFLAGS: -buildvcs=false
+      TZ: "${MEMOH_DEV_TZ:-UTC}"
       # Proxy: use host.docker.internal for localhost proxies, e.g.
       #   HTTP_PROXY=http://host.docker.internal:7890 mise run dev
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
@@ -125,7 +126,6 @@ services:
       - ../.toolkit:/opt/memoh/runtime/toolkit
       - ../docker/toolkit/bin:/opt/memoh/runtime/toolkit/bin
       - ../cmd/bridge/template:/opt/memoh/runtime/templates
-      - /etc/localtime:/etc/localtime:ro
     ports:
       - "${MEMOH_DEV_SERVER_PORT:-18080}:8080"
       - "${MEMOH_DEV_OAUTH_PORT:-1455}:8080"

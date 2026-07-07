@@ -133,7 +133,7 @@
            minimum. Sits on the sidebar's right edge. -->
       <div
         v-if="!desktopShell"
-        class="group/resize absolute right-0 top-0 z-20 h-full w-1 cursor-col-resize"
+        class="group/resize absolute right-0 top-0 z-(--z-sticky) h-full w-1 cursor-col-resize"
         @mousedown="onResizeStart"
       >
         <div
