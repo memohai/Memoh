@@ -1118,7 +1118,8 @@
       "openviking": "OpenViking"
     },
     "graphViewHint": "Browse the connections between memories — hubs, clusters, and orphans.",
-    "graphEmpty": "No memories yet — add some to see the graph."
+    "graphEmpty": "No memories yet — add some to see the graph.",
+    "notConfigured": "Not configured"
   },
   "network": {
     "title": "Network",

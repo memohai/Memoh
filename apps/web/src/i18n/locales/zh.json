@@ -1118,7 +1118,8 @@
       "openviking": "OpenViking"
     },
     "graphViewHint": "浏览记忆之间的关联——枢纽、集群和孤立节点。",
-    "graphEmpty": "还没有记忆——添加一些以查看图谱。"
+    "graphEmpty": "还没有记忆——添加一些以查看图谱。",
+    "notConfigured": "未配置"
   },
   "network": {
     "title": "网络",

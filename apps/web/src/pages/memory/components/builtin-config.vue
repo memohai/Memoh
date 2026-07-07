@@ -7,29 +7,42 @@
       align="start"
     />
 
-    <SettingsRow
-      v-if="graphStatus"
-      :label="$t('memory.graphNodes')"
-      :description="String(graphStatus.source_count ?? 0)"
-    />
+    <!-- Cold-load skeleton: framed tiles matching the MetricReadout min-height
+         so the swap does not jump once status resolves. -->
+    <div
+      v-if="!graphStatus"
+      class="grid grid-cols-1 gap-3 sm:grid-cols-3"
+    >
+      <Skeleton
+        v-for="n in 3"
+        :key="n"
+        class="h-[4.375rem] rounded-[var(--radius-menu-shell)]"
+      />
+    </div>
 
-    <SettingsRow
-      v-if="graphStatus"
-      :label="$t('memory.graphEdges')"
-      :description="String(graphStatus.edge_count ?? 0)"
-    />
-
-    <SettingsRow
-      v-if="graphStatus"
-      :label="$t('memory.graphFiles')"
-      :description="String(graphStatus.markdown_file_count ?? 0)"
-    />
-
-    <SettingsRow
-      v-if="graphStatus"
-      :label="$t('memory.semanticIndexEntries')"
-      :description="String(graphStatus.indexed_count ?? 0)"
-    />
+    <!-- Configuration overview tiles. This is a *provider-level* settings page,
+         so it shows the provider's configured state (mode / embedding model /
+         semantic index readiness), NOT per-bot counts — those live on each
+         bot's memory tab. The status signal on the Semantic tile reflects
+         whether an embedding model has been chosen (ok) or not (neutral). -->
+    <div
+      v-else
+      class="grid grid-cols-1 gap-3 sm:grid-cols-3"
+    >
+      <MetricReadout
+        :label="$t('memory.modeLabel')"
+        :value="modeLabel"
+      />
+      <MetricReadout
+        :label="$t('memory.semanticEmbeddingModel')"
+        :value="embeddingModelLabel"
+      />
+      <MetricReadout
+        :label="$t('memory.semanticIndexTitle')"
+        :status="semanticReadiness"
+        :value="semanticReadinessLabel"
+      />
+    </div>
 
     <SettingsRow
       :label="$t('memory.semanticEmbeddingModel')"
@@ -47,24 +60,12 @@
         />
       </div>
     </SettingsRow>
-
-    <SettingsRow
-      v-if="graphStatus?.vector_index"
-      :label="$t('memory.semanticIndexTitle')"
-      :description="graphStatus.vector_index"
-      stack="sm"
-      align="start"
-    >
-      <Badge :variant="graphStatus.pgvector?.ok ? 'success' : 'destructive'">
-        {{ graphStatus.pgvector?.ok ? $t('memory.semanticIndexHealthy') : (graphStatus.pgvector?.error || $t('memory.semanticIndexUnavailable')) }}
-      </Badge>
-    </SettingsRow>
   </SettingsSection>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Badge, toast } from '@memohai/ui'
+import { Skeleton, toast } from '@memohai/ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   getMemoryProvidersByIdStatus,
@@ -77,6 +78,7 @@ import type { AdaptersProviderGetResponse, AdaptersProviderStatusResponse } from
 import { useI18n } from 'vue-i18n'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
+import MetricReadout from '@/components/settings/metric-readout.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
 
 const props = defineProps<{
@@ -118,6 +120,25 @@ const { data: statusData } = useQuery({
 const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
 const graphStatus = computed(() => statusData.value as AdaptersProviderStatusResponse | null)
+// Mode tile: the configured memory mode, falling back to the built-in default
+// ('graph') when the provider config hasn't been saved yet.
+const modeLabel = computed(() => {
+  const mode = graphStatus.value?.memory_mode || 'graph'
+  return t(`memory.modeNames.${mode}`, mode)
+})
+// Embedding-model tile: the model id if configured, else a neutral 'Not
+// configured'. Empty is the common local/SQLite case (no semantic index), so it
+// must NOT read as an error — just an unselected state.
+const embeddingModelLabel = computed(() => {
+  const id = graphStatus.value?.embedding_model_id
+  return id && id.trim() ? id.trim() : t('memory.notConfigured')
+})
+// Semantic-index tile reflects *readiness* (an embedding model has been chosen),
+// not a live pgvector health probe — this is a provider-config page, not a
+// per-bot status. 'ok' once a model is set; neutral (no dot) otherwise.
+const hasEmbeddingModel = computed(() => Boolean(graphStatus.value?.embedding_model_id?.trim()))
+const semanticReadiness = computed<'ok' | undefined>(() => hasEmbeddingModel.value ? 'ok' : undefined)
+const semanticReadinessLabel = computed(() => hasEmbeddingModel.value ? t('memory.semanticIndexHealthy') : t('memory.notConfigured'))
 const savedEmbeddingModelId = computed(() => {
   const config = (props.provider?.config ?? {}) as Record<string, unknown>
   return typeof config.embedding_model_id === 'string' ? config.embedding_model_id : ''
