@@ -22,7 +22,7 @@ import (
 // Markdown as a derived agent-facing view.
 const ModeGraph = "graph"
 
-// graphRuntime implements Runtime over the PG/SQLite wiki graph. The wiki
+// graphRuntime implements Runtime over the PostgreSQL wiki graph. The wiki
 // store (wikistore.Store) is authoritative; the filesystem store (memoryStore)
 // holds the derived Markdown view the agent reads.
 type graphRuntime struct {

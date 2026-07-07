@@ -17,7 +17,7 @@ import (
 //
 // queries is used to resolve the optional embedding_model_id from the main
 // relational store. The pgvector semantic seed index itself uses the dedicated
-// [pgvector] database, so SQLite/local stores intentionally run graph-only.
+// [pgvector] database, so Local stores intentionally run graph-only.
 func NewBuiltinRuntimeFromConfig(logger *slog.Logger, providerConfig map[string]any, store *storefs.Service, queries dbstore.Queries, cfg config.Config, wikiStore wikistore.Store) (Runtime, error) {
 	if wikiStore == nil {
 		return nil, errors.New("graph runtime: wiki store not configured")

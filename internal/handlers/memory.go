@@ -671,6 +671,19 @@ func graphParseTime(s string) time.Time {
 	return time.Now().UTC()
 }
 
+// requireMemoryOwnedByBot rejects memory IDs whose bot prefix does not match
+// the authorized bot. Builtin providers derive the target bot from the memory
+// ID prefix ("<botID>:mem_..."), not from the authorized bot, so without this
+// check /bots/A/memory/B:mem_x would operate on bot B's memory. The prefix is
+// parsed exactly like the provider does (everything before the first ":").
+func requireMemoryOwnedByBot(botID, memoryID string) error {
+	parts := strings.SplitN(strings.TrimSpace(memoryID), ":", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) != botID {
+		return echo.NewHTTPError(http.StatusForbidden, "memory does not belong to this bot")
+	}
+	return nil
+}
+
 // @Summary Delete memories
 // @Description Delete specific memories by IDs, or delete all memories if no IDs are provided
 // @Tags memory
@@ -698,6 +711,12 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 	_ = c.Bind(&payload)
 
 	if len(payload.MemoryIDs) > 0 {
+		// Reject the whole batch if any ID targets another bot's memory.
+		for _, memoryID := range payload.MemoryIDs {
+			if err := requireMemoryOwnedByBot(botID, memoryID); err != nil {
+				return err
+			}
+		}
 		resp, delErr := provider.DeleteBatch(c.Request().Context(), payload.MemoryIDs)
 		if delErr != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, delErr.Error())
@@ -747,6 +766,9 @@ func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 	if memoryID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "memory_id is required")
 	}
+	if err := requireMemoryOwnedByBot(botID, memoryID); err != nil {
+		return err
+	}
 	resp, err := provider.Delete(c.Request().Context(), memoryID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -781,6 +803,9 @@ func (h *MemoryHandler) ChatUpdate(c echo.Context) error {
 	memoryID := strings.TrimSpace(c.Param("memory_id"))
 	if memoryID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "memory_id is required")
+	}
+	if err := requireMemoryOwnedByBot(botID, memoryID); err != nil {
+		return err
 	}
 	var payload memoryUpdatePayload
 	if err := c.Bind(&payload); err != nil {

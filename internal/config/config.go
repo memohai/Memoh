@@ -351,7 +351,6 @@ type PostgresConfig struct {
 	SSLMode  string `toml:"sslmode"`
 }
 
-
 type PGVectorConfig struct {
 	Enabled  bool   `toml:"enabled"`
 	Host     string `toml:"host"`

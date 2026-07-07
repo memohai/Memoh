@@ -54,10 +54,14 @@ password = "memoh123"
 database = "memoh"
 sslmode = "disable"
 
-[qdrant]
-base_url = "http://127.0.0.1:6334"
-api_key = ""
-timeout_seconds = 10
+[pgvector]
+enabled = false
+host = "127.0.0.1"
+port = 5432
+user = "memoh"
+password = ""
+database = "memoh_vector"
+sslmode = "disable"
 
 [registry]
 providers_dir = "conf/providers"

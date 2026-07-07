@@ -1,8 +1,8 @@
-// Package wikistore provides a backend-agnostic graph store over the
-// memory_nodes / memory_edges tables. It defines the Store interface in terms
-// of plain Go POJOs (migrate.NodeSpec / EdgeSpec) so that the graph runtime
-// never touches sqlc or driver-specific types (pgtype.UUID vs string). Two
-// concrete implementations wrap the PostgreSQL and SQLite sqlc packages.
+// Package wikistore provides a graph store over the memory_nodes /
+// memory_edges tables. It defines the Store interface in terms of plain Go
+// POJOs (migrate.NodeSpec / EdgeSpec) so that the graph runtime never touches
+// sqlc or driver-specific types. The PostgreSQL implementation wraps the
+// sqlc-generated queries.
 package wikistore
 
 import (

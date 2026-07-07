@@ -79,7 +79,7 @@
           <div class="space-y-1.5">
             <Label class="text-caption font-semibold text-muted-foreground uppercase tracking-wider">
               {{ $t('bots.memory.compactDecayDate') }}
-              <span class="text-muted-foreground/60 normal-case tracking-normal">({{ $t('common.optional') }})</span>
+              <span class="text-caption normal-case tracking-normal text-muted-foreground">({{ $t('common.optional') }})</span>
             </Label>
             <Popover>
               <PopoverTrigger
@@ -196,7 +196,7 @@
         <input
           v-model="searchInput"
           type="text"
-          class="h-9 w-full rounded-[var(--radius-control)] border border-border bg-background pl-9 pr-9 text-control text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-foreground/30"
+          class="h-9 w-full rounded-[var(--radius-control)] border border-border bg-background pl-9 pr-9 text-control text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-foreground"
           :placeholder="$t('bots.memory.searchPlaceholder')"
           @input="onSearchInput"
           @keydown.enter.prevent="runSearch"
@@ -361,7 +361,7 @@
                   variant="ghost"
                   size="icon"
                   type="button"
-                  class="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  class="text-destructive hover:bg-destructive-soft hover:text-destructive"
                   :aria-label="$t('common.delete')"
                 >
                   <Trash2 class="size-4" />

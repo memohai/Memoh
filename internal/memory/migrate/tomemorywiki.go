@@ -1,5 +1,5 @@
 // Package migrate contains utilities that convert existing markdown-backed
-// memory content into the PostgreSQL/SQLite wiki/graph schema
+// memory content into the PostgreSQL wiki/graph schema
 // (memory_nodes + memory_edges). The conversion logic is backend-agnostic: it
 // produces plain NodeSpec/EdgeSpec values so it can be exercised by unit tests
 // without a live database, and persisted by any concrete store implementation.
@@ -40,7 +40,7 @@ const (
 )
 
 // NodeSpec is a backend-agnostic description of a memory_nodes row, produced
-// from a storefs.MemoryItem. Concrete stores (PG/SQLite) translate this into
+// from a storefs.MemoryItem. Concrete store (PostgreSQL) translates this into
 // their sqlc UpsertMemoryNodeParams.
 type NodeSpec struct {
 	ID               string

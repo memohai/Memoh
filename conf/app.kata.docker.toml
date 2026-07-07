@@ -77,11 +77,15 @@ password = "memoh123"
 database = "memoh"
 sslmode = "disable"
 
-## Qdrant configuration
-[qdrant]
-base_url = "http://qdrant:6334"
-api_key = ""
-timeout_seconds = 10
+## pgvector auxiliary index database.
+[pgvector]
+enabled = true
+host = "pgvector"
+port = 5432
+user = "memoh"
+password = "memoh123"
+database = "memoh_vector"
+sslmode = "disable"
 
 [registry]
 providers_dir = "conf/providers"

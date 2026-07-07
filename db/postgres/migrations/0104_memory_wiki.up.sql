@@ -1,4 +1,4 @@
--- 0103_memory_wiki
+-- 0104_memory_wiki
 -- Move memory content into PG as a wiki/graph source of truth.
 -- memory_nodes holds the canonical memory entries (one row per memory item);
 -- memory_edges holds relationships between nodes (profile/topic/day/refs/...).

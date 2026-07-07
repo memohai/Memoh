@@ -209,26 +209,14 @@ func provideAccountService(log *slog.Logger, accountStore dbstore.AccountStore, 
 	return svc
 }
 
-// provideWikiStore selects the memory wiki store implementation for the
-// configured database driver, mirroring provideAccountStore. Returns a pointer
+// provideWikiStore wires the PostgreSQL memory wiki store. Returns a pointer
 // so FX can inject nil-safe into providers that may run without a wiki store.
-func provideWikiStore(cfg config.Config, postgresStore *postgresstore.Store, sqliteStore *sqlitestore.Store) (*wikistore.Store, error) {
-	switch db.DriverFromConfig(cfg) {
-	case db.DriverPostgres:
-		if postgresStore == nil {
-			return nil, errors.New("postgres wiki store not configured")
-		}
-		ws := wikistore.Store(wikistore.NewPostgres(postgresStore.SQLC()))
-		return &ws, nil
-	case db.DriverSQLite:
-		if sqliteStore == nil {
-			return nil, errors.New("sqlite wiki store not configured")
-		}
-		ws := wikistore.Store(wikistore.NewSQLite(sqliteStore.SQLC()))
-		return &ws, nil
-	default:
-		return nil, fmt.Errorf("unsupported database driver %q", db.DriverFromConfig(cfg))
+func provideWikiStore(postgresStore *postgresstore.Store) (*wikistore.Store, error) {
+	if postgresStore == nil {
+		return nil, errors.New("postgres wiki store not configured")
 	}
+	ws := wikistore.Store(wikistore.NewPostgres(postgresStore.SQLC()))
+	return &ws, nil
 }
 
 func provideBridgeProvider(manage *workspace.Manager) bridge.Provider {

@@ -407,3 +407,52 @@ func TestSynthIngestID(t *testing.T) {
 		t.Fatal("whitespace padding should not change the synthesised id")
 	}
 }
+
+// TestIsProjectionItems verifies which memory files RebuildFiles may delete:
+// only files whose every entry id carries the "<botID>:" prefix minted by the
+// wiki store are DB projections (current or stale). Agent-authored files use
+// unprefixed ids (per the _memory.md prompt) and must be preserved.
+func TestIsProjectionItems(t *testing.T) {
+	botID := "bot-1"
+	cases := []struct {
+		name  string
+		items []MemoryItem
+		want  bool
+	}{
+		{
+			name:  "bot-prefixed projection is deletable",
+			items: []MemoryItem{{ID: "bot-1:mem_1"}, {ID: "bot-1:mem_2"}},
+			want:  true,
+		},
+		{
+			name:  "stale projection of a deleted node is still deletable",
+			items: []MemoryItem{{ID: "bot-1:mem_gone"}},
+			want:  true,
+		},
+		{
+			name:  "agent-authored unprefixed id is preserved",
+			items: []MemoryItem{{ID: "mem_20260313_001"}},
+			want:  false,
+		},
+		{
+			name:  "mixed file with any unprefixed entry is preserved",
+			items: []MemoryItem{{ID: "bot-1:mem_1"}, {ID: "mem_agent"}},
+			want:  false,
+		},
+		{
+			name:  "another bot's prefix is not ours to delete",
+			items: []MemoryItem{{ID: "bot-2:mem_1"}},
+			want:  false,
+		},
+		{
+			name:  "no parsed entries is preserved",
+			items: nil,
+			want:  false,
+		},
+	}
+	for _, tc := range cases {
+		if got := isProjectionItems(botID, tc.items); got != tc.want {
+			t.Errorf("%s: isProjectionItems = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

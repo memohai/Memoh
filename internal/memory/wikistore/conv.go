@@ -3,15 +3,14 @@ package wikistore
 import (
 	"encoding/json"
 	"strings"
-	"time"
 
 	"github.com/memohai/memoh/internal/memory/migrate"
 )
 
-// ---- NodeSpec <-> wire record helpers (shared by both backends) ----
+// ---- NodeSpec <-> wire record helpers ----
 
-// nodeToRecord flattens a NodeSpec into the internal record shape. Both
-// backend implementations call this before building their driver-specific
+// nodeToRecord flattens a NodeSpec into the internal record shape. The
+// PostgreSQL implementation calls this before building its driver-specific
 // sqlc params, so the metadata JSON marshalling stays in one place.
 func nodeToRecord(n migrate.NodeSpec) record {
 	return record{
@@ -115,21 +114,22 @@ func unmarshalStringList(b []byte) []string {
 	return s
 }
 
-// marshalStringJSON marshals for the SQLite backend, which stores JSONB as TEXT.
-func marshalStringJSON(m map[string]any) string { return string(marshalJSON(m)) }
-
-func marshalStringListJSON(s []string) string { return string(marshalStringList(s)) }
-
-// parseTime parses an RFC3339-ish timestamp; returns zero on failure.
-func parseTime(s string) time.Time {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return time.Time{}
+// filterImplicitEdges keeps only edges whose Rel is in the allowed set. Used
+// when rebuilding derived edges so only same_profile / same_topic / same_day /
+// refs edges are written back.
+func filterImplicitEdges(edges []migrate.EdgeSpec, allowed []migrate.EdgeRel) []migrate.EdgeSpec {
+	if len(edges) == 0 {
+		return nil
 	}
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05Z", "2006-01-02 15:04:05", "2006-01-02"} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t.UTC()
+	set := make(map[migrate.EdgeRel]struct{}, len(allowed))
+	for _, r := range allowed {
+		set[r] = struct{}{}
+	}
+	out := make([]migrate.EdgeSpec, 0, len(edges))
+	for _, e := range edges {
+		if _, ok := set[e.Rel]; ok {
+			out = append(out, e)
 		}
 	}
-	return time.Time{}
+	return out
 }

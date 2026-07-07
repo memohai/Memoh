@@ -239,15 +239,16 @@ func (s *Service) RebuildFiles(ctx context.Context, botID string, items []Memory
 	if s.provider == nil {
 		return ErrNotConfigured
 	}
-	// RebuildFiles regenerates the entire derived /data/memory tree from the
-	// authoritative node set (`items`). It is destructive by design: the
-	// Markdown view is a pure projection of the DB, so any agent-authored files
-	// under /data/memory that have not been ingested as DB nodes are lost.
-	//
-	// Data-loss mitigation lives one layer up: graphRuntime.Rebuild calls
-	// IngestMarkdownFiles BEFORE this rebuild, so agent-authored files become
-	// DB nodes first and are then re-projected here.
-	if err := s.deleteFile(ctx, botID, memoryDirPath(), true); err != nil && !isNotFound(err) {
+	// RebuildFiles regenerates the derived /data/memory projection from the
+	// authoritative node set (`items`) without wiping the whole tree. Only
+	// files that are recognizably DB projections — every parsed entry carries
+	// the "<botID>:" id prefix minted by the wiki store — are removed before
+	// re-rendering, so stale projections of deleted nodes go away while
+	// agent-authored files that have not been ingested yet (unprefixed or
+	// missing frontmatter ids, or free-form markdown that does not parse)
+	// survive every sync until POST /bots/:bot_id/memory/ingest or /rebuild
+	// imports them as DB nodes.
+	if err := s.removeProjectionFiles(ctx, botID); err != nil {
 		return err
 	}
 	plans := planConceptFiles(items)
@@ -258,6 +259,51 @@ func (s *Service) RebuildFiles(ctx context.Context, botID string, items []Memory
 		}
 	}
 	return s.SyncOverview(ctx, botID)
+}
+
+// removeProjectionFiles deletes the markdown files under /data/memory that are
+// projections of DB nodes (see isProjectionItems), leaving agent-authored
+// un-ingested files untouched.
+func (s *Service) removeProjectionFiles(ctx context.Context, botID string) error {
+	entries, err := s.listMemoryMarkdownEntries(ctx, botID)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		entryPath := memoryEntryPath(entry.GetPath())
+		content, readErr := s.readFile(ctx, botID, entryPath)
+		if readErr != nil {
+			s.logger.Warn("rebuild: failed to read memory file; preserving it",
+				slog.String("bot_id", botID), slog.String("path", entryPath), slog.Any("error", readErr))
+			continue
+		}
+		parsed, parseErr := parseMemoryFile(content)
+		if parseErr != nil || !isProjectionItems(botID, parsed) {
+			continue
+		}
+		if err := s.deleteFile(ctx, botID, entryPath, false); err != nil && !isNotFound(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+// isProjectionItems reports whether a parsed memory file is a projection of DB
+// nodes: every entry id carries the canonical "<botID>:" prefix minted by the
+// wiki store (runtimeMemoryID / qualifyIngestID). Agent-authored files use
+// unprefixed ids (or none), so any entry without the prefix marks the file as
+// not ours to delete.
+func isProjectionItems(botID string, items []MemoryItem) bool {
+	if len(items) == 0 {
+		return false
+	}
+	prefix := botID + ":"
+	for _, item := range items {
+		if !strings.HasPrefix(strings.TrimSpace(item.ID), prefix) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Service) RemoveMemories(ctx context.Context, botID string, ids []string) error {
@@ -358,9 +404,9 @@ func (s *Service) ReadAllMemoryFiles(ctx context.Context, botID string) ([]Memor
 // already declare an `id` keep it verbatim, preserving agent-authored control.
 //
 // This is the file→DB ingest entry point: the derived-markdown rebuild path
-// (RebuildFiles) regenerates files from DB nodes, so without this the agent's
-// directly-written /data/memory/*.md would be invisible to search_memory and
-// silently wiped on the next sync.
+// (RebuildFiles) regenerates files from DB nodes and preserves un-ingested
+// agent-authored files, but without this ingest the agent's directly-written
+// /data/memory/*.md would stay invisible to search_memory.
 func (s *Service) ReadAllMemoryFilesForIngest(ctx context.Context, botID string) ([]MemoryItem, error) {
 	items, err := s.ReadAllMemoryFiles(ctx, botID)
 	if err != nil {

@@ -32,8 +32,9 @@ type IngestResult struct {
 // back into the DB).
 //
 // It is the file→DB direction. Direct agent writes (write_file to /data/memory)
-// are otherwise invisible to search_memory (which reads DB nodes) and get
-// silently wiped by the next RebuildFiles.
+// are otherwise invisible to search_memory (which reads DB nodes); RebuildFiles
+// preserves them (it only deletes bot-prefixed projection files), but they stay
+// unsearchable until ingested here.
 //
 // Idempotency: items keep their YAML frontmatter `id` verbatim; items missing
 // an id get a deterministic synthesised id (see storefs.ReadAllMemoryFilesForIngest).

@@ -56,8 +56,9 @@ func (s *graphSync) botLock(botID string) *sync.Mutex {
 // those files are invisible to search_memory until they are ingested. Use
 // graphRuntime.IngestMarkdownFiles (exposed as POST /bots/:bot_id/memory/ingest
 // via the MarkdownIngestProvider interface) to import them as DB nodes.
-// RebuildFiles is non-destructive, so uningested files survive a sync rather
-// than being wiped.
+// storefs.RebuildFiles only deletes files it recognizes as DB projections
+// (every entry id prefixed "<botID>:"), so un-ingested agent-authored files
+// survive a sync rather than being wiped.
 //
 // The caller passes the authoritative node list (already read from the store);
 // this avoids a second ListNodes round-trip and lets the caller hold the most
