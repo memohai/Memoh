@@ -6,7 +6,7 @@
        transcription/speech/video provider-setting.vue hand-synced this exact
        shape 3x (transcription/speech were byte-identical; video only differed
        by nesting the click handler on a trailing ghost Button instead of the
-       row itself — flagged in batch-A-raw.json as a trivial, not a
+       row itself — adjudicated in that census as a trivial, not a
        deliberate, divergence). NOT the same relationship as
        providers/model-item.vue: that row carries inline enable/test/delete
        actions + a capability badge + a status line, a materially richer

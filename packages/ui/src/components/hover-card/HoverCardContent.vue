@@ -45,7 +45,7 @@ const ctx = injectHoverCardContext()
       data-slot="hover-card-content"
       v-bind="{ ...$attrs, ...forwarded }"
       :class="cn(
-        'bg-popover text-popover-foreground z-50 w-64 rounded-menu-shell border border-[color:var(--border-menu)] p-4 shadow-[var(--shadow-dropdown)] outline-hidden',
+        'bg-popover text-popover-foreground z-(--z-overlay) w-64 rounded-menu-shell border border-[color:var(--border-menu)] p-4 shadow-[var(--shadow-dropdown)] outline-hidden',
         'origin-(--reka-popover-content-transform-origin)',
         'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 duration-75',
         menuSlideClass,

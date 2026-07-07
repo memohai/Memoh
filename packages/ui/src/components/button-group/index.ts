@@ -13,6 +13,11 @@ export const buttonGroupVariants = cva(
   // no size of its own. Grouped buttons also drop their standalone ::before chrome
   // (hairline ring + press-scale) in style.css so the group border is the single
   // edge and a press never pulls the fill away from a fixed divider.
+  // ui-allow-z: z-10 below is NOT on the z-index ladder (packages/ui/AGENTS.md
+  // "z 梯"): it only lifts a focused item's ring above its own unfocused
+  // siblings inside ONE button-group (so the shared divider border doesn't
+  // clip the ring) — it never competes with another component's z-index, so
+  // a global token would overstate its scope.
   'bg-inherit border border-border rounded-lg flex w-fit items-stretch [&>*]:focus-visible:z-10 [&>*]:focus-visible:relative [&>[data-slot=select-trigger]:not([class*=\'w-\'])]:w-fit [&>input]:flex-1 has-[select[aria-hidden=true]:last-child]:[&>[data-slot=select-trigger]:last-of-type]:rounded-r-md has-[>[data-slot=button-group]]:gap-2',
   {
     variants: {

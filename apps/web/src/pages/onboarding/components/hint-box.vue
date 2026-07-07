@@ -36,6 +36,6 @@ const props = withDefaults(defineProps<{
 const toneClass = computed(() =>
   props.tone === 'warning'
     ? 'border-warning-border bg-warning-soft text-warning-foreground'
-    : 'border-border bg-muted/40 text-muted-foreground',
+    : 'border-border bg-muted-soft text-muted-foreground',
 )
 </script>

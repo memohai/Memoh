@@ -90,8 +90,7 @@
     "unsaved": "未保存",
     "editJson": "编辑 JSON",
     "actionRequired": "需要操作",
-    "preview": "预览",
-    "raw": "源码"
+    "preview": "预览"
   },
   "auth": {
     "welcome": "欢迎回来",
@@ -438,8 +437,6 @@
       "defaultTitle": "{session} 分叉"
     },
     "unknownSession": "未知会话",
-    "minimapLabel": "对话导航",
-    "minimapEarlier": "更早的消息加载后显示",
     "startChat": "开始聊天",
     "noBot": "暂无可用 Bot，请先创建 Bot",
     "newChat": "新会话",

@@ -145,7 +145,7 @@
 
     <!-- Width resize handle -->
     <div
-      class="group absolute right-0 top-0 z-10 h-full w-1 cursor-col-resize"
+      class="group absolute right-0 top-0 z-(--z-raised) h-full w-1 cursor-col-resize"
       @mousedown="onResizeStart"
     >
       <div

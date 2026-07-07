@@ -77,7 +77,7 @@
           @click="router.push({ name: 'bot-new' })"
         >
           <template #media>
-            <div class="flex size-14 items-center justify-center rounded-full bg-[color:var(--accent-gray-soft-active)]">
+            <div class="flex size-14 items-center justify-center rounded-full bg-accent-gray-soft-active">
               <Plus class="size-6" />
             </div>
           </template>

@@ -26,12 +26,12 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
 <template>
   <DialogPortal>
     <DialogOverlay
-      class="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-[var(--scrim)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
+      class="fixed inset-0 z-(--z-overlay) grid place-items-center overflow-y-auto bg-[var(--scrim)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
     >
       <DialogContent
         :class="
           cn(
-            'relative z-50 grid w-full max-w-lg my-8 gap-4 border border-[color:var(--border-menu-elevated)] bg-card p-6 shadow-[var(--shadow-modal)] sm:rounded-xl md:w-full',
+            'relative z-(--z-overlay) grid w-full max-w-lg my-8 gap-4 border border-[color:var(--border-menu-elevated)] bg-card p-6 shadow-[var(--shadow-modal)] sm:rounded-xl md:w-full',
             // Same 100ms fade + 2% zoom modal entrance as DialogContent (was an inert
             // duration-200 with no animation utilities attached) so the scrollable
             // variant opens with the one shared modal motion.

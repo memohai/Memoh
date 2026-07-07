@@ -289,7 +289,7 @@
       </div>
 
       <!-- Hint -->
-      <div class="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground mt-6">
+      <div class="rounded-md border bg-muted-soft px-3 py-2 text-xs text-muted-foreground mt-6">
         {{ $t('bots.createBotWaitHint') }}
       </div>
 

@@ -150,7 +150,7 @@ const skipAnimation = () => {
       <div class="relative flex items-center justify-center w-full h-[100px]">
         <!-- Memoh Logo -->
         <div
-          class="absolute z-20 flex items-center justify-center w-24 h-24 bg-background rounded-2xl border border-border transition-all duration-1000 shadow-none"
+          class="absolute z-(--z-sticky) flex items-center justify-center w-24 h-24 bg-background rounded-2xl border border-border transition-all duration-1000 shadow-none"
           :class="showContent ? 'scale-100' : 'scale-110 ring-2 ring-primary/20'"
         >
           <img

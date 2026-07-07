@@ -57,9 +57,18 @@ const toastHeadings = computed(() => ({
                opaque bg-background, so while it slides/fades in or out the layer
                behind it is the live chat — never a black backdrop. Earlier the
                wrapper itself was near-black, so any fade/leave revealed a dark
-               wash. Transparent + visibility flip = clean, no flash, no fade. -->
+               wash. Transparent + visibility flip = clean, no flash, no fade.
+           z-(--z-overlay), not --z-panel: this was bare z-40 pre-ladder (no
+           dedicated tier — the ladder's z-40 slot folds into overlay or panel
+           by use, see packages/ui/AGENTS.md "z 梯"). MainSection stays mounted
+           BEHIND this layer while settings is open, and its chat-pane composer/
+           slash-panel floats already sit at --z-panel (30) — tying this wrapper
+           to the same 30 would make "settings always wins" depend on DOM order
+           instead of an explicit rank, which is exactly the hidden-dependency
+           risk the ladder migration is supposed to remove. --z-overlay (50)
+           preserves the original strict 40-over-30 inequality. -->
       <div
-        class="fixed inset-0 z-40"
+        class="fixed inset-0 z-(--z-overlay)"
         :class="isSettingsRoute ? 'visible' : 'pointer-events-none invisible'"
       >
         <component

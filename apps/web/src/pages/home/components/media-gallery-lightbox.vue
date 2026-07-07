@@ -4,7 +4,7 @@
       <div
         v-if="isOpen"
         ref="dialogRef"
-        class="fixed inset-0 z-[100] flex items-center justify-center"
+        class="fixed inset-0 z-(--z-top) flex items-center justify-center"
         :class="overlayClass"
         role="dialog"
         aria-modal="true"
@@ -19,7 +19,7 @@
         <button
           ref="closeButtonRef"
           type="button"
-          class="absolute right-4 top-4 z-10 rounded-full p-2 transition-colors"
+          class="absolute right-4 top-4 z-(--z-raised) rounded-full p-2 transition-colors"
           :class="controlClass"
           aria-label="Close"
           @click="close"
@@ -33,7 +33,7 @@
         <button
           v-if="items.length > 1"
           type="button"
-          class="absolute left-4 top-1/2 -translate-y-1/2 z-10 rounded-full p-3 transition-colors"
+          class="absolute left-4 top-1/2 -translate-y-1/2 z-(--z-raised) rounded-full p-3 transition-colors"
           :class="controlClass"
           aria-label="Previous"
           @click.stop="prev"
@@ -47,7 +47,7 @@
         <button
           v-if="items.length > 1"
           type="button"
-          class="absolute right-4 top-1/2 -translate-y-1/2 z-10 rounded-full p-3 transition-colors"
+          class="absolute right-4 top-1/2 -translate-y-1/2 z-(--z-raised) rounded-full p-3 transition-colors"
           :class="controlClass"
           aria-label="Next"
           @click.stop="next"

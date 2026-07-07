@@ -71,7 +71,7 @@ const hostOffsetClass = computed(() => props.menu
   : '')
 
 const baseClass = computed(() => cn(
-  'z-50 origin-(--reka-popover-content-transform-origin) outline-hidden',
+  'z-(--z-overlay) origin-(--reka-popover-content-transform-origin) outline-hidden',
   chromeClass.value,
   motionClass.value,
   hostOffsetClass.value,

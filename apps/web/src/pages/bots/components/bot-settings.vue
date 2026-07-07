@@ -7,7 +7,7 @@
       <Transition name="fade">
         <div
           v-if="hasChanges"
-          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/40 border border-border/50"
+          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted-soft border border-border/50"
         >
           <div class="size-1 rounded-full bg-muted-foreground/40" />
           <span class="text-[10px] text-muted-foreground font-medium whitespace-nowrap">{{ $t('common.unsaved') }}</span>

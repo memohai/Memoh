@@ -211,6 +211,14 @@ prose use `variant="link"`; for a control-sized action use a normal `<Button>`.
 - **Legacy (do NOT use as reference):** Badge, Alert (semantic fills) — and any
   component not listed as Reference above. When in doubt, ask; do not
   pattern-match off legacy.
+- **`components/sidebar/` (do NOT copy its styling):** the entire directory (23
+  files) is an unmigrated shadcn-vue import — it hand-rolls its own button
+  chrome and a separate focus-ring vocabulary instead of the Button/field-edge
+  contracts above, and it is where the invalid `hsl(var(--sidebar-border))`
+  shadow shipped (browser silently drops the whole declaration — see the
+  `check-ui-contract.mjs` oklch-leftover rule). Production usage is limited to
+  `settings-sidebar` (via `master-detail-sidebar-layout` → `settings-section` /
+  `bots/detail.vue`). Copy patterns from the Reference list, not from here.
 
 ## Color
 
@@ -304,6 +312,57 @@ Two DIFFERENT states with two different expressions — do not conflate them:
   real control (`as="a"` / `as="button"`); selection still goes through an
   indicator, not a background.
 
+## Selected state
+
+A THIRD state, distinct from both of the above: a control that IS its own
+persistent choice, with **no separate indicator slot** — the control's own
+chrome has to show which one is current (a theme-picker button, the sidebar's
+current-session row). Token pair: `--selected-bg` (`--overlay-hover-strong`,
+one ladder step above `--ui-hover`/`--sidebar-hover` — an idle selected control
+must always read deeper than a merely-hovered one) and `--selected-border`
+(`--foreground`, button chrome only). Carrier: the `[data-ui-selected]` attribute,
+never a page-injected utility class onto the control box. The `ui-` prefix is
+load-bearing, twice over: a bare `data-selected` is reka-ui's own attribute
+(emitted natively on CalendarCellTrigger / PaginationListItem / TreeItem — a
+global rule on it restyles calendar range days and pagination chips), and
+`--ui-selected` the *token* is already taken by the menus' roving highlight
+above. Both collisions are real; do not "simplify" the name in either
+direction.
+
+- **`[data-button]` (outline/secondary variants)** — `[data-ui-selected]` swaps the
+  resting fill/ring on the same `::before` shell that already owns hover/press
+  (`style.css`), so which one wins when a selected control is also hovered or
+  pressed is decided by the cascade engine, not by two layers of utility
+  classes fighting for the box. This replaces the old pattern of injecting
+  `border-foreground bg-accent text-foreground` onto a `<Button>` from the
+  page — that pattern silently fought the hover chrome for the same pixels;
+  data-driven chrome can't.
+- **Non-button surfaces** (sidebar rows, list rows not wearing `<Button>`) — a
+  standalone `[data-ui-selected]` rule applies `--selected-bg` with no
+  ring/border; these rows never had one.
+- **vs Highlight / indicator-selection (§ above)** — those are for rows that
+  DO have an indicator slot (menu items, Select/Command rows): the highlight
+  just follows the pointer, the chosen value shows via a check/dot, never a
+  persistent background. `--selected-bg` is for controls with no indicator to
+  fall back on. Do not reach for `--ui-selected` here — that name is already
+  the roving highlight, a different state.
+- **vs Pressed** — `--ui-pressed`/`:active` is transient, gone the instant the
+  pointer releases. Selected is durable until the user picks something else. A
+  control can be both at once (pressing a currently-selected button); the
+  chrome engine's cascade decides which reads through, not a hand-tuned class.
+- **vs active-route** — `nav-button.vue`'s `active` prop (the Settings row,
+  keyed off `route.path`) and the sidebar's horizontal view-switcher tabs
+  (`data-[active=true]`, keyed off in-memory view state) are a SEPARATE,
+  not-yet-migrated concept: both still render on the plain `--sidebar-accent`
+  token via a hand-written class, not `[data-ui-selected]`. Do not casually fold
+  them into `--selected-bg` — the sidebar current-session row was deliberately
+  moved one ladder step deeper than `--sidebar-accent` (see `session-item.vue`)
+  precisely so "this is the session I'm in" reads stronger than "this is the
+  nav section I'm in"; unifying the tokens would either flatten that signal or
+  deepen the nav/tab active state without a design call. If route-level or
+  view-switcher "active" ever gets its own legislation, that's a follow-up
+  decision, not a silent side effect of this one.
+
 ## Radius
 
 - Use the scale only: `rounded-2xs/xs/sm/md/lg/xl` = `--radius-*`
@@ -379,6 +438,51 @@ dark. Tooltip carries no border at all — its solid fill is its own edge.
   - `--shadow-modal` — the modal layer (Dialog / Sheet / CommandDialog).
 - Flat controls and Cards carry NO shadow. Tooltip carries none. A `shadow-none`
   fighting an inherited shadow, or an invented `shadow-xs`, is the dirty tell.
+
+## Layering / z-index — the "z 梯"
+
+- **Five semantic tiers, not eleven ad-hoc numbers.** Before this ladder the
+  codebase had 26 files, 45 call sites, and 11 distinct raw values (`z-10`,
+  `z-20`, `z-30`, `z-40`, `z-50`, `z-[100]`, `z-[1]`, `z-[2]`, raw
+  `z-index: 0/1/9999`) with no relationship to each other — every new floating
+  element guessed a number. Tokens are defined in `style.css`'s `@theme
+  inline` block; each token's VALUE is whatever number already dominated that
+  role pre-ladder, so adopting one is a pure rename, never a re-ranking.
+
+  | Token | Value | Role |
+  |---|---|---|
+  | `--z-raised` | 10 | Local elevation: sticky top-fades, resize rails, overlay badges |
+  | `--z-sticky` | 20 | Sticky bars and hand-rolled popovers/rails within a panel |
+  | `--z-panel` | 30 | Panel-level floats: composer, minimap, app-level view switches |
+  | `--z-overlay` | 50 | Every Radix floating layer: dialog/sheet/popover/tooltip/menu |
+  | `--z-top` | 100 | Lightbox / full-screen top layer |
+
+- **Consume via the Tailwind v4 CSS-variable shorthand**: `z-(--z-overlay)` in
+  a class list (same pattern as this codebase's existing
+  `origin-(--reka-popover-content-transform-origin)` / `w-(--sidebar-width)`),
+  or `z-index: var(--z-overlay);` in raw CSS.
+- **There is no "in-between" tier.** Wanting a value between two tiers is a
+  design question — pick a tier, don't invent a number. `toast` is the one
+  intentional exception: it stays a raw `z-index: 9999` (see
+  `.memoh-toaster` in `style.css`) specifically so it wins over the
+  `--z-top` lightbox too, which a shared tier value can't guarantee once two
+  Teleport-rendered layers tie.
+- **Context-internal ordering is NOT on this ladder.** A handful of `0`/`1`/`2`
+  values (and dockview's own `--dv-overlay-z-index` fallback) only order an
+  element against its OWN children/siblings inside one component's stacking
+  context — never against another component's z-index. Forcing one of these
+  onto a global tier would claim a rank it doesn't have. Each is marked
+  `ui-allow-z` at the call site with a written reason (see
+  `[data-segment-thumb]` in `style.css`, `.tabs-thumb` in `TabsList.vue`, the
+  tab paint order in `dockview-theme.css` / `workspace-tab.vue`, and the
+  focus-ring lift in `button-group/index.ts`) — copy that pattern, don't grep
+  a token onto them.
+- **Guard**: `check-ui-contract.mjs` HARD-fails a bare `z-10/20/30/40/50` or
+  `z-[N]` utility in both `packages/ui` and `apps/web` (no baseline — the
+  ladder started this migration at zero and stays there) and WARNs on any raw
+  `z-index: N` CSS literal outside `var()`. Mark `ui-allow-z` (with a reason)
+  for a genuine context-internal exception; there is no other escape hatch.
+
 
 ## Typography
 
@@ -479,6 +583,73 @@ in-flight state either — confirm against the rules above).
 
 The guard WARNs on red lines 2 / 5 / 7 (string-detectable); the existing HARD
 checks already cover raw color, arbitrary radius, and invented box-shadow.
+
+## Alpha policy
+
+Red line 6 above ("hand-written alpha is a dirty pattern") existed as prose with
+no mechanical teeth: the guard's raw-color regex only catches bracket/hex
+literals (`bg-[#fff]`, `text-[rgba(...)]`), not Tailwind's built-in `/NN` suffix
+on a semantic color name (`text-foreground/92`, `bg-muted/40`). That blind spot
+let hand-picked alpha values accumulate — the same visual role (a faint divider,
+a muted label, a soft destructive banner) re-derived independently at each call
+site, each with its own guessed percentage, silently drifting apart.
+
+**The rule: transparency is a token, same as color.** If a component or page
+needs a translucent tint of a semantic color, it reaches for a `-soft` /
+`-border` / `-muted` token (below), never a raw `/NN` suffix. Need a shade this
+system doesn't have? Add the token (color-mix off the base semantic color, so
+it tracks `.dark` / per-scheme overrides automatically — see the token
+definitions in `style.css` for the pattern), then use it. Don't invent the
+percentage inline.
+
+**Allowlist — the suffix is legitimate here, not a violation:**
+
+- `ring-ring/<alpha>` — the focus ring (pre-existing exemption, § Interaction model).
+- Overlay scrims (`bg-black/50`, lightbox chrome) — a full-bleed dimming layer
+  behind a modal/lightbox is its own role, disconnected from any semantic
+  surface color; forcing it onto a token family built for tinting a surface
+  would be the wrong abstraction. Still hand-written on purpose, not debt.
+- The neutral **interaction overlay ladder** (`--overlay-hover`, `--ui-pressed`,
+  etc., § Color) — already tokens, already alpha-based; nothing to migrate.
+
+**Soft-tier tokens (first batch — color-mix, not hand-picked, so each is
+PIXEL-IDENTICAL to the `/NN` call sites it replaces):**
+
+| Token | Formula | Replaces | Role |
+|---|---|---|---|
+| `--muted-soft` | `color-mix(in oklab, var(--muted) 40%, transparent)` | `bg-muted/40` | Neutral hint/tip box background (the missing soft rung for `--muted`, parallel to `--success-soft` etc.) |
+| `--border-soft` | `color-mix(in oklab, var(--border) 60%, transparent)` | `border-border/60` | De-emphasized divider or card edge — softer than the structural `--border` |
+| `--destructive-soft` | `color-mix(in oklab, var(--destructive) 5%, transparent)` | `bg-destructive/5` | Destructive banner/callout background fill (the gap `--success-soft`/`--warning-soft`/`--info-soft` had no destructive counterpart for) |
+| `--destructive-border` | `color-mix(in oklab, var(--destructive) 30%, transparent)` | `border-destructive/30` | Destructive banner/callout border, and a destructive badge/status outline |
+
+Each is registered in the `@theme inline` block so it composes as an ordinary
+utility: `bg-muted-soft`, `border-border-soft`, `bg-destructive-soft`,
+`border-destructive-border`.
+
+(`text-foreground/92` — the sidebar row label — was considered for a fifth
+token, but its only LIVE call site is `SidebarNavButton`'s `rowClass`, already
+the single owner the header comment documents consolidating 3 prior
+duplicates; two apparent siblings in `panel-sessions.vue` sit inside a
+`<!-- archived experiment -->` comment block, not rendered markup. One
+consumer doesn't earn a global token — the line keeps its `/92` with a same-line
+`ui-allow-alpha`, consistent with the `ui-allow-style`/`ui-allow-px` markers
+already on it for the same "reviewed, owned exception" reason.)
+
+Not every `/NN` found in the codebase belongs to one of these four yet — some
+are single-occurrence (no repeated role to name a token after), some need a
+design call on which value is canonical when two or three percentages compete
+for the same role, and some are chat-surface files intentionally left alone
+pending a larger revamp. Those stay hand-written for now, grandfathered by the
+guard's ratchet (below) so they don't block on this pass, but also can't grow.
+
+**Guard**: `scripts/check-ui-contract.mjs` HARD-fails a semantic-color `/NN`
+suffix (`bg|text|border|divide|ring|shadow|from|to|via` on
+`muted|accent|border|foreground|background|destructive|warning|primary|success|info|card|popover|sidebar*`)
+in both `packages/ui` and `apps/web`, except the allowlist above. Existing debt
+is grandfathered in `scripts/ui-alpha-baseline.json` — a ratchet, same shape as
+the px / app-injection / hand-spun-loader baselines: a file keeps its recorded
+count, adding more (or a brand-new file) HARD-fails. Regenerate after a cleanup
+pass with `node scripts/check-ui-contract.mjs --write-baseline`.
 
 ## Motion & Tailwind v4 gotchas
 

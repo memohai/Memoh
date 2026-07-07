@@ -1,7 +1,6 @@
 {
   "apps/web/src/components/bot-select/index.vue": 2,
   "apps/web/src/components/color-scheme-card/index.vue": 1,
-  "apps/web/src/components/preview-mode-toggle/index.vue": 2,
   "apps/web/src/components/settings-sidebar/index.vue": 5,
   "apps/web/src/components/settings/section.vue": 1,
   "apps/web/src/components/sidebar/bot-switcher.vue": 3,
@@ -38,7 +37,6 @@
   "apps/web/src/pages/home/components/dockview/prefix-header-actions.vue": 1,
   "apps/web/src/pages/home/components/heartbeat-trigger-block.vue": 1,
   "apps/web/src/pages/home/components/message-item.vue": 3,
-  "apps/web/src/pages/home/components/process-rail.vue": 1,
   "apps/web/src/pages/home/components/schedule-trigger-block.vue": 3,
   "apps/web/src/pages/home/components/tool-call-detail-exec.vue": 1,
   "apps/web/src/pages/home/components/tool-call-detail-output.vue": 1,

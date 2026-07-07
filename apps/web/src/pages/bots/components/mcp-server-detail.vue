@@ -164,7 +164,7 @@
               v-else-if="status === 'error'"
               variant="outline"
               size="sm"
-              class="border-destructive/30 text-destructive"
+              class="border-destructive-border text-destructive"
             >
               {{ $t('mcp.statusError') }}
             </Badge>
