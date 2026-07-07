@@ -14,7 +14,7 @@
        Keep them equal-and-opposite; re-derive both if one changes. -->
   <Button
     variant="ghost"
-    class="-ml-4 max-w-full px-4 text-foreground/85"
+    :class="buttonClass"
     @click="emit('click')"
   >
     <ChevronLeft class="size-4 shrink-0" />
@@ -31,4 +31,8 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{ click: [] }>()
+
+// Geometry rationale in the template comment above. The /85 dim is tuned for
+// this sole owner — one consumer doesn't earn a global -soft token.
+const buttonClass = '-ml-4 max-w-full px-4 text-foreground/85' /* ui-allow-alpha: sole owner, see comment above */
 </script>
