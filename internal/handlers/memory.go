@@ -51,6 +51,10 @@ type memoryDeletePayload struct {
 	MemoryIDs []string `json:"memory_ids,omitempty"`
 }
 
+type memoryUpdatePayload struct {
+	Memory string `json:"memory"`
+}
+
 type memoryCompactPayload struct {
 	Ratio     float64 `json:"ratio"`
 	DecayDays *int    `json:"decay_days,omitempty"`
@@ -127,6 +131,7 @@ func (h *MemoryHandler) Register(e *echo.Echo) {
 	chatGroup.GET("/usage", h.ChatUsage)
 	chatGroup.GET("/graph", h.ChatGraph)
 	chatGroup.DELETE("", h.ChatDelete)
+	chatGroup.PUT("/:memory_id", h.ChatUpdate)
 	chatGroup.DELETE("/:memory_id", h.ChatDeleteOne)
 }
 
@@ -578,6 +583,51 @@ func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, resp)
+}
+
+// ChatUpdate godoc
+// @Summary Update a single memory by id
+// @Description Update the body of an existing memory entry in place (preserves id, layer, metadata). Replaces the legacy client-side delete-then-add edit emulation.
+// @Tags memory
+// @Accept json
+// @Produce json
+// @Param bot_id path string true "Bot ID"
+// @Param memory_id path string true "Memory ID"
+// @Param payload body memoryUpdatePayload true "Update request"
+// @Success 200 {object} adapters.MemoryItem
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
+// @Router /bots/{bot_id}/memory/{memory_id} [put].
+func (h *MemoryHandler) ChatUpdate(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	provider, checkErr := h.checkService(c.Request().Context(), botID)
+	if checkErr != nil {
+		return checkErr
+	}
+	memoryID := strings.TrimSpace(c.Param("memory_id"))
+	if memoryID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "memory_id is required")
+	}
+	var payload memoryUpdatePayload
+	if err := c.Bind(&payload); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if strings.TrimSpace(payload.Memory) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "memory is required")
+	}
+	item, err := provider.Update(c.Request().Context(), memprovider.UpdateRequest{
+		MemoryID: memoryID,
+		Memory:   payload.Memory,
+	})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, item)
 }
 
 // ChatCompact godoc

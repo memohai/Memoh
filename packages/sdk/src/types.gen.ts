@@ -2071,6 +2071,10 @@ export type HandlersMemorySearchPayload = {
     sources?: Array<string>;
 };
 
+export type HandlersMemoryUpdatePayload = {
+    memory?: string;
+};
+
 export type HandlersOauthAuthorizeRequest = {
     callback_url?: string;
     client_id?: string;
@@ -7179,6 +7183,55 @@ export type DeleteBotsByBotIdMemoryByIdResponses = {
 };
 
 export type DeleteBotsByBotIdMemoryByIdResponse = DeleteBotsByBotIdMemoryByIdResponses[keyof DeleteBotsByBotIdMemoryByIdResponses];
+
+export type PutBotsByBotIdMemoryByMemoryIdData = {
+    /**
+     * Update request
+     */
+    body: HandlersMemoryUpdatePayload;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Memory ID
+         */
+        memory_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/memory/{memory_id}';
+};
+
+export type PutBotsByBotIdMemoryByMemoryIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdMemoryByMemoryIdError = PutBotsByBotIdMemoryByMemoryIdErrors[keyof PutBotsByBotIdMemoryByMemoryIdErrors];
+
+export type PutBotsByBotIdMemoryByMemoryIdResponses = {
+    /**
+     * OK
+     */
+    200: AdaptersMemoryItem;
+};
+
+export type PutBotsByBotIdMemoryByMemoryIdResponse = PutBotsByBotIdMemoryByMemoryIdResponses[keyof PutBotsByBotIdMemoryByMemoryIdResponses];
 
 export type DeleteBotsByBotIdMessagesData = {
     body?: never;

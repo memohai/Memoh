@@ -91,9 +91,10 @@ func TestIngestMarkdownFiles(t *testing.T) {
 	if got := len(store.nodes); got != 2 {
 		t.Fatalf("store nodes = %d, want 2", got)
 	}
-	// Explicit id preserved.
-	if _, ok := store.nodes["mem_20260706_001"]; !ok {
-		t.Fatal("explicit frontmatter id not preserved on ingest")
+	// Explicit id is preserved but qualified to "<botID>:<localId>" so
+	// Update/Delete can recover the bot id from the memory id.
+	if _, ok := store.nodes["bot-1:mem_20260706_001"]; !ok {
+		t.Fatal("explicit frontmatter id not qualified/preserved on ingest")
 	}
 	// Synthesised id is stable and content-derived.
 	var synthID string
@@ -170,9 +171,9 @@ func TestIngestLayerClassification(t *testing.T) {
 		t.Fatalf("Ingest: %v", err)
 	}
 	want := map[string]migrate.MemoryLayer{
-		"mem_pref": migrate.LayerPreference,
-		"mem_id":   migrate.LayerIdentity,
-		"mem_note": migrate.LayerNote,
+		"bot-l:mem_pref": migrate.LayerPreference,
+		"bot-l:mem_id":   migrate.LayerIdentity,
+		"bot-l:mem_note": migrate.LayerNote,
 	}
 	for id, layer := range want {
 		n, ok := store.nodes[id]
@@ -182,5 +183,30 @@ func TestIngestLayerClassification(t *testing.T) {
 		if n.Layer != layer {
 			t.Fatalf("node %q layer = %q, want %q", id, n.Layer, layer)
 		}
+	}
+}
+
+func TestQualifyIngestID(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		botID string
+		in    string
+		want  string
+	}{
+		{"empty id", "bot-1", "", ""},
+		{"bare local id gets prefixed", "bot-1", "mem_20260706_005", "bot-1:mem_20260706_005"},
+		{"already qualified stays single-prefixed", "bot-1", "bot-1:mem_5", "bot-1:mem_5"},
+		{"different prefix replaced", "bot-1", "other:mem_5", "bot-1:mem_5"},
+		{"synth id prefixed", "bot-1", "a1b2c3d4", "bot-1:a1b2c3d4"},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := qualifyIngestID(c.botID, c.in); got != c.want {
+				t.Fatalf("qualifyIngestID(%q,%q) = %q, want %q", c.botID, c.in, got, c.want)
+			}
+		})
 	}
 }

@@ -2550,7 +2550,6 @@
       }
     },
     "memory": {
-      "unsavedChanges": "Unsaved changes",
       "title": "Memories",
       "empty": "The bot will accumulate memories through conversations, or you can add them manually.",
       "emptyTitle": "No memories yet",
@@ -2577,7 +2576,24 @@
       "deleteConfirm": "Are you sure you want to delete this memory? This cannot be undone.",
       "saveSuccess": "Memory saved",
       "deleteSuccess": "Memory deleted",
-      "deleteFailed": "Failed to delete memory"
+      "deleteFailed": "Failed to delete memory",
+      "searchResults": "Search results",
+      "searchFailed": "Search failed",
+      "degradedTitle": "Memory index degraded",
+      "degradedDesc": "The semantic seed index is behind the wiki store; graph recall still works. Re-ingest files to resync.",
+      "ingestAction": "Sync files",
+      "ingestSuccess": "Ingested {n} memories from files",
+      "ingestFailed": "Failed to ingest memories from files",
+      "layer": {
+        "all": "All",
+        "identity": "Identity",
+        "preference": "Preference",
+        "context": "Context",
+        "experience": "Experience",
+        "activity": "Activity",
+        "persona": "Persona",
+        "note": "Note"
+      }
     },
     "plugins": {
       "title": "Plugins",

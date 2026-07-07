@@ -64,6 +64,11 @@ func (r *graphRuntime) IngestMarkdownFiles(ctx context.Context, botID string) (I
 			result.Skipped++
 			continue
 		}
+		// Normalise the id to the canonical "<botID>:<localId>" shape used by
+		// runtimeMemoryID, so Update/Delete (which extract the bot id from the
+		// memory id) work on ingested nodes regardless of whether the agent wrote
+		// a frontmatter id, a synthesised one, or omitted it.
+		item.ID = qualifyIngestID(botID, item.ID)
 		spec := nodeSpecFromIngestItem(botID, now, item)
 		if _, err := r.store.UpsertNode(ctx, spec); err != nil {
 			r.logger.Warn("graph ingest: upsert node failed", slog.String("bot_id", botID), slog.String("node_id", spec.ID), slog.Any("err", err))
@@ -79,6 +84,25 @@ func (r *graphRuntime) IngestMarkdownFiles(ctx context.Context, botID string) (I
 	// authoritative node set, so the file tree and DB converge.
 	r.syncAndInvalidate(ctx, botID)
 	return result, nil
+}
+
+// qualifyIngestID normalises an ingested memory id to the canonical
+// "<botID>:<localId>" shape. Agent-authored frontmatter ids and synthesised ids
+// may omit the bot prefix; without it, Update/Delete cannot recover the bot id
+// from the memory id and reject the operation. Already-qualified ids pass through
+// unchanged; the bot prefix is stripped first to avoid double-prefixing.
+func qualifyIngestID(botID, id string) string {
+	botID = strings.TrimSpace(botID)
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
+	}
+	// Strip any existing "<botID>:" prefix (or any prefix before ":") so we never
+	// produce "bot:bot:local".
+	if idx := strings.Index(id, ":"); idx >= 0 {
+		id = id[idx+1:]
+	}
+	return botID + ":" + id
 }
 
 // nodeSpecFromIngestItem converts a parsed memory item into a wiki NodeSpec via

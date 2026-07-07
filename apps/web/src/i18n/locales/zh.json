@@ -2550,7 +2550,6 @@
       }
     },
     "memory": {
-      "unsavedChanges": "有未保存的更改",
       "title": "记忆",
       "empty": "Bot 会在对话中自动积累记忆，你也可以手动添加。",
       "emptyTitle": "暂无记忆",
@@ -2577,7 +2576,24 @@
       "deleteConfirm": "确定要删除这条记忆吗？此操作无法撤销。",
       "saveSuccess": "记忆已保存",
       "deleteSuccess": "记忆已删除",
-      "deleteFailed": "删除记忆失败"
+      "deleteFailed": "删除记忆失败",
+      "searchResults": "搜索结果",
+      "searchFailed": "搜索失败",
+      "degradedTitle": "记忆索引降级",
+      "degradedDesc": "语义种子索引落后于知识库存储,图谱召回仍可用。重新同步文件以恢复。",
+      "ingestAction": "同步文件",
+      "ingestSuccess": "已从文件导入 {n} 条记忆",
+      "ingestFailed": "从文件导入记忆失败",
+      "layer": {
+        "all": "全部",
+        "identity": "身份",
+        "preference": "偏好",
+        "context": "上下文",
+        "experience": "经验",
+        "activity": "活动",
+        "persona": "人格",
+        "note": "备注"
+      }
     },
     "plugins": {
       "title": "Plugins",

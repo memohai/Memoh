@@ -3467,6 +3467,11 @@ definitions:
           type: string
         type: array
     type: object
+  handlers.memoryUpdatePayload:
+    properties:
+      memory:
+        type: string
+    type: object
   handlers.oauthAuthorizeRequest:
     properties:
       callback_url:
@@ -7970,6 +7975,56 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Delete a single memory
+      tags:
+      - memory
+  /bots/{bot_id}/memory/{memory_id}:
+    put:
+      consumes:
+      - application/json
+      description: Update the body of an existing memory entry in place (preserves
+        id, layer, metadata). Replaces the legacy client-side delete-then-add edit
+        emulation.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Memory ID
+        in: path
+        name: memory_id
+        required: true
+        type: string
+      - description: Update request
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.memoryUpdatePayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/adapters.MemoryItem'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update a single memory by id
       tags:
       - memory
   /bots/{bot_id}/memory/compact:
