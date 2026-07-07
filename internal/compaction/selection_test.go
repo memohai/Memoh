@@ -207,6 +207,42 @@ func TestGuardedSelectionCompactsAroundMustKeepAskExchange(t *testing.T) {
 	}
 }
 
+func TestParallelToolCallsPropagateMustKeepToSiblingResult(t *testing.T) {
+	t.Parallel()
+
+	// One assistant message carries two parallel tool calls (ask_user + calc).
+	// The row is must-keep because of ask_user, but the calc result is a
+	// separate row that only carries the tool-closure policy on its own.
+	assistantCall := mkRow(t, "assistant", `[{"type":"tool-call","toolName":"`+userinput.ToolNameAskUser+`","toolCallId":"ask-1","input":{"questions":[]}},`+
+		`{"type":"tool-call","toolName":"calc","toolCallId":"calc-1","input":{}}]`, 100)
+	calcResult := mkRow(t, "tool", `[{"type":"tool-result","toolName":"calc","toolCallId":"calc-1","output":{"type":"text","value":"42"}}]`, 100)
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `"question 1"`, 100),
+		assistantCall,
+		calcResult,
+		mkRow(t, "user", `"question 2"`, 100),
+		mkRow(t, "assistant", `"answer 2"`, 100),
+		mkRow(t, "user", `"current question"`, 100),
+		mkRow(t, "assistant", `"current answer"`, 100),
+	}
+	items, _ := itemsFromRows(rows)
+
+	assertPolicy(t, items[2], CompactPolicyMustKeep)
+
+	toCompact := splitByTarget(items, 200)
+	if len(toCompact) == 0 {
+		t.Fatal("compaction should still proceed around the must-keep exchange")
+	}
+	for _, item := range toCompact {
+		if item.ID == assistantCall.ID {
+			t.Fatalf("must-keep assistant row with parallel tool calls was selected for compaction")
+		}
+		if item.ID == calcResult.ID {
+			t.Fatalf("sibling tool-result row of a must-keep exchange was selected for compaction")
+		}
+	}
+}
+
 func TestItemsFromRowsAllowsCurrentTurnMiddleCompaction(t *testing.T) {
 	t.Parallel()
 

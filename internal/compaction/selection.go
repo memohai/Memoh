@@ -65,9 +65,60 @@ func itemsFromRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]Compactio
 		})
 	}
 	if len(items) > 0 {
+		propagateMustKeepAcrossToolExchanges(items)
 		markSelectionPolicies(items)
 	}
 	return items, skipped
+}
+
+// toolExchangeGroups partitions items into tool-exchange groups: a maximal run
+// starting at a non-result row that carries the tool-closure policy (an
+// assistant tool-call row) followed by every immediately-adjacent tool-result
+// row answering it. Rows outside any exchange are returned as singleton
+// groups, so an exchange can never be split by ID-blind index slicing.
+func toolExchangeGroups(items []CompactionCandidate) [][]int {
+	groups := make([][]int, 0, len(items))
+	for i := 0; i < len(items); {
+		if isToolResultItem(items[i]) || !items[i].HasPolicy(CompactPolicyPreserveToolClosure) {
+			groups = append(groups, []int{i})
+			i++
+			continue
+		}
+		group := []int{i}
+		j := i + 1
+		for j < len(items) && isToolResultItem(items[j]) {
+			group = append(group, j)
+			j++
+		}
+		groups = append(groups, group)
+		i = j
+	}
+	return groups
+}
+
+// propagateMustKeepAcrossToolExchanges spreads CompactPolicyMustKeep across an
+// entire tool exchange: if the call row or any of its answering tool-result
+// rows is must-keep, every row in that exchange becomes must-keep, so
+// excluding only the must-keep row can never orphan a sibling tool call/result.
+func propagateMustKeepAcrossToolExchanges(items []CompactionCandidate) {
+	for _, group := range toolExchangeGroups(items) {
+		if len(group) < 2 {
+			continue
+		}
+		mustKeep := false
+		for _, idx := range group {
+			if items[idx].HasPolicy(CompactPolicyMustKeep) {
+				mustKeep = true
+				break
+			}
+		}
+		if !mustKeep {
+			continue
+		}
+		for _, idx := range group {
+			items[idx].Policies = appendPolicy(items[idx].Policies, CompactPolicyMustKeep)
+		}
+	}
 }
 
 func markSelectionPolicies(items []CompactionCandidate) {
@@ -424,17 +475,23 @@ func isToolResultItem(item CompactionCandidate) bool {
 // reasoning-only messages) are skipped from the prompt to avoid bare "role:"
 // noise. If every selected item renders empty, all ids are still returned so the
 // caller can detect the all-empty no-op case.
+//
+// Marking is closure-aware: a tool exchange (see toolExchangeGroups) is only
+// marked as a whole when every row in it rendered. Otherwise the empty row
+// would be dropped from marking while its call/sibling-result row stays
+// marked, stranding an orphan tool message in raw history after the summary
+// replaces the rest.
 func buildEntriesAndIDs(items []CompactionCandidate) ([]messageEntry, []pgtype.UUID) {
 	entries := make([]messageEntry, 0, len(items))
 	allIDs := make([]pgtype.UUID, 0, len(items))
-	renderedIDs := make([]pgtype.UUID, 0, len(items))
-	for _, it := range items {
+	rendered := make([]bool, len(items))
+	for i, it := range items {
 		allIDs = append(allIDs, it.ID)
 		content := renderCandidateEntry(it.Record)
 		if strings.TrimSpace(content) == "" {
 			continue
 		}
-		renderedIDs = append(renderedIDs, it.ID)
+		rendered[i] = true
 		entries = append(entries, messageEntry{
 			Role:    it.Record.ModelMessage.Role,
 			Content: content,
@@ -442,6 +499,23 @@ func buildEntriesAndIDs(items []CompactionCandidate) ([]messageEntry, []pgtype.U
 	}
 	if len(entries) == 0 {
 		return entries, allIDs
+	}
+
+	renderedIDs := make([]pgtype.UUID, 0, len(items))
+	for _, group := range toolExchangeGroups(items) {
+		complete := true
+		for _, idx := range group {
+			if !rendered[idx] {
+				complete = false
+				break
+			}
+		}
+		if !complete {
+			continue
+		}
+		for _, idx := range group {
+			renderedIDs = append(renderedIDs, items[idx].ID)
+		}
 	}
 	return entries, renderedIDs
 }

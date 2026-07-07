@@ -45,6 +45,28 @@ func TestBuildEntriesAndIDsMarksOnlyRenderedItemsInMixedWindow(t *testing.T) {
 	}
 }
 
+func TestBuildEntriesAndIDsWithholdsWholeExchangeWhenResultRendersEmpty(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `"question"`, 0),
+		toolCallRow(t, 0),
+		// degenerate content: still a "tool" role closure row, but has no
+		// recognizable parts, so it renders empty.
+		mkRow(t, "tool", `[]`, 0),
+	}
+	items, _ := itemsFromRows(rows)
+
+	entries, ids := buildEntriesAndIDs(items)
+
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want 2 (question + rendered call marker)", len(entries))
+	}
+	if len(ids) != 1 || ids[0] != rows[0].ID {
+		t.Fatalf("ids = %#v, want only the unrelated question row marked", ids)
+	}
+}
+
 func TestBuildUserPromptPriorContextBranch(t *testing.T) {
 	t.Parallel()
 
