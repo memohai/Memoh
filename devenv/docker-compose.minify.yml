@@ -44,10 +44,13 @@ services:
     environment:
       CI: "true"
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      # Store lives INSIDE the node_modules volume — same filesystem, so pnpm can
+      # hardlink, and it is container-only (never shared with the host's pnpm).
+      # See devenv/docker-compose.yml for the full rationale.
+      npm_config_store_dir: /workspace/node_modules/.pnpm-store
     volumes:
       - ..:/workspace
       - node_modules:/workspace/node_modules
-      - pnpm_store:/root/.local/share/pnpm/store
     restart: "no"
 
   migrate:
@@ -132,6 +135,11 @@ services:
     working_dir: /workspace/apps/web
     command: ["pnpm", "exec", "vite", "--host", "0.0.0.0", "--port", "8082"]
     environment:
+      # Same store as the deps service: any `pnpm install` run inside this
+      # container (debugging, one-off upgrades) must NOT fall back to the
+      # default store logic, or it re-creates the host-shared repo-root store
+      # this env var exists to eliminate.
+      npm_config_store_dir: /workspace/node_modules/.pnpm-store
       MEMOH_CONFIG_PATH: /workspace/devenv/app.dev.toml
       MEMOH_WEB_PROXY_TARGET: http://server:8080
     volumes:
@@ -177,6 +185,4 @@ volumes:
   server_cni_state:
     driver: local
   node_modules:
-    driver: local
-  pnpm_store:
     driver: local

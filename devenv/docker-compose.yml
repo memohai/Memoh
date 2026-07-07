@@ -44,10 +44,17 @@ services:
     environment:
       CI: "true"
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      # Keep the pnpm store on the SAME filesystem as node_modules (both live in
+      # the node_modules volume). With the store elsewhere — a separate volume or
+      # pnpm's cross-device fallback to <repo>/.pnpm-store on the bind mount —
+      # hardlinking is impossible and the store is shared with the host's pnpm,
+      # which is how a corrupted materialization of a patched dependency got
+      # cached under a valid patch-hash name and was then reused forever.
+      # Inside the volume it is container-only and dies with `docker volume rm`.
+      npm_config_store_dir: /workspace/node_modules/.pnpm-store
     volumes:
       - ..:/workspace
       - node_modules:/workspace/node_modules
-      - pnpm_store:/root/.local/share/pnpm/store
     restart: "no"
 
   migrate:
@@ -143,6 +150,11 @@ services:
     working_dir: /workspace/apps/web
     command: ["pnpm", "exec", "vite", "--host", "0.0.0.0", "--port", "8082"]
     environment:
+      # Same store as the deps service: any `pnpm install` run inside this
+      # container (debugging, one-off upgrades) must NOT fall back to the
+      # default store logic, or it re-creates the host-shared repo-root store
+      # this env var exists to eliminate.
+      npm_config_store_dir: /workspace/node_modules/.pnpm-store
       MEMOH_CONFIG_PATH: /workspace/devenv/app.dev.toml
       MEMOH_WEB_PROXY_TARGET: http://server:8080
     volumes:
@@ -188,6 +200,4 @@ volumes:
   server_cni_state:
     driver: local
   node_modules:
-    driver: local
-  pnpm_store:
     driver: local
