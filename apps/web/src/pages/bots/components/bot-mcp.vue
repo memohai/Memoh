@@ -145,16 +145,25 @@
     </section>
   </SwapTransition>
 
-  <!-- Import: paste a standard mcpServers JSON; same-name servers are updated. -->
+  <!-- Import: paste a standard mcpServers JSON; same-name servers are updated.
+       Same unified DialogPanel shell as the other focused dialogs (appearance /
+       access) — no full-bleed border-b/border-t bars (dividers separate peers
+       inside a body, they don't frame the shell). `grow` (fixed height, not
+       max-h): Monaco has no intrinsic height, so the body row must be given
+       one to fill. -->
   <Dialog v-model:open="importOpen">
-    <DialogContent class="flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden p-0 sm:h-[70vh] sm:max-w-3xl">
-      <DialogHeader class="shrink-0 border-b border-border p-4">
+    <DialogPanel
+      grow
+      footer
+      width="3xl"
+    >
+      <DialogHeader>
         <DialogTitle>{{ $t('mcp.importSandbox') }}</DialogTitle>
         <DialogDescription>{{ $t('mcp.importHint') }}</DialogDescription>
       </DialogHeader>
 
-      <div class="min-h-0 flex-1 p-4">
-        <div class="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-menu-shell)] border border-border">
+      <div class="flex min-h-0 flex-col">
+        <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-menu-shell)] border border-border">
           <MonacoEditor
             v-model="importJson"
             language="json"
@@ -176,7 +185,7 @@
         </p>
       </div>
 
-      <DialogFooter class="shrink-0 items-center gap-2 border-t border-border p-4 sm:justify-between">
+      <DialogFooter class="items-center gap-2 sm:justify-between">
         <Button
           variant="outline"
           :disabled="importSubmitting"
@@ -203,7 +212,7 @@
           </Button>
         </div>
       </DialogFooter>
-    </DialogContent>
+    </DialogPanel>
   </Dialog>
 </template>
 
@@ -211,8 +220,8 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  Badge, Button, Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter,
-  DialogHeader, DialogTitle, Empty, EmptyContent, EmptyDescription, EmptyTitle,
+  Badge, Button, Dialog, DialogClose, DialogDescription, DialogFooter,
+  DialogHeader, DialogPanel, DialogTitle, Empty, EmptyContent, EmptyDescription, EmptyTitle,
   InputGroup, InputGroupAddon, InputGroupInput, Skeleton, toast, Tooltip,
   TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@memohai/ui'

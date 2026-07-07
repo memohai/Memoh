@@ -508,6 +508,79 @@
   [data-button][data-variant="ghost"][data-loading]::before {
     background-color: var(--btn-ghost-hover);
   }
+
+  /* ── ActionCard — a clickable ENTRY card (action / go-to-next-surface) ────────
+     Wears the white-card language (bg-card, one hairline, card radius, flat) but
+     the WHOLE card reacts to the pointer. The fill can't be a bg-* swap: --card
+     (white) ≠ --background, so painting --ui-hover onto the card body would
+     replace the fill and bleed the page surface through the "hover" (the exact
+     trap the old bg-accent/30 hack danced around). Instead a z-index:-1 ::before
+     shell carries the neutral overlay — composited OVER bg-card, UNDER the
+     content — so the whole surface darkens (light) / lightens (dark) in place,
+     scheme-agnostic, no per-mode override. NO press-scale: a large content card
+     must never lift/shrink on press (the "no hover-rise" rule), so the press
+     reads purely through a deeper fill, like a table row. Only arms when the card
+     is a real control (button / a). 15ms fill — a snappy near-instant color
+     change; a slow fade across a whole-card surface reads sluggish, so this stays
+     fast at both hover and press. Fill uses the BESPOKE --action-card-hover /
+     --action-card-active pair (defined + fully justified in :root), NOT the shared
+     overlay ladder: this is the one control whose hover surface is a whole card,
+     and at that area even the ladder's lightest rung read too strong on dark, so
+     it gets its own measured-delta wash. Do not swap these back to --ui-hover /
+     --overlay-*.
+
+     Radius is --radius-menu-shell (12px) — the SAME rung `SettingsSection` and
+     the app-layer `BackendCard` use for a card sitting among settings rows, NOT
+     the standalone-card --radius-xl (14px). ActionCard is almost always adjacent
+     to those rows, so it must match their corner, not the generic Card family's.
+     Set here (not a Tailwind rounded-[…] class) because the guard HARD-fails any
+     arbitrary-radius Tailwind token in packages/ui — this mirrors how the Toast
+     shell (.memoh-toast above) sets the same token as a plain CSS property. */
+  [data-slot="action-card"] {
+    border-radius: var(--radius-menu-shell);
+    /* Border-COLOR lives here (not a Tailwind `border-border` class) so it can
+       change on hover: a Tailwind color utility sits in @layer utilities, which
+       always beats @layer components, so a :hover rule here could never override
+       it. At rest the hairline defines the card among its neighbors; on hover the
+       whole-card wash IS the shape cue, so the resting stroke is redundant — it
+       fades to transparent so the card reads as one clean filled surface, not a
+       fill boxed inside a leftover outline. Width stays on the `border` class. */
+    border-color: var(--border);
+    transition: border-color 15ms ease;
+  }
+  :is(button, a)[data-slot="action-card"]:hover,
+  :is(button, a)[data-slot="action-card"]:active {
+    border-color: transparent;
+  }
+  [data-slot="action-card"]::before {
+    content: "";
+    position: absolute;
+    /* -1px (not inset:0) so this shell covers the BORDER box, not the padding
+       box. inset:0 on an absolutely-positioned child lands on the padding
+       edge — a ring exactly 1px (the border width) narrower than the card's
+       outer edge, leaving the border's own 1px strip uncovered. On hover the
+       border color fades to transparent (exposing bg-card underneath) while
+       this shell's tint only reached the padding edge — so that 1px strip sat
+       un-tinted next to a tinted interior, reading back as a visible "ring"
+       even after the border color itself was neutralized (the "hover still
+       shows a ring" bug). Extending 1px past every edge makes the tint cover
+       the exact same box the border occupies, so border-fade and fill-tint
+       land on the same pixels and the ring disappears. */
+    inset: -1px;
+    z-index: -1;
+    /* Now sized to the OUTER border box, so radius matches the card's own
+       outer radius — not the inner (radius − border-width) curve used when
+       this shell was padding-box-sized. */
+    border-radius: var(--radius-menu-shell);
+    background-color: transparent;
+    transition: background-color 15ms ease;
+  }
+  :is(button, a)[data-slot="action-card"]:hover::before {
+    background-color: var(--action-card-hover);
+  }
+  :is(button, a)[data-slot="action-card"]:active::before {
+    background-color: var(--action-card-active);
+  }
 }
 
 @keyframes button-spin {
@@ -977,6 +1050,30 @@
   --overlay-hover-strong:  oklch(0 0 0 / 0.110);
   --overlay-active:        oklch(0 0 0 / 0.135);
   --overlay-active-strong: oklch(0 0 0 / 0.170);
+  /* ActionCard-only hover/press wash. A bespoke pair — NOT part of the shared
+     overlay ladder above — because ActionCard is the one control whose hover
+     surface is a WHOLE CARD (not a compact control or a thin row): at that area
+     the standard rungs read too strong (the 5.5%-dark `--overlay-hover-light`
+     already landed ~11-13 RGB delta on the card fill, visibly bright on dark).
+
+     Tuned against the card's own DISTANCE TO THE PAGE BACKGROUND, not just its
+     own delta — that's the number that actually decides whether hover reads as
+     "distinct surface" vs. "sank into the page". Light card (255) sits only ~5
+     above the light page background (250): the first cut (3.5% alpha, delta 9
+     off the card) landed the hover fill at 246 — only 4 above the 250
+     background, i.e. it visually MERGED with the page (bug: "hover 降下去就和
+     background 近乎相似"). Dark card (24) sits a full 12 above its background
+     (12), so the same style of light-card math never has this problem — it just
+     needed a MILD bump, not a rescue. Measured via exact oklch->sRGB conversion
+     (not eyeballed): light hover 8% alpha -> fill 235, 15 BELOW the 250
+     background (clearly separated); light active 14% -> fill 219, 31 below.
+     Dark hover 5.5% -> fill 37, delta 13 off the card (was 10); dark active
+     8.5% -> fill 44, delta 20 off the card (was 16). Do NOT fold these back
+     into the shared ladder or reuse elsewhere — they only make sense on a
+     surface this large, which is why they are a documented exception, not a
+     new rung. */
+  --action-card-hover:   oklch(0 0 0 / 0.08);
+  --action-card-active:  oklch(0 0 0 / 0.14);
   /* Fully-transparent overlay base. Authored in oklch (not the `transparent`
      keyword) so a fade between this and an oklch overlay stays in one color
      space and the browser produces a smooth alpha fade, not a hard cut. */
@@ -1326,6 +1423,13 @@
   --overlay-hover-strong:  oklch(1 0 0 / 0.130);
   --overlay-active:        oklch(1 0 0 / 0.155);
   --overlay-active-strong: oklch(1 0 0 / 0.190);
+  /* ActionCard-only wash (dark) — see :root for the full rationale. Nudged up
+     slightly from the first cut: dark's card-to-background gap (24 vs. 12) is
+     already comfortable, so this is a mild bump for a touch more presence, not
+     a rescue like light needed. 5.5% -> fill 37 (delta 13 off the card, was
+     10); 8.5% -> fill 44 (delta 20, was 16). */
+  --action-card-hover:   oklch(1 0 0 / 0.055);
+  --action-card-active:  oklch(1 0 0 / 0.085);
   --segment-track: oklch(0.24 0 0);
   --segment-thumb: oklch(0.40 0 0);
   /* Switch (dark): off gray LIGHTENS on hover (like the other dark control

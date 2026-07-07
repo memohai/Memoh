@@ -2,8 +2,10 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
+import { Box } from 'lucide-vue-next'
 import {
-  Button, Badge, Empty, EmptyDescription, EmptyHeader, EmptyTitle, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Input, Slider,
+  ActionCard, Button, Badge, Dialog, DialogBody, DialogDescription, DialogHeader, DialogPanel, DialogTitle,
+  Empty, EmptyDescription, EmptyHeader, EmptyTitle, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Input, Slider,
   Pagination, PaginationContent, PaginationEllipsis,
   PaginationFirst, PaginationItem, PaginationLast,
   PaginationNext, PaginationPrevious,
@@ -23,8 +25,6 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
-import ExpandableSettingsRow from '@/components/settings/expandable-row.vue'
-import FieldStack from '@/components/settings/field-stack.vue'
 import type { Ref } from 'vue'
 
 const props = defineProps<{
@@ -297,29 +297,6 @@ onBeforeUnmount(() => {
               </span>
             </div>
           </SettingsRow>
-
-          <!-- Model is a power-user override (it defaults to the bot's chat model), so it
-               stays folded behind Advanced rather than occupying space the moment you enable. -->
-          <ExpandableSettingsRow
-            v-model:open="advancedOpen"
-            :label="$t('bots.compaction.advanced')"
-          >
-            <template #expanded>
-              <FieldStack
-                :label="$t('bots.settings.compactionModel')"
-                :help="$t('bots.settings.compactionModelDescription')"
-              >
-                <ModelSelect
-                  v-model="settingsForm.compaction_model_id"
-                  :models="models"
-                  :providers="providers"
-                  model-type="chat"
-                  :placeholder="$t('bots.settings.compactionModelPlaceholder')"
-                  class="w-72"
-                />
-              </FieldStack>
-            </template>
-          </ExpandableSettingsRow>
         </template>
 
         <!-- Turning the toggle off is a pending change, not an instant stop — say so, so the
@@ -356,6 +333,32 @@ onBeforeUnmount(() => {
           </Button>
         </template>
       </SettingsSection>
+
+      <!-- Model override is a power-user facet (defaults to the bot's chat
+           model), so it lives behind a named ActionCard entry opening a
+           focused dialog — the house replacement for the old in-card
+           "Advanced" expand row. Draft semantics unchanged: the dialog edits
+           the same settingsForm, and the settings card's footer Save commits. -->
+      <section
+        v-if="settingsForm.compaction_enabled"
+        class="space-y-2.5"
+      >
+        <h2 class="px-2 text-label font-medium text-muted-foreground">
+          {{ $t('bots.compaction.advanced') }}
+        </h2>
+        <!-- Slim single-line entry, per the ActionCard contract: NO description
+             (it would grow the row past the 48px rung) — the dialog's own
+             DialogDescription carries the explanation. Box = the house icon
+             for "model" (providers page: Boxes count / Box empty state). -->
+        <ActionCard
+          :title="$t('bots.settings.compactionModel')"
+          @click="advancedOpen = true"
+        >
+          <template #icon>
+            <Box />
+          </template>
+        </ActionCard>
+      </section>
 
       <SettingsSection :title="$t('bots.compaction.title')">
         <SettingsRow
@@ -576,4 +579,27 @@ onBeforeUnmount(() => {
       </SettingsSection>
     </div>
   </PageShell>
+
+  <!-- Advanced model override dialog (workbench form). Edits settingsForm
+       directly — the Save/Cancel footer on the settings card remains the
+       single commit point, so closing this dialog never loses or applies
+       anything by itself. -->
+  <Dialog v-model:open="advancedOpen">
+    <DialogPanel width="lg">
+      <DialogHeader>
+        <DialogTitle>{{ $t('bots.settings.compactionModel') }}</DialogTitle>
+        <DialogDescription>{{ $t('bots.settings.compactionModelDescription') }}</DialogDescription>
+      </DialogHeader>
+      <DialogBody>
+        <ModelSelect
+          v-model="settingsForm.compaction_model_id"
+          :models="models"
+          :providers="providers"
+          model-type="chat"
+          :placeholder="$t('bots.settings.compactionModelPlaceholder')"
+          class="w-full"
+        />
+      </DialogBody>
+    </DialogPanel>
+  </Dialog>
 </template>

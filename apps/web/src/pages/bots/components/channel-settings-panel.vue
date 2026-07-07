@@ -137,26 +137,28 @@
           :field="orderedFields[key]"
           :field-key="key"
         />
+      </SettingsSection>
 
-        <template v-if="optionalFieldsKeys.length > 0">
-          <!-- Label on the left; the canonical settings-card disclosure on the
-               right — an outline button with a leading chevron that rotates 90°
-               when open (same mechanism as the Access rules card). -->
-          <SettingsRow :label="$t('bots.channels.advancedTitle')">
-            <Button
-              variant="outline"
-              size="sm"
-              class="shrink-0"
-              @click="isAdvancedExpanded = !isAdvancedExpanded"
-            >
-              <ChevronRight
-                class="size-4 transition-transform"
-                :class="isAdvancedExpanded ? 'rotate-90' : ''"
-              />
-              {{ isAdvancedExpanded ? $t('bots.channels.collapse') : $t('bots.channels.expandAll') }}
-            </Button>
-          </SettingsRow>
-          <template v-if="isAdvancedExpanded">
+      <!-- Optional parameters behind a named ActionCard entry opening a
+           focused dialog — the house replacement for the old in-card
+           "Expand all" row. Slim single-line entry per the ActionCard
+           contract. -->
+      <ActionCard
+        v-if="optionalFieldsKeys.length > 0"
+        :title="$t('bots.channels.advancedTitle')"
+        @click="isAdvancedExpanded = true"
+      >
+        <template #icon>
+          <SlidersHorizontal />
+        </template>
+      </ActionCard>
+
+      <Dialog v-model:open="isAdvancedExpanded">
+        <DialogPanel>
+          <DialogHeader>
+            <DialogTitle>{{ $t('bots.channels.advancedTitle') }}</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
             <ChannelField
               v-for="key in optionalFieldsKeys"
               :key="key"
@@ -164,9 +166,9 @@
               :field="orderedFields[key]"
               :field-key="key"
             />
-          </template>
-        </template>
-      </SettingsSection>
+          </DialogBody>
+        </DialogPanel>
+      </Dialog>
     </template>
 
     <!-- Removing a connection is irreversible, so it sits in its own card -->
@@ -203,8 +205,8 @@
 </template>
 
 <script setup lang="ts">
-import { Button, Input } from '@memohai/ui'
-import { ChevronRight } from 'lucide-vue-next'
+import { ActionCard, Button, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, Input } from '@memohai/ui'
+import { SlidersHorizontal } from 'lucide-vue-next'
 import { reactive, watch, computed, ref } from 'vue'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
@@ -316,11 +318,9 @@ function initForm() {
   const existingCredentials = props.channelItem.config?.credentials ?? {}
   const creds: Record<string, unknown> = {}
 
-  let hasPopulatedOptional = false
   for (const [key, field] of Object.entries(schema)) {
     if (existingCredentials[key] !== undefined) {
       creds[key] = existingCredentials[key]
-      if (!field.required && creds[key] && String(creds[key]).trim() !== '') hasPopulatedOptional = true
     } else {
       creds[key] = field.type === 'bool' ? undefined : ''
     }
@@ -330,9 +330,11 @@ function initForm() {
   lastSavedConfigId.value = String(props.channelItem.config?.id || '').trim()
   initialCredentialsString.value = JSON.stringify(creds)
 
-  // Optional fields open only when something is already filled, so a fresh
-  // connection stays minimal while an existing one shows what it has.
-  isAdvancedExpanded.value = hasPopulatedOptional
+  // NOTE: the old inline expand auto-opened when an optional field was already
+  // filled, so configured values never sat hidden. The optional surface is now
+  // a DIALOG — auto-popping a modal on init would be hostile; the
+  // always-visible ActionCard entry keeps the facet discoverable.
+  isAdvancedExpanded.value = false
   emit('update:dirty', false)
 }
 

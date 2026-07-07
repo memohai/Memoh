@@ -1,5 +1,7 @@
 export * from './components/accordion/index'
+export * from './components/action-card/index'
 export * from './components/alert/index'
+export * from './components/auto-height/index'
 export * from './components/avatar/index'
 export * from './components/badge/index'
 export * from './components/breadcrumb/index'

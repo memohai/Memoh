@@ -42,7 +42,10 @@ const curFetchProvider = ref<FetchprovidersGetResponse>()
 provide('curSearchProvider', curProvider)
 provide('curFetchProvider', curFetchProvider)
 
-const { view, direction, openDetail, backToList } = useViewSwap()
+// 'detail' query key: see useViewSwap.ts — makes re-clicking Web Search in the
+// settings sidebar while a provider's detail is open actually navigate back.
+// detailKind stays a local ref, not mirrored — same reasoning as voice/index.vue.
+const { view, direction, openDetail, backToList } = useViewSwap('detail')
 const detailKind = ref<'search' | 'fetch'>('search')
 const openStatus = reactive({
   addSearchOpen: false,

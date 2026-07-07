@@ -39,7 +39,9 @@ const { data: providerData } = useQuery({
 const curProvider = ref<EmailProviderResponse>()
 provide('curEmailProvider', curProvider)
 
-const { view, direction, openDetail, backToList } = useViewSwap()
+// 'detail' query key: see useViewSwap.ts — makes re-clicking Email in the
+// settings sidebar while a provider's detail is open actually navigate back.
+const { view, direction, openDetail, backToList } = useViewSwap('detail')
 const searchQuery = ref('')
 const openStatus = reactive({ addOpen: false })
 

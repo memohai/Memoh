@@ -234,7 +234,9 @@
       "codeHighlightDescription": "应用于代码块与编辑器的配色方案。",
       "diagrams": "图表",
       "mermaidTheme": "Mermaid 主题",
-      "mermaidThemeDescription": "应用于已渲染的 Mermaid 图表。"
+      "mermaidThemeDescription": "应用于已渲染的 Mermaid 图表。",
+      "advanced": "高级",
+      "advancedEntryTitle": "代码与图表"
     },
     "keyboard": {
       "title": "快捷键",
@@ -2362,8 +2364,7 @@
         "removeFailed": "移除成员失败"
       },
       "advanced": {
-        "show": "显示高级规则",
-        "hide": "隐藏高级规则"
+        "entryTitle": "高级规则"
       },
       "defaultEffectTitle": "默认行为",
       "defaultEffectDescription": "当没有规则匹配入站消息时应用此策略。",
@@ -2386,8 +2387,6 @@
       "blacklistEmptyDescription": "目前没设任何拦截规则。没被选中的人都能正常通过。",
       "whitelistEmpty": "白名单为空",
       "whitelistEmptyDescription": "还没添加放行的人。没在这份名单里的都会被拦截。",
-      "blacklistPreview": "把 {target} 加进黑名单。",
-      "whitelistPreview": "把 {target} 加进白名单。",
       "platformQuestion": "这条规则在哪用？",
       "userQuestion": "这条规则针对谁？",
       "allPlatforms": "所有平台",
@@ -2409,6 +2408,8 @@
       "editRule": "编辑规则",
       "rulesEmpty": "暂无规则",
       "rulesEmptyDescription": "添加规则以在默认行为之外控制访问。",
+      "searchRules": "搜索规则…",
+      "searchNoMatch": "没有匹配的规则。",
       "enabled": "启用",
       "effect": "行为",
       "matchTarget": "匹配对象",

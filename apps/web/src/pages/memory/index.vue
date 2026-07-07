@@ -35,7 +35,10 @@ const externalProviders = computed(() => providers.value.filter((p) => p.provide
 const curProvider = ref<AdaptersProviderGetResponse | null>(null)
 provide('curMemoryProvider', curProvider)
 
-const { view, direction, openDetail, backToList } = useViewSwap()
+// 'detail' query key: mirrors detail-open into the URL so re-clicking Memory
+// in the settings sidebar while a backend's detail is open actually navigates
+// back (see useViewSwap.ts).
+const { view, direction, openDetail, backToList } = useViewSwap('detail')
 const advancedOpen = ref(false)
 const openStatus = reactive({ addOpen: false })
 

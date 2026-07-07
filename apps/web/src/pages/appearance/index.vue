@@ -162,12 +162,49 @@
             @keydown.enter="commitCodeFontFamilyDraft"
           />
         </SettingsRow>
+      </SettingsSection>
 
-        <SettingsRow
-          stack="always"
-          :label="t('settings.appearance.codeHighlight')"
-          :description="t('settings.appearance.codeHighlightDescription')"
+      <!-- Rarely-touched code/diagram theming lives behind an ActionCard that
+           opens a focused DIALOG — not a push-in sub-page. The structural rule
+           from the design pass: a facet of the current page never grows a
+           sub-level (sub-pages are reserved for entities like a Provider); a
+           dialog keeps the page visibly underneath, so "where am I" never
+           arises and no back-button chrome is needed. -->
+      <section class="space-y-2.5">
+        <h2 class="px-2 text-label font-medium text-muted-foreground">
+          {{ t('settings.appearance.advanced') }}
+        </h2>
+        <ActionCard
+          :title="t('settings.appearance.advancedEntryTitle')"
+          @click="advancedOpen = true"
         >
+          <template #icon>
+            <SlidersHorizontal />
+          </template>
+        </ActionCard>
+      </section>
+    </div>
+  </PageShell>
+
+  <!-- Code & diagrams dialog. DialogPanel (capped focused shell), NOT
+       DialogScrollContent — that variant scrolls the whole overlay, so a tall
+       dialog grows past the viewport and drags the PAGE scrollbar (rejected).
+       Only the DialogBody row scrolls. Stays mounted outside any conditional
+       so open/close never loses highlighter state. -->
+  <Dialog v-model:open="advancedOpen">
+    <DialogPanel>
+      <DialogHeader>
+        <DialogTitle>{{ t('settings.appearance.advancedEntryTitle') }}</DialogTitle>
+      </DialogHeader>
+
+      <DialogBody class="space-y-6">
+        <section class="space-y-3">
+          <h3 class="text-sm font-medium text-foreground">
+            {{ t('settings.appearance.codeHighlight') }}
+          </h3>
+          <p class="text-xs text-muted-foreground">
+            {{ t('settings.appearance.codeHighlightDescription') }}
+          </p>
           <div class="grid gap-3 sm:grid-cols-2">
             <div class="space-y-2">
               <SearchableSelectPopover
@@ -180,10 +217,13 @@
                 :empty-text="t('settings.appearance.shikiThemeEmpty')"
                 :show-group-headers="false"
               />
+              <!-- NOT pointer-events-none/inert (unlike the mermaid preview):
+                   the code sample overflows horizontally and its scrollbar
+                   must stay draggable. The content is static highlighted
+                   markup — nothing focusable to fence off. -->
               <div
-                class="typography-code-preview shiki-preview pointer-events-none overflow-hidden"
+                class="typography-code-preview shiki-preview overflow-hidden"
                 :style="codeFontPreviewStyle"
-                inert
               >
                 <!-- eslint-disable vue/no-v-html -->
                 <div
@@ -205,9 +245,8 @@
                 :show-group-headers="false"
               />
               <div
-                class="typography-code-preview shiki-preview pointer-events-none overflow-hidden"
+                class="typography-code-preview shiki-preview overflow-hidden"
                 :style="codeFontPreviewStyle"
-                inert
               >
                 <!-- eslint-disable vue/no-v-html -->
                 <div
@@ -218,24 +257,14 @@
               </div>
             </div>
           </div>
-        </SettingsRow>
-      </SettingsSection>
+        </section>
 
-      <SettingsSection :title="t('settings.appearance.diagrams')">
-        <!-- Stay-local (adjudicated 2026-07-06 after a visual regression): this is a
-             THREE-piece row — (label+description | Select) on one line, plus a
-             full-row-width diagram preview below. SettingsRow models two pieces;
-             putting the preview inside #content bounds it to the content column
-             (left of the Select), so the centered diagram drifts left of the card's
-             axis. One caller only — if a second full-bleed-preview row ever appears,
-             consider a SettingsRow #below slot; until then the shape stays
-             hand-written. -->
-        <div class="mx-4 border-b border-border py-3 last:border-b-0">
+        <section class="space-y-3">
           <div class="flex min-h-[2.25rem] items-center justify-between gap-4">
             <div class="min-w-0">
-              <div class="text-sm font-medium text-foreground">
+              <h3 class="text-sm font-medium text-foreground">
                 {{ t('settings.appearance.mermaidTheme') }}
-              </div>
+              </h3>
               <p class="mt-0.5 text-xs text-muted-foreground">
                 {{ t('settings.appearance.mermaidThemeDescription') }}
               </p>
@@ -268,7 +297,17 @@
               </Select>
             </div>
           </div>
-          <div class="appearance-mermaid-preview pointer-events-none mt-3">
+          <!-- min-h reserves the diagram's height BEFORE mermaid's async SVG
+               lands — without it the container starts at 0 and the dialog
+               visibly jumps taller a frame later. 25.5rem (408px) is DERIVED
+               from a devtools measurement of the rendered dialog, not guessed:
+               the whole section measured 611×458; minus the header block
+               (title 20 + mt-0.5 2 + description 16 = 38px) and the space-y-3
+               gap (12px) leaves 458 − 38 − 12 = 408px for this preview. Valid
+               at the dialog's sm:max-w-2xl width — mermaid scales the SVG to
+               container width, so if the dialog width or the preview content
+               changes, re-measure. -->
+          <div class="appearance-mermaid-preview pointer-events-none min-h-[25.5rem]">
             <MarkdownRender
               :content="MERMAID_PREVIEW_CONTENT"
               :is-dark="isDark"
@@ -278,16 +317,44 @@
               custom-id="appearance-mermaid-preview"
             />
           </div>
-        </div>
-      </SettingsSection>
-    </div>
-  </PageShell>
+        </section>
+      </DialogBody>
+    </DialogPanel>
+  </Dialog>
+
+  <!-- Mermaid warm-up: renders the same diagram once, offscreen, as soon as
+       this page mounts — so mermaid's heavy dynamic import + first-render
+       initialization happen BEFORE the user opens the dialog, not during its
+       opening frame (the cause of the visible late-pop). Unmounted permanently
+       on first dialog open: by then the module is loaded and the real
+       instance takes over. fixed + offscreen (not display:none) because
+       mermaid must measure layout to render. -->
+  <div
+    v-if="mermaidWarmup"
+    class="pointer-events-none fixed top-0 -left-[999rem] w-[40rem]"
+    aria-hidden="true"
+  >
+    <MarkdownRender
+      :content="MERMAID_PREVIEW_CONTENT"
+      :is-dark="isDark"
+      :typewriter="false"
+      :fade="false"
+      :mermaid-props="MERMAID_PREVIEW_PROPS"
+      custom-id="appearance-mermaid-warmup"
+    />
+  </div>
 </template>
 
 <script setup lang="ts">
 import type { Component } from 'vue'
 
 import {
+  ActionCard,
+  Dialog,
+  DialogBody,
+  DialogHeader,
+  DialogPanel,
+  DialogTitle,
   Input,
   SegmentedControl,
   type SegmentedItem,
@@ -297,7 +364,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@memohai/ui'
-import { Monitor, Moon, Sun } from 'lucide-vue-next'
+import { Monitor, Moon, SlidersHorizontal, Sun } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -346,6 +413,19 @@ const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const { language, theme, colorScheme, uiFontFamily, codeFontFamily, uiFontSizePx, codeFontSizePx, shikiThemeLight, shikiThemeDark, mermaidTheme, defaultUiFontFamily, defaultCodeFontFamily, isDark } = storeToRefs(settingsStore)
 const { setLanguage, setTheme, setColorScheme, setUiFontFamily, setCodeFontFamily, setUiFontSizePx, setCodeFontSizePx, setShikiTheme, setMermaidTheme } = settingsStore
+
+// Code & diagrams dialog visibility. The two preview blocks live in the dialog
+// but share this component's script (highlighter instances, draft state), so
+// opening/closing is pure visibility — nothing re-initializes.
+const advancedOpen = ref(false)
+
+// Offscreen mermaid warm-up (see the template comment). Alive until the first
+// dialog open, then dropped for good — the warm render's only job is to pull
+// in the mermaid module and pay its init cost ahead of time.
+const mermaidWarmup = ref(true)
+watch(advancedOpen, (open) => {
+  if (open) mermaidWarmup.value = false
+})
 
 const mermaidThemeLabels: Record<MermaidTheme, string> = {
   auto: 'Auto',
@@ -403,8 +483,8 @@ const codeFontFamilyDraft = ref(codeFontFamily.value)
 // of the interface mode (mirrors Claude Code's Code-appearance panel).
 const codeFontPreviewLight = useShikiHighlighter()
 const codeFontPreviewDark = useShikiHighlighter()
-const codeFontPreviewCode = `function greet(name: string): string {
-  return \`Hello, \${name}\`
+const codeFontPreviewCode = `function greet(name: string) {
+  return \`Hi, \${name}\`
 }`
 const codeFontPreviewFallback = `<pre><code>${codeFontPreviewCode}</code></pre>`
 const codeFontPreviewLightHtml = computed(() => codeFontPreviewLight.html.value || codeFontPreviewFallback)
@@ -502,6 +582,13 @@ function commitCodeFontFamilyDraft() {
    theme previews. Line numbers follow the same idea so they stay legible on
    any chosen theme. */
 .shiki-preview :deep(pre) {
+  /* width:max-content + min-width:100% makes the themed box grow to the code's
+     full length so its background and inset ring paint UNDER the overflowing
+     text. Without this the <pre> stays at the overflow-x-auto wrapper's width,
+     and scrolling right exposes the page behind the theme color (the box only
+     ever painted the first viewport-width of code). */
+  width: max-content;
+  min-width: 100%;
   padding: 0.5rem 0.75rem;
   border-radius: 0.375rem;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent);

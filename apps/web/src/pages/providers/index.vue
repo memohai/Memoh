@@ -47,7 +47,11 @@ const { data: modelData } = useQuery({
 
 const curProvider = ref<ProvidersGetResponse>()
 
-const { view, direction, openDetail, backToList } = useViewSwap()
+// 'detail' query key: mirrors detail-open into the URL so re-clicking Providers
+// in the settings sidebar while a provider's detail is open actually navigates
+// back to the list, instead of being dropped as a duplicate push (see
+// useViewSwap.ts).
+const { view, direction, openDetail, backToList } = useViewSwap('detail')
 const searchQuery = ref('')
 const addOpen = ref(false)
 

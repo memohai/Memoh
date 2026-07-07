@@ -29,7 +29,9 @@ const { data: providersData } = useQuery({
 const curProvider = ref<VideoProviderResponse>()
 provide('curVideoProvider', curProvider)
 
-const { view, direction, openDetail, backToList } = useViewSwap()
+// 'detail' query key: see useViewSwap.ts — makes re-clicking Video in the
+// settings sidebar while a provider's detail is open actually navigate back.
+const { view, direction, openDetail, backToList } = useViewSwap('detail')
 const openStatus = reactive({ addOpen: false })
 
 const providers = computed<VideoProviderResponse[]>(() => {

@@ -238,7 +238,9 @@
       "codeHighlightDescription": "Themes applied to code blocks and editors.",
       "diagrams": "Diagrams",
       "mermaidTheme": "Mermaid Theme",
-      "mermaidThemeDescription": "Applies to rendered Mermaid diagrams."
+      "mermaidThemeDescription": "Applies to rendered Mermaid diagrams.",
+      "advanced": "Advanced",
+      "advancedEntryTitle": "Code & diagrams"
     },
     "keyboard": {
       "title": "Keyboard Shortcuts",
@@ -2362,8 +2364,7 @@
         "removeFailed": "Failed to remove member"
       },
       "advanced": {
-        "show": "Show advanced rules",
-        "hide": "Hide advanced rules"
+        "entryTitle": "Advanced rules"
       },
       "defaultEffectTitle": "Default Effect",
       "defaultEffectDescription": "Applied when no rule matches an inbound message.",
@@ -2386,8 +2387,6 @@
       "blacklistEmptyDescription": "No blocks active. Anyone not matched by other rules is allowed.",
       "whitelistEmpty": "Whitelist Is Empty",
       "whitelistEmptyDescription": "No allowed entries yet. Anyone not matched by other rules is blocked.",
-      "blacklistPreview": "Add {target} to the blacklist.",
-      "whitelistPreview": "Add {target} to the whitelist.",
       "platformQuestion": "Which Platform Is This For?",
       "userQuestion": "Which User Does This Apply To?",
       "allPlatforms": "All Platforms",
@@ -2409,6 +2408,8 @@
       "editRule": "Edit Rule",
       "rulesEmpty": "No Rules",
       "rulesEmptyDescription": "Add a rule to override the default behavior.",
+      "searchRules": "Search rules…",
+      "searchNoMatch": "No rules match your search.",
       "enabled": "Enabled",
       "effect": "Action",
       "matchTarget": "Applies To",

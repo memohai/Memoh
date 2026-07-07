@@ -197,46 +197,32 @@
       </div>
     </SettingsSection>
 
-    <!-- Advanced: env vars / headers / auth, behind the one canonical toggle. The
-         header row removes its own hairline when collapsed (last child of card). -->
-    <SettingsSection>
-      <SettingsRow
-        :label="$t('mcp.advancedSettings')"
-        :description="connectionType === 'stdio' ? $t('mcp.advancedHintStdio') : $t('mcp.advancedHintRemote')"
-      >
-        <Button
-          variant="outline"
-          size="sm"
-          @click="showAdvanced = !showAdvanced"
-        >
-          <ChevronRight
-            class="size-4 transition-transform"
-            :class="showAdvanced ? 'rotate-90' : ''"
-          />
-          {{ showAdvanced ? $t('mcp.collapse') : $t('mcp.expand') }}
-        </Button>
-      </SettingsRow>
+    <!-- Advanced: env vars / headers / auth behind a named ActionCard entry
+         opening a focused dialog — the house replacement for the old in-card
+         "Advanced" expand row. No section label above: the card's own
+         title+description already carry the full naming (an h2 would just
+         repeat it). -->
+    <ActionCard
+      :title="$t('mcp.advancedSettings')"
+      :description="connectionType === 'stdio' ? $t('mcp.advancedHintStdio') : $t('mcp.advancedHintRemote')"
+      @click="showAdvanced = true"
+    >
+      <template #icon>
+        <SlidersHorizontal />
+      </template>
+    </ActionCard>
 
-      <div
-        v-if="showAdvanced"
-        class="space-y-5 p-4"
-      >
-        <!-- stdio: process environment. remote: HTTP headers (+ env vars only when
-             a migrated config already carries ${VAR} substitutions). -->
-        <div
-          v-if="connectionType === 'stdio'"
-          class="space-y-2"
-        >
-          <Label>{{ $t('mcp.envVars') }}</Label>
-          <KeyValueEditor
-            v-model="envPairs"
-            :key-placeholder="$t('mcp.placeholders.envKey')"
-            :value-placeholder="$t('mcp.placeholders.envValue')"
-          />
-        </div>
-        <template v-else>
+    <Dialog v-model:open="showAdvanced">
+      <DialogPanel>
+        <DialogHeader>
+          <DialogTitle>{{ $t('mcp.advancedSettings') }}</DialogTitle>
+          <DialogDescription>{{ connectionType === 'stdio' ? $t('mcp.advancedHintStdio') : $t('mcp.advancedHintRemote') }}</DialogDescription>
+        </DialogHeader>
+        <DialogBody class="space-y-5">
+          <!-- stdio: process environment. remote: HTTP headers (+ env vars only when
+               a migrated config already carries ${VAR} substitutions). -->
           <div
-            v-if="envPairs.length > 0"
+            v-if="connectionType === 'stdio'"
             class="space-y-2"
           >
             <Label>{{ $t('mcp.envVars') }}</Label>
@@ -246,88 +232,101 @@
               :value-placeholder="$t('mcp.placeholders.envValue')"
             />
           </div>
-          <div class="space-y-2">
-            <Label>{{ $t('mcp.httpHeaders') }}</Label>
-            <KeyValueEditor
-              v-model="headerPairs"
-              :key-placeholder="$t('mcp.placeholders.headerKey')"
-              :value-placeholder="$t('mcp.placeholders.headerValue')"
-            />
-          </div>
-
-          <!-- Authentication (remote, saved servers only). Spotlit when a probe
-               reported it needs authorization and there's no token yet. -->
-          <div
-            v-if="serverId"
-            class="space-y-3 border-t border-border pt-4"
-          >
-            <div class="flex items-center justify-between gap-2">
-              <Label>{{ $t('mcp.oauth.title') }}</Label>
-              <Badge
-                variant="outline"
-                size="sm"
-                :class="oauthStatus?.has_token ? 'border-success/30 text-success' : 'text-muted-foreground'"
-              >
-                {{ oauthStatus?.has_token ? $t('mcp.oauth.authorized') : $t('mcp.oauth.notConfigured') }}
-              </Badge>
+          <template v-else>
+            <div
+              v-if="envPairs.length > 0"
+              class="space-y-2"
+            >
+              <Label>{{ $t('mcp.envVars') }}</Label>
+              <KeyValueEditor
+                v-model="envPairs"
+                :key-placeholder="$t('mcp.placeholders.envKey')"
+                :value-placeholder="$t('mcp.placeholders.envValue')"
+              />
+            </div>
+            <div class="space-y-2">
+              <Label>{{ $t('mcp.httpHeaders') }}</Label>
+              <KeyValueEditor
+                v-model="headerPairs"
+                :key-placeholder="$t('mcp.placeholders.headerKey')"
+                :value-placeholder="$t('mcp.placeholders.headerValue')"
+              />
             </div>
 
-            <template v-if="oauthNeedsClientId && (!oauthStatus?.has_token || oauthStatus?.expired)">
-              <p class="text-xs text-muted-foreground">
-                {{ $t('mcp.oauth.clientIdHint') }}
-              </p>
-              <Field>
-                <FieldLabel>{{ $t('mcp.oauth.clientId') }}</FieldLabel>
-                <FieldControl>
-                  <Input
-                    v-model="oauthClientId"
-                    class="font-mono"
-                    autocomplete="off"
-                    :placeholder="$t('mcp.oauth.clientIdPlaceholder')"
-                  />
-                </FieldControl>
-              </Field>
-              <Field>
-                <FieldLabel>{{ $t('mcp.oauth.clientSecret') }}</FieldLabel>
-                <FieldControl>
-                  <Input
-                    v-model="oauthClientSecret"
-                    type="password"
-                    class="font-mono"
-                    autocomplete="new-password"
-                    :placeholder="$t('mcp.oauth.clientSecretPlaceholder')"
-                  />
-                </FieldControl>
-              </Field>
-            </template>
+            <!-- Authentication (remote, saved servers only). Spotlit when a probe
+                 reported it needs authorization and there's no token yet. -->
+            <div
+              v-if="serverId"
+              class="space-y-3 border-t border-border pt-4"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <Label>{{ $t('mcp.oauth.title') }}</Label>
+                <Badge
+                  variant="outline"
+                  size="sm"
+                  :class="oauthStatus?.has_token ? 'border-success/30 text-success' : 'text-muted-foreground'"
+                >
+                  {{ oauthStatus?.has_token ? $t('mcp.oauth.authorized') : $t('mcp.oauth.notConfigured') }}
+                </Badge>
+              </div>
 
-            <Button
-              v-if="!oauthStatus?.has_token"
-              :loading="oauthDiscovering || oauthAuthorizing"
-              loading-mode="manual"
-              @click="handleOAuthFlow"
-            >
-              <Loader2
-                v-if="oauthDiscovering || oauthAuthorizing"
-                class="size-4 animate-spin"
-              />
-              <KeyRound
+              <template v-if="oauthNeedsClientId && (!oauthStatus?.has_token || oauthStatus?.expired)">
+                <p class="text-xs text-muted-foreground">
+                  {{ $t('mcp.oauth.clientIdHint') }}
+                </p>
+                <Field>
+                  <FieldLabel>{{ $t('mcp.oauth.clientId') }}</FieldLabel>
+                  <FieldControl>
+                    <Input
+                      v-model="oauthClientId"
+                      class="font-mono"
+                      autocomplete="off"
+                      :placeholder="$t('mcp.oauth.clientIdPlaceholder')"
+                    />
+                  </FieldControl>
+                </Field>
+                <Field>
+                  <FieldLabel>{{ $t('mcp.oauth.clientSecret') }}</FieldLabel>
+                  <FieldControl>
+                    <Input
+                      v-model="oauthClientSecret"
+                      type="password"
+                      class="font-mono"
+                      autocomplete="new-password"
+                      :placeholder="$t('mcp.oauth.clientSecretPlaceholder')"
+                    />
+                  </FieldControl>
+                </Field>
+              </template>
+
+              <Button
+                v-if="!oauthStatus?.has_token"
+                :loading="oauthDiscovering || oauthAuthorizing"
+                loading-mode="manual"
+                @click="handleOAuthFlow"
+              >
+                <Loader2
+                  v-if="oauthDiscovering || oauthAuthorizing"
+                  class="size-4 animate-spin"
+                />
+                <KeyRound
+                  v-else
+                  class="size-4"
+                />
+                {{ oauthDiscovering ? $t('mcp.oauth.discovering') : $t('mcp.oauth.authorize') }}
+              </Button>
+              <Button
                 v-else
-                class="size-4"
-              />
-              {{ oauthDiscovering ? $t('mcp.oauth.discovering') : $t('mcp.oauth.authorize') }}
-            </Button>
-            <Button
-              v-else
-              variant="outline"
-              @click="handleOAuthRevoke"
-            >
-              {{ $t('mcp.oauth.revoke') }}
-            </Button>
-          </div>
-        </template>
-      </div>
-    </SettingsSection>
+                variant="outline"
+                @click="handleOAuthRevoke"
+              >
+                {{ $t('mcp.oauth.revoke') }}
+              </Button>
+            </div>
+          </template>
+        </DialogBody>
+      </DialogPanel>
+    </Dialog>
 
     <!-- Discovered tools: a result, shown only once the server is connected.
          Read-only chips — names with the description on hover. -->
@@ -402,12 +401,13 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  Badge, Button, Field, FieldControl, FieldLabel, Input, Label, Select, SelectContent,
+  ActionCard, Badge, Button, Dialog, DialogBody, DialogDescription, DialogHeader,
+  DialogPanel, DialogTitle, Field, FieldControl, FieldLabel, Input, Label, Select, SelectContent,
   SelectItem, SelectTrigger, SelectValue, SegmentedControl, Switch, TagsInput,
   TagsInputInput, TagsInputItem, TagsInputItemDelete, TagsInputItemText, toast,
   type SegmentedItem,
 } from '@memohai/ui'
-import { ChevronRight, Download, KeyRound, Loader2, RefreshCw, Trash2 } from 'lucide-vue-next'
+import { Download, KeyRound, Loader2, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-vue-next'
 import {
   postBotsByBotIdMcp, putBotsByBotIdMcpById, deleteBotsByBotIdMcpById,
   postBotsByBotIdMcpByIdProbe, getBotsByBotIdMcpByIdOauthStatus,
@@ -417,7 +417,6 @@ import {
 import { client } from '@memohai/sdk/client'
 import type { McpUpsertRequest, McpMcpServerEntry, McpToolDescriptor, McpOAuthStatus } from '@memohai/sdk'
 import SettingsSection from '@/components/settings/section.vue'
-import SettingsRow from '@/components/settings/row.vue'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import KeyValueEditor from '@/components/key-value-editor/index.vue'
 import type { KeyValuePair } from '@/components/key-value-editor/index.vue'
@@ -486,8 +485,9 @@ const hasConnectionTarget = computed(() =>
 
 const relativeProbed = computed(() => formatRelativeTime(lastProbedAt.value, { locale: locale.value }))
 
-// Open advanced automatically when a probe says authorization is missing, so the
-// user lands on the auth section rather than a hidden one.
+// Open the advanced dialog automatically when a probe says authorization is
+// missing — the probe is a user-initiated action, so the dialog opening in
+// response lands them on the auth section instead of a hidden one.
 const oauthSpotlight = computed(() =>
   connectionType.value === 'remote' && probeAuthRequired.value && !oauthStatus.value?.has_token,
 )
@@ -561,7 +561,10 @@ function seedFromServer(server: McpItem | null) {
   argsTags.value = configArray(cfg, 'args')
   envPairs.value = recordToPairs(configMap(cfg, 'env'))
   headerPairs.value = recordToPairs(configMap(cfg, 'headers'))
-  if (envPairs.value.length > 0 || headerPairs.value.length > 0) showAdvanced.value = true
+  // NOTE: unlike the old inline expand (which auto-opened when env/headers were
+  // populated so configured values never sat hidden), the advanced surface is
+  // now a DIALOG — auto-popping a modal on page load would be hostile. The
+  // always-visible ActionCard entry is what keeps the facet discoverable.
   status.value = server.status || 'unknown'
   statusMessage.value = server.status_message || ''
   lastProbedAt.value = server.last_probed_at
