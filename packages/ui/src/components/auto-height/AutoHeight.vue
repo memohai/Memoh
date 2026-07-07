@@ -21,7 +21,6 @@
 // animates identically; reduced-motion drops the transition entirely.
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
-const outer = ref<HTMLElement | null>(null)
 const inner = ref<HTMLElement | null>(null)
 const height = ref<string>('auto')
 const ready = ref(false)
@@ -52,7 +51,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div
-    ref="outer"
     data-slot="auto-height"
     class="overflow-hidden"
     :class="{ 'auto-height-animated': ready }"

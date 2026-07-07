@@ -53,7 +53,7 @@ onMounted(() => {
   observer = new ResizeObserver(update)
   if (el.value) {
     observer.observe(el.value)
-    for (const child of el.value.children) observer.observe(child)
+    for (const child of Array.from(el.value.children)) observer.observe(child)
   }
 })
 
