@@ -39,6 +39,18 @@ func (s *fakeStore) ReadAllMemoryFiles(_ context.Context, _ string) ([]storefs.M
 	return out, nil
 }
 
+func (s *fakeStore) ReadAllMemoryFilesForIngest(_ context.Context, _ string) ([]storefs.MemoryItem, error) {
+	// In tests the ingest path is identical to the read path (the fake serves
+	// the same in-memory items either way); duplicate the read body so the
+	// contextcheck linter does not flag a synthetic context.
+	out := make([]storefs.MemoryItem, 0, len(s.items))
+	for _, item := range s.items {
+		out = append(out, item)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
 func (s *fakeStore) RemoveMemories(_ context.Context, _ string, ids []string) error {
 	for _, id := range ids {
 		delete(s.items, strings.TrimSpace(id))

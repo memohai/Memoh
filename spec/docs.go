@@ -4885,6 +4885,65 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/memory/ingest": {
+            "post": {
+                "description": "Read /data/memory/*.md the bot (or its agent) wrote directly and upsert them as DB memory nodes, so they become searchable and survive the next derived-view rebuild. Idempotent (ON CONFLICT id DO UPDATE).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "memory"
+                ],
+                "summary": "Ingest agent-authored memory markdown into the wiki store",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/adapters.IngestResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/memory/rebuild": {
             "post": {
                 "description": "Read memory files from the container filesystem (source of truth) and restore missing entries to memory storage",
@@ -13466,6 +13525,19 @@ const docTemplate = `{
                 }
             }
         },
+        "adapters.IngestResult": {
+            "type": "object",
+            "properties": {
+                "ingested": {
+                    "description": "Ingested is the number of memory nodes written to the store (inserts +\nupdates; re-ingesting an unchanged file counts as an update).",
+                    "type": "integer"
+                },
+                "skipped": {
+                    "description": "Skipped is the number of source items that parsed to empty content or\nfailed to persist.",
+                    "type": "integer"
+                }
+            }
+        },
         "adapters.MemoryCompactCapability": {
             "type": "object",
             "properties": {
@@ -13751,6 +13823,9 @@ const docTemplate = `{
         "adapters.SearchResponse": {
             "type": "object",
             "properties": {
+                "fallback_reason": {
+                    "type": "string"
+                },
                 "relations": {
                     "type": "array",
                     "items": {}
@@ -13760,6 +13835,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/adapters.MemoryItem"
                     }
+                },
+                "retrieval_mode": {
+                    "type": "string"
                 }
             }
         },

@@ -54,6 +54,26 @@ type SourceSyncProvider interface {
 	Rebuild(ctx context.Context, botID string) (RebuildResult, error)
 }
 
+// MarkdownIngestProvider is implemented by providers whose canonical source of
+// truth is the DB but which also accept agent-authored Markdown files as input.
+// IngestFromMarkdown reads /data/memory/*.md and upserts them as DB nodes,
+// closing the gap left by the DB→file derived-view sync (which only writes
+// files FROM nodes). Providers that treat files as the source of truth (e.g.
+// the legacy file runtime) do not implement this.
+type MarkdownIngestProvider interface {
+	IngestFromMarkdown(ctx context.Context, botID string) (IngestResult, error)
+}
+
+// IngestResult reports the outcome of a file→DB memory ingest pass.
+type IngestResult struct {
+	// Ingested is the number of memory nodes written to the store (inserts +
+	// updates; re-ingesting an unchanged file counts as an update).
+	Ingested int `json:"ingested"`
+	// Skipped is the number of source items that parsed to empty content or
+	// failed to persist.
+	Skipped int `json:"skipped"`
+}
+
 // SemanticCompactProvider is implemented by providers that can apply Memoh's
 // semantic memory compact contract: LLM merge, source archive, and derived
 // storage rebuild under the selected bot scope.

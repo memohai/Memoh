@@ -2,6 +2,8 @@ package storefs
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +20,7 @@ import (
 	"github.com/memohai/memoh/internal/config"
 	memslug "github.com/memohai/memoh/internal/memory/slug"
 	"github.com/memohai/memoh/internal/workspace/bridge"
+	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
 
 const (
@@ -236,6 +239,16 @@ func (s *Service) RebuildFiles(ctx context.Context, botID string, items []Memory
 	if s.provider == nil {
 		return ErrNotConfigured
 	}
+	// RebuildFiles regenerates the entire derived /data/memory tree from the
+	// authoritative node set (`items`). It is destructive by design: the
+	// Markdown view is a pure projection of the DB, so any agent-authored files
+	// under /data/memory that have not been ingested as DB nodes are lost.
+	//
+	// Data-loss mitigation lives one layer up: graphRuntime.syncAndInvalidate
+	// calls IngestMarkdownFiles BEFORE this rebuild, so agent-authored files
+	// become DB nodes first and are then re-projected here. Callers that bypass
+	// the graph runtime (e.g. legacy file-runtime compact) must ensure files
+	// are ingested first if they want agent content preserved.
 	if err := s.deleteFile(ctx, botID, memoryDirPath(), true); err != nil && !isNotFound(err) {
 		return err
 	}
@@ -351,6 +364,94 @@ func (s *Service) ReadAllMemoryFiles(ctx context.Context, botID string) ([]Memor
 		return memoryTime(items[i]).Before(memoryTime(items[j]))
 	})
 	return items, nil
+}
+
+// ReadAllMemoryFilesForIngest is like ReadAllMemoryFiles but does not drop items
+// whose YAML frontmatter lacks an `id`. Instead it synthesises a deterministic
+// id from the file path + body so re-ingesting the same file is idempotent
+// (collides on the same row via UpsertNode's ON CONFLICT(id)). Items that
+// already declare an `id` keep it verbatim, preserving agent-authored control.
+//
+// This is the file→DB ingest entry point: the derived-markdown rebuild path
+// (RebuildFiles) regenerates files from DB nodes, so without this the agent's
+// directly-written /data/memory/*.md would be invisible to search_memory and
+// silently wiped on the next sync.
+func (s *Service) ReadAllMemoryFilesForIngest(ctx context.Context, botID string) ([]MemoryItem, error) {
+	items, err := s.ReadAllMemoryFiles(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	// ReadAllMemoryFiles already dropped empty-ID items; re-scan the raw files
+	// to recover them with a synthesised deterministic id.
+	entries, err := s.listMemoryMarkdownEntries(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	existing := make(map[string]struct{}, len(items))
+	for _, it := range items {
+		existing[it.ID] = struct{}{}
+	}
+	for _, entry := range entries {
+		content, readErr := s.readFile(ctx, botID, memoryEntryPath(entry.GetPath()))
+		if readErr != nil {
+			continue
+		}
+		parsed, parseErr := parseMemoryFile(content)
+		if parseErr != nil {
+			continue
+		}
+		for _, item := range parsed {
+			if strings.TrimSpace(item.ID) != "" {
+				continue // ReadAllMemoryFiles already returned it.
+			}
+			item.ID = synthIngestID(entry.GetPath(), item.Memory)
+			if _, ok := existing[item.ID]; ok {
+				continue
+			}
+			existing[item.ID] = struct{}{}
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return memoryTime(items[i]).Before(memoryTime(items[j]))
+	})
+	return items, nil
+}
+
+// listMemoryMarkdownEntries lists .md files under /data/memory for a bot.
+func (s *Service) listMemoryMarkdownEntries(ctx context.Context, botID string) ([]*pb.FileEntry, error) {
+	if s.provider == nil {
+		return nil, ErrNotConfigured
+	}
+	c, err := s.client(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := c.ListDirAll(ctx, memoryDirPath(), true)
+	if err != nil {
+		if isNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := make([]*pb.FileEntry, 0, len(entries))
+	for _, e := range entries {
+		if e.GetIsDir() || !strings.HasSuffix(e.GetPath(), ".md") {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+// synthIngestID derives a deterministic node id for an agent-authored memory
+// file that lacks a frontmatter id. It is bot-agnostic; callers prefix the
+// bot id. The inputs are the file's relative path and body so editing the same
+// file updates the same node, while a different file with the same body gets a
+// distinct id.
+func synthIngestID(relPath, body string) string {
+	h := sha256.Sum256([]byte(strings.TrimSpace(relPath) + "\n" + strings.TrimSpace(body)))
+	return hex.EncodeToString(h[:8])
 }
 
 func (s *Service) CountMemoryFiles(ctx context.Context, botID string) (int, error) {

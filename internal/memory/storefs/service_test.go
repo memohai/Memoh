@@ -386,3 +386,24 @@ func TestFormatMemoryOverviewUsesProvidedPaths(t *testing.T) {
 		t.Fatalf("overview should preserve actual path, got:\n%s", md)
 	}
 }
+
+// TestSynthIngestID verifies the deterministic id synthesised for agent files
+// that lack a frontmatter id: same (path, body) => same id; any change => diff.
+// This is what makes file→DB ingest idempotent for agent-authored notes.
+func TestSynthIngestID(t *testing.T) {
+	a := synthIngestID("memory/note/x.md", "hello")
+	b := synthIngestID("memory/note/x.md", "hello")
+	if a != b {
+		t.Fatalf("same inputs produced different ids: %q vs %q", a, b)
+	}
+	if synthIngestID("memory/note/x.md", "hello ") == synthIngestID("memory/note/x.md", "world") {
+		t.Fatal("different bodies must produce different ids")
+	}
+	if synthIngestID("memory/note/x.md", "hello") == synthIngestID("memory/note/y.md", "hello") {
+		t.Fatal("different paths must produce different ids")
+	}
+	// Whitespace-only differences are ignored (trim), matching runtimeHash semantics.
+	if synthIngestID("p.md", "  hi  ") != synthIngestID("p.md", "hi") {
+		t.Fatal("whitespace padding should not change the synthesised id")
+	}
+}

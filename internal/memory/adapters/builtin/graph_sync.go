@@ -49,9 +49,15 @@ func (s *graphSync) botLock(botID string) *sync.Mutex {
 }
 
 // syncMarkdownFromNodes regenerates /data/memory/<layer>/<slug>.md + MEMORY.md
-// for botID from the given node set. It is the PG->file direction only. The
-// file->PG direction (agent-authored edits) is handled by the existing storefs
-// write path the builtin provider already intercepts.
+// for botID from the given node set. It is the DB→file direction only.
+//
+// The file→DB direction (agent-authored edits under /data/memory) is NOT
+// automatic: agents that write markdown directly bypass the wiki store, so
+// those files are invisible to search_memory until they are ingested. Use
+// graphRuntime.IngestMarkdownFiles (exposed as POST /bots/:bot_id/memory/ingest
+// via the MarkdownIngestProvider interface) to import them as DB nodes.
+// RebuildFiles is non-destructive, so uningested files survive a sync rather
+// than being wiped.
 //
 // The caller passes the authoritative node list (already read from the store);
 // this avoids a second ListNodes round-trip and lets the caller hold the most

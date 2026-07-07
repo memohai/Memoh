@@ -514,3 +514,28 @@ func (p *BuiltinProvider) Rebuild(ctx context.Context, botID string) (adapters.R
 	}
 	return p.service.Rebuild(ctx, botID)
 }
+
+// markdownIngestor is the optional Runtime capability for ingesting agent-
+// authored Markdown files back into the DB as nodes. Only the graph runtime
+// implements it (the file runtime treats files as the source of truth).
+type markdownIngestor interface {
+	IngestMarkdownFiles(ctx context.Context, botID string) (IngestResult, error)
+}
+
+// IngestFromMarkdown implements adapters.MarkdownIngestProvider. It imports
+// /data/memory/*.md into the wiki store so agent-authored files become
+// searchable DB nodes (and survive the next derived-view rebuild).
+func (p *BuiltinProvider) IngestFromMarkdown(ctx context.Context, botID string) (adapters.IngestResult, error) {
+	if p.service == nil {
+		return adapters.IngestResult{}, errors.New("memory runtime not configured")
+	}
+	ing, ok := p.service.(markdownIngestor)
+	if !ok {
+		return adapters.IngestResult{}, errors.New("selected memory runtime does not support markdown ingest")
+	}
+	res, err := ing.IngestMarkdownFiles(ctx, botID)
+	if err != nil {
+		return adapters.IngestResult{}, err
+	}
+	return adapters.IngestResult{Ingested: res.Ingested, Skipped: res.Skipped}, nil
+}

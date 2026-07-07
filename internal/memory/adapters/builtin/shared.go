@@ -26,6 +26,7 @@ var memoryIDSeq uint64
 type memoryStore interface {
 	PersistMemories(ctx context.Context, botID string, items []storefs.MemoryItem, filters map[string]any) error
 	ReadAllMemoryFiles(ctx context.Context, botID string) ([]storefs.MemoryItem, error)
+	ReadAllMemoryFilesForIngest(ctx context.Context, botID string) ([]storefs.MemoryItem, error)
 	RemoveMemories(ctx context.Context, botID string, ids []string) error
 	RemoveAllMemories(ctx context.Context, botID string) error
 	RebuildFiles(ctx context.Context, botID string, items []storefs.MemoryItem, filters map[string]any) error

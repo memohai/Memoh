@@ -121,6 +121,7 @@ func (h *MemoryHandler) Register(e *echo.Echo) {
 	chatGroup.POST("/search", h.ChatSearch)
 	chatGroup.POST("/compact", h.ChatCompact)
 	chatGroup.POST("/rebuild", h.ChatRebuild)
+	chatGroup.POST("/ingest", h.ChatIngest)
 	chatGroup.GET("/status", h.ChatStatus)
 	chatGroup.GET("", h.ChatGetAll)
 	chatGroup.GET("/usage", h.ChatUsage)
@@ -728,6 +729,39 @@ func (h *MemoryHandler) ChatRebuild(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusConflict, "manual sync is not available for the selected memory provider")
 	}
 	result, err := syncProvider.Rebuild(c.Request().Context(), botID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+// ChatIngest godoc
+// @Summary Ingest agent-authored memory markdown into the wiki store
+// @Description Read /data/memory/*.md the bot (or its agent) wrote directly and upsert them as DB memory nodes, so they become searchable and survive the next derived-view rebuild. Idempotent (ON CONFLICT id DO UPDATE).
+// @Tags memory
+// @Produce json
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {object} adapters.IngestResult
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
+// @Router /bots/{bot_id}/memory/ingest [post].
+func (h *MemoryHandler) ChatIngest(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	provider, checkErr := h.checkService(c.Request().Context(), botID)
+	if checkErr != nil {
+		return checkErr
+	}
+	ingestProvider, ok := provider.(memprovider.MarkdownIngestProvider)
+	if !ok {
+		return echo.NewHTTPError(http.StatusConflict, "selected memory provider does not support markdown ingest")
+	}
+	result, err := ingestProvider.IngestFromMarkdown(c.Request().Context(), botID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

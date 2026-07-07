@@ -203,6 +203,19 @@ export type AdaptersHealthStatus = {
     ok?: boolean;
 };
 
+export type AdaptersIngestResult = {
+    /**
+     * Ingested is the number of memory nodes written to the store (inserts +
+     * updates; re-ingesting an unchanged file counts as an update).
+     */
+    ingested?: number;
+    /**
+     * Skipped is the number of source items that parsed to empty content or
+     * failed to persist.
+     */
+    skipped?: number;
+};
+
 export type AdaptersMemoryCompactCapability = {
     archive?: boolean;
     reason?: string;
@@ -324,8 +337,10 @@ export type AdaptersRebuildResult = {
 };
 
 export type AdaptersSearchResponse = {
+    fallback_reason?: string;
     relations?: Array<unknown>;
     results?: Array<AdaptersMemoryItem>;
+    retrieval_mode?: string;
 };
 
 export type AdaptersUsageResponse = {
@@ -6889,6 +6904,52 @@ export type GetBotsByBotIdMemoryGraphResponses = {
 };
 
 export type GetBotsByBotIdMemoryGraphResponse = GetBotsByBotIdMemoryGraphResponses[keyof GetBotsByBotIdMemoryGraphResponses];
+
+export type PostBotsByBotIdMemoryIngestData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/memory/ingest';
+};
+
+export type PostBotsByBotIdMemoryIngestErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdMemoryIngestError = PostBotsByBotIdMemoryIngestErrors[keyof PostBotsByBotIdMemoryIngestErrors];
+
+export type PostBotsByBotIdMemoryIngestResponses = {
+    /**
+     * OK
+     */
+    200: AdaptersIngestResult;
+};
+
+export type PostBotsByBotIdMemoryIngestResponse = PostBotsByBotIdMemoryIngestResponses[keyof PostBotsByBotIdMemoryIngestResponses];
 
 export type PostBotsByBotIdMemoryRebuildData = {
     body?: never;

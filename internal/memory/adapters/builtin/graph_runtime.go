@@ -645,6 +645,15 @@ func (r *graphRuntime) Rebuild(ctx context.Context, botID string) (adapters.Rebu
 	if r.store == nil {
 		return adapters.RebuildResult{}, errors.New("graph runtime: wiki store not configured")
 	}
+	// Ingest agent-authored /data/memory/*.md BEFORE the destructive
+	// derived-view rebuild so their content becomes DB nodes and survives the
+	// regeneration. Without this, a rebuild would silently drop any file the
+	// agent wrote directly that has not yet been ingested.
+	if r.fs != nil {
+		if _, err := r.IngestMarkdownFiles(ctx, botID); err != nil {
+			r.logger.Warn("graph: rebuild ingest failed", "bot_id", botID, "err", err)
+		}
+	}
 	nodes, err := r.store.ListNodes(ctx, botID)
 	if err != nil {
 		return adapters.RebuildResult{}, fmt.Errorf("graph runtime: rebuild list: %w", err)
