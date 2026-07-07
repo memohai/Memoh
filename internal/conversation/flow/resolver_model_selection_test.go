@@ -1,8 +1,17 @@
 package flow
 
 import (
+	"context"
+	"log/slog"
+	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/memohai/memoh/internal/db"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/settings"
 )
@@ -316,5 +325,131 @@ func TestResolveReasoningConfig(t *testing.T) {
 				t.Fatalf("expected %#v, got %#v", tt.want, got)
 			}
 		})
+	}
+}
+
+// modelSelectionFakeQueries is an in-memory dbstore.Queries fake for
+// fetchChatModel tests. The embedded interface panics on any method the
+// test did not expect to be called.
+type modelSelectionFakeQueries struct {
+	dbstore.Queries
+
+	models   map[string]sqlc.Model
+	provider sqlc.Provider
+}
+
+func (f *modelSelectionFakeQueries) ListModelsByModelID(_ context.Context, modelID string) ([]sqlc.Model, error) {
+	model, ok := f.models[modelID]
+	if !ok {
+		return nil, nil
+	}
+	return []sqlc.Model{model}, nil
+}
+
+func (f *modelSelectionFakeQueries) GetProviderByID(_ context.Context, id pgtype.UUID) (sqlc.Provider, error) {
+	if !id.Valid || id != f.provider.ID {
+		return sqlc.Provider{}, pgx.ErrNoRows
+	}
+	return f.provider, nil
+}
+
+func newModelSelectionResolver(t *testing.T, fake *modelSelectionFakeQueries) *Resolver {
+	t.Helper()
+	return &Resolver{
+		modelsService: models.NewService(slog.New(slog.DiscardHandler), fake),
+		queries:       fake,
+	}
+}
+
+func modelSelectionProviderRow(t *testing.T, id string, clientType string, enable bool) sqlc.Provider {
+	t.Helper()
+	pgID, err := db.ParseUUID(id)
+	if err != nil {
+		t.Fatalf("parse provider uuid: %v", err)
+	}
+	return sqlc.Provider{
+		ID:         pgID,
+		Name:       "provider-" + id,
+		ClientType: clientType,
+		Enable:     enable,
+		Config:     []byte(`{}`),
+		Metadata:   []byte(`{}`),
+	}
+}
+
+func modelSelectionModelRow(t *testing.T, id string, modelID string, providerID pgtype.UUID, modelType models.ModelType, enable bool) sqlc.Model {
+	t.Helper()
+	pgID, err := db.ParseUUID(id)
+	if err != nil {
+		t.Fatalf("parse model uuid: %v", err)
+	}
+	return sqlc.Model{
+		ID:         pgID,
+		ModelID:    modelID,
+		Name:       pgtype.Text{String: modelID, Valid: true},
+		ProviderID: providerID,
+		Type:       string(modelType),
+		Enable:     enable,
+		Config:     []byte(`{}`),
+	}
+}
+
+func TestFetchChatModelRejectsDisabledModel(t *testing.T) {
+	ctx := context.Background()
+	provider := modelSelectionProviderRow(t, "00000000-0000-0000-0000-000000000101", "openai-completions", true)
+	model := modelSelectionModelRow(t, "00000000-0000-0000-0000-000000000102", "gpt-disabled", provider.ID, models.ModelTypeChat, false)
+	fake := &modelSelectionFakeQueries{
+		models:   map[string]sqlc.Model{model.ModelID: model},
+		provider: provider,
+	}
+	resolver := newModelSelectionResolver(t, fake)
+
+	_, _, err := resolver.fetchChatModel(ctx, "gpt-disabled")
+	if err == nil || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("fetchChatModel disabled model error = %v, want disabled error", err)
+	}
+}
+
+func TestFetchChatModelRejectsDisabledProvider(t *testing.T) {
+	ctx := context.Background()
+	provider := modelSelectionProviderRow(t, "00000000-0000-0000-0000-000000000201", "openai-completions", false)
+	model := modelSelectionModelRow(t, "00000000-0000-0000-0000-000000000202", "gpt-provider-disabled", provider.ID, models.ModelTypeChat, true)
+	fake := &modelSelectionFakeQueries{
+		models:   map[string]sqlc.Model{model.ModelID: model},
+		provider: provider,
+	}
+	resolver := newModelSelectionResolver(t, fake)
+
+	_, _, err := resolver.fetchChatModel(ctx, "gpt-provider-disabled")
+	if err == nil || !strings.Contains(err.Error(), "provider") || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("fetchChatModel disabled provider error = %v, want provider disabled error", err)
+	}
+}
+
+func TestFetchChatModelReturnsEnabledModelAndProvider(t *testing.T) {
+	ctx := context.Background()
+	provider := modelSelectionProviderRow(t, "00000000-0000-0000-0000-000000000301", "openai-completions", true)
+	model := modelSelectionModelRow(t, "00000000-0000-0000-0000-000000000302", "gpt-enabled", provider.ID, models.ModelTypeChat, true)
+	fake := &modelSelectionFakeQueries{
+		models:   map[string]sqlc.Model{model.ModelID: model},
+		provider: provider,
+	}
+	resolver := newModelSelectionResolver(t, fake)
+
+	got, prov, err := resolver.fetchChatModel(ctx, "gpt-enabled")
+	if err != nil {
+		t.Fatalf("fetchChatModel enabled model error = %v, want nil", err)
+	}
+	if got.ModelID != "gpt-enabled" {
+		t.Fatalf("fetchChatModel model_id = %q, want %q", got.ModelID, "gpt-enabled")
+	}
+	if got.ID != "00000000-0000-0000-0000-000000000302" {
+		t.Fatalf("fetchChatModel id = %q, want %q", got.ID, "00000000-0000-0000-0000-000000000302")
+	}
+	if prov.Name != provider.Name {
+		t.Fatalf("fetchChatModel provider = %q, want %q", prov.Name, provider.Name)
+	}
+	if !prov.Enable {
+		t.Fatal("fetchChatModel returned disabled provider, want enabled")
 	}
 }

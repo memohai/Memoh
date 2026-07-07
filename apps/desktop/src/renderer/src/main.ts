@@ -126,6 +126,22 @@ async function bootstrap() {
     }
   })
 
+  // Mirror the chat store's bot list into the native tray menu. The main
+  // process holds no credentials, so the renderer — owner of the
+  // authenticated SDK session — pushes the list whenever it changes
+  // (initial fetch, invalidation-driven refreshes, sign-out clearing it).
+  watchEffect(() => {
+    const trayBots = chatStore.bots
+      .map(bot => ({
+        id: (bot.id ?? '').trim(),
+        displayName: bot.display_name?.trim() || bot.name?.trim() || (bot.id ?? '').trim(),
+      }))
+      .filter(bot => bot.id)
+    window.api.desktop.setTrayBots(trayBots).catch((error) => {
+      console.warn('failed to push tray bots to main', error)
+    })
+  })
+
   app.mount('#app')
 
   for (const target of pendingNavigationTargets.splice(0)) {

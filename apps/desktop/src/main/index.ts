@@ -21,7 +21,7 @@ import { dispatchRendererNavigate } from './window-navigation'
 import { maybeSelfInstallMacOS } from './self-install'
 
 const DESKTOP_PRODUCT_NAME = 'Memoh'
-const DEFAULT_BASE_URL = 'http://localhost:18080'
+const DEFAULT_BASE_URL = is.dev ? 'http://localhost:18080' : 'http://localhost:8080'
 const guardedExternalLinkWebContents = new WeakSet<Electron.WebContents>()
 
 // Must run before anything resolves `app.getPath('userData')`.
@@ -338,35 +338,33 @@ function buildTrayMenu(bots: TrayBot[] = []): Electron.Menu {
   ])
 }
 
-async function fetchTrayBots(): Promise<TrayBot[]> {
-  return []
+// The main process has no credentials of its own, so it never fetches bots
+// from the server. The renderer — which owns the authenticated SDK session —
+// pushes its bot list over `desktop:set-tray-bots`; main keeps the last
+// pushed list and rebuilds the tray menu from it.
+let trayBots: TrayBot[] = []
+
+function normalizeTrayBots(payload: unknown): TrayBot[] {
+  if (!Array.isArray(payload)) return []
+  return payload.flatMap((item): TrayBot[] => {
+    if (!item || typeof item !== 'object') return []
+    const record = item as { id?: unknown, displayName?: unknown }
+    const id = typeof record.id === 'string' ? record.id.trim() : ''
+    if (!id) return []
+    const displayName = (typeof record.displayName === 'string' ? record.displayName.trim() : '') || id
+    return [{ id, displayName }]
+  })
 }
 
-function setTrayMenu(bots: TrayBot[] = []): void {
-  appTray?.setContextMenu(buildTrayMenu(bots))
+function setTrayMenu(): void {
+  appTray?.setContextMenu(buildTrayMenu(trayBots))
 }
 
-async function refreshTrayMenu(): Promise<void> {
-  try {
-    setTrayMenu(await fetchTrayBots())
-  } catch (error) {
-    console.error('failed to refresh tray bots', error)
-    setTrayMenu()
-  }
-}
-
-async function showTrayMenu(): Promise<void> {
+function showTrayMenu(): void {
   if (!appTray) return
-  try {
-    const menu = buildTrayMenu(await fetchTrayBots())
-    appTray.setContextMenu(menu)
-    appTray.popUpContextMenu(menu)
-  } catch (error) {
-    console.error('failed to show tray bots', error)
-    const menu = buildTrayMenu()
-    appTray.setContextMenu(menu)
-    appTray.popUpContextMenu(menu)
-  }
+  const menu = buildTrayMenu(trayBots)
+  appTray.setContextMenu(menu)
+  appTray.popUpContextMenu(menu)
 }
 
 function createAppTray(): void {
@@ -376,12 +374,11 @@ function createAppTray(): void {
   appTray.setToolTip(DESKTOP_PRODUCT_NAME)
   setTrayMenu()
   appTray.on('click', () => {
-    void showTrayMenu()
+    showTrayMenu()
   })
   appTray.on('right-click', () => {
-    void showTrayMenu()
+    showTrayMenu()
   })
-  void refreshTrayMenu()
 }
 
 // `electron-vite` emits the preload bundle as `index.mjs` because the
@@ -575,6 +572,10 @@ app.whenReady().then(async () => {
     await rebuildAppMenu()
   })
   ipcMain.handle('desktop:open-external-url', (_event, rawURL: unknown) => openExternalUrl(rawURL))
+  ipcMain.handle('desktop:set-tray-bots', (_event, payload: unknown) => {
+    trayBots = normalizeTrayBots(payload)
+    setTrayMenu()
+  })
   ipcMain.handle('desktop:broadcast-invalidate', (event, payload: unknown) => {
     const senderId = event.sender.id
     for (const target of BrowserWindow.getAllWindows()) {
@@ -582,7 +583,6 @@ app.whenReady().then(async () => {
       if (target.webContents.id === senderId) continue
       target.webContents.send('desktop:invalidate', payload)
     }
-    void refreshTrayMenu()
   })
 
   chatWindow = createChatWindow()

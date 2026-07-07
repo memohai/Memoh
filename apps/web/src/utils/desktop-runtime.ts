@@ -32,11 +32,3 @@ export function canCreateLocalWorkspace(input: LocalWorkspaceCreatePolicyInput):
   if (!input.serverLocalWorkspaceEnabled) return false
   return input.host === 'web'
 }
-
-export function canPickProjectFolder(): boolean {
-  return false
-}
-
-export async function pickProjectFolder(): Promise<string | null> {
-  return null
-}

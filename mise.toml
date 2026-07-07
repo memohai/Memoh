@@ -400,6 +400,6 @@ dir = "{{config_root}}/apps/desktop"
 run = "pnpm build:win:x64"
 
 [tasks."desktop:build:dir"]
-description = "Build unpacked Electron desktop app with bundled local server"
+description = "Build unpacked Electron desktop app"
 dir = "{{config_root}}/apps/desktop"
 run = "pnpm build:dir"

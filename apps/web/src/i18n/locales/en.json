@@ -663,8 +663,6 @@
     "modelOptions": "Options",
     "modelEffort": "Effort",
     "noProject": "Not in a project",
-    "projectFolder": "Project folder",
-    "chooseFolder": "Choose folder…",
     "noModels": "No models available",
     "acpAttachmentsUnsupported": "Attachments are not supported in ACP sessions yet.",
     "defaultACPLoading": "Default Agent is still loading. Try again in a moment.",

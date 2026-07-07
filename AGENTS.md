@@ -61,12 +61,15 @@ Memoh/
 │   ├── agent/                  #   Main backend server (main.go, FX wiring)
 │   ├── bridge/                 #   In-container gRPC bridge (UDS-based, runs inside bot containers; supervises optional display/browser helpers)
 │   │   └── template/           #     Prompt templates for bridge (TOOLS.md, SOUL.md, IDENTITY.md, etc.)
-│   └── mcp/                    #   MCP stdio transport binary
+│   ├── gen-bridge-mtls/        #   Bridge mTLS certificate generator
+│   ├── mcp/                    #   MCP stdio transport binary
+│   └── synccaps/               #   Build-time sync of provider template capabilities from the LiteLLM registry
 ├── internal/                   # Go backend core code (domain packages)
 │   ├── accounts/               #   User account management (CRUD, password hashing)
 │   ├── acl/                    #   Access control list (source-aware chat trigger ACL)
 │   ├── acpagent/               #   ACP (Agent Control Protocol) runtime session pool
 │   ├── acpclient/              #   ACP client process management
+│   ├── acpfeedback/            #   User-facing ACP error codes and messages
 │   ├── acpprofile/             #   ACP profile definitions
 │   ├── agent/                  #   In-process AI agent (Twilight AI SDK integration)
 │   │   ├── agent.go            #     Core agent: Stream() / Generate() via Twilight SDK
@@ -74,17 +77,21 @@ Memoh/
 │   │   ├── sential.go          #     Sential (sentinel) loop detection logic
 │   │   ├── prompt.go           #     Prompt assembly (system, heartbeat, schedule, subagent, discuss)
 │   │   ├── config.go           #     Agent service dependencies
-│   │   ├── types.go            #     Shared types (StreamEvent, GenerateResult, FileAttachment)
+│   │   ├── context_frag.go     #     Context fragment compilation (see internal/contextfrag)
+│   │   ├── hooks.go            #     Agent lifecycle hook dispatch (see internal/hooks)
+│   │   ├── attachment_bundle.go #    Attachment bundle assembly
 │   │   ├── fs.go               #     Filesystem utilities
 │   │   ├── guard_state.go      #     Guard state management
 │   │   ├── retry.go            #     Retry logic
 │   │   ├── read_media.go       #     Media reading utilities
 │   │   ├── spawn_adapter.go    #     Spawn adapter for sub-processes
+│   │   ├── background/         #     Background task manager (spawned subagents, video tasks)
+│   │   ├── event/              #     Agent event types
+│   │   ├── sessionmode/        #     Session mode resolution
 │   │   ├── prompts/            #     Prompt templates (Markdown, with partials prefixed by _)
 │   │   │   ├── system_common.md, mode_chat.md, mode_discuss.md, mode_heartbeat.md, mode_schedule.md, mode_subagent.md
 │   │   │   ├── _memory.md, _identities.md
-│   │   │   ├── heartbeat.md, schedule.md
-│   │   │   └── memory_extract.md, memory_update.md
+│   │   │   └── heartbeat.md, schedule.md
 │   │   └── tools/              #     Tool providers (ToolProvider interface)
 │   │       ├── message.go      #       Send message tool
 │   │       ├── contacts.go     #       Contact list tool
@@ -92,43 +99,59 @@ Memoh/
 │   │       ├── memory.go       #       Memory read/write tool
 │   │       ├── web.go          #       Web search tool
 │   │       ├── webfetch.go     #       Web page fetch tool
+│   │       ├── browser.go      #       Browser Use (headed workspace Chrome over CDP)
+│   │       ├── computer_a11y.go #      Computer Use (AT-SPI accessibility + RFB input)
 │   │       ├── container.go    #       Container file/exec tools
 │   │       ├── fsops.go        #       Filesystem operations tool
+│   │       ├── apply_patch.go  #       Patch application tool
+│   │       ├── ask_user.go     #       In-conversation user input tool
+│   │       ├── background.go   #       Background task tool
 │   │       ├── email.go        #       Email send tool
 │   │       ├── subagent.go     #       Sub-agent invocation tool
 │   │       ├── skill.go        #       Skill activation tool
 │   │       ├── tts.go          #       Text-to-speech tool
+│   │       ├── transcribe.go   #       Audio transcription tool
 │   │       ├── federation.go   #       MCP federation tool
 │   │       ├── image_gen.go    #       Image generation tool
+│   │       ├── video_gen.go    #       Video generation tool
 │   │       ├── prune.go        #       Pruning tool
 │   │       ├── history.go      #       History access tool
 │   │       └── read_media.go   #       Media reading tool
+│   ├── agentpayload/           #   On-wire shapes for agent events forwarded to SSE subscribers
 │   ├── attachment/             #   Attachment normalization (MIME types, base64)
 │   ├── audio/                  #   Audio/TTS processing utilities
 │   ├── auth/                   #   JWT authentication middleware and utilities
-│   ├── bind/                   #   Channel identity-to-user binding code management
 │   ├── boot/                   #   Runtime configuration provider (container backend detection)
 │   ├── bots/                   #   Bot management (CRUD, lifecycle)
 │   ├── botbackup/              #   Bot backup/export/import service
+│   ├── capabilities/           #   Model reasoning capability derivation (LiteLLM registry)
 │   ├── channel/                #   Channel adapter system
-│   │   ├── adapters/           #     Platform adapters: telegram, discord, feishu, qq, dingtalk, weixin, wecom, wechatoa, matrix, misskey, local
+│   │   ├── adapters/           #     Platform adapters: telegram, discord, feishu, qq, dingtalk, weixin, wecom, wechatoa, matrix, misskey, line, slack, local
 │   │   └── identities/        #     Channel identity service
+│   ├── channelaccess/          #   Effective per-bot Manage capability (channel binding + override)
 │   ├── command/                #   Slash command system (extensible command handlers)
 │   ├── compaction/             #   Message history compaction service (LLM summarization)
 │   ├── config/                 #   Configuration loading and parsing (TOML + YAML providers)
 │   ├── container/              #   Container runtime abstraction + adapters (containerd, Apple, Docker)
+│   ├── contextfrag/            #   Typed context-fragment IR (compile, render, hash)
+│   ├── contextlimit/           #   Tool output size limits (head/tail truncation)
 │   ├── conversation/           #   Conversation management and flow resolver
 │   │   ├── service.go          #     Conversation CRUD and routing
 │   │   └── flow/               #     Chat orchestration (resolver, streaming, memory, triggers)
 │   ├── copilot/                #   GitHub Copilot client integration
 │   ├── db/                     #   Database connection and migration utilities
-│   │   └── sqlc/               #   ⚠️ Auto-generated by sqlc — DO NOT modify manually
+│   │   ├── postgres/           #     PostgreSQL store adapters
+│   │   │   └── sqlc/           #     ⚠️ Auto-generated by sqlc — DO NOT modify manually
+│   │   └── store/              #     Transitional Queries interface shared by domain services
+│   ├── decision/               #   Decision DTOs and waiter registry (ask_user, tool approval)
 │   ├── email/                  #   Email provider and outbox management (Mailgun, generic SMTP, OAuth)
 │   ├── embedded/               #   Embedded filesystem assets (web only)
 │   ├── display/                #   Workspace display service (Xvnc/RFB/WebRTC sessions and input forwarding)
+│   ├── fetchproviders/         #   Web-fetch provider management (native, Jina, Cloudflare Markdown)
 │   ├── handlers/               #   HTTP request handlers (REST API endpoints)
 │   ├── healthcheck/            #   Health check adapter system (MCP, channel checkers)
 │   ├── heartbeat/              #   Heartbeat scheduling service (cron-based)
+│   ├── hooks/                  #   Bot-defined lifecycle hooks (PreToolUse, TurnEnd, … from hooks.json)
 │   ├── identity/               #   Identity type utilities (human vs bot)
 │   ├── i18n/                   #   Command and message internationalization
 │   ├── logger/                 #   Structured logging (slog)
@@ -139,6 +162,7 @@ Memoh/
 │   ├── messaging/              #   Outbound message executor
 │   ├── models/                 #   LLM model management (CRUD, variants, client types, probe)
 │   ├── network/                #   Workspace container network configuration
+│   ├── oauthclients/           #   Built-in OAuth client registry (TOML)
 │   ├── oauthctx/               #   OAuth context helpers
 │   ├── pipeline/               #   Discuss/chat pipeline (adapt, projection, rendering, driver)
 │   ├── plugins/                #   Plugin system (manifests, installations, lifecycle)
@@ -152,14 +176,15 @@ Memoh/
 │   ├── session/                #   Bot session management service
 │   ├── settings/               #   Bot settings management
 │   ├── skills/                 #   Skill registry and activation
+│   ├── slash/                  #   Slash-command classification and metadata (channel + web surfaces)
 │   ├── storage/                #   Storage provider interface (filesystem, container FS)
 │   ├── textutil/               #   UTF-8 safe text utilities
 │   ├── timezone/               #   Timezone utilities
 │   ├── toolapproval/           #   Tool call approval flow
-│   ├── tts/                    #   Text-to-speech provider management
-│   ├── tui/                    #   Terminal UI (Charm stack for CLI interactive mode)
 │   ├── userinput/              #   In-conversation user input requests (ask_user tool)
 │   ├── version/                #   Build-time version information
+│   ├── video/                  #   Video generation provider/model service
+│   ├── webhooktunnel/          #   Webhook tunnel manager (cloudflared) for channels behind NAT
 │   └── workspace/              #   Workspace container lifecycle management
 │       ├── manager.go          #     Container reconciliation, gRPC connection pool
 │       ├── manager_lifecycle.go #    Container create/start/stop operations

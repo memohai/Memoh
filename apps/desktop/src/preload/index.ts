@@ -43,6 +43,12 @@ const api = {
     // without sharing JS heap state.
     broadcastInvalidate: (payload: RendererInvalidatePayload): Promise<void> =>
       ipcRenderer.invoke('desktop:broadcast-invalidate', payload),
+    // Push the renderer's bot list so the main process can populate the
+    // tray's Bots submenu. Main never talks to the server itself — the
+    // renderer owns the authenticated SDK session, so it is the only side
+    // that can produce this list.
+    setTrayBots: (bots: Array<{ id: string, displayName: string }>): Promise<void> =>
+      ipcRenderer.invoke('desktop:set-tray-bots', bots),
     // Subscribe to invalidation events forwarded from sibling renderers.
     // Listener lives for the entire renderer lifetime.
     onInvalidate: (cb: (payload: RendererInvalidatePayload) => void): void => {
