@@ -7,6 +7,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/historyfrag"
@@ -191,6 +192,52 @@ func TestReplaceCompactedHistoryRecordsKeepsMustKeepIslandOrdering(t *testing.T)
 	}
 	if gotMessages := historyfrag.ToModelMessages(got); !reflect.DeepEqual(gotMessages, want) {
 		t.Fatalf("must-keep island ordering broken:\ngot  %#v\nwant %#v", gotMessages, want)
+	}
+}
+
+func TestHistoryContextFragsForMessagesCarriesActiveSummaryCoverage(t *testing.T) {
+	t.Parallel()
+
+	covered := []contextfrag.ContextRef{
+		{Namespace: "bot_history_message", ID: "row-1", Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable},
+	}
+	summary := historyfrag.SummaryRecord("compact-1", "condensed", covered, contextfrag.Scope{BotID: "bot-1"})
+	records := []historyfrag.HistoryRecord{
+		summary,
+		historyRecord("row-2", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("new")}, nil),
+	}
+	messages := []conversation.ModelMessage{
+		summary.ModelMessage,
+		{Role: "user", Content: conversation.NewTextContent("new")},
+	}
+
+	frags := historyContextFragsForMessages(messages, records)
+
+	if len(frags) != 1 {
+		t.Fatalf("summary frags = %d, want 1: %#v", len(frags), frags)
+	}
+	if frags[0].ID != "message.000" || frags[0].Provenance.Index != 0 {
+		t.Fatalf("summary frag should align with final message index: %#v", frags[0])
+	}
+	if frags[0].Kind != contextfrag.KindConversationSummary || frags[0].Coverage == nil {
+		t.Fatalf("summary frag lost kind/coverage: %#v", frags[0])
+	}
+
+	cfg := agentpkg.RunConfig{
+		Messages:     modelMessagesToSDKMessages(messages),
+		ContextFrags: frags,
+	}.RefreshContextFrag()
+	if len(cfg.ContextManifest.CoverageTrace) != 1 {
+		t.Fatalf("run config manifest lost summary coverage: %#v", cfg.ContextManifest)
+	}
+	summaryItems := 0
+	for _, item := range cfg.ContextManifest.Items {
+		if item.Kind == contextfrag.KindConversationSummary {
+			summaryItems++
+		}
+	}
+	if summaryItems != 1 {
+		t.Fatalf("run config manifest summary items = %d, want 1: %#v", summaryItems, cfg.ContextManifest.Items)
 	}
 }
 

@@ -29,6 +29,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/historyfrag"
 	"github.com/memohai/memoh/internal/hooks"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	messagepkg "github.com/memohai/memoh/internal/message"
@@ -348,6 +349,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	}
 
 	var messages []conversation.ModelMessage
+	var historyRecords []historyfrag.HistoryRecord
 	var estimatedTokens int
 	if usePipeline {
 		messages = r.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
@@ -373,6 +375,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			return resolvedContext{}, loadErr
 		}
 		loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
+		historyRecords = loaded
 		messages, estimatedTokens = trimMessagesByTokens(r.logger, loaded, contextTokenBudget)
 		// When context reaches 70% of the contextTokenBudget (the user-configured
 		// budget cap), run synchronous compaction before sending the request.
@@ -415,6 +418,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 					return resolvedContext{}, loadErr
 				}
 				loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
+				historyRecords = loaded
 				messages, estimatedTokens = trimMessagesByTokens(r.logger, loaded, contextTokenBudget)
 				// Remove tool messages from the recent context — they are large
 				// and unnecessary when we already have a summary. Keep only
@@ -469,6 +473,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	if strings.TrimSpace(modelQuery) != strings.TrimSpace(req.Query) {
 		headerifiedModelQuery = FormatUserHeader(headerInput, modelQuery)
 	}
+	runCfg.ContextFrags = historyContextFragsForMessages(messages, historyRecords)
 	runCfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
 	// When using the pipeline the user message is already in the RC;
 	// don't send it to the LLM again. headerifiedQuery is still kept
