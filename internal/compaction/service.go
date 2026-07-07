@@ -3,7 +3,9 @@ package compaction
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -16,6 +18,11 @@ import (
 	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/models"
 )
+
+// errEmptySummary marks a completed LLM call that produced no usable summary
+// text. The compacted rows must stay reclaimable, so this must never reach
+// MarkMessagesCompacted.
+var errEmptySummary = errors.New("compaction: model returned an empty summary")
 
 // Service manages context compaction for bot conversations.
 type Service struct {
@@ -256,6 +263,11 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	if err != nil {
 		s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{})
 		return err
+	}
+
+	if strings.TrimSpace(result.Text) == "" {
+		s.completeLog(persistCtx, logID, "error", "", errEmptySummary.Error(), 0, nil, pgtype.UUID{})
+		return errEmptySummary
 	}
 
 	usageJSON, _ := json.Marshal(result.Usage)

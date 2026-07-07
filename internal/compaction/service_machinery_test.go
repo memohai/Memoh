@@ -296,6 +296,23 @@ func TestDoCompactionSummarizerFailureRecordsErrorWithoutMarking(t *testing.T) {
 	}
 }
 
+func TestDoCompactionEmptySummaryRecordsErrorWithoutMarking(t *testing.T) {
+	rows := machineryCorpus(t)
+	q := &fakeQueries{uncompacted: rows}
+	stub := &stubModel{summary: "   "}
+	svc := newMachineryService(q)
+
+	if err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450)); err == nil {
+		t.Fatal("an empty summary must surface an error")
+	}
+	if len(q.markedIDs) != 0 {
+		t.Fatalf("nothing may be marked when the summary is empty (marked=%d)", len(q.markedIDs))
+	}
+	if !q.created || q.completed.Status != "error" {
+		t.Fatalf("an empty summary must leave an error log row (created=%v status=%q)", q.created, q.completed.Status)
+	}
+}
+
 func TestRunCompactionSkipsWhenSessionAlreadyInFlight(t *testing.T) {
 	rows := machineryCorpus(t)
 	q := &fakeQueries{uncompacted: rows}
