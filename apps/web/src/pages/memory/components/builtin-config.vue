@@ -1,66 +1,71 @@
 <template>
-  <SettingsSection>
-    <SettingsRow
-      :label="$t('memory.graphTitle')"
-      :description="$t('memory.graphDescription')"
-      stack="sm"
-      align="start"
-    />
-
-    <!-- Cold-load skeleton: framed tiles matching the MetricReadout min-height
-         so the swap does not jump once status resolves. -->
-    <div
-      v-if="!graphStatus"
-      class="grid grid-cols-1 gap-3 sm:grid-cols-3"
-    >
-      <Skeleton
-        v-for="n in 3"
-        :key="n"
-        class="h-[4.375rem] rounded-[var(--radius-menu-shell)]"
-      />
+  <div class="space-y-2.5">
+    <!-- Section header: title + description sit ABOVE the card (not as a row
+         inside it), so there is no in-card hairline slicing under the title. -->
+    <div class="flex min-h-7 items-center gap-4 px-2">
+      <h2 class="text-label font-medium text-muted-foreground">
+        {{ $t('memory.graphTitle') }}
+      </h2>
     </div>
+    <p class="px-2 text-body text-muted-foreground">
+      {{ $t('memory.graphDescription') }}
+    </p>
 
-    <!-- Configuration overview tiles. This is a *provider-level* settings page,
-         so it shows the provider's configured state (mode / embedding model /
-         semantic index readiness), NOT per-bot counts — those live on each
-         bot's memory tab. The status signal on the Semantic tile reflects
-         whether an embedding model has been chosen (ok) or not (neutral). -->
-    <div
-      v-else
-      class="grid grid-cols-1 gap-3 sm:grid-cols-3"
-    >
-      <MetricReadout
-        :label="$t('memory.modeLabel')"
-        :value="modeLabel"
-      />
-      <MetricReadout
-        :label="$t('memory.semanticEmbeddingModel')"
-        :value="embeddingModelLabel"
-      />
-      <MetricReadout
-        :label="$t('memory.semanticIndexTitle')"
-        :status="semanticReadiness"
-        :value="semanticReadinessLabel"
-      />
-    </div>
-
-    <SettingsRow
-      :label="$t('memory.semanticEmbeddingModel')"
-      :description="$t('memory.semanticIndexDescription')"
-      stack="sm"
-      align="start"
-    >
-      <div class="w-full sm:w-64">
-        <ModelSelect
-          v-model="embeddingModelId"
-          :models="models"
-          :providers="providers"
-          model-type="embedding"
-          :placeholder="$t('memory.semanticEmbeddingModelPlaceholder')"
+    <SettingsSection>
+      <!-- Cold-load skeleton: bare tiles (no frame) so they sit on the card
+           surface without card-in-card nesting. -->
+      <div
+        v-if="!graphStatus"
+        class="grid grid-cols-1 gap-4 px-4 py-4 sm:grid-cols-2"
+      >
+        <Skeleton
+          v-for="n in 2"
+          :key="n"
+          class="h-8 w-full rounded-[var(--radius-control)]"
         />
       </div>
-    </SettingsRow>
-  </SettingsSection>
+
+      <!-- Configuration overview: unframed tiles live directly on the card
+         surface (the card is the container; the tiles don't redraw a border).
+         This is a *provider-level* settings page, so it shows the provider's
+         configured state, NOT per-bot counts — those live on each bot's memory
+         tab. The embedding model itself is chosen in the row below, so it is
+         intentionally NOT a tile (no duplicated info). -->
+      <div
+        v-else
+        class="grid grid-cols-1 gap-4 px-4 py-4 sm:grid-cols-2"
+      >
+        <MetricReadout
+          :framed="false"
+          :label="$t('memory.modeLabel')"
+          :value="modeLabel"
+        />
+        <MetricReadout
+          :framed="false"
+          :label="$t('memory.semanticIndexTitle')"
+          :status="semanticReadiness"
+          :value="semanticReadinessLabel"
+        />
+      </div>
+
+      <SettingsRow
+        :label="$t('memory.semanticEmbeddingModel')"
+        :description="$t('memory.semanticIndexDescription')"
+        stack="sm"
+        align="start"
+      >
+        <div class="w-full sm:w-64">
+          <ModelSelect
+            v-model="embeddingModelId"
+            :models="models"
+            :providers="providers"
+            model-type="embedding"
+            :placeholder="$t('memory.semanticEmbeddingModelPlaceholder')"
+          />
+        </div>
+      </SettingsRow>
+    </SettingsSection>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -126,16 +131,10 @@ const modeLabel = computed(() => {
   const mode = graphStatus.value?.memory_mode || 'graph'
   return t(`memory.modeNames.${mode}`, mode)
 })
-// Embedding-model tile: the model id if configured, else a neutral 'Not
-// configured'. Empty is the common local/SQLite case (no semantic index), so it
-// must NOT read as an error — just an unselected state.
-const embeddingModelLabel = computed(() => {
-  const id = graphStatus.value?.embedding_model_id
-  return id && id.trim() ? id.trim() : t('memory.notConfigured')
-})
 // Semantic-index tile reflects *readiness* (an embedding model has been chosen),
 // not a live pgvector health probe — this is a provider-config page, not a
-// per-bot status. 'ok' once a model is set; neutral (no dot) otherwise.
+// per-bot status. 'ok' once a model is set; neutral (no dot) otherwise. The
+// model itself is picked in the Embedding Model row below, so it is not a tile.
 const hasEmbeddingModel = computed(() => Boolean(graphStatus.value?.embedding_model_id?.trim()))
 const semanticReadiness = computed<'ok' | undefined>(() => hasEmbeddingModel.value ? 'ok' : undefined)
 const semanticReadinessLabel = computed(() => hasEmbeddingModel.value ? t('memory.semanticIndexHealthy') : t('memory.notConfigured'))
