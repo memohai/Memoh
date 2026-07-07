@@ -115,25 +115,45 @@ function extractMarkers(patchFile) {
 }
 
 /** Locate every installed dir for a patched spec ("name@version").
- * Scoped names use pnpm's `+` encoding in the .pnpm directory. Plural on
- * purpose: peer-dependency variants materialize as separate `_patch_hash=…_…`
- * directories and EACH copy must carry the patch. The glob over the hash
- * suffix is intentional: we don't recompute the hash — the whole point is to
- * distrust it and read the content instead. */
+ * Deliberately name-blind: pnpm truncates virtual-store dir names longer than
+ * virtual-store-dir-max-length (default 120, but 60 ON WINDOWS) to
+ * `<prefix>_<32-hex md5>`, which cuts the literal `_patch_hash=` out of the
+ * name — matching on it broke Windows CI while passing everywhere else. So
+ * enumerate `.pnpm/<any>/node_modules/<name>/package.json` and match by
+ * CONTENT (name + version), consistent with the guard's core rule of never
+ * trusting directory names. Plural on purpose: peer-dependency variants
+ * materialize as separate dirs and EACH copy must carry the patch. Dependents'
+ * node_modules contain symlinks to the same materialization — dedupe by
+ * realpath so each copy is verified once. */
 function findInstalledDirs(spec) {
   // Versionless specs are legal pnpm keys: `pkg` has no `@` at all and
   // `@scope/pkg` has its only `@` at index 0 — in both cases the whole spec
   // is the name and ANY version may carry the patch.
   const at = spec.lastIndexOf('@')
   const name = at > 0 ? spec.slice(0, at) : spec
-  const encoded = name.replace(/\//g, '+')
+  const version = at > 0 ? spec.slice(at + 1) : null
   const pnpmDir = path.join(repoRoot, 'node_modules', '.pnpm')
   if (!fs.existsSync(pnpmDir)) return []
-  const prefix = at > 0 ? `${encoded}@${spec.slice(at + 1)}_patch_hash=` : `${encoded}@`
-  return fs
-    .readdirSync(pnpmDir)
-    .filter((d) => d.startsWith(prefix) && d.includes('_patch_hash='))
-    .map((d) => path.join(pnpmDir, d, 'node_modules', name))
+  const byRealpath = new Map()
+  for (const entry of fs.readdirSync(pnpmDir)) {
+    const candidate = path.join(pnpmDir, entry, 'node_modules', name)
+    let pkg
+    try {
+      pkg = JSON.parse(fs.readFileSync(path.join(candidate, 'package.json'), 'utf8'))
+    } catch {
+      continue // not a dir materializing <name> (or unreadable) — skip
+    }
+    if (pkg.name !== name) continue
+    if (version !== null && pkg.version !== version) continue
+    let real
+    try {
+      real = fs.realpathSync(candidate)
+    } catch {
+      real = candidate
+    }
+    if (!byRealpath.has(real)) byRealpath.set(real, candidate)
+  }
+  return [...byRealpath.values()]
 }
 
 function verifyInstalled() {
@@ -141,7 +161,7 @@ function verifyInstalled() {
   for (const { spec, patchPath } of readPatchedDependencies()) {
     const installedDirs = findInstalledDirs(spec)
     if (installedDirs.length === 0) {
-      failures.push(`${spec}: no _patch_hash directory found in node_modules/.pnpm (patch not applied at all?)`)
+      failures.push(`${spec}: no installed copy found in node_modules/.pnpm (package missing or patch config broken?)`)
       continue
     }
     let markers
