@@ -360,6 +360,17 @@ func provideHeartbeatSessionCreator(sessionService *sessionpkg.Service) heartbea
 	return &sessionCreatorAdapter{svc: sessionService}
 }
 
+// provideHeartbeatService constructs the heartbeat service and wires its
+// optional memory-provider dependencies via setters (mirroring
+// provideMemoryHandler), so each heartbeat tick can converge agent-authored
+// memory files into the DB.
+func provideHeartbeatService(log *slog.Logger, queries dbstore.Queries, triggerer heartbeat.Triggerer, sessionCreator heartbeat.SessionCreator, runtimeConfig *boot.RuntimeConfig, memoryRegistry *memprovider.Registry, settingsService *settings.Service) *heartbeat.Service {
+	svc := heartbeat.NewService(log, queries, triggerer, sessionCreator, runtimeConfig)
+	svc.SetMemoryRegistry(memoryRegistry)
+	svc.SetSettingsService(settingsService)
+	return svc
+}
+
 func provideScheduleSessionCreator(sessionService *sessionpkg.Service) schedule.SessionCreator {
 	return &sessionCreatorAdapter{svc: sessionService}
 }

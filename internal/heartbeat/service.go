@@ -18,6 +18,8 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	memprovider "github.com/memohai/memoh/internal/memory/adapters"
+	"github.com/memohai/memoh/internal/settings"
 )
 
 const heartbeatTokenTTL = 10 * time.Minute
@@ -38,11 +40,23 @@ type Service struct {
 	cron           *cron.Cron
 	triggerer      Triggerer
 	sessionCreator SessionCreator
+	memoryRegistry *memprovider.Registry
+	settingsSvc    *settings.Service
 	jwtSecret      string
 	logger         *slog.Logger
 	mu             sync.Mutex
 	jobs           map[string]cron.EntryID
 }
+
+// SetMemoryRegistry wires the memory provider registry so heartbeats can
+// converge agent-authored memory files into the DB. Set via setter (not the
+// constructor) to mirror the MemoryHandler/Resolver convention and keep
+// NewService's signature stable.
+func (s *Service) SetMemoryRegistry(r *memprovider.Registry) { s.memoryRegistry = r }
+
+// SetSettingsService wires the bot settings service used to resolve a bot's
+// configured memory provider.
+func (s *Service) SetSettingsService(svc *settings.Service) { s.settingsSvc = svc }
 
 func NewService(log *slog.Logger, queries dbstore.Queries, triggerer Triggerer, sessionCreator SessionCreator, runtimeConfig *boot.RuntimeConfig) *Service {
 	c := cron.New()
@@ -173,6 +187,78 @@ func (s *Service) runHeartbeat(ctx context.Context, cfg Config) {
 	modelID := db.ParseUUIDOrEmpty(result.ModelID)
 	s.completeLog(ctx, logRow.ID, result.Status, result.Text, "", result.UsageBytes, modelID)
 	s.logger.Info("heartbeat completed", slog.String("bot_id", cfg.BotID), slog.String("status", result.Status))
+
+	// Best-effort: converge agent-authored memory files into the DB so they
+	// become visible to search_memory without a manual /ingest. Runs after the
+	// trigger so files written during this tick are caught. Idempotent (ON
+	// CONFLICT upsert); failures are Warn-logged and never affect the tick.
+	s.ingestMemoryFiles(ctx, cfg.BotID)
+}
+
+// defaultBuiltinProviderID is the registry key under which the built-in graph
+// memory provider is registered (see app.go provideMemoryProviderRegistry). It
+// mirrors handlers.MemoryHandler.defaultBuiltinProviderID.
+const defaultBuiltinProviderID = "__builtin_default__"
+
+// ingestMemoryFiles resolves the bot's memory provider and, if it supports
+// markdown ingest, imports agent-authored /data/memory/*.md into the DB. This
+// mirrors MemoryHandler.resolveProvider + ChatIngest: it honours a bot's
+// configured provider and falls back to the default builtin, then type-asserts
+// to MarkdownIngestProvider. Non-supporting providers are a no-op (Debug log),
+// not an error — only the builtin graph runtime implements ingest today.
+func (s *Service) ingestMemoryFiles(ctx context.Context, botID string) {
+	botID = strings.TrimSpace(botID)
+	if botID == "" || s.memoryRegistry == nil {
+		return
+	}
+	provider, err := s.resolveMemoryProvider(ctx, botID)
+	if err != nil || provider == nil {
+		s.logger.Debug("memory ingest skipped: provider unavailable", slog.String("bot_id", botID), slog.Any("error", err))
+		return
+	}
+	ingest, ok := provider.(memprovider.MarkdownIngestProvider)
+	if !ok {
+		s.logger.Debug("memory ingest skipped: provider does not support markdown ingest", slog.String("bot_id", botID))
+		return
+	}
+	result, err := ingest.IngestFromMarkdown(ctx, botID)
+	if err != nil {
+		s.logger.Warn("memory ingest failed", slog.String("bot_id", botID), slog.Any("error", err))
+		return
+	}
+	if result.Ingested > 0 || result.Skipped > 0 {
+		s.logger.Info("memory ingest completed",
+			slog.String("bot_id", botID),
+			slog.Int("ingested", result.Ingested),
+			slog.Int("skipped", result.Skipped),
+		)
+	}
+}
+
+// resolveMemoryProvider resolves a bot's configured memory provider, falling
+// back to the default builtin when none is configured. Mirrors
+// handlers.MemoryHandler.resolveProvider so the heartbeat uses the same
+// resolution semantics as the HTTP /ingest endpoint.
+func (s *Service) resolveMemoryProvider(ctx context.Context, botID string) (memprovider.Provider, error) {
+	if s.settingsSvc != nil {
+		botSettings, err := s.settingsSvc.GetBot(ctx, botID)
+		if err == nil {
+			providerID := strings.TrimSpace(botSettings.MemoryProviderID)
+			if providerID != "" {
+				p, getErr := s.memoryRegistry.Get(providerID)
+				if getErr == nil {
+					return p, nil
+				}
+				s.logger.Warn("memory provider lookup failed", slog.String("provider_id", providerID), slog.Any("error", getErr))
+				return nil, fmt.Errorf("configured memory provider is unavailable: %w", getErr)
+			}
+		}
+	}
+	p, err := s.memoryRegistry.Get(defaultBuiltinProviderID)
+	if err != nil {
+		return nil, nil
+	}
+	return p, nil
 }
 
 func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, resultText, errorMessage string, usageBytes []byte, modelID pgtype.UUID) {

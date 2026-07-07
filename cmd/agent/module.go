@@ -20,7 +20,6 @@ import (
 	emailpkg "github.com/memohai/memoh/internal/email"
 	"github.com/memohai/memoh/internal/fetchproviders"
 	"github.com/memohai/memoh/internal/handlers"
-	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/mcp"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/message/event"
@@ -119,7 +118,7 @@ func options() fx.Option {
 			provideScheduleSessionCreator,
 			schedule.NewService,
 			provideHeartbeatTriggerer,
-			heartbeat.NewService,
+			provideHeartbeatService,
 			compaction.NewService,
 			provideContainerdHandler,
 			provideBotBackupService,
