@@ -99,6 +99,32 @@ func TestCanonicalFragmentHashIsStableAndIgnoresDebugID(t *testing.T) {
 	}
 }
 
+func TestCanonicalFragmentHashGoldenValue(t *testing.T) {
+	t.Parallel()
+
+	frag := TextFrag(TextFragInput{
+		ID:         "golden",
+		Kind:       KindConversationEvent,
+		Role:       sdk.MessageRoleUser,
+		Slot:       SlotHistory,
+		Text:       "hello",
+		Priority:   70,
+		CacheClass: CacheNever,
+		Trust:      TrustExternal,
+		Source:     "test",
+		SourceID:   "row-1",
+		Collector:  "golden_test",
+	})
+	hash, err := CanonicalFragmentHash(frag)
+	if err != nil {
+		t.Fatalf("canonical hash: %v", err)
+	}
+	const want = "a33139d731966124ebcadf9eb4f2ce815b63650e866794086fc587c504193764"
+	if hash.Value != want {
+		t.Fatalf("golden hash drifted: got %q, want %q — if the canonical struct shape changed intentionally, update this value", hash.Value, want)
+	}
+}
+
 func TestCanonicalFragmentHashDiscriminatesSDKMessagePartTypes(t *testing.T) {
 	t.Parallel()
 
@@ -151,6 +177,116 @@ func TestCanonicalFragmentHashIncludesNativeImageSDKPayload(t *testing.T) {
 	}
 	if baseHash.Value == cacheHash.Value {
 		t.Fatalf("image fragments with different SDK cache control must not collide: %q", baseHash.Value)
+	}
+}
+
+func TestWithContextRefPreservesExplicitSourcePayloadHash(t *testing.T) {
+	t.Parallel()
+
+	frag := TextFrag(TextFragInput{
+		ID:         "history.001",
+		Kind:       KindConversationEvent,
+		Role:       sdk.MessageRoleUser,
+		Slot:       SlotHistory,
+		Text:       "hello",
+		Priority:   70,
+		CacheClass: CacheNever,
+		Trust:      TrustExternal,
+		Scope:      Scope{ChatID: "request-scope"},
+		Source:     "history",
+		SourceID:   "row-1",
+		Collector:  "test",
+	})
+	frag = WithContextRef(frag, ContextRef{
+		Namespace:   "history",
+		ID:          "row-1",
+		Version:     1,
+		HashAlgo:    HashAlgoSHA256,
+		HashScope:   HashScopeSourcePayload,
+		ContentHash: "source-hash",
+		Schema:      SchemaContextRef,
+		Durability:  RefDurable,
+	})
+
+	if frag.Ref.HashScope != HashScopeSourcePayload || frag.Ref.ContentHash != "source-hash" {
+		t.Fatalf("explicit source payload hash should be preserved: %#v", frag.Ref)
+	}
+	if err := ValidateContextRef(frag.Ref); err != nil {
+		t.Fatalf("source payload ref should validate: %#v: %v", frag.Ref, err)
+	}
+}
+
+func TestWithContextRefRecomputesCanonicalFragmentHash(t *testing.T) {
+	t.Parallel()
+
+	frag := TextFrag(TextFragInput{
+		ID:         "history.001",
+		Kind:       KindConversationEvent,
+		Role:       sdk.MessageRoleUser,
+		Slot:       SlotHistory,
+		Text:       "hello",
+		Priority:   70,
+		CacheClass: CacheNever,
+		Trust:      TrustExternal,
+		Source:     "history",
+		SourceID:   "row-1",
+		Collector:  "test",
+	})
+	normalized := WithContextRef(frag, ContextRef{
+		Namespace:  "history",
+		ID:         "row-1",
+		Version:    1,
+		Schema:     SchemaContextRef,
+		Durability: RefDurable,
+	})
+	mutated := frag
+	mutated.Parts = append([]Part(nil), frag.Parts...)
+	mutated.Parts[0].Text = "hello again"
+	expected, err := CanonicalFragmentHash(mutated)
+	if err != nil {
+		t.Fatalf("canonical hash for mutated frag: %v", err)
+	}
+
+	got := WithContextRef(mutated, normalized.Ref)
+
+	if got.Ref.HashScope != HashScopeCanonicalFragment || got.Ref.HashAlgo != HashAlgoSHA256 {
+		t.Fatalf("canonical hash metadata should be refreshed: %#v", got.Ref)
+	}
+	if got.Ref.ContentHash != expected.Value {
+		t.Fatalf("canonical hash should be recomputed from current fragment: got %q want %q", got.Ref.ContentHash, expected.Value)
+	}
+}
+
+func TestWithContextRefRepairsIncompleteExplicitHash(t *testing.T) {
+	t.Parallel()
+
+	frag := TextFrag(TextFragInput{
+		ID:         "history.001",
+		Kind:       KindConversationEvent,
+		Role:       sdk.MessageRoleUser,
+		Slot:       SlotHistory,
+		Text:       "hello",
+		Priority:   70,
+		CacheClass: CacheNever,
+		Trust:      TrustExternal,
+		Source:     "history",
+		SourceID:   "row-1",
+		Collector:  "test",
+	})
+	frag = WithContextRef(frag, ContextRef{
+		Namespace:   "history",
+		ID:          "row-1",
+		Version:     1,
+		ContentHash: "bare-hash",
+		Schema:      SchemaContextRef,
+		Durability:  RefDurable,
+	})
+
+	if frag.Ref.ContentHash == "bare-hash" || frag.Ref.HashScope != HashScopeCanonicalFragment || frag.Ref.HashAlgo != HashAlgoSHA256 {
+		t.Fatalf("incomplete explicit hash should be repaired with canonical hash: %#v", frag.Ref)
+	}
+	if err := ValidateContextRef(frag.Ref); err != nil {
+		t.Fatalf("repaired ref should validate: %#v: %v", frag.Ref, err)
 	}
 }
 
@@ -350,6 +486,34 @@ func TestSchemaAndHashValidationRejectsSilentDrift(t *testing.T) {
 	conflicts := CheckEditPreconditions(edit, []ContextRef{ref})
 	if len(conflicts) != 1 || conflicts[0].Kind != ConflictContentHashMismatch {
 		t.Fatalf("expected one content-hash conflict, got %#v", conflicts)
+	}
+
+	sourceRef := ContextRef{
+		Namespace:   "history",
+		ID:          "row-source",
+		HashAlgo:    HashAlgoSHA256,
+		HashScope:   HashScopeSourcePayload,
+		ContentHash: "source-good",
+		Schema:      SchemaContextRef,
+		Durability:  RefDurable,
+	}
+	sourceEdit := ContextEdit{
+		EditID: "edit-source",
+		Slot:   SlotHistory,
+		Op:     EditReplace,
+		Refs:   []ContextRef{sourceRef},
+		Preconditions: EditPreconditions{
+			ExpectedHashes: map[string]string{sourceRef.StableKey(): "source-good"},
+		},
+		Schema: SchemaVersion{Name: SchemaContextEdit, Version: CurrentSchemaVersion},
+	}
+	if conflicts := CheckEditPreconditions(sourceEdit, []ContextRef{sourceRef}); len(conflicts) != 0 {
+		t.Fatalf("source payload expected hash should match, got %#v", conflicts)
+	}
+	sourceEdit.Preconditions.ExpectedHashes[sourceRef.StableKey()] = "source-bad"
+	sourceConflicts := CheckEditPreconditions(sourceEdit, []ContextRef{sourceRef})
+	if len(sourceConflicts) != 1 || sourceConflicts[0].Kind != ConflictContentHashMismatch {
+		t.Fatalf("source payload mismatch should produce one hash conflict, got %#v", sourceConflicts)
 	}
 
 	missing := CheckEditPreconditions(edit, nil)

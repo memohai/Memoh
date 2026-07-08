@@ -272,12 +272,12 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 		return err
 	}
 
-	loaded, err := r.loadMessages(ctx, input.BotID, approval.SessionID, defaultMaxContextMinutes)
+	loaded, err := r.loadHistoryRecords(ctx, historyScopeFallbackFromToolApprovalRequest(approval), approval.SessionID, defaultMaxContextMinutes)
 	if err != nil {
 		return err
 	}
 	loaded = pruneHistoryForGateway(loaded)
-	loaded = r.replaceCompactedMessages(ctx, loaded)
+	loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(firstNonEmpty(approval.BotID, input.BotID), "", approval.SessionID, approval.ConversationType, "", approval.ReplyTarget), loaded)
 	messages, _ := trimMessagesByTokens(r.logger, loaded, 0)
 
 	cfg := resolved.RunConfig
