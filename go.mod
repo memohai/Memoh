@@ -33,7 +33,7 @@ require (
 	github.com/mailgun/mailgun-go/v5 v5.14.0
 	github.com/memohai/acgo v0.0.0-20260221232113-babac0d6acd7
 	github.com/memohai/dingtalk-stream-sdk-go v0.0.0-20260405113102-87e23096b978
-	github.com/memohai/twilight-ai v0.4.1-0.20260623064358-a8230254367e
+	github.com/memohai/twilight-ai v0.4.1-0.20260708041258-f7bcb57fcaab
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/opencontainers/runtime-spec v1.3.0
@@ -197,7 +197,5 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 	tags.cncf.io/container-device-interface/specs-go v1.1.0 // indirect
 )
-
-replace github.com/memohai/twilight-ai => github.com/akazwz/twilight-ai v0.4.1-0.20260707044248-a3b78173e729
 
 tool github.com/swaggo/swag/cmd/swag
