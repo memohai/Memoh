@@ -361,6 +361,53 @@ func TestRenderEntryContentToolResultEmptyMarker(t *testing.T) {
 	}
 }
 
+func TestRenderEntryContentLegacyEnvelopeStructuredResult(t *testing.T) {
+	t.Parallel()
+
+	// Older OpenAI-style tool-result envelope: ToolCallID is set on the
+	// ModelMessage itself and Content IS the result payload, not a
+	// content-part array.
+	mm := conversation.ModelMessage{
+		Role:       "tool",
+		ToolCallID: "x",
+		Content:    []byte(`{"output":"search results here"}`),
+	}
+	got := renderEntryContent(mm)
+	if !strings.Contains(got, "search results here") {
+		t.Fatalf("legacy envelope structured result lost: %q", got)
+	}
+}
+
+func TestRenderEntryContentLegacyEnvelopePlainText(t *testing.T) {
+	t.Parallel()
+
+	mm := conversation.ModelMessage{
+		Role:       "tool",
+		ToolCallID: "x",
+		Content:    conversation.NewTextContent("plain result text"),
+	}
+	got := renderEntryContent(mm)
+	if got != "plain result text" {
+		t.Fatalf("legacy envelope plain text render = %q, want exactly 'plain result text' once", got)
+	}
+}
+
+func TestRenderEntryContentLegacyEnvelopeWithToolResultPartUnaffected(t *testing.T) {
+	t.Parallel()
+
+	// ToolCallID set at the envelope level AND a content-part tool-result
+	// present: the parts path must still win (no double-render).
+	mm := conversation.ModelMessage{
+		Role:       "tool",
+		ToolCallID: "x",
+		Content:    []byte(`[{"type":"tool-result","toolName":"calc","toolCallId":"x","output":{"type":"text","value":"4"}}]`),
+	}
+	got := renderEntryContent(mm)
+	if got != "4" {
+		t.Fatalf("content-part tool-result render = %q, want exactly '4'", got)
+	}
+}
+
 func TestRenderEntryContentTopLevelToolCalls(t *testing.T) {
 	t.Parallel()
 

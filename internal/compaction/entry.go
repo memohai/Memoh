@@ -83,13 +83,23 @@ func cleanEntryMetadataValue(value string) string {
 // marker, tool calls show their name, and tool results show their outcome text
 // (falling back to a marker) instead of dumping the raw stored JSON.
 func renderEntryContent(mm conversation.ModelMessage) string {
+	parts := parseEntryParts(mm.Content)
+
+	// Legacy OpenAI-style tool-result envelope: ToolCallID lives on the
+	// ModelMessage itself and Content IS the result payload directly, not a
+	// content-part array (see pipeline.nativeToolRoleContent). A content-part
+	// tool-result, when present, still takes precedence below.
+	if strings.TrimSpace(mm.ToolCallID) != "" && !hasToolResultPart(parts) {
+		return renderToolResult(mm.Content)
+	}
+
 	var segs []string
 	if text := strings.TrimSpace(mm.TextContent()); text != "" {
 		segs = append(segs, text)
 	}
 
 	sawToolCallPart := false
-	for _, p := range parseEntryParts(mm.Content) {
+	for _, p := range parts {
 		switch {
 		case p.Type == "image":
 			segs = append(segs, "[image]")
@@ -110,6 +120,15 @@ func renderEntryContent(mm conversation.ModelMessage) string {
 	}
 
 	return strings.Join(segs, "\n")
+}
+
+func hasToolResultPart(parts []entryPart) bool {
+	for _, p := range parts {
+		if strings.Contains(p.Type, "tool-result") || strings.Contains(p.Type, "tool_result") {
+			return true
+		}
+	}
+	return false
 }
 
 func parseEntryParts(content json.RawMessage) []entryPart {

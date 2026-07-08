@@ -67,6 +67,31 @@ func TestBuildEntriesAndIDsWithholdsWholeExchangeWhenResultRendersEmpty(t *testi
 	}
 }
 
+func TestBuildEntriesAndIDsRendersLegacyToolResultEnvelopeExchange(t *testing.T) {
+	t.Parallel()
+
+	// The tool row uses the older OpenAI-style envelope (tool_call_id at the
+	// top level, content is the result payload directly), which previously
+	// rendered empty and withheld the whole exchange from marking.
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		toolCallRow(t, 0),
+		mkRow(t, "tool", `{"role":"tool","tool_call_id":"c1","content":{"output":"search results here"}}`, 0),
+	}
+	items, _ := itemsFromRows(rows)
+
+	entries, ids := buildEntriesAndIDs(items)
+
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want 2 (call marker + legacy tool result)", len(entries))
+	}
+	if !strings.Contains(entries[1].Content, "search results here") {
+		t.Fatalf("legacy tool result content lost: %+v", entries)
+	}
+	if len(ids) != 2 || ids[0] != rows[0].ID || ids[1] != rows[1].ID {
+		t.Fatalf("ids = %#v, want both exchange rows marked", ids)
+	}
+}
+
 func TestBuildUserPromptPriorContextBranch(t *testing.T) {
 	t.Parallel()
 
