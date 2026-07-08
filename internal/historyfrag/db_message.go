@@ -153,10 +153,35 @@ func modelMessageFromDBMessage(log *slog.Logger, msg messagepkg.Message) convers
 			Role:    strings.TrimSpace(msg.Role),
 			Content: cloneRawMessage(msg.Content),
 		}
-	} else {
-		modelMessage.Role = strings.TrimSpace(msg.Role)
+		return modelMessage
 	}
+
+	// A bare content-part object (e.g. {"type":"text","text":"hello"}) has no
+	// role/content/tool_calls keys, so it unmarshals successfully into an empty
+	// ModelMessage instead of erroring — unknown JSON fields are ignored. Detect
+	// that shape before the row's Role column gets stamped below, and normalize
+	// it into a one-element parts array so TextContent/ContentParts still see it.
+	if modelMessage.Role == "" && !modelMessage.HasContent() {
+		if wrapped, ok := bareContentPartArray(msg.Content); ok {
+			modelMessage.Content = wrapped
+		}
+	}
+
+	modelMessage.Role = strings.TrimSpace(msg.Role)
 	return modelMessage
+}
+
+// bareContentPartArray wraps a raw JSON object into a single-element parts
+// array, e.g. {"type":"text","text":"hello"} -> [{"type":"text","text":"hello"}].
+// Only a non-empty object is wrapped: `{}` carries no content to recover, and
+// unmarshal already guarantees non-object payloads (arrays/strings/scalars)
+// took the error branch above.
+func bareContentPartArray(raw json.RawMessage) (json.RawMessage, bool) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed[0] != '{' || trimmed == "{}" {
+		return nil, false
+	}
+	return json.RawMessage("[" + trimmed + "]"), true
 }
 
 func parseUsage(raw json.RawMessage) (*int, *int) {

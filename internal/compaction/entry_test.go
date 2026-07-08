@@ -213,6 +213,25 @@ func TestBuildEntriesAndIDsDoesNotCompactUnrenderedRowInMixedWindow(t *testing.T
 	}
 }
 
+// TestBuildEntriesAndIDsRendersBareContentPartRow drives the real downstream
+// path for a persisted row whose content is a bare content-part object: before
+// the historyfrag normalization fix, such a row decoded as an empty
+// ModelMessage and was silently skipped by selection instead of compacted.
+func TestBuildEntriesAndIDsRendersBareContentPartRow(t *testing.T) {
+	t.Parallel()
+
+	row := mkRow(t, "user", `{"type":"text","text":"hello"}`, 0)
+	items, _ := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{row})
+
+	entries, ids := buildEntriesAndIDs(items)
+	if len(entries) != 1 || entries[0].Content != "hello" {
+		t.Fatalf("entries = %#v, want single entry with content 'hello'", entries)
+	}
+	if len(ids) != 1 || ids[0] != row.ID {
+		t.Fatalf("ids = %#v, want row marked for compaction", ids)
+	}
+}
+
 func TestBuildEntriesAndIDsIncludesDirectedSignalHeader(t *testing.T) {
 	t.Parallel()
 
