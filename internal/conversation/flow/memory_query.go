@@ -62,7 +62,7 @@ func (r *Resolver) buildMemoryQuery(ctx context.Context, req conversation.ChatRe
 		}
 		return builder.Build(req, nil)
 	}
-	loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
+	loaded = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
 	loaded = dedupePersistedCurrentUserMessage(loaded, req)
 	return builder.Build(req, loaded)
 }

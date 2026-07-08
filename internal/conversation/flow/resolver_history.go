@@ -344,17 +344,6 @@ func requiredMessagesBeforeCutoff(messages []historyfrag.HistoryRecord, cutoff i
 	return required
 }
 
-func compactionSummaryScope(botID, chatID, sessionID, conversationType, conversationName, replyTarget string) contextfrag.Scope {
-	return contextfrag.Scope{
-		BotID:            strings.TrimSpace(botID),
-		ChatID:           strings.TrimSpace(chatID),
-		SessionID:        strings.TrimSpace(sessionID),
-		ConversationType: strings.TrimSpace(conversationType),
-		ConversationName: strings.TrimSpace(conversationName),
-		ReplyTarget:      strings.TrimSpace(replyTarget),
-	}
-}
-
 func historyContextFragsForMessages(messages []conversation.ModelMessage, records []historyfrag.HistoryRecord) []contextfrag.ContextFrag {
 	if len(messages) == 0 || len(records) == 0 {
 		return nil
