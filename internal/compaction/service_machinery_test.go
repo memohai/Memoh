@@ -251,6 +251,30 @@ func TestDoCompactionAllEmptyWindowSkipsModelAndMarking(t *testing.T) {
 	}
 }
 
+func TestDoCompactionIncompleteToolExchangeSkipsModelAndMarking(t *testing.T) {
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		toolCallRow(t, 100),
+		mkRow(t, "tool", `[]`, 100),
+		mkRow(t, "assistant", `[{"type":"text","text":"recent kept"}]`, 100),
+	}
+	q := &fakeQueries{uncompacted: rows}
+	stub := &stubModel{summary: "unused"}
+	svc := newMachineryService(q)
+
+	if err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 150)); err != nil {
+		t.Fatalf("RunCompactionSync: %v", err)
+	}
+	if stub.calls != 0 {
+		t.Fatalf("summarizer should not be called when no row can be marked (calls=%d)", stub.calls)
+	}
+	if q.created {
+		t.Fatal("a no-op compaction must not create a log row")
+	}
+	if len(q.markedIDs) != 0 {
+		t.Fatalf("nothing should be marked for an incomplete tool exchange (marked=%d)", len(q.markedIDs))
+	}
+}
+
 func TestDoCompactionEmptyHistoryNoOp(t *testing.T) {
 	q := &fakeQueries{}
 	stub := &stubModel{summary: "unused"}
