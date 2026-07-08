@@ -118,6 +118,43 @@ func TestPostgresReplaceTurnEditHidesSupersededTurn(t *testing.T) {
 	assertPostgresMessageVisibility(t, ctx, tx, oldAssistant.ID, false, true)
 }
 
+func TestPostgresRepairSupersededMessageVisibilityMigration(t *testing.T) {
+	ctx := context.Background()
+	tx := beginPostgresMessageTestTx(t, ctx)
+	setupPostgresMessageTestFixtures(t, ctx, tx)
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bot_history_messages (
+			id, bot_id, session_id, role, content,
+			turn_id, turn_position, turn_message_seq, turn_visible, turn_superseded_at
+		)
+		VALUES
+			(
+				'00000000-0000-0000-0000-000000074111',
+				$1, $2, 'assistant', '{"role":"assistant","content":"bad"}'::jsonb,
+				'00000000-0000-0000-0000-000000074121', 1, 2, true, now()
+			),
+			(
+				'00000000-0000-0000-0000-000000074112',
+				$1, $2, 'assistant', '{"role":"assistant","content":"good"}'::jsonb,
+				'00000000-0000-0000-0000-000000074122', 2, 2, true, NULL
+			)
+	`, postgresMessageTestBotID, postgresMessageTestSessionID); err != nil {
+		t.Fatalf("insert repair fixtures: %v", err)
+	}
+
+	sql, err := os.ReadFile("../../db/postgres/migrations/0105_repair_superseded_message_visibility.up.sql")
+	if err != nil {
+		t.Fatalf("read repair migration: %v", err)
+	}
+	if _, err := tx.Exec(ctx, string(sql)); err != nil {
+		t.Fatalf("run repair migration: %v", err)
+	}
+
+	assertPostgresMessageVisibility(t, ctx, tx, "00000000-0000-0000-0000-000000074111", false, true)
+	assertPostgresMessageVisibility(t, ctx, tx, "00000000-0000-0000-0000-000000074112", true, false)
+}
+
 const (
 	postgresMessageTestUserID    = "00000000-0000-0000-0000-000000074101"
 	postgresMessageTestBotID     = "00000000-0000-0000-0000-000000074102"

@@ -204,6 +204,84 @@ func TestPostgresForkFromAssistantMessageRejectsInvalidTargetWithoutSideEffects(
 	}
 }
 
+func TestPostgresRepairIncompleteForkSessionsMigration(t *testing.T) {
+	ctx := context.Background()
+	tx := beginPostgresSessionTestTx(t, ctx)
+	setupPostgresSessionForkFixtures(t, ctx, tx)
+
+	const (
+		pureResidualID      = "00000000-0000-0000-0000-000000075301"
+		withFollowUpID      = "00000000-0000-0000-0000-000000075302"
+		validForkID         = "00000000-0000-0000-0000-000000075303"
+		pureResidualMessage = "00000000-0000-0000-0000-000000075311"
+		followUpCopyMessage = "00000000-0000-0000-0000-000000075312"
+		followUpNewMessage  = "00000000-0000-0000-0000-000000075313"
+		validForkMessage    = "00000000-0000-0000-0000-000000075314"
+	)
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bot_sessions (id, bot_id, channel_type, title, metadata, created_at, updated_at)
+		VALUES
+			(
+				$2, $1, 'local', 'bad fork',
+				'{"forked_from":{"session_id":"00000000-0000-0000-0000-000000075103","message_id":"00000000-0000-0000-0000-000000075114"}}'::jsonb,
+				now(), now()
+			),
+			(
+				$3, $1, 'local', 'bad fork with follow-up',
+				'{"forked_from":{"session_id":"00000000-0000-0000-0000-000000075103","message_id":"00000000-0000-0000-0000-000000075114"}}'::jsonb,
+				now(), now()
+			),
+			(
+				$4, $1, 'local', 'valid fork',
+				'{"forked_from":{"session_id":"00000000-0000-0000-0000-000000075103","message_id":"00000000-0000-0000-0000-000000075114","fork_message_id":"00000000-0000-0000-0000-000000075314"}}'::jsonb,
+				now(), now()
+			)
+	`, postgresSessionTestBotID, pureResidualID, withFollowUpID, validForkID); err != nil {
+		t.Fatalf("insert repair fork sessions: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bot_history_messages (
+			id, bot_id, session_id, role, content,
+			turn_id, turn_position, turn_message_seq, turn_visible, created_at
+		)
+		VALUES
+			(
+				$3, $1, $2, 'assistant', '{"role":"assistant","content":"copied"}'::jsonb,
+				'00000000-0000-0000-0000-000000075321', 1, 2, true,
+				(SELECT created_at - interval '1 minute' FROM bot_sessions WHERE id = $2)
+			),
+			(
+				$5, $1, $4, 'assistant', '{"role":"assistant","content":"copied"}'::jsonb,
+				'00000000-0000-0000-0000-000000075322', 1, 2, true,
+				(SELECT created_at - interval '1 minute' FROM bot_sessions WHERE id = $4)
+			),
+			(
+				$6, $1, $4, 'user', '{"role":"user","content":"follow-up"}'::jsonb,
+				'00000000-0000-0000-0000-000000075323', 1, 1, true,
+				(SELECT created_at + interval '1 minute' FROM bot_sessions WHERE id = $4)
+			),
+			(
+				$8, $1, $7, 'assistant', '{"role":"assistant","content":"valid copied"}'::jsonb,
+				'00000000-0000-0000-0000-000000075324', 1, 2, true,
+				(SELECT created_at - interval '1 minute' FROM bot_sessions WHERE id = $7)
+			)
+	`, postgresSessionTestBotID, pureResidualID, pureResidualMessage, withFollowUpID, followUpCopyMessage, followUpNewMessage, validForkID, validForkMessage); err != nil {
+		t.Fatalf("insert repair fork messages: %v", err)
+	}
+
+	sql, err := os.ReadFile("../../db/postgres/migrations/0105_repair_superseded_message_visibility.up.sql")
+	if err != nil {
+		t.Fatalf("read fork repair migration: %v", err)
+	}
+	if _, err := tx.Exec(ctx, string(sql)); err != nil {
+		t.Fatalf("run fork repair migration: %v", err)
+	}
+
+	assertPostgresSessionDeleted(t, ctx, tx, pureResidualID, true)
+	assertPostgresSessionDeleted(t, ctx, tx, withFollowUpID, false)
+	assertPostgresSessionDeleted(t, ctx, tx, validForkID, false)
+}
+
 const (
 	postgresSessionTestUserID            = "00000000-0000-0000-0000-000000075101"
 	postgresSessionTestBotID             = "00000000-0000-0000-0000-000000075102"
@@ -306,4 +384,19 @@ func countPostgresSessionTestRows(t *testing.T, ctx context.Context, tx pgx.Tx, 
 		t.Fatalf("count %s: %v", table, err)
 	}
 	return count
+}
+
+func assertPostgresSessionDeleted(t *testing.T, ctx context.Context, tx pgx.Tx, sessionID string, wantDeleted bool) {
+	t.Helper()
+	var deleted bool
+	if err := tx.QueryRow(ctx, `
+		SELECT deleted_at IS NOT NULL
+		FROM bot_sessions
+		WHERE id = $1
+	`, sessionID).Scan(&deleted); err != nil {
+		t.Fatalf("read session deleted state: %v", err)
+	}
+	if deleted != wantDeleted {
+		t.Fatalf("session %s deleted = %v, want %v", sessionID, deleted, wantDeleted)
+	}
 }
