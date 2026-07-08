@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/historyfrag"
 	"github.com/memohai/memoh/internal/prune"
 	"github.com/memohai/memoh/internal/textutil"
 )
@@ -49,7 +50,7 @@ func (r *Resolver) buildMemoryQuery(ctx context.Context, req conversation.ChatRe
 	if r == nil || r.messageService == nil {
 		return builder.Build(req, nil)
 	}
-	loaded, err := r.loadMessages(ctx, req.ChatID, req.SessionID, defaultMaxContextMinutes)
+	loaded, err := r.loadHistoryRecords(ctx, historyScopeFallbackFromChatRequest(req), req.SessionID, defaultMaxContextMinutes)
 	if err != nil {
 		if r.logger != nil {
 			r.logger.Warn("memory query history load failed",
@@ -61,12 +62,12 @@ func (r *Resolver) buildMemoryQuery(ctx context.Context, req conversation.ChatRe
 		}
 		return builder.Build(req, nil)
 	}
-	loaded = r.replaceCompactedMessages(ctx, loaded)
+	loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
 	loaded = dedupePersistedCurrentUserMessage(loaded, req)
 	return builder.Build(req, loaded)
 }
 
-func (b memoryQueryBuilder) Build(req conversation.ChatRequest, history []messageWithUsage) memoryQuery {
+func (b memoryQueryBuilder) Build(req conversation.ChatRequest, history []historyfrag.HistoryRecord) memoryQuery {
 	current := strings.TrimSpace(req.Query)
 	if current == "" {
 		return memoryQuery{}
@@ -95,7 +96,7 @@ func (b memoryQueryBuilder) Build(req conversation.ChatRequest, history []messag
 	}
 }
 
-func (b memoryQueryBuilder) recentUserMessages(current string, history []messageWithUsage) []string {
+func (b memoryQueryBuilder) recentUserMessages(current string, history []historyfrag.HistoryRecord) []string {
 	if len(history) == 0 || b.MaxRecentMessages <= 0 {
 		return nil
 	}
@@ -103,7 +104,7 @@ func (b memoryQueryBuilder) recentUserMessages(current string, history []message
 	seen := map[string]bool{currentKey: true}
 	reversed := make([]string, 0, b.MaxRecentMessages)
 	for i := len(history) - 1; i >= 0 && len(reversed) < b.MaxRecentMessages; i-- {
-		msg := history[i].Message
+		msg := history[i].ModelMessage
 		if !strings.EqualFold(strings.TrimSpace(msg.Role), "user") {
 			continue
 		}

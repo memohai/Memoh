@@ -5,17 +5,18 @@ import (
 	"testing"
 
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/historyfrag"
 )
 
 func TestMemoryQueryBuilderCombinesRecentUserMessages(t *testing.T) {
 	t.Parallel()
 
 	builder := memoryQueryBuilder{MaxRecentMessages: 2, MaxBytes: 2000, MaxLines: 20, MaxMessageRunes: 200}
-	query := builder.Build(conversation.ChatRequest{Query: "What should I pack?"}, []messageWithUsage{
-		{Message: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("I am visiting Berlin next week")}},
-		{Message: conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("Sounds fun.")}},
-		{Message: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("I prefer tea over coffee")}},
-		{Message: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("What should I pack?")}},
+	query := builder.Build(conversation.ChatRequest{Query: "What should I pack?"}, []historyfrag.HistoryRecord{
+		{ModelMessage: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("I am visiting Berlin next week")}},
+		{ModelMessage: conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("Sounds fun.")}},
+		{ModelMessage: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("I prefer tea over coffee")}},
+		{ModelMessage: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("What should I pack?")}},
 	})
 
 	if query.Source != "current_query_with_history" {
@@ -38,8 +39,8 @@ func TestMemoryQueryBuilderTruncates(t *testing.T) {
 	t.Parallel()
 
 	builder := memoryQueryBuilder{MaxRecentMessages: 1, MaxBytes: 120, MaxLines: 6, MaxMessageRunes: 500}
-	query := builder.Build(conversation.ChatRequest{Query: strings.Repeat("current ", 30)}, []messageWithUsage{
-		{Message: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(strings.Repeat("history ", 30))}},
+	query := builder.Build(conversation.ChatRequest{Query: strings.Repeat("current ", 30)}, []historyfrag.HistoryRecord{
+		{ModelMessage: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(strings.Repeat("history ", 30))}},
 	})
 
 	if !query.Truncated {
@@ -53,8 +54,8 @@ func TestMemoryQueryBuilderTruncates(t *testing.T) {
 func TestMemoryQueryBuilderSkipsEmptyVisibleQuery(t *testing.T) {
 	t.Parallel()
 
-	query := defaultMemoryQueryBuilder().Build(conversation.ChatRequest{Query: "   "}, []messageWithUsage{
-		{Message: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("history")}},
+	query := defaultMemoryQueryBuilder().Build(conversation.ChatRequest{Query: "   "}, []historyfrag.HistoryRecord{
+		{ModelMessage: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("history")}},
 	})
 	if query.Query != "" {
 		t.Fatalf("expected empty query, got %+v", query)
