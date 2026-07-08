@@ -1,6 +1,9 @@
 package conversation
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 type uiTextStreamState struct {
 	ID      int
@@ -11,12 +14,28 @@ type uiToolStreamState struct {
 	Message UIMessage
 }
 
+// uiEmittedBlock records one block ID allocation in live-stream order so the
+// terminal snapshot replay can line its blocks up with the ones the client
+// already rendered (block order on the client is the ID order).
+type uiEmittedBlock struct {
+	Kind       UIMessageType
+	ToolCallID string
+	ID         int
+	// TagOnly marks a text block whose entire content is inline agent tags
+	// (<attachments>/<reactions>/<speech>). The terminal snapshot strips those
+	// tags and drops empty text blocks, so such a live block has no terminal
+	// counterpart and must be skipped during positional matching — otherwise it
+	// shifts the alignment and the final reply overwrites the wrong block.
+	TagOnly bool
+}
+
 // UIMessageStreamConverter converts low-level stream events into complete UI messages.
 type UIMessageStreamConverter struct {
 	nextID    int
 	text      *uiTextStreamState
 	reasoning *uiTextStreamState
 	tools     map[string]*uiToolStreamState
+	emitted   []uiEmittedBlock
 }
 
 // NewUIMessageStreamConverter creates a new UI stream converter.
@@ -29,13 +48,27 @@ func NewUIMessageStreamConverter() *UIMessageStreamConverter {
 // HandleEvent updates converter state and returns zero or one complete UI messages.
 func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIMessage {
 	switch strings.ToLower(strings.TrimSpace(event.Type)) {
+	case "retry":
+		// A retried attempt regenerates its output from scratch, so the terminal
+		// snapshot will contain only the surviving attempt's messages. Drop the
+		// bookkeeping for the discarded attempt (including the emitted-block log)
+		// so ConvertTerminalMessages aligns against the surviving attempt's
+		// blocks only — otherwise an orphaned pre-retry text/reasoning block
+		// shifts the positional match and the final reply overwrites the wrong
+		// block. IDs (c.nextID) keep advancing so re-emitted blocks stay unique.
+		c.text = nil
+		c.reasoning = nil
+		c.tools = map[string]*uiToolStreamState{}
+		c.emitted = nil
+		return nil
+
 	case "text_start":
-		c.text = &uiTextStreamState{ID: c.nextMessageID()}
+		c.text = &uiTextStreamState{ID: c.allocBlockID(UIMessageText, "")}
 		return nil
 
 	case "text_delta":
 		if c.text == nil {
-			c.text = &uiTextStreamState{ID: c.nextMessageID()}
+			c.text = &uiTextStreamState{ID: c.allocBlockID(UIMessageText, "")}
 		}
 		c.text.Content += event.Delta
 		return []UIMessage{{
@@ -45,16 +78,16 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		}}
 
 	case "text_end":
-		c.text = nil
+		c.finalizeTextBlock()
 		return nil
 
 	case "reasoning_start":
-		c.reasoning = &uiTextStreamState{ID: c.nextMessageID()}
+		c.reasoning = &uiTextStreamState{ID: c.allocBlockID(UIMessageReasoning, "")}
 		return nil
 
 	case "reasoning_delta":
 		if c.reasoning == nil {
-			c.reasoning = &uiTextStreamState{ID: c.nextMessageID()}
+			c.reasoning = &uiTextStreamState{ID: c.allocBlockID(UIMessageReasoning, "")}
 		}
 		c.reasoning.Content += event.Delta
 		return []UIMessage{{
@@ -72,7 +105,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		if state == nil {
 			state = &uiToolStreamState{
 				Message: UIMessage{
-					ID:         c.nextMessageID(),
+					ID:         c.allocBlockID(UIMessageTool, strings.TrimSpace(event.ToolCallID)),
 					Type:       UIMessageTool,
 					Name:       strings.TrimSpace(event.ToolName),
 					Input:      event.Input,
@@ -92,7 +125,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			c.tools[trimmed] = state
 		}
 		state.Message.Running = uiBoolPtr(true)
-		c.text = nil
+		c.finalizeTextBlock()
 		return []UIMessage{cloneToolStreamMessage(state.Message)}
 
 	case "tool_call_progress":
@@ -100,7 +133,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		if state == nil {
 			state = &uiToolStreamState{
 				Message: UIMessage{
-					ID:         c.nextMessageID(),
+					ID:         c.allocBlockID(UIMessageTool, strings.TrimSpace(event.ToolCallID)),
 					Type:       UIMessageTool,
 					Name:       strings.TrimSpace(event.ToolName),
 					Input:      event.Input,
@@ -123,7 +156,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		if state == nil {
 			state = &uiToolStreamState{
 				Message: UIMessage{
-					ID:         c.nextMessageID(),
+					ID:         c.allocBlockID(UIMessageTool, strings.TrimSpace(event.ToolCallID)),
 					Type:       UIMessageTool,
 					Name:       strings.TrimSpace(event.ToolName),
 					Input:      event.Input,
@@ -162,7 +195,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		if state == nil {
 			state = &uiToolStreamState{
 				Message: UIMessage{
-					ID:         c.nextMessageID(),
+					ID:         c.allocBlockID(UIMessageTool, strings.TrimSpace(event.ToolCallID)),
 					Type:       UIMessageTool,
 					Name:       strings.TrimSpace(event.ToolName),
 					Input:      event.Input,
@@ -206,7 +239,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		if state == nil {
 			state = &uiToolStreamState{
 				Message: UIMessage{
-					ID:         c.nextMessageID(),
+					ID:         c.allocBlockID(UIMessageTool, strings.TrimSpace(event.ToolCallID)),
 					Type:       UIMessageTool,
 					Name:       strings.TrimSpace(event.ToolName),
 					Input:      event.Input,
@@ -228,7 +261,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			return nil
 		}
 		return []UIMessage{{
-			ID:          c.nextMessageID(),
+			ID:          c.allocBlockID(UIMessageAttachments, ""),
 			Type:        UIMessageAttachments,
 			Attachments: append([]UIAttachment(nil), event.Attachments...),
 		}}
@@ -242,6 +275,83 @@ func (c *UIMessageStreamConverter) nextMessageID() int {
 	id := c.nextID
 	c.nextID++
 	return id
+}
+
+// allocBlockID allocates the next block ID and records the allocation so
+// ConvertTerminalMessages can align the terminal snapshot with the live blocks.
+func (c *UIMessageStreamConverter) allocBlockID(kind UIMessageType, toolCallID string) int {
+	id := c.nextMessageID()
+	c.emitted = append(c.emitted, uiEmittedBlock{Kind: kind, ToolCallID: toolCallID, ID: id})
+	return id
+}
+
+// finalizeTextBlock closes the active text block, marking its emitted entry as
+// tag-only when stripping inline agent tags leaves no visible content (the
+// terminal snapshot drops such blocks, so they must not take part in
+// positional matching).
+func (c *UIMessageStreamConverter) finalizeTextBlock() {
+	if c.text == nil {
+		return
+	}
+	if stripPersistedAgentTags(c.text.Content) == "" {
+		for i := range c.emitted {
+			if c.emitted[i].Kind == UIMessageText && c.emitted[i].ID == c.text.ID {
+				c.emitted[i].TagOnly = true
+				break
+			}
+		}
+	}
+	c.text = nil
+}
+
+// ConvertTerminalMessages converts the terminal snapshot into UI messages whose
+// IDs line up with the blocks this converter emitted during the live stream.
+// The client orders and upserts blocks by ID, and the snapshot regenerates only
+// text/reasoning/tool blocks from raw model messages — attachments exist solely
+// as stream events. A plain sequential renumbering would therefore shift onto
+// the IDs of live attachment blocks and overwrite them at stream end (the
+// generated image flashes away, then reappears after the history refresh).
+// Instead each snapshot block reuses the ID of its live counterpart — tools are
+// matched by tool call ID, text/reasoning positionally within their kind — and
+// only blocks without one get fresh IDs.
+func (c *UIMessageStreamConverter) ConvertTerminalMessages(raw json.RawMessage) []UIMessage {
+	c.finalizeTextBlock()
+	blocks := ConvertRawModelMessagesToUIAssistantMessages(raw)
+	if len(blocks) == 0 {
+		return nil
+	}
+	consumed := make([]bool, len(c.emitted))
+	for i := range blocks {
+		if id, ok := c.reuseEmittedBlockID(blocks[i].Type, blocks[i].ToolCallID, consumed); ok {
+			blocks[i].ID = id
+			continue
+		}
+		blocks[i].ID = c.nextMessageID()
+	}
+	return blocks
+}
+
+func (c *UIMessageStreamConverter) reuseEmittedBlockID(kind UIMessageType, toolCallID string, consumed []bool) (int, bool) {
+	toolCallID = strings.TrimSpace(toolCallID)
+	if kind == UIMessageTool && toolCallID != "" {
+		for i, blk := range c.emitted {
+			if !consumed[i] && blk.Kind == kind && blk.ToolCallID == toolCallID {
+				consumed[i] = true
+				return blk.ID, true
+			}
+		}
+	}
+	for i, blk := range c.emitted {
+		if consumed[i] || blk.Kind != kind || blk.TagOnly {
+			continue
+		}
+		if kind == UIMessageTool && blk.ToolCallID != "" && toolCallID != "" && blk.ToolCallID != toolCallID {
+			continue
+		}
+		consumed[i] = true
+		return blk.ID, true
+	}
+	return 0, false
 }
 
 func (c *UIMessageStreamConverter) findToolState(toolCallID, toolName string) *uiToolStreamState {

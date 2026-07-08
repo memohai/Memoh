@@ -1464,3 +1464,26 @@ func newLocalChannelHandlerWithMedia() (*LocalChannelHandler, *localChannelMemor
 	handler.SetMediaService(media.NewService(slog.Default(), provider))
 	return handler, provider
 }
+
+func TestExtractAssetRefsFromProcessedEvent_CarriesToolCallID(t *testing.T) {
+	t.Parallel()
+
+	event, err := json.Marshal(map[string]any{
+		"type":       "attachment_delta",
+		"toolCallId": "call-42",
+		"attachments": []any{
+			map[string]any{"type": "image", "content_hash": "asset-1", "mime": "image/png"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	refs := extractAssetRefsFromProcessedEvent(event)
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 asset ref, got %d", len(refs))
+	}
+	if got, _ := refs[0].Metadata["tool_call_id"].(string); got != "call-42" {
+		t.Fatalf("tool_call_id metadata = %q, want call-42", got)
+	}
+}

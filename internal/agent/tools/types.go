@@ -35,7 +35,11 @@ const (
 // current conversation (e.g. inline attachment, reaction, or TTS speech).
 // The agent framework converts these into the appropriate wire-level events.
 type ToolStreamEvent struct {
-	Type        StreamEventType
+	Type StreamEventType
+	// ToolCallID identifies the tool call that produced this side effect, so
+	// downstream persistence can anchor it to the right message (and keep the
+	// live ordering after a history reload). Empty when unknown.
+	ToolCallID  string
 	Attachments []Attachment
 	Reactions   []Reaction
 	Speeches    []Speech

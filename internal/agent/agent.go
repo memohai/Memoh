@@ -1012,7 +1012,7 @@ func toolStreamEventToAgentEvent(evt tools.ToolStreamEvent) StreamEvent {
 		for _, a := range evt.Attachments {
 			atts = append(atts, fileAttachmentFromToolAttachment(a))
 		}
-		return StreamEvent{Type: EventAttachment, Attachments: atts}
+		return StreamEvent{Type: EventAttachment, ToolCallID: evt.ToolCallID, Attachments: atts}
 	case tools.StreamEventReaction:
 		rs := make([]ReactionItem, 0, len(evt.Reactions))
 		for _, r := range evt.Reactions {

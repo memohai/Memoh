@@ -453,3 +453,123 @@ func TestFetchChatModelReturnsEnabledModelAndProvider(t *testing.T) {
 		t.Fatal("fetchChatModel returned disabled provider, want enabled")
 	}
 }
+
+func TestFetchChatModelRejectsImageOnlyModel(t *testing.T) {
+	ctx := context.Background()
+	provider := modelSelectionProviderRow(t, "00000000-0000-0000-0000-000000000401", "openai-completions", true)
+	model := modelSelectionModelRow(t, "00000000-0000-0000-0000-000000000402", "qwen-image", provider.ID, models.ModelTypeChat, true)
+	model.Config = []byte(`{"compatibilities":["image-output"]}`)
+	fake := &modelSelectionFakeQueries{
+		models:   map[string]sqlc.Model{model.ModelID: model},
+		provider: provider,
+	}
+	resolver := newModelSelectionResolver(t, fake)
+
+	_, _, err := resolver.fetchChatModel(ctx, "qwen-image")
+	if err == nil || !strings.Contains(err.Error(), "image generation model") || !strings.Contains(err.Error(), "bot image model") {
+		t.Fatalf("fetchChatModel image-only model error = %v, want image model guidance", err)
+	}
+}
+
+func TestFetchChatModelRejectsImportedImageModelWithoutCompatibility(t *testing.T) {
+	ctx := context.Background()
+	provider := modelSelectionProviderRow(t, "00000000-0000-0000-0000-000000000501", "openai-completions", true)
+	model := modelSelectionModelRow(t, "00000000-0000-0000-0000-000000000502", "wan2.7-image-pro", provider.ID, models.ModelTypeChat, true)
+	fake := &modelSelectionFakeQueries{
+		models:   map[string]sqlc.Model{model.ModelID: model},
+		provider: provider,
+	}
+	resolver := newModelSelectionResolver(t, fake)
+
+	_, _, err := resolver.fetchChatModel(ctx, "wan2.7-image-pro")
+	if err == nil || !strings.Contains(err.Error(), "image generation model") {
+		t.Fatalf("fetchChatModel imported image model error = %v, want image model guidance", err)
+	}
+}
+
+func TestValidateSelectedChatModelAllowsToolCallingImageOutputModel(t *testing.T) {
+	t.Parallel()
+
+	model := models.GetResponse{
+		ModelID: "openrouter/auto",
+		Model: models.Model{
+			Type:   models.ModelTypeChat,
+			Enable: true,
+			Config: models.ModelConfig{
+				Compatibilities: []string{models.CompatToolCall, models.CompatImageOutput},
+			},
+		},
+	}
+	if err := validateSelectedChatModel(model, sqlc.Provider{}); err != nil {
+		t.Fatalf("validateSelectedChatModel() error = %v, want nil", err)
+	}
+}
+
+func TestValidateSelectedChatModelAllowsGoogleImageOutputModel(t *testing.T) {
+	t.Parallel()
+
+	model := models.GetResponse{
+		ModelID: "gemini-2.5-flash-image-preview",
+		Model: models.Model{
+			Type:   models.ModelTypeChat,
+			Enable: true,
+			Config: models.ModelConfig{
+				Compatibilities: []string{models.CompatImageOutput},
+			},
+		},
+	}
+	provider := sqlc.Provider{ClientType: string(models.ClientTypeGoogleGenerativeAI)}
+	if err := validateSelectedChatModel(model, provider); err != nil {
+		t.Fatalf("validateSelectedChatModel() error = %v, want nil", err)
+	}
+}
+
+func TestIsKnownStandaloneImageModelID(t *testing.T) {
+	t.Parallel()
+
+	for _, id := range []string{
+		"qwen-image-2.0", "wan2.7-image", "z-image-turbo",
+		"flux-schnell", "stable-diffusion-3.5-large-turbo",
+		"gpt-image-1", "dall-e-3", "doubao-seedream-4-0-250828",
+	} {
+		if !isKnownStandaloneImageModelID(id) {
+			t.Errorf("isKnownStandaloneImageModelID(%q) = false, want true", id)
+		}
+	}
+	for _, id := range []string{
+		"gpt-4o", "qwen-max", "deepseek-chat", "",
+		// Chat models that merely share a leading token must not match: the
+		// "wan"/"flux" prefixes are scoped to image-model naming conventions.
+		"wanjuan-chat", "want-to-talk", "fluxion-7b", "fluent-chat",
+	} {
+		if isKnownStandaloneImageModelID(id) {
+			t.Errorf("isKnownStandaloneImageModelID(%q) = true, want false", id)
+		}
+	}
+}
+
+func TestIsImageOnlyChatModelToolCallEscape(t *testing.T) {
+	t.Parallel()
+
+	// A model whose name looks like an image model but which advertises tool
+	// calling must not be classified as image-only — tool calling is the
+	// override that lets a name collision be used as a chat model.
+	toolCaller := models.GetResponse{
+		ModelID: "wan2.7-omni",
+		Model: models.Model{
+			Config: models.ModelConfig{Compatibilities: []string{models.CompatToolCall, models.CompatImageOutput}},
+		},
+	}
+	if isImageOnlyChatModel(toolCaller, sqlc.Provider{}) {
+		t.Fatal("a tool-calling model must not be treated as image-only, even with an image-like name")
+	}
+
+	// Without tool calling, the same name is still rejected.
+	imageOnly := models.GetResponse{
+		ModelID: "wan2.7-image",
+		Model:   models.Model{Config: models.ModelConfig{Compatibilities: []string{models.CompatImageOutput}}},
+	}
+	if !isImageOnlyChatModel(imageOnly, sqlc.Provider{}) {
+		t.Fatal("a non-tool-calling image model name should be treated as image-only")
+	}
+}
