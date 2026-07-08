@@ -217,6 +217,8 @@ func TestPostgresRepairIncompleteForkSessionsMigration(t *testing.T) {
 		followUpCopyMessage = "00000000-0000-0000-0000-000000075312"
 		followUpNewMessage  = "00000000-0000-0000-0000-000000075313"
 		validForkMessage    = "00000000-0000-0000-0000-000000075314"
+		followUpCopySecond  = "00000000-0000-0000-0000-000000075315"
+		followUpNewReply    = "00000000-0000-0000-0000-000000075316"
 	)
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO bot_sessions (id, bot_id, channel_type, title, metadata, created_at, updated_at)
@@ -256,16 +258,26 @@ func TestPostgresRepairIncompleteForkSessionsMigration(t *testing.T) {
 				(SELECT created_at - interval '1 minute' FROM bot_sessions WHERE id = $4)
 			),
 			(
+				$9, $1, $4, 'assistant', '{"role":"assistant","content":"copied second"}'::jsonb,
+				'00000000-0000-0000-0000-000000075325', 2, 2, true,
+				(SELECT created_at - interval '30 seconds' FROM bot_sessions WHERE id = $4)
+			),
+			(
 				$6, $1, $4, 'user', '{"role":"user","content":"follow-up"}'::jsonb,
 				'00000000-0000-0000-0000-000000075323', 1, 1, true,
 				(SELECT created_at + interval '1 minute' FROM bot_sessions WHERE id = $4)
+			),
+			(
+				$10, $1, $4, 'assistant', '{"role":"assistant","content":"follow-up reply"}'::jsonb,
+				'00000000-0000-0000-0000-000000075323', 1, 2, true,
+				(SELECT created_at + interval '2 minutes' FROM bot_sessions WHERE id = $4)
 			),
 			(
 				$8, $1, $7, 'assistant', '{"role":"assistant","content":"valid copied"}'::jsonb,
 				'00000000-0000-0000-0000-000000075324', 1, 2, true,
 				(SELECT created_at - interval '1 minute' FROM bot_sessions WHERE id = $7)
 			)
-	`, postgresSessionTestBotID, pureResidualID, pureResidualMessage, withFollowUpID, followUpCopyMessage, followUpNewMessage, validForkID, validForkMessage); err != nil {
+	`, postgresSessionTestBotID, pureResidualID, pureResidualMessage, withFollowUpID, followUpCopyMessage, followUpNewMessage, validForkID, validForkMessage, followUpCopySecond, followUpNewReply); err != nil {
 		t.Fatalf("insert repair fork messages: %v", err)
 	}
 
@@ -280,6 +292,11 @@ func TestPostgresRepairIncompleteForkSessionsMigration(t *testing.T) {
 	assertPostgresSessionDeleted(t, ctx, tx, pureResidualID, true)
 	assertPostgresSessionDeleted(t, ctx, tx, withFollowUpID, false)
 	assertPostgresSessionDeleted(t, ctx, tx, validForkID, false)
+	assertPostgresMessageTurnPosition(t, ctx, tx, followUpCopyMessage, 1)
+	assertPostgresMessageTurnPosition(t, ctx, tx, followUpCopySecond, 2)
+	assertPostgresMessageTurnPosition(t, ctx, tx, followUpNewMessage, 3)
+	assertPostgresMessageTurnPosition(t, ctx, tx, followUpNewReply, 3)
+	assertPostgresSessionNextTurnPosition(t, ctx, tx, withFollowUpID, 4)
 }
 
 const (
@@ -398,5 +415,35 @@ func assertPostgresSessionDeleted(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	}
 	if deleted != wantDeleted {
 		t.Fatalf("session %s deleted = %v, want %v", sessionID, deleted, wantDeleted)
+	}
+}
+
+func assertPostgresMessageTurnPosition(t *testing.T, ctx context.Context, tx pgx.Tx, messageID string, want int64) {
+	t.Helper()
+	var got int64
+	if err := tx.QueryRow(ctx, `
+		SELECT turn_position
+		FROM bot_history_messages
+		WHERE id = $1
+	`, messageID).Scan(&got); err != nil {
+		t.Fatalf("read message %s turn position: %v", messageID, err)
+	}
+	if got != want {
+		t.Fatalf("message %s turn_position = %d, want %d", messageID, got, want)
+	}
+}
+
+func assertPostgresSessionNextTurnPosition(t *testing.T, ctx context.Context, tx pgx.Tx, sessionID string, want int64) {
+	t.Helper()
+	var got int64
+	if err := tx.QueryRow(ctx, `
+		SELECT next_turn_position
+		FROM bot_sessions
+		WHERE id = $1
+	`, sessionID).Scan(&got); err != nil {
+		t.Fatalf("read session %s next turn position: %v", sessionID, err)
+	}
+	if got != want {
+		t.Fatalf("session %s next_turn_position = %d, want %d", sessionID, got, want)
 	}
 }
