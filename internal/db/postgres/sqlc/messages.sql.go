@@ -4787,7 +4787,8 @@ updated AS (
   UPDATE bot_history_messages old
   SET turn_superseded_by_turn_id = replacement.id,
       turn_superseded_at = $5,
-      turn_superseded_reason = $6
+      turn_superseded_reason = $6,
+      turn_visible = false
   FROM replacement
   WHERE old.turn_id = $1
     AND old.session_id = $2
