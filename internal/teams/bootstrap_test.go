@@ -28,6 +28,20 @@ func TestEnsureDefaultBootstrapsTeamAndMembers(t *testing.T) {
 	}
 }
 
+func TestEnsureDefaultEnrollsAllUsersAsMember(t *testing.T) {
+	db := &recordingBootstrapDB{}
+	if err := EnsureDefault(context.Background(), db); err != nil {
+		t.Fatalf("EnsureDefault: %v", err)
+	}
+	// second exec is member backfill; must insert fixed 'member', not read users.role
+	if !strings.Contains(db.execs[1].sql, "INSERT INTO team_members") {
+		t.Fatal("expected team_members backfill")
+	}
+	if strings.Contains(db.execs[1].sql, "users.role") || strings.Contains(db.execs[1].sql, "CASE WHEN role") {
+		t.Fatal("member backfill must not read users.role")
+	}
+}
+
 type recordingBootstrapDB struct {
 	execs []recordedBootstrapExec
 }

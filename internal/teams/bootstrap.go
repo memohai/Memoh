@@ -27,9 +27,7 @@ SET slug = EXCLUDED.slug,
 	}
 	_, err := db.Exec(ctx, `
 INSERT INTO team_members (team_id, user_id, role)
-SELECT $1::uuid,
-       id,
-       CASE WHEN role = 'admin' THEN 'admin' ELSE 'member' END
+SELECT $1::uuid, id, 'member'
 FROM users
 ON CONFLICT (team_id, user_id) DO NOTHING
 `, DefaultTeamID)

@@ -1359,6 +1359,22 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 					return fmt.Errorf("backfill default team members: %w", err)
 				}
 			}
+			if postgresStore != nil {
+				cnt, err := accountStore.CountAccounts(ctx)
+				if err != nil {
+					return fmt.Errorf("count accounts for owner grant: %w", err)
+				}
+				if cnt == 1 {
+					if _, err := postgresStore.Pool().Exec(ctx, `
+INSERT INTO team_members (team_id, user_id, role)
+SELECT $1::uuid, id, 'owner'
+FROM users
+ON CONFLICT (team_id, user_id) DO UPDATE SET role = 'owner'
+`, teams.DefaultTeamID); err != nil {
+						return fmt.Errorf("grant bootstrap owner: %w", err)
+					}
+				}
+			}
 			botService.SetContainerLifecycle(manager)
 			botService.SetContainerReachability(func(ctx context.Context, botID string) error {
 				_, err := manager.MCPClient(ctx, botID)
