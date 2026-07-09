@@ -51,6 +51,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      # Release ownership note for future maintainers and agents:
+      # packages/ui is a git submodule pinned by this repository, but Memoh
+      # releases intentionally publish the pinned @memohai/ui sources together
+      # with the rest of the Memoh npm workspace. In other words,
+      # @memohai/ui@<Memoh version> means "the UI package content selected by
+      # this Memoh release", not necessarily a matching tag in memohai/ui.
+      #
+      # Do not remove packages/ui from the version-sync or publish path just
+      # because it is a submodule. If @memohai/ui ever moves to an independent
+      # release cadence, update this workflow, scripts/publish-packages.mjs, and
+      # the release handoff docs in the same PR so the ownership model stays
+      # explicit.
       - name: Sync workspace versions
         shell: bash
         run: |
