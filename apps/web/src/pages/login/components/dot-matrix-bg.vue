@@ -17,54 +17,61 @@ import {
   type ShapeDef,
 } from './dot-matrix-keyframes'
 
-/** 点阵背景:归一化轨迹 × 当前视口,canvas 矢量 + 渐变,再采样成点阵。 */
+/**
+ * 点阵背景:归一化关键帧轨迹驱动的几何形状,在常亮点网格上轮流点亮。
+ * 形状与键帧(dot-matrix-keyframes.ts)是初版原样;本文件的渲染管线
+ * 重写过一次,解决初版两大问题——
+ *   1. CPU 70-80%:初版每帧对全屏尺寸的离屏画布 getImageData(≈2M 像素)
+ *      再逐点画 ~1.5 万个独立 arc/fill。现在离屏"场"画布直接用点阵分辨率
+ *      (1 像素 = 1 个点,抗锯齿天然充当覆盖率采样),getImageData 缩到
+ *      ~1 万像素;常亮层用 resize 时缓存的 Path2D 一笔画完;点亮层按
+ *      量化档位聚合成少数几条 Path2D;再加 30fps 帧率上限。
+ *   2. 节奏太慢:初版 MOTION_RATE=0.55 全局降速,现在按键帧原速(1.0)播放。
+ * 颜色裁决:亮暗都不带彩——初版暗色用 accent 调色板逐点上色,已否决;
+ * 两种主题统一用 text-foreground 单色,暗色仅调点亮增益。
+ * 使用方:SaaS 登录页 + 实例创建/等待/无工作区页面。
+ */
 
-const GAP = 14
+/** 点间距(CSS px) */
+const GAP = 13.5
 const DOT_RADIUS = 1
+/** 点亮覆盖率量化档数(也是每帧点亮层的最大 fill 次数) */
 const LEVELS = 4
-const MOTION_RATE = 0.55
+/** 键帧播放速率;1 = 按 keyframes 原速 */
+const MOTION_RATE = 1
 /** 归一化坐标映射到视口时的内边距(含形状半径余量) */
 const VIEW_INSET = 0.08
-/** 离屏画布长边上限,避免 4K 全屏每帧 getImageData 过重 */
-const MAX_FIELD_DIM = 1920
+/** 帧率上限:背景动效 30fps 足够顺滑,渲染开销直接减半 */
+const FRAME_MS = 1000 / 30
 
-const AMBIENT_LIGHT = 0.08
+// 网格亮度(点色 × alpha),亮暗同值(设计裁决:暗色不单独加亮)
+const AMBIENT = 0.105
+// 点亮增益:暗色白点需要更高 alpha 才能与亮色的黑点等感知强度
 const GAIN_LIGHT = 0.32
-const AMBIENT_DARK = 0.12
-const GAIN_DARK = 0.72
-
-const ACCENT_VARS = [
-  '--accent-blue', '--accent-purple', '--accent-teal',
-  '--accent-green', '--accent-orange', '--accent-pink', '--accent-red',
-]
+const GAIN_DARK = 0.44
 
 const canvasEl = ref<HTMLCanvasElement | null>(null)
 
 let raf = 0
 let ctx: CanvasRenderingContext2D | null = null
+/** 点阵分辨率的离屏"场":alpha 通道即每个点的点亮覆盖率 */
 let field: HTMLCanvasElement | null = null
 let fieldCtx: CanvasRenderingContext2D | null = null
 let cols = 0
 let rows = 0
-let fieldW = 0
-let fieldH = 0
-let fieldScale = 1
 let viewW = 0
 let viewH = 0
 let dpr = 1
 let dotColor = 'currentColor'
 let isDark = false
-let paletteRGB: string[] = []
+let ambientPath: Path2D | null = null
 let lastNow = 0
+let lastFrameAt = 0
 let reduceMotion = false
 let animTime = 0
 let pageVisible = true
 
-function minDim(w: number, h: number) {
-  return Math.min(w, h)
-}
-
-/** 归一化 [0,1] → 视图像素,始终铺满当前窗口(含超宽/竖屏) */
+/** 归一化 [0,1] → 场像素,始终铺满当前窗口(含超宽/竖屏) */
 function normToPx(nx: number, ny: number, w: number, h: number): [number, number] {
   const span = 1 - 2 * VIEW_INSET
   return [
@@ -96,23 +103,11 @@ function sampleTrack(track: KeyframeTrack, frame: number, comp = 0): number {
   return na + (nb - na) * t
 }
 
-function toRGB(color: string): string {
-  if (!fieldCtx) return '255,255,255'
-  fieldCtx.fillStyle = color
-  fieldCtx.fillRect(0, 0, 1, 1)
-  const d = fieldCtx.getImageData(0, 0, 1, 1).data
-  return `${d[0]},${d[1]},${d[2]}`
-}
-
 function readColor() {
   if (!canvasEl.value) return
   const cs = getComputedStyle(canvasEl.value)
   dotColor = cs.color || 'currentColor'
   isDark = document.documentElement.classList.contains('dark')
-  paletteRGB = ACCENT_VARS
-    .map(v => cs.getPropertyValue(v).trim())
-    .filter(Boolean)
-    .map(toRGB)
 }
 
 function resize() {
@@ -125,22 +120,32 @@ function resize() {
   el.width = Math.max(1, Math.round(viewW * dpr))
   el.height = Math.max(1, Math.round(viewH * dpr))
 
-  const longEdge = Math.max(viewW, viewH)
-  fieldScale = longEdge > MAX_FIELD_DIM ? MAX_FIELD_DIM / longEdge : 1
-  fieldW = Math.max(1, Math.round(viewW * fieldScale))
-  fieldH = Math.max(1, Math.round(viewH * fieldScale))
-
   cols = Math.max(1, Math.ceil(viewW / GAP) + 1)
   rows = Math.max(1, Math.ceil(viewH / GAP) + 1)
 
+  // 场画布 = 点阵分辨率:1 像素对应 1 个点,是整个管线省 CPU 的关键
   if (!field) field = document.createElement('canvas')
-  field.width = fieldW
-  field.height = fieldH
+  field.width = cols
+  field.height = rows
   fieldCtx = field.getContext('2d', { willReadFrequently: true })
+
+  // 常亮网格一次成 Path,之后每帧一笔 fill
+  const TWO_PI = Math.PI * 2
+  ambientPath = new Path2D()
+  for (let y = 0; y < rows; y++) {
+    const py = y * GAP
+    for (let x = 0; x < cols; x++) {
+      const px = x * GAP
+      // 每个圆前先 moveTo,避免 Path2D 把上一个圆的终点连线过来
+      ambientPath.moveTo(px + DOT_RADIUS, py)
+      ambientPath.arc(px, py, DOT_RADIUS, 0, TWO_PI)
+    }
+  }
   readColor()
 }
 
-function shapeFillGradient(s: ShapeDef, rgb: string, alpha: number, unit: number) {
+/** 形状内的线性渐变:沿 gradAngle 从全亮衰减到 40%,让点亮有方向感 */
+function shapeFillGradient(s: ShapeDef, alpha: number, unit: number) {
   if (!fieldCtx) return '#fff'
   const r = s.radius * s.scale * unit
   const ang = s.gradAngle
@@ -149,8 +154,8 @@ function shapeFillGradient(s: ShapeDef, rgb: string, alpha: number, unit: number
   const hi = Math.min(1, alpha)
   const lo = Math.min(1, alpha * 0.4)
   const grad = fieldCtx.createLinearGradient(-dx, -dy, dx, dy)
-  grad.addColorStop(0, `rgba(${rgb},${hi})`)
-  grad.addColorStop(1, `rgba(${rgb},${lo})`)
+  grad.addColorStop(0, `rgba(255,255,255,${hi})`)
+  grad.addColorStop(1, `rgba(255,255,255,${lo})`)
   return grad
 }
 
@@ -178,27 +183,21 @@ function drawTri(r: number) {
   fieldCtx.closePath()
 }
 
-function drawShape(
-  s: ShapeDef,
-  frame: number,
-  vw: number,
-  vh: number,
-  rgb: string,
-) {
+function drawShape(s: ShapeDef, frame: number) {
   if (!fieldCtx) return
-  const unit = minDim(vw, vh)
+  const unit = Math.min(cols, rows)
   const nx = sampleTrack(s.pos, frame, 0)
   const ny = sampleTrack(s.pos, frame, 1)
   const rotDeg = sampleTrack(s.rot, frame, 0) + s.localRot
-  const [cx, cy] = normToPx(nx, ny, vw, vh)
+  const [cx, cy] = normToPx(nx, ny, cols, rows)
   const r = s.radius * s.scale * unit
   const alpha = isDark ? Math.max(s.opacity, 0.88) : 1
 
   fieldCtx.save()
   fieldCtx.translate(cx, cy)
   fieldCtx.rotate(rotDeg * (Math.PI / 180))
-  fieldCtx.fillStyle = shapeFillGradient(s, rgb, alpha, unit)
-  fieldCtx.strokeStyle = shapeFillGradient(s, rgb, alpha, unit)
+  fieldCtx.fillStyle = shapeFillGradient(s, alpha, unit)
+  fieldCtx.strokeStyle = shapeFillGradient(s, alpha, unit)
 
   switch (s.kind) {
     case 'circle':
@@ -237,14 +236,11 @@ function drawShape(
 
 function drawField(frame: number) {
   if (!fieldCtx || !field) return
-  fieldCtx.clearRect(0, 0, fieldW, fieldH)
+  fieldCtx.clearRect(0, 0, cols, rows)
+  // 形状构图仍按主题分(亮暗两套编排不同);颜色不分——统一无彩,
+  // 场里只写 alpha 覆盖率,着色在主画布用 dotColor 完成
   const theme = isDark ? THEMES.dark : THEMES.light
-  theme.shapes.forEach((s, i) => {
-    const rgb = isDark
-      ? (paletteRGB[i % paletteRGB.length] ?? '255,255,255')
-      : toRGB(dotColor)
-    drawShape(s, frame, fieldW, fieldH, rgb)
-  })
+  theme.shapes.forEach(s => drawShape(s, frame))
 }
 
 function scheduleFrame() {
@@ -254,7 +250,13 @@ function scheduleFrame() {
 }
 
 function render(now: number) {
-  if (!ctx || !fieldCtx || !field || !canvasEl.value) return
+  if (!ctx || !fieldCtx || !field || !canvasEl.value || !ambientPath) return
+  // 30fps 帧率闸:跳过的帧只重新排队,不推进时间轴
+  if (now - lastFrameAt < FRAME_MS) {
+    scheduleFrame()
+    return
+  }
+  lastFrameAt = now
   if (!lastNow) lastNow = now
   const dt = Math.min(0.05, (now - lastNow) / 1000)
   lastNow = now
@@ -262,45 +264,39 @@ function render(now: number) {
   const frame = (animTime * STAGE_FR) % STAGE_OP
 
   drawField(frame)
-  const data = fieldCtx.getImageData(0, 0, fieldW, fieldH).data
-  const el = canvasEl.value
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  ctx.clearRect(0, 0, el.width, el.height)
+  const data = fieldCtx.getImageData(0, 0, cols, rows).data
 
-  const theme = isDark ? THEMES.dark : THEMES.light
-  const ambient = isDark ? AMBIENT_DARK : Math.max(AMBIENT_LIGHT, theme.bgOpacity * 0.65)
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, viewW, viewH)
+  ctx.fillStyle = dotColor
+
+  // 常亮层:一笔
+  ctx.globalAlpha = AMBIENT
+  ctx.fill(ambientPath)
+
+  // 点亮层:按量化档位聚合,每档一条 Path2D 一笔 fill
   const gain = isDark ? GAIN_DARK : GAIN_LIGHT
   const TWO_PI = Math.PI * 2
-
-  ctx.fillStyle = dotColor
-  ctx.globalAlpha = ambient
+  const buckets: (Path2D | null)[] = Array.from({ length: LEVELS }, () => null)
   for (let y = 0; y < rows; y++) {
     const py = y * GAP
+    const rowBase = y * cols
     for (let x = 0; x < cols; x++) {
-      ctx.beginPath()
-      ctx.arc(x * GAP, py, DOT_RADIUS, 0, TWO_PI)
-      ctx.fill()
+      const raw = data[(rowBase + x) * 4 + 3] / 255
+      if (raw <= 0.04) continue
+      const level = Math.min(LEVELS, Math.round(raw * LEVELS))
+      if (level <= 0) continue
+      const px = x * GAP
+      const path = (buckets[level - 1] ??= new Path2D())
+      path.moveTo(px + DOT_RADIUS, py)
+      path.arc(px, py, DOT_RADIUS, 0, TWO_PI)
     }
   }
-
-  if (!isDark) ctx.fillStyle = dotColor
-  for (let y = 0; y < rows; y++) {
-    const py = y * GAP
-    const fy = Math.min(fieldH - 1, Math.round(py * fieldScale))
-    for (let x = 0; x < cols; x++) {
-      const px = x * GAP
-      const fx = Math.min(fieldW - 1, Math.round(px * fieldScale))
-      const idx = (fy * fieldW + fx) * 4
-      const raw = data[idx + 3] / 255
-      if (raw <= 0.04) continue
-      const cov = Math.round(raw * LEVELS) / LEVELS
-      if (cov <= 0) continue
-      if (isDark) ctx.fillStyle = `rgb(${data[idx]},${data[idx + 1]},${data[idx + 2]})`
-      ctx.globalAlpha = cov * gain
-      ctx.beginPath()
-      ctx.arc(px, py, DOT_RADIUS, 0, TWO_PI)
-      ctx.fill()
-    }
+  for (let level = 1; level <= LEVELS; level++) {
+    const path = buckets[level - 1]
+    if (!path) continue
+    ctx.globalAlpha = (level / LEVELS) * gain
+    ctx.fill(path)
   }
   ctx.globalAlpha = 1
   scheduleFrame()
@@ -310,12 +306,18 @@ let resizeObserver: ResizeObserver | null = null
 let themeObserver: MutationObserver | null = null
 let mediaQuery: MediaQueryList | null = null
 
+/** reduce-motion 下仍画一帧静态点阵(含当前形状),只是不再推进 */
+function renderOnce() {
+  cancelAnimationFrame(raf)
+  raf = requestAnimationFrame(render)
+}
+
 function onReduceMotionChange() {
   reduceMotion = !!mediaQuery?.matches
   lastNow = 0
+  lastFrameAt = 0
   if (reduceMotion) {
-    cancelAnimationFrame(raf)
-    raf = requestAnimationFrame(render)
+    renderOnce()
     return
   }
   scheduleFrame()
@@ -324,6 +326,7 @@ function onReduceMotionChange() {
 function onVisibilityChange() {
   pageVisible = !document.hidden
   lastNow = 0
+  lastFrameAt = 0
   if (!pageVisible) {
     cancelAnimationFrame(raf)
     return
@@ -340,9 +343,15 @@ onMounted(() => {
   mediaQuery.addEventListener('change', onReduceMotionChange)
   document.addEventListener('visibilitychange', onVisibilityChange)
   resize()
-  resizeObserver = new ResizeObserver(() => resize())
+  resizeObserver = new ResizeObserver(() => {
+    resize()
+    if (reduceMotion) renderOnce()
+  })
   resizeObserver.observe(el)
-  themeObserver = new MutationObserver(() => readColor())
+  themeObserver = new MutationObserver(() => {
+    readColor()
+    if (reduceMotion) renderOnce()
+  })
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
   raf = requestAnimationFrame(render)
 })
