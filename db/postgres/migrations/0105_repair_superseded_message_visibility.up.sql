@@ -139,13 +139,7 @@ repaired_next_turn_position AS (
 -- that merely match the filter but are already consistent are left untouched.
 UPDATE bot_sessions s
 SET next_turn_position = GREATEST(s.next_turn_position, repaired_next_turn_position.value),
-    updated_at = now(),
-    metadata = jsonb_set(
-      s.metadata,
-      '{repair}',
-      COALESCE(s.metadata->'repair', '{}'::jsonb) || jsonb_build_object('0105_incomplete_fork_turn_positions', true),
-      true
-    )
+    updated_at = now()
 FROM repaired_next_turn_position
 WHERE s.id = repaired_next_turn_position.session_id
   AND (

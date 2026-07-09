@@ -377,7 +377,7 @@ func TestPostgresRepairIncompleteForkRetriedCopiedTurnMigration(t *testing.T) {
 	assertPostgresMessageTurnPosition(t, ctx, tx, reusedUser2, 3)
 	assertPostgresMessageTurnPosition(t, ctx, tx, replacementAssistant, 3)
 	assertPostgresSessionNextTurnPosition(t, ctx, tx, sessionID, 4)
-	assertPostgresSessionRepairMarker(t, ctx, tx, sessionID, "0105_incomplete_fork_turn_positions", true)
+	assertPostgresSessionRepairMarker(t, ctx, tx, sessionID, "0105_incomplete_fork_turn_positions", false)
 
 	var supersededVisible bool
 	if err := tx.QueryRow(ctx, `
@@ -454,7 +454,7 @@ func TestPostgresRepairIncompleteForkTurnlessFollowUpMigration(t *testing.T) {
 	assertPostgresSessionDeleted(t, ctx, tx, sessionID, false)
 	assertPostgresMessageTurnPosition(t, ctx, tx, copiedAssistant, 1)
 	assertPostgresSessionNextTurnPosition(t, ctx, tx, sessionID, 2)
-	assertPostgresSessionRepairMarker(t, ctx, tx, sessionID, "0105_incomplete_fork_turn_positions", true)
+	assertPostgresSessionRepairMarker(t, ctx, tx, sessionID, "0105_incomplete_fork_turn_positions", false)
 
 	var turnless bool
 	if err := tx.QueryRow(ctx, `
