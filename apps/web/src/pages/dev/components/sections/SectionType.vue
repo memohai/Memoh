@@ -5,7 +5,7 @@
 // always reflects the source of truth. Tune a token → the whole app + this
 // wall move together.
 import { onMounted, ref } from 'vue'
-import { Button } from '@memohai/ui'
+import { Button } from '@felinic/ui'
 import { RefreshCw } from 'lucide-vue-next'
 import SectionShell from '../components/SectionShell.vue'
 import Specimen from '../components/Specimen.vue'

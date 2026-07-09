@@ -99,7 +99,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   Switch,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import type { ScheduleSchedule } from '@memohai/sdk'
 
 withDefaults(defineProps<{

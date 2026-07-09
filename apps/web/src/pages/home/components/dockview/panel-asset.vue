@@ -52,7 +52,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { File, Download } from 'lucide-vue-next'
-import { Button, toast } from '@memohai/ui'
+import { Button, toast } from '@felinic/ui'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
 import PanePlaceholder from '@/components/pane-placeholder/index.vue'

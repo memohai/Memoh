@@ -615,7 +615,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   Plus,
@@ -659,7 +659,7 @@ import {
   Popover,
   PopoverTrigger,
   PopoverContent,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import PageShell from '@/components/page-shell/index.vue'

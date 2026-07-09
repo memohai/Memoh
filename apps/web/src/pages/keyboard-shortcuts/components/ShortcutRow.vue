@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Button, Kbd, KbdGroup } from '@memohai/ui'
+import { Button, Kbd, KbdGroup } from '@felinic/ui'
 import { RotateCcw } from 'lucide-vue-next'
 import { comboFromBinding, displayKeyCombo } from '@/lib/keyboard-combo'
 import { detectPlatform, type KeyboardBinding } from '@/lib/keyboard-bindings'

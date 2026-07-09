@@ -37,7 +37,7 @@
 
 <script setup lang="ts">
 import { ChevronsUpDown } from 'lucide-vue-next'
-import { selectTriggerClass } from '@memohai/ui'
+import { selectTriggerClass } from '@felinic/ui'
 import { computed } from 'vue'
 import type { FetchprovidersGetResponse } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'

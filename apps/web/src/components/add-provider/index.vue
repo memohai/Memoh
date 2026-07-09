@@ -180,7 +180,7 @@ import {
   Label,
   Switch,
   Separator,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
@@ -194,7 +194,7 @@ import FieldStack from '@/components/settings/field-stack.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import { LLM_CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { computed, ref, watch } from 'vue'
 import { providerPresets } from '@/constants/provider-presets'
 import type { ProviderPreset } from '@/constants/provider-presets'

@@ -75,7 +75,7 @@
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { Check } from 'lucide-vue-next'
-import { menuItemClass, menuLabelClass, menuSearchHeaderClass, menuSearchInputClass, virtualListboxClass } from '@memohai/ui'
+import { menuItemClass, menuLabelClass, menuSearchHeaderClass, menuSearchInputClass, virtualListboxClass } from '@felinic/ui'
 import type { ModelsGetResponse, ModelsModelType, ProvidersGetResponse } from '@memohai/sdk'
 import { useListboxKeyboard } from '@/composables/useListboxKeyboard'
 

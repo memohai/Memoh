@@ -24,7 +24,7 @@
 import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Spinner } from '@memohai/ui'
+import { Spinner } from '@felinic/ui'
 import { CircleCheck, CircleX } from 'lucide-vue-next'
 import { postBotsByBotIdMcpByIdOauthExchange } from '@memohai/sdk'
 

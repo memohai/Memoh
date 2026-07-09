@@ -435,7 +435,7 @@ import {
   Skeleton,
   selectTriggerClass,
   toast,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import {
   getBotsByBotIdMemory,
   getBotsByBotIdMemoryStatus,

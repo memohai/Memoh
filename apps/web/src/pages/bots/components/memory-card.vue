@@ -61,7 +61,7 @@
 <script setup lang="ts">
 import { Pencil } from 'lucide-vue-next'
 import { computed } from 'vue'
-import { Badge, Button } from '@memohai/ui'
+import { Badge, Button } from '@felinic/ui'
 import type { AdaptersMemoryItem } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { formatRelativeTime } from '@/utils/date-time'

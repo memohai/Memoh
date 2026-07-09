@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, provide } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
-import { Toaster } from '@memohai/ui'
+import { Toaster } from '@felinic/ui'
 import { useSettingsStore } from '@memohai/web/store/settings'
 import { useUpdateStore } from '@memohai/web/store/update'
 import { DesktopShellKey } from '@memohai/web/lib/desktop-shell'

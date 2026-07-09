@@ -100,7 +100,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { X } from 'lucide-vue-next'
-import { Button } from '@memohai/ui'
+import { Button } from '@felinic/ui'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 

@@ -4,7 +4,7 @@
 // closure that does NOT expose its `.config`, so variant keys cannot be read
 // from the cva function at runtime. They are mirrored here instead — keep in
 // sync with the `cva(...)` declarations in packages/ui/src/components/*/index.ts.
-// (If @memohai/ui ever re-exports the raw variant config, this can go back to
+// (If @felinic/ui ever re-exports the raw variant config, this can go back to
 // runtime introspection.)
 
 export interface VariantSpec {

@@ -31,7 +31,7 @@ import { useI18n } from 'vue-i18n'
 import { Terminal, type ILink } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SerializeAddon } from '@xterm/addon-serialize'
-import { Button } from '@memohai/ui'
+import { Button } from '@felinic/ui'
 import {
   readTerminalSnapshot,
   terminalCacheKey,

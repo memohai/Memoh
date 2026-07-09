@@ -57,7 +57,7 @@
 
 <script setup lang="ts">
 import { ExternalLink } from 'lucide-vue-next'
-import { Card } from '@memohai/ui'
+import { Card } from '@felinic/ui'
 
 // 整卡可点,hover 是刻意的 owner 级交互反馈(修掉 plugin 卡原本没有反馈的 bug)
 const rootClass = 'group flex cursor-pointer flex-row items-start gap-3 p-4 transition-colors hover:border-foreground/20 hover:bg-accent/20' /* ui-allow-style */

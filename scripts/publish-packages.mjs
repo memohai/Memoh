@@ -9,7 +9,7 @@ const ROOT_DIR = dirname(dirname(fileURLToPath(import.meta.url)))
 // packages/ui is a git submodule, but it intentionally stays in this publish
 // allowlist. Memoh releases publish the pinned UI package under the Memoh
 // release version, so the npm package represents the UI sources selected by
-// this host release. If @memohai/ui moves to an independent release cadence,
+// this host release. If @felinic/ui moves to an independent release cadence,
 // remove it here and from .github/workflows/release.yml in the same change.
 const CANDIDATE_DIRS = [
   'apps/desktop',
@@ -109,6 +109,9 @@ for (const dir of CANDIDATE_DIRS) {
   }
 
   log.info(`${name}@${version}`)
+  if (name === '@felinic/ui') {
+    log.info('@felinic/ui requires NPM_TOKEN publish rights for the @felinic scope')
+  }
   if (publish(dir, version)) {
     log.ok(`${name}@${version}`)
     published++

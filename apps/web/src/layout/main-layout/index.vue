@@ -18,7 +18,7 @@
 </template>
 <script setup lang="ts">
 import { ref, watch, inject } from 'vue'
-import { SidebarProvider } from '@memohai/ui'
+import { SidebarProvider } from '@felinic/ui'
 import { useMediaQuery } from '@vueuse/core'
 import { DesktopShellKey } from '@/lib/desktop-shell'
 

@@ -321,7 +321,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { CloudUpload, Download, FilePlus, FolderPlus, ListChecks, RefreshCw, Trash2, Upload, X } from 'lucide-vue-next'
 import {
   Button,
@@ -341,7 +341,7 @@ import {
   DialogTitle,
   DialogFooter,
   ScrollArea,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import {
   getBotsByBotIdContainerFsList,
   postBotsByBotIdContainerFsUpload,

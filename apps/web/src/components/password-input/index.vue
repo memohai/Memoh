@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Password input with a trailing show/hide toggle. Thin wrapper over the
-// InputGroup atoms from @memohai/ui so it inherits the field-edge design
+// InputGroup atoms from @felinic/ui so it inherits the field-edge design
 // language and stays consistent with the secret-field pattern in channel-field.
 //
 // `class` is routed to the InputGroup wrapper (callers like the login page pass
@@ -10,7 +10,7 @@
 import type { HTMLAttributes } from 'vue'
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { InputGroup, InputGroupInput, InputGroupAddon, InputGroupButton } from '@memohai/ui'
+import { InputGroup, InputGroupInput, InputGroupAddon, InputGroupButton } from '@felinic/ui'
 import { Eye, EyeOff } from 'lucide-vue-next'
 
 defineOptions({ inheritAttrs: false })

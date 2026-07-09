@@ -23,7 +23,7 @@
 </template>
 
 <script setup lang="ts">
-import { TextButton } from '@memohai/ui'
+import { TextButton } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{

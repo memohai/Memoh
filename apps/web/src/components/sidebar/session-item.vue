@@ -140,7 +140,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { acpAgentDisplayName, acpAgentIcon, normalizeACPAgentID } from '@/utils/acp'
 import { splitScriptRuns } from '@/utils/script-runs'
 import { normalizedRuntimeType } from '@/store/chat-list.utils'

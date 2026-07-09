@@ -133,7 +133,7 @@ import {
   PopoverContent,
   selectTriggerClass,
   virtualListboxClass,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useListboxKeyboard } from '@/composables/useListboxKeyboard'

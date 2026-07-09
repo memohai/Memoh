@@ -21,7 +21,7 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { isArchiveFile, sortDirsFirst } from './utils'
 import { resolveFileIcon } from './file-icon'

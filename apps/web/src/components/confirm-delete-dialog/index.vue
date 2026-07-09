@@ -47,7 +47,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@memohai/ui'
+} from '@felinic/ui'
 
 defineProps<{
   open: boolean

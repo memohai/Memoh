@@ -100,7 +100,7 @@ import {
   Button,
   Input,
   Skeleton,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { Search, Plus, Upload } from 'lucide-vue-next'
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'

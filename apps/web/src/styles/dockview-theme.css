@@ -1,5 +1,5 @@
 /* Memoh dockview theme: maps dockview's --dv-* variables onto the design
- * tokens from @memohai/ui style.css so the dock chrome follows light/dark
+ * tokens from @felinic/ui style.css so the dock chrome follows light/dark
  * and any future palette swap automatically.
  *
  * Two-plane editor model: the active tab and the view it owns both

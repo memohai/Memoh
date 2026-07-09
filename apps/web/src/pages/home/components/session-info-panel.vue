@@ -110,7 +110,7 @@
 
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
-import { ScrollArea, Button } from '@memohai/ui'
+import { ScrollArea, Button } from '@felinic/ui'
 import { Sparkles, Minimize2 } from 'lucide-vue-next'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import SubagentList from './subagent-list.vue'

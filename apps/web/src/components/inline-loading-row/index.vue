@@ -23,7 +23,7 @@
 </template>
 
 <script setup lang="ts">
-import { Spinner } from '@memohai/ui'
+import { Spinner } from '@felinic/ui'
 
 withDefaults(defineProps<{
   /** spinner + 字号档:sm=text-xs/size-3.5(默认),md=text-sm/size-4。 */

@@ -88,7 +88,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import FieldStack from '@/components/settings/field-stack.vue'
 import FormStack from '@/components/settings/form-stack.vue'
 import PasswordInput from '@/components/password-input/index.vue'

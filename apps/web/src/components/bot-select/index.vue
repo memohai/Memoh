@@ -53,7 +53,7 @@ import { useQuery } from '@pinia/colada'
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
   Avatar, AvatarImage, AvatarFallback,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { getBotsQuery } from '@memohai/sdk/colada'
 import type { BotsBot } from '@memohai/sdk'
 

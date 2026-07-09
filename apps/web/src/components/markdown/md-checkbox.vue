@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Checkbox } from '@memohai/ui'
+import { Checkbox } from '@felinic/ui'
 
 // A rendered `- [x]` / `- [ ]` task marker. We swap markstream's bespoke
 // checkbox glyph for the real library Checkbox so a task list in chat matches

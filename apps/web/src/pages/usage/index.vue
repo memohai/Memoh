@@ -347,7 +347,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { getBotsQuery } from '@memohai/sdk/colada'
 import { getBotsByBotIdTokenUsage, getBotsByBotIdTokenUsageRecords } from '@memohai/sdk'
 import BotSelect from '@/components/bot-select/index.vue'

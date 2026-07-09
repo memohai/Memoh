@@ -34,7 +34,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Check, Copy } from 'lucide-vue-next'
-import { Button } from '@memohai/ui'
+import { Button } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import CodeBlock from './code-block.vue'
 

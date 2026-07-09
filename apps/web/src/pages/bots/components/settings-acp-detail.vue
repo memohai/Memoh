@@ -279,7 +279,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
   Button,
@@ -291,7 +291,7 @@ import {
   SelectTrigger,
   SelectValue,
   type SegmentedItem,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { Copy } from 'lucide-vue-next'
 import {
   type AcpprofileManagedField,

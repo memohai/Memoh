@@ -132,7 +132,7 @@ import {
   FormControl,
   FormField,
   Switch,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import SettingsShell from '@/components/settings-shell/index.vue'
@@ -161,7 +161,7 @@ import { useMutation, useQueryCache } from '@pinia/colada'
 import { putSearchProvidersById, deleteSearchProvidersById } from '@memohai/sdk'
 import type { SearchprovidersGetResponse, SearchprovidersUpdateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 
 const { t } = useI18n()
 const curProvider = inject('curSearchProvider', ref<SearchprovidersGetResponse>())

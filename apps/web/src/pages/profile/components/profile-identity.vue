@@ -133,7 +133,7 @@ import {
   DialogTitle,
   DialogTrigger,
   Input,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { Check, Pencil, X } from 'lucide-vue-next'
 import SettingsRow from '@/components/settings/row.vue'
 

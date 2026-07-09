@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Spinner } from '@memohai/ui'
+import { Spinner } from '@felinic/ui'
 import { Check, X, ChevronRight } from 'lucide-vue-next'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'

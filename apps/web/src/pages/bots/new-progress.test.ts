@@ -41,7 +41,7 @@ vi.mock('@memohai/sdk/colada', () => ({
   getBotsQueryKey: () => ['bots'],
 }))
 
-vi.mock('@memohai/ui', async () => {
+vi.mock('@felinic/ui', async () => {
   const { h } = await import('vue')
   const Passthrough = (_props: Record<string, unknown>, { slots }: { slots: Slots }) => {
     return h('div', slots.default?.())

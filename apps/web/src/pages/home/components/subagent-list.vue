@@ -24,7 +24,7 @@
 
 <script setup lang="ts">
 import { GitBranch, ExternalLink } from 'lucide-vue-next'
-import { Button } from '@memohai/ui'
+import { Button } from '@felinic/ui'
 import { useSubagentList } from '../composables/useSubagentList'
 
 const { subagents, navigateToSession } = useSubagentList()

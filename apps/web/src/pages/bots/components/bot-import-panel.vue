@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import {
   Avatar,
   AvatarFallback,
@@ -11,7 +11,7 @@ import {
   Tabs,
   TabsList,
   TabsTrigger,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { Check, FileArchive, Lock, Upload, X } from 'lucide-vue-next'
 import {
   postBotsBackupImportPreview,

@@ -206,7 +206,7 @@
 <script setup lang="ts">
 import { computed, inject, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import {
   getTranscriptionProvidersById,
@@ -224,7 +224,7 @@ import type {
   AudioTranscriptionModelResponse,
 } from '@memohai/sdk'
 import { Eye, EyeOff } from 'lucide-vue-next'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@memohai/ui'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@felinic/ui'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import ModelConfigEditor from '@/pages/speech/components/model-config-editor.vue'

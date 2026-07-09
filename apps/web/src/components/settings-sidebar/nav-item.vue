@@ -9,7 +9,7 @@
 </template>
 
 <script setup lang="ts">
-import { Button } from '@memohai/ui'
+import { Button } from '@felinic/ui'
 
 withDefaults(defineProps<{
   active?: boolean

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, provide, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { Button } from '@memohai/ui'
+import { Button } from '@felinic/ui'
 import { getSpeechProviders, getTranscriptionProviders, postSpeechProvidersByIdImportModels, postTranscriptionProvidersByIdImportModels } from '@memohai/sdk'
 import type { AudioSpeechProviderResponse } from '@memohai/sdk'
 import { Plus } from 'lucide-vue-next'

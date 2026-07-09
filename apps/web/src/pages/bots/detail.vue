@@ -256,7 +256,7 @@
 import {
   Avatar, AvatarImage, AvatarFallback, Input,
   SidebarMenu, SidebarMenuItem,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import {
   SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, Settings, MessageSquare,
   BrainCircuit, ShieldAlert, HeartPulse, Database, Mail, Link, Clock, Server, FileBox, Zap,
@@ -264,7 +264,7 @@ import {
 } from 'lucide-vue-next'
 import { computed, ref, watch, onMounted, toValue, nextTick, inject } from 'vue'
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import {

@@ -107,9 +107,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
-import { Button, Skeleton } from '@memohai/ui'
+import { Button, Skeleton } from '@felinic/ui'
 import { Check, Copy } from 'lucide-vue-next'
 
 import PageShell from '@/components/page-shell/index.vue'

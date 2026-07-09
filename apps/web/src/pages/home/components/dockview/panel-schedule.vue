@@ -50,7 +50,7 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
   deleteBotsByBotIdScheduleById,

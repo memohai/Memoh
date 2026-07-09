@@ -6,8 +6,8 @@ import {
   Button,
   Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle,
   Progress,
-} from '@memohai/ui'
-import { toast } from '@memohai/ui'
+} from '@felinic/ui'
+import { toast } from '@felinic/ui'
 import { AlertCircle, Inbox, Terminal } from 'lucide-vue-next'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import SectionShell from '../components/SectionShell.vue'

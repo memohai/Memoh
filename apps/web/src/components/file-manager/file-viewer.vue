@@ -14,9 +14,9 @@ import {
   type ChipButton,
 } from './file-conflict'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { File, FileX, Download, RefreshCw, GitCompare, X } from 'lucide-vue-next'
-import { Button } from '@memohai/ui'
+import { Button } from '@felinic/ui'
 import {
   getBotsByBotIdContainerFs,
   getBotsByBotIdContainerFsRead,

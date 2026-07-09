@@ -38,7 +38,7 @@ Infrastructure dependencies:
 - **Framework**: Vue 3 (Composition API)
 - **Build Tool**: Vite 8
 - **State Management**: Pinia 3 + Pinia Colada
-- **UI**: Tailwind CSS 4 + custom component library (`@memohai/ui`) + Reka UI
+- **UI**: Tailwind CSS 4 + custom component library (`@felinic/ui`) + Reka UI
 - **Icons**: lucide-vue-next + `@memohai/icon` (brand/provider icons)
 - **i18n**: vue-i18n
 - **Markdown**: markstream-vue + Shiki + Mermaid + KaTeX
@@ -194,7 +194,7 @@ Memoh/
 │   ├── desktop/                #   Native Electron app (@memohai/desktop): hosted-server renderer, tray, menus, preload IPC
 │   └── web/                    #   Main web app (@memohai/web, Vue 3) — see apps/web/AGENTS.md
 ├── packages/                   # Shared TypeScript libraries
-│   ├── ui/                     #   Shared UI component library (@memohai/ui) — git submodule → github.com/memohai/ui; also ships the memoh-web / memoh-ui-owners agent skills (symlinked from .agents/skills/)
+│   ├── ui/                     #   Shared UI component library (@felinic/ui) — git submodule → github.com/memohai/ui; also ships the memoh-web / memoh-ui-owners agent skills (symlinked from .agents/skills/)
 │   ├── sdk/                    #   TypeScript SDK (@memohai/sdk, auto-generated from OpenAPI)
 │   ├── icons/                  #   Brand/provider icon library (@memohai/icon)
 │   └── config/                 #   Shared configuration utilities (@memohai/config)
@@ -287,7 +287,7 @@ Bot persona templates (not developer guides):
 
 ### Dev Component Wall & UI Contract Guard
 
-- The dev component wall at `apps/web/src/pages/dev/components/` is the living reference for `@memohai/ui` components and tokens. Use it to verify visual changes locally.
+- The dev component wall at `apps/web/src/pages/dev/components/` is the living reference for `@felinic/ui` components and tokens. Use it to verify visual changes locally.
 - `scripts/check-ui-contract.mjs` is a mechanical guard wired into `mise run lint`. It enforces the design token contract from `packages/ui/AGENTS.md` (no raw colors, no invented shadows, no off-list arbitrary radius). Run lint before committing UI changes.
 
 ### Docker Deployment

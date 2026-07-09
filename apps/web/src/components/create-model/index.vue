@@ -179,8 +179,8 @@ import {
   SelectValue,
   Checkbox,
   Label,
-} from '@memohai/ui'
-import type { ButtonVariants } from '@memohai/ui'
+} from '@felinic/ui'
+import type { ButtonVariants } from '@felinic/ui'
 import { useForm } from 'vee-validate'
 import { inject, computed, watch, nextTick, type Ref, ref } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'

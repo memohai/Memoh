@@ -363,7 +363,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { Monitor, Moon, SlidersHorizontal, Sun } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, watch } from 'vue'

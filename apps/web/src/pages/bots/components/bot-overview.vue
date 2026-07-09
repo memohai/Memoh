@@ -269,7 +269,7 @@ import { BarChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { useDark } from '@vueuse/core'
-import { Badge, Button, Skeleton } from '@memohai/ui'
+import { Badge, Button, Skeleton } from '@felinic/ui'
 import {
   getBotsById,
   getBotsByBotIdSettings,

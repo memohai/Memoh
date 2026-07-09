@@ -130,7 +130,7 @@
 import { computed, ref, watch } from 'vue'
 import { X, Image as ImageIcon, File as FileIcon } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
-import { Skeleton } from '@memohai/ui'
+import { Skeleton } from '@felinic/ui'
 
 const props = defineProps<{
   kind: 'media' | 'file' | 'pasted'

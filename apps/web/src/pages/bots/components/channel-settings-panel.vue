@@ -205,10 +205,10 @@
 </template>
 
 <script setup lang="ts">
-import { ActionCard, Button, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, Input } from '@memohai/ui'
+import { ActionCard, Button, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, Input } from '@felinic/ui'
 import { SlidersHorizontal } from 'lucide-vue-next'
 import { reactive, watch, computed, ref } from 'vue'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useMutation } from '@pinia/colada'
 import { putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBotsByIdChannelByPlatformStatus, postBotsByIdChannelByPlatformWebhookEndpoint } from '@memohai/sdk'

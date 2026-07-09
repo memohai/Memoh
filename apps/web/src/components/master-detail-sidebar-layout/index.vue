@@ -111,7 +111,7 @@ import {
   Sidebar,
   SidebarInset,
   ScrollArea
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { DesktopShellKey } from '@/lib/desktop-shell'
 
 withDefaults(defineProps<{

@@ -405,7 +405,7 @@ setCustomComponents({ mermaid: ThemedMermaidBlock })
 import { computed, nextTick, ref, toRef, useTemplateRef, watch } from 'vue'
 import { CircleAlert, Sparkles } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
-import { Avatar, AvatarImage, AvatarFallback, Button, Textarea } from '@memohai/ui'
+import { Avatar, AvatarImage, AvatarFallback, Button, Textarea } from '@felinic/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
 import ToolCallGroup from './tool-call-group.vue'

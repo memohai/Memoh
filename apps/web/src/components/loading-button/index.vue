@@ -13,15 +13,15 @@
 </template>
 
 <script setup lang="ts">
-// Thin convenience over @memohai/ui Button: the spinner visuals (the leading
+// Thin convenience over @felinic/ui Button: the spinner visuals (the leading
 // slot that grows in, the busy color hold, the layout-stable swap) all live in
 // Button now. This wrapper only adds the one thing that is an app concern rather
 // than a component concern: holding the spinner back until a request actually
 // feels slow, so a local round trip resolves without a flash. While we hold it
 // we still block clicks (pointer-events, not `disabled`, so the button keeps
 // full color instead of fading) to swallow double submits in that window.
-import { Button } from '@memohai/ui'
-import type { ButtonVariants } from '@memohai/ui'
+import { Button } from '@felinic/ui'
+import type { ButtonVariants } from '@felinic/ui'
 import { onBeforeUnmount, ref, watch } from 'vue'
 
 defineOptions({ inheritAttrs: false })

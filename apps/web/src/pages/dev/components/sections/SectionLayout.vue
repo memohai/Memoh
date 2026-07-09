@@ -8,7 +8,7 @@ import {
   Collapsible, CollapsibleContent, CollapsibleTrigger,
   Dialog, DialogClose, DialogFooter, DialogHeader, DialogScrollContent, DialogTitle,
   Input, Label,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import {
   ArrowUpRight, ChevronsUpDown, Funnel, KeyRound, ListChecks, Palette, Route,
   ScrollText, Shield, ShieldCheck, SlidersHorizontal, UserCog,

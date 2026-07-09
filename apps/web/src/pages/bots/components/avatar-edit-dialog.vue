@@ -56,7 +56,7 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { ref, computed, watch } from 'vue'
 
 withDefaults(defineProps<{

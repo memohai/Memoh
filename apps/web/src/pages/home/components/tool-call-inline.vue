@@ -183,7 +183,7 @@
 
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
-import { Button } from '@memohai/ui'
+import { Button } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
 import { useChatStore } from '@/store/chat-list'

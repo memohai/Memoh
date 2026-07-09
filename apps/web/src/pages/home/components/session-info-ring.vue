@@ -67,7 +67,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Popover, PopoverContent, PopoverTrigger } from '@memohai/ui'
+import { Popover, PopoverContent, PopoverTrigger } from '@felinic/ui'
 import SessionInfoPanel from './session-info-panel.vue'
 import { useSessionInfo } from '../composables/useSessionInfo'
 

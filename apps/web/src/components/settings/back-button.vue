@@ -23,7 +23,7 @@
 </template>
 
 <script setup lang="ts">
-import { Button } from '@memohai/ui'
+import { Button } from '@felinic/ui'
 import { ChevronLeft } from 'lucide-vue-next'
 
 defineProps<{

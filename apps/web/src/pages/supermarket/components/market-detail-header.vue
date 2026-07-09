@@ -53,7 +53,7 @@
 
 <script setup lang="ts">
 import { ArrowLeft, Download } from 'lucide-vue-next'
-import { Badge, Button } from '@memohai/ui'
+import { Badge, Button } from '@felinic/ui'
 
 // 抽取前两页图标盒原样带的浅投影,随形状一起搬入 owner
 const iconBoxClass = 'flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-background shadow-sm' /* ui-allow-style */

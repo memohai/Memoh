@@ -65,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { Button, Switch } from '@memohai/ui'
+import { Button, Switch } from '@felinic/ui'
 import { Trash2 } from 'lucide-vue-next'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
@@ -79,7 +79,7 @@ import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { putProvidersById, deleteProvidersById, getProvidersByIdModels, deleteModelsById } from '@memohai/sdk'
 import type { ModelsGetResponse, ProvidersGetResponse, ProvidersUpdateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 
 // ---- Model 编辑状态（provide 给 CreateModel） ----
 const openModel = reactive<{

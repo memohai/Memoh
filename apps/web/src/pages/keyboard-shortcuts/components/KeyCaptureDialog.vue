@@ -12,7 +12,7 @@ import {
   DialogTitle,
   Kbd,
   KbdGroup,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import {
   displayKeyCombo,
   formatKeyCombo,

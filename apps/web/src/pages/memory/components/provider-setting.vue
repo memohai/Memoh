@@ -99,12 +99,12 @@ import {
   Button,
   Input,
   Label,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { Brain, Trash2 } from 'lucide-vue-next'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { getMemoryProvidersMeta, putMemoryProvidersById, deleteMemoryProvidersById } from '@memohai/sdk'
 import type { AdaptersProviderGetResponse, AdaptersProviderMeta } from '@memohai/sdk'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'

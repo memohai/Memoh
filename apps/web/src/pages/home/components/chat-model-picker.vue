@@ -150,7 +150,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useEventListener } from '@vueuse/core'
 import { ChevronRight, X, Check, Lightbulb } from 'lucide-vue-next'
-import { Popover, PopoverAnchor, PopoverContent, ScrollArea } from '@memohai/ui'
+import { Popover, PopoverAnchor, PopoverContent, ScrollArea } from '@felinic/ui'
 import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import {
   REASONING_EFFORT_DISABLE,

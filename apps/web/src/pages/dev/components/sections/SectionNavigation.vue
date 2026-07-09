@@ -16,7 +16,7 @@ import {
   SidebarMenuSubButton, SidebarMenuSubItem, SidebarProvider, SidebarSeparator, SidebarTrigger,
   Tabs, TabsContent, TabsList, TabsTrigger,
   TextButton,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { Archive, ChevronDown, FolderOpen, GitFork, Home, Inbox, MoreHorizontal, Settings, SquarePen, Trash2 } from 'lucide-vue-next'
 import SectionShell from '../components/SectionShell.vue'
 import Specimen from '../components/Specimen.vue'

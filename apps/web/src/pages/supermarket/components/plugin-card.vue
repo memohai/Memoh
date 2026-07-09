@@ -43,7 +43,7 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Download, PackageOpen } from 'lucide-vue-next'
-import { Button } from '@memohai/ui'
+import { Button } from '@felinic/ui'
 import type { PluginsManifest } from '@memohai/sdk'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import MarketItemCard from './market-item-card.vue'

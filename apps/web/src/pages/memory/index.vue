@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, provide, reactive, ref, watch } from 'vue'
 import { useQuery } from '@pinia/colada'
-import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger, Spinner } from '@memohai/ui'
+import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger, Spinner } from '@felinic/ui'
 import { getMemoryProviders } from '@memohai/sdk'
 import type { AdaptersProviderGetResponse } from '@memohai/sdk'
 import { Brain, ChevronRight, Plus } from 'lucide-vue-next'
