@@ -59,8 +59,11 @@ func TestBuildEntriesAndIDsWithholdsWholeExchangeWhenResultRendersEmpty(t *testi
 
 	entries, ids := buildEntriesAndIDs(items)
 
-	if len(entries) != 2 {
-		t.Fatalf("entries = %d, want 2 (question + rendered call marker)", len(entries))
+	// The incomplete exchange (renderable call, empty-rendering result) is
+	// withheld from BOTH the summarizer prompt and the marked ids: summarizing
+	// the call while it stays in raw history would duplicate its content.
+	if len(entries) != 1 || entries[0].Content != "question" {
+		t.Fatalf("entries = %#v, want only the unrelated question", entries)
 	}
 	if len(ids) != 1 || ids[0] != rows[0].ID {
 		t.Fatalf("ids = %#v, want only the unrelated question row marked", ids)

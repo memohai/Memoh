@@ -392,7 +392,7 @@ func guardedCompactionItems(items []CompactionCandidate, cutoff int) []Compactio
 	if cutoff <= 0 {
 		return nil
 	}
-	return dropMustKeepItems(items[:cutoff])
+	return firstCompactableRun(items[:cutoff])
 }
 
 func guardedCurrentTurnCompactionItems(items []CompactionCandidate, cutoff int) []CompactionCandidate {
@@ -413,23 +413,29 @@ func guardedCurrentTurnCompactionItems(items []CompactionCandidate, cutoff int) 
 	if cutoff > protectedTailStart {
 		return nil
 	}
-	return dropMustKeepItems(items[1:cutoff])
+	return firstCompactableRun(items[1:cutoff])
 }
 
-// dropMustKeepItems removes must-keep rows from a compact span so they stay in
-// raw history without capping how much of the surrounding span can compact.
-func dropMustKeepItems(items []CompactionCandidate) []CompactionCandidate {
-	kept := make([]CompactionCandidate, 0, len(items))
-	for _, item := range items {
-		if item.HasPolicy(CompactPolicyMustKeep) {
-			continue
-		}
-		kept = append(kept, item)
+// firstCompactableRun returns the first maximal run of non-must-keep items in
+// the span. Must-keep rows (e.g. ask_user) stay in raw history and split the
+// span into islands; compacting only the first run keeps every compaction log
+// covering a contiguous history range, so the read path replaces it in place
+// without reordering rows across a must-keep island under a shared compact_id.
+// A must-keep island at the head is skipped rather than starving the run behind
+// it, and later runs are picked up on subsequent passes.
+func firstCompactableRun(items []CompactionCandidate) []CompactionCandidate {
+	start := 0
+	for start < len(items) && items[start].HasPolicy(CompactPolicyMustKeep) {
+		start++
 	}
-	if len(kept) == 0 {
+	end := start
+	for end < len(items) && !items[end].HasPolicy(CompactPolicyMustKeep) {
+		end++
+	}
+	if end == start {
 		return nil
 	}
-	return kept
+	return items[start:end]
 }
 
 func firstPolicyStart(items []CompactionCandidate, policy CompactPolicy) int {
@@ -471,41 +477,31 @@ func isToolResultItem(item CompactionCandidate) bool {
 }
 
 // buildEntriesAndIDs renders the summarizer entries and the ids to mark
-// compacted from the selected items. Entries that render empty (e.g.
-// reasoning-only messages) are skipped from the prompt to avoid bare "role:"
-// noise. If every selected item renders empty, all ids are still returned so the
-// caller can detect the all-empty no-op case.
-//
-// Marking is closure-aware: a tool exchange (see toolExchangeGroups) is only
-// marked as a whole when every row in it rendered. Otherwise the empty row
-// would be dropped from marking while its call/sibling-result row stays
-// marked, stranding an orphan tool message in raw history after the summary
-// replaces the rest.
+// compacted, grouped by tool exchange (see toolExchangeGroups). A group is
+// emitted only when every row in it renders non-empty; an incomplete group —
+// e.g. a reasoning-only message, or a renderable tool call whose result renders
+// empty — is withheld from BOTH the prompt and the marked ids. That keeps
+// entries and ids aligned: the summarizer never sees content that would remain
+// in raw history (which would duplicate it), and marking never strands an
+// orphan tool row after the summary replaces the rest.
 func buildEntriesAndIDs(items []CompactionCandidate) ([]messageEntry, []pgtype.UUID) {
-	entries := make([]messageEntry, 0, len(items))
-	allIDs := make([]pgtype.UUID, 0, len(items))
-	rendered := make([]bool, len(items))
+	rendered := make([]string, len(items))
+	renderedOK := make([]bool, len(items))
 	for i, it := range items {
-		allIDs = append(allIDs, it.ID)
 		content := renderCandidateEntry(it.Record)
 		if strings.TrimSpace(content) == "" {
 			continue
 		}
-		rendered[i] = true
-		entries = append(entries, messageEntry{
-			Role:    it.Record.ModelMessage.Role,
-			Content: content,
-		})
-	}
-	if len(entries) == 0 {
-		return entries, allIDs
+		rendered[i] = content
+		renderedOK[i] = true
 	}
 
-	renderedIDs := make([]pgtype.UUID, 0, len(items))
+	entries := make([]messageEntry, 0, len(items))
+	ids := make([]pgtype.UUID, 0, len(items))
 	for _, group := range toolExchangeGroups(items) {
 		complete := true
 		for _, idx := range group {
-			if !rendered[idx] {
+			if !renderedOK[idx] {
 				complete = false
 				break
 			}
@@ -514,10 +510,14 @@ func buildEntriesAndIDs(items []CompactionCandidate) ([]messageEntry, []pgtype.U
 			continue
 		}
 		for _, idx := range group {
-			renderedIDs = append(renderedIDs, items[idx].ID)
+			entries = append(entries, messageEntry{
+				Role:    items[idx].Record.ModelMessage.Role,
+				Content: rendered[idx],
+			})
+			ids = append(ids, items[idx].ID)
 		}
 	}
-	return entries, renderedIDs
+	return entries, ids
 }
 
 // trimCompactMessages trims the compaction input from the tail (oldest) so the

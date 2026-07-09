@@ -243,6 +243,55 @@ func TestParallelToolCallsPropagateMustKeepToSiblingResult(t *testing.T) {
 	}
 }
 
+func TestGuardedSelectionKeepsCompactRunContiguousAcrossMustKeepIsland(t *testing.T) {
+	t.Parallel()
+
+	askCall := mkRow(t, "assistant", `[{"type":"tool-call","toolName":"`+userinput.ToolNameAskUser+`","toolCallId":"ask-1","input":{"questions":[]}}]`, 100)
+	askResult := mkRow(t, "tool", `[{"type":"tool-result","toolName":"`+userinput.ToolNameAskUser+`","toolCallId":"ask-1","result":{"status":"submitted"}}]`, 100)
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `"old q"`, 100),          // 0 run before island
+		mkRow(t, "assistant", `"old a"`, 100),     // 1
+		askCall,                                   // 2 must-keep island
+		askResult,                                 // 3
+		mkRow(t, "user", `"mid q"`, 100),          // 4 run after island
+		mkRow(t, "assistant", `"mid a"`, 100),     // 5
+		mkRow(t, "user", `"current q"`, 100),      // 6 protected recent
+		mkRow(t, "assistant", `"current a"`, 100), // 7
+	}
+	items, _ := itemsFromRows(rows)
+
+	// One pass must select a single contiguous run so the read path can drop it
+	// in place. It may only be the rows before the first must-keep island, never
+	// straddling ask_user into "mid q"/"mid a" under a shared compact_id.
+	toCompact := splitByTarget(items, 200)
+	gotIDs := make([]pgtype.UUID, len(toCompact))
+	for i, item := range toCompact {
+		gotIDs[i] = item.ID
+	}
+	wantIDs := []pgtype.UUID{rows[0].ID, rows[1].ID}
+	if len(gotIDs) != len(wantIDs) {
+		t.Fatalf("selected %d rows, want the contiguous pre-island run [old q, old a]", len(gotIDs))
+	}
+	for i := range wantIDs {
+		if gotIDs[i] != wantIDs[i] {
+			t.Fatalf("selected run must be the contiguous pre-island run, got id[%d]=%s", i, formatUUID(gotIDs[i]))
+		}
+	}
+
+	// The run after the island is not starved: once the pre-island run is
+	// compacted away, the next pass makes progress on "mid q"/"mid a".
+	nextItems, _ := itemsFromRows(rows[2:])
+	nextCompact := splitByTarget(nextItems, 200)
+	if len(nextCompact) == 0 {
+		t.Fatal("run after the must-keep island must be compactable on a later pass")
+	}
+	for _, item := range nextCompact {
+		if item.ID == askCall.ID || item.ID == askResult.ID {
+			t.Fatalf("must-keep ask_user row was selected for compaction")
+		}
+	}
+}
+
 func TestItemsFromRowsAllowsCurrentTurnMiddleCompaction(t *testing.T) {
 	t.Parallel()
 

@@ -266,12 +266,11 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 
 	entries, messageIDs := buildEntriesAndIDs(toCompact)
 	if len(entries) == 0 || len(messageIDs) == 0 {
-		// entries==0: every selected message rendered empty (e.g. reasoning-only);
-		// summarizing nothing would destroy them for a junk summary. messageIDs==0:
-		// all-or-none marking withheld every id (e.g. an incomplete tool exchange
-		// with a renderable call and an empty-rendering result sibling); summarizing
-		// rows we cannot mark would create an ok log with message_count=0 and
-		// pollute prior_context. Either way, leave the rows in history.
+		// No complete group survived: every selected group had a row that rendered
+		// empty (a reasoning-only message, or a tool exchange whose result renders
+		// empty). buildEntriesAndIDs withholds such a group from both entries and
+		// ids, so summarizing here would either destroy rows for a junk summary or
+		// mark rows we cannot faithfully summarize. Leave them in raw history.
 		return nil
 	}
 

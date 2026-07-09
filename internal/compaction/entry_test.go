@@ -181,8 +181,9 @@ func TestRenderEntryContentToolResultBoundsCleanText(t *testing.T) {
 func TestBuildEntriesAndIDsAllEmptyWindow(t *testing.T) {
 	t.Parallel()
 
-	// A window of only reasoning-only messages renders to no entries, but all
-	// ids are still returned so the caller can detect the all-empty no-op case.
+	// A window of only reasoning-only messages renders to no entries, so no
+	// group is complete and no ids are marked; entries and ids stay aligned and
+	// the caller treats the empty result as a no-op, leaving the rows in history.
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
 		mkRow(t, "assistant", `[{"type":"reasoning","text":"think a"}]`, 0),
 		mkRow(t, "assistant", `[{"type":"reasoning","text":"think b"}]`, 0),
@@ -192,8 +193,8 @@ func TestBuildEntriesAndIDsAllEmptyWindow(t *testing.T) {
 	if len(entries) != 0 {
 		t.Fatalf("reasoning-only window should yield no entries, got %d", len(entries))
 	}
-	if len(ids) != 2 {
-		t.Fatalf("ids should still cover all selected, got %d", len(ids))
+	if len(ids) != 0 {
+		t.Fatalf("no complete group should be marked in an all-empty window, got %d", len(ids))
 	}
 }
 
