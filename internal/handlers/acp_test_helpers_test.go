@@ -60,19 +60,19 @@ func testAuthContextWithRole(e *echo.Echo, req *http.Request, rec http.ResponseW
 	return ctx
 }
 
-// newTestAdminAccountService returns an accounts.Service backed by a fake store
-// that serves the given role for GetByUserID lookups.  Note: accounts.Service.IsAdmin
-// now reads the team scope from context rather than querying the store, so this
-// service is mainly used for AuthorizeAccess helpers that call GetByUserID.
-func newTestAdminAccountService(role string) *accounts.Service {
-	return accounts.NewService(nil, testAdminAccountStore{role: role})
+// newTestAdminAccountService returns an accounts.Service backed by a fake store.
+// Note: accounts.Service.IsAdmin now reads the team scope from context rather
+// than querying the store, so this service is mainly used for AuthorizeAccess
+// helpers that call GetByUserID. The role parameter is kept for call-site
+// compatibility but is no longer stored.
+func newTestAdminAccountService(_ string) *accounts.Service {
+	return accounts.NewService(nil, testAdminAccountStore{})
 }
 
 type testAdminAccountStore struct {
 	dbstore.AccountStore
-	role string
 }
 
-func (s testAdminAccountStore) GetByUserID(_ context.Context, _ string) (dbstore.AccountRecord, error) {
-	return dbstore.AccountRecord{Role: s.role, IsActive: true}, nil
+func (testAdminAccountStore) GetByUserID(_ context.Context, _ string) (dbstore.AccountRecord, error) {
+	return dbstore.AccountRecord{IsActive: true}, nil
 }

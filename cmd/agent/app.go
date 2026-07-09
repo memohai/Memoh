@@ -1447,7 +1447,6 @@ func ensureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore
 		Username:     username,
 		Email:        email,
 		PasswordHash: string(hashed),
-		Role:         "admin",
 		DisplayName:  username,
 		IsActive:     true,
 		DataRoot:     cfg.Workspace.DataRoot,

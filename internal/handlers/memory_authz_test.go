@@ -53,7 +53,7 @@ func newMemoryAuthzHandler(t *testing.T, botID, userID string) (*MemoryHandler, 
 	handler := NewMemoryHandler(
 		slog.Default(),
 		bots.NewService(slog.Default(), queries),
-		accounts.NewService(slog.Default(), testAdminAccountStore{role: "admin"}),
+		accounts.NewService(slog.Default(), testAdminAccountStore{}),
 	)
 	handler.SetMemoryRegistry(registry)
 	return handler, provider

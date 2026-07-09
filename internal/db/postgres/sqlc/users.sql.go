@@ -30,21 +30,19 @@ UPDATE users
 SET username = $1,
     email = $2,
     password_hash = $3,
-    role = $4::user_role,
-    display_name = $5,
-    avatar_url = $6,
-    is_active = $7,
-    data_root = $8,
+    display_name = $4,
+    avatar_url = $5,
+    is_active = $6,
+    data_root = $7,
     updated_at = now()
-WHERE id = $9
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
+WHERE id = $8
+RETURNING id, username, email, password_hash, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
 `
 
 type CreateAccountParams struct {
 	Username     pgtype.Text `json:"username"`
 	Email        pgtype.Text `json:"email"`
 	PasswordHash pgtype.Text `json:"password_hash"`
-	Role         string      `json:"role"`
 	DisplayName  pgtype.Text `json:"display_name"`
 	AvatarUrl    pgtype.Text `json:"avatar_url"`
 	IsActive     bool        `json:"is_active"`
@@ -57,7 +55,6 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (U
 		arg.Username,
 		arg.Email,
 		arg.PasswordHash,
-		arg.Role,
 		arg.DisplayName,
 		arg.AvatarUrl,
 		arg.IsActive,
@@ -70,7 +67,6 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (U
 		&i.Username,
 		&i.Email,
 		&i.PasswordHash,
-		&i.Role,
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Timezone,
@@ -87,7 +83,7 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (U
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (is_active, metadata)
 VALUES ($1, $2)
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
+RETURNING id, username, email, password_hash, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
 `
 
 type CreateUserParams struct {
@@ -103,7 +99,6 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Username,
 		&i.Email,
 		&i.PasswordHash,
-		&i.Role,
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Timezone,
@@ -118,7 +113,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 }
 
 const getAccountByIdentity = `-- name: GetAccountByIdentity :one
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at FROM users WHERE username = $1 OR email = $1
+SELECT id, username, email, password_hash, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at FROM users WHERE username = $1 OR email = $1
 `
 
 func (q *Queries) GetAccountByIdentity(ctx context.Context, identity pgtype.Text) (User, error) {
@@ -129,7 +124,6 @@ func (q *Queries) GetAccountByIdentity(ctx context.Context, identity pgtype.Text
 		&i.Username,
 		&i.Email,
 		&i.PasswordHash,
-		&i.Role,
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Timezone,
@@ -144,7 +138,7 @@ func (q *Queries) GetAccountByIdentity(ctx context.Context, identity pgtype.Text
 }
 
 const getAccountByUserID = `-- name: GetAccountByUserID :one
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at FROM users WHERE id = $1
+SELECT id, username, email, password_hash, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at FROM users WHERE id = $1
 `
 
 func (q *Queries) GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (User, error) {
@@ -155,7 +149,6 @@ func (q *Queries) GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (U
 		&i.Username,
 		&i.Email,
 		&i.PasswordHash,
-		&i.Role,
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Timezone,
@@ -170,7 +163,7 @@ func (q *Queries) GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (U
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
+SELECT id, username, email, password_hash, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
 FROM users
 WHERE id = $1
 `
@@ -183,7 +176,6 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 		&i.Username,
 		&i.Email,
 		&i.PasswordHash,
-		&i.Role,
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Timezone,
@@ -198,7 +190,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 }
 
 const listAccounts = `-- name: ListAccounts :many
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at FROM users
+SELECT id, username, email, password_hash, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at FROM users
 WHERE username IS NOT NULL
 ORDER BY created_at DESC
 `
@@ -217,7 +209,6 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]User, error) {
 			&i.Username,
 			&i.Email,
 			&i.PasswordHash,
-			&i.Role,
 			&i.DisplayName,
 			&i.AvatarUrl,
 			&i.Timezone,
@@ -260,7 +251,7 @@ func (q *Queries) RemoveMember(ctx context.Context, userID pgtype.UUID) (pgtype.
 }
 
 const searchAccounts = `-- name: SearchAccounts :many
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
+SELECT id, username, email, password_hash, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
 FROM users
 WHERE username IS NOT NULL
   AND (
@@ -292,7 +283,6 @@ func (q *Queries) SearchAccounts(ctx context.Context, arg SearchAccountsParams) 
 			&i.Username,
 			&i.Email,
 			&i.PasswordHash,
-			&i.Role,
 			&i.DisplayName,
 			&i.AvatarUrl,
 			&i.Timezone,
@@ -315,17 +305,15 @@ func (q *Queries) SearchAccounts(ctx context.Context, arg SearchAccountsParams) 
 
 const updateAccountAdmin = `-- name: UpdateAccountAdmin :one
 UPDATE users
-SET role = $1::user_role,
-    display_name = $2,
-    avatar_url = $3,
-    is_active = $4,
+SET display_name = $1,
+    avatar_url = $2,
+    is_active = $3,
     updated_at = now()
-WHERE id = $5
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
+WHERE id = $4
+RETURNING id, username, email, password_hash, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
 `
 
 type UpdateAccountAdminParams struct {
-	Role        string      `json:"role"`
 	DisplayName pgtype.Text `json:"display_name"`
 	AvatarUrl   pgtype.Text `json:"avatar_url"`
 	IsActive    bool        `json:"is_active"`
@@ -334,7 +322,6 @@ type UpdateAccountAdminParams struct {
 
 func (q *Queries) UpdateAccountAdmin(ctx context.Context, arg UpdateAccountAdminParams) (User, error) {
 	row := q.db.QueryRow(ctx, updateAccountAdmin,
-		arg.Role,
 		arg.DisplayName,
 		arg.AvatarUrl,
 		arg.IsActive,
@@ -346,7 +333,6 @@ func (q *Queries) UpdateAccountAdmin(ctx context.Context, arg UpdateAccountAdmin
 		&i.Username,
 		&i.Email,
 		&i.PasswordHash,
-		&i.Role,
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Timezone,
@@ -365,7 +351,7 @@ UPDATE users
 SET last_login_at = now(),
     updated_at = now()
 WHERE id = $1
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
+RETURNING id, username, email, password_hash, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
 `
 
 func (q *Queries) UpdateAccountLastLogin(ctx context.Context, id pgtype.UUID) (User, error) {
@@ -376,7 +362,6 @@ func (q *Queries) UpdateAccountLastLogin(ctx context.Context, id pgtype.UUID) (U
 		&i.Username,
 		&i.Email,
 		&i.PasswordHash,
-		&i.Role,
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Timezone,
@@ -395,7 +380,7 @@ UPDATE users
 SET password_hash = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
+RETURNING id, username, email, password_hash, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
 `
 
 type UpdateAccountPasswordParams struct {
@@ -411,7 +396,6 @@ func (q *Queries) UpdateAccountPassword(ctx context.Context, arg UpdateAccountPa
 		&i.Username,
 		&i.Email,
 		&i.PasswordHash,
-		&i.Role,
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Timezone,
@@ -434,7 +418,7 @@ SET display_name = $2,
     metadata = $6,
     updated_at = now()
 WHERE id = $1
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
+RETURNING id, username, email, password_hash, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
 `
 
 type UpdateAccountProfileParams struct {
@@ -461,7 +445,6 @@ func (q *Queries) UpdateAccountProfile(ctx context.Context, arg UpdateAccountPro
 		&i.Username,
 		&i.Email,
 		&i.PasswordHash,
-		&i.Role,
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Timezone,
@@ -476,29 +459,27 @@ func (q *Queries) UpdateAccountProfile(ctx context.Context, arg UpdateAccountPro
 }
 
 const upsertAccountByUsername = `-- name: UpsertAccountByUsername :one
-INSERT INTO users (id, username, email, password_hash, role, display_name, avatar_url, is_active, data_root, metadata)
+INSERT INTO users (id, username, email, password_hash, display_name, avatar_url, is_active, data_root, metadata)
 VALUES (
   $1,
   $2,
   $3,
   $4,
-  $5::user_role,
+  $5,
   $6,
   $7,
   $8,
-  $9,
   '{}'::jsonb
 )
 ON CONFLICT (username) DO UPDATE SET
   email = EXCLUDED.email,
   password_hash = EXCLUDED.password_hash,
-  role = EXCLUDED.role,
   display_name = EXCLUDED.display_name,
   avatar_url = EXCLUDED.avatar_url,
   is_active = EXCLUDED.is_active,
   data_root = EXCLUDED.data_root,
   updated_at = now()
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
+RETURNING id, username, email, password_hash, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
 `
 
 type UpsertAccountByUsernameParams struct {
@@ -506,7 +487,6 @@ type UpsertAccountByUsernameParams struct {
 	Username     pgtype.Text `json:"username"`
 	Email        pgtype.Text `json:"email"`
 	PasswordHash pgtype.Text `json:"password_hash"`
-	Role         string      `json:"role"`
 	DisplayName  pgtype.Text `json:"display_name"`
 	AvatarUrl    pgtype.Text `json:"avatar_url"`
 	IsActive     bool        `json:"is_active"`
@@ -519,7 +499,6 @@ func (q *Queries) UpsertAccountByUsername(ctx context.Context, arg UpsertAccount
 		arg.Username,
 		arg.Email,
 		arg.PasswordHash,
-		arg.Role,
 		arg.DisplayName,
 		arg.AvatarUrl,
 		arg.IsActive,
@@ -531,7 +510,6 @@ func (q *Queries) UpsertAccountByUsername(ctx context.Context, arg UpsertAccount
 		&i.Username,
 		&i.Email,
 		&i.PasswordHash,
-		&i.Role,
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Timezone,

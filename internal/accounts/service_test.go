@@ -40,7 +40,6 @@ func (s *testAccountStore) CreateAccount(_ context.Context, input dbstore.Create
 		ID:              input.UserID,
 		Username:        input.Username,
 		Email:           input.Email,
-		Role:            input.Role,
 		DisplayName:     input.DisplayName,
 		AvatarURL:       input.AvatarURL,
 		PasswordHash:    input.PasswordHash,

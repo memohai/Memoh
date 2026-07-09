@@ -13,7 +13,6 @@ UPDATE users
 SET username = sqlc.arg(username),
     email = sqlc.arg(email),
     password_hash = sqlc.arg(password_hash),
-    role = sqlc.arg(role)::user_role,
     display_name = sqlc.arg(display_name),
     avatar_url = sqlc.arg(avatar_url),
     is_active = sqlc.arg(is_active),
@@ -23,13 +22,12 @@ WHERE id = sqlc.arg(user_id)
 RETURNING *;
 
 -- name: UpsertAccountByUsername :one
-INSERT INTO users (id, username, email, password_hash, role, display_name, avatar_url, is_active, data_root, metadata)
+INSERT INTO users (id, username, email, password_hash, display_name, avatar_url, is_active, data_root, metadata)
 VALUES (
   sqlc.arg(user_id),
   sqlc.arg(username),
   sqlc.arg(email),
   sqlc.arg(password_hash),
-  sqlc.arg(role)::user_role,
   sqlc.arg(display_name),
   sqlc.arg(avatar_url),
   sqlc.arg(is_active),
@@ -39,7 +37,6 @@ VALUES (
 ON CONFLICT (username) DO UPDATE SET
   email = EXCLUDED.email,
   password_hash = EXCLUDED.password_hash,
-  role = EXCLUDED.role,
   display_name = EXCLUDED.display_name,
   avatar_url = EXCLUDED.avatar_url,
   is_active = EXCLUDED.is_active,
@@ -90,8 +87,7 @@ RETURNING *;
 
 -- name: UpdateAccountAdmin :one
 UPDATE users
-SET role = sqlc.arg(role)::user_role,
-    display_name = sqlc.arg(display_name),
+SET display_name = sqlc.arg(display_name),
     avatar_url = sqlc.arg(avatar_url),
     is_active = sqlc.arg(is_active),
     updated_at = now()

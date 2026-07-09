@@ -557,7 +557,7 @@ func TestLocalChannelAuthorizeWSSessionScopesChatToCreator(t *testing.T) {
 	}
 	handler := &LocalChannelHandler{
 		botService:     bots.NewService(nil, queries),
-		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
+		accountService: accounts.NewService(nil, testAdminAccountStore{}),
 		sessionService: sessionpkg.NewService(nil, queries, nil),
 	}
 
@@ -598,7 +598,7 @@ func TestLocalChannelAuthorizeWSSessionAllowsManageAccess(t *testing.T) {
 	}
 	handler := &LocalChannelHandler{
 		botService:     bots.NewService(nil, queries),
-		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
+		accountService: accounts.NewService(nil, testAdminAccountStore{}),
 		sessionService: sessionpkg.NewService(nil, queries, nil),
 	}
 
@@ -638,7 +638,7 @@ func TestLocalChannelWSMessageAuthorizesSessionBeforeSlashCommand(t *testing.T) 
 	handler := &LocalChannelHandler{
 		channelType:    channel.ChannelTypeLocal,
 		botService:     bots.NewService(nil, queries),
-		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
+		accountService: accounts.NewService(nil, testAdminAccountStore{}),
 		sessionService: sessionpkg.NewService(nil, queries, nil),
 		resolver:       &flow.Resolver{},
 		commandHandler: command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil),
@@ -715,7 +715,7 @@ func TestLocalChannelWSQuickActionRequiresChatAccessWithoutSession(t *testing.T)
 	handler := &LocalChannelHandler{
 		channelType:    channel.ChannelTypeLocal,
 		botService:     bots.NewService(nil, queries),
-		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
+		accountService: accounts.NewService(nil, testAdminAccountStore{}),
 		resolver:       &flow.Resolver{},
 		logger:         slog.Default(),
 	}
@@ -796,7 +796,7 @@ func TestLocalChannelWSSkillActivationRequiresChatAccessWithSession(t *testing.T
 	handler := &LocalChannelHandler{
 		channelType:    channel.ChannelTypeLocal,
 		botService:     bots.NewService(nil, queries),
-		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
+		accountService: accounts.NewService(nil, testAdminAccountStore{}),
 		sessionService: sessionpkg.NewService(nil, queries, nil),
 		resolver:       &flow.Resolver{},
 		logger:         slog.Default(),
@@ -882,7 +882,7 @@ func TestLocalChannelWSQuickActionHelpOmitsSkillsForACPSession(t *testing.T) {
 	handler := &LocalChannelHandler{
 		channelType:    channel.ChannelTypeLocal,
 		botService:     bots.NewService(nil, queries),
-		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
+		accountService: accounts.NewService(nil, testAdminAccountStore{}),
 		sessionService: sessionpkg.NewService(nil, queries, nil),
 		resolver:       &flow.Resolver{},
 		skillResolver: testRuntimeSkillResolver{catalog: []skillset.SafeCatalogItem{
@@ -953,7 +953,7 @@ func TestLocalChannelWSQuickActionSkillListRejectsACPSession(t *testing.T) {
 	handler := &LocalChannelHandler{
 		channelType:    channel.ChannelTypeLocal,
 		botService:     bots.NewService(nil, queries),
-		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
+		accountService: accounts.NewService(nil, testAdminAccountStore{}),
 		sessionService: sessionpkg.NewService(nil, queries, nil),
 		resolver:       &flow.Resolver{},
 		skillResolver: testRuntimeSkillResolver{catalog: []skillset.SafeCatalogItem{
@@ -1037,7 +1037,7 @@ func TestExecuteQuickActionAcceptsSessionIDAsCapabilityContext(t *testing.T) {
 	}
 	handler := &LocalChannelHandler{
 		botService:     bots.NewService(nil, queries),
-		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
+		accountService: accounts.NewService(nil, testAdminAccountStore{}),
 		sessionService: sessionpkg.NewService(nil, queries, nil),
 		logger:         slog.Default(),
 	}
@@ -1150,7 +1150,7 @@ func TestPostMessageRejectsSlashOnLegacyRESTEndpoint(t *testing.T) {
 		channelStore:   &channel.Store{},
 		chatService:    conversation.NewService(nil, queries),
 		botService:     bots.NewService(nil, queries),
-		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
+		accountService: accounts.NewService(nil, testAdminAccountStore{}),
 		logger:         slog.Default(),
 	}
 

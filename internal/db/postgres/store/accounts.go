@@ -76,7 +76,6 @@ func (s *Store) CreateAccount(ctx context.Context, input dbstore.CreateAccountIn
 		Username:     text(input.Username),
 		Email:        optionalText(input.Email),
 		PasswordHash: text(input.PasswordHash),
-		Role:         input.Role,
 		DisplayName:  optionalText(input.DisplayName),
 		AvatarUrl:    optionalText(input.AvatarURL),
 		IsActive:     input.IsActive,
@@ -104,7 +103,6 @@ func (s *Store) UpdateAdmin(ctx context.Context, input dbstore.UpdateAccountAdmi
 	}
 	row, err := s.queries.UpdateAccountAdmin(ctx, dbsqlc.UpdateAccountAdminParams{
 		UserID:      userID,
-		Role:        input.Role,
 		DisplayName: optionalText(input.DisplayName),
 		AvatarUrl:   optionalText(input.AvatarURL),
 		IsActive:    input.IsActive,
@@ -183,7 +181,6 @@ func accountRecord(row dbsqlc.User) dbstore.AccountRecord {
 		ID:              row.ID.String(),
 		Username:        row.Username.String,
 		Email:           row.Email.String,
-		Role:            row.Role,
 		DisplayName:     row.DisplayName.String,
 		AvatarURL:       row.AvatarUrl.String,
 		Timezone:        row.Timezone,

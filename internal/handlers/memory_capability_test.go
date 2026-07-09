@@ -129,7 +129,7 @@ func TestChatCompactReturnsNotImplementedWhenProviderDoesNotSupportSemanticCompa
 	handler := NewMemoryHandler(
 		slog.Default(),
 		bots.NewService(slog.Default(), queries),
-		accounts.NewService(slog.Default(), testAdminAccountStore{role: "admin"}),
+		accounts.NewService(slog.Default(), testAdminAccountStore{}),
 	)
 	handler.SetMemoryRegistry(registry)
 
@@ -173,7 +173,7 @@ func TestChatStatusIncludesSemanticCompactCapability(t *testing.T) {
 	handler := NewMemoryHandler(
 		slog.Default(),
 		bots.NewService(slog.Default(), queries),
-		accounts.NewService(slog.Default(), testAdminAccountStore{role: "admin"}),
+		accounts.NewService(slog.Default(), testAdminAccountStore{}),
 	)
 	handler.SetMemoryRegistry(registry)
 
@@ -226,7 +226,7 @@ func TestChatStatusDoesNotFallbackToBuiltinWhenConfiguredProviderIsUnavailable(t
 	handler := NewMemoryHandler(
 		slog.Default(),
 		bots.NewService(slog.Default(), queries),
-		accounts.NewService(slog.Default(), testAdminAccountStore{role: "admin"}),
+		accounts.NewService(slog.Default(), testAdminAccountStore{}),
 	)
 	handler.SetMemoryRegistry(registry)
 	handler.SetSettingsService(settings.NewService(slog.Default(), queries, nil, nil))

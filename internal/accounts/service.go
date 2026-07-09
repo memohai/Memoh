@@ -170,10 +170,6 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateAccountRe
 	if password == "" {
 		return Account{}, errors.New("password is required")
 	}
-	role, err := normalizeRole(req.Role)
-	if err != nil {
-		return Account{}, err
-	}
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -196,7 +192,6 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateAccountRe
 		Username:     username,
 		Email:        email,
 		PasswordHash: string(hashed),
-		Role:         role,
 		DisplayName:  displayName,
 		AvatarURL:    avatarURL,
 		IsActive:     isActive,
@@ -254,13 +249,6 @@ func (s *Service) UpdateAdmin(ctx context.Context, userID string, req UpdateAcco
 	if err != nil {
 		return Account{}, err
 	}
-	role := existing.Role
-	if req.Role != nil {
-		role, err = normalizeRole(*req.Role)
-		if err != nil {
-			return Account{}, err
-		}
-	}
 	displayName := strings.TrimSpace(existing.DisplayName)
 	if req.DisplayName != nil {
 		displayName = strings.TrimSpace(*req.DisplayName)
@@ -279,7 +267,6 @@ func (s *Service) UpdateAdmin(ctx context.Context, userID string, req UpdateAcco
 
 	row, err := s.store.UpdateAdmin(ctx, dbstore.UpdateAccountAdminInput{
 		UserID:      userID,
-		Role:        role,
 		DisplayName: displayName,
 		AvatarURL:   avatarURL,
 		IsActive:    isActive,
@@ -397,17 +384,6 @@ func (s *Service) RemoveMember(ctx context.Context, userID string) error {
 	return s.store.RemoveMember(ctx, userID)
 }
 
-func normalizeRole(raw string) (string, error) {
-	role := strings.ToLower(strings.TrimSpace(raw))
-	if role == "" {
-		return "member", nil
-	}
-	if role != "member" && role != "admin" {
-		return "", fmt.Errorf("invalid role: %s", raw)
-	}
-	return role, nil
-}
-
 func toAccount(row dbstore.AccountRecord) Account {
 	username := strings.TrimSpace(row.Username)
 	email := strings.TrimSpace(row.Email)
@@ -425,7 +401,6 @@ func toAccount(row dbstore.AccountRecord) Account {
 		ID:          row.ID,
 		Username:    username,
 		Email:       email,
-		Role:        row.Role,
 		DisplayName: displayName,
 		AvatarURL:   avatarURL,
 		Timezone:    timezone,

@@ -30,7 +30,7 @@ fallback_owner AS (
   SELECT id AS owner_user_id
   FROM users
   WHERE username IS NOT NULL
-  ORDER BY (role = 'admin') DESC, created_at ASC
+  ORDER BY created_at ASC
   LIMIT 1
 ),
 provider_owners AS (

@@ -441,7 +441,7 @@ func (s createBotAccountStore) GetByUserID(_ context.Context, userID string) (db
 	if userID != s.userID {
 		return dbstore.AccountRecord{}, pgx.ErrNoRows
 	}
-	return dbstore.AccountRecord{ID: userID, Role: "member", IsActive: true}, nil
+	return dbstore.AccountRecord{ID: userID, IsActive: true}, nil
 }
 
 type createBotMissingAccountStore struct {

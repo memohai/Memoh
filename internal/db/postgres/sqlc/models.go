@@ -746,7 +746,6 @@ type User struct {
 	Username     pgtype.Text        `json:"username"`
 	Email        pgtype.Text        `json:"email"`
 	PasswordHash pgtype.Text        `json:"password_hash"`
-	Role         string             `json:"role"`
 	DisplayName  pgtype.Text        `json:"display_name"`
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 	Timezone     string             `json:"timezone"`
