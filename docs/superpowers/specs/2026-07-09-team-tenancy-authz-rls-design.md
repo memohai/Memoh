@@ -226,3 +226,11 @@
 - **托管 Postgres。** 用迁移建角色假定有足够权限；为托管库记录 owner/DDL 凭据的要求。
 - **开源单 team 下 RLS 实际收益≈0**（没有第二个租户可挡）；方案 A 接受这份多出来的自托管
   复杂度，换取机制统一、SaaS 免费继承真隔离。若自托管摩擦成为支持负担，重新权衡这一取舍。
+- **pgvector 向量库的 RLS 兜底是 follow-up。** `memory_node_embeddings` 在独立的 pgvector
+  库里、由 pgvector 连接自己 bootstrap，不走主库迁移的 RLS 路径。现状：该表已 `ENABLE` RLS +
+  `team_isolation` 策略（**不 FORCE**——pgvector 连接是表 owner，FORCE 会把它自己困在零行），
+  但当前 pgvector 池以 owner 连接、owner 豁免非 FORCE RLS，所以策略此刻惰性；**该表的实际隔离
+  靠每条语句显式的 `team_id` 谓词（已被 `pgvector_isolation_test.go` 锁定）**。要让 RLS 在这里
+  真正兜底，需给 pgvector 池配专用非 owner 角色 + 每语句 `set_config('app.team_id', ...)`（与
+  主池 memoh_app 同构）——部署级 follow-up。在此之前 pgvector 的跨 team 隔离与主库 RLS 落地前
+  一致：应用层谓词正确但无数据库兜底。

@@ -71,6 +71,31 @@ BEGIN
 END $$;
 
 CREATE INDEX IF NOT EXISTS idx_memory_node_embeddings_team_bot_model ON memory_node_embeddings (team_id, bot_id, model_id);
+
+-- Team isolation backstop for the vector table. ENABLE (not FORCE) RLS with a
+-- team_isolation policy keyed on current_setting('app.team_id'). This pgvector
+-- connection OWNS the table (it bootstraps it), and a table owner is exempt from
+-- non-FORCE RLS, so the policy is inert on the current owner connection and does
+-- NOT break reads/writes (which would otherwise return zero rows without
+-- app.team_id set). The active isolation today is the explicit team_id predicate
+-- on every statement below. The policy activates as a real backstop once the
+-- pgvector pool connects as a dedicated non-owner role that also sets
+-- app.team_id per statement -- a deployment follow-up parallel to the main pool's
+-- memoh_app role (see design spec). FORCE is deliberately NOT used here because
+-- the owner connection would then be trapped at zero rows.
+ALTER TABLE memory_node_embeddings ENABLE ROW LEVEL SECURITY;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'memory_node_embeddings'
+          AND policyname = 'team_isolation'
+    ) THEN
+        EXECUTE 'CREATE POLICY team_isolation ON memory_node_embeddings '
+             || 'USING (team_id = NULLIF(current_setting(''app.team_id'', true), '''')::uuid) '
+             || 'WITH CHECK (team_id = NULLIF(current_setting(''app.team_id'', true), '''')::uuid)';
+    END IF;
+END $$;
 `
 
 type pgvectorIndex struct {
