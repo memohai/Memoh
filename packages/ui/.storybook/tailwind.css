@@ -1,8 +1,0 @@
-/* Storybook's Tailwind entry — mirrors apps/web/src/style.css so stories render
-   with the exact same utilities + design tokens as the real app. */
-@import "tailwindcss";
-@import "../src/style.css";
-
-/* Tailwind v4 content scan: pick up utility classes used in the library source
-   and the stories themselves. */
-@source "../src";

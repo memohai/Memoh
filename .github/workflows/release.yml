@@ -28,6 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          submodules: recursive
           fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
@@ -48,6 +49,8 @@ jobs:
     if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Sync workspace versions
         shell: bash
         run: |
@@ -111,6 +114,8 @@ jobs:
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Sync desktop version
         shell: bash
         run: |

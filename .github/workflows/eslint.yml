@@ -55,6 +55,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: pnpm/action-setup@v4
         with:
           version: 10

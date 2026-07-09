@@ -55,7 +55,7 @@ curl -fsSL https://memoh.sh | sh
 Manual deployment:
 
 ```bash
-git clone --depth 1 https://github.com/memohai/Memoh.git
+git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/memohai/Memoh.git
 cd Memoh
 cp conf/app.docker.toml config.toml
 # Edit config.toml

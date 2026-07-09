@@ -24,9 +24,14 @@ dir = "{{cwd}}"
 [settings]
 experimental = true
 
+[tasks.submodule-init]
+description = "Init/update git submodules (packages/ui lives in memohai/ui)"
+run = "git submodule update --init --recursive"
+
 [tasks.pnpm-install]
 description = "Install dependencies"
 env = { CI = "true" }
+depends = ["submodule-init"]
 run = "pnpm install"
 
 [tasks.go-install]

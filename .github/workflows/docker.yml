@@ -39,6 +39,8 @@ jobs:
       workspace: ${{ steps.filter.outputs.workspace }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -124,6 +126,8 @@ jobs:
       - name: Checkout
         if: steps.should-build.outputs.skip != 'true'
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Set up Docker Buildx
         if: steps.should-build.outputs.skip != 'true'
