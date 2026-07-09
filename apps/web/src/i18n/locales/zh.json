@@ -99,6 +99,8 @@
     "continue": "继续",
     "username": "用户名",
     "password": "密码",
+    "usernamePlaceholder": "请输入用户名",
+    "passwordPlaceholder": "请输入密码",
     "login": "登录",
     "register": "注册账户",
     "logout": "退出登录",
