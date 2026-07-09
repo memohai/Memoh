@@ -14,6 +14,9 @@ COPY scripts/check-patched-deps.mjs ./scripts/
 COPY packages ./packages
 COPY apps ./apps
 
+RUN test -f packages/ui/package.json || \
+    (echo "packages/ui is missing. Initialize git submodules before building: git submodule update --init --recursive" >&2; exit 1)
+
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install
 

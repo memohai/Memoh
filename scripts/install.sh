@@ -718,12 +718,22 @@ if [ -d "$DIR" ]; then
 else
     echo "Cloning Memoh into $WORKSPACE..."
     if [ -n "$MEMOH_VERSION" ]; then
-        git clone --depth 1 --branch "$MEMOH_VERSION" "$REPO" "$DIR"
+        git clone --depth 1 --recurse-submodules --shallow-submodules --branch "$MEMOH_VERSION" "$REPO" "$DIR"
     else
-        git clone --depth 1 "$REPO" "$DIR"
+        git clone --depth 1 --recurse-submodules --shallow-submodules "$REPO" "$DIR"
     fi
     cd "$DIR"
     CLONED_FRESH=true
+fi
+
+echo "Updating git submodules..."
+git submodule sync --recursive
+git submodule update --init --recursive --depth 1
+
+if [ -f .gitmodules ] && [ ! -f packages/ui/package.json ]; then
+  echo "${RED}Error: packages/ui submodule is not initialized.${NC}"
+  echo "Run: git submodule update --init --recursive"
+  exit 1
 fi
 
 COMPOSE_FILE_NAME="docker-compose.yml"
