@@ -24,10 +24,10 @@
         </p>
       </div>
 
-      <!-- 无卡、无描边:两字段 + Continue 直接浮在点阵上(SaaS filled-control 语言)。
-           placeholder 用 Enter …,不与 label 裸词重复(P0 label≠placeholder)。 -->
+      <!-- 两字段 + Continue 等距 gap-2.5(不学 SaaS 密码步拉开 CTA)。
+           placeholder 用 Enter …(P0 label≠placeholder)。 -->
       <form
-        class="flex w-full flex-col"
+        class="flex w-full flex-col gap-2.5"
         @submit.prevent="login"
       >
         <Input
@@ -42,14 +42,12 @@
         <PasswordInput
           id="password"
           v-model="password"
-          class="mt-2.5"
           :placeholder="$t('auth.passwordPlaceholder')"
           autocomplete="current-password"
           :disabled="isSubmitting"
         />
         <LoadingButton
           type="submit"
-          class="login-entry-submit"
           block
           :loading="isSubmitting"
           :loading-delay="0"
@@ -125,17 +123,23 @@ const login = async () => {
 
 <!-- 非 scoped:scoped 内 :global(.dark) 组合选择器编译不可靠;用 .login-scope 限定。 -->
 <style>
-/* ── 登录页专属控件语言(与 SaaS 登录同源,2026-07)──────────────
- * 无卡、无描边:控件 = 比页面底色高一阶的填充块,浮在点阵动画上。
- * rest 用不透明实色;hover 用透明度叠在实色上。与产品内 field-edge
- * 是有意分叉(登录=营销面 / 产品内=工具面)。 */
+/* ── 登录页专属控件语言(与 SaaS 登录同源)────────────────────
+ * 浅色 rest = 纯白(非 #ececec 脏灰);暗色 #242424。
+ * hover = 白纱盖在 content 上(图标色不动,整体被洗亮),0ms。 */
 .login-scope {
-  --login-control: #ececec;
-  --login-control-hover: color-mix(in oklab, #ececec, rgb(0 0 0 / 0.05));
+  --login-control: #ffffff;
+  --login-outline-hover-opacity: 0.68;
+  --login-hover-duration: 10ms;
+  --login-primary-hover: color-mix(in oklab, var(--btn-primary), #fff 18%);
+  --login-primary-active: color-mix(in oklab, var(--btn-primary), #fff 28%);
+  --login-primary-disabled: color-mix(in oklab, var(--btn-primary), #fff 42%);
 }
 .dark .login-scope {
   --login-control: #242424;
-  --login-control-hover: color-mix(in oklab, #242424, rgb(255 255 255 / 0.07));
+  --login-outline-hover-opacity: 0.72;
+  --login-primary-hover: color-mix(in oklab, var(--btn-primary), #000 12%);
+  --login-primary-active: color-mix(in oklab, var(--btn-primary), #000 20%);
+  --login-primary-disabled: color-mix(in oklab, var(--btn-primary), #000 28%);
 }
 
 /* 防双击选中系统蓝框 */
@@ -144,7 +148,16 @@ const login = async () => {
   -webkit-user-select: none;
 }
 
-/* 禁用纱层:背景色叠在控件上,不引入第三色;loading 豁免 */
+/* outline hover = 整颗降透明度;10ms */
+.login-scope [data-button][data-variant="outline"]:not(:disabled) {
+  transition: opacity var(--login-hover-duration) ease-out;
+}
+.login-scope [data-button][data-variant="outline"]:not(:disabled):hover,
+.login-scope [data-button][data-variant="outline"]:not(:disabled):active {
+  opacity: var(--login-outline-hover-opacity);
+}
+
+/* ::after 仅禁用纱 */
 .login-scope [data-button]:not([data-variant="quiet"])::after {
   content: "";
   position: absolute;
@@ -156,8 +169,10 @@ const login = async () => {
   pointer-events: none;
   transition: opacity 0.2s ease-out;
 }
-.login-scope [data-button]:disabled:not([data-loading])::after {
-  opacity: 0.55;
+.login-scope [data-button]:not([data-variant="quiet"]):disabled:not([data-loading])::after,
+.login-scope [data-button]:not([data-variant="quiet"]):disabled:hover::after,
+.login-scope [data-button]:not([data-variant="quiet"]):disabled:active::after {
+  opacity: 0.32;
 }
 .login-scope [data-button]:disabled {
   opacity: 1;
@@ -165,15 +180,27 @@ const login = async () => {
   cursor: not-allowed;
 }
 
-/* 输入框:实心填充,无 field-edge;聚焦不变色 */
+/* 浅色描边两档:输入框 field-edge-rest(≈11%);按钮再淡到 ≈7%(大块+字重同浓度更重) */
+.login-scope {
+  --login-edge-field: inset 0 0 0 1px var(--field-edge-rest);
+  --login-edge-btn: inset 0 0 0 1px oklch(0 0 0 / 0.09);
+}
 .login-scope [data-slot="input"],
 .login-scope [data-slot="input-group"] {
   background-color: var(--login-control);
+  box-shadow: var(--login-edge-field);
+  transition: background-color 0.2s ease-out, box-shadow 0.06s ease-out;
+}
+.dark .login-scope [data-slot="input"],
+.dark .login-scope [data-slot="input-group"] {
   box-shadow: none;
-  transition: background-color 0.2s ease-out;
 }
 .login-scope [data-slot="input"]:focus,
 .login-scope [data-slot="input-group"]:focus-within {
+  box-shadow: var(--login-edge-field);
+}
+.dark .login-scope [data-slot="input"]:focus,
+.dark .login-scope [data-slot="input-group"]:focus-within {
   box-shadow: none;
 }
 .login-scope [data-slot="input"]:disabled,
@@ -183,8 +210,87 @@ const login = async () => {
   cursor: not-allowed;
 }
 
-/* 主按钮到字段:密码框→Continue 20px(与 SaaS 密码步同档) */
-.login-scope .login-entry-submit {
-  margin-top: 1.25rem;
+/* 浏览器原生自动填充覆盖(与 SaaS 登录页 saas/login.vue 同源,发现于该页
+ * 2026-07-09 的开发过程,详见其文件内注释):Chrome/Safari 对 autofill 的
+ * <input> 会强制刷一层它自己的背景,且只认 -webkit-text-fill-color、不认
+ * 普通 color——本页文字色是 --foreground(暗色下接近纯白),一旦浏览器把
+ * 背景抢成浅色,白字就读不出来了。用 inset box-shadow 撑满整个输入框把
+ * 浏览器的背景"挤"成看不见,再显式钉住文字色。
+ * transition delay 用大数字拖延 -webkit 的显示时机,是该 hack 的标准写法。
+ * ⚠ 与 saas/login.vue 保持同步:改这段前先看那边是否也要跟着改。
+ * ⚠ 选择器同时覆盖 [data-slot="input"] 和 [data-slot="input-group-control"]:
+ * 本页密码框走 PasswordInput → InputGroup → InputGroupInput,内层 <input>
+ * 的 data-slot 被 InputGroupInput 显式传成了 "input-group-control"(Vue
+ * fallthrough attrs 规则覆盖了 Input.vue 内部写死的 "input"),只写
+ * [data-slot="input"] 会漏掉密码框——账号用 Input(data-slot="input")没事,
+ * 密码这个最容易被浏览器自动填充命中的字段却选不中。
+ * input-group-control 不带 --login-edge-field:那圈描边已经画在外层
+ * [data-slot="input-group"] 容器上,内层再叠一份会形成双层描边。 */
+.login-scope [data-slot="input"]:-webkit-autofill,
+.login-scope [data-slot="input"]:-webkit-autofill:hover,
+.login-scope [data-slot="input"]:-webkit-autofill:focus,
+.login-scope [data-slot="input"]:-webkit-autofill:active {
+  box-shadow: var(--login-edge-field), 0 0 0px 1000px var(--login-control) inset;
+  -webkit-text-fill-color: var(--foreground);
+  caret-color: var(--foreground);
+  transition: background-color 99999s ease-in-out 0s;
+}
+.login-scope [data-slot="input-group-control"]:-webkit-autofill,
+.login-scope [data-slot="input-group-control"]:-webkit-autofill:hover,
+.login-scope [data-slot="input-group-control"]:-webkit-autofill:focus,
+.login-scope [data-slot="input-group-control"]:-webkit-autofill:active {
+  box-shadow: 0 0 0px 1000px var(--login-control) inset;
+  -webkit-text-fill-color: var(--foreground);
+  caret-color: var(--foreground);
+  transition: background-color 99999s ease-in-out 0s;
+}
+.dark .login-scope [data-slot="input"]:-webkit-autofill,
+.dark .login-scope [data-slot="input"]:-webkit-autofill:hover,
+.dark .login-scope [data-slot="input"]:-webkit-autofill:focus,
+.dark .login-scope [data-slot="input"]:-webkit-autofill:active,
+.dark .login-scope [data-slot="input-group-control"]:-webkit-autofill,
+.dark .login-scope [data-slot="input-group-control"]:-webkit-autofill:hover,
+.dark .login-scope [data-slot="input-group-control"]:-webkit-autofill:focus,
+.dark .login-scope [data-slot="input-group-control"]:-webkit-autofill:active {
+  box-shadow: 0 0 0px 1000px var(--login-control) inset;
+}
+
+/* outline:描边 hover 不摘;fill 不动,靠整颗 opacity */
+.login-scope [data-button][data-variant="outline"]::before,
+.login-scope [data-button][data-variant="outline"]:not(:disabled):hover::before,
+.login-scope [data-button][data-variant="outline"]:not(:disabled):active::before,
+.login-scope [data-button][data-variant="outline"]:disabled:hover::before,
+.login-scope [data-button][data-variant="outline"]:disabled:active::before {
+  background-color: var(--login-control);
+  box-shadow: var(--login-edge-btn);
+}
+.dark .login-scope [data-button][data-variant="outline"]::before,
+.dark .login-scope [data-button][data-variant="outline"]:not(:disabled):hover::before,
+.dark .login-scope [data-button][data-variant="outline"]:not(:disabled):active::before,
+.dark .login-scope [data-button][data-variant="outline"]:disabled:hover::before,
+.dark .login-scope [data-button][data-variant="outline"]:disabled:active::before {
+  background-color: var(--login-control);
+  box-shadow: none;
+}
+
+/* primary:轻抬 fill;10ms;不可点往白抬 */
+.login-scope [data-button]:is([data-variant="default"], [data-variant="primary"])::before,
+.dark .login-scope [data-button]:is([data-variant="default"], [data-variant="primary"])::before {
+  transition: background-color var(--login-hover-duration) ease-out;
+}
+.login-scope [data-button]:is([data-variant="default"], [data-variant="primary"]):not(:disabled):hover::before,
+.dark .login-scope [data-button]:is([data-variant="default"], [data-variant="primary"]):not(:disabled):hover::before {
+  background-color: var(--login-primary-hover);
+}
+.login-scope [data-button]:is([data-variant="default"], [data-variant="primary"]):not(:disabled):active::before,
+.login-scope [data-button]:is([data-variant="default"], [data-variant="primary"])[data-block]:not(:disabled):active::before,
+.dark .login-scope [data-button]:is([data-variant="default"], [data-variant="primary"]):not(:disabled):active::before,
+.dark .login-scope [data-button]:is([data-variant="default"], [data-variant="primary"])[data-block]:not(:disabled):active::before {
+  background-color: var(--login-primary-active);
+  transition: background-color var(--login-hover-duration) ease-out;
+}
+.login-scope [data-button]:is([data-variant="default"], [data-variant="primary"]):disabled:not([data-loading])::before,
+.dark .login-scope [data-button]:is([data-variant="default"], [data-variant="primary"]):disabled:not([data-loading])::before {
+  background-color: var(--login-primary-disabled);
 }
 </style>
