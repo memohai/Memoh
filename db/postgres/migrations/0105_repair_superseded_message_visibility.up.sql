@@ -46,13 +46,16 @@ retained_incomplete_forks AS (
       WHERE a.session_id = f.id
         AND a.turn_id IS NOT NULL
         AND a.turn_position IS NOT NULL
+        AND a.turn_visible = true
         AND b.turn_id IS NOT NULL
+        AND b.turn_visible = true
     )
     OR f.next_turn_position <= (
       SELECT MAX(m.turn_position)
       FROM bot_history_messages m
       WHERE m.session_id = f.id
         AND m.turn_position IS NOT NULL
+        AND m.turn_visible = true
     )
   )
 ),

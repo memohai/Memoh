@@ -486,16 +486,25 @@ func TestPostgresRepairSkipsConsistentIncompleteForkMigration(t *testing.T) {
 		retriedReusedUser = "00000000-0000-0000-0000-000000075616"
 		retriedNewReply   = "00000000-0000-0000-0000-000000075617"
 
+		hiddenCollisionSessionID = "00000000-0000-0000-0000-000000075604"
+		hiddenCollisionPrefix    = "00000000-0000-0000-0000-000000075618"
+		hiddenCollisionHidden    = "00000000-0000-0000-0000-000000075619"
+		hiddenCollisionUser      = "00000000-0000-0000-0000-00000007561a"
+		hiddenCollisionVisible   = "00000000-0000-0000-0000-00000007561b"
+
 		arrayMetadataSessionID = "00000000-0000-0000-0000-000000075603"
 	)
-	// Three sessions that match the missing-fork_message_id filter but must
+	// Four sessions that match the missing-fork_message_id filter but must
 	// not be repaired:
 	// 1. positions and allocator already consistent
 	// 2. healthy fork whose post-fork turn was retried with the NEW
 	//    ReplaceHistoryTurn: the hidden superseded turn keeps its position and
 	//    the replacement reuses the user message, so message-time ordering
 	//    disagrees with positions — still consistent, must stay untouched
-	// 3. forked_from is a jsonb array, not an object (the ? operator matches
+	// 3. a hidden superseded turn shares a position with a visible turn: the
+	//    collision only exists among hidden rows, which never reach visible
+	//    history or turn allocation, so it must not count as damage
+	// 4. forked_from is a jsonb array, not an object (the ? operator matches
 	//    array elements, so a shape guard is required)
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO bot_sessions (id, bot_id, channel_type, title, metadata, next_turn_position, created_at, updated_at)
@@ -514,8 +523,13 @@ func TestPostgresRepairSkipsConsistentIncompleteForkMigration(t *testing.T) {
 				$4, $1, 'local', 'array metadata',
 				'{"forked_from":["session_id","message_id"]}'::jsonb,
 				1, now(), now()
+			),
+			(
+				$5, $1, 'local', 'hidden collision fork',
+				'{"forked_from":{"session_id":"00000000-0000-0000-0000-000000075103","message_id":"00000000-0000-0000-0000-000000075114"}}'::jsonb,
+				3, now(), now()
 			)
-	`, postgresSessionTestBotID, sessionID, retriedSessionID, arrayMetadataSessionID); err != nil {
+	`, postgresSessionTestBotID, sessionID, retriedSessionID, arrayMetadataSessionID, hiddenCollisionSessionID); err != nil {
 		t.Fatalf("insert consistent fork sessions: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
@@ -559,9 +573,31 @@ func TestPostgresRepairSkipsConsistentIncompleteForkMigration(t *testing.T) {
 				$10, $1, $6, 'assistant', '{"role":"assistant","content":"retry reply"}'::jsonb,
 				'00000000-0000-0000-0000-000000075625', 3, 2, true, NULL,
 				(SELECT created_at + interval '4 minutes' FROM bot_sessions WHERE id = $6)
+			),
+			(
+				$12, $1, $11, 'assistant', '{"role":"assistant","content":"copied"}'::jsonb,
+				'00000000-0000-0000-0000-000000075626', 1, 2, true, NULL,
+				(SELECT created_at - interval '1 minute' FROM bot_sessions WHERE id = $11)
+			),
+			(
+				$13, $1, $11, 'assistant', '{"role":"assistant","content":"superseded reply"}'::jsonb,
+				'00000000-0000-0000-0000-000000075627', 2, 2, false,
+				(SELECT created_at + interval '3 minutes' FROM bot_sessions WHERE id = $11),
+				(SELECT created_at + interval '1 minute' FROM bot_sessions WHERE id = $11)
+			),
+			(
+				$14, $1, $11, 'user', '{"role":"user","content":"replacement"}'::jsonb,
+				'00000000-0000-0000-0000-000000075628', 2, 1, true, NULL,
+				(SELECT created_at + interval '2 minutes' FROM bot_sessions WHERE id = $11)
+			),
+			(
+				$15, $1, $11, 'assistant', '{"role":"assistant","content":"replacement reply"}'::jsonb,
+				'00000000-0000-0000-0000-000000075628', 2, 2, true, NULL,
+				(SELECT created_at + interval '3 minutes' FROM bot_sessions WHERE id = $11)
 			)
 	`, postgresSessionTestBotID, sessionID, prefixAssistant, followUpUser, followUpAssistant,
-		retriedSessionID, retriedPrefixMsg, retriedHiddenMsg, retriedReusedUser, retriedNewReply); err != nil {
+		retriedSessionID, retriedPrefixMsg, retriedHiddenMsg, retriedReusedUser, retriedNewReply,
+		hiddenCollisionSessionID, hiddenCollisionPrefix, hiddenCollisionHidden, hiddenCollisionUser, hiddenCollisionVisible); err != nil {
 		t.Fatalf("insert consistent fork messages: %v", err)
 	}
 
@@ -592,6 +628,14 @@ func TestPostgresRepairSkipsConsistentIncompleteForkMigration(t *testing.T) {
 	assertPostgresSessionNextTurnPosition(t, ctx, tx, arrayMetadataSessionID, 1)
 	assertPostgresSessionRepairMarker(t, ctx, tx, arrayMetadataSessionID, "0105_incomplete_fork_session", false)
 	assertPostgresSessionRepairMarker(t, ctx, tx, arrayMetadataSessionID, "0105_incomplete_fork_turn_positions", false)
+
+	assertPostgresSessionDeleted(t, ctx, tx, hiddenCollisionSessionID, false)
+	assertPostgresMessageTurnPosition(t, ctx, tx, hiddenCollisionPrefix, 1)
+	assertPostgresMessageTurnPosition(t, ctx, tx, hiddenCollisionHidden, 2)
+	assertPostgresMessageTurnPosition(t, ctx, tx, hiddenCollisionUser, 2)
+	assertPostgresMessageTurnPosition(t, ctx, tx, hiddenCollisionVisible, 2)
+	assertPostgresSessionNextTurnPosition(t, ctx, tx, hiddenCollisionSessionID, 3)
+	assertPostgresSessionRepairMarker(t, ctx, tx, hiddenCollisionSessionID, "0105_incomplete_fork_turn_positions", false)
 }
 
 const (
