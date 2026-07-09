@@ -7,6 +7,7 @@ import (
 	"time"
 
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 type testAccountStore struct {
@@ -74,6 +75,20 @@ type testEmailBootstrapper struct {
 func (b *testEmailBootstrapper) EnsureDefaultGmailProvider(_ context.Context, userID string) error {
 	b.userID = userID
 	return b.err
+}
+
+func TestIsAdminReadsScopeRole(t *testing.T) {
+	svc := &Service{} // IsAdmin(ctx) does not need store
+	for role, want := range map[string]bool{"owner": true, "admin": true, "member": false, "": false} {
+		ctx := teams.WithScope(context.Background(), teams.Scope{TeamID: teams.DefaultTeamID, UserID: "u1", Role: role})
+		got, err := svc.IsAdmin(ctx)
+		if err != nil {
+			t.Fatalf("role %q: %v", role, err)
+		}
+		if got != want {
+			t.Fatalf("role %q: IsAdmin=%v want %v", role, got, want)
+		}
+	}
 }
 
 func TestCreateEnsuresDefaultGmailProvider(t *testing.T) {

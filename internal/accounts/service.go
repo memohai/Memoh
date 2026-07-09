@@ -12,6 +12,7 @@ import (
 
 	"github.com/memohai/memoh/internal/db"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/teams"
 	tzutil "github.com/memohai/memoh/internal/timezone"
 )
 
@@ -20,6 +21,7 @@ type Service struct {
 	store             dbstore.AccountStore
 	logger            *slog.Logger
 	emailBootstrapper EmailProviderBootstrapper
+	membership        teams.MembershipReader
 }
 
 type EmailProviderBootstrapper interface {
@@ -45,6 +47,10 @@ func NewService(log *slog.Logger, store dbstore.AccountStore) *Service {
 
 func (s *Service) SetEmailProviderBootstrapper(bootstrapper EmailProviderBootstrapper) {
 	s.emailBootstrapper = bootstrapper
+}
+
+func (s *Service) SetMembershipReader(r teams.MembershipReader) {
+	s.membership = r
 }
 
 // Get returns an account by user id.
@@ -127,19 +133,28 @@ func (s *Service) SearchAccounts(ctx context.Context, query string, limit int) (
 	return items, nil
 }
 
-// IsAdmin checks if the user has admin role.
-func (s *Service) IsAdmin(ctx context.Context, userID string) (bool, error) {
-	if s.store == nil {
-		return false, errors.New("account store not configured")
-	}
-	row, err := s.store.GetByUserID(ctx, userID)
+// IsAdmin reports whether the request's acting user is an owner/admin of the
+// resolved team (read from the team scope injected by the membership middleware).
+func (s *Service) IsAdmin(ctx context.Context) (bool, error) {
+	scope, err := teams.ScopeFromContext(ctx)
 	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return false, nil
-		}
+		return false, nil // no team scope => not an admin (unauthenticated/background)
+	}
+	return scope.Role == "owner" || scope.Role == "admin", nil
+}
+
+// IsTeamAdmin reports whether the given user is owner/admin of the current team.
+// Used where a specific identity (not the request caller) is being checked.
+func (s *Service) IsTeamAdmin(ctx context.Context, userID string) (bool, error) {
+	if s.membership == nil {
+		return false, errors.New("membership reader not configured")
+	}
+	scope := teams.ScopeOrDefault(ctx)
+	role, found, err := s.membership.Membership(ctx, scope.TeamID, userID)
+	if err != nil || !found {
 		return false, err
 	}
-	return isAdminRole(row.Role), nil
+	return role == "owner" || role == "admin", nil
 }
 
 // Create creates a new account for an existing user.
@@ -391,20 +406,6 @@ func normalizeRole(raw string) (string, error) {
 		return "", fmt.Errorf("invalid role: %s", raw)
 	}
 	return role, nil
-}
-
-func isAdminRole(role any) bool {
-	if role == nil {
-		return false
-	}
-	switch v := role.(type) {
-	case string:
-		return strings.EqualFold(v, "admin")
-	case fmt.Stringer:
-		return strings.EqualFold(v.String(), "admin")
-	default:
-		return strings.EqualFold(fmt.Sprint(v), "admin")
-	}
 }
 
 func toAccount(row dbstore.AccountRecord) Account {
