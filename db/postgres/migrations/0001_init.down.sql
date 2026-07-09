@@ -62,3 +62,14 @@ DROP TABLE IF EXISTS team_members CASCADE;
 DROP TABLE IF EXISTS teams CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 DROP TYPE IF EXISTS user_role;
+
+-- Remove the memoh_app runtime role and its default privileges (created at the
+-- tail of 0001_init.up.sql / by 0107_rls_enforcement.up.sql).
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'memoh_app') THEN
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM memoh_app;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE USAGE, SELECT ON SEQUENCES FROM memoh_app;
+    DROP ROLE IF EXISTS memoh_app;
+  END IF;
+END $$;
