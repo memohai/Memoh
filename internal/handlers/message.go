@@ -691,7 +691,7 @@ func (h *MessageHandler) authorizeBotMessageAccess(c echo.Context, channelIdenti
 		return bots.Bot{}, nil, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
 	}
 	ctx := c.Request().Context()
-	isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
+	isAdmin, err := h.accountService.IsAdmin(ctx)
 	if err != nil {
 		return bots.Bot{}, nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

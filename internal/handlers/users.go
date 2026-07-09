@@ -199,11 +199,10 @@ func (h *UsersHandler) UpdateMyPassword(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /users [get].
 func (h *UsersHandler) ListUsers(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
-	if err != nil {
+	if _, err := h.requireChannelIdentityID(c); err != nil {
 		return err
 	}
-	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+	isAdmin, err := h.service.IsAdmin(c.Request().Context())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -241,7 +240,7 @@ func (h *UsersHandler) GetUser(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "user id is required")
 	}
 	if targetID != channelIdentityID {
-		isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+		isAdmin, err := h.service.IsAdmin(c.Request().Context())
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
@@ -272,11 +271,10 @@ func (h *UsersHandler) GetUser(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /users/{id} [put].
 func (h *UsersHandler) UpdateUser(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
-	if err != nil {
+	if _, err := h.requireChannelIdentityID(c); err != nil {
 		return err
 	}
-	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+	isAdmin, err := h.service.IsAdmin(c.Request().Context())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -318,11 +316,10 @@ func (h *UsersHandler) UpdateUser(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /users/{id}/password [put].
 func (h *UsersHandler) ResetUserPassword(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
-	if err != nil {
+	if _, err := h.requireChannelIdentityID(c); err != nil {
 		return err
 	}
-	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+	isAdmin, err := h.service.IsAdmin(c.Request().Context())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -360,11 +357,10 @@ func (h *UsersHandler) ResetUserPassword(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /users [post].
 func (h *UsersHandler) CreateUser(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
-	if err != nil {
+	if _, err := h.requireChannelIdentityID(c); err != nil {
 		return err
 	}
-	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+	isAdmin, err := h.service.IsAdmin(c.Request().Context())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -399,7 +395,7 @@ func (h *UsersHandler) RemoveMember(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+	isAdmin, err := h.service.IsAdmin(c.Request().Context())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -450,7 +446,7 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 	ownerID := channelIdentityID
 	ownerFromToken := true
 	if raw := strings.TrimSpace(c.QueryParam("owner_id")); raw != "" {
-		isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+		isAdmin, err := h.service.IsAdmin(c.Request().Context())
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
@@ -705,7 +701,7 @@ func (h *UsersHandler) ListBots(c echo.Context) error {
 	}
 	ownerID := strings.TrimSpace(c.QueryParam("owner_id"))
 	if ownerID != "" {
-		isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+		isAdmin, err := h.service.IsAdmin(c.Request().Context())
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
@@ -795,7 +791,7 @@ func (h *UsersHandler) ListBotChecks(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+	isAdmin, err := h.service.IsAdmin(c.Request().Context())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -1069,11 +1065,10 @@ func (h *UsersHandler) prepareACPWorkspaceConfig(ctx context.Context, bot bots.B
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{id}/owner [put].
 func (h *UsersHandler) TransferBotOwner(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
-	if err != nil {
+	if _, err := h.requireChannelIdentityID(c); err != nil {
 		return err
 	}
-	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+	isAdmin, err := h.service.IsAdmin(c.Request().Context())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -1477,7 +1472,7 @@ func (h *UsersHandler) authorizeBotAccess(ctx context.Context, channelIdentityID
 // attachCurrentUserPermissions populates the requesting user's effective access
 // permissions for a single bot.
 func (h *UsersHandler) attachCurrentUserPermissions(ctx context.Context, channelIdentityID string, bot *bots.Bot) error {
-	isAdmin, err := h.service.IsAdmin(ctx, channelIdentityID)
+	isAdmin, err := h.service.IsAdmin(ctx)
 	if err != nil {
 		return err
 	}
@@ -1491,7 +1486,7 @@ func (h *UsersHandler) attachCurrentUserPermissions(ctx context.Context, channel
 
 // attachCurrentUserPermissionsList populates effective permissions for a list of bots.
 func (h *UsersHandler) attachCurrentUserPermissionsList(ctx context.Context, channelIdentityID string, items []bots.Bot) error {
-	isAdmin, err := h.service.IsAdmin(ctx, channelIdentityID)
+	isAdmin, err := h.service.IsAdmin(ctx)
 	if err != nil {
 		return err
 	}

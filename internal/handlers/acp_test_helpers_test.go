@@ -11,6 +11,7 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 func testUUID(value string) pgtype.UUID {
@@ -29,7 +30,17 @@ func testJSON(value map[string]any) []byte {
 	return data
 }
 
+// testAuthContext builds an Echo context with a JWT token for userID.
+// The team scope role is left empty (no admin). Use testAuthContextWithRole for
+// tests that need a specific role injected into the team scope.
 func testAuthContext(e *echo.Echo, req *http.Request, rec http.ResponseWriter, userID string) echo.Context {
+	return testAuthContextWithRole(e, req, rec, userID, "")
+}
+
+// testAuthContextWithRole builds an Echo context with a JWT token and a team
+// scope carrying the given role ("admin", "owner", "member", etc.). Pass an
+// empty role to omit the team scope (anonymous / no admin).
+func testAuthContextWithRole(e *echo.Echo, req *http.Request, rec http.ResponseWriter, userID, role string) echo.Context {
 	ctx := e.NewContext(req, rec)
 	ctx.Set("user", &jwt.Token{
 		Valid: true,
@@ -38,9 +49,21 @@ func testAuthContext(e *echo.Echo, req *http.Request, rec http.ResponseWriter, u
 			"user_id": userID,
 		},
 	})
+	if role != "" {
+		scopedCtx := teams.WithScope(req.Context(), teams.Scope{
+			TeamID: teams.DefaultTeamID,
+			UserID: userID,
+			Role:   role,
+		})
+		ctx.SetRequest(req.WithContext(scopedCtx))
+	}
 	return ctx
 }
 
+// newTestAdminAccountService returns an accounts.Service backed by a fake store
+// that serves the given role for GetByUserID lookups.  Note: accounts.Service.IsAdmin
+// now reads the team scope from context rather than querying the store, so this
+// service is mainly used for AuthorizeAccess helpers that call GetByUserID.
 func newTestAdminAccountService(role string) *accounts.Service {
 	return accounts.NewService(nil, testAdminAccountStore{role: role})
 }

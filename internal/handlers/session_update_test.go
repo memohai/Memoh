@@ -342,7 +342,7 @@ func TestUpdateSessionSwitchToACPRequiresWorkspaceExec(t *testing.T) {
 		newTestAdminAccountService("user"),
 	)
 
-	_, err := callUpdateSessionAs(handler, botID, sessionID, userID, `{"type":"acp_agent","metadata":{"acp_agent_id":"codex","project_path":"/data/app"}}`)
+	_, err := callUpdateSessionAsWithRole(handler, botID, sessionID, userID, `{"type":"acp_agent","metadata":{"acp_agent_id":"codex","project_path":"/data/app"}}`, "")
 	var httpErr *echo.HTTPError
 	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
 		t.Fatalf("UpdateSession() error = %v, want HTTP 403", err)
@@ -505,7 +505,7 @@ func TestUpdateSessionRejectsRetagToSubagentForChatUser(t *testing.T) {
 		newTestAdminAccountService("user"),
 	)
 
-	_, err := callUpdateSessionAs(handler, botID, sessionID, userID, `{"type":"subagent","metadata":{"agent_id":"direct"}}`)
+	_, err := callUpdateSessionAsWithRole(handler, botID, sessionID, userID, `{"type":"subagent","metadata":{"agent_id":"direct"}}`, "")
 	var httpErr *echo.HTTPError
 	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
 		t.Fatalf("UpdateSession() error = %v, want HTTP 403", err)
@@ -570,7 +570,7 @@ func TestUpdateSessionRejectsSubagentTitleUpdateForChatUser(t *testing.T) {
 		newTestAdminAccountService("user"),
 	)
 
-	_, err := callUpdateSessionAs(handler, botID, sessionID, userID, `{"title":"renamed directly"}`)
+	_, err := callUpdateSessionAsWithRole(handler, botID, sessionID, userID, `{"title":"renamed directly"}`, "")
 	var httpErr *echo.HTTPError
 	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
 		t.Fatalf("UpdateSession() error = %v, want HTTP 403", err)
@@ -766,16 +766,23 @@ func TestUpdateSessionSwitchesACPAgentToChatClearsMetadataAndClosesRuntime(t *te
 	}
 }
 
+// callUpdateSession updates a session as an admin user (role="admin" in team scope).
 func callUpdateSession(handler *SessionHandler, botID, sessionID, body string) (*httptest.ResponseRecorder, error) {
 	return callUpdateSessionAs(handler, botID, sessionID, "user-1", body)
 }
 
 func callUpdateSessionAs(handler *SessionHandler, botID, sessionID, userID, body string) (*httptest.ResponseRecorder, error) {
+	return callUpdateSessionAsWithRole(handler, botID, sessionID, userID, body, "admin")
+}
+
+// callUpdateSessionAsWithRole updates a session with the given team scope role.
+// Pass an empty role to simulate a non-admin (member/user) context.
+func callUpdateSessionAsWithRole(handler *SessionHandler, botID, sessionID, userID, body, role string) (*httptest.ResponseRecorder, error) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPatch, "/bots/"+botID+"/sessions/"+sessionID, bytes.NewBufferString(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
-	ctx := testAuthContext(e, req, rec, userID)
+	ctx := testAuthContextWithRole(e, req, rec, userID, role)
 	ctx.SetPath("/bots/:bot_id/sessions/:session_id")
 	ctx.SetParamNames("bot_id", "session_id")
 	ctx.SetParamValues(botID, sessionID)
@@ -783,10 +790,14 @@ func callUpdateSessionAs(handler *SessionHandler, botID, sessionID, userID, body
 }
 
 func callGetSession(handler *SessionHandler, botID, sessionID, userID string) (*httptest.ResponseRecorder, error) {
+	return callGetSessionWithRole(handler, botID, sessionID, userID, "admin")
+}
+
+func callGetSessionWithRole(handler *SessionHandler, botID, sessionID, userID, role string) (*httptest.ResponseRecorder, error) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/sessions/"+sessionID, nil)
 	rec := httptest.NewRecorder()
-	ctx := testAuthContext(e, req, rec, userID)
+	ctx := testAuthContextWithRole(e, req, rec, userID, role)
 	ctx.SetPath("/bots/:bot_id/sessions/:session_id")
 	ctx.SetParamNames("bot_id", "session_id")
 	ctx.SetParamValues(botID, sessionID)

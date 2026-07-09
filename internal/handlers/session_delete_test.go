@@ -154,7 +154,7 @@ func TestDeleteSessionRejectsSubagentForChatUser(t *testing.T) {
 		newTestAdminAccountService("user"),
 	)
 
-	_, err := callDeleteSessionAs(handler, botID, sessionID, userID)
+	_, err := callDeleteSessionAsWithRole(handler, botID, sessionID, userID, "")
 	var httpErr *echo.HTTPError
 	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
 		t.Fatalf("DeleteSession() error = %v, want HTTP 403", err)
@@ -164,15 +164,22 @@ func TestDeleteSessionRejectsSubagentForChatUser(t *testing.T) {
 	}
 }
 
+// callDeleteSession deletes a session as an admin user (role="admin" in team scope).
 func callDeleteSession(handler *SessionHandler, botID, sessionID string) (*httptest.ResponseRecorder, error) {
 	return callDeleteSessionAs(handler, botID, sessionID, "user-1")
 }
 
 func callDeleteSessionAs(handler *SessionHandler, botID, sessionID, userID string) (*httptest.ResponseRecorder, error) {
+	return callDeleteSessionAsWithRole(handler, botID, sessionID, userID, "admin")
+}
+
+// callDeleteSessionAsWithRole deletes a session with the given team scope role.
+// Pass an empty role to simulate a non-admin (member/user) context.
+func callDeleteSessionAsWithRole(handler *SessionHandler, botID, sessionID, userID, role string) (*httptest.ResponseRecorder, error) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodDelete, "/bots/"+botID+"/sessions/"+sessionID, nil)
 	rec := httptest.NewRecorder()
-	ctx := testAuthContext(e, req, rec, userID)
+	ctx := testAuthContextWithRole(e, req, rec, userID, role)
 	ctx.SetPath("/bots/:bot_id/sessions/:session_id")
 	ctx.SetParamNames("bot_id", "session_id")
 	ctx.SetParamValues(botID, sessionID)

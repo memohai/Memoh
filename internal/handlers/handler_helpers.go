@@ -39,7 +39,7 @@ func AuthorizeBotAccessWithPermission(ctx context.Context, botService *bots.Serv
 	if botService == nil || accountService == nil {
 		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
 	}
-	isAdmin, err := accountService.IsAdmin(ctx, channelIdentityID)
+	isAdmin, err := accountService.IsAdmin(ctx)
 	if err != nil {
 		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

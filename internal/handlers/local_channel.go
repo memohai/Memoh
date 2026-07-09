@@ -1783,7 +1783,7 @@ func (h *LocalChannelHandler) resolveCurrentUserPermissions(ctx context.Context,
 	if h.botService == nil || h.accountService == nil {
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
 	}
-	isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
+	isAdmin, err := h.accountService.IsAdmin(ctx)
 	if err != nil {
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

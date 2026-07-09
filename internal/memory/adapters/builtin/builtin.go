@@ -55,7 +55,7 @@ type llmCompactRuntime interface {
 
 // AdminChecker checks whether a channel identity has admin privileges.
 type AdminChecker interface {
-	IsAdmin(ctx context.Context, channelIdentityID string) (bool, error)
+	IsTeamAdmin(ctx context.Context, channelIdentityID string) (bool, error)
 }
 
 func NewBuiltinProvider(log *slog.Logger, service Runtime, chatAccessor conversation.Accessor, adminChecker AdminChecker) *BuiltinProvider {
@@ -414,7 +414,7 @@ func (p *BuiltinProvider) CallTool(ctx context.Context, session mcp.ToolSessionC
 
 func (p *BuiltinProvider) canAccessChat(ctx context.Context, chatID, channelIdentityID string) (bool, error) {
 	if p.adminChecker != nil {
-		isAdmin, err := p.adminChecker.IsAdmin(ctx, channelIdentityID)
+		isAdmin, err := p.adminChecker.IsTeamAdmin(ctx, channelIdentityID)
 		if err != nil {
 			return false, err
 		}

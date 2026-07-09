@@ -97,7 +97,7 @@ func TestCreateSessionAuthorizesFinalDescriptor(t *testing.T) {
 		newTestAdminAccountService("user"),
 	)
 
-	err := callCreateSession(handler, botID, `{"type":"chat","session_mode":"discuss","title":"discuss"}`)
+	err := callCreateSessionWithRole(handler, botID, `{"type":"chat","session_mode":"discuss","title":"discuss"}`, "")
 	var httpErr *echo.HTTPError
 	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
 		t.Fatalf("CreateSession() error = %v, want HTTP 403", err)
@@ -199,7 +199,7 @@ func TestCreateSessionRejectsSubagentTypeForChatUser(t *testing.T) {
 		newTestAdminAccountService("user"),
 	)
 
-	err := callCreateSession(handler, botID, `{"type":"subagent","title":"direct child"}`)
+	err := callCreateSessionWithRole(handler, botID, `{"type":"subagent","title":"direct child"}`, "")
 	var httpErr *echo.HTTPError
 	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
 		t.Fatalf("CreateSession() error = %v, want HTTP 403", err)
@@ -319,12 +319,19 @@ func TestCreateSessionToleratesFailedRuntimeBind(t *testing.T) {
 	}
 }
 
+// callCreateSession creates a session as an admin user (role="admin" in team scope).
 func callCreateSession(handler *SessionHandler, botID string, body string) error {
+	return callCreateSessionWithRole(handler, botID, body, "admin")
+}
+
+// callCreateSessionWithRole creates a session with the given team scope role.
+// Pass an empty role to simulate a non-admin (member/user) context.
+func callCreateSessionWithRole(handler *SessionHandler, botID string, body string, role string) error {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/sessions", bytes.NewBufferString(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
-	ctx := testAuthContext(e, req, rec, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	ctx := testAuthContextWithRole(e, req, rec, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", role)
 	ctx.SetPath("/bots/:bot_id/sessions")
 	ctx.SetParamNames("bot_id")
 	ctx.SetParamValues(botID)

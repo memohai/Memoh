@@ -74,7 +74,14 @@ func newListSessionHandler(t *testing.T, queries *sessionListQueries) *SessionHa
 	)
 }
 
+// callListSessions lists sessions as an admin user (role="admin" in team scope).
 func callListSessions(handler *SessionHandler, botID, rawQuery string) (*httptest.ResponseRecorder, error) {
+	return callListSessionsWithRole(handler, botID, rawQuery, "admin")
+}
+
+// callListSessionsWithRole lists sessions with the given team scope role.
+// Pass an empty role to simulate a non-admin (member/user) context.
+func callListSessionsWithRole(handler *SessionHandler, botID, rawQuery, role string) (*httptest.ResponseRecorder, error) {
 	e := echo.New()
 	target := "/bots/" + botID + "/sessions"
 	if rawQuery != "" {
@@ -82,7 +89,7 @@ func callListSessions(handler *SessionHandler, botID, rawQuery string) (*httptes
 	}
 	req := httptest.NewRequest(http.MethodGet, target, nil)
 	rec := httptest.NewRecorder()
-	ctx := testAuthContext(e, req, rec, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	ctx := testAuthContextWithRole(e, req, rec, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", role)
 	ctx.SetPath("/bots/:bot_id/sessions")
 	ctx.SetParamNames("bot_id")
 	ctx.SetParamValues(botID)
@@ -326,7 +333,7 @@ func TestListSessionsCursorNotTruncatedByPermissionFilter(t *testing.T) {
 		newTestAdminAccountService("user"),
 	)
 
-	rec, err := callListSessions(handler, botID, "limit=2")
+	rec, err := callListSessionsWithRole(handler, botID, "limit=2", "")
 	if err != nil {
 		t.Fatalf("ListSessions() error = %v", err)
 	}

@@ -135,7 +135,7 @@ func (s *Service) SearchAccounts(ctx context.Context, query string, limit int) (
 
 // IsAdmin reports whether the request's acting user is an owner/admin of the
 // resolved team (read from the team scope injected by the membership middleware).
-func (s *Service) IsAdmin(ctx context.Context) (bool, error) {
+func (*Service) IsAdmin(ctx context.Context) (bool, error) {
 	scope, err := teams.ScopeFromContext(ctx)
 	if err != nil {
 		return false, nil // no team scope => not an admin (unauthenticated/background)

@@ -184,7 +184,7 @@ func (h *SessionInfoHandler) resolveCurrentUserPermissions(c echo.Context, chann
 	if h.botService == nil || h.accountService == nil {
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
 	}
-	isAdmin, err := h.accountService.IsAdmin(c.Request().Context(), channelIdentityID)
+	isAdmin, err := h.accountService.IsAdmin(c.Request().Context())
 	if err != nil {
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

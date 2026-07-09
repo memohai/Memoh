@@ -1095,7 +1095,7 @@ func (a *botPermissionCheckerAdapter) HasBotPermission(ctx context.Context, botI
 	if a == nil || a.bots == nil || a.accounts == nil {
 		return false, errors.New("bot permission services not configured")
 	}
-	isAdmin, err := a.accounts.IsAdmin(ctx, accountID)
+	isAdmin, err := a.accounts.IsTeamAdmin(ctx, accountID)
 	if err != nil {
 		return false, err
 	}
