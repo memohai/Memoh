@@ -1506,9 +1506,69 @@ export const useChatStore = defineStore('chat', () => {
   // between sessions. Per-session SSE delivers live updates without ever
   // touching another session's data, so cross-session caching has no purpose.
 
+  // Carry the current view's RENDER identity onto freshly fetched turns.
+  //
+  // Message ids are v-for keys in chat-pane (turn containers and message
+  // rows) and the scroll pin's reserve key. A refresh (stream end, SSE
+  // `dropped`, retry) re-derives every turn from server rows, whose ids
+  // differ from the optimistic client ids — splicing them in as-is re-keys
+  // the conversation tail, which remounts the just-streamed reply (markdown
+  // + code highlighting re-render = visible flash) and detaches the pinned
+  // viewport's reserve. Instead, incoming turns ADOPT the id already on
+  // screen; the authoritative server id stays reachable via `serverId`
+  // (server-facing calls already resolve `serverId ?? id`).
+  //
+  // Matching, in order:
+  //   1. serverId — a turn that adopted once keeps its identity across every
+  //      later refresh, not just the first.
+  //   2. optimistic user turns — same logical turn (externalMessageId, or
+  //      text + timestamp window; see isSameLogicalTurn).
+  //   3. the optimistic assistant turn directly after a matched user turn
+  //      adopts from the incoming assistant directly after its match
+  //      (isSameLogicalTurn deliberately refuses to guess on assistant
+  //      content, but adjacency to an anchored user turn is unambiguous).
+  //
+  // Unlike the removed cross-session reconciler (see the note above
+  // replaceMessages) this never retains or mutates EXISTING objects — it
+  // only stamps ids onto the incoming ones, within the active session view.
+  function adoptRenderIdentity(incoming: ChatMessage[]) {
+    if (messages.length === 0 || incoming.length === 0) return
+    const adopted = new Set<ChatMessage>()
+    const adopt = (twin: ChatMessage, existing: ChatMessage) => {
+      adopted.add(twin)
+      if (twin.id === existing.id) return
+      twin.serverId = twin.serverId ?? twin.id
+      twin.id = existing.id
+    }
+    const byServerId = new Map<string, ChatMessage>()
+    for (const existing of messages) {
+      if (existing.serverId) byServerId.set(existing.serverId, existing)
+    }
+    for (const twin of incoming) {
+      const prior = byServerId.get(twin.serverId ?? twin.id)
+      if (prior) adopt(twin, prior)
+    }
+    for (let i = 0; i < messages.length; i += 1) {
+      const existing = messages[i]
+      if (!existing || existing.role !== 'user' || !isOptimisticTurn(existing)) continue
+      const twinIndex = incoming.findIndex(turn => !adopted.has(turn) && isSameLogicalTurn(existing, turn))
+      if (twinIndex === -1) continue
+      adopt(incoming[twinIndex]!, existing)
+      const existingNext = messages[i + 1]
+      const incomingNext = incoming[twinIndex + 1]
+      if (
+        existingNext?.role === 'assistant' && isOptimisticTurn(existingNext)
+        && incomingNext?.role === 'assistant' && !adopted.has(incomingNext)
+      ) {
+        adopt(incomingNext, existingNext)
+      }
+    }
+  }
+
   function replaceMessages(items: UITurn[], targetSessionId?: string) {
     syncForkAnchorFromUITurns(targetSessionId, items)
     const next = normalizeTurns(items, targetSessionId)
+    adoptRenderIdentity(next)
     messages.splice(0, messages.length, ...next)
   }
 
@@ -1534,6 +1594,7 @@ export const useChatStore = defineStore('chat', () => {
   // with the server one in place.
   function mergeMessages(items: UITurn[], targetSessionId?: string) {
     const incoming = normalizeTurns(items, targetSessionId)
+    adoptRenderIdentity(incoming)
     const matched = new Set<string>()
     for (let i = 0; i < messages.length; i += 1) {
       const optimistic = messages[i]

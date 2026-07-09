@@ -60,53 +60,68 @@
                 </p>
               </div>
 
-              <template
-                v-for="(msg, index) in messages"
-                :key="msg.id"
+              <!-- One persistent container per turn, keyed by the turn's
+                   opening message id — a send APPENDS a container; previous
+                   turns' DOM is never re-parented (see messageTurns for why
+                   that is load-bearing). The send pin reserves viewport space
+                   declaratively: turnReserveStyle projects a min-height for
+                   the turn ids that currently hold a reserve (see
+                   useChatScroll's Pin section). -->
+              <div
+                v-for="(turn, turnIndex) in messageTurns"
+                :key="turn.id"
+                :ref="turnIndex === messageTurns.length - 1 ? setLastTurnEl : undefined"
+                class="space-y-6"
+                :style="turnReserveStyle(turn.id)"
               >
-                <ForkSourceDivider
-                  v-if="showForkSourceDividerBefore(index)"
-                  :title="forkSourceTitle"
-                  :disabled="openingForkSource"
-                  @open-source="handleForkSourceClick"
-                />
-
-                <div
-                  :data-message-id="msg.id"
-                  :data-external-message-id="(msg.role === 'user' || msg.role === 'assistant') ? msg.externalMessageId : undefined"
-                  class="transition-[background-color] duration-500 scroll-mt-2 px-2 -mx-2"
-                  :class="highlightedMessageId === msg.id ? 'bg-muted/45' : ''"
-                  :data-anchor="msg.id"
+                <template
+                  v-for="(msg, msgIndex) in turn.messages"
+                  :key="msg.id"
                 >
-                  <MessageItem
-                    :message="msg"
-                    :session-type="activeSession?.type"
-                    :bot-id="currentBotId"
-                    :channel-thread="isChannelThread"
-                    :channel-platform="channelPlatform"
-                    :bot-name="currentBot?.name"
-                    :bot-avatar-url="currentBot?.avatar_url"
-                    :on-open-media="galleryOpenBySrc"
-                    :on-reply-click="handleReplyJump"
-                    :on-retry-message="handleRetryMessage"
-                    :can-retry-latest-assistant="latestRetryableAssistantId === ((msg.serverId ?? msg.id).trim())"
-                    :can-edit-latest-user="latestEditableUserId === ((msg.serverId ?? msg.id).trim())"
-                    :can-fork-assistant="canForkAssistant"
-                    :is-scrolling="isScrolling"
-                    :is-last-message="index === messages.length - 1"
-                    @active="onMessageActive"
-                    @edit-message="handleEditMessage"
-                    @fork-message="handleForkMessage"
+                  <ForkSourceDivider
+                    v-if="showForkSourceDividerBefore(turn.start + msgIndex)"
+                    :title="forkSourceTitle"
+                    :disabled="openingForkSource"
+                    @open-source="handleForkSourceClick"
                   />
-                </div>
 
-                <ForkSourceDivider
-                  v-if="showForkSourceDividerAfter(msg, index)"
-                  :title="forkSourceTitle"
-                  :disabled="openingForkSource"
-                  @open-source="handleForkSourceClick"
-                />
-              </template>
+                  <div
+                    :data-message-id="msg.id"
+                    :data-external-message-id="(msg.role === 'user' || msg.role === 'assistant') ? msg.externalMessageId : undefined"
+                    class="transition-[background-color] duration-500 scroll-mt-2 px-2 -mx-2"
+                    :class="highlightedMessageId === msg.id ? 'bg-muted/45' : ''"
+                    :data-anchor="msg.id"
+                  >
+                    <MessageItem
+                      :message="msg"
+                      :session-type="activeSession?.type"
+                      :bot-id="currentBotId"
+                      :channel-thread="isChannelThread"
+                      :channel-platform="channelPlatform"
+                      :bot-name="currentBot?.name"
+                      :bot-avatar-url="currentBot?.avatar_url"
+                      :on-open-media="galleryOpenBySrc"
+                      :on-reply-click="handleReplyJump"
+                      :on-retry-message="handleRetryMessage"
+                      :can-retry-latest-assistant="latestRetryableAssistantId === ((msg.serverId ?? msg.id).trim())"
+                      :can-edit-latest-user="latestEditableUserId === ((msg.serverId ?? msg.id).trim())"
+                      :can-fork-assistant="canForkAssistant"
+                      :is-scrolling="isScrolling"
+                      :is-last-message="msg.id === lastMessageId"
+                      @active="onMessageActive"
+                      @edit-message="handleEditMessage"
+                      @fork-message="handleForkMessage"
+                    />
+                  </div>
+
+                  <ForkSourceDivider
+                    v-if="showForkSourceDividerAfter(msg, turn.start + msgIndex)"
+                    :title="forkSourceTitle"
+                    :disabled="openingForkSource"
+                    @open-source="handleForkSourceClick"
+                  />
+                </template>
+              </div>
             </div>
           </ScrollArea>
 
@@ -2544,15 +2559,49 @@ const descEl = computed<HTMLElement | null>(() => {
 })
 const loadMoreSentinel = useTemplateRef<HTMLElement>('loadMoreSentinel')
 
+// The last turn's container. A function ref because template refs inside
+// v-for collect into arrays — bind just the pinnable (last) turn by hand.
+const lastTurnEl = ref<HTMLElement | null>(null)
+function setLastTurnEl(el: unknown) {
+  lastTurnEl.value = el as HTMLElement | null
+}
+
+// The message list rendered as TURNS: a user message opens a turn that holds
+// everything up to the next user message (leading assistant/system rows before
+// the first user message form their own head turn). Keyed by the opening
+// message's id, which never changes for a given turn — so sending a new
+// message APPENDS a fresh container and no previous turn's DOM is ever
+// re-parented. This is load-bearing for scroll stability: re-parenting (the
+// earlier "split at the last prompt into two chunks" design) remounts the
+// whole previous turn on every send — markdown re-renders, code re-highlights
+// async, expanded tool groups collapse — and the transient height collapse
+// showed up as a hard scroll jump when sending from the bottom.
+// `start` is each turn's offset into the flat list, for the fork-source
+// dividers whose positions are flat-list indexes.
+const messageTurns = computed(() => {
+  const turns: { id: string, start: number, messages: ChatMessage[] }[] = []
+  messages.value.forEach((msg, index) => {
+    const last = turns[turns.length - 1]
+    if (msg.role === 'user' || !last) {
+      turns.push({ id: msg.id, start: index, messages: [msg] })
+    } else {
+      last.messages.push(msg)
+    }
+  })
+  return turns
+})
+const lastMessageId = computed(() => messages.value[messages.value.length - 1]?.id ?? '')
+
 const {
   isScrolling,
   highlightedMessageId,
   showJumpToBottom: showJumpToBottomFromScroll,
+  turnReserveStyle,
   scrollToBottom,
   scrollToMessage,
   suppressAutoScrollForPrepend,
   markEscaped,
-  followBottom,
+  pinAfterSend,
   onActivatedRestoreScroll,
   onDeactivatedResetScroll,
   onMessageActive,
@@ -2562,6 +2611,7 @@ const {
 } = useChatScroll({
   scrollEl,
   contentEl: descEl,
+  lastTurnEl,
   messages,
   isActive,
   sessionId: computed(() => chatStore.sessionId),
@@ -2797,9 +2847,6 @@ function handleComposerKeydown(e: KeyboardEvent) {
     return
   }
   e.preventDefault()
-  // Sending re-arms stick-to-bottom so the reply streams into view even if the
-  // user had scrolled up (escaped) while reading earlier messages.
-  followBottom()
   handleSend()
 }
 
@@ -3054,6 +3101,12 @@ async function handleSend() {
     return
   }
 
+  // Pin the just-sent turn: reserve viewport space under it and smooth-scroll
+  // once (browser-native) so the prompt lands near the top with the reply
+  // streaming into the blank below. The view then stays parked — no
+  // auto-follow — until the user scrolls back to the bottom. Armed before the
+  // append so the message's own DOM mutation applies the pin.
+  pinAfterSend()
   const result = await chatStore.sendMessage(text, attachments, {
     requestedSkills: skills,
     composerScope: sentComposerScope,
