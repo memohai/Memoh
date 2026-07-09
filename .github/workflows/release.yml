@@ -103,8 +103,16 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          # whoami/ping only prove the token is valid and the registry is up —
+          # they do NOT prove the token may publish into every scope we release.
+          # @felinic/ui is a cross-scope first publish (@felinic, not @memohai),
+          # so also confirm the token can reach the @felinic scope here. This
+          # fails the release at the token step instead of mid-publish. Mirrors
+          # the preflight in scripts/publish-packages.mjs.
           npm whoami
           npm ping
+          npm access list packages @felinic \
+            || (echo "::error::NPM_TOKEN cannot reach the @felinic scope — ensure the org exists and the token is a member with publish rights" && exit 1)
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
