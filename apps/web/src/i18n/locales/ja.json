@@ -96,6 +96,8 @@
     "continue": "続ける",
     "username": "ユーザー名",
     "password": "パスワード",
+    "usernamePlaceholder": "ユーザー名を入力",
+    "passwordPlaceholder": "パスワードを入力してください",
     "login": "サインイン",
     "register": "サインアップ",
     "logout": "サインアウト",

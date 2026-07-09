@@ -99,6 +99,8 @@
     "continue": "Continue",
     "username": "Username",
     "password": "Password",
+    "usernamePlaceholder": "Enter username",
+    "passwordPlaceholder": "Enter password",
     "login": "Sign In",
     "register": "Sign Up",
     "logout": "Sign Out",
