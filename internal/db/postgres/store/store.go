@@ -46,3 +46,10 @@ func (s *Store) SQLC() *dbsqlc.Queries {
 	}
 	return s.queries
 }
+
+// NewTeamPoolDBTXForTest exposes the pooled (non-transactional) team-scoped DBTX
+// for integration tests that need to drive it against a real pool. It is not
+// part of the production API surface.
+func NewTeamPoolDBTXForTest(pool *pgxpool.Pool) dbsqlc.DBTX {
+	return newTeamPoolDBTX(pool)
+}

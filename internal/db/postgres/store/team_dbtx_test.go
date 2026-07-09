@@ -72,6 +72,152 @@ func assertLocalTeamInjected(t *testing.T, tx *recordingTx, want string) {
 	}
 }
 
+// --- Pooled (non-transactional) path -----------------------------------------
+
+func TestTeamPoolDBTXExecBatchesSetConfigBeforeStatement(t *testing.T) {
+	ctx := teams.WithScope(context.Background(), teams.Scope{TeamID: teamID})
+	pool := &recordingPool{}
+	db := &teamPoolDBTX{pool: pool}
+
+	if _, err := db.Exec(ctx, "UPDATE bots SET name = name", 1); err != nil {
+		t.Fatalf("Exec returned error: %v", err)
+	}
+	assertBatchedSetConfig(t, pool, "UPDATE bots SET name = name")
+	assertConnReleased(t, pool)
+}
+
+func TestTeamPoolDBTXQueryBatchesSetConfigBeforeStatement(t *testing.T) {
+	ctx := teams.WithScope(context.Background(), teams.Scope{TeamID: teamID})
+	pool := &recordingPool{}
+	db := &teamPoolDBTX{pool: pool}
+
+	rows, err := db.Query(ctx, "SELECT id FROM bots")
+	if err != nil {
+		t.Fatalf("Query returned error: %v", err)
+	}
+	rows.Close()
+	assertBatchedSetConfig(t, pool, "SELECT id FROM bots")
+	assertConnReleased(t, pool)
+}
+
+func TestTeamPoolDBTXQueryRowBatchesSetConfigBeforeStatement(t *testing.T) {
+	ctx := teams.WithScope(context.Background(), teams.Scope{TeamID: teamID})
+	pool := &recordingPool{}
+	db := &teamPoolDBTX{pool: pool}
+
+	_ = db.QueryRow(ctx, "SELECT count(*) FROM bots").Scan(new(int))
+	assertBatchedSetConfig(t, pool, "SELECT count(*) FROM bots")
+	assertConnReleased(t, pool)
+}
+
+func TestTeamPoolDBTXUsesScopeTeam(t *testing.T) {
+	const scopedTeam = "22222222-2222-2222-2222-222222222222"
+	ctx := teams.WithScope(context.Background(), teams.Scope{TeamID: scopedTeam})
+	pool := &recordingPool{}
+	db := &teamPoolDBTX{pool: pool}
+
+	_ = db.QueryRow(ctx, "SELECT 1").Scan(new(int))
+	if got := pool.conn.batch.QueuedQueries[0].Arguments[0]; got != scopedTeam {
+		t.Fatalf("set_config team arg = %v, want %q", got, scopedTeam)
+	}
+}
+
+func TestTeamPoolDBTXFallsBackToDefaultTeam(t *testing.T) {
+	// No scope in context -> ScopeOrDefault yields the default team so
+	// background paths still set app.team_id.
+	pool := &recordingPool{}
+	db := &teamPoolDBTX{pool: pool}
+
+	_ = db.QueryRow(context.Background(), "SELECT 1").Scan(new(int))
+	if got := pool.conn.batch.QueuedQueries[0].Arguments[0]; got != teams.DefaultTeamID {
+		t.Fatalf("set_config team arg = %v, want default %q", got, teams.DefaultTeamID)
+	}
+}
+
+// assertBatchedSetConfig verifies the pooled path pipelines
+// set_config('app.team_id', <scope team>, false) ahead of the caller's
+// statement in one batch on one connection.
+func assertBatchedSetConfig(t *testing.T, pool *recordingPool, want string) {
+	t.Helper()
+	if pool.conn == nil {
+		t.Fatal("no connection acquired")
+	}
+	b := pool.conn.batch
+	if b == nil || len(b.QueuedQueries) != 2 {
+		t.Fatalf("batch queued %d queries, want 2", queuedLen(b))
+	}
+	if b.QueuedQueries[0].SQL != setSessionTeamSQL {
+		t.Fatalf("first batch sql = %q, want %q", b.QueuedQueries[0].SQL, setSessionTeamSQL)
+	}
+	if got := b.QueuedQueries[0].Arguments[0]; got != teamID {
+		t.Fatalf("set_config team arg = %v, want %q", got, teamID)
+	}
+	if b.QueuedQueries[1].SQL != want {
+		t.Fatalf("second batch sql = %q, want %q", b.QueuedQueries[1].SQL, want)
+	}
+}
+
+func assertConnReleased(t *testing.T, pool *recordingPool) {
+	t.Helper()
+	if pool.conn == nil {
+		t.Fatal("no connection acquired")
+	}
+	if pool.conn.released != 1 {
+		t.Fatalf("conn released %d times, want exactly 1", pool.conn.released)
+	}
+	if !pool.conn.batchClosed {
+		t.Fatal("batch results were not closed")
+	}
+}
+
+func queuedLen(b *pgx.Batch) int {
+	if b == nil {
+		return 0
+	}
+	return len(b.QueuedQueries)
+}
+
+// recordingPool / recordingConn / recordingBatchResults capture the batched
+// set_config + statement without a real database.
+
+type recordingPool struct {
+	conn *recordingConn
+}
+
+func (p *recordingPool) Acquire(context.Context) (teamConn, error) {
+	p.conn = &recordingConn{}
+	return p.conn, nil
+}
+
+type recordingConn struct {
+	batch       *pgx.Batch
+	released    int
+	batchClosed bool
+}
+
+func (c *recordingConn) SendBatch(_ context.Context, b *pgx.Batch) pgx.BatchResults {
+	c.batch = b
+	return &recordingBatchResults{conn: c}
+}
+
+func (c *recordingConn) Release() { c.released++ }
+
+type recordingBatchResults struct {
+	conn *recordingConn
+}
+
+func (*recordingBatchResults) Exec() (pgconn.CommandTag, error) { return pgconn.CommandTag{}, nil }
+func (*recordingBatchResults) Query() (pgx.Rows, error)         { return noopRows{}, nil }
+func (*recordingBatchResults) QueryRow() pgx.Row                { return noopRow{} }
+func (r *recordingBatchResults) Close() error {
+	r.conn.batchClosed = true
+	return nil
+}
+
+type noopRow struct{}
+
+func (noopRow) Scan(...any) error { return nil }
+
 type recordingTx struct {
 	execs []recordedExec
 }
