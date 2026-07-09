@@ -17,7 +17,7 @@ func getModelByIDForScope(ctx context.Context, queries dbstore.Queries, id pgtyp
 	return InvokeTeamQuery[sqlc.Model](ctx, queries, "GetModelByIDForTeam", map[string]any{
 		"ID": id,
 	}, func() (sqlc.Model, error) {
-		return queries.GetModelByID(ctx, id)
+		return queries.GetModelByID(ctx, sqlc.GetModelByIDParams{ID: id, TeamID: TeamIDFromContext(ctx)})
 	})
 }
 
@@ -103,7 +103,7 @@ func deleteModelForScope(ctx context.Context, queries dbstore.Queries, id pgtype
 	return InvokeTeamExec(ctx, queries, "DeleteModelForTeam", map[string]any{
 		"ID": id,
 	}, func() error {
-		return queries.DeleteModel(ctx, id)
+		return queries.DeleteModel(ctx, sqlc.DeleteModelParams{ID: id, TeamID: TeamIDFromContext(ctx)})
 	})
 }
 
@@ -125,7 +125,7 @@ func getProviderByIDForScope(ctx context.Context, queries dbstore.Queries, id pg
 	return InvokeTeamQuery[sqlc.Provider](ctx, queries, "GetProviderByIDForTeam", map[string]any{
 		"ID": id,
 	}, func() (sqlc.Provider, error) {
-		return queries.GetProviderByID(ctx, id)
+		return queries.GetProviderByID(ctx, sqlc.GetProviderByIDParams{ID: id, TeamID: TeamIDFromContext(ctx)})
 	})
 }
 

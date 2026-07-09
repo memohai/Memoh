@@ -84,13 +84,13 @@ func (*lazyLLMTestQueries) ListModelsByModelID(_ context.Context, _ string) ([]s
 	return nil, nil
 }
 
-func (q *lazyLLMTestQueries) GetModelByID(_ context.Context, id pgtype.UUID) (sqlc.Model, error) {
+func (q *lazyLLMTestQueries) GetModelByID(_ context.Context, arg sqlc.GetModelByIDParams) (sqlc.Model, error) {
 	q.configuredLookups++
-	if id.String() != q.compactionModel.String() {
+	if arg.ID.String() != q.compactionModel.String() {
 		return sqlc.Model{}, errors.New("unexpected model id")
 	}
 	return sqlc.Model{
-		ID:         id,
+		ID:         arg.ID,
 		ModelID:    "compact-model",
 		ProviderID: q.providerID,
 		Type:       string(modelspkg.ModelTypeChat),
@@ -103,12 +103,12 @@ func (q *lazyLLMTestQueries) ListEnabledModelsByType(context.Context, string) ([
 	return nil, errors.New("fallback model lookup should not be used")
 }
 
-func (q *lazyLLMTestQueries) GetProviderByID(_ context.Context, id pgtype.UUID) (sqlc.Provider, error) {
-	if id.String() != q.providerID.String() {
+func (q *lazyLLMTestQueries) GetProviderByID(_ context.Context, arg sqlc.GetProviderByIDParams) (sqlc.Provider, error) {
+	if arg.ID.String() != q.providerID.String() {
 		return sqlc.Provider{}, errors.New("unexpected provider id")
 	}
 	return sqlc.Provider{
-		ID:         id,
+		ID:         arg.ID,
 		Name:       "test-provider",
 		ClientType: string(modelspkg.ClientTypeOpenAIResponses),
 		Enable:     true,

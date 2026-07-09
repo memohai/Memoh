@@ -12,7 +12,8 @@ VALUES (
 RETURNING *;
 
 -- name: GetProviderByID :one
-SELECT * FROM providers WHERE id = sqlc.arg(id);
+SELECT * FROM providers WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: GetProviderByIDForTeam :one
 SELECT * FROM providers
@@ -99,7 +100,8 @@ WHERE id = sqlc.arg(id)
 RETURNING *;
 
 -- name: DeleteProvider :exec
-DELETE FROM providers WHERE id = sqlc.arg(id);
+DELETE FROM providers WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: DeleteProviderForTeam :exec
 DELETE FROM providers
@@ -169,7 +171,8 @@ VALUES (
 RETURNING *;
 
 -- name: GetModelByID :one
-SELECT * FROM models WHERE id = sqlc.arg(id);
+SELECT * FROM models WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: GetModelByIDForTeam :one
 SELECT * FROM models
@@ -274,7 +277,8 @@ WHERE id = sqlc.arg(id)
 RETURNING *;
 
 -- name: DeleteModel :exec
-DELETE FROM models WHERE id = sqlc.arg(id);
+DELETE FROM models WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: DeleteModelForTeam :exec
 DELETE FROM models
@@ -447,6 +451,7 @@ SELECT
 FROM models m
 JOIN providers p ON p.id = m.provider_id
 WHERE m.id = sqlc.arg(id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.type = 'speech';
 
 -- name: GetSpeechModelWithProviderForTeam :one
@@ -569,6 +574,7 @@ SELECT
 FROM models m
 JOIN providers p ON p.id = m.provider_id
 WHERE m.id = sqlc.arg(id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.type = 'transcription';
 
 -- name: GetTranscriptionModelWithProviderForTeam :one
@@ -625,6 +631,7 @@ SELECT
 FROM models m
 JOIN providers p ON p.id = m.provider_id
 WHERE m.id = sqlc.arg(id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.type = 'video';
 
 -- name: GetVideoModelWithProviderForTeam :one

@@ -115,7 +115,7 @@ type Queries interface {
 	DeleteEmailOAuthToken(ctx context.Context, emailProviderID pgtype.UUID) error
 	DeleteEmailProvider(ctx context.Context, id pgtype.UUID) error
 	DeleteEmailProviderByIDAndUser(ctx context.Context, arg dbsqlc.DeleteEmailProviderByIDAndUserParams) error
-	DeleteFetchProvider(ctx context.Context, id pgtype.UUID) error
+	DeleteFetchProvider(ctx context.Context, arg dbsqlc.DeleteFetchProviderParams) error
 	DeleteHeartbeatLogsByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteMCPConnection(ctx context.Context, arg dbsqlc.DeleteMCPConnectionParams) error
 	DeleteMCPConnectionsByPlugin(ctx context.Context, arg dbsqlc.DeleteMCPConnectionsByPluginParams) error
@@ -125,18 +125,18 @@ type Queries interface {
 	DeleteMessagesByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteMessagesByIDs(ctx context.Context, ids []pgtype.UUID) error
 	DeleteMessagesBySession(ctx context.Context, sessionID pgtype.UUID) error
-	DeleteModel(ctx context.Context, id pgtype.UUID) error
+	DeleteModel(ctx context.Context, arg dbsqlc.DeleteModelParams) error
 	DeleteModelByModelID(ctx context.Context, modelID string) error
 	DeleteSessionDiscussCursorsByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteSessionEventsByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteModelByProviderAndType(ctx context.Context, arg dbsqlc.DeleteModelByProviderAndTypeParams) error
 	DeleteModelByProviderIDAndModelID(ctx context.Context, arg dbsqlc.DeleteModelByProviderIDAndModelIDParams) error
-	DeleteProvider(ctx context.Context, id pgtype.UUID) error
+	DeleteProvider(ctx context.Context, arg dbsqlc.DeleteProviderParams) error
 	DeleteProviderOAuthToken(ctx context.Context, providerID pgtype.UUID) error
 	DeleteSchedule(ctx context.Context, id pgtype.UUID) error
 	DeleteScheduleLogsByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteScheduleLogsBySchedule(ctx context.Context, scheduleID pgtype.UUID) error
-	DeleteSearchProvider(ctx context.Context, id pgtype.UUID) error
+	DeleteSearchProvider(ctx context.Context, arg dbsqlc.DeleteSearchProviderParams) error
 	DeleteSettingsByBotID(ctx context.Context, id pgtype.UUID) error
 	DeleteUserProviderOAuthToken(ctx context.Context, arg dbsqlc.DeleteUserProviderOAuthTokenParams) error
 	EvaluateBotACLRule(ctx context.Context, arg dbsqlc.EvaluateBotACLRuleParams) (string, error)
@@ -176,7 +176,7 @@ type Queries interface {
 	GetEmailProviderByID(ctx context.Context, id pgtype.UUID) (dbsqlc.EmailProvider, error)
 	GetEmailProviderByIDAndUser(ctx context.Context, arg dbsqlc.GetEmailProviderByIDAndUserParams) (dbsqlc.EmailProvider, error)
 	GetEmailProviderByNameAndUser(ctx context.Context, arg dbsqlc.GetEmailProviderByNameAndUserParams) (dbsqlc.EmailProvider, error)
-	GetFetchProviderByID(ctx context.Context, id pgtype.UUID) (dbsqlc.FetchProvider, error)
+	GetFetchProviderByID(ctx context.Context, arg dbsqlc.GetFetchProviderByIDParams) (dbsqlc.FetchProvider, error)
 	GetFetchProviderByName(ctx context.Context, name string) (dbsqlc.FetchProvider, error)
 	GetLatestAssistantUsage(ctx context.Context, sessionID pgtype.UUID) (int64, error)
 	GetLatestVisibleHistoryTurnBySession(ctx context.Context, sessionID pgtype.UUID) (HistoryTurn, error)
@@ -188,7 +188,7 @@ type Queries interface {
 	GetMCPOAuthToken(ctx context.Context, connectionID pgtype.UUID) (dbsqlc.McpOauthToken, error)
 	GetMCPOAuthTokenByState(ctx context.Context, stateParam string) (dbsqlc.McpOauthToken, error)
 	GetMemoryProviderByID(ctx context.Context, id pgtype.UUID) (dbsqlc.MemoryProvider, error)
-	GetModelByID(ctx context.Context, id pgtype.UUID) (dbsqlc.Model, error)
+	GetModelByID(ctx context.Context, arg dbsqlc.GetModelByIDParams) (dbsqlc.Model, error)
 	GetModelByModelID(ctx context.Context, modelID string) (dbsqlc.Model, error)
 	GetModelByProviderAndModelID(ctx context.Context, arg dbsqlc.GetModelByProviderAndModelIDParams) (dbsqlc.Model, error)
 	GetPendingToolApprovalByReplyMessage(ctx context.Context, arg dbsqlc.GetPendingToolApprovalByReplyMessageParams) (dbsqlc.ToolApprovalRequest, error)
@@ -196,12 +196,12 @@ type Queries interface {
 	GetPendingUserInputByReplyMessage(ctx context.Context, arg dbsqlc.GetPendingUserInputByReplyMessageParams) (dbsqlc.UserInputRequest, error)
 	GetPendingUserInputBySessionShortID(ctx context.Context, arg dbsqlc.GetPendingUserInputBySessionShortIDParams) (dbsqlc.UserInputRequest, error)
 	GetProviderByClientType(ctx context.Context, clientType string) (dbsqlc.Provider, error)
-	GetProviderByID(ctx context.Context, id pgtype.UUID) (dbsqlc.Provider, error)
+	GetProviderByID(ctx context.Context, arg dbsqlc.GetProviderByIDParams) (dbsqlc.Provider, error)
 	GetProviderByName(ctx context.Context, name string) (dbsqlc.Provider, error)
 	GetProviderOAuthTokenByProvider(ctx context.Context, providerID pgtype.UUID) (dbsqlc.ProviderOauthToken, error)
 	GetProviderOAuthTokenByState(ctx context.Context, state string) (dbsqlc.ProviderOauthToken, error)
 	GetScheduleByID(ctx context.Context, id pgtype.UUID) (dbsqlc.Schedule, error)
-	GetSearchProviderByID(ctx context.Context, id pgtype.UUID) (dbsqlc.SearchProvider, error)
+	GetSearchProviderByID(ctx context.Context, arg dbsqlc.GetSearchProviderByIDParams) (dbsqlc.SearchProvider, error)
 	GetSearchProviderByName(ctx context.Context, name string) (dbsqlc.SearchProvider, error)
 	GetSessionByID(ctx context.Context, id pgtype.UUID) (dbsqlc.BotSession, error)
 	GetSessionDiscussCursor(ctx context.Context, arg dbsqlc.GetSessionDiscussCursorParams) (dbsqlc.BotSessionDiscussCursor, error)
@@ -209,7 +209,7 @@ type Queries interface {
 	GetSessionUsedSkills(ctx context.Context, sessionID pgtype.UUID) ([]string, error)
 	GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (dbsqlc.GetSettingsByBotIDRow, error)
 	GetSnapshotByContainerAndRuntimeName(ctx context.Context, arg dbsqlc.GetSnapshotByContainerAndRuntimeNameParams) (dbsqlc.Snapshot, error)
-	GetSpeechModelWithProvider(ctx context.Context, id pgtype.UUID) (dbsqlc.GetSpeechModelWithProviderRow, error)
+	GetSpeechModelWithProvider(ctx context.Context, arg dbsqlc.GetSpeechModelWithProviderParams) (dbsqlc.GetSpeechModelWithProviderRow, error)
 	GetStorageProviderByID(ctx context.Context, id pgtype.UUID) (dbsqlc.StorageProvider, error)
 	GetStorageProviderByName(ctx context.Context, name string) (dbsqlc.StorageProvider, error)
 	GetTokenUsageByDayAndType(ctx context.Context, arg dbsqlc.GetTokenUsageByDayAndTypeParams) ([]dbsqlc.GetTokenUsageByDayAndTypeRow, error)
@@ -217,9 +217,9 @@ type Queries interface {
 	GetToolApprovalRequest(ctx context.Context, id pgtype.UUID) (dbsqlc.ToolApprovalRequest, error)
 	GetUserInputRequest(ctx context.Context, id pgtype.UUID) (dbsqlc.UserInputRequest, error)
 	GetUserInputRequestBySessionToolCall(ctx context.Context, arg dbsqlc.GetUserInputRequestBySessionToolCallParams) (dbsqlc.UserInputRequest, error)
-	GetTranscriptionModelWithProvider(ctx context.Context, id pgtype.UUID) (dbsqlc.GetTranscriptionModelWithProviderRow, error)
+	GetTranscriptionModelWithProvider(ctx context.Context, arg dbsqlc.GetTranscriptionModelWithProviderParams) (dbsqlc.GetTranscriptionModelWithProviderRow, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (dbsqlc.User, error)
-	GetVideoModelWithProvider(ctx context.Context, id pgtype.UUID) (dbsqlc.GetVideoModelWithProviderRow, error)
+	GetVideoModelWithProvider(ctx context.Context, arg dbsqlc.GetVideoModelWithProviderParams) (dbsqlc.GetVideoModelWithProviderRow, error)
 	GetUserChannelBinding(ctx context.Context, arg dbsqlc.GetUserChannelBindingParams) (dbsqlc.UserChannelBinding, error)
 	GetUserProviderOAuthToken(ctx context.Context, arg dbsqlc.GetUserProviderOAuthTokenParams) (dbsqlc.UserProviderOauthToken, error)
 	GetUserProviderOAuthTokenByState(ctx context.Context, state string) (dbsqlc.UserProviderOauthToken, error)

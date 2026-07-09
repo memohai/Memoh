@@ -55,10 +55,16 @@ func (q *Queries) CreateFetchProvider(ctx context.Context, arg CreateFetchProvid
 
 const deleteFetchProvider = `-- name: DeleteFetchProvider :exec
 DELETE FROM fetch_providers WHERE id = $1
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) DeleteFetchProvider(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteFetchProvider, id)
+type DeleteFetchProviderParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteFetchProvider(ctx context.Context, arg DeleteFetchProviderParams) error {
+	_, err := q.db.Exec(ctx, deleteFetchProvider, arg.ID, arg.TeamID)
 	return err
 }
 
@@ -80,10 +86,16 @@ func (q *Queries) DeleteFetchProviderForTeam(ctx context.Context, arg DeleteFetc
 
 const getFetchProviderByID = `-- name: GetFetchProviderByID :one
 SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM fetch_providers WHERE id = $1
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) GetFetchProviderByID(ctx context.Context, id pgtype.UUID) (FetchProvider, error) {
-	row := q.db.QueryRow(ctx, getFetchProviderByID, id)
+type GetFetchProviderByIDParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetFetchProviderByID(ctx context.Context, arg GetFetchProviderByIDParams) (FetchProvider, error) {
+	row := q.db.QueryRow(ctx, getFetchProviderByID, arg.ID, arg.TeamID)
 	var i FetchProvider
 	err := row.Scan(
 		&i.ID,

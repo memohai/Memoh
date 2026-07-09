@@ -10,7 +10,8 @@ VALUES (
 RETURNING *;
 
 -- name: GetSearchProviderByID :one
-SELECT * FROM search_providers WHERE id = sqlc.arg(id);
+SELECT * FROM search_providers WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: GetSearchProviderByIDForTeam :one
 SELECT * FROM search_providers
@@ -58,7 +59,8 @@ WHERE id = sqlc.arg(id)
 RETURNING *;
 
 -- name: DeleteSearchProvider :exec
-DELETE FROM search_providers WHERE id = sqlc.arg(id);
+DELETE FROM search_providers WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: DeleteSearchProviderForTeam :exec
 DELETE FROM search_providers

@@ -225,6 +225,7 @@ WITH updated AS (
       command_ui_language = $34,
       updated_at = now()
   WHERE bots.id = $35
+    AND bots.team_id = $36::uuid
   RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
@@ -312,6 +313,7 @@ type UpsertBotSettingsParams struct {
 	OverlayConfig          []byte      `json:"overlay_config"`
 	CommandUiLanguage      string      `json:"command_ui_language"`
 	ID                     pgtype.UUID `json:"id"`
+	TeamID                 pgtype.UUID `json:"team_id"`
 }
 
 type UpsertBotSettingsRow struct {
@@ -388,6 +390,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.OverlayConfig,
 		arg.CommandUiLanguage,
 		arg.ID,
+		arg.TeamID,
 	)
 	var i UpsertBotSettingsRow
 	err := row.Scan(

@@ -18,7 +18,7 @@ func getSearchProviderByIDForScope(ctx context.Context, queries dbstore.Queries,
 	return models.InvokeTeamQuery[sqlc.SearchProvider](ctx, queries, "GetSearchProviderByIDForTeam", map[string]any{
 		"ID": id,
 	}, func() (sqlc.SearchProvider, error) {
-		return queries.GetSearchProviderByID(ctx, id)
+		return queries.GetSearchProviderByID(ctx, sqlc.GetSearchProviderByIDParams{ID: id, TeamID: models.TeamIDFromContext(ctx)})
 	})
 }
 
@@ -40,6 +40,6 @@ func deleteSearchProviderForScope(ctx context.Context, queries dbstore.Queries, 
 	return models.InvokeTeamExec(ctx, queries, "DeleteSearchProviderForTeam", map[string]any{
 		"ID": id,
 	}, func() error {
-		return queries.DeleteSearchProvider(ctx, id)
+		return queries.DeleteSearchProvider(ctx, sqlc.DeleteSearchProviderParams{ID: id, TeamID: models.TeamIDFromContext(ctx)})
 	})
 }

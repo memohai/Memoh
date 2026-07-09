@@ -18,7 +18,7 @@ func getProviderByIDForScope(ctx context.Context, queries dbstore.Queries, id pg
 	return models.InvokeTeamQuery[sqlc.Provider](ctx, queries, "GetProviderByIDForTeam", map[string]any{
 		"ID": id,
 	}, func() (sqlc.Provider, error) {
-		return queries.GetProviderByID(ctx, id)
+		return queries.GetProviderByID(ctx, sqlc.GetProviderByIDParams{ID: id, TeamID: models.TeamIDFromContext(ctx)})
 	})
 }
 
@@ -40,7 +40,7 @@ func deleteProviderForScope(ctx context.Context, queries dbstore.Queries, id pgt
 	return models.InvokeTeamExec(ctx, queries, "DeleteProviderForTeam", map[string]any{
 		"ID": id,
 	}, func() error {
-		return queries.DeleteProvider(ctx, id)
+		return queries.DeleteProvider(ctx, sqlc.DeleteProviderParams{ID: id, TeamID: models.TeamIDFromContext(ctx)})
 	})
 }
 

@@ -271,10 +271,16 @@ func (q *Queries) CreateProvider(ctx context.Context, arg CreateProviderParams) 
 
 const deleteModel = `-- name: DeleteModel :exec
 DELETE FROM models WHERE id = $1
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) DeleteModel(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteModel, id)
+type DeleteModelParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteModel(ctx context.Context, arg DeleteModelParams) error {
+	_, err := q.db.Exec(ctx, deleteModel, arg.ID, arg.TeamID)
 	return err
 }
 
@@ -398,10 +404,16 @@ func (q *Queries) DeleteModelForTeam(ctx context.Context, arg DeleteModelForTeam
 
 const deleteProvider = `-- name: DeleteProvider :exec
 DELETE FROM providers WHERE id = $1
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) DeleteProvider(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteProvider, id)
+type DeleteProviderParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteProvider(ctx context.Context, arg DeleteProviderParams) error {
+	_, err := q.db.Exec(ctx, deleteProvider, arg.ID, arg.TeamID)
 	return err
 }
 
@@ -423,10 +435,16 @@ func (q *Queries) DeleteProviderForTeam(ctx context.Context, arg DeleteProviderF
 
 const getModelByID = `-- name: GetModelByID :one
 SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models WHERE id = $1
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) GetModelByID(ctx context.Context, id pgtype.UUID) (Model, error) {
-	row := q.db.QueryRow(ctx, getModelByID, id)
+type GetModelByIDParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetModelByID(ctx context.Context, arg GetModelByIDParams) (Model, error) {
+	row := q.db.QueryRow(ctx, getModelByID, arg.ID, arg.TeamID)
 	var i Model
 	err := row.Scan(
 		&i.ID,
@@ -638,10 +656,16 @@ func (q *Queries) GetProviderByClientTypeForTeam(ctx context.Context, arg GetPro
 
 const getProviderByID = `-- name: GetProviderByID :one
 SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers WHERE id = $1
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) GetProviderByID(ctx context.Context, id pgtype.UUID) (Provider, error) {
-	row := q.db.QueryRow(ctx, getProviderByID, id)
+type GetProviderByIDParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetProviderByID(ctx context.Context, arg GetProviderByIDParams) (Provider, error) {
+	row := q.db.QueryRow(ctx, getProviderByID, arg.ID, arg.TeamID)
 	var i Provider
 	err := row.Scan(
 		&i.ID,
@@ -745,8 +769,14 @@ SELECT
 FROM models m
 JOIN providers p ON p.id = m.provider_id
 WHERE m.id = $1
+  AND m.team_id = $2::uuid
   AND m.type = 'speech'
 `
+
+type GetSpeechModelWithProviderParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
 
 type GetSpeechModelWithProviderRow struct {
 	ID           pgtype.UUID        `json:"id"`
@@ -762,8 +792,8 @@ type GetSpeechModelWithProviderRow struct {
 	ProviderType string             `json:"provider_type"`
 }
 
-func (q *Queries) GetSpeechModelWithProvider(ctx context.Context, id pgtype.UUID) (GetSpeechModelWithProviderRow, error) {
-	row := q.db.QueryRow(ctx, getSpeechModelWithProvider, id)
+func (q *Queries) GetSpeechModelWithProvider(ctx context.Context, arg GetSpeechModelWithProviderParams) (GetSpeechModelWithProviderRow, error) {
+	row := q.db.QueryRow(ctx, getSpeechModelWithProvider, arg.ID, arg.TeamID)
 	var i GetSpeechModelWithProviderRow
 	err := row.Scan(
 		&i.ID,
@@ -838,8 +868,14 @@ SELECT
 FROM models m
 JOIN providers p ON p.id = m.provider_id
 WHERE m.id = $1
+  AND m.team_id = $2::uuid
   AND m.type = 'transcription'
 `
+
+type GetTranscriptionModelWithProviderParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
 
 type GetTranscriptionModelWithProviderRow struct {
 	ID           pgtype.UUID        `json:"id"`
@@ -855,8 +891,8 @@ type GetTranscriptionModelWithProviderRow struct {
 	ProviderType string             `json:"provider_type"`
 }
 
-func (q *Queries) GetTranscriptionModelWithProvider(ctx context.Context, id pgtype.UUID) (GetTranscriptionModelWithProviderRow, error) {
-	row := q.db.QueryRow(ctx, getTranscriptionModelWithProvider, id)
+func (q *Queries) GetTranscriptionModelWithProvider(ctx context.Context, arg GetTranscriptionModelWithProviderParams) (GetTranscriptionModelWithProviderRow, error) {
+	row := q.db.QueryRow(ctx, getTranscriptionModelWithProvider, arg.ID, arg.TeamID)
 	var i GetTranscriptionModelWithProviderRow
 	err := row.Scan(
 		&i.ID,
@@ -931,8 +967,14 @@ SELECT
 FROM models m
 JOIN providers p ON p.id = m.provider_id
 WHERE m.id = $1
+  AND m.team_id = $2::uuid
   AND m.type = 'video'
 `
+
+type GetVideoModelWithProviderParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
 
 type GetVideoModelWithProviderRow struct {
 	ID           pgtype.UUID        `json:"id"`
@@ -948,8 +990,8 @@ type GetVideoModelWithProviderRow struct {
 	ProviderType string             `json:"provider_type"`
 }
 
-func (q *Queries) GetVideoModelWithProvider(ctx context.Context, id pgtype.UUID) (GetVideoModelWithProviderRow, error) {
-	row := q.db.QueryRow(ctx, getVideoModelWithProvider, id)
+func (q *Queries) GetVideoModelWithProvider(ctx context.Context, arg GetVideoModelWithProviderParams) (GetVideoModelWithProviderRow, error) {
+	row := q.db.QueryRow(ctx, getVideoModelWithProvider, arg.ID, arg.TeamID)
 	var i GetVideoModelWithProviderRow
 	err := row.Scan(
 		&i.ID,

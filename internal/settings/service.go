@@ -19,6 +19,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	netctl "github.com/memohai/memoh/internal/network"
+	"github.com/memohai/memoh/internal/teams"
 	tzutil "github.com/memohai/memoh/internal/timezone"
 )
 
@@ -896,7 +897,7 @@ func (s *Service) resolveModelUUID(ctx context.Context, modelID string) (pgtype.
 
 	// Preferred path: when caller already passes the model UUID.
 	if parsed, err := db.ParseUUID(modelID); err == nil {
-		if _, err := s.queries.GetModelByID(ctx, parsed); err == nil {
+		if _, err := s.queries.GetModelByID(ctx, sqlc.GetModelByIDParams{ID: parsed, TeamID: teams.TeamUUIDOrZero(ctx)}); err == nil {
 			return parsed, nil
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return pgtype.UUID{}, err

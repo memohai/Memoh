@@ -59,7 +59,7 @@ func (s *Service) GetProvider(ctx context.Context, id string) (ProviderResponse,
 	if err != nil {
 		return ProviderResponse{}, err
 	}
-	row, err := s.queries.GetProviderByID(ctx, pgID)
+	row, err := s.queries.GetProviderByID(ctx, sqlc.GetProviderByIDParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return ProviderResponse{}, fmt.Errorf("get video provider: %w", err)
 	}
@@ -87,7 +87,7 @@ func (s *Service) ListModelsByProvider(ctx context.Context, providerID string) (
 	if err != nil {
 		return nil, err
 	}
-	providerRow, err := s.queries.GetProviderByID(ctx, pgID)
+	providerRow, err := s.queries.GetProviderByID(ctx, sqlc.GetProviderByIDParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return nil, fmt.Errorf("get video provider: %w", err)
 	}
@@ -110,7 +110,7 @@ func (s *Service) GetModel(ctx context.Context, id string) (ModelResponse, error
 	if err != nil {
 		return ModelResponse{}, err
 	}
-	row, err := s.queries.GetVideoModelWithProvider(ctx, pgID)
+	row, err := s.queries.GetVideoModelWithProvider(ctx, sqlc.GetVideoModelWithProviderParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return ModelResponse{}, fmt.Errorf("get video model: %w", err)
 	}
@@ -122,7 +122,7 @@ func (s *Service) UpdateModel(ctx context.Context, id string, req UpdateModelReq
 	if err != nil {
 		return ModelResponse{}, err
 	}
-	row, err := s.queries.GetVideoModelWithProvider(ctx, pgID)
+	row, err := s.queries.GetVideoModelWithProvider(ctx, sqlc.GetVideoModelWithProviderParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return ModelResponse{}, fmt.Errorf("get video model: %w", err)
 	}
@@ -156,7 +156,7 @@ func (s *Service) FetchRemoteModels(ctx context.Context, providerID string) ([]M
 	if err != nil {
 		return nil, err
 	}
-	providerRow, err := s.queries.GetProviderByID(ctx, pgID)
+	providerRow, err := s.queries.GetProviderByID(ctx, sqlc.GetProviderByIDParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return nil, fmt.Errorf("get video provider: %w", err)
 	}
@@ -190,14 +190,14 @@ func (s *Service) ResolveVideoModel(ctx context.Context, modelID string) (*sdk.V
 	if err != nil {
 		return nil, nil, err
 	}
-	modelRow, err := s.queries.GetVideoModelWithProvider(ctx, pgID)
+	modelRow, err := s.queries.GetVideoModelWithProvider(ctx, sqlc.GetVideoModelWithProviderParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return nil, nil, fmt.Errorf("get video model: %w", err)
 	}
 	if !modelRow.Enable {
 		return nil, nil, fmt.Errorf("video model %s is disabled", modelRow.ModelID)
 	}
-	providerRow, err := s.queries.GetProviderByID(ctx, modelRow.ProviderID)
+	providerRow, err := s.queries.GetProviderByID(ctx, sqlc.GetProviderByIDParams{ID: modelRow.ProviderID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return nil, nil, fmt.Errorf("get video provider: %w", err)
 	}

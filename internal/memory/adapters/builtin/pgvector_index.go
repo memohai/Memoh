@@ -180,7 +180,7 @@ func (r *pgvectorIndex) ensureEmbeddingEnabled(ctx context.Context) error {
 	modelRef := r.modelRef
 	var row dbsqlc.Model
 	if parsed, err := db.ParseUUID(modelRef); err == nil {
-		if dbModel, err := r.lookupQueries().GetModelByID(ctx, parsed); err == nil {
+		if dbModel, err := r.lookupQueries().GetModelByID(ctx, dbsqlc.GetModelByIDParams{ID: parsed, TeamID: teams.TeamUUIDOrZero(ctx)}); err == nil {
 			row = dbModel
 		}
 	}
@@ -462,7 +462,7 @@ func resolveEmbeddingModel(ctx context.Context, queries dbstore.Queries, modelRe
 		dbModel, err := models.InvokeTeamQuery[dbsqlc.Model](ctx, queries, "GetModelByIDForTeam", map[string]any{
 			"ID": parsed,
 		}, func() (dbsqlc.Model, error) {
-			return queries.GetModelByID(ctx, parsed)
+			return queries.GetModelByID(ctx, dbsqlc.GetModelByIDParams{ID: parsed, TeamID: models.TeamIDFromContext(ctx)})
 		})
 		if err == nil {
 			row = dbModel
@@ -491,7 +491,7 @@ func resolveEmbeddingModel(ctx context.Context, queries dbstore.Queries, modelRe
 	provider, err := models.InvokeTeamQuery[dbsqlc.Provider](ctx, queries, "GetProviderByIDForTeam", map[string]any{
 		"ID": row.ProviderID,
 	}, func() (dbsqlc.Provider, error) {
-		return queries.GetProviderByID(ctx, row.ProviderID)
+		return queries.GetProviderByID(ctx, dbsqlc.GetProviderByIDParams{ID: row.ProviderID, TeamID: models.TeamIDFromContext(ctx)})
 	})
 	if err != nil {
 		return embeddingModelSpec{}, fmt.Errorf("pgvector semantic index: get embedding provider: %w", err)

@@ -346,8 +346,8 @@ func (f *modelSelectionFakeQueries) ListModelsByModelID(_ context.Context, model
 	return []sqlc.Model{model}, nil
 }
 
-func (f *modelSelectionFakeQueries) GetProviderByID(_ context.Context, id pgtype.UUID) (sqlc.Provider, error) {
-	if !id.Valid || id != f.provider.ID {
+func (f *modelSelectionFakeQueries) GetProviderByID(_ context.Context, arg sqlc.GetProviderByIDParams) (sqlc.Provider, error) {
+	if !arg.ID.Valid || arg.ID != f.provider.ID {
 		return sqlc.Provider{}, pgx.ErrNoRows
 	}
 	return f.provider, nil

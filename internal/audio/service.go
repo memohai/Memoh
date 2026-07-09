@@ -73,7 +73,7 @@ func (s *Service) GetSpeechProvider(ctx context.Context, id string) (SpeechProvi
 	if err != nil {
 		return SpeechProviderResponse{}, err
 	}
-	row, err := s.queries.GetProviderByID(ctx, pgID)
+	row, err := s.queries.GetProviderByID(ctx, sqlc.GetProviderByIDParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return SpeechProviderResponse{}, fmt.Errorf("get speech provider: %w", err)
 	}
@@ -115,7 +115,7 @@ func (s *Service) ListSpeechModelsByProvider(ctx context.Context, providerID str
 	if err != nil {
 		return nil, err
 	}
-	providerRow, err := s.queries.GetProviderByID(ctx, pgID)
+	providerRow, err := s.queries.GetProviderByID(ctx, sqlc.GetProviderByIDParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return nil, fmt.Errorf("get speech provider: %w", err)
 	}
@@ -142,7 +142,7 @@ func (s *Service) ListTranscriptionModelsByProvider(ctx context.Context, provide
 	if err != nil {
 		return nil, err
 	}
-	providerRow, err := s.queries.GetProviderByID(ctx, pgID)
+	providerRow, err := s.queries.GetProviderByID(ctx, sqlc.GetProviderByIDParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return nil, fmt.Errorf("get speech provider: %w", err)
 	}
@@ -169,7 +169,7 @@ func (s *Service) GetSpeechModel(ctx context.Context, id string) (SpeechModelRes
 	if err != nil {
 		return SpeechModelResponse{}, err
 	}
-	row, err := s.queries.GetSpeechModelWithProvider(ctx, pgID)
+	row, err := s.queries.GetSpeechModelWithProvider(ctx, sqlc.GetSpeechModelWithProviderParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return SpeechModelResponse{}, fmt.Errorf("get speech model: %w", err)
 	}
@@ -181,7 +181,7 @@ func (s *Service) GetTranscriptionModel(ctx context.Context, id string) (Transcr
 	if err != nil {
 		return TranscriptionModelResponse{}, err
 	}
-	row, err := s.queries.GetTranscriptionModelWithProvider(ctx, pgID)
+	row, err := s.queries.GetTranscriptionModelWithProvider(ctx, sqlc.GetTranscriptionModelWithProviderParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return TranscriptionModelResponse{}, fmt.Errorf("get transcription model: %w", err)
 	}
@@ -193,7 +193,7 @@ func (s *Service) UpdateSpeechModel(ctx context.Context, id string, req UpdateSp
 	if err != nil {
 		return SpeechModelResponse{}, err
 	}
-	row, err := s.queries.GetSpeechModelWithProvider(ctx, pgID)
+	row, err := s.queries.GetSpeechModelWithProvider(ctx, sqlc.GetSpeechModelWithProviderParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return SpeechModelResponse{}, fmt.Errorf("get speech model: %w", err)
 	}
@@ -227,7 +227,7 @@ func (s *Service) UpdateTranscriptionModel(ctx context.Context, id string, req U
 	if err != nil {
 		return TranscriptionModelResponse{}, err
 	}
-	row, err := s.queries.GetTranscriptionModelWithProvider(ctx, pgID)
+	row, err := s.queries.GetTranscriptionModelWithProvider(ctx, sqlc.GetTranscriptionModelWithProviderParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return TranscriptionModelResponse{}, fmt.Errorf("get transcription model: %w", err)
 	}
@@ -300,7 +300,7 @@ func (s *Service) GetModelCapabilities(ctx context.Context, modelID string) (*Mo
 	if err != nil {
 		return nil, err
 	}
-	modelRow, err := s.queries.GetSpeechModelWithProvider(ctx, pgID)
+	modelRow, err := s.queries.GetSpeechModelWithProvider(ctx, sqlc.GetSpeechModelWithProviderParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return nil, fmt.Errorf("get speech model: %w", err)
 	}
@@ -328,7 +328,7 @@ func (s *Service) GetTranscriptionModelCapabilities(ctx context.Context, modelID
 	if err != nil {
 		return nil, err
 	}
-	modelRow, err := s.queries.GetTranscriptionModelWithProvider(ctx, pgID)
+	modelRow, err := s.queries.GetTranscriptionModelWithProvider(ctx, sqlc.GetTranscriptionModelWithProviderParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return nil, fmt.Errorf("get transcription model: %w", err)
 	}
@@ -353,7 +353,7 @@ func (s *Service) FetchRemoteModels(ctx context.Context, providerID string) ([]M
 		return nil, err
 	}
 
-	providerRow, err := s.queries.GetProviderByID(ctx, pgID)
+	providerRow, err := s.queries.GetProviderByID(ctx, sqlc.GetProviderByIDParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return nil, fmt.Errorf("get speech provider: %w", err)
 	}
@@ -392,7 +392,7 @@ func (s *Service) FetchRemoteTranscriptionModels(ctx context.Context, providerID
 		return nil, err
 	}
 
-	providerRow, err := s.queries.GetProviderByID(ctx, pgID)
+	providerRow, err := s.queries.GetProviderByID(ctx, sqlc.GetProviderByIDParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return nil, fmt.Errorf("get speech provider: %w", err)
 	}
@@ -458,14 +458,14 @@ func (s *Service) resolveSpeechParams(ctx context.Context, modelID string, text 
 		return nil, err
 	}
 
-	modelRow, err := s.queries.GetSpeechModelWithProvider(ctx, pgID)
+	modelRow, err := s.queries.GetSpeechModelWithProvider(ctx, sqlc.GetSpeechModelWithProviderParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return nil, fmt.Errorf("get speech model: %w", err)
 	}
 	if !modelRow.Enable {
 		return nil, fmt.Errorf("speech model %s is disabled", modelRow.ModelID)
 	}
-	providerRow, err := s.queries.GetProviderByID(ctx, modelRow.ProviderID)
+	providerRow, err := s.queries.GetProviderByID(ctx, sqlc.GetProviderByIDParams{ID: modelRow.ProviderID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return nil, fmt.Errorf("get speech provider: %w", err)
 	}
@@ -495,14 +495,14 @@ func (s *Service) resolveTranscriptionParams(ctx context.Context, modelID string
 		return nil, err
 	}
 
-	modelRow, err := s.queries.GetTranscriptionModelWithProvider(ctx, pgID)
+	modelRow, err := s.queries.GetTranscriptionModelWithProvider(ctx, sqlc.GetTranscriptionModelWithProviderParams{ID: pgID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return nil, fmt.Errorf("get transcription model: %w", err)
 	}
 	if !modelRow.Enable {
 		return nil, fmt.Errorf("transcription model %s is disabled", modelRow.ModelID)
 	}
-	providerRow, err := s.queries.GetProviderByID(ctx, modelRow.ProviderID)
+	providerRow, err := s.queries.GetProviderByID(ctx, sqlc.GetProviderByIDParams{ID: modelRow.ProviderID, TeamID: models.TeamIDFromContext(ctx)})
 	if err != nil {
 		return nil, fmt.Errorf("get speech provider: %w", err)
 	}

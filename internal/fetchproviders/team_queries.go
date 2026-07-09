@@ -18,7 +18,7 @@ func getFetchProviderByIDForScope(ctx context.Context, queries dbstore.Queries, 
 	return models.InvokeTeamQuery[sqlc.FetchProvider](ctx, queries, "GetFetchProviderByIDForTeam", map[string]any{
 		"ID": id,
 	}, func() (sqlc.FetchProvider, error) {
-		return queries.GetFetchProviderByID(ctx, id)
+		return queries.GetFetchProviderByID(ctx, sqlc.GetFetchProviderByIDParams{ID: id, TeamID: models.TeamIDFromContext(ctx)})
 	})
 }
 
@@ -40,6 +40,6 @@ func deleteFetchProviderForScope(ctx context.Context, queries dbstore.Queries, i
 	return models.InvokeTeamExec(ctx, queries, "DeleteFetchProviderForTeam", map[string]any{
 		"ID": id,
 	}, func() error {
-		return queries.DeleteFetchProvider(ctx, id)
+		return queries.DeleteFetchProvider(ctx, sqlc.DeleteFetchProviderParams{ID: id, TeamID: models.TeamIDFromContext(ctx)})
 	})
 }

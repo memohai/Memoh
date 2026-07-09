@@ -55,10 +55,16 @@ func (q *Queries) CreateSearchProvider(ctx context.Context, arg CreateSearchProv
 
 const deleteSearchProvider = `-- name: DeleteSearchProvider :exec
 DELETE FROM search_providers WHERE id = $1
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) DeleteSearchProvider(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteSearchProvider, id)
+type DeleteSearchProviderParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteSearchProvider(ctx context.Context, arg DeleteSearchProviderParams) error {
+	_, err := q.db.Exec(ctx, deleteSearchProvider, arg.ID, arg.TeamID)
 	return err
 }
 
@@ -80,10 +86,16 @@ func (q *Queries) DeleteSearchProviderForTeam(ctx context.Context, arg DeleteSea
 
 const getSearchProviderByID = `-- name: GetSearchProviderByID :one
 SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM search_providers WHERE id = $1
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) GetSearchProviderByID(ctx context.Context, id pgtype.UUID) (SearchProvider, error) {
-	row := q.db.QueryRow(ctx, getSearchProviderByID, id)
+type GetSearchProviderByIDParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetSearchProviderByID(ctx context.Context, arg GetSearchProviderByIDParams) (SearchProvider, error) {
+	row := q.db.QueryRow(ctx, getSearchProviderByID, arg.ID, arg.TeamID)
 	var i SearchProvider
 	err := row.Scan(
 		&i.ID,

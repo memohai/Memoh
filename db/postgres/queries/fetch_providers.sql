@@ -10,7 +10,8 @@ VALUES (
 RETURNING *;
 
 -- name: GetFetchProviderByID :one
-SELECT * FROM fetch_providers WHERE id = sqlc.arg(id);
+SELECT * FROM fetch_providers WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: GetFetchProviderByIDForTeam :one
 SELECT * FROM fetch_providers
@@ -58,7 +59,8 @@ WHERE id = sqlc.arg(id)
 RETURNING *;
 
 -- name: DeleteFetchProvider :exec
-DELETE FROM fetch_providers WHERE id = sqlc.arg(id);
+DELETE FROM fetch_providers WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: DeleteFetchProviderForTeam :exec
 DELETE FROM fetch_providers

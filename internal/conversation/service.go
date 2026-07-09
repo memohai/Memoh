@@ -419,7 +419,7 @@ func (s *Service) resolveModelUUID(ctx context.Context, modelRef string) (pgtype
 
 	// Prefer UUID path; if not found, fall back to model_id slug.
 	if parsed, err := dbpkg.ParseUUID(modelRef); err == nil {
-		if _, err := s.queries.GetModelByID(ctx, parsed); err == nil {
+		if _, err := s.queries.GetModelByID(ctx, sqlc.GetModelByIDParams{ID: parsed, TeamID: teams.TeamUUIDOrZero(ctx)}); err == nil {
 			return parsed, nil
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return pgtype.UUID{}, err
