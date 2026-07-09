@@ -134,12 +134,15 @@ func (s *Service) Create(ctx context.Context, req ProviderCreateRequest) (Provid
 	if err != nil {
 		return ProviderGetResponse{}, fmt.Errorf("marshal config: %w", err)
 	}
-	row, err := s.queries.CreateMemoryProvider(ctx, sqlc.CreateMemoryProviderParams{
+	params := sqlc.CreateMemoryProviderParams{
 		Name:      strings.TrimSpace(req.Name),
 		Provider:  string(req.Provider),
 		Config:    configJSON,
 		IsDefault: false,
-	})
+	}
+	setMemoryProviderTeamID(ctx, &params)
+
+	row, err := s.queries.CreateMemoryProvider(ctx, params)
 	if err != nil {
 		return ProviderGetResponse{}, fmt.Errorf("create memory provider: %w", err)
 	}
@@ -153,7 +156,7 @@ func (s *Service) Get(ctx context.Context, id string) (ProviderGetResponse, erro
 	if err != nil {
 		return ProviderGetResponse{}, err
 	}
-	row, err := s.queries.GetMemoryProviderByID(ctx, pgID)
+	row, err := getMemoryProviderByIDForScope(ctx, s.queries, pgID)
 	if err != nil {
 		return ProviderGetResponse{}, fmt.Errorf("get memory provider: %w", err)
 	}
@@ -177,7 +180,7 @@ func (s *Service) Status(ctx context.Context, id string) (ProviderStatusResponse
 }
 
 func (s *Service) List(ctx context.Context) ([]ProviderGetResponse, error) {
-	rows, err := s.queries.ListMemoryProviders(ctx)
+	rows, err := listMemoryProvidersForScope(ctx, s.queries)
 	if err != nil {
 		return nil, fmt.Errorf("list memory providers: %w", err)
 	}
@@ -189,7 +192,7 @@ func (s *Service) List(ctx context.Context) ([]ProviderGetResponse, error) {
 }
 
 func (s *Service) InstantiateAll(ctx context.Context) (int, error) {
-	rows, err := s.queries.ListMemoryProviders(ctx)
+	rows, err := listMemoryProvidersForScope(ctx, s.queries)
 	if err != nil {
 		return 0, fmt.Errorf("list memory providers: %w", err)
 	}
@@ -214,7 +217,7 @@ func (s *Service) Update(ctx context.Context, id string, req ProviderUpdateReque
 	if err != nil {
 		return ProviderGetResponse{}, err
 	}
-	current, err := s.queries.GetMemoryProviderByID(ctx, pgID)
+	current, err := getMemoryProviderByIDForScope(ctx, s.queries, pgID)
 	if err != nil {
 		return ProviderGetResponse{}, fmt.Errorf("get memory provider: %w", err)
 	}
@@ -230,11 +233,14 @@ func (s *Service) Update(ctx context.Context, id string, req ProviderUpdateReque
 		}
 		config = configJSON
 	}
-	updated, err := s.queries.UpdateMemoryProvider(ctx, sqlc.UpdateMemoryProviderParams{
+	params := sqlc.UpdateMemoryProviderParams{
 		ID:     pgID,
 		Name:   name,
 		Config: config,
-	})
+	}
+	setMemoryProviderTeamID(ctx, &params)
+
+	updated, err := s.queries.UpdateMemoryProvider(ctx, params)
 	if err != nil {
 		return ProviderGetResponse{}, fmt.Errorf("update memory provider: %w", err)
 	}
@@ -248,7 +254,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.queries.DeleteMemoryProvider(ctx, pgID); err != nil {
+	if err := deleteMemoryProviderForScope(ctx, s.queries, pgID); err != nil {
 		return err
 	}
 	if s.registry != nil {
@@ -259,17 +265,20 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 
 // EnsureDefault creates a default builtin provider if none exists.
 func (s *Service) EnsureDefault(ctx context.Context) (ProviderGetResponse, error) {
-	row, err := s.queries.GetDefaultMemoryProvider(ctx)
+	row, err := getDefaultMemoryProviderForScope(ctx, s.queries)
 	if err == nil {
 		return s.toGetResponse(row), nil
 	}
 	configJSON, _ := json.Marshal(map[string]any{})
-	created, err := s.queries.CreateMemoryProvider(ctx, sqlc.CreateMemoryProviderParams{
+	params := sqlc.CreateMemoryProviderParams{
 		Name:      "Built-in Memory",
 		Provider:  string(ProviderBuiltin),
 		Config:    configJSON,
 		IsDefault: true,
-	})
+	}
+	setMemoryProviderTeamID(ctx, &params)
+
+	created, err := s.queries.CreateMemoryProvider(ctx, params)
 	if err != nil {
 		return ProviderGetResponse{}, fmt.Errorf("create default memory provider: %w", err)
 	}

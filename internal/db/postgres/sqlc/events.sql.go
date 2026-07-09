@@ -7,31 +7,37 @@ package sqlc
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const insertLifecycleEvent = `-- name: InsertLifecycleEvent :exec
 INSERT INTO lifecycle_events (id, container_id, event_type, payload)
-VALUES (
+SELECT
   $1,
+  c.container_id,
   $2,
-  $3,
-  $4
-)
+  $3
+FROM containers c
+WHERE c.container_id = $4
+  AND c.team_id = $5
 `
 
 type InsertLifecycleEventParams struct {
-	ID          string `json:"id"`
-	ContainerID string `json:"container_id"`
-	EventType   string `json:"event_type"`
-	Payload     []byte `json:"payload"`
+	ID          string      `json:"id"`
+	EventType   string      `json:"event_type"`
+	Payload     []byte      `json:"payload"`
+	ContainerID string      `json:"container_id"`
+	TeamID      pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) InsertLifecycleEvent(ctx context.Context, arg InsertLifecycleEventParams) error {
 	_, err := q.db.Exec(ctx, insertLifecycleEvent,
 		arg.ID,
-		arg.ContainerID,
 		arg.EventType,
 		arg.Payload,
+		arg.ContainerID,
+		arg.TeamID,
 	)
 	return err
 }

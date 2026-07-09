@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"log/slog"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 const (
@@ -107,7 +109,11 @@ func (s *Service) inheritedManage(ctx context.Context, botID, channelIdentityID 
 	if err != nil {
 		return false, err
 	}
-	userIDs, err := s.queries.ListUserIDsByChannelIdentity(ctx, pgID)
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return false, err
+	}
+	userIDs, err := listUserIDsByChannelIdentity(ctx, s.queries, teamID, pgID)
 	if err != nil {
 		return false, err
 	}
@@ -157,14 +163,20 @@ func (s *Service) IssueLinkCode(ctx context.Context, userID, channelType string)
 		return LinkCode{}, err
 	}
 	expiresAt := s.now().Add(s.codeTTL)
-	row, err := s.queries.CreateChannelLinkCode(ctx, sqlc.CreateChannelLinkCodeParams{
+	params := sqlc.CreateChannelLinkCodeParams{
 		Token:  token,
 		UserID: pgUserID,
 		// channel_type is NOT NULL; "" is the "no specific platform" sentinel, so
 		// always send a valid (possibly empty) string rather than NULL.
 		ChannelType: pgtype.Text{String: strings.TrimSpace(channelType), Valid: true},
 		ExpiresAt:   pgtype.Timestamptz{Time: expiresAt, Valid: true},
-	})
+	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return LinkCode{}, err
+	}
+	applyTeamID(&params, teamID)
+	row, err := s.queries.CreateChannelLinkCode(ctx, params)
 	if err != nil {
 		return LinkCode{}, err
 	}
@@ -192,13 +204,19 @@ func (s *Service) ConsumeLinkCode(ctx context.Context, token, channelIdentityID 
 	if err != nil {
 		return Binding{}, err
 	}
-	bindingRow, err := s.queries.RedeemChannelLinkCode(ctx, sqlc.RedeemChannelLinkCodeParams{
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return Binding{}, err
+	}
+	params := sqlc.RedeemChannelLinkCodeParams{
 		Token:             token,
 		ChannelIdentityID: pgIdentityID,
-	})
+	}
+	applyTeamID(&params, teamID)
+	bindingRow, err := s.queries.RedeemChannelLinkCode(ctx, params)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return Binding{}, s.classifyRedeemNoRow(ctx, token)
+			return Binding{}, s.classifyRedeemNoRow(ctx, teamID, token)
 		}
 		return Binding{}, err
 	}
@@ -210,8 +228,8 @@ func (s *Service) ConsumeLinkCode(ctx context.Context, token, channelIdentityID 
 	}, nil
 }
 
-func (s *Service) classifyRedeemNoRow(ctx context.Context, token string) error {
-	code, err := s.queries.GetChannelLinkCodeByToken(ctx, token)
+func (s *Service) classifyRedeemNoRow(ctx context.Context, teamID pgtype.UUID, token string) error {
+	code, err := getChannelLinkCodeByToken(ctx, s.queries, teamID, token)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrCodeNotFound
@@ -242,7 +260,11 @@ func (s *Service) ListUserBindings(ctx context.Context, userID string) ([]Bindin
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListChannelIdentityBindingsForUser(ctx, pgUserID)
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := listChannelIdentityBindingsForUser(ctx, s.queries, teamID, pgUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -275,10 +297,16 @@ func (s *Service) Unbind(ctx context.Context, userID, channelIdentityID string) 
 	if err != nil {
 		return err
 	}
-	return s.queries.DeleteUserChannelIdentityBinding(ctx, sqlc.DeleteUserChannelIdentityBindingParams{
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	params := sqlc.DeleteUserChannelIdentityBindingParams{
 		UserID:            pgUserID,
 		ChannelIdentityID: pgIdentityID,
-	})
+	}
+	applyTeamID(&params, teamID)
+	return s.queries.DeleteUserChannelIdentityBinding(ctx, params)
 }
 
 // SetManager sets a local Manage override (ON/OFF) for a channel identity on a bot.
@@ -331,7 +359,11 @@ func (s *Service) ListManagers(ctx context.Context, botID string) ([]Manager, er
 			if err != nil {
 				continue
 			}
-			bindings, err := s.queries.ListChannelIdentityBindingsForUser(ctx, pgUserID)
+			teamID, err := teamIDFromContext(ctx)
+			if err != nil {
+				return nil, err
+			}
+			bindings, err := listChannelIdentityBindingsForUser(ctx, s.queries, teamID, pgUserID)
 			if err != nil {
 				return nil, err
 			}
@@ -440,6 +472,97 @@ func uuidString(id pgtype.UUID) string {
 
 func normalizeToken(token string) string {
 	return strings.ToUpper(strings.TrimSpace(token))
+}
+
+func teamIDFromContext(ctx context.Context) (pgtype.UUID, error) {
+	return db.ParseUUID(strings.TrimSpace(teams.ScopeOrDefault(ctx).TeamID))
+}
+
+func applyTeamID(params any, teamID pgtype.UUID) {
+	value := reflect.ValueOf(params)
+	if value.Kind() != reflect.Pointer || value.IsNil() {
+		return
+	}
+	elem := value.Elem()
+	if elem.Kind() != reflect.Struct {
+		return
+	}
+	field := elem.FieldByName("TeamID")
+	if !field.IsValid() || !field.CanSet() || field.Type() != reflect.TypeOf(pgtype.UUID{}) {
+		return
+	}
+	field.Set(reflect.ValueOf(teamID))
+}
+
+func listUserIDsByChannelIdentity(ctx context.Context, queries dbstore.Queries, teamID, channelIdentityID pgtype.UUID) ([]pgtype.UUID, error) {
+	values, err := callTeamScopedQuery(ctx, queries, "ListUserIDsByChannelIdentity", teamID, map[string]reflect.Value{
+		"ChannelIdentityID": reflect.ValueOf(channelIdentityID),
+	}, reflect.ValueOf(channelIdentityID))
+	if err != nil {
+		return nil, err
+	}
+	rows, _ := values[0].Interface().([]pgtype.UUID)
+	return rows, errorFromValue(values[1])
+}
+
+func getChannelLinkCodeByToken(ctx context.Context, queries dbstore.Queries, teamID pgtype.UUID, token string) (sqlc.ChannelLinkCode, error) {
+	values, err := callTeamScopedQuery(ctx, queries, "GetChannelLinkCodeByToken", teamID, map[string]reflect.Value{
+		"Token": reflect.ValueOf(token),
+	}, reflect.ValueOf(token))
+	if err != nil {
+		return sqlc.ChannelLinkCode{}, err
+	}
+	row, _ := values[0].Interface().(sqlc.ChannelLinkCode)
+	return row, errorFromValue(values[1])
+}
+
+func listChannelIdentityBindingsForUser(ctx context.Context, queries dbstore.Queries, teamID, userID pgtype.UUID) ([]sqlc.ListChannelIdentityBindingsForUserRow, error) {
+	values, err := callTeamScopedQuery(ctx, queries, "ListChannelIdentityBindingsForUser", teamID, map[string]reflect.Value{
+		"UserID": reflect.ValueOf(userID),
+	}, reflect.ValueOf(userID))
+	if err != nil {
+		return nil, err
+	}
+	rows, _ := values[0].Interface().([]sqlc.ListChannelIdentityBindingsForUserRow)
+	return rows, errorFromValue(values[1])
+}
+
+func callTeamScopedQuery(ctx context.Context, queries dbstore.Queries, methodName string, teamID pgtype.UUID, fields map[string]reflect.Value, legacyArg reflect.Value) ([]reflect.Value, error) {
+	method := reflect.ValueOf(queries).MethodByName(methodName)
+	if !method.IsValid() {
+		return nil, errors.New("query method " + methodName + " not configured")
+	}
+	if method.Type().NumIn() != 2 {
+		return nil, errors.New("query method " + methodName + " has unexpected arity")
+	}
+	argType := method.Type().In(1)
+	var arg reflect.Value
+	if legacyArg.IsValid() && legacyArg.Type().AssignableTo(argType) {
+		arg = legacyArg
+	} else {
+		arg = reflect.New(argType).Elem()
+		if arg.Kind() != reflect.Struct {
+			return nil, errors.New("query method " + methodName + " has unsupported arg type")
+		}
+		if field := arg.FieldByName("TeamID"); field.IsValid() && field.CanSet() && reflect.TypeOf(teamID).AssignableTo(field.Type()) {
+			field.Set(reflect.ValueOf(teamID))
+		}
+		for name, value := range fields {
+			field := arg.FieldByName(name)
+			if field.IsValid() && field.CanSet() && value.Type().AssignableTo(field.Type()) {
+				field.Set(value)
+			}
+		}
+	}
+	return method.Call([]reflect.Value{reflect.ValueOf(ctx), arg}), nil
+}
+
+func errorFromValue(value reflect.Value) error {
+	if !value.IsValid() || value.IsNil() {
+		return nil
+	}
+	err, _ := value.Interface().(error)
+	return err
 }
 
 func generateToken() (string, error) {

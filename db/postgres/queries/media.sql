@@ -14,26 +14,42 @@ SELECT * FROM storage_providers ORDER BY created_at DESC;
 
 -- name: UpsertBotStorageBinding :one
 INSERT INTO bot_storage_bindings (bot_id, storage_provider_id, base_path)
-VALUES (sqlc.arg(bot_id), sqlc.arg(storage_provider_id), sqlc.arg(base_path))
+SELECT b.id, sqlc.arg(storage_provider_id), sqlc.arg(base_path)
+FROM bots b
+WHERE b.id = sqlc.arg(bot_id)
+  AND b.team_id = sqlc.arg(team_id)
 ON CONFLICT (bot_id) DO UPDATE SET
   storage_provider_id = EXCLUDED.storage_provider_id,
   base_path = EXCLUDED.base_path,
   updated_at = now()
+WHERE EXISTS (
+  SELECT 1
+  FROM bots b
+  WHERE b.id = bot_storage_bindings.bot_id
+    AND b.team_id = sqlc.arg(team_id)
+)
 RETURNING *;
 
 -- name: GetBotStorageBinding :one
-SELECT * FROM bot_storage_bindings WHERE bot_id = sqlc.arg(bot_id);
+SELECT bsb.*
+FROM bot_storage_bindings bsb
+JOIN bots b ON b.id = bsb.bot_id
+WHERE bsb.bot_id = sqlc.arg(bot_id)
+  AND b.team_id = sqlc.arg(team_id);
 
 -- name: CreateMessageAsset :one
 INSERT INTO bot_history_message_assets (message_id, role, ordinal, content_hash, name, metadata)
-VALUES (
-  sqlc.arg(message_id),
+SELECT
+  m.id,
   sqlc.arg(role),
   sqlc.arg(ordinal),
   sqlc.arg(content_hash),
   sqlc.arg(name),
   sqlc.arg(metadata)
-)
+FROM bot_history_messages m
+JOIN bots b ON b.id = m.bot_id
+WHERE m.id = sqlc.arg(message_id)
+  AND b.team_id = sqlc.arg(team_id)
 ON CONFLICT (message_id, content_hash) DO UPDATE SET
   role = EXCLUDED.role,
   ordinal = EXCLUDED.ordinal,
@@ -42,22 +58,35 @@ ON CONFLICT (message_id, content_hash) DO UPDATE SET
 RETURNING *;
 
 -- name: ListMessageAssets :many
-SELECT id AS rel_id, message_id, role, ordinal, content_hash, name, metadata
-FROM bot_history_message_assets
-WHERE message_id = sqlc.arg(message_id)
-ORDER BY ordinal ASC;
+SELECT a.id AS rel_id, a.message_id, a.role, a.ordinal, a.content_hash, a.name, a.metadata
+FROM bot_history_message_assets a
+JOIN bot_history_messages m ON m.id = a.message_id
+JOIN bots b ON b.id = m.bot_id
+WHERE a.message_id = sqlc.arg(message_id)
+  AND b.team_id = sqlc.arg(team_id)
+ORDER BY a.ordinal ASC;
 
 -- name: ListMessageAssetsBatch :many
-SELECT id AS rel_id, message_id, role, ordinal, content_hash, name, metadata
-FROM bot_history_message_assets
-WHERE message_id = ANY(sqlc.arg(message_ids)::uuid[])
-ORDER BY message_id, ordinal ASC;
+SELECT a.id AS rel_id, a.message_id, a.role, a.ordinal, a.content_hash, a.name, a.metadata
+FROM bot_history_message_assets a
+JOIN bot_history_messages m ON m.id = a.message_id
+JOIN bots b ON b.id = m.bot_id
+WHERE a.message_id = ANY(sqlc.arg(message_ids)::uuid[])
+  AND b.team_id = sqlc.arg(team_id)
+ORDER BY a.message_id, a.ordinal ASC;
 
 -- name: CountMessageAssetsByBot :one
 SELECT COUNT(*)
 FROM bot_history_message_assets a
 JOIN bot_history_messages m ON m.id = a.message_id
-WHERE m.bot_id = sqlc.arg(bot_id);
+JOIN bots b ON b.id = m.bot_id
+WHERE m.bot_id = sqlc.arg(bot_id)
+  AND b.team_id = sqlc.arg(team_id);
 
 -- name: DeleteMessageAssets :exec
-DELETE FROM bot_history_message_assets WHERE message_id = sqlc.arg(message_id);
+DELETE FROM bot_history_message_assets AS a
+USING bot_history_messages m, bots b
+WHERE a.message_id = sqlc.arg(message_id)
+  AND m.id = a.message_id
+  AND b.id = m.bot_id
+  AND b.team_id = sqlc.arg(team_id);

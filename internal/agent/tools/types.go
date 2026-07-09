@@ -78,6 +78,7 @@ type StreamEmitter func(ToolStreamEvent)
 
 // SessionContext carries request-scoped identity for tool execution.
 type SessionContext struct {
+	TeamID              string
 	BotID               string
 	ChatID              string
 	SessionID           string

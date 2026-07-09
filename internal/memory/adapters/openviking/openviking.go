@@ -16,6 +16,11 @@ var errOpenVikingDisabled = errors.New("openviking provider is disabled")
 // OpenVikingProvider is kept as a provider interface placeholder. The external
 // OpenViking integration logic has been removed; selecting this provider is a
 // no-op for chat memory and returns an unsupported error for direct CRUD calls.
+//
+// Isolation audit: this implementation does not persist or fetch memory from
+// OpenViking, so there is no active tenant isolation mechanism to wire here.
+// If the external integration is restored, every request must carry Memoh's
+// team_id in addition to the bot scope before this provider can be enabled.
 type OpenVikingProvider struct{}
 
 func NewOpenVikingProvider(_ *slog.Logger, _ map[string]any) (*OpenVikingProvider, error) {

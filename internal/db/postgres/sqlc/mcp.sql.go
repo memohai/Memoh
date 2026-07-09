@@ -12,29 +12,30 @@ import (
 )
 
 const createMCPConnection = `-- name: CreateMCPConnection :one
-INSERT INTO mcp_connections (bot_id, name, type, config, is_active, auth_type)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at
+INSERT INTO mcp_connections (team_id, bot_id, name, type, config, is_active, auth_type)
+SELECT b.team_id, b.id, $1, $2, $3, $4, $5
+FROM bots b
+WHERE b.id = $6
+RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, team_id
 `
 
 type CreateMCPConnectionParams struct {
-	BotID    pgtype.UUID `json:"bot_id"`
 	Name     string      `json:"name"`
 	Type     string      `json:"type"`
 	Config   []byte      `json:"config"`
 	IsActive bool        `json:"is_active"`
 	AuthType string      `json:"auth_type"`
+	BotID    pgtype.UUID `json:"bot_id"`
 }
 
 func (q *Queries) CreateMCPConnection(ctx context.Context, arg CreateMCPConnectionParams) (McpConnection, error) {
 	row := q.db.QueryRow(ctx, createMCPConnection,
-		arg.BotID,
 		arg.Name,
 		arg.Type,
 		arg.Config,
 		arg.IsActive,
 		arg.AuthType,
+		arg.BotID,
 	)
 	var i McpConnection
 	err := row.Scan(
@@ -55,45 +56,51 @@ func (q *Queries) CreateMCPConnection(ctx context.Context, arg CreateMCPConnecti
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const createManagedMCPConnection = `-- name: CreateManagedMCPConnection :one
 INSERT INTO mcp_connections (
-  bot_id, name, type, config, is_active, auth_type,
+  team_id, bot_id, name, type, config, is_active, auth_type,
   managed_by_plugin_installation_id, managed_resource_key, visible, metadata
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at
+SELECT b.team_id, b.id, $1, $2, $3, $4, $5, i.id, $6, $7, $8
+FROM bots b
+JOIN bot_plugin_installations i
+  ON i.id = $9
+ AND i.bot_id = b.id
+ AND i.team_id = b.team_id
+WHERE b.id = $10
+RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, team_id
 `
 
 type CreateManagedMCPConnectionParams struct {
-	BotID                         pgtype.UUID `json:"bot_id"`
 	Name                          string      `json:"name"`
 	Type                          string      `json:"type"`
 	Config                        []byte      `json:"config"`
 	IsActive                      bool        `json:"is_active"`
 	AuthType                      string      `json:"auth_type"`
-	ManagedByPluginInstallationID pgtype.UUID `json:"managed_by_plugin_installation_id"`
 	ManagedResourceKey            string      `json:"managed_resource_key"`
 	Visible                       bool        `json:"visible"`
 	Metadata                      []byte      `json:"metadata"`
+	ManagedByPluginInstallationID pgtype.UUID `json:"managed_by_plugin_installation_id"`
+	BotID                         pgtype.UUID `json:"bot_id"`
 }
 
 func (q *Queries) CreateManagedMCPConnection(ctx context.Context, arg CreateManagedMCPConnectionParams) (McpConnection, error) {
 	row := q.db.QueryRow(ctx, createManagedMCPConnection,
-		arg.BotID,
 		arg.Name,
 		arg.Type,
 		arg.Config,
 		arg.IsActive,
 		arg.AuthType,
-		arg.ManagedByPluginInstallationID,
 		arg.ManagedResourceKey,
 		arg.Visible,
 		arg.Metadata,
+		arg.ManagedByPluginInstallationID,
+		arg.BotID,
 	)
 	var i McpConnection
 	err := row.Scan(
@@ -114,13 +121,16 @@ func (q *Queries) CreateManagedMCPConnection(ctx context.Context, arg CreateMana
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const deleteMCPConnection = `-- name: DeleteMCPConnection :exec
 DELETE FROM mcp_connections
-WHERE bot_id = $1 AND id = $2
+WHERE bot_id = $1
+  AND mcp_connections.id = $2
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = $1)
 `
 
 type DeleteMCPConnectionParams struct {
@@ -135,7 +145,9 @@ func (q *Queries) DeleteMCPConnection(ctx context.Context, arg DeleteMCPConnecti
 
 const deleteMCPConnectionsByPlugin = `-- name: DeleteMCPConnectionsByPlugin :exec
 DELETE FROM mcp_connections
-WHERE bot_id = $1 AND managed_by_plugin_installation_id = $2
+WHERE bot_id = $1
+  AND managed_by_plugin_installation_id = $2
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = $1)
 `
 
 type DeleteMCPConnectionsByPluginParams struct {
@@ -149,10 +161,11 @@ func (q *Queries) DeleteMCPConnectionsByPlugin(ctx context.Context, arg DeleteMC
 }
 
 const getMCPConnectionByID = `-- name: GetMCPConnectionByID :one
-SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-       managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at
+SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, team_id
 FROM mcp_connections
-WHERE bot_id = $1 AND id = $2
+WHERE bot_id = $1
+  AND mcp_connections.id = $2
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = $1)
 LIMIT 1
 `
 
@@ -182,15 +195,16 @@ func (q *Queries) GetMCPConnectionByID(ctx context.Context, arg GetMCPConnection
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listMCPConnectionsByBotID = `-- name: ListMCPConnectionsByBotID :many
-SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-       managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at
+SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, team_id
 FROM mcp_connections
 WHERE bot_id = $1
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = $1)
 ORDER BY created_at DESC
 `
 
@@ -221,6 +235,7 @@ func (q *Queries) ListMCPConnectionsByBotID(ctx context.Context, botID pgtype.UU
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -234,36 +249,37 @@ func (q *Queries) ListMCPConnectionsByBotID(ctx context.Context, botID pgtype.UU
 
 const updateMCPConnection = `-- name: UpdateMCPConnection :one
 UPDATE mcp_connections
-SET name = $3,
-    type = $4,
-    config = $5,
-    is_active = $6,
-    auth_type = $7,
+SET name = $1,
+    type = $2,
+    config = $3,
+    is_active = $4,
+    auth_type = $5,
     updated_at = now()
-WHERE bot_id = $1 AND id = $2
-RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at
+WHERE bot_id = $6
+  AND mcp_connections.id = $7
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = $6)
+RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, team_id
 `
 
 type UpdateMCPConnectionParams struct {
-	BotID    pgtype.UUID `json:"bot_id"`
-	ID       pgtype.UUID `json:"id"`
 	Name     string      `json:"name"`
 	Type     string      `json:"type"`
 	Config   []byte      `json:"config"`
 	IsActive bool        `json:"is_active"`
 	AuthType string      `json:"auth_type"`
+	BotID    pgtype.UUID `json:"bot_id"`
+	ID       pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) UpdateMCPConnection(ctx context.Context, arg UpdateMCPConnectionParams) (McpConnection, error) {
 	row := q.db.QueryRow(ctx, updateMCPConnection,
-		arg.BotID,
-		arg.ID,
 		arg.Name,
 		arg.Type,
 		arg.Config,
 		arg.IsActive,
 		arg.AuthType,
+		arg.BotID,
+		arg.ID,
 	)
 	var i McpConnection
 	err := row.Scan(
@@ -284,116 +300,125 @@ func (q *Queries) UpdateMCPConnection(ctx context.Context, arg UpdateMCPConnecti
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const updateMCPConnectionActive = `-- name: UpdateMCPConnectionActive :exec
 UPDATE mcp_connections
-SET is_active = $3,
+SET is_active = $1,
     updated_at = now()
-WHERE bot_id = $1 AND id = $2
+WHERE bot_id = $2
+  AND mcp_connections.id = $3
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = $2)
 `
 
 type UpdateMCPConnectionActiveParams struct {
+	IsActive bool        `json:"is_active"`
 	BotID    pgtype.UUID `json:"bot_id"`
 	ID       pgtype.UUID `json:"id"`
-	IsActive bool        `json:"is_active"`
 }
 
 func (q *Queries) UpdateMCPConnectionActive(ctx context.Context, arg UpdateMCPConnectionActiveParams) error {
-	_, err := q.db.Exec(ctx, updateMCPConnectionActive, arg.BotID, arg.ID, arg.IsActive)
+	_, err := q.db.Exec(ctx, updateMCPConnectionActive, arg.IsActive, arg.BotID, arg.ID)
 	return err
 }
 
 const updateMCPConnectionAuthType = `-- name: UpdateMCPConnectionAuthType :exec
 UPDATE mcp_connections
-SET auth_type = $2,
+SET auth_type = $1,
     updated_at = now()
-WHERE id = $1
+WHERE mcp_connections.id = $2
+  AND team_id = (SELECT t.team_id FROM mcp_oauth_tokens t WHERE t.connection_id = $2)
 `
 
 type UpdateMCPConnectionAuthTypeParams struct {
-	ID       pgtype.UUID `json:"id"`
 	AuthType string      `json:"auth_type"`
+	ID       pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) UpdateMCPConnectionAuthType(ctx context.Context, arg UpdateMCPConnectionAuthTypeParams) error {
-	_, err := q.db.Exec(ctx, updateMCPConnectionAuthType, arg.ID, arg.AuthType)
+	_, err := q.db.Exec(ctx, updateMCPConnectionAuthType, arg.AuthType, arg.ID)
 	return err
 }
 
 const updateMCPConnectionProbeResult = `-- name: UpdateMCPConnectionProbeResult :exec
 UPDATE mcp_connections
-SET status = $3,
-    tools_cache = $4,
+SET status = $1,
+    tools_cache = $2,
     last_probed_at = now(),
-    status_message = $5,
+    status_message = $3,
     updated_at = now()
-WHERE bot_id = $1 AND id = $2
+WHERE bot_id = $4
+  AND mcp_connections.id = $5
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = $4)
 `
 
 type UpdateMCPConnectionProbeResultParams struct {
-	BotID         pgtype.UUID `json:"bot_id"`
-	ID            pgtype.UUID `json:"id"`
 	Status        string      `json:"status"`
 	ToolsCache    []byte      `json:"tools_cache"`
 	StatusMessage string      `json:"status_message"`
+	BotID         pgtype.UUID `json:"bot_id"`
+	ID            pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) UpdateMCPConnectionProbeResult(ctx context.Context, arg UpdateMCPConnectionProbeResultParams) error {
 	_, err := q.db.Exec(ctx, updateMCPConnectionProbeResult,
-		arg.BotID,
-		arg.ID,
 		arg.Status,
 		arg.ToolsCache,
 		arg.StatusMessage,
+		arg.BotID,
+		arg.ID,
 	)
 	return err
 }
 
 const updateMCPConnectionsActiveByPlugin = `-- name: UpdateMCPConnectionsActiveByPlugin :exec
 UPDATE mcp_connections
-SET is_active = $3,
+SET is_active = $1,
     updated_at = now()
-WHERE bot_id = $1 AND managed_by_plugin_installation_id = $2
+WHERE bot_id = $2
+  AND managed_by_plugin_installation_id = $3
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = $2)
 `
 
 type UpdateMCPConnectionsActiveByPluginParams struct {
+	IsActive                      bool        `json:"is_active"`
 	BotID                         pgtype.UUID `json:"bot_id"`
 	ManagedByPluginInstallationID pgtype.UUID `json:"managed_by_plugin_installation_id"`
-	IsActive                      bool        `json:"is_active"`
 }
 
 func (q *Queries) UpdateMCPConnectionsActiveByPlugin(ctx context.Context, arg UpdateMCPConnectionsActiveByPluginParams) error {
-	_, err := q.db.Exec(ctx, updateMCPConnectionsActiveByPlugin, arg.BotID, arg.ManagedByPluginInstallationID, arg.IsActive)
+	_, err := q.db.Exec(ctx, updateMCPConnectionsActiveByPlugin, arg.IsActive, arg.BotID, arg.ManagedByPluginInstallationID)
 	return err
 }
 
 const upsertMCPConnectionByName = `-- name: UpsertMCPConnectionByName :one
-INSERT INTO mcp_connections (bot_id, name, type, config)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (bot_id, name)
+INSERT INTO mcp_connections (team_id, bot_id, name, type, config)
+SELECT b.team_id, b.id, $1, $2, $3
+FROM bots b
+WHERE b.id = $4
+ON CONFLICT (team_id, bot_id, name)
 DO UPDATE SET type = EXCLUDED.type,
               config = EXCLUDED.config,
               updated_at = now()
-RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at
+RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, team_id
 `
 
 type UpsertMCPConnectionByNameParams struct {
-	BotID  pgtype.UUID `json:"bot_id"`
 	Name   string      `json:"name"`
 	Type   string      `json:"type"`
 	Config []byte      `json:"config"`
+	BotID  pgtype.UUID `json:"bot_id"`
 }
 
 func (q *Queries) UpsertMCPConnectionByName(ctx context.Context, arg UpsertMCPConnectionByNameParams) (McpConnection, error) {
 	row := q.db.QueryRow(ctx, upsertMCPConnectionByName,
-		arg.BotID,
 		arg.Name,
 		arg.Type,
 		arg.Config,
+		arg.BotID,
 	)
 	var i McpConnection
 	err := row.Scan(
@@ -414,6 +439,7 @@ func (q *Queries) UpsertMCPConnectionByName(ctx context.Context, arg UpsertMCPCo
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

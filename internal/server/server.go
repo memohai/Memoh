@@ -11,6 +11,7 @@ import (
 
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/channel/publicmedia"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 type Server struct {
@@ -33,6 +34,7 @@ func NewServer(log *slog.Logger, addr string, jwtSecret string,
 	e := echo.New()
 	e.HideBanner = true
 	e.Use(middleware.Recover())
+	e.Use(teams.DefaultMiddleware())
 	e.Use(middleware.BodyLimitWithConfig(middleware.BodyLimitConfig{
 		Limit: "1M",
 		Skipper: func(c echo.Context) bool {

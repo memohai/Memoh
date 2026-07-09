@@ -13,37 +13,43 @@ import (
 
 const createBotEmailBinding = `-- name: CreateBotEmailBinding :one
 INSERT INTO bot_email_bindings (bot_id, email_provider_id, email_address, can_read, can_write, can_delete, config)
-VALUES (
+SELECT
+  b.id,
+  ep.id,
   $1,
   $2,
   $3,
   $4,
-  $5,
-  $6,
-  $7
-)
-RETURNING id, bot_id, email_provider_id, email_address, can_read, can_write, can_delete, config, created_at, updated_at
+  $5
+FROM bots b
+JOIN email_providers ep ON ep.id = $6
+WHERE b.id = $7
+  AND b.team_id = $8
+  AND ep.team_id = $8
+RETURNING id, bot_id, email_provider_id, email_address, can_read, can_write, can_delete, config, created_at, updated_at, team_id
 `
 
 type CreateBotEmailBindingParams struct {
-	BotID           pgtype.UUID `json:"bot_id"`
-	EmailProviderID pgtype.UUID `json:"email_provider_id"`
 	EmailAddress    string      `json:"email_address"`
 	CanRead         bool        `json:"can_read"`
 	CanWrite        bool        `json:"can_write"`
 	CanDelete       bool        `json:"can_delete"`
 	Config          []byte      `json:"config"`
+	EmailProviderID pgtype.UUID `json:"email_provider_id"`
+	BotID           pgtype.UUID `json:"bot_id"`
+	TeamID          pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) CreateBotEmailBinding(ctx context.Context, arg CreateBotEmailBindingParams) (BotEmailBinding, error) {
 	row := q.db.QueryRow(ctx, createBotEmailBinding,
-		arg.BotID,
-		arg.EmailProviderID,
 		arg.EmailAddress,
 		arg.CanRead,
 		arg.CanWrite,
 		arg.CanDelete,
 		arg.Config,
+		arg.EmailProviderID,
+		arg.BotID,
+		arg.TeamID,
 	)
 	var i BotEmailBinding
 	err := row.Scan(
@@ -57,31 +63,50 @@ func (q *Queries) CreateBotEmailBinding(ctx context.Context, arg CreateBotEmailB
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const deleteBotEmailBinding = `-- name: DeleteBotEmailBinding :exec
-DELETE FROM bot_email_bindings WHERE id = $1
+DELETE FROM bot_email_bindings AS beb
+USING bots b, email_providers ep
+WHERE beb.id = $1
+  AND b.id = beb.bot_id
+  AND ep.id = beb.email_provider_id
+  AND b.team_id = $2
+  AND ep.team_id = $2
 `
 
-func (q *Queries) DeleteBotEmailBinding(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteBotEmailBinding, id)
+type DeleteBotEmailBindingParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteBotEmailBinding(ctx context.Context, arg DeleteBotEmailBindingParams) error {
+	_, err := q.db.Exec(ctx, deleteBotEmailBinding, arg.ID, arg.TeamID)
 	return err
 }
 
 const getBotEmailBindingByBotAndProvider = `-- name: GetBotEmailBindingByBotAndProvider :one
-SELECT id, bot_id, email_provider_id, email_address, can_read, can_write, can_delete, config, created_at, updated_at FROM bot_email_bindings
-WHERE bot_id = $1 AND email_provider_id = $2
+SELECT beb.id, beb.bot_id, beb.email_provider_id, beb.email_address, beb.can_read, beb.can_write, beb.can_delete, beb.config, beb.created_at, beb.updated_at, beb.team_id
+FROM bot_email_bindings beb
+JOIN bots b ON b.id = beb.bot_id
+JOIN email_providers ep ON ep.id = beb.email_provider_id
+WHERE beb.bot_id = $1
+  AND beb.email_provider_id = $2
+  AND b.team_id = $3
+  AND ep.team_id = $3
 `
 
 type GetBotEmailBindingByBotAndProviderParams struct {
 	BotID           pgtype.UUID `json:"bot_id"`
 	EmailProviderID pgtype.UUID `json:"email_provider_id"`
+	TeamID          pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) GetBotEmailBindingByBotAndProvider(ctx context.Context, arg GetBotEmailBindingByBotAndProviderParams) (BotEmailBinding, error) {
-	row := q.db.QueryRow(ctx, getBotEmailBindingByBotAndProvider, arg.BotID, arg.EmailProviderID)
+	row := q.db.QueryRow(ctx, getBotEmailBindingByBotAndProvider, arg.BotID, arg.EmailProviderID, arg.TeamID)
 	var i BotEmailBinding
 	err := row.Scan(
 		&i.ID,
@@ -94,16 +119,28 @@ func (q *Queries) GetBotEmailBindingByBotAndProvider(ctx context.Context, arg Ge
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getBotEmailBindingByID = `-- name: GetBotEmailBindingByID :one
-SELECT id, bot_id, email_provider_id, email_address, can_read, can_write, can_delete, config, created_at, updated_at FROM bot_email_bindings WHERE id = $1
+SELECT beb.id, beb.bot_id, beb.email_provider_id, beb.email_address, beb.can_read, beb.can_write, beb.can_delete, beb.config, beb.created_at, beb.updated_at, beb.team_id
+FROM bot_email_bindings beb
+JOIN bots b ON b.id = beb.bot_id
+JOIN email_providers ep ON ep.id = beb.email_provider_id
+WHERE beb.id = $1
+  AND b.team_id = $2
+  AND ep.team_id = $2
 `
 
-func (q *Queries) GetBotEmailBindingByID(ctx context.Context, id pgtype.UUID) (BotEmailBinding, error) {
-	row := q.db.QueryRow(ctx, getBotEmailBindingByID, id)
+type GetBotEmailBindingByIDParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetBotEmailBindingByID(ctx context.Context, arg GetBotEmailBindingByIDParams) (BotEmailBinding, error) {
+	row := q.db.QueryRow(ctx, getBotEmailBindingByID, arg.ID, arg.TeamID)
 	var i BotEmailBinding
 	err := row.Scan(
 		&i.ID,
@@ -116,18 +153,29 @@ func (q *Queries) GetBotEmailBindingByID(ctx context.Context, id pgtype.UUID) (B
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listBotEmailBindings = `-- name: ListBotEmailBindings :many
-SELECT id, bot_id, email_provider_id, email_address, can_read, can_write, can_delete, config, created_at, updated_at FROM bot_email_bindings
-WHERE bot_id = $1
-ORDER BY created_at DESC
+SELECT beb.id, beb.bot_id, beb.email_provider_id, beb.email_address, beb.can_read, beb.can_write, beb.can_delete, beb.config, beb.created_at, beb.updated_at, beb.team_id
+FROM bot_email_bindings beb
+JOIN bots b ON b.id = beb.bot_id
+JOIN email_providers ep ON ep.id = beb.email_provider_id
+WHERE beb.bot_id = $1
+  AND b.team_id = $2
+  AND ep.team_id = $2
+ORDER BY beb.created_at DESC
 `
 
-func (q *Queries) ListBotEmailBindings(ctx context.Context, botID pgtype.UUID) ([]BotEmailBinding, error) {
-	rows, err := q.db.Query(ctx, listBotEmailBindings, botID)
+type ListBotEmailBindingsParams struct {
+	BotID  pgtype.UUID `json:"bot_id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) ListBotEmailBindings(ctx context.Context, arg ListBotEmailBindingsParams) ([]BotEmailBinding, error) {
+	rows, err := q.db.Query(ctx, listBotEmailBindings, arg.BotID, arg.TeamID)
 	if err != nil {
 		return nil, err
 	}
@@ -146,6 +194,7 @@ func (q *Queries) ListBotEmailBindings(ctx context.Context, botID pgtype.UUID) (
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -158,13 +207,23 @@ func (q *Queries) ListBotEmailBindings(ctx context.Context, botID pgtype.UUID) (
 }
 
 const listBotEmailBindingsByProvider = `-- name: ListBotEmailBindingsByProvider :many
-SELECT id, bot_id, email_provider_id, email_address, can_read, can_write, can_delete, config, created_at, updated_at FROM bot_email_bindings
-WHERE email_provider_id = $1
-ORDER BY created_at DESC
+SELECT beb.id, beb.bot_id, beb.email_provider_id, beb.email_address, beb.can_read, beb.can_write, beb.can_delete, beb.config, beb.created_at, beb.updated_at, beb.team_id
+FROM bot_email_bindings beb
+JOIN bots b ON b.id = beb.bot_id
+JOIN email_providers ep ON ep.id = beb.email_provider_id
+WHERE beb.email_provider_id = $1
+  AND b.team_id = $2
+  AND ep.team_id = $2
+ORDER BY beb.created_at DESC
 `
 
-func (q *Queries) ListBotEmailBindingsByProvider(ctx context.Context, emailProviderID pgtype.UUID) ([]BotEmailBinding, error) {
-	rows, err := q.db.Query(ctx, listBotEmailBindingsByProvider, emailProviderID)
+type ListBotEmailBindingsByProviderParams struct {
+	EmailProviderID pgtype.UUID `json:"email_provider_id"`
+	TeamID          pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) ListBotEmailBindingsByProvider(ctx context.Context, arg ListBotEmailBindingsByProviderParams) ([]BotEmailBinding, error) {
+	rows, err := q.db.Query(ctx, listBotEmailBindingsByProvider, arg.EmailProviderID, arg.TeamID)
 	if err != nil {
 		return nil, err
 	}
@@ -183,6 +242,7 @@ func (q *Queries) ListBotEmailBindingsByProvider(ctx context.Context, emailProvi
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -195,13 +255,24 @@ func (q *Queries) ListBotEmailBindingsByProvider(ctx context.Context, emailProvi
 }
 
 const listReadableBindingsByProvider = `-- name: ListReadableBindingsByProvider :many
-SELECT id, bot_id, email_provider_id, email_address, can_read, can_write, can_delete, config, created_at, updated_at FROM bot_email_bindings
-WHERE email_provider_id = $1 AND can_read = TRUE
-ORDER BY created_at DESC
+SELECT beb.id, beb.bot_id, beb.email_provider_id, beb.email_address, beb.can_read, beb.can_write, beb.can_delete, beb.config, beb.created_at, beb.updated_at, beb.team_id
+FROM bot_email_bindings beb
+JOIN bots b ON b.id = beb.bot_id
+JOIN email_providers ep ON ep.id = beb.email_provider_id
+WHERE beb.email_provider_id = $1
+  AND beb.can_read = TRUE
+  AND b.team_id = $2
+  AND ep.team_id = $2
+ORDER BY beb.created_at DESC
 `
 
-func (q *Queries) ListReadableBindingsByProvider(ctx context.Context, emailProviderID pgtype.UUID) ([]BotEmailBinding, error) {
-	rows, err := q.db.Query(ctx, listReadableBindingsByProvider, emailProviderID)
+type ListReadableBindingsByProviderParams struct {
+	EmailProviderID pgtype.UUID `json:"email_provider_id"`
+	TeamID          pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) ListReadableBindingsByProvider(ctx context.Context, arg ListReadableBindingsByProviderParams) ([]BotEmailBinding, error) {
+	rows, err := q.db.Query(ctx, listReadableBindingsByProvider, arg.EmailProviderID, arg.TeamID)
 	if err != nil {
 		return nil, err
 	}
@@ -220,6 +291,7 @@ func (q *Queries) ListReadableBindingsByProvider(ctx context.Context, emailProvi
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -232,7 +304,7 @@ func (q *Queries) ListReadableBindingsByProvider(ctx context.Context, emailProvi
 }
 
 const updateBotEmailBinding = `-- name: UpdateBotEmailBinding :one
-UPDATE bot_email_bindings
+UPDATE bot_email_bindings AS beb
 SET
   email_address = $1,
   can_read = $2,
@@ -240,8 +312,13 @@ SET
   can_delete = $4,
   config = $5,
   updated_at = now()
-WHERE id = $6
-RETURNING id, bot_id, email_provider_id, email_address, can_read, can_write, can_delete, config, created_at, updated_at
+FROM bots b, email_providers ep
+WHERE beb.id = $6
+  AND b.id = beb.bot_id
+  AND ep.id = beb.email_provider_id
+  AND b.team_id = $7
+  AND ep.team_id = $7
+RETURNING beb.id, beb.bot_id, beb.email_provider_id, beb.email_address, beb.can_read, beb.can_write, beb.can_delete, beb.config, beb.created_at, beb.updated_at, beb.team_id
 `
 
 type UpdateBotEmailBindingParams struct {
@@ -251,6 +328,7 @@ type UpdateBotEmailBindingParams struct {
 	CanDelete    bool        `json:"can_delete"`
 	Config       []byte      `json:"config"`
 	ID           pgtype.UUID `json:"id"`
+	TeamID       pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateBotEmailBinding(ctx context.Context, arg UpdateBotEmailBindingParams) (BotEmailBinding, error) {
@@ -261,6 +339,7 @@ func (q *Queries) UpdateBotEmailBinding(ctx context.Context, arg UpdateBotEmailB
 		arg.CanDelete,
 		arg.Config,
 		arg.ID,
+		arg.TeamID,
 	)
 	var i BotEmailBinding
 	err := row.Scan(
@@ -274,6 +353,7 @@ func (q *Queries) UpdateBotEmailBinding(ctx context.Context, arg UpdateBotEmailB
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

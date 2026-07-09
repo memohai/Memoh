@@ -108,7 +108,12 @@ func (m *Manager) SetResourceLimits(ctx context.Context, botID string, limits co
 	if err != nil {
 		return nil, err
 	}
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := m.queries.UpsertBotWorkspaceResourceLimits(ctx, dbsqlc.UpsertBotWorkspaceResourceLimitsParams{
+		TeamID:        pgTeamID,
 		BotID:         pgBotID,
 		CpuMillicores: limits.CPUMillicores,
 		MemoryBytes:   limits.MemoryBytes,

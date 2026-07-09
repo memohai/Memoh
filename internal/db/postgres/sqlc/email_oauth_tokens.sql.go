@@ -12,20 +12,38 @@ import (
 )
 
 const deleteEmailOAuthToken = `-- name: DeleteEmailOAuthToken :exec
-DELETE FROM email_oauth_tokens WHERE email_provider_id = $1
+DELETE FROM email_oauth_tokens tok
+USING email_providers ep
+WHERE tok.email_provider_id = $1
+  AND ep.id = tok.email_provider_id
+  AND ep.team_id = $2
 `
 
-func (q *Queries) DeleteEmailOAuthToken(ctx context.Context, emailProviderID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteEmailOAuthToken, emailProviderID)
+type DeleteEmailOAuthTokenParams struct {
+	EmailProviderID pgtype.UUID `json:"email_provider_id"`
+	TeamID          pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteEmailOAuthToken(ctx context.Context, arg DeleteEmailOAuthTokenParams) error {
+	_, err := q.db.Exec(ctx, deleteEmailOAuthToken, arg.EmailProviderID, arg.TeamID)
 	return err
 }
 
 const getEmailOAuthTokenByProvider = `-- name: GetEmailOAuthTokenByProvider :one
-SELECT id, email_provider_id, email_address, access_token, refresh_token, expires_at, scope, state, created_at, updated_at FROM email_oauth_tokens WHERE email_provider_id = $1
+SELECT tok.id, tok.email_provider_id, tok.email_address, tok.access_token, tok.refresh_token, tok.expires_at, tok.scope, tok.state, tok.created_at, tok.updated_at, tok.team_id
+FROM email_oauth_tokens tok
+JOIN email_providers ep ON ep.id = tok.email_provider_id
+WHERE tok.email_provider_id = $1
+  AND ep.team_id = $2
 `
 
-func (q *Queries) GetEmailOAuthTokenByProvider(ctx context.Context, emailProviderID pgtype.UUID) (EmailOauthToken, error) {
-	row := q.db.QueryRow(ctx, getEmailOAuthTokenByProvider, emailProviderID)
+type GetEmailOAuthTokenByProviderParams struct {
+	EmailProviderID pgtype.UUID `json:"email_provider_id"`
+	TeamID          pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetEmailOAuthTokenByProvider(ctx context.Context, arg GetEmailOAuthTokenByProviderParams) (EmailOauthToken, error) {
+	row := q.db.QueryRow(ctx, getEmailOAuthTokenByProvider, arg.EmailProviderID, arg.TeamID)
 	var i EmailOauthToken
 	err := row.Scan(
 		&i.ID,
@@ -38,16 +56,27 @@ func (q *Queries) GetEmailOAuthTokenByProvider(ctx context.Context, emailProvide
 		&i.State,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getEmailOAuthTokenByState = `-- name: GetEmailOAuthTokenByState :one
-SELECT id, email_provider_id, email_address, access_token, refresh_token, expires_at, scope, state, created_at, updated_at FROM email_oauth_tokens WHERE state = $1 AND state != ''
+SELECT tok.id, tok.email_provider_id, tok.email_address, tok.access_token, tok.refresh_token, tok.expires_at, tok.scope, tok.state, tok.created_at, tok.updated_at, tok.team_id
+FROM email_oauth_tokens tok
+JOIN email_providers ep ON ep.id = tok.email_provider_id
+WHERE tok.state = $1
+  AND tok.state != ''
+  AND ep.team_id = $2
 `
 
-func (q *Queries) GetEmailOAuthTokenByState(ctx context.Context, state string) (EmailOauthToken, error) {
-	row := q.db.QueryRow(ctx, getEmailOAuthTokenByState, state)
+type GetEmailOAuthTokenByStateParams struct {
+	State  string      `json:"state"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetEmailOAuthTokenByState(ctx context.Context, arg GetEmailOAuthTokenByStateParams) (EmailOauthToken, error) {
+	row := q.db.QueryRow(ctx, getEmailOAuthTokenByState, arg.State, arg.TeamID)
 	var i EmailOauthToken
 	err := row.Scan(
 		&i.ID,
@@ -60,31 +89,39 @@ func (q *Queries) GetEmailOAuthTokenByState(ctx context.Context, state string) (
 		&i.State,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const updateEmailOAuthState = `-- name: UpdateEmailOAuthState :exec
 INSERT INTO email_oauth_tokens (email_provider_id, state)
-VALUES ($1, $2)
+SELECT ep.id, $1
+FROM email_providers ep
+WHERE ep.id = $2
+  AND ep.team_id = $3
 ON CONFLICT (email_provider_id) DO UPDATE SET
   state      = EXCLUDED.state,
   updated_at = now()
 `
 
 type UpdateEmailOAuthStateParams struct {
-	EmailProviderID pgtype.UUID `json:"email_provider_id"`
 	State           string      `json:"state"`
+	EmailProviderID pgtype.UUID `json:"email_provider_id"`
+	TeamID          pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateEmailOAuthState(ctx context.Context, arg UpdateEmailOAuthStateParams) error {
-	_, err := q.db.Exec(ctx, updateEmailOAuthState, arg.EmailProviderID, arg.State)
+	_, err := q.db.Exec(ctx, updateEmailOAuthState, arg.State, arg.EmailProviderID, arg.TeamID)
 	return err
 }
 
 const upsertEmailOAuthToken = `-- name: UpsertEmailOAuthToken :one
 INSERT INTO email_oauth_tokens (email_provider_id, email_address, access_token, refresh_token, expires_at, scope, state)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+SELECT ep.id, $1, $2, $3, $4, $5, $6
+FROM email_providers ep
+WHERE ep.id = $7
+  AND ep.team_id = $8
 ON CONFLICT (email_provider_id) DO UPDATE SET
   email_address  = EXCLUDED.email_address,
   access_token   = EXCLUDED.access_token,
@@ -93,28 +130,30 @@ ON CONFLICT (email_provider_id) DO UPDATE SET
   scope          = EXCLUDED.scope,
   state          = EXCLUDED.state,
   updated_at     = now()
-RETURNING id, email_provider_id, email_address, access_token, refresh_token, expires_at, scope, state, created_at, updated_at
+RETURNING id, email_provider_id, email_address, access_token, refresh_token, expires_at, scope, state, created_at, updated_at, team_id
 `
 
 type UpsertEmailOAuthTokenParams struct {
-	EmailProviderID pgtype.UUID        `json:"email_provider_id"`
 	EmailAddress    string             `json:"email_address"`
 	AccessToken     string             `json:"access_token"`
 	RefreshToken    string             `json:"refresh_token"`
 	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
 	Scope           string             `json:"scope"`
 	State           string             `json:"state"`
+	EmailProviderID pgtype.UUID        `json:"email_provider_id"`
+	TeamID          pgtype.UUID        `json:"team_id"`
 }
 
 func (q *Queries) UpsertEmailOAuthToken(ctx context.Context, arg UpsertEmailOAuthTokenParams) (EmailOauthToken, error) {
 	row := q.db.QueryRow(ctx, upsertEmailOAuthToken,
-		arg.EmailProviderID,
 		arg.EmailAddress,
 		arg.AccessToken,
 		arg.RefreshToken,
 		arg.ExpiresAt,
 		arg.Scope,
 		arg.State,
+		arg.EmailProviderID,
+		arg.TeamID,
 	)
 	var i EmailOauthToken
 	err := row.Scan(
@@ -128,6 +167,7 @@ func (q *Queries) UpsertEmailOAuthToken(ctx context.Context, arg UpsertEmailOAut
 		&i.State,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

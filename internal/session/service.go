@@ -171,6 +171,10 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 	if err != nil {
 		return Session{}, fmt.Errorf("invalid bot id: %w", err)
 	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return Session{}, err
+	}
 	pgRouteID, err := parseOptionalUUID(input.RouteID)
 	if err != nil {
 		return Session{}, fmt.Errorf("invalid route id: %w", err)
@@ -232,7 +236,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 		return Session{}, fmt.Errorf("invalid parent session id: %w", err)
 	}
 
-	row, err := s.queries.CreateSession(ctx, sqlc.CreateSessionParams{
+	row, err := s.queries.CreateSession(ctx, withTeamID(sqlc.CreateSessionParams{
 		BotID:           pgBotID,
 		RouteID:         pgRouteID,
 		ChannelType:     channelType,
@@ -244,7 +248,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 		Metadata:        metaBytes,
 		ParentSessionID: pgParentSessionID,
 		CreatedByUserID: pgCreatedByUserID,
-	})
+	}, teamID))
 	if err != nil {
 		return Session{}, err
 	}
@@ -260,6 +264,10 @@ func (s *Service) ForkFromAssistantMessage(ctx context.Context, input ForkFromAs
 	pgBotID, err := dbpkg.ParseUUID(input.BotID)
 	if err != nil {
 		return Session{}, fmt.Errorf("invalid bot id: %w", err)
+	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return Session{}, err
 	}
 	pgSessionID, err := dbpkg.ParseUUID(input.SessionID)
 	if err != nil {
@@ -308,14 +316,14 @@ func (s *Service) ForkFromAssistantMessage(ctx context.Context, input ForkFromAs
 		return Session{}, fmt.Errorf("marshal metadata: %w", err)
 	}
 
-	row, err := s.queries.ForkSessionFromAssistantMessage(ctx, sqlc.ForkSessionFromAssistantMessageParams{
+	row, err := s.queries.ForkSessionFromAssistantMessage(ctx, withTeamID(sqlc.ForkSessionFromAssistantMessageParams{
 		SessionID:       pgSessionID,
 		BotID:           pgBotID,
 		MessageID:       pgMessageID,
 		Title:           forkTitle,
 		Metadata:        metaBytes,
 		CreatedByUserID: pgCreatedByUserID,
-	})
+	}, teamID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Session{}, ErrForkSourceNotReply
@@ -408,6 +416,10 @@ func (s *Service) updateDescriptorAndMetadata(ctx context.Context, sessionID, ty
 	if err != nil {
 		return Session{}, fmt.Errorf("invalid session id: %w", err)
 	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return Session{}, err
+	}
 	sessionType := strings.TrimSpace(typ)
 	if sessionType == "" {
 		sessionType = TypeChat
@@ -468,14 +480,14 @@ func (s *Service) updateDescriptorAndMetadata(ctx context.Context, sessionID, ty
 	if err != nil {
 		return Session{}, fmt.Errorf("marshal runtime metadata: %w", err)
 	}
-	row, err := s.queries.UpdateSessionTypeAndMetadata(ctx, sqlc.UpdateSessionTypeAndMetadataParams{
+	row, err := s.queries.UpdateSessionTypeAndMetadata(ctx, withTeamID(sqlc.UpdateSessionTypeAndMetadataParams{
 		ID:              pgID,
 		Type:            sessionType,
 		SessionMode:     desc.SessionMode,
 		RuntimeType:     desc.RuntimeType,
 		RuntimeMetadata: runtimeMetaBytes,
 		Metadata:        metaBytes,
-	})
+	}, teamID))
 	if err != nil {
 		return Session{}, err
 	}
@@ -556,7 +568,11 @@ func (s *Service) ListByBotPagedWithFilter(ctx context.Context, botID string, ty
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListSessionsByBotPaged(ctx, sqlc.ListSessionsByBotPagedParams{
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListSessionsByBotPaged(ctx, withTeamID(sqlc.ListSessionsByBotPagedParams{
 		BotID:            pgBotID,
 		Types:            types,
 		UseParentSession: useParentSession,
@@ -565,7 +581,7 @@ func (s *Service) ListByBotPagedWithFilter(ctx context.Context, botID string, ty
 		CursorUpdatedAt:  cursorUpdatedAt,
 		CursorID:         cursorID,
 		LimitCount:       limitParam,
-	})
+	}, teamID))
 	if err != nil {
 		return nil, err
 	}
@@ -586,6 +602,10 @@ func (s *Service) ListByBotAndCreatedByUserPagedWithFilter(ctx context.Context, 
 	if err != nil {
 		return nil, fmt.Errorf("invalid bot id: %w", err)
 	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	pgUserID, err := dbpkg.ParseUUID(userID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid user id: %w", err)
@@ -602,7 +622,7 @@ func (s *Service) ListByBotAndCreatedByUserPagedWithFilter(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListSessionsByBotAndCreatedByUserPaged(ctx, sqlc.ListSessionsByBotAndCreatedByUserPagedParams{
+	rows, err := s.queries.ListSessionsByBotAndCreatedByUserPaged(ctx, withTeamID(sqlc.ListSessionsByBotAndCreatedByUserPagedParams{
 		BotID:            pgBotID,
 		CreatedByUserID:  pgUserID,
 		Types:            types,
@@ -612,7 +632,7 @@ func (s *Service) ListByBotAndCreatedByUserPagedWithFilter(ctx context.Context, 
 		CursorUpdatedAt:  cursorUpdatedAt,
 		CursorID:         cursorID,
 		LimitCount:       limitParam,
-	})
+	}, teamID))
 	if err != nil {
 		return nil, err
 	}
@@ -671,14 +691,18 @@ func (s *Service) ListByBotAndCreatedByUser(ctx context.Context, botID, userID s
 	if err != nil {
 		return nil, fmt.Errorf("invalid bot id: %w", err)
 	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	pgUserID, err := dbpkg.ParseUUID(userID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid user id: %w", err)
 	}
-	rows, err := s.queries.ListSessionsByBotAndCreatedByUser(ctx, sqlc.ListSessionsByBotAndCreatedByUserParams{
+	rows, err := s.queries.ListSessionsByBotAndCreatedByUser(ctx, withTeamID(sqlc.ListSessionsByBotAndCreatedByUserParams{
 		BotID:           pgBotID,
 		CreatedByUserID: pgUserID,
-	})
+	}, teamID))
 	if err != nil {
 		return nil, err
 	}
@@ -743,10 +767,14 @@ func (s *Service) UpdateTitle(ctx context.Context, sessionID, title string) (Ses
 	if err != nil {
 		return Session{}, fmt.Errorf("invalid session id: %w", err)
 	}
-	row, err := s.queries.UpdateSessionTitle(ctx, sqlc.UpdateSessionTitleParams{
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return Session{}, err
+	}
+	row, err := s.queries.UpdateSessionTitle(ctx, withTeamID(sqlc.UpdateSessionTitleParams{
 		ID:    pgID,
 		Title: title,
-	})
+	}, teamID))
 	if err != nil {
 		return Session{}, err
 	}
@@ -759,6 +787,10 @@ func (s *Service) UpdateMetadata(ctx context.Context, sessionID string, metadata
 	if err != nil {
 		return Session{}, fmt.Errorf("invalid session id: %w", err)
 	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return Session{}, err
+	}
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
@@ -766,10 +798,10 @@ func (s *Service) UpdateMetadata(ctx context.Context, sessionID string, metadata
 	if err != nil {
 		return Session{}, fmt.Errorf("marshal metadata: %w", err)
 	}
-	row, err := s.queries.UpdateSessionMetadata(ctx, sqlc.UpdateSessionMetadataParams{
+	row, err := s.queries.UpdateSessionMetadata(ctx, withTeamID(sqlc.UpdateSessionMetadataParams{
 		ID:       pgID,
 		Metadata: metaBytes,
-	})
+	}, teamID))
 	if err != nil {
 		return Session{}, err
 	}
@@ -808,14 +840,18 @@ func (s *Service) SetRouteActiveSession(ctx context.Context, routeID, sessionID 
 	if err != nil {
 		return fmt.Errorf("invalid route id: %w", err)
 	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	pgSessionID, err := parseOptionalUUID(sessionID)
 	if err != nil {
 		return fmt.Errorf("invalid session id: %w", err)
 	}
-	return s.queries.SetRouteActiveSession(ctx, sqlc.SetRouteActiveSessionParams{
+	return s.queries.SetRouteActiveSession(ctx, withTeamID(sqlc.SetRouteActiveSessionParams{
 		ID:              pgRouteID,
 		ActiveSessionID: pgSessionID,
-	})
+	}, teamID))
 }
 
 // CreateNewSession always creates a fresh session and sets it as the active

@@ -15,6 +15,7 @@ import (
 
 // SessionContext carries request-scoped identity and routing information.
 type SessionContext struct {
+	TeamID            string
 	BotID             string
 	ChatID            string
 	SessionID         string

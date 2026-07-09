@@ -13,6 +13,7 @@ SELECT
 FROM bots b
 LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
 WHERE b.id = sqlc.arg(bot_id)
+  AND b.team_id = sqlc.arg(team_id)::uuid
 LIMIT 1;
 
 -- name: GetChatByID :one
@@ -29,7 +30,8 @@ SELECT
   b.updated_at
 FROM bots b
 LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
-WHERE b.id = $1;
+WHERE b.id = sqlc.arg(id)
+  AND b.team_id = sqlc.arg(team_id)::uuid;
 
 -- name: ListChatsByBotAndUser :many
 SELECT
@@ -46,6 +48,7 @@ SELECT
 FROM bots b
 LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
 WHERE b.id = sqlc.arg(bot_id)
+  AND b.team_id = sqlc.arg(team_id)::uuid
   AND b.owner_user_id = sqlc.arg(user_id)
 ORDER BY b.updated_at DESC;
 
@@ -70,6 +73,7 @@ SELECT
 FROM bots b
 LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
 WHERE b.id = sqlc.arg(bot_id)
+  AND b.team_id = sqlc.arg(team_id)::uuid
   AND b.owner_user_id = sqlc.arg(user_id)
 ORDER BY b.updated_at DESC;
 
@@ -80,6 +84,7 @@ SELECT
   NULL::timestamptz AS last_observed_at
 FROM bots b
 WHERE b.id = sqlc.arg(chat_id)
+  AND b.team_id = sqlc.arg(team_id)::uuid
   AND b.owner_user_id = sqlc.arg(user_id)
 LIMIT 1;
 
@@ -97,7 +102,8 @@ SELECT
   b.updated_at
 FROM bots b
 LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
-WHERE b.id = $1
+WHERE b.id = sqlc.arg(parent_chat_id)
+  AND b.team_id = sqlc.arg(team_id)::uuid
 ORDER BY b.created_at DESC;
 
 -- name: UpdateChatTitle :one
@@ -106,6 +112,7 @@ WITH updated AS (
   SET display_name = sqlc.arg(title),
       updated_at = now()
   WHERE bots.id = sqlc.arg(bot_id)
+    AND bots.team_id = sqlc.arg(team_id)::uuid
   RETURNING *
 )
 SELECT
@@ -125,30 +132,37 @@ LEFT JOIN models chat_models ON chat_models.id = updated.chat_model_id;
 -- name: TouchChat :exec
 UPDATE bots
 SET updated_at = now()
-WHERE id = sqlc.arg(chat_id);
+WHERE id = sqlc.arg(chat_id)
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: DeleteChat :exec
 WITH deleted_messages AS (
   DELETE FROM bot_history_messages
   WHERE bot_id = sqlc.arg(chat_id)
+    AND team_id = sqlc.arg(team_id)::uuid
 ),
 deleted_sessions AS (
   DELETE FROM bot_sessions
   WHERE bot_id = sqlc.arg(chat_id)
+    AND team_id = sqlc.arg(team_id)::uuid
 )
 DELETE FROM bot_channel_routes bcr
-WHERE bcr.bot_id = sqlc.arg(chat_id);
+WHERE bcr.bot_id = sqlc.arg(chat_id)
+  AND bcr.team_id = sqlc.arg(team_id)::uuid;
 
 -- name: GetChatParticipant :one
 SELECT b.id AS chat_id, b.owner_user_id AS user_id, 'owner'::text AS role, b.created_at AS joined_at
 FROM bots b
-WHERE b.id = sqlc.arg(chat_id) AND b.owner_user_id = sqlc.arg(user_id)
+WHERE b.id = sqlc.arg(chat_id)
+  AND b.team_id = sqlc.arg(team_id)::uuid
+  AND b.owner_user_id = sqlc.arg(user_id)
 LIMIT 1;
 
 -- name: ListChatParticipants :many
 SELECT b.id AS chat_id, b.owner_user_id AS user_id, 'owner'::text AS role, b.created_at AS joined_at
 FROM bots b
 WHERE b.id = sqlc.arg(chat_id)
+  AND b.team_id = sqlc.arg(team_id)::uuid
 ORDER BY joined_at ASC;
 
 -- name: RemoveChatParticipant :exec
@@ -157,6 +171,7 @@ WHERE EXISTS (
   SELECT 1
   FROM bots b
   WHERE b.id = sqlc.arg(chat_id)
+    AND b.team_id = sqlc.arg(team_id)::uuid
     AND b.owner_user_id = sqlc.arg(user_id)
 );
 
@@ -169,6 +184,7 @@ updated AS (
   SET chat_model_id = COALESCE(sqlc.narg(chat_model_id)::uuid, bots.chat_model_id),
       updated_at = now()
   WHERE bots.id = sqlc.arg(id)
+    AND bots.team_id = sqlc.arg(team_id)::uuid
   RETURNING bots.id, bots.chat_model_id, bots.updated_at
 )
 SELECT
@@ -185,4 +201,5 @@ SELECT
   b.updated_at
 FROM bots b
 LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
-WHERE b.id = $1;
+WHERE b.id = sqlc.arg(id)
+  AND b.team_id = sqlc.arg(team_id)::uuid;

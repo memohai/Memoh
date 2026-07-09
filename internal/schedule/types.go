@@ -7,6 +7,7 @@ import (
 
 type Schedule struct {
 	ID           string    `json:"id"`
+	TeamID       string    `json:"team_id,omitempty"`
 	Name         string    `json:"name"`
 	Description  string    `json:"description"`
 	Pattern      string    `json:"pattern"`
@@ -73,6 +74,7 @@ type ListResponse struct {
 
 type Log struct {
 	ID           string     `json:"id"`
+	TeamID       string     `json:"team_id,omitempty"`
 	ScheduleID   string     `json:"schedule_id"`
 	BotID        string     `json:"bot_id"`
 	SessionID    string     `json:"session_id,omitempty"`

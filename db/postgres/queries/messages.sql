@@ -1,5 +1,6 @@
 -- name: CreateMessage :one
 INSERT INTO bot_history_messages (
+  team_id,
   bot_id,
   session_id,
   sender_channel_identity_id,
@@ -17,6 +18,7 @@ INSERT INTO bot_history_messages (
   display_text
 )
 VALUES (
+  sqlc.arg(team_id)::uuid,
   sqlc.arg(bot_id),
   sqlc.narg(session_id)::uuid,
   sqlc.narg(sender_channel_identity_id)::uuid,
@@ -60,6 +62,7 @@ WITH target AS (
     bool_or(existing.turn_visible) AS turn_visible
   FROM bot_history_messages existing
   WHERE existing.turn_id = sqlc.arg(turn_id)
+    AND existing.team_id = sqlc.arg(team_id)::uuid
     AND existing.session_id = sqlc.narg(session_id)::uuid
     AND existing.bot_id = sqlc.arg(bot_id)
     AND existing.turn_position IS NOT NULL
@@ -68,6 +71,7 @@ WITH target AS (
 )
 INSERT INTO bot_history_messages (
   id,
+  team_id,
   bot_id,
   session_id,
   sender_channel_identity_id,
@@ -90,6 +94,7 @@ INSERT INTO bot_history_messages (
 )
 SELECT
   sqlc.arg(message_id),
+  sqlc.arg(team_id)::uuid,
   sqlc.arg(bot_id),
   target.session_id,
   sqlc.narg(sender_channel_identity_id)::uuid,
@@ -132,6 +137,7 @@ RETURNING
 UPDATE bot_sessions
 SET next_turn_position = next_turn_position + 1
 WHERE id = sqlc.arg(session_id)
+  AND team_id = sqlc.arg(team_id)::uuid
 RETURNING (next_turn_position - 1)::bigint AS position;
 
 -- name: CreateMessageWithHistoryTurn :one
@@ -139,11 +145,13 @@ WITH next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
   WHERE bot_sessions.id = sqlc.arg(session_id)
+    AND bot_sessions.team_id = sqlc.arg(team_id)::uuid
   RETURNING (next_turn_position - 1)::bigint AS position
 ),
 inserted_message AS (
   INSERT INTO bot_history_messages (
     id,
+    team_id,
     bot_id,
     session_id,
     sender_channel_identity_id,
@@ -166,6 +174,7 @@ inserted_message AS (
   )
   SELECT
     sqlc.arg(message_id),
+    sqlc.arg(team_id)::uuid,
     sqlc.arg(bot_id),
     sqlc.arg(session_id),
     sqlc.narg(sender_channel_identity_id)::uuid,
@@ -206,6 +215,7 @@ WITH target AS (
         SELECT 1
         FROM bot_history_messages assistant
         WHERE assistant.turn_id = turns.turn_id
+          AND assistant.team_id = sqlc.arg(team_id)::uuid
           AND assistant.role = 'assistant'
           AND assistant.turn_message_seq = 2
           AND assistant.turn_visible = true
@@ -214,12 +224,14 @@ WITH target AS (
         SELECT existing.turn_message_seq + 1
         FROM bot_history_messages existing
         WHERE existing.turn_id = turns.turn_id
+          AND existing.team_id = sqlc.arg(team_id)::uuid
         ORDER BY existing.turn_message_seq DESC
         LIMIT 1
       ), 1)
     END AS turn_message_seq
   FROM bot_history_messages turns
   WHERE turns.session_id = sqlc.arg(session_id)
+    AND turns.team_id = sqlc.arg(team_id)::uuid
     AND turns.id = sqlc.arg(request_message_id)
     AND turns.turn_id IS NOT NULL
     AND turns.turn_position IS NOT NULL
@@ -229,6 +241,7 @@ WITH target AS (
 ),
 inserted AS (
   INSERT INTO bot_history_messages (
+    team_id,
     bot_id,
     session_id,
     sender_channel_identity_id,
@@ -250,6 +263,7 @@ inserted AS (
     turn_visible
   )
   SELECT
+    sqlc.arg(team_id)::uuid,
     sqlc.arg(bot_id),
     target.session_id,
     sqlc.narg(sender_channel_identity_id)::uuid,
@@ -318,6 +332,7 @@ WITH target AS (
         SELECT 1
         FROM bot_history_messages assistant
         WHERE assistant.turn_id = turns.turn_id
+          AND assistant.team_id = sqlc.arg(team_id)::uuid
           AND assistant.role = 'assistant'
           AND assistant.turn_message_seq = 2
           AND assistant.turn_visible = true
@@ -326,12 +341,14 @@ WITH target AS (
         SELECT existing.turn_message_seq + 1
         FROM bot_history_messages existing
         WHERE existing.turn_id = turns.turn_id
+          AND existing.team_id = sqlc.arg(team_id)::uuid
         ORDER BY existing.turn_message_seq DESC
         LIMIT 1
       ), 1)
     END AS turn_message_seq
   FROM bot_history_messages turns
   WHERE turns.session_id = sqlc.arg(session_id)
+    AND turns.team_id = sqlc.arg(team_id)::uuid
     AND turns.id = sqlc.arg(request_message_id)
     AND turns.turn_id IS NOT NULL
     AND turns.turn_position IS NOT NULL
@@ -341,6 +358,7 @@ WITH target AS (
 ),
 inserted AS (
   INSERT INTO bot_history_messages (
+    team_id,
     bot_id,
     session_id,
     sender_channel_identity_id,
@@ -362,6 +380,7 @@ inserted AS (
     turn_visible
   )
   SELECT
+    sqlc.arg(team_id)::uuid,
     sqlc.arg(bot_id),
     target.session_id,
     sqlc.narg(sender_channel_identity_id)::uuid,
@@ -485,11 +504,13 @@ next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
   WHERE bot_sessions.id = sqlc.arg(session_id)
+    AND bot_sessions.team_id = sqlc.arg(team_id)::uuid
   RETURNING (next_turn_position - 1)::bigint AS position
 ),
 inserted_messages AS (
   INSERT INTO bot_history_messages (
     id,
+    team_id,
     bot_id,
     session_id,
     sender_channel_identity_id,
@@ -512,6 +533,7 @@ inserted_messages AS (
   )
   SELECT
     input.message_id,
+    sqlc.arg(team_id)::uuid,
     sqlc.arg(bot_id),
     sqlc.arg(session_id),
     input.sender_channel_identity_id,
@@ -543,11 +565,13 @@ WITH next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
   WHERE bot_sessions.id = sqlc.arg(session_id)
+    AND bot_sessions.team_id = sqlc.arg(team_id)::uuid
   RETURNING next_turn_position - 1 AS position
 ),
 input AS (
   SELECT
     gen_random_uuid() AS turn_id,
+    sqlc.arg(team_id)::uuid AS team_id,
     sqlc.arg(bot_id)::uuid AS bot_id,
     sqlc.arg(session_id)::uuid AS session_id,
     next_position.position,
@@ -566,6 +590,7 @@ linked_request AS (
       turn_superseded_reason = NULL
   FROM input
   WHERE m.id = input.request_message_id
+    AND m.team_id = input.team_id
     AND m.session_id = input.session_id
     AND m.bot_id = input.bot_id
   RETURNING m.id, m.created_at
@@ -581,6 +606,7 @@ linked_assistant AS (
       turn_superseded_reason = NULL
   FROM input
   WHERE m.id = input.assistant_message_id
+    AND m.team_id = input.team_id
     AND m.session_id = input.session_id
     AND m.bot_id = input.bot_id
   RETURNING m.id, m.created_at
@@ -609,11 +635,13 @@ WITH next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
   WHERE bot_sessions.id = sqlc.arg(session_id)
+    AND bot_sessions.team_id = sqlc.arg(team_id)::uuid
   RETURNING next_turn_position - 1 AS position
 ),
 input AS (
   SELECT
     sqlc.arg(turn_id)::uuid AS turn_id,
+    sqlc.arg(team_id)::uuid AS team_id,
     sqlc.arg(bot_id)::uuid AS bot_id,
     sqlc.arg(session_id)::uuid AS session_id,
     next_position.position,
@@ -632,6 +660,7 @@ linked_request AS (
       turn_superseded_reason = NULL
   FROM input
   WHERE m.id = input.request_message_id
+    AND m.team_id = input.team_id
     AND m.session_id = input.session_id
     AND m.bot_id = input.bot_id
   RETURNING m.id, m.created_at
@@ -647,6 +676,7 @@ linked_assistant AS (
       turn_superseded_reason = NULL
   FROM input
   WHERE m.id = input.assistant_message_id
+    AND m.team_id = input.team_id
     AND m.session_id = input.session_id
     AND m.bot_id = input.bot_id
   RETURNING m.id, m.created_at
@@ -674,6 +704,7 @@ WHERE linked_summary.linked_count > 0;
 WITH input AS (
   SELECT
     sqlc.arg(turn_id)::uuid AS turn_id,
+    sqlc.arg(team_id)::uuid AS team_id,
     sqlc.arg(bot_id)::uuid AS bot_id,
     sqlc.arg(session_id)::uuid AS session_id,
     sqlc.arg(turn_position)::bigint AS position,
@@ -691,6 +722,7 @@ linked_request AS (
       turn_superseded_reason = NULL
   FROM input
   WHERE m.id = input.request_message_id
+    AND m.team_id = input.team_id
     AND m.session_id = input.session_id
     AND m.bot_id = input.bot_id
   RETURNING m.id, m.created_at
@@ -706,6 +738,7 @@ linked_assistant AS (
       turn_superseded_reason = NULL
   FROM input
   WHERE m.id = input.assistant_message_id
+    AND m.team_id = input.team_id
     AND m.session_id = input.session_id
     AND m.bot_id = input.bot_id
   RETURNING m.id, m.created_at
@@ -740,6 +773,7 @@ WITH target AS (
     request.created_at AS request_created_at
   FROM bot_history_messages request
   WHERE request.session_id = sqlc.arg(session_id)
+    AND request.team_id = sqlc.arg(team_id)::uuid
     AND request.id = sqlc.arg(request_message_id)
     AND request.turn_id IS NOT NULL
     AND request.turn_visible = true
@@ -747,6 +781,7 @@ WITH target AS (
       SELECT 1
       FROM bot_history_messages assistant
       WHERE assistant.turn_id = request.turn_id
+        AND assistant.team_id = sqlc.arg(team_id)::uuid
         AND assistant.role = 'assistant'
         AND assistant.turn_message_seq = 2
         AND assistant.turn_visible = true
@@ -765,6 +800,7 @@ linked AS (
       turn_superseded_reason = NULL
   FROM target
   WHERE assistant.id = sqlc.arg(assistant_message_id)
+    AND assistant.team_id = sqlc.arg(team_id)::uuid
     AND assistant.session_id = target.session_id
   RETURNING assistant.id AS assistant_message_id, assistant.created_at AS assistant_created_at
 )
@@ -789,6 +825,7 @@ WITH target AS (
     request.created_at AS request_created_at
   FROM bot_history_messages request
   WHERE request.session_id = sqlc.arg(session_id)
+    AND request.team_id = sqlc.arg(team_id)::uuid
     AND request.role = 'user'
     AND request.turn_message_seq = 1
     AND request.turn_id IS NOT NULL
@@ -797,6 +834,7 @@ WITH target AS (
       SELECT 1
       FROM bot_history_messages assistant
       WHERE assistant.turn_id = request.turn_id
+        AND assistant.team_id = sqlc.arg(team_id)::uuid
         AND assistant.role = 'assistant'
         AND assistant.turn_message_seq = 2
         AND assistant.turn_visible = true
@@ -816,6 +854,7 @@ linked AS (
       turn_superseded_reason = NULL
   FROM target
   WHERE assistant.id = sqlc.arg(assistant_message_id)
+    AND assistant.team_id = sqlc.arg(team_id)::uuid
     AND assistant.session_id = target.session_id
   RETURNING assistant.id AS assistant_message_id, assistant.created_at AS assistant_created_at
 )
@@ -838,6 +877,7 @@ WITH target AS (
     bool_or(existing.turn_visible) AS turn_visible
   FROM bot_history_messages existing
   WHERE existing.turn_id = sqlc.arg(turn_id)
+    AND existing.team_id = sqlc.arg(team_id)::uuid
     AND existing.turn_position IS NOT NULL
   GROUP BY existing.turn_id, existing.session_id, existing.turn_position
   LIMIT 1
@@ -852,6 +892,7 @@ SET turn_id = target.turn_id,
     turn_superseded_reason = NULL
 FROM target
 WHERE m.id = sqlc.arg(message_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.session_id = target.session_id
 RETURNING m.id;
 
@@ -859,6 +900,7 @@ RETURNING m.id;
 SELECT pg_advisory_xact_lock(hashtextextended(m.turn_id::text, 0))
 FROM bot_history_messages m
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.id = sqlc.arg(request_message_id)
   AND m.turn_id IS NOT NULL
 LIMIT 1;
@@ -868,6 +910,7 @@ WITH target AS (
   SELECT request.turn_id, request.session_id, request.turn_position
   FROM bot_history_messages request
   WHERE request.session_id = sqlc.arg(session_id)
+    AND request.team_id = sqlc.arg(team_id)::uuid
     AND request.id = sqlc.arg(request_message_id)
     AND request.turn_id IS NOT NULL
     AND request.turn_position IS NOT NULL
@@ -883,6 +926,7 @@ next_seq AS (
     COALESCE(MAX(existing.turn_message_seq), 0) + 1 AS turn_message_seq
   FROM target
   JOIN bot_history_messages existing ON existing.turn_id = target.turn_id
+    AND existing.team_id = sqlc.arg(team_id)::uuid
   GROUP BY target.turn_id, target.session_id, target.turn_position
 )
 UPDATE bot_history_messages m
@@ -895,6 +939,7 @@ SET turn_id = next_seq.turn_id,
     turn_superseded_reason = NULL
 FROM next_seq
 WHERE m.id = sqlc.arg(message_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.session_id = next_seq.session_id
   AND m.turn_id IS NULL
 RETURNING m.id;
@@ -904,6 +949,7 @@ WITH latest AS (
   SELECT visible.turn_id, visible.session_id, visible.turn_position
   FROM bot_history_messages visible
   WHERE visible.session_id = sqlc.arg(session_id)
+    AND visible.team_id = sqlc.arg(team_id)::uuid
     AND visible.turn_id IS NOT NULL
     AND visible.turn_position IS NOT NULL
     AND visible.turn_message_seq IS NOT NULL
@@ -920,6 +966,7 @@ next_seq AS (
     COALESCE(MAX(existing.turn_message_seq), 0) + 1 AS turn_message_seq
   FROM latest
   JOIN bot_history_messages existing ON existing.turn_id = latest.turn_id
+    AND existing.team_id = sqlc.arg(team_id)::uuid
   GROUP BY latest.turn_id, latest.session_id, latest.turn_position
 )
 UPDATE bot_history_messages m
@@ -932,6 +979,7 @@ SET turn_id = next_seq.turn_id,
     turn_superseded_reason = NULL
 FROM next_seq
 WHERE m.id = sqlc.arg(message_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.session_id = next_seq.session_id
   AND m.turn_id IS NULL
 RETURNING m.id;
@@ -946,6 +994,7 @@ WITH target AS (
     assistant.id AS assistant_id
   FROM bot_history_messages assistant
   WHERE assistant.turn_id = sqlc.arg(turn_id)
+    AND assistant.team_id = sqlc.arg(team_id)::uuid
     AND assistant.role = 'assistant'
     AND assistant.turn_message_seq = 2
     AND assistant.turn_visible = true
@@ -960,6 +1009,7 @@ tail AS (
   FROM target
   JOIN bot_history_messages m
     ON m.session_id = target.session_id
+   AND m.team_id = sqlc.arg(team_id)::uuid
    AND m.role IN ('assistant', 'tool')
   WHERE m.id <> target.assistant_id
     AND m.turn_id IS NULL
@@ -978,6 +1028,7 @@ WITH target AS (
   SELECT m.turn_id, m.session_id, m.turn_position
   FROM bot_history_messages m
   WHERE m.session_id = sqlc.arg(session_id)
+    AND m.team_id = sqlc.arg(team_id)::uuid
     AND m.id = sqlc.arg(message_id)
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
@@ -999,6 +1050,7 @@ SELECT
 FROM target
 JOIN bot_history_messages m
   ON m.turn_id = target.turn_id
+ AND m.team_id = sqlc.arg(team_id)::uuid
  AND m.session_id = target.session_id
 GROUP BY target.turn_id, target.session_id, target.turn_position;
 
@@ -1007,6 +1059,7 @@ WITH target AS (
   SELECT m.turn_id, m.session_id, m.turn_position
   FROM bot_history_messages m
   WHERE m.session_id = sqlc.arg(session_id)
+    AND m.team_id = sqlc.arg(team_id)::uuid
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
     AND m.turn_visible = true
@@ -1028,6 +1081,7 @@ SELECT
 FROM target
 JOIN bot_history_messages m
   ON m.turn_id = target.turn_id
+ AND m.team_id = sqlc.arg(team_id)::uuid
  AND m.session_id = target.session_id
 GROUP BY target.turn_id, target.session_id, target.turn_position;
 
@@ -1036,6 +1090,7 @@ WITH target AS (
   SELECT m.turn_id, m.session_id, m.turn_position
   FROM bot_history_messages m
   WHERE m.turn_id = sqlc.arg(old_turn_id)
+    AND m.team_id = sqlc.arg(team_id)::uuid
     AND m.session_id = sqlc.arg(session_id)
     AND m.turn_position IS NOT NULL
     AND m.turn_visible = true
@@ -1056,6 +1111,7 @@ SELECT
 FROM target
 JOIN bot_history_messages m
   ON m.turn_id = target.turn_id
+ AND m.team_id = sqlc.arg(team_id)::uuid
  AND m.session_id = target.session_id
 GROUP BY target.turn_id, target.session_id, target.turn_position;
 
@@ -1064,6 +1120,7 @@ WITH old_turn_target AS (
   SELECT m.turn_id, m.session_id, m.turn_position
   FROM bot_history_messages m
   WHERE m.turn_id = sqlc.arg(old_turn_id)
+    AND m.team_id = sqlc.arg(team_id)::uuid
     AND m.session_id = sqlc.arg(session_id)
     AND m.turn_position IS NOT NULL
     AND m.turn_visible = true
@@ -1085,6 +1142,7 @@ old_turn AS (
   FROM old_turn_target
   JOIN bot_history_messages m
     ON m.turn_id = old_turn_target.turn_id
+   AND m.team_id = sqlc.arg(team_id)::uuid
    AND m.session_id = old_turn_target.session_id
   GROUP BY old_turn_target.turn_id, old_turn_target.session_id, old_turn_target.turn_position
 ),
@@ -1092,6 +1150,7 @@ old_lock AS (
   SELECT m.id
   FROM bot_history_messages m
   JOIN old_turn ON old_turn.id = m.turn_id
+  WHERE m.team_id = sqlc.arg(team_id)::uuid
   FOR UPDATE
 ),
 old_lock_guard AS (
@@ -1101,6 +1160,7 @@ latest_turn AS (
   SELECT m.turn_id AS id
   FROM bot_history_messages m
   WHERE m.session_id = sqlc.arg(session_id)
+    AND m.team_id = sqlc.arg(team_id)::uuid
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
     AND m.turn_visible = true
@@ -1121,6 +1181,7 @@ replacement_input AS (
         SELECT 1
         FROM bot_history_messages request_message
         WHERE request_message.id = sqlc.narg(request_message_id)::uuid
+          AND request_message.team_id = sqlc.arg(team_id)::uuid
           AND request_message.session_id = old_turn.session_id
           AND request_message.role = 'user'
           AND (
@@ -1136,6 +1197,7 @@ replacement_input AS (
         SELECT 1
         FROM bot_history_messages assistant_message
         WHERE assistant_message.id = sqlc.narg(assistant_message_id)::uuid
+          AND assistant_message.team_id = sqlc.arg(team_id)::uuid
           AND assistant_message.session_id = old_turn.session_id
           AND assistant_message.role = 'assistant'
           AND assistant_message.turn_id IS NULL
@@ -1148,6 +1210,7 @@ next_position AS (
   SET next_turn_position = next_turn_position + 1
   FROM replacement_input
   WHERE s.id = replacement_input.session_id
+    AND s.team_id = sqlc.arg(team_id)::uuid
   RETURNING s.next_turn_position - 1 AS position
 ),
 replacement AS (
@@ -1173,6 +1236,7 @@ updated AS (
       turn_superseded_reason = sqlc.arg(superseded_reason)
   FROM replacement
   WHERE old.turn_id = sqlc.arg(old_turn_id)
+    AND old.team_id = sqlc.arg(team_id)::uuid
     AND old.session_id = sqlc.arg(session_id)
     AND old.turn_superseded_at IS NULL
     AND old.id IS DISTINCT FROM replacement.request_message_id
@@ -1187,6 +1251,7 @@ hidden_old_messages AS (
   SET turn_visible = false
   FROM updated_turn, replacement
   WHERE m.turn_id = updated_turn.id
+    AND m.team_id = sqlc.arg(team_id)::uuid
     AND m.id IS DISTINCT FROM replacement.request_message_id
     AND m.id IS DISTINCT FROM replacement.assistant_message_id
   RETURNING m.id
@@ -1212,6 +1277,7 @@ linked_anchors AS (
   JOIN updated_turn ON true
   WHERE (
       m.id = replacement.request_message_id
+      AND m.team_id = sqlc.arg(team_id)::uuid
       AND m.role = 'user'
       AND (
         m.turn_id IS NULL
@@ -1220,6 +1286,7 @@ linked_anchors AS (
     )
     OR (
       m.id = replacement.assistant_message_id
+      AND m.team_id = sqlc.arg(team_id)::uuid
       AND m.role = 'assistant'
       AND m.turn_id IS NULL
     )
@@ -1242,8 +1309,10 @@ linked_tail AS (
       2 + ROW_NUMBER() OVER (ORDER BY m.created_at, m.id) AS turn_message_seq
     FROM replacement
     JOIN bot_history_messages assistant ON assistant.id = replacement.assistant_message_id
+      AND assistant.team_id = sqlc.arg(team_id)::uuid
     JOIN bot_history_messages m
       ON m.session_id = replacement.session_id
+     AND m.team_id = sqlc.arg(team_id)::uuid
      AND m.role IN ('assistant', 'tool')
     WHERE m.id <> replacement.assistant_message_id
       AND m.turn_id IS NULL
@@ -1275,6 +1344,7 @@ WITH updated AS (
       turn_superseded_reason = sqlc.arg(superseded_reason),
       turn_visible = false
   WHERE m.turn_id = sqlc.arg(old_turn_id)
+    AND m.team_id = sqlc.arg(team_id)::uuid
     AND m.session_id = sqlc.arg(session_id)
     AND m.turn_superseded_at IS NULL
   RETURNING
@@ -1308,7 +1378,8 @@ GROUP BY updated.turn_id, updated.session_id, updated.turn_position;
 -- name: HideMessagesByHistoryTurn :exec
 UPDATE bot_history_messages
 SET turn_visible = false
-WHERE turn_id = sqlc.arg(turn_id);
+WHERE turn_id = sqlc.arg(turn_id)
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: ListMessages :many
 SELECT
@@ -1335,6 +1406,7 @@ FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
 ORDER BY m.created_at ASC, m.id ASC
 LIMIT 10000;
 
@@ -1370,6 +1442,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
 ORDER BY m.created_at ASC, m.id ASC;
 
 -- name: ListHistoryTurnsByBot :many
@@ -1387,6 +1460,7 @@ SELECT
   COALESCE(MAX(m.turn_superseded_at), MAX(m.created_at))::timestamptz AS updated_at
 FROM bot_history_messages m
 WHERE m.bot_id = sqlc.arg(bot_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
   AND m.session_id IS NOT NULL
@@ -1418,6 +1492,7 @@ FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 LIMIT 10000;
 
@@ -1446,6 +1521,7 @@ FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.created_at >= sqlc.arg(created_at)
 ORDER BY m.created_at ASC, m.id ASC;
 
@@ -1474,6 +1550,7 @@ FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.created_at >= sqlc.arg(created_at)
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
 
@@ -1503,6 +1580,7 @@ FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.created_at >= sqlc.arg(created_at)
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.created_at ASC, m.id ASC;
@@ -1533,6 +1611,7 @@ FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.created_at >= sqlc.arg(created_at)
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
@@ -1562,6 +1641,7 @@ FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.created_at < sqlc.arg(created_at)
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
@@ -1591,6 +1671,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -1624,6 +1705,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -1633,6 +1715,7 @@ WHERE m.session_id = sqlc.arg(session_id)
       SELECT c.turn_position, c.turn_message_seq, c.created_at, c.id
       FROM bot_history_messages c
       WHERE c.session_id = sqlc.arg(session_id)
+        AND c.team_id = sqlc.arg(team_id)::uuid
         AND c.turn_visible = true
         AND c.turn_id IS NOT NULL
         AND c.turn_position IS NOT NULL
@@ -1668,6 +1751,7 @@ FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
 
@@ -1696,6 +1780,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -1724,6 +1809,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -1756,6 +1842,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.turn_visible = true
   AND m.id = sqlc.arg(message_id)
 LIMIT 1;
@@ -1785,6 +1872,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -1801,6 +1889,7 @@ SELECT
   m.created_at
 FROM bot_history_messages m
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -1817,6 +1906,7 @@ SELECT
   m.created_at
 FROM bot_history_messages m
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -1851,6 +1941,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -1868,6 +1959,7 @@ WITH target AS (
     m.created_at
   FROM bot_history_messages m
   WHERE m.session_id = sqlc.arg(session_id)
+    AND m.team_id = sqlc.arg(team_id)::uuid
     AND m.turn_visible = true
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
@@ -1881,6 +1973,7 @@ before_rows AS (
   FROM bot_history_messages m
   CROSS JOIN target
   WHERE m.session_id = sqlc.arg(session_id)
+    AND m.team_id = sqlc.arg(team_id)::uuid
     AND m.turn_visible = true
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
@@ -1895,6 +1988,7 @@ after_rows AS (
   FROM bot_history_messages m
   CROSS JOIN target
   WHERE m.session_id = sqlc.arg(session_id)
+    AND m.team_id = sqlc.arg(team_id)::uuid
     AND m.turn_visible = true
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
@@ -1935,10 +2029,11 @@ SELECT
   s.channel_type AS platform
 FROM window_rows w
 CROSS JOIN target
-JOIN bot_history_messages m ON m.id = w.id
+JOIN bot_history_messages m ON m.id = w.id AND m.team_id = sqlc.arg(team_id)::uuid
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.turn_visible = true
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
 
@@ -1967,6 +2062,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -2000,6 +2096,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -2009,6 +2106,7 @@ WHERE m.session_id = sqlc.arg(session_id)
       SELECT c.turn_position, c.turn_message_seq, c.created_at, c.id
       FROM bot_history_messages c
       WHERE c.session_id = sqlc.arg(session_id)
+        AND c.team_id = sqlc.arg(team_id)::uuid
         AND c.turn_visible = true
         AND c.turn_id IS NOT NULL
         AND c.turn_position IS NOT NULL
@@ -2044,6 +2142,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -2083,6 +2182,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -2102,6 +2202,7 @@ WITH cursor_message AS (
   SELECT m.turn_position
   FROM bot_history_messages m
   WHERE m.session_id = sqlc.arg(session_id)
+    AND m.team_id = sqlc.arg(team_id)::uuid
     AND m.turn_visible = true
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
@@ -2134,6 +2235,7 @@ CROSS JOIN cursor_message cursor
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -2143,19 +2245,23 @@ ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 
 -- name: CountMessagesByBot :one
 SELECT COUNT(*) FROM bot_visible_history_messages
-WHERE bot_id = sqlc.arg(bot_id);
+WHERE bot_id = sqlc.arg(bot_id)
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: DeleteMessagesByBot :exec
 DELETE FROM bot_history_messages
-WHERE bot_id = sqlc.arg(bot_id);
+WHERE bot_id = sqlc.arg(bot_id)
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: DeleteMessagesBySession :exec
 DELETE FROM bot_history_messages
-WHERE session_id = sqlc.arg(session_id);
+WHERE session_id = sqlc.arg(session_id)
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: DeleteMessagesByIDs :exec
 DELETE FROM bot_history_messages
-WHERE id = ANY(sqlc.arg(ids)::uuid[]);
+WHERE id = ANY(sqlc.arg(ids)::uuid[])
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: ListObservedConversationsByChannelIdentity :many
 WITH observed_routes AS (
@@ -2163,8 +2269,9 @@ WITH observed_routes AS (
     s.route_id,
     MAX(m.created_at)::timestamptz AS last_observed_at
   FROM bot_visible_history_messages m
-  JOIN bot_sessions s ON s.id = m.session_id
+  JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = sqlc.arg(team_id)::uuid
   WHERE m.bot_id = sqlc.arg(bot_id)
+    AND m.team_id = sqlc.arg(team_id)::uuid
     AND m.sender_channel_identity_id = sqlc.arg(channel_identity_id)::uuid
     AND s.route_id IS NOT NULL
   GROUP BY s.route_id
@@ -2187,7 +2294,7 @@ SELECT
   COALESCE(NULLIF(TRIM(COALESCE(r.metadata->>'conversation_avatar_url', '')), ''), '')::text AS conversation_avatar_url,
   rr.last_observed_at
 FROM observed_routes rr
-JOIN bot_channel_routes r ON r.id = rr.route_id
+JOIN bot_channel_routes r ON r.id = rr.route_id AND r.team_id = sqlc.arg(team_id)::uuid
 GROUP BY
   r.id,
   r.channel_type,
@@ -2205,9 +2312,10 @@ WITH observed_routes AS (
     s.route_id,
     MAX(m.created_at)::timestamptz AS last_observed_at
   FROM bot_visible_history_messages m
-  JOIN bot_sessions s ON s.id = m.session_id
-  JOIN bot_channel_routes r ON r.id = s.route_id
+  JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = sqlc.arg(team_id)::uuid
+  JOIN bot_channel_routes r ON r.id = s.route_id AND r.team_id = sqlc.arg(team_id)::uuid
   WHERE m.bot_id = sqlc.arg(bot_id)
+    AND m.team_id = sqlc.arg(team_id)::uuid
     AND LOWER(TRIM(r.channel_type)) = LOWER(TRIM(sqlc.arg(channel_type)))
     AND s.route_id IS NOT NULL
   GROUP BY s.route_id
@@ -2230,7 +2338,7 @@ SELECT
   COALESCE(NULLIF(TRIM(COALESCE(r.metadata->>'conversation_avatar_url', '')), ''), '')::text AS conversation_avatar_url,
   rr.last_observed_at
 FROM observed_routes rr
-JOIN bot_channel_routes r ON r.id = rr.route_id
+JOIN bot_channel_routes r ON r.id = rr.route_id AND r.team_id = sqlc.arg(team_id)::uuid
 GROUP BY
   r.id,
   r.channel_type,
@@ -2256,6 +2364,7 @@ FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
+  AND m.team_id = sqlc.arg(team_id)::uuid
   AND (sqlc.narg(session_id)::uuid IS NULL OR m.session_id = sqlc.narg(session_id)::uuid)
   AND (sqlc.narg(contact_id)::uuid IS NULL OR m.sender_channel_identity_id = sqlc.narg(contact_id)::uuid)
   AND (sqlc.narg(start_time)::timestamptz IS NULL OR m.created_at >= sqlc.narg(start_time)::timestamptz)
@@ -2277,12 +2386,14 @@ LIMIT sqlc.arg(max_count);
 
 -- name: MarkMessagesCompacted :exec
 UPDATE bot_history_messages
-SET compact_id = $1
-WHERE id = ANY($2::uuid[]);
+SET compact_id = sqlc.arg(compact_id)
+WHERE id = ANY(sqlc.arg(column2)::uuid[])
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: ListUncompactedMessagesBySession :many
 SELECT id, bot_id, session_id, role, content, usage, sender_channel_identity_id, compact_id, created_at
 FROM bot_visible_history_messages
-WHERE session_id = $1
+WHERE session_id = sqlc.arg(session_id)
+  AND team_id = sqlc.arg(team_id)::uuid
   AND compact_id IS NULL
 ORDER BY turn_position ASC, turn_message_seq ASC, created_at ASC, id ASC;

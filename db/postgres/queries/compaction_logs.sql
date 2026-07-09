@@ -1,40 +1,48 @@
 -- name: CreateCompactionLog :one
-INSERT INTO bot_history_message_compacts (bot_id, session_id)
-VALUES ($1, $2)
-RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at;
+INSERT INTO bot_history_message_compacts (team_id, bot_id, session_id)
+VALUES (sqlc.arg(team_id)::uuid, sqlc.arg(bot_id)::uuid, sqlc.arg(session_id)::uuid)
+RETURNING *;
 
 -- name: CompleteCompactionLog :one
 UPDATE bot_history_message_compacts
-SET status = $2,
-    summary = $3,
-    message_count = $4,
-    error_message = $5,
-    usage = $6,
-    model_id = $7,
+SET status = sqlc.arg(status),
+    summary = sqlc.arg(summary),
+    message_count = sqlc.arg(message_count),
+    error_message = sqlc.arg(error_message),
+    usage = sqlc.arg(usage),
+    model_id = sqlc.narg(model_id)::uuid,
     completed_at = now()
-WHERE id = $1
-RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at;
+WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid
+RETURNING *;
 
 -- name: GetCompactionLogByID :one
-SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at
+SELECT *
 FROM bot_history_message_compacts
-WHERE id = $1;
+WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: ListCompactionLogsByBot :many
-SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at
+SELECT *
 FROM bot_history_message_compacts
-WHERE bot_id = $1
+WHERE bot_id = sqlc.arg(bot_id)
+  AND team_id = sqlc.arg(team_id)::uuid
 ORDER BY started_at DESC
-LIMIT $2 OFFSET $3;
+LIMIT sqlc.arg(limit_count) OFFSET sqlc.arg(offset_count);
 
 -- name: CountCompactionLogsByBot :one
-SELECT count(*) FROM bot_history_message_compacts WHERE bot_id = $1;
+SELECT count(*) FROM bot_history_message_compacts
+WHERE bot_id = sqlc.arg(bot_id)
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: ListCompactionLogsBySession :many
-SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at
+SELECT *
 FROM bot_history_message_compacts
-WHERE session_id = $1
+WHERE session_id = sqlc.arg(session_id)
+  AND team_id = sqlc.arg(team_id)::uuid
 ORDER BY started_at ASC;
 
 -- name: DeleteCompactionLogsByBot :exec
-DELETE FROM bot_history_message_compacts WHERE bot_id = $1;
+DELETE FROM bot_history_message_compacts
+WHERE bot_id = sqlc.arg(bot_id)
+  AND team_id = sqlc.arg(team_id)::uuid;

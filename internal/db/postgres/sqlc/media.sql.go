@@ -15,11 +15,18 @@ const countMessageAssetsByBot = `-- name: CountMessageAssetsByBot :one
 SELECT COUNT(*)
 FROM bot_history_message_assets a
 JOIN bot_history_messages m ON m.id = a.message_id
+JOIN bots b ON b.id = m.bot_id
 WHERE m.bot_id = $1
+  AND b.team_id = $2
 `
 
-func (q *Queries) CountMessageAssetsByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMessageAssetsByBot, botID)
+type CountMessageAssetsByBotParams struct {
+	BotID  pgtype.UUID `json:"bot_id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) CountMessageAssetsByBot(ctx context.Context, arg CountMessageAssetsByBotParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countMessageAssetsByBot, arg.BotID, arg.TeamID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -27,39 +34,44 @@ func (q *Queries) CountMessageAssetsByBot(ctx context.Context, botID pgtype.UUID
 
 const createMessageAsset = `-- name: CreateMessageAsset :one
 INSERT INTO bot_history_message_assets (message_id, role, ordinal, content_hash, name, metadata)
-VALUES (
+SELECT
+  m.id,
   $1,
   $2,
   $3,
   $4,
-  $5,
-  $6
-)
+  $5
+FROM bot_history_messages m
+JOIN bots b ON b.id = m.bot_id
+WHERE m.id = $6
+  AND b.team_id = $7
 ON CONFLICT (message_id, content_hash) DO UPDATE SET
   role = EXCLUDED.role,
   ordinal = EXCLUDED.ordinal,
   name = EXCLUDED.name,
   metadata = EXCLUDED.metadata
-RETURNING id, message_id, role, ordinal, content_hash, name, metadata, created_at
+RETURNING id, message_id, role, ordinal, content_hash, name, metadata, created_at, team_id
 `
 
 type CreateMessageAssetParams struct {
-	MessageID   pgtype.UUID `json:"message_id"`
 	Role        string      `json:"role"`
 	Ordinal     int32       `json:"ordinal"`
 	ContentHash string      `json:"content_hash"`
 	Name        string      `json:"name"`
 	Metadata    []byte      `json:"metadata"`
+	MessageID   pgtype.UUID `json:"message_id"`
+	TeamID      pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) CreateMessageAsset(ctx context.Context, arg CreateMessageAssetParams) (BotHistoryMessageAsset, error) {
 	row := q.db.QueryRow(ctx, createMessageAsset,
-		arg.MessageID,
 		arg.Role,
 		arg.Ordinal,
 		arg.ContentHash,
 		arg.Name,
 		arg.Metadata,
+		arg.MessageID,
+		arg.TeamID,
 	)
 	var i BotHistoryMessageAsset
 	err := row.Scan(
@@ -71,6 +83,7 @@ func (q *Queries) CreateMessageAsset(ctx context.Context, arg CreateMessageAsset
 		&i.Name,
 		&i.Metadata,
 		&i.CreatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -102,20 +115,39 @@ func (q *Queries) CreateStorageProvider(ctx context.Context, arg CreateStoragePr
 }
 
 const deleteMessageAssets = `-- name: DeleteMessageAssets :exec
-DELETE FROM bot_history_message_assets WHERE message_id = $1
+DELETE FROM bot_history_message_assets AS a
+USING bot_history_messages m, bots b
+WHERE a.message_id = $1
+  AND m.id = a.message_id
+  AND b.id = m.bot_id
+  AND b.team_id = $2
 `
 
-func (q *Queries) DeleteMessageAssets(ctx context.Context, messageID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteMessageAssets, messageID)
+type DeleteMessageAssetsParams struct {
+	MessageID pgtype.UUID `json:"message_id"`
+	TeamID    pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteMessageAssets(ctx context.Context, arg DeleteMessageAssetsParams) error {
+	_, err := q.db.Exec(ctx, deleteMessageAssets, arg.MessageID, arg.TeamID)
 	return err
 }
 
 const getBotStorageBinding = `-- name: GetBotStorageBinding :one
-SELECT id, bot_id, storage_provider_id, base_path, created_at, updated_at FROM bot_storage_bindings WHERE bot_id = $1
+SELECT bsb.id, bsb.bot_id, bsb.storage_provider_id, bsb.base_path, bsb.created_at, bsb.updated_at, bsb.team_id
+FROM bot_storage_bindings bsb
+JOIN bots b ON b.id = bsb.bot_id
+WHERE bsb.bot_id = $1
+  AND b.team_id = $2
 `
 
-func (q *Queries) GetBotStorageBinding(ctx context.Context, botID pgtype.UUID) (BotStorageBinding, error) {
-	row := q.db.QueryRow(ctx, getBotStorageBinding, botID)
+type GetBotStorageBindingParams struct {
+	BotID  pgtype.UUID `json:"bot_id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetBotStorageBinding(ctx context.Context, arg GetBotStorageBindingParams) (BotStorageBinding, error) {
+	row := q.db.QueryRow(ctx, getBotStorageBinding, arg.BotID, arg.TeamID)
 	var i BotStorageBinding
 	err := row.Scan(
 		&i.ID,
@@ -124,6 +156,7 @@ func (q *Queries) GetBotStorageBinding(ctx context.Context, botID pgtype.UUID) (
 		&i.BasePath,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -165,11 +198,19 @@ func (q *Queries) GetStorageProviderByName(ctx context.Context, name string) (St
 }
 
 const listMessageAssets = `-- name: ListMessageAssets :many
-SELECT id AS rel_id, message_id, role, ordinal, content_hash, name, metadata
-FROM bot_history_message_assets
-WHERE message_id = $1
-ORDER BY ordinal ASC
+SELECT a.id AS rel_id, a.message_id, a.role, a.ordinal, a.content_hash, a.name, a.metadata
+FROM bot_history_message_assets a
+JOIN bot_history_messages m ON m.id = a.message_id
+JOIN bots b ON b.id = m.bot_id
+WHERE a.message_id = $1
+  AND b.team_id = $2
+ORDER BY a.ordinal ASC
 `
+
+type ListMessageAssetsParams struct {
+	MessageID pgtype.UUID `json:"message_id"`
+	TeamID    pgtype.UUID `json:"team_id"`
+}
 
 type ListMessageAssetsRow struct {
 	RelID       pgtype.UUID `json:"rel_id"`
@@ -181,8 +222,8 @@ type ListMessageAssetsRow struct {
 	Metadata    []byte      `json:"metadata"`
 }
 
-func (q *Queries) ListMessageAssets(ctx context.Context, messageID pgtype.UUID) ([]ListMessageAssetsRow, error) {
-	rows, err := q.db.Query(ctx, listMessageAssets, messageID)
+func (q *Queries) ListMessageAssets(ctx context.Context, arg ListMessageAssetsParams) ([]ListMessageAssetsRow, error) {
+	rows, err := q.db.Query(ctx, listMessageAssets, arg.MessageID, arg.TeamID)
 	if err != nil {
 		return nil, err
 	}
@@ -210,11 +251,19 @@ func (q *Queries) ListMessageAssets(ctx context.Context, messageID pgtype.UUID) 
 }
 
 const listMessageAssetsBatch = `-- name: ListMessageAssetsBatch :many
-SELECT id AS rel_id, message_id, role, ordinal, content_hash, name, metadata
-FROM bot_history_message_assets
-WHERE message_id = ANY($1::uuid[])
-ORDER BY message_id, ordinal ASC
+SELECT a.id AS rel_id, a.message_id, a.role, a.ordinal, a.content_hash, a.name, a.metadata
+FROM bot_history_message_assets a
+JOIN bot_history_messages m ON m.id = a.message_id
+JOIN bots b ON b.id = m.bot_id
+WHERE a.message_id = ANY($1::uuid[])
+  AND b.team_id = $2
+ORDER BY a.message_id, a.ordinal ASC
 `
+
+type ListMessageAssetsBatchParams struct {
+	MessageIds []pgtype.UUID `json:"message_ids"`
+	TeamID     pgtype.UUID   `json:"team_id"`
+}
 
 type ListMessageAssetsBatchRow struct {
 	RelID       pgtype.UUID `json:"rel_id"`
@@ -226,8 +275,8 @@ type ListMessageAssetsBatchRow struct {
 	Metadata    []byte      `json:"metadata"`
 }
 
-func (q *Queries) ListMessageAssetsBatch(ctx context.Context, messageIds []pgtype.UUID) ([]ListMessageAssetsBatchRow, error) {
-	rows, err := q.db.Query(ctx, listMessageAssetsBatch, messageIds)
+func (q *Queries) ListMessageAssetsBatch(ctx context.Context, arg ListMessageAssetsBatchParams) ([]ListMessageAssetsBatchRow, error) {
+	rows, err := q.db.Query(ctx, listMessageAssetsBatch, arg.MessageIds, arg.TeamID)
 	if err != nil {
 		return nil, err
 	}
@@ -287,22 +336,37 @@ func (q *Queries) ListStorageProviders(ctx context.Context) ([]StorageProvider, 
 
 const upsertBotStorageBinding = `-- name: UpsertBotStorageBinding :one
 INSERT INTO bot_storage_bindings (bot_id, storage_provider_id, base_path)
-VALUES ($1, $2, $3)
+SELECT b.id, $1, $2
+FROM bots b
+WHERE b.id = $3
+  AND b.team_id = $4
 ON CONFLICT (bot_id) DO UPDATE SET
   storage_provider_id = EXCLUDED.storage_provider_id,
   base_path = EXCLUDED.base_path,
   updated_at = now()
-RETURNING id, bot_id, storage_provider_id, base_path, created_at, updated_at
+WHERE EXISTS (
+  SELECT 1
+  FROM bots b
+  WHERE b.id = bot_storage_bindings.bot_id
+    AND b.team_id = $4
+)
+RETURNING id, bot_id, storage_provider_id, base_path, created_at, updated_at, team_id
 `
 
 type UpsertBotStorageBindingParams struct {
-	BotID             pgtype.UUID `json:"bot_id"`
 	StorageProviderID pgtype.UUID `json:"storage_provider_id"`
 	BasePath          string      `json:"base_path"`
+	BotID             pgtype.UUID `json:"bot_id"`
+	TeamID            pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpsertBotStorageBinding(ctx context.Context, arg UpsertBotStorageBindingParams) (BotStorageBinding, error) {
-	row := q.db.QueryRow(ctx, upsertBotStorageBinding, arg.BotID, arg.StorageProviderID, arg.BasePath)
+	row := q.db.QueryRow(ctx, upsertBotStorageBinding,
+		arg.StorageProviderID,
+		arg.BasePath,
+		arg.BotID,
+		arg.TeamID,
+	)
 	var i BotStorageBinding
 	err := row.Scan(
 		&i.ID,
@@ -311,6 +375,7 @@ func (q *Queries) UpsertBotStorageBinding(ctx context.Context, arg UpsertBotStor
 		&i.BasePath,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

@@ -3,6 +3,7 @@ package heartbeat
 import "time"
 
 type Config struct {
+	TeamID      string
 	BotID       string
 	OwnerUserID string
 	Interval    int
@@ -10,6 +11,7 @@ type Config struct {
 
 type Log struct {
 	ID           string     `json:"id"`
+	TeamID       string     `json:"team_id,omitempty"`
 	BotID        string     `json:"bot_id"`
 	SessionID    string     `json:"session_id,omitempty"`
 	Status       string     `json:"status"`

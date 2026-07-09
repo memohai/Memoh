@@ -60,8 +60,12 @@ func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (bool, erro
 	if err != nil {
 		return false, err
 	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return false, err
+	}
 
-	effect, err := s.queries.EvaluateBotACLRule(ctx, sqlc.EvaluateBotACLRuleParams{
+	params := sqlc.EvaluateBotACLRuleParams{
 		BotID:                  pgBotID,
 		Action:                 ActionChatTrigger,
 		ChannelIdentityID:      optionalUUID(channelIdentityID),
@@ -69,7 +73,9 @@ func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (bool, erro
 		SourceConversationType: optionalText(sourceScope.ConversationType),
 		SourceConversationID:   optionalText(sourceScope.ConversationID),
 		SourceThreadID:         optionalText(sourceScope.ThreadID),
-	})
+	}
+	applyTeamID(&params, teamID)
+	effect, err := s.queries.EvaluateBotACLRule(ctx, params)
 	if err != nil {
 		return false, err
 	}
@@ -85,7 +91,11 @@ func (s *Service) GetDefaultEffect(ctx context.Context, botID string) (string, e
 	if err != nil {
 		return "", err
 	}
-	return s.queries.GetBotACLDefaultEffect(ctx, pgBotID)
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return "", err
+	}
+	return getBotACLDefaultEffect(ctx, s.queries, teamID, pgBotID)
 }
 
 // SetDefaultEffect sets the bot's fallback ACL effect.
@@ -101,10 +111,16 @@ func (s *Service) SetDefaultEffect(ctx context.Context, botID, effect string) er
 	if err != nil {
 		return err
 	}
-	return s.queries.SetBotACLDefaultEffect(ctx, sqlc.SetBotACLDefaultEffectParams{
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	params := sqlc.SetBotACLDefaultEffectParams{
 		ID:               pgBotID,
 		AclDefaultEffect: effect,
-	})
+	}
+	applyTeamID(&params, teamID)
+	return s.queries.SetBotACLDefaultEffect(ctx, params)
 }
 
 // ListRules returns all ACL rules for a bot, newest first.
@@ -116,7 +132,11 @@ func (s *Service) ListRules(ctx context.Context, botID string) ([]Rule, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListBotACLRules(ctx, pgBotID)
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := listBotACLRules(ctx, s.queries, teamID, pgBotID)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +170,11 @@ func (s *Service) CreateRule(ctx context.Context, botID, createdByUserID string,
 	if err != nil {
 		return Rule{}, err
 	}
-	row, err := s.queries.CreateBotACLRule(ctx, sqlc.CreateBotACLRuleParams{
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return Rule{}, err
+	}
+	params := sqlc.CreateBotACLRuleParams{
 		BotID:                  pgBotID,
 		Enabled:                req.Enabled,
 		Description:            optionalText(req.Description),
@@ -162,15 +186,17 @@ func (s *Service) CreateRule(ctx context.Context, botID, createdByUserID string,
 		SourceConversationID:   optionalText(sourceScope.ConversationID),
 		SourceThreadID:         optionalText(sourceScope.ThreadID),
 		CreatedByUserID:        optionalUUID(createdByUserID),
-	})
+	}
+	applyTeamID(&params, teamID)
+	row, err := s.queries.CreateBotACLRule(ctx, params)
 	if err != nil {
 		return Rule{}, err
 	}
 	return ruleFromWrite(row), nil
 }
 
-// UpdateRule updates an existing ACL rule.
-func (s *Service) UpdateRule(ctx context.Context, ruleID string, req UpdateRuleRequest) (Rule, error) {
+// UpdateRule updates an existing ACL rule under a bot.
+func (s *Service) UpdateRule(ctx context.Context, botID, ruleID string, req UpdateRuleRequest) (Rule, error) {
 	if s == nil || s.queries == nil {
 		return Rule{}, errors.New("acl service not configured")
 	}
@@ -192,7 +218,15 @@ func (s *Service) UpdateRule(ctx context.Context, ruleID string, req UpdateRuleR
 	if err != nil {
 		return Rule{}, err
 	}
-	row, err := s.queries.UpdateBotACLRule(ctx, sqlc.UpdateBotACLRuleParams{
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return Rule{}, err
+	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return Rule{}, err
+	}
+	params := sqlc.UpdateBotACLRuleParams{
 		ID:                     pgRuleID,
 		Enabled:                req.Enabled,
 		Description:            optionalText(req.Description),
@@ -203,7 +237,10 @@ func (s *Service) UpdateRule(ctx context.Context, ruleID string, req UpdateRuleR
 		SourceConversationType: optionalText(sourceScope.ConversationType),
 		SourceConversationID:   optionalText(sourceScope.ConversationID),
 		SourceThreadID:         optionalText(sourceScope.ThreadID),
-	})
+	}
+	applyTeamID(&params, teamID)
+	applyUUIDField(&params, "BotID", pgBotID)
+	row, err := s.queries.UpdateBotACLRule(ctx, params)
 	if err != nil {
 		return Rule{}, err
 	}
@@ -226,7 +263,11 @@ func (s *Service) resolveSourceChannel(ctx context.Context, scope SourceScope, s
 		if err != nil {
 			return "", fmt.Errorf("resolve source channel: %w", err)
 		}
-		identity, err := s.queries.GetChannelIdentityByID(ctx, pgID)
+		teamID, err := teamIDFromContext(ctx)
+		if err != nil {
+			return "", err
+		}
+		identity, err := getChannelIdentityByID(ctx, s.queries, teamID, pgID)
 		if err != nil {
 			return "", fmt.Errorf("resolve source channel: get identity: %w", err)
 		}
@@ -235,8 +276,8 @@ func (s *Service) resolveSourceChannel(ctx context.Context, scope SourceScope, s
 	return "", nil
 }
 
-// DeleteRule removes an ACL rule by ID.
-func (s *Service) DeleteRule(ctx context.Context, ruleID string) error {
+// DeleteRule removes an ACL rule by ID under a bot.
+func (s *Service) DeleteRule(ctx context.Context, botID, ruleID string) error {
 	if s == nil || s.queries == nil {
 		return errors.New("acl service not configured")
 	}
@@ -244,7 +285,15 @@ func (s *Service) DeleteRule(ctx context.Context, ruleID string) error {
 	if err != nil {
 		return err
 	}
-	return s.queries.DeleteBotACLRuleByID(ctx, pgRuleID)
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return err
+	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	return deleteBotACLRuleByID(ctx, s.queries, teamID, pgBotID, pgRuleID)
 }
 
 // GetManageOverride returns the local Manage override for a channel identity on a
@@ -323,7 +372,11 @@ func (s *Service) SetManageOverride(ctx context.Context, botID, channelIdentityI
 	if err != nil {
 		return ManageOverride{}, err
 	}
-	if _, err := s.queries.GetChannelIdentityByID(ctx, pgIdentityID); err != nil {
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return ManageOverride{}, err
+	}
+	if _, err := getChannelIdentityByID(ctx, s.queries, teamID, pgIdentityID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ManageOverride{}, ErrInvalidRuleSubject
 		}
@@ -461,7 +514,11 @@ func (s *Service) validateTarget(ctx context.Context, channelIdentityID, channel
 	if err != nil {
 		return err
 	}
-	identity, err := s.queries.GetChannelIdentityByID(ctx, pgID)
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	identity, err := getChannelIdentityByID(ctx, s.queries, teamID, pgID)
 	if err != nil {
 		return err
 	}

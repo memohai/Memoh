@@ -17,6 +17,11 @@ var errMem0Disabled = errors.New("mem0 provider is disabled")
 // Mem0Provider is kept as a provider interface placeholder. The external Mem0
 // integration logic has been removed; selecting this provider is a no-op for
 // chat memory and returns an unsupported error for direct CRUD calls.
+//
+// Isolation audit: this implementation does not persist or fetch memory from
+// Mem0, so there is no active tenant isolation mechanism to wire here. If the
+// external integration is restored, every request must carry Memoh's team_id
+// in addition to the bot scope before this provider can be enabled.
 type Mem0Provider struct{}
 
 func NewMem0Provider(_ *slog.Logger, _ map[string]any, _ *storefs.Service) (*Mem0Provider, error) {

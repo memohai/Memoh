@@ -95,6 +95,10 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	if s.queries == nil {
 		return Bot{}, errors.New("bot queries not configured")
 	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return Bot{}, err
+	}
 	ownerID := strings.TrimSpace(ownerUserID)
 	if ownerID == "" {
 		return Bot{}, errors.New("owner user id is required")
@@ -135,7 +139,7 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	if err != nil {
 		return Bot{}, err
 	}
-	row, err := s.queries.CreateBot(ctx, sqlc.CreateBotParams{
+	createParams := sqlc.CreateBotParams{
 		OwnerUserID: ownerUUID,
 		Name:        botName,
 		DisplayName: pgtype.Text{String: displayName, Valid: displayName != ""},
@@ -144,7 +148,9 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 		IsActive:    isActive,
 		Metadata:    payload,
 		Status:      BotStatusCreating,
-	})
+	}
+	applyTeamID(&createParams, teamID)
+	row, err := s.queries.CreateBot(ctx, createParams)
 	if err != nil {
 		if db.IsUniqueViolation(err) {
 			return Bot{}, ErrBotNameTaken
@@ -404,6 +410,10 @@ func (s *Service) prepareUpdateParams(ctx context.Context, botID string, req Upd
 	if s.queries == nil {
 		return sqlc.UpdateBotProfileParams{}, errors.New("bot queries not configured")
 	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return sqlc.UpdateBotProfileParams{}, err
+	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
 		return sqlc.UpdateBotProfileParams{}, err
@@ -456,7 +466,7 @@ func (s *Service) prepareUpdateParams(ctx context.Context, botID string, req Upd
 	if err != nil {
 		return sqlc.UpdateBotProfileParams{}, err
 	}
-	return sqlc.UpdateBotProfileParams{
+	params := sqlc.UpdateBotProfileParams{
 		ID:          botUUID,
 		Name:        botName,
 		DisplayName: pgtype.Text{String: displayName, Valid: displayName != ""},
@@ -464,13 +474,19 @@ func (s *Service) prepareUpdateParams(ctx context.Context, botID string, req Upd
 		Timezone:    timezoneValue,
 		IsActive:    isActive,
 		Metadata:    payload,
-	}, nil
+	}
+	applyTeamID(&params, teamID)
+	return params, nil
 }
 
 // TransferOwner transfers bot ownership to another user.
 func (s *Service) TransferOwner(ctx context.Context, botID string, ownerUserID string) (Bot, error) {
 	if s.queries == nil {
 		return Bot{}, errors.New("bot queries not configured")
+	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return Bot{}, err
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -483,10 +499,12 @@ func (s *Service) TransferOwner(ctx context.Context, botID string, ownerUserID s
 	if err := s.ensureUserExists(ctx, ownerUUID); err != nil {
 		return Bot{}, err
 	}
-	row, err := s.queries.UpdateBotOwner(ctx, sqlc.UpdateBotOwnerParams{
+	params := sqlc.UpdateBotOwnerParams{
 		ID:          botUUID,
 		OwnerUserID: ownerUUID,
-	})
+	}
+	applyTeamID(&params, teamID)
+	row, err := s.queries.UpdateBotOwner(ctx, params)
 	if err != nil {
 		return Bot{}, err
 	}
@@ -629,14 +647,20 @@ func (s *Service) updateStatus(ctx context.Context, botID, status string) error 
 	if s.queries == nil {
 		return errors.New("bot queries not configured")
 	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
 		return err
 	}
-	return s.queries.UpdateBotStatus(ctx, sqlc.UpdateBotStatusParams{
+	params := sqlc.UpdateBotStatusParams{
 		ID:     botUUID,
 		Status: strings.TrimSpace(status),
-	})
+	}
+	applyTeamID(&params, teamID)
+	return s.queries.UpdateBotStatus(ctx, params)
 }
 
 func (s *Service) ensureUserExists(ctx context.Context, userID pgtype.UUID) error {

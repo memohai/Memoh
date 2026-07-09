@@ -58,7 +58,10 @@ func (q *Queries) GetHistoryTurnByID(ctx context.Context, arg dbsqlc.GetHistoryT
 }
 
 func (q *Queries) GetLatestVisibleHistoryTurnBySession(ctx context.Context, sessionID pgtype.UUID) (dbstore.HistoryTurn, error) {
-	row, err := q.Queries.GetLatestVisibleHistoryTurnBySession(ctx, sessionID)
+	row, err := q.Queries.GetLatestVisibleHistoryTurnBySession(ctx, dbsqlc.GetLatestVisibleHistoryTurnBySessionParams{
+		TeamID:    teamUUIDFromContext(ctx),
+		SessionID: sessionID,
+	})
 	if err != nil {
 		return dbstore.HistoryTurn{}, err
 	}
@@ -74,7 +77,10 @@ func (q *Queries) GetVisibleHistoryTurnByMessage(ctx context.Context, arg dbsqlc
 }
 
 func (q *Queries) ListHistoryTurnsByBot(ctx context.Context, botID pgtype.UUID) ([]dbstore.HistoryTurn, error) {
-	rows, err := q.Queries.ListHistoryTurnsByBot(ctx, botID)
+	rows, err := q.Queries.ListHistoryTurnsByBot(ctx, dbsqlc.ListHistoryTurnsByBotParams{
+		BotID:  botID,
+		TeamID: teamUUIDFromContext(ctx),
+	})
 	if err != nil {
 		return nil, err
 	}

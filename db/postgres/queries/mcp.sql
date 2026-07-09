@@ -1,85 +1,105 @@
 -- name: GetMCPConnectionByID :one
-SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-       managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at
+SELECT *
 FROM mcp_connections
-WHERE bot_id = $1 AND id = $2
+WHERE bot_id = sqlc.arg(bot_id)
+  AND mcp_connections.id = sqlc.arg(id)
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = sqlc.arg(bot_id))
 LIMIT 1;
 
 -- name: ListMCPConnectionsByBotID :many
-SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-       managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at
+SELECT *
 FROM mcp_connections
-WHERE bot_id = $1
+WHERE bot_id = sqlc.arg(bot_id)
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = sqlc.arg(bot_id))
 ORDER BY created_at DESC;
 
 -- name: CreateMCPConnection :one
-INSERT INTO mcp_connections (bot_id, name, type, config, is_active, auth_type)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at;
+INSERT INTO mcp_connections (team_id, bot_id, name, type, config, is_active, auth_type)
+SELECT b.team_id, b.id, sqlc.arg(name), sqlc.arg(type), sqlc.arg(config), sqlc.arg(is_active), sqlc.arg(auth_type)
+FROM bots b
+WHERE b.id = sqlc.arg(bot_id)
+RETURNING *;
 
 -- name: CreateManagedMCPConnection :one
 INSERT INTO mcp_connections (
-  bot_id, name, type, config, is_active, auth_type,
+  team_id, bot_id, name, type, config, is_active, auth_type,
   managed_by_plugin_installation_id, managed_resource_key, visible, metadata
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at;
+SELECT b.team_id, b.id, sqlc.arg(name), sqlc.arg(type), sqlc.arg(config), sqlc.arg(is_active), sqlc.arg(auth_type), i.id, sqlc.arg(managed_resource_key), sqlc.arg(visible), sqlc.arg(metadata)
+FROM bots b
+JOIN bot_plugin_installations i
+  ON i.id = sqlc.arg(managed_by_plugin_installation_id)
+ AND i.bot_id = b.id
+ AND i.team_id = b.team_id
+WHERE b.id = sqlc.arg(bot_id)
+RETURNING *;
 
 -- name: UpdateMCPConnection :one
 UPDATE mcp_connections
-SET name = $3,
-    type = $4,
-    config = $5,
-    is_active = $6,
-    auth_type = $7,
+SET name = sqlc.arg(name),
+    type = sqlc.arg(type),
+    config = sqlc.arg(config),
+    is_active = sqlc.arg(is_active),
+    auth_type = sqlc.arg(auth_type),
     updated_at = now()
-WHERE bot_id = $1 AND id = $2
-RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at;
+WHERE bot_id = sqlc.arg(bot_id)
+  AND mcp_connections.id = sqlc.arg(id)
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = sqlc.arg(bot_id))
+RETURNING *;
 
 -- name: UpdateMCPConnectionActive :exec
 UPDATE mcp_connections
-SET is_active = $3,
+SET is_active = sqlc.arg(is_active),
     updated_at = now()
-WHERE bot_id = $1 AND id = $2;
+WHERE bot_id = sqlc.arg(bot_id)
+  AND mcp_connections.id = sqlc.arg(id)
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = sqlc.arg(bot_id));
 
 -- name: UpdateMCPConnectionsActiveByPlugin :exec
 UPDATE mcp_connections
-SET is_active = $3,
+SET is_active = sqlc.arg(is_active),
     updated_at = now()
-WHERE bot_id = $1 AND managed_by_plugin_installation_id = $2;
+WHERE bot_id = sqlc.arg(bot_id)
+  AND managed_by_plugin_installation_id = sqlc.arg(managed_by_plugin_installation_id)
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = sqlc.arg(bot_id));
 
 -- name: UpdateMCPConnectionProbeResult :exec
 UPDATE mcp_connections
-SET status = $3,
-    tools_cache = $4,
+SET status = sqlc.arg(status),
+    tools_cache = sqlc.arg(tools_cache),
     last_probed_at = now(),
-    status_message = $5,
+    status_message = sqlc.arg(status_message),
     updated_at = now()
-WHERE bot_id = $1 AND id = $2;
+WHERE bot_id = sqlc.arg(bot_id)
+  AND mcp_connections.id = sqlc.arg(id)
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = sqlc.arg(bot_id));
 
 -- name: UpdateMCPConnectionAuthType :exec
 UPDATE mcp_connections
-SET auth_type = $2,
+SET auth_type = sqlc.arg(auth_type),
     updated_at = now()
-WHERE id = $1;
+WHERE mcp_connections.id = sqlc.arg(id)
+  AND team_id = (SELECT t.team_id FROM mcp_oauth_tokens t WHERE t.connection_id = sqlc.arg(id));
 
 -- name: DeleteMCPConnection :exec
 DELETE FROM mcp_connections
-WHERE bot_id = $1 AND id = $2;
+WHERE bot_id = sqlc.arg(bot_id)
+  AND mcp_connections.id = sqlc.arg(id)
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = sqlc.arg(bot_id));
 
 -- name: DeleteMCPConnectionsByPlugin :exec
 DELETE FROM mcp_connections
-WHERE bot_id = $1 AND managed_by_plugin_installation_id = $2;
+WHERE bot_id = sqlc.arg(bot_id)
+  AND managed_by_plugin_installation_id = sqlc.arg(managed_by_plugin_installation_id)
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = sqlc.arg(bot_id));
 
 -- name: UpsertMCPConnectionByName :one
-INSERT INTO mcp_connections (bot_id, name, type, config)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (bot_id, name)
+INSERT INTO mcp_connections (team_id, bot_id, name, type, config)
+SELECT b.team_id, b.id, sqlc.arg(name), sqlc.arg(type), sqlc.arg(config)
+FROM bots b
+WHERE b.id = sqlc.arg(bot_id)
+ON CONFLICT (team_id, bot_id, name)
 DO UPDATE SET type = EXCLUDED.type,
               config = EXCLUDED.config,
               updated_at = now()
-RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at;
+RETURNING *;

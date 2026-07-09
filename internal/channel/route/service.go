@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -15,6 +16,7 @@ import (
 	dbpkg "github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 // ConversationService contains the minimal conversation behavior required by route resolution.
@@ -105,7 +107,11 @@ func (s *DBService) GetByID(ctx context.Context, routeID string) (Route, error) 
 	if err != nil {
 		return Route{}, err
 	}
-	row, err := s.queries.GetChatRouteByID(ctx, pgID)
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return Route{}, err
+	}
+	row, err := getChatRouteByID(ctx, s.queries, teamID, pgID)
 	if err != nil {
 		return Route{}, err
 	}
@@ -118,7 +124,11 @@ func (s *DBService) List(ctx context.Context, conversationID string) ([]Route, e
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListChatRoutes(ctx, pgID)
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := listChatRoutes(ctx, s.queries, teamID, pgID)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +145,11 @@ func (s *DBService) Delete(ctx context.Context, routeID string) error {
 	if err != nil {
 		return err
 	}
-	return s.queries.DeleteChatRoute(ctx, pgID)
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	return deleteChatRoute(ctx, s.queries, teamID, pgID)
 }
 
 // UpdateReplyTarget updates default reply target.
@@ -144,10 +158,16 @@ func (s *DBService) UpdateReplyTarget(ctx context.Context, routeID, replyTarget 
 	if err != nil {
 		return err
 	}
-	return s.queries.UpdateChatRouteReplyTarget(ctx, sqlc.UpdateChatRouteReplyTargetParams{
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	params := sqlc.UpdateChatRouteReplyTargetParams{
 		ID:          pgID,
 		ReplyTarget: toPgText(replyTarget),
-	})
+	}
+	applyTeamID(&params, teamID)
+	return s.queries.UpdateChatRouteReplyTarget(ctx, params)
 }
 
 // UpdateMetadata replaces the route metadata.
@@ -160,10 +180,16 @@ func (s *DBService) UpdateMetadata(ctx context.Context, routeID string, metadata
 	if err != nil {
 		return fmt.Errorf("marshal route metadata: %w", err)
 	}
-	return s.queries.UpdateChatRouteMetadata(ctx, sqlc.UpdateChatRouteMetadataParams{
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	params := sqlc.UpdateChatRouteMetadataParams{
 		ID:       pgID,
 		Metadata: data,
-	})
+	}
+	applyTeamID(&params, teamID)
+	return s.queries.UpdateChatRouteMetadata(ctx, params)
 }
 
 // ResolveConversation finds or creates a conversation route for an inbound message.
@@ -185,7 +211,11 @@ func (s *DBService) ResolveConversation(ctx context.Context, input ResolveInput)
 		if parseErr != nil {
 			return ResolveConversationResult{}, fmt.Errorf("parse route conversation id: %w", parseErr)
 		}
-		if touchErr := s.queries.TouchChat(ctx, pgConversationID); touchErr != nil && s.logger != nil {
+		teamID, teamErr := teamUUIDFromContext(ctx)
+		if teamErr != nil {
+			return ResolveConversationResult{}, teamErr
+		}
+		if touchErr := touchChat(ctx, s.queries, teamID, pgConversationID); touchErr != nil && s.logger != nil {
 			s.logger.Warn("touch conversation failed", slog.Any("error", touchErr))
 		}
 		return ResolveConversationResult{ChatID: route.ChatID, RouteID: route.ID, Created: false}, nil
@@ -263,7 +293,11 @@ func (s *DBService) resolveConversationCreatorChannelIdentityID(ctx context.Cont
 	if err != nil {
 		return fallback
 	}
-	row, err := s.queries.GetBotByID(ctx, pgBotID)
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return fallback
+	}
+	row, err := getBotByID(ctx, s.queries, teamID, pgBotID)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("resolve bot owner for group conversation failed", slog.Any("error", err))
@@ -333,6 +367,118 @@ func toPgText(value string) pgtype.Text {
 		return pgtype.Text{}
 	}
 	return pgtype.Text{String: value, Valid: true}
+}
+
+func teamUUIDFromContext(ctx context.Context) (pgtype.UUID, error) {
+	scope := teams.ScopeOrDefault(ctx)
+	return dbpkg.ParseUUID(strings.TrimSpace(scope.TeamID))
+}
+
+func applyTeamID(params any, teamID pgtype.UUID) {
+	value := reflect.ValueOf(params)
+	if value.Kind() != reflect.Pointer || value.IsNil() {
+		return
+	}
+	elem := value.Elem()
+	if elem.Kind() != reflect.Struct {
+		return
+	}
+	field := elem.FieldByName("TeamID")
+	if !field.IsValid() || !field.CanSet() || field.Type() != reflect.TypeOf(pgtype.UUID{}) {
+		return
+	}
+	field.Set(reflect.ValueOf(teamID))
+}
+
+func getChatRouteByID(ctx context.Context, queries dbstore.Queries, teamID, id pgtype.UUID) (sqlc.GetChatRouteByIDRow, error) {
+	values, err := callTeamScopedQuery(ctx, queries, "GetChatRouteByID", teamID, map[string]reflect.Value{
+		"ID": reflect.ValueOf(id),
+	}, reflect.ValueOf(id))
+	if err != nil {
+		return sqlc.GetChatRouteByIDRow{}, err
+	}
+	row, _ := values[0].Interface().(sqlc.GetChatRouteByIDRow)
+	return row, errorFromValue(values[1])
+}
+
+func listChatRoutes(ctx context.Context, queries dbstore.Queries, teamID, chatID pgtype.UUID) ([]sqlc.ListChatRoutesRow, error) {
+	values, err := callTeamScopedQuery(ctx, queries, "ListChatRoutes", teamID, map[string]reflect.Value{
+		"ChatID": reflect.ValueOf(chatID),
+	}, reflect.ValueOf(chatID))
+	if err != nil {
+		return nil, err
+	}
+	rows, _ := values[0].Interface().([]sqlc.ListChatRoutesRow)
+	return rows, errorFromValue(values[1])
+}
+
+func deleteChatRoute(ctx context.Context, queries dbstore.Queries, teamID, id pgtype.UUID) error {
+	values, err := callTeamScopedQuery(ctx, queries, "DeleteChatRoute", teamID, map[string]reflect.Value{
+		"ID": reflect.ValueOf(id),
+	}, reflect.ValueOf(id))
+	if err != nil {
+		return err
+	}
+	return errorFromValue(values[0])
+}
+
+func touchChat(ctx context.Context, queries dbstore.Queries, teamID, chatID pgtype.UUID) error {
+	values, err := callTeamScopedQuery(ctx, queries, "TouchChat", teamID, map[string]reflect.Value{
+		"ChatID": reflect.ValueOf(chatID),
+	}, reflect.ValueOf(chatID))
+	if err != nil {
+		return err
+	}
+	return errorFromValue(values[0])
+}
+
+func getBotByID(ctx context.Context, queries dbstore.Queries, teamID, id pgtype.UUID) (sqlc.GetBotByIDRow, error) {
+	values, err := callTeamScopedQuery(ctx, queries, "GetBotByID", teamID, map[string]reflect.Value{
+		"ID": reflect.ValueOf(id),
+	}, reflect.ValueOf(id))
+	if err != nil {
+		return sqlc.GetBotByIDRow{}, err
+	}
+	row, _ := values[0].Interface().(sqlc.GetBotByIDRow)
+	return row, errorFromValue(values[1])
+}
+
+func callTeamScopedQuery(ctx context.Context, queries dbstore.Queries, methodName string, teamID pgtype.UUID, fields map[string]reflect.Value, legacyArg reflect.Value) ([]reflect.Value, error) {
+	method := reflect.ValueOf(queries).MethodByName(methodName)
+	if !method.IsValid() {
+		return nil, fmt.Errorf("query method %s not configured", methodName)
+	}
+	if method.Type().NumIn() != 2 {
+		return nil, fmt.Errorf("query method %s has unexpected arity", methodName)
+	}
+	argType := method.Type().In(1)
+	var arg reflect.Value
+	if legacyArg.IsValid() && legacyArg.Type().AssignableTo(argType) {
+		arg = legacyArg
+	} else {
+		arg = reflect.New(argType).Elem()
+		if arg.Kind() != reflect.Struct {
+			return nil, fmt.Errorf("query method %s has unsupported arg type %s", methodName, argType)
+		}
+		if field := arg.FieldByName("TeamID"); field.IsValid() && field.CanSet() && reflect.TypeOf(teamID).AssignableTo(field.Type()) {
+			field.Set(reflect.ValueOf(teamID))
+		}
+		for name, value := range fields {
+			field := arg.FieldByName(name)
+			if field.IsValid() && field.CanSet() && value.Type().AssignableTo(field.Type()) {
+				field.Set(value)
+			}
+		}
+	}
+	return method.Call([]reflect.Value{reflect.ValueOf(ctx), arg}), nil
+}
+
+func errorFromValue(value reflect.Value) error {
+	if !value.IsValid() || value.IsNil() {
+		return nil
+	}
+	err, _ := value.Interface().(error)
+	return err
 }
 
 func nonNilMap(m map[string]any) map[string]any {

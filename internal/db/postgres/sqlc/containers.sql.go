@@ -12,20 +12,36 @@ import (
 )
 
 const deleteContainerByBotID = `-- name: DeleteContainerByBotID :exec
-DELETE FROM containers WHERE bot_id = $1
+DELETE FROM containers
+WHERE team_id = $1
+  AND bot_id = $2
 `
 
-func (q *Queries) DeleteContainerByBotID(ctx context.Context, botID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteContainerByBotID, botID)
+type DeleteContainerByBotIDParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+}
+
+func (q *Queries) DeleteContainerByBotID(ctx context.Context, arg DeleteContainerByBotIDParams) error {
+	_, err := q.db.Exec(ctx, deleteContainerByBotID, arg.TeamID, arg.BotID)
 	return err
 }
 
 const getContainerByBotID = `-- name: GetContainerByBotID :one
-SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, workspace_backend, created_at, updated_at, last_started_at, last_stopped_at FROM containers WHERE bot_id = $1 ORDER BY updated_at DESC LIMIT 1
+SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, workspace_backend, created_at, updated_at, last_started_at, last_stopped_at, team_id FROM containers
+WHERE team_id = $1
+  AND bot_id = $2
+ORDER BY updated_at DESC
+LIMIT 1
 `
 
-func (q *Queries) GetContainerByBotID(ctx context.Context, botID pgtype.UUID) (Container, error) {
-	row := q.db.QueryRow(ctx, getContainerByBotID, botID)
+type GetContainerByBotIDParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+}
+
+func (q *Queries) GetContainerByBotID(ctx context.Context, arg GetContainerByBotIDParams) (Container, error) {
+	row := q.db.QueryRow(ctx, getContainerByBotID, arg.TeamID, arg.BotID)
 	var i Container
 	err := row.Scan(
 		&i.ID,
@@ -42,16 +58,20 @@ func (q *Queries) GetContainerByBotID(ctx context.Context, botID pgtype.UUID) (C
 		&i.UpdatedAt,
 		&i.LastStartedAt,
 		&i.LastStoppedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listAutoStartContainers = `-- name: ListAutoStartContainers :many
-SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, workspace_backend, created_at, updated_at, last_started_at, last_stopped_at FROM containers WHERE auto_start = true ORDER BY updated_at DESC
+SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, workspace_backend, created_at, updated_at, last_started_at, last_stopped_at, team_id FROM containers
+WHERE team_id = $1
+  AND auto_start = true
+ORDER BY updated_at DESC
 `
 
-func (q *Queries) ListAutoStartContainers(ctx context.Context) ([]Container, error) {
-	rows, err := q.db.Query(ctx, listAutoStartContainers)
+func (q *Queries) ListAutoStartContainers(ctx context.Context, teamID pgtype.UUID) ([]Container, error) {
+	rows, err := q.db.Query(ctx, listAutoStartContainers, teamID)
 	if err != nil {
 		return nil, err
 	}
@@ -74,6 +94,7 @@ func (q *Queries) ListAutoStartContainers(ctx context.Context) ([]Container, err
 			&i.UpdatedAt,
 			&i.LastStartedAt,
 			&i.LastStoppedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -88,44 +109,58 @@ func (q *Queries) ListAutoStartContainers(ctx context.Context) ([]Container, err
 const updateContainerStarted = `-- name: UpdateContainerStarted :exec
 UPDATE containers
 SET status = 'running', last_started_at = now(), updated_at = now()
-WHERE bot_id = $1
+WHERE team_id = $1
+  AND bot_id = $2
 `
 
-func (q *Queries) UpdateContainerStarted(ctx context.Context, botID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, updateContainerStarted, botID)
+type UpdateContainerStartedParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+}
+
+func (q *Queries) UpdateContainerStarted(ctx context.Context, arg UpdateContainerStartedParams) error {
+	_, err := q.db.Exec(ctx, updateContainerStarted, arg.TeamID, arg.BotID)
 	return err
 }
 
 const updateContainerStatus = `-- name: UpdateContainerStatus :exec
 UPDATE containers
 SET status = $1, updated_at = now()
-WHERE bot_id = $2
+WHERE team_id = $2
+  AND bot_id = $3
 `
 
 type UpdateContainerStatusParams struct {
 	Status string      `json:"status"`
+	TeamID pgtype.UUID `json:"team_id"`
 	BotID  pgtype.UUID `json:"bot_id"`
 }
 
 func (q *Queries) UpdateContainerStatus(ctx context.Context, arg UpdateContainerStatusParams) error {
-	_, err := q.db.Exec(ctx, updateContainerStatus, arg.Status, arg.BotID)
+	_, err := q.db.Exec(ctx, updateContainerStatus, arg.Status, arg.TeamID, arg.BotID)
 	return err
 }
 
 const updateContainerStopped = `-- name: UpdateContainerStopped :exec
 UPDATE containers
 SET status = 'stopped', last_stopped_at = now(), updated_at = now()
-WHERE bot_id = $1
+WHERE team_id = $1
+  AND bot_id = $2
 `
 
-func (q *Queries) UpdateContainerStopped(ctx context.Context, botID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, updateContainerStopped, botID)
+type UpdateContainerStoppedParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+}
+
+func (q *Queries) UpdateContainerStopped(ctx context.Context, arg UpdateContainerStoppedParams) error {
+	_, err := q.db.Exec(ctx, updateContainerStopped, arg.TeamID, arg.BotID)
 	return err
 }
 
 const upsertContainer = `-- name: UpsertContainer :exec
 INSERT INTO containers (
-  bot_id, container_id, container_name, image, status, namespace, auto_start,
+  team_id, bot_id, container_id, container_name, image, status, namespace, auto_start,
   container_path, workspace_backend, last_started_at, last_stopped_at
 )
 VALUES (
@@ -139,9 +174,11 @@ VALUES (
   $8,
   $9,
   $10,
-  $11
+  $11,
+  $12
 )
 ON CONFLICT (container_id) DO UPDATE SET
+  team_id = EXCLUDED.team_id,
   bot_id = EXCLUDED.bot_id,
   container_name = EXCLUDED.container_name,
   image = EXCLUDED.image,
@@ -153,9 +190,11 @@ ON CONFLICT (container_id) DO UPDATE SET
   last_started_at = EXCLUDED.last_started_at,
   last_stopped_at = EXCLUDED.last_stopped_at,
   updated_at = now()
+WHERE containers.team_id = $1
 `
 
 type UpsertContainerParams struct {
+	TeamID           pgtype.UUID        `json:"team_id"`
 	BotID            pgtype.UUID        `json:"bot_id"`
 	ContainerID      string             `json:"container_id"`
 	ContainerName    string             `json:"container_name"`
@@ -171,6 +210,7 @@ type UpsertContainerParams struct {
 
 func (q *Queries) UpsertContainer(ctx context.Context, arg UpsertContainerParams) error {
 	_, err := q.db.Exec(ctx, upsertContainer,
+		arg.TeamID,
 		arg.BotID,
 		arg.ContainerID,
 		arg.ContainerName,

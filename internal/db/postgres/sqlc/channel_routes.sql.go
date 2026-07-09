@@ -13,18 +13,20 @@ import (
 
 const createChatRoute = `-- name: CreateChatRoute :one
 INSERT INTO bot_channel_routes (
-  bot_id, channel_type, channel_config_id, external_conversation_id, external_thread_id, conversation_type, default_reply_target, metadata
+  team_id, bot_id, channel_type, channel_config_id, external_conversation_id, external_thread_id, conversation_type, default_reply_target, metadata
 )
-VALUES (
+SELECT
+  b.team_id,
+  b.id,
   $1,
-  $2,
-  $3::uuid,
-  $4,
+  $2::uuid,
+  $3,
+  $4::text,
   $5::text,
   $6::text,
-  $7::text,
-  $8
-)
+  $7
+FROM bots b
+WHERE b.id = $8
 RETURNING
   id,
   $9::uuid AS chat_id,
@@ -42,7 +44,6 @@ RETURNING
 `
 
 type CreateChatRouteParams struct {
-	BotID            pgtype.UUID `json:"bot_id"`
 	Platform         string      `json:"platform"`
 	ChannelConfigID  pgtype.UUID `json:"channel_config_id"`
 	ConversationID   string      `json:"conversation_id"`
@@ -50,6 +51,7 @@ type CreateChatRouteParams struct {
 	ConversationType pgtype.Text `json:"conversation_type"`
 	ReplyTarget      pgtype.Text `json:"reply_target"`
 	Metadata         []byte      `json:"metadata"`
+	BotID            pgtype.UUID `json:"bot_id"`
 	ChatID           pgtype.UUID `json:"chat_id"`
 }
 
@@ -71,7 +73,6 @@ type CreateChatRouteRow struct {
 
 func (q *Queries) CreateChatRoute(ctx context.Context, arg CreateChatRouteParams) (CreateChatRouteRow, error) {
 	row := q.db.QueryRow(ctx, createChatRoute,
-		arg.BotID,
 		arg.Platform,
 		arg.ChannelConfigID,
 		arg.ConversationID,
@@ -79,6 +80,7 @@ func (q *Queries) CreateChatRoute(ctx context.Context, arg CreateChatRouteParams
 		arg.ConversationType,
 		arg.ReplyTarget,
 		arg.Metadata,
+		arg.BotID,
 		arg.ChatID,
 	)
 	var i CreateChatRouteRow
@@ -103,10 +105,16 @@ func (q *Queries) CreateChatRoute(ctx context.Context, arg CreateChatRouteParams
 const deleteChatRoute = `-- name: DeleteChatRoute :exec
 DELETE FROM bot_channel_routes
 WHERE id = $1
+  AND team_id = $2
 `
 
-func (q *Queries) DeleteChatRoute(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteChatRoute, id)
+type DeleteChatRouteParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteChatRoute(ctx context.Context, arg DeleteChatRouteParams) error {
+	_, err := q.db.Exec(ctx, deleteChatRoute, arg.ID, arg.TeamID)
 	return err
 }
 
@@ -127,6 +135,7 @@ SELECT
   updated_at
 FROM bot_channel_routes
 WHERE bot_id = $1
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = $1)
   AND channel_type = $2
   AND external_conversation_id = $3
   AND COALESCE(external_thread_id, '') = COALESCE($4, '')
@@ -199,7 +208,13 @@ SELECT
   updated_at
 FROM bot_channel_routes
 WHERE id = $1
+  AND team_id = $2
 `
+
+type GetChatRouteByIDParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
 
 type GetChatRouteByIDRow struct {
 	ID               pgtype.UUID        `json:"id"`
@@ -217,8 +232,8 @@ type GetChatRouteByIDRow struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
-func (q *Queries) GetChatRouteByID(ctx context.Context, id pgtype.UUID) (GetChatRouteByIDRow, error) {
-	row := q.db.QueryRow(ctx, getChatRouteByID, id)
+func (q *Queries) GetChatRouteByID(ctx context.Context, arg GetChatRouteByIDParams) (GetChatRouteByIDRow, error) {
+	row := q.db.QueryRow(ctx, getChatRouteByID, arg.ID, arg.TeamID)
 	var i GetChatRouteByIDRow
 	err := row.Scan(
 		&i.ID,
@@ -254,9 +269,15 @@ SELECT
   created_at,
   updated_at
 FROM bot_channel_routes
-WHERE bot_id = $1
+WHERE team_id = $1
+  AND bot_id = $2
 ORDER BY created_at ASC
 `
+
+type ListChatRoutesParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	ChatID pgtype.UUID `json:"chat_id"`
+}
 
 type ListChatRoutesRow struct {
 	ID               pgtype.UUID        `json:"id"`
@@ -274,8 +295,8 @@ type ListChatRoutesRow struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
-func (q *Queries) ListChatRoutes(ctx context.Context, chatID pgtype.UUID) ([]ListChatRoutesRow, error) {
-	rows, err := q.db.Query(ctx, listChatRoutes, chatID)
+func (q *Queries) ListChatRoutes(ctx context.Context, arg ListChatRoutesParams) ([]ListChatRoutesRow, error) {
+	rows, err := q.db.Query(ctx, listChatRoutes, arg.TeamID, arg.ChatID)
 	if err != nil {
 		return nil, err
 	}
@@ -312,15 +333,17 @@ const setRouteActiveSession = `-- name: SetRouteActiveSession :exec
 UPDATE bot_channel_routes
 SET active_session_id = $1::uuid, updated_at = now()
 WHERE id = $2
+  AND team_id = $3
 `
 
 type SetRouteActiveSessionParams struct {
 	ActiveSessionID pgtype.UUID `json:"active_session_id"`
 	ID              pgtype.UUID `json:"id"`
+	TeamID          pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) SetRouteActiveSession(ctx context.Context, arg SetRouteActiveSessionParams) error {
-	_, err := q.db.Exec(ctx, setRouteActiveSession, arg.ActiveSessionID, arg.ID)
+	_, err := q.db.Exec(ctx, setRouteActiveSession, arg.ActiveSessionID, arg.ID, arg.TeamID)
 	return err
 }
 
@@ -328,15 +351,17 @@ const updateChatRouteMetadata = `-- name: UpdateChatRouteMetadata :exec
 UPDATE bot_channel_routes
 SET metadata = $1, updated_at = now()
 WHERE id = $2
+  AND team_id = $3
 `
 
 type UpdateChatRouteMetadataParams struct {
 	Metadata []byte      `json:"metadata"`
 	ID       pgtype.UUID `json:"id"`
+	TeamID   pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateChatRouteMetadata(ctx context.Context, arg UpdateChatRouteMetadataParams) error {
-	_, err := q.db.Exec(ctx, updateChatRouteMetadata, arg.Metadata, arg.ID)
+	_, err := q.db.Exec(ctx, updateChatRouteMetadata, arg.Metadata, arg.ID, arg.TeamID)
 	return err
 }
 
@@ -344,14 +369,16 @@ const updateChatRouteReplyTarget = `-- name: UpdateChatRouteReplyTarget :exec
 UPDATE bot_channel_routes
 SET default_reply_target = $1, updated_at = now()
 WHERE id = $2
+  AND team_id = $3
 `
 
 type UpdateChatRouteReplyTargetParams struct {
 	ReplyTarget pgtype.Text `json:"reply_target"`
 	ID          pgtype.UUID `json:"id"`
+	TeamID      pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateChatRouteReplyTarget(ctx context.Context, arg UpdateChatRouteReplyTargetParams) error {
-	_, err := q.db.Exec(ctx, updateChatRouteReplyTarget, arg.ReplyTarget, arg.ID)
+	_, err := q.db.Exec(ctx, updateChatRouteReplyTarget, arg.ReplyTarget, arg.ID, arg.TeamID)
 	return err
 }

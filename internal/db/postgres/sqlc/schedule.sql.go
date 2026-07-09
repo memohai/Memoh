@@ -12,12 +12,13 @@ import (
 )
 
 const createSchedule = `-- name: CreateSchedule :one
-INSERT INTO schedule (name, description, pattern, max_calls, enabled, command, bot_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id
+INSERT INTO schedule (team_id, name, description, pattern, max_calls, enabled, command, bot_id)
+VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid)
+RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id
 `
 
 type CreateScheduleParams struct {
+	TeamID      pgtype.UUID `json:"team_id"`
 	Name        string      `json:"name"`
 	Description string      `json:"description"`
 	Pattern     string      `json:"pattern"`
@@ -29,6 +30,7 @@ type CreateScheduleParams struct {
 
 func (q *Queries) CreateSchedule(ctx context.Context, arg CreateScheduleParams) (Schedule, error) {
 	row := q.db.QueryRow(ctx, createSchedule,
+		arg.TeamID,
 		arg.Name,
 		arg.Description,
 		arg.Pattern,
@@ -50,28 +52,41 @@ func (q *Queries) CreateSchedule(ctx context.Context, arg CreateScheduleParams) 
 		&i.Enabled,
 		&i.Command,
 		&i.BotID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const deleteSchedule = `-- name: DeleteSchedule :exec
 DELETE FROM schedule
-WHERE id = $1
+WHERE id = $1::uuid
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) DeleteSchedule(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteSchedule, id)
+type DeleteScheduleParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteSchedule(ctx context.Context, arg DeleteScheduleParams) error {
+	_, err := q.db.Exec(ctx, deleteSchedule, arg.ID, arg.TeamID)
 	return err
 }
 
 const getScheduleByID = `-- name: GetScheduleByID :one
-SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id
+SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id
 FROM schedule
-WHERE id = $1
+WHERE id = $1::uuid
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) GetScheduleByID(ctx context.Context, id pgtype.UUID) (Schedule, error) {
-	row := q.db.QueryRow(ctx, getScheduleByID, id)
+type GetScheduleByIDParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetScheduleByID(ctx context.Context, arg GetScheduleByIDParams) (Schedule, error) {
+	row := q.db.QueryRow(ctx, getScheduleByID, arg.ID, arg.TeamID)
 	var i Schedule
 	err := row.Scan(
 		&i.ID,
@@ -85,6 +100,7 @@ func (q *Queries) GetScheduleByID(ctx context.Context, id pgtype.UUID) (Schedule
 		&i.Enabled,
 		&i.Command,
 		&i.BotID,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -97,12 +113,18 @@ SET current_calls = current_calls + 1,
       ELSE enabled
     END,
     updated_at = now()
-WHERE id = $1
-RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id
+WHERE id = $1::uuid
+  AND team_id = $2::uuid
+RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id
 `
 
-func (q *Queries) IncrementScheduleCalls(ctx context.Context, id pgtype.UUID) (Schedule, error) {
-	row := q.db.QueryRow(ctx, incrementScheduleCalls, id)
+type IncrementScheduleCallsParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) IncrementScheduleCalls(ctx context.Context, arg IncrementScheduleCallsParams) (Schedule, error) {
+	row := q.db.QueryRow(ctx, incrementScheduleCalls, arg.ID, arg.TeamID)
 	var i Schedule
 	err := row.Scan(
 		&i.ID,
@@ -116,19 +138,21 @@ func (q *Queries) IncrementScheduleCalls(ctx context.Context, id pgtype.UUID) (S
 		&i.Enabled,
 		&i.Command,
 		&i.BotID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listEnabledSchedules = `-- name: ListEnabledSchedules :many
-SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id
+SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id
 FROM schedule
-WHERE enabled = true
+WHERE team_id = $1::uuid
+  AND enabled = true
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListEnabledSchedules(ctx context.Context) ([]Schedule, error) {
-	rows, err := q.db.Query(ctx, listEnabledSchedules)
+func (q *Queries) ListEnabledSchedules(ctx context.Context, teamID pgtype.UUID) ([]Schedule, error) {
+	rows, err := q.db.Query(ctx, listEnabledSchedules, teamID)
 	if err != nil {
 		return nil, err
 	}
@@ -148,6 +172,7 @@ func (q *Queries) ListEnabledSchedules(ctx context.Context) ([]Schedule, error) 
 			&i.Enabled,
 			&i.Command,
 			&i.BotID,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -160,14 +185,20 @@ func (q *Queries) ListEnabledSchedules(ctx context.Context) ([]Schedule, error) 
 }
 
 const listSchedulesByBot = `-- name: ListSchedulesByBot :many
-SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id
+SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id
 FROM schedule
-WHERE bot_id = $1
+WHERE team_id = $1::uuid
+  AND bot_id = $2::uuid
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListSchedulesByBot(ctx context.Context, botID pgtype.UUID) ([]Schedule, error) {
-	rows, err := q.db.Query(ctx, listSchedulesByBot, botID)
+type ListSchedulesByBotParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+}
+
+func (q *Queries) ListSchedulesByBot(ctx context.Context, arg ListSchedulesByBotParams) ([]Schedule, error) {
+	rows, err := q.db.Query(ctx, listSchedulesByBot, arg.TeamID, arg.BotID)
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +218,7 @@ func (q *Queries) ListSchedulesByBot(ctx context.Context, botID pgtype.UUID) ([]
 			&i.Enabled,
 			&i.Command,
 			&i.BotID,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -200,36 +232,39 @@ func (q *Queries) ListSchedulesByBot(ctx context.Context, botID pgtype.UUID) ([]
 
 const updateSchedule = `-- name: UpdateSchedule :one
 UPDATE schedule
-SET name = $2,
-    description = $3,
-    pattern = $4,
-    max_calls = $5,
-    enabled = $6,
-    command = $7,
+SET name = $1,
+    description = $2,
+    pattern = $3,
+    max_calls = $4,
+    enabled = $5,
+    command = $6,
     updated_at = now()
-WHERE id = $1
-RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id
+WHERE id = $7::uuid
+  AND team_id = $8::uuid
+RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id
 `
 
 type UpdateScheduleParams struct {
-	ID          pgtype.UUID `json:"id"`
 	Name        string      `json:"name"`
 	Description string      `json:"description"`
 	Pattern     string      `json:"pattern"`
 	MaxCalls    pgtype.Int4 `json:"max_calls"`
 	Enabled     bool        `json:"enabled"`
 	Command     string      `json:"command"`
+	ID          pgtype.UUID `json:"id"`
+	TeamID      pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateSchedule(ctx context.Context, arg UpdateScheduleParams) (Schedule, error) {
 	row := q.db.QueryRow(ctx, updateSchedule,
-		arg.ID,
 		arg.Name,
 		arg.Description,
 		arg.Pattern,
 		arg.MaxCalls,
 		arg.Enabled,
 		arg.Command,
+		arg.ID,
+		arg.TeamID,
 	)
 	var i Schedule
 	err := row.Scan(
@@ -244,6 +279,7 @@ func (q *Queries) UpdateSchedule(ctx context.Context, arg UpdateScheduleParams) 
 		&i.Enabled,
 		&i.Command,
 		&i.BotID,
+		&i.TeamID,
 	)
 	return i, err
 }

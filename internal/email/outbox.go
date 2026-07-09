@@ -30,6 +30,10 @@ func (s *OutboxService) Create(ctx context.Context, providerID, botID string, ms
 	if err != nil {
 		return "", fmt.Errorf("invalid provider_id: %w", err)
 	}
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return "", err
+	}
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
 		return "", fmt.Errorf("invalid bot_id: %w", err)
@@ -42,6 +46,7 @@ func (s *OutboxService) Create(ctx context.Context, providerID, botID string, ms
 	}
 
 	row, err := s.queries.CreateEmailOutbox(ctx, sqlc.CreateEmailOutboxParams{
+		TeamID:      pgTeamID,
 		ProviderID:  pgProviderID,
 		BotID:       pgBotID,
 		FromAddress: fromAddr,
@@ -60,11 +65,16 @@ func (s *OutboxService) Create(ctx context.Context, providerID, botID string, ms
 
 // MarkSent updates the outbox record with a successful send.
 func (s *OutboxService) MarkSent(ctx context.Context, id, messageID string) error {
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
 		return err
 	}
 	return s.queries.UpdateEmailOutboxSent(ctx, sqlc.UpdateEmailOutboxSentParams{
+		TeamID:    pgTeamID,
 		ID:        pgID,
 		MessageID: messageID,
 	})
@@ -72,13 +82,18 @@ func (s *OutboxService) MarkSent(ctx context.Context, id, messageID string) erro
 
 // MarkFailed updates the outbox record with an error.
 func (s *OutboxService) MarkFailed(ctx context.Context, id, errMsg string) error {
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
 		return err
 	}
 	return s.queries.UpdateEmailOutboxFailed(ctx, sqlc.UpdateEmailOutboxFailedParams{
-		ID:    pgID,
-		Error: errMsg,
+		TeamID: pgTeamID,
+		ID:     pgID,
+		Error:  errMsg,
 	})
 }
 
@@ -99,10 +114,15 @@ func (s *OutboxService) ListByBot(ctx context.Context, botID string, limit, offs
 	if err != nil {
 		return nil, 0, err
 	}
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
 	rows, err := s.queries.ListEmailOutboxByBot(ctx, sqlc.ListEmailOutboxByBotParams{
-		BotID: pgBotID,
-		Lim:   limit,
-		Off:   offset,
+		TeamID: pgTeamID,
+		BotID:  pgBotID,
+		Lim:    limit,
+		Off:    offset,
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("list outbox: %w", err)

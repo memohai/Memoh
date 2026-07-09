@@ -1,9 +1,10 @@
 -- name: UpsertContainer :exec
 INSERT INTO containers (
-  bot_id, container_id, container_name, image, status, namespace, auto_start,
+  team_id, bot_id, container_id, container_name, image, status, namespace, auto_start,
   container_path, workspace_backend, last_started_at, last_stopped_at
 )
 VALUES (
+  sqlc.arg(team_id),
   sqlc.arg(bot_id),
   sqlc.arg(container_id),
   sqlc.arg(container_name),
@@ -17,6 +18,7 @@ VALUES (
   sqlc.arg(last_stopped_at)
 )
 ON CONFLICT (container_id) DO UPDATE SET
+  team_id = EXCLUDED.team_id,
   bot_id = EXCLUDED.bot_id,
   container_name = EXCLUDED.container_name,
   image = EXCLUDED.image,
@@ -27,28 +29,41 @@ ON CONFLICT (container_id) DO UPDATE SET
   workspace_backend = EXCLUDED.workspace_backend,
   last_started_at = EXCLUDED.last_started_at,
   last_stopped_at = EXCLUDED.last_stopped_at,
-  updated_at = now();
+  updated_at = now()
+WHERE containers.team_id = sqlc.arg(team_id);
 
 -- name: GetContainerByBotID :one
-SELECT * FROM containers WHERE bot_id = sqlc.arg(bot_id) ORDER BY updated_at DESC LIMIT 1;
+SELECT * FROM containers
+WHERE team_id = sqlc.arg(team_id)
+  AND bot_id = sqlc.arg(bot_id)
+ORDER BY updated_at DESC
+LIMIT 1;
 
 -- name: DeleteContainerByBotID :exec
-DELETE FROM containers WHERE bot_id = sqlc.arg(bot_id);
+DELETE FROM containers
+WHERE team_id = sqlc.arg(team_id)
+  AND bot_id = sqlc.arg(bot_id);
 
 -- name: UpdateContainerStatus :exec
 UPDATE containers
 SET status = sqlc.arg(status), updated_at = now()
-WHERE bot_id = sqlc.arg(bot_id);
+WHERE team_id = sqlc.arg(team_id)
+  AND bot_id = sqlc.arg(bot_id);
 
 -- name: UpdateContainerStarted :exec
 UPDATE containers
 SET status = 'running', last_started_at = now(), updated_at = now()
-WHERE bot_id = sqlc.arg(bot_id);
+WHERE team_id = sqlc.arg(team_id)
+  AND bot_id = sqlc.arg(bot_id);
 
 -- name: UpdateContainerStopped :exec
 UPDATE containers
 SET status = 'stopped', last_stopped_at = now(), updated_at = now()
-WHERE bot_id = sqlc.arg(bot_id);
+WHERE team_id = sqlc.arg(team_id)
+  AND bot_id = sqlc.arg(bot_id);
 
 -- name: ListAutoStartContainers :many
-SELECT * FROM containers WHERE auto_start = true ORDER BY updated_at DESC;
+SELECT * FROM containers
+WHERE team_id = sqlc.arg(team_id)
+  AND auto_start = true
+ORDER BY updated_at DESC;

@@ -12,12 +12,22 @@ import (
 )
 
 const countEmailOutboxByBot = `-- name: CountEmailOutboxByBot :one
-SELECT count(*) FROM email_outbox
-WHERE bot_id = $1
+SELECT count(*)
+FROM email_outbox eo
+JOIN bots b ON b.id = eo.bot_id
+JOIN email_providers ep ON ep.id = eo.provider_id
+WHERE eo.bot_id = $1
+  AND b.team_id = $2
+  AND ep.team_id = $2
 `
 
-func (q *Queries) CountEmailOutboxByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countEmailOutboxByBot, botID)
+type CountEmailOutboxByBotParams struct {
+	BotID  pgtype.UUID `json:"bot_id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) CountEmailOutboxByBot(ctx context.Context, arg CountEmailOutboxByBotParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countEmailOutboxByBot, arg.BotID, arg.TeamID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -25,23 +35,25 @@ func (q *Queries) CountEmailOutboxByBot(ctx context.Context, botID pgtype.UUID) 
 
 const createEmailOutbox = `-- name: CreateEmailOutbox :one
 INSERT INTO email_outbox (provider_id, bot_id, from_address, to_addresses, subject, body_text, body_html, attachments, status)
-VALUES (
+SELECT
+  ep.id,
+  b.id,
   $1,
   $2,
   $3,
   $4,
   $5,
   $6,
-  $7,
-  $8,
-  $9
-)
-RETURNING id, provider_id, bot_id, message_id, from_address, to_addresses, subject, body_text, body_html, attachments, status, error, sent_at, created_at
+  $7
+FROM email_providers ep
+JOIN bots b ON b.id = $8
+WHERE ep.id = $9
+  AND ep.team_id = $10
+  AND b.team_id = $10
+RETURNING id, provider_id, bot_id, message_id, from_address, to_addresses, subject, body_text, body_html, attachments, status, error, sent_at, created_at, team_id
 `
 
 type CreateEmailOutboxParams struct {
-	ProviderID  pgtype.UUID `json:"provider_id"`
-	BotID       pgtype.UUID `json:"bot_id"`
 	FromAddress string      `json:"from_address"`
 	ToAddresses []byte      `json:"to_addresses"`
 	Subject     string      `json:"subject"`
@@ -49,12 +61,13 @@ type CreateEmailOutboxParams struct {
 	BodyHtml    string      `json:"body_html"`
 	Attachments []byte      `json:"attachments"`
 	Status      string      `json:"status"`
+	BotID       pgtype.UUID `json:"bot_id"`
+	ProviderID  pgtype.UUID `json:"provider_id"`
+	TeamID      pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) CreateEmailOutbox(ctx context.Context, arg CreateEmailOutboxParams) (EmailOutbox, error) {
 	row := q.db.QueryRow(ctx, createEmailOutbox,
-		arg.ProviderID,
-		arg.BotID,
 		arg.FromAddress,
 		arg.ToAddresses,
 		arg.Subject,
@@ -62,6 +75,9 @@ func (q *Queries) CreateEmailOutbox(ctx context.Context, arg CreateEmailOutboxPa
 		arg.BodyHtml,
 		arg.Attachments,
 		arg.Status,
+		arg.BotID,
+		arg.ProviderID,
+		arg.TeamID,
 	)
 	var i EmailOutbox
 	err := row.Scan(
@@ -79,16 +95,28 @@ func (q *Queries) CreateEmailOutbox(ctx context.Context, arg CreateEmailOutboxPa
 		&i.Error,
 		&i.SentAt,
 		&i.CreatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getEmailOutboxByID = `-- name: GetEmailOutboxByID :one
-SELECT id, provider_id, bot_id, message_id, from_address, to_addresses, subject, body_text, body_html, attachments, status, error, sent_at, created_at FROM email_outbox WHERE id = $1
+SELECT eo.id, eo.provider_id, eo.bot_id, eo.message_id, eo.from_address, eo.to_addresses, eo.subject, eo.body_text, eo.body_html, eo.attachments, eo.status, eo.error, eo.sent_at, eo.created_at, eo.team_id
+FROM email_outbox eo
+JOIN bots b ON b.id = eo.bot_id
+JOIN email_providers ep ON ep.id = eo.provider_id
+WHERE eo.id = $1
+  AND b.team_id = $2
+  AND ep.team_id = $2
 `
 
-func (q *Queries) GetEmailOutboxByID(ctx context.Context, id pgtype.UUID) (EmailOutbox, error) {
-	row := q.db.QueryRow(ctx, getEmailOutboxByID, id)
+type GetEmailOutboxByIDParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetEmailOutboxByID(ctx context.Context, arg GetEmailOutboxByIDParams) (EmailOutbox, error) {
+	row := q.db.QueryRow(ctx, getEmailOutboxByID, arg.ID, arg.TeamID)
 	var i EmailOutbox
 	err := row.Scan(
 		&i.ID,
@@ -105,25 +133,37 @@ func (q *Queries) GetEmailOutboxByID(ctx context.Context, id pgtype.UUID) (Email
 		&i.Error,
 		&i.SentAt,
 		&i.CreatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listEmailOutboxByBot = `-- name: ListEmailOutboxByBot :many
-SELECT id, provider_id, bot_id, message_id, from_address, to_addresses, subject, body_text, body_html, attachments, status, error, sent_at, created_at FROM email_outbox
-WHERE bot_id = $1
-ORDER BY created_at DESC
-LIMIT $3 OFFSET $2
+SELECT eo.id, eo.provider_id, eo.bot_id, eo.message_id, eo.from_address, eo.to_addresses, eo.subject, eo.body_text, eo.body_html, eo.attachments, eo.status, eo.error, eo.sent_at, eo.created_at, eo.team_id
+FROM email_outbox eo
+JOIN bots b ON b.id = eo.bot_id
+JOIN email_providers ep ON ep.id = eo.provider_id
+WHERE eo.bot_id = $1
+  AND b.team_id = $2
+  AND ep.team_id = $2
+ORDER BY eo.created_at DESC
+LIMIT $4 OFFSET $3
 `
 
 type ListEmailOutboxByBotParams struct {
-	BotID pgtype.UUID `json:"bot_id"`
-	Off   int32       `json:"off"`
-	Lim   int32       `json:"lim"`
+	BotID  pgtype.UUID `json:"bot_id"`
+	TeamID pgtype.UUID `json:"team_id"`
+	Off    int32       `json:"off"`
+	Lim    int32       `json:"lim"`
 }
 
 func (q *Queries) ListEmailOutboxByBot(ctx context.Context, arg ListEmailOutboxByBotParams) ([]EmailOutbox, error) {
-	rows, err := q.db.Query(ctx, listEmailOutboxByBot, arg.BotID, arg.Off, arg.Lim)
+	rows, err := q.db.Query(ctx, listEmailOutboxByBot,
+		arg.BotID,
+		arg.TeamID,
+		arg.Off,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -146,6 +186,7 @@ func (q *Queries) ListEmailOutboxByBot(ctx context.Context, arg ListEmailOutboxB
 			&i.Error,
 			&i.SentAt,
 			&i.CreatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -158,33 +199,45 @@ func (q *Queries) ListEmailOutboxByBot(ctx context.Context, arg ListEmailOutboxB
 }
 
 const updateEmailOutboxFailed = `-- name: UpdateEmailOutboxFailed :exec
-UPDATE email_outbox
+UPDATE email_outbox AS eo
 SET status = 'failed', error = $1
-WHERE id = $2
+FROM bots b, email_providers ep
+WHERE eo.id = $2
+  AND b.id = eo.bot_id
+  AND ep.id = eo.provider_id
+  AND b.team_id = $3
+  AND ep.team_id = $3
 `
 
 type UpdateEmailOutboxFailedParams struct {
-	Error string      `json:"error"`
-	ID    pgtype.UUID `json:"id"`
+	Error  string      `json:"error"`
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateEmailOutboxFailed(ctx context.Context, arg UpdateEmailOutboxFailedParams) error {
-	_, err := q.db.Exec(ctx, updateEmailOutboxFailed, arg.Error, arg.ID)
+	_, err := q.db.Exec(ctx, updateEmailOutboxFailed, arg.Error, arg.ID, arg.TeamID)
 	return err
 }
 
 const updateEmailOutboxSent = `-- name: UpdateEmailOutboxSent :exec
-UPDATE email_outbox
+UPDATE email_outbox AS eo
 SET message_id = $1, status = 'sent', sent_at = now()
-WHERE id = $2
+FROM bots b, email_providers ep
+WHERE eo.id = $2
+  AND b.id = eo.bot_id
+  AND ep.id = eo.provider_id
+  AND b.team_id = $3
+  AND ep.team_id = $3
 `
 
 type UpdateEmailOutboxSentParams struct {
 	MessageID string      `json:"message_id"`
 	ID        pgtype.UUID `json:"id"`
+	TeamID    pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateEmailOutboxSent(ctx context.Context, arg UpdateEmailOutboxSentParams) error {
-	_, err := q.db.Exec(ctx, updateEmailOutboxSent, arg.MessageID, arg.ID)
+	_, err := q.db.Exec(ctx, updateEmailOutboxSent, arg.MessageID, arg.ID, arg.TeamID)
 	return err
 }

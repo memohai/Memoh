@@ -5,6 +5,7 @@ import "context"
 // TriggerPayload describes the parameters passed to the chat side when a schedule triggers.
 type TriggerPayload struct {
 	ID          string
+	TeamID      string
 	Name        string
 	Description string
 	Pattern     string

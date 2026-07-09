@@ -100,7 +100,7 @@ func TestApplyPreset(t *testing.T) {
 	db := &fakeDBTX{
 		execFunc: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 			if strings.Contains(sql, "acl_default_effect") {
-				defaultEffect = args[1].(string)
+				defaultEffect = args[0].(string)
 			}
 			return pgconn.CommandTag{}, nil
 		},
@@ -108,7 +108,7 @@ func TestApplyPreset(t *testing.T) {
 			if strings.Contains(sql, "INSERT INTO bot_acl_rules") {
 				createdRules = append(createdRules, createdRule{
 					effect:           args[2].(string),
-					conversationType: textFromArg(args[8]),
+					conversationType: textFromArg(args[6]),
 				})
 				return &fakeRow{scanFunc: func(_ ...any) error { return nil }}
 			}

@@ -622,11 +622,18 @@ func (m *Manager) upsertContainerRecord(ctx context.Context, botID, containerID,
 	if err != nil {
 		return
 	}
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		m.logger.Error("failed to resolve team scope for container record",
+			slog.String("bot_id", botID), slog.Any("error", err))
+		return
+	}
 	ns := strings.TrimSpace(m.namespace)
 	if ns == "" {
 		ns = "default"
 	}
 	if dbErr := m.queries.UpsertContainer(ctx, dbsqlc.UpsertContainerParams{
+		TeamID:           pgTeamID,
 		BotID:            pgBotID,
 		ContainerID:      containerID,
 		ContainerName:    containerID,
@@ -726,7 +733,14 @@ func (m *Manager) markContainerStatus(ctx context.Context, botID, status string)
 	if err != nil {
 		return
 	}
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		m.logger.Error("failed to resolve team scope for container status",
+			slog.String("bot_id", botID), slog.Any("error", err))
+		return
+	}
 	if dbErr := m.queries.UpdateContainerStatus(ctx, dbsqlc.UpdateContainerStatusParams{
+		TeamID: pgTeamID,
 		Status: status,
 		BotID:  pgBotID,
 	}); dbErr != nil {

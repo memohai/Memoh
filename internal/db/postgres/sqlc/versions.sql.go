@@ -15,40 +15,55 @@ const getVersionSnapshotRuntimeName = `-- name: GetVersionSnapshotRuntimeName :o
 SELECT s.runtime_snapshot_name
 FROM container_versions cv
 JOIN snapshots s ON s.id = cv.snapshot_id
+JOIN containers c ON c.container_id = cv.container_id
 WHERE cv.container_id = $1
   AND cv.version = $2
+  AND c.team_id = $3
 `
 
 type GetVersionSnapshotRuntimeNameParams struct {
-	ContainerID string `json:"container_id"`
-	Version     int32  `json:"version"`
+	ContainerID string      `json:"container_id"`
+	Version     int32       `json:"version"`
+	TeamID      pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) GetVersionSnapshotRuntimeName(ctx context.Context, arg GetVersionSnapshotRuntimeNameParams) (string, error) {
-	row := q.db.QueryRow(ctx, getVersionSnapshotRuntimeName, arg.ContainerID, arg.Version)
+	row := q.db.QueryRow(ctx, getVersionSnapshotRuntimeName, arg.ContainerID, arg.Version, arg.TeamID)
 	var runtime_snapshot_name string
 	err := row.Scan(&runtime_snapshot_name)
 	return runtime_snapshot_name, err
 }
 
 const insertVersion = `-- name: InsertVersion :one
-INSERT INTO container_versions (container_id, snapshot_id, version)
-VALUES (
+INSERT INTO container_versions (container_id, snapshot_id, version, team_id)
+SELECT
+  c.container_id,
+  s.id,
   $1,
-  $2,
-  $3
-)
-RETURNING id, container_id, snapshot_id, version, created_at
+  c.team_id
+FROM containers c
+JOIN snapshots s ON s.id = $2
+WHERE c.container_id = $3
+  AND c.team_id = $4
+  AND s.container_id = c.container_id
+  AND s.team_id = c.team_id
+RETURNING id, container_id, snapshot_id, version, created_at, team_id
 `
 
 type InsertVersionParams struct {
-	ContainerID string      `json:"container_id"`
-	SnapshotID  pgtype.UUID `json:"snapshot_id"`
 	Version     int32       `json:"version"`
+	SnapshotID  pgtype.UUID `json:"snapshot_id"`
+	ContainerID string      `json:"container_id"`
+	TeamID      pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) InsertVersion(ctx context.Context, arg InsertVersionParams) (ContainerVersion, error) {
-	row := q.db.QueryRow(ctx, insertVersion, arg.ContainerID, arg.SnapshotID, arg.Version)
+	row := q.db.QueryRow(ctx, insertVersion,
+		arg.Version,
+		arg.SnapshotID,
+		arg.ContainerID,
+		arg.TeamID,
+	)
 	var i ContainerVersion
 	err := row.Scan(
 		&i.ID,
@@ -56,6 +71,7 @@ func (q *Queries) InsertVersion(ctx context.Context, arg InsertVersionParams) (C
 		&i.SnapshotID,
 		&i.Version,
 		&i.CreatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -71,9 +87,16 @@ SELECT
   s.display_name
 FROM container_versions cv
 JOIN snapshots s ON s.id = cv.snapshot_id
+JOIN containers c ON c.container_id = cv.container_id
 WHERE cv.container_id = $1
+  AND c.team_id = $2
 ORDER BY cv.version ASC
 `
+
+type ListVersionsByContainerIDParams struct {
+	ContainerID string      `json:"container_id"`
+	TeamID      pgtype.UUID `json:"team_id"`
+}
 
 type ListVersionsByContainerIDRow struct {
 	ID                  pgtype.UUID        `json:"id"`
@@ -85,8 +108,8 @@ type ListVersionsByContainerIDRow struct {
 	DisplayName         pgtype.Text        `json:"display_name"`
 }
 
-func (q *Queries) ListVersionsByContainerID(ctx context.Context, containerID string) ([]ListVersionsByContainerIDRow, error) {
-	rows, err := q.db.Query(ctx, listVersionsByContainerID, containerID)
+func (q *Queries) ListVersionsByContainerID(ctx context.Context, arg ListVersionsByContainerIDParams) ([]ListVersionsByContainerIDRow, error) {
+	rows, err := q.db.Query(ctx, listVersionsByContainerID, arg.ContainerID, arg.TeamID)
 	if err != nil {
 		return nil, err
 	}
@@ -114,11 +137,20 @@ func (q *Queries) ListVersionsByContainerID(ctx context.Context, containerID str
 }
 
 const nextVersion = `-- name: NextVersion :one
-SELECT COALESCE(MAX(version), 0) + 1 FROM container_versions WHERE container_id = $1
+SELECT COALESCE(MAX(cv.version), 0) + 1
+FROM container_versions cv
+JOIN containers c ON c.container_id = cv.container_id
+WHERE cv.container_id = $1
+  AND c.team_id = $2
 `
 
-func (q *Queries) NextVersion(ctx context.Context, containerID string) (int32, error) {
-	row := q.db.QueryRow(ctx, nextVersion, containerID)
+type NextVersionParams struct {
+	ContainerID string      `json:"container_id"`
+	TeamID      pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) NextVersion(ctx context.Context, arg NextVersionParams) (int32, error) {
+	row := q.db.QueryRow(ctx, nextVersion, arg.ContainerID, arg.TeamID)
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err

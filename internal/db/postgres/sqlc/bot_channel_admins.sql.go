@@ -13,7 +13,9 @@ import (
 
 const deleteBotChannelAdmin = `-- name: DeleteBotChannelAdmin :exec
 DELETE FROM bot_channel_admins
-WHERE bot_id = $1 AND channel_identity_id = $2
+WHERE bot_id = $1
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = $1)
+  AND channel_identity_id = $2
 `
 
 type DeleteBotChannelAdminParams struct {
@@ -27,9 +29,11 @@ func (q *Queries) DeleteBotChannelAdmin(ctx context.Context, arg DeleteBotChanne
 }
 
 const getBotChannelAdmin = `-- name: GetBotChannelAdmin :one
-SELECT id, bot_id, channel_identity_id, granted, created_by_user_id, created_at, updated_at
+SELECT id, bot_id, channel_identity_id, granted, created_by_user_id, created_at, updated_at, team_id
 FROM bot_channel_admins
-WHERE bot_id = $1 AND channel_identity_id = $2
+WHERE bot_id = $1
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = $1)
+  AND channel_identity_id = $2
 `
 
 type GetBotChannelAdminParams struct {
@@ -48,6 +52,7 @@ func (q *Queries) GetBotChannelAdmin(ctx context.Context, arg GetBotChannelAdmin
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -66,7 +71,8 @@ SELECT
   ci.display_name AS channel_identity_display_name,
   ci.avatar_url AS channel_identity_avatar_url
 FROM bot_channel_admins a
-LEFT JOIN channel_identities ci ON ci.id = a.channel_identity_id
+INNER JOIN bots bot_scope ON bot_scope.id = a.bot_id AND bot_scope.team_id = a.team_id
+LEFT JOIN channel_identities ci ON ci.id = a.channel_identity_id AND ci.team_id = a.team_id
 WHERE a.bot_id = $1
 ORDER BY a.created_at DESC
 `
@@ -119,36 +125,40 @@ func (q *Queries) ListBotChannelAdmins(ctx context.Context, botID pgtype.UUID) (
 
 const upsertBotChannelAdmin = `-- name: UpsertBotChannelAdmin :one
 INSERT INTO bot_channel_admins (
+  team_id,
   bot_id,
   channel_identity_id,
   granted,
   created_by_user_id
 )
-VALUES (
+SELECT
+  b.team_id,
+  b.id,
+  ci.id,
   $1,
-  $2,
-  $3,
-  $4::uuid
-)
+  $2::uuid
+FROM bots b
+INNER JOIN channel_identities ci ON ci.id = $3 AND ci.team_id = b.team_id
+WHERE b.id = $4
 ON CONFLICT (bot_id, channel_identity_id) DO UPDATE
   SET granted = EXCLUDED.granted,
       updated_at = now()
-RETURNING id, bot_id, channel_identity_id, granted, created_by_user_id, created_at, updated_at
+RETURNING id, bot_id, channel_identity_id, granted, created_by_user_id, created_at, updated_at, team_id
 `
 
 type UpsertBotChannelAdminParams struct {
-	BotID             pgtype.UUID `json:"bot_id"`
-	ChannelIdentityID pgtype.UUID `json:"channel_identity_id"`
 	Granted           bool        `json:"granted"`
 	CreatedByUserID   pgtype.UUID `json:"created_by_user_id"`
+	ChannelIdentityID pgtype.UUID `json:"channel_identity_id"`
+	BotID             pgtype.UUID `json:"bot_id"`
 }
 
 func (q *Queries) UpsertBotChannelAdmin(ctx context.Context, arg UpsertBotChannelAdminParams) (BotChannelAdmin, error) {
 	row := q.db.QueryRow(ctx, upsertBotChannelAdmin,
-		arg.BotID,
-		arg.ChannelIdentityID,
 		arg.Granted,
 		arg.CreatedByUserID,
+		arg.ChannelIdentityID,
+		arg.BotID,
 	)
 	var i BotChannelAdmin
 	err := row.Scan(
@@ -159,6 +169,7 @@ func (q *Queries) UpsertBotChannelAdmin(ctx context.Context, arg UpsertBotChanne
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

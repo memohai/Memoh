@@ -1,24 +1,32 @@
 -- name: DeleteBotChannelConfig :exec
 DELETE FROM bot_channel_configs
-WHERE bot_id = $1 AND channel_type = $2;
+WHERE bot_id = sqlc.arg(bot_id)
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = sqlc.arg(bot_id))
+  AND channel_type = sqlc.arg(channel_type);
 
 -- name: GetBotChannelConfig :one
-SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+SELECT *
 FROM bot_channel_configs
-WHERE bot_id = $1 AND channel_type = $2
+WHERE bot_id = sqlc.arg(bot_id)
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = sqlc.arg(bot_id))
+  AND channel_type = sqlc.arg(channel_type)
 LIMIT 1;
 
 -- name: GetBotChannelConfigByExternalIdentity :one
-SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+SELECT *
 FROM bot_channel_configs
-WHERE channel_type = $1 AND external_identity = $2
+WHERE team_id = sqlc.arg(team_id)
+  AND channel_type = sqlc.arg(channel_type)
+  AND external_identity = sqlc.arg(external_identity)
 LIMIT 1;
 
 -- name: UpsertBotChannelConfig :one
 INSERT INTO bot_channel_configs (
-  bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at
+  team_id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+SELECT b.team_id, b.id, sqlc.arg(channel_type), sqlc.arg(credentials), sqlc.arg(external_identity), sqlc.arg(self_identity), sqlc.arg(routing), sqlc.arg(capabilities), sqlc.arg(disabled), sqlc.arg(verified_at)
+FROM bots b
+WHERE b.id = sqlc.arg(bot_id)
 ON CONFLICT (bot_id, channel_type)
 DO UPDATE SET
   credentials = EXCLUDED.credentials,
@@ -29,15 +37,17 @@ DO UPDATE SET
   disabled = EXCLUDED.disabled,
   verified_at = EXCLUDED.verified_at,
   updated_at = now()
-RETURNING id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at;
+RETURNING *;
 
 -- name: UpdateBotChannelConfigDisabled :one
 UPDATE bot_channel_configs
 SET
-  disabled = $3,
+  disabled = sqlc.arg(disabled),
   updated_at = now()
-WHERE bot_id = $1 AND channel_type = $2
-RETURNING id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at;
+WHERE bot_id = sqlc.arg(bot_id)
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = sqlc.arg(bot_id))
+  AND channel_type = sqlc.arg(channel_type)
+RETURNING *;
 
 -- name: SaveMatrixSyncSinceToken :execrows
 UPDATE bot_channel_configs
@@ -45,31 +55,36 @@ SET routing = COALESCE(routing, '{}'::jsonb) || jsonb_build_object(
   '_matrix',
   COALESCE(routing->'_matrix', '{}'::jsonb) || jsonb_build_object('since_token', sqlc.arg(since_token)::text)
 )
-WHERE id = $1;
+WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id);
 
 -- name: ListBotChannelConfigsByType :many
-SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+SELECT *
 FROM bot_channel_configs
-WHERE channel_type = $1
+WHERE team_id = sqlc.arg(team_id)
+  AND channel_type = sqlc.arg(channel_type)
 ORDER BY created_at DESC;
 
 -- name: GetUserChannelBinding :one
-SELECT id, user_id, channel_type, config, created_at, updated_at
+SELECT *
 FROM user_channel_bindings
-WHERE user_id = $1 AND channel_type = $2
+WHERE team_id = sqlc.arg(team_id)
+  AND user_id = sqlc.arg(user_id)
+  AND channel_type = sqlc.arg(channel_type)
 LIMIT 1;
 
 -- name: UpsertUserChannelBinding :one
-INSERT INTO user_channel_bindings (user_id, channel_type, config)
-VALUES ($1, $2, $3)
-ON CONFLICT (user_id, channel_type)
+INSERT INTO user_channel_bindings (team_id, user_id, channel_type, config)
+VALUES (sqlc.arg(team_id), sqlc.arg(user_id), sqlc.arg(channel_type), sqlc.arg(config))
+ON CONFLICT (team_id, user_id, channel_type)
 DO UPDATE SET
   config = EXCLUDED.config,
   updated_at = now()
-RETURNING id, user_id, channel_type, config, created_at, updated_at;
+RETURNING *;
 
 -- name: ListUserChannelBindingsByPlatform :many
-SELECT id, user_id, channel_type, config, created_at, updated_at
+SELECT *
 FROM user_channel_bindings
-WHERE channel_type = $1
+WHERE team_id = sqlc.arg(team_id)
+  AND channel_type = sqlc.arg(channel_type)
 ORDER BY created_at DESC;

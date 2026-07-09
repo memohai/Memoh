@@ -112,12 +112,15 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("marshal config: %w", err)
 	}
-	row, err := s.queries.CreateFetchProvider(ctx, sqlc.CreateFetchProviderParams{
+	params := sqlc.CreateFetchProviderParams{
 		Name:     strings.TrimSpace(req.Name),
 		Provider: string(req.Provider),
 		Config:   configJSON,
 		Enable:   false,
-	})
+	}
+	setFetchProviderTeamID(ctx, &params)
+
+	row, err := s.queries.CreateFetchProvider(ctx, params)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("create fetch provider: %w", err)
 	}
@@ -129,7 +132,7 @@ func (s *Service) Get(ctx context.Context, id string) (GetResponse, error) {
 	if err != nil {
 		return GetResponse{}, err
 	}
-	row, err := s.queries.GetFetchProviderByID(ctx, pgID)
+	row, err := getFetchProviderByIDForScope(ctx, s.queries, pgID)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("get fetch provider: %w", err)
 	}
@@ -141,7 +144,7 @@ func (s *Service) GetRawByID(ctx context.Context, id string) (sqlc.FetchProvider
 	if err != nil {
 		return sqlc.FetchProvider{}, err
 	}
-	return s.queries.GetFetchProviderByID(ctx, pgID)
+	return getFetchProviderByIDForScope(ctx, s.queries, pgID)
 }
 
 func (s *Service) List(ctx context.Context, provider string) ([]GetResponse, error) {
@@ -151,9 +154,9 @@ func (s *Service) List(ctx context.Context, provider string) ([]GetResponse, err
 		err  error
 	)
 	if provider == "" {
-		rows, err = s.queries.ListFetchProviders(ctx)
+		rows, err = listFetchProvidersForScope(ctx, s.queries)
 	} else {
-		rows, err = s.queries.ListFetchProvidersByProvider(ctx, provider)
+		rows, err = listFetchProvidersByProviderForScope(ctx, s.queries, provider)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("list fetch providers: %w", err)
@@ -170,7 +173,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 	if err != nil {
 		return GetResponse{}, err
 	}
-	current, err := s.queries.GetFetchProviderByID(ctx, pgID)
+	current, err := getFetchProviderByIDForScope(ctx, s.queries, pgID)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("get fetch provider: %w", err)
 	}
@@ -210,13 +213,16 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 	if provider == string(ProviderNative) {
 		enable = true
 	}
-	updated, err := s.queries.UpdateFetchProvider(ctx, sqlc.UpdateFetchProviderParams{
+	params := sqlc.UpdateFetchProviderParams{
 		ID:       pgID,
 		Name:     name,
 		Provider: provider,
 		Config:   config,
 		Enable:   enable,
-	})
+	}
+	setFetchProviderTeamID(ctx, &params)
+
+	updated, err := s.queries.UpdateFetchProvider(ctx, params)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("update fetch provider: %w", err)
 	}
@@ -228,18 +234,18 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	current, err := s.queries.GetFetchProviderByID(ctx, pgID)
+	current, err := getFetchProviderByIDForScope(ctx, s.queries, pgID)
 	if err != nil {
 		return fmt.Errorf("get fetch provider: %w", err)
 	}
 	if current.Provider == string(ProviderNative) {
 		return ErrManagedNativeProvider
 	}
-	return s.queries.DeleteFetchProvider(ctx, pgID)
+	return deleteFetchProviderForScope(ctx, s.queries, pgID)
 }
 
 func (s *Service) EnsureDefaults(ctx context.Context) error {
-	rows, err := s.queries.ListFetchProviders(ctx)
+	rows, err := listFetchProvidersForScope(ctx, s.queries)
 	if err != nil {
 		return fmt.Errorf("list fetch providers: %w", err)
 	}
@@ -252,25 +258,29 @@ func (s *Service) EnsureDefaults(ctx context.Context) error {
 	for _, dp := range defaultProviders {
 		if row, ok := existing[string(dp.Name)]; ok {
 			if dp.Name == ProviderNative && !row.Enable {
-				_, err := s.queries.UpdateFetchProvider(ctx, sqlc.UpdateFetchProviderParams{
+				params := sqlc.UpdateFetchProviderParams{
 					ID:       row.ID,
 					Name:     row.Name,
 					Provider: row.Provider,
 					Config:   row.Config,
 					Enable:   true,
-				})
+				}
+				setFetchProviderTeamID(ctx, &params)
+				_, err := s.queries.UpdateFetchProvider(ctx, params)
 				if err != nil {
 					s.logger.Warn("failed to enable native fetch provider", slog.Any("error", err))
 				}
 			}
 			continue
 		}
-		_, err := s.queries.CreateFetchProvider(ctx, sqlc.CreateFetchProviderParams{
+		params := sqlc.CreateFetchProviderParams{
 			Name:     dp.DisplayName,
 			Provider: string(dp.Name),
 			Config:   []byte("{}"),
 			Enable:   dp.Enable,
-		})
+		}
+		setFetchProviderTeamID(ctx, &params)
+		_, err := s.queries.CreateFetchProvider(ctx, params)
 		if err != nil {
 			s.logger.Warn("failed to create default fetch provider",
 				slog.String("provider", string(dp.Name)),

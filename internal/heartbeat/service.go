@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 const heartbeatTokenTTL = 10 * time.Minute
@@ -31,6 +33,11 @@ const defaultHeartbeatIntervalMinutes = 1440
 // SessionCreator creates sessions for heartbeat runs.
 type SessionCreator interface {
 	CreateSession(ctx context.Context, botID, sessionType string) (string, error)
+}
+
+// TeamSessionCreator creates sessions with an explicit tenant scope.
+type TeamSessionCreator interface {
+	CreateSessionForTeam(ctx context.Context, teamID, botID, sessionType string) (string, error)
 }
 
 type Service struct {
@@ -70,12 +77,14 @@ func (s *Service) Bootstrap(ctx context.Context) error {
 	for _, row := range rows {
 		botID := row.ID.String()
 		ownerUserID := row.OwnerUserID.String()
+		teamID := teamIDFromValue(row, teams.ScopeOrDefault(ctx).TeamID)
 		cfg := Config{
+			TeamID:      teamID,
 			BotID:       botID,
 			OwnerUserID: ownerUserID,
 			Interval:    int(row.HeartbeatInterval),
 		}
-		if err := s.scheduleJob(ctx, cfg); err != nil {
+		if err := s.scheduleJob(withTeamScope(ctx, teamID), cfg); err != nil {
 			s.logger.Error("failed to schedule heartbeat", slog.String("bot_id", botID), slog.Any("error", err))
 		}
 	}
@@ -97,12 +106,14 @@ func (s *Service) Reschedule(ctx context.Context, botID string) error {
 	if !bot.HeartbeatEnabled || bot.Status != "ready" {
 		return nil
 	}
+	teamID := teams.ScopeOrDefault(ctx).TeamID
 	cfg := Config{
+		TeamID:      teamID,
 		BotID:       botID,
 		OwnerUserID: bot.OwnerUserID.String(),
 		Interval:    int(bot.HeartbeatInterval),
 	}
-	return s.scheduleJob(ctx, cfg)
+	return s.scheduleJob(withTeamScope(ctx, teamID), cfg)
 }
 
 func (s *Service) Stop(botID string) {
@@ -114,6 +125,8 @@ func (s *Service) runHeartbeat(ctx context.Context, cfg Config) {
 		s.logger.Error("heartbeat triggerer not configured")
 		return
 	}
+	teamID := firstNonEmpty(cfg.TeamID, teams.ScopeOrDefault(ctx).TeamID)
+	ctx = withTeamScope(ctx, teamID)
 
 	pgBotID, err := db.ParseUUID(cfg.BotID)
 	if err != nil {
@@ -121,22 +134,14 @@ func (s *Service) runHeartbeat(ctx context.Context, cfg Config) {
 		return
 	}
 
-	var sessionID string
-	var pgSessionID pgtype.UUID
-	if s.sessionCreator != nil {
-		sid, err := s.sessionCreator.CreateSession(ctx, cfg.BotID, "heartbeat")
-		if err != nil {
-			s.logger.Error("create heartbeat session failed", slog.String("bot_id", cfg.BotID), slog.Any("error", err))
-		} else {
-			sessionID = sid
-			pgSessionID = db.ParseUUIDOrEmpty(sid)
-		}
-	}
+	sessionID, pgSessionID := s.createRunSession(ctx, teamID, cfg.BotID, "heartbeat")
 
 	var lastHeartbeatAt string
+	pgTeamID := db.ParseUUIDOrEmpty(teamID)
 	if prevLogs, listErr := s.queries.ListHeartbeatLogsByBot(ctx, sqlc.ListHeartbeatLogsByBotParams{
-		BotID: pgBotID,
-		Limit: 1,
+		TeamID:     pgTeamID,
+		BotID:      pgBotID,
+		LimitCount: 1,
 	}); listErr == nil && len(prevLogs) > 0 {
 		lastHeartbeatAt = prevLogs[0].StartedAt.Time.UTC().Format("2006-01-02T15:04:05Z")
 	}
@@ -158,6 +163,7 @@ func (s *Service) runHeartbeat(ctx context.Context, cfg Config) {
 	}
 
 	result, err := s.triggerer.TriggerHeartbeat(ctx, cfg.BotID, TriggerPayload{
+		TeamID:          teamID,
 		BotID:           cfg.BotID,
 		Interval:        cfg.Interval,
 		OwnerUserID:     cfg.OwnerUserID,
@@ -200,6 +206,10 @@ func (s *Service) ListLogs(ctx context.Context, botID string, limit, offset int)
 	if offset < 0 {
 		offset = 0
 	}
+	pgTeamID, err := db.ParseUUID(teams.ScopeOrDefault(ctx).TeamID)
+	if err != nil {
+		return nil, 0, err
+	}
 
 	total, err := s.queries.CountHeartbeatLogsByBot(ctx, pgBotID)
 	if err != nil {
@@ -207,9 +217,10 @@ func (s *Service) ListLogs(ctx context.Context, botID string, limit, offset int)
 	}
 
 	rows, err := s.queries.ListHeartbeatLogsByBot(ctx, sqlc.ListHeartbeatLogsByBotParams{
-		BotID:  pgBotID,
-		Limit:  int32(limit),  //nolint:gosec // capped to 100 above
-		Offset: int32(offset), //nolint:gosec // validated above
+		TeamID:      pgTeamID,
+		BotID:       pgBotID,
+		LimitCount:  int32(limit),  //nolint:gosec // capped to 100 above
+		OffsetCount: int32(offset), //nolint:gosec // validated above
 	})
 	if err != nil {
 		return nil, 0, err
@@ -242,6 +253,8 @@ func (s *Service) generateTriggerToken(userID string) (string, error) {
 
 func (s *Service) scheduleJob(ctx context.Context, cfg Config) error {
 	cfg.Interval = normalizeHeartbeatInterval(cfg.Interval)
+	cfg.TeamID = firstNonEmpty(cfg.TeamID, teams.ScopeOrDefault(ctx).TeamID)
+	ctx = withTeamScope(ctx, cfg.TeamID)
 	spec := fmt.Sprintf("@every %dm", cfg.Interval)
 	job := func() {
 		runCtx, runCancel := context.WithTimeout(context.WithoutCancel(ctx), heartbeatRunTimeout)
@@ -266,6 +279,94 @@ func normalizeHeartbeatInterval(interval int) int {
 	return interval
 }
 
+func (s *Service) createRunSession(ctx context.Context, teamID, botID, sessionType string) (string, pgtype.UUID) {
+	if s.sessionCreator == nil {
+		return "", pgtype.UUID{}
+	}
+	var (
+		sessionID string
+		err       error
+	)
+	if strings.TrimSpace(teamID) != "" {
+		if creator, ok := s.sessionCreator.(TeamSessionCreator); ok {
+			sessionID, err = creator.CreateSessionForTeam(ctx, teamID, botID, sessionType)
+		} else {
+			sessionID, err = s.sessionCreator.CreateSession(ctx, botID, sessionType)
+		}
+	} else {
+		sessionID, err = s.sessionCreator.CreateSession(ctx, botID, sessionType)
+	}
+	if err != nil {
+		s.logger.Error("create heartbeat session failed",
+			slog.String("team_id", teamID),
+			slog.String("bot_id", botID),
+			slog.String("session_type", sessionType),
+			slog.Any("error", err),
+		)
+		return "", pgtype.UUID{}
+	}
+	return sessionID, db.ParseUUIDOrEmpty(sessionID)
+}
+
+func withTeamScope(ctx context.Context, teamID string) context.Context {
+	teamID = strings.TrimSpace(teamID)
+	if teamID == "" {
+		teamID = teams.DefaultTeamID
+	}
+	return teams.WithScope(ctx, teams.Scope{TeamID: teamID})
+}
+
+func teamIDFromValue(value any, fallback string) string {
+	if teamID, ok := value.(interface{ GetTeamID() string }); ok {
+		if trimmed := strings.TrimSpace(teamID.GetTeamID()); trimmed != "" {
+			return trimmed
+		}
+	}
+	if stringer, ok := value.(interface{ TeamIDString() string }); ok {
+		if trimmed := strings.TrimSpace(stringer.TeamIDString()); trimmed != "" {
+			return trimmed
+		}
+	}
+	v := reflect.ValueOf(value)
+	for v.IsValid() && v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			break
+		}
+		v = v.Elem()
+	}
+	if v.IsValid() && v.Kind() == reflect.Struct {
+		field := v.FieldByName("TeamID")
+		if field.IsValid() {
+			if field.Kind() == reflect.String {
+				if trimmed := strings.TrimSpace(field.String()); trimmed != "" {
+					return trimmed
+				}
+			}
+			if field.CanInterface() {
+				if stringer, ok := field.Interface().(fmt.Stringer); ok {
+					if trimmed := strings.TrimSpace(stringer.String()); trimmed != "" {
+						return trimmed
+					}
+				}
+			}
+		}
+	}
+	teamID := strings.TrimSpace(fallback)
+	if teamID == "" {
+		teamID = teams.DefaultTeamID
+	}
+	return teamID
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
 func (s *Service) removeJob(botID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -279,6 +380,7 @@ func (s *Service) removeJob(botID string) {
 func toLog(row sqlc.ListHeartbeatLogsByBotRow) Log {
 	l := Log{
 		ID:           row.ID.String(),
+		TeamID:       teamIDFromValue(row, ""),
 		BotID:        row.BotID.String(),
 		SessionID:    row.SessionID.String(),
 		Status:       row.Status,

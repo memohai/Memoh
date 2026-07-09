@@ -1,8 +1,8 @@
 // Package wikistore provides a graph store over the memory_nodes /
 // memory_edges tables. It defines the Store interface in terms of plain Go
 // POJOs (migrate.NodeSpec / EdgeSpec) so that the graph runtime never touches
-// sqlc or driver-specific types. The PostgreSQL implementation wraps the
-// sqlc-generated queries.
+// sqlc or driver-specific types. The PostgreSQL implementation uses the sqlc
+// DBTX connection while keeping tenant scoping local to this package.
 package wikistore
 
 import (
@@ -13,8 +13,9 @@ import (
 )
 
 // Store is the backend-agnostic contract over the memory wiki tables. All
-// methods are scoped to a single bot_id. NodeSpec/EdgeSpec come from the
-// migrate package and carry no driver-specific types.
+// methods are scoped to the team_id carried by context plus a single bot_id.
+// NodeSpec/EdgeSpec come from the migrate package and carry no driver-specific
+// types.
 type Store interface {
 	// UpsertNode inserts or updates a single node by id (idempotent on conflict).
 	UpsertNode(ctx context.Context, node migrate.NodeSpec) (migrate.NodeSpec, error)

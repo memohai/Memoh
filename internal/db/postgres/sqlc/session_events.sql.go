@@ -14,10 +14,16 @@ import (
 const countSessionEvents = `-- name: CountSessionEvents :one
 SELECT COUNT(*) FROM bot_session_events
 WHERE session_id = $1
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) CountSessionEvents(ctx context.Context, sessionID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countSessionEvents, sessionID)
+type CountSessionEventsParams struct {
+	SessionID pgtype.UUID `json:"session_id"`
+	TeamID    pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) CountSessionEvents(ctx context.Context, arg CountSessionEventsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countSessionEvents, arg.SessionID, arg.TeamID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -25,6 +31,7 @@ func (q *Queries) CountSessionEvents(ctx context.Context, sessionID pgtype.UUID)
 
 const createSessionEvent = `-- name: CreateSessionEvent :one
 INSERT INTO bot_session_events (
+  team_id,
   bot_id,
   session_id,
   event_kind,
@@ -32,12 +39,22 @@ INSERT INTO bot_session_events (
   external_message_id,
   sender_channel_identity_id,
   received_at_ms
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
+) VALUES (
+  $1::uuid,
+  $2::uuid,
+  $3::uuid,
+  $4,
+  $5,
+  $6::text,
+  $7::uuid,
+  $8
+)
 ON CONFLICT DO NOTHING
 RETURNING id
 `
 
 type CreateSessionEventParams struct {
+	TeamID                  pgtype.UUID `json:"team_id"`
 	BotID                   pgtype.UUID `json:"bot_id"`
 	SessionID               pgtype.UUID `json:"session_id"`
 	EventKind               string      `json:"event_kind"`
@@ -49,6 +66,7 @@ type CreateSessionEventParams struct {
 
 func (q *Queries) CreateSessionEvent(ctx context.Context, arg CreateSessionEventParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, createSessionEvent,
+		arg.TeamID,
 		arg.BotID,
 		arg.SessionID,
 		arg.EventKind,
@@ -65,21 +83,33 @@ func (q *Queries) CreateSessionEvent(ctx context.Context, arg CreateSessionEvent
 const deleteSessionEventsByBot = `-- name: DeleteSessionEventsByBot :exec
 DELETE FROM bot_session_events
 WHERE bot_id = $1
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) DeleteSessionEventsByBot(ctx context.Context, botID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteSessionEventsByBot, botID)
+type DeleteSessionEventsByBotParams struct {
+	BotID  pgtype.UUID `json:"bot_id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteSessionEventsByBot(ctx context.Context, arg DeleteSessionEventsByBotParams) error {
+	_, err := q.db.Exec(ctx, deleteSessionEventsByBot, arg.BotID, arg.TeamID)
 	return err
 }
 
 const listSessionEventsByBot = `-- name: ListSessionEventsByBot :many
-SELECT id, bot_id, session_id, event_kind, event_data, external_message_id, sender_channel_identity_id, received_at_ms, created_at FROM bot_session_events
+SELECT id, bot_id, session_id, event_kind, event_data, external_message_id, sender_channel_identity_id, received_at_ms, created_at, team_id FROM bot_session_events
 WHERE bot_id = $1
+  AND team_id = $2::uuid
 ORDER BY received_at_ms ASC, id ASC
 `
 
-func (q *Queries) ListSessionEventsByBot(ctx context.Context, botID pgtype.UUID) ([]BotSessionEvent, error) {
-	rows, err := q.db.Query(ctx, listSessionEventsByBot, botID)
+type ListSessionEventsByBotParams struct {
+	BotID  pgtype.UUID `json:"bot_id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) ListSessionEventsByBot(ctx context.Context, arg ListSessionEventsByBotParams) ([]BotSessionEvent, error) {
+	rows, err := q.db.Query(ctx, listSessionEventsByBot, arg.BotID, arg.TeamID)
 	if err != nil {
 		return nil, err
 	}
@@ -97,6 +127,7 @@ func (q *Queries) ListSessionEventsByBot(ctx context.Context, botID pgtype.UUID)
 			&i.SenderChannelIdentityID,
 			&i.ReceivedAtMs,
 			&i.CreatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -109,13 +140,19 @@ func (q *Queries) ListSessionEventsByBot(ctx context.Context, botID pgtype.UUID)
 }
 
 const listSessionEventsBySession = `-- name: ListSessionEventsBySession :many
-SELECT id, bot_id, session_id, event_kind, event_data, external_message_id, sender_channel_identity_id, received_at_ms, created_at FROM bot_session_events
+SELECT id, bot_id, session_id, event_kind, event_data, external_message_id, sender_channel_identity_id, received_at_ms, created_at, team_id FROM bot_session_events
 WHERE session_id = $1
+  AND team_id = $2::uuid
 ORDER BY received_at_ms ASC
 `
 
-func (q *Queries) ListSessionEventsBySession(ctx context.Context, sessionID pgtype.UUID) ([]BotSessionEvent, error) {
-	rows, err := q.db.Query(ctx, listSessionEventsBySession, sessionID)
+type ListSessionEventsBySessionParams struct {
+	SessionID pgtype.UUID `json:"session_id"`
+	TeamID    pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) ListSessionEventsBySession(ctx context.Context, arg ListSessionEventsBySessionParams) ([]BotSessionEvent, error) {
+	rows, err := q.db.Query(ctx, listSessionEventsBySession, arg.SessionID, arg.TeamID)
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +170,7 @@ func (q *Queries) ListSessionEventsBySession(ctx context.Context, sessionID pgty
 			&i.SenderChannelIdentityID,
 			&i.ReceivedAtMs,
 			&i.CreatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -145,18 +183,21 @@ func (q *Queries) ListSessionEventsBySession(ctx context.Context, sessionID pgty
 }
 
 const listSessionEventsBySessionAfter = `-- name: ListSessionEventsBySessionAfter :many
-SELECT id, bot_id, session_id, event_kind, event_data, external_message_id, sender_channel_identity_id, received_at_ms, created_at FROM bot_session_events
-WHERE session_id = $1 AND received_at_ms >= $2
+SELECT id, bot_id, session_id, event_kind, event_data, external_message_id, sender_channel_identity_id, received_at_ms, created_at, team_id FROM bot_session_events
+WHERE session_id = $1
+  AND team_id = $2::uuid
+  AND received_at_ms >= $3
 ORDER BY received_at_ms ASC
 `
 
 type ListSessionEventsBySessionAfterParams struct {
 	SessionID    pgtype.UUID `json:"session_id"`
+	TeamID       pgtype.UUID `json:"team_id"`
 	ReceivedAtMs int64       `json:"received_at_ms"`
 }
 
 func (q *Queries) ListSessionEventsBySessionAfter(ctx context.Context, arg ListSessionEventsBySessionAfterParams) ([]BotSessionEvent, error) {
-	rows, err := q.db.Query(ctx, listSessionEventsBySessionAfter, arg.SessionID, arg.ReceivedAtMs)
+	rows, err := q.db.Query(ctx, listSessionEventsBySessionAfter, arg.SessionID, arg.TeamID, arg.ReceivedAtMs)
 	if err != nil {
 		return nil, err
 	}
@@ -174,6 +215,7 @@ func (q *Queries) ListSessionEventsBySessionAfter(ctx context.Context, arg ListS
 			&i.SenderChannelIdentityID,
 			&i.ReceivedAtMs,
 			&i.CreatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}

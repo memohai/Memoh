@@ -12,17 +12,19 @@ import (
 )
 
 const createEmailProvider = `-- name: CreateEmailProvider :one
-INSERT INTO email_providers (user_id, name, provider, config)
+INSERT INTO email_providers (team_id, user_id, name, provider, config)
 VALUES (
   $1,
   $2,
   $3,
-  $4
+  $4,
+  $5
 )
-RETURNING id, user_id, name, provider, config, created_at, updated_at
+RETURNING id, user_id, name, provider, config, created_at, updated_at, team_id
 `
 
 type CreateEmailProviderParams struct {
+	TeamID   pgtype.UUID `json:"team_id"`
 	UserID   pgtype.UUID `json:"user_id"`
 	Name     string      `json:"name"`
 	Provider string      `json:"provider"`
@@ -31,6 +33,7 @@ type CreateEmailProviderParams struct {
 
 func (q *Queries) CreateEmailProvider(ctx context.Context, arg CreateEmailProviderParams) (EmailProvider, error) {
 	row := q.db.QueryRow(ctx, createEmailProvider,
+		arg.TeamID,
 		arg.UserID,
 		arg.Name,
 		arg.Provider,
@@ -45,41 +48,58 @@ func (q *Queries) CreateEmailProvider(ctx context.Context, arg CreateEmailProvid
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const deleteEmailProvider = `-- name: DeleteEmailProvider :exec
-DELETE FROM email_providers WHERE id = $1
+DELETE FROM email_providers
+WHERE id = $1
+  AND team_id = $2
 `
 
-func (q *Queries) DeleteEmailProvider(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteEmailProvider, id)
+type DeleteEmailProviderParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteEmailProvider(ctx context.Context, arg DeleteEmailProviderParams) error {
+	_, err := q.db.Exec(ctx, deleteEmailProvider, arg.ID, arg.TeamID)
 	return err
 }
 
 const deleteEmailProviderByIDAndUser = `-- name: DeleteEmailProviderByIDAndUser :exec
 DELETE FROM email_providers
 WHERE id = $1
-  AND user_id = $2
+  AND team_id = $2
+  AND user_id = $3
 `
 
 type DeleteEmailProviderByIDAndUserParams struct {
 	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
 	UserID pgtype.UUID `json:"user_id"`
 }
 
 func (q *Queries) DeleteEmailProviderByIDAndUser(ctx context.Context, arg DeleteEmailProviderByIDAndUserParams) error {
-	_, err := q.db.Exec(ctx, deleteEmailProviderByIDAndUser, arg.ID, arg.UserID)
+	_, err := q.db.Exec(ctx, deleteEmailProviderByIDAndUser, arg.ID, arg.TeamID, arg.UserID)
 	return err
 }
 
 const getEmailProviderByID = `-- name: GetEmailProviderByID :one
-SELECT id, user_id, name, provider, config, created_at, updated_at FROM email_providers WHERE id = $1
+SELECT id, user_id, name, provider, config, created_at, updated_at, team_id FROM email_providers
+WHERE id = $1
+  AND team_id = $2
 `
 
-func (q *Queries) GetEmailProviderByID(ctx context.Context, id pgtype.UUID) (EmailProvider, error) {
-	row := q.db.QueryRow(ctx, getEmailProviderByID, id)
+type GetEmailProviderByIDParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetEmailProviderByID(ctx context.Context, arg GetEmailProviderByIDParams) (EmailProvider, error) {
+	row := q.db.QueryRow(ctx, getEmailProviderByID, arg.ID, arg.TeamID)
 	var i EmailProvider
 	err := row.Scan(
 		&i.ID,
@@ -89,23 +109,26 @@ func (q *Queries) GetEmailProviderByID(ctx context.Context, id pgtype.UUID) (Ema
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getEmailProviderByIDAndUser = `-- name: GetEmailProviderByIDAndUser :one
-SELECT id, user_id, name, provider, config, created_at, updated_at FROM email_providers
+SELECT id, user_id, name, provider, config, created_at, updated_at, team_id FROM email_providers
 WHERE id = $1
-  AND user_id = $2
+  AND team_id = $2
+  AND user_id = $3
 `
 
 type GetEmailProviderByIDAndUserParams struct {
 	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
 	UserID pgtype.UUID `json:"user_id"`
 }
 
 func (q *Queries) GetEmailProviderByIDAndUser(ctx context.Context, arg GetEmailProviderByIDAndUserParams) (EmailProvider, error) {
-	row := q.db.QueryRow(ctx, getEmailProviderByIDAndUser, arg.ID, arg.UserID)
+	row := q.db.QueryRow(ctx, getEmailProviderByIDAndUser, arg.ID, arg.TeamID, arg.UserID)
 	var i EmailProvider
 	err := row.Scan(
 		&i.ID,
@@ -115,23 +138,26 @@ func (q *Queries) GetEmailProviderByIDAndUser(ctx context.Context, arg GetEmailP
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getEmailProviderByNameAndUser = `-- name: GetEmailProviderByNameAndUser :one
-SELECT id, user_id, name, provider, config, created_at, updated_at FROM email_providers
-WHERE user_id = $1
-  AND name = $2
+SELECT id, user_id, name, provider, config, created_at, updated_at, team_id FROM email_providers
+WHERE team_id = $1
+  AND user_id = $2
+  AND name = $3
 `
 
 type GetEmailProviderByNameAndUserParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
 	UserID pgtype.UUID `json:"user_id"`
 	Name   string      `json:"name"`
 }
 
 func (q *Queries) GetEmailProviderByNameAndUser(ctx context.Context, arg GetEmailProviderByNameAndUserParams) (EmailProvider, error) {
-	row := q.db.QueryRow(ctx, getEmailProviderByNameAndUser, arg.UserID, arg.Name)
+	row := q.db.QueryRow(ctx, getEmailProviderByNameAndUser, arg.TeamID, arg.UserID, arg.Name)
 	var i EmailProvider
 	err := row.Scan(
 		&i.ID,
@@ -141,17 +167,19 @@ func (q *Queries) GetEmailProviderByNameAndUser(ctx context.Context, arg GetEmai
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listEmailProviders = `-- name: ListEmailProviders :many
-SELECT id, user_id, name, provider, config, created_at, updated_at FROM email_providers
+SELECT id, user_id, name, provider, config, created_at, updated_at, team_id FROM email_providers
+WHERE team_id = $1
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListEmailProviders(ctx context.Context) ([]EmailProvider, error) {
-	rows, err := q.db.Query(ctx, listEmailProviders)
+func (q *Queries) ListEmailProviders(ctx context.Context, teamID pgtype.UUID) ([]EmailProvider, error) {
+	rows, err := q.db.Query(ctx, listEmailProviders, teamID)
 	if err != nil {
 		return nil, err
 	}
@@ -167,6 +195,7 @@ func (q *Queries) ListEmailProviders(ctx context.Context) ([]EmailProvider, erro
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -179,13 +208,19 @@ func (q *Queries) ListEmailProviders(ctx context.Context) ([]EmailProvider, erro
 }
 
 const listEmailProvidersByProvider = `-- name: ListEmailProvidersByProvider :many
-SELECT id, user_id, name, provider, config, created_at, updated_at FROM email_providers
-WHERE provider = $1
+SELECT id, user_id, name, provider, config, created_at, updated_at, team_id FROM email_providers
+WHERE team_id = $1
+  AND provider = $2
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListEmailProvidersByProvider(ctx context.Context, provider string) ([]EmailProvider, error) {
-	rows, err := q.db.Query(ctx, listEmailProvidersByProvider, provider)
+type ListEmailProvidersByProviderParams struct {
+	TeamID   pgtype.UUID `json:"team_id"`
+	Provider string      `json:"provider"`
+}
+
+func (q *Queries) ListEmailProvidersByProvider(ctx context.Context, arg ListEmailProvidersByProviderParams) ([]EmailProvider, error) {
+	rows, err := q.db.Query(ctx, listEmailProvidersByProvider, arg.TeamID, arg.Provider)
 	if err != nil {
 		return nil, err
 	}
@@ -201,6 +236,7 @@ func (q *Queries) ListEmailProvidersByProvider(ctx context.Context, provider str
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -213,13 +249,19 @@ func (q *Queries) ListEmailProvidersByProvider(ctx context.Context, provider str
 }
 
 const listEmailProvidersByUser = `-- name: ListEmailProvidersByUser :many
-SELECT id, user_id, name, provider, config, created_at, updated_at FROM email_providers
-WHERE user_id = $1
+SELECT id, user_id, name, provider, config, created_at, updated_at, team_id FROM email_providers
+WHERE team_id = $1
+  AND user_id = $2
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListEmailProvidersByUser(ctx context.Context, userID pgtype.UUID) ([]EmailProvider, error) {
-	rows, err := q.db.Query(ctx, listEmailProvidersByUser, userID)
+type ListEmailProvidersByUserParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	UserID pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) ListEmailProvidersByUser(ctx context.Context, arg ListEmailProvidersByUserParams) ([]EmailProvider, error) {
+	rows, err := q.db.Query(ctx, listEmailProvidersByUser, arg.TeamID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -235,6 +277,7 @@ func (q *Queries) ListEmailProvidersByUser(ctx context.Context, userID pgtype.UU
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -247,19 +290,21 @@ func (q *Queries) ListEmailProvidersByUser(ctx context.Context, userID pgtype.UU
 }
 
 const listEmailProvidersByUserAndProvider = `-- name: ListEmailProvidersByUserAndProvider :many
-SELECT id, user_id, name, provider, config, created_at, updated_at FROM email_providers
-WHERE user_id = $1
-  AND provider = $2
+SELECT id, user_id, name, provider, config, created_at, updated_at, team_id FROM email_providers
+WHERE team_id = $1
+  AND user_id = $2
+  AND provider = $3
 ORDER BY created_at DESC
 `
 
 type ListEmailProvidersByUserAndProviderParams struct {
+	TeamID   pgtype.UUID `json:"team_id"`
 	UserID   pgtype.UUID `json:"user_id"`
 	Provider string      `json:"provider"`
 }
 
 func (q *Queries) ListEmailProvidersByUserAndProvider(ctx context.Context, arg ListEmailProvidersByUserAndProviderParams) ([]EmailProvider, error) {
-	rows, err := q.db.Query(ctx, listEmailProvidersByUserAndProvider, arg.UserID, arg.Provider)
+	rows, err := q.db.Query(ctx, listEmailProvidersByUserAndProvider, arg.TeamID, arg.UserID, arg.Provider)
 	if err != nil {
 		return nil, err
 	}
@@ -275,6 +320,7 @@ func (q *Queries) ListEmailProvidersByUserAndProvider(ctx context.Context, arg L
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -294,7 +340,8 @@ SET
   config = $3,
   updated_at = now()
 WHERE id = $4
-RETURNING id, user_id, name, provider, config, created_at, updated_at
+  AND team_id = $5
+RETURNING id, user_id, name, provider, config, created_at, updated_at, team_id
 `
 
 type UpdateEmailProviderParams struct {
@@ -302,6 +349,7 @@ type UpdateEmailProviderParams struct {
 	Provider string      `json:"provider"`
 	Config   []byte      `json:"config"`
 	ID       pgtype.UUID `json:"id"`
+	TeamID   pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateEmailProvider(ctx context.Context, arg UpdateEmailProviderParams) (EmailProvider, error) {
@@ -310,6 +358,7 @@ func (q *Queries) UpdateEmailProvider(ctx context.Context, arg UpdateEmailProvid
 		arg.Provider,
 		arg.Config,
 		arg.ID,
+		arg.TeamID,
 	)
 	var i EmailProvider
 	err := row.Scan(
@@ -320,6 +369,7 @@ func (q *Queries) UpdateEmailProvider(ctx context.Context, arg UpdateEmailProvid
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -332,8 +382,9 @@ SET
   config = $3,
   updated_at = now()
 WHERE id = $4
-  AND user_id = $5
-RETURNING id, user_id, name, provider, config, created_at, updated_at
+  AND team_id = $5
+  AND user_id = $6
+RETURNING id, user_id, name, provider, config, created_at, updated_at, team_id
 `
 
 type UpdateEmailProviderByIDAndUserParams struct {
@@ -341,6 +392,7 @@ type UpdateEmailProviderByIDAndUserParams struct {
 	Provider string      `json:"provider"`
 	Config   []byte      `json:"config"`
 	ID       pgtype.UUID `json:"id"`
+	TeamID   pgtype.UUID `json:"team_id"`
 	UserID   pgtype.UUID `json:"user_id"`
 }
 
@@ -350,6 +402,7 @@ func (q *Queries) UpdateEmailProviderByIDAndUser(ctx context.Context, arg Update
 		arg.Provider,
 		arg.Config,
 		arg.ID,
+		arg.TeamID,
 		arg.UserID,
 	)
 	var i EmailProvider
@@ -361,6 +414,7 @@ func (q *Queries) UpdateEmailProviderByIDAndUser(ctx context.Context, arg Update
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

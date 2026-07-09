@@ -33,12 +33,12 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 		return TestResponse{}, fmt.Errorf("invalid model id: %w", err)
 	}
 
-	model, err := s.queries.GetModelByID(ctx, modelID)
+	model, err := getModelByIDForScope(ctx, s.queries, modelID)
 	if err != nil {
 		return TestResponse{}, fmt.Errorf("get model: %w", err)
 	}
 
-	provider, err := s.queries.GetProviderByID(ctx, model.ProviderID)
+	provider, err := getProviderByIDForScope(ctx, s.queries, model.ProviderID)
 	if err != nil {
 		return TestResponse{}, fmt.Errorf("get provider: %w", err)
 	}
@@ -213,7 +213,7 @@ func (s *Service) resolveModelCredentials(ctx context.Context, provider sqlc.Pro
 		return modelCredentials{APIKey: token}, nil
 
 	case ClientTypeOpenAICodex:
-		tokenRow, err := s.queries.GetProviderOAuthTokenByProvider(ctx, provider.ID)
+		tokenRow, err := getProviderOAuthTokenByProviderForScope(ctx, s.queries, provider.ID)
 		if err != nil {
 			return modelCredentials{}, err
 		}
@@ -244,7 +244,7 @@ func (s *Service) resolveGitHubCopilotAccessToken(ctx context.Context, provider 
 	if err != nil {
 		return "", err
 	}
-	row, err := s.queries.GetUserProviderOAuthToken(ctx, sqlc.GetUserProviderOAuthTokenParams{
+	row, err := getUserProviderOAuthTokenForScope(ctx, s.queries, sqlc.GetUserProviderOAuthTokenParams{
 		ProviderID: provider.ID,
 		UserID:     userUUID,
 	})

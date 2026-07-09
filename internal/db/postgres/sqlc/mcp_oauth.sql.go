@@ -22,6 +22,7 @@ SET access_token = '',
     redirect_uri = '',
     updated_at = now()
 WHERE connection_id = $1
+  AND team_id = (SELECT c.team_id FROM mcp_connections c WHERE c.id = $1)
 `
 
 func (q *Queries) ClearMCPOAuthTokens(ctx context.Context, connectionID pgtype.UUID) error {
@@ -32,6 +33,7 @@ func (q *Queries) ClearMCPOAuthTokens(ctx context.Context, connectionID pgtype.U
 const deleteMCPOAuthToken = `-- name: DeleteMCPOAuthToken :exec
 DELETE FROM mcp_oauth_tokens
 WHERE connection_id = $1
+  AND team_id = (SELECT c.team_id FROM mcp_connections c WHERE c.id = $1)
 `
 
 func (q *Queries) DeleteMCPOAuthToken(ctx context.Context, connectionID pgtype.UUID) error {
@@ -40,13 +42,10 @@ func (q *Queries) DeleteMCPOAuthToken(ctx context.Context, connectionID pgtype.U
 }
 
 const getMCPOAuthToken = `-- name: GetMCPOAuthToken :one
-SELECT id, connection_id, resource_metadata_url, authorization_server_url,
-       authorization_endpoint, token_endpoint, registration_endpoint,
-       scopes_supported, client_id, client_secret, access_token, refresh_token,
-       token_type, expires_at, scope, pkce_code_verifier, state_param,
-       resource_uri, redirect_uri, created_at, updated_at
-FROM mcp_oauth_tokens
+SELECT id, connection_id, resource_metadata_url, authorization_server_url, authorization_endpoint, token_endpoint, registration_endpoint, scopes_supported, client_id, client_secret, access_token, refresh_token, token_type, expires_at, scope, pkce_code_verifier, state_param, resource_uri, redirect_uri, created_at, updated_at, team_id
+FROM mcp_oauth_tokens t
 WHERE connection_id = $1
+  AND team_id = (SELECT c.team_id FROM mcp_connections c WHERE c.id = $1)
 LIMIT 1
 `
 
@@ -75,18 +74,19 @@ func (q *Queries) GetMCPOAuthToken(ctx context.Context, connectionID pgtype.UUID
 		&i.RedirectUri,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getMCPOAuthTokenByState = `-- name: GetMCPOAuthTokenByState :one
-SELECT id, connection_id, resource_metadata_url, authorization_server_url,
-       authorization_endpoint, token_endpoint, registration_endpoint,
-       scopes_supported, client_id, client_secret, access_token, refresh_token,
-       token_type, expires_at, scope, pkce_code_verifier, state_param,
-       resource_uri, redirect_uri, created_at, updated_at
-FROM mcp_oauth_tokens
-WHERE state_param = $1
+SELECT t.id, t.connection_id, t.resource_metadata_url, t.authorization_server_url, t.authorization_endpoint, t.token_endpoint, t.registration_endpoint, t.scopes_supported, t.client_id, t.client_secret, t.access_token, t.refresh_token, t.token_type, t.expires_at, t.scope, t.pkce_code_verifier, t.state_param, t.resource_uri, t.redirect_uri, t.created_at, t.updated_at, t.team_id
+FROM mcp_oauth_tokens t
+JOIN mcp_connections c
+  ON c.id = t.connection_id
+ AND c.team_id = t.team_id
+WHERE t.state_param = $1
+  AND t.state_param <> ''
 LIMIT 1
 `
 
@@ -115,96 +115,102 @@ func (q *Queries) GetMCPOAuthTokenByState(ctx context.Context, stateParam string
 		&i.RedirectUri,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const updateMCPOAuthClientSecret = `-- name: UpdateMCPOAuthClientSecret :exec
 UPDATE mcp_oauth_tokens
-SET client_secret = $2,
+SET client_secret = $1,
     updated_at = now()
-WHERE connection_id = $1
+WHERE connection_id = $2
+  AND team_id = (SELECT c.team_id FROM mcp_connections c WHERE c.id = $2)
 `
 
 type UpdateMCPOAuthClientSecretParams struct {
-	ConnectionID pgtype.UUID `json:"connection_id"`
 	ClientSecret string      `json:"client_secret"`
+	ConnectionID pgtype.UUID `json:"connection_id"`
 }
 
 func (q *Queries) UpdateMCPOAuthClientSecret(ctx context.Context, arg UpdateMCPOAuthClientSecretParams) error {
-	_, err := q.db.Exec(ctx, updateMCPOAuthClientSecret, arg.ConnectionID, arg.ClientSecret)
+	_, err := q.db.Exec(ctx, updateMCPOAuthClientSecret, arg.ClientSecret, arg.ConnectionID)
 	return err
 }
 
 const updateMCPOAuthPKCEState = `-- name: UpdateMCPOAuthPKCEState :exec
 UPDATE mcp_oauth_tokens
-SET pkce_code_verifier = $2,
-    state_param = $3,
-    client_id = $4,
-    redirect_uri = $5,
+SET pkce_code_verifier = $1,
+    state_param = $2,
+    client_id = $3,
+    redirect_uri = $4,
     updated_at = now()
-WHERE connection_id = $1
+WHERE connection_id = $5
+  AND team_id = (SELECT c.team_id FROM mcp_connections c WHERE c.id = $5)
 `
 
 type UpdateMCPOAuthPKCEStateParams struct {
-	ConnectionID     pgtype.UUID `json:"connection_id"`
 	PkceCodeVerifier string      `json:"pkce_code_verifier"`
 	StateParam       string      `json:"state_param"`
 	ClientID         string      `json:"client_id"`
 	RedirectUri      string      `json:"redirect_uri"`
+	ConnectionID     pgtype.UUID `json:"connection_id"`
 }
 
 func (q *Queries) UpdateMCPOAuthPKCEState(ctx context.Context, arg UpdateMCPOAuthPKCEStateParams) error {
 	_, err := q.db.Exec(ctx, updateMCPOAuthPKCEState,
-		arg.ConnectionID,
 		arg.PkceCodeVerifier,
 		arg.StateParam,
 		arg.ClientID,
 		arg.RedirectUri,
+		arg.ConnectionID,
 	)
 	return err
 }
 
 const updateMCPOAuthTokens = `-- name: UpdateMCPOAuthTokens :exec
 UPDATE mcp_oauth_tokens
-SET access_token = $2,
-    refresh_token = $3,
-    token_type = $4,
-    expires_at = $5,
-    scope = $6,
+SET access_token = $1,
+    refresh_token = $2,
+    token_type = $3,
+    expires_at = $4,
+    scope = $5,
     pkce_code_verifier = '',
     state_param = '',
     updated_at = now()
-WHERE connection_id = $1
+WHERE connection_id = $6
+  AND team_id = (SELECT c.team_id FROM mcp_connections c WHERE c.id = $6)
 `
 
 type UpdateMCPOAuthTokensParams struct {
-	ConnectionID pgtype.UUID        `json:"connection_id"`
 	AccessToken  string             `json:"access_token"`
 	RefreshToken string             `json:"refresh_token"`
 	TokenType    string             `json:"token_type"`
 	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
 	Scope        string             `json:"scope"`
+	ConnectionID pgtype.UUID        `json:"connection_id"`
 }
 
 func (q *Queries) UpdateMCPOAuthTokens(ctx context.Context, arg UpdateMCPOAuthTokensParams) error {
 	_, err := q.db.Exec(ctx, updateMCPOAuthTokens,
-		arg.ConnectionID,
 		arg.AccessToken,
 		arg.RefreshToken,
 		arg.TokenType,
 		arg.ExpiresAt,
 		arg.Scope,
+		arg.ConnectionID,
 	)
 	return err
 }
 
 const upsertMCPOAuthDiscovery = `-- name: UpsertMCPOAuthDiscovery :one
-INSERT INTO mcp_oauth_tokens (connection_id, resource_metadata_url, authorization_server_url,
+INSERT INTO mcp_oauth_tokens (team_id, connection_id, resource_metadata_url, authorization_server_url,
     authorization_endpoint, token_endpoint, registration_endpoint, scopes_supported,
     resource_uri)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-ON CONFLICT (connection_id)
+SELECT c.team_id, c.id, $1, $2, $3, $4, $5, $6, $7
+FROM mcp_connections c
+WHERE c.id = $8
+ON CONFLICT (team_id, connection_id)
 DO UPDATE SET resource_metadata_url = EXCLUDED.resource_metadata_url,
               authorization_server_url = EXCLUDED.authorization_server_url,
               authorization_endpoint = EXCLUDED.authorization_endpoint,
@@ -213,15 +219,10 @@ DO UPDATE SET resource_metadata_url = EXCLUDED.resource_metadata_url,
               scopes_supported = EXCLUDED.scopes_supported,
               resource_uri = EXCLUDED.resource_uri,
               updated_at = now()
-RETURNING id, connection_id, resource_metadata_url, authorization_server_url,
-          authorization_endpoint, token_endpoint, registration_endpoint,
-          scopes_supported, client_id, client_secret, access_token, refresh_token,
-          token_type, expires_at, scope, pkce_code_verifier, state_param,
-          resource_uri, redirect_uri, created_at, updated_at
+RETURNING id, connection_id, resource_metadata_url, authorization_server_url, authorization_endpoint, token_endpoint, registration_endpoint, scopes_supported, client_id, client_secret, access_token, refresh_token, token_type, expires_at, scope, pkce_code_verifier, state_param, resource_uri, redirect_uri, created_at, updated_at, team_id
 `
 
 type UpsertMCPOAuthDiscoveryParams struct {
-	ConnectionID           pgtype.UUID `json:"connection_id"`
 	ResourceMetadataUrl    string      `json:"resource_metadata_url"`
 	AuthorizationServerUrl string      `json:"authorization_server_url"`
 	AuthorizationEndpoint  string      `json:"authorization_endpoint"`
@@ -229,11 +230,11 @@ type UpsertMCPOAuthDiscoveryParams struct {
 	RegistrationEndpoint   string      `json:"registration_endpoint"`
 	ScopesSupported        []string    `json:"scopes_supported"`
 	ResourceUri            string      `json:"resource_uri"`
+	ConnectionID           pgtype.UUID `json:"connection_id"`
 }
 
 func (q *Queries) UpsertMCPOAuthDiscovery(ctx context.Context, arg UpsertMCPOAuthDiscoveryParams) (McpOauthToken, error) {
 	row := q.db.QueryRow(ctx, upsertMCPOAuthDiscovery,
-		arg.ConnectionID,
 		arg.ResourceMetadataUrl,
 		arg.AuthorizationServerUrl,
 		arg.AuthorizationEndpoint,
@@ -241,6 +242,7 @@ func (q *Queries) UpsertMCPOAuthDiscovery(ctx context.Context, arg UpsertMCPOAut
 		arg.RegistrationEndpoint,
 		arg.ScopesSupported,
 		arg.ResourceUri,
+		arg.ConnectionID,
 	)
 	var i McpOauthToken
 	err := row.Scan(
@@ -265,6 +267,7 @@ func (q *Queries) UpsertMCPOAuthDiscovery(ctx context.Context, arg UpsertMCPOAut
 		&i.RedirectUri,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

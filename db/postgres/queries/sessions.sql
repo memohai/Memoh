@@ -1,8 +1,9 @@
 -- name: CreateSession :one
 INSERT INTO bot_sessions (
-  bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, parent_session_id, created_by_user_id
+  team_id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, parent_session_id, created_by_user_id
 )
 VALUES (
+  sqlc.arg(team_id)::uuid,
   sqlc.arg(bot_id),
   sqlc.narg(route_id)::uuid,
   sqlc.narg(channel_type)::text,
@@ -23,6 +24,7 @@ WITH source_session AS (
   FROM bot_sessions s
   WHERE s.id = sqlc.arg(session_id)
     AND s.bot_id = sqlc.arg(bot_id)
+    AND s.team_id = sqlc.arg(team_id)::uuid
     AND s.type = 'chat'
     AND s.deleted_at IS NULL
 ),
@@ -33,6 +35,7 @@ target_turn AS (
     vm.id AS message_id
   FROM source_session s
   JOIN bot_visible_history_messages vm ON vm.session_id = s.id
+    AND vm.team_id = sqlc.arg(team_id)::uuid
     AND vm.id = sqlc.arg(message_id)
     AND vm.role = 'assistant'
     AND vm.turn_id IS NOT NULL
@@ -41,6 +44,7 @@ target_turn AS (
 ),
 created_session AS (
   INSERT INTO bot_sessions (
+    team_id,
     bot_id,
     channel_type,
     type,
@@ -52,6 +56,7 @@ created_session AS (
     created_by_user_id
   )
   SELECT
+    s.team_id,
     s.bot_id,
     s.channel_type,
     s.type,
@@ -91,6 +96,7 @@ copy_messages AS (
     OR vm.turn_position = tt.position
   )
   WHERE vm.session_id = sqlc.arg(session_id)
+    AND vm.team_id = sqlc.arg(team_id)::uuid
   ORDER BY vm.turn_position ASC, vm.turn_message_seq ASC, vm.created_at ASC, vm.id ASC
 ),
 copy_turns AS (
@@ -108,6 +114,7 @@ copy_turns AS (
 inserted_messages AS (
   INSERT INTO bot_history_messages (
     id,
+    team_id,
     bot_id,
     session_id,
     sender_channel_identity_id,
@@ -130,6 +137,7 @@ inserted_messages AS (
   )
   SELECT
     cm.new_message_id,
+    cs.team_id,
     cs.bot_id,
     cs.id,
     cm.sender_channel_identity_id,
@@ -217,7 +225,8 @@ WHERE EXISTS (SELECT 1 FROM copy_turns)
 -- name: GetSessionByID :one
 SELECT *
 FROM bot_sessions
-WHERE id = $1
+WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid
   AND deleted_at IS NULL;
 
 -- name: ListSessionsByBot :many
@@ -227,8 +236,9 @@ SELECT
   r.metadata AS route_metadata,
   r.conversation_type AS route_conversation_type
 FROM bot_sessions s
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id AND r.team_id = s.team_id
 WHERE s.bot_id = sqlc.arg(bot_id)
+  AND s.team_id = sqlc.arg(team_id)::uuid
   AND s.deleted_at IS NULL
 ORDER BY s.updated_at DESC;
 
@@ -239,8 +249,9 @@ SELECT
   r.metadata AS route_metadata,
   r.conversation_type AS route_conversation_type
 FROM bot_sessions s
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id AND r.team_id = s.team_id
 WHERE s.bot_id = sqlc.arg(bot_id)
+  AND s.team_id = sqlc.arg(team_id)::uuid
   AND s.created_by_user_id = sqlc.arg(created_by_user_id)
   AND s.deleted_at IS NULL
 ORDER BY s.updated_at DESC;
@@ -255,8 +266,9 @@ SELECT
   r.metadata AS route_metadata,
   r.conversation_type AS route_conversation_type
 FROM bot_sessions s
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id AND r.team_id = s.team_id
 WHERE s.bot_id = sqlc.arg(bot_id)
+  AND s.team_id = sqlc.arg(team_id)::uuid
   AND s.deleted_at IS NULL
   AND s.type = ANY(sqlc.arg(types)::text[])
   AND (
@@ -277,8 +289,9 @@ SELECT
   r.metadata AS route_metadata,
   r.conversation_type AS route_conversation_type
 FROM bot_sessions s
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id AND r.team_id = s.team_id
 WHERE s.bot_id = sqlc.arg(bot_id)
+  AND s.team_id = sqlc.arg(team_id)::uuid
   AND s.created_by_user_id = sqlc.arg(created_by_user_id)
   AND s.deleted_at IS NULL
   AND s.type = ANY(sqlc.arg(types)::text[])
@@ -297,19 +310,24 @@ LIMIT sqlc.arg(limit_count)::int;
 SELECT *
 FROM bot_sessions
 WHERE route_id = sqlc.arg(route_id)
+  AND team_id = sqlc.arg(team_id)::uuid
   AND deleted_at IS NULL
 ORDER BY updated_at DESC;
 
 -- name: UpdateSessionTitle :one
 UPDATE bot_sessions
 SET title = sqlc.arg(title), updated_at = now()
-WHERE id = sqlc.arg(id) AND deleted_at IS NULL
+WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid
+  AND deleted_at IS NULL
 RETURNING *;
 
 -- name: UpdateSessionMetadata :one
 UPDATE bot_sessions
 SET metadata = sqlc.arg(metadata), updated_at = now()
-WHERE id = sqlc.arg(id) AND deleted_at IS NULL
+WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid
+  AND deleted_at IS NULL
 RETURNING *;
 
 -- name: UpdateSessionTypeAndMetadata :one
@@ -320,28 +338,36 @@ SET type = sqlc.arg(type),
     runtime_metadata = sqlc.arg(runtime_metadata),
     metadata = sqlc.arg(metadata),
     updated_at = now()
-WHERE id = sqlc.arg(id) AND deleted_at IS NULL
+WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid
+  AND deleted_at IS NULL
 RETURNING *;
 
 -- name: SoftDeleteSession :exec
 UPDATE bot_sessions
 SET deleted_at = now(), updated_at = now()
-WHERE id = sqlc.arg(id) AND deleted_at IS NULL;
+WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid
+  AND deleted_at IS NULL;
 
 -- name: TouchSession :exec
 UPDATE bot_sessions
 SET updated_at = now()
-WHERE id = sqlc.arg(id) AND deleted_at IS NULL;
+WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid
+  AND deleted_at IS NULL;
 
 -- name: SetSessionNextTurnPosition :exec
 UPDATE bot_sessions
 SET next_turn_position = sqlc.arg(next_turn_position)::bigint
-WHERE id = sqlc.arg(session_id);
+WHERE id = sqlc.arg(session_id)
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: GetSessionDiscussCursor :one
 SELECT *
 FROM bot_session_discuss_cursors
 WHERE session_id = sqlc.arg(session_id)
+  AND team_id = sqlc.arg(team_id)::uuid
   AND scope_key = sqlc.arg(scope_key);
 
 -- name: ListSessionDiscussCursorsByBot :many
@@ -349,28 +375,33 @@ SELECT c.*
 FROM bot_session_discuss_cursors c
 JOIN bot_sessions s ON s.id = c.session_id
 WHERE s.bot_id = sqlc.arg(bot_id)
+  AND s.team_id = sqlc.arg(team_id)::uuid
+  AND c.team_id = sqlc.arg(team_id)::uuid
 ORDER BY c.updated_at ASC, c.session_id ASC, c.scope_key ASC;
 
 -- name: DeleteSessionDiscussCursorsByBot :exec
 DELETE FROM bot_session_discuss_cursors
-WHERE session_id IN (
-  SELECT id
-  FROM bot_sessions
-  WHERE bot_id = sqlc.arg(bot_id)
-);
+WHERE team_id = sqlc.arg(team_id)::uuid
+  AND session_id IN (
+    SELECT id
+    FROM bot_sessions
+    WHERE bot_id = sqlc.arg(bot_id)
+      AND team_id = sqlc.arg(team_id)::uuid
+  );
 
 -- name: UpsertSessionDiscussCursor :one
 INSERT INTO bot_session_discuss_cursors (
-  session_id, scope_key, route_id, source, consumed_cursor
+  team_id, session_id, scope_key, route_id, source, consumed_cursor
 )
 VALUES (
+  sqlc.arg(team_id)::uuid,
   sqlc.arg(session_id),
   sqlc.arg(scope_key),
   sqlc.narg(route_id)::uuid,
   sqlc.arg(source),
   sqlc.arg(consumed_cursor)
 )
-ON CONFLICT (session_id, scope_key) DO UPDATE
+ON CONFLICT (team_id, session_id, scope_key) DO UPDATE
 SET route_id = COALESCE(EXCLUDED.route_id, bot_session_discuss_cursors.route_id),
     source = EXCLUDED.source,
     consumed_cursor = GREATEST(bot_session_discuss_cursors.consumed_cursor, EXCLUDED.consumed_cursor),
@@ -382,16 +413,21 @@ SELECT s.*
 FROM bot_sessions s
 JOIN bot_channel_routes r ON r.active_session_id = s.id
 WHERE r.id = sqlc.arg(route_id)
+  AND r.team_id = sqlc.arg(team_id)::uuid
+  AND s.team_id = sqlc.arg(team_id)::uuid
   AND s.deleted_at IS NULL;
 
 -- name: ListSubagentSessionsByParent :many
 SELECT *
 FROM bot_sessions
 WHERE parent_session_id = sqlc.arg(parent_session_id)
+  AND team_id = sqlc.arg(team_id)::uuid
   AND deleted_at IS NULL
 ORDER BY created_at DESC;
 
 -- name: SoftDeleteSessionsByBot :exec
 UPDATE bot_sessions
 SET deleted_at = now(), updated_at = now()
-WHERE bot_id = sqlc.arg(bot_id) AND deleted_at IS NULL;
+WHERE bot_id = sqlc.arg(bot_id)
+  AND team_id = sqlc.arg(team_id)::uuid
+  AND deleted_at IS NULL;

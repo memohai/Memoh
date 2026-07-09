@@ -12,12 +12,13 @@ import (
 )
 
 const createBot = `-- name: CreateBot :one
-INSERT INTO bots (owner_user_id, name, display_name, avatar_url, timezone, is_active, metadata, status)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO bots (team_id, owner_user_id, name, display_name, avatar_url, timezone, is_active, metadata, status)
+VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 `
 
 type CreateBotParams struct {
+	TeamID      pgtype.UUID `json:"team_id"`
 	OwnerUserID pgtype.UUID `json:"owner_user_id"`
 	Name        string      `json:"name"`
 	DisplayName pgtype.Text `json:"display_name"`
@@ -53,6 +54,7 @@ type CreateBotRow struct {
 
 func (q *Queries) CreateBot(ctx context.Context, arg CreateBotParams) (CreateBotRow, error) {
 	row := q.db.QueryRow(ctx, createBot,
+		arg.TeamID,
 		arg.OwnerUserID,
 		arg.Name,
 		arg.DisplayName,
@@ -89,11 +91,18 @@ func (q *Queries) CreateBot(ctx context.Context, arg CreateBotParams) (CreateBot
 }
 
 const deleteBotByID = `-- name: DeleteBotByID :exec
-DELETE FROM bots WHERE id = $1
+DELETE FROM bots
+WHERE id = $1
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) DeleteBotByID(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteBotByID, id)
+type DeleteBotByIDParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteBotByID(ctx context.Context, arg DeleteBotByIDParams) error {
+	_, err := q.db.Exec(ctx, deleteBotByID, arg.ID, arg.TeamID)
 	return err
 }
 
@@ -101,7 +110,13 @@ const getBotByID = `-- name: GetBotByID :one
 SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, compaction_enabled, compaction_threshold, compaction_ratio, compaction_model_id, metadata, created_at, updated_at
 FROM bots
 WHERE id = $1
+  AND team_id = $2::uuid
 `
+
+type GetBotByIDParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
 
 type GetBotByIDRow struct {
 	ID                  pgtype.UUID        `json:"id"`
@@ -130,8 +145,8 @@ type GetBotByIDRow struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
-func (q *Queries) GetBotByID(ctx context.Context, id pgtype.UUID) (GetBotByIDRow, error) {
-	row := q.db.QueryRow(ctx, getBotByID, id)
+func (q *Queries) GetBotByID(ctx context.Context, arg GetBotByIDParams) (GetBotByIDRow, error) {
+	row := q.db.QueryRow(ctx, getBotByID, arg.ID, arg.TeamID)
 	var i GetBotByIDRow
 	err := row.Scan(
 		&i.ID,
@@ -165,8 +180,14 @@ func (q *Queries) GetBotByID(ctx context.Context, id pgtype.UUID) (GetBotByIDRow
 const getBotByName = `-- name: GetBotByName :one
 SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, compaction_enabled, compaction_threshold, compaction_ratio, compaction_model_id, metadata, created_at, updated_at
 FROM bots
-WHERE name = $1
+WHERE team_id = $1::uuid
+  AND name = $2
 `
+
+type GetBotByNameParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	Name   string      `json:"name"`
+}
 
 type GetBotByNameRow struct {
 	ID                  pgtype.UUID        `json:"id"`
@@ -195,8 +216,8 @@ type GetBotByNameRow struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
-func (q *Queries) GetBotByName(ctx context.Context, name string) (GetBotByNameRow, error) {
-	row := q.db.QueryRow(ctx, getBotByName, name)
+func (q *Queries) GetBotByName(ctx context.Context, arg GetBotByNameParams) (GetBotByNameRow, error) {
+	row := q.db.QueryRow(ctx, getBotByName, arg.TeamID, arg.Name)
 	var i GetBotByNameRow
 	err := row.Scan(
 		&i.ID,
@@ -230,17 +251,26 @@ func (q *Queries) GetBotByName(ctx context.Context, name string) (GetBotByNameRo
 const listAccessibleBots = `-- name: ListAccessibleBots :many
 SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 FROM bots b
-WHERE b.owner_user_id = $1
-   OR EXISTS (
+WHERE b.team_id = $1::uuid
+  AND (
+    b.owner_user_id = $2
+    OR EXISTS (
      SELECT 1 FROM bot_user_grants g
      WHERE g.bot_id = b.id
+       AND g.team_id = $1::uuid
        AND (
          g.subject_type = 'everyone'
-         OR (g.subject_type = 'user' AND g.user_id = $1)
+         OR (g.subject_type = 'user' AND g.user_id = $2)
        )
-   )
+    )
+  )
 ORDER BY b.created_at DESC
 `
+
+type ListAccessibleBotsParams struct {
+	TeamID      pgtype.UUID `json:"team_id"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
+}
 
 type ListAccessibleBotsRow struct {
 	ID                pgtype.UUID        `json:"id"`
@@ -265,8 +295,8 @@ type ListAccessibleBotsRow struct {
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
-func (q *Queries) ListAccessibleBots(ctx context.Context, ownerUserID pgtype.UUID) ([]ListAccessibleBotsRow, error) {
-	rows, err := q.db.Query(ctx, listAccessibleBots, ownerUserID)
+func (q *Queries) ListAccessibleBots(ctx context.Context, arg ListAccessibleBotsParams) ([]ListAccessibleBotsRow, error) {
+	rows, err := q.db.Query(ctx, listAccessibleBots, arg.TeamID, arg.OwnerUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -309,9 +339,15 @@ func (q *Queries) ListAccessibleBots(ctx context.Context, ownerUserID pgtype.UUI
 const listBotsByOwner = `-- name: ListBotsByOwner :many
 SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 FROM bots
-WHERE owner_user_id = $1
+WHERE team_id = $1::uuid
+  AND owner_user_id = $2
 ORDER BY created_at DESC
 `
+
+type ListBotsByOwnerParams struct {
+	TeamID      pgtype.UUID `json:"team_id"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
+}
 
 type ListBotsByOwnerRow struct {
 	ID                pgtype.UUID        `json:"id"`
@@ -336,8 +372,8 @@ type ListBotsByOwnerRow struct {
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
-func (q *Queries) ListBotsByOwner(ctx context.Context, ownerUserID pgtype.UUID) ([]ListBotsByOwnerRow, error) {
-	rows, err := q.db.Query(ctx, listBotsByOwner, ownerUserID)
+func (q *Queries) ListBotsByOwner(ctx context.Context, arg ListBotsByOwnerParams) ([]ListBotsByOwnerRow, error) {
+	rows, err := q.db.Query(ctx, listBotsByOwner, arg.TeamID, arg.OwnerUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -378,12 +414,15 @@ func (q *Queries) ListBotsByOwner(ctx context.Context, ownerUserID pgtype.UUID) 
 }
 
 const listHeartbeatEnabledBots = `-- name: ListHeartbeatEnabledBots :many
-SELECT id, owner_user_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt
+SELECT team_id, id, owner_user_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt
 FROM bots
-WHERE heartbeat_enabled = true AND status = 'ready'
+WHERE team_id = $1::uuid
+  AND heartbeat_enabled = true
+  AND status = 'ready'
 `
 
 type ListHeartbeatEnabledBotsRow struct {
+	TeamID            pgtype.UUID `json:"team_id"`
 	ID                pgtype.UUID `json:"id"`
 	OwnerUserID       pgtype.UUID `json:"owner_user_id"`
 	HeartbeatEnabled  bool        `json:"heartbeat_enabled"`
@@ -391,8 +430,8 @@ type ListHeartbeatEnabledBotsRow struct {
 	HeartbeatPrompt   string      `json:"heartbeat_prompt"`
 }
 
-func (q *Queries) ListHeartbeatEnabledBots(ctx context.Context) ([]ListHeartbeatEnabledBotsRow, error) {
-	rows, err := q.db.Query(ctx, listHeartbeatEnabledBots)
+func (q *Queries) ListHeartbeatEnabledBots(ctx context.Context, teamID pgtype.UUID) ([]ListHeartbeatEnabledBotsRow, error) {
+	rows, err := q.db.Query(ctx, listHeartbeatEnabledBots, teamID)
 	if err != nil {
 		return nil, err
 	}
@@ -401,6 +440,7 @@ func (q *Queries) ListHeartbeatEnabledBots(ctx context.Context) ([]ListHeartbeat
 	for rows.Next() {
 		var i ListHeartbeatEnabledBotsRow
 		if err := rows.Scan(
+			&i.TeamID,
 			&i.ID,
 			&i.OwnerUserID,
 			&i.HeartbeatEnabled,
@@ -419,15 +459,17 @@ func (q *Queries) ListHeartbeatEnabledBots(ctx context.Context) ([]ListHeartbeat
 
 const updateBotOwner = `-- name: UpdateBotOwner :one
 UPDATE bots
-SET owner_user_id = $2,
+SET owner_user_id = $1,
     updated_at = now()
-WHERE id = $1
+WHERE id = $2
+  AND team_id = $3::uuid
 RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 `
 
 type UpdateBotOwnerParams struct {
-	ID          pgtype.UUID `json:"id"`
 	OwnerUserID pgtype.UUID `json:"owner_user_id"`
+	ID          pgtype.UUID `json:"id"`
+	TeamID      pgtype.UUID `json:"team_id"`
 }
 
 type UpdateBotOwnerRow struct {
@@ -454,7 +496,7 @@ type UpdateBotOwnerRow struct {
 }
 
 func (q *Queries) UpdateBotOwner(ctx context.Context, arg UpdateBotOwnerParams) (UpdateBotOwnerRow, error) {
-	row := q.db.QueryRow(ctx, updateBotOwner, arg.ID, arg.OwnerUserID)
+	row := q.db.QueryRow(ctx, updateBotOwner, arg.OwnerUserID, arg.ID, arg.TeamID)
 	var i UpdateBotOwnerRow
 	err := row.Scan(
 		&i.ID,
@@ -483,25 +525,27 @@ func (q *Queries) UpdateBotOwner(ctx context.Context, arg UpdateBotOwnerParams) 
 
 const updateBotProfile = `-- name: UpdateBotProfile :one
 UPDATE bots
-SET name = $2,
-    display_name = $3,
-    avatar_url = $4,
-    timezone = $5,
-    is_active = $6,
-    metadata = $7,
+SET name = $1,
+    display_name = $2,
+    avatar_url = $3,
+    timezone = $4,
+    is_active = $5,
+    metadata = $6,
     updated_at = now()
-WHERE id = $1
+WHERE id = $7
+  AND team_id = $8::uuid
 RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 `
 
 type UpdateBotProfileParams struct {
-	ID          pgtype.UUID `json:"id"`
 	Name        string      `json:"name"`
 	DisplayName pgtype.Text `json:"display_name"`
 	AvatarUrl   pgtype.Text `json:"avatar_url"`
 	Timezone    pgtype.Text `json:"timezone"`
 	IsActive    bool        `json:"is_active"`
 	Metadata    []byte      `json:"metadata"`
+	ID          pgtype.UUID `json:"id"`
+	TeamID      pgtype.UUID `json:"team_id"`
 }
 
 type UpdateBotProfileRow struct {
@@ -529,13 +573,14 @@ type UpdateBotProfileRow struct {
 
 func (q *Queries) UpdateBotProfile(ctx context.Context, arg UpdateBotProfileParams) (UpdateBotProfileRow, error) {
 	row := q.db.QueryRow(ctx, updateBotProfile,
-		arg.ID,
 		arg.Name,
 		arg.DisplayName,
 		arg.AvatarUrl,
 		arg.Timezone,
 		arg.IsActive,
 		arg.Metadata,
+		arg.ID,
+		arg.TeamID,
 	)
 	var i UpdateBotProfileRow
 	err := row.Scan(
@@ -565,17 +610,19 @@ func (q *Queries) UpdateBotProfile(ctx context.Context, arg UpdateBotProfilePara
 
 const updateBotStatus = `-- name: UpdateBotStatus :exec
 UPDATE bots
-SET status = $2,
+SET status = $1,
     updated_at = now()
-WHERE id = $1
+WHERE id = $2
+  AND team_id = $3::uuid
 `
 
 type UpdateBotStatusParams struct {
-	ID     pgtype.UUID `json:"id"`
 	Status string      `json:"status"`
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateBotStatus(ctx context.Context, arg UpdateBotStatusParams) error {
-	_, err := q.db.Exec(ctx, updateBotStatus, arg.ID, arg.Status)
+	_, err := q.db.Exec(ctx, updateBotStatus, arg.Status, arg.ID, arg.TeamID)
 	return err
 }

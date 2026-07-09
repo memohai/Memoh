@@ -15,10 +15,16 @@ const countMessagesBySession = `-- name: CountMessagesBySession :one
 SELECT COUNT(*)::bigint AS message_count
 FROM bot_visible_history_messages
 WHERE session_id = $1
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) CountMessagesBySession(ctx context.Context, sessionID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMessagesBySession, sessionID)
+type CountMessagesBySessionParams struct {
+	SessionID pgtype.UUID `json:"session_id"`
+	TeamID    pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) CountMessagesBySession(ctx context.Context, arg CountMessagesBySessionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countMessagesBySession, arg.SessionID, arg.TeamID)
 	var message_count int64
 	err := row.Scan(&message_count)
 	return message_count, err
@@ -29,14 +35,20 @@ SELECT
   COALESCE((m.usage->>'inputTokens')::bigint, 0)::bigint AS input_tokens
 FROM bot_visible_history_messages m
 WHERE m.session_id = $1
+  AND m.team_id = $2::uuid
   AND m.role = 'assistant'
   AND m.usage IS NOT NULL
 ORDER BY m.created_at DESC
 LIMIT 1
 `
 
-func (q *Queries) GetLatestAssistantUsage(ctx context.Context, sessionID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, getLatestAssistantUsage, sessionID)
+type GetLatestAssistantUsageParams struct {
+	SessionID pgtype.UUID `json:"session_id"`
+	TeamID    pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetLatestAssistantUsage(ctx context.Context, arg GetLatestAssistantUsageParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getLatestAssistantUsage, arg.SessionID, arg.TeamID)
 	var input_tokens int64
 	err := row.Scan(&input_tokens)
 	return input_tokens, err
@@ -46,14 +58,20 @@ const getLatestSessionIDByBot = `-- name: GetLatestSessionIDByBot :one
 SELECT s.id
 FROM bot_sessions s
 WHERE s.bot_id = $1
+  AND s.team_id = $2::uuid
   AND s.type = 'chat'
   AND s.deleted_at IS NULL
 ORDER BY s.updated_at DESC
 LIMIT 1
 `
 
-func (q *Queries) GetLatestSessionIDByBot(ctx context.Context, botID pgtype.UUID) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, getLatestSessionIDByBot, botID)
+type GetLatestSessionIDByBotParams struct {
+	BotID  pgtype.UUID `json:"bot_id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetLatestSessionIDByBot(ctx context.Context, arg GetLatestSessionIDByBotParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getLatestSessionIDByBot, arg.BotID, arg.TeamID)
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
@@ -65,16 +83,22 @@ SELECT
   COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint), 0)::bigint AS cache_read_tokens
 FROM bot_visible_history_messages m
 WHERE m.session_id = $1
+  AND m.team_id = $2::uuid
   AND m.usage IS NOT NULL
 `
+
+type GetSessionCacheStatsParams struct {
+	SessionID pgtype.UUID `json:"session_id"`
+	TeamID    pgtype.UUID `json:"team_id"`
+}
 
 type GetSessionCacheStatsRow struct {
 	TotalInputTokens int64 `json:"total_input_tokens"`
 	CacheReadTokens  int64 `json:"cache_read_tokens"`
 }
 
-func (q *Queries) GetSessionCacheStats(ctx context.Context, sessionID pgtype.UUID) (GetSessionCacheStatsRow, error) {
-	row := q.db.QueryRow(ctx, getSessionCacheStats, sessionID)
+func (q *Queries) GetSessionCacheStats(ctx context.Context, arg GetSessionCacheStatsParams) (GetSessionCacheStatsRow, error) {
+	row := q.db.QueryRow(ctx, getSessionCacheStats, arg.SessionID, arg.TeamID)
 	var i GetSessionCacheStatsRow
 	err := row.Scan(&i.TotalInputTokens, &i.CacheReadTokens)
 	return i, err
@@ -98,6 +122,7 @@ WITH requested AS (
       END
     ) AS item
   WHERE m.session_id = $1
+    AND m.team_id = $2::uuid
     AND m.role = 'user'
     AND item->>'name' IS NOT NULL
     AND item->>'name' != ''
@@ -112,6 +137,7 @@ tool_payloads AS (
     END AS content_json
   FROM bot_visible_history_messages m
   WHERE m.session_id = $1
+    AND m.team_id = $2::uuid
     AND m.role = 'assistant'
 ),
 tool_used AS (
@@ -156,8 +182,13 @@ SELECT DISTINCT skill_name FROM deduped
 ORDER BY skill_name
 `
 
-func (q *Queries) GetSessionUsedSkills(ctx context.Context, sessionID pgtype.UUID) ([]string, error) {
-	rows, err := q.db.Query(ctx, getSessionUsedSkills, sessionID)
+type GetSessionUsedSkillsParams struct {
+	SessionID pgtype.UUID `json:"session_id"`
+	TeamID    pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetSessionUsedSkills(ctx context.Context, arg GetSessionUsedSkillsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, getSessionUsedSkills, arg.SessionID, arg.TeamID)
 	if err != nil {
 		return nil, err
 	}

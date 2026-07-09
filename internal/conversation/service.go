@@ -56,6 +56,10 @@ func (s *Service) Create(ctx context.Context, botID, channelIdentityID string, r
 	if err != nil {
 		return Conversation{}, fmt.Errorf("invalid bot id: %w", err)
 	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return Conversation{}, err
+	}
 	pgChannelIdentityID := pgtype.UUID{}
 	if strings.TrimSpace(channelIdentityID) != "" {
 		pgChannelIdentityID, err = parseUUID(channelIdentityID)
@@ -77,14 +81,14 @@ func (s *Service) Create(ctx context.Context, botID, channelIdentityID string, r
 		return Conversation{}, fmt.Errorf("marshal conversation metadata: %w", err)
 	}
 
-	row, err := s.queries.CreateChat(ctx, sqlc.CreateChatParams{
+	row, err := s.queries.CreateChat(ctx, withTeamID(sqlc.CreateChatParams{
 		BotID:           pgBotID,
 		Kind:            kind,
 		ParentChatID:    pgParent,
 		Title:           strings.TrimSpace(req.Title),
 		CreatedByUserID: pgChannelIdentityID,
 		Metadata:        metadata,
-	})
+	}, teamID))
 	if err != nil {
 		return Conversation{}, fmt.Errorf("create conversation: %w", err)
 	}
@@ -118,10 +122,14 @@ func (s *Service) GetReadAccess(ctx context.Context, conversationID, channelIden
 	if err != nil {
 		return ConversationReadAccess{}, ErrPermissionDenied
 	}
-	row, err := s.queries.GetChatReadAccessByUser(ctx, sqlc.GetChatReadAccessByUserParams{
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return ConversationReadAccess{}, err
+	}
+	row, err := s.queries.GetChatReadAccessByUser(ctx, withTeamID(sqlc.GetChatReadAccessByUserParams{
 		ChatID: pgConversationID,
 		UserID: pgChannelIdentityID,
-	})
+	}, teamID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ConversationReadAccess{}, ErrPermissionDenied
@@ -145,10 +153,14 @@ func (s *Service) ListByBotAndChannelIdentity(ctx context.Context, botID, channe
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListVisibleChatsByBotAndUser(ctx, sqlc.ListVisibleChatsByBotAndUserParams{
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListVisibleChatsByBotAndUser(ctx, withTeamID(sqlc.ListVisibleChatsByBotAndUserParams{
 		BotID:  pgBotID,
 		UserID: pgChannelIdentityID,
-	})
+	}, teamID))
 	if err != nil {
 		return nil, err
 	}
@@ -281,10 +293,14 @@ func (s *Service) UpdateSettings(ctx context.Context, conversationID string, req
 		}
 	}
 
-	row, err := s.queries.UpsertChatSettings(ctx, sqlc.UpsertChatSettingsParams{
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return Settings{}, err
+	}
+	row, err := s.queries.UpsertChatSettings(ctx, withTeamID(sqlc.UpsertChatSettingsParams{
 		ID:          pgID,
 		ChatModelID: chatModelUUID,
-	})
+	}, teamID))
 	if err != nil {
 		return Settings{}, err
 	}

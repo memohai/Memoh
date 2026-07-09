@@ -31,7 +31,7 @@ func (q *Queries) WithTx(tx pgx.Tx) dbstore.Queries {
 	if q == nil {
 		return nil
 	}
-	return NewQueries(q.Queries.WithTx(tx))
+	return NewQueries(dbsqlc.New(newTeamTxDBTX(tx)))
 }
 
 func (q *Queries) InTx(ctx context.Context, fn func(dbstore.Queries) error) error {

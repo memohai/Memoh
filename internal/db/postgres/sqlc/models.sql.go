@@ -34,6 +34,37 @@ func (q *Queries) CountModelsByType(ctx context.Context, type_ string) (int64, e
 	return count, err
 }
 
+const countModelsByTypeForTeam = `-- name: CountModelsByTypeForTeam :one
+SELECT COUNT(*) FROM models
+WHERE team_id = $1
+  AND type = $2
+`
+
+type CountModelsByTypeForTeamParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	Type   string      `json:"type"`
+}
+
+func (q *Queries) CountModelsByTypeForTeam(ctx context.Context, arg CountModelsByTypeForTeamParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countModelsByTypeForTeam, arg.TeamID, arg.Type)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countModelsForTeam = `-- name: CountModelsForTeam :one
+SELECT COUNT(*) FROM models
+WHERE team_id = $1
+  AND type NOT IN ('speech', 'transcription', 'video')
+`
+
+func (q *Queries) CountModelsForTeam(ctx context.Context, teamID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countModelsForTeam, teamID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countProviders = `-- name: CountProviders :one
 SELECT COUNT(*)
 FROM providers
@@ -66,20 +97,55 @@ func (q *Queries) CountProviders(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countProvidersForTeam = `-- name: CountProvidersForTeam :one
+SELECT COUNT(*)
+FROM providers
+WHERE team_id = $1
+  AND client_type NOT IN (
+    'edge-speech',
+    'openai-speech',
+    'openai-transcription',
+    'openrouter-speech',
+    'openrouter-transcription',
+    'elevenlabs-speech',
+    'elevenlabs-transcription',
+    'deepgram-speech',
+    'deepgram-transcription',
+    'minimax-speech',
+    'volcengine-speech',
+    'alibabacloud-speech',
+    'microsoft-speech',
+    'google-speech',
+    'google-transcription',
+    'openrouter-video',
+    'modelark-video',
+    'volcengine-video'
+  )
+`
+
+func (q *Queries) CountProvidersForTeam(ctx context.Context, teamID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countProvidersForTeam, teamID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createModel = `-- name: CreateModel :one
-INSERT INTO models (model_id, name, provider_id, type, enable, config)
+INSERT INTO models (team_id, model_id, name, provider_id, type, enable, config)
 VALUES (
-  $1,
+  COALESCE($1::uuid, '00000000-0000-0000-0000-000000000001'::uuid),
   $2,
   $3,
   $4,
   $5,
-  $6
+  $6,
+  $7
 )
-RETURNING id, model_id, name, provider_id, type, enable, config, created_at, updated_at
+RETURNING id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id
 `
 
 type CreateModelParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
 	ModelID    string      `json:"model_id"`
 	Name       pgtype.Text `json:"name"`
 	ProviderID pgtype.UUID `json:"provider_id"`
@@ -90,6 +156,7 @@ type CreateModelParams struct {
 
 func (q *Queries) CreateModel(ctx context.Context, arg CreateModelParams) (Model, error) {
 	row := q.db.QueryRow(ctx, createModel,
+		arg.TeamID,
 		arg.ModelID,
 		arg.Name,
 		arg.ProviderID,
@@ -108,6 +175,7 @@ func (q *Queries) CreateModel(ctx context.Context, arg CreateModelParams) (Model
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -120,7 +188,7 @@ VALUES (
   $3,
   $4
 )
-RETURNING id, model_uuid, variant_id, weight, metadata, created_at, updated_at
+RETURNING id, model_uuid, variant_id, weight, metadata, created_at, updated_at, team_id
 `
 
 type CreateModelVariantParams struct {
@@ -146,24 +214,27 @@ func (q *Queries) CreateModelVariant(ctx context.Context, arg CreateModelVariant
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const createProvider = `-- name: CreateProvider :one
-INSERT INTO providers (name, client_type, icon, enable, config, metadata)
+INSERT INTO providers (team_id, name, client_type, icon, enable, config, metadata)
 VALUES (
-  $1,
+  COALESCE($1::uuid, '00000000-0000-0000-0000-000000000001'::uuid),
   $2,
   $3,
   $4,
   $5,
-  $6
+  $6,
+  $7
 )
-RETURNING id, name, client_type, icon, enable, config, metadata, created_at, updated_at
+RETURNING id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id
 `
 
 type CreateProviderParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
 	Name       string      `json:"name"`
 	ClientType string      `json:"client_type"`
 	Icon       pgtype.Text `json:"icon"`
@@ -174,6 +245,7 @@ type CreateProviderParams struct {
 
 func (q *Queries) CreateProvider(ctx context.Context, arg CreateProviderParams) (Provider, error) {
 	row := q.db.QueryRow(ctx, createProvider,
+		arg.TeamID,
 		arg.Name,
 		arg.ClientType,
 		arg.Icon,
@@ -192,6 +264,7 @@ func (q *Queries) CreateProvider(ctx context.Context, arg CreateProviderParams) 
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -214,6 +287,22 @@ func (q *Queries) DeleteModelByModelID(ctx context.Context, modelID string) erro
 	return err
 }
 
+const deleteModelByModelIDForTeam = `-- name: DeleteModelByModelIDForTeam :exec
+DELETE FROM models
+WHERE team_id = $1
+  AND model_id = $2
+`
+
+type DeleteModelByModelIDForTeamParams struct {
+	TeamID  pgtype.UUID `json:"team_id"`
+	ModelID string      `json:"model_id"`
+}
+
+func (q *Queries) DeleteModelByModelIDForTeam(ctx context.Context, arg DeleteModelByModelIDForTeamParams) error {
+	_, err := q.db.Exec(ctx, deleteModelByModelIDForTeam, arg.TeamID, arg.ModelID)
+	return err
+}
+
 const deleteModelByProviderAndType = `-- name: DeleteModelByProviderAndType :exec
 DELETE FROM models
 WHERE provider_id = $1
@@ -229,6 +318,31 @@ type DeleteModelByProviderAndTypeParams struct {
 
 func (q *Queries) DeleteModelByProviderAndType(ctx context.Context, arg DeleteModelByProviderAndTypeParams) error {
 	_, err := q.db.Exec(ctx, deleteModelByProviderAndType, arg.ProviderID, arg.ModelID, arg.Type)
+	return err
+}
+
+const deleteModelByProviderAndTypeForTeam = `-- name: DeleteModelByProviderAndTypeForTeam :exec
+DELETE FROM models
+WHERE team_id = $1
+  AND provider_id = $2
+  AND model_id = $3
+  AND type = $4
+`
+
+type DeleteModelByProviderAndTypeForTeamParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
+	ProviderID pgtype.UUID `json:"provider_id"`
+	ModelID    string      `json:"model_id"`
+	Type       string      `json:"type"`
+}
+
+func (q *Queries) DeleteModelByProviderAndTypeForTeam(ctx context.Context, arg DeleteModelByProviderAndTypeForTeamParams) error {
+	_, err := q.db.Exec(ctx, deleteModelByProviderAndTypeForTeam,
+		arg.TeamID,
+		arg.ProviderID,
+		arg.ModelID,
+		arg.Type,
+	)
 	return err
 }
 
@@ -248,6 +362,40 @@ func (q *Queries) DeleteModelByProviderIDAndModelID(ctx context.Context, arg Del
 	return err
 }
 
+const deleteModelByProviderIDAndModelIDForTeam = `-- name: DeleteModelByProviderIDAndModelIDForTeam :exec
+DELETE FROM models
+WHERE team_id = $1
+  AND provider_id = $2
+  AND model_id = $3
+`
+
+type DeleteModelByProviderIDAndModelIDForTeamParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
+	ProviderID pgtype.UUID `json:"provider_id"`
+	ModelID    string      `json:"model_id"`
+}
+
+func (q *Queries) DeleteModelByProviderIDAndModelIDForTeam(ctx context.Context, arg DeleteModelByProviderIDAndModelIDForTeamParams) error {
+	_, err := q.db.Exec(ctx, deleteModelByProviderIDAndModelIDForTeam, arg.TeamID, arg.ProviderID, arg.ModelID)
+	return err
+}
+
+const deleteModelForTeam = `-- name: DeleteModelForTeam :exec
+DELETE FROM models
+WHERE id = $1
+  AND team_id = $2
+`
+
+type DeleteModelForTeamParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteModelForTeam(ctx context.Context, arg DeleteModelForTeamParams) error {
+	_, err := q.db.Exec(ctx, deleteModelForTeam, arg.ID, arg.TeamID)
+	return err
+}
+
 const deleteProvider = `-- name: DeleteProvider :exec
 DELETE FROM providers WHERE id = $1
 `
@@ -257,8 +405,24 @@ func (q *Queries) DeleteProvider(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const deleteProviderForTeam = `-- name: DeleteProviderForTeam :exec
+DELETE FROM providers
+WHERE id = $1
+  AND team_id = $2
+`
+
+type DeleteProviderForTeamParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteProviderForTeam(ctx context.Context, arg DeleteProviderForTeamParams) error {
+	_, err := q.db.Exec(ctx, deleteProviderForTeam, arg.ID, arg.TeamID)
+	return err
+}
+
 const getModelByID = `-- name: GetModelByID :one
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models WHERE id = $1
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models WHERE id = $1
 `
 
 func (q *Queries) GetModelByID(ctx context.Context, id pgtype.UUID) (Model, error) {
@@ -274,12 +438,42 @@ func (q *Queries) GetModelByID(ctx context.Context, id pgtype.UUID) (Model, erro
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
+const getModelByIDForTeam = `-- name: GetModelByIDForTeam :one
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE id = $1
+  AND team_id = $2
+`
+
+type GetModelByIDForTeamParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetModelByIDForTeam(ctx context.Context, arg GetModelByIDForTeamParams) (Model, error) {
+	row := q.db.QueryRow(ctx, getModelByIDForTeam, arg.ID, arg.TeamID)
+	var i Model
+	err := row.Scan(
+		&i.ID,
+		&i.ModelID,
+		&i.Name,
+		&i.ProviderID,
+		&i.Type,
+		&i.Enable,
+		&i.Config,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getModelByModelID = `-- name: GetModelByModelID :one
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models WHERE model_id = $1
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models WHERE model_id = $1
 `
 
 func (q *Queries) GetModelByModelID(ctx context.Context, modelID string) (Model, error) {
@@ -295,12 +489,42 @@ func (q *Queries) GetModelByModelID(ctx context.Context, modelID string) (Model,
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
+const getModelByModelIDForTeam = `-- name: GetModelByModelIDForTeam :one
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = $1
+  AND model_id = $2
+`
+
+type GetModelByModelIDForTeamParams struct {
+	TeamID  pgtype.UUID `json:"team_id"`
+	ModelID string      `json:"model_id"`
+}
+
+func (q *Queries) GetModelByModelIDForTeam(ctx context.Context, arg GetModelByModelIDForTeamParams) (Model, error) {
+	row := q.db.QueryRow(ctx, getModelByModelIDForTeam, arg.TeamID, arg.ModelID)
+	var i Model
+	err := row.Scan(
+		&i.ID,
+		&i.ModelID,
+		&i.Name,
+		&i.ProviderID,
+		&i.Type,
+		&i.Enable,
+		&i.Config,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getModelByProviderAndModelID = `-- name: GetModelByProviderAndModelID :one
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
 WHERE provider_id = $1
   AND model_id = $2
 LIMIT 1
@@ -324,12 +548,45 @@ func (q *Queries) GetModelByProviderAndModelID(ctx context.Context, arg GetModel
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
+const getModelByProviderAndModelIDForTeam = `-- name: GetModelByProviderAndModelIDForTeam :one
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = $1
+  AND provider_id = $2
+  AND model_id = $3
+LIMIT 1
+`
+
+type GetModelByProviderAndModelIDForTeamParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
+	ProviderID pgtype.UUID `json:"provider_id"`
+	ModelID    string      `json:"model_id"`
+}
+
+func (q *Queries) GetModelByProviderAndModelIDForTeam(ctx context.Context, arg GetModelByProviderAndModelIDForTeamParams) (Model, error) {
+	row := q.db.QueryRow(ctx, getModelByProviderAndModelIDForTeam, arg.TeamID, arg.ProviderID, arg.ModelID)
+	var i Model
+	err := row.Scan(
+		&i.ID,
+		&i.ModelID,
+		&i.Name,
+		&i.ProviderID,
+		&i.Type,
+		&i.Enable,
+		&i.Config,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getProviderByClientType = `-- name: GetProviderByClientType :one
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers WHERE client_type = $1
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers WHERE client_type = $1
 `
 
 func (q *Queries) GetProviderByClientType(ctx context.Context, clientType string) (Provider, error) {
@@ -345,12 +602,42 @@ func (q *Queries) GetProviderByClientType(ctx context.Context, clientType string
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
+const getProviderByClientTypeForTeam = `-- name: GetProviderByClientTypeForTeam :one
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
+WHERE team_id = $1
+  AND client_type = $2
+`
+
+type GetProviderByClientTypeForTeamParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
+	ClientType string      `json:"client_type"`
+}
+
+func (q *Queries) GetProviderByClientTypeForTeam(ctx context.Context, arg GetProviderByClientTypeForTeamParams) (Provider, error) {
+	row := q.db.QueryRow(ctx, getProviderByClientTypeForTeam, arg.TeamID, arg.ClientType)
+	var i Provider
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.ClientType,
+		&i.Icon,
+		&i.Enable,
+		&i.Config,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getProviderByID = `-- name: GetProviderByID :one
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers WHERE id = $1
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers WHERE id = $1
 `
 
 func (q *Queries) GetProviderByID(ctx context.Context, id pgtype.UUID) (Provider, error) {
@@ -366,12 +653,42 @@ func (q *Queries) GetProviderByID(ctx context.Context, id pgtype.UUID) (Provider
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
+const getProviderByIDForTeam = `-- name: GetProviderByIDForTeam :one
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
+WHERE id = $1
+  AND team_id = $2
+`
+
+type GetProviderByIDForTeamParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetProviderByIDForTeam(ctx context.Context, arg GetProviderByIDForTeamParams) (Provider, error) {
+	row := q.db.QueryRow(ctx, getProviderByIDForTeam, arg.ID, arg.TeamID)
+	var i Provider
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.ClientType,
+		&i.Icon,
+		&i.Enable,
+		&i.Config,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getProviderByName = `-- name: GetProviderByName :one
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers WHERE name = $1
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers WHERE name = $1
 `
 
 func (q *Queries) GetProviderByName(ctx context.Context, name string) (Provider, error) {
@@ -387,13 +704,43 @@ func (q *Queries) GetProviderByName(ctx context.Context, name string) (Provider,
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
+const getProviderByNameForTeam = `-- name: GetProviderByNameForTeam :one
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
+WHERE team_id = $1
+  AND name = $2
+`
+
+type GetProviderByNameForTeamParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	Name   string      `json:"name"`
+}
+
+func (q *Queries) GetProviderByNameForTeam(ctx context.Context, arg GetProviderByNameForTeamParams) (Provider, error) {
+	row := q.db.QueryRow(ctx, getProviderByNameForTeam, arg.TeamID, arg.Name)
+	var i Provider
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.ClientType,
+		&i.Icon,
+		&i.Enable,
+		&i.Config,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getSpeechModelWithProvider = `-- name: GetSpeechModelWithProvider :one
 SELECT
-  m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at,
+  m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id,
   p.client_type AS provider_type
 FROM models m
 JOIN providers p ON p.id = m.provider_id
@@ -411,6 +758,7 @@ type GetSpeechModelWithProviderRow struct {
 	Config       []byte             `json:"config"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 	ProviderType string             `json:"provider_type"`
 }
 
@@ -427,6 +775,57 @@ func (q *Queries) GetSpeechModelWithProvider(ctx context.Context, id pgtype.UUID
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
+		&i.ProviderType,
+	)
+	return i, err
+}
+
+const getSpeechModelWithProviderForTeam = `-- name: GetSpeechModelWithProviderForTeam :one
+SELECT
+  m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id,
+  p.client_type AS provider_type
+FROM models m
+JOIN providers p ON p.id = m.provider_id
+WHERE m.id = $1
+  AND m.team_id = $2
+  AND p.team_id = $2
+  AND m.type = 'speech'
+`
+
+type GetSpeechModelWithProviderForTeamParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+type GetSpeechModelWithProviderForTeamRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	ModelID      string             `json:"model_id"`
+	Name         pgtype.Text        `json:"name"`
+	ProviderID   pgtype.UUID        `json:"provider_id"`
+	Type         string             `json:"type"`
+	Enable       bool               `json:"enable"`
+	Config       []byte             `json:"config"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
+	ProviderType string             `json:"provider_type"`
+}
+
+func (q *Queries) GetSpeechModelWithProviderForTeam(ctx context.Context, arg GetSpeechModelWithProviderForTeamParams) (GetSpeechModelWithProviderForTeamRow, error) {
+	row := q.db.QueryRow(ctx, getSpeechModelWithProviderForTeam, arg.ID, arg.TeamID)
+	var i GetSpeechModelWithProviderForTeamRow
+	err := row.Scan(
+		&i.ID,
+		&i.ModelID,
+		&i.Name,
+		&i.ProviderID,
+		&i.Type,
+		&i.Enable,
+		&i.Config,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
 		&i.ProviderType,
 	)
 	return i, err
@@ -434,7 +833,7 @@ func (q *Queries) GetSpeechModelWithProvider(ctx context.Context, id pgtype.UUID
 
 const getTranscriptionModelWithProvider = `-- name: GetTranscriptionModelWithProvider :one
 SELECT
-  m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at,
+  m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id,
   p.client_type AS provider_type
 FROM models m
 JOIN providers p ON p.id = m.provider_id
@@ -452,6 +851,7 @@ type GetTranscriptionModelWithProviderRow struct {
 	Config       []byte             `json:"config"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 	ProviderType string             `json:"provider_type"`
 }
 
@@ -468,6 +868,57 @@ func (q *Queries) GetTranscriptionModelWithProvider(ctx context.Context, id pgty
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
+		&i.ProviderType,
+	)
+	return i, err
+}
+
+const getTranscriptionModelWithProviderForTeam = `-- name: GetTranscriptionModelWithProviderForTeam :one
+SELECT
+  m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id,
+  p.client_type AS provider_type
+FROM models m
+JOIN providers p ON p.id = m.provider_id
+WHERE m.id = $1
+  AND m.team_id = $2
+  AND p.team_id = $2
+  AND m.type = 'transcription'
+`
+
+type GetTranscriptionModelWithProviderForTeamParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+type GetTranscriptionModelWithProviderForTeamRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	ModelID      string             `json:"model_id"`
+	Name         pgtype.Text        `json:"name"`
+	ProviderID   pgtype.UUID        `json:"provider_id"`
+	Type         string             `json:"type"`
+	Enable       bool               `json:"enable"`
+	Config       []byte             `json:"config"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
+	ProviderType string             `json:"provider_type"`
+}
+
+func (q *Queries) GetTranscriptionModelWithProviderForTeam(ctx context.Context, arg GetTranscriptionModelWithProviderForTeamParams) (GetTranscriptionModelWithProviderForTeamRow, error) {
+	row := q.db.QueryRow(ctx, getTranscriptionModelWithProviderForTeam, arg.ID, arg.TeamID)
+	var i GetTranscriptionModelWithProviderForTeamRow
+	err := row.Scan(
+		&i.ID,
+		&i.ModelID,
+		&i.Name,
+		&i.ProviderID,
+		&i.Type,
+		&i.Enable,
+		&i.Config,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
 		&i.ProviderType,
 	)
 	return i, err
@@ -475,7 +926,7 @@ func (q *Queries) GetTranscriptionModelWithProvider(ctx context.Context, id pgty
 
 const getVideoModelWithProvider = `-- name: GetVideoModelWithProvider :one
 SELECT
-  m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at,
+  m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id,
   p.client_type AS provider_type
 FROM models m
 JOIN providers p ON p.id = m.provider_id
@@ -493,6 +944,7 @@ type GetVideoModelWithProviderRow struct {
 	Config       []byte             `json:"config"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 	ProviderType string             `json:"provider_type"`
 }
 
@@ -509,13 +961,64 @@ func (q *Queries) GetVideoModelWithProvider(ctx context.Context, id pgtype.UUID)
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
+		&i.ProviderType,
+	)
+	return i, err
+}
+
+const getVideoModelWithProviderForTeam = `-- name: GetVideoModelWithProviderForTeam :one
+SELECT
+  m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id,
+  p.client_type AS provider_type
+FROM models m
+JOIN providers p ON p.id = m.provider_id
+WHERE m.id = $1
+  AND m.team_id = $2
+  AND p.team_id = $2
+  AND m.type = 'video'
+`
+
+type GetVideoModelWithProviderForTeamParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+type GetVideoModelWithProviderForTeamRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	ModelID      string             `json:"model_id"`
+	Name         pgtype.Text        `json:"name"`
+	ProviderID   pgtype.UUID        `json:"provider_id"`
+	Type         string             `json:"type"`
+	Enable       bool               `json:"enable"`
+	Config       []byte             `json:"config"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
+	ProviderType string             `json:"provider_type"`
+}
+
+func (q *Queries) GetVideoModelWithProviderForTeam(ctx context.Context, arg GetVideoModelWithProviderForTeamParams) (GetVideoModelWithProviderForTeamRow, error) {
+	row := q.db.QueryRow(ctx, getVideoModelWithProviderForTeam, arg.ID, arg.TeamID)
+	var i GetVideoModelWithProviderForTeamRow
+	err := row.Scan(
+		&i.ID,
+		&i.ModelID,
+		&i.Name,
+		&i.ProviderID,
+		&i.Type,
+		&i.Enable,
+		&i.Config,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
 		&i.ProviderType,
 	)
 	return i, err
 }
 
 const listEnabledModels = `-- name: ListEnabledModels :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id
 FROM models m
 JOIN providers p ON m.provider_id = p.id
 WHERE p.enable = true
@@ -543,6 +1046,7 @@ func (q *Queries) ListEnabledModels(ctx context.Context) ([]Model, error) {
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -555,7 +1059,7 @@ func (q *Queries) ListEnabledModels(ctx context.Context) ([]Model, error) {
 }
 
 const listEnabledModelsByProviderClientType = `-- name: ListEnabledModelsByProviderClientType :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id
 FROM models m
 JOIN providers p ON m.provider_id = p.id
 WHERE p.enable = true
@@ -583,6 +1087,55 @@ func (q *Queries) ListEnabledModelsByProviderClientType(ctx context.Context, cli
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEnabledModelsByProviderClientTypeForTeam = `-- name: ListEnabledModelsByProviderClientTypeForTeam :many
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id
+FROM models m
+JOIN providers p ON m.provider_id = p.id
+WHERE m.team_id = $1
+  AND p.team_id = $1
+  AND p.enable = true
+  AND m.enable = true
+  AND p.client_type = $2
+ORDER BY m.created_at DESC
+`
+
+type ListEnabledModelsByProviderClientTypeForTeamParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
+	ClientType string      `json:"client_type"`
+}
+
+func (q *Queries) ListEnabledModelsByProviderClientTypeForTeam(ctx context.Context, arg ListEnabledModelsByProviderClientTypeForTeamParams) ([]Model, error) {
+	rows, err := q.db.Query(ctx, listEnabledModelsByProviderClientTypeForTeam, arg.TeamID, arg.ClientType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Model
+	for rows.Next() {
+		var i Model
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.ProviderID,
+			&i.Type,
+			&i.Enable,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -595,7 +1148,7 @@ func (q *Queries) ListEnabledModelsByProviderClientType(ctx context.Context, cli
 }
 
 const listEnabledModelsByType = `-- name: ListEnabledModelsByType :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id
 FROM models m
 JOIN providers p ON m.provider_id = p.id
 WHERE p.enable = true
@@ -623,6 +1176,98 @@ func (q *Queries) ListEnabledModelsByType(ctx context.Context, type_ string) ([]
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEnabledModelsByTypeForTeam = `-- name: ListEnabledModelsByTypeForTeam :many
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id
+FROM models m
+JOIN providers p ON m.provider_id = p.id
+WHERE m.team_id = $1
+  AND p.team_id = $1
+  AND p.enable = true
+  AND m.enable = true
+  AND m.type = $2
+ORDER BY m.created_at DESC
+`
+
+type ListEnabledModelsByTypeForTeamParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	Type   string      `json:"type"`
+}
+
+func (q *Queries) ListEnabledModelsByTypeForTeam(ctx context.Context, arg ListEnabledModelsByTypeForTeamParams) ([]Model, error) {
+	rows, err := q.db.Query(ctx, listEnabledModelsByTypeForTeam, arg.TeamID, arg.Type)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Model
+	for rows.Next() {
+		var i Model
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.ProviderID,
+			&i.Type,
+			&i.Enable,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEnabledModelsForTeam = `-- name: ListEnabledModelsForTeam :many
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id
+FROM models m
+JOIN providers p ON m.provider_id = p.id
+WHERE m.team_id = $1
+  AND p.team_id = $1
+  AND p.enable = true
+  AND m.enable = true
+  AND m.type NOT IN ('speech', 'transcription', 'video')
+ORDER BY m.created_at DESC
+`
+
+func (q *Queries) ListEnabledModelsForTeam(ctx context.Context, teamID pgtype.UUID) ([]Model, error) {
+	rows, err := q.db.Query(ctx, listEnabledModelsForTeam, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Model
+	for rows.Next() {
+		var i Model
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.ProviderID,
+			&i.Type,
+			&i.Enable,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -635,7 +1280,7 @@ func (q *Queries) ListEnabledModelsByType(ctx context.Context, type_ string) ([]
 }
 
 const listModelVariantsByModelUUID = `-- name: ListModelVariantsByModelUUID :many
-SELECT id, model_uuid, variant_id, weight, metadata, created_at, updated_at FROM model_variants
+SELECT id, model_uuid, variant_id, weight, metadata, created_at, updated_at, team_id FROM model_variants
 WHERE model_uuid = $1
 ORDER BY weight DESC, created_at DESC
 `
@@ -657,6 +1302,7 @@ func (q *Queries) ListModelVariantsByModelUUID(ctx context.Context, modelUuid pg
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -669,7 +1315,7 @@ func (q *Queries) ListModelVariantsByModelUUID(ctx context.Context, modelUuid pg
 }
 
 const listModels = `-- name: ListModels :many
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
 WHERE type NOT IN ('speech', 'transcription', 'video')
 ORDER BY created_at DESC
 `
@@ -693,6 +1339,7 @@ func (q *Queries) ListModels(ctx context.Context) ([]Model, error) {
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -705,7 +1352,7 @@ func (q *Queries) ListModels(ctx context.Context) ([]Model, error) {
 }
 
 const listModelsByModelID = `-- name: ListModelsByModelID :many
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
 WHERE model_id = $1
 ORDER BY created_at DESC
 `
@@ -729,6 +1376,50 @@ func (q *Queries) ListModelsByModelID(ctx context.Context, modelID string) ([]Mo
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listModelsByModelIDForTeam = `-- name: ListModelsByModelIDForTeam :many
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = $1
+  AND model_id = $2
+ORDER BY created_at DESC
+`
+
+type ListModelsByModelIDForTeamParams struct {
+	TeamID  pgtype.UUID `json:"team_id"`
+	ModelID string      `json:"model_id"`
+}
+
+func (q *Queries) ListModelsByModelIDForTeam(ctx context.Context, arg ListModelsByModelIDForTeamParams) ([]Model, error) {
+	rows, err := q.db.Query(ctx, listModelsByModelIDForTeam, arg.TeamID, arg.ModelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Model
+	for rows.Next() {
+		var i Model
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.ProviderID,
+			&i.Type,
+			&i.Enable,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -741,7 +1432,7 @@ func (q *Queries) ListModelsByModelID(ctx context.Context, modelID string) ([]Mo
 }
 
 const listModelsByProviderClientType = `-- name: ListModelsByProviderClientType :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id
 FROM models m
 JOIN providers p ON m.provider_id = p.id
 WHERE p.client_type = $1
@@ -767,6 +1458,53 @@ func (q *Queries) ListModelsByProviderClientType(ctx context.Context, clientType
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listModelsByProviderClientTypeForTeam = `-- name: ListModelsByProviderClientTypeForTeam :many
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id
+FROM models m
+JOIN providers p ON m.provider_id = p.id
+WHERE m.team_id = $1
+  AND p.team_id = $1
+  AND p.client_type = $2
+ORDER BY m.created_at DESC
+`
+
+type ListModelsByProviderClientTypeForTeamParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
+	ClientType string      `json:"client_type"`
+}
+
+func (q *Queries) ListModelsByProviderClientTypeForTeam(ctx context.Context, arg ListModelsByProviderClientTypeForTeamParams) ([]Model, error) {
+	rows, err := q.db.Query(ctx, listModelsByProviderClientTypeForTeam, arg.TeamID, arg.ClientType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Model
+	for rows.Next() {
+		var i Model
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.ProviderID,
+			&i.Type,
+			&i.Enable,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -779,7 +1517,7 @@ func (q *Queries) ListModelsByProviderClientType(ctx context.Context, clientType
 }
 
 const listModelsByProviderID = `-- name: ListModelsByProviderID :many
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
 WHERE provider_id = $1
   AND type NOT IN ('speech', 'transcription', 'video')
 ORDER BY created_at DESC
@@ -804,6 +1542,7 @@ func (q *Queries) ListModelsByProviderID(ctx context.Context, providerID pgtype.
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -816,7 +1555,7 @@ func (q *Queries) ListModelsByProviderID(ctx context.Context, providerID pgtype.
 }
 
 const listModelsByProviderIDAndType = `-- name: ListModelsByProviderIDAndType :many
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
 WHERE provider_id = $1
   AND type = $2
 ORDER BY created_at DESC
@@ -846,6 +1585,96 @@ func (q *Queries) ListModelsByProviderIDAndType(ctx context.Context, arg ListMod
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listModelsByProviderIDAndTypeForTeam = `-- name: ListModelsByProviderIDAndTypeForTeam :many
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = $1
+  AND provider_id = $2
+  AND type = $3
+ORDER BY created_at DESC
+`
+
+type ListModelsByProviderIDAndTypeForTeamParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
+	ProviderID pgtype.UUID `json:"provider_id"`
+	Type       string      `json:"type"`
+}
+
+func (q *Queries) ListModelsByProviderIDAndTypeForTeam(ctx context.Context, arg ListModelsByProviderIDAndTypeForTeamParams) ([]Model, error) {
+	rows, err := q.db.Query(ctx, listModelsByProviderIDAndTypeForTeam, arg.TeamID, arg.ProviderID, arg.Type)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Model
+	for rows.Next() {
+		var i Model
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.ProviderID,
+			&i.Type,
+			&i.Enable,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listModelsByProviderIDForTeam = `-- name: ListModelsByProviderIDForTeam :many
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = $1
+  AND provider_id = $2
+  AND type NOT IN ('speech', 'transcription', 'video')
+ORDER BY created_at DESC
+`
+
+type ListModelsByProviderIDForTeamParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
+	ProviderID pgtype.UUID `json:"provider_id"`
+}
+
+func (q *Queries) ListModelsByProviderIDForTeam(ctx context.Context, arg ListModelsByProviderIDForTeamParams) ([]Model, error) {
+	rows, err := q.db.Query(ctx, listModelsByProviderIDForTeam, arg.TeamID, arg.ProviderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Model
+	for rows.Next() {
+		var i Model
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.ProviderID,
+			&i.Type,
+			&i.Enable,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -858,7 +1687,7 @@ func (q *Queries) ListModelsByProviderIDAndType(ctx context.Context, arg ListMod
 }
 
 const listModelsByType = `-- name: ListModelsByType :many
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
 WHERE type = $1
 ORDER BY created_at DESC
 `
@@ -882,6 +1711,88 @@ func (q *Queries) ListModelsByType(ctx context.Context, type_ string) ([]Model, 
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listModelsByTypeForTeam = `-- name: ListModelsByTypeForTeam :many
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = $1
+  AND type = $2
+ORDER BY created_at DESC
+`
+
+type ListModelsByTypeForTeamParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	Type   string      `json:"type"`
+}
+
+func (q *Queries) ListModelsByTypeForTeam(ctx context.Context, arg ListModelsByTypeForTeamParams) ([]Model, error) {
+	rows, err := q.db.Query(ctx, listModelsByTypeForTeam, arg.TeamID, arg.Type)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Model
+	for rows.Next() {
+		var i Model
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.ProviderID,
+			&i.Type,
+			&i.Enable,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listModelsForTeam = `-- name: ListModelsForTeam :many
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = $1
+  AND type NOT IN ('speech', 'transcription', 'video')
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListModelsForTeam(ctx context.Context, teamID pgtype.UUID) ([]Model, error) {
+	rows, err := q.db.Query(ctx, listModelsForTeam, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Model
+	for rows.Next() {
+		var i Model
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.ProviderID,
+			&i.Type,
+			&i.Enable,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -894,7 +1805,7 @@ func (q *Queries) ListModelsByType(ctx context.Context, type_ string) ([]Model, 
 }
 
 const listProviders = `-- name: ListProviders :many
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
 WHERE client_type NOT IN (
   'edge-speech',
   'openai-speech',
@@ -937,6 +1848,64 @@ func (q *Queries) ListProviders(ctx context.Context) ([]Provider, error) {
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProvidersForTeam = `-- name: ListProvidersForTeam :many
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
+WHERE team_id = $1
+  AND client_type NOT IN (
+    'edge-speech',
+    'openai-speech',
+    'openai-transcription',
+    'openrouter-speech',
+    'openrouter-transcription',
+    'elevenlabs-speech',
+    'elevenlabs-transcription',
+    'deepgram-speech',
+    'deepgram-transcription',
+    'minimax-speech',
+    'volcengine-speech',
+    'alibabacloud-speech',
+    'microsoft-speech',
+    'google-speech',
+    'google-transcription',
+    'openrouter-video',
+    'modelark-video',
+    'volcengine-video'
+  )
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListProvidersForTeam(ctx context.Context, teamID pgtype.UUID) ([]Provider, error) {
+	rows, err := q.db.Query(ctx, listProvidersForTeam, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Provider
+	for rows.Next() {
+		var i Provider
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.ClientType,
+			&i.Icon,
+			&i.Enable,
+			&i.Config,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -949,7 +1918,7 @@ func (q *Queries) ListProviders(ctx context.Context) ([]Provider, error) {
 }
 
 const listSpeechModels = `-- name: ListSpeechModels :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at,
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id,
   p.client_type AS provider_type
 FROM models m
 JOIN providers p ON p.id = m.provider_id
@@ -968,6 +1937,7 @@ type ListSpeechModelsRow struct {
 	Config       []byte             `json:"config"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 	ProviderType string             `json:"provider_type"`
 }
 
@@ -990,6 +1960,7 @@ func (q *Queries) ListSpeechModels(ctx context.Context) ([]ListSpeechModelsRow, 
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 			&i.ProviderType,
 		); err != nil {
 			return nil, err
@@ -1003,7 +1974,7 @@ func (q *Queries) ListSpeechModels(ctx context.Context) ([]ListSpeechModelsRow, 
 }
 
 const listSpeechModelsByProviderID = `-- name: ListSpeechModelsByProviderID :many
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
 WHERE provider_id = $1
   AND type = 'speech'
   AND enable = true
@@ -1029,6 +2000,110 @@ func (q *Queries) ListSpeechModelsByProviderID(ctx context.Context, providerID p
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSpeechModelsByProviderIDForTeam = `-- name: ListSpeechModelsByProviderIDForTeam :many
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = $1
+  AND provider_id = $2
+  AND type = 'speech'
+  AND enable = true
+ORDER BY created_at DESC
+`
+
+type ListSpeechModelsByProviderIDForTeamParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
+	ProviderID pgtype.UUID `json:"provider_id"`
+}
+
+func (q *Queries) ListSpeechModelsByProviderIDForTeam(ctx context.Context, arg ListSpeechModelsByProviderIDForTeamParams) ([]Model, error) {
+	rows, err := q.db.Query(ctx, listSpeechModelsByProviderIDForTeam, arg.TeamID, arg.ProviderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Model
+	for rows.Next() {
+		var i Model
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.ProviderID,
+			&i.Type,
+			&i.Enable,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSpeechModelsForTeam = `-- name: ListSpeechModelsForTeam :many
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id,
+  p.client_type AS provider_type
+FROM models m
+JOIN providers p ON p.id = m.provider_id
+WHERE m.team_id = $1
+  AND p.team_id = $1
+  AND m.type = 'speech'
+  AND m.enable = true
+ORDER BY m.created_at DESC
+`
+
+type ListSpeechModelsForTeamRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	ModelID      string             `json:"model_id"`
+	Name         pgtype.Text        `json:"name"`
+	ProviderID   pgtype.UUID        `json:"provider_id"`
+	Type         string             `json:"type"`
+	Enable       bool               `json:"enable"`
+	Config       []byte             `json:"config"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
+	ProviderType string             `json:"provider_type"`
+}
+
+func (q *Queries) ListSpeechModelsForTeam(ctx context.Context, teamID pgtype.UUID) ([]ListSpeechModelsForTeamRow, error) {
+	rows, err := q.db.Query(ctx, listSpeechModelsForTeam, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSpeechModelsForTeamRow
+	for rows.Next() {
+		var i ListSpeechModelsForTeamRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.ProviderID,
+			&i.Type,
+			&i.Enable,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
+			&i.ProviderType,
 		); err != nil {
 			return nil, err
 		}
@@ -1041,7 +2116,7 @@ func (q *Queries) ListSpeechModelsByProviderID(ctx context.Context, providerID p
 }
 
 const listSpeechProviders = `-- name: ListSpeechProviders :many
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
 WHERE client_type IN (
   'edge-speech',
   'openai-speech',
@@ -1075,6 +2150,55 @@ func (q *Queries) ListSpeechProviders(ctx context.Context) ([]Provider, error) {
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSpeechProvidersForTeam = `-- name: ListSpeechProvidersForTeam :many
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
+WHERE team_id = $1
+  AND client_type IN (
+    'edge-speech',
+    'openai-speech',
+    'openrouter-speech',
+    'elevenlabs-speech',
+    'deepgram-speech',
+    'minimax-speech',
+    'volcengine-speech',
+    'alibabacloud-speech',
+    'microsoft-speech'
+  )
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListSpeechProvidersForTeam(ctx context.Context, teamID pgtype.UUID) ([]Provider, error) {
+	rows, err := q.db.Query(ctx, listSpeechProvidersForTeam, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Provider
+	for rows.Next() {
+		var i Provider
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.ClientType,
+			&i.Icon,
+			&i.Enable,
+			&i.Config,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -1087,7 +2211,7 @@ func (q *Queries) ListSpeechProviders(ctx context.Context) ([]Provider, error) {
 }
 
 const listTranscriptionModels = `-- name: ListTranscriptionModels :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at,
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id,
   p.client_type AS provider_type
 FROM models m
 JOIN providers p ON p.id = m.provider_id
@@ -1106,6 +2230,7 @@ type ListTranscriptionModelsRow struct {
 	Config       []byte             `json:"config"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 	ProviderType string             `json:"provider_type"`
 }
 
@@ -1128,6 +2253,7 @@ func (q *Queries) ListTranscriptionModels(ctx context.Context) ([]ListTranscript
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 			&i.ProviderType,
 		); err != nil {
 			return nil, err
@@ -1141,7 +2267,7 @@ func (q *Queries) ListTranscriptionModels(ctx context.Context) ([]ListTranscript
 }
 
 const listTranscriptionModelsByProviderID = `-- name: ListTranscriptionModelsByProviderID :many
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
 WHERE provider_id = $1
   AND type = 'transcription'
   AND enable = true
@@ -1167,6 +2293,110 @@ func (q *Queries) ListTranscriptionModelsByProviderID(ctx context.Context, provi
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTranscriptionModelsByProviderIDForTeam = `-- name: ListTranscriptionModelsByProviderIDForTeam :many
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = $1
+  AND provider_id = $2
+  AND type = 'transcription'
+  AND enable = true
+ORDER BY created_at DESC
+`
+
+type ListTranscriptionModelsByProviderIDForTeamParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
+	ProviderID pgtype.UUID `json:"provider_id"`
+}
+
+func (q *Queries) ListTranscriptionModelsByProviderIDForTeam(ctx context.Context, arg ListTranscriptionModelsByProviderIDForTeamParams) ([]Model, error) {
+	rows, err := q.db.Query(ctx, listTranscriptionModelsByProviderIDForTeam, arg.TeamID, arg.ProviderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Model
+	for rows.Next() {
+		var i Model
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.ProviderID,
+			&i.Type,
+			&i.Enable,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTranscriptionModelsForTeam = `-- name: ListTranscriptionModelsForTeam :many
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id,
+  p.client_type AS provider_type
+FROM models m
+JOIN providers p ON p.id = m.provider_id
+WHERE m.team_id = $1
+  AND p.team_id = $1
+  AND m.type = 'transcription'
+  AND m.enable = true
+ORDER BY m.created_at DESC
+`
+
+type ListTranscriptionModelsForTeamRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	ModelID      string             `json:"model_id"`
+	Name         pgtype.Text        `json:"name"`
+	ProviderID   pgtype.UUID        `json:"provider_id"`
+	Type         string             `json:"type"`
+	Enable       bool               `json:"enable"`
+	Config       []byte             `json:"config"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
+	ProviderType string             `json:"provider_type"`
+}
+
+func (q *Queries) ListTranscriptionModelsForTeam(ctx context.Context, teamID pgtype.UUID) ([]ListTranscriptionModelsForTeamRow, error) {
+	rows, err := q.db.Query(ctx, listTranscriptionModelsForTeam, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTranscriptionModelsForTeamRow
+	for rows.Next() {
+		var i ListTranscriptionModelsForTeamRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.ProviderID,
+			&i.Type,
+			&i.Enable,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
+			&i.ProviderType,
 		); err != nil {
 			return nil, err
 		}
@@ -1179,7 +2409,7 @@ func (q *Queries) ListTranscriptionModelsByProviderID(ctx context.Context, provi
 }
 
 const listTranscriptionProviders = `-- name: ListTranscriptionProviders :many
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
 WHERE client_type IN (
   'openai-transcription',
   'openrouter-transcription',
@@ -1209,6 +2439,51 @@ func (q *Queries) ListTranscriptionProviders(ctx context.Context) ([]Provider, e
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTranscriptionProvidersForTeam = `-- name: ListTranscriptionProvidersForTeam :many
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
+WHERE team_id = $1
+  AND client_type IN (
+    'openai-transcription',
+    'openrouter-transcription',
+    'elevenlabs-transcription',
+    'deepgram-transcription',
+    'google-transcription'
+  )
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListTranscriptionProvidersForTeam(ctx context.Context, teamID pgtype.UUID) ([]Provider, error) {
+	rows, err := q.db.Query(ctx, listTranscriptionProvidersForTeam, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Provider
+	for rows.Next() {
+		var i Provider
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.ClientType,
+			&i.Icon,
+			&i.Enable,
+			&i.Config,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -1221,7 +2496,7 @@ func (q *Queries) ListTranscriptionProviders(ctx context.Context) ([]Provider, e
 }
 
 const listVideoModels = `-- name: ListVideoModels :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at,
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id,
   p.client_type AS provider_type
 FROM models m
 JOIN providers p ON p.id = m.provider_id
@@ -1240,6 +2515,7 @@ type ListVideoModelsRow struct {
 	Config       []byte             `json:"config"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 	ProviderType string             `json:"provider_type"`
 }
 
@@ -1262,6 +2538,7 @@ func (q *Queries) ListVideoModels(ctx context.Context) ([]ListVideoModelsRow, er
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 			&i.ProviderType,
 		); err != nil {
 			return nil, err
@@ -1275,7 +2552,7 @@ func (q *Queries) ListVideoModels(ctx context.Context) ([]ListVideoModelsRow, er
 }
 
 const listVideoModelsByProviderID = `-- name: ListVideoModelsByProviderID :many
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
 WHERE provider_id = $1
   AND type = 'video'
   AND enable = true
@@ -1301,6 +2578,110 @@ func (q *Queries) ListVideoModelsByProviderID(ctx context.Context, providerID pg
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVideoModelsByProviderIDForTeam = `-- name: ListVideoModelsByProviderIDForTeam :many
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = $1
+  AND provider_id = $2
+  AND type = 'video'
+  AND enable = true
+ORDER BY created_at DESC
+`
+
+type ListVideoModelsByProviderIDForTeamParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
+	ProviderID pgtype.UUID `json:"provider_id"`
+}
+
+func (q *Queries) ListVideoModelsByProviderIDForTeam(ctx context.Context, arg ListVideoModelsByProviderIDForTeamParams) ([]Model, error) {
+	rows, err := q.db.Query(ctx, listVideoModelsByProviderIDForTeam, arg.TeamID, arg.ProviderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Model
+	for rows.Next() {
+		var i Model
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.ProviderID,
+			&i.Type,
+			&i.Enable,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVideoModelsForTeam = `-- name: ListVideoModelsForTeam :many
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id,
+  p.client_type AS provider_type
+FROM models m
+JOIN providers p ON p.id = m.provider_id
+WHERE m.team_id = $1
+  AND p.team_id = $1
+  AND m.type = 'video'
+  AND m.enable = true
+ORDER BY m.created_at DESC
+`
+
+type ListVideoModelsForTeamRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	ModelID      string             `json:"model_id"`
+	Name         pgtype.Text        `json:"name"`
+	ProviderID   pgtype.UUID        `json:"provider_id"`
+	Type         string             `json:"type"`
+	Enable       bool               `json:"enable"`
+	Config       []byte             `json:"config"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
+	ProviderType string             `json:"provider_type"`
+}
+
+func (q *Queries) ListVideoModelsForTeam(ctx context.Context, teamID pgtype.UUID) ([]ListVideoModelsForTeamRow, error) {
+	rows, err := q.db.Query(ctx, listVideoModelsForTeam, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListVideoModelsForTeamRow
+	for rows.Next() {
+		var i ListVideoModelsForTeamRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ModelID,
+			&i.Name,
+			&i.ProviderID,
+			&i.Type,
+			&i.Enable,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
+			&i.ProviderType,
 		); err != nil {
 			return nil, err
 		}
@@ -1313,7 +2694,7 @@ func (q *Queries) ListVideoModelsByProviderID(ctx context.Context, providerID pg
 }
 
 const listVideoProviders = `-- name: ListVideoProviders :many
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
 WHERE client_type IN (
   'openrouter-video',
   'modelark-video',
@@ -1341,6 +2722,49 @@ func (q *Queries) ListVideoProviders(ctx context.Context) ([]Provider, error) {
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVideoProvidersForTeam = `-- name: ListVideoProvidersForTeam :many
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
+WHERE team_id = $1
+  AND client_type IN (
+    'openrouter-video',
+    'modelark-video',
+    'volcengine-video'
+  )
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListVideoProvidersForTeam(ctx context.Context, teamID pgtype.UUID) ([]Provider, error) {
+	rows, err := q.db.Query(ctx, listVideoProvidersForTeam, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Provider
+	for rows.Next() {
+		var i Provider
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.ClientType,
+			&i.Icon,
+			&i.Enable,
+			&i.Config,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -1363,7 +2787,8 @@ SET
   config = $6,
   updated_at = now()
 WHERE id = $7
-RETURNING id, model_id, name, provider_id, type, enable, config, created_at, updated_at
+  AND team_id = COALESCE($8::uuid, '00000000-0000-0000-0000-000000000001'::uuid)
+RETURNING id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id
 `
 
 type UpdateModelParams struct {
@@ -1374,6 +2799,7 @@ type UpdateModelParams struct {
 	Enable     bool        `json:"enable"`
 	Config     []byte      `json:"config"`
 	ID         pgtype.UUID `json:"id"`
+	TeamID     pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateModel(ctx context.Context, arg UpdateModelParams) (Model, error) {
@@ -1385,6 +2811,7 @@ func (q *Queries) UpdateModel(ctx context.Context, arg UpdateModelParams) (Model
 		arg.Enable,
 		arg.Config,
 		arg.ID,
+		arg.TeamID,
 	)
 	var i Model
 	err := row.Scan(
@@ -1397,6 +2824,7 @@ func (q *Queries) UpdateModel(ctx context.Context, arg UpdateModelParams) (Model
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -1412,7 +2840,8 @@ SET
   metadata = $6,
   updated_at = now()
 WHERE id = $7
-RETURNING id, name, client_type, icon, enable, config, metadata, created_at, updated_at
+  AND team_id = COALESCE($8::uuid, '00000000-0000-0000-0000-000000000001'::uuid)
+RETURNING id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id
 `
 
 type UpdateProviderParams struct {
@@ -1423,6 +2852,7 @@ type UpdateProviderParams struct {
 	Config     []byte      `json:"config"`
 	Metadata   []byte      `json:"metadata"`
 	ID         pgtype.UUID `json:"id"`
+	TeamID     pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateProvider(ctx context.Context, arg UpdateProviderParams) (Provider, error) {
@@ -1434,6 +2864,7 @@ func (q *Queries) UpdateProvider(ctx context.Context, arg UpdateProviderParams) 
 		arg.Config,
 		arg.Metadata,
 		arg.ID,
+		arg.TeamID,
 	)
 	var i Provider
 	err := row.Scan(
@@ -1446,22 +2877,31 @@ func (q *Queries) UpdateProvider(ctx context.Context, arg UpdateProviderParams) 
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const upsertRegistryModel = `-- name: UpsertRegistryModel :one
-INSERT INTO models (model_id, name, provider_id, type, config)
-VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (provider_id, model_id) DO UPDATE SET
+INSERT INTO models (team_id, model_id, name, provider_id, type, config)
+VALUES (
+  COALESCE($1::uuid, '00000000-0000-0000-0000-000000000001'::uuid),
+  $2,
+  $3,
+  $4,
+  $5,
+  $6
+)
+ON CONFLICT (team_id, provider_id, model_id) DO UPDATE SET
   name = EXCLUDED.name,
   type = EXCLUDED.type,
   config = EXCLUDED.config,
   updated_at = now()
-RETURNING id, model_id, name, provider_id, type, enable, config, created_at, updated_at
+RETURNING id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id
 `
 
 type UpsertRegistryModelParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
 	ModelID    string      `json:"model_id"`
 	Name       pgtype.Text `json:"name"`
 	ProviderID pgtype.UUID `json:"provider_id"`
@@ -1471,6 +2911,7 @@ type UpsertRegistryModelParams struct {
 
 func (q *Queries) UpsertRegistryModel(ctx context.Context, arg UpsertRegistryModelParams) (Model, error) {
 	row := q.db.QueryRow(ctx, upsertRegistryModel,
+		arg.TeamID,
 		arg.ModelID,
 		arg.Name,
 		arg.ProviderID,
@@ -1488,21 +2929,31 @@ func (q *Queries) UpsertRegistryModel(ctx context.Context, arg UpsertRegistryMod
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const upsertRegistryProvider = `-- name: UpsertRegistryProvider :one
-INSERT INTO providers (name, client_type, icon, enable, config, metadata)
-VALUES ($1, $2, $3, false, $4, '{}')
-ON CONFLICT (name) DO UPDATE SET
+INSERT INTO providers (team_id, name, client_type, icon, enable, config, metadata)
+VALUES (
+  COALESCE($1::uuid, '00000000-0000-0000-0000-000000000001'::uuid),
+  $2,
+  $3,
+  $4,
+  false,
+  $5,
+  '{}'
+)
+ON CONFLICT (team_id, name) DO UPDATE SET
   icon = EXCLUDED.icon,
   client_type = EXCLUDED.client_type,
   updated_at = now()
-RETURNING id, name, client_type, icon, enable, config, metadata, created_at, updated_at
+RETURNING id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id
 `
 
 type UpsertRegistryProviderParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
 	Name       string      `json:"name"`
 	ClientType string      `json:"client_type"`
 	Icon       pgtype.Text `json:"icon"`
@@ -1511,6 +2962,7 @@ type UpsertRegistryProviderParams struct {
 
 func (q *Queries) UpsertRegistryProvider(ctx context.Context, arg UpsertRegistryProviderParams) (Provider, error) {
 	row := q.db.QueryRow(ctx, upsertRegistryProvider,
+		arg.TeamID,
 		arg.Name,
 		arg.ClientType,
 		arg.Icon,
@@ -1527,6 +2979,7 @@ func (q *Queries) UpsertRegistryProvider(ctx context.Context, arg UpsertRegistry
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

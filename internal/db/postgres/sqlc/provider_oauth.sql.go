@@ -20,8 +20,24 @@ func (q *Queries) DeleteProviderOAuthToken(ctx context.Context, providerID pgtyp
 	return err
 }
 
+const deleteProviderOAuthTokenForTeam = `-- name: DeleteProviderOAuthTokenForTeam :exec
+DELETE FROM provider_oauth_tokens
+WHERE team_id = $1
+  AND provider_id = $2
+`
+
+type DeleteProviderOAuthTokenForTeamParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
+	ProviderID pgtype.UUID `json:"provider_id"`
+}
+
+func (q *Queries) DeleteProviderOAuthTokenForTeam(ctx context.Context, arg DeleteProviderOAuthTokenForTeamParams) error {
+	_, err := q.db.Exec(ctx, deleteProviderOAuthTokenForTeam, arg.TeamID, arg.ProviderID)
+	return err
+}
+
 const getProviderOAuthTokenByProvider = `-- name: GetProviderOAuthTokenByProvider :one
-SELECT id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, created_at, updated_at FROM provider_oauth_tokens WHERE provider_id = $1
+SELECT id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, created_at, updated_at, team_id FROM provider_oauth_tokens WHERE provider_id = $1
 `
 
 func (q *Queries) GetProviderOAuthTokenByProvider(ctx context.Context, providerID pgtype.UUID) (ProviderOauthToken, error) {
@@ -39,12 +55,44 @@ func (q *Queries) GetProviderOAuthTokenByProvider(ctx context.Context, providerI
 		&i.PkceCodeVerifier,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
+const getProviderOAuthTokenByProviderForTeam = `-- name: GetProviderOAuthTokenByProviderForTeam :one
+SELECT id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, created_at, updated_at, team_id FROM provider_oauth_tokens
+WHERE team_id = $1
+  AND provider_id = $2
+`
+
+type GetProviderOAuthTokenByProviderForTeamParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
+	ProviderID pgtype.UUID `json:"provider_id"`
+}
+
+func (q *Queries) GetProviderOAuthTokenByProviderForTeam(ctx context.Context, arg GetProviderOAuthTokenByProviderForTeamParams) (ProviderOauthToken, error) {
+	row := q.db.QueryRow(ctx, getProviderOAuthTokenByProviderForTeam, arg.TeamID, arg.ProviderID)
+	var i ProviderOauthToken
+	err := row.Scan(
+		&i.ID,
+		&i.ProviderID,
+		&i.AccessToken,
+		&i.RefreshToken,
+		&i.ExpiresAt,
+		&i.Scope,
+		&i.TokenType,
+		&i.State,
+		&i.PkceCodeVerifier,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getProviderOAuthTokenByState = `-- name: GetProviderOAuthTokenByState :one
-SELECT id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, created_at, updated_at FROM provider_oauth_tokens WHERE state = $1 AND state != ''
+SELECT id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, created_at, updated_at, team_id FROM provider_oauth_tokens WHERE state = $1 AND state != ''
 `
 
 func (q *Queries) GetProviderOAuthTokenByState(ctx context.Context, state string) (ProviderOauthToken, error) {
@@ -62,36 +110,77 @@ func (q *Queries) GetProviderOAuthTokenByState(ctx context.Context, state string
 		&i.PkceCodeVerifier,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
+const getProviderOAuthTokenByStateForTeam = `-- name: GetProviderOAuthTokenByStateForTeam :one
+SELECT id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, created_at, updated_at, team_id FROM provider_oauth_tokens
+WHERE team_id = $1
+  AND state = $2
+  AND state != ''
+`
+
+type GetProviderOAuthTokenByStateForTeamParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	State  string      `json:"state"`
+}
+
+func (q *Queries) GetProviderOAuthTokenByStateForTeam(ctx context.Context, arg GetProviderOAuthTokenByStateForTeamParams) (ProviderOauthToken, error) {
+	row := q.db.QueryRow(ctx, getProviderOAuthTokenByStateForTeam, arg.TeamID, arg.State)
+	var i ProviderOauthToken
+	err := row.Scan(
+		&i.ID,
+		&i.ProviderID,
+		&i.AccessToken,
+		&i.RefreshToken,
+		&i.ExpiresAt,
+		&i.Scope,
+		&i.TokenType,
+		&i.State,
+		&i.PkceCodeVerifier,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const updateProviderOAuthState = `-- name: UpdateProviderOAuthState :exec
-INSERT INTO provider_oauth_tokens (provider_id, state, pkce_code_verifier)
+INSERT INTO provider_oauth_tokens (team_id, provider_id, state, pkce_code_verifier)
 VALUES (
-  $1,
+  COALESCE($1::uuid, '00000000-0000-0000-0000-000000000001'::uuid),
   $2,
-  $3
+  $3,
+  $4
 )
-ON CONFLICT (provider_id) DO UPDATE SET
+ON CONFLICT (team_id, provider_id) DO UPDATE SET
   state = EXCLUDED.state,
   pkce_code_verifier = EXCLUDED.pkce_code_verifier,
   updated_at = now()
 `
 
 type UpdateProviderOAuthStateParams struct {
+	TeamID           pgtype.UUID `json:"team_id"`
 	ProviderID       pgtype.UUID `json:"provider_id"`
 	State            string      `json:"state"`
 	PkceCodeVerifier string      `json:"pkce_code_verifier"`
 }
 
 func (q *Queries) UpdateProviderOAuthState(ctx context.Context, arg UpdateProviderOAuthStateParams) error {
-	_, err := q.db.Exec(ctx, updateProviderOAuthState, arg.ProviderID, arg.State, arg.PkceCodeVerifier)
+	_, err := q.db.Exec(ctx, updateProviderOAuthState,
+		arg.TeamID,
+		arg.ProviderID,
+		arg.State,
+		arg.PkceCodeVerifier,
+	)
 	return err
 }
 
 const upsertProviderOAuthToken = `-- name: UpsertProviderOAuthToken :one
 INSERT INTO provider_oauth_tokens (
+  team_id,
   provider_id,
   access_token,
   refresh_token,
@@ -102,16 +191,17 @@ INSERT INTO provider_oauth_tokens (
   pkce_code_verifier
 )
 VALUES (
-  $1,
+  COALESCE($1::uuid, '00000000-0000-0000-0000-000000000001'::uuid),
   $2,
   $3,
   $4,
   $5,
   $6,
   $7,
-  $8
+  $8,
+  $9
 )
-ON CONFLICT (provider_id) DO UPDATE SET
+ON CONFLICT (team_id, provider_id) DO UPDATE SET
   access_token = EXCLUDED.access_token,
   refresh_token = EXCLUDED.refresh_token,
   expires_at = EXCLUDED.expires_at,
@@ -120,10 +210,11 @@ ON CONFLICT (provider_id) DO UPDATE SET
   state = EXCLUDED.state,
   pkce_code_verifier = EXCLUDED.pkce_code_verifier,
   updated_at = now()
-RETURNING id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, created_at, updated_at
+RETURNING id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, created_at, updated_at, team_id
 `
 
 type UpsertProviderOAuthTokenParams struct {
+	TeamID           pgtype.UUID        `json:"team_id"`
 	ProviderID       pgtype.UUID        `json:"provider_id"`
 	AccessToken      string             `json:"access_token"`
 	RefreshToken     string             `json:"refresh_token"`
@@ -136,6 +227,7 @@ type UpsertProviderOAuthTokenParams struct {
 
 func (q *Queries) UpsertProviderOAuthToken(ctx context.Context, arg UpsertProviderOAuthTokenParams) (ProviderOauthToken, error) {
 	row := q.db.QueryRow(ctx, upsertProviderOAuthToken,
+		arg.TeamID,
 		arg.ProviderID,
 		arg.AccessToken,
 		arg.RefreshToken,
@@ -158,6 +250,7 @@ func (q *Queries) UpsertProviderOAuthToken(ctx context.Context, arg UpsertProvid
 		&i.PkceCodeVerifier,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

@@ -27,8 +27,26 @@ func (q *Queries) DeleteUserProviderOAuthToken(ctx context.Context, arg DeleteUs
 	return err
 }
 
+const deleteUserProviderOAuthTokenForTeam = `-- name: DeleteUserProviderOAuthTokenForTeam :exec
+DELETE FROM user_provider_oauth_tokens
+WHERE team_id = $1
+  AND provider_id = $2
+  AND user_id = $3
+`
+
+type DeleteUserProviderOAuthTokenForTeamParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
+	ProviderID pgtype.UUID `json:"provider_id"`
+	UserID     pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) DeleteUserProviderOAuthTokenForTeam(ctx context.Context, arg DeleteUserProviderOAuthTokenForTeamParams) error {
+	_, err := q.db.Exec(ctx, deleteUserProviderOAuthTokenForTeam, arg.TeamID, arg.ProviderID, arg.UserID)
+	return err
+}
+
 const getUserProviderOAuthToken = `-- name: GetUserProviderOAuthToken :one
-SELECT id, provider_id, user_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at FROM user_provider_oauth_tokens
+SELECT id, provider_id, user_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at, team_id FROM user_provider_oauth_tokens
 WHERE provider_id = $1
   AND user_id = $2
 `
@@ -55,12 +73,13 @@ func (q *Queries) GetUserProviderOAuthToken(ctx context.Context, arg GetUserProv
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getUserProviderOAuthTokenByState = `-- name: GetUserProviderOAuthTokenByState :one
-SELECT id, provider_id, user_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at FROM user_provider_oauth_tokens
+SELECT id, provider_id, user_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at, team_id FROM user_provider_oauth_tokens
 WHERE state = $1
   AND state != ''
 `
@@ -82,20 +101,91 @@ func (q *Queries) GetUserProviderOAuthTokenByState(ctx context.Context, state st
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
+const getUserProviderOAuthTokenByStateForTeam = `-- name: GetUserProviderOAuthTokenByStateForTeam :one
+SELECT id, provider_id, user_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at, team_id FROM user_provider_oauth_tokens
+WHERE team_id = $1
+  AND state = $2
+  AND state != ''
+`
+
+type GetUserProviderOAuthTokenByStateForTeamParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	State  string      `json:"state"`
+}
+
+func (q *Queries) GetUserProviderOAuthTokenByStateForTeam(ctx context.Context, arg GetUserProviderOAuthTokenByStateForTeamParams) (UserProviderOauthToken, error) {
+	row := q.db.QueryRow(ctx, getUserProviderOAuthTokenByStateForTeam, arg.TeamID, arg.State)
+	var i UserProviderOauthToken
+	err := row.Scan(
+		&i.ID,
+		&i.ProviderID,
+		&i.UserID,
+		&i.AccessToken,
+		&i.RefreshToken,
+		&i.ExpiresAt,
+		&i.Scope,
+		&i.TokenType,
+		&i.State,
+		&i.PkceCodeVerifier,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
+const getUserProviderOAuthTokenForTeam = `-- name: GetUserProviderOAuthTokenForTeam :one
+SELECT id, provider_id, user_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at, team_id FROM user_provider_oauth_tokens
+WHERE team_id = $1
+  AND provider_id = $2
+  AND user_id = $3
+`
+
+type GetUserProviderOAuthTokenForTeamParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
+	ProviderID pgtype.UUID `json:"provider_id"`
+	UserID     pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) GetUserProviderOAuthTokenForTeam(ctx context.Context, arg GetUserProviderOAuthTokenForTeamParams) (UserProviderOauthToken, error) {
+	row := q.db.QueryRow(ctx, getUserProviderOAuthTokenForTeam, arg.TeamID, arg.ProviderID, arg.UserID)
+	var i UserProviderOauthToken
+	err := row.Scan(
+		&i.ID,
+		&i.ProviderID,
+		&i.UserID,
+		&i.AccessToken,
+		&i.RefreshToken,
+		&i.ExpiresAt,
+		&i.Scope,
+		&i.TokenType,
+		&i.State,
+		&i.PkceCodeVerifier,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const updateUserProviderOAuthState = `-- name: UpdateUserProviderOAuthState :exec
-INSERT INTO user_provider_oauth_tokens (provider_id, user_id, state, pkce_code_verifier, metadata)
+INSERT INTO user_provider_oauth_tokens (team_id, provider_id, user_id, state, pkce_code_verifier, metadata)
 VALUES (
-  $1,
+  COALESCE($1::uuid, '00000000-0000-0000-0000-000000000001'::uuid),
   $2,
   $3,
   $4,
-  $5
+  $5,
+  $6
 )
-ON CONFLICT (provider_id, user_id) DO UPDATE SET
+ON CONFLICT (team_id, provider_id, user_id) DO UPDATE SET
   state = EXCLUDED.state,
   pkce_code_verifier = EXCLUDED.pkce_code_verifier,
   metadata = EXCLUDED.metadata,
@@ -103,6 +193,7 @@ ON CONFLICT (provider_id, user_id) DO UPDATE SET
 `
 
 type UpdateUserProviderOAuthStateParams struct {
+	TeamID           pgtype.UUID `json:"team_id"`
 	ProviderID       pgtype.UUID `json:"provider_id"`
 	UserID           pgtype.UUID `json:"user_id"`
 	State            string      `json:"state"`
@@ -112,6 +203,7 @@ type UpdateUserProviderOAuthStateParams struct {
 
 func (q *Queries) UpdateUserProviderOAuthState(ctx context.Context, arg UpdateUserProviderOAuthStateParams) error {
 	_, err := q.db.Exec(ctx, updateUserProviderOAuthState,
+		arg.TeamID,
 		arg.ProviderID,
 		arg.UserID,
 		arg.State,
@@ -123,6 +215,7 @@ func (q *Queries) UpdateUserProviderOAuthState(ctx context.Context, arg UpdateUs
 
 const upsertUserProviderOAuthToken = `-- name: UpsertUserProviderOAuthToken :one
 INSERT INTO user_provider_oauth_tokens (
+  team_id,
   provider_id,
   user_id,
   access_token,
@@ -135,7 +228,7 @@ INSERT INTO user_provider_oauth_tokens (
   metadata
 )
 VALUES (
-  $1,
+  COALESCE($1::uuid, '00000000-0000-0000-0000-000000000001'::uuid),
   $2,
   $3,
   $4,
@@ -144,9 +237,10 @@ VALUES (
   $7,
   $8,
   $9,
-  $10
+  $10,
+  $11
 )
-ON CONFLICT (provider_id, user_id) DO UPDATE SET
+ON CONFLICT (team_id, provider_id, user_id) DO UPDATE SET
   access_token = EXCLUDED.access_token,
   refresh_token = EXCLUDED.refresh_token,
   expires_at = EXCLUDED.expires_at,
@@ -156,10 +250,11 @@ ON CONFLICT (provider_id, user_id) DO UPDATE SET
   pkce_code_verifier = EXCLUDED.pkce_code_verifier,
   metadata = EXCLUDED.metadata,
   updated_at = now()
-RETURNING id, provider_id, user_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at
+RETURNING id, provider_id, user_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at, team_id
 `
 
 type UpsertUserProviderOAuthTokenParams struct {
+	TeamID           pgtype.UUID        `json:"team_id"`
 	ProviderID       pgtype.UUID        `json:"provider_id"`
 	UserID           pgtype.UUID        `json:"user_id"`
 	AccessToken      string             `json:"access_token"`
@@ -174,6 +269,7 @@ type UpsertUserProviderOAuthTokenParams struct {
 
 func (q *Queries) UpsertUserProviderOAuthToken(ctx context.Context, arg UpsertUserProviderOAuthTokenParams) (UserProviderOauthToken, error) {
 	row := q.db.QueryRow(ctx, upsertUserProviderOAuthToken,
+		arg.TeamID,
 		arg.ProviderID,
 		arg.UserID,
 		arg.AccessToken,
@@ -200,6 +296,7 @@ func (q *Queries) UpsertUserProviderOAuthToken(ctx context.Context, arg UpsertUs
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

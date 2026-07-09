@@ -18,7 +18,7 @@ func New(pool *pgxpool.Pool) (*Store, error) {
 	if pool == nil {
 		return nil, errors.New("postgres store requires a pgx pool")
 	}
-	return NewWithPool(pool, dbsqlc.New(pool)), nil
+	return NewWithPool(pool, dbsqlc.New(newTeamPoolDBTX(pool))), nil
 }
 
 func NewWithQueries(queries *dbsqlc.Queries) *Store {

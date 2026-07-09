@@ -3,6 +3,7 @@ package heartbeat
 import "context"
 
 type TriggerPayload struct {
+	TeamID          string
 	BotID           string
 	Interval        int
 	OwnerUserID     string

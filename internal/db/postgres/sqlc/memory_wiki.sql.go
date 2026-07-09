@@ -13,11 +13,17 @@ import (
 
 const countMemoryEdgesByBot = `-- name: CountMemoryEdgesByBot :one
 SELECT COUNT(*) FROM memory_edges
-WHERE bot_id = $1
+WHERE team_id = $1
+  AND bot_id = $2
 `
 
-func (q *Queries) CountMemoryEdgesByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMemoryEdgesByBot, botID)
+type CountMemoryEdgesByBotParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+}
+
+func (q *Queries) CountMemoryEdgesByBot(ctx context.Context, arg CountMemoryEdgesByBotParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countMemoryEdgesByBot, arg.TeamID, arg.BotID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -25,11 +31,17 @@ func (q *Queries) CountMemoryEdgesByBot(ctx context.Context, botID pgtype.UUID) 
 
 const countMemoryNodesByBot = `-- name: CountMemoryNodesByBot :one
 SELECT COUNT(*) FROM memory_nodes
-WHERE bot_id = $1
+WHERE team_id = $1
+  AND bot_id = $2
 `
 
-func (q *Queries) CountMemoryNodesByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMemoryNodesByBot, botID)
+type CountMemoryNodesByBotParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+}
+
+func (q *Queries) CountMemoryNodesByBot(ctx context.Context, arg CountMemoryNodesByBotParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countMemoryNodesByBot, arg.TeamID, arg.BotID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -37,81 +49,105 @@ func (q *Queries) CountMemoryNodesByBot(ctx context.Context, botID pgtype.UUID) 
 
 const deleteAllMemoryEdgesByBot = `-- name: DeleteAllMemoryEdgesByBot :exec
 DELETE FROM memory_edges
-WHERE bot_id = $1
+WHERE team_id = $1
+  AND bot_id = $2
 `
 
-func (q *Queries) DeleteAllMemoryEdgesByBot(ctx context.Context, botID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteAllMemoryEdgesByBot, botID)
+type DeleteAllMemoryEdgesByBotParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+}
+
+func (q *Queries) DeleteAllMemoryEdgesByBot(ctx context.Context, arg DeleteAllMemoryEdgesByBotParams) error {
+	_, err := q.db.Exec(ctx, deleteAllMemoryEdgesByBot, arg.TeamID, arg.BotID)
 	return err
 }
 
 const deleteAllMemoryNodesByBot = `-- name: DeleteAllMemoryNodesByBot :exec
 DELETE FROM memory_nodes
-WHERE bot_id = $1
+WHERE team_id = $1
+  AND bot_id = $2
 `
 
-func (q *Queries) DeleteAllMemoryNodesByBot(ctx context.Context, botID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteAllMemoryNodesByBot, botID)
+type DeleteAllMemoryNodesByBotParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+}
+
+func (q *Queries) DeleteAllMemoryNodesByBot(ctx context.Context, arg DeleteAllMemoryNodesByBotParams) error {
+	_, err := q.db.Exec(ctx, deleteAllMemoryNodesByBot, arg.TeamID, arg.BotID)
 	return err
 }
 
 const deleteMemoryEdgesByRelForBot = `-- name: DeleteMemoryEdgesByRelForBot :exec
 DELETE FROM memory_edges
-WHERE bot_id = $1 AND rel = $2
+WHERE team_id = $1
+  AND bot_id = $2
+  AND rel = $3
 `
 
 type DeleteMemoryEdgesByRelForBotParams struct {
-	BotID pgtype.UUID `json:"bot_id"`
-	Rel   string      `json:"rel"`
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+	Rel    string      `json:"rel"`
 }
 
 func (q *Queries) DeleteMemoryEdgesByRelForBot(ctx context.Context, arg DeleteMemoryEdgesByRelForBotParams) error {
-	_, err := q.db.Exec(ctx, deleteMemoryEdgesByRelForBot, arg.BotID, arg.Rel)
+	_, err := q.db.Exec(ctx, deleteMemoryEdgesByRelForBot, arg.TeamID, arg.BotID, arg.Rel)
 	return err
 }
 
 const deleteMemoryEdgesForNode = `-- name: DeleteMemoryEdgesForNode :exec
 DELETE FROM memory_edges
-WHERE bot_id = $1 AND (src_node = $2 OR dst_node = $2)
+WHERE team_id = $1
+  AND bot_id = $2
+  AND (src_node = $3 OR dst_node = $3)
 `
 
 type DeleteMemoryEdgesForNodeParams struct {
-	BotID   pgtype.UUID `json:"bot_id"`
-	SrcNode string      `json:"src_node"`
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+	NodeID string      `json:"node_id"`
 }
 
 func (q *Queries) DeleteMemoryEdgesForNode(ctx context.Context, arg DeleteMemoryEdgesForNodeParams) error {
-	_, err := q.db.Exec(ctx, deleteMemoryEdgesForNode, arg.BotID, arg.SrcNode)
+	_, err := q.db.Exec(ctx, deleteMemoryEdgesForNode, arg.TeamID, arg.BotID, arg.NodeID)
 	return err
 }
 
 const deleteMemoryNode = `-- name: DeleteMemoryNode :exec
 DELETE FROM memory_nodes
-WHERE bot_id = $1 AND id = $2
+WHERE team_id = $1
+  AND bot_id = $2
+  AND id = $3
 `
 
 type DeleteMemoryNodeParams struct {
-	BotID pgtype.UUID `json:"bot_id"`
-	ID    string      `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+	ID     string      `json:"id"`
 }
 
 func (q *Queries) DeleteMemoryNode(ctx context.Context, arg DeleteMemoryNodeParams) error {
-	_, err := q.db.Exec(ctx, deleteMemoryNode, arg.BotID, arg.ID)
+	_, err := q.db.Exec(ctx, deleteMemoryNode, arg.TeamID, arg.BotID, arg.ID)
 	return err
 }
 
 const getMemoryNode = `-- name: GetMemoryNode :one
-SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at FROM memory_nodes
-WHERE bot_id = $1 AND id = $2
+SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at, team_id FROM memory_nodes
+WHERE team_id = $1
+  AND bot_id = $2
+  AND id = $3
 `
 
 type GetMemoryNodeParams struct {
-	BotID pgtype.UUID `json:"bot_id"`
-	ID    string      `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+	ID     string      `json:"id"`
 }
 
 func (q *Queries) GetMemoryNode(ctx context.Context, arg GetMemoryNodeParams) (MemoryNode, error) {
-	row := q.db.QueryRow(ctx, getMemoryNode, arg.BotID, arg.ID)
+	row := q.db.QueryRow(ctx, getMemoryNode, arg.TeamID, arg.BotID, arg.ID)
 	var i MemoryNode
 	err := row.Scan(
 		&i.ID,
@@ -130,19 +166,24 @@ func (q *Queries) GetMemoryNode(ctx context.Context, arg GetMemoryNodeParams) (M
 		&i.ExpiresAt,
 		&i.UpdatedAt,
 		&i.CreatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const insertMemoryEdge = `-- name: InsertMemoryEdge :exec
-INSERT INTO memory_edges (bot_id, src_node, dst_node, rel, weight, metadata)
-VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (bot_id, src_node, dst_node, rel) DO UPDATE SET
+INSERT INTO memory_edges (team_id, bot_id, src_node, dst_node, rel, weight, metadata)
+VALUES (
+  $1, $2, $3, $4,
+  $5, $6, $7
+)
+ON CONFLICT (team_id, bot_id, src_node, dst_node, rel) DO UPDATE SET
   weight = EXCLUDED.weight,
   metadata = EXCLUDED.metadata
 `
 
 type InsertMemoryEdgeParams struct {
+	TeamID   pgtype.UUID `json:"team_id"`
 	BotID    pgtype.UUID `json:"bot_id"`
 	SrcNode  string      `json:"src_node"`
 	DstNode  string      `json:"dst_node"`
@@ -153,6 +194,7 @@ type InsertMemoryEdgeParams struct {
 
 func (q *Queries) InsertMemoryEdge(ctx context.Context, arg InsertMemoryEdgeParams) error {
 	_, err := q.db.Exec(ctx, insertMemoryEdge,
+		arg.TeamID,
 		arg.BotID,
 		arg.SrcNode,
 		arg.DstNode,
@@ -164,12 +206,18 @@ func (q *Queries) InsertMemoryEdge(ctx context.Context, arg InsertMemoryEdgePara
 }
 
 const listMemoryEdgesByBot = `-- name: ListMemoryEdgesByBot :many
-SELECT id, bot_id, src_node, dst_node, rel, weight, metadata, created_at FROM memory_edges
-WHERE bot_id = $1
+SELECT id, bot_id, src_node, dst_node, rel, weight, metadata, created_at, team_id FROM memory_edges
+WHERE team_id = $1
+  AND bot_id = $2
 `
 
-func (q *Queries) ListMemoryEdgesByBot(ctx context.Context, botID pgtype.UUID) ([]MemoryEdge, error) {
-	rows, err := q.db.Query(ctx, listMemoryEdgesByBot, botID)
+type ListMemoryEdgesByBotParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+}
+
+func (q *Queries) ListMemoryEdgesByBot(ctx context.Context, arg ListMemoryEdgesByBotParams) ([]MemoryEdge, error) {
+	rows, err := q.db.Query(ctx, listMemoryEdgesByBot, arg.TeamID, arg.BotID)
 	if err != nil {
 		return nil, err
 	}
@@ -186,6 +234,7 @@ func (q *Queries) ListMemoryEdgesByBot(ctx context.Context, botID pgtype.UUID) (
 			&i.Weight,
 			&i.Metadata,
 			&i.CreatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -198,17 +247,20 @@ func (q *Queries) ListMemoryEdgesByBot(ctx context.Context, botID pgtype.UUID) (
 }
 
 const listMemoryEdgesByRel = `-- name: ListMemoryEdgesByRel :many
-SELECT id, bot_id, src_node, dst_node, rel, weight, metadata, created_at FROM memory_edges
-WHERE bot_id = $1 AND rel = $2
+SELECT id, bot_id, src_node, dst_node, rel, weight, metadata, created_at, team_id FROM memory_edges
+WHERE team_id = $1
+  AND bot_id = $2
+  AND rel = $3
 `
 
 type ListMemoryEdgesByRelParams struct {
-	BotID pgtype.UUID `json:"bot_id"`
-	Rel   string      `json:"rel"`
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+	Rel    string      `json:"rel"`
 }
 
 func (q *Queries) ListMemoryEdgesByRel(ctx context.Context, arg ListMemoryEdgesByRelParams) ([]MemoryEdge, error) {
-	rows, err := q.db.Query(ctx, listMemoryEdgesByRel, arg.BotID, arg.Rel)
+	rows, err := q.db.Query(ctx, listMemoryEdgesByRel, arg.TeamID, arg.BotID, arg.Rel)
 	if err != nil {
 		return nil, err
 	}
@@ -225,6 +277,7 @@ func (q *Queries) ListMemoryEdgesByRel(ctx context.Context, arg ListMemoryEdgesB
 			&i.Weight,
 			&i.Metadata,
 			&i.CreatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -237,18 +290,21 @@ func (q *Queries) ListMemoryEdgesByRel(ctx context.Context, arg ListMemoryEdgesB
 }
 
 const listMemoryEdgesFromNode = `-- name: ListMemoryEdgesFromNode :many
-SELECT id, bot_id, src_node, dst_node, rel, weight, metadata, created_at FROM memory_edges
-WHERE bot_id = $1 AND src_node = $2
+SELECT id, bot_id, src_node, dst_node, rel, weight, metadata, created_at, team_id FROM memory_edges
+WHERE team_id = $1
+  AND bot_id = $2
+  AND src_node = $3
 ORDER BY weight DESC
 `
 
 type ListMemoryEdgesFromNodeParams struct {
+	TeamID  pgtype.UUID `json:"team_id"`
 	BotID   pgtype.UUID `json:"bot_id"`
 	SrcNode string      `json:"src_node"`
 }
 
 func (q *Queries) ListMemoryEdgesFromNode(ctx context.Context, arg ListMemoryEdgesFromNodeParams) ([]MemoryEdge, error) {
-	rows, err := q.db.Query(ctx, listMemoryEdgesFromNode, arg.BotID, arg.SrcNode)
+	rows, err := q.db.Query(ctx, listMemoryEdgesFromNode, arg.TeamID, arg.BotID, arg.SrcNode)
 	if err != nil {
 		return nil, err
 	}
@@ -265,6 +321,7 @@ func (q *Queries) ListMemoryEdgesFromNode(ctx context.Context, arg ListMemoryEdg
 			&i.Weight,
 			&i.Metadata,
 			&i.CreatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -277,13 +334,19 @@ func (q *Queries) ListMemoryEdgesFromNode(ctx context.Context, arg ListMemoryEdg
 }
 
 const listMemoryNodesByBot = `-- name: ListMemoryNodesByBot :many
-SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at FROM memory_nodes
-WHERE bot_id = $1
+SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at, team_id FROM memory_nodes
+WHERE team_id = $1
+  AND bot_id = $2
 ORDER BY captured_at ASC
 `
 
-func (q *Queries) ListMemoryNodesByBot(ctx context.Context, botID pgtype.UUID) ([]MemoryNode, error) {
-	rows, err := q.db.Query(ctx, listMemoryNodesByBot, botID)
+type ListMemoryNodesByBotParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+}
+
+func (q *Queries) ListMemoryNodesByBot(ctx context.Context, arg ListMemoryNodesByBotParams) ([]MemoryNode, error) {
+	rows, err := q.db.Query(ctx, listMemoryNodesByBot, arg.TeamID, arg.BotID)
 	if err != nil {
 		return nil, err
 	}
@@ -308,6 +371,7 @@ func (q *Queries) ListMemoryNodesByBot(ctx context.Context, botID pgtype.UUID) (
 			&i.ExpiresAt,
 			&i.UpdatedAt,
 			&i.CreatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -320,18 +384,21 @@ func (q *Queries) ListMemoryNodesByBot(ctx context.Context, botID pgtype.UUID) (
 }
 
 const listMemoryNodesByBotLayer = `-- name: ListMemoryNodesByBotLayer :many
-SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at FROM memory_nodes
-WHERE bot_id = $1 AND layer = $2
+SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at, team_id FROM memory_nodes
+WHERE team_id = $1
+  AND bot_id = $2
+  AND layer = $3
 ORDER BY captured_at ASC
 `
 
 type ListMemoryNodesByBotLayerParams struct {
-	BotID pgtype.UUID `json:"bot_id"`
-	Layer string      `json:"layer"`
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+	Layer  string      `json:"layer"`
 }
 
 func (q *Queries) ListMemoryNodesByBotLayer(ctx context.Context, arg ListMemoryNodesByBotLayerParams) ([]MemoryNode, error) {
-	rows, err := q.db.Query(ctx, listMemoryNodesByBotLayer, arg.BotID, arg.Layer)
+	rows, err := q.db.Query(ctx, listMemoryNodesByBotLayer, arg.TeamID, arg.BotID, arg.Layer)
 	if err != nil {
 		return nil, err
 	}
@@ -356,6 +423,7 @@ func (q *Queries) ListMemoryNodesByBotLayer(ctx context.Context, arg ListMemoryN
 			&i.ExpiresAt,
 			&i.UpdatedAt,
 			&i.CreatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -368,18 +436,21 @@ func (q *Queries) ListMemoryNodesByBotLayer(ctx context.Context, arg ListMemoryN
 }
 
 const listMemoryNodesByBotProfile = `-- name: ListMemoryNodesByBotProfile :many
-SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at FROM memory_nodes
-WHERE bot_id = $1 AND profile_ref = $2
+SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at, team_id FROM memory_nodes
+WHERE team_id = $1
+  AND bot_id = $2
+  AND profile_ref = $3
 ORDER BY captured_at ASC
 `
 
 type ListMemoryNodesByBotProfileParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
 	BotID      pgtype.UUID `json:"bot_id"`
 	ProfileRef string      `json:"profile_ref"`
 }
 
 func (q *Queries) ListMemoryNodesByBotProfile(ctx context.Context, arg ListMemoryNodesByBotProfileParams) ([]MemoryNode, error) {
-	rows, err := q.db.Query(ctx, listMemoryNodesByBotProfile, arg.BotID, arg.ProfileRef)
+	rows, err := q.db.Query(ctx, listMemoryNodesByBotProfile, arg.TeamID, arg.BotID, arg.ProfileRef)
 	if err != nil {
 		return nil, err
 	}
@@ -404,6 +475,7 @@ func (q *Queries) ListMemoryNodesByBotProfile(ctx context.Context, arg ListMemor
 			&i.ExpiresAt,
 			&i.UpdatedAt,
 			&i.CreatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -417,11 +489,17 @@ func (q *Queries) ListMemoryNodesByBotProfile(ctx context.Context, arg ListMemor
 
 const upsertMemoryNode = `-- name: UpsertMemoryNode :one
 INSERT INTO memory_nodes (
-  id, bot_id, body, hash, layer, fact_type, subject, confidence,
+  team_id, id, bot_id, body, hash, layer, fact_type, subject, confidence,
   metadata, source_message_ids, profile_ref, topic, captured_at, expires_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-ON CONFLICT (id) DO UPDATE SET
+VALUES (
+  $1, $2, $3, $4,
+  $5, $6, $7, $8,
+  $9, $10, $11,
+  $12, $13, $14,
+  $15
+)
+ON CONFLICT (team_id, bot_id, id) DO UPDATE SET
   body = EXCLUDED.body,
   hash = EXCLUDED.hash,
   layer = EXCLUDED.layer,
@@ -434,10 +512,11 @@ ON CONFLICT (id) DO UPDATE SET
   topic = EXCLUDED.topic,
   expires_at = EXCLUDED.expires_at,
   updated_at = now()
-RETURNING id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at
+RETURNING id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at, team_id
 `
 
 type UpsertMemoryNodeParams struct {
+	TeamID           pgtype.UUID        `json:"team_id"`
 	ID               string             `json:"id"`
 	BotID            pgtype.UUID        `json:"bot_id"`
 	Body             string             `json:"body"`
@@ -456,6 +535,7 @@ type UpsertMemoryNodeParams struct {
 
 func (q *Queries) UpsertMemoryNode(ctx context.Context, arg UpsertMemoryNodeParams) (MemoryNode, error) {
 	row := q.db.QueryRow(ctx, upsertMemoryNode,
+		arg.TeamID,
 		arg.ID,
 		arg.BotID,
 		arg.Body,
@@ -489,6 +569,7 @@ func (q *Queries) UpsertMemoryNode(ctx context.Context, arg UpsertMemoryNodePara
 		&i.ExpiresAt,
 		&i.UpdatedAt,
 		&i.CreatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

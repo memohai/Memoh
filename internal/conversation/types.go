@@ -222,6 +222,7 @@ type OutboundAssetRef struct {
 
 // ChatRequest is the input for Chat and StreamChat.
 type ChatRequest struct {
+	TeamID                       string           `json:"-"`
 	BotID                        string           `json:"-"`
 	ChatID                       string           `json:"-"`
 	SessionID                    string           `json:"-"`

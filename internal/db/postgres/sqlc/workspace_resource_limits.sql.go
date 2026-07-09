@@ -12,11 +12,20 @@ import (
 )
 
 const getBotWorkspaceResourceLimits = `-- name: GetBotWorkspaceResourceLimits :one
-SELECT bot_id, cpu_millicores, memory_bytes, storage_bytes, created_at, updated_at FROM bot_workspace_resource_limits WHERE bot_id = $1
+SELECT limits.bot_id, limits.cpu_millicores, limits.memory_bytes, limits.storage_bytes, limits.created_at, limits.updated_at, limits.team_id
+FROM bot_workspace_resource_limits limits
+JOIN bots b ON b.id = limits.bot_id
+WHERE limits.bot_id = $1
+  AND b.team_id = $2
 `
 
-func (q *Queries) GetBotWorkspaceResourceLimits(ctx context.Context, botID pgtype.UUID) (BotWorkspaceResourceLimit, error) {
-	row := q.db.QueryRow(ctx, getBotWorkspaceResourceLimits, botID)
+type GetBotWorkspaceResourceLimitsParams struct {
+	BotID  pgtype.UUID `json:"bot_id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetBotWorkspaceResourceLimits(ctx context.Context, arg GetBotWorkspaceResourceLimitsParams) (BotWorkspaceResourceLimit, error) {
+	row := q.db.QueryRow(ctx, getBotWorkspaceResourceLimits, arg.BotID, arg.TeamID)
 	var i BotWorkspaceResourceLimit
 	err := row.Scan(
 		&i.BotID,
@@ -25,6 +34,7 @@ func (q *Queries) GetBotWorkspaceResourceLimits(ctx context.Context, botID pgtyp
 		&i.StorageBytes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -33,33 +43,43 @@ const upsertBotWorkspaceResourceLimits = `-- name: UpsertBotWorkspaceResourceLim
 INSERT INTO bot_workspace_resource_limits (
   bot_id, cpu_millicores, memory_bytes, storage_bytes
 )
-VALUES (
+SELECT
+  b.id,
   $1,
   $2,
-  $3,
-  $4
-)
+  $3
+FROM bots b
+WHERE b.id = $4
+  AND b.team_id = $5
 ON CONFLICT (bot_id) DO UPDATE SET
   cpu_millicores = EXCLUDED.cpu_millicores,
   memory_bytes = EXCLUDED.memory_bytes,
   storage_bytes = EXCLUDED.storage_bytes,
   updated_at = now()
-RETURNING bot_id, cpu_millicores, memory_bytes, storage_bytes, created_at, updated_at
+WHERE EXISTS (
+  SELECT 1
+  FROM bots b
+  WHERE b.id = bot_workspace_resource_limits.bot_id
+    AND b.team_id = $5
+)
+RETURNING bot_id, cpu_millicores, memory_bytes, storage_bytes, created_at, updated_at, team_id
 `
 
 type UpsertBotWorkspaceResourceLimitsParams struct {
-	BotID         pgtype.UUID `json:"bot_id"`
 	CpuMillicores int64       `json:"cpu_millicores"`
 	MemoryBytes   int64       `json:"memory_bytes"`
 	StorageBytes  int64       `json:"storage_bytes"`
+	BotID         pgtype.UUID `json:"bot_id"`
+	TeamID        pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpsertBotWorkspaceResourceLimits(ctx context.Context, arg UpsertBotWorkspaceResourceLimitsParams) (BotWorkspaceResourceLimit, error) {
 	row := q.db.QueryRow(ctx, upsertBotWorkspaceResourceLimits,
-		arg.BotID,
 		arg.CpuMillicores,
 		arg.MemoryBytes,
 		arg.StorageBytes,
+		arg.BotID,
+		arg.TeamID,
 	)
 	var i BotWorkspaceResourceLimit
 	err := row.Scan(
@@ -69,6 +89,7 @@ func (q *Queries) UpsertBotWorkspaceResourceLimits(ctx context.Context, arg Upse
 		&i.StorageBytes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -14,6 +15,7 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 // Service provides channel identity lifecycle operations.
@@ -45,13 +47,19 @@ func (s *Service) Create(ctx context.Context, channel, channelSubjectID, display
 	if channel == "" || channelSubjectID == "" {
 		return ChannelIdentity{}, errors.New("channel and channel_subject_id are required")
 	}
-	row, err := s.queries.CreateChannelIdentity(ctx, sqlc.CreateChannelIdentityParams{
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return ChannelIdentity{}, err
+	}
+	params := sqlc.CreateChannelIdentityParams{
 		ChannelType:      channel,
 		ChannelSubjectID: channelSubjectID,
 		DisplayName:      toPgText(displayName),
 		AvatarUrl:        pgtype.Text{},
 		Metadata:         emptyMetadataBytes(),
-	})
+	}
+	applyTeamID(&params, teamID)
+	row, err := s.queries.CreateChannelIdentity(ctx, params)
 	if err != nil {
 		return ChannelIdentity{}, err
 	}
@@ -67,7 +75,11 @@ func (s *Service) GetByID(ctx context.Context, channelIdentityID string) (Channe
 	if err != nil {
 		return ChannelIdentity{}, err
 	}
-	row, err := s.queries.GetChannelIdentityByID(ctx, pgID)
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return ChannelIdentity{}, err
+	}
+	row, err := getChannelIdentityByID(ctx, s.queries, teamID, pgID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ChannelIdentity{}, ErrChannelIdentityNotFound
@@ -86,7 +98,11 @@ func (s *Service) Canonicalize(ctx context.Context, channelIdentityID string) (s
 	if err != nil {
 		return "", err
 	}
-	_, err = s.queries.GetChannelIdentityByID(ctx, pgID)
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return "", err
+	}
+	_, err = getChannelIdentityByID(ctx, s.queries, teamID, pgID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", ErrChannelIdentityNotFound
@@ -114,14 +130,20 @@ func (s *Service) ResolveByChannelIdentity(ctx context.Context, channel, channel
 			avatarURL = strings.TrimSpace(fmt.Sprint(raw))
 		}
 	}
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return ChannelIdentity{}, err
+	}
 
-	row, err := s.queries.UpsertChannelIdentityByChannelSubject(ctx, sqlc.UpsertChannelIdentityByChannelSubjectParams{
+	params := sqlc.UpsertChannelIdentityByChannelSubjectParams{
 		ChannelType:      channel,
 		ChannelSubjectID: channelSubjectID,
 		DisplayName:      toPgText(displayName),
 		AvatarUrl:        toPgText(avatarURL),
 		Metadata:         emptyMetadataBytes(),
-	})
+	}
+	applyTeamID(&params, teamID)
+	row, err := s.queries.UpsertChannelIdentityByChannelSubject(ctx, params)
 	if err != nil {
 		return ChannelIdentity{}, err
 	}
@@ -146,13 +168,19 @@ func (s *Service) UpsertChannelIdentity(ctx context.Context, channel, channelSub
 	if raw, ok := metadata["avatar_url"]; ok {
 		avatarURL = strings.TrimSpace(fmt.Sprint(raw))
 	}
-	row, err := s.queries.UpsertChannelIdentityByChannelSubject(ctx, sqlc.UpsertChannelIdentityByChannelSubjectParams{
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return ChannelIdentity{}, err
+	}
+	params := sqlc.UpsertChannelIdentityByChannelSubjectParams{
 		ChannelType:      channel,
 		ChannelSubjectID: channelSubjectID,
 		DisplayName:      toPgText(displayName),
 		AvatarUrl:        toPgText(avatarURL),
 		Metadata:         metaBytes,
-	})
+	}
+	applyTeamID(&params, teamID)
+	row, err := s.queries.UpsertChannelIdentityByChannelSubject(ctx, params)
 	if err != nil {
 		return ChannelIdentity{}, err
 	}
@@ -168,7 +196,11 @@ func (s *Service) ListCanonicalChannelIdentities(ctx context.Context, channelIde
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.queries.GetChannelIdentityByID(ctx, pgChannelIdentityID)
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row, err := getChannelIdentityByID(ctx, s.queries, teamID, pgChannelIdentityID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrChannelIdentityNotFound
@@ -190,7 +222,11 @@ func (s *Service) ListUserIDsByChannelIdentity(ctx context.Context, channelIdent
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListUserIDsByChannelIdentity(ctx, pgChannelIdentityID)
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := listUserIDsByChannelIdentity(ctx, s.queries, teamID, pgChannelIdentityID)
 	if err != nil {
 		return nil, err
 	}
@@ -212,10 +248,16 @@ func (s *Service) Search(ctx context.Context, query string, limit int) ([]Search
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.queries.SearchChannelIdentities(ctx, sqlc.SearchChannelIdentitiesParams{
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	params := sqlc.SearchChannelIdentitiesParams{
 		Query:      strings.TrimSpace(query),
 		LimitCount: int32(limit), //nolint:gosec // limit is capped above
-	})
+	}
+	applyTeamID(&params, teamID)
+	rows, err := s.queries.SearchChannelIdentities(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -236,6 +278,87 @@ func (s *Service) Search(ctx context.Context, query string, limit int) ([]Search
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func teamUUIDFromContext(ctx context.Context) (pgtype.UUID, error) {
+	scope := teams.ScopeOrDefault(ctx)
+	return db.ParseUUID(strings.TrimSpace(scope.TeamID))
+}
+
+func applyTeamID(params any, teamID pgtype.UUID) {
+	value := reflect.ValueOf(params)
+	if value.Kind() != reflect.Pointer || value.IsNil() {
+		return
+	}
+	elem := value.Elem()
+	if elem.Kind() != reflect.Struct {
+		return
+	}
+	field := elem.FieldByName("TeamID")
+	if !field.IsValid() || !field.CanSet() || field.Type() != reflect.TypeOf(pgtype.UUID{}) {
+		return
+	}
+	field.Set(reflect.ValueOf(teamID))
+}
+
+func getChannelIdentityByID(ctx context.Context, queries dbstore.Queries, teamID, id pgtype.UUID) (sqlc.ChannelIdentity, error) {
+	values, err := callTeamScopedQuery(ctx, queries, "GetChannelIdentityByID", teamID, map[string]reflect.Value{
+		"ID": reflect.ValueOf(id),
+	}, reflect.ValueOf(id))
+	if err != nil {
+		return sqlc.ChannelIdentity{}, err
+	}
+	row, _ := values[0].Interface().(sqlc.ChannelIdentity)
+	return row, errorFromValue(values[1])
+}
+
+func listUserIDsByChannelIdentity(ctx context.Context, queries dbstore.Queries, teamID, channelIdentityID pgtype.UUID) ([]pgtype.UUID, error) {
+	values, err := callTeamScopedQuery(ctx, queries, "ListUserIDsByChannelIdentity", teamID, map[string]reflect.Value{
+		"ChannelIdentityID": reflect.ValueOf(channelIdentityID),
+	}, reflect.ValueOf(channelIdentityID))
+	if err != nil {
+		return nil, err
+	}
+	rows, _ := values[0].Interface().([]pgtype.UUID)
+	return rows, errorFromValue(values[1])
+}
+
+func callTeamScopedQuery(ctx context.Context, queries dbstore.Queries, methodName string, teamID pgtype.UUID, fields map[string]reflect.Value, legacyArg reflect.Value) ([]reflect.Value, error) {
+	method := reflect.ValueOf(queries).MethodByName(methodName)
+	if !method.IsValid() {
+		return nil, fmt.Errorf("query method %s not configured", methodName)
+	}
+	if method.Type().NumIn() != 2 {
+		return nil, fmt.Errorf("query method %s has unexpected arity", methodName)
+	}
+	argType := method.Type().In(1)
+	var arg reflect.Value
+	if legacyArg.IsValid() && legacyArg.Type().AssignableTo(argType) {
+		arg = legacyArg
+	} else {
+		arg = reflect.New(argType).Elem()
+		if arg.Kind() != reflect.Struct {
+			return nil, fmt.Errorf("query method %s has unsupported arg type %s", methodName, argType)
+		}
+		if field := arg.FieldByName("TeamID"); field.IsValid() && field.CanSet() && reflect.TypeOf(teamID).AssignableTo(field.Type()) {
+			field.Set(reflect.ValueOf(teamID))
+		}
+		for name, value := range fields {
+			field := arg.FieldByName(name)
+			if field.IsValid() && field.CanSet() && value.Type().AssignableTo(field.Type()) {
+				field.Set(value)
+			}
+		}
+	}
+	return method.Call([]reflect.Value{reflect.ValueOf(ctx), arg}), nil
+}
+
+func errorFromValue(value reflect.Value) error {
+	if !value.IsValid() || value.IsNil() {
+		return nil
+	}
+	err, _ := value.Interface().(error)
+	return err
 }
 
 func toChannelIdentity(row sqlc.ChannelIdentity) ChannelIdentity {

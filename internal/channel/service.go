@@ -16,6 +16,7 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 // ErrChannelConfigNotFound indicates the bot has no persisted config for the channel type.
@@ -306,10 +307,16 @@ func (s *Store) SaveMatrixSyncSinceToken(ctx context.Context, configID string, s
 	if err != nil {
 		return err
 	}
-	rows, err := s.queries.SaveMatrixSyncSinceToken(ctx, sqlc.SaveMatrixSyncSinceTokenParams{
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	params := sqlc.SaveMatrixSyncSinceTokenParams{
 		ID:         pgConfigID,
 		SinceToken: strings.TrimSpace(since),
-	})
+	}
+	applyTeamID(&params, teamID)
+	rows, err := s.queries.SaveMatrixSyncSinceToken(ctx, params)
 	if err != nil {
 		return err
 	}
@@ -339,11 +346,17 @@ func (s *Store) UpsertChannelIdentityConfig(ctx context.Context, channelIdentity
 	if err != nil {
 		return ChannelIdentityBinding{}, err
 	}
-	row, err := s.queries.UpsertUserChannelBinding(ctx, sqlc.UpsertUserChannelBindingParams{
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return ChannelIdentityBinding{}, err
+	}
+	params := sqlc.UpsertUserChannelBindingParams{
 		UserID:      pgChannelIdentityID,
 		ChannelType: channelType.String(),
 		Config:      payload,
-	})
+	}
+	applyTeamID(&params, teamID)
+	row, err := s.queries.UpsertUserChannelBinding(ctx, params)
 	if err != nil {
 		return ChannelIdentityBinding{}, err
 	}
@@ -417,7 +430,11 @@ func (s *Store) ListConfigsByType(ctx context.Context, channelType ChannelType) 
 	if s.registry.IsConfigless(channelType) {
 		return []ChannelConfig{}, nil
 	}
-	rows, err := s.queries.ListBotChannelConfigsByType(ctx, channelType.String())
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := listBotChannelConfigsByType(ctx, s.queries, teamID, channelType.String())
 	if err != nil {
 		return nil, err
 	}
@@ -444,10 +461,16 @@ func (s *Store) GetChannelIdentityConfig(ctx context.Context, channelIdentityID 
 	if err != nil {
 		return ChannelIdentityBinding{}, err
 	}
-	row, err := s.queries.GetUserChannelBinding(ctx, sqlc.GetUserChannelBindingParams{
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return ChannelIdentityBinding{}, err
+	}
+	params := sqlc.GetUserChannelBindingParams{
 		UserID:      pgChannelIdentityID,
 		ChannelType: channelType.String(),
-	})
+	}
+	applyTeamID(&params, teamID)
+	row, err := s.queries.GetUserChannelBinding(ctx, params)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ChannelIdentityBinding{}, errors.New("channel user config not found")
@@ -473,7 +496,11 @@ func (s *Store) ListChannelIdentityConfigsByType(ctx context.Context, channelTyp
 	if s.queries == nil {
 		return nil, errors.New("channel queries not configured")
 	}
-	rows, err := s.queries.ListUserChannelBindingsByPlatform(ctx, channelType.String())
+	teamID, err := teamUUIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := listUserChannelBindingsByPlatform(ctx, s.queries, teamID, channelType.String())
 	if err != nil {
 		return nil, err
 	}
@@ -511,6 +538,87 @@ func normalizeChannelConfigFromRow(row sqlc.BotChannelConfig) (ChannelConfig, er
 		row.Credentials, row.ExternalIdentity, row.SelfIdentity, row.Routing,
 		row.Disabled, row.VerifiedAt, row.CreatedAt, row.UpdatedAt,
 	)
+}
+
+func teamUUIDFromContext(ctx context.Context) (pgtype.UUID, error) {
+	scope := teams.ScopeOrDefault(ctx)
+	return db.ParseUUID(strings.TrimSpace(scope.TeamID))
+}
+
+func applyTeamID(params any, teamID pgtype.UUID) {
+	value := reflect.ValueOf(params)
+	if value.Kind() != reflect.Pointer || value.IsNil() {
+		return
+	}
+	elem := value.Elem()
+	if elem.Kind() != reflect.Struct {
+		return
+	}
+	field := elem.FieldByName("TeamID")
+	if !field.IsValid() || !field.CanSet() || field.Type() != reflect.TypeOf(pgtype.UUID{}) {
+		return
+	}
+	field.Set(reflect.ValueOf(teamID))
+}
+
+func listBotChannelConfigsByType(ctx context.Context, queries dbstore.Queries, teamID pgtype.UUID, channelType string) ([]sqlc.BotChannelConfig, error) {
+	values, err := callTeamScopedQuery(ctx, queries, "ListBotChannelConfigsByType", teamID, map[string]reflect.Value{
+		"ChannelType": reflect.ValueOf(channelType),
+	}, reflect.ValueOf(channelType))
+	if err != nil {
+		return nil, err
+	}
+	rows, _ := values[0].Interface().([]sqlc.BotChannelConfig)
+	return rows, errorFromValue(values[1])
+}
+
+func listUserChannelBindingsByPlatform(ctx context.Context, queries dbstore.Queries, teamID pgtype.UUID, channelType string) ([]sqlc.UserChannelBinding, error) {
+	values, err := callTeamScopedQuery(ctx, queries, "ListUserChannelBindingsByPlatform", teamID, map[string]reflect.Value{
+		"ChannelType": reflect.ValueOf(channelType),
+	}, reflect.ValueOf(channelType))
+	if err != nil {
+		return nil, err
+	}
+	rows, _ := values[0].Interface().([]sqlc.UserChannelBinding)
+	return rows, errorFromValue(values[1])
+}
+
+func callTeamScopedQuery(ctx context.Context, queries dbstore.Queries, methodName string, teamID pgtype.UUID, fields map[string]reflect.Value, legacyArg reflect.Value) ([]reflect.Value, error) {
+	method := reflect.ValueOf(queries).MethodByName(methodName)
+	if !method.IsValid() {
+		return nil, fmt.Errorf("query method %s not configured", methodName)
+	}
+	if method.Type().NumIn() != 2 {
+		return nil, fmt.Errorf("query method %s has unexpected arity", methodName)
+	}
+	argType := method.Type().In(1)
+	var arg reflect.Value
+	if legacyArg.IsValid() && legacyArg.Type().AssignableTo(argType) {
+		arg = legacyArg
+	} else {
+		arg = reflect.New(argType).Elem()
+		if arg.Kind() != reflect.Struct {
+			return nil, fmt.Errorf("query method %s has unsupported arg type %s", methodName, argType)
+		}
+		if field := arg.FieldByName("TeamID"); field.IsValid() && field.CanSet() && reflect.TypeOf(teamID).AssignableTo(field.Type()) {
+			field.Set(reflect.ValueOf(teamID))
+		}
+		for name, value := range fields {
+			field := arg.FieldByName(name)
+			if field.IsValid() && field.CanSet() && value.Type().AssignableTo(field.Type()) {
+				field.Set(value)
+			}
+		}
+	}
+	return method.Call([]reflect.Value{reflect.ValueOf(ctx), arg}), nil
+}
+
+func errorFromValue(value reflect.Value) error {
+	if !value.IsValid() || value.IsNil() {
+		return nil
+	}
+	err, _ := value.Interface().(error)
+	return err
 }
 
 func normalizeChannelConfigFromGetRow(row sqlc.BotChannelConfig) (ChannelConfig, error) {

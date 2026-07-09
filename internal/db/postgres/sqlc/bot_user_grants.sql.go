@@ -12,31 +12,34 @@ import (
 )
 
 const createBotUserGrant = `-- name: CreateBotUserGrant :one
-INSERT INTO bot_user_grants (bot_id, subject_type, user_id, permissions, created_by_user_id)
+INSERT INTO bot_user_grants (team_id, bot_id, subject_type, user_id, permissions, created_by_user_id)
 VALUES (
-  $1,
+  $1::uuid,
   $2,
-  $4::uuid,
   $3,
-  $5::uuid
+  $4::uuid,
+  $5,
+  $6::uuid
 )
-RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at
+RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at, team_id
 `
 
 type CreateBotUserGrantParams struct {
+	TeamID          pgtype.UUID `json:"team_id"`
 	BotID           pgtype.UUID `json:"bot_id"`
 	SubjectType     string      `json:"subject_type"`
-	Permissions     []byte      `json:"permissions"`
 	UserID          pgtype.UUID `json:"user_id"`
+	Permissions     []byte      `json:"permissions"`
 	CreatedByUserID pgtype.UUID `json:"created_by_user_id"`
 }
 
 func (q *Queries) CreateBotUserGrant(ctx context.Context, arg CreateBotUserGrantParams) (BotUserGrant, error) {
 	row := q.db.QueryRow(ctx, createBotUserGrant,
+		arg.TeamID,
 		arg.BotID,
 		arg.SubjectType,
-		arg.Permissions,
 		arg.UserID,
+		arg.Permissions,
 		arg.CreatedByUserID,
 	)
 	var i BotUserGrant
@@ -49,27 +52,41 @@ func (q *Queries) CreateBotUserGrant(ctx context.Context, arg CreateBotUserGrant
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const deleteBotUserGrantByID = `-- name: DeleteBotUserGrantByID :exec
-DELETE FROM bot_user_grants WHERE id = $1
+DELETE FROM bot_user_grants
+WHERE id = $1
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) DeleteBotUserGrantByID(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteBotUserGrantByID, id)
+type DeleteBotUserGrantByIDParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteBotUserGrantByID(ctx context.Context, arg DeleteBotUserGrantByIDParams) error {
+	_, err := q.db.Exec(ctx, deleteBotUserGrantByID, arg.ID, arg.TeamID)
 	return err
 }
 
 const getBotUserGrantByID = `-- name: GetBotUserGrantByID :one
-SELECT id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at
+SELECT id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at, team_id
 FROM bot_user_grants
 WHERE id = $1
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) GetBotUserGrantByID(ctx context.Context, id pgtype.UUID) (BotUserGrant, error) {
-	row := q.db.QueryRow(ctx, getBotUserGrantByID, id)
+type GetBotUserGrantByIDParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetBotUserGrantByID(ctx context.Context, arg GetBotUserGrantByIDParams) (BotUserGrant, error) {
+	row := q.db.QueryRow(ctx, getBotUserGrantByID, arg.ID, arg.TeamID)
 	var i BotUserGrant
 	err := row.Scan(
 		&i.ID,
@@ -80,6 +97,7 @@ func (q *Queries) GetBotUserGrantByID(ctx context.Context, id pgtype.UUID) (BotU
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -100,8 +118,14 @@ SELECT
 FROM bot_user_grants g
 LEFT JOIN users u ON u.id = g.user_id
 WHERE g.bot_id = $1
+  AND g.team_id = $2::uuid
 ORDER BY g.subject_type DESC, g.created_at ASC
 `
+
+type ListBotUserGrantsParams struct {
+	BotID  pgtype.UUID `json:"bot_id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
 
 type ListBotUserGrantsRow struct {
 	ID              pgtype.UUID        `json:"id"`
@@ -117,8 +141,8 @@ type ListBotUserGrantsRow struct {
 	UserAvatarUrl   pgtype.Text        `json:"user_avatar_url"`
 }
 
-func (q *Queries) ListBotUserGrants(ctx context.Context, botID pgtype.UUID) ([]ListBotUserGrantsRow, error) {
-	rows, err := q.db.Query(ctx, listBotUserGrants, botID)
+func (q *Queries) ListBotUserGrants(ctx context.Context, arg ListBotUserGrantsParams) ([]ListBotUserGrantsRow, error) {
+	rows, err := q.db.Query(ctx, listBotUserGrants, arg.BotID, arg.TeamID)
 	if err != nil {
 		return nil, err
 	}
@@ -153,14 +177,16 @@ const listBotUserGrantsForUser = `-- name: ListBotUserGrantsForUser :many
 SELECT id, bot_id, subject_type, user_id, permissions
 FROM bot_user_grants
 WHERE bot_id = $1
+  AND team_id = $2::uuid
   AND (
     subject_type = 'everyone'
-    OR (subject_type = 'user' AND user_id = $2::uuid)
+    OR (subject_type = 'user' AND user_id = $3::uuid)
   )
 `
 
 type ListBotUserGrantsForUserParams struct {
 	BotID  pgtype.UUID `json:"bot_id"`
+	TeamID pgtype.UUID `json:"team_id"`
 	UserID pgtype.UUID `json:"user_id"`
 }
 
@@ -173,7 +199,7 @@ type ListBotUserGrantsForUserRow struct {
 }
 
 func (q *Queries) ListBotUserGrantsForUser(ctx context.Context, arg ListBotUserGrantsForUserParams) ([]ListBotUserGrantsForUserRow, error) {
-	rows, err := q.db.Query(ctx, listBotUserGrantsForUser, arg.BotID, arg.UserID)
+	rows, err := q.db.Query(ctx, listBotUserGrantsForUser, arg.BotID, arg.TeamID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -200,19 +226,21 @@ func (q *Queries) ListBotUserGrantsForUser(ctx context.Context, arg ListBotUserG
 
 const updateBotUserGrantPermissions = `-- name: UpdateBotUserGrantPermissions :one
 UPDATE bot_user_grants
-SET permissions = $2,
+SET permissions = $1,
     updated_at = now()
-WHERE id = $1
-RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at
+WHERE id = $2
+  AND team_id = $3::uuid
+RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at, team_id
 `
 
 type UpdateBotUserGrantPermissionsParams struct {
-	ID          pgtype.UUID `json:"id"`
 	Permissions []byte      `json:"permissions"`
+	ID          pgtype.UUID `json:"id"`
+	TeamID      pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateBotUserGrantPermissions(ctx context.Context, arg UpdateBotUserGrantPermissionsParams) (BotUserGrant, error) {
-	row := q.db.QueryRow(ctx, updateBotUserGrantPermissions, arg.ID, arg.Permissions)
+	row := q.db.QueryRow(ctx, updateBotUserGrantPermissions, arg.Permissions, arg.ID, arg.TeamID)
 	var i BotUserGrant
 	err := row.Scan(
 		&i.ID,
@@ -223,6 +251,7 @@ func (q *Queries) UpdateBotUserGrantPermissions(ctx context.Context, arg UpdateB
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

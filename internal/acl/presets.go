@@ -112,16 +112,22 @@ func ApplyPreset(ctx context.Context, queries dbstore.Queries, botID, createdByU
 	if err != nil {
 		return err
 	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
 
-	if err := queries.SetBotACLDefaultEffect(ctx, sqlc.SetBotACLDefaultEffectParams{
+	defaultParams := sqlc.SetBotACLDefaultEffectParams{
 		ID:               pgBotID,
 		AclDefaultEffect: preset.DefaultEffect,
-	}); err != nil {
+	}
+	applyTeamID(&defaultParams, teamID)
+	if err := queries.SetBotACLDefaultEffect(ctx, defaultParams); err != nil {
 		return err
 	}
 
 	for _, rule := range preset.Rules {
-		if err := applyPresetRule(ctx, queries, pgBotID, createdByUserID, rule); err != nil {
+		if err := applyPresetRule(ctx, queries, teamID, pgBotID, createdByUserID, rule); err != nil {
 			return err
 		}
 	}
@@ -129,7 +135,7 @@ func ApplyPreset(ctx context.Context, queries dbstore.Queries, botID, createdByU
 	return nil
 }
 
-func applyPresetRule(ctx context.Context, queries dbstore.Queries, botID pgtype.UUID, createdByUserID string, rule CreateRuleRequest) error {
+func applyPresetRule(ctx context.Context, queries dbstore.Queries, teamID, botID pgtype.UUID, createdByUserID string, rule CreateRuleRequest) error {
 	if err := validateEffect(rule.Effect); err != nil {
 		return err
 	}
@@ -144,7 +150,7 @@ func applyPresetRule(ctx context.Context, queries dbstore.Queries, botID pgtype.
 		return err
 	}
 
-	_, err = queries.CreateBotACLRule(ctx, sqlc.CreateBotACLRuleParams{
+	params := sqlc.CreateBotACLRuleParams{
 		BotID:                  botID,
 		Enabled:                rule.Enabled,
 		Description:            optionalText(rule.Description),
@@ -156,7 +162,9 @@ func applyPresetRule(ctx context.Context, queries dbstore.Queries, botID pgtype.
 		SourceConversationID:   optionalText(sourceScope.ConversationID),
 		SourceThreadID:         optionalText(sourceScope.ThreadID),
 		CreatedByUserID:        optionalUUID(createdByUserID),
-	})
+	}
+	applyTeamID(&params, teamID)
+	_, err = queries.CreateBotACLRule(ctx, params)
 	return err
 }
 

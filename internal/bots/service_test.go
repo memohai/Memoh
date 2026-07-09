@@ -244,12 +244,12 @@ func TestRunCreateLifecycleSetsUpContainerBeforeReady(t *testing.T) {
 
 	db := &fakeDBTX{
 		execFunc: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-			if strings.Contains(sql, "UPDATE bots") && strings.Contains(sql, "SET status = $2") {
+			if strings.Contains(sql, "UPDATE bots") && strings.Contains(sql, "SET status = $1") {
 				events = append(events, "status")
-				if got := args[0].(pgtype.UUID); got != botUUID {
+				if got := args[1].(pgtype.UUID); got != botUUID {
 					t.Fatalf("expected status update for %s, got %s", botUUID, got)
 				}
-				if got := args[1].(string); got != BotStatusReady {
+				if got := args[0].(string); got != BotStatusReady {
 					t.Fatalf("expected status %q, got %q", BotStatusReady, got)
 				}
 			}
@@ -287,14 +287,14 @@ func TestRunCreateLifecycleRecordsSetupFailureAndLeavesBotReady(t *testing.T) {
 			switch {
 			case strings.Contains(query, "SELECT id, owner_user_id") && strings.Contains(query, "FROM bots"):
 				return makeGetBotRowWithMetadata(botUUID, ownerUUID, []byte(`{"workspace":{"image":"ghcr.io/memohai/workspace:latest"},"keep":true}`))
-			case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $7"):
+			case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $6"):
 				events = append(events, "metadata")
-				if got := args[1].(string); got != "test-bot" {
+				if got := args[0].(string); got != "test-bot" {
 					t.Fatalf("expected update to preserve bot name, got %q", got)
 				}
-				payload, ok := args[6].([]byte)
+				payload, ok := args[5].([]byte)
 				if !ok {
-					t.Fatalf("metadata arg type = %T, want []byte", args[6])
+					t.Fatalf("metadata arg type = %T, want []byte", args[5])
 				}
 				persisted = append([]byte(nil), payload...)
 				return makeUpdateBotProfileRowWithMetadata(botUUID, ownerUUID, payload)
@@ -304,9 +304,9 @@ func TestRunCreateLifecycleRecordsSetupFailureAndLeavesBotReady(t *testing.T) {
 			}
 		},
 		execFunc: func(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
-			if strings.Contains(query, "UPDATE bots") && strings.Contains(query, "SET status = $2") {
+			if strings.Contains(query, "UPDATE bots") && strings.Contains(query, "SET status = $1") {
 				events = append(events, "status")
-				if got := args[1].(string); got != BotStatusReady {
+				if got := args[0].(string); got != BotStatusReady {
 					t.Fatalf("expected bot to remain %q, got %q", BotStatusReady, got)
 				}
 			}
@@ -353,10 +353,10 @@ func TestRunCreateLifecycleClearsSetupFailureAfterSuccess(t *testing.T) {
 			switch {
 			case strings.Contains(query, "SELECT id, owner_user_id") && strings.Contains(query, "FROM bots"):
 				return makeGetBotRowWithMetadata(botUUID, ownerUUID, []byte(`{"workspace":{"image":"ghcr.io/memohai/workspace:latest","last_setup_error":{"phase":"setup","message":"old failure","at":"2026-06-08T10:00:00Z"}}}`))
-			case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $7"):
-				payload, ok := args[6].([]byte)
+			case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $6"):
+				payload, ok := args[5].([]byte)
 				if !ok {
-					t.Fatalf("metadata arg type = %T, want []byte", args[6])
+					t.Fatalf("metadata arg type = %T, want []byte", args[5])
 				}
 				persisted = append([]byte(nil), payload...)
 				return makeUpdateBotProfileRowWithMetadata(botUUID, ownerUUID, payload)
@@ -434,10 +434,10 @@ func TestRecordContainerSetupFailureTruncatesLongMessages(t *testing.T) {
 			switch {
 			case strings.Contains(query, "SELECT id, owner_user_id") && strings.Contains(query, "FROM bots"):
 				return makeGetBotRowWithMetadata(botUUID, ownerUUID, []byte(`{}`))
-			case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $7"):
-				payload, ok := args[6].([]byte)
+			case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $6"):
+				payload, ok := args[5].([]byte)
 				if !ok {
-					t.Fatalf("metadata arg type = %T, want []byte", args[6])
+					t.Fatalf("metadata arg type = %T, want []byte", args[5])
 				}
 				persisted = append([]byte(nil), payload...)
 				return makeUpdateBotProfileRowWithMetadata(botUUID, ownerUUID, payload)

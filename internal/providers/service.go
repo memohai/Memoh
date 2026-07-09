@@ -71,14 +71,17 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 		icon = pgtype.Text{String: req.Icon, Valid: true}
 	}
 
-	provider, err := s.queries.CreateProvider(ctx, sqlc.CreateProviderParams{
+	params := sqlc.CreateProviderParams{
 		Name:       req.Name,
 		ClientType: clientType,
 		Icon:       icon,
 		Enable:     true,
 		Config:     configJSON,
 		Metadata:   metadataJSON,
-	})
+	}
+	setProviderTeamID(ctx, &params)
+
+	provider, err := s.queries.CreateProvider(ctx, params)
 	if err != nil {
 		if isProviderNameConflict(err) {
 			if provider, ok, activateErr := s.activateHiddenRegistryTemplate(ctx, req, clientType, icon, configJSON, metadataJSON); ok {
@@ -101,7 +104,7 @@ func (s *Service) Get(ctx context.Context, id string) (GetResponse, error) {
 		return GetResponse{}, err
 	}
 
-	provider, err := s.queries.GetProviderByID(ctx, providerID)
+	provider, err := getProviderByIDForScope(ctx, s.queries, providerID)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("get provider: %w", err)
 	}
@@ -111,7 +114,7 @@ func (s *Service) Get(ctx context.Context, id string) (GetResponse, error) {
 
 // GetByName retrieves a provider by name.
 func (s *Service) GetByName(ctx context.Context, name string) (GetResponse, error) {
-	provider, err := s.queries.GetProviderByName(ctx, name)
+	provider, err := getProviderByNameForScope(ctx, s.queries, name)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("get provider by name: %w", err)
 	}
@@ -121,7 +124,7 @@ func (s *Service) GetByName(ctx context.Context, name string) (GetResponse, erro
 
 // List retrieves all providers.
 func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
-	providers, err := s.queries.ListProviders(ctx)
+	providers, err := listProvidersForScope(ctx, s.queries)
 	if err != nil {
 		return nil, fmt.Errorf("list providers: %w", err)
 	}
@@ -140,7 +143,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		return GetResponse{}, err
 	}
 
-	existing, err := s.queries.GetProviderByID(ctx, providerID)
+	existing, err := getProviderByIDForScope(ctx, s.queries, providerID)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("get provider: %w", err)
 	}
@@ -187,7 +190,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		return GetResponse{}, fmt.Errorf("marshal metadata: %w", err)
 	}
 
-	updated, err := s.queries.UpdateProvider(ctx, sqlc.UpdateProviderParams{
+	params := sqlc.UpdateProviderParams{
 		ID:         providerID,
 		Name:       name,
 		ClientType: clientType,
@@ -195,7 +198,10 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		Enable:     enable,
 		Config:     configJSON,
 		Metadata:   metadataJSON,
-	})
+	}
+	setProviderTeamID(ctx, &params)
+
+	updated, err := s.queries.UpdateProvider(ctx, params)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("update provider: %w", err)
 	}
@@ -210,7 +216,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 		return err
 	}
 
-	if err := s.queries.DeleteProvider(ctx, providerID); err != nil {
+	if err := deleteProviderForScope(ctx, s.queries, providerID); err != nil {
 		return fmt.Errorf("delete provider: %w", err)
 	}
 	return nil
@@ -240,7 +246,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 		return TestResponse{}, err
 	}
 
-	provider, err := s.queries.GetProviderByID(ctx, providerID)
+	provider, err := getProviderByIDForScope(ctx, s.queries, providerID)
 	if err != nil {
 		return TestResponse{}, fmt.Errorf("get provider: %w", err)
 	}
@@ -330,7 +336,7 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return nil, err
 	}
 
-	provider, err := s.queries.GetProviderByID(ctx, providerID)
+	provider, err := getProviderByIDForScope(ctx, s.queries, providerID)
 	if err != nil {
 		return nil, fmt.Errorf("get provider: %w", err)
 	}
@@ -687,7 +693,7 @@ func (s *Service) activateHiddenRegistryTemplate(
 	configJSON []byte,
 	metadataJSON []byte,
 ) (sqlc.Provider, bool, error) {
-	existing, err := s.queries.GetProviderByName(ctx, req.Name)
+	existing, err := getProviderByNameForScope(ctx, s.queries, req.Name)
 	if err != nil {
 		return sqlc.Provider{}, false, nil
 	}
@@ -698,7 +704,7 @@ func (s *Service) activateHiddenRegistryTemplate(
 		icon = existing.Icon
 	}
 
-	updated, err := s.queries.UpdateProvider(ctx, sqlc.UpdateProviderParams{
+	params := sqlc.UpdateProviderParams{
 		ID:         existing.ID,
 		Name:       req.Name,
 		ClientType: clientType,
@@ -706,7 +712,10 @@ func (s *Service) activateHiddenRegistryTemplate(
 		Enable:     true,
 		Config:     configJSON,
 		Metadata:   metadataJSON,
-	})
+	}
+	setProviderTeamID(ctx, &params)
+
+	updated, err := s.queries.UpdateProvider(ctx, params)
 	if err != nil {
 		return sqlc.Provider{}, true, fmt.Errorf("activate registry provider template: %w", err)
 	}

@@ -13,33 +13,36 @@ import (
 
 const completeHeartbeatLog = `-- name: CompleteHeartbeatLog :one
 UPDATE bot_heartbeat_logs
-SET status = $2,
-    result_text = $3,
-    error_message = $4,
-    usage = $5,
-    model_id = $6,
+SET status = $1,
+    result_text = $2,
+    error_message = $3,
+    usage = $4,
+    model_id = $5,
     completed_at = now()
-WHERE id = $1
-RETURNING id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at
+WHERE id = $6::uuid
+  AND team_id = $7::uuid
+RETURNING id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at, team_id
 `
 
 type CompleteHeartbeatLogParams struct {
-	ID           pgtype.UUID `json:"id"`
 	Status       string      `json:"status"`
 	ResultText   string      `json:"result_text"`
 	ErrorMessage string      `json:"error_message"`
 	Usage        []byte      `json:"usage"`
 	ModelID      pgtype.UUID `json:"model_id"`
+	ID           pgtype.UUID `json:"id"`
+	TeamID       pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) CompleteHeartbeatLog(ctx context.Context, arg CompleteHeartbeatLogParams) (BotHeartbeatLog, error) {
 	row := q.db.QueryRow(ctx, completeHeartbeatLog,
-		arg.ID,
 		arg.Status,
 		arg.ResultText,
 		arg.ErrorMessage,
 		arg.Usage,
 		arg.ModelID,
+		arg.ID,
+		arg.TeamID,
 	)
 	var i BotHeartbeatLog
 	err := row.Scan(
@@ -53,34 +56,44 @@ func (q *Queries) CompleteHeartbeatLog(ctx context.Context, arg CompleteHeartbea
 		&i.ModelID,
 		&i.StartedAt,
 		&i.CompletedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const countHeartbeatLogsByBot = `-- name: CountHeartbeatLogsByBot :one
-SELECT count(*) FROM bot_heartbeat_logs WHERE bot_id = $1
+SELECT count(*) FROM bot_heartbeat_logs
+WHERE team_id = $1::uuid
+  AND bot_id = $2::uuid
 `
 
-func (q *Queries) CountHeartbeatLogsByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countHeartbeatLogsByBot, botID)
+type CountHeartbeatLogsByBotParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+}
+
+func (q *Queries) CountHeartbeatLogsByBot(ctx context.Context, arg CountHeartbeatLogsByBotParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countHeartbeatLogsByBot, arg.TeamID, arg.BotID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
 const createHeartbeatLog = `-- name: CreateHeartbeatLog :one
-INSERT INTO bot_heartbeat_logs (bot_id, session_id, started_at)
-VALUES ($1, $2::uuid, now())
-RETURNING id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
+INSERT INTO bot_heartbeat_logs (team_id, bot_id, session_id, started_at)
+VALUES ($1::uuid, $2::uuid, $3::uuid, now())
+RETURNING id, team_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 `
 
 type CreateHeartbeatLogParams struct {
+	TeamID    pgtype.UUID `json:"team_id"`
 	BotID     pgtype.UUID `json:"bot_id"`
 	SessionID pgtype.UUID `json:"session_id"`
 }
 
 type CreateHeartbeatLogRow struct {
 	ID           pgtype.UUID        `json:"id"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 	BotID        pgtype.UUID        `json:"bot_id"`
 	SessionID    pgtype.UUID        `json:"session_id"`
 	Status       string             `json:"status"`
@@ -92,10 +105,11 @@ type CreateHeartbeatLogRow struct {
 }
 
 func (q *Queries) CreateHeartbeatLog(ctx context.Context, arg CreateHeartbeatLogParams) (CreateHeartbeatLogRow, error) {
-	row := q.db.QueryRow(ctx, createHeartbeatLog, arg.BotID, arg.SessionID)
+	row := q.db.QueryRow(ctx, createHeartbeatLog, arg.TeamID, arg.BotID, arg.SessionID)
 	var i CreateHeartbeatLogRow
 	err := row.Scan(
 		&i.ID,
+		&i.TeamID,
 		&i.BotID,
 		&i.SessionID,
 		&i.Status,
@@ -109,30 +123,40 @@ func (q *Queries) CreateHeartbeatLog(ctx context.Context, arg CreateHeartbeatLog
 }
 
 const deleteHeartbeatLogsByBot = `-- name: DeleteHeartbeatLogsByBot :exec
-DELETE FROM bot_heartbeat_logs WHERE bot_id = $1
+DELETE FROM bot_heartbeat_logs
+WHERE team_id = $1::uuid
+  AND bot_id = $2::uuid
 `
 
-func (q *Queries) DeleteHeartbeatLogsByBot(ctx context.Context, botID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteHeartbeatLogsByBot, botID)
+type DeleteHeartbeatLogsByBotParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+}
+
+func (q *Queries) DeleteHeartbeatLogsByBot(ctx context.Context, arg DeleteHeartbeatLogsByBotParams) error {
+	_, err := q.db.Exec(ctx, deleteHeartbeatLogsByBot, arg.TeamID, arg.BotID)
 	return err
 }
 
 const listHeartbeatLogsByBot = `-- name: ListHeartbeatLogsByBot :many
-SELECT id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
+SELECT id, team_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM bot_heartbeat_logs
-WHERE bot_id = $1
+WHERE team_id = $1::uuid
+  AND bot_id = $2::uuid
 ORDER BY started_at DESC
-LIMIT $2 OFFSET $3
+LIMIT $4 OFFSET $3
 `
 
 type ListHeartbeatLogsByBotParams struct {
-	BotID  pgtype.UUID `json:"bot_id"`
-	Limit  int32       `json:"limit"`
-	Offset int32       `json:"offset"`
+	TeamID      pgtype.UUID `json:"team_id"`
+	BotID       pgtype.UUID `json:"bot_id"`
+	OffsetCount int32       `json:"offset_count"`
+	LimitCount  int32       `json:"limit_count"`
 }
 
 type ListHeartbeatLogsByBotRow struct {
 	ID           pgtype.UUID        `json:"id"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 	BotID        pgtype.UUID        `json:"bot_id"`
 	SessionID    pgtype.UUID        `json:"session_id"`
 	Status       string             `json:"status"`
@@ -144,7 +168,12 @@ type ListHeartbeatLogsByBotRow struct {
 }
 
 func (q *Queries) ListHeartbeatLogsByBot(ctx context.Context, arg ListHeartbeatLogsByBotParams) ([]ListHeartbeatLogsByBotRow, error) {
-	rows, err := q.db.Query(ctx, listHeartbeatLogsByBot, arg.BotID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listHeartbeatLogsByBot,
+		arg.TeamID,
+		arg.BotID,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -154,6 +183,7 @@ func (q *Queries) ListHeartbeatLogsByBot(ctx context.Context, arg ListHeartbeatL
 		var i ListHeartbeatLogsByBotRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.TeamID,
 			&i.BotID,
 			&i.SessionID,
 			&i.Status,

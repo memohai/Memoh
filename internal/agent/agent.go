@@ -842,6 +842,7 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 		}
 	}
 	session := tools.SessionContext{
+		TeamID:              cfg.Identity.TeamID,
 		BotID:               cfg.Identity.BotID,
 		ChatID:              cfg.Identity.ChatID,
 		SessionID:           cfg.Identity.SessionID,

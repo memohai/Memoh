@@ -105,6 +105,7 @@ import (
 	"github.com/memohai/memoh/internal/storage/providers/containerfs"
 	"github.com/memohai/memoh/internal/storage/providers/fallback"
 	"github.com/memohai/memoh/internal/storage/providers/localfs"
+	"github.com/memohai/memoh/internal/teams"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
 	"github.com/memohai/memoh/internal/version"
@@ -354,6 +355,10 @@ func (a *sessionCreatorAdapter) CreateSession(ctx context.Context, botID, sessio
 		return "", err
 	}
 	return sess.ID, nil
+}
+
+func (a *sessionCreatorAdapter) CreateSessionForTeam(ctx context.Context, teamID, botID, sessionType string) (string, error) {
+	return a.CreateSession(teams.WithScope(ctx, teams.Scope{TeamID: teamID}), botID, sessionType)
 }
 
 func provideHeartbeatSessionCreator(sessionService *sessionpkg.Service) heartbeat.SessionCreator {
@@ -1335,13 +1340,23 @@ func startContainerReconciliation(lc fx.Lifecycle, manager *workspace.Manager, _
 	})
 }
 
-func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries dbstore.Queries, accountStore dbstore.AccountStore, emailService *emailpkg.Service, botService *bots.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelManager *channel.Manager, modelsService *models.Service) {
+func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries dbstore.Queries, accountStore dbstore.AccountStore, postgresStore *postgresstore.Store, emailService *emailpkg.Service, botService *bots.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelManager *channel.Manager, modelsService *models.Service) {
 	fmt.Printf("Starting Memoh Agent %s\n", version.GetInfo())
 
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
+			if postgresStore != nil {
+				if err := teams.EnsureDefault(ctx, postgresStore.Pool()); err != nil {
+					return fmt.Errorf("ensure default team: %w", err)
+				}
+			}
 			if err := ensureAdminUser(ctx, logger, accountStore, emailService, cfg); err != nil {
 				return err
+			}
+			if postgresStore != nil {
+				if err := teams.EnsureDefault(ctx, postgresStore.Pool()); err != nil {
+					return fmt.Errorf("backfill default team members: %w", err)
+				}
 			}
 			botService.SetContainerLifecycle(manager)
 			botService.SetContainerReachability(func(ctx context.Context, botID string) error {

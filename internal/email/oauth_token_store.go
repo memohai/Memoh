@@ -53,6 +53,10 @@ func (s *DBOAuthTokenStore) Get(ctx context.Context, providerID string) (*OAuthT
 }
 
 func (s *DBOAuthTokenStore) Save(ctx context.Context, t OAuthToken) error {
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	pgID, err := db.ParseUUID(t.ProviderID)
 	if err != nil {
 		return err
@@ -62,6 +66,7 @@ func (s *DBOAuthTokenStore) Save(ctx context.Context, t OAuthToken) error {
 		expiresAt = pgtype.Timestamptz{Time: t.ExpiresAt, Valid: true}
 	}
 	_, err = s.queries.UpsertEmailOAuthToken(ctx, sqlc.UpsertEmailOAuthTokenParams{
+		TeamID:          pgTeamID,
 		EmailProviderID: pgID,
 		EmailAddress:    t.EmailAddress,
 		AccessToken:     t.AccessToken,
@@ -74,11 +79,16 @@ func (s *DBOAuthTokenStore) Save(ctx context.Context, t OAuthToken) error {
 }
 
 func (s *DBOAuthTokenStore) SetPendingState(ctx context.Context, providerID, state string) error {
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	pgID, err := db.ParseUUID(providerID)
 	if err != nil {
 		return err
 	}
 	return s.queries.UpdateEmailOAuthState(ctx, sqlc.UpdateEmailOAuthStateParams{
+		TeamID:          pgTeamID,
 		EmailProviderID: pgID,
 		State:           state,
 	})

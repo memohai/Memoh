@@ -402,12 +402,15 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("marshal config: %w", err)
 	}
-	row, err := s.queries.CreateSearchProvider(ctx, sqlc.CreateSearchProviderParams{
+	params := sqlc.CreateSearchProviderParams{
 		Name:     strings.TrimSpace(req.Name),
 		Provider: string(req.Provider),
 		Config:   configJSON,
 		Enable:   false,
-	})
+	}
+	setSearchProviderTeamID(ctx, &params)
+
+	row, err := s.queries.CreateSearchProvider(ctx, params)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("create search provider: %w", err)
 	}
@@ -419,7 +422,7 @@ func (s *Service) Get(ctx context.Context, id string) (GetResponse, error) {
 	if err != nil {
 		return GetResponse{}, err
 	}
-	row, err := s.queries.GetSearchProviderByID(ctx, pgID)
+	row, err := getSearchProviderByIDForScope(ctx, s.queries, pgID)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("get search provider: %w", err)
 	}
@@ -431,7 +434,7 @@ func (s *Service) GetRawByID(ctx context.Context, id string) (sqlc.SearchProvide
 	if err != nil {
 		return sqlc.SearchProvider{}, err
 	}
-	return s.queries.GetSearchProviderByID(ctx, pgID)
+	return getSearchProviderByIDForScope(ctx, s.queries, pgID)
 }
 
 func (s *Service) List(ctx context.Context, provider string) ([]GetResponse, error) {
@@ -441,9 +444,9 @@ func (s *Service) List(ctx context.Context, provider string) ([]GetResponse, err
 		err  error
 	)
 	if provider == "" {
-		rows, err = s.queries.ListSearchProviders(ctx)
+		rows, err = listSearchProvidersForScope(ctx, s.queries)
 	} else {
-		rows, err = s.queries.ListSearchProvidersByProvider(ctx, provider)
+		rows, err = listSearchProvidersByProviderForScope(ctx, s.queries, provider)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("list search providers: %w", err)
@@ -460,7 +463,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 	if err != nil {
 		return GetResponse{}, err
 	}
-	current, err := s.queries.GetSearchProviderByID(ctx, pgID)
+	current, err := getSearchProviderByIDForScope(ctx, s.queries, pgID)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("get search provider: %w", err)
 	}
@@ -487,13 +490,16 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 	if req.Enable != nil {
 		enable = *req.Enable
 	}
-	updated, err := s.queries.UpdateSearchProvider(ctx, sqlc.UpdateSearchProviderParams{
+	params := sqlc.UpdateSearchProviderParams{
 		ID:       pgID,
 		Name:     name,
 		Provider: provider,
 		Config:   config,
 		Enable:   enable,
-	})
+	}
+	setSearchProviderTeamID(ctx, &params)
+
+	updated, err := s.queries.UpdateSearchProvider(ctx, params)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("update search provider: %w", err)
 	}
@@ -505,7 +511,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	return s.queries.DeleteSearchProvider(ctx, pgID)
+	return deleteSearchProviderForScope(ctx, s.queries, pgID)
 }
 
 func (s *Service) toGetResponse(row sqlc.SearchProvider) GetResponse {
@@ -545,7 +551,7 @@ var defaultProviders = []struct {
 }
 
 func (s *Service) EnsureDefaults(ctx context.Context) error {
-	rows, err := s.queries.ListSearchProviders(ctx)
+	rows, err := listSearchProvidersForScope(ctx, s.queries)
 	if err != nil {
 		return fmt.Errorf("list search providers: %w", err)
 	}
@@ -559,12 +565,14 @@ func (s *Service) EnsureDefaults(ctx context.Context) error {
 		if _, ok := existing[string(dp.Name)]; ok {
 			continue
 		}
-		_, err := s.queries.CreateSearchProvider(ctx, sqlc.CreateSearchProviderParams{
+		params := sqlc.CreateSearchProviderParams{
 			Name:     dp.DisplayName,
 			Provider: string(dp.Name),
 			Config:   []byte("{}"),
 			Enable:   false,
-		})
+		}
+		setSearchProviderTeamID(ctx, &params)
+		_, err := s.queries.CreateSearchProvider(ctx, params)
 		if err != nil {
 			s.logger.Warn("failed to create default search provider",
 				slog.String("provider", string(dp.Name)),

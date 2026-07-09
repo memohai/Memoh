@@ -1,9 +1,11 @@
 -- name: CreateBotPluginInstallation :one
 INSERT INTO bot_plugin_installations (
-  bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest
+  team_id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-ON CONFLICT (bot_id, plugin_id)
+SELECT b.team_id, b.id, sqlc.arg(plugin_id), sqlc.arg(plugin_name), sqlc.arg(version), sqlc.arg(status), sqlc.arg(enabled), sqlc.arg(config), sqlc.arg(metadata), sqlc.arg(manifest)
+FROM bots b
+WHERE b.id = sqlc.arg(bot_id)
+ON CONFLICT (team_id, bot_id, plugin_id)
 DO UPDATE SET plugin_name = EXCLUDED.plugin_name,
               version = EXCLUDED.version,
               status = EXCLUDED.status,
@@ -12,50 +14,61 @@ DO UPDATE SET plugin_name = EXCLUDED.plugin_name,
               metadata = EXCLUDED.metadata,
               manifest = EXCLUDED.manifest,
               updated_at = now()
-RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at;
+RETURNING *;
 
 -- name: GetBotPluginInstallationByID :one
-SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at
+SELECT *
 FROM bot_plugin_installations
-WHERE bot_id = $1 AND id = $2
+WHERE bot_id = sqlc.arg(bot_id)
+  AND bot_plugin_installations.id = sqlc.arg(id)
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = sqlc.arg(bot_id))
 LIMIT 1;
 
 -- name: ListBotPluginInstallations :many
-SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at
+SELECT *
 FROM bot_plugin_installations
-WHERE bot_id = $1
+WHERE bot_id = sqlc.arg(bot_id)
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = sqlc.arg(bot_id))
 ORDER BY installed_at DESC;
 
 -- name: UpdateBotPluginInstallationStatus :one
 UPDATE bot_plugin_installations
-SET status = $3,
-    enabled = $4,
+SET status = sqlc.arg(status),
+    enabled = sqlc.arg(enabled),
     updated_at = now()
-WHERE bot_id = $1 AND id = $2
-RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at;
+WHERE bot_id = sqlc.arg(bot_id)
+  AND bot_plugin_installations.id = sqlc.arg(id)
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = sqlc.arg(bot_id))
+RETURNING *;
 
 -- name: DeleteBotPluginInstallation :exec
 DELETE FROM bot_plugin_installations
-WHERE bot_id = $1 AND id = $2;
+WHERE bot_id = sqlc.arg(bot_id)
+  AND bot_plugin_installations.id = sqlc.arg(id)
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = sqlc.arg(bot_id));
 
 -- name: UpsertBotPluginResource :one
 INSERT INTO bot_plugin_resources (
-  installation_id, resource_type, resource_key, resource_id, status, metadata
+  team_id, installation_id, resource_type, resource_key, resource_id, status, metadata
 )
-VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (installation_id, resource_type, resource_key)
+SELECT i.team_id, i.id, sqlc.arg(resource_type), sqlc.arg(resource_key), sqlc.arg(resource_id), sqlc.arg(status), sqlc.arg(metadata)
+FROM bot_plugin_installations i
+WHERE i.id = sqlc.arg(installation_id)
+ON CONFLICT (team_id, installation_id, resource_type, resource_key)
 DO UPDATE SET resource_id = EXCLUDED.resource_id,
               status = EXCLUDED.status,
               metadata = EXCLUDED.metadata,
               updated_at = now()
-RETURNING id, installation_id, resource_type, resource_key, resource_id, status, metadata, created_at, updated_at;
+RETURNING *;
 
 -- name: ListBotPluginResources :many
-SELECT id, installation_id, resource_type, resource_key, resource_id, status, metadata, created_at, updated_at
+SELECT *
 FROM bot_plugin_resources
-WHERE installation_id = $1
+WHERE installation_id = sqlc.arg(installation_id)
+  AND team_id = (SELECT i.team_id FROM bot_plugin_installations i WHERE i.id = sqlc.arg(installation_id))
 ORDER BY resource_type ASC, resource_key ASC;
 
 -- name: DeleteBotPluginResources :exec
 DELETE FROM bot_plugin_resources
-WHERE installation_id = $1;
+WHERE installation_id = sqlc.arg(installation_id)
+  AND team_id = (SELECT i.team_id FROM bot_plugin_installations i WHERE i.id = sqlc.arg(installation_id));

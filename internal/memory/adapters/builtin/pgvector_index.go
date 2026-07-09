@@ -21,6 +21,7 @@ import (
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 const (
@@ -32,6 +33,7 @@ const pgvectorSchemaSQL = `
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS memory_node_embeddings (
+    team_id     UUID        NOT NULL DEFAULT '` + teams.DefaultTeamID + `'::uuid,
     bot_id      UUID        NOT NULL,
     node_id     TEXT        NOT NULL,
     model_id    UUID        NOT NULL,
@@ -40,11 +42,35 @@ CREATE TABLE IF NOT EXISTS memory_node_embeddings (
     embedding   vector      NOT NULL,
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (bot_id, node_id, model_id),
+    PRIMARY KEY (team_id, bot_id, node_id, model_id),
     CONSTRAINT memory_node_embeddings_dimensions_check CHECK (dimensions > 0)
 );
 
-CREATE INDEX IF NOT EXISTS idx_memory_node_embeddings_bot_model ON memory_node_embeddings (bot_id, model_id);
+ALTER TABLE memory_node_embeddings ADD COLUMN IF NOT EXISTS team_id UUID;
+UPDATE memory_node_embeddings SET team_id = '` + teams.DefaultTeamID + `'::uuid WHERE team_id IS NULL;
+ALTER TABLE memory_node_embeddings ALTER COLUMN team_id SET DEFAULT '` + teams.DefaultTeamID + `'::uuid;
+ALTER TABLE memory_node_embeddings ALTER COLUMN team_id SET NOT NULL;
+
+DO $$
+DECLARE
+    pk_cols text[];
+BEGIN
+    SELECT array_agg(a.attname ORDER BY u.ord)
+    INTO pk_cols
+    FROM pg_constraint c
+    JOIN unnest(c.conkey) WITH ORDINALITY AS u(attnum, ord) ON true
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = u.attnum
+    WHERE c.conrelid = 'memory_node_embeddings'::regclass
+      AND c.contype = 'p';
+
+    IF pk_cols IS DISTINCT FROM ARRAY['team_id', 'bot_id', 'node_id', 'model_id']::text[] THEN
+        ALTER TABLE memory_node_embeddings DROP CONSTRAINT IF EXISTS memory_node_embeddings_pkey;
+        ALTER TABLE memory_node_embeddings ADD CONSTRAINT memory_node_embeddings_pkey
+            PRIMARY KEY (team_id, bot_id, node_id, model_id);
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_memory_node_embeddings_team_bot_model ON memory_node_embeddings (team_id, bot_id, model_id);
 `
 
 type pgvectorIndex struct {
@@ -195,6 +221,10 @@ func (r *pgvectorIndex) Upsert(ctx context.Context, botID, nodeID, body, hash st
 	if r == nil || r.pool == nil || strings.TrimSpace(body) == "" {
 		return nil
 	}
+	teamUUID, err := pgvectorTeamUUID(ctx)
+	if err != nil {
+		return err
+	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
 		return err
@@ -209,15 +239,15 @@ func (r *pgvectorIndex) Upsert(ctx context.Context, botID, nodeID, body, hash st
 	}
 	_, err = r.pool.Exec(ctx, `
 INSERT INTO memory_node_embeddings (
-  bot_id, node_id, model_id, dimensions, body_hash, embedding
+  team_id, bot_id, node_id, model_id, dimensions, body_hash, embedding
 )
-VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (bot_id, node_id, model_id) DO UPDATE SET
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (team_id, bot_id, node_id, model_id) DO UPDATE SET
   dimensions = EXCLUDED.dimensions,
   body_hash = EXCLUDED.body_hash,
   embedding = EXCLUDED.embedding,
   updated_at = now();
-`, botUUID, strings.TrimSpace(nodeID), r.model.uuid, dimensions, strings.TrimSpace(hash), pgvector.NewVector(vec))
+`, teamUUID, botUUID, strings.TrimSpace(nodeID), r.model.uuid, dimensions, strings.TrimSpace(hash), pgvector.NewVector(vec))
 	if err != nil {
 		return fmt.Errorf("pgvector semantic index: upsert: %w", err)
 	}
@@ -227,6 +257,10 @@ ON CONFLICT (bot_id, node_id, model_id) DO UPDATE SET
 func (r *pgvectorIndex) SearchSeeds(ctx context.Context, botID, query string, limit int) (map[string]float64, error) {
 	if r == nil || r.pool == nil || strings.TrimSpace(query) == "" || limit <= 0 {
 		return nil, nil
+	}
+	teamUUID, err := pgvectorTeamUUID(ctx)
+	if err != nil {
+		return nil, err
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -245,11 +279,12 @@ SELECT
   node_id,
   CAST(1.0 - (embedding <=> $1::vector) AS double precision) AS score
 FROM memory_node_embeddings
-WHERE bot_id = $2
-  AND model_id = $3
+WHERE team_id = $2
+  AND bot_id = $3
+  AND model_id = $4
 ORDER BY embedding <=> $1::vector
-LIMIT $4;
-`, pgvector.NewVector(vec), botUUID, r.model.uuid, rowLimit)
+LIMIT $5;
+`, pgvector.NewVector(vec), teamUUID, botUUID, r.model.uuid, rowLimit)
 	if err != nil {
 		return nil, fmt.Errorf("pgvector semantic index: search: %w", err)
 	}
@@ -284,6 +319,10 @@ func (r *pgvectorIndex) DeleteNodes(ctx context.Context, botID string, nodeIDs [
 	if r == nil || r.pool == nil || len(nodeIDs) == 0 {
 		return nil
 	}
+	teamUUID, err := pgvectorTeamUUID(ctx)
+	if err != nil {
+		return err
+	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
 		return err
@@ -300,9 +339,10 @@ func (r *pgvectorIndex) DeleteNodes(ctx context.Context, botID string, nodeIDs [
 	}
 	_, err = r.pool.Exec(ctx, `
 DELETE FROM memory_node_embeddings
-WHERE bot_id = $1
-  AND node_id = ANY($2::text[]);
-`, botUUID, ids)
+WHERE team_id = $1
+  AND bot_id = $2
+  AND node_id = ANY($3::text[]);
+`, teamUUID, botUUID, ids)
 	if err != nil {
 		return fmt.Errorf("pgvector semantic index: delete nodes: %w", err)
 	}
@@ -313,14 +353,19 @@ func (r *pgvectorIndex) DeleteBot(ctx context.Context, botID string) error {
 	if r == nil || r.pool == nil {
 		return nil
 	}
+	teamUUID, err := pgvectorTeamUUID(ctx)
+	if err != nil {
+		return err
+	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
 		return err
 	}
 	_, err = r.pool.Exec(ctx, `
 DELETE FROM memory_node_embeddings
-WHERE bot_id = $1;
-`, botUUID)
+WHERE team_id = $1
+  AND bot_id = $2;
+`, teamUUID, botUUID)
 	if err != nil {
 		return fmt.Errorf("pgvector semantic index: delete bot: %w", err)
 	}
@@ -331,6 +376,10 @@ func (r *pgvectorIndex) Count(ctx context.Context, botID string) (int, error) {
 	if r == nil || r.pool == nil {
 		return 0, nil
 	}
+	teamUUID, err := pgvectorTeamUUID(ctx)
+	if err != nil {
+		return 0, err
+	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
 		return 0, err
@@ -339,9 +388,10 @@ func (r *pgvectorIndex) Count(ctx context.Context, botID string) (int, error) {
 	if err := r.pool.QueryRow(ctx, `
 SELECT COUNT(*)
 FROM memory_node_embeddings
-WHERE bot_id = $1
-  AND model_id = $2;
-`, botUUID, r.model.uuid).Scan(&count); err != nil {
+WHERE team_id = $1
+  AND bot_id = $2
+  AND model_id = $3;
+`, teamUUID, botUUID, r.model.uuid).Scan(&count); err != nil {
 		return 0, fmt.Errorf("pgvector semantic index: count: %w", err)
 	}
 	if count > int64(^uint(0)>>1) {
@@ -374,6 +424,21 @@ SELECT EXISTS (
 	return nil
 }
 
+func pgvectorTeamUUID(ctx context.Context) (pgtype.UUID, error) {
+	scope, err := teams.ScopeFromContext(ctx)
+	if err != nil {
+		return pgtype.UUID{}, fmt.Errorf("pgvector semantic index: team scope: %w", err)
+	}
+	var u pgtype.UUID
+	if err := u.Scan(strings.TrimSpace(scope.TeamID)); err != nil {
+		return pgtype.UUID{}, fmt.Errorf("pgvector semantic index: invalid team_id: %w", err)
+	}
+	if !u.Valid {
+		return pgtype.UUID{}, errors.New("pgvector semantic index: invalid team_id")
+	}
+	return u, nil
+}
+
 func float64sToFloat32s(in []float64) []float32 {
 	out := make([]float32, len(in))
 	for i, v := range in {
@@ -392,13 +457,21 @@ func resolveEmbeddingModel(ctx context.Context, queries dbstore.Queries, modelRe
 	}
 	var row dbsqlc.Model
 	if parsed, err := db.ParseUUID(modelRef); err == nil {
-		dbModel, err := queries.GetModelByID(ctx, parsed)
+		dbModel, err := models.InvokeTeamQuery[dbsqlc.Model](ctx, queries, "GetModelByIDForTeam", map[string]any{
+			"ID": parsed,
+		}, func() (dbsqlc.Model, error) {
+			return queries.GetModelByID(ctx, parsed)
+		})
 		if err == nil {
 			row = dbModel
 		}
 	}
 	if !row.ID.Valid {
-		rows, err := queries.ListModelsByModelID(ctx, modelRef)
+		rows, err := models.InvokeTeamQuery[[]dbsqlc.Model](ctx, queries, "ListModelsByModelIDForTeam", map[string]any{
+			"ModelID": modelRef,
+		}, func() ([]dbsqlc.Model, error) {
+			return queries.ListModelsByModelID(ctx, modelRef)
+		})
 		if err != nil || len(rows) == 0 {
 			return embeddingModelSpec{}, fmt.Errorf("pgvector semantic index: embedding model not found: %s", modelRef)
 		}
@@ -413,7 +486,11 @@ func resolveEmbeddingModel(ctx context.Context, queries dbstore.Queries, modelRe
 	if !row.ProviderID.Valid {
 		return embeddingModelSpec{}, fmt.Errorf("pgvector semantic index: model %s has no provider", modelRef)
 	}
-	provider, err := queries.GetProviderByID(ctx, row.ProviderID)
+	provider, err := models.InvokeTeamQuery[dbsqlc.Provider](ctx, queries, "GetProviderByIDForTeam", map[string]any{
+		"ID": row.ProviderID,
+	}, func() (dbsqlc.Provider, error) {
+		return queries.GetProviderByID(ctx, row.ProviderID)
+	})
 	if err != nil {
 		return embeddingModelSpec{}, fmt.Errorf("pgvector semantic index: get embedding provider: %w", err)
 	}

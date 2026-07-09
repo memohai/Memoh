@@ -49,6 +49,7 @@ type SpawnRunConfig struct {
 
 // SpawnIdentity mirrors agent.SessionContext fields needed by subagent controls.
 type SpawnIdentity struct {
+	TeamID            string
 	BotID             string
 	ChatID            string
 	SessionID         string
@@ -693,6 +694,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		PromptCacheTTL: req.promptCacheTTL,
 		Messages:       history,
 		Identity: SpawnIdentity{
+			TeamID:            req.parentSession.TeamID,
 			BotID:             req.parentSession.BotID,
 			ChatID:            req.parentSession.ChatID,
 			SessionID:         req.agentSessionID,

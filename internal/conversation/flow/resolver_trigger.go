@@ -26,6 +26,7 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload sc
 	}
 
 	req := conversation.ChatRequest{
+		TeamID:      payload.TeamID,
 		BotID:       botID,
 		ChatID:      botID,
 		SessionID:   payload.SessionID,
@@ -85,6 +86,7 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 	}
 
 	req := conversation.ChatRequest{
+		TeamID:      payload.TeamID,
 		BotID:       botID,
 		ChatID:      botID,
 		SessionID:   payload.SessionID,

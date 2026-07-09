@@ -12,25 +12,28 @@ import (
 )
 
 const createSearchProvider = `-- name: CreateSearchProvider :one
-INSERT INTO search_providers (name, provider, config, enable)
+INSERT INTO search_providers (team_id, name, provider, config, enable)
 VALUES (
-  $1,
+  COALESCE($1::uuid, '00000000-0000-0000-0000-000000000001'::uuid),
   $2,
   $3,
-  $4
+  $4,
+  $5
 )
-RETURNING id, name, provider, config, enable, created_at, updated_at
+RETURNING id, name, provider, config, enable, created_at, updated_at, team_id
 `
 
 type CreateSearchProviderParams struct {
-	Name     string `json:"name"`
-	Provider string `json:"provider"`
-	Config   []byte `json:"config"`
-	Enable   bool   `json:"enable"`
+	TeamID   pgtype.UUID `json:"team_id"`
+	Name     string      `json:"name"`
+	Provider string      `json:"provider"`
+	Config   []byte      `json:"config"`
+	Enable   bool        `json:"enable"`
 }
 
 func (q *Queries) CreateSearchProvider(ctx context.Context, arg CreateSearchProviderParams) (SearchProvider, error) {
 	row := q.db.QueryRow(ctx, createSearchProvider,
+		arg.TeamID,
 		arg.Name,
 		arg.Provider,
 		arg.Config,
@@ -45,6 +48,7 @@ func (q *Queries) CreateSearchProvider(ctx context.Context, arg CreateSearchProv
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -58,8 +62,24 @@ func (q *Queries) DeleteSearchProvider(ctx context.Context, id pgtype.UUID) erro
 	return err
 }
 
+const deleteSearchProviderForTeam = `-- name: DeleteSearchProviderForTeam :exec
+DELETE FROM search_providers
+WHERE id = $1
+  AND team_id = $2
+`
+
+type DeleteSearchProviderForTeamParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteSearchProviderForTeam(ctx context.Context, arg DeleteSearchProviderForTeamParams) error {
+	_, err := q.db.Exec(ctx, deleteSearchProviderForTeam, arg.ID, arg.TeamID)
+	return err
+}
+
 const getSearchProviderByID = `-- name: GetSearchProviderByID :one
-SELECT id, name, provider, config, enable, created_at, updated_at FROM search_providers WHERE id = $1
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM search_providers WHERE id = $1
 `
 
 func (q *Queries) GetSearchProviderByID(ctx context.Context, id pgtype.UUID) (SearchProvider, error) {
@@ -73,12 +93,40 @@ func (q *Queries) GetSearchProviderByID(ctx context.Context, id pgtype.UUID) (Se
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
+const getSearchProviderByIDForTeam = `-- name: GetSearchProviderByIDForTeam :one
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM search_providers
+WHERE id = $1
+  AND team_id = $2
+`
+
+type GetSearchProviderByIDForTeamParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetSearchProviderByIDForTeam(ctx context.Context, arg GetSearchProviderByIDForTeamParams) (SearchProvider, error) {
+	row := q.db.QueryRow(ctx, getSearchProviderByIDForTeam, arg.ID, arg.TeamID)
+	var i SearchProvider
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Provider,
+		&i.Config,
+		&i.Enable,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getSearchProviderByName = `-- name: GetSearchProviderByName :one
-SELECT id, name, provider, config, enable, created_at, updated_at FROM search_providers WHERE name = $1
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM search_providers WHERE name = $1
 `
 
 func (q *Queries) GetSearchProviderByName(ctx context.Context, name string) (SearchProvider, error) {
@@ -92,12 +140,40 @@ func (q *Queries) GetSearchProviderByName(ctx context.Context, name string) (Sea
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
+const getSearchProviderByNameForTeam = `-- name: GetSearchProviderByNameForTeam :one
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM search_providers
+WHERE team_id = $1
+  AND name = $2
+`
+
+type GetSearchProviderByNameForTeamParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	Name   string      `json:"name"`
+}
+
+func (q *Queries) GetSearchProviderByNameForTeam(ctx context.Context, arg GetSearchProviderByNameForTeamParams) (SearchProvider, error) {
+	row := q.db.QueryRow(ctx, getSearchProviderByNameForTeam, arg.TeamID, arg.Name)
+	var i SearchProvider
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Provider,
+		&i.Config,
+		&i.Enable,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listSearchProviders = `-- name: ListSearchProviders :many
-SELECT id, name, provider, config, enable, created_at, updated_at FROM search_providers
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM search_providers
 ORDER BY created_at DESC
 `
 
@@ -118,6 +194,7 @@ func (q *Queries) ListSearchProviders(ctx context.Context) ([]SearchProvider, er
 			&i.Enable,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -130,7 +207,7 @@ func (q *Queries) ListSearchProviders(ctx context.Context) ([]SearchProvider, er
 }
 
 const listSearchProvidersByProvider = `-- name: ListSearchProvidersByProvider :many
-SELECT id, name, provider, config, enable, created_at, updated_at FROM search_providers
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM search_providers
 WHERE provider = $1
 ORDER BY created_at DESC
 `
@@ -152,6 +229,83 @@ func (q *Queries) ListSearchProvidersByProvider(ctx context.Context, provider st
 			&i.Enable,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSearchProvidersByProviderForTeam = `-- name: ListSearchProvidersByProviderForTeam :many
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM search_providers
+WHERE team_id = $1
+  AND provider = $2
+ORDER BY created_at DESC
+`
+
+type ListSearchProvidersByProviderForTeamParams struct {
+	TeamID   pgtype.UUID `json:"team_id"`
+	Provider string      `json:"provider"`
+}
+
+func (q *Queries) ListSearchProvidersByProviderForTeam(ctx context.Context, arg ListSearchProvidersByProviderForTeamParams) ([]SearchProvider, error) {
+	rows, err := q.db.Query(ctx, listSearchProvidersByProviderForTeam, arg.TeamID, arg.Provider)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchProvider
+	for rows.Next() {
+		var i SearchProvider
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Provider,
+			&i.Config,
+			&i.Enable,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSearchProvidersForTeam = `-- name: ListSearchProvidersForTeam :many
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM search_providers
+WHERE team_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListSearchProvidersForTeam(ctx context.Context, teamID pgtype.UUID) ([]SearchProvider, error) {
+	rows, err := q.db.Query(ctx, listSearchProvidersForTeam, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchProvider
+	for rows.Next() {
+		var i SearchProvider
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Provider,
+			&i.Config,
+			&i.Enable,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -172,7 +326,8 @@ SET
   enable = $4,
   updated_at = now()
 WHERE id = $5
-RETURNING id, name, provider, config, enable, created_at, updated_at
+  AND team_id = COALESCE($6::uuid, '00000000-0000-0000-0000-000000000001'::uuid)
+RETURNING id, name, provider, config, enable, created_at, updated_at, team_id
 `
 
 type UpdateSearchProviderParams struct {
@@ -181,6 +336,7 @@ type UpdateSearchProviderParams struct {
 	Config   []byte      `json:"config"`
 	Enable   bool        `json:"enable"`
 	ID       pgtype.UUID `json:"id"`
+	TeamID   pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateSearchProvider(ctx context.Context, arg UpdateSearchProviderParams) (SearchProvider, error) {
@@ -190,6 +346,7 @@ func (q *Queries) UpdateSearchProvider(ctx context.Context, arg UpdateSearchProv
 		arg.Config,
 		arg.Enable,
 		arg.ID,
+		arg.TeamID,
 	)
 	var i SearchProvider
 	err := row.Scan(
@@ -200,6 +357,7 @@ func (q *Queries) UpdateSearchProvider(ctx context.Context, arg UpdateSearchProv
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

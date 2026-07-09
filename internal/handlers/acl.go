@@ -106,7 +106,8 @@ func (h *ACLHandler) CreateRule(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/acl/rules/{rule_id} [put].
 func (h *ACLHandler) UpdateRule(c echo.Context) error {
-	if _, _, err := h.requireManageAccess(c); err != nil {
+	botID, _, err := h.requireManageAccess(c)
+	if err != nil {
 		return err
 	}
 	ruleID := strings.TrimSpace(c.Param("rule_id"))
@@ -117,7 +118,7 @@ func (h *ACLHandler) UpdateRule(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	item, err := h.service.UpdateRule(c.Request().Context(), ruleID, req)
+	item, err := h.service.UpdateRule(c.Request().Context(), botID, ruleID, req)
 	if err != nil {
 		return h.mapRuleError(err)
 	}
@@ -136,14 +137,15 @@ func (h *ACLHandler) UpdateRule(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/acl/rules/{rule_id} [delete].
 func (h *ACLHandler) DeleteRule(c echo.Context) error {
-	if _, _, err := h.requireManageAccess(c); err != nil {
+	botID, _, err := h.requireManageAccess(c)
+	if err != nil {
 		return err
 	}
 	ruleID := strings.TrimSpace(c.Param("rule_id"))
 	if ruleID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "rule_id is required")
 	}
-	if err := h.service.DeleteRule(c.Request().Context(), ruleID); err != nil {
+	if err := h.service.DeleteRule(c.Request().Context(), botID, ruleID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.NoContent(http.StatusNoContent)

@@ -13,36 +13,39 @@ import (
 
 const completeCompactionLog = `-- name: CompleteCompactionLog :one
 UPDATE bot_history_message_compacts
-SET status = $2,
-    summary = $3,
-    message_count = $4,
-    error_message = $5,
-    usage = $6,
-    model_id = $7,
+SET status = $1,
+    summary = $2,
+    message_count = $3,
+    error_message = $4,
+    usage = $5,
+    model_id = $6::uuid,
     completed_at = now()
-WHERE id = $1
-RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at
+WHERE id = $7
+  AND team_id = $8::uuid
+RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, team_id
 `
 
 type CompleteCompactionLogParams struct {
-	ID           pgtype.UUID `json:"id"`
 	Status       string      `json:"status"`
 	Summary      string      `json:"summary"`
 	MessageCount int32       `json:"message_count"`
 	ErrorMessage string      `json:"error_message"`
 	Usage        []byte      `json:"usage"`
 	ModelID      pgtype.UUID `json:"model_id"`
+	ID           pgtype.UUID `json:"id"`
+	TeamID       pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) CompleteCompactionLog(ctx context.Context, arg CompleteCompactionLogParams) (BotHistoryMessageCompact, error) {
 	row := q.db.QueryRow(ctx, completeCompactionLog,
-		arg.ID,
 		arg.Status,
 		arg.Summary,
 		arg.MessageCount,
 		arg.ErrorMessage,
 		arg.Usage,
 		arg.ModelID,
+		arg.ID,
+		arg.TeamID,
 	)
 	var i BotHistoryMessageCompact
 	err := row.Scan(
@@ -57,34 +60,43 @@ func (q *Queries) CompleteCompactionLog(ctx context.Context, arg CompleteCompact
 		&i.ModelID,
 		&i.StartedAt,
 		&i.CompletedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const countCompactionLogsByBot = `-- name: CountCompactionLogsByBot :one
-SELECT count(*) FROM bot_history_message_compacts WHERE bot_id = $1
+SELECT count(*) FROM bot_history_message_compacts
+WHERE bot_id = $1
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) CountCompactionLogsByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countCompactionLogsByBot, botID)
+type CountCompactionLogsByBotParams struct {
+	BotID  pgtype.UUID `json:"bot_id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) CountCompactionLogsByBot(ctx context.Context, arg CountCompactionLogsByBotParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countCompactionLogsByBot, arg.BotID, arg.TeamID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
 const createCompactionLog = `-- name: CreateCompactionLog :one
-INSERT INTO bot_history_message_compacts (bot_id, session_id)
-VALUES ($1, $2)
-RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at
+INSERT INTO bot_history_message_compacts (team_id, bot_id, session_id)
+VALUES ($1::uuid, $2::uuid, $3::uuid)
+RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, team_id
 `
 
 type CreateCompactionLogParams struct {
+	TeamID    pgtype.UUID `json:"team_id"`
 	BotID     pgtype.UUID `json:"bot_id"`
 	SessionID pgtype.UUID `json:"session_id"`
 }
 
 func (q *Queries) CreateCompactionLog(ctx context.Context, arg CreateCompactionLogParams) (BotHistoryMessageCompact, error) {
-	row := q.db.QueryRow(ctx, createCompactionLog, arg.BotID, arg.SessionID)
+	row := q.db.QueryRow(ctx, createCompactionLog, arg.TeamID, arg.BotID, arg.SessionID)
 	var i BotHistoryMessageCompact
 	err := row.Scan(
 		&i.ID,
@@ -98,27 +110,41 @@ func (q *Queries) CreateCompactionLog(ctx context.Context, arg CreateCompactionL
 		&i.ModelID,
 		&i.StartedAt,
 		&i.CompletedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const deleteCompactionLogsByBot = `-- name: DeleteCompactionLogsByBot :exec
-DELETE FROM bot_history_message_compacts WHERE bot_id = $1
+DELETE FROM bot_history_message_compacts
+WHERE bot_id = $1
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) DeleteCompactionLogsByBot(ctx context.Context, botID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteCompactionLogsByBot, botID)
+type DeleteCompactionLogsByBotParams struct {
+	BotID  pgtype.UUID `json:"bot_id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteCompactionLogsByBot(ctx context.Context, arg DeleteCompactionLogsByBotParams) error {
+	_, err := q.db.Exec(ctx, deleteCompactionLogsByBot, arg.BotID, arg.TeamID)
 	return err
 }
 
 const getCompactionLogByID = `-- name: GetCompactionLogByID :one
-SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at
+SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, team_id
 FROM bot_history_message_compacts
 WHERE id = $1
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) GetCompactionLogByID(ctx context.Context, id pgtype.UUID) (BotHistoryMessageCompact, error) {
-	row := q.db.QueryRow(ctx, getCompactionLogByID, id)
+type GetCompactionLogByIDParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetCompactionLogByID(ctx context.Context, arg GetCompactionLogByIDParams) (BotHistoryMessageCompact, error) {
+	row := q.db.QueryRow(ctx, getCompactionLogByID, arg.ID, arg.TeamID)
 	var i BotHistoryMessageCompact
 	err := row.Scan(
 		&i.ID,
@@ -132,26 +158,34 @@ func (q *Queries) GetCompactionLogByID(ctx context.Context, id pgtype.UUID) (Bot
 		&i.ModelID,
 		&i.StartedAt,
 		&i.CompletedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listCompactionLogsByBot = `-- name: ListCompactionLogsByBot :many
-SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at
+SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, team_id
 FROM bot_history_message_compacts
 WHERE bot_id = $1
+  AND team_id = $2::uuid
 ORDER BY started_at DESC
-LIMIT $2 OFFSET $3
+LIMIT $4 OFFSET $3
 `
 
 type ListCompactionLogsByBotParams struct {
-	BotID  pgtype.UUID `json:"bot_id"`
-	Limit  int32       `json:"limit"`
-	Offset int32       `json:"offset"`
+	BotID       pgtype.UUID `json:"bot_id"`
+	TeamID      pgtype.UUID `json:"team_id"`
+	OffsetCount int32       `json:"offset_count"`
+	LimitCount  int32       `json:"limit_count"`
 }
 
 func (q *Queries) ListCompactionLogsByBot(ctx context.Context, arg ListCompactionLogsByBotParams) ([]BotHistoryMessageCompact, error) {
-	rows, err := q.db.Query(ctx, listCompactionLogsByBot, arg.BotID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listCompactionLogsByBot,
+		arg.BotID,
+		arg.TeamID,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -171,6 +205,7 @@ func (q *Queries) ListCompactionLogsByBot(ctx context.Context, arg ListCompactio
 			&i.ModelID,
 			&i.StartedAt,
 			&i.CompletedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -183,14 +218,20 @@ func (q *Queries) ListCompactionLogsByBot(ctx context.Context, arg ListCompactio
 }
 
 const listCompactionLogsBySession = `-- name: ListCompactionLogsBySession :many
-SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at
+SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, team_id
 FROM bot_history_message_compacts
 WHERE session_id = $1
+  AND team_id = $2::uuid
 ORDER BY started_at ASC
 `
 
-func (q *Queries) ListCompactionLogsBySession(ctx context.Context, sessionID pgtype.UUID) ([]BotHistoryMessageCompact, error) {
-	rows, err := q.db.Query(ctx, listCompactionLogsBySession, sessionID)
+type ListCompactionLogsBySessionParams struct {
+	SessionID pgtype.UUID `json:"session_id"`
+	TeamID    pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) ListCompactionLogsBySession(ctx context.Context, arg ListCompactionLogsBySessionParams) ([]BotHistoryMessageCompact, error) {
+	rows, err := q.db.Query(ctx, listCompactionLogsBySession, arg.SessionID, arg.TeamID)
 	if err != nil {
 		return nil, err
 	}
@@ -210,6 +251,7 @@ func (q *Queries) ListCompactionLogsBySession(ctx context.Context, sessionID pgt
 			&i.ModelID,
 			&i.StartedAt,
 			&i.CompletedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}

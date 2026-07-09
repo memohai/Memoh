@@ -37,8 +37,8 @@ func TestUpdateMergesACPSensitiveMetadataBeforePersisting(t *testing.T) {
 			switch {
 			case strings.Contains(query, "SELECT id, owner_user_id") && strings.Contains(query, "FROM bots"):
 				return makeGetBotRowWithMetadata(botUUID, ownerUUID, existingMetadata)
-			case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $7"):
-				payload, ok := args[6].([]byte)
+			case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $6"):
+				payload, ok := args[5].([]byte)
 				if !ok {
 					t.Fatalf("metadata arg type = %T, want []byte", args[5])
 				}

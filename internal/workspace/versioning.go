@@ -344,7 +344,12 @@ func (m *Manager) RollbackVersion(ctx context.Context, botID string, version int
 	}
 	defer ref.Close()
 
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	snapshotName, err := m.queries.GetVersionSnapshotRuntimeName(ctx, dbsqlc.GetVersionSnapshotRuntimeNameParams{
+		TeamID:      pgTeamID,
 		ContainerID: ref.containerID,
 		Version:     int32(version),
 	})
@@ -392,7 +397,12 @@ func (m *Manager) VersionSnapshotName(ctx context.Context, botID string, version
 	}
 
 	containerID := m.resolveContainerID(ctx, botID)
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return "", err
+	}
 	return m.queries.GetVersionSnapshotRuntimeName(ctx, dbsqlc.GetVersionSnapshotRuntimeNameParams{
+		TeamID:      pgTeamID,
 		ContainerID: containerID,
 		Version:     int32(version),
 	})
@@ -505,12 +515,17 @@ func (m *Manager) ensureDBRecords(ctx context.Context, botID, containerID, _ str
 	if err != nil {
 		return pgtype.UUID{}, err
 	}
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
 	if _, err := m.queries.GetBotByID(ctx, botUUID); err != nil {
 		return pgtype.UUID{}, err
 	}
 
 	containerPath := config.DefaultDataMount
 	if err := m.queries.UpsertContainer(ctx, dbsqlc.UpsertContainerParams{
+		TeamID:           pgTeamID,
 		BotID:            botUUID,
 		ContainerID:      containerID,
 		ContainerName:    containerID,
@@ -536,11 +551,14 @@ func (m *Manager) recordSnapshotVersion(ctx context.Context, containerID, runtim
 	if containerID == "" || runtimeSnapshotName == "" || snapshotter == "" {
 		return "", 0, time.Time{}, ctr.ErrInvalidArgument
 	}
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return "", 0, time.Time{}, err
+	}
 
 	qtx := m.queries
 	var tx pgx.Tx
 	if m.db != nil {
-		var err error
 		tx, err = m.db.Begin(ctx)
 		if err != nil {
 			return "", 0, time.Time{}, err
@@ -555,6 +573,7 @@ func (m *Manager) recordSnapshotVersion(ctx context.Context, containerID, runtim
 		parent = pgtype.Text{String: normalizedParent, Valid: true}
 	}
 	snapshotRow, err := qtx.UpsertSnapshot(ctx, dbsqlc.UpsertSnapshotParams{
+		TeamID:                    pgTeamID,
 		ContainerID:               containerID,
 		RuntimeSnapshotName:       runtimeSnapshotName,
 		DisplayName:               pgtype.Text{String: strings.TrimSpace(displayName), Valid: strings.TrimSpace(displayName) != ""},
@@ -572,6 +591,7 @@ func (m *Manager) recordSnapshotVersion(ctx context.Context, containerID, runtim
 	}
 
 	versionRow, err := qtx.InsertVersion(ctx, dbsqlc.InsertVersionParams{
+		TeamID:      pgTeamID,
 		ContainerID: containerID,
 		SnapshotID:  snapshotRow.ID,
 		Version:     version,
@@ -599,7 +619,12 @@ func (m *Manager) insertEvent(ctx context.Context, containerID, eventType string
 	if err != nil {
 		return err
 	}
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	return m.queries.InsertLifecycleEvent(ctx, dbsqlc.InsertLifecycleEventParams{
+		TeamID:      pgTeamID,
 		ID:          fmt.Sprintf("%s-%d", containerID, time.Now().UnixNano()),
 		ContainerID: containerID,
 		EventType:   eventType,

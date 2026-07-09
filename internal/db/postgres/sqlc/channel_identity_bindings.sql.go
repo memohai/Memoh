@@ -12,24 +12,26 @@ import (
 )
 
 const createChannelLinkCode = `-- name: CreateChannelLinkCode :one
-INSERT INTO channel_link_codes (token, user_id, channel_type, expires_at)
-VALUES ($1, $2, $4::text, $3)
-RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at
+INSERT INTO channel_link_codes (token, team_id, user_id, channel_type, expires_at)
+VALUES ($1, $2, $3, $4::text, $5)
+RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at, team_id
 `
 
 type CreateChannelLinkCodeParams struct {
 	Token       string             `json:"token"`
+	TeamID      pgtype.UUID        `json:"team_id"`
 	UserID      pgtype.UUID        `json:"user_id"`
-	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
 	ChannelType pgtype.Text        `json:"channel_type"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
 }
 
 func (q *Queries) CreateChannelLinkCode(ctx context.Context, arg CreateChannelLinkCodeParams) (ChannelLinkCode, error) {
 	row := q.db.QueryRow(ctx, createChannelLinkCode,
 		arg.Token,
+		arg.TeamID,
 		arg.UserID,
-		arg.ExpiresAt,
 		arg.ChannelType,
+		arg.ExpiresAt,
 	)
 	var i ChannelLinkCode
 	err := row.Scan(
@@ -40,33 +42,43 @@ func (q *Queries) CreateChannelLinkCode(ctx context.Context, arg CreateChannelLi
 		&i.ConsumedAt,
 		&i.ConsumedChannelIdentityID,
 		&i.CreatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const deleteUserChannelIdentityBinding = `-- name: DeleteUserChannelIdentityBinding :exec
 DELETE FROM user_channel_identity_bindings
-WHERE user_id = $1 AND channel_identity_id = $2
+WHERE team_id = $1
+  AND user_id = $2
+  AND channel_identity_id = $3
 `
 
 type DeleteUserChannelIdentityBindingParams struct {
+	TeamID            pgtype.UUID `json:"team_id"`
 	UserID            pgtype.UUID `json:"user_id"`
 	ChannelIdentityID pgtype.UUID `json:"channel_identity_id"`
 }
 
 func (q *Queries) DeleteUserChannelIdentityBinding(ctx context.Context, arg DeleteUserChannelIdentityBindingParams) error {
-	_, err := q.db.Exec(ctx, deleteUserChannelIdentityBinding, arg.UserID, arg.ChannelIdentityID)
+	_, err := q.db.Exec(ctx, deleteUserChannelIdentityBinding, arg.TeamID, arg.UserID, arg.ChannelIdentityID)
 	return err
 }
 
 const getChannelLinkCodeByToken = `-- name: GetChannelLinkCodeByToken :one
-SELECT token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at
+SELECT token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at, team_id
 FROM channel_link_codes
 WHERE token = $1
+  AND team_id = $2
 `
 
-func (q *Queries) GetChannelLinkCodeByToken(ctx context.Context, token string) (ChannelLinkCode, error) {
-	row := q.db.QueryRow(ctx, getChannelLinkCodeByToken, token)
+type GetChannelLinkCodeByTokenParams struct {
+	Token  string      `json:"token"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetChannelLinkCodeByToken(ctx context.Context, arg GetChannelLinkCodeByTokenParams) (ChannelLinkCode, error) {
+	row := q.db.QueryRow(ctx, getChannelLinkCodeByToken, arg.Token, arg.TeamID)
 	var i ChannelLinkCode
 	err := row.Scan(
 		&i.Token,
@@ -76,6 +88,7 @@ func (q *Queries) GetChannelLinkCodeByToken(ctx context.Context, token string) (
 		&i.ConsumedAt,
 		&i.ConsumedChannelIdentityID,
 		&i.CreatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -92,7 +105,8 @@ SELECT
   ci.display_name AS channel_identity_display_name,
   ci.avatar_url AS channel_identity_avatar_url
 FROM user_channel_identity_bindings b
-LEFT JOIN channel_identities ci ON ci.id = b.channel_identity_id
+LEFT JOIN channel_identities ci ON ci.id = b.channel_identity_id AND ci.team_id = b.team_id
+WHERE b.team_id = $1
 ORDER BY b.created_at DESC
 `
 
@@ -108,8 +122,8 @@ type ListChannelIdentityBindingsRow struct {
 	ChannelIdentityAvatarUrl   pgtype.Text        `json:"channel_identity_avatar_url"`
 }
 
-func (q *Queries) ListChannelIdentityBindings(ctx context.Context) ([]ListChannelIdentityBindingsRow, error) {
-	rows, err := q.db.Query(ctx, listChannelIdentityBindings)
+func (q *Queries) ListChannelIdentityBindings(ctx context.Context, teamID pgtype.UUID) ([]ListChannelIdentityBindingsRow, error) {
+	rows, err := q.db.Query(ctx, listChannelIdentityBindings, teamID)
 	if err != nil {
 		return nil, err
 	}
@@ -150,8 +164,10 @@ SELECT DISTINCT
   ci.display_name AS channel_identity_display_name,
   ci.avatar_url AS channel_identity_avatar_url
 FROM user_channel_identity_bindings b
-INNER JOIN bot_user_grants g ON g.user_id = b.user_id AND g.bot_id = $1 AND g.subject_type = 'user'
-LEFT JOIN channel_identities ci ON ci.id = b.channel_identity_id
+INNER JOIN bots bot_scope ON bot_scope.id = $1
+INNER JOIN bot_user_grants g ON g.user_id = b.user_id AND g.bot_id = bot_scope.id AND g.subject_type = 'user'
+LEFT JOIN channel_identities ci ON ci.id = b.channel_identity_id AND ci.team_id = b.team_id
+WHERE b.team_id = bot_scope.team_id
 ORDER BY b.created_at DESC
 `
 
@@ -209,10 +225,16 @@ SELECT
   ci.display_name AS channel_identity_display_name,
   ci.avatar_url AS channel_identity_avatar_url
 FROM user_channel_identity_bindings b
-LEFT JOIN channel_identities ci ON ci.id = b.channel_identity_id
-WHERE b.user_id = $1
+LEFT JOIN channel_identities ci ON ci.id = b.channel_identity_id AND ci.team_id = b.team_id
+WHERE b.team_id = $1
+  AND b.user_id = $2
 ORDER BY b.created_at DESC
 `
+
+type ListChannelIdentityBindingsForUserParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	UserID pgtype.UUID `json:"user_id"`
+}
 
 type ListChannelIdentityBindingsForUserRow struct {
 	ID                         pgtype.UUID        `json:"id"`
@@ -226,8 +248,8 @@ type ListChannelIdentityBindingsForUserRow struct {
 	ChannelIdentityAvatarUrl   pgtype.Text        `json:"channel_identity_avatar_url"`
 }
 
-func (q *Queries) ListChannelIdentityBindingsForUser(ctx context.Context, userID pgtype.UUID) ([]ListChannelIdentityBindingsForUserRow, error) {
-	rows, err := q.db.Query(ctx, listChannelIdentityBindingsForUser, userID)
+func (q *Queries) ListChannelIdentityBindingsForUser(ctx context.Context, arg ListChannelIdentityBindingsForUserParams) ([]ListChannelIdentityBindingsForUserRow, error) {
+	rows, err := q.db.Query(ctx, listChannelIdentityBindingsForUser, arg.TeamID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -259,11 +281,17 @@ func (q *Queries) ListChannelIdentityBindingsForUser(ctx context.Context, userID
 const listUserIDsByChannelIdentity = `-- name: ListUserIDsByChannelIdentity :many
 SELECT user_id
 FROM user_channel_identity_bindings
-WHERE channel_identity_id = $1
+WHERE team_id = $1
+  AND channel_identity_id = $2
 `
 
-func (q *Queries) ListUserIDsByChannelIdentity(ctx context.Context, channelIdentityID pgtype.UUID) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listUserIDsByChannelIdentity, channelIdentityID)
+type ListUserIDsByChannelIdentityParams struct {
+	TeamID            pgtype.UUID `json:"team_id"`
+	ChannelIdentityID pgtype.UUID `json:"channel_identity_id"`
+}
+
+func (q *Queries) ListUserIDsByChannelIdentity(ctx context.Context, arg ListUserIDsByChannelIdentityParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listUserIDsByChannelIdentity, arg.TeamID, arg.ChannelIdentityID)
 	if err != nil {
 		return nil, err
 	}
@@ -285,18 +313,22 @@ func (q *Queries) ListUserIDsByChannelIdentity(ctx context.Context, channelIdent
 const markChannelLinkCodeConsumed = `-- name: MarkChannelLinkCodeConsumed :one
 UPDATE channel_link_codes
 SET consumed_at = now(),
-    consumed_channel_identity_id = $2
-WHERE token = $1 AND consumed_at IS NULL AND expires_at > now()
-RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at
+    consumed_channel_identity_id = $1
+WHERE token = $2
+  AND team_id = $3
+  AND consumed_at IS NULL
+  AND expires_at > now()
+RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at, team_id
 `
 
 type MarkChannelLinkCodeConsumedParams struct {
-	Token                     string      `json:"token"`
-	ConsumedChannelIdentityID pgtype.UUID `json:"consumed_channel_identity_id"`
+	ChannelIdentityID pgtype.UUID `json:"channel_identity_id"`
+	Token             string      `json:"token"`
+	TeamID            pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) MarkChannelLinkCodeConsumed(ctx context.Context, arg MarkChannelLinkCodeConsumedParams) (ChannelLinkCode, error) {
-	row := q.db.QueryRow(ctx, markChannelLinkCodeConsumed, arg.Token, arg.ConsumedChannelIdentityID)
+	row := q.db.QueryRow(ctx, markChannelLinkCodeConsumed, arg.ChannelIdentityID, arg.Token, arg.TeamID)
 	var i ChannelLinkCode
 	err := row.Scan(
 		&i.Token,
@@ -306,35 +338,49 @@ func (q *Queries) MarkChannelLinkCodeConsumed(ctx context.Context, arg MarkChann
 		&i.ConsumedAt,
 		&i.ConsumedChannelIdentityID,
 		&i.CreatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const redeemChannelLinkCode = `-- name: RedeemChannelLinkCode :one
-WITH claimed AS (
-  UPDATE channel_link_codes
+WITH identity_scope AS (
+  SELECT ci.id, ci.team_id, ci.channel_type
+  FROM channel_identities ci
+  WHERE ci.id = $1
+    AND ci.team_id = $2
+),
+claimed AS (
+  UPDATE channel_link_codes c
   SET consumed_at = now(),
-      consumed_channel_identity_id = $2
-  WHERE token = $1
-    AND consumed_at IS NULL
-    AND expires_at > now()
-  RETURNING user_id
+      consumed_channel_identity_id = (SELECT id FROM identity_scope)
+  WHERE c.token = $3
+    AND c.team_id = $2
+    AND c.consumed_at IS NULL
+    AND c.expires_at > now()
+    AND EXISTS (
+      SELECT 1
+      FROM identity_scope i
+      WHERE c.channel_type = '' OR c.channel_type = i.channel_type
+    )
+  RETURNING c.team_id, c.user_id, (SELECT id FROM identity_scope) AS channel_identity_id
 )
-INSERT INTO user_channel_identity_bindings (user_id, channel_identity_id)
-SELECT user_id, $2
+INSERT INTO user_channel_identity_bindings (team_id, user_id, channel_identity_id)
+SELECT team_id, user_id, channel_identity_id
 FROM claimed
-ON CONFLICT (user_id, channel_identity_id) DO UPDATE
+ON CONFLICT (team_id, user_id, channel_identity_id) DO UPDATE
   SET updated_at = now()
-RETURNING id, user_id, channel_identity_id, created_at, updated_at
+RETURNING id, user_id, channel_identity_id, created_at, updated_at, team_id
 `
 
 type RedeemChannelLinkCodeParams struct {
-	Token             string      `json:"token"`
 	ChannelIdentityID pgtype.UUID `json:"channel_identity_id"`
+	TeamID            pgtype.UUID `json:"team_id"`
+	Token             string      `json:"token"`
 }
 
 func (q *Queries) RedeemChannelLinkCode(ctx context.Context, arg RedeemChannelLinkCodeParams) (UserChannelIdentityBinding, error) {
-	row := q.db.QueryRow(ctx, redeemChannelLinkCode, arg.Token, arg.ChannelIdentityID)
+	row := q.db.QueryRow(ctx, redeemChannelLinkCode, arg.ChannelIdentityID, arg.TeamID, arg.Token)
 	var i UserChannelIdentityBinding
 	err := row.Scan(
 		&i.ID,
@@ -342,25 +388,30 @@ func (q *Queries) RedeemChannelLinkCode(ctx context.Context, arg RedeemChannelLi
 		&i.ChannelIdentityID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const upsertUserChannelIdentityBinding = `-- name: UpsertUserChannelIdentityBinding :one
-INSERT INTO user_channel_identity_bindings (user_id, channel_identity_id)
-VALUES ($1, $2)
-ON CONFLICT (user_id, channel_identity_id) DO UPDATE
+INSERT INTO user_channel_identity_bindings (team_id, user_id, channel_identity_id)
+SELECT $1, $2, ci.id
+FROM channel_identities ci
+WHERE ci.id = $3
+  AND ci.team_id = $1
+ON CONFLICT (team_id, user_id, channel_identity_id) DO UPDATE
   SET updated_at = now()
-RETURNING id, user_id, channel_identity_id, created_at, updated_at
+RETURNING id, user_id, channel_identity_id, created_at, updated_at, team_id
 `
 
 type UpsertUserChannelIdentityBindingParams struct {
+	TeamID            pgtype.UUID `json:"team_id"`
 	UserID            pgtype.UUID `json:"user_id"`
 	ChannelIdentityID pgtype.UUID `json:"channel_identity_id"`
 }
 
 func (q *Queries) UpsertUserChannelIdentityBinding(ctx context.Context, arg UpsertUserChannelIdentityBindingParams) (UserChannelIdentityBinding, error) {
-	row := q.db.QueryRow(ctx, upsertUserChannelIdentityBinding, arg.UserID, arg.ChannelIdentityID)
+	row := q.db.QueryRow(ctx, upsertUserChannelIdentityBinding, arg.TeamID, arg.UserID, arg.ChannelIdentityID)
 	var i UserChannelIdentityBinding
 	err := row.Scan(
 		&i.ID,
@@ -368,6 +419,7 @@ func (q *Queries) UpsertUserChannelIdentityBinding(ctx context.Context, arg Upse
 		&i.ChannelIdentityID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

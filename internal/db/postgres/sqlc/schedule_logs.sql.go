@@ -13,33 +13,36 @@ import (
 
 const completeScheduleLog = `-- name: CompleteScheduleLog :one
 UPDATE schedule_logs
-SET status = $2,
-    result_text = $3,
-    error_message = $4,
-    usage = $5,
-    model_id = $6,
+SET status = $1,
+    result_text = $2,
+    error_message = $3,
+    usage = $4,
+    model_id = $5,
     completed_at = now()
-WHERE id = $1
-RETURNING id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at
+WHERE id = $6::uuid
+  AND team_id = $7::uuid
+RETURNING id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at, team_id
 `
 
 type CompleteScheduleLogParams struct {
-	ID           pgtype.UUID `json:"id"`
 	Status       string      `json:"status"`
 	ResultText   string      `json:"result_text"`
 	ErrorMessage string      `json:"error_message"`
 	Usage        []byte      `json:"usage"`
 	ModelID      pgtype.UUID `json:"model_id"`
+	ID           pgtype.UUID `json:"id"`
+	TeamID       pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) CompleteScheduleLog(ctx context.Context, arg CompleteScheduleLogParams) (ScheduleLog, error) {
 	row := q.db.QueryRow(ctx, completeScheduleLog,
-		arg.ID,
 		arg.Status,
 		arg.ResultText,
 		arg.ErrorMessage,
 		arg.Usage,
 		arg.ModelID,
+		arg.ID,
+		arg.TeamID,
 	)
 	var i ScheduleLog
 	err := row.Scan(
@@ -54,39 +57,55 @@ func (q *Queries) CompleteScheduleLog(ctx context.Context, arg CompleteScheduleL
 		&i.ModelID,
 		&i.StartedAt,
 		&i.CompletedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const countScheduleLogsByBot = `-- name: CountScheduleLogsByBot :one
-SELECT count(*) FROM schedule_logs WHERE bot_id = $1
+SELECT count(*) FROM schedule_logs
+WHERE team_id = $1::uuid
+  AND bot_id = $2::uuid
 `
 
-func (q *Queries) CountScheduleLogsByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countScheduleLogsByBot, botID)
+type CountScheduleLogsByBotParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+}
+
+func (q *Queries) CountScheduleLogsByBot(ctx context.Context, arg CountScheduleLogsByBotParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countScheduleLogsByBot, arg.TeamID, arg.BotID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
 const countScheduleLogsBySchedule = `-- name: CountScheduleLogsBySchedule :one
-SELECT count(*) FROM schedule_logs WHERE schedule_id = $1
+SELECT count(*) FROM schedule_logs
+WHERE team_id = $1::uuid
+  AND schedule_id = $2::uuid
 `
 
-func (q *Queries) CountScheduleLogsBySchedule(ctx context.Context, scheduleID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countScheduleLogsBySchedule, scheduleID)
+type CountScheduleLogsByScheduleParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
+	ScheduleID pgtype.UUID `json:"schedule_id"`
+}
+
+func (q *Queries) CountScheduleLogsBySchedule(ctx context.Context, arg CountScheduleLogsByScheduleParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countScheduleLogsBySchedule, arg.TeamID, arg.ScheduleID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
 const createScheduleLog = `-- name: CreateScheduleLog :one
-INSERT INTO schedule_logs (schedule_id, bot_id, session_id, started_at)
-VALUES ($1, $2, $3::uuid, now())
-RETURNING id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
+INSERT INTO schedule_logs (team_id, schedule_id, bot_id, session_id, started_at)
+VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, now())
+RETURNING id, team_id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 `
 
 type CreateScheduleLogParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
 	ScheduleID pgtype.UUID `json:"schedule_id"`
 	BotID      pgtype.UUID `json:"bot_id"`
 	SessionID  pgtype.UUID `json:"session_id"`
@@ -94,6 +113,7 @@ type CreateScheduleLogParams struct {
 
 type CreateScheduleLogRow struct {
 	ID           pgtype.UUID        `json:"id"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 	ScheduleID   pgtype.UUID        `json:"schedule_id"`
 	BotID        pgtype.UUID        `json:"bot_id"`
 	SessionID    pgtype.UUID        `json:"session_id"`
@@ -106,10 +126,16 @@ type CreateScheduleLogRow struct {
 }
 
 func (q *Queries) CreateScheduleLog(ctx context.Context, arg CreateScheduleLogParams) (CreateScheduleLogRow, error) {
-	row := q.db.QueryRow(ctx, createScheduleLog, arg.ScheduleID, arg.BotID, arg.SessionID)
+	row := q.db.QueryRow(ctx, createScheduleLog,
+		arg.TeamID,
+		arg.ScheduleID,
+		arg.BotID,
+		arg.SessionID,
+	)
 	var i CreateScheduleLogRow
 	err := row.Scan(
 		&i.ID,
+		&i.TeamID,
 		&i.ScheduleID,
 		&i.BotID,
 		&i.SessionID,
@@ -124,39 +150,56 @@ func (q *Queries) CreateScheduleLog(ctx context.Context, arg CreateScheduleLogPa
 }
 
 const deleteScheduleLogsByBot = `-- name: DeleteScheduleLogsByBot :exec
-DELETE FROM schedule_logs WHERE bot_id = $1
+DELETE FROM schedule_logs
+WHERE team_id = $1::uuid
+  AND bot_id = $2::uuid
 `
 
-func (q *Queries) DeleteScheduleLogsByBot(ctx context.Context, botID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteScheduleLogsByBot, botID)
+type DeleteScheduleLogsByBotParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	BotID  pgtype.UUID `json:"bot_id"`
+}
+
+func (q *Queries) DeleteScheduleLogsByBot(ctx context.Context, arg DeleteScheduleLogsByBotParams) error {
+	_, err := q.db.Exec(ctx, deleteScheduleLogsByBot, arg.TeamID, arg.BotID)
 	return err
 }
 
 const deleteScheduleLogsBySchedule = `-- name: DeleteScheduleLogsBySchedule :exec
-DELETE FROM schedule_logs WHERE schedule_id = $1
+DELETE FROM schedule_logs
+WHERE team_id = $1::uuid
+  AND schedule_id = $2::uuid
 `
 
-func (q *Queries) DeleteScheduleLogsBySchedule(ctx context.Context, scheduleID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteScheduleLogsBySchedule, scheduleID)
+type DeleteScheduleLogsByScheduleParams struct {
+	TeamID     pgtype.UUID `json:"team_id"`
+	ScheduleID pgtype.UUID `json:"schedule_id"`
+}
+
+func (q *Queries) DeleteScheduleLogsBySchedule(ctx context.Context, arg DeleteScheduleLogsByScheduleParams) error {
+	_, err := q.db.Exec(ctx, deleteScheduleLogsBySchedule, arg.TeamID, arg.ScheduleID)
 	return err
 }
 
 const listScheduleLogsByBot = `-- name: ListScheduleLogsByBot :many
-SELECT id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
+SELECT id, team_id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM schedule_logs
-WHERE bot_id = $1
+WHERE team_id = $1::uuid
+  AND bot_id = $2::uuid
 ORDER BY started_at DESC
-LIMIT $2 OFFSET $3
+LIMIT $4 OFFSET $3
 `
 
 type ListScheduleLogsByBotParams struct {
-	BotID  pgtype.UUID `json:"bot_id"`
-	Limit  int32       `json:"limit"`
-	Offset int32       `json:"offset"`
+	TeamID      pgtype.UUID `json:"team_id"`
+	BotID       pgtype.UUID `json:"bot_id"`
+	OffsetCount int32       `json:"offset_count"`
+	LimitCount  int32       `json:"limit_count"`
 }
 
 type ListScheduleLogsByBotRow struct {
 	ID           pgtype.UUID        `json:"id"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 	ScheduleID   pgtype.UUID        `json:"schedule_id"`
 	BotID        pgtype.UUID        `json:"bot_id"`
 	SessionID    pgtype.UUID        `json:"session_id"`
@@ -169,7 +212,12 @@ type ListScheduleLogsByBotRow struct {
 }
 
 func (q *Queries) ListScheduleLogsByBot(ctx context.Context, arg ListScheduleLogsByBotParams) ([]ListScheduleLogsByBotRow, error) {
-	rows, err := q.db.Query(ctx, listScheduleLogsByBot, arg.BotID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listScheduleLogsByBot,
+		arg.TeamID,
+		arg.BotID,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -179,6 +227,7 @@ func (q *Queries) ListScheduleLogsByBot(ctx context.Context, arg ListScheduleLog
 		var i ListScheduleLogsByBotRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.TeamID,
 			&i.ScheduleID,
 			&i.BotID,
 			&i.SessionID,
@@ -200,21 +249,24 @@ func (q *Queries) ListScheduleLogsByBot(ctx context.Context, arg ListScheduleLog
 }
 
 const listScheduleLogsBySchedule = `-- name: ListScheduleLogsBySchedule :many
-SELECT id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
+SELECT id, team_id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM schedule_logs
-WHERE schedule_id = $1
+WHERE team_id = $1::uuid
+  AND schedule_id = $2::uuid
 ORDER BY started_at DESC
-LIMIT $2 OFFSET $3
+LIMIT $4 OFFSET $3
 `
 
 type ListScheduleLogsByScheduleParams struct {
-	ScheduleID pgtype.UUID `json:"schedule_id"`
-	Limit      int32       `json:"limit"`
-	Offset     int32       `json:"offset"`
+	TeamID      pgtype.UUID `json:"team_id"`
+	ScheduleID  pgtype.UUID `json:"schedule_id"`
+	OffsetCount int32       `json:"offset_count"`
+	LimitCount  int32       `json:"limit_count"`
 }
 
 type ListScheduleLogsByScheduleRow struct {
 	ID           pgtype.UUID        `json:"id"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 	ScheduleID   pgtype.UUID        `json:"schedule_id"`
 	BotID        pgtype.UUID        `json:"bot_id"`
 	SessionID    pgtype.UUID        `json:"session_id"`
@@ -227,7 +279,12 @@ type ListScheduleLogsByScheduleRow struct {
 }
 
 func (q *Queries) ListScheduleLogsBySchedule(ctx context.Context, arg ListScheduleLogsByScheduleParams) ([]ListScheduleLogsByScheduleRow, error) {
-	rows, err := q.db.Query(ctx, listScheduleLogsBySchedule, arg.ScheduleID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listScheduleLogsBySchedule,
+		arg.TeamID,
+		arg.ScheduleID,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -237,6 +294,7 @@ func (q *Queries) ListScheduleLogsBySchedule(ctx context.Context, arg ListSchedu
 		var i ListScheduleLogsByScheduleRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.TeamID,
 			&i.ScheduleID,
 			&i.BotID,
 			&i.SessionID,

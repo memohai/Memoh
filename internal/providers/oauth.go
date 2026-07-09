@@ -571,7 +571,7 @@ func (s *Service) HandleOAuthCallback(ctx context.Context, state, code string) (
 	if err != nil {
 		return "", err
 	}
-	provider, err := s.queries.GetProviderByID(ctx, providerUUID)
+	provider, err := getProviderByIDForScope(ctx, s.queries, providerUUID)
 	if err != nil {
 		return "", fmt.Errorf("get provider: %w", err)
 	}
@@ -629,7 +629,7 @@ func (s *Service) handleUserScopedOAuthCallback(ctx context.Context, token *oaut
 	if err != nil {
 		return "", err
 	}
-	provider, err := s.queries.GetProviderByID(ctx, providerUUID)
+	provider, err := getProviderByIDForScope(ctx, s.queries, providerUUID)
 	if err != nil {
 		return "", fmt.Errorf("get provider: %w", err)
 	}
@@ -830,7 +830,7 @@ func (s *Service) RevokeOAuthToken(ctx context.Context, providerID string) error
 		}
 		return s.deleteUserOAuthToken(ctx, providerID, userID)
 	}
-	return s.queries.DeleteProviderOAuthToken(ctx, provider.ID)
+	return deleteProviderOAuthTokenForScope(ctx, s.queries, provider.ID)
 }
 
 func (s *Service) GetValidAccessToken(ctx context.Context, providerID string) (string, error) {
@@ -929,7 +929,7 @@ func (s *Service) loadOAuthProvider(ctx context.Context, providerID string) (sql
 	if err != nil {
 		return sqlc.Provider{}, err
 	}
-	provider, err := s.queries.GetProviderByID(ctx, providerUUID)
+	provider, err := getProviderByIDForScope(ctx, s.queries, providerUUID)
 	if err != nil {
 		return sqlc.Provider{}, fmt.Errorf("get provider: %w", err)
 	}
@@ -944,7 +944,7 @@ func (s *Service) getOAuthToken(ctx context.Context, providerID string) (*oauthT
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.queries.GetProviderOAuthTokenByProvider(ctx, providerUUID)
+	row, err := getProviderOAuthTokenByProviderForScope(ctx, s.queries, providerUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -952,7 +952,7 @@ func (s *Service) getOAuthToken(ctx context.Context, providerID string) (*oauthT
 }
 
 func (s *Service) getOAuthTokenByState(ctx context.Context, state string) (*oauthTokenRecord, error) {
-	row, err := s.queries.GetProviderOAuthTokenByState(ctx, state)
+	row, err := getProviderOAuthTokenByStateForScope(ctx, s.queries, state)
 	if err != nil {
 		return nil, err
 	}
@@ -964,11 +964,13 @@ func (s *Service) updateOAuthState(ctx context.Context, providerID, state, codeV
 	if err != nil {
 		return err
 	}
-	return s.queries.UpdateProviderOAuthState(ctx, sqlc.UpdateProviderOAuthStateParams{
+	params := sqlc.UpdateProviderOAuthStateParams{
 		ProviderID:       providerUUID,
 		State:            state,
 		PkceCodeVerifier: codeVerifier,
-	})
+	}
+	setProviderTeamID(ctx, &params)
+	return s.queries.UpdateProviderOAuthState(ctx, params)
 }
 
 func (s *Service) saveOAuthToken(ctx context.Context, providerID string, token oauthTokenRecord) error {
@@ -980,7 +982,7 @@ func (s *Service) saveOAuthToken(ctx context.Context, providerID string, token o
 	if !token.ExpiresAt.IsZero() {
 		expiresAt = pgtype.Timestamptz{Time: token.ExpiresAt, Valid: true}
 	}
-	_, err = s.queries.UpsertProviderOAuthToken(ctx, sqlc.UpsertProviderOAuthTokenParams{
+	params := sqlc.UpsertProviderOAuthTokenParams{
 		ProviderID:       providerUUID,
 		AccessToken:      token.AccessToken,
 		RefreshToken:     token.RefreshToken,
@@ -989,7 +991,9 @@ func (s *Service) saveOAuthToken(ctx context.Context, providerID string, token o
 		TokenType:        token.TokenType,
 		State:            token.State,
 		PkceCodeVerifier: token.PKCECodeVerifier,
-	})
+	}
+	setProviderTeamID(ctx, &params)
+	_, err = s.queries.UpsertProviderOAuthToken(ctx, params)
 	return err
 }
 
@@ -1002,7 +1006,7 @@ func (s *Service) getUserOAuthToken(ctx context.Context, providerID, userID stri
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.queries.GetUserProviderOAuthToken(ctx, sqlc.GetUserProviderOAuthTokenParams{
+	row, err := getUserProviderOAuthTokenForScope(ctx, s.queries, sqlc.GetUserProviderOAuthTokenParams{
 		ProviderID: providerUUID,
 		UserID:     userUUID,
 	})
@@ -1013,7 +1017,7 @@ func (s *Service) getUserOAuthToken(ctx context.Context, providerID, userID stri
 }
 
 func (s *Service) getUserOAuthTokenByState(ctx context.Context, state string) (*oauthTokenRecord, error) {
-	row, err := s.queries.GetUserProviderOAuthTokenByState(ctx, state)
+	row, err := getUserProviderOAuthTokenByStateForScope(ctx, s.queries, state)
 	if err != nil {
 		return nil, err
 	}
@@ -1029,13 +1033,15 @@ func (s *Service) updateUserOAuthState(ctx context.Context, providerID, userID, 
 	if err != nil {
 		return err
 	}
-	return s.queries.UpdateUserProviderOAuthState(ctx, sqlc.UpdateUserProviderOAuthStateParams{
+	params := sqlc.UpdateUserProviderOAuthStateParams{
 		ProviderID:       providerUUID,
 		UserID:           userUUID,
 		State:            state,
 		PkceCodeVerifier: codeVerifier,
 		Metadata:         metadataJSON(metadata),
-	})
+	}
+	setProviderTeamID(ctx, &params)
+	return s.queries.UpdateUserProviderOAuthState(ctx, params)
 }
 
 func (s *Service) saveUserOAuthToken(ctx context.Context, providerID, userID string, token oauthTokenRecord) error {
@@ -1051,7 +1057,7 @@ func (s *Service) saveUserOAuthToken(ctx context.Context, providerID, userID str
 	if !token.ExpiresAt.IsZero() {
 		expiresAt = pgtype.Timestamptz{Time: token.ExpiresAt, Valid: true}
 	}
-	_, err = s.queries.UpsertUserProviderOAuthToken(ctx, sqlc.UpsertUserProviderOAuthTokenParams{
+	params := sqlc.UpsertUserProviderOAuthTokenParams{
 		ProviderID:       providerUUID,
 		UserID:           userUUID,
 		AccessToken:      token.AccessToken,
@@ -1062,7 +1068,9 @@ func (s *Service) saveUserOAuthToken(ctx context.Context, providerID, userID str
 		State:            token.State,
 		PkceCodeVerifier: token.PKCECodeVerifier,
 		Metadata:         metadataJSON(token.Metadata),
-	})
+	}
+	setProviderTeamID(ctx, &params)
+	_, err = s.queries.UpsertUserProviderOAuthToken(ctx, params)
 	return err
 }
 
@@ -1075,7 +1083,7 @@ func (s *Service) deleteUserOAuthToken(ctx context.Context, providerID, userID s
 	if err != nil {
 		return err
 	}
-	return s.queries.DeleteUserProviderOAuthToken(ctx, sqlc.DeleteUserProviderOAuthTokenParams{
+	return deleteUserProviderOAuthTokenForScope(ctx, s.queries, sqlc.DeleteUserProviderOAuthTokenParams{
 		ProviderID: providerUUID,
 		UserID:     userUUID,
 	})

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
@@ -41,6 +42,19 @@ func decodeBotMetadata(payload []byte) (map[string]any, error) {
 		data = map[string]any{}
 	}
 	return data, nil
+}
+
+func (m *Manager) getBotWorkspaceMetadataRow(ctx context.Context, botID string) (dbsqlc.GetBotByIDRow, pgtype.UUID, pgtype.UUID, error) {
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return dbsqlc.GetBotByIDRow{}, pgtype.UUID{}, pgtype.UUID{}, err
+	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return dbsqlc.GetBotByIDRow{}, pgtype.UUID{}, pgtype.UUID{}, err
+	}
+	row, err := m.queries.GetBotByID(ctx, botUUID)
+	return row, botUUID, teamID, err
 }
 
 func cloneAnyMap(src map[string]any) map[string]any {
@@ -252,11 +266,7 @@ func (m *Manager) botWorkspaceImagePreference(ctx context.Context, botID string)
 	if m.queries == nil {
 		return "", nil
 	}
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return "", err
-	}
-	row, err := m.queries.GetBotByID(ctx, botUUID)
+	row, _, _, err := m.getBotWorkspaceMetadataRow(ctx, botID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", nil
@@ -274,11 +284,7 @@ func (m *Manager) botWorkspaceStartPreference(ctx context.Context, botID string)
 	if m.queries == nil {
 		return WorkspaceStartConfig{Backend: bridge.WorkspaceBackendContainer}, nil
 	}
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return WorkspaceStartConfig{}, err
-	}
-	row, err := m.queries.GetBotByID(ctx, botUUID)
+	row, _, _, err := m.getBotWorkspaceMetadataRow(ctx, botID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return WorkspaceStartConfig{Backend: bridge.WorkspaceBackendContainer}, nil
@@ -299,11 +305,7 @@ func (m *Manager) updateBotWorkspaceImagePreference(ctx context.Context, botID, 
 	if m.queries == nil {
 		return nil
 	}
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return err
-	}
-	row, err := m.queries.GetBotByID(ctx, botUUID)
+	row, botUUID, teamID, err := m.getBotWorkspaceMetadataRow(ctx, botID)
 	if err != nil {
 		return err
 	}
@@ -321,6 +323,7 @@ func (m *Manager) updateBotWorkspaceImagePreference(ctx context.Context, botID, 
 		return err
 	}
 	_, err = m.queries.UpdateBotProfile(ctx, dbsqlc.UpdateBotProfileParams{
+		TeamID:      teamID,
 		ID:          botUUID,
 		Name:        row.Name,
 		DisplayName: row.DisplayName,
@@ -336,11 +339,7 @@ func (m *Manager) rememberWorkspaceBackend(ctx context.Context, botID, backend, 
 	if m.queries == nil {
 		return nil
 	}
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return err
-	}
-	row, err := m.queries.GetBotByID(ctx, botUUID)
+	row, botUUID, teamID, err := m.getBotWorkspaceMetadataRow(ctx, botID)
 	if err != nil {
 		return err
 	}
@@ -354,6 +353,7 @@ func (m *Manager) rememberWorkspaceBackend(ctx context.Context, botID, backend, 
 		return err
 	}
 	_, err = m.queries.UpdateBotProfile(ctx, dbsqlc.UpdateBotProfileParams{
+		TeamID:      teamID,
 		ID:          botUUID,
 		Name:        row.Name,
 		DisplayName: row.DisplayName,
@@ -377,11 +377,7 @@ func (m *Manager) botWorkspaceGPUPreference(ctx context.Context, botID string) (
 	if m.queries == nil {
 		return WorkspaceGPUConfig{}, false, nil
 	}
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return WorkspaceGPUConfig{}, false, err
-	}
-	row, err := m.queries.GetBotByID(ctx, botUUID)
+	row, _, _, err := m.getBotWorkspaceMetadataRow(ctx, botID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return WorkspaceGPUConfig{}, false, nil
@@ -400,11 +396,7 @@ func (m *Manager) botWorkspaceSkillDiscoveryRootsPreference(ctx context.Context,
 	if m.queries == nil {
 		return nil, false, nil
 	}
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return nil, false, err
-	}
-	row, err := m.queries.GetBotByID(ctx, botUUID)
+	row, _, _, err := m.getBotWorkspaceMetadataRow(ctx, botID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, false, nil
@@ -423,11 +415,7 @@ func (m *Manager) updateBotWorkspaceGPUPreference(ctx context.Context, botID str
 	if m.queries == nil {
 		return nil
 	}
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return err
-	}
-	row, err := m.queries.GetBotByID(ctx, botUUID)
+	row, botUUID, teamID, err := m.getBotWorkspaceMetadataRow(ctx, botID)
 	if err != nil {
 		return err
 	}
@@ -445,6 +433,7 @@ func (m *Manager) updateBotWorkspaceGPUPreference(ctx context.Context, botID str
 		return err
 	}
 	_, err = m.queries.UpdateBotProfile(ctx, dbsqlc.UpdateBotProfileParams{
+		TeamID:      teamID,
 		ID:          botUUID,
 		Name:        row.Name,
 		DisplayName: row.DisplayName,

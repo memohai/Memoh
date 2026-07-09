@@ -12,25 +12,28 @@ import (
 )
 
 const createFetchProvider = `-- name: CreateFetchProvider :one
-INSERT INTO fetch_providers (name, provider, config, enable)
+INSERT INTO fetch_providers (team_id, name, provider, config, enable)
 VALUES (
-  $1,
+  COALESCE($1::uuid, '00000000-0000-0000-0000-000000000001'::uuid),
   $2,
   $3,
-  $4
+  $4,
+  $5
 )
-RETURNING id, name, provider, config, enable, created_at, updated_at
+RETURNING id, name, provider, config, enable, created_at, updated_at, team_id
 `
 
 type CreateFetchProviderParams struct {
-	Name     string `json:"name"`
-	Provider string `json:"provider"`
-	Config   []byte `json:"config"`
-	Enable   bool   `json:"enable"`
+	TeamID   pgtype.UUID `json:"team_id"`
+	Name     string      `json:"name"`
+	Provider string      `json:"provider"`
+	Config   []byte      `json:"config"`
+	Enable   bool        `json:"enable"`
 }
 
 func (q *Queries) CreateFetchProvider(ctx context.Context, arg CreateFetchProviderParams) (FetchProvider, error) {
 	row := q.db.QueryRow(ctx, createFetchProvider,
+		arg.TeamID,
 		arg.Name,
 		arg.Provider,
 		arg.Config,
@@ -45,6 +48,7 @@ func (q *Queries) CreateFetchProvider(ctx context.Context, arg CreateFetchProvid
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -58,8 +62,24 @@ func (q *Queries) DeleteFetchProvider(ctx context.Context, id pgtype.UUID) error
 	return err
 }
 
+const deleteFetchProviderForTeam = `-- name: DeleteFetchProviderForTeam :exec
+DELETE FROM fetch_providers
+WHERE id = $1
+  AND team_id = $2
+`
+
+type DeleteFetchProviderForTeamParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteFetchProviderForTeam(ctx context.Context, arg DeleteFetchProviderForTeamParams) error {
+	_, err := q.db.Exec(ctx, deleteFetchProviderForTeam, arg.ID, arg.TeamID)
+	return err
+}
+
 const getFetchProviderByID = `-- name: GetFetchProviderByID :one
-SELECT id, name, provider, config, enable, created_at, updated_at FROM fetch_providers WHERE id = $1
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM fetch_providers WHERE id = $1
 `
 
 func (q *Queries) GetFetchProviderByID(ctx context.Context, id pgtype.UUID) (FetchProvider, error) {
@@ -73,12 +93,40 @@ func (q *Queries) GetFetchProviderByID(ctx context.Context, id pgtype.UUID) (Fet
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
+const getFetchProviderByIDForTeam = `-- name: GetFetchProviderByIDForTeam :one
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM fetch_providers
+WHERE id = $1
+  AND team_id = $2
+`
+
+type GetFetchProviderByIDForTeamParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetFetchProviderByIDForTeam(ctx context.Context, arg GetFetchProviderByIDForTeamParams) (FetchProvider, error) {
+	row := q.db.QueryRow(ctx, getFetchProviderByIDForTeam, arg.ID, arg.TeamID)
+	var i FetchProvider
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Provider,
+		&i.Config,
+		&i.Enable,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getFetchProviderByName = `-- name: GetFetchProviderByName :one
-SELECT id, name, provider, config, enable, created_at, updated_at FROM fetch_providers WHERE name = $1
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM fetch_providers WHERE name = $1
 `
 
 func (q *Queries) GetFetchProviderByName(ctx context.Context, name string) (FetchProvider, error) {
@@ -92,12 +140,40 @@ func (q *Queries) GetFetchProviderByName(ctx context.Context, name string) (Fetc
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
+const getFetchProviderByNameForTeam = `-- name: GetFetchProviderByNameForTeam :one
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM fetch_providers
+WHERE team_id = $1
+  AND name = $2
+`
+
+type GetFetchProviderByNameForTeamParams struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	Name   string      `json:"name"`
+}
+
+func (q *Queries) GetFetchProviderByNameForTeam(ctx context.Context, arg GetFetchProviderByNameForTeamParams) (FetchProvider, error) {
+	row := q.db.QueryRow(ctx, getFetchProviderByNameForTeam, arg.TeamID, arg.Name)
+	var i FetchProvider
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Provider,
+		&i.Config,
+		&i.Enable,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listFetchProviders = `-- name: ListFetchProviders :many
-SELECT id, name, provider, config, enable, created_at, updated_at FROM fetch_providers
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM fetch_providers
 ORDER BY created_at DESC
 `
 
@@ -118,6 +194,7 @@ func (q *Queries) ListFetchProviders(ctx context.Context) ([]FetchProvider, erro
 			&i.Enable,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -130,7 +207,7 @@ func (q *Queries) ListFetchProviders(ctx context.Context) ([]FetchProvider, erro
 }
 
 const listFetchProvidersByProvider = `-- name: ListFetchProvidersByProvider :many
-SELECT id, name, provider, config, enable, created_at, updated_at FROM fetch_providers
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM fetch_providers
 WHERE provider = $1
 ORDER BY created_at DESC
 `
@@ -152,6 +229,83 @@ func (q *Queries) ListFetchProvidersByProvider(ctx context.Context, provider str
 			&i.Enable,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFetchProvidersByProviderForTeam = `-- name: ListFetchProvidersByProviderForTeam :many
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM fetch_providers
+WHERE team_id = $1
+  AND provider = $2
+ORDER BY created_at DESC
+`
+
+type ListFetchProvidersByProviderForTeamParams struct {
+	TeamID   pgtype.UUID `json:"team_id"`
+	Provider string      `json:"provider"`
+}
+
+func (q *Queries) ListFetchProvidersByProviderForTeam(ctx context.Context, arg ListFetchProvidersByProviderForTeamParams) ([]FetchProvider, error) {
+	rows, err := q.db.Query(ctx, listFetchProvidersByProviderForTeam, arg.TeamID, arg.Provider)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FetchProvider
+	for rows.Next() {
+		var i FetchProvider
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Provider,
+			&i.Config,
+			&i.Enable,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFetchProvidersForTeam = `-- name: ListFetchProvidersForTeam :many
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM fetch_providers
+WHERE team_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListFetchProvidersForTeam(ctx context.Context, teamID pgtype.UUID) ([]FetchProvider, error) {
+	rows, err := q.db.Query(ctx, listFetchProvidersForTeam, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FetchProvider
+	for rows.Next() {
+		var i FetchProvider
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Provider,
+			&i.Config,
+			&i.Enable,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -172,7 +326,8 @@ SET
   enable = $4,
   updated_at = now()
 WHERE id = $5
-RETURNING id, name, provider, config, enable, created_at, updated_at
+  AND team_id = COALESCE($6::uuid, '00000000-0000-0000-0000-000000000001'::uuid)
+RETURNING id, name, provider, config, enable, created_at, updated_at, team_id
 `
 
 type UpdateFetchProviderParams struct {
@@ -181,6 +336,7 @@ type UpdateFetchProviderParams struct {
 	Config   []byte      `json:"config"`
 	Enable   bool        `json:"enable"`
 	ID       pgtype.UUID `json:"id"`
+	TeamID   pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateFetchProvider(ctx context.Context, arg UpdateFetchProviderParams) (FetchProvider, error) {
@@ -190,6 +346,7 @@ func (q *Queries) UpdateFetchProvider(ctx context.Context, arg UpdateFetchProvid
 		arg.Config,
 		arg.Enable,
 		arg.ID,
+		arg.TeamID,
 	)
 	var i FetchProvider
 	err := row.Scan(
@@ -200,6 +357,7 @@ func (q *Queries) UpdateFetchProvider(ctx context.Context, arg UpdateFetchProvid
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

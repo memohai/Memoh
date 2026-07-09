@@ -1,28 +1,34 @@
 -- name: CreateHeartbeatLog :one
-INSERT INTO bot_heartbeat_logs (bot_id, session_id, started_at)
-VALUES ($1, sqlc.narg(session_id)::uuid, now())
-RETURNING id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at;
+INSERT INTO bot_heartbeat_logs (team_id, bot_id, session_id, started_at)
+VALUES (sqlc.arg(team_id)::uuid, sqlc.arg(bot_id)::uuid, sqlc.narg(session_id)::uuid, now())
+RETURNING id, team_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at;
 
 -- name: CompleteHeartbeatLog :one
 UPDATE bot_heartbeat_logs
-SET status = $2,
-    result_text = $3,
-    error_message = $4,
-    usage = $5,
-    model_id = $6,
+SET status = sqlc.arg(status),
+    result_text = sqlc.arg(result_text),
+    error_message = sqlc.arg(error_message),
+    usage = sqlc.arg(usage),
+    model_id = sqlc.arg(model_id),
     completed_at = now()
-WHERE id = $1
-RETURNING id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at;
+WHERE id = sqlc.arg(id)::uuid
+  AND team_id = sqlc.arg(team_id)::uuid
+RETURNING *;
 
 -- name: ListHeartbeatLogsByBot :many
-SELECT id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
+SELECT id, team_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM bot_heartbeat_logs
-WHERE bot_id = $1
+WHERE team_id = sqlc.arg(team_id)::uuid
+  AND bot_id = sqlc.arg(bot_id)::uuid
 ORDER BY started_at DESC
-LIMIT $2 OFFSET $3;
+LIMIT sqlc.arg(limit_count) OFFSET sqlc.arg(offset_count);
 
 -- name: CountHeartbeatLogsByBot :one
-SELECT count(*) FROM bot_heartbeat_logs WHERE bot_id = $1;
+SELECT count(*) FROM bot_heartbeat_logs
+WHERE team_id = sqlc.arg(team_id)::uuid
+  AND bot_id = sqlc.arg(bot_id)::uuid;
 
 -- name: DeleteHeartbeatLogsByBot :exec
-DELETE FROM bot_heartbeat_logs WHERE bot_id = $1;
+DELETE FROM bot_heartbeat_logs
+WHERE team_id = sqlc.arg(team_id)::uuid
+  AND bot_id = sqlc.arg(bot_id)::uuid;

@@ -22,21 +22,42 @@ func (q *Queries) CountMemoryProvidersByDefault(ctx context.Context) (int64, err
 	return count, err
 }
 
+const countMemoryProvidersByDefaultForTeam = `-- name: CountMemoryProvidersByDefaultForTeam :one
+SELECT COUNT(*) FROM memory_providers
+WHERE team_id = $1
+  AND is_default = true
+`
+
+func (q *Queries) CountMemoryProvidersByDefaultForTeam(ctx context.Context, teamID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMemoryProvidersByDefaultForTeam, teamID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createMemoryProvider = `-- name: CreateMemoryProvider :one
-INSERT INTO memory_providers (name, provider, config, is_default)
-VALUES ($1, $2, $3, $4)
-RETURNING id, name, provider, config, is_default, created_at, updated_at
+INSERT INTO memory_providers (team_id, name, provider, config, is_default)
+VALUES (
+  COALESCE($1::uuid, '00000000-0000-0000-0000-000000000001'::uuid),
+  $2,
+  $3,
+  $4,
+  $5
+)
+RETURNING id, name, provider, config, is_default, created_at, updated_at, team_id
 `
 
 type CreateMemoryProviderParams struct {
-	Name      string `json:"name"`
-	Provider  string `json:"provider"`
-	Config    []byte `json:"config"`
-	IsDefault bool   `json:"is_default"`
+	TeamID    pgtype.UUID `json:"team_id"`
+	Name      string      `json:"name"`
+	Provider  string      `json:"provider"`
+	Config    []byte      `json:"config"`
+	IsDefault bool        `json:"is_default"`
 }
 
 func (q *Queries) CreateMemoryProvider(ctx context.Context, arg CreateMemoryProviderParams) (MemoryProvider, error) {
 	row := q.db.QueryRow(ctx, createMemoryProvider,
+		arg.TeamID,
 		arg.Name,
 		arg.Provider,
 		arg.Config,
@@ -51,6 +72,7 @@ func (q *Queries) CreateMemoryProvider(ctx context.Context, arg CreateMemoryProv
 		&i.IsDefault,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -64,8 +86,24 @@ func (q *Queries) DeleteMemoryProvider(ctx context.Context, id pgtype.UUID) erro
 	return err
 }
 
+const deleteMemoryProviderForTeam = `-- name: DeleteMemoryProviderForTeam :exec
+DELETE FROM memory_providers
+WHERE id = $1
+  AND team_id = $2
+`
+
+type DeleteMemoryProviderForTeamParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteMemoryProviderForTeam(ctx context.Context, arg DeleteMemoryProviderForTeamParams) error {
+	_, err := q.db.Exec(ctx, deleteMemoryProviderForTeam, arg.ID, arg.TeamID)
+	return err
+}
+
 const getDefaultMemoryProvider = `-- name: GetDefaultMemoryProvider :one
-SELECT id, name, provider, config, is_default, created_at, updated_at FROM memory_providers WHERE is_default = true LIMIT 1
+SELECT id, name, provider, config, is_default, created_at, updated_at, team_id FROM memory_providers WHERE is_default = true LIMIT 1
 `
 
 func (q *Queries) GetDefaultMemoryProvider(ctx context.Context) (MemoryProvider, error) {
@@ -79,12 +117,36 @@ func (q *Queries) GetDefaultMemoryProvider(ctx context.Context) (MemoryProvider,
 		&i.IsDefault,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
+const getDefaultMemoryProviderForTeam = `-- name: GetDefaultMemoryProviderForTeam :one
+SELECT id, name, provider, config, is_default, created_at, updated_at, team_id FROM memory_providers
+WHERE team_id = $1
+  AND is_default = true
+LIMIT 1
+`
+
+func (q *Queries) GetDefaultMemoryProviderForTeam(ctx context.Context, teamID pgtype.UUID) (MemoryProvider, error) {
+	row := q.db.QueryRow(ctx, getDefaultMemoryProviderForTeam, teamID)
+	var i MemoryProvider
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Provider,
+		&i.Config,
+		&i.IsDefault,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getMemoryProviderByID = `-- name: GetMemoryProviderByID :one
-SELECT id, name, provider, config, is_default, created_at, updated_at FROM memory_providers WHERE id = $1
+SELECT id, name, provider, config, is_default, created_at, updated_at, team_id FROM memory_providers WHERE id = $1
 `
 
 func (q *Queries) GetMemoryProviderByID(ctx context.Context, id pgtype.UUID) (MemoryProvider, error) {
@@ -98,12 +160,40 @@ func (q *Queries) GetMemoryProviderByID(ctx context.Context, id pgtype.UUID) (Me
 		&i.IsDefault,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
+const getMemoryProviderByIDForTeam = `-- name: GetMemoryProviderByIDForTeam :one
+SELECT id, name, provider, config, is_default, created_at, updated_at, team_id FROM memory_providers
+WHERE id = $1
+  AND team_id = $2
+`
+
+type GetMemoryProviderByIDForTeamParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) GetMemoryProviderByIDForTeam(ctx context.Context, arg GetMemoryProviderByIDForTeamParams) (MemoryProvider, error) {
+	row := q.db.QueryRow(ctx, getMemoryProviderByIDForTeam, arg.ID, arg.TeamID)
+	var i MemoryProvider
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Provider,
+		&i.Config,
+		&i.IsDefault,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listMemoryProviders = `-- name: ListMemoryProviders :many
-SELECT id, name, provider, config, is_default, created_at, updated_at FROM memory_providers ORDER BY created_at ASC
+SELECT id, name, provider, config, is_default, created_at, updated_at, team_id FROM memory_providers ORDER BY created_at ASC
 `
 
 func (q *Queries) ListMemoryProviders(ctx context.Context) ([]MemoryProvider, error) {
@@ -123,6 +213,42 @@ func (q *Queries) ListMemoryProviders(ctx context.Context) ([]MemoryProvider, er
 			&i.IsDefault,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMemoryProvidersForTeam = `-- name: ListMemoryProvidersForTeam :many
+SELECT id, name, provider, config, is_default, created_at, updated_at, team_id FROM memory_providers
+WHERE team_id = $1
+ORDER BY created_at ASC
+`
+
+func (q *Queries) ListMemoryProvidersForTeam(ctx context.Context, teamID pgtype.UUID) ([]MemoryProvider, error) {
+	rows, err := q.db.Query(ctx, listMemoryProvidersForTeam, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MemoryProvider
+	for rows.Next() {
+		var i MemoryProvider
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Provider,
+			&i.Config,
+			&i.IsDefault,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -136,21 +262,28 @@ func (q *Queries) ListMemoryProviders(ctx context.Context) ([]MemoryProvider, er
 
 const updateMemoryProvider = `-- name: UpdateMemoryProvider :one
 UPDATE memory_providers
-SET name = $2,
-    config = $3,
+SET name = $1,
+    config = $2,
     updated_at = now()
-WHERE id = $1
-RETURNING id, name, provider, config, is_default, created_at, updated_at
+WHERE id = $3
+  AND team_id = COALESCE($4::uuid, '00000000-0000-0000-0000-000000000001'::uuid)
+RETURNING id, name, provider, config, is_default, created_at, updated_at, team_id
 `
 
 type UpdateMemoryProviderParams struct {
-	ID     pgtype.UUID `json:"id"`
 	Name   string      `json:"name"`
 	Config []byte      `json:"config"`
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateMemoryProvider(ctx context.Context, arg UpdateMemoryProviderParams) (MemoryProvider, error) {
-	row := q.db.QueryRow(ctx, updateMemoryProvider, arg.ID, arg.Name, arg.Config)
+	row := q.db.QueryRow(ctx, updateMemoryProvider,
+		arg.Name,
+		arg.Config,
+		arg.ID,
+		arg.TeamID,
+	)
 	var i MemoryProvider
 	err := row.Scan(
 		&i.ID,
@@ -160,6 +293,7 @@ func (q *Queries) UpdateMemoryProvider(ctx context.Context, arg UpdateMemoryProv
 		&i.IsDefault,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

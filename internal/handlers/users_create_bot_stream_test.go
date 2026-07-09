@@ -472,14 +472,14 @@ func (d *createBotStreamDB) QueryRow(_ context.Context, query string, args ...an
 	case strings.Contains(query, "FROM users") && strings.Contains(query, "WHERE id = $1"):
 		return &createBotStreamRow{scanFunc: func(_ ...any) error { return nil }}
 	case strings.Contains(query, "INSERT INTO bots"):
-		if len(args) > 6 {
-			if payload, ok := args[6].([]byte); ok {
+		if len(args) > 7 {
+			if payload, ok := args[7].([]byte); ok {
 				d.metadata = append([]byte(nil), payload...)
 			}
 		}
 		return d.botRow(bots.BotStatusCreating)
-	case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $7"):
-		payload, ok := args[6].([]byte)
+	case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $6"):
+		payload, ok := args[5].([]byte)
 		if !ok {
 			return &createBotStreamRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
 		}

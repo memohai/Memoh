@@ -28,6 +28,40 @@ CREATE TABLE IF NOT EXISTS users (
   CONSTRAINT users_username_unique UNIQUE (username)
 );
 
+-- teams: tenant boundary for Memoh data
+CREATE TABLE IF NOT EXISTS teams (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  slug TEXT NOT NULL,
+  name TEXT NOT NULL,
+  is_default BOOLEAN NOT NULL DEFAULT false,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT teams_slug_unique UNIQUE (slug)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_single_default ON teams(is_default) WHERE is_default;
+
+INSERT INTO teams (id, slug, name, is_default)
+VALUES ('00000000-0000-0000-0000-000000000001'::uuid, 'default', 'Default', true)
+ON CONFLICT (id) DO UPDATE
+SET slug = EXCLUDED.slug,
+    is_default = true,
+    updated_at = now();
+
+-- team_members: users participating in a team; users stay global principals
+CREATE TABLE IF NOT EXISTS team_members (
+  team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'member',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (team_id, user_id),
+  CONSTRAINT team_members_role_check CHECK (role IN ('owner', 'admin', 'member'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_team_members_user_id ON team_members(user_id);
+
 -- channel_identities: unified inbound identity subject
 CREATE TABLE IF NOT EXISTS channel_identities (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1038,3 +1072,214 @@ CREATE TABLE IF NOT EXISTS memory_edges (
 CREATE INDEX IF NOT EXISTS idx_memory_edges_src  ON memory_edges (bot_id, src_node);
 CREATE INDEX IF NOT EXISTS idx_memory_edges_dst  ON memory_edges (bot_id, dst_node);
 CREATE INDEX IF NOT EXISTS idx_memory_edges_rel  ON memory_edges (bot_id, rel);
+
+-- Team isolation columns. New self-hosted installs start with a single default
+-- team, so existing single-tenant behavior remains unchanged.
+ALTER TABLE IF EXISTS channel_identities ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS user_channel_bindings ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS providers ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS search_providers ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS fetch_providers ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS models ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS model_variants ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS memory_providers ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS bots ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS bot_acl_rules ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS bot_channel_admins ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS user_channel_identity_bindings ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS channel_link_codes ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS bot_plugin_installations ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS mcp_connections ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS bot_plugin_resources ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS mcp_oauth_tokens ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS bot_channel_configs ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS channel_identity_bind_codes ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS bot_channel_routes ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS bot_sessions ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS bot_session_events ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS bot_history_messages ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS bot_session_discuss_cursors ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS tool_approval_requests ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS user_input_requests ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS containers ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS bot_workspace_resource_limits ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS snapshots ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS container_versions ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS lifecycle_events ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS schedule ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS bot_storage_bindings ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS bot_history_message_assets ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS bot_heartbeat_logs ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS bot_history_message_compacts ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS schedule_logs ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS email_providers ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS email_oauth_tokens ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS bot_email_bindings ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS email_outbox ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS provider_oauth_tokens ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS user_provider_oauth_tokens ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS bot_user_grants ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS memory_nodes ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS memory_edges ADD COLUMN IF NOT EXISTS team_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES teams(id) ON DELETE CASCADE;
+
+INSERT INTO team_members (team_id, user_id, role)
+SELECT '00000000-0000-0000-0000-000000000001'::uuid,
+       id,
+       CASE WHEN role = 'admin' THEN 'admin' ELSE 'member' END
+FROM users
+ON CONFLICT (team_id, user_id) DO NOTHING;
+
+ALTER TABLE IF EXISTS channel_identities DROP CONSTRAINT IF EXISTS channel_identities_channel_type_subject_unique;
+ALTER TABLE IF EXISTS user_channel_bindings DROP CONSTRAINT IF EXISTS user_channel_bindings_unique;
+ALTER TABLE IF EXISTS providers DROP CONSTRAINT IF EXISTS providers_name_unique;
+ALTER TABLE IF EXISTS search_providers DROP CONSTRAINT IF EXISTS search_providers_name_unique;
+ALTER TABLE IF EXISTS fetch_providers DROP CONSTRAINT IF EXISTS fetch_providers_name_unique;
+ALTER TABLE IF EXISTS models DROP CONSTRAINT IF EXISTS models_provider_id_model_id_unique;
+ALTER TABLE IF EXISTS memory_providers DROP CONSTRAINT IF EXISTS memory_providers_name_unique;
+DROP INDEX IF EXISTS idx_bots_name;
+ALTER TABLE IF EXISTS bot_channel_admins DROP CONSTRAINT IF EXISTS bot_channel_admins_unique;
+ALTER TABLE IF EXISTS user_channel_identity_bindings DROP CONSTRAINT IF EXISTS user_channel_identity_bindings_unique;
+ALTER TABLE IF EXISTS bot_plugin_installations DROP CONSTRAINT IF EXISTS bot_plugin_installations_unique;
+ALTER TABLE IF EXISTS mcp_connections DROP CONSTRAINT IF EXISTS mcp_connections_unique;
+ALTER TABLE IF EXISTS bot_plugin_resources DROP CONSTRAINT IF EXISTS bot_plugin_resources_unique;
+ALTER TABLE IF EXISTS mcp_oauth_tokens DROP CONSTRAINT IF EXISTS mcp_oauth_tokens_connection_id_key;
+ALTER TABLE IF EXISTS bot_channel_configs DROP CONSTRAINT IF EXISTS bot_channel_unique;
+ALTER TABLE IF EXISTS bot_session_discuss_cursors DROP CONSTRAINT IF EXISTS bot_session_discuss_cursors_session_scope_key;
+ALTER TABLE IF EXISTS tool_approval_requests DROP CONSTRAINT IF EXISTS tool_approval_short_id_unique;
+ALTER TABLE IF EXISTS tool_approval_requests DROP CONSTRAINT IF EXISTS tool_approval_tool_call_unique;
+ALTER TABLE IF EXISTS user_input_requests DROP CONSTRAINT IF EXISTS user_input_short_id_unique;
+ALTER TABLE IF EXISTS user_input_requests DROP CONSTRAINT IF EXISTS user_input_tool_call_unique;
+ALTER TABLE IF EXISTS containers DROP CONSTRAINT IF EXISTS containers_container_id_unique;
+ALTER TABLE IF EXISTS containers DROP CONSTRAINT IF EXISTS containers_container_name_unique;
+ALTER TABLE IF EXISTS bot_storage_bindings DROP CONSTRAINT IF EXISTS bot_storage_bindings_unique;
+ALTER TABLE IF EXISTS bot_history_message_assets DROP CONSTRAINT IF EXISTS message_asset_content_unique;
+ALTER TABLE IF EXISTS email_providers DROP CONSTRAINT IF EXISTS email_providers_user_name_unique;
+ALTER TABLE IF EXISTS bot_email_bindings DROP CONSTRAINT IF EXISTS bot_email_bindings_unique;
+ALTER TABLE IF EXISTS provider_oauth_tokens DROP CONSTRAINT IF EXISTS provider_oauth_tokens_provider_id_key;
+ALTER TABLE IF EXISTS user_provider_oauth_tokens DROP CONSTRAINT IF EXISTS user_provider_oauth_tokens_provider_user_unique;
+ALTER TABLE IF EXISTS memory_edges DROP CONSTRAINT IF EXISTS memory_edges_unique;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_identities_team_subject ON channel_identities(team_id, channel_type, channel_subject_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_channel_bindings_team_unique ON user_channel_bindings(team_id, user_id, channel_type);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_providers_team_name ON providers(team_id, name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_search_providers_team_name ON search_providers(team_id, name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fetch_providers_team_name ON fetch_providers(team_id, name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_models_team_provider_model ON models(team_id, provider_id, model_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_providers_team_name ON memory_providers(team_id, name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_team_name ON bots(team_id, name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_channel_admins_team_unique ON bot_channel_admins(team_id, bot_id, channel_identity_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_uci_bindings_team_unique ON user_channel_identity_bindings(team_id, user_id, channel_identity_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_installs_team_unique ON bot_plugin_installations(team_id, bot_id, plugin_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_connections_team_unique ON mcp_connections(team_id, bot_id, name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_resources_team_unique ON bot_plugin_resources(team_id, installation_id, resource_type, resource_key);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_oauth_tokens_team_connection ON mcp_oauth_tokens(team_id, connection_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_channel_configs_team_unique ON bot_channel_configs(team_id, bot_id, channel_type);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_discuss_cursors_team_unique ON bot_session_discuss_cursors(team_id, session_id, scope_key);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tool_approval_short_id_team_unique ON tool_approval_requests(team_id, session_id, short_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tool_approval_tool_call_team_unique ON tool_approval_requests(team_id, session_id, tool_call_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_input_short_id_team_unique ON user_input_requests(team_id, session_id, short_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_input_tool_call_team_unique ON user_input_requests(team_id, session_id, tool_call_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_containers_container_id_team_unique ON containers(team_id, container_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_containers_container_name_team_unique ON containers(team_id, container_name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_storage_bindings_team_unique ON bot_storage_bindings(team_id, bot_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_message_assets_team_content_unique ON bot_history_message_assets(team_id, message_id, content_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_email_providers_team_user_name ON email_providers(team_id, user_id, name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_email_bindings_team_unique ON bot_email_bindings(team_id, bot_id, email_provider_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_oauth_team_unique ON provider_oauth_tokens(team_id, provider_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_provider_oauth_team_unique ON user_provider_oauth_tokens(team_id, provider_id, user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_edges_team_unique ON memory_edges(team_id, bot_id, src_node, dst_node, rel);
+
+CREATE INDEX IF NOT EXISTS idx_channel_identities_team_user ON channel_identities(team_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_bots_team_owner ON bots(team_id, owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_team_bot ON bot_acl_rules(team_id, bot_id);
+CREATE INDEX IF NOT EXISTS idx_bot_channel_routes_team_bot ON bot_channel_routes(team_id, bot_id);
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_team_bot_updated ON bot_sessions(team_id, bot_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_session_events_team_session ON bot_session_events(team_id, session_id);
+CREATE INDEX IF NOT EXISTS idx_history_messages_team_session ON bot_history_messages(team_id, session_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tool_approvals_team_bot ON tool_approval_requests(team_id, bot_id);
+CREATE INDEX IF NOT EXISTS idx_user_input_team_session ON user_input_requests(team_id, session_id);
+CREATE INDEX IF NOT EXISTS idx_containers_team_bot ON containers(team_id, bot_id);
+CREATE INDEX IF NOT EXISTS idx_resource_limits_team_bot ON bot_workspace_resource_limits(team_id, bot_id);
+CREATE INDEX IF NOT EXISTS idx_snapshots_team_container ON snapshots(team_id, container_id);
+CREATE INDEX IF NOT EXISTS idx_container_versions_team_container ON container_versions(team_id, container_id);
+CREATE INDEX IF NOT EXISTS idx_lifecycle_events_team_container ON lifecycle_events(team_id, container_id);
+CREATE INDEX IF NOT EXISTS idx_schedule_team_bot ON schedule(team_id, bot_id);
+CREATE INDEX IF NOT EXISTS idx_message_assets_team_message ON bot_history_message_assets(team_id, message_id);
+CREATE INDEX IF NOT EXISTS idx_heartbeat_logs_team_bot ON bot_heartbeat_logs(team_id, bot_id);
+CREATE INDEX IF NOT EXISTS idx_compacts_team_session ON bot_history_message_compacts(team_id, session_id);
+CREATE INDEX IF NOT EXISTS idx_schedule_logs_team_bot ON schedule_logs(team_id, bot_id);
+CREATE INDEX IF NOT EXISTS idx_email_oauth_team_provider ON email_oauth_tokens(team_id, email_provider_id);
+CREATE INDEX IF NOT EXISTS idx_email_outbox_team_bot ON email_outbox(team_id, bot_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bot_user_grants_team_bot ON bot_user_grants(team_id, bot_id);
+CREATE INDEX IF NOT EXISTS idx_memory_nodes_team_bot_layer ON memory_nodes(team_id, bot_id, layer);
+CREATE INDEX IF NOT EXISTS idx_memory_edges_team_bot_src ON memory_edges(team_id, bot_id, src_node);
+
+DO $$
+DECLARE
+  table_name TEXT;
+BEGIN
+  FOREACH table_name IN ARRAY ARRAY[
+    'team_members',
+    'channel_identities',
+    'user_channel_bindings',
+    'providers',
+    'search_providers',
+    'fetch_providers',
+    'models',
+    'model_variants',
+    'memory_providers',
+    'bots',
+    'bot_acl_rules',
+    'bot_channel_admins',
+    'user_channel_identity_bindings',
+    'channel_link_codes',
+    'bot_plugin_installations',
+    'mcp_connections',
+    'bot_plugin_resources',
+    'mcp_oauth_tokens',
+    'bot_channel_configs',
+    'channel_identity_bind_codes',
+    'bot_channel_routes',
+    'bot_sessions',
+    'bot_session_events',
+    'bot_history_messages',
+    'bot_session_discuss_cursors',
+    'tool_approval_requests',
+    'user_input_requests',
+    'containers',
+    'bot_workspace_resource_limits',
+    'snapshots',
+    'container_versions',
+    'lifecycle_events',
+    'schedule',
+    'bot_storage_bindings',
+    'bot_history_message_assets',
+    'bot_heartbeat_logs',
+    'bot_history_message_compacts',
+    'schedule_logs',
+    'email_providers',
+    'email_oauth_tokens',
+    'bot_email_bindings',
+    'email_outbox',
+    'provider_oauth_tokens',
+    'user_provider_oauth_tokens',
+    'bot_user_grants',
+    'memory_nodes',
+    'memory_edges'
+  ]
+  LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_policies
+      WHERE schemaname = 'public'
+        AND tablename = table_name
+        AND policyname = 'team_isolation'
+    ) THEN
+      EXECUTE format(
+        'CREATE POLICY team_isolation ON %I USING (team_id = NULLIF(current_setting(''app.team_id'', true), '''')::uuid) WITH CHECK (team_id = NULLIF(current_setting(''app.team_id'', true), '''')::uuid)',
+        table_name
+      );
+    END IF;
+  END LOOP;
+END $$;

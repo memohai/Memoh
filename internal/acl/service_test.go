@@ -233,29 +233,29 @@ func TestEvaluatePassesGroupScopeToQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(captured) != 7 {
-		t.Fatalf("expected 7 evaluate args, got %d: %#v", len(captured), captured)
+	if len(captured) != 8 {
+		t.Fatalf("expected 8 evaluate args, got %d: %#v", len(captured), captured)
 	}
-	if captured[0] != ActionChatTrigger {
-		t.Fatalf("unexpected action arg: %#v", captured[0])
+	if captured[1] != ActionChatTrigger {
+		t.Fatalf("unexpected action arg: %#v", captured[1])
 	}
-	if got := textFromArg(captured[1]); got != "slack" {
+	if got := textFromArg(captured[2]); got != "slack" {
 		t.Fatalf("subject channel arg = %q, want slack", got)
 	}
-	if got := captured[2].(pgtype.UUID); !got.Valid || uuid.UUID(got.Bytes).String() != identityUUID {
-		t.Fatalf("channel identity arg = %#v, want %s", captured[2], identityUUID)
+	if got := captured[3].(pgtype.UUID); !got.Valid || uuid.UUID(got.Bytes).String() != identityUUID {
+		t.Fatalf("channel identity arg = %#v, want %s", captured[3], identityUUID)
 	}
-	if got := textFromArg(captured[3]); got != "group" {
+	if got := textFromArg(captured[4]); got != "group" {
 		t.Fatalf("conversation type arg = %q, want group", got)
 	}
-	if got := textFromArg(captured[4]); got != "C123" {
+	if got := textFromArg(captured[5]); got != "C123" {
 		t.Fatalf("conversation id arg = %q, want C123", got)
 	}
-	if got := textFromArg(captured[5]); got != "" {
+	if got := textFromArg(captured[6]); got != "" {
 		t.Fatalf("thread id arg = %q, want empty", got)
 	}
-	if got := captured[6].(pgtype.UUID); !got.Valid || uuid.UUID(got.Bytes).String() != botUUID.String() {
-		t.Fatalf("bot id arg = %#v, want %s", captured[6], botUUID.String())
+	if got := captured[7].(pgtype.UUID); !got.Valid || uuid.UUID(got.Bytes).String() != botUUID.String() {
+		t.Fatalf("bot id arg = %#v, want %s", captured[7], botUUID.String())
 	}
 }
 
@@ -329,20 +329,21 @@ func TestCreateGroupRuleResolvesSourceChannelFromSubjectChannel(t *testing.T) {
 				captured = append([]any(nil), args...)
 				return &fakeRow{scanFunc: func(dest ...any) error {
 					*dest[0].(*pgtype.UUID) = ruleUUID
-					*dest[1].(*pgtype.UUID) = args[0].(pgtype.UUID)
+					*dest[1].(*pgtype.UUID) = args[10].(pgtype.UUID)
 					*dest[2].(*string) = ActionChatTrigger
 					*dest[3].(*string) = args[2].(string)
-					*dest[4].(*pgtype.UUID) = pgtype.UUID{}
-					*dest[5].(*pgtype.Text) = args[7].(pgtype.Text)
-					*dest[6].(*pgtype.Text) = args[8].(pgtype.Text)
-					*dest[7].(*pgtype.Text) = args[9].(pgtype.Text)
-					*dest[8].(*pgtype.Text) = args[10].(pgtype.Text)
-					*dest[9].(*pgtype.UUID) = args[3].(pgtype.UUID)
+					*dest[4].(*pgtype.UUID) = args[3].(pgtype.UUID)
+					*dest[5].(*pgtype.Text) = args[5].(pgtype.Text)
+					*dest[6].(*pgtype.Text) = args[6].(pgtype.Text)
+					*dest[7].(*pgtype.Text) = args[7].(pgtype.Text)
+					*dest[8].(*pgtype.Text) = args[8].(pgtype.Text)
+					*dest[9].(*pgtype.UUID) = args[9].(pgtype.UUID)
 					*dest[10].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 					*dest[11].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-					*dest[12].(*bool) = args[1].(bool)
-					*dest[13].(*pgtype.Text) = args[4].(pgtype.Text)
-					*dest[14].(*pgtype.Text) = args[6].(pgtype.Text)
+					*dest[12].(*pgtype.UUID) = args[11].(pgtype.UUID)
+					*dest[13].(*bool) = args[0].(bool)
+					*dest[14].(*pgtype.Text) = args[1].(pgtype.Text)
+					*dest[15].(*pgtype.Text) = args[4].(pgtype.Text)
 					return nil
 				}}
 			}
@@ -362,22 +363,22 @@ func TestCreateGroupRuleResolvesSourceChannelFromSubjectChannel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(captured) != 11 {
-		t.Fatalf("expected 11 create args, got %d: %#v", len(captured), captured)
+	if len(captured) != 12 {
+		t.Fatalf("expected 12 create args, got %d: %#v", len(captured), captured)
 	}
-	if got := captured[5].(pgtype.UUID); got.Valid {
+	if got := captured[3].(pgtype.UUID); got.Valid {
 		t.Fatalf("channel identity arg should be empty for group rule: %#v", got)
 	}
-	if got := textFromArg(captured[6]); got != "slack" {
+	if got := textFromArg(captured[4]); got != "slack" {
 		t.Fatalf("subject channel arg = %q, want slack", got)
 	}
-	if got := textFromArg(captured[7]); got != "slack" {
+	if got := textFromArg(captured[5]); got != "slack" {
 		t.Fatalf("source channel arg = %q, want slack", got)
 	}
-	if got := textFromArg(captured[8]); got != "group" {
+	if got := textFromArg(captured[6]); got != "group" {
 		t.Fatalf("source conversation type arg = %q, want group", got)
 	}
-	if got := textFromArg(captured[9]); got != "C123" {
+	if got := textFromArg(captured[7]); got != "C123" {
 		t.Fatalf("source conversation id arg = %q, want C123", got)
 	}
 	if rule.SubjectChannelType != "slack" || rule.SourceScope == nil || rule.SourceScope.ConversationID != "C123" {
@@ -403,7 +404,7 @@ func TestSetDefaultEffect(t *testing.T) {
 	db := &fakeDBTX{
 		execFunc: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 			if strings.Contains(sql, "acl_default_effect") {
-				capturedEffect = args[1].(string)
+				capturedEffect = args[0].(string)
 			}
 			return pgconn.CommandTag{}, nil
 		},

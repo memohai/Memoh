@@ -39,6 +39,7 @@ import (
 	"github.com/memohai/memoh/internal/providers"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
+	"github.com/memohai/memoh/internal/teams"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
 )
@@ -299,6 +300,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	}
 
 	runCfg, chatModel, provider, err := r.buildBaseRunConfig(ctx, baseRunConfigParams{
+		TeamID:            firstNonEmpty(req.TeamID, teams.ScopeOrDefault(ctx).TeamID),
 		BotID:             req.BotID,
 		ChatID:            req.ChatID,
 		SessionID:         req.SessionID,
@@ -581,6 +583,7 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 // baseRunConfigParams holds parameters for buildBaseRunConfig that differ
 // between chat and discuss callers.
 type baseRunConfigParams struct {
+	TeamID            string
 	BotID             string
 	ChatID            string
 	SessionID         string
@@ -680,6 +683,7 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 		SupportsImageInput:    supportsImageInputForModel(chatModel),
 		SupportsToolCall:      chatModel.HasCompatibility(models.CompatToolCall),
 		Identity: agentpkg.SessionContext{
+			TeamID:            strings.TrimSpace(p.TeamID),
 			BotID:             p.BotID,
 			ChatID:            chatID,
 			SessionID:         p.SessionID,
@@ -696,6 +700,7 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 		LoopDetection:     agentpkg.LoopDetectionConfig{Enabled: loopDetectionEnabled},
 		BackgroundManager: r.bgManager,
 		ContextScope: contextfrag.Scope{
+			TeamID:            strings.TrimSpace(p.TeamID),
 			BotID:             p.BotID,
 			ChatID:            chatID,
 			SessionID:         p.SessionID,
@@ -1082,6 +1087,7 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 		cfg := agentpkg.RunConfig{
 			SessionType: sessionType,
 			Identity: agentpkg.SessionContext{
+				TeamID:            teams.ScopeOrDefault(ctx).TeamID,
 				BotID:             botID,
 				ChatID:            botID,
 				SessionID:         sessionID,
@@ -1098,6 +1104,7 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 		}, nil
 	}
 	cfg, chatModel, _, err := r.buildBaseRunConfig(ctx, baseRunConfigParams{
+		TeamID:            teams.ScopeOrDefault(ctx).TeamID,
 		BotID:             botID,
 		SessionID:         sessionID,
 		ChannelIdentityID: channelIdentityID,

@@ -61,6 +61,7 @@ func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, erro
 		Enable:     model.Enable,
 		Config:     configJSON,
 	}
+	setModelTeamID(ctx, &params)
 
 	if model.Name != "" {
 		params.Name = pgtype.Text{String: model.Name, Valid: true}
@@ -96,7 +97,7 @@ func (s *Service) GetByID(ctx context.Context, id string) (GetResponse, error) {
 		return GetResponse{}, fmt.Errorf("invalid ID: %w", err)
 	}
 
-	dbModel, err := s.queries.GetModelByID(ctx, uuid)
+	dbModel, err := getModelByIDForScope(ctx, s.queries, uuid)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("failed to get model: %w", err)
 	}
@@ -120,7 +121,7 @@ func (s *Service) GetByModelID(ctx context.Context, modelID string) (GetResponse
 
 // List returns all models.
 func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
-	dbModels, err := s.queries.ListModels(ctx)
+	dbModels, err := listModelsForScope(ctx, s.queries)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list models: %w", err)
 	}
@@ -134,7 +135,7 @@ func (s *Service) ListByType(ctx context.Context, modelType ModelType) ([]GetRes
 		return nil, fmt.Errorf("invalid model type: %s", modelType)
 	}
 
-	dbModels, err := s.queries.ListModelsByType(ctx, string(modelType))
+	dbModels, err := listModelsByTypeForScope(ctx, s.queries, string(modelType))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list models by type: %w", err)
 	}
@@ -148,7 +149,7 @@ func (s *Service) ListByProviderClientType(ctx context.Context, clientType Clien
 		return nil, fmt.Errorf("invalid client type: %s", clientType)
 	}
 
-	dbModels, err := s.queries.ListModelsByProviderClientType(ctx, string(clientType))
+	dbModels, err := listModelsByProviderClientTypeForScope(ctx, s.queries, string(clientType))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list models by provider client type: %w", err)
 	}
@@ -158,7 +159,7 @@ func (s *Service) ListByProviderClientType(ctx context.Context, clientType Clien
 
 // ListEnabled returns all models from enabled providers.
 func (s *Service) ListEnabled(ctx context.Context) ([]GetResponse, error) {
-	dbModels, err := s.queries.ListEnabledModels(ctx)
+	dbModels, err := listEnabledModelsForScope(ctx, s.queries)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list enabled models: %w", err)
 	}
@@ -170,7 +171,7 @@ func (s *Service) ListEnabledByType(ctx context.Context, modelType ModelType) ([
 	if !IsValidModelType(modelType) {
 		return nil, fmt.Errorf("invalid model type: %s", modelType)
 	}
-	dbModels, err := s.queries.ListEnabledModelsByType(ctx, string(modelType))
+	dbModels, err := listEnabledModelsByTypeForScope(ctx, s.queries, string(modelType))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list enabled models by type: %w", err)
 	}
@@ -183,7 +184,7 @@ func (s *Service) ListEnabledByProviderClientType(ctx context.Context, clientTyp
 	if !IsValidClientType(clientType) {
 		return nil, fmt.Errorf("invalid client type: %s", clientType)
 	}
-	dbModels, err := s.queries.ListEnabledModelsByProviderClientType(ctx, string(clientType))
+	dbModels, err := listEnabledModelsByProviderClientTypeForScope(ctx, s.queries, string(clientType))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list enabled models by provider client type: %w", err)
 	}
@@ -199,7 +200,7 @@ func (s *Service) ListByProviderID(ctx context.Context, providerID string) ([]Ge
 	if err != nil {
 		return nil, fmt.Errorf("invalid provider id: %w", err)
 	}
-	dbModels, err := s.queries.ListModelsByProviderID(ctx, uuid)
+	dbModels, err := listModelsByProviderIDForScope(ctx, s.queries, uuid)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list models by provider: %w", err)
 	}
@@ -218,7 +219,7 @@ func (s *Service) ListByProviderIDAndType(ctx context.Context, providerID string
 	if err != nil {
 		return nil, fmt.Errorf("invalid provider id: %w", err)
 	}
-	dbModels, err := s.queries.ListModelsByProviderIDAndType(ctx, sqlc.ListModelsByProviderIDAndTypeParams{
+	dbModels, err := listModelsByProviderIDAndTypeForScope(ctx, s.queries, sqlc.ListModelsByProviderIDAndTypeParams{
 		ProviderID: uuid,
 		Type:       string(modelType),
 	})
@@ -240,7 +241,7 @@ func (s *Service) GetByProviderAndModelID(ctx context.Context, providerID, model
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("invalid provider id: %w", err)
 	}
-	dbModel, err := s.queries.GetModelByProviderAndModelID(ctx, sqlc.GetModelByProviderAndModelIDParams{
+	dbModel, err := getModelByProviderAndModelIDForScope(ctx, s.queries, sqlc.GetModelByProviderAndModelIDParams{
 		ProviderID: uuid,
 		ModelID:    modelID,
 	})
@@ -257,7 +258,7 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 		return GetResponse{}, fmt.Errorf("invalid ID: %w", err)
 	}
 
-	current, err := s.queries.GetModelByID(ctx, uuid)
+	current, err := getModelByIDForScope(ctx, s.queries, uuid)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("failed to load model: %w", err)
 	}
@@ -285,6 +286,7 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 		Enable:     model.Enable,
 		Config:     configJSON,
 	}
+	setModelTeamID(ctx, &params)
 
 	if model.Name != "" {
 		params.Name = pgtype.Text{String: model.Name, Valid: true}
@@ -343,6 +345,7 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 		Enable:     model.Enable,
 		Config:     configJSON,
 	}
+	setModelTeamID(ctx, &params)
 
 	if model.Name != "" {
 		params.Name = pgtype.Text{String: model.Name, Valid: true}
@@ -366,7 +369,7 @@ func (s *Service) DeleteByID(ctx context.Context, id string) error {
 		return fmt.Errorf("invalid ID: %w", err)
 	}
 
-	if err := s.queries.DeleteModel(ctx, uuid); err != nil {
+	if err := deleteModelForScope(ctx, s.queries, uuid); err != nil {
 		return fmt.Errorf("failed to delete model: %w", err)
 	}
 
@@ -383,7 +386,7 @@ func (s *Service) DeleteByModelID(ctx context.Context, modelID string) error {
 		return fmt.Errorf("failed to delete model: %w", err)
 	}
 
-	if err := s.queries.DeleteModel(ctx, current.ID); err != nil {
+	if err := deleteModelForScope(ctx, s.queries, current.ID); err != nil {
 		return fmt.Errorf("failed to delete model: %w", err)
 	}
 
@@ -392,7 +395,7 @@ func (s *Service) DeleteByModelID(ctx context.Context, modelID string) error {
 
 // Count returns the total number of models.
 func (s *Service) Count(ctx context.Context) (int64, error) {
-	count, err := s.queries.CountModels(ctx)
+	count, err := countModelsForScope(ctx, s.queries)
 	if err != nil {
 		return 0, fmt.Errorf("failed to count models: %w", err)
 	}
@@ -405,7 +408,7 @@ func (s *Service) CountByType(ctx context.Context, modelType ModelType) (int64, 
 		return 0, fmt.Errorf("invalid model type: %s", modelType)
 	}
 
-	count, err := s.queries.CountModelsByType(ctx, string(modelType))
+	count, err := countModelsByTypeForScope(ctx, s.queries, string(modelType))
 	if err != nil {
 		return 0, fmt.Errorf("failed to count models by type: %w", err)
 	}
@@ -449,7 +452,7 @@ func (s *Service) convertToGetResponseList(dbModels []sqlc.Model) []GetResponse 
 }
 
 func (s *Service) findUniqueByModelID(ctx context.Context, modelID string) (sqlc.Model, error) {
-	rows, err := s.queries.ListModelsByModelID(ctx, modelID)
+	rows, err := listModelsByModelIDForScope(ctx, s.queries, modelID)
 	if err != nil {
 		return sqlc.Model{}, err
 	}
@@ -571,7 +574,7 @@ func FetchProviderByID(ctx context.Context, queries dbstore.Queries, providerID 
 	if err != nil {
 		return sqlc.Provider{}, err
 	}
-	provider, err := queries.GetProviderByID(ctx, parsed)
+	provider, err := getProviderByIDForScope(ctx, queries, parsed)
 	if err != nil {
 		return sqlc.Provider{}, err
 	}

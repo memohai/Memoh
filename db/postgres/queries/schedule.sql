@@ -1,40 +1,45 @@
 -- name: CreateSchedule :one
-INSERT INTO schedule (name, description, pattern, max_calls, enabled, command, bot_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id;
+INSERT INTO schedule (team_id, name, description, pattern, max_calls, enabled, command, bot_id)
+VALUES (sqlc.arg(team_id)::uuid, sqlc.arg(name), sqlc.arg(description), sqlc.arg(pattern), sqlc.arg(max_calls), sqlc.arg(enabled), sqlc.arg(command), sqlc.arg(bot_id)::uuid)
+RETURNING *;
 
 -- name: GetScheduleByID :one
-SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id
+SELECT *
 FROM schedule
-WHERE id = $1;
+WHERE id = sqlc.arg(id)::uuid
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: ListSchedulesByBot :many
-SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id
+SELECT *
 FROM schedule
-WHERE bot_id = $1
+WHERE team_id = sqlc.arg(team_id)::uuid
+  AND bot_id = sqlc.arg(bot_id)::uuid
 ORDER BY created_at DESC;
 
 -- name: ListEnabledSchedules :many
-SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id
+SELECT *
 FROM schedule
-WHERE enabled = true
+WHERE team_id = sqlc.arg(team_id)::uuid
+  AND enabled = true
 ORDER BY created_at DESC;
 
 -- name: UpdateSchedule :one
 UPDATE schedule
-SET name = $2,
-    description = $3,
-    pattern = $4,
-    max_calls = $5,
-    enabled = $6,
-    command = $7,
+SET name = sqlc.arg(name),
+    description = sqlc.arg(description),
+    pattern = sqlc.arg(pattern),
+    max_calls = sqlc.arg(max_calls),
+    enabled = sqlc.arg(enabled),
+    command = sqlc.arg(command),
     updated_at = now()
-WHERE id = $1
-RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id;
+WHERE id = sqlc.arg(id)::uuid
+  AND team_id = sqlc.arg(team_id)::uuid
+RETURNING *;
 
 -- name: DeleteSchedule :exec
 DELETE FROM schedule
-WHERE id = $1;
+WHERE id = sqlc.arg(id)::uuid
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: IncrementScheduleCalls :one
 UPDATE schedule
@@ -44,6 +49,6 @@ SET current_calls = current_calls + 1,
       ELSE enabled
     END,
     updated_at = now()
-WHERE id = $1
-RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id;
-
+WHERE id = sqlc.arg(id)::uuid
+  AND team_id = sqlc.arg(team_id)::uuid
+RETURNING *;

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -20,11 +21,17 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 // SessionCreator creates sessions for schedule runs.
 type SessionCreator interface {
 	CreateSession(ctx context.Context, botID, sessionType string) (string, error)
+}
+
+// TeamSessionCreator creates sessions with an explicit tenant scope.
+type TeamSessionCreator interface {
+	CreateSessionForTeam(ctx context.Context, teamID, botID, sessionType string) (string, error)
 }
 
 type Service struct {
@@ -103,6 +110,7 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
+	teamID := teams.ScopeOrDefault(ctx).TeamID
 	row, err := s.queries.CreateSchedule(ctx, sqlc.CreateScheduleParams{
 		Name:        req.Name,
 		Description: req.Description,
@@ -120,7 +128,11 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 			return Schedule{}, err
 		}
 	}
-	return toSchedule(row), nil
+	item := toSchedule(row)
+	if item.TeamID == "" {
+		item.TeamID = teamID
+	}
+	return item, nil
 }
 
 func (s *Service) Get(ctx context.Context, id string) (Schedule, error) {
@@ -251,6 +263,8 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 	if s.triggerer == nil {
 		return errors.New("schedule triggerer not configured")
 	}
+	teamID := firstNonEmpty(sched.TeamID, teams.ScopeOrDefault(ctx).TeamID)
+	ctx = withTeamScope(ctx, teamID)
 	updated, err := s.queries.IncrementScheduleCalls(ctx, toUUID(sched.ID))
 	if err != nil {
 		return err
@@ -264,17 +278,7 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 		return fmt.Errorf("resolve bot owner: %w", err)
 	}
 
-	var sessionID string
-	var pgSessionID pgtype.UUID
-	if s.sessionCreator != nil {
-		sid, err := s.sessionCreator.CreateSession(ctx, sched.BotID, "schedule")
-		if err != nil {
-			s.logger.Error("create schedule session failed", slog.String("bot_id", sched.BotID), slog.Any("error", err))
-		} else {
-			sessionID = sid
-			pgSessionID = db.ParseUUIDOrEmpty(sid)
-		}
-	}
+	sessionID, pgSessionID := s.createRunSession(ctx, teamID, sched.BotID, "schedule")
 
 	pgScheduleID := toUUID(sched.ID)
 	pgBotID := toUUID(sched.BotID)
@@ -296,6 +300,7 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 
 	result, triggerErr := s.triggerer.TriggerSchedule(ctx, sched.BotID, TriggerPayload{
 		ID:          sched.ID,
+		TeamID:      teamID,
 		Name:        sched.Name,
 		Description: sched.Description,
 		Pattern:     sched.Pattern,
@@ -343,6 +348,10 @@ func (s *Service) ListLogs(ctx context.Context, botID string, limit, offset int)
 	if offset < 0 {
 		offset = 0
 	}
+	pgTeamID, err := db.ParseUUID(teams.ScopeOrDefault(ctx).TeamID)
+	if err != nil {
+		return nil, 0, err
+	}
 
 	total, err := s.queries.CountScheduleLogsByBot(ctx, pgBotID)
 	if err != nil {
@@ -350,9 +359,10 @@ func (s *Service) ListLogs(ctx context.Context, botID string, limit, offset int)
 	}
 
 	rows, err := s.queries.ListScheduleLogsByBot(ctx, sqlc.ListScheduleLogsByBotParams{
-		BotID:  pgBotID,
-		Limit:  int32(limit),  //nolint:gosec // capped to 100 above
-		Offset: int32(offset), //nolint:gosec // validated above
+		TeamID:      pgTeamID,
+		BotID:       pgBotID,
+		LimitCount:  int32(limit),  //nolint:gosec // capped to 100 above
+		OffsetCount: int32(offset), //nolint:gosec // validated above
 	})
 	if err != nil {
 		return nil, 0, err
@@ -375,6 +385,10 @@ func (s *Service) ListLogsBySchedule(ctx context.Context, scheduleID string, lim
 	if offset < 0 {
 		offset = 0
 	}
+	pgTeamID, err := db.ParseUUID(teams.ScopeOrDefault(ctx).TeamID)
+	if err != nil {
+		return nil, 0, err
+	}
 
 	total, err := s.queries.CountScheduleLogsBySchedule(ctx, pgID)
 	if err != nil {
@@ -382,9 +396,10 @@ func (s *Service) ListLogsBySchedule(ctx context.Context, scheduleID string, lim
 	}
 
 	rows, err := s.queries.ListScheduleLogsBySchedule(ctx, sqlc.ListScheduleLogsByScheduleParams{
-		ScheduleID: pgID,
-		Limit:      int32(limit),  //nolint:gosec // capped to 100 above
-		Offset:     int32(offset), //nolint:gosec // validated above
+		TeamID:      pgTeamID,
+		ScheduleID:  pgID,
+		LimitCount:  int32(limit),  //nolint:gosec // capped to 100 above
+		OffsetCount: int32(offset), //nolint:gosec // validated above
 	})
 	if err != nil {
 		return nil, 0, err
@@ -407,6 +422,7 @@ func (s *Service) DeleteLogs(ctx context.Context, botID string) error {
 func toScheduleLog(row sqlc.ListScheduleLogsByBotRow) Log {
 	l := Log{
 		ID:           row.ID.String(),
+		TeamID:       teamIDFromValue(row, ""),
 		ScheduleID:   row.ScheduleID.String(),
 		BotID:        row.BotID.String(),
 		SessionID:    row.SessionID.String(),
@@ -433,6 +449,7 @@ func toScheduleLog(row sqlc.ListScheduleLogsByBotRow) Log {
 func toScheduleLogFromSchedule(row sqlc.ListScheduleLogsByScheduleRow) Log {
 	l := Log{
 		ID:           row.ID.String(),
+		TeamID:       teamIDFromValue(row, ""),
 		ScheduleID:   row.ScheduleID.String(),
 		BotID:        row.BotID.String(),
 		SessionID:    row.SessionID.String(),
@@ -490,6 +507,7 @@ func (s *Service) scheduleJob(ctx context.Context, schedule sqlc.Schedule) error
 	if id == "" {
 		return errors.New("schedule id missing")
 	}
+	ctx = withTeamScopeFromValue(ctx, schedule)
 	job := func() {
 		runCtx, runCancel := context.WithTimeout(context.WithoutCancel(ctx), scheduleRunTimeout)
 		defer runCancel()
@@ -537,6 +555,7 @@ func (s *Service) removeJob(id string) {
 func toSchedule(row sqlc.Schedule) Schedule {
 	item := Schedule{
 		ID:           row.ID.String(),
+		TeamID:       teamIDFromValue(row, ""),
 		Name:         row.Name,
 		Description:  row.Description,
 		Pattern:      row.Pattern,
@@ -564,6 +583,98 @@ func toUUID(id string) pgtype.UUID {
 		return pgtype.UUID{}
 	}
 	return pgID
+}
+
+func (s *Service) createRunSession(ctx context.Context, teamID, botID, sessionType string) (string, pgtype.UUID) {
+	if s.sessionCreator == nil {
+		return "", pgtype.UUID{}
+	}
+	var (
+		sessionID string
+		err       error
+	)
+	if strings.TrimSpace(teamID) != "" {
+		if creator, ok := s.sessionCreator.(TeamSessionCreator); ok {
+			sessionID, err = creator.CreateSessionForTeam(ctx, teamID, botID, sessionType)
+		} else {
+			sessionID, err = s.sessionCreator.CreateSession(ctx, botID, sessionType)
+		}
+	} else {
+		sessionID, err = s.sessionCreator.CreateSession(ctx, botID, sessionType)
+	}
+	if err != nil {
+		s.logger.Error("create schedule session failed",
+			slog.String("team_id", teamID),
+			slog.String("bot_id", botID),
+			slog.String("session_type", sessionType),
+			slog.Any("error", err),
+		)
+		return "", pgtype.UUID{}
+	}
+	return sessionID, db.ParseUUIDOrEmpty(sessionID)
+}
+
+func withTeamScopeFromValue(ctx context.Context, value any) context.Context {
+	return withTeamScope(ctx, teamIDFromValue(value, teams.ScopeOrDefault(ctx).TeamID))
+}
+
+func withTeamScope(ctx context.Context, teamID string) context.Context {
+	teamID = strings.TrimSpace(teamID)
+	if teamID == "" {
+		teamID = teams.DefaultTeamID
+	}
+	return teams.WithScope(ctx, teams.Scope{TeamID: teamID})
+}
+
+func teamIDFromValue(value any, fallback string) string {
+	if teamID, ok := value.(interface{ GetTeamID() string }); ok {
+		if trimmed := strings.TrimSpace(teamID.GetTeamID()); trimmed != "" {
+			return trimmed
+		}
+	}
+	if stringer, ok := value.(interface{ TeamIDString() string }); ok {
+		if trimmed := strings.TrimSpace(stringer.TeamIDString()); trimmed != "" {
+			return trimmed
+		}
+	}
+	v := reflect.ValueOf(value)
+	for v.IsValid() && v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			break
+		}
+		v = v.Elem()
+	}
+	if v.IsValid() && v.Kind() == reflect.Struct {
+		field := v.FieldByName("TeamID")
+		if field.IsValid() {
+			if field.Kind() == reflect.String {
+				if trimmed := strings.TrimSpace(field.String()); trimmed != "" {
+					return trimmed
+				}
+			}
+			if field.CanInterface() {
+				if stringer, ok := field.Interface().(fmt.Stringer); ok {
+					if trimmed := strings.TrimSpace(stringer.String()); trimmed != "" {
+						return trimmed
+					}
+				}
+			}
+		}
+	}
+	teamID := strings.TrimSpace(fallback)
+	if teamID == "" {
+		teamID = teams.DefaultTeamID
+	}
+	return teamID
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 // resolveBotLocation returns the bot's configured timezone location, falling

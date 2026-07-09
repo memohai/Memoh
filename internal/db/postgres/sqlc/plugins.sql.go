@@ -13,10 +13,12 @@ import (
 
 const createBotPluginInstallation = `-- name: CreateBotPluginInstallation :one
 INSERT INTO bot_plugin_installations (
-  bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest
+  team_id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-ON CONFLICT (bot_id, plugin_id)
+SELECT b.team_id, b.id, $1, $2, $3, $4, $5, $6, $7, $8
+FROM bots b
+WHERE b.id = $9
+ON CONFLICT (team_id, bot_id, plugin_id)
 DO UPDATE SET plugin_name = EXCLUDED.plugin_name,
               version = EXCLUDED.version,
               status = EXCLUDED.status,
@@ -25,11 +27,10 @@ DO UPDATE SET plugin_name = EXCLUDED.plugin_name,
               metadata = EXCLUDED.metadata,
               manifest = EXCLUDED.manifest,
               updated_at = now()
-RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at
+RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id
 `
 
 type CreateBotPluginInstallationParams struct {
-	BotID      pgtype.UUID `json:"bot_id"`
 	PluginID   string      `json:"plugin_id"`
 	PluginName string      `json:"plugin_name"`
 	Version    string      `json:"version"`
@@ -38,11 +39,11 @@ type CreateBotPluginInstallationParams struct {
 	Config     []byte      `json:"config"`
 	Metadata   []byte      `json:"metadata"`
 	Manifest   []byte      `json:"manifest"`
+	BotID      pgtype.UUID `json:"bot_id"`
 }
 
 func (q *Queries) CreateBotPluginInstallation(ctx context.Context, arg CreateBotPluginInstallationParams) (BotPluginInstallation, error) {
 	row := q.db.QueryRow(ctx, createBotPluginInstallation,
-		arg.BotID,
 		arg.PluginID,
 		arg.PluginName,
 		arg.Version,
@@ -51,6 +52,7 @@ func (q *Queries) CreateBotPluginInstallation(ctx context.Context, arg CreateBot
 		arg.Config,
 		arg.Metadata,
 		arg.Manifest,
+		arg.BotID,
 	)
 	var i BotPluginInstallation
 	err := row.Scan(
@@ -66,13 +68,16 @@ func (q *Queries) CreateBotPluginInstallation(ctx context.Context, arg CreateBot
 		&i.Manifest,
 		&i.InstalledAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const deleteBotPluginInstallation = `-- name: DeleteBotPluginInstallation :exec
 DELETE FROM bot_plugin_installations
-WHERE bot_id = $1 AND id = $2
+WHERE bot_id = $1
+  AND bot_plugin_installations.id = $2
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = $1)
 `
 
 type DeleteBotPluginInstallationParams struct {
@@ -88,6 +93,7 @@ func (q *Queries) DeleteBotPluginInstallation(ctx context.Context, arg DeleteBot
 const deleteBotPluginResources = `-- name: DeleteBotPluginResources :exec
 DELETE FROM bot_plugin_resources
 WHERE installation_id = $1
+  AND team_id = (SELECT i.team_id FROM bot_plugin_installations i WHERE i.id = $1)
 `
 
 func (q *Queries) DeleteBotPluginResources(ctx context.Context, installationID pgtype.UUID) error {
@@ -96,9 +102,11 @@ func (q *Queries) DeleteBotPluginResources(ctx context.Context, installationID p
 }
 
 const getBotPluginInstallationByID = `-- name: GetBotPluginInstallationByID :one
-SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at
+SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id
 FROM bot_plugin_installations
-WHERE bot_id = $1 AND id = $2
+WHERE bot_id = $1
+  AND bot_plugin_installations.id = $2
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = $1)
 LIMIT 1
 `
 
@@ -123,14 +131,16 @@ func (q *Queries) GetBotPluginInstallationByID(ctx context.Context, arg GetBotPl
 		&i.Manifest,
 		&i.InstalledAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listBotPluginInstallations = `-- name: ListBotPluginInstallations :many
-SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at
+SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id
 FROM bot_plugin_installations
 WHERE bot_id = $1
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = $1)
 ORDER BY installed_at DESC
 `
 
@@ -156,6 +166,7 @@ func (q *Queries) ListBotPluginInstallations(ctx context.Context, botID pgtype.U
 			&i.Manifest,
 			&i.InstalledAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -168,9 +179,10 @@ func (q *Queries) ListBotPluginInstallations(ctx context.Context, botID pgtype.U
 }
 
 const listBotPluginResources = `-- name: ListBotPluginResources :many
-SELECT id, installation_id, resource_type, resource_key, resource_id, status, metadata, created_at, updated_at
+SELECT id, installation_id, resource_type, resource_key, resource_id, status, metadata, created_at, updated_at, team_id
 FROM bot_plugin_resources
 WHERE installation_id = $1
+  AND team_id = (SELECT i.team_id FROM bot_plugin_installations i WHERE i.id = $1)
 ORDER BY resource_type ASC, resource_key ASC
 `
 
@@ -193,6 +205,7 @@ func (q *Queries) ListBotPluginResources(ctx context.Context, installationID pgt
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -206,26 +219,28 @@ func (q *Queries) ListBotPluginResources(ctx context.Context, installationID pgt
 
 const updateBotPluginInstallationStatus = `-- name: UpdateBotPluginInstallationStatus :one
 UPDATE bot_plugin_installations
-SET status = $3,
-    enabled = $4,
+SET status = $1,
+    enabled = $2,
     updated_at = now()
-WHERE bot_id = $1 AND id = $2
-RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at
+WHERE bot_id = $3
+  AND bot_plugin_installations.id = $4
+  AND team_id = (SELECT b.team_id FROM bots b WHERE b.id = $3)
+RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id
 `
 
 type UpdateBotPluginInstallationStatusParams struct {
-	BotID   pgtype.UUID `json:"bot_id"`
-	ID      pgtype.UUID `json:"id"`
 	Status  string      `json:"status"`
 	Enabled bool        `json:"enabled"`
+	BotID   pgtype.UUID `json:"bot_id"`
+	ID      pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) UpdateBotPluginInstallationStatus(ctx context.Context, arg UpdateBotPluginInstallationStatusParams) (BotPluginInstallation, error) {
 	row := q.db.QueryRow(ctx, updateBotPluginInstallationStatus,
-		arg.BotID,
-		arg.ID,
 		arg.Status,
 		arg.Enabled,
+		arg.BotID,
+		arg.ID,
 	)
 	var i BotPluginInstallation
 	err := row.Scan(
@@ -241,40 +256,43 @@ func (q *Queries) UpdateBotPluginInstallationStatus(ctx context.Context, arg Upd
 		&i.Manifest,
 		&i.InstalledAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const upsertBotPluginResource = `-- name: UpsertBotPluginResource :one
 INSERT INTO bot_plugin_resources (
-  installation_id, resource_type, resource_key, resource_id, status, metadata
+  team_id, installation_id, resource_type, resource_key, resource_id, status, metadata
 )
-VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (installation_id, resource_type, resource_key)
+SELECT i.team_id, i.id, $1, $2, $3, $4, $5
+FROM bot_plugin_installations i
+WHERE i.id = $6
+ON CONFLICT (team_id, installation_id, resource_type, resource_key)
 DO UPDATE SET resource_id = EXCLUDED.resource_id,
               status = EXCLUDED.status,
               metadata = EXCLUDED.metadata,
               updated_at = now()
-RETURNING id, installation_id, resource_type, resource_key, resource_id, status, metadata, created_at, updated_at
+RETURNING id, installation_id, resource_type, resource_key, resource_id, status, metadata, created_at, updated_at, team_id
 `
 
 type UpsertBotPluginResourceParams struct {
-	InstallationID pgtype.UUID `json:"installation_id"`
 	ResourceType   string      `json:"resource_type"`
 	ResourceKey    string      `json:"resource_key"`
 	ResourceID     string      `json:"resource_id"`
 	Status         string      `json:"status"`
 	Metadata       []byte      `json:"metadata"`
+	InstallationID pgtype.UUID `json:"installation_id"`
 }
 
 func (q *Queries) UpsertBotPluginResource(ctx context.Context, arg UpsertBotPluginResourceParams) (BotPluginResource, error) {
 	row := q.db.QueryRow(ctx, upsertBotPluginResource,
-		arg.InstallationID,
 		arg.ResourceType,
 		arg.ResourceKey,
 		arg.ResourceID,
 		arg.Status,
 		arg.Metadata,
+		arg.InstallationID,
 	)
 	var i BotPluginResource
 	err := row.Scan(
@@ -287,6 +305,7 @@ func (q *Queries) UpsertBotPluginResource(ctx context.Context, arg UpsertBotPlug
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

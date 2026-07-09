@@ -79,11 +79,16 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) error {
 		compactErr = err
 		return compactErr
 	}
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		compactErr = err
+		return compactErr
+	}
 
-	logRow, err := s.queries.CreateCompactionLog(ctx, sqlc.CreateCompactionLogParams{
+	logRow, err := s.queries.CreateCompactionLog(ctx, withTeamID(sqlc.CreateCompactionLogParams{
 		BotID:     botUUID,
 		SessionID: sessionUUID,
-	})
+	}, teamID))
 	if err != nil {
 		compactErr = err
 		return compactErr
@@ -130,6 +135,10 @@ func (s *Service) runCompactionHook(ctx context.Context, eventName string, cfg T
 }
 
 func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) error {
+	teamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	messages, err := s.queries.ListUncompactedMessagesBySession(ctx, sessionUUID)
 	if err != nil {
 		return err
@@ -220,10 +229,10 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 
 	modelUUID := db.ParseUUIDOrEmpty(cfg.ModelID)
 
-	if err := s.queries.MarkMessagesCompacted(ctx, sqlc.MarkMessagesCompactedParams{
+	if err := s.queries.MarkMessagesCompacted(ctx, withTeamID(sqlc.MarkMessagesCompactedParams{
 		CompactID: logID,
 		Column2:   messageIDs,
-	}); err != nil {
+	}, teamID)); err != nil {
 		return err
 	}
 
@@ -232,7 +241,12 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 }
 
 func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, summary, errMsg string, messageCount int, usage []byte, modelID pgtype.UUID) {
-	if _, err := s.queries.CompleteCompactionLog(ctx, sqlc.CompleteCompactionLogParams{
+	teamID, teamErr := teamIDFromContext(ctx)
+	if teamErr != nil {
+		s.logger.Error("failed to resolve team scope for compaction log", slog.String("error", teamErr.Error()))
+		return
+	}
+	if _, err := s.queries.CompleteCompactionLog(ctx, withTeamID(sqlc.CompleteCompactionLogParams{
 		ID:           logID,
 		Status:       status,
 		Summary:      summary,
@@ -240,7 +254,7 @@ func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, su
 		ErrorMessage: errMsg,
 		Usage:        usage,
 		ModelID:      modelID,
-	}); err != nil {
+	}, teamID)); err != nil {
 		s.logger.Error("failed to complete compaction log", slog.String("error", err.Error()))
 	}
 }
@@ -248,6 +262,10 @@ func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, su
 // ListLogs returns paginated compaction logs for a bot.
 func (s *Service) ListLogs(ctx context.Context, botID string, limit, offset int) ([]Log, int64, error) {
 	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return nil, 0, err
+	}
+	teamID, err := teamIDFromContext(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -264,11 +282,11 @@ func (s *Service) ListLogs(ctx context.Context, botID string, limit, offset int)
 		return nil, 0, err
 	}
 
-	rows, err := s.queries.ListCompactionLogsByBot(ctx, sqlc.ListCompactionLogsByBotParams{
-		BotID:  botUUID,
-		Limit:  int32(limit),  //nolint:gosec // clamped above
-		Offset: int32(offset), //nolint:gosec // validated above
-	})
+	rows, err := s.queries.ListCompactionLogsByBot(ctx, withTeamID(sqlc.ListCompactionLogsByBotParams{
+		BotID:       botUUID,
+		LimitCount:  int32(limit),  //nolint:gosec // clamped above
+		OffsetCount: int32(offset), //nolint:gosec // validated above
+	}, teamID))
 	if err != nil {
 		return nil, 0, err
 	}

@@ -26,6 +26,7 @@ SELECT
 FROM bots b
 LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
 WHERE b.id = $6
+  AND b.team_id = $7::uuid
 LIMIT 1
 `
 
@@ -36,6 +37,7 @@ type CreateChatParams struct {
 	CreatedByUserID pgtype.UUID `json:"created_by_user_id"`
 	Metadata        []byte      `json:"metadata"`
 	BotID           pgtype.UUID `json:"bot_id"`
+	TeamID          pgtype.UUID `json:"team_id"`
 }
 
 type CreateChatRow struct {
@@ -59,6 +61,7 @@ func (q *Queries) CreateChat(ctx context.Context, arg CreateChatParams) (CreateC
 		arg.CreatedByUserID,
 		arg.Metadata,
 		arg.BotID,
+		arg.TeamID,
 	)
 	var i CreateChatRow
 	err := row.Scan(
@@ -80,17 +83,25 @@ const deleteChat = `-- name: DeleteChat :exec
 WITH deleted_messages AS (
   DELETE FROM bot_history_messages
   WHERE bot_id = $1
+    AND team_id = $2::uuid
 ),
 deleted_sessions AS (
   DELETE FROM bot_sessions
   WHERE bot_id = $1
+    AND team_id = $2::uuid
 )
 DELETE FROM bot_channel_routes bcr
 WHERE bcr.bot_id = $1
+  AND bcr.team_id = $2::uuid
 `
 
-func (q *Queries) DeleteChat(ctx context.Context, chatID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteChat, chatID)
+type DeleteChatParams struct {
+	ChatID pgtype.UUID `json:"chat_id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) DeleteChat(ctx context.Context, arg DeleteChatParams) error {
+	_, err := q.db.Exec(ctx, deleteChat, arg.ChatID, arg.TeamID)
 	return err
 }
 
@@ -109,7 +120,13 @@ SELECT
 FROM bots b
 LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
 WHERE b.id = $1
+  AND b.team_id = $2::uuid
 `
+
+type GetChatByIDParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
 
 type GetChatByIDRow struct {
 	ID              pgtype.UUID        `json:"id"`
@@ -124,8 +141,8 @@ type GetChatByIDRow struct {
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
-func (q *Queries) GetChatByID(ctx context.Context, id pgtype.UUID) (GetChatByIDRow, error) {
-	row := q.db.QueryRow(ctx, getChatByID, id)
+func (q *Queries) GetChatByID(ctx context.Context, arg GetChatByIDParams) (GetChatByIDRow, error) {
+	row := q.db.QueryRow(ctx, getChatByID, arg.ID, arg.TeamID)
 	var i GetChatByIDRow
 	err := row.Scan(
 		&i.ID,
@@ -145,12 +162,15 @@ func (q *Queries) GetChatByID(ctx context.Context, id pgtype.UUID) (GetChatByIDR
 const getChatParticipant = `-- name: GetChatParticipant :one
 SELECT b.id AS chat_id, b.owner_user_id AS user_id, 'owner'::text AS role, b.created_at AS joined_at
 FROM bots b
-WHERE b.id = $1 AND b.owner_user_id = $2
+WHERE b.id = $1
+  AND b.team_id = $2::uuid
+  AND b.owner_user_id = $3
 LIMIT 1
 `
 
 type GetChatParticipantParams struct {
 	ChatID pgtype.UUID `json:"chat_id"`
+	TeamID pgtype.UUID `json:"team_id"`
 	UserID pgtype.UUID `json:"user_id"`
 }
 
@@ -162,7 +182,7 @@ type GetChatParticipantRow struct {
 }
 
 func (q *Queries) GetChatParticipant(ctx context.Context, arg GetChatParticipantParams) (GetChatParticipantRow, error) {
-	row := q.db.QueryRow(ctx, getChatParticipant, arg.ChatID, arg.UserID)
+	row := q.db.QueryRow(ctx, getChatParticipant, arg.ChatID, arg.TeamID, arg.UserID)
 	var i GetChatParticipantRow
 	err := row.Scan(
 		&i.ChatID,
@@ -180,12 +200,14 @@ SELECT
   NULL::timestamptz AS last_observed_at
 FROM bots b
 WHERE b.id = $1
-  AND b.owner_user_id = $2
+  AND b.team_id = $2::uuid
+  AND b.owner_user_id = $3
 LIMIT 1
 `
 
 type GetChatReadAccessByUserParams struct {
 	ChatID pgtype.UUID `json:"chat_id"`
+	TeamID pgtype.UUID `json:"team_id"`
 	UserID pgtype.UUID `json:"user_id"`
 }
 
@@ -196,7 +218,7 @@ type GetChatReadAccessByUserRow struct {
 }
 
 func (q *Queries) GetChatReadAccessByUser(ctx context.Context, arg GetChatReadAccessByUserParams) (GetChatReadAccessByUserRow, error) {
-	row := q.db.QueryRow(ctx, getChatReadAccessByUser, arg.ChatID, arg.UserID)
+	row := q.db.QueryRow(ctx, getChatReadAccessByUser, arg.ChatID, arg.TeamID, arg.UserID)
 	var i GetChatReadAccessByUserRow
 	err := row.Scan(&i.AccessMode, &i.ParticipantRole, &i.LastObservedAt)
 	return i, err
@@ -210,7 +232,13 @@ SELECT
 FROM bots b
 LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
 WHERE b.id = $1
+  AND b.team_id = $2::uuid
 `
+
+type GetChatSettingsParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
 
 type GetChatSettingsRow struct {
 	ChatID    pgtype.UUID        `json:"chat_id"`
@@ -218,8 +246,8 @@ type GetChatSettingsRow struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
-func (q *Queries) GetChatSettings(ctx context.Context, id pgtype.UUID) (GetChatSettingsRow, error) {
-	row := q.db.QueryRow(ctx, getChatSettings, id)
+func (q *Queries) GetChatSettings(ctx context.Context, arg GetChatSettingsParams) (GetChatSettingsRow, error) {
+	row := q.db.QueryRow(ctx, getChatSettings, arg.ID, arg.TeamID)
 	var i GetChatSettingsRow
 	err := row.Scan(&i.ChatID, &i.ModelID, &i.UpdatedAt)
 	return i, err
@@ -229,8 +257,14 @@ const listChatParticipants = `-- name: ListChatParticipants :many
 SELECT b.id AS chat_id, b.owner_user_id AS user_id, 'owner'::text AS role, b.created_at AS joined_at
 FROM bots b
 WHERE b.id = $1
+  AND b.team_id = $2::uuid
 ORDER BY joined_at ASC
 `
+
+type ListChatParticipantsParams struct {
+	ChatID pgtype.UUID `json:"chat_id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
 
 type ListChatParticipantsRow struct {
 	ChatID   pgtype.UUID        `json:"chat_id"`
@@ -239,8 +273,8 @@ type ListChatParticipantsRow struct {
 	JoinedAt pgtype.Timestamptz `json:"joined_at"`
 }
 
-func (q *Queries) ListChatParticipants(ctx context.Context, chatID pgtype.UUID) ([]ListChatParticipantsRow, error) {
-	rows, err := q.db.Query(ctx, listChatParticipants, chatID)
+func (q *Queries) ListChatParticipants(ctx context.Context, arg ListChatParticipantsParams) ([]ListChatParticipantsRow, error) {
+	rows, err := q.db.Query(ctx, listChatParticipants, arg.ChatID, arg.TeamID)
 	if err != nil {
 		return nil, err
 	}
@@ -279,12 +313,14 @@ SELECT
 FROM bots b
 LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
 WHERE b.id = $1
-  AND b.owner_user_id = $2
+  AND b.team_id = $2::uuid
+  AND b.owner_user_id = $3
 ORDER BY b.updated_at DESC
 `
 
 type ListChatsByBotAndUserParams struct {
 	BotID  pgtype.UUID `json:"bot_id"`
+	TeamID pgtype.UUID `json:"team_id"`
 	UserID pgtype.UUID `json:"user_id"`
 }
 
@@ -302,7 +338,7 @@ type ListChatsByBotAndUserRow struct {
 }
 
 func (q *Queries) ListChatsByBotAndUser(ctx context.Context, arg ListChatsByBotAndUserParams) ([]ListChatsByBotAndUserRow, error) {
-	rows, err := q.db.Query(ctx, listChatsByBotAndUser, arg.BotID, arg.UserID)
+	rows, err := q.db.Query(ctx, listChatsByBotAndUser, arg.BotID, arg.TeamID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -347,8 +383,14 @@ SELECT
 FROM bots b
 LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
 WHERE b.id = $1
+  AND b.team_id = $2::uuid
 ORDER BY b.created_at DESC
 `
+
+type ListThreadsByParentParams struct {
+	ParentChatID pgtype.UUID `json:"parent_chat_id"`
+	TeamID       pgtype.UUID `json:"team_id"`
+}
 
 type ListThreadsByParentRow struct {
 	ID              pgtype.UUID        `json:"id"`
@@ -363,8 +405,8 @@ type ListThreadsByParentRow struct {
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
-func (q *Queries) ListThreadsByParent(ctx context.Context, id pgtype.UUID) ([]ListThreadsByParentRow, error) {
-	rows, err := q.db.Query(ctx, listThreadsByParent, id)
+func (q *Queries) ListThreadsByParent(ctx context.Context, arg ListThreadsByParentParams) ([]ListThreadsByParentRow, error) {
+	rows, err := q.db.Query(ctx, listThreadsByParent, arg.ParentChatID, arg.TeamID)
 	if err != nil {
 		return nil, err
 	}
@@ -415,6 +457,7 @@ SELECT
 FROM bots b
 LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
 WHERE b.id = $2
+  AND b.team_id = $3::uuid
   AND b.owner_user_id = $1
 ORDER BY b.updated_at DESC
 `
@@ -422,6 +465,7 @@ ORDER BY b.updated_at DESC
 type ListVisibleChatsByBotAndUserParams struct {
 	UserID pgtype.UUID `json:"user_id"`
 	BotID  pgtype.UUID `json:"bot_id"`
+	TeamID pgtype.UUID `json:"team_id"`
 }
 
 type ListVisibleChatsByBotAndUserRow struct {
@@ -441,7 +485,7 @@ type ListVisibleChatsByBotAndUserRow struct {
 }
 
 func (q *Queries) ListVisibleChatsByBotAndUser(ctx context.Context, arg ListVisibleChatsByBotAndUserParams) ([]ListVisibleChatsByBotAndUserRow, error) {
-	rows, err := q.db.Query(ctx, listVisibleChatsByBotAndUser, arg.UserID, arg.BotID)
+	rows, err := q.db.Query(ctx, listVisibleChatsByBotAndUser, arg.UserID, arg.BotID, arg.TeamID)
 	if err != nil {
 		return nil, err
 	}
@@ -480,17 +524,19 @@ WHERE EXISTS (
   SELECT 1
   FROM bots b
   WHERE b.id = $1
-    AND b.owner_user_id = $2
+    AND b.team_id = $2::uuid
+    AND b.owner_user_id = $3
 )
 `
 
 type RemoveChatParticipantParams struct {
 	ChatID pgtype.UUID `json:"chat_id"`
+	TeamID pgtype.UUID `json:"team_id"`
 	UserID pgtype.UUID `json:"user_id"`
 }
 
 func (q *Queries) RemoveChatParticipant(ctx context.Context, arg RemoveChatParticipantParams) error {
-	_, err := q.db.Exec(ctx, removeChatParticipant, arg.ChatID, arg.UserID)
+	_, err := q.db.Exec(ctx, removeChatParticipant, arg.ChatID, arg.TeamID, arg.UserID)
 	return err
 }
 
@@ -498,10 +544,16 @@ const touchChat = `-- name: TouchChat :exec
 UPDATE bots
 SET updated_at = now()
 WHERE id = $1
+  AND team_id = $2::uuid
 `
 
-func (q *Queries) TouchChat(ctx context.Context, chatID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, touchChat, chatID)
+type TouchChatParams struct {
+	ChatID pgtype.UUID `json:"chat_id"`
+	TeamID pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) TouchChat(ctx context.Context, arg TouchChatParams) error {
+	_, err := q.db.Exec(ctx, touchChat, arg.ChatID, arg.TeamID)
 	return err
 }
 
@@ -511,7 +563,8 @@ WITH updated AS (
   SET display_name = $1,
       updated_at = now()
   WHERE bots.id = $2
-  RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, command_ui_language, reasoning_enabled, reasoning_effort, chat_model_id, chat_runtime, chat_acp_agent_id, chat_acp_project_path, chat_acp_project_mode, search_provider_id, fetch_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, heartbeat_model_id, compaction_enabled, compaction_threshold, compaction_ratio, compaction_model_id, title_model_id, image_model_id, discuss_probe_model_id, tts_model_id, transcription_model_id, video_model_id, persist_full_tool_results, show_tool_calls_in_im, tool_approval_config, display_enabled, overlay_provider, overlay_enabled, overlay_config, metadata, created_at, updated_at, acl_default_effect
+    AND bots.team_id = $3::uuid
+  RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, command_ui_language, reasoning_enabled, reasoning_effort, chat_model_id, chat_runtime, chat_acp_agent_id, chat_acp_project_path, chat_acp_project_mode, search_provider_id, fetch_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, heartbeat_model_id, compaction_enabled, compaction_threshold, compaction_ratio, compaction_model_id, title_model_id, image_model_id, discuss_probe_model_id, tts_model_id, transcription_model_id, video_model_id, persist_full_tool_results, show_tool_calls_in_im, tool_approval_config, display_enabled, overlay_provider, overlay_enabled, overlay_config, metadata, created_at, updated_at, team_id, acl_default_effect
 )
 SELECT
   updated.id AS id,
@@ -529,8 +582,9 @@ LEFT JOIN models chat_models ON chat_models.id = updated.chat_model_id
 `
 
 type UpdateChatTitleParams struct {
-	Title pgtype.Text `json:"title"`
-	BotID pgtype.UUID `json:"bot_id"`
+	Title  pgtype.Text `json:"title"`
+	BotID  pgtype.UUID `json:"bot_id"`
+	TeamID pgtype.UUID `json:"team_id"`
 }
 
 type UpdateChatTitleRow struct {
@@ -547,7 +601,7 @@ type UpdateChatTitleRow struct {
 }
 
 func (q *Queries) UpdateChatTitle(ctx context.Context, arg UpdateChatTitleParams) (UpdateChatTitleRow, error) {
-	row := q.db.QueryRow(ctx, updateChatTitle, arg.Title, arg.BotID)
+	row := q.db.QueryRow(ctx, updateChatTitle, arg.Title, arg.BotID, arg.TeamID)
 	var i UpdateChatTitleRow
 	err := row.Scan(
 		&i.ID,
@@ -572,6 +626,7 @@ updated AS (
   SET chat_model_id = COALESCE($1::uuid, bots.chat_model_id),
       updated_at = now()
   WHERE bots.id = $2
+    AND bots.team_id = $3::uuid
   RETURNING bots.id, bots.chat_model_id, bots.updated_at
 )
 SELECT
@@ -585,6 +640,7 @@ LEFT JOIN models chat_models ON chat_models.id = updated.chat_model_id
 type UpsertChatSettingsParams struct {
 	ChatModelID pgtype.UUID `json:"chat_model_id"`
 	ID          pgtype.UUID `json:"id"`
+	TeamID      pgtype.UUID `json:"team_id"`
 }
 
 type UpsertChatSettingsRow struct {
@@ -595,7 +651,7 @@ type UpsertChatSettingsRow struct {
 
 // chat_settings
 func (q *Queries) UpsertChatSettings(ctx context.Context, arg UpsertChatSettingsParams) (UpsertChatSettingsRow, error) {
-	row := q.db.QueryRow(ctx, upsertChatSettings, arg.ChatModelID, arg.ID)
+	row := q.db.QueryRow(ctx, upsertChatSettings, arg.ChatModelID, arg.ID, arg.TeamID)
 	var i UpsertChatSettingsRow
 	err := row.Scan(&i.ChatID, &i.ModelID, &i.UpdatedAt)
 	return i, err

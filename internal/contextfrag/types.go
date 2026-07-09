@@ -173,6 +173,7 @@ const (
 
 // Scope preserves IM/group-chat topology separately from rendered text.
 type Scope struct {
+	TeamID                    string            `json:"team_id,omitempty"`
 	BotID                     string            `json:"bot_id,omitempty"`
 	ChatID                    string            `json:"chat_id,omitempty"`
 	SessionID                 string            `json:"session_id,omitempty"`

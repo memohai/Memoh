@@ -1,8 +1,15 @@
 package server
 
 import (
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	neturl "net/url"
 	"testing"
+
+	"github.com/labstack/echo/v4"
+
+	"github.com/memohai/memoh/internal/teams"
 )
 
 func TestShouldSkipJWT_ChannelWebhookPaths(t *testing.T) {
@@ -29,6 +36,39 @@ func TestShouldSkipJWT_ChannelWebhookPaths(t *testing.T) {
 			t.Fatalf("path=%q want=%v got=%v", tc.path, tc.want, got)
 		}
 	}
+}
+
+func TestNewServerInjectsDefaultTeamScope(t *testing.T) {
+	t.Parallel()
+
+	handler := &teamProbeHandler{}
+	srv := NewServer(slog.New(slog.DiscardHandler), ":0", "", handler)
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	rec := httptest.NewRecorder()
+
+	srv.echo.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+	if handler.seen.TeamID != teams.DefaultTeamID {
+		t.Fatalf("team id = %q, want %q", handler.seen.TeamID, teams.DefaultTeamID)
+	}
+}
+
+type teamProbeHandler struct {
+	seen teams.Scope
+}
+
+func (h *teamProbeHandler) Register(e *echo.Echo) {
+	e.GET("/ping", func(c echo.Context) error {
+		scope, err := teams.ScopeFromContext(c.Request().Context())
+		if err != nil {
+			return err
+		}
+		h.seen = scope
+		return c.NoContent(http.StatusNoContent)
+	})
 }
 
 func TestShouldLimitPublicRequestBody(t *testing.T) {

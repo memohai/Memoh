@@ -12,28 +12,23 @@ import (
 )
 
 const getSnapshotByContainerAndRuntimeName = `-- name: GetSnapshotByContainerAndRuntimeName :one
-SELECT
-  id,
-  container_id,
-  runtime_snapshot_name,
-  display_name,
-  parent_runtime_snapshot_name,
-  snapshotter,
-  source,
-  created_at
+SELECT snapshots.id, snapshots.container_id, snapshots.runtime_snapshot_name, snapshots.display_name, snapshots.parent_runtime_snapshot_name, snapshots.snapshotter, snapshots.source, snapshots.created_at, snapshots.team_id
 FROM snapshots
-WHERE container_id = $1
-  AND runtime_snapshot_name = $2
+JOIN containers c ON c.container_id = snapshots.container_id
+WHERE snapshots.container_id = $1
+  AND snapshots.runtime_snapshot_name = $2
+  AND c.team_id = $3
 LIMIT 1
 `
 
 type GetSnapshotByContainerAndRuntimeNameParams struct {
-	ContainerID         string `json:"container_id"`
-	RuntimeSnapshotName string `json:"runtime_snapshot_name"`
+	ContainerID         string      `json:"container_id"`
+	RuntimeSnapshotName string      `json:"runtime_snapshot_name"`
+	TeamID              pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) GetSnapshotByContainerAndRuntimeName(ctx context.Context, arg GetSnapshotByContainerAndRuntimeNameParams) (Snapshot, error) {
-	row := q.db.QueryRow(ctx, getSnapshotByContainerAndRuntimeName, arg.ContainerID, arg.RuntimeSnapshotName)
+	row := q.db.QueryRow(ctx, getSnapshotByContainerAndRuntimeName, arg.ContainerID, arg.RuntimeSnapshotName, arg.TeamID)
 	var i Snapshot
 	err := row.Scan(
 		&i.ID,
@@ -44,27 +39,27 @@ func (q *Queries) GetSnapshotByContainerAndRuntimeName(ctx context.Context, arg 
 		&i.Snapshotter,
 		&i.Source,
 		&i.CreatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listSnapshotsByContainerID = `-- name: ListSnapshotsByContainerID :many
-SELECT
-  id,
-  container_id,
-  runtime_snapshot_name,
-  display_name,
-  parent_runtime_snapshot_name,
-  snapshotter,
-  source,
-  created_at
+SELECT snapshots.id, snapshots.container_id, snapshots.runtime_snapshot_name, snapshots.display_name, snapshots.parent_runtime_snapshot_name, snapshots.snapshotter, snapshots.source, snapshots.created_at, snapshots.team_id
 FROM snapshots
-WHERE container_id = $1
-ORDER BY created_at DESC
+JOIN containers c ON c.container_id = snapshots.container_id
+WHERE snapshots.container_id = $1
+  AND c.team_id = $2
+ORDER BY snapshots.created_at DESC
 `
 
-func (q *Queries) ListSnapshotsByContainerID(ctx context.Context, containerID string) ([]Snapshot, error) {
-	rows, err := q.db.Query(ctx, listSnapshotsByContainerID, containerID)
+type ListSnapshotsByContainerIDParams struct {
+	ContainerID string      `json:"container_id"`
+	TeamID      pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) ListSnapshotsByContainerID(ctx context.Context, arg ListSnapshotsByContainerIDParams) ([]Snapshot, error) {
+	rows, err := q.db.Query(ctx, listSnapshotsByContainerID, arg.ContainerID, arg.TeamID)
 	if err != nil {
 		return nil, err
 	}
@@ -81,6 +76,7 @@ func (q *Queries) ListSnapshotsByContainerID(ctx context.Context, containerID st
 			&i.Snapshotter,
 			&i.Source,
 			&i.CreatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -105,9 +101,16 @@ SELECT
   cv.version
 FROM snapshots s
 LEFT JOIN container_versions cv ON cv.snapshot_id = s.id
+JOIN containers c ON c.container_id = s.container_id
 WHERE s.container_id = $1
+  AND c.team_id = $2
 ORDER BY s.created_at DESC
 `
+
+type ListSnapshotsWithVersionByContainerIDParams struct {
+	ContainerID string      `json:"container_id"`
+	TeamID      pgtype.UUID `json:"team_id"`
+}
 
 type ListSnapshotsWithVersionByContainerIDRow struct {
 	ID                        pgtype.UUID        `json:"id"`
@@ -121,8 +124,8 @@ type ListSnapshotsWithVersionByContainerIDRow struct {
 	Version                   pgtype.Int4        `json:"version"`
 }
 
-func (q *Queries) ListSnapshotsWithVersionByContainerID(ctx context.Context, containerID string) ([]ListSnapshotsWithVersionByContainerIDRow, error) {
-	rows, err := q.db.Query(ctx, listSnapshotsWithVersionByContainerID, containerID)
+func (q *Queries) ListSnapshotsWithVersionByContainerID(ctx context.Context, arg ListSnapshotsWithVersionByContainerIDParams) ([]ListSnapshotsWithVersionByContainerIDRow, error) {
+	rows, err := q.db.Query(ctx, listSnapshotsWithVersionByContainerID, arg.ContainerID, arg.TeamID)
 	if err != nil {
 		return nil, err
 	}
@@ -154,46 +157,58 @@ func (q *Queries) ListSnapshotsWithVersionByContainerID(ctx context.Context, con
 const upsertSnapshot = `-- name: UpsertSnapshot :one
 INSERT INTO snapshots (
   container_id,
+  team_id,
   runtime_snapshot_name,
   display_name,
   parent_runtime_snapshot_name,
   snapshotter,
   source
 )
-VALUES (
+SELECT
+  c.container_id,
+  c.team_id,
   $1,
   $2,
   $3,
   $4,
-  $5,
-  $6
-)
+  $5
+FROM containers c
+WHERE c.container_id = $6
+  AND c.team_id = $7
 ON CONFLICT (container_id, runtime_snapshot_name) DO UPDATE
 SET
   display_name = EXCLUDED.display_name,
   parent_runtime_snapshot_name = EXCLUDED.parent_runtime_snapshot_name,
   snapshotter = EXCLUDED.snapshotter,
   source = EXCLUDED.source
-RETURNING id, container_id, runtime_snapshot_name, display_name, parent_runtime_snapshot_name, snapshotter, source, created_at
+WHERE EXISTS (
+  SELECT 1
+  FROM containers c
+  WHERE c.container_id = snapshots.container_id
+    AND c.team_id = $7
+)
+RETURNING id, container_id, runtime_snapshot_name, display_name, parent_runtime_snapshot_name, snapshotter, source, created_at, team_id
 `
 
 type UpsertSnapshotParams struct {
-	ContainerID               string      `json:"container_id"`
 	RuntimeSnapshotName       string      `json:"runtime_snapshot_name"`
 	DisplayName               pgtype.Text `json:"display_name"`
 	ParentRuntimeSnapshotName pgtype.Text `json:"parent_runtime_snapshot_name"`
 	Snapshotter               string      `json:"snapshotter"`
 	Source                    string      `json:"source"`
+	ContainerID               string      `json:"container_id"`
+	TeamID                    pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpsertSnapshot(ctx context.Context, arg UpsertSnapshotParams) (Snapshot, error) {
 	row := q.db.QueryRow(ctx, upsertSnapshot,
-		arg.ContainerID,
 		arg.RuntimeSnapshotName,
 		arg.DisplayName,
 		arg.ParentRuntimeSnapshotName,
 		arg.Snapshotter,
 		arg.Source,
+		arg.ContainerID,
+		arg.TeamID,
 	)
 	var i Snapshot
 	err := row.Scan(
@@ -205,6 +220,7 @@ func (q *Queries) UpsertSnapshot(ctx context.Context, arg UpsertSnapshotParams) 
 		&i.Snapshotter,
 		&i.Source,
 		&i.CreatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

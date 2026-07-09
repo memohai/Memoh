@@ -13,40 +13,47 @@ SELECT
   u.avatar_url AS user_avatar_url
 FROM bot_user_grants g
 LEFT JOIN users u ON u.id = g.user_id
-WHERE g.bot_id = $1
+WHERE g.bot_id = sqlc.arg(bot_id)
+  AND g.team_id = sqlc.arg(team_id)::uuid
 ORDER BY g.subject_type DESC, g.created_at ASC;
 
 -- name: GetBotUserGrantByID :one
-SELECT id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at
+SELECT *
 FROM bot_user_grants
-WHERE id = $1;
+WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: ListBotUserGrantsForUser :many
 SELECT id, bot_id, subject_type, user_id, permissions
 FROM bot_user_grants
-WHERE bot_id = $1
+WHERE bot_id = sqlc.arg(bot_id)
+  AND team_id = sqlc.arg(team_id)::uuid
   AND (
     subject_type = 'everyone'
     OR (subject_type = 'user' AND user_id = sqlc.narg(user_id)::uuid)
   );
 
 -- name: CreateBotUserGrant :one
-INSERT INTO bot_user_grants (bot_id, subject_type, user_id, permissions, created_by_user_id)
+INSERT INTO bot_user_grants (team_id, bot_id, subject_type, user_id, permissions, created_by_user_id)
 VALUES (
-  $1,
-  $2,
+  sqlc.arg(team_id)::uuid,
+  sqlc.arg(bot_id),
+  sqlc.arg(subject_type),
   sqlc.narg(user_id)::uuid,
-  $3,
+  sqlc.arg(permissions),
   sqlc.narg(created_by_user_id)::uuid
 )
-RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at;
+RETURNING *;
 
 -- name: UpdateBotUserGrantPermissions :one
 UPDATE bot_user_grants
-SET permissions = $2,
+SET permissions = sqlc.arg(permissions),
     updated_at = now()
-WHERE id = $1
-RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at;
+WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid
+RETURNING *;
 
 -- name: DeleteBotUserGrantByID :exec
-DELETE FROM bot_user_grants WHERE id = $1;
+DELETE FROM bot_user_grants
+WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid;

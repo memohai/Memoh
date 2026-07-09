@@ -199,7 +199,7 @@ func (s *Service) clearACL(ctx context.Context, botID string) {
 		return
 	}
 	for _, r := range rows {
-		_ = s.acl.DeleteRule(ctx, r.ID)
+		_ = s.acl.DeleteRule(ctx, botID, r.ID)
 	}
 }
 

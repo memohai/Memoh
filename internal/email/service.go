@@ -45,6 +45,10 @@ func (s *Service) CreateProvider(ctx context.Context, userID string, req CreateP
 	if err != nil {
 		return ProviderResponse{}, fmt.Errorf("invalid user_id: %w", err)
 	}
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return ProviderResponse{}, err
+	}
 	if strings.TrimSpace(req.Name) == "" {
 		return ProviderResponse{}, errors.New("name is required")
 	}
@@ -68,6 +72,7 @@ func (s *Service) CreateProvider(ctx context.Context, userID string, req CreateP
 		return ProviderResponse{}, fmt.Errorf("marshal config: %w", err)
 	}
 	row, err := s.queries.CreateEmailProvider(ctx, sqlc.CreateEmailProviderParams{
+		TeamID:   pgTeamID,
 		UserID:   pgUserID,
 		Name:     strings.TrimSpace(req.Name),
 		Provider: string(req.Provider),
@@ -84,7 +89,12 @@ func (s *Service) EnsureDefaultGmailProvider(ctx context.Context, userID string)
 	if err != nil {
 		return fmt.Errorf("invalid user_id: %w", err)
 	}
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	_, err = s.queries.GetEmailProviderByNameAndUser(ctx, sqlc.GetEmailProviderByNameAndUserParams{
+		TeamID: pgTeamID,
 		UserID: pgUserID,
 		Name:   DefaultGmailProviderName,
 	})
@@ -107,11 +117,16 @@ func (s *Service) GetProvider(ctx context.Context, userID, id string) (ProviderR
 	if err != nil {
 		return ProviderResponse{}, fmt.Errorf("invalid user_id: %w", err)
 	}
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return ProviderResponse{}, err
+	}
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
 		return ProviderResponse{}, err
 	}
 	row, err := s.queries.GetEmailProviderByIDAndUser(ctx, sqlc.GetEmailProviderByIDAndUserParams{
+		TeamID: pgTeamID,
 		ID:     pgID,
 		UserID: pgUserID,
 	})
@@ -151,7 +166,12 @@ func (s *Service) ListProviders(ctx context.Context, userID, provider string) ([
 	if provider == "" {
 		rows, err = s.queries.ListEmailProvidersByUser(ctx, pgUserID)
 	} else {
+		pgTeamID, teamErr := teamIDFromContext(ctx)
+		if teamErr != nil {
+			return nil, teamErr
+		}
 		rows, err = s.queries.ListEmailProvidersByUserAndProvider(ctx, sqlc.ListEmailProvidersByUserAndProviderParams{
+			TeamID:   pgTeamID,
 			UserID:   pgUserID,
 			Provider: provider,
 		})
@@ -192,11 +212,16 @@ func (s *Service) UpdateProvider(ctx context.Context, userID, id string, req Upd
 	if err != nil {
 		return ProviderResponse{}, fmt.Errorf("invalid user_id: %w", err)
 	}
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return ProviderResponse{}, err
+	}
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
 		return ProviderResponse{}, err
 	}
 	current, err := s.queries.GetEmailProviderByIDAndUser(ctx, sqlc.GetEmailProviderByIDAndUserParams{
+		TeamID: pgTeamID,
 		ID:     pgID,
 		UserID: pgUserID,
 	})
@@ -230,6 +255,7 @@ func (s *Service) UpdateProvider(ctx context.Context, userID, id string, req Upd
 		config = configJSON
 	}
 	updated, err := s.queries.UpdateEmailProviderByIDAndUser(ctx, sqlc.UpdateEmailProviderByIDAndUserParams{
+		TeamID:   pgTeamID,
 		ID:       pgID,
 		UserID:   pgUserID,
 		Name:     name,
@@ -247,11 +273,16 @@ func (s *Service) DeleteProvider(ctx context.Context, userID, id string) error {
 	if err != nil {
 		return fmt.Errorf("invalid user_id: %w", err)
 	}
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
 		return err
 	}
 	return s.queries.DeleteEmailProviderByIDAndUser(ctx, sqlc.DeleteEmailProviderByIDAndUserParams{
+		TeamID: pgTeamID,
 		ID:     pgID,
 		UserID: pgUserID,
 	})
@@ -297,6 +328,10 @@ func (s *Service) CreateBinding(ctx context.Context, botID string, req CreateBin
 	if err != nil {
 		return BindingResponse{}, fmt.Errorf("invalid bot_id: %w", err)
 	}
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return BindingResponse{}, err
+	}
 	pgProviderID, err := db.ParseUUID(req.EmailProviderID)
 	if err != nil {
 		return BindingResponse{}, fmt.Errorf("invalid email_provider_id: %w", err)
@@ -316,6 +351,7 @@ func (s *Service) CreateBinding(ctx context.Context, botID string, req CreateBin
 		return BindingResponse{}, fmt.Errorf("marshal config: %w", err)
 	}
 	row, err := s.queries.CreateBotEmailBinding(ctx, sqlc.CreateBotEmailBindingParams{
+		TeamID:          pgTeamID,
 		BotID:           pgBotID,
 		EmailProviderID: pgProviderID,
 		EmailAddress:    strings.TrimSpace(req.EmailAddress),
@@ -386,6 +422,10 @@ func (s *Service) GetBotBinding(ctx context.Context, botID string) (BindingRespo
 }
 
 func (s *Service) UpdateBinding(ctx context.Context, id string, req UpdateBindingRequest) (BindingResponse, error) {
+	pgTeamID, err := teamIDFromContext(ctx)
+	if err != nil {
+		return BindingResponse{}, err
+	}
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
 		return BindingResponse{}, err
@@ -419,6 +459,7 @@ func (s *Service) UpdateBinding(ctx context.Context, id string, req UpdateBindin
 		config = configJSON
 	}
 	updated, err := s.queries.UpdateBotEmailBinding(ctx, sqlc.UpdateBotEmailBindingParams{
+		TeamID:       pgTeamID,
 		ID:           pgID,
 		EmailAddress: emailAddr,
 		CanRead:      canRead,

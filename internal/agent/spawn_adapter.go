@@ -49,6 +49,7 @@ func runConfigFromSpawnRunConfig(cfg tools.SpawnRunConfig) RunConfig {
 	}
 
 	identity := SessionContext{
+		TeamID:            cfg.Identity.TeamID,
 		BotID:             cfg.Identity.BotID,
 		ChatID:            cfg.Identity.ChatID,
 		SessionID:         cfg.Identity.SessionID,
@@ -69,6 +70,7 @@ func runConfigFromSpawnRunConfig(cfg tools.SpawnRunConfig) RunConfig {
 		SupportsToolCall:         true,
 		Identity:                 identity,
 		ContextScope: contextfrag.Scope{
+			TeamID:            identity.TeamID,
 			BotID:             identity.BotID,
 			ChatID:            identity.ChatID,
 			SessionID:         identity.SessionID,
