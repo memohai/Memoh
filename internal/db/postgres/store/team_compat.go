@@ -724,3 +724,77 @@ func (q *Queries) UpdateContainerStopped(ctx context.Context, botID pgtype.UUID)
 		TeamID: teamUUIDFromContext(ctx),
 	})
 }
+
+// Task 1: tool_approval and user_input by-id queries scoped to team.
+
+func (q *Queries) ApproveToolApprovalRequest(ctx context.Context, arg dbsqlc.ApproveToolApprovalRequestParams) (dbsqlc.ToolApprovalRequest, error) {
+	if !arg.TeamID.Valid {
+		arg.TeamID = teamUUIDFromContext(ctx)
+	}
+	return q.Queries.ApproveToolApprovalRequest(ctx, arg)
+}
+
+func (q *Queries) RejectToolApprovalRequest(ctx context.Context, arg dbsqlc.RejectToolApprovalRequestParams) (dbsqlc.ToolApprovalRequest, error) {
+	if !arg.TeamID.Valid {
+		arg.TeamID = teamUUIDFromContext(ctx)
+	}
+	return q.Queries.RejectToolApprovalRequest(ctx, arg)
+}
+
+func (q *Queries) UpdateToolApprovalPromptMessage(ctx context.Context, arg dbsqlc.UpdateToolApprovalPromptMessageParams) (dbsqlc.ToolApprovalRequest, error) {
+	if !arg.TeamID.Valid {
+		arg.TeamID = teamUUIDFromContext(ctx)
+	}
+	return q.Queries.UpdateToolApprovalPromptMessage(ctx, arg)
+}
+
+func (q *Queries) SubmitUserInputRequest(ctx context.Context, arg dbsqlc.SubmitUserInputRequestParams) (dbsqlc.UserInputRequest, error) {
+	if !arg.TeamID.Valid {
+		arg.TeamID = teamUUIDFromContext(ctx)
+	}
+	return q.Queries.SubmitUserInputRequest(ctx, arg)
+}
+
+func (q *Queries) CancelUserInputRequest(ctx context.Context, arg dbsqlc.CancelUserInputRequestParams) (dbsqlc.UserInputRequest, error) {
+	if !arg.TeamID.Valid {
+		arg.TeamID = teamUUIDFromContext(ctx)
+	}
+	return q.Queries.CancelUserInputRequest(ctx, arg)
+}
+
+func (q *Queries) FailUserInputRequest(ctx context.Context, arg dbsqlc.FailUserInputRequestParams) (dbsqlc.UserInputRequest, error) {
+	if !arg.TeamID.Valid {
+		arg.TeamID = teamUUIDFromContext(ctx)
+	}
+	return q.Queries.FailUserInputRequest(ctx, arg)
+}
+
+func (q *Queries) UpdateUserInputPromptMessage(ctx context.Context, arg dbsqlc.UpdateUserInputPromptMessageParams) (dbsqlc.UserInputRequest, error) {
+	if !arg.TeamID.Valid {
+		arg.TeamID = teamUUIDFromContext(ctx)
+	}
+	return q.Queries.UpdateUserInputPromptMessage(ctx, arg)
+}
+
+func (q *Queries) UpdateUserInputAssistantMessage(ctx context.Context, arg dbsqlc.UpdateUserInputAssistantMessageParams) (dbsqlc.UserInputRequest, error) {
+	if !arg.TeamID.Valid {
+		arg.TeamID = teamUUIDFromContext(ctx)
+	}
+	return q.Queries.UpdateUserInputAssistantMessage(ctx, arg)
+}
+
+func (q *Queries) UpdateUserInputToolResultMessage(ctx context.Context, arg dbsqlc.UpdateUserInputToolResultMessageParams) (dbsqlc.UserInputRequest, error) {
+	if !arg.TeamID.Valid {
+		arg.TeamID = teamUUIDFromContext(ctx)
+	}
+	return q.Queries.UpdateUserInputToolResultMessage(ctx, arg)
+}
+
+// Task 2: UpsertBotSettings scoped to team.
+
+func (q *Queries) UpsertBotSettings(ctx context.Context, arg dbsqlc.UpsertBotSettingsParams) (dbsqlc.UpsertBotSettingsRow, error) {
+	if !arg.TeamID.Valid {
+		arg.TeamID = teamUUIDFromContext(ctx)
+	}
+	return q.Queries.UpsertBotSettings(ctx, arg)
+}

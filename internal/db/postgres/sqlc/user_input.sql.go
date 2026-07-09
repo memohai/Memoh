@@ -89,6 +89,7 @@ SET status = 'canceled',
     canceled_at = now(),
     updated_at = now()
 WHERE id = $3
+  AND team_id = $4::uuid
   AND status = 'pending'
   AND (expires_at IS NULL OR expires_at > now())
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id
@@ -98,10 +99,16 @@ type CancelUserInputRequestParams struct {
 	ResultJson                   []byte      `json:"result_json"`
 	RespondedByChannelIdentityID pgtype.UUID `json:"responded_by_channel_identity_id"`
 	ID                           pgtype.UUID `json:"id"`
+	TeamID                       pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) CancelUserInputRequest(ctx context.Context, arg CancelUserInputRequestParams) (UserInputRequest, error) {
-	row := q.db.QueryRow(ctx, cancelUserInputRequest, arg.ResultJson, arg.RespondedByChannelIdentityID, arg.ID)
+	row := q.db.QueryRow(ctx, cancelUserInputRequest,
+		arg.ResultJson,
+		arg.RespondedByChannelIdentityID,
+		arg.ID,
+		arg.TeamID,
+	)
 	var i UserInputRequest
 	err := row.Scan(
 		&i.ID,
@@ -275,6 +282,7 @@ SET status = 'failed',
     result_json = $1,
     updated_at = now()
 WHERE id = $2
+  AND team_id = $3::uuid
   AND status = 'pending'
   AND (expires_at IS NULL OR expires_at > now())
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id
@@ -283,10 +291,11 @@ RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, t
 type FailUserInputRequestParams struct {
 	ResultJson []byte      `json:"result_json"`
 	ID         pgtype.UUID `json:"id"`
+	TeamID     pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) FailUserInputRequest(ctx context.Context, arg FailUserInputRequestParams) (UserInputRequest, error) {
-	row := q.db.QueryRow(ctx, failUserInputRequest, arg.ResultJson, arg.ID)
+	row := q.db.QueryRow(ctx, failUserInputRequest, arg.ResultJson, arg.ID, arg.TeamID)
 	var i UserInputRequest
 	err := row.Scan(
 		&i.ID,
@@ -767,6 +776,7 @@ SET status = 'submitted',
     responded_at = now(),
     updated_at = now()
 WHERE id = $3
+  AND team_id = $4::uuid
   AND status = 'pending'
   AND (expires_at IS NULL OR expires_at > now())
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id
@@ -776,10 +786,16 @@ type SubmitUserInputRequestParams struct {
 	ResultJson                   []byte      `json:"result_json"`
 	RespondedByChannelIdentityID pgtype.UUID `json:"responded_by_channel_identity_id"`
 	ID                           pgtype.UUID `json:"id"`
+	TeamID                       pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) SubmitUserInputRequest(ctx context.Context, arg SubmitUserInputRequestParams) (UserInputRequest, error) {
-	row := q.db.QueryRow(ctx, submitUserInputRequest, arg.ResultJson, arg.RespondedByChannelIdentityID, arg.ID)
+	row := q.db.QueryRow(ctx, submitUserInputRequest,
+		arg.ResultJson,
+		arg.RespondedByChannelIdentityID,
+		arg.ID,
+		arg.TeamID,
+	)
 	var i UserInputRequest
 	err := row.Scan(
 		&i.ID,
@@ -819,16 +835,18 @@ UPDATE user_input_requests
 SET assistant_message_id = $1,
     updated_at = now()
 WHERE id = $2
+  AND team_id = $3::uuid
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id
 `
 
 type UpdateUserInputAssistantMessageParams struct {
 	AssistantMessageID pgtype.UUID `json:"assistant_message_id"`
 	ID                 pgtype.UUID `json:"id"`
+	TeamID             pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateUserInputAssistantMessage(ctx context.Context, arg UpdateUserInputAssistantMessageParams) (UserInputRequest, error) {
-	row := q.db.QueryRow(ctx, updateUserInputAssistantMessage, arg.AssistantMessageID, arg.ID)
+	row := q.db.QueryRow(ctx, updateUserInputAssistantMessage, arg.AssistantMessageID, arg.ID, arg.TeamID)
 	var i UserInputRequest
 	err := row.Scan(
 		&i.ID,
@@ -869,6 +887,7 @@ SET prompt_message_id = $1,
     prompt_external_message_id = $2,
     updated_at = now()
 WHERE id = $3
+  AND team_id = $4::uuid
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id
 `
 
@@ -876,10 +895,16 @@ type UpdateUserInputPromptMessageParams struct {
 	PromptMessageID         pgtype.UUID `json:"prompt_message_id"`
 	PromptExternalMessageID string      `json:"prompt_external_message_id"`
 	ID                      pgtype.UUID `json:"id"`
+	TeamID                  pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateUserInputPromptMessage(ctx context.Context, arg UpdateUserInputPromptMessageParams) (UserInputRequest, error) {
-	row := q.db.QueryRow(ctx, updateUserInputPromptMessage, arg.PromptMessageID, arg.PromptExternalMessageID, arg.ID)
+	row := q.db.QueryRow(ctx, updateUserInputPromptMessage,
+		arg.PromptMessageID,
+		arg.PromptExternalMessageID,
+		arg.ID,
+		arg.TeamID,
+	)
 	var i UserInputRequest
 	err := row.Scan(
 		&i.ID,
@@ -919,16 +944,18 @@ UPDATE user_input_requests
 SET tool_result_message_id = $1,
     updated_at = now()
 WHERE id = $2
+  AND team_id = $3::uuid
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id
 `
 
 type UpdateUserInputToolResultMessageParams struct {
 	ToolResultMessageID pgtype.UUID `json:"tool_result_message_id"`
 	ID                  pgtype.UUID `json:"id"`
+	TeamID              pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateUserInputToolResultMessage(ctx context.Context, arg UpdateUserInputToolResultMessageParams) (UserInputRequest, error) {
-	row := q.db.QueryRow(ctx, updateUserInputToolResultMessage, arg.ToolResultMessageID, arg.ID)
+	row := q.db.QueryRow(ctx, updateUserInputToolResultMessage, arg.ToolResultMessageID, arg.ID, arg.TeamID)
 	var i UserInputRequest
 	err := row.Scan(
 		&i.ID,

@@ -107,6 +107,7 @@ SET prompt_message_id = sqlc.narg(prompt_message_id),
     prompt_external_message_id = sqlc.arg(prompt_external_message_id),
     updated_at = now()
 WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid
 RETURNING *;
 
 -- name: UpdateUserInputAssistantMessage :one
@@ -114,6 +115,7 @@ UPDATE user_input_requests
 SET assistant_message_id = sqlc.narg(assistant_message_id),
     updated_at = now()
 WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid
 RETURNING *;
 
 -- name: UpdateUserInputToolResultMessage :one
@@ -121,6 +123,7 @@ UPDATE user_input_requests
 SET tool_result_message_id = sqlc.narg(tool_result_message_id),
     updated_at = now()
 WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid
 RETURNING *;
 
 -- name: SubmitUserInputRequest :one
@@ -131,6 +134,7 @@ SET status = 'submitted',
     responded_at = now(),
     updated_at = now()
 WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid
   AND status = 'pending'
   AND (expires_at IS NULL OR expires_at > now())
 RETURNING *;
@@ -144,6 +148,7 @@ SET status = 'canceled',
     canceled_at = now(),
     updated_at = now()
 WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid
   AND status = 'pending'
   AND (expires_at IS NULL OR expires_at > now())
 RETURNING *;
@@ -167,6 +172,7 @@ SET status = 'failed',
     result_json = sqlc.arg(result_json),
     updated_at = now()
 WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid
   AND status = 'pending'
   AND (expires_at IS NULL OR expires_at > now())
 RETURNING *;

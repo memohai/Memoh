@@ -18,6 +18,7 @@ SET status = 'approved',
     decided_by_channel_identity_id = $2,
     decided_at = now()
 WHERE id = $3
+  AND team_id = $4::uuid
   AND status = 'pending'
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id
 `
@@ -26,10 +27,16 @@ type ApproveToolApprovalRequestParams struct {
 	Reason                     string      `json:"reason"`
 	DecidedByChannelIdentityID pgtype.UUID `json:"decided_by_channel_identity_id"`
 	ID                         pgtype.UUID `json:"id"`
+	TeamID                     pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) ApproveToolApprovalRequest(ctx context.Context, arg ApproveToolApprovalRequestParams) (ToolApprovalRequest, error) {
-	row := q.db.QueryRow(ctx, approveToolApprovalRequest, arg.Reason, arg.DecidedByChannelIdentityID, arg.ID)
+	row := q.db.QueryRow(ctx, approveToolApprovalRequest,
+		arg.Reason,
+		arg.DecidedByChannelIdentityID,
+		arg.ID,
+		arg.TeamID,
+	)
 	var i ToolApprovalRequest
 	err := row.Scan(
 		&i.ID,
@@ -587,6 +594,7 @@ SET status = 'rejected',
     decided_by_channel_identity_id = $2,
     decided_at = now()
 WHERE id = $3
+  AND team_id = $4::uuid
   AND status = 'pending'
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id
 `
@@ -595,10 +603,16 @@ type RejectToolApprovalRequestParams struct {
 	Reason                     string      `json:"reason"`
 	DecidedByChannelIdentityID pgtype.UUID `json:"decided_by_channel_identity_id"`
 	ID                         pgtype.UUID `json:"id"`
+	TeamID                     pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) RejectToolApprovalRequest(ctx context.Context, arg RejectToolApprovalRequestParams) (ToolApprovalRequest, error) {
-	row := q.db.QueryRow(ctx, rejectToolApprovalRequest, arg.Reason, arg.DecidedByChannelIdentityID, arg.ID)
+	row := q.db.QueryRow(ctx, rejectToolApprovalRequest,
+		arg.Reason,
+		arg.DecidedByChannelIdentityID,
+		arg.ID,
+		arg.TeamID,
+	)
 	var i ToolApprovalRequest
 	err := row.Scan(
 		&i.ID,
@@ -633,6 +647,7 @@ UPDATE tool_approval_requests
 SET prompt_message_id = $1,
     prompt_external_message_id = $2
 WHERE id = $3
+  AND team_id = $4::uuid
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id
 `
 
@@ -640,10 +655,16 @@ type UpdateToolApprovalPromptMessageParams struct {
 	PromptMessageID         pgtype.UUID `json:"prompt_message_id"`
 	PromptExternalMessageID string      `json:"prompt_external_message_id"`
 	ID                      pgtype.UUID `json:"id"`
+	TeamID                  pgtype.UUID `json:"team_id"`
 }
 
 func (q *Queries) UpdateToolApprovalPromptMessage(ctx context.Context, arg UpdateToolApprovalPromptMessageParams) (ToolApprovalRequest, error) {
-	row := q.db.QueryRow(ctx, updateToolApprovalPromptMessage, arg.PromptMessageID, arg.PromptExternalMessageID, arg.ID)
+	row := q.db.QueryRow(ctx, updateToolApprovalPromptMessage,
+		arg.PromptMessageID,
+		arg.PromptExternalMessageID,
+		arg.ID,
+		arg.TeamID,
+	)
 	var i ToolApprovalRequest
 	err := row.Scan(
 		&i.ID,

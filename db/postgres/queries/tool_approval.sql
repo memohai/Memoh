@@ -80,6 +80,7 @@ UPDATE tool_approval_requests
 SET prompt_message_id = sqlc.narg(prompt_message_id),
     prompt_external_message_id = sqlc.arg(prompt_external_message_id)
 WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid
 RETURNING *;
 
 -- name: ApproveToolApprovalRequest :one
@@ -89,6 +90,7 @@ SET status = 'approved',
     decided_by_channel_identity_id = sqlc.narg(decided_by_channel_identity_id),
     decided_at = now()
 WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid
   AND status = 'pending'
 RETURNING *;
 
@@ -99,6 +101,7 @@ SET status = 'rejected',
     decided_by_channel_identity_id = sqlc.narg(decided_by_channel_identity_id),
     decided_at = now()
 WHERE id = sqlc.arg(id)
+  AND team_id = sqlc.arg(team_id)::uuid
   AND status = 'pending'
 RETURNING *;
 
