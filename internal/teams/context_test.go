@@ -39,6 +39,24 @@ func TestScopeFromContextRequiresScope(t *testing.T) {
 	}
 }
 
+func TestScopeCarriesUserAndRole(t *testing.T) {
+	in := Scope{TeamID: DefaultTeamID, UserID: "u1", Role: "owner"}
+	got, err := ScopeFromContext(WithScope(context.Background(), in))
+	if err != nil {
+		t.Fatalf("ScopeFromContext: %v", err)
+	}
+	if got.UserID != "u1" || got.Role != "owner" {
+		t.Fatalf("scope = %+v, want UserID=u1 Role=owner", got)
+	}
+}
+
+func TestScopeIsZeroStillOnlyChecksTeamID(t *testing.T) {
+	// 只有 UserID/Role 没有 TeamID 时仍视为 zero（向后兼容）。
+	if !(Scope{UserID: "u1", Role: "owner"}).IsZero() {
+		t.Fatal("scope without TeamID must be zero")
+	}
+}
+
 func TestDefaultMiddlewareInjectsTeamScope(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/bots", nil)

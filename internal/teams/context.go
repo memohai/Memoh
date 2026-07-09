@@ -18,6 +18,10 @@ var ErrMissingScope = errors.New("team scope missing from context")
 
 type Scope struct {
 	TeamID string
+	// UserID is the acting principal; empty for system/background contexts.
+	UserID string
+	// Role is the caller's team_members.role in TeamID: owner|admin|member.
+	Role string
 }
 
 type contextKey struct{}
