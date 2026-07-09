@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1080,6 +1081,46 @@ func TestExecuteQuickActionAcceptsSessionIDAsCapabilityContext(t *testing.T) {
 	}
 	if !strings.Contains(event.Result.Text, "/skill list") {
 		t.Fatalf("help text = %q, want skill quick action guidance", event.Result.Text)
+	}
+}
+
+func TestExecuteWebQuickActionHelpListsAllQuickActions(t *testing.T) {
+	t.Parallel()
+
+	handler := &LocalChannelHandler{}
+
+	full, slashErr := handler.executeWebQuickAction(context.Background(), "bot-1", "help", true)
+	if slashErr != nil {
+		t.Fatalf("executeWebQuickAction: %v", slashErr)
+	}
+	gotIDs := make([]string, 0, len(full.Items))
+	for _, item := range full.Items {
+		gotIDs = append(gotIDs, item.ID)
+	}
+	wantIDs := []string{"help", "new", "compact", "skill.list", "model"}
+	if !slices.Equal(gotIDs, wantIDs) {
+		t.Fatalf("item ids = %v, want %v", gotIDs, wantIDs)
+	}
+	for _, label := range []string{"/help", "/new", "/compact", "/skill list", "/model"} {
+		if !strings.Contains(full.Text, label) {
+			t.Fatalf("help text = %q, missing %q", full.Text, label)
+		}
+	}
+
+	restricted, slashErr := handler.executeWebQuickAction(context.Background(), "bot-1", "help", false)
+	if slashErr != nil {
+		t.Fatalf("executeWebQuickAction: %v", slashErr)
+	}
+	gotRestrictedIDs := make([]string, 0, len(restricted.Items))
+	for _, item := range restricted.Items {
+		gotRestrictedIDs = append(gotRestrictedIDs, item.ID)
+	}
+	wantRestrictedIDs := []string{"help", "new", "compact"}
+	if !slices.Equal(gotRestrictedIDs, wantRestrictedIDs) {
+		t.Fatalf("restricted item ids = %v, want %v", gotRestrictedIDs, wantRestrictedIDs)
+	}
+	if strings.Contains(restricted.Text, "/skill list") || strings.Contains(restricted.Text, "/model") {
+		t.Fatalf("restricted help text should omit skill/model actions: %q", restricted.Text)
 	}
 }
 

@@ -534,7 +534,6 @@
                           v-for="item in commandResultItems"
                           :key="`${item.kind || 'item'}:${item.id || item.title}`"
                           :value="`${item.kind || 'item'}:${item.id || item.title}`"
-                          :disabled="item.kind !== 'skill'"
                           @select="selectCommandResultItem(item)"
                         >
                           <Sparkles
@@ -1015,6 +1014,7 @@ import ChatModelPicker from './chat-model-picker.vue'
 import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
 import { fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput, type UIUserInputQuestion, type WSUserInputAnswer } from '@/composables/api/useChat'
+import { commandResultQuickActionText, isCommandResultItemSelectable } from './slash-command-result'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
@@ -1720,6 +1720,7 @@ function clearCurrentCommandEvent() {
 const commandPanelEvent = computed(() => chatStore.commandEventForScope(currentPaneCommandScope()))
 const commandResult = computed(() => commandPanelEvent.value?.type === 'command_result' ? commandPanelEvent.value.result : null)
 const commandError = computed(() => commandPanelEvent.value?.type === 'command_error' ? commandPanelEvent.value.error : null)
+const commandPanelActionID = computed(() => commandPanelEvent.value?.action_id?.trim() ?? '')
 const commandPanelIsError = computed(() => !!commandError.value)
 const commandPanelTitle = computed(() => {
   if (commandError.value) return t('chat.slash.commandError')
@@ -1736,11 +1737,24 @@ function localizedCommandErrorMessage(error: CommandActionError): string {
 }
 
 const commandPanelText = computed(() => commandError.value ? localizedCommandErrorMessage(commandError.value) : commandResult.value?.text || '')
-const commandResultItems = computed(() => commandResult.value?.items ?? [])
+const commandResultItems = computed(() =>
+  (commandResult.value?.items ?? []).filter(item => isCommandResultItemSelectable(item, commandPanelActionID.value)),
+)
 
 function selectCommandResultItem(item: CommandActionListItem) {
+  const kind = item.kind?.trim().toLowerCase()
+  if (kind === 'quick_action') {
+    const label = commandResultQuickActionText(item, commandPanelActionID.value)
+    if (!label) return
+    clearCurrentCommandEvent()
+    selectSlashQuickAction({
+      id: item.id?.trim() || label,
+      label,
+    })
+    return
+  }
   if (!skillSlashEnabled.value) return
-  if (item.kind !== 'skill' || !item.id?.trim() || !item.title.trim()) return
+  if (kind !== 'skill' || !item.id?.trim() || !item.title.trim()) return
   addRequestedSkill({
     name: item.id.trim(),
     display_name: item.title,

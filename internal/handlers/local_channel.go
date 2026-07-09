@@ -249,17 +249,27 @@ func (h *LocalChannelHandler) executeWebQuickAction(ctx context.Context, botID, 
 	case "help":
 		items := []CommandActionListItem{
 			{ID: "help", Title: "/help", Description: "Show available quick actions", Kind: "quick_action"},
+			{ID: "new", Title: "/new", Description: "Start a new session", Kind: "quick_action"},
+			{ID: "compact", Title: "/compact", Description: "Compact the current session history", Kind: "quick_action"},
 		}
-		text := "Available Web quick actions: /help."
+		labels := []string{"/help", "/new", "/compact"}
+		text := "Available Web quick actions: %s."
+		// skillActivationAllowed already reflects a plain (non-ACP) chat
+		// session, which is also the only context where the model picker
+		// applies, so it doubles as the /model gate.
 		if skillActivationAllowed {
-			items = append(items, CommandActionListItem{ID: "skill.list", Title: "/skill list", Description: "Show runtime-usable skills", Kind: "quick_action"})
-			text = "Available Web quick actions: /help, /skill list. To activate a skill, send /<skill-name> or /<skill-name> <prompt>."
+			items = append(items,
+				CommandActionListItem{ID: "skill.list", Title: "/skill list", Description: "Show runtime-usable skills", Kind: "quick_action"},
+				CommandActionListItem{ID: "model", Title: "/model", Description: "Switch the chat model", Kind: "quick_action"},
+			)
+			labels = append(labels, "/skill list", "/model")
+			text = "Available Web quick actions: %s. To activate a skill, send /<skill-name> or /<skill-name> <prompt>."
 		}
 		return &CommandActionResult{
 			Kind:  "list",
 			Title: "Quick actions",
 			Items: items,
-			Text:  text,
+			Text:  fmt.Sprintf(text, strings.Join(labels, ", ")),
 		}, nil
 	case "skill.list":
 		if !skillActivationAllowed {
