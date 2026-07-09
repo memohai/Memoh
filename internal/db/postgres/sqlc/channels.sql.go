@@ -132,18 +132,16 @@ func (q *Queries) GetUserChannelBinding(ctx context.Context, arg GetUserChannelB
 const listBotChannelConfigsByType = `-- name: ListBotChannelConfigsByType :many
 SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at, team_id
 FROM bot_channel_configs
-WHERE team_id = $1
-  AND channel_type = $2
+WHERE channel_type = $1
 ORDER BY created_at DESC
 `
 
-type ListBotChannelConfigsByTypeParams struct {
-	TeamID      pgtype.UUID `json:"team_id"`
-	ChannelType string      `json:"channel_type"`
-}
-
-func (q *Queries) ListBotChannelConfigsByType(ctx context.Context, arg ListBotChannelConfigsByTypeParams) ([]BotChannelConfig, error) {
-	rows, err := q.db.Query(ctx, listBotChannelConfigsByType, arg.TeamID, arg.ChannelType)
+// Process-wide channel refresh / inbound webhook routing: intentionally spans
+// all teams (no team_id filter) so every team's adapters connect after a
+// restart and inbound webhooks resolve regardless of tenant. Each row carries
+// team_id for downstream per-config work.
+func (q *Queries) ListBotChannelConfigsByType(ctx context.Context, channelType string) ([]BotChannelConfig, error) {
+	rows, err := q.db.Query(ctx, listBotChannelConfigsByType, channelType)
 	if err != nil {
 		return nil, err
 	}

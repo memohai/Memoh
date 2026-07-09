@@ -449,22 +449,16 @@ func (q *Queries) ListBotUserGrants(ctx context.Context, botID pgtype.UUID) ([]d
 	})
 }
 
-func (q *Queries) ListBotChannelConfigsByType(ctx context.Context, channelType string) ([]dbsqlc.BotChannelConfig, error) {
-	return q.Queries.ListBotChannelConfigsByType(ctx, dbsqlc.ListBotChannelConfigsByTypeParams{
-		ChannelType: channelType,
-		TeamID:      teamUUIDFromContext(ctx),
-	})
-}
+// ListBotChannelConfigsByType, ListAutoStartContainers, ListEnabledSchedules and
+// ListHeartbeatEnabledBots are intentionally NOT team-scoped here: they back
+// process-wide startup/reconcile paths that must span all teams, so the embedded
+// sqlc methods (which no longer take a team_id) satisfy the interface directly.
 
 func (q *Queries) ListAccessibleBots(ctx context.Context, ownerUserID pgtype.UUID) ([]dbsqlc.ListAccessibleBotsRow, error) {
 	return q.Queries.ListAccessibleBots(ctx, dbsqlc.ListAccessibleBotsParams{
 		OwnerUserID: ownerUserID,
 		TeamID:      teamUUIDFromContext(ctx),
 	})
-}
-
-func (q *Queries) ListAutoStartContainers(ctx context.Context) ([]dbsqlc.Container, error) {
-	return q.Queries.ListAutoStartContainers(ctx, teamUUIDFromContext(ctx))
 }
 
 func (q *Queries) ListBotsByOwner(ctx context.Context, ownerUserID pgtype.UUID) ([]dbsqlc.ListBotsByOwnerRow, error) {
@@ -540,14 +534,6 @@ func (q *Queries) ListAllMessagesForBackup(ctx context.Context, botID pgtype.UUI
 		BotID:  botID,
 		TeamID: teamUUIDFromContext(ctx),
 	})
-}
-
-func (q *Queries) ListEnabledSchedules(ctx context.Context) ([]dbsqlc.Schedule, error) {
-	return q.Queries.ListEnabledSchedules(ctx, teamUUIDFromContext(ctx))
-}
-
-func (q *Queries) ListHeartbeatEnabledBots(ctx context.Context) ([]dbsqlc.ListHeartbeatEnabledBotsRow, error) {
-	return q.Queries.ListHeartbeatEnabledBots(ctx, teamUUIDFromContext(ctx))
 }
 
 func (q *Queries) ListMessageAssets(ctx context.Context, messageID pgtype.UUID) ([]dbsqlc.ListMessageAssetsRow, error) {

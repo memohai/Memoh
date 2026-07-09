@@ -34,7 +34,13 @@ func requireTeamScopedSQL(t *testing.T, relPath string) {
 		if len(fields) == 0 {
 			continue
 		}
-		if fields[0] != "ListHeartbeatEnabledBots" && relPath == "db/postgres/queries/bots.sql" {
+		if relPath == "db/postgres/queries/bots.sql" {
+			// Only ListHeartbeatEnabledBots is relevant to heartbeat here, and it
+			// is intentionally all-team (process-wide bootstrap): assert it does
+			// NOT filter team_id, then skip the rest of bots.sql.
+			if fields[0] == "ListHeartbeatEnabledBots" && strings.Contains(block, "sqlc.arg(team_id)") {
+				t.Errorf("bots.sql query ListHeartbeatEnabledBots is all-team by design but filters team_id")
+			}
 			continue
 		}
 		if !strings.Contains(block, "team_id") || !strings.Contains(block, "sqlc.arg(team_id)") {

@@ -65,13 +65,15 @@ func (q *Queries) GetContainerByBotID(ctx context.Context, arg GetContainerByBot
 
 const listAutoStartContainers = `-- name: ListAutoStartContainers :many
 SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, workspace_backend, created_at, updated_at, last_started_at, last_stopped_at, team_id FROM containers
-WHERE team_id = $1
-  AND auto_start = true
+WHERE auto_start = true
 ORDER BY updated_at DESC
 `
 
-func (q *Queries) ListAutoStartContainers(ctx context.Context, teamID pgtype.UUID) ([]Container, error) {
-	rows, err := q.db.Query(ctx, listAutoStartContainers, teamID)
+// Process-wide startup reconcile: intentionally spans all teams (no team_id
+// filter) so every team's auto-start containers are rebuilt after a restart.
+// Each row carries team_id for downstream per-container work.
+func (q *Queries) ListAutoStartContainers(ctx context.Context) ([]Container, error) {
+	rows, err := q.db.Query(ctx, listAutoStartContainers)
 	if err != nil {
 		return nil, err
 	}

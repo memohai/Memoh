@@ -74,8 +74,10 @@ WHERE id = sqlc.arg(id)
   AND team_id = sqlc.arg(team_id)::uuid;
 
 -- name: ListHeartbeatEnabledBots :many
+-- Process-wide startup bootstrap: intentionally spans all teams (no team_id
+-- filter) so every team's heartbeat bots are scheduled after a restart. The
+-- selected team_id is threaded into each heartbeat job downstream.
 SELECT team_id, id, owner_user_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt
 FROM bots
-WHERE team_id = sqlc.arg(team_id)::uuid
-  AND heartbeat_enabled = true
+WHERE heartbeat_enabled = true
   AND status = 'ready';

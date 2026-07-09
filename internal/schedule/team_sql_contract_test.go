@@ -34,8 +34,23 @@ func requireTeamScopedSQL(t *testing.T, relPath string) {
 		if len(fields) == 0 {
 			continue
 		}
+		if allTeamScheduleQueries[fields[0]] {
+			// Intentionally all-team (process-wide bootstrap). Guard that it stays
+			// that way: a team_id filter here would silently limit the startup
+			// scheduler to the default team.
+			if strings.Contains(block, "sqlc.arg(team_id)") {
+				t.Errorf("%s query %s is all-team by design but filters team_id", relPath, fields[0])
+			}
+			continue
+		}
 		if !strings.Contains(block, "team_id") || !strings.Contains(block, "sqlc.arg(team_id)") {
 			t.Errorf("%s query %s missing team_id scope", relPath, fields[0])
 		}
 	}
+}
+
+// allTeamScheduleQueries back the process-wide startup scheduler and must span
+// all teams; each row carries team_id, which the scheduler threads into the job.
+var allTeamScheduleQueries = map[string]bool{
+	"ListEnabledSchedules": true,
 }

@@ -63,7 +63,9 @@ WHERE team_id = sqlc.arg(team_id)
   AND bot_id = sqlc.arg(bot_id);
 
 -- name: ListAutoStartContainers :many
+-- Process-wide startup reconcile: intentionally spans all teams (no team_id
+-- filter) so every team's auto-start containers are rebuilt after a restart.
+-- Each row carries team_id for downstream per-container work.
 SELECT * FROM containers
-WHERE team_id = sqlc.arg(team_id)
-  AND auto_start = true
+WHERE auto_start = true
 ORDER BY updated_at DESC;

@@ -17,10 +17,12 @@ WHERE team_id = sqlc.arg(team_id)::uuid
 ORDER BY created_at DESC;
 
 -- name: ListEnabledSchedules :many
+-- Process-wide startup bootstrap: intentionally spans all teams (no team_id
+-- filter) so every team's cron jobs are registered after a restart. Each row
+-- carries team_id, which the scheduler threads into the job it starts.
 SELECT *
 FROM schedule
-WHERE team_id = sqlc.arg(team_id)::uuid
-  AND enabled = true
+WHERE enabled = true
 ORDER BY created_at DESC;
 
 -- name: UpdateSchedule :one

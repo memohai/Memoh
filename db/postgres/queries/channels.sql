@@ -59,10 +59,13 @@ WHERE id = sqlc.arg(id)
   AND team_id = sqlc.arg(team_id);
 
 -- name: ListBotChannelConfigsByType :many
+-- Process-wide channel refresh / inbound webhook routing: intentionally spans
+-- all teams (no team_id filter) so every team's adapters connect after a
+-- restart and inbound webhooks resolve regardless of tenant. Each row carries
+-- team_id for downstream per-config work.
 SELECT *
 FROM bot_channel_configs
-WHERE team_id = sqlc.arg(team_id)
-  AND channel_type = sqlc.arg(channel_type)
+WHERE channel_type = sqlc.arg(channel_type)
 ORDER BY created_at DESC;
 
 -- name: GetUserChannelBinding :one

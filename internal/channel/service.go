@@ -430,11 +430,9 @@ func (s *Store) ListConfigsByType(ctx context.Context, channelType ChannelType) 
 	if s.registry.IsConfigless(channelType) {
 		return []ChannelConfig{}, nil
 	}
-	teamID, err := teams.TeamUUID(ctx)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := listBotChannelConfigsByType(ctx, s.queries, teamID, channelType.String())
+	// All-team by design: this backs the process-wide channel refresh and inbound
+	// webhook routing, which run without a per-request team scope.
+	rows, err := s.queries.ListBotChannelConfigsByType(ctx, channelType.String())
 	if err != nil {
 		return nil, err
 	}
@@ -538,17 +536,6 @@ func normalizeChannelConfigFromRow(row sqlc.BotChannelConfig) (ChannelConfig, er
 		row.Credentials, row.ExternalIdentity, row.SelfIdentity, row.Routing,
 		row.Disabled, row.VerifiedAt, row.CreatedAt, row.UpdatedAt,
 	)
-}
-
-func listBotChannelConfigsByType(ctx context.Context, queries dbstore.Queries, teamID pgtype.UUID, channelType string) ([]sqlc.BotChannelConfig, error) {
-	values, err := callTeamScopedQuery(ctx, queries, "ListBotChannelConfigsByType", teamID, map[string]reflect.Value{
-		"ChannelType": reflect.ValueOf(channelType),
-	}, reflect.ValueOf(channelType))
-	if err != nil {
-		return nil, err
-	}
-	rows, _ := values[0].Interface().([]sqlc.BotChannelConfig)
-	return rows, errorFromValue(values[1])
 }
 
 func listUserChannelBindingsByPlatform(ctx context.Context, queries dbstore.Queries, teamID pgtype.UUID, channelType string) ([]sqlc.UserChannelBinding, error) {

@@ -146,13 +146,15 @@ func (q *Queries) IncrementScheduleCalls(ctx context.Context, arg IncrementSched
 const listEnabledSchedules = `-- name: ListEnabledSchedules :many
 SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id
 FROM schedule
-WHERE team_id = $1::uuid
-  AND enabled = true
+WHERE enabled = true
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListEnabledSchedules(ctx context.Context, teamID pgtype.UUID) ([]Schedule, error) {
-	rows, err := q.db.Query(ctx, listEnabledSchedules, teamID)
+// Process-wide startup bootstrap: intentionally spans all teams (no team_id
+// filter) so every team's cron jobs are registered after a restart. Each row
+// carries team_id, which the scheduler threads into the job it starts.
+func (q *Queries) ListEnabledSchedules(ctx context.Context) ([]Schedule, error) {
+	rows, err := q.db.Query(ctx, listEnabledSchedules)
 	if err != nil {
 		return nil, err
 	}

@@ -416,8 +416,7 @@ func (q *Queries) ListBotsByOwner(ctx context.Context, arg ListBotsByOwnerParams
 const listHeartbeatEnabledBots = `-- name: ListHeartbeatEnabledBots :many
 SELECT team_id, id, owner_user_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt
 FROM bots
-WHERE team_id = $1::uuid
-  AND heartbeat_enabled = true
+WHERE heartbeat_enabled = true
   AND status = 'ready'
 `
 
@@ -430,8 +429,11 @@ type ListHeartbeatEnabledBotsRow struct {
 	HeartbeatPrompt   string      `json:"heartbeat_prompt"`
 }
 
-func (q *Queries) ListHeartbeatEnabledBots(ctx context.Context, teamID pgtype.UUID) ([]ListHeartbeatEnabledBotsRow, error) {
-	rows, err := q.db.Query(ctx, listHeartbeatEnabledBots, teamID)
+// Process-wide startup bootstrap: intentionally spans all teams (no team_id
+// filter) so every team's heartbeat bots are scheduled after a restart. The
+// selected team_id is threaded into each heartbeat job downstream.
+func (q *Queries) ListHeartbeatEnabledBots(ctx context.Context) ([]ListHeartbeatEnabledBotsRow, error) {
+	rows, err := q.db.Query(ctx, listHeartbeatEnabledBots)
 	if err != nil {
 		return nil, err
 	}
