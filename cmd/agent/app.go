@@ -1202,6 +1202,7 @@ type serverParams struct {
 	Logger            *slog.Logger
 	RuntimeConfig     *boot.RuntimeConfig
 	Config            config.Config
+	Queries           dbstore.Queries
 	ServerHandlers    []server.Handler `group:"server_handlers"`
 	ContainerdHandler *handlers.ContainerdHandler
 }
@@ -1210,7 +1211,7 @@ func provideServer(params serverParams) *server.Server {
 	allHandlers := make([]server.Handler, 0, len(params.ServerHandlers)+1)
 	allHandlers = append(allHandlers, params.ServerHandlers...)
 	allHandlers = append(allHandlers, params.ContainerdHandler)
-	return server.NewServer(params.Logger, params.RuntimeConfig.ServerAddr, params.Config.Auth.JWTSecret, allHandlers...)
+	return server.NewServer(params.Logger, params.RuntimeConfig.ServerAddr, params.Config.Auth.JWTSecret, params.Queries, allHandlers...)
 }
 
 func startRegistrySync(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, queries dbstore.Queries) {

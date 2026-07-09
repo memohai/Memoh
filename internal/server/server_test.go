@@ -42,7 +42,7 @@ func TestNewServerInjectsDefaultTeamScope(t *testing.T) {
 	t.Parallel()
 
 	handler := &teamProbeHandler{}
-	srv := NewServer(slog.New(slog.DiscardHandler), ":0", "", handler)
+	srv := NewServer(slog.New(slog.DiscardHandler), ":0", "", nil, handler)
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	rec := httptest.NewRecorder()
 

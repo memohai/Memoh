@@ -11,6 +11,7 @@ import (
 
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/channel/publicmedia"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/teams"
 )
 
@@ -24,7 +25,7 @@ type Handler interface {
 	Register(e *echo.Echo)
 }
 
-func NewServer(log *slog.Logger, addr string, jwtSecret string,
+func NewServer(log *slog.Logger, addr string, jwtSecret string, queries dbstore.Queries,
 	handlers ...Handler,
 ) *Server {
 	if addr == "" {
@@ -61,9 +62,17 @@ func NewServer(log *slog.Logger, addr string, jwtSecret string,
 			return nil
 		},
 	}))
-	e.Use(auth.JWTMiddleware(jwtSecret, func(c echo.Context) bool {
+	jwtSkipper := func(c echo.Context) bool {
 		return shouldSkipJWT(c.Request().URL.Path)
-	}))
+	}
+	e.Use(auth.JWTMiddleware(jwtSecret, jwtSkipper))
+
+	// After auth: resolve the acting team and reject non-members. Shares the
+	// auth skipper so unauthenticated routes (login, health, webhooks) pass through.
+	if queries != nil {
+		resolver := teams.NewSingleTeamResolver(membershipReader{q: queries})
+		e.Use(teams.ResolveTeamMiddleware(resolver, auth.UserIDFromContext, jwtSkipper))
+	}
 
 	for _, h := range handlers {
 		if h != nil {
