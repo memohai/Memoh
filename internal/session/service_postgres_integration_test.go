@@ -299,6 +299,242 @@ func TestPostgresRepairIncompleteForkSessionsMigration(t *testing.T) {
 	assertPostgresSessionNextTurnPosition(t, ctx, tx, withFollowUpID, 4)
 }
 
+func TestPostgresRepairIncompleteForkRetriedCopiedTurnMigration(t *testing.T) {
+	ctx := context.Background()
+	tx := beginPostgresSessionTestTx(t, ctx)
+	setupPostgresSessionForkFixtures(t, ctx, tx)
+
+	const (
+		sessionID            = "00000000-0000-0000-0000-000000075401"
+		copiedUser1          = "00000000-0000-0000-0000-000000075411"
+		copiedAssistant1     = "00000000-0000-0000-0000-000000075412"
+		reusedUser2          = "00000000-0000-0000-0000-000000075413"
+		supersededAssistant2 = "00000000-0000-0000-0000-000000075414"
+		replacementAssistant = "00000000-0000-0000-0000-000000075415"
+	)
+	// Broken fork left by the old fork query, then retried with the old
+	// ReplaceHistoryTurn: the replacement turn reused the copied user message
+	// (which keeps its pre-fork created_at), got position 1 from the broken
+	// allocator, and the superseded copied assistant stayed visible.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bot_sessions (id, bot_id, channel_type, title, metadata, next_turn_position, created_at, updated_at)
+		VALUES (
+			$2, $1, 'local', 'retried broken fork',
+			'{"forked_from":{"session_id":"00000000-0000-0000-0000-000000075103","message_id":"00000000-0000-0000-0000-000000075114"}}'::jsonb,
+			2, now(), now()
+		)
+	`, postgresSessionTestBotID, sessionID); err != nil {
+		t.Fatalf("insert retried fork session: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bot_history_messages (
+			id, bot_id, session_id, role, content,
+			turn_id, turn_position, turn_message_seq, turn_visible, turn_superseded_at, created_at
+		)
+		VALUES
+			(
+				$3, $1, $2, 'user', '{"role":"user","content":"copied first"}'::jsonb,
+				'00000000-0000-0000-0000-000000075421', 1, 1, true, NULL,
+				(SELECT created_at - interval '4 minutes' FROM bot_sessions WHERE id = $2)
+			),
+			(
+				$4, $1, $2, 'assistant', '{"role":"assistant","content":"copied first reply"}'::jsonb,
+				'00000000-0000-0000-0000-000000075421', 1, 2, true, NULL,
+				(SELECT created_at - interval '4 minutes' FROM bot_sessions WHERE id = $2)
+			),
+			(
+				$5, $1, $2, 'user', '{"role":"user","content":"copied second"}'::jsonb,
+				'00000000-0000-0000-0000-000000075423', 1, 1, true, NULL,
+				(SELECT created_at - interval '2 minutes' FROM bot_sessions WHERE id = $2)
+			),
+			(
+				$6, $1, $2, 'assistant', '{"role":"assistant","content":"superseded reply"}'::jsonb,
+				'00000000-0000-0000-0000-000000075422', 2, 2, true,
+				(SELECT created_at - interval '1 minute' FROM bot_sessions WHERE id = $2),
+				(SELECT created_at - interval '2 minutes' FROM bot_sessions WHERE id = $2)
+			),
+			(
+				$7, $1, $2, 'assistant', '{"role":"assistant","content":"retry reply"}'::jsonb,
+				'00000000-0000-0000-0000-000000075423', 1, 2, true, NULL,
+				(SELECT created_at + interval '1 minute' FROM bot_sessions WHERE id = $2)
+			)
+	`, postgresSessionTestBotID, sessionID, copiedUser1, copiedAssistant1, reusedUser2, supersededAssistant2, replacementAssistant); err != nil {
+		t.Fatalf("insert retried fork messages: %v", err)
+	}
+
+	sql, err := os.ReadFile("../../db/postgres/migrations/0105_repair_superseded_message_visibility.up.sql")
+	if err != nil {
+		t.Fatalf("read fork repair migration: %v", err)
+	}
+	if _, err := tx.Exec(ctx, string(sql)); err != nil {
+		t.Fatalf("run fork repair migration: %v", err)
+	}
+
+	assertPostgresSessionDeleted(t, ctx, tx, sessionID, false)
+	assertPostgresMessageTurnPosition(t, ctx, tx, copiedUser1, 1)
+	assertPostgresMessageTurnPosition(t, ctx, tx, copiedAssistant1, 1)
+	assertPostgresMessageTurnPosition(t, ctx, tx, supersededAssistant2, 2)
+	assertPostgresMessageTurnPosition(t, ctx, tx, reusedUser2, 3)
+	assertPostgresMessageTurnPosition(t, ctx, tx, replacementAssistant, 3)
+	assertPostgresSessionNextTurnPosition(t, ctx, tx, sessionID, 4)
+	assertPostgresSessionRepairMarker(t, ctx, tx, sessionID, "0105_incomplete_fork_turn_positions", true)
+
+	var supersededVisible bool
+	if err := tx.QueryRow(ctx, `
+		SELECT turn_visible
+		FROM bot_history_messages
+		WHERE id = $1
+	`, supersededAssistant2).Scan(&supersededVisible); err != nil {
+		t.Fatalf("read superseded assistant visibility: %v", err)
+	}
+	if supersededVisible {
+		t.Fatalf("superseded copied assistant is still visible after repair")
+	}
+
+	// Re-running the repair must be a no-op for the already repaired session.
+	if _, err := tx.Exec(ctx, string(sql)); err != nil {
+		t.Fatalf("re-run fork repair migration: %v", err)
+	}
+	assertPostgresMessageTurnPosition(t, ctx, tx, reusedUser2, 3)
+	assertPostgresMessageTurnPosition(t, ctx, tx, replacementAssistant, 3)
+	assertPostgresSessionNextTurnPosition(t, ctx, tx, sessionID, 4)
+}
+
+func TestPostgresRepairIncompleteForkTurnlessFollowUpMigration(t *testing.T) {
+	ctx := context.Background()
+	tx := beginPostgresSessionTestTx(t, ctx)
+	setupPostgresSessionForkFixtures(t, ctx, tx)
+
+	const (
+		sessionID       = "00000000-0000-0000-0000-000000075501"
+		copiedAssistant = "00000000-0000-0000-0000-000000075511"
+		turnlessMessage = "00000000-0000-0000-0000-000000075512"
+	)
+	// Broken fork the user continued, but the follow-up message never got a
+	// turn (e.g. the agent crashed before turn creation). There is nothing to
+	// renumber, yet the allocator must still move past the copied prefix.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bot_sessions (id, bot_id, channel_type, title, metadata, created_at, updated_at)
+		VALUES (
+			$2, $1, 'local', 'turnless follow-up fork',
+			'{"forked_from":{"session_id":"00000000-0000-0000-0000-000000075103","message_id":"00000000-0000-0000-0000-000000075114"}}'::jsonb,
+			now(), now()
+		)
+	`, postgresSessionTestBotID, sessionID); err != nil {
+		t.Fatalf("insert turnless fork session: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bot_history_messages (
+			id, bot_id, session_id, role, content,
+			turn_id, turn_position, turn_message_seq, turn_visible, created_at
+		)
+		VALUES
+			(
+				$3, $1, $2, 'assistant', '{"role":"assistant","content":"copied"}'::jsonb,
+				'00000000-0000-0000-0000-000000075521', 1, 2, true,
+				(SELECT created_at - interval '1 minute' FROM bot_sessions WHERE id = $2)
+			),
+			(
+				$4, $1, $2, 'user', '{"role":"user","content":"follow-up"}'::jsonb,
+				NULL, NULL, NULL, false,
+				(SELECT created_at + interval '1 minute' FROM bot_sessions WHERE id = $2)
+			)
+	`, postgresSessionTestBotID, sessionID, copiedAssistant, turnlessMessage); err != nil {
+		t.Fatalf("insert turnless fork messages: %v", err)
+	}
+
+	sql, err := os.ReadFile("../../db/postgres/migrations/0105_repair_superseded_message_visibility.up.sql")
+	if err != nil {
+		t.Fatalf("read fork repair migration: %v", err)
+	}
+	if _, err := tx.Exec(ctx, string(sql)); err != nil {
+		t.Fatalf("run fork repair migration: %v", err)
+	}
+
+	assertPostgresSessionDeleted(t, ctx, tx, sessionID, false)
+	assertPostgresMessageTurnPosition(t, ctx, tx, copiedAssistant, 1)
+	assertPostgresSessionNextTurnPosition(t, ctx, tx, sessionID, 2)
+	assertPostgresSessionRepairMarker(t, ctx, tx, sessionID, "0105_incomplete_fork_turn_positions", true)
+
+	var turnless bool
+	if err := tx.QueryRow(ctx, `
+		SELECT turn_id IS NULL AND turn_position IS NULL
+		FROM bot_history_messages
+		WHERE id = $1
+	`, turnlessMessage).Scan(&turnless); err != nil {
+		t.Fatalf("read turnless follow-up message: %v", err)
+	}
+	if !turnless {
+		t.Fatalf("turnless follow-up message gained turn state during repair")
+	}
+}
+
+func TestPostgresRepairSkipsConsistentIncompleteForkMigration(t *testing.T) {
+	ctx := context.Background()
+	tx := beginPostgresSessionTestTx(t, ctx)
+	setupPostgresSessionForkFixtures(t, ctx, tx)
+
+	const (
+		sessionID         = "00000000-0000-0000-0000-000000075601"
+		prefixAssistant   = "00000000-0000-0000-0000-000000075611"
+		followUpUser      = "00000000-0000-0000-0000-000000075612"
+		followUpAssistant = "00000000-0000-0000-0000-000000075613"
+	)
+	// Session that matches the incomplete-fork filter (fork_message_id can be
+	// legitimately removed when its anchor turn is retried away) but whose
+	// positions and allocator are already consistent. The repair must not
+	// touch it: no renumbering, no marker, no allocator change.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bot_sessions (id, bot_id, channel_type, title, metadata, next_turn_position, created_at, updated_at)
+		VALUES (
+			$2, $1, 'local', 'consistent fork',
+			'{"forked_from":{"session_id":"00000000-0000-0000-0000-000000075103","message_id":"00000000-0000-0000-0000-000000075114"}}'::jsonb,
+			3, now(), now()
+		)
+	`, postgresSessionTestBotID, sessionID); err != nil {
+		t.Fatalf("insert consistent fork session: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bot_history_messages (
+			id, bot_id, session_id, role, content,
+			turn_id, turn_position, turn_message_seq, turn_visible, created_at
+		)
+		VALUES
+			(
+				$3, $1, $2, 'assistant', '{"role":"assistant","content":"copied"}'::jsonb,
+				'00000000-0000-0000-0000-000000075621', 1, 2, true,
+				(SELECT created_at - interval '1 minute' FROM bot_sessions WHERE id = $2)
+			),
+			(
+				$4, $1, $2, 'user', '{"role":"user","content":"follow-up"}'::jsonb,
+				'00000000-0000-0000-0000-000000075622', 2, 1, true,
+				(SELECT created_at + interval '1 minute' FROM bot_sessions WHERE id = $2)
+			),
+			(
+				$5, $1, $2, 'assistant', '{"role":"assistant","content":"follow-up reply"}'::jsonb,
+				'00000000-0000-0000-0000-000000075622', 2, 2, true,
+				(SELECT created_at + interval '2 minutes' FROM bot_sessions WHERE id = $2)
+			)
+	`, postgresSessionTestBotID, sessionID, prefixAssistant, followUpUser, followUpAssistant); err != nil {
+		t.Fatalf("insert consistent fork messages: %v", err)
+	}
+
+	sql, err := os.ReadFile("../../db/postgres/migrations/0105_repair_superseded_message_visibility.up.sql")
+	if err != nil {
+		t.Fatalf("read fork repair migration: %v", err)
+	}
+	if _, err := tx.Exec(ctx, string(sql)); err != nil {
+		t.Fatalf("run fork repair migration: %v", err)
+	}
+
+	assertPostgresSessionDeleted(t, ctx, tx, sessionID, false)
+	assertPostgresMessageTurnPosition(t, ctx, tx, prefixAssistant, 1)
+	assertPostgresMessageTurnPosition(t, ctx, tx, followUpUser, 2)
+	assertPostgresMessageTurnPosition(t, ctx, tx, followUpAssistant, 2)
+	assertPostgresSessionNextTurnPosition(t, ctx, tx, sessionID, 3)
+	assertPostgresSessionRepairMarker(t, ctx, tx, sessionID, "0105_incomplete_fork_turn_positions", false)
+}
+
 const (
 	postgresSessionTestUserID            = "00000000-0000-0000-0000-000000075101"
 	postgresSessionTestBotID             = "00000000-0000-0000-0000-000000075102"
@@ -445,5 +681,20 @@ func assertPostgresSessionNextTurnPosition(t *testing.T, ctx context.Context, tx
 	}
 	if got != want {
 		t.Fatalf("session %s next_turn_position = %d, want %d", sessionID, got, want)
+	}
+}
+
+func assertPostgresSessionRepairMarker(t *testing.T, ctx context.Context, tx pgx.Tx, sessionID string, marker string, want bool) {
+	t.Helper()
+	var got bool
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE((metadata->'repair'->>$2)::boolean, false)
+		FROM bot_sessions
+		WHERE id = $1
+	`, sessionID, marker).Scan(&got); err != nil {
+		t.Fatalf("read session %s repair marker: %v", sessionID, err)
+	}
+	if got != want {
+		t.Fatalf("session %s repair marker %s = %v, want %v", sessionID, marker, got, want)
 	}
 }
