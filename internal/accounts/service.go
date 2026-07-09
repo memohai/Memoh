@@ -151,8 +151,11 @@ func (s *Service) IsTeamAdmin(ctx context.Context, userID string) (bool, error) 
 	}
 	scope := teams.ScopeOrDefault(ctx)
 	role, found, err := s.membership.Membership(ctx, scope.TeamID, userID)
-	if err != nil || !found {
+	if err != nil {
 		return false, err
+	}
+	if !found {
+		return false, nil
 	}
 	return role == "owner" || role == "admin", nil
 }

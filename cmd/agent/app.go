@@ -267,9 +267,12 @@ func provideAccountStore(postgresStore *postgresstore.Store) (dbstore.AccountSto
 	return postgresStore, nil
 }
 
-func provideAccountService(log *slog.Logger, accountStore dbstore.AccountStore, emailService *emailpkg.Service) *accounts.Service {
+func provideAccountService(log *slog.Logger, accountStore dbstore.AccountStore, emailService *emailpkg.Service, queries dbstore.Queries) *accounts.Service {
 	svc := accounts.NewService(log, accountStore)
 	svc.SetEmailProviderBootstrapper(emailService)
+	// Wire the team membership reader so IsTeamAdmin can resolve a user's role;
+	// without this it errors and every HasBotPermission caller fails closed.
+	svc.SetMembershipReader(server.NewMembershipReader(queries))
 	return svc
 }
 

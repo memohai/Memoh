@@ -90,6 +90,56 @@ func TestIsAdminReadsScopeRole(t *testing.T) {
 	}
 }
 
+type fakeMembership struct {
+	role  string
+	found bool
+	err   error
+}
+
+func (f fakeMembership) Membership(context.Context, string, string) (string, bool, error) {
+	return f.role, f.found, f.err
+}
+
+func TestIsTeamAdminDistinguishesErrorFromNotMember(t *testing.T) {
+	sentinel := errors.New("db down")
+	cases := []struct {
+		name    string
+		reader  fakeMembership
+		wantOK  bool
+		wantErr bool
+	}{
+		{"admin member", fakeMembership{role: "admin", found: true}, true, false},
+		{"owner member", fakeMembership{role: "owner", found: true}, true, false},
+		{"plain member", fakeMembership{role: "member", found: true}, false, false},
+		{"not a member", fakeMembership{found: false}, false, false},
+		{"db error is not silently a non-member", fakeMembership{err: sentinel}, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &Service{membership: tc.reader}
+			got, err := svc.IsTeamAdmin(context.Background(), "u1")
+			if tc.wantErr {
+				if !errors.Is(err, sentinel) {
+					t.Fatalf("err = %v, want sentinel", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
+			if got != tc.wantOK {
+				t.Fatalf("IsTeamAdmin = %v, want %v", got, tc.wantOK)
+			}
+		})
+	}
+}
+
+func TestIsTeamAdminUnconfiguredErrors(t *testing.T) {
+	if _, err := (&Service{}).IsTeamAdmin(context.Background(), "u1"); err == nil {
+		t.Fatal("expected error when membership reader not configured")
+	}
+}
+
 func TestCreateEnsuresDefaultGmailProvider(t *testing.T) {
 	store := &testAccountStore{}
 	bootstrapper := &testEmailBootstrapper{}
