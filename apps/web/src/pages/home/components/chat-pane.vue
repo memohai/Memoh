@@ -64,15 +64,13 @@
                    opening message id — a send APPENDS a container; previous
                    turns' DOM is never re-parented (see messageTurns for why
                    that is load-bearing). The send pin reserves viewport space
-                   declaratively: turnReserveStyle projects a min-height for
-                   the turn ids that currently hold a reserve (see
-                   useChatScroll's Pin section). -->
+                   by setting an inline min-height on the LAST turn's container
+                   (see useChatScroll's Pin section). -->
               <div
                 v-for="(turn, turnIndex) in messageTurns"
                 :key="turn.id"
                 :ref="turnIndex === messageTurns.length - 1 ? setLastTurnEl : undefined"
                 class="space-y-6"
-                :style="turnReserveStyle(turn.id)"
               >
                 <template
                   v-for="(msg, msgIndex) in turn.messages"
@@ -2596,7 +2594,6 @@ const {
   isScrolling,
   highlightedMessageId,
   showJumpToBottom: showJumpToBottomFromScroll,
-  turnReserveStyle,
   scrollToBottom,
   scrollToMessage,
   suppressAutoScrollForPrepend,

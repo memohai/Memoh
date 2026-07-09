@@ -76,9 +76,15 @@ export interface UseChatScrollOptions {
   contentEl: Ref<HTMLElement | null>
   /**
    * Container of the LAST turn (chat-pane renders one persistent container
-   * per turn and binds this ref to the last one). Used for MEASUREMENT only
-   * — the reserve itself is declarative render state keyed by turn id
-   * (turnReserveStyle, bound by chat-pane on every turn container).
+   * per turn and binds this ref to the last one). The pin reserves viewport
+   * space by setting an inline min-height on it — imperatively, exactly once
+   * per pin (see tryApplyPin), never via a reactive binding, so sizing and
+   * the scroll that consumes it stay in one synchronous pass.
+   *
+   * When a newer turn is pinned, the PREVIOUS last-turn container's residual
+   * min-height is cleared first (collapseReserveKeepingView) so the entrance
+   * never flies through empty spacing. lastTurnEl always points at the
+   * newest turn; appliedPinContainer tracks who currently holds the reserve.
    */
   lastTurnEl: Ref<HTMLElement | null>
   messages: Ref<ChatMessage[]>
@@ -148,7 +154,8 @@ export interface UseChatScrollOptions {
  * ─── Follow on / off ──────────────────────────────────────────────────────
  * Pin and follow are mutually exclusive phases, switched only by explicit
  * actions:
- *   • user scrolls down INTO the 30px bottom band        → follow ON
+ *   • user scrolls down INTO the content-end band        → follow ON
+ *     (atContentEnd — parked in pin reserve blank does NOT arm)
  *   • jump-to-bottom button / session switch             → follow ON
  *   • any upward wheel / scroll                          → follow OFF
  *   • jump-to-message / rail / prepend (markEscaped)     → follow OFF
@@ -170,29 +177,69 @@ export interface UseChatScrollOptions {
  * after the DOM lands. Native anchoring corrects continuously; the pin's JS
  * tween is immune to it (it rewrites scrollTop every frame), so they coexist.
  *
+ * ─── Browser vs hand-written scroll (read before changing pin/reserve) ───
+ * We do NOT replace the browser's scroller. Most of the time the browser
+ * owns scrollTop:
+ *   • everyday wheel/touch scrolling
+ *   • native overflow-anchor during history prepend and async reflow
+ *     (Shiki / KaTeX / images / fonts) — see Prepend above
+ *   • clamp when content shrinks past the max scroll
+ *
+ * What the browser does NOT know is chat product geometry:
+ *   • residual pin blank is deliberate "reply room", not ordinary content
+ *   • send = pin the new prompt at PIN_TOP_OFFSET_PX with previous-turn peek
+ *   • that blank SURVIVES stream completion (must not collapse on finish)
+ *   • entrance needs a quintic ease-out tween, not native smooth
+ *
+ * So we hand-write scrollTop only on a NARROW boundary: the frame that
+ * hands a pin from one turn to the next, plus the entrance tween itself.
+ * That is intentional policy, not a temporary hack — but the surface must
+ * stay narrow. If a new height-change path (Thought expand, tool group,
+ * split pane, tab restore, …) seems to need the same compensation, do NOT
+ * call collapseReserveKeepingView from there and do NOT add a second
+ * settle-time / delayed "restore" layer. Either the product geometry
+ * changed (rethink reserve structure) or the bug is elsewhere (follow
+ * arming, remount, id identity). Three rewrite rounds died on "mechanism
+ * got clever"; the surviving rule is: one named handover, one formula,
+ * everything else stays dumb and browser-owned.
+ *
  * ─── Pin (send + session entry) ───────────────────────────────────────────
  * On send (chat-pane → pinAfterSend) the newest prompt is pinned near the top
  * and the reply streams into reserved blank below. Mechanism: chat-pane
  * renders every turn in its own PERSISTENT container (keyed by the turn's
  * opening message — a send appends a container, it never re-parents previous
  * turns' DOM; re-parenting remounts the subtree and its transient height
- * collapse read as a scroll jump). On the mutation where the new prompt
- * renders, tryApplyPin measures ONCE and sets the DECLARATIVE reserve
- * (turnReserves → per-turn :style binding, see the reserve comment in the
- * body)
- * — sized so the prompt can sit at PIN_TOP_OFFSET_PX with reserved blank
- * below — then moves the viewport to the shared pin target
- * (prompt top - offset) with the shared entrance tween (the same animation as
- * jump-to-bottom; browser-native smooth was tried and rejected — see the
- * comment inside tryApplyPin). The first turn never pins (nothing above it).
- * From there CSS layout does everything: the reply consumes the reserve, a
- * tool group toggling open/closed just uses more or less of it, and content
- * outgrowing the reserve makes the min-height inert (natural layout resumes).
- * The reserve is NEVER recomputed on mutations and SURVIVES stream completion
- * and container remounts (it is render state, not a DOM annotation). Only the
- * next send (handover: old blank retires, released at the entrance settle) or
- * a session switch touches it. While pinned, follow is OFF; the view stays
- * parked until the user scrolls back to the bottom.
+ * collapse read as a scroll jump).
+ *
+ * tryApplyPin order is load-bearing (single coordinate system):
+ *   1. Retire the PREVIOUS turn's residual blank via
+ *      collapseReserveKeepingView (position-aware — see that function).
+ *   2. Measure and set the NEW turn's min-height once.
+ *   3. Tween (send) or jump (entry) to prompt top − PIN_TOP_OFFSET_PX.
+ *
+ * Two rejected alternatives (do not resurrect without a new product reason):
+ *   A. Keep old blank for the whole flight, clear at settle.
+ *      Document is [prev content | EMPTY SPACING | new prompt | new blank].
+ *      The tween pins the new prompt by scrolling through that empty band,
+ *      so the previous turn leaves the viewport and looks unmounted; settle
+ *      then removes the spacing and the previous turn "reappears". User-
+ *      confirmed wrong.
+ *   B. Clear old blank before the tween with flat `scrollTop -= fullDelta`.
+ *      Keeps content BELOW the blank fixed — but when the user is parked on
+ *      the previous pin (reading content ABOVE the blank) or reading history
+ *      far above, that yanks the whole view before the entrance starts.
+ *      User-confirmed wrong.
+ *
+ * Position-aware collapse (A/B midpoint) only compensates the removed band
+ * that sat above the viewport top. Parked on previous-turn content, the
+ * blank is below the viewport top → scrollTop stays put → blank vanishes →
+ * the down animation then carries REAL previous-turn content into the peek.
+ * From there CSS layout does everything: the reply consumes the new reserve,
+ * tool/Thought toggles use more or less of it, content past min-height makes
+ * it inert. The new reserve is NEVER recomputed on mutations and SURVIVES
+ * stream completion. Only the next send or a session switch touches the
+ * reserve. While pinned, follow is OFF until the user scrolls back to the
+ * content end (atContentEnd — not merely "no content below").
  *
  * Opening a session uses the SAME paradigm ('entry' mode): the last prompt
  * lands at the pin offset with the previous turn peeking above — identical
@@ -251,52 +298,103 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // settle timer (the tween has no completion callback).
   let pinScrollActive = false
   let pinSettleTimer: ReturnType<typeof setTimeout> | null = null
-  // --- The pin reserve: DECLARATIVE render state, keyed by TURN IDENTITY --
-  // This map is the source of truth; chat-pane projects it per turn via
-  // turnReserveStyle(turn.id) as a :style min-height binding. Two design
-  // points, both learned the hard way:
-  //   • Declarative, not an imperative inline style: because the style is
-  //     part of the render, a container remount re-renders WITH the reserve
-  //     — a reserve-less layout cannot be produced. The imperative design
-  //     needed three layers of compensation to approximate this.
-  //   • Keyed by the turn's opening message id, NOT by position (last /
-  //     second-to-last). A positional binding re-maps whatever values it
-  //     holds onto DIFFERENT containers the instant the turn count changes
-  //     — and the optimistic append lands several microtasks after
-  //     pinAfterSend (sendMessage awaits command parsing / session setup
-  //     before pushing), so a positional handover rendered one flush with
-  //     the reserve on the WRONG turns: a viewport of blank injected above
-  //     the view (visible content shoved away) while the real blank
-  //     collapsed (scrollHeight shrink → clamp → hard upward yank). Id
-  //     keying is inert to turn-count changes. It requires render ids to be
-  //     stable across the optimistic → server consolidation, which the
-  //     store now guarantees (adoptRenderIdentity in chat-list).
-  //
-  // Lifecycle (contract A3 + 3b): tryApplyPin sets the new turn's entry;
-  // the previous turn's entry is deliberately left untouched at arm and
-  // apply time — its blank must survive until the new entrance settles
-  // (collapsing it earlier teleports a viewport parked in that blank) —
-  // and is pruned at the settle. Session switches clear the map. Writes
-  // replace the map so the :style projections re-evaluate.
-  const turnReserves = ref<Map<string, number>>(new Map())
-  function turnReserveStyle(turnId: string): { minHeight: string } | undefined {
-    const px = turnReserves.value.get(turnId)
-    return px === undefined ? undefined : { minHeight: `${px}px` }
-  }
-  // Turn id holding the CURRENT pin's reserve — the one entry a settle keeps.
-  let pinnedTurnId: string | null = null
+  // The container currently holding a pin reserve. Containers are per-turn and
+  // persistent. On the next pin, tryApplyPin clears THIS container's residual
+  // blank BEFORE the entrance tween (collapseReserveKeepingView) so the
+  // flight never scrolls through empty spacing — see file-header Pin section.
+  let appliedPinContainer: HTMLElement | null = null
+  // The pinned reserve in px, held as STATE — not only as the container's
+  // inline style. BUSINESS INVARIANT: the reserve must NOT drop when the
+  // stream finishes. Completion swaps message ids (temp → server), which
+  // re-keys and REMOUNTS the turn container, and an inline style dies with
+  // its element — restorePinReserve re-asserts this value onto the fresh
+  // container so the invariant holds regardless of DOM churn.
+  let pinnedReservePx: number | null = null
 
-  // Drop every reserve except the given turn's (null prunes all). Runs at
-  // the entrance settle / entry landing — never at arm time (contract 3b);
-  // native scroll anchoring holds the view still while blank above the
-  // pinned prompt collapses on the next flush.
-  function pruneReservesTo(keepTurnId: string | null) {
-    const cur = turnReserves.value
-    const keepPx = keepTurnId === null ? undefined : cur.get(keepTurnId)
-    if (cur.size === (keepPx === undefined ? 0 : 1)) return
-    turnReserves.value = keepPx === undefined
-      ? new Map()
-      : new Map([[keepTurnId!, keepPx]])
+  // ── collapseReserveKeepingView ─────────────────────────────────────────
+  // THE only place that hand-adjusts scrollTop in response to a pin-reserve
+  // height drop. Call site is intentionally singular: tryApplyPin, when the
+  // previous pin container is not the container about to receive the new
+  // reserve. Do not reuse for Thought/tool expands, stream completion,
+  // remounts, or prepend — those stay browser-owned (overflow-anchor) or
+  // follow/escape owned.
+  //
+  // Why we write scrollTop at all (vs "let the browser handle shrink"):
+  //   Residual pin blank is product geometry, not content. Clearing
+  //   min-height is a deliberate layout edit on send/entry handover. The
+  //   browser's clamp / scroll anchoring do not know we want "parked on
+  //   previous-turn content → keep that content still; blank below may
+  //   vanish". Left alone, clamp/anchoring and a later tween fight; the
+  //   user either sees a pre-tween yank or flies through empty spacing.
+  //   This function is the narrow policy that makes the handover match
+  //   that product intent. It is NOT a general scroll-anchoring reinstall.
+  //
+  // Geometry (residual blank always at the BOTTOM of its turn container,
+  // above the next turn's prompt):
+  //
+  //   before clear:  container height = max(content, minHeight)
+  //   after clear:   container height = content
+  //   delta         = before − after  (≥ 0; the blank we remove)
+  //   collapseTop   = absolute Y where the blank started
+  //                 = containerTop + contentHeight
+  //                 = containerTop + (before − delta)
+  //   removed band  = [collapseTop, collapseTop + delta)
+  //
+  // Position-aware scrollTop (only when delta > 0):
+  //
+  //   • scrollTop ≤ collapseTop
+  //       Viewport top is above the blank (reading previous-turn content,
+  //       or history further up). Leave scrollTop alone. The blank below
+  //       the user vanishes; what they were looking at stays put. This is
+  //       the common "send while still parked on the previous pin" path
+  //       and "scroll up into history then send".
+  //
+  //   • scrollTop > collapseTop
+  //       Viewport top sits inside or past the blank. Subtract only the
+  //       removed length that was above the viewport top:
+  //         scrollTop -= min(delta, scrollTop − collapseTop)
+  //       so content that lived BELOW the blank does not jump.
+  //
+  // Rejected formulas (do not bring back):
+  //   • scrollTop -= delta always
+  //       Anchors content below the blank. Yanks history readers toward
+  //       the top; shifts a parked pin's visible content before the
+  //       entrance tween — "spacing snaps off, whole view jumps, then
+  //       the down animation starts".
+  //   • defer clear until tween settle (+ prompt-as-anchor restore)
+  //       Flight runs with [prev | EMPTY | new prompt]. Tween scrolls
+  //       through the empty band; previous turn looks unmounted until
+  //       settle removes spacing and it reappears.
+  //   • prompt-as-anchor compensation on the PRE-tween clear
+  //       Keeps the NEW prompt fixed; when the user is still looking at
+  //       previous-turn content, THAT is what jumps. Wrong anchor for
+  //       the send-from-parked-pin case.
+  //
+  // After this returns, tryApplyPin measures the new reserve and starts
+  // the tween in a single-reserve coordinate system — previous-turn
+  // content is what peeks above the new prompt, not empty spacing.
+  function collapseReserveKeepingView(el: HTMLElement, container: HTMLElement) {
+    if (!container.isConnected) {
+      container.style.minHeight = ''
+      return
+    }
+    const rootRect = el.getBoundingClientRect()
+    const before = container.offsetHeight
+    // Absolute top of the container in scroll content coordinates (same
+    // basis as scrollTop), measured BEFORE clearing min-height so
+    // collapseTop refers to the pre-clear layout.
+    const containerTop = el.scrollTop + container.getBoundingClientRect().top - rootRect.top
+
+    container.style.minHeight = ''
+    const delta = before - container.offsetHeight
+    if (delta <= 0) return
+
+    // Removed band was [containerTop + after, containerTop + before] with
+    // after = before - delta (= content height once min-height is gone).
+    const collapseTop = containerTop + (before - delta)
+    if (el.scrollTop > collapseTop) {
+      el.scrollTop = Math.max(0, el.scrollTop - Math.min(delta, el.scrollTop - collapseTop))
+    }
   }
 
   let highlightTimer: ReturnType<typeof setTimeout> | null = null
@@ -304,22 +402,26 @@ export function useChatScroll(options: UseChatScrollOptions) {
   let tweenFlagTimer: ReturnType<typeof setTimeout> | null = null
   let mutationObserver: MutationObserver | null = null
 
+  // "Is there anything further to see below?" — used for the jump-to-bottom
+  // button. Parked inside the pin's unconsumed reserve blank counts as yes-
+  // at-bottom (gap ≤ 0): the blank is not content, so the button must not
+  // offer to scroll into empty space.
   function isNearBottom(el: HTMLElement): boolean {
     return contentEndGap(el) < NEAR_BOTTOM_THRESHOLD_PX
   }
 
-  // Whether the viewport sits AT the content end — the ONLY state allowed to
-  // (re-)arm follow. Deliberately distinct from isNearBottom: isNearBottom
-  // answers "is there content below to see" for the jump button, and a
-  // viewport parked inside the pin's reserve blank correctly counts as
-  // at-bottom there (gap is negative — nothing further to see). But arming
-  // follow from inside that blank would make every streamed chunk snap the
-  // view UP to hug the content end — the pinned park would twitch chunk by
-  // chunk toward the top. So arming additionally bounds the overshoot past
-  // the content end: the span between the last turn container's bottom and
-  // scrollHeight is ordinary column padding (being anywhere in it is still
-  // the physical bottom), while the container's own overhang past its last
-  // message is exactly the reserve's unconsumed blank — outside the budget.
+  // Whether the viewport sits at the CONTENT END band — the ONLY state
+  // allowed to (re-)arm follow. Distinct from isNearBottom on purpose:
+  // parking deep in the reserve blank is "nothing more to see" for the jump
+  // button, but arming follow from there makes every streamed chunk (or a
+  // Thought/tool expand that mutates the tree) yank the parked view up to
+  // hug the content end. Arming additionally bounds overshoot past the
+  // content end: the span between the last turn container's bottom and
+  // scrollHeight is ordinary column padding (still the physical bottom);
+  // the container's own overhang past its last message is the reserve's
+  // unconsumed blank and is outside the budget. Measured geometrically —
+  // do not use getComputedStyle on the reka viewport's first child (its
+  // padding is 0; the real pad is layout after the last turn).
   function atContentEnd(el: HTMLElement): boolean {
     const gap = contentEndGap(el)
     if (gap >= NEAR_BOTTOM_THRESHOLD_PX) return false
@@ -331,12 +433,11 @@ export function useChatScroll(options: UseChatScrollOptions) {
   }
 
   // --- Content-end geometry --------------------------------------------
-  // BUSINESS SEMANTIC: "the bottom" everywhere in this file means the END OF
-  // CONTENT — the last message's bottom edge — NOT scrollHeight. The pin
-  // reserve leaves blank under the last message and that blank is not
-  // content: the jump button must not appear when only blank is below (it
-  // would scroll into nothing), follow must not drag the view into the
-  // blank, and reaching the content end is what re-arms follow.
+  // BUSINESS SEMANTIC: "the bottom" for content-aware decisions means the
+  // END OF CONTENT — the last message's bottom edge — NOT scrollHeight. The
+  // pin reserve leaves blank under the last message and that blank is not
+  // content. Jump-button visibility uses isNearBottom (blank counts as
+  // bottom); follow-arming uses atContentEnd (blank does NOT arm).
   // Cached per last-message id: this runs on every scroll frame and a
   // querySelector per frame would be wasteful.
   let lastMessageElCache: { id: string, el: HTMLElement } | null = null
@@ -391,12 +492,15 @@ export function useChatScroll(options: UseChatScrollOptions) {
     pinPending = true
     pinMode = 'send'
     pinAnchorId = lastUserMessage()?.id ?? null
-    // Deliberately NO reserve mutation here. The previous turn's blank must
-    // survive until the new entrance settles (contract 3b), and its map
-    // entry is keyed by that turn's id, so the upcoming append cannot re-map
-    // it — and CANNOT run here: the optimistic push happens several awaits
-    // into sendMessage, so anything mutated now renders one flush BEFORE the
-    // new turn exists. tryApplyPin sets the new entry; the settle prunes.
+    // Arm only — do NOT clear / set reserves here.
+    //
+    // sendMessage pushes the optimistic user turn only after several awaits
+    // (command parse, session setup, …). Anything we mutate now paints one
+    // Vue flush BEFORE that turn exists: a positional or "clear previous
+    // blank now" edit either hits the wrong container or shrinks scrollHeight
+    // under a bottom-parked viewport (zero-frame jerk). The full handover
+    // (collapseReserveKeepingView → new min-height → tween) runs in
+    // tryApplyPin on the first mutation where the NEW prompt is in the DOM.
   }
 
   function startScrollTween(
@@ -454,20 +558,27 @@ export function useChatScroll(options: UseChatScrollOptions) {
   }
 
   // Apply an armed pin: size the last-turn container's reserve ONCE, then move
-  // the viewport to the shared pin target (prompt top - offset) — send mode
-  // tweens there, entry mode jumps there. The reserve is min-height,
-  // so all later geometry is absorbed by CSS layout with zero JS involvement;
-  // see the header's Pin section for why it must be set exactly once and left
+  // the viewport to the shared pin target (prompt top − offset) — send mode
+  // tweens there, entry mode jumps there. The reserve is min-height, so all
+  // later geometry is absorbed by CSS layout with zero JS involvement; see
+  // the header's Pin section for why it must be set exactly once and left
   // alone (including after the stream completes).
   //
-  // Geometry: with reserve R on the container and `below` = everything under
-  // the container (the column's bottom padding),
-  //   scrollTop@bottom = containerTop + R + below - clientHeight
-  // and we want that to equal promptTop - PIN_TOP_OFFSET_PX, giving
-  //   R = clientHeight - below - PIN_TOP_OFFSET_PX + (promptTop - containerTop)
-  // A prompt taller than the reserve can't land its top at the pin point; the
-  // floor guarantees breathing room below its tail instead (its end plus the
-  // incoming reply stay visible).
+  // Pipeline (order is the product; do not reorder "for simplicity"):
+  //   arm (pinAfterSend / session watch) → MO sees new prompt → tryApplyPin
+  //     → collapse previous residual blank (if any)
+  //     → measure + set new min-height
+  //     → pinTarget tween/jump
+  //   settle timer only clears pinScrollActive / refreshes isAtBottom —
+  //   it must NOT touch reserves (handover already finished before flight).
+  //
+  // Geometry for the NEW reserve R (measured only after old blank is gone):
+  //   with `below` = everything under the new container (column bottom pad),
+  //     scrollTop@bottom = containerTop + R + below − clientHeight
+  //   want that equal to promptTop − PIN_TOP_OFFSET_PX:
+  //     R = clientHeight − below − PIN_TOP_OFFSET_PX + (promptTop − containerTop)
+  //   Floor: prompt taller than the ideal reserve can't land its top at the
+  //   pin point — keep breathing room below its tail instead.
   function tryApplyPin(el: HTMLElement): boolean {
     const container = lastTurnEl.value
     if (!container) return false
@@ -484,42 +595,50 @@ export function useChatScroll(options: UseChatScrollOptions) {
     // and the rendered rows can briefly disagree; sizing against a mismatched
     // pair would reserve garbage.
     if (!container.contains(promptEl)) return false
-    // The first turn never pins (reference behavior: pin only when older
-    // turns exist above) — with nothing before it the content already sits
-    // at the top, and a viewport of reserved blank would only add dead
-    // scroll range.
-    if (messages.value[0]?.id === prompt.id) {
-      pinPending = false
-      return false
-    }
     pinPending = false
     // A pinned turn is a parked view — follow re-engages only when the user
-    // scrolls back into the bottom band. (Send already parked in pinAfterSend;
-    // this is where ENTRY switches from its land-at-bottom fallback to parked.)
+    // scrolls back into the content-end band. (Send already parked in
+    // pinAfterSend; this is where ENTRY switches from its land-at-bottom
+    // fallback to parked.)
     followEnabled = false
 
+    // ── Reserve HANDOVER (single coordinate system) ────────────────────
+    // Step 1: retire previous residual blank with position-aware
+    // compensation (collapseReserveKeepingView). MUST run before measuring
+    // the new reserve and before the entrance tween:
+    //   • If the old blank stays during flight, pinTarget is measured with
+    //     empty spacing above the new prompt — the tween scrolls through
+    //     that spacing; previous turn looks unmounted until something later
+    //     clears the blank.
+    //   • If we clear with flat scrollTop -= delta, parked/history views
+    //     jump before the tween starts.
+    // Bracket as programmatic so any scrollTop tweak cannot latch as a
+    // user escape before startScrollTween takes over the flag.
+    isProgrammaticScroll = true
+    if (appliedPinContainer && appliedPinContainer !== container) {
+      collapseReserveKeepingView(el, appliedPinContainer)
+    }
+    appliedPinContainer = container
+
+    // Step 2: measure + set NEW reserve once. `below` / prompt offsets are
+    // only honest after step 1 — dual-reserve layout would inflate
+    // containerTop and lie about how much blank the new turn still needs.
     const containerTop = getElementAbsoluteTop(container, el)
     const promptOffsetInTurn = getElementAbsoluteTop(promptEl, el) - containerTop
     const below = el.scrollHeight - containerTop - container.offsetHeight
     const ideal = el.clientHeight - below - PIN_TOP_OFFSET_PX + promptOffsetInTurn
     const floor = promptOffsetInTurn + promptEl.offsetHeight + Math.round(el.clientHeight / 3)
-    const reservePx = Math.max(0, Math.round(Math.max(ideal, floor)))
-    pinnedTurnId = prompt.id
-    turnReserves.value = new Map(turnReserves.value).set(prompt.id, reservePx)
-    // Immediate projection of the same value: the reactive binding lands on
-    // Vue's next flush, but the scroll below needs this frame's geometry
-    // (the entry jump would otherwise clamp against a reserve-less
-    // scrollHeight). The binding renders the identical value and owns it
-    // from the next patch on.
-    container.style.minHeight = `${reservePx}px`
+    pinnedReservePx = Math.max(0, Math.round(Math.max(ideal, floor)))
+    container.style.minHeight = `${pinnedReservePx}px`
+    lastScrollTop = el.scrollTop
 
-    // THE one landing computation, shared verbatim by send and entry so the
-    // two ways of arriving at a pinned turn cannot drift apart: the viewport
-    // top goes to (prompt top - PIN_TOP_OFFSET_PX). Anchored on the PROMPT,
-    // never on scrollHeight — a bottom-anchored target moves mid-flight when
-    // the reply outgrows the reserve while streaming, landing deeper than the
-    // offset (the sliver visibly eroded). Re-resolved on every read because
-    // the optimistic → server id swap remounts the prompt row mid-flight.
+    // Step 3: landing target — THE one formula for send and entry so the
+    // two arrival paths cannot drift. Viewport top → prompt top −
+    // PIN_TOP_OFFSET_PX. Anchored on the PROMPT, never on scrollHeight (a
+    // bottom-anchored target moves mid-flight when the reply outgrows the
+    // reserve). Re-resolved every tween frame because optimistic → server
+    // id swap can remount the prompt row mid-flight. Measured only after
+    // step 1 so distance and peek are real previous-turn content.
     const pinTarget = () => {
       const cur = lastUserMessage()
       const curEl = cur ? findMessageElement(cur.id) : null
@@ -527,25 +646,17 @@ export function useChatScroll(options: UseChatScrollOptions) {
     }
 
     if (pinMode === 'send') {
-      // Entrance animation: the shared JS tween — the same one the
-      // jump-to-bottom button and reply jumps use. Browser-native smooth
-      // scroll was tried first (per spec) and rejected in testing: Chromium
-      // animates scrollTo at a flat constant-speed profile (reads as
-      // mechanical, no ease-out), and cancels the flight outright when the
-      // scroller's content changes — which streaming guarantees, so the view
-      // kept stopping partway. The tween is per-frame and re-reads its target,
-      // so it can't be cancelled by mutations and lands exactly even while
-      // the reply grows; a real wheel/touch still cancels it (user intent
-      // wins, handled inside startScrollTween).
+      // Entrance: shared JS tween (same as jump-to-bottom / reply jumps).
+      // Native smooth was rejected: Chromium's profile reads as constant-
+      // speed, and content mutations cancel the flight mid-stream. The
+      // tween re-reads pinTarget each frame; wheel/touch cancels it inside
+      // startScrollTween. Settle timer only ends pinScrollActive — no
+      // reserve work (that finished in steps 1–2).
       pinScrollActive = true
       if (pinSettleTimer) clearTimeout(pinSettleTimer)
       pinSettleTimer = setTimeout(() => {
         pinSettleTimer = null
         pinScrollActive = false
-        // The entrance has settled — retire the previous turn's blank now
-        // (contract: never at arm/animation start). Declarative: its :style
-        // binding drops the min-height on the next flush.
-        pruneReservesTo(pinnedTurnId)
         const cur = scrollEl.value
         if (!cur) return
         isAtBottom.value = isNearBottom(cur)
@@ -553,11 +664,8 @@ export function useChatScroll(options: UseChatScrollOptions) {
       }, PIN_TWEEN_DURATION_MS + 100)
       startScrollTween(el, pinTarget, PIN_TWEEN_DURATION_MS)
     } else {
-      // Entry: same target, no animation — a session opens already in place,
-      // so there is no flight to protect: retire any other turn's blank
-      // right away.
-      pruneReservesTo(prompt.id)
-      isProgrammaticScroll = true
+      // Entry: same pinTarget, no animation — session opens already in place.
+      // Old blank was already cleared in step 1 (same helper as send).
       el.scrollTo({ top: pinTarget(), behavior: 'auto' })
       requestAnimationFrame(() => {
         isProgrammaticScroll = false
@@ -662,10 +770,11 @@ export function useChatScroll(options: UseChatScrollOptions) {
     pinPending = true
     pinMode = 'entry'
     pinAnchorId = null
-    // The old session's reserves are meaningless in the new one; the entry
-    // pin measures the new session fresh.
-    pinnedTurnId = null
-    turnReserves.value = new Map()
+    // The old session's turn containers unmount with its messages (inline
+    // reserve dies with the element); drop the pin pointers and the held
+    // reserve so the entry pin measures the new session fresh.
+    appliedPinContainer = null
+    pinnedReservePx = null
   })
 
   watch(isScrolling, (scrolling) => {
@@ -712,11 +821,11 @@ export function useChatScroll(options: UseChatScrollOptions) {
             done = true
             unwatch()
             // Restored to a remembered position: follow only if that position
-            // is at the content end, so a mid-history restore (or a park in
-            // the reserve blank) is not yanked by the first streamed mutation.
+            // is already at the content end (not merely "no content below" —
+            // a restore parked in pin blank must stay parked).
             const root = scrollEl.value
             followEnabled = root ? atContentEnd(root) : true
-            if (root) isAtBottom.value = followEnabled
+            if (root) isAtBottom.value = isNearBottom(root)
           })
         } else {
           if (!newValue) {
@@ -795,20 +904,53 @@ export function useChatScroll(options: UseChatScrollOptions) {
       // parked).
       followEnabled = false
     } else if (atContentEnd(el)) {
-      // Reaching the CONTENT END is the only scroll gesture that (re-)arms
-      // follow — not merely "no content below" (see atContentEnd for why a
-      // park inside the reserve blank must never arm). Deliberately NO
-      // optimistic "relock shortly after a downward pause" here — see the
-      // header's "Follow on / off" section.
+      // Reaching the content end is the only scroll gesture that (re-)arms
+      // follow — not merely "no content below" (see atContentEnd: a viewport
+      // parked in the pin reserve must not arm). Deliberately NO optimistic
+      // "relock shortly after a downward pause" here — see the header's
+      // "Follow on / off" section.
       followEnabled = true
     }
   }
 
-  // The follow heartbeat: streaming tokens mutate the DOM subtree. First give
-  // an armed pin its chance to apply (it needs the target prompt in the DOM);
-  // the mutation that applies a pin belongs to the pin alone — never also
-  // follow on it, or the entry landing would be yanked straight to the bottom.
+  // Re-assert the pinned reserve after the turn container remounts (stream
+  // completion re-keys it — see pinnedReservePx). Skipped while a pin is
+  // pending: between arm and apply, lastTurnEl already points at the NEXT
+  // turn's container, which must measure fresh, not inherit the old reserve.
+  // Touches only inline style (no layout reads), so it is safe to run BEFORE
+  // any layout-forcing work — that ordering is what prevents a transient
+  // reserve-less layout (and the scrollTop clamp it would trigger) from ever
+  // materializing on screen.
+  // Re-assert the CURRENT pin's min-height after a turn-container remount
+  // (stream completion re-keys → v-for remount drops inline style). This is
+  // NOT a second handover and must not run collapseReserveKeepingView:
+  // we only stamp the already-chosen pinnedReservePx onto the live last-turn
+  // node so residual blank survives completion. Skipped while pinPending —
+  // between arm and apply, lastTurnEl already points at the NEXT turn, which
+  // must measure fresh in tryApplyPin, not inherit the old px.
+  function restorePinReserve() {
+    if (pinnedReservePx === null || pinPending) return
+    const container = lastTurnEl.value
+    if (!container || container === appliedPinContainer) return
+    if (appliedPinContainer?.isConnected) appliedPinContainer.style.minHeight = ''
+    container.style.minHeight = `${pinnedReservePx}px`
+    appliedPinContainer = container
+  }
+
+  // Follow / pin heartbeat. Streaming (and any other subtree mutation) lands
+  // here. Order matters:
+  //   1. restorePinReserve — re-stamp current reserve if the container remounted
+  //      (style-only; no scrollTop policy).
+  //   2. tryApplyPin if armed — owns the one real handover + entrance; return
+  //      so this mutation never ALSO follow-snaps (would cancel the pin).
+  //   3. else if followEnabled → stick to content end.
+  //   4. else refresh jump-button mirror only.
+  // Height changes that are NOT a pin handover (Thought expand, tool body,
+  // markdown reflow) intentionally do nothing special here when follow is
+  // off — the browser keeps the parked view; do not invent collapse/scroll
+  // compensation on those paths.
   function onContentMutated() {
+    restorePinReserve()
     const el = scrollEl.value
     if (!el) return
     if (!isActive.value || lockScroll.value) return
@@ -816,6 +958,13 @@ export function useChatScroll(options: UseChatScrollOptions) {
     if (followEnabled) stickToBottomNow()
     else if (!pinScrollActive) isAtBottom.value = isNearBottom(el)
   }
+
+  // Second belt for the same invariant: Vue's watcher flush and the
+  // MutationObserver microtask race — whichever runs first after the remount
+  // must re-assert before anything forces layout.
+  watch(lastTurnEl, () => {
+    restorePinReserve()
+  }, { flush: 'post' })
 
   function attach(el: HTMLElement) {
     lastScrollTop = el.scrollTop
@@ -864,9 +1013,6 @@ export function useChatScroll(options: UseChatScrollOptions) {
     lockScroll,
     highlightedMessageId,
     showJumpToBottom,
-    // reserve projection — chat-pane binds this per turn container
-    // (see the declarative-reserve comment above)
-    turnReserveStyle,
 
     // primary actions
     scrollToBottom,
