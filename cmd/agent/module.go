@@ -52,8 +52,10 @@ func options() fx.Option {
 			provideNetworkService,
 			provideNetworkController,
 			provideDBConn,
+			provideAppDBConn,
 			providePostgresStore,
 			provideDBQueries,
+			provideMaintenanceQueries,
 			provideAccountStore,
 			provideWikiStore,
 			provideWorkspaceManager,
@@ -183,6 +185,7 @@ func options() fx.Option {
 		fx.Invoke(
 			injectToolProviders,
 			injectACPToolProviders,
+			wireMaintenanceQueries,
 			startRegistrySync,
 			startAudioProviderBootstrap,
 			startVideoProviderBootstrap,

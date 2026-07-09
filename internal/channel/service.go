@@ -27,8 +27,12 @@ var ErrChannelDiscoveryFailed = errors.New("channel identity discovery failed")
 
 // Store provides CRUD operations for channel configurations, user bindings, and sessions.
 type Store struct {
-	queries  dbstore.Queries
-	registry *Registry
+	queries dbstore.Queries
+	// maintenanceQueries runs on the owner pool (bypasses FORCE RLS) and backs
+	// the all-team ListConfigsByType path (channel refresh + inbound webhook
+	// routing). Falls back to queries when unset.
+	maintenanceQueries dbstore.Queries
+	registry           *Registry
 }
 
 // NewStore creates a Store backed by the given database queries and adapter registry.
@@ -37,6 +41,19 @@ func NewStore(queries dbstore.Queries, registry *Registry) *Store {
 		registry = NewRegistry()
 	}
 	return &Store{queries: queries, registry: registry}
+}
+
+// SetMaintenanceQueries wires the owner-pool Queries used by the all-team
+// ListConfigsByType read (bypasses FORCE ROW LEVEL SECURITY).
+func (s *Store) SetMaintenanceQueries(q dbstore.Queries) {
+	s.maintenanceQueries = q
+}
+
+func (s *Store) allTeamQueries() dbstore.Queries {
+	if s.maintenanceQueries != nil {
+		return s.maintenanceQueries
+	}
+	return s.queries
 }
 
 // UpsertConfig creates or updates a bot's channel configuration.
@@ -431,8 +448,9 @@ func (s *Store) ListConfigsByType(ctx context.Context, channelType ChannelType) 
 		return []ChannelConfig{}, nil
 	}
 	// All-team by design: this backs the process-wide channel refresh and inbound
-	// webhook routing, which run without a per-request team scope.
-	rows, err := s.queries.ListBotChannelConfigsByType(ctx, channelType.String())
+	// webhook routing, which run without a per-request team scope. It runs on the
+	// maintenance (owner) pool so FORCE RLS does not filter it to zero rows.
+	rows, err := s.allTeamQueries().ListBotChannelConfigsByType(ctx, channelType.String())
 	if err != nil {
 		return nil, err
 	}

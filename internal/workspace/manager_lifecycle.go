@@ -15,7 +15,9 @@ import (
 	ctr "github.com/memohai/memoh/internal/container"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	netctl "github.com/memohai/memoh/internal/network"
+	"github.com/memohai/memoh/internal/teams"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -510,10 +512,13 @@ func (m *Manager) CleanupBotContainer(ctx context.Context, botID string, preserv
 // state on startup. For each auto_start container in DB it verifies the container
 // and task exist; if missing they are rebuilt.
 func (m *Manager) ReconcileContainers(ctx context.Context) {
-	if m.queries == nil {
+	// The auto-start list and the status writes below span all teams, so they run
+	// on the maintenance (owner) pool, which bypasses FORCE ROW LEVEL SECURITY.
+	rq := m.reconcileQueries()
+	if rq == nil {
 		return
 	}
-	rows, err := m.queries.ListAutoStartContainers(ctx)
+	rows, err := rq.ListAutoStartContainers(ctx)
 	if err != nil {
 		m.logger.Error("reconcile: failed to list containers from DB", slog.Any("error", err))
 		return
@@ -527,6 +532,9 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 	for _, row := range rows {
 		containerID := row.ContainerID
 		botID := uuid.UUID(row.BotID.Bytes).String()
+		// Scope the per-row status writes to this container's team so the
+		// team_id predicate (and RLS, if ever run on a restricted pool) matches.
+		rowCtx := teams.WithScope(ctx, teams.Scope{TeamID: uuid.UUID(row.TeamID.Bytes).String()})
 
 		_, err := m.service.GetContainer(ctx, containerID)
 		if err != nil {
@@ -541,7 +549,7 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 			if setupErr := m.SetupBotContainer(ctx, botID); setupErr != nil {
 				m.logger.Error("reconcile: rebuild failed",
 					slog.String("bot_id", botID), slog.Any("error", setupErr))
-				m.markContainerStatus(ctx, botID, "error")
+				m.markContainerStatusWith(rowCtx, rq, botID, "error")
 			}
 			continue
 		}
@@ -575,7 +583,7 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 		running := m.isTaskRunning(ctx, containerID)
 		if running {
 			if row.Status != "running" {
-				m.markContainerStarted(ctx, botID)
+				m.markContainerStartedWith(rowCtx, rq, botID)
 			}
 			if netErr := m.ensureContainerNetwork(ctx, containerID, botID); netErr != nil {
 				m.logger.Error("reconcile: network setup failed for running task, container unreachable",
@@ -595,9 +603,9 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 		if err := m.EnsureRunning(ctx, botID); err != nil {
 			m.logger.Error("reconcile: failed to start task",
 				slog.String("bot_id", botID), slog.Any("error", err))
-			m.markContainerStopped(ctx, botID)
+			m.markContainerStoppedWith(rowCtx, rq, botID)
 		} else {
-			m.markContainerStarted(ctx, botID)
+			m.markContainerStartedWith(rowCtx, rq, botID)
 		}
 	}
 	m.logger.Info("reconcile: completed")
@@ -698,35 +706,43 @@ func (m *Manager) deleteContainerRecord(ctx context.Context, botID string) {
 }
 
 func (m *Manager) markContainerStarted(ctx context.Context, botID string) {
-	if m.queries == nil {
+	m.markContainerStartedWith(ctx, m.queries, botID)
+}
+
+func (m *Manager) markContainerStartedWith(ctx context.Context, q dbstore.Queries, botID string) {
+	if q == nil {
 		return
 	}
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
 		return
 	}
-	if dbErr := m.queries.UpdateContainerStarted(ctx, pgBotID); dbErr != nil {
+	if dbErr := q.UpdateContainerStarted(ctx, pgBotID); dbErr != nil {
 		m.logger.Error("failed to update container started status",
 			slog.String("bot_id", botID), slog.Any("error", dbErr))
 	}
 }
 
 func (m *Manager) markContainerStopped(ctx context.Context, botID string) {
-	if m.queries == nil {
+	m.markContainerStoppedWith(ctx, m.queries, botID)
+}
+
+func (m *Manager) markContainerStoppedWith(ctx context.Context, q dbstore.Queries, botID string) {
+	if q == nil {
 		return
 	}
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
 		return
 	}
-	if dbErr := m.queries.UpdateContainerStopped(ctx, pgBotID); dbErr != nil {
+	if dbErr := q.UpdateContainerStopped(ctx, pgBotID); dbErr != nil {
 		m.logger.Error("failed to update container stopped status",
 			slog.String("bot_id", botID), slog.Any("error", dbErr))
 	}
 }
 
-func (m *Manager) markContainerStatus(ctx context.Context, botID, status string) {
-	if m.queries == nil {
+func (m *Manager) markContainerStatusWith(ctx context.Context, q dbstore.Queries, botID, status string) {
+	if q == nil {
 		return
 	}
 	pgBotID, err := db.ParseUUID(botID)
@@ -739,7 +755,7 @@ func (m *Manager) markContainerStatus(ctx context.Context, botID, status string)
 			slog.String("bot_id", botID), slog.Any("error", err))
 		return
 	}
-	if dbErr := m.queries.UpdateContainerStatus(ctx, dbsqlc.UpdateContainerStatusParams{
+	if dbErr := q.UpdateContainerStatus(ctx, dbsqlc.UpdateContainerStatusParams{
 		TeamID: pgTeamID,
 		Status: status,
 		BotID:  pgBotID,

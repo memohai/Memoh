@@ -90,14 +90,18 @@ type Manager struct {
 	namespace         string
 	db                *pgxpool.Pool
 	queries           dbstore.Queries
-	hookService       *hooks.Service
-	logger            *slog.Logger
-	containerLockMu   sync.Mutex
-	containerLocks    map[string]*sync.Mutex
-	grpcPool          *bridge.Pool
-	bridgeTLS         *BridgeTLSRuntimeOptions
-	legacyMu          sync.RWMutex
-	legacyIPs         map[string]string // botID → IP for pre-bridge containers
+	// maintenanceQueries runs on the owner pool (bypasses FORCE RLS) and is used
+	// only by the cross-team startup reconcile path. Falls back to queries when
+	// unset so behavior is unchanged where no maintenance pool is wired.
+	maintenanceQueries dbstore.Queries
+	hookService        *hooks.Service
+	logger             *slog.Logger
+	containerLockMu    sync.Mutex
+	containerLocks     map[string]*sync.Mutex
+	grpcPool           *bridge.Pool
+	bridgeTLS          *BridgeTLSRuntimeOptions
+	legacyMu           sync.RWMutex
+	legacyIPs          map[string]string // botID → IP for pre-bridge containers
 }
 
 type WorkspaceStartConfig struct {
@@ -132,6 +136,21 @@ func NewManager(log *slog.Logger, service runtimeService, networkController netc
 
 func (m *Manager) SetHookService(h *hooks.Service) {
 	m.hookService = h
+}
+
+// SetMaintenanceQueries wires the owner-pool Queries used by the cross-team
+// startup reconcile path (bypasses FORCE ROW LEVEL SECURITY).
+func (m *Manager) SetMaintenanceQueries(q dbstore.Queries) {
+	m.maintenanceQueries = q
+}
+
+// reconcileQueries returns the Queries used by the all-team startup reconcile
+// path: the maintenance (owner) pool when wired, else the default queries.
+func (m *Manager) reconcileQueries() dbstore.Queries {
+	if m.maintenanceQueries != nil {
+		return m.maintenanceQueries
+	}
+	return m.queries
 }
 
 // SetBridgeTLS enables strict mTLS on TCP bridge dials and injects bridge-side

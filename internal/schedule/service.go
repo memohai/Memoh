@@ -35,16 +35,33 @@ type TeamSessionCreator interface {
 }
 
 type Service struct {
-	queries         dbstore.Queries
-	cron            *cron.Cron
-	parser          cron.Parser
-	triggerer       Triggerer
-	sessionCreator  SessionCreator
-	jwtSecret       string
-	logger          *slog.Logger
-	defaultLocation *time.Location
-	mu              sync.Mutex
-	jobs            map[string]cron.EntryID
+	queries dbstore.Queries
+	// maintenanceQueries runs on the owner pool (bypasses FORCE RLS) and is used
+	// only for the all-team ListEnabledSchedules read in Bootstrap. Falls back to
+	// queries when unset.
+	maintenanceQueries dbstore.Queries
+	cron               *cron.Cron
+	parser             cron.Parser
+	triggerer          Triggerer
+	sessionCreator     SessionCreator
+	jwtSecret          string
+	logger             *slog.Logger
+	defaultLocation    *time.Location
+	mu                 sync.Mutex
+	jobs               map[string]cron.EntryID
+}
+
+// SetMaintenanceQueries wires the owner-pool Queries used by the all-team
+// Bootstrap read (bypasses FORCE ROW LEVEL SECURITY).
+func (s *Service) SetMaintenanceQueries(q dbstore.Queries) {
+	s.maintenanceQueries = q
+}
+
+func (s *Service) bootstrapQueries() dbstore.Queries {
+	if s.maintenanceQueries != nil {
+		return s.maintenanceQueries
+	}
+	return s.queries
 }
 
 func NewService(log *slog.Logger, queries dbstore.Queries, triggerer Triggerer, sessionCreator SessionCreator, runtimeConfig *boot.RuntimeConfig) *Service {
@@ -73,7 +90,8 @@ func (s *Service) Bootstrap(ctx context.Context) error {
 	if s.queries == nil {
 		return errors.New("schedule queries not configured")
 	}
-	items, err := s.queries.ListEnabledSchedules(ctx)
+	// All-team read runs on the maintenance (owner) pool to bypass FORCE RLS.
+	items, err := s.bootstrapQueries().ListEnabledSchedules(ctx)
 	if err != nil {
 		return err
 	}

@@ -60,6 +60,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/db"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	emailpkg "github.com/memohai/memoh/internal/email"
@@ -149,6 +150,11 @@ func provideNetworkController(service ctr.Service, rc *boot.RuntimeConfig, netwo
 	return ctrl
 }
 
+// provideDBConn builds the owner/DDL connection pool (db.DSN). The owner role is
+// the table owner and bypasses FORCE ROW LEVEL SECURITY, so this pool is used
+// for: bootstrap writes that touch team_members/teams/users, the workspace
+// bridge dial target, bot backup, and the maintenance Queries that runs the
+// enumerated all-team startup queries.
 func provideDBConn(lc fx.Lifecycle, cfg config.Config) (*pgxpool.Pool, error) {
 	conn, err := db.Open(context.Background(), cfg)
 	if err != nil {
@@ -164,6 +170,39 @@ func provideDBConn(lc fx.Lifecycle, cfg config.Config) (*pgxpool.Pool, error) {
 		},
 	})
 	return conn, nil
+}
+
+// appDBPool wraps the restricted runtime connection pool (db.AppDSN, role
+// memoh_app). It is a distinct type so FX does not confuse it with the owner
+// *pgxpool.Pool. When app_user is empty AppDSN falls back to the owner DSN, so
+// this pool is safe to build even before the memoh_app role exists (RLS is then
+// inert but the app still works).
+type appDBPool struct {
+	pool *pgxpool.Pool
+}
+
+func provideAppDBConn(lc fx.Lifecycle, log *slog.Logger, cfg config.Config) (*appDBPool, error) {
+	if db.DriverFromConfig(cfg) != db.DriverPostgres {
+		return &appDBPool{}, nil
+	}
+	if strings.TrimSpace(cfg.Postgres.AppUser) == "" {
+		log.Warn("postgres app_user is empty; runtime connects as the owner role and FORCE RLS is inert (set [postgres].app_user = \"memoh_app\" to enable enforced team isolation)")
+	}
+	poolCfg, err := pgxpool.ParseConfig(db.AppDSN(cfg.Postgres))
+	if err != nil {
+		return nil, fmt.Errorf("app db parse config: %w", err)
+	}
+	pool, err := pgxpool.NewWithConfig(context.Background(), poolCfg)
+	if err != nil {
+		return nil, fmt.Errorf("app db connect: %w", err)
+	}
+	lc.Append(fx.Hook{
+		OnStop: func(_ context.Context) error {
+			pool.Close()
+			return nil
+		},
+	})
+	return &appDBPool{pool: pool}, nil
 }
 
 func providePostgresStore(conn *pgxpool.Pool) (*postgresstore.Store, error) {
@@ -190,11 +229,35 @@ func provideNetworkService(log *slog.Logger, queries dbstore.Queries, registry *
 	return netctl.NewService(log, queries, registry, service, rc.ContainerBackend, cfg.Workspace.CNIBinaryDir, cfg.Workspace.CNIConfigDir, cfg.Workspace.DataRoot)
 }
 
-func provideDBQueries(postgresStore *postgresstore.Store) (dbstore.Queries, error) {
+// provideDBQueries builds the per-request Queries. It runs on the restricted
+// app pool (memoh_app) when configured, so every statement sets app.team_id and
+// FORCE ROW LEVEL SECURITY isolates teams. When the app pool is unavailable
+// (no app_user; AppDSN fell back to owner, or non-postgres driver) it uses the
+// owner pool so the app still works.
+func provideDBQueries(appPool *appDBPool, postgresStore *postgresstore.Store) (dbstore.Queries, error) {
+	if appPool != nil && appPool.pool != nil {
+		appStore, err := postgresstore.New(appPool.pool)
+		if err != nil {
+			return nil, fmt.Errorf("app store: %w", err)
+		}
+		return postgresstore.NewQueriesWithPool(appPool.pool, appStore.SQLC()), nil
+	}
 	if postgresStore == nil {
 		return nil, errors.New("postgres store not configured")
 	}
 	return postgresstore.NewQueriesWithPool(postgresStore.Pool(), postgresStore.SQLC()), nil
+}
+
+// provideMaintenanceQueries builds the maintenance Queries on the owner pool.
+// It uses the raw pool as DBTX (no per-statement app.team_id), so the owner role
+// bypasses FORCE ROW LEVEL SECURITY. Only the enumerated all-team startup paths
+// (container reconcile, schedule/heartbeat bootstrap, channel refresh) use it.
+func provideMaintenanceQueries(postgresStore *postgresstore.Store) (dbstore.MaintenanceQueries, error) {
+	if postgresStore == nil || postgresStore.Pool() == nil {
+		return dbstore.MaintenanceQueries{}, errors.New("postgres store not configured for maintenance queries")
+	}
+	pool := postgresStore.Pool()
+	return dbstore.NewMaintenanceQueries(postgresstore.NewQueriesWithPool(pool, dbsqlc.New(pool))), nil
 }
 
 func provideAccountStore(postgresStore *postgresstore.Store) (dbstore.AccountStore, error) {
@@ -234,7 +297,7 @@ func provideHooksService(log *slog.Logger, provider bridge.Provider, pluginServi
 	return service
 }
 
-func provideWorkspaceManager(lc fx.Lifecycle, log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, conn *pgxpool.Pool, queries dbstore.Queries) (*workspace.Manager, error) {
+func provideWorkspaceManager(lc fx.Lifecycle, log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, conn *pgxpool.Pool, queries dbstore.Queries, maintenanceQueries dbstore.MaintenanceQueries) (*workspace.Manager, error) {
 	localSvc := workspace.NewLocalService(log, cfg.Local, cfg.Workspace.DataRoot)
 	lc.Append(fx.Hook{
 		OnStop: func(context.Context) error {
@@ -244,6 +307,9 @@ func provideWorkspaceManager(lc fx.Lifecycle, log *slog.Logger, service ctr.Serv
 	})
 	runtimeSvc := workspace.NewRuntimeRouter(service, localSvc)
 	mgr := workspace.NewManager(log, runtimeSvc, networkController, cfg.Workspace, cfg.Containerd.Namespace, conn, queries)
+	if maintenanceQueries.Queries != nil {
+		mgr.SetMaintenanceQueries(maintenanceQueries.Queries)
+	}
 	tlsOpts, err := workspace.BridgeTLSRuntimeOptionsFromConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -1300,6 +1366,20 @@ func startFetchProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, fpService *f
 			return nil
 		},
 	})
+}
+
+// wireMaintenanceQueries routes the enumerated all-team startup reads through
+// the maintenance (owner) pool, which bypasses FORCE ROW LEVEL SECURITY. Under
+// the restricted memoh_app pool these all-team reads would otherwise return zero
+// rows. When no maintenance pool is wired (MaintenanceQueries empty) the
+// services keep using their default queries.
+func wireMaintenanceQueries(maintenanceQueries dbstore.MaintenanceQueries, scheduleService *schedule.Service, heartbeatService *heartbeat.Service, channelStore *channel.Store) {
+	if maintenanceQueries.Queries == nil {
+		return
+	}
+	scheduleService.SetMaintenanceQueries(maintenanceQueries.Queries)
+	heartbeatService.SetMaintenanceQueries(maintenanceQueries.Queries)
+	channelStore.SetMaintenanceQueries(maintenanceQueries.Queries)
 }
 
 func startScheduleService(lc fx.Lifecycle, scheduleService *schedule.Service) {

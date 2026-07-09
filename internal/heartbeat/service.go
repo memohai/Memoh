@@ -41,14 +41,31 @@ type TeamSessionCreator interface {
 }
 
 type Service struct {
-	queries        dbstore.Queries
-	cron           *cron.Cron
-	triggerer      Triggerer
-	sessionCreator SessionCreator
-	jwtSecret      string
-	logger         *slog.Logger
-	mu             sync.Mutex
-	jobs           map[string]cron.EntryID
+	queries dbstore.Queries
+	// maintenanceQueries runs on the owner pool (bypasses FORCE RLS) and is used
+	// only for the all-team ListHeartbeatEnabledBots read in Bootstrap. Falls
+	// back to queries when unset.
+	maintenanceQueries dbstore.Queries
+	cron               *cron.Cron
+	triggerer          Triggerer
+	sessionCreator     SessionCreator
+	jwtSecret          string
+	logger             *slog.Logger
+	mu                 sync.Mutex
+	jobs               map[string]cron.EntryID
+}
+
+// SetMaintenanceQueries wires the owner-pool Queries used by the all-team
+// Bootstrap read (bypasses FORCE ROW LEVEL SECURITY).
+func (s *Service) SetMaintenanceQueries(q dbstore.Queries) {
+	s.maintenanceQueries = q
+}
+
+func (s *Service) bootstrapQueries() dbstore.Queries {
+	if s.maintenanceQueries != nil {
+		return s.maintenanceQueries
+	}
+	return s.queries
 }
 
 func NewService(log *slog.Logger, queries dbstore.Queries, triggerer Triggerer, sessionCreator SessionCreator, runtimeConfig *boot.RuntimeConfig) *Service {
@@ -70,7 +87,8 @@ func (s *Service) Bootstrap(ctx context.Context) error {
 	if s.queries == nil {
 		return errors.New("heartbeat queries not configured")
 	}
-	rows, err := s.queries.ListHeartbeatEnabledBots(ctx)
+	// All-team read runs on the maintenance (owner) pool to bypass FORCE RLS.
+	rows, err := s.bootstrapQueries().ListHeartbeatEnabledBots(ctx)
 	if err != nil {
 		return err
 	}
