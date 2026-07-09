@@ -49,10 +49,16 @@ host = ""
 [postgres]
 host = "127.0.0.1"
 port = 5432
+# Owner/DDL role: runs migrations and owns the tables (bypasses FORCE RLS).
 user = "memoh"
 password = "memoh123"
 database = "memoh"
 sslmode = "disable"
+# Restricted runtime role (memoh_app), created by migration 0107. Non-owner,
+# non-superuser, so FORCE ROW LEVEL SECURITY enforces team isolation. Leave
+# empty to fall back to the owner role.
+app_user = "memoh_app"
+app_password = "memoh_app"
 
 [pgvector]
 enabled = false

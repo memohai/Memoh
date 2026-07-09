@@ -349,6 +349,14 @@ type PostgresConfig struct {
 	Password string `toml:"password" json:"-"`
 	Database string `toml:"database"`
 	SSLMode  string `toml:"sslmode"`
+	// AppUser/AppPassword are the restricted runtime role (memoh_app): a
+	// non-owner, non-superuser role the application connects as so FORCE ROW
+	// LEVEL SECURITY enforces team isolation. User/Password remain the
+	// owner/DDL role used for migrations. When AppUser is empty the runtime
+	// falls back to the owner role (see db.AppDSN), so OSS first boot still
+	// works before the role-creating migration has run.
+	AppUser     string `toml:"app_user"`
+	AppPassword string `toml:"app_password" json:"-"`
 }
 
 type PGVectorConfig struct {

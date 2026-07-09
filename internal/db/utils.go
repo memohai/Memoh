@@ -16,11 +16,30 @@ import (
 	"github.com/memohai/memoh/internal/config"
 )
 
-// DSN builds a PostgreSQL connection string from config.
+// DSN builds a PostgreSQL connection string for the owner/DDL role. This role
+// is used for migrations (which create/alter tables and the memoh_app role) and
+// is the table owner, so it is not subject to FORCE ROW LEVEL SECURITY.
 func DSN(cfg config.PostgresConfig) string {
+	return dsnWithCredentials(cfg, cfg.User, cfg.Password)
+}
+
+// AppDSN builds a PostgreSQL connection string for the restricted runtime role
+// (memoh_app): a non-owner, non-superuser role so FORCE ROW LEVEL SECURITY
+// enforces team isolation. When AppUser is empty it falls back to the owner DSN
+// so OSS first boot works before the role-creating migration has run; callers
+// should log a warning in that case.
+func AppDSN(cfg config.PostgresConfig) string {
+	user := strings.TrimSpace(cfg.AppUser)
+	if user == "" {
+		return DSN(cfg)
+	}
+	return dsnWithCredentials(cfg, cfg.AppUser, cfg.AppPassword)
+}
+
+func dsnWithCredentials(cfg config.PostgresConfig, user, password string) string {
 	dsn := &url.URL{
 		Scheme: "postgres",
-		User:   url.UserPassword(cfg.User, cfg.Password),
+		User:   url.UserPassword(user, password),
 		Host:   net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)),
 		Path:   cfg.Database,
 	}

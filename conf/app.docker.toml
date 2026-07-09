@@ -71,10 +71,17 @@ allow_absolute_paths = false
 [postgres]
 host = "postgres"
 port = 5432
+# Owner/DDL role: runs migrations and owns the tables (bypasses FORCE RLS).
 user = "memoh"
 password = "memoh123"
 database = "memoh"
 sslmode = "disable"
+# Restricted runtime role (memoh_app), created by migration 0107. Non-owner,
+# non-superuser, so FORCE ROW LEVEL SECURITY enforces team isolation. The
+# password here must match the role's password (set by the compose entrypoint /
+# MEMOH_POSTGRES_APP_PASSWORD). Leave empty to fall back to the owner role.
+app_user = "memoh_app"
+app_password = "memoh_app"
 
 ## pgvector auxiliary index database. The main Postgres service remains the
 ## relational source of truth; this separate service stores semantic seed vectors.
