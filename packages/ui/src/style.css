@@ -112,6 +112,19 @@
     scale: 0.974;
     box-shadow: none;
   }
+  /* press — BLOCK / full-width outline/secondary: mirrors the primary/ghost block
+     philosophy. A uniform press-scale on a wide button lurches sideways (each edge
+     travels ~width × 2.6%), so block secondary CTAs (e.g. the login OAuth buttons)
+     drop the scale and read the press through a deeper fill, applied INSTANT and
+     easing back on release via the base transition. Before this rule, wide
+     outline buttons fell through to the standalone scale above — the gap that
+     made full-width secondary actions lurch. */
+  [data-button]:is([data-variant="outline"], [data-variant="secondary"])[data-block]:active::before {
+    scale: 1 1;
+    background-color: var(--ui-pressed);
+    box-shadow: none;
+    transition: background-color 0s;
+  }
 
   /* ── Buttons inside a ButtonGroup — a "joined" relative of Toggle ────────────
      The group (button-group/index.ts) draws the single outer border + internal
@@ -922,6 +935,23 @@
 }
 .dark [data-button]:is([data-variant="outline"], [data-variant="secondary"])::before {
   transition-duration: 0.255s, 0.095s, 0.095s;
+}
+
+/* BLOCK buttons: pointer-driven color must be INSTANT, both directions.
+   A wide CTA already dropped press-scale (the block rules above); the remaining
+   motion cue is color, and any easing on it reads as lag under the cursor. So on
+   block primary/secondary the color/ring transitions go to 0s on the base shell —
+   hover-in, hover-out, press, release are all immediate; only the scale spring
+   keeps its duration (unused by block, kept for the transition-slot order).
+   Placed after the .dark overrides above and matching their specificity+order so
+   block wins in dark mode too. Loading keeps its own busy-hold rules. */
+[data-button]:is([data-variant="default"], [data-variant="primary"])[data-block]::before,
+.dark [data-button]:is([data-variant="default"], [data-variant="primary"])[data-block]::before {
+  transition-duration: 0.255s, 0s;
+}
+[data-button]:is([data-variant="outline"], [data-variant="secondary"])[data-block]::before,
+.dark [data-button]:is([data-variant="outline"], [data-variant="secondary"])[data-block]::before {
+  transition-duration: 0.255s, 0s, 0s;
 }
 
 :root {

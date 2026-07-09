@@ -618,6 +618,25 @@ These are judgment rules. They are the difference between "it renders" and "it's
 
 ### 1. Interrogate every line of copy
 
+**P0 — Label ≠ placeholder (never show the same noun twice).** A field label and its
+placeholder must not be the same string, and must not read as the same bare noun sitting
+twice in the viewport (e.g. label `Password` + placeholder `Password`, or label `Email` +
+placeholder `Email`). The eye sees a stutter, not a hint. Placeholder is an *instruction*
+or a soft example, never a second label:
+
+- Prefer a verb lead-in: `Enter password`, `Enter your email`, `Enter email or username`.
+- Or a worked example: `name@company.com`, `e.g. acme-bot` — never the field's own name alone.
+- Same rule for the first step of a multi-step auth flow where there is *no* label and the
+  placeholder is the only chrome: still write `Enter your email`, not `Email` / `Username`.
+- Check **all three locales** — a language that glues verb+noun (`输入密码`) can accidentally
+  make the *page title* and the placeholder identical too; differentiate (e.g. title `输入密码`,
+  placeholder `请输入密码`, label `密码`).
+
+Lived fail (SaaS login, 2026-07): password step shipped label `Password` + placeholder
+`Password`; first step shipped placeholder `Email`. Fixed to `Enter password` /
+`Enter your email` / `Enter email or username`. Treat any new form field the same way before
+you ship.
+
 Before you write *any* user-facing line, slow down and ask, repeatedly:
 
 - The user already knows the page's **icon** and its **name in the sidebar**. So what do
@@ -690,6 +709,37 @@ matters (submit), and surface the error usefully then.
 Generalize this: the red-required box is just one instance. **Restraint applies to all
 external component signals.** Don't make a component shout a state the user did not ask
 about and does not benefit from.
+
+### 2b. Focus follows the job — every step lands the caret where the user will type
+
+This is not a layout rule and not "always autofocus the first field." It is a path rule:
+**when the view changes because the user advanced (or went back) in a multi-step flow, put
+keyboard focus on the field they are about to fill — not on the button they just pressed,
+and not nowhere.** Users expect to type immediately; making them click the field is a
+tax on a path they already committed to.
+
+Concrete tells (login is the worked example; apply the *path*, not a page template):
+
+- **Advance into a new step whose job is to type something** (e.g. identifier → password,
+  "send code" → OTP): after the step mounts, `focus()` that step's primary input. HTML
+  `autofocus` only fires on the *first* document load — it does **not** re-fire when a
+  `v-if` / step swap mounts a new field. Use `nextTick` + programmatic `focus()` (or a
+  shared helper) on the step transition itself.
+- **Back / Edit that returns to a prior field** (e.g. "Edit" on a readonly email, or
+  "Back" to the identifier step): focus that field again so the user can correct it
+  without an extra click. Same for dialog list→form→list when the form's job is input.
+- **One caret, one job.** Don't leave focus on Continue after it succeeded; don't focus a
+  readonly display field when the next action is typing in a different control; don't
+  steal focus mid-keystroke for ambient re-renders.
+- **Wrappers:** if the control is a composed field (`PasswordInput`, `InputGroup`), put a
+  stable `id` on the real `<input>` (or resolve it) before calling `focus()` — focusing the
+  outer shell does nothing useful.
+- **Don't invent a global "focus manager."** Wire focus at the transition site (`onContinue`,
+  `backToIdentifier`, dialog open, view-swap enter) where the *path* is known. A page that
+  has no step change needs no extra focus code beyond a sensible first-load `autofocus`.
+
+Review check: after every step / drill-in / back path you ship, tab away and re-enter with
+the keyboard only — can the user type the next thing without clicking?
 
 ### 3. Empty *and loading* states must hold the frame
 
