@@ -95,6 +95,7 @@
   "auth": {
     "welcome": "Welcome Back",
     "pageTitle": "Sign in",
+    "pageSubtitle": "Start building with Memoh",
     "continue": "Continue",
     "username": "Username",
     "password": "Password",

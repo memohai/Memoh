@@ -92,6 +92,7 @@
   "auth": {
     "welcome": "おかえり",
     "pageTitle": "サインイン",
+    "pageSubtitle": "Memoh で構築を始めましょう",
     "continue": "続ける",
     "username": "ユーザー名",
     "password": "パスワード",
