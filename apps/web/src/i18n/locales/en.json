@@ -2098,7 +2098,7 @@
         "global": "Global Settings",
         "globalDescription": "Core preferences for this bot.",
         "interaction": "Interaction",
-        "interactionDescription": "Configure how the bot engages in conversations.",
+        "interactionDescription": "Choose the chat model and configure how the bot engages in conversations.",
         "multimedia": "Multimedia",
         "multimediaDescription": "Configure voice and image generation models.",
         "acp": "ACP Agent"
