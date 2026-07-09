@@ -36,6 +36,13 @@ func TestBotScopedChannelAndACLQueriesKeepIdentityJoinsInTeam(t *testing.T) {
 	}
 }
 
+// DeleteBotACLRuleByID must scope by bot_id so a user with Manage on one bot
+// cannot delete another bot's rule by id within the same team.
+func TestDeleteBotACLRuleByIDScopesByBot(t *testing.T) {
+	sql := readQueryFile(t, "acl.sql")
+	requireSQLContains(t, sql, "AND bot_id = sqlc.arg(bot_id)")
+}
+
 func readQueryFile(t *testing.T, name string) string {
 	t.Helper()
 	// #nosec G304 -- tests read fixed checked-in SQL query files.

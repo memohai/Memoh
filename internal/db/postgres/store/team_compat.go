@@ -92,11 +92,11 @@ func (q *Queries) UpsertSessionDiscussCursor(ctx context.Context, arg dbsqlc.Ups
 	return q.Queries.UpsertSessionDiscussCursor(ctx, arg)
 }
 
-func (q *Queries) DeleteBotACLRuleByID(ctx context.Context, id pgtype.UUID) error {
-	return q.Queries.DeleteBotACLRuleByID(ctx, dbsqlc.DeleteBotACLRuleByIDParams{
-		ID:     id,
-		TeamID: teamUUIDFromContext(ctx),
-	})
+func (q *Queries) DeleteBotACLRuleByID(ctx context.Context, arg dbsqlc.DeleteBotACLRuleByIDParams) error {
+	if !arg.TeamID.Valid {
+		arg.TeamID = teamUUIDFromContext(ctx)
+	}
+	return q.Queries.DeleteBotACLRuleByID(ctx, arg)
 }
 
 func (q *Queries) DeleteBotByID(ctx context.Context, id pgtype.UUID) error {
