@@ -12,6 +12,7 @@ import (
 
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 // Grant permission scopes. manage implies every scoped permission; workspace_write
@@ -219,7 +220,7 @@ func (s *Service) ResolveUserPermissionsForBot(ctx context.Context, bot Bot, use
 	if s.queries == nil {
 		return nil, errors.New("bot queries not configured")
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +242,7 @@ func (s *Service) ResolveUserPermissionsForBot(ctx context.Context, bot Bot, use
 		BotID:  botUUID,
 		UserID: userUUID,
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	grants, err := s.queries.ListBotUserGrantsForUser(ctx, params)
 	if err != nil {
 		return nil, err
@@ -344,7 +345,7 @@ func (s *Service) CreateUserGrant(ctx context.Context, botID, createdByUserID st
 	if s.queries == nil {
 		return UserGrant{}, errors.New("bot queries not configured")
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return UserGrant{}, err
 	}
@@ -374,7 +375,7 @@ func (s *Service) CreateUserGrant(ctx context.Context, botID, createdByUserID st
 		SubjectType: subjectType,
 		Permissions: payload,
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	if createdBy := strings.TrimSpace(createdByUserID); createdBy != "" {
 		if parsed, parseErr := db.ParseUUID(createdBy); parseErr == nil {
 			params.CreatedByUserID = parsed
@@ -419,7 +420,7 @@ func (s *Service) UpdateUserGrant(ctx context.Context, botID, grantID string, re
 	if s.queries == nil {
 		return UserGrant{}, errors.New("bot queries not configured")
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return UserGrant{}, err
 	}
@@ -449,7 +450,7 @@ func (s *Service) UpdateUserGrant(ctx context.Context, botID, grantID string, re
 		ID:          grantUUID,
 		Permissions: payload,
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	row, err := s.queries.UpdateBotUserGrantPermissions(ctx, params)
 	if err != nil {
 		return UserGrant{}, err

@@ -16,6 +16,7 @@ import (
 	dbpkg "github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 var (
@@ -56,7 +57,7 @@ func (s *Service) Create(ctx context.Context, botID, channelIdentityID string, r
 	if err != nil {
 		return Conversation{}, fmt.Errorf("invalid bot id: %w", err)
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return Conversation{}, err
 	}
@@ -81,7 +82,7 @@ func (s *Service) Create(ctx context.Context, botID, channelIdentityID string, r
 		return Conversation{}, fmt.Errorf("marshal conversation metadata: %w", err)
 	}
 
-	row, err := s.queries.CreateChat(ctx, withTeamID(sqlc.CreateChatParams{
+	row, err := s.queries.CreateChat(ctx, teams.WithTeamID(sqlc.CreateChatParams{
 		BotID:           pgBotID,
 		Kind:            kind,
 		ParentChatID:    pgParent,
@@ -122,11 +123,11 @@ func (s *Service) GetReadAccess(ctx context.Context, conversationID, channelIden
 	if err != nil {
 		return ConversationReadAccess{}, ErrPermissionDenied
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return ConversationReadAccess{}, err
 	}
-	row, err := s.queries.GetChatReadAccessByUser(ctx, withTeamID(sqlc.GetChatReadAccessByUserParams{
+	row, err := s.queries.GetChatReadAccessByUser(ctx, teams.WithTeamID(sqlc.GetChatReadAccessByUserParams{
 		ChatID: pgConversationID,
 		UserID: pgChannelIdentityID,
 	}, teamID))
@@ -153,11 +154,11 @@ func (s *Service) ListByBotAndChannelIdentity(ctx context.Context, botID, channe
 	if err != nil {
 		return nil, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListVisibleChatsByBotAndUser(ctx, withTeamID(sqlc.ListVisibleChatsByBotAndUserParams{
+	rows, err := s.queries.ListVisibleChatsByBotAndUser(ctx, teams.WithTeamID(sqlc.ListVisibleChatsByBotAndUserParams{
 		BotID:  pgBotID,
 		UserID: pgChannelIdentityID,
 	}, teamID))
@@ -293,11 +294,11 @@ func (s *Service) UpdateSettings(ctx context.Context, conversationID string, req
 		}
 	}
 
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return Settings{}, err
 	}
-	row, err := s.queries.UpsertChatSettings(ctx, withTeamID(sqlc.UpsertChatSettingsParams{
+	row, err := s.queries.UpsertChatSettings(ctx, teams.WithTeamID(sqlc.UpsertChatSettingsParams{
 		ID:          pgID,
 		ChatModelID: chatModelUUID,
 	}, teamID))

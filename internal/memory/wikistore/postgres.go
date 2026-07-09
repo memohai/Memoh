@@ -4,10 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
-	"strings"
 	"time"
-	"unsafe"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -17,55 +14,39 @@ import (
 	"github.com/memohai/memoh/internal/teams"
 )
 
-const (
-	memoryNodeSelectColumns = `
-id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata,
-source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at`
-
-	memoryEdgeSelectColumns = `
-id, bot_id, src_node, dst_node, rel, weight, metadata, created_at`
-)
-
 // PostgresStore implements Store over the PostgreSQL memory_wiki tables.
 type PostgresStore struct {
-	q  *dbsqlc.Queries
-	db dbsqlc.DBTX
+	q *dbsqlc.Queries
 }
 
 // NewPostgres returns a Store backed by the PostgreSQL sqlc Queries.
 func NewPostgres(q *dbsqlc.Queries) *PostgresStore {
-	return &PostgresStore{q: q, db: sqlcDBTX(q)}
+	return &PostgresStore{q: q}
 }
 
 func (s *PostgresStore) UpsertNode(ctx context.Context, node migrate.NodeSpec) (migrate.NodeSpec, error) {
-	dbtx, teamID, err := s.scopedDB(ctx)
+	q, teamID, err := s.scopedQueries(ctx)
 	if err != nil {
 		return migrate.NodeSpec{}, err
 	}
 	r := nodeToRecord(node)
-	row, err := scanMemoryNode(dbtx.QueryRow(ctx, `
-INSERT INTO memory_nodes (
-  team_id, id, bot_id, body, hash, layer, fact_type, subject, confidence,
-  metadata, source_message_ids, profile_ref, topic, captured_at, expires_at
-)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-ON CONFLICT (team_id, bot_id, id) DO UPDATE SET
-  body = EXCLUDED.body,
-  hash = EXCLUDED.hash,
-  layer = EXCLUDED.layer,
-  fact_type = EXCLUDED.fact_type,
-  subject = EXCLUDED.subject,
-  confidence = EXCLUDED.confidence,
-  metadata = EXCLUDED.metadata,
-  source_message_ids = EXCLUDED.source_message_ids,
-  profile_ref = EXCLUDED.profile_ref,
-  topic = EXCLUDED.topic,
-  expires_at = EXCLUDED.expires_at,
-  updated_at = now()
-RETURNING `+memoryNodeSelectColumns+`;
-`, teamID, r.ID, pgUUID(r.BotID), r.Body, r.Hash, r.Layer, r.FactType, r.Subject, r.Confidence,
-		marshalJSON(r.Metadata), marshalStringList(r.SourceMessageIDs), r.ProfileRef, r.Topic,
-		pgTimestamptz(r.CapturedAt), pgTimestamptz(r.ExpiresAt)))
+	row, err := q.UpsertMemoryNode(ctx, dbsqlc.UpsertMemoryNodeParams{
+		TeamID:           teamID,
+		ID:               r.ID,
+		BotID:            pgUUID(r.BotID),
+		Body:             r.Body,
+		Hash:             r.Hash,
+		Layer:            r.Layer,
+		FactType:         r.FactType,
+		Subject:          r.Subject,
+		Confidence:       r.Confidence,
+		Metadata:         marshalJSON(r.Metadata),
+		SourceMessageIds: marshalStringList(r.SourceMessageIDs),
+		ProfileRef:       r.ProfileRef,
+		Topic:            r.Topic,
+		CapturedAt:       pgTimestamptz(r.CapturedAt),
+		ExpiresAt:        pgTimestamptz(r.ExpiresAt),
+	})
 	if err != nil {
 		return migrate.NodeSpec{}, fmt.Errorf("wikistore(postgres): upsert node: %w", err)
 	}
@@ -73,15 +54,15 @@ RETURNING `+memoryNodeSelectColumns+`;
 }
 
 func (s *PostgresStore) GetNode(ctx context.Context, botID, nodeID string) (migrate.NodeSpec, error) {
-	dbtx, teamID, err := s.scopedDB(ctx)
+	q, teamID, err := s.scopedQueries(ctx)
 	if err != nil {
 		return migrate.NodeSpec{}, err
 	}
-	row, err := scanMemoryNode(dbtx.QueryRow(ctx, `
-SELECT `+memoryNodeSelectColumns+`
-FROM memory_nodes
-WHERE team_id = $1 AND bot_id = $2 AND id = $3;
-`, teamID, pgUUID(botID), nodeID))
+	row, err := q.GetMemoryNode(ctx, dbsqlc.GetMemoryNodeParams{
+		TeamID: teamID,
+		BotID:  pgUUID(botID),
+		ID:     nodeID,
+	})
 	if err != nil {
 		if isPgNoRows(err) {
 			return migrate.NodeSpec{}, ErrNodeNotFound
@@ -92,21 +73,14 @@ WHERE team_id = $1 AND bot_id = $2 AND id = $3;
 }
 
 func (s *PostgresStore) ListNodes(ctx context.Context, botID string) ([]migrate.NodeSpec, error) {
-	dbtx, teamID, err := s.scopedDB(ctx)
+	q, teamID, err := s.scopedQueries(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := dbtx.Query(ctx, `
-SELECT `+memoryNodeSelectColumns+`
-FROM memory_nodes
-WHERE team_id = $1 AND bot_id = $2
-ORDER BY captured_at ASC;
-`, teamID, pgUUID(botID))
-	if err != nil {
-		return nil, fmt.Errorf("wikistore(postgres): list nodes: %w", err)
-	}
-	defer rows.Close()
-	records, err := scanMemoryNodes(rows)
+	records, err := q.ListMemoryNodesByBot(ctx, dbsqlc.ListMemoryNodesByBotParams{
+		TeamID: teamID,
+		BotID:  pgUUID(botID),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("wikistore(postgres): list nodes: %w", err)
 	}
@@ -118,21 +92,15 @@ ORDER BY captured_at ASC;
 }
 
 func (s *PostgresStore) ListNodesByLayer(ctx context.Context, botID string, layer migrate.MemoryLayer) ([]migrate.NodeSpec, error) {
-	dbtx, teamID, err := s.scopedDB(ctx)
+	q, teamID, err := s.scopedQueries(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := dbtx.Query(ctx, `
-SELECT `+memoryNodeSelectColumns+`
-FROM memory_nodes
-WHERE team_id = $1 AND bot_id = $2 AND layer = $3
-ORDER BY captured_at ASC;
-`, teamID, pgUUID(botID), string(orDefaultLayer(layer)))
-	if err != nil {
-		return nil, fmt.Errorf("wikistore(postgres): list nodes by layer: %w", err)
-	}
-	defer rows.Close()
-	records, err := scanMemoryNodes(rows)
+	records, err := q.ListMemoryNodesByBotLayer(ctx, dbsqlc.ListMemoryNodesByBotLayerParams{
+		TeamID: teamID,
+		BotID:  pgUUID(botID),
+		Layer:  string(orDefaultLayer(layer)),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("wikistore(postgres): list nodes by layer: %w", err)
 	}
@@ -144,74 +112,77 @@ ORDER BY captured_at ASC;
 }
 
 func (s *PostgresStore) DeleteNode(ctx context.Context, botID, nodeID string) error {
-	dbtx, teamID, err := s.scopedDB(ctx)
+	q, teamID, err := s.scopedQueries(ctx)
 	if err != nil {
 		return err
 	}
-	if _, err := dbtx.Exec(ctx, `
-DELETE FROM memory_edges
-WHERE team_id = $1 AND bot_id = $2 AND (src_node = $3 OR dst_node = $3);
-`, teamID, pgUUID(botID), nodeID); err != nil {
+	if err := q.DeleteMemoryEdgesForNode(ctx, dbsqlc.DeleteMemoryEdgesForNodeParams{
+		TeamID: teamID,
+		BotID:  pgUUID(botID),
+		NodeID: nodeID,
+	}); err != nil {
 		return fmt.Errorf("wikistore(postgres): delete node edges: %w", err)
 	}
-	if _, err := dbtx.Exec(ctx, `
-DELETE FROM memory_nodes
-WHERE team_id = $1 AND bot_id = $2 AND id = $3;
-`, teamID, pgUUID(botID), nodeID); err != nil {
+	if err := q.DeleteMemoryNode(ctx, dbsqlc.DeleteMemoryNodeParams{
+		TeamID: teamID,
+		BotID:  pgUUID(botID),
+		ID:     nodeID,
+	}); err != nil {
 		return fmt.Errorf("wikistore(postgres): delete node: %w", err)
 	}
 	return nil
 }
 
 func (s *PostgresStore) DeleteAllNodes(ctx context.Context, botID string) error {
-	dbtx, teamID, err := s.scopedDB(ctx)
+	q, teamID, err := s.scopedQueries(ctx)
 	if err != nil {
 		return err
 	}
-	if _, err := dbtx.Exec(ctx, `
-DELETE FROM memory_edges
-WHERE team_id = $1 AND bot_id = $2;
-`, teamID, pgUUID(botID)); err != nil {
+	if err := q.DeleteAllMemoryEdgesByBot(ctx, dbsqlc.DeleteAllMemoryEdgesByBotParams{
+		TeamID: teamID,
+		BotID:  pgUUID(botID),
+	}); err != nil {
 		return fmt.Errorf("wikistore(postgres): delete all edges: %w", err)
 	}
-	if _, err := dbtx.Exec(ctx, `
-DELETE FROM memory_nodes
-WHERE team_id = $1 AND bot_id = $2;
-`, teamID, pgUUID(botID)); err != nil {
+	if err := q.DeleteAllMemoryNodesByBot(ctx, dbsqlc.DeleteAllMemoryNodesByBotParams{
+		TeamID: teamID,
+		BotID:  pgUUID(botID),
+	}); err != nil {
 		return fmt.Errorf("wikistore(postgres): delete all nodes: %w", err)
 	}
 	return nil
 }
 
 func (s *PostgresStore) CountNodes(ctx context.Context, botID string) (int, error) {
-	dbtx, teamID, err := s.scopedDB(ctx)
+	q, teamID, err := s.scopedQueries(ctx)
 	if err != nil {
 		return 0, err
 	}
-	var n int64
-	if err := dbtx.QueryRow(ctx, `
-SELECT COUNT(*)
-FROM memory_nodes
-WHERE team_id = $1 AND bot_id = $2;
-`, teamID, pgUUID(botID)).Scan(&n); err != nil {
+	n, err := q.CountMemoryNodesByBot(ctx, dbsqlc.CountMemoryNodesByBotParams{
+		TeamID: teamID,
+		BotID:  pgUUID(botID),
+	})
+	if err != nil {
 		return 0, fmt.Errorf("wikistore(postgres): count nodes: %w", err)
 	}
 	return int(n), nil
 }
 
 func (s *PostgresStore) UpsertEdges(ctx context.Context, edges []migrate.EdgeSpec) error {
-	dbtx, teamID, err := s.scopedDB(ctx)
+	q, teamID, err := s.scopedQueries(ctx)
 	if err != nil {
 		return err
 	}
 	for _, e := range edges {
-		if _, err := dbtx.Exec(ctx, `
-INSERT INTO memory_edges (team_id, bot_id, src_node, dst_node, rel, weight, metadata)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-ON CONFLICT (team_id, bot_id, src_node, dst_node, rel) DO UPDATE SET
-  weight = EXCLUDED.weight,
-  metadata = EXCLUDED.metadata;
-`, teamID, pgUUID(e.BotID), e.SrcNode, e.DstNode, string(e.Rel), e.Weight, marshalJSON(e.Metadata)); err != nil {
+		if err := q.InsertMemoryEdge(ctx, dbsqlc.InsertMemoryEdgeParams{
+			TeamID:   teamID,
+			BotID:    pgUUID(e.BotID),
+			SrcNode:  e.SrcNode,
+			DstNode:  e.DstNode,
+			Rel:      string(e.Rel),
+			Weight:   e.Weight,
+			Metadata: marshalJSON(e.Metadata),
+		}); err != nil {
 			return fmt.Errorf("wikistore(postgres): upsert edge: %w", err)
 		}
 	}
@@ -219,20 +190,14 @@ ON CONFLICT (team_id, bot_id, src_node, dst_node, rel) DO UPDATE SET
 }
 
 func (s *PostgresStore) ListEdges(ctx context.Context, botID string) ([]migrate.EdgeSpec, error) {
-	dbtx, teamID, err := s.scopedDB(ctx)
+	q, teamID, err := s.scopedQueries(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := dbtx.Query(ctx, `
-SELECT `+memoryEdgeSelectColumns+`
-FROM memory_edges
-WHERE team_id = $1 AND bot_id = $2;
-`, teamID, pgUUID(botID))
-	if err != nil {
-		return nil, fmt.Errorf("wikistore(postgres): list edges: %w", err)
-	}
-	defer rows.Close()
-	records, err := scanMemoryEdges(rows)
+	records, err := q.ListMemoryEdgesByBot(ctx, dbsqlc.ListMemoryEdgesByBotParams{
+		TeamID: teamID,
+		BotID:  pgUUID(botID),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("wikistore(postgres): list edges: %w", err)
 	}
@@ -244,59 +209,60 @@ WHERE team_id = $1 AND bot_id = $2;
 }
 
 func (s *PostgresStore) DeleteEdgesForNode(ctx context.Context, botID, nodeID string) error {
-	dbtx, teamID, err := s.scopedDB(ctx)
+	q, teamID, err := s.scopedQueries(ctx)
 	if err != nil {
 		return err
 	}
-	if _, err := dbtx.Exec(ctx, `
-DELETE FROM memory_edges
-WHERE team_id = $1 AND bot_id = $2 AND (src_node = $3 OR dst_node = $3);
-`, teamID, pgUUID(botID), nodeID); err != nil {
+	if err := q.DeleteMemoryEdgesForNode(ctx, dbsqlc.DeleteMemoryEdgesForNodeParams{
+		TeamID: teamID,
+		BotID:  pgUUID(botID),
+		NodeID: nodeID,
+	}); err != nil {
 		return fmt.Errorf("wikistore(postgres): delete edges for node: %w", err)
 	}
 	return nil
 }
 
 func (s *PostgresStore) DeleteAllEdges(ctx context.Context, botID string) error {
-	dbtx, teamID, err := s.scopedDB(ctx)
+	q, teamID, err := s.scopedQueries(ctx)
 	if err != nil {
 		return err
 	}
-	if _, err := dbtx.Exec(ctx, `
-DELETE FROM memory_edges
-WHERE team_id = $1 AND bot_id = $2;
-`, teamID, pgUUID(botID)); err != nil {
+	if err := q.DeleteAllMemoryEdgesByBot(ctx, dbsqlc.DeleteAllMemoryEdgesByBotParams{
+		TeamID: teamID,
+		BotID:  pgUUID(botID),
+	}); err != nil {
 		return fmt.Errorf("wikistore(postgres): delete all edges: %w", err)
 	}
 	return nil
 }
 
 func (s *PostgresStore) CountEdges(ctx context.Context, botID string) (int, error) {
-	dbtx, teamID, err := s.scopedDB(ctx)
+	q, teamID, err := s.scopedQueries(ctx)
 	if err != nil {
 		return 0, err
 	}
-	var n int64
-	if err := dbtx.QueryRow(ctx, `
-SELECT COUNT(*)
-FROM memory_edges
-WHERE team_id = $1 AND bot_id = $2;
-`, teamID, pgUUID(botID)).Scan(&n); err != nil {
+	n, err := q.CountMemoryEdgesByBot(ctx, dbsqlc.CountMemoryEdgesByBotParams{
+		TeamID: teamID,
+		BotID:  pgUUID(botID),
+	})
+	if err != nil {
 		return 0, fmt.Errorf("wikistore(postgres): count edges: %w", err)
 	}
 	return int(n), nil
 }
 
 func (s *PostgresStore) RebuildDerivedEdges(ctx context.Context, botID string) (int, error) {
-	dbtx, teamID, err := s.scopedDB(ctx)
+	q, teamID, err := s.scopedQueries(ctx)
 	if err != nil {
 		return 0, err
 	}
 	for _, rel := range migrate.DerivedEdgeRels {
-		if _, err := dbtx.Exec(ctx, `
-DELETE FROM memory_edges
-WHERE team_id = $1 AND bot_id = $2 AND rel = $3;
-`, teamID, pgUUID(botID), string(rel)); err != nil {
+		if err := q.DeleteMemoryEdgesByRelForBot(ctx, dbsqlc.DeleteMemoryEdgesByRelForBotParams{
+			TeamID: teamID,
+			BotID:  pgUUID(botID),
+			Rel:    string(rel),
+		}); err != nil {
 			return 0, fmt.Errorf("wikistore(postgres): clear derived edges: %w", err)
 		}
 	}
@@ -312,124 +278,23 @@ WHERE team_id = $1 AND bot_id = $2 AND rel = $3;
 	return len(derived), nil
 }
 
-func (s *PostgresStore) scopedDB(ctx context.Context) (dbsqlc.DBTX, pgtype.UUID, error) {
-	dbtx, err := s.queryDB()
-	if err != nil {
-		return nil, pgtype.UUID{}, err
+func (s *PostgresStore) scopedQueries(ctx context.Context) (*dbsqlc.Queries, pgtype.UUID, error) {
+	if s == nil || s.q == nil {
+		return nil, pgtype.UUID{}, errors.New("wikistore(postgres): queries not configured")
 	}
 	teamID, err := teamUUIDFromContext(ctx)
 	if err != nil {
 		return nil, pgtype.UUID{}, err
 	}
-	return dbtx, teamID, nil
-}
-
-func (s *PostgresStore) queryDB() (dbsqlc.DBTX, error) {
-	if s == nil || s.q == nil || s.db == nil {
-		return nil, errors.New("wikistore(postgres): queries not configured")
-	}
-	return s.db, nil
+	return s.q, teamID, nil
 }
 
 func teamUUIDFromContext(ctx context.Context) (pgtype.UUID, error) {
-	scope, err := teams.ScopeFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
-		return pgtype.UUID{}, fmt.Errorf("wikistore(postgres): team scope: %w", err)
+		return pgtype.UUID{}, fmt.Errorf("wikistore(postgres): invalid team_id: %w", err)
 	}
-	return pgUUIDRequired("team_id", scope.TeamID)
-}
-
-func pgUUIDRequired(name, value string) (pgtype.UUID, error) {
-	var u pgtype.UUID
-	if err := u.Scan(strings.TrimSpace(value)); err != nil {
-		return pgtype.UUID{}, fmt.Errorf("wikistore(postgres): invalid %s: %w", name, err)
-	}
-	if !u.Valid {
-		return pgtype.UUID{}, fmt.Errorf("wikistore(postgres): invalid %s", name)
-	}
-	return u, nil
-}
-
-func sqlcDBTX(q *dbsqlc.Queries) dbsqlc.DBTX {
-	if q == nil {
-		return nil
-	}
-	field := reflect.ValueOf(q).Elem().FieldByName("db")
-	if !field.IsValid() || field.IsNil() || !field.CanAddr() {
-		return nil
-	}
-	// #nosec G103 -- sqlc keeps the DBTX field private; this is a scoped adapter shim.
-	value := reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Interface()
-	dbtx, _ := value.(dbsqlc.DBTX)
-	return dbtx
-}
-
-func scanMemoryNode(row pgx.Row) (dbsqlc.MemoryNode, error) {
-	var r dbsqlc.MemoryNode
-	err := row.Scan(
-		&r.ID,
-		&r.BotID,
-		&r.Body,
-		&r.Hash,
-		&r.Layer,
-		&r.FactType,
-		&r.Subject,
-		&r.Confidence,
-		&r.Metadata,
-		&r.SourceMessageIds,
-		&r.ProfileRef,
-		&r.Topic,
-		&r.CapturedAt,
-		&r.ExpiresAt,
-		&r.UpdatedAt,
-		&r.CreatedAt,
-	)
-	return r, err
-}
-
-func scanMemoryNodes(rows pgx.Rows) ([]dbsqlc.MemoryNode, error) {
-	var out []dbsqlc.MemoryNode
-	for rows.Next() {
-		r, err := scanMemoryNode(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func scanMemoryEdge(row pgx.Row) (dbsqlc.MemoryEdge, error) {
-	var r dbsqlc.MemoryEdge
-	err := row.Scan(
-		&r.ID,
-		&r.BotID,
-		&r.SrcNode,
-		&r.DstNode,
-		&r.Rel,
-		&r.Weight,
-		&r.Metadata,
-		&r.CreatedAt,
-	)
-	return r, err
-}
-
-func scanMemoryEdges(rows pgx.Rows) ([]dbsqlc.MemoryEdge, error) {
-	var out []dbsqlc.MemoryEdge
-	for rows.Next() {
-		r, err := scanMemoryEdge(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return teamID, nil
 }
 
 // ---- Postgres row -> record/spec helpers ----

@@ -134,7 +134,7 @@ func (s *Service) UpdateModel(ctx context.Context, id string, req UpdateModelReq
 	if req.Name != nil {
 		name = pgtype.Text{String: *req.Name, Valid: *req.Name != ""}
 	}
-	updated, err := s.queries.UpdateModel(ctx, sqlc.UpdateModelParams{
+	updateParams := sqlc.UpdateModelParams{
 		ID:         pgID,
 		ModelID:    row.ModelID,
 		Name:       name,
@@ -142,7 +142,9 @@ func (s *Service) UpdateModel(ctx context.Context, id string, req UpdateModelReq
 		Type:       string(models.ModelTypeVideo),
 		Enable:     row.Enable,
 		Config:     configJSON,
-	})
+	}
+	models.SetTeamIDParam(&updateParams, models.TeamIDFromContext(ctx))
+	updated, err := s.queries.UpdateModel(ctx, updateParams)
 	if err != nil {
 		return ModelResponse{}, fmt.Errorf("update video model: %w", err)
 	}

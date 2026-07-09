@@ -37,6 +37,7 @@ import (
 	searchpkg "github.com/memohai/memoh/internal/searchproviders"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 type importState struct {
@@ -986,12 +987,12 @@ func (s *Service) restoreWorkspaceResourceLimits(ctx context.Context, botID stri
 	if err != nil {
 		return err
 	}
-	if _, err := s.queries.UpsertBotWorkspaceResourceLimits(ctx, sqlc.UpsertBotWorkspaceResourceLimitsParams{
+	if _, err := s.queries.UpsertBotWorkspaceResourceLimits(ctx, teams.WithTeamID(sqlc.UpsertBotWorkspaceResourceLimitsParams{
 		BotID:         pgBotID,
 		CpuMillicores: limits.CPUMillicores,
 		MemoryBytes:   limits.MemoryBytes,
 		StorageBytes:  limits.StorageBytes,
-	}); err != nil {
+	}, teams.TeamUUIDOrZero(ctx))); err != nil {
 		return err
 	}
 	return nil
@@ -1163,6 +1164,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		q = s.queries.WithTx(tx)
 	}
 
+	teamID := teams.TeamUUIDOrZero(ctx)
 	pgBotID := optionalUUID(botID)
 	if replace {
 		routes, err := q.ListChatRoutes(ctx, pgBotID)
@@ -1170,10 +1172,10 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			return fmt.Errorf("list routes for history replace: %w", err)
 		}
 		for _, route := range routes {
-			if err := q.SetRouteActiveSession(ctx, sqlc.SetRouteActiveSessionParams{
+			if err := q.SetRouteActiveSession(ctx, teams.WithTeamID(sqlc.SetRouteActiveSessionParams{
 				ID:              route.ID,
 				ActiveSessionID: pgtype.UUID{},
-			}); err != nil {
+			}, teamID)); err != nil {
 				return fmt.Errorf("clear active route session: %w", err)
 			}
 		}
@@ -1209,7 +1211,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			metadata = rebindRestoredRuntimeOwner(metadata, actorUserID)
 			runtimeMetadata = rebindRestoredRuntimeOwner(runtimeMetadata, actorUserID)
 		}
-		created, err := q.CreateSession(ctx, sqlc.CreateSessionParams{
+		created, err := q.CreateSession(ctx, teams.WithTeamID(sqlc.CreateSessionParams{
 			BotID:           pgBotID,
 			ChannelType:     item.ChannelType,
 			Type:            legacyType,
@@ -1220,7 +1222,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			Metadata:        metadata,
 			ParentSessionID: parentSessionID,
 			CreatedByUserID: optionalUUID(actorUserID),
-		})
+		}, teamID))
 		if err != nil {
 			return fmt.Errorf("session: %w", err)
 		}
@@ -1342,7 +1344,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		if item.EventID.Valid {
 			eventID = eventMap[item.EventID.String()]
 		}
-		created, err := q.CreateMessage(ctx, sqlc.CreateMessageParams{
+		created, err := q.CreateMessage(ctx, teams.WithTeamID(sqlc.CreateMessageParams{
 			BotID:                  pgBotID,
 			SessionID:              sessionID,
 			ExternalMessageID:      item.ExternalMessageID,
@@ -1355,7 +1357,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			RuntimeType:            runtimeType,
 			EventID:                eventID,
 			DisplayText:            item.DisplayText,
-		})
+		}, teamID))
 		if err != nil {
 			return fmt.Errorf("message: %w", err)
 		}
@@ -1386,14 +1388,14 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			if !messageID.Valid {
 				continue
 			}
-			if _, err := q.CreateMessageAsset(ctx, sqlc.CreateMessageAssetParams{
+			if _, err := q.CreateMessageAsset(ctx, teams.WithTeamID(sqlc.CreateMessageAssetParams{
 				MessageID:   messageID,
 				Role:        asset.Role,
 				Ordinal:     asset.Ordinal,
 				ContentHash: asset.ContentHash,
 				Name:        asset.Name,
 				Metadata:    asset.Metadata,
-			}); err != nil {
+			}, teamID)); err != nil {
 				return fmt.Errorf("message asset: %w", err)
 			}
 			state.counts[SectionAssets]++
@@ -1476,6 +1478,7 @@ func restoreHistoryTurnReadModelFromMessages(
 	if q == nil || !botID.Valid || len(messages) == 0 {
 		return nil
 	}
+	teamID := teams.TeamUUIDOrZero(ctx)
 	groupsByOldTurnID := make(map[string]*restoredMessageTurnGroup)
 	for _, item := range messages {
 		if !item.ID.Valid || !item.SessionID.Valid || !item.TurnID.Valid || !item.TurnPosition.Valid || !item.TurnMessageSeq.Valid || item.TurnMessageSeq.Int64 <= 0 {
@@ -1542,14 +1545,14 @@ func restoreHistoryTurnReadModelFromMessages(
 	turnMap := make(map[string]pgtype.UUID, len(groups))
 	sessionNextPosition := map[string]int64{}
 	for _, group := range groups {
-		if _, err := q.CreateHistoryTurnWithIDAtPosition(ctx, sqlc.CreateHistoryTurnWithIDAtPositionParams{
+		if _, err := q.CreateHistoryTurnWithIDAtPosition(ctx, teams.WithTeamID(sqlc.CreateHistoryTurnWithIDAtPositionParams{
 			TurnID:             group.newTurnID,
 			BotID:              botID,
 			SessionID:          group.sessionID,
 			TurnPosition:       group.position,
 			RequestMessageID:   group.requestMessageID,
 			AssistantMessageID: group.assistantMessageID,
-		}); err != nil {
+		}, teamID)); err != nil {
 			return fmt.Errorf("restore message turn read model: %w", err)
 		}
 		turnMap[group.oldTurnID.String()] = group.newTurnID
@@ -1574,13 +1577,13 @@ func restoreHistoryTurnReadModelFromMessages(
 
 	for _, group := range groups {
 		if group.supersededAt.Valid {
-			if _, err := q.SupersedeHistoryTurn(ctx, sqlc.SupersedeHistoryTurnParams{
+			if _, err := q.SupersedeHistoryTurn(ctx, teams.WithTeamID(sqlc.SupersedeHistoryTurnParams{
 				OldTurnID:          group.newTurnID,
 				SessionID:          group.sessionID,
 				SupersededByTurnID: mappedPGUUID(turnMap, group.supersededByOldTurnID),
 				SupersededAt:       group.supersededAt,
 				SupersededReason:   group.supersededReason,
-			}); err != nil {
+			}, teamID)); err != nil {
 				return fmt.Errorf("restore superseded message turn: %w", err)
 			}
 			continue
@@ -1600,10 +1603,10 @@ func restoreHistoryTurnReadModelFromMessages(
 		if err != nil {
 			return err
 		}
-		if err := q.SetSessionNextTurnPosition(ctx, sqlc.SetSessionNextTurnPositionParams{
+		if err := q.SetSessionNextTurnPosition(ctx, teams.WithTeamID(sqlc.SetSessionNextTurnPositionParams{
 			SessionID:        sessionID,
 			NextTurnPosition: nextPosition,
-		}); err != nil {
+		}, teamID)); err != nil {
 			return fmt.Errorf("restore session next turn position: %w", err)
 		}
 	}
@@ -1626,6 +1629,7 @@ func rebuildRestoredHistoryTurns(ctx context.Context, q restoredHistoryTurnQueri
 	if q == nil || !botID.Valid || len(messages) == 0 {
 		return nil
 	}
+	teamID := teams.TeamUUIDOrZero(ctx)
 	states := make(map[string]*restoredTurnState)
 	for _, msg := range messages {
 		if !msg.id.Valid || !msg.sessionID.Valid {
@@ -1636,11 +1640,11 @@ func rebuildRestoredHistoryTurns(ctx context.Context, q restoredHistoryTurnQueri
 		role := strings.ToLower(strings.TrimSpace(msg.role))
 		switch role {
 		case "user":
-			turn, err := q.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
+			turn, err := q.CreateHistoryTurn(ctx, teams.WithTeamID(sqlc.CreateHistoryTurnParams{
 				BotID:            botID,
 				SessionID:        msg.sessionID,
 				RequestMessageID: msg.id,
-			})
+			}, teamID))
 			if err != nil {
 				return fmt.Errorf("create restored history turn: %w", err)
 			}
@@ -1648,11 +1652,11 @@ func rebuildRestoredHistoryTurns(ctx context.Context, q restoredHistoryTurnQueri
 			states[sessionKey] = state
 		case "assistant":
 			if state == nil || !state.turnID.Valid {
-				turn, err := q.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
+				turn, err := q.CreateHistoryTurn(ctx, teams.WithTeamID(sqlc.CreateHistoryTurnParams{
 					BotID:              botID,
 					SessionID:          msg.sessionID,
 					AssistantMessageID: msg.id,
-				})
+				}, teamID))
 				if err != nil {
 					return fmt.Errorf("create restored orphan assistant turn: %w", err)
 				}
@@ -1660,11 +1664,11 @@ func rebuildRestoredHistoryTurns(ctx context.Context, q restoredHistoryTurnQueri
 				states[sessionKey] = state
 			} else {
 				if !state.assistantBound && state.requestID.Valid {
-					if _, err := q.BindHistoryTurnAssistantByRequest(ctx, sqlc.BindHistoryTurnAssistantByRequestParams{
+					if _, err := q.BindHistoryTurnAssistantByRequest(ctx, teams.WithTeamID(sqlc.BindHistoryTurnAssistantByRequestParams{
 						SessionID:          msg.sessionID,
 						RequestMessageID:   state.requestID,
 						AssistantMessageID: msg.id,
-					}); err != nil {
+					}, teamID)); err != nil {
 						return fmt.Errorf("bind restored assistant turn: %w", err)
 					}
 					state.assistantBound = true
@@ -1673,11 +1677,11 @@ func rebuildRestoredHistoryTurns(ctx context.Context, q restoredHistoryTurnQueri
 			}
 		default:
 			if state == nil || !state.turnID.Valid {
-				turn, err := q.CreateHistoryTurn(ctx, sqlc.CreateHistoryTurnParams{
+				turn, err := q.CreateHistoryTurn(ctx, teams.WithTeamID(sqlc.CreateHistoryTurnParams{
 					BotID:              botID,
 					SessionID:          msg.sessionID,
 					AssistantMessageID: msg.id,
-				})
+				}, teamID))
 				if err != nil {
 					return fmt.Errorf("create restored message turn: %w", err)
 				}
@@ -1698,11 +1702,11 @@ func linkRestoredHistoryMessage(ctx context.Context, q restoredHistoryMessageLin
 	if !turnID.Valid || !messageID.Valid || seq <= 0 {
 		return nil
 	}
-	if _, err := q.LinkMessageToHistoryTurn(ctx, sqlc.LinkMessageToHistoryTurnParams{
+	if _, err := q.LinkMessageToHistoryTurn(ctx, teams.WithTeamID(sqlc.LinkMessageToHistoryTurnParams{
 		TurnID:         turnID,
 		MessageID:      messageID,
 		TurnMessageSeq: pgtype.Int8{Int64: seq, Valid: true},
-	}); err != nil {
+	}, teams.TeamUUIDOrZero(ctx))); err != nil {
 		return fmt.Errorf("link restored history message: %w", err)
 	}
 	return nil
@@ -1719,6 +1723,7 @@ func rebindRestoredSessionMetadata(
 	if q == nil || len(sessions) == 0 {
 		return nil
 	}
+	teamID := teams.TeamUUIDOrZero(ctx)
 	for _, item := range sessions {
 		oldSessionID := item.ID.String()
 		newSessionID := sessionMap[oldSessionID]
@@ -1733,10 +1738,10 @@ func rebindRestoredSessionMetadata(
 		if !changed {
 			continue
 		}
-		if _, err := q.UpdateSessionMetadata(ctx, sqlc.UpdateSessionMetadataParams{
+		if _, err := q.UpdateSessionMetadata(ctx, teams.WithTeamID(sqlc.UpdateSessionMetadataParams{
 			ID:       newSessionID,
 			Metadata: metadata,
-		}); err != nil {
+		}, teamID)); err != nil {
 			return fmt.Errorf("restore session metadata: %w", err)
 		}
 	}

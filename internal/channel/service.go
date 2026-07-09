@@ -307,7 +307,7 @@ func (s *Store) SaveMatrixSyncSinceToken(ctx context.Context, configID string, s
 	if err != nil {
 		return err
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return err
 	}
@@ -315,7 +315,7 @@ func (s *Store) SaveMatrixSyncSinceToken(ctx context.Context, configID string, s
 		ID:         pgConfigID,
 		SinceToken: strings.TrimSpace(since),
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	rows, err := s.queries.SaveMatrixSyncSinceToken(ctx, params)
 	if err != nil {
 		return err
@@ -346,7 +346,7 @@ func (s *Store) UpsertChannelIdentityConfig(ctx context.Context, channelIdentity
 	if err != nil {
 		return ChannelIdentityBinding{}, err
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return ChannelIdentityBinding{}, err
 	}
@@ -355,7 +355,7 @@ func (s *Store) UpsertChannelIdentityConfig(ctx context.Context, channelIdentity
 		ChannelType: channelType.String(),
 		Config:      payload,
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	row, err := s.queries.UpsertUserChannelBinding(ctx, params)
 	if err != nil {
 		return ChannelIdentityBinding{}, err
@@ -430,7 +430,7 @@ func (s *Store) ListConfigsByType(ctx context.Context, channelType ChannelType) 
 	if s.registry.IsConfigless(channelType) {
 		return []ChannelConfig{}, nil
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -461,7 +461,7 @@ func (s *Store) GetChannelIdentityConfig(ctx context.Context, channelIdentityID 
 	if err != nil {
 		return ChannelIdentityBinding{}, err
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return ChannelIdentityBinding{}, err
 	}
@@ -469,7 +469,7 @@ func (s *Store) GetChannelIdentityConfig(ctx context.Context, channelIdentityID 
 		UserID:      pgChannelIdentityID,
 		ChannelType: channelType.String(),
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	row, err := s.queries.GetUserChannelBinding(ctx, params)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -496,7 +496,7 @@ func (s *Store) ListChannelIdentityConfigsByType(ctx context.Context, channelTyp
 	if s.queries == nil {
 		return nil, errors.New("channel queries not configured")
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -538,27 +538,6 @@ func normalizeChannelConfigFromRow(row sqlc.BotChannelConfig) (ChannelConfig, er
 		row.Credentials, row.ExternalIdentity, row.SelfIdentity, row.Routing,
 		row.Disabled, row.VerifiedAt, row.CreatedAt, row.UpdatedAt,
 	)
-}
-
-func teamUUIDFromContext(ctx context.Context) (pgtype.UUID, error) {
-	scope := teams.ScopeOrDefault(ctx)
-	return db.ParseUUID(strings.TrimSpace(scope.TeamID))
-}
-
-func applyTeamID(params any, teamID pgtype.UUID) {
-	value := reflect.ValueOf(params)
-	if value.Kind() != reflect.Pointer || value.IsNil() {
-		return
-	}
-	elem := value.Elem()
-	if elem.Kind() != reflect.Struct {
-		return
-	}
-	field := elem.FieldByName("TeamID")
-	if !field.IsValid() || !field.CanSet() || field.Type() != reflect.TypeOf(pgtype.UUID{}) {
-		return
-	}
-	field.Set(reflect.ValueOf(teamID))
 }
 
 func listBotChannelConfigsByType(ctx context.Context, queries dbstore.Queries, teamID pgtype.UUID, channelType string) ([]sqlc.BotChannelConfig, error) {

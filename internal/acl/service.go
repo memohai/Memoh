@@ -15,6 +15,7 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 var (
@@ -60,7 +61,7 @@ func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (bool, erro
 	if err != nil {
 		return false, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -74,7 +75,7 @@ func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (bool, erro
 		SourceConversationID:   optionalText(sourceScope.ConversationID),
 		SourceThreadID:         optionalText(sourceScope.ThreadID),
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	effect, err := s.queries.EvaluateBotACLRule(ctx, params)
 	if err != nil {
 		return false, err
@@ -91,7 +92,7 @@ func (s *Service) GetDefaultEffect(ctx context.Context, botID string) (string, e
 	if err != nil {
 		return "", err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -111,7 +112,7 @@ func (s *Service) SetDefaultEffect(ctx context.Context, botID, effect string) er
 	if err != nil {
 		return err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return err
 	}
@@ -119,7 +120,7 @@ func (s *Service) SetDefaultEffect(ctx context.Context, botID, effect string) er
 		ID:               pgBotID,
 		AclDefaultEffect: effect,
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	return s.queries.SetBotACLDefaultEffect(ctx, params)
 }
 
@@ -132,7 +133,7 @@ func (s *Service) ListRules(ctx context.Context, botID string) ([]Rule, error) {
 	if err != nil {
 		return nil, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +171,7 @@ func (s *Service) CreateRule(ctx context.Context, botID, createdByUserID string,
 	if err != nil {
 		return Rule{}, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return Rule{}, err
 	}
@@ -187,7 +188,7 @@ func (s *Service) CreateRule(ctx context.Context, botID, createdByUserID string,
 		SourceThreadID:         optionalText(sourceScope.ThreadID),
 		CreatedByUserID:        optionalUUID(createdByUserID),
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	row, err := s.queries.CreateBotACLRule(ctx, params)
 	if err != nil {
 		return Rule{}, err
@@ -222,7 +223,7 @@ func (s *Service) UpdateRule(ctx context.Context, botID, ruleID string, req Upda
 	if err != nil {
 		return Rule{}, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return Rule{}, err
 	}
@@ -238,7 +239,7 @@ func (s *Service) UpdateRule(ctx context.Context, botID, ruleID string, req Upda
 		SourceConversationID:   optionalText(sourceScope.ConversationID),
 		SourceThreadID:         optionalText(sourceScope.ThreadID),
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	applyUUIDField(&params, "BotID", pgBotID)
 	row, err := s.queries.UpdateBotACLRule(ctx, params)
 	if err != nil {
@@ -263,7 +264,7 @@ func (s *Service) resolveSourceChannel(ctx context.Context, scope SourceScope, s
 		if err != nil {
 			return "", fmt.Errorf("resolve source channel: %w", err)
 		}
-		teamID, err := teamIDFromContext(ctx)
+		teamID, err := teams.TeamUUID(ctx)
 		if err != nil {
 			return "", err
 		}
@@ -289,7 +290,7 @@ func (s *Service) DeleteRule(ctx context.Context, botID, ruleID string) error {
 	if err != nil {
 		return err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return err
 	}
@@ -372,7 +373,7 @@ func (s *Service) SetManageOverride(ctx context.Context, botID, channelIdentityI
 	if err != nil {
 		return ManageOverride{}, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return ManageOverride{}, err
 	}
@@ -434,10 +435,16 @@ func (s *Service) ListObservedConversationsByChannelIdentity(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListObservedConversationsByChannelIdentity(ctx, sqlc.ListObservedConversationsByChannelIdentityParams{
+	teamID, err := teams.TeamUUID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	params := sqlc.ListObservedConversationsByChannelIdentityParams{
 		BotID:             pgBotID,
 		ChannelIdentityID: pgIdentityID,
-	})
+	}
+	teams.ApplyTeamID(&params, teamID)
+	rows, err := s.queries.ListObservedConversationsByChannelIdentity(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -471,10 +478,16 @@ func (s *Service) ListObservedConversationsByChannelType(ctx context.Context, bo
 	if channelType == "" {
 		return nil, errors.New("channel_type is required")
 	}
-	rows, err := s.queries.ListObservedConversationsByChannelType(ctx, sqlc.ListObservedConversationsByChannelTypeParams{
+	teamID, err := teams.TeamUUID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	params := sqlc.ListObservedConversationsByChannelTypeParams{
 		BotID:       pgBotID,
 		ChannelType: channelType,
-	})
+	}
+	teams.ApplyTeamID(&params, teamID)
+	rows, err := s.queries.ListObservedConversationsByChannelType(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -514,7 +527,7 @@ func (s *Service) validateTarget(ctx context.Context, channelIdentityID, channel
 	if err != nil {
 		return err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return err
 	}

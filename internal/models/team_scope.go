@@ -64,16 +64,10 @@ func parseTeamID(raw string) (pgtype.UUID, bool) {
 	return teamID, err == nil && teamID.Valid
 }
 
+// SetTeamIDParam sets the TeamID field on the struct pointed to by arg. It is a
+// thin delegate to teams.ApplyTeamID retained for external callers.
 func SetTeamIDParam(arg any, teamID pgtype.UUID) {
-	value := reflect.ValueOf(arg)
-	if value.Kind() != reflect.Pointer || value.IsNil() {
-		return
-	}
-	elem := value.Elem()
-	if elem.Kind() != reflect.Struct {
-		return
-	}
-	setStructField(elem, "TeamID", teamID)
+	teams.ApplyTeamID(arg, teamID)
 }
 
 func InvokeTeamQuery[T any](

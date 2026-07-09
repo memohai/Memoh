@@ -147,6 +147,7 @@ func (s *Service) runHeartbeat(ctx context.Context, cfg Config) {
 	}
 
 	logRow, err := s.queries.CreateHeartbeatLog(ctx, sqlc.CreateHeartbeatLogParams{
+		TeamID:    pgTeamID,
 		BotID:     pgBotID,
 		SessionID: pgSessionID,
 	})
@@ -184,6 +185,7 @@ func (s *Service) runHeartbeat(ctx context.Context, cfg Config) {
 func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, resultText, errorMessage string, usageBytes []byte, modelID pgtype.UUID) {
 	_, err := s.queries.CompleteHeartbeatLog(ctx, sqlc.CompleteHeartbeatLogParams{
 		ID:           logID,
+		TeamID:       db.ParseUUIDOrEmpty(teams.ScopeOrDefault(ctx).TeamID),
 		Status:       status,
 		ResultText:   resultText,
 		ErrorMessage: errorMessage,

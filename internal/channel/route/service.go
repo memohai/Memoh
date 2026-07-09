@@ -107,7 +107,7 @@ func (s *DBService) GetByID(ctx context.Context, routeID string) (Route, error) 
 	if err != nil {
 		return Route{}, err
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return Route{}, err
 	}
@@ -124,7 +124,7 @@ func (s *DBService) List(ctx context.Context, conversationID string) ([]Route, e
 	if err != nil {
 		return nil, err
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +145,7 @@ func (s *DBService) Delete(ctx context.Context, routeID string) error {
 	if err != nil {
 		return err
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return err
 	}
@@ -158,7 +158,7 @@ func (s *DBService) UpdateReplyTarget(ctx context.Context, routeID, replyTarget 
 	if err != nil {
 		return err
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return err
 	}
@@ -166,7 +166,7 @@ func (s *DBService) UpdateReplyTarget(ctx context.Context, routeID, replyTarget 
 		ID:          pgID,
 		ReplyTarget: toPgText(replyTarget),
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	return s.queries.UpdateChatRouteReplyTarget(ctx, params)
 }
 
@@ -180,7 +180,7 @@ func (s *DBService) UpdateMetadata(ctx context.Context, routeID string, metadata
 	if err != nil {
 		return fmt.Errorf("marshal route metadata: %w", err)
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return err
 	}
@@ -188,7 +188,7 @@ func (s *DBService) UpdateMetadata(ctx context.Context, routeID string, metadata
 		ID:       pgID,
 		Metadata: data,
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	return s.queries.UpdateChatRouteMetadata(ctx, params)
 }
 
@@ -211,7 +211,7 @@ func (s *DBService) ResolveConversation(ctx context.Context, input ResolveInput)
 		if parseErr != nil {
 			return ResolveConversationResult{}, fmt.Errorf("parse route conversation id: %w", parseErr)
 		}
-		teamID, teamErr := teamUUIDFromContext(ctx)
+		teamID, teamErr := teams.TeamUUID(ctx)
 		if teamErr != nil {
 			return ResolveConversationResult{}, teamErr
 		}
@@ -293,7 +293,7 @@ func (s *DBService) resolveConversationCreatorChannelIdentityID(ctx context.Cont
 	if err != nil {
 		return fallback
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return fallback
 	}
@@ -367,27 +367,6 @@ func toPgText(value string) pgtype.Text {
 		return pgtype.Text{}
 	}
 	return pgtype.Text{String: value, Valid: true}
-}
-
-func teamUUIDFromContext(ctx context.Context) (pgtype.UUID, error) {
-	scope := teams.ScopeOrDefault(ctx)
-	return dbpkg.ParseUUID(strings.TrimSpace(scope.TeamID))
-}
-
-func applyTeamID(params any, teamID pgtype.UUID) {
-	value := reflect.ValueOf(params)
-	if value.Kind() != reflect.Pointer || value.IsNil() {
-		return
-	}
-	elem := value.Elem()
-	if elem.Kind() != reflect.Struct {
-		return
-	}
-	field := elem.FieldByName("TeamID")
-	if !field.IsValid() || !field.CanSet() || field.Type() != reflect.TypeOf(pgtype.UUID{}) {
-		return
-	}
-	field.Set(reflect.ValueOf(teamID))
 }
 
 func getChatRouteByID(ctx context.Context, queries dbstore.Queries, teamID, id pgtype.UUID) (sqlc.GetChatRouteByIDRow, error) {

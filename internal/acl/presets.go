@@ -10,6 +10,7 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 const (
@@ -112,7 +113,7 @@ func ApplyPreset(ctx context.Context, queries dbstore.Queries, botID, createdByU
 	if err != nil {
 		return err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return err
 	}
@@ -121,7 +122,7 @@ func ApplyPreset(ctx context.Context, queries dbstore.Queries, botID, createdByU
 		ID:               pgBotID,
 		AclDefaultEffect: preset.DefaultEffect,
 	}
-	applyTeamID(&defaultParams, teamID)
+	teams.ApplyTeamID(&defaultParams, teamID)
 	if err := queries.SetBotACLDefaultEffect(ctx, defaultParams); err != nil {
 		return err
 	}
@@ -163,7 +164,7 @@ func applyPresetRule(ctx context.Context, queries dbstore.Queries, teamID, botID
 		SourceThreadID:         optionalText(sourceScope.ThreadID),
 		CreatedByUserID:        optionalUUID(createdByUserID),
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	_, err = queries.CreateBotACLRule(ctx, params)
 	return err
 }

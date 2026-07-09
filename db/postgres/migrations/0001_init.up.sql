@@ -1194,6 +1194,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_email_bindings_team_unique ON bot_emai
 CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_oauth_team_unique ON provider_oauth_tokens(team_id, provider_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_provider_oauth_team_unique ON user_provider_oauth_tokens(team_id, provider_id, user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_edges_team_unique ON memory_edges(team_id, bot_id, src_node, dst_node, rel);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_nodes_team_bot_id ON memory_nodes(team_id, bot_id, id);
 
 -- Recreate the container-scoped FKs as team-scoped composites backed by
 -- idx_containers_container_id_team_unique.

@@ -109,7 +109,7 @@ func (s *Service) inheritedManage(ctx context.Context, botID, channelIdentityID 
 	if err != nil {
 		return false, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -171,11 +171,11 @@ func (s *Service) IssueLinkCode(ctx context.Context, userID, channelType string)
 		ChannelType: pgtype.Text{String: strings.TrimSpace(channelType), Valid: true},
 		ExpiresAt:   pgtype.Timestamptz{Time: expiresAt, Valid: true},
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return LinkCode{}, err
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	row, err := s.queries.CreateChannelLinkCode(ctx, params)
 	if err != nil {
 		return LinkCode{}, err
@@ -204,7 +204,7 @@ func (s *Service) ConsumeLinkCode(ctx context.Context, token, channelIdentityID 
 	if err != nil {
 		return Binding{}, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return Binding{}, err
 	}
@@ -212,7 +212,7 @@ func (s *Service) ConsumeLinkCode(ctx context.Context, token, channelIdentityID 
 		Token:             token,
 		ChannelIdentityID: pgIdentityID,
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	bindingRow, err := s.queries.RedeemChannelLinkCode(ctx, params)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -260,7 +260,7 @@ func (s *Service) ListUserBindings(ctx context.Context, userID string) ([]Bindin
 	if err != nil {
 		return nil, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +297,7 @@ func (s *Service) Unbind(ctx context.Context, userID, channelIdentityID string) 
 	if err != nil {
 		return err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return err
 	}
@@ -305,7 +305,7 @@ func (s *Service) Unbind(ctx context.Context, userID, channelIdentityID string) 
 		UserID:            pgUserID,
 		ChannelIdentityID: pgIdentityID,
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	return s.queries.DeleteUserChannelIdentityBinding(ctx, params)
 }
 
@@ -359,7 +359,7 @@ func (s *Service) ListManagers(ctx context.Context, botID string) ([]Manager, er
 			if err != nil {
 				continue
 			}
-			teamID, err := teamIDFromContext(ctx)
+			teamID, err := teams.TeamUUID(ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -472,26 +472,6 @@ func uuidString(id pgtype.UUID) string {
 
 func normalizeToken(token string) string {
 	return strings.ToUpper(strings.TrimSpace(token))
-}
-
-func teamIDFromContext(ctx context.Context) (pgtype.UUID, error) {
-	return db.ParseUUID(strings.TrimSpace(teams.ScopeOrDefault(ctx).TeamID))
-}
-
-func applyTeamID(params any, teamID pgtype.UUID) {
-	value := reflect.ValueOf(params)
-	if value.Kind() != reflect.Pointer || value.IsNil() {
-		return
-	}
-	elem := value.Elem()
-	if elem.Kind() != reflect.Struct {
-		return
-	}
-	field := elem.FieldByName("TeamID")
-	if !field.IsValid() || !field.CanSet() || field.Type() != reflect.TypeOf(pgtype.UUID{}) {
-		return
-	}
-	field.Set(reflect.ValueOf(teamID))
 }
 
 func listUserIDsByChannelIdentity(ctx context.Context, queries dbstore.Queries, teamID, channelIdentityID pgtype.UUID) ([]pgtype.UUID, error) {

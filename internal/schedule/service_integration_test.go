@@ -17,6 +17,7 @@ import (
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/schedule"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 func setupScheduleIntegrationTest(t *testing.T) (*schedule.Service, dbstore.Queries, *pgxpool.Pool, *mockTriggerer, func()) {
@@ -77,8 +78,13 @@ func createUserBotAndSchedule(ctx context.Context, t *testing.T, queries dbstore
 	if err != nil {
 		t.Fatalf("parse owner uuid: %v", err)
 	}
+	pgTeamID, err := db.ParseUUID(teams.ScopeOrDefault(ctx).TeamID)
+	if err != nil {
+		t.Fatalf("parse team uuid: %v", err)
+	}
 	meta, _ := json.Marshal(map[string]any{"source": "schedule-integration-test"})
 	botRow, err := queries.CreateBot(ctx, sqlc.CreateBotParams{
+		TeamID:      pgTeamID,
 		OwnerUserID: pgOwnerID,
 		DisplayName: pgtype.Text{String: "schedule-test-bot", Valid: true},
 		AvatarUrl:   pgtype.Text{},
@@ -96,6 +102,7 @@ func createUserBotAndSchedule(ctx context.Context, t *testing.T, queries dbstore
 		t.Fatalf("parse bot uuid: %v", err)
 	}
 	schedRow, err := queries.CreateSchedule(ctx, sqlc.CreateScheduleParams{
+		TeamID:      pgTeamID,
 		Name:        "integration-daily",
 		Description: "daily job for integration test",
 		Pattern:     "0 0 * * *",

@@ -205,7 +205,7 @@ func (s *Service) UpdateSpeechModel(ctx context.Context, id string, req UpdateSp
 	if req.Name != nil {
 		name = pgtype.Text{String: *req.Name, Valid: *req.Name != ""}
 	}
-	updated, err := s.queries.UpdateModel(ctx, sqlc.UpdateModelParams{
+	updateParams := sqlc.UpdateModelParams{
 		ID:         pgID,
 		ModelID:    row.ModelID,
 		Name:       name,
@@ -213,7 +213,9 @@ func (s *Service) UpdateSpeechModel(ctx context.Context, id string, req UpdateSp
 		Type:       string(models.ModelTypeSpeech),
 		Enable:     row.Enable,
 		Config:     configJSON,
-	})
+	}
+	models.SetTeamIDParam(&updateParams, models.TeamIDFromContext(ctx))
+	updated, err := s.queries.UpdateModel(ctx, updateParams)
 	if err != nil {
 		return SpeechModelResponse{}, fmt.Errorf("update speech model: %w", err)
 	}
@@ -237,7 +239,7 @@ func (s *Service) UpdateTranscriptionModel(ctx context.Context, id string, req U
 	if req.Name != nil {
 		name = pgtype.Text{String: *req.Name, Valid: *req.Name != ""}
 	}
-	updated, err := s.queries.UpdateModel(ctx, sqlc.UpdateModelParams{
+	updateParams := sqlc.UpdateModelParams{
 		ID:         pgID,
 		ModelID:    row.ModelID,
 		Name:       name,
@@ -245,7 +247,9 @@ func (s *Service) UpdateTranscriptionModel(ctx context.Context, id string, req U
 		Type:       string(models.ModelTypeTranscription),
 		Enable:     row.Enable,
 		Config:     configJSON,
-	})
+	}
+	models.SetTeamIDParam(&updateParams, models.TeamIDFromContext(ctx))
+	updated, err := s.queries.UpdateModel(ctx, updateParams)
 	if err != nil {
 		return TranscriptionModelResponse{}, fmt.Errorf("update transcription model: %w", err)
 	}

@@ -1,5 +1,6 @@
 -- name: CreateToolApprovalRequest :one
 INSERT INTO tool_approval_requests (
+  team_id,
   bot_id,
   session_id,
   route_id,
@@ -15,6 +16,7 @@ INSERT INTO tool_approval_requests (
   reply_target,
   conversation_type
 ) VALUES (
+  sqlc.arg(team_id)::uuid,
   sqlc.arg(bot_id),
   sqlc.arg(session_id),
   sqlc.narg(route_id),
@@ -34,7 +36,7 @@ INSERT INTO tool_approval_requests (
   sqlc.arg(reply_target),
   sqlc.arg(conversation_type)
 )
-ON CONFLICT (session_id, tool_call_id) DO UPDATE
+ON CONFLICT (team_id, session_id, tool_call_id) DO UPDATE
 SET tool_input = CASE
   WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.tool_input
   ELSE tool_approval_requests.tool_input

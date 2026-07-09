@@ -77,7 +77,7 @@ func (r *graphRuntime) IngestMarkdownFiles(ctx context.Context, botID string) (I
 			continue
 		}
 		if r.semantic != nil {
-			r.semanticUpsertBestEffort(botID, spec) //nolint:contextcheck // async semantic upsert uses its own bounded context
+			r.semanticUpsertBestEffortCtx(ctx, botID, spec) //nolint:contextcheck // async semantic upsert derives its own bounded context but carries the caller's team scope
 		}
 		result.Ingested++
 	}

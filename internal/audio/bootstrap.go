@@ -54,13 +54,15 @@ func SyncRegistry(ctx context.Context, logger *slog.Logger, queries dbstore.Quer
 					return fmt.Errorf("marshal speech model config: %w", err)
 				}
 				name := pgtype.Text{String: model.Name, Valid: model.Name != ""}
-				if _, err := queries.UpsertRegistryModel(ctx, sqlc.UpsertRegistryModelParams{
+				upsertParams := sqlc.UpsertRegistryModelParams{
 					ModelID:    model.ID,
 					Name:       name,
 					ProviderID: provider.ID,
 					Type:       string(models.ModelTypeSpeech),
 					Config:     modelConfigJSON,
-				}); err != nil {
+				}
+				models.SetTeamIDParam(&upsertParams, models.TeamIDFromContext(ctx))
+				if _, err := queries.UpsertRegistryModel(ctx, upsertParams); err != nil {
 					return fmt.Errorf("upsert speech model %s: %w", model.ID, err)
 				}
 				synced++
@@ -82,13 +84,15 @@ func SyncRegistry(ctx context.Context, logger *slog.Logger, queries dbstore.Quer
 				return fmt.Errorf("marshal transcription model config: %w", err)
 			}
 			name := pgtype.Text{String: model.Name, Valid: model.Name != ""}
-			if _, err := queries.UpsertRegistryModel(ctx, sqlc.UpsertRegistryModelParams{
+			upsertParams := sqlc.UpsertRegistryModelParams{
 				ModelID:    model.ID,
 				Name:       name,
 				ProviderID: provider.ID,
 				Type:       string(models.ModelTypeTranscription),
 				Config:     modelConfigJSON,
-			}); err != nil {
+			}
+			models.SetTeamIDParam(&upsertParams, models.TeamIDFromContext(ctx))
+			if _, err := queries.UpsertRegistryModel(ctx, upsertParams); err != nil {
 				return fmt.Errorf("upsert transcription model %s: %w", model.ID, err)
 			}
 		}

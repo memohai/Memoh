@@ -17,7 +17,7 @@ VALUES (
   sqlc.arg(last_started_at),
   sqlc.arg(last_stopped_at)
 )
-ON CONFLICT (container_id) DO UPDATE SET
+ON CONFLICT (team_id, container_id) DO UPDATE SET
   team_id = EXCLUDED.team_id,
   bot_id = EXCLUDED.bot_id,
   container_name = EXCLUDED.container_name,

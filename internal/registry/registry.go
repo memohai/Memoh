@@ -116,13 +116,16 @@ func Sync(ctx context.Context, logger *slog.Logger, queries dbstore.Queries, def
 				typ = "chat"
 			}
 
-			_, err = queries.UpsertRegistryModel(ctx, sqlc.UpsertRegistryModelParams{
+			modelParams := sqlc.UpsertRegistryModelParams{
 				ModelID:    m.ModelID,
 				Name:       name,
 				ProviderID: provider.ID,
 				Type:       typ,
 				Config:     configJSON,
-			})
+			}
+			setRegistryTeamID(ctx, &modelParams)
+
+			_, err = queries.UpsertRegistryModel(ctx, modelParams)
 			if err != nil {
 				logger.Warn("registry: failed to upsert model",
 					slog.String("provider", def.Name), slog.String("model", m.ModelID), slog.Any("error", err))
@@ -199,7 +202,7 @@ func syncProvider(
 		if err != nil {
 			return sqlc.Provider{}, fmt.Errorf("marshal provider metadata: %w", err)
 		}
-		return queries.UpdateProvider(ctx, sqlc.UpdateProviderParams{
+		updateParams := sqlc.UpdateProviderParams{
 			ID:         existing.ID,
 			Name:       def.Name,
 			ClientType: def.ClientType,
@@ -207,15 +210,19 @@ func syncProvider(
 			Enable:     existing.Enable,
 			Config:     configJSON,
 			Metadata:   metadataJSON,
-		})
+		}
+		setRegistryTeamID(ctx, &updateParams)
+		return queries.UpdateProvider(ctx, updateParams)
 	}
 
-	created, err := queries.UpsertRegistryProvider(ctx, sqlc.UpsertRegistryProviderParams{
+	createParams := sqlc.UpsertRegistryProviderParams{
 		Name:       def.Name,
 		ClientType: def.ClientType,
 		Icon:       icon,
 		Config:     registryConfigJSON,
-	})
+	}
+	setRegistryTeamID(ctx, &createParams)
+	created, err := queries.UpsertRegistryProvider(ctx, createParams)
 	if err != nil {
 		return sqlc.Provider{}, err
 	}
@@ -223,7 +230,7 @@ func syncProvider(
 	if err != nil {
 		return sqlc.Provider{}, fmt.Errorf("marshal provider metadata: %w", err)
 	}
-	return queries.UpdateProvider(ctx, sqlc.UpdateProviderParams{
+	updateParams := sqlc.UpdateProviderParams{
 		ID:         created.ID,
 		Name:       created.Name,
 		ClientType: created.ClientType,
@@ -231,7 +238,9 @@ func syncProvider(
 		Enable:     created.Enable,
 		Config:     created.Config,
 		Metadata:   metadataJSON,
-	})
+	}
+	setRegistryTeamID(ctx, &updateParams)
+	return queries.UpdateProvider(ctx, updateParams)
 }
 
 func matchExistingProvider(idx *providerIndex, used map[string]bool, def ProviderDefinition, registryCfg map[string]any) (sqlc.Provider, bool) {

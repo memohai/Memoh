@@ -214,6 +214,7 @@ FROM (VALUES
   ('idx_provider_oauth_team_unique', 'provider_oauth_tokens', '(team_id, provider_id)', true),
   ('idx_user_provider_oauth_team_unique', 'user_provider_oauth_tokens', '(team_id, provider_id, user_id)', true),
   ('idx_memory_edges_team_unique', 'memory_edges', '(team_id, bot_id, src_node, dst_node, rel)', true),
+  ('idx_memory_nodes_team_bot_id', 'memory_nodes', '(team_id, bot_id, id)', true),
   ('idx_bots_team_owner', 'bots', '(team_id, owner_user_id)', false),
   ('idx_bot_acl_rules_team_bot', 'bot_acl_rules', '(team_id, bot_id)', false),
   ('idx_bot_channel_routes_team_bot', 'bot_channel_routes', '(team_id, bot_id)', false),

@@ -19,6 +19,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/message/event"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 // DBService persists and reads bot history messages.
@@ -173,7 +174,7 @@ func (s *DBService) PersistToolTailRound(ctx context.Context, inputs []PersistIn
 
 	messageIDs := [4]pgtype.UUID{newPGUUID(), newPGUUID(), newPGUUID(), newPGUUID()}
 	turnID := newPGUUID()
-	rows, err := writer.CreateToolTailRound(ctx, withTeamID(sqlc.CreateToolTailRoundParams{
+	rows, err := writer.CreateToolTailRound(ctx, teams.WithTeamID(sqlc.CreateToolTailRoundParams{
 		UserMessageID:                            messageIDs[0],
 		UserSenderChannelIdentityID:              prepared[0].createArg.SenderChannelIdentityID,
 		UserSenderUserID:                         prepared[0].createArg.SenderUserID,
@@ -282,7 +283,7 @@ type preparedPersistMessage struct {
 }
 
 func (s *DBService) preparePersistMessage(ctx context.Context, input PersistInput) (preparedPersistMessage, error) {
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return preparedPersistMessage{}, err
 	}
@@ -341,7 +342,7 @@ func (s *DBService) preparePersistMessage(ctx context.Context, input PersistInpu
 		EventID:                 pgEventID,
 		DisplayText:             toPgText(input.DisplayText),
 	}
-	applyTeamID(&createArg, teamID)
+	teams.ApplyTeamID(&createArg, teamID)
 	prepared := preparedPersistMessage{
 		createArg: createArg,
 		metadata:  metadata,
@@ -444,7 +445,7 @@ func persistDirectHistoryMessage(
 	case "user":
 		messageID := newPGUUID()
 		turnID := newPGUUID()
-		row, err := writer.CreateMessageWithHistoryTurn(ctx, withTeamID(sqlc.CreateMessageWithHistoryTurnParams{
+		row, err := writer.CreateMessageWithHistoryTurn(ctx, teams.WithTeamID(sqlc.CreateMessageWithHistoryTurnParams{
 			MessageID:               messageID,
 			BotID:                   createArg.BotID,
 			SessionID:               createArg.SessionID,
@@ -472,7 +473,7 @@ func persistDirectHistoryMessage(
 		if !requestMessageID.Valid {
 			return Message{}, pgtype.UUID{}, false, nil
 		}
-		row, err := writer.CreateMessageInHistoryTurnByRequestAndBind(ctx, withTeamID(sqlc.CreateMessageInHistoryTurnByRequestAndBindParams{
+		row, err := writer.CreateMessageInHistoryTurnByRequestAndBind(ctx, teams.WithTeamID(sqlc.CreateMessageInHistoryTurnByRequestAndBindParams{
 			Role:                    createArg.Role,
 			SessionID:               createArg.SessionID,
 			RequestMessageID:        requestMessageID,
@@ -503,6 +504,10 @@ func persistDirectHistoryMessage(
 }
 
 func (s *DBService) finishPersistedMessage(ctx context.Context, result Message, pgMsgID pgtype.UUID, assets []AssetRef) (Message, error) {
+	teamID, err := teams.TeamUUID(ctx)
+	if err != nil {
+		return Message{}, err
+	}
 	for _, ref := range assets {
 		role := ref.Role
 		if strings.TrimSpace(role) == "" {
@@ -516,14 +521,14 @@ func (s *DBService) finishPersistedMessage(ctx context.Context, result Message, 
 		if ref.Ordinal < math.MinInt32 || ref.Ordinal > math.MaxInt32 {
 			return Message{}, fmt.Errorf("asset ordinal out of range: %d", ref.Ordinal)
 		}
-		if _, assetErr := s.queries.CreateMessageAsset(ctx, sqlc.CreateMessageAssetParams{
+		if _, assetErr := s.queries.CreateMessageAsset(ctx, teams.WithTeamID(sqlc.CreateMessageAssetParams{
 			MessageID:   pgMsgID,
 			Role:        role,
 			Ordinal:     int32(ref.Ordinal),
 			ContentHash: contentHash,
 			Name:        ref.Name,
 			Metadata:    marshalMetadata(ref.Metadata),
-		}); assetErr != nil {
+		}, teamID)); assetErr != nil {
 			s.logger.Warn("create message asset link failed", slog.String("message_id", result.ID), slog.Any("error", assetErr))
 		}
 	}
@@ -580,7 +585,7 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, teamID pgtype.UUID, 
 	}
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case "user":
-		turn, err := writer.CreateHistoryTurn(ctx, withTeamID(sqlc.CreateHistoryTurnParams{
+		turn, err := writer.CreateHistoryTurn(ctx, teams.WithTeamID(sqlc.CreateHistoryTurnParams{
 			BotID:            botID,
 			SessionID:        sessionID,
 			RequestMessageID: messageID,
@@ -588,7 +593,7 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, teamID pgtype.UUID, 
 		if err != nil {
 			return fmt.Errorf("create history turn: %w", err)
 		}
-		if _, err := writer.LinkMessageToHistoryTurn(ctx, withTeamID(sqlc.LinkMessageToHistoryTurnParams{
+		if _, err := writer.LinkMessageToHistoryTurn(ctx, teams.WithTeamID(sqlc.LinkMessageToHistoryTurnParams{
 			MessageID:      messageID,
 			TurnID:         turn.ID,
 			TurnMessageSeq: pgtype.Int8{Int64: 1, Valid: true},
@@ -600,12 +605,12 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, teamID pgtype.UUID, 
 			if err := lockHistoryTurnAppendByRequest(ctx, writer, teamID, sessionID, requestMessageID); err != nil {
 				return fmt.Errorf("lock requested history turn append: %w", err)
 			}
-			if turn, err := writer.BindHistoryTurnAssistantByRequest(ctx, withTeamID(sqlc.BindHistoryTurnAssistantByRequestParams{
+			if turn, err := writer.BindHistoryTurnAssistantByRequest(ctx, teams.WithTeamID(sqlc.BindHistoryTurnAssistantByRequestParams{
 				SessionID:          sessionID,
 				RequestMessageID:   requestMessageID,
 				AssistantMessageID: messageID,
 			}, teamID)); err == nil {
-				if _, err := writer.LinkMessageToHistoryTurn(ctx, withTeamID(sqlc.LinkMessageToHistoryTurnParams{
+				if _, err := writer.LinkMessageToHistoryTurn(ctx, teams.WithTeamID(sqlc.LinkMessageToHistoryTurnParams{
 					MessageID:      messageID,
 					TurnID:         turn.ID,
 					TurnMessageSeq: pgtype.Int8{Int64: 2, Valid: true},
@@ -622,7 +627,7 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, teamID pgtype.UUID, 
 				return fmt.Errorf("append assistant message to requested history turn: %w", err)
 			}
 		}
-		if _, err := writer.AppendMessageToLatestHistoryTurn(ctx, withTeamID(sqlc.AppendMessageToLatestHistoryTurnParams{
+		if _, err := writer.AppendMessageToLatestHistoryTurn(ctx, teams.WithTeamID(sqlc.AppendMessageToLatestHistoryTurnParams{
 			SessionID: sessionID,
 			MessageID: messageID,
 		}, teamID)); err == nil {
@@ -630,7 +635,7 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, teamID pgtype.UUID, 
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("append assistant message to latest history turn: %w", err)
 		}
-		turn, err := writer.CreateHistoryTurn(ctx, withTeamID(sqlc.CreateHistoryTurnParams{
+		turn, err := writer.CreateHistoryTurn(ctx, teams.WithTeamID(sqlc.CreateHistoryTurnParams{
 			BotID:              botID,
 			SessionID:          sessionID,
 			AssistantMessageID: messageID,
@@ -638,7 +643,7 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, teamID pgtype.UUID, 
 		if err != nil {
 			return fmt.Errorf("create orphan assistant history turn: %w", err)
 		}
-		if _, err := writer.LinkMessageToHistoryTurn(ctx, withTeamID(sqlc.LinkMessageToHistoryTurnParams{
+		if _, err := writer.LinkMessageToHistoryTurn(ctx, teams.WithTeamID(sqlc.LinkMessageToHistoryTurnParams{
 			MessageID:      messageID,
 			TurnID:         turn.ID,
 			TurnMessageSeq: pgtype.Int8{Int64: 2, Valid: true},
@@ -656,7 +661,7 @@ func (s *DBService) persistHistoryTurn(ctx context.Context, teamID pgtype.UUID, 
 				return fmt.Errorf("append tool message to requested history turn: %w", err)
 			}
 		}
-		if _, err := writer.AppendMessageToLatestHistoryTurn(ctx, withTeamID(sqlc.AppendMessageToLatestHistoryTurnParams{
+		if _, err := writer.AppendMessageToLatestHistoryTurn(ctx, teams.WithTeamID(sqlc.AppendMessageToLatestHistoryTurnParams{
 			SessionID: sessionID,
 			MessageID: messageID,
 		}, teamID)); err != nil {
@@ -674,14 +679,14 @@ func lockHistoryTurnAppendByRequest(ctx context.Context, writer historyTurnWrite
 	if !ok {
 		return nil
 	}
-	return locker.LockHistoryTurnAppendByRequest(ctx, withTeamID(sqlc.LockHistoryTurnAppendByRequestParams{
+	return locker.LockHistoryTurnAppendByRequest(ctx, teams.WithTeamID(sqlc.LockHistoryTurnAppendByRequestParams{
 		SessionID:        sessionID,
 		RequestMessageID: requestMessageID,
 	}, teamID))
 }
 
 func appendMessageToHistoryTurnByRequest(ctx context.Context, writer historyTurnWriter, teamID pgtype.UUID, sessionID pgtype.UUID, requestMessageID pgtype.UUID, messageID pgtype.UUID) error {
-	_, err := writer.AppendMessageToHistoryTurnByRequest(ctx, withTeamID(sqlc.AppendMessageToHistoryTurnByRequestParams{
+	_, err := writer.AppendMessageToHistoryTurnByRequest(ctx, teams.WithTeamID(sqlc.AppendMessageToHistoryTurnByRequestParams{
 		SessionID:        sessionID,
 		RequestMessageID: requestMessageID,
 		MessageID:        messageID,
@@ -795,11 +800,11 @@ func (s *DBService) ListSince(ctx context.Context, botID string, since time.Time
 	if err != nil {
 		return nil, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListMessagesSince(ctx, withTeamID(sqlc.ListMessagesSinceParams{
+	rows, err := s.queries.ListMessagesSince(ctx, teams.WithTeamID(sqlc.ListMessagesSinceParams{
 		BotID:     pgBotID,
 		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
 	}, teamID))
@@ -817,11 +822,11 @@ func (s *DBService) ListActiveSince(ctx context.Context, botID string, since tim
 	if err != nil {
 		return nil, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListActiveMessagesSince(ctx, withTeamID(sqlc.ListActiveMessagesSinceParams{
+	rows, err := s.queries.ListActiveMessagesSince(ctx, teams.WithTeamID(sqlc.ListActiveMessagesSinceParams{
 		BotID:     pgBotID,
 		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
 	}, teamID))
@@ -839,11 +844,11 @@ func (s *DBService) ListLatest(ctx context.Context, botID string, limit int32) (
 	if err != nil {
 		return nil, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListMessagesLatest(ctx, withTeamID(sqlc.ListMessagesLatestParams{
+	rows, err := s.queries.ListMessagesLatest(ctx, teams.WithTeamID(sqlc.ListMessagesLatestParams{
 		BotID:    pgBotID,
 		MaxCount: limit,
 	}, teamID))
@@ -861,11 +866,11 @@ func (s *DBService) ListBefore(ctx context.Context, botID string, before time.Ti
 	if err != nil {
 		return nil, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListMessagesBefore(ctx, withTeamID(sqlc.ListMessagesBeforeParams{
+	rows, err := s.queries.ListMessagesBefore(ctx, teams.WithTeamID(sqlc.ListMessagesBeforeParams{
 		BotID:     pgBotID,
 		CreatedAt: pgtype.Timestamptz{Time: before, Valid: true},
 		MaxCount:  limit,
@@ -901,11 +906,11 @@ func (s *DBService) ListSinceBySession(ctx context.Context, sessionID string, si
 	if err != nil {
 		return nil, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListMessagesSinceBySession(ctx, withTeamID(sqlc.ListMessagesSinceBySessionParams{
+	rows, err := s.queries.ListMessagesSinceBySession(ctx, teams.WithTeamID(sqlc.ListMessagesSinceBySessionParams{
 		SessionID: pgSessionID,
 		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
 	}, teamID))
@@ -923,11 +928,11 @@ func (s *DBService) ListActiveSinceBySession(ctx context.Context, sessionID stri
 	if err != nil {
 		return nil, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListActiveMessagesSinceBySession(ctx, withTeamID(sqlc.ListActiveMessagesSinceBySessionParams{
+	rows, err := s.queries.ListActiveMessagesSinceBySession(ctx, teams.WithTeamID(sqlc.ListActiveMessagesSinceBySessionParams{
 		SessionID: pgSessionID,
 		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
 	}, teamID))
@@ -945,11 +950,11 @@ func (s *DBService) ListLatestBySession(ctx context.Context, sessionID string, l
 	if err != nil {
 		return nil, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListMessagesLatestBySession(ctx, withTeamID(sqlc.ListMessagesLatestBySessionParams{
+	rows, err := s.queries.ListMessagesLatestBySession(ctx, teams.WithTeamID(sqlc.ListMessagesLatestBySessionParams{
 		SessionID: pgSessionID,
 		MaxCount:  limit,
 	}, teamID))
@@ -968,11 +973,11 @@ func (s *DBService) ListLatestUIBySession(ctx context.Context, sessionID string,
 	if err != nil {
 		return nil, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListMessagesLatestUIBySession(ctx, withTeamID(sqlc.ListMessagesLatestUIBySessionParams{
+	rows, err := s.queries.ListMessagesLatestUIBySession(ctx, teams.WithTeamID(sqlc.ListMessagesLatestUIBySessionParams{
 		SessionID: pgSessionID,
 		MaxCount:  limit,
 	}, teamID))
@@ -990,11 +995,11 @@ func (s *DBService) ListBeforeBySession(ctx context.Context, sessionID string, b
 	if err != nil {
 		return nil, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListMessagesBeforeBySession(ctx, withTeamID(sqlc.ListMessagesBeforeBySessionParams{
+	rows, err := s.queries.ListMessagesBeforeBySession(ctx, teams.WithTeamID(sqlc.ListMessagesBeforeBySessionParams{
 		SessionID: pgSessionID,
 		CreatedAt: pgtype.Timestamptz{Time: before, Valid: true},
 		MaxCount:  limit,
@@ -1018,11 +1023,11 @@ func (s *DBService) ListBeforeMessageBySession(ctx context.Context, sessionID st
 	if err != nil {
 		return nil, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	cursor, err := s.queries.GetVisibleMessageCursorByIDBySession(ctx, withTeamID(sqlc.GetVisibleMessageCursorByIDBySessionParams{
+	cursor, err := s.queries.GetVisibleMessageCursorByIDBySession(ctx, teams.WithTeamID(sqlc.GetVisibleMessageCursorByIDBySessionParams{
 		SessionID: pgSessionID,
 		MessageID: pgMessageID,
 	}, teamID))
@@ -1032,7 +1037,7 @@ func (s *DBService) ListBeforeMessageBySession(ctx context.Context, sessionID st
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListMessagesBeforeCursorBySession(ctx, withTeamID(sqlc.ListMessagesBeforeCursorBySessionParams{
+	rows, err := s.queries.ListMessagesBeforeCursorBySession(ctx, teams.WithTeamID(sqlc.ListMessagesBeforeCursorBySessionParams{
 		SessionID:            pgSessionID,
 		CursorTurnPosition:   cursor.TurnPosition.Int64,
 		CursorTurnMessageSeq: cursor.TurnMessageSeq.Int64,
@@ -1063,12 +1068,12 @@ func (s *DBService) LocateByExternalIDBySession(ctx context.Context, sessionID s
 	if afterLimit < 0 {
 		afterLimit = 0
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return LocateResult{}, err
 	}
 
-	rows, err := s.queries.LocateMessagesWindowByExternalIDBySession(ctx, withTeamID(sqlc.LocateMessagesWindowByExternalIDBySessionParams{
+	rows, err := s.queries.LocateMessagesWindowByExternalIDBySession(ctx, teams.WithTeamID(sqlc.LocateMessagesWindowByExternalIDBySessionParams{
 		SessionID:         pgSessionID,
 		ExternalMessageID: toPgText(externalMessageID),
 		BeforeLimit:       beforeLimit,
@@ -1098,11 +1103,11 @@ func (s *DBService) GetByIDBySession(ctx context.Context, sessionID string, mess
 	if err != nil {
 		return Message{}, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return Message{}, err
 	}
-	row, err := s.queries.GetMessageByIDBySession(ctx, withTeamID(sqlc.GetMessageByIDBySessionParams{
+	row, err := s.queries.GetMessageByIDBySession(ctx, teams.WithTeamID(sqlc.GetMessageByIDBySessionParams{
 		SessionID: pgSessionID,
 		MessageID: pgMessageID,
 	}, teamID))
@@ -1124,11 +1129,11 @@ func (s *DBService) ListVisibleFromBySession(ctx context.Context, sessionID stri
 	if err != nil {
 		return nil, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListVisibleMessagesFromBySession(ctx, withTeamID(sqlc.ListVisibleMessagesFromBySessionParams{
+	rows, err := s.queries.ListVisibleMessagesFromBySession(ctx, teams.WithTeamID(sqlc.ListVisibleMessagesFromBySessionParams{
 		SessionID: pgSessionID,
 		MessageID: pgMessageID,
 	}, teamID))
@@ -1149,11 +1154,11 @@ func (s *DBService) GetVisibleTurnByMessage(ctx context.Context, sessionID strin
 	if err != nil {
 		return HistoryTurn{}, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return HistoryTurn{}, err
 	}
-	row, err := s.queries.GetVisibleHistoryTurnByMessage(ctx, withTeamID(sqlc.GetVisibleHistoryTurnByMessageParams{
+	row, err := s.queries.GetVisibleHistoryTurnByMessage(ctx, teams.WithTeamID(sqlc.GetVisibleHistoryTurnByMessageParams{
 		SessionID: pgSessionID,
 		MessageID: pgMessageID,
 	}, teamID))
@@ -1192,7 +1197,7 @@ func (s *DBService) ReplaceTurn(ctx context.Context, sessionID string, oldTurnID
 	if err != nil {
 		return HistoryTurn{}, fmt.Errorf("invalid assistant message id: %w", err)
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return HistoryTurn{}, err
 	}
@@ -1200,7 +1205,7 @@ func (s *DBService) ReplaceTurn(ctx context.Context, sessionID string, oldTurnID
 	if reason == "" {
 		reason = "replace"
 	}
-	row, err := s.queries.ReplaceHistoryTurn(ctx, withTeamID(sqlc.ReplaceHistoryTurnParams{
+	row, err := s.queries.ReplaceHistoryTurn(ctx, teams.WithTeamID(sqlc.ReplaceHistoryTurnParams{
 		OldTurnID:          pgOldTurnID,
 		SessionID:          pgSessionID,
 		RequestMessageID:   pgRequestMessageID,
@@ -1220,6 +1225,10 @@ func (s *DBService) LinkAssets(ctx context.Context, messageID string, assets []A
 	if err != nil {
 		return fmt.Errorf("invalid message id: %w", err)
 	}
+	teamID, err := teams.TeamUUID(ctx)
+	if err != nil {
+		return err
+	}
 	for _, ref := range assets {
 		contentHash := strings.TrimSpace(ref.ContentHash)
 		if contentHash == "" {
@@ -1232,14 +1241,14 @@ func (s *DBService) LinkAssets(ctx context.Context, messageID string, assets []A
 		if ref.Ordinal < math.MinInt32 || ref.Ordinal > math.MaxInt32 {
 			return fmt.Errorf("asset ordinal out of range: %d", ref.Ordinal)
 		}
-		if _, assetErr := s.queries.CreateMessageAsset(ctx, sqlc.CreateMessageAssetParams{
+		if _, assetErr := s.queries.CreateMessageAsset(ctx, teams.WithTeamID(sqlc.CreateMessageAssetParams{
 			MessageID:   pgMsgID,
 			Role:        role,
 			Ordinal:     int32(ref.Ordinal),
 			ContentHash: contentHash,
 			Name:        ref.Name,
 			Metadata:    marshalMetadata(ref.Metadata),
-		}); assetErr != nil {
+		}, teamID)); assetErr != nil {
 			s.logger.Warn("link asset failed", slog.String("message_id", messageID), slog.Any("error", assetErr))
 		}
 	}

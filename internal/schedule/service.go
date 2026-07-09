@@ -111,7 +111,12 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 		enabled = *req.Enabled
 	}
 	teamID := teams.ScopeOrDefault(ctx).TeamID
+	pgTeamID, err := db.ParseUUID(teamID)
+	if err != nil {
+		return Schedule{}, err
+	}
 	row, err := s.queries.CreateSchedule(ctx, sqlc.CreateScheduleParams{
+		TeamID:      pgTeamID,
 		Name:        req.Name,
 		Description: req.Description,
 		Pattern:     req.Pattern,
@@ -209,8 +214,13 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
+	pgTeamID, err := db.ParseUUID(teams.ScopeOrDefault(ctx).TeamID)
+	if err != nil {
+		return Schedule{}, err
+	}
 	updated, err := s.queries.UpdateSchedule(ctx, sqlc.UpdateScheduleParams{
 		ID:          pgID,
+		TeamID:      pgTeamID,
 		Name:        name,
 		Description: description,
 		Pattern:     pattern,
@@ -264,6 +274,10 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 		return errors.New("schedule triggerer not configured")
 	}
 	teamID := firstNonEmpty(sched.TeamID, teams.ScopeOrDefault(ctx).TeamID)
+	pgTeamID, err := db.ParseUUID(teamID)
+	if err != nil {
+		return fmt.Errorf("parse team id: %w", err)
+	}
 	ctx = withTeamScope(ctx, teamID)
 	updated, err := s.queries.IncrementScheduleCalls(ctx, toUUID(sched.ID))
 	if err != nil {
@@ -284,6 +298,7 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 	pgBotID := toUUID(sched.BotID)
 
 	logRow, err := s.queries.CreateScheduleLog(ctx, sqlc.CreateScheduleLogParams{
+		TeamID:     pgTeamID,
 		ScheduleID: pgScheduleID,
 		BotID:      pgBotID,
 		SessionID:  pgSessionID,
@@ -324,8 +339,14 @@ func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, re
 	if !logID.Valid {
 		return
 	}
-	_, err := s.queries.CompleteScheduleLog(ctx, sqlc.CompleteScheduleLogParams{
+	pgTeamID, err := db.ParseUUID(teams.ScopeOrDefault(ctx).TeamID)
+	if err != nil {
+		s.logger.Error("complete schedule log failed", slog.Any("error", err))
+		return
+	}
+	_, err = s.queries.CompleteScheduleLog(ctx, sqlc.CompleteScheduleLogParams{
 		ID:           logID,
+		TeamID:       pgTeamID,
 		Status:       status,
 		ResultText:   resultText,
 		ErrorMessage: errorMessage,

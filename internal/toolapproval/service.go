@@ -19,6 +19,7 @@ import (
 	"github.com/memohai/memoh/internal/decision"
 	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/settings"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 type Service struct {
@@ -106,7 +107,12 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 	if err := s.runApprovalHook(ctx, hooks.EventBeforeApprovalCreate, input, Request{}, true); err != nil {
 		return Request{}, err
 	}
+	teamID, err := db.ParseUUID(teams.ScopeOrDefault(ctx).TeamID)
+	if err != nil {
+		return Request{}, err
+	}
 	row, err := s.queries.CreateToolApprovalRequest(ctx, sqlc.CreateToolApprovalRequestParams{
+		TeamID:                       teamID,
 		BotID:                        botID,
 		SessionID:                    sessionID,
 		RouteID:                      optionalUUID(input.RouteID),

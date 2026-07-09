@@ -18,6 +18,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/decision"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 const (
@@ -148,7 +149,12 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 	if err != nil {
 		return Request{}, err
 	}
+	teamID, err := db.ParseUUID(teams.ScopeOrDefault(ctx).TeamID)
+	if err != nil {
+		return Request{}, err
+	}
 	params := sqlc.CreateUserInputRequestParams{
+		TeamID:                       teamID,
 		BotID:                        botID,
 		SessionID:                    sessionID,
 		RouteID:                      optionalUUID(input.RouteID),

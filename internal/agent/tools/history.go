@@ -17,6 +17,7 @@ import (
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/session"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 const defaultMaxLookbackDays = 7
@@ -371,10 +372,14 @@ func (p *HistoryProvider) execSearchMessages(ctx context.Context, sess SessionCo
 		limit = int32(v) //nolint:gosec // bounds-checked above
 	}
 
-	params := sqlc.SearchMessagesParams{
+	teamID, err := teams.TeamUUID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	params := teams.WithTeamID(sqlc.SearchMessagesParams{
 		BotID:    pgBotID,
 		MaxCount: limit,
-	}
+	}, teamID)
 
 	if v := StringArg(args, "session_id"); v != "" {
 		params.SessionID = dbpkg.ParseUUIDOrEmpty(v)

@@ -425,10 +425,12 @@ SELECT EXISTS (
 }
 
 func pgvectorTeamUUID(ctx context.Context) (pgtype.UUID, error) {
-	scope, err := teams.ScopeFromContext(ctx)
-	if err != nil {
-		return pgtype.UUID{}, fmt.Errorf("pgvector semantic index: team scope: %w", err)
-	}
+	// Once background callers thread/re-inject the team scope (semantic upsert +
+	// retry paths), the scope should always be present here. Use ScopeOrDefault
+	// rather than the strict ScopeFromContext so this stays consistent with the
+	// rest of the app and never hard-fails a memory write when the scope is
+	// absent, degrading to the default team instead.
+	scope := teams.ScopeOrDefault(ctx)
 	var u pgtype.UUID
 	if err := u.Scan(strings.TrimSpace(scope.TeamID)); err != nil {
 		return pgtype.UUID{}, fmt.Errorf("pgvector semantic index: invalid team_id: %w", err)

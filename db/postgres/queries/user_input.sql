@@ -11,6 +11,7 @@ next_short_id AS (
   LEFT JOIN user_input_requests ON user_input_requests.session_id = locked_session.id
 )
 INSERT INTO user_input_requests (
+  team_id,
   bot_id,
   session_id,
   route_id,
@@ -27,6 +28,7 @@ INSERT INTO user_input_requests (
   conversation_type,
   expires_at
 ) SELECT
+  sqlc.arg(team_id)::uuid,
   sqlc.arg(bot_id),
   sqlc.arg(session_id),
   sqlc.narg(route_id),
@@ -44,7 +46,7 @@ INSERT INTO user_input_requests (
   sqlc.narg(expires_at)
 FROM locked_session
 CROSS JOIN next_short_id
-ON CONFLICT (session_id, tool_call_id) DO UPDATE
+ON CONFLICT (team_id, session_id, tool_call_id) DO UPDATE
 SET input_json = EXCLUDED.input_json,
     ui_payload_json = EXCLUDED.ui_payload_json,
     provider_metadata = EXCLUDED.provider_metadata,

@@ -116,6 +116,7 @@ DROP INDEX IF EXISTS idx_bot_email_bindings_team_unique;
 DROP INDEX IF EXISTS idx_provider_oauth_team_unique;
 DROP INDEX IF EXISTS idx_user_provider_oauth_team_unique;
 DROP INDEX IF EXISTS idx_memory_edges_team_unique;
+DROP INDEX IF EXISTS idx_memory_nodes_team_bot_id;
 DROP INDEX IF EXISTS idx_bots_team_owner;
 DROP INDEX IF EXISTS idx_bot_acl_rules_team_bot;
 DROP INDEX IF EXISTS idx_bot_channel_routes_team_bot;

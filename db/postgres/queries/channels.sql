@@ -27,7 +27,7 @@ INSERT INTO bot_channel_configs (
 SELECT b.team_id, b.id, sqlc.arg(channel_type), sqlc.arg(credentials), sqlc.arg(external_identity), sqlc.arg(self_identity), sqlc.arg(routing), sqlc.arg(capabilities), sqlc.arg(disabled), sqlc.arg(verified_at)
 FROM bots b
 WHERE b.id = sqlc.arg(bot_id)
-ON CONFLICT (bot_id, channel_type)
+ON CONFLICT (team_id, bot_id, channel_type)
 DO UPDATE SET
   credentials = EXCLUDED.credentials,
   external_identity = EXCLUDED.external_identity,

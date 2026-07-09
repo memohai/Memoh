@@ -34,7 +34,7 @@ SELECT
 FROM bots b
 INNER JOIN channel_identities ci ON ci.id = sqlc.arg(channel_identity_id) AND ci.team_id = b.team_id
 WHERE b.id = sqlc.arg(bot_id)
-ON CONFLICT (bot_id, channel_identity_id) DO UPDATE
+ON CONFLICT (team_id, bot_id, channel_identity_id) DO UPDATE
   SET granted = EXCLUDED.granted,
       updated_at = now()
 RETURNING *;

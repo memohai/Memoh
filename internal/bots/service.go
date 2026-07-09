@@ -18,6 +18,7 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/teams"
 	tzutil "github.com/memohai/memoh/internal/timezone"
 )
 
@@ -95,7 +96,7 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	if s.queries == nil {
 		return Bot{}, errors.New("bot queries not configured")
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return Bot{}, err
 	}
@@ -149,7 +150,7 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 		Metadata:    payload,
 		Status:      BotStatusCreating,
 	}
-	applyTeamID(&createParams, teamID)
+	teams.ApplyTeamID(&createParams, teamID)
 	row, err := s.queries.CreateBot(ctx, createParams)
 	if err != nil {
 		if db.IsUniqueViolation(err) {
@@ -410,7 +411,7 @@ func (s *Service) prepareUpdateParams(ctx context.Context, botID string, req Upd
 	if s.queries == nil {
 		return sqlc.UpdateBotProfileParams{}, errors.New("bot queries not configured")
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return sqlc.UpdateBotProfileParams{}, err
 	}
@@ -475,7 +476,7 @@ func (s *Service) prepareUpdateParams(ctx context.Context, botID string, req Upd
 		IsActive:    isActive,
 		Metadata:    payload,
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	return params, nil
 }
 
@@ -484,7 +485,7 @@ func (s *Service) TransferOwner(ctx context.Context, botID string, ownerUserID s
 	if s.queries == nil {
 		return Bot{}, errors.New("bot queries not configured")
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return Bot{}, err
 	}
@@ -503,7 +504,7 @@ func (s *Service) TransferOwner(ctx context.Context, botID string, ownerUserID s
 		ID:          botUUID,
 		OwnerUserID: ownerUUID,
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	row, err := s.queries.UpdateBotOwner(ctx, params)
 	if err != nil {
 		return Bot{}, err
@@ -534,10 +535,7 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 	if strings.TrimSpace(row.Status) == BotStatusDeleting {
 		return nil
 	}
-	if err := s.queries.UpdateBotStatus(ctx, sqlc.UpdateBotStatusParams{
-		ID:     botUUID,
-		Status: BotStatusDeleting,
-	}); err != nil {
+	if err := s.updateStatus(ctx, botID, BotStatusDeleting); err != nil {
 		return err
 	}
 	s.enqueueDeleteLifecycle(ctx, botID)
@@ -647,7 +645,7 @@ func (s *Service) updateStatus(ctx context.Context, botID, status string) error 
 	if s.queries == nil {
 		return errors.New("bot queries not configured")
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return err
 	}
@@ -659,7 +657,7 @@ func (s *Service) updateStatus(ctx context.Context, botID, status string) error 
 		ID:     botUUID,
 		Status: strings.TrimSpace(status),
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	return s.queries.UpdateBotStatus(ctx, params)
 }
 

@@ -156,4 +156,5 @@ RETURNING *;
 -- name: DeleteBotACLRuleByID :exec
 DELETE FROM bot_acl_rules
 WHERE id = sqlc.arg(id)
+  AND bot_id = sqlc.arg(bot_id)
   AND team_id = sqlc.arg(team_id)::uuid;

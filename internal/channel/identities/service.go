@@ -47,7 +47,7 @@ func (s *Service) Create(ctx context.Context, channel, channelSubjectID, display
 	if channel == "" || channelSubjectID == "" {
 		return ChannelIdentity{}, errors.New("channel and channel_subject_id are required")
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return ChannelIdentity{}, err
 	}
@@ -58,7 +58,7 @@ func (s *Service) Create(ctx context.Context, channel, channelSubjectID, display
 		AvatarUrl:        pgtype.Text{},
 		Metadata:         emptyMetadataBytes(),
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	row, err := s.queries.CreateChannelIdentity(ctx, params)
 	if err != nil {
 		return ChannelIdentity{}, err
@@ -75,7 +75,7 @@ func (s *Service) GetByID(ctx context.Context, channelIdentityID string) (Channe
 	if err != nil {
 		return ChannelIdentity{}, err
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return ChannelIdentity{}, err
 	}
@@ -98,7 +98,7 @@ func (s *Service) Canonicalize(ctx context.Context, channelIdentityID string) (s
 	if err != nil {
 		return "", err
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -130,7 +130,7 @@ func (s *Service) ResolveByChannelIdentity(ctx context.Context, channel, channel
 			avatarURL = strings.TrimSpace(fmt.Sprint(raw))
 		}
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return ChannelIdentity{}, err
 	}
@@ -142,7 +142,7 @@ func (s *Service) ResolveByChannelIdentity(ctx context.Context, channel, channel
 		AvatarUrl:        toPgText(avatarURL),
 		Metadata:         emptyMetadataBytes(),
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	row, err := s.queries.UpsertChannelIdentityByChannelSubject(ctx, params)
 	if err != nil {
 		return ChannelIdentity{}, err
@@ -168,7 +168,7 @@ func (s *Service) UpsertChannelIdentity(ctx context.Context, channel, channelSub
 	if raw, ok := metadata["avatar_url"]; ok {
 		avatarURL = strings.TrimSpace(fmt.Sprint(raw))
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return ChannelIdentity{}, err
 	}
@@ -179,7 +179,7 @@ func (s *Service) UpsertChannelIdentity(ctx context.Context, channel, channelSub
 		AvatarUrl:        toPgText(avatarURL),
 		Metadata:         metaBytes,
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	row, err := s.queries.UpsertChannelIdentityByChannelSubject(ctx, params)
 	if err != nil {
 		return ChannelIdentity{}, err
@@ -196,7 +196,7 @@ func (s *Service) ListCanonicalChannelIdentities(ctx context.Context, channelIde
 	if err != nil {
 		return nil, err
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +222,7 @@ func (s *Service) ListUserIDsByChannelIdentity(ctx context.Context, channelIdent
 	if err != nil {
 		return nil, err
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +248,7 @@ func (s *Service) Search(ctx context.Context, query string, limit int) ([]Search
 	if limit <= 0 {
 		limit = 50
 	}
-	teamID, err := teamUUIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +256,7 @@ func (s *Service) Search(ctx context.Context, query string, limit int) ([]Search
 		Query:      strings.TrimSpace(query),
 		LimitCount: int32(limit), //nolint:gosec // limit is capped above
 	}
-	applyTeamID(&params, teamID)
+	teams.ApplyTeamID(&params, teamID)
 	rows, err := s.queries.SearchChannelIdentities(ctx, params)
 	if err != nil {
 		return nil, err
@@ -278,27 +278,6 @@ func (s *Service) Search(ctx context.Context, query string, limit int) ([]Search
 		items = append(items, item)
 	}
 	return items, nil
-}
-
-func teamUUIDFromContext(ctx context.Context) (pgtype.UUID, error) {
-	scope := teams.ScopeOrDefault(ctx)
-	return db.ParseUUID(strings.TrimSpace(scope.TeamID))
-}
-
-func applyTeamID(params any, teamID pgtype.UUID) {
-	value := reflect.ValueOf(params)
-	if value.Kind() != reflect.Pointer || value.IsNil() {
-		return
-	}
-	elem := value.Elem()
-	if elem.Kind() != reflect.Struct {
-		return
-	}
-	field := elem.FieldByName("TeamID")
-	if !field.IsValid() || !field.CanSet() || field.Type() != reflect.TypeOf(pgtype.UUID{}) {
-		return
-	}
-	field.Set(reflect.ValueOf(teamID))
 }
 
 func getChannelIdentityByID(ctx context.Context, queries dbstore.Queries, teamID, id pgtype.UUID) (sqlc.ChannelIdentity, error) {

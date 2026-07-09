@@ -7,19 +7,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/teams"
 )
-
-func teamIDFromContext(ctx context.Context) (pgtype.UUID, error) {
-	return db.ParseUUID(teams.ScopeOrDefault(ctx).TeamID)
-}
-
-func applyTeamID(params any, teamID pgtype.UUID) {
-	applyUUIDField(params, "TeamID", teamID)
-}
 
 func applyUUIDField(params any, name string, id pgtype.UUID) {
 	value := reflect.ValueOf(params)

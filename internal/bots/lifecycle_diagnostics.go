@@ -10,6 +10,7 @@ import (
 
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 const (
@@ -95,7 +96,11 @@ func (s *Service) persistBotMetadata(ctx context.Context, row sqlc.Bot, metadata
 	if err != nil {
 		return err
 	}
-	_, err = s.queries.UpdateBotProfile(ctx, sqlc.UpdateBotProfileParams{
+	teamID, err := teams.TeamUUID(ctx)
+	if err != nil {
+		return err
+	}
+	params := sqlc.UpdateBotProfileParams{
 		ID:          row.ID,
 		Name:        row.Name,
 		DisplayName: row.DisplayName,
@@ -103,7 +108,9 @@ func (s *Service) persistBotMetadata(ctx context.Context, row sqlc.Bot, metadata
 		Timezone:    row.Timezone,
 		IsActive:    row.IsActive,
 		Metadata:    payload,
-	})
+	}
+	teams.ApplyTeamID(&params, teamID)
+	_, err = s.queries.UpdateBotProfile(ctx, params)
 	return err
 }
 

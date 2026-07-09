@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+
+	"github.com/memohai/memoh/internal/teams"
 )
 
 // ErrInboundQueueFull indicates the synchronous inbound queue admission failed
@@ -46,6 +48,15 @@ func (m *Manager) handleInbound(ctx context.Context, cfg ChannelConfig, msg Inbo
 	if m.processor == nil {
 		return errors.New("inbound processor not configured")
 	}
+	// Inbound worker contexts are spawned from context.WithoutCancel and carry
+	// no team scope (only the HTTP middleware injects one). Ensure a scope is
+	// present before handing off to the processor so downstream team-scoped
+	// reads/writes (memory, history, ...) don't hit strict scope checks.
+	//
+	// The channel Manager has no bot->team_id available here, so this defaults
+	// to the default team. The processor resolves the bot from cfg.BotID and
+	// should override this with the bot's actual team scope once it does.
+	ctx = teams.WithScope(ctx, teams.ScopeOrDefault(ctx))
 	sender := m.newReplySender(cfg, msg.Channel)
 	if err := m.processor.HandleInbound(ctx, cfg, msg, sender); err != nil {
 		if m.logger != nil {

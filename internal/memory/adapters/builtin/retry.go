@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/memohai/memoh/internal/teams"
 )
 
 const (
@@ -29,6 +31,11 @@ type semanticRetryEntry struct {
 	nodeID string
 	body   string
 	hash   string
+	// scope captures the team scope at enqueue time so background retries
+	// re-inject it: the flush loop runs on context.Background() and pgvector
+	// upserts are team-scoped, so losing the scope would retry under the wrong
+	// (or a strict-check-failing) team forever.
+	scope teams.Scope
 }
 
 // semanticRetryQueue keeps failed pgvector upserts and re-attempts them in the
@@ -146,7 +153,14 @@ func (q *semanticRetryQueue) flush(ctx context.Context, index semanticUpserter) 
 		if ctx.Err() != nil {
 			return
 		}
-		attemptCtx, cancel := context.WithTimeout(ctx, semanticEmbedTimeout)
+		// Re-inject the team scope captured at enqueue time; the flush ctx
+		// (from the background loop) carries none. Fall back to the default
+		// scope for entries enqueued before scope was tracked.
+		scope := entry.scope
+		if scope.IsZero() {
+			scope = teams.ScopeOrDefault(ctx)
+		}
+		attemptCtx, cancel := context.WithTimeout(teams.WithScope(ctx, scope), semanticEmbedTimeout)
 		err := index.Upsert(attemptCtx, entry.botID, entry.nodeID, entry.body, entry.hash)
 		cancel()
 		if err != nil {

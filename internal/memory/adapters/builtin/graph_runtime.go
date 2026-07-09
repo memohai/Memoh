@@ -15,6 +15,7 @@ import (
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/memory/migrate"
 	"github.com/memohai/memoh/internal/memory/wikistore"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 // ModeGraph is the memory mode identifier for the graph runtime. It is the
@@ -94,15 +95,23 @@ func (r *graphRuntime) syncAndInvalidate(ctx context.Context, botID string) {
 	r.cache.invalidate(botID)
 }
 
-func (r *graphRuntime) semanticUpsertBestEffort(botID string, n migrate.NodeSpec) {
+func (r *graphRuntime) semanticUpsertBestEffortCtx(callerCtx context.Context, botID string, n migrate.NodeSpec) {
 	if r.semantic == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), semanticEmbedTimeout)
+	// The semantic upsert runs on its own bounded context, but must still carry
+	// the caller's team scope: pgvector writes are team-scoped and dropping the
+	// scope here would either fail strict checks or write under the wrong team.
+	scope := teams.ScopeOrDefault(callerCtx)
+	// Deliberately detached from callerCtx: this best-effort write must survive
+	// the request ending, so it runs on a fresh bounded context that re-carries
+	// only the team scope (pgvector writes are team-scoped).
+	ctx, cancel := context.WithTimeout(teams.WithScope(context.Background(), scope), semanticEmbedTimeout)
 	defer cancel()
+	//nolint:contextcheck // intentional detached background context, scope re-injected above
 	if err := r.semantic.Upsert(ctx, botID, n.ID, n.Body, n.Hash); err != nil {
 		r.logger.Debug("graph: pgvector upsert failed; queued for retry", "bot_id", botID, "node_id", n.ID, "err", err)
-		r.retry.enqueue(semanticRetryEntry{botID: botID, nodeID: n.ID, body: n.Body, hash: n.Hash})
+		r.retry.enqueue(semanticRetryEntry{botID: botID, nodeID: n.ID, body: n.Body, hash: n.Hash, scope: scope})
 		return
 	}
 	// A fresh successful write supersedes any stale pending retry for the node.
@@ -137,7 +146,7 @@ func (r *graphRuntime) Add(ctx context.Context, req adapters.AddRequest) (adapte
 	if err != nil {
 		return adapters.SearchResponse{}, fmt.Errorf("graph runtime: upsert node: %w", err)
 	}
-	r.semanticUpsertBestEffort(botID, saved) //nolint:contextcheck // async semantic upsert uses its own bounded context
+	r.semanticUpsertBestEffortCtx(ctx, botID, saved) //nolint:contextcheck // async semantic upsert derives its own bounded context but carries the caller's team scope
 	r.syncAndInvalidate(ctx, botID)
 	return adapters.SearchResponse{Results: []adapters.MemoryItem{nodeSpecToMemoryItem(saved)}}, nil
 }
@@ -380,7 +389,7 @@ func (r *graphRuntime) Update(ctx context.Context, req adapters.UpdateRequest) (
 			r.discardSemanticNodes(ctx, botID, []string{storedID})
 		}
 	}
-	r.semanticUpsertBestEffort(botID, saved) //nolint:contextcheck // async semantic upsert uses its own bounded context
+	r.semanticUpsertBestEffortCtx(ctx, botID, saved) //nolint:contextcheck // async semantic upsert derives its own bounded context but carries the caller's team scope
 	r.syncAndInvalidate(ctx, botID)
 	return nodeSpecToMemoryItem(saved), nil
 }
@@ -587,7 +596,7 @@ func (r *graphRuntime) Rebuild(ctx context.Context, botID string) (adapters.Rebu
 			r.logger.Debug("graph: pgvector rebuild clear failed", "bot_id", botID, "err", err)
 		}
 		for _, node := range nodes {
-			r.semanticUpsertBestEffort(botID, node) //nolint:contextcheck // async semantic upsert uses its own bounded context
+			r.semanticUpsertBestEffortCtx(ctx, botID, node) //nolint:contextcheck // async semantic upsert derives its own bounded context but carries the caller's team scope
 		}
 		if indexed, err := r.semantic.Count(ctx, botID); err == nil {
 			result.StorageCount = indexed

@@ -14,6 +14,7 @@ import (
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/teams"
 )
 
 // Service manages context compaction for bot conversations.
@@ -79,13 +80,13 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) error {
 		compactErr = err
 		return compactErr
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		compactErr = err
 		return compactErr
 	}
 
-	logRow, err := s.queries.CreateCompactionLog(ctx, withTeamID(sqlc.CreateCompactionLogParams{
+	logRow, err := s.queries.CreateCompactionLog(ctx, teams.WithTeamID(sqlc.CreateCompactionLogParams{
 		BotID:     botUUID,
 		SessionID: sessionUUID,
 	}, teamID))
@@ -135,7 +136,7 @@ func (s *Service) runCompactionHook(ctx context.Context, eventName string, cfg T
 }
 
 func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) error {
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return err
 	}
@@ -229,7 +230,7 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 
 	modelUUID := db.ParseUUIDOrEmpty(cfg.ModelID)
 
-	if err := s.queries.MarkMessagesCompacted(ctx, withTeamID(sqlc.MarkMessagesCompactedParams{
+	if err := s.queries.MarkMessagesCompacted(ctx, teams.WithTeamID(sqlc.MarkMessagesCompactedParams{
 		CompactID: logID,
 		Column2:   messageIDs,
 	}, teamID)); err != nil {
@@ -241,12 +242,12 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 }
 
 func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, summary, errMsg string, messageCount int, usage []byte, modelID pgtype.UUID) {
-	teamID, teamErr := teamIDFromContext(ctx)
+	teamID, teamErr := teams.TeamUUID(ctx)
 	if teamErr != nil {
 		s.logger.Error("failed to resolve team scope for compaction log", slog.String("error", teamErr.Error()))
 		return
 	}
-	if _, err := s.queries.CompleteCompactionLog(ctx, withTeamID(sqlc.CompleteCompactionLogParams{
+	if _, err := s.queries.CompleteCompactionLog(ctx, teams.WithTeamID(sqlc.CompleteCompactionLogParams{
 		ID:           logID,
 		Status:       status,
 		Summary:      summary,
@@ -265,7 +266,7 @@ func (s *Service) ListLogs(ctx context.Context, botID string, limit, offset int)
 	if err != nil {
 		return nil, 0, err
 	}
-	teamID, err := teamIDFromContext(ctx)
+	teamID, err := teams.TeamUUID(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -282,7 +283,7 @@ func (s *Service) ListLogs(ctx context.Context, botID string, limit, offset int)
 		return nil, 0, err
 	}
 
-	rows, err := s.queries.ListCompactionLogsByBot(ctx, withTeamID(sqlc.ListCompactionLogsByBotParams{
+	rows, err := s.queries.ListCompactionLogsByBot(ctx, teams.WithTeamID(sqlc.ListCompactionLogsByBotParams{
 		BotID:       botUUID,
 		LimitCount:  int32(limit),  //nolint:gosec // clamped above
 		OffsetCount: int32(offset), //nolint:gosec // validated above
