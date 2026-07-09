@@ -92,14 +92,9 @@ func InvokeTeamQuery[T any](
 	if methodType.NumIn() != 2 || methodType.NumOut() != 2 {
 		return fallback()
 	}
-	paramType := methodType.In(1)
-	if paramType.Kind() != reflect.Struct {
+	param, ok := buildTeamParam(ctx, methodType.In(1), fields)
+	if !ok {
 		return fallback()
-	}
-	param := reflect.New(paramType).Elem()
-	setStructField(param, "TeamID", TeamIDFromContext(ctx))
-	for name, value := range fields {
-		setStructField(param, name, value)
 	}
 	out := methodValue.Call([]reflect.Value{reflect.ValueOf(ctx), param})
 	if !out[1].IsNil() {
@@ -110,6 +105,27 @@ func InvokeTeamQuery[T any](
 		return fallback()
 	}
 	return result, nil
+}
+
+// buildTeamParam builds the second argument for a generated ForTeam query.
+// sqlc emits a bare pgtype.UUID for single-parameter queries and a Params
+// struct with a TeamID field otherwise; both must receive the context team.
+func buildTeamParam(ctx context.Context, paramType reflect.Type, fields map[string]any) (reflect.Value, bool) {
+	if paramType == reflect.TypeOf(pgtype.UUID{}) {
+		if len(fields) > 0 {
+			return reflect.Value{}, false
+		}
+		return reflect.ValueOf(TeamIDFromContext(ctx)), true
+	}
+	if paramType.Kind() != reflect.Struct {
+		return reflect.Value{}, false
+	}
+	param := reflect.New(paramType).Elem()
+	setStructField(param, "TeamID", TeamIDFromContext(ctx))
+	for name, value := range fields {
+		setStructField(param, name, value)
+	}
+	return param, true
 }
 
 func InvokeTeamExec(
@@ -127,14 +143,9 @@ func InvokeTeamExec(
 	if methodType.NumIn() != 2 || methodType.NumOut() != 1 {
 		return fallback()
 	}
-	paramType := methodType.In(1)
-	if paramType.Kind() != reflect.Struct {
+	param, ok := buildTeamParam(ctx, methodType.In(1), fields)
+	if !ok {
 		return fallback()
-	}
-	param := reflect.New(paramType).Elem()
-	setStructField(param, "TeamID", TeamIDFromContext(ctx))
-	for name, value := range fields {
-		setStructField(param, name, value)
 	}
 	out := methodValue.Call([]reflect.Value{reflect.ValueOf(ctx), param})
 	if out[0].IsNil() {

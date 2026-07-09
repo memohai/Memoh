@@ -1149,6 +1149,12 @@ ALTER TABLE IF EXISTS tool_approval_requests DROP CONSTRAINT IF EXISTS tool_appr
 ALTER TABLE IF EXISTS tool_approval_requests DROP CONSTRAINT IF EXISTS tool_approval_tool_call_unique;
 ALTER TABLE IF EXISTS user_input_requests DROP CONSTRAINT IF EXISTS user_input_short_id_unique;
 ALTER TABLE IF EXISTS user_input_requests DROP CONSTRAINT IF EXISTS user_input_tool_call_unique;
+-- containers_container_id_unique is the FK target of snapshots/container_versions/
+-- lifecycle_events; drop those FKs first, then recreate them as team-scoped
+-- composites once idx_containers_container_id_team_unique exists (below).
+ALTER TABLE IF EXISTS snapshots DROP CONSTRAINT IF EXISTS snapshots_container_id_fkey;
+ALTER TABLE IF EXISTS container_versions DROP CONSTRAINT IF EXISTS container_versions_container_id_fkey;
+ALTER TABLE IF EXISTS lifecycle_events DROP CONSTRAINT IF EXISTS lifecycle_events_container_id_fkey;
 ALTER TABLE IF EXISTS containers DROP CONSTRAINT IF EXISTS containers_container_id_unique;
 ALTER TABLE IF EXISTS containers DROP CONSTRAINT IF EXISTS containers_container_name_unique;
 ALTER TABLE IF EXISTS bot_storage_bindings DROP CONSTRAINT IF EXISTS bot_storage_bindings_unique;
@@ -1189,7 +1195,68 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_oauth_team_unique ON provider_oau
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_provider_oauth_team_unique ON user_provider_oauth_tokens(team_id, provider_id, user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_edges_team_unique ON memory_edges(team_id, bot_id, src_node, dst_node, rel);
 
-CREATE INDEX IF NOT EXISTS idx_channel_identities_team_user ON channel_identities(team_id, user_id);
+-- Recreate the container-scoped FKs as team-scoped composites backed by
+-- idx_containers_container_id_team_unique.
+DO $$
+DECLARE
+  fk RECORD;
+BEGIN
+  FOR fk IN
+    SELECT *
+    FROM (VALUES
+      ('snapshots', 'snapshots_container_id_fkey'),
+      ('container_versions', 'container_versions_container_id_fkey'),
+      ('lifecycle_events', 'lifecycle_events_container_id_fkey')
+    ) AS fks(table_name, constraint_name)
+  LOOP
+    IF EXISTS (
+      SELECT 1
+      FROM pg_constraint
+      WHERE conrelid = to_regclass('public.' || quote_ident(fk.table_name))
+        AND conname = fk.constraint_name
+    ) THEN
+      CONTINUE;
+    END IF;
+    EXECUTE format(
+      'ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (team_id, container_id) REFERENCES containers(team_id, container_id) ON DELETE CASCADE',
+      fk.table_name,
+      fk.constraint_name
+    );
+  END LOOP;
+END $$;
+
+-- bot_visible_history_messages was created above before team_id existed;
+-- recreate it so team-scoped queries can filter on m.team_id.
+CREATE OR REPLACE VIEW bot_visible_history_messages AS
+SELECT
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id,
+  m.source_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.compact_id,
+  m.session_mode,
+  m.runtime_type,
+  m.model_id,
+  m.event_id,
+  m.display_text,
+  m.created_at,
+  m.team_id
+FROM bot_history_messages m
+WHERE m.turn_visible = true
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_bots_team_owner ON bots(team_id, owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_team_bot ON bot_acl_rules(team_id, bot_id);
 CREATE INDEX IF NOT EXISTS idx_bot_channel_routes_team_bot ON bot_channel_routes(team_id, bot_id);

@@ -75,6 +75,17 @@ BEGIN
   END LOOP;
 END $$;
 
+-- The team-scoped composite FKs depend on idx_containers_container_id_team_unique;
+-- drop them before the index, then restore the single-column FKs after
+-- containers_container_id_unique is recreated (below).
+ALTER TABLE IF EXISTS snapshots DROP CONSTRAINT IF EXISTS snapshots_container_id_fkey;
+ALTER TABLE IF EXISTS container_versions DROP CONSTRAINT IF EXISTS container_versions_container_id_fkey;
+ALTER TABLE IF EXISTS lifecycle_events DROP CONSTRAINT IF EXISTS lifecycle_events_container_id_fkey;
+
+-- The view exposes team_id, which blocks dropping the column; drop it here and
+-- recreate the pre-team definition at the end of this migration.
+DROP VIEW IF EXISTS bot_visible_history_messages;
+
 DROP INDEX IF EXISTS idx_channel_identities_team_subject;
 DROP INDEX IF EXISTS idx_user_channel_bindings_team_unique;
 DROP INDEX IF EXISTS idx_providers_team_name;
@@ -105,7 +116,6 @@ DROP INDEX IF EXISTS idx_bot_email_bindings_team_unique;
 DROP INDEX IF EXISTS idx_provider_oauth_team_unique;
 DROP INDEX IF EXISTS idx_user_provider_oauth_team_unique;
 DROP INDEX IF EXISTS idx_memory_edges_team_unique;
-DROP INDEX IF EXISTS idx_channel_identities_team_user;
 DROP INDEX IF EXISTS idx_bots_team_owner;
 DROP INDEX IF EXISTS idx_bot_acl_rules_team_bot;
 DROP INDEX IF EXISTS idx_bot_channel_routes_team_bot;
@@ -185,6 +195,39 @@ FROM (VALUES
 
 DROP FUNCTION memoh_add_unique_constraint(TEXT, TEXT, TEXT);
 
+-- Restore the pre-team single-column container FKs now that
+-- containers_container_id_unique exists again.
+DO $$
+DECLARE
+  fk RECORD;
+BEGIN
+  FOR fk IN
+    SELECT *
+    FROM (VALUES
+      ('snapshots', 'snapshots_container_id_fkey'),
+      ('container_versions', 'container_versions_container_id_fkey'),
+      ('lifecycle_events', 'lifecycle_events_container_id_fkey')
+    ) AS fks(table_name, constraint_name)
+  LOOP
+    IF to_regclass('public.' || quote_ident(fk.table_name)) IS NULL OR to_regclass('public.containers') IS NULL THEN
+      CONTINUE;
+    END IF;
+    IF EXISTS (
+      SELECT 1
+      FROM pg_constraint
+      WHERE conrelid = to_regclass('public.' || quote_ident(fk.table_name))
+        AND conname = fk.constraint_name
+    ) THEN
+      CONTINUE;
+    END IF;
+    EXECUTE format(
+      'ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (container_id) REFERENCES containers(container_id) ON DELETE CASCADE',
+      fk.table_name,
+      fk.constraint_name
+    );
+  END LOOP;
+END $$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_name ON bots(name);
 
 ALTER TABLE IF EXISTS channel_identities DROP COLUMN IF EXISTS team_id;
@@ -239,3 +282,33 @@ ALTER TABLE IF EXISTS tasks DROP COLUMN IF EXISTS team_id;
 
 DROP TABLE IF EXISTS team_members CASCADE;
 DROP TABLE IF EXISTS teams CASCADE;
+
+-- Restore the pre-team view definition (from 0103_message_turn_read_model).
+CREATE OR REPLACE VIEW bot_visible_history_messages AS
+SELECT
+  m.turn_id,
+  m.turn_position,
+  m.turn_message_seq,
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id,
+  m.source_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.compact_id,
+  m.session_mode,
+  m.runtime_type,
+  m.model_id,
+  m.event_id,
+  m.display_text,
+  m.created_at
+FROM bot_history_messages m
+WHERE m.turn_visible = true
+  AND m.turn_id IS NOT NULL
+  AND m.turn_position IS NOT NULL
+  AND m.turn_message_seq IS NOT NULL;

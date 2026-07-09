@@ -71,6 +71,27 @@ func (q *Queries) CountSessionEvents(ctx context.Context, sessionID pgtype.UUID)
 	})
 }
 
+func (q *Queries) CreateSessionEvent(ctx context.Context, arg dbsqlc.CreateSessionEventParams) (pgtype.UUID, error) {
+	if !arg.TeamID.Valid {
+		arg.TeamID = teamUUIDFromContext(ctx)
+	}
+	return q.Queries.CreateSessionEvent(ctx, arg)
+}
+
+func (q *Queries) GetSessionDiscussCursor(ctx context.Context, arg dbsqlc.GetSessionDiscussCursorParams) (dbsqlc.BotSessionDiscussCursor, error) {
+	if !arg.TeamID.Valid {
+		arg.TeamID = teamUUIDFromContext(ctx)
+	}
+	return q.Queries.GetSessionDiscussCursor(ctx, arg)
+}
+
+func (q *Queries) UpsertSessionDiscussCursor(ctx context.Context, arg dbsqlc.UpsertSessionDiscussCursorParams) (dbsqlc.BotSessionDiscussCursor, error) {
+	if !arg.TeamID.Valid {
+		arg.TeamID = teamUUIDFromContext(ctx)
+	}
+	return q.Queries.UpsertSessionDiscussCursor(ctx, arg)
+}
+
 func (q *Queries) DeleteBotACLRuleByID(ctx context.Context, id pgtype.UUID) error {
 	return q.Queries.DeleteBotACLRuleByID(ctx, dbsqlc.DeleteBotACLRuleByIDParams{
 		ID:     id,
