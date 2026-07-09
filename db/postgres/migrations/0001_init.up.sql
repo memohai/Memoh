@@ -1225,38 +1225,10 @@ BEGIN
   END LOOP;
 END $$;
 
--- bot_visible_history_messages was created above before team_id existed;
--- recreate it so team-scoped queries can filter on m.team_id.
-CREATE OR REPLACE VIEW bot_visible_history_messages AS
-SELECT
-  m.turn_id,
-  m.turn_position,
-  m.turn_message_seq,
-  m.id,
-  m.bot_id,
-  m.session_id,
-  m.sender_channel_identity_id,
-  m.sender_account_user_id,
-  m.source_message_id,
-  m.source_reply_to_message_id,
-  m.role,
-  m.content,
-  m.metadata,
-  m.usage,
-  m.compact_id,
-  m.session_mode,
-  m.runtime_type,
-  m.model_id,
-  m.event_id,
-  m.display_text,
-  m.created_at,
-  m.team_id
-FROM bot_history_messages m
-WHERE m.turn_visible = true
-  AND m.turn_id IS NOT NULL
-  AND m.turn_position IS NOT NULL
-  AND m.turn_message_seq IS NOT NULL;
-
+-- NOTE: bot_visible_history_messages is intentionally NOT recreated with
+-- team_id here: 0103 re-runs its pre-team CREATE OR REPLACE VIEW after this
+-- file on fresh installs, and a view cannot drop columns. 0105 (the last
+-- migration) appends team_id to the view instead.
 CREATE INDEX IF NOT EXISTS idx_bots_team_owner ON bots(team_id, owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_team_bot ON bot_acl_rules(team_id, bot_id);
 CREATE INDEX IF NOT EXISTS idx_bot_channel_routes_team_bot ON bot_channel_routes(team_id, bot_id);
