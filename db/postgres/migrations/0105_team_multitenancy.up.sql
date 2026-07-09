@@ -14,12 +14,13 @@ CREATE TABLE IF NOT EXISTS teams (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_single_default ON teams(is_default) WHERE is_default;
 
+-- Minimal FK anchor only: the backfill + FK below require this row to exist
+-- during the migration. Canonical team identity (name/slug/is_default) and
+-- membership are owned by teams.EnsureDefault at server startup, so control
+-- planes (SaaS) can manage the teams table without fighting a migration seed.
 INSERT INTO teams (id, slug, name, is_default)
 VALUES ('00000000-0000-0000-0000-000000000001'::uuid, 'default', 'Default', true)
-ON CONFLICT (id) DO UPDATE
-SET slug = EXCLUDED.slug,
-    is_default = true,
-    updated_at = now();
+ON CONFLICT (id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS team_members (
   team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
@@ -119,12 +120,8 @@ FROM unnest(ARRAY[
 
 DROP FUNCTION memoh_add_team_column(TEXT);
 
-INSERT INTO team_members (team_id, user_id, role)
-SELECT '00000000-0000-0000-0000-000000000001'::uuid,
-       id,
-       CASE WHEN role = 'admin' THEN 'admin' ELSE 'member' END
-FROM users
-ON CONFLICT (team_id, user_id) DO NOTHING;
+-- Default-team membership is enrolled by teams.EnsureDefault at server startup,
+-- not seeded here, so a control plane (SaaS) owns who belongs to which team.
 
 ALTER TABLE IF EXISTS channel_identities DROP CONSTRAINT IF EXISTS channel_identities_channel_type_subject_unique;
 ALTER TABLE IF EXISTS user_channel_bindings DROP CONSTRAINT IF EXISTS user_channel_bindings_unique;
