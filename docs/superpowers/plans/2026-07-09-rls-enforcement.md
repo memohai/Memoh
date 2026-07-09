@@ -204,7 +204,15 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
-### Task 3: 请求级连接 pin + `app.team_id` 注入中间件
+### Task 3（已改为 Option A —— 每语句 set_config，弃用连接 pin）
+
+> **决策变更（经实现子代理分析 + 人确认）：** 原"请求级连接 pin"方案与长连接 WebSocket 聊天路径不兼容（连接池耗尽、脱离 ctx 的并发 goroutine 共用同一 pin 连接触发 pgx 并发禁令、释放后再用）。改为 **Option A**：在 `teamPoolDBTX` 的每条单条语句里，从 `teams.ScopeOrDefault(ctx)` 取 `TeamID`，用 pgx `SendBatch` 把 `set_config('app.team_id', <teamID>, false)` 与实际查询**管线成一次往返**在同一连接上执行（丢弃 batch 的第一个结果 set_config，返回实际查询结果）。脱离的 goroutine 本就在 ctx 里带 Scope，故正确。事务路径保留现有 `SET LOCAL`。不引入连接 pin、不引入请求级中间件。
+>
+> **不变量：** 所有 app 查询都经 `teamPoolDBTX`，每条语句执行前都会覆盖 `app.team_id`，故池连接上的陈旧值永不被读到（无需额外 reset 往返）。维护池（Task 4，owner/BYPASSRLS）不设 `app.team_id`，用于 4 条 all-team 启动查询。
+>
+> **验收闸：** Task 6 的 RLS 集成测试（`memoh_app` 只见本 team、跨 team 改动 0 行）+ `mise run dev` 全链路（含 WS 聊天）无零行/`app.team_id` 报错。
+
+#### （历史，已弃用）请求级连接 pin + `app.team_id` 注入中间件
 
 **Files:**
 - Create: `internal/db/postgres/store/conn_pin.go`（context 里存/取 pin 的 `*pgxpool.Conn`）
