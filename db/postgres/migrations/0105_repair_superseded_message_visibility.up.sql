@@ -12,16 +12,20 @@ WHERE turn_visible = true
   AND turn_superseded_at IS NOT NULL;
 
 WITH incomplete_fork_sessions AS (
-  SELECT s.id, s.created_at
+  SELECT s.id, s.created_at, s.next_turn_position
   FROM bot_sessions s
   WHERE s.deleted_at IS NULL
     AND s.type = 'chat'
     AND s.session_mode = 'chat'
-    AND s.metadata ? 'forked_from'
+    AND jsonb_typeof(s.metadata->'forked_from') = 'object'
     AND (s.metadata->'forked_from') ? 'session_id'
     AND (s.metadata->'forked_from') ? 'message_id'
     AND NOT ((s.metadata->'forked_from') ? 'fork_message_id')
 ),
+-- A missing fork_message_id alone does not prove broken data: the live retry
+-- flow legitimately removes the anchor from healthy forks. Repair only
+-- sessions whose turn state is actually damaged: two turns colliding on one
+-- position, or the allocator sitting at or below an occupied position.
 retained_incomplete_forks AS (
   SELECT f.id, f.created_at
   FROM incomplete_fork_sessions f
@@ -30,6 +34,26 @@ retained_incomplete_forks AS (
     FROM bot_history_messages m
     WHERE m.session_id = f.id
       AND m.created_at > f.created_at
+  )
+  AND (
+    EXISTS (
+      SELECT 1
+      FROM bot_history_messages a
+      JOIN bot_history_messages b
+        ON b.session_id = a.session_id
+       AND b.turn_position = a.turn_position
+       AND b.turn_id <> a.turn_id
+      WHERE a.session_id = f.id
+        AND a.turn_id IS NOT NULL
+        AND a.turn_position IS NOT NULL
+        AND b.turn_id IS NOT NULL
+    )
+    OR f.next_turn_position <= (
+      SELECT MAX(m.turn_position)
+      FROM bot_history_messages m
+      WHERE m.session_id = f.id
+        AND m.turn_position IS NOT NULL
+    )
   )
 ),
 -- Classify turns, not messages: a retry replacement reuses the replaced turn's
@@ -136,7 +160,7 @@ WITH incomplete_forks AS (
   WHERE s.deleted_at IS NULL
     AND s.type = 'chat'
     AND s.session_mode = 'chat'
-    AND s.metadata ? 'forked_from'
+    AND jsonb_typeof(s.metadata->'forked_from') = 'object'
     AND (s.metadata->'forked_from') ? 'session_id'
     AND (s.metadata->'forked_from') ? 'message_id'
     AND NOT ((s.metadata->'forked_from') ? 'fork_message_id')
