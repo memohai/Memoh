@@ -178,6 +178,19 @@ func TestLoadAppliesBridgeTLSEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadAppliesPostgresAppEnvOverrides(t *testing.T) {
+	t.Setenv("MEMOH_POSTGRES_APP_USER", "memoh_app")
+	t.Setenv("MEMOH_POSTGRES_APP_PASSWORD", "env-secret")
+
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Postgres.AppUser != "memoh_app" || cfg.Postgres.AppPassword != "env-secret" {
+		t.Fatalf("postgres app credential = %q/%q, want memoh_app/env-secret", cfg.Postgres.AppUser, cfg.Postgres.AppPassword)
+	}
+}
+
 func TestLoadAppliesWebhookTunnelEnvOverrides(t *testing.T) {
 	t.Setenv("MEMOH_WEBHOOK_TUNNEL_MODE", WebhookTunnelModeExternal)
 	t.Setenv("MEMOH_WEBHOOK_PUBLIC_BASE_URL", "https://memoh.example.com")

@@ -78,6 +78,15 @@ services:
       MEMOH_WEBHOOK_PUBLIC_BASE_URL: "${MEMOH_WEBHOOK_PUBLIC_BASE_URL:-}"
       MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR: ":18734"
       MEMOH_WEBHOOK_TUNNEL_METRICS_URL: "http://webhook-tunnel:18735"
+      # Restricted runtime DB role. Migration 0107 (run by the migrate service)
+      # creates memoh_app with the default password "memoh_app"; the server
+      # connects as this non-owner role so FORCE ROW LEVEL SECURITY enforces team
+      # isolation. Override the password below AND run
+      #   ALTER ROLE memoh_app PASSWORD '<new>'
+      # (as the owner) if you change it. Leave MEMOH_POSTGRES_APP_USER empty to
+      # fall back to the owner role (RLS inert but the app still works).
+      MEMOH_POSTGRES_APP_USER: "${MEMOH_POSTGRES_APP_USER:-memoh_app}"
+      MEMOH_POSTGRES_APP_PASSWORD: "${MEMOH_POSTGRES_APP_PASSWORD:-memoh_app}"
     volumes:
       - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
       - ./conf/providers:/app/conf/providers:ro

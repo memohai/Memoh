@@ -58,8 +58,14 @@ database = "memoh"
 sslmode = "disable"
 # Restricted runtime role (memoh_app), created by migration 0107. Non-owner,
 # non-superuser, so FORCE ROW LEVEL SECURITY enforces team isolation.
-app_user = "memoh_app"
-app_password = "memoh_app"
+#
+# Left EMPTY (owner fallback) by default so the shared dev env keeps working
+# before migration 0107 is applied and the role is provisioned. To exercise
+# enforced RLS locally: apply migrations up (creates memoh_app + grants), run
+# `ALTER ROLE memoh_app PASSWORD 'memoh_app'`, uncomment the two lines below,
+# and restart the dev server.
+# app_user = "memoh_app"
+# app_password = "memoh_app"
 
 [pgvector]
 enabled = true

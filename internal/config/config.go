@@ -500,6 +500,7 @@ func Load(path string) (Config, error) {
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			cfg.applyBridgeTLSEnvOverrides()
+			cfg.applyPostgresEnvOverrides()
 			if err := cfg.validate(); err != nil {
 				return cfg, err
 			}
@@ -542,6 +543,7 @@ func Load(path string) (Config, error) {
 		cfg.Workspace = cfg.Container.WorkspaceConfig
 	}
 	cfg.applyBridgeTLSEnvOverrides()
+	cfg.applyPostgresEnvOverrides()
 	if err := cfg.validate(); err != nil {
 		return cfg, err
 	}
@@ -596,6 +598,18 @@ func (cfg *Config) applyBridgeTLSEnvOverrides() {
 	}
 	if value := strings.TrimSpace(os.Getenv("MEMOH_WEBHOOK_TUNNEL_METRICS_URL")); value != "" {
 		cfg.WebhookTunnel.MetricsURL = value
+	}
+}
+
+// applyPostgresEnvOverrides lets deployments set the runtime (restricted)
+// database credentials without editing config.toml. This is how docker-compose
+// hands memoh_app to the server service while migrate keeps the owner role.
+func (cfg *Config) applyPostgresEnvOverrides() {
+	if value := strings.TrimSpace(os.Getenv("MEMOH_POSTGRES_APP_USER")); value != "" {
+		cfg.Postgres.AppUser = value
+	}
+	if value := os.Getenv("MEMOH_POSTGRES_APP_PASSWORD"); value != "" {
+		cfg.Postgres.AppPassword = value
 	}
 }
 
