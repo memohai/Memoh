@@ -289,6 +289,10 @@ export interface SendMessageResult {
 export interface SendMessageOptions {
   requestedSkills?: RequestedSkillSelection[]
   composerScope?: string
+  /** Called immediately before a real chat turn is appended or dispatched. */
+  onBeforeTurnAppend?: () => void
+  /** Called when that turn is rolled back after a startup-stage failure. */
+  onTurnAppendAborted?: () => void
 }
 
 type WebNewCommandResult =
@@ -3851,6 +3855,7 @@ export const useChatStore = defineStore('chat', () => {
     let sendBotId = ''
     let sendSessionId = ''
     let sendStreamId = ''
+    let turnAppendStarted = false
 
     const wasDraft = !sessionId.value
     const serverSlashActivation = isWebSlashInput(trimmed) && quickActionIDForSlash(trimmed) === ''
@@ -3880,6 +3885,8 @@ export const useChatStore = defineStore('chat', () => {
       }
 
       assistantTurn = createOptimisticAssistantTurn()
+      turnAppendStarted = true
+      options.onBeforeTurnAppend?.()
       if (!serverSkillActivation) {
         userTurn = createOptimisticUserTurn(trimmed, attachments)
         messages.push(userTurn)
@@ -3946,6 +3953,10 @@ export const useChatStore = defineStore('chat', () => {
       if (sendStreamId) forgetAssistantStream(sendStreamId)
       if (sendStreamId) wsCreatedSessionsByStream.delete(sendStreamId)
       loading.value = false
+
+      if (!isAbort && stage === 'startup' && turnAppendStarted) {
+        options.onTurnAppendAborted?.()
+      }
 
       if (isAbort) return { ok: false, stage: 'stream', error: reason }
       if (stage === 'startup') {

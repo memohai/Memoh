@@ -3099,16 +3099,22 @@ async function handleSend() {
     return
   }
 
-  // Pin the just-sent turn: reserve viewport space under it and smooth-scroll
-  // once (browser-native) so the prompt lands near the top with the reply
-  // streaming into the blank below. The view then stays parked — no
-  // auto-follow — until the user scrolls back to the bottom. Armed before the
-  // append so the message's own DOM mutation applies the pin.
-  pinAfterSend()
+  // Arm the pin only once the store has passed command handling and session
+  // setup and is about to start a real turn. Command-only sends therefore do
+  // not leave a latent pin behind; startup failures roll the arm back.
+  let rollbackPin: (() => void) | null = null
   const result = await chatStore.sendMessage(text, attachments, {
     requestedSkills: skills,
     composerScope: sentComposerScope,
+    onBeforeTurnAppend: () => {
+      rollbackPin = pinAfterSend()
+    },
+    onTurnAppendAborted: () => {
+      rollbackPin?.()
+      rollbackPin = null
+    },
   })
+  rollbackPin = null
   if (!result.ok && result.stage === 'startup') {
     const restoreInput = result.restoreInput ?? text
     const activeRenderedSessionId = (props.sessionId || activeSessionId.value || chatStore.sessionId || '').trim()

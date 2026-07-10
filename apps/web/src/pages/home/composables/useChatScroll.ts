@@ -114,8 +114,8 @@ export interface UseChatScrollOptions {
  *   1. `isProgrammaticScroll` brackets every scroll the code performs; the
  *      `scroll` handler ignores events while it is set, so a follow scroll is
  *      never misread as the user leaving.
- *   2. Escape is latched only from signals a programmatic scroll cannot forge:
- *      a physical `wheel` event, and a per-frame `scrollTop` delta.
+ *   2. Escape is latched only while a physical wheel, touch, pointer, or
+ *      keyboard gesture surrounds the resulting `scrollTop` delta.
  *
  * ─── State model ──────────────────────────────────────────────────────────
  * The hot-path latches are plain closure vars, NOT refs on purpose: they move
@@ -136,9 +136,11 @@ export interface UseChatScrollOptions {
  * ─── Event flow ───────────────────────────────────────────────────────────
  *   MutationObserver(content subtree) ─ streaming mutates the DOM ─▶ apply an
  *       armed pin (once, when the fresh prompt is in the DOM), then follow to
- *       the bottom IF followEnabled. Growth is sensed via DOM mutation,
- *       deliberately NOT a height ResizeObserver + "scrollTop = height" snap —
- *       that snap was half of the original bug.
+ *       the bottom IF followEnabled.
+ *   ResizeObserver(content element) ─ image/font/layout-only reflow ─▶ run the
+ *       same gated heartbeat. It never writes scrollTop merely because height
+ *       changed: parked views stay parked, while an explicitly-following view
+ *       is healed to the new bottom.
  *   wheel  ─▶ physical intent; deltaY<0 (up) parks the view immediately.
  *   scroll ─▶ refresh isAtBottom; if it is not our own scroll, run the latch.
  *
@@ -250,7 +252,7 @@ export interface UseChatScrollOptions {
  *   onDeactivatedResetScroll (its own KeepAlive hooks).
  */
 export function useChatScroll(options: UseChatScrollOptions) {
-  const { scrollEl, lastTurnEl, messages, isActive, sessionId } = options
+  const { scrollEl, contentEl, lastTurnEl, messages, isActive, sessionId } = options
 
   const highlightedMessageId = ref('')
   // Reactive mirror of "is the viewport at the bottom". This is the ONLY
@@ -274,8 +276,8 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // turn is pinned). Flipped only by explicit actions — see "Follow on / off"
   // in the header.
   let followEnabled = true
-  // One-shot pin: armed by pinAfterSend, applied by the MutationObserver on
-  // the first mutation where the target prompt is actually in the DOM.
+  // One-shot pin: armed by pinAfterSend, applied by the content heartbeat on
+  // the first DOM/geometry change where the target prompt is actually present.
   let pinPending = false
   // Last user message id at arm time — the pin waits for a NEWER one, so a
   // stray mutation (a late token of the previous reply) can't size the pin
@@ -409,8 +411,8 @@ export function useChatScroll(options: UseChatScrollOptions) {
     }
   }
 
-  // Coalesced post-paint refresh of the isAtBottom mirror. The MutationObserver
-  // callback reads geometry MID-layout: heavy markdown / tool rows can be
+  // Coalesced post-paint refresh of the isAtBottom mirror. An observer callback
+  // can read geometry MID-layout: heavy markdown / tool rows can be
   // transiently taller for a frame before async reflow (Shiki, collapse)
   // settles, so a reading taken there can latch a stale "not at bottom" (fake
   // jump arrow). If the stream ends right then, nothing ever corrects it —
@@ -431,6 +433,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
   let cancelScrollTween: (() => void) | null = null
   let tweenFlagTimer: ReturnType<typeof setTimeout> | null = null
   let mutationObserver: MutationObserver | null = null
+  let contentResizeObserver: ResizeObserver | null = null
+  let pinAttemptId = 0
+  let appliedPinAttemptId = 0
 
   // "At the bottom" = the plain scrollHeight test. The pin reserve is LEGAL
   // LAYOUT (Grok-parity business rule): parked at the pin IS the physical
@@ -461,18 +466,27 @@ export function useChatScroll(options: UseChatScrollOptions) {
     followEnabled = false
   }
 
-  // Re-arm following. The MutationObserver picks it back up on the next
-  // content growth; used by the jump-to-bottom button and session switches.
+  // Re-arm following. The content heartbeat picks it back up on the next
+  // growth; used by the jump-to-bottom button and session switches.
   function followBottom() {
     followEnabled = true
   }
 
   // Called when the user sends. Pin and follow are MUTUALLY EXCLUSIVE phases:
-  // sending parks the view and arms a one-shot pin; the MutationObserver
+  // sending parks the view and arms a one-shot pin; the content heartbeat
   // applies it when the new prompt renders (tryApplyPin). Streaming then grows
   // below the fold without moving the view — follow re-engages only when the
   // user scrolls back down to the bottom.
-  function pinAfterSend() {
+  function pinAfterSend(): () => void {
+    const attemptId = ++pinAttemptId
+    const previousFollowEnabled = followEnabled
+    const previousPinPending = pinPending
+    const previousPinAnchorId = pinAnchorId
+    const previousPinnedTurnId = pinnedTurnId
+    const previousTurnReserves = new Map(turnReserves.value)
+    const previousScrollTop = scrollEl.value?.scrollTop ?? 0
+    let active = true
+
     followEnabled = false
     pinPending = true
     pinAnchorId = lastUserMessage()?.id ?? null
@@ -485,6 +499,49 @@ export function useChatScroll(options: UseChatScrollOptions) {
     // under a bottom-parked viewport (zero-frame jerk). The full handover
     // (collapseReserveKeepingView → new min-height → tween) runs in
     // tryApplyPin on the first mutation where the NEW prompt is in the DOM.
+
+    // The store calls this rollback only when it had started a real turn but
+    // failed before any visible response was established. Command-only paths
+    // never arm a pin in the first place. Restoring the full snapshot also
+    // covers the rare case where the optimistic prompt rendered before a
+    // startup transport failure arrived.
+    return () => {
+      if (!active || attemptId !== pinAttemptId) return
+      active = false
+      const pinWasApplied = appliedPinAttemptId === attemptId
+      if (pinWasApplied) {
+        cancelScrollTween?.()
+        if (pinSettleTimer) {
+          clearTimeout(pinSettleTimer)
+          pinSettleTimer = null
+        }
+        pinScrollActive = false
+        appliedPinAttemptId = 0
+      }
+      pinPending = previousPinPending
+      pinAnchorId = previousPinAnchorId
+      pinnedTurnId = previousPinnedTurnId
+      turnReserves.value = previousTurnReserves
+      followEnabled = previousFollowEnabled
+
+      void nextTick(() => {
+        const el = scrollEl.value
+        if (!el) return
+        if (previousFollowEnabled) {
+          stickToBottomNow()
+          return
+        }
+        isProgrammaticScroll = true
+        const max = Math.max(el.scrollHeight - el.clientHeight, 0)
+        el.scrollTop = Math.min(Math.max(previousScrollTop, 0), max)
+        lastScrollTop = el.scrollTop
+        requestAnimationFrame(() => {
+          isProgrammaticScroll = false
+          const current = scrollEl.value
+          if (current) isAtBottom.value = isNearBottom(current)
+        })
+      })
+    }
   }
 
   function startScrollTween(
@@ -552,7 +609,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // alone (including after the stream completes).
   //
   // Pipeline (order is the product; do not reorder "for simplicity"):
-  //   arm (pinAfterSend / session watch) → MO sees new prompt → tryApplyPin
+  //   arm (pinAfterSend / session watch) → heartbeat sees prompt → tryApplyPin
   //     → collapse previous residual blank (if any)
   //     → measure + set new min-height
   //     → pinTarget tween/jump
@@ -583,10 +640,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
     if (!container.contains(promptEl)) return false
     // BUSINESS RULE: the session's FIRST turn never pins — there is no
     // content above the prompt to peek at, so a reserve would only add dead
-    // scroll range. Disarm and hand over to the follow heartbeat (the
-    // MutationObserver's follow branch lands the view at the bottom on this
-    // same mutation). Covers draft sends and the first send in an empty
-    // session alike.
+    // scroll range. Disarm and hand over to the follow heartbeat, whose follow
+    // branch lands the view at the bottom on this same change. Covers draft
+    // sends and the first send in an empty session alike.
     if (messages.value[0]?.id === prompt.id) {
       pinPending = false
       followBottom()
@@ -626,6 +682,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     const floor = promptOffsetInTurn + promptEl.offsetHeight + Math.round(el.clientHeight / 3)
     const reservePx = Math.max(0, Math.round(Math.max(ideal, floor)))
     turnReserves.value = new Map(turnReserves.value).set(prompt.id, reservePx)
+    appliedPinAttemptId = pinAttemptId
     // Immediate projection of the same value: the reactive binding lands on
     // Vue's next flush, but the tween below needs this frame's geometry.
     // The binding renders the identical value and owns it from the next
@@ -666,7 +723,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     return true
   }
 
-  // Instant follow used by the MutationObserver while follow is engaged. Marks
+  // Instant follow used by the content heartbeat while follow is engaged. Marks
   // itself programmatic so the scroll it triggers is not read as user intent.
   //
   // Timing: `scrollTo` dispatches its `scroll` event before the next rAF fires,
@@ -689,7 +746,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
   }
 
   // Deliberate "go to the latest" — the jump-to-bottom button. Re-arms follow
-  // and eases down; the MutationObserver keeps it pinned once there.
+  // and eases down; the content heartbeat keeps it pinned once there.
   function scrollToBottom() {
     const root = scrollEl.value
     if (!root) return
@@ -752,7 +809,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
 
   // Drop accumulated anchors when the active session changes, and land the new
   // session at the bottom via the ordinary follow heartbeat (the
-  // MutationObserver sticks to the content end as the messages render).
+  // content heartbeat sticks to the content end as the messages render).
   // Entry-pin (landing on the last prompt like just-after-send) was a
   // deliberate FEATURE CUT — the user chose plain bottom landing for history
   // sessions; only sending pins.
@@ -868,9 +925,36 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // --- User-intent detection: the escape latch ---
   // `wheel` is a user-only signal — a programmatic scroll never fires it — so
   // it is the trustworthy source for "the user is moving the view".
+  const PHYSICAL_SCROLL_GRACE_MS = 250
+  const KEY_NAV_GRACE_MS = 500
+  let lastWheelAt = Number.NEGATIVE_INFINITY
+  let touchActive = false
+  let lastTouchScrollAt = Number.NEGATIVE_INFINITY
+
   function onWheel(ev: WheelEvent) {
     isProgrammaticScroll = false
+    lastWheelAt = performance.now()
+    // Upward intent must park immediately, before the browser applies the
+    // wheel delta. A downward wheel already at the bottom can re-lock here
+    // even when the browser has no remaining distance and emits no scroll;
+    // otherwise the subsequent scroll event decides against post-delta
+    // geometry.
     handleUserScroll(ev.deltaY < 0)
+  }
+
+  function onTouchStart() {
+    isProgrammaticScroll = false
+    touchActive = true
+    lastTouchScrollAt = performance.now()
+  }
+
+  function onTouchMove() {
+    lastTouchScrollAt = performance.now()
+  }
+
+  function onTouchEnd() {
+    touchActive = false
+    lastTouchScrollAt = performance.now()
   }
 
   // --- Physical-gesture latches for the scroll paths that bypass `wheel` ---
@@ -878,7 +962,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // events; so does keyboard paging. Track the gestures themselves so
   // onScrollEvent can tell them apart from LAYOUT-induced scrolls (see below).
   let pointerActive = false
-  let lastKeyNavAt = 0
+  let lastKeyNavAt = Number.NEGATIVE_INFINITY
   function onPointerDown() {
     pointerActive = true
   }
@@ -916,18 +1000,27 @@ export function useChatScroll(options: UseChatScrollOptions) {
     // killed follow exactly at completion and left the view shoved up at the
     // reply's top; enumerating their signatures (a previous clamp-only guard)
     // lost the race whenever content had already regrown by the time the
-    // event was delivered. Wheel/touch never reach here (handled/cancelled at
-    // their own listeners); pointer drag and keyboard paging are latched
-    // above. 500ms covers key-repeat gaps between keydown and its scroll.
-    const physical = pointerActive || performance.now() - lastKeyNavAt < 500
+    // event was delivered. Wheel/touch scroll events do reach here, so their
+    // short-lived gesture latches must survive the browser's post-input event
+    // ordering. Pointer drag and keyboard paging are latched alongside them.
+    const now = performance.now()
+    const touchPhysical = touchActive || now - lastTouchScrollAt < PHYSICAL_SCROLL_GRACE_MS
+    // Momentum scroll emits no more touch events. Extend the grace window on
+    // every scroll frame that still belongs to that gesture so pointercancel
+    // and touchend cannot turn momentum into a fake layout scroll.
+    if (touchPhysical) lastTouchScrollAt = now
+    const physical = pointerActive
+      || touchPhysical
+      || now - lastWheelAt < PHYSICAL_SCROLL_GRACE_MS
+      || now - lastKeyNavAt < KEY_NAV_GRACE_MS
     if (physical) {
       handleUserScroll(isScrollingUp)
       return
     }
     // Layout displacement while following: heal it. Completion re-renders can
     // shove the viewport with no further DOM mutation ever coming to pull it
-    // back — the follow heartbeat is mutation-driven, so this scroll event is
-    // the only wake-up we get.
+    // back — the follow heartbeat may see neither a mutation nor a resize, so
+    // this scroll event is the only wake-up we get.
     if (followEnabled && !isNearBottom(el)) stickToBottomNow()
   }
 
@@ -961,10 +1054,11 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // flush: 'pre' is load-bearing: the migration must land BEFORE the render
   // that re-keys, so the remounted container binds the reserve in the very
   // same patch — a reserve-less frame never exists.
-  watch(messages, (list) => {
+  watch(() => messages.value.map(message => message.id), () => {
     if (!pinnedTurnId) return
     const px = turnReserves.value.get(pinnedTurnId)
     if (px === undefined) return
+    const list = messages.value
     if (list.some(m => m.id === pinnedTurnId)) return
     // The pinned turn's opening prompt is still the newest user message —
     // only its id changed. No user message at all means the turn was
@@ -987,7 +1081,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // markdown reflow) intentionally do nothing special here when follow is
   // off — the browser keeps the parked view; do not invent collapse/scroll
   // compensation on those paths.
-  function onContentMutated() {
+  function onContentChanged() {
     const el = scrollEl.value
     if (!el) return
     if (!isActive.value || lockScroll.value) return
@@ -1008,10 +1102,14 @@ export function useChatScroll(options: UseChatScrollOptions) {
     // drag often releases outside the element. Keydown on window because the
     // focused node during keyboard paging may sit outside this subtree.
     el.addEventListener('pointerdown', onPointerDown, { passive: true })
+    el.addEventListener('touchstart', onTouchStart, { passive: true })
+    el.addEventListener('touchmove', onTouchMove, { passive: true })
     window.addEventListener('pointerup', onPointerUp, { passive: true })
     window.addEventListener('pointercancel', onPointerUp, { passive: true })
+    window.addEventListener('touchend', onTouchEnd, { passive: true })
+    window.addEventListener('touchcancel', onTouchEnd, { passive: true })
     window.addEventListener('keydown', onKeyNav, { passive: true })
-    mutationObserver = new MutationObserver(onContentMutated)
+    mutationObserver = new MutationObserver(onContentChanged)
     // childList catches new bubbles/token spans; characterData catches text
     // that streams into an existing node — either can be the stream's growth.
     mutationObserver.observe(el, { childList: true, subtree: true, characterData: true })
@@ -1022,11 +1120,19 @@ export function useChatScroll(options: UseChatScrollOptions) {
       el.removeEventListener('wheel', onWheel)
       el.removeEventListener('scroll', onScrollEvent)
       el.removeEventListener('pointerdown', onPointerDown)
+      el.removeEventListener('touchstart', onTouchStart)
+      el.removeEventListener('touchmove', onTouchMove)
     }
     window.removeEventListener('pointerup', onPointerUp)
     window.removeEventListener('pointercancel', onPointerUp)
+    window.removeEventListener('touchend', onTouchEnd)
+    window.removeEventListener('touchcancel', onTouchEnd)
     window.removeEventListener('keydown', onKeyNav)
     pointerActive = false
+    touchActive = false
+    lastTouchScrollAt = Number.NEGATIVE_INFINITY
+    lastWheelAt = Number.NEGATIVE_INFINITY
+    lastKeyNavAt = Number.NEGATIVE_INFINITY
     mutationObserver?.disconnect()
     mutationObserver = null
   }
@@ -1034,6 +1140,14 @@ export function useChatScroll(options: UseChatScrollOptions) {
   watch(scrollEl, (el, old) => {
     detach(old ?? null)
     if (el) attach(el)
+  }, { immediate: true })
+
+  watch(contentEl, (el) => {
+    contentResizeObserver?.disconnect()
+    contentResizeObserver = null
+    if (!el || typeof ResizeObserver === 'undefined') return
+    contentResizeObserver = new ResizeObserver(onContentChanged)
+    contentResizeObserver.observe(el)
   }, { immediate: true })
 
   // Prepend of older history is a deliberate move away from the bottom, so it
@@ -1051,6 +1165,8 @@ export function useChatScroll(options: UseChatScrollOptions) {
     if (tweenFlagTimer) clearTimeout(tweenFlagTimer)
     if (pinSettleTimer) clearTimeout(pinSettleTimer)
     cancelScrollTween?.()
+    contentResizeObserver?.disconnect()
+    contentResizeObserver = null
     detach(scrollEl.value)
   })
 

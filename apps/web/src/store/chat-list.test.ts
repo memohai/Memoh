@@ -267,9 +267,14 @@ describe('chat-list store', () => {
 
   it('returns startup stream errors to the composer when no assistant output exists', async () => {
     const store = useChatStore()
+    const onBeforeTurnAppend = vi.fn()
+    const onTurnAppendAborted = vi.fn()
 
     await store.selectBot('bot-1')
-    const result = await store.sendMessage('hello')
+    const result = await store.sendMessage('hello', undefined, {
+      onBeforeTurnAppend,
+      onTurnAppendAborted,
+    })
 
     expect(result).toMatchObject({
       ok: false,
@@ -284,6 +289,8 @@ describe('chat-list store', () => {
       error: 'model failed',
       restoreInput: 'hello',
     })
+    expect(onBeforeTurnAppend).toHaveBeenCalledOnce()
+    expect(onTurnAppendAborted).toHaveBeenCalledOnce()
   })
 
   it('uses structured API feedback for startup send failures', async () => {
@@ -3482,10 +3489,16 @@ describe('chat-list store', () => {
       type: 'chat',
     })
     const store = useChatStore()
+    const onBeforeTurnAppend = vi.fn()
+    const onTurnAppendAborted = vi.fn()
 
     await store.selectBot('bot-1')
     await store.selectSession('session-a')
-    const result = await store.sendMessage('/help', undefined, { composerScope: 'bot-1:panel-a' })
+    const result = await store.sendMessage('/help', undefined, {
+      composerScope: 'bot-1:panel-a',
+      onBeforeTurnAppend,
+      onTurnAppendAborted,
+    })
 
     expect(result).toMatchObject({ ok: true })
     expect(api.executeQuickAction).toHaveBeenCalledWith('bot-1', 'help', expect.objectContaining({
@@ -3493,6 +3506,8 @@ describe('chat-list store', () => {
       sessionId: 'session-a',
       skillActivationAllowed: true,
     }))
+    expect(onBeforeTurnAppend).not.toHaveBeenCalled()
+    expect(onTurnAppendAborted).not.toHaveBeenCalled()
   })
 
   it('keeps quick action transport failures as startup command errors', async () => {
@@ -4435,12 +4450,16 @@ describe('chat-list store', () => {
     await new Promise(r => setTimeout(r, 150))
     await flushPromises()
 
-    // Both copies would survive id-keyed dedup; only the server turn must
-    // remain, and the optimistic id must be gone.
+    // Both copies would survive id-keyed dedup. Consolidation keeps the
+    // optimistic render id stable so keyed chat DOM (including turn reserve)
+    // does not remount, while recording the canonical server id separately.
     expect(store.messages.length).toBe(baseLength + 1)
     const justSent = store.messages.filter(m => m.role === 'user' && (m as { text?: string }).text === 'just sent')
     expect(justSent.length).toBe(1)
-    expect(justSent[0]?.id).toBe('server-user-1')
+    expect(justSent[0]).toMatchObject({
+      id: '1700000000000',
+      serverId: 'server-user-1',
+    })
     // And the dashed-id server turn from the older page is still here.
     expect(store.messages.some(m => m.id === dashedServerId)).toBe(true)
   })
