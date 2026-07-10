@@ -69,13 +69,21 @@ func rawToolShape(row sqlc.ListUncompactedMessagesBySessionRow) (preserveToolClo
 			content = modelMessage.Content
 		}
 	}
+	var barePart entryPart
+	if json.Unmarshal(content, &barePart) == nil && isToolPartType(barePart.Type) {
+		return true, false
+	}
 	for _, part := range parseEntryParts(content) {
-		if strings.Contains(part.Type, "tool-call") || strings.Contains(part.Type, "tool_call") ||
-			strings.Contains(part.Type, "tool-result") || strings.Contains(part.Type, "tool_result") {
+		if isToolPartType(part.Type) {
 			return true, false
 		}
 	}
 	return false, false
+}
+
+func isToolPartType(value string) bool {
+	return strings.Contains(value, "tool-call") || strings.Contains(value, "tool_call") ||
+		strings.Contains(value, "tool-result") || strings.Contains(value, "tool_result")
 }
 
 func rowToMessage(row sqlc.ListUncompactedMessagesBySessionRow) messagepkg.Message {

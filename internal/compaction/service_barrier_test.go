@@ -15,9 +15,11 @@ func TestDoCompactionDoesNotSplitToolExchangeAtUnparseableBarrier(t *testing.T) 
 	tests := []struct {
 		name       string
 		breakIndex int
+		bareCall   bool
 	}{
 		{name: "call is unparseable", breakIndex: 0},
 		{name: "result is unparseable", breakIndex: 1},
+		{name: "bare call part is unparseable", breakIndex: 0, bareCall: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -28,6 +30,9 @@ func TestDoCompactionDoesNotSplitToolExchangeAtUnparseableBarrier(t *testing.T) 
 				mkRow(t, "assistant", `"old answer"`, 100),
 				mkRow(t, "user", `"current question"`, 100),
 				mkRow(t, "assistant", `"current answer"`, 100),
+			}
+			if tt.bareCall {
+				rows[0].Content = []byte(`{"type":"tool-call","toolCallId":"c1","toolName":"search","input":{}}`)
 			}
 			rows[tt.breakIndex].ID = pgtype.UUID{Valid: false}
 			q := &fakeQueries{uncompacted: rows}
