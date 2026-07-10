@@ -4,11 +4,17 @@ on:
   push:
     branches: [main]
     paths:
+      - ".github/workflows/migrations.yml"
       - "db/postgres/migrations/**"
+      - "db/postgres/queries/**"
+      - "internal/db/*migration*_test.go"
   pull_request:
     branches: [main]
     paths:
+      - ".github/workflows/migrations.yml"
       - "db/postgres/migrations/**"
+      - "db/postgres/queries/**"
+      - "internal/db/*migration*_test.go"
 
 concurrency:
   group: migrations-${{ github.ref }}
@@ -65,3 +71,8 @@ jobs:
 
       - name: Migrate up (idempotent)
         run: ./memoh-server migrate up
+
+      - name: Test compaction artifact migration and lineage queries
+        env:
+          TEST_POSTGRES_DSN: postgres://memoh:memoh123@127.0.0.1:5432/memoh_test?sslmode=disable
+        run: go test -count=1 ./internal/db -run '^TestCompactionArtifactMigrationPostgresPath$'

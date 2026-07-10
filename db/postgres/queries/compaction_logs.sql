@@ -38,6 +38,12 @@ WHERE superseded_by = sqlc.arg(successor_id)
   AND status = 'ok'
 ORDER BY id ASC;
 
+-- name: ListCompactionArtifactParentEdges :many
+SELECT parent_id, ordinal
+FROM bot_history_message_compact_parent_edges
+WHERE artifact_id = $1
+ORDER BY ordinal ASC;
+
 -- name: ListCompactionLogsByBot :many
 SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
        artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
@@ -69,4 +75,13 @@ WHERE c.session_id = $1
 ORDER BY c.anchor_start_ms ASC, c.started_at ASC, c.id ASC;
 
 -- name: DeleteCompactionLogsByBot :exec
-DELETE FROM bot_history_message_compacts WHERE bot_id = $1;
+WITH target_compacts AS MATERIALIZED (
+  SELECT compact.id
+  FROM bot_history_message_compacts AS compact
+  WHERE compact.bot_id = sqlc.arg(bot_id)
+), deleted_parent_edges AS (
+  DELETE FROM bot_history_message_compact_parent_edges
+  WHERE artifact_id IN (SELECT id FROM target_compacts)
+)
+DELETE FROM bot_history_message_compacts
+WHERE id IN (SELECT id FROM target_compacts);
