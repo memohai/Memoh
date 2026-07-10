@@ -31,6 +31,7 @@ import { createTranscriptController } from './chat/transcript'
 import { createAssistantStreamRegistry } from './chat/assistant-streams'
 import { createChatRealtimeController } from './chat/realtime'
 import { createACPRuntimeRegistry } from './chat/acp-runtime-registry'
+import { createChatRefreshCoordinator } from './chat/refresh-coordinator'
 import {
   createApprovalResponseTracker,
   type ApprovalResponse,
@@ -334,6 +335,23 @@ export const useChatStore = defineStore('chat', () => {
   transcript.setRefreshAppliedHook((targetSessionId, latestTimestamp) => {
     touchSessionInList(targetSessionId, latestTimestamp)
   })
+  const refreshCoordinator = createChatRefreshCoordinator({
+    currentBotId,
+    sessionId,
+    fetchSessions,
+    applySessionsSnapshot: (response) => {
+      replaceSessions(response.items)
+      sessionsCursor.value = response.nextCursor
+      hasMoreSessions.value = response.nextCursor !== null
+    },
+    isSessionStreaming,
+    refreshCurrentSession,
+  })
+  const {
+    refreshSessionsList,
+    scheduleRefreshCurrentSession,
+    resetRefreshCoordinator,
+  } = refreshCoordinator
   const realtime = createChatRealtimeController({
     onWebSocketEvent: (botId, event) => handleWSStreamEvent(event, undefined, botId),
     prepareSessionMessages,
@@ -391,8 +409,6 @@ export const useChatStore = defineStore('chat', () => {
   const deletedSession = ref<{ id: string, botId: string, seq: number, composerScope?: string } | null>(null)
   let deletedSessionSeq = 0
 
-  let refreshTimer: ReturnType<typeof setTimeout> | null = null
-  let sessionListRefreshPromise: { botId: string; promise: Promise<void> } | null = null
   let selectSessionRequestId = 0
 
   const hasExplicitSessionSelection = computed(() => explicitSessionSelection.value)
@@ -713,11 +729,7 @@ export const useChatStore = defineStore('chat', () => {
     abortAllAssistantStreams()
     stopWebSocket()
 
-    if (refreshTimer) {
-      clearTimeout(refreshTimer)
-      refreshTimer = null
-    }
-    sessionListRefreshPromise = null
+    resetRefreshCoordinator()
 
     replaceSessions([])
     clearDeletedSessionIds()
@@ -751,31 +763,6 @@ export const useChatStore = defineStore('chat', () => {
     backgroundTasks.clearBackgroundTasks()
   }
 
-  function refreshSessionsList(targetBotId: string): Promise<void> {
-    const bid = targetBotId.trim()
-    if (!bid) return Promise.resolve()
-    if (sessionListRefreshPromise?.botId === bid) return sessionListRefreshPromise.promise
-
-    const promise = fetchSessions(bid)
-      .then((response) => {
-        if ((currentBotId.value ?? '').trim() !== bid) return
-        replaceSessions(response.items)
-        sessionsCursor.value = response.nextCursor
-        hasMoreSessions.value = response.nextCursor !== null
-      })
-      .catch((error) => {
-        console.error('Failed to refresh sessions:', error)
-      })
-      .finally(() => {
-        if (sessionListRefreshPromise?.promise === promise) {
-          sessionListRefreshPromise = null
-        }
-      })
-
-    sessionListRefreshPromise = { botId: bid, promise }
-    return promise
-  }
-
   async function loadMoreSessions(): Promise<void> {
     if (!hasMoreSessions.value || loadingMoreSessions.value) return
     const bid = (currentBotId.value ?? '').trim()
@@ -793,21 +780,6 @@ export const useChatStore = defineStore('chat', () => {
     } finally {
       loadingMoreSessions.value = false
     }
-  }
-
-  function scheduleRefreshCurrentSession(expectedSessionId?: string, delay = 100) {
-    const sid = (sessionId.value ?? '').trim()
-    if (!sid) return
-    if (expectedSessionId?.trim() && expectedSessionId.trim() !== sid) return
-    if (refreshTimer) return
-
-    refreshTimer = setTimeout(() => {
-      refreshTimer = null
-      const sidNow = (sessionId.value ?? '').trim()
-      const streamActive = isSessionStreaming(sidNow)
-      if (streamActive) return
-      void refreshCurrentSession()
-    }, delay)
   }
 
   function handleSessionMessageEvent(targetBotId: string, targetSessionId: string, event: SessionMessageStreamEvent) {
@@ -1295,6 +1267,7 @@ export const useChatStore = defineStore('chat', () => {
           // refresh (which would take the merge branch and duplicate optimistic
           // turns).
           prepareForInitialization()
+          resetRefreshCoordinator()
           stopStreams()
           stopWebSocket()
 
