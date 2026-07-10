@@ -343,6 +343,9 @@ func TestTrimComposedPipelineMessagesKeepsRetainedArtifactIdentity(t *testing.T)
 	})
 
 	built := trimComposedPipelineMessages(nil, entries, budget)
+	if len(built.Messages) != 4 || !strings.HasPrefix(built.Messages[0].TextContent(), "[System Notice]") {
+		t.Fatalf("trimmed messages = %#v, want notice plus both summaries and latest raw", modelMessageTexts(built.Messages))
+	}
 	if got, want := pipelineSummaryIDs(built.HistoryRecords), []string{"artifact-a", "artifact-b"}; !equalStrings(got, want) {
 		t.Fatalf("retained summary identities = %#v, want %#v", got, want)
 	}

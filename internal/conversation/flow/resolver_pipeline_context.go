@@ -271,8 +271,13 @@ func trimComposedPipelineMessages(
 	}
 	retained = append(retained, entries[cutoff:]...)
 	build := pipelineContextBuild{
-		Messages:       make([]conversation.ModelMessage, 0, len(retained)),
+		Messages:       make([]conversation.ModelMessage, 0, len(retained)+1),
 		HistoryRecords: make([]historyfrag.HistoryRecord, 0),
+	}
+	if cutoff > 0 {
+		notice := historyTruncationNotice()
+		build.Messages = append(build.Messages, notice)
+		build.EstimatedTokens += estimateMessageTokens(notice)
 	}
 	for _, entry := range retained {
 		build.Messages = append(build.Messages, entry.message)

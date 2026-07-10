@@ -12,6 +12,7 @@ import (
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/historyfrag"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 )
@@ -124,6 +125,40 @@ func TestFlowAndPipelinePathsProduceEquivalentMultiArtifactContext(t *testing.T)
 	assertParitySummaryFrags(t, "pipeline", pipelineFrags, []string{artifactA, artifactB})
 	assertValidToolClosures(t, "flow", flowMessages)
 	assertValidToolClosures(t, "pipeline", pipelineBuild.Messages)
+}
+
+func TestFlowAndPipelineTrimmingProduceEquivalentNotice(t *testing.T) {
+	t.Parallel()
+
+	old := conversation.ModelMessage{
+		Role:    "user",
+		Content: conversation.NewTextContent(strings.Repeat("old context", 100)),
+	}
+	latest := conversation.ModelMessage{
+		Role:    "user",
+		Content: conversation.NewTextContent("latest context"),
+	}
+	budget := estimateMessageTokens(latest)
+	flowMessages, _, _ := trimMessagesAndRecordsByTokens(nil, []historyfrag.HistoryRecord{
+		{ModelMessage: old},
+		{ModelMessage: latest},
+	}, budget)
+	pipelineBuild := trimComposedPipelineMessages(nil, []composedPipelineMessage{
+		{message: old},
+		{message: latest},
+	}, budget)
+
+	if len(flowMessages) != len(pipelineBuild.Messages) {
+		t.Fatalf("message counts: flow=%d pipeline=%d\nflow=%#v\npipeline=%#v",
+			len(flowMessages), len(pipelineBuild.Messages), modelMessageTexts(flowMessages), modelMessageTexts(pipelineBuild.Messages))
+	}
+	for i := range flowMessages {
+		flowRole, flowText := normalizeParityMessage(flowMessages[i])
+		pipelineRole, pipelineText := normalizeParityMessage(pipelineBuild.Messages[i])
+		if flowRole != pipelineRole || flowText != pipelineText {
+			t.Fatalf("message %d mismatch: flow=(%q, %q) pipeline=(%q, %q)", i, flowRole, flowText, pipelineRole, pipelineText)
+		}
+	}
 }
 
 func pipelineModelHistoryMessage(t *testing.T, id, botID, sessionID string, createdAt time.Time, message conversation.ModelMessage) messagepkg.Message {

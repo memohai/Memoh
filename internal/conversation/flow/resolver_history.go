@@ -271,22 +271,23 @@ func trimMessagesAndRecordsByTokens(log *slog.Logger, messages []historyfrag.His
 	retained = append(retained, messages[cutoff:]...)
 	result := make([]conversation.ModelMessage, 0, len(retained))
 	if cutoff > 0 {
-		// Add a truncation notice at the beginning so the LLM knows earlier
-		// context was trimmed and it can use tools (memory, search) to look up
-		// past information if needed.
-		result = append(result, conversation.ModelMessage{
-			Role: "system",
-			Content: conversation.NewTextContent(
-				"[System Notice] Earlier conversation history has been trimmed to fit the context window. " +
-					"If you need information from earlier in the conversation, use the available tools " +
-					"(such as memory_read or web search) to retrieve it.",
-			),
-		})
+		result = append(result, historyTruncationNotice())
 	}
 	for _, m := range retained {
 		result = append(result, m.ModelMessage)
 	}
 	return result, retained, totalTokens
+}
+
+func historyTruncationNotice() conversation.ModelMessage {
+	return conversation.ModelMessage{
+		Role: "system",
+		Content: conversation.NewTextContent(
+			"[System Notice] Earlier conversation history has been trimmed to fit the context window. " +
+				"If you need information from earlier in the conversation, use the available tools " +
+				"(such as memory_read or web search) to retrieve it.",
+		),
+	}
 }
 
 func fitRequiredMessagesWithinBudget(messages []historyfrag.HistoryRecord, cutoff int, maxTokens int) (int, int) {
