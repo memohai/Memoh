@@ -401,14 +401,26 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		slog.Int("prior_summaries", len(priorSummaries)),
 	)
 
-	entries, messageIDs := buildEntriesAndIDs(toCompact)
-	if len(entries) == 0 || len(messageIDs) == 0 {
+	entries, compactedMessageIDs := buildEntriesAndIDs(toCompact)
+	if len(entries) == 0 || len(compactedMessageIDs) == 0 {
 		// No complete group survived: every selected group had a row that rendered
 		// empty (a reasoning-only message, or a tool exchange whose result renders
 		// empty). buildEntriesAndIDs withholds such a group from both entries and
 		// ids, so summarizing here would either destroy rows for a junk summary or
 		// mark rows we cannot faithfully summarize. Leave them in raw history.
 		return Result{Status: StatusNoop}, nil
+	}
+	assetRows, err := s.queries.ListMessageAssetsBatch(ctx, compactedMessageIDs)
+	if err != nil {
+		return Result{}, fmt.Errorf("load compaction message assets: %w", err)
+	}
+	toCompact, err = candidatesWithAssets(toCompact, rows, assetRows)
+	if err != nil {
+		return Result{}, err
+	}
+	artifact, err := artifactMetadataFor(toCompact, compactedMessageIDs)
+	if err != nil {
+		return Result{}, err
 	}
 
 	// A single markable group larger than the whole budget survives trim by
@@ -474,27 +486,21 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	usageJSON, _ := json.Marshal(result.Usage)
 
 	modelUUID := db.ParseUUIDOrEmpty(cfg.ModelID)
-	artifact, err := artifactMetadataFor(toCompact, messageIDs)
-	if err != nil {
-		s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, usageJSON, modelUUID, nil)
-		return Result{}, err
-	}
-
 	if err := s.queries.MarkMessagesCompacted(persistCtx, sqlc.MarkMessagesCompactedParams{
 		CompactID: logID,
-		Column2:   messageIDs,
+		Column2:   compactedMessageIDs,
 	}); err != nil {
 		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, err
 	}
 
-	if err := s.completeLog(persistCtx, logID, "ok", result.Text, "", len(messageIDs), usageJSON, modelUUID, &artifact); err != nil {
+	if err := s.completeLog(persistCtx, logID, "ok", result.Text, "", len(compactedMessageIDs), usageJSON, modelUUID, &artifact); err != nil {
 		// The rows are already marked, but the log never reached status=ok, so
 		// the reclaim SQL keeps them eligible for a later pass. Reporting ok
 		// here would claim a summary that was never persisted.
 		return Result{}, err
 	}
-	return Result{Status: StatusOK, Summary: result.Text, MessageCount: len(messageIDs)}, nil
+	return Result{Status: StatusOK, Summary: result.Text, MessageCount: len(compactedMessageIDs)}, nil
 }
 
 func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, summary, errMsg string, messageCount int, usage []byte, modelID pgtype.UUID, artifact *artifactMetadata) error {
@@ -505,7 +511,7 @@ func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, su
 		anchorStartMs = artifact.AnchorStartMs
 		anchorEndMs = artifact.AnchorEndMs
 	}
-	if _, err := s.queries.CompleteCompactionLog(ctx, sqlc.CompleteCompactionLogParams{
+	_, err := s.queries.CompleteCompactionLog(ctx, sqlc.CompleteCompactionLogParams{
 		ID:            logID,
 		Status:        status,
 		Summary:       summary,
@@ -516,7 +522,8 @@ func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, su
 		Coverage:      coverage,
 		AnchorStartMs: anchorStartMs,
 		AnchorEndMs:   anchorEndMs,
-	}); err != nil {
+	})
+	if err != nil {
 		s.logger.Error("failed to complete compaction log", slog.String("error", err.Error()))
 		return err
 	}

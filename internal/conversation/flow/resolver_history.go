@@ -17,7 +17,6 @@ import (
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/historyfrag"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
@@ -470,6 +469,11 @@ func (r *Resolver) listActiveCompactionArtifacts(ctx context.Context, sessionID 
 		}
 		return nil
 	}
+	for _, artifact := range artifacts {
+		if artifact.CoverageMalformed && r.logger != nil {
+			r.logger.Warn("listActiveCompactionArtifacts: malformed coverage requires legacy backfill", slog.String("compact_id", artifact.ID))
+		}
+	}
 	return artifacts
 }
 
@@ -522,24 +526,16 @@ func (r *Resolver) coveredRefsForCompact(ctx context.Context, compactID pgtype.U
 	}
 	refs := make([]contextfrag.ContextRef, 0, len(rows))
 	for _, row := range rows {
-		record, err := historyfrag.FromDBMessage(messageFromCompactRefRow(row), historyfrag.ScopeFallback{})
+		ref, err := historyfrag.DBMessageIdentityRef(pgUUIDString(row.ID))
 		if err != nil {
 			if r.logger != nil {
 				r.logger.Warn("coveredRefsForCompact: skipped compacted message ref", slog.String("compact_id", pgUUIDString(compactID)), slog.Any("error", err))
 			}
 			continue
 		}
-		refs = append(refs, record.Ref)
+		refs = append(refs, ref)
 	}
 	return refs
-}
-
-func messageFromCompactRefRow(row sqlc.ListMessageRefsByCompactIDRow) messagepkg.Message {
-	return messagepkg.Message{
-		ID:        pgUUIDString(row.ID),
-		BotID:     pgUUIDString(row.BotID),
-		SessionID: pgUUIDString(row.SessionID),
-	}
 }
 
 func prependMissingCompactionSummaries(messages []historyfrag.HistoryRecord, summaries []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {

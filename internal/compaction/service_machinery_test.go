@@ -104,6 +104,10 @@ func (f *fakeQueries) ListUncompactedMessagesBySession(_ context.Context, _ pgty
 	return f.uncompacted, nil
 }
 
+func (f *fakeQueries) ListMessageAssetsBatch(_ context.Context, _ []pgtype.UUID) ([]sqlc.ListMessageAssetsBatchRow, error) {
+	return nil, nil
+}
+
 func (f *fakeQueries) ListActiveCompactionArtifactsBySession(_ context.Context, _ pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
 	return f.priorLogs, nil
 }

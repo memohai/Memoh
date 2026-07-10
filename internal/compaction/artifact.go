@@ -27,16 +27,17 @@ type CoveredSource struct {
 }
 
 type Artifact struct {
-	ID            string
-	BotID         string
-	SessionID     string
-	Summary       string
-	Version       int
-	Coverage      []CoveredSource
-	AnchorStartMs int64
-	AnchorEndMs   int64
-	Level         int
-	ParentIDs     []string
+	ID                string
+	BotID             string
+	SessionID         string
+	Summary           string
+	Version           int
+	Coverage          []CoveredSource
+	AnchorStartMs     int64
+	AnchorEndMs       int64
+	Level             int
+	ParentIDs         []string
+	CoverageMalformed bool
 }
 
 func (a Artifact) HistoryRecord(scope contextfrag.Scope) historyfrag.HistoryRecord {
@@ -111,10 +112,7 @@ func artifactFromDBRow(row sqlc.BotHistoryMessageCompact) (Artifact, error) {
 	if row.Status != "ok" || strings.TrimSpace(row.Summary) == "" {
 		return Artifact{}, fmt.Errorf("compaction artifact %s is not active", id)
 	}
-	coverage, err := DecodeArtifactCoverage(row.Coverage)
-	if err != nil {
-		return Artifact{}, fmt.Errorf("compaction artifact %s: %w", id, err)
-	}
+	coverage, coverageErr := DecodeArtifactCoverage(row.Coverage)
 	version := int(row.ArtifactVersion)
 	if version == 0 {
 		version = ArtifactVersion
@@ -126,16 +124,17 @@ func artifactFromDBRow(row sqlc.BotHistoryMessageCompact) (Artifact, error) {
 		}
 	}
 	return Artifact{
-		ID:            id,
-		BotID:         formatUUID(row.BotID),
-		SessionID:     formatUUID(row.SessionID),
-		Summary:       row.Summary,
-		Version:       version,
-		Coverage:      coverage,
-		AnchorStartMs: row.AnchorStartMs,
-		AnchorEndMs:   row.AnchorEndMs,
-		Level:         int(row.ArtifactLevel),
-		ParentIDs:     parentIDs,
+		ID:                id,
+		BotID:             formatUUID(row.BotID),
+		SessionID:         formatUUID(row.SessionID),
+		Summary:           row.Summary,
+		Version:           version,
+		Coverage:          coverage,
+		AnchorStartMs:     row.AnchorStartMs,
+		AnchorEndMs:       row.AnchorEndMs,
+		Level:             int(row.ArtifactLevel),
+		ParentIDs:         parentIDs,
+		CoverageMalformed: coverageErr != nil,
 	}, nil
 }
 

@@ -360,6 +360,41 @@ func TestReplaceCompactedMessagesLoadsSessionSummaryCoverageFromCompactedRows(t 
 	}
 }
 
+func TestReplaceCompactedMessagesBackfillsMalformedPersistedCoverage(t *testing.T) {
+	t.Parallel()
+
+	sessionID := "00000000-0000-0000-0000-00000000f008"
+	compactID := "00000000-0000-0000-0000-00000000c008"
+	coveredID := "00000000-0000-0000-0000-000000000801"
+	queries := &recordingCompactionLogQueries{
+		logs: []sqlc.BotHistoryMessageCompact{
+			{
+				ID:        mustPGUUID(t, compactID),
+				SessionID: mustPGUUID(t, sessionID),
+				Status:    "ok",
+				Summary:   "recoverable condensed context",
+				Coverage:  []byte(`{"unexpected":"shape"}`),
+			},
+		},
+		refs: map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow{
+			mustPGUUID(t, compactID): {{ID: mustPGUUID(t, coveredID)}},
+		},
+	}
+	resolver := &Resolver{queries: queries}
+
+	got := resolver.replaceCompactedMessages(context.Background(), sessionID, contextfrag.Scope{SessionID: sessionID}, nil)
+
+	if len(got) != 1 || got[0].CompactID != compactID {
+		t.Fatalf("malformed coverage must not drop a valid summary artifact: %#v", got)
+	}
+	if got[0].Coverage == nil || len(got[0].Coverage.CoveredRefs) != 1 || got[0].Coverage.CoveredRefs[0].ID != coveredID {
+		t.Fatalf("malformed persisted coverage was not backfilled: %#v", got[0].Coverage)
+	}
+	if len(queries.refCalls) != 1 || queries.refCalls[0] != mustPGUUID(t, compactID) {
+		t.Fatalf("refs-only fallback calls = %#v, want %s", queries.refCalls, compactID)
+	}
+}
+
 func TestReplaceCompactedMessagesInWindowGroupCoversRowsOutsideLoadWindow(t *testing.T) {
 	t.Parallel()
 
@@ -400,6 +435,11 @@ func TestReplaceCompactedMessagesInWindowGroupCoversRowsOutsideLoadWindow(t *tes
 	}
 	if got[0].Coverage.CoveredRefs[0].ID != "00000000-0000-0000-0000-000000000501" {
 		t.Fatalf("covered refs should include the row outside the load window: %#v", got[0].Coverage.CoveredRefs)
+	}
+	for _, ref := range got[0].Coverage.CoveredRefs {
+		if ref.ContentHash != "" || ref.HashAlgo != "" || ref.HashScope != "" {
+			t.Fatalf("refs-only legacy coverage must not claim a source hash: %#v", ref)
+		}
 	}
 	if len(queries.coveredCalls) != 0 {
 		t.Fatalf("coverage path must not request full message content, called: %#v", queries.coveredCalls)

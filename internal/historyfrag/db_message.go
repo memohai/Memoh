@@ -28,23 +28,17 @@ func FromDBMessage(msg messagepkg.Message, fallback ScopeFallback) (HistoryRecor
 }
 
 func FromDBMessageWithLogger(log *slog.Logger, msg messagepkg.Message, fallback ScopeFallback) (HistoryRecord, error) {
-	rowID := strings.TrimSpace(msg.ID)
-	if rowID == "" {
-		return HistoryRecord{}, errors.New("history db message id is required")
+	ref, err := DBMessageIdentityRef(msg.ID)
+	if err != nil {
+		return HistoryRecord{}, err
 	}
+	rowID := ref.ID
 
 	modelMessage := modelMessageFromDBMessage(log, msg)
 	inputTokens, outputTokens := parseUsage(msg.Usage)
-	ref := contextfrag.ContextRef{
-		Namespace:   namespaceDBHistoryMessage,
-		ID:          rowID,
-		Version:     1,
-		Schema:      contextfrag.SchemaContextRef,
-		Durability:  contextfrag.RefDurable,
-		HashAlgo:    contextfrag.HashAlgoSHA256,
-		HashScope:   contextfrag.HashScopeSourcePayload,
-		ContentHash: DBMessageSourceHash(msg).Value,
-	}
+	ref.HashAlgo = contextfrag.HashAlgoSHA256
+	ref.HashScope = contextfrag.HashScopeSourcePayload
+	ref.ContentHash = DBMessageSourceHash(msg).Value
 	scope := scopeFromDBMessage(msg, fallback)
 	provenance := contextfrag.Provenance{
 		Source:    string(SourceDBMessage),
@@ -82,6 +76,20 @@ func FromDBMessageWithLogger(log *slog.Logger, msg messagepkg.Message, fallback 
 
 		UsageInputTokens:  inputTokens,
 		UsageOutputTokens: outputTokens,
+	}, nil
+}
+
+func DBMessageIdentityRef(id string) (contextfrag.ContextRef, error) {
+	rowID := strings.TrimSpace(id)
+	if rowID == "" {
+		return contextfrag.ContextRef{}, errors.New("history db message id is required")
+	}
+	return contextfrag.ContextRef{
+		Namespace:  namespaceDBHistoryMessage,
+		ID:         rowID,
+		Version:    1,
+		Schema:     contextfrag.SchemaContextRef,
+		Durability: contextfrag.RefDurable,
 	}, nil
 }
 
