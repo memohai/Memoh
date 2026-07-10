@@ -18,7 +18,6 @@ import {
   type SidebarSessionMode,
 } from './chat-list.utils'
 import {
-  asRecord,
   cloneRequestedSkills,
   cloneToolApprovalState,
   cloneUserInputState,
@@ -34,16 +33,21 @@ import {
   normalizeReplyRef,
   normalizeRequestedSkills,
   normalizeTimestamp,
-  pickRawString,
-  pickString,
   requestedSkillRequestsForWire,
   resolveIsSelf,
   serverMessageId,
   skillActivationTextFromRaw,
   sortChatMessages,
-  taskIdFromToolBlock,
 } from './chat-list.normalize'
 import { createFsChangeBeacon } from './chat/fs-beacon'
+import { createCommandEventRegistry } from './chat/command-events'
+import {
+  createBackgroundTaskTracker,
+  isBackgroundTaskActive,
+  normalizeBackgroundTask,
+  reconcileBackgroundTasksInMessages,
+  type BackgroundTask,
+} from './chat/background-tasks'
 import {
   createSession,
   deleteSession as requestDeleteSession,
@@ -67,7 +71,6 @@ import {
   type UIAttachment,
   type UIAttachmentsMessage,
   type UIErrorMessage,
-  type UIBackgroundTask,
   type UIMessage,
   type UIReasoningMessage,
   type UIReplyRef,
@@ -198,23 +201,9 @@ interface ToolApprovalStateSnapshot {
   approval: UIToolApproval
 }
 
-export interface BackgroundTask {
-  taskId: string
-  status: string
-  event?: string
-  botId?: string
-  sessionId?: string
-  command?: string
-  agentId?: string
-  agentSessionId?: string
-  outputFile?: string
-  outputTail?: string
-  stream?: string
-  chunk?: string
-  exitCode?: number
-  duration?: string
-  stalled?: boolean
-}
+// Background-task tracking lives in ./chat/background-tasks; the type is
+// re-exported so existing consumers keep importing it from the store module.
+export type { BackgroundTask } from './chat/background-tasks'
 
 export interface ChatSystemTurn {
   id: string
@@ -372,16 +361,6 @@ class CommandStreamError extends StreamFailureError {
   }
 }
 
-type StoreCommandEvent = CommandEventResponse & {
-  bot_id?: string
-}
-
-interface CommandEventScope {
-  botId?: string
-  sessionId?: string
-  composerScope?: string
-}
-
 interface EphemeralAssistantError {
   content: string
   timestamp: string
@@ -440,7 +419,18 @@ export const useChatStore = defineStore('chat', () => {
   const overrideModelId = ref<string>('')
   const overrideReasoningEffort = ref<string>('')
   const startupSendFailure = ref<StartupSendFailure | null>(null)
-  const commandEvents = ref<Record<string, StoreCommandEvent>>({})
+  // Slash-command event registry (see ./chat/command-events for scoping rules).
+  const commandEventRegistry = createCommandEventRegistry({ currentBotId, sessionId })
+  const {
+    commandEvent,
+    currentCommandScope,
+    commandEventForScope,
+    rememberCommandEvent,
+    showCommandError,
+    clearCommandEvent,
+    rescopeSessionCommandEventToComposer,
+    resetCommandEvents,
+  } = commandEventRegistry
   // Bumps when the user sends a message, carrying the resolved session id and
   // whether that send just promoted a draft (created the session). The workspace
   // tab store watches this to pin the chat tab — a session you have sent in is no
@@ -469,7 +459,12 @@ export const useChatStore = defineStore('chat', () => {
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   let refreshPromise: { key: string; promise: Promise<void> } | null = null
   let sessionListRefreshPromise: { botId: string; promise: Promise<void> } | null = null
-  const latestBackgroundTasks = new Map<string, BackgroundTask>()
+  // Background-task tracker (see ./chat/background-tasks for merge semantics).
+  const backgroundTasks = createBackgroundTaskTracker()
+  const {
+    rememberBackgroundTask,
+    applyPendingBackgroundEventsToTool,
+  } = backgroundTasks
   const ephemeralAssistantErrors = new Map<string, EphemeralAssistantError[]>()
   const wsCreatedSessionsByStream = new Map<string, string>()
   // Two independent streams replace the deleted bot-wide messages SSE:
@@ -817,17 +812,8 @@ export const useChatStore = defineStore('chat', () => {
     const sid = targetSessionId.trim()
     if (!bid || !sid) return
 
-    const sessionCommandKey = commandEventKey({ botId: bid, sessionId: sid })
-    const sessionCommandEvent = commandEvents.value[sessionCommandKey]
-    const composerScope = sessionCommandEvent?.composer_scope?.trim() || fallbackComposerScope.trim()
-    if (sessionCommandEvent) {
-      const scoped = { ...sessionCommandEvent }
-      delete scoped.session_id
-      const next = { ...commandEvents.value }
-      delete next[sessionCommandKey]
-      next[commandEventKey({ botId: bid, composerScope: scoped.composer_scope || 'chat' })] = scoped
-      commandEvents.value = next
-    }
+    const rescopedComposerScope = rescopeSessionCommandEventToComposer(bid, sid)
+    const composerScope = rescopedComposerScope || fallbackComposerScope.trim()
     markSessionDeleted(bid, sid)
     const deletedSignal: { id: string, botId: string, seq: number, composerScope?: string } = { id: sid, botId: bid, seq: ++deletedSessionSeq }
     if (composerScope) deletedSignal.composerScope = composerScope
@@ -929,126 +915,6 @@ export const useChatStore = defineStore('chat', () => {
   onAuthSessionCleared(() => resetUserScopedState({ clearSelection: true }))
 
 
-  function normalizeBackgroundStatus(status?: string, event?: string): string {
-    const token = (status || event || '').trim().toLowerCase()
-    switch (token) {
-      case 'background_started':
-      case 'auto_backgrounded':
-      case 'started':
-      case 'output':
-      case 'running':
-        return 'running'
-      case 'queued':
-      case 'queue':
-        return 'queued'
-      case 'complete':
-      case 'completed':
-      case 'success':
-      case 'succeeded':
-        return 'completed'
-      case 'error':
-      case 'failed':
-      case 'failure':
-        return 'failed'
-      case 'stalled':
-        return 'stalled'
-      case 'killed':
-      case 'cancelled':
-      case 'canceled':
-        return 'killed'
-      case 'unknown':
-        return 'unknown'
-      default:
-        return ''
-    }
-  }
-
-  function isBackgroundTaskActive(task?: BackgroundTask): boolean {
-    const status = normalizeBackgroundStatus(task?.status, task?.event)
-    return status === 'running' || status === 'queued' || status === 'stalled'
-  }
-
-  function normalizeBackgroundTask(task?: UIBackgroundTask, eventType?: string): BackgroundTask | null {
-    if (!task) return null
-    const outer = task as Record<string, unknown>
-    const nested = asRecord(outer.task)
-    const record = Object.keys(nested).length > 0 ? nested : outer
-    const taskId = pickString(record, 'task_id', 'taskId')
-    if (!taskId) return null
-    const event = pickString(record, 'event') || pickString(outer, 'event') || (eventType ?? '').trim()
-    const status = normalizeBackgroundStatus(pickString(record, 'status'), event) || 'running'
-    const exitCode = record.exit_code ?? record.exitCode
-    return {
-      taskId,
-      status,
-      event: event || undefined,
-      botId: pickString(record, 'bot_id', 'botId') || pickString(outer, 'bot_id', 'botId') || undefined,
-      sessionId: pickString(record, 'session_id', 'sessionId') || pickString(outer, 'session_id', 'sessionId') || undefined,
-      command: pickString(record, 'command') || undefined,
-      agentId: pickString(record, 'agent_id', 'agentId') || undefined,
-      agentSessionId: pickString(record, 'agent_session_id', 'agentSessionId') || undefined,
-      outputFile: pickString(record, 'output_file', 'outputFile') || undefined,
-      outputTail: pickRawString(record, 'output_tail', 'outputTail', 'tail') || undefined,
-      stream: pickString(record, 'stream') || undefined,
-      chunk: pickRawString(record, 'chunk') || undefined,
-      exitCode: typeof exitCode === 'number' ? exitCode : undefined,
-      duration: pickString(record, 'duration') || undefined,
-      stalled: record.stalled === true || status === 'stalled',
-    }
-  }
-
-  function mergeBackgroundTask(existing: BackgroundTask | undefined, incoming: BackgroundTask): BackgroundTask {
-    const merged: BackgroundTask = existing ? { ...existing } : { taskId: incoming.taskId, status: incoming.status }
-    const writable = merged as unknown as Record<string, unknown>
-    for (const [key, value] of Object.entries(incoming)) {
-      if (value === undefined || value === '') continue
-      writable[key] = value
-    }
-    if (!incoming.outputTail && incoming.chunk) {
-      merged.outputTail = `${existing?.outputTail ?? ''}${incoming.chunk}`.slice(-4096)
-    }
-    merged.status = normalizeBackgroundStatus(merged.status, merged.event) || merged.status || 'running'
-    merged.stalled = merged.stalled === true || merged.status === 'stalled'
-    return merged
-  }
-
-  function rememberBackgroundTask(task: BackgroundTask): BackgroundTask {
-    const latest = mergeBackgroundTask(latestBackgroundTasks.get(task.taskId), task)
-    latestBackgroundTasks.set(task.taskId, latest)
-    return latest
-  }
-
-  function mergeBackgroundTaskIntoToolBlock(block: ToolCallBlock, task: BackgroundTask) {
-    const merged = mergeBackgroundTask(block.backgroundTask, task)
-    block.backgroundTask = merged
-    block.done = !isBackgroundTaskActive(merged)
-    block.running = !block.done
-    block.background_task = {
-      task_id: merged.taskId,
-      status: merged.status,
-      event: merged.event,
-      bot_id: merged.botId,
-      session_id: merged.sessionId,
-      command: merged.command,
-      output_file: merged.outputFile,
-      output_tail: merged.outputTail,
-      stream: merged.stream,
-      chunk: merged.chunk,
-      exit_code: merged.exitCode,
-      duration: merged.duration,
-      stalled: merged.stalled,
-    }
-  }
-
-  function applyPendingBackgroundEventsToTool(block: ToolCallBlock) {
-    const taskId = taskIdFromToolBlock(block)
-    if (!taskId) return
-    const latest = latestBackgroundTasks.get(taskId)
-    if (latest) {
-      mergeBackgroundTaskIntoToolBlock(block, latest)
-    }
-  }
-
   function normalizeUIMessage(msg: UIMessage): ContentBlock {
     switch (msg.type) {
       case 'tool': {
@@ -1132,36 +998,6 @@ export const useChatStore = defineStore('chat', () => {
       platform: (turn.platform ?? '').trim() || undefined,
       externalMessageId: (turn.external_message_id ?? '').trim() || undefined,
       streaming: false,
-    }
-  }
-
-  function reconcileBackgroundTasksInMessages(items: ChatMessage[]) {
-    const toolsByTaskId = new Map<string, ToolCallBlock>()
-    for (const item of items) {
-      if (item.role === 'assistant') {
-        for (const block of item.messages) {
-          if (block.type !== 'tool') continue
-          const taskId = taskIdFromToolBlock(block)
-          if (taskId) toolsByTaskId.set(taskId, block)
-        }
-        continue
-      }
-      if (item.role === 'system' && item.kind === 'background_task') {
-        const target = toolsByTaskId.get(item.backgroundTask.taskId)
-        if (target) mergeBackgroundTaskIntoToolBlock(target, item.backgroundTask)
-      }
-    }
-  }
-
-  function mergeBackgroundTaskIntoMatchingTools(task: BackgroundTask) {
-    for (const item of messages) {
-      if (item.role !== 'assistant') continue
-      for (const block of item.messages) {
-        if (block.type !== 'tool') continue
-        if (taskIdFromToolBlock(block) === task.taskId) {
-          mergeBackgroundTaskIntoToolBlock(block, task)
-        }
-      }
     }
   }
 
@@ -1772,71 +1608,6 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function currentCommandScope(composerScope = 'chat'): CommandEventScope {
-    return {
-      botId: currentBotId.value ?? undefined,
-      sessionId: sessionId.value ?? undefined,
-      composerScope,
-    }
-  }
-
-  function commandEventKey(scope: CommandEventScope) {
-    const bid = (scope.botId ?? '').trim()
-    const sid = (scope.sessionId ?? '').trim()
-    if (bid && sid) return `session:${bid}:${sid}`
-    return `composer:${bid}:${(scope.composerScope ?? 'chat').trim() || 'chat'}`
-  }
-
-  function commandEventForScope(scope: CommandEventScope = currentCommandScope()): StoreCommandEvent | null {
-    return commandEvents.value[commandEventKey(scope)] ?? null
-  }
-
-  const commandEvent = computed(() => commandEventForScope())
-
-  function rememberCommandEvent(event: CommandEventResponse | null, scope: CommandEventScope = {}) {
-    if (!event) {
-      clearCommandEvent(scope)
-      return
-    }
-    const scoped: StoreCommandEvent = {
-      ...event,
-      composer_scope: event.composer_scope || scope.composerScope || 'chat',
-    }
-    const bid = (scope.botId ?? '').trim()
-    if (bid) scoped.bot_id = bid
-    if (!scoped.session_id) {
-      const sid = (scope.sessionId ?? '').trim()
-      if (sid) scoped.session_id = sid
-    }
-    const key = commandEventKey({
-      botId: scoped.bot_id || scope.botId,
-      sessionId: scoped.session_id,
-      composerScope: scoped.composer_scope,
-    })
-    commandEvents.value = {
-      ...commandEvents.value,
-      [key]: scoped,
-    }
-  }
-
-  function showCommandError(code: string, message: string, scope: CommandEventScope = currentCommandScope()) {
-    rememberCommandEvent({
-      type: 'command_error',
-      invocation_id: createStreamId(),
-      composer_scope: scope.composerScope || 'chat',
-      terminal: true,
-      error: { code, message },
-    }, scope)
-  }
-
-  function clearCommandEvent(scope: CommandEventScope = currentCommandScope()) {
-    const key = commandEventKey(scope)
-    if (!commandEvents.value[key]) return
-    const next = { ...commandEvents.value }
-    delete next[key]
-    commandEvents.value = next
-  }
-
   function bindAssistantStreamSession(streamId: string | undefined, targetSessionId: string) {
     const id = streamId?.trim()
     const sid = targetSessionId.trim()
@@ -2032,7 +1803,7 @@ export const useChatStore = defineStore('chat', () => {
     overrideModelId.value = ''
     overrideReasoningEffort.value = ''
     startupSendFailure.value = null
-    commandEvents.value = {}
+    resetCommandEvents()
     resetFsBeacon()
     clearPendingACPSession()
 
@@ -2040,7 +1811,7 @@ export const useChatStore = defineStore('chat', () => {
     approvalResponseStreams.clear()
     wsCreatedSessionsByStream.clear()
     forkingMessages.clear()
-    latestBackgroundTasks.clear()
+    backgroundTasks.clearBackgroundTasks()
     ephemeralAssistantErrors.clear()
   }
 
@@ -2185,7 +1956,7 @@ export const useChatStore = defineStore('chat', () => {
       if (eventSessionId && eventSessionId !== targetSessionId) return
       const task = normalizeBackgroundTask(event, event.type)
       if (!task) return
-      mergeBackgroundTaskIntoMatchingTools(rememberBackgroundTask(task))
+      backgroundTasks.mergeBackgroundTaskIntoMatchingTools(rememberBackgroundTask(task), messages)
       if (eventSessionId) touchSessionInList(eventSessionId)
       return
     }
