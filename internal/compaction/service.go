@@ -49,19 +49,23 @@ type Service struct {
 	logger      *slog.Logger
 	nowFn       func() time.Time
 
-	inflightMu sync.Mutex
-	inflight   map[string]*inflightRun
-	failedAt   map[string]time.Time
+	inflightMu   sync.Mutex
+	inflight     map[string]*inflightRun
+	failedAt     map[string]time.Time
+	asyncRunning map[string]struct{}
+	asyncPending map[string]compactionTriggerRequest
 }
 
 // NewService creates a new compaction Service.
 func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 	return &Service{
-		queries:  queries,
-		logger:   log,
-		nowFn:    time.Now,
-		inflight: make(map[string]*inflightRun),
-		failedAt: make(map[string]time.Time),
+		queries:      queries,
+		logger:       log,
+		nowFn:        time.Now,
+		inflight:     make(map[string]*inflightRun),
+		failedAt:     make(map[string]time.Time),
+		asyncRunning: make(map[string]struct{}),
+		asyncPending: make(map[string]compactionTriggerRequest),
 	}
 }
 
@@ -124,18 +128,6 @@ func (s *Service) SetHookService(h *hooks.Service) {
 // ShouldCompact returns true if inputTokens exceeds the threshold.
 func ShouldCompact(inputTokens, threshold int) bool {
 	return threshold > 0 && inputTokens >= threshold
-}
-
-// TriggerCompaction runs compaction in the background. A session with a run
-// already in flight is skipped: the async trigger fires per request, so the
-// next turn re-evaluates the demand.
-func (s *Service) TriggerCompaction(ctx context.Context, cfg TriggerConfig) {
-	go func() {
-		bgCtx := context.WithoutCancel(ctx)
-		if _, _, err := s.runCompaction(bgCtx, cfg); err != nil {
-			s.logger.Error("compaction failed", slog.String("bot_id", cfg.BotID), slog.String("session_id", cfg.SessionID), slog.String("error", err.Error()))
-		}
-	}()
 }
 
 // RunCompactionSync runs compaction synchronously and reports this session's
