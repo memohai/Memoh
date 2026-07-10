@@ -2119,6 +2119,10 @@ export const useChatStore = defineStore('chat', () => {
     appendToView(assistantTurn)
     void trackAssistantStream({ streamId, assistantTurn, botId: bid, sessionId: sid }).catch((error: Error) => {
       finalizeStreamFailure(assistantTurn, bid, sid, error)
+      if (error.name === 'AbortError') {
+        restoreUserInputStates(previousUserInputStates)
+        return
+      }
       // While the main session stream is still active a refresh would
       // clobber its in-flight state; roll back and let its end refresh
       // bring truth.

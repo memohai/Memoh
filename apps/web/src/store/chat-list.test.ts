@@ -2465,6 +2465,62 @@ describe('chat-list store', () => {
     }
   })
 
+  it('rolls back user input on abort without refreshing the old session', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const userInput = singleSelectUserInput()
+    store.messages.push(askUserTurn(userInput))
+    api.fetchMessagesUI.mockClear()
+
+    await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
+    const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
+    const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
+    store.abort()
+    await flushPromises()
+
+    expect(ws.abort).toHaveBeenCalledWith(responseStreamId)
+    expect(api.fetchMessagesUI).not.toHaveBeenCalled()
+    expect(store.messages).toHaveLength(1)
+    const block = store.messages[0]?.role === 'assistant' ? store.messages[0].messages[0] : null
+    expect(block?.type).toBe('tool')
+    if (block?.type === 'tool') {
+      expect(block.userInput).toMatchObject({ status: 'pending', can_respond: true })
+    }
+  })
+
+  it('does not refresh a previous bot after user-input teardown', async () => {
+    api.fetchBots.mockResolvedValue([
+      { id: 'bot-1', status: 'active', name: 'Bot 1' },
+      { id: 'bot-2', status: 'active', name: 'Bot 2' },
+    ])
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const userInput = singleSelectUserInput()
+    store.messages.push(askUserTurn(userInput))
+    await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
+    api.fetchMessagesUI.mockClear()
+
+    await store.selectBot('bot-2')
+    await flushPromises()
+
+    expect(store.currentBotId).toBe('bot-2')
+    expect(api.fetchMessagesUI).not.toHaveBeenCalledWith(
+      'bot-1',
+      'session-1',
+      expect.anything(),
+    )
+  })
+
   it('deduplicates concurrent ACP runtime ensure calls', async () => {
     api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'acp-session-1', bot_id: 'bot-1', title: '', type: 'acp_agent' },
