@@ -1,0 +1,205 @@
+import { describe, expect, it, vi } from 'vitest'
+import { ref, toRaw } from 'vue'
+import type { UIMessage, UITurn } from '@/composables/api/useChat.types'
+import { createBackgroundTaskTracker } from './background-tasks'
+import { createTranscriptController } from './transcript'
+import type { ChatAssistantTurn, ChatUserTurn, ToolCallBlock } from './types'
+
+vi.mock('@/store/user', () => ({
+  useUserStore: () => ({ userInfo: { id: 'user-1' } }),
+}))
+
+function rawUser(id: string, text = 'hello', timestamp = '2026-01-01T00:00:00.000Z'): UITurn {
+  return { id, role: 'user', text, timestamp, platform: 'local' }
+}
+
+function rawAssistant(id: string, messages: UIMessage[] = [], timestamp = '2026-01-01T00:00:01.000Z'): UITurn {
+  return { id, role: 'assistant', messages, timestamp }
+}
+
+function assistant(id: string, messages: ChatAssistantTurn['messages'] = []): ChatAssistantTurn {
+  return {
+    id,
+    role: 'assistant',
+    messages,
+    timestamp: '2026-01-01T00:00:01.000Z',
+    streaming: true,
+    __optimistic: true,
+  }
+}
+
+function makeTranscript() {
+  const currentBotId = ref<string | null>('bot-1')
+  const sessionId = ref<string | null>('session-1')
+  const backgroundTasks = createBackgroundTaskTracker()
+  const bumpFsChangedAtIfFsMutation = vi.fn()
+  const transcript = createTranscriptController({
+    currentBotId,
+    sessionId,
+    rememberBackgroundTask: backgroundTasks.rememberBackgroundTask,
+    applyPendingBackgroundEventsToTool: backgroundTasks.applyPendingBackgroundEventsToTool,
+    bumpFsChangedAtIfFsMutation,
+  })
+  return { transcript, currentBotId, sessionId, bumpFsChangedAtIfFsMutation }
+}
+
+function approvalMessage(status = 'pending'): UIMessage {
+  return {
+    id: 1,
+    type: 'tool',
+    name: 'exec',
+    input: { command: 'pwd' },
+    tool_call_id: 'call-1',
+    running: false,
+    approval: { approval_id: 'approval-1', status, can_approve: status === 'pending' },
+  }
+}
+
+describe('chat transcript controller', () => {
+  it('is the single context gate for appending active-session turns', () => {
+    const { transcript } = makeTranscript()
+    const turn = assistant('assistant-1')
+
+    transcript.appendTurnToSession('bot-1', 'other-session', turn)
+    expect(transcript.messages).toHaveLength(0)
+
+    transcript.appendTurnToSession('bot-1', 'session-1', turn)
+    expect(toRaw(transcript.messages[0])).toBe(turn)
+  })
+
+  it('preserves optimistic render identity when a server snapshot replaces the view', () => {
+    const { transcript } = makeTranscript()
+    const snapshotHook = vi.fn()
+    transcript.setSnapshotHook(snapshotHook)
+    const optimistic: ChatUserTurn = {
+      id: 'local-user',
+      role: 'user',
+      text: 'hello',
+      attachments: [],
+      timestamp: '2026-01-01T00:00:00.000Z',
+      streaming: false,
+      isSelf: true,
+      __optimistic: true,
+    }
+    transcript.appendToView(optimistic)
+
+    transcript.replaceMessages([rawUser('server-user')], 'session-1')
+
+    expect(snapshotHook).toHaveBeenCalledWith('session-1', expect.any(Array))
+    expect(transcript.messages[0]).toMatchObject({ id: 'local-user', serverId: 'server-user' })
+  })
+
+  it('rolls an optimistic tail back only while its original context is active', () => {
+    const { transcript, sessionId } = makeTranscript()
+    transcript.replaceMessages([
+      rawUser('user-1'),
+      rawAssistant('assistant-1', [{ id: 1, type: 'text', content: 'old' }]),
+    ], 'session-1')
+    const target = transcript.messages[1]!
+    const optimistic = assistant('assistant-local')
+    const replaced = transcript.replaceTailFromTurn(target, [optimistic])
+
+    sessionId.value = 'session-2'
+    transcript.restoreTailFromOptimistic('bot-1', 'session-1', null, optimistic, replaced)
+    expect(toRaw(transcript.messages[1])).toBe(optimistic)
+
+    sessionId.value = 'session-1'
+    transcript.restoreTailFromOptimistic('bot-1', 'session-1', null, optimistic, replaced)
+    expect(transcript.messages[1]?.id).toBe('assistant-1')
+  })
+
+  it('keeps a local approval decision when a stale pending tool snapshot arrives', () => {
+    const { transcript } = makeTranscript()
+    transcript.replaceMessages([rawAssistant('assistant-1', [approvalMessage()])], 'session-1')
+    const turn = transcript.messages[0] as ChatAssistantTurn
+    const snapshots = transcript.snapshotToolApprovalStates('approval-1')
+
+    transcript.markToolApprovalDecision('approval-1', 'approved')
+    transcript.upsertAssistantUIMessage(turn, approvalMessage('pending'))
+    const block = turn.messages[0] as ToolCallBlock
+    expect(block.approval?.status).toBe('approved')
+
+    transcript.restoreToolApprovalStates(snapshots)
+    expect(block.approval?.status).toBe('pending')
+  })
+
+  it('snapshots and restores optimistic user-input state', () => {
+    const { transcript } = makeTranscript()
+    const userInput = {
+      user_input_id: 'input-1',
+      status: 'pending',
+      can_respond: true,
+      questions: [{ id: 'q1', text: 'Pick', kind: 'text' as const }],
+    }
+    const message: UIMessage = {
+      id: 1,
+      type: 'tool',
+      name: 'ask_user',
+      input: {},
+      tool_call_id: 'call-input',
+      running: false,
+      user_input: userInput,
+    }
+    transcript.replaceMessages([rawAssistant('assistant-1', [message])], 'session-1')
+    const block = (transcript.messages[0] as ChatAssistantTurn).messages[0] as ToolCallBlock
+    const snapshots = transcript.snapshotUserInputStates('input-1')
+    block.userInput = { ...block.userInput!, status: 'submitted', can_respond: false }
+
+    transcript.restoreUserInputStates(snapshots)
+
+    expect(block.userInput).toMatchObject({ status: 'pending', can_respond: true })
+  })
+
+  it('replays ephemeral stream errors after refresh until user-scope reset', () => {
+    const { transcript } = makeTranscript()
+    transcript.replaceMessages([rawUser('user-1')], 'session-1')
+    const failed = assistant('assistant-local', [{ id: 1, type: 'text', content: 'partial' }])
+    transcript.appendToView(failed)
+    transcript.finalizeStreamFailure(failed, 'bot-1', 'session-1', new Error('stream failed'))
+
+    transcript.replaceMessages([rawUser('user-1')], 'session-1')
+    expect(transcript.messages.some(turn =>
+      turn.role === 'assistant' && turn.messages.some(block => block.type === 'error' && block.content === 'stream failed'),
+    )).toBe(true)
+
+    transcript.resetUserScope()
+    transcript.replaceMessages([rawUser('user-1')], 'session-1')
+    expect(transcript.messages).toHaveLength(1)
+  })
+
+  it('routes completed tool messages through the fs mutation beacon', () => {
+    const { transcript, bumpFsChangedAtIfFsMutation } = makeTranscript()
+    const turn = assistant('assistant-1')
+    const tool = approvalMessage()
+
+    transcript.upsertAssistantUIMessage(turn, tool)
+
+    expect(bumpFsChangedAtIfFsMutation).toHaveBeenCalledWith(tool)
+  })
+
+  it('normalizes and reconciles background-task turns without leaking tracker state', () => {
+    const { transcript } = makeTranscript()
+    const turns = transcript.normalizeTurns([
+      rawAssistant('assistant-1', [{
+        id: 1,
+        type: 'tool',
+        name: 'background',
+        input: {},
+        tool_call_id: 'call-bg',
+        running: true,
+        background_task: { task_id: 'task-1', status: 'running' },
+      }]),
+      {
+        id: 'system-1',
+        role: 'system',
+        kind: 'background_task',
+        timestamp: '2026-01-01T00:00:02.000Z',
+        background_task: { task_id: 'task-1', status: 'completed' },
+      },
+    ] as UITurn[])
+
+    const tool = (turns[0] as ChatAssistantTurn).messages[0] as ToolCallBlock
+    expect(tool.backgroundTask?.status).toBe('completed')
+    expect(tool.done).toBe(true)
+  })
+})

@@ -12,40 +12,26 @@ import {
   normalizedRuntimeType,
   provisionalSessionTitle,
   shouldRefreshFromMessageCreated,
-  upsertById,
   type SidebarSessionMode,
 } from './chat-list.utils'
 import {
   cloneRequestedSkills,
-  cloneToolApprovalState,
-  cloneUserInputState,
   createStreamId,
   hasUserAttachments,
-  isOptimisticTurn,
   isPendingBot,
-  isSameLogicalTurn,
-  mergeApprovalState,
   nextId,
-  normalizeAttachment,
-  normalizeForwardRef,
-  normalizeReplyRef,
   normalizeRequestedSkills,
-  normalizeTimestamp,
   requestedSkillRequestsForWire,
-  resolveIsSelf,
   serverMessageId,
-  skillActivationTextFromRaw,
-  sortChatMessages,
 } from './chat-list.normalize'
 import { createFsChangeBeacon } from './chat/fs-beacon'
 import { createCommandEventRegistry } from './chat/command-events'
 import { createSessionList } from './chat/session-list'
 import { acpSessionMetadata, createACPStaging } from './chat/acp-staging'
+import { createTranscriptController } from './chat/transcript'
 import {
   createBackgroundTaskTracker,
-  isBackgroundTaskActive,
   normalizeBackgroundTask,
-  reconcileBackgroundTasksInMessages,
 } from './chat/background-tasks'
 import type {
   ACPAgentSessionInput,
@@ -53,11 +39,9 @@ import type {
   ChatAssistantTurn,
   ChatMessage,
   ChatUserTurn,
-  ContentBlock,
   SendMessageOptions,
   SendMessageResult,
   SendMessageStage,
-  ToolCallBlock,
 } from './chat/types'
 import {
   createSession,
@@ -76,13 +60,10 @@ import {
   type ChatAttachment,
   type CommandEventResponse,
   type ChatWebSocket,
-  type UIMessage,
-  type UISystemTurn,
   type UIToolApproval,
   type UIUserInput,
   type RequestedSkillSelection,
   type WSUserInputAnswer,
-  type UITurn,
   type UIStreamEvent,
   executeQuickAction,
   fetchBots,
@@ -120,16 +101,6 @@ export type {
 // fs-change beacon lives in ./chat/fs-beacon; types re-exported so existing
 // consumers keep importing them from the store module.
 export type { FsChangeBatch, FsChangeEvent, FsToolKind } from './chat/fs-beacon'
-
-interface UserInputStateSnapshot {
-  block: ToolCallBlock
-  userInput: UIUserInput
-}
-
-interface ToolApprovalStateSnapshot {
-  block: ToolCallBlock
-  approval: UIToolApproval
-}
 
 function currentLocale() {
   const storage = globalThis.localStorage
@@ -233,17 +204,59 @@ class CommandStreamError extends StreamFailureError {
   }
 }
 
-interface EphemeralAssistantError {
-  content: string
-  timestamp: string
-  userText?: string
-}
-
 export const useChatStore = defineStore('chat', () => {
   const selectionStore = useChatSelectionStore()
   const { currentBotId, sessionId, draftIntent, explicitSelection: explicitSessionSelection } = storeToRefs(selectionStore)
 
-  const messages = reactive<ChatMessage[]>([])
+  const fsBeacon = createFsChangeBeacon({ currentBotId, sessionId })
+  const {
+    fsChangedAt,
+    markFsChanged,
+    affectsPath,
+    fsEventForPath,
+    bumpFsChangedAtIfFsMutation,
+    resetFsBeacon,
+    clearFsForBotSwitch,
+  } = fsBeacon
+  const backgroundTasks = createBackgroundTaskTracker()
+  const {
+    rememberBackgroundTask,
+    applyPendingBackgroundEventsToTool,
+  } = backgroundTasks
+  const transcript = createTranscriptController({
+    currentBotId,
+    sessionId,
+    rememberBackgroundTask,
+    applyPendingBackgroundEventsToTool,
+    bumpFsChangedAtIfFsMutation,
+  })
+  const {
+    messages,
+    normalizeTurn,
+    normalizeTurns,
+    replaceMessages,
+    mergeMessages,
+    isActiveSessionTarget,
+    appendTurnToSession,
+    appendToView,
+    prependToView,
+    removeFromView,
+    removeTurnFromSession,
+    replaceTailFromTurn,
+    restoreTailFromOptimistic,
+    createOptimisticAssistantTurn,
+    createOptimisticUserTurn,
+    upsertAssistantUIMessage,
+    hasVisibleAssistantBlocks,
+    snapshotToolApprovalStates,
+    restoreToolApprovalStates,
+    snapshotUserInputStates,
+    restoreUserInputStates,
+    finalizeStreamFailure,
+    latestOptimisticUserText,
+    markToolApprovalDecision,
+    resetUserScope: resetTranscriptUserScope,
+  } = transcript
   const pendingAssistantStreams = reactive(new Map<string, PendingAssistantStream>())
   // In-flight tool-approval responses, keyed by response stream id. Silent
   // entries belong to a session that is already streaming: their events are
@@ -292,6 +305,7 @@ export const useChatStore = defineStore('chat', () => {
     clearDeletedSessionIds,
     clearRememberedSessions,
   } = sessionList
+  transcript.setSnapshotHook(syncForkAnchorFromUITurns)
   const loading = ref(false)
   // `loadingChats` covers the bot-level boot path (sessions list fetch), so
   // the sidebar can show its skeleton + suppress its empty-state placeholder
@@ -344,29 +358,10 @@ export const useChatStore = defineStore('chat', () => {
   const deletedSession = ref<{ id: string, botId: string, seq: number, composerScope?: string } | null>(null)
   let deletedSessionSeq = 0
 
-  // fs-change beacon (see ./chat/fs-beacon for the debounce/dedupe invariants).
-  const fsBeacon = createFsChangeBeacon({ currentBotId, sessionId })
-  const {
-    fsChangedAt,
-    markFsChanged,
-    affectsPath,
-    fsEventForPath,
-    bumpFsChangedAtIfFsMutation,
-    resetFsBeacon,
-    clearFsForBotSwitch,
-  } = fsBeacon
-
   let activeWs: ChatWebSocket | null = null
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   let refreshPromise: { key: string; promise: Promise<void> } | null = null
   let sessionListRefreshPromise: { botId: string; promise: Promise<void> } | null = null
-  // Background-task tracker (see ./chat/background-tasks for merge semantics).
-  const backgroundTasks = createBackgroundTaskTracker()
-  const {
-    rememberBackgroundTask,
-    applyPendingBackgroundEventsToTool,
-  } = backgroundTasks
-  const ephemeralAssistantErrors = new Map<string, EphemeralAssistantError[]>()
   const wsCreatedSessionsByStream = new Map<string, string>()
   // Two independent streams replace the deleted bot-wide messages SSE:
   // - sessionMessagesStream follows the active sessionId and feeds the
@@ -553,321 +548,6 @@ export const useChatStore = defineStore('chat', () => {
   onAuthSessionCleared(() => resetUserScopedState({ clearSelection: true }))
 
 
-  function normalizeUIMessage(msg: UIMessage): ContentBlock {
-    switch (msg.type) {
-      case 'tool': {
-        const backgroundTask = normalizeBackgroundTask(msg.background_task)
-        const block: ToolCallBlock = {
-          ...msg,
-          toolCallId: msg.tool_call_id,
-          toolName: msg.name,
-          result: msg.output ?? null,
-          running: backgroundTask ? isBackgroundTaskActive(backgroundTask) : msg.running,
-          done: backgroundTask ? !isBackgroundTaskActive(backgroundTask) : !msg.running,
-          approval: msg.approval,
-          userInput: msg.user_input,
-          backgroundTask: backgroundTask ?? undefined,
-          progress: msg.progress ? [...msg.progress] : undefined,
-        }
-        applyPendingBackgroundEventsToTool(block)
-        return block
-      }
-      case 'attachments':
-        return {
-          ...msg,
-          attachments: msg.attachments.map(normalizeAttachment),
-        }
-      case 'error':
-        return { ...msg }
-      default:
-        return { ...msg }
-    }
-  }
-
-  function normalizeTurn(turn: UITurn): ChatMessage {
-    if (turn.role === 'user') {
-      const userMessageKind = (turn.user_message_kind ?? '').trim()
-        || (turn.skill_activation ? 'skill_activation' : undefined)
-      const text = turn.skill_activation
-        ? skillActivationTextFromRaw(turn.text ?? '', turn.skill_activation)
-        : turn.text ?? ''
-      return {
-        id: String(turn.id ?? nextId()),
-        role: 'user',
-        text,
-        userMessageKind,
-        skillActivation: turn.skill_activation,
-        attachments: (turn.attachments ?? []).map(normalizeAttachment),
-        reply: normalizeReplyRef(turn.reply),
-        forward: normalizeForwardRef(turn.forward),
-        timestamp: normalizeTimestamp(turn.timestamp),
-        platform: (turn.platform ?? '').trim() || undefined,
-        senderDisplayName: (turn.sender_display_name ?? '').trim() || undefined,
-        senderAvatarUrl: (turn.sender_avatar_url ?? '').trim() || undefined,
-        senderUserId: (turn.sender_user_id ?? '').trim() || undefined,
-        externalMessageId: (turn.external_message_id ?? '').trim() || undefined,
-        streaming: false,
-        isSelf: resolveIsSelf(turn),
-      }
-    }
-
-    if (turn.role === 'system') {
-      const task = normalizeBackgroundTask((turn as UISystemTurn).background_task) ?? {
-        taskId: String(turn.id ?? nextId()),
-        status: 'completed',
-      }
-      const latest = rememberBackgroundTask(task)
-      return {
-        id: String(turn.id ?? `system-${latest.taskId}`),
-        role: 'system',
-        kind: 'background_task',
-        backgroundTask: latest,
-        timestamp: normalizeTimestamp(turn.timestamp),
-        platform: (turn.platform ?? '').trim() || undefined,
-        streaming: false,
-      }
-    }
-
-    return {
-      id: String(turn.id ?? nextId()),
-      role: 'assistant',
-      messages: (turn.messages ?? []).map(normalizeUIMessage),
-      timestamp: normalizeTimestamp(turn.timestamp),
-      platform: (turn.platform ?? '').trim() || undefined,
-      externalMessageId: (turn.external_message_id ?? '').trim() || undefined,
-      streaming: false,
-    }
-  }
-
-  function ephemeralErrorId(sessionID: string, error: EphemeralAssistantError): string {
-    let hash = 0
-    const input = `${error.timestamp}:${error.content}`
-    for (let i = 0; i < input.length; i += 1) {
-      hash = ((hash << 5) - hash + input.charCodeAt(i)) | 0
-    }
-    return `ephemeral-error-${sessionID}-${Math.abs(hash).toString(36)}`
-  }
-
-  function hasAssistantError(items: ChatMessage[], text: string): boolean {
-    return items.some(item =>
-      item.role === 'assistant'
-      && item.messages.some(block => block.type === 'error' && block.content === text),
-    )
-  }
-
-  function findAssistantTurnForEphemeralError(items: ChatMessage[], timestamp: string): ChatAssistantTurn | null {
-    const errorTime = Date.parse(timestamp)
-    let target: ChatAssistantTurn | null = null
-
-    for (const item of items) {
-      const itemTime = Date.parse(item.timestamp)
-      if (!Number.isNaN(errorTime) && !Number.isNaN(itemTime) && itemTime > errorTime) {
-        break
-      }
-      if (item.role === 'user') {
-        target = null
-        continue
-      }
-      if (item.role === 'assistant') {
-        target = item
-      }
-    }
-
-    return target
-  }
-
-  function findUserTurnBeforeAssistant(assistantTurn: ChatAssistantTurn): ChatUserTurn | null {
-    const index = messages.indexOf(assistantTurn)
-    if (index < 0) return null
-    for (let i = index - 1; i >= 0; i -= 1) {
-      const item = messages[i]
-      if (item?.role === 'user') return item
-    }
-    return null
-  }
-
-  function findAnchorUserIndex(items: ChatMessage[], error: EphemeralAssistantError): number {
-    const targetText = (error.userText ?? '').trim()
-    let fallback = -1
-    for (let i = items.length - 1; i >= 0; i -= 1) {
-      const item = items[i]
-      if (item?.role !== 'user') continue
-      if (fallback < 0) fallback = i
-      if (targetText && item.text.trim() === targetText) return i
-    }
-    return fallback
-  }
-
-  function findAssistantAfterAnchor(items: ChatMessage[], anchorIndex: number): ChatAssistantTurn | null {
-    let target: ChatAssistantTurn | null = null
-    for (let i = anchorIndex + 1; i < items.length; i += 1) {
-      const item = items[i]
-      if (!item) continue
-      if (item.role === 'user') break
-      if (item.role === 'assistant') target = item
-    }
-    return target
-  }
-
-  function timestampAfter(value?: string): string | null {
-    const ts = Date.parse(value ?? '')
-    if (Number.isNaN(ts)) return null
-    return new Date(ts + 1).toISOString()
-  }
-
-  function createEphemeralErrorTurn(sessionID: string, error: EphemeralAssistantError, timestamp = error.timestamp): ChatAssistantTurn {
-    return {
-      id: ephemeralErrorId(sessionID, error),
-      role: 'assistant',
-      messages: [{
-        id: 0,
-        type: 'error',
-        content: error.content,
-      }],
-      timestamp,
-      streaming: false,
-    }
-  }
-
-  function appendEphemeralErrors(items: ChatMessage[], targetSessionId?: string) {
-    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
-    if (!sid) return
-    const errors = ephemeralAssistantErrors.get(sid)
-    if (!errors?.length) return
-    for (const error of errors) {
-      const text = error.content.trim()
-      if (!text) continue
-      if (hasAssistantError(items, text)) continue
-
-      const anchorIndex = findAnchorUserIndex(items, error)
-      const assistantTurn = anchorIndex >= 0
-        ? findAssistantAfterAnchor(items, anchorIndex)
-        : findAssistantTurnForEphemeralError(items, error.timestamp)
-      if (assistantTurn) {
-        assistantTurn.messages.push({
-          id: nextAssistantMessageId(assistantTurn),
-          type: 'error',
-          content: text,
-        })
-      } else {
-        const insertAt = anchorIndex >= 0 ? anchorIndex + 1 : items.length
-        const displayTimestamp = timestampAfter(items[anchorIndex]?.timestamp) ?? error.timestamp
-        items.splice(insertAt, 0, createEphemeralErrorTurn(sid, { ...error, content: text }, displayTimestamp))
-      }
-    }
-  }
-
-  function normalizeTurns(items: UITurn[], targetSessionId?: string): ChatMessage[] {
-    const normalized = items.map(normalizeTurn)
-    reconcileBackgroundTasksInMessages(normalized)
-    appendEphemeralErrors(normalized, targetSessionId)
-    return normalized
-  }
-
-  // Active-session-only view. There is no per-session message cache: switching
-  // sessions clears `messages` and re-fetches the new session's transcript via
-  // `refreshCurrentSession`. The previous identity-preserving reconciler held
-  // ChatMessage references across sessions in the cache and let
-  // mergeTurnInPlace mutate them, which corrupted the view when navigating
-  // between sessions. Per-session SSE delivers live updates without ever
-  // touching another session's data, so cross-session caching has no purpose.
-
-  // Carry the current view's RENDER identity onto freshly fetched turns.
-  //
-  // Message ids are v-for keys in chat-pane (turn containers and message
-  // rows) and the scroll pin's reserve key. A refresh (stream end, SSE
-  // `dropped`, retry) re-derives every turn from server rows, whose ids
-  // differ from the optimistic client ids — splicing them in as-is re-keys
-  // the conversation tail, which remounts the just-streamed reply (markdown
-  // + code highlighting re-render = visible flash) and detaches the pinned
-  // viewport's reserve. Instead, incoming turns ADOPT the id already on
-  // screen; the authoritative server id stays reachable via `serverId`
-  // (server-facing calls already resolve `serverId ?? id`).
-  //
-  // Matching, in order:
-  //   1. serverId — a turn that adopted once keeps its identity across every
-  //      later refresh, not just the first.
-  //   2. optimistic user turns — same logical turn (externalMessageId, or
-  //      text + timestamp window; see isSameLogicalTurn).
-  //   3. the optimistic assistant turn directly after a matched user turn
-  //      adopts from the incoming assistant directly after its match
-  //      (isSameLogicalTurn deliberately refuses to guess on assistant
-  //      content, but adjacency to an anchored user turn is unambiguous).
-  //
-  // Unlike the removed cross-session reconciler (see the note above
-  // replaceMessages) this never retains or mutates EXISTING objects — it
-  // only stamps ids onto the incoming ones, within the active session view.
-  function adoptRenderIdentity(incoming: ChatMessage[]) {
-    if (messages.length === 0 || incoming.length === 0) return
-    const adopted = new Set<ChatMessage>()
-    const adopt = (twin: ChatMessage, existing: ChatMessage) => {
-      adopted.add(twin)
-      if (twin.id === existing.id) return
-      twin.serverId = twin.serverId ?? twin.id
-      twin.id = existing.id
-    }
-    const byServerId = new Map<string, ChatMessage>()
-    for (const existing of messages) {
-      if (existing.serverId) byServerId.set(existing.serverId, existing)
-    }
-    for (const twin of incoming) {
-      const prior = byServerId.get(twin.serverId ?? twin.id)
-      if (prior) adopt(twin, prior)
-    }
-    for (let i = 0; i < messages.length; i += 1) {
-      const existing = messages[i]
-      if (!existing || existing.role !== 'user' || !isOptimisticTurn(existing)) continue
-      const twinIndex = incoming.findIndex(turn => !adopted.has(turn) && isSameLogicalTurn(existing, turn))
-      if (twinIndex === -1) continue
-      adopt(incoming[twinIndex]!, existing)
-      const existingNext = messages[i + 1]
-      const incomingNext = incoming[twinIndex + 1]
-      if (
-        existingNext?.role === 'assistant' && isOptimisticTurn(existingNext)
-        && incomingNext?.role === 'assistant' && !adopted.has(incomingNext)
-      ) {
-        adopt(incomingNext, existingNext)
-      }
-    }
-  }
-
-  function replaceMessages(items: UITurn[], targetSessionId?: string) {
-    syncForkAnchorFromUITurns(targetSessionId, items)
-    const next = normalizeTurns(items, targetSessionId)
-    adoptRenderIdentity(next)
-    messages.splice(0, messages.length, ...next)
-  }
-
-  // Used by locateMessageByExternalId to merge a server-supplied message window
-  // into the current view.
-  //
-  // While the user is scrolled-back (hasLoadedOlder), an SSE-triggered refresh
-  // can arrive with a server-side row for a turn the user just sent. The
-  // optimistic turn in `messages` carries a client-generated id and the server
-  // turn carries a different server id, so a pure id-keyed dedup leaves both
-  // visible until the next session switch. Match optimistic turns to their
-  // server counterparts first — by externalMessageId when present, otherwise
-  // by (role, content, timestamp within 5s) — and replace the optimistic turn
-  // with the server one in place.
-  function mergeMessages(items: UITurn[], targetSessionId?: string) {
-    const incoming = normalizeTurns(items, targetSessionId)
-    adoptRenderIdentity(incoming)
-    const matched = new Set<string>()
-    for (let i = 0; i < messages.length; i += 1) {
-      const optimistic = messages[i]
-      if (!optimistic || !isOptimisticTurn(optimistic)) continue
-      const replacement = incoming.find(turn => !matched.has(turn.id) && isSameLogicalTurn(optimistic, turn))
-      if (replacement) {
-        messages[i] = replacement
-        matched.add(replacement.id)
-      }
-    }
-    const merged = new Map<string, ChatMessage>()
-    for (const item of messages) merged.set(item.id, item)
-    for (const item of incoming) merged.set(item.id, item)
-    const sorted = sortChatMessages([...merged.values()])
-    messages.splice(0, messages.length, ...sorted)
-  }
 
   function fallbackStreamId(targetSessionId?: string | null): string {
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
@@ -943,105 +623,11 @@ export const useChatStore = defineStore('chat', () => {
     pendingAssistantStreams.delete(streamId.trim())
   }
 
-  // Append/remove operate only on the active session's `messages` array.
-  // Optimistic turns belonging to a now-stale session (the user switched away
-  // before the assistant stream finished) are silently dropped from the view;
-  // the server keeps recording the conversation and the next REST refresh on
-  // that session will surface the response.
-
-  function appendTurnToSession(botId: string, targetSessionId: string, turn: ChatMessage) {
-    const bid = botId.trim()
-    const sid = targetSessionId.trim()
-    if (!bid || !sid) return
-    if (currentBotId.value === bid && sessionId.value === sid) {
-      messages.push(turn)
-    }
-  }
-
-  function isActiveSessionTarget(botId: string, targetSessionId: string): boolean {
-    const bid = botId.trim()
-    const sid = targetSessionId.trim()
-    return Boolean(bid && sid && currentBotId.value === bid && sessionId.value === sid)
-  }
-
   function refreshLoadingForSession(botId: string, targetSessionId: string) {
     if (!isActiveSessionTarget(botId, targetSessionId)) return
     loading.value = isSessionStreaming(targetSessionId)
   }
 
-  function removeTurnFromSession(botId: string, targetSessionId: string, turn: ChatMessage) {
-    if (botId.trim() && targetSessionId.trim() && !isActiveSessionTarget(botId, targetSessionId)) return
-    const idx = messages.indexOf(turn)
-    if (idx >= 0) messages.splice(idx, 1)
-  }
-
-  function findMessageIndexForReplacement(turn: ChatMessage): number {
-    const referenceIndex = messages.indexOf(turn)
-    if (referenceIndex >= 0) return referenceIndex
-    const id = serverMessageId(turn)
-    if (!id) return -1
-    return messages.findIndex(message => serverMessageId(message) === id)
-  }
-
-  function replaceTailFromTurn(turn: ChatMessage, replacements: ChatMessage[]): ChatMessage[] {
-    const idx = findMessageIndexForReplacement(turn)
-    if (idx < 0) {
-      messages.push(...replacements)
-      return []
-    }
-    const replaced = messages.slice(idx)
-    messages.splice(idx, messages.length - idx, ...replacements)
-    return replaced
-  }
-
-  function restoreTailFromOptimistic(
-    botId: string,
-    targetSessionId: string,
-    optimisticUserTurn: ChatUserTurn | null,
-    assistantTurn: ChatAssistantTurn,
-    replacedTurns: ChatMessage[],
-  ) {
-    if (!isActiveSessionTarget(botId, targetSessionId)) return
-    const anchor = optimisticUserTurn ?? assistantTurn
-    const idx = findMessageIndexForReplacement(anchor)
-    if (idx >= 0) {
-      const deleteCount = optimisticUserTurn ? 2 : 1
-      messages.splice(idx, deleteCount, ...replacedTurns)
-      return
-    }
-    if (optimisticUserTurn) removeTurnFromSession(botId, targetSessionId, optimisticUserTurn)
-    removeTurnFromSession(botId, targetSessionId, assistantTurn)
-    if (replacedTurns.length > 0) messages.push(...replacedTurns)
-  }
-
-  function createOptimisticAssistantTurn(): ChatAssistantTurn {
-    return {
-      id: nextId(),
-      role: 'assistant',
-      messages: [],
-      timestamp: new Date().toISOString(),
-      streaming: true,
-      __optimistic: true,
-    }
-  }
-
-  function createOptimisticUserTurn(text: string, attachments?: ChatAttachment[]): ChatUserTurn {
-    return {
-      id: nextId(),
-      role: 'user',
-      text,
-      attachments: (attachments ?? []).map((attachment) => ({
-        type: attachment.type,
-        base64: attachment.base64,
-        name: attachment.name ?? '',
-        mime: attachment.mime ?? '',
-      })),
-      timestamp: new Date().toISOString(),
-      streaming: false,
-      isSelf: true,
-      __optimistic: true,
-    }
-  }
 
   function ensureDiscussStream(streamId: string, targetSessionId?: string): PendingAssistantStream {
     const id = streamIdForEvent({ stream_id: streamId, session_id: targetSessionId }, targetSessionId)
@@ -1059,147 +645,6 @@ export const useChatStore = defineStore('chat', () => {
     return getAssistantStream(id)!
   }
 
-  // Approval and user-input snapshots are partial messages: the ?? / || guards
-  // keep them from wiping fields the stream already filled in. The block keeps
-  // its id (and reactive identity) — only content fields move.
-  //
-  // We use ?? / || here for partial-overlay semantics — preserving an
-  // already-populated field when the incoming partial omits it. This is
-  // distinct from fabricating defaults for unvalidated input, which the
-  // project conventions in CLAUDE.md prohibit; here both sides are typed
-  // server payloads and "absent" means "no update," not "missing data."
-  function mergeToolCallBlock(existing: ToolCallBlock, incoming: ToolCallBlock) {
-    Object.assign(existing, incoming, {
-      id: existing.id,
-      name: incoming.name || existing.name,
-      toolName: incoming.toolName || existing.toolName,
-      input: incoming.input ?? existing.input,
-      result: incoming.result ?? existing.result,
-      output: incoming.output ?? existing.output,
-      approval: mergeApprovalState(existing.approval, incoming.approval),
-      userInput: incoming.userInput ?? existing.userInput,
-      user_input: incoming.user_input ?? existing.user_input,
-      backgroundTask: incoming.backgroundTask ?? existing.backgroundTask,
-      background_task: incoming.background_task ?? existing.background_task,
-      progress: incoming.progress ?? existing.progress,
-    })
-  }
-
-  function upsertAssistantUIMessage(turn: ChatAssistantTurn, message: UIMessage) {
-    const normalized = normalizeUIMessage(message)
-    if (normalized.type === 'tool' && normalized.toolCallId) {
-      const existing = turn.messages.find((block): block is ToolCallBlock => block.type === 'tool' && block.toolCallId === normalized.toolCallId)
-      if (existing) {
-        mergeToolCallBlock(existing, normalized)
-        bumpFsChangedAtIfFsMutation(message)
-        return
-      }
-    }
-    turn.messages = upsertById(turn.messages, normalized)
-    bumpFsChangedAtIfFsMutation(message)
-  }
-
-  function nextAssistantMessageId(turn: ChatAssistantTurn): number {
-    return turn.messages.reduce((maxId, message) => Math.max(maxId, message.id), -1) + 1
-  }
-
-  function hasVisibleAssistantBlocks(turn: ChatAssistantTurn): boolean {
-    return turn.messages.some(block => block.type !== 'error')
-  }
-
-  function snapshotToolApprovalStates(approvalId: string): ToolApprovalStateSnapshot[] {
-    const id = approvalId.trim()
-    if (!id) return []
-    const snapshots: ToolApprovalStateSnapshot[] = []
-    for (const message of messages) {
-      if (message.role !== 'assistant') continue
-      for (const block of message.messages) {
-        if (block.type === 'tool' && block.approval?.approval_id === id) {
-          snapshots.push({
-            block,
-            approval: cloneToolApprovalState(block.approval),
-          })
-        }
-      }
-    }
-    return snapshots
-  }
-
-  function restoreToolApprovalStates(snapshots: ToolApprovalStateSnapshot[]) {
-    for (const snapshot of snapshots) {
-      if (snapshot.block.approval?.approval_id !== snapshot.approval.approval_id) continue
-      snapshot.block.approval = cloneToolApprovalState(snapshot.approval)
-    }
-  }
-
-  function snapshotUserInputStates(userInputId: string): UserInputStateSnapshot[] {
-    const id = userInputId.trim()
-    if (!id) return []
-    const snapshots: UserInputStateSnapshot[] = []
-    for (const message of messages) {
-      if (message.role !== 'assistant') continue
-      for (const block of message.messages) {
-        if (block.type === 'tool' && block.userInput?.user_input_id === id) {
-          snapshots.push({
-            block,
-            userInput: cloneUserInputState(block.userInput),
-          })
-        }
-      }
-    }
-    return snapshots
-  }
-
-  function restoreUserInputStates(snapshots: UserInputStateSnapshot[]) {
-    for (const snapshot of snapshots) {
-      if (snapshot.block.userInput?.user_input_id !== snapshot.userInput.user_input_id) continue
-      snapshot.block.userInput = cloneUserInputState(snapshot.userInput)
-    }
-  }
-
-  function rememberAssistantError(errorMessage: string, botId: string, targetSessionId: string, assistantTurn: ChatAssistantTurn) {
-    const sid = targetSessionId.trim()
-    const text = errorMessage.trim()
-    if (!sid || !text) return
-    const current = ephemeralAssistantErrors.get(sid) ?? []
-    if (current.some(item => item.content === text)) return
-    const anchorUser = findUserTurnBeforeAssistant(assistantTurn)
-    ephemeralAssistantErrors.set(sid, [...current, {
-      content: text,
-      timestamp: new Date().toISOString(),
-      userText: anchorUser?.text.trim() || undefined,
-    }].slice(-5))
-  }
-
-  function appendAssistantError(assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string, errorMessage: string) {
-    const text = errorMessage.trim()
-    if (!text) return
-
-    rememberAssistantError(text, botId, targetSessionId, assistantTurn)
-    assistantTurn.messages.push({
-      id: nextAssistantMessageId(assistantTurn),
-      type: 'error',
-      content: text,
-    })
-  }
-
-  function finalizeStreamFailure(assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string, error: Error) {
-    if (!hasVisibleAssistantBlocks(assistantTurn)) {
-      removeTurnFromSession(botId, targetSessionId, assistantTurn)
-      return
-    }
-    if (error.name === 'AbortError') return
-    if (assistantTurn.messages.some(block => block.type === 'error')) return
-    appendAssistantError(assistantTurn, botId, targetSessionId, error.message)
-  }
-
-  function latestOptimisticUserText(): string {
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-      const message = messages[i]
-      if (message?.role === 'user') return message.text.trim()
-    }
-    return ''
-  }
 
   function handleWSSessionCreated(event: { stream_id?: string; session_id: string }, sourceBotId = '') {
     const sid = event.session_id.trim()
@@ -1281,21 +726,6 @@ export const useChatStore = defineStore('chat', () => {
     return false
   }
 
-  function markToolApprovalDecision(approvalId: string, status: 'approved' | 'rejected' | 'pending') {
-    const id = approvalId.trim()
-    if (!id) return
-    for (const message of messages) {
-      if (message.role !== 'assistant') continue
-      for (const block of message.messages) {
-        if (block.type !== 'tool' || block.approval?.approval_id !== id) continue
-        block.approval = {
-          ...block.approval,
-          status,
-          can_approve: status === 'pending',
-        }
-      }
-    }
-  }
 
   // Undo the optimistic decision when the response stream fails, so the user
   // can retry instead of being stuck with buttons that vanished for nothing.
@@ -1428,7 +858,7 @@ export const useChatStore = defineStore('chat', () => {
     if (options.clearSelection && currentBotId.value) {
       currentBotId.value = null
     }
-    replaceMessages([])
+    resetTranscriptUserScope()
     hasMoreOlder.value = true
     hasLoadedOlder.value = false
     loading.value = false
@@ -1450,7 +880,6 @@ export const useChatStore = defineStore('chat', () => {
     wsCreatedSessionsByStream.clear()
     forkingMessages.clear()
     backgroundTasks.clearBackgroundTasks()
-    ephemeralAssistantErrors.clear()
   }
 
   function startWebSocket(targetBotId: string) {
@@ -1808,7 +1237,7 @@ export const useChatStore = defineStore('chat', () => {
         const older = normalized.filter(turn => !existingIds.has(turn.id))
 
         if (older.length > 0) {
-          messages.unshift(...older)
+          prependToView(...older)
           hasLoadedOlder.value = true
           // Don't infer end-of-history from `turns.length < PAGE_SIZE`: the
           // server pages by raw DB rows (bot_history_messages.created_at) but
@@ -2672,8 +2101,7 @@ export const useChatStore = defineStore('chat', () => {
       options.onBeforeTurnAppend?.()
       if (!serverSkillActivation) {
         userTurn = createOptimisticUserTurn(trimmed, attachments)
-        messages.push(userTurn)
-        messages.push(assistantTurn)
+        appendToView(userTurn, assistantTurn)
       }
 
       const modelId = overrideModelId.value || undefined
@@ -2908,7 +2336,7 @@ export const useChatStore = defineStore('chat', () => {
     let assistantTurn: ChatAssistantTurn | null = null
     if (!silent) {
       assistantTurn = createOptimisticAssistantTurn()
-      messages.push(assistantTurn)
+      appendToView(assistantTurn)
       void trackAssistantStream(streamId, assistantTurn, bid, sid).catch((error: Error) => {
         finalizeStreamFailure(assistantTurn, bid, sid, error)
       })
@@ -2931,10 +2359,7 @@ export const useChatStore = defineStore('chat', () => {
       approvalResponseStreams.delete(streamId)
       if (!silent) {
         forgetAssistantStream(streamId)
-        if (assistantTurn) {
-          const idx = messages.indexOf(assistantTurn)
-          if (idx >= 0) messages.splice(idx, 1)
-        }
+        if (assistantTurn) removeFromView(assistantTurn)
       }
       loading.value = false
       toast.error(resolveApiErrorMessage(error, 'Failed to send tool approval response.'))
@@ -2958,7 +2383,7 @@ export const useChatStore = defineStore('chat', () => {
     const streamId = createStreamId()
     const previousUserInputStates = snapshotUserInputStates(userInput.user_input_id)
     const assistantTurn = createOptimisticAssistantTurn()
-    messages.push(assistantTurn)
+    appendToView(assistantTurn)
     void trackAssistantStream(streamId, assistantTurn, bid, sid).catch((error: Error) => {
       finalizeStreamFailure(assistantTurn, bid, sid, error)
       // While the main session stream is still active a refresh would
@@ -3002,8 +2427,7 @@ export const useChatStore = defineStore('chat', () => {
     } catch (error) {
       restoreUserInputStates(previousUserInputStates)
       forgetAssistantStream(streamId)
-      const idx = messages.indexOf(assistantTurn)
-      if (idx >= 0) messages.splice(idx, 1)
+      removeFromView(assistantTurn)
       loading.value = false
       toast.error(resolveApiErrorMessage(error, 'Failed to send user input response.'))
     }
