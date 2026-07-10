@@ -319,7 +319,9 @@ func TestBuildPipelineContextForceKeepsCurrentRenderedMessagePastBudget(t *testi
 	if err != nil {
 		t.Fatalf("buildPipelineContext() error = %v", err)
 	}
-	if len(built.Messages) != 1 || !strings.Contains(built.Messages[0].TextContent(), "current") {
+	if len(built.Messages) != 2 ||
+		!strings.HasPrefix(built.Messages[0].TextContent(), "[System Notice]") ||
+		!strings.Contains(built.Messages[1].TextContent(), "current") {
 		t.Fatalf("current rendered message was trimmed: %#v", modelMessageTexts(built.Messages))
 	}
 }
