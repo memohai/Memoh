@@ -103,9 +103,8 @@ export interface UseChatScrollOptions {
  *   • let the user scroll away ("escape") and STAY there
  *   • jump-to-message + transient highlight (reply refs, the scroll rail)
  *   • keep the viewport still while older history is prepended at the top
- *   • restore scroll position across KeepAlive tab switches; land a freshly
- *     opened session pinned at its last prompt (same look as just-after-send),
- *     falling back to the bottom when the session has no user turn
+ *   • restore scroll position across KeepAlive tab switches; a freshly
+ *     opened session lands at the bottom (entry pin was a feature cut)
  *
  * ─── The one idea the whole file rests on ─────────────────────────────────
  * Follow and escape pull the scroll position in opposite directions, so
@@ -135,8 +134,6 @@ export interface UseChatScrollOptions {
  *   followEnabled         content growth may pull the viewport to the bottom;
  *                         false = parked (user escaped, or a turn is pinned)
  *   pinPending/pinAnchorId one-shot pin, applied when the target prompt renders
- *   pinMode               'send' = animated entrance for a just-sent turn;
- *                         'entry' = instant landing when a session opens
  *   pinScrollActive       pin's entrance tween in flight → freeze isAtBottom
  *   lastScrollTop         previous frame's scrollTop, for the up/down test
  *   lockScroll (ref)      init / cross-tab restore running → freeze BOTH follow
@@ -154,8 +151,9 @@ export interface UseChatScrollOptions {
  * ─── Follow on / off ──────────────────────────────────────────────────────
  * Pin and follow are mutually exclusive phases, switched only by explicit
  * actions:
- *   • user scrolls down INTO the content-end band        → follow ON
- *     (atContentEnd — parked in pin reserve blank does NOT arm)
+ *   • user scrolls down to the bottom                    → follow ON
+ *     (parked at the pin already IS the bottom; arming there is a no-op
+ *     until the reply outgrows the reserve)
  *   • jump-to-bottom button / session switch             → follow ON
  *   • any upward wheel / scroll                          → follow OFF
  *   • jump-to-message / rail / prepend (markEscaped)     → follow OFF
@@ -171,7 +169,7 @@ export interface UseChatScrollOptions {
  * scrollTop compensation — and you must NOT set `overflow-anchor: none` on the
  * viewport. That was tried (to protect a browser-native smooth entrance
  * scroll, which anchoring can cancel) and it broke two things at once: each
- * prepend batch twitched, and the entry pin drifted off its offset — a
+ * prepend batch twitched, and the pin drifted off its offset — a
  * one-shot manual compensation / one-shot landing cannot track the ASYNC
  * layout settles (code highlighting, images, fonts) that keep resizing rows
  * after the DOM lands. Native anchoring corrects continuously; the pin's JS
@@ -188,7 +186,8 @@ export interface UseChatScrollOptions {
  * What the browser does NOT know is chat product geometry:
  *   • residual pin blank is deliberate "reply room", not ordinary content
  *   • send = pin the new prompt at PIN_TOP_OFFSET_PX with previous-turn peek
- *   • that blank SURVIVES stream completion (must not collapse on finish)
+ *   • that blank SURVIVES stream completion and stays until the next
+ *     send's handover (legal layout — never trimmed while the view lives)
  *   • entrance needs a quintic ease-out tween, not native smooth
  *
  * So we hand-write scrollTop only on a NARROW boundary: the frame that
@@ -203,7 +202,7 @@ export interface UseChatScrollOptions {
  * got clever"; the surviving rule is: one named handover, one formula,
  * everything else stays dumb and browser-owned.
  *
- * ─── Pin (send + session entry) ───────────────────────────────────────────
+ * ─── Pin (send only) ──────────────────────────────────────────────────────
  * On send (chat-pane → pinAfterSend) the newest prompt is pinned near the top
  * and the reply streams into reserved blank below. Mechanism: chat-pane
  * renders every turn in its own PERSISTENT container (keyed by the turn's
@@ -215,7 +214,7 @@ export interface UseChatScrollOptions {
  *   1. Retire the PREVIOUS turn's residual blank via
  *      collapseReserveKeepingView (position-aware — see that function).
  *   2. Measure and set the NEW turn's min-height once.
- *   3. Tween (send) or jump (entry) to prompt top − PIN_TOP_OFFSET_PX.
+ *   3. Tween to prompt top − PIN_TOP_OFFSET_PX.
  *
  * Two rejected alternatives (do not resurrect without a new product reason):
  *   A. Keep old blank for the whole flight, clear at settle.
@@ -236,17 +235,17 @@ export interface UseChatScrollOptions {
  * the down animation then carries REAL previous-turn content into the peek.
  * From there CSS layout does everything: the reply consumes the new reserve,
  * tool/Thought toggles use more or less of it, content past min-height makes
- * it inert. The new reserve is NEVER recomputed on mutations and SURVIVES
- * stream completion. Only the next send or a session switch touches the
- * reserve. While pinned, follow is OFF until the user scrolls back to the
- * content end (atContentEnd — not merely "no content below").
+ * it inert. The reserve is LEGAL LAYOUT for the rest of this view's life —
+ * NEVER recomputed, never trimmed on completion or scroll (Grok-parity
+ * rule: spacing must not jump). It dies only at the next send's handover,
+ * a session switch, or the view unmounting (KeepAlive tab switches keep
+ * the DOM, so they keep the spacing). While pinned, follow is OFF; it re-arms on
+ * any downward scroll at the bottom, which parked-at-pin trivially is —
+ * harmless, since follow-to-scrollHeight is a no-op there.
  *
- * Opening a session uses the SAME paradigm ('entry' mode): the last prompt
- * lands at the pin offset with the previous turn peeking above — identical
- * geometry to just-after-send — but instantly, with no animation. Sessions
- * with no user turn (system/subagent, empty chats) fall back to the bottom:
- * follow stays engaged while the entry pin is pending, so if no prompt ever
- * renders the ordinary follow heartbeat lands the view.
+ * Opening a session does NOT pin — it lands at the bottom via the follow
+ * heartbeat (entry pin was a deliberate feature cut; see the sessionId
+ * watch). Only sending pins.
  *
  * ─── chat-pane contract ───────────────────────────────────────────────────
  * chat-pane owns the DOM refs and drives this composable through:
@@ -281,17 +280,12 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // turn is pinned). Flipped only by explicit actions — see "Follow on / off"
   // in the header.
   let followEnabled = true
-  // One-shot pin: armed by pinAfterSend / a session switch, applied by the
-  // MutationObserver on the first mutation where the target prompt is actually
-  // in the DOM.
+  // One-shot pin: armed by pinAfterSend, applied by the MutationObserver on
+  // the first mutation where the target prompt is actually in the DOM.
   let pinPending = false
-  // 'send' animates the entrance (shared JS tween); 'entry' lands a
-  // freshly opened session at the same geometry instantly.
-  let pinMode: 'send' | 'entry' = 'send'
-  // Send mode only: last user message id at arm time — the pin waits for a
-  // NEWER one, so a stray mutation (a late token of the previous reply) can't
-  // size the pin against the previous turn's prompt. Entry mode pins whatever
-  // last prompt renders, so it keeps this null.
+  // Last user message id at arm time — the pin waits for a NEWER one, so a
+  // stray mutation (a late token of the previous reply) can't size the pin
+  // against the previous turn's prompt.
   let pinAnchorId: string | null = null
   // True while the pin's entrance tween is in flight; freezes the isAtBottom
   // mirror so the jump button doesn't flash mid-animation. Cleared by the
@@ -304,7 +298,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // flight never scrolls through empty spacing — see file-header Pin section.
   let appliedPinContainer: HTMLElement | null = null
   // The pinned reserve in px, held as STATE — not only as the container's
-  // inline style. BUSINESS INVARIANT: the reserve must NOT drop when the
+  // inline style. BUSINESS INVARIANT: the reserve must NOT change when the
   // stream finishes. Completion swaps message ids (temp → server), which
   // re-keys and REMOUNTS the turn container, and an inline style dies with
   // its element — restorePinReserve re-asserts this value onto the fresh
@@ -321,7 +315,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
   //
   // Why we write scrollTop at all (vs "let the browser handle shrink"):
   //   Residual pin blank is product geometry, not content. Clearing
-  //   min-height is a deliberate layout edit on send/entry handover. The
+  //   min-height is a deliberate layout edit on the send handover. The
   //   browser's clamp / scroll anchoring do not know we want "parked on
   //   previous-turn content → keep that content still; blank below may
   //   vanish". Left alone, clamp/anchoring and a later tween fight; the
@@ -397,77 +391,50 @@ export function useChatScroll(options: UseChatScrollOptions) {
     }
   }
 
+  // Coalesced post-paint refresh of the isAtBottom mirror. The MutationObserver
+  // callback reads geometry MID-layout: heavy markdown / tool rows can be
+  // transiently taller for a frame before async reflow (Shiki, collapse)
+  // settles, so a reading taken there can latch a stale "not at bottom" (fake
+  // jump arrow). If the stream ends right then, nothing ever corrects it —
+  // no further mutation, no scroll event. This rAF re-reads AFTER paint;
+  // any later async reflow mutates again and schedules another pass.
+  let atBottomRefreshRaf = 0
+  function scheduleAtBottomRefresh() {
+    if (atBottomRefreshRaf) return
+    atBottomRefreshRaf = requestAnimationFrame(() => {
+      atBottomRefreshRaf = 0
+      const el = scrollEl.value
+      if (!el || pinScrollActive) return
+      isAtBottom.value = isNearBottom(el)
+    })
+  }
+
   let highlightTimer: ReturnType<typeof setTimeout> | null = null
   let cancelScrollTween: (() => void) | null = null
   let tweenFlagTimer: ReturnType<typeof setTimeout> | null = null
   let mutationObserver: MutationObserver | null = null
 
-  // "Is there anything further to see below?" — used for the jump-to-bottom
-  // button. Parked inside the pin's unconsumed reserve blank counts as yes-
-  // at-bottom (gap ≤ 0): the blank is not content, so the button must not
-  // offer to scroll into empty space.
+  // "At the bottom" = the plain scrollHeight test. The pin reserve is LEGAL
+  // LAYOUT (Grok-parity business rule): parked at the pin IS the physical
+  // bottom, so no separate "content end" notion exists — one predicate serves
+  // the jump button, follow arming, and the jump target alike.
   function isNearBottom(el: HTMLElement): boolean {
-    return contentEndGap(el) < NEAR_BOTTOM_THRESHOLD_PX
+    return el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_THRESHOLD_PX
   }
 
-  // Whether the viewport sits at the CONTENT END band — the ONLY state
-  // allowed to (re-)arm follow. Distinct from isNearBottom on purpose:
-  // parking deep in the reserve blank is "nothing more to see" for the jump
-  // button, but arming follow from there makes every streamed chunk (or a
-  // Thought/tool expand that mutates the tree) yank the parked view up to
-  // hug the content end. Arming additionally bounds overshoot past the
-  // content end: the span between the last turn container's bottom and
-  // scrollHeight is ordinary column padding (still the physical bottom);
-  // the container's own overhang past its last message is the reserve's
-  // unconsumed blank and is outside the budget. Measured geometrically —
-  // do not use getComputedStyle on the reka viewport's first child (its
-  // padding is 0; the real pad is layout after the last turn).
-  function atContentEnd(el: HTMLElement): boolean {
-    const gap = contentEndGap(el)
-    if (gap >= NEAR_BOTTOM_THRESHOLD_PX) return false
-    const container = lastTurnEl.value
-    const pad = container
-      ? Math.max(0, el.scrollHeight - getElementAbsoluteTop(container, el) - container.offsetHeight)
-      : 0
-    return -gap <= pad + NEAR_BOTTOM_THRESHOLD_PX
+  // Scroll target for "go to the bottom": the physical bottom.
+  function bottomTarget(el: HTMLElement): number {
+    return el.scrollHeight - el.clientHeight
   }
 
-  // --- Content-end geometry --------------------------------------------
-  // BUSINESS SEMANTIC: "the bottom" for content-aware decisions means the
-  // END OF CONTENT — the last message's bottom edge — NOT scrollHeight. The
-  // pin reserve leaves blank under the last message and that blank is not
-  // content. Jump-button visibility uses isNearBottom (blank counts as
-  // bottom); follow-arming uses atContentEnd (blank does NOT arm).
-  // Cached per last-message id: this runs on every scroll frame and a
-  // querySelector per frame would be wasteful.
-  let lastMessageElCache: { id: string, el: HTMLElement } | null = null
-  function lastMessageElement(): HTMLElement | null {
-    const last = messages.value[messages.value.length - 1]
-    if (!last) return null
-    if (lastMessageElCache?.id === last.id && lastMessageElCache.el.isConnected) {
-      return lastMessageElCache.el
-    }
-    const el = findMessageElement(last.id)
-    lastMessageElCache = el ? { id: last.id, el } : null
-    return el
-  }
-
-  // Px from the viewport's bottom edge down to the content end; <= 0 means
-  // the content end is visible (being parked inside the reserve blank counts
-  // as "at the bottom" — there is nothing further to see). Falls back to the
-  // scrollHeight distance when no message is rendered (empty sessions).
-  function contentEndGap(el: HTMLElement): number {
-    const lastEl = lastMessageElement()
-    if (!lastEl) return el.scrollHeight - el.scrollTop - el.clientHeight
-    return getElementAbsoluteTop(lastEl, el) + lastEl.offsetHeight - el.scrollTop - el.clientHeight
-  }
-
-  // Scroll target for "go to the latest": content end at the viewport's
-  // bottom edge — never scrollHeight, which would dive into the reserve blank.
-  function contentEndTarget(el: HTMLElement): number {
-    const lastEl = lastMessageElement()
-    if (!lastEl) return el.scrollHeight
-    return getElementAbsoluteTop(lastEl, el) + lastEl.offsetHeight - el.clientHeight
+  // THE one landing rule for every "bring this message into view" path —
+  // reply-ref jumps, the scroll rail, and the pin's own entrance all resolve
+  // through this: target top sits PIN_TOP_OFFSET_PX below the viewport top,
+  // exactly where a pinned prompt lands. Jumping back to an old turn therefore
+  // reproduces the same geometry the user saw right after sending it.
+  function messageJumpTarget(root: HTMLElement, messageId: string): number {
+    const el = findMessageElement(messageId)
+    return el ? getElementAbsoluteTop(el, root) - PIN_TOP_OFFSET_PX : root.scrollTop
   }
 
   // Stop following, immediately. Called for any deliberate move away from the
@@ -490,7 +457,6 @@ export function useChatScroll(options: UseChatScrollOptions) {
   function pinAfterSend() {
     followEnabled = false
     pinPending = true
-    pinMode = 'send'
     pinAnchorId = lastUserMessage()?.id ?? null
     // Arm only — do NOT clear / set reserves here.
     //
@@ -539,6 +505,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
     tweenFlagTimer = setTimeout(() => {
       isProgrammaticScroll = false
       tweenFlagTimer = null
+      // A zero-distance tween (already at the target) fires no scroll event;
+      // refresh the mirror here or a stale arrow survives the click.
+      scheduleAtBottomRefresh()
     }, duration + 100)
   }
 
@@ -557,9 +526,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
     return null
   }
 
-  // Apply an armed pin: size the last-turn container's reserve ONCE, then move
-  // the viewport to the shared pin target (prompt top − offset) — send mode
-  // tweens there, entry mode jumps there. The reserve is min-height, so all
+  // Apply an armed pin: size the last-turn container's reserve ONCE, then
+  // tween the viewport to the shared pin target (prompt top − offset).
+  // The reserve is min-height, so all
   // later geometry is absorbed by CSS layout with zero JS involvement; see
   // the header's Pin section for why it must be set exactly once and left
   // alone (including after the stream completes).
@@ -584,22 +553,31 @@ export function useChatScroll(options: UseChatScrollOptions) {
     if (!container) return false
     const prompt = lastUserMessage()
     if (!prompt) return false
-    // Send mode: wait until a user message NEWER than the one present at arm
-    // time is actually rendered — an unrelated mutation must not size the pin
-    // against the previous turn's prompt. Entry mode has no such race (it pins
-    // whatever last prompt the freshly opened session renders).
-    if (pinMode === 'send' && prompt.id === pinAnchorId) return false
+    // Wait until a user message NEWER than the one present at arm time is
+    // actually rendered — an unrelated mutation must not size the pin
+    // against the previous turn's prompt.
+    if (prompt.id === pinAnchorId) return false
     const promptEl = findMessageElement(prompt.id)
     if (!promptEl) return false
     // The prompt must live INSIDE the last-turn container — mid-patch the ref
     // and the rendered rows can briefly disagree; sizing against a mismatched
     // pair would reserve garbage.
     if (!container.contains(promptEl)) return false
+    // BUSINESS RULE: the session's FIRST turn never pins — there is no
+    // content above the prompt to peek at, so a reserve would only add dead
+    // scroll range. Disarm and hand over to the follow heartbeat (the
+    // MutationObserver's follow branch lands the view at the bottom on this
+    // same mutation). Covers draft sends and the first send in an empty
+    // session alike.
+    if (messages.value[0]?.id === prompt.id) {
+      pinPending = false
+      followBottom()
+      return false
+    }
     pinPending = false
     // A pinned turn is a parked view — follow re-engages only when the user
-    // scrolls back into the content-end band. (Send already parked in
-    // pinAfterSend; this is where ENTRY switches from its land-at-bottom
-    // fallback to parked.)
+    // scrolls back into the content-end band. (pinAfterSend already parked;
+    // re-assert against anything that re-armed follow in between.)
     followEnabled = false
 
     // ── Reserve HANDOVER (single coordinate system) ────────────────────
@@ -632,49 +610,36 @@ export function useChatScroll(options: UseChatScrollOptions) {
     container.style.minHeight = `${pinnedReservePx}px`
     lastScrollTop = el.scrollTop
 
-    // Step 3: landing target — THE one formula for send and entry so the
-    // two arrival paths cannot drift. Viewport top → prompt top −
-    // PIN_TOP_OFFSET_PX. Anchored on the PROMPT, never on scrollHeight (a
-    // bottom-anchored target moves mid-flight when the reply outgrows the
-    // reserve). Re-resolved every tween frame because optimistic → server
-    // id swap can remount the prompt row mid-flight. Measured only after
-    // step 1 so distance and peek are real previous-turn content.
+    // Step 3: landing target — resolves through messageJumpTarget, THE one
+    // formula shared with reply jumps and the scroll rail, so sending and
+    // jumping back to a message cannot drift apart. Anchored on the PROMPT,
+    // never on scrollHeight (a bottom-anchored target moves mid-flight when
+    // the reply outgrows the reserve). Re-resolved every tween frame because
+    // optimistic → server id swap can remount the prompt row mid-flight.
+    // Measured only after step 1 so distance and peek are real previous-turn
+    // content.
     const pinTarget = () => {
       const cur = lastUserMessage()
-      const curEl = cur ? findMessageElement(cur.id) : null
-      return curEl ? getElementAbsoluteTop(curEl, el) - PIN_TOP_OFFSET_PX : el.scrollTop
+      return cur ? messageJumpTarget(el, cur.id) : el.scrollTop
     }
 
-    if (pinMode === 'send') {
-      // Entrance: shared JS tween (same as jump-to-bottom / reply jumps).
-      // Native smooth was rejected: Chromium's profile reads as constant-
-      // speed, and content mutations cancel the flight mid-stream. The
-      // tween re-reads pinTarget each frame; wheel/touch cancels it inside
-      // startScrollTween. Settle timer only ends pinScrollActive — no
-      // reserve work (that finished in steps 1–2).
-      pinScrollActive = true
-      if (pinSettleTimer) clearTimeout(pinSettleTimer)
-      pinSettleTimer = setTimeout(() => {
-        pinSettleTimer = null
-        pinScrollActive = false
-        const cur = scrollEl.value
-        if (!cur) return
-        isAtBottom.value = isNearBottom(cur)
-        lastScrollTop = cur.scrollTop
-      }, PIN_TWEEN_DURATION_MS + 100)
-      startScrollTween(el, pinTarget, PIN_TWEEN_DURATION_MS)
-    } else {
-      // Entry: same pinTarget, no animation — session opens already in place.
-      // Old blank was already cleared in step 1 (same helper as send).
-      el.scrollTo({ top: pinTarget(), behavior: 'auto' })
-      requestAnimationFrame(() => {
-        isProgrammaticScroll = false
-        const cur = scrollEl.value
-        if (!cur) return
-        isAtBottom.value = isNearBottom(cur)
-        lastScrollTop = cur.scrollTop
-      })
-    }
+    // Entrance: shared JS tween (same as jump-to-bottom / reply jumps).
+    // Native smooth was rejected: Chromium's profile reads as constant-
+    // speed, and content mutations cancel the flight mid-stream. The
+    // tween re-reads pinTarget each frame; wheel/touch cancels it inside
+    // startScrollTween. Settle timer only ends pinScrollActive — no
+    // reserve work (that finished in steps 1–2).
+    pinScrollActive = true
+    if (pinSettleTimer) clearTimeout(pinSettleTimer)
+    pinSettleTimer = setTimeout(() => {
+      pinSettleTimer = null
+      pinScrollActive = false
+      const cur = scrollEl.value
+      if (!cur) return
+      isAtBottom.value = isNearBottom(cur)
+      lastScrollTop = cur.scrollTop
+    }, PIN_TWEEN_DURATION_MS + 100)
+    startScrollTween(el, pinTarget, PIN_TWEEN_DURATION_MS)
     return true
   }
 
@@ -690,7 +655,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     const el = scrollEl.value
     if (!el) return
     isProgrammaticScroll = true
-    el.scrollTo({ top: contentEndTarget(el), behavior: 'auto' })
+    el.scrollTo({ top: bottomTarget(el), behavior: 'auto' })
     requestAnimationFrame(() => {
       isProgrammaticScroll = false
       const cur = scrollEl.value
@@ -706,7 +671,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     const root = scrollEl.value
     if (!root) return
     followBottom()
-    startScrollTween(root, () => contentEndTarget(root))
+    startScrollTween(root, () => bottomTarget(root))
   }
 
   function findMessageElement(messageId: string): HTMLElement | null {
@@ -722,11 +687,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     if (!root || !target) return false
     // Landing on a specific message parks the reader there — stop following.
     markEscaped()
-    const scrollMargin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0
-    startScrollTween(root, () => {
-      const el = findMessageElement(messageId)
-      return el ? getElementAbsoluteTop(el, root) - scrollMargin : root.scrollTop
-    })
+    startScrollTween(root, () => messageJumpTarget(root, messageId))
     highlightedMessageId.value = messageId
     if (highlightTimer) clearTimeout(highlightTimer)
     highlightTimer = setTimeout(() => {
@@ -759,20 +720,31 @@ export function useChatScroll(options: UseChatScrollOptions) {
   }
 
   // Drop accumulated anchors when the active session changes, and land the new
-  // session with the ENTRY pin: last prompt at the pin offset, previous turn
-  // peeking above — the same look as just-after-send, applied instantly by the
-  // MutationObserver once the new session's messages render. Follow stays on
-  // while the pin is pending so a session with no user turn (system/subagent,
-  // empty chat) still lands at the bottom via the ordinary follow heartbeat.
-  watch(sessionId, () => {
+  // session at the bottom via the ordinary follow heartbeat (the
+  // MutationObserver sticks to the content end as the messages render).
+  // Entry-pin (landing on the last prompt like just-after-send) was a
+  // deliberate FEATURE CUT — the user chose plain bottom landing for history
+  // sessions; only sending pins.
+  watch(sessionId, (_next, prev) => {
     elId.clear()
+    // Draft materialization is NOT a navigation: sending from a draft creates
+    // the session mid-send (sessionId null → id) while the send pin is still
+    // armed. The pin belongs to this very send — killing it here (and arming
+    // follow) made the reply stream yank the view and drop the reserve.
+    // Only a change AWAY FROM an existing session is a real switch.
+    if (pinPending && !prev) {
+      appliedPinContainer = null
+      pinnedReservePx = null
+      return
+    }
     followBottom()
-    pinPending = true
-    pinMode = 'entry'
+    // A send pin armed in the previous session must not fire against the new
+    // session's rows.
+    pinPending = false
     pinAnchorId = null
     // The old session's turn containers unmount with its messages (inline
     // reserve dies with the element); drop the pin pointers and the held
-    // reserve so the entry pin measures the new session fresh.
+    // reserve so the next send pin measures fresh.
     appliedPinContainer = null
     pinnedReservePx = null
   })
@@ -820,11 +792,10 @@ export function useChatScroll(options: UseChatScrollOptions) {
             lockScroll.value = false
             done = true
             unwatch()
-            // Restored to a remembered position: follow only if that position
-            // is already at the content end (not merely "no content below" —
-            // a restore parked in pin blank must stay parked).
+            // Restored to a remembered position: follow only if it is at the
+            // bottom.
             const root = scrollEl.value
-            followEnabled = root ? atContentEnd(root) : true
+            followEnabled = root ? isNearBottom(root) : true
             if (root) isAtBottom.value = isNearBottom(root)
           })
         } else {
@@ -833,19 +804,11 @@ export function useChatScroll(options: UseChatScrollOptions) {
               lockScroll.value = false
               done = true
               unwatch()
-              // No remembered anchor (fresh open / previously at bottom): land
-              // with the entry pin — last prompt at the offset, instantly. If
-              // there is nothing to pin yet (no user turn, or rows not
-              // rendered), fall back to the bottom and leave the pin armed so
-              // a late render can still apply it.
+              // No remembered anchor (fresh open / previously at bottom):
+              // land at the bottom and let the follow heartbeat keep it
+              // there (entry pin was cut — see the sessionId watch).
               followBottom()
-              pinMode = 'entry'
-              pinAnchorId = null
-              const root = scrollEl.value
-              if (!root || !tryApplyPin(root)) {
-                pinPending = true
-                stickToBottomNow()
-              }
+              stickToBottomNow()
             })
           }
         }
@@ -903,12 +866,13 @@ export function useChatScroll(options: UseChatScrollOptions) {
       // Any upward move parks the view immediately (and a pinned turn stays
       // parked).
       followEnabled = false
-    } else if (atContentEnd(el)) {
-      // Reaching the content end is the only scroll gesture that (re-)arms
-      // follow — not merely "no content below" (see atContentEnd: a viewport
-      // parked in the pin reserve must not arm). Deliberately NO optimistic
-      // "relock shortly after a downward pause" here — see the header's
-      // "Follow on / off" section.
+    } else if (isNearBottom(el)) {
+      // Reaching the physical bottom is the only scroll gesture that
+      // (re-)arms follow. Parked at the pin the viewport already IS the
+      // bottom, and follow-to-bottom there is a no-op until content outgrows
+      // the reserve — so arming is harmless by construction. Deliberately NO
+      // optimistic "relock shortly after a downward pause" timer — see the
+      // header's "Follow on / off" section.
       followEnabled = true
     }
   }
@@ -956,7 +920,10 @@ export function useChatScroll(options: UseChatScrollOptions) {
     if (!isActive.value || lockScroll.value) return
     if (pinPending && tryApplyPin(el)) return
     if (followEnabled) stickToBottomNow()
-    else if (!pinScrollActive) isAtBottom.value = isNearBottom(el)
+    else if (!pinScrollActive) {
+      isAtBottom.value = isNearBottom(el)
+      scheduleAtBottomRefresh()
+    }
   }
 
   // Second belt for the same invariant: Vue's watcher flush and the
@@ -1000,6 +967,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
   }
 
   onBeforeUnmount(() => {
+    if (atBottomRefreshRaf) cancelAnimationFrame(atBottomRefreshRaf)
     if (highlightTimer) clearTimeout(highlightTimer)
     if (tweenFlagTimer) clearTimeout(tweenFlagTimer)
     if (pinSettleTimer) clearTimeout(pinSettleTimer)
@@ -1034,5 +1002,6 @@ export function useChatScroll(options: UseChatScrollOptions) {
     startScrollTween,
     findMessageElement,
     getElementAbsoluteTop,
+    messageJumpTarget,
   }
 }

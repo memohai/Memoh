@@ -2604,7 +2604,7 @@ const {
   onMessageActive,
   startScrollTween,
   findMessageElement,
-  getElementAbsoluteTop,
+  messageJumpTarget,
 } = useChatScroll({
   scrollEl,
   contentEl: descEl,
@@ -2700,11 +2700,10 @@ function scrollToRailSegment(seg: ScrollRailSegment) {
     // Rail navigation parks the reader on a chosen turn, so escape follow —
     // otherwise the next streamed mutation would drag them back to the bottom.
     markEscaped()
-    const scrollMargin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0
-    startScrollTween(root, () => {
-      const el = findMessageElement(seg.id)
-      return el ? getElementAbsoluteTop(el, root) - scrollMargin : root.scrollTop
-    })
+    // Same landing rule as pin/entry/reply jumps (messageJumpTarget): the
+    // chosen turn arrives at the pin offset, identical to how it looked
+    // right after being sent.
+    startScrollTween(root, () => messageJumpTarget(root, seg.id))
   })
 }
 // --- End scroll rail ---
