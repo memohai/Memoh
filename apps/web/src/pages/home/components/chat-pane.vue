@@ -124,49 +124,12 @@
             </div>
           </ScrollArea>
 
-          <div
-            v-if="showScrollRail"
-            class="group/rail hidden md:flex absolute inset-y-0 right-4 z-(--z-raised) w-96 flex-col items-end justify-center pointer-events-none"
-            @mouseenter="scheduleRailOpen"
-            @mouseleave="scheduleRailClose"
-          >
-            <!-- Collapsed: uniform tick marks -->
-            <div
-              class="flex max-h-[60vh] flex-col items-end justify-center gap-2 py-2 pointer-events-auto transition-opacity duration-150"
-              :class="railOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'"
-            >
-              <span
-                v-for="seg in railSegments"
-                :key="seg.id"
-                class="h-0.5 w-4 shrink-0 rounded-full transition-colors duration-150"
-                :class="seg.id === activeRailId
-                  ? 'bg-foreground/70'
-                  : 'bg-muted-foreground/30 group-hover/rail:bg-muted-foreground/55'"
-              />
-            </div>
-
-            <!-- Expanded: user-prompt select panel -->
-            <div
-              v-if="railOpen"
-              class="absolute right-0 top-1/2 w-80 -translate-y-1/2 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-lg pointer-events-auto"
-              @mouseenter="scheduleRailOpen"
-              @mouseleave="scheduleRailClose"
-            >
-              <div
-                class="max-h-[min(60vh,480px)] overflow-y-auto overscroll-contain p-1.5 outline-none [mask-image:linear-gradient(to_bottom,transparent,black_10px,black_calc(100%-10px),transparent)] scrollbar-none"
-              >
-                <button
-                  v-for="seg in railSegments"
-                  :key="seg.id"
-                  type="button"
-                  class="flex h-8 w-full items-center rounded-md px-3 text-left text-[13px] text-foreground hover:bg-[var(--overlay-hover)]"
-                  @click="scrollToRailSegment(seg)"
-                >
-                  <span class="truncate">{{ seg.preview }}</span>
-                </button>
-              </div>
-            </div>
-          </div>
+          <ChatScrollRail
+            :messages="messages"
+            :scroll-el="scrollEl"
+            :enabled="isActive && !loadingChats"
+            @jump="handleRailJump"
+          />
         </section>
       </section>
 
@@ -876,7 +839,7 @@ import {
 import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner, toast } from '@felinic/ui'
 import { useChatStore, type ACPAgentSessionInput, type ChatMessage } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
-import { useScroll, useIntersectionObserver, useStorage } from '@vueuse/core'
+import { useIntersectionObserver, useStorage } from '@vueuse/core'
 import { useQuery } from '@pinia/colada'
 import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings } from '@memohai/sdk'
 import type { AcpclientModelInfo, AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
@@ -890,6 +853,7 @@ import BgTaskPill from './bg-task-pill.vue'
 import ForkSourceDivider from './fork-source-divider.vue'
 import ChatForkDialog from './chat-fork-dialog.vue'
 import ChatUserInputForm from './chat-user-input-form.vue'
+import ChatScrollRail, { type ScrollRailSegment } from './chat-scroll-rail.vue'
 import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
 import MediaGalleryLightbox, { type MediaGalleryItem } from './media-gallery-lightbox.vue'
 import SessionInfoRing from './session-info-ring.vue'
@@ -904,13 +868,6 @@ import { useACPRuntime } from '@/composables/useACPRuntime'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
-
-interface ScrollRailSegment {
-  id: string
-  label: string
-  preview: string
-  index: number
-}
 
 const props = withDefaults(defineProps<{
   // Stable dockview panel id (e.g. `chat:3`). Used for per-tab composer drafts and
@@ -2466,98 +2423,20 @@ const {
 })
 const showJumpToBottom = computed(() => showJumpToBottomFromScroll.value && !loadingChats.value)
 
-// --- Scroll rail ---
-const railSegments = ref<ScrollRailSegment[]>([])
-const activeRailId = ref('')
-const railOpen = ref(false)
-let railRaf = 0
-let railOpenTimer: ReturnType<typeof setTimeout> | null = null
-let railCloseTimer: ReturnType<typeof setTimeout> | null = null
-
-function getRailSegmentText(msg: (typeof messages.value)[number]): string {
-  if (msg.role === 'user') return msg.text?.trim().replace(/\s+/g, ' ') || ''
-  return ''
-}
-
-function rebuildRailSegments() {
-  const segments: ScrollRailSegment[] = []
-  messages.value.forEach((msg) => {
-    if (msg.role !== 'user') return
-    const preview = getRailSegmentText(msg)
-    if (!preview) return
-    segments.push({
-      id: msg.id,
-      label: `Message ${segments.length + 1}`,
-      preview,
-      index: segments.length,
-    })
-  })
-  railSegments.value = segments
-}
-
-function syncActiveRailFromScroll() {
-  const root = scrollEl.value
-  if (!root || !railSegments.value.length) return
-  const viewAnchor = root.scrollTop + 8
-  let best = railSegments.value[0]!.id
-  let bestDist = Number.POSITIVE_INFINITY
-  for (const seg of railSegments.value) {
-    const el = root.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(seg.id)}"]`)
-    if (!el) continue
-    const top = root.scrollTop + el.getBoundingClientRect().top - root.getBoundingClientRect().top
-    const dist = Math.abs(top - viewAnchor)
-    if (dist < bestDist) { bestDist = dist; best = seg.id }
-  }
-  activeRailId.value = best
-}
-
-watch(() => messages.value.map(m => `${m.id}:${m.role}`).join('|'), () => {
-  rebuildRailSegments()
-}, { flush: 'post', immediate: true })
-
-useScroll(scrollEl, {
-  onScroll() {
-    if (railRaf) return
-    railRaf = requestAnimationFrame(() => {
-      railRaf = 0
-      syncActiveRailFromScroll()
-    })
-  },
-})
-
-function scheduleRailOpen() {
-  if (railCloseTimer) { clearTimeout(railCloseTimer); railCloseTimer = null }
-  if (railOpen.value || railOpenTimer) return
-  railOpenTimer = setTimeout(() => { railOpen.value = true; railOpenTimer = null }, 80)
-}
-
-function scheduleRailClose() {
-  if (railOpenTimer) { clearTimeout(railOpenTimer); railOpenTimer = null }
-  if (!railOpen.value || railCloseTimer) return
-  railCloseTimer = setTimeout(() => { railOpen.value = false; railCloseTimer = null }, 150)
-}
-
-const showScrollRail = computed(() =>
-  isActive.value && !loadingChats.value && railSegments.value.length > 1,
-)
-
-function scrollToRailSegment(seg: ScrollRailSegment) {
-  activeRailId.value = seg.id
-  railOpen.value = false
+// Rail navigation parks the reader on a chosen turn, so escape follow —
+// otherwise the next streamed mutation would drag them back to the bottom.
+// Landing uses the same rule as pin/entry/reply jumps (messageJumpTarget):
+// the chosen turn arrives at the pin offset, identical to how it looked
+// right after being sent.
+function handleRailJump(seg: ScrollRailSegment) {
   void nextTick(() => {
     const root = scrollEl.value
     const target = findMessageElement(seg.id)
     if (!root || !target) return
-    // Rail navigation parks the reader on a chosen turn, so escape follow —
-    // otherwise the next streamed mutation would drag them back to the bottom.
     markEscaped()
-    // Same landing rule as pin/entry/reply jumps (messageJumpTarget): the
-    // chosen turn arrives at the pin offset, identical to how it looked
-    // right after being sent.
     startScrollTween(root, () => messageJumpTarget(root, seg.id))
   })
 }
-// --- End scroll rail ---
 
 onBeforeUnmount(() => {
   stopAuthSessionCleanup()
