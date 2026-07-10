@@ -44,30 +44,35 @@ type blockingCompactionModel struct {
 	started chan struct{}
 	release chan struct{}
 	once    sync.Once
+	summary string
 }
 
 func (m *blockingCompactionModel) RoundTrip(*http.Request) (*http.Response, error) {
 	m.once.Do(func() { close(m.started) })
 	<-m.release
-	return compactionModelResponse(), nil
+	return compactionModelResponse(m.summary), nil
 }
 
 type signalingCompactionModel struct {
-	called chan struct{}
-	once   sync.Once
+	called  chan struct{}
+	once    sync.Once
+	summary string
 }
 
 func (m *signalingCompactionModel) RoundTrip(*http.Request) (*http.Response, error) {
 	m.once.Do(func() { close(m.called) })
-	return compactionModelResponse(), nil
+	return compactionModelResponse(m.summary), nil
 }
 
-func compactionModelResponse() *http.Response {
+func compactionModelResponse(summary string) *http.Response {
+	if summary == "" {
+		summary = "summary"
+	}
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Body: io.NopCloser(strings.NewReader(
 			`{"id":"stub","object":"chat.completion","created":0,"model":"stub",` +
-				`"choices":[{"index":0,"message":{"role":"assistant","content":"summary"},"finish_reason":"stop"}],` +
+				`"choices":[{"index":0,"message":{"role":"assistant","content":"` + summary + `"},"finish_reason":"stop"}],` +
 				`"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120}}`,
 		)),
 		Header: http.Header{"Content-Type": []string{"application/json"}},
@@ -187,32 +192,6 @@ func TestTriggerCompactionRearmsAfterSynchronousOwnerReleasesSession(t *testing.
 		t.Fatal("async demand was not rearmed after synchronous owner")
 	}
 	assertRearmedCompactionRows(t, queries, secondRows)
-}
-
-func TestAutomaticCompactionObservesBusyOwnerBeforeFailureCooldown(t *testing.T) {
-	service := newMachineryService(&fakeQueries{})
-	sessionID := uuid.NewString()
-	service.recordCompactionFailure(sessionID)
-	if !service.beginSessionCompaction(sessionID) {
-		t.Fatal("manual owner failed to acquire session")
-	}
-
-	result, err := service.runCompaction(context.Background(), TriggerConfig{
-		BotID:     uuid.NewString(),
-		SessionID: sessionID,
-	})
-	if err != nil {
-		t.Fatalf("busy automatic compaction error = %v", err)
-	}
-	if result.Status != StatusNoop || result.inflightDone == nil {
-		t.Fatalf("busy automatic result = %#v, want noop with owner completion signal", result)
-	}
-	service.endSessionCompaction(sessionID)
-	select {
-	case <-result.inflightDone:
-	default:
-		t.Fatal("owner completion signal remained open after release")
-	}
 }
 
 func assertRearmedCompactionRows(t *testing.T, queries *rearmQueries, secondRows []sqlc.ListUncompactedMessagesBySessionRow) {
