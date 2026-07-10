@@ -260,8 +260,23 @@ func TestLoadPipelineCompactionArtifactsRejectsCrossSessionLegacyIdentityRows(t 
 	}
 	resolver := &Resolver{queries: queries}
 	scope := compactionSummaryScope(botID, "chat", sessionID, "group", "room", "target")
+	recent := pipelineHistoryMessage(
+		t,
+		"dddddddd-dddd-dddd-dddd-dddddddddddd",
+		botID,
+		sessionID,
+		"recent-external",
+		time.UnixMilli(2_000).UTC(),
+		"user",
+		"recent same-session row",
+	)
+	recent.CompactID = artifactID
 
-	artifacts, summaries, err := resolver.loadPipelineCompactionArtifacts(context.Background(), scope, nil)
+	artifacts, summaries, err := resolver.loadPipelineCompactionArtifacts(
+		context.Background(),
+		scope,
+		pipelineHistoryRecords(t, []messagepkg.Message{recent}),
+	)
 	if err != nil {
 		t.Fatalf("loadPipelineCompactionArtifacts() error = %v", err)
 	}

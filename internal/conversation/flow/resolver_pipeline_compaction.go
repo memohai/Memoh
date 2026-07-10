@@ -57,11 +57,12 @@ func (r *Resolver) loadPipelineCompactionArtifacts(
 		}
 		projected := artifact
 		if len(projected.Coverage) == 0 {
-			projected.Coverage, err = r.loadLegacyArtifactCoverage(ctx, projected, owner)
+			var hasDurableCoverageRows bool
+			projected.Coverage, hasDurableCoverageRows, err = r.loadLegacyArtifactCoverage(ctx, projected, owner)
 			if err != nil {
 				return nil, nil, err
 			}
-			if len(projected.Coverage) == 0 {
+			if len(projected.Coverage) == 0 && !hasDurableCoverageRows {
 				projected.Coverage = legacyArtifactCoverage(catalog, projected, records, scope)
 			}
 			if len(projected.Coverage) == 0 {
@@ -94,25 +95,25 @@ func (r *Resolver) loadLegacyArtifactCoverage(
 	ctx context.Context,
 	artifact compaction.Artifact,
 	owner compaction.ArtifactOwner,
-) ([]compaction.CoveredSource, error) {
+) ([]compaction.CoveredSource, bool, error) {
 	compactID, err := db.ParseUUID(artifact.ID)
 	if err != nil {
-		return nil, nil
+		return nil, false, nil
 	}
 	rows, err := r.queries.ListMessageRefsByCompactID(ctx, compactID)
 	if err != nil {
-		return nil, fmt.Errorf("load legacy pipeline coverage for %s: %w", artifact.ID, err)
+		return nil, false, fmt.Errorf("load legacy pipeline coverage for %s: %w", artifact.ID, err)
 	}
 	coverage := make([]compaction.CoveredSource, 0, len(rows))
 	for _, row := range rows {
 		if !row.CreatedAt.Valid ||
 			(owner.BotID != "" && pgUUIDString(row.BotID) != owner.BotID) ||
 			!owner.SessionIDKnown || pgUUIDString(row.SessionID) != owner.SessionID {
-			return nil, nil
+			return nil, true, nil
 		}
 		ref, err := historyfrag.DBMessageIdentityRef(pgUUIDString(row.ID))
 		if err != nil {
-			return nil, nil
+			return nil, true, nil
 		}
 		coverage = append(coverage, compaction.CoveredSource{
 			Ref:                    ref,
@@ -121,7 +122,7 @@ func (r *Resolver) loadLegacyArtifactCoverage(
 			CreatedAtMs:            row.CreatedAt.Time.UnixMilli(),
 		})
 	}
-	return coverage, nil
+	return coverage, len(rows) > 0, nil
 }
 
 func legacyArtifactCoverage(
