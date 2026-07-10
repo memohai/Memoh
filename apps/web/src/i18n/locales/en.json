@@ -95,9 +95,12 @@
   "auth": {
     "welcome": "Welcome Back",
     "pageTitle": "Sign in",
+    "pageSubtitle": "Start building with Memoh",
     "continue": "Continue",
     "username": "Username",
     "password": "Password",
+    "usernamePlaceholder": "Enter username",
+    "passwordPlaceholder": "Enter password",
     "login": "Sign In",
     "register": "Sign Up",
     "logout": "Sign Out",
@@ -2095,7 +2098,7 @@
         "global": "Global Settings",
         "globalDescription": "Core preferences for this bot.",
         "interaction": "Interaction",
-        "interactionDescription": "Configure how the bot engages in conversations.",
+        "interactionDescription": "Choose the chat model and configure how the bot engages in conversations.",
         "multimedia": "Multimedia",
         "multimediaDescription": "Configure voice and image generation models.",
         "acp": "ACP Agent"

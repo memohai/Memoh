@@ -3,10 +3,9 @@
 // InputGroup atoms from @felinic/ui so it inherits the field-edge design
 // language and stays consistent with the secret-field pattern in channel-field.
 //
-// `class` is routed to the InputGroup wrapper (callers like the login page pass
-// `bg-background` so the field stays opaque over the animated dot matrix);
-// every other attr (id / placeholder / autocomplete / aria-invalid / v-model)
-// falls through to the input via $attrs.
+// `class` and `size` are routed to the InputGroup wrapper; every other attr
+// (id / placeholder / autocomplete / aria-invalid / v-model) falls through to
+// the input via $attrs.
 import type { HTMLAttributes } from 'vue'
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -18,6 +17,7 @@ defineOptions({ inheritAttrs: false })
 const props = defineProps<{
   class?: HTMLAttributes['class']
   disabled?: boolean
+  size?: 'sm' | 'default' | 'lg'
 }>()
 
 const { t } = useI18n()
@@ -25,7 +25,10 @@ const revealed = ref(false)
 </script>
 
 <template>
-  <InputGroup :class="props.class">
+  <InputGroup
+    :class="props.class"
+    :size="props.size"
+  >
     <InputGroupInput
       v-bind="$attrs"
       :type="revealed ? 'text' : 'password'"
