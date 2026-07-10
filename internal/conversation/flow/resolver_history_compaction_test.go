@@ -1,8 +1,10 @@
 package flow
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -75,6 +77,109 @@ func TestResolveCatalogArtifactRejectsDurableCoverageHashMismatch(t *testing.T) 
 	})
 	if len(got) != 1 || got[0].ModelMessage.TextContent() != "edited" {
 		t.Fatalf("hash-mismatched raw record was not preserved: %#v", got)
+	}
+}
+
+func TestResolveCatalogArtifactRejectsDurableCoverageMetadataMismatch(t *testing.T) {
+	t.Parallel()
+
+	owner := compaction.ArtifactOwner{BotID: "bot-1", SessionID: "session-1", SessionIDKnown: true}
+	record := historyRecord("row-1", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("unchanged")}, func(record *historyfrag.HistoryRecord) {
+		record.BotID = owner.BotID
+		record.SessionID = owner.SessionID
+		record.SessionIDKnown = true
+		record.CompactID = "artifact-1"
+		record.ExternalMessageID = "external-1"
+		record.SourceReplyToMessageID = "reply-1"
+		record.CreatedAt = time.UnixMilli(2)
+	})
+	artifact := compaction.Artifact{
+		ID:        "artifact-1",
+		BotID:     owner.BotID,
+		SessionID: owner.SessionID,
+		Summary:   "stale summary",
+		Coverage: []compaction.CoveredSource{{
+			Ref:                    record.Ref,
+			ExternalMessageID:      record.ExternalMessageID,
+			SourceReplyToMessageID: record.SourceReplyToMessageID,
+			CreatedAtMs:            1,
+		}},
+	}
+	catalog := compaction.NewArtifactCatalog()
+	catalog.Add(owner, compaction.NewArtifactAliasFrontier(artifact.ID, artifact))
+
+	if resolved, ok := resolveCatalogArtifact(catalog, owner, record); ok {
+		t.Fatalf("metadata-mismatched record resolved to stale artifact: %#v", resolved)
+	}
+}
+
+func TestReplaceCompactedMessagesRejectsArtifactWhenAnyLoadedSourceConflicts(t *testing.T) {
+	t.Parallel()
+
+	sessionID := "00000000-0000-0000-0000-00000000f501"
+	artifactID := "00000000-0000-0000-0000-00000000c501"
+	recordAID := "00000000-0000-0000-0000-000000000501"
+	recordBID := "00000000-0000-0000-0000-000000000502"
+	records := []historyfrag.HistoryRecord{
+		historyRecord(recordAID, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("raw a")}, func(record *historyfrag.HistoryRecord) {
+			record.SessionID = sessionID
+			record.SessionIDKnown = true
+			record.CompactID = artifactID
+		}),
+		historyRecord(recordBID, conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("edited raw b")}, func(record *historyfrag.HistoryRecord) {
+			record.SessionID = sessionID
+			record.SessionIDKnown = true
+			record.CompactID = artifactID
+		}),
+	}
+	staleRef := records[1].Ref
+	staleRef.ContentHash = "old-source-hash"
+	coverage, err := json.Marshal([]compaction.CoveredSource{{Ref: records[0].Ref}, {Ref: staleRef}})
+	if err != nil {
+		t.Fatalf("marshal stale coverage: %v", err)
+	}
+	queries := &recordingCompactionLogQueries{logs: []sqlc.BotHistoryMessageCompact{{
+		ID:        mustPGUUID(t, artifactID),
+		SessionID: mustPGUUID(t, sessionID),
+		Status:    "ok",
+		Summary:   "partially stale summary",
+		Coverage:  coverage,
+	}}}
+
+	got := mustReplaceCompactedMessages(t, &Resolver{queries: queries}, sessionID, contextfrag.Scope{SessionID: sessionID}, records)
+	want := []string{"raw a", "edited raw b"}
+	if gotTexts := recordTexts(got); !reflect.DeepEqual(gotTexts, want) {
+		t.Fatalf("partially stale artifact remained active: %#v, want %#v", gotTexts, want)
+	}
+}
+
+func TestReplaceCompactedMessagesRejectsArtifactForStaleCoverageFallback(t *testing.T) {
+	t.Parallel()
+
+	sessionID := "00000000-0000-0000-0000-00000000f502"
+	artifactID := "00000000-0000-0000-0000-00000000c502"
+	recordID := "00000000-0000-0000-0000-000000000503"
+	record := historyRecord(recordID, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("edited raw")}, func(record *historyfrag.HistoryRecord) {
+		record.SessionID = sessionID
+		record.SessionIDKnown = true
+	})
+	staleRef := record.Ref
+	staleRef.ContentHash = "old-source-hash"
+	coverage, err := json.Marshal([]compaction.CoveredSource{{Ref: staleRef}})
+	if err != nil {
+		t.Fatalf("marshal stale coverage: %v", err)
+	}
+	queries := &recordingCompactionLogQueries{logs: []sqlc.BotHistoryMessageCompact{{
+		ID:        mustPGUUID(t, artifactID),
+		SessionID: mustPGUUID(t, sessionID),
+		Status:    "ok",
+		Summary:   "stale summary",
+		Coverage:  coverage,
+	}}}
+
+	got := mustReplaceCompactedMessages(t, &Resolver{queries: queries}, sessionID, contextfrag.Scope{SessionID: sessionID}, []historyfrag.HistoryRecord{record})
+	if gotTexts := recordTexts(got); !reflect.DeepEqual(gotTexts, []string{"edited raw"}) {
+		t.Fatalf("stale coverage fallback remained active: %#v", gotTexts)
 	}
 }
 

@@ -233,7 +233,6 @@ func testCoverage(ids ...string) []CoveredSource {
 				Schema:      contextfrag.SchemaContextRef,
 				Durability:  contextfrag.RefDurable,
 			},
-			Ordinal:     i,
 			CreatedAtMs: int64(i + 1),
 		})
 	}

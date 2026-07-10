@@ -48,9 +48,6 @@ func TestDecodeArtifactCoverageRejectsInvalidPersistedCoverage(t *testing.T) {
 	duplicate := strictTestCoveredSource("duplicate", 1)
 	newer := strictTestCoveredSource("newer", 2)
 	older := strictTestCoveredSource("older", 1)
-	older.Ordinal = 1
-	wrongOrdinal := strictTestCoveredSource("wrong-ordinal", 1)
-	wrongOrdinal.Ordinal = 1
 
 	tests := []struct {
 		name    string
@@ -62,7 +59,6 @@ func TestDecodeArtifactCoverageRejectsInvalidPersistedCoverage(t *testing.T) {
 		{name: "canonical hash scope", covered: []CoveredSource{canonicalScope}, wantErr: "source_payload"},
 		{name: "duplicate stable key", covered: []CoveredSource{duplicate, duplicate}, wantErr: "duplicate"},
 		{name: "decreasing creation time", covered: []CoveredSource{newer, older}, wantErr: "created_at_ms"},
-		{name: "non-canonical ordinal", covered: []CoveredSource{wrongOrdinal}, wantErr: "ordinal"},
 	}
 
 	for _, tt := range tests {
@@ -114,6 +110,60 @@ func TestArtifactFrontierRejectsDerivedCoverageThatReordersParentSources(t *test
 	frontier := buildArtifactFrontier([]Artifact{parent, child})
 	if len(frontier.Artifacts) != 0 || !hasLineageIssue(frontier.Issues, LineageIssueCoverageMismatch) {
 		t.Fatalf("reordered derived coverage remained active: artifacts=%#v issues=%#v", frontier.Artifacts, frontier.Issues)
+	}
+}
+
+func TestArtifactFrontierRejectsDerivedCoverageThatReordersParentSegments(t *testing.T) {
+	t.Parallel()
+
+	parentA := testArtifact("parent-a")
+	parentB := testArtifact("parent-b")
+	child := testArtifact("reordered-child")
+	parentA.SupersededBy = child.ID
+	parentA.SupersededAt = time.Unix(1, 0)
+	parentA.Coverage = testCoverage("row-a")
+	parentB.SupersededBy = child.ID
+	parentB.SupersededAt = time.Unix(1, 0)
+	parentB.Coverage = testCoverage("row-b")
+	child.ParentIDs = []string{parentA.ID, parentB.ID}
+	child.Coverage = testCoverage("row-b", "row-a")
+
+	frontier := buildArtifactFrontier([]Artifact{parentA, parentB, child})
+	if len(frontier.Artifacts) != 0 || !hasLineageIssue(frontier.Issues, LineageIssueCoverageMismatch) {
+		t.Fatalf("reordered parent segments remained active: artifacts=%#v issues=%#v", frontier.Artifacts, frontier.Issues)
+	}
+}
+
+func TestArtifactFrontierRejectsDerivedCoverageThatRewritesParentMetadata(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		mutate func(*CoveredSource)
+	}{
+		{name: "created at", mutate: func(source *CoveredSource) { source.CreatedAtMs++ }},
+		{name: "external message id", mutate: func(source *CoveredSource) { source.ExternalMessageID = "changed" }},
+		{name: "reply target", mutate: func(source *CoveredSource) { source.SourceReplyToMessageID = "changed" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parent := testArtifact("metadata-parent")
+			child := testArtifact("metadata-child")
+			parent.SupersededBy = child.ID
+			parent.SupersededAt = time.Unix(1, 0)
+			parent.Coverage = testCoverage("row-1")
+			parent.Coverage[0].ExternalMessageID = "external-1"
+			parent.Coverage[0].SourceReplyToMessageID = "reply-1"
+			child.ParentIDs = []string{parent.ID}
+			child.Coverage = append([]CoveredSource(nil), parent.Coverage...)
+			tt.mutate(&child.Coverage[0])
+
+			frontier := buildArtifactFrontier([]Artifact{parent, child})
+			if len(frontier.Artifacts) != 0 || !hasLineageIssue(frontier.Issues, LineageIssueCoverageMismatch) {
+				t.Fatalf("rewritten parent metadata remained active: artifacts=%#v issues=%#v", frontier.Artifacts, frontier.Issues)
+			}
+		})
 	}
 }
 

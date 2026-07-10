@@ -40,6 +40,14 @@ func (c *ArtifactCatalog) ResolveCoveredRef(owner ArtifactOwner, ref contextfrag
 	return frontier.ResolveCoveredRef(ref)
 }
 
+func (c *ArtifactCatalog) ResolveCoverageIdentity(owner ArtifactOwner, ref contextfrag.ContextRef) (Artifact, bool) {
+	frontier, ok := c.frontiers[normalizeArtifactOwner(owner)]
+	if !ok {
+		return Artifact{}, false
+	}
+	return frontier.ResolveCoverageIdentity(ref)
+}
+
 func normalizeArtifactOwner(owner ArtifactOwner) ArtifactOwner {
 	owner.BotID = strings.TrimSpace(owner.BotID)
 	owner.SessionID = strings.TrimSpace(owner.SessionID)

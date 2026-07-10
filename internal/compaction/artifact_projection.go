@@ -77,6 +77,15 @@ func (f ArtifactFrontier) ResolveCoveredRef(ref contextfrag.ContextRef) (Artifac
 	return artifact, ok
 }
 
+func (f ArtifactFrontier) ResolveCoverageIdentity(ref contextfrag.ContextRef) (Artifact, bool) {
+	covered, ok := f.coverage[ref.StableKey()]
+	if !ok {
+		return Artifact{}, false
+	}
+	artifact, ok := f.byID[covered.artifactID]
+	return artifact, ok
+}
+
 type artifactCoverageAlias struct {
 	artifactID string
 	ref        contextfrag.ContextRef
@@ -285,6 +294,7 @@ func (r *loadedLineageResolver) resolve(id string) loadedLineageResolution {
 	if lineageCoverageMissing(current) {
 		return r.finish(id, loadedLineageResolution{issue: issue(LineageIssueMissingDerivedCoverage, current.ID, "")})
 	}
+	parentCoverage := make([]CoveredSource, 0)
 	for _, parentID := range current.ParentIDs {
 		parent, exists := r.nodes[parentID]
 		if !exists || !artifactUsable(parent) || parent.SupersededBy != current.ID {
@@ -302,9 +312,10 @@ func (r *loadedLineageResolver) resolve(id string) loadedLineageResolution {
 		if lineageCoverageMissing(parent) {
 			return r.finish(id, loadedLineageResolution{issue: issue(LineageIssueMissingDerivedCoverage, parent.ID, "")})
 		}
-		if !coverageIncludes(current.Coverage, parent.Coverage) {
-			return r.finish(id, loadedLineageResolution{issue: issue(LineageIssueCoverageMismatch, current.ID, parentID)})
-		}
+		parentCoverage = append(parentCoverage, parent.Coverage...)
+	}
+	if !coverageIncludes(current.Coverage, parentCoverage) {
+		return r.finish(id, loadedLineageResolution{issue: issue(LineageIssueCoverageMismatch, current.ID, strings.Join(current.ParentIDs, ","))})
 	}
 	if current.SupersededBy == "" {
 		return r.finish(id, loadedLineageResolution{terminal: current})
@@ -372,7 +383,7 @@ func coverageIncludes(coverage []CoveredSource, required []CoveredSource) bool {
 		for next < len(coverage) {
 			candidate := coverage[next]
 			next++
-			if compatibleCoverageRef(candidate.Ref, expected.Ref) {
+			if compatibleCoveredSource(candidate, expected) {
 				found = true
 				break
 			}
@@ -382,6 +393,13 @@ func coverageIncludes(coverage []CoveredSource, required []CoveredSource) bool {
 		}
 	}
 	return true
+}
+
+func compatibleCoveredSource(candidate, expected CoveredSource) bool {
+	return compatibleCoverageRef(candidate.Ref, expected.Ref) &&
+		candidate.ExternalMessageID == expected.ExternalMessageID &&
+		candidate.SourceReplyToMessageID == expected.SourceReplyToMessageID &&
+		candidate.CreatedAtMs == expected.CreatedAtMs
 }
 
 func compatibleCoverageRef(candidate contextfrag.ContextRef, expected contextfrag.ContextRef) bool {

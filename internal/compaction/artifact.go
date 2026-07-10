@@ -18,7 +18,6 @@ const ArtifactVersion = 1
 
 type CoveredSource struct {
 	Ref                    contextfrag.ContextRef `json:"ref"`
-	Ordinal                int                    `json:"ordinal"`
 	ExternalMessageID      string                 `json:"external_message_id,omitempty"`
 	SourceReplyToMessageID string                 `json:"source_reply_to_message_id,omitempty"`
 	CreatedAtMs            int64                  `json:"created_at_ms,omitempty"`
@@ -63,9 +62,16 @@ func (a Artifact) HistoryRecord(scope contextfrag.Scope) historyfrag.HistoryReco
 	return record
 }
 
-func (a Artifact) Covers(ref contextfrag.ContextRef) bool {
+func (a Artifact) CoversRecord(record historyfrag.HistoryRecord) bool {
+	createdAtMs := int64(0)
+	if !record.CreatedAt.IsZero() {
+		createdAtMs = record.CreatedAt.UnixMilli()
+	}
 	for _, source := range a.Coverage {
-		if compatibleCoverageRef(ref, source.Ref) {
+		if compatibleCoverageRef(record.Ref, source.Ref) &&
+			strings.TrimSpace(source.ExternalMessageID) == strings.TrimSpace(record.ExternalMessageID) &&
+			strings.TrimSpace(source.SourceReplyToMessageID) == strings.TrimSpace(record.SourceReplyToMessageID) &&
+			source.CreatedAtMs == createdAtMs {
 			return true
 		}
 	}
@@ -84,7 +90,7 @@ func artifactMetadataFor(items []CompactionCandidate, ids []pgtype.UUID) (artifa
 		byID[item.ID] = item
 	}
 	covered := make([]CoveredSource, 0, len(ids))
-	for ordinal, id := range ids {
+	for _, id := range ids {
 		item, ok := byID[id]
 		if !ok {
 			return artifactMetadata{}, fmt.Errorf("compaction artifact: marked id %s missing from candidates", formatUUID(id))
@@ -95,7 +101,6 @@ func artifactMetadataFor(items []CompactionCandidate, ids []pgtype.UUID) (artifa
 		}
 		covered = append(covered, CoveredSource{
 			Ref:                    item.Record.Ref,
-			Ordinal:                ordinal,
 			ExternalMessageID:      item.Record.ExternalMessageID,
 			SourceReplyToMessageID: item.Record.SourceReplyToMessageID,
 			CreatedAtMs:            createdAtMs,
@@ -138,9 +143,6 @@ func validatePersistedArtifactCoverage(covered []CoveredSource) error {
 			return fmt.Errorf("ref %d: duplicate stable key %q", i, key)
 		}
 		seen[key] = struct{}{}
-		if source.Ordinal != i {
-			return fmt.Errorf("ref %d: ordinal %d does not match coverage position", i, source.Ordinal)
-		}
 		if i > 0 && source.CreatedAtMs < covered[i-1].CreatedAtMs {
 			return fmt.Errorf(
 				"ref %d: created_at_ms %d precedes ref %d created_at_ms %d",

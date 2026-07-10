@@ -63,8 +63,30 @@ func TestReplaceCompactedMessagesLoadsSessionSummaryCoverageFromCompactedRows(t 
 	sessionID := "00000000-0000-0000-0000-00000000f004"
 	compactID := "00000000-0000-0000-0000-00000000c004"
 	coverage, err := json.Marshal([]compaction.CoveredSource{
-		{Ordinal: 0, Ref: contextfrag.ContextRef{Namespace: "bot_history_message", ID: "00000000-0000-0000-0000-000000000401", Version: 1, Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable, ContentHash: "hash-401", HashAlgo: contextfrag.HashAlgoSHA256, HashScope: contextfrag.HashScopeSourcePayload}},
-		{Ordinal: 1, Ref: contextfrag.ContextRef{Namespace: "bot_history_message", ID: "00000000-0000-0000-0000-000000000402", Version: 1, Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable, ContentHash: "hash-402", HashAlgo: contextfrag.HashAlgoSHA256, HashScope: contextfrag.HashScopeSourcePayload}},
+		{
+			Ref: contextfrag.ContextRef{
+				Namespace:   "bot_history_message",
+				ID:          "00000000-0000-0000-0000-000000000401",
+				Version:     1,
+				Schema:      contextfrag.SchemaContextRef,
+				Durability:  contextfrag.RefDurable,
+				ContentHash: "hash-401",
+				HashAlgo:    contextfrag.HashAlgoSHA256,
+				HashScope:   contextfrag.HashScopeSourcePayload,
+			},
+		},
+		{
+			Ref: contextfrag.ContextRef{
+				Namespace:   "bot_history_message",
+				ID:          "00000000-0000-0000-0000-000000000402",
+				Version:     1,
+				Schema:      contextfrag.SchemaContextRef,
+				Durability:  contextfrag.RefDurable,
+				ContentHash: "hash-402",
+				HashAlgo:    contextfrag.HashAlgoSHA256,
+				HashScope:   contextfrag.HashScopeSourcePayload,
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("marshal coverage: %v", err)
