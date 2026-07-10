@@ -7,9 +7,9 @@ RUN npm install -g pnpm@10
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY patches ./patches
-# Root postinstall verifies patchedDependencies content; the script must exist
-# before `pnpm install` or the lifecycle hook fails the build.
-COPY scripts/check-patched-deps.mjs ./scripts/
+# Root lifecycle hooks validate the UI submodule and patched dependencies; both
+# scripts must exist before `pnpm install` runs preinstall and postinstall.
+COPY scripts/ensure-submodules.mjs scripts/check-patched-deps.mjs ./scripts/
 
 COPY packages ./packages
 COPY apps ./apps
