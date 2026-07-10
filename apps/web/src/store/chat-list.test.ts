@@ -145,6 +145,113 @@ function approvalTurn(approval: UIToolApproval) {
   }
 }
 
+function richActiveRunStoreScript(sessionId = 'session-1', streamId = 'stream-rich'): UIStreamEvent[] {
+  return [
+    { type: 'start', stream_id: streamId, session_id: sessionId } as UIStreamEvent,
+    {
+      type: 'message',
+      stream_id: streamId,
+      session_id: sessionId,
+      data: { id: 0, type: 'reasoning', content: 'I need to inspect the workspace.' },
+    } as UIStreamEvent,
+    {
+      type: 'message',
+      stream_id: streamId,
+      session_id: sessionId,
+      data: { id: 1, type: 'text', content: 'I will check the current state.' },
+    } as UIStreamEvent,
+    {
+      type: 'message',
+      stream_id: streamId,
+      session_id: sessionId,
+      data: {
+        id: 2,
+        type: 'tool',
+        name: 'exec',
+        tool_call_id: 'call-exec',
+        input: { command: 'pwd' },
+        running: true,
+        progress: ['queued'],
+      },
+    } as UIStreamEvent,
+    {
+      type: 'message',
+      stream_id: streamId,
+      session_id: sessionId,
+      data: {
+        id: 2,
+        type: 'tool',
+        name: 'exec',
+        tool_call_id: 'call-exec',
+        input: { command: 'pwd' },
+        output: { structuredContent: { stdout: '/workspace\n' } },
+        running: false,
+        progress: ['queued', { stdout: '/workspace\n' }],
+      },
+    } as UIStreamEvent,
+    {
+      type: 'message',
+      stream_id: streamId,
+      session_id: sessionId,
+      data: {
+        id: 3,
+        type: 'tool',
+        name: 'exec',
+        tool_call_id: 'call-approval',
+        input: { command: 'rm -rf build' },
+        running: false,
+        approval: {
+          approval_id: 'approval-1',
+          short_id: 7,
+          status: 'pending',
+          can_approve: true,
+        },
+      },
+    } as UIStreamEvent,
+    {
+      type: 'message',
+      stream_id: streamId,
+      session_id: sessionId,
+      data: {
+        id: 4,
+        type: 'tool',
+        name: 'ask_user',
+        tool_call_id: 'call-ask',
+        input: { questions: [{ text: 'Continue?', kind: 'single_select' }] },
+        running: false,
+        user_input: {
+          user_input_id: 'input-1',
+          short_id: 8,
+          status: 'pending',
+          can_respond: true,
+          questions: [{
+            id: 'q1',
+            text: 'Continue?',
+            kind: 'single_select',
+            options: [
+              { id: 'yes', label: 'Yes' },
+              { id: 'no', label: 'No' },
+            ],
+          }],
+        },
+      },
+    } as UIStreamEvent,
+  ]
+}
+
+function interruptedRunStoreScript(sessionId = 'session-1', streamId = 'stream-interrupted'): UIStreamEvent[] {
+  return [
+    { type: 'start', stream_id: streamId, session_id: sessionId } as UIStreamEvent,
+    {
+      type: 'message',
+      stream_id: streamId,
+      session_id: sessionId,
+      data: { id: 0, type: 'text', content: 'partial output' },
+    } as UIStreamEvent,
+    { type: 'error', stream_id: streamId, session_id: sessionId, message: 'runtime interrupted' } as UIStreamEvent,
+  ]
+}
+
 describe('chat-list store', () => {
   let streamHandler: UIStreamEventHandler | null
   // Captured but not driven by any test body yet; keep the capture so future
@@ -6395,4 +6502,122 @@ describe('chat-list store', () => {
     })
     expect(api.closeACPRuntime).not.toHaveBeenCalledWith('bot-1', 'rt_warm')
   })
+  it('applies the rich active-run contract script to the current assistant turn', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    sendEvents = richActiveRunStoreScript()
+    const sendPromise = store.sendMessage('please inspect')
+    await flushPromises()
+    await flushPromises()
+
+    expect(sentWSMessages[0]).toMatchObject({
+      type: 'message',
+      text: 'please inspect',
+      session_id: 'session-1',
+    })
+
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    expect(assistant?.role).toBe('assistant')
+    if (assistant?.role !== 'assistant') throw new Error('missing assistant turn')
+
+    expect(assistant.messages.find(block => block.type === 'reasoning')).toMatchObject({
+      content: 'I need to inspect the workspace.',
+    })
+    expect(assistant.messages.find(block => block.type === 'text')).toMatchObject({
+      content: 'I will check the current state.',
+    })
+
+    const execTool = assistant.messages.find(block => block.type === 'tool' && block.toolCallId === 'call-exec')
+    expect(execTool).toMatchObject({
+      type: 'tool',
+      toolName: 'exec',
+      done: true,
+      running: false,
+      progress: ['queued', { stdout: '/workspace\n' }],
+    })
+
+    const approvalTool = assistant.messages.find(block => block.type === 'tool' && block.toolCallId === 'call-approval')
+    expect(approvalTool).toMatchObject({
+      approval: {
+        approval_id: 'approval-1',
+        status: 'pending',
+        can_approve: true,
+      },
+    })
+
+    const askUserTool = assistant.messages.find(block => block.type === 'tool' && block.toolCallId === 'call-ask')
+    expect(askUserTool).toMatchObject({
+      userInput: {
+        user_input_id: 'input-1',
+        status: 'pending',
+        can_respond: true,
+        questions: [expect.objectContaining({ text: 'Continue?' })],
+      },
+    })
+
+    streamHandler?.({ type: 'end', stream_id: lastStreamId, session_id: lastSessionId } as UIStreamEvent)
+    await sendPromise
+  })
+
+  it('records interrupted runtime streams as stream-stage failures after visible output', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' }],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    sendEvents = interruptedRunStoreScript()
+    const result = await store.sendMessage('please run')
+
+    expect(result).toMatchObject({
+      ok: false,
+      stage: 'stream',
+      error: 'runtime interrupted',
+    })
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    expect(assistant?.role).toBe('assistant')
+    if (assistant?.role !== 'assistant') throw new Error('missing assistant turn')
+    expect(assistant.messages.some(block => block.type === 'text' && block.content === 'partial output')).toBe(true)
+    expect(assistant.messages.some(block => block.type === 'error' && block.content === 'runtime interrupted')).toBe(true)
+  })
+
+  it('does not let stale active-run events for another session pollute the visible transcript', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    api.fetchMessagesUI.mockResolvedValueOnce([])
+    store.selectSession('session-2')
+    await flushPromises()
+    expect(store.sessionId).toBe('session-2')
+    expect(store.messages).toEqual([])
+
+    streamHandler?.({ type: 'start', stream_id: 'stream-old', session_id: 'session-1' } as UIStreamEvent)
+    streamHandler?.({
+      type: 'message',
+      stream_id: 'stream-old',
+      session_id: 'session-1',
+      data: { id: 0, type: 'text', content: 'old session output' },
+    } as UIStreamEvent)
+
+    expect(store.messages).toEqual([])
+
+    streamHandler?.({ type: 'end', stream_id: 'stream-old', session_id: 'session-1' } as UIStreamEvent)
+  })
+
 })
