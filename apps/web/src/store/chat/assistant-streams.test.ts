@@ -95,6 +95,8 @@ describe('assistant stream registry', () => {
 
     expect(registry.streaming.value).toBe(true)
     expect(registry.streamingSessionId.value).toBe('session-b')
+    expect(registry.assistantStreamsForSession('bot-1', 'session-a').map(stream => stream.streamId)).toEqual(['stream-a'])
+    expect(registry.assistantStreamsForSession('bot-2', 'session-a')).toEqual([])
 
     sessionId.value = 'session-c'
     expect(registry.streaming.value).toBe(false)

@@ -55,6 +55,13 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
       .map(stream => stream.streamId)
   }
 
+  function assistantStreamsForSession(botId: string, targetSessionId: string): AssistantStream[] {
+    const bid = botId.trim()
+    const sid = targetSessionId.trim()
+    if (!bid || !sid) return []
+    return activeStreams().filter(stream => stream.botId === bid && stream.sessionId === sid)
+  }
+
   function isSessionStreaming(targetSessionId?: string | null): boolean {
     return activeStreamIdsForSession(targetSessionId).length > 0
   }
@@ -209,6 +216,7 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
     streaming,
     streamingSessionId,
     activeStreamIdsForSession,
+    assistantStreamsForSession,
     isSessionStreaming,
     isUnboundComposerStreaming,
     streamIdForEvent,

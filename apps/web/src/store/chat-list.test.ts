@@ -4105,6 +4105,72 @@ describe('chat-list store', () => {
     expect(store.messages).toHaveLength(0)
   })
 
+  it('reattaches an active assistant stream after switching away and back', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+      { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+    ], nextCursor: null })
+    let returningToSessionA = false
+    api.fetchMessagesUI.mockImplementation(async (_botId: string, targetSessionId: string) => {
+      if (returningToSessionA && targetSessionId === 'session-a') {
+        return [{
+          id: 'server-user-a',
+          role: 'user',
+          text: 'first',
+          attachments: [],
+          timestamp: '2026-07-10T00:00:00.000Z',
+        }]
+      }
+      return []
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const sending = store.sendMessage('first')
+    await flushPromises()
+    const streamId = sentWSMessages[0]?.stream_id as string
+    streamHandler?.({
+      type: 'message',
+      stream_id: streamId,
+      session_id: 'session-a',
+      data: { id: 0, type: 'text', content: 'before switch' },
+    } as UIStreamEvent)
+
+    await store.selectSession('session-b')
+    await flushPromises()
+    expect(store.messages).toHaveLength(0)
+
+    returningToSessionA = true
+    await store.selectSession('session-a')
+    await flushPromises()
+    await flushPromises()
+    expect(store.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
+    expect(store.messages[1]).toMatchObject({
+      role: 'assistant',
+      messages: [{ type: 'text', content: 'before switch' }],
+      streaming: true,
+    })
+
+    streamHandler?.({
+      type: 'message',
+      stream_id: streamId,
+      session_id: 'session-a',
+      data: { id: 1, type: 'text', content: 'after return' },
+    } as UIStreamEvent)
+    expect(store.messages[1]).toMatchObject({
+      role: 'assistant',
+      messages: [
+        { type: 'text', content: 'before switch' },
+        { type: 'text', content: 'after return' },
+      ],
+    })
+
+    streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'session-a' } as UIStreamEvent)
+    await expect(sending).resolves.toMatchObject({ ok: true })
+  })
+
   it('routes interleaved websocket events by stream id', async () => {
     // Two parallel assistant streams in two sessions: each turn must be
     // updated by its own stream id, never crossed. Cross-session view

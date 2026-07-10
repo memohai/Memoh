@@ -259,6 +259,7 @@ export const useChatStore = defineStore('chat', () => {
   const {
     streaming,
     streamingSessionId,
+    assistantStreamsForSession,
     isSessionStreaming,
     streamIdForEvent,
     trackAssistantStream,
@@ -967,6 +968,11 @@ export const useChatStore = defineStore('chat', () => {
     sessionMessagesStream.start(async (signal) => {
       try {
         await loadInitialMessages(bid, sid)
+        for (const stream of assistantStreamsForSession(bid, sid)) {
+          if (!messages.includes(stream.assistantTurn)) {
+            appendTurnToSession(bid, sid, stream.assistantTurn)
+          }
+        }
       } catch (error) {
         console.error('Failed to load session messages:', error)
       }
