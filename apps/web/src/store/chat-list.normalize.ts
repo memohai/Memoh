@@ -11,7 +11,7 @@ import type {
   UIUserInput,
   UIUserTurn,
 } from '@/composables/api/useChat'
-import type { ChatMessage, ChatUserTurn, ToolCallBlock } from './chat-list'
+import type { ChatMessage, ChatUserTurn, ToolCallBlock } from './chat/types'
 
 // Stateless normalization/merge helpers shared by the chat store. Everything
 // here is pure with respect to the chat store — no refs, no maps, no session

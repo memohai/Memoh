@@ -6,7 +6,7 @@ import {
   setACPRuntimeModelByID as requestSetACPRuntimeModelByID,
 } from '@/composables/api/useChat'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH } from '@/utils/acp'
-import type { ACPAgentSessionInput } from '../chat-list'
+import type { ACPAgentSessionInput } from './types'
 
 // Pending-ACP session staging — the state machine behind the "draft composer
 // pointed at an ACP agent" flow: staging an agent before any session exists,

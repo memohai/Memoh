@@ -46,8 +46,19 @@ import {
   isBackgroundTaskActive,
   normalizeBackgroundTask,
   reconcileBackgroundTasksInMessages,
-  type BackgroundTask,
 } from './chat/background-tasks'
+import type {
+  ACPAgentSessionInput,
+  ActiveChatTarget,
+  ChatAssistantTurn,
+  ChatMessage,
+  ChatUserTurn,
+  ContentBlock,
+  SendMessageOptions,
+  SendMessageResult,
+  SendMessageStage,
+  ToolCallBlock,
+} from './chat/types'
 import {
   createSession,
   deleteSession as requestDeleteSession,
@@ -65,18 +76,9 @@ import {
   type ChatAttachment,
   type CommandEventResponse,
   type ChatWebSocket,
-  type UIAttachment,
-  type UIAttachmentsMessage,
-  type UIErrorMessage,
   type UIMessage,
-  type UIReasoningMessage,
-  type UIReplyRef,
-  type UIForwardRef,
-  type UISkillActivation,
   type UISystemTurn,
-  type UITextMessage,
   type UIToolApproval,
-  type UIToolMessage,
   type UIUserInput,
   type RequestedSkillSelection,
   type WSUserInputAnswer,
@@ -95,98 +97,29 @@ import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH } from '@/utils/acp'
 import { getBotsByBotIdSettings } from '@memohai/sdk'
 import type { AcpagentRuntimeStatus } from '@memohai/sdk'
 
-export type TextBlock = UITextMessage
-export type ThinkingBlock = UIReasoningMessage
-export type AttachmentItem = UIAttachment
-export type AttachmentBlock = UIAttachmentsMessage
-export type ErrorBlock = UIErrorMessage
-
-export interface ToolCallBlock extends UIToolMessage {
-  toolCallId: string
-  toolName: string
-  result: unknown | null
-  done: boolean
-  approval?: UIToolApproval
-  userInput?: UIUserInput
-  backgroundTask?: BackgroundTask
-}
-
-export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | AttachmentBlock | ErrorBlock
+export type {
+  ACPAgentSessionInput,
+  ActiveChatTarget,
+  AttachmentBlock,
+  AttachmentItem,
+  BackgroundTask,
+  ChatAssistantTurn,
+  ChatMessage,
+  ChatSystemTurn,
+  ChatUserTurn,
+  ContentBlock,
+  ErrorBlock,
+  SendMessageOptions,
+  SendMessageResult,
+  SendMessageStage,
+  TextBlock,
+  ThinkingBlock,
+  ToolCallBlock,
+} from './chat/types'
 
 // fs-change beacon lives in ./chat/fs-beacon; types re-exported so existing
 // consumers keep importing them from the store module.
 export type { FsChangeBatch, FsChangeEvent, FsToolKind } from './chat/fs-beacon'
-
-export type ActiveChatTarget =
-  | {
-      kind: 'session'
-      sessionId: string
-      session: SessionSummary | null
-      runtimeType: string
-      isACP: boolean
-      isPendingACP: false
-      metadata: Record<string, unknown>
-      explicitSelection: boolean
-    }
-  | {
-      kind: 'draft-acp'
-      sessionId: null
-      session: null
-      runtimeType: 'acp_agent'
-      isACP: true
-      isPendingACP: true
-      metadata: Record<string, unknown>
-      explicitSelection: boolean
-    }
-  | {
-      kind: 'draft-native'
-      sessionId: null
-      session: null
-      runtimeType: 'model'
-      isACP: false
-      isPendingACP: false
-      metadata: Record<string, unknown>
-      explicitSelection: boolean
-    }
-
-export interface ChatUserTurn {
-  id: string
-  serverId?: string
-  role: 'user'
-  text: string
-  userMessageKind?: string
-  skillActivation?: UISkillActivation
-  attachments: AttachmentItem[]
-  reply?: UIReplyRef
-  forward?: UIForwardRef
-  timestamp: string
-  platform?: string
-  senderDisplayName?: string
-  senderAvatarUrl?: string
-  senderUserId?: string
-  externalMessageId?: string
-  streaming: boolean
-  isSelf: boolean
-  // Set by createOptimisticUserTurn / createOptimisticAssistantTurn and
-  // cleared as soon as the server twin replaces the optimistic row in
-  // mergeMessages. mergeMessages keys off this flag to decide which side of
-  // a (optimistic, server) pair to drop, so any new code path that creates a
-  // client-only turn before the server acknowledges it MUST set this.
-  __optimistic?: boolean
-}
-
-export interface ChatAssistantTurn {
-  id: string
-  serverId?: string
-  role: 'assistant'
-  messages: ContentBlock[]
-  timestamp: string
-  platform?: string
-  externalMessageId?: string
-  streaming: boolean
-  // See ChatUserTurn.__optimistic.
-  __optimistic?: boolean
-}
 
 interface UserInputStateSnapshot {
   block: ToolCallBlock
@@ -197,23 +130,6 @@ interface ToolApprovalStateSnapshot {
   block: ToolCallBlock
   approval: UIToolApproval
 }
-
-// Background-task tracking lives in ./chat/background-tasks; the type is
-// re-exported so existing consumers keep importing it from the store module.
-export type { BackgroundTask } from './chat/background-tasks'
-
-export interface ChatSystemTurn {
-  id: string
-  serverId?: string
-  role: 'system'
-  kind: 'background_task'
-  backgroundTask: BackgroundTask
-  timestamp: string
-  platform?: string
-  streaming: boolean
-}
-
-export type ChatMessage = ChatUserTurn | ChatAssistantTurn | ChatSystemTurn
 
 function currentLocale() {
   const storage = globalThis.localStorage
@@ -265,27 +181,6 @@ interface StreamIdentity {
   session_id?: string
 }
 
-export type SendMessageStage = 'startup' | 'stream'
-
-export interface SendMessageResult {
-  ok: boolean
-  stage?: SendMessageStage
-  error?: string
-  restoreInput?: string
-  restoreAttachments?: ChatAttachment[]
-  restoreRequestedSkills?: RequestedSkillSelection[]
-  composerScope?: string
-}
-
-export interface SendMessageOptions {
-  requestedSkills?: RequestedSkillSelection[]
-  composerScope?: string
-  /** Called immediately before a real chat turn is appended or dispatched. */
-  onBeforeTurnAppend?: () => void
-  /** Called when that turn is rolled back after a startup-stage failure. */
-  onTurnAppendAborted?: () => void
-}
-
 type WebNewCommandResult =
   | { kind: 'none' }
   | { kind: 'handled' }
@@ -309,19 +204,6 @@ function parseWebNewCommand(text: string): { mode: 'chat' | 'discuss' | ''; agen
   }
   return { mode: '', agentId: first }
 }
-
-export interface ACPAgentSessionInput {
-  agentId: string
-  sessionMode?: 'chat' | 'discuss'
-  projectPath?: string
-  projectMode?: string
-  modelId?: string
-  title?: string
-  startRuntime?: boolean
-  /** Warm pre-session runtime to bind to the created session. */
-  runtimeId?: string
-}
-
 
 interface StartupSendFailure {
   id: string

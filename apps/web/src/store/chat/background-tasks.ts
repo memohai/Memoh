@@ -1,6 +1,8 @@
 import type { UIBackgroundTask } from '@/composables/api/useChat'
 import { asRecord, pickRawString, pickString, taskIdFromToolBlock } from '../chat-list.normalize'
-import type { ChatMessage, ToolCallBlock } from '../chat-list'
+import type { BackgroundTask, ChatMessage, ToolCallBlock } from './types'
+
+export type { BackgroundTask } from './types'
 
 // Background-task tracking — normalizes the loosely-shaped background_task
 // payloads that arrive over WS/SSE, remembers the latest state per task id,
@@ -8,24 +10,6 @@ import type { ChatMessage, ToolCallBlock } from '../chat-list'
 // merge/normalize logic plus one Map; the chat store instantiates a tracker
 // and passes its own `messages` array where a scan is needed, so this module
 // never holds transcript state itself.
-
-export interface BackgroundTask {
-  taskId: string
-  status: string
-  event?: string
-  botId?: string
-  sessionId?: string
-  command?: string
-  agentId?: string
-  agentSessionId?: string
-  outputFile?: string
-  outputTail?: string
-  stream?: string
-  chunk?: string
-  exitCode?: number
-  duration?: string
-  stalled?: boolean
-}
 
 export function normalizeBackgroundStatus(status?: string, event?: string): string {
   const token = (status || event || '').trim().toLowerCase()

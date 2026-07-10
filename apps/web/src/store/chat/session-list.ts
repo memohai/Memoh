@@ -6,7 +6,7 @@ import {
   type SidebarSessionMode,
 } from '../chat-list.utils'
 import { serverMessageId } from '../chat-list.normalize'
-import type { ChatMessage } from '../chat-list'
+import type { ChatMessage } from './types'
 
 // Sessions-list bookkeeping + fork-anchor tracking.
 //
