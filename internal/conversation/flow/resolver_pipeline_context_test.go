@@ -121,6 +121,57 @@ func TestBuildPipelineContextPropagatesArtifactProjectionFailure(t *testing.T) {
 	}
 }
 
+func TestBuildPipelineContextLoadsBoundedRecentHistory(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "22222222-2222-2222-2222-222222222222"
+	p := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+	p.ReplaySession(sessionID, nil)
+	messages := &pipelineContextMessageService{}
+	resolver := &Resolver{
+		logger:         slog.New(slog.DiscardHandler),
+		pipeline:       p,
+		messageService: messages,
+	}
+
+	if _, err := resolver.buildPipelineContext(context.Background(), conversation.ChatRequest{SessionID: sessionID}, 0); err != nil {
+		t.Fatalf("buildPipelineContext() error = %v", err)
+	}
+	if messages.activeSinceCalls != 1 {
+		t.Fatalf("active history loads = %d, want 1", messages.activeSinceCalls)
+	}
+	age := time.Since(messages.since)
+	if age < 23*time.Hour+59*time.Minute || age > 24*time.Hour+time.Minute {
+		t.Fatalf("history window age = %s, want approximately 24h", age)
+	}
+}
+
+func TestLoadContextHistoryProjectionUsesLatestResponseOutsideRecentWindow(t *testing.T) {
+	t.Parallel()
+
+	want := time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Millisecond)
+	messages := &pipelineContextMessageService{latestTurnResponseAt: want}
+	resolver := &Resolver{
+		logger:         slog.New(slog.DiscardHandler),
+		messageService: messages,
+	}
+
+	projection, err := resolver.LoadContextHistoryProjection(
+		context.Background(),
+		"11111111-1111-1111-1111-111111111111",
+		"22222222-2222-2222-2222-222222222222",
+	)
+	if err != nil {
+		t.Fatalf("LoadContextHistoryProjection() error = %v", err)
+	}
+	if projection.LatestTurnResponseAtMs != want.UnixMilli() {
+		t.Fatalf("latest turn response = %d, want %d", projection.LatestTurnResponseAtMs, want.UnixMilli())
+	}
+	if messages.latestTurnResponseCalls != 1 {
+		t.Fatalf("latest turn response lookups = %d, want 1", messages.latestTurnResponseCalls)
+	}
+}
+
 func TestBuildPipelineContextKeepsHistoryAndCurrentQueryWhenRenderedContextIsStale(t *testing.T) {
 	t.Parallel()
 
@@ -250,11 +301,22 @@ func TestTrimMessagesAndRecordsPreservesEveryActiveSummary(t *testing.T) {
 
 type pipelineContextMessageService struct {
 	messagepkg.Service
-	rows []messagepkg.Message
-	err  error
+	rows                    []messagepkg.Message
+	err                     error
+	activeSinceCalls        int
+	since                   time.Time
+	latestTurnResponseAt    time.Time
+	latestTurnResponseCalls int
 }
 
-func (s *pipelineContextMessageService) ListActiveSinceBySession(context.Context, string, time.Time) ([]messagepkg.Message, error) {
+func (s *pipelineContextMessageService) LatestTurnResponseAtBySession(context.Context, string) (time.Time, error) {
+	s.latestTurnResponseCalls++
+	return s.latestTurnResponseAt, nil
+}
+
+func (s *pipelineContextMessageService) ListActiveSinceBySession(_ context.Context, _ string, since time.Time) ([]messagepkg.Message, error) {
+	s.activeSinceCalls++
+	s.since = since
 	return s.rows, s.err
 }
 

@@ -104,6 +104,12 @@ type Writer interface {
 	Persist(ctx context.Context, input PersistInput) (Message, error)
 }
 
+// TurnResponseCursorReader exposes the latest durable assistant/tool response
+// without materializing session history.
+type TurnResponseCursorReader interface {
+	LatestTurnResponseAtBySession(ctx context.Context, sessionID string) (time.Time, error)
+}
+
 // ToolTailRoundPersister optionally persists a complete
 // user -> assistant(tool-call) -> tool -> assistant(final) round in one write.
 type ToolTailRoundPersister interface {

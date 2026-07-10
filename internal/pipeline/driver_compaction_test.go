@@ -103,6 +103,25 @@ func TestHandleReplyWithAgentConsumesCoveredReplayWithoutCallingModel(t *testing
 	}
 }
 
+func TestHandleReplyWithAgentAnchorsColdStartFromProjectedTurnResponses(t *testing.T) {
+	t.Parallel()
+
+	resolver := &fakeRunConfigResolver{turnResponses: []TurnResponseEntry{{RequestedAtMs: 200, Role: "assistant", Content: "prior response"}}}
+	agent := &fakeDiscussStreamer{}
+	driver := NewDiscussDriver(DiscussDriverDeps{Resolver: resolver})
+	sess := &discussSession{config: DiscussSessionConfig{BotID: "bot", SessionID: "session"}}
+	rc := RenderedContext{{MessageID: "old", ReceivedAtMs: 100, Content: []RenderedContentPiece{{Type: "text", Text: "already answered"}}}}
+
+	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, agent)
+
+	if agent.lastConfig != nil {
+		t.Fatal("cold start replay older than projected turn response must not call the model")
+	}
+	if sess.lastProcessedMs != 200 {
+		t.Fatalf("cold start cursor = %d, want projected turn response anchor 200", sess.lastProcessedMs)
+	}
+}
+
 func TestHandleReplyWithAgentStopsOnArtifactProjectionFailure(t *testing.T) {
 	t.Parallel()
 

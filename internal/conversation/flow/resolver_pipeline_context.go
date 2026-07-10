@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/historyfrag"
 	messagepkg "github.com/memohai/memoh/internal/message"
@@ -17,6 +18,11 @@ type pipelineContextBuild struct {
 	Messages        []conversation.ModelMessage
 	HistoryRecords  []historyfrag.HistoryRecord
 	EstimatedTokens int
+}
+
+type pipelineHistoryProjectionBuild struct {
+	projection     pipelinepkg.ContextHistoryProjection
+	summaryRecords []historyfrag.HistoryRecord
 }
 
 type composedPipelineMessage struct {
@@ -37,10 +43,6 @@ func (r *Resolver) buildPipelineContext(
 		return pipelineContextBuild{}, nil
 	}
 	rc := r.pipeline.GetRC(sessionID)
-	historyMessages, records, err := r.loadPipelineHistorySnapshot(ctx, req)
-	if err != nil {
-		return pipelineContextBuild{}, err
-	}
 	scope := compactionSummaryScope(
 		req.BotID,
 		req.ChatID,
@@ -49,38 +51,79 @@ func (r *Resolver) buildPipelineContext(
 		req.ConversationName,
 		req.ReplyTarget,
 	)
-	artifacts, summaryRecords, err := r.loadPipelineCompactionArtifacts(ctx, scope, records)
+	history, err := r.loadPipelineHistoryProjection(ctx, scope, historyScopeFallbackFromChatRequest(req))
 	if err != nil {
 		return pipelineContextBuild{}, err
 	}
-	trs := pipelineTurnResponses(historyMessages)
-	composed := pipelinepkg.ComposeContextWithArtifacts(rc, trs, artifacts)
-	entries := composedPipelineMessages(composed, summaryRecords)
-	entries = appendCurrentPipelineQueryIfMissing(entries, pipelinepkg.ActiveRenderedContext(rc, artifacts), req)
+	composed := pipelinepkg.ComposeContextWithArtifacts(
+		rc,
+		history.projection.TurnResponses,
+		history.projection.CompactionArtifacts,
+	)
+	entries := composedPipelineMessages(composed, history.summaryRecords)
+	entries = appendCurrentPipelineQueryIfMissing(
+		entries,
+		pipelinepkg.ActiveRenderedContext(rc, history.projection.CompactionArtifacts),
+		req,
+	)
 	return trimComposedPipelineMessages(r.logger, entries, contextTokenBudget), nil
 }
 
-func (r *Resolver) loadPipelineHistorySnapshot(
+func (r *Resolver) loadPipelineHistoryProjection(
 	ctx context.Context,
-	req conversation.ChatRequest,
-) ([]messagepkg.Message, []historyfrag.HistoryRecord, error) {
+	scope contextfrag.Scope,
+	fallback historyfrag.ScopeFallback,
+) (pipelineHistoryProjectionBuild, error) {
 	if r.messageService == nil {
-		return nil, nil, nil
+		artifacts, summaries, err := r.loadPipelineCompactionArtifacts(ctx, scope, nil)
+		return pipelineHistoryProjectionBuild{
+			projection:     pipelinepkg.ContextHistoryProjection{CompactionArtifacts: artifacts},
+			summaryRecords: summaries,
+		}, err
 	}
-	messages, err := r.messageService.ListActiveSinceBySession(ctx, req.SessionID, time.Unix(0, 0).UTC())
+	since := time.Now().UTC().Add(-time.Duration(defaultMaxContextMinutes) * time.Minute)
+	messages, err := r.messageService.ListActiveSinceBySession(ctx, scope.SessionID, since)
 	if err != nil {
-		return nil, nil, err
+		return pipelineHistoryProjectionBuild{}, err
 	}
-	fallback := historyScopeFallbackFromChatRequest(req)
 	records := make([]historyfrag.HistoryRecord, 0, len(messages))
 	for _, message := range messages {
 		record, err := historyfrag.FromDBMessageWithLogger(r.logger, message, fallback)
 		if err != nil {
-			return nil, nil, err
+			return pipelineHistoryProjectionBuild{}, err
 		}
 		records = append(records, record)
 	}
-	return messages, records, nil
+	artifacts, summaries, err := r.loadPipelineCompactionArtifacts(ctx, scope, records)
+	if err != nil {
+		return pipelineHistoryProjectionBuild{}, err
+	}
+	turnResponses := pipelineTurnResponses(messages)
+	latestTurnResponseAtMs := int64(0)
+	for _, response := range turnResponses {
+		if response.RequestedAtMs > latestTurnResponseAtMs {
+			latestTurnResponseAtMs = response.RequestedAtMs
+		}
+	}
+	if latestTurnResponseAtMs == 0 {
+		if cursorReader, ok := r.messageService.(messagepkg.TurnResponseCursorReader); ok {
+			latest, err := cursorReader.LatestTurnResponseAtBySession(ctx, scope.SessionID)
+			if err != nil {
+				return pipelineHistoryProjectionBuild{}, err
+			}
+			if !latest.IsZero() {
+				latestTurnResponseAtMs = latest.UnixMilli()
+			}
+		}
+	}
+	return pipelineHistoryProjectionBuild{
+		projection: pipelinepkg.ContextHistoryProjection{
+			TurnResponses:          turnResponses,
+			CompactionArtifacts:    artifacts,
+			LatestTurnResponseAtMs: latestTurnResponseAtMs,
+		},
+		summaryRecords: summaries,
+	}, nil
 }
 
 func pipelineTurnResponses(messages []messagepkg.Message) []pipelinepkg.TurnResponseEntry {

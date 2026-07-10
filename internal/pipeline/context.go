@@ -56,6 +56,14 @@ type CompactionArtifact struct {
 	Sources       []CompactionSource `json:"sources,omitempty"`
 }
 
+// ContextHistoryProjection is the storage-independent history input consumed
+// by pipeline orchestration.
+type ContextHistoryProjection struct {
+	TurnResponses          []TurnResponseEntry
+	CompactionArtifacts    []CompactionArtifact
+	LatestTurnResponseAtMs int64
+}
+
 // LatestExternalEventMs returns the latest external event timestamp after
 // afterMs, or 0 if none found.
 func LatestExternalEventMs(rc RenderedContext, afterMs int64) int64 {

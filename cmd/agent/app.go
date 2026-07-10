@@ -310,14 +310,13 @@ func provideEventStore(log *slog.Logger, queries dbstore.Queries) *pipelinepkg.E
 	return pipelinepkg.NewEventStore(log, queries)
 }
 
-func provideDiscussDriver(log *slog.Logger, pipeline *pipelinepkg.Pipeline, eventStore *pipelinepkg.EventStore, agent *agentpkg.Agent, msgService *message.DBService) *pipelinepkg.DiscussDriver {
+func provideDiscussDriver(log *slog.Logger, pipeline *pipelinepkg.Pipeline, eventStore *pipelinepkg.EventStore, agent *agentpkg.Agent) *pipelinepkg.DiscussDriver {
 	return pipelinepkg.NewDiscussDriver(pipelinepkg.DiscussDriverDeps{
-		Pipeline:       pipeline,
-		EventStore:     eventStore,
-		Agent:          agent,
-		MessageService: msgService,
-		CursorStore:    eventStore,
-		Logger:         log,
+		Pipeline:    pipeline,
+		EventStore:  eventStore,
+		Agent:       agent,
+		CursorStore: eventStore,
+		Logger:      log,
 	})
 }
 

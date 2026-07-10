@@ -1766,6 +1766,21 @@ func (q *Queries) GetHistoryTurnByID(ctx context.Context, arg GetHistoryTurnByID
 	return i, err
 }
 
+const getLatestActiveTurnResponseAtBySession = `-- name: GetLatestActiveTurnResponseAtBySession :one
+SELECT MAX(m.created_at)::timestamptz
+FROM bot_visible_history_messages m
+WHERE m.session_id = $1
+  AND m.role IN ('assistant', 'tool')
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+`
+
+func (q *Queries) GetLatestActiveTurnResponseAtBySession(ctx context.Context, sessionID pgtype.UUID) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getLatestActiveTurnResponseAtBySession, sessionID)
+	var column_1 pgtype.Timestamptz
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const getLatestVisibleHistoryTurnBySession = `-- name: GetLatestVisibleHistoryTurnBySession :one
 WITH target AS (
   SELECT m.turn_id, m.session_id, m.turn_position
@@ -2721,20 +2736,27 @@ const listMessageRefsByCompactID = `-- name: ListMessageRefsByCompactID :many
 SELECT
   m.id,
   m.bot_id,
-  m.session_id
+  m.session_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.created_at
 FROM bot_history_messages m
 WHERE m.compact_id = $1
 ORDER BY m.created_at ASC, m.id ASC
 `
 
 type ListMessageRefsByCompactIDRow struct {
-	ID        pgtype.UUID `json:"id"`
-	BotID     pgtype.UUID `json:"bot_id"`
-	SessionID pgtype.UUID `json:"session_id"`
+	ID                     pgtype.UUID        `json:"id"`
+	BotID                  pgtype.UUID        `json:"bot_id"`
+	SessionID              pgtype.UUID        `json:"session_id"`
+	ExternalMessageID      pgtype.Text        `json:"external_message_id"`
+	SourceReplyToMessageID pgtype.Text        `json:"source_reply_to_message_id"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 }
 
-// Backfills coverage for summaries that predate persisted artifact coverage
-// without pulling every compacted row's full content/usage.
+// Backfills identity/anchor coverage for summaries that predate persisted
+// artifact coverage without pulling every compacted row's content, usage,
+// or assets.
 func (q *Queries) ListMessageRefsByCompactID(ctx context.Context, compactID pgtype.UUID) ([]ListMessageRefsByCompactIDRow, error) {
 	rows, err := q.db.Query(ctx, listMessageRefsByCompactID, compactID)
 	if err != nil {
@@ -2744,7 +2766,14 @@ func (q *Queries) ListMessageRefsByCompactID(ctx context.Context, compactID pgty
 	var items []ListMessageRefsByCompactIDRow
 	for rows.Next() {
 		var i ListMessageRefsByCompactIDRow
-		if err := rows.Scan(&i.ID, &i.BotID, &i.SessionID); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.CreatedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

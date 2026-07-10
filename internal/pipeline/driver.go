@@ -13,7 +13,6 @@ import (
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/conversation"
-	messagepkg "github.com/memohai/memoh/internal/message"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 )
 
@@ -29,7 +28,7 @@ type ResolveRunConfigResult struct {
 type RunConfigResolver interface {
 	ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
 	InlineImageAttachments(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart
-	LoadCompactionArtifacts(ctx context.Context, botID, sessionID string, messages []messagepkg.Message) ([]CompactionArtifact, error)
+	LoadContextHistoryProjection(ctx context.Context, botID, sessionID string) (ContextHistoryProjection, error)
 	MaybeCompactSession(ctx context.Context, botID, sessionID, channelIdentityID string, inputTokens, contextTokenBudget int)
 	StoreRound(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform string, messages []sdk.Message, modelID string) error
 }
@@ -59,7 +58,6 @@ type DiscussDriverDeps struct {
 	Pipeline        *Pipeline
 	EventStore      *EventStore
 	Agent           *agentpkg.Agent
-	MessageService  messagepkg.Service
 	Resolver        RunConfigResolver
 	RuntimeStreamer discussRuntimeStreamer
 	CursorStore     DiscussCursorStore
@@ -109,21 +107,6 @@ func NewDiscussDriver(deps DiscussDriverDeps) *DiscussDriver {
 		sessions: make(map[string]*discussSession),
 		logger:   logger.With(slog.String("service", "discuss_driver")),
 	}
-}
-
-// SetResolver sets the RunConfigResolver after construction (breaks DI cycles).
-func (d *DiscussDriver) SetResolver(r RunConfigResolver) {
-	d.deps.Resolver = r
-}
-
-func (d *DiscussDriver) SetRuntimeStreamer(r discussRuntimeStreamer) {
-	d.deps.RuntimeStreamer = r
-}
-
-// SetBroadcaster sets the stream broadcaster after construction so that
-// discuss-mode agent events are forwarded to the Web UI in real time.
-func (d *DiscussDriver) SetBroadcaster(b DiscussStreamBroadcaster) {
-	d.deps.Broadcaster = b
 }
 
 // NotifyRC pushes a new RenderedContext to the discuss session.
@@ -263,15 +246,13 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 		return
 	}
 
-	trs, historyMessages, err := d.loadTurnResponses(ctx, cfg.SessionID)
+	history, err := d.deps.Resolver.LoadContextHistoryProjection(ctx, cfg.BotID, cfg.SessionID)
 	if err != nil {
+		log.Error("discuss: load context history projection failed", slog.Any("error", err))
 		return
 	}
-	artifacts, err := d.deps.Resolver.LoadCompactionArtifacts(ctx, cfg.BotID, cfg.SessionID, historyMessages)
-	if err != nil {
-		log.Error("discuss: load compaction artifacts failed", slog.Any("error", err))
-		return
-	}
+	trs := history.TurnResponses
+	artifacts := history.CompactionArtifacts
 	activeRC := ActiveRenderedContext(rc, artifacts)
 
 	// Cold-start / post-idle initialisation: if we haven't processed anything
@@ -282,7 +263,7 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 	// idle-timeout restart would treat the entire session history as brand
 	// new external traffic and re-answer it.
 	if sess.lastProcessedMs == 0 {
-		sess.lastProcessedMs = maxInt64(anchorFromTRs(trs), d.loadDiscussCursor(ctx, cfg, log))
+		sess.lastProcessedMs = maxInt64(history.LatestTurnResponseAtMs, d.loadDiscussCursor(ctx, cfg, log))
 	}
 
 	// Re-evaluate the trigger condition now that lastProcessedMs is anchored.

@@ -14,8 +14,22 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/historyfrag"
-	messagepkg "github.com/memohai/memoh/internal/message"
 )
+
+// SetResolver sets the RunConfigResolver after construction (breaks DI cycles).
+func (d *DiscussDriver) SetResolver(r RunConfigResolver) {
+	d.deps.Resolver = r
+}
+
+func (d *DiscussDriver) SetRuntimeStreamer(r discussRuntimeStreamer) {
+	d.deps.RuntimeStreamer = r
+}
+
+// SetBroadcaster sets the stream broadcaster after construction so that
+// discuss-mode agent events are forwarded to the Web UI in real time.
+func (d *DiscussDriver) SetBroadcaster(b DiscussStreamBroadcaster) {
+	d.deps.Broadcaster = b
+}
 
 func latestRCEventAtMs(rc RenderedContext) int64 {
 	var latest int64
@@ -175,24 +189,6 @@ func agentEventToChannelEvent(event agentpkg.StreamEvent) (channel.StreamEvent, 
 	default:
 		return channel.StreamEvent{}, false
 	}
-}
-
-func (d *DiscussDriver) loadTurnResponses(ctx context.Context, sessionID string) ([]TurnResponseEntry, []messagepkg.Message, error) {
-	if d.deps.MessageService == nil {
-		return nil, nil, nil
-	}
-	messages, err := d.deps.MessageService.ListActiveSinceBySession(ctx, sessionID, time.Unix(0, 0).UTC())
-	if err != nil {
-		d.logger.Warn("load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
-		return nil, nil, err
-	}
-	responses := make([]TurnResponseEntry, 0, len(messages))
-	for _, message := range messages {
-		if entry, ok := DecodeTurnResponseEntry(message); ok {
-			responses = append(responses, entry)
-		}
-	}
-	return responses, messages, nil
 }
 
 func extractNewImageRefs(rc RenderedContext, afterMs int64) []ImageAttachmentRef {

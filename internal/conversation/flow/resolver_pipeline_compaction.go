@@ -2,38 +2,30 @@ package flow
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/contextfrag"
+	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/historyfrag"
-	messagepkg "github.com/memohai/memoh/internal/message"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 )
 
-func (r *Resolver) LoadCompactionArtifacts(
+func (r *Resolver) LoadContextHistoryProjection(
 	ctx context.Context,
 	botID string,
 	sessionID string,
-	messages []messagepkg.Message,
-) ([]pipelinepkg.CompactionArtifact, error) {
-	records := make([]historyfrag.HistoryRecord, 0, len(messages))
-	for _, message := range messages {
-		record, err := historyfrag.FromDBMessageWithLogger(r.logger, message, historyfrag.ScopeFallback{})
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, record)
-	}
-	artifacts, _, err := r.loadPipelineCompactionArtifacts(ctx, compactionSummaryScope(
+) (pipelinepkg.ContextHistoryProjection, error) {
+	build, err := r.loadPipelineHistoryProjection(ctx, compactionSummaryScope(
 		botID,
 		"",
 		sessionID,
 		"",
 		"",
 		"",
-	), records)
-	return artifacts, err
+	), historyfrag.ScopeFallback{})
+	return build.projection, err
 }
 
 func (r *Resolver) loadPipelineCompactionArtifacts(
@@ -65,7 +57,10 @@ func (r *Resolver) loadPipelineCompactionArtifacts(
 		}
 		projected := artifact
 		if len(projected.Coverage) == 0 {
-			projected.Coverage = legacyArtifactCoverage(catalog, projected, records, scope)
+			projected.Coverage = r.loadLegacyArtifactCoverage(ctx, projected, owner)
+			if len(projected.Coverage) == 0 {
+				projected.Coverage = legacyArtifactCoverage(catalog, projected, records, scope)
+			}
 			if len(projected.Coverage) == 0 {
 				continue
 			}
@@ -90,6 +85,43 @@ func (r *Resolver) loadPipelineCompactionArtifacts(
 		summaries = append(summaries, projected.HistoryRecord(scope))
 	}
 	return artifacts, summaries, nil
+}
+
+func (r *Resolver) loadLegacyArtifactCoverage(
+	ctx context.Context,
+	artifact compaction.Artifact,
+	owner compaction.ArtifactOwner,
+) []compaction.CoveredSource {
+	compactID, err := db.ParseUUID(artifact.ID)
+	if err != nil {
+		return nil
+	}
+	rows, err := r.queries.ListMessageRefsByCompactID(ctx, compactID)
+	if err != nil {
+		if r.logger != nil {
+			r.logger.Warn("load legacy pipeline coverage failed", slog.String("compact_id", artifact.ID), slog.Any("error", err))
+		}
+		return nil
+	}
+	coverage := make([]compaction.CoveredSource, 0, len(rows))
+	for _, row := range rows {
+		if !row.CreatedAt.Valid ||
+			(owner.BotID != "" && pgUUIDString(row.BotID) != owner.BotID) ||
+			!owner.SessionIDKnown || pgUUIDString(row.SessionID) != owner.SessionID {
+			return nil
+		}
+		ref, err := historyfrag.DBMessageIdentityRef(pgUUIDString(row.ID))
+		if err != nil {
+			return nil
+		}
+		coverage = append(coverage, compaction.CoveredSource{
+			Ref:                    ref,
+			ExternalMessageID:      strings.TrimSpace(row.ExternalMessageID.String),
+			SourceReplyToMessageID: strings.TrimSpace(row.SourceReplyToMessageID.String),
+			CreatedAtMs:            row.CreatedAt.Time.UnixMilli(),
+		})
+	}
+	return coverage
 }
 
 func legacyArtifactCoverage(

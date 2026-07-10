@@ -1538,6 +1538,13 @@ WHERE m.session_id = sqlc.arg(session_id)
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
 
+-- name: GetLatestActiveTurnResponseAtBySession :one
+SELECT MAX(m.created_at)::timestamptz
+FROM bot_visible_history_messages m
+WHERE m.session_id = sqlc.arg(session_id)
+  AND m.role IN ('assistant', 'tool')
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync');
+
 -- name: ListMessagesBefore :many
 SELECT
   m.id,
@@ -2327,12 +2334,16 @@ WHERE m.session_id = $1
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
 
 -- name: ListMessageRefsByCompactID :many
--- Backfills coverage for summaries that predate persisted artifact coverage
--- without pulling every compacted row's full content/usage.
+-- Backfills identity/anchor coverage for summaries that predate persisted
+-- artifact coverage without pulling every compacted row's content, usage,
+-- or assets.
 SELECT
   m.id,
   m.bot_id,
-  m.session_id
+  m.session_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.created_at
 FROM bot_history_messages m
 WHERE m.compact_id = $1
 ORDER BY m.created_at ASC, m.id ASC;

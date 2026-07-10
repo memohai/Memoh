@@ -133,6 +133,64 @@ func TestLoadPipelineCompactionArtifactsBackfillsLegacyCoverageFromMarkedRows(t 
 	}
 }
 
+func TestLoadPipelineCompactionArtifactsBackfillsLegacyCoverageFromIdentityRows(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID      = "11111111-1111-1111-1111-111111111111"
+		sessionID  = "22222222-2222-2222-2222-222222222222"
+		artifactID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+		sourceID   = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+		recentID   = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+	)
+	createdAt := time.UnixMilli(1_000).UTC()
+	recentAt := createdAt.Add(time.Hour)
+	recent := pipelineHistoryMessage(t, recentID, botID, sessionID, "external-recent", recentAt, "user", "recent legacy source")
+	recent.CompactID = artifactID
+	row := pipelineArtifactRow(t, artifactID, botID, sessionID, "legacy summary", nil, createdAt.Add(time.Minute))
+	row.Coverage = []byte("[]")
+	queries := &recordingCompactionLogQueries{
+		logs: []sqlc.BotHistoryMessageCompact{row},
+		refs: map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow{
+			mustPGUUID(t, artifactID): {{
+				ID:                     mustPGUUID(t, sourceID),
+				BotID:                  mustPGUUID(t, botID),
+				SessionID:              mustPGUUID(t, sessionID),
+				ExternalMessageID:      pgtype.Text{String: "external-old", Valid: true},
+				SourceReplyToMessageID: pgtype.Text{String: "reply-old", Valid: true},
+				CreatedAt:              pgtype.Timestamptz{Time: createdAt, Valid: true},
+			}, {
+				ID:                mustPGUUID(t, recentID),
+				BotID:             mustPGUUID(t, botID),
+				SessionID:         mustPGUUID(t, sessionID),
+				ExternalMessageID: pgtype.Text{String: "external-recent", Valid: true},
+				CreatedAt:         pgtype.Timestamptz{Time: recentAt, Valid: true},
+			}},
+		},
+	}
+	resolver := &Resolver{queries: queries}
+	scope := compactionSummaryScope(botID, "chat", sessionID, "group", "room", "target")
+
+	artifacts, summaries, err := resolver.loadPipelineCompactionArtifacts(
+		context.Background(),
+		scope,
+		pipelineHistoryRecords(t, []messagepkg.Message{recent}),
+	)
+	if err != nil {
+		t.Fatalf("loadPipelineCompactionArtifacts() error = %v", err)
+	}
+	if len(artifacts) != 1 || len(artifacts[0].Sources) != 2 {
+		t.Fatalf("legacy artifact projection = %#v, want complete identity coverage", artifacts)
+	}
+	source := artifacts[0].Sources[0]
+	if source.Ref.ID != sourceID || source.ExternalMessageID != "external-old" || source.CreatedAtMs != createdAt.UnixMilli() {
+		t.Fatalf("legacy source = %#v", source)
+	}
+	if artifacts[0].AnchorStartMs != createdAt.UnixMilli() || len(summaries) != 1 {
+		t.Fatalf("legacy anchor/summary = artifact:%#v summaries:%#v", artifacts[0], summaries)
+	}
+}
+
 func TestLoadPipelineCompactionArtifactsSkipsUnreconciledLegacyArtifact(t *testing.T) {
 	t.Parallel()
 
@@ -152,6 +210,39 @@ func TestLoadPipelineCompactionArtifactsSkipsUnreconciledLegacyArtifact(t *testi
 	}
 	if len(artifacts) != 0 || len(summaries) != 0 {
 		t.Fatalf("unreconciled legacy artifact became active: artifacts=%#v summaries=%#v", artifacts, summaries)
+	}
+}
+
+func TestLoadPipelineCompactionArtifactsRejectsCrossSessionLegacyIdentityRows(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID      = "11111111-1111-1111-1111-111111111111"
+		sessionID  = "22222222-2222-2222-2222-222222222222"
+		artifactID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	)
+	row := pipelineArtifactRow(t, artifactID, botID, sessionID, "legacy summary", nil, time.UnixMilli(1_000).UTC())
+	row.Coverage = []byte("[]")
+	queries := &recordingCompactionLogQueries{
+		logs: []sqlc.BotHistoryMessageCompact{row},
+		refs: map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow{
+			mustPGUUID(t, artifactID): {{
+				ID:        mustPGUUID(t, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+				BotID:     mustPGUUID(t, botID),
+				SessionID: mustPGUUID(t, "cccccccc-cccc-cccc-cccc-cccccccccccc"),
+				CreatedAt: pgtype.Timestamptz{Time: time.UnixMilli(1_000).UTC(), Valid: true},
+			}},
+		},
+	}
+	resolver := &Resolver{queries: queries}
+	scope := compactionSummaryScope(botID, "chat", sessionID, "group", "room", "target")
+
+	artifacts, summaries, err := resolver.loadPipelineCompactionArtifacts(context.Background(), scope, nil)
+	if err != nil {
+		t.Fatalf("loadPipelineCompactionArtifacts() error = %v", err)
+	}
+	if len(artifacts) != 0 || len(summaries) != 0 {
+		t.Fatalf("cross-session legacy rows activated artifact: artifacts=%#v summaries=%#v", artifacts, summaries)
 	}
 }
 

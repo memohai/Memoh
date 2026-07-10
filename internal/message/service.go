@@ -906,6 +906,22 @@ func (s *DBService) ListActiveSinceBySession(ctx context.Context, sessionID stri
 	return msgs, nil
 }
 
+// LatestTurnResponseAtBySession returns the newest visible assistant/tool timestamp.
+func (s *DBService) LatestTurnResponseAtBySession(ctx context.Context, sessionID string) (time.Time, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	latest, err := s.queries.GetLatestActiveTurnResponseAtBySession(ctx, pgSessionID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !latest.Valid {
+		return time.Time{}, nil
+	}
+	return latest.Time.UTC(), nil
+}
+
 // ListLatestBySession returns the latest N session messages.
 func (s *DBService) ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]Message, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)

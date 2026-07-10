@@ -13,7 +13,6 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
-	messagepkg "github.com/memohai/memoh/internal/message"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 )
 
@@ -586,9 +585,8 @@ func TestHandleReplyWithAgent_ColdStartAnchoredByTR(t *testing.T) {
 	resolver := &fakeRunConfigResolver{}
 
 	driver := NewDiscussDriver(DiscussDriverDeps{
-		Pipeline:       NewPipeline(RenderParams{}),
-		Resolver:       resolver,
-		MessageService: nil,
+		Pipeline: NewPipeline(RenderParams{}),
+		Resolver: resolver,
 	})
 
 	sess := &discussSession{
@@ -596,10 +594,8 @@ func TestHandleReplyWithAgent_ColdStartAnchoredByTR(t *testing.T) {
 		lastProcessedMs: 0,
 	}
 
-	// Simulate a previously answered round by pre-stuffing a TR newer than
-	// the RC segment's ReceivedAtMs. Since we cannot inject MessageService
-	// easily, we instead pre-set lastProcessedMs as the anchor would.
-	sess.lastProcessedMs = 200 // mimic anchorFromTRs result
+	// Simulate the cursor after a previously answered round.
+	sess.lastProcessedMs = 200
 
 	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
 
@@ -802,6 +798,7 @@ type fakeRunConfigResolver struct {
 	resolveResult         ResolveRunConfigResult
 	resolveFn             func(botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
 	inlineFn              func(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart
+	turnResponses         []TurnResponseEntry
 	artifacts             []CompactionArtifact
 	artifactErr           error
 	compactionCalls       int
@@ -823,8 +820,12 @@ func (f *fakeRunConfigResolver) InlineImageAttachments(ctx context.Context, botI
 	return nil
 }
 
-func (f *fakeRunConfigResolver) LoadCompactionArtifacts(context.Context, string, string, []messagepkg.Message) ([]CompactionArtifact, error) {
-	return f.artifacts, f.artifactErr
+func (f *fakeRunConfigResolver) LoadContextHistoryProjection(context.Context, string, string) (ContextHistoryProjection, error) {
+	return ContextHistoryProjection{
+		TurnResponses:          f.turnResponses,
+		CompactionArtifacts:    f.artifacts,
+		LatestTurnResponseAtMs: anchorFromTRs(f.turnResponses),
+	}, f.artifactErr
 }
 
 func (f *fakeRunConfigResolver) MaybeCompactSession(_ context.Context, _, _, _ string, inputTokens, contextTokenBudget int) {
