@@ -62,6 +62,13 @@ cp conf/app.docker.toml config.toml
 docker compose up -d
 ```
 
+setup 済みの既存 checkout では、引き続き `git pull` を使用できます。post-merge hook
+が新しい submodule を初期化し、setup がそれ以降の pull で再帰更新を有効にします。
+hook が未導入の場合だけ、更新後に `mise run submodule-init` を一度実行してください。
+GitHub が自動生成する「Source code」
+アーカイブには submodule が含まれないため、Release に添付された
+`Memoh-<version>-source.zip` または `.tar.gz` を使用してください。
+
 > **イメージの pull が遅い場合は CN mirror を利用できます:**
 > ```bash
 > curl -fsSL https://memoh.sh | USE_CN_MIRROR=true sh

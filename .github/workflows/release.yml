@@ -42,6 +42,43 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  source-bundle:
+    name: Build complete source archives
+    needs: changelog
+    if: ${{ always() && (needs.changelog.result == 'success' || needs.changelog.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Package repository with submodules
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          ROOT="Memoh-${VERSION}"
+          STAGE="${RUNNER_TEMP}/${ROOT}"
+
+          test -f packages/ui/package.json
+          mkdir -p "$STAGE"
+          rsync -a \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='dist' \
+            ./ "$STAGE/"
+
+          tar -C "$RUNNER_TEMP" -czf "${RUNNER_TEMP}/${ROOT}-source.tar.gz" "$ROOT"
+          (cd "$RUNNER_TEMP" && zip -qr "${ROOT}-source.zip" "$ROOT")
+      - name: Upload complete source archives
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          gh release upload "$RELEASE_TAG" \
+            "${RUNNER_TEMP}/Memoh-${VERSION}-source.tar.gz" \
+            "${RUNNER_TEMP}/Memoh-${VERSION}-source.zip" \
+            --clobber
+
   npm-publish-felinic:
     name: Publish @felinic/ui
     runs-on: ubuntu-latest
