@@ -156,19 +156,14 @@ func (h *CompactionHandler) TriggerCompact(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	if err := h.service.RunCompactionSync(c.Request().Context(), cfg); err != nil {
+	res, err := h.service.RunCompactionSyncResult(c.Request().Context(), cfg)
+	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-
-	logs, _, err := h.service.ListLogs(c.Request().Context(), botID, 1, 0)
-	if err != nil || len(logs) == 0 {
-		return c.JSON(http.StatusOK, TriggerCompactResponse{Status: "ok"})
-	}
-	latest := logs[0]
 	return c.JSON(http.StatusOK, TriggerCompactResponse{
-		Status:       latest.Status,
-		Summary:      latest.Summary,
-		MessageCount: latest.MessageCount,
+		Status:       res.Status,
+		Summary:      res.Summary,
+		MessageCount: res.MessageCount,
 	})
 }
 

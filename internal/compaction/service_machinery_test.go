@@ -303,6 +303,55 @@ func TestDoCompactionMarksOnlyContiguousRunAcrossEmptyMiddleRow(t *testing.T) {
 	}
 }
 
+func TestRunCompactionSyncResultReportsScopedNoop(t *testing.T) {
+	// An already-compact/fresh session compacts nothing. The result must be a
+	// scoped no-op, so a caller (the HTTP endpoint) never has to fall back to an
+	// unscoped bot-wide log that could belong to another session.
+	q := &fakeQueries{}
+	stub := &stubModel{summary: "unused"}
+	svc := newMachineryService(q)
+
+	res, err := svc.RunCompactionSyncResult(context.Background(), machineryConfig(stub, 100))
+	if err != nil {
+		t.Fatalf("no-op must not error: %v", err)
+	}
+	if res.Status != StatusNoop || res.MessageCount != 0 || res.Summary != "" {
+		t.Fatalf("no-op result = %+v, want noop/0/empty", res)
+	}
+	if stub.calls != 0 || q.created {
+		t.Fatalf("no-op must not call the model or create a log (calls=%d created=%v)", stub.calls, q.created)
+	}
+}
+
+func TestRunCompactionSyncResultReportsScopedSummaryOnSuccess(t *testing.T) {
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	stub := &stubModel{summary: "SUMMARY-OK"}
+	svc := newMachineryService(q)
+
+	res, err := svc.RunCompactionSyncResult(context.Background(), machineryConfig(stub, 450))
+	if err != nil {
+		t.Fatalf("RunCompactionSyncResult: %v", err)
+	}
+	if res.Status != StatusOK || res.Summary != "SUMMARY-OK" || res.MessageCount != len(q.markedIDs) {
+		t.Fatalf("success result = %+v, want ok/SUMMARY-OK/%d", res, len(q.markedIDs))
+	}
+}
+
+func TestRunCompactionSyncResultFailureSurfacesError(t *testing.T) {
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	svc := newMachineryService(q)
+	cfg := machineryConfig(&stubModel{}, 450)
+	cfg.HTTPClient = &http.Client{Transport: &failingModel{}}
+
+	res, err := svc.RunCompactionSyncResult(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("a summarizer failure must surface an error, not a stale result")
+	}
+	if res.Status == StatusOK {
+		t.Fatalf("failed result must not report ok: %+v", res)
+	}
+}
+
 func TestDoCompactionEmptyHistoryNoOp(t *testing.T) {
 	q := &fakeQueries{}
 	stub := &stubModel{summary: "unused"}

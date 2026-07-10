@@ -109,18 +109,27 @@ func ShouldCompact(inputTokens, threshold int) bool {
 func (s *Service) TriggerCompaction(ctx context.Context, cfg TriggerConfig) {
 	go func() {
 		bgCtx := context.WithoutCancel(ctx)
-		if err := s.runCompaction(bgCtx, cfg); err != nil {
+		if _, err := s.runCompaction(bgCtx, cfg); err != nil {
 			s.logger.Error("compaction failed", slog.String("bot_id", cfg.BotID), slog.String("session_id", cfg.SessionID), slog.String("error", err.Error()))
 		}
 	}()
 }
 
-// RunCompactionSync runs compaction synchronously and returns any error.
+// RunCompactionSync runs compaction synchronously and returns any error. Use
+// RunCompactionSyncResult when the caller needs this session's scoped outcome.
 func (s *Service) RunCompactionSync(ctx context.Context, cfg TriggerConfig) error {
+	_, err := s.runCompaction(ctx, cfg)
+	return err
+}
+
+// RunCompactionSyncResult runs compaction synchronously and reports this
+// session's scoped Result, so callers respond with their own outcome instead of
+// reading an unscoped bot-wide log that may belong to another session.
+func (s *Service) RunCompactionSyncResult(ctx context.Context, cfg TriggerConfig) (Result, error) {
 	return s.runCompaction(ctx, cfg)
 }
 
-func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) error {
+func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result, error) {
 	// Manual (user-initiated) compaction bypasses the cooldown: the user may
 	// have just fixed the failing model, and a silent skip would report success
 	// while nothing runs. Automatic per-request paths still honor the cooldown.
@@ -129,19 +138,19 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) error {
 			slog.String("bot_id", cfg.BotID),
 			slog.String("session_id", cfg.SessionID),
 		)
-		return nil
+		return Result{Status: StatusNoop}, nil
 	}
 	if !s.beginSessionCompaction(cfg.SessionID) {
 		s.logger.Info("compaction: already in flight for session, skipping",
 			slog.String("bot_id", cfg.BotID),
 			slog.String("session_id", cfg.SessionID),
 		)
-		return nil
+		return Result{Status: StatusNoop}, nil
 	}
 	defer s.endSessionCompaction(cfg.SessionID)
 
 	if err := s.runCompactionHook(ctx, hooks.EventPreCompact, cfg, nil); err != nil {
-		return err
+		return Result{}, err
 	}
 	var compactErr error
 	defer func() {
@@ -161,16 +170,17 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) error {
 	botUUID, err := db.ParseUUID(cfg.BotID)
 	if err != nil {
 		compactErr = err
-		return compactErr
+		return Result{}, compactErr
 	}
 	sessionUUID, err := db.ParseUUID(cfg.SessionID)
 	if err != nil {
 		compactErr = err
-		return compactErr
+		return Result{}, compactErr
 	}
 
-	compactErr = s.doCompaction(ctx, botUUID, sessionUUID, cfg)
-	return compactErr
+	res, err := s.doCompaction(ctx, botUUID, sessionUUID, cfg)
+	compactErr = err
+	return res, compactErr
 }
 
 func (s *Service) runCompactionHook(ctx context.Context, eventName string, cfg TriggerConfig, extra map[string]any) error {
@@ -206,13 +216,13 @@ func (s *Service) runCompactionHook(ctx context.Context, eventName string, cfg T
 	return nil
 }
 
-func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) error {
+func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) (Result, error) {
 	rows, err := s.queries.ListUncompactedMessagesBySession(ctx, sessionUUID)
 	if err != nil {
-		return err
+		return Result{}, err
 	}
 	if len(rows) == 0 {
-		return nil
+		return Result{Status: StatusNoop}, nil
 	}
 
 	messages, skipped := itemsFromRows(rows)
@@ -223,7 +233,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		)
 	}
 	if len(messages) == 0 {
-		return nil
+		return Result{Status: StatusNoop}, nil
 	}
 
 	var toCompact []CompactionCandidate
@@ -236,7 +246,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		toCompact = splitByRatio(messages, cfg.TotalInputTokens, cfg.Ratio)
 	}
 	if len(toCompact) == 0 {
-		return nil
+		return Result{Status: StatusNoop}, nil
 	}
 
 	// Cap the compaction input to avoid exceeding the compaction model's
@@ -258,7 +268,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 
 	priorLogs, err := s.queries.ListCompactionLogsBySession(ctx, sessionUUID)
 	if err != nil {
-		return err
+		return Result{}, err
 	}
 	var priorSummaries []string
 	for _, l := range priorLogs {
@@ -274,7 +284,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		// empty). buildEntriesAndIDs withholds such a group from both entries and
 		// ids, so summarizing here would either destroy rows for a junk summary or
 		// mark rows we cannot faithfully summarize. Leave them in raw history.
-		return nil
+		return Result{Status: StatusNoop}, nil
 	}
 
 	userPrompt := buildUserPrompt(priorSummaries, entries)
@@ -303,7 +313,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		SessionID: sessionUUID,
 	})
 	if err != nil {
-		return err
+		return Result{}, err
 	}
 	logID := logRow.ID
 
@@ -314,12 +324,12 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	)
 	if err != nil {
 		s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{})
-		return err
+		return Result{}, err
 	}
 
 	if strings.TrimSpace(result.Text) == "" {
 		s.completeLog(persistCtx, logID, "error", "", errEmptySummary.Error(), 0, nil, pgtype.UUID{})
-		return errEmptySummary
+		return Result{}, errEmptySummary
 	}
 
 	usageJSON, _ := json.Marshal(result.Usage)
@@ -331,11 +341,11 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		Column2:   messageIDs,
 	}); err != nil {
 		s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{})
-		return err
+		return Result{}, err
 	}
 
 	s.completeLog(persistCtx, logID, "ok", result.Text, "", len(messageIDs), usageJSON, modelUUID)
-	return nil
+	return Result{Status: StatusOK, Summary: result.Text, MessageCount: len(messageIDs)}, nil
 }
 
 func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, summary, errMsg string, messageCount int, usage []byte, modelID pgtype.UUID) {
