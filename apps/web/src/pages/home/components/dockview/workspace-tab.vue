@@ -294,16 +294,28 @@ function updateActiveTabShape() {
   const tabRect = tab.getBoundingClientRect()
   if (tabRect.width <= 0 || tabRect.height <= 0) return
 
-  const scale = window.devicePixelRatio || 1
-  const alignedLeft = snapToDevicePixel(tabRect.left, scale)
-  const alignedTop = snapToDevicePixel(tabRect.top, scale)
-  const alignedRight = snapToDevicePixel(tabRect.right, scale)
-  const alignedBottom = snapToDevicePixel(tabRect.bottom, scale)
+  // getBoundingClientRect includes ancestor transforms. The first-entry shell
+  // scales from 1.15 to 1, so writing that visual size back as a local CSS size
+  // permanently enlarged the SVG until a resize forced another measurement.
+  // Normalize the relative rect back into the tab's untransformed layout space.
+  const tabStyle = getComputedStyle(tab)
+  const layoutWidth = readLayoutDimension(tabStyle.width, tab.offsetWidth)
+  const layoutHeight = readLayoutDimension(tabStyle.height, tab.offsetHeight)
+  const visualScaleX = readVisualScale(tabRect.width, layoutWidth)
+  const visualScaleY = readVisualScale(tabRect.height, layoutHeight)
+  const relativeLeft = (tabRect.left - rootRect.left) / visualScaleX
+  const relativeTop = (tabRect.top - rootRect.top) / visualScaleY
+
+  const pixelRatio = window.devicePixelRatio || 1
+  const alignedLeft = snapToDevicePixel(relativeLeft, pixelRatio)
+  const alignedTop = snapToDevicePixel(relativeTop, pixelRatio)
+  const alignedRight = snapToDevicePixel(relativeLeft + layoutWidth, pixelRatio)
+  const alignedBottom = snapToDevicePixel(relativeTop + layoutHeight, pixelRatio)
   const width = alignedRight - alignedLeft
   const height = alignedBottom - alignedTop
   const strokeWidth = readWorkspaceTabStrokeWidth(tab)
   const radius = Math.min(
-    snapToDevicePixel(readTabRadius(tab), scale),
+    snapToDevicePixel(readTabRadius(tab), pixelRatio),
     Math.max(0, width / 2),
     Math.max(0, height),
   )
@@ -320,8 +332,8 @@ function updateActiveTabShape() {
   activeTabFillPath.value = shape.fillPath
   activeTabStrokePath.value = shape.strokePath
   activeTabShapeStyle.value = {
-    left: `${formatPx(alignedLeft - rootRect.left - radius)}`,
-    top: `${formatPx(alignedTop - rootRect.top)}`,
+    left: `${formatPx(alignedLeft - radius)}`,
+    top: `${formatPx(alignedTop)}`,
     width: `${formatPx(width + radius * 2)}`,
     height: `${formatPx(height)}`,
   }
@@ -380,6 +392,16 @@ function buildActiveTabShape({
 function readTabRadius(tab: HTMLElement) {
   const radius = Number.parseFloat(getComputedStyle(tab).borderTopLeftRadius)
   return Number.isFinite(radius) && radius > 0 ? radius : 8
+}
+
+function readLayoutDimension(value: string, fallback: number) {
+  const dimension = Number.parseFloat(value)
+  return Number.isFinite(dimension) && dimension > 0 ? dimension : fallback
+}
+
+function readVisualScale(visualDimension: number, layoutDimension: number) {
+  const scale = visualDimension / layoutDimension
+  return Number.isFinite(scale) && scale > 0 ? scale : 1
 }
 
 function snapToDevicePixel(value: number, scale: number) {
