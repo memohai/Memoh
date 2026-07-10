@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -47,6 +48,9 @@ func TestDecodeArtifactCoverageRejectsInvalidPersistedCoverage(t *testing.T) {
 	duplicate := strictTestCoveredSource("duplicate", 1)
 	newer := strictTestCoveredSource("newer", 2)
 	older := strictTestCoveredSource("older", 1)
+	older.Ordinal = 1
+	wrongOrdinal := strictTestCoveredSource("wrong-ordinal", 1)
+	wrongOrdinal.Ordinal = 1
 
 	tests := []struct {
 		name    string
@@ -58,6 +62,7 @@ func TestDecodeArtifactCoverageRejectsInvalidPersistedCoverage(t *testing.T) {
 		{name: "canonical hash scope", covered: []CoveredSource{canonicalScope}, wantErr: "source_payload"},
 		{name: "duplicate stable key", covered: []CoveredSource{duplicate, duplicate}, wantErr: "duplicate"},
 		{name: "decreasing creation time", covered: []CoveredSource{newer, older}, wantErr: "created_at_ms"},
+		{name: "non-canonical ordinal", covered: []CoveredSource{wrongOrdinal}, wantErr: "ordinal"},
 	}
 
 	for _, tt := range tests {
@@ -88,6 +93,27 @@ func TestCoverageIncludesRequiresExactPersistedHash(t *testing.T) {
 	}
 	if coverageIncludes([]CoveredSource{hashless}, []CoveredSource{hashless}) {
 		t.Fatal("hashless persisted coverage matched itself")
+	}
+}
+
+func TestArtifactFrontierRejectsDerivedCoverageThatReordersParentSources(t *testing.T) {
+	t.Parallel()
+
+	parent := testArtifact("ordered-parent")
+	child := testArtifact("reordered-child")
+	parent.SupersededBy = child.ID
+	parent.SupersededAt = time.Unix(1, 0)
+	parent.Coverage = testCoverage("row-1", "row-2")
+	child.ParentIDs = []string{parent.ID}
+	child.Coverage = testCoverage("row-2", "row-1")
+	for i := range parent.Coverage {
+		parent.Coverage[i].CreatedAtMs = 1
+		child.Coverage[i].CreatedAtMs = 1
+	}
+
+	frontier := buildArtifactFrontier([]Artifact{parent, child})
+	if len(frontier.Artifacts) != 0 || !hasLineageIssue(frontier.Issues, LineageIssueCoverageMismatch) {
+		t.Fatalf("reordered derived coverage remained active: artifacts=%#v issues=%#v", frontier.Artifacts, frontier.Issues)
 	}
 }
 
@@ -122,7 +148,7 @@ func TestPersistedMalformedOrHashlessLineageCoverageIsQuarantined(t *testing.T) 
 			}
 
 			frontier := buildArtifactFrontier([]Artifact{artifact})
-			if len(frontier.Artifacts) != 0 || !hasLineageIssue(frontier.Issues, LineageIssueMissingDerivedCoverage) {
+			if len(frontier.Artifacts) != 0 || !hasLineageIssue(frontier.Issues, LineageIssueMalformedCoverage) {
 				t.Fatalf("invalid lineage coverage was not quarantined: frontier=%#v issues=%#v", frontier.Artifacts, frontier.Issues)
 			}
 		})

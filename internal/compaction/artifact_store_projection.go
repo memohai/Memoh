@@ -8,17 +8,23 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
-type ArtifactProjection struct {
-	queries dbstore.Queries
+type artifactProjectionQueries interface {
+	GetCompactionLogByID(context.Context, pgtype.UUID) (sqlc.BotHistoryMessageCompact, error)
+	ListCompactionArtifactLineageBySession(context.Context, pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error)
+	ListCompactionArtifactParentIDsBySuccessor(context.Context, sqlc.ListCompactionArtifactParentIDsBySuccessorParams) ([]pgtype.UUID, error)
 }
 
-func NewArtifactProjection(queries dbstore.Queries) ArtifactProjection {
+type ArtifactProjection struct {
+	queries artifactProjectionQueries
+}
+
+func NewArtifactProjection(queries artifactProjectionQueries) ArtifactProjection {
 	return ArtifactProjection{queries: queries}
 }
 

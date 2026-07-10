@@ -21,6 +21,7 @@ const (
 	LineageIssueCoverageMismatch       LineageIssueKind = "coverage_mismatch"
 	LineageIssueCoverageOverlap        LineageIssueKind = "coverage_overlap"
 	LineageIssueAliasConflict          LineageIssueKind = "alias_conflict"
+	LineageIssueMalformedCoverage      LineageIssueKind = "malformed_coverage"
 )
 
 type LineageIssue struct {
@@ -103,6 +104,16 @@ func buildArtifactFrontierForOwner(artifacts []Artifact, owner ArtifactOwner) Ar
 	}
 	for _, artifact := range artifacts {
 		if !artifactUsable(artifact) {
+			continue
+		}
+		if artifactCoverageMalformed(artifact) {
+			lineageIssue := LineageIssue{Kind: LineageIssueMalformedCoverage, ArtifactID: artifact.ID}
+			key := fmt.Sprintf("%s:%s:%s", lineageIssue.Kind, lineageIssue.ArtifactID, lineageIssue.RelatedID)
+			if _, seen := seenIssues[key]; !seen {
+				seenIssues[key] = struct{}{}
+				issues = append(issues, lineageIssue)
+			}
+			markConnectedLineage(artifact.ID, adjacent, invalid)
 			continue
 		}
 		if !artifactMatchesOwner(artifact, owner) {
@@ -265,6 +276,9 @@ func (r *loadedLineageResolver) resolve(id string) loadedLineageResolution {
 	if !artifactUsable(current) {
 		return r.finish(id, loadedLineageResolution{issue: issue(LineageIssueInactiveSuccessor, id, id)})
 	}
+	if artifactCoverageMalformed(current) {
+		return r.finish(id, loadedLineageResolution{issue: issue(LineageIssueMalformedCoverage, current.ID, "")})
+	}
 	if markerIssue, invalid := validateSupersessionMarker(current); invalid {
 		return r.finish(id, loadedLineageResolution{issue: &markerIssue})
 	}
@@ -275,6 +289,9 @@ func (r *loadedLineageResolver) resolve(id string) loadedLineageResolution {
 		parent, exists := r.nodes[parentID]
 		if !exists || !artifactUsable(parent) || parent.SupersededBy != current.ID {
 			return r.finish(id, loadedLineageResolution{issue: issue(LineageIssueParentMismatch, current.ID, parentID)})
+		}
+		if artifactCoverageMalformed(parent) {
+			return r.finish(id, loadedLineageResolution{issue: issue(LineageIssueMalformedCoverage, parent.ID, "")})
 		}
 		if markerIssue, invalid := validateSupersessionMarker(parent); invalid {
 			return r.finish(id, loadedLineageResolution{issue: &markerIssue})
@@ -327,12 +344,12 @@ func validateSupersessionMarker(artifact Artifact) (LineageIssue, bool) {
 
 func lineageCoverageMissing(artifact Artifact) bool {
 	participatesInLineage := len(artifact.ParentIDs) > 0 || artifact.SupersededBy != ""
-	if !participatesInLineage {
-		return false
-	}
+	return participatesInLineage && len(artifact.Coverage) == 0
+}
+
+func artifactCoverageMalformed(artifact Artifact) bool {
 	return artifact.CoverageMalformed ||
-		len(artifact.Coverage) == 0 ||
-		validatePersistedArtifactCoverage(artifact.Coverage) != nil
+		(len(artifact.Coverage) > 0 && validatePersistedArtifactCoverage(artifact.Coverage) != nil)
 }
 
 func sameArtifactScope(artifact Artifact, botID, sessionID string) bool {
@@ -349,9 +366,12 @@ func artifactMatchesOwner(artifact Artifact, owner ArtifactOwner) bool {
 }
 
 func coverageIncludes(coverage []CoveredSource, required []CoveredSource) bool {
+	next := 0
 	for _, expected := range required {
 		found := false
-		for _, candidate := range coverage {
+		for next < len(coverage) {
+			candidate := coverage[next]
+			next++
 			if compatibleCoverageRef(candidate.Ref, expected.Ref) {
 				found = true
 				break

@@ -177,7 +177,7 @@ func resolveCatalogArtifact(catalog *compaction.ArtifactCatalog, owner compactio
 	if compactID := strings.TrimSpace(record.CompactID); compactID != "" {
 		if artifact, ok := catalog.Resolve(owner, compactID); ok {
 			isSummary := record.SourceKind == historyfrag.SourceCompactionLog && record.Kind == contextfrag.KindConversationSummary
-			if isSummary || len(artifact.Coverage) == 0 || artifact.Covers(record.Ref) {
+			if isSummary || (!artifact.CoverageMalformed && len(artifact.Coverage) == 0) || artifact.Covers(record.Ref) {
 				return artifact, true
 			}
 		}

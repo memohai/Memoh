@@ -63,8 +63,8 @@ func TestReplaceCompactedMessagesLoadsSessionSummaryCoverageFromCompactedRows(t 
 	sessionID := "00000000-0000-0000-0000-00000000f004"
 	compactID := "00000000-0000-0000-0000-00000000c004"
 	coverage, err := json.Marshal([]compaction.CoveredSource{
-		{Ref: contextfrag.ContextRef{Namespace: "bot_history_message", ID: "00000000-0000-0000-0000-000000000401", Version: 1, Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable, ContentHash: "hash-401", HashAlgo: contextfrag.HashAlgoSHA256, HashScope: contextfrag.HashScopeSourcePayload}},
-		{Ref: contextfrag.ContextRef{Namespace: "bot_history_message", ID: "00000000-0000-0000-0000-000000000402", Version: 1, Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable, ContentHash: "hash-402", HashAlgo: contextfrag.HashAlgoSHA256, HashScope: contextfrag.HashScopeSourcePayload}},
+		{Ordinal: 0, Ref: contextfrag.ContextRef{Namespace: "bot_history_message", ID: "00000000-0000-0000-0000-000000000401", Version: 1, Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable, ContentHash: "hash-401", HashAlgo: contextfrag.HashAlgoSHA256, HashScope: contextfrag.HashScopeSourcePayload}},
+		{Ordinal: 1, Ref: contextfrag.ContextRef{Namespace: "bot_history_message", ID: "00000000-0000-0000-0000-000000000402", Version: 1, Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable, ContentHash: "hash-402", HashAlgo: contextfrag.HashAlgoSHA256, HashScope: contextfrag.HashScopeSourcePayload}},
 	})
 	if err != nil {
 		t.Fatalf("marshal coverage: %v", err)
@@ -106,7 +106,7 @@ func TestReplaceCompactedMessagesLoadsSessionSummaryCoverageFromCompactedRows(t 
 	}
 }
 
-func TestReplaceCompactedMessagesBackfillsMalformedPersistedCoverage(t *testing.T) {
+func TestReplaceCompactedMessagesRejectsMalformedPersistedCoverage(t *testing.T) {
 	t.Parallel()
 
 	sessionID := "00000000-0000-0000-0000-00000000f008"
@@ -127,17 +127,19 @@ func TestReplaceCompactedMessagesBackfillsMalformedPersistedCoverage(t *testing.
 		},
 	}
 	resolver := &Resolver{queries: queries}
-
-	got := mustReplaceCompactedMessages(t, resolver, sessionID, contextfrag.Scope{SessionID: sessionID}, nil)
-
-	if len(got) != 1 || got[0].CompactID != compactID {
-		t.Fatalf("malformed coverage must not drop a valid summary artifact: %#v", got)
+	recent := []historyfrag.HistoryRecord{
+		historyRecord(coveredID, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("edited raw")}, func(record *historyfrag.HistoryRecord) {
+			record.CompactID = compactID
+		}),
 	}
-	if got[0].Coverage == nil || len(got[0].Coverage.CoveredRefs) != 1 || got[0].Coverage.CoveredRefs[0].ID != coveredID {
-		t.Fatalf("malformed persisted coverage was not backfilled: %#v", got[0].Coverage)
+
+	got := mustReplaceCompactedMessages(t, resolver, sessionID, contextfrag.Scope{SessionID: sessionID}, recent)
+
+	if len(got) != 1 || got[0].DBMessageID != coveredID || got[0].ModelMessage.TextContent() != "edited raw" {
+		t.Fatalf("malformed non-empty coverage replaced current raw history: %#v", got)
 	}
-	if len(queries.refCalls) != 1 || queries.refCalls[0] != mustPGUUID(t, compactID) {
-		t.Fatalf("refs-only fallback calls = %#v, want %s", queries.refCalls, compactID)
+	if len(queries.refCalls) != 0 {
+		t.Fatalf("malformed non-empty coverage used legacy refs-only fallback: %#v", queries.refCalls)
 	}
 }
 
