@@ -21,7 +21,7 @@
         <div
           class="flex-1 flex flex-col overflow-hidden min-h-0"
           :class="flush
-            ? 'bg-sidebar border-r border-sidebar-border'
+            ? 'workspace-divider-r bg-sidebar'
             : 'border border-border-soft bg-muted/10 rounded-lg'"
         >
           <!-- Integrated Header (if provided) -->

@@ -40,7 +40,7 @@
   --dv-tab-divider-color: transparent;
   --dv-tab-font-size: 12px;
 
-  --dv-separator-border: var(--border);
+  --dv-separator-border: var(--workspace-divider-color);
   --dv-sash-color: transparent;
   --dv-active-sash-color: var(--ring);
 
@@ -115,7 +115,7 @@
    *   is clipped.
    *
    * HOVER HEIGHT — the hover pill's TOP (only) drops by the active stroke width.
-   *   The active crown is a 1px STROKE whose solid core sits a stroke-width below
+   *   The active crown is the workspace hairline STROKE whose solid core sits a stroke-width below
    *   the chip's top edge; the hover pill is a solid FILL from its top edge up. At
    *   the same top y the fill therefore reads ~1px taller than the active crown.
    *   Trimming only the pill's top by --tab-active-stroke makes the two read as
@@ -129,7 +129,7 @@
    *   spill editor colour past the rounded corner onto the chrome strip. The
    *   close-fade is therefore a band centred on the 20px lane, never the full box.
    *
-   * DIVIDERS — two kinds, ONE stroke (--dock-stroke, --tab-active-stroke wide),
+   * DIVIDERS — two kinds, one shared tab stroke width (--tab-active-stroke),
    *   ONE height (--tab-divider-height = the glyph height, so the bar reads the
    *   same extent as the X/“+” icons beside it — a taller bar reads as "too high"
    *   even when centred), both centred on the 20px lane:
@@ -158,9 +158,10 @@
    *      .dv-tab to its right", DOM-order-independent and not relying on :last-child. */
   /* VERTICAL lane */
   --tab-inset: 0.3125rem;
-  /* The active crown/foot is a 1px stroke; single-sourced here so the hover-top
-   * trim that matches it can never drift from the SVG's stroke-width. */
-  --tab-active-stroke: 1px;
+  /* Keep the curved SVG crown on an integer hairline: fractional strokes look
+   * heavier around its arcs. This still single-sources the crown, hover trim,
+   * short tab seams, and SVG geometry while shell dividers use their own width. */
+  --tab-active-stroke: var(--workspace-tab-stroke-width);
   /* RADIUS — crown (and active SVG crown) vs the uniform floating hover pill */
   --tab-radius: var(--radius-md);
   --tab-hover-radius: var(--radius-sm);
@@ -222,11 +223,9 @@
   --tab-action-gap: 0.375rem;
   /* Shared timing for close-fade (workspace-tab.vue). Tab hover fill itself is instant. */
   --tab-hover-duration: 150ms;
-  /* ONE stroke colour for the whole dock outline — the strip's bottom hairline, the
-   * active tab's crown/side border, and the fillet-foot ring. It MUST be opaque, yet
-   * it must also read as the SAME line as the rest of the app's dividers (the sidebar's
-   * vertical --border, the panel seams): the dock is not a special-coloured zone, it
-   * just needs a special TECHNIQUE.
+  /* The tab strip sits one contrast rung above shell dividers. --dock-stroke
+   * paints its bottom hairline and short seams, and is also the endpoint colour
+   * where the active tab's stronger SVG outline rejoins that hairline.
    *
    * The design system's --border is a translucent white in dark mode (oklch(1 0 0/8%)).
    * Used directly it (a) reads at a different brightness on the chrome strip vs the
@@ -234,13 +233,10 @@
    * box-shadow vs a gradient ring), and (c) STACKS — where the foot ring overlaps the
    * side border the two translucent whites composite brighter, the "whitened fillet".
    *
-   * So --dock-stroke is the OPAQUE FLATTENING of that same --border over the chrome
-   * plane (8% white pre-composited onto --surface-chrome). It therefore lands at the
-   * exact brightness the sidebar's translucent --border already shows there — the
-   * horizontal hairline and the vertical sidebar divider become one continuous family —
-   * while being backdrop-/technique-independent and never building up. Light mode's
-   * --border is already opaque (no stacking), so it's reused as-is. */
-  --dock-stroke: var(--border);
+   * Dark mode therefore replaces the translucent token with its OPAQUE FLATTENING
+   * over the chrome plane, keeping overlapping paint techniques from building up. */
+  --dock-stroke: var(--workspace-tab-strip-color);
+  --tab-strip-junction-stroke: var(--workspace-divider-color);
 }
 
 /* Dark: the opaque equivalent of --border (8% white) sitting on the chrome plane, so
@@ -249,6 +245,8 @@
  * this single value is the one knob for the whole dock outline's weight. */
 .dark .dockview-theme-memoh {
   --dock-stroke: color-mix(in oklab, oklch(1 0 0) 8%, var(--surface-chrome));
+  --tab-strip-junction-stroke: var(--dock-stroke);
+  --workspace-tab-outline-color: var(--dock-stroke);
 }
 
 /* The custom tab content (workspace-tab.vue) owns its padding/ellipsis; .dv-tab
@@ -309,7 +307,7 @@
   /* Box coords: the tab box is already top-offset by margin-top:--tab-inset, so
    * top sits --tab-inset below the strip top. The TOP (only) is trimmed by the
    * active stroke width so the solid fill reads at the same optical height as the
-   * active crown's 1px stroke (whose solid core sits a stroke below its top edge).
+   * active crown's hairline stroke (whose solid core sits a stroke below its top edge).
    * right/bottom/left keep the equal --tab-inset margin — no such mismatch there. */
   top: var(--tab-active-stroke);
   right: var(--tab-hover-inset);
@@ -458,10 +456,26 @@
 
 /* Prefix actions container: renders navigation buttons before the tabs. */
 .dockview-theme-memoh .dv-pre-actions-container {
+  position: relative;
   display: flex;
   align-items: center;
   flex-shrink: 0;
   height: 100%;
+}
+
+/* The first group's nav cluster sits exactly where the lighter sidebar divider
+ * hands off to the stronger tab-strip hairline. Paint that container's measured
+ * width as the transition so web/desktop prefix padding can change without a
+ * hard-coded gradient stop. The strip-wide shadow remains underneath and carries
+ * the settled tab colour through the rest of the header. */
+.dockview-theme-memoh .dv-pre-actions-container::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: var(--workspace-divider-width);
+  background: linear-gradient(to right, var(--tab-strip-junction-stroke), var(--dock-stroke));
+  pointer-events: none;
 }
 
 /* The void is dockview's droppable empty-header region — it owns the
@@ -577,10 +591,49 @@
  * each tab, void, actions) and left the leftover gap after the last tab unlined. As a
  * single strip-wide shadow it spans nav · tabs · the leftover gap · void · actions in
  * one unbroken line. The active (and hovered) tab's OPAQUE background paints over this
- * 1px at its own slot, so that tab reads as continuous with the pane below
+ * hairline at its own slot, so that tab reads as continuous with the pane below
  * (punch-through); transparent inactive tabs and the leftover gap let the line show. */
 .dockview-theme-memoh .dv-tabs-and-actions-container {
-  box-shadow: inset 0 -1px 0 var(--dock-stroke);
+  box-shadow: inset 0 calc(-1 * var(--workspace-divider-width)) 0 var(--dock-stroke);
+}
+
+/* Dockview keeps a 4px sash hit target for comfortable resizing, while these
+ * rules reduce only the visible workspace divider and active sash indicator. */
+.dockview-theme-memoh .dv-split-view-container.dv-horizontal > .dv-view-container > .dv-view:not(:first-child)::before {
+  width: var(--workspace-divider-width);
+}
+
+.dockview-theme-memoh .dv-split-view-container.dv-vertical > .dv-view-container > .dv-view:not(:first-child)::before {
+  height: var(--workspace-divider-width);
+}
+
+.dockview-theme-memoh .dv-split-view-container > .dv-sash-container > .dv-sash {
+  background-color: transparent;
+}
+
+.dockview-theme-memoh .dv-split-view-container > .dv-sash-container > .dv-sash::after {
+  content: '';
+  position: absolute;
+  background-color: transparent;
+  pointer-events: none;
+}
+
+.dockview-theme-memoh .dv-split-view-container.dv-horizontal > .dv-sash-container > .dv-sash::after {
+  inset-block: 0;
+  left: 50%;
+  width: var(--workspace-divider-width);
+  transform: translateX(-50%);
+}
+
+.dockview-theme-memoh .dv-split-view-container.dv-vertical > .dv-sash-container > .dv-sash::after {
+  inset-inline: 0;
+  top: 50%;
+  height: var(--workspace-divider-width);
+  transform: translateY(-50%);
+}
+
+.dockview-theme-memoh .dv-split-view-container > .dv-sash-container > .dv-sash:not(.disabled):is(:hover, :active)::after {
+  background-color: var(--ring);
 }
 
 /* No vertical inter-tab divider lines: selecting a tab changes only fill, stroke,
@@ -715,7 +768,7 @@
    * panel is one continuous ground, split from the editor only by the border. */
   background-color: var(--surface-editor);
   box-shadow: none;
-  border-top: 1px solid var(--border);
+  border-top: var(--workspace-divider-width) solid var(--workspace-divider-color);
   height: auto;
   min-height: calc(1.6875rem + 0.375rem);
   padding-block: 0.1875rem;

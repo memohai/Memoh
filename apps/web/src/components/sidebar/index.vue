@@ -6,7 +6,7 @@
        transitioned, so the resize handle still tracks the pointer 1:1. `inert`
        while closed so focus can't tab into the parked-off-screen rail. -->
   <aside
-    class="relative flex shrink-0 flex-col border-r border-sidebar-border bg-sidebar"
+    class="workspace-divider-r relative flex shrink-0 flex-col bg-sidebar"
     :style="asideStyle"
     :inert="!workbenchOpen || undefined"
   >
