@@ -247,7 +247,7 @@ func TestHistoryContextFragsForMessagesCarriesActiveSummaryCoverage(t *testing.T
 	}
 }
 
-func TestHistoryContextFragsUseRetainedSummaryRecordsAfterTrim(t *testing.T) {
+func TestHistoryContextFragsPreserveEverySummaryRecordAfterTrim(t *testing.T) {
 	t.Parallel()
 
 	firstCovered := []contextfrag.ContextRef{{Namespace: "bot_history_message", ID: "old-covered", Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable}}
@@ -263,11 +263,11 @@ func TestHistoryContextFragsUseRetainedSummaryRecordsAfterTrim(t *testing.T) {
 	messages, retained, _ := trimMessagesAndRecordsByTokens(nil, records, 20)
 	frags := historyContextFragsForMessages(messages, retained)
 
-	if len(frags) != 1 || frags[0].Coverage == nil || len(frags[0].Coverage.CoveredRefs) != 1 {
+	if len(frags) != 2 || frags[0].Coverage == nil || frags[1].Coverage == nil {
 		t.Fatalf("summary frag coverage mismatch: %#v", frags)
 	}
-	if got := frags[0].Coverage.CoveredRefs[0].ID; got != "new-covered" {
-		t.Fatalf("summary coverage = %q, want retained summary coverage", got)
+	if got := []string{frags[0].Coverage.CoveredRefs[0].ID, frags[1].Coverage.CoveredRefs[0].ID}; !equalStrings(got, []string{"old-covered", "new-covered"}) {
+		t.Fatalf("summary coverage = %#v, want both retained summaries", got)
 	}
 }
 

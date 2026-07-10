@@ -149,6 +149,47 @@ func TestBuildPipelineContextKeepsHistoryAndCurrentQueryWhenRenderedContextIsSta
 	})
 }
 
+func TestBuildPipelineContextKeepsRepeatedCurrentQueryWithoutExternalID(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "22222222-2222-2222-2222-222222222222"
+	p := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+	p.PushEvent(sessionID, pipelineMessageEvent(sessionID, "old", 1_000, "yes"))
+	resolver := &Resolver{logger: slog.New(slog.DiscardHandler), pipeline: p}
+
+	built, err := resolver.buildPipelineContext(context.Background(), conversation.ChatRequest{
+		SessionID: sessionID,
+		Query:     "yes",
+	}, 0)
+	if err != nil {
+		t.Fatalf("buildPipelineContext() error = %v", err)
+	}
+	if len(built.Messages) != 2 || !strings.Contains(built.Messages[0].TextContent(), "yes") || built.Messages[1].TextContent() != "yes" {
+		t.Fatalf("repeated current query was not appended: %#v", modelMessageTexts(built.Messages))
+	}
+}
+
+func TestBuildPipelineContextForceKeepsCurrentRenderedMessagePastBudget(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "22222222-2222-2222-2222-222222222222"
+	p := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+	p.PushEvent(sessionID, pipelineMessageEvent(sessionID, "current", 1_000, strings.Repeat("current", 100)))
+	resolver := &Resolver{logger: slog.New(slog.DiscardHandler), pipeline: p}
+
+	built, err := resolver.buildPipelineContext(context.Background(), conversation.ChatRequest{
+		SessionID:         sessionID,
+		ExternalMessageID: "current",
+		Query:             strings.Repeat("current", 100),
+	}, 1)
+	if err != nil {
+		t.Fatalf("buildPipelineContext() error = %v", err)
+	}
+	if len(built.Messages) != 1 || !strings.Contains(built.Messages[0].TextContent(), "current") {
+		t.Fatalf("current rendered message was trimmed: %#v", modelMessageTexts(built.Messages))
+	}
+}
+
 func TestTrimComposedPipelineMessagesKeepsRetainedArtifactIdentity(t *testing.T) {
 	t.Parallel()
 
@@ -168,12 +209,42 @@ func TestTrimComposedPipelineMessagesKeepsRetainedArtifactIdentity(t *testing.T)
 	})
 
 	built := trimComposedPipelineMessages(nil, entries, budget)
-	if got, want := pipelineSummaryIDs(built.HistoryRecords), []string{"artifact-b"}; !equalStrings(got, want) {
+	if got, want := pipelineSummaryIDs(built.HistoryRecords), []string{"artifact-a", "artifact-b"}; !equalStrings(got, want) {
 		t.Fatalf("retained summary identities = %#v, want %#v", got, want)
 	}
 	frags := historyContextFragsForMessages(built.Messages, built.HistoryRecords)
-	if len(frags) != 1 || frags[0].Ref.ID != "artifact-b" {
-		t.Fatalf("retained summary frag = %#v, want artifact-b", frags)
+	if len(frags) != 2 || frags[0].Ref.ID != "artifact-a" || frags[1].Ref.ID != "artifact-b" {
+		t.Fatalf("retained summary frags = %#v, want artifact-a and artifact-b", frags)
+	}
+}
+
+func TestTrimMessagesAndRecordsPreservesEveryActiveSummary(t *testing.T) {
+	t.Parallel()
+
+	scope := contextfrag.Scope{BotID: "bot", SessionID: "session"}
+	summaryA := historyfrag.SummaryRecord("artifact-a", "summary a", nil, scope)
+	summaryB := historyfrag.SummaryRecord("artifact-b", "summary b", nil, scope)
+	oldRaw := historyfrag.HistoryRecord{ModelMessage: conversation.ModelMessage{
+		Role:    "user",
+		Content: conversation.NewTextContent(strings.Repeat("old raw context", 200)),
+	}}
+	latest := historyfrag.HistoryRecord{ModelMessage: conversation.ModelMessage{
+		Role:    "user",
+		Content: conversation.NewTextContent("latest raw context"),
+	}}
+	budget := estimateMessageTokens(summaryB.ModelMessage) + estimateMessageTokens(latest.ModelMessage)
+
+	messages, retained, _ := trimMessagesAndRecordsByTokens(nil, []historyfrag.HistoryRecord{
+		summaryA,
+		oldRaw,
+		summaryB,
+		latest,
+	}, budget)
+	if got, want := pipelineSummaryIDs(retained), []string{"artifact-a", "artifact-b", ""}; !equalStrings(got, want) {
+		t.Fatalf("retained records = %#v, want both summaries plus latest raw", got)
+	}
+	if len(messages) != 4 || !strings.HasPrefix(messages[0].TextContent(), "[System Notice]") {
+		t.Fatalf("trimmed messages = %#v, want notice plus both summaries and latest raw", modelMessageTexts(messages))
 	}
 }
 

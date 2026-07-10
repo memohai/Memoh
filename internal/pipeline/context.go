@@ -25,6 +25,7 @@ type ContextMessage struct {
 	Content              string          `json:"content"`
 	RawContent           json.RawMessage `json:"raw_content,omitempty"`
 	CompactionArtifactID string          `json:"compaction_artifact_id,omitempty"`
+	RenderedMessageIDs   []string        `json:"rendered_message_ids,omitempty"`
 }
 
 // ComposeContextResult holds the output of ComposeContext.
@@ -72,7 +73,8 @@ type mergeEntry struct {
 	time int64
 	step int
 	// For RC entries
-	rcContent []RenderedContentPiece
+	rcContent   []RenderedContentPiece
+	rcMessageID string
 	// For summary entries
 	summaryContent    string
 	summaryArtifactID string
@@ -96,10 +98,11 @@ func MergeContext(rc RenderedContext, trs []TurnResponseEntry) []ContextMessage 
 func appendRenderedContextEntries(entries []mergeEntry, rc RenderedContext) []mergeEntry {
 	for _, seg := range rc {
 		entries = append(entries, mergeEntry{
-			kind:      "rc",
-			time:      seg.eventAtMs(),
-			step:      -1,
-			rcContent: seg.Content,
+			kind:        "rc",
+			time:        seg.eventAtMs(),
+			step:        -1,
+			rcContent:   seg.Content,
+			rcMessageID: strings.TrimSpace(seg.MessageID),
 		})
 	}
 	return entries
@@ -132,17 +135,26 @@ func mergeEntries(entries []mergeEntry) []ContextMessage {
 
 	var messages []ContextMessage
 	var pendingText strings.Builder
+	var pendingMessageIDs []string
 
 	flushRC := func() {
 		if pendingText.Len() > 0 {
-			messages = append(messages, ContextMessage{Role: "user", Content: pendingText.String()})
+			messages = append(messages, ContextMessage{
+				Role:               "user",
+				Content:            pendingText.String(),
+				RenderedMessageIDs: append([]string(nil), pendingMessageIDs...),
+			})
 			pendingText.Reset()
+			pendingMessageIDs = pendingMessageIDs[:0]
 		}
 	}
 
 	for _, entry := range entries {
 		switch entry.kind {
 		case "rc":
+			if entry.rcMessageID != "" {
+				pendingMessageIDs = append(pendingMessageIDs, entry.rcMessageID)
+			}
 			for _, piece := range entry.rcContent {
 				if piece.Type == "text" {
 					if pendingText.Len() > 0 {

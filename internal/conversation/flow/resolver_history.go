@@ -265,9 +265,9 @@ func trimMessagesAndRecordsByTokens(log *slog.Logger, messages []historyfrag.His
 		)
 	}
 
-	requiredPrefix := requiredMessagesBeforeCutoff(messages, cutoff)
-	retained := make([]historyfrag.HistoryRecord, 0, len(messages)-cutoff+len(requiredPrefix))
-	retained = append(retained, requiredPrefix...)
+	forceKeptPrefix := forceKeptMessagesBeforeCutoff(messages, cutoff)
+	retained := make([]historyfrag.HistoryRecord, 0, len(messages)-cutoff+len(forceKeptPrefix))
+	retained = append(retained, forceKeptPrefix...)
 	retained = append(retained, messages[cutoff:]...)
 	result := make([]conversation.ModelMessage, 0, len(retained))
 	if cutoff > 0 {
@@ -312,14 +312,6 @@ func fitRequiredMessagesWithinBudget(messages []historyfrag.HistoryRecord, cutof
 	}
 }
 
-func estimateMessagesTokens(messages []historyfrag.HistoryRecord) int {
-	total := 0
-	for _, m := range messages {
-		total += estimateMessageTokens(m.ModelMessage)
-	}
-	return total
-}
-
 func requiredMessagesBeforeCutoff(messages []historyfrag.HistoryRecord, cutoff int) []historyfrag.HistoryRecord {
 	if cutoff <= 0 {
 		return nil
@@ -328,10 +320,34 @@ func requiredMessagesBeforeCutoff(messages []historyfrag.HistoryRecord, cutoff i
 		cutoff = len(messages)
 	}
 	var required []historyfrag.HistoryRecord
-	for _, m := range messages[:cutoff] {
-		if m.Required {
-			required = append(required, m)
+	for _, message := range messages[:cutoff] {
+		if message.Required {
+			required = append(required, message)
 		}
 	}
 	return required
+}
+
+func estimateMessagesTokens(messages []historyfrag.HistoryRecord) int {
+	total := 0
+	for _, m := range messages {
+		total += estimateMessageTokens(m.ModelMessage)
+	}
+	return total
+}
+
+func forceKeptMessagesBeforeCutoff(messages []historyfrag.HistoryRecord, cutoff int) []historyfrag.HistoryRecord {
+	if cutoff <= 0 {
+		return nil
+	}
+	if cutoff > len(messages) {
+		cutoff = len(messages)
+	}
+	var forceKept []historyfrag.HistoryRecord
+	for _, m := range messages[:cutoff] {
+		if m.Required || m.Kind == contextfrag.KindConversationSummary || m.Lifecycle == historyfrag.LifecycleActiveSummary {
+			forceKept = append(forceKept, m)
+		}
+	}
+	return forceKept
 }

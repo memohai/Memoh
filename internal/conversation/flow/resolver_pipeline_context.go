@@ -20,9 +20,11 @@ type pipelineContextBuild struct {
 }
 
 type composedPipelineMessage struct {
-	message       conversation.ModelMessage
-	summaryRecord historyfrag.HistoryRecord
-	hasSummary    bool
+	message            conversation.ModelMessage
+	renderedMessageIDs []string
+	summaryRecord      historyfrag.HistoryRecord
+	hasSummary         bool
+	forceKeep          bool
 }
 
 func (r *Resolver) buildPipelineContext(
@@ -109,7 +111,10 @@ func composedPipelineMessages(
 		if len(content) == 0 {
 			content, _ = json.Marshal(message.Content)
 		}
-		entry := composedPipelineMessage{message: conversation.ModelMessage{Role: message.Role, Content: content}}
+		entry := composedPipelineMessage{
+			message:            conversation.ModelMessage{Role: message.Role, Content: content},
+			renderedMessageIDs: append([]string(nil), message.RenderedMessageIDs...),
+		}
 		if summary, ok := summaries[message.CompactionArtifactID]; ok {
 			entry.summaryRecord = summary
 			entry.hasSummary = true
@@ -130,15 +135,17 @@ func appendCurrentPipelineQueryIfMissing(
 	}
 	currentMessageID := strings.TrimSpace(req.ExternalMessageID)
 	if currentMessageID != "" && renderedContextHasMessageID(rc, currentMessageID) {
-		return entries
-	}
-	if currentMessageID == "" && pipelineEntriesContainText(entries, query) {
-		return entries
+		for i := len(entries) - 1; i >= 0; i-- {
+			if containsString(entries[i].renderedMessageIDs, currentMessageID) {
+				entries[i].forceKeep = true
+				return entries
+			}
+		}
 	}
 	return append(entries, composedPipelineMessage{message: conversation.ModelMessage{
 		Role:    "user",
 		Content: conversation.NewTextContent(query),
-	}})
+	}, forceKeep: true})
 }
 
 func renderedContextHasMessageID(rc pipelinepkg.RenderedContext, messageID string) bool {
@@ -150,10 +157,9 @@ func renderedContextHasMessageID(rc pipelinepkg.RenderedContext, messageID strin
 	return false
 }
 
-func pipelineEntriesContainText(entries []composedPipelineMessage, text string) bool {
-	for _, entry := range entries {
-		if strings.EqualFold(strings.TrimSpace(entry.message.Role), "user") &&
-			strings.TrimSpace(entry.message.TextContent()) == text {
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
 			return true
 		}
 	}
@@ -186,7 +192,13 @@ func trimComposedPipelineMessages(
 			slog.Int("kept_messages", len(entries)-cutoff),
 		)
 	}
-	retained := entries[cutoff:]
+	retained := make([]composedPipelineMessage, 0, len(entries)-cutoff)
+	for _, entry := range entries[:cutoff] {
+		if entry.hasSummary || entry.forceKeep {
+			retained = append(retained, entry)
+		}
+	}
+	retained = append(retained, entries[cutoff:]...)
 	build := pipelineContextBuild{
 		Messages:       make([]conversation.ModelMessage, 0, len(retained)),
 		HistoryRecords: make([]historyfrag.HistoryRecord, 0),
