@@ -39,32 +39,6 @@ target_turn AS (
     AND vm.turn_position IS NOT NULL
   LIMIT 1
 ),
-created_session AS (
-  INSERT INTO bot_sessions (
-    bot_id,
-    channel_type,
-    type,
-    session_mode,
-    runtime_type,
-    runtime_metadata,
-    title,
-    metadata,
-    created_by_user_id
-  )
-  SELECT
-    s.bot_id,
-    s.channel_type,
-    s.type,
-    s.session_mode,
-    s.runtime_type,
-    s.runtime_metadata,
-    sqlc.arg(title),
-    sqlc.arg(metadata),
-    sqlc.narg(created_by_user_id)::uuid
-  FROM source_session s
-  JOIN target_turn tt ON true
-  RETURNING *
-),
 copy_messages AS (
   SELECT
     vm.id AS old_message_id,
@@ -104,6 +78,62 @@ copy_turns AS (
     FROM copy_messages
   ) cm
   ORDER BY cm.turn_position ASC
+),
+next_turn_position AS (
+  SELECT COALESCE(MAX(new_position), 0) + 1 AS value
+  FROM copy_turns
+),
+fork_anchor_message AS (
+  SELECT assistant_message.new_message_id
+  FROM target_turn tt
+  JOIN copy_messages assistant_message ON assistant_message.old_message_id = tt.message_id
+  LIMIT 1
+),
+prepared_metadata AS (
+  SELECT COALESCE(sqlc.arg(metadata)::jsonb, '{}'::jsonb) AS value
+),
+fork_plan AS (
+  SELECT
+    s.*,
+    fam.new_message_id AS fork_message_id,
+    ntp.value AS next_turn_position_value
+  FROM source_session s
+  JOIN fork_anchor_message fam ON true
+  CROSS JOIN next_turn_position ntp
+  WHERE EXISTS (SELECT 1 FROM copy_turns)
+),
+created_session AS (
+  INSERT INTO bot_sessions (
+    bot_id,
+    channel_type,
+    type,
+    session_mode,
+    runtime_type,
+    runtime_metadata,
+    title,
+    metadata,
+    next_turn_position,
+    created_by_user_id
+  )
+  SELECT
+    fp.bot_id,
+    fp.channel_type,
+    fp.type,
+    fp.session_mode,
+    fp.runtime_type,
+    fp.runtime_metadata,
+    sqlc.arg(title),
+    jsonb_set(
+      pm.value,
+      '{forked_from}',
+      COALESCE(pm.value->'forked_from', '{}'::jsonb) || jsonb_build_object('fork_message_id', fp.fork_message_id::text),
+      true
+    ),
+    fp.next_turn_position_value,
+    sqlc.narg(created_by_user_id)::uuid
+  FROM fork_plan fp
+  CROSS JOIN prepared_metadata pm
+  RETURNING *
 ),
 inserted_messages AS (
   INSERT INTO bot_history_messages (
@@ -154,16 +184,6 @@ inserted_messages AS (
   CROSS JOIN created_session cs
   RETURNING id
 ),
-copy_message_counts AS (
-  SELECT count(*) AS count FROM copy_messages
-),
-inserted_message_counts AS (
-  SELECT count(*) AS count FROM inserted_messages
-),
-next_turn_position AS (
-  SELECT COALESCE(MAX(new_position), 0) + 1 AS value
-  FROM copy_turns
-),
 copied_assets AS (
   INSERT INTO bot_history_message_assets (
     message_id,
@@ -184,35 +204,10 @@ copied_assets AS (
   JOIN copy_messages cm ON cm.old_message_id = a.message_id
   JOIN inserted_messages im ON im.id = cm.new_message_id
   RETURNING id
-),
-fork_anchor_message AS (
-  SELECT assistant_message.new_message_id
-  FROM target_turn tt
-  JOIN copy_messages assistant_message ON assistant_message.old_message_id = tt.message_id
-  LIMIT 1
-),
-updated_session AS (
-  UPDATE bot_sessions s
-  SET next_turn_position = ntp.value,
-      metadata = jsonb_set(
-        s.metadata,
-        '{forked_from}',
-        COALESCE(s.metadata->'forked_from', '{}'::jsonb) || jsonb_build_object('fork_message_id', fam.new_message_id::text),
-        true
-      )
-  FROM created_session cs
-  JOIN fork_anchor_message fam ON true
-  CROSS JOIN next_turn_position ntp
-  WHERE s.id = cs.id
-  RETURNING s.*
 )
-SELECT us.*
-FROM updated_session us
-CROSS JOIN (SELECT count(*) AS copied_asset_count FROM copied_assets) copied_asset_counts
-CROSS JOIN copy_message_counts
-CROSS JOIN inserted_message_counts
-WHERE EXISTS (SELECT 1 FROM copy_turns)
-  AND inserted_message_counts.count = copy_message_counts.count;
+SELECT cs.*
+FROM created_session cs
+CROSS JOIN (SELECT count(*) AS copied_asset_count FROM copied_assets) copied_asset_counts;
 
 -- name: GetSessionByID :one
 SELECT *

@@ -1170,7 +1170,8 @@ updated AS (
   UPDATE bot_history_messages old
   SET turn_superseded_by_turn_id = replacement.id,
       turn_superseded_at = sqlc.arg(superseded_at),
-      turn_superseded_reason = sqlc.arg(superseded_reason)
+      turn_superseded_reason = sqlc.arg(superseded_reason),
+      turn_visible = false
   FROM replacement
   WHERE old.turn_id = sqlc.arg(old_turn_id)
     AND old.session_id = sqlc.arg(session_id)
