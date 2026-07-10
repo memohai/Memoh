@@ -15,9 +15,13 @@ function assistantTurn(id: string): ChatAssistantTurn {
 }
 
 function makeRegistry(activeSessionId: string | null = 'session-a') {
+  const currentBotId = ref<string | null>('bot-1')
   const sessionId = ref<string | null>(activeSessionId)
-  const registry = createAssistantStreamRegistry({ sessionId })
-  return { registry, sessionId }
+  const finishAssistantTurn = vi.fn((turn: ChatAssistantTurn) => {
+    turn.streaming = false
+  })
+  const registry = createAssistantStreamRegistry({ currentBotId, sessionId, finishAssistantTurn })
+  return { registry, currentBotId, sessionId, finishAssistantTurn }
 }
 
 function track(
@@ -37,7 +41,7 @@ function track(
 
 describe('assistant stream registry', () => {
   it('registers synchronously and resolves only after removing the active stream', async () => {
-    const { registry } = makeRegistry()
+    const { registry, finishAssistantTurn } = makeRegistry()
     const { turn, completion } = track(registry, 'stream-1')
 
     expect(toRaw(registry.getAssistantStream('stream-1')!.assistantTurn)).toBe(turn)
@@ -50,6 +54,7 @@ describe('assistant stream registry', () => {
     await observed
 
     expect(settled).toHaveBeenCalledOnce()
+    expect(finishAssistantTurn).toHaveBeenCalledOnce()
     expect(turn.streaming).toBe(false)
     expect(registry.getAssistantStream('stream-1')).toBeUndefined()
     expect(registry.streaming.value).toBe(false)
@@ -68,6 +73,19 @@ describe('assistant stream registry', () => {
     registry.rejectAssistantStream('stream-1', failure)
     await expect(original.completion).rejects.toBe(failure)
     expect(original.turn.streaming).toBe(false)
+  })
+
+  it('discards a pre-dispatch stream as a settled terminal transition', async () => {
+    const { registry } = makeRegistry()
+    const entry = track(registry, 'stream-1')
+
+    registry.discardAssistantStream('stream-1')
+
+    await expect(entry.completion).resolves.toBeUndefined()
+    expect(entry.turn.streaming).toBe(false)
+    expect(registry.getAssistantStream('stream-1')).toBeUndefined()
+    expect(registry.isTerminalStream('stream-1')).toBe(true)
+    await expect(track(registry, 'stream-1').completion).rejects.toThrow('stream_id stream-1 is already terminal')
   })
 
   it('reactively prioritizes the selected streaming session', async () => {
@@ -111,8 +129,13 @@ describe('assistant stream registry', () => {
     const { registry, sessionId } = makeRegistry(null)
     const deferred = track(registry, 'stream-1', '')
 
-    expect(registry.streamingSessionId.value).toBe('')
+    expect(registry.streaming.value).toBe(true)
+    expect(registry.streamingSessionId.value).toBeNull()
+    expect(registry.isUnboundComposerStreaming('bot-1')).toBe(true)
+    expect(registry.isUnboundComposerStreaming('bot-1', 'chat')).toBe(true)
+    expect(registry.isUnboundComposerStreaming('bot-2')).toBe(false)
     registry.recordCreatedSession('stream-1', 'session-created')
+    registry.recordCreatedSession('stream-1', 'conflicting-session')
     expect(registry.getAssistantStream('stream-1')?.sessionId).toBe('session-created')
     expect(registry.createdSessionIdForStream('stream-1')).toBe('session-created')
 
@@ -126,13 +149,19 @@ describe('assistant stream registry', () => {
     expect(registry.createdSessionIdForStream('stream-1')).toBe('')
   })
 
-  it('records created-session metadata even after the pending entry is gone', () => {
+  it('records created-session metadata even after the pending entry is gone', async () => {
     const { registry } = makeRegistry()
     registry.recordCreatedSession('late-stream', 'session-created')
+    registry.recordCreatedSession('late-stream', 'conflicting-session')
     expect(registry.createdSessionIdForStream('late-stream')).toBe('session-created')
 
-    registry.clearCreatedSessions()
+    const terminal = track(registry, 'terminal-stream')
+    registry.resolveAssistantStream('terminal-stream')
+    await terminal.completion
+    expect(registry.isTerminalStream('terminal-stream')).toBe(true)
+    registry.clearStreamHistory()
     expect(registry.createdSessionIdForStream('late-stream')).toBe('')
+    expect(registry.isTerminalStream('terminal-stream')).toBe(false)
   })
 
   it('rejects session and global snapshots in insertion order', async () => {

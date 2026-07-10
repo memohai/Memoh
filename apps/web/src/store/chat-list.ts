@@ -245,6 +245,7 @@ export const useChatStore = defineStore('chat', () => {
     createOptimisticUserTurn,
     upsertAssistantUIMessage,
     hasVisibleAssistantBlocks,
+    finishAssistantTurn,
     snapshotToolApprovalStates,
     restoreToolApprovalStates,
     snapshotUserInputStates,
@@ -254,7 +255,7 @@ export const useChatStore = defineStore('chat', () => {
     markToolApprovalDecision,
     resetUserScope: resetTranscriptUserScope,
   } = transcript
-  const assistantStreams = createAssistantStreamRegistry({ sessionId })
+  const assistantStreams = createAssistantStreamRegistry({ currentBotId, sessionId, finishAssistantTurn })
   const {
     streaming,
     streamingSessionId,
@@ -264,13 +265,14 @@ export const useChatStore = defineStore('chat', () => {
     getAssistantStream,
     resolveAssistantStream,
     rejectAssistantStream,
-    forgetAssistantStream,
+    discardAssistantStream,
+    isTerminalStream,
     rejectSessionStreams,
     rejectAllStreams,
     recordCreatedSession,
     createdSessionIdForStream,
     forgetCreatedSession,
-    clearCreatedSessions,
+    clearStreamHistory,
   } = assistantStreams
   // In-flight tool-approval responses, keyed by response stream id. Silent
   // entries belong to a session that is already streaming: their events are
@@ -550,6 +552,7 @@ export const useChatStore = defineStore('chat', () => {
     const id = streamIdForEvent({ stream_id: streamId, session_id: targetSessionId }, targetSessionId)
     const existing = getAssistantStream(id)
     if (existing) return existing
+    if (isTerminalStream(id)) return null
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
     const bid = (currentBotId.value ?? '').trim()
     const assistantTurn = createOptimisticAssistantTurn()
@@ -562,11 +565,12 @@ export const useChatStore = defineStore('chat', () => {
 
 
   function handleWSSessionCreated(event: { stream_id?: string; session_id: string }, sourceBotId = '') {
-    const sid = event.session_id.trim()
+    const eventSessionId = event.session_id.trim()
+    if (isTerminalStream(event.stream_id)) return
     const pending = event.stream_id ? getAssistantStream(event.stream_id) : undefined
     const bid = (pending?.botId || sourceBotId || currentBotId.value || '').trim()
-    if (!bid || !sid) return
-    recordCreatedSession(event.stream_id, sid)
+    if (!bid || !eventSessionId) return
+    const sid = recordCreatedSession(event.stream_id, eventSessionId) || eventSessionId
     if ((currentBotId.value ?? '').trim() !== bid) return
     if (sessionId.value && sessionId.value !== sid) return
 
@@ -646,6 +650,7 @@ export const useChatStore = defineStore('chat', () => {
       const sid = (event.session_id ?? targetSessionId ?? sessionId.value ?? '').trim()
       const bid = sourceBotId || currentBotId.value || ''
       const streamId = streamIdForEvent(event, sid)
+      if (isTerminalStream(streamId)) return
       appendTurnToSession(bid, sid, normalizeTurn(event.data))
       const pending = getAssistantStream(streamId)
       if (pending && !messages.includes(pending.assistantTurn)) {
@@ -673,6 +678,9 @@ export const useChatStore = defineStore('chat', () => {
 
     const sid = (event.session_id ?? targetSessionId ?? sessionId.value ?? '').trim()
     const streamId = streamIdForEvent(event, sid)
+    // The server may emit end after error. It must not recreate the stream, but
+    // it still triggers the final authoritative refresh below.
+    if (isTerminalStream(streamId) && event.type !== 'end') return
 
     if (approvalResponseStreams.get(streamId)?.silent) {
       if (event.type === 'end' || event.type === 'error') {
@@ -691,7 +699,8 @@ export const useChatStore = defineStore('chat', () => {
         ensureDiscussStream(streamId, sid)
         break
       case 'message':
-        upsertAssistantUIMessage(ensureDiscussStream(streamId, sid).assistantTurn, event.data)
+        const messageStream = ensureDiscussStream(streamId, sid)
+        if (messageStream) upsertAssistantUIMessage(messageStream.assistantTurn, event.data)
         break
       case 'end':
         const endedSession = getAssistantStream(streamId)
@@ -720,6 +729,7 @@ export const useChatStore = defineStore('chat', () => {
         break
       case 'error': {
         const session = getAssistantStream(streamId) ?? ensureDiscussStream(streamId, sid)
+        if (!session) break
         const message = event.message || 'stream error'
         const stage: SendMessageStage = hasVisibleAssistantBlocks(session.assistantTurn) ? 'stream' : 'startup'
         rollbackApprovalResponse(streamId)
@@ -774,7 +784,7 @@ export const useChatStore = defineStore('chat', () => {
     resetFsBeacon()
     clearPendingACPSession()
 
-    clearCreatedSessions()
+    clearStreamHistory()
     approvalResponseStreams.clear()
     forkingMessages.clear()
     backgroundTasks.clearBackgroundTasks()
@@ -1851,7 +1861,6 @@ export const useChatStore = defineStore('chat', () => {
         await refreshCurrentSession(bid, sid)
       }
 
-      assistantTurn.streaming = false
       loading.value = false
       return { ok: true }
     } catch (error) {
@@ -1874,7 +1883,7 @@ export const useChatStore = defineStore('chat', () => {
         await cleanupFailedDeferredSession(bid, createdSessionId, composerScope)
       }
 
-      if (sendStreamId) forgetAssistantStream(sendStreamId)
+      if (sendStreamId) discardAssistantStream(sendStreamId)
       if (sendStreamId) forgetCreatedSession(sendStreamId)
       loading.value = false
 
@@ -1964,7 +1973,7 @@ export const useChatStore = defineStore('chat', () => {
       const stage: SendMessageStage = err instanceof StreamFailureError
         ? err.stage
         : (hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
-      forgetAssistantStream(streamId)
+      discardAssistantStream(streamId)
       if (stage === 'startup') {
         restoreForkAnchor?.()
         restoreTailFromOptimistic(bid, sid, null, assistantTurn, replacedTurns)
@@ -2018,7 +2027,7 @@ export const useChatStore = defineStore('chat', () => {
       const stage: SendMessageStage = err instanceof StreamFailureError
         ? err.stage
         : (hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
-      forgetAssistantStream(streamId)
+      discardAssistantStream(streamId)
       if (stage === 'startup') {
         restoreForkAnchor?.()
         restoreTailFromOptimistic(bid, sid, userTurn, assistantTurn, replacedTurns)
@@ -2071,7 +2080,7 @@ export const useChatStore = defineStore('chat', () => {
       restoreToolApprovalStates(previousApprovalStates)
       approvalResponseStreams.delete(streamId)
       if (!silent) {
-        forgetAssistantStream(streamId)
+        discardAssistantStream(streamId)
         if (assistantTurn) removeFromView(assistantTurn)
       }
       loading.value = false
@@ -2139,7 +2148,7 @@ export const useChatStore = defineStore('chat', () => {
       })
     } catch (error) {
       restoreUserInputStates(previousUserInputStates)
-      forgetAssistantStream(streamId)
+      discardAssistantStream(streamId)
       removeFromView(assistantTurn)
       loading.value = false
       toast.error(resolveApiErrorMessage(error, 'Failed to send user input response.'))

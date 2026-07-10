@@ -29,14 +29,19 @@ export interface TrackAssistantStreamInput {
 }
 
 interface AssistantStreamRegistryDeps {
+  currentBotId: Ref<string | null>
   sessionId: Ref<string | null>
+  finishAssistantTurn: (turn: ChatAssistantTurn) => void
 }
 
 type BeforeReject = (streamId: string) => void
 
-export function createAssistantStreamRegistry({ sessionId }: AssistantStreamRegistryDeps) {
+const TERMINAL_STREAM_HISTORY_LIMIT = 512
+
+export function createAssistantStreamRegistry({ currentBotId, sessionId, finishAssistantTurn }: AssistantStreamRegistryDeps) {
   const streams = reactive(new Map<string, PendingAssistantStream>())
   const createdSessionsByStream = new Map<string, string>()
+  const terminalStreamIds = new Set<string>()
 
   function activeStreams(): PendingAssistantStream[] {
     return [...streams.values()]
@@ -54,14 +59,30 @@ export function createAssistantStreamRegistry({ sessionId }: AssistantStreamRegi
     return activeStreamIdsForSession(targetSessionId).length > 0
   }
 
+  function isUnboundComposerStreaming(botId: string | null | undefined, composerScope?: string): boolean {
+    const bid = (botId ?? '').trim()
+    const scope = composerScope?.trim()
+    if (!bid) return false
+    return activeStreams().some(stream =>
+      stream.botId === bid
+      && !stream.sessionId
+      && (!scope || stream.composerScope === scope),
+    )
+  }
+
   const streamingSessionId = computed(() => {
     const activeSid = (sessionId.value ?? '').trim()
-    const activeSessionIds = activeStreams().map(stream => stream.sessionId)
+    const activeSessionIds = activeStreams().map(stream => stream.sessionId).filter(Boolean)
     if (activeSid && activeSessionIds.includes(activeSid)) return activeSid
     return activeSessionIds[0] ?? null
   })
 
-  const streaming = computed(() => isSessionStreaming(sessionId.value))
+  const streaming = computed(() => {
+    const activeSid = (sessionId.value ?? '').trim()
+    return activeSid
+      ? isSessionStreaming(activeSid)
+      : isUnboundComposerStreaming(currentBotId.value)
+  })
 
   function fallbackStreamId(targetSessionId?: string | null): string {
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
@@ -89,6 +110,10 @@ export function createAssistantStreamRegistry({ sessionId }: AssistantStreamRegi
         reject(new Error(`stream_id ${id} is already active`))
         return
       }
+      if (terminalStreamIds.has(id)) {
+        reject(new Error(`stream_id ${id} is already terminal`))
+        return
+      }
       streams.set(id, {
         streamId: id,
         assistantTurn: input.assistantTurn,
@@ -108,9 +133,24 @@ export function createAssistantStreamRegistry({ sessionId }: AssistantStreamRegi
   function finishAssistantStream(streamId: string): PendingAssistantStream | undefined {
     const stream = streams.get(streamId.trim())
     if (!stream) return undefined
-    stream.assistantTurn.streaming = false
+    finishAssistantTurn(stream.assistantTurn)
+    rememberTerminalStream(stream.streamId)
     streams.delete(stream.streamId)
     return stream
+  }
+
+  function rememberTerminalStream(streamId: string) {
+    const id = streamId.trim()
+    if (!id) return
+    terminalStreamIds.add(id)
+    if (terminalStreamIds.size <= TERMINAL_STREAM_HISTORY_LIMIT) return
+    const oldest = terminalStreamIds.values().next().value
+    if (oldest) terminalStreamIds.delete(oldest)
+  }
+
+  function isTerminalStream(streamId: string | undefined): boolean {
+    const id = streamId?.trim()
+    return Boolean(id && terminalStreamIds.has(id))
   }
 
   function resolveAssistantStream(streamId: string) {
@@ -121,8 +161,8 @@ export function createAssistantStreamRegistry({ sessionId }: AssistantStreamRegi
     finishAssistantStream(streamId)?.reject(error)
   }
 
-  function forgetAssistantStream(streamId: string) {
-    streams.delete(streamId.trim())
+  function discardAssistantStream(streamId: string) {
+    finishAssistantStream(streamId)?.resolve()
   }
 
   function rejectSessionStreams(targetSessionId: string | null | undefined, error: Error, beforeReject?: BeforeReject) {
@@ -141,13 +181,15 @@ export function createAssistantStreamRegistry({ sessionId }: AssistantStreamRegi
 
   // Deferred draft streams start unbound and may be assigned exactly once by
   // session_created. A duplicate or late event cannot move them to a new session.
-  function recordCreatedSession(streamId: string | undefined, targetSessionId: string) {
+  function recordCreatedSession(streamId: string | undefined, targetSessionId: string): string {
     const id = streamId?.trim()
     const sid = targetSessionId.trim()
-    if (!id || !sid) return
+    if (!id || !sid) return ''
     const stream = streams.get(id)
-    if (stream && !stream.sessionId) stream.sessionId = sid
-    createdSessionsByStream.set(id, sid)
+    const canonicalSessionId = createdSessionsByStream.get(id) || stream?.sessionId || sid
+    if (stream && !stream.sessionId) stream.sessionId = canonicalSessionId
+    if (!createdSessionsByStream.has(id)) createdSessionsByStream.set(id, canonicalSessionId)
+    return canonicalSessionId
   }
 
   function createdSessionIdForStream(streamId: string): string {
@@ -158,8 +200,9 @@ export function createAssistantStreamRegistry({ sessionId }: AssistantStreamRegi
     createdSessionsByStream.delete(streamId.trim())
   }
 
-  function clearCreatedSessions() {
+  function clearStreamHistory() {
     createdSessionsByStream.clear()
+    terminalStreamIds.clear()
   }
 
   return {
@@ -167,17 +210,19 @@ export function createAssistantStreamRegistry({ sessionId }: AssistantStreamRegi
     streamingSessionId,
     activeStreamIdsForSession,
     isSessionStreaming,
+    isUnboundComposerStreaming,
     streamIdForEvent,
     trackAssistantStream,
     getAssistantStream,
     resolveAssistantStream,
     rejectAssistantStream,
-    forgetAssistantStream,
+    discardAssistantStream,
+    isTerminalStream,
     rejectSessionStreams,
     rejectAllStreams,
     recordCreatedSession,
     createdSessionIdForStream,
     forgetCreatedSession,
-    clearCreatedSessions,
+    clearStreamHistory,
   }
 }

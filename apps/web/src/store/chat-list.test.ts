@@ -3784,6 +3784,73 @@ describe('chat-list store', () => {
     await expect(sendPromise).resolves.toMatchObject({ ok: true })
   })
 
+  it('blocks a second deferred draft send while the first stream is still unbound', async () => {
+    sendEvents = []
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const firstSend = store.sendMessage('first activation', undefined, {
+      requestedSkills: [{ name: 'alpha' }],
+      composerScope: 'bot-1:draft-a',
+    })
+    await flushPromises()
+    const streamId = sentWSMessages[0]?.stream_id as string
+
+    expect(store.streaming).toBe(true)
+    const secondResult = await store.sendMessage('second activation', undefined, {
+      requestedSkills: [{ name: 'beta' }],
+      composerScope: 'bot-1:draft-a',
+    })
+    expect(secondResult).toMatchObject({ ok: false, stage: 'startup' })
+    expect(sentWSMessages).toHaveLength(1)
+
+    streamHandler?.({ type: 'end', stream_id: streamId } as UIStreamEvent)
+    await expect(firstSend).resolves.toMatchObject({ ok: true })
+    expect(store.streaming).toBe(false)
+  })
+
+  it('keeps the first created-session correlation when a stream receives a conflicting duplicate', async () => {
+    sendEvents = []
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sending = store.sendMessage('activate', undefined, {
+      requestedSkills: [{ name: 'alpha' }],
+      composerScope: 'bot-1:draft-a',
+    })
+    await flushPromises()
+    const streamId = sentWSMessages[0]?.stream_id as string
+
+    streamHandler?.({ type: 'session_created', stream_id: streamId, session_id: 'session-first' } as UIStreamEvent)
+    streamHandler?.({ type: 'session_created', stream_id: streamId, session_id: 'session-conflict' } as UIStreamEvent)
+
+    expect(store.sessionId).toBe('session-first')
+    expect(store.knownSessionSummary('session-first')).not.toBeNull()
+    expect(store.knownSessionSummary('session-conflict')).toBeNull()
+
+    streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'session-first' } as UIStreamEvent)
+    await expect(sending).resolves.toMatchObject({ ok: true })
+  })
+
+  it('ignores late messages for a terminal stream instead of resurrecting it', async () => {
+    sendEvents = [{ type: 'start' } as UIStreamEvent, { type: 'end' } as UIStreamEvent]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await expect(store.sendMessage('hello')).resolves.toMatchObject({ ok: true })
+    const messageCount = store.messages.length
+
+    streamHandler?.({
+      type: 'message',
+      stream_id: lastStreamId,
+      session_id: lastSessionId,
+      data: { id: 1, type: 'text', content: 'late' },
+    } as UIStreamEvent)
+
+    expect(store.messages).toHaveLength(messageCount)
+    expect(store.streaming).toBe(false)
+  })
+
   it('does not select a late session_created event after the user switches sessions', async () => {
     sendEvents = []
     api.fetchSession.mockImplementation(async (_botId: string, sessionID: string) => ({

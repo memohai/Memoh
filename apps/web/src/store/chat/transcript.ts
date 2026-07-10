@@ -679,6 +679,10 @@ export function createTranscriptController({
     return turn.messages.some(block => block.type !== 'error')
   }
 
+  function finishAssistantTurn(turn: ChatAssistantTurn) {
+    turn.streaming = false
+  }
+
   function snapshotToolApprovalStates(approvalId: string): ToolApprovalStateSnapshot[] {
     const id = approvalId.trim()
     if (!id) return []
@@ -816,6 +820,7 @@ export function createTranscriptController({
     createOptimisticUserTurn,
     upsertAssistantUIMessage,
     hasVisibleAssistantBlocks,
+    finishAssistantTurn,
     snapshotToolApprovalStates,
     restoreToolApprovalStates,
     snapshotUserInputStates,
