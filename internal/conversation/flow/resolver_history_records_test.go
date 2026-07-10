@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -519,6 +520,92 @@ func TestReplaceCompactedMessagesResolvesInWindowGroupsFromSessionLogs(t *testin
 	}
 }
 
+func TestReplaceCompactedMessagesResolvesSupersededGroupToActiveArtifact(t *testing.T) {
+	t.Parallel()
+
+	sessionID := "00000000-0000-0000-0000-00000000f009"
+	parentID := "00000000-0000-0000-0000-00000000c009"
+	activeID := "00000000-0000-0000-0000-00000000c010"
+	supersededAt := pgtype.Timestamptz{Time: time.Unix(10, 0), Valid: true}
+	queries := &recordingCompactionLogQueries{
+		logs: []sqlc.BotHistoryMessageCompact{
+			{
+				ID:           mustPGUUID(t, parentID),
+				SessionID:    mustPGUUID(t, sessionID),
+				Status:       "ok",
+				Summary:      "stale parent summary",
+				SupersededBy: mustPGUUID(t, activeID),
+				SupersededAt: supersededAt,
+			},
+			{
+				ID:        mustPGUUID(t, activeID),
+				SessionID: mustPGUUID(t, sessionID),
+				Status:    "ok",
+				Summary:   "active restacked summary",
+				Coverage:  persistedCoverage(t, "00000000-0000-0000-0000-000000000901"),
+				ParentIds: []pgtype.UUID{mustPGUUID(t, parentID)},
+			},
+		},
+	}
+	resolver := &Resolver{queries: queries}
+	recent := []historyfrag.HistoryRecord{
+		historyRecord("row-parent", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("covered by parent")}, func(record *historyfrag.HistoryRecord) {
+			record.CompactID = parentID
+		}),
+	}
+
+	got := resolver.replaceCompactedMessages(context.Background(), sessionID, contextfrag.Scope{SessionID: sessionID}, recent)
+
+	if len(got) != 1 || got[0].CompactID != activeID {
+		t.Fatalf("superseded raw group must resolve once to active artifact %s: %#v", activeID, got)
+	}
+	if got[0].ModelMessage.TextContent() != "<summary>\nactive restacked summary\n</summary>" {
+		t.Fatalf("resolved summary = %q", got[0].ModelMessage.TextContent())
+	}
+}
+
+func TestReplaceRecentCompactedMessagesFollowsSupersession(t *testing.T) {
+	t.Parallel()
+
+	parentID := "00000000-0000-0000-0000-00000000c011"
+	activeID := "00000000-0000-0000-0000-00000000c012"
+	parent := sqlc.BotHistoryMessageCompact{
+		ID:           mustPGUUID(t, parentID),
+		Status:       "ok",
+		Summary:      "stale parent summary",
+		SupersededBy: mustPGUUID(t, activeID),
+		SupersededAt: pgtype.Timestamptz{Time: time.Unix(10, 0), Valid: true},
+	}
+	active := sqlc.BotHistoryMessageCompact{
+		ID:        mustPGUUID(t, activeID),
+		Status:    "ok",
+		Summary:   "active restacked summary",
+		Coverage:  persistedCoverage(t, "00000000-0000-0000-0000-000000000902"),
+		ParentIds: []pgtype.UUID{mustPGUUID(t, parentID)},
+	}
+	queries := &recordingCompactionLogQueries{
+		byID: map[pgtype.UUID]sqlc.BotHistoryMessageCompact{
+			parent.ID: parent,
+			active.ID: active,
+		},
+	}
+	resolver := &Resolver{queries: queries}
+	recent := []historyfrag.HistoryRecord{
+		historyRecord("row-parent", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("covered by parent")}, func(record *historyfrag.HistoryRecord) {
+			record.CompactID = parentID
+		}),
+	}
+
+	got := resolver.replaceCompactedMessages(context.Background(), "", contextfrag.Scope{}, recent)
+
+	if len(got) != 1 || got[0].CompactID != activeID {
+		t.Fatalf("sessionless superseded group must resolve to active artifact %s: %#v", activeID, got)
+	}
+	if len(queries.getCalls) != 2 || queries.getCalls[0] != parent.ID || queries.getCalls[1] != active.ID {
+		t.Fatalf("lineage lookups = %#v, want parent then active", queries.getCalls)
+	}
+}
+
 func TestTotalCompactableHistoryTokensExcludesSummaries(t *testing.T) {
 	t.Parallel()
 
@@ -733,16 +820,40 @@ type recordingCompactionLogQueries struct {
 	logs         []sqlc.BotHistoryMessageCompact
 	covered      map[pgtype.UUID][]sqlc.ListMessagesByCompactIDRow
 	refs         map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow
+	byID         map[pgtype.UUID]sqlc.BotHistoryMessageCompact
 	sessionID    pgtype.UUID
 	listCalls    int
 	coveredCalls []pgtype.UUID
 	refCalls     []pgtype.UUID
+	getCalls     []pgtype.UUID
 }
 
-func (q *recordingCompactionLogQueries) ListActiveCompactionArtifactsBySession(_ context.Context, sessionID pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
+func (q *recordingCompactionLogQueries) GetCompactionLogByID(_ context.Context, compactID pgtype.UUID) (sqlc.BotHistoryMessageCompact, error) {
+	q.getCalls = append(q.getCalls, compactID)
+	return q.byID[compactID], nil
+}
+
+func (q *recordingCompactionLogQueries) ListCompactionArtifactLineageBySession(_ context.Context, sessionID pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
 	q.sessionID = sessionID
 	q.listCalls++
 	return q.logs, nil
+}
+
+func persistedCoverage(t *testing.T, id string) []byte {
+	t.Helper()
+	raw, err := json.Marshal([]compaction.CoveredSource{{
+		Ref: contextfrag.ContextRef{
+			Namespace:  "bot_history_message",
+			ID:         id,
+			Version:    1,
+			Schema:     contextfrag.SchemaContextRef,
+			Durability: contextfrag.RefDurable,
+		},
+	}})
+	if err != nil {
+		t.Fatalf("marshal persisted coverage: %v", err)
+	}
+	return raw
 }
 
 func (q *recordingCompactionLogQueries) ListMessagesByCompactID(_ context.Context, compactID pgtype.UUID) ([]sqlc.ListMessagesByCompactIDRow, error) {

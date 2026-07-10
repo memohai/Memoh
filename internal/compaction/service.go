@@ -362,14 +362,17 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		maxCompactTokens = 30000
 	}
 
-	priorLogs, err := s.queries.ListActiveCompactionArtifactsBySession(ctx, sessionUUID)
+	frontier, err := NewArtifactProjection(s.queries).LoadActiveSession(ctx, cfg.SessionID)
 	if err != nil {
 		return Result{}, err
 	}
+	for _, issue := range frontier.Issues {
+		s.logger.Warn("compaction: ignored invalid artifact lineage", slog.String("issue", issue.Error()))
+	}
 	var priorSummaries []string
-	for _, l := range priorLogs {
-		if strings.TrimSpace(l.Summary) != "" {
-			priorSummaries = append(priorSummaries, l.Summary)
+	for _, artifact := range frontier.Artifacts {
+		if strings.TrimSpace(artifact.Summary) != "" {
+			priorSummaries = append(priorSummaries, artifact.Summary)
 		}
 	}
 	priorSummaries = capPriorSummaries(priorSummaries, maxCompactTokens/4)

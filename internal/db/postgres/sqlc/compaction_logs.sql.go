@@ -175,20 +175,27 @@ func (q *Queries) GetCompactionLogByID(ctx context.Context, id pgtype.UUID) (Bot
 	return i, err
 }
 
-const listActiveCompactionArtifactsBySession = `-- name: ListActiveCompactionArtifactsBySession :many
+const listCompactionArtifactLineageBySession = `-- name: ListCompactionArtifactLineageBySession :many
 SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
        artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
        superseded_by, superseded_at, started_at, completed_at
-FROM bot_history_message_compacts
-WHERE session_id = $1
-  AND status = 'ok'
-  AND summary <> ''
-  AND superseded_at IS NULL
-ORDER BY anchor_start_ms ASC, started_at ASC, id ASC
+FROM bot_history_message_compacts c
+WHERE c.session_id = $1
+  AND (
+    c.status = 'ok'
+    OR EXISTS (
+      SELECT 1
+      FROM bot_history_message_compacts parent
+      WHERE parent.session_id = $1
+        AND parent.status = 'ok'
+        AND parent.superseded_by = c.id
+    )
+  )
+ORDER BY c.anchor_start_ms ASC, c.started_at ASC, c.id ASC
 `
 
-func (q *Queries) ListActiveCompactionArtifactsBySession(ctx context.Context, sessionID pgtype.UUID) ([]BotHistoryMessageCompact, error) {
-	rows, err := q.db.Query(ctx, listActiveCompactionArtifactsBySession, sessionID)
+func (q *Queries) ListCompactionArtifactLineageBySession(ctx context.Context, sessionID pgtype.UUID) ([]BotHistoryMessageCompact, error) {
+	rows, err := q.db.Query(ctx, listCompactionArtifactLineageBySession, sessionID)
 	if err != nil {
 		return nil, err
 	}

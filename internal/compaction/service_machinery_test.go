@@ -108,7 +108,7 @@ func (*fakeQueries) ListMessageAssetsBatch(_ context.Context, _ []pgtype.UUID) (
 	return nil, nil
 }
 
-func (f *fakeQueries) ListActiveCompactionArtifactsBySession(_ context.Context, _ pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
+func (f *fakeQueries) ListCompactionArtifactLineageBySession(_ context.Context, _ pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
 	return f.priorLogs, nil
 }
 
@@ -235,7 +235,11 @@ func TestDoCompactionInjectsPriorContext(t *testing.T) {
 	rows := machineryCorpus(t)
 	q := &fakeQueries{
 		uncompacted: rows,
-		priorLogs:   []sqlc.BotHistoryMessageCompact{{Summary: "earlier-segment-summary", Status: "ok"}},
+		priorLogs: []sqlc.BotHistoryMessageCompact{{
+			ID:      pgtype.UUID{Bytes: uuid.New(), Valid: true},
+			Summary: "earlier-segment-summary",
+			Status:  "ok",
+		}},
 	}
 	stub := &stubModel{summary: "S2"}
 	svc := newMachineryService(q)
@@ -300,6 +304,42 @@ func TestDoCompactionWarnsWhenEntryFloorsExceedBudget(t *testing.T) {
 	}
 	if !strings.Contains(logBuf.String(), "entry floors exceed the budget") {
 		t.Fatalf("budget overshoot not surfaced in logs:\n%s", logBuf.String())
+	}
+}
+
+func TestDoCompactionPriorContextUsesOnlyActiveArtifactFrontier(t *testing.T) {
+	parentID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+	activeID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+	coverage, err := json.Marshal(testCoverage("covered-row"))
+	if err != nil {
+		t.Fatalf("marshal coverage: %v", err)
+	}
+	q := &fakeQueries{
+		uncompacted: machineryCorpus(t),
+		priorLogs: []sqlc.BotHistoryMessageCompact{
+			{
+				ID:           parentID,
+				Status:       "ok",
+				Summary:      "stale-parent-summary",
+				SupersededBy: activeID,
+				SupersededAt: pgtype.Timestamptz{Time: time.Unix(1, 0), Valid: true},
+			},
+			{
+				ID:        activeID,
+				Status:    "ok",
+				Summary:   "active-frontier-summary",
+				Coverage:  coverage,
+				ParentIds: []pgtype.UUID{parentID},
+			},
+		},
+	}
+	stub := &stubModel{summary: "S2"}
+
+	if _, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 450)); err != nil {
+		t.Fatalf("RunCompactionSync: %v", err)
+	}
+	if !strings.Contains(stub.prompt, "active-frontier-summary") || strings.Contains(stub.prompt, "stale-parent-summary") {
+		t.Fatalf("prior context did not use the active frontier:\n%s", stub.prompt)
 	}
 }
 

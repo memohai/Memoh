@@ -392,20 +392,16 @@ func (r *Resolver) replaceCompactedMessages(ctx context.Context, sessionID strin
 		// resolve each in-window compact group individually.
 		return r.replaceRecentCompactedMessages(ctx, scope, messages)
 	}
-	artifacts := r.listActiveCompactionArtifacts(ctx, sessionID)
-	if len(artifacts) == 0 {
+	frontier := r.loadActiveCompactionFrontier(ctx, sessionID)
+	if len(frontier.Artifacts) == 0 {
 		return messages
 	}
-	byID := make(map[string]compaction.Artifact, len(artifacts))
-	for _, artifact := range artifacts {
-		byID[artifact.ID] = artifact
-	}
-	messages = replaceCompactedHistoryRecordsWithArtifacts(messages, byID, scope)
-	sessionSummaries := summaryRecordsFromArtifacts(missingCompactionArtifacts(messages, artifacts), scope)
+	messages = replaceCompactedHistoryRecordsWithResolver(messages, scope, frontier.Resolve)
+	sessionSummaries := summaryRecordsFromArtifacts(missingCompactionArtifacts(messages, frontier.Artifacts), scope)
 	if len(sessionSummaries) > 0 {
 		messages = prependMissingCompactionSummaries(messages, sessionSummaries)
 	}
-	return r.refreshCompactedSummaryCoverage(ctx, messages, byID)
+	return r.refreshCompactedSummaryCoverage(ctx, messages, frontier.Resolve)
 }
 
 // missingCompactionArtifacts filters the active frontier down to summaries not
@@ -413,9 +409,6 @@ func (r *Resolver) replaceCompactedMessages(ctx context.Context, sessionID strin
 func missingCompactionArtifacts(messages []historyfrag.HistoryRecord, artifacts []compaction.Artifact) []compaction.Artifact {
 	seen := make(map[string]struct{}, len(messages))
 	for _, record := range messages {
-		if id := strings.TrimSpace(record.CompactID); id != "" {
-			seen[id] = struct{}{}
-		}
 		if record.SourceKind == historyfrag.SourceCompactionLog {
 			if id := strings.TrimSpace(record.Ref.ID); id != "" {
 				seen[id] = struct{}{}
@@ -450,31 +443,43 @@ func (r *Resolver) replaceRecentCompactedMessages(ctx context.Context, scope con
 	artifacts := make(map[string]compaction.Artifact)
 	projection := compaction.NewArtifactProjection(r.queries)
 	for compactID := range compactGroups {
-		artifact, err := projection.LoadByID(ctx, compactID)
+		artifact, err := projection.LoadActiveByID(ctx, compactID)
 		if err != nil {
-			r.logger.Warn("replaceCompactedMessages: failed to load compaction artifact", slog.String("compact_id", compactID), slog.Any("error", err))
+			if r.logger != nil {
+				r.logger.Warn("replaceCompactedMessages: failed to load compaction artifact", slog.String("compact_id", compactID), slog.Any("error", err))
+			}
 			continue
 		}
 		artifacts[compactID] = artifact
+		artifacts[artifact.ID] = artifact
+	}
+	resolve := func(id string) (compaction.Artifact, bool) {
+		artifact, ok := artifacts[id]
+		return artifact, ok
 	}
 
-	return r.refreshCompactedSummaryCoverage(ctx, replaceCompactedHistoryRecordsWithArtifacts(messages, artifacts, scope), artifacts)
+	return r.refreshCompactedSummaryCoverage(ctx, replaceCompactedHistoryRecordsWithResolver(messages, scope, resolve), resolve)
 }
 
-func (r *Resolver) listActiveCompactionArtifacts(ctx context.Context, sessionID string) []compaction.Artifact {
-	artifacts, err := compaction.NewArtifactProjection(r.queries).LoadActiveSession(ctx, sessionID)
+func (r *Resolver) loadActiveCompactionFrontier(ctx context.Context, sessionID string) compaction.ArtifactFrontier {
+	frontier, err := compaction.NewArtifactProjection(r.queries).LoadActiveSession(ctx, sessionID)
 	if err != nil {
 		if r.logger != nil {
-			r.logger.Warn("listActiveCompactionArtifacts: failed to load active frontier", slog.String("session_id", sessionID), slog.Any("error", err))
+			r.logger.Warn("loadActiveCompactionFrontier: failed to load active frontier", slog.String("session_id", sessionID), slog.Any("error", err))
 		}
-		return nil
+		return compaction.ArtifactFrontier{}
 	}
-	for _, artifact := range artifacts {
+	for _, issue := range frontier.Issues {
+		if r.logger != nil {
+			r.logger.Warn("loadActiveCompactionFrontier: ignored invalid lineage", slog.String("issue", issue.Error()))
+		}
+	}
+	for _, artifact := range frontier.Artifacts {
 		if artifact.CoverageMalformed && r.logger != nil {
-			r.logger.Warn("listActiveCompactionArtifacts: malformed coverage requires legacy backfill", slog.String("compact_id", artifact.ID))
+			r.logger.Warn("loadActiveCompactionFrontier: malformed coverage requires legacy backfill", slog.String("compact_id", artifact.ID))
 		}
 	}
-	return artifacts
+	return frontier
 }
 
 func summaryRecordsFromArtifacts(artifacts []compaction.Artifact, scope contextfrag.Scope) []historyfrag.HistoryRecord {
@@ -491,7 +496,7 @@ func summaryRecordsFromArtifacts(artifacts []compaction.Artifact, scope contextf
 // refreshCompactedSummaryCoverage backfills legacy summaries that predate
 // persisted artifact coverage. New artifacts already carry immutable refs and
 // avoid this per-summary query.
-func (r *Resolver) refreshCompactedSummaryCoverage(ctx context.Context, messages []historyfrag.HistoryRecord, artifacts map[string]compaction.Artifact) []historyfrag.HistoryRecord {
+func (r *Resolver) refreshCompactedSummaryCoverage(ctx context.Context, messages []historyfrag.HistoryRecord, resolve func(string) (compaction.Artifact, bool)) []historyfrag.HistoryRecord {
 	if r.queries == nil {
 		return messages
 	}
@@ -500,7 +505,7 @@ func (r *Resolver) refreshCompactedSummaryCoverage(ctx context.Context, messages
 		if record.SourceKind != historyfrag.SourceCompactionLog || record.Kind != contextfrag.KindConversationSummary {
 			continue
 		}
-		if artifact, ok := artifacts[record.CompactID]; ok && len(artifact.Coverage) > 0 {
+		if artifact, ok := resolve(record.CompactID); ok && len(artifact.Coverage) > 0 {
 			continue
 		}
 		compactID, err := db.ParseUUID(record.CompactID)
@@ -597,6 +602,13 @@ func replaceCompactedHistoryRecords(messages []historyfrag.HistoryRecord, summar
 }
 
 func replaceCompactedHistoryRecordsWithArtifacts(messages []historyfrag.HistoryRecord, artifacts map[string]compaction.Artifact, scope contextfrag.Scope) []historyfrag.HistoryRecord {
+	return replaceCompactedHistoryRecordsWithResolver(messages, scope, func(id string) (compaction.Artifact, bool) {
+		artifact, ok := artifacts[id]
+		return artifact, ok
+	})
+}
+
+func replaceCompactedHistoryRecordsWithResolver(messages []historyfrag.HistoryRecord, scope contextfrag.Scope, resolve func(string) (compaction.Artifact, bool)) []historyfrag.HistoryRecord {
 	compactGroups := make(map[string][]int)
 	requiredCompactGroups := make(map[string]bool)
 	for i, m := range messages {
@@ -613,6 +625,7 @@ func replaceCompactedHistoryRecordsWithArtifacts(messages []historyfrag.HistoryR
 
 	var result []historyfrag.HistoryRecord
 	replaced := make(map[string]bool)
+	emittedArtifacts := make(map[string]bool)
 	for _, m := range messages {
 		if m.CompactID == "" {
 			result = append(result, m)
@@ -622,26 +635,28 @@ func replaceCompactedHistoryRecordsWithArtifacts(messages []historyfrag.HistoryR
 			continue
 		}
 		replaced[m.CompactID] = true
-		if requiredCompactGroups[m.CompactID] {
-			for _, idx := range compactGroups[m.CompactID] {
-				result = append(result, messages[idx])
-			}
-			continue
-		}
-		artifact, ok := artifacts[m.CompactID]
+		artifact, ok := resolve(m.CompactID)
 		if !ok || strings.TrimSpace(artifact.Summary) == "" {
 			for _, idx := range compactGroups[m.CompactID] {
 				result = append(result, messages[idx])
 			}
 			continue
 		}
-		if len(artifact.Coverage) == 0 {
-			artifact.Coverage = make([]compaction.CoveredSource, 0, len(compactGroups[m.CompactID]))
+		if !emittedArtifacts[artifact.ID] {
+			emittedArtifacts[artifact.ID] = true
+			if len(artifact.Coverage) == 0 {
+				artifact.Coverage = make([]compaction.CoveredSource, 0, len(compactGroups[m.CompactID]))
+				for _, idx := range compactGroups[m.CompactID] {
+					artifact.Coverage = append(artifact.Coverage, compaction.CoveredSource{Ref: messages[idx].Ref})
+				}
+			}
+			result = append(result, artifact.HistoryRecord(scope))
+		}
+		if requiredCompactGroups[m.CompactID] {
 			for _, idx := range compactGroups[m.CompactID] {
-				artifact.Coverage = append(artifact.Coverage, compaction.CoveredSource{Ref: messages[idx].Ref})
+				result = append(result, messages[idx])
 			}
 		}
-		result = append(result, artifact.HistoryRecord(scope))
 	}
 	return result
 }

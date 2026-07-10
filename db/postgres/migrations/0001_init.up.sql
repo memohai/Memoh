@@ -848,10 +848,12 @@ CREATE TABLE IF NOT EXISTS bot_history_message_compacts (
   anchor_end_ms BIGINT NOT NULL DEFAULT 0,
   artifact_level INTEGER NOT NULL DEFAULT 0,
   parent_ids UUID[] NOT NULL DEFAULT '{}'::uuid[],
-  superseded_by UUID REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL,
+  superseded_by UUID REFERENCES bot_history_message_compacts(id),
   superseded_at TIMESTAMPTZ,
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  completed_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ,
+  CONSTRAINT compacts_supersession_markers_check CHECK ((superseded_by IS NULL) = (superseded_at IS NULL)),
+  CONSTRAINT compacts_not_self_superseded_check CHECK (superseded_by IS NULL OR superseded_by <> id)
 );
 CREATE INDEX IF NOT EXISTS idx_compacts_bot_session ON bot_history_message_compacts(bot_id, session_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_compacts_active_session ON bot_history_message_compacts(session_id, anchor_start_ms, started_at) WHERE status = 'ok' AND superseded_at IS NULL;

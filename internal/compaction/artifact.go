@@ -2,19 +2,13 @@ package compaction
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/contextfrag"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/historyfrag"
 )
 
@@ -31,6 +25,7 @@ type Artifact struct {
 	ID                string
 	BotID             string
 	SessionID         string
+	Status            string
 	Summary           string
 	Version           int
 	Coverage          []CoveredSource
@@ -38,6 +33,9 @@ type Artifact struct {
 	AnchorEndMs       int64
 	Level             int
 	ParentIDs         []string
+	SupersededBy      string
+	SupersededAt      time.Time
+	StartedAt         time.Time
 	CoverageMalformed bool
 }
 
@@ -57,86 +55,6 @@ func (a Artifact) HistoryRecord(scope contextfrag.Scope) historyfrag.HistoryReco
 		record.CreatedAt = time.UnixMilli(a.AnchorStartMs).UTC()
 	}
 	return record
-}
-
-type ArtifactProjection struct {
-	queries dbstore.Queries
-}
-
-func NewArtifactProjection(queries dbstore.Queries) ArtifactProjection {
-	return ArtifactProjection{queries: queries}
-}
-
-func (p ArtifactProjection) LoadActiveSession(ctx context.Context, sessionID string) ([]Artifact, error) {
-	if p.queries == nil {
-		return nil, nil
-	}
-	sessionUUID, err := db.ParseUUID(sessionID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := p.queries.ListActiveCompactionArtifactsBySession(ctx, sessionUUID)
-	if err != nil {
-		return nil, err
-	}
-	artifacts := make([]Artifact, 0, len(rows))
-	for _, row := range rows {
-		artifact, err := artifactFromDBRow(row)
-		if err != nil {
-			return nil, err
-		}
-		artifacts = append(artifacts, artifact)
-	}
-	return artifacts, nil
-}
-
-func (p ArtifactProjection) LoadByID(ctx context.Context, id string) (Artifact, error) {
-	if p.queries == nil {
-		return Artifact{}, errors.New("compaction artifact projection: queries are required")
-	}
-	artifactID, err := db.ParseUUID(id)
-	if err != nil {
-		return Artifact{}, err
-	}
-	row, err := p.queries.GetCompactionLogByID(ctx, artifactID)
-	if err != nil {
-		return Artifact{}, err
-	}
-	return artifactFromDBRow(row)
-}
-
-func artifactFromDBRow(row sqlc.BotHistoryMessageCompact) (Artifact, error) {
-	id := formatUUID(row.ID)
-	if id == "" {
-		return Artifact{}, errors.New("compaction artifact: id is required")
-	}
-	if row.Status != "ok" || strings.TrimSpace(row.Summary) == "" {
-		return Artifact{}, fmt.Errorf("compaction artifact %s is not active", id)
-	}
-	coverage, coverageErr := DecodeArtifactCoverage(row.Coverage)
-	version := int(row.ArtifactVersion)
-	if version == 0 {
-		version = ArtifactVersion
-	}
-	parentIDs := make([]string, 0, len(row.ParentIds))
-	for _, parentID := range row.ParentIds {
-		if value := formatUUID(parentID); value != "" {
-			parentIDs = append(parentIDs, value)
-		}
-	}
-	return Artifact{
-		ID:                id,
-		BotID:             formatUUID(row.BotID),
-		SessionID:         formatUUID(row.SessionID),
-		Summary:           row.Summary,
-		Version:           version,
-		Coverage:          coverage,
-		AnchorStartMs:     row.AnchorStartMs,
-		AnchorEndMs:       row.AnchorEndMs,
-		Level:             int(row.ArtifactLevel),
-		ParentIDs:         parentIDs,
-		CoverageMalformed: coverageErr != nil,
-	}, nil
 }
 
 type artifactMetadata struct {
@@ -186,6 +104,11 @@ func DecodeArtifactCoverage(raw []byte) ([]CoveredSource, error) {
 	var covered []CoveredSource
 	if err := json.Unmarshal(raw, &covered); err != nil {
 		return nil, fmt.Errorf("decode compaction artifact coverage: %w", err)
+	}
+	for i, source := range covered {
+		if err := contextfrag.ValidateContextRef(source.Ref); err != nil {
+			return nil, fmt.Errorf("decode compaction artifact coverage ref %d: %w", i, err)
+		}
 	}
 	return covered, nil
 }
