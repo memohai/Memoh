@@ -1,5 +1,5 @@
 import { computed, ref, type Ref } from 'vue'
-import type { SessionSummary, UITurn } from '@/composables/api/useChat'
+import type { SessionSummary, UITurn } from '@/composables/api/useChat.types'
 import {
   isSessionVisibleInSidebarMode,
   sortByRecency,
@@ -24,6 +24,14 @@ export interface SessionListDeps {
   sessionId: Ref<string | null>
   // The active transcript, read (never written) by fork-anchor relocation.
   messages: ChatMessage[]
+}
+
+export type SessionLookupSource = 'listed' | 'remembered' | 'unknown'
+
+export interface SessionTouchResult {
+  source: SessionLookupSource
+  session: SessionSummary | null
+  visibleInRecents: boolean
 }
 
 export function createSessionList({ currentBotId, sessionId, messages }: SessionListDeps) {
@@ -314,6 +322,10 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
     return sessionById.get(sid) ?? rememberedSessions.value[sid] ?? null
   }
 
+  function hasListedSession(targetSessionId: string): boolean {
+    return sessionById.has(targetSessionId.trim())
+  }
+
   function isRecentsSession(session: SessionSummary): boolean {
     const type = (session.type ?? 'chat').trim()
     return type === 'chat' || type === 'discuss' || type === 'acp_agent'
@@ -337,6 +349,15 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
     markSessionLookupChanged()
   }
 
+  function updateKnownSessionTitle(id: string, title: string) {
+    const sid = id.trim()
+    const nextTitle = title.trim()
+    if (!sid || !nextTitle) return
+    if (sessionById.has(sid)) patchSessionInList(sid, { title: nextTitle })
+    const remembered = rememberedSessions.value[sid]
+    if (remembered) rememberSession({ ...remembered, title: nextTitle })
+  }
+
   function removeSessionFromList(id: string) {
     if (!sessionById.has(id) && !rememberedSessions.value[id]) return
     sessions.value = sessions.value.filter(session => session.id !== id)
@@ -351,6 +372,27 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
     if (timestamp && (!target.updated_at || timestamp > target.updated_at)) {
       patchSessionInList(targetSessionId, { updated_at: timestamp })
     }
+  }
+
+  function touchKnownSession(targetSessionId: string, timestamp?: string): SessionTouchResult {
+    const sid = targetSessionId.trim()
+    if (!sid) return { source: 'unknown', session: null, visibleInRecents: false }
+
+    const listed = sessionById.get(sid)
+    if (listed) {
+      touchSessionInList(sid, timestamp)
+      const session = sessionById.get(sid) ?? listed
+      return { source: 'listed', session, visibleInRecents: isRecentsSession(session) }
+    }
+
+    const remembered = rememberedSessions.value[sid]
+    if (!remembered) return { source: 'unknown', session: null, visibleInRecents: false }
+    if (timestamp && (!remembered.updated_at || timestamp > remembered.updated_at)) {
+      const touched = { ...remembered, updated_at: timestamp }
+      rememberSession(touched)
+      return { source: 'remembered', session: touched, visibleInRecents: isRecentsSession(touched) }
+    }
+    return { source: 'remembered', session: remembered, visibleInRecents: isRecentsSession(remembered) }
   }
 
   function fallbackSessionAfterDelete(mode: SidebarSessionMode): SessionSummary | null {
@@ -378,8 +420,6 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
   return {
     // state
     sessions,
-    sessionById,
-    rememberedSessions,
     sessionsCursor,
     hasMoreSessions,
     loadingMoreSessions,
@@ -389,26 +429,21 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
     activeChatReadOnly,
     activeChatCanFork,
     // fork anchor
-    forkSourceMetadata,
-    forkSourceAnchor,
-    forkAnchorFromUITurns,
     withForkAnchorFromUITurns,
     syncForkAnchorFromUITurns,
-    messageMatchesForkAnchor,
     updateForkAnchorForReplacedMessage,
-    preserveSessionSummary,
     // mutations
     replaceSessions,
     appendSessions,
     upsertSession,
-    replaceKnownSessionSummary,
     rememberSession,
-    forgetRememberedSession,
     knownSessionSummary,
-    isRecentsSession,
+    hasListedSession,
     patchSessionInList,
+    updateKnownSessionTitle,
     removeSessionFromList,
     touchSessionInList,
+    touchKnownSession,
     fallbackSessionAfterDelete,
     markSessionDeleted,
     clearDeletedSessionIds,

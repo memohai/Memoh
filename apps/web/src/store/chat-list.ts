@@ -266,8 +266,6 @@ export const useChatStore = defineStore('chat', () => {
   const sessionList = createSessionList({ currentBotId, sessionId, messages })
   const {
     sessions,
-    sessionById,
-    rememberedSessions,
     sessionsCursor,
     hasMoreSessions,
     loadingMoreSessions,
@@ -283,10 +281,12 @@ export const useChatStore = defineStore('chat', () => {
     upsertSession,
     rememberSession,
     knownSessionSummary,
-    isRecentsSession,
+    hasListedSession,
     patchSessionInList,
+    updateKnownSessionTitle,
     removeSessionFromList,
     touchSessionInList,
+    touchKnownSession,
     fallbackSessionAfterDelete,
     markSessionDeleted,
     clearDeletedSessionIds,
@@ -1603,9 +1603,7 @@ export const useChatStore = defineStore('chat', () => {
       const sid = event.session_id.trim()
       const title = event.title.trim()
       if (!sid || !title) return
-      patchSessionInList(sid, { title })
-      const remembered = rememberedSessions.value[sid]
-      if (remembered) rememberSession({ ...remembered, title })
+      updateKnownSessionTitle(sid, title)
       return
     }
 
@@ -1636,19 +1634,10 @@ export const useChatStore = defineStore('chat', () => {
     if (event.type === 'session_touched') {
       const sid = event.session_id.trim()
       if (!sid) return
-      const target = sessionById.get(sid)
-      if (target) {
-        if (event.updated_at && (!target.updated_at || event.updated_at > target.updated_at)) {
-          patchSessionInList(sid, { updated_at: event.updated_at })
-        }
-        return
-      }
-      const remembered = rememberedSessions.value[sid]
-      if (remembered) {
-        if (event.updated_at && (!remembered.updated_at || event.updated_at > remembered.updated_at)) {
-          rememberSession({ ...remembered, updated_at: event.updated_at })
-        }
-        if (isRecentsSession(remembered)) void refreshSessionsList(targetBotId)
+      const touched = touchKnownSession(sid, event.updated_at)
+      if (touched.source === 'listed') return
+      if (touched.source === 'remembered') {
+        if (touched.visibleInRecents) void refreshSessionsList(targetBotId)
         return
       }
       // Unknown session — likely created from another channel. Reload the
@@ -1661,9 +1650,7 @@ export const useChatStore = defineStore('chat', () => {
       const sid = event.session_id.trim()
       const title = event.title.trim()
       if (!sid || !title) return
-      patchSessionInList(sid, { title })
-      const remembered = rememberedSessions.value[sid]
-      if (remembered) rememberSession({ ...remembered, title })
+      updateKnownSessionTitle(sid, title)
       return
     }
 
@@ -1673,7 +1660,7 @@ export const useChatStore = defineStore('chat', () => {
     // on session.type, so reload the first page instead and let the server
     // return the full summary.
     const sid = event.session_id.trim()
-    if (!sid || sessionById.has(sid)) return
+    if (!sid || hasListedSession(sid)) return
     void refreshSessionsList(targetBotId)
   }
 
