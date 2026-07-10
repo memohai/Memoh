@@ -462,28 +462,33 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		sdk.WithMessages(sdkMessages),
 	)
 	if err != nil {
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{})
+		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, err
 	}
 
 	if strings.TrimSpace(result.Text) == "" {
-		_ = s.completeLog(persistCtx, logID, "error", "", errEmptySummary.Error(), 0, nil, pgtype.UUID{})
+		_ = s.completeLog(persistCtx, logID, "error", "", errEmptySummary.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, errEmptySummary
 	}
 
 	usageJSON, _ := json.Marshal(result.Usage)
 
 	modelUUID := db.ParseUUIDOrEmpty(cfg.ModelID)
+	artifact, err := artifactMetadataFor(toCompact, messageIDs)
+	if err != nil {
+		s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, usageJSON, modelUUID, nil)
+		return Result{}, err
+	}
 
 	if err := s.queries.MarkMessagesCompacted(persistCtx, sqlc.MarkMessagesCompactedParams{
 		CompactID: logID,
 		Column2:   messageIDs,
 	}); err != nil {
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{})
+		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, err
 	}
 
-	if err := s.completeLog(persistCtx, logID, "ok", result.Text, "", len(messageIDs), usageJSON, modelUUID); err != nil {
+	if err := s.completeLog(persistCtx, logID, "ok", result.Text, "", len(messageIDs), usageJSON, modelUUID, &artifact); err != nil {
 		// The rows are already marked, but the log never reached status=ok, so
 		// the reclaim SQL keeps them eligible for a later pass. Reporting ok
 		// here would claim a summary that was never persisted.
@@ -492,15 +497,25 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	return Result{Status: StatusOK, Summary: result.Text, MessageCount: len(messageIDs)}, nil
 }
 
-func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, summary, errMsg string, messageCount int, usage []byte, modelID pgtype.UUID) error {
+func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, summary, errMsg string, messageCount int, usage []byte, modelID pgtype.UUID, artifact *artifactMetadata) error {
+	coverage := []byte("[]")
+	var anchorStartMs, anchorEndMs int64
+	if artifact != nil {
+		coverage = artifact.Coverage
+		anchorStartMs = artifact.AnchorStartMs
+		anchorEndMs = artifact.AnchorEndMs
+	}
 	if _, err := s.queries.CompleteCompactionLog(ctx, sqlc.CompleteCompactionLogParams{
-		ID:           logID,
-		Status:       status,
-		Summary:      summary,
-		MessageCount: int32(messageCount), //nolint:gosec // count always small
-		ErrorMessage: errMsg,
-		Usage:        usage,
-		ModelID:      modelID,
+		ID:            logID,
+		Status:        status,
+		Summary:       summary,
+		MessageCount:  int32(messageCount), //nolint:gosec // count always small
+		ErrorMessage:  errMsg,
+		Usage:         usage,
+		ModelID:       modelID,
+		Coverage:      coverage,
+		AnchorStartMs: anchorStartMs,
+		AnchorEndMs:   anchorEndMs,
 	}); err != nil {
 		s.logger.Error("failed to complete compaction log", slog.String("error", err.Error()))
 		return err
