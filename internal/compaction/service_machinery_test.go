@@ -104,7 +104,7 @@ func (f *fakeQueries) ListUncompactedMessagesBySession(_ context.Context, _ pgty
 	return f.uncompacted, nil
 }
 
-func (f *fakeQueries) ListMessageAssetsBatch(_ context.Context, _ []pgtype.UUID) ([]sqlc.ListMessageAssetsBatchRow, error) {
+func (*fakeQueries) ListMessageAssetsBatch(_ context.Context, _ []pgtype.UUID) ([]sqlc.ListMessageAssetsBatchRow, error) {
 	return nil, nil
 }
 

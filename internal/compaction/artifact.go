@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -91,7 +92,7 @@ func (p ArtifactProjection) LoadActiveSession(ctx context.Context, sessionID str
 
 func (p ArtifactProjection) LoadByID(ctx context.Context, id string) (Artifact, error) {
 	if p.queries == nil {
-		return Artifact{}, fmt.Errorf("compaction artifact projection: queries are required")
+		return Artifact{}, errors.New("compaction artifact projection: queries are required")
 	}
 	artifactID, err := db.ParseUUID(id)
 	if err != nil {
@@ -107,7 +108,7 @@ func (p ArtifactProjection) LoadByID(ctx context.Context, id string) (Artifact, 
 func artifactFromDBRow(row sqlc.BotHistoryMessageCompact) (Artifact, error) {
 	id := formatUUID(row.ID)
 	if id == "" {
-		return Artifact{}, fmt.Errorf("compaction artifact: id is required")
+		return Artifact{}, errors.New("compaction artifact: id is required")
 	}
 	if row.Status != "ok" || strings.TrimSpace(row.Summary) == "" {
 		return Artifact{}, fmt.Errorf("compaction artifact %s is not active", id)
