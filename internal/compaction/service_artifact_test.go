@@ -49,7 +49,7 @@ func TestDoCompactionPersistsDurableCoverageAndAnchor(t *testing.T) {
 	q := &fakeQueries{uncompacted: rows}
 	stub := &stubModel{summary: "SUMMARY"}
 
-	if err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 200)); err != nil {
+	if _, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 200)); err != nil {
 		t.Fatalf("RunCompactionSync: %v", err)
 	}
 
@@ -91,7 +91,7 @@ func TestDoCompactionCoverageHashIncludesMessageAssets(t *testing.T) {
 	}
 	stub := &stubModel{summary: "SUMMARY"}
 
-	if err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 200)); err != nil {
+	if _, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 200)); err != nil {
 		t.Fatalf("RunCompactionSync: %v", err)
 	}
 
@@ -138,7 +138,7 @@ func TestDoCompactionStopsWhenAssetsCannotBeLoaded(t *testing.T) {
 		assetsErr:   assetErr,
 	}
 
-	err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 200))
+	_, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 200))
 	if !errors.Is(err, assetErr) {
 		t.Fatalf("RunCompactionSync error = %v, want %v", err, assetErr)
 	}
@@ -162,7 +162,7 @@ func TestDoCompactionReturnsSuccessfulArtifactFinalizationError(t *testing.T) {
 		completeErr: completeErr,
 	}
 
-	err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 200))
+	_, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 200))
 	if !errors.Is(err, completeErr) {
 		t.Fatalf("RunCompactionSync error = %v, want %v", err, completeErr)
 	}
