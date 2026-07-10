@@ -64,3 +64,30 @@ func TestRepairSDKToolClosuresKeepsIntactPair(t *testing.T) {
 		}
 	}
 }
+
+func TestRepairSDKContextToolClosuresPreservesArtifactIdentity(t *testing.T) {
+	t.Parallel()
+
+	repaired := repairSDKContextToolClosures([]sdkContextMessage{
+		{
+			Message: sdk.Message{
+				Role: sdk.MessageRoleAssistant,
+				Content: []sdk.MessagePart{
+					sdk.ToolCallPart{ToolCallID: "call-1", ToolName: "exec", Input: map[string]any{}},
+				},
+			},
+			CompactionArtifactID: "artifact-a",
+		},
+		{Message: sdk.UserMessage("follow-up"), CompactionArtifactID: "artifact-b"},
+	})
+
+	if len(repaired) != 3 {
+		t.Fatalf("repaired messages = %d, want 3: %#v", len(repaired), repaired)
+	}
+	if repaired[0].CompactionArtifactID != "artifact-a" || repaired[2].CompactionArtifactID != "artifact-b" {
+		t.Fatalf("artifact identity changed: %#v", repaired)
+	}
+	if repaired[1].CompactionArtifactID != "" || repaired[1].Message.Role != sdk.MessageRoleTool {
+		t.Fatalf("synthetic closure inherited artifact identity: %#v", repaired[1])
+	}
+}

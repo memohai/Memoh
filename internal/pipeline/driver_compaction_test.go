@@ -9,6 +9,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/contextfrag"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 )
 
@@ -24,7 +25,20 @@ func TestHandleReplyWithAgentConsumesCompactionArtifacts(t *testing.T) {
 			ID:            "artifact-a",
 			Summary:       "condensed old context",
 			AnchorStartMs: 100,
-			Sources:       []CompactionSource{{ExternalMessageID: "old", CreatedAtMs: 200}},
+			Sources: []CompactionSource{{
+				Ref: contextfrag.ContextRef{
+					Namespace:   "bot_history_message",
+					ID:          "row-old",
+					Version:     1,
+					HashAlgo:    contextfrag.HashAlgoSHA256,
+					HashScope:   contextfrag.HashScopeSourcePayload,
+					ContentHash: "source-hash",
+					Schema:      contextfrag.SchemaContextRef,
+					Durability:  contextfrag.RefDurable,
+				},
+				ExternalMessageID: "old",
+				CreatedAtMs:       200,
+			}},
 		}},
 	}
 	agent := &fakeDiscussStreamer{}
@@ -43,6 +57,22 @@ func TestHandleReplyWithAgentConsumesCompactionArtifacts(t *testing.T) {
 	if !strings.Contains(joined, "<summary>\ncondensed old context\n</summary>") ||
 		!strings.Contains(joined, "new rendered context") {
 		t.Fatalf("composed context lost summary or new RC: %s", joined)
+	}
+	if len(agent.lastConfig.ContextManifest.CoverageTrace) != 1 {
+		t.Fatalf("discuss manifest coverage traces = %d, want 1: %#v", len(agent.lastConfig.ContextManifest.CoverageTrace), agent.lastConfig.ContextManifest)
+	}
+	foundSummary := false
+	for _, frag := range agent.lastConfig.ContextFrags {
+		if frag.Kind != contextfrag.KindConversationSummary {
+			continue
+		}
+		foundSummary = true
+		if frag.Ref.ID != "artifact-a" || frag.Coverage == nil || len(frag.Coverage.CoveredRefs) != 1 || frag.Coverage.CoveredRefs[0].ID != "row-old" {
+			t.Fatalf("discuss summary frag lost artifact identity: %#v", frag)
+		}
+	}
+	if !foundSummary {
+		t.Fatal("discuss context has no typed summary fragment")
 	}
 }
 

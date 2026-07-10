@@ -340,7 +340,12 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 	}
 	runConfig := resolved.RunConfig
 
-	runConfig.Messages = repairSDKToolClosures(contextMessagesToSDK(composed.Messages))
+	contextEntries := repairSDKContextToolClosures(contextMessagesToSDKEntries(composed.Messages))
+	runConfig.Messages = sdkMessagesFromContextEntries(contextEntries)
+	runConfig.ContextFrags = append(
+		runConfig.ContextFrags,
+		compactionSummaryContextFrags(contextEntries, artifacts, runConfig.ContextScope)...,
+	)
 	runConfig.SessionType = sessionpkg.TypeDiscuss
 	runConfig.Query = ""
 

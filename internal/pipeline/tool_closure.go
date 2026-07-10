@@ -8,11 +8,24 @@ import (
 
 const syntheticToolClosureReason = "tool execution interrupted before a response was recorded"
 
+type sdkContextMessage struct {
+	Message              sdk.Message
+	CompactionArtifactID string
+}
+
 func repairSDKToolClosures(messages []sdk.Message) []sdk.Message {
-	if len(messages) == 0 {
-		return messages
+	entries := make([]sdkContextMessage, 0, len(messages))
+	for _, message := range messages {
+		entries = append(entries, sdkContextMessage{Message: message})
 	}
-	repaired := make([]sdk.Message, 0, len(messages))
+	return sdkMessagesFromContextEntries(repairSDKContextToolClosures(entries))
+}
+
+func repairSDKContextToolClosures(entries []sdkContextMessage) []sdkContextMessage {
+	if len(entries) == 0 {
+		return entries
+	}
+	repaired := make([]sdkContextMessage, 0, len(entries))
 	pending := make(map[string]string)
 	pendingOrder := make([]string, 0)
 	flushPending := func() {
@@ -21,22 +34,25 @@ func repairSDKToolClosures(messages []sdk.Message) []sdk.Message {
 			if !ok {
 				continue
 			}
-			repaired = append(repaired, sdk.ToolMessage(sdk.ToolResultPart{
-				ToolCallID: callID,
-				ToolName:   toolName,
-				Result:     syntheticToolClosureReason,
-				IsError:    true,
-			}))
+			repaired = append(repaired, sdkContextMessage{
+				Message: sdk.ToolMessage(sdk.ToolResultPart{
+					ToolCallID: callID,
+					ToolName:   toolName,
+					Result:     syntheticToolClosureReason,
+					IsError:    true,
+				}),
+			})
 			delete(pending, callID)
 		}
 		pendingOrder = pendingOrder[:0]
 	}
 
-	for _, message := range messages {
+	for _, entry := range entries {
+		message := entry.Message
 		switch message.Role {
 		case sdk.MessageRoleAssistant:
 			flushPending()
-			repaired = append(repaired, message)
+			repaired = append(repaired, entry)
 			for _, part := range message.Content {
 				call, ok := part.(sdk.ToolCallPart)
 				if !ok {
@@ -70,11 +86,11 @@ func repairSDKToolClosures(messages []sdk.Message) []sdk.Message {
 			if len(kept) == 0 {
 				continue
 			}
-			message.Content = kept
-			repaired = append(repaired, message)
+			entry.Message.Content = kept
+			repaired = append(repaired, entry)
 		default:
 			flushPending()
-			repaired = append(repaired, message)
+			repaired = append(repaired, entry)
 		}
 	}
 	flushPending()

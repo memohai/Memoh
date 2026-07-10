@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -11,6 +12,8 @@ import (
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/contextfrag"
+	"github.com/memohai/memoh/internal/historyfrag"
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
@@ -246,9 +249,10 @@ func buildLateBindingPrompt(isMentioned bool) string {
 	return prompt.String()
 }
 
-func contextMessagesToSDK(messages []ContextMessage) []sdk.Message {
-	result := make([]sdk.Message, 0, len(messages))
+func contextMessagesToSDKEntries(messages []ContextMessage) []sdkContextMessage {
+	result := make([]sdkContextMessage, 0, len(messages))
 	for _, message := range messages {
+		entry := sdkContextMessage{CompactionArtifactID: strings.TrimSpace(message.CompactionArtifactID)}
 		if len(message.RawContent) > 0 {
 			raw, err := json.Marshal(struct {
 				Role    string          `json:"role"`
@@ -257,16 +261,60 @@ func contextMessagesToSDK(messages []ContextMessage) []sdk.Message {
 			if err == nil {
 				var decoded sdk.Message
 				if json.Unmarshal(raw, &decoded) == nil {
-					result = append(result, decoded)
+					entry.Message = decoded
+					result = append(result, entry)
 					continue
 				}
 			}
 		}
 		if message.Role == "assistant" {
-			result = append(result, sdk.AssistantMessage(message.Content))
+			entry.Message = sdk.AssistantMessage(message.Content)
 		} else {
-			result = append(result, sdk.UserMessage(message.Content))
+			entry.Message = sdk.UserMessage(message.Content)
 		}
+		result = append(result, entry)
 	}
 	return result
+}
+
+func sdkMessagesFromContextEntries(entries []sdkContextMessage) []sdk.Message {
+	messages := make([]sdk.Message, 0, len(entries))
+	for _, entry := range entries {
+		messages = append(messages, entry.Message)
+	}
+	return messages
+}
+
+func compactionSummaryContextFrags(
+	entries []sdkContextMessage,
+	artifacts []CompactionArtifact,
+	scope contextfrag.Scope,
+) []contextfrag.ContextFrag {
+	artifactsByID := make(map[string]CompactionArtifact, len(artifacts))
+	for _, artifact := range artifacts {
+		if id := strings.TrimSpace(artifact.ID); id != "" {
+			artifactsByID[id] = artifact
+		}
+	}
+
+	frags := make([]contextfrag.ContextFrag, 0, len(artifactsByID))
+	for index, entry := range entries {
+		artifactID := strings.TrimSpace(entry.CompactionArtifactID)
+		artifact, ok := artifactsByID[artifactID]
+		if !ok {
+			continue
+		}
+		coveredRefs := make([]contextfrag.ContextRef, 0, len(artifact.Sources))
+		for _, source := range artifact.Sources {
+			if contextfrag.ValidateContextRef(source.Ref) == nil {
+				coveredRefs = append(coveredRefs, source.Ref)
+			}
+		}
+		record := historyfrag.SummaryRecord(artifactID, artifact.Summary, coveredRefs, scope)
+		frag := historyfrag.ToFrag(record)
+		frag.ID = fmt.Sprintf("message.%03d", index)
+		frag.Provenance.Index = index
+		frags = append(frags, frag)
+	}
+	return frags
 }
