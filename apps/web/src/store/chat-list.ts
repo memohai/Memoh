@@ -283,6 +283,7 @@ export const useChatStore = defineStore('chat', () => {
   } = assistantStreams
   const approvalResponses = createApprovalResponseTracker({
     rollbackApproval: approvalId => markToolApprovalDecision(approvalId, 'pending'),
+    onExpired: handleExpiredApprovalResponse,
   })
   const {
     hasPendingApprovalResponse,
@@ -627,6 +628,19 @@ export const useChatStore = defineStore('chat', () => {
     const turn = session.assistantTurn
     if (turn.messages.length > 0) return
     removeTurnFromSession(session.botId, session.sessionId, turn)
+  }
+
+  function handleExpiredApprovalResponse(response: ApprovalResponse) {
+    if (activeWs?.connected) activeWs.abort(response.streamId)
+    const stream = getAssistantStream(response.streamId)
+    if (stream) {
+      const turn = stream.assistantTurn
+      discardAssistantStream(response.streamId)
+      if (turn.messages.length === 0) {
+        removeTurnFromSession(response.botId, response.sessionId, turn)
+      }
+    }
+    refreshLoadingForSession(response.botId, response.sessionId)
   }
 
   function handleWSStreamEvent(event: UIStreamEvent, targetSessionId?: string, sourceBotId = '') {

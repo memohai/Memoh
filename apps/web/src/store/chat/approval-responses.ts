@@ -1,4 +1,4 @@
-export type ApprovalResponseOutcome = 'succeeded' | 'failed' | 'canceled'
+export type ApprovalResponseOutcome = 'succeeded' | 'failed' | 'canceled' | 'expired'
 
 export interface ApprovalResponse {
   readonly streamId: string
@@ -18,23 +18,35 @@ export interface BeginApprovalResponseInput {
 
 interface PendingApprovalResponse extends ApprovalResponse {
   startedAt: number
+  cancelExpiry?: () => void
 }
+
+type ScheduleExpiry = (callback: () => void, delayMs: number) => () => void
 
 interface ApprovalResponseTrackerDeps {
   rollbackApproval: (approvalId: string) => void
   now?: () => number
   ttlMs?: number
   terminalHistoryLimit?: number
+  scheduleExpiry?: ScheduleExpiry
+  onExpired?: (response: ApprovalResponse) => void
 }
 
 const DEFAULT_TTL_MS = 2 * 60 * 1000
 const DEFAULT_TERMINAL_HISTORY_LIMIT = 512
+
+const defaultScheduleExpiry: ScheduleExpiry = (callback, delayMs) => {
+  const timer = setTimeout(callback, delayMs)
+  return () => clearTimeout(timer)
+}
 
 export function createApprovalResponseTracker({
   rollbackApproval,
   now = Date.now,
   ttlMs = DEFAULT_TTL_MS,
   terminalHistoryLimit = DEFAULT_TERMINAL_HISTORY_LIMIT,
+  scheduleExpiry = defaultScheduleExpiry,
+  onExpired = () => {},
 }: ApprovalResponseTrackerDeps) {
   const responses = new Map<string, PendingApprovalResponse>()
   const terminalResponseIds = new Set<string>()
@@ -46,11 +58,23 @@ export function createApprovalResponseTracker({
     if (oldest) terminalResponseIds.delete(oldest)
   }
 
+  function expireResponse(streamId: string) {
+    const response = responses.get(streamId)
+    if (!response) return
+    const remaining = ttlMs - (now() - response.startedAt)
+    if (remaining > 0) {
+      response.cancelExpiry = scheduleExpiry(() => expireResponse(streamId), remaining)
+      return
+    }
+    const expired = settleApprovalResponse(streamId, 'expired')
+    if (expired) onExpired(expired)
+  }
+
   function expireStaleResponses() {
     const currentTime = now()
     for (const [streamId, response] of responses) {
       if (currentTime - response.startedAt < ttlMs) continue
-      settleApprovalResponse(streamId, 'failed')
+      expireResponse(streamId)
     }
   }
 
@@ -73,14 +97,16 @@ export function createApprovalResponseTracker({
     expireStaleResponses()
     if (responses.has(streamId) || hasPendingApprovalResponse(approvalId)) return false
     if (terminalResponseIds.has(streamId)) return false
-    responses.set(streamId, {
+    const response: PendingApprovalResponse = {
       streamId,
       approvalId,
       botId,
       sessionId,
       silent: input.silent,
       startedAt: now(),
-    })
+    }
+    responses.set(streamId, response)
+    response.cancelExpiry = scheduleExpiry(() => expireResponse(streamId), ttlMs)
     return true
   }
 
@@ -93,8 +119,9 @@ export function createApprovalResponseTracker({
     const response = responses.get(id)
     if (!response) return undefined
     responses.delete(id)
+    response.cancelExpiry?.()
     rememberTerminalResponse(id)
-    if (outcome === 'failed') rollbackApproval(response.approvalId)
+    if (outcome === 'failed' || outcome === 'expired') rollbackApproval(response.approvalId)
     return response
   }
 
@@ -121,6 +148,7 @@ export function createApprovalResponseTracker({
   }
 
   function resetApprovalResponses() {
+    for (const response of responses.values()) response.cancelExpiry?.()
     responses.clear()
     terminalResponseIds.clear()
   }

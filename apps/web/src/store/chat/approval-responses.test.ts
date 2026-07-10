@@ -30,6 +30,7 @@ describe('approval response tracker', () => {
     expect(rollbackApproval).not.toHaveBeenCalled()
     expect(tracker.pendingApprovalResponsesForSession('bot-1', 'session-1')).toHaveLength(1)
     expect(tracker.pendingApprovalResponsesForSession('bot-2', 'session-1')).toEqual([])
+    tracker.resetApprovalResponses()
   })
 
   it('settles success, failure, and local cancellation through one transition', () => {
@@ -69,6 +70,7 @@ describe('approval response tracker', () => {
     expect(rollbackApproval).toHaveBeenCalledWith('approval-1')
     expect(tracker.beginApprovalResponse(input('stream-1'))).toBe(false)
     expect(tracker.beginApprovalResponse(input('stream-2'))).toBe(true)
+    tracker.resetApprovalResponses()
   })
 
   it('rejects incomplete registrations and clears terminal bookkeeping', () => {
@@ -97,5 +99,43 @@ describe('approval response tracker', () => {
     expect(tracker.isTerminalApprovalResponse('stream-1')).toBe(false)
     expect(tracker.isTerminalApprovalResponse('stream-2')).toBe(true)
     expect(tracker.isTerminalApprovalResponse('stream-3')).toBe(true)
+  })
+
+  it('automatically expires an abandoned response and reports its captured context', () => {
+    let currentTime = 1_000
+    const scheduled: Array<{ callback: () => void; canceled: boolean; delayMs: number }> = []
+    const rollbackApproval = vi.fn()
+    const onExpired = vi.fn()
+    const tracker = createApprovalResponseTracker({
+      rollbackApproval,
+      onExpired,
+      now: () => currentTime,
+      ttlMs: 100,
+      scheduleExpiry: (callback, delayMs) => {
+        const entry = { callback, delayMs, canceled: false }
+        scheduled.push(entry)
+        return () => { entry.canceled = true }
+      },
+    })
+    tracker.beginApprovalResponse(input('stream-1', 'approval-1', true))
+
+    expect(scheduled[0]?.delayMs).toBe(100)
+    currentTime = 1_099
+    scheduled[0]!.callback()
+    expect(scheduled[1]?.delayMs).toBe(1)
+    expect(rollbackApproval).not.toHaveBeenCalled()
+
+    currentTime = 1_100
+    scheduled[1]!.callback()
+    expect(rollbackApproval).toHaveBeenCalledWith('approval-1')
+    expect(onExpired).toHaveBeenCalledWith(expect.objectContaining({
+      streamId: 'stream-1',
+      approvalId: 'approval-1',
+      botId: 'bot-1',
+      sessionId: 'session-1',
+      silent: true,
+    }))
+    expect(tracker.getApprovalResponse('stream-1')).toBeUndefined()
+    expect(tracker.isTerminalApprovalResponse('stream-1')).toBe(true)
   })
 })
