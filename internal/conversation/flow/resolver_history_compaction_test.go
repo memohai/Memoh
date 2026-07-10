@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
@@ -125,5 +127,56 @@ func TestReplaceRecentCompactedMessagesKeepsArtifactResolutionOwnerBound(t *test
 	want := []string{"session one raw", "session two raw"}
 	if gotTexts := recordTexts(got); !reflect.DeepEqual(gotTexts, want) {
 		t.Fatalf("cross-owner artifact replaced history: %#v, want %#v", gotTexts, want)
+	}
+}
+
+func TestReplaceRecentCompactedMessagesLoadsEveryKnownNullSessionGroup(t *testing.T) {
+	t.Parallel()
+
+	botID := "00000000-0000-0000-0000-00000000b301"
+	artifactAID := "00000000-0000-0000-0000-00000000c301"
+	artifactBID := "00000000-0000-0000-0000-00000000c302"
+	recordAID := "00000000-0000-0000-0000-000000000301"
+	recordBID := "00000000-0000-0000-0000-000000000302"
+	artifactA := sqlc.BotHistoryMessageCompact{
+		ID:       mustPGUUID(t, artifactAID),
+		BotID:    mustPGUUID(t, botID),
+		Status:   "ok",
+		Summary:  "summary a",
+		Coverage: persistedCoverage(t, recordAID),
+	}
+	artifactB := sqlc.BotHistoryMessageCompact{
+		ID:       mustPGUUID(t, artifactBID),
+		BotID:    mustPGUUID(t, botID),
+		Status:   "ok",
+		Summary:  "summary b",
+		Coverage: persistedCoverage(t, recordBID),
+	}
+	queries := &recordingCompactionLogQueries{
+		byID: map[pgtype.UUID]sqlc.BotHistoryMessageCompact{
+			artifactA.ID: artifactA,
+			artifactB.ID: artifactB,
+		},
+	}
+	records := []historyfrag.HistoryRecord{
+		historyRecord(recordAID, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("raw a")}, func(record *historyfrag.HistoryRecord) {
+			record.BotID = botID
+			record.SessionIDKnown = true
+			record.CompactID = artifactAID
+		}),
+		historyRecord(recordBID, conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("raw b")}, func(record *historyfrag.HistoryRecord) {
+			record.BotID = botID
+			record.SessionIDKnown = true
+			record.CompactID = artifactBID
+		}),
+	}
+
+	got := mustReplaceCompactedMessages(t, &Resolver{queries: queries}, "", contextfrag.Scope{BotID: botID}, records)
+	want := []string{"<summary>\nsummary a\n</summary>", "<summary>\nsummary b\n</summary>"}
+	if gotTexts := recordTexts(got); !reflect.DeepEqual(gotTexts, want) {
+		t.Fatalf("known-null compact groups = %#v, want %#v", gotTexts, want)
+	}
+	if len(queries.getCalls) != 2 {
+		t.Fatalf("point-loaded compact groups = %d, want 2: %#v", len(queries.getCalls), queries.getCalls)
 	}
 }

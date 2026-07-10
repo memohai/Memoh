@@ -119,13 +119,14 @@ func (r *Resolver) replaceRecentCompactedMessages(ctx context.Context, scope con
 		}
 	}
 	catalog := compaction.NewArtifactCatalog()
+	loadedFrontiers := make(map[compaction.ArtifactOwner]struct{})
 	projection := compaction.NewArtifactProjection(r.queries)
 	for _, record := range messages {
 		owner := recordArtifactOwner(record, scope)
 		if owner.SessionID == "" {
 			continue
 		}
-		if catalog.HasOwner(owner) {
+		if _, loaded := loadedFrontiers[owner]; loaded {
 			continue
 		}
 		frontier, err := r.loadActiveCompactionFrontier(ctx, owner.BotID, owner.SessionID)
@@ -133,6 +134,7 @@ func (r *Resolver) replaceRecentCompactedMessages(ctx context.Context, scope con
 			return nil, err
 		}
 		catalog.Add(owner, frontier)
+		loadedFrontiers[owner] = struct{}{}
 	}
 	for compactID := range compactGroups {
 		owner, consistent := compactGroupOwner(messages, compactGroups[compactID], scope)
@@ -142,7 +144,7 @@ func (r *Resolver) replaceRecentCompactedMessages(ctx context.Context, scope con
 			}
 			continue
 		}
-		if catalog.HasOwner(owner) {
+		if _, loaded := loadedFrontiers[owner]; loaded {
 			continue
 		}
 		artifact, err := projection.LoadActiveByID(ctx, compactID, owner)

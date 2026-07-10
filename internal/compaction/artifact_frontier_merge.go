@@ -32,11 +32,6 @@ func (c *ArtifactCatalog) Resolve(owner ArtifactOwner, lineageID string) (Artifa
 	return frontier.Resolve(lineageID)
 }
 
-func (c *ArtifactCatalog) HasOwner(owner ArtifactOwner) bool {
-	_, ok := c.frontiers[normalizeArtifactOwner(owner)]
-	return ok
-}
-
 func (c *ArtifactCatalog) ResolveCoveredRef(owner ArtifactOwner, ref contextfrag.ContextRef) (Artifact, bool) {
 	frontier, ok := c.frontiers[normalizeArtifactOwner(owner)]
 	if !ok {
