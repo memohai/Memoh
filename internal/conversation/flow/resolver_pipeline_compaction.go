@@ -63,21 +63,67 @@ func (r *Resolver) loadPipelineCompactionArtifacts(
 		if _, conflict := blocked[artifact.ID]; conflict {
 			continue
 		}
-		sources := make([]pipelinepkg.CompactionSource, 0, len(artifact.Coverage))
-		for _, source := range artifact.Coverage {
+		projected := artifact
+		if len(projected.Coverage) == 0 {
+			projected.Coverage = legacyArtifactCoverage(catalog, projected, records, scope)
+			if len(projected.Coverage) == 0 {
+				continue
+			}
+			projected.AnchorStartMs = projected.Coverage[0].CreatedAtMs
+			projected.AnchorEndMs = projected.Coverage[len(projected.Coverage)-1].CreatedAtMs
+		}
+		sources := make([]pipelinepkg.CompactionSource, 0, len(projected.Coverage))
+		for _, source := range projected.Coverage {
 			sources = append(sources, pipelinepkg.CompactionSource{
+				Ref:               source.Ref,
 				HistoryMessageID:  source.Ref.ID,
 				ExternalMessageID: source.ExternalMessageID,
 				CreatedAtMs:       source.CreatedAtMs,
 			})
 		}
 		artifacts = append(artifacts, pipelinepkg.CompactionArtifact{
-			ID:            artifact.ID,
-			Summary:       artifact.Summary,
-			AnchorStartMs: artifact.AnchorStartMs,
+			ID:            projected.ID,
+			Summary:       projected.Summary,
+			AnchorStartMs: projected.AnchorStartMs,
 			Sources:       sources,
 		})
-		summaries = append(summaries, artifact.HistoryRecord(scope))
+		summaries = append(summaries, projected.HistoryRecord(scope))
 	}
 	return artifacts, summaries, nil
+}
+
+func legacyArtifactCoverage(
+	catalog *compaction.ArtifactCatalog,
+	artifact compaction.Artifact,
+	records []historyfrag.HistoryRecord,
+	scope contextfrag.Scope,
+) []compaction.CoveredSource {
+	covered := make([]compaction.CoveredSource, 0)
+	seen := make(map[string]struct{})
+	for _, record := range records {
+		compactID := strings.TrimSpace(record.CompactID)
+		if compactID == "" {
+			continue
+		}
+		resolved, ok := catalog.Resolve(recordArtifactOwner(record, scope), compactID)
+		if !ok || resolved.ID != artifact.ID {
+			continue
+		}
+		key := record.Ref.StableKey()
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		createdAtMs := int64(0)
+		if !record.CreatedAt.IsZero() {
+			createdAtMs = record.CreatedAt.UnixMilli()
+		}
+		covered = append(covered, compaction.CoveredSource{
+			Ref:                    record.Ref,
+			ExternalMessageID:      record.ExternalMessageID,
+			SourceReplyToMessageID: record.SourceReplyToMessageID,
+			CreatedAtMs:            createdAtMs,
+		})
+	}
+	return covered
 }

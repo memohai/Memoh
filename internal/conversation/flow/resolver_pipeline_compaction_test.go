@@ -100,6 +100,61 @@ func TestLoadPipelineCompactionArtifactsRejectsOnlyConflictingArtifact(t *testin
 	}
 }
 
+func TestLoadPipelineCompactionArtifactsBackfillsLegacyCoverageFromMarkedRows(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID     = "11111111-1111-1111-1111-111111111111"
+		sessionID = "22222222-2222-2222-2222-222222222222"
+		artifact  = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	)
+	createdAt := time.UnixMilli(1_000).UTC()
+	message := pipelineHistoryMessage(t, "row-a", botID, sessionID, "external-a", createdAt, "user", "legacy source")
+	message.CompactID = artifact
+	row := pipelineArtifactRow(t, artifact, botID, sessionID, "legacy summary", []messagepkg.Message{message}, createdAt.Add(time.Minute))
+	row.Coverage = []byte("[]")
+	row.AnchorStartMs = 0
+	row.AnchorEndMs = 0
+	resolver := &Resolver{queries: &recordingCompactionLogQueries{logs: []sqlc.BotHistoryMessageCompact{row}}}
+	scope := compactionSummaryScope(botID, "chat", sessionID, "group", "room", "target")
+
+	artifacts, summaries, err := resolver.loadPipelineCompactionArtifacts(context.Background(), scope, pipelineHistoryRecords(t, []messagepkg.Message{message}))
+	if err != nil {
+		t.Fatalf("loadPipelineCompactionArtifacts() error = %v", err)
+	}
+	if len(artifacts) != 1 || len(artifacts[0].Sources) != 1 {
+		t.Fatalf("legacy artifact projection = %#v, want one covered source", artifacts)
+	}
+	if artifacts[0].AnchorStartMs != createdAt.UnixMilli() || artifacts[0].Sources[0].ExternalMessageID != "external-a" {
+		t.Fatalf("legacy artifact lost derived anchor/source: %#v", artifacts[0])
+	}
+	if len(summaries) != 1 || summaries[0].Coverage == nil || len(summaries[0].Coverage.CoveredRefs) != 1 {
+		t.Fatalf("legacy summary coverage = %#v", summaries)
+	}
+}
+
+func TestLoadPipelineCompactionArtifactsSkipsUnreconciledLegacyArtifact(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID     = "11111111-1111-1111-1111-111111111111"
+		sessionID = "22222222-2222-2222-2222-222222222222"
+		artifact  = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	)
+	row := pipelineArtifactRow(t, artifact, botID, sessionID, "legacy summary", nil, time.UnixMilli(1_000).UTC())
+	row.Coverage = []byte("[]")
+	resolver := &Resolver{queries: &recordingCompactionLogQueries{logs: []sqlc.BotHistoryMessageCompact{row}}}
+	scope := compactionSummaryScope(botID, "chat", sessionID, "group", "room", "target")
+
+	artifacts, summaries, err := resolver.loadPipelineCompactionArtifacts(context.Background(), scope, nil)
+	if err != nil {
+		t.Fatalf("loadPipelineCompactionArtifacts() error = %v", err)
+	}
+	if len(artifacts) != 0 || len(summaries) != 0 {
+		t.Fatalf("unreconciled legacy artifact became active: artifacts=%#v summaries=%#v", artifacts, summaries)
+	}
+}
+
 func pipelineHistoryMessage(t *testing.T, id, botID, sessionID, externalID string, createdAt time.Time, role, text string) messagepkg.Message {
 	t.Helper()
 	modelMessage := conversation.ModelMessage{Role: role, Content: conversation.NewTextContent(text)}

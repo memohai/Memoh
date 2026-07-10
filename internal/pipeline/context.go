@@ -5,6 +5,8 @@ import (
 	"math"
 	"sort"
 	"strings"
+
+	"github.com/memohai/memoh/internal/contextfrag"
 )
 
 const charsPerToken = 2
@@ -38,9 +40,10 @@ type ComposeContextResult struct {
 // compaction artifact. ExternalMessageID projects that source onto the DCP
 // rendered stream; HistoryMessageID projects it onto persisted turn responses.
 type CompactionSource struct {
-	HistoryMessageID  string `json:"history_message_id,omitempty"`
-	ExternalMessageID string `json:"external_message_id,omitempty"`
-	CreatedAtMs       int64  `json:"created_at_ms,omitempty"`
+	Ref               contextfrag.ContextRef `json:"ref"`
+	HistoryMessageID  string                 `json:"history_message_id,omitempty"`
+	ExternalMessageID string                 `json:"external_message_id,omitempty"`
+	CreatedAtMs       int64                  `json:"created_at_ms,omitempty"`
 }
 
 // CompactionArtifact is the pipeline-facing projection of one active durable
