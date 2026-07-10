@@ -7,13 +7,15 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
 
-func TestBuildEntriesAndIDsMarksOnlyRenderedItemsInMixedWindow(t *testing.T) {
+func TestBuildEntriesAndIDsBreaksSpanAtSkippedMiddleGroup(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
 		mkRow(t, "user", `"first question"`, 0),
-		// reasoning-only: renders to empty and must NOT add a bare
-		// "assistant:" line or be marked compacted in a mixed window.
+		// reasoning-only: renders empty. It must NOT be marked, and because it
+		// sits between two rendered rows, it breaks the contiguous compact span:
+		// marking row 0 and row 2 under one compact_id would leave this raw row
+		// between them, and the read path would fold row 2's summary before it.
 		mkRow(t, "assistant", `[{"type":"reasoning","text":"thinking"}]`, 0),
 		mkRow(t, "assistant", `"the answer"`, 0),
 	}
@@ -21,22 +23,13 @@ func TestBuildEntriesAndIDsMarksOnlyRenderedItemsInMixedWindow(t *testing.T) {
 
 	entries, ids := buildEntriesAndIDs(items)
 
-	if len(ids) != 2 {
-		t.Fatalf("ids = %d, want 2 (only rendered rows marked)", len(ids))
+	// Only the first contiguous run (row 0) is marked; "the answer" is deferred
+	// to a later pass so the marked ids stay contiguous in history.
+	if len(ids) != 1 || ids[0] != rows[0].ID {
+		t.Fatalf("ids = %#v, want only the leading contiguous row 0 marked", ids)
 	}
-	wantIDs := []int{0, 2}
-	for i, rowIdx := range wantIDs {
-		if ids[i] != rows[rowIdx].ID {
-			t.Fatalf("id[%d] misaligned with rendered row %d", i, rowIdx)
-		}
-	}
-
-	// The reasoning-only message contributes no summarizer entry.
-	if len(entries) != 2 {
-		t.Fatalf("entries = %d, want 2 (empty entry skipped)", len(entries))
-	}
-	if entries[0].Content != "first question" || entries[1].Content != "the answer" {
-		t.Fatalf("entries lost order/content: %+v", entries)
+	if len(entries) != 1 || entries[0].Content != "first question" {
+		t.Fatalf("entries = %#v, want only 'first question'", entries)
 	}
 	for _, e := range entries {
 		if strings.TrimSpace(e.Content) == "" {

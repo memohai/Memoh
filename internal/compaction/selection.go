@@ -477,13 +477,19 @@ func isToolResultItem(item CompactionCandidate) bool {
 }
 
 // buildEntriesAndIDs renders the summarizer entries and the ids to mark
-// compacted, grouped by tool exchange (see toolExchangeGroups). A group is
-// emitted only when every row in it renders non-empty; an incomplete group —
-// e.g. a reasoning-only message, or a renderable tool call whose result renders
-// empty — is withheld from BOTH the prompt and the marked ids. That keeps
-// entries and ids aligned: the summarizer never sees content that would remain
-// in raw history (which would duplicate it), and marking never strands an
-// orphan tool row after the summary replaces the rest.
+// compacted from the first maximal run of contiguous complete tool-exchange
+// groups (see toolExchangeGroups). A group is complete only when every row in
+// it renders non-empty; an incomplete group — a reasoning-only message, or a
+// tool call whose result renders empty — is skipped.
+//
+// Marking stops at the first skipped group so the marked ids stay a contiguous
+// history range under one compact_id. Were a later complete group marked across
+// a skipped raw row, the read path (replaceCompactedHistoryRecords) would emit
+// the summary at the first marked row and fold the later rows in front of the
+// still-raw skipped row, reordering history. Leading skipped groups stay raw
+// before the summary; complete groups after the first gap compact on a later
+// pass. Emitting entries and ids together also keeps them aligned, so the
+// summarizer never sees content that would remain in raw history.
 func buildEntriesAndIDs(items []CompactionCandidate) ([]messageEntry, []pgtype.UUID) {
 	rendered := make([]string, len(items))
 	renderedOK := make([]bool, len(items))
@@ -496,19 +502,27 @@ func buildEntriesAndIDs(items []CompactionCandidate) ([]messageEntry, []pgtype.U
 		renderedOK[i] = true
 	}
 
-	entries := make([]messageEntry, 0, len(items))
-	ids := make([]pgtype.UUID, 0, len(items))
-	for _, group := range toolExchangeGroups(items) {
-		complete := true
+	groups := toolExchangeGroups(items)
+	complete := func(group []int) bool {
 		for _, idx := range group {
 			if !renderedOK[idx] {
-				complete = false
-				break
+				return false
 			}
 		}
-		if !complete {
-			continue
-		}
+		return true
+	}
+	start := 0
+	for start < len(groups) && !complete(groups[start]) {
+		start++
+	}
+	end := start
+	for end < len(groups) && complete(groups[end]) {
+		end++
+	}
+
+	entries := make([]messageEntry, 0, len(items))
+	ids := make([]pgtype.UUID, 0, len(items))
+	for _, group := range groups[start:end] {
 		for _, idx := range group {
 			entries = append(entries, messageEntry{
 				Role:    items[idx].Record.ModelMessage.Role,

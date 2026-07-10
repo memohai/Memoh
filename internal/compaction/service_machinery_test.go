@@ -275,6 +275,34 @@ func TestDoCompactionIncompleteToolExchangeSkipsModelAndMarking(t *testing.T) {
 	}
 }
 
+func TestDoCompactionMarksOnlyContiguousRunAcrossEmptyMiddleRow(t *testing.T) {
+	// Window: an empty-rendering reasoning row sits between two rendered rows.
+	// Marking both rendered rows under one compact_id would leave the raw
+	// reasoning row between them and let the read path fold history out of
+	// order. doCompaction must mark only the first contiguous run (row 0) and
+	// leave row 2 for a later pass.
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `[{"type":"text","text":"old question"}]`, 100),       // 0
+		mkRow(t, "assistant", `[{"type":"reasoning","text":"thinking"}]`, 100), // 1 renders empty
+		mkRow(t, "assistant", `[{"type":"text","text":"old answer"}]`, 100),    // 2
+		mkRow(t, "user", `[{"type":"text","text":"recent question"}]`, 100),    // 3 kept
+		mkRow(t, "assistant", `[{"type":"text","text":"recent answer"}]`, 100), // 4 kept
+	}
+	q := &fakeQueries{uncompacted: rows}
+	stub := &stubModel{summary: "SUMMARY"}
+	svc := newMachineryService(q)
+
+	if err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 250)); err != nil {
+		t.Fatalf("RunCompactionSync: %v", err)
+	}
+	if len(q.markedIDs) != 1 || q.markedIDs[0] != rows[0].ID {
+		t.Fatalf("marked = %d ids, want only the contiguous leading run [row 0]", len(q.markedIDs))
+	}
+	if q.completed.Status != "ok" || q.completed.MessageCount != 1 {
+		t.Fatalf("complete log = status=%q count=%d, want ok/1", q.completed.Status, q.completed.MessageCount)
+	}
+}
+
 func TestDoCompactionEmptyHistoryNoOp(t *testing.T) {
 	q := &fakeQueries{}
 	stub := &stubModel{summary: "unused"}
