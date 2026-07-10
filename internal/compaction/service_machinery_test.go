@@ -371,6 +371,75 @@ func TestRunCompactionFailureCooldownSkipsImmediateRetry(t *testing.T) {
 	}
 }
 
+func TestRunCompactionManualRequestBypassesFailureCooldown(t *testing.T) {
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	svc := newMachineryService(q)
+	now := time.Now()
+	svc.nowFn = func() time.Time { return now }
+
+	autoCfg := machineryConfig(&stubModel{}, 450)
+	autoCfg.HTTPClient = &http.Client{Transport: &failingModel{}}
+	if err := svc.RunCompactionSync(context.Background(), autoCfg); err == nil {
+		t.Fatal("first automatic attempt must run and fail, arming the cooldown")
+	}
+
+	// The user fixes the model and presses compact within the cooldown window.
+	// A manual request must actually run (not be skipped and reported as done):
+	// it compacts and reports a real result instead of a false success.
+	manualStub := &stubModel{summary: "recovered by manual run"}
+	manualCfg := autoCfg
+	manualCfg.Manual = true
+	manualCfg.HTTPClient = &http.Client{Transport: manualStub}
+	if err := svc.RunCompactionSync(context.Background(), manualCfg); err != nil {
+		t.Fatalf("manual compaction must run despite cooldown: %v", err)
+	}
+	if manualStub.calls != 1 {
+		t.Fatalf("manual request must call the model, not skip on cooldown (calls=%d)", manualStub.calls)
+	}
+	if !q.created || len(q.markedIDs) == 0 || q.completed.Status != "ok" {
+		t.Fatalf("manual run must do real work: created=%v marked=%d status=%q", q.created, len(q.markedIDs), q.completed.Status)
+	}
+
+	// An automatic request in the same window still respects the cooldown: the
+	// manual success above cleared it, so this one runs — proving cooldown is a
+	// shared per-session state that manual participates in, not a bypass leak.
+	autoRetry := &failingModel{}
+	autoRetryCfg := autoCfg
+	autoRetryCfg.HTTPClient = &http.Client{Transport: autoRetry}
+	if err := svc.RunCompactionSync(context.Background(), autoRetryCfg); err == nil {
+		t.Fatal("automatic retry after a successful manual run should proceed and fail")
+	}
+	if autoRetry.calls != 1 {
+		t.Fatalf("manual success must clear the shared cooldown for automatic runs too (calls=%d)", autoRetry.calls)
+	}
+}
+
+func TestRunCompactionManualFailureStillSurfacesError(t *testing.T) {
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	svc := newMachineryService(q)
+	now := time.Now()
+	svc.nowFn = func() time.Time { return now }
+
+	autoCfg := machineryConfig(&stubModel{}, 450)
+	autoCfg.HTTPClient = &http.Client{Transport: &failingModel{}}
+	if err := svc.RunCompactionSync(context.Background(), autoCfg); err == nil {
+		t.Fatal("automatic attempt must fail to arm the cooldown")
+	}
+
+	// A manual request that also fails must surface the real error, never a
+	// silent nil that callers render as "done".
+	manualFail := &failingModel{}
+	manualCfg := autoCfg
+	manualCfg.Manual = true
+	manualCfg.HTTPClient = &http.Client{Transport: manualFail}
+	if err := svc.RunCompactionSync(context.Background(), manualCfg); err == nil {
+		t.Fatal("a failing manual compaction must return an error, not a false success")
+	}
+	if manualFail.calls != 1 {
+		t.Fatalf("manual request must attempt the model despite cooldown (calls=%d)", manualFail.calls)
+	}
+}
+
 func TestRunCompactionFailureCooldownClearsOnSuccess(t *testing.T) {
 	q := &fakeQueries{uncompacted: machineryCorpus(t)}
 	svc := newMachineryService(q)

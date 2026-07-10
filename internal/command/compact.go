@@ -108,6 +108,7 @@ func (h *Handler) buildCompactConfig(cc CommandContext, sessionID string) (compa
 		Ratio:            100,
 		TotalInputTokens: 1,
 		PromptCacheTTL:   providers.ProviderConfigString(compactProvider, "prompt_cache_ttl"),
+		Manual:           true,
 	}
 	if compactModel.Config.ContextWindow != nil && *compactModel.Config.ContextWindow > 0 {
 		cfg.MaxCompactTokens = *compactModel.Config.ContextWindow * 90 / 100

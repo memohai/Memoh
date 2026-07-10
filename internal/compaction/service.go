@@ -121,7 +121,10 @@ func (s *Service) RunCompactionSync(ctx context.Context, cfg TriggerConfig) erro
 }
 
 func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) error {
-	if s.inFailureCooldown(cfg.SessionID) {
+	// Manual (user-initiated) compaction bypasses the cooldown: the user may
+	// have just fixed the failing model, and a silent skip would report success
+	// while nothing runs. Automatic per-request paths still honor the cooldown.
+	if !cfg.Manual && s.inFailureCooldown(cfg.SessionID) {
 		s.logger.Info("compaction: session in failure cooldown, skipping",
 			slog.String("bot_id", cfg.BotID),
 			slog.String("session_id", cfg.SessionID),

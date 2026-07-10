@@ -41,4 +41,10 @@ type TriggerConfig struct {
 	MaxCompactTokens int // if > 0, cap compaction input to this many tokens (e.g. 90% of model window)
 	TargetTokens     int // if > 0, compaction goal: reduce context to this many tokens (used by sync compaction)
 	PromptCacheTTL   string
+
+	// Manual marks a user-initiated compaction (slash command, HTTP endpoint).
+	// Such a request bypasses the per-session failure cooldown so a user who
+	// just fixed their credentials/model isn't told "done" while nothing runs.
+	// Automatic per-request paths leave this false to keep the cooldown backstop.
+	Manual bool
 }
