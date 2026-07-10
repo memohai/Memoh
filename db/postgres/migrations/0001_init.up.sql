@@ -842,10 +842,19 @@ CREATE TABLE IF NOT EXISTS bot_history_message_compacts (
   error_message TEXT NOT NULL DEFAULT '',
   usage JSONB,
   model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  artifact_version INTEGER NOT NULL DEFAULT 1,
+  coverage JSONB NOT NULL DEFAULT '[]'::jsonb,
+  anchor_start_ms BIGINT NOT NULL DEFAULT 0,
+  anchor_end_ms BIGINT NOT NULL DEFAULT 0,
+  artifact_level INTEGER NOT NULL DEFAULT 0,
+  parent_ids UUID[] NOT NULL DEFAULT '{}'::uuid[],
+  superseded_by UUID REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL,
+  superseded_at TIMESTAMPTZ,
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   completed_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_compacts_bot_session ON bot_history_message_compacts(bot_id, session_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_compacts_active_session ON bot_history_message_compacts(session_id, anchor_start_ms, started_at) WHERE status = 'ok' AND superseded_at IS NULL;
 
 ALTER TABLE bot_history_messages ADD CONSTRAINT fk_compact_id FOREIGN KEY (compact_id) REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL;
 
