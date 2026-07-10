@@ -351,6 +351,7 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 
 	var finalMessages json.RawMessage
 	var finalUsage json.RawMessage
+	terminalReceived := false
 	for event := range eventCh {
 		d.broadcastDiscussEvent(cfg.BotID, event)
 
@@ -358,6 +359,7 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 		case agentpkg.EventError:
 			log.Error("discuss stream error", slog.String("error", event.Error))
 		case agentpkg.EventAgentEnd, agentpkg.EventAgentAbort:
+			terminalReceived = true
 			finalMessages = event.Messages
 			finalUsage = event.Usage
 		}
@@ -387,6 +389,9 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 			inputTokens,
 			0,
 		)
+	}
+	if !terminalReceived {
+		return
 	}
 
 	// Advance the cursor to the latest RC segment actually consumed in this

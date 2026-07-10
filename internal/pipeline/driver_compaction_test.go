@@ -8,6 +8,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/contextfrag"
 	sessionpkg "github.com/memohai/memoh/internal/session"
@@ -213,6 +214,52 @@ func TestHandleReplyWithAgentFallsBackToComposedEstimateForCompaction(t *testing
 
 	if resolver.compactionCalls != 1 || resolver.compactionInputTokens != want {
 		t.Fatalf("compaction fallback = calls:%d input:%d, want one call with %d", resolver.compactionCalls, resolver.compactionInputTokens, want)
+	}
+}
+
+func TestHandleReplyWithAgentDoesNotConsumeContextAfterStreamError(t *testing.T) {
+	t.Parallel()
+
+	resolver := &fakeRunConfigResolver{}
+	agent := &fakeDiscussStreamer{events: []agentpkg.StreamEvent{{
+		Type:  agentpkg.EventError,
+		Error: "provider failed",
+	}}}
+	driver := NewDiscussDriver(DiscussDriverDeps{Resolver: resolver})
+	sess := &discussSession{config: DiscussSessionConfig{BotID: "bot", SessionID: "session"}}
+	rc := RenderedContext{{MessageID: "new", ReceivedAtMs: 100, Content: []RenderedContentPiece{{Type: "text", Text: "retry me"}}}}
+	wantEstimate := ComposeContext(rc, nil).EstimatedTokens
+
+	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, agent)
+
+	if sess.lastProcessedMs != 0 {
+		t.Fatalf("failed stream consumed cursor %d", sess.lastProcessedMs)
+	}
+	if resolver.compactionCalls != 1 || resolver.compactionInputTokens != wantEstimate {
+		t.Fatalf(
+			"failed stream compaction = calls:%d input:%d, want one call with %d",
+			resolver.compactionCalls,
+			resolver.compactionInputTokens,
+			wantEstimate,
+		)
+	}
+}
+
+func TestHandleReplyWithAgentConsumesContextAfterTerminalAbort(t *testing.T) {
+	t.Parallel()
+
+	agent := &fakeDiscussStreamer{events: []agentpkg.StreamEvent{
+		{Type: agentpkg.EventError, Error: "loop aborted"},
+		{Type: agentpkg.EventAgentAbort},
+	}}
+	driver := NewDiscussDriver(DiscussDriverDeps{Resolver: &fakeRunConfigResolver{}})
+	sess := &discussSession{config: DiscussSessionConfig{BotID: "bot", SessionID: "session"}}
+	rc := RenderedContext{{MessageID: "new", ReceivedAtMs: 100, Content: []RenderedContentPiece{{Type: "text", Text: "handled before abort"}}}}
+
+	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, agent)
+
+	if sess.lastProcessedMs != 100 {
+		t.Fatalf("terminal abort cursor = %d, want 100", sess.lastProcessedMs)
 	}
 }
 

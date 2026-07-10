@@ -763,12 +763,19 @@ func TestHandleReplyWithAgentRefreshesContextFragAfterLateBinding(t *testing.T) 
 type fakeDiscussStreamer struct {
 	lastConfig *agentpkg.RunConfig
 	endUsage   []byte
+	events     []agentpkg.StreamEvent
 }
 
 func (f *fakeDiscussStreamer) Stream(_ context.Context, cfg agentpkg.RunConfig) <-chan agentpkg.StreamEvent {
 	f.lastConfig = &cfg
-	ch := make(chan agentpkg.StreamEvent, 1)
-	ch <- agentpkg.StreamEvent{Type: agentpkg.EventAgentEnd, Usage: f.endUsage}
+	events := f.events
+	if events == nil {
+		events = []agentpkg.StreamEvent{{Type: agentpkg.EventAgentEnd, Usage: f.endUsage}}
+	}
+	ch := make(chan agentpkg.StreamEvent, len(events))
+	for _, event := range events {
+		ch <- event
+	}
 	close(ch)
 	return ch
 }
