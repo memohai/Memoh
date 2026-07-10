@@ -28,6 +28,7 @@ const log = {
 }
 
 const dryRun = process.argv.includes('--dry-run') || process.env.PUBLISH_PACKAGES_DRY_RUN === '1'
+const publishScope = process.env.NPM_PUBLISH_SCOPE?.trim() || null
 
 function prereleaseTag(version) {
   const override = process.env.NPM_PUBLISH_TAG?.trim()
@@ -132,7 +133,7 @@ function preflightScopes(plan) {
 
   if (blocked.length > 0) {
     log.fail(`preflight failed for: ${blocked.join(', ')} — aborting before any publish`)
-    log.fail('Ensure each scope/org exists on npm and NPM_TOKEN is a member with publish rights.')
+    log.fail('Ensure each scope/org exists on npm and the active token has publish rights.')
     return false
   }
 
@@ -180,6 +181,12 @@ for (const dir of CANDIDATE_DIRS) {
     continue
   }
 
+  if (publishScope && scopeOf(name) !== publishScope) {
+    log.skip(`${name} (outside ${publishScope})`)
+    skipped++
+    continue
+  }
+
   if (isVersionPublished(name, version)) {
     log.skip(`${name}@${version} (already on registry)`)
     skipped++
@@ -200,7 +207,7 @@ if (!dryRun && plan.length > 0 && !preflightScopes(plan)) {
 for (const { dir, name, version } of plan) {
   log.info(`${name}@${version}`)
   if (name === '@felinic/ui') {
-    log.info('@felinic/ui requires NPM_TOKEN publish rights for the @felinic scope')
+    log.info('@felinic/ui requires FELINIC_NPM_TOKEN publish rights for the @felinic scope')
   }
   if (publish(dir, version)) {
     log.ok(`${name}@${version}`)

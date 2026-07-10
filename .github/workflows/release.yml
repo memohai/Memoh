@@ -42,8 +42,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  npm-publish:
-    name: Publish npm packages
+  npm-publish-felinic:
+    name: Publish @felinic/ui
     runs-on: ubuntu-latest
     timeout-minutes: 15
     if: github.event_name == 'push'
@@ -99,23 +99,73 @@ jobs:
           registry-url: https://registry.npmjs.org/
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
-      - name: Verify npm publish token
+      - name: Verify @felinic publish token
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.FELINIC_NPM_TOKEN }}
         run: |
-          # whoami/ping only prove the token is valid and the registry is up —
-          # they do NOT prove the token may publish into every scope we release.
-          # @felinic/ui is a cross-scope first publish (@felinic, not @memohai),
-          # so also confirm the token can reach the @felinic scope here. This
-          # fails the release at the token step instead of mid-publish. Mirrors
-          # the preflight in scripts/publish-packages.mjs.
           npm whoami
           npm ping
           npm access list packages @felinic \
-            || (echo "::error::NPM_TOKEN cannot reach the @felinic scope — ensure the org exists and the token is a member with publish rights" && exit 1)
-      - name: Publish to npm
+            || (echo "::error::FELINIC_NPM_TOKEN cannot reach the @felinic scope" && exit 1)
+      - name: Publish @felinic/ui
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.FELINIC_NPM_TOKEN }}
+          NPM_PUBLISH_SCOPE: "@felinic"
+        run: pnpm publish:npm
+
+  npm-publish-memohai:
+    name: Publish @memohai packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Sync workspace versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          export VERSION
+          node <<'EOF'
+          const fs = require('fs');
+          const version = process.env.VERSION;
+          const targets = [
+            'package.json',
+            'packages/sdk/package.json',
+            'packages/icons/package.json',
+            'packages/config/package.json',
+            'apps/web/package.json',
+            'apps/desktop/package.json',
+          ];
+          for (const target of targets) {
+            if (!fs.existsSync(target)) continue;
+            const pkg = JSON.parse(fs.readFileSync(target, 'utf8'));
+            pkg.version = version;
+            fs.writeFileSync(target, `${JSON.stringify(pkg, null, 2)}\n`);
+          }
+          EOF
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+          registry-url: https://registry.npmjs.org/
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify @memohai publish token
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm whoami
+          npm ping
+      - name: Publish @memohai packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_PUBLISH_SCOPE: "@memohai"
         run: pnpm publish:npm
 
   desktop-build:
