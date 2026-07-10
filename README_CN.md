@@ -60,6 +60,12 @@ cp conf/app.docker.toml config.toml
 docker compose up -d
 ```
 
+执行过 setup 的已有仓库仍然可以继续使用 `git pull`：post-merge hook 会初始化新增的
+submodule，setup 也会为后续 pull 启用递归更新。如果从未安装过该 hook，升级后只需执行
+一次 `mise run submodule-init`。GitHub 自动生成的
+“Source code” 压缩包不包含 submodule，请改用 Release 附件中的
+`Memoh-<version>-source.zip` 或 `.tar.gz` 完整源码包。
+
 > **镜像拉取慢时可用国内镜像：**
 > ```bash
 > curl -fsSL https://memoh.sh | USE_CN_MIRROR=true sh
