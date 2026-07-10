@@ -11,6 +11,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db"
@@ -315,6 +316,13 @@ func TestReplaceCompactedMessagesLoadsSessionSummaryCoverageFromCompactedRows(t 
 
 	sessionID := "00000000-0000-0000-0000-00000000f004"
 	compactID := "00000000-0000-0000-0000-00000000c004"
+	coverage, err := json.Marshal([]compaction.CoveredSource{
+		{Ref: contextfrag.ContextRef{Namespace: "bot_history_message", ID: "00000000-0000-0000-0000-000000000401", Version: 1, Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable, ContentHash: "hash-401", HashAlgo: contextfrag.HashAlgoSHA256, HashScope: contextfrag.HashScopeSourcePayload}},
+		{Ref: contextfrag.ContextRef{Namespace: "bot_history_message", ID: "00000000-0000-0000-0000-000000000402", Version: 1, Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable, ContentHash: "hash-402", HashAlgo: contextfrag.HashAlgoSHA256, HashScope: contextfrag.HashScopeSourcePayload}},
+	})
+	if err != nil {
+		t.Fatalf("marshal coverage: %v", err)
+	}
 	queries := &recordingCompactionLogQueries{
 		logs: []sqlc.BotHistoryMessageCompact{
 			{
@@ -322,18 +330,7 @@ func TestReplaceCompactedMessagesLoadsSessionSummaryCoverageFromCompactedRows(t 
 				SessionID: mustPGUUID(t, sessionID),
 				Status:    "ok",
 				Summary:   "older condensed context",
-			},
-		},
-		refs: map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow{
-			mustPGUUID(t, compactID): {
-				{
-					ID:    mustPGUUID(t, "00000000-0000-0000-0000-000000000401"),
-					BotID: mustPGUUID(t, "00000000-0000-0000-0000-000000000001"),
-				},
-				{
-					ID:    mustPGUUID(t, "00000000-0000-0000-0000-000000000402"),
-					BotID: mustPGUUID(t, "00000000-0000-0000-0000-000000000001"),
-				},
+				Coverage:  coverage,
 			},
 		},
 	}
@@ -353,6 +350,9 @@ func TestReplaceCompactedMessagesLoadsSessionSummaryCoverageFromCompactedRows(t 
 	}
 	if len(queries.coveredCalls) != 0 {
 		t.Fatalf("coverage path must not request full message content, called: %#v", queries.coveredCalls)
+	}
+	if len(queries.refCalls) != 0 {
+		t.Fatalf("persisted artifact coverage must not query message refs, called: %#v", queries.refCalls)
 	}
 	frags := historyContextFragsForMessages(historyfrag.ToModelMessages(got), got)
 	if len(frags) != 1 || frags[0].Coverage == nil || len(frags[0].Coverage.CoveredRefs) != 2 {
@@ -699,7 +699,7 @@ type recordingCompactionLogQueries struct {
 	refCalls     []pgtype.UUID
 }
 
-func (q *recordingCompactionLogQueries) ListCompactionLogsBySession(_ context.Context, sessionID pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
+func (q *recordingCompactionLogQueries) ListActiveCompactionArtifactsBySession(_ context.Context, sessionID pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
 	q.sessionID = sessionID
 	q.listCalls++
 	return q.logs, nil

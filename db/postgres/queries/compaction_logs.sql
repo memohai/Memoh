@@ -41,14 +41,6 @@ LIMIT $2 OFFSET $3;
 -- name: CountCompactionLogsByBot :one
 SELECT count(*) FROM bot_history_message_compacts WHERE bot_id = $1;
 
--- name: ListCompactionLogsBySession :many
-SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
-       artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
-       superseded_by, superseded_at, started_at, completed_at
-FROM bot_history_message_compacts
-WHERE session_id = $1
-ORDER BY started_at ASC;
-
 -- name: ListActiveCompactionArtifactsBySession :many
 SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
        artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,

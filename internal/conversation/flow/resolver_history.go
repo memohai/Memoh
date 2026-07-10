@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db"
@@ -392,31 +393,25 @@ func (r *Resolver) replaceCompactedMessages(ctx context.Context, sessionID strin
 		// resolve each in-window compact group individually.
 		return r.replaceRecentCompactedMessages(ctx, scope, messages)
 	}
-	logs := r.listSessionCompactionLogs(ctx, sessionID)
-	if len(logs) == 0 {
+	artifacts := r.listActiveCompactionArtifacts(ctx, sessionID)
+	if len(artifacts) == 0 {
 		return messages
 	}
-	summaries := make(map[string]string, len(logs))
-	for _, log := range logs {
-		if log.Status != "ok" || strings.TrimSpace(log.Summary) == "" {
-			continue
-		}
-		if id := pgUUIDString(log.ID); id != "" {
-			summaries[id] = log.Summary
-		}
+	byID := make(map[string]compaction.Artifact, len(artifacts))
+	for _, artifact := range artifacts {
+		byID[artifact.ID] = artifact
 	}
-	messages = replaceCompactedHistoryRecords(messages, summaries, scope)
-	sessionSummaries := summaryRecordsFromCompactionLogs(missingCompactionLogs(messages, logs), scope)
+	messages = replaceCompactedHistoryRecordsWithArtifacts(messages, byID, scope)
+	sessionSummaries := summaryRecordsFromArtifacts(missingCompactionArtifacts(messages, artifacts), scope)
 	if len(sessionSummaries) > 0 {
 		messages = prependMissingCompactionSummaries(messages, sessionSummaries)
 	}
-	return r.refreshCompactedSummaryCoverage(ctx, messages)
+	return r.refreshCompactedSummaryCoverage(ctx, messages, byID)
 }
 
-// missingCompactionLogs filters the session logs down to those not already
-// represented in the loaded records, so covered-ref lookups only run for
-// summaries whose raw rows aged out of the load window.
-func missingCompactionLogs(messages []historyfrag.HistoryRecord, logs []sqlc.BotHistoryMessageCompact) []sqlc.BotHistoryMessageCompact {
+// missingCompactionArtifacts filters the active frontier down to summaries not
+// already represented in the loaded records.
+func missingCompactionArtifacts(messages []historyfrag.HistoryRecord, artifacts []compaction.Artifact) []compaction.Artifact {
 	seen := make(map[string]struct{}, len(messages))
 	for _, record := range messages {
 		if id := strings.TrimSpace(record.CompactID); id != "" {
@@ -428,12 +423,12 @@ func missingCompactionLogs(messages []historyfrag.HistoryRecord, logs []sqlc.Bot
 			}
 		}
 	}
-	missing := make([]sqlc.BotHistoryMessageCompact, 0, len(logs))
-	for _, log := range logs {
-		if _, ok := seen[pgUUIDString(log.ID)]; ok {
+	missing := make([]compaction.Artifact, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		if _, ok := seen[artifact.ID]; ok {
 			continue
 		}
-		missing = append(missing, log)
+		missing = append(missing, artifact)
 	}
 	return missing
 }
@@ -453,81 +448,59 @@ func (r *Resolver) replaceRecentCompactedMessages(ctx context.Context, scope con
 		return messages
 	}
 
-	summaries := make(map[string]string)
+	artifacts := make(map[string]compaction.Artifact)
+	projection := compaction.NewArtifactProjection(r.queries)
 	for compactID := range compactGroups {
 		cUUID, err := db.ParseUUID(compactID)
 		if err != nil {
 			continue
 		}
-		log, err := r.queries.GetCompactionLogByID(ctx, cUUID)
+		artifact, err := projection.LoadByID(ctx, cUUID)
 		if err != nil {
-			r.logger.Warn("replaceCompactedMessages: failed to load compact log", slog.String("compact_id", compactID), slog.Any("error", err))
+			r.logger.Warn("replaceCompactedMessages: failed to load compaction artifact", slog.String("compact_id", compactID), slog.Any("error", err))
 			continue
 		}
-		if log.Status == "ok" && strings.TrimSpace(log.Summary) != "" {
-			summaries[compactID] = log.Summary
-		}
+		artifacts[compactID] = artifact
 	}
 
-	return r.refreshCompactedSummaryCoverage(ctx, replaceCompactedHistoryRecords(messages, summaries, scope))
+	return r.refreshCompactedSummaryCoverage(ctx, replaceCompactedHistoryRecordsWithArtifacts(messages, artifacts, scope), artifacts)
 }
 
-func (r *Resolver) listSessionCompactionLogs(ctx context.Context, sessionID string) []sqlc.BotHistoryMessageCompact {
-	sessionUUID, err := db.ParseUUID(sessionID)
+func (r *Resolver) listActiveCompactionArtifacts(ctx context.Context, sessionID string) []compaction.Artifact {
+	artifacts, err := compaction.NewArtifactProjection(r.queries).LoadActiveSession(ctx, sessionID)
 	if err != nil {
 		if r.logger != nil {
-			r.logger.Warn("listSessionCompactionLogs: invalid session id", slog.String("session_id", sessionID), slog.Any("error", err))
+			r.logger.Warn("listActiveCompactionArtifacts: failed to load active frontier", slog.String("session_id", sessionID), slog.Any("error", err))
 		}
 		return nil
 	}
-	logs, err := r.queries.ListCompactionLogsBySession(ctx, sessionUUID)
-	if err != nil {
-		if r.logger != nil {
-			r.logger.Warn("listSessionCompactionLogs: failed to load compaction logs", slog.String("session_id", sessionID), slog.Any("error", err))
-		}
-		return nil
-	}
-	return logs
+	return artifacts
 }
 
-func summaryRecordsFromCompactionLogs(logs []sqlc.BotHistoryMessageCompact, scope contextfrag.Scope) []historyfrag.HistoryRecord {
-	if len(logs) == 0 {
+func summaryRecordsFromArtifacts(artifacts []compaction.Artifact, scope contextfrag.Scope) []historyfrag.HistoryRecord {
+	if len(artifacts) == 0 {
 		return nil
 	}
-	records := make([]historyfrag.HistoryRecord, 0, len(logs))
-	for _, log := range logs {
-		if log.Status != "ok" || strings.TrimSpace(log.Summary) == "" {
-			continue
-		}
-		compactID := pgUUIDString(log.ID)
-		if compactID == "" {
-			continue
-		}
-		logScope := scope
-		if logScope.BotID == "" {
-			logScope.BotID = pgUUIDString(log.BotID)
-		}
-		if logScope.SessionID == "" {
-			logScope.SessionID = pgUUIDString(log.SessionID)
-		}
-		// Coverage is filled in afterward by refreshCompactedSummaryCoverage, once
-		// per compact group, from the refs-only query.
-		records = append(records, historyfrag.SummaryRecord(compactID, log.Summary, nil, logScope))
+	records := make([]historyfrag.HistoryRecord, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		records = append(records, artifact.HistoryRecord(scope))
 	}
 	return records
 }
 
-// refreshCompactedSummaryCoverage recomputes each compaction summary's
-// CoveredRefs from the full compact group via a refs-only query, so coverage
-// is complete even when a group straddles the load window and no full-content
-// row fetch is needed just to keep the refs.
-func (r *Resolver) refreshCompactedSummaryCoverage(ctx context.Context, messages []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
+// refreshCompactedSummaryCoverage backfills legacy summaries that predate
+// persisted artifact coverage. New artifacts already carry immutable refs and
+// avoid this per-summary query.
+func (r *Resolver) refreshCompactedSummaryCoverage(ctx context.Context, messages []historyfrag.HistoryRecord, artifacts map[string]compaction.Artifact) []historyfrag.HistoryRecord {
 	if r.queries == nil {
 		return messages
 	}
 	for i := range messages {
 		record := &messages[i]
 		if record.SourceKind != historyfrag.SourceCompactionLog || record.Kind != contextfrag.KindConversationSummary {
+			continue
+		}
+		if artifact, ok := artifacts[record.CompactID]; ok && len(artifact.Coverage) > 0 {
 			continue
 		}
 		compactID, err := db.ParseUUID(record.CompactID)
@@ -624,6 +597,14 @@ func pgUUIDString(value pgtype.UUID) string {
 }
 
 func replaceCompactedHistoryRecords(messages []historyfrag.HistoryRecord, summaries map[string]string, scope contextfrag.Scope) []historyfrag.HistoryRecord {
+	artifacts := make(map[string]compaction.Artifact, len(summaries))
+	for compactID, summary := range summaries {
+		artifacts[compactID] = compaction.Artifact{ID: compactID, Summary: summary}
+	}
+	return replaceCompactedHistoryRecordsWithArtifacts(messages, artifacts, scope)
+}
+
+func replaceCompactedHistoryRecordsWithArtifacts(messages []historyfrag.HistoryRecord, artifacts map[string]compaction.Artifact, scope contextfrag.Scope) []historyfrag.HistoryRecord {
 	compactGroups := make(map[string][]int)
 	requiredCompactGroups := make(map[string]bool)
 	for i, m := range messages {
@@ -655,18 +636,20 @@ func replaceCompactedHistoryRecords(messages []historyfrag.HistoryRecord, summar
 			}
 			continue
 		}
-		summary, ok := summaries[m.CompactID]
-		if !ok || strings.TrimSpace(summary) == "" {
+		artifact, ok := artifacts[m.CompactID]
+		if !ok || strings.TrimSpace(artifact.Summary) == "" {
 			for _, idx := range compactGroups[m.CompactID] {
 				result = append(result, messages[idx])
 			}
 			continue
 		}
-		coveredRefs := make([]contextfrag.ContextRef, 0, len(compactGroups[m.CompactID]))
-		for _, idx := range compactGroups[m.CompactID] {
-			coveredRefs = append(coveredRefs, messages[idx].Ref)
+		if len(artifact.Coverage) == 0 {
+			artifact.Coverage = make([]compaction.CoveredSource, 0, len(compactGroups[m.CompactID]))
+			for _, idx := range compactGroups[m.CompactID] {
+				artifact.Coverage = append(artifact.Coverage, compaction.CoveredSource{Ref: messages[idx].Ref})
+			}
 		}
-		result = append(result, historyfrag.SummaryRecord(m.CompactID, summary, coveredRefs, scope))
+		result = append(result, artifact.HistoryRecord(scope))
 	}
 	return result
 }

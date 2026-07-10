@@ -362,7 +362,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		maxCompactTokens = 30000
 	}
 
-	priorLogs, err := s.queries.ListCompactionLogsBySession(ctx, sessionUUID)
+	priorLogs, err := s.queries.ListActiveCompactionArtifactsBySession(ctx, sessionUUID)
 	if err != nil {
 		return Result{}, err
 	}
