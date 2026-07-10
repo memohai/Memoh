@@ -451,11 +451,7 @@ func (r *Resolver) replaceRecentCompactedMessages(ctx context.Context, scope con
 	artifacts := make(map[string]compaction.Artifact)
 	projection := compaction.NewArtifactProjection(r.queries)
 	for compactID := range compactGroups {
-		cUUID, err := db.ParseUUID(compactID)
-		if err != nil {
-			continue
-		}
-		artifact, err := projection.LoadByID(ctx, cUUID)
+		artifact, err := projection.LoadByID(ctx, compactID)
 		if err != nil {
 			r.logger.Warn("replaceCompactedMessages: failed to load compaction artifact", slog.String("compact_id", compactID), slog.Any("error", err))
 			continue

@@ -79,7 +79,7 @@ func (p ArtifactProjection) LoadActiveSession(ctx context.Context, sessionID str
 	}
 	artifacts := make([]Artifact, 0, len(rows))
 	for _, row := range rows {
-		artifact, err := ArtifactFromDBRow(row)
+		artifact, err := artifactFromDBRow(row)
 		if err != nil {
 			return nil, err
 		}
@@ -88,18 +88,22 @@ func (p ArtifactProjection) LoadActiveSession(ctx context.Context, sessionID str
 	return artifacts, nil
 }
 
-func (p ArtifactProjection) LoadByID(ctx context.Context, id pgtype.UUID) (Artifact, error) {
+func (p ArtifactProjection) LoadByID(ctx context.Context, id string) (Artifact, error) {
 	if p.queries == nil {
 		return Artifact{}, fmt.Errorf("compaction artifact projection: queries are required")
 	}
-	row, err := p.queries.GetCompactionLogByID(ctx, id)
+	artifactID, err := db.ParseUUID(id)
 	if err != nil {
 		return Artifact{}, err
 	}
-	return ArtifactFromDBRow(row)
+	row, err := p.queries.GetCompactionLogByID(ctx, artifactID)
+	if err != nil {
+		return Artifact{}, err
+	}
+	return artifactFromDBRow(row)
 }
 
-func ArtifactFromDBRow(row sqlc.BotHistoryMessageCompact) (Artifact, error) {
+func artifactFromDBRow(row sqlc.BotHistoryMessageCompact) (Artifact, error) {
 	id := formatUUID(row.ID)
 	if id == "" {
 		return Artifact{}, fmt.Errorf("compaction artifact: id is required")
