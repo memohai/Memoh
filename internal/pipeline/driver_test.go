@@ -13,6 +13,7 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
+	messagepkg "github.com/memohai/memoh/internal/message"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 )
 
@@ -553,19 +554,19 @@ func TestAnchorFromTRs(t *testing.T) {
 	}
 }
 
-func TestLatestRCReceivedAtMs(t *testing.T) {
+func TestLatestRCEventAtMs(t *testing.T) {
 	t.Parallel()
 
-	if got := latestRCReceivedAtMs(nil); got != 0 {
+	if got := latestRCEventAtMs(nil); got != 0 {
 		t.Fatalf("empty RC = %d, want 0", got)
 	}
-	got := latestRCReceivedAtMs(RenderedContext{
+	got := latestRCEventAtMs(RenderedContext{
 		{ReceivedAtMs: 100},
 		{ReceivedAtMs: 900},
-		{ReceivedAtMs: 500, IsMyself: true},
+		{ReceivedAtMs: 500, LastEventAtMs: 1_100, IsMyself: true},
 	})
-	if got != 900 {
-		t.Fatalf("latest = %d, want 900", got)
+	if got != 1_100 {
+		t.Fatalf("latest = %d, want 1100", got)
 	}
 }
 
@@ -800,6 +801,8 @@ type fakeRunConfigResolver struct {
 	resolveResult ResolveRunConfigResult
 	resolveFn     func(botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
 	inlineFn      func(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart
+	artifacts     []CompactionArtifact
+	artifactErr   error
 }
 
 func (f *fakeRunConfigResolver) ResolveRunConfig(_ context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error) {
@@ -814,6 +817,10 @@ func (f *fakeRunConfigResolver) InlineImageAttachments(ctx context.Context, botI
 		return f.inlineFn(ctx, botID, refs)
 	}
 	return nil
+}
+
+func (f *fakeRunConfigResolver) LoadCompactionArtifacts(context.Context, string, string, []messagepkg.Message) ([]CompactionArtifact, error) {
+	return f.artifacts, f.artifactErr
 }
 
 func (*fakeRunConfigResolver) StoreRound(_ context.Context, _, _, _, _ string, _ []sdk.Message, _ string) error {

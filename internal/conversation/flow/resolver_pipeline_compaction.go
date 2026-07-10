@@ -7,8 +7,34 @@ import (
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/historyfrag"
+	messagepkg "github.com/memohai/memoh/internal/message"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 )
+
+func (r *Resolver) LoadCompactionArtifacts(
+	ctx context.Context,
+	botID string,
+	sessionID string,
+	messages []messagepkg.Message,
+) ([]pipelinepkg.CompactionArtifact, error) {
+	records := make([]historyfrag.HistoryRecord, 0, len(messages))
+	for _, message := range messages {
+		record, err := historyfrag.FromDBMessageWithLogger(r.logger, message, historyfrag.ScopeFallback{})
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	artifacts, _, err := r.loadPipelineCompactionArtifacts(ctx, compactionSummaryScope(
+		botID,
+		"",
+		sessionID,
+		"",
+		"",
+		"",
+	), records)
+	return artifacts, err
+}
 
 func (r *Resolver) loadPipelineCompactionArtifacts(
 	ctx context.Context,
