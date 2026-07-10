@@ -830,6 +830,106 @@ describe('chat-list store', () => {
     await expect(sendPromise).resolves.toMatchObject({ ok: true })
   })
 
+  it('aborts a visible approval response, rolls back its decision, and unlocks retry', async () => {
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const approval: UIToolApproval = {
+      approval_id: 'approval-pwd',
+      short_id: 9,
+      status: 'pending',
+      can_approve: true,
+    }
+    store.messages.push(approvalTurn(approval))
+    await expect(store.respondToolApproval(approval, 'approve')).resolves.toBe(true)
+    const responseMessage = sentWSMessages.find(message => message.type === 'tool_approval_response')
+    const responseStreamId = responseMessage?.stream_id as string
+    const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
+
+    store.abort()
+    await flushPromises()
+
+    expect(ws.abort).toHaveBeenCalledTimes(1)
+    expect(ws.abort).toHaveBeenCalledWith(responseStreamId)
+    expect(store.streaming).toBe(false)
+    const block = store.messages[0]?.role === 'assistant' ? store.messages[0].messages[0] : null
+    expect(block?.type).toBe('tool')
+    if (block?.type !== 'tool' || !block.approval) throw new Error('approval block missing')
+    expect(block.approval).toMatchObject({ status: 'pending', can_approve: true })
+
+    sendEvents = [{ type: 'start' } as UIStreamEvent, { type: 'end' } as UIStreamEvent]
+    await expect(store.respondToolApproval(block.approval, 'approve')).resolves.toBe(true)
+  })
+
+  it('aborts silent approval and original streams once and ignores late response events', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'exec',
+          input: { command: 'pwd' },
+          tool_call_id: 'call-pwd',
+          running: false,
+          approval: {
+            approval_id: 'approval-pwd',
+            short_id: 9,
+            status: 'pending',
+            can_approve: true,
+          },
+        },
+      } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sending = store.sendMessage('run pwd')
+    await flushPromises()
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    if (!assistant || assistant.role !== 'assistant') throw new Error('assistant turn missing')
+    const tool = assistant.messages.find(block => block.type === 'tool')
+    if (!tool?.approval) throw new Error('approval block missing')
+    const originalStreamId = sentWSMessages[0]?.stream_id as string
+
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    await expect(store.respondToolApproval(tool.approval, 'approve')).resolves.toBe(true)
+    const responseMessage = sentWSMessages.find(message => message.type === 'tool_approval_response')
+    const responseStreamId = responseMessage?.stream_id as string
+    const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
+    const messageCount = store.messages.length
+
+    store.abort()
+    await expect(sending).resolves.toMatchObject({ ok: false, stage: 'stream' })
+    await flushPromises()
+
+    expect(ws.abort).toHaveBeenCalledTimes(2)
+    expect(ws.abort).toHaveBeenCalledWith(originalStreamId)
+    expect(ws.abort).toHaveBeenCalledWith(responseStreamId)
+    expect(tool.approval).toMatchObject({ status: 'pending', can_approve: true })
+    expect(store.messages).toHaveLength(messageCount)
+
+    streamHandler?.({
+      type: 'message',
+      stream_id: responseStreamId,
+      session_id: 'session-1',
+      data: { id: 99, type: 'text', content: 'late approval output' },
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'error',
+      stream_id: responseStreamId,
+      session_id: 'session-1',
+      message: 'late approval error',
+    } as UIStreamEvent)
+    expect(store.messages).toHaveLength(messageCount)
+    expect(toast.error).not.toHaveBeenCalledWith('late approval error')
+  })
+
   it('does not optimistically submit tool approval while websocket is disconnected', async () => {
     api.connectWebSocket.mockImplementationOnce((_botId: string, _onStreamEvent: UIStreamEventHandler) => ({
       get connected() {

@@ -30,7 +30,11 @@ import { createSessionList } from './chat/session-list'
 import { acpSessionMetadata, createACPStaging } from './chat/acp-staging'
 import { createTranscriptController } from './chat/transcript'
 import { createAssistantStreamRegistry } from './chat/assistant-streams'
-import { createApprovalResponseTracker } from './chat/approval-responses'
+import {
+  createApprovalResponseTracker,
+  type ApprovalResponse,
+  type ApprovalResponseOutcome,
+} from './chat/approval-responses'
 import {
   createBackgroundTaskTracker,
   normalizeBackgroundTask,
@@ -284,7 +288,10 @@ export const useChatStore = defineStore('chat', () => {
     beginApprovalResponse,
     getApprovalResponse,
     settleApprovalResponse,
-    clearApprovalResponses,
+    pendingApprovalResponses,
+    pendingApprovalResponsesForSession,
+    isTerminalApprovalResponse,
+    resetApprovalResponses,
   } = approvalResponses
   const forkingMessages = new Set<string>()
   // Sessions-list bookkeeping + fork-anchor tracking (see ./chat/session-list).
@@ -571,7 +578,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function handleWSSessionCreated(event: { stream_id?: string; session_id: string }, sourceBotId = '') {
     const eventSessionId = event.session_id.trim()
-    if (isTerminalStream(event.stream_id)) return
+    if (isTerminalStream(event.stream_id) || isTerminalApprovalResponse(event.stream_id)) return
     const pending = event.stream_id ? getAssistantStream(event.stream_id) : undefined
     const bid = (pending?.botId || sourceBotId || currentBotId.value || '').trim()
     if (!bid || !eventSessionId) return
@@ -630,7 +637,7 @@ export const useChatStore = defineStore('chat', () => {
       const sid = (event.session_id ?? targetSessionId ?? sessionId.value ?? '').trim()
       const bid = sourceBotId || currentBotId.value || ''
       const streamId = streamIdForEvent(event, sid)
-      if (isTerminalStream(streamId)) return
+      if (isTerminalStream(streamId) || isTerminalApprovalResponse(streamId)) return
       appendTurnToSession(bid, sid, normalizeTurn(event.data))
       const pending = getAssistantStream(streamId)
       if (pending && !messages.includes(pending.assistantTurn)) {
@@ -660,7 +667,7 @@ export const useChatStore = defineStore('chat', () => {
     const streamId = streamIdForEvent(event, sid)
     // The server may emit end after error. It must not recreate the stream, but
     // it still triggers the final authoritative refresh below.
-    if (isTerminalStream(streamId) && event.type !== 'end') return
+    if ((isTerminalStream(streamId) || isTerminalApprovalResponse(streamId)) && event.type !== 'end') return
 
     if (getApprovalResponse(streamId)?.silent) {
       if (event.type === 'end' || event.type === 'error') {
@@ -766,7 +773,7 @@ export const useChatStore = defineStore('chat', () => {
     clearPendingACPSession()
 
     clearStreamHistory()
-    clearApprovalResponses()
+    resetApprovalResponses()
     forkingMessages.clear()
     backgroundTasks.clearBackgroundTasks()
   }
@@ -983,18 +990,32 @@ export const useChatStore = defineStore('chat', () => {
   function abort() {
     const abortError = new Error('aborted')
     abortError.name = 'AbortError'
+    const approvalStreamIds = abortApprovalResponses(
+      pendingApprovalResponsesForSession(currentBotId.value ?? '', sessionId.value ?? ''),
+      'failed',
+    )
     rejectSessionStreams(sessionId.value, abortError, (streamId) => {
-      if (activeWs?.connected) activeWs.abort(streamId)
+      if (!approvalStreamIds.has(streamId) && activeWs?.connected) activeWs.abort(streamId)
     })
     loading.value = isSessionStreaming(sessionId.value)
+  }
+
+  function abortApprovalResponses(responses: ApprovalResponse[], outcome: ApprovalResponseOutcome): Set<string> {
+    const streamIds = new Set<string>()
+    for (const response of responses) {
+      streamIds.add(response.streamId)
+      if (activeWs?.connected) activeWs.abort(response.streamId)
+      settleApprovalResponse(response.streamId, outcome)
+    }
+    return streamIds
   }
 
   function abortAllAssistantStreams() {
     const abortError = new Error('aborted')
     abortError.name = 'AbortError'
-    clearApprovalResponses()
+    const approvalStreamIds = abortApprovalResponses(pendingApprovalResponses(), 'canceled')
     rejectAllStreams(abortError, (streamId) => {
-      if (activeWs?.connected) activeWs.abort(streamId)
+      if (!approvalStreamIds.has(streamId) && activeWs?.connected) activeWs.abort(streamId)
     })
     loading.value = false
   }

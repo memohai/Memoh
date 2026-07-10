@@ -28,6 +28,8 @@ describe('approval response tracker', () => {
     expect(tracker.beginApprovalResponse(input('stream-2', 'approval-1'))).toBe(false)
     expect(tracker.beginApprovalResponse(input('stream-1', 'approval-2'))).toBe(false)
     expect(rollbackApproval).not.toHaveBeenCalled()
+    expect(tracker.pendingApprovalResponsesForSession('bot-1', 'session-1')).toHaveLength(1)
+    expect(tracker.pendingApprovalResponsesForSession('bot-2', 'session-1')).toEqual([])
   })
 
   it('settles success, failure, and local cancellation through one transition', () => {
@@ -43,7 +45,11 @@ describe('approval response tracker', () => {
     expect(rollbackApproval).toHaveBeenCalledOnce()
     expect(rollbackApproval).toHaveBeenCalledWith('approval-failure')
     expect(tracker.getApprovalResponse('stream-success')).toBeUndefined()
+    expect(tracker.isTerminalApprovalResponse('stream-success')).toBe(true)
+    expect(tracker.isTerminalApprovalResponse('stream-failure')).toBe(true)
+    expect(tracker.isTerminalApprovalResponse('stream-canceled')).toBe(true)
     expect(tracker.settleApprovalResponse('stream-success', 'failed')).toBeUndefined()
+    expect(rollbackApproval).toHaveBeenCalledOnce()
   })
 
   it('expires abandoned responses, rolls them back, and allows a retry', () => {
@@ -61,6 +67,7 @@ describe('approval response tracker', () => {
     currentTime = 1_100
     expect(tracker.hasPendingApprovalResponse('approval-1')).toBe(false)
     expect(rollbackApproval).toHaveBeenCalledWith('approval-1')
+    expect(tracker.beginApprovalResponse(input('stream-1'))).toBe(false)
     expect(tracker.beginApprovalResponse(input('stream-2'))).toBe(true)
   })
 
@@ -70,7 +77,25 @@ describe('approval response tracker', () => {
     expect(tracker.beginApprovalResponse(input(' '))).toBe(false)
     expect(tracker.beginApprovalResponse({ ...input('stream-1'), sessionId: '' })).toBe(false)
     expect(tracker.beginApprovalResponse(input('stream-2'))).toBe(true)
-    tracker.clearApprovalResponses()
+    expect(tracker.discardAllApprovalResponses()).toHaveLength(1)
+    expect(tracker.isTerminalApprovalResponse('stream-2')).toBe(true)
+    tracker.resetApprovalResponses()
     expect(tracker.hasPendingApprovalResponse('approval-1')).toBe(false)
+    expect(tracker.isTerminalApprovalResponse('stream-2')).toBe(false)
+  })
+
+  it('evicts the oldest terminal response at the configured bound', () => {
+    const tracker = createApprovalResponseTracker({
+      rollbackApproval: vi.fn(),
+      terminalHistoryLimit: 2,
+    })
+    for (const id of ['stream-1', 'stream-2', 'stream-3']) {
+      tracker.beginApprovalResponse(input(id, `approval-${id}`))
+      tracker.settleApprovalResponse(id, 'succeeded')
+    }
+
+    expect(tracker.isTerminalApprovalResponse('stream-1')).toBe(false)
+    expect(tracker.isTerminalApprovalResponse('stream-2')).toBe(true)
+    expect(tracker.isTerminalApprovalResponse('stream-3')).toBe(true)
   })
 })
