@@ -76,15 +76,9 @@ export interface UseChatScrollOptions {
   contentEl: Ref<HTMLElement | null>
   /**
    * Container of the LAST turn (chat-pane renders one persistent container
-   * per turn and binds this ref to the last one). The pin reserves viewport
-   * space by setting an inline min-height on it — imperatively, exactly once
-   * per pin (see tryApplyPin), never via a reactive binding, so sizing and
-   * the scroll that consumes it stay in one synchronous pass.
-   *
-   * When a newer turn is pinned, the PREVIOUS last-turn container's residual
-   * min-height is cleared first (collapseReserveKeepingView) so the entrance
-   * never flies through empty spacing. lastTurnEl always points at the
-   * newest turn; appliedPinContainer tracks who currently holds the reserve.
+   * per turn and binds this ref to the last one). Used for measurement only
+   * — the reserve itself is DECLARATIVE state (turnReserves) projected by
+   * chat-pane as a :style binding per turn; see the reserve block below.
    */
   lastTurnEl: Ref<HTMLElement | null>
   messages: Ref<ChatMessage[]>
@@ -292,18 +286,36 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // settle timer (the tween has no completion callback).
   let pinScrollActive = false
   let pinSettleTimer: ReturnType<typeof setTimeout> | null = null
-  // The container currently holding a pin reserve. Containers are per-turn and
-  // persistent. On the next pin, tryApplyPin clears THIS container's residual
-  // blank BEFORE the entrance tween (collapseReserveKeepingView) so the
-  // flight never scrolls through empty spacing — see file-header Pin section.
-  let appliedPinContainer: HTMLElement | null = null
-  // The pinned reserve in px, held as STATE — not only as the container's
-  // inline style. BUSINESS INVARIANT: the reserve must NOT change when the
-  // stream finishes. Completion swaps message ids (temp → server), which
-  // re-keys and REMOUNTS the turn container, and an inline style dies with
-  // its element — restorePinReserve re-asserts this value onto the fresh
-  // container so the invariant holds regardless of DOM churn.
-  let pinnedReservePx: number | null = null
+  // --- The pin reserve: DECLARATIVE render state, keyed by TURN IDENTITY --
+  // This map is the source of truth; chat-pane projects it per turn via
+  // turnReserveStyle(turn.id) as a :style min-height binding. Two design
+  // points, both learned the hard way:
+  //   • Declarative, not an imperative inline style: the style is part of
+  //     the render, so a container remount (stream completion re-keys the
+  //     turn) re-renders WITH the reserve — a reserve-less frame (and the
+  //     scrollTop clamp it caused: view silently shoved up, fake jump
+  //     arrow) cannot be produced. The imperative design needed a restore
+  //     helper plus a remount watcher to approximate this, and still lost
+  //     the race whenever anything forced layout mid-remount.
+  //   • Keyed by the turn's opening message id, NOT by position: positional
+  //     bindings re-map onto different containers the instant the turn
+  //     count changes mid-send (optimistic append lands several microtasks
+  //     after pinAfterSend). Id keying is inert to turn-count changes; it
+  //     relies on render ids being stable across the optimistic → server
+  //     consolidation, which the store guarantees (adoptRenderIdentity).
+  //
+  // BUSINESS INVARIANT unchanged: the reserve must NOT change when the
+  // stream finishes — it is legal layout until the next send's handover,
+  // a session switch, or the view unmounting.
+  const turnReserves = ref<Map<string, number>>(new Map())
+  function turnReserveStyle(turnId: string): { minHeight: string } | undefined {
+    const px = turnReserves.value.get(turnId)
+    return px === undefined ? undefined : { minHeight: `${px}px` }
+  }
+  // Turn id holding the CURRENT pin's reserve (the entry the next send's
+  // handover collapses). An id, not an element pointer — element pointers
+  // die on remount, which was the imperative design's disease.
+  let pinnedTurnId: string | null = null
 
   // ── collapseReserveKeepingView ─────────────────────────────────────────
   // THE only place that hand-adjusts scrollTop in response to a pin-reserve
@@ -367,11 +379,14 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // After this returns, tryApplyPin measures the new reserve and starts
   // the tween in a single-reserve coordinate system — previous-turn
   // content is what peeks above the new prompt, not empty spacing.
-  function collapseReserveKeepingView(el: HTMLElement, container: HTMLElement) {
-    if (!container.isConnected) {
-      container.style.minHeight = ''
-      return
-    }
+  function collapseReserveKeepingView(el: HTMLElement, turnId: string) {
+    const container = turnContainerOf(turnId)
+    // Drop the reserve from render state FIRST; if its container is gone the
+    // blank is already gone with it and there is nothing to compensate.
+    const nextMap = new Map(turnReserves.value)
+    nextMap.delete(turnId)
+    turnReserves.value = nextMap
+    if (!container?.isConnected) return
     const rootRect = el.getBoundingClientRect()
     const before = container.offsetHeight
     // Absolute top of the container in scroll content coordinates (same
@@ -379,6 +394,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
     // collapseTop refers to the pre-clear layout.
     const containerTop = el.scrollTop + container.getBoundingClientRect().top - rootRect.top
 
+    // The reactive binding clears on Vue's next flush; the handover needs
+    // this frame's geometry, so mirror the removal synchronously. The next
+    // patch renders the same (absent) value and owns it from there.
     container.style.minHeight = ''
     const delta = before - container.offsetHeight
     if (delta <= 0) return
@@ -593,10 +611,10 @@ export function useChatScroll(options: UseChatScrollOptions) {
     // Bracket as programmatic so any scrollTop tweak cannot latch as a
     // user escape before startScrollTween takes over the flag.
     isProgrammaticScroll = true
-    if (appliedPinContainer && appliedPinContainer !== container) {
-      collapseReserveKeepingView(el, appliedPinContainer)
+    if (pinnedTurnId && pinnedTurnId !== prompt.id) {
+      collapseReserveKeepingView(el, pinnedTurnId)
     }
-    appliedPinContainer = container
+    pinnedTurnId = prompt.id
 
     // Step 2: measure + set NEW reserve once. `below` / prompt offsets are
     // only honest after step 1 — dual-reserve layout would inflate
@@ -606,8 +624,13 @@ export function useChatScroll(options: UseChatScrollOptions) {
     const below = el.scrollHeight - containerTop - container.offsetHeight
     const ideal = el.clientHeight - below - PIN_TOP_OFFSET_PX + promptOffsetInTurn
     const floor = promptOffsetInTurn + promptEl.offsetHeight + Math.round(el.clientHeight / 3)
-    pinnedReservePx = Math.max(0, Math.round(Math.max(ideal, floor)))
-    container.style.minHeight = `${pinnedReservePx}px`
+    const reservePx = Math.max(0, Math.round(Math.max(ideal, floor)))
+    turnReserves.value = new Map(turnReserves.value).set(prompt.id, reservePx)
+    // Immediate projection of the same value: the reactive binding lands on
+    // Vue's next flush, but the tween below needs this frame's geometry.
+    // The binding renders the identical value and owns it from the next
+    // patch on — including across every future remount.
+    container.style.minHeight = `${reservePx}px`
     lastScrollTop = el.scrollTop
 
     // Step 3: landing target — resolves through messageJumpTarget, THE one
@@ -674,6 +697,14 @@ export function useChatScroll(options: UseChatScrollOptions) {
     startScrollTween(root, () => bottomTarget(root))
   }
 
+  // The persistent per-turn container that holds a message — the element the
+  // reserve :style binds to. chat-pane renders one div per turn keyed by the
+  // opening message id; the message row lives inside it.
+  function turnContainerOf(turnId: string): HTMLElement | null {
+    const msgEl = findMessageElement(turnId)
+    return (msgEl?.parentElement as HTMLElement | null) ?? null
+  }
+
   function findMessageElement(messageId: string): HTMLElement | null {
     const root = scrollEl.value
     if (!root) return null
@@ -733,8 +764,8 @@ export function useChatScroll(options: UseChatScrollOptions) {
     // follow) made the reply stream yank the view and drop the reserve.
     // Only a change AWAY FROM an existing session is a real switch.
     if (pinPending && !prev) {
-      appliedPinContainer = null
-      pinnedReservePx = null
+      pinnedTurnId = null
+      turnReserves.value = new Map()
       return
     }
     followBottom()
@@ -742,11 +773,10 @@ export function useChatScroll(options: UseChatScrollOptions) {
     // session's rows.
     pinPending = false
     pinAnchorId = null
-    // The old session's turn containers unmount with its messages (inline
-    // reserve dies with the element); drop the pin pointers and the held
-    // reserve so the next send pin measures fresh.
-    appliedPinContainer = null
-    pinnedReservePx = null
+    // The old session's reserves are meaningless against the new session's
+    // turns — clear the map so nothing re-projects onto foreign ids.
+    pinnedTurnId = null
+    turnReserves.value = new Map()
   })
 
   watch(isScrolling, (scrolling) => {
@@ -877,44 +907,44 @@ export function useChatScroll(options: UseChatScrollOptions) {
     }
   }
 
-  // Re-assert the pinned reserve after the turn container remounts (stream
-  // completion re-keys it — see pinnedReservePx). Skipped while a pin is
-  // pending: between arm and apply, lastTurnEl already points at the NEXT
-  // turn's container, which must measure fresh, not inherit the old reserve.
-  // Touches only inline style (no layout reads), so it is safe to run BEFORE
-  // any layout-forcing work — that ordering is what prevents a transient
-  // reserve-less layout (and the scrollTop clamp it would trigger) from ever
-  // materializing on screen.
-  // Re-assert the CURRENT pin's min-height after a turn-container remount
-  // (stream completion re-keys → v-for remount drops inline style). This is
-  // NOT a second handover and must not run collapseReserveKeepingView:
-  // we only stamp the already-chosen pinnedReservePx onto the live last-turn
-  // node so residual blank survives completion. Skipped while pinPending —
-  // between arm and apply, lastTurnEl already points at the NEXT turn, which
-  // must measure fresh in tryApplyPin, not inherit the old px.
-  function restorePinReserve() {
-    if (pinnedReservePx === null || pinPending) return
-    const container = lastTurnEl.value
-    if (!container || container === appliedPinContainer) return
-    if (appliedPinContainer?.isConnected) appliedPinContainer.style.minHeight = ''
-    container.style.minHeight = `${pinnedReservePx}px`
-    appliedPinContainer = container
-  }
+  // ── Pinned-turn identity migration ─────────────────────────────────────
+  // Stream completion swaps the opening user message's render id (temp →
+  // server) when the store cannot adopt the on-screen id; the v-for key
+  // changes and the turn container REMOUNTS under a NEW id. The reserve map
+  // is keyed by the OLD id — without migration the fresh container's :style
+  // lookup misses and Vue strips the min-height (spacing vanished exactly at
+  // completion; the imperative design survived this because its restore
+  // helper stamped px onto whatever container was last, id-blind).
+  // flush: 'pre' is load-bearing: the migration must land BEFORE the render
+  // that re-keys, so the remounted container binds the reserve in the very
+  // same patch — a reserve-less frame never exists.
+  watch(messages, (list) => {
+    if (!pinnedTurnId) return
+    const px = turnReserves.value.get(pinnedTurnId)
+    if (px === undefined) return
+    if (list.some(m => m.id === pinnedTurnId)) return
+    // The pinned turn's opening prompt is still the newest user message —
+    // only its id changed. No user message at all means the turn was
+    // removed (retry/fork surgery): drop the reserve with it.
+    const successor = lastUserMessage()?.id ?? null
+    const next = new Map(turnReserves.value)
+    next.delete(pinnedTurnId)
+    if (successor) next.set(successor, px)
+    turnReserves.value = next
+    pinnedTurnId = successor
+  }, { flush: 'pre' })
 
   // Follow / pin heartbeat. Streaming (and any other subtree mutation) lands
   // here. Order matters:
-  //   1. restorePinReserve — re-stamp current reserve if the container remounted
-  //      (style-only; no scrollTop policy).
-  //   2. tryApplyPin if armed — owns the one real handover + entrance; return
+  //   1. tryApplyPin if armed — owns the one real handover + entrance; return
   //      so this mutation never ALSO follow-snaps (would cancel the pin).
-  //   3. else if followEnabled → stick to content end.
-  //   4. else refresh jump-button mirror only.
+  //   2. else if followEnabled → stick to the bottom.
+  //   3. else refresh jump-button mirror only.
   // Height changes that are NOT a pin handover (Thought expand, tool body,
   // markdown reflow) intentionally do nothing special here when follow is
   // off — the browser keeps the parked view; do not invent collapse/scroll
   // compensation on those paths.
   function onContentMutated() {
-    restorePinReserve()
     const el = scrollEl.value
     if (!el) return
     if (!isActive.value || lockScroll.value) return
@@ -925,13 +955,6 @@ export function useChatScroll(options: UseChatScrollOptions) {
       scheduleAtBottomRefresh()
     }
   }
-
-  // Second belt for the same invariant: Vue's watcher flush and the
-  // MutationObserver microtask race — whichever runs first after the remount
-  // must re-assert before anything forces layout.
-  watch(lastTurnEl, () => {
-    restorePinReserve()
-  }, { flush: 'post' })
 
   function attach(el: HTMLElement) {
     lastScrollTop = el.scrollTop
@@ -996,6 +1019,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
 
     // message-item @active contract
     onMessageActive,
+
+    // per-turn reserve projection — chat-pane binds :style="turnReserveStyle(turn.id)"
+    turnReserveStyle,
 
     // low-level primitives kept public for the scroll rail (the rail's own
     // trigger logic still calls these directly)

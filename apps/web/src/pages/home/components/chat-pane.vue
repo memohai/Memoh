@@ -70,6 +70,7 @@
                 v-for="(turn, turnIndex) in messageTurns"
                 :key="turn.id"
                 :ref="turnIndex === messageTurns.length - 1 ? setLastTurnEl : undefined"
+                :style="turnReserveStyle(turn.id)"
                 class="space-y-6"
               >
                 <template
@@ -2605,6 +2606,7 @@ const {
   startScrollTween,
   findMessageElement,
   messageJumpTarget,
+  turnReserveStyle,
 } = useChatScroll({
   scrollEl,
   contentEl: descEl,
