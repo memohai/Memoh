@@ -9,11 +9,9 @@ import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
-  isSessionVisibleInSidebarMode,
   normalizedRuntimeType,
   provisionalSessionTitle,
   shouldRefreshFromMessageCreated,
-  sortByRecency,
   upsertById,
   type SidebarSessionMode,
 } from './chat-list.utils'
@@ -41,6 +39,7 @@ import {
 } from './chat-list.normalize'
 import { createFsChangeBeacon } from './chat/fs-beacon'
 import { createCommandEventRegistry } from './chat/command-events'
+import { createSessionList } from './chat/session-list'
 import {
   createBackgroundTaskTracker,
   isBackgroundTaskActive,
@@ -390,7 +389,36 @@ export const useChatStore = defineStore('chat', () => {
     return activeSessionIds[0] ?? null
   })
   const streaming = computed(() => isSessionStreaming(sessionId.value))
-  const sessions = ref<SessionSummary[]>([])
+  // Sessions-list bookkeeping + fork-anchor tracking (see ./chat/session-list).
+  const sessionList = createSessionList({ currentBotId, sessionId, messages })
+  const {
+    sessions,
+    sessionById,
+    rememberedSessions,
+    sessionsCursor,
+    hasMoreSessions,
+    loadingMoreSessions,
+    activeSession,
+    knownSessions,
+    activeChatReadOnly,
+    activeChatCanFork,
+    withForkAnchorFromUITurns,
+    syncForkAnchorFromUITurns,
+    updateForkAnchorForReplacedMessage,
+    replaceSessions,
+    appendSessions,
+    upsertSession,
+    rememberSession,
+    knownSessionSummary,
+    isRecentsSession,
+    patchSessionInList,
+    removeSessionFromList,
+    touchSessionInList,
+    fallbackSessionAfterDelete,
+    markSessionDeleted,
+    clearDeletedSessionIds,
+    clearRememberedSessions,
+  } = sessionList
   const loading = ref(false)
   // `loadingChats` covers the bot-level boot path (sessions list fetch), so
   // the sidebar can show its skeleton + suppress its empty-state placeholder
@@ -476,15 +504,6 @@ export const useChatStore = defineStore('chat', () => {
   //   to notice sessions created from external channels.
   const sessionMessagesStream = useRetryingStream()
   const botSessionsActivityStream = useRetryingStream()
-  // O(1) lookup keeps event handlers off the list scan that previously
-  // blocked the UI on bots with thousands of heartbeat sessions.
-  const sessionById = new Map<string, SessionSummary>()
-  const sessionLookupRevision = ref(0)
-  const rememberedSessions = ref<Record<string, SessionSummary>>({})
-  const deletedSessionIdsByBot = new Map<string, Set<string>>()
-  const sessionsCursor = ref<string | null>(null)
-  const hasMoreSessions = ref(false)
-  const loadingMoreSessions = ref(false)
   const acpRuntimeStatuses = ref<Record<string, AcpagentRuntimeStatus | undefined>>({})
   const acpRuntimePending = ref<Record<string, boolean>>({})
   const acpRuntimeRequests = new Map<string, Promise<AcpagentRuntimeStatus>>()
@@ -499,264 +518,26 @@ export const useChatStore = defineStore('chat', () => {
   let pendingACPGeneration = 0
   let selectSessionRequestId = 0
 
-  const activeSession = computed(() => knownSessionSummary(sessionId.value ?? ''))
   const hasExplicitSessionSelection = computed(() => explicitSessionSelection.value)
-  const knownSessions = computed<SessionSummary[]>(() => {
-    const byId = new Map<string, SessionSummary>()
-    for (const session of sessions.value) byId.set(session.id, session)
-    for (const session of Object.values(rememberedSessions.value)) {
-      if (!byId.has(session.id)) byId.set(session.id, session)
-    }
-    return [...byId.values()]
-  })
 
-  function markSessionLookupChanged() {
-    sessionLookupRevision.value++
-  }
 
-  function trackSessionLookupRevision() {
-    return sessionLookupRevision.value
-  }
 
-  function forkSourceMetadata(session: SessionSummary | null | undefined): Record<string, unknown> | null {
-    const metadata = session?.metadata
-    if (!metadata || typeof metadata !== 'object') return null
-    const raw = (metadata as Record<string, unknown>).forked_from
-    return raw && typeof raw === 'object' ? raw as Record<string, unknown> : null
-  }
 
-  function forkSourceAnchor(session: SessionSummary | null | undefined): string {
-    return String(forkSourceMetadata(session)?.fork_message_id ?? '').trim()
-  }
 
-  function forkAnchorFromUITurns(turns: UITurn[], session?: SessionSummary | null): string {
-    const cutoff = Date.parse(session?.created_at ?? '')
-    const hasCutoff = Number.isFinite(cutoff)
-    for (let i = turns.length - 1; i >= 0; i--) {
-      const turn = turns[i]
-      if (turn.role !== 'assistant') continue
-      const id = String(turn.id ?? '').trim()
-      if (!id) continue
-      if (!hasCutoff) return id
-      const timestamp = Date.parse(turn.timestamp)
-      if (Number.isFinite(timestamp) && timestamp <= cutoff) return id
-    }
-    return ''
-  }
 
-  function withForkAnchorFromUITurns(session: SessionSummary, turns: UITurn[]): SessionSummary {
-    const anchor = forkAnchorFromUITurns(turns, session)
-    if (!anchor) return session
-    const fork = forkSourceMetadata(session)
-    if (!fork) return session
-    if (forkSourceAnchor(session) === anchor) return session
 
-    const metadata = session.metadata && typeof session.metadata === 'object' ? session.metadata : {}
-    return {
-      ...session,
-      metadata: {
-        ...metadata,
-        forked_from: {
-          ...fork,
-          fork_message_id: anchor,
-        },
-      },
-    }
-  }
 
-  function syncForkAnchorFromUITurns(targetSessionId: string | undefined, turns: UITurn[]) {
-    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
-    if (!sid || turns.length === 0) return
-    const known = knownSessionSummary(sid)
-    if (!known || !forkSourceMetadata(known)) return
-    const anchored = withForkAnchorFromUITurns(known, turns)
-    if (anchored === known) return
-    upsertSession(anchored)
-    rememberSession(anchored)
-  }
 
-  function forkMessageCandidates(message: ChatMessage): string[] {
-    const out = [
-      message.serverId,
-      message.id,
-      message.role === 'system' ? undefined : message.externalMessageId,
-    ]
-      .map(value => value?.trim() ?? '')
-      .filter(Boolean)
-    return Array.from(new Set(out))
-  }
 
-  function messageMatchesForkAnchor(message: ChatMessage, anchor: string): boolean {
-    const target = anchor.trim()
-    return Boolean(target) && forkMessageCandidates(message).includes(target)
-  }
 
-  function latestInheritedAssistantBefore(index: number, session?: SessionSummary | null): string {
-    const cutoff = Date.parse(session?.created_at ?? '')
-    const hasCutoff = Number.isFinite(cutoff)
-    for (let i = index - 1; i >= 0; i--) {
-      const message = messages[i]
-      if (message?.role !== 'assistant') continue
-      if (hasCutoff) {
-        const timestamp = Date.parse(message.timestamp)
-        if (!Number.isFinite(timestamp) || timestamp > cutoff) continue
-      }
-      return serverMessageId(message) || message.id
-    }
-    return ''
-  }
 
-  function updateForkAnchorForReplacedMessage(targetSessionId: string, target: ChatMessage): (() => void) | null {
-    const sid = targetSessionId.trim()
-    if (!sid) return null
-    const known = knownSessionSummary(sid)
-    const fork = forkSourceMetadata(known)
-    const currentAnchor = String(fork?.fork_message_id ?? '').trim()
-    if (!known || !fork || !currentAnchor) return null
 
-    const targetIndex = messages.indexOf(target)
-    if (targetIndex < 0) return null
-    const replacedTailContainsAnchor = messages
-      .slice(targetIndex)
-      .some(message => messageMatchesForkAnchor(message, currentAnchor))
-    if (!replacedTailContainsAnchor) return null
-    const nextAnchor = latestInheritedAssistantBefore(targetIndex, known)
-    if (nextAnchor === currentAnchor) return null
 
-    const metadata = known.metadata && typeof known.metadata === 'object' ? known.metadata : {}
-    const nextFork = { ...fork }
-    if (nextAnchor) {
-      nextFork.fork_message_id = nextAnchor
-    } else {
-      delete nextFork.fork_message_id
-    }
-    const next = {
-      ...known,
-      metadata: {
-        ...metadata,
-        forked_from: nextFork,
-      },
-    }
-    replaceKnownSessionSummary(next)
-    rememberSession(next)
-    return () => {
-      replaceKnownSessionSummary(known)
-      rememberSession(known)
-    }
-  }
 
-  function preserveSessionSummary(incoming: SessionSummary, known?: SessionSummary | null): SessionSummary {
-    let next = incoming
-    if (known && !(next.title ?? '').trim() && (known.title ?? '').trim()) {
-      next = { ...next, title: known.title }
-    }
 
-    const knownFork = forkSourceMetadata(known)
-    if (!knownFork || !forkSourceAnchor(known) || forkSourceAnchor(next)) {
-      return next
-    }
 
-    const incomingFork = forkSourceMetadata(next)
-    const metadata = next.metadata && typeof next.metadata === 'object' ? next.metadata : {}
-    return {
-      ...next,
-      metadata: {
-        ...metadata,
-        forked_from: {
-          ...knownFork,
-          ...(incomingFork ?? {}),
-          fork_message_id: knownFork.fork_message_id,
-        },
-      },
-    }
-  }
 
-  function replaceSessions(items: SessionSummary[]): SessionSummary[] {
-    const currentDeleted = deletedSessionIdsByBot.get((currentBotId.value ?? '').trim())
-    // A racing list refresh can fetch a session before the backend's
-    // title-generation flow has persisted a title, while the client already
-    // holds one — the optimistic provisional title set in ensureActiveSession,
-    // which is local-only and never sent to the server. (Server-published
-    // titles don't have this problem: applyFallbackTitle and the LLM path
-    // both UpdateTitle before publishing, so the DB is current by the time any
-    // client sees the SSE.) An empty title in the snapshot means "server
-    // hasn't set one yet," not "title cleared," so preserve our non-empty title
-    // instead of letting the refresh erase it (which split the sidebar from
-    // the sticky tab title).
-    const merged = items
-      .filter(s => !currentDeleted?.has(s.id))
-      .map(s => preserveSessionSummary(s, sessionById.get(s.id) ?? rememberedSessions.value[s.id]))
-    sessions.value = merged
-    sessionById.clear()
-    for (const s of merged) sessionById.set(s.id, s)
-    markSessionLookupChanged()
-    return merged
-  }
 
-  function appendSessions(items: SessionSummary[]) {
-    if (items.length === 0) return
-    const currentDeleted = deletedSessionIdsByBot.get((currentBotId.value ?? '').trim())
-    const fresh = items
-      .filter(s => !sessionById.has(s.id) && !currentDeleted?.has(s.id))
-      .map(s => preserveSessionSummary(s, rememberedSessions.value[s.id]))
-    if (fresh.length === 0) return
-    sessions.value = [...sessions.value, ...fresh]
-    for (const s of fresh) sessionById.set(s.id, s)
-    markSessionLookupChanged()
-  }
-
-  function upsertSession(updated: SessionSummary) {
-    const currentDeleted = deletedSessionIdsByBot.get((currentBotId.value ?? '').trim())
-    if (currentDeleted?.has(updated.id)) return
-    const existing = sessionById.get(updated.id)
-    const remembered = rememberedSessions.value[updated.id]
-    const next = preserveSessionSummary(updated, existing ?? remembered)
-    if (existing) {
-      const rest = sessions.value.filter(session => session.id !== updated.id)
-      sessions.value = [next, ...rest]
-    } else {
-      sessions.value = [next, ...sessions.value]
-    }
-    sessionById.set(next.id, next)
-    markSessionLookupChanged()
-    if (remembered) rememberSession(next)
-  }
-
-  function replaceKnownSessionSummary(updated: SessionSummary) {
-    const currentDeleted = deletedSessionIdsByBot.get((currentBotId.value ?? '').trim())
-    if (currentDeleted?.has(updated.id)) return
-    if (sessionById.has(updated.id)) {
-      sessions.value = sessions.value.map(session => (session.id === updated.id ? updated : session))
-    }
-    sessionById.set(updated.id, updated)
-    markSessionLookupChanged()
-  }
-
-  function rememberSession(updated: SessionSummary) {
-    rememberedSessions.value = {
-      ...rememberedSessions.value,
-      [updated.id]: updated,
-    }
-    markSessionLookupChanged()
-  }
-
-  function forgetRememberedSession(id: string) {
-    if (!rememberedSessions.value[id]) return
-    const next = { ...rememberedSessions.value }
-    delete next[id]
-    rememberedSessions.value = next
-    markSessionLookupChanged()
-  }
-
-  function knownSessionSummary(targetSessionId: string): SessionSummary | null {
-    const sid = targetSessionId.trim()
-    if (!sid) return null
-    // `sessionById` is intentionally a non-reactive O(1) lookup. Tie computed
-    // consumers such as activeChatTarget to a tiny revision so an early null
-    // read is invalidated when the session list/hydration later fills the map.
-    trackSessionLookupRevision()
-    return sessionById.get(sid) ?? rememberedSessions.value[sid] ?? null
-  }
 
   async function ensureSessionSummary(targetBotId: string, targetSessionId: string, requestId?: number): Promise<SessionSummary | null> {
     const bid = targetBotId.trim()
@@ -776,36 +557,8 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function isRecentsSession(session: SessionSummary): boolean {
-    const type = (session.type ?? 'chat').trim()
-    return type === 'chat' || type === 'discuss' || type === 'acp_agent'
-  }
 
-  // patchSessionInList applies a partial update to one session in BOTH the
-  // reactive `sessions` array (reassigned so the sidebar virtualizer and any
-  // `sessions`-derived computed re-run) and the `sessionById` lookup map. SSE
-  // title/touch handlers must route through this: mutating the map's stored
-  // object in place (`target.title = ...`) writes the raw object but never
-  // triggers `sessions.value`, so the UI stays stale until a full REST refresh
-  // (the Cmd+R symptom).
-  function patchSessionInList(id: string, patch: Partial<SessionSummary>) {
-    const existing = sessionById.get(id)
-    if (!existing) return
-    const currentDeleted = deletedSessionIdsByBot.get((existing.bot_id ?? currentBotId.value ?? '').trim())
-    if (currentDeleted?.has(id)) return
-    const next = { ...existing, ...patch }
-    sessionById.set(id, next)
-    sessions.value = sessions.value.map(session => (session.id === id ? next : session))
-    markSessionLookupChanged()
-  }
 
-  function removeSessionFromList(id: string) {
-    if (!sessionById.has(id) && !rememberedSessions.value[id]) return
-    sessions.value = sessions.value.filter(session => session.id !== id)
-    sessionById.delete(id)
-    markSessionLookupChanged()
-    forgetRememberedSession(id)
-  }
 
   async function cleanupFailedDeferredSession(botId: string, targetSessionId: string, fallbackComposerScope = '') {
     const bid = botId.trim()
@@ -839,31 +592,9 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function fallbackSessionAfterDelete(mode: SidebarSessionMode): SessionSummary | null {
-    const visibleSessions = sessions.value.filter(session => isSessionVisibleInSidebarMode(session, mode))
-    return sortByRecency(visibleSessions)[0] ?? null
-  }
 
-  function markSessionDeleted(botId: string, targetSessionId: string) {
-    const bid = botId.trim()
-    const sid = targetSessionId.trim()
-    if (!bid || !sid) return
-    const deletedIds = deletedSessionIdsByBot.get(bid) ?? new Set<string>()
-    deletedIds.add(sid)
-    deletedSessionIdsByBot.set(bid, deletedIds)
-  }
 
-  const activeChatReadOnly = computed(() => {
-    const session = activeSession.value
-    if (!session) return false
-    const type = session.type ?? 'chat'
-    if (type === 'heartbeat' || type === 'schedule' || type === 'subagent') return true
-    const ct = (session.channel_type ?? '').trim().toLowerCase()
-    if (ct && ct !== 'local') return true
-    return false
-  })
 
-  const activeChatCanFork = computed(() => activeSession.value?.type === 'chat')
 
   function acpRuntimeKey(botId: string, targetSessionId: string) {
     const bid = botId.trim()
@@ -1780,7 +1511,7 @@ export const useChatStore = defineStore('chat', () => {
     sessionListRefreshPromise = null
 
     replaceSessions([])
-    deletedSessionIdsByBot.clear()
+    clearDeletedSessionIds()
     sessionsCursor.value = null
     hasMoreSessions.value = false
     loadingMoreSessions.value = false
@@ -2251,13 +1982,6 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function touchSessionInList(targetSessionId: string, timestamp?: string) {
-    const target = sessionById.get(targetSessionId)
-    if (!target) return
-    if (timestamp && (!target.updated_at || timestamp > target.updated_at)) {
-      patchSessionInList(targetSessionId, { updated_at: timestamp })
-    }
-  }
 
   function acpSessionMetadata(input: ACPAgentSessionInput): Record<string, unknown> {
     const agentId = input.agentId.trim()
@@ -3046,7 +2770,7 @@ export const useChatStore = defineStore('chat', () => {
     clearFsForBotSwitch()
     currentBotId.value = targetBotId
     sessionId.value = null
-    rememberedSessions.value = {}
+    clearRememberedSessions()
     explicitSessionSelection.value = false
     draftIntent.value = false
     await initialize()
