@@ -4494,6 +4494,57 @@ func (q *Queries) ListUncompactedMessagesBySession(ctx context.Context, sessionI
 	return items, nil
 }
 
+const listUncoveredTurnResponsesBySession = `-- name: ListUncoveredTurnResponsesBySession :many
+SELECT
+  m.id,
+  m.role,
+  m.content,
+  m.created_at
+FROM bot_visible_history_messages m
+WHERE m.session_id = $1
+  AND m.role IN ('assistant', 'tool')
+  AND m.id <> ALL($2::uuid[])
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+`
+
+type ListUncoveredTurnResponsesBySessionParams struct {
+	SessionID         pgtype.UUID   `json:"session_id"`
+	CoveredMessageIds []pgtype.UUID `json:"covered_message_ids"`
+}
+
+type ListUncoveredTurnResponsesBySessionRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	Role      string             `json:"role"`
+	Content   []byte             `json:"content"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListUncoveredTurnResponsesBySession(ctx context.Context, arg ListUncoveredTurnResponsesBySessionParams) ([]ListUncoveredTurnResponsesBySessionRow, error) {
+	rows, err := q.db.Query(ctx, listUncoveredTurnResponsesBySession, arg.SessionID, arg.CoveredMessageIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUncoveredTurnResponsesBySessionRow
+	for rows.Next() {
+		var i ListUncoveredTurnResponsesBySessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Role,
+			&i.Content,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVisibleMessagesFromBySession = `-- name: ListVisibleMessagesFromBySession :many
 WITH cursor_message AS (
   SELECT m.turn_position

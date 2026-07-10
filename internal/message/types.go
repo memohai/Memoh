@@ -110,6 +110,12 @@ type TurnResponseCursorReader interface {
 	LatestTurnResponseAtBySession(ctx context.Context, sessionID string) (time.Time, error)
 }
 
+// TurnResponseHistoryReader exposes the narrow assistant/tool read model used
+// to pair full rendered context with durable bot responses.
+type TurnResponseHistoryReader interface {
+	ListUncoveredTurnResponsesBySession(ctx context.Context, sessionID string, coveredMessageIDs []string) ([]Message, error)
+}
+
 // ToolTailRoundPersister optionally persists a complete
 // user -> assistant(tool-call) -> tool -> assistant(final) round in one write.
 type ToolTailRoundPersister interface {

@@ -1545,6 +1545,19 @@ WHERE m.session_id = sqlc.arg(session_id)
   AND m.role IN ('assistant', 'tool')
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync');
 
+-- name: ListUncoveredTurnResponsesBySession :many
+SELECT
+  m.id,
+  m.role,
+  m.content,
+  m.created_at
+FROM bot_visible_history_messages m
+WHERE m.session_id = sqlc.arg(session_id)
+  AND m.role IN ('assistant', 'tool')
+  AND m.id <> ALL(sqlc.arg(covered_message_ids)::uuid[])
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
+
 -- name: ListMessagesBefore :many
 SELECT
   m.id,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -12,6 +13,50 @@ import (
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	messageevent "github.com/memohai/memoh/internal/message/event"
 )
+
+type uncoveredTurnResponseQueries struct {
+	dbstore.Queries
+	arg  sqlc.ListUncoveredTurnResponsesBySessionParams
+	rows []sqlc.ListUncoveredTurnResponsesBySessionRow
+}
+
+func (q *uncoveredTurnResponseQueries) ListUncoveredTurnResponsesBySession(
+	_ context.Context,
+	arg sqlc.ListUncoveredTurnResponsesBySessionParams,
+) ([]sqlc.ListUncoveredTurnResponsesBySessionRow, error) {
+	q.arg = arg
+	return q.rows, nil
+}
+
+func TestListUncoveredTurnResponsesBySessionUsesAcceptedCoverage(t *testing.T) {
+	t.Parallel()
+
+	createdAt := time.UnixMilli(1_000).UTC()
+	queries := &uncoveredTurnResponseQueries{rows: []sqlc.ListUncoveredTurnResponsesBySessionRow{{
+		ID:        testMessageUUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+		Role:      "assistant",
+		Content:   []byte(`{"role":"assistant","content":"response"}`),
+		CreatedAt: pgtype.Timestamptz{Time: createdAt, Valid: true},
+	}}}
+	service := NewService(nil, queries)
+
+	messages, err := service.ListUncoveredTurnResponsesBySession(
+		context.Background(),
+		"22222222-2222-2222-2222-222222222222",
+		[]string{"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"},
+	)
+	if err != nil {
+		t.Fatalf("ListUncoveredTurnResponsesBySession() error = %v", err)
+	}
+	if len(messages) != 1 || messages[0].ID != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" || !messages[0].CreatedAt.Equal(createdAt) {
+		t.Fatalf("uncovered turn responses = %#v", messages)
+	}
+	if queries.arg.SessionID.String() != "22222222-2222-2222-2222-222222222222" ||
+		len(queries.arg.CoveredMessageIds) != 1 ||
+		queries.arg.CoveredMessageIds[0].String() != "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" {
+		t.Fatalf("query args = %#v", queries.arg)
+	}
+}
 
 type runtimeSnapshotQueries struct {
 	dbstore.Queries

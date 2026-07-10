@@ -172,6 +172,89 @@ func TestLoadContextHistoryProjectionUsesLatestResponseOutsideRecentWindow(t *te
 	}
 }
 
+func TestLoadContextHistoryProjectionKeepsOldUncompactedTurnResponses(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "22222222-2222-2222-2222-222222222222"
+	oldAssistant := pipelineHistoryMessage(
+		t,
+		"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+		"11111111-1111-1111-1111-111111111111",
+		sessionID,
+		"",
+		time.Now().UTC().Add(-48*time.Hour),
+		"assistant",
+		"old response",
+	)
+	messages := &pipelineContextMessageService{uncoveredTurnResponses: []messagepkg.Message{oldAssistant}}
+	resolver := &Resolver{
+		logger:         slog.New(slog.DiscardHandler),
+		messageService: messages,
+	}
+
+	projection, err := resolver.LoadContextHistoryProjection(
+		context.Background(),
+		"11111111-1111-1111-1111-111111111111",
+		sessionID,
+	)
+	if err != nil {
+		t.Fatalf("LoadContextHistoryProjection() error = %v", err)
+	}
+	if len(projection.TurnResponses) != 1 || projection.TurnResponses[0].Content != "old response" {
+		t.Fatalf("old uncompacted turn responses = %#v", projection.TurnResponses)
+	}
+	if messages.uncoveredTurnResponseCalls != 1 {
+		t.Fatalf("uncovered turn response loads = %d, want 1", messages.uncoveredTurnResponseCalls)
+	}
+}
+
+func TestLoadContextHistoryProjectionExcludesTurnResponsesCoveredByActiveArtifact(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID      = "11111111-1111-1111-1111-111111111111"
+		sessionID  = "22222222-2222-2222-2222-222222222222"
+		artifactID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+		responseID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	)
+	response := pipelineHistoryMessage(t, responseID, botID, sessionID, "", time.Now().UTC().Add(-48*time.Hour), "assistant", "covered response")
+	queries := &recordingCompactionLogQueries{logs: []sqlc.BotHistoryMessageCompact{
+		pipelineArtifactRow(t, artifactID, botID, sessionID, "summary", []messagepkg.Message{response}, time.Now().UTC()),
+	}}
+	messages := &pipelineContextMessageService{rows: []messagepkg.Message{response}}
+	resolver := &Resolver{logger: slog.New(slog.DiscardHandler), messageService: messages, queries: queries}
+
+	projection, err := resolver.LoadContextHistoryProjection(context.Background(), botID, sessionID)
+	if err != nil {
+		t.Fatalf("LoadContextHistoryProjection() error = %v", err)
+	}
+	if len(projection.CompactionArtifacts) != 1 || len(projection.TurnResponses) != 0 {
+		t.Fatalf("active projection = %#v", projection)
+	}
+	if got, want := messages.coveredMessageIDs, []string{responseID}; !equalStrings(got, want) {
+		t.Fatalf("covered message ids = %#v, want %#v", got, want)
+	}
+}
+
+func TestLoadContextHistoryProjectionPropagatesTurnResponseReadFailure(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("turn responses unavailable")
+	resolver := &Resolver{
+		logger:         slog.New(slog.DiscardHandler),
+		messageService: &pipelineContextMessageService{turnResponseErr: wantErr},
+	}
+
+	_, err := resolver.LoadContextHistoryProjection(
+		context.Background(),
+		"11111111-1111-1111-1111-111111111111",
+		"22222222-2222-2222-2222-222222222222",
+	)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("LoadContextHistoryProjection() error = %v, want %v", err, wantErr)
+	}
+}
+
 func TestBuildPipelineContextKeepsHistoryAndCurrentQueryWhenRenderedContextIsStale(t *testing.T) {
 	t.Parallel()
 
@@ -301,17 +384,44 @@ func TestTrimMessagesAndRecordsPreservesEveryActiveSummary(t *testing.T) {
 
 type pipelineContextMessageService struct {
 	messagepkg.Service
-	rows                    []messagepkg.Message
-	err                     error
-	activeSinceCalls        int
-	since                   time.Time
-	latestTurnResponseAt    time.Time
-	latestTurnResponseCalls int
+	rows                       []messagepkg.Message
+	err                        error
+	activeSinceCalls           int
+	since                      time.Time
+	latestTurnResponseAt       time.Time
+	latestTurnResponseCalls    int
+	uncoveredTurnResponses     []messagepkg.Message
+	uncoveredTurnResponseCalls int
+	coveredMessageIDs          []string
+	turnResponseErr            error
 }
 
 func (s *pipelineContextMessageService) LatestTurnResponseAtBySession(context.Context, string) (time.Time, error) {
 	s.latestTurnResponseCalls++
 	return s.latestTurnResponseAt, nil
+}
+
+func (s *pipelineContextMessageService) ListUncoveredTurnResponsesBySession(_ context.Context, _ string, coveredMessageIDs []string) ([]messagepkg.Message, error) {
+	s.uncoveredTurnResponseCalls++
+	s.coveredMessageIDs = append([]string(nil), coveredMessageIDs...)
+	if s.turnResponseErr != nil || s.uncoveredTurnResponses != nil {
+		return s.uncoveredTurnResponses, s.turnResponseErr
+	}
+	covered := make(map[string]struct{}, len(coveredMessageIDs))
+	for _, id := range coveredMessageIDs {
+		covered[id] = struct{}{}
+	}
+	responses := make([]messagepkg.Message, 0, len(s.rows))
+	for _, message := range s.rows {
+		if message.Role != "assistant" && message.Role != "tool" {
+			continue
+		}
+		if _, excluded := covered[message.ID]; excluded {
+			continue
+		}
+		responses = append(responses, message)
+	}
+	return responses, nil
 }
 
 func (s *pipelineContextMessageService) ListActiveSinceBySession(_ context.Context, _ string, since time.Time) ([]messagepkg.Message, error) {

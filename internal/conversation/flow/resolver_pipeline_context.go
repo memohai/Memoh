@@ -98,22 +98,31 @@ func (r *Resolver) loadPipelineHistoryProjection(
 	if err != nil {
 		return pipelineHistoryProjectionBuild{}, err
 	}
-	turnResponses := pipelineTurnResponses(messages)
+	turnResponseMessages := messages
+	if historyReader, ok := r.messageService.(messagepkg.TurnResponseHistoryReader); ok {
+		turnResponseMessages, err = historyReader.ListUncoveredTurnResponsesBySession(
+			ctx,
+			scope.SessionID,
+			coveredHistoryMessageIDs(artifacts),
+		)
+		if err != nil {
+			return pipelineHistoryProjectionBuild{}, err
+		}
+	}
+	turnResponses := pipelineTurnResponses(turnResponseMessages)
 	latestTurnResponseAtMs := int64(0)
 	for _, response := range turnResponses {
 		if response.RequestedAtMs > latestTurnResponseAtMs {
 			latestTurnResponseAtMs = response.RequestedAtMs
 		}
 	}
-	if latestTurnResponseAtMs == 0 {
-		if cursorReader, ok := r.messageService.(messagepkg.TurnResponseCursorReader); ok {
-			latest, err := cursorReader.LatestTurnResponseAtBySession(ctx, scope.SessionID)
-			if err != nil {
-				return pipelineHistoryProjectionBuild{}, err
-			}
-			if !latest.IsZero() {
-				latestTurnResponseAtMs = latest.UnixMilli()
-			}
+	if cursorReader, ok := r.messageService.(messagepkg.TurnResponseCursorReader); ok {
+		latest, err := cursorReader.LatestTurnResponseAtBySession(ctx, scope.SessionID)
+		if err != nil {
+			return pipelineHistoryProjectionBuild{}, err
+		}
+		if latestMs := latest.UnixMilli(); !latest.IsZero() && latestMs > latestTurnResponseAtMs {
+			latestTurnResponseAtMs = latestMs
 		}
 	}
 	return pipelineHistoryProjectionBuild{
@@ -124,6 +133,25 @@ func (r *Resolver) loadPipelineHistoryProjection(
 		},
 		summaryRecords: summaries,
 	}, nil
+}
+
+func coveredHistoryMessageIDs(artifacts []pipelinepkg.CompactionArtifact) []string {
+	ids := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, artifact := range artifacts {
+		for _, source := range artifact.Sources {
+			id := strings.TrimSpace(source.HistoryMessageID)
+			if id == "" {
+				continue
+			}
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func pipelineTurnResponses(messages []messagepkg.Message) []pipelinepkg.TurnResponseEntry {

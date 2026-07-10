@@ -922,6 +922,40 @@ func (s *DBService) LatestTurnResponseAtBySession(ctx context.Context, sessionID
 	return latest.Time.UTC(), nil
 }
 
+// ListUncoveredTurnResponsesBySession returns assistant/tool rows not replaced
+// by the active compaction projection.
+func (s *DBService) ListUncoveredTurnResponsesBySession(ctx context.Context, sessionID string, coveredMessageIDs []string) ([]Message, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	pgCoveredMessageIDs := make([]pgtype.UUID, 0, len(coveredMessageIDs))
+	for _, messageID := range coveredMessageIDs {
+		pgMessageID, err := dbpkg.ParseUUID(messageID)
+		if err != nil {
+			return nil, err
+		}
+		pgCoveredMessageIDs = append(pgCoveredMessageIDs, pgMessageID)
+	}
+	rows, err := s.queries.ListUncoveredTurnResponsesBySession(ctx, sqlc.ListUncoveredTurnResponsesBySessionParams{
+		SessionID:         pgSessionID,
+		CoveredMessageIds: pgCoveredMessageIDs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	messages := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		messages = append(messages, Message{
+			ID:        row.ID.String(),
+			Role:      row.Role,
+			Content:   row.Content,
+			CreatedAt: row.CreatedAt.Time,
+		})
+	}
+	return messages, nil
+}
+
 // ListLatestBySession returns the latest N session messages.
 func (s *DBService) ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]Message, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
