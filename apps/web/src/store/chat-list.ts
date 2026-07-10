@@ -1,5 +1,5 @@
 import { defineStore, storeToRefs } from 'pinia'
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { toast } from '@felinic/ui'
 import enMessages from '@/i18n/locales/en.json'
 import zhMessages from '@/i18n/locales/zh.json'
@@ -29,6 +29,7 @@ import { createCommandEventRegistry } from './chat/command-events'
 import { createSessionList } from './chat/session-list'
 import { acpSessionMetadata, createACPStaging } from './chat/acp-staging'
 import { createTranscriptController } from './chat/transcript'
+import { createAssistantStreamRegistry } from './chat/assistant-streams'
 import {
   createBackgroundTaskTracker,
   normalizeBackgroundTask,
@@ -134,22 +135,6 @@ function commandErrorMessage(code: string) {
 function forkFailedMessage() {
   const messages = localizedMessages()
   return messages.chat.forkFailed
-}
-
-interface PendingAssistantStream {
-  streamId: string
-  assistantTurn: ChatAssistantTurn
-  botId: string
-  sessionId: string
-  composerScope: string
-  done: boolean
-  resolve: () => void
-  reject: (err: Error) => void
-}
-
-interface StreamIdentity {
-  stream_id?: string
-  session_id?: string
 }
 
 type WebNewCommandResult =
@@ -269,7 +254,24 @@ export const useChatStore = defineStore('chat', () => {
     markToolApprovalDecision,
     resetUserScope: resetTranscriptUserScope,
   } = transcript
-  const pendingAssistantStreams = reactive(new Map<string, PendingAssistantStream>())
+  const assistantStreams = createAssistantStreamRegistry({ sessionId })
+  const {
+    streaming,
+    streamingSessionId,
+    isSessionStreaming,
+    streamIdForEvent,
+    trackAssistantStream,
+    getAssistantStream,
+    resolveAssistantStream,
+    rejectAssistantStream,
+    forgetAssistantStream,
+    rejectSessionStreams,
+    rejectAllStreams,
+    recordCreatedSession,
+    createdSessionIdForStream,
+    forgetCreatedSession,
+    clearCreatedSessions,
+  } = assistantStreams
   // In-flight tool-approval responses, keyed by response stream id. Silent
   // entries belong to a session that is already streaming: their events are
   // swallowed instead of rendered as a new assistant turn. Entries normally
@@ -279,14 +281,6 @@ export const useChatStore = defineStore('chat', () => {
   const APPROVAL_RESPONSE_TTL_MS = 2 * 60 * 1000
   const approvalResponseStreams = new Map<string, { approvalId: string, silent: boolean, at: number }>()
   const forkingMessages = new Set<string>()
-  const pendingStreams = () => [...pendingAssistantStreams.values()].filter(stream => !stream.done)
-  const streamingSessionId = computed(() => {
-    const activeSid = (sessionId.value ?? '').trim()
-    const activeSessionIds = pendingStreams().map(stream => stream.sessionId)
-    if (activeSid && activeSessionIds.includes(activeSid)) return activeSid
-    return activeSessionIds[0] ?? null
-  })
-  const streaming = computed(() => isSessionStreaming(sessionId.value))
   // Sessions-list bookkeeping + fork-anchor tracking (see ./chat/session-list).
   const sessionList = createSessionList({ currentBotId, sessionId, messages })
   const {
@@ -364,7 +358,6 @@ export const useChatStore = defineStore('chat', () => {
   let activeWs: ChatWebSocket | null = null
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   let sessionListRefreshPromise: { botId: string; promise: Promise<void> } | null = null
-  const wsCreatedSessionsByStream = new Map<string, string>()
   // Two independent streams replace the deleted bot-wide messages SSE:
   // - sessionMessagesStream follows the active sessionId and feeds the
   //   transcript (server pushes a small backlog + live messages for that
@@ -547,97 +540,21 @@ export const useChatStore = defineStore('chat', () => {
 
 
 
-  function fallbackStreamId(targetSessionId?: string | null): string {
-    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
-    return sid ? `session:${sid}:agent-stream` : 'legacy-stream'
-  }
-
-  function activeStreamIdsForSession(targetSessionId?: string | null): string[] {
-    const sid = (targetSessionId ?? '').trim()
-    if (!sid) return []
-    return pendingStreams()
-      .filter(stream => stream.sessionId === sid)
-      .map(stream => stream.streamId)
-  }
-
-  function isSessionStreaming(targetSessionId?: string | null): boolean {
-    return activeStreamIdsForSession(targetSessionId).length > 0
-  }
-
-  function streamIdForEvent(event: StreamIdentity, targetSessionId?: string): string {
-    const explicit = (event.stream_id ?? '').trim()
-    if (explicit) return explicit
-    const sid = (event.session_id ?? targetSessionId ?? '').trim()
-    const activeIds = activeStreamIdsForSession(sid)
-    return activeIds.length === 1 ? activeIds[0]! : fallbackStreamId(sid)
-  }
-
-  function trackAssistantStream(streamId: string, assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string, composerScope = 'chat'): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      const id = streamId.trim()
-      if (!id) {
-        reject(new Error('stream_id is required'))
-        return
-      }
-      if (pendingAssistantStreams.has(id)) {
-        reject(new Error(`stream_id ${id} is already active`))
-        return
-      }
-      pendingAssistantStreams.set(id, {
-        streamId: id,
-        assistantTurn,
-        botId,
-        sessionId: targetSessionId.trim(),
-        composerScope: composerScope.trim() || 'chat',
-        done: false,
-        resolve,
-        reject,
-      })
-    })
-  }
-
-  function getAssistantStream(streamId: string): PendingAssistantStream | undefined {
-    return pendingAssistantStreams.get(streamId.trim())
-  }
-
-  function finishAssistantStream(streamId: string): PendingAssistantStream | undefined {
-    const stream = getAssistantStream(streamId)
-    if (!stream || stream.done) return undefined
-    stream.assistantTurn.streaming = false
-    stream.done = true
-    pendingAssistantStreams.delete(stream.streamId)
-    return stream
-  }
-
-  function resolveAssistantStream(streamId: string) {
-    finishAssistantStream(streamId)?.resolve()
-  }
-
-  function rejectAssistantStream(streamId: string, err: Error) {
-    finishAssistantStream(streamId)?.reject(err)
-  }
-
-  function forgetAssistantStream(streamId: string) {
-    pendingAssistantStreams.delete(streamId.trim())
-  }
-
   function refreshLoadingForSession(botId: string, targetSessionId: string) {
     if (!isActiveSessionTarget(botId, targetSessionId)) return
     loading.value = isSessionStreaming(targetSessionId)
   }
 
 
-  function ensureDiscussStream(streamId: string, targetSessionId?: string): PendingAssistantStream {
+  function ensureDiscussStream(streamId: string, targetSessionId?: string) {
     const id = streamIdForEvent({ stream_id: streamId, session_id: targetSessionId }, targetSessionId)
     const existing = getAssistantStream(id)
-    if (existing && !existing.done) {
-      return existing
-    }
+    if (existing) return existing
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
     const bid = (currentBotId.value ?? '').trim()
     const assistantTurn = createOptimisticAssistantTurn()
     appendTurnToSession(bid, sid, assistantTurn)
-    void trackAssistantStream(id, assistantTurn, bid, sid).catch((error: Error) => {
+    void trackAssistantStream({ streamId: id, assistantTurn, botId: bid, sessionId: sid }).catch((error: Error) => {
       finalizeStreamFailure(assistantTurn, bid, sid, error)
     })
     return getAssistantStream(id)!
@@ -649,9 +566,7 @@ export const useChatStore = defineStore('chat', () => {
     const pending = event.stream_id ? getAssistantStream(event.stream_id) : undefined
     const bid = (pending?.botId || sourceBotId || currentBotId.value || '').trim()
     if (!bid || !sid) return
-    const streamId = event.stream_id?.trim()
-    if (streamId) wsCreatedSessionsByStream.set(streamId, sid)
-    bindAssistantStreamSession(event.stream_id, sid)
+    recordCreatedSession(event.stream_id, sid)
     if ((currentBotId.value ?? '').trim() !== bid) return
     if (sessionId.value && sessionId.value !== sid) return
 
@@ -686,16 +601,6 @@ export const useChatStore = defineStore('chat', () => {
   function clearStartupSendFailure(id?: string) {
     if (!id || startupSendFailure.value?.id === id) {
       startupSendFailure.value = null
-    }
-  }
-
-  function bindAssistantStreamSession(streamId: string | undefined, targetSessionId: string) {
-    const id = streamId?.trim()
-    const sid = targetSessionId.trim()
-    if (!id || !sid) return
-    const stream = pendingAssistantStreams.get(id)
-    if (stream && !stream.sessionId) {
-      stream.sessionId = sid
     }
   }
 
@@ -869,9 +774,8 @@ export const useChatStore = defineStore('chat', () => {
     resetFsBeacon()
     clearPendingACPSession()
 
-    pendingAssistantStreams.clear()
+    clearCreatedSessions()
     approvalResponseStreams.clear()
-    wsCreatedSessionsByStream.clear()
     forkingMessages.clear()
     backgroundTasks.clearBackgroundTasks()
   }
@@ -1077,13 +981,11 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function abort() {
-    const activeIds = activeStreamIdsForSession(sessionId.value)
     const abortError = new Error('aborted')
     abortError.name = 'AbortError'
-    for (const streamId of activeIds) {
+    rejectSessionStreams(sessionId.value, abortError, (streamId) => {
       if (activeWs?.connected) activeWs.abort(streamId)
-      rejectAssistantStream(streamId, abortError)
-    }
+    })
     loading.value = isSessionStreaming(sessionId.value)
   }
 
@@ -1091,10 +993,9 @@ export const useChatStore = defineStore('chat', () => {
     const abortError = new Error('aborted')
     abortError.name = 'AbortError'
     approvalResponseStreams.clear()
-    for (const stream of pendingStreams()) {
-      if (activeWs?.connected) activeWs.abort(stream.streamId)
-      rejectAssistantStream(stream.streamId, abortError)
-    }
+    rejectAllStreams(abortError, (streamId) => {
+      if (activeWs?.connected) activeWs.abort(streamId)
+    })
     loading.value = false
   }
 
@@ -1919,7 +1820,13 @@ export const useChatStore = defineStore('chat', () => {
         if (!ws.connected) {
           throw new StreamFailureError('WebSocket is not connected', 'startup')
         }
-        const completion = trackAssistantStream(sendStreamId, assistantTurn, bid, sid, composerScope)
+        const completion = trackAssistantStream({
+          streamId: sendStreamId,
+          assistantTurn,
+          botId: bid,
+          sessionId: sid,
+          composerScope,
+        })
         ws.send({
           type: 'message',
           stream_id: sendStreamId,
@@ -1933,10 +1840,10 @@ export const useChatStore = defineStore('chat', () => {
           reasoning_effort: reasoningEffort,
         })
         await completion
-        const createdSessionId = wsCreatedSessionsByStream.get(sendStreamId) ?? ''
+        const createdSessionId = createdSessionIdForStream(sendStreamId)
         const fallbackActiveSessionId = (currentBotId.value ?? '').trim() === bid ? sessionId.value ?? '' : ''
         const refreshSessionId = sendSessionId || createdSessionId || fallbackActiveSessionId
-        wsCreatedSessionsByStream.delete(sendStreamId)
+        forgetCreatedSession(sendStreamId)
         if (refreshSessionId) await refreshCurrentSession(bid, refreshSessionId)
       } else {
         if (serverSkillActivation) throw new StreamFailureError('WebSocket is required for skill activation', 'startup')
@@ -1955,7 +1862,7 @@ export const useChatStore = defineStore('chat', () => {
       const stage: SendMessageStage = err instanceof StreamFailureError
         ? err.stage
         : (assistantTurn && hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
-      const createdSessionId = sendStreamId ? wsCreatedSessionsByStream.get(sendStreamId) ?? '' : ''
+      const createdSessionId = sendStreamId ? createdSessionIdForStream(sendStreamId) : ''
       const bid = sendBotId || currentBotId.value || ''
       const sid = sendSessionId || (deferSessionCreation ? '' : sessionId.value || '')
 
@@ -1968,7 +1875,7 @@ export const useChatStore = defineStore('chat', () => {
       }
 
       if (sendStreamId) forgetAssistantStream(sendStreamId)
-      if (sendStreamId) wsCreatedSessionsByStream.delete(sendStreamId)
+      if (sendStreamId) forgetCreatedSession(sendStreamId)
       loading.value = false
 
       if (!isAbort && stage === 'startup' && turnAppendStarted) {
@@ -2038,7 +1945,7 @@ export const useChatStore = defineStore('chat', () => {
       if (!ws?.connected) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
-      const completion = trackAssistantStream(streamId, assistantTurn, bid, sid)
+      const completion = trackAssistantStream({ streamId, assistantTurn, botId: bid, sessionId: sid })
       ws.send({
         type: 'retry_message',
         stream_id: streamId,
@@ -2091,7 +1998,7 @@ export const useChatStore = defineStore('chat', () => {
       if (!ws?.connected) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
-      const completion = trackAssistantStream(streamId, assistantTurn, bid, sid)
+      const completion = trackAssistantStream({ streamId, assistantTurn, botId: bid, sessionId: sid })
       ws.send({
         type: 'edit_message',
         stream_id: streamId,
@@ -2143,7 +2050,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!silent) {
       assistantTurn = createOptimisticAssistantTurn()
       appendToView(assistantTurn)
-      void trackAssistantStream(streamId, assistantTurn, bid, sid).catch((error: Error) => {
+      void trackAssistantStream({ streamId, assistantTurn, botId: bid, sessionId: sid }).catch((error: Error) => {
         finalizeStreamFailure(assistantTurn, bid, sid, error)
       })
       loading.value = true
@@ -2190,7 +2097,7 @@ export const useChatStore = defineStore('chat', () => {
     const previousUserInputStates = snapshotUserInputStates(userInput.user_input_id)
     const assistantTurn = createOptimisticAssistantTurn()
     appendToView(assistantTurn)
-    void trackAssistantStream(streamId, assistantTurn, bid, sid).catch((error: Error) => {
+    void trackAssistantStream({ streamId, assistantTurn, botId: bid, sessionId: sid }).catch((error: Error) => {
       finalizeStreamFailure(assistantTurn, bid, sid, error)
       // While the main session stream is still active a refresh would
       // clobber its in-flight state; roll back and let its end refresh

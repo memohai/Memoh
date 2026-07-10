@@ -2448,6 +2448,28 @@ describe('chat-list store', () => {
     expect(store.startupSendFailure).toBeNull()
   })
 
+  it('aborts the active session stream through the websocket and settles the send', async () => {
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sending = store.sendMessage('hello')
+    await flushPromises()
+    await flushPromises()
+
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
+    expect(store.streaming).toBe(true)
+    expect(assistant?.streaming).toBe(true)
+
+    store.abort()
+
+    await expect(sending).resolves.toMatchObject({ ok: false, stage: 'stream' })
+    expect(ws.abort).toHaveBeenCalledWith(lastStreamId)
+    expect(store.streaming).toBe(false)
+    expect(assistant?.streaming).toBe(false)
+  })
+
   it('keeps an ephemeral error visible when refresh returns only the persisted user turn', async () => {
     sendEvents = [
       { type: 'start' } as UIStreamEvent,
