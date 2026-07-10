@@ -4234,9 +4234,6 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  const chats = sessions
-  const chatId = sessionId
-
   return {
     messages,
     streaming,
@@ -4254,8 +4251,6 @@ export const useChatStore = defineStore('chat', () => {
     pendingACPRuntimeId,
     pendingACPRuntimeStatus,
     pendingACPRuntimeEnsuring,
-    chats,
-    chatId,
     sessionId,
     hasExplicitSessionSelection,
     currentBotId,
@@ -4275,7 +4270,6 @@ export const useChatStore = defineStore('chat', () => {
     // Exposed for tests only — do not branch on this in components. The
     // leading underscore reflects the test-only contract at the call site.
     _hasLoadedOlder: hasLoadedOlder,
-    initializing,
     overrideModelId,
     overrideReasoningEffort,
     startupSendFailure,
@@ -4283,8 +4277,6 @@ export const useChatStore = defineStore('chat', () => {
     commandEventForScope,
     showCommandError,
     fsChangedAt,
-    lastFsChange,
-    lastFsEvents,
     markFsChanged,
     affectsPath,
     fsEventForPath,
@@ -4292,7 +4284,6 @@ export const useChatStore = defineStore('chat', () => {
     refreshBots,
     selectBot,
     selectSession,
-    selectChat: selectSession,
     stageACPSession,
     stageDefaultACPSession,
     cacheDefaultACPSession,
@@ -4307,13 +4298,10 @@ export const useChatStore = defineStore('chat', () => {
     ensureACPRuntime,
     setACPRuntimeModel,
     createNewSession,
-    createNewChat: createNewSession,
     selectDraft,
     userSentInSession,
     deletedSession,
     removeSession,
-    removeChat: removeSession,
-    deleteChat: removeSession,
     renameSession,
     forkMessage,
     sendMessage,
@@ -4321,7 +4309,6 @@ export const useChatStore = defineStore('chat', () => {
     editLatestUser,
     respondToolApproval,
     respondUserInput,
-    resetUserScopedState,
     loadOlderMessages,
     findMessageIdByExternalId,
     locateMessageByExternalId,
