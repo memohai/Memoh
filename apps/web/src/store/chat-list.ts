@@ -4,7 +4,6 @@ import { toast } from '@felinic/ui'
 import enMessages from '@/i18n/locales/en.json'
 import zhMessages from '@/i18n/locales/zh.json'
 import jaMessages from '@/i18n/locales/ja.json'
-import { useRetryingStream } from '@/composables/useRetryingStream'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -30,6 +29,7 @@ import { createSessionList } from './chat/session-list'
 import { acpSessionMetadata, createACPStaging } from './chat/acp-staging'
 import { createTranscriptController } from './chat/transcript'
 import { createAssistantStreamRegistry } from './chat/assistant-streams'
+import { createChatRealtimeController } from './chat/realtime'
 import {
   createApprovalResponseTracker,
   type ApprovalResponse,
@@ -65,7 +65,6 @@ import {
   type SessionMessageStreamEvent,
   type ChatAttachment,
   type CommandEventResponse,
-  type ChatWebSocket,
   type UIToolApproval,
   type UIUserInput,
   type RequestedSkillSelection,
@@ -74,10 +73,6 @@ import {
   executeQuickAction,
   fetchBots,
   fetchMessagesUI,
-  sendLocalChannelMessage,
-  streamBotSessionsActivityEvents,
-  streamSessionMessageEvents,
-  connectWebSocket,
   locateMessageUI,
 } from '@/composables/api/useChat'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH } from '@/utils/acp'
@@ -330,6 +325,23 @@ export const useChatStore = defineStore('chat', () => {
   transcript.setRefreshAppliedHook((targetSessionId, latestTimestamp) => {
     touchSessionInList(targetSessionId, latestTimestamp)
   })
+  const realtime = createChatRealtimeController({
+    onWebSocketEvent: (botId, event) => handleWSStreamEvent(event, undefined, botId),
+    prepareSessionMessages,
+    onSessionMessageEvent: handleSessionMessageEvent,
+    onBotSessionsActivityEvent: handleBotSessionsActivityEvent,
+  })
+  const {
+    startWebSocket,
+    stopWebSocket,
+    ensureWebSocketConnected,
+    sendWebSocketMessage,
+    abortWebSocketStream,
+    startSessionMessagesStream,
+    stopSessionMessagesStream,
+    startBotSessionsActivityStream,
+    stopStreams,
+  } = realtime
   const loading = ref(false)
   // `loadingChats` covers the bot-level boot path (sessions list fetch), so
   // the sidebar can show its skeleton + suppress its empty-state placeholder
@@ -370,19 +382,8 @@ export const useChatStore = defineStore('chat', () => {
   const deletedSession = ref<{ id: string, botId: string, seq: number, composerScope?: string } | null>(null)
   let deletedSessionSeq = 0
 
-  let activeWs: ChatWebSocket | null = null
-  let webSocketGeneration = 0
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   let sessionListRefreshPromise: { botId: string; promise: Promise<void> } | null = null
-  // Two independent streams replace the deleted bot-wide messages SSE:
-  // - sessionMessagesStream follows the active sessionId and feeds the
-  //   transcript (server pushes a small backlog + live messages for that
-  //   session only, so no client-supplied cursor is needed).
-  // - botSessionsActivityStream is bot-wide and lightweight: identifiers
-  //   only, never message bodies, used to keep the sidebar live-sorted and
-  //   to notice sessions created from external channels.
-  const sessionMessagesStream = useRetryingStream()
-  const botSessionsActivityStream = useRetryingStream()
   const acpRuntimeStatuses = ref<Record<string, AcpagentRuntimeStatus | undefined>>({})
   const acpRuntimePending = ref<Record<string, boolean>>({})
   const acpRuntimeRequests = new Map<string, Promise<AcpagentRuntimeStatus>>()
@@ -448,7 +449,7 @@ export const useChatStore = defineStore('chat', () => {
         sessionId.value = null
         explicitSessionSelection.value = false
         draftIntent.value = true
-        sessionMessagesStream.stop()
+        stopSessionMessagesStream()
         clearHistoryView()
       }
     }
@@ -519,7 +520,7 @@ export const useChatStore = defineStore('chat', () => {
       selectSessionRequestId++
     },
     clearTranscriptForDraft: () => {
-      sessionMessagesStream.stop()
+      stopSessionMessagesStream()
       clearHistoryView()
     },
   })
@@ -631,7 +632,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function handleExpiredApprovalResponse(response: ApprovalResponse) {
-    if (activeWs?.connected) activeWs.abort(response.streamId)
+    abortWebSocketStream(response.streamId, response.botId)
     const stream = getAssistantStream(response.streamId)
     if (stream) {
       const turn = stream.assistantTurn
@@ -743,14 +744,6 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function stopWebSocket() {
-    webSocketGeneration += 1
-    if (activeWs) {
-      activeWs.close()
-      activeWs = null
-    }
-  }
-
   function resetUserScopedState(options: { clearSelection?: boolean } = {}) {
     stopStreams()
     abortAllAssistantStreams()
@@ -792,27 +785,6 @@ export const useChatStore = defineStore('chat', () => {
     forkingMessages.clear()
     backgroundTasks.clearBackgroundTasks()
   }
-
-  function startWebSocket(targetBotId: string) {
-    const bid = targetBotId.trim()
-    stopWebSocket()
-    if (!bid) return
-    const generation = webSocketGeneration
-    activeWs = connectWebSocket(bid, (event) => {
-      if (generation !== webSocketGeneration) return
-      handleWSStreamEvent(event, undefined, bid)
-    })
-  }
-
-  function ensureWebSocket(targetBotId: string): ChatWebSocket | null {
-    const bid = targetBotId.trim()
-    if (!bid) return null
-    if (!activeWs) {
-      startWebSocket(bid)
-    }
-    return activeWs
-  }
-
 
   function refreshSessionsList(targetBotId: string): Promise<void> {
     const bid = targetBotId.trim()
@@ -955,8 +927,7 @@ export const useChatStore = defineStore('chat', () => {
     void refreshSessionsList(targetBotId)
   }
 
-  function startSessionMessagesStream(targetBotId: string, targetSessionId: string) {
-    sessionMessagesStream.stop()
+  async function prepareSessionMessages(targetBotId: string, targetSessionId: string) {
     const bid = targetBotId.trim()
     const sid = targetSessionId.trim()
     if (!bid || !sid) return
@@ -965,41 +936,12 @@ export const useChatStore = defineStore('chat', () => {
     // placeholders (e.g. "system session has no records") while a fresh
     // transcript is on its way. The sidebar deliberately ignores it — only
     // `loadingChats` (sessions-list boot) makes the sidebar spin.
-    sessionMessagesStream.start(async (signal) => {
-      try {
-        await loadInitialMessages(bid, sid)
-        for (const stream of assistantStreamsForSession(bid, sid)) {
-          if (!messages.includes(stream.assistantTurn)) {
-            appendTurnToSession(bid, sid, stream.assistantTurn)
-          }
-        }
-      } catch (error) {
-        console.error('Failed to load session messages:', error)
+    await loadInitialMessages(bid, sid)
+    for (const stream of assistantStreamsForSession(bid, sid)) {
+      if (!messages.includes(stream.assistantTurn)) {
+        appendTurnToSession(bid, sid, stream.assistantTurn)
       }
-      await streamSessionMessageEvents(bid, sid, signal, (event) => {
-        handleSessionMessageEvent(bid, sid, event)
-      })
-    })
-  }
-
-  function startBotSessionsActivityStream(targetBotId: string) {
-    botSessionsActivityStream.stop()
-    const bid = targetBotId.trim()
-    if (!bid) return
-
-    botSessionsActivityStream.start(async (signal) => {
-      await streamBotSessionsActivityEvents(bid, signal, (event) => {
-        handleBotSessionsActivityEvent(bid, event)
-      })
-    })
-  }
-
-  // Closes both SSE subscriptions. The per-session stream restarts on the
-  // next `sessionId` change; the bot-wide stream restarts on the next
-  // `initialize()` after a bot or session-token change.
-  function stopStreams() {
-    sessionMessagesStream.stop()
-    botSessionsActivityStream.stop()
+    }
   }
 
   function abort() {
@@ -1010,7 +952,9 @@ export const useChatStore = defineStore('chat', () => {
       'failed',
     )
     rejectSessionStreams(sessionId.value, abortError, (streamId) => {
-      if (!approvalStreamIds.has(streamId) && activeWs?.connected) activeWs.abort(streamId)
+      if (!approvalStreamIds.has(streamId)) {
+        abortWebSocketStream(streamId, getAssistantStream(streamId)?.botId)
+      }
     })
     loading.value = isSessionStreaming(sessionId.value)
   }
@@ -1019,7 +963,7 @@ export const useChatStore = defineStore('chat', () => {
     const streamIds = new Set<string>()
     for (const response of responses) {
       streamIds.add(response.streamId)
-      if (activeWs?.connected) activeWs.abort(response.streamId)
+      abortWebSocketStream(response.streamId, response.botId)
       settleApprovalResponse(response.streamId, outcome)
     }
     return streamIds
@@ -1030,7 +974,9 @@ export const useChatStore = defineStore('chat', () => {
     abortError.name = 'AbortError'
     const approvalStreamIds = abortApprovalResponses(pendingApprovalResponses(), 'canceled')
     rejectAllStreams(abortError, (streamId) => {
-      if (!approvalStreamIds.has(streamId) && activeWs?.connected) activeWs.abort(streamId)
+      if (!approvalStreamIds.has(streamId)) {
+        abortWebSocketStream(streamId, getAssistantStream(streamId)?.botId)
+      }
     })
     loading.value = false
   }
@@ -1544,7 +1490,7 @@ export const useChatStore = defineStore('chat', () => {
   // already gated on `sessionId.value === <stream's sessionId>`, so the
   // orphan does not bleed into B's view).
   function switchActiveSession(sid: string) {
-    sessionMessagesStream.stop()
+    stopSessionMessagesStream()
     clearHistoryView()
     const bid = (currentBotId.value ?? '').trim()
     if (!bid || !sid) return
@@ -1703,7 +1649,7 @@ export const useChatStore = defineStore('chat', () => {
       sessionId.value = null
       explicitSessionSelection.value = false
       draftIntent.value = false
-      sessionMessagesStream.stop()
+      stopSessionMessagesStream()
       clearHistoryView()
       return
     }
@@ -1759,7 +1705,7 @@ export const useChatStore = defineStore('chat', () => {
 
       selectSessionRequestId++
       clearPendingACPSession()
-      sessionMessagesStream.stop()
+      stopSessionMessagesStream()
       sessionId.value = forked.id
       explicitSessionSelection.value = true
       draftIntent.value = false
@@ -1851,41 +1797,34 @@ export const useChatStore = defineStore('chat', () => {
       const effort = overrideReasoningEffort.value
       const reasoningEffort = effort || undefined
 
-      const ws = ensureWebSocket(bid)
-      if (ws) {
-        if (!ws.connected) {
-          throw new StreamFailureError('WebSocket is not connected', 'startup')
-        }
-        const completion = trackAssistantStream({
-          streamId: sendStreamId,
-          assistantTurn,
-          botId: bid,
-          sessionId: sid,
-          composerScope,
-        })
-        ws.send({
-          type: 'message',
-          stream_id: sendStreamId,
-          invocation_id: sendStreamId,
-          composer_scope: composerScope,
-          text: trimmed,
-          session_id: sid || undefined,
-          attachments,
-          requested_skills: requestedSkills.length ? requestedSkillRequestsForWire(requestedSkills) : undefined,
-          model_id: modelId,
-          reasoning_effort: reasoningEffort,
-        })
-        await completion
-        const createdSessionId = createdSessionIdForStream(sendStreamId)
-        const fallbackActiveSessionId = (currentBotId.value ?? '').trim() === bid ? sessionId.value ?? '' : ''
-        const refreshSessionId = sendSessionId || createdSessionId || fallbackActiveSessionId
-        forgetCreatedSession(sendStreamId)
-        if (refreshSessionId) await refreshCurrentSession(bid, refreshSessionId)
-      } else {
-        if (serverSkillActivation) throw new StreamFailureError('WebSocket is required for skill activation', 'startup')
-        await sendLocalChannelMessage(bid, trimmed, attachments, { modelId, reasoningEffort })
-        await refreshCurrentSession(bid, sid)
+      if (!ensureWebSocketConnected(bid)) {
+        throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
+      const completion = trackAssistantStream({
+        streamId: sendStreamId,
+        assistantTurn,
+        botId: bid,
+        sessionId: sid,
+        composerScope,
+      })
+      if (!sendWebSocketMessage(bid, {
+        type: 'message',
+        stream_id: sendStreamId,
+        invocation_id: sendStreamId,
+        composer_scope: composerScope,
+        text: trimmed,
+        session_id: sid || undefined,
+        attachments,
+        requested_skills: requestedSkills.length ? requestedSkillRequestsForWire(requestedSkills) : undefined,
+        model_id: modelId,
+        reasoning_effort: reasoningEffort,
+      })) throw new StreamFailureError('WebSocket is not connected', 'startup')
+      await completion
+      const createdSessionId = createdSessionIdForStream(sendStreamId)
+      const fallbackActiveSessionId = (currentBotId.value ?? '').trim() === bid ? sessionId.value ?? '' : ''
+      const refreshSessionId = sendSessionId || createdSessionId || fallbackActiveSessionId
+      forgetCreatedSession(sendStreamId)
+      if (refreshSessionId) await refreshCurrentSession(bid, refreshSessionId)
 
       loading.value = false
       return { ok: true }
@@ -1976,19 +1915,18 @@ export const useChatStore = defineStore('chat', () => {
     const replacedTurns = replaceTailFromTurn(target, [assistantTurn])
     loading.value = true
     try {
-      const ws = ensureWebSocket(bid)
-      if (!ws?.connected) {
+      if (!ensureWebSocketConnected(bid)) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
       const completion = trackAssistantStream({ streamId, assistantTurn, botId: bid, sessionId: sid })
-      ws.send({
+      if (!sendWebSocketMessage(bid, {
         type: 'retry_message',
         stream_id: streamId,
         session_id: sid,
         message_id: targetID,
         model_id: overrideModelId.value || undefined,
         reasoning_effort: overrideReasoningEffort.value || undefined,
-      })
+      })) throw new StreamFailureError('WebSocket is not connected', 'startup')
       await completion
       await refreshCurrentSession(bid, sid)
       refreshLoadingForSession(bid, sid)
@@ -2029,12 +1967,11 @@ export const useChatStore = defineStore('chat', () => {
     const replacedTurns = replaceTailFromTurn(target, [userTurn, assistantTurn])
     loading.value = true
     try {
-      const ws = ensureWebSocket(bid)
-      if (!ws?.connected) {
+      if (!ensureWebSocketConnected(bid)) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
       const completion = trackAssistantStream({ streamId, assistantTurn, botId: bid, sessionId: sid })
-      ws.send({
+      if (!sendWebSocketMessage(bid, {
         type: 'edit_message',
         stream_id: streamId,
         session_id: sid,
@@ -2042,7 +1979,7 @@ export const useChatStore = defineStore('chat', () => {
         text: trimmed,
         model_id: overrideModelId.value || undefined,
         reasoning_effort: overrideReasoningEffort.value || undefined,
-      })
+      })) throw new StreamFailureError('WebSocket is not connected', 'startup')
       await completion
       await refreshCurrentSession(bid, sid)
       refreshLoadingForSession(bid, sid)
@@ -2072,8 +2009,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!bid || !sid || !approvalId) return false
     if (approval.status !== 'pending' || approval.can_approve === false) return false
     if (hasPendingApprovalResponse(approvalId)) return false
-    const ws = ensureWebSocket(bid)
-    if (!ws?.connected) {
+    if (!ensureWebSocketConnected(bid)) {
       toast.error(userInputConnectionLostMessage())
       return false
     }
@@ -2094,14 +2030,14 @@ export const useChatStore = defineStore('chat', () => {
     // server snapshot arrives so the buttons disappear immediately.
     markToolApprovalDecision(approvalId, decision === 'approve' ? 'approved' : 'rejected')
     try {
-      ws.send({
+      if (!sendWebSocketMessage(bid, {
         type: 'tool_approval_response',
         stream_id: streamId,
         session_id: sid,
         approval_id: approvalId,
         short_id: approval.short_id,
         decision,
-      })
+      })) throw new Error('WebSocket is not connected')
     } catch (error) {
       restoreToolApprovalStates(previousApprovalStates)
       settleApprovalResponse(streamId, 'canceled')
@@ -2123,8 +2059,7 @@ export const useChatStore = defineStore('chat', () => {
     const bid = currentBotId.value ?? ''
     const sid = sessionId.value ?? ''
     if (!bid || !sid || !userInput.user_input_id) return
-    const ws = ensureWebSocket(bid)
-    if (!ws?.connected) {
+    if (!ensureWebSocketConnected(bid)) {
       toast.error(userInputConnectionLostMessage())
       return
     }
@@ -2155,7 +2090,7 @@ export const useChatStore = defineStore('chat', () => {
     markUserInputDecision(userInput.user_input_id, status)
 
     try {
-      ws.send({
+      if (!sendWebSocketMessage(bid, {
         type: 'user_input_response',
         stream_id: streamId,
         session_id: sid,
@@ -2164,7 +2099,7 @@ export const useChatStore = defineStore('chat', () => {
         answers: payload.answers,
         canceled: payload.canceled === true,
         reason: payload.reason,
-      })
+      })) throw new Error('WebSocket is not connected')
     } catch (error) {
       restoreUserInputStates(previousUserInputStates)
       discardAssistantStream(streamId)
