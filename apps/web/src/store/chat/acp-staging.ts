@@ -6,6 +6,7 @@ import {
   setACPRuntimeModelByID as requestSetACPRuntimeModelByID,
 } from '@/composables/api/useChat'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH } from '@/utils/acp'
+import type { ACPRuntimeStatusRegistry } from './acp-runtime-registry'
 import type { ACPAgentSessionInput } from './types'
 
 // Pending-ACP session staging — the state machine behind the "draft composer
@@ -43,12 +44,9 @@ export interface ACPStagingDeps {
   sessionId: Ref<string | null>
   draftIntent: Ref<boolean>
   explicitSessionSelection: Ref<boolean>
-  // Session-keyed runtime-status registry (stays in the chat store: WS
-  // handlers write it for real sessions too, not just staged runtimes).
-  acpRuntimeStatuses: Ref<Record<string, AcpagentRuntimeStatus | undefined>>
-  acpRuntimeKey: (botId: string, targetSessionId: string) => string
-  setACPRuntimeStatus: (botId: string, targetSessionId: string, runtime: AcpagentRuntimeStatus | undefined) => void
-  clearACPRuntimeStatus: (botId: string, targetSessionId: string) => void
+  // Shared by staged runtimes and real session runtimes, but owned by one
+  // registry so neither flow can mutate its lookup containers directly.
+  runtimeRegistry: ACPRuntimeStatusRegistry
   // Invalidates any in-flight selectSession/hydration work in the store.
   bumpSelectSessionRequest: () => void
   // Stops the per-session SSE stream and empties the transcript, resetting
@@ -62,13 +60,16 @@ export function createACPStaging(deps: ACPStagingDeps) {
     sessionId,
     draftIntent,
     explicitSessionSelection,
+    runtimeRegistry,
+    bumpSelectSessionRequest,
+    clearTranscriptForDraft,
+  } = deps
+  const {
     acpRuntimeStatuses,
     acpRuntimeKey,
     setACPRuntimeStatus,
     clearACPRuntimeStatus,
-    bumpSelectSessionRequest,
-    clearTranscriptForDraft,
-  } = deps
+  } = runtimeRegistry
 
   const pendingACPSessionInput = ref<ACPAgentSessionInput | null>(null)
   const defaultACPInputsByBot = new Map<string, ACPAgentSessionInput | null>()

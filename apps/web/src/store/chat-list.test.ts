@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { BotSessionActivityEvent, SessionMessageStreamEvent, UIStreamEvent, UIStreamEventHandler, UIToolApproval, UIUserInput } from '@/composables/api/useChat'
 import { REASONING_EFFORT_DISABLE } from '@/pages/bots/components/reasoning-effort'
+import { AUTH_SESSION_CLEARED_EVENT } from '@/lib/auth-session'
 import { useChatSelectionStore } from './chat-selection'
 import { useChatStore } from './chat-list'
 
@@ -249,6 +250,10 @@ describe('chat-list store', () => {
         onClose: null,
       }
     })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('selects the first ready bot during initialization when none is selected', async () => {
@@ -2548,6 +2553,27 @@ describe('chat-list store', () => {
 
     expect(api.ensureACPRuntime).toHaveBeenCalledTimes(1)
     expect(store.acpRuntimeStatuses[store.acpRuntimeKey('bot-1', 'acp-session-1')]?.models?.available_models).toHaveLength(1)
+  })
+
+  it('clears ACP runtime state with the authenticated user scope', async () => {
+    const windowTarget = new EventTarget()
+    vi.stubGlobal('window', windowTarget)
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'acp-session-1', bot_id: 'bot-1', title: '', type: 'acp_agent' },
+    ], nextCursor: null })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await store.ensureACPRuntime('acp-session-1')
+    const key = store.acpRuntimeKey('bot-1', 'acp-session-1')
+    expect(store.acpRuntimeStatuses[key]).toBeDefined()
+
+    windowTarget.dispatchEvent(new CustomEvent(AUTH_SESSION_CLEARED_EVENT, {
+      detail: { reason: 'logout' },
+    }))
+
+    expect(store.acpRuntimeStatuses).toEqual({})
+    expect(store.acpRuntimePending).toEqual({})
   })
 
   it('refreshes the session list when message events arrive for an unknown session', async () => {

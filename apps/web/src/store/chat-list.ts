@@ -30,6 +30,7 @@ import { acpSessionMetadata, createACPStaging } from './chat/acp-staging'
 import { createTranscriptController } from './chat/transcript'
 import { createAssistantStreamRegistry } from './chat/assistant-streams'
 import { createChatRealtimeController } from './chat/realtime'
+import { createACPRuntimeRegistry } from './chat/acp-runtime-registry'
 import {
   createApprovalResponseTracker,
   type ApprovalResponse,
@@ -52,8 +53,6 @@ import type {
 import {
   createSession,
   deleteSession as requestDeleteSession,
-  ensureACPRuntime as requestEnsureACPRuntime,
-  setACPRuntimeModel as requestSetACPRuntimeModel,
   updateSessionAgent as requestUpdateSessionAgent,
   updateSessionTitle as requestUpdateSessionTitle,
   forkSessionFromMessage as requestForkSessionFromMessage,
@@ -192,6 +191,16 @@ class CommandStreamError extends StreamFailureError {
 export const useChatStore = defineStore('chat', () => {
   const selectionStore = useChatSelectionStore()
   const { currentBotId, sessionId, draftIntent, explicitSelection: explicitSessionSelection } = storeToRefs(selectionStore)
+  const acpRuntimeRegistry = createACPRuntimeRegistry({ currentBotId, sessionId })
+  const {
+    acpRuntimeStatuses,
+    acpRuntimePending,
+    acpRuntimeKey,
+    clearACPRuntimeStatus,
+    ensureACPRuntime,
+    setACPRuntimeModel,
+    resetACPRuntimeRegistry,
+  } = acpRuntimeRegistry
 
   const fsBeacon = createFsChangeBeacon({ currentBotId, sessionId })
   const {
@@ -384,9 +393,6 @@ export const useChatStore = defineStore('chat', () => {
 
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   let sessionListRefreshPromise: { botId: string; promise: Promise<void> } | null = null
-  const acpRuntimeStatuses = ref<Record<string, AcpagentRuntimeStatus | undefined>>({})
-  const acpRuntimePending = ref<Record<string, boolean>>({})
-  const acpRuntimeRequests = new Map<string, Promise<AcpagentRuntimeStatus>>()
   let selectSessionRequestId = 0
 
   const hasExplicitSessionSelection = computed(() => explicitSessionSelection.value)
@@ -465,45 +471,6 @@ export const useChatStore = defineStore('chat', () => {
 
 
 
-  function acpRuntimeKey(botId: string, targetSessionId: string) {
-    const bid = botId.trim()
-    const sid = targetSessionId.trim()
-    return bid && sid ? `${bid}:${sid}` : ''
-  }
-
-  function setACPRuntimeStatus(botId: string, targetSessionId: string, runtime: AcpagentRuntimeStatus | undefined) {
-    const key = acpRuntimeKey(botId, targetSessionId)
-    if (!key) return
-    if (!runtime) {
-      const next = { ...acpRuntimeStatuses.value }
-      delete next[key]
-      acpRuntimeStatuses.value = next
-      return
-    }
-    acpRuntimeStatuses.value = {
-      ...acpRuntimeStatuses.value,
-      [key]: runtime,
-    }
-  }
-
-  function setACPRuntimePending(botId: string, targetSessionId: string, pending: boolean) {
-    const key = acpRuntimeKey(botId, targetSessionId)
-    if (!key) return
-    const next = { ...acpRuntimePending.value }
-    if (pending) {
-      next[key] = true
-    } else {
-      delete next[key]
-    }
-    acpRuntimePending.value = next
-  }
-
-  function clearACPRuntimeStatus(botId: string, targetSessionId: string) {
-    setACPRuntimeStatus(botId, targetSessionId, undefined)
-    setACPRuntimePending(botId, targetSessionId, false)
-    acpRuntimeRequests.delete(acpRuntimeKey(botId, targetSessionId))
-  }
-
   // Pending-ACP session staging (see ./chat/acp-staging for the generation /
   // identity-key model). Transcript and select-session invalidation are
   // injected so the staging machine never touches store internals directly.
@@ -512,10 +479,7 @@ export const useChatStore = defineStore('chat', () => {
     sessionId,
     draftIntent,
     explicitSessionSelection,
-    acpRuntimeStatuses,
-    acpRuntimeKey,
-    setACPRuntimeStatus,
-    clearACPRuntimeStatus,
+    runtimeRegistry: acpRuntimeRegistry,
     bumpSelectSessionRequest: () => {
       selectSessionRequestId++
     },
@@ -778,6 +742,7 @@ export const useChatStore = defineStore('chat', () => {
     startupSendFailure.value = null
     resetCommandEvents()
     resetFsBeacon()
+    resetACPRuntimeRegistry()
     clearPendingACPSession()
 
     clearStreamHistory()
@@ -1166,42 +1131,6 @@ export const useChatStore = defineStore('chat', () => {
     draftIntent.value = false
     clearACPRuntimeStatus(bid, sid)
     return updated
-  }
-
-  async function ensureACPRuntime(sessionID?: string): Promise<AcpagentRuntimeStatus> {
-    const bid = currentBotId.value ?? ''
-    const sid = sessionID?.trim() || sessionId.value || ''
-    if (!bid || !sid) throw new Error('ACP session is not selected')
-    const key = acpRuntimeKey(bid, sid)
-    const existing = acpRuntimeRequests.get(key)
-    if (existing) return existing
-
-    setACPRuntimePending(bid, sid, true)
-    const request = requestEnsureACPRuntime(bid, sid)
-      .then((runtime) => {
-        if (acpRuntimeRequests.get(key) === request) {
-          setACPRuntimeStatus(bid, sid, runtime)
-        }
-        return runtime
-      })
-      .finally(() => {
-        if (acpRuntimeRequests.get(key) === request) {
-          acpRuntimeRequests.delete(key)
-          setACPRuntimePending(bid, sid, false)
-        }
-      })
-    acpRuntimeRequests.set(key, request)
-    return request
-  }
-
-  async function setACPRuntimeModel(modelID: string, sessionID?: string): Promise<AcpagentRuntimeStatus> {
-    const bid = currentBotId.value ?? ''
-    const sid = sessionID?.trim() || sessionId.value || ''
-    const mid = modelID.trim()
-    if (!bid || !sid || !mid) throw new Error('ACP model is not selected')
-    const runtime = await requestSetACPRuntimeModel(bid, sid, mid)
-    setACPRuntimeStatus(bid, sid, runtime)
-    return runtime
   }
 
   async function ensureActiveSession(firstPrompt?: string) {
