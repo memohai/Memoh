@@ -258,6 +258,7 @@ export const useChatStore = defineStore('chat', () => {
     finalizeStreamFailure,
     latestOptimisticUserText,
     markToolApprovalDecision,
+    markUserInputDecision,
     resetUserScope: resetTranscriptUserScope,
   } = transcript
   const assistantStreams = createAssistantStreamRegistry({ currentBotId, sessionId, finishAssistantTurn })
@@ -2137,18 +2138,7 @@ export const useChatStore = defineStore('chat', () => {
     loading.value = true
 
     const status = payload.canceled ? 'canceled' : 'submitted'
-    for (const message of messages) {
-      if (message.role !== 'assistant') continue
-      for (const block of message.messages) {
-        if (block.type === 'tool' && block.userInput?.user_input_id === userInput.user_input_id) {
-          block.userInput = {
-            ...block.userInput,
-            status,
-            can_respond: false,
-          }
-        }
-      }
-    }
+    markUserInputDecision(userInput.user_input_id, status)
 
     try {
       ws.send({

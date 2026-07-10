@@ -683,18 +683,24 @@ export function createTranscriptController({
     turn.streaming = false
   }
 
+  function forEachToolBlock(visitor: (block: ToolCallBlock) => void) {
+    for (const message of messages) {
+      if (message.role !== 'assistant') continue
+      for (const block of message.messages) {
+        if (block.type === 'tool') visitor(block)
+      }
+    }
+  }
+
   function snapshotToolApprovalStates(approvalId: string): ToolApprovalStateSnapshot[] {
     const id = approvalId.trim()
     if (!id) return []
     const snapshots: ToolApprovalStateSnapshot[] = []
-    for (const message of messages) {
-      if (message.role !== 'assistant') continue
-      for (const block of message.messages) {
-        if (block.type === 'tool' && block.approval?.approval_id === id) {
-          snapshots.push({ block, approval: cloneToolApprovalState(block.approval) })
-        }
+    forEachToolBlock((block) => {
+      if (block.approval?.approval_id === id) {
+        snapshots.push({ block, approval: cloneToolApprovalState(block.approval) })
       }
-    }
+    })
     return snapshots
   }
 
@@ -709,14 +715,11 @@ export function createTranscriptController({
     const id = userInputId.trim()
     if (!id) return []
     const snapshots: UserInputStateSnapshot[] = []
-    for (const message of messages) {
-      if (message.role !== 'assistant') continue
-      for (const block of message.messages) {
-        if (block.type === 'tool' && block.userInput?.user_input_id === id) {
-          snapshots.push({ block, userInput: cloneUserInputState(block.userInput) })
-        }
+    forEachToolBlock((block) => {
+      if (block.userInput?.user_input_id === id) {
+        snapshots.push({ block, userInput: cloneUserInputState(block.userInput) })
       }
-    }
+    })
     return snapshots
   }
 
@@ -771,13 +774,21 @@ export function createTranscriptController({
   function markToolApprovalDecision(approvalId: string, status: 'approved' | 'rejected' | 'pending') {
     const id = approvalId.trim()
     if (!id) return
-    for (const message of messages) {
-      if (message.role !== 'assistant') continue
-      for (const block of message.messages) {
-        if (block.type !== 'tool' || block.approval?.approval_id !== id) continue
+    forEachToolBlock((block) => {
+      if (block.approval?.approval_id === id) {
         block.approval = { ...block.approval, status, can_approve: status === 'pending' }
       }
-    }
+    })
+  }
+
+  function markUserInputDecision(userInputId: string, status: 'submitted' | 'canceled') {
+    const id = userInputId.trim()
+    if (!id) return
+    forEachToolBlock((block) => {
+      if (block.userInput?.user_input_id === id) {
+        block.userInput = { ...block.userInput, status, can_respond: false }
+      }
+    })
   }
 
   function resetUserScope() {
@@ -828,6 +839,7 @@ export function createTranscriptController({
     finalizeStreamFailure,
     latestOptimisticUserText,
     markToolApprovalDecision,
+    markUserInputDecision,
     resetUserScope,
   }
 }

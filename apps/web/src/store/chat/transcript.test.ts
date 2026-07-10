@@ -153,7 +153,8 @@ describe('chat transcript controller', () => {
     transcript.replaceMessages([rawAssistant('assistant-1', [message])], 'session-1')
     const block = (transcript.messages[0] as ChatAssistantTurn).messages[0] as ToolCallBlock
     const snapshots = transcript.snapshotUserInputStates('input-1')
-    block.userInput = { ...block.userInput!, status: 'submitted', can_respond: false }
+    transcript.markUserInputDecision('input-1', 'submitted')
+    expect(block.userInput).toMatchObject({ status: 'submitted', can_respond: false })
 
     transcript.restoreUserInputStates(snapshots)
 
