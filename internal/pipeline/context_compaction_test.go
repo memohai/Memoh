@@ -82,6 +82,30 @@ func TestComposeContextWithArtifactsKeepsPostCompactionMutation(t *testing.T) {
 	})
 }
 
+func TestComposeContextWithArtifactsUsesDurableAnchorInsteadOfCurrentReplayTime(t *testing.T) {
+	t.Parallel()
+
+	rc := RenderedContext{
+		renderedText("covered", 100, "covered source replayed early"),
+		renderedText("between", 150, "persisted before artifact anchor"),
+	}
+	artifacts := []CompactionArtifact{{
+		ID:            "artifact-a",
+		Summary:       "durably anchored summary",
+		AnchorStartMs: 200,
+		Sources:       []CompactionSource{{ExternalMessageID: "covered", CreatedAtMs: 250}},
+	}}
+
+	composed := ComposeContextWithArtifacts(rc, nil, artifacts)
+	if composed == nil {
+		t.Fatal("expected composed context")
+	}
+	assertContextContents(t, composed.Messages, []string{
+		messageXML("between", "persisted before artifact anchor"),
+		"<summary>\ndurably anchored summary\n</summary>",
+	})
+}
+
 func TestComposeContextWithArtifactsKeepsRenderedMessageWithoutDurableCutoff(t *testing.T) {
 	t.Parallel()
 

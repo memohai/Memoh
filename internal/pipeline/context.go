@@ -203,7 +203,7 @@ func ComposeContextWithArtifacts(rc RenderedContext, trs []TurnResponseEntry, ar
 		}
 		entries = append(entries, mergeEntry{
 			kind:              "summary",
-			time:              artifactSummaryAnchor(artifact, rc, trs),
+			time:              artifactSummaryAnchor(artifact),
 			step:              i,
 			summaryContent:    "<summary>\n" + strings.TrimSpace(artifact.Summary) + "\n</summary>",
 			summaryArtifactID: artifact.ID,
@@ -289,38 +289,11 @@ func (artifact CompactionArtifact) usable() bool {
 	return strings.TrimSpace(artifact.ID) != "" && strings.TrimSpace(artifact.Summary) != ""
 }
 
-func artifactSummaryAnchor(artifact CompactionArtifact, rc RenderedContext, trs []TurnResponseEntry) int64 {
-	anchor := artifact.AnchorStartMs
-	update := func(candidate int64) {
-		if candidate <= 0 {
-			return
-		}
-		if anchor <= 0 || candidate < anchor {
-			anchor = candidate
-		}
-	}
-	for _, source := range artifact.Sources {
-		externalID := strings.TrimSpace(source.ExternalMessageID)
-		if externalID != "" && source.CreatedAtMs > 0 {
-			for _, segment := range rc {
-				if strings.TrimSpace(segment.MessageID) == externalID && segment.ReceivedAtMs <= source.CreatedAtMs {
-					update(segment.ReceivedAtMs)
-				}
-			}
-		}
-		historyID := strings.TrimSpace(source.HistoryMessageID)
-		if historyID != "" {
-			for _, tr := range trs {
-				if strings.TrimSpace(tr.SourceMessageID) == historyID {
-					update(tr.RequestedAtMs)
-				}
-			}
-		}
-	}
-	if anchor <= 0 {
+func artifactSummaryAnchor(artifact CompactionArtifact) int64 {
+	if artifact.AnchorStartMs <= 0 {
 		return earliestMergeTime
 	}
-	return anchor
+	return artifact.AnchorStartMs
 }
 
 func (seg RenderedSegment) eventAtMs() int64 {
