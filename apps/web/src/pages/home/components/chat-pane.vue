@@ -60,53 +60,67 @@
                 </p>
               </div>
 
-              <template
-                v-for="(msg, index) in messages"
-                :key="msg.id"
+              <!-- One persistent container per turn, keyed by the turn's
+                   opening message id — a send APPENDS a container; previous
+                   turns' DOM is never re-parented (see messageTurns for why
+                   that is load-bearing). The send pin reserves viewport space
+                   by setting an inline min-height on the LAST turn's container
+                   (see useChatScroll's Pin section). -->
+              <div
+                v-for="(turn, turnIndex) in messageTurns"
+                :key="turn.id"
+                :ref="turnIndex === messageTurns.length - 1 ? setLastTurnEl : undefined"
+                :style="turnReserveStyle(turn.id)"
+                class="space-y-6"
               >
-                <ForkSourceDivider
-                  v-if="showForkSourceDividerBefore(index)"
-                  :title="forkSourceTitle"
-                  :disabled="openingForkSource"
-                  @open-source="handleForkSourceClick"
-                />
-
-                <div
-                  :data-message-id="msg.id"
-                  :data-external-message-id="(msg.role === 'user' || msg.role === 'assistant') ? msg.externalMessageId : undefined"
-                  class="transition-[background-color] duration-500 scroll-mt-2 px-2 -mx-2"
-                  :class="highlightedMessageId === msg.id ? 'bg-muted/45' : ''"
-                  :data-anchor="msg.id"
+                <template
+                  v-for="(msg, msgIndex) in turn.messages"
+                  :key="msg.id"
                 >
-                  <MessageItem
-                    :message="msg"
-                    :session-type="activeSession?.type"
-                    :bot-id="currentBotId"
-                    :channel-thread="isChannelThread"
-                    :channel-platform="channelPlatform"
-                    :bot-name="currentBot?.name"
-                    :bot-avatar-url="currentBot?.avatar_url"
-                    :on-open-media="galleryOpenBySrc"
-                    :on-reply-click="handleReplyJump"
-                    :on-retry-message="handleRetryMessage"
-                    :can-retry-latest-assistant="latestRetryableAssistantId === ((msg.serverId ?? msg.id).trim())"
-                    :can-edit-latest-user="latestEditableUserId === ((msg.serverId ?? msg.id).trim())"
-                    :can-fork-assistant="canForkAssistant"
-                    :is-scrolling="isScrolling"
-                    :is-last-message="index === messages.length - 1"
-                    @active="isActiveEl"
-                    @edit-message="handleEditMessage"
-                    @fork-message="handleForkMessage"
+                  <ForkSourceDivider
+                    v-if="showForkSourceDividerBefore(turn.start + msgIndex)"
+                    :title="forkSourceTitle"
+                    :disabled="openingForkSource"
+                    @open-source="handleForkSourceClick"
                   />
-                </div>
 
-                <ForkSourceDivider
-                  v-if="showForkSourceDividerAfter(msg, index)"
-                  :title="forkSourceTitle"
-                  :disabled="openingForkSource"
-                  @open-source="handleForkSourceClick"
-                />
-              </template>
+                  <div
+                    :data-message-id="msg.id"
+                    :data-external-message-id="(msg.role === 'user' || msg.role === 'assistant') ? msg.externalMessageId : undefined"
+                    class="transition-[background-color] duration-500 scroll-mt-2 px-2 -mx-2"
+                    :class="highlightedMessageId === msg.id ? 'bg-muted/45' : ''"
+                    :data-anchor="msg.id"
+                  >
+                    <MessageItem
+                      :message="msg"
+                      :session-type="activeSession?.type"
+                      :bot-id="currentBotId"
+                      :channel-thread="isChannelThread"
+                      :channel-platform="channelPlatform"
+                      :bot-name="currentBot?.name"
+                      :bot-avatar-url="currentBot?.avatar_url"
+                      :on-open-media="galleryOpenBySrc"
+                      :on-reply-click="handleReplyJump"
+                      :on-retry-message="handleRetryMessage"
+                      :can-retry-latest-assistant="latestRetryableAssistantId === ((msg.serverId ?? msg.id).trim())"
+                      :can-edit-latest-user="latestEditableUserId === ((msg.serverId ?? msg.id).trim())"
+                      :can-fork-assistant="canForkAssistant"
+                      :is-scrolling="isScrolling"
+                      :is-last-message="msg.id === lastMessageId"
+                      @active="onMessageActive"
+                      @edit-message="handleEditMessage"
+                      @fork-message="handleForkMessage"
+                    />
+                  </div>
+
+                  <ForkSourceDivider
+                    v-if="showForkSourceDividerAfter(msg, turn.start + msgIndex)"
+                    :title="forkSourceTitle"
+                    :disabled="openingForkSource"
+                    @open-source="handleForkSourceClick"
+                  />
+                </template>
+              </div>
             </div>
           </ScrollArea>
 
@@ -970,7 +984,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, onMounted, useTemplateRef, watchEffect, watch, nextTick, onActivated, onDeactivated } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted, useTemplateRef, watch, nextTick, onActivated, onDeactivated } from 'vue'
 import {
   Paperclip,
   Plus,
@@ -994,7 +1008,7 @@ import {
 import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner, toast } from '@felinic/ui'
 import { useChatStore, type ACPAgentSessionInput, type ChatMessage } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
-import { useScroll, useElementBounding, useIntersectionObserver, useStorage } from '@vueuse/core'
+import { useScroll, useIntersectionObserver, useStorage } from '@vueuse/core'
 import { useQuery } from '@pinia/colada'
 import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings } from '@memohai/sdk'
 import type { AcpclientModelInfo, AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
@@ -1003,7 +1017,7 @@ import MessageItem from './message-item.vue'
 import ChatAttachmentCard from './chat-attachment-card.vue'
 import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
-import { animateScrollTo } from './chat-minimap'
+import { useChatScroll } from '../composables/useChatScroll'
 import BgTaskPill from './bg-task-pill.vue'
 import ForkSourceDivider from './fork-source-divider.vue'
 import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
@@ -2556,13 +2570,65 @@ const descEl = computed<HTMLElement | null>(() => {
   return (scrollEl.value?.firstElementChild as HTMLElement | null) ?? null
 })
 const loadMoreSentinel = useTemplateRef<HTMLElement>('loadMoreSentinel')
-const isAutoScroll = ref(true)
-const isInstant = ref(false)
-const highlightedMessageId = ref('')
-const { y, directions, arrivedState, isScrolling } = useScroll(scrollEl, { behavior: computed(() => isAutoScroll.value && isInstant.value ? 'smooth' : 'instant') })
-const { height } = useElementBounding(descEl)
-let highlightTimer: ReturnType<typeof setTimeout> | null = null
-let cancelScrollTween: (() => void) | null = null
+
+// The last turn's container. A function ref because template refs inside
+// v-for collect into arrays — bind just the pinnable (last) turn by hand.
+const lastTurnEl = ref<HTMLElement | null>(null)
+function setLastTurnEl(el: unknown) {
+  lastTurnEl.value = el as HTMLElement | null
+}
+
+// The message list rendered as TURNS: a user message opens a turn that holds
+// everything up to the next user message (leading assistant/system rows before
+// the first user message form their own head turn). Keyed by the opening
+// message's id, which never changes for a given turn — so sending a new
+// message APPENDS a fresh container and no previous turn's DOM is ever
+// re-parented. This is load-bearing for scroll stability: re-parenting (the
+// earlier "split at the last prompt into two chunks" design) remounts the
+// whole previous turn on every send — markdown re-renders, code re-highlights
+// async, expanded tool groups collapse — and the transient height collapse
+// showed up as a hard scroll jump when sending from the bottom.
+// `start` is each turn's offset into the flat list, for the fork-source
+// dividers whose positions are flat-list indexes.
+const messageTurns = computed(() => {
+  const turns: { id: string, start: number, messages: ChatMessage[] }[] = []
+  messages.value.forEach((msg, index) => {
+    const last = turns[turns.length - 1]
+    if (msg.role === 'user' || !last) {
+      turns.push({ id: msg.id, start: index, messages: [msg] })
+    } else {
+      last.messages.push(msg)
+    }
+  })
+  return turns
+})
+const lastMessageId = computed(() => messages.value[messages.value.length - 1]?.id ?? '')
+
+const {
+  isScrolling,
+  highlightedMessageId,
+  showJumpToBottom: showJumpToBottomFromScroll,
+  scrollToBottom,
+  scrollToMessage,
+  suppressAutoScrollForPrepend,
+  markEscaped,
+  pinAfterSend,
+  onActivatedRestoreScroll,
+  onDeactivatedResetScroll,
+  onMessageActive,
+  startScrollTween,
+  findMessageElement,
+  messageJumpTarget,
+  turnReserveStyle,
+} = useChatScroll({
+  scrollEl,
+  contentEl: descEl,
+  lastTurnEl,
+  messages,
+  isActive,
+  sessionId: computed(() => chatStore.sessionId),
+})
+const showJumpToBottom = computed(() => showJumpToBottomFromScroll.value && !loadingChats.value)
 
 // --- Scroll rail ---
 const railSegments = ref<ScrollRailSegment[]>([])
@@ -2646,232 +2712,29 @@ function scrollToRailSegment(seg: ScrollRailSegment) {
     const root = scrollEl.value
     const target = findMessageElement(seg.id)
     if (!root || !target) return
-    isAutoScroll.value = false
-    isInstant.value = false
-    const scrollMargin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0
-    startScrollTween(root, () => {
-      const el = findMessageElement(seg.id)
-      return el ? getElementAbsoluteTop(el, root) - scrollMargin : root.scrollTop
-    })
+    // Rail navigation parks the reader on a chosen turn, so escape follow —
+    // otherwise the next streamed mutation would drag them back to the bottom.
+    markEscaped()
+    // Same landing rule as pin/entry/reply jumps (messageJumpTarget): the
+    // chosen turn arrives at the pin offset, identical to how it looked
+    // right after being sent.
+    startScrollTween(root, () => messageJumpTarget(root, seg.id))
   })
 }
 // --- End scroll rail ---
 
 onBeforeUnmount(() => {
   stopAuthSessionCleanup()
-  if (highlightTimer) clearTimeout(highlightTimer)
-  cancelScrollTween?.()
 })
 
-// The tween re-reads its target every frame, so positions shifted by
-// late layout settles (markdown re-render, code highlighting, image
-// loads, KaTeX/Mermaid resolves) still land exactly.
-function startScrollTween(root: HTMLElement, getTarget: () => number) {
-  cancelScrollTween?.()
-  const stop = animateScrollTo(root, () => {
-    const max = Math.max(root.scrollHeight - root.clientHeight, 0)
-    return Math.min(Math.max(getTarget(), 0), max)
-  })
-  const cancel = () => {
-    stop()
-    root.removeEventListener('wheel', cancel)
-    root.removeEventListener('touchstart', cancel)
-    cancelScrollTween = null
-  }
-  root.addEventListener('wheel', cancel, { passive: true })
-  root.addEventListener('touchstart', cancel, { passive: true })
-  cancelScrollTween = cancel
-}
-
-const showJumpToBottom = computed(() =>
-  isActive.value
-  && !loadingChats.value
-  && messages.value.length > 0
-  && !arrivedState.bottom,
-)
-
-function getElementAbsoluteTop(target: HTMLElement, root: HTMLElement) {
-  return root.scrollTop + target.getBoundingClientRect().top - root.getBoundingClientRect().top
-}
-
-function scrollViewportTo(getTop: () => number) {
-  const root = scrollEl.value
-  if (!root) return
-  startScrollTween(root, getTop)
-}
-
-function scrollToBottom() {
-  const root = scrollEl.value
-  if (!root) return
-  isAutoScroll.value = true
-  isInstant.value = true
-  scrollViewportTo(() => root.scrollHeight)
-}
-
-
-// Tracks the viewport-relative top offset of every "active" message element so
-// onActivated can restore scroll to the same anchor. Keyed by message id for
-// O(1) update/remove on every active/inactive transition; long conversations
-// would otherwise pay a linear scan + splice on each transition.
-const elId = new Map<string, number>()
-function isActiveEl(isActive: boolean, item: { id: string, top: number }) {
-  if (lockScroll.value) return
-  if (isActive) {
-    elId.set(item.id, item.top)
-  } else {
-    elId.delete(item.id)
-  }
-}
-
-// Drop accumulated anchors when the active session changes. Otherwise an
-// anchor for a message that only exists in session B would survive into A
-// when the user switches back, and the onActivated restore would query
-// the DOM with a foreign id (or worse, find a coincidentally-matching
-// element from the new session's load). Scroll position restoration is
-// preserved across route activation but reset across cross-session
-// switches.
-watch(() => chatStore.sessionId, () => {
-  elId.clear()
-})
-
-
-const lockScroll = ref(true)
-
-watch(isScrolling, (scrolling) => {
-  if (scrolling || lockScroll.value || !isActive.value) return
-  for (const [id] of elId) {
-    const el = findMessageElement(id)
-    if (el) elId.set(id, el.getBoundingClientRect().top - 48)
-  }
-})
-
-let isInit = false
-onActivated(() => {
-  if (!isActive.value) return
-  let done = false
-  const unwatch = watch(loadingMessages, async (newValue) => {
-    if (done) return
-    try {
-      // Pick the anchor closest to the top edge of the viewport so the
-      // restore lands on the message the user was reading rather than an
-      // arbitrary entry from earlier hover state.
-      let anchorId: string | undefined
-      let anchorTop = Number.POSITIVE_INFINITY
-      for (const [id, top] of elId) {
-        if (Math.abs(top) < Math.abs(anchorTop)) {
-          anchorId = id
-          anchorTop = top
-        }
-      }
-
-      if (anchorId && !newValue) {
-        const el: HTMLElement | null = document.querySelector(`[data-message-id="${anchorId}"]`)
-        if (el) {
-          const cachePos = anchorTop
-          el.scrollIntoView()
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              scrollEl.value?.scrollBy({
-                top: -cachePos
-              })
-            })
-          })
-        }
-        setTimeout(() => {
-          lockScroll.value = false
-          isInit = true
-          done = true
-          unwatch()
-        })
-      } else {
-        isInit = true
-        if (!newValue) {
-          setTimeout(async () => {
-            lockScroll.value = false
-            done = true
-            unwatch()
-          })
-        }
-      }
-    } catch (error) {
-      done = true
-      unwatch()
-      throw error
-    }
-  }, {
-    immediate: true,
-    flush: 'post'
-  })
-
-})
-
-onDeactivated(() => {
-  lockScroll.value = true
-  isInstant.value = false
-  isAutoScroll.value = true
-  isInit = false
-  if (arrivedState.bottom) {
-    elId.clear()
-  }
-})
-
-watchEffect(() => {
-  if (!isActive.value) return
-  if (directions.top && !lockScroll.value) {
-    isAutoScroll.value = false
-    isInstant.value = false
-    return
-  }
-
-  if (arrivedState.bottom && !lockScroll.value) {
-    isAutoScroll.value = true
-    isInstant.value = true
-    return
-  }
-})
-
-watch([isAutoScroll, height, isActive], async () => {
-  if (!isActive.value) return
-  if (isAutoScroll.value && height.value && isInit) {
-    y.value = height.value
-  }
-}, {
-  flush: 'post',
-  deep: true
-})
-
-// Sentinel-based infinite scroll for older history. Fires once per
-// IntersectionObserver transition: load one batch. We do NOT manually
-// reposition scrollTop after the prepend.
-//
-// Why no manual compensation: the browser's `overflow-anchor: auto`
-// already keeps the visible content stationary across a prepend when
-// `scrollTop > 0`, which is the case whenever the user is reading mid-
-// history. When the user has scrolled all the way to `scrollTop === 0`,
-// the spec deliberately suppresses overflow-anchor to avoid jitter at
-// the top of a document — and that's exactly what we want: leaving
-// scrollTop at 0 means the freshly-prepended older messages render at
-// the top of the viewport, which is what a user who just scrolled to
-// the top to see older history actually wants to see.
-//
-// Prior versions of this function ran an offset-from-bottom or anchor-
-// based scrollTop correction after each prepend. Both produced a
-// visible discontinuity: the user saw new content for one frame, then
-// got yanked to a different scroll position — the "scroll jumps back"
-// symptom users reported. The browser already does the right thing on
-// both sides of the scrollTop=0 boundary; our job is just to suppress
-// the `isAutoScroll`-driven jump-to-bottom and let the prepend land.
+// Sentinel-based infinite scroll for older history. Position preservation
+// across the prepend itself is owned by useChatScroll (see
+// suppressAutoScrollForPrepend's doc comment for why no manual scrollTop
+// correction is needed).
 async function ensureOlderLoaded() {
   if (loadingOlder.value || !hasMoreOlder.value) return
   if (!messages.value.length) return
-
-  // The `watch([isAutoScroll, height, isActive], ...)` effect slams
-  // scrollTop to the bottom whenever content height grows and
-  // isAutoScroll is true. Prepend grows height, would fire that, would
-  // hurl the user back to the bottom. arrivedState.bottom will re-
-  // enable it when the user scrolls back down to the latest messages.
-  isAutoScroll.value = false
-
+  suppressAutoScrollForPrepend()
   try {
     await chatStore.loadOlderMessages()
   } catch (error) {
@@ -2893,33 +2756,13 @@ useIntersectionObserver(
   },
 )
 
-function findMessageElement(messageId: string): HTMLElement | null {
-  const root = scrollEl.value
-  if (!root) return null
-  return root.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(messageId)}"]`)
-}
+onActivated(() => {
+  onActivatedRestoreScroll(loadingMessages)
+})
 
-async function scrollToMessage(messageId: string): Promise<boolean> {
-  await nextTick()
-  const root = scrollEl.value
-  const target = findMessageElement(messageId)
-  if (!root || !target) return false
-  isAutoScroll.value = false
-  isInstant.value = false
-  const scrollMargin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0
-  startScrollTween(root, () => {
-    const el = findMessageElement(messageId)
-    return el ? getElementAbsoluteTop(el, root) - scrollMargin : root.scrollTop
-  })
-  highlightedMessageId.value = messageId
-  if (highlightTimer) clearTimeout(highlightTimer)
-  highlightTimer = setTimeout(() => {
-    if (highlightedMessageId.value === messageId) {
-      highlightedMessageId.value = ''
-    }
-  }, 1800)
-  return true
-}
+onDeactivated(() => {
+  onDeactivatedResetScroll()
+})
 
 async function handleReplyJump(messageId: string) {
   const target = messageId.trim()
@@ -3015,7 +2858,6 @@ function handleComposerKeydown(e: KeyboardEvent) {
     return
   }
   e.preventDefault()
-  isAutoScroll.value = true
   handleSend()
 }
 
@@ -3215,7 +3057,6 @@ async function handleEditMessage(messageId: string, text: string, done?: (starte
 
 async function handleSend() {
   if (!isActive.value) return
-  // isAutoScroll.value = true
   if (!skillSlashEnabled.value && requestedSkills.value.length) {
     requestedSkills.value = []
   }
@@ -3271,10 +3112,22 @@ async function handleSend() {
     return
   }
 
+  // Arm the pin only once the store has passed command handling and session
+  // setup and is about to start a real turn. Command-only sends therefore do
+  // not leave a latent pin behind; startup failures roll the arm back.
+  let rollbackPin: (() => void) | null = null
   const result = await chatStore.sendMessage(text, attachments, {
     requestedSkills: skills,
     composerScope: sentComposerScope,
+    onBeforeTurnAppend: () => {
+      rollbackPin = pinAfterSend()
+    },
+    onTurnAppendAborted: () => {
+      rollbackPin?.()
+      rollbackPin = null
+    },
   })
+  rollbackPin = null
   if (!result.ok && result.stage === 'startup') {
     const restoreInput = result.restoreInput ?? text
     const activeRenderedSessionId = (props.sessionId || activeSessionId.value || chatStore.sessionId || '').trim()
