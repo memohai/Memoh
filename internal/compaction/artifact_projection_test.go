@@ -2,6 +2,7 @@ package compaction
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -23,11 +24,13 @@ func TestArtifactFrontierResolvesMultiLevelLineageToOneTerminal(t *testing.T) {
 	c := testArtifact("c")
 	a.SupersededBy = b.ID
 	a.SupersededAt = time.Unix(1, 0)
+	a.Coverage = testCoverage("row-a")
 	b.ParentIDs = []string{a.ID}
+	b.Coverage = testCoverage("row-a")
 	b.SupersededBy = c.ID
 	b.SupersededAt = time.Unix(2, 0)
 	c.ParentIDs = []string{b.ID}
-	c.Coverage = testCoverage("row-c")
+	c.Coverage = testCoverage("row-a")
 
 	frontier := buildArtifactFrontier([]Artifact{a, b, c})
 
@@ -60,6 +63,7 @@ func TestArtifactFrontierQuarantinesBrokenLineageWithoutDroppingValidLeaf(t *tes
 				a, b := testArtifact("cycle-a"), testArtifact("cycle-b")
 				a.SupersededBy, a.SupersededAt, a.ParentIDs = b.ID, time.Unix(1, 0), []string{b.ID}
 				b.SupersededBy, b.SupersededAt, b.ParentIDs = a.ID, time.Unix(2, 0), []string{a.ID}
+				a.Coverage, b.Coverage = testCoverage("cycle-row"), testCoverage("cycle-row")
 				return []Artifact{a, b}
 			}(),
 			startID: "cycle-a",
@@ -70,6 +74,7 @@ func TestArtifactFrontierQuarantinesBrokenLineageWithoutDroppingValidLeaf(t *tes
 			artifacts: func() []Artifact {
 				a := testArtifact("missing-a")
 				a.SupersededBy, a.SupersededAt = "missing-b", time.Unix(1, 0)
+				a.Coverage = testCoverage("missing-row")
 				return []Artifact{a}
 			}(),
 			startID: "missing-a",
@@ -80,6 +85,7 @@ func TestArtifactFrontierQuarantinesBrokenLineageWithoutDroppingValidLeaf(t *tes
 			artifacts: func() []Artifact {
 				a, b := testArtifact("inactive-a"), testArtifact("inactive-b")
 				a.SupersededBy, a.SupersededAt = b.ID, time.Unix(1, 0)
+				a.Coverage = testCoverage("inactive-row")
 				b.Status, b.ParentIDs = "pending", []string{a.ID}
 				return []Artifact{a, b}
 			}(),
@@ -102,6 +108,7 @@ func TestArtifactFrontierQuarantinesBrokenLineageWithoutDroppingValidLeaf(t *tes
 			artifacts: func() []Artifact {
 				a, b := testArtifact("parent-a"), testArtifact("parent-b")
 				a.SupersededBy, a.SupersededAt = b.ID, time.Unix(1, 0)
+				a.Coverage = testCoverage("parent-row")
 				return []Artifact{a, b}
 			}(),
 			startID: "parent-a",
@@ -112,6 +119,7 @@ func TestArtifactFrontierQuarantinesBrokenLineageWithoutDroppingValidLeaf(t *tes
 			artifacts: func() []Artifact {
 				a, b := testArtifact("scope-a"), testArtifact("scope-b")
 				a.SupersededBy, a.SupersededAt = b.ID, time.Unix(1, 0)
+				a.Coverage = testCoverage("scope-row")
 				b.SessionID, b.ParentIDs, b.Coverage = "other-session", []string{a.ID}, testCoverage("scope-row")
 				return []Artifact{a, b}
 			}(),
@@ -123,6 +131,7 @@ func TestArtifactFrontierQuarantinesBrokenLineageWithoutDroppingValidLeaf(t *tes
 			artifacts: func() []Artifact {
 				a, b := testArtifact("coverage-a"), testArtifact("coverage-b")
 				a.SupersededBy, a.SupersededAt = b.ID, time.Unix(1, 0)
+				a.Coverage = testCoverage("coverage-row")
 				b.ParentIDs = []string{a.ID}
 				return []Artifact{a, b}
 			}(),
@@ -160,6 +169,7 @@ func TestArtifactProjectionLoadActiveByIDReturnsTypedLineageErrors(t *testing.T)
 	b := projectionRow(t, bID)
 	a.SupersededBy, a.SupersededAt, a.ParentIds = b.ID, pgtype.Timestamptz{Time: time.Unix(1, 0), Valid: true}, []pgtype.UUID{b.ID}
 	b.SupersededBy, b.SupersededAt, b.ParentIds = a.ID, pgtype.Timestamptz{Time: time.Unix(2, 0), Valid: true}, []pgtype.UUID{a.ID}
+	a.Coverage, b.Coverage = testCoverageJSON(t, "cycle-db-row"), testCoverageJSON(t, "cycle-db-row")
 
 	tests := []struct {
 		name  string
@@ -178,6 +188,7 @@ func TestArtifactProjectionLoadActiveByIDReturnsTypedLineageErrors(t *testing.T)
 					row := projectionRow(t, aID)
 					row.SupersededBy = b.ID
 					row.SupersededAt = pgtype.Timestamptz{Time: time.Unix(1, 0), Valid: true}
+					row.Coverage = testCoverageJSON(t, "missing-successor-row")
 					return row
 				}(),
 			},
@@ -189,7 +200,7 @@ func TestArtifactProjectionLoadActiveByIDReturnsTypedLineageErrors(t *testing.T)
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			queries := &projectionQueries{rows: tt.rows}
-			_, err := NewArtifactProjection(queries).LoadActiveByID(context.Background(), aID)
+			_, err := NewArtifactProjection(queries).LoadActiveByID(context.Background(), aID, ArtifactOwner{})
 			var lineageErr *LineageError
 			if !errors.As(err, &lineageErr) || lineageErr.Issue.Kind != tt.issue {
 				t.Fatalf("LoadActiveByID error = %v, want lineage issue %q", err, tt.issue)
@@ -208,16 +219,29 @@ func testArtifact(id string) Artifact {
 	}
 }
 
-func testCoverage(id string) []CoveredSource {
-	return []CoveredSource{{
-		Ref: contextfrag.ContextRef{
-			Namespace:  "bot_history_message",
-			ID:         id,
-			Version:    1,
-			Schema:     contextfrag.SchemaContextRef,
-			Durability: contextfrag.RefDurable,
-		},
-	}}
+func testCoverage(ids ...string) []CoveredSource {
+	covered := make([]CoveredSource, 0, len(ids))
+	for _, id := range ids {
+		covered = append(covered, CoveredSource{
+			Ref: contextfrag.ContextRef{
+				Namespace:  "bot_history_message",
+				ID:         id,
+				Version:    1,
+				Schema:     contextfrag.SchemaContextRef,
+				Durability: contextfrag.RefDurable,
+			},
+		})
+	}
+	return covered
+}
+
+func testCoverageJSON(t *testing.T, ids ...string) []byte {
+	t.Helper()
+	raw, err := json.Marshal(testCoverage(ids...))
+	if err != nil {
+		t.Fatalf("marshal coverage: %v", err)
+	}
+	return raw
 }
 
 func hasLineageIssue(issues []LineageIssue, kind LineageIssueKind) bool {
@@ -231,15 +255,33 @@ func hasLineageIssue(issues []LineageIssue, kind LineageIssueKind) bool {
 
 type projectionQueries struct {
 	dbstore.Queries
-	rows map[pgtype.UUID]sqlc.BotHistoryMessageCompact
+	rows       map[pgtype.UUID]sqlc.BotHistoryMessageCompact
+	getErrors  map[pgtype.UUID]error
+	parentsErr error
 }
 
 func (q *projectionQueries) GetCompactionLogByID(_ context.Context, id pgtype.UUID) (sqlc.BotHistoryMessageCompact, error) {
+	if err := q.getErrors[id]; err != nil {
+		return sqlc.BotHistoryMessageCompact{}, err
+	}
 	row, ok := q.rows[id]
 	if !ok {
 		return sqlc.BotHistoryMessageCompact{}, pgx.ErrNoRows
 	}
 	return row, nil
+}
+
+func (q *projectionQueries) ListCompactionArtifactParentIDsBySuccessor(_ context.Context, arg sqlc.ListCompactionArtifactParentIDsBySuccessorParams) ([]pgtype.UUID, error) {
+	if q.parentsErr != nil {
+		return nil, q.parentsErr
+	}
+	var ids []pgtype.UUID
+	for _, row := range q.rows {
+		if row.Status == "ok" && row.SupersededBy == arg.SuccessorID && row.BotID == arg.BotID && row.SessionID == arg.SessionID {
+			ids = append(ids, row.ID)
+		}
+	}
+	return ids, nil
 }
 
 func projectionRow(t *testing.T, id string) sqlc.BotHistoryMessageCompact {

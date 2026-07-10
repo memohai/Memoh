@@ -375,7 +375,10 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			)
 			return resolvedContext{}, loadErr
 		}
-		loaded = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
+		loaded, loadErr = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
+		if loadErr != nil {
+			return resolvedContext{}, loadErr
+		}
 		messages, historyRecords, estimatedTokens = trimMessagesAndRecordsByTokens(r.logger, loaded, contextTokenBudget)
 		// When context reaches the shared budget share, run synchronous
 		// compaction before sending the request. contextTokenBudget is the
@@ -421,7 +424,10 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 					)
 					return resolvedContext{}, loadErr
 				}
-				loaded = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
+				loaded, loadErr = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
+				if loadErr != nil {
+					return resolvedContext{}, loadErr
+				}
 				messages, historyRecords, estimatedTokens = trimMessagesAndRecordsByTokens(r.logger, loaded, contextTokenBudget)
 				// Remove tool messages from the recent context — they are large
 				// and unnecessary when we already have a summary. Keep only

@@ -1,18 +1,11 @@
 package compaction
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
-	"github.com/jackc/pgx/v5"
-
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/contextfrag"
 )
 
 type LineageIssueKind string
@@ -25,6 +18,8 @@ const (
 	LineageIssueParentMismatch         LineageIssueKind = "parent_mismatch"
 	LineageIssueScopeMismatch          LineageIssueKind = "scope_mismatch"
 	LineageIssueMissingDerivedCoverage LineageIssueKind = "missing_derived_coverage"
+	LineageIssueCoverageMismatch       LineageIssueKind = "coverage_mismatch"
+	LineageIssueCoverageOverlap        LineageIssueKind = "coverage_overlap"
 )
 
 type LineageIssue struct {
@@ -53,6 +48,12 @@ type ArtifactFrontier struct {
 	Issues    []LineageIssue
 	aliases   map[string]string
 	byID      map[string]Artifact
+	coverage  map[string]artifactCoverageAlias
+}
+
+type ArtifactOwner struct {
+	BotID     string
+	SessionID string
 }
 
 func (f ArtifactFrontier) Resolve(lineageID string) (Artifact, bool) {
@@ -64,125 +65,25 @@ func (f ArtifactFrontier) Resolve(lineageID string) (Artifact, bool) {
 	return artifact, ok
 }
 
-type ArtifactProjection struct {
-	queries dbstore.Queries
+func (f ArtifactFrontier) ResolveCoveredRef(ref contextfrag.ContextRef) (Artifact, bool) {
+	covered, ok := f.coverage[ref.StableKey()]
+	if !ok || !compatibleCoverageRef(ref, covered.ref) {
+		return Artifact{}, false
+	}
+	artifact, ok := f.byID[covered.artifactID]
+	return artifact, ok
 }
 
-func NewArtifactProjection(queries dbstore.Queries) ArtifactProjection {
-	return ArtifactProjection{queries: queries}
-}
-
-func (p ArtifactProjection) LoadActiveSession(ctx context.Context, sessionID string) (ArtifactFrontier, error) {
-	if p.queries == nil {
-		return ArtifactFrontier{}, nil
-	}
-	sessionUUID, err := db.ParseUUID(sessionID)
-	if err != nil {
-		return ArtifactFrontier{}, err
-	}
-	rows, err := p.queries.ListCompactionArtifactLineageBySession(ctx, sessionUUID)
-	if err != nil {
-		return ArtifactFrontier{}, err
-	}
-	artifacts := make([]Artifact, 0, len(rows))
-	for _, row := range rows {
-		artifact, err := artifactFromDBRow(row)
-		if err != nil {
-			return ArtifactFrontier{}, err
-		}
-		artifacts = append(artifacts, artifact)
-	}
-	return buildArtifactFrontier(artifacts), nil
-}
-
-func (p ArtifactProjection) LoadActiveByID(ctx context.Context, id string) (Artifact, error) {
-	if p.queries == nil {
-		return Artifact{}, errors.New("compaction artifact projection: queries are required")
-	}
-	startID := strings.TrimSpace(id)
-	if _, err := db.ParseUUID(startID); err != nil {
-		return Artifact{}, err
-	}
-	cache := make(map[string]Artifact)
-	load := func(id string) (Artifact, error) {
-		if artifact, ok := cache[id]; ok {
-			return artifact, nil
-		}
-		artifactID, err := db.ParseUUID(id)
-		if err != nil {
-			return Artifact{}, err
-		}
-		row, err := p.queries.GetCompactionLogByID(ctx, artifactID)
-		if err != nil {
-			return Artifact{}, err
-		}
-		artifact, err := artifactFromDBRow(row)
-		if err != nil {
-			return Artifact{}, err
-		}
-		cache[id] = artifact
-		return artifact, nil
-	}
-
-	current, err := load(startID)
-	if err != nil {
-		return Artifact{}, err
-	}
-	botID, sessionID := current.BotID, current.SessionID
-	visited := make(map[string]struct{})
-	for {
-		if _, ok := visited[current.ID]; ok {
-			return Artifact{}, lineageError(LineageIssueCycle, startID, current.ID)
-		}
-		visited[current.ID] = struct{}{}
-		if !artifactUsable(current) {
-			return Artifact{}, lineageError(LineageIssueInactiveSuccessor, startID, current.ID)
-		}
-		if issue, ok := validateSupersessionMarker(current); ok {
-			return Artifact{}, &LineageError{Issue: issue}
-		}
-		if !sameArtifactScope(current, botID, sessionID) {
-			return Artifact{}, lineageError(LineageIssueScopeMismatch, startID, current.ID)
-		}
-		for _, parentID := range current.ParentIDs {
-			parent, err := load(parentID)
-			if err != nil || !artifactUsable(parent) || parent.SupersededBy != current.ID {
-				return Artifact{}, lineageError(LineageIssueParentMismatch, current.ID, parentID)
-			}
-			if markerIssue, invalid := validateSupersessionMarker(parent); invalid {
-				return Artifact{}, &LineageError{Issue: markerIssue}
-			}
-			if !sameArtifactScope(parent, botID, sessionID) {
-				return Artifact{}, lineageError(LineageIssueScopeMismatch, current.ID, parentID)
-			}
-		}
-		if current.SupersededBy == "" {
-			if derivedCoverageMissing(current) {
-				return Artifact{}, lineageError(LineageIssueMissingDerivedCoverage, current.ID, "")
-			}
-			return current, nil
-		}
-		next, err := load(current.SupersededBy)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return Artifact{}, lineageError(LineageIssueMissingSuccessor, current.ID, current.SupersededBy)
-			}
-			return Artifact{}, fmt.Errorf("load compaction successor %s: %w", current.SupersededBy, err)
-		}
-		if !artifactUsable(next) {
-			return Artifact{}, lineageError(LineageIssueInactiveSuccessor, current.ID, next.ID)
-		}
-		if !sameArtifactScope(next, botID, sessionID) {
-			return Artifact{}, lineageError(LineageIssueScopeMismatch, current.ID, next.ID)
-		}
-		if !containsID(next.ParentIDs, current.ID) {
-			return Artifact{}, lineageError(LineageIssueParentMismatch, current.ID, next.ID)
-		}
-		current = next
-	}
+type artifactCoverageAlias struct {
+	artifactID string
+	ref        contextfrag.ContextRef
 }
 
 func buildArtifactFrontier(artifacts []Artifact) ArtifactFrontier {
+	return buildArtifactFrontierForOwner(artifacts, ArtifactOwner{})
+}
+
+func buildArtifactFrontierForOwner(artifacts []Artifact, owner ArtifactOwner) ArtifactFrontier {
 	nodes := make(map[string]Artifact, len(artifacts))
 	for _, artifact := range artifacts {
 		nodes[artifact.ID] = artifact
@@ -202,6 +103,17 @@ func buildArtifactFrontier(artifacts []Artifact) ArtifactFrontier {
 		if !artifactUsable(artifact) {
 			continue
 		}
+		if !artifactMatchesOwner(artifact, owner) {
+			ownerID := strings.TrimSpace(owner.BotID) + "/" + strings.TrimSpace(owner.SessionID)
+			lineageIssue := LineageIssue{Kind: LineageIssueScopeMismatch, ArtifactID: artifact.ID, RelatedID: ownerID}
+			key := fmt.Sprintf("%s:%s:%s", lineageIssue.Kind, lineageIssue.ArtifactID, lineageIssue.RelatedID)
+			if _, seen := seenIssues[key]; !seen {
+				seenIssues[key] = struct{}{}
+				issues = append(issues, lineageIssue)
+			}
+			markConnectedLineage(artifact.ID, adjacent, invalid)
+			continue
+		}
 		resolved := resolver.resolve(artifact.ID)
 		if resolved.issue != nil {
 			key := fmt.Sprintf("%s:%s:%s", resolved.issue.Kind, resolved.issue.ArtifactID, resolved.issue.RelatedID)
@@ -219,12 +131,42 @@ func buildArtifactFrontier(artifacts []Artifact) ArtifactFrontier {
 		delete(active, id)
 		delete(aliases, id)
 	}
+	coverageOwners := make(map[string]artifactCoverageAlias)
+	for artifactID, artifact := range active {
+		for _, source := range artifact.Coverage {
+			key := source.Ref.StableKey()
+			previous, exists := coverageOwners[key]
+			if !exists || previous.artifactID == artifactID {
+				coverageOwners[key] = artifactCoverageAlias{artifactID: artifactID, ref: source.Ref}
+				continue
+			}
+			lineageIssue := LineageIssue{Kind: LineageIssueCoverageOverlap, ArtifactID: artifactID, RelatedID: previous.artifactID}
+			issueKey := fmt.Sprintf("%s:%s:%s", lineageIssue.Kind, lineageIssue.ArtifactID, lineageIssue.RelatedID)
+			if _, seen := seenIssues[issueKey]; !seen {
+				seenIssues[issueKey] = struct{}{}
+				issues = append(issues, lineageIssue)
+			}
+			markConnectedLineage(artifactID, adjacent, invalid)
+			markConnectedLineage(previous.artifactID, adjacent, invalid)
+		}
+	}
+	for id := range invalid {
+		delete(active, id)
+		delete(aliases, id)
+	}
+	coverageOwners = make(map[string]artifactCoverageAlias)
+	for artifactID, artifact := range active {
+		for _, source := range artifact.Coverage {
+			coverageOwners[source.Ref.StableKey()] = artifactCoverageAlias{artifactID: artifactID, ref: source.Ref}
+		}
+	}
 
 	frontier := ArtifactFrontier{
 		Artifacts: make([]Artifact, 0, len(active)),
 		Issues:    issues,
 		aliases:   aliases,
 		byID:      active,
+		coverage:  coverageOwners,
 	}
 	for _, artifact := range active {
 		frontier.Artifacts = append(frontier.Artifacts, artifact)
@@ -324,6 +266,9 @@ func (r *loadedLineageResolver) resolve(id string) loadedLineageResolution {
 	if markerIssue, invalid := validateSupersessionMarker(current); invalid {
 		return r.finish(id, loadedLineageResolution{issue: &markerIssue})
 	}
+	if lineageCoverageMissing(current) {
+		return r.finish(id, loadedLineageResolution{issue: issue(LineageIssueMissingDerivedCoverage, current.ID, "")})
+	}
 	for _, parentID := range current.ParentIDs {
 		parent, exists := r.nodes[parentID]
 		if !exists || !artifactUsable(parent) || parent.SupersededBy != current.ID {
@@ -335,11 +280,14 @@ func (r *loadedLineageResolver) resolve(id string) loadedLineageResolution {
 		if !sameArtifactScope(parent, current.BotID, current.SessionID) {
 			return r.finish(id, loadedLineageResolution{issue: issue(LineageIssueScopeMismatch, current.ID, parentID)})
 		}
+		if lineageCoverageMissing(parent) {
+			return r.finish(id, loadedLineageResolution{issue: issue(LineageIssueMissingDerivedCoverage, parent.ID, "")})
+		}
+		if !coverageIncludes(current.Coverage, parent.Coverage) {
+			return r.finish(id, loadedLineageResolution{issue: issue(LineageIssueCoverageMismatch, current.ID, parentID)})
+		}
 	}
 	if current.SupersededBy == "" {
-		if derivedCoverageMissing(current) {
-			return r.finish(id, loadedLineageResolution{issue: issue(LineageIssueMissingDerivedCoverage, current.ID, "")})
-		}
 		return r.finish(id, loadedLineageResolution{terminal: current})
 	}
 	next, exists := r.nodes[current.SupersededBy]
@@ -364,41 +312,6 @@ func (r *loadedLineageResolver) finish(id string, resolved loadedLineageResoluti
 	return resolved
 }
 
-func artifactFromDBRow(row sqlc.BotHistoryMessageCompact) (Artifact, error) {
-	id := formatUUID(row.ID)
-	if id == "" {
-		return Artifact{}, errors.New("compaction artifact: id is required")
-	}
-	coverage, coverageErr := DecodeArtifactCoverage(row.Coverage)
-	version := int(row.ArtifactVersion)
-	if version == 0 {
-		version = ArtifactVersion
-	}
-	parentIDs := make([]string, 0, len(row.ParentIds))
-	for _, parentID := range row.ParentIds {
-		if value := formatUUID(parentID); value != "" {
-			parentIDs = append(parentIDs, value)
-		}
-	}
-	return Artifact{
-		ID:                id,
-		BotID:             formatUUID(row.BotID),
-		SessionID:         formatUUID(row.SessionID),
-		Status:            strings.TrimSpace(row.Status),
-		Summary:           row.Summary,
-		Version:           version,
-		Coverage:          coverage,
-		AnchorStartMs:     row.AnchorStartMs,
-		AnchorEndMs:       row.AnchorEndMs,
-		Level:             int(row.ArtifactLevel),
-		ParentIDs:         parentIDs,
-		SupersededBy:      formatUUID(row.SupersededBy),
-		SupersededAt:      pgTime(row.SupersededAt.Time, row.SupersededAt.Valid),
-		StartedAt:         pgTime(row.StartedAt.Time, row.StartedAt.Valid),
-		CoverageMalformed: coverageErr != nil,
-	}, nil
-}
-
 func artifactUsable(artifact Artifact) bool {
 	return artifact.Status == "ok" && strings.TrimSpace(artifact.Summary) != ""
 }
@@ -410,13 +323,50 @@ func validateSupersessionMarker(artifact Artifact) (LineageIssue, bool) {
 	return LineageIssue{}, false
 }
 
-func derivedCoverageMissing(artifact Artifact) bool {
-	return len(artifact.ParentIDs) > 0 && (artifact.CoverageMalformed || len(artifact.Coverage) == 0)
+func lineageCoverageMissing(artifact Artifact) bool {
+	participatesInLineage := len(artifact.ParentIDs) > 0 || artifact.SupersededBy != ""
+	return participatesInLineage && (artifact.CoverageMalformed || len(artifact.Coverage) == 0)
 }
 
 func sameArtifactScope(artifact Artifact, botID, sessionID string) bool {
-	return (botID == "" || artifact.BotID == "" || artifact.BotID == botID) &&
-		(sessionID == "" || artifact.SessionID == "" || artifact.SessionID == sessionID)
+	return artifact.BotID == botID && artifact.SessionID == sessionID
+}
+
+func artifactMatchesOwner(artifact Artifact, owner ArtifactOwner) bool {
+	botID := strings.TrimSpace(owner.BotID)
+	if botID != "" && artifact.BotID != botID {
+		return false
+	}
+	sessionID := strings.TrimSpace(owner.SessionID)
+	return sessionID == "" || artifact.SessionID == sessionID
+}
+
+func coverageIncludes(coverage []CoveredSource, required []CoveredSource) bool {
+	for _, expected := range required {
+		found := false
+		for _, candidate := range coverage {
+			if compatibleCoverageRef(candidate.Ref, expected.Ref) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func compatibleCoverageRef(candidate contextfrag.ContextRef, expected contextfrag.ContextRef) bool {
+	if !candidate.EqualIdentity(expected) {
+		return false
+	}
+	if expected.ContentHash == "" {
+		return true
+	}
+	return candidate.HashAlgo == expected.HashAlgo &&
+		candidate.HashScope == expected.HashScope &&
+		candidate.ContentHash == expected.ContentHash
 }
 
 func containsID(ids []string, target string) bool {
@@ -428,17 +378,6 @@ func containsID(ids []string, target string) bool {
 	return false
 }
 
-func lineageError(kind LineageIssueKind, artifactID, relatedID string) error {
-	return &LineageError{Issue: LineageIssue{Kind: kind, ArtifactID: artifactID, RelatedID: relatedID}}
-}
-
 func issue(kind LineageIssueKind, artifactID, relatedID string) *LineageIssue {
 	return &LineageIssue{Kind: kind, ArtifactID: artifactID, RelatedID: relatedID}
-}
-
-func pgTime(value time.Time, valid bool) time.Time {
-	if !valid {
-		return time.Time{}
-	}
-	return value.UTC()
 }

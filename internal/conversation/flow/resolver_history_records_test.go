@@ -3,6 +3,8 @@ package flow
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -293,7 +295,7 @@ func TestReplaceCompactedMessagesLoadsSessionSummaryWithoutRecentRows(t *testing
 		historyRecord("row-current", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("current")}, nil),
 	}
 
-	got := resolver.replaceCompactedMessages(context.Background(), sessionID, contextfrag.Scope{BotID: "bot-1", SessionID: sessionID}, recent)
+	got := mustReplaceCompactedMessages(t, resolver, sessionID, contextfrag.Scope{SessionID: sessionID}, recent)
 
 	if queries.sessionID != mustPGUUID(t, sessionID) {
 		t.Fatalf("queried session id = %#v, want %s", queries.sessionID, sessionID)
@@ -337,7 +339,7 @@ func TestReplaceCompactedMessagesLoadsSessionSummaryCoverageFromCompactedRows(t 
 	}
 	resolver := &Resolver{queries: queries}
 
-	got := resolver.replaceCompactedMessages(context.Background(), sessionID, contextfrag.Scope{BotID: "bot-1", SessionID: sessionID}, nil)
+	got := mustReplaceCompactedMessages(t, resolver, sessionID, contextfrag.Scope{SessionID: sessionID}, nil)
 
 	if len(got) != 1 {
 		t.Fatalf("records = %d, want one session summary: %#v", len(got), got)
@@ -383,7 +385,7 @@ func TestReplaceCompactedMessagesBackfillsMalformedPersistedCoverage(t *testing.
 	}
 	resolver := &Resolver{queries: queries}
 
-	got := resolver.replaceCompactedMessages(context.Background(), sessionID, contextfrag.Scope{SessionID: sessionID}, nil)
+	got := mustReplaceCompactedMessages(t, resolver, sessionID, contextfrag.Scope{SessionID: sessionID}, nil)
 
 	if len(got) != 1 || got[0].CompactID != compactID {
 		t.Fatalf("malformed coverage must not drop a valid summary artifact: %#v", got)
@@ -426,7 +428,7 @@ func TestReplaceCompactedMessagesInWindowGroupCoversRowsOutsideLoadWindow(t *tes
 		}),
 	}
 
-	got := resolver.replaceCompactedMessages(context.Background(), sessionID, contextfrag.Scope{BotID: "bot-1", SessionID: sessionID}, recent)
+	got := mustReplaceCompactedMessages(t, resolver, sessionID, contextfrag.Scope{SessionID: sessionID}, recent)
 
 	if len(got) != 1 || got[0].Kind != contextfrag.KindConversationSummary {
 		t.Fatalf("expected single in-window summary record, got %#v", got)
@@ -486,7 +488,7 @@ func TestReplaceCompactedMessagesResolvesInWindowGroupsFromSessionLogs(t *testin
 
 	// The fake does not implement GetCompactionLogByID: resolving in-window
 	// groups must come from the single session log load, not per-group lookups.
-	got := resolver.replaceCompactedMessages(context.Background(), sessionID, contextfrag.Scope{BotID: "bot-1", SessionID: sessionID}, recent)
+	got := mustReplaceCompactedMessages(t, resolver, sessionID, contextfrag.Scope{SessionID: sessionID}, recent)
 
 	if queries.listCalls != 1 {
 		t.Fatalf("session logs loaded %d times, want exactly once", queries.listCalls)
@@ -526,6 +528,7 @@ func TestReplaceCompactedMessagesResolvesSupersededGroupToActiveArtifact(t *test
 	sessionID := "00000000-0000-0000-0000-00000000f009"
 	parentID := "00000000-0000-0000-0000-00000000c009"
 	activeID := "00000000-0000-0000-0000-00000000c010"
+	coverage := persistedCoverage(t, "00000000-0000-0000-0000-000000000901")
 	supersededAt := pgtype.Timestamptz{Time: time.Unix(10, 0), Valid: true}
 	queries := &recordingCompactionLogQueries{
 		logs: []sqlc.BotHistoryMessageCompact{
@@ -534,6 +537,7 @@ func TestReplaceCompactedMessagesResolvesSupersededGroupToActiveArtifact(t *test
 				SessionID:    mustPGUUID(t, sessionID),
 				Status:       "ok",
 				Summary:      "stale parent summary",
+				Coverage:     coverage,
 				SupersededBy: mustPGUUID(t, activeID),
 				SupersededAt: supersededAt,
 			},
@@ -542,7 +546,7 @@ func TestReplaceCompactedMessagesResolvesSupersededGroupToActiveArtifact(t *test
 				SessionID: mustPGUUID(t, sessionID),
 				Status:    "ok",
 				Summary:   "active restacked summary",
-				Coverage:  persistedCoverage(t, "00000000-0000-0000-0000-000000000901"),
+				Coverage:  coverage,
 				ParentIds: []pgtype.UUID{mustPGUUID(t, parentID)},
 			},
 		},
@@ -554,7 +558,7 @@ func TestReplaceCompactedMessagesResolvesSupersededGroupToActiveArtifact(t *test
 		}),
 	}
 
-	got := resolver.replaceCompactedMessages(context.Background(), sessionID, contextfrag.Scope{SessionID: sessionID}, recent)
+	got := mustReplaceCompactedMessages(t, resolver, sessionID, contextfrag.Scope{SessionID: sessionID}, recent)
 
 	if len(got) != 1 || got[0].CompactID != activeID {
 		t.Fatalf("superseded raw group must resolve once to active artifact %s: %#v", activeID, got)
@@ -564,15 +568,74 @@ func TestReplaceCompactedMessagesResolvesSupersededGroupToActiveArtifact(t *test
 	}
 }
 
+func TestReplaceCompactedMessagesReconcilesStaleRawRowsByDurableCoverage(t *testing.T) {
+	t.Parallel()
+
+	sessionID := "00000000-0000-0000-0000-00000000f010"
+	compactID := "00000000-0000-0000-0000-00000000c013"
+	coveredID := "00000000-0000-0000-0000-000000000910"
+	for _, required := range []bool{false, true} {
+		t.Run(fmt.Sprintf("required=%v", required), func(t *testing.T) {
+			t.Parallel()
+			queries := &recordingCompactionLogQueries{
+				logs: []sqlc.BotHistoryMessageCompact{{
+					ID:        mustPGUUID(t, compactID),
+					SessionID: mustPGUUID(t, sessionID),
+					Status:    "ok",
+					Summary:   "newly completed summary",
+					Coverage:  persistedCoverage(t, coveredID),
+				}},
+			}
+			resolver := &Resolver{queries: queries}
+			recent := []historyfrag.HistoryRecord{
+				historyRecord("before-row", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("before")}, nil),
+				historyRecord(coveredID, conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("stale raw")}, func(record *historyfrag.HistoryRecord) {
+					record.Required = required
+				}),
+				historyRecord("after-row", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("after")}, nil),
+			}
+
+			got := mustReplaceCompactedMessages(t, resolver, sessionID, contextfrag.Scope{SessionID: sessionID}, recent)
+
+			wantText := []string{"before", "<summary>\nnewly completed summary\n</summary>"}
+			if required {
+				wantText = append(wantText, "stale raw")
+			}
+			wantText = append(wantText, "after")
+			if gotText := recordTexts(got); !reflect.DeepEqual(gotText, wantText) {
+				t.Fatalf("reconciled history = %#v, want %#v", gotText, wantText)
+			}
+		})
+	}
+}
+
+func TestReplaceCompactedMessagesPropagatesFrontierStorageError(t *testing.T) {
+	t.Parallel()
+
+	sentinel := errors.New("frontier database unavailable")
+	resolver := &Resolver{queries: &recordingCompactionLogQueries{listErr: sentinel}}
+	_, err := resolver.replaceCompactedMessages(
+		context.Background(),
+		"00000000-0000-0000-0000-00000000f011",
+		contextfrag.Scope{},
+		[]historyfrag.HistoryRecord{historyRecord("row-current", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("current")}, nil)},
+	)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("replaceCompactedMessages error = %v, want %v", err, sentinel)
+	}
+}
+
 func TestReplaceRecentCompactedMessagesFollowsSupersession(t *testing.T) {
 	t.Parallel()
 
 	parentID := "00000000-0000-0000-0000-00000000c011"
 	activeID := "00000000-0000-0000-0000-00000000c012"
+	coverage := persistedCoverage(t, "00000000-0000-0000-0000-000000000902")
 	parent := sqlc.BotHistoryMessageCompact{
 		ID:           mustPGUUID(t, parentID),
 		Status:       "ok",
 		Summary:      "stale parent summary",
+		Coverage:     coverage,
 		SupersededBy: mustPGUUID(t, activeID),
 		SupersededAt: pgtype.Timestamptz{Time: time.Unix(10, 0), Valid: true},
 	}
@@ -580,7 +643,7 @@ func TestReplaceRecentCompactedMessagesFollowsSupersession(t *testing.T) {
 		ID:        mustPGUUID(t, activeID),
 		Status:    "ok",
 		Summary:   "active restacked summary",
-		Coverage:  persistedCoverage(t, "00000000-0000-0000-0000-000000000902"),
+		Coverage:  coverage,
 		ParentIds: []pgtype.UUID{mustPGUUID(t, parentID)},
 	}
 	queries := &recordingCompactionLogQueries{
@@ -596,13 +659,49 @@ func TestReplaceRecentCompactedMessagesFollowsSupersession(t *testing.T) {
 		}),
 	}
 
-	got := resolver.replaceCompactedMessages(context.Background(), "", contextfrag.Scope{}, recent)
+	got := mustReplaceCompactedMessages(t, resolver, "", contextfrag.Scope{}, recent)
 
 	if len(got) != 1 || got[0].CompactID != activeID {
 		t.Fatalf("sessionless superseded group must resolve to active artifact %s: %#v", activeID, got)
 	}
 	if len(queries.getCalls) != 2 || queries.getCalls[0] != parent.ID || queries.getCalls[1] != active.ID {
 		t.Fatalf("lineage lookups = %#v, want parent then active", queries.getCalls)
+	}
+}
+
+func TestReplaceRecentCompactedMessagesUsesRecordSessionAsOwner(t *testing.T) {
+	t.Parallel()
+
+	botID := "00000000-0000-0000-0000-00000000b101"
+	recordSessionID := "00000000-0000-0000-0000-00000000f101"
+	foreignSessionID := "00000000-0000-0000-0000-00000000f102"
+	foreignCompactID := "00000000-0000-0000-0000-00000000c101"
+	foreign := sqlc.BotHistoryMessageCompact{
+		ID:        mustPGUUID(t, foreignCompactID),
+		BotID:     mustPGUUID(t, botID),
+		SessionID: mustPGUUID(t, foreignSessionID),
+		Status:    "ok",
+		Summary:   "foreign session summary",
+	}
+	queries := &recordingCompactionLogQueries{
+		byID: map[pgtype.UUID]sqlc.BotHistoryMessageCompact{foreign.ID: foreign},
+	}
+	resolver := &Resolver{queries: queries}
+	recent := []historyfrag.HistoryRecord{
+		historyRecord("row-owned-by-session", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("keep local raw")}, func(record *historyfrag.HistoryRecord) {
+			record.BotID = botID
+			record.SessionID = recordSessionID
+			record.CompactID = foreignCompactID
+		}),
+	}
+
+	got := mustReplaceCompactedMessages(t, resolver, "", contextfrag.Scope{BotID: botID}, recent)
+
+	if gotText := recordTexts(got); !reflect.DeepEqual(gotText, []string{"keep local raw"}) {
+		t.Fatalf("cross-session artifact replaced local history: %#v", gotText)
+	}
+	if len(queries.getCalls) != 0 {
+		t.Fatalf("session-owned group fell back to unscoped point lookup: %#v", queries.getCalls)
 	}
 }
 
@@ -826,6 +925,7 @@ type recordingCompactionLogQueries struct {
 	coveredCalls []pgtype.UUID
 	refCalls     []pgtype.UUID
 	getCalls     []pgtype.UUID
+	listErr      error
 }
 
 func (q *recordingCompactionLogQueries) GetCompactionLogByID(_ context.Context, compactID pgtype.UUID) (sqlc.BotHistoryMessageCompact, error) {
@@ -833,10 +933,20 @@ func (q *recordingCompactionLogQueries) GetCompactionLogByID(_ context.Context, 
 	return q.byID[compactID], nil
 }
 
+func (q *recordingCompactionLogQueries) ListCompactionArtifactParentIDsBySuccessor(_ context.Context, arg sqlc.ListCompactionArtifactParentIDsBySuccessorParams) ([]pgtype.UUID, error) {
+	var ids []pgtype.UUID
+	for _, row := range q.byID {
+		if row.Status == "ok" && row.SupersededBy == arg.SuccessorID && row.BotID == arg.BotID && row.SessionID == arg.SessionID {
+			ids = append(ids, row.ID)
+		}
+	}
+	return ids, nil
+}
+
 func (q *recordingCompactionLogQueries) ListCompactionArtifactLineageBySession(_ context.Context, sessionID pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
 	q.sessionID = sessionID
 	q.listCalls++
-	return q.logs, nil
+	return q.logs, q.listErr
 }
 
 func persistedCoverage(t *testing.T, id string) []byte {
@@ -854,6 +964,23 @@ func persistedCoverage(t *testing.T, id string) []byte {
 		t.Fatalf("marshal persisted coverage: %v", err)
 	}
 	return raw
+}
+
+func recordTexts(records []historyfrag.HistoryRecord) []string {
+	texts := make([]string, 0, len(records))
+	for _, record := range records {
+		texts = append(texts, record.ModelMessage.TextContent())
+	}
+	return texts
+}
+
+func mustReplaceCompactedMessages(t *testing.T, resolver *Resolver, sessionID string, scope contextfrag.Scope, records []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
+	t.Helper()
+	replaced, err := resolver.replaceCompactedMessages(context.Background(), sessionID, scope, records)
+	if err != nil {
+		t.Fatalf("replaceCompactedMessages: %v", err)
+	}
+	return replaced
 }
 
 func (q *recordingCompactionLogQueries) ListMessagesByCompactID(_ context.Context, compactID pgtype.UUID) ([]sqlc.ListMessagesByCompactIDRow, error) {

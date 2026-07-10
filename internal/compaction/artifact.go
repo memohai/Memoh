@@ -57,6 +57,15 @@ func (a Artifact) HistoryRecord(scope contextfrag.Scope) historyfrag.HistoryReco
 	return record
 }
 
+func (a Artifact) Covers(ref contextfrag.ContextRef) bool {
+	for _, source := range a.Coverage {
+		if compatibleCoverageRef(ref, source.Ref) {
+			return true
+		}
+	}
+	return false
+}
+
 type artifactMetadata struct {
 	Coverage      []byte
 	AnchorStartMs int64

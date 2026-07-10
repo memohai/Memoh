@@ -228,6 +228,7 @@ type Queries interface {
 	InsertVersion(ctx context.Context, arg dbsqlc.InsertVersionParams) (dbsqlc.ContainerVersion, error)
 	ListAccounts(ctx context.Context) ([]dbsqlc.User, error)
 	ListCompactionArtifactLineageBySession(ctx context.Context, sessionID pgtype.UUID) ([]dbsqlc.BotHistoryMessageCompact, error)
+	ListCompactionArtifactParentIDsBySuccessor(ctx context.Context, arg dbsqlc.ListCompactionArtifactParentIDsBySuccessorParams) ([]pgtype.UUID, error)
 	ListActiveMessagesSince(ctx context.Context, arg dbsqlc.ListActiveMessagesSinceParams) ([]dbsqlc.ListActiveMessagesSinceRow, error)
 	ListActiveMessagesSinceBySession(ctx context.Context, arg dbsqlc.ListActiveMessagesSinceBySessionParams) ([]dbsqlc.ListActiveMessagesSinceBySessionRow, error)
 	ListAutoStartContainers(ctx context.Context) ([]dbsqlc.Container, error)

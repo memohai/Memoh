@@ -362,7 +362,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		maxCompactTokens = 30000
 	}
 
-	frontier, err := NewArtifactProjection(s.queries).LoadActiveSession(ctx, cfg.SessionID)
+	frontier, err := NewArtifactProjection(s.queries).LoadActiveSession(ctx, ArtifactOwner{BotID: cfg.BotID, SessionID: cfg.SessionID})
 	if err != nil {
 		return Result{}, err
 	}

@@ -234,6 +234,42 @@ func (q *Queries) ListCompactionArtifactLineageBySession(ctx context.Context, se
 	return items, nil
 }
 
+const listCompactionArtifactParentIDsBySuccessor = `-- name: ListCompactionArtifactParentIDsBySuccessor :many
+SELECT id
+FROM bot_history_message_compacts
+WHERE superseded_by = $1
+  AND bot_id = $2
+  AND session_id IS NOT DISTINCT FROM $3::uuid
+  AND status = 'ok'
+ORDER BY id ASC
+`
+
+type ListCompactionArtifactParentIDsBySuccessorParams struct {
+	SuccessorID pgtype.UUID `json:"successor_id"`
+	BotID       pgtype.UUID `json:"bot_id"`
+	SessionID   pgtype.UUID `json:"session_id"`
+}
+
+func (q *Queries) ListCompactionArtifactParentIDsBySuccessor(ctx context.Context, arg ListCompactionArtifactParentIDsBySuccessorParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listCompactionArtifactParentIDsBySuccessor, arg.SuccessorID, arg.BotID, arg.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCompactionLogsByBot = `-- name: ListCompactionLogsByBot :many
 SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
        artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,

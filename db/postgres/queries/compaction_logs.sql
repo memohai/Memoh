@@ -29,6 +29,15 @@ SELECT id, bot_id, session_id, status, summary, message_count, error_message, us
 FROM bot_history_message_compacts
 WHERE id = $1;
 
+-- name: ListCompactionArtifactParentIDsBySuccessor :many
+SELECT id
+FROM bot_history_message_compacts
+WHERE superseded_by = sqlc.arg(successor_id)
+  AND bot_id = sqlc.arg(bot_id)
+  AND session_id IS NOT DISTINCT FROM sqlc.narg(session_id)::uuid
+  AND status = 'ok'
+ORDER BY id ASC;
+
 -- name: ListCompactionLogsByBot :many
 SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
        artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
