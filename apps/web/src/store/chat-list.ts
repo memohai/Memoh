@@ -358,6 +358,7 @@ export const useChatStore = defineStore('chat', () => {
   let deletedSessionSeq = 0
 
   let activeWs: ChatWebSocket | null = null
+  let webSocketGeneration = 0
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   let sessionListRefreshPromise: { botId: string; promise: Promise<void> } | null = null
   // Two independent streams replace the deleted bot-wide messages SSE:
@@ -742,6 +743,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function stopWebSocket() {
+    webSocketGeneration += 1
     if (activeWs) {
       activeWs.close()
       activeWs = null
@@ -794,7 +796,11 @@ export const useChatStore = defineStore('chat', () => {
     const bid = targetBotId.trim()
     stopWebSocket()
     if (!bid) return
-    activeWs = connectWebSocket(bid, event => handleWSStreamEvent(event, undefined, bid))
+    const generation = webSocketGeneration
+    activeWs = connectWebSocket(bid, (event) => {
+      if (generation !== webSocketGeneration) return
+      handleWSStreamEvent(event, undefined, bid)
+    })
   }
 
   function ensureWebSocket(targetBotId: string): ChatWebSocket | null {

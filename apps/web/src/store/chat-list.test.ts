@@ -4066,6 +4066,45 @@ describe('chat-list store', () => {
     })
   })
 
+  it('ignores queued websocket events from a previous bot connection', async () => {
+    api.fetchBots.mockResolvedValue([
+      { id: 'bot-1', status: 'active', name: 'Bot 1' },
+      { id: 'bot-2', status: 'active', name: 'Bot 2' },
+    ])
+    const handlers: Array<{ botId: string; handler: UIStreamEventHandler }> = []
+    api.connectWebSocket.mockImplementation((botId: string, handler: UIStreamEventHandler) => {
+      handlers.push({ botId, handler })
+      return {
+        get connected() {
+          return true
+        },
+        send: vi.fn(),
+        abort: vi.fn(),
+        close: vi.fn(),
+        onOpen: null,
+        onClose: null,
+      }
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const staleHandler = handlers.find(entry => entry.botId === 'bot-1')?.handler
+    expect(staleHandler).toBeDefined()
+
+    await store.selectBot('bot-2')
+    staleHandler?.({ type: 'start', stream_id: 'old-stream', session_id: 'old-session' } as UIStreamEvent)
+    staleHandler?.({
+      type: 'message',
+      stream_id: 'old-stream',
+      session_id: 'old-session',
+      data: { id: 0, type: 'text', content: 'late old-bot output' },
+    } as UIStreamEvent)
+
+    expect(store.currentBotId).toBe('bot-2')
+    expect(store.isSessionStreaming('old-session')).toBe(false)
+    expect(store.messages).toHaveLength(0)
+  })
+
   it('routes interleaved websocket events by stream id', async () => {
     // Two parallel assistant streams in two sessions: each turn must be
     // updated by its own stream id, never crossed. Cross-session view
