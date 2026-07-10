@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -210,6 +211,29 @@ func TestLoadPipelineCompactionArtifactsSkipsUnreconciledLegacyArtifact(t *testi
 	}
 	if len(artifacts) != 0 || len(summaries) != 0 {
 		t.Fatalf("unreconciled legacy artifact became active: artifacts=%#v summaries=%#v", artifacts, summaries)
+	}
+}
+
+func TestLoadPipelineCompactionArtifactsPropagatesLegacyCoverageFailure(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID      = "11111111-1111-1111-1111-111111111111"
+		sessionID  = "22222222-2222-2222-2222-222222222222"
+		artifactID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	)
+	wantErr := errors.New("legacy coverage unavailable")
+	row := pipelineArtifactRow(t, artifactID, botID, sessionID, "legacy summary", nil, time.UnixMilli(1_000).UTC())
+	row.Coverage = []byte("[]")
+	resolver := &Resolver{queries: &recordingCompactionLogQueries{
+		logs:   []sqlc.BotHistoryMessageCompact{row},
+		refErr: wantErr,
+	}}
+	scope := compactionSummaryScope(botID, "chat", sessionID, "group", "room", "target")
+
+	_, _, err := resolver.loadPipelineCompactionArtifacts(context.Background(), scope, nil)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("loadPipelineCompactionArtifacts() error = %v, want %v", err, wantErr)
 	}
 }
 

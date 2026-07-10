@@ -405,6 +405,7 @@ type recordingCompactionLogQueries struct {
 	refCalls  []pgtype.UUID
 	getCalls  []pgtype.UUID
 	listErr   error
+	refErr    error
 }
 
 func (q *recordingCompactionLogQueries) GetCompactionLogByID(_ context.Context, compactID pgtype.UUID) (sqlc.BotHistoryMessageCompact, error) {
@@ -471,7 +472,7 @@ func mustReplaceCompactedMessages(t *testing.T, resolver *Resolver, sessionID st
 
 func (q *recordingCompactionLogQueries) ListMessageRefsByCompactID(_ context.Context, compactID pgtype.UUID) ([]sqlc.ListMessageRefsByCompactIDRow, error) {
 	q.refCalls = append(q.refCalls, compactID)
-	return q.refs[compactID], nil
+	return q.refs[compactID], q.refErr
 }
 
 func mustPGUUID(t *testing.T, value string) pgtype.UUID {

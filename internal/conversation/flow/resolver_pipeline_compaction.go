@@ -2,7 +2,7 @@ package flow
 
 import (
 	"context"
-	"log/slog"
+	"fmt"
 	"strings"
 
 	"github.com/memohai/memoh/internal/compaction"
@@ -57,7 +57,10 @@ func (r *Resolver) loadPipelineCompactionArtifacts(
 		}
 		projected := artifact
 		if len(projected.Coverage) == 0 {
-			projected.Coverage = r.loadLegacyArtifactCoverage(ctx, projected, owner)
+			projected.Coverage, err = r.loadLegacyArtifactCoverage(ctx, projected, owner)
+			if err != nil {
+				return nil, nil, err
+			}
 			if len(projected.Coverage) == 0 {
 				projected.Coverage = legacyArtifactCoverage(catalog, projected, records, scope)
 			}
@@ -91,28 +94,25 @@ func (r *Resolver) loadLegacyArtifactCoverage(
 	ctx context.Context,
 	artifact compaction.Artifact,
 	owner compaction.ArtifactOwner,
-) []compaction.CoveredSource {
+) ([]compaction.CoveredSource, error) {
 	compactID, err := db.ParseUUID(artifact.ID)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	rows, err := r.queries.ListMessageRefsByCompactID(ctx, compactID)
 	if err != nil {
-		if r.logger != nil {
-			r.logger.Warn("load legacy pipeline coverage failed", slog.String("compact_id", artifact.ID), slog.Any("error", err))
-		}
-		return nil
+		return nil, fmt.Errorf("load legacy pipeline coverage for %s: %w", artifact.ID, err)
 	}
 	coverage := make([]compaction.CoveredSource, 0, len(rows))
 	for _, row := range rows {
 		if !row.CreatedAt.Valid ||
 			(owner.BotID != "" && pgUUIDString(row.BotID) != owner.BotID) ||
 			!owner.SessionIDKnown || pgUUIDString(row.SessionID) != owner.SessionID {
-			return nil
+			return nil, nil
 		}
 		ref, err := historyfrag.DBMessageIdentityRef(pgUUIDString(row.ID))
 		if err != nil {
-			return nil
+			return nil, nil
 		}
 		coverage = append(coverage, compaction.CoveredSource{
 			Ref:                    ref,
@@ -121,7 +121,7 @@ func (r *Resolver) loadLegacyArtifactCoverage(
 			CreatedAtMs:            row.CreatedAt.Time.UnixMilli(),
 		})
 	}
-	return coverage
+	return coverage, nil
 }
 
 func legacyArtifactCoverage(
