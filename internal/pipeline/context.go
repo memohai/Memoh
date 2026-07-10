@@ -21,9 +21,10 @@ type TurnResponseEntry struct {
 
 // ContextMessage is a unified message for LLM context, produced by MergeContext.
 type ContextMessage struct {
-	Role       string          `json:"role"`
-	Content    string          `json:"content"`
-	RawContent json.RawMessage `json:"raw_content,omitempty"`
+	Role                 string          `json:"role"`
+	Content              string          `json:"content"`
+	RawContent           json.RawMessage `json:"raw_content,omitempty"`
+	CompactionArtifactID string          `json:"compaction_artifact_id,omitempty"`
 }
 
 // ComposeContextResult holds the output of ComposeContext.
@@ -73,7 +74,8 @@ type mergeEntry struct {
 	// For RC entries
 	rcContent []RenderedContentPiece
 	// For summary entries
-	summaryContent string
+	summaryContent    string
+	summaryArtifactID string
 	// For TR entries
 	trRole       string
 	trContent    string
@@ -151,7 +153,11 @@ func mergeEntries(entries []mergeEntry) []ContextMessage {
 			}
 		case "summary":
 			flushRC()
-			messages = append(messages, ContextMessage{Role: "user", Content: entry.summaryContent})
+			messages = append(messages, ContextMessage{
+				Role:                 "user",
+				Content:              entry.summaryContent,
+				CompactionArtifactID: entry.summaryArtifactID,
+			})
 		case "tr":
 			flushRC()
 			messages = append(messages, ContextMessage{
@@ -196,10 +202,11 @@ func ComposeContextWithArtifacts(rc RenderedContext, trs []TurnResponseEntry, ar
 			continue
 		}
 		entries = append(entries, mergeEntry{
-			kind:           "summary",
-			time:           artifactSummaryAnchor(artifact, rc, trs),
-			step:           i,
-			summaryContent: "[Conversation summary]\n" + strings.TrimSpace(artifact.Summary),
+			kind:              "summary",
+			time:              artifactSummaryAnchor(artifact, rc, trs),
+			step:              i,
+			summaryContent:    "<summary>\n" + strings.TrimSpace(artifact.Summary) + "\n</summary>",
+			summaryArtifactID: artifact.ID,
 		})
 	}
 	entries = appendTurnResponseEntries(entries, activeTRs)

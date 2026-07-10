@@ -44,9 +44,9 @@ func TestComposeContextWithArtifactsKeepsOrderedSummariesAtCoverageAnchors(t *te
 	}
 	assertContextContents(t, composed.Messages, []string{
 		messageXML("before", "before compacted ranges"),
-		"[Conversation summary]\nsummary a",
+		"<summary>\nsummary a\n</summary>",
 		messageXML("between", "between summaries"),
-		"[Conversation summary]\nsummary b",
+		"<summary>\nsummary b\n</summary>",
 		messageXML("after", "after compacted ranges"),
 		"new assistant",
 	})
@@ -77,7 +77,7 @@ func TestComposeContextWithArtifactsKeepsPostCompactionMutation(t *testing.T) {
 	}
 	assertContextContents(t, composed.Messages, []string{
 		messageXML("before", "before compact"),
-		"[Conversation summary]\noriginal state",
+		"<summary>\noriginal state\n</summary>",
 		messageXML("covered", "edited after compact"),
 	})
 }
@@ -97,7 +97,7 @@ func TestComposeContextWithArtifactsKeepsRenderedMessageWithoutDurableCutoff(t *
 		t.Fatal("expected composed context")
 	}
 	assertContextContents(t, composed.Messages, []string{
-		"[Conversation summary]\nlegacy summary",
+		"<summary>\nlegacy summary\n</summary>",
 		messageXML("covered", "still live"),
 	})
 }
@@ -120,6 +120,25 @@ func TestComposeContextWithArtifactsIgnoresUnusableArtifactAtomically(t *testing
 		messageXML("covered", "must remain"),
 		"must also remain",
 	})
+}
+
+func TestComposeContextWithArtifactsPreservesIdentityForEqualSummaryText(t *testing.T) {
+	t.Parallel()
+
+	artifacts := []CompactionArtifact{
+		{ID: "artifact-a", Summary: "same text", AnchorStartMs: 100},
+		{ID: "artifact-b", Summary: "same text", AnchorStartMs: 200},
+	}
+	composed := ComposeContextWithArtifacts(nil, nil, artifacts)
+	if composed == nil || len(composed.Messages) != 2 {
+		t.Fatalf("composed context = %#v, want two summaries", composed)
+	}
+	if got := composed.Messages[0].CompactionArtifactID; got != "artifact-a" {
+		t.Fatalf("first summary identity = %q, want artifact-a", got)
+	}
+	if got := composed.Messages[1].CompactionArtifactID; got != "artifact-b" {
+		t.Fatalf("second summary identity = %q, want artifact-b", got)
+	}
 }
 
 func TestLatestExternalEventMsUsesMutationTimeAndSkipsSelfSent(t *testing.T) {
