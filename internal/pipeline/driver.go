@@ -29,7 +29,7 @@ type RunConfigResolver interface {
 	ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
 	InlineImageAttachments(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart
 	LoadContextHistoryProjection(ctx context.Context, botID, sessionID string) (ContextHistoryProjection, error)
-	MaybeCompactSession(ctx context.Context, botID, sessionID, channelIdentityID string, inputTokens, contextTokenBudget int)
+	MaybeCompactSession(ctx context.Context, botID, sessionID, userID string, inputTokens, contextTokenBudget int)
 	StoreRound(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform string, messages []sdk.Message, modelID string) error
 }
 
@@ -70,6 +70,7 @@ type DiscussSessionConfig struct {
 	BotID             string
 	SessionID         string
 	RouteID           string
+	UserID            string
 	ChannelIdentityID string
 	ReplyTarget       string
 	CurrentPlatform   string
@@ -382,7 +383,7 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 			context.WithoutCancel(ctx),
 			cfg.BotID,
 			cfg.SessionID,
-			cfg.ChannelIdentityID,
+			cfg.UserID,
 			inputTokens,
 			0,
 		)

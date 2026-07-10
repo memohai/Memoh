@@ -37,7 +37,7 @@ func (r *Resolver) MaybeCompactSession(
 	ctx context.Context,
 	botID string,
 	sessionID string,
-	channelIdentityID string,
+	userID string,
 	inputTokens int,
 	contextTokenBudget int,
 ) {
@@ -47,7 +47,7 @@ func (r *Resolver) MaybeCompactSession(
 	r.maybeCompact(ctx, conversation.ChatRequest{
 		BotID:     botID,
 		SessionID: sessionID,
-		UserID:    channelIdentityID,
+		UserID:    userID,
 	}, resolvedContext{contextTokenBudget: contextTokenBudget}, inputTokens)
 }
 

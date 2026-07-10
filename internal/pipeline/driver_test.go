@@ -804,6 +804,7 @@ type fakeRunConfigResolver struct {
 	compactionCalls       int
 	compactionInputTokens int
 	compactionBudget      int
+	compactionUserID      string
 }
 
 func (f *fakeRunConfigResolver) ResolveRunConfig(_ context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error) {
@@ -828,10 +829,11 @@ func (f *fakeRunConfigResolver) LoadContextHistoryProjection(context.Context, st
 	}, f.artifactErr
 }
 
-func (f *fakeRunConfigResolver) MaybeCompactSession(_ context.Context, _, _, _ string, inputTokens, contextTokenBudget int) {
+func (f *fakeRunConfigResolver) MaybeCompactSession(_ context.Context, _, _, userID string, inputTokens, contextTokenBudget int) {
 	f.compactionCalls++
 	f.compactionInputTokens = inputTokens
 	f.compactionBudget = contextTokenBudget
+	f.compactionUserID = userID
 }
 
 func (*fakeRunConfigResolver) StoreRound(_ context.Context, _, _, _, _ string, _ []sdk.Message, _ string) error {

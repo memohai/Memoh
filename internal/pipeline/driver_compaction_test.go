@@ -181,13 +181,21 @@ func TestHandleReplyWithAgentTriggersCompactionFromReportedUsage(t *testing.T) {
 	resolver := &fakeRunConfigResolver{}
 	agent := &fakeDiscussStreamer{endUsage: []byte(`{"inputTokens":321}`)}
 	driver := NewDiscussDriver(DiscussDriverDeps{Resolver: resolver})
-	sess := &discussSession{config: DiscussSessionConfig{BotID: "bot", SessionID: "session", ChannelIdentityID: "identity"}}
+	sess := &discussSession{config: DiscussSessionConfig{
+		BotID:             "bot",
+		SessionID:         "session",
+		UserID:            "account-user",
+		ChannelIdentityID: "channel-identity",
+	}}
 	rc := RenderedContext{{MessageID: "new", ReceivedAtMs: 100, Content: []RenderedContentPiece{{Type: "text", Text: "new"}}}}
 
 	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, agent)
 
 	if resolver.compactionCalls != 1 || resolver.compactionInputTokens != 321 {
 		t.Fatalf("compaction trigger = calls:%d input:%d, want one call with 321", resolver.compactionCalls, resolver.compactionInputTokens)
+	}
+	if resolver.compactionUserID != "account-user" {
+		t.Fatalf("compaction principal = %q, want account user", resolver.compactionUserID)
 	}
 }
 
