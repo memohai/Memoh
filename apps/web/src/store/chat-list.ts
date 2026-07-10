@@ -30,6 +30,7 @@ import { createSessionList } from './chat/session-list'
 import { acpSessionMetadata, createACPStaging } from './chat/acp-staging'
 import { createTranscriptController } from './chat/transcript'
 import { createAssistantStreamRegistry } from './chat/assistant-streams'
+import { createApprovalResponseTracker } from './chat/approval-responses'
 import {
   createBackgroundTaskTracker,
   normalizeBackgroundTask,
@@ -275,14 +276,16 @@ export const useChatStore = defineStore('chat', () => {
     forgetCreatedSession,
     clearStreamHistory,
   } = assistantStreams
-  // In-flight tool-approval responses, keyed by response stream id. Silent
-  // entries belong to a session that is already streaming: their events are
-  // swallowed instead of rendered as a new assistant turn. Entries normally
-  // clear on the response stream's end/error; the expiry covers streams whose
-  // terminal event never arrives (e.g. a WebSocket drop mid-approval), so the
-  // approval doesn't stay locked against retries until a reload.
-  const APPROVAL_RESPONSE_TTL_MS = 2 * 60 * 1000
-  const approvalResponseStreams = new Map<string, { approvalId: string, silent: boolean, at: number }>()
+  const approvalResponses = createApprovalResponseTracker({
+    rollbackApproval: approvalId => markToolApprovalDecision(approvalId, 'pending'),
+  })
+  const {
+    hasPendingApprovalResponse,
+    beginApprovalResponse,
+    getApprovalResponse,
+    settleApprovalResponse,
+    clearApprovalResponses,
+  } = approvalResponses
   const forkingMessages = new Set<string>()
   // Sessions-list bookkeeping + fork-anchor tracking (see ./chat/session-list).
   const sessionList = createSessionList({ currentBotId, sessionId, messages })
@@ -618,31 +621,6 @@ export const useChatStore = defineStore('chat', () => {
     removeTurnFromSession(session.botId, session.sessionId, turn)
   }
 
-  function purgeStaleApprovalResponses() {
-    const now = Date.now()
-    for (const [streamId, entry] of approvalResponseStreams) {
-      if (now - entry.at < APPROVAL_RESPONSE_TTL_MS) continue
-      markToolApprovalDecision(entry.approvalId, 'pending')
-      approvalResponseStreams.delete(streamId)
-    }
-  }
-
-  function hasPendingApprovalResponse(approvalId: string) {
-    purgeStaleApprovalResponses()
-    for (const entry of approvalResponseStreams.values()) {
-      if (entry.approvalId === approvalId) return true
-    }
-    return false
-  }
-
-
-  // Undo the optimistic decision when the response stream fails, so the user
-  // can retry instead of being stuck with buttons that vanished for nothing.
-  function rollbackApprovalResponse(streamId: string) {
-    const approvalId = approvalResponseStreams.get(streamId)?.approvalId
-    if (approvalId) markToolApprovalDecision(approvalId, 'pending')
-  }
-
   function handleWSStreamEvent(event: UIStreamEvent, targetSessionId?: string, sourceBotId = '') {
     if (event.type === 'session_created') {
       handleWSSessionCreated(event, sourceBotId)
@@ -684,13 +662,14 @@ export const useChatStore = defineStore('chat', () => {
     // it still triggers the final authoritative refresh below.
     if (isTerminalStream(streamId) && event.type !== 'end') return
 
-    if (approvalResponseStreams.get(streamId)?.silent) {
+    if (getApprovalResponse(streamId)?.silent) {
       if (event.type === 'end' || event.type === 'error') {
         if (event.type === 'error') {
-          rollbackApprovalResponse(streamId)
+          settleApprovalResponse(streamId, 'failed')
           toast.error(resolveApiErrorMessage(event, event.message || 'tool approval failed'))
+        } else {
+          settleApprovalResponse(streamId, 'succeeded')
         }
-        approvalResponseStreams.delete(streamId)
         loading.value = isSessionStreaming(sessionId.value)
       }
       return
@@ -708,7 +687,7 @@ export const useChatStore = defineStore('chat', () => {
         const endedSession = getAssistantStream(streamId)
         const endedBotId = endedSession?.botId ?? currentBotId.value ?? ''
         const endedSessionId = (endedSession?.sessionId || sid || '').trim()
-        approvalResponseStreams.delete(streamId)
+        settleApprovalResponse(streamId, 'succeeded')
         pruneEmptyAssistantTurnIfPending(streamId)
         resolveAssistantStream(streamId)
         loading.value = isSessionStreaming(sessionId.value)
@@ -734,8 +713,7 @@ export const useChatStore = defineStore('chat', () => {
         if (!session) break
         const message = event.message || 'stream error'
         const stage: SendMessageStage = hasVisibleAssistantBlocks(session.assistantTurn) ? 'stream' : 'startup'
-        rollbackApprovalResponse(streamId)
-        approvalResponseStreams.delete(streamId)
+        settleApprovalResponse(streamId, 'failed')
         rejectAssistantStream(streamId, new StreamFailureError(message, stage))
         loading.value = isSessionStreaming(sessionId.value)
         break
@@ -788,7 +766,7 @@ export const useChatStore = defineStore('chat', () => {
     clearPendingACPSession()
 
     clearStreamHistory()
-    approvalResponseStreams.clear()
+    clearApprovalResponses()
     forkingMessages.clear()
     backgroundTasks.clearBackgroundTasks()
   }
@@ -1014,7 +992,7 @@ export const useChatStore = defineStore('chat', () => {
   function abortAllAssistantStreams() {
     const abortError = new Error('aborted')
     abortError.name = 'AbortError'
-    approvalResponseStreams.clear()
+    clearApprovalResponses()
     rejectAllStreams(abortError, (streamId) => {
       if (activeWs?.connected) activeWs.abort(streamId)
     })
@@ -2065,7 +2043,7 @@ export const useChatStore = defineStore('chat', () => {
     }
     const streamId = createStreamId()
     const silent = isSessionStreaming(sid)
-    approvalResponseStreams.set(streamId, { approvalId, silent, at: Date.now() })
+    if (!beginApprovalResponse({ streamId, approvalId, botId: bid, sessionId: sid, silent })) return false
     const previousApprovalStates = snapshotToolApprovalStates(approvalId)
     let assistantTurn: ChatAssistantTurn | null = null
     if (!silent) {
@@ -2090,7 +2068,7 @@ export const useChatStore = defineStore('chat', () => {
       })
     } catch (error) {
       restoreToolApprovalStates(previousApprovalStates)
-      approvalResponseStreams.delete(streamId)
+      settleApprovalResponse(streamId, 'canceled')
       if (!silent) {
         discardAssistantStream(streamId)
         if (assistantTurn) removeFromView(assistantTurn)
