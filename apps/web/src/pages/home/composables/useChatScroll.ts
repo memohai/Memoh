@@ -873,6 +873,28 @@ export function useChatScroll(options: UseChatScrollOptions) {
     handleUserScroll(ev.deltaY < 0)
   }
 
+  // --- Physical-gesture latches for the scroll paths that bypass `wheel` ---
+  // Scrollbar dragging and text-selection auto-scroll arrive as bare scroll
+  // events; so does keyboard paging. Track the gestures themselves so
+  // onScrollEvent can tell them apart from LAYOUT-induced scrolls (see below).
+  let pointerActive = false
+  let lastKeyNavAt = 0
+  function onPointerDown() {
+    pointerActive = true
+  }
+  function onPointerUp() {
+    pointerActive = false
+  }
+  const KEY_NAV = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '])
+  function onKeyNav(ev: KeyboardEvent) {
+    if (!KEY_NAV.has(ev.key)) return
+    // Typing in the composer must not count as scroll intent (space/arrows
+    // are ordinary editing keys there).
+    const t = ev.target as HTMLElement | null
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+    lastKeyNavAt = performance.now()
+  }
+
   function onScrollEvent() {
     const el = scrollEl.value
     if (!el) return
@@ -885,7 +907,28 @@ export function useChatScroll(options: UseChatScrollOptions) {
     // A scroll we triggered ourselves only updates the at-bottom mirror; it
     // must never move the follow latch.
     if (isProgrammaticScroll) return
-    handleUserScroll(isScrollingUp)
+    // Escape may ONLY be latched from a physical gesture. Everything else
+    // reaching here is a LAYOUT-induced scroll the browser performed on its
+    // own — clamp when content transiently shrinks (completion flips
+    // streaming off → the markdown subtree re-renders and is shorter for a
+    // beat), or scroll anchoring re-seating the viewport when its anchor
+    // node is destroyed by that re-render. Reading direction off such events
+    // killed follow exactly at completion and left the view shoved up at the
+    // reply's top; enumerating their signatures (a previous clamp-only guard)
+    // lost the race whenever content had already regrown by the time the
+    // event was delivered. Wheel/touch never reach here (handled/cancelled at
+    // their own listeners); pointer drag and keyboard paging are latched
+    // above. 500ms covers key-repeat gaps between keydown and its scroll.
+    const physical = pointerActive || performance.now() - lastKeyNavAt < 500
+    if (physical) {
+      handleUserScroll(isScrollingUp)
+      return
+    }
+    // Layout displacement while following: heal it. Completion re-renders can
+    // shove the viewport with no further DOM mutation ever coming to pull it
+    // back — the follow heartbeat is mutation-driven, so this scroll event is
+    // the only wake-up we get.
+    if (followEnabled && !isNearBottom(el)) stickToBottomNow()
   }
 
   function handleUserScroll(isScrollingUp: boolean) {
@@ -960,6 +1003,14 @@ export function useChatScroll(options: UseChatScrollOptions) {
     lastScrollTop = el.scrollTop
     el.addEventListener('wheel', onWheel, { passive: true })
     el.addEventListener('scroll', onScrollEvent, { passive: true })
+    // Physical-gesture latches: pointerdown on the element covers scrollbar
+    // drags and selection auto-scroll; pointerup goes on window because a
+    // drag often releases outside the element. Keydown on window because the
+    // focused node during keyboard paging may sit outside this subtree.
+    el.addEventListener('pointerdown', onPointerDown, { passive: true })
+    window.addEventListener('pointerup', onPointerUp, { passive: true })
+    window.addEventListener('pointercancel', onPointerUp, { passive: true })
+    window.addEventListener('keydown', onKeyNav, { passive: true })
     mutationObserver = new MutationObserver(onContentMutated)
     // childList catches new bubbles/token spans; characterData catches text
     // that streams into an existing node — either can be the stream's growth.
@@ -970,7 +1021,12 @@ export function useChatScroll(options: UseChatScrollOptions) {
     if (el) {
       el.removeEventListener('wheel', onWheel)
       el.removeEventListener('scroll', onScrollEvent)
+      el.removeEventListener('pointerdown', onPointerDown)
     }
+    window.removeEventListener('pointerup', onPointerUp)
+    window.removeEventListener('pointercancel', onPointerUp)
+    window.removeEventListener('keydown', onKeyNav)
+    pointerActive = false
     mutationObserver?.disconnect()
     mutationObserver = null
   }
