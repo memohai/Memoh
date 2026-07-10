@@ -3,7 +3,9 @@ package compaction
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -51,6 +53,9 @@ func (a Artifact) HistoryRecord(scope contextfrag.Scope) historyfrag.HistoryReco
 		coveredRefs = append(coveredRefs, source.Ref)
 	}
 	record := historyfrag.SummaryRecord(a.ID, a.Summary, coveredRefs, scope)
+	record.BotID = a.BotID
+	record.SessionID = a.SessionID
+	record.SessionIDKnown = true
 	if a.AnchorStartMs > 0 {
 		record.CreatedAt = time.UnixMilli(a.AnchorStartMs).UTC()
 	}
@@ -114,10 +119,48 @@ func DecodeArtifactCoverage(raw []byte) ([]CoveredSource, error) {
 	if err := json.Unmarshal(raw, &covered); err != nil {
 		return nil, fmt.Errorf("decode compaction artifact coverage: %w", err)
 	}
-	for i, source := range covered {
-		if err := contextfrag.ValidateContextRef(source.Ref); err != nil {
-			return nil, fmt.Errorf("decode compaction artifact coverage ref %d: %w", i, err)
-		}
+	if err := validatePersistedArtifactCoverage(covered); err != nil {
+		return nil, fmt.Errorf("decode compaction artifact coverage: %w", err)
 	}
 	return covered, nil
+}
+
+func validatePersistedArtifactCoverage(covered []CoveredSource) error {
+	seen := make(map[string]struct{}, len(covered))
+	for i, source := range covered {
+		if err := validatePersistedCoverageRef(source.Ref); err != nil {
+			return fmt.Errorf("ref %d: %w", i, err)
+		}
+		key := source.Ref.StableKey()
+		if _, ok := seen[key]; ok {
+			return fmt.Errorf("ref %d: duplicate stable key %q", i, key)
+		}
+		seen[key] = struct{}{}
+		if i > 0 && source.CreatedAtMs < covered[i-1].CreatedAtMs {
+			return fmt.Errorf(
+				"ref %d: created_at_ms %d precedes ref %d created_at_ms %d",
+				i,
+				source.CreatedAtMs,
+				i-1,
+				covered[i-1].CreatedAtMs,
+			)
+		}
+	}
+	return nil
+}
+
+func validatePersistedCoverageRef(ref contextfrag.ContextRef) error {
+	if err := contextfrag.ValidateContextRef(ref); err != nil {
+		return err
+	}
+	if ref.HashAlgo != contextfrag.HashAlgoSHA256 {
+		return fmt.Errorf("hash algo must be %q", contextfrag.HashAlgoSHA256)
+	}
+	if ref.HashScope != contextfrag.HashScopeSourcePayload {
+		return fmt.Errorf("hash scope must be %q", contextfrag.HashScopeSourcePayload)
+	}
+	if strings.TrimSpace(ref.ContentHash) == "" {
+		return errors.New("content hash is required")
+	}
+	return nil
 }

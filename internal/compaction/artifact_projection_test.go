@@ -221,15 +221,19 @@ func testArtifact(id string) Artifact {
 
 func testCoverage(ids ...string) []CoveredSource {
 	covered := make([]CoveredSource, 0, len(ids))
-	for _, id := range ids {
+	for i, id := range ids {
 		covered = append(covered, CoveredSource{
 			Ref: contextfrag.ContextRef{
-				Namespace:  "bot_history_message",
-				ID:         id,
-				Version:    1,
-				Schema:     contextfrag.SchemaContextRef,
-				Durability: contextfrag.RefDurable,
+				Namespace:   "bot_history_message",
+				ID:          id,
+				Version:     1,
+				HashAlgo:    contextfrag.HashAlgoSHA256,
+				HashScope:   contextfrag.HashScopeSourcePayload,
+				ContentHash: "hash-" + id,
+				Schema:      contextfrag.SchemaContextRef,
+				Durability:  contextfrag.RefDurable,
 			},
+			CreatedAtMs: int64(i + 1),
 		})
 	}
 	return covered

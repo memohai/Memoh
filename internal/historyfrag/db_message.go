@@ -63,6 +63,7 @@ func FromDBMessageWithLogger(log *slog.Logger, msg messagepkg.Message, fallback 
 		ExternalMessageID: strings.TrimSpace(msg.ExternalMessageID),
 		EventID:           strings.TrimSpace(msg.EventID),
 		SessionID:         strings.TrimSpace(msg.SessionID),
+		SessionIDKnown:    true,
 		BotID:             strings.TrimSpace(msg.BotID),
 
 		SenderChannelIdentityID: strings.TrimSpace(msg.SenderChannelIdentityID),

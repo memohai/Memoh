@@ -289,25 +289,16 @@ func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.R
 		return err
 	}
 
-	loaded, err := r.loadHistoryRecords(ctx, historyScopeFallbackFromUserInputRequest(req), req.SessionID, defaultMaxContextMinutes)
+	cfg, err := r.prepareContinuationRunConfig(
+		ctx,
+		resolved.RunConfig,
+		historyScopeFallbackFromUserInputRequest(req),
+		compactionSummaryScope(firstNonEmpty(req.BotID, input.BotID), "", req.SessionID, req.ConversationType, "", req.ReplyTarget),
+		eventCh,
+	)
 	if err != nil {
 		return err
 	}
-	loaded = pruneHistoryForGateway(loaded)
-	loaded, err = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(firstNonEmpty(req.BotID, input.BotID), "", req.SessionID, req.ConversationType, "", req.ReplyTarget), loaded)
-	if err != nil {
-		return err
-	}
-	messages, retained, _ := trimMessagesAndRecordsByTokens(r.logger, loaded, 0)
-	messages = sanitizeMessages(messages)
-
-	cfg := resolved.RunConfig
-	cfg.ContextFrags = historyContextFragsForMessages(messages, retained)
-	cfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
-	cfg.Query = ""
-	cfg.LiveToolStream = eventCh != nil
-	cfg.CanRequestUserInput = r.canDeliverUserInputWS(eventCh)
-	cfg = r.prepareRunConfig(ctx, cfg)
 
 	chatReq := conversation.ChatRequest{
 		BotID:                   input.BotID,

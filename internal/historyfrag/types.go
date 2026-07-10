@@ -47,6 +47,7 @@ type HistoryRecord struct {
 	ExternalMessageID string
 	EventID           string
 	SessionID         string
+	SessionIDKnown    bool
 	BotID             string
 
 	SenderChannelIdentityID string

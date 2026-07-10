@@ -20,6 +20,7 @@ const (
 	LineageIssueMissingDerivedCoverage LineageIssueKind = "missing_derived_coverage"
 	LineageIssueCoverageMismatch       LineageIssueKind = "coverage_mismatch"
 	LineageIssueCoverageOverlap        LineageIssueKind = "coverage_overlap"
+	LineageIssueAliasConflict          LineageIssueKind = "alias_conflict"
 )
 
 type LineageIssue struct {
@@ -52,8 +53,9 @@ type ArtifactFrontier struct {
 }
 
 type ArtifactOwner struct {
-	BotID     string
-	SessionID string
+	BotID          string
+	SessionID      string
+	SessionIDKnown bool
 }
 
 func (f ArtifactFrontier) Resolve(lineageID string) (Artifact, bool) {
@@ -325,7 +327,12 @@ func validateSupersessionMarker(artifact Artifact) (LineageIssue, bool) {
 
 func lineageCoverageMissing(artifact Artifact) bool {
 	participatesInLineage := len(artifact.ParentIDs) > 0 || artifact.SupersededBy != ""
-	return participatesInLineage && (artifact.CoverageMalformed || len(artifact.Coverage) == 0)
+	if !participatesInLineage {
+		return false
+	}
+	return artifact.CoverageMalformed ||
+		len(artifact.Coverage) == 0 ||
+		validatePersistedArtifactCoverage(artifact.Coverage) != nil
 }
 
 func sameArtifactScope(artifact Artifact, botID, sessionID string) bool {
@@ -338,7 +345,7 @@ func artifactMatchesOwner(artifact Artifact, owner ArtifactOwner) bool {
 		return false
 	}
 	sessionID := strings.TrimSpace(owner.SessionID)
-	return sessionID == "" || artifact.SessionID == sessionID
+	return (!owner.SessionIDKnown && sessionID == "") || artifact.SessionID == sessionID
 }
 
 func coverageIncludes(coverage []CoveredSource, required []CoveredSource) bool {
@@ -361,8 +368,8 @@ func compatibleCoverageRef(candidate contextfrag.ContextRef, expected contextfra
 	if !candidate.EqualIdentity(expected) {
 		return false
 	}
-	if expected.ContentHash == "" {
-		return true
+	if validatePersistedCoverageRef(candidate) != nil || validatePersistedCoverageRef(expected) != nil {
+		return false
 	}
 	return candidate.HashAlgo == expected.HashAlgo &&
 		candidate.HashScope == expected.HashScope &&

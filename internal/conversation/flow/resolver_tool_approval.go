@@ -272,25 +272,16 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 		return err
 	}
 
-	loaded, err := r.loadHistoryRecords(ctx, historyScopeFallbackFromToolApprovalRequest(approval), approval.SessionID, defaultMaxContextMinutes)
+	cfg, err := r.prepareContinuationRunConfig(
+		ctx,
+		resolved.RunConfig,
+		historyScopeFallbackFromToolApprovalRequest(approval),
+		compactionSummaryScope(firstNonEmpty(approval.BotID, input.BotID), "", approval.SessionID, approval.ConversationType, "", approval.ReplyTarget),
+		eventCh,
+	)
 	if err != nil {
 		return err
 	}
-	loaded = pruneHistoryForGateway(loaded)
-	loaded, err = r.replaceCompactedMessages(ctx, approval.SessionID, compactionSummaryScope(firstNonEmpty(approval.BotID, input.BotID), "", approval.SessionID, approval.ConversationType, "", approval.ReplyTarget), loaded)
-	if err != nil {
-		return err
-	}
-	messages, retained, _ := trimMessagesAndRecordsByTokens(r.logger, loaded, 0)
-	messages = sanitizeMessages(messages)
-
-	cfg := resolved.RunConfig
-	cfg.ContextFrags = historyContextFragsForMessages(messages, retained)
-	cfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
-	cfg.Query = ""
-	cfg.LiveToolStream = eventCh != nil
-	cfg.CanRequestUserInput = r.canDeliverUserInputWS(eventCh)
-	cfg = r.prepareRunConfig(ctx, cfg)
 
 	req := conversation.ChatRequest{
 		BotID:                   input.BotID,
