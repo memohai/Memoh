@@ -2,7 +2,6 @@ package compaction
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -44,10 +43,7 @@ func TestDoCompactionPriorContextUsesOnlyActiveArtifactFrontier(t *testing.T) {
 	cfg := machineryConfig(stub, 450)
 	botID := pgtype.UUID{Bytes: uuid.MustParse(cfg.BotID), Valid: true}
 	sessionID := pgtype.UUID{Bytes: uuid.MustParse(cfg.SessionID), Valid: true}
-	coverage, err := json.Marshal(testCoverage("covered-row"))
-	if err != nil {
-		t.Fatalf("marshal coverage: %v", err)
-	}
+	coverage := testCoverageJSON(t, "covered-row")
 	q := &fakeQueries{
 		uncompacted: machineryCorpus(t),
 		priorLogs: []sqlc.BotHistoryMessageCompact{

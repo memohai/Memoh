@@ -205,6 +205,27 @@ func TestPersistedMalformedOrHashlessLineageCoverageIsQuarantined(t *testing.T) 
 	}
 }
 
+func TestArtifactProjectionQuarantinesCoverageAnchorMismatch(t *testing.T) {
+	t.Parallel()
+
+	row := projectionRow(t, "00000000-0000-0000-0000-00000000da03")
+	row.Coverage = testCoverageJSON(t, "anchor-row")
+	row.AnchorStartMs = 0
+	row.AnchorEndMs = 2
+	artifact, err := artifactFromDBRow(row)
+	if err != nil {
+		t.Fatalf("artifactFromDBRow() error = %v", err)
+	}
+	if !artifact.CoverageMalformed {
+		t.Fatal("coverage/anchor mismatch was not marked malformed")
+	}
+
+	frontier := buildArtifactFrontier([]Artifact{artifact})
+	if len(frontier.Artifacts) != 0 || !hasLineageIssue(frontier.Issues, LineageIssueMalformedCoverage) {
+		t.Fatalf("coverage/anchor mismatch remained active: frontier=%#v issues=%#v", frontier.Artifacts, frontier.Issues)
+	}
+}
+
 func strictTestCoveredSource(id string, createdAtMs int64) CoveredSource {
 	return CoveredSource{
 		Ref: contextfrag.ContextRef{

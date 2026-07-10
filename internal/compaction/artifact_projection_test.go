@@ -241,7 +241,11 @@ func testCoverage(ids ...string) []CoveredSource {
 
 func testCoverageJSON(t *testing.T, ids ...string) []byte {
 	t.Helper()
-	raw, err := json.Marshal(testCoverage(ids...))
+	coverage := testCoverage(ids...)
+	for i := range coverage {
+		coverage[i].CreatedAtMs = 0
+	}
+	raw, err := json.Marshal(coverage)
 	if err != nil {
 		t.Fatalf("marshal coverage: %v", err)
 	}

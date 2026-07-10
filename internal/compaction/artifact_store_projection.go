@@ -127,6 +127,11 @@ func artifactFromDBRow(row sqlc.BotHistoryMessageCompact) (Artifact, error) {
 		return Artifact{}, errors.New("compaction artifact: id is required")
 	}
 	coverage, coverageErr := DecodeArtifactCoverage(row.Coverage)
+	coverageMalformed := coverageErr != nil
+	if !coverageMalformed && len(coverage) > 0 {
+		coverageMalformed = row.AnchorStartMs != coverage[0].CreatedAtMs ||
+			row.AnchorEndMs != coverage[len(coverage)-1].CreatedAtMs
+	}
 	version := int(row.ArtifactVersion)
 	if version == 0 {
 		version = ArtifactVersion
@@ -152,7 +157,7 @@ func artifactFromDBRow(row sqlc.BotHistoryMessageCompact) (Artifact, error) {
 		SupersededBy:      formatUUID(row.SupersededBy),
 		SupersededAt:      pgTime(row.SupersededAt.Time, row.SupersededAt.Valid),
 		StartedAt:         pgTime(row.StartedAt.Time, row.StartedAt.Valid),
-		CoverageMalformed: coverageErr != nil,
+		CoverageMalformed: coverageMalformed,
 	}, nil
 }
 
