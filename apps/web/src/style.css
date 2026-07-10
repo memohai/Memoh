@@ -69,6 +69,22 @@
    * separate .dark override is needed here. */
   --surface-chrome-hover: var(--sidebar-accent);
 
+  /* Workspace structural dividers separate the large shell planes (sidebar,
+   * dock groups, tab strip) without borrowing the darker component/card edge. */
+  --workspace-divider-width: 1.2px;
+  --workspace-tab-stroke-width: 1px;
+  --workspace-divider-color: rgb(240 239 237);
+  --workspace-tab-strip-color: color-mix(
+    in oklab,
+    var(--workspace-divider-color) 75%,
+    var(--border)
+  );
+  --workspace-tab-outline-color: color-mix(
+    in oklab,
+    var(--workspace-divider-color) 50%,
+    var(--border)
+  );
+
   /* Composer input surface — the chat input capsule. Differentiated from the
    * reading surface by COLOR in dark mode (gray body above the dark canvas),
    * but in light mode it stays the SAME pure white as the editor surface — a
@@ -110,6 +126,7 @@
   --surface-editor: var(--background);
   --surface-chrome: var(--sidebar);
   --surface-composer: var(--card);
+  --workspace-divider-color: var(--border);
   --composer-edge-rest: oklch(0.255 0 0);
   /* Dark = a solid deep purple ≈ rgb(83,45,141) with pure-white ink (a filled
    * "sent" bubble); same relative recipe, just a darker L and near-full C. */
@@ -125,6 +142,12 @@
   --color-chat-user-bubble: var(--chat-user-bubble);
   --color-chat-user-bubble-fg: var(--chat-user-bubble-fg);
   --color-cop-title: var(--cop-title);
+}
+
+/* Shell-divider owners outside dockview. Keep the colour role on the component;
+ * this utility only shares the workspace family's physical stroke width. */
+.workspace-divider-r {
+  border-right: var(--workspace-divider-width) solid var(--workspace-divider-color);
 }
 
 /* Chat composer edge — fainter at rest than a standard field, brightening to
@@ -1031,4 +1054,3 @@
     transform: none;
   }
 }
-

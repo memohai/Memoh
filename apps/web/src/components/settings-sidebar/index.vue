@@ -10,7 +10,7 @@
   >
     <Sidebar
       collapsible="none"
-      :class="['border-r border-sidebar-border', desktopShell && 'h-dvh']"
+      :class="['workspace-divider-r', desktopShell && 'h-dvh']"
     >
       <div
         v-if="macTrafficReserve"

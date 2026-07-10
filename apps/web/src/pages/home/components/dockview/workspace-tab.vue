@@ -16,6 +16,32 @@
       aria-hidden="true"
       focusable="false"
     >
+      <defs>
+        <linearGradient
+          :id="activeTabStrokeGradientId"
+          x1="0"
+          y1="0"
+          x2="1"
+          y2="0"
+        >
+          <stop
+            offset="0%"
+            stop-color="var(--dock-stroke)"
+          />
+          <stop
+            offset="5%"
+            stop-color="var(--workspace-tab-outline-color)"
+          />
+          <stop
+            offset="95%"
+            stop-color="var(--workspace-tab-outline-color)"
+          />
+          <stop
+            offset="100%"
+            stop-color="var(--dock-stroke)"
+          />
+        </linearGradient>
+      </defs>
       <path
         :d="activeTabFillPath"
         fill="var(--surface-editor)"
@@ -23,9 +49,8 @@
       <path
         :d="activeTabStrokePath"
         fill="none"
-        stroke="var(--dock-stroke)"
-        stroke-width="1"
-        vector-effect="non-scaling-stroke"
+        :stroke="`url(#${activeTabStrokeGradientId})`"
+        :stroke-width="activeTabStrokeWidth"
       />
     </svg>
     <!-- ui-allow-z: same tab-local stack as the root div above — this label
@@ -97,7 +122,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { X } from 'lucide-vue-next'
 import { Button } from '@felinic/ui'
@@ -118,6 +143,8 @@ const { t } = useI18n()
 const workspaceTabs = useWorkspaceTabsStore()
 
 const rootEl = ref<HTMLElement | null>(null)
+const DEFAULT_WORKSPACE_TAB_STROKE_WIDTH = 1
+const activeTabStrokeGradientId = `active-tab-stroke-${useId()}`
 const panelId = props.params.api.id
 const title = ref(props.params.api.title ?? '')
 const isActive = ref(props.params.api.isActive)
@@ -130,7 +157,7 @@ const isActive = ref(props.params.api.isActive)
 // carry this per-group signal the shape needs.
 const isVisible = ref(props.params.api.isVisible)
 // First-paint placeholder ONLY — these mirror the CSS contract (200≈12.5rem tab,
-// 35 = 40px strip − 5px inset, 8 = --tab-radius, 1px stroke) just so the active
+// 35 = 40px strip − 5px inset, 8 = --tab-radius, workspace hairline stroke) so the active
 // SVG has a sane shape for the one frame before onMounted measures the real DOM.
 // updateActiveTabShape() overwrites all of it; do NOT treat these as a source of
 // truth — the CSS tokens are. They exist because the path can't be empty pre-mount.
@@ -138,8 +165,9 @@ const initialTabShape = buildActiveTabShape({
   width: 200,
   height: 35,
   radius: 8,
-  strokeWidth: 1,
+  strokeWidth: DEFAULT_WORKSPACE_TAB_STROKE_WIDTH,
 })
+const activeTabStrokeWidth = ref(DEFAULT_WORKSPACE_TAB_STROKE_WIDTH)
 const activeTabViewBox = ref(initialTabShape.viewBox)
 const activeTabFillPath = ref(initialTabShape.fillPath)
 const activeTabStrokePath = ref(initialTabShape.strokePath)
@@ -273,6 +301,7 @@ function updateActiveTabShape() {
   const alignedBottom = snapToDevicePixel(tabRect.bottom, scale)
   const width = alignedRight - alignedLeft
   const height = alignedBottom - alignedTop
+  const strokeWidth = readWorkspaceTabStrokeWidth(tab)
   const radius = Math.min(
     snapToDevicePixel(readTabRadius(tab), scale),
     Math.max(0, width / 2),
@@ -283,9 +312,10 @@ function updateActiveTabShape() {
     width,
     height,
     radius,
-    strokeWidth: 1,
+    strokeWidth,
   })
 
+  activeTabStrokeWidth.value = strokeWidth
   activeTabViewBox.value = shape.viewBox
   activeTabFillPath.value = shape.fillPath
   activeTabStrokePath.value = shape.strokePath
@@ -295,6 +325,11 @@ function updateActiveTabShape() {
     width: `${formatPx(width + radius * 2)}`,
     height: `${formatPx(height)}`,
   }
+}
+
+function readWorkspaceTabStrokeWidth(tab: HTMLElement) {
+  const width = Number.parseFloat(getComputedStyle(tab).getPropertyValue('--workspace-tab-stroke-width'))
+  return Number.isFinite(width) && width > 0 ? width : DEFAULT_WORKSPACE_TAB_STROKE_WIDTH
 }
 
 function buildActiveTabShape({
