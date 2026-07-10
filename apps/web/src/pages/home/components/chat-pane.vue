@@ -192,39 +192,10 @@
         </DialogContent>
       </Dialog>
 
-      <Dialog v-model:open="forkDialogOpen">
-        <DialogContent class="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{{ $t('chat.forkDialog.title') }}</DialogTitle>
-            <DialogDescription>{{ $t('chat.forkDialog.description') }}</DialogDescription>
-          </DialogHeader>
-          <form
-            class="space-y-4"
-            @submit.prevent="handleCreateFork"
-          >
-            <Input
-              v-model="forkSessionTitle"
-              :aria-label="$t('chat.forkDialog.namePlaceholder')"
-              :placeholder="$t('chat.forkDialog.namePlaceholder')"
-              :disabled="forkSubmitting"
-              maxlength="120"
-              autofocus
-            />
-            <DialogFooter>
-              <Button
-                type="submit"
-                :disabled="!forkSessionTitle.trim() || forkSubmitting"
-              >
-                <Spinner
-                  v-if="forkSubmitting"
-                  class="mr-1 size-3"
-                />
-                {{ $t('common.create') }}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <ChatForkDialog
+        v-model:open="forkDialogOpen"
+        :message-id="pendingForkMessageId"
+      />
 
       <!-- The composer is a single instance reused in both layouts: pinned to
            the bottom once a conversation exists, or lifted to the vertical
@@ -398,110 +369,11 @@
                 leave-from-class="opacity-100 translate-y-0"
                 leave-to-class="opacity-0 translate-y-1"
               >
-                <div
+                <ChatUserInputForm
                   v-if="pendingUserInput"
-                  class="mb-2 overflow-hidden rounded-lg border border-border bg-card shadow-sm"
-                >
-                  <div
-                    class="max-h-[45vh] overflow-y-auto overscroll-contain px-3 py-2 pr-2"
-                    style="scrollbar-gutter: stable;"
-                  >
-                    <div
-                      v-for="(question, questionIndex) in pendingUserInputQuestions"
-                      :key="question.id"
-                      :class="questionIndex > 0 ? 'mt-3 border-t border-border/60 pt-3' : ''"
-                    >
-                      <p class="whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-foreground">
-                        {{ question.text }}
-                      </p>
-                      <div>
-                        <div
-                          v-if="question.kind !== 'text' && question.options?.length"
-                          class="mt-2 flex flex-col gap-1"
-                        >
-                          <Button
-                            v-for="option in question.options"
-                            :key="option.id"
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            class="h-auto min-h-8 w-full justify-start whitespace-normal rounded-md px-2.5 py-1.5 text-left text-xs"
-                            :class="isPendingUserInputOptionSelected(question.id, option.id) ? 'bg-muted text-foreground' : 'text-foreground hover:bg-accent'"
-                            :title="option.description || option.label"
-                            :role="question.kind === 'multi_select' ? 'checkbox' : 'radio'"
-                            :aria-checked="isPendingUserInputOptionSelected(question.id, option.id)"
-                            @click="togglePendingUserInputOption(question, option.id)"
-                          >
-                            <span
-                              class="mr-2 flex size-4 shrink-0 items-center justify-center"
-                              :class="isPendingUserInputOptionSelected(question.id, option.id) ? 'text-foreground' : 'text-muted-foreground'"
-                            >
-                              <component
-                                :is="pendingUserInputOptionIcon(question, isPendingUserInputOptionSelected(question.id, option.id))"
-                                class="size-4"
-                              />
-                            </span>
-                            <span class="min-w-0 flex-1 break-words">{{ option.label }}</span>
-                          </Button>
-                          <Button
-                            v-if="question.allow_custom"
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            class="h-auto min-h-8 w-full justify-start whitespace-normal rounded-md px-2.5 py-1.5 text-left text-xs"
-                            :class="isPendingUserInputCustomSelected(question.id) ? 'bg-muted text-foreground' : 'text-foreground hover:bg-accent'"
-                            :role="question.kind === 'multi_select' ? 'checkbox' : 'radio'"
-                            :aria-checked="isPendingUserInputCustomSelected(question.id)"
-                            @click="togglePendingUserInputCustom(question)"
-                          >
-                            <span
-                              class="mr-2 flex size-4 shrink-0 items-center justify-center"
-                              :class="isPendingUserInputCustomSelected(question.id) ? 'text-foreground' : 'text-muted-foreground'"
-                            >
-                              <component
-                                :is="pendingUserInputOptionIcon(question, isPendingUserInputCustomSelected(question.id))"
-                                class="size-4"
-                              />
-                            </span>
-                            <span class="min-w-0 flex-1 break-words">{{ $t('chat.tools.userInputCustomOption') }}</span>
-                          </Button>
-                        </div>
-                        <div
-                          v-if="question.kind === 'text' || isPendingUserInputCustomSelected(question.id)"
-                          class="mt-1 flex items-center gap-2"
-                        >
-                          <input
-                            :value="pendingUserInputDraftText(question)"
-                            class="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            :placeholder="question.placeholder || $t('chat.tools.userInputPlaceholder')"
-                            @input="setPendingUserInputDraftText(question, ($event.target as HTMLInputElement).value)"
-                            @keydown.enter.prevent="handlePendingUserInputSubmit"
-                          >
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="flex items-center justify-end gap-2 border-t border-border/60 bg-card px-3 py-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      class="text-xs text-muted-foreground hover:text-foreground"
-                      @click="handlePendingUserInputCancel"
-                    >
-                      {{ $t('chat.tools.cancelUserInput') }}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      class="text-xs"
-                      :disabled="!canSubmitPendingUserInput"
-                      @click="handlePendingUserInputSubmit"
-                    >
-                      {{ $t('chat.tools.submitUserInput') }}
-                    </Button>
-                  </div>
-                </div>
+                  class="mb-2"
+                  :user-input="pendingUserInput"
+                />
               </Transition>
               <div
                 v-if="commandPanelEvent"
@@ -993,10 +865,6 @@ import {
   ArrowDown,
   Check,
   FolderOpen,
-  Square,
-  SquareCheck,
-  Circle,
-  CircleDot,
   Sparkles,
   X,
   HelpCircle,
@@ -1005,7 +873,7 @@ import {
   Package,
   SquarePen,
 } from 'lucide-vue-next'
-import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner, toast } from '@felinic/ui'
+import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner, toast } from '@felinic/ui'
 import { useChatStore, type ACPAgentSessionInput, type ChatMessage } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import { useScroll, useIntersectionObserver, useStorage } from '@vueuse/core'
@@ -1020,6 +888,8 @@ import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import { useChatScroll } from '../composables/useChatScroll'
 import BgTaskPill from './bg-task-pill.vue'
 import ForkSourceDivider from './fork-source-divider.vue'
+import ChatForkDialog from './chat-fork-dialog.vue'
+import ChatUserInputForm from './chat-user-input-form.vue'
 import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
 import MediaGalleryLightbox, { type MediaGalleryItem } from './media-gallery-lightbox.vue'
 import SessionInfoRing from './session-info-ring.vue'
@@ -1027,20 +897,13 @@ import { useSessionInfo } from '../composables/useSessionInfo'
 import ChatModelPicker from './chat-model-picker.vue'
 import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
-import { fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput, type UIUserInputQuestion, type WSUserInputAnswer } from '@/composables/api/useChat'
+import { fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
 import { commandResultQuickActionText, isCommandResultItemSelectable } from './slash-command-result'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
-
-interface PendingUserInputDraft {
-  optionIds: string[]
-  customSelected: boolean
-  customText: string
-  text: string
-}
 
 interface ScrollRailSegment {
   id: string
@@ -1263,9 +1126,6 @@ onBeforeUnmount(() => {
 const composerError = ref('')
 const forkDialogOpen = ref(false)
 const pendingForkMessageId = ref('')
-const forkSessionTitle = ref('')
-const forkSubmitting = ref(false)
-const pendingUserInputDrafts = ref<Record<string, PendingUserInputDraft>>({})
 const modelPopoverOpen = ref(false)
 const agentPopoverOpen = ref(false)
 const agentChanging = ref(false)
@@ -1344,8 +1204,6 @@ const pendingUserInput = computed<UIUserInput | null>(() => {
   return null
 })
 
-const pendingUserInputQuestions = computed(() => pendingUserInput.value?.questions ?? [])
-
 const canForkAssistant = computed(() =>
   !streaming.value
   && !loadingMessages.value
@@ -1374,28 +1232,6 @@ const latestEditableUserId = computed(() => {
   }
   return ''
 })
-
-// All questions must be answered per kind before submit; null means incomplete.
-const pendingUserInputAnswers = computed<WSUserInputAnswer[] | null>(() => {
-  const questions = pendingUserInputQuestions.value
-  if (!questions.length) return null
-  const answers: WSUserInputAnswer[] = []
-  for (const question of questions) {
-    const answer = pendingUserInputAnswerFor(question)
-    if (!answer) return null
-    answers.push(answer)
-  }
-  return answers
-})
-
-const canSubmitPendingUserInput = computed(() => pendingUserInputAnswers.value !== null)
-
-watch(
-  () => pendingUserInput.value?.user_input_id,
-  () => {
-    pendingUserInputDrafts.value = {}
-  },
-)
 
 const { data: modelData } = useQuery({
   key: ['models'],
@@ -2790,35 +2626,12 @@ async function handleForkSourceClick() {
   }
 }
 
-function defaultForkSessionTitle() {
-  const sourceTitle = activeSession.value?.title?.trim() || t('chat.unknownSession')
-  return t('chat.forkDialog.defaultTitle', { session: sourceTitle })
-}
-
 function handleForkMessage(messageId: string) {
   composerError.value = ''
   const id = messageId.trim()
   if (!id) return
   pendingForkMessageId.value = id
-  forkSessionTitle.value = defaultForkSessionTitle()
   forkDialogOpen.value = true
-}
-
-async function handleCreateFork() {
-  const messageId = pendingForkMessageId.value.trim()
-  const title = forkSessionTitle.value.trim()
-  if (!messageId || !title || forkSubmitting.value) return
-  composerError.value = ''
-  forkSubmitting.value = true
-  try {
-    const ok = await chatStore.forkMessage(messageId, { title })
-    if (ok) {
-      forkDialogOpen.value = false
-      pendingForkMessageId.value = ''
-    }
-  } finally {
-    forkSubmitting.value = false
-  }
 }
 
 // Keyboard bridges into the two composer list surfaces (slash picker, command
@@ -2936,102 +2749,6 @@ function attachmentToFile(attachment: ChatAttachment): File | null {
   } catch {
     return null
   }
-}
-
-function ensurePendingUserInputDraft(questionId: string): PendingUserInputDraft {
-  let draft = pendingUserInputDrafts.value[questionId]
-  if (!draft) {
-    draft = { optionIds: [], customSelected: false, customText: '', text: '' }
-    pendingUserInputDrafts.value[questionId] = draft
-  }
-  return draft
-}
-
-function isPendingUserInputOptionSelected(questionId: string, optionId: string) {
-  return pendingUserInputDrafts.value[questionId]?.optionIds.includes(optionId) ?? false
-}
-
-function isPendingUserInputCustomSelected(questionId: string) {
-  return pendingUserInputDrafts.value[questionId]?.customSelected ?? false
-}
-
-function pendingUserInputOptionIcon(question: UIUserInputQuestion, selected: boolean) {
-  if (question.kind === 'multi_select') return selected ? SquareCheck : Square
-  return selected ? CircleDot : Circle
-}
-
-function togglePendingUserInputOption(question: UIUserInputQuestion, optionId: string) {
-  const draft = ensurePendingUserInputDraft(question.id)
-  if (question.kind === 'multi_select') {
-    draft.optionIds = draft.optionIds.includes(optionId)
-      ? draft.optionIds.filter(id => id !== optionId)
-      : [...draft.optionIds, optionId]
-    return
-  }
-  draft.optionIds = [optionId]
-  draft.customSelected = false
-  draft.customText = ''
-}
-
-function togglePendingUserInputCustom(question: UIUserInputQuestion) {
-  const draft = ensurePendingUserInputDraft(question.id)
-  if (question.kind === 'multi_select') {
-    draft.customSelected = !draft.customSelected
-  } else {
-    draft.customSelected = true
-    draft.optionIds = []
-  }
-  if (!draft.customSelected) {
-    draft.customText = ''
-  }
-}
-
-function pendingUserInputDraftText(question: UIUserInputQuestion) {
-  const draft = pendingUserInputDrafts.value[question.id]
-  if (!draft) return ''
-  return question.kind === 'text' ? draft.text : draft.customText
-}
-
-function setPendingUserInputDraftText(question: UIUserInputQuestion, value: string) {
-  const draft = ensurePendingUserInputDraft(question.id)
-  if (question.kind === 'text') {
-    draft.text = value
-    return
-  }
-  draft.customText = value
-}
-
-function pendingUserInputAnswerFor(question: UIUserInputQuestion): WSUserInputAnswer | null {
-  const draft = pendingUserInputDrafts.value[question.id]
-  const customText = draft?.customSelected ? draft.customText.trim() : ''
-  const text = draft?.text.trim() ?? ''
-  if (!draft) return null
-  if (question.kind === 'text') {
-    return text ? { question_id: question.id, text } : null
-  }
-  if (draft.customSelected && !customText) return null
-  if (question.kind === 'single_select' && draft.optionIds.length + (customText ? 1 : 0) !== 1) return null
-  if (draft.optionIds.length === 0 && !customText) return null
-  const answer: WSUserInputAnswer = { question_id: question.id }
-  if (draft.optionIds.length > 0) answer.option_ids = [...draft.optionIds]
-  if (customText) answer.custom_text = customText
-  return answer
-}
-
-function handlePendingUserInputSubmit() {
-  const userInput = pendingUserInput.value
-  const answers = pendingUserInputAnswers.value
-  if (!userInput || !answers) return
-  void chatStore.respondUserInput(userInput, { answers })
-}
-
-function handlePendingUserInputCancel() {
-  const userInput = pendingUserInput.value
-  if (!userInput) return
-  void chatStore.respondUserInput(userInput, {
-    canceled: true,
-    reason: 'user_canceled',
-  })
 }
 
 async function handleRetryMessage(messageId: string) {
