@@ -239,6 +239,11 @@ func filterCoveredRenderedContext(rc RenderedContext, artifacts []CompactionArti
 	return filtered
 }
 
+// ActiveRenderedContext removes only sources covered by usable artifacts.
+func ActiveRenderedContext(rc RenderedContext, artifacts []CompactionArtifact) RenderedContext {
+	return filterCoveredRenderedContext(rc, artifacts)
+}
+
 func filterCoveredTurnResponses(trs []TurnResponseEntry, artifacts []CompactionArtifact) []TurnResponseEntry {
 	covered := make(map[string]struct{})
 	for _, artifact := range artifacts {

@@ -1,116 +1,14 @@
 package flow
 
 import (
-	"context"
 	"encoding/json"
-	"log/slog"
 	"strings"
-	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/conversation"
-	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/userinput"
 )
-
-// buildMessagesFromPipeline assembles chat context from the DCP pipeline's
-// RenderedContext (RC) merged with assistant/tool turns (TR) from
-// bot_history_messages. This gives chat mode the same event-driven context
-// that discuss mode uses, replacing the legacy loadMessages path.
-func (r *Resolver) buildMessagesFromPipeline(ctx context.Context, req conversation.ChatRequest, contextTokenBudget int) []conversation.ModelMessage {
-	sessionID := strings.TrimSpace(req.SessionID)
-	if r.pipeline == nil || sessionID == "" {
-		return nil
-	}
-	rc := r.pipeline.GetRC(sessionID)
-	if len(rc) == 0 {
-		return nil
-	}
-
-	trs := r.loadTurnResponses(ctx, sessionID)
-
-	composed := pipelinepkg.ComposeContext(rc, trs)
-	if composed == nil {
-		return nil
-	}
-
-	messages := make([]conversation.ModelMessage, 0, len(composed.Messages))
-	for _, m := range composed.Messages {
-		contentJSON := m.RawContent
-		if len(contentJSON) == 0 {
-			var err error
-			contentJSON, err = json.Marshal(m.Content)
-			if err != nil {
-				continue
-			}
-		}
-		messages = append(messages, conversation.ModelMessage{
-			Role:    m.Role,
-			Content: contentJSON,
-		})
-	}
-
-	// Apply context token budget trimming to pipeline path as well.
-	if contextTokenBudget > 0 && len(messages) > 0 {
-		messages = trimPipelineMessagesByTokens(r.logger, messages, contextTokenBudget)
-	}
-
-	return messages
-}
-
-// trimPipelineMessagesByTokens trims pipeline-assembled messages to fit within
-// the context token budget using character-based estimation.
-func trimPipelineMessagesByTokens(log *slog.Logger, messages []conversation.ModelMessage, maxTokens int) []conversation.ModelMessage {
-	totalTokens := 0
-	cutoff := 0
-	for i := len(messages) - 1; i >= 0; i-- {
-		totalTokens += estimateMessageTokens(messages[i])
-		if totalTokens > maxTokens {
-			cutoff = i + 1
-			break
-		}
-	}
-
-	// Avoid orphaned tool messages at the cutoff boundary.
-	for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].Role), "tool") {
-		cutoff++
-	}
-
-	if cutoff > 0 && log != nil {
-		log.Info("trimPipelineMessagesByTokens: context trimmed",
-			slog.Int("total_messages", len(messages)),
-			slog.Int("estimated_tokens", totalTokens),
-			slog.Int("max_tokens", maxTokens),
-			slog.Int("kept_messages", len(messages)-cutoff),
-		)
-	}
-
-	return messages[cutoff:]
-}
-
-// loadTurnResponses loads recent assistant/tool messages from bot_history_messages
-// for use as the TR stream in pipeline-based context assembly.
-func (r *Resolver) loadTurnResponses(ctx context.Context, sessionID string) []pipelinepkg.TurnResponseEntry {
-	if r.messageService == nil {
-		return nil
-	}
-	since := time.Now().UTC().Add(-24 * time.Hour)
-	msgs, err := r.messageService.ListActiveSinceBySession(ctx, sessionID, since)
-	if err != nil {
-		r.logger.Warn("load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
-		return nil
-	}
-	var trs []pipelinepkg.TurnResponseEntry
-	for _, m := range msgs {
-		entry, ok := pipelinepkg.DecodeTurnResponseEntry(m)
-		if !ok {
-			continue
-		}
-		trs = append(trs, entry)
-	}
-	return trs
-}
 
 // stripToolMessages removes bulky tool interactions from the context while
 // keeping ask_user calls and results. ask_user is conversation-visible: the
