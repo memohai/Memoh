@@ -139,7 +139,7 @@ func TestFlowAndPipelineTrimmingProduceEquivalentNotice(t *testing.T) {
 		Content: conversation.NewTextContent("latest context"),
 	}
 	budget := estimateMessageTokens(latest)
-	flowMessages, _, _ := trimMessagesAndRecordsByTokens(nil, []historyfrag.HistoryRecord{
+	flowMessages, _, flowEstimate := trimMessagesAndRecordsByTokens(nil, []historyfrag.HistoryRecord{
 		{ModelMessage: old},
 		{ModelMessage: latest},
 	}, budget)
@@ -158,6 +158,9 @@ func TestFlowAndPipelineTrimmingProduceEquivalentNotice(t *testing.T) {
 		if flowRole != pipelineRole || flowText != pipelineText {
 			t.Fatalf("message %d mismatch: flow=(%q, %q) pipeline=(%q, %q)", i, flowRole, flowText, pipelineRole, pipelineText)
 		}
+	}
+	if flowEstimate != pipelineBuild.EstimatedTokens {
+		t.Fatalf("estimated tokens: flow=%d pipeline=%d", flowEstimate, pipelineBuild.EstimatedTokens)
 	}
 }
 

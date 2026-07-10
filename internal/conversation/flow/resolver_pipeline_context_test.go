@@ -373,7 +373,7 @@ func TestTrimMessagesAndRecordsPreservesEveryActiveSummary(t *testing.T) {
 	}}
 	budget := estimateMessageTokens(summaryB.ModelMessage) + estimateMessageTokens(latest.ModelMessage)
 
-	messages, retained, _ := trimMessagesAndRecordsByTokens(nil, []historyfrag.HistoryRecord{
+	messages, retained, estimate := trimMessagesAndRecordsByTokens(nil, []historyfrag.HistoryRecord{
 		summaryA,
 		oldRaw,
 		summaryB,
@@ -384,6 +384,13 @@ func TestTrimMessagesAndRecordsPreservesEveryActiveSummary(t *testing.T) {
 	}
 	if len(messages) != 4 || !strings.HasPrefix(messages[0].TextContent(), "[System Notice]") {
 		t.Fatalf("trimmed messages = %#v, want notice plus both summaries and latest raw", modelMessageTexts(messages))
+	}
+	wantEstimate := 0
+	for _, message := range messages {
+		wantEstimate += estimateMessageTokens(message)
+	}
+	if estimate != wantEstimate {
+		t.Fatalf("estimated tokens = %d, want emitted-message total %d", estimate, wantEstimate)
 	}
 }
 

@@ -253,17 +253,7 @@ func trimMessagesAndRecordsByTokens(log *slog.Logger, messages []historyfrag.His
 	for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].ModelMessage.Role), "tool") {
 		cutoff++
 	}
-	cutoff, totalTokens := fitRequiredMessagesWithinBudget(messages, cutoff, maxTokens)
-
-	if cutoff > 0 && log != nil {
-		log.Info("trimMessagesByTokens: context trimmed",
-			slog.Int("total_messages", len(messages)),
-			slog.Int("estimated_tokens", totalTokens),
-			slog.Int("max_tokens", maxTokens),
-			slog.Int("cutoff_index", cutoff),
-			slog.Int("kept_messages", len(messages)-cutoff),
-		)
-	}
+	cutoff, _ = fitRequiredMessagesWithinBudget(messages, cutoff, maxTokens)
 
 	forceKeptPrefix := forceKeptMessagesBeforeCutoff(messages, cutoff)
 	retained := make([]historyfrag.HistoryRecord, 0, len(messages)-cutoff+len(forceKeptPrefix))
@@ -271,10 +261,24 @@ func trimMessagesAndRecordsByTokens(log *slog.Logger, messages []historyfrag.His
 	retained = append(retained, messages[cutoff:]...)
 	result := make([]conversation.ModelMessage, 0, len(retained))
 	if cutoff > 0 {
-		result = append(result, historyTruncationNotice())
+		notice := historyTruncationNotice()
+		result = append(result, notice)
 	}
 	for _, m := range retained {
 		result = append(result, m.ModelMessage)
+	}
+	totalTokens := 0
+	for _, message := range result {
+		totalTokens += estimateMessageTokens(message)
+	}
+	if cutoff > 0 && log != nil {
+		log.Info("trimMessagesByTokens: context trimmed",
+			slog.Int("total_messages", len(messages)),
+			slog.Int("estimated_tokens", totalTokens),
+			slog.Int("max_tokens", maxTokens),
+			slog.Int("cutoff_index", cutoff),
+			slog.Int("kept_messages", len(retained)),
+		)
 	}
 	return result, retained, totalTokens
 }
