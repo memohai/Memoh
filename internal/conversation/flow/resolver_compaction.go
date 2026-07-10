@@ -33,6 +33,24 @@ func effectiveCompactionThreshold(threshold, contextTokenBudget int) int {
 	return threshold
 }
 
+func (r *Resolver) MaybeCompactSession(
+	ctx context.Context,
+	botID string,
+	sessionID string,
+	channelIdentityID string,
+	inputTokens int,
+	contextTokenBudget int,
+) {
+	if inputTokens <= 0 {
+		return
+	}
+	r.maybeCompact(ctx, conversation.ChatRequest{
+		BotID:     botID,
+		SessionID: sessionID,
+		UserID:    channelIdentityID,
+	}, resolvedContext{contextTokenBudget: contextTokenBudget}, inputTokens)
+}
+
 func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, inputTokens int) {
 	if r.compactionService == nil || r.settingsService == nil {
 		r.logger.Info("compaction: skipped, service or settings nil")

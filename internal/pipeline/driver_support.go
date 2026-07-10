@@ -24,6 +24,19 @@ func latestRCEventAtMs(rc RenderedContext) int64 {
 	return latest
 }
 
+func usageInputTokens(raw json.RawMessage) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var usage struct {
+		InputTokens int `json:"inputTokens"`
+	}
+	if json.Unmarshal(raw, &usage) != nil {
+		return 0
+	}
+	return usage.InputTokens
+}
+
 func (d *DiscussDriver) loadDiscussCursor(ctx context.Context, cfg DiscussSessionConfig, log *slog.Logger) int64 {
 	if d.deps.CursorStore == nil {
 		return 0

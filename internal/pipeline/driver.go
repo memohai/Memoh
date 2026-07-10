@@ -30,6 +30,7 @@ type RunConfigResolver interface {
 	ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
 	InlineImageAttachments(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart
 	LoadCompactionArtifacts(ctx context.Context, botID, sessionID string, messages []messagepkg.Message) ([]CompactionArtifact, error)
+	MaybeCompactSession(ctx context.Context, botID, sessionID, channelIdentityID string, inputTokens, contextTokenBudget int)
 	StoreRound(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform string, messages []sdk.Message, modelID string) error
 }
 
@@ -362,6 +363,7 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 	eventCh := agent.Stream(ctx, runConfig)
 
 	var finalMessages json.RawMessage
+	var finalUsage json.RawMessage
 	for event := range eventCh {
 		d.broadcastDiscussEvent(cfg.BotID, event)
 
@@ -370,6 +372,7 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 			log.Error("discuss stream error", slog.String("error", event.Error))
 		case agentpkg.EventAgentEnd, agentpkg.EventAgentAbort:
 			finalMessages = event.Messages
+			finalUsage = event.Usage
 		}
 	}
 
@@ -383,6 +386,20 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 				log.Error("discuss: store round failed", slog.Any("error", storeErr))
 			}
 		}
+	}
+	inputTokens := usageInputTokens(finalUsage)
+	if inputTokens <= 0 {
+		inputTokens = composed.EstimatedTokens
+	}
+	if inputTokens > 0 {
+		d.deps.Resolver.MaybeCompactSession(
+			context.WithoutCancel(ctx),
+			cfg.BotID,
+			cfg.SessionID,
+			cfg.ChannelIdentityID,
+			inputTokens,
+			0,
+		)
 	}
 
 	// Advance the cursor to the latest RC segment actually consumed in this

@@ -126,6 +126,39 @@ func TestHandleReplyWithAgentIgnoresCoveredMentionForACPGate(t *testing.T) {
 	}
 }
 
+func TestHandleReplyWithAgentTriggersCompactionFromReportedUsage(t *testing.T) {
+	t.Parallel()
+
+	resolver := &fakeRunConfigResolver{}
+	agent := &fakeDiscussStreamer{endUsage: []byte(`{"inputTokens":321}`)}
+	driver := NewDiscussDriver(DiscussDriverDeps{Resolver: resolver})
+	sess := &discussSession{config: DiscussSessionConfig{BotID: "bot", SessionID: "session", ChannelIdentityID: "identity"}}
+	rc := RenderedContext{{MessageID: "new", ReceivedAtMs: 100, Content: []RenderedContentPiece{{Type: "text", Text: "new"}}}}
+
+	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, agent)
+
+	if resolver.compactionCalls != 1 || resolver.compactionInputTokens != 321 {
+		t.Fatalf("compaction trigger = calls:%d input:%d, want one call with 321", resolver.compactionCalls, resolver.compactionInputTokens)
+	}
+}
+
+func TestHandleReplyWithAgentFallsBackToComposedEstimateForCompaction(t *testing.T) {
+	t.Parallel()
+
+	resolver := &fakeRunConfigResolver{}
+	agent := &fakeDiscussStreamer{}
+	driver := NewDiscussDriver(DiscussDriverDeps{Resolver: resolver})
+	sess := &discussSession{config: DiscussSessionConfig{BotID: "bot", SessionID: "session"}}
+	rc := RenderedContext{{MessageID: "new", ReceivedAtMs: 100, Content: []RenderedContentPiece{{Type: "text", Text: "fallback estimate"}}}}
+	want := ComposeContext(rc, nil).EstimatedTokens
+
+	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, agent)
+
+	if resolver.compactionCalls != 1 || resolver.compactionInputTokens != want {
+		t.Fatalf("compaction fallback = calls:%d input:%d, want one call with %d", resolver.compactionCalls, resolver.compactionInputTokens, want)
+	}
+}
+
 func TestCoverageSensitiveGatesUseLatestExternalMutation(t *testing.T) {
 	t.Parallel()
 

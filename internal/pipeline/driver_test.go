@@ -766,12 +766,13 @@ func TestHandleReplyWithAgentRefreshesContextFragAfterLateBinding(t *testing.T) 
 
 type fakeDiscussStreamer struct {
 	lastConfig *agentpkg.RunConfig
+	endUsage   []byte
 }
 
 func (f *fakeDiscussStreamer) Stream(_ context.Context, cfg agentpkg.RunConfig) <-chan agentpkg.StreamEvent {
 	f.lastConfig = &cfg
 	ch := make(chan agentpkg.StreamEvent, 1)
-	ch <- agentpkg.StreamEvent{Type: agentpkg.EventAgentEnd}
+	ch <- agentpkg.StreamEvent{Type: agentpkg.EventAgentEnd, Usage: f.endUsage}
 	close(ch)
 	return ch
 }
@@ -798,11 +799,14 @@ func (f *fakeDiscussRuntimeStreamer) StreamChat(_ context.Context, req conversat
 }
 
 type fakeRunConfigResolver struct {
-	resolveResult ResolveRunConfigResult
-	resolveFn     func(botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
-	inlineFn      func(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart
-	artifacts     []CompactionArtifact
-	artifactErr   error
+	resolveResult         ResolveRunConfigResult
+	resolveFn             func(botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
+	inlineFn              func(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart
+	artifacts             []CompactionArtifact
+	artifactErr           error
+	compactionCalls       int
+	compactionInputTokens int
+	compactionBudget      int
 }
 
 func (f *fakeRunConfigResolver) ResolveRunConfig(_ context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error) {
@@ -821,6 +825,12 @@ func (f *fakeRunConfigResolver) InlineImageAttachments(ctx context.Context, botI
 
 func (f *fakeRunConfigResolver) LoadCompactionArtifacts(context.Context, string, string, []messagepkg.Message) ([]CompactionArtifact, error) {
 	return f.artifacts, f.artifactErr
+}
+
+func (f *fakeRunConfigResolver) MaybeCompactSession(_ context.Context, _, _, _ string, inputTokens, contextTokenBudget int) {
+	f.compactionCalls++
+	f.compactionInputTokens = inputTokens
+	f.compactionBudget = contextTokenBudget
 }
 
 func (*fakeRunConfigResolver) StoreRound(_ context.Context, _, _, _, _ string, _ []sdk.Message, _ string) error {
