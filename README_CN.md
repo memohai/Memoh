@@ -53,7 +53,7 @@ curl -fsSL https://memoh.sh | sh
 <summary><strong>更多部署选项</strong></summary>
 
 ```bash
-git clone --depth 1 https://github.com/memohai/Memoh.git
+git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/memohai/Memoh.git
 cd Memoh
 cp conf/app.docker.toml config.toml
 # 编辑 config.toml

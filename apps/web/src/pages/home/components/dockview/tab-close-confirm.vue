@@ -47,7 +47,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 
 // Save-on-close confirmation for unsaved file tabs. The store drives this via

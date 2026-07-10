@@ -13,7 +13,7 @@
     "paths": {
       "@renderer/*": ["src/renderer/src/*"],
       "@memohai/web/*": ["src/renderer/types/web-stubs.d.ts"],
-      "@memohai/ui": ["src/renderer/types/ui-stubs.d.ts"]
+      "@felinic/ui": ["src/renderer/types/ui-stubs.d.ts"]
     }
   }
 }

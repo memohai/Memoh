@@ -66,7 +66,7 @@
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
-import { SidebarInset } from '@memohai/ui'
+import { SidebarInset } from '@felinic/ui'
 import MainLayout from '@/layout/main-layout/index.vue'
 import SettingsSidebar from '@/components/settings-sidebar/index.vue'
 import { DesktopShellKey } from '@/lib/desktop-shell'

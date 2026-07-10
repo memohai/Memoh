@@ -81,7 +81,7 @@ vi.mock('@/components/searchable-select-popover/index.vue', () => ({
   },
 }))
 
-vi.mock('@memohai/ui', async () => {
+vi.mock('@felinic/ui', async () => {
   const { h } = await import('vue')
   const { Field } = await import('vee-validate')
   const Passthrough = (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', slots.default?.())

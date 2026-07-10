@@ -52,7 +52,7 @@ import {
   Switch,
   Button,
   Badge,
-} from '@memohai/ui'
+} from '@felinic/ui'
 
 defineProps<{
   platform: {

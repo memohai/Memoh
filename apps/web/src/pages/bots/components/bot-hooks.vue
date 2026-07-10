@@ -210,7 +210,7 @@ import {
   Skeleton,
   Textarea,
   toast,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { FileJson, Play, RefreshCw, Save } from 'lucide-vue-next'
 import {
   getBotsByBotIdContainerFsRead,

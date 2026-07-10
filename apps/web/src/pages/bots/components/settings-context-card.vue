@@ -167,7 +167,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Button, Spinner } from '@memohai/ui'
+import { Button, Spinner } from '@felinic/ui'
 import { ChevronDown } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import SearchProviderSelect from './search-provider-select.vue'

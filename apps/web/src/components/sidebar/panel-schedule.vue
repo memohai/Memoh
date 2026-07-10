@@ -105,11 +105,11 @@ import { ref, watch, computed, onMounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { Plus } from 'lucide-vue-next'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
   Button, Spinner,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { getBotsByBotIdSchedule, deleteBotsByBotIdScheduleById, putBotsByBotIdScheduleById } from '@memohai/sdk'
 import type { ScheduleSchedule } from '@memohai/sdk'
 import { useChatStore } from '@/store/chat-list'

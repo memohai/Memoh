@@ -25,7 +25,7 @@ import {
   Button,
   menuChromeClass,
   selectTriggerClass,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { Check, ChevronsUpDown, Eye, EyeOff, Search, X } from 'lucide-vue-next'
 import SectionShell from '../components/SectionShell.vue'
 import Specimen from '../components/Specimen.vue'

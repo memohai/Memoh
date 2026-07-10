@@ -20,7 +20,7 @@ import {
   Popover, PopoverContent, PopoverTrigger,
   Sheet, SheetClose, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle, SheetTrigger,
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import SectionShell from '../components/SectionShell.vue'
 import Specimen from '../components/Specimen.vue'
 

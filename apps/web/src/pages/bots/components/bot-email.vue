@@ -207,11 +207,11 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { Plus } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {

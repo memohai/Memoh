@@ -126,12 +126,12 @@
 import {
   Button,
   Input,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { Check, X, LoaderCircle } from 'lucide-vue-next'
 import { reactive, ref, computed, watch, onMounted, onActivated, nextTick } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { useRouter, useRoute } from 'vue-router'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import SettingsGlobalCard from './settings-global-card.vue'
 import SettingsInteractionCard from './settings-interaction-card.vue'

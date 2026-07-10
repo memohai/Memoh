@@ -51,8 +51,8 @@ vi.hoisted(() => {
 vi.mock('@/composables/api/useChat', () => api)
 vi.mock('@memohai/sdk', () => ({ getBotsByBotIdSettings: sdk.getBotsByBotIdSettings }))
 vi.mock('vue-sonner', () => ({ toast }))
-vi.mock('@memohai/ui', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@memohai/ui')>()
+vi.mock('@felinic/ui', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@felinic/ui')>()
   return { ...original, toast }
 })
 

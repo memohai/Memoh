@@ -51,7 +51,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Switch, toast } from '@memohai/ui'
+import { Switch, toast } from '@felinic/ui'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import {
   getBotsByBotIdContainerDisplay,

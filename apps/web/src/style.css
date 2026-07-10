@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "@memohai/ui/style.css";
+@import "@felinic/ui/style.css";
 
 /* Bundled MiSans Variable (Apache-2.0) as the CJK fallback so Chinese renders
  * identically on Web / Windows / macOS instead of each OS's system font.
@@ -130,7 +130,7 @@
 /* Chat composer edge — fainter at rest than a standard field, brightening to
  * the normal field hairline on hover and one notch past it on focus. Reuses the
  * shared --field-edge-* tokens so it themes with everything else. Unlayered so
- * it overrides the @memohai/ui input-group rules without a specificity war. */
+ * it overrides the @felinic/ui input-group rules without a specificity war. */
 [data-slot="input-group"].chat-composer-edge:not(:has([aria-invalid="true"])) {
   --field-edge: var(--composer-edge-rest);
 }
@@ -694,7 +694,7 @@
  * keeps the dotted run continuous under descenders; the offset + visible
  * overflow stop a glyph tail (the "p" in https) from being clipped. The floating
  * URL tooltip is disabled at the renderer (showTooltips=false) — it was an
- * off-language popover, not the @memohai/ui Tooltip. */
+ * off-language popover, not the @felinic/ui Tooltip. */
 .markstream-vue .link-node {
   color: var(--color-foreground);
   text-decoration-line: underline;

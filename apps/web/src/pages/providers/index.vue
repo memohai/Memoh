@@ -12,7 +12,7 @@ import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { getModels, getProviders } from '@memohai/sdk'
 import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import { Boxes, Box, ChevronRight, Plus, Search } from 'lucide-vue-next'

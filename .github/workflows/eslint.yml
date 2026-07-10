@@ -10,6 +10,7 @@ on:
       - "apps/**/*.ts"
       - "apps/**/*.tsx"
       - "apps/**/*.vue"
+      - "packages/**"
       - "packages/**/*.js"
       - "packages/**/*.ts"
       - "packages/**/*.tsx"
@@ -29,6 +30,7 @@ on:
       - "apps/**/*.ts"
       - "apps/**/*.tsx"
       - "apps/**/*.vue"
+      - "packages/**"
       - "packages/**/*.js"
       - "packages/**/*.ts"
       - "packages/**/*.tsx"
@@ -55,6 +57,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: pnpm/action-setup@v4
         with:
           version: 10

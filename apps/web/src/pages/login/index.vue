@@ -62,10 +62,10 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Input } from '@memohai/ui'
+import { Input } from '@felinic/ui'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/store/user'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { postAuthLogin } from '@memohai/sdk'
 import LoadingButton from '@/components/loading-button/index.vue'

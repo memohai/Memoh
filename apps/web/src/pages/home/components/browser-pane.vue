@@ -82,7 +82,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Button, Input } from '@memohai/ui'
+import { Button, Input } from '@felinic/ui'
 import { ArrowRight, Globe, RefreshCw } from 'lucide-vue-next'
 import PanePlaceholder from '@/components/pane-placeholder/index.vue'
 import { sdkApiUrl } from '@/lib/api-client'

@@ -37,7 +37,7 @@ import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch 
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { FileText } from 'lucide-vue-next'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import { getBotsByBotIdContainerFsRead } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'

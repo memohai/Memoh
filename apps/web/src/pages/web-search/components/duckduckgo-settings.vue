@@ -21,7 +21,7 @@
 
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
-import { Input } from '@memohai/ui'
+import { Input } from '@felinic/ui'
 import SettingsRow from '@/components/settings/row.vue'
 
 const props = defineProps<{

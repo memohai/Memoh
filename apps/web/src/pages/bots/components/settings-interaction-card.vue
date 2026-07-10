@@ -114,7 +114,7 @@
 
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@memohai/ui'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import ModelSelect from './model-select.vue'
 import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from './reasoning-effort'

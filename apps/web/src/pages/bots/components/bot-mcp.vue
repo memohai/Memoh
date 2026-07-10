@@ -224,7 +224,7 @@ import {
   DialogHeader, DialogPanel, DialogTitle, Empty, EmptyContent, EmptyDescription, EmptyTitle,
   InputGroup, InputGroupAddon, InputGroupInput, Skeleton, toast, Tooltip,
   TooltipContent, TooltipProvider, TooltipTrigger,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { ChevronLeft, ChevronRight, Globe, Plus, Search, Terminal, Upload } from 'lucide-vue-next'
 import { getBotsByBotIdMcp, putBotsByBotIdMcpImport } from '@memohai/sdk'
 import type { McpImportRequest, McpToolDescriptor } from '@memohai/sdk'

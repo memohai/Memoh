@@ -50,7 +50,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '@memohai/ui'
+} from '@felinic/ui'
 
 
 withDefaults(defineProps<{

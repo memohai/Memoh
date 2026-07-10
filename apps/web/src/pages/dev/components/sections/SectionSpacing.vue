@@ -6,7 +6,7 @@ import {
   Button,
   Input,
   Switch,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import {
   Box,
   Globe,

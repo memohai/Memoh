@@ -218,7 +218,7 @@ import {
   EmptyHeader,
   EmptyTitle,
   SegmentedControl,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'

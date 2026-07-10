@@ -149,7 +149,7 @@ import {
   EmptyTitle,
   Skeleton,
   toast,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import {
   CheckCircle2,
   AlertTriangle,

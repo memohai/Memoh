@@ -137,7 +137,7 @@ import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { ExternalLink, PackageOpen, Store } from 'lucide-vue-next'
-import { Badge, Button, Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle, Switch, toast } from '@memohai/ui'
+import { Badge, Button, Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle, Switch, toast } from '@felinic/ui'
 import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import {
   getBotsByBotIdPlugins,

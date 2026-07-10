@@ -75,6 +75,9 @@ importers:
       '@electron-toolkit/tsconfig':
         specifier: ^1.0.1
         version: 1.0.1(@types/node@24.10.4)
+      '@felinic/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@memohai/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -84,9 +87,6 @@ importers:
       '@memohai/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
-      '@memohai/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
       '@memohai/web':
         specifier: workspace:*
         version: link:../web
@@ -171,6 +171,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@felinic/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@fontsource-variable/inter':
         specifier: ^5.2.8
         version: 5.2.8
@@ -186,9 +189,6 @@ importers:
       '@memohai/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
-      '@memohai/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
       '@pinia/colada':
         specifier: ^0.21.1
         version: 0.21.2(pinia@3.0.4(typescript@5.9.3)(vue@3.5.26(typescript@5.9.3)))(vue@3.5.26(typescript@5.9.3))

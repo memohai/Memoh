@@ -1,6 +1,6 @@
 import { defineStore, storeToRefs } from 'pinia'
 import { computed, reactive, ref, watch } from 'vue'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import enMessages from '@/i18n/locales/en.json'
 import zhMessages from '@/i18n/locales/zh.json'
 import jaMessages from '@/i18n/locales/ja.json'

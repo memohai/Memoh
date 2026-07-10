@@ -160,7 +160,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { Plus, Trash2, Copy, Check, RefreshCw, ArrowRight } from 'lucide-vue-next'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import {
   Button,
   Spinner,
@@ -168,7 +168,7 @@ import {
   AvatarImage,
   AvatarFallback,
   Input,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'

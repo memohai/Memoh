@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import i18n from '@/i18n'
 import { useCapabilitiesStore } from './capabilities'
 

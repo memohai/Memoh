@@ -134,7 +134,7 @@ import {
   PaginationLast,
   PaginationNext,
   PaginationPrevious,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { Search, List } from 'lucide-vue-next'
 import CreateModel from '@/components/create-model/index.vue'
 import ImportModelsDialog from '@/components/import-models-dialog/index.vue'

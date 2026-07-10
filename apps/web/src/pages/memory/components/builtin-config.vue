@@ -70,7 +70,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Skeleton, toast } from '@memohai/ui'
+import { Skeleton, toast } from '@felinic/ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   getMemoryProvidersByIdStatus,

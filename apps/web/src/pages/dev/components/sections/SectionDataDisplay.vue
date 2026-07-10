@@ -8,7 +8,7 @@ import {
   Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemSeparator, ItemTitle,
   ScrollArea, ScrollBar,
   Table, TableBody, TableCell, TableEmpty, TableFooter, TableHead, TableHeader, TableRow,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import SectionShell from '../components/SectionShell.vue'
 import Specimen from '../components/Specimen.vue'
 import VariantMatrix from '../components/VariantMatrix.vue'

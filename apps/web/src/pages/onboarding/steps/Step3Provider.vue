@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
   Spinner,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { ArrowLeft, Plus, AlertCircle } from 'lucide-vue-next'
 import { getAcpProfiles, type AcpprofileManagedField, type AcpprofilePublicProfile } from '@memohai/sdk'
 import { useOnboarding } from '@/composables/useOnboarding'

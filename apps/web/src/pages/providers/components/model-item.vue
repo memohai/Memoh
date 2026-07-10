@@ -120,7 +120,7 @@ import {
   Spinner,
   Switch,
   toast,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { Zap, Settings, Trash2, Binary } from 'lucide-vue-next'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { postModelsByIdTest, putModelsById } from '@memohai/sdk'

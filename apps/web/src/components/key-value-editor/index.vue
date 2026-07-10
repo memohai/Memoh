@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { X, Plus } from 'lucide-vue-next'
-import { Button, Input } from '@memohai/ui'
+import { Button, Input } from '@felinic/ui'
 
 export interface KeyValuePair {
   key: string

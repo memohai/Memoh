@@ -338,7 +338,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { KeyRound, Trash2, UserPlus } from 'lucide-vue-next'
 import {
   Alert,
@@ -370,7 +370,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'

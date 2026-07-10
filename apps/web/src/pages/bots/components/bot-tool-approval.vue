@@ -102,11 +102,11 @@ import {
   Button,
   Switch,
   SegmentedControl,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { RotateCcw } from 'lucide-vue-next'
 import { reactive, computed, watch, ref } from 'vue'
 import type { Ref } from 'vue'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { getBotsByBotIdSettings, putBotsByBotIdSettings } from '@memohai/sdk'

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Dev-only component wall. Reached via the `memoh:dev-tools` localStorage flag
-// (web) or Cmd/Ctrl+Shift+D (desktop). Renders every @memohai/ui component and
+// (web) or Cmd/Ctrl+Shift+D (desktop). Renders every @felinic/ui component and
 // design token in one place so tokens/components can be tuned via Vite HMR.
 //
 // Owns its own scroll container (h-dvh + overflow-y-auto) so it scrolls inside

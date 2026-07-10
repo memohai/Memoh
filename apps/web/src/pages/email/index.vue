@@ -11,7 +11,7 @@ import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { getEmailProviders } from '@memohai/sdk'
 import type { EmailProviderResponse } from '@memohai/sdk'
 import { Plus, Search } from 'lucide-vue-next'

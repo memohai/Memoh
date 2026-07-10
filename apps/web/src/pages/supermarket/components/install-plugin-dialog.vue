@@ -127,7 +127,7 @@ import { Boxes } from 'lucide-vue-next'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
   Button, Badge, Input, Label, toast,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import {
   getBotsByBotIdPluginsByIdOauthStatus,
   postBotsByBotIdPluginsByIdOauthAuthorize,

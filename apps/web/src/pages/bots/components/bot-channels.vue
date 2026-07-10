@@ -142,7 +142,7 @@ import {
   Button, Skeleton,
   Dialog, DialogContent, DialogHeader, DialogTitle,
   Empty, EmptyTitle, EmptyDescription, EmptyContent,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { useQuery } from '@pinia/colada'
 import { getChannels, getBotsByIdChannelByPlatform } from '@memohai/sdk'
 import type { HandlersChannelMeta, ChannelChannelConfig } from '@memohai/sdk'

@@ -406,7 +406,7 @@ import {
   SelectItem, SelectTrigger, SelectValue, SegmentedControl, Switch, TagsInput,
   TagsInputInput, TagsInputItem, TagsInputItemDelete, TagsInputItemText, toast,
   type SegmentedItem,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { Download, KeyRound, Loader2, RefreshCw, SlidersHorizontal, Trash2 } from 'lucide-vue-next'
 import {
   postBotsByBotIdMcp, putBotsByBotIdMcpById, deleteBotsByBotIdMcpById,

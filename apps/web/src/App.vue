@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterView, useRoute } from 'vue-router'
-import { Toaster } from '@memohai/ui'
+import { Toaster } from '@felinic/ui'
 import { useSettingsStore } from '@/store/settings'
 import MainSection from '@/pages/main-section/index.vue'
 
@@ -27,7 +27,7 @@ const isSettingsRoute = computed(() => route.path.startsWith('/settings'))
 const isAppArea = computed(() => isChatRoute.value || isSettingsRoute.value)
 
 // Localized headings for auto-shaped long-blob toasts (raw backend errors etc.).
-// @memohai/ui is i18n-agnostic, so the app supplies these; they react to locale.
+// @felinic/ui is i18n-agnostic, so the app supplies these; they react to locale.
 const toastHeadings = computed(() => ({
   message: t('common.toast.notice'),
   success: t('common.toast.success'),

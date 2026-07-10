@@ -240,9 +240,9 @@ import {
   SelectValue,
   Spinner,
   Switch,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { computed, inject, reactive, ref, watch } from 'vue'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { getVideoProvidersById, getVideoProvidersByIdModels, getVideoProvidersMeta, postVideoProvidersByIdImportModels, putProvidersById, putVideoModelsById } from '@memohai/sdk'

@@ -76,7 +76,7 @@ import {
   DialogTitle,
   DialogDescription,
   ScrollArea,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { sortByRecency } from '@/store/chat-list.utils'

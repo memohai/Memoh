@@ -20,7 +20,7 @@ server. The default dev target is `http://localhost:18080`.
 | Bundler | electron-vite 4 |
 | Renderer | Vue 3 + Vite 8 + Tailwind CSS 4 |
 | Packager | electron-builder 26 |
-| Reused packages | `@memohai/web`, `@memohai/ui`, `@memohai/sdk`, `@memohai/icon`, `@memohai/config` |
+| Reused packages | `@memohai/web`, `@felinic/ui`, `@memohai/sdk`, `@memohai/icon`, `@memohai/config` |
 | Type checking | TypeScript + `vue-tsc` |
 
 ## Directory Structure
@@ -73,7 +73,7 @@ bundle.
 with `tsconfig.web.json` path stubs:
 
 - `src/renderer/types/web-stubs.d.ts` for `@memohai/web/*`
-- `src/renderer/types/ui-stubs.d.ts` for `@memohai/ui`
+- `src/renderer/types/ui-stubs.d.ts` for `@felinic/ui`
 
 When adding a new reused web or UI import, update the matching stub. Keep the
 runtime import specifier and the typecheck stub aligned; do not switch to private

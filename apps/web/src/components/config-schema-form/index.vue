@@ -48,7 +48,7 @@ import {
   SelectValue,
   Switch,
   Textarea,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { computed, defineComponent, h, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown, ChevronRight, Eye, EyeOff } from 'lucide-vue-next'

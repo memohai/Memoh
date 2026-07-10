@@ -25,7 +25,7 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import { Zap, Download } from 'lucide-vue-next'
-import { Button } from '@memohai/ui'
+import { Button } from '@felinic/ui'
 import type { HandlersSupermarketSkillEntry } from '@memohai/sdk'
 import MarketItemCard from './market-item-card.vue'
 

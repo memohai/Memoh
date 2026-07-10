@@ -104,7 +104,7 @@ import {
   SelectGroup,
   SelectItem,
   SelectLabel,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'

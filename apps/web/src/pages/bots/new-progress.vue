@@ -47,7 +47,7 @@
 </template>
 
 <script setup lang="ts">
-import { Avatar, AvatarImage, AvatarFallback, Button, toast } from '@memohai/ui'
+import { Avatar, AvatarImage, AvatarFallback, Button, toast } from '@felinic/ui'
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'

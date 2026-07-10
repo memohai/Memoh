@@ -49,7 +49,7 @@ import {
   Avatar,
   AvatarImage,
   AvatarFallback,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { AlertTriangle, LoaderCircle } from 'lucide-vue-next'
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'

@@ -12,7 +12,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { useSettingsStore } from '@/store/settings'
 import { colorSchemes, type ColorSchemeId } from '@/constants/color-schemes'
 import { DesktopShellKey } from '@/lib/desktop-shell'

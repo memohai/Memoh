@@ -124,9 +124,9 @@
 <script setup lang="ts">
 import { QrCode, Smartphone, Check } from 'lucide-vue-next'
 import { ref, computed, onUnmounted } from 'vue'
-import { Button, Spinner } from '@memohai/ui'
+import { Button, Spinner } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import QRCode from 'qrcode'
 import { client } from '@memohai/sdk/client'
 import { resolveApiErrorMessage } from '@/utils/api-error'

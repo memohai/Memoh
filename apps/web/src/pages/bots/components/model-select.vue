@@ -41,7 +41,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ChevronsUpDown } from 'lucide-vue-next'
-import { Popover, PopoverTrigger, PopoverContent, menuChromeClass, selectTriggerClass } from '@memohai/ui'
+import { Popover, PopoverTrigger, PopoverContent, menuChromeClass, selectTriggerClass } from '@felinic/ui'
 import type { ModelsGetResponse, ModelsModelType, ProvidersGetResponse } from '@memohai/sdk'
 import ModelOptions from './model-options.vue'
 

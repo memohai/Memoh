@@ -33,7 +33,7 @@
 </template>
 
 <script setup lang="ts">
-import { Spinner } from '@memohai/ui'
+import { Spinner } from '@felinic/ui'
 
 // hover/disabled 是 owner 级刻意交互反馈,不属于页面注入
 const prevClass = 'inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring' /* ui-allow-style */

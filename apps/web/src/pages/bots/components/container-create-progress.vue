@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Spinner } from '@memohai/ui'
+import { Spinner } from '@felinic/ui'
 
 defineProps<{
   phase: 'preserving' | 'pulling' | 'creating' | 'restoring' | 'complete' | 'error'

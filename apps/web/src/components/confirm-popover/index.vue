@@ -71,7 +71,7 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from '@memohai/ui'
+} from '@felinic/ui'
 
 withDefaults(defineProps<{
   title?: string

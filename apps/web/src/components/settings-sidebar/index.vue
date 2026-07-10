@@ -180,7 +180,7 @@ import {
   SidebarHeader,
   SidebarMenu,
   SidebarMenuItem,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { DesktopShellKey } from '@/lib/desktop-shell'
 import NavItem from './nav-item.vue'
 

@@ -132,7 +132,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { Badge, Button, Empty, EmptyDescription, EmptyTitle, Skeleton, Switch, toast } from '@memohai/ui'
+import { Badge, Button, Empty, EmptyDescription, EmptyTitle, Skeleton, Switch, toast } from '@felinic/ui'
 import { ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'

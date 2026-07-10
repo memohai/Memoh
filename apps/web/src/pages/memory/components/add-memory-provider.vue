@@ -87,12 +87,12 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import FieldStack from '@/components/settings/field-stack.vue'
 import FormStack from '@/components/settings/form-stack.vue'
 import { postMemoryProviders } from '@memohai/sdk'
 import type { AdaptersProviderType } from '@memohai/sdk'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQueryCache } from '@pinia/colada'
 

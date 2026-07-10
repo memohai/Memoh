@@ -16,7 +16,7 @@
 </template>
 
 <script setup lang="ts">
-import { Button } from '@memohai/ui'
+import { Button } from '@felinic/ui'
 
 // 行几何 + 墨色是 owner 级刻意 chrome,不属于页面注入;px 值是 sidebar
 // 图标列的对齐常量(见头注释),不是可换算成 rem 刻度的间距

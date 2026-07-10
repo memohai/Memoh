@@ -117,14 +117,14 @@
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Search, Github } from 'lucide-vue-next'
-import { Input, Button, Tabs, TabsList, TabsTrigger, TabsContent } from '@memohai/ui'
+import { Input, Button, Tabs, TabsList, TabsTrigger, TabsContent } from '@felinic/ui'
 import {
   getSupermarketPlugins,
   getSupermarketSkills,
   type HandlersSupermarketSkillEntry,
   type PluginsManifest,
 } from '@memohai/sdk'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import PageShell from '@/components/page-shell/index.vue'
 import InlineLoadingRow from '@/components/inline-loading-row/index.vue'

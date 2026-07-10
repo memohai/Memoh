@@ -104,7 +104,7 @@ import {
   Input, Label, Switch,
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
   InputGroup, InputGroupInput, InputGroupAddon, InputGroupButton,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { Eye, EyeOff } from 'lucide-vue-next'
 import type { ChannelFieldSchema } from '@memohai/sdk'
 import SettingsRow from '@/components/settings/row.vue'

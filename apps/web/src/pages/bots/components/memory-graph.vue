@@ -88,7 +88,7 @@ import type { ECElementEvent } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { GraphChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
-import { Dialog, DialogHeader, DialogScrollContent, DialogTitle } from '@memohai/ui'
+import { Dialog, DialogHeader, DialogScrollContent, DialogTitle } from '@felinic/ui'
 import {
   getBotsByBotIdMemoryGraph,
   type HandlersGraphEdge,

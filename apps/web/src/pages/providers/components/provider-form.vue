@@ -372,7 +372,7 @@ import {
   SelectTrigger,
   SelectValue,
   Spinner,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { AlertCircle, Copy, KeyRound, RefreshCw } from 'lucide-vue-next'
 import LoadingButton from '@/components/loading-button/index.vue'
 import SettingsRow from '@/components/settings/row.vue'
@@ -397,7 +397,7 @@ import type {
   ProvidersTestResponse,
 } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { startOAuthPopupFlow, type OAuthPopupFlowController } from '@/utils/oauth/popup-flow'
 
 const { t } = useI18n()

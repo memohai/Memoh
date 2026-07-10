@@ -139,13 +139,13 @@ import {
 } from 'lucide-vue-next'
 import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
   Button,
   Dialog, DialogContent, DialogScrollContent, DialogHeader, DialogTitle, DialogFooter,
   DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuItem,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import {
   deleteBotsByBotIdScheduleById,
   getBotsByBotIdSchedule,

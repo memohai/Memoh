@@ -39,7 +39,7 @@
     "@memohai/config": "workspace:*",
     "@memohai/icon": "workspace:*",
     "@memohai/sdk": "workspace:*",
-    "@memohai/ui": "workspace:*",
+    "@felinic/ui": "workspace:*",
     "@memohai/web": "workspace:*",
     "@pinia/colada": "^0.21.2",
     "@tailwindcss/vite": "^4.2.2",

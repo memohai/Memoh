@@ -20,7 +20,7 @@ vi.mock('vue-i18n', () => ({
     t: (key: string) => key,
   }),
 }))
-vi.mock('@memohai/ui', () => ({
+vi.mock('@felinic/ui', () => ({
   Spinner: { template: '<span />' },
   toast: { error: vi.fn() },
 }))

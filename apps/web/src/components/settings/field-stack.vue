@@ -70,7 +70,7 @@
 </template>
 
 <script setup lang="ts">
-import { Label, FORM_ITEM_INJECTION_KEY } from '@memohai/ui'
+import { Label, FORM_ITEM_INJECTION_KEY } from '@felinic/ui'
 import { CircleAlert } from 'lucide-vue-next'
 import { ErrorMessage, FieldContextKey } from 'vee-validate'
 import { computed, inject, provide, toValue, useId } from 'vue'

@@ -341,12 +341,12 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { SquarePen, CircleHelp, Check, X, LoaderCircle } from 'lucide-vue-next'
 import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { useRouter, useRoute } from 'vue-router'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { getModels, getProviders, getMemoryProviders, getBotsNameAvailability } from '@memohai/sdk'

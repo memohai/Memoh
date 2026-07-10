@@ -7,7 +7,7 @@
        全部 h-full 借用容器高度,内容态切换不 reflow。
        抽出前这三套在 dockview 的 panel-asset/panel-preview、file-manager/file-viewer、
        home/index、chat-pane、workspace-watermark 各被逐字复制了一遍。
-       刻意不复用 @memohai/ui 的 Empty:那是带虚线边框 + 大留白(p-12 gap-6)的卡片式空态,
+       刻意不复用 @felinic/ui 的 Empty:那是带虚线边框 + 大留白(p-12 gap-6)的卡片式空态,
        而这里要的是极简、填满面板、无边框的内容区占位 —— 两种不同的空态语言。
        icon 的具体样式(size/opacity/destructive 色)留给调用方在 #icon 内自持,因为各面板的
        图标语义不同(缺文件 vs 已删除),组件只统一容器、间距与文案排版。 -->
@@ -56,7 +56,7 @@
 </template>
 
 <script setup lang="ts">
-import { Spinner } from '@memohai/ui'
+import { Spinner } from '@felinic/ui'
 
 defineProps<{
   /** 加载态:横向渲染内置 Spinner + 默认插槽文案。与 title 互斥(loading 优先)。 */

@@ -1,4 +1,4 @@
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 interface DialogMutationOptions {

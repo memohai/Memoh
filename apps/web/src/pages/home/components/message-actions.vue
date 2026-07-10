@@ -160,7 +160,7 @@ import {
   DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuItem,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { useClipboard } from '@/composables/useClipboard'
 
 const props = defineProps<{

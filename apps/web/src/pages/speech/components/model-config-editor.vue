@@ -296,10 +296,10 @@ import {
   SelectValue,
   Switch,
   Textarea,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { ChevronRight, Eye, EyeOff, Play } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import LoadingButton from '@/components/loading-button/index.vue'
 import FieldStack from '@/components/settings/field-stack.vue'

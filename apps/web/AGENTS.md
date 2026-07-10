@@ -19,7 +19,7 @@ Before writing or changing anything under `apps/web` — pages, components, layo
   authoritative list of owners, the decision map, and the rules for when a shape deliberately
   stays hand-written.
 
-This skill is the page-level companion to `packages/ui/AGENTS.md` (atom-level tokens and components). It covers the white-floating-card design language, `@memohai/ui` composition rules, copy discipline, empty/loading states, layout patterns, and the verification checklist. Do not skip it for "small" UI edits — the non-negotiables there apply to every surface in this package.
+This skill is the page-level companion to `packages/ui/AGENTS.md` (atom-level tokens and components). It covers the white-floating-card design language, `@felinic/ui` composition rules, copy discipline, empty/loading states, layout patterns, and the verification checklist. Do not skip it for "small" UI edits — the non-negotiables there apply to every surface in this package.
 
 ## Tech Stack
 
@@ -28,13 +28,13 @@ This skill is the page-level companion to `packages/ui/AGENTS.md` (atom-level to
 | Framework | Vue 3 (Composition API, `<script setup>`) |
 | Build | Vite 8 + `@vitejs/plugin-vue` |
 | CSS | Tailwind CSS 4 (CSS-based config, no `tailwind.config.*`) |
-| UI Library | `@memohai/ui` (built on Reka UI + class-variance-authority) |
+| UI Library | `@felinic/ui` (built on Reka UI + class-variance-authority) |
 | State | Pinia 3 + `pinia-plugin-persistedstate` |
 | Data Fetching | Pinia Colada (`@pinia/colada`) + `@memohai/sdk` |
 | Forms | vee-validate + `@vee-validate/zod` + Zod |
 | i18n | vue-i18n (en / zh) |
 | Icons | lucide-vue-next (primary) + `@memohai/icon` (brand/provider icons) |
-| Toast | `@memohai/ui` `toast` / `Toaster` (in-house) |
+| Toast | `@felinic/ui` `toast` / `Toaster` (in-house) |
 | Tables | @tanstack/vue-table |
 | Markdown | markstream-vue + Shiki + Mermaid + KaTeX |
 | Charts | ECharts + vue-echarts |
@@ -51,7 +51,7 @@ src/
 ├── App.vue                    # Root component (RouterView + Toaster + settings init)
 ├── main.ts                    # App entry (plugins, global components, API client setup)
 ├── router.ts                  # Route definitions, auth guard, chunk error recovery
-├── style.css                  # Tailwind imports (delegates to @memohai/ui/style.css)
+├── style.css                  # Tailwind imports (delegates to @felinic/ui/style.css)
 ├── i18n.ts                    # vue-i18n configuration
 ├── assets/                    # Static assets (logo.svg)
 ├── components/                # Shared components
@@ -325,7 +325,7 @@ Several settings pages use **MasterDetailSidebarLayout** (`components/master-det
 
 ### Dev Component Wall
 
-`pages/dev/components/` is the living reference for `@memohai/ui` atoms and tokens. Reach it at `/dev/components` in dev builds after `localStorage.setItem('memoh:dev-tools', '1')`. Also openable via `Cmd/Ctrl+Shift+D` when dev tools are enabled. Use it to verify visual changes; `mise run lint` runs `scripts/check-ui-contract.mjs` as a mechanical guard.
+`pages/dev/components/` is the living reference for `@felinic/ui` atoms and tokens. Reach it at `/dev/components` in dev builds after `localStorage.setItem('memoh:dev-tools', '1')`. Also openable via `Cmd/Ctrl+Shift+D` when dev tools are enabled. Use it to verify visual changes; `mise run lint` runs `scripts/check-ui-contract.mjs` as a mechanical guard.
 
 ## CSS & Theming
 
@@ -336,7 +336,7 @@ Design tokens, typography, elevation, and the atom-level visual contract live in
 CSS-based configuration (no `tailwind.config.*` file). All design tokens (CSS variables, `@theme inline` mapping, base styles) live in `packages/ui/src/style.css`. The web app imports them via:
 
 ```css
-@import "@memohai/ui/style.css";
+@import "@felinic/ui/style.css";
 ```
 
 ### Dark Mode
@@ -352,9 +352,9 @@ CSS-based configuration (no `tailwind.config.*` file). All design tokens (CSS va
 - Always use semantic color tokens (`text-foreground`, `bg-card`, `border-border`, etc.) — never hardcode raw colors (`gray-*`, `bg-white`, `text-black`).
 - Follow the design system rules in `packages/ui/AGENTS.md`.
 
-## UI Components (@memohai/ui)
+## UI Components (@felinic/ui)
 
-All UI primitives are provided by `@memohai/ui` (built on Reka UI). Do not import Reka UI directly. For the component design contract (variants, tokens, elevation, spacing), see `packages/ui/AGENTS.md`.
+All UI primitives are provided by `@felinic/ui` (built on Reka UI). Do not import Reka UI directly. For the component design contract (variants, tokens, elevation, spacing), see `packages/ui/AGENTS.md`.
 
 - **Exception**: Physical UI knobs (Switch thumb, Slider thumb) may keep `bg-white` as they need to contrast against colored tracks regardless of theme.
 - **No scoped CSS modules**: Styling is done inline via utility classes.
@@ -368,9 +368,9 @@ markstream-vue/index.css     — Markdown rendering
 katex/dist/katex.min.css     — Math rendering
 ```
 
-Toast styling ships inside `@memohai/ui` `style.css` (the in-house `Toaster`); no separate toast stylesheet import is needed.
+Toast styling ships inside `@felinic/ui` `style.css` (the in-house `Toaster`); no separate toast stylesheet import is needed.
 
-`@memohai/ui` provides 43 component groups built on Reka UI primitives + Tailwind + class-variance-authority:
+`@felinic/ui` provides 43 component groups built on Reka UI primitives + Tailwind + class-variance-authority:
 
 - **Form**: `Form`, `FormField`, `FormFieldArray`, `FormItem`, `FormControl`, `FormLabel`, `FormMessage`, `FormDescription`
 - **Input**: `Input`, `Textarea`, `InputGroup` (Addon, Button, Input, Text, Textarea), `NativeSelect`, `Combobox`, `TagsInput`, `InputOTP` (Group, Slot, Separator)
@@ -415,7 +415,7 @@ const form = useForm({
 ### Notification Pattern
 
 ```typescript
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 toast.success(t('common.saved'))
 toast.error(resolveApiErrorMessage(error, 'Failed'))
 ```
@@ -546,7 +546,7 @@ Chat supports two transport modes: **Server-Sent Events (SSE)** and **WebSocket*
 - Use Vue 3 Composition API with `<script setup>` exclusively.
 - Style with Tailwind utility classes; avoid `<style>` blocks. Follow `packages/ui/AGENTS.md` and `.agents/skills/memoh-web/SKILL.md`.
 - **Always use semantic color tokens** (`text-foreground`, `bg-card`, `border-border`, `text-muted-foreground`, `bg-accent`, etc.) instead of raw colors (`gray-*`, `bg-white`, `text-black`). Never introduce hardcoded Tailwind color classes for themed elements — this breaks dark mode consistency.
-- Use `@memohai/ui` components for all UI primitives; do not import Reka UI directly.
+- Use `@felinic/ui` components for all UI primitives; do not import Reka UI directly.
 - Use `lucide-vue-next` for all UI icons. Use `@memohai/icon` for brand/provider logos. **Never use FontAwesome** — do not add `<FontAwesomeIcon>`, do not import from `@fortawesome/*`, do not use inline SVG or base64-encoded SVG in templates.
 - Use Pinia Colada (`useQuery`/`useMutation`) for server state; use Pinia stores for client state only.
 - API calls must go through `@memohai/sdk`; never call `fetch()` directly.

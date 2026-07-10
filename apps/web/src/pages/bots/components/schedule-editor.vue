@@ -286,7 +286,7 @@ import {
   Switch,
   Textarea,
   TimeInput,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import {
   getBotsByBotIdSettings,
   postBotsByBotIdSchedule,

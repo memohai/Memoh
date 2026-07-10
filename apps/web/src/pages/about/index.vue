@@ -185,7 +185,7 @@ import {
   DialogHeader,
   DialogTitle,
   toast,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import MarkdownRender from 'markstream-vue'
 import { useI18n } from 'vue-i18n'
 import SettingsRow from '@/components/settings/row.vue'

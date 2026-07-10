@@ -562,10 +562,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
   Textarea,
   Dialog, DialogBody, DialogContent, DialogHeader, DialogPanel, DialogTitle, DialogDescription, DialogFooter, DialogClose,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { SquarePen, Eye, EyeOff, RefreshCw, SlidersHorizontal } from 'lucide-vue-next'
 import { reactive, computed, watch, nextTick, onBeforeUnmount, ref } from 'vue'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import { getBotsByBotIdSettings, putBotsByBotIdSettings } from '@memohai/sdk'

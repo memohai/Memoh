@@ -14,7 +14,7 @@ The one-click Docker Compose installer uses the `containerd` workspace backend. 
 ## Manual Install
 
 ```bash
-git clone https://github.com/memohai/Memoh.git
+git clone --recurse-submodules https://github.com/memohai/Memoh.git
 cd Memoh
 cp conf/app.docker.toml config.toml
 nano config.toml   # Change passwords and JWT secret

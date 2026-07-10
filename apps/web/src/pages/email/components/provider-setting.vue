@@ -221,7 +221,7 @@ import {
   SelectContent,
   SelectItem,
   Switch,
-} from '@memohai/ui'
+} from '@felinic/ui'
 import { Eye, EyeOff, KeyRound, Trash2 } from 'lucide-vue-next'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
@@ -231,7 +231,7 @@ import SettingsRow from '@/components/settings/row.vue'
 import FieldStack from '@/components/settings/field-stack.vue'
 import EmailProviderIcon from '@/components/email-provider-icon/index.vue'
 import { computed, inject, reactive, ref, watch } from 'vue'
-import { toast } from '@memohai/ui'
+import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
