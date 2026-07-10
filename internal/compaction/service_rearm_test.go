@@ -189,6 +189,32 @@ func TestTriggerCompactionRearmsAfterSynchronousOwnerReleasesSession(t *testing.
 	assertRearmedCompactionRows(t, queries, secondRows)
 }
 
+func TestAutomaticCompactionObservesBusyOwnerBeforeFailureCooldown(t *testing.T) {
+	service := newMachineryService(&fakeQueries{})
+	sessionID := uuid.NewString()
+	service.recordCompactionFailure(sessionID)
+	if !service.beginSessionCompaction(sessionID) {
+		t.Fatal("manual owner failed to acquire session")
+	}
+
+	result, err := service.runCompaction(context.Background(), TriggerConfig{
+		BotID:     uuid.NewString(),
+		SessionID: sessionID,
+	})
+	if err != nil {
+		t.Fatalf("busy automatic compaction error = %v", err)
+	}
+	if result.Status != StatusNoop || result.inflightDone == nil {
+		t.Fatalf("busy automatic result = %#v, want noop with owner completion signal", result)
+	}
+	service.endSessionCompaction(sessionID)
+	select {
+	case <-result.inflightDone:
+	default:
+		t.Fatal("owner completion signal remained open after release")
+	}
+}
+
 func assertRearmedCompactionRows(t *testing.T, queries *rearmQueries, secondRows []sqlc.ListUncompactedMessagesBySessionRow) {
 	t.Helper()
 	secondIDs := make(map[pgtype.UUID]struct{}, len(secondRows))
