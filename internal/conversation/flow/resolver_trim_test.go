@@ -4,8 +4,12 @@ import (
 	"encoding/json"
 	"testing"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/historyfrag"
+	"github.com/memohai/memoh/internal/messageconv"
+	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/userinput"
 )
 
@@ -51,10 +55,11 @@ func TestTrimMessagesByTokens_DropsLeadingOrphanTool(t *testing.T) {
 		}),
 	}
 
-	// Budget 2: newest assistant and tool result fit, adding the older assistant
+	// The newest assistant and tool result fit, adding the older assistant
 	// tool call exceeds the budget. The cutoff initially lands on the tool result,
 	// which must be skipped to avoid an orphan tool message.
-	trimmed, _ := trimMessagesByTokens(nil, messages, 2)
+	budget := estimateMessageTokens(messages[2].ModelMessage) + estimateMessageTokens(messages[3].ModelMessage)
+	trimmed, _ := trimMessagesByTokens(nil, messages, budget)
 	if len(trimmed) != 2 {
 		t.Fatalf("expected truncation notice and latest assistant, got %d messages: %+v", len(trimmed), trimmed)
 	}
@@ -183,6 +188,186 @@ func TestTrimMessagesByTokens_EstimatesFallback(t *testing.T) {
 	// The key check is that the long user message was removed.
 	if len(trimmed) != 2 || trimmed[0].Role != "system" || trimmed[1].Role != "assistant" {
 		t.Fatalf("expected [system notice, assistant message], got %d messages: %+v", len(trimmed), trimmed)
+	}
+}
+
+func TestEstimateMessageTokensRoundsUpShortNonEmptyMessages(t *testing.T) {
+	t.Parallel()
+
+	message := conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("abc")}
+	if got := estimateMessageTokens(message); got != 1 {
+		t.Fatalf("estimateMessageTokens() = %d, want 1", got)
+	}
+}
+
+func TestEstimateMessageTokensExcludesReasoningOnlyContent(t *testing.T) {
+	t.Parallel()
+
+	content, err := json.Marshal([]map[string]any{{"type": "reasoning", "text": "private chain of thought"}})
+	if err != nil {
+		t.Fatalf("marshal reasoning content: %v", err)
+	}
+	if got := estimateMessageTokens(conversation.ModelMessage{Role: "assistant", Content: content}); got != 0 {
+		t.Fatalf("reasoning-only estimate = %d, want 0", got)
+	}
+}
+
+func TestEstimateMessageTokensMatchesPipelineForStructuredContent(t *testing.T) {
+	t.Parallel()
+
+	for _, message := range []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent(" abc ")},
+		{Role: "user", Content: conversation.NewTextContent("   ")},
+		{
+			Role: "assistant",
+			ToolCalls: []conversation.ToolCall{{
+				ID:   "call-1",
+				Type: "function",
+				Function: conversation.ToolCallFunction{
+					Name:      "lookup",
+					Arguments: `{"query":"weather"}`,
+				},
+			}},
+		},
+		{
+			Role:       "tool",
+			ToolCallID: "call-1",
+			Name:       "lookup",
+			Content:    conversation.NewTextContent("sunny"),
+		},
+	} {
+		canonical := messageconv.CanonicalModelMessageContent(message)
+		projected, err := json.Marshal(modelMessageToSDKMessage(message))
+		if err != nil {
+			t.Fatalf("marshal SDK projection: %v", err)
+		}
+		var envelope struct {
+			Content json.RawMessage `json:"content"`
+		}
+		if err := json.Unmarshal(projected, &envelope); err != nil {
+			t.Fatalf("decode SDK projection: %v", err)
+		}
+		providerTokens := messageconv.EstimateCanonicalContentTokens(envelope.Content)
+		canonicalTokens := messageconv.EstimateCanonicalContentTokens(canonical)
+		if providerTokens != canonicalTokens {
+			t.Fatalf("provider and canonical estimates differ: provider=%d canonical=%d", providerTokens, canonicalTokens)
+		}
+		composed := pipelinepkg.ComposeContext(nil, []pipelinepkg.TurnResponseEntry{{
+			RequestedAtMs: 1,
+			Role:          message.Role,
+			RawContent:    canonical,
+		}})
+		if composed == nil {
+			t.Fatal("pipeline composition returned nil")
+		}
+		got := estimateMessageTokens(message)
+		if got <= 0 {
+			t.Fatalf("structured estimate = %d, want positive cost for %s", got, canonical)
+		}
+		if want := composed.EstimatedTokens; got != want {
+			t.Fatalf("structured estimate mismatch: flow=%d pipeline=%d content=%s", got, want, canonical)
+		}
+	}
+}
+
+func TestModelMessageProjectionPreservesNativeParts(t *testing.T) {
+	t.Parallel()
+
+	cache := &sdk.CacheControl{Type: "ephemeral", TTL: "1h"}
+	modelMessages := messageconv.SDKMessagesToModelMessages([]sdk.Message{
+		{
+			Role: sdk.MessageRoleUser,
+			Content: []sdk.MessagePart{
+				sdk.TextPart{
+					Text:             " padded ",
+					CacheControl:     cache,
+					ProviderMetadata: map[string]any{"provider": map[string]any{"key": "value"}},
+				},
+				sdk.ImagePart{Image: "base64-image", MediaType: "image/png", CacheControl: cache},
+				sdk.FilePart{Data: "base64-file", MediaType: "text/plain", Filename: "a.txt", CacheControl: cache},
+			},
+		},
+		sdk.ToolMessage(sdk.ToolResultPart{
+			ToolCallID: "call-1",
+			ToolName:   "lookup",
+			Result:     map[string]any{"status": "failed"},
+			IsError:    true,
+		}),
+	})
+
+	user := modelMessageToSDKMessage(modelMessages[0])
+	if len(user.Content) != 3 {
+		t.Fatalf("projected user parts = %d, want 3", len(user.Content))
+	}
+	text, ok := user.Content[0].(sdk.TextPart)
+	if !ok || text.Text != " padded " || text.CacheControl == nil || text.CacheControl.TTL != "1h" || len(text.ProviderMetadata) == 0 {
+		t.Fatalf("text part lost semantic fields: %#v", user.Content[0])
+	}
+	image, ok := user.Content[1].(sdk.ImagePart)
+	if !ok || image.Image != "base64-image" || image.MediaType != "image/png" || image.CacheControl == nil {
+		t.Fatalf("image part was not preserved: %#v", user.Content[1])
+	}
+	file, ok := user.Content[2].(sdk.FilePart)
+	if !ok || file.Data != "base64-file" || file.Filename != "a.txt" || file.CacheControl == nil {
+		t.Fatalf("file part was not preserved: %#v", user.Content[2])
+	}
+
+	tool := modelMessageToSDKMessage(modelMessages[1])
+	result, ok := tool.Content[0].(sdk.ToolResultPart)
+	if !ok || !result.IsError || result.ToolCallID != "call-1" {
+		t.Fatalf("tool result lost error state: %#v", tool.Content[0])
+	}
+}
+
+func TestModelMessageProjectionNormalizesMixedLegacyToolResult(t *testing.T) {
+	t.Parallel()
+
+	content, err := json.Marshal([]map[string]any{{
+		"type":       "tool-result",
+		"toolCallId": "call-1",
+		"toolName":   "lookup",
+		"result":     nil,
+		"output":     map[string]any{"status": "ok"},
+	}})
+	if err != nil {
+		t.Fatalf("marshal mixed tool result: %v", err)
+	}
+	message := modelMessageToSDKMessage(conversation.ModelMessage{Role: "tool", Content: content})
+	result, ok := message.Content[0].(sdk.ToolResultPart)
+	if !ok {
+		t.Fatalf("projected part = %#v, want tool result", message.Content[0])
+	}
+	payload, ok := result.Result.(map[string]any)
+	if !ok || payload["status"] != "ok" {
+		t.Fatalf("projected result = %#v, want legacy output", result.Result)
+	}
+}
+
+func TestModelMessageProjectionDoesNotDuplicateLegacyToolCall(t *testing.T) {
+	t.Parallel()
+
+	content, err := json.Marshal([]map[string]any{{
+		"type":       "tool-call",
+		"toolCallId": "call-1",
+		"toolName":   "lookup",
+		"input":      map[string]any{"query": "weather"},
+	}})
+	if err != nil {
+		t.Fatalf("marshal native tool call: %v", err)
+	}
+	message := modelMessageToSDKMessage(conversation.ModelMessage{
+		Role:    "assistant",
+		Content: content,
+		ToolCalls: []conversation.ToolCall{{
+			ID: "call-1",
+			Function: conversation.ToolCallFunction{
+				Name:      "lookup",
+				Arguments: `{"query":"weather"}`,
+			},
+		}},
+	})
+	if len(message.Content) != 1 {
+		t.Fatalf("projected parts = %d, want one occurrence", len(message.Content))
 	}
 }
 

@@ -1,6 +1,10 @@
 package pipeline
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestComposeContextWithArtifactsKeepsOrderedSummariesAtCoverageAnchors(t *testing.T) {
 	t.Parallel()
@@ -179,6 +183,39 @@ func TestLatestExternalEventMsUsesMutationTimeAndSkipsSelfSent(t *testing.T) {
 	}
 	if got := LatestExternalEventMs(rc[:2], 350); got != 0 {
 		t.Fatalf("self-originated mutations must not count as external events, got %d", got)
+	}
+}
+
+func TestEstimateMessageTokensUsesSharedCharsPerToken(t *testing.T) {
+	t.Parallel()
+
+	if got := estimateMessageTokens(ContextMessage{Role: "user", Content: "abc"}); got != 1 {
+		t.Fatalf("estimateMessageTokens() = %d, want 1", got)
+	}
+}
+
+func TestEstimateMessageTokensIncludesToolProviderMetadata(t *testing.T) {
+	t.Parallel()
+
+	content := func(signature string) json.RawMessage {
+		raw, err := json.Marshal([]map[string]any{{
+			"type":       "tool-call",
+			"toolCallId": "call-1",
+			"toolName":   "lookup",
+			"input":      map[string]any{"query": "weather"},
+			"providerMetadata": map[string]any{
+				"google": map[string]any{"thoughtSignature": signature},
+			},
+		}})
+		if err != nil {
+			t.Fatalf("marshal canonical content: %v", err)
+		}
+		return raw
+	}
+	small := estimateMessageTokens(ContextMessage{Role: "assistant", RawContent: content("sig")})
+	large := estimateMessageTokens(ContextMessage{Role: "assistant", RawContent: content(strings.Repeat("sig", 100))})
+	if large <= small {
+		t.Fatalf("metadata estimates = small:%d large:%d, want growth", small, large)
 	}
 }
 

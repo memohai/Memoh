@@ -2,14 +2,13 @@ package pipeline
 
 import (
 	"encoding/json"
-	"math"
 	"sort"
 	"strings"
 
+	"github.com/memohai/memoh/internal/contextbudget"
 	"github.com/memohai/memoh/internal/contextfrag"
+	"github.com/memohai/memoh/internal/messageconv"
 )
-
-const charsPerToken = 2
 
 // TurnResponseEntry represents an assistant or tool message from bot_history_messages,
 // used as the "TR" stream in context composition.
@@ -336,7 +335,7 @@ func estimateMessagesTokens(messages []ContextMessage) int {
 
 func estimateMessageTokens(m ContextMessage) int {
 	if len(m.RawContent) > 0 {
-		return int(math.Ceil(float64(len(m.RawContent)) / charsPerToken))
+		return messageconv.EstimateCanonicalContentTokens(m.RawContent)
 	}
-	return int(math.Ceil(float64(len(m.Content)) / charsPerToken))
+	return contextbudget.EstimateTextTokens(m.Content)
 }

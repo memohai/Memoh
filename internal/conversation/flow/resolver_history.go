@@ -2,7 +2,6 @@ package flow
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/historyfrag"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	"github.com/memohai/memoh/internal/messageconv"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
 )
@@ -196,12 +196,7 @@ func dedupePersistedCurrentUserMessage(messages []historyfrag.HistoryRecord, req
 }
 
 func estimateMessageTokens(msg conversation.ModelMessage) int {
-	text := msg.TextContent()
-	if len(text) == 0 {
-		data, _ := json.Marshal(msg.Content)
-		return len(data) / 4
-	}
-	return len(text) / 4
+	return messageconv.EstimateModelMessageTokens(msg)
 }
 
 func trimMessagesByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord, maxTokens int) ([]conversation.ModelMessage, int) {
