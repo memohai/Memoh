@@ -44,9 +44,9 @@ func (c CompactionCandidate) HasPolicy(policy CompactPolicy) bool {
 }
 
 // itemsFromRows classifies each uncompacted row into a typed CompactionCandidate.
-// A row that cannot be classified is skipped (and counted) rather than aborting
-// the whole compaction: it simply stays in active history to be retried, which
-// matches the legacy path's inability to fail at selection time.
+// A row that cannot be classified remains as a must-keep barrier rather than
+// aborting the whole compaction. Keeping its position prevents compact spans on
+// either side from sharing an ID and being reordered by the read path.
 func itemsFromRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]CompactionCandidate, int) {
 	items := make([]CompactionCandidate, 0, len(rows))
 	skipped := 0
@@ -54,6 +54,12 @@ func itemsFromRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]Compactio
 		record, err := historyfrag.FromDBMessage(rowToMessage(row), rowScopeFallback(row))
 		if err != nil {
 			skipped++
+			items = append(items, CompactionCandidate{
+				ID:         row.ID,
+				RawContent: row.Content,
+				RawUsage:   row.Usage,
+				Policies:   []CompactPolicy{CompactPolicyMustKeep},
+			})
 			continue
 		}
 		items = append(items, CompactionCandidate{

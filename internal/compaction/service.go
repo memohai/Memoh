@@ -227,7 +227,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 
 	messages, skipped := itemsFromRows(rows)
 	if skipped > 0 {
-		s.logger.Warn("compaction: skipped unparseable history rows",
+		s.logger.Warn("compaction: kept unparseable history rows as span barriers",
 			slog.Int("skipped", skipped),
 			slog.String("session_id", cfg.SessionID),
 		)

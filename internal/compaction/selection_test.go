@@ -314,21 +314,28 @@ func TestItemsFromRowsAllowsCurrentTurnMiddleCompaction(t *testing.T) {
 	assertNoPolicy(t, items[3], CompactPolicyCanDrop)
 }
 
-func TestItemsFromRowsSkipsUnparseableRowsWithoutAborting(t *testing.T) {
+func TestItemsFromRowsPreservesUnparseableRowsAsSelectionBarriers(t *testing.T) {
 	t.Parallel()
 
-	good := mkRow(t, "user", `"ok"`, 0)
+	before := mkRow(t, "user", `"before"`, 100)
 	bad := sqlc.ListUncompactedMessagesBySessionRow{
 		ID:      pgtype.UUID{Valid: false}, // empty id -> FromDBMessage rejects it
 		Role:    "user",
 		Content: json.RawMessage(`"x"`),
 	}
-	items, skipped := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{good, bad})
+	after := mkRow(t, "assistant", `"after"`, 100)
+	current := mkRow(t, "user", `"current"`, 100)
+	items, skipped := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{before, bad, after, current})
 	if skipped != 1 {
 		t.Fatalf("skipped = %d, want 1", skipped)
 	}
-	if len(items) != 1 || items[0].ID != good.ID {
-		t.Fatalf("a bad row must be skipped, not abort the batch: got %d items", len(items))
+	if len(items) != 4 || !items[1].HasPolicy(CompactPolicyMustKeep) {
+		t.Fatalf("an unparseable row must remain as a selection barrier: %#v", items)
+	}
+
+	selected := splitByTarget(items, 100)
+	if len(selected) != 1 || selected[0].ID != before.ID {
+		t.Fatalf("selected = %#v, want only the contiguous run before the barrier", selected)
 	}
 }
 
