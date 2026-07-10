@@ -229,17 +229,29 @@ export const useChatStore = defineStore('chat', () => {
     rememberBackgroundTask,
     applyPendingBackgroundEventsToTool,
     bumpFsChangedAtIfFsMutation,
+    fetchMessages: fetchMessagesUI,
+    locateMessage: locateMessageUI,
   })
   const {
     messages,
+    loadingMessages,
+    loadingOlder,
+    hasMoreOlder,
+    hasLoadedOlder,
     normalizeTurn,
-    normalizeTurns,
-    replaceMessages,
-    mergeMessages,
+    clearHistoryView,
+    prepareForInitialization,
+    markHistoryEmpty,
+    replaceHistoryView,
+    refreshCurrentSession,
+    loadInitialMessages,
+    fetchSessionWindow,
+    loadOlderMessages,
+    findMessageIdByExternalId,
+    locateMessageByExternalId,
     isActiveSessionTarget,
     appendTurnToSession,
     appendToView,
-    prependToView,
     removeFromView,
     removeTurnFromSession,
     replaceTailFromTurn,
@@ -306,6 +318,9 @@ export const useChatStore = defineStore('chat', () => {
     clearRememberedSessions,
   } = sessionList
   transcript.setSnapshotHook(syncForkAnchorFromUITurns)
+  transcript.setRefreshAppliedHook((targetSessionId, latestTimestamp) => {
+    touchSessionInList(targetSessionId, latestTimestamp)
+  })
   const loading = ref(false)
   // `loadingChats` covers the bot-level boot path (sessions list fetch), so
   // the sidebar can show its skeleton + suppress its empty-state placeholder
@@ -314,18 +329,6 @@ export const useChatStore = defineStore('chat', () => {
   // never reacts to it, only the chat pane uses it to keep its own empty
   // placeholders hidden while a fresh transcript is on its way.
   const loadingChats = ref(false)
-  const loadingMessages = ref(false)
-  const loadingOlder = ref(false)
-  const hasMoreOlder = ref(true)
-  // Tracks whether the user has scrolled back and loaded at least one page of
-  // older history for the current session. Used by `refreshCurrentSession` to
-  // decide between merge (preserve scrolled-back history) and replace
-  // (consolidate optimistic turns against the server view). Replaces a
-  // timestamp-based heuristic that misfired under client/server clock skew —
-  // on a fresh session's first send the optimistic user turn could carry a
-  // timestamp slightly newer than the server-persisted one, which made the
-  // heuristic merge instead of replace and left two user turns visible.
-  const hasLoadedOlder = ref(false)
   const initializing = ref(false)
   let initializeRerunRequested = false
   let initializingBotId: string | null = null
@@ -360,7 +363,6 @@ export const useChatStore = defineStore('chat', () => {
 
   let activeWs: ChatWebSocket | null = null
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
-  let refreshPromise: { key: string; promise: Promise<void> } | null = null
   let sessionListRefreshPromise: { botId: string; promise: Promise<void> } | null = null
   const wsCreatedSessionsByStream = new Map<string, string>()
   // Two independent streams replace the deleted bot-wide messages SSE:
@@ -438,9 +440,7 @@ export const useChatStore = defineStore('chat', () => {
         explicitSessionSelection.value = false
         draftIntent.value = true
         sessionMessagesStream.stop()
-        replaceMessages([])
-        hasMoreOlder.value = false
-        hasLoadedOlder.value = false
+        clearHistoryView()
       }
     }
 
@@ -511,9 +511,7 @@ export const useChatStore = defineStore('chat', () => {
     },
     clearTranscriptForDraft: () => {
       sessionMessagesStream.stop()
-      replaceMessages([])
-      hasMoreOlder.value = false
-      hasLoadedOlder.value = false
+      clearHistoryView()
     },
   })
   const {
@@ -844,7 +842,6 @@ export const useChatStore = defineStore('chat', () => {
       clearTimeout(refreshTimer)
       refreshTimer = null
     }
-    refreshPromise = null
     sessionListRefreshPromise = null
 
     replaceSessions([])
@@ -859,11 +856,8 @@ export const useChatStore = defineStore('chat', () => {
       currentBotId.value = null
     }
     resetTranscriptUserScope()
-    hasMoreOlder.value = true
-    hasLoadedOlder.value = false
     loading.value = false
     loadingChats.value = false
-    loadingOlder.value = false
     initializing.value = false
     initializeRerunRequested = false
     initializingBotId = null
@@ -898,59 +892,6 @@ export const useChatStore = defineStore('chat', () => {
     return activeWs
   }
 
-  async function refreshCurrentSession(targetBotId?: string, targetSessionId?: string) {
-    const bid = (targetBotId ?? currentBotId.value ?? '').trim()
-    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
-    if (!bid || !sid) return
-    const key = `${bid}:${sid}`
-
-    if (refreshPromise) {
-      if (refreshPromise.key === key) {
-        await refreshPromise.promise
-        return
-      }
-      await refreshPromise.promise
-    }
-
-    const promise = (async () => {
-      const turns = await fetchMessagesUI(bid, sid, { limit: PAGE_SIZE })
-      // The user may have switched away while the request was in flight. Drop
-      // the result silently — the new session has its own load underway.
-      if (currentBotId.value !== bid || sessionId.value !== sid) return
-      // Pick replace vs merge by whether the user has scrolled back to load
-      // older history. When older pages are present we MUST preserve them
-      // (otherwise an SSE-triggered refresh wipes the prepended history).
-      // Otherwise replace, so optimistic in-flight turns get consolidated
-      // against the server's authoritative view on stream end. The signal
-      // is a flag set by `loadOlderMessages` rather than a timestamp
-      // comparison, because client/server clock skew on a fresh session's
-      // first send could otherwise flip the decision and duplicate the user
-      // turn.
-      if (hasLoadedOlder.value) {
-        mergeMessages(turns, sid)
-      } else {
-        replaceMessages(turns, sid)
-        // We cannot infer end-of-history from `turns.length < PAGE_SIZE`: the
-        // server pages by raw `bot_history_messages` rows but returns merged
-        // UI turns (multi-row user/assistant groups collapsed into one). A 30-
-        // row page collapses to ~28 turns even when the session has thousands
-        // more rows behind it, so trusting that count truncates real history.
-        // Leave `hasMoreOlder` at the optimistic default and let the first
-        // scroll-to-top call `loadOlderMessages`, whose authoritative
-        // empty-server-response handling settles the flag correctly.
-        hasMoreOlder.value = true
-      }
-      const latest = messages[messages.length - 1]?.timestamp
-      touchSessionInList(sid, latest)
-    })().finally(() => {
-      if (refreshPromise?.promise === promise) {
-        refreshPromise = null
-      }
-    })
-    refreshPromise = { key, promise }
-
-    await promise
-  }
 
   function refreshSessionsList(targetBotId: string): Promise<void> {
     const bid = targetBotId.trim()
@@ -1093,12 +1034,6 @@ export const useChatStore = defineStore('chat', () => {
     void refreshSessionsList(targetBotId)
   }
 
-  // Bumped on every `startSessionMessagesStream` call. Late-resolving
-  // refreshes from a previous session must NOT clear `loadingMessages` if
-  // the user has already switched to another session — the newer start
-  // owns the flag now.
-  let loadingMessagesVersion = 0
-
   function startSessionMessagesStream(targetBotId: string, targetSessionId: string) {
     sessionMessagesStream.stop()
     const bid = targetBotId.trim()
@@ -1109,15 +1044,11 @@ export const useChatStore = defineStore('chat', () => {
     // placeholders (e.g. "system session has no records") while a fresh
     // transcript is on its way. The sidebar deliberately ignores it — only
     // `loadingChats` (sessions-list boot) makes the sidebar spin.
-    loadingMessages.value = true
-    const myVersion = ++loadingMessagesVersion
     sessionMessagesStream.start(async (signal) => {
       try {
-        await refreshCurrentSession(bid, sid)
+        await loadInitialMessages(bid, sid)
       } catch (error) {
         console.error('Failed to load session messages:', error)
-      } finally {
-        if (myVersion === loadingMessagesVersion) loadingMessages.value = false
       }
       await streamSessionMessageEvents(bid, sid, signal, (event) => {
         handleSessionMessageEvent(bid, sid, event)
@@ -1201,110 +1132,6 @@ export const useChatStore = defineStore('chat', () => {
       console.error('Failed to refresh bots:', error)
     }
   }
-
-  const PAGE_SIZE = 30
-
-  async function loadOlderMessages(): Promise<number> {
-    const bid = currentBotId.value ?? ''
-    const sid = sessionId.value ?? ''
-    if (!bid || !sid || loadingOlder.value || !hasMoreOlder.value) return 0
-    const first = messages[0]
-    const firstId = serverMessageId(first)
-    if (!firstId) return 0
-
-    loadingOlder.value = true
-    try {
-      // Page through history with cursor advancement. When merged-turn de-dup
-      // collapses an entire page to zero net-new entries, we must keep
-      // advancing the message-id cursor (using the earliest returned UI turn,
-      // not our local list, otherwise the cursor never moves and we'd
-      // terminate prematurely).
-      const MAX_DEDUP_HOPS = 4
-      let cursor = firstId
-      for (let hop = 0; hop < MAX_DEDUP_HOPS; hop++) {
-        const turns = await fetchMessagesUI(bid, sid, {
-          limit: PAGE_SIZE,
-          beforeMessageId: cursor,
-        })
-
-        if (turns.length === 0) {
-          hasMoreOlder.value = false
-          return 0
-        }
-
-        const existingIds = new Set(messages.map(message => message.id))
-        const normalized = normalizeTurns(turns)
-        const older = normalized.filter(turn => !existingIds.has(turn.id))
-
-        if (older.length > 0) {
-          prependToView(...older)
-          hasLoadedOlder.value = true
-          // Don't infer end-of-history from `turns.length < PAGE_SIZE`: the
-          // server pages by raw DB rows (bot_history_messages.created_at) but
-          // we receive merged UI turns (multi-row user/assistant groups
-          // collapsed into one), so a "short" UI page is the common case, not
-          // a terminal signal. Only an empty server response (handled at the
-          // top of the loop) is authoritative.
-          return older.length
-        }
-
-        // All returned turns were already present locally. Advance the cursor
-        // past the earliest returned turn and try again on the next hop.
-        const earliestTurn = normalized[0]
-        const earliest = earliestTurn ? serverMessageId(earliestTurn) : ''
-        if (!earliest || earliest === cursor) {
-          // Pagination cursor cannot advance; bail out to avoid a request loop.
-          hasMoreOlder.value = false
-          return 0
-        }
-        cursor = earliest
-      }
-      // Exhausted hop budget without finding net-new turns; treat as end of
-      // history rather than spinning indefinitely.
-      hasMoreOlder.value = false
-      return 0
-    } catch (error) {
-      console.error('Failed to load older messages:', error)
-      return 0
-    } finally {
-      loadingOlder.value = false
-    }
-  }
-
-  function findMessageIdByExternalId(externalMessageId: string): string | null {
-    const target = externalMessageId.trim()
-    if (!target) return null
-    const found = messages.find(message =>
-      (message.role === 'user' || message.role === 'assistant')
-      && message.externalMessageId === target,
-    )
-    return found?.id ?? null
-  }
-
-  async function locateMessageByExternalId(externalMessageId: string): Promise<string | null> {
-    const localID = findMessageIdByExternalId(externalMessageId)
-    if (localID) return localID
-
-    const bid = currentBotId.value ?? ''
-    const sid = sessionId.value ?? ''
-    const target = externalMessageId.trim()
-    if (!bid || !sid || !target) return null
-
-    try {
-      const result = await locateMessageUI(bid, sid, target, PAGE_SIZE, PAGE_SIZE)
-      if (!result.items.length) return null
-      mergeMessages(result.items, sid)
-      hasMoreOlder.value = true
-      // locateMessage merges an older slice into the view; treat this as
-      // "the user has loaded older content" so future refreshes preserve it.
-      hasLoadedOlder.value = true
-      return result.target_id?.trim() || findMessageIdByExternalId(target)
-    } catch (error) {
-      console.error('Failed to locate message:', error)
-      return null
-    }
-  }
-
 
 
   function sessionMetadata(session: SessionSummary | null): Record<string, unknown> {
@@ -1402,9 +1229,7 @@ export const useChatStore = defineStore('chat', () => {
     sessionId.value = created.id
     explicitSessionSelection.value = true
     draftIntent.value = false
-    replaceMessages([])
-    hasMoreOlder.value = false
-    hasLoadedOlder.value = false
+    clearHistoryView()
     if (runtimeId) {
       // The staged runtime now belongs to the session — reset local staging
       // without closing it.
@@ -1549,9 +1374,7 @@ export const useChatStore = defineStore('chat', () => {
     sessionId.value = created.id
     draftIntent.value = false
     explicitSessionSelection.value = true
-    replaceMessages([])
-    hasMoreOlder.value = false
-    hasLoadedOlder.value = false
+    clearHistoryView()
   }
 
   // defaultRuntimeIsACP reports whether the bot's default chat runtime is an
@@ -1659,7 +1482,7 @@ export const useChatStore = defineStore('chat', () => {
           // `hasLoadedOlder = true` from a previous bot into the new bot's first
           // refresh (which would take the merge branch and duplicate optimistic
           // turns).
-          hasLoadedOlder.value = false
+          prepareForInitialization()
           stopStreams()
           stopWebSocket()
 
@@ -1670,9 +1493,7 @@ export const useChatStore = defineStore('chat', () => {
             hasMoreSessions.value = false
             sessionId.value = null
             clearPendingACPSession()
-            replaceMessages([])
-            hasMoreOlder.value = false
-            hasLoadedOlder.value = false
+            clearHistoryView()
             continue
           }
           initializingBotId = bid
@@ -1717,28 +1538,21 @@ export const useChatStore = defineStore('chat', () => {
 
           if (preservePendingACPStage) {
             sessionId.value = null
-            hasMoreOlder.value = false
-            hasLoadedOlder.value = false
+            markHistoryEmpty()
           } else if (preserveExplicitEmptyComposer) {
             sessionId.value = null
-            replaceMessages([])
-            hasMoreOlder.value = false
-            hasLoadedOlder.value = false
+            clearHistoryView()
           } else if (preferDefaultACP) {
             sessionId.value = null
             explicitSessionSelection.value = false
             draftIntent.value = false
-            replaceMessages([])
-            hasMoreOlder.value = false
-            hasLoadedOlder.value = false
+            clearHistoryView()
           } else if (restoredExplicitSession) {
             draftIntent.value = false
           } else if (!visibleSessions.length) {
             sessionId.value = null
             explicitSessionSelection.value = false
-            replaceMessages([])
-            hasMoreOlder.value = false
-            hasLoadedOlder.value = false
+            clearHistoryView()
           } else {
             // Keep a VALID persisted session; otherwise, if the user intentionally
             // closed down to the draft "New Session" page, keep that on reload instead
@@ -1753,9 +1567,7 @@ export const useChatStore = defineStore('chat', () => {
               draftIntent.value = false
             } else if (draftIntent.value) {
               sessionId.value = null
-              replaceMessages([])
-              hasMoreOlder.value = false
-              hasLoadedOlder.value = false
+              clearHistoryView()
             } else {
               const firstConversation = visibleSessions.find(s => (s.type ?? 'chat') !== 'schedule')
               sessionId.value = (firstConversation ?? visibleSessions[0]!).id
@@ -1786,7 +1598,7 @@ export const useChatStore = defineStore('chat', () => {
   // `sessionId` — a watcher fires asynchronously and races with operations
   // that mutate `messages` between the assignment and the watcher microtask
   // (e.g. an optimistic turn appended during `sendMessage` is wiped when the
-  // pending watcher finally runs `replaceMessages([])`).
+  // pending watcher finally runs `clearHistoryView()`).
   //
   // We deliberately do NOT call `abortAllAssistantStreams()` here: an
   // assistant stream that started in session A keeps running server-side
@@ -1796,9 +1608,7 @@ export const useChatStore = defineStore('chat', () => {
   // orphan does not bleed into B's view).
   function switchActiveSession(sid: string) {
     sessionMessagesStream.stop()
-    replaceMessages([])
-    hasMoreOlder.value = false
-    hasLoadedOlder.value = false
+    clearHistoryView()
     const bid = (currentBotId.value ?? '').trim()
     if (!bid || !sid) return
     startSessionMessagesStream(bid, sid)
@@ -1957,9 +1767,7 @@ export const useChatStore = defineStore('chat', () => {
       explicitSessionSelection.value = false
       draftIntent.value = false
       sessionMessagesStream.stop()
-      replaceMessages([])
-      hasMoreOlder.value = false
-      hasLoadedOlder.value = false
+      clearHistoryView()
       return
     }
     const next = nextSession.id
@@ -2002,7 +1810,7 @@ export const useChatStore = defineStore('chat', () => {
       rememberSession(forked)
       void refreshSessionsList(bid)
 
-      const turns = await fetchMessagesUI(bid, forked.id, { limit: PAGE_SIZE })
+      const turns = await fetchSessionWindow(bid, forked.id)
       const anchoredForked = withForkAnchorFromUITurns(forked, turns)
       if (anchoredForked !== forked) {
         upsertSession(anchoredForked)
@@ -2018,9 +1826,7 @@ export const useChatStore = defineStore('chat', () => {
       sessionId.value = forked.id
       explicitSessionSelection.value = true
       draftIntent.value = false
-      replaceMessages(turns, forked.id)
-      hasMoreOlder.value = true
-      hasLoadedOlder.value = false
+      replaceHistoryView(turns, forked.id)
       startSessionMessagesStream(bid, forked.id)
       return true
     } catch (error) {

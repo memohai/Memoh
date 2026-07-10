@@ -33,14 +33,24 @@ function makeTranscript() {
   const sessionId = ref<string | null>('session-1')
   const backgroundTasks = createBackgroundTaskTracker()
   const bumpFsChangedAtIfFsMutation = vi.fn()
+  const fetchMessages = vi.fn().mockResolvedValue([])
+  const locateMessage = vi.fn().mockResolvedValue({ items: [] })
   const transcript = createTranscriptController({
     currentBotId,
     sessionId,
     rememberBackgroundTask: backgroundTasks.rememberBackgroundTask,
     applyPendingBackgroundEventsToTool: backgroundTasks.applyPendingBackgroundEventsToTool,
     bumpFsChangedAtIfFsMutation,
+    fetchMessages,
+    locateMessage,
   })
-  return { transcript, currentBotId, sessionId, bumpFsChangedAtIfFsMutation }
+  return { transcript, currentBotId, sessionId, bumpFsChangedAtIfFsMutation, fetchMessages, locateMessage }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => { resolve = done })
+  return { promise, resolve }
 }
 
 function approvalMessage(status = 'pending'): UIMessage {
@@ -201,5 +211,57 @@ describe('chat transcript controller', () => {
     const tool = (turns[0] as ChatAssistantTurn).messages[0] as ToolCallBlock
     expect(tool.backgroundTask?.status).toBe('completed')
     expect(tool.done).toBe(true)
+  })
+
+  it('owns refresh state and reports the latest applied timestamp', async () => {
+    const { transcript, fetchMessages } = makeTranscript()
+    const onRefreshApplied = vi.fn()
+    transcript.setRefreshAppliedHook(onRefreshApplied)
+    fetchMessages.mockResolvedValueOnce([
+      rawUser('user-1'),
+      rawAssistant('assistant-1', [], '2026-01-01T00:00:02.000Z'),
+    ])
+
+    await transcript.loadInitialMessages('bot-1', 'session-1')
+
+    expect(transcript.loadingMessages.value).toBe(false)
+    expect(transcript.hasMoreOlder.value).toBe(true)
+    expect(onRefreshApplied).toHaveBeenCalledWith('session-1', '2026-01-01T00:00:02.000Z')
+  })
+
+  it('drops an older-page response that resolves after the active session changes', async () => {
+    const { transcript, sessionId, fetchMessages } = makeTranscript()
+    transcript.replaceHistoryView([rawUser('session-1-user')], 'session-1')
+    const pending = deferred<UITurn[]>()
+    fetchMessages.mockReturnValueOnce(pending.promise)
+
+    const loading = transcript.loadOlderMessages()
+    sessionId.value = 'session-2'
+    transcript.clearHistoryView()
+    transcript.replaceHistoryView([rawUser('session-2-user')], 'session-2')
+    pending.resolve([rawUser('session-1-older', 'old', '2025-01-01T00:00:00.000Z')])
+
+    expect(await loading).toBe(0)
+    expect(transcript.messages.map(turn => turn.id)).toEqual(['session-2-user'])
+    expect(transcript.loadingOlder.value).toBe(false)
+  })
+
+  it('drops a locate response that resolves after the active session changes', async () => {
+    const { transcript, sessionId, locateMessage } = makeTranscript()
+    const pending = deferred<{ items: UITurn[]; target_id?: string }>()
+    locateMessage.mockReturnValueOnce(pending.promise)
+
+    const locating = transcript.locateMessageByExternalId('external-1')
+    sessionId.value = 'session-2'
+    transcript.clearHistoryView()
+    transcript.replaceHistoryView([rawUser('session-2-user')], 'session-2')
+    pending.resolve({
+      items: [{ ...rawUser('session-1-target'), external_message_id: 'external-1' } as UITurn],
+      target_id: 'session-1-target',
+    })
+
+    expect(await locating).toBeNull()
+    expect(transcript.messages.map(turn => turn.id)).toEqual(['session-2-user'])
+    expect(transcript.hasLoadedOlder.value).toBe(false)
   })
 })

@@ -1,6 +1,7 @@
-import { reactive, type Ref } from 'vue'
+import { reactive, ref, type Ref } from 'vue'
 import type {
   ChatAttachment,
+  FetchMessagesOptions,
   UIMessage,
   UISystemTurn,
   UIToolApproval,
@@ -60,9 +61,17 @@ export interface TranscriptDeps {
   rememberBackgroundTask: (task: BackgroundTask) => BackgroundTask
   applyPendingBackgroundEventsToTool: (block: ToolCallBlock) => void
   bumpFsChangedAtIfFsMutation: (message: UIMessage) => void
+  fetchMessages: (botId: string, sessionId: string, options?: FetchMessagesOptions) => Promise<UITurn[]>
+  locateMessage: (botId: string, sessionId: string, externalMessageId: string, before?: number, after?: number) => Promise<LocateMessageResult>
 }
 
 type SnapshotHook = (targetSessionId: string | undefined, turns: UITurn[]) => void
+type RefreshAppliedHook = (targetSessionId: string, latestTimestamp?: string) => void
+
+export interface LocateMessageResult {
+  items: UITurn[]
+  target_id?: string
+}
 
 // Owns the single active transcript view and every mutation of that view.
 // Streams for inactive sessions may keep mutating their detached turn objects,
@@ -73,13 +82,28 @@ export function createTranscriptController({
   rememberBackgroundTask,
   applyPendingBackgroundEventsToTool,
   bumpFsChangedAtIfFsMutation,
+  fetchMessages,
+  locateMessage,
 }: TranscriptDeps) {
   const messages = reactive<ChatMessage[]>([])
+  const loadingMessages = ref(false)
+  const loadingOlder = ref(false)
+  const hasMoreOlder = ref(true)
+  const hasLoadedOlder = ref(false)
   const ephemeralAssistantErrors = new Map<string, EphemeralAssistantError[]>()
   let onSnapshot: SnapshotHook = () => {}
+  let onRefreshApplied: RefreshAppliedHook = () => {}
+  let refreshPromise: { key: string; promise: Promise<void> } | null = null
+  let historyGeneration = 0
+  let loadingMessagesVersion = 0
+  let loadingOlderVersion = 0
 
   function setSnapshotHook(hook: SnapshotHook) {
     onSnapshot = hook
+  }
+
+  function setRefreshAppliedHook(hook: RefreshAppliedHook) {
+    onRefreshApplied = hook
   }
 
   function normalizeUIMessage(msg: UIMessage): ContentBlock {
@@ -341,6 +365,180 @@ export function createTranscriptController({
     messages.splice(0, messages.length, ...sortChatMessages([...merged.values()]))
   }
 
+  const PAGE_SIZE = 30
+
+  function isCurrentHistoryContext(botId: string, targetSessionId: string, generation: number): boolean {
+    return generation === historyGeneration && isActiveSessionTarget(botId, targetSessionId)
+  }
+
+  function clearHistoryView(options: { hasMoreOlder?: boolean } = {}) {
+    historyGeneration += 1
+    loadingMessagesVersion += 1
+    loadingOlderVersion += 1
+    refreshPromise = null
+    replaceMessages([])
+    hasMoreOlder.value = options.hasMoreOlder === true
+    hasLoadedOlder.value = false
+    loadingMessages.value = false
+    loadingOlder.value = false
+  }
+
+  function prepareForInitialization() {
+    historyGeneration += 1
+    loadingMessagesVersion += 1
+    loadingOlderVersion += 1
+    refreshPromise = null
+    hasLoadedOlder.value = false
+    loadingMessages.value = false
+    loadingOlder.value = false
+  }
+
+  function markHistoryEmpty() {
+    hasMoreOlder.value = false
+    hasLoadedOlder.value = false
+  }
+
+  function replaceHistoryView(items: UITurn[], targetSessionId: string) {
+    historyGeneration += 1
+    loadingOlderVersion += 1
+    refreshPromise = null
+    replaceMessages(items, targetSessionId)
+    hasMoreOlder.value = true
+    hasLoadedOlder.value = false
+    loadingOlder.value = false
+  }
+
+  async function refreshCurrentSession(targetBotId?: string, targetSessionId?: string) {
+    const bid = (targetBotId ?? currentBotId.value ?? '').trim()
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
+    if (!bid || !sid) return
+    const key = `${bid}:${sid}`
+    const generation = historyGeneration
+
+    if (refreshPromise) {
+      if (refreshPromise.key === key) {
+        await refreshPromise.promise
+        return
+      }
+      await refreshPromise.promise
+    }
+
+    const promise = (async () => {
+      const turns = await fetchMessages(bid, sid, { limit: PAGE_SIZE })
+      if (!isCurrentHistoryContext(bid, sid, generation)) return
+      if (hasLoadedOlder.value) {
+        mergeMessages(turns, sid)
+      } else {
+        replaceMessages(turns, sid)
+        // The API pages raw DB rows but returns merged UI turns, so a short
+        // page is not proof that history ended. Only pagination can settle it.
+        hasMoreOlder.value = true
+      }
+      onRefreshApplied(sid, messages[messages.length - 1]?.timestamp)
+    })().finally(() => {
+      if (refreshPromise?.promise === promise) refreshPromise = null
+    })
+    refreshPromise = { key, promise }
+    await promise
+  }
+
+  async function loadInitialMessages(botId: string, targetSessionId: string) {
+    const bid = botId.trim()
+    const sid = targetSessionId.trim()
+    if (!bid || !sid) return
+    loadingMessages.value = true
+    const version = ++loadingMessagesVersion
+    try {
+      await refreshCurrentSession(bid, sid)
+    } finally {
+      if (version === loadingMessagesVersion) loadingMessages.value = false
+    }
+  }
+
+  function fetchSessionWindow(botId: string, targetSessionId: string): Promise<UITurn[]> {
+    return fetchMessages(botId, targetSessionId, { limit: PAGE_SIZE })
+  }
+
+  async function loadOlderMessages(): Promise<number> {
+    const bid = (currentBotId.value ?? '').trim()
+    const sid = (sessionId.value ?? '').trim()
+    if (!bid || !sid || loadingOlder.value || !hasMoreOlder.value) return 0
+    const firstId = serverMessageId(messages[0])
+    if (!firstId) return 0
+
+    const generation = historyGeneration
+    const version = ++loadingOlderVersion
+    loadingOlder.value = true
+    try {
+      const maxDedupHops = 4
+      let cursor = firstId
+      for (let hop = 0; hop < maxDedupHops; hop++) {
+        const turns = await fetchMessages(bid, sid, { limit: PAGE_SIZE, beforeMessageId: cursor })
+        if (!isCurrentHistoryContext(bid, sid, generation)) return 0
+        if (turns.length === 0) {
+          hasMoreOlder.value = false
+          return 0
+        }
+
+        const existingIds = new Set(messages.map(message => message.id))
+        const normalized = normalizeTurns(turns, sid)
+        const older = normalized.filter(turn => !existingIds.has(turn.id))
+        if (older.length > 0) {
+          prependToView(...older)
+          hasLoadedOlder.value = true
+          return older.length
+        }
+
+        const earliest = normalized[0] ? serverMessageId(normalized[0]) : ''
+        if (!earliest || earliest === cursor) {
+          hasMoreOlder.value = false
+          return 0
+        }
+        cursor = earliest
+      }
+      hasMoreOlder.value = false
+      return 0
+    } catch (error) {
+      console.error('Failed to load older messages:', error)
+      return 0
+    } finally {
+      if (version === loadingOlderVersion) loadingOlder.value = false
+    }
+  }
+
+  function findMessageIdByExternalId(externalMessageId: string): string | null {
+    const target = externalMessageId.trim()
+    if (!target) return null
+    const found = messages.find(message =>
+      (message.role === 'user' || message.role === 'assistant')
+      && message.externalMessageId === target,
+    )
+    return found?.id ?? null
+  }
+
+  async function locateMessageByExternalId(externalMessageId: string): Promise<string | null> {
+    const localID = findMessageIdByExternalId(externalMessageId)
+    if (localID) return localID
+
+    const bid = (currentBotId.value ?? '').trim()
+    const sid = (sessionId.value ?? '').trim()
+    const target = externalMessageId.trim()
+    if (!bid || !sid || !target) return null
+    const generation = historyGeneration
+
+    try {
+      const result = await locateMessage(bid, sid, target, PAGE_SIZE, PAGE_SIZE)
+      if (!isCurrentHistoryContext(bid, sid, generation) || !result.items.length) return null
+      mergeMessages(result.items, sid)
+      hasMoreOlder.value = true
+      hasLoadedOlder.value = true
+      return result.target_id?.trim() || findMessageIdByExternalId(target)
+    } catch (error) {
+      console.error('Failed to locate message:', error)
+      return null
+    }
+  }
+
   function isActiveSessionTarget(botId: string, targetSessionId: string): boolean {
     const bid = botId.trim()
     const sid = targetSessionId.trim()
@@ -579,18 +777,33 @@ export function createTranscriptController({
   }
 
   function resetUserScope() {
-    replaceMessages([])
+    clearHistoryView({ hasMoreOlder: true })
     ephemeralAssistantErrors.clear()
   }
 
   return {
     messages,
+    loadingMessages,
+    loadingOlder,
+    hasMoreOlder,
+    hasLoadedOlder,
     setSnapshotHook,
+    setRefreshAppliedHook,
     normalizeUIMessage,
     normalizeTurn,
     normalizeTurns,
     replaceMessages,
     mergeMessages,
+    clearHistoryView,
+    prepareForInitialization,
+    markHistoryEmpty,
+    replaceHistoryView,
+    refreshCurrentSession,
+    loadInitialMessages,
+    fetchSessionWindow,
+    loadOlderMessages,
+    findMessageIdByExternalId,
+    locateMessageByExternalId,
     isActiveSessionTarget,
     appendTurnToSession,
     appendToView,
