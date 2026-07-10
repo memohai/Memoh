@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
 
@@ -85,6 +87,45 @@ func TestBuildEntriesAndIDsRendersLegacyToolResultEnvelopeExchange(t *testing.T)
 	}
 	if len(ids) != 2 || ids[0] != rows[0].ID || ids[1] != rows[1].ID {
 		t.Fatalf("ids = %#v, want both exchange rows marked", ids)
+	}
+}
+
+func TestBuildEntriesAndIDsKeepsToolExchangeAcrossUnparseableBarrier(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		breakIndex int
+	}{
+		{name: "call is unparseable", breakIndex: 0},
+		{name: "result is unparseable", breakIndex: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows := []sqlc.ListUncompactedMessagesBySessionRow{
+				toolCallRow(t, 100),
+				toolResultRow(t, 100),
+				mkRow(t, "user", `"old question"`, 100),
+				mkRow(t, "assistant", `"old answer"`, 100),
+				mkRow(t, "user", `"current question"`, 100),
+				mkRow(t, "assistant", `"current answer"`, 100),
+			}
+			rows[tt.breakIndex].ID = pgtype.UUID{Valid: false}
+
+			items, barrierCount := itemsFromRows(rows)
+			if barrierCount != 1 {
+				t.Fatalf("barrier count = %d, want 1", barrierCount)
+			}
+			selected := splitByTarget(items, 200)
+			entries, ids := buildEntriesAndIDs(selected)
+
+			if len(ids) != 2 || ids[0] != rows[2].ID || ids[1] != rows[3].ID {
+				t.Fatalf("ids = %#v, want only the complete run after the protected tool exchange", ids)
+			}
+			if len(entries) != 2 {
+				t.Fatalf("entries = %#v, want the old question and answer", entries)
+			}
+		})
 	}
 }
 

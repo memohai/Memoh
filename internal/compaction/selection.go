@@ -6,9 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/historyfrag"
-	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/userinput"
 )
 
@@ -27,11 +25,12 @@ const (
 // typed classifier output used for policies, tool-aware boundaries, and
 // summarizer rendering.
 type CompactionCandidate struct {
-	ID         pgtype.UUID
-	RawContent []byte
-	RawUsage   []byte
-	Record     historyfrag.HistoryRecord
-	Policies   []CompactPolicy
+	ID           pgtype.UUID
+	RawContent   []byte
+	RawUsage     []byte
+	Record       historyfrag.HistoryRecord
+	Policies     []CompactPolicy
+	IsToolResult bool
 }
 
 func (c CompactionCandidate) HasPolicy(policy CompactPolicy) bool {
@@ -41,40 +40,6 @@ func (c CompactionCandidate) HasPolicy(policy CompactPolicy) bool {
 		}
 	}
 	return false
-}
-
-// itemsFromRows classifies each uncompacted row into a typed CompactionCandidate.
-// A row that cannot be classified remains as a must-keep barrier rather than
-// aborting the whole compaction. Keeping its position prevents compact spans on
-// either side from sharing an ID and being reordered by the read path.
-func itemsFromRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]CompactionCandidate, int) {
-	items := make([]CompactionCandidate, 0, len(rows))
-	skipped := 0
-	for _, row := range rows {
-		record, err := historyfrag.FromDBMessage(rowToMessage(row), rowScopeFallback(row))
-		if err != nil {
-			skipped++
-			items = append(items, CompactionCandidate{
-				ID:         row.ID,
-				RawContent: row.Content,
-				RawUsage:   row.Usage,
-				Policies:   []CompactPolicy{CompactPolicyMustKeep},
-			})
-			continue
-		}
-		items = append(items, CompactionCandidate{
-			ID:         row.ID,
-			RawContent: row.Content,
-			RawUsage:   row.Usage,
-			Record:     record,
-			Policies:   candidatePolicies(record),
-		})
-	}
-	if len(items) > 0 {
-		propagateMustKeepAcrossToolExchanges(items)
-		markSelectionPolicies(items)
-	}
-	return items, skipped
 }
 
 // toolExchangeGroups partitions items into tool-exchange groups: a maximal run
@@ -180,55 +145,6 @@ func recentTailProtectedStart(items []CompactionCandidate, minStart int) int {
 		start--
 	}
 	return start
-}
-
-func rowToMessage(row sqlc.ListUncompactedMessagesBySessionRow) messagepkg.Message {
-	return messagepkg.Message{
-		ID:                      formatUUID(row.ID),
-		BotID:                   formatUUID(row.BotID),
-		SessionID:               formatUUID(row.SessionID),
-		SenderChannelIdentityID: formatUUID(row.SenderChannelIdentityID),
-		SenderUserID:            formatUUID(row.SenderUserID),
-		SenderDisplayName:       textValue(row.SenderDisplayName),
-		SenderAvatarURL:         textValue(row.SenderAvatarUrl),
-		Platform:                textValue(row.Platform),
-		ExternalMessageID:       textValue(row.ExternalMessageID),
-		SourceReplyToMessageID:  textValue(row.SourceReplyToMessageID),
-		Role:                    row.Role,
-		Content:                 row.Content,
-		Metadata:                metadataMap(row.Metadata),
-		Usage:                   row.Usage,
-		CompactID:               formatUUID(row.CompactID),
-		EventID:                 formatUUID(row.EventID),
-		DisplayContent:          textValue(row.DisplayText),
-		CreatedAt:               row.CreatedAt.Time,
-	}
-}
-
-func rowScopeFallback(row sqlc.ListUncompactedMessagesBySessionRow) historyfrag.ScopeFallback {
-	return historyfrag.ScopeFallback{
-		ConversationType: textValue(row.ConversationType),
-		ConversationName: strings.TrimSpace(row.ConversationName),
-		ReplyTarget:      textValue(row.ReplyTarget),
-	}
-}
-
-func textValue(value pgtype.Text) string {
-	if !value.Valid {
-		return ""
-	}
-	return strings.TrimSpace(value.String)
-}
-
-func metadataMap(raw []byte) map[string]any {
-	if len(raw) == 0 {
-		return nil
-	}
-	var out map[string]any
-	if json.Unmarshal(raw, &out) != nil {
-		return nil
-	}
-	return out
 }
 
 func candidatePolicies(record historyfrag.HistoryRecord) []CompactPolicy {
@@ -479,7 +395,7 @@ func isToolClosureResultItem(item CompactionCandidate) bool {
 }
 
 func isToolResultItem(item CompactionCandidate) bool {
-	return strings.EqualFold(strings.TrimSpace(item.Record.ModelMessage.Role), "tool")
+	return item.IsToolResult
 }
 
 // buildEntriesAndIDs renders the summarizer entries and the ids to mark

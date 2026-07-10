@@ -225,10 +225,10 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		return Result{Status: StatusNoop}, nil
 	}
 
-	messages, skipped := itemsFromRows(rows)
-	if skipped > 0 {
+	messages, barrierCount := itemsFromRows(rows)
+	if barrierCount > 0 {
 		s.logger.Warn("compaction: kept unparseable history rows as span barriers",
-			slog.Int("skipped", skipped),
+			slog.Int("barrier_count", barrierCount),
 			slog.String("session_id", cfg.SessionID),
 		)
 	}

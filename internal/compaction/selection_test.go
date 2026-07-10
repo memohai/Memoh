@@ -104,9 +104,9 @@ func TestItemsFromRowsPreservesDirectedSignalMetadata(t *testing.T) {
 	row.ConversationName = "Ops Room"
 	row.ReplyTarget = pgtype.Text{String: "thread-9", Valid: true}
 
-	items, skipped := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{row})
-	if skipped != 0 || len(items) != 1 {
-		t.Fatalf("items=%d skipped=%d, want one classified row", len(items), skipped)
+	items, barrierCount := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{row})
+	if barrierCount != 0 || len(items) != 1 {
+		t.Fatalf("items=%d barriers=%d, want one classified row", len(items), barrierCount)
 	}
 	record := items[0].Record
 	if record.ExternalMessageID != "msg-123" ||
@@ -130,9 +130,9 @@ func TestItemsFromRowsAnnotatesCompactionCandidatePolicy(t *testing.T) {
 		toolCallRow(t, 100),
 		toolResultRow(t, 100),
 	}
-	items, skipped := itemsFromRows(rows)
-	if skipped != 0 || len(items) != 5 {
-		t.Fatalf("items=%d skipped=%d, want five classified candidates", len(items), skipped)
+	items, barrierCount := itemsFromRows(rows)
+	if barrierCount != 0 || len(items) != 5 {
+		t.Fatalf("items=%d barriers=%d, want five classified candidates", len(items), barrierCount)
 	}
 
 	assertPolicy(t, items[0], CompactPolicyCanDrop)
@@ -158,9 +158,9 @@ func TestItemsFromRowsKeepsAskUserToolExchange(t *testing.T) {
 		mkRow(t, "tool", `[{"type":"tool-result","toolName":"`+userinput.ToolNameAskUser+`","toolCallId":"ask-1","result":{"status":"submitted"}}]`, 100),
 		mkRow(t, "assistant", `"latest tail"`, 100),
 	}
-	items, skipped := itemsFromRows(rows)
-	if skipped != 0 || len(items) != 4 {
-		t.Fatalf("items=%d skipped=%d, want four classified candidates", len(items), skipped)
+	items, barrierCount := itemsFromRows(rows)
+	if barrierCount != 0 || len(items) != 4 {
+		t.Fatalf("items=%d barriers=%d, want four classified candidates", len(items), barrierCount)
 	}
 
 	for _, idx := range []int{1, 2} {
@@ -301,9 +301,9 @@ func TestItemsFromRowsAllowsCurrentTurnMiddleCompaction(t *testing.T) {
 		mkRow(t, "assistant", `"loop step 2"`, 100),
 		mkRow(t, "assistant", `"latest tail"`, 100),
 	}
-	items, skipped := itemsFromRows(rows)
-	if skipped != 0 || len(items) != 4 {
-		t.Fatalf("items=%d skipped=%d, want four classified candidates", len(items), skipped)
+	items, barrierCount := itemsFromRows(rows)
+	if barrierCount != 0 || len(items) != 4 {
+		t.Fatalf("items=%d barriers=%d, want four classified candidates", len(items), barrierCount)
 	}
 
 	assertPolicy(t, items[0], CompactPolicyPreserveRecent)
@@ -325,9 +325,9 @@ func TestItemsFromRowsPreservesUnparseableRowsAsSelectionBarriers(t *testing.T) 
 	}
 	after := mkRow(t, "assistant", `"after"`, 100)
 	current := mkRow(t, "user", `"current"`, 100)
-	items, skipped := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{before, bad, after, current})
-	if skipped != 1 {
-		t.Fatalf("skipped = %d, want 1", skipped)
+	items, barrierCount := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{before, bad, after, current})
+	if barrierCount != 1 {
+		t.Fatalf("barrier count = %d, want 1", barrierCount)
 	}
 	if len(items) != 4 || !items[1].HasPolicy(CompactPolicyMustKeep) {
 		t.Fatalf("an unparseable row must remain as a selection barrier: %#v", items)
