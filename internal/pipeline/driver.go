@@ -315,7 +315,11 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 			d.advanceDiscussCursor(ctx, sess, cfg, consumedMs, log)
 			return
 		}
-		if d.streamDiscussACPRuntime(ctx, cfg, composed, addressed, log) {
+		attempted, completed := d.streamDiscussACPRuntime(ctx, cfg, composed, addressed, log)
+		if attempted {
+			d.maybeCompactDiscussContext(ctx, cfg, composed.EstimatedTokens, 0)
+		}
+		if completed {
 			d.advanceDiscussCursor(ctx, sess, cfg, consumedMs, log)
 		}
 		return
@@ -380,16 +384,7 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 	if inputTokens <= 0 {
 		inputTokens = composed.EstimatedTokens
 	}
-	if inputTokens > 0 {
-		d.deps.Resolver.MaybeCompactSession(
-			context.WithoutCancel(ctx),
-			cfg.BotID,
-			cfg.SessionID,
-			cfg.UserID,
-			inputTokens,
-			0,
-		)
-	}
+	d.maybeCompactDiscussContext(ctx, cfg, inputTokens, 0)
 	if !terminalReceived {
 		return
 	}
@@ -402,14 +397,20 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 	d.advanceDiscussCursor(ctx, sess, cfg, consumedMs, log)
 }
 
-func (d *DiscussDriver) streamDiscussACPRuntime(ctx context.Context, cfg DiscussSessionConfig, composed *ComposeContextResult, isMentioned bool, log *slog.Logger) bool {
+func (d *DiscussDriver) streamDiscussACPRuntime(
+	ctx context.Context,
+	cfg DiscussSessionConfig,
+	composed *ComposeContextResult,
+	isMentioned bool,
+	log *slog.Logger,
+) (bool, bool) {
 	if d.deps.RuntimeStreamer == nil {
 		log.Error("discuss ACP runtime: streamer not configured")
-		return false
+		return false, false
 	}
 	prompt := discussACPFullContextPrompt(composed.Messages, buildLateBindingPrompt(isMentioned))
 	if strings.TrimSpace(prompt) == "" {
-		return false
+		return false, false
 	}
 	chunks, errs := d.deps.RuntimeStreamer.StreamChat(ctx, conversation.ChatRequest{
 		BotID:                   cfg.BotID,
@@ -464,10 +465,10 @@ func (d *DiscussDriver) streamDiscussACPRuntime(ctx context.Context, cfg Discuss
 			}
 		case <-ctx.Done():
 			log.Warn("discuss ACP runtime cancelled", slog.Any("error", ctx.Err()))
-			return false
+			return true, false
 		}
 	}
-	return streamed && terminal && !failed
+	return true, streamed && terminal && !failed
 }
 
 func discussACPFullContextPrompt(messages []ContextMessage, lateBinding string) string {

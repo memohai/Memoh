@@ -54,6 +54,25 @@ func usageInputTokens(raw json.RawMessage) int {
 	return usage.InputTokens
 }
 
+func (d *DiscussDriver) maybeCompactDiscussContext(
+	ctx context.Context,
+	cfg DiscussSessionConfig,
+	inputTokens int,
+	contextTokenBudget int,
+) {
+	if inputTokens <= 0 {
+		return
+	}
+	d.deps.Resolver.MaybeCompactSession(
+		context.WithoutCancel(ctx),
+		cfg.BotID,
+		cfg.SessionID,
+		cfg.UserID,
+		inputTokens,
+		contextTokenBudget,
+	)
+}
+
 func (d *DiscussDriver) loadDiscussCursor(ctx context.Context, cfg DiscussSessionConfig, log *slog.Logger) int64 {
 	if d.deps.CursorStore == nil {
 		return 0

@@ -217,6 +217,46 @@ func TestHandleReplyWithAgentFallsBackToComposedEstimateForCompaction(t *testing
 	}
 }
 
+func TestHandleReplyWithAgentTriggersCompactionForACPDiscuss(t *testing.T) {
+	t.Parallel()
+
+	resolver := &fakeRunConfigResolver{
+		resolveResult: ResolveRunConfigResult{RuntimeType: sessionpkg.RuntimeACPAgent},
+	}
+	runtime := &fakeDiscussRuntimeStreamer{}
+	driver := NewDiscussDriver(DiscussDriverDeps{Resolver: resolver, RuntimeStreamer: runtime})
+	sess := &discussSession{config: DiscussSessionConfig{
+		BotID:            "bot",
+		SessionID:        "session",
+		UserID:           "account-user",
+		ConversationType: channel.ConversationTypeGroup,
+	}}
+	rc := RenderedContext{{
+		MessageID:    "new",
+		ReceivedAtMs: 100,
+		MentionsMe:   true,
+		Content:      []RenderedContentPiece{{Type: "text", Text: "compact ACP discuss context"}},
+	}}
+	want := ComposeContext(rc, nil).EstimatedTokens
+
+	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, &fakeDiscussStreamer{})
+
+	if runtime.calls != 1 {
+		t.Fatalf("ACP runtime calls = %d, want 1", runtime.calls)
+	}
+	if resolver.compactionCalls != 1 || resolver.compactionInputTokens != want {
+		t.Fatalf(
+			"ACP compaction trigger = calls:%d input:%d, want one call with %d",
+			resolver.compactionCalls,
+			resolver.compactionInputTokens,
+			want,
+		)
+	}
+	if resolver.compactionUserID != "account-user" {
+		t.Fatalf("ACP compaction principal = %q, want account user", resolver.compactionUserID)
+	}
+}
+
 func TestHandleReplyWithAgentDoesNotConsumeContextAfterStreamError(t *testing.T) {
 	t.Parallel()
 

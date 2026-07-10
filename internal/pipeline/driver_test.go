@@ -407,6 +407,9 @@ func TestHandleReplyWithAgent_ACPDiscussDoesNotAdvanceCursorWithoutRuntimeStream
 	if sess.lastProcessedMs != 0 {
 		t.Fatalf("lastProcessedMs = %d, want 0 when ACP runtime streamer is missing", sess.lastProcessedMs)
 	}
+	if resolver.compactionCalls != 0 {
+		t.Fatalf("missing-runtime compaction calls = %d, want 0", resolver.compactionCalls)
+	}
 }
 
 func TestHandleReplyWithAgent_ACPDiscussDoesNotAdvanceCursorOnRuntimeError(t *testing.T) {
@@ -433,8 +436,10 @@ func TestHandleReplyWithAgent_ACPDiscussDoesNotAdvanceCursorOnRuntimeError(t *te
 		config: DiscussSessionConfig{
 			BotID:     "bot-1",
 			SessionID: "sess-1",
+			UserID:    "account-user",
 		},
 	}
+	wantEstimate := ComposeContext(rc, nil).EstimatedTokens
 
 	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
 
@@ -443,6 +448,17 @@ func TestHandleReplyWithAgent_ACPDiscussDoesNotAdvanceCursorOnRuntimeError(t *te
 	}
 	if sess.lastProcessedMs != 0 {
 		t.Fatalf("lastProcessedMs = %d, want 0 when ACP runtime stream fails", sess.lastProcessedMs)
+	}
+	if resolver.compactionCalls != 1 || resolver.compactionInputTokens != wantEstimate {
+		t.Fatalf(
+			"failed ACP compaction = calls:%d input:%d, want one call with %d",
+			resolver.compactionCalls,
+			resolver.compactionInputTokens,
+			wantEstimate,
+		)
+	}
+	if resolver.compactionUserID != "account-user" {
+		t.Fatalf("failed ACP compaction principal = %q, want account user", resolver.compactionUserID)
 	}
 }
 
@@ -482,6 +498,9 @@ func TestHandleReplyWithAgent_ACPDiscussSkipsRuntimeForPassiveMessage(t *testing
 
 	if runtime.calls != 0 {
 		t.Fatalf("runtime calls = %d, want 0 for a passive (unmentioned) group message", runtime.calls)
+	}
+	if resolver.compactionCalls != 0 {
+		t.Fatalf("passive ACP compaction calls = %d, want 0", resolver.compactionCalls)
 	}
 	if fakeAgent.lastConfig != nil {
 		t.Fatal("ordinary agent should not be invoked for ACP discuss runtime")
