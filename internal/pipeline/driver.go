@@ -278,7 +278,7 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 		return
 	}
 
-	composed := ComposeContext(rc, trs, "")
+	composed := ComposeContext(rc, trs)
 	if composed == nil {
 		return
 	}

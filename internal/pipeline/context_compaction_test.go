@@ -1,0 +1,168 @@
+package pipeline
+
+import "testing"
+
+func TestComposeContextWithArtifactsKeepsOrderedSummariesAtCoverageAnchors(t *testing.T) {
+	t.Parallel()
+
+	rc := RenderedContext{
+		renderedText("before", 50, "before compacted ranges"),
+		renderedText("covered-a", 100, "covered by a"),
+		renderedText("between", 250, "between summaries"),
+		renderedText("covered-b", 300, "covered by b"),
+		renderedText("after", 500, "after compacted ranges"),
+	}
+	trs := []TurnResponseEntry{
+		{SourceMessageID: "assistant-a", RequestedAtMs: 150, Role: "assistant", Content: "covered assistant a"},
+		{SourceMessageID: "assistant-b", RequestedAtMs: 350, Role: "assistant", Content: "covered assistant b"},
+		{SourceMessageID: "assistant-new", RequestedAtMs: 550, Role: "assistant", Content: "new assistant"},
+	}
+	artifacts := []CompactionArtifact{
+		{
+			ID:            "artifact-a",
+			Summary:       "summary a",
+			AnchorStartMs: 100,
+			Sources: []CompactionSource{
+				{ExternalMessageID: "covered-a", CreatedAtMs: 200},
+				{HistoryMessageID: "assistant-a", CreatedAtMs: 200},
+			},
+		},
+		{
+			ID:            "artifact-b",
+			Summary:       "summary b",
+			AnchorStartMs: 300,
+			Sources: []CompactionSource{
+				{ExternalMessageID: "covered-b", CreatedAtMs: 400},
+				{HistoryMessageID: "assistant-b", CreatedAtMs: 400},
+			},
+		},
+	}
+
+	composed := ComposeContextWithArtifacts(rc, trs, artifacts)
+	if composed == nil {
+		t.Fatal("expected composed context")
+	}
+	assertContextContents(t, composed.Messages, []string{
+		messageXML("before", "before compacted ranges"),
+		"[Conversation summary]\nsummary a",
+		messageXML("between", "between summaries"),
+		"[Conversation summary]\nsummary b",
+		messageXML("after", "after compacted ranges"),
+		"new assistant",
+	})
+}
+
+func TestComposeContextWithArtifactsKeepsPostCompactionMutation(t *testing.T) {
+	t.Parallel()
+
+	rc := RenderedContext{
+		renderedText("before", 50, "before compact"),
+		{
+			MessageID:     "covered",
+			ReceivedAtMs:  100,
+			LastEventAtMs: 300,
+			Content:       []RenderedContentPiece{{Type: "text", Text: messageXML("covered", "edited after compact")}},
+		},
+	}
+	artifacts := []CompactionArtifact{{
+		ID:            "artifact-a",
+		Summary:       "original state",
+		AnchorStartMs: 100,
+		Sources:       []CompactionSource{{ExternalMessageID: "covered", CreatedAtMs: 200}},
+	}}
+
+	composed := ComposeContextWithArtifacts(rc, nil, artifacts)
+	if composed == nil {
+		t.Fatal("expected composed context")
+	}
+	assertContextContents(t, composed.Messages, []string{
+		messageXML("before", "before compact"),
+		"[Conversation summary]\noriginal state",
+		messageXML("covered", "edited after compact"),
+	})
+}
+
+func TestComposeContextWithArtifactsKeepsRenderedMessageWithoutDurableCutoff(t *testing.T) {
+	t.Parallel()
+
+	rc := RenderedContext{renderedText("covered", 100, "still live")}
+	artifacts := []CompactionArtifact{{
+		ID:      "artifact-a",
+		Summary: "legacy summary",
+		Sources: []CompactionSource{{ExternalMessageID: "covered"}},
+	}}
+
+	composed := ComposeContextWithArtifacts(rc, nil, artifacts)
+	if composed == nil {
+		t.Fatal("expected composed context")
+	}
+	assertContextContents(t, composed.Messages, []string{
+		"[Conversation summary]\nlegacy summary",
+		messageXML("covered", "still live"),
+	})
+}
+
+func TestComposeContextWithArtifactsIgnoresUnusableArtifactAtomically(t *testing.T) {
+	t.Parallel()
+
+	rc := RenderedContext{renderedText("covered", 100, "must remain")}
+	trs := []TurnResponseEntry{{SourceMessageID: "assistant", RequestedAtMs: 150, Role: "assistant", Content: "must also remain"}}
+	artifacts := []CompactionArtifact{{
+		ID:      "artifact-a",
+		Sources: []CompactionSource{{ExternalMessageID: "covered", HistoryMessageID: "assistant", CreatedAtMs: 200}},
+	}}
+
+	composed := ComposeContextWithArtifacts(rc, trs, artifacts)
+	if composed == nil {
+		t.Fatal("expected composed context")
+	}
+	assertContextContents(t, composed.Messages, []string{
+		messageXML("covered", "must remain"),
+		"must also remain",
+	})
+}
+
+func TestLatestExternalEventMsUsesMutationTimeAndSkipsSelfSent(t *testing.T) {
+	t.Parallel()
+
+	rc := RenderedContext{
+		{ReceivedAtMs: 100, LastEventAtMs: 400, IsSelfSent: true},
+		{ReceivedAtMs: 200, LastEventAtMs: 500, IsMyself: true},
+		{ReceivedAtMs: 300, LastEventAtMs: 600},
+	}
+
+	if got := LatestExternalEventMs(rc, 350); got != 600 {
+		t.Fatalf("latest external event = %d, want 600", got)
+	}
+	if got := LatestExternalEventMs(rc[:2], 350); got != 0 {
+		t.Fatalf("self-originated mutations must not count as external events, got %d", got)
+	}
+}
+
+func renderedText(id string, atMs int64, text string) RenderedSegment {
+	return RenderedSegment{
+		MessageID:    id,
+		ReceivedAtMs: atMs,
+		Content:      []RenderedContentPiece{{Type: "text", Text: messageXML(id, text)}},
+	}
+}
+
+func messageXML(id, text string) string {
+	return `<message id="` + id + `">` + text + `</message>`
+}
+
+func assertContextContents(t *testing.T, messages []ContextMessage, want []string) {
+	t.Helper()
+	got := make([]string, 0, len(messages))
+	for _, message := range messages {
+		got = append(got, message.Content)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("message count = %d, want %d:\ngot  %#v\nwant %#v", len(got), len(want), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("message[%d] = %q, want %q; all=%#v", i, got[i], want[i], got)
+		}
+	}
+}

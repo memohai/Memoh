@@ -30,7 +30,7 @@ func (r *Resolver) buildMessagesFromPipeline(ctx context.Context, req conversati
 
 	trs := r.loadTurnResponses(ctx, sessionID)
 
-	composed := pipelinepkg.ComposeContext(rc, trs, "")
+	composed := pipelinepkg.ComposeContext(rc, trs)
 	if composed == nil {
 		return nil
 	}

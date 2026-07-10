@@ -12,10 +12,11 @@ const charsPerToken = 2
 // TurnResponseEntry represents an assistant or tool message from bot_history_messages,
 // used as the "TR" stream in context composition.
 type TurnResponseEntry struct {
-	RequestedAtMs int64           `json:"requested_at_ms"`
-	Role          string          `json:"role"`
-	Content       string          `json:"content"`
-	RawContent    json.RawMessage `json:"raw_content,omitempty"`
+	RequestedAtMs   int64           `json:"requested_at_ms"`
+	Role            string          `json:"role"`
+	Content         string          `json:"content"`
+	RawContent      json.RawMessage `json:"raw_content,omitempty"`
+	SourceMessageID string          `json:"source_message_id,omitempty"`
 }
 
 // ContextMessage is a unified message for LLM context, produced by MergeContext.
@@ -31,14 +32,34 @@ type ComposeContextResult struct {
 	EstimatedTokens int
 }
 
-// LatestExternalEventMs returns the receivedAtMs of the latest non-self segment
-// after afterMs, or 0 if none found.
+// CompactionSource identifies one durable history source covered by an active
+// compaction artifact. ExternalMessageID projects that source onto the DCP
+// rendered stream; HistoryMessageID projects it onto persisted turn responses.
+type CompactionSource struct {
+	HistoryMessageID  string `json:"history_message_id,omitempty"`
+	ExternalMessageID string `json:"external_message_id,omitempty"`
+	CreatedAtMs       int64  `json:"created_at_ms,omitempty"`
+}
+
+// CompactionArtifact is the pipeline-facing projection of one active durable
+// artifact. Callers preserve frontier order; composition keeps each artifact
+// separate so later restacks can supersede only the ranges they actually cover.
+type CompactionArtifact struct {
+	ID            string             `json:"id"`
+	Summary       string             `json:"summary"`
+	AnchorStartMs int64              `json:"anchor_start_ms,omitempty"`
+	Sources       []CompactionSource `json:"sources,omitempty"`
+}
+
+// LatestExternalEventMs returns the latest external event timestamp after
+// afterMs, or 0 if none found.
 func LatestExternalEventMs(rc RenderedContext, afterMs int64) int64 {
 	var latest int64
 	for _, seg := range rc {
-		if seg.ReceivedAtMs > afterMs && !seg.IsMyself {
-			if seg.ReceivedAtMs > latest {
-				latest = seg.ReceivedAtMs
+		eventAtMs := seg.eventAtMs()
+		if eventAtMs > afterMs && !seg.IsMyself && !seg.IsSelfSent {
+			if eventAtMs > latest {
+				latest = eventAtMs
 			}
 		}
 	}
@@ -46,11 +67,13 @@ func LatestExternalEventMs(rc RenderedContext, afterMs int64) int64 {
 }
 
 type mergeEntry struct {
-	kind string // "rc" or "tr"
+	kind string // "rc", "summary", or "tr"
 	time int64
 	step int
 	// For RC entries
 	rcContent []RenderedContentPiece
+	// For summary entries
+	summaryContent string
 	// For TR entries
 	trRole       string
 	trContent    string
@@ -58,21 +81,29 @@ type mergeEntry struct {
 }
 
 // MergeContext interleaves RC segments and TR entries by timestamp.
-// RC entries use receivedAtMs; TR entries use requestedAtMs.
+// RC entries use their latest event time; TR entries use requestedAtMs.
 // Tiebreaker: RC before TR on equal timestamp.
 // Consecutive RC entries between TR entries are merged into one user message.
 func MergeContext(rc RenderedContext, trs []TurnResponseEntry) []ContextMessage {
 	entries := make([]mergeEntry, 0, len(rc)+len(trs))
+	entries = appendRenderedContextEntries(entries, rc)
+	entries = appendTurnResponseEntries(entries, trs)
+	return mergeEntries(entries)
+}
 
+func appendRenderedContextEntries(entries []mergeEntry, rc RenderedContext) []mergeEntry {
 	for _, seg := range rc {
 		entries = append(entries, mergeEntry{
 			kind:      "rc",
-			time:      seg.ReceivedAtMs,
+			time:      seg.eventAtMs(),
 			step:      -1,
 			rcContent: seg.Content,
 		})
 	}
+	return entries
+}
 
+func appendTurnResponseEntries(entries []mergeEntry, trs []TurnResponseEntry) []mergeEntry {
 	for i, tr := range trs {
 		entries = append(entries, mergeEntry{
 			kind:         "tr",
@@ -83,13 +114,16 @@ func MergeContext(rc RenderedContext, trs []TurnResponseEntry) []ContextMessage 
 			trRawContent: tr.RawContent,
 		})
 	}
+	return entries
+}
 
+func mergeEntries(entries []mergeEntry) []ContextMessage {
 	sort.SliceStable(entries, func(i, j int) bool {
 		if entries[i].time != entries[j].time {
 			return entries[i].time < entries[j].time
 		}
 		if entries[i].kind != entries[j].kind {
-			return entries[i].kind == "rc"
+			return mergeKindOrder(entries[i].kind) < mergeKindOrder(entries[j].kind)
 		}
 		return entries[i].step < entries[j].step
 	})
@@ -105,7 +139,8 @@ func MergeContext(rc RenderedContext, trs []TurnResponseEntry) []ContextMessage 
 	}
 
 	for _, entry := range entries {
-		if entry.kind == "rc" {
+		switch entry.kind {
+		case "rc":
 			for _, piece := range entry.rcContent {
 				if piece.Type == "text" {
 					if pendingText.Len() > 0 {
@@ -114,7 +149,10 @@ func MergeContext(rc RenderedContext, trs []TurnResponseEntry) []ContextMessage 
 					pendingText.WriteString(piece.Text)
 				}
 			}
-		} else {
+		case "summary":
+			flushRC()
+			messages = append(messages, ContextMessage{Role: "user", Content: entry.summaryContent})
+		case "tr":
 			flushRC()
 			messages = append(messages, ContextMessage{
 				Role:       entry.trRole,
@@ -128,22 +166,156 @@ func MergeContext(rc RenderedContext, trs []TurnResponseEntry) []ContextMessage 
 	return messages
 }
 
-// ComposeContext merges RC and TRs, optionally prepends a compaction summary.
-func ComposeContext(rc RenderedContext, trs []TurnResponseEntry, compactSummary string) *ComposeContextResult {
-	allMessages := MergeContext(rc, trs)
-	if len(allMessages) == 0 && compactSummary == "" {
-		return nil
+func mergeKindOrder(kind string) int {
+	switch kind {
+	case "summary":
+		return 0
+	case "rc":
+		return 1
+	case "tr":
+		return 2
+	default:
+		return 3
 	}
+}
 
-	if compactSummary != "" {
-		summary := ContextMessage{Role: "user", Content: "[Conversation summary]\n" + compactSummary}
-		allMessages = append([]ContextMessage{summary}, allMessages...)
+// ComposeContext merges un-compacted RC and TR streams.
+func ComposeContext(rc RenderedContext, trs []TurnResponseEntry) *ComposeContextResult {
+	return ComposeContextWithArtifacts(rc, trs, nil)
+}
+
+// ComposeContextWithArtifacts replaces covered RC/TR sources with each active
+// artifact at its own chronological anchor.
+func ComposeContextWithArtifacts(rc RenderedContext, trs []TurnResponseEntry, artifacts []CompactionArtifact) *ComposeContextResult {
+	activeRC := filterCoveredRenderedContext(rc, artifacts)
+	activeTRs := filterCoveredTurnResponses(trs, artifacts)
+	entries := make([]mergeEntry, 0, len(activeRC)+len(activeTRs)+len(artifacts))
+	entries = appendRenderedContextEntries(entries, activeRC)
+	for i, artifact := range artifacts {
+		if !artifact.usable() {
+			continue
+		}
+		entries = append(entries, mergeEntry{
+			kind:           "summary",
+			time:           artifactSummaryAnchor(artifact, rc, trs),
+			step:           i,
+			summaryContent: "[Conversation summary]\n" + strings.TrimSpace(artifact.Summary),
+		})
+	}
+	entries = appendTurnResponseEntries(entries, activeTRs)
+	allMessages := mergeEntries(entries)
+	if len(allMessages) == 0 {
+		return nil
 	}
 
 	return &ComposeContextResult{
 		Messages:        allMessages,
 		EstimatedTokens: estimateMessagesTokens(allMessages),
 	}
+}
+
+const earliestMergeTime int64 = -1 << 63
+
+func filterCoveredRenderedContext(rc RenderedContext, artifacts []CompactionArtifact) RenderedContext {
+	cutoffs := coveredExternalMessageCutoffs(artifacts)
+	if len(cutoffs) == 0 {
+		return rc
+	}
+	filtered := make(RenderedContext, 0, len(rc))
+	for _, segment := range rc {
+		cutoffMs, covered := cutoffs[strings.TrimSpace(segment.MessageID)]
+		if covered && cutoffMs > 0 && segment.eventAtMs() <= cutoffMs {
+			continue
+		}
+		filtered = append(filtered, segment)
+	}
+	return filtered
+}
+
+func filterCoveredTurnResponses(trs []TurnResponseEntry, artifacts []CompactionArtifact) []TurnResponseEntry {
+	covered := make(map[string]struct{})
+	for _, artifact := range artifacts {
+		if !artifact.usable() {
+			continue
+		}
+		for _, source := range artifact.Sources {
+			if id := strings.TrimSpace(source.HistoryMessageID); id != "" {
+				covered[id] = struct{}{}
+			}
+		}
+	}
+	if len(covered) == 0 {
+		return trs
+	}
+	filtered := make([]TurnResponseEntry, 0, len(trs))
+	for _, tr := range trs {
+		if _, ok := covered[strings.TrimSpace(tr.SourceMessageID)]; ok {
+			continue
+		}
+		filtered = append(filtered, tr)
+	}
+	return filtered
+}
+
+func coveredExternalMessageCutoffs(artifacts []CompactionArtifact) map[string]int64 {
+	cutoffs := make(map[string]int64)
+	for _, artifact := range artifacts {
+		if !artifact.usable() {
+			continue
+		}
+		for _, source := range artifact.Sources {
+			id := strings.TrimSpace(source.ExternalMessageID)
+			if id != "" && source.CreatedAtMs > cutoffs[id] {
+				cutoffs[id] = source.CreatedAtMs
+			}
+		}
+	}
+	return cutoffs
+}
+
+func (artifact CompactionArtifact) usable() bool {
+	return strings.TrimSpace(artifact.ID) != "" && strings.TrimSpace(artifact.Summary) != ""
+}
+
+func artifactSummaryAnchor(artifact CompactionArtifact, rc RenderedContext, trs []TurnResponseEntry) int64 {
+	anchor := artifact.AnchorStartMs
+	update := func(candidate int64) {
+		if candidate <= 0 {
+			return
+		}
+		if anchor <= 0 || candidate < anchor {
+			anchor = candidate
+		}
+	}
+	for _, source := range artifact.Sources {
+		externalID := strings.TrimSpace(source.ExternalMessageID)
+		if externalID != "" && source.CreatedAtMs > 0 {
+			for _, segment := range rc {
+				if strings.TrimSpace(segment.MessageID) == externalID && segment.ReceivedAtMs <= source.CreatedAtMs {
+					update(segment.ReceivedAtMs)
+				}
+			}
+		}
+		historyID := strings.TrimSpace(source.HistoryMessageID)
+		if historyID != "" {
+			for _, tr := range trs {
+				if strings.TrimSpace(tr.SourceMessageID) == historyID {
+					update(tr.RequestedAtMs)
+				}
+			}
+		}
+	}
+	if anchor <= 0 {
+		return earliestMergeTime
+	}
+	return anchor
+}
+
+func (seg RenderedSegment) eventAtMs() int64 {
+	if seg.LastEventAtMs > 0 {
+		return seg.LastEventAtMs
+	}
+	return seg.ReceivedAtMs
 }
 
 func estimateMessagesTokens(messages []ContextMessage) int {
