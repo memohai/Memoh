@@ -77,6 +77,36 @@ describe('chat transcript controller', () => {
     expect(toRaw(transcript.messages[0])).toBe(turn)
   })
 
+  it('owns server-id lookup and latest visible turn queries', () => {
+    const { transcript } = makeTranscript()
+    transcript.replaceMessages([
+      rawUser('user-1'),
+      rawAssistant('assistant-1'),
+      rawUser('user-2'),
+      rawAssistant('assistant-2'),
+    ], 'session-1')
+    const latestUser = transcript.findTurnByServerId('user-2')!
+    const latestAssistant = transcript.findTurnByServerId('assistant-2')!
+    const optimisticUser: ChatUserTurn = {
+      id: 'optimistic-user',
+      role: 'user',
+      text: 'pending',
+      attachments: [],
+      timestamp: '2026-01-01T00:00:03.000Z',
+      streaming: false,
+      isSelf: true,
+      __optimistic: true,
+    }
+    transcript.appendToView(optimisticUser)
+
+    expect(transcript.hasTurn(optimisticUser)).toBe(true)
+    expect(transcript.findTurnByServerId('missing')).toBeNull()
+    expect(transcript.isLatestVisibleUserTurn(latestUser)).toBe(true)
+    expect(transcript.isLatestVisibleAssistantTurn(latestAssistant)).toBe(true)
+    expect(transcript.isLatestVisibleUserTurn(optimisticUser)).toBe(false)
+    expect(transcript.isLatestVisibleUserTurn(transcript.findTurnByServerId('user-1')!)).toBe(false)
+  })
+
   it('preserves optimistic render identity when a server snapshot replaces the view', () => {
     const { transcript } = makeTranscript()
     const snapshotHook = vi.fn()

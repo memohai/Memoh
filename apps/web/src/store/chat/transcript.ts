@@ -771,6 +771,38 @@ export function createTranscriptController({
     return ''
   }
 
+  function hasTurn(turn: ChatMessage): boolean {
+    return messages.includes(turn)
+  }
+
+  function findTurnByServerId(messageId: string): ChatMessage | null {
+    const id = messageId.trim()
+    if (!id) return null
+    return messages.find(turn => serverMessageId(turn) === id) ?? null
+  }
+
+  function latestVisibleTurn(role: 'user'): ChatUserTurn | null
+  function latestVisibleTurn(role: 'assistant'): ChatAssistantTurn | null
+  function latestVisibleTurn(role: ChatMessage['role']): ChatUserTurn | ChatAssistantTurn | null {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const turn = messages[index]
+      if (turn?.role === role && !turn.__optimistic) return turn as ChatUserTurn | ChatAssistantTurn
+    }
+    return null
+  }
+
+  function isLatestVisibleUserTurn(turn: ChatMessage): turn is ChatUserTurn {
+    if (turn.role !== 'user') return false
+    const latest = latestVisibleTurn('user')
+    return Boolean(latest && serverMessageId(latest) === serverMessageId(turn))
+  }
+
+  function isLatestVisibleAssistantTurn(turn: ChatMessage): turn is ChatAssistantTurn {
+    if (turn.role !== 'assistant') return false
+    const latest = latestVisibleTurn('assistant')
+    return Boolean(latest && serverMessageId(latest) === serverMessageId(turn))
+  }
+
   function markToolApprovalDecision(approvalId: string, status: 'approved' | 'rejected' | 'pending') {
     const id = approvalId.trim()
     if (!id) return
@@ -838,6 +870,10 @@ export function createTranscriptController({
     restoreUserInputStates,
     finalizeStreamFailure,
     latestOptimisticUserText,
+    hasTurn,
+    findTurnByServerId,
+    isLatestVisibleUserTurn,
+    isLatestVisibleAssistantTurn,
     markToolApprovalDecision,
     markUserInputDecision,
     resetUserScope,

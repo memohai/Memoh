@@ -21,7 +21,6 @@ import {
   nextId,
   normalizeRequestedSkills,
   requestedSkillRequestsForWire,
-  serverMessageId,
 } from './chat-list.normalize'
 import { createFsChangeBeacon } from './chat/fs-beacon'
 import { createCommandEventRegistry } from './chat/command-events'
@@ -45,7 +44,6 @@ import type {
   ACPAgentSessionInput,
   ActiveChatTarget,
   ChatAssistantTurn,
-  ChatMessage,
   ChatUserTurn,
   SendMessageOptions,
   SendMessageResult,
@@ -262,6 +260,10 @@ export const useChatStore = defineStore('chat', () => {
     restoreUserInputStates,
     finalizeStreamFailure,
     latestOptimisticUserText,
+    hasTurn,
+    findTurnByServerId,
+    isLatestVisibleUserTurn,
+    isLatestVisibleAssistantTurn,
     markToolApprovalDecision,
     markUserInputDecision,
     resetUserScope: resetTranscriptUserScope,
@@ -636,7 +638,7 @@ export const useChatStore = defineStore('chat', () => {
       if (isTerminalStream(streamId) || isTerminalApprovalResponse(streamId)) return
       appendTurnToSession(bid, sid, normalizeTurn(event.data))
       const pending = getAssistantStream(streamId)
-      if (pending && !messages.includes(pending.assistantTurn)) {
+      if (pending && !hasTurn(pending.assistantTurn)) {
         appendTurnToSession(bid || pending.botId, sid || pending.sessionId, pending.assistantTurn)
       }
       return
@@ -875,7 +877,7 @@ export const useChatStore = defineStore('chat', () => {
     // `loadingChats` (sessions-list boot) makes the sidebar spin.
     await loadInitialMessages(bid, sid)
     for (const stream of assistantStreamsForSession(bid, sid)) {
-      if (!messages.includes(stream.assistantTurn)) {
+      if (!hasTurn(stream.assistantTurn)) {
         appendTurnToSession(bid, sid, stream.assistantTurn)
       }
     }
@@ -1774,41 +1776,13 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function latestVisibleUserTurn(): ChatUserTurn | null {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const turn = messages[i]
-      if (turn.role === 'user' && !turn.__optimistic) return turn
-    }
-    return null
-  }
-
-  function latestVisibleAssistantTurn(): ChatAssistantTurn | null {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const turn = messages[i]
-      if (turn.role === 'assistant' && !turn.__optimistic) return turn
-    }
-    return null
-  }
-
-  function isLatestVisibleUserTurn(turn: ChatMessage): turn is ChatUserTurn {
-    if (turn.role !== 'user') return false
-    const latest = latestVisibleUserTurn()
-    return Boolean(latest && serverMessageId(latest) === serverMessageId(turn))
-  }
-
-  function isLatestVisibleAssistantTurn(turn: ChatMessage): turn is ChatAssistantTurn {
-    if (turn.role !== 'assistant') return false
-    const latest = latestVisibleAssistantTurn()
-    return Boolean(latest && serverMessageId(latest) === serverMessageId(turn))
-  }
-
   async function retryLatestAssistant(messageId: string): Promise<SendMessageResult> {
     const bid = currentBotId.value ?? ''
     const sid = sessionId.value ?? ''
     const targetID = messageId.trim()
     if (!bid || !sid || !targetID) return { ok: false, stage: 'startup' }
     if (streaming.value || loadingMessages.value) return { ok: false, stage: 'startup' }
-    const target = messages.find(turn => serverMessageId(turn) === targetID)
+    const target = findTurnByServerId(targetID)
     if (!target || !isLatestVisibleAssistantTurn(target)) return { ok: false, stage: 'startup' }
 
     const streamId = createStreamId()
@@ -1858,7 +1832,7 @@ export const useChatStore = defineStore('chat', () => {
     const targetID = messageId.trim()
     if (!bid || !sid || !targetID || !trimmed) return { ok: false, stage: 'startup' }
     if (streaming.value || loadingMessages.value) return { ok: false, stage: 'startup' }
-    const target = messages.find(turn => serverMessageId(turn) === targetID)
+    const target = findTurnByServerId(targetID)
     if (!target || !isLatestVisibleUserTurn(target)) return { ok: false, stage: 'startup' }
     if (hasUserAttachments(target)) return { ok: false, stage: 'startup' }
 
