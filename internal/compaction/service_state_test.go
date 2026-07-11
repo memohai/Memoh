@@ -396,3 +396,127 @@ func TestDoCompactionSacrificesPriorContextForOversizedEntries(t *testing.T) {
 		t.Fatalf("combined prompt ~%d tokens, want within MaxCompactTokens plus the fixed overhead", got)
 	}
 }
+
+func TestDoCompactionCountsPriorSeparatorsInSharedBudget(t *testing.T) {
+	t.Parallel()
+
+	priors := make([]sqlc.BotHistoryMessageCompact, 0, 100)
+	for i := 0; i < 100; i++ {
+		priors = append(priors, sqlc.BotHistoryMessageCompact{Status: "ok", Summary: "abcd"})
+	}
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		textRow(t, "user", 917),
+		mkRow(t, "user", `"current"`, 40),
+	}
+	q := &fakeQueries{uncompacted: rows, priorLogs: priors}
+	stub := &stubModel{summary: "condensed"}
+	svc := newMachineryService(q)
+
+	cfg := machineryConfig(stub, 100)
+	cfg.MaxCompactTokens = 1000
+	if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
+		t.Fatalf("RunCompactionSync = %v, %v", res, err)
+	}
+	if got := estimateBytesAsTokens(stub.prompt); got > 1000+320 {
+		t.Fatalf("combined prompt ~%d tokens: prior separators must count toward the shared budget", got)
+	}
+}
+
+func TestDoCompactionTruncatesEntriesPastTheTotalCap(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		textRow(t, "user", 1202),
+		mkRow(t, "user", `"current"`, 40),
+	}
+	q := &fakeQueries{uncompacted: rows}
+	stub := &stubModel{summary: "condensed"}
+	svc := newMachineryService(q)
+
+	cfg := machineryConfig(stub, 100)
+	cfg.MaxCompactTokens = 1000
+	res, err := svc.RunCompactionSync(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("RunCompactionSync: %v", err)
+	}
+	if res.Status != StatusOK {
+		t.Fatalf("status = %q, want %q", res.Status, StatusOK)
+	}
+	if len(q.markedIDs) != 1 || q.markedIDs[0] != rows[0].ID {
+		t.Fatalf("marked = %v, want the oversized row", q.markedIDs)
+	}
+	if !strings.Contains(stub.prompt, truncationMarker) {
+		t.Fatal("an entry larger than the whole budget must be truncated, not sent verbatim")
+	}
+	if got := estimateBytesAsTokens(stub.prompt); got > 1000+320 {
+		t.Fatalf("combined prompt ~%d tokens, want within the total cap plus fixed overhead", got)
+	}
+}
+
+func TestRunCompactionSyncAttachesToOwnerDuringCooldown(t *testing.T) {
+	t.Parallel()
+
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	stub := &stubModel{summary: "unused"}
+	svc := newMachineryService(q)
+	cfg := machineryConfig(stub, 450)
+
+	svc.recordCompactionFailure(cfg.SessionID)
+	run, ok := svc.beginSessionCompaction(cfg.SessionID)
+	if !ok {
+		t.Fatal("manual owner acquisition must succeed")
+	}
+
+	got := make(chan Result, 1)
+	go func() {
+		res, err := svc.RunCompactionSync(context.Background(), cfg) // auto path, cooldown armed
+		if err != nil {
+			t.Errorf("waiter: %v", err)
+		}
+		got <- res
+	}()
+	awaitWaiter(t, run) // cooldown must not hide the running owner
+
+	want := Result{Status: StatusOK, Summary: "manual retry summary", MessageCount: 2}
+	svc.endSessionCompaction(cfg.SessionID, run, want, nil)
+	if res := <-got; res != want {
+		t.Fatalf("auto sync must reuse the cooldown-bypassing owner's result, got %#v", res)
+	}
+}
+
+func TestRunCompactionPanicArmsCooldownAndReleasesSlot(t *testing.T) {
+	t.Parallel()
+
+	q := &fakeQueries{uncompacted: machineryCorpus(t), listPanic: true}
+	stub := &stubModel{summary: "recovered"}
+	svc := newMachineryService(q)
+	cfg := machineryConfig(stub, 450)
+
+	recovered := make(chan any, 1)
+	go func() {
+		defer func() { recovered <- recover() }()
+		_, _ = svc.RunCompactionSync(context.Background(), cfg)
+	}()
+	if r := <-recovered; r == nil {
+		t.Fatal("the panic must propagate, not be swallowed")
+	}
+
+	q.listPanic = false
+	res, err := svc.RunCompactionSync(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("run after panic: %v", err)
+	}
+	if res.Status != StatusNoop {
+		t.Fatalf("a panicked run must arm the cooldown, got %q", res.Status)
+	}
+
+	manual := cfg
+	manual.Manual = true
+	res, err = svc.RunCompactionSync(context.Background(), manual)
+	if err != nil {
+		t.Fatalf("manual run after panic: %v", err)
+	}
+	if res.Status != StatusOK {
+		t.Fatalf("the slot must be released after a panic, got %q", res.Status)
+	}
+}

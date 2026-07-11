@@ -83,6 +83,7 @@ type fakeQueries struct {
 	uncompacted     []sqlc.ListUncompactedMessagesBySessionRow
 	priorLogs       []sqlc.BotHistoryMessageCompact
 	completeErr     error
+	listPanic       bool
 
 	created   bool
 	markedIDs []pgtype.UUID
@@ -95,6 +96,9 @@ func (f *fakeQueries) CreateCompactionLog(_ context.Context, _ sqlc.CreateCompac
 }
 
 func (f *fakeQueries) ListUncompactedMessagesBySession(_ context.Context, _ pgtype.UUID) ([]sqlc.ListUncompactedMessagesBySessionRow, error) {
+	if f.listPanic {
+		panic("boom: injected query panic")
+	}
 	return f.uncompacted, nil
 }
 

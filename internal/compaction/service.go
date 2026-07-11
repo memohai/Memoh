@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -154,16 +155,10 @@ func (s *Service) RunCompactionSync(ctx context.Context, cfg TriggerConfig) (Res
 }
 
 func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result, *inflightRun, error) {
-	// Manual (user-initiated) compaction bypasses the cooldown: the user may
-	// have just fixed the failing model, and a silent skip would report success
-	// while nothing runs. Automatic per-request paths still honor the cooldown.
-	if !cfg.Manual && s.inFailureCooldown(cfg.SessionID) {
-		s.logger.Info("compaction: session in failure cooldown, skipping",
-			slog.String("bot_id", cfg.BotID),
-			slog.String("session_id", cfg.SessionID),
-		)
-		return Result{Status: StatusNoop}, nil, nil
-	}
+	// Attaching to an existing owner wins over the cooldown check: the
+	// cooldown exists to stop new failing runs, not to hide a run already in
+	// flight (a manual retry may be the owner precisely because it bypassed
+	// the cooldown, and sync callers should reuse its result).
 	run, ok := s.beginSessionCompaction(cfg.SessionID)
 	if !ok {
 		s.logger.Info("compaction: already in flight for session",
@@ -179,11 +174,31 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result,
 		s.endSessionCompaction(cfg.SessionID, run, compactRes, compactErr)
 	}()
 
+	// Manual (user-initiated) compaction bypasses the cooldown: the user may
+	// have just fixed the failing model, and a silent skip would report success
+	// while nothing runs. Automatic per-request paths still honor the cooldown.
+	if !cfg.Manual && s.inFailureCooldown(cfg.SessionID) {
+		s.logger.Info("compaction: session in failure cooldown, skipping",
+			slog.String("bot_id", cfg.BotID),
+			slog.String("session_id", cfg.SessionID),
+		)
+		compactRes = Result{Status: StatusNoop}
+		return compactRes, nil, nil
+	}
+
 	if err := s.runCompactionHook(ctx, hooks.EventPreCompact, cfg, nil); err != nil {
 		compactErr = err
 		return Result{}, nil, err
 	}
 	defer func() {
+		if r := recover(); r != nil {
+			// A panicking run must not publish a zero-value success to
+			// waiters or clear the cooldown as if it succeeded.
+			compactErr = fmt.Errorf("compaction panicked: %v", r)
+			compactRes = Result{}
+			s.recordCompactionFailure(cfg.SessionID)
+			panic(r)
+		}
 		switch {
 		case compactErr == nil:
 			s.clearCompactionFailure(cfg.SessionID)
@@ -307,10 +322,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		}
 	}
 	priorSummaries = capPriorSummaries(priorSummaries, maxCompactTokens/4)
-	priorTokens := 0
-	for _, summary := range priorSummaries {
-		priorTokens += estimateBytesAsTokens(summary)
-	}
+	priorTokens := priorContextTokens(priorSummaries)
 	// capPriorSummaries always keeps the newest summary, so a single oversized
 	// one can exceed its allowance; floor the entries budget at half the total
 	// so compaction keeps making progress.
@@ -331,6 +343,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	// to nothing) before letting the combined prompt exceed MaxCompactTokens.
 	if entriesCost := markableCompactCost(toCompact); entriesCost+priorTokens > maxCompactTokens {
 		priorSummaries = capPriorSummaries(priorSummaries, maxCompactTokens-entriesCost)
+		priorTokens = priorContextTokens(priorSummaries)
 	}
 	s.logger.Info("compaction: after trim",
 		slog.Int("messages", len(toCompact)),
@@ -346,6 +359,11 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		// mark rows we cannot faithfully summarize. Leave them in raw history.
 		return Result{Status: StatusNoop}, nil
 	}
+
+	// A single markable group larger than the whole budget survives trim by
+	// design (progress guarantee); truncate its rendered entries rather than
+	// send a prompt the model rejects on every pass.
+	entries = capEntriesToBudget(entries, maxCompactTokens-priorTokens)
 
 	userPrompt := buildUserPrompt(priorSummaries, entries)
 

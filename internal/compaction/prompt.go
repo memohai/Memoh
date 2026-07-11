@@ -52,6 +52,50 @@ const priorSeparatorTokens = 2
 // separators are charged, a non-positive budget drops everything, and when
 // the forced newest summary alone exceeds the budget its text is truncated
 // (marker included) so callers can rely on the returned total.
+// priorContextTokens is the prompt cost of the kept prior summaries — bodies
+// plus the per-summary separator — and must stay the single accounting both
+// capPriorSummaries and the shared-budget rebalance use.
+func priorContextTokens(summaries []string) int {
+	total := 0
+	for _, summary := range summaries {
+		total += estimateBytesAsTokens(summary) + priorSeparatorTokens
+	}
+	return total
+}
+
+// capEntriesToBudget truncates entry contents so their total prompt cost fits
+// maxTokens. Entries are never dropped — ids and entries are emitted together
+// by buildEntriesAndIDs, so dropping one would mark a row the summarizer never
+// saw. This only engages when a single markable group exceeds the whole
+// budget: the alternative is a prompt the compaction model rejects on every
+// pass, which stalls the session behind the failure cooldown forever.
+func capEntriesToBudget(entries []messageEntry, maxTokens int) []messageEntry {
+	if maxTokens <= 0 {
+		maxTokens = 1
+	}
+	remaining := maxTokens
+	capped := make([]messageEntry, len(entries))
+	for i, entry := range entries {
+		overhead := estimateBytesAsTokens(entry.Role) + 1
+		cost := estimateBytesAsTokens(entry.Content) + overhead
+		if cost > remaining {
+			budgetBytes := (remaining - overhead) * 4
+			if budgetBytes > len(truncationMarker) {
+				entry.Content = truncateBytes(entry.Content, budgetBytes-len(truncationMarker))
+			} else {
+				entry.Content = truncationMarker
+			}
+			cost = estimateBytesAsTokens(entry.Content) + overhead
+		}
+		remaining -= cost
+		if remaining < 0 {
+			remaining = 0
+		}
+		capped[i] = entry
+	}
+	return capped
+}
+
 func capPriorSummaries(summaries []string, maxTokens int) []string {
 	if len(summaries) == 0 {
 		return summaries
