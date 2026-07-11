@@ -70,35 +70,40 @@ type InjectMessage struct {
 	ImageParts []sdk.ImagePart
 }
 
+// InitialPromptMaterializer owns the one-time provider prompt projection after
+// tools and step-zero hooks are known, but before prompt-cache representation.
+type InitialPromptMaterializer func(context.Context, RunConfig, []sdk.Tool) (RunConfig, error)
+
 // RunConfig holds everything needed for a single agent invocation.
 type RunConfig struct {
-	Model                    *sdk.Model
-	ReasoningEffort          string
-	ReasoningActive          bool
-	ReasoningDisabled        bool
-	ReasoningAdaptive        bool
-	ReasoningOffEffort       string
-	ChatCompletionsCompat    string
-	Messages                 []sdk.Message
-	Query                    string
-	System                   string
-	ContextFrags             []contextfrag.ContextFrag
-	ContextManifest          contextfrag.Manifest
-	ContextScope             contextfrag.Scope
-	ContextQueryMaterialized bool
-	ContextToolUsage         string
-	ContextDynamicMutators   []contextfrag.DynamicMutator
-	SessionType              string
-	LiveToolStream           bool
-	CanRequestUserInput      bool
-	SupportsImageInput       bool
-	SupportsToolCall         bool
-	InlineImages             []sdk.ImagePart
-	Identity                 SessionContext
-	Bot                      BotInfo
-	Skills                   []SkillEntry
-	LoopDetection            LoopDetectionConfig
-	Retry                    RetryConfig
+	Model                     *sdk.Model
+	ReasoningEffort           string
+	ReasoningActive           bool
+	ReasoningDisabled         bool
+	ReasoningAdaptive         bool
+	ReasoningOffEffort        string
+	ChatCompletionsCompat     string
+	Messages                  []sdk.Message
+	Query                     string
+	System                    string
+	ContextFrags              []contextfrag.ContextFrag
+	ContextManifest           contextfrag.Manifest
+	ContextScope              contextfrag.Scope
+	ContextQueryMaterialized  bool
+	ContextToolUsage          string
+	ContextDynamicMutators    []contextfrag.DynamicMutator
+	InitialPromptMaterializer InitialPromptMaterializer
+	SessionType               string
+	LiveToolStream            bool
+	CanRequestUserInput       bool
+	SupportsImageInput        bool
+	SupportsToolCall          bool
+	InlineImages              []sdk.ImagePart
+	Identity                  SessionContext
+	Bot                       BotInfo
+	Skills                    []SkillEntry
+	LoopDetection             LoopDetectionConfig
+	Retry                     RetryConfig
 
 	// PromptCacheTTL controls prompt caching for this run. Empty or
 	// unrecognized values default to 5m. Use "1h" for the long-cache tier

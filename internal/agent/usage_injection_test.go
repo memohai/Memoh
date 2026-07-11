@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -95,6 +96,12 @@ func (p *usageRecordingProvider) lastParams() sdk.GenerateParams {
 	return p.params[len(p.params)-1]
 }
 
+func (p *usageRecordingProvider) callCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.params)
+}
+
 func TestGenerateInjectsToolUsageIntoModelSystem(t *testing.T) {
 	t.Parallel()
 	modelProvider := &usageRecordingProvider{}
@@ -186,6 +193,114 @@ func TestStreamInjectsToolUsageIntoModelSystem(t *testing.T) {
 	wantSystem := "base system\n\n## Tool usage\n\n" + usageMarker
 	if params.System != wantSystem {
 		t.Fatalf("expected stream model system %q, got %q", wantSystem, params.System)
+	}
+}
+
+func TestInitialPromptMaterializerRunsOnceAfterToolAssembly(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		run  func(*Agent, RunConfig) error
+	}{
+		{
+			name: "generate",
+			run: func(agent *Agent, config RunConfig) error {
+				_, err := agent.Generate(context.Background(), config)
+				return err
+			},
+		},
+		{
+			name: "stream",
+			run: func(agent *Agent, config RunConfig) error {
+				for event := range agent.Stream(context.Background(), config) {
+					if event.Type == EventError {
+						return errors.New(event.Error)
+					}
+				}
+				return nil
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var provider interface {
+				sdk.Provider
+				lastParams() sdk.GenerateParams
+			}
+			if test.name == "stream" {
+				provider = &usageStreamRecordingProvider{}
+			} else {
+				provider = &usageRecordingProvider{}
+			}
+			agent := newTestAgent(&usageTestProvider{emitTool: true, usage: usageMarker})
+			calls := 0
+			config := RunConfig{
+				Model:            &sdk.Model{ID: "usage-model", Provider: provider, Type: sdk.ModelTypeChat},
+				System:           "base system",
+				Messages:         []sdk.Message{sdk.UserMessage("before")},
+				SupportsToolCall: true,
+				InitialPromptMaterializer: func(_ context.Context, cfg RunConfig, tools []sdk.Tool) (RunConfig, error) {
+					calls++
+					if !strings.Contains(cfg.System, usageMarker) || len(tools) != 1 || tools[0].Name != "fake_tool" {
+						t.Fatalf("materializer input = system:%q tools:%#v", cfg.System, tools)
+					}
+					cfg.Messages = []sdk.Message{sdk.UserMessage("materialized")}
+					return cfg, nil
+				},
+			}
+			if err := test.run(agent, config); err != nil {
+				t.Fatalf("run error: %v", err)
+			}
+			if calls != 1 {
+				t.Fatalf("materializer calls = %d, want 1", calls)
+			}
+			params := provider.lastParams()
+			if len(params.Messages) != 1 || params.Messages[0].Role != sdk.MessageRoleUser {
+				t.Fatalf("provider messages = %#v", params.Messages)
+			}
+			text, ok := params.Messages[0].Content[0].(sdk.TextPart)
+			if !ok || text.Text != "materialized" {
+				t.Fatalf("provider message = %#v", params.Messages[0])
+			}
+		})
+	}
+}
+
+func TestInitialPromptMaterializerErrorStopsProvider(t *testing.T) {
+	sentinel := errors.New("materialize failed")
+	provider := &usageRecordingProvider{}
+	agent := newTestAgent()
+	_, err := agent.Generate(context.Background(), RunConfig{
+		Model:    &sdk.Model{ID: "usage-model", Provider: provider, Type: sdk.ModelTypeChat},
+		Messages: []sdk.Message{sdk.UserMessage("before")},
+		InitialPromptMaterializer: func(context.Context, RunConfig, []sdk.Tool) (RunConfig, error) {
+			return RunConfig{}, sentinel
+		},
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("Generate error = %v, want %v", err, sentinel)
+	}
+	if provider.callCount() != 0 {
+		t.Fatalf("provider calls = %d, want 0", provider.callCount())
+	}
+
+	streamProvider := &usageStreamRecordingProvider{}
+	streamAgent := newTestAgent()
+	var streamError string
+	for event := range streamAgent.Stream(context.Background(), RunConfig{
+		Model:    &sdk.Model{ID: "usage-model", Provider: streamProvider, Type: sdk.ModelTypeChat},
+		Messages: []sdk.Message{sdk.UserMessage("before")},
+		InitialPromptMaterializer: func(context.Context, RunConfig, []sdk.Tool) (RunConfig, error) {
+			return RunConfig{}, sentinel
+		},
+	}) {
+		if event.Type == EventError {
+			streamError = event.Error
+		}
+	}
+	if !strings.Contains(streamError, sentinel.Error()) {
+		t.Fatalf("stream error = %q, want %q", streamError, sentinel)
+	}
+	if streamProvider.callCount() != 0 {
+		t.Fatalf("stream provider calls = %d, want 0", streamProvider.callCount())
 	}
 }
 

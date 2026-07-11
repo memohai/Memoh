@@ -461,7 +461,7 @@ func TestAgentStreamReadMediaPersistsInjectedImageInTerminalMessages(t *testing.
 	expectedDataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngBytes)
 
 	modelProvider := &agentReadMediaMockProvider{
-		handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
 			if call == 1 {
 				return &sdk.GenerateResult{
 					FinishReason: sdk.FinishReasonToolCalls,
@@ -471,6 +471,15 @@ func TestAgentStreamReadMediaPersistsInjectedImageInTerminalMessages(t *testing.
 						Input:      map[string]any{"path": "/data/images/demo.png"},
 					}},
 				}, nil
+			}
+			if len(params.Messages) < 2 {
+				t.Fatalf("second call messages = %#v", params.Messages)
+			}
+			imageMessage := params.Messages[len(params.Messages)-2]
+			assertInjectedReadMediaMessage(t, imageMessage, expectedDataURL, "image/png")
+			injectedText, ok := params.Messages[len(params.Messages)-1].Content[0].(sdk.TextPart)
+			if !ok || injectedText.Text != "follow up" {
+				t.Fatalf("injected message = %#v", params.Messages[len(params.Messages)-1])
 			}
 			return &sdk.GenerateResult{
 				Text:         "done",
@@ -489,6 +498,10 @@ func TestAgentStreamReadMediaPersistsInjectedImageInTerminalMessages(t *testing.
 	a.SetToolProviders([]agenttools.ToolProvider{
 		agenttools.NewContainerProvider(nil, bp, nil, "/data"),
 	})
+	injectCh := make(chan InjectMessage, 1)
+	injectCh <- InjectMessage{Text: "follow up"}
+	close(injectCh)
+	insertAfter := -1
 
 	var terminal StreamEvent
 	for event := range a.Stream(context.Background(), RunConfig{
@@ -496,6 +509,10 @@ func TestAgentStreamReadMediaPersistsInjectedImageInTerminalMessages(t *testing.
 		Messages:           []sdk.Message{sdk.UserMessage("look at the image")},
 		SupportsImageInput: true,
 		SupportsToolCall:   true,
+		InjectCh:           injectCh,
+		InjectedRecorder: func(_ string, got int) {
+			insertAfter = got
+		},
 		Identity: SessionContext{
 			BotID: "bot-1",
 		},
@@ -519,5 +536,8 @@ func TestAgentStreamReadMediaPersistsInjectedImageInTerminalMessages(t *testing.
 	assertInjectedReadMediaMessage(t, messages[2], expectedDataURL, "image/png")
 	if messages[3].Role != sdk.MessageRoleAssistant {
 		t.Fatalf("expected final persisted message to be assistant, got %s", messages[3].Role)
+	}
+	if insertAfter != 3 {
+		t.Fatalf("injected insertAfter = %d, want step output plus persisted read_media message", insertAfter)
 	}
 }
