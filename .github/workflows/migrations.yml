@@ -77,4 +77,4 @@ jobs:
       - name: Test compaction artifact persistence
         env:
           TEST_POSTGRES_DSN: postgres://memoh:memoh123@127.0.0.1:5432/memoh_test?sslmode=disable
-        run: go test -count=1 ./internal/db -run '^(TestCompactionArtifactMigrationPostgresPath|TestFinalizeCompactionArtifact.*PostgresPath)$'
+        run: go test -count=1 ./internal/db -run '^(TestCompactionArtifactMigrationPostgresPath|TestCompactionTerminalStatusMigrationPostgresPath|TestFinalizeCompactionArtifact.*PostgresPath)$'

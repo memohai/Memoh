@@ -1,6 +1,10 @@
 ALTER TABLE IF EXISTS bot_channel_routes DROP CONSTRAINT IF EXISTS fk_bot_channel_routes_active_session;
 ALTER TABLE IF EXISTS bot_history_messages DROP CONSTRAINT IF EXISTS fk_compact_id;
 
+DROP TRIGGER IF EXISTS compaction_log_terminal_status_guard
+  ON bot_history_message_compacts;
+DROP FUNCTION IF EXISTS guard_compaction_log_terminal_status();
+
 DROP TABLE IF EXISTS bot_user_grants CASCADE;
 DROP TABLE IF EXISTS user_provider_oauth_tokens CASCADE;
 DROP TABLE IF EXISTS provider_oauth_tokens CASCADE;

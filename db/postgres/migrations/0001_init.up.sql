@@ -897,6 +897,26 @@ EXECUTE FUNCTION sync_compaction_artifact_parent_edges();
 
 ALTER TABLE bot_history_messages ADD CONSTRAINT fk_compact_id FOREIGN KEY (compact_id) REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL;
 
+CREATE OR REPLACE FUNCTION guard_compaction_log_terminal_status()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF OLD.status IN ('ok', 'error')
+     AND NEW.status IS DISTINCT FROM OLD.status THEN
+    RAISE EXCEPTION 'compaction attempt % is already terminal with status %', OLD.id, OLD.status
+      USING ERRCODE = '23514';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER compaction_log_terminal_status_guard
+BEFORE UPDATE OF status ON bot_history_message_compacts
+FOR EACH ROW
+EXECUTE FUNCTION guard_compaction_log_terminal_status();
+
 -- schedule_logs: structured execution records for scheduled tasks.
 CREATE TABLE IF NOT EXISTS schedule_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -67,3 +67,40 @@ func TestCompactionArtifactCanonicalSchemaMatchesPublished0106(t *testing.T) {
 		}
 	}
 }
+
+func TestCompactionTerminalStatusMigrationPreservesTerminalAttempts(t *testing.T) {
+	t.Parallel()
+
+	baseline := readEmbeddedMigration(t, "postgres/migrations/0001_init.up.sql")
+	baselineDown := readEmbeddedMigration(t, "postgres/migrations/0001_init.down.sql")
+	up := readEmbeddedMigration(t, "postgres/migrations/0107_compaction_terminal_status.up.sql")
+	down := readEmbeddedMigration(t, "postgres/migrations/0107_compaction_terminal_status.down.sql")
+
+	if !strings.HasPrefix(up, "-- 0107_compaction_terminal_status\n-- Protect terminal compaction attempts") ||
+		!strings.HasPrefix(down, "-- 0107_compaction_terminal_status\n-- Remove the compaction terminal status guard") {
+		t.Fatal("0107 migration pair is missing the required name and description headers")
+	}
+	for name, sql := range map[string]string{"baseline": baseline, "up": up} {
+		for _, required := range []string{
+			"guard_compaction_log_terminal_status",
+			"OLD.status IN ('ok', 'error')",
+			"NEW.status IS DISTINCT FROM OLD.status",
+			"compaction_log_terminal_status_guard",
+			"BEFORE UPDATE OF status ON bot_history_message_compacts",
+		} {
+			if !strings.Contains(sql, required) {
+				t.Fatalf("%s schema is missing compaction finalize guard %q", name, required)
+			}
+		}
+	}
+	for name, sql := range map[string]string{"baseline down": baselineDown, "0107 down": down} {
+		for _, required := range []string{
+			"DROP TRIGGER IF EXISTS compaction_log_terminal_status_guard",
+			"DROP FUNCTION IF EXISTS guard_compaction_log_terminal_status()",
+		} {
+			if !strings.Contains(sql, required) {
+				t.Fatalf("%s does not reverse compaction finalize guard %q", name, required)
+			}
+		}
+	}
+}
