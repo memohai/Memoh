@@ -565,7 +565,7 @@ func TestDoCompactionRejectsNonShrinkingSummaryWithoutMarking(t *testing.T) {
 	q := &fakeQueries{uncompacted: rows}
 	stub := &stubModel{summary: strings.Repeat("summary expands instead of shrinking ", 200)}
 
-	err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 1))
+	_, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 1))
 	if !errors.Is(err, errIneffectiveSummary) {
 		t.Fatalf("RunCompactionSync error = %v, want errIneffectiveSummary", err)
 	}

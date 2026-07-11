@@ -93,20 +93,22 @@ func (q *Queries) CountCompactionLogsByBot(ctx context.Context, botID pgtype.UUI
 }
 
 const createCompactionLog = `-- name: CreateCompactionLog :one
-INSERT INTO bot_history_message_compacts (bot_id, session_id)
-VALUES ($1, $2)
+INSERT INTO bot_history_message_compacts (id, bot_id, session_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (id) DO NOTHING
 RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
           artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
           superseded_by, superseded_at, started_at, completed_at
 `
 
 type CreateCompactionLogParams struct {
+	ID        pgtype.UUID `json:"id"`
 	BotID     pgtype.UUID `json:"bot_id"`
 	SessionID pgtype.UUID `json:"session_id"`
 }
 
 func (q *Queries) CreateCompactionLog(ctx context.Context, arg CreateCompactionLogParams) (BotHistoryMessageCompact, error) {
-	row := q.db.QueryRow(ctx, createCompactionLog, arg.BotID, arg.SessionID)
+	row := q.db.QueryRow(ctx, createCompactionLog, arg.ID, arg.BotID, arg.SessionID)
 	var i BotHistoryMessageCompact
 	err := row.Scan(
 		&i.ID,

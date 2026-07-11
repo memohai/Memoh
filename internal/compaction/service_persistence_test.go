@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -22,6 +24,13 @@ type fakeQueries struct {
 	listPanic  bool
 	onComplete func()
 
+	createParams      []sqlc.CreateCompactionLogParams
+	createErrors      []error
+	createCommits     []bool
+	createCtxErrors   []error
+	createDeadlines   []bool
+	mutateCreatedLog  func(*sqlc.BotHistoryMessageCompact)
+	createCalls       int
 	created           bool
 	markedIDs         []pgtype.UUID
 	completed         sqlc.CompleteCompactionLogParams
@@ -45,13 +54,61 @@ type fakeQueries struct {
 
 var errLegacyCompactionMark = errors.New("legacy compaction mark called")
 
-func (f *fakeQueries) CreateCompactionLog(_ context.Context, arg sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
-	f.created = true
-	f.createdLog = sqlc.BotHistoryMessageCompact{
-		ID:        pgtype.UUID{Bytes: uuid.New(), Valid: true},
-		BotID:     arg.BotID,
-		SessionID: arg.SessionID,
-		Status:    "pending",
+func TestCreateCompactionAttemptPreservesRetryValidationErrors(t *testing.T) {
+	t.Parallel()
+
+	initialErr := errors.New("initial create failed")
+	params := sqlc.CreateCompactionLogParams{ID: testUUID(t), BotID: testUUID(t), SessionID: testUUID(t)}
+	queries := &fakeQueries{
+		createErrors: []error{initialErr},
+		mutateCreatedLog: func(row *sqlc.BotHistoryMessageCompact) {
+			row.BotID = testUUID(t)
+		},
+	}
+
+	_, err := newMachineryService(queries).createCompactionAttempt(context.Background(), params)
+	if !errors.Is(err, initialErr) || !errors.Is(err, pgx.ErrNoRows) || !strings.Contains(err.Error(), "unexpected persisted row") {
+		t.Fatalf("createCompactionAttempt error = %v, want complete retry diagnostics", err)
+	}
+}
+
+func (f *fakeQueries) CreateCompactionLog(ctx context.Context, arg sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
+	f.createCalls++
+	f.createParams = append(f.createParams, arg)
+	f.createCtxErrors = append(f.createCtxErrors, ctx.Err())
+	_, hasDeadline := ctx.Deadline()
+	f.createDeadlines = append(f.createDeadlines, hasDeadline)
+	id := arg.ID
+	if !id.Valid {
+		id = pgtype.UUID{Bytes: uuid.New(), Valid: true}
+	}
+	callIndex := f.createCalls - 1
+	var createErr error
+	if callIndex < len(f.createErrors) {
+		createErr = f.createErrors[callIndex]
+	}
+	alreadyCommitted := f.createdLog.ID.Valid && f.createdLog.ID == id
+	if alreadyCommitted && createErr == nil {
+		createErr = pgx.ErrNoRows
+	}
+	committed := createErr == nil || (callIndex < len(f.createCommits) && f.createCommits[callIndex])
+	if committed && !alreadyCommitted {
+		f.created = true
+		f.createdLog = sqlc.BotHistoryMessageCompact{
+			ID:              id,
+			BotID:           arg.BotID,
+			SessionID:       arg.SessionID,
+			Status:          "pending",
+			ArtifactVersion: 1,
+			Coverage:        json.RawMessage(`[]`),
+			StartedAt:       pgtype.Timestamptz{Valid: true},
+		}
+		if f.mutateCreatedLog != nil {
+			f.mutateCreatedLog(&f.createdLog)
+		}
+	}
+	if createErr != nil {
+		return sqlc.BotHistoryMessageCompact{}, createErr
 	}
 	return f.createdLog, nil
 }

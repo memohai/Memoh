@@ -215,6 +215,129 @@ func TestDoCompactionReconcilesCommittedFinalizationAfterResponseLoss(t *testing
 	}
 }
 
+func TestDoCompactionReconcilesCommittedAttemptAfterCreateResponseLoss(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", jsonStr(strings.Repeat("old question ", 20)), 100),
+		mkRow(t, "assistant", jsonStr(strings.Repeat("old answer ", 20)), 100),
+		mkRow(t, "user", `"current question"`, 100),
+	}
+	responseLoss := errors.New("create response lost after commit")
+	q := &artifactQueries{fakeQueries: &fakeQueries{
+		uncompacted:   rows,
+		createErrors:  []error{responseLoss},
+		createCommits: []bool{true},
+	}}
+
+	result, err := newMachineryService(q).RunCompactionSyncResult(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 100))
+	if err != nil {
+		t.Fatalf("RunCompactionSyncResult error = %v, want reconciled success", err)
+	}
+	if result.Status != StatusOK || q.createCalls != 1 || q.getCalls != 1 {
+		t.Fatalf("reconciled create = result:%#v creates:%d gets:%d", result, q.createCalls, q.getCalls)
+	}
+	assertStableAttemptID(t, q)
+}
+
+func TestDoCompactionRetriesUncommittedCreateWithStableAttemptID(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", jsonStr(strings.Repeat("old question ", 20)), 100),
+		mkRow(t, "assistant", jsonStr(strings.Repeat("old answer ", 20)), 100),
+		mkRow(t, "user", `"current question"`, 100),
+	}
+	initialFailure := errors.New("create failed before commit")
+	q := &artifactQueries{fakeQueries: &fakeQueries{
+		uncompacted:  rows,
+		createErrors: []error{initialFailure},
+	}}
+
+	result, err := newMachineryService(q).RunCompactionSyncResult(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 100))
+	if err != nil {
+		t.Fatalf("RunCompactionSyncResult error = %v, want retried success", err)
+	}
+	if result.Status != StatusOK || q.createCalls != 2 || q.getCalls != 1 {
+		t.Fatalf("retried create = result:%#v creates:%d gets:%d", result, q.createCalls, q.getCalls)
+	}
+	assertStableAttemptID(t, q)
+	for index := range q.createCtxErrors {
+		if q.createCtxErrors[index] != nil || !q.createDeadlines[index] {
+			t.Fatalf("create context %d = (%v,%v), want active bounded context", index, q.createCtxErrors[index], q.createDeadlines[index])
+		}
+	}
+}
+
+func TestDoCompactionReconcilesCommittedAttemptAfterCreateRetry(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", jsonStr(strings.Repeat("old question ", 20)), 100),
+		mkRow(t, "assistant", jsonStr(strings.Repeat("old answer ", 20)), 100),
+		mkRow(t, "user", `"current question"`, 100),
+	}
+	responseLoss := errors.New("create response lost after commit")
+	reconcileFailure := errors.New("initial create reconciliation failed")
+	q := &artifactQueries{fakeQueries: &fakeQueries{
+		uncompacted:   rows,
+		createErrors:  []error{responseLoss},
+		createCommits: []bool{true},
+		getErrors:     []error{reconcileFailure},
+	}}
+
+	result, err := newMachineryService(q).RunCompactionSyncResult(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 100))
+	if err != nil {
+		t.Fatalf("RunCompactionSyncResult error = %v, want retry reconciliation success", err)
+	}
+	if result.Status != StatusOK || q.createCalls != 2 || q.getCalls != 2 {
+		t.Fatalf("retried reconciliation = result:%#v creates:%d gets:%d", result, q.createCalls, q.getCalls)
+	}
+	assertStableAttemptID(t, q)
+}
+
+func TestDoCompactionRejectsAttemptIDCollisionBeforeModelCall(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", jsonStr(strings.Repeat("old question ", 20)), 100),
+		mkRow(t, "assistant", jsonStr(strings.Repeat("old answer ", 20)), 100),
+		mkRow(t, "user", `"current question"`, 100),
+	}
+	stub := &stubModel{summary: "unused"}
+	q := &artifactQueries{fakeQueries: &fakeQueries{
+		uncompacted:   rows,
+		createErrors:  []error{pgx.ErrNoRows},
+		createCommits: []bool{true},
+		mutateCreatedLog: func(row *sqlc.BotHistoryMessageCompact) {
+			row.BotID = testUUID(t)
+		},
+	}}
+
+	_, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 100))
+	if err == nil || !strings.Contains(err.Error(), "unexpected persisted row") {
+		t.Fatalf("RunCompactionSync error = %v, want attempt collision invariant", err)
+	}
+	if stub.calls != 0 || q.createCalls != 1 || q.getCalls != 1 {
+		t.Fatalf("collision path = model:%d creates:%d gets:%d", stub.calls, q.createCalls, q.getCalls)
+	}
+}
+
+func assertStableAttemptID(t *testing.T, q *artifactQueries) {
+	t.Helper()
+	if len(q.createParams) == 0 || !q.createParams[0].ID.Valid {
+		t.Fatalf("create params = %#v, want runtime-generated attempt id", q.createParams)
+	}
+	for _, params := range q.createParams[1:] {
+		if params.ID != q.createParams[0].ID {
+			t.Fatalf("create attempt ids changed across retry: %#v", q.createParams)
+		}
+	}
+	if q.finalized.CompactID != q.createParams[0].ID {
+		t.Fatalf("finalized attempt %s, want created attempt %s", q.finalized.CompactID, q.createParams[0].ID)
+	}
+}
+
 func TestDoCompactionReconcilesCommittedSourceConflictAfterResponseLoss(t *testing.T) {
 	t.Parallel()
 
@@ -291,7 +414,7 @@ func TestDoCompactionJoinsModelAndTerminalizationErrors(t *testing.T) {
 	config := machineryConfig(&stubModel{}, 100)
 	config.HTTPClient = &http.Client{Transport: modelErr}
 
-	err := newMachineryService(q).RunCompactionSync(context.Background(), config)
+	_, err := newMachineryService(q).RunCompactionSync(context.Background(), config)
 	if err == nil || !errors.Is(err, cleanupErr) {
 		t.Fatalf("RunCompactionSync error = %v, want joined cleanup error", err)
 	}
@@ -319,7 +442,7 @@ func TestDoCompactionTerminalizesInvalidFinalizerState(t *testing.T) {
 		},
 	}}
 
-	err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 100))
+	_, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 100))
 	if err == nil || !strings.Contains(err.Error(), "finalized=false") {
 		t.Fatalf("RunCompactionSync error = %v, want invalid finalizer state", err)
 	}
@@ -340,7 +463,7 @@ func TestDoCompactionRejectsMissingSourceVersionBeforeAttempt(t *testing.T) {
 	q := &artifactQueries{fakeQueries: &fakeQueries{uncompacted: rows}}
 	stub := &stubModel{summary: "unused"}
 
-	err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 100))
+	_, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 100))
 	if err == nil || !strings.Contains(err.Error(), "has no version") {
 		t.Fatalf("RunCompactionSync error = %v, want missing source version", err)
 	}

@@ -423,12 +423,11 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	// The log row is created only once a real attempt starts, so no-op runs do
 	// not accumulate rows. Each persistence operation gets its own detached,
 	// bounded context while the expensive model call remains caller-cancellable.
-	createCtx, cancelCreate := detachedCompactionPersistenceContext(ctx)
-	logRow, err := s.queries.CreateCompactionLog(createCtx, sqlc.CreateCompactionLogParams{
+	logRow, err := s.createCompactionAttempt(ctx, sqlc.CreateCompactionLogParams{
+		ID:        pgtype.UUID{Bytes: uuid.New(), Valid: true},
 		BotID:     botUUID,
 		SessionID: sessionUUID,
 	})
-	cancelCreate()
 	if err != nil {
 		return Result{}, err
 	}

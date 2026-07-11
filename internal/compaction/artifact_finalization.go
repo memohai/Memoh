@@ -166,6 +166,100 @@ func detachedCompactionPersistenceContext(parent context.Context) (context.Conte
 	return context.WithTimeout(context.WithoutCancel(parent), compactionPersistenceTimeout)
 }
 
+func (s *Service) createCompactionAttempt(
+	ctx context.Context,
+	params sqlc.CreateCompactionLogParams,
+) (sqlc.BotHistoryMessageCompact, error) {
+	row, err := s.insertCompactionAttempt(ctx, params)
+	if err == nil {
+		return validateCreatedCompactionAttempt(row, params)
+	}
+	createErr := fmt.Errorf("create compaction attempt %s: %w", formatUUID(params.ID), err)
+
+	row, getErr := s.getCompactionLog(ctx, params.ID)
+	if getErr == nil {
+		if compactionAttemptMatches(row, params) {
+			return row, nil
+		}
+		return sqlc.BotHistoryMessageCompact{}, errors.Join(
+			createErr,
+			errors.New("compaction attempt id resolved to an unexpected persisted row"),
+		)
+	}
+
+	row, retryErr := s.insertCompactionAttempt(ctx, params)
+	if retryErr == nil {
+		created, validationErr := validateCreatedCompactionAttempt(row, params)
+		if validationErr == nil {
+			return created, nil
+		}
+		return sqlc.BotHistoryMessageCompact{}, errors.Join(
+			createErr,
+			fmt.Errorf("reconcile compaction attempt creation: %w", getErr),
+			validationErr,
+		)
+	}
+	row, retryGetErr := s.getCompactionLog(ctx, params.ID)
+	if retryGetErr == nil {
+		if compactionAttemptMatches(row, params) {
+			return row, nil
+		}
+		return sqlc.BotHistoryMessageCompact{}, errors.Join(
+			createErr,
+			fmt.Errorf("reconcile compaction attempt creation: %w", getErr),
+			fmt.Errorf("retry compaction attempt %s: %w", formatUUID(params.ID), retryErr),
+			errors.New("compaction attempt id resolved to an unexpected persisted row"),
+		)
+	}
+	return sqlc.BotHistoryMessageCompact{}, errors.Join(
+		createErr,
+		fmt.Errorf("reconcile compaction attempt creation: %w", getErr),
+		fmt.Errorf("retry compaction attempt %s: %w", formatUUID(params.ID), retryErr),
+		fmt.Errorf("final compaction attempt reconciliation: %w", retryGetErr),
+	)
+}
+
+func (s *Service) insertCompactionAttempt(
+	ctx context.Context,
+	params sqlc.CreateCompactionLogParams,
+) (sqlc.BotHistoryMessageCompact, error) {
+	createCtx, cancel := detachedCompactionPersistenceContext(ctx)
+	defer cancel()
+	return s.queries.CreateCompactionLog(createCtx, params)
+}
+
+func validateCreatedCompactionAttempt(
+	row sqlc.BotHistoryMessageCompact,
+	params sqlc.CreateCompactionLogParams,
+) (sqlc.BotHistoryMessageCompact, error) {
+	if compactionAttemptMatches(row, params) {
+		return row, nil
+	}
+	return sqlc.BotHistoryMessageCompact{}, errors.New("compaction attempt creation returned an unexpected persisted row")
+}
+
+func compactionAttemptMatches(row sqlc.BotHistoryMessageCompact, params sqlc.CreateCompactionLogParams) bool {
+	return row.ID == params.ID &&
+		row.BotID == params.BotID &&
+		row.SessionID == params.SessionID &&
+		row.Status == "pending" &&
+		row.Summary == "" &&
+		row.MessageCount == 0 &&
+		row.ErrorMessage == "" &&
+		len(row.Usage) == 0 &&
+		!row.ModelID.Valid &&
+		row.ArtifactVersion == 1 &&
+		jsonValuesEqual(row.Coverage, []byte("[]")) &&
+		row.AnchorStartMs == 0 &&
+		row.AnchorEndMs == 0 &&
+		row.ArtifactLevel == 0 &&
+		len(row.ParentIds) == 0 &&
+		!row.SupersededBy.Valid &&
+		!row.SupersededAt.Valid &&
+		row.StartedAt.Valid &&
+		!row.CompletedAt.Valid
+}
+
 func (s *Service) finalizeArtifact(ctx context.Context, params sqlc.FinalizeCompactionArtifactParams) error {
 	finalizeCtx, cancel := detachedCompactionPersistenceContext(ctx)
 	result, err := s.queries.FinalizeCompactionArtifact(finalizeCtx, params)

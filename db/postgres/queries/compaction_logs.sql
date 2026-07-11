@@ -1,6 +1,7 @@
 -- name: CreateCompactionLog :one
-INSERT INTO bot_history_message_compacts (bot_id, session_id)
-VALUES ($1, $2)
+INSERT INTO bot_history_message_compacts (id, bot_id, session_id)
+VALUES (sqlc.arg(id), sqlc.arg(bot_id), sqlc.arg(session_id))
+ON CONFLICT (id) DO NOTHING
 RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
           artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
           superseded_by, superseded_at, started_at, completed_at;
