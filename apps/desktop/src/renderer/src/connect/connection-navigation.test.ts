@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { decidePostConnectNavigation } from './connection-navigation'
+import { decidePostConnectNavigation, isCurrentServerProbe } from './connection-navigation'
+
+describe('startup server probe', () => {
+  it('ignores a failed probe after the user has switched servers', () => {
+    expect(isCurrentServerProbe(
+      'https://old.memoh.example.com',
+      'https://new.memoh.example.com',
+    )).toBe(false)
+  })
+
+  it('handles a failed probe while its server is still configured', () => {
+    expect(isCurrentServerProbe(
+      'https://memoh.example.com',
+      'https://memoh.example.com',
+    )).toBe(true)
+  })
+})
 
 describe('post-connect navigation', () => {
   it('clears authentication and opens login after switching servers', () => {

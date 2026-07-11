@@ -4,6 +4,10 @@ export interface PostConnectNavigationInput {
   returnTo: unknown
 }
 
+export function isCurrentServerProbe(probedBaseUrl: string, currentBaseUrl: string): boolean {
+  return probedBaseUrl === currentBaseUrl
+}
+
 export type PostConnectNavigation =
   | { clearAuth: true, animateLogin: true, destination: { name: 'Login' } }
   | { clearAuth: false, animateLogin: true, destination: { name: 'Login' } }
