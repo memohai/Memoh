@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"strings"
 	"sync/atomic"
+	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
-	"testing"
-	"time"
 
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/hooks"
