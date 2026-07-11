@@ -27,6 +27,8 @@ type budgetSourceProjection struct {
 	currentSourceID  string
 	historyRecords   []historyfrag.HistoryRecord
 	hasHistoryRecord []bool
+	sourceFrags      []contextfrag.ContextFrag
+	hasSourceFrag    []bool
 }
 
 type budgetSourceAssembly struct {

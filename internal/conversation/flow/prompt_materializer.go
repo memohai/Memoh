@@ -18,11 +18,12 @@ import (
 )
 
 type initialPromptPlan struct {
-	sources          []contextassembly.Source
-	baselineMessages []sdk.Message
-	currentSourceID  string
-	contextBudget    int
-	notice           string
+	sources             []contextassembly.Source
+	baselineMessages    []sdk.Message
+	nativePartsBySource map[string][]sdk.MessagePart
+	currentSourceID     string
+	contextBudget       int
+	notice              string
 }
 
 type initialPromptPlanInput struct {
@@ -31,6 +32,7 @@ type initialPromptPlanInput struct {
 	ContextBudget   int
 	Notice          string
 	StripTools      bool
+	NativeParts     map[string][]sdk.MessagePart
 }
 
 type initialPromptResult struct {
@@ -114,7 +116,7 @@ func withInitialPromptMaterializer(
 	state := &initialPromptState{}
 	cfg.InitialPromptMaterializer = func(ctx context.Context, prepared agent.RunConfig, tools []sdk.Tool) (agent.RunConfig, error) {
 		result, err := plan.Materialize(ctx, prepared, tools)
-		result.Config.ContextFrags = historyContextFragsForPromptEntries(result.Entries, projection)
+		result.Config.ContextFrags = contextFragsForPromptEntries(result.Entries, projection)
 		state.Store(result, err)
 		return result.Config, err
 	}
@@ -157,8 +159,34 @@ func newInitialPromptPlan(input initialPromptPlanInput) (initialPromptPlan, erro
 		}
 		sources[currentIndex].Retention = contextbudget.RetentionRequired
 	}
+	nativeParts, err := clonePromptNativeParts(input.NativeParts)
+	if err != nil {
+		return initialPromptPlan{}, err
+	}
+	for sourceID, parts := range nativeParts {
+		if len(parts) == 0 {
+			continue
+		}
+		sourceIndex, err := uniquePromptSourceIndex(sources, sourceID)
+		if err != nil {
+			return initialPromptPlan{}, err
+		}
+		if sources[sourceIndex].Message.Role != sdk.MessageRoleUser {
+			return initialPromptPlan{}, fmt.Errorf("native prompt source %q must have user role", sourceID)
+		}
+		sources[sourceIndex].Retention = contextbudget.RetentionRequired
+	}
+	baselineSources, err := clonePromptSources(sources)
+	if err != nil {
+		return initialPromptPlan{}, err
+	}
+	for sourceID, parts := range nativeParts {
+		if err := appendPromptNativeParts(baselineSources, sourceID, parts); err != nil {
+			return initialPromptPlan{}, err
+		}
+	}
 	assembled, err := contextassembly.Assemble(contextassembly.Request{
-		Sources:             sources,
+		Sources:             baselineSources,
 		SyntheticToolResult: syntheticToolClosureError,
 	})
 	if err != nil {
@@ -169,11 +197,12 @@ func newInitialPromptPlan(input initialPromptPlanInput) (initialPromptPlan, erro
 		baseline[index] = entry.Message
 	}
 	return initialPromptPlan{
-		sources:          sources,
-		baselineMessages: baseline,
-		currentSourceID:  input.CurrentSourceID,
-		contextBudget:    input.ContextBudget,
-		notice:           input.Notice,
+		sources:             sources,
+		baselineMessages:    baseline,
+		nativePartsBySource: nativeParts,
+		currentSourceID:     input.CurrentSourceID,
+		contextBudget:       input.ContextBudget,
+		notice:              input.Notice,
 	}, nil
 }
 
@@ -248,6 +277,14 @@ func (p initialPromptPlan) Materialize(_ context.Context, cfg agent.RunConfig, t
 	sources, err := clonePromptSources(p.sources)
 	if err != nil {
 		return initialPromptResult{}, err
+	}
+	for sourceID, parts := range p.nativePartsBySource {
+		if err := appendPromptNativeParts(sources, sourceID, parts); err != nil {
+			return initialPromptResult{}, err
+		}
+		if len(parts) > 0 {
+			cfg.ContextQueryMaterialized = true
+		}
 	}
 	if !cfg.ContextQueryMaterialized {
 		imageParts, err := promptImageParts(cfg.InlineImages)
@@ -392,6 +429,38 @@ func clonePromptSources(sources []contextassembly.Source) ([]contextassembly.Sou
 		cloned[index].Message = message
 	}
 	return cloned, nil
+}
+
+func clonePromptNativeParts(partsBySource map[string][]sdk.MessagePart) (map[string][]sdk.MessagePart, error) {
+	if len(partsBySource) == 0 {
+		return nil, nil
+	}
+	cloned := make(map[string][]sdk.MessagePart, len(partsBySource))
+	for sourceID, parts := range partsBySource {
+		message, err := clonePromptMessage(sdk.Message{Role: sdk.MessageRoleUser, Content: parts})
+		if err != nil {
+			return nil, fmt.Errorf("clone native prompt parts for %q: %w", sourceID, err)
+		}
+		cloned[sourceID] = message.Content
+	}
+	return cloned, nil
+}
+
+func appendPromptNativeParts(sources []contextassembly.Source, sourceID string, parts []sdk.MessagePart) error {
+	if len(parts) == 0 {
+		return nil
+	}
+	index, err := uniquePromptSourceIndex(sources, sourceID)
+	if err != nil {
+		return err
+	}
+	message, err := clonePromptMessage(sdk.Message{Role: sdk.MessageRoleUser, Content: parts})
+	if err != nil {
+		return fmt.Errorf("clone native prompt parts for %q: %w", sourceID, err)
+	}
+	sources[index].Message.Content = append(sources[index].Message.Content, message.Content...)
+	sources[index].Retention = contextbudget.RetentionRequired
+	return nil
 }
 
 func clonePromptMessage(message sdk.Message) (sdk.Message, error) {

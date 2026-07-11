@@ -86,7 +86,7 @@ func TestHistoryContextFragsForPromptEntriesUsesSourceIdentity(t *testing.T) {
 		{Message: sdk.UserMessage("fixed"), SourceIndex: 3},
 	}
 
-	frags := historyContextFragsForPromptEntries(entries, projection)
+	frags := contextFragsForPromptEntries(entries, projection)
 	if len(frags) != 2 {
 		t.Fatalf("summary frags = %#v, want two source-backed summaries", frags)
 	}

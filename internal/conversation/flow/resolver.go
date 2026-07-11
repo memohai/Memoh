@@ -1189,6 +1189,12 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 		ModelID:            chatModel.ID,
 		RuntimeType:        runtimeType,
 		ContextTokenBudget: contextTokenBudget,
+		DirectDiscussPromptPreparer: &directDiscussPromptPreparer{
+			resolver:           r,
+			runConfig:          cfg,
+			contextTokenBudget: contextTokenBudget,
+			compact:            r.maybeCompact,
+		},
 	}, nil
 }
 

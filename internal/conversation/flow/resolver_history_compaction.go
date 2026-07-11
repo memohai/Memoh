@@ -47,10 +47,18 @@ func historyContextFragsForMessages(messages []conversation.ModelMessage, record
 	return frags
 }
 
-func historyContextFragsForPromptEntries(entries []contextassembly.Entry, projection budgetSourceProjection) []contextfrag.ContextFrag {
+func contextFragsForPromptEntries(entries []contextassembly.Entry, projection budgetSourceProjection) []contextfrag.ContextFrag {
 	frags := make([]contextfrag.ContextFrag, 0)
 	for messageIndex, entry := range entries {
 		sourceIndex := entry.SourceIndex
+		if sourceIndex >= 0 && sourceIndex < len(projection.sourceFrags) &&
+			sourceIndex < len(projection.hasSourceFrag) && projection.hasSourceFrag[sourceIndex] {
+			frag := projection.sourceFrags[sourceIndex]
+			frag.ID = fmt.Sprintf("message.%03d", messageIndex)
+			frag.Provenance.Index = messageIndex
+			frags = append(frags, frag)
+			continue
+		}
 		if sourceIndex < 0 || sourceIndex >= len(projection.historyRecords) ||
 			sourceIndex >= len(projection.hasHistoryRecord) || !projection.hasHistoryRecord[sourceIndex] {
 			continue

@@ -23,7 +23,8 @@ type ResolveRunConfigResult struct {
 	RuntimeType string
 	// ContextTokenBudget is the chat model's declared context window, or 0
 	// when the model does not declare one (or the runtime has no chat model).
-	ContextTokenBudget int
+	ContextTokenBudget          int
+	DirectDiscussPromptPreparer DirectDiscussPromptPreparer
 }
 
 // RunConfigResolver resolves a complete agent RunConfig and persists output
