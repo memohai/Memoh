@@ -27,6 +27,8 @@ type ContextMessage struct {
 	RawContent           json.RawMessage `json:"raw_content,omitempty"`
 	CompactionArtifactID string          `json:"compaction_artifact_id,omitempty"`
 	RenderedMessageIDs   []string        `json:"rendered_message_ids,omitempty"`
+	SourceMessageID      string          `json:"source_message_id,omitempty"`
+	Current              bool            `json:"current,omitempty"`
 }
 
 // ComposeContextResult holds the output of ComposeContext.
@@ -85,6 +87,8 @@ type mergeEntry struct {
 	// For RC entries
 	rcContent   []RenderedContentPiece
 	rcMessageID string
+	rcNative    bool
+	current     bool
 	// For summary entries
 	summaryContent    string
 	summaryArtifactID string
@@ -92,6 +96,7 @@ type mergeEntry struct {
 	trRole       string
 	trContent    string
 	trRawContent json.RawMessage
+	trSourceID   string
 }
 
 // MergeContext interleaves RC segments and TR entries by timestamp.
@@ -106,6 +111,10 @@ func MergeContext(rc RenderedContext, trs []TurnResponseEntry) []ContextMessage 
 }
 
 func appendRenderedContextEntries(entries []mergeEntry, rc RenderedContext) []mergeEntry {
+	return appendRenderedContextEntriesAtCursor(entries, rc, nil)
+}
+
+func appendRenderedContextEntriesAtCursor(entries []mergeEntry, rc RenderedContext, afterMs *int64) []mergeEntry {
 	for _, seg := range rc {
 		entries = append(entries, mergeEntry{
 			kind:        "rc",
@@ -113,6 +122,9 @@ func appendRenderedContextEntries(entries []mergeEntry, rc RenderedContext) []me
 			step:        -1,
 			rcContent:   seg.Content,
 			rcMessageID: strings.TrimSpace(seg.MessageID),
+			rcNative:    renderedSegmentHasNativeContent(seg),
+			current: afterMs != nil && seg.eventAtMs() > *afterMs &&
+				!seg.IsMyself && !seg.IsSelfSent,
 		})
 	}
 	return entries
@@ -127,6 +139,7 @@ func appendTurnResponseEntries(entries []mergeEntry, trs []TurnResponseEntry) []
 			trRole:       tr.Role,
 			trContent:    tr.Content,
 			trRawContent: tr.RawContent,
+			trSourceID:   strings.TrimSpace(tr.SourceMessageID),
 		})
 	}
 	return entries
@@ -146,22 +159,47 @@ func mergeEntries(entries []mergeEntry) []ContextMessage {
 	var messages []ContextMessage
 	var pendingText strings.Builder
 	var pendingMessageIDs []string
+	pendingCurrent := false
+	pendingRC := false
+	pendingNative := false
 
 	flushRC := func() {
-		if pendingText.Len() > 0 {
+		if pendingText.Len() > 0 || pendingNative {
 			messages = append(messages, ContextMessage{
 				Role:               "user",
 				Content:            pendingText.String(),
 				RenderedMessageIDs: append([]string(nil), pendingMessageIDs...),
+				Current:            pendingCurrent,
 			})
-			pendingText.Reset()
-			pendingMessageIDs = pendingMessageIDs[:0]
 		}
+		pendingText.Reset()
+		pendingMessageIDs = pendingMessageIDs[:0]
+		pendingCurrent = false
+		pendingRC = false
+		pendingNative = false
 	}
 
 	for _, entry := range entries {
 		switch entry.kind {
 		case "rc":
+			hasText := false
+			for _, piece := range entry.rcContent {
+				if piece.Type == "text" && piece.Text != "" {
+					hasText = true
+					break
+				}
+			}
+			if !hasText && !(entry.current && entry.rcNative) {
+				continue
+			}
+			if pendingRC && pendingCurrent != entry.current {
+				flushRC()
+			}
+			if !pendingRC {
+				pendingCurrent = entry.current
+				pendingRC = true
+			}
+			pendingNative = pendingNative || entry.rcNative
 			if entry.rcMessageID != "" {
 				pendingMessageIDs = append(pendingMessageIDs, entry.rcMessageID)
 			}
@@ -183,9 +221,10 @@ func mergeEntries(entries []mergeEntry) []ContextMessage {
 		case "tr":
 			flushRC()
 			messages = append(messages, ContextMessage{
-				Role:       entry.trRole,
-				Content:    entry.trContent,
-				RawContent: entry.trRawContent,
+				Role:            entry.trRole,
+				Content:         entry.trContent,
+				RawContent:      entry.trRawContent,
+				SourceMessageID: entry.trSourceID,
 			})
 		}
 	}
@@ -215,10 +254,28 @@ func ComposeContext(rc RenderedContext, trs []TurnResponseEntry) *ComposeContext
 // ComposeContextWithArtifacts replaces covered RC/TR sources with each active
 // artifact at its own chronological anchor.
 func ComposeContextWithArtifacts(rc RenderedContext, trs []TurnResponseEntry, artifacts []CompactionArtifact) *ComposeContextResult {
+	return composeContextWithArtifacts(rc, trs, artifacts, 0, false)
+}
+
+func composeContextWithArtifactsAtCursor(rc RenderedContext, trs []TurnResponseEntry, artifacts []CompactionArtifact, afterMs int64) *ComposeContextResult {
+	return composeContextWithArtifacts(rc, trs, artifacts, afterMs, true)
+}
+
+func composeContextWithArtifacts(
+	rc RenderedContext,
+	trs []TurnResponseEntry,
+	artifacts []CompactionArtifact,
+	afterMs int64,
+	markCurrent bool,
+) *ComposeContextResult {
 	activeRC := filterCoveredRenderedContext(rc, artifacts)
 	activeTRs := filterCoveredTurnResponses(trs, artifacts)
 	entries := make([]mergeEntry, 0, len(activeRC)+len(activeTRs)+len(artifacts))
-	entries = appendRenderedContextEntries(entries, activeRC)
+	if markCurrent {
+		entries = appendRenderedContextEntriesAtCursor(entries, activeRC, &afterMs)
+	} else {
+		entries = appendRenderedContextEntries(entries, activeRC)
+	}
 	for i, artifact := range artifacts {
 		if !artifact.usable() {
 			continue
@@ -241,6 +298,10 @@ func ComposeContextWithArtifacts(rc RenderedContext, trs []TurnResponseEntry, ar
 		Messages:        allMessages,
 		EstimatedTokens: estimateMessagesTokens(allMessages),
 	}
+}
+
+func renderedSegmentHasNativeContent(segment RenderedSegment) bool {
+	return len(segment.ImageRefs) > 0
 }
 
 const earliestMergeTime int64 = -1 << 63

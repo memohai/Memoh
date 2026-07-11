@@ -169,6 +169,114 @@ func TestComposeContextWithArtifactsPreservesIdentityForEqualSummaryText(t *test
 	}
 }
 
+func TestComposeContextAtCursorSplitsOldAndCurrentRenderedSources(t *testing.T) {
+	t.Parallel()
+
+	rc := RenderedContext{
+		renderedText("old", 100, "old context"),
+		renderedText("current-a", 300, "current context a"),
+		renderedText("current-b", 400, "current context b"),
+	}
+
+	composed := composeContextWithArtifactsAtCursor(rc, nil, nil, 200)
+	if composed == nil || len(composed.Messages) != 2 {
+		t.Fatalf("composed context = %#v, want old and current sources", composed)
+	}
+	if composed.Messages[0].Current || !composed.Messages[1].Current {
+		t.Fatalf("current source flags = %#v", composed.Messages)
+	}
+	if got := composed.Messages[0].RenderedMessageIDs; len(got) != 1 || got[0] != "old" {
+		t.Fatalf("old source ids = %#v, want old", got)
+	}
+	if got := composed.Messages[1].RenderedMessageIDs; len(got) != 2 || got[0] != "current-a" || got[1] != "current-b" {
+		t.Fatalf("current source ids = %#v", got)
+	}
+}
+
+func TestComposeContextPreservesTurnResponseSourceIdentity(t *testing.T) {
+	t.Parallel()
+
+	composed := ComposeContext(nil, []TurnResponseEntry{{
+		RequestedAtMs:   100,
+		Role:            "assistant",
+		Content:         "persisted response",
+		SourceMessageID: "history-row",
+	}})
+	if composed == nil || len(composed.Messages) != 1 {
+		t.Fatalf("composed context = %#v, want one turn response", composed)
+	}
+	if got := composed.Messages[0].SourceMessageID; got != "history-row" {
+		t.Fatalf("turn response source id = %q, want history-row", got)
+	}
+}
+
+func TestComposeContextAtCursorKeepsImageOnlyCurrentSource(t *testing.T) {
+	t.Parallel()
+
+	rc := RenderedContext{{
+		MessageID:    "image-only",
+		ReceivedAtMs: 300,
+		ImageRefs:    []ImageAttachmentRef{{ContentHash: "image-hash", Mime: "image/png"}},
+	}}
+
+	composed := composeContextWithArtifactsAtCursor(rc, nil, nil, 200)
+	if composed == nil || len(composed.Messages) != 1 {
+		t.Fatalf("composed context = %#v, want one image source", composed)
+	}
+	message := composed.Messages[0]
+	if !message.Current || message.Role != "user" || message.Content != "" {
+		t.Fatalf("image-only source = %#v", message)
+	}
+	if len(message.RenderedMessageIDs) != 1 || message.RenderedMessageIDs[0] != "image-only" {
+		t.Fatalf("image-only source ids = %#v", message.RenderedMessageIDs)
+	}
+}
+
+func TestComposeContextAtCursorDropsImageOnlyHistoricalPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	rc := RenderedContext{
+		{
+			MessageID:    "old-image",
+			ReceivedAtMs: 100,
+			ImageRefs:    []ImageAttachmentRef{{ContentHash: "old-image-hash", Mime: "image/png"}},
+		},
+		renderedText("current", 300, "current context"),
+	}
+
+	composed := composeContextWithArtifactsAtCursor(rc, nil, nil, 200)
+	if composed == nil || len(composed.Messages) != 1 {
+		t.Fatalf("composed context = %#v, want only current text source", composed)
+	}
+	if !composed.Messages[0].Current || strings.Contains(composed.Messages[0].Content, "old-image") {
+		t.Fatalf("historical image placeholder leaked into prompt: %#v", composed.Messages)
+	}
+}
+
+func TestComposeContextAtCursorPreservesSeparatedCurrentSources(t *testing.T) {
+	t.Parallel()
+
+	rc := RenderedContext{
+		renderedText("current-a", 300, "current context a"),
+		{
+			MessageID:    "self",
+			ReceivedAtMs: 400,
+			IsSelfSent:   true,
+			Content:      []RenderedContentPiece{{Type: "text", Text: "self context"}},
+		},
+		renderedText("current-b", 500, "current context b"),
+	}
+	trs := []TurnResponseEntry{{RequestedAtMs: 350, Role: "assistant", Content: "turn response"}}
+
+	composed := composeContextWithArtifactsAtCursor(rc, trs, nil, 200)
+	if composed == nil || len(composed.Messages) != 4 {
+		t.Fatalf("composed context = %#v, want two current sources separated by TR and self context", composed)
+	}
+	if !composed.Messages[0].Current || composed.Messages[1].Current || composed.Messages[2].Current || !composed.Messages[3].Current {
+		t.Fatalf("separated current source flags = %#v", composed.Messages)
+	}
+}
+
 func TestLatestExternalEventMsUsesMutationTimeAndSkipsSelfSent(t *testing.T) {
 	t.Parallel()
 
