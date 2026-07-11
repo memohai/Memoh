@@ -31,7 +31,7 @@ func (f *pairingQueries) ListUncompactedMessagesBySession(context.Context, pgtyp
 	return f.uncompacted, nil
 }
 
-func (f *pairingQueries) ListCompactionLogsBySession(context.Context, pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
+func (*pairingQueries) ListCompactionLogsBySession(context.Context, pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
 	return nil, nil
 }
 
@@ -44,7 +44,7 @@ func (f *pairingQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkM
 	return nil
 }
 
-func (f *pairingQueries) CompleteCompactionLog(_ context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
+func (*pairingQueries) CompleteCompactionLog(_ context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
 	return sqlc.BotHistoryMessageCompact{ID: arg.ID, Status: arg.Status, Summary: arg.Summary}, nil
 }
 
