@@ -520,3 +520,41 @@ func TestRunCompactionPanicArmsCooldownAndReleasesSlot(t *testing.T) {
 		t.Fatalf("the slot must be released after a panic, got %q", res.Status)
 	}
 }
+
+func TestManualRunBypassesACooldownNoopOwner(t *testing.T) {
+	t.Parallel()
+
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	stub := &stubModel{summary: "manual summary"}
+	svc := newMachineryService(q)
+	cfg := machineryConfig(stub, 450)
+
+	svc.recordCompactionFailure(cfg.SessionID)
+	run, ok := svc.beginSessionCompaction(cfg.SessionID) // an automatic run holding the slot
+	if !ok {
+		t.Fatal("owner acquisition must succeed")
+	}
+
+	manual := cfg
+	manual.Manual = true
+	got := make(chan Result, 1)
+	go func() {
+		res, err := svc.RunCompactionSync(context.Background(), manual)
+		if err != nil {
+			t.Errorf("manual: %v", err)
+		}
+		got <- res
+	}()
+	awaitWaiter(t, run)
+
+	// The automatic owner publishes its cooldown noop; the manual request must
+	// retry and actually run instead of inheriting the skip.
+	svc.endSessionCompaction(cfg.SessionID, run, Result{Status: StatusNoop}, nil)
+	res := <-got
+	if res.Status != StatusOK {
+		t.Fatalf("manual run inherited the owner's noop, got %#v", res)
+	}
+	if stub.calls != 1 {
+		t.Fatalf("model called %d times, want 1", stub.calls)
+	}
+}

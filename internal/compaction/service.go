@@ -141,16 +141,24 @@ func (s *Service) TriggerCompaction(ctx context.Context, cfg TriggerConfig) {
 // seconds away, and waiting removes a duplicate LLM call over the same span; a
 // canceled wait degrades to a noop.
 func (s *Service) RunCompactionSync(ctx context.Context, cfg TriggerConfig) (Result, error) {
-	res, owner, err := s.runCompaction(ctx, cfg)
-	if owner == nil {
-		return res, err
-	}
-	owner.waiters.Add(1)
-	select {
-	case <-owner.done:
-		return owner.res, owner.err
-	case <-ctx.Done():
-		return Result{Status: StatusNoop}, nil
+	for {
+		res, owner, err := s.runCompaction(ctx, cfg)
+		if owner == nil {
+			return res, err
+		}
+		owner.waiters.Add(1)
+		select {
+		case <-owner.done:
+			if cfg.Manual && owner.err == nil && owner.res.Status == StatusNoop {
+				// The owner may have been an automatic run that nooped on the
+				// failure cooldown; a manual request must still bypass it and
+				// attempt for real instead of inheriting the skip.
+				continue
+			}
+			return owner.res, owner.err
+		case <-ctx.Done():
+			return Result{Status: StatusNoop}, nil
+		}
 	}
 }
 
@@ -186,14 +194,12 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result,
 		return compactRes, nil, nil
 	}
 
-	if err := s.runCompactionHook(ctx, hooks.EventPreCompact, cfg, nil); err != nil {
-		compactErr = err
-		return Result{}, nil, err
-	}
+	preHookRan := false
 	defer func() {
 		if r := recover(); r != nil {
-			// A panicking run must not publish a zero-value success to
-			// waiters or clear the cooldown as if it succeeded.
+			// A panicking run — the pre-hook included — must not publish a
+			// zero-value success to waiters or clear the cooldown as if it
+			// succeeded.
 			compactErr = fmt.Errorf("compaction panicked: %v", r)
 			compactRes = Result{}
 			s.recordCompactionFailure(cfg.SessionID)
@@ -202,6 +208,9 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result,
 		switch {
 		case compactErr == nil:
 			s.clearCompactionFailure(cfg.SessionID)
+		case !preHookRan:
+			// A pre-hook error or deny is bot policy, not a model failure;
+			// it must not arm the cooldown (panics above still do).
 		case ctx.Err() != nil:
 			// The caller's request was canceled or hit its deadline — not a
 			// model failure. Arming the five-minute cooldown here would
@@ -212,6 +221,9 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result,
 		default:
 			s.recordCompactionFailure(cfg.SessionID)
 		}
+		if !preHookRan {
+			return
+		}
 		extra := map[string]any{}
 		if compactErr != nil {
 			extra["error"] = compactErr.Error()
@@ -220,6 +232,12 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result,
 			s.logger.Warn("post compaction hook failed", slog.String("bot_id", cfg.BotID), slog.Any("error", err))
 		}
 	}()
+
+	if err := s.runCompactionHook(ctx, hooks.EventPreCompact, cfg, nil); err != nil {
+		compactErr = err
+		return Result{}, nil, err
+	}
+	preHookRan = true
 	botUUID, err := db.ParseUUID(cfg.BotID)
 	if err != nil {
 		compactErr = err

@@ -75,26 +75,39 @@ func capEntriesToBudget(entries []messageEntry, maxTokens int) []messageEntry {
 	}
 	markerTokens := estimateBytesAsTokens(truncationMarker)
 	overheadOf := func(entry messageEntry) int { return estimateBytesAsTokens(entry.Role) + 1 }
-	// Reserve every later entry's floor (role overhead plus a bare marker) up
-	// front, so spending on one entry can never push the tail past the cap.
+	costOf := func(entry messageEntry) int { return estimateBytesAsTokens(entry.Content) + overheadOf(entry) }
+	// An entry's floor is its cheapest faithful representation: the original
+	// text when it is already smaller than a truncation marker. Reserving
+	// every later entry's floor up front means spending on one entry can never
+	// push the tail past the cap, and short entries are never replaced by a
+	// marker that costs more than they do.
+	floorOf := func(entry messageEntry) int {
+		if cost := costOf(entry); cost < overheadOf(entry)+markerTokens {
+			return cost
+		}
+		return overheadOf(entry) + markerTokens
+	}
 	tailFloor := make([]int, len(entries)+1)
 	for i := len(entries) - 1; i >= 0; i-- {
-		tailFloor[i] = tailFloor[i+1] + overheadOf(entries[i]) + markerTokens
+		tailFloor[i] = tailFloor[i+1] + floorOf(entries[i])
 	}
 	remaining := maxTokens
 	capped := make([]messageEntry, len(entries))
 	for i, entry := range entries {
 		overhead := overheadOf(entry)
 		avail := remaining - tailFloor[i+1]
-		cost := estimateBytesAsTokens(entry.Content) + overhead
+		cost := costOf(entry)
 		if cost > avail {
+			truncated := entry
 			budgetBytes := (avail - overhead) * 4
 			if budgetBytes > len(truncationMarker) {
-				entry.Content = truncateBytes(entry.Content, budgetBytes-len(truncationMarker))
+				truncated.Content = truncateBytes(entry.Content, budgetBytes-len(truncationMarker))
 			} else {
-				entry.Content = truncationMarker
+				truncated.Content = truncationMarker
 			}
-			cost = estimateBytesAsTokens(entry.Content) + overhead
+			if truncatedCost := costOf(truncated); truncatedCost < cost {
+				entry, cost = truncated, truncatedCost
+			}
 		}
 		remaining -= cost
 		capped[i] = entry

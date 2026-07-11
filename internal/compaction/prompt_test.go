@@ -93,3 +93,23 @@ func TestCapEntriesToBudgetHoldsTheTotalAcrossManyEntries(t *testing.T) {
 		})
 	}
 }
+
+func TestCapEntriesToBudgetKeepsCheapShortEntries(t *testing.T) {
+	t.Parallel()
+
+	entries := []messageEntry{{Role: "user", Content: strings.Repeat("g", 4800)}}
+	for i := 0; i < 20; i++ {
+		entries = append(entries, messageEntry{Role: "tool", Content: "a"})
+	}
+	capped := capEntriesToBudget(entries, 100)
+	total := 0
+	for i, e := range capped {
+		total += estimateBytesAsTokens(e.Content) + estimateBytesAsTokens(e.Role) + 1
+		if i > 0 && e.Content != "a" {
+			t.Fatalf("short entry %d was rewritten to %q: a marker must never replace cheaper original text", i, e.Content)
+		}
+	}
+	if total > 100 {
+		t.Fatalf("capped total = %d tokens, exceeds max = 100", total)
+	}
+}
