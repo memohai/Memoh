@@ -195,12 +195,12 @@ func TestToolBoundaryGuardRequiresToolClosurePolicy(t *testing.T) {
 	}
 }
 
-func TestTrimCompactMessagesKeepsToolExchangeIntact(t *testing.T) {
+func TestTrimCompactMessagesKeepsOldestAndToolExchangeIntact(t *testing.T) {
 	t.Parallel()
 
 	// compact input (oldest -> newest): assistant(tool-call), tool(result), user, assistant.
-	// maxTokens 350 trims the oldest (the tool call), which would orphan the tool
-	// result at the head of the retained compact input.
+	// maxTokens 350 keeps the oldest groups within budget — the whole exchange
+	// plus the user row — and defers the newest overflow to a later pass.
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
 		toolCallRow(t, 100),
 		toolResultRow(t, 100),
@@ -209,14 +209,51 @@ func TestTrimCompactMessagesKeepsToolExchangeIntact(t *testing.T) {
 	}
 	items, _ := itemsFromRows(rows)
 	trimmed := trimCompactMessages(items, 350)
-	if len(trimmed) == 0 {
-		t.Fatalf("trim dropped everything")
+	if len(trimmed) != 3 {
+		t.Fatalf("trimmed = %d, want the oldest exchange plus the user row", len(trimmed))
 	}
-	if isToolResultItem(trimmed[0]) {
-		t.Fatalf("trim left an orphan tool result at the head of the compact input")
+	if trimmed[0].ID != items[0].ID || trimmed[1].ID != items[1].ID {
+		t.Fatalf("trim must keep the oldest tool exchange intact at the head")
 	}
+	if trimmed[len(trimmed)-1].ID != items[2].ID {
+		t.Fatalf("newest overflow must be deferred, got tail %s", formatUUID(trimmed[len(trimmed)-1].ID))
+	}
+}
+
+func TestTrimCompactMessagesKeepsOversizedFirstGroup(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		toolCallRow(t, 600),
+		toolResultRow(t, 600),
+		mkRow(t, "user", `"c"`, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	trimmed := trimCompactMessages(items, 350)
 	if len(trimmed) != 2 {
-		t.Fatalf("trimmed = %d, want 2 (orphan tool result dropped with its call)", len(trimmed))
+		t.Fatalf("trimmed = %d, want the oversized head exchange kept whole for progress", len(trimmed))
+	}
+}
+
+func TestTrimCompactMessagesMustKeepRowsCostNoBudget(t *testing.T) {
+	t.Parallel()
+
+	askCall := mkRow(t, "assistant", `[{"type":"tool-call","toolName":"ask_user","toolCallId":"a","input":{}}]`, 600)
+	askResult := mkRow(t, "tool", `[{"type":"tool-result","toolName":"ask_user","toolCallId":"a","output":"yes"}]`, 600)
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		askCall,
+		askResult,
+		mkRow(t, "user", `"old q"`, 100),
+		mkRow(t, "assistant", `"old a"`, 100),
+		mkRow(t, "user", `"newer q"`, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	trimmed := trimCompactMessages(items, 250)
+	if len(trimmed) != 4 {
+		t.Fatalf("trimmed = %d, want must-keep island (free) plus two rows within budget", len(trimmed))
+	}
+	if !trimmed[0].HasPolicy(CompactPolicyMustKeep) || !trimmed[1].HasPolicy(CompactPolicyMustKeep) {
+		t.Fatalf("must-keep island must stay in place at the head")
 	}
 }
 

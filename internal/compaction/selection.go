@@ -461,31 +461,42 @@ func buildEntriesAndIDs(items []CompactionCandidate) ([]messageEntry, []pgtype.U
 	return nil, nil
 }
 
-// trimCompactMessages trims the compaction input from the tail (oldest) so the
-// total estimated tokens stay within maxTokens.
+// trimCompactMessages caps one compaction call's input to maxTokens by keeping
+// the oldest tool-exchange groups and deferring the newest overflow to a later
+// pass. Chewing front-to-back reclaims the oldest raw rows first and keeps
+// summary coverage in chronological order across passes, so prior summaries
+// read in narrative order. Must-keep rows never reach the summarizer, so they
+// cost no budget; the first group is always kept so an oversized head cannot
+// stall progress. Group-aligned cuts can never split a tool exchange.
 func trimCompactMessages(items []CompactionCandidate, maxTokens int) []CompactionCandidate {
 	if len(items) == 0 || maxTokens <= 0 {
 		return items
 	}
+	budgetCost := func(idx int) int {
+		if items[idx].HasPolicy(CompactPolicyMustKeep) {
+			return 0
+		}
+		return estimateCompactPromptTokens(items[idx])
+	}
 	total := 0
-	for _, it := range items {
-		total += estimateCompactPromptTokens(it)
+	for i := range items {
+		total += budgetCost(i)
 	}
 	if total <= maxTokens {
 		return items
 	}
 	accumulated := 0
-	cutoff := len(items)
-	for i := len(items) - 1; i >= 0; i-- {
-		accumulated += estimateCompactPromptTokens(items[i])
-		if accumulated > maxTokens {
-			cutoff = i + 1
+	end := 0
+	for _, group := range toolExchangeGroups(items) {
+		cost := 0
+		for _, idx := range group {
+			cost += budgetCost(idx)
+		}
+		if end > 0 && accumulated+cost > maxTokens {
 			break
 		}
+		accumulated += cost
+		end = group[len(group)-1] + 1
 	}
-	cutoff = adjustForToolBoundary(items, cutoff)
-	if cutoff >= len(items) {
-		return items
-	}
-	return items[cutoff:]
+	return items[:end]
 }

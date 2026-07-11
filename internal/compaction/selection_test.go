@@ -405,7 +405,7 @@ func TestSplitByRatioBoundaryConditions(t *testing.T) {
 	}
 }
 
-func TestTrimCompactMessagesDropsOldestBeyondBudget(t *testing.T) {
+func TestTrimCompactMessagesDefersNewestBeyondBudget(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
@@ -415,13 +415,14 @@ func TestTrimCompactMessagesDropsOldestBeyondBudget(t *testing.T) {
 	}
 	items, _ := itemsFromRows(rows)
 	trimmed := trimCompactMessages(items, 150)
-	// Budget 150, accumulate from newest: 100 (c) fits, +100 (b) = 200 > 150 -> drop
-	// the oldest two (a, b) from the tail, keep only the newest (c).
+	// Budget 150, accumulate from oldest: 100 (a) fits, +100 (b) = 200 > 150 ->
+	// keep the oldest row and defer the newer overflow to a later pass, so
+	// passes chew history front-to-back in chronological order.
 	if len(trimmed) != 1 {
 		t.Fatalf("trimmed count = %d, want 1", len(trimmed))
 	}
-	if trimmed[0].ID != rows[2].ID {
-		t.Fatalf("trim should keep the newest message and drop older ones")
+	if trimmed[0].ID != rows[0].ID {
+		t.Fatalf("trim should keep the oldest message and defer newer ones")
 	}
 }
 
@@ -445,8 +446,8 @@ func TestTrimCompactMessagesAccountsForDirectedSignalHeaders(t *testing.T) {
 	if len(trimmed) != 2 {
 		t.Fatalf("trimmed count = %d, want 2 after accounting for header tokens", len(trimmed))
 	}
-	if trimmed[0].ID != rows[1].ID || trimmed[1].ID != rows[2].ID {
-		t.Fatalf("trim should drop the oldest message when headers exceed budget")
+	if trimmed[0].ID != rows[0].ID || trimmed[1].ID != rows[1].ID {
+		t.Fatalf("trim should defer the newest message when headers exceed budget")
 	}
 }
 
