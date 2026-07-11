@@ -1,9 +1,17 @@
 <template>
-  <canvas
-    ref="canvasEl"
+  <div
     class="size-full text-foreground"
     aria-hidden="true"
-  />
+  >
+    <canvas
+      ref="ambientCanvasEl"
+      class="absolute inset-0 size-full"
+    />
+    <canvas
+      ref="canvasEl"
+      class="absolute inset-0 size-full"
+    />
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -24,8 +32,9 @@ import {
  *   1. CPU 70-80%:初版每帧对全屏尺寸的离屏画布 getImageData(≈2M 像素)
  *      再逐点画 ~1.5 万个独立 arc/fill。现在离屏"场"画布直接用点阵分辨率
  *      (1 像素 = 1 个点,抗锯齿天然充当覆盖率采样),getImageData 缩到
- *      ~1 万像素;常亮层用 resize 时缓存的 Path2D 一笔画完;点亮层按
- *      量化档位聚合成少数几条 Path2D;再加 30fps 帧率上限。
+ *      ~1 万像素;常亮层和完整点阵在 resize 时栅格化为位图;每帧只更新
+ *      点阵分辨率的 alpha 遮罩并合成亮区,不再为数千个亮点重建 Path2D;
+ *      再加 30fps 帧率上限。
  *   2. 节奏太慢:初版 MOTION_RATE=0.55 全局降速,现在按键帧原速(1.0)播放。
  * 颜色裁决:亮暗都不带彩——初版暗色用 accent 调色板逐点上色,已否决;
  * 两种主题统一用 text-foreground 单色,暗色仅调点亮增益。
@@ -51,6 +60,7 @@ const GAIN_LIGHT = 0.32
 const GAIN_DARK = 0.44
 
 const canvasEl = ref<HTMLCanvasElement | null>(null)
+const ambientCanvasEl = ref<HTMLCanvasElement | null>(null)
 
 let raf = 0
 let ctx: CanvasRenderingContext2D | null = null
@@ -64,7 +74,12 @@ let viewH = 0
 let dpr = 1
 let dotColor = 'currentColor'
 let isDark = false
-let ambientPath: Path2D | null = null
+/** 尺寸不变时可直接复用的常亮层和完整点阵层 */
+let dotLayer: HTMLCanvasElement | null = null
+/** 点阵分辨率的量化 alpha 遮罩,每帧只改它的像素 */
+let mask: HTMLCanvasElement | null = null
+let maskCtx: CanvasRenderingContext2D | null = null
+let maskImage: ImageData | null = null
 let lastNow = 0
 let lastFrameAt = 0
 let reduceMotion = false
@@ -110,6 +125,47 @@ function readColor() {
   isDark = document.documentElement.classList.contains('dark')
 }
 
+function createLayer(width: number, height: number) {
+  const layer = document.createElement('canvas')
+  layer.width = width
+  layer.height = height
+  return layer
+}
+
+function rebuildDotLayers() {
+  const width = Math.max(1, Math.round(viewW * dpr))
+  const height = Math.max(1, Math.round(viewH * dpr))
+  dotLayer = createLayer(width, height)
+  const ambientLayer = ambientCanvasEl.value
+  if (!ambientLayer) return
+  ambientLayer.width = width
+  ambientLayer.height = height
+
+  const dotCtx = dotLayer.getContext('2d')
+  const ambientCtx = ambientLayer.getContext('2d')
+  if (!dotCtx || !ambientCtx) return
+
+  const path = new Path2D()
+  const twoPi = Math.PI * 2
+  for (let y = 0; y < rows; y++) {
+    const py = y * GAP
+    for (let x = 0; x < cols; x++) {
+      const px = x * GAP
+      path.moveTo(px + DOT_RADIUS, py)
+      path.arc(px, py, DOT_RADIUS, 0, twoPi)
+    }
+  }
+
+  for (const layerCtx of [dotCtx, ambientCtx]) {
+    layerCtx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    layerCtx.fillStyle = dotColor
+  }
+  dotCtx.fill(path)
+  ambientCtx.globalAlpha = AMBIENT
+  ambientCtx.fill(path)
+  ambientCtx.globalAlpha = 1
+}
+
 function resize() {
   const el = canvasEl.value
   if (!el) return
@@ -129,19 +185,11 @@ function resize() {
   field.height = rows
   fieldCtx = field.getContext('2d', { willReadFrequently: true })
 
-  // 常亮网格一次成 Path,之后每帧一笔 fill
-  const TWO_PI = Math.PI * 2
-  ambientPath = new Path2D()
-  for (let y = 0; y < rows; y++) {
-    const py = y * GAP
-    for (let x = 0; x < cols; x++) {
-      const px = x * GAP
-      // 每个圆前先 moveTo,避免 Path2D 把上一个圆的终点连线过来
-      ambientPath.moveTo(px + DOT_RADIUS, py)
-      ambientPath.arc(px, py, DOT_RADIUS, 0, TWO_PI)
-    }
-  }
   readColor()
+  mask = createLayer(cols, rows)
+  maskCtx = mask.getContext('2d')
+  maskImage = maskCtx?.createImageData(cols, rows) ?? null
+  rebuildDotLayers()
 }
 
 /** 形状内的线性渐变:沿 gradAngle 从全亮衰减到 40%,让点亮有方向感 */
@@ -250,7 +298,10 @@ function scheduleFrame() {
 }
 
 function render(now: number) {
-  if (!ctx || !fieldCtx || !field || !canvasEl.value || !ambientPath) return
+  if (
+    !ctx || !fieldCtx || !field || !canvasEl.value
+    || !dotLayer || !mask || !maskCtx || !maskImage
+  ) return
   // 30fps 帧率闸:跳过的帧只重新排队,不推进时间轴
   if (now - lastFrameAt < FRAME_MS) {
     scheduleFrame()
@@ -264,41 +315,35 @@ function render(now: number) {
   const frame = (animTime * STAGE_FR) % STAGE_OP
 
   drawField(frame)
-  const data = fieldCtx.getImageData(0, 0, cols, rows).data
-
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  ctx.clearRect(0, 0, viewW, viewH)
-  ctx.fillStyle = dotColor
-
-  // 常亮层:一笔
-  ctx.globalAlpha = AMBIENT
-  ctx.fill(ambientPath)
-
-  // 点亮层:按量化档位聚合,每档一条 Path2D 一笔 fill
+  const fieldData = fieldCtx.getImageData(0, 0, cols, rows).data
+  const maskData = maskImage.data
   const gain = isDark ? GAIN_DARK : GAIN_LIGHT
-  const TWO_PI = Math.PI * 2
-  const buckets: (Path2D | null)[] = Array.from({ length: LEVELS }, () => null)
-  for (let y = 0; y < rows; y++) {
-    const py = y * GAP
-    const rowBase = y * cols
-    for (let x = 0; x < cols; x++) {
-      const raw = data[(rowBase + x) * 4 + 3] / 255
-      if (raw <= 0.04) continue
-      const level = Math.min(LEVELS, Math.round(raw * LEVELS))
-      if (level <= 0) continue
-      const px = x * GAP
-      const path = (buckets[level - 1] ??= new Path2D())
-      path.moveTo(px + DOT_RADIUS, py)
-      path.arc(px, py, DOT_RADIUS, 0, TWO_PI)
-    }
+  for (let pixel = 0; pixel < cols * rows; pixel++) {
+    const offset = pixel * 4
+    const raw = fieldData[offset + 3] / 255
+    const level = raw <= 0.04 ? 0 : Math.min(LEVELS, Math.round(raw * LEVELS))
+    maskData[offset + 3] = Math.round((level / LEVELS) * gain * 255)
   }
-  for (let level = 1; level <= LEVELS; level++) {
-    const path = buckets[level - 1]
-    if (!path) continue
-    ctx.globalAlpha = (level / LEVELS) * gain
-    ctx.fill(path)
-  }
-  ctx.globalAlpha = 1
+  maskCtx.putImageData(maskImage, 0, 0)
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.globalCompositeOperation = 'source-over'
+  ctx.clearRect(0, 0, canvasEl.value.width, canvasEl.value.height)
+  ctx.drawImage(dotLayer, 0, 0)
+  ctx.globalCompositeOperation = 'destination-in'
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(
+    mask,
+    0,
+    0,
+    cols,
+    rows,
+    -GAP * dpr / 2,
+    -GAP * dpr / 2,
+    cols * GAP * dpr,
+    rows * GAP * dpr,
+  )
+  ctx.globalCompositeOperation = 'source-over'
   scheduleFrame()
 }
 
@@ -350,6 +395,7 @@ onMounted(() => {
   resizeObserver.observe(el)
   themeObserver = new MutationObserver(() => {
     readColor()
+    rebuildDotLayers()
     if (reduceMotion) renderOnce()
   })
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
