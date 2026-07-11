@@ -478,16 +478,23 @@ func trimCompactMessages(items []CompactionCandidate, maxTokens int) []Compactio
 	}
 	accumulated := 0
 	end := 0
+	keptRealGroup := false
 	for _, group := range toolExchangeGroups(items) {
 		cost := 0
 		for _, idx := range group {
 			cost += budgetCost(idx)
 		}
-		if end > 0 && accumulated+cost > maxTokens {
+		// The progress guarantee keys on real (positive-cost) groups: a
+		// zero-cost head must not count as "already kept something" and
+		// starve an oversized first real group behind it.
+		if cost > 0 && keptRealGroup && accumulated+cost > maxTokens {
 			break
 		}
 		accumulated += cost
 		end = group[len(group)-1] + 1
+		if cost > 0 {
+			keptRealGroup = true
+		}
 	}
 	return items[:end]
 }

@@ -270,3 +270,24 @@ func TestAdjustForToolBoundaryIgnoresZeroCutoff(t *testing.T) {
 		t.Fatalf("zero cutoff must stay zero, got %d", got)
 	}
 }
+
+func TestTrimCompactMessagesKeepsOversizedFirstRealGroupBehindFreeHead(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "assistant", `[{"type":"reasoning","text":"a"}]`, 300), // renders empty: zero budget cost
+		toolCallRow(t, 400),
+		toolResultRow(t, 400),
+		mkRow(t, "user", `"newer"`, 100),
+	}
+	items, _ := itemsFromRows(rows)
+	trimmed := trimCompactMessages(items, 500)
+	// The zero-cost head must not defeat the keep-first-group progress
+	// guarantee: the oversized first real exchange stays in.
+	if len(trimmed) < 3 {
+		t.Fatalf("trimmed = %d rows, want the free head plus the oversized first real exchange", len(trimmed))
+	}
+	if trimmed[1].ID != items[1].ID || trimmed[2].ID != items[2].ID {
+		t.Fatalf("oversized first real exchange must be kept for progress")
+	}
+}
