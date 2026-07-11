@@ -38,6 +38,18 @@ type entryPart struct {
 	Result   json.RawMessage `json:"result"`
 }
 
+func isToolCallPartType(value string) bool {
+	return strings.Contains(value, "tool-call") || strings.Contains(value, "tool_call")
+}
+
+func isToolResultPartType(value string) bool {
+	return strings.Contains(value, "tool-result") || strings.Contains(value, "tool_result")
+}
+
+func isToolPartType(value string) bool {
+	return isToolCallPartType(value) || isToolResultPartType(value)
+}
+
 func renderCandidateEntry(record historyfrag.HistoryRecord) string {
 	content := strings.TrimSpace(renderEntryContent(record.ModelMessage))
 	if content == "" {
@@ -105,10 +117,10 @@ func renderEntryContent(mm conversation.ModelMessage) string {
 			segs = append(segs, "[image]")
 		case p.Type == "file":
 			segs = append(segs, "[file]")
-		case strings.Contains(p.Type, "tool-call"), strings.Contains(p.Type, "tool_call"):
+		case isToolCallPartType(p.Type):
 			sawToolCallPart = true
 			segs = append(segs, toolCallMarker(p.ToolName))
-		case strings.Contains(p.Type, "tool-result"), strings.Contains(p.Type, "tool_result"):
+		case isToolResultPartType(p.Type):
 			segs = append(segs, renderToolResult(p.Output, p.Result))
 		}
 	}
@@ -124,7 +136,7 @@ func renderEntryContent(mm conversation.ModelMessage) string {
 
 func hasToolResultPart(parts []entryPart) bool {
 	for _, p := range parts {
-		if strings.Contains(p.Type, "tool-result") || strings.Contains(p.Type, "tool_result") {
+		if isToolResultPartType(p.Type) {
 			return true
 		}
 	}

@@ -13,7 +13,6 @@ import (
 type CompactPolicy string
 
 const (
-	CompactPolicyCanDrop             CompactPolicy = "can_drop"
 	CompactPolicyPreserveRecent      CompactPolicy = "preserve_recent"
 	CompactPolicyPreserveToolClosure CompactPolicy = "preserve_tool_closure"
 	CompactPolicyMustKeep            CompactPolicy = "must_keep"
@@ -98,24 +97,13 @@ func markSelectionPolicies(items []CompactionCandidate) {
 		for i := range items {
 			if i == 0 || i >= tailStart {
 				items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyPreserveRecent)
-				continue
 			}
-			if items[i].HasPolicy(CompactPolicyMustKeep) {
-				continue
-			}
-			items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyCanDrop)
 		}
 		return
 	}
 
 	start := recentProtectedStart(items)
-	for i := range items {
-		if i < start {
-			if !items[i].HasPolicy(CompactPolicyMustKeep) {
-				items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyCanDrop)
-			}
-			continue
-		}
+	for i := start; i < len(items); i++ {
 		items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyPreserveRecent)
 	}
 }
@@ -177,10 +165,7 @@ func isToolExchangeRecord(record historyfrag.HistoryRecord) bool {
 		return true
 	}
 	for _, p := range parseEntryParts(mm.Content) {
-		if strings.Contains(p.Type, "tool-call") ||
-			strings.Contains(p.Type, "tool_call") ||
-			strings.Contains(p.Type, "tool-result") ||
-			strings.Contains(p.Type, "tool_result") {
+		if isToolPartType(p.Type) {
 			return true
 		}
 	}

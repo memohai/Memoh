@@ -135,18 +135,15 @@ func TestItemsFromRowsAnnotatesCompactionCandidatePolicy(t *testing.T) {
 		t.Fatalf("items=%d barriers=%d, want five classified candidates", len(items), barrierCount)
 	}
 
-	assertPolicy(t, items[0], CompactPolicyCanDrop)
-	assertPolicy(t, items[1], CompactPolicyCanDrop)
 	assertNoPolicy(t, items[0], CompactPolicyPreserveRecent)
+	assertNoPolicy(t, items[0], CompactPolicyMustKeep)
 	assertNoPolicy(t, items[1], CompactPolicyPreserveRecent)
+	assertNoPolicy(t, items[1], CompactPolicyMustKeep)
 	assertPolicy(t, items[2], CompactPolicyPreserveRecent)
-	assertNoPolicy(t, items[2], CompactPolicyCanDrop)
 	assertPolicy(t, items[3], CompactPolicyPreserveToolClosure)
 	assertPolicy(t, items[3], CompactPolicyPreserveRecent)
-	assertNoPolicy(t, items[3], CompactPolicyCanDrop)
 	assertPolicy(t, items[4], CompactPolicyPreserveToolClosure)
 	assertPolicy(t, items[4], CompactPolicyPreserveRecent)
-	assertNoPolicy(t, items[4], CompactPolicyCanDrop)
 }
 
 func TestItemsFromRowsKeepsAskUserToolExchange(t *testing.T) {
@@ -166,7 +163,6 @@ func TestItemsFromRowsKeepsAskUserToolExchange(t *testing.T) {
 	for _, idx := range []int{1, 2} {
 		assertPolicy(t, items[idx], CompactPolicy("must_keep"))
 		assertPolicy(t, items[idx], CompactPolicyPreserveToolClosure)
-		assertNoPolicy(t, items[idx], CompactPolicyCanDrop)
 	}
 }
 
@@ -303,11 +299,11 @@ func TestItemsFromRowsAllowsCurrentTurnMiddleCompaction(t *testing.T) {
 	}
 
 	assertPolicy(t, items[0], CompactPolicyPreserveRecent)
-	assertNoPolicy(t, items[0], CompactPolicyCanDrop)
-	assertPolicy(t, items[1], CompactPolicyCanDrop)
-	assertPolicy(t, items[2], CompactPolicyCanDrop)
+	assertNoPolicy(t, items[1], CompactPolicyPreserveRecent)
+	assertNoPolicy(t, items[1], CompactPolicyMustKeep)
+	assertNoPolicy(t, items[2], CompactPolicyPreserveRecent)
+	assertNoPolicy(t, items[2], CompactPolicyMustKeep)
 	assertPolicy(t, items[3], CompactPolicyPreserveRecent)
-	assertNoPolicy(t, items[3], CompactPolicyCanDrop)
 }
 
 func TestItemsFromRowsPreservesUnparseableRowsAsSelectionBarriers(t *testing.T) {

@@ -81,11 +81,6 @@ func rawToolShape(row sqlc.ListUncompactedMessagesBySessionRow) (preserveToolClo
 	return false, false
 }
 
-func isToolPartType(value string) bool {
-	return strings.Contains(value, "tool-call") || strings.Contains(value, "tool_call") ||
-		strings.Contains(value, "tool-result") || strings.Contains(value, "tool_result")
-}
-
 func rowToMessage(row sqlc.ListUncompactedMessagesBySessionRow) messagepkg.Message {
 	return messagepkg.Message{
 		ID:                      formatUUID(row.ID),
