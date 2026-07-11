@@ -55,6 +55,17 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
       .map(stream => stream.streamId)
   }
 
+  function activeUnboundStreamIds(botId: string | null | undefined, composerScope?: string): string[] {
+    const bid = (botId ?? '').trim()
+    const scope = composerScope?.trim()
+    if (!bid) return []
+    return activeStreams()
+      .filter(stream => stream.botId === bid
+        && !stream.sessionId
+        && (!scope || stream.composerScope === scope))
+      .map(stream => stream.streamId)
+  }
+
   function assistantStreamsForSession(botId: string, targetSessionId: string): AssistantStream[] {
     const bid = botId.trim()
     const sid = targetSessionId.trim()
@@ -67,14 +78,7 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
   }
 
   function isUnboundComposerStreaming(botId: string | null | undefined, composerScope?: string): boolean {
-    const bid = (botId ?? '').trim()
-    const scope = composerScope?.trim()
-    if (!bid) return false
-    return activeStreams().some(stream =>
-      stream.botId === bid
-      && !stream.sessionId
-      && (!scope || stream.composerScope === scope),
-    )
+    return activeUnboundStreamIds(botId, composerScope).length > 0
   }
 
   const streamingSessionId = computed(() => {
@@ -140,9 +144,11 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
   function finishAssistantStream(streamId: string): PendingAssistantStream | undefined {
     const stream = streams.get(streamId.trim())
     if (!stream) return undefined
-    finishAssistantTurn(stream.assistantTurn)
     rememberTerminalStream(stream.streamId)
     streams.delete(stream.streamId)
+    if (!activeStreams().some(active => active.assistantTurn === stream.assistantTurn)) {
+      finishAssistantTurn(stream.assistantTurn)
+    }
     return stream
   }
 
@@ -216,6 +222,7 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
     streaming,
     streamingSessionId,
     activeStreamIdsForSession,
+    activeUnboundStreamIds,
     assistantStreamsForSession,
     isSessionStreaming,
     isUnboundComposerStreaming,

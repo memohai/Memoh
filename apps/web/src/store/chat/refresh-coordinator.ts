@@ -20,6 +20,7 @@ export function createChatRefreshCoordinator({
 }: ChatRefreshCoordinatorDeps) {
   const sessionListRequests = new Map<string, Promise<void>>()
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
+  let scheduledRefreshKey = ''
   let scopeGeneration = 0
 
   function refreshSessionsList(botId: string): Promise<void> {
@@ -52,11 +53,15 @@ export function createChatRefreshCoordinator({
     const sid = (sessionId.value ?? '').trim()
     if (!bid || !sid) return
     if (expectedSessionId?.trim() && expectedSessionId.trim() !== sid) return
-    if (refreshTimer) return
+    const key = `${bid}:${sid}`
+    if (refreshTimer && scheduledRefreshKey === key) return
+    if (refreshTimer) clearTimeout(refreshTimer)
 
     const generation = scopeGeneration
+    scheduledRefreshKey = key
     refreshTimer = setTimeout(() => {
       refreshTimer = null
+      scheduledRefreshKey = ''
       if (generation !== scopeGeneration) return
       if ((currentBotId.value ?? '').trim() !== bid || (sessionId.value ?? '').trim() !== sid) return
       if (isSessionStreaming(sid)) return
@@ -71,6 +76,7 @@ export function createChatRefreshCoordinator({
       clearTimeout(refreshTimer)
       refreshTimer = null
     }
+    scheduledRefreshKey = ''
   }
 
   return {

@@ -244,6 +244,7 @@ export const useChatStore = defineStore('chat', () => {
     locateMessageByExternalId,
     isActiveSessionTarget,
     appendTurnToSession,
+    reattachTurnToSession,
     appendToView,
     removeFromView,
     removeTurnFromSession,
@@ -255,8 +256,10 @@ export const useChatStore = defineStore('chat', () => {
     hasVisibleAssistantBlocks,
     finishAssistantTurn,
     snapshotToolApprovalStates,
+    assistantTurnForApproval,
     restoreToolApprovalStates,
     snapshotUserInputStates,
+    assistantTurnForUserInput,
     restoreUserInputStates,
     finalizeStreamFailure,
     latestOptimisticUserText,
@@ -273,6 +276,7 @@ export const useChatStore = defineStore('chat', () => {
     streaming,
     streamingSessionId,
     assistantStreamsForSession,
+    activeUnboundStreamIds,
     isSessionStreaming,
     streamIdForEvent,
     trackAssistantStream,
@@ -281,7 +285,6 @@ export const useChatStore = defineStore('chat', () => {
     rejectAssistantStream,
     discardAssistantStream,
     isTerminalStream,
-    rejectSessionStreams,
     rejectAllStreams,
     recordCreatedSession,
     createdSessionIdForStream,
@@ -383,6 +386,7 @@ export const useChatStore = defineStore('chat', () => {
   let initializeRerunRequested = false
   let initializingBotId: string | null = null
   let initializePromise: Promise<void> | null = null
+  let userScopeGeneration = 0
   const bots = ref<Bot[]>([])
   const overrideModelId = ref<string>('')
   const overrideReasoningEffort = ref<string>('')
@@ -524,6 +528,8 @@ export const useChatStore = defineStore('chat', () => {
     setPendingACPModel,
     clearPendingACPSession,
     detachPendingACPSession,
+    restorePendingACPSession,
+    releasePendingACPSession,
     pendingACPMatchesInput,
   } = acpStaging
 
@@ -727,9 +733,11 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function resetUserScopedState(options: { clearSelection?: boolean } = {}) {
+    userScopeGeneration += 1
     stopStreams()
     abortAllAssistantStreams()
     stopWebSocket()
+    clearPendingACPSession()
 
     resetRefreshCoordinator()
 
@@ -757,7 +765,6 @@ export const useChatStore = defineStore('chat', () => {
     resetCommandEvents()
     resetFsBeacon()
     resetACPRuntimeRegistry()
-    clearPendingACPSession()
 
     clearStreamHistory()
     resetApprovalResponses()
@@ -875,10 +882,11 @@ export const useChatStore = defineStore('chat', () => {
     // placeholders (e.g. "system session has no records") while a fresh
     // transcript is on its way. The sidebar deliberately ignores it — only
     // `loadingChats` (sessions-list boot) makes the sidebar spin.
-    await loadInitialMessages(bid, sid)
-    for (const stream of assistantStreamsForSession(bid, sid)) {
-      if (!hasTurn(stream.assistantTurn)) {
-        appendTurnToSession(bid, sid, stream.assistantTurn)
+    try {
+      await loadInitialMessages(bid, sid)
+    } finally {
+      for (const stream of assistantStreamsForSession(bid, sid)) {
+        reattachTurnToSession(bid, sid, stream.assistantTurn)
       }
     }
   }
@@ -890,11 +898,16 @@ export const useChatStore = defineStore('chat', () => {
       pendingApprovalResponsesForSession(currentBotId.value ?? '', sessionId.value ?? ''),
       'failed',
     )
-    rejectSessionStreams(sessionId.value, abortError, (streamId) => {
+    const activeSessionId = (sessionId.value ?? '').trim()
+    const streamIds = activeSessionId
+      ? assistantStreams.activeStreamIdsForSession(activeSessionId)
+      : activeUnboundStreamIds(currentBotId.value)
+    for (const streamId of streamIds) {
       if (!approvalStreamIds.has(streamId)) {
         abortWebSocketStream(streamId, getAssistantStream(streamId)?.botId)
       }
-    })
+      rejectAssistantStream(streamId, abortError)
+    }
     loading.value = isSessionStreaming(sessionId.value)
   }
 
@@ -921,8 +934,10 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function ensureBot(): Promise<string | null> {
+    const generation = userScopeGeneration
     try {
       const list = await fetchBots()
+      if (generation !== userScopeGeneration) return null
       bots.value = list
       if (!list.length) {
         currentBotId.value = null
@@ -936,6 +951,7 @@ export const useChatStore = defineStore('chat', () => {
       currentBotId.value = ready ? ready.id : list[0]!.id
       return currentBotId.value
     } catch (error) {
+      if (generation !== userScopeGeneration) return null
       console.error('Failed to fetch bots:', error)
       return currentBotId.value
     }
@@ -948,9 +964,13 @@ export const useChatStore = defineStore('chat', () => {
   // currentBot is a computed over bots, so swapping the list reactively
   // refreshes the composer's agent list and metadata in place.
   async function refreshBots(): Promise<void> {
+    const generation = userScopeGeneration
     try {
-      bots.value = await fetchBots()
+      const list = await fetchBots()
+      if (generation !== userScopeGeneration) return
+      bots.value = list
     } catch (error) {
+      if (generation !== userScopeGeneration) return
       console.error('Failed to refresh bots:', error)
     }
   }
@@ -1055,8 +1075,7 @@ export const useChatStore = defineStore('chat', () => {
     if (runtimeId) {
       // The staged runtime now belongs to the session — reset local staging
       // without closing it.
-      pendingACPSessionInput.value = null
-      pendingACPRuntimeId.value = ''
+      releasePendingACPSession()
     } else {
       clearPendingACPSession()
     }
@@ -1122,8 +1141,7 @@ export const useChatStore = defineStore('chat', () => {
         // Session creation failed: restore the staged agent (and keep its
         // warm runtime) so the user can simply retry.
         if (!pendingACPSessionInput.value && !sessionId.value) {
-          pendingACPSessionInput.value = pending
-          pendingACPRuntimeId.value = runtimeId
+          restorePendingACPSession(pending, runtimeId, detached.botId)
         }
         throw error
       }
@@ -1255,11 +1273,13 @@ export const useChatStore = defineStore('chat', () => {
       return
     }
 
+    const generation = userScopeGeneration
     const run = (async () => {
       initializing.value = true
       loadingChats.value = true
       try {
         do {
+          if (generation !== userScopeGeneration) return
           initializeRerunRequested = false
           initializingBotId = (currentBotId.value ?? '').trim() || null
           // Every entry into initialize starts from a clean transcript window. We
@@ -1274,6 +1294,7 @@ export const useChatStore = defineStore('chat', () => {
           stopWebSocket()
 
           const bid = await ensureBot()
+          if (generation !== userScopeGeneration) return
           if (!bid) {
             replaceSessions([])
             sessionsCursor.value = null
@@ -1293,12 +1314,14 @@ export const useChatStore = defineStore('chat', () => {
               defaultRuntimeIsACP(bid),
             ])
           } catch (error) {
+            if (generation !== userScopeGeneration) return
             if ((currentBotId.value ?? '').trim() !== bid) {
               initializeRerunRequested = true
               continue
             }
             throw error
           }
+          if (generation !== userScopeGeneration) return
           if ((currentBotId.value ?? '').trim() !== bid) {
             initializeRerunRequested = true
             continue
@@ -1312,6 +1335,7 @@ export const useChatStore = defineStore('chat', () => {
           const restoredExplicitSession = restoredSessionId && explicitSessionSelection.value
             ? await ensureSessionSummary(bid, restoredSessionId)
             : null
+          if (generation !== userScopeGeneration) return
           if ((currentBotId.value ?? '').trim() !== bid) {
             initializeRerunRequested = true
             continue
@@ -1367,10 +1391,12 @@ export const useChatStore = defineStore('chat', () => {
           if (sessionId.value) startSessionMessagesStream(bid, sessionId.value)
         } while (initializeRerunRequested)
       } finally {
-        loadingChats.value = false
-        initializing.value = false
-        initializingBotId = null
-        initializeRerunRequested = false
+        if (generation === userScopeGeneration) {
+          loadingChats.value = false
+          initializing.value = false
+          initializingBotId = null
+          initializeRerunRequested = false
+        }
         if (initializePromise === run) {
           initializePromise = null
         }
@@ -1894,9 +1920,12 @@ export const useChatStore = defineStore('chat', () => {
     if (!beginApprovalResponse({ streamId, approvalId, botId: bid, sessionId: sid, silent })) return false
     const previousApprovalStates = snapshotToolApprovalStates(approvalId)
     let assistantTurn: ChatAssistantTurn | null = null
+    let appendedAssistantTurn = false
     if (!silent) {
-      assistantTurn = createOptimisticAssistantTurn()
-      appendToView(assistantTurn)
+      assistantTurn = assistantTurnForApproval(approvalId) ?? createOptimisticAssistantTurn()
+      appendedAssistantTurn = !hasTurn(assistantTurn)
+      if (appendedAssistantTurn) appendToView(assistantTurn)
+      assistantTurn.streaming = true
       void trackAssistantStream({ streamId, assistantTurn, botId: bid, sessionId: sid }).catch((error: Error) => {
         finalizeStreamFailure(assistantTurn, bid, sid, error)
       })
@@ -1919,7 +1948,7 @@ export const useChatStore = defineStore('chat', () => {
       settleApprovalResponse(streamId, 'canceled')
       if (!silent) {
         discardAssistantStream(streamId)
-        if (assistantTurn) removeFromView(assistantTurn)
+        if (assistantTurn && appendedAssistantTurn) removeFromView(assistantTurn)
       }
       loading.value = false
       toast.error(resolveApiErrorMessage(error, 'Failed to send tool approval response.'))
@@ -1941,8 +1970,10 @@ export const useChatStore = defineStore('chat', () => {
     }
     const streamId = createStreamId()
     const previousUserInputStates = snapshotUserInputStates(userInput.user_input_id)
-    const assistantTurn = createOptimisticAssistantTurn()
-    appendToView(assistantTurn)
+    const assistantTurn = assistantTurnForUserInput(userInput.user_input_id) ?? createOptimisticAssistantTurn()
+    const appendedAssistantTurn = !hasTurn(assistantTurn)
+    if (appendedAssistantTurn) appendToView(assistantTurn)
+    assistantTurn.streaming = true
     void trackAssistantStream({ streamId, assistantTurn, botId: bid, sessionId: sid }).catch((error: Error) => {
       finalizeStreamFailure(assistantTurn, bid, sid, error)
       if (error.name === 'AbortError') {
@@ -1979,7 +2010,7 @@ export const useChatStore = defineStore('chat', () => {
     } catch (error) {
       restoreUserInputStates(previousUserInputStates)
       discardAssistantStream(streamId)
-      removeFromView(assistantTurn)
+      if (appendedAssistantTurn) removeFromView(assistantTurn)
       loading.value = false
       toast.error(resolveApiErrorMessage(error, 'Failed to send user input response.'))
     }

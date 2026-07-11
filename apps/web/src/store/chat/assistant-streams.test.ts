@@ -127,6 +127,25 @@ describe('assistant stream registry', () => {
     await Promise.all([first.completion, second.completion])
   })
 
+  it('keeps a shared continuation turn streaming until every stream finishes', async () => {
+    const { registry } = makeRegistry()
+    const turn = assistantTurn('shared-turn')
+    const first = registry.trackAssistantStream({
+      streamId: 'main-stream', assistantTurn: turn, botId: 'bot-1', sessionId: 'session-a',
+    })
+    const second = registry.trackAssistantStream({
+      streamId: 'response-stream', assistantTurn: turn, botId: 'bot-1', sessionId: 'session-a',
+    })
+
+    registry.resolveAssistantStream('response-stream')
+    await second
+    expect(turn.streaming).toBe(true)
+
+    registry.resolveAssistantStream('main-stream')
+    await first
+    expect(turn.streaming).toBe(false)
+  })
+
   it('binds a deferred stream once and retains created-session metadata past terminal', async () => {
     const { registry, sessionId } = makeRegistry(null)
     const deferred = track(registry, 'stream-1', '')
@@ -136,6 +155,8 @@ describe('assistant stream registry', () => {
     expect(registry.isUnboundComposerStreaming('bot-1')).toBe(true)
     expect(registry.isUnboundComposerStreaming('bot-1', 'chat')).toBe(true)
     expect(registry.isUnboundComposerStreaming('bot-2')).toBe(false)
+    expect(registry.activeUnboundStreamIds('bot-1')).toEqual(['stream-1'])
+    expect(registry.activeUnboundStreamIds('bot-1', 'other')).toEqual([])
     registry.recordCreatedSession('stream-1', 'session-created')
     registry.recordCreatedSession('stream-1', 'conflicting-session')
     expect(registry.getAssistantStream('stream-1')?.sessionId).toBe('session-created')

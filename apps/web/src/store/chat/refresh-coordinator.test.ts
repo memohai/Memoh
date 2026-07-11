@@ -110,6 +110,19 @@ describe('chat refresh coordinator', () => {
     expect(refreshCurrentSession).toHaveBeenCalledWith('bot-1', 'session-1')
   })
 
+  it('replaces an old-session debounce when the active session changes', async () => {
+    vi.useFakeTimers()
+    const { coordinator, sessionId, refreshCurrentSession } = makeCoordinator()
+
+    coordinator.scheduleRefreshCurrentSession('session-1')
+    sessionId.value = 'session-2'
+    coordinator.scheduleRefreshCurrentSession('session-2')
+    await vi.runAllTimersAsync()
+
+    expect(refreshCurrentSession).toHaveBeenCalledOnce()
+    expect(refreshCurrentSession).toHaveBeenCalledWith('bot-1', 'session-2')
+  })
+
   it('cancels scheduled refreshes and skips sessions that are still streaming', async () => {
     vi.useFakeTimers()
     const { coordinator, isSessionStreaming, refreshCurrentSession } = makeCoordinator()

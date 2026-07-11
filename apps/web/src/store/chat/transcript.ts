@@ -551,6 +551,23 @@ export function createTranscriptController({
     if (isActiveSessionTarget(botId, targetSessionId)) messages.push(turn)
   }
 
+  function reattachTurnToSession(botId: string, targetSessionId: string, turn: ChatMessage) {
+    if (!isActiveSessionTarget(botId, targetSessionId)) return
+    if (messages.includes(turn)) return
+    const adoptedIndex = messages.findIndex(message => message.id === turn.id)
+    if (adoptedIndex >= 0) {
+      messages.splice(adoptedIndex, 1, turn)
+      return
+    }
+    const tailIndex = messages.length - 1
+    const hydratedTail = messages[tailIndex]
+    if (hydratedTail?.role === 'assistant' && !hydratedTail.streaming) {
+      messages.splice(tailIndex, 1, turn)
+      return
+    }
+    messages.push(turn)
+  }
+
   function appendToView(...turns: ChatMessage[]) {
     messages.push(...turns)
   }
@@ -704,6 +721,15 @@ export function createTranscriptController({
     return snapshots
   }
 
+  function assistantTurnForApproval(approvalId: string): ChatAssistantTurn | null {
+    const id = approvalId.trim()
+    if (!id) return null
+    return messages.find((message): message is ChatAssistantTurn =>
+      message.role === 'assistant'
+      && message.messages.some(block => block.type === 'tool' && block.approval?.approval_id === id),
+    ) ?? null
+  }
+
   function restoreToolApprovalStates(snapshots: ToolApprovalStateSnapshot[]) {
     for (const snapshot of snapshots) {
       if (snapshot.block.approval?.approval_id !== snapshot.approval.approval_id) continue
@@ -721,6 +747,15 @@ export function createTranscriptController({
       }
     })
     return snapshots
+  }
+
+  function assistantTurnForUserInput(userInputId: string): ChatAssistantTurn | null {
+    const id = userInputId.trim()
+    if (!id) return null
+    return messages.find((message): message is ChatAssistantTurn =>
+      message.role === 'assistant'
+      && message.messages.some(block => block.type === 'tool' && block.userInput?.user_input_id === id),
+    ) ?? null
   }
 
   function restoreUserInputStates(snapshots: UserInputStateSnapshot[]) {
@@ -853,6 +888,7 @@ export function createTranscriptController({
     locateMessageByExternalId,
     isActiveSessionTarget,
     appendTurnToSession,
+    reattachTurnToSession,
     appendToView,
     prependToView,
     removeFromView,
@@ -865,8 +901,10 @@ export function createTranscriptController({
     hasVisibleAssistantBlocks,
     finishAssistantTurn,
     snapshotToolApprovalStates,
+    assistantTurnForApproval,
     restoreToolApprovalStates,
     snapshotUserInputStates,
+    assistantTurnForUserInput,
     restoreUserInputStates,
     finalizeStreamFailure,
     latestOptimisticUserText,

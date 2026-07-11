@@ -76,17 +76,19 @@ export function createACPStaging(deps: ACPStagingDeps) {
   // Server-generated ID of the staged runtime; the client never invents
   // runtime identifiers.
   const pendingACPRuntimeId = ref('')
+  const pendingACPBotId = ref('')
   const pendingACPCreating = ref(false)
   let pendingACPCreateRequest: Promise<AcpagentRuntimeStatus | undefined> | null = null
   let pendingACPCreateKey = ''
   let pendingACPGeneration = 0
+  let pendingACPModelRequestVersion = 0
 
   const pendingACPSessionMetadata = computed<Record<string, unknown> | null>(() =>
     pendingACPSessionInput.value ? acpSessionMetadata(pendingACPSessionInput.value) : null,
   )
   const pendingACPModelId = computed(() => pendingACPSessionInput.value?.modelId?.trim() ?? '')
   const pendingACPRuntimeStatus = computed(() => {
-    const bid = currentBotId.value ?? ''
+    const bid = pendingACPBotId.value
     const rid = pendingACPRuntimeId.value
     const key = acpRuntimeKey(bid, rid)
     return key ? acpRuntimeStatuses.value[key] : undefined
@@ -141,7 +143,7 @@ export function createACPStaging(deps: ACPStagingDeps) {
   }
 
   function capturePendingACPStage(): PendingACPStageSnapshot | null {
-    const botId = currentBotId.value ?? ''
+    const botId = pendingACPBotId.value
     const pending = pendingACPSessionInput.value
     if (!botId || !pending) return null
     return {
@@ -153,27 +155,33 @@ export function createACPStaging(deps: ACPStagingDeps) {
     }
   }
 
-  function isPendingACPStageCurrent(snapshot: PendingACPStageSnapshot, modelId?: string): boolean {
+  function isPendingACPStageCurrent(snapshot: PendingACPStageSnapshot, modelId?: string, modelRequestVersion?: number): boolean {
     const current = capturePendingACPStage()
     if (!current) return false
     return current.botId === snapshot.botId
       && current.generation === snapshot.generation
       && current.identityKey === snapshot.identityKey
       && (modelId === undefined || current.modelId === modelId)
+      && (modelRequestVersion === undefined || pendingACPModelRequestVersion === modelRequestVersion)
   }
 
   function stageACPSession(input: ACPAgentSessionInput, options: { explicitSelection?: boolean } = {}) {
+    const ownerBotId = (currentBotId.value ?? '').trim()
     const metadata = acpSessionMetadata(input)
     const existing = pendingACPSessionInput.value
     const samePendingAgent = Boolean(existing
+      && pendingACPBotId.value === ownerBotId
       && existing.agentId === metadata.acp_agent_id
       && (existing.sessionMode || 'chat') === (input.sessionMode || 'chat')
       && (existing.projectPath || ACP_DEFAULT_PROJECT_PATH) === metadata.project_path
       && (existing.projectMode || ACP_DEFAULT_PROJECT_MODE) === metadata.acp_project_mode)
     if (!samePendingAgent) {
       nextPendingACPGeneration()
+      pendingACPModelRequestVersion += 1
       clearPendingACPCreateTracking()
     }
+    const previousOwnerBotId = pendingACPBotId.value
+    pendingACPBotId.value = ownerBotId
     pendingACPSessionInput.value = {
       ...input,
       agentId: String(metadata.acp_agent_id ?? ''),
@@ -182,7 +190,7 @@ export function createACPStaging(deps: ACPStagingDeps) {
       modelId: input.modelId?.trim() || (samePendingAgent ? existing?.modelId : '') || '',
     }
     if (!samePendingAgent && pendingACPRuntimeId.value) {
-      const bid = currentBotId.value ?? ''
+      const bid = previousOwnerBotId
       const runtimeId = pendingACPRuntimeId.value
       pendingACPRuntimeId.value = ''
       closeStagedRuntime(bid, runtimeId)
@@ -278,13 +286,14 @@ export function createACPStaging(deps: ACPStagingDeps) {
 
     const initialSnapshot = capturePendingACPStage()
     if (!initialSnapshot) return
+    const requestVersion = ++pendingACPModelRequestVersion
 
     try {
-      const runtimeId = await pendingACPModelRuntime(initialSnapshot, mid)
+      const runtimeId = await pendingACPModelRuntime(initialSnapshot, mid, requestVersion)
       if (!runtimeId) return
-      await setPendingACPModelOnRuntime(initialSnapshot, runtimeId, mid)
+      await setPendingACPModelOnRuntime(initialSnapshot, runtimeId, mid, requestVersion)
     } catch (error) {
-      if (!isPendingACPStageCurrent(initialSnapshot, mid)) return
+      if (!isPendingACPStageCurrent(initialSnapshot, mid, requestVersion)) return
       if (pendingACPSessionInput.value?.modelId?.trim() === mid) {
         pendingACPSessionInput.value = {
           ...pendingACPSessionInput.value,
@@ -295,32 +304,32 @@ export function createACPStaging(deps: ACPStagingDeps) {
     }
   }
 
-  async function pendingACPModelRuntime(snapshot: PendingACPStageSnapshot, modelId: string): Promise<string> {
+  async function pendingACPModelRuntime(snapshot: PendingACPStageSnapshot, modelId: string, requestVersion: number): Promise<string> {
     const current = capturePendingACPStage()
-    if (!current || !isPendingACPStageCurrent(snapshot, modelId)) return ''
+    if (!current || !isPendingACPStageCurrent(snapshot, modelId, requestVersion)) return ''
     if (current.runtimeId || !modelId) return current.runtimeId
     await ensurePendingACPRuntime()
-    if (!isPendingACPStageCurrent(snapshot, modelId)) return ''
+    if (!isPendingACPStageCurrent(snapshot, modelId, requestVersion)) return ''
     return capturePendingACPStage()?.runtimeId ?? ''
   }
 
-  async function setPendingACPModelOnRuntime(snapshot: PendingACPStageSnapshot, runtimeId: string, modelId: string) {
+  async function setPendingACPModelOnRuntime(snapshot: PendingACPStageSnapshot, runtimeId: string, modelId: string, requestVersion: number) {
     try {
       const runtime = await requestSetACPRuntimeModelByID(snapshot.botId, runtimeId, modelId)
-      if (!isPendingACPStageCurrent(snapshot, modelId)) return
+      if (!isPendingACPStageCurrent(snapshot, modelId, requestVersion)) return
       setACPRuntimeStatus(snapshot.botId, runtimeId, runtime)
     } catch (error) {
-      if (!isPendingACPStageCurrent(snapshot, modelId)) return
+      if (!isPendingACPStageCurrent(snapshot, modelId, requestVersion)) return
       if (!isRuntimeNotFoundError(error)) throw error
       if (pendingACPRuntimeId.value !== runtimeId) return
 
       clearACPRuntimeStatus(snapshot.botId, runtimeId)
       pendingACPRuntimeId.value = ''
 
-      const freshId = await pendingACPModelRuntime(snapshot, modelId)
+      const freshId = await pendingACPModelRuntime(snapshot, modelId, requestVersion)
       if (!freshId) return
       const runtime = await requestSetACPRuntimeModelByID(snapshot.botId, freshId, modelId)
-      if (!isPendingACPStageCurrent(snapshot, modelId)) return
+      if (!isPendingACPStageCurrent(snapshot, modelId, requestVersion)) return
       setACPRuntimeStatus(snapshot.botId, freshId, runtime)
     }
   }
@@ -334,26 +343,46 @@ export function createACPStaging(deps: ACPStagingDeps) {
   }
 
   function clearPendingACPSession() {
-    const bid = currentBotId.value ?? ''
+    const bid = pendingACPBotId.value
     const runtimeId = pendingACPRuntimeId.value
     nextPendingACPGeneration()
+    pendingACPModelRequestVersion += 1
     clearPendingACPCreateTracking()
     closeStagedRuntime(bid, runtimeId)
     pendingACPSessionInput.value = null
     pendingACPRuntimeId.value = ''
+    pendingACPBotId.value = ''
   }
 
   // Detaches the staged ACP session without closing its warm runtime, so the
   // first send can bind the runtime to the real session.
-  function detachPendingACPSession(): { input: ACPAgentSessionInput; runtimeId: string } | null {
+  function detachPendingACPSession(): { input: ACPAgentSessionInput; runtimeId: string; botId: string } | null {
     const pending = pendingACPSessionInput.value
     if (!pending) return null
     const runtimeId = pendingACPRuntimeId.value
+    const botId = pendingACPBotId.value
     nextPendingACPGeneration()
+    pendingACPModelRequestVersion += 1
     clearPendingACPCreateTracking()
     pendingACPSessionInput.value = null
     pendingACPRuntimeId.value = ''
-    return { input: { ...pending }, runtimeId }
+    pendingACPBotId.value = ''
+    return { input: { ...pending }, runtimeId, botId }
+  }
+
+  function restorePendingACPSession(input: ACPAgentSessionInput, runtimeId: string, botId: string) {
+    pendingACPSessionInput.value = { ...input }
+    pendingACPRuntimeId.value = runtimeId.trim()
+    pendingACPBotId.value = botId.trim()
+  }
+
+  function releasePendingACPSession() {
+    nextPendingACPGeneration()
+    pendingACPModelRequestVersion += 1
+    clearPendingACPCreateTracking()
+    pendingACPSessionInput.value = null
+    pendingACPRuntimeId.value = ''
+    pendingACPBotId.value = ''
   }
 
   function pendingACPMatchesInput(input: ACPAgentSessionInput): boolean {
@@ -384,6 +413,8 @@ export function createACPStaging(deps: ACPStagingDeps) {
     setPendingACPModel,
     clearPendingACPSession,
     detachPendingACPSession,
+    restorePendingACPSession,
+    releasePendingACPSession,
     pendingACPMatchesInput,
   }
 }
