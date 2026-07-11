@@ -47,7 +47,10 @@ run = "cd internal/handlers && go generate"
 
 [tasks.sdk-generate]
 description = "Generate SDK code"
-run = "pnpm run generate-sdk"
+run = [
+  "pnpm run generate-sdk",
+  "pnpm --filter @memohai/sdk typecheck",
+]
 depends = [
   "//:pnpm-install",
   "//:swagger-generate"

@@ -95,9 +95,10 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown):
     url: path,
     ...(body !== undefined ? { body: body as Record<string, unknown> } : {}),
   })
-  if (error || !response.ok) {
+  if (error || !response?.ok) {
     const text = typeof error === 'string' ? error : (error as Record<string, unknown>)?.message as string | undefined
-    throw new Error(text || `request failed: ${response.status}`)
+    const status = response ? `: ${response.status}` : ''
+    throw new Error(text || `request failed${status}`)
   }
   return data as T
 }

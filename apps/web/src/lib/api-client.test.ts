@@ -106,6 +106,51 @@ describe('setupApiClient auth handling', () => {
     expect(localStorage.getItem('token')).toBeNull()
   })
 
+  it('runs the unauthorized flow before a REST 401 is thrown', async () => {
+    localStorage.setItem('token', 'stale-token')
+    const onUnauthorized = vi.fn()
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({ message: 'expired' }),
+      {
+        status: 401,
+        statusText: 'Unauthorized',
+        headers: { 'Content-Type': 'application/json' },
+      },
+    ))
+
+    setupApiClient({
+      baseUrl: 'http://example.test',
+      fetch: fetchMock as unknown as typeof fetch,
+      onUnauthorized,
+    })
+
+    await expect(client.get({
+      url: '/users/me',
+      throwOnError: true,
+    })).rejects.toEqual({ message: 'expired' })
+
+    expect(onUnauthorized).toHaveBeenCalledTimes(1)
+    expect(localStorage.getItem('token')).toBeNull()
+  })
+
+  it('returns network errors without inventing a response', async () => {
+    const networkError = new TypeError('network unavailable')
+    const fetchMock = vi.fn(async () => {
+      throw networkError
+    })
+
+    setupApiClient({
+      baseUrl: 'http://example.test',
+      fetch: fetchMock as unknown as typeof fetch,
+    })
+
+    const result = await client.get({ url: '/users/me' })
+
+    expect(result.error).toBe(networkError)
+    expect(result.request).toBeInstanceOf(Request)
+    expect(result.response).toBeUndefined()
+  })
+
   it('normalizes stored token whitespace before comparing 401 request tokens', async () => {
     localStorage.setItem('token', '  stale-token  ')
     const onUnauthorized = vi.fn()

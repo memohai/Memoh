@@ -24,7 +24,7 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "@hey-api/openapi-ts": "0.92.3",
+    "@hey-api/openapi-ts": "0.99.0",
     "@types/node": "^25.0.3",
     "@vitejs/plugin-vue": "^6.0.5",
     "bumpp": "^10.4.1",
