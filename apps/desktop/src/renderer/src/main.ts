@@ -56,6 +56,7 @@ async function bootstrap() {
     baseUrl: status.baseUrl || 'http://127.0.0.1:0',
     onUnauthorized: () => router.replace({ name: 'Login' }),
   })
+  const serverProbe = window.api.desktop.probeServer()
 
   const pinia = createPinia().use(piniaPluginPersistedstate)
   const keyboardCommands = createKeyboardCommandRegistry()
@@ -142,6 +143,22 @@ async function bootstrap() {
   })
 
   app.mount('#app')
+
+  // The first frame stays optimistic: render the normal auth/app route while
+  // the main process checks the configured server in the background. Local
+  // connection refusals resolve immediately; only a genuinely slow endpoint
+  // consumes the full timeout.
+  void serverProbe
+    .then((result) => {
+      if (!result.ok && router.currentRoute.value.name !== 'ConnectServer') {
+        return router.replace({ name: 'ConnectServer' })
+      }
+    })
+    .catch(() => {
+      if (router.currentRoute.value.name !== 'ConnectServer') {
+        return router.replace({ name: 'ConnectServer' })
+      }
+    })
 
   for (const target of pendingNavigationTargets.splice(0)) {
     handleRendererNavigate(router, target)

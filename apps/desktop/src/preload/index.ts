@@ -5,6 +5,7 @@ import {
   isAppKeyboardCommand,
   type AppKeyboardCommand,
 } from '../shared/keyboard-commands'
+import type { ServerConnectResult, ServerConnectionResult } from '../shared/server-connection'
 
 // Renderer query-cache invalidation payload. Mirrors the subset of
 // Pinia Colada's `UseQueryEntryFilter` that survives structured-clone
@@ -26,12 +27,13 @@ const api = {
   desktop: {
     getServerStatus: (): Promise<{
       baseUrl: string
-      ready: boolean
       managed: boolean
-      error?: string
     }> =>
       ipcRenderer.invoke('desktop:server-status'),
     apiBaseUrl: (): Promise<string> => ipcRenderer.invoke('desktop:api-base-url'),
+    probeServer: (): Promise<ServerConnectionResult> => ipcRenderer.invoke('desktop:probe-server'),
+    connectServer: (baseUrl: string): Promise<ServerConnectResult> =>
+      ipcRenderer.invoke('desktop:connect-server', baseUrl),
     // Push the renderer's authoritative menu accelerators (derived from the
     // Keyboard Shortcuts store) so the main process can rebuild native menu
     // items with the user's bindings instead of the static table defaults.

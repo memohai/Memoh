@@ -11,7 +11,7 @@ import {
   type MenuItemConstructorOptions,
 } from 'electron'
 import { join } from 'node:path'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import iconPng from '../../resources/icon.png?asset'
 import trayIconPng from '../../resources/tray-icon.png?asset'
@@ -19,6 +19,14 @@ import { acceleratorForCommand, appKeyboardCommands, type AppKeyboardCommand } f
 import { dispatchFocusedWindowCommand } from './window-commands'
 import { dispatchRendererNavigate } from './window-navigation'
 import { maybeSelfInstallMacOS } from './self-install'
+import {
+  normalizeBaseUrl,
+  normalizeServerInput,
+  probeServerBaseUrl,
+  resolveDesktopBaseUrl,
+  type ServerConnectResult,
+  type ServerConnectionResult,
+} from '../shared/server-connection'
 
 const DESKTOP_PRODUCT_NAME = 'Memoh'
 const DEFAULT_BASE_URL = is.dev ? 'http://localhost:18080' : 'http://localhost:8080'
@@ -54,6 +62,7 @@ let chatWindow: BrowserWindow | null = null
 let appTray: Tray | null = null
 let isQuitting = false
 let windowStatesCache: StoredWindowStates | null = null
+let sessionBaseUrlOverride = ''
 
 function windowStatePath(): string {
   return join(app.getPath('userData'), 'window-state.json')
@@ -137,57 +146,68 @@ function restoreWindowMaximized(window: BrowserWindow, kind: WindowKind): void {
   }
 }
 
-function normalizeBaseUrl(raw: string): string {
-  let value = raw.trim()
-  if (!value) {
-    throw new Error('Server URL is required')
-  }
-  if (!/^[a-z][a-z\d+.-]*:\/\//i.test(value)) {
-    const localHost = /^(localhost|127\.|0\.0\.0\.0|\[::1\])(?::|\/|$)/i.test(value)
-    value = `${localHost ? 'http' : 'https'}://${value}`
-  }
-  const url = new URL(value)
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('Server URL must use http or https')
-  }
-  url.hash = ''
-  url.search = ''
-  return url.toString().replace(/\/$/, '')
+function desktopProfilePath(): string {
+  return join(app.getPath('userData'), 'remote-profile.json')
 }
 
-// Legacy fallback: the pre-unified "Memoh" (online) build persisted the
-// user's chosen server URL in userData/remote-profile.json. Nothing writes
-// this file anymore, but existing installs still rely on it, so it stays
-// ahead of the localhost default (environment variables win).
-function readLegacyProfileBaseUrl(): string {
-  const path = join(app.getPath('userData'), 'remote-profile.json')
+function readProfileBaseUrl(): string {
+  const path = desktopProfilePath()
   if (!existsSync(path)) return ''
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as { baseUrl?: unknown }
     if (typeof parsed.baseUrl !== 'string' || !parsed.baseUrl.trim()) return ''
     return normalizeBaseUrl(parsed.baseUrl)
   } catch (error) {
-    console.error('failed to read legacy remote desktop profile', error)
+    console.error('failed to read remote desktop profile', error)
     return ''
   }
 }
 
+function writeProfileBaseUrl(baseUrl: string): void {
+  mkdirSync(app.getPath('userData'), { recursive: true })
+  const path = desktopProfilePath()
+  writeFileSync(path, `${JSON.stringify({ baseUrl }, null, 2)}\n`, { mode: 0o600 })
+  chmodSync(path, 0o600)
+}
+
 function getDesktopApiBaseUrl(): string {
-  const configured =
-    process.env.MEMOH_DESKTOP_BASE_URL?.trim()
-    || process.env.MEMOH_WEB_PROXY_TARGET?.trim()
-    || process.env.VITE_API_URL?.trim()
-    || readLegacyProfileBaseUrl()
-    || DEFAULT_BASE_URL
-  return normalizeBaseUrl(configured)
+  return resolveDesktopBaseUrl({
+    session: sessionBaseUrlOverride,
+    desktop: process.env.MEMOH_DESKTOP_BASE_URL,
+    proxy: process.env.MEMOH_WEB_PROXY_TARGET,
+    vite: process.env.VITE_API_URL,
+    profile: readProfileBaseUrl(),
+    fallback: DEFAULT_BASE_URL,
+  })
 }
 
 function getDesktopServerStatus() {
   const baseUrl = getDesktopApiBaseUrl()
   return {
     baseUrl,
-    ready: baseUrl !== '',
-    managed: false,
+    managed: Boolean(
+      process.env.MEMOH_DESKTOP_BASE_URL?.trim()
+      || process.env.MEMOH_WEB_PROXY_TARGET?.trim()
+      || process.env.VITE_API_URL?.trim(),
+    ),
+  }
+}
+
+async function probeConfiguredServer(): Promise<ServerConnectionResult> {
+  return probeServerBaseUrl(getDesktopApiBaseUrl())
+}
+
+async function connectToServer(rawBaseUrl: unknown): Promise<ServerConnectResult> {
+  const previousBaseUrl = getDesktopApiBaseUrl()
+  const normalized = normalizeServerInput(rawBaseUrl)
+  if (!normalized.ok) return normalized
+  const result = await probeServerBaseUrl(normalized.baseUrl)
+  if (!result.ok) return result
+  writeProfileBaseUrl(result.baseUrl)
+  sessionBaseUrlOverride = result.baseUrl
+  return {
+    ...result,
+    changed: result.baseUrl !== previousBaseUrl,
   }
 }
 
@@ -566,6 +586,8 @@ app.whenReady().then(async () => {
   })
   ipcMain.handle('desktop:server-status', () => getDesktopServerStatus())
   ipcMain.handle('desktop:api-base-url', () => getDesktopApiBaseUrl())
+  ipcMain.handle('desktop:probe-server', () => probeConfiguredServer())
+  ipcMain.handle('desktop:connect-server', (_event, baseUrl: unknown) => connectToServer(baseUrl))
   ipcMain.handle('desktop:set-menu-accelerators', async (_event, rawPayload: unknown) => {
     if (!rawPayload || typeof rawPayload !== 'object') return
     const incoming = new Map<string, string>()

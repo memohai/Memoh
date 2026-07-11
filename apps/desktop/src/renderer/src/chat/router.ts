@@ -14,7 +14,8 @@ const realSettingsRoutes: RouteRecordRaw[] = SETTINGS_ROUTE_SPECS.map(mapSetting
 const routes: RouteRecordRaw[] = [
   {
     path: '/connect',
-    redirect: { name: 'Login' },
+    name: 'ConnectServer',
+    component: () => import('../connect/ConnectServer.vue'),
   },
   {
     path: '/onboarding',
@@ -109,9 +110,7 @@ router.beforeEach(async (to: RouteLocationNormalized) => {
     return import.meta.env.DEV ? true : { path: '/' }
   }
 
-  if (to.path === '/connect') {
-    return { name: 'Login' }
-  }
+  if (to.path === '/connect') return true
 
   const token = localStorage.getItem('token')
   if (to.fullPath === '/login') {

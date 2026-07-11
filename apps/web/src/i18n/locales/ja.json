@@ -106,6 +106,22 @@
     "invalidCredentials": "ユーザー名またはパスワードが正しくありません",
     "retryHint": "認証情報を確認して再試行してください"
   },
+  "desktopConnection": {
+    "title": "Memoh に接続",
+    "subtitle": "Memoh Server のアドレスを入力してください",
+    "placeholder": "https://memoh.example.com",
+    "connect": "接続",
+    "failed": "接続できませんでした",
+    "errors": {
+      "required": "Server のアドレスを入力してください",
+      "invalid-url": "有効な Server アドレスを入力してください",
+      "unsupported-protocol": "HTTP または HTTPS のアドレスを使用してください",
+      "timeout": "Server からの応答がタイムアウトしました",
+      "unreachable": "Server に接続できません",
+      "http": "Server が HTTP {status} を返しました",
+      "invalid-response": "このアドレスから Memoh Server の応答を確認できませんでした"
+    }
+  },
   "sidebar": {
     "session": "セッション",
     "chat": "チャット",
@@ -359,6 +375,11 @@
     "github": "GitHub",
     "docs": "ドキュメント",
     "feedback": "フィードバック",
+    "advanced": "詳細設定",
+    "advancedDescription": "Desktop 接続など、通常は変更しない設定です。",
+    "serverConnection": "Server 接続",
+    "serverConnectionDescription": "Desktop を別の Memoh Server に接続します。",
+    "configureServer": "設定",
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {

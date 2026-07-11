@@ -16,6 +16,14 @@ declare module '@felinic/ui' {
     unknown
   >
 
+  interface ToastOptions {
+    description?: string
+  }
+
+  export const toast: {
+    error: (message: string, options?: ToastOptions) => string | number
+  }
+
   export const Toaster: LooseComponent
   export const SidebarInset: LooseComponent
   export const Avatar: LooseComponent
