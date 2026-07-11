@@ -1,6 +1,13 @@
 ALTER TABLE IF EXISTS bot_channel_routes DROP CONSTRAINT IF EXISTS fk_bot_channel_routes_active_session;
 ALTER TABLE IF EXISTS bot_history_messages DROP CONSTRAINT IF EXISTS fk_compact_id;
 
+DROP TRIGGER IF EXISTS history_message_asset_source_revision_bump
+  ON bot_history_message_assets;
+DROP FUNCTION IF EXISTS bump_message_source_revision_for_asset();
+DROP TRIGGER IF EXISTS history_message_source_revision_bump
+  ON bot_history_messages;
+DROP FUNCTION IF EXISTS bump_history_message_source_revision();
+
 DROP TRIGGER IF EXISTS compaction_message_claim_finalize
   ON bot_history_message_compacts;
 DROP TRIGGER IF EXISTS compaction_message_claim_insert_guard
