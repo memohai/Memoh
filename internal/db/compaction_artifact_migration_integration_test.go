@@ -71,7 +71,7 @@ CREATE INDEX idx_compacts_active_session
   ON bot_history_message_compacts(session_id, anchor_start_ms, started_at)
   WHERE status = 'ok' AND superseded_at IS NULL;
 `); err != nil {
-		t.Fatalf("create old 0105 compaction schema: %v", err)
+		t.Fatalf("create old 0106 compaction schema: %v", err)
 	}
 	assertForeignKeyDeleteAction(t, ctx, tx, "bot_history_message_compacts", "bot_history_message_compacts_superseded_by_fkey", "n")
 	assertIndexExists(t, ctx, tx, "idx_compacts_active_session", true)
@@ -109,9 +109,9 @@ VALUES ($1, $2, $3, 'ok', 'unlinked')
 		t.Fatalf("insert unlinked artifact: %v", err)
 	}
 
-	up0106 := readEmbeddedMigration(t, "postgres/migrations/0106_compaction_artifact_parent_edges.up.sql")
-	if _, err := tx.Exec(ctx, up0106); err != nil {
-		t.Fatalf("apply 0106 up after 0105: %v", err)
+	up0107 := readEmbeddedMigration(t, "postgres/migrations/0107_compaction_artifact_parent_edges.up.sql")
+	if _, err := tx.Exec(ctx, up0107); err != nil {
+		t.Fatalf("apply 0107 up after 0106: %v", err)
 	}
 	queries := sqlc.New(tx)
 	parents := []string{parentOneID, parentTwoID}
@@ -138,8 +138,8 @@ WHERE id = $3
 		{parentID: parentTwoID, ordinal: 0},
 		{parentID: parentOneID, ordinal: 1},
 	})
-	if _, err := tx.Exec(ctx, up0106); err != nil {
-		t.Fatalf("reapply 0106 up: %v", err)
+	if _, err := tx.Exec(ctx, up0107); err != nil {
+		t.Fatalf("reapply 0107 up: %v", err)
 	}
 	assertGeneratedParentEdges(t, ctx, queries, activeID, []expectedParentEdge{
 		{parentID: parentTwoID, ordinal: 0},
@@ -213,9 +213,9 @@ WHERE id = $1
 	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 1)
 	assertRowCount(t, ctx, tx, "bot_history_message_compact_parent_edges", 0)
 
-	down0106 := readEmbeddedMigration(t, "postgres/migrations/0106_compaction_artifact_parent_edges.down.sql")
-	if _, err := tx.Exec(ctx, down0106); err != nil {
-		t.Fatalf("apply 0106 down: %v", err)
+	down0107 := readEmbeddedMigration(t, "postgres/migrations/0107_compaction_artifact_parent_edges.down.sql")
+	if _, err := tx.Exec(ctx, down0107); err != nil {
+		t.Fatalf("apply 0107 down: %v", err)
 	}
 	var reversed bool
 	if err := tx.QueryRow(ctx, `
@@ -228,10 +228,10 @@ SELECT to_regclass('bot_history_message_compact_parent_edges') IS NULL
       AND tgname = 'compaction_artifact_parent_edges_sync'
   )
 `).Scan(&reversed); err != nil {
-		t.Fatalf("inspect 0106 down reversal: %v", err)
+		t.Fatalf("inspect 0107 down reversal: %v", err)
 	}
 	if !reversed {
-		t.Fatal("0106 down migration left normalized parent-edge objects behind")
+		t.Fatal("0107 down migration left normalized parent-edge objects behind")
 	}
 	assertIndexExists(t, ctx, tx, "idx_compacts_session_lineage", false)
 	assertIndexExists(t, ctx, tx, "idx_compacts_active_session", true)
@@ -248,10 +248,10 @@ SELECT EXISTS (
     AND column_name = 'parent_ids'
 )
 `, schema).Scan(&parentIDsExists); err != nil {
-		t.Fatalf("inspect retained 0105 schema: %v", err)
+		t.Fatalf("inspect retained 0106 schema: %v", err)
 	}
 	if !parentIDsExists {
-		t.Fatal("0106 down migration removed the 0105 parent_ids source of truth")
+		t.Fatal("0107 down migration removed the 0106 parent_ids source of truth")
 	}
 }
 

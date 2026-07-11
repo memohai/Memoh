@@ -1,4 +1,4 @@
--- 0106_compaction_artifact_parent_edges
+-- 0107_compaction_artifact_parent_edges
 -- Remove normalized compaction artifact parent edges and synchronization.
 
 DROP TRIGGER IF EXISTS compaction_artifact_parent_edges_sync

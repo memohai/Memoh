@@ -1,4 +1,4 @@
--- 0106_compaction_artifact_parent_edges
+-- 0107_compaction_artifact_parent_edges
 -- Normalize compaction artifact parent edges and enforce durable lineage.
 
 ALTER TABLE bot_history_message_compacts
