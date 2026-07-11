@@ -146,24 +146,32 @@ func (s *Service) RunCompactionSync(ctx context.Context, cfg TriggerConfig) (Res
 		if owner == nil {
 			return res, err
 		}
-		owner.waiters.Add(1)
-		select {
-		case <-owner.done:
-			if cfg.Manual && owner.err == nil && owner.res.Status == StatusNoop {
-				// The owner may have been an automatic run that nooped on the
-				// failure cooldown; a manual request must still bypass it and
-				// attempt for real instead of inheriting the skip — unless the
-				// caller canceled while waiting, in which case retrying would
-				// start new side effects after cancellation.
-				if ctx.Err() != nil {
-					return Result{Status: StatusNoop}, nil
-				}
-				continue
-			}
-			return owner.res, owner.err
-		case <-ctx.Done():
-			return Result{Status: StatusNoop}, nil
+		res, retry, err := waitForOwner(ctx, cfg, owner)
+		if !retry {
+			return res, err
 		}
+	}
+}
+
+// waitForOwner blocks until the in-flight owner publishes its outcome or the
+// caller's context ends, reporting whether the caller should try again. Only
+// a manual request retries, and only through an owner that nooped without an
+// error — typically an automatic run skipped by the failure cooldown that the
+// manual request must still bypass. A canceled caller never retries: that
+// would start new side effects after cancellation.
+func waitForOwner(ctx context.Context, cfg TriggerConfig, owner *inflightRun) (Result, bool, error) {
+	owner.waiters.Add(1)
+	select {
+	case <-owner.done:
+		if cfg.Manual && owner.err == nil && owner.res.Status == StatusNoop {
+			if ctx.Err() != nil {
+				return Result{Status: StatusNoop}, false, nil
+			}
+			return Result{}, true, nil
+		}
+		return owner.res, false, owner.err
+	case <-ctx.Done():
+		return Result{Status: StatusNoop}, false, nil
 	}
 }
 

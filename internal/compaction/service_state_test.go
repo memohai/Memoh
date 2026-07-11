@@ -589,9 +589,6 @@ func TestCanceledManualWaiterDoesNotRetryThroughANoopOwner(t *testing.T) {
 	}()
 	awaitWaiter(t, run)
 
-	// Cancel while the owner's noop publication races the waiter's select:
-	// whichever branch wins, a canceled manual caller must not become a new
-	// owner and start real work after cancellation.
 	cancel()
 	svc.endSessionCompaction(cfg.SessionID, run, Result{Status: StatusNoop}, nil)
 	if res := <-got; res.Status != StatusNoop {
@@ -602,17 +599,78 @@ func TestCanceledManualWaiterDoesNotRetryThroughANoopOwner(t *testing.T) {
 	}
 }
 
+// TestWaitForOwnerManualBranches pins the owner-done arm deterministically:
+// the racing integration test above almost always wakes on ctx.Done(), so the
+// post-noop context recheck is driven directly through the seam.
+func TestWaitForOwnerManualBranches(t *testing.T) {
+	t.Parallel()
+
+	closedOwner := func(res Result, err error) *inflightRun {
+		run := &inflightRun{done: make(chan struct{}), res: res, err: err}
+		close(run.done)
+		return run
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	manual := TriggerConfig{Manual: true}
+
+	// doneHidden forces the owner-done select arm while Err() still reports
+	// cancellation, pinning the post-noop context recheck deterministically
+	// (with both channels ready the select would pick randomly).
+	doneHidden := doneHiddenContext{canceled}
+	res, retry, err := waitForOwner(doneHidden, manual, closedOwner(Result{Status: StatusNoop}, nil))
+	if retry || err != nil || res.Status != StatusNoop {
+		t.Fatalf("canceled manual caller must not retry through a noop owner: res=%#v err=%v retry=%v", res, err, retry)
+	}
+
+	res, retry, err = waitForOwner(canceled, manual, closedOwner(Result{Status: StatusNoop}, nil))
+	if retry || err != nil || res.Status != StatusNoop {
+		t.Fatalf("either select arm must degrade a canceled manual caller to noop: res=%#v err=%v retry=%v", res, err, retry)
+	}
+
+	_, retry, err = waitForOwner(context.Background(), manual, closedOwner(Result{Status: StatusNoop}, nil))
+	if !retry || err != nil {
+		t.Fatalf("live manual caller must retry through a noop owner: err=%v retry=%v", err, retry)
+	}
+
+	want := Result{Status: StatusOK, Summary: "s", MessageCount: 1}
+	res, retry, err = waitForOwner(doneHiddenContext{canceled}, manual, closedOwner(want, nil))
+	if retry || err != nil || res != want {
+		t.Fatalf("a completed owner's ok result must be reused even after cancel: res=%#v err=%v retry=%v", res, err, retry)
+	}
+
+	res, retry, err = waitForOwner(context.Background(), TriggerConfig{}, closedOwner(Result{Status: StatusNoop}, nil))
+	if retry || err != nil || res.Status != StatusNoop {
+		t.Fatalf("automatic callers never retry: res=%#v err=%v retry=%v", res, err, retry)
+	}
+}
+
 type panickingHookProvider struct {
-	armed atomic.Bool
-	calls atomic.Int32
+	armed   atomic.Bool
+	calls   atomic.Int32
+	entered chan struct{}
+	release chan struct{}
 }
 
 func (p *panickingHookProvider) MCPClient(context.Context, string) (*bridge.Client, error) {
 	p.calls.Add(1)
 	if p.armed.Load() {
+		if p.entered != nil {
+			select {
+			case p.entered <- struct{}{}:
+			default:
+			}
+			<-p.release
+		}
 		panic("boom: injected hook provider panic")
 	}
 	return nil, errors.New("no workspace client")
+}
+
+func (s *Service) inflightRunFor(sessionID string) *inflightRun {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	return s.inflight[sessionID]
 }
 
 func TestPreHookPanicArmsCooldownAndReleasesSlot(t *testing.T) {
@@ -621,7 +679,7 @@ func TestPreHookPanicArmsCooldownAndReleasesSlot(t *testing.T) {
 	q := &fakeQueries{uncompacted: machineryCorpus(t)}
 	stub := &stubModel{summary: "unused"}
 	svc := newMachineryService(q)
-	provider := &panickingHookProvider{}
+	provider := &panickingHookProvider{entered: make(chan struct{}, 1), release: make(chan struct{})}
 	provider.armed.Store(true)
 	svc.SetHookService(hooks.NewService(slog.New(slog.DiscardHandler), provider))
 	cfg := machineryConfig(stub, 450)
@@ -631,8 +689,25 @@ func TestPreHookPanicArmsCooldownAndReleasesSlot(t *testing.T) {
 		defer func() { recovered <- recover() }()
 		_, _ = svc.RunCompactionSync(context.Background(), cfg)
 	}()
+	<-provider.entered // the owner is inside the pre-hook, holding the slot
+
+	waiterErr := make(chan error, 1)
+	go func() {
+		_, err := svc.RunCompactionSync(context.Background(), cfg)
+		waiterErr <- err
+	}()
+	run := svc.inflightRunFor(cfg.SessionID)
+	if run == nil {
+		t.Fatal("owner run must be registered while inside the pre-hook")
+	}
+	awaitWaiter(t, run)
+
+	close(provider.release)
 	if r := <-recovered; r == nil {
 		t.Fatal("a pre-hook panic must propagate, not be swallowed")
+	}
+	if err := <-waiterErr; err == nil {
+		t.Fatal("a waiter attached to a panicking owner must receive a failure, not a zero-value success")
 	}
 
 	provider.armed.Store(false)
@@ -657,3 +732,7 @@ func TestPreHookPanicArmsCooldownAndReleasesSlot(t *testing.T) {
 		t.Fatalf("model called %d times behind the failing pre-hook, want 0", stub.calls)
 	}
 }
+
+type doneHiddenContext struct{ context.Context }
+
+func (doneHiddenContext) Done() <-chan struct{} { return nil }
