@@ -464,22 +464,9 @@ func trimCompactMessages(items []CompactionCandidate, maxTokens int) []Compactio
 		return items
 	}
 	groups := toolExchangeGroups(items)
-	groupCost := func(group []int) int {
-		cost := 0
-		for _, idx := range group {
-			if items[idx].HasPolicy(CompactPolicyMustKeep) {
-				return 0
-			}
-			if strings.TrimSpace(renderCandidateEntry(items[idx].Record)) == "" {
-				return 0
-			}
-			cost += estimateCompactPromptTokens(items[idx])
-		}
-		return cost
-	}
 	total := 0
 	for _, group := range groups {
-		total += groupCost(group)
+		total += markableGroupCost(items, group)
 	}
 	if total <= maxTokens {
 		return items
@@ -488,7 +475,7 @@ func trimCompactMessages(items []CompactionCandidate, maxTokens int) []Compactio
 	end := 0
 	keptMarkableGroup := false
 	for _, group := range groups {
-		cost := groupCost(group)
+		cost := markableGroupCost(items, group)
 		if cost > 0 && keptMarkableGroup && accumulated+cost > maxTokens {
 			break
 		}
@@ -499,4 +486,35 @@ func trimCompactMessages(items []CompactionCandidate, maxTokens int) []Compactio
 		}
 	}
 	return items[:end]
+}
+
+// markableGroupCost is the summarizer-prompt cost of one tool-exchange group:
+// zero for unmarkable groups (must-keep, or any row rendering empty), and for
+// markable groups the content estimate plus the per-entry role prefix, with a
+// floor of one token per row so tiny-but-real entries can never ride along for
+// free — a markable group therefore always has a positive cost, keeping
+// eligibility and cost in one predicate.
+func markableGroupCost(items []CompactionCandidate, group []int) int {
+	cost := 0
+	for _, idx := range group {
+		if items[idx].HasPolicy(CompactPolicyMustKeep) {
+			return 0
+		}
+		if strings.TrimSpace(renderCandidateEntry(items[idx].Record)) == "" {
+			return 0
+		}
+		rowCost := estimateCompactPromptTokens(items[idx]) + estimateBytesAsTokens(items[idx].Record.ModelMessage.Role) + 1
+		cost += rowCost
+	}
+	return cost
+}
+
+// markableCompactCost sums markableGroupCost across the span — the tokens its
+// entries will actually occupy in the summarizer prompt.
+func markableCompactCost(items []CompactionCandidate) int {
+	total := 0
+	for _, group := range toolExchangeGroups(items) {
+		total += markableGroupCost(items, group)
+	}
+	return total
 }

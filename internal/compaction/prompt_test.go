@@ -28,8 +28,19 @@ func TestCapPriorSummariesAlwaysKeepsTheNewestTruncatedToBudget(t *testing.T) {
 	if len(capped) != 1 || !strings.HasPrefix(capped[0], "y") {
 		t.Fatalf("cap must keep at least the newest summary, got %q", capped)
 	}
-	if got := estimateBytesAsTokens(capped[0]); got > 10+4 {
-		t.Fatalf("forced newest summary must be truncated to the cap, got ~%d tokens", got)
+	if got := estimateBytesAsTokens(capped[0]) + priorSeparatorTokens; got > 10 {
+		t.Fatalf("the cap is a hard bound, marker included: got ~%d tokens for cap 10", got)
+	}
+}
+
+func TestCapPriorSummariesDropsAllOnNonPositiveBudget(t *testing.T) {
+	t.Parallel()
+
+	if got := capPriorSummaries([]string{"a", "b"}, 0); got != nil {
+		t.Fatalf("non-positive budget must drop all prior context, got %q", got)
+	}
+	if got := capPriorSummaries([]string{"a", "b"}, -5); got != nil {
+		t.Fatalf("negative budget must drop all prior context, got %q", got)
 	}
 }
 

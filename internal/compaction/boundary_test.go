@@ -291,3 +291,19 @@ func TestTrimCompactMessagesKeepsOversizedFirstRealGroupBehindFreeHead(t *testin
 		t.Fatalf("oversized first real exchange must be kept for progress")
 	}
 }
+
+func TestTrimCompactMessagesFloorsTinyRowCosts(t *testing.T) {
+	t.Parallel()
+
+	rows := make([]sqlc.ListUncompactedMessagesBySessionRow, 0, 100)
+	for i := 0; i < 100; i++ {
+		rows = append(rows, mkRow(t, "user", `"a"`, 0)) // no usage; raw estimate rounds to 0
+	}
+	items, _ := itemsFromRows(rows)
+	trimmed := trimCompactMessages(items, 1)
+	// Each markable row costs at least one token, so a swarm of tiny rows
+	// cannot ride into the prompt for free.
+	if len(trimmed) != 1 {
+		t.Fatalf("trimmed = %d rows, want 1 (per-row cost floor)", len(trimmed))
+	}
+}

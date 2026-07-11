@@ -247,6 +247,8 @@ func rawToolOutput(candidates ...json.RawMessage) string {
 	return ""
 }
 
+const truncationMarker = " …[truncated]"
+
 func truncateBytes(s string, maxBytes int) string {
 	if len(s) <= maxBytes {
 		return s
@@ -255,5 +257,5 @@ func truncateBytes(s string, maxBytes int) string {
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}
-	return strings.TrimSpace(s[:cut]) + " …[truncated]"
+	return strings.TrimSpace(s[:cut]) + truncationMarker
 }

@@ -355,3 +355,42 @@ func TestDoCompactionSharesPromptBudgetWithPriorContext(t *testing.T) {
 		t.Fatalf("prior context must carve out of the entries budget: marked %d with prior, %d without", with, without)
 	}
 }
+
+func TestDoCompactionSacrificesPriorContextForOversizedEntries(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `"the enormous old turn"`, 900),
+		mkRow(t, "user", `"small follow-up"`, 100),
+		mkRow(t, "user", `"current"`, 40),
+	}
+	prior := strings.Repeat("history so far ", 70) // ~262 tokens, within the 1/4 allowance
+	q := &fakeQueries{
+		uncompacted: rows,
+		priorLogs:   []sqlc.BotHistoryMessageCompact{{Status: "ok", Summary: prior}},
+	}
+	stub := &stubModel{summary: "condensed"}
+	svc := newMachineryService(q)
+
+	cfg := machineryConfig(stub, 100)
+	cfg.MaxCompactTokens = 1000
+	res, err := svc.RunCompactionSync(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("RunCompactionSync: %v", err)
+	}
+	if res.Status != StatusOK {
+		t.Fatalf("status = %q, want %q", res.Status, StatusOK)
+	}
+	if len(q.markedIDs) != 1 || q.markedIDs[0] != rows[0].ID {
+		t.Fatalf("marked = %v, want the oversized first markable turn", q.markedIDs)
+	}
+	// The oversized kept entries exceed their budget share, so the reference
+	// prior context must shrink (truncate) to keep the combined prompt within
+	// MaxCompactTokens instead of stacking on top of it.
+	if strings.Contains(stub.prompt, prior) {
+		t.Fatal("full prior context must not ride along with oversized entries")
+	}
+	if got := estimateBytesAsTokens(stub.prompt); got > 1000+150 {
+		t.Fatalf("combined prompt ~%d tokens, want within MaxCompactTokens plus the fixed wrapper", got)
+	}
+}

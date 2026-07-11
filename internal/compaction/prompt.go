@@ -40,21 +40,29 @@ func buildUserPrompt(priorSummaries []string, messages []messageEntry) string {
 	return sb.String()
 }
 
+// priorSeparatorTokens covers the "\n---\n" joiner buildUserPrompt places
+// between prior summaries.
+const priorSeparatorTokens = 2
+
 // capPriorSummaries bounds the reference context fed to the summarizer.
 // Summaries accumulate one per pass, so an unbounded <prior_context> would
 // eventually dominate — or overflow — the compaction model's own window.
 // The newest summaries carry the most continuity, so the budget keeps them
-// (at least one) and drops from the oldest; order stays chronological. The
-// cap is hard: when the forced newest summary alone exceeds it, its text is
-// truncated so callers can rely on the returned total staying within budget.
+// and drops from the oldest; order stays chronological. The cap is hard:
+// separators are charged, a non-positive budget drops everything, and when
+// the forced newest summary alone exceeds the budget its text is truncated
+// (marker included) so callers can rely on the returned total.
 func capPriorSummaries(summaries []string, maxTokens int) []string {
-	if len(summaries) == 0 || maxTokens <= 0 {
+	if len(summaries) == 0 {
 		return summaries
+	}
+	if maxTokens <= 0 {
+		return nil
 	}
 	accumulated := 0
 	start := len(summaries)
 	for i := len(summaries) - 1; i >= 0; i-- {
-		cost := estimateBytesAsTokens(summaries[i])
+		cost := estimateBytesAsTokens(summaries[i]) + priorSeparatorTokens
 		if start < len(summaries) && accumulated+cost > maxTokens {
 			break
 		}
@@ -62,8 +70,12 @@ func capPriorSummaries(summaries []string, maxTokens int) []string {
 		start = i
 	}
 	kept := summaries[start:]
-	if len(kept) == 1 && estimateBytesAsTokens(kept[0]) > maxTokens {
-		kept = []string{truncateBytes(kept[0], maxTokens*4)}
+	if len(kept) == 1 && estimateBytesAsTokens(kept[0])+priorSeparatorTokens > maxTokens {
+		budgetBytes := (maxTokens-priorSeparatorTokens)*4 - len(truncationMarker)
+		if budgetBytes <= 0 {
+			return nil
+		}
+		kept = []string{truncateBytes(kept[0], budgetBytes)}
 	}
 	return kept
 }

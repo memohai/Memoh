@@ -369,22 +369,105 @@ func TestDoCompactionEmptySummaryRecordsErrorWithoutMarking(t *testing.T) {
 	}
 }
 
-func TestRunCompactionSkipsWhenSessionAlreadyInFlight(t *testing.T) {
+type gatedTransport struct {
+	started chan struct{}
+	release chan struct{}
+	inner   http.RoundTripper
+}
+
+func (g *gatedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	select {
+	case g.started <- struct{}{}:
+	default:
+	}
+	<-g.release
+	return g.inner.RoundTrip(req)
+}
+
+func TestRunCompactionSyncWaitsForOwnerAndReusesItsResult(t *testing.T) {
 	rows := machineryCorpus(t)
 	q := &fakeQueries{uncompacted: rows}
-	stub := &stubModel{summary: "unused"}
+	stub := &stubModel{summary: "owner summary"}
 	svc := newMachineryService(q)
 
 	cfg := machineryConfig(stub, 450)
-	if !svc.beginSessionCompaction(cfg.SessionID) {
-		t.Fatal("first acquisition must succeed")
-	}
-	defer svc.endSessionCompaction(cfg.SessionID)
+	gate := &gatedTransport{started: make(chan struct{}, 1), release: make(chan struct{}), inner: stub}
+	ownerCfg := cfg
+	ownerCfg.HTTPClient = &http.Client{Transport: gate}
 
-	if _, err := svc.RunCompactionSync(context.Background(), cfg); err != nil {
-		t.Fatalf("in-flight skip must not error: %v", err)
+	ownerGot := make(chan Result, 1)
+	go func() {
+		res, err := svc.RunCompactionSync(context.Background(), ownerCfg)
+		if err != nil {
+			t.Errorf("owner: %v", err)
+		}
+		ownerGot <- res
+	}()
+	<-gate.started // the owner holds the session slot until its model call returns
+
+	waiterGot := make(chan Result, 1)
+	go func() {
+		res, err := svc.RunCompactionSync(context.Background(), cfg)
+		if err != nil {
+			t.Errorf("waiter: %v", err)
+		}
+		waiterGot <- res
+	}()
+
+	close(gate.release)
+	ownerRes := <-ownerGot
+	waiterRes := <-waiterGot
+	if ownerRes.Status != StatusOK {
+		t.Fatalf("owner status = %q, want %q", ownerRes.Status, StatusOK)
 	}
-	if stub.calls != 0 || q.created || len(q.markedIDs) != 0 {
-		t.Fatalf("in-flight session must skip entirely (calls=%d created=%v marked=%d)", stub.calls, q.created, len(q.markedIDs))
+	if waiterRes != ownerRes {
+		t.Fatalf("waiter must reuse the owner's result: owner %#v waiter %#v", ownerRes, waiterRes)
+	}
+	if stub.calls != 1 {
+		t.Fatalf("model called %d times, want 1 (waiter must not double-run)", stub.calls)
+	}
+}
+
+func TestRunCompactionSyncCanceledWaiterDegradesToNoop(t *testing.T) {
+	rows := machineryCorpus(t)
+	q := &fakeQueries{uncompacted: rows}
+	stub := &stubModel{summary: "owner summary"}
+	svc := newMachineryService(q)
+
+	cfg := machineryConfig(stub, 450)
+	gate := &gatedTransport{started: make(chan struct{}, 1), release: make(chan struct{}), inner: stub}
+	ownerCfg := cfg
+	ownerCfg.HTTPClient = &http.Client{Transport: gate}
+
+	ownerGot := make(chan Result, 1)
+	go func() {
+		res, err := svc.RunCompactionSync(context.Background(), ownerCfg)
+		if err != nil {
+			t.Errorf("owner: %v", err)
+		}
+		ownerGot <- res
+	}()
+	<-gate.started
+
+	ctx, cancel := context.WithCancel(context.Background())
+	waiterGot := make(chan Result, 1)
+	go func() {
+		res, err := svc.RunCompactionSync(ctx, cfg)
+		if err != nil {
+			t.Errorf("canceled waiter: %v", err)
+		}
+		waiterGot <- res
+	}()
+	cancel()
+	if res := <-waiterGot; res.Status != StatusNoop {
+		t.Fatalf("canceled waiter must degrade to noop, got %#v", res)
+	}
+
+	close(gate.release)
+	if res := <-ownerGot; res.Status != StatusOK {
+		t.Fatalf("owner must still complete after a waiter cancels, got %#v", res)
+	}
+	if stub.calls != 1 {
+		t.Fatalf("model called %d times, want 1", stub.calls)
 	}
 }
