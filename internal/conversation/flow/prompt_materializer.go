@@ -29,6 +29,7 @@ type initialPromptPlanInput struct {
 	CurrentSourceID string
 	ContextBudget   int
 	Notice          string
+	StripTools      bool
 }
 
 type initialPromptResult struct {
@@ -63,6 +64,9 @@ func newInitialPromptPlan(input initialPromptPlanInput) (initialPromptPlan, erro
 	if err != nil {
 		return initialPromptPlan{}, err
 	}
+	if input.StripTools {
+		sources = applyPromptToolPolicy(sources)
+	}
 	if input.CurrentSourceID != "" {
 		currentIndex, err := uniquePromptSourceIndex(sources, input.CurrentSourceID)
 		if err != nil {
@@ -72,7 +76,6 @@ func newInitialPromptPlan(input initialPromptPlanInput) (initialPromptPlan, erro
 			return initialPromptPlan{}, fmt.Errorf("current prompt source %q must have user role", input.CurrentSourceID)
 		}
 		sources[currentIndex].Retention = contextbudget.RetentionRequired
-		sources[currentIndex].CompactableTokens = 0
 	}
 	assembled, err := contextassembly.Assemble(contextassembly.Request{
 		Sources:             sources,
@@ -92,6 +95,57 @@ func newInitialPromptPlan(input initialPromptPlanInput) (initialPromptPlan, erro
 		contextBudget:    input.ContextBudget,
 		notice:           input.Notice,
 	}, nil
+}
+
+func applyPromptToolPolicy(sources []contextassembly.Source) []contextassembly.Source {
+	protected := requiredPromptOccurrenceSources(sources)
+	for index := range sources {
+		source := &sources[index]
+		if source.Retention == contextbudget.RetentionRequired || source.Retention == contextbudget.RetentionDrop || protected[index] {
+			continue
+		}
+		messages := messageconv.SDKMessagesToModelMessages([]sdk.Message{source.Message})
+		if len(messages) != 1 {
+			continue
+		}
+		message := messages[0]
+		if !strings.EqualFold(message.Role, string(sdk.MessageRoleTool)) &&
+			(!strings.EqualFold(message.Role, string(sdk.MessageRoleAssistant)) || !hasToolCallContent(message)) {
+			continue
+		}
+		filtered := stripToolMessages(messages)
+		if len(filtered) == 0 {
+			source.Retention = contextbudget.RetentionDrop
+			source.PolicyReason = contextbudget.DropPolicy
+			continue
+		}
+		usage := source.Message.Usage
+		source.Message = messageconv.ModelMessageToSDKMessage(filtered[0])
+		source.Message.Usage = usage
+	}
+	return sources
+}
+
+func requiredPromptOccurrenceSources(sources []contextassembly.Source) []bool {
+	messages := make([]sdk.Message, len(sources))
+	protected := make([]bool, len(sources))
+	for index, source := range sources {
+		messages[index] = source.Message
+		protected[index] = source.Retention == contextbudget.RetentionRequired
+	}
+	matches := messageconv.AnalyzeSDKToolOccurrences(messages).Matches
+	for changed := true; changed; {
+		changed = false
+		for _, match := range matches {
+			if protected[match.CallCarrierIndex] == protected[match.ResultCarrierIndex] {
+				continue
+			}
+			protected[match.CallCarrierIndex] = true
+			protected[match.ResultCarrierIndex] = true
+			changed = true
+		}
+	}
+	return protected
 }
 
 func (p initialPromptPlan) BaselineMessages() ([]sdk.Message, error) {

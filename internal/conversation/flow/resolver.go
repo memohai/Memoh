@@ -1235,7 +1235,7 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 		}
 		cfg.Messages = append(cfg.Messages, sdk.UserMessage(cfg.Query, extra...))
 		cfg.ContextQueryMaterialized = true
-	} else if len(cfg.InlineImages) > 0 {
+	} else if len(cfg.InlineImages) > 0 && cfg.InitialPromptMaterializer == nil {
 		// Pipeline path: the user query is already embedded in the RC messages,
 		// but image parts are not rendered by the pipeline renderer. Inject the
 		// inline images into the last user message so the model receives them.

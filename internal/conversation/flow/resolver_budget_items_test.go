@@ -136,7 +136,7 @@ func TestBudgetSourcesForPipelineEntriesRequireSummaryAndCurrentSource(t *testin
 	projection := budgetSourcesForPipelineEntries([]composedPipelineMessage{
 		{message: summary.ModelMessage, summaryRecord: summary, hasSummary: true},
 		{message: sdkModelMessage(t, sdk.UserMessage("raw history"))},
-		{message: sdkModelMessage(t, sdk.UserMessage("current")), forceKeep: true},
+		{message: sdkModelMessage(t, sdk.UserMessage("current")), forceKeep: true, currentSourceID: "pipeline-current:message-1"},
 	})
 
 	if projection.sources[0].Retention != contextbudget.RetentionRequired || projection.sources[0].CompactableTokens != 0 {
@@ -147,6 +147,30 @@ func TestBudgetSourcesForPipelineEntriesRequireSummaryAndCurrentSource(t *testin
 	}
 	if projection.sources[2].Retention != contextbudget.RetentionRequired || projection.sources[2].CompactableTokens != messageconv.EstimateSDKMessageTokens(projection.sources[2].Message) {
 		t.Fatalf("current source = %#v, want required raw source", projection.sources[2])
+	}
+	if projection.currentSourceID != "pipeline-current:message-1" || projection.sources[2].ID != projection.currentSourceID {
+		t.Fatalf("current identity = projection:%q source:%q", projection.currentSourceID, projection.sources[2].ID)
+	}
+	plan := mustInitialPromptPlan(t, initialPromptPlanInput{
+		Sources:         projection.sources,
+		CurrentSourceID: projection.currentSourceID,
+	})
+	if plan.sources[2].Retention != contextbudget.RetentionRequired || plan.sources[2].CompactableTokens != projection.sources[2].CompactableTokens {
+		t.Fatalf("materialized current source = %#v, want required with preserved raw pressure", plan.sources[2])
+	}
+	fallback := budgetSourcesForPipelineEntries([]composedPipelineMessage{{
+		message:   sdkModelMessage(t, sdk.UserMessage("current without external ID")),
+		forceKeep: true,
+	}})
+	if fallback.currentSourceID != "pipeline-current:request" || fallback.sources[0].ID != fallback.currentSourceID {
+		t.Fatalf("fallback current identity = projection:%q source:%q", fallback.currentSourceID, fallback.sources[0].ID)
+	}
+	attachmentOnly := appendCurrentPipelineQueryIfMissing(nil, nil, conversation.ChatRequest{
+		ExternalMessageID: "attachment-message",
+		Attachments:       []conversation.ChatAttachment{{Type: "image", ContentHash: "sha256:abc"}},
+	})
+	if len(attachmentOnly) != 1 || !attachmentOnly[0].forceKeep || attachmentOnly[0].currentSourceID != "pipeline-current:attachment-message" || attachmentOnly[0].message.TextContent() == "" {
+		t.Fatalf("attachment-only current source = %#v", attachmentOnly)
 	}
 }
 

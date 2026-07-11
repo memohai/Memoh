@@ -205,11 +205,13 @@ type historyContextBuild struct {
 	HistoryRecords []historyfrag.HistoryRecord
 	Allocation     contextbudget.Allocation
 	EmittedTokens  int
+	Projection     budgetSourceProjection
 }
 
 func assembleHistoryContext(log *slog.Logger, records []historyfrag.HistoryRecord, envelopeLimit *int) (historyContextBuild, error) {
+	projection := budgetSourcesForHistoryRecords(records)
 	assembled, err := assembleBudgetSources(
-		budgetSourcesForHistoryRecords(records),
+		projection,
 		envelopeLimit,
 		historyTruncationNotice().TextContent(),
 	)
@@ -218,6 +220,7 @@ func assembleHistoryContext(log *slog.Logger, records []historyfrag.HistoryRecor
 		Allocation:     assembled.allocation,
 		EmittedTokens:  assembled.emittedTokens,
 		HistoryRecords: retainedHistoryRecords(records, assembled.sourceIndexes),
+		Projection:     projection,
 	}
 	if log != nil && build.Allocation.BudgetTrimmed {
 		limit := 0

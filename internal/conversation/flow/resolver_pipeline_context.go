@@ -20,6 +20,7 @@ type pipelineContextBuild struct {
 	HistoryRecords  []historyfrag.HistoryRecord
 	EstimatedTokens int
 	Allocation      contextbudget.Allocation
+	Projection      budgetSourceProjection
 }
 
 type pipelineHistoryProjectionBuild struct {
@@ -33,6 +34,7 @@ type composedPipelineMessage struct {
 	summaryRecord      historyfrag.HistoryRecord
 	hasSummary         bool
 	forceKeep          bool
+	currentSourceID    string
 }
 
 func (r *Resolver) buildPipelineContext(
@@ -207,7 +209,7 @@ func appendCurrentPipelineQueryIfMissing(
 	req conversation.ChatRequest,
 ) []composedPipelineMessage {
 	query := strings.TrimSpace(firstNonEmpty(req.RawQuery, req.Query))
-	if query == "" {
+	if query == "" && len(req.Attachments) == 0 {
 		return entries
 	}
 	currentMessageID := strings.TrimSpace(req.ExternalMessageID)
@@ -215,14 +217,30 @@ func appendCurrentPipelineQueryIfMissing(
 		for i := len(entries) - 1; i >= 0; i-- {
 			if containsString(entries[i].renderedMessageIDs, currentMessageID) {
 				entries[i].forceKeep = true
+				entries[i].currentSourceID = pipelineCurrentSourceID(currentMessageID)
 				return entries
 			}
 		}
 	}
+	currentSourceID := pipelineCurrentSourceID(currentMessageID)
+	if currentSourceID == "" {
+		currentSourceID = "pipeline-current:request"
+	}
+	if query == "" {
+		query = "User attached one or more files."
+	}
 	return append(entries, composedPipelineMessage{message: conversation.ModelMessage{
 		Role:    "user",
 		Content: conversation.NewTextContent(query),
-	}, forceKeep: true})
+	}, forceKeep: true, currentSourceID: currentSourceID})
+}
+
+func pipelineCurrentSourceID(messageID string) string {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return ""
+	}
+	return "pipeline-current:" + messageID
 }
 
 func renderedContextHasMessageID(rc pipelinepkg.RenderedContext, messageID string) bool {
@@ -334,8 +352,9 @@ func assembleComposedPipelineContext(
 	entries []composedPipelineMessage,
 	envelopeLimit *int,
 ) (pipelineContextBuild, error) {
+	projection := budgetSourcesForPipelineEntries(entries)
 	assembled, err := assembleBudgetSources(
-		budgetSourcesForPipelineEntries(entries),
+		projection,
 		envelopeLimit,
 		historyTruncationNotice().TextContent(),
 	)
@@ -344,6 +363,7 @@ func assembleComposedPipelineContext(
 		HistoryRecords:  retainedPipelineSummaryRecords(entries, assembled.sourceIndexes),
 		EstimatedTokens: assembled.emittedTokens,
 		Allocation:      assembled.allocation,
+		Projection:      projection,
 	}
 	if log != nil && build.Allocation.BudgetTrimmed {
 		limit := 0

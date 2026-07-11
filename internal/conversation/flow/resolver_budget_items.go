@@ -24,6 +24,7 @@ type budgetSourceInput struct {
 type budgetSourceProjection struct {
 	sources          []contextassembly.Source
 	originalMessages []conversation.ModelMessage
+	currentSourceID  string
 }
 
 type budgetSourceAssembly struct {
@@ -49,11 +50,19 @@ func budgetSourcesForHistoryRecords(records []historyfrag.HistoryRecord) budgetS
 
 func budgetSourcesForPipelineEntries(entries []composedPipelineMessage) budgetSourceProjection {
 	sources := make([]budgetSourceInput, len(entries))
+	currentSourceID := ""
 	for index, entry := range entries {
 		required := entry.hasSummary || entry.forceKeep
 		id := "pipeline:" + strconv.Itoa(index)
 		if entry.hasSummary {
 			id = historyBudgetItemID(entry.summaryRecord, index)
+		}
+		if entry.forceKeep {
+			if strings.TrimSpace(entry.currentSourceID) == "" {
+				entry.currentSourceID = "pipeline-current:request"
+			}
+			id = entry.currentSourceID
+			currentSourceID = id
 		}
 		sources[index] = budgetSourceInput{
 			id:          id,
@@ -62,7 +71,9 @@ func budgetSourcesForPipelineEntries(entries []composedPipelineMessage) budgetSo
 			compactable: !entry.hasSummary,
 		}
 	}
-	return projectBudgetSources(sources)
+	projection := projectBudgetSources(sources)
+	projection.currentSourceID = currentSourceID
+	return projection
 }
 
 func projectBudgetSources(sources []budgetSourceInput) budgetSourceProjection {
@@ -72,6 +83,11 @@ func projectBudgetSources(sources []budgetSourceInput) budgetSourceProjection {
 	}
 	for index, source := range sources {
 		tokens := messageconv.EstimateModelMessageTokens(source.message)
+		if sanitized := sanitizeMessages([]conversation.ModelMessage{source.message}); len(sanitized) > 0 {
+			source.message = sanitized[0]
+		} else {
+			source.message = conversation.ModelMessage{}
+		}
 		projection.originalMessages[index] = source.message
 		retention := contextbudget.RetentionCandidate
 		if source.required {

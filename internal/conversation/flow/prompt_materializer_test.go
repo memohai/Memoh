@@ -166,8 +166,8 @@ func TestPipelineCurrentImageStaysOnIdentifiedCurrentSource(t *testing.T) {
 		},
 		CurrentSourceID: "pipeline-current:message-1",
 	})
-	if plan.sources[0].Retention != contextbudget.RetentionRequired || plan.sources[0].CompactableTokens != 0 {
-		t.Fatalf("current source policy = %#v, want required non-compactable", plan.sources[0])
+	if plan.sources[0].Retention != contextbudget.RetentionRequired || plan.sources[0].CompactableTokens != 4 {
+		t.Fatalf("current source policy = %#v, want required with caller-owned raw pressure", plan.sources[0])
 	}
 	cfg := agent.RunConfig{
 		Messages:     promptBaseline(t, plan),
@@ -391,6 +391,76 @@ func TestInitialPromptMaterializerPreservesHistoryProvenanceAcrossSyntheticRepai
 	entryCall := result.Entries[0].Message.Content[0].(sdk.ToolCallPart)
 	if entryCall.Input.(map[string]any)["q"] != "memoh" || result.Entries[0].Message.Usage.InputTokens != 3 {
 		t.Fatalf("result config mutated audit entries: %#v", result.Entries)
+	}
+}
+
+func TestInitialPromptPlanAppliesToolPolicyWithoutChangingRawPressure(t *testing.T) {
+	t.Parallel()
+
+	callUsage := &sdk.Usage{InputTokens: 3, TotalTokens: 3}
+	boundaryUsage := &sdk.Usage{InputTokens: 5, TotalTokens: 5}
+	call := sdk.Message{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{
+			sdk.TextPart{Text: "visible"},
+			sdk.ToolCallPart{ToolCallID: "call-1", ToolName: "lookup", Input: map[string]any{}},
+		},
+		Usage: callUsage,
+	}
+	toolResult := sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "lookup", Result: "large"})
+	boundary := sdk.UserMessage("next")
+	boundary.Usage = boundaryUsage
+	plan := mustInitialPromptPlan(t, initialPromptPlanInput{
+		Sources: []contextassembly.Source{
+			{ID: "call", Message: call, CompactableTokens: 7},
+			{ID: "result", Message: toolResult, CompactableTokens: 11},
+			{ID: "boundary", Message: boundary, CompactableTokens: 2},
+		},
+		StripTools: true,
+	})
+	result, err := plan.Materialize(context.Background(), agent.RunConfig{Messages: promptBaseline(t, plan)}, nil)
+	if err != nil {
+		t.Fatalf("Materialize() error = %v", err)
+	}
+	if got := messageTexts(result.Config.Messages); len(got) != 2 || got[0] != "visible" || got[1] != "next" {
+		t.Fatalf("tool policy messages = %#v", result.Config.Messages)
+	}
+	if result.Allocation.CompactableTokens != 20 || len(result.Allocation.Dropped) != 1 || result.Allocation.Dropped[0].ID != "result" || result.Allocation.BudgetTrimmed {
+		t.Fatalf("tool policy allocation = %#v", result.Allocation)
+	}
+	if result.Config.Messages[0].Usage == nil || result.Config.Messages[0].Usage.InputTokens != 3 || result.Config.Messages[1].Usage == nil || result.Config.Messages[1].Usage.InputTokens != 5 {
+		t.Fatalf("tool policy lost source usage: %#v", result.Config.Messages)
+	}
+}
+
+func TestInitialPromptPlanToolPolicyPreservesRequiredOccurrence(t *testing.T) {
+	t.Parallel()
+
+	call := sdk.Message{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{
+			sdk.TextPart{Text: "visible"},
+			sdk.ToolCallPart{ToolCallID: "call-1", ToolName: "lookup", Input: map[string]any{}},
+		},
+	}
+	toolResult := sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "lookup", Result: "required"})
+	plan := mustInitialPromptPlan(t, initialPromptPlanInput{
+		Sources: []contextassembly.Source{
+			{ID: "call", Message: call, CompactableTokens: 7},
+			{ID: "required-result", Message: toolResult, Retention: contextbudget.RetentionRequired, CompactableTokens: 11},
+		},
+		StripTools: true,
+	})
+	result, err := plan.Materialize(context.Background(), agent.RunConfig{Messages: promptBaseline(t, plan)}, nil)
+	if err != nil {
+		t.Fatalf("Materialize() error = %v", err)
+	}
+	if len(result.Config.Messages) != 2 || len(result.Allocation.Dropped) != 0 || result.Allocation.CompactableTokens != 18 {
+		t.Fatalf("required occurrence = %#v", result)
+	}
+	analysis := messageconv.AnalyzeSDKToolOccurrences(result.Config.Messages)
+	if len(analysis.Matches) != 1 || len(analysis.DanglingCalls) != 0 || len(analysis.PartIssues) != 0 {
+		t.Fatalf("required occurrence closure = %#v", analysis)
 	}
 }
 
