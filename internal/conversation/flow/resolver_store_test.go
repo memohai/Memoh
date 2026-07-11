@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"testing"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
@@ -202,5 +204,54 @@ func TestFindAssistantMessageForToolCall(t *testing.T) {
 	}
 	if got := findAssistantMessageForToolCall(msgs, "call-404"); got != "" {
 		t.Fatalf("findAssistantMessageForToolCall unknown id = %q, want empty", got)
+	}
+}
+
+func TestStoreRoundRemapsMetadataAcrossSyntheticToolClosure(t *testing.T) {
+	t.Parallel()
+
+	messages := &batchRecordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+	call := sdkMessagesToModelMessages([]sdk.Message{{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{sdk.ToolCallPart{
+			ToolCallID: "call-1",
+			ToolName:   "lookup",
+			Input:      map[string]any{},
+		}},
+	}})[0]
+	failureMetadata := map[string]any{"error": "runtime failed", "stop_reason": "error"}
+
+	_, err := resolver.storeRoundWithOptionsResult(context.Background(), conversation.ChatRequest{
+		BotID:       storeRoundBotID,
+		SessionID:   "33333333-3333-3333-3333-333333333333",
+		Query:       "hello",
+		SessionType: "chat",
+		RuntimeType: "acp_agent",
+	}, []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("hello")},
+		call,
+		{Role: "assistant", Content: conversation.NewTextContent("runtime failed")},
+	}, "", storeRoundOptions{
+		SkipMemory:             true,
+		MessageMetadataByIndex: map[int]map[string]any{2: failureMetadata},
+	})
+	if err != nil {
+		t.Fatalf("storeRoundWithOptionsResult() error = %v", err)
+	}
+	if len(messages.batchInputs) != 4 {
+		t.Fatalf("persisted inputs = %d, want user, call, synthetic result, failure", len(messages.batchInputs))
+	}
+	if messages.batchInputs[2].Role != "tool" {
+		t.Fatalf("input[2] role = %q, want synthetic tool", messages.batchInputs[2].Role)
+	}
+	if _, leaked := messages.batchInputs[2].Metadata["error"]; leaked {
+		t.Fatalf("synthetic tool inherited failure metadata: %#v", messages.batchInputs[2].Metadata)
+	}
+	if messages.batchInputs[3].Metadata["error"] != "runtime failed" || messages.batchInputs[3].Metadata["stop_reason"] != "error" {
+		t.Fatalf("failure metadata moved or disappeared: %#v", messages.batchInputs[3].Metadata)
 	}
 }

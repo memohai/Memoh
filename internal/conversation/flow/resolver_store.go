@@ -44,7 +44,9 @@ func (r *Resolver) storeRoundWithOptionsResult(ctx context.Context, req conversa
 		fullRound = append(fullRound, m)
 	}
 	if !opts.AllowPendingToolCalls {
-		fullRound = repairToolCallClosures(fullRound, syntheticToolClosureError)
+		repaired := repairToolCallClosuresWithSources(fullRound, syntheticToolClosureError)
+		fullRound = repaired.messages
+		opts.MessageMetadataByIndex = remapMessageMetadata(opts.MessageMetadataByIndex, repaired.sourceIndexes)
 	}
 
 	// Filter out empty assistant messages (content: []) that result from LLM
@@ -52,15 +54,20 @@ func (r *Resolver) storeRoundWithOptionsResult(ctx context.Context, req conversa
 	// no value and pollute the conversation history, causing subsequent turns
 	// to also produce empty responses.
 	filtered := make([]conversation.ModelMessage, 0, len(fullRound))
-	for _, m := range fullRound {
+	filteredMetadata := make(map[int]map[string]any)
+	for index, m := range fullRound {
 		if m.Role == "assistant" && isEmptyAssistantMessage(m) && !opts.AllowEmptyAssistantText {
 			r.logger.Warn("skipping empty assistant message in storeRound",
 				slog.String("bot_id", req.BotID),
 			)
 			continue
 		}
+		if metadata := opts.MessageMetadataByIndex[index]; len(metadata) > 0 {
+			filteredMetadata[len(filtered)] = metadata
+		}
 		filtered = append(filtered, m)
 	}
+	opts.MessageMetadataByIndex = filteredMetadata
 
 	if len(filtered) == 0 {
 		return nil, nil
@@ -72,6 +79,25 @@ func (r *Resolver) storeRoundWithOptionsResult(ctx context.Context, req conversa
 	}
 
 	return persisted, nil
+}
+
+func remapMessageMetadata(
+	metadata map[int]map[string]any,
+	sourceIndexes []int,
+) map[int]map[string]any {
+	if len(metadata) == 0 || len(sourceIndexes) == 0 {
+		return nil
+	}
+	remapped := make(map[int]map[string]any)
+	for outputIndex, sourceIndex := range sourceIndexes {
+		if sourceIndex < 0 {
+			continue
+		}
+		if sourceMetadata := metadata[sourceIndex]; len(sourceMetadata) > 0 {
+			remapped[outputIndex] = sourceMetadata
+		}
+	}
+	return remapped
 }
 
 // isEmptyAssistantMessage returns true if an assistant message has no

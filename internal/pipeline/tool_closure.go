@@ -1,9 +1,9 @@
 package pipeline
 
 import (
-	"strings"
-
 	sdk "github.com/memohai/twilight-ai/sdk"
+
+	"github.com/memohai/memoh/internal/messageconv"
 )
 
 const syntheticToolClosureReason = "tool execution interrupted before a response was recorded"
@@ -14,85 +14,33 @@ type sdkContextMessage struct {
 }
 
 func repairSDKToolClosures(messages []sdk.Message) []sdk.Message {
-	entries := make([]sdkContextMessage, 0, len(messages))
-	for _, message := range messages {
-		entries = append(entries, sdkContextMessage{Message: message})
+	if len(messages) == 0 {
+		return messages
 	}
-	return sdkMessagesFromContextEntries(repairSDKContextToolClosures(entries))
+	repair := messageconv.RepairSDKToolOccurrences(messages, syntheticToolClosureReason)
+	repaired := make([]sdk.Message, len(repair.Entries))
+	for index, entry := range repair.Entries {
+		repaired[index] = entry.Message
+	}
+	return repaired
 }
 
 func repairSDKContextToolClosures(entries []sdkContextMessage) []sdkContextMessage {
 	if len(entries) == 0 {
 		return entries
 	}
-	repaired := make([]sdkContextMessage, 0, len(entries))
-	pending := make(map[string]string)
-	pendingOrder := make([]string, 0)
-	flushPending := func() {
-		for _, callID := range pendingOrder {
-			toolName, ok := pending[callID]
-			if !ok {
-				continue
-			}
-			repaired = append(repaired, sdkContextMessage{
-				Message: sdk.ToolMessage(sdk.ToolResultPart{
-					ToolCallID: callID,
-					ToolName:   toolName,
-					Result:     syntheticToolClosureReason,
-					IsError:    true,
-				}),
-			})
-			delete(pending, callID)
-		}
-		pendingOrder = pendingOrder[:0]
+	messages := make([]sdk.Message, len(entries))
+	for index, entry := range entries {
+		messages[index] = entry.Message
 	}
-
-	for _, entry := range entries {
-		message := entry.Message
-		switch message.Role {
-		case sdk.MessageRoleAssistant:
-			flushPending()
-			repaired = append(repaired, entry)
-			for _, part := range message.Content {
-				call, ok := part.(sdk.ToolCallPart)
-				if !ok {
-					continue
-				}
-				callID := strings.TrimSpace(call.ToolCallID)
-				if callID == "" {
-					continue
-				}
-				if _, exists := pending[callID]; exists {
-					continue
-				}
-				pending[callID] = strings.TrimSpace(call.ToolName)
-				pendingOrder = append(pendingOrder, callID)
-			}
-		case sdk.MessageRoleTool:
-			kept := make([]sdk.MessagePart, 0, len(message.Content))
-			for _, part := range message.Content {
-				result, ok := part.(sdk.ToolResultPart)
-				if !ok {
-					kept = append(kept, part)
-					continue
-				}
-				callID := strings.TrimSpace(result.ToolCallID)
-				if _, matches := pending[callID]; !matches {
-					continue
-				}
-				kept = append(kept, part)
-				delete(pending, callID)
-			}
-			if len(kept) == 0 {
-				continue
-			}
-			entry.Message.Content = kept
-			repaired = append(repaired, entry)
-		default:
-			flushPending()
-			repaired = append(repaired, entry)
+	repair := messageconv.RepairSDKToolOccurrences(messages, syntheticToolClosureReason)
+	repaired := make([]sdkContextMessage, 0, len(repair.Entries))
+	for _, entry := range repair.Entries {
+		contextMessage := sdkContextMessage{Message: entry.Message}
+		if !entry.Synthetic && entry.SourceIndex >= 0 && entry.SourceIndex < len(entries) {
+			contextMessage.CompactionArtifactID = entries[entry.SourceIndex].CompactionArtifactID
 		}
+		repaired = append(repaired, contextMessage)
 	}
-	flushPending()
 	return repaired
 }

@@ -63,11 +63,9 @@ func projectBudgetSources(sources []budgetSourceInput) budgetSourceProjection {
 		items:    make([]contextbudget.Item, len(sources)),
 		messages: make([]sdk.Message, len(sources)),
 	}
-	carriers := make([]contextbudget.ToolCarrier, len(sources))
 	for index, source := range sources {
 		message := canonicalBudgetMessage(source.message)
 		projection.messages[index] = message
-		carriers[index] = budgetToolCarrier(message)
 		retention := contextbudget.RetentionCandidate
 		if source.required {
 			retention = contextbudget.RetentionRequired
@@ -79,7 +77,7 @@ func projectBudgetSources(sources []budgetSourceInput) budgetSourceProjection {
 			Compactable: source.compactable,
 		}
 	}
-	projection.toolAnalysis = contextbudget.AnalyzeToolOccurrences(carriers)
+	projection.toolAnalysis = messageconv.AnalyzeSDKToolOccurrences(projection.messages)
 	for index, binding := range projection.toolAnalysis.Bindings {
 		projection.items[index].Group = binding.Group
 	}
@@ -91,29 +89,6 @@ func canonicalBudgetMessage(message conversation.ModelMessage) sdk.Message {
 		Role:    message.Role,
 		Content: messageconv.CanonicalModelMessageContent(message),
 	})
-}
-
-func budgetToolCarrier(message sdk.Message) contextbudget.ToolCarrier {
-	carrier := contextbudget.ToolCarrier{
-		BoundaryBefore: !strings.EqualFold(strings.TrimSpace(string(message.Role)), string(sdk.MessageRoleTool)),
-	}
-	for partIndex, part := range message.Content {
-		switch typed := part.(type) {
-		case sdk.ToolCallPart:
-			carrier.Parts = append(carrier.Parts, contextbudget.ToolPart{
-				PartIndex: partIndex,
-				Kind:      contextbudget.ToolPartCall,
-				CallID:    typed.ToolCallID,
-			})
-		case sdk.ToolResultPart:
-			carrier.Parts = append(carrier.Parts, contextbudget.ToolPart{
-				PartIndex: partIndex,
-				Kind:      contextbudget.ToolPartResult,
-				CallID:    typed.ToolCallID,
-			})
-		}
-	}
-	return carrier
 }
 
 func isActiveContextArtifact(record historyfrag.HistoryRecord) bool {
