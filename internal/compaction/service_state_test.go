@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
 
 func TestRunCompactionSyncReportsScopedNoop(t *testing.T) {
@@ -204,10 +208,20 @@ func TestRunCompactionSyncInterruptedRunDoesNotArmCooldown(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		err  error
+		ctx  func(t *testing.T) context.Context
 	}{
-		{"canceled mid-call", context.Canceled},
-		{"deadline exceeded mid-call", context.DeadlineExceeded},
+		{"caller canceled", func(t *testing.T) context.Context {
+			t.Helper()
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			return ctx
+		}},
+		{"caller deadline exceeded", func(t *testing.T) context.Context {
+			t.Helper()
+			ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
+			t.Cleanup(cancel)
+			return ctx
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -216,9 +230,10 @@ func TestRunCompactionSyncInterruptedRunDoesNotArmCooldown(t *testing.T) {
 			stub := &stubModel{summary: "recovered summary"}
 			cfg := machineryConfig(stub, 200)
 
+			interruptedCtx := tc.ctx(t)
 			interrupted := cfg
-			interrupted.HTTPClient = &http.Client{Transport: errTransport{err: tc.err}}
-			if _, err := svc.RunCompactionSync(context.Background(), interrupted); err == nil {
+			interrupted.HTTPClient = &http.Client{Transport: errTransport{err: interruptedCtx.Err()}}
+			if _, err := svc.RunCompactionSync(interruptedCtx, interrupted); err == nil {
 				t.Fatal("interrupted run must surface an error")
 			}
 
@@ -230,6 +245,35 @@ func TestRunCompactionSyncInterruptedRunDoesNotArmCooldown(t *testing.T) {
 				t.Fatalf("status after interruption = %q, want %q (cooldown must not be armed)", res.Status, StatusOK)
 			}
 		})
+	}
+}
+
+func TestRunCompactionSyncClientTimeoutStillArmsCooldown(t *testing.T) {
+	t.Parallel()
+
+	// The HTTP client's own timeout fires with the caller's context still
+	// live: the model is genuinely too slow, so the cooldown must arm —
+	// otherwise the sync backstop re-attempts the same slow call every turn.
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	svc := newMachineryService(q)
+	stub := &stubModel{summary: "healthy summary"}
+	cfg := machineryConfig(stub, 200)
+
+	slow := cfg
+	slow.HTTPClient = &http.Client{Transport: errTransport{err: context.DeadlineExceeded}}
+	if _, err := svc.RunCompactionSync(context.Background(), slow); err == nil {
+		t.Fatal("timed-out run must surface an error")
+	}
+
+	res, err := svc.RunCompactionSync(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("run during cooldown: %v", err)
+	}
+	if res.Status != StatusNoop {
+		t.Fatalf("status during cooldown = %q, want %q", res.Status, StatusNoop)
+	}
+	if stub.calls != 0 {
+		t.Fatalf("model called %d times during cooldown, want 0", stub.calls)
 	}
 }
 
@@ -272,5 +316,42 @@ func TestRunCompactionSyncSurfacesCompletionPersistenceFailure(t *testing.T) {
 	}
 	if res.Status == StatusOK {
 		t.Fatal("result must not claim ok when the summary was never persisted")
+	}
+}
+
+func TestDoCompactionSharesPromptBudgetWithPriorContext(t *testing.T) {
+	t.Parallel()
+
+	rows := make([]sqlc.ListUncompactedMessagesBySessionRow, 0, 13)
+	for i := 0; i < 12; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		rows = append(rows, mkRow(t, role, `"turn `+strconv.Itoa(i)+`"`, 100))
+	}
+	rows = append(rows, mkRow(t, "user", `"current"`, 40))
+
+	run := func(t *testing.T, priorLogs []sqlc.BotHistoryMessageCompact) int {
+		t.Helper()
+		q := &fakeQueries{uncompacted: rows, priorLogs: priorLogs}
+		stub := &stubModel{summary: "condensed"}
+		svc := newMachineryService(q)
+		cfg := machineryConfig(stub, 100)
+		cfg.MaxCompactTokens = 1000
+		res, err := svc.RunCompactionSync(context.Background(), cfg)
+		if err != nil {
+			t.Fatalf("RunCompactionSync: %v", err)
+		}
+		if res.Status != StatusOK {
+			t.Fatalf("status = %q, want %q", res.Status, StatusOK)
+		}
+		return len(q.markedIDs)
+	}
+
+	without := run(t, nil)
+	with := run(t, []sqlc.BotHistoryMessageCompact{{Status: "ok", Summary: strings.Repeat("p", 1200)}})
+	if with >= without {
+		t.Fatalf("prior context must carve out of the entries budget: marked %d with prior, %d without", with, without)
 	}
 }

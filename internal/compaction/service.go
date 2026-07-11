@@ -151,10 +151,13 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result,
 		switch {
 		case compactErr == nil:
 			s.clearCompactionFailure(cfg.SessionID)
-		case ctx.Err() != nil, errors.Is(compactErr, context.Canceled), errors.Is(compactErr, context.DeadlineExceeded):
-			// An interrupted request is not a model failure: arming the
-			// five-minute cooldown here would silence auto-compaction for a
-			// healthy session just because the user canceled one request.
+		case ctx.Err() != nil:
+			// The caller's request was canceled or hit its deadline — not a
+			// model failure. Arming the five-minute cooldown here would
+			// silence auto-compaction for a healthy session just because the
+			// user aborted one request. A timeout with the caller's context
+			// still live (e.g. the HTTP client's own timeout on a model too
+			// slow to summarize) is a real failure and still arms it.
 		default:
 			s.recordCompactionFailure(cfg.SessionID)
 		}
@@ -250,20 +253,13 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 
 	// Cap the compaction input to avoid exceeding the compaction model's
 	// context window. MaxCompactTokens is typically set to 90% of the model's
-	// window. If not set, use a conservative default of 30K tokens.
+	// window. If not set, use a conservative default of 30K tokens. Prior
+	// summaries and message entries share this one budget — an additive prior
+	// allowance would let the combined prompt exceed the window headroom.
 	maxCompactTokens := cfg.MaxCompactTokens
 	if maxCompactTokens <= 0 {
 		maxCompactTokens = 30000
 	}
-	s.logger.Info("compaction: before trim",
-		slog.Int("messages", len(toCompact)),
-		slog.Int("total_uncompacted", len(messages)),
-		slog.Int("max_compact_tokens", maxCompactTokens),
-	)
-	toCompact = trimCompactMessages(toCompact, maxCompactTokens)
-	s.logger.Info("compaction: after trim",
-		slog.Int("messages", len(toCompact)),
-	)
 
 	priorLogs, err := s.queries.ListCompactionLogsBySession(ctx, sessionUUID)
 	if err != nil {
@@ -276,6 +272,28 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		}
 	}
 	priorSummaries = capPriorSummaries(priorSummaries, maxCompactTokens/4)
+	priorTokens := 0
+	for _, summary := range priorSummaries {
+		priorTokens += estimateBytesAsTokens(summary)
+	}
+	// capPriorSummaries always keeps the newest summary, so a single oversized
+	// one can exceed its allowance; floor the entries budget at half the total
+	// so compaction keeps making progress.
+	entriesBudget := maxCompactTokens - priorTokens
+	if entriesBudget < maxCompactTokens/2 {
+		entriesBudget = maxCompactTokens / 2
+	}
+
+	s.logger.Info("compaction: before trim",
+		slog.Int("messages", len(toCompact)),
+		slog.Int("total_uncompacted", len(messages)),
+		slog.Int("max_compact_tokens", maxCompactTokens),
+		slog.Int("prior_context_tokens", priorTokens),
+	)
+	toCompact = trimCompactMessages(toCompact, entriesBudget)
+	s.logger.Info("compaction: after trim",
+		slog.Int("messages", len(toCompact)),
+	)
 
 	entries, messageIDs := buildEntriesAndIDs(toCompact)
 	if len(entries) == 0 || len(messageIDs) == 0 {
