@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -328,7 +327,7 @@ func TestDoCompactionSharesPromptBudgetWithPriorContext(t *testing.T) {
 		if i%2 == 1 {
 			role = "assistant"
 		}
-		rows = append(rows, mkRow(t, role, `"turn `+strconv.Itoa(i)+`"`, 100))
+		rows = append(rows, textRow(t, role, 100))
 	}
 	rows = append(rows, mkRow(t, "user", `"current"`, 40))
 
@@ -360,8 +359,8 @@ func TestDoCompactionSacrificesPriorContextForOversizedEntries(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"the enormous old turn"`, 900),
-		mkRow(t, "user", `"small follow-up"`, 100),
+		textRow(t, "user", 900),
+		textRow(t, "user", 100),
 		mkRow(t, "user", `"current"`, 40),
 	}
 	prior := strings.Repeat("history so far ", 70) // ~262 tokens, within the 1/4 allowance
@@ -390,7 +389,10 @@ func TestDoCompactionSacrificesPriorContextForOversizedEntries(t *testing.T) {
 	if strings.Contains(stub.prompt, prior) {
 		t.Fatal("full prior context must not ride along with oversized entries")
 	}
-	if got := estimateBytesAsTokens(stub.prompt); got > 1000+150 {
-		t.Fatalf("combined prompt ~%d tokens, want within MaxCompactTokens plus the fixed wrapper", got)
+	// stub.prompt concatenates the fixed system prompt (~190 tokens) and the
+	// user-prompt wrapper (~90 tokens) on top of the budgeted prior+entries;
+	// an additive-budget regression overshoots this bound by the full prior.
+	if got := estimateBytesAsTokens(stub.prompt); got > 1000+320 {
+		t.Fatalf("combined prompt ~%d tokens, want within MaxCompactTokens plus the fixed overhead", got)
 	}
 }

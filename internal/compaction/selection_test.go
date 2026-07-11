@@ -405,15 +405,16 @@ func TestTrimCompactMessagesDefersNewestBeyondBudget(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"a"`, 100),
-		mkRow(t, "assistant", `"b"`, 100),
-		mkRow(t, "user", `"c"`, 100),
+		textRow(t, "user", 100),
+		textRow(t, "assistant", 100),
+		textRow(t, "user", 100),
 	}
 	items, _ := itemsFromRows(rows)
 	trimmed := trimCompactMessages(items, 150)
-	// Budget 150, accumulate from oldest: 100 (a) fits, +100 (b) = 200 > 150 ->
-	// keep the oldest row and defer the newer overflow to a later pass, so
-	// passes chew history front-to-back in chronological order.
+	// Budget 150, accumulate rendered costs from oldest: ~102 (a) fits,
+	// +~102 (b) > 150 -> keep the oldest row and defer the newer overflow to
+	// a later pass, so passes chew history front-to-back in chronological
+	// order.
 	if len(trimmed) != 1 {
 		t.Fatalf("trimmed count = %d, want 1", len(trimmed))
 	}
@@ -428,9 +429,9 @@ func TestTrimCompactMessagesAccountsForDirectedSignalHeaders(t *testing.T) {
 	longID := repeat("m", entryMetadataMaxBytes)
 	longSender := repeat("s", entryMetadataMaxBytes)
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "assistant", `"one"`, 1),
-		mkRow(t, "assistant", `"two"`, 1),
-		mkRow(t, "assistant", `"three"`, 1),
+		textRow(t, "assistant", 1),
+		textRow(t, "assistant", 1),
+		textRow(t, "assistant", 1),
 	}
 	for i := range rows {
 		rows[i].ExternalMessageID = pgtype.Text{String: longID, Valid: true}

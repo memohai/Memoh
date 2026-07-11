@@ -16,6 +16,17 @@ func toolResultRow(t *testing.T, tokens int) sqlc.ListUncompactedMessagesBySessi
 	return mkRow(t, "tool", `[{"type":"tool-result","toolName":"calc","toolCallId":"c1","output":{"type":"text","value":"42"}}]`, tokens)
 }
 
+// textRow builds a plain text row whose rendered entry is ~tokens tokens, so
+// trim tests drive the rendered-byte budget directly.
+func textRow(t *testing.T, role string, tokens int) sqlc.ListUncompactedMessagesBySessionRow {
+	t.Helper()
+	body := make([]byte, 0, tokens*4)
+	for len(body) < tokens*4 {
+		body = append(body, 'x')
+	}
+	return mkRow(t, role, `"`+string(body)+`"`, 0)
+}
+
 func firstKeptIsNotOrphanTool(t *testing.T, items, toCompact []CompactionCandidate) {
 	t.Helper()
 	keepStart := len(toCompact)
@@ -198,19 +209,20 @@ func TestToolBoundaryGuardRequiresToolClosurePolicy(t *testing.T) {
 func TestTrimCompactMessagesKeepsOldestAndToolExchangeIntact(t *testing.T) {
 	t.Parallel()
 
-	// compact input (oldest -> newest): assistant(tool-call), tool(result), user, assistant.
-	// maxTokens 350 keeps the oldest groups within budget — the whole exchange
-	// plus the user row — and defers the newest overflow to a later pass.
+	// compact input (oldest -> newest): a tool exchange (~110 rendered tokens
+	// with its role prefixes), then two ~100-token text rows. maxTokens 320
+	// keeps the oldest groups within budget — the whole exchange plus the
+	// first text row — and defers the newest overflow to a later pass.
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		toolCallRow(t, 100),
-		toolResultRow(t, 100),
-		mkRow(t, "user", `"c"`, 100),
-		mkRow(t, "assistant", `"d"`, 100),
+		toolCallRow(t, 0),
+		toolResultRow(t, 0),
+		textRow(t, "user", 100),
+		textRow(t, "assistant", 100),
 	}
 	items, _ := itemsFromRows(rows)
-	trimmed := trimCompactMessages(items, 350)
+	trimmed := trimCompactMessages(items, 120)
 	if len(trimmed) != 3 {
-		t.Fatalf("trimmed = %d, want the oldest exchange plus the user row", len(trimmed))
+		t.Fatalf("trimmed = %d, want the oldest exchange plus the first text row", len(trimmed))
 	}
 	if trimmed[0].ID != items[0].ID || trimmed[1].ID != items[1].ID {
 		t.Fatalf("trim must keep the oldest tool exchange intact at the head")
@@ -224,14 +236,16 @@ func TestTrimCompactMessagesKeepsOversizedFirstGroup(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		toolCallRow(t, 600),
-		toolResultRow(t, 600),
-		mkRow(t, "user", `"c"`, 100),
+		textRow(t, "user", 600),
+		textRow(t, "assistant", 100),
 	}
 	items, _ := itemsFromRows(rows)
 	trimmed := trimCompactMessages(items, 350)
-	if len(trimmed) != 2 {
-		t.Fatalf("trimmed = %d, want the oversized head exchange kept whole for progress", len(trimmed))
+	if len(trimmed) != 1 {
+		t.Fatalf("trimmed = %d, want the oversized head row kept whole for progress", len(trimmed))
+	}
+	if trimmed[0].ID != items[0].ID {
+		t.Fatalf("the oversized first markable row must be kept")
 	}
 }
 
@@ -243,9 +257,9 @@ func TestTrimCompactMessagesMustKeepRowsCostNoBudget(t *testing.T) {
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
 		askCall,
 		askResult,
-		mkRow(t, "user", `"old q"`, 100),
-		mkRow(t, "assistant", `"old a"`, 100),
-		mkRow(t, "user", `"newer q"`, 100),
+		textRow(t, "user", 100),
+		textRow(t, "assistant", 100),
+		textRow(t, "user", 100),
 	}
 	items, _ := itemsFromRows(rows)
 	trimmed := trimCompactMessages(items, 250)

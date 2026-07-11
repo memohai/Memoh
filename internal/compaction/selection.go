@@ -214,14 +214,6 @@ func estimateItemTokens(item CompactionCandidate) int {
 	return len(item.RawContent) / 4
 }
 
-func estimateCompactPromptTokens(item CompactionCandidate) int {
-	tokens := estimateItemTokens(item)
-	if header := renderEntryHeader(item.Record); header != "" {
-		tokens += estimateBytesAsTokens(header)
-	}
-	return tokens
-}
-
 func estimateBytesAsTokens(value string) int {
 	if value == "" {
 		return 0
@@ -490,21 +482,24 @@ func trimCompactMessages(items []CompactionCandidate, maxTokens int) []Compactio
 
 // markableGroupCost is the summarizer-prompt cost of one tool-exchange group:
 // zero for unmarkable groups (must-keep, or any row rendering empty), and for
-// markable groups the content estimate plus the per-entry role prefix, with a
-// floor of one token per row so tiny-but-real entries can never ride along for
-// free — a markable group therefore always has a positive cost, keeping
-// eligibility and cost in one predicate.
+// markable groups the rendered entry text — what buildUserPrompt actually
+// emits, headers included — plus the per-entry role prefix, with a floor of
+// one token per row so tiny-but-real entries can never ride along for free. A
+// markable group therefore always has a positive cost, keeping eligibility
+// and cost in one predicate. Costing the rendered bytes rather than the raw
+// usage estimate matters: a row whose generation cost five tokens can still
+// render a two-kilobyte tool outcome into the prompt.
 func markableGroupCost(items []CompactionCandidate, group []int) int {
 	cost := 0
 	for _, idx := range group {
 		if items[idx].HasPolicy(CompactPolicyMustKeep) {
 			return 0
 		}
-		if strings.TrimSpace(renderCandidateEntry(items[idx].Record)) == "" {
+		rendered := strings.TrimSpace(renderCandidateEntry(items[idx].Record))
+		if rendered == "" {
 			return 0
 		}
-		rowCost := estimateCompactPromptTokens(items[idx]) + estimateBytesAsTokens(items[idx].Record.ModelMessage.Role) + 1
-		cost += rowCost
+		cost += estimateBytesAsTokens(rendered) + estimateBytesAsTokens(items[idx].Record.ModelMessage.Role) + 1
 	}
 	return cost
 }

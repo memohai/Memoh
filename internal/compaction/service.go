@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,9 +35,10 @@ const compactionFailureCooldown = 5 * time.Minute
 // done closes after res/err are set, so concurrent sync callers can wait for
 // the owner and reuse its outcome instead of skipping or double-running.
 type inflightRun struct {
-	done chan struct{}
-	res  Result
-	err  error
+	done    chan struct{}
+	waiters atomic.Int32
+	res     Result
+	err     error
 }
 
 // Service manages context compaction for bot conversations.
@@ -142,6 +144,7 @@ func (s *Service) RunCompactionSync(ctx context.Context, cfg TriggerConfig) (Res
 	if owner == nil {
 		return res, err
 	}
+	owner.waiters.Add(1)
 	select {
 	case <-owner.done:
 		return owner.res, owner.err
