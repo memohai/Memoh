@@ -317,10 +317,6 @@ func TestCoverageSensitiveGatesUseLatestExternalMutation(t *testing.T) {
 	if !wasRecentlyMentioned(rc, 400) {
 		t.Fatal("external post-compaction mutation should retain its mention gate")
 	}
-	refs := extractNewImageRefs(rc, 400)
-	if len(refs) != 1 || refs[0].ContentHash != "external" {
-		t.Fatalf("external image refs = %#v, want only external mutation", refs)
-	}
 	if wasRecentlyMentioned(rc[1:], 400) {
 		t.Fatal("self-sent mutation must not activate mention gate")
 	}

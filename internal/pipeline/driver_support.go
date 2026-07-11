@@ -2,12 +2,9 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"strings"
 	"time"
-
-	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/channel"
@@ -194,37 +191,6 @@ func agentEventToChannelEvent(event agentpkg.StreamEvent) (channel.StreamEvent, 
 	}
 }
 
-func extractNewImageRefs(rc RenderedContext, afterMs int64) []ImageAttachmentRef {
-	var refs []ImageAttachmentRef
-	for _, segment := range rc {
-		if segment.eventAtMs() > afterMs && !segment.IsMyself && !segment.IsSelfSent {
-			refs = append(refs, segment.ImageRefs...)
-		}
-	}
-	return refs
-}
-
-func injectImagePartsIntoLastUserMessage(messages []sdk.Message, parts []sdk.ImagePart) {
-	if len(parts) == 0 {
-		return
-	}
-	extra := make([]sdk.MessagePart, 0, len(parts))
-	for _, part := range parts {
-		if strings.TrimSpace(part.Image) != "" {
-			extra = append(extra, part)
-		}
-	}
-	if len(extra) == 0 {
-		return
-	}
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == sdk.MessageRoleUser {
-			messages[i].Content = append(messages[i].Content, extra...)
-			return
-		}
-	}
-}
-
 func wasRecentlyMentioned(rc RenderedContext, afterMs int64) bool {
 	for _, segment := range rc {
 		if segment.eventAtMs() > afterMs && !segment.IsMyself && !segment.IsSelfSent && (segment.MentionsMe || segment.RepliesToMe) {
@@ -246,35 +212,4 @@ func buildLateBindingPrompt(isMentioned bool) string {
 		prompt.WriteString("\n\nYou are being addressed directly. You should respond by calling the `send` tool now.")
 	}
 	return prompt.String()
-}
-
-func contextMessagesToSDKEntries(messages []ContextMessage) []sdkContextMessage {
-	result := make([]sdkContextMessage, 0, len(messages))
-	for _, message := range messages {
-		entry := sdkContextMessage{CompactionArtifactID: strings.TrimSpace(message.CompactionArtifactID)}
-		if len(message.RawContent) > 0 {
-			raw, err := json.Marshal(struct {
-				Role    string          `json:"role"`
-				Content json.RawMessage `json:"content"`
-			}{Role: message.Role, Content: message.RawContent})
-			if err == nil {
-				var decoded sdk.Message
-				if json.Unmarshal(raw, &decoded) == nil {
-					entry.Message = decoded
-					result = append(result, entry)
-					continue
-				}
-			}
-		}
-		switch {
-		case strings.EqualFold(message.Role, "assistant"):
-			entry.Message = sdk.AssistantMessage(message.Content)
-		case strings.EqualFold(message.Role, "system"):
-			entry.Message = sdk.SystemMessage(message.Content)
-		default:
-			entry.Message = sdk.UserMessage(message.Content)
-		}
-		result = append(result, entry)
-	}
-	return result
 }

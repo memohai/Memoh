@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -47,7 +48,6 @@ func buildDirectDiscussPromptInput(
 	lateBinding string,
 	actorUserID string,
 ) DirectDiscussPromptInput {
-	entries := contextMessagesToSDKEntries(messages)
 	artifactsByID := make(map[string]CompactionArtifact, len(artifacts))
 	for _, artifact := range artifacts {
 		if id := strings.TrimSpace(artifact.ID); id != "" {
@@ -62,7 +62,7 @@ func buildDirectDiscussPromptInput(
 		sourceID := directDiscussSourceID(message, index)
 		source := DirectDiscussPromptSource{
 			ID:          sourceID,
-			Message:     entries[index].Message,
+			Message:     directDiscussSDKMessage(message),
 			Required:    message.Current,
 			Compactable: strings.TrimSpace(message.CompactionArtifactID) == "",
 		}
@@ -86,6 +86,25 @@ func buildDirectDiscussPromptInput(
 		Required: true,
 	})
 	return input
+}
+
+func directDiscussSDKMessage(message ContextMessage) sdk.Message {
+	if len(message.RawContent) > 0 {
+		raw, err := json.Marshal(struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		}{Role: message.Role, Content: message.RawContent})
+		if err == nil {
+			var decoded sdk.Message
+			if json.Unmarshal(raw, &decoded) == nil {
+				return decoded
+			}
+		}
+	}
+	if message.Role == "assistant" {
+		return sdk.AssistantMessage(message.Content)
+	}
+	return sdk.UserMessage(message.Content)
 }
 
 func directDiscussSourceID(message ContextMessage, index int) string {
