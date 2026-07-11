@@ -35,25 +35,6 @@ func latestRCEventAtMs(rc RenderedContext) int64 {
 	return latest
 }
 
-func (d *DiscussDriver) maybeCompactDiscussContext(
-	ctx context.Context,
-	cfg DiscussSessionConfig,
-	inputTokens int,
-	contextTokenBudget int,
-) {
-	if inputTokens <= 0 {
-		return
-	}
-	d.deps.Resolver.MaybeCompactSession(
-		context.WithoutCancel(ctx),
-		cfg.BotID,
-		cfg.SessionID,
-		cfg.UserID,
-		inputTokens,
-		contextTokenBudget,
-	)
-}
-
 func (d *DiscussDriver) loadDiscussCursor(ctx context.Context, cfg DiscussSessionConfig, log *slog.Logger) int64 {
 	if d.deps.CursorStore == nil {
 		return 0

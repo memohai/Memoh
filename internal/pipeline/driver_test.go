@@ -203,6 +203,9 @@ func TestHandleReplyWithAgent_UsesRuntimeStreamerForACPDiscuss(t *testing.T) {
 	if !runtime.lastReq.ForceFreshRuntime {
 		t.Fatal("discuss ACP runtime request should force a fresh runtime each turn")
 	}
+	if resolver.promptFinishCalls != 1 {
+		t.Fatalf("ACP receipt finish calls = %d, want 1", resolver.promptFinishCalls)
+	}
 	if sess.lastProcessedMs != 200 {
 		t.Fatalf("lastProcessedMs = %d, want 200", sess.lastProcessedMs)
 	}
@@ -336,6 +339,9 @@ func TestHandleReplyWithAgent_ACPDiscussDoesNotAdvanceCursorWithoutRuntimeStream
 	if resolver.compactionCalls != 0 {
 		t.Fatalf("missing-runtime compaction calls = %d, want 0", resolver.compactionCalls)
 	}
+	if resolver.promptFinishCalls != 0 {
+		t.Fatalf("missing-runtime receipt finish calls = %d, want 0", resolver.promptFinishCalls)
+	}
 }
 
 func TestHandleReplyWithAgent_ACPDiscussDoesNotAdvanceCursorOnRuntimeError(t *testing.T) {
@@ -386,6 +392,9 @@ func TestHandleReplyWithAgent_ACPDiscussDoesNotAdvanceCursorOnRuntimeError(t *te
 	if resolver.compactionUserID != "account-user" {
 		t.Fatalf("failed ACP compaction principal = %q, want account user", resolver.compactionUserID)
 	}
+	if resolver.promptFinishCalls != 1 {
+		t.Fatalf("failed ACP receipt finish calls = %d, want 1", resolver.promptFinishCalls)
+	}
 }
 
 func TestHandleReplyWithAgent_ACPDiscussSkipsRuntimeForPassiveMessage(t *testing.T) {
@@ -427,6 +436,9 @@ func TestHandleReplyWithAgent_ACPDiscussSkipsRuntimeForPassiveMessage(t *testing
 	}
 	if resolver.compactionCalls != 0 {
 		t.Fatalf("passive ACP compaction calls = %d, want 0", resolver.compactionCalls)
+	}
+	if len(resolver.lastPromptInput.Sources) != 0 || resolver.promptFinishCalls != 0 {
+		t.Fatalf("passive ACP prompt lifecycle = sources:%d finish:%d, want none", len(resolver.lastPromptInput.Sources), resolver.promptFinishCalls)
 	}
 	if fakeAgent.lastConfig != nil {
 		t.Fatal("ordinary agent should not be invoked for ACP discuss runtime")
@@ -783,7 +795,7 @@ func (f *fakeRunConfigResolver) ResolveRunConfig(_ context.Context, botID, sessi
 	} else {
 		result = f.resolveResult
 	}
-	if err == nil && strings.TrimSpace(result.RuntimeType) != sessionpkg.RuntimeACPAgent && result.DirectDiscussPromptPreparer == nil {
+	if err == nil && result.DirectDiscussPromptPreparer == nil {
 		result.DirectDiscussPromptPreparer = &fakeDirectDiscussPromptPreparer{
 			resolver:  f,
 			runConfig: result.RunConfig,

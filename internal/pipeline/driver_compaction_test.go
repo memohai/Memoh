@@ -261,6 +261,44 @@ func TestHandleReplyWithAgentTriggersCompactionForACPDiscuss(t *testing.T) {
 	}
 }
 
+func TestHandleReplyWithAgentACPPressureExcludesActiveSummary(t *testing.T) {
+	t.Parallel()
+
+	rc := RenderedContext{
+		{MessageID: "covered", ReceivedAtMs: 100, Content: []RenderedContentPiece{{Type: "text", Text: "old raw context"}}},
+		{MessageID: "current", ReceivedAtMs: 300, MentionsMe: true, Content: []RenderedContentPiece{{Type: "text", Text: "current raw context"}}},
+	}
+	resolver := &fakeRunConfigResolver{
+		resolveResult: ResolveRunConfigResult{RuntimeType: sessionpkg.RuntimeACPAgent},
+		artifacts: []CompactionArtifact{{
+			ID:            "artifact-a",
+			Summary:       strings.Repeat("large active summary", 100),
+			AnchorStartMs: 100,
+			Sources:       []CompactionSource{{ExternalMessageID: "covered", CreatedAtMs: 200}},
+		}},
+	}
+	runtime := &fakeDiscussRuntimeStreamer{}
+	driver := NewDiscussDriver(DiscussDriverDeps{Resolver: resolver, RuntimeStreamer: runtime})
+	sess := &discussSession{config: DiscussSessionConfig{
+		BotID:            "bot",
+		SessionID:        "session",
+		ConversationType: channel.ConversationTypeGroup,
+	}}
+	want := ComposeContext(RenderedContext{rc[1]}, nil).EstimatedTokens
+
+	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, &fakeDiscussStreamer{})
+
+	if runtime.calls != 1 {
+		t.Fatalf("ACP runtime calls = %d, want 1", runtime.calls)
+	}
+	if resolver.compactionCalls != 1 || resolver.compactionInputTokens != want {
+		t.Fatalf("ACP raw pressure = calls:%d input:%d, want one call with %d", resolver.compactionCalls, resolver.compactionInputTokens, want)
+	}
+	if !strings.Contains(runtime.lastReq.Query, "large active summary") || !strings.Contains(runtime.lastReq.Query, "current raw context") {
+		t.Fatalf("ACP prepared query lost summary/current context: %q", runtime.lastReq.Query)
+	}
+}
+
 func TestHandleReplyWithAgentDoesNotConsumeContextAfterStreamError(t *testing.T) {
 	t.Parallel()
 

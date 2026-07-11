@@ -1166,6 +1166,11 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 		return pipelinepkg.ResolveRunConfigResult{
 			RunConfig:   cfg,
 			RuntimeType: runtimeType,
+			DirectDiscussPromptPreparer: &directDiscussPromptPreparer{
+				resolver:  r,
+				runConfig: cfg,
+				compact:   r.maybeCompact,
+			},
 		}, nil
 	}
 	cfg, chatModel, _, err := r.buildBaseRunConfig(ctx, baseRunConfigParams{

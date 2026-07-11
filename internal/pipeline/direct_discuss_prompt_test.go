@@ -11,7 +11,9 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/contextfrag"
+	sessionpkg "github.com/memohai/memoh/internal/session"
 )
 
 func TestBuildDirectDiscussPromptInputClassifiesSemanticSources(t *testing.T) {
@@ -92,6 +94,31 @@ func TestBuildDirectDiscussPromptInputUsesStableFallbackIdentity(t *testing.T) {
 	)
 	if got := input.Sources[0].ID; got != "discuss-source:000" || input.CurrentSourceID != got {
 		t.Fatalf("fallback source identity = source:%q current:%q", got, input.CurrentSourceID)
+	}
+}
+
+func TestDiscussACPFullContextPromptRendersNativeToolMarkers(t *testing.T) {
+	t.Parallel()
+
+	prompt := discussACPFullContextPrompt([]sdk.Message{
+		sdk.UserMessage("question"),
+		{
+			Role: sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{
+				sdk.ReasoningPart{Text: "private reasoning"},
+				sdk.ToolCallPart{ToolCallID: "call-1", ToolName: "lookup", Input: map[string]any{"q": "memoh"}},
+			},
+		},
+		sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "lookup", Result: map[string]any{"answer": 42}}),
+	})
+
+	for _, want := range []string{"[user]", "question", "[tool_call: lookup]", `"q":"memoh"`, "[tool_result: lookup]", `"answer":42`} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("ACP prompt missing %q: %s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "private reasoning") {
+		t.Fatalf("ACP prompt leaked reasoning: %s", prompt)
 	}
 }
 
@@ -250,6 +277,98 @@ func TestHandleReplyWithAgentStopsWhenPromptPreparationFails(t *testing.T) {
 				t.Fatalf("cursor advanced after %s to %d", test.name, sess.lastProcessedMs)
 			}
 		})
+	}
+}
+
+func TestHandleReplyWithAgentACPConsumesPreparedPromptAndReceipt(t *testing.T) {
+	t.Parallel()
+
+	receipt := &countingDirectDiscussReceipt{}
+	preparer := &capturingDirectDiscussPromptPreparer{prepared: PreparedDirectDiscussPrompt{
+		RunConfig: agentpkg.RunConfig{Messages: []sdk.Message{
+			sdk.UserMessage("prepared summary"),
+			sdk.UserMessage("prepared current"),
+			sdk.UserMessage("prepared late binding"),
+		}},
+		Receipt: receipt,
+	}}
+	resolver := &fakeRunConfigResolver{resolveResult: ResolveRunConfigResult{
+		RuntimeType:                 sessionpkg.RuntimeACPAgent,
+		DirectDiscussPromptPreparer: preparer,
+	}}
+	runtime := &fakeDiscussRuntimeStreamer{}
+	driver := NewDiscussDriver(DiscussDriverDeps{Resolver: resolver, RuntimeStreamer: runtime})
+	sess := &discussSession{
+		config: DiscussSessionConfig{
+			BotID:            "bot",
+			SessionID:        "session",
+			ConversationType: channel.ConversationTypeGroup,
+		},
+		lastProcessedMs: 50,
+	}
+	rc := RenderedContext{{
+		MessageID:    "current",
+		ReceivedAtMs: 100,
+		MentionsMe:   true,
+		Content:      []RenderedContentPiece{{Type: "text", Text: "raw bypass content"}},
+	}}
+
+	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, &fakeDiscussStreamer{})
+
+	if preparer.calls != 1 || runtime.calls != 1 {
+		t.Fatalf("ACP preparation/runtime = prepare:%d runtime:%d", preparer.calls, runtime.calls)
+	}
+	if !strings.Contains(runtime.lastReq.Query, "prepared current") || strings.Contains(runtime.lastReq.Query, "raw bypass content") {
+		t.Fatalf("ACP query bypassed prepared prompt: %q", runtime.lastReq.Query)
+	}
+	if receipt.calls.Load() != 1 {
+		t.Fatalf("ACP receipt finish calls = %d, want 1", receipt.calls.Load())
+	}
+	if resolver.compactionCalls != 0 {
+		t.Fatalf("ACP driver bypassed receipt with %d legacy compaction calls", resolver.compactionCalls)
+	}
+	if sess.lastProcessedMs != 100 {
+		t.Fatalf("ACP terminal cursor = %d, want 100", sess.lastProcessedMs)
+	}
+}
+
+func TestHandleReplyWithAgentACPDoesNotConsumeReceiptWithoutRuntimeAttempt(t *testing.T) {
+	t.Parallel()
+
+	receipt := &countingDirectDiscussReceipt{}
+	preparer := &capturingDirectDiscussPromptPreparer{prepared: PreparedDirectDiscussPrompt{
+		RunConfig: agentpkg.RunConfig{Messages: []sdk.Message{sdk.UserMessage("prepared")}},
+		Receipt:   receipt,
+	}}
+	resolver := &fakeRunConfigResolver{resolveResult: ResolveRunConfigResult{
+		RuntimeType:                 sessionpkg.RuntimeACPAgent,
+		DirectDiscussPromptPreparer: preparer,
+	}}
+	driver := NewDiscussDriver(DiscussDriverDeps{Resolver: resolver})
+	sess := &discussSession{
+		config: DiscussSessionConfig{
+			BotID:            "bot",
+			SessionID:        "session",
+			ConversationType: channel.ConversationTypeGroup,
+		},
+		lastProcessedMs: 50,
+	}
+
+	driver.handleReplyWithAgent(context.Background(), sess, RenderedContext{{
+		MessageID:    "current",
+		ReceivedAtMs: 100,
+		MentionsMe:   true,
+		Content:      []RenderedContentPiece{{Type: "text", Text: "current"}},
+	}}, driver.logger, &fakeDiscussStreamer{})
+
+	if preparer.calls != 1 {
+		t.Fatalf("ACP prepare calls = %d, want 1", preparer.calls)
+	}
+	if receipt.calls.Load() != 0 {
+		t.Fatalf("receipt consumed without runtime attempt %d times", receipt.calls.Load())
+	}
+	if sess.lastProcessedMs != 50 {
+		t.Fatalf("cursor advanced without runtime attempt to %d", sess.lastProcessedMs)
 	}
 }
 

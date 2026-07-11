@@ -32,8 +32,6 @@ type ResolveRunConfigResult struct {
 type RunConfigResolver interface {
 	ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
 	LoadContextHistoryProjection(ctx context.Context, botID, sessionID string) (ContextHistoryProjection, error)
-	MaybeCompactSession(ctx context.Context, botID, sessionID, userID string, inputTokens, contextTokenBudget int)
-	TrimDiscussContext(messages []ContextMessage, contextTokenBudget int) ([]ContextMessage, int)
 	StoreRound(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform string, messages []sdk.Message, modelID string) error
 }
 
@@ -299,10 +297,6 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 		return
 	}
 	if strings.TrimSpace(resolved.RuntimeType) == sessionpkg.RuntimeACPAgent {
-		acpComposed := ComposeContextWithArtifacts(rc, trs, artifacts)
-		if acpComposed == nil {
-			return
-		}
 		isMentioned := wasRecentlyMentioned(activeRC, sess.lastProcessedMs)
 		// A direct/1:1 conversation is always "addressed" (matching the inbound
 		// layer's isDirectedAtBot/shouldTriggerAssistantResponse), so a DM
@@ -323,9 +317,30 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 			d.advanceDiscussCursor(ctx, sess, cfg, consumedMs, log)
 			return
 		}
-		attempted, completed := d.streamDiscussACPRuntime(ctx, cfg, acpComposed, addressed, log)
+		if resolved.DirectDiscussPromptPreparer == nil {
+			log.Error("discuss ACP runtime: prompt preparer not configured")
+			return
+		}
+		prepared, prepareErr := resolved.DirectDiscussPromptPreparer.PrepareDirectDiscussPrompt(ctx, buildDirectDiscussPromptInput(
+			composed.Messages,
+			artifacts,
+			resolved.RunConfig.ContextScope,
+			buildLateBindingPrompt(addressed),
+			cfg.UserID,
+		))
+		if prepareErr != nil {
+			log.Error("discuss ACP runtime: prepare prompt failed", slog.Any("error", prepareErr))
+			return
+		}
+		if prepared.Receipt == nil {
+			log.Error("discuss ACP runtime: prompt receipt not configured")
+			return
+		}
+		attempted, completed := d.streamDiscussACPRuntime(ctx, cfg, prepared.RunConfig.Messages, log)
 		if attempted {
-			d.maybeCompactDiscussContext(ctx, cfg, acpComposed.EstimatedTokens, 0)
+			if finishErr := prepared.Receipt.Finish(ctx); finishErr != nil {
+				log.Error("discuss ACP runtime: finish prompt failed", slog.Any("error", finishErr))
+			}
 		}
 		if completed {
 			d.advanceDiscussCursor(ctx, sess, cfg, consumedMs, log)
@@ -410,15 +425,14 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 func (d *DiscussDriver) streamDiscussACPRuntime(
 	ctx context.Context,
 	cfg DiscussSessionConfig,
-	composed *ComposeContextResult,
-	isMentioned bool,
+	messages []sdk.Message,
 	log *slog.Logger,
 ) (bool, bool) {
 	if d.deps.RuntimeStreamer == nil {
 		log.Error("discuss ACP runtime: streamer not configured")
 		return false, false
 	}
-	prompt := discussACPFullContextPrompt(composed.Messages, buildLateBindingPrompt(isMentioned))
+	prompt := discussACPFullContextPrompt(messages)
 	if strings.TrimSpace(prompt) == "" {
 		return false, false
 	}
@@ -481,15 +495,15 @@ func (d *DiscussDriver) streamDiscussACPRuntime(
 	return true, streamed && terminal && !failed
 }
 
-func discussACPFullContextPrompt(messages []ContextMessage, lateBinding string) string {
+func discussACPFullContextPrompt(messages []sdk.Message) string {
 	var b strings.Builder
 	b.WriteString("You are replying in a discuss-mode conversation. The runtime is reset each turn, so use the complete context below as the source of truth.\n\n")
 	for _, msg := range messages {
-		role := strings.TrimSpace(msg.Role)
+		role := strings.TrimSpace(string(msg.Role))
 		if role == "" {
 			role = "user"
 		}
-		content := strings.TrimSpace(msg.Content)
+		content := discussACPMessageContent(msg)
 		if content == "" {
 			continue
 		}
@@ -500,9 +514,57 @@ func discussACPFullContextPrompt(messages []ContextMessage, lateBinding string) 
 		b.WriteString("\n\n")
 	}
 	b.WriteString("Reply to the latest user-visible message when a response is appropriate.")
-	if strings.TrimSpace(lateBinding) != "" {
-		b.WriteString("\n\n")
-		b.WriteString(strings.TrimSpace(lateBinding))
-	}
 	return strings.TrimSpace(b.String())
+}
+
+func discussACPMessageContent(message sdk.Message) string {
+	parts := make([]string, 0, len(message.Content))
+	for _, part := range message.Content {
+		switch value := part.(type) {
+		case sdk.TextPart:
+			if text := strings.TrimSpace(value.Text); text != "" {
+				parts = append(parts, text)
+			}
+		case sdk.ToolCallPart:
+			parts = append(parts, discussACPToolMarker("tool_call", value.ToolName, value.Input))
+		case sdk.ToolResultPart:
+			parts = append(parts, discussACPToolMarker("tool_result", value.ToolName, value.Result))
+		case sdk.ImagePart:
+			parts = append(parts, "[image]")
+		case sdk.FilePart:
+			parts = append(parts, "[file]")
+		case sdk.ReasoningPart:
+			continue
+		default:
+			if payload := boundedACPValue(value); payload != "" {
+				parts = append(parts, payload)
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func discussACPToolMarker(kind, name string, payload any) string {
+	marker := "[" + kind
+	if name = strings.TrimSpace(name); name != "" {
+		marker += ": " + name
+	}
+	marker += "]"
+	if rendered := boundedACPValue(payload); rendered != "" && rendered != "{}" && rendered != "null" {
+		marker += " " + rendered
+	}
+	return marker
+}
+
+func boundedACPValue(value any) string {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	const maxRunes = 4096
+	runes := []rune(strings.TrimSpace(string(raw)))
+	if len(runes) > maxRunes {
+		runes = append(runes[:maxRunes], '…')
+	}
+	return string(runes)
 }
