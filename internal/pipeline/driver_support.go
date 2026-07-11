@@ -13,7 +13,6 @@ import (
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/contextfrag"
-	"github.com/memohai/memoh/internal/historyfrag"
 )
 
 // SetResolver sets the RunConfigResolver after construction (breaks DI cycles).
@@ -322,14 +321,7 @@ func compactionSummaryContextFrags(
 		if !ok {
 			continue
 		}
-		coveredRefs := make([]contextfrag.ContextRef, 0, len(artifact.Sources))
-		for _, source := range artifact.Sources {
-			if contextfrag.ValidateContextRef(source.Ref) == nil {
-				coveredRefs = append(coveredRefs, source.Ref)
-			}
-		}
-		record := historyfrag.SummaryRecord(artifactID, artifact.Summary, coveredRefs, scope)
-		frag := historyfrag.ToFrag(record)
+		frag := compactionSummarySourceFrag(artifact, scope)
 		frag.ID = fmt.Sprintf("message.%03d", index)
 		frag.Provenance.Index = index
 		frags = append(frags, frag)

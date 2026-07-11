@@ -22,13 +22,14 @@ type TurnResponseEntry struct {
 
 // ContextMessage is a unified message for LLM context, produced by MergeContext.
 type ContextMessage struct {
-	Role                 string          `json:"role"`
-	Content              string          `json:"content"`
-	RawContent           json.RawMessage `json:"raw_content,omitempty"`
-	CompactionArtifactID string          `json:"compaction_artifact_id,omitempty"`
-	RenderedMessageIDs   []string        `json:"rendered_message_ids,omitempty"`
-	SourceMessageID      string          `json:"source_message_id,omitempty"`
-	Current              bool            `json:"current,omitempty"`
+	Role                 string               `json:"role"`
+	Content              string               `json:"content"`
+	RawContent           json.RawMessage      `json:"raw_content,omitempty"`
+	CompactionArtifactID string               `json:"compaction_artifact_id,omitempty"`
+	RenderedMessageIDs   []string             `json:"rendered_message_ids,omitempty"`
+	SourceMessageID      string               `json:"source_message_id,omitempty"`
+	ImageRefs            []ImageAttachmentRef `json:"image_refs,omitempty"`
+	Current              bool                 `json:"current,omitempty"`
 }
 
 // ComposeContextResult holds the output of ComposeContext.
@@ -88,6 +89,7 @@ type mergeEntry struct {
 	rcContent   []RenderedContentPiece
 	rcMessageID string
 	rcNative    bool
+	rcImageRefs []ImageAttachmentRef
 	current     bool
 	// For summary entries
 	summaryContent    string
@@ -123,6 +125,7 @@ func appendRenderedContextEntriesAtCursor(entries []mergeEntry, rc RenderedConte
 			rcContent:   seg.Content,
 			rcMessageID: strings.TrimSpace(seg.MessageID),
 			rcNative:    renderedSegmentHasNativeContent(seg),
+			rcImageRefs: append([]ImageAttachmentRef(nil), seg.ImageRefs...),
 			current: afterMs != nil && seg.eventAtMs() > *afterMs &&
 				!seg.IsMyself && !seg.IsSelfSent,
 		})
@@ -159,6 +162,7 @@ func mergeEntries(entries []mergeEntry) []ContextMessage {
 	var messages []ContextMessage
 	var pendingText strings.Builder
 	var pendingMessageIDs []string
+	var pendingImageRefs []ImageAttachmentRef
 	pendingCurrent := false
 	pendingRC := false
 	pendingNative := false
@@ -169,11 +173,13 @@ func mergeEntries(entries []mergeEntry) []ContextMessage {
 				Role:               "user",
 				Content:            pendingText.String(),
 				RenderedMessageIDs: append([]string(nil), pendingMessageIDs...),
+				ImageRefs:          append([]ImageAttachmentRef(nil), pendingImageRefs...),
 				Current:            pendingCurrent,
 			})
 		}
 		pendingText.Reset()
 		pendingMessageIDs = pendingMessageIDs[:0]
+		pendingImageRefs = pendingImageRefs[:0]
 		pendingCurrent = false
 		pendingRC = false
 		pendingNative = false
@@ -189,7 +195,7 @@ func mergeEntries(entries []mergeEntry) []ContextMessage {
 					break
 				}
 			}
-			if !hasText && !(entry.current && entry.rcNative) {
+			if !hasText && (!entry.current || !entry.rcNative) {
 				continue
 			}
 			if pendingRC && pendingCurrent != entry.current {
@@ -200,6 +206,7 @@ func mergeEntries(entries []mergeEntry) []ContextMessage {
 				pendingRC = true
 			}
 			pendingNative = pendingNative || entry.rcNative
+			pendingImageRefs = append(pendingImageRefs, entry.rcImageRefs...)
 			if entry.rcMessageID != "" {
 				pendingMessageIDs = append(pendingMessageIDs, entry.rcMessageID)
 			}

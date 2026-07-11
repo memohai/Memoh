@@ -230,6 +230,9 @@ func TestComposeContextAtCursorKeepsImageOnlyCurrentSource(t *testing.T) {
 	if len(message.RenderedMessageIDs) != 1 || message.RenderedMessageIDs[0] != "image-only" {
 		t.Fatalf("image-only source ids = %#v", message.RenderedMessageIDs)
 	}
+	if len(message.ImageRefs) != 1 || message.ImageRefs[0].ContentHash != "image-hash" {
+		t.Fatalf("image-only source refs = %#v", message.ImageRefs)
+	}
 }
 
 func TestComposeContextAtCursorDropsImageOnlyHistoricalPlaceholder(t *testing.T) {

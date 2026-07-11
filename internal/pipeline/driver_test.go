@@ -3,7 +3,9 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/messageconv"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 )
 
@@ -834,6 +837,8 @@ type fakeRunConfigResolver struct {
 	trimCalls             int
 	trimBudget            int
 	trimFn                func(messages []ContextMessage, contextTokenBudget int) ([]ContextMessage, int)
+	lastPromptInput       DirectDiscussPromptInput
+	promptFinishCalls     int
 }
 
 func (f *fakeRunConfigResolver) TrimDiscussContext(messages []ContextMessage, contextTokenBudget int) ([]ContextMessage, int) {
@@ -846,10 +851,21 @@ func (f *fakeRunConfigResolver) TrimDiscussContext(messages []ContextMessage, co
 }
 
 func (f *fakeRunConfigResolver) ResolveRunConfig(_ context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error) {
+	var result ResolveRunConfigResult
+	var err error
 	if f.resolveFn != nil {
-		return f.resolveFn(botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken)
+		result, err = f.resolveFn(botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken)
+	} else {
+		result = f.resolveResult
 	}
-	return f.resolveResult, nil
+	if err == nil && strings.TrimSpace(result.RuntimeType) != sessionpkg.RuntimeACPAgent && result.DirectDiscussPromptPreparer == nil {
+		result.DirectDiscussPromptPreparer = &fakeDirectDiscussPromptPreparer{
+			resolver:  f,
+			runConfig: result.RunConfig,
+			budget:    result.ContextTokenBudget,
+		}
+	}
+	return result, err
 }
 
 func (f *fakeRunConfigResolver) InlineImageAttachments(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart {
@@ -875,6 +891,60 @@ func (f *fakeRunConfigResolver) MaybeCompactSession(_ context.Context, _, _, use
 }
 
 func (*fakeRunConfigResolver) StoreRound(_ context.Context, _, _, _, _ string, _ []sdk.Message, _ string) error {
+	return nil
+}
+
+type fakeDirectDiscussPromptPreparer struct {
+	resolver  *fakeRunConfigResolver
+	runConfig agentpkg.RunConfig
+	budget    int
+}
+
+func (p *fakeDirectDiscussPromptPreparer) PrepareDirectDiscussPrompt(
+	ctx context.Context,
+	input DirectDiscussPromptInput,
+) (PreparedDirectDiscussPrompt, error) {
+	p.resolver.lastPromptInput = input
+	cfg := p.runConfig
+	cfg.Messages = nil
+	compactableTokens := 0
+	for index, source := range input.Sources {
+		message := source.Message
+		if cfg.SupportsImageInput && len(source.ImageRefs) > 0 {
+			for _, image := range p.resolver.InlineImageAttachments(ctx, cfg.Identity.BotID, source.ImageRefs) {
+				if strings.TrimSpace(image.Image) != "" {
+					message.Content = append(message.Content, image)
+				}
+			}
+		}
+		cfg.Messages = append(cfg.Messages, message)
+		if source.SummaryFrag != nil {
+			frag := *source.SummaryFrag
+			frag.ID = fmt.Sprintf("message.%03d", index)
+			frag.Provenance.Index = index
+			cfg.ContextFrags = append(cfg.ContextFrags, frag)
+		}
+		if source.Compactable {
+			compactableTokens += messageconv.EstimateSDKMessageTokens(source.Message)
+		}
+	}
+	cfg = cfg.RefreshContextFrag()
+	receipt := &fakeDirectDiscussPromptReceipt{finish: func() {
+		p.resolver.promptFinishCalls++
+		if compactableTokens > 0 {
+			p.resolver.MaybeCompactSession(ctx, cfg.Identity.BotID, cfg.Identity.SessionID, input.ActorUserID, compactableTokens, p.budget)
+		}
+	}}
+	return PreparedDirectDiscussPrompt{RunConfig: cfg, Receipt: receipt}, nil
+}
+
+type fakeDirectDiscussPromptReceipt struct {
+	once   sync.Once
+	finish func()
+}
+
+func (r *fakeDirectDiscussPromptReceipt) Finish(context.Context) error {
+	r.once.Do(r.finish)
 	return nil
 }
 

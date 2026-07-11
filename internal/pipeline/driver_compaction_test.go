@@ -176,10 +176,10 @@ func TestHandleReplyWithAgentIgnoresCoveredMentionForACPGate(t *testing.T) {
 	}
 }
 
-func TestHandleReplyWithAgentTriggersCompactionFromReportedUsage(t *testing.T) {
+func TestHandleReplyWithAgentIgnoresProviderUsageForCompaction(t *testing.T) {
 	t.Parallel()
 
-	resolver := &fakeRunConfigResolver{}
+	resolver := &fakeRunConfigResolver{resolveResult: ResolveRunConfigResult{ContextTokenBudget: 1000}}
 	agent := &fakeDiscussStreamer{endUsage: []byte(`{"inputTokens":321}`)}
 	driver := NewDiscussDriver(DiscussDriverDeps{Resolver: resolver})
 	sess := &discussSession{config: DiscussSessionConfig{
@@ -189,18 +189,22 @@ func TestHandleReplyWithAgentTriggersCompactionFromReportedUsage(t *testing.T) {
 		ChannelIdentityID: "channel-identity",
 	}}
 	rc := RenderedContext{{MessageID: "new", ReceivedAtMs: 100, Content: []RenderedContentPiece{{Type: "text", Text: "new"}}}}
+	want := ComposeContext(rc, nil).EstimatedTokens
 
 	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, agent)
 
-	if resolver.compactionCalls != 1 || resolver.compactionInputTokens != 321 {
-		t.Fatalf("compaction trigger = calls:%d input:%d, want one call with 321", resolver.compactionCalls, resolver.compactionInputTokens)
+	if resolver.compactionCalls != 1 || resolver.compactionInputTokens != want {
+		t.Fatalf("compaction trigger = calls:%d input:%d, want one raw-pressure call with %d", resolver.compactionCalls, resolver.compactionInputTokens, want)
+	}
+	if resolver.compactionBudget != 1000 {
+		t.Fatalf("compaction context budget = %d, want 1000", resolver.compactionBudget)
 	}
 	if resolver.compactionUserID != "account-user" {
 		t.Fatalf("compaction principal = %q, want account user", resolver.compactionUserID)
 	}
 }
 
-func TestHandleReplyWithAgentFallsBackToComposedEstimateForCompaction(t *testing.T) {
+func TestHandleReplyWithAgentUsesRawPressureWithoutProviderUsage(t *testing.T) {
 	t.Parallel()
 
 	resolver := &fakeRunConfigResolver{}
@@ -213,7 +217,7 @@ func TestHandleReplyWithAgentFallsBackToComposedEstimateForCompaction(t *testing
 	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, agent)
 
 	if resolver.compactionCalls != 1 || resolver.compactionInputTokens != want {
-		t.Fatalf("compaction fallback = calls:%d input:%d, want one call with %d", resolver.compactionCalls, resolver.compactionInputTokens, want)
+		t.Fatalf("raw-pressure receipt = calls:%d input:%d, want one call with %d", resolver.compactionCalls, resolver.compactionInputTokens, want)
 	}
 }
 

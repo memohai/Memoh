@@ -283,7 +283,7 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 		return
 	}
 
-	composed := ComposeContextWithArtifacts(rc, trs, artifacts)
+	composed := composeContextWithArtifactsAtCursor(rc, trs, artifacts, sess.lastProcessedMs)
 	if composed == nil {
 		return
 	}
@@ -300,6 +300,10 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 		return
 	}
 	if strings.TrimSpace(resolved.RuntimeType) == sessionpkg.RuntimeACPAgent {
+		acpComposed := ComposeContextWithArtifacts(rc, trs, artifacts)
+		if acpComposed == nil {
+			return
+		}
 		isMentioned := wasRecentlyMentioned(activeRC, sess.lastProcessedMs)
 		// A direct/1:1 conversation is always "addressed" (matching the inbound
 		// layer's isDirectedAtBot/shouldTriggerAssistantResponse), so a DM
@@ -320,61 +324,63 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 			d.advanceDiscussCursor(ctx, sess, cfg, consumedMs, log)
 			return
 		}
-		attempted, completed := d.streamDiscussACPRuntime(ctx, cfg, composed, addressed, log)
+		attempted, completed := d.streamDiscussACPRuntime(ctx, cfg, acpComposed, addressed, log)
 		if attempted {
-			d.maybeCompactDiscussContext(ctx, cfg, composed.EstimatedTokens, resolved.ContextTokenBudget)
+			d.maybeCompactDiscussContext(ctx, cfg, acpComposed.EstimatedTokens, 0)
 		}
 		if completed {
 			d.advanceDiscussCursor(ctx, sess, cfg, consumedMs, log)
 		}
 		return
 	}
-	runConfig := resolved.RunConfig
-
-	composedMessages, estimatedTokens := composed.Messages, composed.EstimatedTokens
-	if resolved.ContextTokenBudget > 0 {
-		composedMessages, estimatedTokens = d.deps.Resolver.TrimDiscussContext(composedMessages, resolved.ContextTokenBudget)
-	}
-	contextEntries := repairSDKContextToolClosures(contextMessagesToSDKEntries(composedMessages))
-	runConfig.Messages = sdkMessagesFromContextEntries(contextEntries)
-	runConfig.ContextFrags = append(
-		runConfig.ContextFrags,
-		compactionSummaryContextFrags(contextEntries, artifacts, runConfig.ContextScope)...,
-	)
-	runConfig.SessionType = sessionpkg.TypeDiscuss
-	runConfig.Query = ""
-
-	// Inline image attachments from new RC segments so the model receives
-	// them as native vision input (ImagePart) on the first encounter.
-	// Subsequent turns only see the file path in the XML rendering.
-	if runConfig.SupportsImageInput && d.deps.Resolver != nil {
-		imageRefs := extractNewImageRefs(activeRC, sess.lastProcessedMs)
-		if len(imageRefs) > 0 {
-			imageParts := d.deps.Resolver.InlineImageAttachments(ctx, cfg.BotID, imageRefs)
-			injectImagePartsIntoLastUserMessage(runConfig.Messages, imageParts)
-		}
-	}
-
 	isMentioned := wasRecentlyMentioned(activeRC, sess.lastProcessedMs)
 	lateBinding := buildLateBindingPrompt(isMentioned)
-	runConfig.Messages = append(runConfig.Messages, sdk.UserMessage(lateBinding))
-	runConfig = runConfig.RefreshContextFrag()
+	if resolved.DirectDiscussPromptPreparer == nil {
+		log.Error("discuss: prompt preparer not configured")
+		return
+	}
+	prepared, err := resolved.DirectDiscussPromptPreparer.PrepareDirectDiscussPrompt(ctx, buildDirectDiscussPromptInput(
+		composed.Messages,
+		artifacts,
+		resolved.RunConfig.ContextScope,
+		lateBinding,
+		cfg.UserID,
+	))
+	if err != nil {
+		log.Error("discuss: prepare prompt failed", slog.Any("error", err))
+		return
+	}
+	if prepared.Receipt == nil {
+		log.Error("discuss: prompt receipt not configured")
+		return
+	}
+	receiptFinished := false
+	lastStreamError := ""
+	finishReceipt := func() {
+		if receiptFinished {
+			return
+		}
+		receiptFinished = true
+		if finishErr := prepared.Receipt.Finish(ctx); finishErr != nil && finishErr.Error() != lastStreamError {
+			log.Error("discuss: finish prompt failed", slog.Any("error", finishErr))
+		}
+	}
+	defer finishReceipt()
 
-	eventCh := agent.Stream(ctx, runConfig)
+	eventCh := agent.Stream(ctx, prepared.RunConfig)
 
 	var finalMessages json.RawMessage
-	var finalUsage json.RawMessage
 	terminalReceived := false
 	for event := range eventCh {
 		d.broadcastDiscussEvent(cfg.BotID, event)
 
 		switch event.Type {
 		case agentpkg.EventError:
+			lastStreamError = event.Error
 			log.Error("discuss stream error", slog.String("error", event.Error))
 		case agentpkg.EventAgentEnd, agentpkg.EventAgentAbort:
 			terminalReceived = true
 			finalMessages = event.Messages
-			finalUsage = event.Usage
 		}
 	}
 
@@ -389,11 +395,7 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 			}
 		}
 	}
-	inputTokens := usageInputTokens(finalUsage)
-	if inputTokens <= 0 {
-		inputTokens = estimatedTokens
-	}
-	d.maybeCompactDiscussContext(ctx, cfg, inputTokens, resolved.ContextTokenBudget)
+	finishReceipt()
 	if !terminalReceived {
 		return
 	}
