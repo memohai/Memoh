@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -138,29 +139,38 @@ func TestFlowAndPipelineTrimmingProduceEquivalentNotice(t *testing.T) {
 		Role:    "user",
 		Content: conversation.NewTextContent("latest context"),
 	}
-	budget := estimateMessageTokens(latest)
-	flowMessages, _, flowEstimate := trimMessagesAndRecordsByTokens(nil, []historyfrag.HistoryRecord{
+	budget := estimateMessageTokens(historyTruncationNotice()) + estimateMessageTokens(latest)
+	flowBuild, err := assembleHistoryContext(nil, []historyfrag.HistoryRecord{
 		{ModelMessage: old},
 		{ModelMessage: latest},
-	}, budget)
-	pipelineBuild := trimComposedPipelineMessages(nil, []composedPipelineMessage{
+	}, &budget)
+	if err != nil {
+		t.Fatalf("assemble flow: %v", err)
+	}
+	pipelineBuild, err := assembleComposedPipelineContext(nil, []composedPipelineMessage{
 		{message: old},
 		{message: latest},
-	}, budget)
-
-	if len(flowMessages) != len(pipelineBuild.Messages) {
-		t.Fatalf("message counts: flow=%d pipeline=%d\nflow=%#v\npipeline=%#v",
-			len(flowMessages), len(pipelineBuild.Messages), modelMessageTexts(flowMessages), modelMessageTexts(pipelineBuild.Messages))
+	}, &budget)
+	if err != nil {
+		t.Fatalf("assemble pipeline: %v", err)
 	}
-	for i := range flowMessages {
-		flowRole, flowText := normalizeParityMessage(flowMessages[i])
+
+	if len(flowBuild.Messages) != len(pipelineBuild.Messages) {
+		t.Fatalf("message counts: flow=%d pipeline=%d\nflow=%#v\npipeline=%#v",
+			len(flowBuild.Messages), len(pipelineBuild.Messages), modelMessageTexts(flowBuild.Messages), modelMessageTexts(pipelineBuild.Messages))
+	}
+	for i := range flowBuild.Messages {
+		flowRole, flowText := normalizeParityMessage(flowBuild.Messages[i])
 		pipelineRole, pipelineText := normalizeParityMessage(pipelineBuild.Messages[i])
 		if flowRole != pipelineRole || flowText != pipelineText {
 			t.Fatalf("message %d mismatch: flow=(%q, %q) pipeline=(%q, %q)", i, flowRole, flowText, pipelineRole, pipelineText)
 		}
 	}
-	if flowEstimate != pipelineBuild.EstimatedTokens {
-		t.Fatalf("estimated tokens: flow=%d pipeline=%d", flowEstimate, pipelineBuild.EstimatedTokens)
+	if flowBuild.EmittedTokens != pipelineBuild.EstimatedTokens {
+		t.Fatalf("estimated tokens: flow=%d pipeline=%d", flowBuild.EmittedTokens, pipelineBuild.EstimatedTokens)
+	}
+	if !reflect.DeepEqual(allocationWithoutIDs(flowBuild.Allocation), allocationWithoutIDs(pipelineBuild.Allocation)) {
+		t.Fatalf("allocations differ:\nflow     %#v\npipeline %#v", flowBuild.Allocation, pipelineBuild.Allocation)
 	}
 }
 

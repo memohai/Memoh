@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/memohai/memoh/internal/contextbudget"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/historyfrag"
@@ -199,83 +200,39 @@ func estimateMessageTokens(msg conversation.ModelMessage) int {
 	return messageconv.EstimateModelMessageTokens(msg)
 }
 
-func trimMessagesByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord, maxTokens int) ([]conversation.ModelMessage, int) {
-	trimmed, _, totalTokens := trimMessagesAndRecordsByTokens(log, messages, maxTokens)
-	return trimmed, totalTokens
+type historyContextBuild struct {
+	Messages       []conversation.ModelMessage
+	HistoryRecords []historyfrag.HistoryRecord
+	Allocation     contextbudget.Allocation
+	EmittedTokens  int
 }
 
-// totalCompactableHistoryTokens estimates the tokens held by raw history rows
-// only. Active summaries are excluded: compaction can never shrink them, so
-// counting them toward the compaction trigger would re-fire it on every
-// request once accumulated summaries alone cross the threshold.
-func totalCompactableHistoryTokens(records []historyfrag.HistoryRecord) int {
-	total := 0
-	for _, record := range records {
-		if record.Kind == contextfrag.KindConversationSummary || record.Lifecycle == historyfrag.LifecycleActiveSummary {
-			continue
+func assembleHistoryContext(log *slog.Logger, records []historyfrag.HistoryRecord, envelopeLimit *int) (historyContextBuild, error) {
+	assembled, err := assembleBudgetSources(
+		budgetSourcesForHistoryRecords(records),
+		envelopeLimit,
+		historyTruncationNotice().TextContent(),
+	)
+	build := historyContextBuild{
+		Messages:       assembled.messages,
+		Allocation:     assembled.allocation,
+		EmittedTokens:  assembled.emittedTokens,
+		HistoryRecords: retainedHistoryRecords(records, assembled.sourceIndexes),
+	}
+	if log != nil && build.Allocation.BudgetTrimmed {
+		limit := 0
+		if envelopeLimit != nil {
+			limit = max(*envelopeLimit, 0)
 		}
-		total += estimateMessageTokens(record.ModelMessage)
-	}
-	return total
-}
-
-func trimMessagesAndRecordsByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord, maxTokens int) ([]conversation.ModelMessage, []historyfrag.HistoryRecord, int) {
-	if maxTokens == 0 || len(messages) == 0 {
-		totalTokens := 0
-		for _, m := range messages {
-			totalTokens += estimateMessageTokens(m.ModelMessage)
-		}
-		return historyfrag.ToModelMessages(messages), messages, totalTokens
-	}
-
-	// Scan from newest to oldest, accumulating per-message estimated context
-	// token costs. Each message's cost represents the tokens it occupies in the
-	// context window (not the output tokens it generated). We use a character-
-	// based estimate for all messages since this measures context window impact.
-	scannedTokens := 0
-	cutoff := 0
-	for i := len(messages) - 1; i >= 0; i-- {
-		scannedTokens += estimateMessageTokens(messages[i].ModelMessage)
-		if scannedTokens > maxTokens {
-			cutoff = i + 1
-			break
-		}
-	}
-
-	// Keep provider-valid message order: a "tool" message must follow a preceding
-	// assistant tool call. When history is head-trimmed, a leading tool message
-	// may become orphaned and cause provider 400 errors.
-	for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].ModelMessage.Role), "tool") {
-		cutoff++
-	}
-	cutoff, _ = fitRequiredMessagesWithinBudget(messages, cutoff, maxTokens)
-
-	forceKeptPrefix := forceKeptMessagesBeforeCutoff(messages, cutoff)
-	retained := make([]historyfrag.HistoryRecord, 0, len(messages)-cutoff+len(forceKeptPrefix))
-	retained = append(retained, forceKeptPrefix...)
-	retained = append(retained, messages[cutoff:]...)
-	result := make([]conversation.ModelMessage, 0, len(retained))
-	if cutoff > 0 {
-		notice := historyTruncationNotice()
-		result = append(result, notice)
-	}
-	for _, m := range retained {
-		result = append(result, m.ModelMessage)
-	}
-	totalTokens := 0
-	for _, message := range result {
-		totalTokens += estimateMessageTokens(message)
-	}
-	if cutoff > 0 && log != nil {
-		log.Info("trimMessagesByTokens: context trimmed",
-			slog.Int("total_messages", len(messages)),
-			slog.Int("estimated_tokens", totalTokens),
-			slog.Int("max_tokens", maxTokens),
-			slog.Int("cutoff_index", cutoff),
-			slog.Int("kept_messages", len(retained)),
+		log.Info("assemble history context: sources trimmed",
+			slog.Int("total_sources", len(records)),
+			slog.Int("kept_sources", len(build.HistoryRecords)),
+			slog.Int("dropped_sources", len(build.Allocation.Dropped)),
+			slog.Int("emitted_tokens", build.EmittedTokens),
+			slog.Int("envelope_limit", limit),
 		)
 	}
-	return result, retained, totalTokens
+	return build, err
 }
 
 func historyTruncationNotice() conversation.ModelMessage {
@@ -289,65 +246,29 @@ func historyTruncationNotice() conversation.ModelMessage {
 	}
 }
 
-func fitRequiredMessagesWithinBudget(messages []historyfrag.HistoryRecord, cutoff int, maxTokens int) (int, int) {
-	if maxTokens <= 0 || len(messages) == 0 {
-		return cutoff, estimateMessagesTokens(messages)
-	}
-	if cutoff < 0 {
-		cutoff = 0
-	}
-	if cutoff > len(messages) {
-		cutoff = len(messages)
-	}
-	for {
-		requiredPrefix := requiredMessagesBeforeCutoff(messages, cutoff)
-		totalTokens := estimateMessagesTokens(requiredPrefix) + estimateMessagesTokens(messages[cutoff:])
-		if totalTokens <= maxTokens || cutoff >= len(messages) {
-			return cutoff, totalTokens
+func retainedHistoryRecords(records []historyfrag.HistoryRecord, sourceIndexes []int) []historyfrag.HistoryRecord {
+	retained := make([]historyfrag.HistoryRecord, 0, len(sourceIndexes))
+	seen := make([]bool, len(records))
+	for _, sourceIndex := range sourceIndexes {
+		if sourceIndex < 0 || sourceIndex >= len(records) || seen[sourceIndex] {
+			continue
 		}
-		cutoff++
-		for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].ModelMessage.Role), "tool") {
-			cutoff++
-		}
+		seen[sourceIndex] = true
+		retained = append(retained, records[sourceIndex])
 	}
+	return retained
 }
 
-func requiredMessagesBeforeCutoff(messages []historyfrag.HistoryRecord, cutoff int) []historyfrag.HistoryRecord {
-	if cutoff <= 0 {
-		return nil
-	}
-	if cutoff > len(messages) {
-		cutoff = len(messages)
-	}
-	var required []historyfrag.HistoryRecord
-	for _, message := range messages[:cutoff] {
-		if message.Required {
-			required = append(required, message)
-		}
-	}
-	return required
+func trimMessagesByTokens(log *slog.Logger, records []historyfrag.HistoryRecord, maxTokens int) ([]conversation.ModelMessage, int) {
+	trimmed, _, totalTokens := trimMessagesAndRecordsByTokens(log, records, maxTokens)
+	return trimmed, totalTokens
 }
 
-func estimateMessagesTokens(messages []historyfrag.HistoryRecord) int {
-	total := 0
-	for _, m := range messages {
-		total += estimateMessageTokens(m.ModelMessage)
+func trimMessagesAndRecordsByTokens(log *slog.Logger, records []historyfrag.HistoryRecord, maxTokens int) ([]conversation.ModelMessage, []historyfrag.HistoryRecord, int) {
+	var envelopeLimit *int
+	if maxTokens != 0 {
+		envelopeLimit = &maxTokens
 	}
-	return total
-}
-
-func forceKeptMessagesBeforeCutoff(messages []historyfrag.HistoryRecord, cutoff int) []historyfrag.HistoryRecord {
-	if cutoff <= 0 {
-		return nil
-	}
-	if cutoff > len(messages) {
-		cutoff = len(messages)
-	}
-	var forceKept []historyfrag.HistoryRecord
-	for _, m := range messages[:cutoff] {
-		if m.Required || m.Kind == contextfrag.KindConversationSummary || m.Lifecycle == historyfrag.LifecycleActiveSummary {
-			forceKept = append(forceKept, m)
-		}
-	}
-	return forceKept
+	build, _ := assembleHistoryContext(log, records, envelopeLimit)
+	return build.Messages, build.HistoryRecords, build.EmittedTokens
 }

@@ -2,10 +2,13 @@ package flow
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/contextassembly"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/historyfrag"
 	"github.com/memohai/memoh/internal/messageconv"
@@ -25,7 +28,7 @@ func TestTrimMessagesByTokens_DropsLeadingOrphanTool(t *testing.T) {
 	messages := []historyfrag.HistoryRecord{
 		trimRecord(conversation.ModelMessage{
 			Role:    "user",
-			Content: conversation.NewTextContent("1111"),
+			Content: conversation.NewTextContent(strings.Repeat("1", 400)),
 		}, nil),
 		trimRecord(conversation.ModelMessage{
 			Role: "assistant",
@@ -55,10 +58,9 @@ func TestTrimMessagesByTokens_DropsLeadingOrphanTool(t *testing.T) {
 		}),
 	}
 
-	// The newest assistant and tool result fit, adding the older assistant
-	// tool call exceeds the budget. The cutoff initially lands on the tool result,
-	// which must be skipped to avoid an orphan tool message.
-	budget := estimateMessageTokens(messages[2].ModelMessage) + estimateMessageTokens(messages[3].ModelMessage)
+	// The notice and newest assistant fit. The older tool occurrence is atomic,
+	// so neither its call nor result can survive the budget boundary alone.
+	budget := estimateMessageTokens(historyTruncationNotice()) + estimateMessageTokens(messages[3].ModelMessage)
 	trimmed, _ := trimMessagesByTokens(nil, messages, budget)
 	if len(trimmed) != 2 {
 		t.Fatalf("expected truncation notice and latest assistant, got %d messages: %+v", len(trimmed), trimmed)
@@ -166,6 +168,27 @@ func TestTrimMessagesByTokens_SmallBudgetTrims(t *testing.T) {
 	}
 }
 
+func TestAssembleHistoryContextReportsRequiredOverflowWithoutNotice(t *testing.T) {
+	t.Parallel()
+
+	records := []historyfrag.HistoryRecord{{
+		ModelMessage: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("12345678")},
+		Required:     true,
+	}}
+	limit := 1
+	built, err := assembleHistoryContext(nil, records, &limit)
+	var overflow *contextassembly.OverflowError
+	if !errors.As(err, &overflow) {
+		t.Fatalf("error = %v, want *OverflowError", err)
+	}
+	if len(built.Messages) != 1 || built.Messages[0].Role != "user" || len(built.HistoryRecords) != 1 {
+		t.Fatalf("required source was lost: %#v", built)
+	}
+	if built.Allocation.BudgetTrimmed || built.Allocation.SourcesFit || built.Allocation.SourceOverflowTokens != 1 {
+		t.Fatalf("required overflow was treated as truncation: %#v", built.Allocation)
+	}
+}
+
 func TestTrimMessagesByTokens_EstimatesFallback(t *testing.T) {
 	t.Parallel()
 
@@ -181,8 +204,10 @@ func TestTrimMessagesByTokens_EstimatesFallback(t *testing.T) {
 		}),
 	}
 
-	// Budget of 50: user message is ~100 estimated tokens (400/4), should be trimmed.
-	trimmed, _ := trimMessagesByTokens(nil, messages, 50)
+	// The envelope reserves the notice and latest assistant; the ~100-token user
+	// message must be trimmed.
+	budget := estimateMessageTokens(historyTruncationNotice()) + estimateMessageTokens(messages[1].ModelMessage)
+	trimmed, _ := trimMessagesByTokens(nil, messages, budget)
 	// When trimming occurs, a system truncation notice is prepended.
 	// So we expect: 1 system notice + 1 assistant message (kept) = 2 total.
 	// The key check is that the long user message was removed.

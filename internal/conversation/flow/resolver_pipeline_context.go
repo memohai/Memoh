@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/memohai/memoh/internal/contextbudget"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/historyfrag"
@@ -18,6 +19,7 @@ type pipelineContextBuild struct {
 	Messages        []conversation.ModelMessage
 	HistoryRecords  []historyfrag.HistoryRecord
 	EstimatedTokens int
+	Allocation      contextbudget.Allocation
 }
 
 type pipelineHistoryProjectionBuild struct {
@@ -66,7 +68,11 @@ func (r *Resolver) buildPipelineContext(
 		pipelinepkg.ActiveRenderedContext(rc, history.projection.CompactionArtifacts),
 		req,
 	)
-	return trimComposedPipelineMessages(r.logger, entries, contextTokenBudget), nil
+	var envelopeLimit *int
+	if contextTokenBudget != 0 {
+		envelopeLimit = &contextTokenBudget
+	}
+	return assembleComposedPipelineContext(r.logger, entries, envelopeLimit)
 }
 
 func (r *Resolver) loadPipelineHistoryProjection(
@@ -323,49 +329,47 @@ func contextMessageForMetering(message pipelinepkg.ContextMessage) conversation.
 	return conversation.ModelMessage{Role: message.Role, Content: conversation.NewTextContent(message.Content)}
 }
 
-func trimComposedPipelineMessages(
+func assembleComposedPipelineContext(
 	log *slog.Logger,
 	entries []composedPipelineMessage,
-	maxTokens int,
-) pipelineContextBuild {
-	trimEntries := make([]composedTrimEntry, len(entries))
-	for i, entry := range entries {
-		trimEntries[i] = composedTrimEntry{
-			tokens: estimateMessageTokens(entry.message),
-			role:   entry.message.Role,
-			keep:   entry.hasSummary || entry.forceKeep,
-		}
+	envelopeLimit *int,
+) (pipelineContextBuild, error) {
+	assembled, err := assembleBudgetSources(
+		budgetSourcesForPipelineEntries(entries),
+		envelopeLimit,
+		historyTruncationNotice().TextContent(),
+	)
+	build := pipelineContextBuild{
+		Messages:        assembled.messages,
+		HistoryRecords:  retainedPipelineSummaryRecords(entries, assembled.sourceIndexes),
+		EstimatedTokens: assembled.emittedTokens,
+		Allocation:      assembled.allocation,
 	}
-	cutoff := composedTrimCutoff(trimEntries, maxTokens)
-	if cutoff > 0 && log != nil {
-		log.Info("trim pipeline context",
-			slog.Int("total_messages", len(entries)),
-			slog.Int("max_tokens", maxTokens),
-			slog.Int("kept_messages", len(entries)-cutoff),
+	if log != nil && build.Allocation.BudgetTrimmed {
+		limit := 0
+		if envelopeLimit != nil {
+			limit = max(*envelopeLimit, 0)
+		}
+		log.Info("assemble pipeline context: sources trimmed",
+			slog.Int("total_sources", len(entries)),
+			slog.Int("kept_summaries", len(build.HistoryRecords)),
+			slog.Int("dropped_sources", len(build.Allocation.Dropped)),
+			slog.Int("emitted_tokens", build.EstimatedTokens),
+			slog.Int("envelope_limit", limit),
 		)
 	}
-	retained := make([]composedPipelineMessage, 0, len(entries)-cutoff)
-	for _, entry := range entries[:cutoff] {
-		if entry.hasSummary || entry.forceKeep {
-			retained = append(retained, entry)
+	return build, err
+}
+
+func retainedPipelineSummaryRecords(entries []composedPipelineMessage, sourceIndexes []int) []historyfrag.HistoryRecord {
+	retained := make([]historyfrag.HistoryRecord, 0)
+	seen := make([]bool, len(entries))
+	for _, sourceIndex := range sourceIndexes {
+		if sourceIndex < 0 || sourceIndex >= len(entries) || seen[sourceIndex] || !entries[sourceIndex].hasSummary {
+			continue
 		}
+		seen[sourceIndex] = true
+		retained = append(retained, entries[sourceIndex].summaryRecord)
 	}
-	retained = append(retained, entries[cutoff:]...)
-	build := pipelineContextBuild{
-		Messages:       make([]conversation.ModelMessage, 0, len(retained)+1),
-		HistoryRecords: make([]historyfrag.HistoryRecord, 0),
-	}
-	if cutoff > 0 {
-		notice := historyTruncationNotice()
-		build.Messages = append(build.Messages, notice)
-		build.EstimatedTokens += estimateMessageTokens(notice)
-	}
-	for _, entry := range retained {
-		build.Messages = append(build.Messages, entry.message)
-		build.EstimatedTokens += estimateMessageTokens(entry.message)
-		if entry.hasSummary {
-			build.HistoryRecords = append(build.HistoryRecords, entry.summaryRecord)
-		}
-	}
-	return build
+	return retained
 }

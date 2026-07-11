@@ -382,7 +382,18 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		if loadErr != nil {
 			return resolvedContext{}, loadErr
 		}
-		messages, historyRecords, estimatedTokens = trimMessagesAndRecordsByTokens(r.logger, loaded, contextTokenBudget)
+		var envelopeLimit *int
+		if contextTokenBudget != 0 {
+			envelopeLimit = &contextTokenBudget
+		}
+		built, buildErr := assembleHistoryContext(r.logger, loaded, envelopeLimit)
+		if buildErr != nil {
+			return resolvedContext{}, buildErr
+		}
+		messages = built.Messages
+		historyRecords = built.HistoryRecords
+		estimatedTokens = built.EmittedTokens
+		compactableTokens := built.Allocation.CompactableTokens
 		// When context reaches the shared budget share, run synchronous
 		// compaction before sending the request. contextTokenBudget is the
 		// authoritative limit for how much context the user wants to send
@@ -394,7 +405,6 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		// The trigger only counts raw (compactable) rows: active summaries can
 		// never be compacted away, so including them would make the trigger
 		// self-sustaining once accumulated summaries cross the threshold.
-		compactableTokens := totalCompactableHistoryTokens(loaded)
 		if compactionThreshold > 0 && compactableTokens >= compactionThreshold {
 			r.logger.Warn("resolve: context reached compaction threshold, running synchronous compaction",
 				slog.String("bot_id", req.BotID),
@@ -431,7 +441,13 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 				if loadErr != nil {
 					return resolvedContext{}, loadErr
 				}
-				messages, historyRecords, estimatedTokens = trimMessagesAndRecordsByTokens(r.logger, loaded, contextTokenBudget)
+				built, buildErr = assembleHistoryContext(r.logger, loaded, envelopeLimit)
+				if buildErr != nil {
+					return resolvedContext{}, buildErr
+				}
+				messages = built.Messages
+				historyRecords = built.HistoryRecords
+				estimatedTokens = built.EmittedTokens
 				// Remove tool messages from the recent context — they are large
 				// and unnecessary when we already have a summary. Keep only
 				// user/assistant conversation turns.

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/memohai/memoh/internal/contextassembly"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -305,7 +306,7 @@ func TestBuildPipelineContextKeepsRepeatedCurrentQueryWithoutExternalID(t *testi
 	}
 }
 
-func TestBuildPipelineContextForceKeepsCurrentRenderedMessagePastBudget(t *testing.T) {
+func TestBuildPipelineContextReportsCurrentOverflowWithoutNotice(t *testing.T) {
 	t.Parallel()
 
 	const sessionID = "22222222-2222-2222-2222-222222222222"
@@ -318,13 +319,15 @@ func TestBuildPipelineContextForceKeepsCurrentRenderedMessagePastBudget(t *testi
 		ExternalMessageID: "current",
 		Query:             strings.Repeat("current", 100),
 	}, 1)
-	if err != nil {
-		t.Fatalf("buildPipelineContext() error = %v", err)
+	var overflow *contextassembly.OverflowError
+	if !errors.As(err, &overflow) {
+		t.Fatalf("buildPipelineContext() error = %v, want *OverflowError", err)
 	}
-	if len(built.Messages) != 2 ||
-		!strings.HasPrefix(built.Messages[0].TextContent(), "[System Notice]") ||
-		!strings.Contains(built.Messages[1].TextContent(), "current") {
-		t.Fatalf("current rendered message was trimmed: %#v", modelMessageTexts(built.Messages))
+	if len(built.Messages) != 1 || !strings.Contains(built.Messages[0].TextContent(), "current") {
+		t.Fatalf("required current source was lost: %#v", modelMessageTexts(built.Messages))
+	}
+	if built.Allocation.BudgetTrimmed || built.Allocation.SourcesFit {
+		t.Fatalf("required overflow was treated as truncation: %#v", built.Allocation)
 	}
 }
 
@@ -341,12 +344,19 @@ func TestTrimComposedPipelineMessagesKeepsRetainedArtifactIdentity(t *testing.T)
 		{Role: "user", Content: "latest raw context"},
 	}}
 	entries := composedPipelineMessages(composed, []historyfrag.HistoryRecord{summaryA, summaryB})
-	budget := estimateMessageTokens(summaryB.ModelMessage) + estimateMessageTokens(conversation.ModelMessage{
+	latest := conversation.ModelMessage{
 		Role:    "user",
 		Content: conversation.NewTextContent("latest raw context"),
-	})
+	}
+	budget := estimateMessageTokens(historyTruncationNotice()) +
+		estimateMessageTokens(summaryA.ModelMessage) +
+		estimateMessageTokens(summaryB.ModelMessage) +
+		estimateMessageTokens(latest)
 
-	built := trimComposedPipelineMessages(nil, entries, budget)
+	built, err := assembleComposedPipelineContext(nil, entries, &budget)
+	if err != nil {
+		t.Fatalf("assembleComposedPipelineContext() error = %v", err)
+	}
 	if len(built.Messages) != 4 || !strings.HasPrefix(built.Messages[0].TextContent(), "[System Notice]") {
 		t.Fatalf("trimmed messages = %#v, want notice plus both summaries and latest raw", modelMessageTexts(built.Messages))
 	}
@@ -373,7 +383,10 @@ func TestTrimMessagesAndRecordsPreservesEveryActiveSummary(t *testing.T) {
 		Role:    "user",
 		Content: conversation.NewTextContent("latest raw context"),
 	}}
-	budget := estimateMessageTokens(summaryB.ModelMessage) + estimateMessageTokens(latest.ModelMessage)
+	budget := estimateMessageTokens(historyTruncationNotice()) +
+		estimateMessageTokens(summaryA.ModelMessage) +
+		estimateMessageTokens(summaryB.ModelMessage) +
+		estimateMessageTokens(latest.ModelMessage)
 
 	messages, retained, estimate := trimMessagesAndRecordsByTokens(nil, []historyfrag.HistoryRecord{
 		summaryA,

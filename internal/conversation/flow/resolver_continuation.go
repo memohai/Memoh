@@ -24,10 +24,13 @@ func (r *Resolver) prepareContinuationRunConfig(
 	if err != nil {
 		return agent.RunConfig{}, err
 	}
-	messages, retained, _ := trimMessagesAndRecordsByTokens(r.logger, loaded, 0)
-	messages = sanitizeMessages(messages)
+	built, err := assembleHistoryContext(r.logger, loaded, nil)
+	if err != nil {
+		return agent.RunConfig{}, err
+	}
+	messages := sanitizeMessages(built.Messages)
 
-	base.ContextFrags = historyContextFragsForMessages(messages, retained)
+	base.ContextFrags = historyContextFragsForMessages(messages, built.HistoryRecords)
 	base.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
 	base.Query = ""
 	base.LiveToolStream = eventCh != nil

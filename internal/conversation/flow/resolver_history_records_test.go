@@ -260,7 +260,8 @@ func TestHistoryContextFragsPreserveEverySummaryRecordAfterTrim(t *testing.T) {
 		second,
 	}
 
-	messages, retained, _ := trimMessagesAndRecordsByTokens(nil, records, 20)
+	budget := estimateMessageTokens(historyTruncationNotice()) + estimateMessageTokens(first.ModelMessage) + estimateMessageTokens(second.ModelMessage)
+	messages, retained, _ := trimMessagesAndRecordsByTokens(nil, records, budget)
 	frags := historyContextFragsForMessages(messages, retained)
 
 	if len(frags) != 2 || frags[0].Coverage == nil || frags[1].Coverage == nil {
@@ -271,15 +272,24 @@ func TestHistoryContextFragsPreserveEverySummaryRecordAfterTrim(t *testing.T) {
 	}
 }
 
-func TestTotalCompactableHistoryTokensExcludesSummaries(t *testing.T) {
+func TestHistoryAssemblyCompactableTokensExcludeSummariesAndIgnoreBudget(t *testing.T) {
 	t.Parallel()
 
 	summary := historyfrag.SummaryRecord("compact-big", strings.Repeat("s", 4000), nil, contextfrag.Scope{})
 	raw := historyRecord("row-1", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(strings.Repeat("r", 400))}, nil)
 	records := []historyfrag.HistoryRecord{summary, raw}
 
-	compactable := totalCompactableHistoryTokens(records)
-	if compactable <= 0 {
+	unlimited, err := assembleHistoryContext(nil, records, nil)
+	if err != nil {
+		t.Fatalf("assemble unlimited history: %v", err)
+	}
+	limit := estimateMessageTokens(historyTruncationNotice()) + estimateMessageTokens(summary.ModelMessage)
+	limited, err := assembleHistoryContext(nil, records, &limit)
+	if err != nil {
+		t.Fatalf("assemble limited history: %v", err)
+	}
+	compactable := unlimited.Allocation.CompactableTokens
+	if compactable <= 0 || limited.Allocation.CompactableTokens != compactable {
 		t.Fatal("raw rows must count toward the compactable estimate")
 	}
 	if want := estimateMessageTokens(raw.ModelMessage); compactable != want {
