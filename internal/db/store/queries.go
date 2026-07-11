@@ -141,6 +141,7 @@ type Queries interface {
 	DeleteUserProviderOAuthToken(ctx context.Context, arg dbsqlc.DeleteUserProviderOAuthTokenParams) error
 	EvaluateBotACLRule(ctx context.Context, arg dbsqlc.EvaluateBotACLRuleParams) (string, error)
 	FailUserInputRequest(ctx context.Context, arg dbsqlc.FailUserInputRequestParams) (dbsqlc.UserInputRequest, error)
+	FinalizeCompactionArtifact(ctx context.Context, arg dbsqlc.FinalizeCompactionArtifactParams) (dbsqlc.FinalizeCompactionArtifactRow, error)
 	FindChatRoute(ctx context.Context, arg dbsqlc.FindChatRouteParams) (dbsqlc.FindChatRouteRow, error)
 	GetAccountByIdentity(ctx context.Context, identity pgtype.Text) (dbsqlc.User, error)
 	GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (dbsqlc.User, error)

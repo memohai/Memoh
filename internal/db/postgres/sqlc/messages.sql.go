@@ -4399,6 +4399,7 @@ SELECT
   m.display_text,
   m.compact_id,
   m.created_at,
+  source_row.xmin::text AS source_version,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform,
@@ -4410,6 +4411,7 @@ SELECT
   )::text AS conversation_name,
   r.default_reply_target AS reply_target
 FROM bot_visible_history_messages m
+JOIN bot_history_messages source_row ON source_row.id = m.id
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN bot_channel_routes r ON r.id = s.route_id
@@ -4444,6 +4446,7 @@ type ListUncompactedMessagesBySessionRow struct {
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SourceVersion           string             `json:"source_version"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
 	Platform                pgtype.Text        `json:"platform"`
@@ -4477,6 +4480,7 @@ func (q *Queries) ListUncompactedMessagesBySession(ctx context.Context, sessionI
 			&i.DisplayText,
 			&i.CompactID,
 			&i.CreatedAt,
+			&i.SourceVersion,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
 			&i.Platform,
