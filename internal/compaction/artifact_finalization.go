@@ -205,17 +205,8 @@ func (s *Service) reconcileFinalizationError(
 ) error {
 	row, getErr := s.getCompactionLog(ctx, params.CompactID)
 	if getErr == nil {
-		if artifactFinalizationMatches(row, params) {
-			return nil
-		}
-		if artifactFinalizationConflictMatches(row, params) {
-			return fmt.Errorf("%w: persisted conflict recovered after finalization response loss", ErrCompactionSourceChanged)
-		}
-		if row.Status == "error" {
-			return finalizeErr
-		}
-		if row.Status == "ok" {
-			return errors.Join(finalizeErr, errors.New("compaction artifact finalization committed with unexpected payload"))
+		if handled, outcome := reconciledFinalizationOutcome(row, params, finalizeErr, nil); handled {
+			return outcome
 		}
 	}
 
@@ -225,14 +216,15 @@ func (s *Service) reconcileFinalizationError(
 	}
 	row, retryErr := s.getCompactionLog(ctx, params.CompactID)
 	if retryErr == nil {
-		if artifactFinalizationMatches(row, params) {
-			return nil
+		unexpectedStateErr := fmt.Errorf("record compaction finalization failure: %w", completeErr)
+		if getErr != nil {
+			unexpectedStateErr = errors.Join(
+				unexpectedStateErr,
+				fmt.Errorf("initial compaction finalization reconciliation: %w", getErr),
+			)
 		}
-		if artifactFinalizationConflictMatches(row, params) {
-			return fmt.Errorf("%w: persisted conflict recovered after finalization response loss", ErrCompactionSourceChanged)
-		}
-		if row.Status == "error" {
-			return finalizeErr
+		if handled, outcome := reconciledFinalizationOutcome(row, params, finalizeErr, unexpectedStateErr); handled {
+			return outcome
 		}
 	}
 	joined := []error{finalizeErr, fmt.Errorf("record compaction finalization failure: %w", completeErr)}
@@ -243,6 +235,31 @@ func (s *Service) reconcileFinalizationError(
 		joined = append(joined, fmt.Errorf("final compaction finalization reconciliation: %w", retryErr))
 	}
 	return errors.Join(joined...)
+}
+
+func reconciledFinalizationOutcome(
+	row sqlc.BotHistoryMessageCompact,
+	params sqlc.FinalizeCompactionArtifactParams,
+	finalizeErr error,
+	unexpectedStateErr error,
+) (bool, error) {
+	if artifactFinalizationMatches(row, params) {
+		return true, nil
+	}
+	if artifactFinalizationConflictMatches(row, params) {
+		return true, fmt.Errorf("%w: persisted conflict recovered after finalization response loss", ErrCompactionSourceChanged)
+	}
+	if row.Status == "error" {
+		return true, finalizeErr
+	}
+	if row.Status == "ok" {
+		return true, errors.Join(
+			finalizeErr,
+			errors.New("compaction artifact finalization committed with unexpected payload"),
+			unexpectedStateErr,
+		)
+	}
+	return false, nil
 }
 
 func (s *Service) getCompactionLog(ctx context.Context, id pgtype.UUID) (sqlc.BotHistoryMessageCompact, error) {

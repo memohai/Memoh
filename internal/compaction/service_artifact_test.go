@@ -206,7 +206,7 @@ func TestDoCompactionReconcilesCommittedFinalizationAfterResponseLoss(t *testing
 		getErrors:        []error{initialReconcileErr},
 	}}
 
-	result, err := newMachineryService(q).RunCompactionSyncResult(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 100))
+	result, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 100))
 	if err != nil {
 		t.Fatalf("RunCompactionSyncResult error = %v, want reconciled success", err)
 	}
@@ -232,7 +232,7 @@ func TestDoCompactionReconcilesCommittedSourceConflictAfterResponseLoss(t *testi
 	service := newMachineryService(q)
 	config := machineryConfig(&stubModel{summary: "SUMMARY"}, 100)
 
-	err := service.RunCompactionSync(context.Background(), config)
+	_, err := service.RunCompactionSync(context.Background(), config)
 	if !errors.Is(err, ErrCompactionSourceChanged) {
 		t.Fatalf("RunCompactionSync error = %v, want reconciled source conflict", err)
 	}
@@ -265,7 +265,7 @@ func TestDoCompactionReturnsSourceConflictWithoutSecondCompletion(t *testing.T) 
 
 	service := newMachineryService(q)
 	config := machineryConfig(&stubModel{summary: "SUMMARY"}, 100)
-	err := service.RunCompactionSync(context.Background(), config)
+	_, err := service.RunCompactionSync(context.Background(), config)
 	if !errors.Is(err, ErrCompactionSourceChanged) {
 		t.Fatalf("RunCompactionSync error = %v, want source conflict", err)
 	}
