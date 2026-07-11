@@ -6,6 +6,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/contextassembly"
 	"github.com/memohai/memoh/internal/contextbudget"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
@@ -21,12 +22,18 @@ type budgetSourceInput struct {
 }
 
 type budgetSourceProjection struct {
-	items        []contextbudget.Item
-	messages     []sdk.Message
-	toolAnalysis contextbudget.ToolOccurrenceAnalysis
+	sources          []contextassembly.Source
+	originalMessages []conversation.ModelMessage
 }
 
-func budgetItemsForHistoryRecords(records []historyfrag.HistoryRecord) budgetSourceProjection {
+type budgetSourceAssembly struct {
+	messages      []conversation.ModelMessage
+	sourceIndexes []int
+	allocation    contextbudget.Allocation
+	emittedTokens int
+}
+
+func budgetSourcesForHistoryRecords(records []historyfrag.HistoryRecord) budgetSourceProjection {
 	sources := make([]budgetSourceInput, len(records))
 	for index, record := range records {
 		activeArtifact := isActiveContextArtifact(record)
@@ -40,7 +47,7 @@ func budgetItemsForHistoryRecords(records []historyfrag.HistoryRecord) budgetSou
 	return projectBudgetSources(sources)
 }
 
-func budgetItemsForPipelineEntries(entries []composedPipelineMessage) budgetSourceProjection {
+func budgetSourcesForPipelineEntries(entries []composedPipelineMessage) budgetSourceProjection {
 	sources := make([]budgetSourceInput, len(entries))
 	for index, entry := range entries {
 		required := entry.hasSummary || entry.forceKeep
@@ -60,38 +67,54 @@ func budgetItemsForPipelineEntries(entries []composedPipelineMessage) budgetSour
 
 func projectBudgetSources(sources []budgetSourceInput) budgetSourceProjection {
 	projection := budgetSourceProjection{
-		items:    make([]contextbudget.Item, len(sources)),
-		messages: make([]sdk.Message, len(sources)),
+		sources:          make([]contextassembly.Source, len(sources)),
+		originalMessages: make([]conversation.ModelMessage, len(sources)),
 	}
 	for index, source := range sources {
-		message := canonicalBudgetMessage(source.message)
 		tokens := messageconv.EstimateModelMessageTokens(source.message)
-		projection.messages[index] = message
+		projection.originalMessages[index] = source.message
 		retention := contextbudget.RetentionCandidate
 		if source.required {
 			retention = contextbudget.RetentionRequired
 		}
-		projection.items[index] = contextbudget.Item{
+		projection.sources[index] = contextassembly.Source{
 			ID:        source.id,
-			Tokens:    tokens,
+			Message:   messageconv.ModelMessageToSDKMessage(source.message),
 			Retention: retention,
 		}
 		if source.compactable {
-			projection.items[index].CompactableTokens = tokens
+			projection.sources[index].CompactableTokens = tokens
 		}
-	}
-	projection.toolAnalysis = messageconv.AnalyzeSDKToolOccurrences(projection.messages)
-	for index, binding := range projection.toolAnalysis.Bindings {
-		projection.items[index].Group = binding.Group
 	}
 	return projection
 }
 
-func canonicalBudgetMessage(message conversation.ModelMessage) sdk.Message {
-	return messageconv.ModelMessageToSDKMessage(conversation.ModelMessage{
-		Role:    message.Role,
-		Content: messageconv.CanonicalModelMessageContent(message),
+func assembleBudgetSources(projection budgetSourceProjection, envelopeLimit *int, notice string) (budgetSourceAssembly, error) {
+	result, err := contextassembly.Assemble(contextassembly.Request{
+		Sources:             projection.sources,
+		EnvelopeLimit:       envelopeLimit,
+		Notice:              notice,
+		SyntheticToolResult: syntheticToolClosureError,
 	})
+	assembled := budgetSourceAssembly{
+		messages:      make([]conversation.ModelMessage, 0, len(result.Entries)),
+		sourceIndexes: make([]int, 0, len(result.Entries)),
+		allocation:    result.Allocation,
+		emittedTokens: result.EmittedTokens,
+	}
+	for _, entry := range result.Entries {
+		converted := messageconv.SDKMessagesToModelMessages([]sdk.Message{entry.Message})
+		if len(converted) == 0 {
+			continue
+		}
+		message := converted[0]
+		if entry.SourceIndex >= 0 && entry.SourceIndex < len(projection.originalMessages) {
+			message.Usage = projection.originalMessages[entry.SourceIndex].Usage
+		}
+		assembled.messages = append(assembled.messages, message)
+		assembled.sourceIndexes = append(assembled.sourceIndexes, entry.SourceIndex)
+	}
+	return assembled, err
 }
 
 func isActiveContextArtifact(record historyfrag.HistoryRecord) bool {

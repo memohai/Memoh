@@ -1,11 +1,13 @@
 package flow
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/contextassembly"
 	"github.com/memohai/memoh/internal/contextbudget"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
@@ -13,7 +15,7 @@ import (
 	"github.com/memohai/memoh/internal/messageconv"
 )
 
-func TestBudgetItemsAdaptersProduceIdenticalToolOccurrences(t *testing.T) {
+func TestBudgetSourceAdaptersAssembleIdenticalToolOccurrences(t *testing.T) {
 	t.Parallel()
 
 	messages := messageconv.SDKMessagesToModelMessages([]sdk.Message{
@@ -39,24 +41,38 @@ func TestBudgetItemsAdaptersProduceIdenticalToolOccurrences(t *testing.T) {
 		entries[i] = composedPipelineMessage{message: message}
 	}
 
-	historyProjection := budgetItemsForHistoryRecords(records)
-	pipelineProjection := budgetItemsForPipelineEntries(entries)
-	if len(historyProjection.items) != len(pipelineProjection.items) {
-		t.Fatalf("item counts differ: history=%d pipeline=%d", len(historyProjection.items), len(pipelineProjection.items))
+	historyProjection := budgetSourcesForHistoryRecords(records)
+	pipelineProjection := budgetSourcesForPipelineEntries(entries)
+	if len(historyProjection.sources) != len(pipelineProjection.sources) {
+		t.Fatalf("source counts differ: history=%d pipeline=%d", len(historyProjection.sources), len(pipelineProjection.sources))
 	}
-	for i := range historyProjection.items {
-		historyItem := historyProjection.items[i]
-		pipelineItem := pipelineProjection.items[i]
-		if historyItem.Tokens != pipelineItem.Tokens || historyItem.CompactableTokens != pipelineItem.CompactableTokens || historyItem.Group != pipelineItem.Group || historyItem.Retention != pipelineItem.Retention {
-			t.Fatalf("item[%d] differs: history=%#v pipeline=%#v", i, historyItem, pipelineItem)
+	for i := range historyProjection.sources {
+		historySource := historyProjection.sources[i]
+		pipelineSource := pipelineProjection.sources[i]
+		if !reflect.DeepEqual(historySource.Message, pipelineSource.Message) || historySource.CompactableTokens != pipelineSource.CompactableTokens || historySource.Retention != pipelineSource.Retention {
+			t.Fatalf("source[%d] differs: history=%#v pipeline=%#v", i, historySource, pipelineSource)
 		}
 	}
-	if !reflect.DeepEqual(historyProjection.toolAnalysis, pipelineProjection.toolAnalysis) {
-		t.Fatalf("tool analyses differ:\nhistory  %#v\npipeline %#v", historyProjection.toolAnalysis, pipelineProjection.toolAnalysis)
+	historyAssembly, err := assembleBudgetSources(historyProjection, nil, "")
+	if err != nil {
+		t.Fatalf("assemble history: %v", err)
+	}
+	pipelineAssembly, err := assembleBudgetSources(pipelineProjection, nil, "")
+	if err != nil {
+		t.Fatalf("assemble pipeline: %v", err)
+	}
+	if !reflect.DeepEqual(historyAssembly.messages, pipelineAssembly.messages) || !reflect.DeepEqual(historyAssembly.sourceIndexes, pipelineAssembly.sourceIndexes) {
+		t.Fatalf("assembled streams differ:\nhistory  %#v\npipeline %#v", historyAssembly, pipelineAssembly)
+	}
+	if !reflect.DeepEqual(allocationWithoutIDs(historyAssembly.allocation), allocationWithoutIDs(pipelineAssembly.allocation)) {
+		t.Fatalf("allocations differ:\nhistory  %#v\npipeline %#v", historyAssembly.allocation, pipelineAssembly.allocation)
+	}
+	if historyAssembly.emittedTokens != pipelineAssembly.emittedTokens {
+		t.Fatalf("emitted tokens differ: history=%d pipeline=%d", historyAssembly.emittedTokens, pipelineAssembly.emittedTokens)
 	}
 }
 
-func TestBudgetItemsForHistoryRecordsMakesRequiredClosureAtomic(t *testing.T) {
+func TestBudgetSourcesForHistoryRecordsMakeRequiredClosureAtomic(t *testing.T) {
 	t.Parallel()
 
 	messages := messageconv.SDKMessagesToModelMessages([]sdk.Message{
@@ -70,69 +86,71 @@ func TestBudgetItemsForHistoryRecordsMakesRequiredClosureAtomic(t *testing.T) {
 		},
 		sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-a", ToolName: "lookup", Result: "sunny"}),
 	})
-	projection := budgetItemsForHistoryRecords([]historyfrag.HistoryRecord{
+	projection := budgetSourcesForHistoryRecords([]historyfrag.HistoryRecord{
 		{Ref: contextfrag.ContextRef{Namespace: "history", ID: "call"}, ModelMessage: messages[0], Required: true},
 		{Ref: contextfrag.ContextRef{Namespace: "history", ID: "result"}, ModelMessage: messages[1]},
 	})
 
-	if projection.items[0].Group == "" || projection.items[0].Group != projection.items[1].Group {
-		t.Fatalf("tool closure groups = %#v, want one group", projection.items)
-	}
-	if projection.items[0].CompactableTokens != projection.items[0].Tokens || projection.items[0].CompactableTokens <= 0 {
-		t.Fatalf("required raw source was removed from compactable pressure: %#v", projection.items[0])
+	if projection.sources[0].Retention != contextbudget.RetentionRequired || projection.sources[0].CompactableTokens <= 0 {
+		t.Fatalf("required raw source = %#v", projection.sources[0])
 	}
 	limit := 1
-	result := contextbudget.Allocate(contextbudget.Request{SourceLimit: &limit, Items: projection.items})
-	if len(result.Kept) != 2 || result.SourcesFit || result.SourceOverflowTokens <= 0 {
-		t.Fatalf("required closure allocation = %#v, want both kept with explicit overflow", result)
+	assembled, err := assembleBudgetSources(projection, &limit, "")
+	var overflow *contextassembly.OverflowError
+	if !errors.As(err, &overflow) {
+		t.Fatalf("error = %v, want required closure overflow", err)
+	}
+	if len(assembled.allocation.Kept) != 2 || len(assembled.messages) != 2 || assembled.allocation.SourcesFit || assembled.allocation.SourceOverflowTokens <= 0 {
+		t.Fatalf("required closure assembly = %#v", assembled)
 	}
 }
 
-func TestBudgetItemsForHistoryRecordsRequiresEveryActiveArtifactByIdentity(t *testing.T) {
+func TestBudgetSourcesForHistoryRecordsRequireEveryActiveArtifactByIdentity(t *testing.T) {
 	t.Parallel()
 
 	scope := contextfrag.Scope{BotID: "bot", SessionID: "session"}
 	first := historyfrag.SummaryRecord("artifact-a", "same text", nil, scope)
 	second := historyfrag.SummaryRecord("artifact-b", "same text", nil, scope)
-	projection := budgetItemsForHistoryRecords([]historyfrag.HistoryRecord{first, second})
+	projection := budgetSourcesForHistoryRecords([]historyfrag.HistoryRecord{first, second})
 
-	if projection.items[0].ID == projection.items[1].ID {
-		t.Fatalf("distinct artifacts share identity %q", projection.items[0].ID)
+	if projection.sources[0].ID == projection.sources[1].ID {
+		t.Fatalf("distinct artifacts share identity %q", projection.sources[0].ID)
 	}
-	for i, item := range projection.items {
-		if item.Retention != contextbudget.RetentionRequired || item.CompactableTokens != 0 {
-			t.Fatalf("artifact item[%d] = %#v, want required and non-compactable", i, item)
+	for i, source := range projection.sources {
+		if source.Retention != contextbudget.RetentionRequired || source.CompactableTokens != 0 {
+			t.Fatalf("artifact source[%d] = %#v, want required and non-compactable", i, source)
 		}
 	}
 	limit := 1
-	result := contextbudget.Allocate(contextbudget.Request{SourceLimit: &limit, Items: projection.items})
-	if len(result.Kept) != 2 || result.SourcesFit || len(result.Dropped) != 0 {
-		t.Fatalf("artifact overflow was hidden: %#v", result)
+	assembled, err := assembleBudgetSources(projection, &limit, "")
+	var overflow *contextassembly.OverflowError
+	if !errors.As(err, &overflow) || len(assembled.allocation.Kept) != 2 || assembled.allocation.SourcesFit || len(assembled.allocation.Dropped) != 0 {
+		t.Fatalf("artifact overflow was hidden: assembly=%#v error=%v", assembled, err)
 	}
 }
 
-func TestBudgetItemsForPipelineEntriesRequiresSummaryAndCurrentSource(t *testing.T) {
+func TestBudgetSourcesForPipelineEntriesRequireSummaryAndCurrentSource(t *testing.T) {
 	t.Parallel()
 
 	summary := historyfrag.SummaryRecord("artifact-a", "summary", nil, contextfrag.Scope{})
-	projection := budgetItemsForPipelineEntries([]composedPipelineMessage{
+	projection := budgetSourcesForPipelineEntries([]composedPipelineMessage{
 		{message: summary.ModelMessage, summaryRecord: summary, hasSummary: true},
 		{message: sdkModelMessage(t, sdk.UserMessage("raw history"))},
 		{message: sdkModelMessage(t, sdk.UserMessage("current")), forceKeep: true},
 	})
 
-	if projection.items[0].Retention != contextbudget.RetentionRequired || projection.items[0].CompactableTokens != 0 {
-		t.Fatalf("summary item = %#v, want required artifact", projection.items[0])
+	if projection.sources[0].Retention != contextbudget.RetentionRequired || projection.sources[0].CompactableTokens != 0 {
+		t.Fatalf("summary source = %#v, want required artifact", projection.sources[0])
 	}
-	if projection.items[1].Retention != contextbudget.RetentionCandidate || projection.items[1].CompactableTokens != projection.items[1].Tokens || projection.items[1].CompactableTokens <= 0 {
-		t.Fatalf("raw item = %#v, want compactable candidate", projection.items[1])
+	if projection.sources[1].Retention != contextbudget.RetentionCandidate || projection.sources[1].CompactableTokens != messageconv.EstimateSDKMessageTokens(projection.sources[1].Message) {
+		t.Fatalf("raw source = %#v, want compactable candidate", projection.sources[1])
 	}
-	if projection.items[2].Retention != contextbudget.RetentionRequired || projection.items[2].CompactableTokens != projection.items[2].Tokens || projection.items[2].CompactableTokens <= 0 {
-		t.Fatalf("current item = %#v, want required raw source", projection.items[2])
+	if projection.sources[2].Retention != contextbudget.RetentionRequired || projection.sources[2].CompactableTokens != messageconv.EstimateSDKMessageTokens(projection.sources[2].Message) {
+		t.Fatalf("current source = %#v, want required raw source", projection.sources[2])
 	}
 }
 
-func TestBudgetItemsExcludeReasoningFromProjectedPayload(t *testing.T) {
+func TestBudgetSourceAssemblyOwnsCanonicalProjection(t *testing.T) {
 	t.Parallel()
 
 	message := sdkModelMessage(t, sdk.Message{
@@ -142,30 +160,32 @@ func TestBudgetItemsExcludeReasoningFromProjectedPayload(t *testing.T) {
 			sdk.TextPart{Text: "visible"},
 		},
 	})
-	projection := budgetItemsForHistoryRecords([]historyfrag.HistoryRecord{{ModelMessage: message}})
-
-	if projection.items[0].Tokens != 2 {
-		t.Fatalf("visible token cost = %d, want 2", projection.items[0].Tokens)
+	projection := budgetSourcesForHistoryRecords([]historyfrag.HistoryRecord{{ModelMessage: message}})
+	if len(projection.sources[0].Message.Content) != 2 {
+		t.Fatalf("adapter rewrote source before assembly: %#v", projection.sources[0].Message)
 	}
-	if len(projection.messages[0].Content) != 1 {
-		t.Fatalf("projected content = %#v, want one visible part", projection.messages[0].Content)
+	assembled, err := assembleBudgetSources(projection, nil, "")
+	if err != nil {
+		t.Fatalf("assemble visible source: %v", err)
 	}
-	text, ok := projection.messages[0].Content[0].(sdk.TextPart)
-	if !ok || text.Text != "visible" {
-		t.Fatalf("projected visible content = %#v", projection.messages[0].Content[0])
+	if len(assembled.messages) != 1 || assembled.messages[0].TextContent() != "visible" || assembled.emittedTokens != 2 {
+		t.Fatalf("canonical assembly = %#v", assembled)
 	}
 
 	reasoningOnly := sdkModelMessage(t, sdk.Message{
 		Role:    sdk.MessageRoleAssistant,
 		Content: []sdk.MessagePart{sdk.ReasoningPart{Text: "private only"}},
 	})
-	projection = budgetItemsForHistoryRecords([]historyfrag.HistoryRecord{{ModelMessage: reasoningOnly}})
-	if projection.items[0].Tokens != 0 || len(projection.messages[0].Content) != 0 {
-		t.Fatalf("reasoning-only projection = item:%#v message:%#v, want zero visible payload", projection.items[0], projection.messages[0])
+	assembled, err = assembleBudgetSources(budgetSourcesForHistoryRecords([]historyfrag.HistoryRecord{{ModelMessage: reasoningOnly}}), nil, "")
+	if err != nil {
+		t.Fatalf("assemble reasoning-only source: %v", err)
+	}
+	if len(assembled.messages) != 0 || len(assembled.allocation.Dropped) != 1 || assembled.allocation.BudgetTrimmed {
+		t.Fatalf("reasoning-only assembly = %#v", assembled)
 	}
 }
 
-func TestBudgetItemsPreservePartLevelIssueForLaterRewrite(t *testing.T) {
+func TestBudgetSourceAssemblyRepairsPartsWithoutDroppingVisibleCarrier(t *testing.T) {
 	t.Parallel()
 
 	message := sdkModelMessage(t, sdk.Message{
@@ -175,18 +195,57 @@ func TestBudgetItemsPreservePartLevelIssueForLaterRewrite(t *testing.T) {
 			sdk.ToolResultPart{ToolCallID: "orphan", ToolName: "lookup", Result: "bad"},
 		},
 	})
-	projection := budgetItemsForHistoryRecords([]historyfrag.HistoryRecord{{ModelMessage: message}})
+	projection := budgetSourcesForHistoryRecords([]historyfrag.HistoryRecord{{ModelMessage: message}})
+	if len(projection.sources[0].Message.Content) != 2 {
+		t.Fatalf("adapter rewrote source before assembly: %#v", projection.sources[0].Message)
+	}
+	assembled, err := assembleBudgetSources(projection, nil, "")
+	if err != nil {
+		t.Fatalf("assemble mixed-validity source: %v", err)
+	}
+	if len(assembled.messages) != 1 || assembled.messages[0].TextContent() != "visible payload" || len(assembled.allocation.Dropped) != 0 {
+		t.Fatalf("mixed-validity assembly = %#v", assembled)
+	}
+}
 
-	wantIssues := []contextbudget.ToolPartIssue{{CarrierIndex: 0, PartIndex: 1, Reason: contextbudget.DropToolOrphanResult}}
-	if !reflect.DeepEqual(projection.toolAnalysis.PartIssues, wantIssues) {
-		t.Fatalf("part issues = %#v, want %#v", projection.toolAnalysis.PartIssues, wantIssues)
+func TestBudgetSourceAssemblyPreservesUsageOnlyForSourceEntries(t *testing.T) {
+	t.Parallel()
+
+	call := sdkModelMessage(t, sdk.Message{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{sdk.ToolCallPart{
+			ToolCallID: "call-a",
+			ToolName:   "lookup",
+			Input:      map[string]any{},
+		}},
+	})
+	call.Usage = []byte(`{"inputTokens":3,"outputTokens":5,"totalTokens":8}`)
+	projection := budgetSourcesForHistoryRecords([]historyfrag.HistoryRecord{
+		{ModelMessage: call},
+		{ModelMessage: sdkModelMessage(t, sdk.UserMessage("boundary"))},
+	})
+	assembled, err := assembleBudgetSources(projection, nil, "")
+	if err != nil {
+		t.Fatalf("assemble dangling call: %v", err)
 	}
-	if projection.items[0].Retention == contextbudget.RetentionDrop {
-		t.Fatalf("mixed-validity carrier was dropped wholesale: %#v", projection.items[0])
+	if got, want := assembled.sourceIndexes, []int{0, -1, 1}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("source indexes = %#v, want %#v", got, want)
 	}
-	if len(projection.messages[0].Content) != 2 {
-		t.Fatalf("adapter rewrote source before the rewrite stage: %#v", projection.messages[0])
+	if len(assembled.messages[0].Usage) == 0 || len(assembled.messages[1].Usage) != 0 {
+		t.Fatalf("usage leaked across generated entry: %#v", assembled.messages)
 	}
+}
+
+func allocationWithoutIDs(allocation contextbudget.Allocation) contextbudget.Allocation {
+	allocation.Kept = append([]contextbudget.Decision(nil), allocation.Kept...)
+	allocation.Dropped = append([]contextbudget.Decision(nil), allocation.Dropped...)
+	for i := range allocation.Kept {
+		allocation.Kept[i].ID = ""
+	}
+	for i := range allocation.Dropped {
+		allocation.Dropped[i].ID = ""
+	}
+	return allocation
 }
 
 func sdkModelMessage(t *testing.T, message sdk.Message) conversation.ModelMessage {
