@@ -1917,8 +1917,15 @@ export const useChatStore = defineStore('chat', () => {
     }
     const streamId = createStreamId()
     const silent = isSessionStreaming(sid)
-    if (!beginApprovalResponse({ streamId, approvalId, botId: bid, sessionId: sid, silent })) return false
     const previousApprovalStates = snapshotToolApprovalStates(approvalId)
+    if (!beginApprovalResponse({
+      streamId,
+      approvalId,
+      botId: bid,
+      sessionId: sid,
+      silent,
+      rollback: () => restoreToolApprovalStates(previousApprovalStates),
+    })) return false
     let assistantTurn: ChatAssistantTurn | null = null
     let appendedAssistantTurn = false
     if (!silent) {

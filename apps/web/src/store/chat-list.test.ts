@@ -796,6 +796,77 @@ describe('chat-list store', () => {
     await expect(sendPromise).resolves.toMatchObject({ ok: true })
   })
 
+  it('rolls back a detached approval turn when the response fails after switching sessions', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-1', bot_id: 'bot-1', title: 'Approval', type: 'chat' },
+        { id: 'session-2', bot_id: 'bot-1', title: 'Other', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'exec',
+          input: { command: 'pwd' },
+          tool_call_id: 'call-detached',
+          running: false,
+          approval: {
+            approval_id: 'approval-detached',
+            short_id: 12,
+            status: 'pending',
+            can_approve: true,
+          },
+        },
+      } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sendPromise = store.sendMessage('run pwd')
+    await flushPromises()
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    if (!assistant || assistant.role !== 'assistant') throw new Error('approval turn was not streamed')
+    const tool = assistant.messages.find(block => block.type === 'tool')
+    if (!tool?.approval) throw new Error('approval block was not streamed')
+
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    await store.respondToolApproval(tool.approval, 'approve')
+    const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
+    await store.selectSession('session-2')
+    streamHandler?.({
+      type: 'error',
+      stream_id: responseStreamId,
+      session_id: 'session-1',
+      message: 'approval failed',
+    } as UIStreamEvent)
+    await flushPromises()
+    await flushPromises()
+
+    api.fetchMessagesUI.mockRejectedValueOnce(new Error('offline'))
+    await store.selectSession('session-1')
+    await flushPromises()
+    await flushPromises()
+
+    const assistantTurns = store.messages.filter(turn => turn.role === 'assistant')
+    expect(assistantTurns).toHaveLength(1)
+    expect(assistantTurns[0]).toBe(assistant)
+    expect(assistant.streaming).toBe(true)
+    expect(tool.approval).toMatchObject({
+      approval_id: 'approval-detached',
+      status: 'pending',
+      can_approve: true,
+    })
+
+    store.abort()
+    await expect(sendPromise).resolves.toMatchObject({ ok: false, stage: 'stream' })
+    expect(assistant.streaming).toBe(false)
+  })
+
   it('sends each ACP approval response only once while the response is in flight', async () => {
     sendEvents = [
       { type: 'start' } as UIStreamEvent,

@@ -14,11 +14,13 @@ export interface BeginApprovalResponseInput {
   botId: string
   sessionId: string
   silent: boolean
+  rollback?: () => void
 }
 
 interface PendingApprovalResponse extends ApprovalResponse {
   startedAt: number
   cancelExpiry?: () => void
+  rollback?: () => void
 }
 
 type ScheduleExpiry = (callback: () => void, delayMs: number) => () => void
@@ -104,6 +106,7 @@ export function createApprovalResponseTracker({
       sessionId,
       silent: input.silent,
       startedAt: now(),
+      rollback: input.rollback,
     }
     responses.set(streamId, response)
     response.cancelExpiry = scheduleExpiry(() => expireResponse(streamId), ttlMs)
@@ -121,7 +124,10 @@ export function createApprovalResponseTracker({
     responses.delete(id)
     response.cancelExpiry?.()
     rememberTerminalResponse(id)
-    if (outcome === 'failed' || outcome === 'expired') rollbackApproval(response.approvalId)
+    if (outcome === 'failed' || outcome === 'expired') {
+      if (response.rollback) response.rollback()
+      else rollbackApproval(response.approvalId)
+    }
     return response
   }
 

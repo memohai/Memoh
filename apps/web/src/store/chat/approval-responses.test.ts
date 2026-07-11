@@ -53,6 +53,21 @@ describe('approval response tracker', () => {
     expect(rollbackApproval).toHaveBeenCalledOnce()
   })
 
+  it('uses the response-owned rollback when its transcript is no longer current', () => {
+    const rollbackApproval = vi.fn()
+    const rollbackResponse = vi.fn()
+    const tracker = createApprovalResponseTracker({ rollbackApproval })
+
+    tracker.beginApprovalResponse({
+      ...input('stream-1'),
+      rollback: rollbackResponse,
+    })
+    tracker.settleApprovalResponse('stream-1', 'failed')
+
+    expect(rollbackResponse).toHaveBeenCalledOnce()
+    expect(rollbackApproval).not.toHaveBeenCalled()
+  })
+
   it('expires abandoned responses, rolls them back, and allows a retry', () => {
     let currentTime = 1_000
     const rollbackApproval = vi.fn()
