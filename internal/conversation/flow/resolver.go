@@ -390,33 +390,37 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 				slog.Int("context_token_budget", contextTokenBudget),
 				slog.Int("compaction_threshold", compactionThreshold),
 			)
-			r.runCompactionSync(ctx, req, estimatedTokens)
-			// Reload messages after compaction.
-			loaded, loadErr = r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
-			if loadErr != nil {
-				r.logger.Error("resolve: reload messages after compaction failed",
-					slog.String("bot_id", req.BotID),
-					slog.Any("error", loadErr),
-				)
-				return resolvedContext{}, loadErr
+			// Reload and post-process only when this run actually produced a
+			// summary. A noop (cooldown, in-flight, nothing markable) keeps
+			// this turn's context untouched — possibly still above the
+			// threshold — and the next turn re-evaluates.
+			if res := r.runCompactionSync(ctx, req, estimatedTokens); res.Status == compaction.StatusOK {
+				loaded, loadErr = r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
+				if loadErr != nil {
+					r.logger.Error("resolve: reload messages after compaction failed",
+						slog.String("bot_id", req.BotID),
+						slog.Any("error", loadErr),
+					)
+					return resolvedContext{}, loadErr
+				}
+				loaded = pruneHistoryForGateway(loaded)
+				loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
+				loaded = dedupePersistedCurrentUserMessage(loaded, req)
+				loaded, loadErr = r.ensureRequiredHistoryMessage(ctx, loaded, req)
+				if loadErr != nil {
+					r.logger.Error("resolve: reload required history message failed",
+						slog.String("bot_id", req.BotID),
+						slog.Any("error", loadErr),
+					)
+					return resolvedContext{}, loadErr
+				}
+				loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
+				messages, estimatedTokens = trimMessagesByTokens(r.logger, loaded, contextTokenBudget)
+				// Remove tool messages from the recent context — they are large
+				// and unnecessary when we already have a summary. Keep only
+				// user/assistant conversation turns.
+				messages = stripToolMessages(messages)
 			}
-			loaded = pruneHistoryForGateway(loaded)
-			loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
-			loaded = dedupePersistedCurrentUserMessage(loaded, req)
-			loaded, loadErr = r.ensureRequiredHistoryMessage(ctx, loaded, req)
-			if loadErr != nil {
-				r.logger.Error("resolve: reload required history message failed",
-					slog.String("bot_id", req.BotID),
-					slog.Any("error", loadErr),
-				)
-				return resolvedContext{}, loadErr
-			}
-			loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
-			messages, estimatedTokens = trimMessagesByTokens(r.logger, loaded, contextTokenBudget)
-			// Remove tool messages from the recent context — they are large
-			// and unnecessary when we already have a summary. Keep only
-			// user/assistant conversation turns.
-			messages = stripToolMessages(messages)
 		}
 		_ = estimatedTokens
 	}

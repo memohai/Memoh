@@ -156,7 +156,7 @@ func (h *CompactionHandler) TriggerCompact(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	res, err := h.service.RunCompactionSyncResult(c.Request().Context(), cfg)
+	res, err := h.service.RunCompactionSync(c.Request().Context(), cfg)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

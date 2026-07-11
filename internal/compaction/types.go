@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Compaction result statuses reported by RunCompactionSyncResult.
+// Compaction result statuses reported by RunCompactionSync.
 const (
 	StatusOK   = "ok"   // messages were compacted into a summary
 	StatusNoop = "noop" // nothing to compact (already compact, cooled down, or in flight)

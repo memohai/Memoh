@@ -115,17 +115,11 @@ func (s *Service) TriggerCompaction(ctx context.Context, cfg TriggerConfig) {
 	}()
 }
 
-// RunCompactionSync runs compaction synchronously and returns any error. Use
-// RunCompactionSyncResult when the caller needs this session's scoped outcome.
-func (s *Service) RunCompactionSync(ctx context.Context, cfg TriggerConfig) error {
-	_, err := s.runCompaction(ctx, cfg)
-	return err
-}
-
-// RunCompactionSyncResult runs compaction synchronously and reports this
-// session's scoped Result, so callers respond with their own outcome instead of
-// reading an unscoped bot-wide log that may belong to another session.
-func (s *Service) RunCompactionSyncResult(ctx context.Context, cfg TriggerConfig) (Result, error) {
+// RunCompactionSync runs compaction synchronously and reports this session's
+// scoped Result, so callers act on their own outcome (a noop keeps their
+// current context) instead of reading an unscoped bot-wide log that may belong
+// to another session.
+func (s *Service) RunCompactionSync(ctx context.Context, cfg TriggerConfig) (Result, error) {
 	return s.runCompaction(ctx, cfg)
 }
 

@@ -453,6 +453,7 @@
     "compact": {
       "unavailable": "Compaction isn't available right now.",
       "done": "✅ Context compacted.",
+      "noop": "Nothing to compact right now.",
       "noModel": "No compaction or chat model is configured for this bot."
     },
     "toolApproval": {

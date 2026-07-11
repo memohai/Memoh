@@ -59,8 +59,12 @@ func (h *Handler) buildCompactGroup() *CommandGroup {
 				return "", err
 			}
 
-			if err := h.compactionService.RunCompactionSync(cc.Ctx, cfg); err != nil {
+			res, err := h.compactionService.RunCompactionSync(cc.Ctx, cfg)
+			if err != nil {
 				return "", fmt.Errorf("compaction failed: %w", err)
+			}
+			if res.Status != compaction.StatusOK {
+				return cc.T("cmd.compact.noop"), nil
 			}
 			return cc.T("cmd.compact.done"), nil
 		},

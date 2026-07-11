@@ -170,7 +170,7 @@ func TestDoCompactionMarksToolAwareWindowAndRendersCleanPrompt(t *testing.T) {
 	// The boundary guard must advance to 7, pulling result B in with its call, so
 	// the marked set is exactly 0..6. If adjustForToolBoundary regressed, this
 	// marks only 0..5 and the assertions below fail.
-	if err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450)); err != nil {
+	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450)); err != nil {
 		t.Fatalf("RunCompactionSync: %v", err)
 	}
 
@@ -219,7 +219,7 @@ func TestDoCompactionInjectsPriorContext(t *testing.T) {
 	stub := &stubModel{summary: "S2"}
 	svc := newMachineryService(q)
 
-	if err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450)); err != nil {
+	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450)); err != nil {
 		t.Fatalf("RunCompactionSync: %v", err)
 	}
 	if !strings.Contains(stub.prompt, "prior_context") || !strings.Contains(stub.prompt, "earlier-segment-summary") {
@@ -237,7 +237,7 @@ func TestDoCompactionAllEmptyWindowSkipsModelAndMarking(t *testing.T) {
 	stub := &stubModel{summary: "unused"}
 	svc := newMachineryService(q)
 
-	if err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 150)); err != nil {
+	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 150)); err != nil {
 		t.Fatalf("RunCompactionSync: %v", err)
 	}
 	if stub.calls != 0 {
@@ -261,7 +261,7 @@ func TestDoCompactionIncompleteToolExchangeSkipsModelAndMarking(t *testing.T) {
 	stub := &stubModel{summary: "unused"}
 	svc := newMachineryService(q)
 
-	if err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 150)); err != nil {
+	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 150)); err != nil {
 		t.Fatalf("RunCompactionSync: %v", err)
 	}
 	if stub.calls != 0 {
@@ -292,7 +292,7 @@ func TestDoCompactionMarksOnlyContiguousRunAcrossEmptyMiddleRow(t *testing.T) {
 	stub := &stubModel{summary: "SUMMARY"}
 	svc := newMachineryService(q)
 
-	if err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 250)); err != nil {
+	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 250)); err != nil {
 		t.Fatalf("RunCompactionSync: %v", err)
 	}
 	if len(q.markedIDs) != 1 || q.markedIDs[0] != rows[0].ID {
@@ -303,7 +303,7 @@ func TestDoCompactionMarksOnlyContiguousRunAcrossEmptyMiddleRow(t *testing.T) {
 	}
 }
 
-func TestRunCompactionSyncResultReportsScopedNoop(t *testing.T) {
+func TestRunCompactionSyncReportsScopedNoop(t *testing.T) {
 	// An already-compact/fresh session compacts nothing. The result must be a
 	// scoped no-op, so a caller (the HTTP endpoint) never has to fall back to an
 	// unscoped bot-wide log that could belong to another session.
@@ -311,7 +311,7 @@ func TestRunCompactionSyncResultReportsScopedNoop(t *testing.T) {
 	stub := &stubModel{summary: "unused"}
 	svc := newMachineryService(q)
 
-	res, err := svc.RunCompactionSyncResult(context.Background(), machineryConfig(stub, 100))
+	res, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 100))
 	if err != nil {
 		t.Fatalf("no-op must not error: %v", err)
 	}
@@ -323,27 +323,27 @@ func TestRunCompactionSyncResultReportsScopedNoop(t *testing.T) {
 	}
 }
 
-func TestRunCompactionSyncResultReportsScopedSummaryOnSuccess(t *testing.T) {
+func TestRunCompactionSyncReportsScopedSummaryOnSuccess(t *testing.T) {
 	q := &fakeQueries{uncompacted: machineryCorpus(t)}
 	stub := &stubModel{summary: "SUMMARY-OK"}
 	svc := newMachineryService(q)
 
-	res, err := svc.RunCompactionSyncResult(context.Background(), machineryConfig(stub, 450))
+	res, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450))
 	if err != nil {
-		t.Fatalf("RunCompactionSyncResult: %v", err)
+		t.Fatalf("RunCompactionSync: %v", err)
 	}
 	if res.Status != StatusOK || res.Summary != "SUMMARY-OK" || res.MessageCount != len(q.markedIDs) {
 		t.Fatalf("success result = %+v, want ok/SUMMARY-OK/%d", res, len(q.markedIDs))
 	}
 }
 
-func TestRunCompactionSyncResultFailureSurfacesError(t *testing.T) {
+func TestRunCompactionSyncFailureSurfacesError(t *testing.T) {
 	q := &fakeQueries{uncompacted: machineryCorpus(t)}
 	svc := newMachineryService(q)
 	cfg := machineryConfig(&stubModel{}, 450)
 	cfg.HTTPClient = &http.Client{Transport: &failingModel{}}
 
-	res, err := svc.RunCompactionSyncResult(context.Background(), cfg)
+	res, err := svc.RunCompactionSync(context.Background(), cfg)
 	if err == nil {
 		t.Fatal("a summarizer failure must surface an error, not a stale result")
 	}
@@ -357,7 +357,7 @@ func TestDoCompactionEmptyHistoryNoOp(t *testing.T) {
 	stub := &stubModel{summary: "unused"}
 	svc := newMachineryService(q)
 
-	if err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 100)); err != nil {
+	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 100)); err != nil {
 		t.Fatalf("RunCompactionSync: %v", err)
 	}
 	if stub.calls != 0 || len(q.markedIDs) != 0 {
@@ -387,7 +387,7 @@ func TestDoCompactionSummarizerFailureRecordsErrorWithoutMarking(t *testing.T) {
 	cfg := machineryConfig(&stubModel{}, 450)
 	cfg.HTTPClient = &http.Client{Transport: &failingModel{}}
 
-	if err := svc.RunCompactionSync(context.Background(), cfg); err == nil {
+	if _, err := svc.RunCompactionSync(context.Background(), cfg); err == nil {
 		t.Fatal("summarizer failure must surface an error")
 	}
 	if len(q.markedIDs) != 0 {
@@ -404,7 +404,7 @@ func TestDoCompactionEmptySummaryRecordsErrorWithoutMarking(t *testing.T) {
 	stub := &stubModel{summary: "   "}
 	svc := newMachineryService(q)
 
-	if err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450)); err == nil {
+	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450)); err == nil {
 		t.Fatal("an empty summary must surface an error")
 	}
 	if len(q.markedIDs) != 0 {
@@ -425,14 +425,14 @@ func TestRunCompactionFailureCooldownSkipsImmediateRetry(t *testing.T) {
 	fail := &failingModel{}
 	cfg.HTTPClient = &http.Client{Transport: fail}
 
-	if err := svc.RunCompactionSync(context.Background(), cfg); err == nil {
+	if _, err := svc.RunCompactionSync(context.Background(), cfg); err == nil {
 		t.Fatal("first attempt must run and fail")
 	}
 	if fail.calls != 1 {
 		t.Fatalf("calls = %d, want 1", fail.calls)
 	}
 
-	if err := svc.RunCompactionSync(context.Background(), cfg); err != nil {
+	if _, err := svc.RunCompactionSync(context.Background(), cfg); err != nil {
 		t.Fatalf("cooldown skip must not surface an error: %v", err)
 	}
 	if fail.calls != 1 {
@@ -440,7 +440,7 @@ func TestRunCompactionFailureCooldownSkipsImmediateRetry(t *testing.T) {
 	}
 
 	now = now.Add(compactionFailureCooldown + time.Second)
-	if err := svc.RunCompactionSync(context.Background(), cfg); err == nil {
+	if _, err := svc.RunCompactionSync(context.Background(), cfg); err == nil {
 		t.Fatal("attempt after cooldown must run and fail again")
 	}
 	if fail.calls != 2 {
@@ -456,7 +456,7 @@ func TestRunCompactionManualRequestBypassesFailureCooldown(t *testing.T) {
 
 	autoCfg := machineryConfig(&stubModel{}, 450)
 	autoCfg.HTTPClient = &http.Client{Transport: &failingModel{}}
-	if err := svc.RunCompactionSync(context.Background(), autoCfg); err == nil {
+	if _, err := svc.RunCompactionSync(context.Background(), autoCfg); err == nil {
 		t.Fatal("first automatic attempt must run and fail, arming the cooldown")
 	}
 
@@ -467,7 +467,7 @@ func TestRunCompactionManualRequestBypassesFailureCooldown(t *testing.T) {
 	manualCfg := autoCfg
 	manualCfg.Manual = true
 	manualCfg.HTTPClient = &http.Client{Transport: manualStub}
-	if err := svc.RunCompactionSync(context.Background(), manualCfg); err != nil {
+	if _, err := svc.RunCompactionSync(context.Background(), manualCfg); err != nil {
 		t.Fatalf("manual compaction must run despite cooldown: %v", err)
 	}
 	if manualStub.calls != 1 {
@@ -483,7 +483,7 @@ func TestRunCompactionManualRequestBypassesFailureCooldown(t *testing.T) {
 	autoRetry := &failingModel{}
 	autoRetryCfg := autoCfg
 	autoRetryCfg.HTTPClient = &http.Client{Transport: autoRetry}
-	if err := svc.RunCompactionSync(context.Background(), autoRetryCfg); err == nil {
+	if _, err := svc.RunCompactionSync(context.Background(), autoRetryCfg); err == nil {
 		t.Fatal("automatic retry after a successful manual run should proceed and fail")
 	}
 	if autoRetry.calls != 1 {
@@ -499,7 +499,7 @@ func TestRunCompactionManualFailureStillSurfacesError(t *testing.T) {
 
 	autoCfg := machineryConfig(&stubModel{}, 450)
 	autoCfg.HTTPClient = &http.Client{Transport: &failingModel{}}
-	if err := svc.RunCompactionSync(context.Background(), autoCfg); err == nil {
+	if _, err := svc.RunCompactionSync(context.Background(), autoCfg); err == nil {
 		t.Fatal("automatic attempt must fail to arm the cooldown")
 	}
 
@@ -509,7 +509,7 @@ func TestRunCompactionManualFailureStillSurfacesError(t *testing.T) {
 	manualCfg := autoCfg
 	manualCfg.Manual = true
 	manualCfg.HTTPClient = &http.Client{Transport: manualFail}
-	if err := svc.RunCompactionSync(context.Background(), manualCfg); err == nil {
+	if _, err := svc.RunCompactionSync(context.Background(), manualCfg); err == nil {
 		t.Fatal("a failing manual compaction must return an error, not a false success")
 	}
 	if manualFail.calls != 1 {
@@ -527,7 +527,7 @@ func TestRunCompactionFailureCooldownClearsOnSuccess(t *testing.T) {
 
 	failCfg := sessionCfg
 	failCfg.HTTPClient = &http.Client{Transport: &failingModel{}}
-	if err := svc.RunCompactionSync(context.Background(), failCfg); err == nil {
+	if _, err := svc.RunCompactionSync(context.Background(), failCfg); err == nil {
 		t.Fatal("expected initial failure")
 	}
 
@@ -535,7 +535,7 @@ func TestRunCompactionFailureCooldownClearsOnSuccess(t *testing.T) {
 	successStub := &stubModel{summary: "recovered"}
 	successCfg := sessionCfg
 	successCfg.HTTPClient = &http.Client{Transport: successStub}
-	if err := svc.RunCompactionSync(context.Background(), successCfg); err != nil {
+	if _, err := svc.RunCompactionSync(context.Background(), successCfg); err != nil {
 		t.Fatalf("attempt after cooldown should succeed: %v", err)
 	}
 	if successStub.calls != 1 {
@@ -545,7 +545,7 @@ func TestRunCompactionFailureCooldownClearsOnSuccess(t *testing.T) {
 	retryFail := &failingModel{}
 	retryCfg := sessionCfg
 	retryCfg.HTTPClient = &http.Client{Transport: retryFail}
-	if err := svc.RunCompactionSync(context.Background(), retryCfg); err == nil {
+	if _, err := svc.RunCompactionSync(context.Background(), retryCfg); err == nil {
 		t.Fatal("expected failure from immediate retry model")
 	}
 	if retryFail.calls != 1 {
@@ -565,7 +565,7 @@ func TestRunCompactionSkipsWhenSessionAlreadyInFlight(t *testing.T) {
 	}
 	defer svc.endSessionCompaction(cfg.SessionID)
 
-	if err := svc.RunCompactionSync(context.Background(), cfg); err != nil {
+	if _, err := svc.RunCompactionSync(context.Background(), cfg); err != nil {
 		t.Fatalf("in-flight skip must not error: %v", err)
 	}
 	if stub.calls != 0 || q.created || len(q.markedIDs) != 0 {
