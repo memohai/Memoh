@@ -20,13 +20,16 @@ func TestCapPriorSummariesKeepsNewestWithinBudget(t *testing.T) {
 	}
 }
 
-func TestCapPriorSummariesAlwaysKeepsTheNewest(t *testing.T) {
+func TestCapPriorSummariesAlwaysKeepsTheNewestTruncatedToBudget(t *testing.T) {
 	t.Parallel()
 
 	summaries := []string{"old", strings.Repeat("y", 4000)}
 	capped := capPriorSummaries(summaries, 10)
 	if len(capped) != 1 || !strings.HasPrefix(capped[0], "y") {
 		t.Fatalf("cap must keep at least the newest summary, got %q", capped)
+	}
+	if got := estimateBytesAsTokens(capped[0]); got > 10+4 {
+		t.Fatalf("forced newest summary must be truncated to the cap, got ~%d tokens", got)
 	}
 }
 
