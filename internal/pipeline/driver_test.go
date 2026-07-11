@@ -839,6 +839,8 @@ type fakeRunConfigResolver struct {
 	trimFn                func(messages []ContextMessage, contextTokenBudget int) ([]ContextMessage, int)
 	lastPromptInput       DirectDiscussPromptInput
 	promptFinishCalls     int
+	storeCalls            int
+	storeErr              error
 }
 
 func (f *fakeRunConfigResolver) TrimDiscussContext(messages []ContextMessage, contextTokenBudget int) ([]ContextMessage, int) {
@@ -890,8 +892,9 @@ func (f *fakeRunConfigResolver) MaybeCompactSession(_ context.Context, _, _, use
 	f.compactionUserID = userID
 }
 
-func (*fakeRunConfigResolver) StoreRound(_ context.Context, _, _, _, _ string, _ []sdk.Message, _ string) error {
-	return nil
+func (f *fakeRunConfigResolver) StoreRound(_ context.Context, _, _, _, _ string, _ []sdk.Message, _ string) error {
+	f.storeCalls++
+	return f.storeErr
 }
 
 type fakeDirectDiscussPromptPreparer struct {

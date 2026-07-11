@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -133,6 +135,121 @@ func TestHandleReplyWithAgentConsumesPreparedPromptAndReceipt(t *testing.T) {
 	}
 	if resolver.compactionCalls != 0 {
 		t.Fatalf("driver bypassed receipt with %d legacy compaction calls", resolver.compactionCalls)
+	}
+}
+
+func TestHandleReplyWithAgentFinishesReceiptOnceAcrossExitPaths(t *testing.T) {
+	t.Parallel()
+
+	terminalMessages, err := json.Marshal([]sdk.Message{sdk.AssistantMessage("done")})
+	if err != nil {
+		t.Fatalf("marshal terminal messages: %v", err)
+	}
+	tests := []struct {
+		name       string
+		events     []agentpkg.StreamEvent
+		storeErr   error
+		wantCursor int64
+		wantStore  int
+	}{
+		{
+			name:       "no terminal",
+			events:     []agentpkg.StreamEvent{{Type: agentpkg.EventError, Error: "provider failed"}},
+			wantCursor: 50,
+		},
+		{
+			name:       "terminal abort",
+			events:     []agentpkg.StreamEvent{{Type: agentpkg.EventAgentAbort}},
+			wantCursor: 100,
+		},
+		{
+			name:       "store failure",
+			events:     []agentpkg.StreamEvent{{Type: agentpkg.EventAgentEnd, Messages: terminalMessages}},
+			storeErr:   errors.New("store failed"),
+			wantCursor: 100,
+			wantStore:  1,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			receipt := &countingDirectDiscussReceipt{}
+			preparer := &capturingDirectDiscussPromptPreparer{prepared: PreparedDirectDiscussPrompt{
+				RunConfig: agentpkg.RunConfig{},
+				Receipt:   receipt,
+			}}
+			resolver := &fakeRunConfigResolver{
+				resolveResult: ResolveRunConfigResult{DirectDiscussPromptPreparer: preparer},
+				storeErr:      test.storeErr,
+			}
+			driver := NewDiscussDriver(DiscussDriverDeps{Resolver: resolver})
+			sess := &discussSession{
+				config:          DiscussSessionConfig{BotID: "bot", SessionID: "session"},
+				lastProcessedMs: 50,
+			}
+			rc := RenderedContext{renderedText("current", 100, "current")}
+
+			driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, &fakeDiscussStreamer{events: test.events})
+
+			if got := receipt.calls.Load(); got != 1 {
+				t.Fatalf("receipt finish calls = %d, want 1", got)
+			}
+			if sess.lastProcessedMs != test.wantCursor {
+				t.Fatalf("cursor = %d, want %d", sess.lastProcessedMs, test.wantCursor)
+			}
+			if resolver.storeCalls != test.wantStore {
+				t.Fatalf("store calls = %d, want %d", resolver.storeCalls, test.wantStore)
+			}
+		})
+	}
+}
+
+func TestHandleReplyWithAgentStopsWhenPromptPreparationFails(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		preparer *capturingDirectDiscussPromptPreparer
+	}{
+		{
+			name:     "prepare error",
+			preparer: &capturingDirectDiscussPromptPreparer{err: errors.New("prepare failed")},
+		},
+		{
+			name: "missing receipt",
+			preparer: &capturingDirectDiscussPromptPreparer{prepared: PreparedDirectDiscussPrompt{
+				RunConfig: agentpkg.RunConfig{},
+			}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			resolver := &fakeRunConfigResolver{resolveResult: ResolveRunConfigResult{DirectDiscussPromptPreparer: test.preparer}}
+			agent := &fakeDiscussStreamer{}
+			driver := NewDiscussDriver(DiscussDriverDeps{Resolver: resolver})
+			sess := &discussSession{
+				config:          DiscussSessionConfig{BotID: "bot", SessionID: "session"},
+				lastProcessedMs: 50,
+			}
+
+			driver.handleReplyWithAgent(
+				context.Background(),
+				sess,
+				RenderedContext{renderedText("current", 100, "current")},
+				driver.logger,
+				agent,
+			)
+
+			if agent.lastConfig != nil {
+				t.Fatalf("agent received config after %s: %#v", test.name, agent.lastConfig)
+			}
+			if sess.lastProcessedMs != 50 {
+				t.Fatalf("cursor advanced after %s to %d", test.name, sess.lastProcessedMs)
+			}
+		})
 	}
 }
 

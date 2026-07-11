@@ -3,7 +3,6 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -12,7 +11,6 @@ import (
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/contextfrag"
 )
 
 // SetResolver sets the RunConfigResolver after construction (breaks DI cycles).
@@ -38,19 +36,6 @@ func latestRCEventAtMs(rc RenderedContext) int64 {
 		}
 	}
 	return latest
-}
-
-func usageInputTokens(raw json.RawMessage) int {
-	if len(raw) == 0 {
-		return 0
-	}
-	var usage struct {
-		InputTokens int `json:"inputTokens"`
-	}
-	if json.Unmarshal(raw, &usage) != nil {
-		return 0
-	}
-	return usage.InputTokens
 }
 
 func (d *DiscussDriver) maybeCompactDiscussContext(
@@ -292,39 +277,4 @@ func contextMessagesToSDKEntries(messages []ContextMessage) []sdkContextMessage 
 		result = append(result, entry)
 	}
 	return result
-}
-
-func sdkMessagesFromContextEntries(entries []sdkContextMessage) []sdk.Message {
-	messages := make([]sdk.Message, 0, len(entries))
-	for _, entry := range entries {
-		messages = append(messages, entry.Message)
-	}
-	return messages
-}
-
-func compactionSummaryContextFrags(
-	entries []sdkContextMessage,
-	artifacts []CompactionArtifact,
-	scope contextfrag.Scope,
-) []contextfrag.ContextFrag {
-	artifactsByID := make(map[string]CompactionArtifact, len(artifacts))
-	for _, artifact := range artifacts {
-		if id := strings.TrimSpace(artifact.ID); id != "" {
-			artifactsByID[id] = artifact
-		}
-	}
-
-	frags := make([]contextfrag.ContextFrag, 0, len(artifactsByID))
-	for index, entry := range entries {
-		artifactID := strings.TrimSpace(entry.CompactionArtifactID)
-		artifact, ok := artifactsByID[artifactID]
-		if !ok {
-			continue
-		}
-		frag := compactionSummarySourceFrag(artifact, scope)
-		frag.ID = fmt.Sprintf("message.%03d", index)
-		frag.Provenance.Index = index
-		frags = append(frags, frag)
-	}
-	return frags
 }
