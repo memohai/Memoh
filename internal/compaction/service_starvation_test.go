@@ -81,3 +81,32 @@ func TestDoCompactionNoopsWithoutModelCallWhenOnlyUnmarkableRowsRemain(t *testin
 		t.Fatal("a compaction log row was created for a no-op window")
 	}
 }
+
+func TestDoCompactionCompactsBehindOversizedRenderEmptyHead(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "assistant", `[{"type":"reasoning","text":"a"}]`, 20000), // renders empty, huge raw estimate
+		mkRow(t, "assistant", `[{"type":"reasoning","text":"b"}]`, 20000),
+		mkRow(t, "user", `"old question"`, 100),
+		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", `"current question"`, 40),
+	}
+	q := &fakeQueries{uncompacted: rows}
+	stub := &stubModel{summary: "old exchange condensed"}
+	svc := newMachineryService(q)
+
+	cfg := machineryConfig(stub, 100)
+	cfg.MaxCompactTokens = 10000 // smaller than one reasoning row's raw estimate
+	res, err := svc.RunCompactionSync(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("RunCompactionSync: %v", err)
+	}
+	if res.Status != StatusOK {
+		t.Fatalf("status = %q, want %q: a render-empty head must not eat the trim budget", res.Status, StatusOK)
+	}
+	marked := idSet(q.markedIDs)
+	if len(marked) != 2 || !marked[rows[2].ID] || !marked[rows[3].ID] {
+		t.Fatalf("marked = %v, want exactly the old question/answer pair", q.markedIDs)
+	}
+}

@@ -450,15 +450,21 @@ func buildEntriesAndIDs(items []CompactionCandidate) ([]messageEntry, []pgtype.U
 // the oldest tool-exchange groups and deferring the newest overflow to a later
 // pass. Chewing front-to-back reclaims the oldest raw rows first and keeps
 // summary coverage in chronological order across passes, so prior summaries
-// read in narrative order. Must-keep rows never reach the summarizer, so they
-// cost no budget; the first group is always kept so an oversized head cannot
-// stall progress. Group-aligned cuts can never split a tool exchange.
+// read in narrative order. The budget models the summarizer prompt: must-keep
+// rows and rows that render empty never reach it, so they cost nothing —
+// otherwise an oversized render-empty head would consume the whole budget and
+// starve the markable history behind it. The first group is always kept so an
+// oversized head cannot stall progress, and group-aligned cuts can never split
+// a tool exchange.
 func trimCompactMessages(items []CompactionCandidate, maxTokens int) []CompactionCandidate {
 	if len(items) == 0 || maxTokens <= 0 {
 		return items
 	}
 	budgetCost := func(idx int) int {
 		if items[idx].HasPolicy(CompactPolicyMustKeep) {
+			return 0
+		}
+		if strings.TrimSpace(renderCandidateEntry(items[idx].Record)) == "" {
 			return 0
 		}
 		return estimateCompactPromptTokens(items[idx])
