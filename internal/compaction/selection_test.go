@@ -20,9 +20,10 @@ func testUUID(t *testing.T) pgtype.UUID {
 func mkRow(t *testing.T, role, content string, outputTokens int) sqlc.ListUncompactedMessagesBySessionRow {
 	t.Helper()
 	row := sqlc.ListUncompactedMessagesBySessionRow{
-		ID:      testUUID(t),
-		Role:    role,
-		Content: json.RawMessage(content),
+		ID:            testUUID(t),
+		Role:          role,
+		Content:       json.RawMessage(content),
+		SourceVersion: "1",
 	}
 	if outputTokens > 0 {
 		row.Usage = json.RawMessage(`{"outputTokens":` + strconv.Itoa(outputTokens) + `}`)

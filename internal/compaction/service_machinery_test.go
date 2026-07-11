@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -100,14 +101,38 @@ type fakeQueries struct {
 	listPanic       bool
 	onComplete      func()
 
-	created   bool
-	markedIDs []pgtype.UUID
-	completed sqlc.CompleteCompactionLogParams
+	created           bool
+	markedIDs         []pgtype.UUID
+	completed         sqlc.CompleteCompactionLogParams
+	finalized         sqlc.FinalizeCompactionArtifactParams
+	finalizeResult    *sqlc.FinalizeCompactionArtifactRow
+	finalizeErr       error
+	finalizeCalls     int
+	legacyMarkCalled  bool
+	beforeFinalize    func()
+	finalizeCtxErr    error
+	finalizeDeadline  bool
+	completeCtxErr    error
+	completeDeadline  bool
+	completeErr       error
+	createdLog        sqlc.BotHistoryMessageCompact
+	reconcileSuccess  bool
+	reconcileConflict bool
+	getErrors         []error
+	getCalls          int
 }
 
-func (f *fakeQueries) CreateCompactionLog(_ context.Context, _ sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
+var errLegacyCompactionMark = errors.New("legacy compaction mark called")
+
+func (f *fakeQueries) CreateCompactionLog(_ context.Context, arg sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
 	f.created = true
-	return sqlc.BotHistoryMessageCompact{ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}}, nil
+	f.createdLog = sqlc.BotHistoryMessageCompact{
+		ID:        pgtype.UUID{Bytes: uuid.New(), Valid: true},
+		BotID:     arg.BotID,
+		SessionID: arg.SessionID,
+		Status:    "pending",
+	}
+	return f.createdLog, nil
 }
 
 func (f *fakeQueries) ListUncompactedMessagesBySession(_ context.Context, _ pgtype.UUID) ([]sqlc.ListUncompactedMessagesBySessionRow, error) {
@@ -126,19 +151,99 @@ func (f *fakeQueries) ListCompactionArtifactLineageBySession(_ context.Context, 
 }
 
 func (f *fakeQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) error {
-	f.markedIDs = append([]pgtype.UUID(nil), arg.Column2...)
-	return nil
+	f.legacyMarkCalled = true
+	return fmt.Errorf("%w: %d messages", errLegacyCompactionMark, len(arg.Column2))
 }
 
-func (f *fakeQueries) CompleteCompactionLog(_ context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
+func (f *fakeQueries) FinalizeCompactionArtifact(ctx context.Context, arg sqlc.FinalizeCompactionArtifactParams) (sqlc.FinalizeCompactionArtifactRow, error) {
+	f.finalizeCalls++
+	f.finalized = arg
+	if f.beforeFinalize != nil {
+		f.beforeFinalize()
+	}
+	f.finalizeCtxErr = ctx.Err()
+	_, f.finalizeDeadline = ctx.Deadline()
+	if f.finalizeErr != nil {
+		return sqlc.FinalizeCompactionArtifactRow{}, f.finalizeErr
+	}
+	count := int32(len(arg.MessageIds)) //nolint:gosec // test corpus is bounded
+	result := sqlc.FinalizeCompactionArtifactRow{
+		Finalized:      true,
+		Status:         "ok",
+		RequestedCount: count,
+		MatchedCount:   count,
+		ClaimedCount:   count,
+	}
+	if f.finalizeResult != nil {
+		result = *f.finalizeResult
+	}
+	if result.Finalized {
+		f.markedIDs = append([]pgtype.UUID(nil), arg.MessageIds...)
+	}
+	return result, nil
+}
+
+func (f *fakeQueries) CompleteCompactionLog(ctx context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
 	if f.onComplete != nil {
 		f.onComplete()
 	}
+	f.completed = arg
+	f.completeCtxErr = ctx.Err()
+	_, f.completeDeadline = ctx.Deadline()
 	if f.completeErr != nil {
 		return sqlc.BotHistoryMessageCompact{}, f.completeErr
 	}
-	f.completed = arg
-	return sqlc.BotHistoryMessageCompact{ID: arg.ID, Status: arg.Status, Summary: arg.Summary}, nil
+	f.createdLog.Status = arg.Status
+	f.createdLog.Summary = arg.Summary
+	f.createdLog.MessageCount = arg.MessageCount
+	f.createdLog.ErrorMessage = arg.ErrorMessage
+	f.createdLog.Usage = arg.Usage
+	f.createdLog.ModelID = arg.ModelID
+	f.createdLog.Coverage = arg.Coverage
+	f.createdLog.AnchorStartMs = arg.AnchorStartMs
+	f.createdLog.AnchorEndMs = arg.AnchorEndMs
+	return f.createdLog, nil
+}
+
+func (f *fakeQueries) GetCompactionLogByID(_ context.Context, id pgtype.UUID) (sqlc.BotHistoryMessageCompact, error) {
+	f.getCalls++
+	if f.getCalls <= len(f.getErrors) && f.getErrors[f.getCalls-1] != nil {
+		return sqlc.BotHistoryMessageCompact{}, f.getErrors[f.getCalls-1]
+	}
+	if !f.createdLog.ID.Valid || f.createdLog.ID != id {
+		return sqlc.BotHistoryMessageCompact{}, pgx.ErrNoRows
+	}
+	if f.reconcileSuccess {
+		count := int32(len(f.finalized.MessageIds)) //nolint:gosec // test corpus is bounded
+		return sqlc.BotHistoryMessageCompact{
+			ID:              f.finalized.CompactID,
+			BotID:           f.finalized.BotID,
+			SessionID:       f.finalized.SessionID,
+			Status:          "ok",
+			Summary:         f.finalized.Summary,
+			MessageCount:    count,
+			Usage:           f.finalized.Usage,
+			ModelID:         f.finalized.ModelID,
+			ArtifactVersion: 1,
+			Coverage:        f.finalized.Coverage,
+			AnchorStartMs:   f.finalized.AnchorStartMs,
+			AnchorEndMs:     f.finalized.AnchorEndMs,
+			ArtifactLevel:   0,
+		}, nil
+	}
+	if f.reconcileConflict {
+		return sqlc.BotHistoryMessageCompact{
+			ID:              f.finalized.CompactID,
+			BotID:           f.finalized.BotID,
+			SessionID:       f.finalized.SessionID,
+			Status:          "error",
+			ErrorMessage:    "compaction source changed before finalization",
+			ArtifactVersion: 1,
+			Coverage:        json.RawMessage(`[]`),
+			ArtifactLevel:   0,
+		}, nil
+	}
+	return f.createdLog, nil
 }
 
 // --- harness ------------------------------------------------------------------
@@ -231,8 +336,11 @@ func TestDoCompactionMarksToolAwareWindowAndRendersCleanPrompt(t *testing.T) {
 	if !marked[rows[6].ID] {
 		t.Fatalf("tool result B must be pulled into the compact set with its call")
 	}
-	if q.completed.Status != "ok" || q.completed.Summary != "SUMMARY-OK" || q.completed.MessageCount != 7 {
-		t.Fatalf("complete log = status=%q summary=%q count=%d", q.completed.Status, q.completed.Summary, q.completed.MessageCount)
+	if q.finalizeCalls != 1 || q.finalized.Summary != "SUMMARY-OK" || len(q.finalized.MessageIds) != 7 {
+		t.Fatalf("finalization = calls=%d summary=%q count=%d", q.finalizeCalls, q.finalized.Summary, len(q.finalized.MessageIds))
+	}
+	if q.completed.Status != "" || q.legacyMarkCalled {
+		t.Fatalf("successful finalization used split persistence: complete=%q legacy_mark=%v", q.completed.Status, q.legacyMarkCalled)
 	}
 
 	// The summarizer prompt must carry clean rendered outcomes, no media, no noise.
@@ -384,8 +492,8 @@ func TestDoCompactionMarksOnlyContiguousRunAcrossEmptyMiddleRow(t *testing.T) {
 	if len(q.markedIDs) != 1 || q.markedIDs[0] != rows[0].ID {
 		t.Fatalf("marked = %d ids, want only the contiguous leading run [row 0]", len(q.markedIDs))
 	}
-	if q.completed.Status != "ok" || q.completed.MessageCount != 1 {
-		t.Fatalf("complete log = status=%q count=%d, want ok/1", q.completed.Status, q.completed.MessageCount)
+	if q.finalizeCalls != 1 || len(q.finalized.MessageIds) != 1 {
+		t.Fatalf("finalization = calls=%d count=%d, want 1/1", q.finalizeCalls, len(q.finalized.MessageIds))
 	}
 }
 

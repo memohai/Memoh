@@ -17,27 +17,22 @@ import (
 
 type rearmQueries struct {
 	*fakeQueries
-	mu              sync.Mutex
-	markedBatches   [][]pgtype.UUID
-	completionCount int
-	secondComplete  chan struct{}
+	mu                sync.Mutex
+	finalizedBatches  [][]pgtype.UUID
+	finalizationCount int
+	secondFinalize    chan struct{}
 }
 
-func (q *rearmQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) error {
+func (q *rearmQueries) FinalizeCompactionArtifact(_ context.Context, arg sqlc.FinalizeCompactionArtifactParams) (sqlc.FinalizeCompactionArtifactRow, error) {
 	q.mu.Lock()
-	q.markedBatches = append(q.markedBatches, append([]pgtype.UUID(nil), arg.Column2...))
-	q.mu.Unlock()
-	return nil
-}
-
-func (q *rearmQueries) CompleteCompactionLog(_ context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
-	q.mu.Lock()
-	q.completionCount++
-	if q.completionCount == 2 {
-		close(q.secondComplete)
+	q.finalizedBatches = append(q.finalizedBatches, append([]pgtype.UUID(nil), arg.MessageIds...))
+	q.finalizationCount++
+	if q.finalizationCount == 2 {
+		close(q.secondFinalize)
 	}
 	q.mu.Unlock()
-	return sqlc.BotHistoryMessageCompact{ID: arg.ID, Status: arg.Status, Summary: arg.Summary}, nil
+	count := int32(len(arg.MessageIds)) //nolint:gosec // test corpus is bounded
+	return sqlc.FinalizeCompactionArtifactRow{Finalized: true, Status: "ok", RequestedCount: count, MatchedCount: count, ClaimedCount: count}, nil
 }
 
 type blockingCompactionModel struct {
@@ -88,7 +83,7 @@ func TestTriggerCompactionRearmsDemandQueuedWhileSessionIsInFlight(t *testing.T)
 	}
 	queries := &rearmQueries{
 		fakeQueries:    &fakeQueries{uncompacted: firstRows},
-		secondComplete: make(chan struct{}),
+		secondFinalize: make(chan struct{}),
 	}
 	service := newMachineryService(queries)
 	firstModel := &blockingCompactionModel{started: make(chan struct{}), release: make(chan struct{})}
@@ -123,7 +118,7 @@ func TestTriggerCompactionRearmsDemandQueuedWhileSessionIsInFlight(t *testing.T)
 	close(firstModel.release)
 
 	select {
-	case <-queries.secondComplete:
+	case <-queries.secondFinalize:
 	case <-time.After(2 * time.Second):
 		t.Fatal("queued compaction demand did not complete")
 	}
@@ -144,7 +139,7 @@ func TestTriggerCompactionRearmsAfterSynchronousOwnerReleasesSession(t *testing.
 	}
 	queries := &rearmQueries{
 		fakeQueries:    &fakeQueries{uncompacted: firstRows},
-		secondComplete: make(chan struct{}),
+		secondFinalize: make(chan struct{}),
 	}
 	service := newMachineryService(queries)
 	firstModel := &blockingCompactionModel{started: make(chan struct{}), release: make(chan struct{})}
@@ -191,7 +186,7 @@ func TestTriggerCompactionRearmsAfterSynchronousOwnerReleasesSession(t *testing.
 		t.Fatal("synchronous compaction did not finish")
 	}
 	select {
-	case <-queries.secondComplete:
+	case <-queries.secondFinalize:
 	case <-time.After(2 * time.Second):
 		t.Fatal("async demand was not rearmed after synchronous owner")
 	}
@@ -205,12 +200,12 @@ func assertRearmedCompactionRows(t *testing.T, queries *rearmQueries, secondRows
 		secondIDs[row.ID] = struct{}{}
 	}
 	queries.mu.Lock()
-	markedBatches := append([][]pgtype.UUID(nil), queries.markedBatches...)
+	finalizedBatches := append([][]pgtype.UUID(nil), queries.finalizedBatches...)
 	queries.mu.Unlock()
-	if len(markedBatches) != 2 || len(markedBatches[1]) == 0 {
-		t.Fatalf("marked batches = %#v, want two non-empty passes", markedBatches)
+	if len(finalizedBatches) != 2 || len(finalizedBatches[1]) == 0 {
+		t.Fatalf("finalized batches = %#v, want two non-empty passes", finalizedBatches)
 	}
-	for _, id := range markedBatches[1] {
+	for _, id := range finalizedBatches[1] {
 		if _, ok := secondIDs[id]; !ok {
 			t.Fatalf("second pass marked stale row %s", id.String())
 		}

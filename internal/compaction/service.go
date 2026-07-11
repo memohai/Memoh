@@ -23,8 +23,8 @@ import (
 )
 
 // errEmptySummary marks a completed LLM call that produced no usable summary
-// text. The compacted rows must stay reclaimable, so this must never reach
-// MarkMessagesCompacted.
+// text. The source rows must stay reclaimable, so this must never reach artifact
+// finalization.
 var errEmptySummary = errors.New("compaction: model returned an empty summary")
 
 var (
@@ -226,6 +226,9 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result,
 		case !preHookRan:
 			// A pre-hook error or deny is bot policy, not a model failure;
 			// it must not arm the cooldown (panics above still do).
+		case errors.Is(compactErr, ErrCompactionSourceChanged):
+			// The sources moved under this attempt (another writer claimed
+			// them) — not a model failure, so the cooldown stays clear.
 		case ctx.Err() != nil:
 			// The caller's request was canceled or hit its deadline — not a
 			// model failure. Arming the five-minute cooldown here would
@@ -412,20 +415,20 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	if err != nil {
 		return Result{}, err
 	}
-	artifact, err := artifactMetadataFor(toCompact, envelope.MessageIDs)
+	finalizationInput, err := artifactFinalizationInputFor(toCompact, rows, envelope.MessageIDs)
 	if err != nil {
 		return Result{}, err
 	}
 
 	// The log row is created only once a real attempt starts, so no-op runs do
-	// not accumulate rows. Persistence uses a non-cancellable context: a client
-	// disconnect mid-run must not strand rows marked compacted without a
-	// completed summary.
-	persistCtx := context.WithoutCancel(ctx)
-	logRow, err := s.queries.CreateCompactionLog(persistCtx, sqlc.CreateCompactionLogParams{
+	// not accumulate rows. Each persistence operation gets its own detached,
+	// bounded context while the expensive model call remains caller-cancellable.
+	createCtx, cancelCreate := detachedCompactionPersistenceContext(ctx)
+	logRow, err := s.queries.CreateCompactionLog(createCtx, sqlc.CreateCompactionLogParams{
 		BotID:     botUUID,
 		SessionID: sessionUUID,
 	})
+	cancelCreate()
 	if err != nil {
 		return Result{}, err
 	}
@@ -438,18 +441,15 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		sdk.WithMaxTokens(envelope.MaxOutputTokens),
 	)
 	if err != nil {
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
-		return Result{}, err
+		return Result{}, s.terminalizeAttemptFailure(ctx, logID, err)
 	}
 
 	if strings.TrimSpace(result.Text) == "" {
-		_ = s.completeLog(persistCtx, logID, "error", "", errEmptySummary.Error(), 0, nil, pgtype.UUID{}, nil)
-		return Result{}, errEmptySummary
+		return Result{}, s.terminalizeAttemptFailure(ctx, logID, errEmptySummary)
 	}
 	if result.FinishReason != sdk.FinishReasonStop {
 		err := fmt.Errorf("%w: finish_reason=%s", errIncompleteSummary, result.FinishReason)
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
-		return Result{}, err
+		return Result{}, s.terminalizeAttemptFailure(ctx, logID, err)
 	}
 	summary := strings.TrimSpace(result.Text)
 	summaryTokens := estimateSummaryReplayTokens(summary)
@@ -460,30 +460,34 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 			summaryTokens,
 			envelope.RawReplayTokens,
 		)
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
-		return Result{}, err
+		return Result{}, s.terminalizeAttemptFailure(ctx, logID, err)
 	}
 
 	usageJSON, _ := json.Marshal(result.Usage)
 
 	modelUUID := db.ParseUUIDOrEmpty(cfg.ModelID)
-	if err := s.queries.MarkMessagesCompacted(persistCtx, sqlc.MarkMessagesCompactedParams{
-		CompactID: logID,
-		Column2:   envelope.MessageIDs,
+	if err := s.finalizeArtifact(ctx, sqlc.FinalizeCompactionArtifactParams{
+		MessageIds:         finalizationInput.MessageIDs,
+		SourceVersions:     finalizationInput.SourceVersions,
+		ExpectedCompactIds: finalizationInput.ExpectedCompactIDs,
+		Coverage:           finalizationInput.Coverage,
+		CompactID:          logID,
+		BotID:              botUUID,
+		SessionID:          sessionUUID,
+		AnchorStartMs:      finalizationInput.AnchorStartMs,
+		AnchorEndMs:        finalizationInput.AnchorEndMs,
+		Summary:            summary,
+		Usage:              usageJSON,
+		ModelID:            modelUUID,
 	}); err != nil {
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, err
 	}
-
-	if err := s.completeLog(persistCtx, logID, "ok", summary, "", len(envelope.MessageIDs), usageJSON, modelUUID, &artifact); err != nil {
-		// The rows are already marked, but the log never reached status=ok, so
-		// the reclaim SQL keeps them eligible for a later pass. Reporting ok
-		// here would claim a summary that was never persisted.		return Result{}, err
-	}
-	return Result{Status: StatusOK, Summary: summary, MessageCount: len(envelope.MessageIDs)}, nil
+	return Result{Status: StatusOK, Summary: summary, MessageCount: len(finalizationInput.MessageIDs)}, nil
 }
 
 func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, summary, errMsg string, messageCount int, usage []byte, modelID pgtype.UUID, artifact *artifactMetadata) error {
+	persistCtx, cancel := detachedCompactionPersistenceContext(ctx)
+	defer cancel()
 	coverage := []byte("[]")
 	var anchorStartMs, anchorEndMs int64
 	if artifact != nil {
@@ -491,7 +495,7 @@ func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, su
 		anchorStartMs = artifact.AnchorStartMs
 		anchorEndMs = artifact.AnchorEndMs
 	}
-	_, err := s.queries.CompleteCompactionLog(ctx, sqlc.CompleteCompactionLogParams{
+	_, err := s.queries.CompleteCompactionLog(persistCtx, sqlc.CompleteCompactionLogParams{
 		ID:            logID,
 		Status:        status,
 		Summary:       summary,
