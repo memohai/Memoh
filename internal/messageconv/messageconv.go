@@ -2,9 +2,12 @@ package messageconv
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/contextbudget"
@@ -186,6 +189,59 @@ func EstimateSDKMessageTokens(message sdk.Message) int {
 		}
 	}
 	return contextbudget.EstimateTokensForBytes(bytes)
+}
+
+func EstimateSDKToolDefinitionTokens(tools []sdk.Tool) (int, error) {
+	if len(tools) == 0 {
+		return 0, nil
+	}
+	definitions := make([]struct {
+		Name        string             `json:"name"`
+		Description string             `json:"description,omitempty"`
+		Parameters  *jsonschema.Schema `json:"parameters"`
+	}, len(tools))
+	for index, tool := range tools {
+		resolved, err := resolveSDKToolParameters(tool.Parameters)
+		if err != nil {
+			return 0, fmt.Errorf("resolve tool %q parameters: %w", tool.Name, err)
+		}
+		definitions[index].Name = tool.Name
+		definitions[index].Description = tool.Description
+		definitions[index].Parameters = resolved
+	}
+	encoded, err := json.Marshal(definitions)
+	if err != nil {
+		return 0, fmt.Errorf("marshal tool definitions: %w", err)
+	}
+	return contextbudget.EstimateTokensForBytes(len(encoded)), nil
+}
+
+func resolveSDKToolParameters(parameters any) (*jsonschema.Schema, error) {
+	if parameters == nil {
+		return nil, nil
+	}
+	if schema, ok := parameters.(*jsonschema.Schema); ok {
+		return schema, nil
+	}
+	if raw, ok := parameters.(map[string]any); ok {
+		data, err := json.Marshal(raw)
+		if err != nil {
+			return nil, fmt.Errorf("marshal map schema: %w", err)
+		}
+		var schema jsonschema.Schema
+		if err := json.Unmarshal(data, &schema); err != nil {
+			return nil, fmt.Errorf("unmarshal map schema: %w", err)
+		}
+		return &schema, nil
+	}
+	typeOf := reflect.TypeOf(parameters)
+	if typeOf.Kind() == reflect.Ptr {
+		typeOf = typeOf.Elem()
+	}
+	if typeOf.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("parameters must be *jsonschema.Schema, map[string]any, or a struct, got %T", parameters)
+	}
+	return jsonschema.ForType(typeOf, nil)
 }
 
 func messageHasToolResult(message sdk.Message) bool {
