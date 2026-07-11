@@ -3,6 +3,7 @@ package compaction
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,8 +39,8 @@ func TestDoCompactionPersistsDurableCoverageAndAnchor(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"old question"`, 100),
-		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", jsonStr(strings.Repeat("old question ", 20)), 100),
+		mkRow(t, "assistant", jsonStr(strings.Repeat("old answer ", 20)), 100),
 		mkRow(t, "user", `"current question"`, 100),
 		mkRow(t, "assistant", `"current answer"`, 100),
 	}
@@ -72,8 +73,8 @@ func TestDoCompactionCoverageHashIncludesMessageAssets(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"old question"`, 100),
-		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", jsonStr(strings.Repeat("old question ", 20)), 100),
+		mkRow(t, "assistant", jsonStr(strings.Repeat("old answer ", 20)), 100),
 		mkRow(t, "user", `"current question"`, 100),
 		mkRow(t, "assistant", `"current answer"`, 100),
 	}
@@ -127,8 +128,8 @@ func TestDoCompactionStopsWhenAssetsCannotBeLoaded(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"old question"`, 100),
-		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", jsonStr(strings.Repeat("old question ", 20)), 100),
+		mkRow(t, "assistant", jsonStr(strings.Repeat("old answer ", 20)), 100),
 		mkRow(t, "user", `"current question"`, 100),
 		mkRow(t, "assistant", `"current answer"`, 100),
 	}
@@ -151,8 +152,8 @@ func TestDoCompactionReturnsSuccessfulArtifactFinalizationError(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"old question"`, 100),
-		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", jsonStr(strings.Repeat("old question ", 20)), 100),
+		mkRow(t, "assistant", jsonStr(strings.Repeat("old answer ", 20)), 100),
 		mkRow(t, "user", `"current question"`, 100),
 		mkRow(t, "assistant", `"current answer"`, 100),
 	}

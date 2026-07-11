@@ -2,6 +2,7 @@ package compaction
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -19,11 +20,13 @@ func TestDoCompactionInjectsPriorContext(t *testing.T) {
 	q := &fakeQueries{
 		uncompacted: rows,
 		priorLogs: []sqlc.BotHistoryMessageCompact{{
-			ID:        pgtype.UUID{Bytes: uuid.New(), Valid: true},
-			BotID:     pgtype.UUID{Bytes: uuid.MustParse(cfg.BotID), Valid: true},
-			SessionID: pgtype.UUID{Bytes: uuid.MustParse(cfg.SessionID), Valid: true},
-			Summary:   "earlier-segment-summary",
-			Status:    "ok",
+			ID:            pgtype.UUID{Bytes: uuid.New(), Valid: true},
+			BotID:         pgtype.UUID{Bytes: uuid.MustParse(cfg.BotID), Valid: true},
+			SessionID:     pgtype.UUID{Bytes: uuid.MustParse(cfg.SessionID), Valid: true},
+			Summary:       "earlier-segment-summary",
+			Status:        "ok",
+			AnchorStartMs: 1000,
+			AnchorEndMs:   2000,
 		}},
 	}
 	svc := newMachineryService(q)
@@ -44,27 +47,37 @@ func TestDoCompactionPriorContextUsesOnlyActiveArtifactFrontier(t *testing.T) {
 	botID := pgtype.UUID{Bytes: uuid.MustParse(cfg.BotID), Valid: true}
 	sessionID := pgtype.UUID{Bytes: uuid.MustParse(cfg.SessionID), Valid: true}
 	coverage := testCoverageJSON(t, "covered-row")
+	var covered []CoveredSource
+	if err := json.Unmarshal(coverage, &covered); err != nil {
+		t.Fatalf("decode test coverage: %v", err)
+	}
+	covered[0].CreatedAtMs = 1000
+	coverage, _ = json.Marshal(covered)
 	q := &fakeQueries{
 		uncompacted: machineryCorpus(t),
 		priorLogs: []sqlc.BotHistoryMessageCompact{
 			{
-				ID:           parentID,
-				BotID:        botID,
-				SessionID:    sessionID,
-				Status:       "ok",
-				Summary:      "stale-parent-summary",
-				Coverage:     coverage,
-				SupersededBy: activeID,
-				SupersededAt: pgtype.Timestamptz{Time: time.Unix(1, 0), Valid: true},
+				ID:            parentID,
+				BotID:         botID,
+				SessionID:     sessionID,
+				Status:        "ok",
+				Summary:       "stale-parent-summary",
+				Coverage:      coverage,
+				AnchorStartMs: 1000,
+				AnchorEndMs:   1000,
+				SupersededBy:  activeID,
+				SupersededAt:  pgtype.Timestamptz{Time: time.Unix(1, 0), Valid: true},
 			},
 			{
-				ID:        activeID,
-				BotID:     botID,
-				SessionID: sessionID,
-				Status:    "ok",
-				Summary:   "active-frontier-summary",
-				Coverage:  coverage,
-				ParentIds: []pgtype.UUID{parentID},
+				ID:            activeID,
+				BotID:         botID,
+				SessionID:     sessionID,
+				Status:        "ok",
+				Summary:       "active-frontier-summary",
+				Coverage:      coverage,
+				AnchorStartMs: 1000,
+				AnchorEndMs:   1000,
+				ParentIds:     []pgtype.UUID{parentID},
 			},
 		},
 	}

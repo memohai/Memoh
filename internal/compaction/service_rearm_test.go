@@ -95,14 +95,16 @@ func TestTriggerCompactionRearmsDemandQueuedWhileSessionIsInFlight(t *testing.T)
 	supersededModel := &signalingCompactionModel{called: make(chan struct{})}
 	secondModel := &signalingCompactionModel{called: make(chan struct{})}
 	firstConfig := TriggerConfig{
-		BotID:        uuid.NewString(),
-		SessionID:    uuid.NewString(),
-		ModelID:      "stub-model",
-		ClientType:   "openai-completions",
-		APIKey:       "test",
-		BaseURL:      "http://stub.invalid",
-		HTTPClient:   &http.Client{Transport: firstModel},
-		TargetTokens: 450,
+		BotID:              uuid.NewString(),
+		SessionID:          uuid.NewString(),
+		ModelID:            "stub-model",
+		ClientType:         "openai-completions",
+		APIKey:             "test",
+		BaseURL:            "http://stub.invalid",
+		HTTPClient:         &http.Client{Transport: firstModel},
+		TargetTokens:       450,
+		ContextTokenBudget: 32_000,
+		MaxCompactTokens:   28_800,
 	}
 	supersededConfig := firstConfig
 	supersededConfig.HTTPClient = &http.Client{Transport: supersededModel}
@@ -148,15 +150,17 @@ func TestTriggerCompactionRearmsAfterSynchronousOwnerReleasesSession(t *testing.
 	firstModel := &blockingCompactionModel{started: make(chan struct{}), release: make(chan struct{})}
 	secondModel := &signalingCompactionModel{called: make(chan struct{})}
 	firstConfig := TriggerConfig{
-		BotID:        uuid.NewString(),
-		SessionID:    uuid.NewString(),
-		ModelID:      "stub-model",
-		ClientType:   "openai-completions",
-		APIKey:       "test",
-		BaseURL:      "http://stub.invalid",
-		HTTPClient:   &http.Client{Transport: firstModel},
-		TargetTokens: 450,
-		Manual:       true,
+		BotID:              uuid.NewString(),
+		SessionID:          uuid.NewString(),
+		ModelID:            "stub-model",
+		ClientType:         "openai-completions",
+		APIKey:             "test",
+		BaseURL:            "http://stub.invalid",
+		HTTPClient:         &http.Client{Transport: firstModel},
+		TargetTokens:       450,
+		Manual:             true,
+		ContextTokenBudget: 32_000,
+		MaxCompactTokens:   28_800,
 	}
 	secondConfig := firstConfig
 	secondConfig.HTTPClient = &http.Client{Transport: secondModel}

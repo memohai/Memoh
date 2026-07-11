@@ -2,6 +2,7 @@ package compaction
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -26,8 +27,8 @@ func TestDoCompactionDoesNotSplitToolExchangeAtUnparseableBarrier(t *testing.T) 
 			rows := []sqlc.ListUncompactedMessagesBySessionRow{
 				toolCallRow(t, 100),
 				toolResultRow(t, 100),
-				mkRow(t, "user", `"old question"`, 100),
-				mkRow(t, "assistant", `"old answer"`, 100),
+				mkRow(t, "user", jsonStr(strings.Repeat("old question ", 20)), 100),
+				mkRow(t, "assistant", jsonStr(strings.Repeat("old answer ", 20)), 100),
 				mkRow(t, "user", `"current question"`, 100),
 				mkRow(t, "assistant", `"current answer"`, 100),
 			}

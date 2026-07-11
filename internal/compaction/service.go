@@ -27,6 +27,11 @@ import (
 // MarkMessagesCompacted.
 var errEmptySummary = errors.New("compaction: model returned an empty summary")
 
+var (
+	errIncompleteSummary  = errors.New("compaction: model returned an incomplete summary")
+	errIneffectiveSummary = errors.New("compaction: summary does not reduce replay tokens")
+)
+
 // compactionFailureCooldown bounds how often a session may retry compaction
 // after a failure, so a persistently failing model can't burn an LLM call on
 // every blocking sync backstop or async trigger.
@@ -344,14 +349,19 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		return Result{Status: StatusNoop}, nil
 	}
 
-	// Cap the compaction input to avoid exceeding the compaction model's
-	// context window. MaxCompactTokens is typically set to 90% of the model's
-	// window. If not set, use a conservative default of 30K tokens. Prior
-	// summaries and message entries share this one budget — an additive prior
-	// allowance would let the combined prompt exceed the window headroom.
+	// Keep the legacy candidate cap as a coarse prefilter. The final envelope
+	// materializer below is the authoritative input/output budget gate.
 	maxCompactTokens := cfg.MaxCompactTokens
-	if maxCompactTokens <= 0 {
-		maxCompactTokens = 30000
+	if maxCompactTokens <= 0 && cfg.ContextTokenBudget > 0 {
+		maxCompactTokens = cfg.ContextTokenBudget * 90 / 100
+	}
+	if maxCompactTokens > 0 {
+		s.logger.Info("compaction: before coarse trim",
+			slog.Int("messages", len(toCompact)),
+			slog.Int("total_uncompacted", len(messages)),
+			slog.Int("max_compact_tokens", maxCompactTokens),
+		)
+		toCompact = trimCompactMessages(toCompact, maxCompactTokens)
 	}
 
 	frontier, err := NewArtifactProjection(s.queries).LoadActiveSession(ctx, ArtifactOwner{BotID: cfg.BotID, SessionID: cfg.SessionID, SessionIDKnown: true})
@@ -361,80 +371,6 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	for _, issue := range frontier.Issues {
 		s.logger.Warn("compaction: ignored invalid artifact lineage", slog.String("issue", issue.Error()))
 	}
-	var priorSummaries []string
-	for _, artifact := range frontier.Artifacts {
-		if strings.TrimSpace(artifact.Summary) != "" {
-			priorSummaries = append(priorSummaries, artifact.Summary)
-		}
-	}
-	priorSummaries = capPriorSummaries(priorSummaries, maxCompactTokens/4)
-	priorTokens := priorContextTokens(priorSummaries)
-	// capPriorSummaries always keeps the newest summary, so a single oversized
-	// one can exceed its allowance; floor the entries budget at half the total
-	// so compaction keeps making progress.
-	entriesBudget := maxCompactTokens - priorTokens
-	if entriesBudget < maxCompactTokens/2 {
-		entriesBudget = maxCompactTokens / 2
-	}
-
-	s.logger.Info("compaction: before trim",
-		slog.Int("messages", len(toCompact)),
-		slog.Int("total_uncompacted", len(messages)),
-		slog.Int("max_compact_tokens", maxCompactTokens),
-		slog.Int("prior_context_tokens", priorTokens),
-	)
-	toCompact = trimCompactMessages(toCompact, entriesBudget)
-	// The progress guarantee may keep one oversized markable group past the
-	// entries budget; the prior context is reference-only, so shrink it (down
-	// to nothing) before letting the combined prompt exceed MaxCompactTokens.
-	if entriesCost := markableCompactCost(toCompact); entriesCost+priorTokens > maxCompactTokens {
-		priorSummaries = capPriorSummaries(priorSummaries, maxCompactTokens-entriesCost)
-		priorTokens = priorContextTokens(priorSummaries)
-	}
-	s.logger.Info("compaction: after trim",
-		slog.Int("messages", len(toCompact)),
-		slog.Int("prior_summaries", len(priorSummaries)),
-	)
-
-	entries, compactedMessageIDs := buildEntriesAndIDs(toCompact)
-	if len(entries) == 0 || len(compactedMessageIDs) == 0 {
-		// No complete group survived: every selected group had a row that rendered
-		// empty (a reasoning-only message, or a tool exchange whose result renders
-		// empty). buildEntriesAndIDs withholds such a group from both entries and
-		// ids, so summarizing here would either destroy rows for a junk summary or
-		// mark rows we cannot faithfully summarize. Leave them in raw history.
-		return Result{Status: StatusNoop}, nil
-	}
-	assetRows, err := s.queries.ListMessageAssetsBatch(ctx, compactedMessageIDs)
-	if err != nil {
-		return Result{}, fmt.Errorf("load compaction message assets: %w", err)
-	}
-	toCompact, err = candidatesWithAssets(toCompact, rows, assetRows)
-	if err != nil {
-		return Result{}, err
-	}
-	artifact, err := artifactMetadataFor(toCompact, compactedMessageIDs)
-	if err != nil {
-		return Result{}, err
-	}
-
-	// A single markable group larger than the whole budget survives trim by
-	// design (progress guarantee); truncate its rendered entries rather than
-	// send a prompt the model rejects on every pass. Entry floors can still
-	// exceed the budget when that group holds enough rows, so recheck and
-	// surface the overshoot instead of claiming an unconditional cap.
-	entries = capEntriesToBudget(entries, maxCompactTokens-priorTokens)
-	if cost := entriesPromptCost(entries); cost+priorTokens > maxCompactTokens {
-		s.logger.Warn("compaction: entry floors exceed the budget, prompt may overflow the compaction window",
-			slog.Int("entries", len(entries)),
-			slog.Int("entry_tokens", cost),
-			slog.Int("max_compact_tokens", maxCompactTokens),
-			slog.String("session_id", cfg.SessionID),
-		)
-	}
-
-	userPrompt := buildUserPrompt(priorSummaries, entries)
-
 	model := models.NewSDKChatModel(models.SDKModelConfig{
 		ClientType:     cfg.ClientType,
 		BaseURL:        cfg.BaseURL,
@@ -443,11 +379,43 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		ModelID:        cfg.ModelID,
 		HTTPClient:     cfg.HTTPClient,
 	})
-
-	systemPromptDecorated, sdkMessages, _ := models.ApplyPromptCache(
-		model, cfg.PromptCacheTTL,
-		systemPrompt, []sdk.Message{sdk.UserMessage(userPrompt)}, nil,
+	envelope, err := materializeCompactionEnvelope(compactionEnvelopeRequest{
+		Model:              model,
+		PromptCacheTTL:     cfg.PromptCacheTTL,
+		ContextTokenBudget: cfg.ContextTokenBudget,
+		Candidates:         toCompact,
+		Artifacts:          frontier.Artifacts,
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	if len(envelope.MessageIDs) == 0 {
+		// No complete group survived: every selected group had a row that rendered
+		// empty (a reasoning-only message, or a tool exchange whose result renders
+		// empty). buildEntriesAndIDs withholds such a group from both entries and
+		// ids, so summarizing here would either destroy rows for a junk summary or
+		// mark rows we cannot faithfully summarize. Leave them in raw history.
+		return Result{Status: StatusNoop}, nil
+	}
+	s.logger.Info("compaction: materialized final envelope",
+		slog.Int("messages", len(envelope.MessageIDs)),
+		slog.Int("input_token_upper_bound", envelope.InputTokenUpperBound),
+		slog.Int("max_output_tokens", envelope.MaxOutputTokens),
+		slog.Int("headroom_tokens", envelope.HeadroomTokens),
+		slog.Int("context_token_budget", cfg.ContextTokenBudget),
 	)
+	assetRows, err := s.queries.ListMessageAssetsBatch(ctx, envelope.MessageIDs)
+	if err != nil {
+		return Result{}, fmt.Errorf("load compaction message assets: %w", err)
+	}
+	toCompact, err = candidatesWithAssets(envelope.Candidates, rows, assetRows)
+	if err != nil {
+		return Result{}, err
+	}
+	artifact, err := artifactMetadataFor(toCompact, envelope.MessageIDs)
+	if err != nil {
+		return Result{}, err
+	}
 
 	// The log row is created only once a real attempt starts, so no-op runs do
 	// not accumulate rows. Persistence uses a non-cancellable context: a client
@@ -465,8 +433,9 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 
 	result, err := sdk.GenerateTextResult(ctx,
 		sdk.WithModel(model),
-		sdk.WithSystem(systemPromptDecorated),
-		sdk.WithMessages(sdkMessages),
+		sdk.WithSystem(envelope.System),
+		sdk.WithMessages(envelope.Messages),
+		sdk.WithMaxTokens(envelope.MaxOutputTokens),
 	)
 	if err != nil {
 		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
@@ -477,25 +446,41 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		_ = s.completeLog(persistCtx, logID, "error", "", errEmptySummary.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, errEmptySummary
 	}
+	if result.FinishReason != sdk.FinishReasonStop {
+		err := fmt.Errorf("%w: finish_reason=%s", errIncompleteSummary, result.FinishReason)
+		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+		return Result{}, err
+	}
+	summary := strings.TrimSpace(result.Text)
+	summaryTokens := estimateSummaryReplayTokens(summary)
+	if summaryTokens >= envelope.RawReplayTokens {
+		err := fmt.Errorf(
+			"%w: summary_tokens=%d raw_tokens=%d",
+			errIneffectiveSummary,
+			summaryTokens,
+			envelope.RawReplayTokens,
+		)
+		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+		return Result{}, err
+	}
 
 	usageJSON, _ := json.Marshal(result.Usage)
 
 	modelUUID := db.ParseUUIDOrEmpty(cfg.ModelID)
 	if err := s.queries.MarkMessagesCompacted(persistCtx, sqlc.MarkMessagesCompactedParams{
 		CompactID: logID,
-		Column2:   compactedMessageIDs,
+		Column2:   envelope.MessageIDs,
 	}); err != nil {
 		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, err
 	}
 
-	if err := s.completeLog(persistCtx, logID, "ok", result.Text, "", len(compactedMessageIDs), usageJSON, modelUUID, &artifact); err != nil {
+	if err := s.completeLog(persistCtx, logID, "ok", summary, "", len(envelope.MessageIDs), usageJSON, modelUUID, &artifact); err != nil {
 		// The rows are already marked, but the log never reached status=ok, so
 		// the reclaim SQL keeps them eligible for a later pass. Reporting ok
-		// here would claim a summary that was never persisted.
-		return Result{}, err
+		// here would claim a summary that was never persisted.		return Result{}, err
 	}
-	return Result{Status: StatusOK, Summary: result.Text, MessageCount: len(compactedMessageIDs)}, nil
+	return Result{Status: StatusOK, Summary: summary, MessageCount: len(envelope.MessageIDs)}, nil
 }
 
 func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, summary, errMsg string, messageCount int, usage []byte, modelID pgtype.UUID, artifact *artifactMetadata) error {
