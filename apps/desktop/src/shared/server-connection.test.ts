@@ -73,4 +73,22 @@ describe('desktop server connection', () => {
     await expect(probeServerBaseUrl('https://memoh.example.com', request))
       .resolves.toMatchObject({ ok: false, error: 'unreachable' })
   })
+
+  it('aborts slow requests and reports a timeout', async () => {
+    vi.useFakeTimers()
+    try {
+      const request = vi.fn<typeof fetch>((_input, init) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('The operation was aborted', 'AbortError'))
+        }, { once: true })
+      }))
+      const result = probeServerBaseUrl('https://memoh.example.com', request, 5000)
+
+      await vi.advanceTimersByTimeAsync(5000)
+
+      await expect(result).resolves.toMatchObject({ ok: false, error: 'timeout' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

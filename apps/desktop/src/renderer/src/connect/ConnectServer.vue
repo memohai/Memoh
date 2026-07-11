@@ -29,7 +29,7 @@
           v-bind="baseUrlProps"
           id="server-url"
           v-model="baseUrl"
-          type="url"
+          type="text"
           inputmode="url"
           autocomplete="url"
           :placeholder="t('desktopConnection.placeholder')"
@@ -63,6 +63,7 @@ import DotMatrixBg from '@memohai/web/pages/login/components/dot-matrix-bg.vue'
 import { notifyAuthSessionCleared } from '@memohai/web/lib/auth-session'
 import { setupApiClient } from '@memohai/web/api-client'
 import { LOGIN_ENTRY_ANIMATION_KEY } from '@memohai/web/pages/login/transition'
+import { decidePostConnectNavigation } from './connection-navigation'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -97,7 +98,12 @@ const onSubmit = handleSubmit(async ({ baseUrl }) => {
     exiting.value = true
     await new Promise<void>(resolve => setTimeout(resolve, exitDuration))
 
-    if (result.changed) {
+    const navigation = decidePostConnectNavigation({
+      changed: result.changed,
+      hasToken: Boolean(localStorage.getItem('token')),
+      returnTo: route.query.returnTo,
+    })
+    if (navigation.clearAuth) {
       notifyAuthSessionCleared('logout')
       localStorage.removeItem('token')
       localStorage.removeItem('user')
@@ -107,16 +113,10 @@ const onSubmit = handleSubmit(async ({ baseUrl }) => {
       baseUrl: result.baseUrl,
       onUnauthorized: () => router.replace({ name: 'Login' }),
     })
-    if (result.changed || !localStorage.getItem('token')) {
+    if (navigation.animateLogin) {
       sessionStorage.setItem(LOGIN_ENTRY_ANIMATION_KEY, '1')
-      await router.replace({ name: 'Login' })
-      return
     }
-
-    const returnTo = typeof route.query.returnTo === 'string' && route.query.returnTo.startsWith('/')
-      ? route.query.returnTo
-      : '/'
-    await router.replace(returnTo)
+    await router.replace(navigation.destination)
   } catch {
     exiting.value = false
     toast.error(t('desktopConnection.failed'), {
