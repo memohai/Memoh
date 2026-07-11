@@ -156,6 +156,7 @@ type BotHistoryMessage struct {
 	RuntimeType             string             `json:"runtime_type"`
 	ModelID                 pgtype.UUID        `json:"model_id"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
+	CompactClaimFinalized   bool               `json:"compact_claim_finalized"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	TurnID                  pgtype.UUID        `json:"turn_id"`

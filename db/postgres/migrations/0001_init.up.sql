@@ -517,6 +517,7 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent')),
   model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   compact_id UUID,
+  compact_claim_finalized BOOLEAN NOT NULL DEFAULT false,
   event_id UUID REFERENCES bot_session_events(id) ON DELETE SET NULL,
   display_text TEXT,
   turn_id UUID,
@@ -526,7 +527,9 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   turn_superseded_by_turn_id UUID,
   turn_superseded_at TIMESTAMPTZ,
   turn_superseded_reason TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT compact_claim_finalized_requires_owner
+    CHECK (NOT compact_claim_finalized OR compact_id IS NOT NULL)
 );
 
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_bot_created ON bot_history_messages(bot_id, created_at);
@@ -916,6 +919,132 @@ CREATE TRIGGER compaction_log_terminal_status_guard
 BEFORE UPDATE OF status ON bot_history_message_compacts
 FOR EACH ROW
 EXECUTE FUNCTION guard_compaction_log_terminal_status();
+
+CREATE OR REPLACE FUNCTION guard_compaction_message_claim()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.compact_id IS NULL THEN
+    IF OLD.compact_claim_finalized
+       AND EXISTS (
+         SELECT 1
+         FROM bot_history_message_compacts compact
+         WHERE compact.id = OLD.compact_id
+       ) THEN
+      RAISE EXCEPTION 'message % has a finalized compaction claim owned by %', OLD.id, OLD.compact_id
+        USING ERRCODE = '23514';
+    END IF;
+
+    NEW.compact_claim_finalized := false;
+    RETURN NEW;
+  END IF;
+
+  IF OLD.compact_claim_finalized
+     AND (
+       NEW.compact_id IS DISTINCT FROM OLD.compact_id
+       OR NEW.compact_claim_finalized IS DISTINCT FROM true
+     ) THEN
+    RAISE EXCEPTION 'message % has a finalized compaction claim owned by %', OLD.id, OLD.compact_id
+      USING ERRCODE = '23514';
+  END IF;
+
+  IF OLD.compact_id IS DISTINCT FROM NEW.compact_id THEN
+    NEW.compact_claim_finalized := false;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION finalize_compaction_message_claims()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  claimed_ids UUID[];
+  expected_ids UUID[];
+BEGIN
+  IF NEW.artifact_level > 0 THEN
+    IF cardinality(NEW.parent_ids) = 0
+       OR NEW.message_count <= 0
+       OR jsonb_typeof(NEW.coverage) IS DISTINCT FROM 'array'
+       OR jsonb_array_length(NEW.coverage) = 0
+       OR EXISTS (
+         SELECT 1
+         FROM bot_history_messages message
+         WHERE message.compact_id = NEW.id
+       ) THEN
+      RAISE EXCEPTION 'derived compaction artifact % has invalid parents, coverage, or direct message claims', NEW.id
+        USING ERRCODE = '23514';
+    END IF;
+
+    RETURN NULL;
+  END IF;
+  IF NEW.artifact_level < 0 THEN
+    RAISE EXCEPTION 'compaction attempt % has invalid artifact level %', NEW.id, NEW.artifact_level
+      USING ERRCODE = '23514';
+  END IF;
+  IF cardinality(NEW.parent_ids) > 0 THEN
+    RAISE EXCEPTION 'direct compaction attempt % cannot have parent artifacts', NEW.id
+      USING ERRCODE = '23514';
+  END IF;
+  IF NEW.message_count <= 0 THEN
+    RAISE EXCEPTION 'direct compaction attempt % has no claimed messages', NEW.id
+      USING ERRCODE = '23514';
+  END IF;
+
+  SELECT COALESCE(array_agg(claim.id ORDER BY claim.id), ARRAY[]::UUID[])
+  INTO claimed_ids
+  FROM (
+    SELECT message.id
+    FROM bot_history_messages message
+    WHERE message.compact_id = NEW.id
+    ORDER BY message.id
+    FOR UPDATE
+  ) claim;
+
+  IF jsonb_typeof(NEW.coverage) IS DISTINCT FROM 'array' THEN
+    RAISE EXCEPTION 'compaction attempt % has invalid coverage', NEW.id
+      USING ERRCODE = '23514';
+  ELSIF jsonb_array_length(NEW.coverage) > 0 THEN
+    SELECT COALESCE(array_agg(expected.id ORDER BY expected.id), ARRAY[]::UUID[])
+    INTO expected_ids
+    FROM (
+      SELECT (covered.source->'ref'->>'id')::UUID AS id
+      FROM jsonb_array_elements(NEW.coverage) AS covered(source)
+    ) expected;
+
+    IF cardinality(expected_ids) <> NEW.message_count
+       OR claimed_ids IS DISTINCT FROM expected_ids THEN
+      RAISE EXCEPTION 'compaction attempt % claim set does not match coverage', NEW.id
+        USING ERRCODE = '23514';
+    END IF;
+  ELSIF cardinality(claimed_ids) <> NEW.message_count THEN
+    RAISE EXCEPTION 'legacy compaction attempt % claimed % messages, expected %',
+      NEW.id, cardinality(claimed_ids), NEW.message_count
+      USING ERRCODE = '23514';
+  END IF;
+
+  UPDATE bot_history_messages
+  SET compact_claim_finalized = true
+  WHERE compact_id = NEW.id
+    AND compact_claim_finalized = false;
+
+  RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER compaction_message_claim_guard
+BEFORE UPDATE OF compact_id, compact_claim_finalized ON bot_history_messages
+FOR EACH ROW
+EXECUTE FUNCTION guard_compaction_message_claim();
+
+CREATE TRIGGER compaction_message_claim_finalize
+AFTER UPDATE OF status ON bot_history_message_compacts
+FOR EACH ROW
+WHEN (OLD.status = 'pending' AND NEW.status = 'ok')
+EXECUTE FUNCTION finalize_compaction_message_claims();
 
 -- schedule_logs: structured execution records for scheduled tasks.
 CREATE TABLE IF NOT EXISTS schedule_logs (

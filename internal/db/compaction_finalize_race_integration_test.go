@@ -162,7 +162,20 @@ func TestFinalizeCompactionArtifactPriorStatusRacePostgresPath(t *testing.T) {
 		t.Fatalf("begin prior finalization: %v", err)
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	if _, err := tx.Exec(ctx, `UPDATE bot_history_message_compacts SET status = 'ok' WHERE id = $1`, priorLogID); err != nil {
+	priorParams := finalizeParams(
+		priorLogID,
+		botID,
+		sessionID,
+		[]pgtype.UUID{messageID},
+		versions,
+		"prior summary",
+		[]string{priorLogID.String()},
+	)
+	if _, err := tx.Exec(ctx, `
+UPDATE bot_history_message_compacts
+SET status = 'ok', summary = $2, message_count = 1, coverage = $3
+WHERE id = $1
+`, priorLogID, priorParams.Summary, priorParams.Coverage); err != nil {
 		t.Fatalf("stage prior finalization: %v", err)
 	}
 
@@ -283,11 +296,19 @@ func TestFinalizeCompactionArtifactUsesListedSourceVersionPostgresPath(t *testin
 func assertMessageUnclaimed(t *testing.T, ctx context.Context, pool *pgxpool.Pool, messageID pgtype.UUID) {
 	t.Helper()
 	var compactID pgtype.UUID
-	if err := pool.QueryRow(ctx, `SELECT compact_id FROM bot_history_messages WHERE id = $1`, messageID).Scan(&compactID); err != nil {
+	var finalized bool
+	if err := pool.QueryRow(ctx, `
+SELECT compact_id, compact_claim_finalized
+FROM bot_history_messages
+WHERE id = $1
+`, messageID).Scan(&compactID, &finalized); err != nil {
 		t.Fatalf("read source claim: %v", err)
 	}
 	if compactID.Valid {
 		t.Fatalf("message %s was partially claimed by %s", messageID, compactID)
+	}
+	if finalized {
+		t.Fatalf("unclaimed message %s retained a finalized claim marker", messageID)
 	}
 }
 

@@ -328,6 +328,14 @@ CREATE TABLE bot_history_messages (
 `); err != nil {
 		t.Fatalf("create finalize fixture: %v", err)
 	}
+	for _, migration := range []string{
+		"postgres/migrations/0107_compaction_terminal_status.up.sql",
+		"postgres/migrations/0108_compaction_claim_finalization.up.sql",
+	} {
+		if _, err := pool.Exec(ctx, readEmbeddedMigration(t, migration)); err != nil {
+			t.Fatalf("apply %s: %v", migration, err)
+		}
+	}
 	return pool
 }
 
@@ -412,11 +420,19 @@ func assertClaimedBy(t *testing.T, ctx context.Context, pool *pgxpool.Pool, mess
 	t.Helper()
 	for _, messageID := range messageIDs {
 		var got pgtype.UUID
-		if err := pool.QueryRow(ctx, `SELECT compact_id FROM bot_history_messages WHERE id = $1`, messageID).Scan(&got); err != nil {
+		var finalized bool
+		if err := pool.QueryRow(ctx, `
+SELECT compact_id, compact_claim_finalized
+FROM bot_history_messages
+WHERE id = $1
+`, messageID).Scan(&got, &finalized); err != nil {
 			t.Fatalf("read source claim: %v", err)
 		}
 		if got != compactID {
 			t.Fatalf("message %s compact_id = %s, want %s", messageID, got, compactID)
+		}
+		if !finalized {
+			t.Fatalf("message %s claim for %s is not finalized", messageID, compactID)
 		}
 	}
 }
@@ -449,11 +465,19 @@ func assertStatusAndUnclaimed(t *testing.T, ctx context.Context, pool *pgxpool.P
 	}
 	for _, messageID := range messageIDs {
 		var compactID pgtype.UUID
-		if err := pool.QueryRow(ctx, `SELECT compact_id FROM bot_history_messages WHERE id = $1`, messageID).Scan(&compactID); err != nil {
+		var finalized bool
+		if err := pool.QueryRow(ctx, `
+SELECT compact_id, compact_claim_finalized
+FROM bot_history_messages
+WHERE id = $1
+`, messageID).Scan(&compactID, &finalized); err != nil {
 			t.Fatalf("read source claim: %v", err)
 		}
 		if compactID.Valid {
 			t.Fatalf("message %s was partially claimed by %s", messageID, compactID)
+		}
+		if finalized {
+			t.Fatalf("unclaimed message %s retained a finalized claim marker", messageID)
 		}
 	}
 }
