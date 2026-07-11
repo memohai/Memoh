@@ -13,6 +13,7 @@ import (
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/contextfrag"
+	"github.com/memohai/memoh/internal/conversation"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 )
 
@@ -110,6 +111,7 @@ func TestDiscussACPFullContextPromptRendersNativeToolMarkers(t *testing.T) {
 			},
 		},
 		sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "lookup", Result: map[string]any{"answer": 42}}),
+		sdk.UserMessage("FINAL LATE BINDING"),
 	})
 
 	for _, want := range []string{"[user]", "question", "[tool_call: lookup]", `"q":"memoh"`, "[tool_result: lookup]", `"answer":42`} {
@@ -119,6 +121,9 @@ func TestDiscussACPFullContextPromptRendersNativeToolMarkers(t *testing.T) {
 	}
 	if strings.Contains(prompt, "private reasoning") {
 		t.Fatalf("ACP prompt leaked reasoning: %s", prompt)
+	}
+	if !strings.HasSuffix(prompt, "FINAL LATE BINDING") {
+		t.Fatalf("late binding is not the final ACP instruction: %s", prompt)
 	}
 }
 
@@ -372,6 +377,80 @@ func TestHandleReplyWithAgentACPDoesNotConsumeReceiptWithoutRuntimeAttempt(t *te
 	}
 }
 
+func TestHandleReplyWithAgentACPFinishesReceiptAcrossAttemptExits(t *testing.T) {
+	t.Parallel()
+
+	abortEvent, err := json.Marshal(agentpkg.StreamEvent{Type: agentpkg.EventAgentAbort})
+	if err != nil {
+		t.Fatalf("marshal abort event: %v", err)
+	}
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	tests := []struct {
+		name       string
+		ctx        context.Context
+		runtime    discussRuntimeStreamer
+		wantCursor int64
+	}{
+		{
+			name:       "closed without terminal",
+			ctx:        context.Background(),
+			runtime:    &scriptedDiscussRuntimeStreamer{},
+			wantCursor: 50,
+		},
+		{
+			name:       "terminal abort",
+			ctx:        context.Background(),
+			runtime:    &scriptedDiscussRuntimeStreamer{chunks: []conversation.StreamChunk{abortEvent}},
+			wantCursor: 100,
+		},
+		{
+			name:       "cancelled",
+			ctx:        cancelledCtx,
+			runtime:    &blockingDiscussRuntimeStreamer{},
+			wantCursor: 50,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			receipt := &countingDirectDiscussReceipt{}
+			preparer := &capturingDirectDiscussPromptPreparer{prepared: PreparedDirectDiscussPrompt{
+				RunConfig: agentpkg.RunConfig{Messages: []sdk.Message{sdk.UserMessage("prepared late binding")}},
+				Receipt:   receipt,
+			}}
+			resolver := &fakeRunConfigResolver{resolveResult: ResolveRunConfigResult{
+				RuntimeType:                 sessionpkg.RuntimeACPAgent,
+				DirectDiscussPromptPreparer: preparer,
+			}}
+			driver := NewDiscussDriver(DiscussDriverDeps{Resolver: resolver, RuntimeStreamer: test.runtime})
+			sess := &discussSession{
+				config: DiscussSessionConfig{
+					BotID:            "bot",
+					SessionID:        "session",
+					ConversationType: channel.ConversationTypeGroup,
+				},
+				lastProcessedMs: 50,
+			}
+
+			driver.handleReplyWithAgent(test.ctx, sess, RenderedContext{{
+				MessageID:    "current",
+				ReceivedAtMs: 100,
+				MentionsMe:   true,
+				Content:      []RenderedContentPiece{{Type: "text", Text: "current"}},
+			}}, driver.logger, &fakeDiscussStreamer{})
+
+			if receipt.calls.Load() != 1 {
+				t.Fatalf("receipt finish calls = %d, want 1", receipt.calls.Load())
+			}
+			if sess.lastProcessedMs != test.wantCursor {
+				t.Fatalf("cursor = %d, want %d", sess.lastProcessedMs, test.wantCursor)
+			}
+		})
+	}
+}
+
 type capturingDirectDiscussPromptPreparer struct {
 	calls    int
 	input    DirectDiscussPromptInput
@@ -391,6 +470,27 @@ func (p *capturingDirectDiscussPromptPreparer) PrepareDirectDiscussPrompt(
 type countingDirectDiscussReceipt struct {
 	calls atomic.Int32
 	err   error
+}
+
+type scriptedDiscussRuntimeStreamer struct {
+	chunks []conversation.StreamChunk
+}
+
+func (s *scriptedDiscussRuntimeStreamer) StreamChat(context.Context, conversation.ChatRequest) (<-chan conversation.StreamChunk, <-chan error) {
+	chunks := make(chan conversation.StreamChunk, len(s.chunks))
+	errs := make(chan error)
+	for _, chunk := range s.chunks {
+		chunks <- chunk
+	}
+	close(chunks)
+	close(errs)
+	return chunks, errs
+}
+
+type blockingDiscussRuntimeStreamer struct{}
+
+func (*blockingDiscussRuntimeStreamer) StreamChat(context.Context, conversation.ChatRequest) (<-chan conversation.StreamChunk, <-chan error) {
+	return make(chan conversation.StreamChunk), make(chan error)
 }
 
 func (r *countingDirectDiscussReceipt) Finish(context.Context) error {

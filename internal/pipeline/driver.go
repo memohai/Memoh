@@ -513,7 +513,6 @@ func discussACPFullContextPrompt(messages []sdk.Message) string {
 		b.WriteString(content)
 		b.WriteString("\n\n")
 	}
-	b.WriteString("Reply to the latest user-visible message when a response is appropriate.")
 	return strings.TrimSpace(b.String())
 }
 
