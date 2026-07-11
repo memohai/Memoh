@@ -936,12 +936,16 @@ const {
 } = storeToRefs(chatStore)
 
 const isActive = computed(() => props.active !== false)
+const hasRenderedSession = computed(() =>
+  !!(props.sessionId || activeChatTarget.value.sessionId || chatStore.sessionId || '').trim(),
+)
 
 // A fresh, writable chat opens with the composer centred and a greeting above
 // it. Read-only sessions (subagent / system / synced channel threads) hide the
 // composer entirely, so they never reach this state.
 const isWelcome = computed(() =>
   !!currentBotId.value
+  && !hasRenderedSession.value
   && !activeChatReadOnly.value
   && !loadingChats.value
   && messages.value.length === 0,
