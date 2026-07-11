@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { BotSessionActivityEvent, SessionMessageStreamEvent, UIStreamEvent, UIStreamEventHandler, UIToolApproval, UIUserInput } from '@/composables/api/useChat'
 import { REASONING_EFFORT_DISABLE } from '@/pages/bots/components/reasoning-effort'
+import { AUTH_SESSION_CLEARED_EVENT } from '@/lib/auth-session'
 import { useChatSelectionStore } from './chat-selection'
 import { useChatStore } from './chat-list'
 
@@ -58,6 +59,16 @@ vi.mock('@felinic/ui', async (importOriginal) => {
 
 function flushPromises() {
   return new Promise(resolve => setTimeout(resolve, 0))
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
 }
 
 function singleSelectUserInput(id = 'input-1'): UIUserInput {
@@ -130,6 +141,7 @@ describe('chat-list store', () => {
   let sessionsActivityHandler: ((event: BotSessionActivityEvent) => void) | null
   let sendEvents: UIStreamEvent[]
   let sentWSMessages: Array<Record<string, unknown>>
+  let abortedWSStreams: string[]
   let lastStreamId = ''
   let lastSessionId = ''
 
@@ -141,6 +153,7 @@ describe('chat-list store', () => {
     lastStreamId = ''
     lastSessionId = ''
     sentWSMessages = []
+    abortedWSStreams = []
     sendEvents = [
       { type: 'start' } as UIStreamEvent,
       { type: 'error', message: 'model failed' } as UIStreamEvent,
@@ -243,12 +256,18 @@ describe('chat-list store', () => {
             } as UIStreamEvent)
           }
         }),
-        abort: vi.fn(),
+        abort: vi.fn((streamId: string) => {
+          abortedWSStreams.push(streamId)
+        }),
         close: vi.fn(),
         onOpen: null,
         onClose: null,
       }
     })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('selects the first ready bot during initialization when none is selected', async () => {
@@ -777,6 +796,77 @@ describe('chat-list store', () => {
     await expect(sendPromise).resolves.toMatchObject({ ok: true })
   })
 
+  it('rolls back a detached approval turn when the response fails after switching sessions', async () => {
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [
+        { id: 'session-1', bot_id: 'bot-1', title: 'Approval', type: 'chat' },
+        { id: 'session-2', bot_id: 'bot-1', title: 'Other', type: 'chat' },
+      ],
+      nextCursor: null,
+    })
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'exec',
+          input: { command: 'pwd' },
+          tool_call_id: 'call-detached',
+          running: false,
+          approval: {
+            approval_id: 'approval-detached',
+            short_id: 12,
+            status: 'pending',
+            can_approve: true,
+          },
+        },
+      } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sendPromise = store.sendMessage('run pwd')
+    await flushPromises()
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    if (!assistant || assistant.role !== 'assistant') throw new Error('approval turn was not streamed')
+    const tool = assistant.messages.find(block => block.type === 'tool')
+    if (!tool?.approval) throw new Error('approval block was not streamed')
+
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    await store.respondToolApproval(tool.approval, 'approve')
+    const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
+    await store.selectSession('session-2')
+    streamHandler?.({
+      type: 'error',
+      stream_id: responseStreamId,
+      session_id: 'session-1',
+      message: 'approval failed',
+    } as UIStreamEvent)
+    await flushPromises()
+    await flushPromises()
+
+    api.fetchMessagesUI.mockRejectedValueOnce(new Error('offline'))
+    await store.selectSession('session-1')
+    await flushPromises()
+    await flushPromises()
+
+    const assistantTurns = store.messages.filter(turn => turn.role === 'assistant')
+    expect(assistantTurns).toHaveLength(1)
+    expect(assistantTurns[0]).toBe(assistant)
+    expect(assistant.streaming).toBe(true)
+    expect(tool.approval).toMatchObject({
+      approval_id: 'approval-detached',
+      status: 'pending',
+      can_approve: true,
+    })
+
+    store.abort()
+    await expect(sendPromise).resolves.toMatchObject({ ok: false, stage: 'stream' })
+    expect(assistant.streaming).toBe(false)
+  })
+
   it('sends each ACP approval response only once while the response is in flight', async () => {
     sendEvents = [
       { type: 'start' } as UIStreamEvent,
@@ -828,6 +918,106 @@ describe('chat-list store', () => {
     const originalStreamId = sentWSMessages[0]?.stream_id as string
     streamHandler?.({ type: 'end', stream_id: originalStreamId, session_id: 'session-1' } as UIStreamEvent)
     await expect(sendPromise).resolves.toMatchObject({ ok: true })
+  })
+
+  it('aborts a visible approval response, rolls back its decision, and unlocks retry', async () => {
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const approval: UIToolApproval = {
+      approval_id: 'approval-pwd',
+      short_id: 9,
+      status: 'pending',
+      can_approve: true,
+    }
+    store.messages.push(approvalTurn(approval))
+    await expect(store.respondToolApproval(approval, 'approve')).resolves.toBe(true)
+    const responseMessage = sentWSMessages.find(message => message.type === 'tool_approval_response')
+    const responseStreamId = responseMessage?.stream_id as string
+    const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
+
+    store.abort()
+    await flushPromises()
+
+    expect(ws.abort).toHaveBeenCalledTimes(1)
+    expect(ws.abort).toHaveBeenCalledWith(responseStreamId)
+    expect(store.streaming).toBe(false)
+    const block = store.messages[0]?.role === 'assistant' ? store.messages[0].messages[0] : null
+    expect(block?.type).toBe('tool')
+    if (block?.type !== 'tool' || !block.approval) throw new Error('approval block missing')
+    expect(block.approval).toMatchObject({ status: 'pending', can_approve: true })
+
+    sendEvents = [{ type: 'start' } as UIStreamEvent, { type: 'end' } as UIStreamEvent]
+    await expect(store.respondToolApproval(block.approval, 'approve')).resolves.toBe(true)
+  })
+
+  it('aborts silent approval and original streams once and ignores late response events', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'exec',
+          input: { command: 'pwd' },
+          tool_call_id: 'call-pwd',
+          running: false,
+          approval: {
+            approval_id: 'approval-pwd',
+            short_id: 9,
+            status: 'pending',
+            can_approve: true,
+          },
+        },
+      } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sending = store.sendMessage('run pwd')
+    await flushPromises()
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    if (!assistant || assistant.role !== 'assistant') throw new Error('assistant turn missing')
+    const tool = assistant.messages.find(block => block.type === 'tool')
+    if (!tool?.approval) throw new Error('approval block missing')
+    const originalStreamId = sentWSMessages[0]?.stream_id as string
+
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    await expect(store.respondToolApproval(tool.approval, 'approve')).resolves.toBe(true)
+    const responseMessage = sentWSMessages.find(message => message.type === 'tool_approval_response')
+    const responseStreamId = responseMessage?.stream_id as string
+    const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
+    const messageCount = store.messages.length
+
+    store.abort()
+    await expect(sending).resolves.toMatchObject({ ok: false, stage: 'stream' })
+    await flushPromises()
+
+    expect(ws.abort).toHaveBeenCalledTimes(2)
+    expect(ws.abort).toHaveBeenCalledWith(originalStreamId)
+    expect(ws.abort).toHaveBeenCalledWith(responseStreamId)
+    expect(tool.approval).toMatchObject({ status: 'pending', can_approve: true })
+    expect(store.messages).toHaveLength(messageCount)
+
+    streamHandler?.({
+      type: 'message',
+      stream_id: responseStreamId,
+      session_id: 'session-1',
+      data: { id: 99, type: 'text', content: 'late approval output' },
+    } as UIStreamEvent)
+    streamHandler?.({
+      type: 'error',
+      stream_id: responseStreamId,
+      session_id: 'session-1',
+      message: 'late approval error',
+    } as UIStreamEvent)
+    expect(store.messages).toHaveLength(messageCount)
+    expect(toast.error).not.toHaveBeenCalledWith('late approval error')
   })
 
   it('does not optimistically submit tool approval while websocket is disconnected', async () => {
@@ -1626,6 +1816,38 @@ describe('chat-list store', () => {
     expect(store.pendingACPRuntimeId).toBe('rt_new')
   })
 
+  it('ignores an older same-model response after a B-A-B model switch', async () => {
+    const firstB = deferred<unknown>()
+    api.setACPRuntimeModelByID
+      .mockReturnValueOnce(firstB.promise)
+      .mockResolvedValueOnce({
+        runtime_id: 'rt_warm', agent_id: 'codex', state: 'idle',
+        models: { current_model_id: 'model-a', available_models: [] },
+      })
+      .mockResolvedValueOnce({
+        runtime_id: 'rt_warm', agent_id: 'codex', state: 'idle',
+        models: { current_model_id: 'model-b', available_models: [] },
+      })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    store.stageACPSession({ agentId: 'codex', modelId: 'model-a' })
+    await store.ensurePendingACPRuntime()
+
+    const oldB = store.setPendingACPModel('model-b')
+    await flushPromises()
+    await store.setPendingACPModel('model-a')
+    await store.setPendingACPModel('model-b')
+    firstB.resolve({
+      runtime_id: 'rt_warm', agent_id: 'codex', state: 'idle',
+      models: { current_model_id: 'stale-model-b', available_models: [] },
+    })
+    await oldB
+
+    expect(store.pendingACPModelId).toBe('model-b')
+    expect(store.pendingACPRuntimeStatus?.models?.current_model_id).toBe('model-b')
+  })
+
   it('reverts the pending model if runtime creation fails for the current staging', async () => {
     api.createACPRuntime.mockRejectedValueOnce({ message: 'runtime create failed' })
     const store = useChatStore()
@@ -2365,6 +2587,62 @@ describe('chat-list store', () => {
     }
   })
 
+  it('rolls back user input on abort without refreshing the old session', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const userInput = singleSelectUserInput()
+    store.messages.push(askUserTurn(userInput))
+    api.fetchMessagesUI.mockClear()
+
+    await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
+    const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
+    const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
+    store.abort()
+    await flushPromises()
+
+    expect(ws.abort).toHaveBeenCalledWith(responseStreamId)
+    expect(api.fetchMessagesUI).not.toHaveBeenCalled()
+    expect(store.messages).toHaveLength(1)
+    const block = store.messages[0]?.role === 'assistant' ? store.messages[0].messages[0] : null
+    expect(block?.type).toBe('tool')
+    if (block?.type === 'tool') {
+      expect(block.userInput).toMatchObject({ status: 'pending', can_respond: true })
+    }
+  })
+
+  it('does not refresh a previous bot after user-input teardown', async () => {
+    api.fetchBots.mockResolvedValue([
+      { id: 'bot-1', status: 'active', name: 'Bot 1' },
+      { id: 'bot-2', status: 'active', name: 'Bot 2' },
+    ])
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const userInput = singleSelectUserInput()
+    store.messages.push(askUserTurn(userInput))
+    await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
+    api.fetchMessagesUI.mockClear()
+
+    await store.selectBot('bot-2')
+    await flushPromises()
+
+    expect(store.currentBotId).toBe('bot-2')
+    expect(api.fetchMessagesUI).not.toHaveBeenCalledWith(
+      'bot-1',
+      'session-1',
+      expect.anything(),
+    )
+  })
+
   it('deduplicates concurrent ACP runtime ensure calls', async () => {
     api.fetchSessions.mockResolvedValueOnce({ items: [
       { id: 'acp-session-1', bot_id: 'bot-1', title: '', type: 'acp_agent' },
@@ -2392,6 +2670,84 @@ describe('chat-list store', () => {
 
     expect(api.ensureACPRuntime).toHaveBeenCalledTimes(1)
     expect(store.acpRuntimeStatuses[store.acpRuntimeKey('bot-1', 'acp-session-1')]?.models?.available_models).toHaveLength(1)
+  })
+
+  it('clears ACP runtime state with the authenticated user scope', async () => {
+    const windowTarget = new EventTarget()
+    vi.stubGlobal('window', windowTarget)
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'acp-session-1', bot_id: 'bot-1', title: '', type: 'acp_agent' },
+    ], nextCursor: null })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await store.ensureACPRuntime('acp-session-1')
+    const key = store.acpRuntimeKey('bot-1', 'acp-session-1')
+    expect(store.acpRuntimeStatuses[key]).toBeDefined()
+
+    windowTarget.dispatchEvent(new CustomEvent(AUTH_SESSION_CLEARED_EVENT, {
+      detail: { reason: 'logout' },
+    }))
+
+    expect(store.acpRuntimeStatuses).toEqual({})
+    expect(store.acpRuntimePending).toEqual({})
+  })
+
+  it('closes a staged ACP runtime with its owner bot on auth reset', async () => {
+    const windowTarget = new EventTarget()
+    vi.stubGlobal('window', windowTarget)
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    store.stageACPSession({ agentId: 'codex' })
+    await store.ensurePendingACPRuntime()
+    expect(store.pendingACPRuntimeId).toBe('rt_warm')
+
+    windowTarget.dispatchEvent(new CustomEvent(AUTH_SESSION_CLEARED_EVENT, {
+      detail: { reason: 'logout' },
+    }))
+
+    expect(api.closeACPRuntime).toHaveBeenCalledWith('bot-1', 'rt_warm')
+    expect(store.pendingACPRuntimeId).toBe('')
+  })
+
+  it('does not restore bots from an initialization response after auth reset', async () => {
+    const windowTarget = new EventTarget()
+    vi.stubGlobal('window', windowTarget)
+    const oldBots = deferred<Array<{ id: string; status: string; name: string }>>()
+    api.fetchBots.mockReturnValueOnce(oldBots.promise)
+    const store = useChatStore()
+
+    const initializing = store.initialize()
+    await flushPromises()
+    windowTarget.dispatchEvent(new CustomEvent(AUTH_SESSION_CLEARED_EVENT, {
+      detail: { reason: 'logout' },
+    }))
+    oldBots.resolve([{ id: 'old-user-bot', status: 'active', name: 'Old' }])
+    await initializing
+
+    expect(store.bots).toEqual([])
+    expect(store.currentBotId).toBeNull()
+    expect(api.fetchSessions).not.toHaveBeenCalledWith('old-user-bot')
+  })
+
+  it('does not apply a late bot refresh after auth reset', async () => {
+    const windowTarget = new EventTarget()
+    vi.stubGlobal('window', windowTarget)
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    const oldRefresh = deferred<Array<{ id: string; status: string; name: string }>>()
+    api.fetchBots.mockReturnValueOnce(oldRefresh.promise)
+
+    const refreshing = store.refreshBots()
+    windowTarget.dispatchEvent(new CustomEvent(AUTH_SESSION_CLEARED_EVENT, {
+      detail: { reason: 'logout' },
+    }))
+    oldRefresh.resolve([{ id: 'old-user-bot', status: 'active', name: 'Old' }])
+    await refreshing
+
+    expect(store.bots).toEqual([])
+    expect(store.currentBotId).toBeNull()
   })
 
   it('refreshes the session list when message events arrive for an unknown session', async () => {
@@ -2446,6 +2802,28 @@ describe('chat-list store', () => {
       streaming: false,
     })
     expect(store.startupSendFailure).toBeNull()
+  })
+
+  it('aborts the active session stream through the websocket and settles the send', async () => {
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sending = store.sendMessage('hello')
+    await flushPromises()
+    await flushPromises()
+
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    const ws = api.connectWebSocket.mock.results.at(-1)?.value as { abort: ReturnType<typeof vi.fn> }
+    expect(store.streaming).toBe(true)
+    expect(assistant?.streaming).toBe(true)
+
+    store.abort()
+
+    await expect(sending).resolves.toMatchObject({ ok: false, stage: 'stream' })
+    expect(ws.abort).toHaveBeenCalledWith(lastStreamId)
+    expect(store.streaming).toBe(false)
+    expect(assistant?.streaming).toBe(false)
   })
 
   it('keeps an ephemeral error visible when refresh returns only the persisted user turn', async () => {
@@ -3314,6 +3692,76 @@ describe('chat-list store', () => {
     })
   })
 
+  it('keeps a forked ask-user continuation in one assistant turn when hydration resolves late', async () => {
+    sendEvents = []
+    const userInput = singleSelectUserInput()
+    const forkTurns = [
+      {
+        id: 'fork-user', role: 'user' as const, text: 'use ask_user', attachments: [],
+        timestamp: '2026-07-11T00:00:00.000Z',
+      },
+      {
+        id: 'fork-assistant',
+        role: 'assistant' as const,
+        messages: [{
+          id: 1,
+          type: 'tool' as const,
+          name: 'ask_user',
+          input: { questions: [{ text: 'Which plan?', kind: 'single_select' }] },
+          tool_call_id: 'call-ask',
+          running: false,
+          user_input: userInput,
+        }],
+        timestamp: '2026-07-11T00:00:01.000Z',
+      },
+    ]
+    api.fetchSessions.mockResolvedValueOnce({
+      items: [{ id: 'source-session', bot_id: 'bot-1', title: 'Source', type: 'chat' }],
+      nextCursor: null,
+    })
+    api.forkSessionFromMessage.mockResolvedValueOnce({
+      id: 'fork-session', bot_id: 'bot-1', title: 'Source fork', type: 'chat',
+    })
+    const hydration = deferred<typeof forkTurns>()
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+    api.fetchMessagesUI
+      .mockResolvedValueOnce(forkTurns)
+      .mockReturnValueOnce(hydration.promise)
+
+    await store.forkMessage('source-assistant')
+    await flushPromises()
+    expect(store.messages.filter(message => message.role === 'assistant')).toHaveLength(1)
+
+    await store.respondUserInput(userInput, {
+      answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
+    })
+    const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
+    streamHandler?.({
+      type: 'message', stream_id: responseStreamId, session_id: 'fork-session',
+      data: { id: 2, type: 'text', content: 'continuation' },
+    } as UIStreamEvent)
+
+    hydration.resolve(forkTurns)
+    await flushPromises()
+    await flushPromises()
+
+    const assistantTurns = store.messages.filter(message => message.role === 'assistant')
+    expect(assistantTurns).toHaveLength(1)
+    expect(assistantTurns[0]).toMatchObject({
+      streaming: true,
+      messages: [
+        { type: 'tool', userInput: { user_input_id: 'input-1', status: 'submitted' } },
+        { type: 'text', content: 'continuation' },
+      ],
+    })
+
+    api.fetchMessagesUI.mockResolvedValueOnce(forkTurns)
+    streamHandler?.({ type: 'end', stream_id: responseStreamId, session_id: 'fork-session' } as UIStreamEvent)
+    await flushPromises()
+  })
+
   it('does not write a fork response into the active store after switching sessions', async () => {
     api.fetchSessions.mockResolvedValueOnce({
       items: [
@@ -3762,6 +4210,92 @@ describe('chat-list store', () => {
     await expect(sendPromise).resolves.toMatchObject({ ok: true })
   })
 
+  it('blocks a second deferred draft send while the first stream is still unbound', async () => {
+    sendEvents = []
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const firstSend = store.sendMessage('first activation', undefined, {
+      requestedSkills: [{ name: 'alpha' }],
+      composerScope: 'bot-1:draft-a',
+    })
+    await flushPromises()
+    const streamId = sentWSMessages[0]?.stream_id as string
+
+    expect(store.streaming).toBe(true)
+    const secondResult = await store.sendMessage('second activation', undefined, {
+      requestedSkills: [{ name: 'beta' }],
+      composerScope: 'bot-1:draft-a',
+    })
+    expect(secondResult).toMatchObject({ ok: false, stage: 'startup' })
+    expect(sentWSMessages).toHaveLength(1)
+
+    streamHandler?.({ type: 'end', stream_id: streamId } as UIStreamEvent)
+    await expect(firstSend).resolves.toMatchObject({ ok: true })
+    expect(store.streaming).toBe(false)
+  })
+
+  it('aborts a deferred draft stream before session_created binds it', async () => {
+    sendEvents = []
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sending = store.sendMessage('activate', undefined, {
+      requestedSkills: [{ name: 'alpha' }],
+      composerScope: 'bot-1:draft-a',
+    })
+    await flushPromises()
+    const streamId = sentWSMessages[0]?.stream_id as string
+
+    store.abort()
+
+    await expect(sending).resolves.toMatchObject({ ok: false })
+    expect(abortedWSStreams).toContain(streamId)
+    expect(store.streaming).toBe(false)
+  })
+
+  it('keeps the first created-session correlation when a stream receives a conflicting duplicate', async () => {
+    sendEvents = []
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sending = store.sendMessage('activate', undefined, {
+      requestedSkills: [{ name: 'alpha' }],
+      composerScope: 'bot-1:draft-a',
+    })
+    await flushPromises()
+    const streamId = sentWSMessages[0]?.stream_id as string
+
+    streamHandler?.({ type: 'session_created', stream_id: streamId, session_id: 'session-first' } as UIStreamEvent)
+    streamHandler?.({ type: 'session_created', stream_id: streamId, session_id: 'session-conflict' } as UIStreamEvent)
+
+    expect(store.sessionId).toBe('session-first')
+    expect(store.knownSessionSummary('session-first')).not.toBeNull()
+    expect(store.knownSessionSummary('session-conflict')).toBeNull()
+
+    streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'session-first' } as UIStreamEvent)
+    await expect(sending).resolves.toMatchObject({ ok: true })
+  })
+
+  it('ignores late messages for a terminal stream instead of resurrecting it', async () => {
+    sendEvents = [{ type: 'start' } as UIStreamEvent, { type: 'end' } as UIStreamEvent]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await expect(store.sendMessage('hello')).resolves.toMatchObject({ ok: true })
+    const messageCount = store.messages.length
+
+    streamHandler?.({
+      type: 'message',
+      stream_id: lastStreamId,
+      session_id: lastSessionId,
+      data: { id: 1, type: 'text', content: 'late' },
+    } as UIStreamEvent)
+
+    expect(store.messages).toHaveLength(messageCount)
+    expect(store.streaming).toBe(false)
+  })
+
   it('does not select a late session_created event after the user switches sessions', async () => {
     sendEvents = []
     api.fetchSession.mockImplementation(async (_botId: string, sessionID: string) => ({
@@ -3975,6 +4509,194 @@ describe('chat-list store', () => {
       type: 'command_error',
       error: { code: 'late_error' },
     })
+  })
+
+  it('ignores queued websocket events from a previous bot connection', async () => {
+    api.fetchBots.mockResolvedValue([
+      { id: 'bot-1', status: 'active', name: 'Bot 1' },
+      { id: 'bot-2', status: 'active', name: 'Bot 2' },
+    ])
+    const handlers: Array<{ botId: string; handler: UIStreamEventHandler }> = []
+    api.connectWebSocket.mockImplementation((botId: string, handler: UIStreamEventHandler) => {
+      handlers.push({ botId, handler })
+      return {
+        get connected() {
+          return true
+        },
+        send: vi.fn(),
+        abort: vi.fn(),
+        close: vi.fn(),
+        onOpen: null,
+        onClose: null,
+      }
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const staleHandler = handlers.find(entry => entry.botId === 'bot-1')?.handler
+    expect(staleHandler).toBeDefined()
+
+    await store.selectBot('bot-2')
+    staleHandler?.({ type: 'start', stream_id: 'old-stream', session_id: 'old-session' } as UIStreamEvent)
+    staleHandler?.({
+      type: 'message',
+      stream_id: 'old-stream',
+      session_id: 'old-session',
+      data: { id: 0, type: 'text', content: 'late old-bot output' },
+    } as UIStreamEvent)
+
+    expect(store.currentBotId).toBe('bot-2')
+    expect(store.isSessionStreaming('old-session')).toBe(false)
+    expect(store.messages).toHaveLength(0)
+  })
+
+  it('reattaches an active assistant stream after switching away and back', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+      { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+    ], nextCursor: null })
+    let returningToSessionA = false
+    api.fetchMessagesUI.mockImplementation(async (_botId: string, targetSessionId: string) => {
+      if (returningToSessionA && targetSessionId === 'session-a') {
+        return [{
+          id: 'server-user-a',
+          role: 'user',
+          text: 'first',
+          attachments: [],
+          timestamp: '2026-07-10T00:00:00.000Z',
+        }]
+      }
+      return []
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    await flushPromises()
+    const sending = store.sendMessage('first')
+    await flushPromises()
+    const streamId = sentWSMessages[0]?.stream_id as string
+    streamHandler?.({
+      type: 'message',
+      stream_id: streamId,
+      session_id: 'session-a',
+      data: { id: 0, type: 'text', content: 'before switch' },
+    } as UIStreamEvent)
+
+    await store.selectSession('session-b')
+    await flushPromises()
+    expect(store.messages).toHaveLength(0)
+
+    returningToSessionA = true
+    await store.selectSession('session-a')
+    await flushPromises()
+    await flushPromises()
+    expect(store.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
+    expect(store.messages[1]).toMatchObject({
+      role: 'assistant',
+      messages: [{ type: 'text', content: 'before switch' }],
+      streaming: true,
+    })
+
+    streamHandler?.({
+      type: 'message',
+      stream_id: streamId,
+      session_id: 'session-a',
+      data: { id: 1, type: 'text', content: 'after return' },
+    } as UIStreamEvent)
+    expect(store.messages[1]).toMatchObject({
+      role: 'assistant',
+      messages: [
+        { type: 'text', content: 'before switch' },
+        { type: 'text', content: 'after return' },
+      ],
+    })
+
+    streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'session-a' } as UIStreamEvent)
+    await expect(sending).resolves.toMatchObject({ ok: true })
+  })
+
+  it('replaces the hydrated assistant twin when reattaching an active stream', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+      { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+    ], nextCursor: null })
+    let returningToSessionA = false
+    api.fetchMessagesUI.mockImplementation(async (_botId: string, targetSessionId: string) => {
+      if (!returningToSessionA || targetSessionId !== 'session-a') return []
+      return [
+        { id: 'server-user-a', role: 'user', text: 'first', attachments: [], timestamp: '2026-07-10T00:00:00.000Z' },
+        {
+          id: 'server-assistant-a',
+          role: 'assistant',
+          messages: [{ id: 0, type: 'text', content: 'persisted' }],
+          timestamp: '2026-07-10T00:00:01.000Z',
+        },
+      ]
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sending = store.sendMessage('first')
+    await flushPromises()
+    const streamId = sentWSMessages[0]?.stream_id as string
+    streamHandler?.({
+      type: 'message', stream_id: streamId, session_id: 'session-a',
+      data: { id: 0, type: 'text', content: 'live' },
+    } as UIStreamEvent)
+
+    await store.selectSession('session-b')
+    returningToSessionA = true
+    await store.selectSession('session-a')
+    await flushPromises()
+    await flushPromises()
+
+    expect(store.messages.filter(turn => turn.role === 'assistant')).toHaveLength(1)
+    expect(store.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      streaming: true,
+      messages: [{ type: 'text', content: 'live' }],
+    })
+
+    streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'session-a' } as UIStreamEvent)
+    await sending
+  })
+
+  it('reattaches an active stream even when return hydration fails', async () => {
+    sendEvents = []
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+      { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+    ], nextCursor: null })
+    let returningToSessionA = false
+    api.fetchMessagesUI.mockImplementation(async (_botId: string, targetSessionId: string) => {
+      if (returningToSessionA && targetSessionId === 'session-a') throw new Error('offline')
+      return []
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sending = store.sendMessage('first')
+    await flushPromises()
+    const streamId = sentWSMessages[0]?.stream_id as string
+    streamHandler?.({
+      type: 'message', stream_id: streamId, session_id: 'session-a',
+      data: { id: 0, type: 'text', content: 'live' },
+    } as UIStreamEvent)
+
+    await store.selectSession('session-b')
+    returningToSessionA = true
+    await store.selectSession('session-a')
+    await flushPromises()
+    await flushPromises()
+
+    expect(store.messages).toHaveLength(1)
+    expect(store.messages[0]).toMatchObject({ role: 'assistant', streaming: true })
+
+    returningToSessionA = false
+    streamHandler?.({ type: 'end', stream_id: streamId, session_id: 'session-a' } as UIStreamEvent)
+    await sending
   })
 
   it('routes interleaved websocket events by stream id', async () => {

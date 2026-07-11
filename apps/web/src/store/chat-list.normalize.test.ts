@@ -1,0 +1,199 @@
+import { describe, expect, it, vi } from 'vitest'
+import {
+  SAME_TURN_TIMESTAMP_TOLERANCE_MS,
+  asRecord,
+  cloneRequestedSkills,
+  cloneUserInputState,
+  createStreamId,
+  isOptimisticTurn,
+  isSameLogicalTurn,
+  mergeApprovalState,
+  normalizeForwardRef,
+  normalizeReplyRef,
+  normalizeRequestedSkills,
+  normalizeTimestamp,
+  pickRawString,
+  pickString,
+  serverMessageId,
+  skillActivationTextFromRaw,
+  sortChatMessages,
+  structuredToolResult,
+} from './chat-list.normalize'
+import type { ChatMessage, ChatUserTurn } from './chat-list'
+
+vi.mock('@/store/user', () => ({
+  useUserStore: () => ({ userInfo: { id: 'user-1' } }),
+}))
+
+function userTurn(overrides: Partial<ChatUserTurn> = {}): ChatUserTurn {
+  return {
+    id: 'u1',
+    role: 'user',
+    text: 'hello',
+    timestamp: '2026-07-09T00:00:00.000Z',
+    attachments: [],
+    isSelf: true,
+    ...overrides,
+  } as ChatUserTurn
+}
+
+describe('normalizeTimestamp', () => {
+  it('normalizes a parseable value to ISO', () => {
+    expect(normalizeTimestamp('2026-07-09T12:00:00+08:00')).toBe('2026-07-09T04:00:00.000Z')
+  })
+
+  it('falls back to now for empty and garbage input', () => {
+    expect(() => new Date(normalizeTimestamp('')).toISOString()).not.toThrow()
+    expect(() => new Date(normalizeTimestamp('not-a-date')).toISOString()).not.toThrow()
+  })
+})
+
+describe('normalizeReplyRef / normalizeForwardRef', () => {
+  it('trims fields and drops an all-empty reply', () => {
+    expect(normalizeReplyRef({ message_id: ' m1 ', sender: '', preview: '', attachments: [] }))
+      .toEqual({ message_id: 'm1', sender: '', preview: '', attachments: [] })
+    expect(normalizeReplyRef({ message_id: '', sender: ' ', preview: '', attachments: [] })).toBeUndefined()
+    expect(normalizeReplyRef(undefined)).toBeUndefined()
+  })
+
+  it('keeps a forward ref only when it carries data, and validates date', () => {
+    expect(normalizeForwardRef({ message_id: 'm2', sender: 's', date: Number.NaN }))
+      .toEqual({ message_id: 'm2', from_user_id: '', from_conversation_id: '', sender: 's', date: undefined })
+    expect(normalizeForwardRef({ message_id: '', sender: '' })).toBeUndefined()
+  })
+})
+
+describe('record pickers', () => {
+  it('asRecord guards non-objects', () => {
+    expect(asRecord(null)).toEqual({})
+    expect(asRecord('x')).toEqual({})
+    expect(asRecord({ a: 1 })).toEqual({ a: 1 })
+  })
+
+  it('pickString trims and skips blank values; pickRawString keeps raw', () => {
+    expect(pickString({ a: '  ', b: ' x ' }, 'a', 'b')).toBe('x')
+    expect(pickRawString({ a: '  ', b: 'x' }, 'a', 'b')).toBe('  ')
+  })
+
+  it('structuredToolResult prefers structuredContent when non-empty', () => {
+    expect(structuredToolResult({ structuredContent: { v: 1 }, other: 2 })).toEqual({ v: 1 })
+    expect(structuredToolResult({ structuredContent: {}, other: 2 })).toEqual({ structuredContent: {}, other: 2 })
+  })
+})
+
+describe('skillActivationTextFromRaw', () => {
+  const activation = { skills: [{ name: 'review' }] }
+
+  it('strips a matching slash selector and keeps the remainder', () => {
+    expect(skillActivationTextFromRaw('/review please check', activation)).toBe('please check')
+    expect(skillActivationTextFromRaw('/review@v2 check', activation)).toBe('check')
+  })
+
+  it('leaves non-matching and non-slash text alone', () => {
+    expect(skillActivationTextFromRaw('/other do', activation)).toBe('')
+    expect(skillActivationTextFromRaw('plain text', activation)).toBe('plain text')
+    expect(skillActivationTextFromRaw('plain text', undefined)).toBe('plain text')
+  })
+})
+
+describe('sortChatMessages', () => {
+  it('sorts by timestamp then id, without mutating input', () => {
+    const items = [
+      userTurn({ id: 'b', timestamp: '2026-07-09T00:00:02.000Z' }),
+      userTurn({ id: 'a', timestamp: '2026-07-09T00:00:01.000Z' }),
+      userTurn({ id: 'c', timestamp: '2026-07-09T00:00:01.000Z' }),
+    ] as ChatMessage[]
+    const sorted = sortChatMessages(items)
+    expect(sorted.map(m => m.id)).toEqual(['a', 'c', 'b'])
+    expect(items.map(m => m.id)).toEqual(['b', 'a', 'c'])
+  })
+})
+
+describe('isOptimisticTurn / isSameLogicalTurn', () => {
+  it('only flags explicitly optimistic turns', () => {
+    expect(isOptimisticTurn(userTurn())).toBe(false)
+    expect(isOptimisticTurn(userTurn({ __optimistic: true } as Partial<ChatUserTurn>))).toBe(true)
+  })
+
+  it('matches by externalMessageId when both sides carry one', () => {
+    const a = userTurn({ externalMessageId: 'x' } as Partial<ChatUserTurn>)
+    const b = userTurn({ id: 'u2', text: 'different', externalMessageId: 'x' } as Partial<ChatUserTurn>)
+    expect(isSameLogicalTurn(a, b)).toBe(true)
+  })
+
+  it('matches user turns by text + timestamp within tolerance', () => {
+    const a = userTurn()
+    const near = userTurn({ id: 'u2', timestamp: new Date(Date.parse(a.timestamp) + SAME_TURN_TIMESTAMP_TOLERANCE_MS).toISOString() })
+    const far = userTurn({ id: 'u3', timestamp: new Date(Date.parse(a.timestamp) + SAME_TURN_TIMESTAMP_TOLERANCE_MS + 1).toISOString() })
+    expect(isSameLogicalTurn(a, near)).toBe(true)
+    expect(isSameLogicalTurn(a, far)).toBe(false)
+    expect(isSameLogicalTurn(a, userTurn({ id: 'u4', text: 'other' }))).toBe(false)
+  })
+
+  it('refuses to guess on assistant content', () => {
+    const asst = { id: 'a1', role: 'assistant', timestamp: userTurn().timestamp, messages: [], streaming: false } as unknown as ChatMessage
+    const twin = { ...asst, id: 'a2' } as ChatMessage
+    expect(isSameLogicalTurn(asst, twin)).toBe(false)
+  })
+})
+
+describe('mergeApprovalState', () => {
+  it('keeps the resolved local state when the incoming twin regressed to pending', () => {
+    const resolved = { approval_id: 'ap1', status: 'approved' }
+    const stale = { approval_id: 'ap1', status: 'pending' }
+    expect(mergeApprovalState(resolved, stale)).toBe(resolved)
+  })
+
+  it('otherwise takes the incoming state, and keeps existing when incoming is absent', () => {
+    const existing = { approval_id: 'ap1', status: 'pending' }
+    const incoming = { approval_id: 'ap1', status: 'approved' }
+    expect(mergeApprovalState(existing, incoming)).toBe(incoming)
+    expect(mergeApprovalState(existing, undefined)).toBe(existing)
+  })
+})
+
+describe('cloneUserInputState', () => {
+  it('deep-clones questions and options', () => {
+    const input = {
+      user_input_id: 'ui1',
+      status: 'pending',
+      questions: [{ id: 'q1', options: [{ id: 'o1' }] }],
+    }
+    const clone = cloneUserInputState(input as never)
+    expect(clone).toEqual(input)
+    expect(clone.questions?.[0]).not.toBe(input.questions[0])
+    expect(clone.questions?.[0]?.options?.[0]).not.toBe(input.questions[0]!.options[0])
+  })
+})
+
+describe('requested skills', () => {
+  it('dedupes by name and trims fields', () => {
+    const out = normalizeRequestedSkills([
+      { name: ' review ', display_name: ' R ' },
+      { name: 'review' },
+      { name: '  ' },
+    ])
+    expect(out).toEqual([{ name: 'review', display_name: 'R', description: undefined, source_kind: undefined, state: undefined }])
+  })
+
+  it('cloneRequestedSkills returns fresh objects', () => {
+    const src = [{ name: 'a' }]
+    const clone = cloneRequestedSkills(src)
+    expect(clone).toEqual(src)
+    expect(clone[0]).not.toBe(src[0])
+  })
+})
+
+describe('ids', () => {
+  it('serverMessageId prefers serverId', () => {
+    expect(serverMessageId(userTurn({ serverId: ' s1 ' } as Partial<ChatUserTurn>))).toBe('s1')
+    expect(serverMessageId(userTurn())).toBe('u1')
+  })
+
+  it('createStreamId yields distinct non-empty ids', () => {
+    const a = createStreamId()
+    const b = createStreamId()
+    expect(a).toBeTruthy()
+    expect(a).not.toBe(b)
+  })
+})

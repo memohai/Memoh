@@ -124,49 +124,12 @@
             </div>
           </ScrollArea>
 
-          <div
-            v-if="showScrollRail"
-            class="group/rail hidden md:flex absolute inset-y-0 right-4 z-(--z-raised) w-96 flex-col items-end justify-center pointer-events-none"
-            @mouseenter="scheduleRailOpen"
-            @mouseleave="scheduleRailClose"
-          >
-            <!-- Collapsed: uniform tick marks -->
-            <div
-              class="flex max-h-[60vh] flex-col items-end justify-center gap-2 py-2 pointer-events-auto transition-opacity duration-150"
-              :class="railOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'"
-            >
-              <span
-                v-for="seg in railSegments"
-                :key="seg.id"
-                class="h-0.5 w-4 shrink-0 rounded-full transition-colors duration-150"
-                :class="seg.id === activeRailId
-                  ? 'bg-foreground/70'
-                  : 'bg-muted-foreground/30 group-hover/rail:bg-muted-foreground/55'"
-              />
-            </div>
-
-            <!-- Expanded: user-prompt select panel -->
-            <div
-              v-if="railOpen"
-              class="absolute right-0 top-1/2 w-80 -translate-y-1/2 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-lg pointer-events-auto"
-              @mouseenter="scheduleRailOpen"
-              @mouseleave="scheduleRailClose"
-            >
-              <div
-                class="max-h-[min(60vh,480px)] overflow-y-auto overscroll-contain p-1.5 outline-none [mask-image:linear-gradient(to_bottom,transparent,black_10px,black_calc(100%-10px),transparent)] scrollbar-none"
-              >
-                <button
-                  v-for="seg in railSegments"
-                  :key="seg.id"
-                  type="button"
-                  class="flex h-8 w-full items-center rounded-md px-3 text-left text-[13px] text-foreground hover:bg-[var(--overlay-hover)]"
-                  @click="scrollToRailSegment(seg)"
-                >
-                  <span class="truncate">{{ seg.preview }}</span>
-                </button>
-              </div>
-            </div>
-          </div>
+          <ChatScrollRail
+            :messages="messages"
+            :scroll-el="scrollEl"
+            :enabled="isActive && !loadingChats"
+            @jump="handleRailJump"
+          />
         </section>
       </section>
 
@@ -192,39 +155,10 @@
         </DialogContent>
       </Dialog>
 
-      <Dialog v-model:open="forkDialogOpen">
-        <DialogContent class="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{{ $t('chat.forkDialog.title') }}</DialogTitle>
-            <DialogDescription>{{ $t('chat.forkDialog.description') }}</DialogDescription>
-          </DialogHeader>
-          <form
-            class="space-y-4"
-            @submit.prevent="handleCreateFork"
-          >
-            <Input
-              v-model="forkSessionTitle"
-              :aria-label="$t('chat.forkDialog.namePlaceholder')"
-              :placeholder="$t('chat.forkDialog.namePlaceholder')"
-              :disabled="forkSubmitting"
-              maxlength="120"
-              autofocus
-            />
-            <DialogFooter>
-              <Button
-                type="submit"
-                :disabled="!forkSessionTitle.trim() || forkSubmitting"
-              >
-                <Spinner
-                  v-if="forkSubmitting"
-                  class="mr-1 size-3"
-                />
-                {{ $t('common.create') }}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <ChatForkDialog
+        v-model:open="forkDialogOpen"
+        :message-id="pendingForkMessageId"
+      />
 
       <!-- The composer is a single instance reused in both layouts: pinned to
            the bottom once a conversation exists, or lifted to the vertical
@@ -398,110 +332,11 @@
                 leave-from-class="opacity-100 translate-y-0"
                 leave-to-class="opacity-0 translate-y-1"
               >
-                <div
+                <ChatUserInputForm
                   v-if="pendingUserInput"
-                  class="mb-2 overflow-hidden rounded-lg border border-border bg-card shadow-sm"
-                >
-                  <div
-                    class="max-h-[45vh] overflow-y-auto overscroll-contain px-3 py-2 pr-2"
-                    style="scrollbar-gutter: stable;"
-                  >
-                    <div
-                      v-for="(question, questionIndex) in pendingUserInputQuestions"
-                      :key="question.id"
-                      :class="questionIndex > 0 ? 'mt-3 border-t border-border/60 pt-3' : ''"
-                    >
-                      <p class="whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-foreground">
-                        {{ question.text }}
-                      </p>
-                      <div>
-                        <div
-                          v-if="question.kind !== 'text' && question.options?.length"
-                          class="mt-2 flex flex-col gap-1"
-                        >
-                          <Button
-                            v-for="option in question.options"
-                            :key="option.id"
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            class="h-auto min-h-8 w-full justify-start whitespace-normal rounded-md px-2.5 py-1.5 text-left text-xs"
-                            :class="isPendingUserInputOptionSelected(question.id, option.id) ? 'bg-muted text-foreground' : 'text-foreground hover:bg-accent'"
-                            :title="option.description || option.label"
-                            :role="question.kind === 'multi_select' ? 'checkbox' : 'radio'"
-                            :aria-checked="isPendingUserInputOptionSelected(question.id, option.id)"
-                            @click="togglePendingUserInputOption(question, option.id)"
-                          >
-                            <span
-                              class="mr-2 flex size-4 shrink-0 items-center justify-center"
-                              :class="isPendingUserInputOptionSelected(question.id, option.id) ? 'text-foreground' : 'text-muted-foreground'"
-                            >
-                              <component
-                                :is="pendingUserInputOptionIcon(question, isPendingUserInputOptionSelected(question.id, option.id))"
-                                class="size-4"
-                              />
-                            </span>
-                            <span class="min-w-0 flex-1 break-words">{{ option.label }}</span>
-                          </Button>
-                          <Button
-                            v-if="question.allow_custom"
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            class="h-auto min-h-8 w-full justify-start whitespace-normal rounded-md px-2.5 py-1.5 text-left text-xs"
-                            :class="isPendingUserInputCustomSelected(question.id) ? 'bg-muted text-foreground' : 'text-foreground hover:bg-accent'"
-                            :role="question.kind === 'multi_select' ? 'checkbox' : 'radio'"
-                            :aria-checked="isPendingUserInputCustomSelected(question.id)"
-                            @click="togglePendingUserInputCustom(question)"
-                          >
-                            <span
-                              class="mr-2 flex size-4 shrink-0 items-center justify-center"
-                              :class="isPendingUserInputCustomSelected(question.id) ? 'text-foreground' : 'text-muted-foreground'"
-                            >
-                              <component
-                                :is="pendingUserInputOptionIcon(question, isPendingUserInputCustomSelected(question.id))"
-                                class="size-4"
-                              />
-                            </span>
-                            <span class="min-w-0 flex-1 break-words">{{ $t('chat.tools.userInputCustomOption') }}</span>
-                          </Button>
-                        </div>
-                        <div
-                          v-if="question.kind === 'text' || isPendingUserInputCustomSelected(question.id)"
-                          class="mt-1 flex items-center gap-2"
-                        >
-                          <input
-                            :value="pendingUserInputDraftText(question)"
-                            class="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            :placeholder="question.placeholder || $t('chat.tools.userInputPlaceholder')"
-                            @input="setPendingUserInputDraftText(question, ($event.target as HTMLInputElement).value)"
-                            @keydown.enter.prevent="handlePendingUserInputSubmit"
-                          >
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="flex items-center justify-end gap-2 border-t border-border/60 bg-card px-3 py-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      class="text-xs text-muted-foreground hover:text-foreground"
-                      @click="handlePendingUserInputCancel"
-                    >
-                      {{ $t('chat.tools.cancelUserInput') }}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      class="text-xs"
-                      :disabled="!canSubmitPendingUserInput"
-                      @click="handlePendingUserInputSubmit"
-                    >
-                      {{ $t('chat.tools.submitUserInput') }}
-                    </Button>
-                  </div>
-                </div>
+                  class="mb-2"
+                  :user-input="pendingUserInput"
+                />
               </Transition>
               <div
                 v-if="commandPanelEvent"
@@ -984,7 +819,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, onMounted, useTemplateRef, watch, nextTick, onActivated, onDeactivated } from 'vue'
+import { ref, computed, onBeforeUnmount, useTemplateRef, watch, nextTick, onActivated, onDeactivated } from 'vue'
 import {
   Paperclip,
   Plus,
@@ -993,10 +828,6 @@ import {
   ArrowDown,
   Check,
   FolderOpen,
-  Square,
-  SquareCheck,
-  Circle,
-  CircleDot,
   Sparkles,
   X,
   HelpCircle,
@@ -1005,10 +836,10 @@ import {
   Package,
   SquarePen,
 } from 'lucide-vue-next'
-import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner, toast } from '@felinic/ui'
+import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner, toast } from '@felinic/ui'
 import { useChatStore, type ACPAgentSessionInput, type ChatMessage } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
-import { useScroll, useIntersectionObserver, useStorage } from '@vueuse/core'
+import { useIntersectionObserver } from '@vueuse/core'
 import { useQuery } from '@pinia/colada'
 import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings } from '@memohai/sdk'
 import type { AcpclientModelInfo, AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
@@ -1020,34 +851,26 @@ import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
 import { useChatScroll } from '../composables/useChatScroll'
 import BgTaskPill from './bg-task-pill.vue'
 import ForkSourceDivider from './fork-source-divider.vue'
+import ChatForkDialog from './chat-fork-dialog.vue'
+import ChatUserInputForm from './chat-user-input-form.vue'
+import ChatScrollRail, { type ScrollRailSegment } from './chat-scroll-rail.vue'
 import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
-import MediaGalleryLightbox, { type MediaGalleryItem } from './media-gallery-lightbox.vue'
+import MediaGalleryLightbox from './media-gallery-lightbox.vue'
 import SessionInfoRing from './session-info-ring.vue'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import ChatModelPicker from './chat-model-picker.vue'
 import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
-import { fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput, type UIUserInputQuestion, type WSUserInputAnswer } from '@/composables/api/useChat'
+import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAttachments } from '../composables/useComposerAttachments'
+import { useComposerDrafts } from '../composables/useComposerDrafts'
+import { useComposerLayout } from '../composables/useComposerLayout'
+import { fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
 import { commandResultQuickActionText, isCommandResultItemSelectable } from './slash-command-result'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
-
-interface PendingUserInputDraft {
-  optionIds: string[]
-  customSelected: boolean
-  customText: string
-  text: string
-}
-
-interface ScrollRailSegment {
-  id: string
-  label: string
-  preview: string
-  index: number
-}
 
 const props = withDefaults(defineProps<{
   // Stable dockview panel id (e.g. `chat:3`). Used for per-tab composer drafts and
@@ -1067,210 +890,28 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const { pill: bgTaskPill, scrollToOffscreen, cleanup: cleanupBgTaskBeacons } = provideBgTaskBeacons()
 onBeforeUnmount(cleanupBgTaskBeacons)
-const fileInput = ref<HTMLInputElement | null>(null)
-const pendingFiles = ref<File[]>([])
-
-// Pasting a large block of text floods the composer and buries the controls, so
-// past a threshold we capture it as a "pasted content" attachment card instead
-// (the raw text still rides along as a .txt file on send). The trigger is set
-// deliberately high so ordinary multi-line snippets keep landing in the input.
-const PASTE_LINE_THRESHOLD = 50
-const PASTE_CHAR_THRESHOLD = 2000
-const PASTED_FILE_NAME = 'pasted-text.txt'
-// Original text for each pasted-content file, so its card can preview the body
-// and the viewer can show it in full without re-reading the synthetic File.
-const pastedTexts = new WeakMap<File, string>()
-function makePastedFile(text: string): File {
-  const file = new File([text], PASTED_FILE_NAME, { type: 'text/plain' })
-  pastedTexts.set(file, text)
-  return file
-}
-
-function isMediaFile(file: File): boolean {
-  return file.type.startsWith('image/') || file.type.startsWith('video/')
-}
-
-// A stable, collision-free key per File object (two byte-identical files are
-// still distinct instances) so a card keeps its identity across reorders and
-// never replays its entry animation when a sibling is removed.
-const fileKeys = new WeakMap<File, string>()
-let fileKeySeq = 0
-function keyForFile(file: File): string {
-  let key = fileKeys.get(file)
-  if (!key) {
-    key = `f${++fileKeySeq}`
-    fileKeys.set(file, key)
-  }
-  return key
-}
-
-// Text-like files get a line count on their card (e.g. a pasted snippet or a
-// .yml config), mirroring how a code block reads. Binary blobs are skipped so
-// we never surface a meaningless newline tally for a PDF or archive.
-const TEXT_EXTENSIONS = new Set([
-  'txt', 'md', 'markdown', 'json', 'jsonc', 'yaml', 'yml', 'xml', 'csv', 'tsv',
-  'log', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'vue', 'py', 'go', 'rs', 'java',
-  'c', 'cc', 'cpp', 'h', 'hpp', 'css', 'scss', 'less', 'html', 'svg', 'sh', 'bash',
-  'zsh', 'toml', 'ini', 'conf', 'env', 'sql', 'rb', 'php', 'swift', 'kt', 'gradle',
-])
-const LINE_COUNT_MAX_BYTES = 2 * 1024 * 1024
-function isTextLikeFile(file: File): boolean {
-  if (isMediaFile(file)) return false
-  if (file.size > LINE_COUNT_MAX_BYTES) return false
-  const mime = file.type.toLowerCase()
-  if (mime.startsWith('text/')) return true
-  if (mime === 'application/json' || mime === 'application/xml' || mime.includes('yaml')) return true
-  const dot = file.name.lastIndexOf('.')
-  const ext = dot > 0 ? file.name.slice(dot + 1).toLowerCase() : ''
-  if (ext && TEXT_EXTENSIONS.has(ext)) return true
-  // Pasted content arrives without a mime/extension — treat it as text.
-  return mime === '' && ext === ''
-}
-
-// Object-URL previews for pending image/video attachments, keyed by File so a
-// URL is created once and revoked the moment its file leaves the tray (or the
-// composer unmounts) — no leaks across sends or session switches.
-const pendingPreviewUrls = ref(new Map<File, string>())
-// Line counts for text-like pending files, resolved asynchronously via FileReader.
-// A `-1` sentinel marks "reading in progress" so a file is read at most once.
-const pendingLineCounts = ref(new Map<File, number>())
-function syncPendingAttachmentMeta(files: File[]) {
-  const urls = pendingPreviewUrls.value
-  for (const [file, url] of urls) {
-    if (!files.includes(file)) {
-      URL.revokeObjectURL(url)
-      urls.delete(file)
-    }
-  }
-  for (const file of files) {
-    if (!urls.has(file) && isMediaFile(file)) urls.set(file, URL.createObjectURL(file))
-  }
-
-  const counts = pendingLineCounts.value
-  for (const file of [...counts.keys()]) {
-    if (!files.includes(file)) counts.delete(file)
-  }
-  for (const file of files) {
-    if (counts.has(file) || !isTextLikeFile(file)) continue
-    counts.set(file, -1)
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      if (!pendingFiles.value.includes(file)) return
-      counts.set(file, String(e.target?.result ?? '').split('\n').length)
-    }
-    // -2 marks "read failed": no count to show, but the card must still reveal.
-    reader.onerror = () => { if (pendingFiles.value.includes(file)) counts.set(file, -2) }
-    reader.readAsText(file)
-  }
-}
-watch(pendingFiles, files => syncPendingAttachmentMeta(files), { deep: true, immediate: true })
-onBeforeUnmount(() => {
-  for (const url of pendingPreviewUrls.value.values()) URL.revokeObjectURL(url)
-  pendingPreviewUrls.value.clear()
-})
-
-const pendingPreviews = computed(() =>
-  pendingFiles.value.map((file, i) => {
-    const isImage = file.type.startsWith('image/')
-    const isVideo = file.type.startsWith('video/')
-    const isMedia = isImage || isVideo
-    const dot = file.name.lastIndexOf('.')
-    const url = pendingPreviewUrls.value.get(file) ?? ''
-    const lc = pendingLineCounts.value.get(file)
-    const pastedText = pastedTexts.get(file)
-    const isPasted = pastedText !== undefined
-    return {
-      i,
-      file,
-      key: keyForFile(file),
-      isMedia,
-      isVideo,
-      isPasted,
-      pastedText: pastedText ?? '',
-      size: file.size,
-      url,
-      ext: dot > 0 ? file.name.slice(dot + 1).toUpperCase() : '',
-      lines: lc != null && lc >= 0 ? lc : null,
-      // A text-like file is still loading until its line count resolves (sentinel
-      // `undefined`/`-1`); the card shimmers until then, like the media skeleton.
-      // Pasted content is held in memory already, so it reveals immediately.
-      loading: !isPasted && !isMedia && isTextLikeFile(file) && (lc === undefined || lc === -1),
-    }
-  }),
-)
-
-// Lightbox for pending composer media so attachments can be verified at full
-// size before sending. Driven separately from the message gallery since these
-// object URLs are not part of the sent history yet.
-const composerPreviewItems = computed<MediaGalleryItem[]>(() =>
-  pendingPreviews.value
-    .filter(p => p.isMedia && p.url)
-    .map(p => ({ src: p.url, type: p.isVideo ? 'video' : 'image', name: p.file.name })),
-)
-const composerPreviewIndex = ref<number | null>(null)
-function openComposerPreview(url: string) {
-  const idx = composerPreviewItems.value.findIndex(item => item.src === url)
-  if (idx >= 0) composerPreviewIndex.value = idx
-}
-
-// Full-text viewer for a pending pasted-content card, opened from its preview.
-const pastedViewerText = ref<string | null>(null)
-const pastedViewerOpen = computed({
-  get: () => pastedViewerText.value !== null,
-  set: (open: boolean) => { if (!open) pastedViewerText.value = null },
-})
-
-// Attachment row reveal/collapse timing (the grid 0fr↔1fr transition).
-const ATTACHMENT_ANIM_MS = 230
-// While the last card is collapsing the row stays mounted (the card holds its
-// place) until the animation ends; the grid is open whenever there are cards and
-// we're not in that closing window.
-const collapsingAttachments = ref(false)
-const showAttachmentGrid = computed(() => pendingPreviews.value.length > 0 && !collapsingAttachments.value)
-let attachmentCollapseTimer: ReturnType<typeof setTimeout> | null = null
-function removeAttachment(index: number) {
-  const file = pendingFiles.value[index]
-  if (!file) return
-  // Removing one of several cards just reflows the open row; removing the last
-  // one collapses the row first, then drops the card so it doesn't pop out.
-  if (pendingFiles.value.length > 1) {
-    pendingFiles.value.splice(index, 1)
-    return
-  }
-  collapsingAttachments.value = true
-  if (attachmentCollapseTimer) clearTimeout(attachmentCollapseTimer)
-  attachmentCollapseTimer = setTimeout(() => {
-    const i = pendingFiles.value.indexOf(file)
-    if (i >= 0) pendingFiles.value.splice(i, 1)
-    collapsingAttachments.value = false
-    attachmentCollapseTimer = null
-  }, ATTACHMENT_ANIM_MS)
-}
-// A new file arriving mid-collapse cancels the close so it can reveal instead.
-watch(() => pendingFiles.value.length, (n, o) => {
-  if (n > o && collapsingAttachments.value) {
-    if (attachmentCollapseTimer) {
-      clearTimeout(attachmentCollapseTimer)
-      attachmentCollapseTimer = null
-    }
-    collapsingAttachments.value = false
-  }
-})
-onBeforeUnmount(() => {
-  if (attachmentCollapseTimer) clearTimeout(attachmentCollapseTimer)
-})
+const {
+  fileInput,
+  pendingFiles,
+  pendingPreviews,
+  composerPreviewItems,
+  composerPreviewIndex,
+  openComposerPreview,
+  pastedViewerText,
+  pastedViewerOpen,
+  showAttachmentGrid,
+  removeAttachment,
+  handleFileInputChange,
+  handlePaste,
+} = useComposerAttachments()
 
 const composerError = ref('')
 const forkDialogOpen = ref(false)
 const pendingForkMessageId = ref('')
-const forkSessionTitle = ref('')
-const forkSubmitting = ref(false)
-const pendingUserInputDrafts = ref<Record<string, PendingUserInputDraft>>({})
 const modelPopoverOpen = ref(false)
 const agentPopoverOpen = ref(false)
 const agentChanging = ref(false)
 const acpModelChanging = ref(false)
-const inputDrafts = useStorage<Record<string, string>>('chat-input-drafts', {})
 
 const {
   messages,
@@ -1344,8 +985,6 @@ const pendingUserInput = computed<UIUserInput | null>(() => {
   return null
 })
 
-const pendingUserInputQuestions = computed(() => pendingUserInput.value?.questions ?? [])
-
 const canForkAssistant = computed(() =>
   !streaming.value
   && !loadingMessages.value
@@ -1374,28 +1013,6 @@ const latestEditableUserId = computed(() => {
   }
   return ''
 })
-
-// All questions must be answered per kind before submit; null means incomplete.
-const pendingUserInputAnswers = computed<WSUserInputAnswer[] | null>(() => {
-  const questions = pendingUserInputQuestions.value
-  if (!questions.length) return null
-  const answers: WSUserInputAnswer[] = []
-  for (const question of questions) {
-    const answer = pendingUserInputAnswerFor(question)
-    if (!answer) return null
-    answers.push(answer)
-  }
-  return answers
-})
-
-const canSubmitPendingUserInput = computed(() => pendingUserInputAnswers.value !== null)
-
-watch(
-  () => pendingUserInput.value?.user_input_id,
-  () => {
-    pendingUserInputDrafts.value = {}
-  },
-)
 
 const { data: modelData } = useQuery({
   key: ['models'],
@@ -2145,21 +1762,27 @@ const {
 } = useMediaGallery(messages)
 
 const inputText = ref('')
-const textareaEl = ref<HTMLTextAreaElement | null>(null)
-const composerEl = ref<HTMLElement | null>(null)
-const modelLabelEl = ref<HTMLElement | null>(null)
-const acpProjectLabelEl = ref<HTMLElement | null>(null)
-// The composer lifts to its multiline layout (textarea on its own row, controls
-// below) for two independent reasons: the typed text wraps or holds a newline
-// (textMultiline), or the pane is too narrow to seat the input + model capsule +
-// send on one pill row (narrowMultiline). Either trigger flips isMultiline, so a
-// cramped pane reflows into multiline instead of letting the pill explode.
-const textMultiline = ref(false)
-const narrowMultiline = ref(false)
-const isMultiline = computed(() => textMultiline.value || narrowMultiline.value)
-const compactContentWidth = ref(0)
-const composerInnerWidth = ref(0)
-const composerBoxHeight = ref(0)
+const {
+  textareaEl,
+  composerEl,
+  modelLabelEl,
+  acpProjectLabelEl,
+  isMultiline,
+  composerRadiusMs,
+  composerRadiusEase,
+  focusTextarea,
+  modelTriggerMaxWidth,
+  composerMaskHeight,
+  snapComposerNext,
+} = useComposerLayout({
+  inputText,
+  isActive,
+  showAttachmentGrid,
+  modelTriggerLabel,
+  activeIsACP,
+  activeACPProjectLabel,
+})
+
 const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.value.length > 0 || requestedSkills.value.length > 0)
 
 // Whether the trailing slot shows the send button at all. In standard chat the
@@ -2169,337 +1792,17 @@ const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.
 // fall to its disabled (dimmed brand) state instead of vanishing.
 const sendButtonVisible = computed(() => showSend.value || activeIsACP.value)
 
-// Border-radius morph, kept on the SAME clock as whatever box change drives it.
-// An attachment open/close keys off showAttachmentGrid — which flips at the START
-// of the collapse, before the card is spliced out — and borrows the grid reveal's
-// duration + curve, so the corner rounds in lockstep with the height instead of
-// lagging a beat behind it (the height was finishing first, then the corner moved
-// only once the card was finally removed). A pill↔multiline text change keeps the
-// form ease, matched to the JS height morph. Pre-flush watchers set the timing
-// before the radius class flips, so the corner uses it.
-const RADIUS_EASE_FORM = 'cubic-bezier(0.33, 1, 0.68, 1)'
-const composerRadiusMs = ref(220)
-const composerRadiusEase = ref(RADIUS_EASE_FORM)
-watch(showAttachmentGrid, () => {
-  composerRadiusMs.value = ATTACHMENT_ANIM_MS
-  composerRadiusEase.value = 'cubic-bezier(0.25, 0.1, 0.25, 1)'
-})
-watch(isMultiline, () => {
-  if (!showAttachmentGrid.value) {
-    composerRadiusMs.value = 220
-    composerRadiusEase.value = RADIUS_EASE_FORM
-  }
-})
-
-function focusTextarea() {
-  textareaEl.value?.focus()
-}
-
-function measureWraps(text: string, width: number): boolean {
-  const el = textareaEl.value
-  if (!el || width <= 1) return false
-  const cs = getComputedStyle(el)
-  const mirror = document.createElement('div')
-  const s = mirror.style
-  s.position = 'fixed'
-  s.left = '-9999px'
-  s.top = '0'
-  s.visibility = 'hidden'
-  s.pointerEvents = 'none'
-  s.whiteSpace = 'pre-wrap'
-  s.overflowWrap = 'anywhere'
-  s.wordBreak = 'break-word'
-  s.boxSizing = 'content-box'
-  s.width = `${width}px`
-  s.fontFamily = cs.fontFamily
-  s.fontSize = cs.fontSize
-  s.fontWeight = cs.fontWeight
-  s.fontStyle = cs.fontStyle
-  s.letterSpacing = cs.letterSpacing
-  s.lineHeight = cs.lineHeight
-  mirror.textContent = text.length ? text : 'x'
-  document.body.appendChild(mirror)
-  const h = mirror.getBoundingClientRect().height
-  mirror.remove()
-  const lh = Number.parseFloat(cs.lineHeight) || 20
-  return h > lh * 1.5
-}
-
-function syncMultiline() {
-  const text = inputText.value
-  if (text.includes('\n')) {
-    textMultiline.value = true
-    return
-  }
-  const el = textareaEl.value
-  if (el && !isMultiline.value) {
-    const cs = getComputedStyle(el)
-    const padX = Number.parseFloat(cs.paddingLeft) + Number.parseFloat(cs.paddingRight)
-    const w = el.clientWidth - padX
-    if (w > 1) compactContentWidth.value = w
-  }
-  textMultiline.value = measureWraps(text, compactContentWidth.value)
-}
-
-// Pixel budget for the compact (pill) row. The right cluster's *natural* width is
-// derived from intrinsic measurements (the model label's scrollWidth, which a
-// `truncate` span still reports in full) so the verdict never depends on the
-// current layout — switching to multiline can't change the inputs and oscillate.
-// When the inline textarea would be squeezed under MIN_INLINE_TEXTAREA, the pill
-// can't host input + capsule + send on one line, so we reflow to multiline.
-const MIN_INLINE_TEXTAREA = 120
-const MODEL_TRIGGER_MAX = 240 // max-w-60
-const PLUS_SLOT = 40 // size-9 (36) + gap-1 (4)
-const SEND_SLOT = 36 // send / ring size-9
-const MODEL_CHROME = 46 // px-3 ×2 + gap-1 + chevron + a little slack
-const CLUSTER_GAP = 8 // gap-2 between cluster children
-const ROW_GAPS = 8 // gap-1 on each flank of the textarea
-
-function rightClusterNaturalWidth(): number {
-  const modelLabel = modelLabelEl.value?.scrollWidth ?? 0
-  const modelWidth = modelLabel > 0
-    ? Math.min(MODEL_TRIGGER_MAX, modelLabel + MODEL_CHROME)
-    : MODEL_TRIGGER_MAX
-  let width = modelWidth + CLUSTER_GAP + SEND_SLOT
-  const acpLabel = acpProjectLabelEl.value?.scrollWidth ?? 0
-  if (acpLabel > 0) width += Math.min(160, acpLabel + 28) + CLUSTER_GAP
-  return width
-}
-
-function recomputeComposerFit() {
-  const el = composerEl.value
-  if (!el) return
-  const cs = getComputedStyle(el)
-  const padX = Number.parseFloat(cs.paddingLeft) + Number.parseFloat(cs.paddingRight)
-  const inner = el.clientWidth - padX
-  if (inner <= 1) return
-  composerInnerWidth.value = inner
-  const room = inner - PLUS_SLOT - ROW_GAPS - rightClusterNaturalWidth()
-  narrowMultiline.value = room < MIN_INLINE_TEXTAREA
-}
-
-// The model trigger inherits the Button's `shrink-0`, so it won't yield in a
-// flex row — a long name would push past the box instead of truncating. A hard
-// max-width clamps it regardless of flex-shrink (the min-w-0 label then ellipses
-// within), sized to whatever the controls row can spare after the ＋, send, and
-// any project pill. It only bites when space is tight; otherwise it rests at the
-// 240px cap and the button still hugs a short name.
-const modelTriggerMaxWidth = computed(() => {
-  const inner = composerInnerWidth.value
-  if (inner <= 1) return MODEL_TRIGGER_MAX
-  let reserved = PLUS_SLOT + ROW_GAPS + CLUSTER_GAP + SEND_SLOT
-  const acpLabel = acpProjectLabelEl.value?.scrollWidth ?? 0
-  if (acpLabel > 0) reserved += Math.min(160, acpLabel + 28) + CLUSTER_GAP
-  return Math.max(72, Math.min(MODEL_TRIGGER_MAX, inner - reserved))
-})
-
-// The bottom mask rises only to the box's vertical centre — its widest point.
-// pb-8 (32px) is the strip beneath the box; + half the box height reaches the
-// centre line, which falls behind the box's full-width middle so the mask's top
-// edge is hidden by the box itself (no visible seam, no fade). Above that line
-// the box's rounded top is left to float over whatever is there; below it the
-// fill hides the bottom-corner gaps and the strip beneath, so nothing bleeds out.
-const COMPOSER_MASK_BELOW = 32 // pb-8
-const composerMaskHeight = computed(() => `${COMPOSER_MASK_BELOW + composerBoxHeight.value / 2}px`)
-
-let composerResizeObserver: ResizeObserver | null = null
-onMounted(() => {
-  void nextTick(() => {
-    syncMultiline()
-    recomputeComposerFit()
-  })
-  if (typeof ResizeObserver !== 'undefined' && textareaEl.value) {
-    composerResizeObserver = new ResizeObserver(() => syncMultiline())
-    composerResizeObserver.observe(textareaEl.value)
-  }
-})
-
-// A different model name (or switching to/from an ACP project pill) changes the
-// right cluster's natural width, so re-run the fit check when the labels change.
-watch([modelTriggerLabel, activeIsACP, activeACPProjectLabel], () => {
-  void nextTick(recomputeComposerFit)
-})
-onBeforeUnmount(() => {
-  composerResizeObserver?.disconnect()
-  composerResizeObserver = null
-})
-watch(inputText, () => {
-  void nextTick(syncMultiline)
-})
-
-// Smooth height morph for the compact↔multiline change. The composer is
-// bottom-anchored, so animating its height makes the top edge rise and the text
-// appears to slide up. Pure CSS can't transition between two content-driven
-// (auto) heights, so we measure the natural height and let the browser's
-// animation engine fill the gap — no permanent inline height, no fight with the
-// textarea's field-sizing. During the morph the box is clipped and its content is
-// bottom-pinned: the left (＋) and right (model) controls stay welded to the
-// bottom edge — which never moves — so they don't twitch, while the textarea
-// grows above them and the text is revealed from the top.
-let composerHeight = 0
-let composerHeightAnim: Animation | null = null
-let composerHeightReady = false
-// Last-seen layout mode, so we can tell a pill↔multiline form change from a
-// grow/shrink that happens entirely within multiline.
-let composerMultiline = false
-// A session/draft switch replaces the text wholesale — snap to the new size
-// once instead of animating between two unrelated drafts.
-let composerSnapNext = false
-// Tracks layout-driven height changes (e.g. window/pane resize re-wrapping a
-// multiline draft) that don't go through inputText/isMultiline, so the next
-// morph starts from the real current height instead of a stale baseline.
-let composerSizeObserver: ResizeObserver | null = null
-
-function prefersReducedMotion() {
-  return typeof window !== 'undefined'
-    && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
-}
-
-// Bottom-pin the controls directly: the compact row carries `self-center`
-// (align-self) on each control, which would override a container-level
-// align-items and let the ＋ jump to center mid-shrink. Overriding each child's
-// align-self welds the controls to the bottom in both directions. The textarea
-// is skipped on purpose — it stays centered in the compact row, so it slides
-// smoothly instead of snapping from bottom-pinned back to centered when the
-// morph ends (which made the placeholder jump on shrink).
-function pinComposerChildrenBottom(el: HTMLElement, pinned: boolean) {
-  const value = pinned ? 'flex-end' : ''
-  for (const child of Array.from(el.children)) {
-    if (child instanceof HTMLElement && child.tagName !== 'TEXTAREA') {
-      child.style.alignSelf = value
-    }
-  }
-}
-
-function clearComposerMorphStyles(el: HTMLElement) {
-  el.style.overflow = ''
-  el.style.alignContent = ''
-  pinComposerChildrenBottom(el, false)
-}
-
-function animateComposerHeight() {
-  const el = composerEl.value
-  if (!el) return
-  // Start from the live visual height when a morph is already running, so a
-  // fresh trigger continues from where the eye is instead of snapping back.
-  const from = composerHeightAnim ? el.offsetHeight : composerHeight
-  composerHeightAnim?.cancel()
-  composerHeightAnim = null
-  clearComposerMorphStyles(el)
-  const target = el.offsetHeight
-  composerHeight = target
-  composerBoxHeight.value = target
-  // Only a pill↔multiline form change earns the height morph. Attachment rows
-  // now reveal via their own grid 0fr↔1fr track (card stays put, box grows), and
-  // plain line-wraps within multiline snap, so they're deliberately excluded.
-  const formChanged = isMultiline.value !== composerMultiline
-  composerMultiline = isMultiline.value
-  if (!composerHeightReady || composerSnapNext) {
-    composerSnapNext = false
-    return
-  }
-  if (!formChanged) return
-  if (!isActive.value || !from || Math.abs(target - from) < 0.5 || prefersReducedMotion()) return
-  // Pin every line to the bottom and clip the overflow: the control row stays
-  // welded to the fixed bottom edge (no twitch) while the box grows/shrinks and
-  // the textarea is revealed/concealed from the top.
-  el.style.overflow = 'hidden'
-  el.style.alignContent = 'flex-end'
-  pinComposerChildrenBottom(el, true)
-  // A gentle ease-out whose tail decelerates to a soft stop — monotonic, so the
-  // height moves to its target and stops without overshooting and bouncing back.
-  const anim = el.animate(
-    [{ height: `${from}px` }, { height: `${target}px` }],
-    { duration: 220, easing: 'cubic-bezier(0.33, 1, 0.68, 1)' },
-  )
-  composerHeightAnim = anim
-  anim.onfinish = () => {
-    if (composerHeightAnim === anim) {
-      clearComposerMorphStyles(el)
-      composerHeightAnim = null
-    }
-  }
-}
-
-watch([inputText, isMultiline], () => {
-  void nextTick(animateComposerHeight)
-})
-
-onMounted(() => {
-  void nextTick(() => {
-    composerHeight = composerEl.value?.offsetHeight ?? 0
-    composerBoxHeight.value = composerHeight
-    composerMultiline = isMultiline.value
-    composerHeightReady = true
-    composerSnapNext = false
-  })
-  const el = composerEl.value
-  if (el && typeof ResizeObserver !== 'undefined') {
-    composerSizeObserver = new ResizeObserver(() => {
-      // The fit check keys off width only, so the height swing of a pill↔multiline
-      // morph (same width) can't feed back and re-toggle it.
-      recomputeComposerFit()
-      // Skip while we drive the height ourselves; only capture layout-driven
-      // resizes so the next morph starts from the real current height. The
-      // keystroke path sets composerHeightAnim before this fires, so normal
-      // morphs are untouched.
-      if (!composerHeightAnim) {
-        composerHeight = el.offsetHeight
-        composerBoxHeight.value = el.offsetHeight
-      }
-    })
-    composerSizeObserver.observe(el)
-  }
-})
-
-onBeforeUnmount(() => {
-  composerSizeObserver?.disconnect()
-  composerSizeObserver = null
-  composerHeightAnim?.cancel()
-  composerHeightAnim = null
-})
-
-onDeactivated(() => {
-  composerHeightAnim?.cancel()
-  composerHeightAnim = null
-  if (composerEl.value) clearComposerMorphStyles(composerEl.value)
-  composerSnapNext = true
-})
-
 const stopAuthSessionCleanup = onAuthSessionCleared(() => {
-  inputDrafts.value = {}
+  clearAllDrafts()
   inputText.value = ''
   pendingFiles.value = []
   composerError.value = ''
 })
-const inputDraftKey = computed(() => {
-  const botId = (currentBotId.value ?? '').trim()
-  const tabId = props.tabId.trim()
-  if (!botId || !tabId) return ''
-  return `${botId}:${tabId}`
-})
-
-function saveInputDraft(key: string, text: string) {
-  if (!key) return
-  const next = { ...inputDrafts.value }
-  if (text) {
-    next[key] = text
-  } else {
-    delete next[key]
-  }
-  inputDrafts.value = next
-}
-
-watch(inputDraftKey, (nextKey, previousKey) => {
-  if (previousKey) {
-    saveInputDraft(previousKey, inputText.value)
-  }
-  inputText.value = nextKey ? inputDrafts.value[nextKey] ?? '' : ''
-  composerSnapNext = true
-}, { immediate: true })
-
-watch(inputText, (text) => {
-  saveInputDraft(inputDraftKey.value, text)
+const { inputDraftKey, saveInputDraft, clearAllDrafts } = useComposerDrafts({
+  currentBotId,
+  tabId: () => props.tabId,
+  inputText,
+  onDraftKeySwap: snapComposerNext,
 })
 
 watch([
@@ -2630,98 +1933,20 @@ const {
 })
 const showJumpToBottom = computed(() => showJumpToBottomFromScroll.value && !loadingChats.value)
 
-// --- Scroll rail ---
-const railSegments = ref<ScrollRailSegment[]>([])
-const activeRailId = ref('')
-const railOpen = ref(false)
-let railRaf = 0
-let railOpenTimer: ReturnType<typeof setTimeout> | null = null
-let railCloseTimer: ReturnType<typeof setTimeout> | null = null
-
-function getRailSegmentText(msg: (typeof messages.value)[number]): string {
-  if (msg.role === 'user') return msg.text?.trim().replace(/\s+/g, ' ') || ''
-  return ''
-}
-
-function rebuildRailSegments() {
-  const segments: ScrollRailSegment[] = []
-  messages.value.forEach((msg) => {
-    if (msg.role !== 'user') return
-    const preview = getRailSegmentText(msg)
-    if (!preview) return
-    segments.push({
-      id: msg.id,
-      label: `Message ${segments.length + 1}`,
-      preview,
-      index: segments.length,
-    })
-  })
-  railSegments.value = segments
-}
-
-function syncActiveRailFromScroll() {
-  const root = scrollEl.value
-  if (!root || !railSegments.value.length) return
-  const viewAnchor = root.scrollTop + 8
-  let best = railSegments.value[0]!.id
-  let bestDist = Number.POSITIVE_INFINITY
-  for (const seg of railSegments.value) {
-    const el = root.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(seg.id)}"]`)
-    if (!el) continue
-    const top = root.scrollTop + el.getBoundingClientRect().top - root.getBoundingClientRect().top
-    const dist = Math.abs(top - viewAnchor)
-    if (dist < bestDist) { bestDist = dist; best = seg.id }
-  }
-  activeRailId.value = best
-}
-
-watch(() => messages.value.map(m => `${m.id}:${m.role}`).join('|'), () => {
-  rebuildRailSegments()
-}, { flush: 'post', immediate: true })
-
-useScroll(scrollEl, {
-  onScroll() {
-    if (railRaf) return
-    railRaf = requestAnimationFrame(() => {
-      railRaf = 0
-      syncActiveRailFromScroll()
-    })
-  },
-})
-
-function scheduleRailOpen() {
-  if (railCloseTimer) { clearTimeout(railCloseTimer); railCloseTimer = null }
-  if (railOpen.value || railOpenTimer) return
-  railOpenTimer = setTimeout(() => { railOpen.value = true; railOpenTimer = null }, 80)
-}
-
-function scheduleRailClose() {
-  if (railOpenTimer) { clearTimeout(railOpenTimer); railOpenTimer = null }
-  if (!railOpen.value || railCloseTimer) return
-  railCloseTimer = setTimeout(() => { railOpen.value = false; railCloseTimer = null }, 150)
-}
-
-const showScrollRail = computed(() =>
-  isActive.value && !loadingChats.value && railSegments.value.length > 1,
-)
-
-function scrollToRailSegment(seg: ScrollRailSegment) {
-  activeRailId.value = seg.id
-  railOpen.value = false
+// Rail navigation parks the reader on a chosen turn, so escape follow —
+// otherwise the next streamed mutation would drag them back to the bottom.
+// Landing uses the same rule as pin/entry/reply jumps (messageJumpTarget):
+// the chosen turn arrives at the pin offset, identical to how it looked
+// right after being sent.
+function handleRailJump(seg: ScrollRailSegment) {
   void nextTick(() => {
     const root = scrollEl.value
     const target = findMessageElement(seg.id)
     if (!root || !target) return
-    // Rail navigation parks the reader on a chosen turn, so escape follow —
-    // otherwise the next streamed mutation would drag them back to the bottom.
     markEscaped()
-    // Same landing rule as pin/entry/reply jumps (messageJumpTarget): the
-    // chosen turn arrives at the pin offset, identical to how it looked
-    // right after being sent.
     startScrollTween(root, () => messageJumpTarget(root, seg.id))
   })
 }
-// --- End scroll rail ---
 
 onBeforeUnmount(() => {
   stopAuthSessionCleanup()
@@ -2790,35 +2015,12 @@ async function handleForkSourceClick() {
   }
 }
 
-function defaultForkSessionTitle() {
-  const sourceTitle = activeSession.value?.title?.trim() || t('chat.unknownSession')
-  return t('chat.forkDialog.defaultTitle', { session: sourceTitle })
-}
-
 function handleForkMessage(messageId: string) {
   composerError.value = ''
   const id = messageId.trim()
   if (!id) return
   pendingForkMessageId.value = id
-  forkSessionTitle.value = defaultForkSessionTitle()
   forkDialogOpen.value = true
-}
-
-async function handleCreateFork() {
-  const messageId = pendingForkMessageId.value.trim()
-  const title = forkSessionTitle.value.trim()
-  if (!messageId || !title || forkSubmitting.value) return
-  composerError.value = ''
-  forkSubmitting.value = true
-  try {
-    const ok = await chatStore.forkMessage(messageId, { title })
-    if (ok) {
-      forkDialogOpen.value = false
-      pendingForkMessageId.value = ''
-    }
-  } finally {
-    forkSubmitting.value = false
-  }
 }
 
 // Keyboard bridges into the two composer list surfaces (slash picker, command
@@ -2859,179 +2061,6 @@ function handleComposerKeydown(e: KeyboardEvent) {
   }
   e.preventDefault()
   handleSend()
-}
-
-function handleFileInputChange(e: Event) {
-  const input = e.target as HTMLInputElement
-  if (input.files) {
-    for (const file of Array.from(input.files)) {
-      pendingFiles.value.push(file)
-    }
-  }
-  input.value = ''
-}
-
-function handlePaste(e: ClipboardEvent) {
-  const data = e.clipboardData
-  if (!data) return
-  let handledFile = false
-  for (const item of Array.from(data.items ?? [])) {
-    if (item.kind === 'file') {
-      const file = item.getAsFile()
-      if (file) {
-        pendingFiles.value.push(file)
-        handledFile = true
-      }
-    }
-  }
-  // A file paste from the OS also carries a text item (its name); without this
-  // the textarea would insert that filename alongside the attachment card.
-  if (handledFile) {
-    e.preventDefault()
-    return
-  }
-  // A large text paste becomes a pasted-content card so it doesn't bury the
-  // composer; anything below the threshold drops into the textarea as usual.
-  const text = data.getData('text/plain')
-  if (!text) return
-  const lineCount = text.split('\n').length
-  if (lineCount >= PASTE_LINE_THRESHOLD || text.length >= PASTE_CHAR_THRESHOLD) {
-    e.preventDefault()
-    pendingFiles.value.push(makePastedFile(text))
-  }
-}
-
-async function fileToAttachment(file: File): Promise<ChatAttachment> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      resolve({
-        type: file.type.startsWith('image/') ? 'image' : 'file',
-        base64: reader.result as string,
-        mime: file.type || 'application/octet-stream',
-        name: file.name,
-      })
-    }
-    reader.onerror = () => reject(new Error('Failed to read file'))
-    reader.readAsDataURL(file)
-  })
-}
-
-function attachmentToFile(attachment: ChatAttachment): File | null {
-  const source = attachment.base64?.trim()
-  if (!source) return null
-  try {
-    const commaIndex = source.indexOf(',')
-    const payload = commaIndex >= 0 ? source.slice(commaIndex + 1) : source
-    const meta = commaIndex >= 0 ? source.slice(0, commaIndex) : ''
-    const bytes = atob(payload)
-    const buffer = new Uint8Array(bytes.length)
-    for (let i = 0; i < bytes.length; i += 1) {
-      buffer[i] = bytes.charCodeAt(i)
-    }
-    const inferredMime = meta.match(/^data:([^;,]+)/)?.[1]
-    return new File([buffer], attachment.name?.trim() || 'attachment', {
-      type: attachment.mime?.trim() || inferredMime || 'application/octet-stream',
-    })
-  } catch {
-    return null
-  }
-}
-
-function ensurePendingUserInputDraft(questionId: string): PendingUserInputDraft {
-  let draft = pendingUserInputDrafts.value[questionId]
-  if (!draft) {
-    draft = { optionIds: [], customSelected: false, customText: '', text: '' }
-    pendingUserInputDrafts.value[questionId] = draft
-  }
-  return draft
-}
-
-function isPendingUserInputOptionSelected(questionId: string, optionId: string) {
-  return pendingUserInputDrafts.value[questionId]?.optionIds.includes(optionId) ?? false
-}
-
-function isPendingUserInputCustomSelected(questionId: string) {
-  return pendingUserInputDrafts.value[questionId]?.customSelected ?? false
-}
-
-function pendingUserInputOptionIcon(question: UIUserInputQuestion, selected: boolean) {
-  if (question.kind === 'multi_select') return selected ? SquareCheck : Square
-  return selected ? CircleDot : Circle
-}
-
-function togglePendingUserInputOption(question: UIUserInputQuestion, optionId: string) {
-  const draft = ensurePendingUserInputDraft(question.id)
-  if (question.kind === 'multi_select') {
-    draft.optionIds = draft.optionIds.includes(optionId)
-      ? draft.optionIds.filter(id => id !== optionId)
-      : [...draft.optionIds, optionId]
-    return
-  }
-  draft.optionIds = [optionId]
-  draft.customSelected = false
-  draft.customText = ''
-}
-
-function togglePendingUserInputCustom(question: UIUserInputQuestion) {
-  const draft = ensurePendingUserInputDraft(question.id)
-  if (question.kind === 'multi_select') {
-    draft.customSelected = !draft.customSelected
-  } else {
-    draft.customSelected = true
-    draft.optionIds = []
-  }
-  if (!draft.customSelected) {
-    draft.customText = ''
-  }
-}
-
-function pendingUserInputDraftText(question: UIUserInputQuestion) {
-  const draft = pendingUserInputDrafts.value[question.id]
-  if (!draft) return ''
-  return question.kind === 'text' ? draft.text : draft.customText
-}
-
-function setPendingUserInputDraftText(question: UIUserInputQuestion, value: string) {
-  const draft = ensurePendingUserInputDraft(question.id)
-  if (question.kind === 'text') {
-    draft.text = value
-    return
-  }
-  draft.customText = value
-}
-
-function pendingUserInputAnswerFor(question: UIUserInputQuestion): WSUserInputAnswer | null {
-  const draft = pendingUserInputDrafts.value[question.id]
-  const customText = draft?.customSelected ? draft.customText.trim() : ''
-  const text = draft?.text.trim() ?? ''
-  if (!draft) return null
-  if (question.kind === 'text') {
-    return text ? { question_id: question.id, text } : null
-  }
-  if (draft.customSelected && !customText) return null
-  if (question.kind === 'single_select' && draft.optionIds.length + (customText ? 1 : 0) !== 1) return null
-  if (draft.optionIds.length === 0 && !customText) return null
-  const answer: WSUserInputAnswer = { question_id: question.id }
-  if (draft.optionIds.length > 0) answer.option_ids = [...draft.optionIds]
-  if (customText) answer.custom_text = customText
-  return answer
-}
-
-function handlePendingUserInputSubmit() {
-  const userInput = pendingUserInput.value
-  const answers = pendingUserInputAnswers.value
-  if (!userInput || !answers) return
-  void chatStore.respondUserInput(userInput, { answers })
-}
-
-function handlePendingUserInputCancel() {
-  const userInput = pendingUserInput.value
-  if (!userInput) return
-  void chatStore.respondUserInput(userInput, {
-    canceled: true,
-    reason: 'user_canceled',
-  })
 }
 
 async function handleRetryMessage(messageId: string) {
