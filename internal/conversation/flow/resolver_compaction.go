@@ -38,7 +38,11 @@ func (r *Resolver) finishPromptCompaction(ctx context.Context, req conversation.
 	if !claimed || !known || pressure <= 0 {
 		return
 	}
-	go r.maybeCompact(context.WithoutCancel(ctx), req, rc, pressure)
+	compact := r.maybeCompact
+	if r.promptCompactionFn != nil {
+		compact = r.promptCompactionFn
+	}
+	go compact(context.WithoutCancel(ctx), req, rc, pressure)
 }
 
 func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, inputTokens int) {

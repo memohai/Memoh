@@ -104,6 +104,8 @@ type Resolver struct {
 	toolApproval       *toolapproval.Service
 	userInput          userInputService
 	hookService        *hooks.Service
+	resolveContextFn   func(context.Context, conversation.ChatRequest) (resolvedContext, error)
+	promptCompactionFn func(context.Context, conversation.ChatRequest, resolvedContext, int)
 	memoryContextMu    sync.Mutex
 	memoryContextCache *memprovider.MemoryContextCache
 	acpPromptMu        sync.Mutex
@@ -313,6 +315,9 @@ func (rc resolvedContext) promptMaterializationError() error {
 }
 
 func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (resolvedContext, error) {
+	if r.resolveContextFn != nil {
+		return r.resolveContextFn(ctx, req)
+	}
 	modelQuery := modelQueryText(req)
 	if strings.TrimSpace(modelQuery) == "" && len(req.Attachments) == 0 {
 		return resolvedContext{}, errors.New("query or attachments is required")
