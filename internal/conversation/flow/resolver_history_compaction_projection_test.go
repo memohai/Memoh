@@ -116,9 +116,6 @@ func TestReplaceCompactedMessagesLoadsSessionSummaryCoverageFromCompactedRows(t 
 		got[0].Coverage.CoveredRefs[1].ID != "00000000-0000-0000-0000-000000000402" {
 		t.Fatalf("covered refs mismatch: %#v", got[0].Coverage.CoveredRefs)
 	}
-	if len(queries.coveredCalls) != 0 {
-		t.Fatalf("coverage path must not request full message content, called: %#v", queries.coveredCalls)
-	}
 	if len(queries.refCalls) != 0 {
 		t.Fatalf("persisted artifact coverage must not query message refs, called: %#v", queries.refCalls)
 	}
@@ -211,9 +208,6 @@ func TestReplaceCompactedMessagesInWindowGroupCoversRowsOutsideLoadWindow(t *tes
 			t.Fatalf("refs-only legacy coverage must not claim a source hash: %#v", ref)
 		}
 	}
-	if len(queries.coveredCalls) != 0 {
-		t.Fatalf("coverage path must not request full message content, called: %#v", queries.coveredCalls)
-	}
 	if len(queries.refCalls) != 1 || queries.refCalls[0] != mustPGUUID(t, compactID) {
 		t.Fatalf("refs-only query should be called once for the compact group, got: %#v", queries.refCalls)
 	}
@@ -271,9 +265,6 @@ func TestReplaceCompactedMessagesResolvesInWindowGroupsFromSessionLogs(t *testin
 	}
 	if got[2].DBMessageID != "row-current" {
 		t.Fatalf("recent row lost or reordered: %#v", got)
-	}
-	if len(queries.coveredCalls) != 0 {
-		t.Fatalf("coverage path must not request full message content, called: %#v", queries.coveredCalls)
 	}
 	wantRefCalls := map[pgtype.UUID]bool{
 		mustPGUUID(t, inWindowCompact):    true,

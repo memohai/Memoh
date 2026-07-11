@@ -397,16 +397,14 @@ func historyRecord(id string, msg conversation.ModelMessage, mutate func(*histor
 
 type recordingCompactionLogQueries struct {
 	dbstore.Queries
-	logs         []sqlc.BotHistoryMessageCompact
-	covered      map[pgtype.UUID][]sqlc.ListMessagesByCompactIDRow
-	refs         map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow
-	byID         map[pgtype.UUID]sqlc.BotHistoryMessageCompact
-	sessionID    pgtype.UUID
-	listCalls    int
-	coveredCalls []pgtype.UUID
-	refCalls     []pgtype.UUID
-	getCalls     []pgtype.UUID
-	listErr      error
+	logs      []sqlc.BotHistoryMessageCompact
+	refs      map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow
+	byID      map[pgtype.UUID]sqlc.BotHistoryMessageCompact
+	sessionID pgtype.UUID
+	listCalls int
+	refCalls  []pgtype.UUID
+	getCalls  []pgtype.UUID
+	listErr   error
 }
 
 func (q *recordingCompactionLogQueries) GetCompactionLogByID(_ context.Context, compactID pgtype.UUID) (sqlc.BotHistoryMessageCompact, error) {
@@ -469,11 +467,6 @@ func mustReplaceCompactedMessages(t *testing.T, resolver *Resolver, sessionID st
 		t.Fatalf("replaceCompactedMessages: %v", err)
 	}
 	return replaced
-}
-
-func (q *recordingCompactionLogQueries) ListMessagesByCompactID(_ context.Context, compactID pgtype.UUID) ([]sqlc.ListMessagesByCompactIDRow, error) {
-	q.coveredCalls = append(q.coveredCalls, compactID)
-	return q.covered[compactID], nil
 }
 
 func (q *recordingCompactionLogQueries) ListMessageRefsByCompactID(_ context.Context, compactID pgtype.UUID) ([]sqlc.ListMessageRefsByCompactIDRow, error) {
