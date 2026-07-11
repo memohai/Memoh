@@ -275,6 +275,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 			priorSummaries = append(priorSummaries, l.Summary)
 		}
 	}
+	priorSummaries = capPriorSummaries(priorSummaries, maxCompactTokens/4)
 
 	entries, messageIDs := buildEntriesAndIDs(toCompact)
 	if len(entries) == 0 || len(messageIDs) == 0 {

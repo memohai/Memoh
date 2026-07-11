@@ -39,3 +39,25 @@ func buildUserPrompt(priorSummaries []string, messages []messageEntry) string {
 	}
 	return sb.String()
 }
+
+// capPriorSummaries bounds the reference context fed to the summarizer.
+// Summaries accumulate one per pass, so an unbounded <prior_context> would
+// eventually dominate — or overflow — the compaction model's own window.
+// The newest summaries carry the most continuity, so the budget keeps them
+// (at least one) and drops from the oldest; order stays chronological.
+func capPriorSummaries(summaries []string, maxTokens int) []string {
+	if len(summaries) == 0 || maxTokens <= 0 {
+		return summaries
+	}
+	accumulated := 0
+	start := len(summaries)
+	for i := len(summaries) - 1; i >= 0; i-- {
+		cost := estimateBytesAsTokens(summaries[i])
+		if start < len(summaries) && accumulated+cost > maxTokens {
+			break
+		}
+		accumulated += cost
+		start = i
+	}
+	return summaries[start:]
+}
