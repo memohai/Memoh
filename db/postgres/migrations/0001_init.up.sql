@@ -529,10 +529,39 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   turn_superseded_reason TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   source_revision BIGINT NOT NULL DEFAULT 1,
+  source_context JSONB,
   CONSTRAINT compact_claim_finalized_requires_owner
     CHECK (NOT compact_claim_finalized OR compact_id IS NOT NULL),
   CONSTRAINT history_message_source_revision_positive
-    CHECK (source_revision > 0)
+    CHECK (source_revision > 0),
+  CONSTRAINT history_message_source_context_valid
+    CHECK (
+      source_context IS NULL
+      OR (
+        jsonb_typeof(source_context) = 'object'
+        AND source_context ?& ARRAY[
+          'version',
+          'sender_display_name',
+          'platform',
+          'conversation_type',
+          'conversation_name'
+        ]
+        AND source_context - ARRAY[
+          'version',
+          'sender_display_name',
+          'platform',
+          'conversation_type',
+          'conversation_name'
+        ] = '{}'::jsonb
+        AND jsonb_typeof(source_context->'version') = 'number'
+        AND source_context->'version' = '1'::jsonb
+        AND source_context->>'version' = '1'
+        AND jsonb_typeof(source_context->'sender_display_name') = 'string'
+        AND jsonb_typeof(source_context->'platform') = 'string'
+        AND jsonb_typeof(source_context->'conversation_type') = 'string'
+        AND jsonb_typeof(source_context->'conversation_name') = 'string'
+      )
+    )
 );
 
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_bot_created ON bot_history_messages(bot_id, created_at);
