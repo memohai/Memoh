@@ -2335,7 +2335,7 @@ SELECT
   m.display_text,
   m.compact_id,
   m.created_at,
-  source_row.xmin::text AS source_version,
+  COALESCE(to_jsonb(source_row)->>'source_revision', source_row.xmin::text)::text AS source_version,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform,

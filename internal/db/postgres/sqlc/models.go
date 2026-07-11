@@ -167,6 +167,7 @@ type BotHistoryMessage struct {
 	TurnSupersededAt        pgtype.Timestamptz `json:"turn_superseded_at"`
 	TurnSupersededReason    pgtype.Text        `json:"turn_superseded_reason"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SourceRevision          int64              `json:"source_revision"`
 }
 
 type BotHistoryMessageAsset struct {

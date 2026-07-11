@@ -268,7 +268,7 @@ locked_sources AS MATERIALIZED (
   FROM bot_history_messages message
   JOIN requested_sources requested
     ON requested.message_id = message.id
-   AND requested.source_version = message.xmin::text
+   AND requested.source_version = COALESCE(to_jsonb(message)->>'source_revision', message.xmin::text)
    AND COALESCE(message.compact_id::text, '') = requested.expected_compact_id
   JOIN coverage_sources covered
     ON covered.ordinal = requested.ordinal
