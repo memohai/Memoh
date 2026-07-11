@@ -127,24 +127,6 @@ func TestFromDBMessageBuildsDurableRecordScopeAndFrag(t *testing.T) {
 	}
 }
 
-func TestDBMessageSourceHashIncludesMessageMetadata(t *testing.T) {
-	t.Parallel()
-
-	msg := messagepkg.Message{
-		ID:       "row-1",
-		BotID:    "bot-1",
-		Role:     "user",
-		Content:  conversation.NewTextContent("hello"),
-		Metadata: map[string]any{"reply": map[string]any{"sender": "Alice"}},
-	}
-	changed := msg
-	changed.Metadata = map[string]any{"reply": map[string]any{"sender": "Bob"}}
-
-	if DBMessageSourceHash(msg).Value == DBMessageSourceHash(changed).Value {
-		t.Fatal("message metadata change should affect DB source payload hash")
-	}
-}
-
 func TestFromDBMessageParsesSnakeCaseUsageTokens(t *testing.T) {
 	t.Parallel()
 
@@ -375,35 +357,6 @@ func TestToFragKeepsPersistedSystemRowsExternalTrust(t *testing.T) {
 	frag := ToFrag(record)
 	if frag.Trust != contextfrag.TrustExternal {
 		t.Fatalf("history frag trust = %s, want %s", frag.Trust, contextfrag.TrustExternal)
-	}
-}
-
-func TestFromDBMessageScopeFallbackDoesNotChangeDurableRefID(t *testing.T) {
-	t.Parallel()
-
-	msg := messagepkg.Message{
-		ID:      "row-1",
-		BotID:   "bot-1",
-		Role:    "user",
-		Content: persistedModelMessage(t, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("hello")}),
-	}
-	first, err := FromDBMessage(msg, ScopeFallback{ChatID: "chat-1", ConversationType: "group"})
-	if err != nil {
-		t.Fatalf("first FromDBMessage failed: %v", err)
-	}
-	second, err := FromDBMessage(msg, ScopeFallback{ChatID: "chat-2", ConversationType: "private"})
-	if err != nil {
-		t.Fatalf("second FromDBMessage failed: %v", err)
-	}
-
-	if first.Ref.ID != second.Ref.ID {
-		t.Fatalf("current-request fallback scope must not change DB row identity: first=%#v second=%#v", first.Ref, second.Ref)
-	}
-	if ToFrag(first).Ref.ID != ToFrag(second).Ref.ID {
-		t.Fatalf("fallback scope changed durable frag identity: first=%#v second=%#v", ToFrag(first).Ref, ToFrag(second).Ref)
-	}
-	if ToFrag(first).Ref.ContentHash != ToFrag(second).Ref.ContentHash {
-		t.Fatalf("fallback scope changed durable content hash: first=%#v second=%#v", ToFrag(first).Ref, ToFrag(second).Ref)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	"github.com/memohai/memoh/internal/messagesource"
 )
 
 const namespaceDBHistoryMessage = "bot_history_message"
@@ -36,6 +37,16 @@ func FromDBMessageWithLogger(log *slog.Logger, msg messagepkg.Message, fallback 
 
 	modelMessage := modelMessageFromDBMessage(log, msg)
 	inputTokens, outputTokens := parseUsage(msg.Usage)
+	sourceContext, err := normalizedSourceContext(msg.SourceContext)
+	if err != nil {
+		return HistoryRecord{}, err
+	}
+	senderDisplayName := strings.TrimSpace(msg.SenderDisplayName)
+	platform := strings.TrimSpace(msg.Platform)
+	if sourceContext.Version == messagesource.Version1 {
+		senderDisplayName = sourceContext.SenderDisplayName
+		platform = sourceContext.Platform
+	}
 	ref.HashAlgo = contextfrag.HashAlgoSHA256
 	ref.HashScope = contextfrag.HashScopeSourcePayload
 	ref.ContentHash = DBMessageSourceHash(msg).Value
@@ -68,8 +79,9 @@ func FromDBMessageWithLogger(log *slog.Logger, msg messagepkg.Message, fallback 
 
 		SenderChannelIdentityID: strings.TrimSpace(msg.SenderChannelIdentityID),
 		SenderUserID:            strings.TrimSpace(msg.SenderUserID),
-		SenderDisplayName:       strings.TrimSpace(msg.SenderDisplayName),
-		Platform:                strings.TrimSpace(msg.Platform),
+		SenderDisplayName:       senderDisplayName,
+		Platform:                platform,
+		SourceContext:           sourceContext,
 		SourceReplyToMessageID:  strings.TrimSpace(msg.SourceReplyToMessageID),
 
 		CompactID: strings.TrimSpace(msg.CompactID),
@@ -95,7 +107,22 @@ func DBMessageIdentityRef(id string) (contextfrag.ContextRef, error) {
 }
 
 func DBMessageSourceHash(msg messagepkg.Message) contextfrag.FragmentHash {
-	payload := dbMessageSourceHashPayload{
+	sourceContext, err := normalizedSourceContext(msg.SourceContext)
+	if err != nil {
+		return contextfrag.FragmentHash{}
+	}
+	assets := mediaRefsFromDBMessage(msg)
+	sort.Slice(assets, func(i, j int) bool {
+		if assets[i].Ordinal != assets[j].Ordinal {
+			return assets[i].Ordinal < assets[j].Ordinal
+		}
+		if assets[i].ContentHash != assets[j].ContentHash {
+			return assets[i].ContentHash < assets[j].ContentHash
+		}
+		return assets[i].Role < assets[j].Role
+	})
+
+	common := dbMessageSourceHashPayloadV0{
 		ID:                      strings.TrimSpace(msg.ID),
 		BotID:                   strings.TrimSpace(msg.BotID),
 		SessionID:               strings.TrimSpace(msg.SessionID),
@@ -110,17 +137,27 @@ func DBMessageSourceHash(msg messagepkg.Message) contextfrag.FragmentHash {
 		Metadata:                cloneMetadata(msg.Metadata),
 		Usage:                   string(msg.Usage),
 		EventID:                 strings.TrimSpace(msg.EventID),
-		Assets:                  mediaRefsFromDBMessage(msg),
+		Assets:                  assets,
 	}
-	sort.Slice(payload.Assets, func(i, j int) bool {
-		if payload.Assets[i].Ordinal != payload.Assets[j].Ordinal {
-			return payload.Assets[i].Ordinal < payload.Assets[j].Ordinal
+	var payload any = common
+	if sourceContext.Version == messagesource.Version1 {
+		payload = dbMessageSourceHashPayloadV1{
+			ID:                      common.ID,
+			BotID:                   common.BotID,
+			SessionID:               common.SessionID,
+			SenderChannelIdentityID: common.SenderChannelIdentityID,
+			SenderUserID:            common.SenderUserID,
+			SourceContext:           sourceContext,
+			ExternalMessageID:       common.ExternalMessageID,
+			SourceReplyToMessageID:  common.SourceReplyToMessageID,
+			Role:                    common.Role,
+			Content:                 common.Content,
+			Metadata:                common.Metadata,
+			Usage:                   common.Usage,
+			EventID:                 common.EventID,
+			Assets:                  common.Assets,
 		}
-		if payload.Assets[i].ContentHash != payload.Assets[j].ContentHash {
-			return payload.Assets[i].ContentHash < payload.Assets[j].ContentHash
-		}
-		return payload.Assets[i].Role < payload.Assets[j].Role
-	})
+	}
 	raw, _ := json.Marshal(payload)
 	sum := sha256.Sum256(raw)
 	return contextfrag.FragmentHash{
@@ -130,7 +167,7 @@ func DBMessageSourceHash(msg messagepkg.Message) contextfrag.FragmentHash {
 	}
 }
 
-type dbMessageSourceHashPayload struct {
+type dbMessageSourceHashPayloadV0 struct {
 	ID                      string         `json:"id"`
 	BotID                   string         `json:"bot_id,omitempty"`
 	SessionID               string         `json:"session_id,omitempty"`
@@ -146,6 +183,35 @@ type dbMessageSourceHashPayload struct {
 	Usage                   string         `json:"usage,omitempty"`
 	EventID                 string         `json:"event_id,omitempty"`
 	Assets                  []MediaRef     `json:"assets,omitempty"`
+}
+
+type dbMessageSourceHashPayloadV1 struct {
+	ID                      string                `json:"id"`
+	BotID                   string                `json:"bot_id,omitempty"`
+	SessionID               string                `json:"session_id,omitempty"`
+	SenderChannelIdentityID string                `json:"sender_channel_identity_id,omitempty"`
+	SenderUserID            string                `json:"sender_user_id,omitempty"`
+	SourceContext           messagesource.Context `json:"source_context"`
+	ExternalMessageID       string                `json:"external_message_id,omitempty"`
+	SourceReplyToMessageID  string                `json:"source_reply_to_message_id,omitempty"`
+	Role                    string                `json:"role"`
+	Content                 string                `json:"content,omitempty"`
+	Metadata                map[string]any        `json:"metadata,omitempty"`
+	Usage                   string                `json:"usage,omitempty"`
+	EventID                 string                `json:"event_id,omitempty"`
+	Assets                  []MediaRef            `json:"assets,omitempty"`
+}
+
+func normalizedSourceContext(sourceContext messagesource.Context) (messagesource.Context, error) {
+	sourceContext = sourceContext.Normalize()
+	switch sourceContext.Version {
+	case 0:
+		return messagesource.Context{}, nil
+	case messagesource.Version1:
+		return sourceContext, nil
+	default:
+		return messagesource.Context{}, errors.New("unsupported message source context version")
+	}
 }
 
 func modelMessageFromDBMessage(log *slog.Logger, msg messagepkg.Message) conversation.ModelMessage {

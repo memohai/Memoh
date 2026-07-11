@@ -5,6 +5,7 @@ import (
 
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/messagesource"
 )
 
 const CollectorHistoryRecords = "history_records"
@@ -54,6 +55,7 @@ type HistoryRecord struct {
 	SenderUserID            string
 	SenderDisplayName       string
 	Platform                string
+	SourceContext           messagesource.Context
 	SourceReplyToMessageID  string
 
 	CompactID string

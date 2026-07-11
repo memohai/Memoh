@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"github.com/memohai/memoh/internal/messagesource"
 )
 
 // MessageAsset carries media asset metadata attached to a message.
@@ -21,28 +23,29 @@ type MessageAsset struct {
 
 // Message represents a single persisted bot message.
 type Message struct {
-	ID                      string          `json:"id"`
-	BotID                   string          `json:"bot_id"`
-	SessionID               string          `json:"session_id,omitempty"`
-	SenderChannelIdentityID string          `json:"sender_channel_identity_id,omitempty"`
-	SenderUserID            string          `json:"sender_user_id,omitempty"`
-	SenderDisplayName       string          `json:"sender_display_name,omitempty"`
-	SenderAvatarURL         string          `json:"sender_avatar_url,omitempty"`
-	Platform                string          `json:"platform,omitempty"`
-	ExternalMessageID       string          `json:"external_message_id,omitempty"`
-	SourceReplyToMessageID  string          `json:"source_reply_to_message_id,omitempty"`
-	Role                    string          `json:"role"`
-	Content                 json.RawMessage `json:"content"`
-	Metadata                map[string]any  `json:"metadata,omitempty"`
-	RawMetadata             json.RawMessage `json:"-"`
-	Usage                   json.RawMessage `json:"usage,omitempty"`
-	SessionMode             string          `json:"session_mode,omitempty"`
-	RuntimeType             string          `json:"runtime_type,omitempty"`
-	Assets                  []MessageAsset  `json:"assets,omitempty"`
-	CompactID               string          `json:"compact_id,omitempty"`
-	EventID                 string          `json:"event_id,omitempty"`
-	DisplayContent          string          `json:"display_content,omitempty"`
-	CreatedAt               time.Time       `json:"created_at"`
+	ID                      string                `json:"id"`
+	BotID                   string                `json:"bot_id"`
+	SessionID               string                `json:"session_id,omitempty"`
+	SenderChannelIdentityID string                `json:"sender_channel_identity_id,omitempty"`
+	SenderUserID            string                `json:"sender_user_id,omitempty"`
+	SenderDisplayName       string                `json:"sender_display_name,omitempty"`
+	SenderAvatarURL         string                `json:"sender_avatar_url,omitempty"`
+	Platform                string                `json:"platform,omitempty"`
+	SourceContext           messagesource.Context `json:"-"`
+	ExternalMessageID       string                `json:"external_message_id,omitempty"`
+	SourceReplyToMessageID  string                `json:"source_reply_to_message_id,omitempty"`
+	Role                    string                `json:"role"`
+	Content                 json.RawMessage       `json:"content"`
+	Metadata                map[string]any        `json:"metadata,omitempty"`
+	RawMetadata             json.RawMessage       `json:"-"`
+	Usage                   json.RawMessage       `json:"usage,omitempty"`
+	SessionMode             string                `json:"session_mode,omitempty"`
+	RuntimeType             string                `json:"runtime_type,omitempty"`
+	Assets                  []MessageAsset        `json:"assets,omitempty"`
+	CompactID               string                `json:"compact_id,omitempty"`
+	EventID                 string                `json:"event_id,omitempty"`
+	DisplayContent          string                `json:"display_content,omitempty"`
+	CreatedAt               time.Time             `json:"created_at"`
 }
 
 type HistoryTurn struct {
