@@ -29,6 +29,7 @@ import App from './chat/App.vue'
 import router from './chat/router'
 import { setupRendererCacheSync } from './renderer-cache-sync'
 import { handleRendererNavigate } from './renderer-navigation'
+import { isCurrentServerProbe } from './connect/connection-navigation'
 
 // Window-management fallback, intentionally kept separate from the close-tab app
 // command. Cmd/Ctrl+W closes the active workspace tab; when the registry reports
@@ -56,6 +57,7 @@ async function bootstrap() {
     baseUrl: status.baseUrl || 'http://127.0.0.1:0',
     onUnauthorized: () => router.replace({ name: 'Login' }),
   })
+  const serverProbe = window.api.desktop.probeServer()
 
   const pinia = createPinia().use(piniaPluginPersistedstate)
   const keyboardCommands = createKeyboardCommandRegistry()
@@ -142,6 +144,32 @@ async function bootstrap() {
   })
 
   app.mount('#app')
+
+  // The first frame stays optimistic: render the normal auth/app route while
+  // the main process checks the configured server in the background. Local
+  // connection refusals resolve immediately; only a genuinely slow endpoint
+  // consumes the full timeout.
+  void serverProbe
+    .then(async (result) => {
+      if (result.ok || router.currentRoute.value.name === 'ConnectServer') return
+
+      // A user can switch servers while the startup probe is still pending.
+      // Ignore a late failure from the old server instead of pulling the newly
+      // connected session back to the connection screen.
+      const currentStatus = await window.api.desktop.getServerStatus()
+      if (!isCurrentServerProbe(result.baseUrl, currentStatus.baseUrl)) return
+      if (router.currentRoute.value.name !== 'ConnectServer') {
+        await router.replace({ name: 'ConnectServer' })
+      }
+    })
+    .catch(async () => {
+      if (router.currentRoute.value.name !== 'ConnectServer') {
+        const currentStatus = await window.api.desktop.getServerStatus()
+        if (isCurrentServerProbe(status.baseUrl, currentStatus.baseUrl)) {
+          await router.replace({ name: 'ConnectServer' })
+        }
+      }
+    })
 
   for (const target of pendingNavigationTargets.splice(0)) {
     handleRendererNavigate(router, target)

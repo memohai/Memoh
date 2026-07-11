@@ -109,6 +109,25 @@
     "invalidCredentials": "Invalid username or password",
     "retryHint": "Please check your credentials and try again"
   },
+  "desktopConnection": {
+    "title": "Connect to Memoh",
+    "subtitle": "Enter the address of your Memoh server",
+    "fullInstallLead": "Want the full Memoh experience?",
+    "fullInstallAction": "Install Memoh with Docker.",
+    "fullInstallHint": "Desktop only connects to an existing server.",
+    "placeholder": "https://memoh.example.com",
+    "connect": "Connect",
+    "failed": "Couldn’t connect",
+    "errors": {
+      "required": "Enter a server address",
+      "invalid-url": "Enter a valid server address",
+      "unsupported-protocol": "Use an HTTP or HTTPS address",
+      "timeout": "The server took too long to respond",
+      "unreachable": "The server could not be reached",
+      "http": "The server returned HTTP {status}",
+      "invalid-response": "This address did not return a Memoh server response"
+    }
+  },
   "sidebar": {
     "session": "Sessions",
     "chat": "Chat",
@@ -362,6 +381,11 @@
     "github": "GitHub",
     "docs": "Documentation",
     "feedback": "Feedback",
+    "advanced": "Advanced",
+    "advancedDescription": "Desktop connection and other rarely changed settings.",
+    "serverConnection": "Server Connection",
+    "serverConnectionDescription": "Connect this Desktop app to a different Memoh server.",
+    "configureServer": "Configure",
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {

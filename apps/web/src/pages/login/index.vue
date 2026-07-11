@@ -6,8 +6,13 @@
     <DotMatrixBg class="pointer-events-none absolute inset-0" />
 
     <section
-      class="login-scope relative flex w-full max-w-[22rem] -translate-y-8 flex-col items-center gap-6 transition-[opacity,transform] duration-[175ms] ease-out"
-      :class="exiting ? 'scale-[0.88] opacity-0' : 'scale-100 opacity-100'"
+      class="login-scope relative flex w-full max-w-[22rem] -translate-y-8 flex-col items-center gap-6 transition-[opacity,transform] ease-out motion-reduce:transition-none"
+      :class="[
+        exiting
+          ? 'scale-[0.88] opacity-0 duration-[175ms] motion-reduce:scale-100 motion-reduce:opacity-100'
+          : 'scale-100 opacity-100 duration-[450ms]',
+        entering && 'scale-[1.15] opacity-0 motion-reduce:scale-100 motion-reduce:opacity-100',
+      ]"
     >
       <div class="flex flex-col items-center gap-3 text-center">
         <img
@@ -61,7 +66,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Input } from '@felinic/ui'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/store/user'
@@ -72,8 +77,9 @@ import LoadingButton from '@/components/loading-button/index.vue'
 import PasswordInput from '@/components/password-input/index.vue'
 import DotMatrixBg from '@/pages/login/components/dot-matrix-bg.vue'
 import { submitLogin } from './login-submit'
-import { safeSessionSet } from '@/utils/safe-storage'
+import { safeSessionGet, safeSessionRemove, safeSessionSet } from '@/utils/safe-storage'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
+import { LOGIN_ENTRY_ANIMATION_KEY } from './transition'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -81,6 +87,18 @@ const { t } = useI18n()
 const username = ref('')
 const password = ref('')
 const exiting = ref(false)
+const shouldAnimateEntry = safeSessionGet(LOGIN_ENTRY_ANIMATION_KEY) === '1'
+if (shouldAnimateEntry) safeSessionRemove(LOGIN_ENTRY_ANIMATION_KEY)
+const entering = ref(shouldAnimateEntry)
+
+onMounted(() => {
+  if (!shouldAnimateEntry) return
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      entering.value = false
+    })
+  })
+})
 
 const canSubmit = computed(() =>
   !!username.value.trim() && !!password.value.trim(),

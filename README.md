@@ -80,10 +80,6 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for custom configuration and production setup
 
 </details>
 
-### Desktop
-
-A native client for macOS, Windows, and Linux that connects to Memoh Cloud or your hosted server. [Download Memoh Desktop](https://memoh.ai/desktop)
-
 ## Why Memoh?
 
 - **Every agent gets its own computer**: An isolated container with its own filesystem, network, desktop, and browser.

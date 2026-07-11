@@ -248,6 +248,15 @@ declare module '@memohai/web/lib/desktop-shell' {
   export const DesktopShellKey: InjectionKey<boolean>
 }
 
+declare module '@memohai/web/lib/auth-session' {
+  export type AuthSessionClearReason = 'login' | 'logout' | 'token-cleared' | 'unauthorized'
+  export function notifyAuthSessionCleared(reason: AuthSessionClearReason): void
+}
+
+declare module '@memohai/web/pages/login/transition' {
+  export const LOGIN_ENTRY_ANIMATION_KEY: string
+}
+
 declare module '@memohai/web/composables/useBackOr' {
   import type { ComputedRef } from 'vue'
   import type { RouteLocationRaw, Router } from 'vue-router'

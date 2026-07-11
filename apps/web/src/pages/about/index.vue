@@ -110,6 +110,20 @@
           </div>
         </SettingsRow>
       </SettingsSection>
+
+      <section
+        v-if="desktopShell"
+        class="space-y-2.5"
+      >
+        <ActionCard
+          :title="$t('about.advanced')"
+          @click="advancedOpen = true"
+        >
+          <template #icon>
+            <SlidersHorizontal />
+          </template>
+        </ActionCard>
+      </section>
     </div>
 
     <!-- Footer meta near the bottom; lifted with a transform so nudging it never
@@ -166,30 +180,60 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <Dialog v-model:open="advancedOpen">
+      <DialogPanel width="lg">
+        <DialogHeader>
+          <DialogTitle>{{ $t('about.advanced') }}</DialogTitle>
+          <DialogDescription>{{ $t('about.advancedDescription') }}</DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <SettingsSection>
+            <SettingsRow
+              :label="$t('about.serverConnection')"
+              :description="$t('about.serverConnectionDescription')"
+            >
+              <Button
+                variant="outline"
+                size="sm"
+                @click="openServerConnection"
+              >
+                {{ $t('about.configureServer') }}
+              </Button>
+            </SettingsRow>
+          </SettingsSection>
+        </DialogBody>
+      </DialogPanel>
+    </Dialog>
   </section>
 </template>
 
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { computed, onMounted, ref } from 'vue'
+import { computed, inject, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useDark } from '@vueuse/core'
-import { BookOpen, Github, MessageSquare, RefreshCw } from 'lucide-vue-next'
+import { BookOpen, Github, MessageSquare, RefreshCw, SlidersHorizontal } from 'lucide-vue-next'
 import {
+  ActionCard,
   Badge,
   Button,
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
+  DialogPanel,
   DialogTitle,
   toast,
 } from '@felinic/ui'
 import MarkdownRender from 'markstream-vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import SettingsRow from '@/components/settings/row.vue'
 import SettingsSection from '@/components/settings/section.vue'
+import { DesktopShellKey } from '@/lib/desktop-shell'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { useSettingsStore } from '@/store/settings'
 import { useUpdateStore } from '@/store/update'
@@ -203,6 +247,8 @@ interface ResourceLink {
 }
 
 const { t } = useI18n()
+const router = useRouter()
+const desktopShell = inject(DesktopShellKey, false)
 
 const capabilitiesStore = useCapabilitiesStore()
 const { serverVersion, commitHash } = storeToRefs(capabilitiesStore)
@@ -240,6 +286,15 @@ const updateDesc = computed(() => {
 })
 
 const notesOpen = ref(false)
+const advancedOpen = ref(false)
+
+async function openServerConnection() {
+  advancedOpen.value = false
+  await router.push({
+    name: 'ConnectServer',
+    query: { returnTo: '/settings/about' },
+  })
+}
 
 // Shorten GitHub issue / PR / commit URLs to compact references and drop the
 // raw <samp> tags GitHub's generated notes leave behind (markstream renders

@@ -80,10 +80,6 @@ GitHub が自動生成する「Source code」
 
 </details>
 
-### Desktop
-
-Memoh Cloud または自分でホストした Server に接続する macOS、Windows、Linux 向けのネイティブクライアント。[Memoh Desktop をダウンロード](https://memoh.ai/desktop)
-
 ## Memoh を選ぶ理由
 
 - **すべての Agent に専用コンピューター**: 専用のファイルシステム、ネットワーク、Desktop、Browser を備えた隔離 Container。

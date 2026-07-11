@@ -109,6 +109,25 @@
     "invalidCredentials": "用户名或密码不正确",
     "retryHint": "请检查凭据后重试"
   },
+  "desktopConnection": {
+    "title": "连接到 Memoh",
+    "subtitle": "输入你的 Memoh 服务器地址",
+    "fullInstallLead": "想运行完整的 Memoh？",
+    "fullInstallAction": "使用 Docker 安装 Memoh。",
+    "fullInstallHint": "Desktop 仅用于连接已有的 Memoh Server。",
+    "placeholder": "https://memoh.example.com",
+    "connect": "连接",
+    "failed": "无法连接",
+    "errors": {
+      "required": "请输入服务器地址",
+      "invalid-url": "请输入有效的服务器地址",
+      "unsupported-protocol": "请使用 HTTP 或 HTTPS 地址",
+      "timeout": "服务器响应超时",
+      "unreachable": "无法访问该服务器",
+      "http": "服务器返回了 HTTP {status}",
+      "invalid-response": "该地址没有返回 Memoh 服务器响应"
+    }
+  },
   "sidebar": {
     "session": "会话列表",
     "chat": "对话",
@@ -362,6 +381,11 @@
     "github": "GitHub",
     "docs": "技术文档",
     "feedback": "问题反馈",
+    "advanced": "高级设置",
+    "advancedDescription": "Desktop 连接及其他不常修改的设置。",
+    "serverConnection": "服务器连接",
+    "serverConnectionDescription": "将 Desktop 连接到另一台 Memoh 服务器。",
+    "configureServer": "设置",
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
