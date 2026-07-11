@@ -47,7 +47,7 @@ func TestBudgetItemsAdaptersProduceIdenticalToolOccurrences(t *testing.T) {
 	for i := range historyProjection.items {
 		historyItem := historyProjection.items[i]
 		pipelineItem := pipelineProjection.items[i]
-		if historyItem.Tokens != pipelineItem.Tokens || historyItem.Group != pipelineItem.Group || historyItem.Retention != pipelineItem.Retention {
+		if historyItem.Tokens != pipelineItem.Tokens || historyItem.CompactableTokens != pipelineItem.CompactableTokens || historyItem.Group != pipelineItem.Group || historyItem.Retention != pipelineItem.Retention {
 			t.Fatalf("item[%d] differs: history=%#v pipeline=%#v", i, historyItem, pipelineItem)
 		}
 	}
@@ -78,10 +78,11 @@ func TestBudgetItemsForHistoryRecordsMakesRequiredClosureAtomic(t *testing.T) {
 	if projection.items[0].Group == "" || projection.items[0].Group != projection.items[1].Group {
 		t.Fatalf("tool closure groups = %#v, want one group", projection.items)
 	}
-	if !projection.items[0].Compactable {
+	if projection.items[0].CompactableTokens != projection.items[0].Tokens || projection.items[0].CompactableTokens <= 0 {
 		t.Fatalf("required raw source was removed from compactable pressure: %#v", projection.items[0])
 	}
-	result := contextbudget.Allocate(contextbudget.Request{SourceLimit: 1, Items: projection.items})
+	limit := 1
+	result := contextbudget.Allocate(contextbudget.Request{SourceLimit: &limit, Items: projection.items})
 	if len(result.Kept) != 2 || result.SourcesFit || result.SourceOverflowTokens <= 0 {
 		t.Fatalf("required closure allocation = %#v, want both kept with explicit overflow", result)
 	}
@@ -99,11 +100,12 @@ func TestBudgetItemsForHistoryRecordsRequiresEveryActiveArtifactByIdentity(t *te
 		t.Fatalf("distinct artifacts share identity %q", projection.items[0].ID)
 	}
 	for i, item := range projection.items {
-		if item.Retention != contextbudget.RetentionRequired || item.Compactable {
+		if item.Retention != contextbudget.RetentionRequired || item.CompactableTokens != 0 {
 			t.Fatalf("artifact item[%d] = %#v, want required and non-compactable", i, item)
 		}
 	}
-	result := contextbudget.Allocate(contextbudget.Request{SourceLimit: 1, Items: projection.items})
+	limit := 1
+	result := contextbudget.Allocate(contextbudget.Request{SourceLimit: &limit, Items: projection.items})
 	if len(result.Kept) != 2 || result.SourcesFit || len(result.Dropped) != 0 {
 		t.Fatalf("artifact overflow was hidden: %#v", result)
 	}
@@ -119,13 +121,13 @@ func TestBudgetItemsForPipelineEntriesRequiresSummaryAndCurrentSource(t *testing
 		{message: sdkModelMessage(t, sdk.UserMessage("current")), forceKeep: true},
 	})
 
-	if projection.items[0].Retention != contextbudget.RetentionRequired || projection.items[0].Compactable {
+	if projection.items[0].Retention != contextbudget.RetentionRequired || projection.items[0].CompactableTokens != 0 {
 		t.Fatalf("summary item = %#v, want required artifact", projection.items[0])
 	}
-	if projection.items[1].Retention != contextbudget.RetentionCandidate || !projection.items[1].Compactable {
+	if projection.items[1].Retention != contextbudget.RetentionCandidate || projection.items[1].CompactableTokens != projection.items[1].Tokens || projection.items[1].CompactableTokens <= 0 {
 		t.Fatalf("raw item = %#v, want compactable candidate", projection.items[1])
 	}
-	if projection.items[2].Retention != contextbudget.RetentionRequired || !projection.items[2].Compactable {
+	if projection.items[2].Retention != contextbudget.RetentionRequired || projection.items[2].CompactableTokens != projection.items[2].Tokens || projection.items[2].CompactableTokens <= 0 {
 		t.Fatalf("current item = %#v, want required raw source", projection.items[2])
 	}
 }

@@ -9,11 +9,11 @@ func TestAllocateDropsLowerTierBeforeProtectedSources(t *testing.T) {
 	t.Parallel()
 
 	result := Allocate(Request{
-		SourceLimit: 9,
+		SourceLimit: tokenLimit(9),
 		Items: []Item{
-			{ID: "old", Tokens: 4, DropTier: 0, Compactable: true},
+			{ID: "old", Tokens: 4, DropTier: 0, CompactableTokens: 4},
 			{ID: "summary", Tokens: 6, Retention: RetentionRequired},
-			{ID: "new", Tokens: 3, DropTier: 1, Compactable: true},
+			{ID: "new", Tokens: 3, DropTier: 1, CompactableTokens: 3},
 		},
 	})
 
@@ -38,7 +38,7 @@ func TestAllocateKeepsGroupsAtomic(t *testing.T) {
 	t.Parallel()
 
 	result := Allocate(Request{
-		SourceLimit: 5,
+		SourceLimit: tokenLimit(5),
 		Items: []Item{
 			{ID: "tool-call", Group: "tool:1", Tokens: 3, DropTier: 2},
 			{ID: "filler", Tokens: 3, DropTier: 1},
@@ -58,7 +58,7 @@ func TestAllocateKeepsOccurrenceScopedGroupsIndependent(t *testing.T) {
 	t.Parallel()
 
 	result := Allocate(Request{
-		SourceLimit: 5,
+		SourceLimit: tokenLimit(5),
 		Items: []Item{
 			{ID: "call_0.call.first", Group: "exchange:0", Tokens: 2, DropTier: 0},
 			{ID: "call_0.result.first", Group: "exchange:0", Tokens: 2, DropTier: 0},
@@ -83,7 +83,7 @@ func TestAllocateAgesAtomicGroupByItsLastMember(t *testing.T) {
 	t.Parallel()
 
 	result := Allocate(Request{
-		SourceLimit: 4,
+		SourceLimit: tokenLimit(4),
 		Items: []Item{
 			{ID: "call", Group: "exchange:0", Tokens: 2, DropTier: 1},
 			{ID: "filler", Tokens: 4, DropTier: 1},
@@ -100,7 +100,7 @@ func TestAllocateReportsRequiredOverflowWithoutDiscardingSources(t *testing.T) {
 	t.Parallel()
 
 	result := Allocate(Request{
-		SourceLimit: 10,
+		SourceLimit: tokenLimit(10),
 		Items: []Item{
 			{ID: "summary-a", Tokens: 7, Retention: RetentionRequired},
 			{ID: "summary-b", Tokens: 5, Retention: RetentionRequired},
@@ -124,7 +124,7 @@ func TestAllocateAppliesPolicyDropsWithoutGlobalLimit(t *testing.T) {
 	result := Allocate(Request{
 		Items: []Item{
 			{ID: "keep", Tokens: 3},
-			{ID: "drop", Tokens: 5, Retention: RetentionDrop, Compactable: true},
+			{ID: "drop", Tokens: 5, Retention: RetentionDrop, CompactableTokens: 5},
 			{ID: "required-call", Group: "required-tool", Tokens: 2, Retention: RetentionRequired},
 			{ID: "required-result", Group: "required-tool", Tokens: 4, Retention: RetentionDrop},
 		},
@@ -166,7 +166,7 @@ func TestAllocateDropsOldestSourceWhenTiersTie(t *testing.T) {
 	t.Parallel()
 
 	result := Allocate(Request{
-		SourceLimit: 4,
+		SourceLimit: tokenLimit(4),
 		Items: []Item{
 			{ID: "older", Tokens: 4, DropTier: 1},
 			{ID: "newer", Tokens: 4, DropTier: 1},
@@ -190,8 +190,8 @@ func TestAllocateKeepsMonotonicSupersetsAsBudgetGrows(t *testing.T) {
 		{ID: "current", Tokens: 6, Retention: RetentionRequired},
 	}
 	var previous map[string]struct{}
-	for limit := 6; limit <= 20; limit++ {
-		result := Allocate(Request{SourceLimit: limit, Items: items})
+	for limit := 0; limit <= 20; limit++ {
+		result := Allocate(Request{SourceLimit: tokenLimit(limit), Items: items})
 		kept := make(map[string]struct{}, len(result.Kept))
 		for _, decision := range result.Kept {
 			kept[decision.ID] = struct{}{}
@@ -213,7 +213,7 @@ func TestAllocateExactFitAndUnlimitedDoNotMutateInput(t *testing.T) {
 		{ID: "second", Tokens: 3, DropTier: 1},
 	}
 	original := append([]Item(nil), items...)
-	exact := Allocate(Request{SourceLimit: 5, Items: items})
+	exact := Allocate(Request{SourceLimit: tokenLimit(5), Items: items})
 	unlimited := Allocate(Request{Items: items})
 
 	if exact.Changed || exact.BudgetTrimmed || !exact.SourcesFit || exact.SelectedTokens != 5 {
@@ -227,10 +227,73 @@ func TestAllocateExactFitAndUnlimitedDoNotMutateInput(t *testing.T) {
 	}
 }
 
+func TestAllocateDistinguishesExplicitZeroLimitFromUnlimited(t *testing.T) {
+	t.Parallel()
+
+	items := []Item{
+		{ID: "candidate", Tokens: 3},
+		{ID: "required", Tokens: 2, Retention: RetentionRequired},
+	}
+	unlimited := Allocate(Request{Items: items})
+
+	for _, limit := range []int{0, -4} {
+		explicitZero := Allocate(Request{SourceLimit: tokenLimit(limit), Items: items})
+		if got, want := decisionIDs(explicitZero.Kept), []string{"required"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("limit %d kept = %#v, want %#v", limit, got, want)
+		}
+		if got, want := decisionIDs(explicitZero.Dropped), []string{"candidate"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("limit %d dropped = %#v, want %#v", limit, got, want)
+		}
+		if explicitZero.SourcesFit || explicitZero.SourceOverflowTokens != 2 || !explicitZero.BudgetTrimmed {
+			t.Fatalf("limit %d result = %#v, want required overflow 2 after budget trim", limit, explicitZero)
+		}
+	}
+	if unlimited.Changed || !unlimited.SourcesFit || unlimited.SelectedTokens != 5 {
+		t.Fatalf("unlimited result = %#v", unlimited)
+	}
+}
+
+func TestAllocateReportsRequiredOnlyOverflowAtExplicitZero(t *testing.T) {
+	t.Parallel()
+
+	result := Allocate(Request{
+		SourceLimit: tokenLimit(0),
+		Items:       []Item{{ID: "required", Tokens: 2, Retention: RetentionRequired}},
+	})
+
+	if len(result.Kept) != 1 || len(result.Dropped) != 0 || result.SourcesFit || result.SourceOverflowTokens != 2 {
+		t.Fatalf("required zero-limit overflow = %#v", result)
+	}
+	if result.Changed || result.BudgetTrimmed {
+		t.Fatalf("required overflow was reported as a source drop: %#v", result)
+	}
+}
+
+func TestAllocateMetersRawCompactablePressureIndependently(t *testing.T) {
+	t.Parallel()
+
+	items := []Item{
+		{ID: "rewritten", Tokens: 2, CompactableTokens: 9},
+		{ID: "policy-drop", Tokens: 4, CompactableTokens: 7, Retention: RetentionDrop},
+		{ID: "artifact", Tokens: 6, Retention: RetentionRequired},
+		{ID: "invalid-pressure", Tokens: 1, CompactableTokens: -3},
+	}
+	for limit := 0; limit <= 20; limit++ {
+		result := Allocate(Request{SourceLimit: tokenLimit(limit), Items: items})
+		if result.CompactableTokens != 16 {
+			t.Fatalf("limit %d compactable tokens = %d, want invariant raw pressure 16", limit, result.CompactableTokens)
+		}
+	}
+}
+
 func decisionIDs(decisions []Decision) []string {
 	ids := make([]string, 0, len(decisions))
 	for _, decision := range decisions {
 		ids = append(ids, decision.ID)
 	}
 	return ids
+}
+
+func tokenLimit(tokens int) *int {
+	return &tokens
 }

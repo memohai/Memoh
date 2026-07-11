@@ -31,14 +31,15 @@ type Item struct {
 	Retention Retention
 	// PolicyReason is reported only for RetentionDrop. Empty uses DropPolicy.
 	PolicyReason DropReason
-	// Compactable contributes Tokens to raw preselection compaction pressure.
-	Compactable bool
+	// CompactableTokens contributes independently metered raw preselection
+	// pressure. Negative values are treated as zero.
+	CompactableTokens int
 }
 
 type Request struct {
 	// SourceLimit is the source-only budget after caller-owned prompt and notice
-	// reserves. A non-positive value disables spatial budget drops.
-	SourceLimit int
+	// reserves. Nil is unlimited; a non-nil negative value is treated as zero.
+	SourceLimit *int
 	Items       []Item
 }
 
@@ -75,6 +76,10 @@ type sourceGroup struct {
 
 func Allocate(request Request) Allocation {
 	groups, itemGroups, result := buildGroups(request.Items)
+	sourceLimit := 0
+	if request.SourceLimit != nil {
+		sourceLimit = max(*request.SourceLimit, 0)
+	}
 	selected := make([]bool, len(groups))
 	dropReasons := make([]DropReason, len(groups))
 	budgetDrops := make([]bool, len(groups))
@@ -93,7 +98,7 @@ func Allocate(request Request) Allocation {
 		}
 	}
 
-	if request.SourceLimit > 0 && result.SelectedTokens > request.SourceLimit {
+	if request.SourceLimit != nil && result.SelectedTokens > sourceLimit {
 		droppable := make([]int, 0, len(groups))
 		for i := range groups {
 			if selected[i] && !groups[i].required {
@@ -109,7 +114,7 @@ func Allocate(request Request) Allocation {
 			return left.lastIndex < right.lastIndex
 		})
 		for _, groupIndex := range droppable {
-			if result.SelectedTokens <= request.SourceLimit {
+			if result.SelectedTokens <= sourceLimit {
 				break
 			}
 			selected[groupIndex] = false
@@ -131,9 +136,9 @@ func Allocate(request Request) Allocation {
 		result.BudgetTrimmed = result.BudgetTrimmed || budgetDrops[groupIndex]
 	}
 	result.Changed = len(result.Dropped) > 0
-	result.SourcesFit = request.SourceLimit <= 0 || result.SelectedTokens <= request.SourceLimit
-	if request.SourceLimit > 0 && result.SelectedTokens > request.SourceLimit {
-		result.SourceOverflowTokens = result.SelectedTokens - request.SourceLimit
+	result.SourcesFit = request.SourceLimit == nil || result.SelectedTokens <= sourceLimit
+	if request.SourceLimit != nil && result.SelectedTokens > sourceLimit {
+		result.SourceOverflowTokens = result.SelectedTokens - sourceLimit
 	}
 	return result
 }
@@ -146,9 +151,7 @@ func buildGroups(items []Item) ([]sourceGroup, []int, Allocation) {
 	for i, item := range items {
 		tokens := max(item.Tokens, 0)
 		result.SourceTokens += tokens
-		if item.Compactable {
-			result.CompactableTokens += tokens
-		}
+		result.CompactableTokens += max(item.CompactableTokens, 0)
 
 		groupIndex := -1
 		if item.Group != "" {

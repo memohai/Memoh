@@ -65,16 +65,19 @@ func projectBudgetSources(sources []budgetSourceInput) budgetSourceProjection {
 	}
 	for index, source := range sources {
 		message := canonicalBudgetMessage(source.message)
+		tokens := messageconv.EstimateModelMessageTokens(source.message)
 		projection.messages[index] = message
 		retention := contextbudget.RetentionCandidate
 		if source.required {
 			retention = contextbudget.RetentionRequired
 		}
 		projection.items[index] = contextbudget.Item{
-			ID:          source.id,
-			Tokens:      messageconv.EstimateModelMessageTokens(source.message),
-			Retention:   retention,
-			Compactable: source.compactable,
+			ID:        source.id,
+			Tokens:    tokens,
+			Retention: retention,
+		}
+		if source.compactable {
+			projection.items[index].CompactableTokens = tokens
 		}
 	}
 	projection.toolAnalysis = messageconv.AnalyzeSDKToolOccurrences(projection.messages)
