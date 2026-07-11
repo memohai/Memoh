@@ -82,6 +82,7 @@ type fakeQueries struct {
 	dbstore.Queries // embedded interface; unimplemented methods would panic if called
 	uncompacted     []sqlc.ListUncompactedMessagesBySessionRow
 	priorLogs       []sqlc.BotHistoryMessageCompact
+	completeErr     error
 
 	created   bool
 	markedIDs []pgtype.UUID
@@ -107,6 +108,9 @@ func (f *fakeQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMess
 }
 
 func (f *fakeQueries) CompleteCompactionLog(_ context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
+	if f.completeErr != nil {
+		return sqlc.BotHistoryMessageCompact{}, f.completeErr
+	}
 	f.completed = arg
 	return sqlc.BotHistoryMessageCompact{ID: arg.ID, Status: arg.Status, Summary: arg.Summary}, nil
 }
@@ -635,5 +639,21 @@ func TestRunCompactionSyncModelFailureStillArmsCooldown(t *testing.T) {
 	}
 	if stub.calls != 0 {
 		t.Fatalf("model called %d times during cooldown, want 0", stub.calls)
+	}
+}
+
+func TestRunCompactionSyncSurfacesCompletionPersistenceFailure(t *testing.T) {
+	t.Parallel()
+
+	q := &fakeQueries{uncompacted: machineryCorpus(t), completeErr: errors.New("db down")}
+	svc := newMachineryService(q)
+	stub := &stubModel{summary: "durable summary"}
+
+	res, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 200))
+	if err == nil {
+		t.Fatal("completion persistence failure must surface an error")
+	}
+	if res.Status == StatusOK {
+		t.Fatal("result must not claim ok when the summary was never persisted")
 	}
 }
