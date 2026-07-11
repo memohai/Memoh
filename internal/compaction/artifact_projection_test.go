@@ -104,6 +104,17 @@ func TestArtifactFrontierQuarantinesBrokenLineageWithoutDroppingValidLeaf(t *tes
 			issue:   LineageIssueInconsistentMarker,
 		},
 		{
+			name: "orphaned marker after successor delete",
+			artifacts: func() []Artifact {
+				a := testArtifact("orphan-marker-a")
+				a.SupersededAt = time.Unix(1, 0)
+				a.Coverage = testCoverage("orphan-marker-row")
+				return []Artifact{a}
+			}(),
+			startID: "orphan-marker-a",
+			issue:   LineageIssueInconsistentMarker,
+		},
+		{
 			name: "parent mismatch",
 			artifacts: func() []Artifact {
 				a, b := testArtifact("parent-a"), testArtifact("parent-b")
