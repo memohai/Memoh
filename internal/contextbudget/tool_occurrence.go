@@ -11,6 +11,8 @@ const (
 	DropToolOrphanResult    DropReason = "tool:orphan_result"
 	DropToolDuplicateCall   DropReason = "tool:duplicate_call"
 	DropToolDuplicateResult DropReason = "tool:duplicate_result"
+	DropToolInvalidRole     DropReason = "tool:invalid_role"
+	DropToolInvalidName     DropReason = "tool:invalid_name"
 )
 
 type ToolPartKind uint8
@@ -24,6 +26,7 @@ type ToolPart struct {
 	PartIndex int
 	Kind      ToolPartKind
 	CallID    string
+	ToolName  string
 }
 
 type ToolCarrier struct {
@@ -47,19 +50,31 @@ type DanglingToolCall struct {
 	CarrierIndex int
 	PartIndex    int
 	CallID       string
+	ToolName     string
 	CloseBefore  int
+}
+
+type ToolPartMatch struct {
+	CallCarrierIndex   int
+	CallPartIndex      int
+	ResultCarrierIndex int
+	ResultPartIndex    int
+	CallID             string
+	ToolName           string
 }
 
 type ToolOccurrenceAnalysis struct {
 	Bindings      []ToolCarrierBinding
 	PartIssues    []ToolPartIssue
 	DanglingCalls []DanglingToolCall
+	Matches       []ToolPartMatch
 }
 
 type openToolCall struct {
 	carrierIndex int
 	partIndex    int
 	callID       string
+	toolName     string
 }
 
 // AnalyzeToolOccurrences derives occurrence-scoped atomic groups and
@@ -94,7 +109,12 @@ func AnalyzeToolOccurrences(carriers []ToolCarrier) ToolOccurrenceAnalysis {
 					analysis.DanglingCalls = append(analysis.DanglingCalls, danglingToolCall(previous, carrierIndex))
 				}
 				members[carrierIndex] = true
-				open[callID] = openToolCall{carrierIndex: carrierIndex, partIndex: part.PartIndex, callID: callID}
+				open[callID] = openToolCall{
+					carrierIndex: carrierIndex,
+					partIndex:    part.PartIndex,
+					callID:       callID,
+					toolName:     strings.TrimSpace(part.ToolName),
+				}
 				completed[callID] = false
 			case ToolPartResult:
 				if callID == "" {
@@ -112,6 +132,14 @@ func AnalyzeToolOccurrences(carriers []ToolCarrier) ToolOccurrenceAnalysis {
 				}
 				members[carrierIndex] = true
 				unionToolCarriers(parents, carrierIndex, call.carrierIndex)
+				analysis.Matches = append(analysis.Matches, ToolPartMatch{
+					CallCarrierIndex:   call.carrierIndex,
+					CallPartIndex:      call.partIndex,
+					ResultCarrierIndex: carrierIndex,
+					ResultPartIndex:    part.PartIndex,
+					CallID:             call.callID,
+					ToolName:           call.toolName,
+				})
 				delete(open, callID)
 				completed[callID] = true
 			}
@@ -181,6 +209,7 @@ func danglingToolCall(call openToolCall, before int) DanglingToolCall {
 		CarrierIndex: call.carrierIndex,
 		PartIndex:    call.partIndex,
 		CallID:       call.callID,
+		ToolName:     call.toolName,
 		CloseBefore:  before,
 	}
 }

@@ -36,6 +36,14 @@ func TestAnalyzeToolOccurrencesGroupsNonAdjacentBatchedResults(t *testing.T) {
 	if got.Bindings[1] != (ToolCarrierBinding{}) || len(got.PartIssues) != 0 || len(got.DanglingCalls) != 0 {
 		t.Fatalf("unexpected analysis metadata: %#v", got)
 	}
+	wantMatches := []ToolPartMatch{
+		{CallCarrierIndex: 0, CallPartIndex: 0, ResultCarrierIndex: 2, ResultPartIndex: 0, CallID: "call-a"},
+		{CallCarrierIndex: 0, CallPartIndex: 1, ResultCarrierIndex: 4, ResultPartIndex: 0, CallID: "call-b"},
+		{CallCarrierIndex: 3, CallPartIndex: 0, ResultCarrierIndex: 4, ResultPartIndex: 1, CallID: "call-c"},
+	}
+	if !reflect.DeepEqual(got.Matches, wantMatches) {
+		t.Fatalf("matches = %#v, want %#v", got.Matches, wantMatches)
+	}
 }
 
 func TestAnalyzeToolOccurrencesIsolatesRepeatedCallIDs(t *testing.T) {
