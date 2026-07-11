@@ -112,6 +112,9 @@
   "desktopConnection": {
     "title": "连接到 Memoh",
     "subtitle": "输入你的 Memoh 服务器地址",
+    "fullInstallLead": "想运行完整的 Memoh？",
+    "fullInstallAction": "使用 Docker 安装 Memoh。",
+    "fullInstallHint": "Desktop 仅用于连接已有的 Memoh Server。",
     "placeholder": "https://memoh.example.com",
     "connect": "连接",
     "failed": "无法连接",

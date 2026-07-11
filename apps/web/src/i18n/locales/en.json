@@ -112,6 +112,9 @@
   "desktopConnection": {
     "title": "Connect to Memoh",
     "subtitle": "Enter the address of your Memoh server",
+    "fullInstallLead": "Want the full Memoh experience?",
+    "fullInstallAction": "Install Memoh with Docker.",
+    "fullInstallHint": "Desktop only connects to an existing server.",
     "placeholder": "https://memoh.example.com",
     "connect": "Connect",
     "failed": "Couldn’t connect",

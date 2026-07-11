@@ -109,6 +109,9 @@
   "desktopConnection": {
     "title": "Memoh に接続",
     "subtitle": "Memoh Server のアドレスを入力してください",
+    "fullInstallLead": "完全な Memoh を利用するには、",
+    "fullInstallAction": "Docker でインストールしてください。",
+    "fullInstallHint": "Desktop は既存の Memoh Server に接続するクライアントです。",
     "placeholder": "https://memoh.example.com",
     "connect": "接続",
     "failed": "接続できませんでした",

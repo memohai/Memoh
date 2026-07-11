@@ -3,7 +3,7 @@
     <DotMatrixBg class="pointer-events-none absolute inset-0" />
 
     <section
-      class="relative flex w-full max-w-[22rem] -translate-y-8 flex-col items-center gap-6 transition-[opacity,transform] duration-[175ms] ease-out motion-reduce:transition-none"
+      class="login-scope relative flex w-full max-w-[22rem] -translate-y-8 flex-col items-center gap-6 transition-[opacity,transform] duration-[175ms] ease-out motion-reduce:transition-none"
       :class="exiting ? 'scale-[0.88] opacity-0 motion-reduce:scale-100 motion-reduce:opacity-100' : 'scale-100 opacity-100'"
     >
       <div class="flex flex-col items-center gap-3 text-center">
@@ -47,6 +47,19 @@
         </LoadingButton>
       </form>
     </section>
+
+    <div class="absolute bottom-24 left-1/2 w-full max-w-2xl -translate-x-1/2 space-y-1 px-8 text-center text-xs text-muted-foreground">
+      <p>
+        {{ t('desktopConnection.fullInstallLead') }}
+        <a
+          href="https://github.com/memohai/Memoh#deploy-to-server"
+          target="_blank"
+          rel="noreferrer"
+          class="underline underline-offset-2 hover:text-foreground"
+        >{{ t('desktopConnection.fullInstallAction') }}</a>
+      </p>
+      <p>{{ t('desktopConnection.fullInstallHint') }}</p>
+    </div>
   </main>
 </template>
 
@@ -125,3 +138,35 @@ const onSubmit = handleSubmit(async ({ baseUrl }) => {
   }
 })
 </script>
+
+<style>
+.login-scope {
+  --login-control: #ffffff;
+  --login-edge-field: inset 0 0 0 1px var(--field-edge-rest);
+}
+
+.dark .login-scope {
+  --login-control: #242424;
+}
+
+.login-scope [data-slot="input"] {
+  background-color: var(--login-control);
+  box-shadow: var(--login-edge-field);
+  transition: background-color 0.2s ease-out, box-shadow 0.06s ease-out;
+}
+
+.dark .login-scope [data-slot="input"],
+.dark .login-scope [data-slot="input"]:focus {
+  box-shadow: none;
+}
+
+.login-scope [data-slot="input"]:focus {
+  box-shadow: var(--login-edge-field);
+}
+
+.login-scope [data-slot="input"]:disabled {
+  background-color: color-mix(in oklab, var(--background) 55%, var(--login-control));
+  opacity: 1;
+  cursor: not-allowed;
+}
+</style>
