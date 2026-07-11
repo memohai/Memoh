@@ -15,6 +15,18 @@ export default defineConfig({
       transformer: true
     },
     '@hey-api/client-fetch',
-    '@pinia/colada',
+    {
+      name: '@pinia/colada',
+      $hooks: {
+        operations: {
+          // An SSE stream returns { stream }, so it cannot be represented by
+          // Pinia Colada's generated mutation contract, which expects { data }.
+          isMutation: operation => operation.method === 'post'
+            && operation.path === '/bots/{bot_id}/container/display/prepare'
+            ? false
+            : undefined,
+        },
+      },
+    },
   ],
 })

@@ -181,7 +181,7 @@ async function loadContainerData(showLoadingToast: boolean) {
   try {
     const result = await getBotsByBotIdContainer({ path: { bot_id: botId.value } })
     if (result.error !== undefined) {
-      if (result.response.status === 404) {
+      if (result.response?.status === 404) {
         containerInfo.value = null
         containerMetrics.value = null
         containerMissing.value = true

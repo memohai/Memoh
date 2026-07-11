@@ -9,7 +9,7 @@
   },
   "main": "index.js",
   "scripts": {
-    
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "packageManager": "pnpm@10.27.0",
   "peerDependencies": {
