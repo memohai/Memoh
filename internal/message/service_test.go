@@ -12,6 +12,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	messageevent "github.com/memohai/memoh/internal/message/event"
+	"github.com/memohai/memoh/internal/messagesource"
 )
 
 type uncoveredTurnResponseQueries struct {
@@ -355,6 +356,23 @@ func TestPersistRetriesTurnSequenceUniqueViolation(t *testing.T) {
 	}
 	if len(publisher.events) != 1 {
 		t.Fatalf("published events = %d, want 1", len(publisher.events))
+	}
+}
+
+func TestActiveMessageMaterializationHydratesSourceContext(t *testing.T) {
+	t.Parallel()
+
+	row := sqlc.ListActiveMessagesSinceBySessionRow{
+		Role:          "user",
+		SourceContext: []byte(`{"version":1,"sender_display_name":"Alice","platform":"telegram","conversation_type":"group","conversation_name":"Ops Room"}`),
+	}
+	want := messagesource.NewV1("Alice", "telegram", "group", "Ops Room")
+	if got := toMessageFromActiveSinceBySessionRow(row).SourceContext; got != want {
+		t.Fatalf("source context = %+v, want %+v", got, want)
+	}
+	row.SourceContext = []byte(`{"version":2,"sender_display_name":"Alice","platform":"telegram","conversation_type":"group","conversation_name":"Ops Room"}`)
+	if got := toMessageFromActiveSinceBySessionRow(row).SourceContext.Version; got != messagesource.VersionInvalid {
+		t.Fatalf("unknown source context version = %d, want invalid", got)
 	}
 }
 

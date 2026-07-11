@@ -19,6 +19,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/message/event"
+	"github.com/memohai/memoh/internal/messagesource"
 )
 
 // DBService persists and reads bot history messages.
@@ -1499,6 +1500,7 @@ func toMessageFromActiveSinceRow(row sqlc.ListActiveMessagesSinceRow) Message {
 		row.DisplayText,
 		row.CreatedAt,
 	)
+	m.SourceContext = messagesource.DecodeOrInvalid(row.SourceContext)
 	if row.CompactID.Valid {
 		m.CompactID = row.CompactID.String()
 	}
@@ -1527,6 +1529,7 @@ func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySess
 		row.DisplayText,
 		row.CreatedAt,
 	)
+	m.SourceContext = messagesource.DecodeOrInvalid(row.SourceContext)
 	if row.CompactID.Valid {
 		m.CompactID = row.CompactID.String()
 	}
@@ -2005,6 +2008,7 @@ func toMessageFromVisibleFromBySessionRow(row sqlc.ListVisibleMessagesFromBySess
 		row.DisplayText,
 		row.CreatedAt,
 	)
+	m.SourceContext = messagesource.DecodeOrInvalid(row.SourceContext)
 	if row.CompactID.Valid {
 		m.CompactID = row.CompactID.String()
 	}

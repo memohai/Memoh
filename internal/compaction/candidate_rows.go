@@ -11,6 +11,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/historyfrag"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	"github.com/memohai/memoh/internal/messagesource"
 )
 
 // itemsFromRows classifies each uncompacted row into a typed CompactionCandidate.
@@ -132,6 +133,7 @@ func rowToMessage(row sqlc.ListUncompactedMessagesBySessionRow) messagepkg.Messa
 		SenderDisplayName:       textValue(row.SenderDisplayName),
 		SenderAvatarURL:         textValue(row.SenderAvatarUrl),
 		Platform:                textValue(row.Platform),
+		SourceContext:           messagesource.DecodeOrInvalid(row.SourceContext),
 		ExternalMessageID:       textValue(row.ExternalMessageID),
 		SourceReplyToMessageID:  textValue(row.SourceReplyToMessageID),
 		Role:                    row.Role,

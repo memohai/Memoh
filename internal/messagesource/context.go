@@ -80,3 +80,11 @@ func Decode(raw []byte) (Context, error) {
 		*wire.ConversationName,
 	), nil
 }
+
+func DecodeOrInvalid(raw []byte) Context {
+	context, err := Decode(raw)
+	if err != nil {
+		return Context{Version: VersionInvalid}
+	}
+	return context
+}
