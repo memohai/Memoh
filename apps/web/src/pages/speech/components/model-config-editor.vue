@@ -48,24 +48,19 @@
           :placeholder="field.example ? String(field.example) : ''"
         />
 
-        <Select
+        <SearchableSelectPopover
           v-else-if="field.type === 'enum' && field.enum"
-          :model-value="String(configData[field.key] ?? '')"
+          :model-value="stringConfigValue(field.key)"
+          :options="enumOptions(field)"
+          :placeholder="enumPlaceholder(field)"
+          :aria-label="field.title || field.key"
+          :search-placeholder="t('common.search')"
+          :search-aria-label="t('common.search')"
+          :empty-text="t('common.noData')"
+          :show-group-headers="false"
+          popover-class="w-[var(--reka-popover-trigger-width)]"
           @update:model-value="(val) => configData[field.key] = val"
-        >
-          <SelectTrigger class="w-full">
-            <SelectValue :placeholder="field.title || field.key" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem
-              v-for="opt in field.enum"
-              :key="opt"
-              :value="opt"
-            >
-              {{ opt }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
+        />
 
         <Input
           v-else
@@ -154,24 +149,19 @@
                   :placeholder="field.example ? String(field.example) : ''"
                 />
 
-                <Select
+                <SearchableSelectPopover
                   v-else-if="field.type === 'enum' && field.enum"
-                  :model-value="String(configData[field.key] ?? '')"
+                  :model-value="stringConfigValue(field.key)"
+                  :options="enumOptions(field)"
+                  :placeholder="enumPlaceholder(field)"
+                  :aria-label="field.title || field.key"
+                  :search-placeholder="t('common.search')"
+                  :search-aria-label="t('common.search')"
+                  :empty-text="t('common.noData')"
+                  :show-group-headers="false"
+                  popover-class="w-[var(--reka-popover-trigger-width)]"
                   @update:model-value="(val) => configData[field.key] = val"
-                >
-                  <SelectTrigger class="w-full">
-                    <SelectValue :placeholder="field.title || field.key" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem
-                      v-for="opt in field.enum"
-                      :key="opt"
-                      :value="opt"
-                    >
-                      {{ opt }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                />
 
                 <Input
                   v-else
@@ -289,11 +279,6 @@ import {
   DialogFooter,
   Input,
   Label,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Switch,
   Textarea,
 } from '@felinic/ui'
@@ -303,6 +288,8 @@ import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import LoadingButton from '@/components/loading-button/index.vue'
 import FieldStack from '@/components/settings/field-stack.vue'
+import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
+import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 
 interface SpeechFieldSchema {
   key: string
@@ -364,6 +351,21 @@ function isWideField(field: SpeechFieldSchema) {
   if (key.includes('url') || key.includes('endpoint') || key.includes('key') || key.includes('token') || key.includes('path') || key.includes('uri')) return true
   if ((field.description ?? '').length > 80) return true
   return false
+}
+
+function stringConfigValue(key: string) {
+  const value = configData[key]
+  return value == null ? '' : String(value)
+}
+
+function enumOptions(field: SpeechFieldSchema): SearchableSelectOption[] {
+  return (field.enum ?? []).map(option => ({ value: option, label: option }))
+}
+
+function enumPlaceholder(field: SpeechFieldSchema) {
+  if (field.key === 'voice') return t('speech.fields.voicePlaceholder')
+  if (field.key === 'format') return t('speech.fields.formatPlaceholder')
+  return field.title || field.key
 }
 
 watch(() => props.config, (cfg) => {
