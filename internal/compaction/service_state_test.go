@@ -3,12 +3,16 @@ package compaction
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/hooks"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 func TestRunCompactionSyncReportsScopedNoop(t *testing.T) {
@@ -556,5 +560,100 @@ func TestManualRunBypassesACooldownNoopOwner(t *testing.T) {
 	}
 	if stub.calls != 1 {
 		t.Fatalf("model called %d times, want 1", stub.calls)
+	}
+}
+
+func TestCanceledManualWaiterDoesNotRetryThroughANoopOwner(t *testing.T) {
+	t.Parallel()
+
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	stub := &stubModel{summary: "unused"}
+	svc := newMachineryService(q)
+	cfg := machineryConfig(stub, 450)
+
+	run, ok := svc.beginSessionCompaction(cfg.SessionID)
+	if !ok {
+		t.Fatal("owner acquisition must succeed")
+	}
+
+	manual := cfg
+	manual.Manual = true
+	ctx, cancel := context.WithCancel(context.Background())
+	got := make(chan Result, 1)
+	go func() {
+		res, err := svc.RunCompactionSync(ctx, manual)
+		if err != nil {
+			t.Errorf("canceled manual waiter: %v", err)
+		}
+		got <- res
+	}()
+	awaitWaiter(t, run)
+
+	// Cancel while the owner's noop publication races the waiter's select:
+	// whichever branch wins, a canceled manual caller must not become a new
+	// owner and start real work after cancellation.
+	cancel()
+	svc.endSessionCompaction(cfg.SessionID, run, Result{Status: StatusNoop}, nil)
+	if res := <-got; res.Status != StatusNoop {
+		t.Fatalf("canceled manual waiter must degrade to noop, got %#v", res)
+	}
+	if stub.calls != 0 || len(q.markedIDs) != 0 {
+		t.Fatalf("canceled manual waiter ran compaction (calls=%d marked=%d)", stub.calls, len(q.markedIDs))
+	}
+}
+
+type panickingHookProvider struct {
+	armed atomic.Bool
+	calls atomic.Int32
+}
+
+func (p *panickingHookProvider) MCPClient(context.Context, string) (*bridge.Client, error) {
+	p.calls.Add(1)
+	if p.armed.Load() {
+		panic("boom: injected hook provider panic")
+	}
+	return nil, errors.New("no workspace client")
+}
+
+func TestPreHookPanicArmsCooldownAndReleasesSlot(t *testing.T) {
+	t.Parallel()
+
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	stub := &stubModel{summary: "unused"}
+	svc := newMachineryService(q)
+	provider := &panickingHookProvider{}
+	provider.armed.Store(true)
+	svc.SetHookService(hooks.NewService(slog.New(slog.DiscardHandler), provider))
+	cfg := machineryConfig(stub, 450)
+
+	recovered := make(chan any, 1)
+	go func() {
+		defer func() { recovered <- recover() }()
+		_, _ = svc.RunCompactionSync(context.Background(), cfg)
+	}()
+	if r := <-recovered; r == nil {
+		t.Fatal("a pre-hook panic must propagate, not be swallowed")
+	}
+
+	provider.armed.Store(false)
+	before := provider.calls.Load()
+	res, err := svc.RunCompactionSync(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("auto run after pre-hook panic: %v", err)
+	}
+	if res.Status != StatusNoop {
+		t.Fatalf("a pre-hook panic must arm the cooldown, got %q", res.Status)
+	}
+	if provider.calls.Load() != before {
+		t.Fatal("the cooldown noop must not reach the pre-hook provider")
+	}
+
+	manual := cfg
+	manual.Manual = true
+	if _, err := svc.RunCompactionSync(context.Background(), manual); err == nil {
+		t.Fatal("manual bypass must reach the failing pre-hook, proving the slot was released")
+	}
+	if stub.calls != 0 {
+		t.Fatalf("model called %d times behind the failing pre-hook, want 0", stub.calls)
 	}
 }

@@ -152,7 +152,12 @@ func (s *Service) RunCompactionSync(ctx context.Context, cfg TriggerConfig) (Res
 			if cfg.Manual && owner.err == nil && owner.res.Status == StatusNoop {
 				// The owner may have been an automatic run that nooped on the
 				// failure cooldown; a manual request must still bypass it and
-				// attempt for real instead of inheriting the skip.
+				// attempt for real instead of inheriting the skip — unless the
+				// caller canceled while waiting, in which case retrying would
+				// start new side effects after cancellation.
+				if ctx.Err() != nil {
+					return Result{Status: StatusNoop}, nil
+				}
 				continue
 			}
 			return owner.res, owner.err
