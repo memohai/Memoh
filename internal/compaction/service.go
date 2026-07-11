@@ -148,10 +148,15 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result,
 	}
 	var compactErr error
 	defer func() {
-		if compactErr != nil {
-			s.recordCompactionFailure(cfg.SessionID)
-		} else {
+		switch {
+		case compactErr == nil:
 			s.clearCompactionFailure(cfg.SessionID)
+		case ctx.Err() != nil, errors.Is(compactErr, context.Canceled), errors.Is(compactErr, context.DeadlineExceeded):
+			// An interrupted request is not a model failure: arming the
+			// five-minute cooldown here would silence auto-compaction for a
+			// healthy session just because the user canceled one request.
+		default:
+			s.recordCompactionFailure(cfg.SessionID)
 		}
 		extra := map[string]any{}
 		if compactErr != nil {

@@ -3,6 +3,7 @@ package compaction
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -570,5 +571,69 @@ func TestRunCompactionSkipsWhenSessionAlreadyInFlight(t *testing.T) {
 	}
 	if stub.calls != 0 || q.created || len(q.markedIDs) != 0 {
 		t.Fatalf("in-flight session must skip entirely (calls=%d created=%v marked=%d)", stub.calls, q.created, len(q.markedIDs))
+	}
+}
+
+type errTransport struct{ err error }
+
+func (t errTransport) RoundTrip(*http.Request) (*http.Response, error) { return nil, t.err }
+
+func TestRunCompactionSyncInterruptedRunDoesNotArmCooldown(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"canceled mid-call", context.Canceled},
+		{"deadline exceeded mid-call", context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			q := &fakeQueries{uncompacted: machineryCorpus(t)}
+			svc := newMachineryService(q)
+			stub := &stubModel{summary: "recovered summary"}
+			cfg := machineryConfig(stub, 200)
+
+			interrupted := cfg
+			interrupted.HTTPClient = &http.Client{Transport: errTransport{err: tc.err}}
+			if _, err := svc.RunCompactionSync(context.Background(), interrupted); err == nil {
+				t.Fatal("interrupted run must surface an error")
+			}
+
+			res, err := svc.RunCompactionSync(context.Background(), cfg)
+			if err != nil {
+				t.Fatalf("run after interruption: %v", err)
+			}
+			if res.Status != StatusOK {
+				t.Fatalf("status after interruption = %q, want %q (cooldown must not be armed)", res.Status, StatusOK)
+			}
+		})
+	}
+}
+
+func TestRunCompactionSyncModelFailureStillArmsCooldown(t *testing.T) {
+	t.Parallel()
+
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	svc := newMachineryService(q)
+	stub := &stubModel{summary: "healthy summary"}
+	cfg := machineryConfig(stub, 200)
+
+	failing := cfg
+	failing.HTTPClient = &http.Client{Transport: errTransport{err: errors.New("upstream 500")}}
+	if _, err := svc.RunCompactionSync(context.Background(), failing); err == nil {
+		t.Fatal("failing run must surface an error")
+	}
+
+	res, err := svc.RunCompactionSync(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("run during cooldown: %v", err)
+	}
+	if res.Status != StatusNoop {
+		t.Fatalf("status during cooldown = %q, want %q", res.Status, StatusNoop)
+	}
+	if stub.calls != 0 {
+		t.Fatalf("model called %d times during cooldown, want 0", stub.calls)
 	}
 }
