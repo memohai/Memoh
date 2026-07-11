@@ -167,8 +167,8 @@ func (r *directDiscussPromptReceipt) Finish(ctx context.Context) error {
 		return nil
 	}
 	materializationErr := r.resolved.promptMaterializationError()
-	pressure, claimed := r.resolved.claimCompactionPressure(0)
-	if claimed && pressure > 0 && r.compact != nil {
+	pressure, known, claimed := r.resolved.claimCompactionPressure()
+	if claimed && known && pressure > 0 && r.compact != nil {
 		r.compact(context.WithoutCancel(ctx), pressure)
 	}
 	return materializationErr

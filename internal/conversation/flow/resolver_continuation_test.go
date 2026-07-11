@@ -107,8 +107,9 @@ func TestPrepareContinuationRunConfigDefersFinalBudgetAndReportsRawPressure(t *t
 	if got := messageTexts(materialized.Messages); len(got) != 2 || !strings.HasPrefix(got[0], "[System Notice]") || got[1] != "recent answer" {
 		t.Fatalf("final continuation messages = %#v, want notice and recent answer", got)
 	}
-	if rc.compactableTokens <= 0 || rc.compactionPressure(0) != rc.compactableTokens {
-		t.Fatalf("continuation raw pressure = %d final=%d", rc.compactableTokens, rc.compactionPressure(0))
+	finalPressure, known := rc.compactionPressure()
+	if rc.compactableTokens <= 0 || !known || finalPressure != rc.compactableTokens {
+		t.Fatalf("continuation raw pressure = %d final=%d known=%v", rc.compactableTokens, finalPressure, known)
 	}
 	if outcome, ok := rc.promptState.Snapshot(); !ok || !outcome.AccountingReady || outcome.Allocation.CompactableTokens != rc.compactableTokens {
 		t.Fatalf("continuation prompt outcome = %#v, set=%v", outcome, ok)
@@ -207,11 +208,11 @@ func TestResolvedContextClaimsCompactionPressureOnce(t *testing.T) {
 		Allocation:      contextbudget.Allocation{CompactableTokens: 31},
 	}, nil)
 	rc := resolvedContext{promptState: state}
-	if pressure, claimed := rc.claimCompactionPressure(0); !claimed || pressure != 31 {
-		t.Fatalf("first claim = pressure:%d claimed:%v, want 31/true", pressure, claimed)
+	if pressure, known, claimed := rc.claimCompactionPressure(); !claimed || !known || pressure != 31 {
+		t.Fatalf("first claim = pressure:%d known:%v claimed:%v, want 31/true/true", pressure, known, claimed)
 	}
-	if pressure, claimed := rc.claimCompactionPressure(999); claimed || pressure != 0 {
-		t.Fatalf("second claim = pressure:%d claimed:%v, want 0/false", pressure, claimed)
+	if pressure, known, claimed := rc.claimCompactionPressure(); claimed || known || pressure != 0 {
+		t.Fatalf("second claim = pressure:%d known:%v claimed:%v, want 0/false/false", pressure, known, claimed)
 	}
 }
 
@@ -245,7 +246,7 @@ func TestConsumeContinuationStreamReturnsTypedMaterializationError(t *testing.T)
 	if len(forwarded) != 0 {
 		t.Fatalf("materialization error was also forwarded as a string event")
 	}
-	if _, claimed := rc.claimCompactionPressure(0); claimed {
+	if _, _, claimed := rc.claimCompactionPressure(); claimed {
 		t.Fatal("no-terminal continuation did not consume its compaction claim")
 	}
 }
@@ -286,7 +287,7 @@ func TestConsumeContinuationStreamPersistsTerminalOnce(t *testing.T) {
 	if len(forwarded) != 1 {
 		t.Fatalf("forwarded events = %d, want one terminal event", len(forwarded))
 	}
-	if _, claimed := rc.claimCompactionPressure(0); claimed {
+	if _, _, claimed := rc.claimCompactionPressure(); claimed {
 		t.Fatal("terminal continuation did not consume its compaction claim")
 	}
 }

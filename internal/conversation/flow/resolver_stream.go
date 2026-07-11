@@ -501,8 +501,7 @@ func (r *Resolver) persistTerminalSnapshotResult(
 		if err != nil {
 			return
 		}
-		providerInputTokens := extractInputTokensFromUsage(snap.usage)
-		if pressure, claimed := rc.claimCompactionPressure(providerInputTokens); claimed && pressure > 0 {
+		if pressure, known, claimed := rc.claimCompactionPressure(); claimed && known && pressure > 0 {
 			go r.maybeCompact(context.WithoutCancel(ctx), req, rc, pressure)
 		}
 	}()
@@ -608,7 +607,7 @@ func (r *Resolver) persistPartialResult(
 
 	// Trigger compaction on the failure path so oversized raw history cannot
 	// deadlock a session before the provider emits a persistable snapshot.
-	if pressure, claimed := rc.claimCompactionPressure(0); claimed && pressure > 0 {
+	if pressure, known, claimed := rc.claimCompactionPressure(); claimed && known && pressure > 0 {
 		r.maybeCompact(persistCtx, req, rc, pressure)
 	}
 	return nil
@@ -643,17 +642,4 @@ func interleaveInjectedMessages(round []conversation.ModelMessage, injections []
 		})
 	}
 	return result
-}
-
-func extractInputTokensFromUsage(raw json.RawMessage) int {
-	if len(raw) == 0 {
-		return 0
-	}
-	var u struct {
-		InputTokens int `json:"inputTokens"`
-	}
-	if json.Unmarshal(raw, &u) != nil {
-		return 0
-	}
-	return u.InputTokens
 }

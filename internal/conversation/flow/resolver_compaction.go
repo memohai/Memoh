@@ -33,6 +33,14 @@ func effectiveCompactionThreshold(threshold, contextTokenBudget int) int {
 	return threshold
 }
 
+func (r *Resolver) finishPromptCompaction(ctx context.Context, req conversation.ChatRequest, rc resolvedContext) {
+	pressure, known, claimed := rc.claimCompactionPressure()
+	if !claimed || !known || pressure <= 0 {
+		return
+	}
+	go r.maybeCompact(context.WithoutCancel(ctx), req, rc, pressure)
+}
+
 func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, inputTokens int) {
 	if r.compactionService == nil || r.settingsService == nil {
 		r.logger.Info("compaction: skipped, service or settings nil")

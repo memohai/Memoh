@@ -149,7 +149,7 @@ func (r *Resolver) consumeContinuationStream(
 }
 
 func (r *Resolver) maybeCompactContinuation(ctx context.Context, req conversation.ChatRequest, rc resolvedContext) {
-	if pressure, claimed := rc.claimCompactionPressure(0); claimed && pressure > 0 {
+	if pressure, known, claimed := rc.claimCompactionPressure(); claimed && known && pressure > 0 {
 		r.maybeCompact(context.WithoutCancel(ctx), req, rc, pressure)
 	}
 }

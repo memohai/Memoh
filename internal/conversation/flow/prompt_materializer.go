@@ -63,7 +63,7 @@ type initialPromptState struct {
 
 func (s *initialPromptState) ClaimCompaction() bool {
 	if s == nil {
-		return true
+		return false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

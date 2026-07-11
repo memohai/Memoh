@@ -287,21 +287,22 @@ type resolvedContext struct {
 	promptState                 *initialPromptState
 }
 
-func (rc resolvedContext) compactionPressure(providerInputTokens int) int {
+func (rc resolvedContext) compactionPressure() (int, bool) {
 	if outcome, ok := rc.promptState.Snapshot(); ok && outcome.AccountingReady {
-		return max(outcome.Allocation.CompactableTokens, 0)
+		return max(outcome.Allocation.CompactableTokens, 0), true
 	}
 	if rc.compactableTokensKnown {
-		return max(rc.compactableTokens, 0)
+		return max(rc.compactableTokens, 0), true
 	}
-	return max(providerInputTokens, 0)
+	return 0, false
 }
 
-func (rc resolvedContext) claimCompactionPressure(providerInputTokens int) (int, bool) {
+func (rc resolvedContext) claimCompactionPressure() (pressure int, known, claimed bool) {
 	if !rc.promptState.ClaimCompaction() {
-		return 0, false
+		return 0, false, false
 	}
-	return rc.compactionPressure(providerInputTokens), true
+	pressure, known = rc.compactionPressure()
+	return pressure, known, true
 }
 
 func (rc resolvedContext) promptMaterializationError() error {
@@ -607,6 +608,7 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	if err != nil {
 		return conversation.ChatResponse{}, err
 	}
+	defer r.finishPromptCompaction(ctx, req, rc)
 	req.Query = rc.query
 
 	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
@@ -616,9 +618,6 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 
 	result, err := r.agent.Generate(ctx, cfg)
 	if err != nil {
-		if pressure, claimed := rc.claimCompactionPressure(0); claimed && pressure > 0 {
-			go r.maybeCompact(context.WithoutCancel(ctx), req, rc, pressure)
-		}
 		return conversation.ChatResponse{}, err
 	}
 
@@ -628,18 +627,7 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	if err := r.storeRoundWithOptions(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
 		SkipMemory: storeReq.SkipMemoryExtraction,
 	}); err != nil {
-		if pressure, claimed := rc.claimCompactionPressure(0); claimed && pressure > 0 {
-			go r.maybeCompact(context.WithoutCancel(ctx), req, rc, pressure)
-		}
 		return conversation.ChatResponse{}, err
-	}
-
-	providerInputTokens := 0
-	if result.Usage != nil {
-		providerInputTokens = result.Usage.InputTokens
-	}
-	if pressure, claimed := rc.claimCompactionPressure(providerInputTokens); claimed && pressure > 0 {
-		go r.maybeCompact(context.WithoutCancel(ctx), req, rc, pressure)
 	}
 
 	return conversation.ChatResponse{

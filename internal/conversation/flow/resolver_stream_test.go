@@ -34,8 +34,8 @@ func TestResolvedContextCompactionPressureUsesFinalRawReceipt(t *testing.T) {
 		promptState:            state,
 	}
 
-	if got := rc.compactionPressure(15000); got != 0 {
-		t.Fatalf("compactionPressure() = %d, want summary-only final raw pressure 0", got)
+	if got, known := rc.compactionPressure(); !known || got != 0 {
+		t.Fatalf("compactionPressure() = %d known=%v, want summary-only final raw pressure 0/true", got, known)
 	}
 	state.Store(initialPromptResult{
 		AccountingReady: true,
@@ -43,8 +43,8 @@ func TestResolvedContextCompactionPressureUsesFinalRawReceipt(t *testing.T) {
 			CompactableTokens: 91,
 		},
 	}, nil)
-	if got := rc.compactionPressure(0); got != 91 {
-		t.Fatalf("compactionPressure() = %d, want raw pressure 91 without provider usage", got)
+	if got, known := rc.compactionPressure(); !known || got != 91 {
+		t.Fatalf("compactionPressure() = %d known=%v, want raw pressure 91/true", got, known)
 	}
 }
 
@@ -60,19 +60,19 @@ func TestResolvedContextCompactionPressureFallsBackBeforeAccounting(t *testing.T
 		promptState:            state,
 	}
 
-	if got := rc.compactionPressure(99); got != 23 {
-		t.Fatalf("compactionPressure() = %d, want known pre-materialization raw pressure 23", got)
+	if got, known := rc.compactionPressure(); !known || got != 23 {
+		t.Fatalf("compactionPressure() = %d known=%v, want pre-materialization raw pressure 23/true", got, known)
 	}
 	if !errors.Is(rc.promptMaterializationError(), sentinel) {
 		t.Fatalf("promptMaterializationError() = %v, want %v", rc.promptMaterializationError(), sentinel)
 	}
 }
 
-func TestResolvedContextCompactionPressureUsesProviderFallbackWithoutReceipt(t *testing.T) {
+func TestResolvedContextCompactionPressureRemainsUnknownWithoutReceipt(t *testing.T) {
 	t.Parallel()
 
-	if got := (resolvedContext{}).compactionPressure(71); got != 71 {
-		t.Fatalf("compactionPressure() = %d, want provider fallback 71", got)
+	if got, known := (resolvedContext{}).compactionPressure(); known || got != 0 {
+		t.Fatalf("compactionPressure() = %d known=%v, want unknown zero", got, known)
 	}
 }
 
