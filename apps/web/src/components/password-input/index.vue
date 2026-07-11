@@ -2,6 +2,7 @@
 // Password input with a trailing show/hide toggle. Thin wrapper over the
 // InputGroup atoms from @felinic/ui so it inherits the field-edge design
 // language and stays consistent with the secret-field pattern in channel-field.
+// The wrapper clips password-manager autofill paint to the group's radius.
 //
 // `class` and `size` are routed to the InputGroup wrapper; every other attr
 // (id / placeholder / autocomplete / aria-invalid / v-model) falls through to
@@ -26,7 +27,7 @@ const revealed = ref(false)
 
 <template>
   <InputGroup
-    :class="props.class"
+    :class="['overflow-hidden', props.class]"
     :size="props.size"
   >
     <InputGroupInput

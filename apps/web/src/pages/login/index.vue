@@ -223,7 +223,6 @@ const login = async () => {
 }
 .login-scope [data-slot="input"]:disabled,
 .login-scope [data-slot="input-group"]:has(input:disabled) {
-  background-color: color-mix(in oklab, var(--background) 55%, var(--login-control));
   opacity: 1;
   cursor: not-allowed;
 }
