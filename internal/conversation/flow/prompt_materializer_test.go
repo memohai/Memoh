@@ -58,6 +58,39 @@ func TestInitialPromptMaterializerReservesFinalSystemAndActualTools(t *testing.T
 	}
 }
 
+func TestInitialPromptStateStoresIsolatedAllocationSnapshots(t *testing.T) {
+	t.Parallel()
+
+	state := &initialPromptState{}
+	if _, ok := state.Snapshot(); ok {
+		t.Fatal("empty state reported an outcome")
+	}
+	result := initialPromptResult{
+		AccountingReady: true,
+		Allocation: contextbudget.Allocation{
+			Kept:              []contextbudget.Decision{{ID: "kept"}},
+			Dropped:           []contextbudget.Decision{{ID: "dropped"}},
+			CompactableTokens: 42,
+		},
+		FixedTokens:   3,
+		MessageTokens: 5,
+		TotalTokens:   8,
+	}
+	sentinel := errors.New("materialization failed")
+	state.Store(result, sentinel)
+	result.Allocation.Kept[0].ID = "mutated input"
+
+	first, ok := state.Snapshot()
+	if !ok || first.Allocation.Kept[0].ID != "kept" || !errors.Is(first.Err, sentinel) {
+		t.Fatalf("first snapshot = %#v, set=%v", first, ok)
+	}
+	first.Allocation.Dropped[0].ID = "mutated snapshot"
+	second, ok := state.Snapshot()
+	if !ok || second.Allocation.Dropped[0].ID != "dropped" || second.FixedTokens != 3 || second.MessageTokens != 5 || second.TotalTokens != 8 {
+		t.Fatalf("second snapshot = %#v, set=%v", second, ok)
+	}
+}
+
 func TestInitialPromptMaterializerKeepsEveryPreparedMessageRequired(t *testing.T) {
 	t.Parallel()
 

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/compaction"
+	"github.com/memohai/memoh/internal/contextassembly"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db"
@@ -42,6 +43,26 @@ func historyContextFragsForMessages(messages []conversation.ModelMessage, record
 			recordStart = j + 1
 			break
 		}
+	}
+	return frags
+}
+
+func historyContextFragsForPromptEntries(entries []contextassembly.Entry, projection budgetSourceProjection) []contextfrag.ContextFrag {
+	frags := make([]contextfrag.ContextFrag, 0)
+	for messageIndex, entry := range entries {
+		sourceIndex := entry.SourceIndex
+		if sourceIndex < 0 || sourceIndex >= len(projection.historyRecords) ||
+			sourceIndex >= len(projection.hasHistoryRecord) || !projection.hasHistoryRecord[sourceIndex] {
+			continue
+		}
+		record := projection.historyRecords[sourceIndex]
+		if record.Kind != contextfrag.KindConversationSummary || record.Coverage == nil {
+			continue
+		}
+		frag := historyfrag.ToFrag(record)
+		frag.ID = fmt.Sprintf("message.%03d", messageIndex)
+		frag.Provenance.Index = messageIndex
+		frags = append(frags, frag)
 	}
 	return frags
 }

@@ -1,12 +1,15 @@
 package flow
 
 import (
+	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/contextassembly"
 	"github.com/memohai/memoh/internal/contextbudget"
 	"github.com/memohai/memoh/internal/contextfrag"
@@ -14,6 +17,86 @@ import (
 	"github.com/memohai/memoh/internal/historyfrag"
 	"github.com/memohai/memoh/internal/messageconv"
 )
+
+func TestBuildInitialPromptPlanDefersBudgetUntilFixedPromptIsKnown(t *testing.T) {
+	t.Parallel()
+
+	oldestText := strings.Repeat("o", 512)
+	oldest := sdkModelMessage(t, sdk.UserMessage(oldestText))
+	newest := sdkModelMessage(t, sdk.AssistantMessage(strings.Repeat("n", 16)))
+	fixed := sdkModelMessage(t, sdk.UserMessage("memory"))
+	projection := budgetSourcesForHistoryRecords([]historyfrag.HistoryRecord{
+		{Ref: contextfrag.ContextRef{Namespace: "history", ID: "oldest"}, ModelMessage: oldest},
+		{Ref: contextfrag.ContextRef{Namespace: "history", ID: "newest"}, ModelMessage: newest},
+	})
+	cfg := agent.RunConfig{System: strings.Repeat("s", 16)}
+	tools := []sdk.Tool{{
+		Name:        "lookup",
+		Description: "provider-visible tool",
+		Parameters:  map[string]any{"type": "object"},
+	}}
+	fixedTokens, err := providerFixedPromptTokens(cfg, tools)
+	if err != nil {
+		t.Fatalf("estimate fixed prompt: %v", err)
+	}
+	messageLimit := messageconv.EstimateSDKMessageTokens(sdk.AssistantMessage(strings.Repeat("n", 16))) +
+		messageconv.EstimateSDKMessageTokens(sdk.UserMessage("memory")) +
+		messageconv.EstimateSDKMessageTokens(messageconv.ModelMessageToSDKMessage(historyTruncationNotice()))
+	plan, err := buildInitialPromptPlan(projection, []conversation.ModelMessage{fixed}, fixedTokens+messageLimit)
+	if err != nil {
+		t.Fatalf("buildInitialPromptPlan() error = %v", err)
+	}
+	baseline, err := plan.BaselineMessages()
+	if err != nil {
+		t.Fatalf("BaselineMessages() error = %v", err)
+	}
+	if got := messageTexts(baseline); len(got) != 3 || got[0] != oldestText || got[2] != "memory" {
+		t.Fatalf("unbudgeted baseline = %#v, want both history sources and fixed memory", got)
+	}
+	cfg.Messages = baseline
+
+	result, err := plan.Materialize(context.Background(), cfg, tools)
+	if err != nil {
+		t.Fatalf("Materialize() error = %v", err)
+	}
+	if got := messageTexts(result.Config.Messages); len(got) != 3 || !strings.HasPrefix(got[0], "[System Notice]") || got[1] != strings.Repeat("n", 16) || got[2] != "memory" {
+		t.Fatalf("final messages = %#v, want truncation notice, newest history, and required memory", got)
+	}
+	if len(result.Allocation.Dropped) != 1 || result.Allocation.Dropped[0].ID != projection.sources[0].ID {
+		t.Fatalf("allocation = %#v, want oldest history dropped after fixed reserve", result.Allocation)
+	}
+}
+
+func TestHistoryContextFragsForPromptEntriesUsesSourceIdentity(t *testing.T) {
+	t.Parallel()
+
+	scope := contextfrag.Scope{BotID: "bot", SessionID: "session"}
+	first := historyfrag.SummaryRecord("artifact-a", "same summary", nil, scope)
+	second := historyfrag.SummaryRecord("artifact-b", "same summary", nil, scope)
+	projection := budgetSourcesForHistoryRecords([]historyfrag.HistoryRecord{
+		first,
+		{ModelMessage: conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("raw")}},
+		second,
+	})
+	entries := []contextassembly.Entry{
+		{Message: sdk.UserMessage("notice"), SourceIndex: -1},
+		{Message: projection.sources[2].Message, SourceIndex: 2},
+		{Message: sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "synthetic"}), SourceIndex: -1, Synthetic: true},
+		{Message: projection.sources[0].Message, SourceIndex: 0},
+		{Message: sdk.UserMessage("fixed"), SourceIndex: 3},
+	}
+
+	frags := historyContextFragsForPromptEntries(entries, projection)
+	if len(frags) != 2 {
+		t.Fatalf("summary frags = %#v, want two source-backed summaries", frags)
+	}
+	if frags[0].Ref.ID != "artifact-b" || frags[0].ID != "message.001" || frags[0].Provenance.Index != 1 {
+		t.Fatalf("first final summary frag = %#v, want artifact-b at final message 1", frags[0])
+	}
+	if frags[1].Ref.ID != "artifact-a" || frags[1].ID != "message.003" || frags[1].Provenance.Index != 3 {
+		t.Fatalf("second final summary frag = %#v, want artifact-a at final message 3", frags[1])
+	}
+}
 
 func TestBudgetSourceAdaptersAssembleIdenticalToolOccurrences(t *testing.T) {
 	t.Parallel()

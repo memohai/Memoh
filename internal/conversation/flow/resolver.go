@@ -281,8 +281,27 @@ type resolvedContext struct {
 	query                       string // headerified persistable query
 	userMessageAlreadyInContext bool
 	injectedRecords             *[]conversation.InjectedMessageRecord
-	estimatedTokens             int // estimated input token count for compaction
+	compactableTokens           int
+	compactableTokensKnown      bool
 	contextTokenBudget          int // token budget used to clamp compaction triggers
+	promptState                 *initialPromptState
+}
+
+func (rc resolvedContext) compactionPressure(providerInputTokens int) int {
+	if outcome, ok := rc.promptState.Snapshot(); ok && outcome.AccountingReady {
+		return max(outcome.Allocation.CompactableTokens, 0)
+	}
+	if rc.compactableTokensKnown {
+		return max(rc.compactableTokens, 0)
+	}
+	return max(providerInputTokens, 0)
+}
+
+func (rc resolvedContext) promptMaterializationError() error {
+	if outcome, ok := rc.promptState.Snapshot(); ok {
+		return outcome.Err
+	}
+	return nil
 }
 
 func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (resolvedContext, error) {
@@ -346,17 +365,17 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 
 	contextTokenBudget := modelContextTokenBudget(chatModel)
 
-	var messages []conversation.ModelMessage
 	var historyRecords []historyfrag.HistoryRecord
-	var estimatedTokens int
+	var promptProjection budgetSourceProjection
+	var compactableTokens int
 	if usePipeline {
-		built, buildErr := r.buildPipelineContext(ctx, req, contextTokenBudget)
+		built, buildErr := r.buildPipelineContext(ctx, req, 0)
 		if buildErr != nil {
 			return resolvedContext{}, buildErr
 		}
-		messages = built.Messages
 		historyRecords = built.HistoryRecords
-		estimatedTokens = built.EstimatedTokens
+		promptProjection = built.Projection
+		compactableTokens = built.Allocation.CompactableTokens
 	} else if r.conversationSvc != nil {
 		historyFallback := historyScopeFallbackFromChatRequest(req)
 		loaded, loadErr := r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
@@ -382,18 +401,14 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		if loadErr != nil {
 			return resolvedContext{}, loadErr
 		}
-		var envelopeLimit *int
-		if contextTokenBudget != 0 {
-			envelopeLimit = &contextTokenBudget
-		}
-		built, buildErr := assembleHistoryContext(r.logger, loaded, envelopeLimit)
+		built, buildErr := assembleHistoryContext(r.logger, loaded, nil)
 		if buildErr != nil {
 			return resolvedContext{}, buildErr
 		}
-		messages = built.Messages
 		historyRecords = built.HistoryRecords
-		estimatedTokens = built.EmittedTokens
-		compactableTokens := built.Allocation.CompactableTokens
+		promptProjection = built.Projection
+		emittedTokens := built.EmittedTokens
+		rawPressure := built.Allocation.CompactableTokens
 		// When context reaches the shared budget share, run synchronous
 		// compaction before sending the request. contextTokenBudget is the
 		// authoritative limit for how much context the user wants to send
@@ -405,11 +420,11 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		// The trigger only counts raw (compactable) rows: active summaries can
 		// never be compacted away, so including them would make the trigger
 		// self-sustaining once accumulated summaries cross the threshold.
-		if compactionThreshold > 0 && compactableTokens >= compactionThreshold {
+		if compactionThreshold > 0 && rawPressure >= compactionThreshold {
 			r.logger.Warn("resolve: context reached compaction threshold, running synchronous compaction",
 				slog.String("bot_id", req.BotID),
-				slog.Int("estimated_tokens", estimatedTokens),
-				slog.Int("compactable_tokens", compactableTokens),
+				slog.Int("estimated_tokens", emittedTokens),
+				slog.Int("compactable_tokens", rawPressure),
 				slog.Int("context_token_budget", contextTokenBudget),
 				slog.Int("compaction_threshold", compactionThreshold),
 			)
@@ -417,7 +432,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			// summary. A noop (cooldown, in-flight, nothing markable) keeps
 			// this turn's context untouched — possibly still above the
 			// threshold — and the next turn re-evaluates.
-			if res := r.runCompactionSync(ctx, req, compactableTokens, contextTokenBudget); res.Status == compaction.StatusOK {
+			if res := r.runCompactionSync(ctx, req, rawPressure, contextTokenBudget); res.Status == compaction.StatusOK {
 				loaded, loadErr = r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
 				if loadErr != nil {
 					r.logger.Error("resolve: reload messages after compaction failed",
@@ -441,37 +456,37 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 				if loadErr != nil {
 					return resolvedContext{}, loadErr
 				}
-				built, buildErr = assembleHistoryContext(r.logger, loaded, envelopeLimit)
+				built, buildErr = assembleHistoryContext(r.logger, loaded, nil)
 				if buildErr != nil {
 					return resolvedContext{}, buildErr
 				}
-				messages = built.Messages
 				historyRecords = built.HistoryRecords
-				estimatedTokens = built.EmittedTokens
-				// Remove tool messages from the recent context — they are large
-				// and unnecessary when we already have a summary. Keep only
-				// user/assistant conversation turns.
-				messages = stripToolMessages(messages)
+				promptProjection = built.Projection
 			}
 		}
+		compactableTokens = built.Allocation.CompactableTokens
 	}
+	fixedMessages := make([]conversation.ModelMessage, 0, 1+len(reqMessages))
 	if memoryMsg != nil {
-		messages = append(messages, *memoryMsg)
+		fixedMessages = append(fixedMessages, *memoryMsg)
 	}
 	if requestedSkillMsg := buildRequestedSkillContextMessage(req.RequestedSkills); requestedSkillMsg != nil {
-		messages = append(messages, *requestedSkillMsg)
+		fixedMessages = append(fixedMessages, *requestedSkillMsg)
 	}
 	if !usePipeline && !req.ReusePersistedUserMessage {
-		messages = append(messages, reqMessages...)
+		fixedMessages = append(fixedMessages, reqMessages...)
 	}
-	messages = sanitizeMessages(messages)
-	// Strip tool messages and tool-call-only assistant messages from context.
-	// Tool outputs are large and waste tokens; the LLM doesn't need raw tool
-	// results when summaries and memory tools are available for lookup.
-	if len(messages) > 10 {
-		messages = stripToolMessages(messages)
+	fixedMessages = sanitizeMessages(fixedMessages)
+	promptPlan, err := buildInitialPromptPlan(promptProjection, fixedMessages, contextTokenBudget)
+	if err != nil {
+		return resolvedContext{}, err
 	}
-	messages = repairToolCallClosures(messages, syntheticToolClosureError)
+	baselineMessages, err := promptPlan.BaselineMessages()
+	if err != nil {
+		return resolvedContext{}, err
+	}
+	messages := sdkMessagesToModelMessages(baselineMessages)
+	promptState := &initialPromptState{}
 
 	displayName := r.resolveDisplayName(ctx, req)
 	mergedAttachments := r.routeAndMergeAttachments(ctx, chatModel, req)
@@ -501,7 +516,13 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		headerifiedModelQuery = FormatUserHeader(headerInput, modelQuery)
 	}
 	runCfg.ContextFrags = historyContextFragsForMessages(messages, historyRecords)
-	runCfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
+	runCfg.Messages = baselineMessages
+	runCfg.InitialPromptMaterializer = func(ctx context.Context, cfg agentpkg.RunConfig, tools []sdk.Tool) (agentpkg.RunConfig, error) {
+		result, materializeErr := promptPlan.Materialize(ctx, cfg, tools)
+		result.Config.ContextFrags = historyContextFragsForPromptEntries(result.Entries, promptProjection)
+		promptState.Store(result, materializeErr)
+		return result.Config, materializeErr
+	}
 	// When using the pipeline the user message is already in the RC;
 	// don't send it to the LLM again. headerifiedQuery is still kept
 	// for storeRound so the user message gets persisted.
@@ -552,8 +573,10 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		query:                       headerifiedQuery,
 		userMessageAlreadyInContext: usePipeline,
 		injectedRecords:             injectedRecords,
-		estimatedTokens:             estimatedTokens,
+		compactableTokens:           compactableTokens,
+		compactableTokensKnown:      true,
 		contextTokenBudget:          contextTokenBudget,
+		promptState:                 promptState,
 	}, nil
 }
 
@@ -592,6 +615,9 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 
 	result, err := r.agent.Generate(ctx, cfg)
 	if err != nil {
+		if pressure := rc.compactionPressure(0); pressure > 0 {
+			go r.maybeCompact(context.WithoutCancel(ctx), req, rc, pressure)
+		}
 		return conversation.ChatResponse{}, err
 	}
 
@@ -604,8 +630,12 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 		return conversation.ChatResponse{}, err
 	}
 
+	providerInputTokens := 0
 	if result.Usage != nil {
-		go r.maybeCompact(context.WithoutCancel(ctx), req, rc, result.Usage.InputTokens)
+		providerInputTokens = result.Usage.InputTokens
+	}
+	if pressure := rc.compactionPressure(providerInputTokens); pressure > 0 {
+		go r.maybeCompact(context.WithoutCancel(ctx), req, rc, pressure)
 	}
 
 	return conversation.ChatResponse{

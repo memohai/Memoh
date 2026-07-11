@@ -25,6 +25,8 @@ type budgetSourceProjection struct {
 	sources          []contextassembly.Source
 	originalMessages []conversation.ModelMessage
 	currentSourceID  string
+	historyRecords   []historyfrag.HistoryRecord
+	hasHistoryRecord []bool
 }
 
 type budgetSourceAssembly struct {
@@ -45,7 +47,13 @@ func budgetSourcesForHistoryRecords(records []historyfrag.HistoryRecord) budgetS
 			compactable: !activeArtifact,
 		}
 	}
-	return projectBudgetSources(sources)
+	projection := projectBudgetSources(sources)
+	projection.historyRecords = append([]historyfrag.HistoryRecord(nil), records...)
+	projection.hasHistoryRecord = make([]bool, len(records))
+	for index := range projection.hasHistoryRecord {
+		projection.hasHistoryRecord[index] = true
+	}
+	return projection
 }
 
 func budgetSourcesForPipelineEntries(entries []composedPipelineMessage) budgetSourceProjection {
@@ -73,7 +81,39 @@ func budgetSourcesForPipelineEntries(entries []composedPipelineMessage) budgetSo
 	}
 	projection := projectBudgetSources(sources)
 	projection.currentSourceID = currentSourceID
+	projection.historyRecords = make([]historyfrag.HistoryRecord, len(entries))
+	projection.hasHistoryRecord = make([]bool, len(entries))
+	for index, entry := range entries {
+		if entry.hasSummary {
+			projection.historyRecords[index] = entry.summaryRecord
+			projection.hasHistoryRecord[index] = true
+		}
+	}
 	return projection
+}
+
+func buildInitialPromptPlan(
+	projection budgetSourceProjection,
+	fixedMessages []conversation.ModelMessage,
+	contextBudget int,
+) (initialPromptPlan, error) {
+	sources := append([]contextassembly.Source(nil), projection.sources...)
+	fixedInputs := make([]budgetSourceInput, len(fixedMessages))
+	for index, message := range fixedMessages {
+		fixedInputs[index] = budgetSourceInput{
+			id:       "fixed:" + strconv.Itoa(index),
+			message:  message,
+			required: true,
+		}
+	}
+	sources = append(sources, projectBudgetSources(fixedInputs).sources...)
+	return newInitialPromptPlan(initialPromptPlanInput{
+		Sources:         sources,
+		CurrentSourceID: projection.currentSourceID,
+		ContextBudget:   contextBudget,
+		Notice:          historyTruncationNotice().TextContent(),
+		StripTools:      len(sources) > 10,
+	})
 }
 
 func projectBudgetSources(sources []budgetSourceInput) budgetSourceProjection {

@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -9,11 +10,110 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/contextbudget"
 	"github.com/memohai/memoh/internal/conversation"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/settings"
 )
+
+func TestResolvedContextCompactionPressureUsesFinalRawReceipt(t *testing.T) {
+	t.Parallel()
+
+	state := &initialPromptState{}
+	state.Store(initialPromptResult{
+		AccountingReady: true,
+		Allocation: contextbudget.Allocation{
+			CompactableTokens: 0,
+		},
+		TotalTokens: 12000,
+	}, nil)
+	rc := resolvedContext{
+		compactableTokens:      9000,
+		compactableTokensKnown: true,
+		promptState:            state,
+	}
+
+	if got := rc.compactionPressure(15000); got != 0 {
+		t.Fatalf("compactionPressure() = %d, want summary-only final raw pressure 0", got)
+	}
+	state.Store(initialPromptResult{
+		AccountingReady: true,
+		Allocation: contextbudget.Allocation{
+			CompactableTokens: 91,
+		},
+	}, nil)
+	if got := rc.compactionPressure(0); got != 91 {
+		t.Fatalf("compactionPressure() = %d, want raw pressure 91 without provider usage", got)
+	}
+}
+
+func TestResolvedContextCompactionPressureFallsBackBeforeAccounting(t *testing.T) {
+	t.Parallel()
+
+	sentinel := errors.New("tool schema failed")
+	state := &initialPromptState{}
+	state.Store(initialPromptResult{}, sentinel)
+	rc := resolvedContext{
+		compactableTokens:      23,
+		compactableTokensKnown: true,
+		promptState:            state,
+	}
+
+	if got := rc.compactionPressure(99); got != 23 {
+		t.Fatalf("compactionPressure() = %d, want known pre-materialization raw pressure 23", got)
+	}
+	if !errors.Is(rc.promptMaterializationError(), sentinel) {
+		t.Fatalf("promptMaterializationError() = %v, want %v", rc.promptMaterializationError(), sentinel)
+	}
+}
+
+func TestResolvedContextCompactionPressureUsesProviderFallbackWithoutReceipt(t *testing.T) {
+	t.Parallel()
+
+	if got := (resolvedContext{}).compactionPressure(71); got != 71 {
+		t.Fatalf("compactionPressure() = %d, want provider fallback 71", got)
+	}
+}
+
+func TestFinishStreamPostPersistPrioritizesMaterializationError(t *testing.T) {
+	t.Parallel()
+
+	overflow := &PromptEnvelopeOverflowError{ContextBudget: 10, TotalTokens: 11}
+	state := &initialPromptState{}
+	state.Store(initialPromptResult{}, overflow)
+	rc := resolvedContext{promptState: state}
+	postPersistCalls := 0
+
+	err := finishStreamPostPersist(context.Background(), rc, nil, false, func(context.Context, []messagepkg.Message) error {
+		postPersistCalls++
+		return errors.New("replacement message was not persisted")
+	})
+	var gotOverflow *PromptEnvelopeOverflowError
+	if !errors.As(err, &gotOverflow) || gotOverflow != overflow {
+		t.Fatalf("finishStreamPostPersist() error = %v, want typed overflow", err)
+	}
+	if postPersistCalls != 0 {
+		t.Fatalf("postPersist calls = %d, want 0 after materialization failure", postPersistCalls)
+	}
+}
+
+func TestShouldForwardAgentStreamEventDefersMaterializationErrorToTypedChannel(t *testing.T) {
+	t.Parallel()
+
+	state := &initialPromptState{}
+	state.Store(initialPromptResult{}, errors.New("materialization failed"))
+	rc := resolvedContext{promptState: state}
+	if shouldForwardAgentStreamEvent(rc, agentpkg.StreamEvent{Type: agentpkg.EventError}) {
+		t.Fatal("materialization EventError was forwarded in addition to typed error")
+	}
+	if !shouldForwardAgentStreamEvent(rc, agentpkg.StreamEvent{Type: agentpkg.EventTextDelta}) {
+		t.Fatal("non-error stream event was suppressed")
+	}
+	if !shouldForwardAgentStreamEvent(resolvedContext{}, agentpkg.StreamEvent{Type: agentpkg.EventError}) {
+		t.Fatal("ordinary provider EventError was suppressed")
+	}
+}
 
 type recordingMessageService struct {
 	persisted []messagepkg.PersistInput

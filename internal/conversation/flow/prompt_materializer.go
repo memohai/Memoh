@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -33,12 +34,62 @@ type initialPromptPlanInput struct {
 }
 
 type initialPromptResult struct {
-	Config        agent.RunConfig
-	Entries       []contextassembly.Entry
-	Allocation    contextbudget.Allocation
-	FixedTokens   int
-	MessageTokens int
-	TotalTokens   int
+	AccountingReady bool
+	Config          agent.RunConfig
+	Entries         []contextassembly.Entry
+	Allocation      contextbudget.Allocation
+	FixedTokens     int
+	MessageTokens   int
+	TotalTokens     int
+}
+
+type initialPromptOutcome struct {
+	AccountingReady bool
+	Allocation      contextbudget.Allocation
+	FixedTokens     int
+	MessageTokens   int
+	TotalTokens     int
+	Err             error
+}
+
+type initialPromptState struct {
+	mu      sync.Mutex
+	outcome initialPromptOutcome
+	set     bool
+}
+
+func (s *initialPromptState) Store(result initialPromptResult, err error) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.outcome = initialPromptOutcome{
+		AccountingReady: result.AccountingReady,
+		Allocation:      clonePromptAllocation(result.Allocation),
+		FixedTokens:     result.FixedTokens,
+		MessageTokens:   result.MessageTokens,
+		TotalTokens:     result.TotalTokens,
+		Err:             err,
+	}
+	s.set = true
+	s.mu.Unlock()
+}
+
+func (s *initialPromptState) Snapshot() (initialPromptOutcome, bool) {
+	if s == nil {
+		return initialPromptOutcome{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	outcome := s.outcome
+	outcome.Allocation = clonePromptAllocation(outcome.Allocation)
+	return outcome, s.set
+}
+
+func clonePromptAllocation(allocation contextbudget.Allocation) contextbudget.Allocation {
+	allocation.Kept = append([]contextbudget.Decision(nil), allocation.Kept...)
+	allocation.Dropped = append([]contextbudget.Decision(nil), allocation.Dropped...)
+	return allocation
 }
 
 type PromptEnvelopeOverflowError struct {
@@ -217,12 +268,13 @@ func (p initialPromptPlan) Materialize(_ context.Context, cfg agent.RunConfig, t
 		SyntheticToolResult: syntheticToolClosureError,
 	})
 	result := initialPromptResult{
-		Config:        cfg,
-		Entries:       assembled.Entries,
-		Allocation:    assembled.Allocation,
-		FixedTokens:   fixedTokens,
-		MessageTokens: assembled.EmittedTokens,
-		TotalTokens:   fixedTokens + assembled.EmittedTokens,
+		AccountingReady: true,
+		Config:          cfg,
+		Entries:         assembled.Entries,
+		Allocation:      assembled.Allocation,
+		FixedTokens:     fixedTokens,
+		MessageTokens:   assembled.EmittedTokens,
+		TotalTokens:     fixedTokens + assembled.EmittedTokens,
 	}
 	result.Config.Messages = make([]sdk.Message, len(assembled.Entries))
 	for index, entry := range assembled.Entries {
