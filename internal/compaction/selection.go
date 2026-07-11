@@ -450,50 +450,52 @@ func buildEntriesAndIDs(items []CompactionCandidate) ([]messageEntry, []pgtype.U
 // the oldest tool-exchange groups and deferring the newest overflow to a later
 // pass. Chewing front-to-back reclaims the oldest raw rows first and keeps
 // summary coverage in chronological order across passes, so prior summaries
-// read in narrative order. The budget models the summarizer prompt: must-keep
-// rows and rows that render empty never reach it, so they cost nothing —
-// otherwise an oversized render-empty head would consume the whole budget and
-// starve the markable history behind it. The first group is always kept so an
-// oversized head cannot stall progress, and group-aligned cuts can never split
-// a tool exchange.
+// read in narrative order.
+//
+// The budget models exactly what buildEntriesAndIDs will feed the summarizer:
+// only markable groups — complete (every row renders non-empty) and not
+// must-keep — cost anything. Charging an unmarkable group would let it consume
+// the budget while never producing entries or marks, starving the markable
+// history behind it into a permanent noop. The first markable group is always
+// kept so an oversized one cannot stall progress, and group-aligned cuts can
+// never split a tool exchange.
 func trimCompactMessages(items []CompactionCandidate, maxTokens int) []CompactionCandidate {
 	if len(items) == 0 || maxTokens <= 0 {
 		return items
 	}
-	budgetCost := func(idx int) int {
-		if items[idx].HasPolicy(CompactPolicyMustKeep) {
-			return 0
+	groups := toolExchangeGroups(items)
+	groupCost := func(group []int) int {
+		cost := 0
+		for _, idx := range group {
+			if items[idx].HasPolicy(CompactPolicyMustKeep) {
+				return 0
+			}
+			if strings.TrimSpace(renderCandidateEntry(items[idx].Record)) == "" {
+				return 0
+			}
+			cost += estimateCompactPromptTokens(items[idx])
 		}
-		if strings.TrimSpace(renderCandidateEntry(items[idx].Record)) == "" {
-			return 0
-		}
-		return estimateCompactPromptTokens(items[idx])
+		return cost
 	}
 	total := 0
-	for i := range items {
-		total += budgetCost(i)
+	for _, group := range groups {
+		total += groupCost(group)
 	}
 	if total <= maxTokens {
 		return items
 	}
 	accumulated := 0
 	end := 0
-	keptRealGroup := false
-	for _, group := range toolExchangeGroups(items) {
-		cost := 0
-		for _, idx := range group {
-			cost += budgetCost(idx)
-		}
-		// The progress guarantee keys on real (positive-cost) groups: a
-		// zero-cost head must not count as "already kept something" and
-		// starve an oversized first real group behind it.
-		if cost > 0 && keptRealGroup && accumulated+cost > maxTokens {
+	keptMarkableGroup := false
+	for _, group := range groups {
+		cost := groupCost(group)
+		if cost > 0 && keptMarkableGroup && accumulated+cost > maxTokens {
 			break
 		}
 		accumulated += cost
 		end = group[len(group)-1] + 1
 		if cost > 0 {
-			keptRealGroup = true
+			keptMarkableGroup = true
 		}
 	}
 	return items[:end]

@@ -110,3 +110,32 @@ func TestDoCompactionCompactsBehindOversizedRenderEmptyHead(t *testing.T) {
 		t.Fatalf("marked = %v, want exactly the old question/answer pair", q.markedIDs)
 	}
 }
+
+func TestDoCompactionCompactsBehindOversizedIncompleteExchange(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "assistant", `[{"type":"text","text":"running the tool"},{"type":"tool-call","toolCallId":"x","toolName":"exec","input":{}}]`, 40000),
+		mkRow(t, "tool", `[{"type":"binary","data":"opaque"}]`, 100), // unrecognized part renders empty -> exchange incomplete
+		mkRow(t, "user", `"old question"`, 100),
+		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", `"current question"`, 40),
+	}
+	q := &fakeQueries{uncompacted: rows}
+	stub := &stubModel{summary: "old exchange condensed"}
+	svc := newMachineryService(q)
+
+	cfg := machineryConfig(stub, 100)
+	cfg.MaxCompactTokens = 10000 // smaller than the incomplete exchange's raw estimate
+	res, err := svc.RunCompactionSync(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("RunCompactionSync: %v", err)
+	}
+	if res.Status != StatusOK {
+		t.Fatalf("status = %q, want %q: an unmarkable oversized exchange must not eat the trim budget", res.Status, StatusOK)
+	}
+	marked := idSet(q.markedIDs)
+	if len(marked) != 2 || !marked[rows[2].ID] || !marked[rows[3].ID] {
+		t.Fatalf("marked = %v, want exactly the old question/answer pair", q.markedIDs)
+	}
+}
