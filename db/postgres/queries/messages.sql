@@ -1497,10 +1497,12 @@ SELECT
   m.display_text,
   m.compact_id,
   m.created_at,
+  source_row.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
+JOIN bot_history_messages source_row ON source_row.id = m.id
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
@@ -1527,10 +1529,12 @@ SELECT
   m.display_text,
   m.compact_id,
   m.created_at,
+  source_row.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
+JOIN bot_history_messages source_row ON source_row.id = m.id
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
@@ -2147,6 +2151,7 @@ SELECT
   m.display_text,
   m.compact_id,
   m.created_at,
+  m.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
@@ -2336,6 +2341,7 @@ SELECT
   m.compact_id,
   m.created_at,
   COALESCE(to_jsonb(source_row)->>'source_revision', source_row.xmin::text)::text AS source_version,
+  source_row.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform,

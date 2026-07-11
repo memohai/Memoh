@@ -2372,10 +2372,12 @@ SELECT
   m.display_text,
   m.compact_id,
   m.created_at,
+  source_row.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
+JOIN bot_history_messages source_row ON source_row.id = m.id
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = $1
@@ -2407,6 +2409,7 @@ type ListActiveMessagesSinceRow struct {
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SourceContext           []byte             `json:"source_context"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
 	Platform                pgtype.Text        `json:"platform"`
@@ -2439,6 +2442,7 @@ func (q *Queries) ListActiveMessagesSince(ctx context.Context, arg ListActiveMes
 			&i.DisplayText,
 			&i.CompactID,
 			&i.CreatedAt,
+			&i.SourceContext,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
 			&i.Platform,
@@ -2472,10 +2476,12 @@ SELECT
   m.display_text,
   m.compact_id,
   m.created_at,
+  source_row.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
+JOIN bot_history_messages source_row ON source_row.id = m.id
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = $1
@@ -2507,6 +2513,7 @@ type ListActiveMessagesSinceBySessionRow struct {
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SourceContext           []byte             `json:"source_context"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
 	Platform                pgtype.Text        `json:"platform"`
@@ -2539,6 +2546,7 @@ func (q *Queries) ListActiveMessagesSinceBySession(ctx context.Context, arg List
 			&i.DisplayText,
 			&i.CompactID,
 			&i.CreatedAt,
+			&i.SourceContext,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
 			&i.Platform,
@@ -4400,6 +4408,7 @@ SELECT
   m.compact_id,
   m.created_at,
   COALESCE(to_jsonb(source_row)->>'source_revision', source_row.xmin::text)::text AS source_version,
+  source_row.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform,
@@ -4447,6 +4456,7 @@ type ListUncompactedMessagesBySessionRow struct {
 	CompactID               pgtype.UUID        `json:"compact_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SourceVersion           string             `json:"source_version"`
+	SourceContext           []byte             `json:"source_context"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
 	Platform                pgtype.Text        `json:"platform"`
@@ -4481,6 +4491,7 @@ func (q *Queries) ListUncompactedMessagesBySession(ctx context.Context, sessionI
 			&i.CompactID,
 			&i.CreatedAt,
 			&i.SourceVersion,
+			&i.SourceContext,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
 			&i.Platform,
@@ -4578,6 +4589,7 @@ SELECT
   m.display_text,
   m.compact_id,
   m.created_at,
+  m.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
@@ -4617,6 +4629,7 @@ type ListVisibleMessagesFromBySessionRow struct {
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SourceContext           []byte             `json:"source_context"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
 	Platform                pgtype.Text        `json:"platform"`
@@ -4649,6 +4662,7 @@ func (q *Queries) ListVisibleMessagesFromBySession(ctx context.Context, arg List
 			&i.DisplayText,
 			&i.CompactID,
 			&i.CreatedAt,
+			&i.SourceContext,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
 			&i.Platform,
