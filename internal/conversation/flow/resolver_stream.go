@@ -502,7 +502,7 @@ func (r *Resolver) persistTerminalSnapshotResult(
 			return
 		}
 		providerInputTokens := extractInputTokensFromUsage(snap.usage)
-		if pressure := rc.compactionPressure(providerInputTokens); pressure > 0 {
+		if pressure, claimed := rc.claimCompactionPressure(providerInputTokens); claimed && pressure > 0 {
 			go r.maybeCompact(context.WithoutCancel(ctx), req, rc, pressure)
 		}
 	}()
@@ -608,7 +608,7 @@ func (r *Resolver) persistPartialResult(
 
 	// Trigger compaction on the failure path so oversized raw history cannot
 	// deadlock a session before the provider emits a persistable snapshot.
-	if pressure := rc.compactionPressure(0); pressure > 0 {
+	if pressure, claimed := rc.claimCompactionPressure(0); claimed && pressure > 0 {
 		r.maybeCompact(persistCtx, req, rc, pressure)
 	}
 	return nil

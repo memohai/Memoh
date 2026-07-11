@@ -53,9 +53,23 @@ type initialPromptOutcome struct {
 }
 
 type initialPromptState struct {
-	mu      sync.Mutex
-	outcome initialPromptOutcome
-	set     bool
+	mu                sync.Mutex
+	outcome           initialPromptOutcome
+	set               bool
+	compactionClaimed bool
+}
+
+func (s *initialPromptState) ClaimCompaction() bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.compactionClaimed {
+		return false
+	}
+	s.compactionClaimed = true
+	return true
 }
 
 func (s *initialPromptState) Store(result initialPromptResult, err error) {
@@ -90,6 +104,21 @@ func clonePromptAllocation(allocation contextbudget.Allocation) contextbudget.Al
 	allocation.Kept = append([]contextbudget.Decision(nil), allocation.Kept...)
 	allocation.Dropped = append([]contextbudget.Decision(nil), allocation.Dropped...)
 	return allocation
+}
+
+func withInitialPromptMaterializer(
+	cfg agent.RunConfig,
+	plan initialPromptPlan,
+	projection budgetSourceProjection,
+) (agent.RunConfig, *initialPromptState) {
+	state := &initialPromptState{}
+	cfg.InitialPromptMaterializer = func(ctx context.Context, prepared agent.RunConfig, tools []sdk.Tool) (agent.RunConfig, error) {
+		result, err := plan.Materialize(ctx, prepared, tools)
+		result.Config.ContextFrags = historyContextFragsForPromptEntries(result.Entries, projection)
+		state.Store(result, err)
+		return result.Config, err
+	}
+	return cfg, state
 }
 
 type PromptEnvelopeOverflowError struct {

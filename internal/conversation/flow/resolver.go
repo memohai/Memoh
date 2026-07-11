@@ -297,6 +297,13 @@ func (rc resolvedContext) compactionPressure(providerInputTokens int) int {
 	return max(providerInputTokens, 0)
 }
 
+func (rc resolvedContext) claimCompactionPressure(providerInputTokens int) (int, bool) {
+	if !rc.promptState.ClaimCompaction() {
+		return 0, false
+	}
+	return rc.compactionPressure(providerInputTokens), true
+}
+
 func (rc resolvedContext) promptMaterializationError() error {
 	if outcome, ok := rc.promptState.Snapshot(); ok {
 		return outcome.Err
@@ -486,7 +493,6 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		return resolvedContext{}, err
 	}
 	messages := sdkMessagesToModelMessages(baselineMessages)
-	promptState := &initialPromptState{}
 
 	displayName := r.resolveDisplayName(ctx, req)
 	mergedAttachments := r.routeAndMergeAttachments(ctx, chatModel, req)
@@ -517,12 +523,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	}
 	runCfg.ContextFrags = historyContextFragsForMessages(messages, historyRecords)
 	runCfg.Messages = baselineMessages
-	runCfg.InitialPromptMaterializer = func(ctx context.Context, cfg agentpkg.RunConfig, tools []sdk.Tool) (agentpkg.RunConfig, error) {
-		result, materializeErr := promptPlan.Materialize(ctx, cfg, tools)
-		result.Config.ContextFrags = historyContextFragsForPromptEntries(result.Entries, promptProjection)
-		promptState.Store(result, materializeErr)
-		return result.Config, materializeErr
-	}
+	runCfg, promptState := withInitialPromptMaterializer(runCfg, promptPlan, promptProjection)
 	// When using the pipeline the user message is already in the RC;
 	// don't send it to the LLM again. headerifiedQuery is still kept
 	// for storeRound so the user message gets persisted.
@@ -615,7 +616,7 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 
 	result, err := r.agent.Generate(ctx, cfg)
 	if err != nil {
-		if pressure := rc.compactionPressure(0); pressure > 0 {
+		if pressure, claimed := rc.claimCompactionPressure(0); claimed && pressure > 0 {
 			go r.maybeCompact(context.WithoutCancel(ctx), req, rc, pressure)
 		}
 		return conversation.ChatResponse{}, err
@@ -627,6 +628,9 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	if err := r.storeRoundWithOptions(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
 		SkipMemory: storeReq.SkipMemoryExtraction,
 	}); err != nil {
+		if pressure, claimed := rc.claimCompactionPressure(0); claimed && pressure > 0 {
+			go r.maybeCompact(context.WithoutCancel(ctx), req, rc, pressure)
+		}
 		return conversation.ChatResponse{}, err
 	}
 
@@ -634,7 +638,7 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	if result.Usage != nil {
 		providerInputTokens = result.Usage.InputTokens
 	}
-	if pressure := rc.compactionPressure(providerInputTokens); pressure > 0 {
+	if pressure, claimed := rc.claimCompactionPressure(providerInputTokens); claimed && pressure > 0 {
 		go r.maybeCompact(context.WithoutCancel(ctx), req, rc, pressure)
 	}
 
@@ -1179,19 +1183,20 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 	}
 
 	cfg = r.prepareRunConfig(ctx, cfg)
+	contextTokenBudget := modelContextTokenBudget(chatModel)
 	return pipelinepkg.ResolveRunConfigResult{
 		RunConfig:          cfg,
 		ModelID:            chatModel.ID,
 		RuntimeType:        runtimeType,
-		ContextTokenBudget: modelContextTokenBudget(chatModel),
+		ContextTokenBudget: contextTokenBudget,
 	}, nil
 }
 
-func modelContextTokenBudget(model models.GetResponse) int {
-	if model.Config.ContextWindow != nil && *model.Config.ContextWindow > 0 {
-		return *model.Config.ContextWindow
+func modelContextTokenBudget(chatModel models.GetResponse) int {
+	if chatModel.Config.ContextWindow == nil || *chatModel.Config.ContextWindow <= 0 {
+		return 0
 	}
-	return 0
+	return *chatModel.Config.ContextWindow
 }
 
 // prepareRunConfig generates the system prompt and appends the user message.
