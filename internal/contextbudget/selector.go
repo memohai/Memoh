@@ -101,7 +101,7 @@ func Allocate(request Request) Allocation {
 	if request.SourceLimit != nil && result.SelectedTokens > sourceLimit {
 		droppable := make([]int, 0, len(groups))
 		for i := range groups {
-			if selected[i] && !groups[i].required {
+			if selected[i] && !groups[i].required && groups[i].tokens > 0 {
 				droppable = append(droppable, i)
 			}
 		}

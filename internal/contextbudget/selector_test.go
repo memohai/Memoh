@@ -269,6 +269,28 @@ func TestAllocateReportsRequiredOnlyOverflowAtExplicitZero(t *testing.T) {
 	}
 }
 
+func TestAllocateDoesNotDropZeroCostCandidatesToAddressOverflow(t *testing.T) {
+	t.Parallel()
+
+	result := Allocate(Request{
+		SourceLimit: tokenLimit(0),
+		Items: []Item{
+			{ID: "provider-invisible", Tokens: 0},
+			{ID: "required", Tokens: 2, Retention: RetentionRequired},
+		},
+	})
+
+	if got, want := decisionIDs(result.Kept), []string{"provider-invisible", "required"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("kept = %#v, want zero-cost source retained %#v", got, want)
+	}
+	if len(result.Dropped) != 0 || result.Changed || result.BudgetTrimmed {
+		t.Fatalf("zero-cost source was falsely reported as a budget trim: %#v", result)
+	}
+	if result.SourcesFit || result.SourceOverflowTokens != 2 {
+		t.Fatalf("required overflow = %#v", result)
+	}
+}
+
 func TestAllocateMetersRawCompactablePressureIndependently(t *testing.T) {
 	t.Parallel()
 

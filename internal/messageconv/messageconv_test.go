@@ -81,6 +81,34 @@ func TestModelMessageToSDKMessageInvalidLegacyContentKeepsRole(t *testing.T) {
 	}
 }
 
+func TestCanonicalSDKMessageRemovesReasoningWithoutMutatingInput(t *testing.T) {
+	t.Parallel()
+
+	usage := &sdk.Usage{InputTokens: 1, OutputTokens: 2, TotalTokens: 3}
+	input := sdk.Message{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{
+			sdk.ReasoningPart{Text: "private"},
+			sdk.TextPart{Text: "visible", ProviderMetadata: map[string]any{"signature": "kept"}},
+		},
+		Usage: usage,
+	}
+	got := CanonicalSDKMessage(input)
+
+	if len(got.Content) != 1 || got.Usage != usage {
+		t.Fatalf("canonical message = %#v", got)
+	}
+	if text, ok := got.Content[0].(sdk.TextPart); !ok || text.Text != "visible" {
+		t.Fatalf("canonical content = %#v", got.Content)
+	}
+	if len(input.Content) != 2 {
+		t.Fatalf("CanonicalSDKMessage mutated input: %#v", input)
+	}
+	if gotTokens, wantTokens := EstimateSDKMessageTokens(input), EstimateSDKMessageTokens(got); gotTokens != wantTokens || gotTokens == 0 {
+		t.Fatalf("SDK estimate = %d, want %d", gotTokens, wantTokens)
+	}
+}
+
 func mustJSON(t *testing.T, value any) json.RawMessage {
 	t.Helper()
 	raw, err := json.Marshal(value)

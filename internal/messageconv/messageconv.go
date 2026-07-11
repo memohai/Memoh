@@ -113,15 +113,21 @@ func CanonicalModelMessageContent(msg conversation.ModelMessage) json.RawMessage
 func canonicalModelMessageContent(msg conversation.ModelMessage) (json.RawMessage, bool) {
 	sdkMessage, valid := decodeModelMessage(msg)
 	sdkMessage = supplementLegacyFields(msg, sdkMessage)
-	filtered := make([]sdk.MessagePart, 0, len(sdkMessage.Content))
-	for _, part := range sdkMessage.Content {
+	sdkMessage = CanonicalSDKMessage(sdkMessage)
+	return sdkMessageContent(sdkMessage), valid
+}
+
+// CanonicalSDKMessage returns a content-slice-independent provider projection.
+func CanonicalSDKMessage(message sdk.Message) sdk.Message {
+	canonical := message
+	canonical.Content = nil
+	for _, part := range message.Content {
 		if _, reasoning := part.(sdk.ReasoningPart); reasoning {
 			continue
 		}
-		filtered = append(filtered, part)
+		canonical.Content = append(canonical.Content, part)
 	}
-	sdkMessage.Content = filtered
-	return sdkMessageContent(sdkMessage), valid
+	return canonical
 }
 
 // EstimateModelMessageTokens meters the canonical model-visible content.
@@ -150,6 +156,12 @@ func EstimateCanonicalContentTokens(raw json.RawMessage) int {
 	if json.Unmarshal(envelope, &message) != nil {
 		return contextbudget.EstimateTokensForBytes(len(raw))
 	}
+	return EstimateSDKMessageTokens(message)
+}
+
+// EstimateSDKMessageTokens meters the provider-visible semantic payload.
+func EstimateSDKMessageTokens(message sdk.Message) int {
+	message = CanonicalSDKMessage(message)
 	bytes := 0
 	for _, part := range message.Content {
 		switch typed := part.(type) {
