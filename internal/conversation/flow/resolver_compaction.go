@@ -197,7 +197,8 @@ func (r *Resolver) buildCompactionConfig(ctx context.Context, req conversation.C
 
 	// Cap compaction input to 90% of the compaction model's context window.
 	if compactModel.Config.ContextWindow != nil && *compactModel.Config.ContextWindow > 0 {
-		cfg.MaxCompactTokens = *compactModel.Config.ContextWindow * 90 / 100
+		cfg.ContextTokenBudget = *compactModel.Config.ContextWindow
+		cfg.MaxCompactTokens = cfg.ContextTokenBudget * 90 / 100
 	}
 
 	return cfg, nil

@@ -90,6 +90,9 @@ func TestBuildCompactionConfigKeepsRatioSelection(t *testing.T) {
 	if cfg.MaxCompactTokens != 180000 {
 		t.Fatalf("MaxCompactTokens = %d, want 180000 (90%% of context window)", cfg.MaxCompactTokens)
 	}
+	if cfg.ContextTokenBudget != 200000 {
+		t.Fatalf("ContextTokenBudget = %d, want full model window 200000", cfg.ContextTokenBudget)
+	}
 }
 
 func TestEffectiveCompactionThreshold(t *testing.T) {
