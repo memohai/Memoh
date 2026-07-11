@@ -314,7 +314,7 @@ func guardedCompactionItems(items []CompactionCandidate, cutoff int) []Compactio
 	if cutoff <= 0 {
 		return nil
 	}
-	return firstCompactableRun(items[:cutoff])
+	return items[:cutoff]
 }
 
 func guardedCurrentTurnCompactionItems(items []CompactionCandidate, cutoff int) []CompactionCandidate {
@@ -335,29 +335,7 @@ func guardedCurrentTurnCompactionItems(items []CompactionCandidate, cutoff int) 
 	if cutoff > protectedTailStart {
 		return nil
 	}
-	return firstCompactableRun(items[1:cutoff])
-}
-
-// firstCompactableRun returns the first maximal run of non-must-keep items in
-// the span. Must-keep rows (e.g. ask_user) stay in raw history and split the
-// span into islands; compacting only the first run keeps every compaction log
-// covering a contiguous history range, so the read path replaces it in place
-// without reordering rows across a must-keep island under a shared compact_id.
-// A must-keep island at the head is skipped rather than starving the run behind
-// it, and later runs are picked up on subsequent passes.
-func firstCompactableRun(items []CompactionCandidate) []CompactionCandidate {
-	start := 0
-	for start < len(items) && items[start].HasPolicy(CompactPolicyMustKeep) {
-		start++
-	}
-	end := start
-	for end < len(items) && !items[end].HasPolicy(CompactPolicyMustKeep) {
-		end++
-	}
-	if end == start {
-		return nil
-	}
-	return items[start:end]
+	return items[1:cutoff]
 }
 
 func firstPolicyStart(items []CompactionCandidate, policy CompactPolicy) int {
@@ -399,18 +377,23 @@ func isToolResultItem(item CompactionCandidate) bool {
 }
 
 // buildEntriesAndIDs renders the summarizer entries and the ids to mark
-// compacted from the first maximal run of contiguous complete tool-exchange
-// groups (see toolExchangeGroups). A group is complete only when every row in
-// it renders non-empty; an incomplete group — a reasoning-only message, or a
-// tool call whose result renders empty — is skipped.
+// compacted from one contiguous sequence of complete tool-exchange groups (see
+// toolExchangeGroups). A group is complete only when every row in it renders
+// non-empty; an incomplete group — a reasoning-only message, or a tool call
+// whose result renders empty — is never marked. Must-keep groups (ask_user,
+// unparseable barriers) stay in raw history and split the span into runs.
 //
-// Marking stops at the first skipped group so the marked ids stay a contiguous
-// history range under one compact_id. Were a later complete group marked across
-// a skipped raw row, the read path (replaceCompactedHistoryRecords) would emit
-// the summary at the first marked row and fold the later rows in front of the
-// still-raw skipped row, reordering history. Leading skipped groups stay raw
-// before the summary; complete groups after the first gap compact on a later
-// pass. Emitting entries and ids together also keeps them aligned, so the
+// Within the span, the first run holding at least one markable sequence wins:
+// leading must-keep islands and runs made only of unmarkable groups are
+// skipped instead of ending the whole pass, so a permanently-empty island can
+// never starve the compactable history behind it. Within the winning run,
+// marking stops at the first skipped group so the marked ids stay a contiguous
+// history range under one compact_id — were a later complete group marked
+// across a skipped raw row, the read path (replaceCompactedHistoryRecords)
+// would emit the summary at the first marked row and fold the later rows in
+// front of the still-raw skipped row, reordering history. Everything left raw
+// by this pass sits before the marked range or after it, and compacts on a
+// later pass. Emitting entries and ids together keeps them aligned, so the
 // summarizer never sees content that would remain in raw history.
 func buildEntriesAndIDs(items []CompactionCandidate) ([]messageEntry, []pgtype.UUID) {
 	rendered := make([]string, len(items))
@@ -425,6 +408,14 @@ func buildEntriesAndIDs(items []CompactionCandidate) ([]messageEntry, []pgtype.U
 	}
 
 	groups := toolExchangeGroups(items)
+	mustKeep := func(group []int) bool {
+		for _, idx := range group {
+			if items[idx].HasPolicy(CompactPolicyMustKeep) {
+				return true
+			}
+		}
+		return false
+	}
 	complete := func(group []int) bool {
 		for _, idx := range group {
 			if !renderedOK[idx] {
@@ -433,27 +424,41 @@ func buildEntriesAndIDs(items []CompactionCandidate) ([]messageEntry, []pgtype.U
 		}
 		return true
 	}
-	start := 0
-	for start < len(groups) && !complete(groups[start]) {
-		start++
-	}
-	end := start
-	for end < len(groups) && complete(groups[end]) {
-		end++
-	}
 
-	entries := make([]messageEntry, 0, len(items))
-	ids := make([]pgtype.UUID, 0, len(items))
-	for _, group := range groups[start:end] {
-		for _, idx := range group {
-			entries = append(entries, messageEntry{
-				Role:    items[idx].Record.ModelMessage.Role,
-				Content: rendered[idx],
-			})
-			ids = append(ids, items[idx].ID)
+	for g := 0; g < len(groups); {
+		if mustKeep(groups[g]) {
+			g++
+			continue
 		}
+		runEnd := g
+		for runEnd < len(groups) && !mustKeep(groups[runEnd]) {
+			runEnd++
+		}
+		start := g
+		for start < runEnd && !complete(groups[start]) {
+			start++
+		}
+		end := start
+		for end < runEnd && complete(groups[end]) {
+			end++
+		}
+		if end > start {
+			entries := make([]messageEntry, 0, len(items))
+			ids := make([]pgtype.UUID, 0, len(items))
+			for _, group := range groups[start:end] {
+				for _, idx := range group {
+					entries = append(entries, messageEntry{
+						Role:    items[idx].Record.ModelMessage.Role,
+						Content: rendered[idx],
+					})
+					ids = append(ids, items[idx].ID)
+				}
+			}
+			return entries, ids
+		}
+		g = runEnd
 	}
-	return entries, ids
+	return nil, nil
 }
 
 // trimCompactMessages trims the compaction input from the tail (oldest) so the

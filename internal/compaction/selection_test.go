@@ -187,22 +187,22 @@ func TestGuardedSelectionCompactsAroundMustKeepAskExchange(t *testing.T) {
 	}
 	items, _ := itemsFromRows(rows)
 
-	toCompact := splitByTarget(items, 200)
-	if len(toCompact) == 0 {
+	_, ids := buildEntriesAndIDs(splitByTarget(items, 200))
+	if len(ids) == 0 {
 		t.Fatal("a must-keep ask exchange at the window head must not starve compaction of newer history")
 	}
-	for _, item := range toCompact {
-		if item.ID == askCall.ID || item.ID == askResult.ID {
-			t.Fatalf("must-keep ask_user row was selected for compaction")
+	for _, id := range ids {
+		if id == askCall.ID || id == askResult.ID {
+			t.Fatalf("must-keep ask_user row was marked for compaction")
 		}
 		for _, protected := range []pgtype.UUID{rows[6].ID, rows[7].ID} {
-			if item.ID == protected {
-				t.Fatalf("current turn row was selected for compaction")
+			if id == protected {
+				t.Fatalf("current turn row was marked for compaction")
 			}
 		}
 	}
 
-	if ratioCompact := splitByRatio(items, 800, 80); len(ratioCompact) == 0 {
+	if _, ratioIDs := buildEntriesAndIDs(splitByRatio(items, 800, 80)); len(ratioIDs) == 0 {
 		t.Fatal("ratio-based selection must also compact around the must-keep island")
 	}
 }
@@ -229,16 +229,16 @@ func TestParallelToolCallsPropagateMustKeepToSiblingResult(t *testing.T) {
 
 	assertPolicy(t, items[2], CompactPolicyMustKeep)
 
-	toCompact := splitByTarget(items, 200)
-	if len(toCompact) == 0 {
+	_, ids := buildEntriesAndIDs(splitByTarget(items, 200))
+	if len(ids) == 0 {
 		t.Fatal("compaction should still proceed around the must-keep exchange")
 	}
-	for _, item := range toCompact {
-		if item.ID == assistantCall.ID {
-			t.Fatalf("must-keep assistant row with parallel tool calls was selected for compaction")
+	for _, id := range ids {
+		if id == assistantCall.ID {
+			t.Fatalf("must-keep assistant row with parallel tool calls was marked for compaction")
 		}
-		if item.ID == calcResult.ID {
-			t.Fatalf("sibling tool-result row of a must-keep exchange was selected for compaction")
+		if id == calcResult.ID {
+			t.Fatalf("sibling tool-result row of a must-keep exchange was marked for compaction")
 		}
 	}
 }
@@ -263,11 +263,7 @@ func TestGuardedSelectionKeepsCompactRunContiguousAcrossMustKeepIsland(t *testin
 	// One pass must select a single contiguous run so the read path can drop it
 	// in place. It may only be the rows before the first must-keep island, never
 	// straddling ask_user into "mid q"/"mid a" under a shared compact_id.
-	toCompact := splitByTarget(items, 200)
-	gotIDs := make([]pgtype.UUID, len(toCompact))
-	for i, item := range toCompact {
-		gotIDs[i] = item.ID
-	}
+	_, gotIDs := buildEntriesAndIDs(splitByTarget(items, 200))
 	wantIDs := []pgtype.UUID{rows[0].ID, rows[1].ID}
 	if len(gotIDs) != len(wantIDs) {
 		t.Fatalf("selected %d rows, want the contiguous pre-island run [old q, old a]", len(gotIDs))
@@ -281,13 +277,13 @@ func TestGuardedSelectionKeepsCompactRunContiguousAcrossMustKeepIsland(t *testin
 	// The run after the island is not starved: once the pre-island run is
 	// compacted away, the next pass makes progress on "mid q"/"mid a".
 	nextItems, _ := itemsFromRows(rows[2:])
-	nextCompact := splitByTarget(nextItems, 200)
-	if len(nextCompact) == 0 {
+	_, nextIDs := buildEntriesAndIDs(splitByTarget(nextItems, 200))
+	if len(nextIDs) == 0 {
 		t.Fatal("run after the must-keep island must be compactable on a later pass")
 	}
-	for _, item := range nextCompact {
-		if item.ID == askCall.ID || item.ID == askResult.ID {
-			t.Fatalf("must-keep ask_user row was selected for compaction")
+	for _, id := range nextIDs {
+		if id == askCall.ID || id == askResult.ID {
+			t.Fatalf("must-keep ask_user row was marked for compaction")
 		}
 	}
 }
@@ -333,9 +329,9 @@ func TestItemsFromRowsPreservesUnparseableRowsAsSelectionBarriers(t *testing.T) 
 		t.Fatalf("an unparseable row must remain as a selection barrier: %#v", items)
 	}
 
-	selected := splitByTarget(items, 100)
-	if len(selected) != 1 || selected[0].ID != before.ID {
-		t.Fatalf("selected = %#v, want only the contiguous run before the barrier", selected)
+	_, ids := buildEntriesAndIDs(splitByTarget(items, 100))
+	if len(ids) != 1 || ids[0] != before.ID {
+		t.Fatalf("marked = %#v, want only the contiguous run before the barrier", ids)
 	}
 }
 
