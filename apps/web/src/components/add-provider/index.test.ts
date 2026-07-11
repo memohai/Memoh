@@ -98,6 +98,7 @@ vi.mock('@felinic/ui', async () => {
   })
   return {
     Button: Passthrough,
+    FORM_ITEM_INJECTION_KEY: Symbol('form-item'),
     Input,
     FormField: Field,
     FormControl: Passthrough,

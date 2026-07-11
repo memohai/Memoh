@@ -5,6 +5,18 @@ import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { useSubagentList } from './useSubagentList'
 
+vi.hoisted(() => {
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+      clear: () => {},
+    },
+  })
+})
+
 const api = vi.hoisted(() => ({
   connectWebSocket: vi.fn(),
   fetchBots: vi.fn(),
@@ -28,7 +40,10 @@ const colada = vi.hoisted(() => ({
   }),
 }))
 
-vi.mock('@/composables/api/useChat', () => api)
+vi.mock('@/composables/api/useChat', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/composables/api/useChat')>()
+  return { ...original, ...api }
+})
 vi.mock('@pinia/colada', () => ({ useQuery: colada.useQuery }))
 
 describe('useSubagentList', () => {
