@@ -52,3 +52,44 @@ func TestBuildUserPromptOrdersPriorContextChronologically(t *testing.T) {
 		t.Fatalf("prior context must stay in chronological order:\n%s", prompt)
 	}
 }
+
+func TestCapEntriesToBudgetHoldsTheTotalAcrossManyEntries(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		entries []messageEntry
+		max     int
+	}{
+		{"two oversized", []messageEntry{
+			{Role: "user", Content: strings.Repeat("a", 2400)},
+			{Role: "assistant", Content: strings.Repeat("b", 2400)},
+		}, 1000},
+		{"one giant many small", []messageEntry{
+			{Role: "user", Content: strings.Repeat("a", 4800)},
+			{Role: "assistant", Content: strings.Repeat("b", 40)},
+			{Role: "user", Content: strings.Repeat("c", 40)},
+			{Role: "assistant", Content: strings.Repeat("d", 40)},
+		}, 1000},
+		{"tight budget", []messageEntry{
+			{Role: "user", Content: strings.Repeat("a", 400)},
+			{Role: "tool", Content: strings.Repeat("b", 400)},
+			{Role: "assistant", Content: strings.Repeat("c", 400)},
+		}, 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			capped := capEntriesToBudget(tc.entries, tc.max)
+			if len(capped) != len(tc.entries) {
+				t.Fatalf("entries dropped: got %d, want %d (ids must stay aligned)", len(capped), len(tc.entries))
+			}
+			total := 0
+			for _, e := range capped {
+				total += estimateBytesAsTokens(e.Content) + estimateBytesAsTokens(e.Role) + 1
+			}
+			if total > tc.max {
+				t.Fatalf("capped total = %d tokens, exceeds max = %d", total, tc.max)
+			}
+		})
+	}
+}

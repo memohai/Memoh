@@ -73,13 +73,22 @@ func capEntriesToBudget(entries []messageEntry, maxTokens int) []messageEntry {
 	if maxTokens <= 0 {
 		maxTokens = 1
 	}
+	markerTokens := estimateBytesAsTokens(truncationMarker)
+	overheadOf := func(entry messageEntry) int { return estimateBytesAsTokens(entry.Role) + 1 }
+	// Reserve every later entry's floor (role overhead plus a bare marker) up
+	// front, so spending on one entry can never push the tail past the cap.
+	tailFloor := make([]int, len(entries)+1)
+	for i := len(entries) - 1; i >= 0; i-- {
+		tailFloor[i] = tailFloor[i+1] + overheadOf(entries[i]) + markerTokens
+	}
 	remaining := maxTokens
 	capped := make([]messageEntry, len(entries))
 	for i, entry := range entries {
-		overhead := estimateBytesAsTokens(entry.Role) + 1
+		overhead := overheadOf(entry)
+		avail := remaining - tailFloor[i+1]
 		cost := estimateBytesAsTokens(entry.Content) + overhead
-		if cost > remaining {
-			budgetBytes := (remaining - overhead) * 4
+		if cost > avail {
+			budgetBytes := (avail - overhead) * 4
 			if budgetBytes > len(truncationMarker) {
 				entry.Content = truncateBytes(entry.Content, budgetBytes-len(truncationMarker))
 			} else {
@@ -88,9 +97,6 @@ func capEntriesToBudget(entries []messageEntry, maxTokens int) []messageEntry {
 			cost = estimateBytesAsTokens(entry.Content) + overhead
 		}
 		remaining -= cost
-		if remaining < 0 {
-			remaining = 0
-		}
 		capped[i] = entry
 	}
 	return capped
