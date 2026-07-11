@@ -21,6 +21,11 @@ BEGIN
   END IF;
 END $$;
 
+DROP TRIGGER IF EXISTS compaction_message_claim_insert_guard
+  ON bot_history_messages;
+DROP TRIGGER IF EXISTS compaction_message_claim_guard
+  ON bot_history_messages;
+
 DO $$
 BEGIN
   IF EXISTS (
@@ -98,7 +103,19 @@ CREATE OR REPLACE FUNCTION guard_compaction_message_claim()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
+DECLARE
+  target_status TEXT;
+  target_level INTEGER;
 BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.compact_id IS NOT NULL OR NEW.compact_claim_finalized THEN
+      RAISE EXCEPTION 'new message % cannot start with a compaction claim', NEW.id
+        USING ERRCODE = '23514';
+    END IF;
+
+    RETURN NEW;
+  END IF;
+
   IF NEW.compact_id IS NULL THEN
     IF OLD.compact_claim_finalized
        AND EXISTS (
@@ -123,8 +140,73 @@ BEGIN
       USING ERRCODE = '23514';
   END IF;
 
+  IF NOT OLD.compact_claim_finalized
+     AND NEW.compact_claim_finalized THEN
+    SELECT compact.status, compact.artifact_level
+    INTO target_status, target_level
+    FROM bot_history_message_compacts compact
+    WHERE compact.id = NEW.compact_id;
+
+    IF NOT FOUND OR target_status <> 'ok' OR target_level <> 0 THEN
+      RAISE EXCEPTION 'message % compaction claim can only be finalized with its successful direct artifact', OLD.id
+        USING ERRCODE = '23514';
+    END IF;
+  END IF;
+
   IF OLD.compact_id IS DISTINCT FROM NEW.compact_id THEN
+    SELECT compact.status, compact.artifact_level
+    INTO target_status, target_level
+    FROM bot_history_message_compacts compact
+    WHERE compact.id = NEW.compact_id
+    FOR SHARE NOWAIT;
+
+    IF NOT FOUND OR target_status <> 'pending' OR target_level <> 0 THEN
+      RAISE EXCEPTION 'message % cannot claim terminal or derived compaction attempt %', OLD.id, NEW.compact_id
+        USING ERRCODE = '23514';
+    END IF;
+
     NEW.compact_claim_finalized := false;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION guard_compaction_log_terminal_status()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF OLD.status IN ('ok', 'error')
+     AND (
+       NEW.status IS DISTINCT FROM OLD.status
+       OR NEW.summary IS DISTINCT FROM OLD.summary
+       OR NEW.message_count IS DISTINCT FROM OLD.message_count
+       OR NEW.error_message IS DISTINCT FROM OLD.error_message
+       OR NEW.usage IS DISTINCT FROM OLD.usage
+       OR (
+         NEW.model_id IS DISTINCT FROM OLD.model_id
+         AND NOT (
+           NEW.model_id IS NULL
+           AND OLD.model_id IS NOT NULL
+           AND NOT EXISTS (
+             SELECT 1
+             FROM models model
+             WHERE model.id = OLD.model_id
+           )
+         )
+       )
+       OR NEW.artifact_version IS DISTINCT FROM OLD.artifact_version
+       OR NEW.coverage IS DISTINCT FROM OLD.coverage
+       OR NEW.anchor_start_ms IS DISTINCT FROM OLD.anchor_start_ms
+       OR NEW.anchor_end_ms IS DISTINCT FROM OLD.anchor_end_ms
+       OR NEW.artifact_level IS DISTINCT FROM OLD.artifact_level
+       OR NEW.parent_ids IS DISTINCT FROM OLD.parent_ids
+       OR NEW.started_at IS DISTINCT FROM OLD.started_at
+       OR NEW.completed_at IS DISTINCT FROM OLD.completed_at
+     ) THEN
+    RAISE EXCEPTION 'compaction attempt % has immutable terminal artifact state', OLD.id
+      USING ERRCODE = '23514';
   END IF;
 
   RETURN NEW;
@@ -209,12 +291,31 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS compaction_message_claim_guard
-  ON bot_history_messages;
+CREATE TRIGGER compaction_message_claim_insert_guard
+BEFORE INSERT ON bot_history_messages
+FOR EACH ROW
+EXECUTE FUNCTION guard_compaction_message_claim();
+
 CREATE TRIGGER compaction_message_claim_guard
 BEFORE UPDATE OF compact_id, compact_claim_finalized ON bot_history_messages
 FOR EACH ROW
 EXECUTE FUNCTION guard_compaction_message_claim();
+
+DROP TRIGGER IF EXISTS compaction_log_terminal_status_guard
+  ON bot_history_message_compacts;
+CREATE TRIGGER compaction_log_terminal_status_guard
+BEFORE UPDATE OF status ON bot_history_message_compacts
+FOR EACH ROW
+EXECUTE FUNCTION guard_compaction_log_terminal_status();
+
+DROP TRIGGER IF EXISTS compaction_log_terminal_artifact_guard
+  ON bot_history_message_compacts;
+CREATE TRIGGER compaction_log_terminal_artifact_guard
+BEFORE UPDATE OF summary, message_count, error_message, usage, model_id,
+  artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
+  started_at, completed_at ON bot_history_message_compacts
+FOR EACH ROW
+EXECUTE FUNCTION guard_compaction_log_terminal_status();
 
 DROP TRIGGER IF EXISTS compaction_message_claim_finalize
   ON bot_history_message_compacts;

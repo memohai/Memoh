@@ -2297,9 +2297,26 @@ ORDER BY m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: MarkMessagesCompacted :exec
-UPDATE bot_history_messages
-SET compact_id = $1
-WHERE id = ANY($2::uuid[]);
+WITH target_compact AS MATERIALIZED (
+  SELECT compact.id
+  FROM bot_history_message_compacts compact
+  WHERE compact.id = sqlc.arg(compact_id)
+    AND compact.status = 'pending'
+    AND compact.artifact_level = 0
+  FOR SHARE OF compact
+),
+locked_messages AS MATERIALIZED (
+  SELECT message.id
+  FROM bot_history_messages message
+  CROSS JOIN target_compact
+  WHERE message.id = ANY(sqlc.arg(column_2)::uuid[])
+  ORDER BY message.id
+  FOR UPDATE OF message
+)
+UPDATE bot_history_messages message
+SET compact_id = target_compact.id
+FROM target_compact, locked_messages
+WHERE message.id = locked_messages.id;
 
 -- name: ListUncompactedMessagesBySession :many
 SELECT

@@ -3,8 +3,12 @@ ALTER TABLE IF EXISTS bot_history_messages DROP CONSTRAINT IF EXISTS fk_compact_
 
 DROP TRIGGER IF EXISTS compaction_message_claim_finalize
   ON bot_history_message_compacts;
+DROP TRIGGER IF EXISTS compaction_message_claim_insert_guard
+  ON bot_history_messages;
 DROP TRIGGER IF EXISTS compaction_message_claim_guard
   ON bot_history_messages;
+DROP TRIGGER IF EXISTS compaction_log_terminal_artifact_guard
+  ON bot_history_message_compacts;
 DROP FUNCTION IF EXISTS finalize_compaction_message_claims();
 DROP FUNCTION IF EXISTS guard_compaction_message_claim();
 ALTER TABLE IF EXISTS bot_history_messages

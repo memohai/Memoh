@@ -7,9 +7,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -28,11 +30,11 @@ func TestFinalizeCompactionArtifactPostgresPath(t *testing.T) {
 		priorLogID := testUUID()
 		insertFinalizeMessages(t, ctx, pool, botID, sessionID, messageIDs)
 		insertFinalizeLogs(t, ctx, pool, botID, sessionID, append(logIDs, priorLogID))
-		if _, err := pool.Exec(ctx, `UPDATE bot_history_message_compacts SET status = 'error' WHERE id = $1`, priorLogID); err != nil {
-			t.Fatalf("terminalize prior attempt: %v", err)
-		}
 		if _, err := pool.Exec(ctx, `UPDATE bot_history_messages SET compact_id = $1 WHERE id = $2`, priorLogID, messageIDs[0]); err != nil {
 			t.Fatalf("attach prior failed attempt: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE bot_history_message_compacts SET status = 'error' WHERE id = $1`, priorLogID); err != nil {
+			t.Fatalf("terminalize prior attempt: %v", err)
 		}
 		versions := readMessageVersions(t, ctx, pool, messageIDs)
 		expectedCompactIDs := []string{priorLogID.String(), ""}
@@ -258,6 +260,136 @@ func TestFinalizeCompactionArtifactPostgresPath(t *testing.T) {
 	})
 }
 
+func TestFinalizeCompactionArtifactMarkLockOrderPostgresPath(t *testing.T) {
+	pool := openCompactionFinalizeTestPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	botID, sessionID := testUUID(), testUUID()
+	messageIDs := []pgtype.UUID{testUUID(), testUUID()}
+	if messageIDs[0].String() < messageIDs[1].String() {
+		messageIDs[0], messageIDs[1] = messageIDs[1], messageIDs[0]
+	}
+	markLogID, completeLogID := testUUID(), testUUID()
+	insertFinalizeMessages(t, ctx, pool, botID, sessionID, messageIDs)
+	insertFinalizeLogs(t, ctx, pool, botID, sessionID, []pgtype.UUID{markLogID, completeLogID})
+	queries := sqlc.New(pool)
+	if err := queries.MarkMessagesCompacted(ctx, sqlc.MarkMessagesCompactedParams{
+		CompactID: completeLogID,
+		Column2:   messageIDs,
+	}); err != nil {
+		t.Fatalf("attach initial claims: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, `
+CREATE TABLE compaction_mark_pause (
+  application_name TEXT PRIMARY KEY,
+  message_id UUID NOT NULL,
+  lock_key BIGINT NOT NULL
+);
+CREATE FUNCTION pause_compaction_mark()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  pause_key BIGINT;
+BEGIN
+  SELECT pause.lock_key
+  INTO pause_key
+  FROM compaction_mark_pause pause
+  WHERE pause.application_name = current_setting('application_name')
+    AND pause.message_id = OLD.id;
+
+  IF FOUND AND NEW.compact_id IS DISTINCT FROM OLD.compact_id THEN
+    PERFORM pg_advisory_xact_lock(pause_key);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER zz_pause_compaction_mark
+BEFORE UPDATE OF compact_id ON bot_history_messages
+FOR EACH ROW
+EXECUTE FUNCTION pause_compaction_mark();
+`); err != nil {
+		t.Fatalf("install mark pause trigger: %v", err)
+	}
+
+	markApplication := "mark-lock-order-" + markLogID.String()
+	completeApplication := "complete-lock-order-" + completeLogID.String()
+	lockKey := int64(982451653)
+	if _, err := pool.Exec(ctx, `INSERT INTO compaction_mark_pause (application_name, message_id, lock_key) VALUES ($1, $2, $3)`, markApplication, messageIDs[0], lockKey); err != nil {
+		t.Fatalf("configure mark pause: %v", err)
+	}
+	control, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin advisory lock control: %v", err)
+	}
+	defer func() { _ = control.Rollback(context.Background()) }()
+	if _, err := control.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, lockKey); err != nil {
+		t.Fatalf("hold mark pause lock: %v", err)
+	}
+
+	markConnection, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire mark connection: %v", err)
+	}
+	defer markConnection.Release()
+	completeConnection, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire complete connection: %v", err)
+	}
+	defer completeConnection.Release()
+	for connection, application := range map[*pgxpool.Conn]string{
+		markConnection:     markApplication,
+		completeConnection: completeApplication,
+	} {
+		if _, err := connection.Exec(ctx, `SELECT set_config('application_name', $1, false)`, application); err != nil {
+			t.Fatalf("name lock-order connection: %v", err)
+		}
+	}
+
+	markDone := make(chan error, 1)
+	go func() {
+		markDone <- sqlc.New(markConnection).MarkMessagesCompacted(ctx, sqlc.MarkMessagesCompactedParams{
+			CompactID: markLogID,
+			Column2:   messageIDs,
+		})
+	}()
+	waitForApplicationLocks(t, ctx, pool, []string{markApplication})
+	completeDone := make(chan error, 1)
+	go func() {
+		_, completeErr := sqlc.New(completeConnection).CompleteCompactionLog(ctx, sqlc.CompleteCompactionLogParams{
+			ID:           completeLogID,
+			Status:       "ok",
+			Summary:      "losing summary",
+			MessageCount: 2,
+			Coverage:     []byte(`[]`),
+		})
+		completeDone <- completeErr
+	}()
+	waitForApplicationLocks(t, ctx, pool, []string{markApplication, completeApplication})
+	if err := control.Commit(ctx); err != nil {
+		t.Fatalf("release mark pause lock: %v", err)
+	}
+	if err := <-markDone; err != nil {
+		t.Fatalf("ordered mark failed: %v", err)
+	}
+	completeErr := <-completeDone
+	var pgErr *pgconn.PgError
+	if !errors.As(completeErr, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("losing completion error = %v, want claim constraint violation", completeErr)
+	}
+	for _, messageID := range messageIDs {
+		var owner pgtype.UUID
+		var finalized bool
+		if err := pool.QueryRow(ctx, `SELECT compact_id, compact_claim_finalized FROM bot_history_messages WHERE id = $1`, messageID).Scan(&owner, &finalized); err != nil {
+			t.Fatalf("read ordered mark result: %v", err)
+		}
+		if owner != markLogID || finalized {
+			t.Fatalf("message %s claim = (%s, %v), want pending owner %s", messageID, owner, finalized, markLogID)
+		}
+	}
+}
+
 func openCompactionFinalizeTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("TEST_POSTGRES_DSN")
@@ -289,6 +421,9 @@ func openCompactionFinalizeTestPool(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(pool.Close)
 	if _, err := pool.Exec(ctx, `
+CREATE TABLE models (
+  id UUID PRIMARY KEY
+);
 CREATE TABLE bot_history_message_compacts (
   id UUID PRIMARY KEY,
   bot_id UUID NOT NULL,
@@ -298,7 +433,7 @@ CREATE TABLE bot_history_message_compacts (
   message_count INTEGER NOT NULL DEFAULT 0,
   error_message TEXT NOT NULL DEFAULT '',
   usage JSONB,
-  model_id UUID,
+  model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   artifact_version INTEGER NOT NULL DEFAULT 1,
   coverage JSONB NOT NULL DEFAULT '[]'::jsonb,
   anchor_start_ms BIGINT NOT NULL DEFAULT 0,
