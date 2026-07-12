@@ -20,21 +20,9 @@ func buildInboundUserReceipt(
 	routeID string,
 	eventID string,
 ) (conversation.UserMessageReceipt, error) {
-	origin, err := messagesource.NewEnvelope(messagesource.EnvelopeInput{
-		SenderChannelIdentityID: identity.ChannelIdentityID,
-		SenderUserID:            identity.UserID,
-		ExternalMessageID:       msg.Message.ID,
-		SourceReplyToMessageID:  inboundReplyMessageID(msg.Message.Reply),
-		EventID:                 eventID,
-		Source: messagesource.V1Candidate{
-			SenderDisplayName: identity.DisplayName,
-			Platform:          msg.Channel.String(),
-			ConversationType:  canonicalSourceConversationType(msg.Conversation.Type),
-			ConversationName:  msg.Conversation.Name,
-		},
-	})
+	origin, err := buildInboundSourceEnvelope(identity, msg, eventID)
 	if err != nil {
-		return conversation.UserMessageReceipt{}, fmt.Errorf("build inbound source envelope: %w", err)
+		return conversation.UserMessageReceipt{}, err
 	}
 	metadata := map[string]any{}
 	if routeID := strings.TrimSpace(routeID); routeID != "" {
@@ -63,6 +51,58 @@ func buildInboundUserReceipt(
 		Metadata:    metadata,
 		Attachments: attachmentSnapshot,
 	}, nil
+}
+
+func buildInboundSourceEnvelope(
+	identity InboundIdentity,
+	msg channel.InboundMessage,
+	eventID string,
+) (messagesource.Envelope, error) {
+	origin, err := messagesource.NewEnvelope(messagesource.EnvelopeInput{
+		SenderChannelIdentityID: identity.ChannelIdentityID,
+		SenderUserID:            identity.UserID,
+		ExternalMessageID:       msg.Message.ID,
+		SourceReplyToMessageID:  inboundReplyMessageID(msg.Message.Reply),
+		EventID:                 eventID,
+		Source: messagesource.V1Candidate{
+			SenderDisplayName: identity.DisplayName,
+			Platform:          msg.Channel.String(),
+			ConversationType:  canonicalSourceConversationType(msg.Conversation.Type),
+			ConversationName:  msg.Conversation.Name,
+		},
+	})
+	if err != nil {
+		return messagesource.Envelope{}, fmt.Errorf("build inbound source envelope: %w", err)
+	}
+	return origin, nil
+}
+
+func bindInboundReceiptEventID(
+	receipt conversation.UserMessageReceipt,
+	eventID string,
+) (conversation.UserMessageReceipt, error) {
+	if strings.TrimSpace(eventID) == "" {
+		return receipt, nil
+	}
+	values := receipt.Origin.Values()
+	origin, err := messagesource.NewEnvelope(messagesource.EnvelopeInput{
+		SenderChannelIdentityID: values.SenderChannelIdentityID,
+		SenderUserID:            values.SenderUserID,
+		ExternalMessageID:       values.ExternalMessageID,
+		SourceReplyToMessageID:  values.SourceReplyToMessageID,
+		EventID:                 eventID,
+		Source: messagesource.V1Candidate{
+			SenderDisplayName: values.Context.SenderDisplayName,
+			Platform:          values.Context.Platform,
+			ConversationType:  values.Context.ConversationType,
+			ConversationName:  values.Context.ConversationName,
+		},
+	})
+	if err != nil {
+		return receipt, fmt.Errorf("bind inbound receipt event: %w", err)
+	}
+	receipt.Origin = origin
+	return receipt, nil
 }
 
 func snapshotInboundAttachments(attachments []conversation.ChatAttachment) ([]conversation.ChatAttachment, error) {

@@ -671,6 +671,95 @@ func TestChannelInboundProcessorWithIdentity(t *testing.T) {
 	}
 }
 
+func TestChannelInboundProcessorRejectsInvalidSourceBeforeStreamSideEffects(t *testing.T) {
+	t.Parallel()
+
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
+	gateway := &fakeChatGateway{}
+	processor := NewChannelInboundProcessor(
+		slog.New(slog.DiscardHandler), nil, chatSvc, chatSvc, gateway,
+		&fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "invalid-channel-identity"}},
+		&fakePolicyService{}, "", 0,
+	)
+	sender := &fakeReplySender{}
+	err := processor.HandleInbound(context.Background(), channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"}, channel.InboundMessage{
+		BotID:       "bot-1",
+		Channel:     channel.ChannelTypeTelegram,
+		Message:     channel.Message{ID: "external-1", Text: "hello"},
+		ReplyTarget: "telegram:user-1",
+		Sender:      channel.Identity{SubjectID: "external-user", DisplayName: "Alice"},
+		Conversation: channel.Conversation{
+			ID: "user-1", Type: channel.ConversationTypePrivate, Name: "Alice Chat",
+		},
+	}, sender)
+	if err == nil {
+		t.Fatal("invalid source identity was accepted")
+	}
+	if len(sender.events) != 0 || gateway.gotReq.BotID != "" || len(chatSvc.persistedIn) != 0 {
+		t.Fatalf("invalid source produced side effects: events=%#v request=%#v persisted=%#v", sender.events, gateway.gotReq, chatSvc.persistedIn)
+	}
+}
+
+func TestChannelInboundProcessorRejectsUncloneableReceiptBeforePipelineSideEffects(t *testing.T) {
+	t.Parallel()
+
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
+	gateway := &fakeChatGateway{}
+	processor := NewChannelInboundProcessor(
+		slog.New(slog.DiscardHandler), nil, chatSvc, chatSvc, gateway,
+		&fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID}},
+		&fakePolicyService{}, "", 0,
+	)
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1", Type: sessionpkg.TypeChat}})
+	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+	processor.SetPipeline(pipeline, nil, nil)
+	sender := &fakeReplySender{}
+	err := processor.HandleInbound(context.Background(), channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1"}, channel.InboundMessage{
+		BotID:   "bot-1",
+		Channel: channel.ChannelTypeTelegram,
+		Message: channel.Message{ID: "external-1", Text: "hello", Attachments: []channel.Attachment{{
+			Type: channel.AttachmentImage, ContentHash: "asset-1", Path: "/data/media/asset-1",
+			Metadata: map[string]any{"invalid": make(chan struct{})},
+		}}},
+		ReplyTarget: "telegram:user-1",
+		Sender:      channel.Identity{SubjectID: "external-user", DisplayName: "Alice"},
+		Conversation: channel.Conversation{
+			ID: "user-1", Type: channel.ConversationTypePrivate, Name: "Alice Chat",
+		},
+	}, sender)
+	if err == nil {
+		t.Fatal("uncloneable receipt metadata was accepted")
+	}
+	if _, loaded := pipeline.GetIC("session-1"); loaded || len(sender.events) != 0 || gateway.gotReq.BotID != "" {
+		t.Fatalf("receipt failure produced side effects: pipeline=%v events=%#v request=%#v", loaded, sender.events, gateway.gotReq)
+	}
+}
+
+func TestPersistPassiveMessageDoesNotFallbackAfterReceiptFailure(t *testing.T) {
+	t.Parallel()
+
+	chatSvc := &fakeChatService{}
+	processor := NewChannelInboundProcessor(
+		slog.New(slog.DiscardHandler), nil, chatSvc, chatSvc, &fakeChatGateway{},
+		&fakeChannelIdentityService{}, &fakePolicyService{}, "", 0,
+	)
+	processor.persistPassiveMessage(
+		context.Background(),
+		InboundIdentity{BotID: "bot-1", ChannelIdentityID: "invalid-channel-identity", DisplayName: "Alice"},
+		channel.InboundMessage{
+			Channel: channel.ChannelTypeTelegram,
+			Message: channel.Message{ID: "external-1", Text: "hello"},
+			Conversation: channel.Conversation{
+				ID: "user-1", Type: channel.ConversationTypePrivate, Name: "Alice Chat",
+			},
+		},
+		"hello", nil, "route-1", "session-1", "", nil,
+	)
+	if len(chatSvc.persistedIn) != 0 {
+		t.Fatalf("passive receipt failure fell back to raw persistence: %#v", chatSvc.persistedIn)
+	}
+}
+
 func TestChannelInboundProcessorActiveRouteCarriesInjectionReceiptAndQueuesWithoutPrepersist(t *testing.T) {
 	t.Parallel()
 
@@ -728,9 +817,9 @@ func TestChannelInboundProcessorActiveRouteCarriesInjectionReceiptAndQueuesWitho
 
 func TestChannelInboundProcessorRespondCommandRoutesUserInput(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{
-		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"},
+		channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID},
 		linkedUserIDs: map[string][]string{
-			"channelIdentity-1": {"user-1"},
+			testChannelIdentityUUID: {testSenderUserUUID},
 		},
 	}
 	policySvc := &fakePolicyService{}
@@ -764,7 +853,7 @@ func TestChannelInboundProcessorRespondCommandRoutesUserInput(t *testing.T) {
 	if got.BotID != "bot-1" || got.SessionID != "session-1" || got.ExplicitID != "input-1" || got.TextAnswer != "Plan B" {
 		t.Fatalf("user input input = %#v", got)
 	}
-	if got.ActorChannelIdentityID != "channelIdentity-1" || got.ActorUserID != "user-1" {
+	if got.ActorChannelIdentityID != testChannelIdentityUUID || got.ActorUserID != testSenderUserUUID {
 		t.Fatalf("actor fields = %#v", got)
 	}
 	if gateway.gotReq.BotID != "" {
@@ -774,9 +863,9 @@ func TestChannelInboundProcessorRespondCommandRoutesUserInput(t *testing.T) {
 
 func TestChannelInboundProcessorRespondReplyUsesReplyTargetAndPreservesAnswer(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{
-		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"},
+		channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID},
 		linkedUserIDs: map[string][]string{
-			"channelIdentity-1": {"user-1"},
+			testChannelIdentityUUID: {testSenderUserUUID},
 		},
 	}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
@@ -879,8 +968,8 @@ func TestChannelInboundProcessorAutoCreatesDefaultACPSession(t *testing.T) {
 
 func TestChannelInboundProcessorDefaultACPRequiresWorkspaceExec(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{
-		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-no-exec"},
-		linkedUserIDs:   map[string][]string{"channelIdentity-no-exec": {"account-user-no-exec"}},
+		channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID},
+		linkedUserIDs:   map[string][]string{testChannelIdentityUUID: {testSenderUserUUID}},
 	}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-acp", RouteID: "route-acp"}}
@@ -924,8 +1013,8 @@ func TestChannelInboundProcessorDefaultACPRequiresWorkspaceExec(t *testing.T) {
 
 func TestChannelInboundProcessorActiveACPRequiresRuntimeOwner(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{
-		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-acp"},
-		linkedUserIDs:   map[string][]string{"channelIdentity-acp": {"account-user-acp"}},
+		channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID},
+		linkedUserIDs:   map[string][]string{testChannelIdentityUUID: {testSenderUserUUID}},
 	}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-acp", RouteID: "route-acp"}}
@@ -966,15 +1055,15 @@ func TestChannelInboundProcessorActiveACPRequiresRuntimeOwner(t *testing.T) {
 
 func TestChannelInboundProcessorActiveACPRequiresCurrentActorOwnerOrManage(t *testing.T) {
 	const (
-		ownerID   = "account-owner"
-		actorID   = "account-other"
-		managerID = "account-manager"
+		ownerID   = "33333333-3333-3333-3333-333333333333"
+		actorID   = "44444444-4444-4444-4444-444444444444"
+		managerID = "55555555-5555-5555-5555-555555555555"
 	)
 
 	t.Run("workspace exec non-owner cannot drive runtime", func(t *testing.T) {
 		channelIdentitySvc := &fakeChannelIdentityService{
-			channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-other"},
-			linkedUserIDs:   map[string][]string{"channelIdentity-other": {actorID}},
+			channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID},
+			linkedUserIDs:   map[string][]string{testChannelIdentityUUID: {actorID}},
 		}
 		chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-acp", RouteID: "route-acp"}}
 		gateway := &fakeChatGateway{}
@@ -1018,8 +1107,8 @@ func TestChannelInboundProcessorActiveACPRequiresCurrentActorOwnerOrManage(t *te
 
 	t.Run("manager cannot drive another user's runtime", func(t *testing.T) {
 		channelIdentitySvc := &fakeChannelIdentityService{
-			channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-manager"},
-			linkedUserIDs:   map[string][]string{"channelIdentity-manager": {managerID}},
+			channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID},
+			linkedUserIDs:   map[string][]string{testChannelIdentityUUID: {managerID}},
 		}
 		chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-acp", RouteID: "route-acp"}}
 		gateway := &fakeChatGateway{
@@ -1068,12 +1157,12 @@ func TestChannelInboundProcessorActiveACPRequiresCurrentActorOwnerOrManage(t *te
 
 func TestChannelInboundProcessorDiscussACPAllowsNonOwnerMemberThroughACL(t *testing.T) {
 	const (
-		ownerID = "account-owner"
-		actorID = "account-member"
+		ownerID = "33333333-3333-3333-3333-333333333333"
+		actorID = "44444444-4444-4444-4444-444444444444"
 	)
 	channelIdentitySvc := &fakeChannelIdentityService{
-		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-member"},
-		linkedUserIDs:   map[string][]string{"channelIdentity-member": {actorID}},
+		channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID},
+		linkedUserIDs:   map[string][]string{testChannelIdentityUUID: {actorID}},
 	}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-discuss", RouteID: "route-discuss"}}
 	gateway := &fakeChatGateway{}
@@ -1163,7 +1252,7 @@ func TestChannelInboundProcessorIssueRuntimeBearerTokenUsesRuntimeOwner(t *testi
 }
 
 func TestChannelInboundProcessorDeniedByACL(t *testing.T) {
-	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-2"}}
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID}}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-denied", RouteID: "route-denied"}}
 	gateway := &fakeChatGateway{}
@@ -1195,7 +1284,7 @@ func TestChannelInboundProcessorDeniedByACL(t *testing.T) {
 }
 
 func TestChannelInboundProcessorACLDeniedManagerMessageDoesNotSuggestLink(t *testing.T) {
-	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-manager"}}
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID}}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-denied", RouteID: "route-denied"}}
 	gateway := &fakeChatGateway{}
@@ -1253,7 +1342,7 @@ func TestChannelInboundProcessorACLDeniedManagerMessageDoesNotSuggestLink(t *tes
 }
 
 func TestChannelInboundProcessorACLGuestDeniedDowngradesToNotify(t *testing.T) {
-	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-acl-deny"}}
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID}}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-acl", RouteID: "route-acl"}}
 	gateway := &fakeChatGateway{}
@@ -1367,7 +1456,7 @@ func TestChannelInboundProcessorACLReceivesThreadScope(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-thread-scope"}}
+			channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID}}
 			policySvc := &fakePolicyService{}
 			chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-thread", RouteID: "route-thread"}}
 			gateway := &fakeChatGateway{}
@@ -1395,7 +1484,7 @@ func TestChannelInboundProcessorACLReceivesThreadScope(t *testing.T) {
 func TestChannelInboundProcessorQQAndWeixinWriteCommandsNeedLinkedManager(t *testing.T) {
 	for _, channelType := range []channel.ChannelType{channel.ChannelType("qq"), channel.ChannelType("weixin")} {
 		t.Run(channelType.String(), func(t *testing.T) {
-			channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-im-command"}}
+			channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID}}
 			policySvc := &fakePolicyService{}
 			chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-im-command", RouteID: "route-im-command"}}
 			gateway := &fakeChatGateway{}
@@ -1434,7 +1523,7 @@ func TestChannelInboundProcessorQQAndWeixinWriteCommandsNeedLinkedManager(t *tes
 }
 
 func TestChannelInboundProcessorRejectsDirectSkillBeforeAutoDiscussSession(t *testing.T) {
-	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-use-group"}}
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID}}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-skill-use-group", RouteID: "route-skill-use-group"}}
 	gateway := &fakeChatGateway{}
@@ -1476,7 +1565,7 @@ func TestChannelInboundProcessorRejectsDirectSkillBeforeAutoDiscussSession(t *te
 }
 
 func TestChannelInboundProcessorRejectsDirectSkillBeforeActiveStreamInjection(t *testing.T) {
-	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-use-active"}}
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID}}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-skill-use-active", RouteID: "route-skill-use-active"}}
 	gateway := &fakeChatGateway{}
@@ -1520,8 +1609,8 @@ func TestChannelInboundProcessorRejectsDirectSkillBeforeActiveStreamInjection(t 
 
 func TestChannelInboundProcessorRejectsDirectSkillDuringContinuationStream(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{
-		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-use-continuation"},
-		linkedUserIDs:   map[string][]string{"channelIdentity-skill-use-continuation": {"user-1"}},
+		channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID},
+		linkedUserIDs:   map[string][]string{testChannelIdentityUUID: {testSenderUserUUID}},
 	}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-skill-use-continuation", RouteID: "route-skill-use-continuation"}}
@@ -1686,7 +1775,7 @@ func TestChannelInboundProcessorDirectSkillAllowsEmptyPrompt(t *testing.T) {
 }
 
 func TestChannelInboundProcessorDirectSkillRejectsReplyWithUnknownAttachmentState(t *testing.T) {
-	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-reply-unknown"}}
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID}}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-skill-reply-unknown", RouteID: "route-skill-reply-unknown"}}
 	gateway := &fakeChatGateway{}
@@ -1780,7 +1869,7 @@ func TestChannelInboundProcessorDirectSkillAllowsReplyKnownWithoutAttachments(t 
 }
 
 func TestChannelInboundProcessorDirectSkillRejectsForwardWithUnknownAttachmentState(t *testing.T) {
-	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-forward-unknown"}}
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID}}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-skill-forward-unknown", RouteID: "route-skill-forward-unknown"}}
 	gateway := &fakeChatGateway{}
@@ -1827,7 +1916,7 @@ func TestChannelInboundProcessorDirectSkillRejectsForwardWithUnknownAttachmentSt
 }
 
 func TestChannelInboundProcessorIgnoreEmpty(t *testing.T) {
-	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-3"}}
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID}}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{}
 	gateway := &fakeChatGateway{}
@@ -1850,7 +1939,7 @@ func TestChannelInboundProcessorIgnoreEmpty(t *testing.T) {
 }
 
 func TestChannelInboundProcessorStatusUsesRouteSession(t *testing.T) {
-	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-status"}}
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID}}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-status", RouteID: "route-status"}}
 	gateway := &fakeChatGateway{}
@@ -1931,7 +2020,7 @@ func TestBuildInboundQueryAttachmentOnlyReturnsEmpty(t *testing.T) {
 }
 
 func TestChannelInboundProcessorDirectedModeCommandPermissionDeniedReplies(t *testing.T) {
-	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-denied-status"}}
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID}}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-denied-status", RouteID: "route-denied-status"}}
 	gateway := &fakeChatGateway{}
@@ -2249,7 +2338,7 @@ func (s *failingCloseStream) Close(_ context.Context) error {
 }
 
 func TestChannelInboundProcessorDoesNotPersistBeforeOpenStream(t *testing.T) {
-	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-openstream"}}
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID}}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-openstream", RouteID: "route-openstream"}}
 	gateway := &fakeChatGateway{}
@@ -2638,7 +2727,7 @@ func TestChannelInboundProcessorPipelineUsesResolvedAttachments(t *testing.T) {
 }
 
 func TestChannelInboundProcessorPersonalGroupNonOwnerIgnored(t *testing.T) {
-	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-member"}}
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID}}
 	policySvc := &fakePolicyService{ownerUserID: "channelIdentity-owner"}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-personal-1", RouteID: "route-personal-1"}}
 	gateway := &fakeChatGateway{
@@ -2683,7 +2772,7 @@ func TestChannelInboundProcessorPersonalGroupNonOwnerIgnored(t *testing.T) {
 }
 
 func TestChannelInboundProcessorPersonalGroupOwnerWithoutMentionUsesPassivePersistence(t *testing.T) {
-	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-owner"}}
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID}}
 	policySvc := &fakePolicyService{ownerUserID: "channelIdentity-owner"}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-personal-2", RouteID: "route-personal-2"}}
 	gateway := &fakeChatGateway{
@@ -3410,7 +3499,7 @@ func TestMapChannelToChatAttachments(t *testing.T) {
 // AttachmentsKnown (QQ, WeCom, Weixin, Misskey, Slack threads). Only skill
 // activation is attachment fail-closed.
 func TestChannelInboundProcessorCommandExecutesWithUnprovenReplyAttachments(t *testing.T) {
-	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-cmd-reply"}}
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID}}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-cmd-reply", RouteID: "route-cmd-reply"}}
 	gateway := &fakeChatGateway{}
