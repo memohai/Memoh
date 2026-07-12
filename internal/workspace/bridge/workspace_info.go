@@ -5,6 +5,7 @@ import "context"
 const (
 	WorkspaceBackendContainer = "container"
 	WorkspaceBackendLocal     = "local"
+	WorkspaceBackendRemote    = "remote"
 	ACPToolsProxyAddr         = "127.0.0.1:18732"
 	ACPToolsProxyHTTPURL      = "http://" + ACPToolsProxyAddr + "/mcp"
 )

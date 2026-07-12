@@ -284,6 +284,13 @@ func (p *ContainerProvider) resolveToolWorkspace(ctx context.Context, session Se
 			absolutePathDescription: "host path",
 		}
 	}
+	if strings.EqualFold(info.Backend, bridge.WorkspaceBackendRemote) {
+		return toolWorkspace{
+			defaultWorkDir:          wd,
+			locationDescription:     "on the connected remote machine",
+			absolutePathDescription: "remote workspace path",
+		}
+	}
 	return toolWorkspace{
 		defaultWorkDir:          wd,
 		locationDescription:     "inside the bot workspace",

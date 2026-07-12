@@ -320,7 +320,9 @@ func (p *VideoGenProvider) saveGeneratedVideo(ctx context.Context, botID, taskID
 	}
 	videoDir := strings.TrimRight(p.dataMount, "/") + strings.TrimPrefix(videoGenDir, "/data")
 	if resolver, ok := p.containers.(bridge.WorkspaceInfoProvider); ok {
-		if info, err := resolver.WorkspaceInfo(ctx, botID); err == nil && info.Backend == bridge.WorkspaceBackendLocal && strings.TrimSpace(info.DefaultWorkDir) != "" {
+		if info, err := resolver.WorkspaceInfo(ctx, botID); err == nil &&
+			(info.Backend == bridge.WorkspaceBackendLocal || info.Backend == bridge.WorkspaceBackendRemote) &&
+			strings.TrimSpace(info.DefaultWorkDir) != "" {
 			videoDir = strings.TrimRight(info.DefaultWorkDir, "/") + "/generated-videos"
 		}
 	}

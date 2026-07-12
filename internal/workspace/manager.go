@@ -96,6 +96,7 @@ type Manager struct {
 	containerLocks    map[string]*sync.Mutex
 	grpcPool          *bridge.Pool
 	bridgeTLS         *BridgeTLSRuntimeOptions
+	remote            *RemoteWorkspaceService
 	legacyMu          sync.RWMutex
 	legacyIPs         map[string]string // botID → IP for pre-bridge containers
 }
@@ -132,6 +133,10 @@ func NewManager(log *slog.Logger, service runtimeService, networkController netc
 
 func (m *Manager) SetHookService(h *hooks.Service) {
 	m.hookService = h
+}
+
+func (m *Manager) SetRemoteWorkspaceService(service *RemoteWorkspaceService) {
+	m.remote = service
 }
 
 // SetBridgeTLS enables strict mTLS on TCP bridge dials and injects bridge-side
@@ -243,6 +248,12 @@ func (m *Manager) clearLegacyRoute(botID string) {
 // MCPClient returns a gRPC client for the given bot's container.
 // Implements bridge.Provider.
 func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
+	if m.remote != nil {
+		client, bound, err := m.remote.ClientForBot(ctx, botID)
+		if bound || err != nil {
+			return client, err
+		}
+	}
 	if provider, ok := m.service.(bridge.Provider); ok {
 		client, err := provider.MCPClient(ctx, botID)
 		if err == nil {
@@ -282,6 +293,12 @@ func (m *Manager) WaitForWorkspaceReady(ctx context.Context, botID string) error
 }
 
 func (m *Manager) WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error) {
+	if m.remote != nil {
+		info, bound, err := m.remote.WorkspaceInfo(ctx, botID)
+		if bound || err != nil {
+			return info, err
+		}
+	}
 	if provider, ok := m.service.(bridge.WorkspaceInfoProvider); ok {
 		info, err := provider.WorkspaceInfo(ctx, botID)
 		if err == nil {

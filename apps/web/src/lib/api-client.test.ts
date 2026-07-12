@@ -6,6 +6,7 @@ vi.mock('./auth-session', () => ({
 
 let client: typeof import('@memohai/sdk/client')['client']
 let setupApiClient: typeof import('./api-client')['setupApiClient']
+let sdkApiBaseUrl: typeof import('./api-client')['sdkApiBaseUrl']
 let mockedNotifyAuthSessionCleared: ReturnType<typeof vi.fn>
 
 function stubLocalStorage() {
@@ -39,6 +40,7 @@ describe('setupApiClient auth handling', () => {
     const authSession = await import('./auth-session')
     client = sdkClientModule.client
     setupApiClient = apiClientModule.setupApiClient
+    sdkApiBaseUrl = apiClientModule.sdkApiBaseUrl
     mockedNotifyAuthSessionCleared = vi.mocked(authSession.notifyAuthSessionCleared) as unknown as ReturnType<typeof vi.fn>
     mockedNotifyAuthSessionCleared.mockClear()
     client.interceptors.request.clear()
@@ -296,5 +298,31 @@ describe('setupApiClient auth handling', () => {
 
     const request = fetchMock.mock.calls[0]?.[0] as Request
     expect(request.headers.get('Authorization')).toBe('Bearer valid-token')
+  })
+
+  it('resolves the browser API prefix for Remote Runtime commands', () => {
+    vi.stubGlobal('window', {
+      location: {
+        protocol: 'https:',
+        host: 'memoh.example.test',
+        origin: 'https://memoh.example.test',
+      },
+    })
+    setupApiClient({ baseUrl: '/api' })
+
+    expect(sdkApiBaseUrl()).toBe('https://memoh.example.test/api')
+  })
+
+  it('keeps the desktop direct-server API base for Remote Runtime commands', () => {
+    vi.stubGlobal('window', {
+      location: {
+        protocol: 'app:',
+        host: 'memoh.local',
+        origin: 'null',
+      },
+    })
+    setupApiClient({ baseUrl: 'http://127.0.0.1:18731/' })
+
+    expect(sdkApiBaseUrl()).toBe('http://127.0.0.1:18731')
   })
 })

@@ -113,6 +113,7 @@ jobs:
           const targets = [
             'package.json',
             'packages/sdk/package.json',
+            'packages/runtime/package.json',
             'packages/ui/package.json',
             'packages/icons/package.json',
             'packages/config/package.json',
@@ -171,6 +172,7 @@ jobs:
           const targets = [
             'package.json',
             'packages/sdk/package.json',
+            'packages/runtime/package.json',
             'packages/icons/package.json',
             'packages/config/package.json',
             'apps/web/package.json',

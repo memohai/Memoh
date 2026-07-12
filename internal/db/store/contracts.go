@@ -19,6 +19,51 @@ type Page struct {
 	Offset int32
 }
 
+type UserRuntimeRecord struct {
+	ID        string
+	UserID    string
+	Name      string
+	APIToken  string //nolint:gosec // owner-readable Remote Runtime credential by product design
+	CreatedAt time.Time
+}
+
+type CreateUserRuntimeInput struct {
+	UserID   string
+	Name     string
+	APIToken string //nolint:gosec // owner-readable Remote Runtime credential by product design
+}
+
+type UserRuntimeStore interface {
+	CreateUserRuntime(ctx context.Context, input CreateUserRuntimeInput) (UserRuntimeRecord, error)
+	GetUserRuntimeByAPIToken(ctx context.Context, apiToken string) (UserRuntimeRecord, error)
+	ListUserRuntimes(ctx context.Context, userID string) ([]UserRuntimeRecord, error)
+	RevokeUserRuntime(ctx context.Context, runtimeID, userID string) error
+}
+
+type BotRemoteRuntimeBindingRecord struct {
+	BotID          string
+	RuntimeID      string
+	WorkspacePath  string
+	RuntimeName    string
+	RuntimeUserID  string
+	BotOwnerUserID string
+	RuntimeRevoked bool
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type UpsertBotRemoteRuntimeBindingInput struct {
+	BotID         string
+	RuntimeID     string
+	WorkspacePath string
+}
+
+type BotRemoteRuntimeBindingStore interface {
+	UpsertBotRemoteRuntimeBinding(ctx context.Context, input UpsertBotRemoteRuntimeBindingInput) (BotRemoteRuntimeBindingRecord, error)
+	GetBotRemoteRuntimeBinding(ctx context.Context, botID string) (BotRemoteRuntimeBindingRecord, error)
+	DeleteBotRemoteRuntimeBinding(ctx context.Context, botID string) error
+}
+
 type AccountRecord struct {
 	ID              string
 	Username        string

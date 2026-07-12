@@ -2828,6 +2828,24 @@ export type UserinputUiQuestion = {
     text?: string;
 };
 
+export type UserruntimeCreateRuntimeRequest = {
+    name?: string;
+};
+
+export type UserruntimeRuntime = {
+    arch?: string;
+    capabilities?: Array<string>;
+    client_version?: string;
+    created_at?: string;
+    hostname?: string;
+    id?: string;
+    key?: string;
+    name?: string;
+    online?: boolean;
+    os?: string;
+    workspace_base?: string;
+};
+
 export type VideoConfigSchema = {
     fields?: Array<VideoFieldSchema>;
 };
@@ -2906,6 +2924,26 @@ export type WebhooktunnelStatus = {
     mode?: string;
     public_base_url?: string;
     status?: string;
+};
+
+export type WorkspaceBindRemoteWorkspaceRequest = {
+    runtime_id: string;
+    workspace_path?: string;
+};
+
+export type WorkspaceRemoteWorkspaceBinding = {
+    arch?: string;
+    bot_id?: string;
+    capabilities?: Array<string>;
+    created_at?: string;
+    hostname?: string;
+    online?: boolean;
+    os?: string;
+    runtime_id?: string;
+    runtime_name?: string;
+    status?: string;
+    updated_at?: string;
+    workspace_path?: string;
 };
 
 export type GetAcpProfilesData = {
@@ -7779,6 +7817,125 @@ export type PostBotsByBotIdQuickActionsExecuteResponses = {
 };
 
 export type PostBotsByBotIdQuickActionsExecuteResponse = PostBotsByBotIdQuickActionsExecuteResponses[keyof PostBotsByBotIdQuickActionsExecuteResponses];
+
+export type DeleteBotsByBotIdRemoteRuntimeData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/remote-runtime';
+};
+
+export type DeleteBotsByBotIdRemoteRuntimeErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdRemoteRuntimeError = DeleteBotsByBotIdRemoteRuntimeErrors[keyof DeleteBotsByBotIdRemoteRuntimeErrors];
+
+export type DeleteBotsByBotIdRemoteRuntimeResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetBotsByBotIdRemoteRuntimeData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/remote-runtime';
+};
+
+export type GetBotsByBotIdRemoteRuntimeErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdRemoteRuntimeError = GetBotsByBotIdRemoteRuntimeErrors[keyof GetBotsByBotIdRemoteRuntimeErrors];
+
+export type GetBotsByBotIdRemoteRuntimeResponses = {
+    /**
+     * OK
+     */
+    200: WorkspaceRemoteWorkspaceBinding;
+};
+
+export type GetBotsByBotIdRemoteRuntimeResponse = GetBotsByBotIdRemoteRuntimeResponses[keyof GetBotsByBotIdRemoteRuntimeResponses];
+
+export type PutBotsByBotIdRemoteRuntimeData = {
+    /**
+     * Remote workspace binding
+     */
+    body: WorkspaceBindRemoteWorkspaceRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/remote-runtime';
+};
+
+export type PutBotsByBotIdRemoteRuntimeErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdRemoteRuntimeError = PutBotsByBotIdRemoteRuntimeErrors[keyof PutBotsByBotIdRemoteRuntimeErrors];
+
+export type PutBotsByBotIdRemoteRuntimeResponses = {
+    /**
+     * OK
+     */
+    200: WorkspaceRemoteWorkspaceBinding;
+};
+
+export type PutBotsByBotIdRemoteRuntimeResponse = PutBotsByBotIdRemoteRuntimeResponses[keyof PutBotsByBotIdRemoteRuntimeResponses];
 
 export type GetBotsByBotIdScheduleData = {
     body?: never;
@@ -13139,6 +13296,103 @@ export type PutUsersMePasswordErrors = {
 export type PutUsersMePasswordError = PutUsersMePasswordErrors[keyof PutUsersMePasswordErrors];
 
 export type PutUsersMePasswordResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetUsersMeRuntimesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/users/me/runtimes';
+};
+
+export type GetUsersMeRuntimesErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetUsersMeRuntimesError = GetUsersMeRuntimesErrors[keyof GetUsersMeRuntimesErrors];
+
+export type GetUsersMeRuntimesResponses = {
+    /**
+     * OK
+     */
+    200: Array<UserruntimeRuntime>;
+};
+
+export type GetUsersMeRuntimesResponse = GetUsersMeRuntimesResponses[keyof GetUsersMeRuntimesResponses];
+
+export type PostUsersMeRuntimesData = {
+    /**
+     * Runtime configuration
+     */
+    body: UserruntimeCreateRuntimeRequest;
+    path?: never;
+    query?: never;
+    url: '/users/me/runtimes';
+};
+
+export type PostUsersMeRuntimesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostUsersMeRuntimesError = PostUsersMeRuntimesErrors[keyof PostUsersMeRuntimesErrors];
+
+export type PostUsersMeRuntimesResponses = {
+    /**
+     * Created
+     */
+    201: UserruntimeRuntime;
+};
+
+export type PostUsersMeRuntimesResponse = PostUsersMeRuntimesResponses[keyof PostUsersMeRuntimesResponses];
+
+export type DeleteUsersMeRuntimesByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Runtime ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/users/me/runtimes/{id}';
+};
+
+export type DeleteUsersMeRuntimesByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteUsersMeRuntimesByIdError = DeleteUsersMeRuntimesByIdErrors[keyof DeleteUsersMeRuntimesByIdErrors];
+
+export type DeleteUsersMeRuntimesByIdResponses = {
     /**
      * No Content
      */

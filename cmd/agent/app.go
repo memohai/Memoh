@@ -107,6 +107,7 @@ import (
 	"github.com/memohai/memoh/internal/storage/providers/localfs"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
+	"github.com/memohai/memoh/internal/userruntime"
 	"github.com/memohai/memoh/internal/version"
 	videopkg "github.com/memohai/memoh/internal/video"
 	"github.com/memohai/memoh/internal/webhooktunnel"
@@ -203,6 +204,30 @@ func provideAccountStore(postgresStore *postgresstore.Store) (dbstore.AccountSto
 	return postgresStore, nil
 }
 
+func provideUserRuntimeStore(postgresStore *postgresstore.Store) (dbstore.UserRuntimeStore, error) {
+	if postgresStore == nil {
+		return nil, errors.New("postgres user runtime store not configured")
+	}
+	return postgresStore, nil
+}
+
+func provideBotRemoteRuntimeBindingStore(postgresStore *postgresstore.Store) (dbstore.BotRemoteRuntimeBindingStore, error) {
+	if postgresStore == nil {
+		return nil, errors.New("postgres bot remote runtime binding store not configured")
+	}
+	return postgresStore, nil
+}
+
+func provideUserRuntimeHub(lc fx.Lifecycle, log *slog.Logger) *userruntime.Hub {
+	hub := userruntime.NewHub(log)
+	lc.Append(fx.Hook{OnStop: hub.Shutdown})
+	return hub
+}
+
+func provideUserRuntimePipe() userruntime.Pipe {
+	return userruntime.NewDirectPipe()
+}
+
 func provideAccountService(log *slog.Logger, accountStore dbstore.AccountStore, emailService *emailpkg.Service) *accounts.Service {
 	svc := accounts.NewService(log, accountStore)
 	svc.SetEmailProviderBootstrapper(emailService)
@@ -233,7 +258,7 @@ func provideHooksService(log *slog.Logger, provider bridge.Provider, pluginServi
 	return service
 }
 
-func provideWorkspaceManager(lc fx.Lifecycle, log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, conn *pgxpool.Pool, queries dbstore.Queries) (*workspace.Manager, error) {
+func provideWorkspaceManager(lc fx.Lifecycle, log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, conn *pgxpool.Pool, queries dbstore.Queries, remote *workspace.RemoteWorkspaceService) (*workspace.Manager, error) {
 	localSvc := workspace.NewLocalService(log, cfg.Local, cfg.Workspace.DataRoot)
 	lc.Append(fx.Hook{
 		OnStop: func(context.Context) error {
@@ -243,6 +268,7 @@ func provideWorkspaceManager(lc fx.Lifecycle, log *slog.Logger, service ctr.Serv
 	})
 	runtimeSvc := workspace.NewRuntimeRouter(service, localSvc)
 	mgr := workspace.NewManager(log, runtimeSvc, networkController, cfg.Workspace, cfg.Containerd.Namespace, conn, queries)
+	mgr.SetRemoteWorkspaceService(remote)
 	tlsOpts, err := workspace.BridgeTLSRuntimeOptionsFromConfig(cfg)
 	if err != nil {
 		return nil, err

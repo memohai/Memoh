@@ -185,6 +185,12 @@ func (m *Manager) waitTaskRunning(ctx context.Context, containerID string, timeo
 // If the container is missing, it rebuilds via SetupBotContainer.
 // If the task is stopped, it restarts and sets up networking.
 func (m *Manager) EnsureRunning(ctx context.Context, botID string) error {
+	if m.remote != nil {
+		bound, err := m.remote.EnsureReady(ctx, botID)
+		if bound || err != nil {
+			return err
+		}
+	}
 	containerID, err := m.ContainerID(ctx, botID)
 	if err != nil {
 		if errors.Is(err, ErrContainerNotFound) {
@@ -225,6 +231,13 @@ func (m *Manager) EnsureRunning(ctx context.Context, botID string) error {
 
 // StopBot stops the container task for a bot and marks it stopped in DB.
 func (m *Manager) StopBot(ctx context.Context, botID string) error {
+	if m.remote != nil {
+		if _, err := m.remote.Get(ctx, botID); err == nil {
+			return ctr.ErrNotSupported
+		} else if !errors.Is(err, ErrRemoteWorkspaceNotBound) {
+			return err
+		}
+	}
 	containerID, err := m.ContainerID(ctx, botID)
 	if err != nil {
 		return err
@@ -252,6 +265,26 @@ func (m *Manager) StopBot(ctx context.Context, botID string) error {
 // GetContainerInfo returns current container status for a bot,
 // combining DB records with live containerd state.
 func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*ContainerStatus, error) {
+	if m.remote != nil {
+		binding, err := m.remote.Get(ctx, botID)
+		if err == nil {
+			return &ContainerStatus{
+				ContainerID:      "remote-" + binding.BotID,
+				WorkspaceBackend: bridge.WorkspaceBackendRemote,
+				RuntimeBackend:   bridge.WorkspaceBackendRemote,
+				Image:            bridge.WorkspaceBackendRemote,
+				Status:           binding.Status,
+				Namespace:        m.namespace,
+				ContainerPath:    "/data",
+				TaskRunning:      binding.Status == RemoteBindingStatusOnline,
+				CreatedAt:        binding.CreatedAt,
+				UpdatedAt:        binding.UpdatedAt,
+			}, nil
+		}
+		if !errors.Is(err, ErrRemoteWorkspaceNotBound) {
+			return nil, err
+		}
+	}
 	if m.queries != nil {
 		pgBotID, parseErr := db.ParseUUID(botID)
 		if parseErr == nil {
@@ -527,6 +560,15 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 	for _, row := range rows {
 		containerID := row.ContainerID
 		botID := uuid.UUID(row.BotID.Bytes).String()
+		if m.remote != nil {
+			if _, err := m.remote.Get(ctx, botID); err == nil {
+				m.logger.Info("reconcile: remote workspace binding skips container start", slog.String("bot_id", botID))
+				continue
+			} else if !errors.Is(err, ErrRemoteWorkspaceNotBound) {
+				m.logger.Error("reconcile: resolve remote workspace binding failed", slog.String("bot_id", botID), slog.Any("error", err))
+				continue
+			}
+		}
 
 		_, err := m.service.GetContainer(ctx, containerID)
 		if err != nil {
@@ -667,6 +709,8 @@ func workspaceBackendFromRecord(recordValue, containerID string) string {
 	switch strings.ToLower(strings.TrimSpace(recordValue)) {
 	case bridge.WorkspaceBackendLocal:
 		return bridge.WorkspaceBackendLocal
+	case bridge.WorkspaceBackendRemote:
+		return bridge.WorkspaceBackendRemote
 	case bridge.WorkspaceBackendContainer:
 		return bridge.WorkspaceBackendContainer
 	}

@@ -39,6 +39,7 @@ declare module '@memohai/web/api-client' {
     query?: Record<string, unknown>
   }
   export function sdkAuthQuery(): { token?: string }
+  export function sdkApiBaseUrl(): string
   export function sdkApiUrl(options: SdkUrlOptions): string
   export function sdkWebSocketUrl(options: SdkUrlOptions): string
   export function setupApiClient(options?: SetupApiClientOptions): void

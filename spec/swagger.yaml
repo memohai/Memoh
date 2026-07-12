@@ -4787,6 +4787,38 @@ definitions:
       text:
         type: string
     type: object
+  userruntime.CreateRuntimeRequest:
+    properties:
+      name:
+        type: string
+    type: object
+  userruntime.Runtime:
+    properties:
+      arch:
+        type: string
+      capabilities:
+        items:
+          type: string
+        type: array
+      client_version:
+        type: string
+      created_at:
+        type: string
+      hostname:
+        type: string
+      id:
+        type: string
+      key:
+        type: string
+      name:
+        type: string
+      online:
+        type: boolean
+      os:
+        type: string
+      workspace_base:
+        type: string
+    type: object
   video.ConfigSchema:
     properties:
       fields:
@@ -4916,6 +4948,44 @@ definitions:
       public_base_url:
         type: string
       status:
+        type: string
+    type: object
+  workspace.BindRemoteWorkspaceRequest:
+    properties:
+      runtime_id:
+        type: string
+      workspace_path:
+        type: string
+    required:
+    - runtime_id
+    type: object
+  workspace.RemoteWorkspaceBinding:
+    properties:
+      arch:
+        type: string
+      bot_id:
+        type: string
+      capabilities:
+        items:
+          type: string
+        type: array
+      created_at:
+        type: string
+      hostname:
+        type: string
+      online:
+        type: boolean
+      os:
+        type: string
+      runtime_id:
+        type: string
+      runtime_name:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+      workspace_path:
         type: string
     type: object
 info:
@@ -8782,6 +8852,107 @@ paths:
       summary: Execute a Web quick action
       tags:
       - quick-actions
+  /bots/{bot_id}/remote-runtime:
+    delete:
+      description: Stops routing new workspace calls to the Remote Runtime. Remote
+        files are not deleted.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Remove a Bot's Remote Runtime workspace binding
+      tags:
+      - bot-remote-runtime
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/workspace.RemoteWorkspaceBinding'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a Bot's Remote Runtime workspace binding
+      tags:
+      - bot-remote-runtime
+    put:
+      consumes:
+      - application/json
+      description: Route the Bot's persistent workspace through a user-owned Remote
+        Runtime. An omitted workspace_path uses bots/{bot_id}; multiple Bots may explicitly
+        share the same path.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Remote workspace binding
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/workspace.BindRemoteWorkspaceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/workspace.RemoteWorkspaceBinding'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Bind a Bot workspace to a Remote Runtime
+      tags:
+      - bot-remote-runtime
   /bots/{bot_id}/schedule:
     get:
       description: List schedules for current user
@@ -13409,6 +13580,83 @@ paths:
       summary: Update current user password
       tags:
       - users
+  /users/me/runtimes:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/userruntime.Runtime'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List Remote Runtime credentials
+      tags:
+      - user-runtimes
+    post:
+      consumes:
+      - application/json
+      description: Register a Remote Runtime and return its reusable API token.
+      parameters:
+      - description: Runtime configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/userruntime.CreateRuntimeRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/userruntime.Runtime'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create a Remote Runtime credential
+      tags:
+      - user-runtimes
+  /users/me/runtimes/{id}:
+    delete:
+      parameters:
+      - description: Runtime ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Revoke a Remote Runtime credential
+      tags:
+      - user-runtimes
   /video-models:
     get:
       produces:

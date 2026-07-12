@@ -33,8 +33,10 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
+	"github.com/memohai/memoh/internal/userruntime"
 	videopkg "github.com/memohai/memoh/internal/video"
 	"github.com/memohai/memoh/internal/webhooktunnel"
+	"github.com/memohai/memoh/internal/workspace"
 )
 
 func runServe() {
@@ -55,6 +57,12 @@ func options() fx.Option {
 			providePostgresStore,
 			provideDBQueries,
 			provideAccountStore,
+			provideUserRuntimeStore,
+			provideBotRemoteRuntimeBindingStore,
+			provideUserRuntimeHub,
+			userruntime.NewService,
+			workspace.NewRemoteWorkspaceService,
+			provideUserRuntimePipe,
 			provideWikiStore,
 			provideWorkspaceManager,
 			provideBridgeProvider,
@@ -136,6 +144,9 @@ func options() fx.Option {
 			provideServerHandler(provideMemoryHandler),
 			provideServerHandler(provideMessageHandler),
 			provideServerHandler(provideSessionHandler),
+			provideServerHandler(handlers.NewUserRuntimeHandler),
+			provideServerHandler(handlers.NewRuntimeConnectHandler),
+			provideServerHandler(handlers.NewBotRemoteRuntimeHandler),
 			provideServerHandler(handlers.NewACPHandler),
 			provideServerHandler(handlers.NewACPRuntimeHandler),
 			provideServerHandler(handlers.NewSwaggerHandler),
