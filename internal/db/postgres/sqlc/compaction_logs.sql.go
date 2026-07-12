@@ -664,126 +664,41 @@ WITH direct_invalid AS (
     AND compact.status = 'ok'
     AND compact.artifact_level = 0
     AND NOT validity.sources_current
-), derived_candidates AS (
-  SELECT
-    compact.id,
-    compact.message_count,
-    CASE
-      WHEN jsonb_typeof(compact.coverage) = 'array' THEN compact.coverage
-      ELSE '[]'::jsonb
-    END AS coverage
+), derived_invalid AS (
+  SELECT compact.id, '[]'::jsonb AS coverage
   FROM bot_history_message_compacts compact
+  LEFT JOIN bot_history_message_compact_topology topology
+    ON topology.compact_id = compact.id
+  LEFT JOIN bot_history_topology_counters counter
+    ON counter.session_id = topology.session_id
   WHERE compact.bot_id = $1
     AND compact.session_id IS NOT DISTINCT FROM $2::uuid
     AND compact.status = 'ok'
     AND compact.artifact_level > 0
-), derived_coverage AS MATERIALIZED (
-  SELECT
-    candidate.id,
-    candidate.coverage,
-    candidate.message_count,
-    covered.source,
-    covered.ordinality::bigint AS source_ordinal,
-    CASE
-      WHEN COALESCE(covered.source->'ref'->>'id', '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-      THEN (covered.source->'ref'->>'id')::uuid
-    END AS source_id
-  FROM derived_candidates candidate
-  LEFT JOIN LATERAL jsonb_array_elements(candidate.coverage)
-    WITH ORDINALITY AS covered(source, ordinality) ON true
-), derived_sources AS MATERIALIZED (
-  SELECT
-    coverage.id, coverage.coverage, coverage.message_count, coverage.source, coverage.source_ordinal, coverage.source_id,
-    message.id AS matched_id,
-    message.bot_id,
-    message.session_id,
-    message.turn_visible,
-    message.turn_id,
-    message.turn_position,
-    message.turn_message_seq,
-    message.metadata,
-    message.created_at,
-    LAG(message.turn_position) OVER artifact_order AS previous_turn_position,
-    LAG(message.turn_message_seq) OVER artifact_order AS previous_turn_message_seq,
-    LAG(message.created_at) OVER artifact_order AS previous_created_at,
-    LAG(message.id) OVER artifact_order AS previous_id
-  FROM derived_coverage coverage
-  LEFT JOIN bot_history_messages message ON message.id = coverage.source_id
-  WINDOW artifact_order AS (PARTITION BY coverage.id ORDER BY coverage.source_ordinal)
-), derived_coverage_stats AS MATERIALIZED (
-  SELECT
-    source.id,
-    source.message_count,
-    COUNT(source.source)::integer AS coverage_count,
-    COUNT(DISTINCT source.source_id)::integer AS distinct_source_count,
-    COUNT(source.matched_id)::integer AS matched_count,
-    COUNT(source.matched_id) FILTER (WHERE
-      source.bot_id = $1
-      AND source.session_id IS NOT DISTINCT FROM $2::uuid
-      AND source.turn_visible = true
-      AND source.turn_id IS NOT NULL
-      AND source.turn_position IS NOT NULL
-      AND source.turn_message_seq IS NOT NULL
-      AND (source.metadata->>'trigger_mode' IS NULL OR source.metadata->>'trigger_mode' <> 'passive_sync')
-    )::integer AS current_count,
-    COALESCE(BOOL_AND(
-      source.previous_turn_position IS NULL
-      OR ROW(source.turn_position, source.turn_message_seq, source.created_at, source.matched_id) >=
-         ROW(source.previous_turn_position, source.previous_turn_message_seq, source.previous_created_at, source.previous_id)
-    ) FILTER (WHERE source.source IS NOT NULL), false) AS ordered,
-    (ARRAY_AGG(source.turn_position ORDER BY source.source_ordinal) FILTER (WHERE source.source IS NOT NULL))[1] AS first_turn_position,
-    (ARRAY_AGG(source.turn_message_seq ORDER BY source.source_ordinal) FILTER (WHERE source.source IS NOT NULL))[1] AS first_turn_message_seq,
-    (ARRAY_AGG(source.created_at ORDER BY source.source_ordinal) FILTER (WHERE source.source IS NOT NULL))[1] AS first_created_at,
-    (ARRAY_AGG(source.matched_id ORDER BY source.source_ordinal) FILTER (WHERE source.source IS NOT NULL))[1] AS first_id,
-    (ARRAY_AGG(source.turn_position ORDER BY source.source_ordinal DESC) FILTER (WHERE source.source IS NOT NULL))[1] AS last_turn_position,
-    (ARRAY_AGG(source.turn_message_seq ORDER BY source.source_ordinal DESC) FILTER (WHERE source.source IS NOT NULL))[1] AS last_turn_message_seq,
-    (ARRAY_AGG(source.created_at ORDER BY source.source_ordinal DESC) FILTER (WHERE source.source IS NOT NULL))[1] AS last_created_at,
-    (ARRAY_AGG(source.matched_id ORDER BY source.source_ordinal DESC) FILTER (WHERE source.source IS NOT NULL))[1] AS last_id
-  FROM derived_sources source
-  GROUP BY source.id, source.message_count
-), derived_range_stats AS MATERIALIZED (
-  SELECT
-    coverage.id, coverage.message_count, coverage.coverage_count, coverage.distinct_source_count, coverage.matched_count, coverage.current_count, coverage.ordered, coverage.first_turn_position, coverage.first_turn_message_seq, coverage.first_created_at, coverage.first_id, coverage.last_turn_position, coverage.last_turn_message_seq, coverage.last_created_at, coverage.last_id,
-    COUNT(message.id)::integer AS range_count
-  FROM derived_coverage_stats coverage
-  LEFT JOIN bot_history_messages message
-    ON message.bot_id = $1
-   AND message.session_id IS NOT DISTINCT FROM $2::uuid
-   AND message.turn_visible = true
-   AND message.turn_id IS NOT NULL
-   AND message.turn_position IS NOT NULL
-   AND message.turn_message_seq IS NOT NULL
-   AND (message.metadata->>'trigger_mode' IS NULL OR message.metadata->>'trigger_mode' <> 'passive_sync')
-   AND ROW(message.turn_position, message.turn_message_seq, message.created_at, message.id) >=
-       ROW(coverage.first_turn_position, coverage.first_turn_message_seq, coverage.first_created_at, coverage.first_id)
-   AND ROW(message.turn_position, message.turn_message_seq, message.created_at, message.id) <=
-       ROW(coverage.last_turn_position, coverage.last_turn_message_seq, coverage.last_created_at, coverage.last_id)
-  GROUP BY
-    coverage.id,
-    coverage.message_count,
-    coverage.coverage_count,
-    coverage.distinct_source_count,
-    coverage.matched_count,
-    coverage.current_count,
-    coverage.ordered,
-    coverage.first_turn_position,
-    coverage.first_turn_message_seq,
-    coverage.first_created_at,
-    coverage.first_id,
-    coverage.last_turn_position,
-    coverage.last_turn_message_seq,
-    coverage.last_created_at,
-    coverage.last_id
-), derived_invalid AS (
-  SELECT range.id, '[]'::jsonb AS coverage
-  FROM derived_range_stats range
-  WHERE range.message_count <= 0
-    OR range.coverage_count <> range.message_count
-    OR range.distinct_source_count <> range.message_count
-    OR range.matched_count <> range.message_count
-    OR range.current_count <> range.message_count
-    OR range.range_count <> range.message_count
-    OR NOT range.ordered
+    AND (
+      topology.compact_id IS NULL
+      OR topology.session_id IS DISTINCT FROM compact.session_id
+      OR topology.topology_revision > COALESCE(counter.revision, 0)
+      OR EXISTS (
+        SELECT 1
+        FROM bot_history_topology_pending pending
+        WHERE pending.transaction_id = pg_current_xact_id()
+          AND pending.session_id = topology.session_id
+          AND pending.turn_position BETWEEN
+              topology.range_start_turn_position AND topology.range_end_turn_position
+      )
+      OR (
+        COALESCE(counter.revision, 0) > topology.topology_revision
+        AND EXISTS (
+          SELECT 1
+          FROM bot_history_topology_positions position
+          WHERE position.session_id = topology.session_id
+            AND position.turn_position BETWEEN
+                topology.range_start_turn_position AND topology.range_end_turn_position
+            AND position.revision > topology.topology_revision
+        )
+      )
+    )
 )
 SELECT invalid.id, invalid.coverage
 FROM (

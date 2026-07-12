@@ -273,6 +273,95 @@ WHERE session_id = $1
 	assertInvalidRollupSeeds(t, fixture, pool, []pgtype.UUID{rollupID})
 }
 
+func TestRollupRejectsPendingTopologyFromSameTransactionPostgresPath(t *testing.T) {
+	pool := openCompactionFinalizeTestPool(t)
+	fixture := createRollupParentsWithGap(t, pool)
+	rollupID := testUUID()
+	insertFinalizeLogs(t, fixture.ctx, pool, fixture.botID, fixture.sessionID, []pgtype.UUID{rollupID})
+	var gapID pgtype.UUID
+	if err := pool.QueryRow(fixture.ctx, `
+SELECT id
+FROM bot_history_messages
+WHERE session_id = $1
+  AND id <> ALL($2::uuid[])
+`, fixture.sessionID, fixture.messageIDs).Scan(&gapID); err != nil {
+		t.Fatalf("read same-transaction gap: %v", err)
+	}
+	tx, err := pool.Begin(fixture.ctx)
+	if err != nil {
+		t.Fatalf("begin same-transaction topology change: %v", err)
+	}
+	if _, err := tx.Exec(fixture.ctx, `UPDATE bot_history_messages SET turn_visible = false WHERE id = $1`, gapID); err != nil {
+		t.Fatalf("hide same-transaction gap: %v", err)
+	}
+	result, err := sqlc.New(tx).FinalizeCompactionRollup(fixture.ctx, rollupParams(
+		rollupID,
+		fixture.botID,
+		fixture.sessionID,
+		fixture.parentIDs,
+		"same transaction checkpoint",
+	))
+	if err != nil || result.Finalized {
+		t.Fatalf("same-transaction rollup = %+v, %v; want pending-topology rejection", result, err)
+	}
+	if err := tx.Rollback(fixture.ctx); err != nil {
+		t.Fatalf("rollback same-transaction topology change: %v", err)
+	}
+	assertRollupNotCommitted(t, fixture, pool, rollupID)
+}
+
+func TestRollupProjectionSeesPendingTopologyFromSameTransactionPostgresPath(t *testing.T) {
+	pool := openCompactionFinalizeTestPool(t)
+	fixture := createRollupParentsWithGap(t, pool)
+	rollupID := testUUID()
+	insertFinalizeLogs(t, fixture.ctx, pool, fixture.botID, fixture.sessionID, []pgtype.UUID{rollupID})
+	var gapID pgtype.UUID
+	if err := pool.QueryRow(fixture.ctx, `
+SELECT id
+FROM bot_history_messages
+WHERE session_id = $1
+  AND id <> ALL($2::uuid[])
+`, fixture.sessionID, fixture.messageIDs).Scan(&gapID); err != nil {
+		t.Fatalf("read projected same-transaction gap: %v", err)
+	}
+	if _, err := pool.Exec(fixture.ctx, `UPDATE bot_history_messages SET turn_visible = false WHERE id = $1`, gapID); err != nil {
+		t.Fatalf("hide projected history gap: %v", err)
+	}
+	result, err := sqlc.New(pool).FinalizeCompactionRollup(fixture.ctx, rollupParams(
+		rollupID,
+		fixture.botID,
+		fixture.sessionID,
+		fixture.parentIDs,
+		"checkpoint before pending activation",
+	))
+	if err != nil || !result.Finalized {
+		t.Fatalf("FinalizeCompactionRollup() = %+v, %v", result, err)
+	}
+	tx, err := pool.Begin(fixture.ctx)
+	if err != nil {
+		t.Fatalf("begin projected same-transaction topology change: %v", err)
+	}
+	if _, err := tx.Exec(fixture.ctx, `UPDATE bot_history_messages SET turn_visible = true WHERE id = $1`, gapID); err != nil {
+		t.Fatalf("activate projected same-transaction gap: %v", err)
+	}
+	rows, err := sqlc.New(tx).ListInvalidCompactionArtifactSeedsBySession(
+		fixture.ctx,
+		sqlc.ListInvalidCompactionArtifactSeedsBySessionParams{
+			BotID:     fixture.botID,
+			SessionID: fixture.sessionID,
+		},
+	)
+	if err != nil {
+		t.Fatalf("load pending topology invalid seeds: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != rollupID {
+		t.Fatalf("pending topology invalid seeds = %#v, want %s", rows, rollupID)
+	}
+	if err := tx.Rollback(fixture.ctx); err != nil {
+		t.Fatalf("rollback projected same-transaction topology change: %v", err)
+	}
+}
+
 func waitForBackendLock(t *testing.T, pool *pgxpool.Pool, backendPID int32) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

@@ -51,6 +51,22 @@ WHERE id = $1
 	if !equalPGUUIDs(parentIDs, fixture.parentIDs) {
 		t.Fatalf("derived parents = %#v, want %#v", parentIDs, fixture.parentIDs)
 	}
+	var topologyRevision, currentRevision, rangeStart, rangeEnd int64
+	if err := pool.QueryRow(fixture.ctx, `
+SELECT
+  topology.topology_revision,
+  counter.revision,
+  topology.range_start_turn_position,
+  topology.range_end_turn_position
+FROM bot_history_message_compact_topology topology
+JOIN bot_history_topology_counters counter ON counter.session_id = topology.session_id
+WHERE topology.compact_id = $1
+`, rollupID).Scan(&topologyRevision, &currentRevision, &rangeStart, &rangeEnd); err != nil {
+		t.Fatalf("read derived topology snapshot: %v", err)
+	}
+	if topologyRevision != currentRevision || rangeStart != 1 || rangeEnd != 2 {
+		t.Fatalf("derived topology = revision:%d current:%d range:%d-%d", topologyRevision, currentRevision, rangeStart, rangeEnd)
+	}
 	var covered []struct {
 		Ref struct {
 			ID string `json:"id"`
@@ -203,6 +219,9 @@ func createRollupParentSet(t *testing.T, pool *pgxpool.Pool, count int) rollupFi
 		fixture.messageIDs = append(fixture.messageIDs, testUUID())
 		fixture.parentIDs = append(fixture.parentIDs, testUUID())
 	}
+	if _, err := pool.Exec(fixture.ctx, `INSERT INTO bot_sessions (id) VALUES ($1)`, fixture.sessionID); err != nil {
+		t.Fatalf("insert rollup session: %v", err)
+	}
 	insertFinalizeMessages(t, fixture.ctx, pool, fixture.botID, fixture.sessionID, fixture.messageIDs)
 	insertFinalizeLogs(t, fixture.ctx, pool, fixture.botID, fixture.sessionID, fixture.parentIDs)
 	queries := sqlc.New(pool)
@@ -233,6 +252,9 @@ func createRollupParentsWithGap(t *testing.T, pool *pgxpool.Pool) rollupFixture 
 		messageIDs: []pgtype.UUID{allMessageIDs[0], allMessageIDs[2]},
 		parentIDs:  []pgtype.UUID{testUUID(), testUUID()},
 	}
+	if _, err := pool.Exec(fixture.ctx, `INSERT INTO bot_sessions (id) VALUES ($1)`, fixture.sessionID); err != nil {
+		t.Fatalf("insert gapped rollup session: %v", err)
+	}
 	insertFinalizeMessages(t, fixture.ctx, pool, fixture.botID, fixture.sessionID, allMessageIDs)
 	insertFinalizeLogs(t, fixture.ctx, pool, fixture.botID, fixture.sessionID, fixture.parentIDs)
 	queries := sqlc.New(pool)
@@ -254,8 +276,14 @@ func createRollupParentsWithGap(t *testing.T, pool *pgxpool.Pool) rollupFixture 
 
 func installRollupParentEdgesFixture(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
+	if _, err := pool.Exec(context.Background(), `CREATE TABLE IF NOT EXISTS bot_sessions (id UUID PRIMARY KEY)`); err != nil {
+		t.Fatalf("install rollup session fixture: %v", err)
+	}
 	if _, err := pool.Exec(context.Background(), readEmbeddedMigration(t, "postgres/migrations/0106_compaction_artifact_parent_edges.up.sql")); err != nil {
 		t.Fatalf("install rollup parent edges fixture: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(), readEmbeddedMigration(t, "postgres/migrations/0113_compaction_topology_positions.up.sql")); err != nil {
+		t.Fatalf("install rollup topology fixture: %v", err)
 	}
 }
 
@@ -296,6 +324,13 @@ WHERE artifact_id = $1
 	if !equalPGUUIDs(edgeIDs, fixture.parentIDs) {
 		t.Fatalf("normalized edges = %#v, want %#v", edgeIDs, fixture.parentIDs)
 	}
+	var topologyCount int
+	if err := pool.QueryRow(fixture.ctx, `SELECT COUNT(*) FROM bot_history_message_compact_topology WHERE compact_id = $1`, rollupID).Scan(&topologyCount); err != nil {
+		t.Fatalf("count committed topology snapshot: %v", err)
+	}
+	if topologyCount != 1 {
+		t.Fatalf("committed rollup has %d topology snapshots", topologyCount)
+	}
 }
 
 func assertRollupNotCommitted(t *testing.T, fixture rollupFixture, pool *pgxpool.Pool, rollupID pgtype.UUID) {
@@ -307,6 +342,13 @@ func assertRollupNotCommitted(t *testing.T, fixture rollupFixture, pool *pgxpool
 	}
 	if status != "pending" || len(parentIDs) != 0 {
 		t.Fatalf("rejected rollup mutated target: status=%s parents=%#v", status, parentIDs)
+	}
+	var topologyCount int
+	if err := pool.QueryRow(fixture.ctx, `SELECT COUNT(*) FROM bot_history_message_compact_topology WHERE compact_id = $1`, rollupID).Scan(&topologyCount); err != nil {
+		t.Fatalf("count rejected topology snapshot: %v", err)
+	}
+	if topologyCount != 0 {
+		t.Fatalf("rejected rollup retained %d topology snapshots", topologyCount)
 	}
 	for _, parentID := range fixture.parentIDs {
 		var successor pgtype.UUID

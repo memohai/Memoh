@@ -220,7 +220,7 @@ INSERT INTO bot_history_messages (
 	assertInvalidRollupSeeds(t, fixture, pool, []pgtype.UUID{rollupID})
 }
 
-func TestRollupBecomesInvalidWhenStoredCoverageBreaksHistoryOrderPostgresPath(t *testing.T) {
+func TestDerivedArtifactWithoutTopologySnapshotIsInvalidPostgresPath(t *testing.T) {
 	pool := openCompactionFinalizeTestPool(t)
 	fixture := createRollupParentSet(t, pool, 3)
 	rollupID := testUUID()
@@ -230,8 +230,8 @@ INSERT INTO bot_history_message_compacts (
   anchor_start_ms, anchor_end_ms, artifact_level, parent_ids, completed_at
 )
 SELECT
-  $1, $2, $3, 'ok', 'reordered checkpoint', 3,
-  jsonb_build_array(first.coverage->0, third.coverage->0, second.coverage->0),
+  $1, $2, $3, 'ok', 'legacy checkpoint', 3,
+  jsonb_build_array(first.coverage->0, second.coverage->0, third.coverage->0),
   1, 1, 1, $4::uuid[], now()
 FROM bot_history_message_compacts first
 JOIN bot_history_message_compacts second ON second.id = $6
@@ -239,7 +239,7 @@ JOIN bot_history_message_compacts third ON third.id = $7
 WHERE first.id = $5
 `, rollupID, fixture.botID, fixture.sessionID, fixture.parentIDs,
 		fixture.parentIDs[0], fixture.parentIDs[1], fixture.parentIDs[2]); err != nil {
-		t.Fatalf("insert reordered stored coverage: %v", err)
+		t.Fatalf("insert derived artifact without topology: %v", err)
 	}
 	assertInvalidRollupSeeds(t, fixture, pool, []pgtype.UUID{rollupID})
 }

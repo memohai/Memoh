@@ -55,6 +55,7 @@ locked_target AS MATERIALIZED (
   FROM locked_compacts compact
   WHERE compact.id = $2
     AND compact.bot_id = $3
+    AND $4::uuid IS NOT NULL
     AND compact.session_id IS NOT DISTINCT FROM $4::uuid
     AND compact.status = 'pending'
     AND compact.summary = ''
@@ -252,8 +253,24 @@ coverage_message_stats AS MATERIALIZED (
 coverage_bounds AS MATERIALIZED (
   SELECT
     (ARRAY_AGG(id ORDER BY parent_ordinal, source_ordinal))[1] AS first_id,
-    (ARRAY_AGG(id ORDER BY parent_ordinal DESC, source_ordinal DESC))[1] AS last_id
+    (ARRAY_AGG(id ORDER BY parent_ordinal DESC, source_ordinal DESC))[1] AS last_id,
+    (ARRAY_AGG(turn_position ORDER BY parent_ordinal, source_ordinal))[1] AS first_turn_position,
+    (ARRAY_AGG(turn_position ORDER BY parent_ordinal DESC, source_ordinal DESC))[1] AS last_turn_position
   FROM covered_messages
+),
+topology_snapshot AS MATERIALIZED (
+  SELECT COALESCE(counter.revision, 0)::bigint AS revision
+  FROM (SELECT 1) seed
+  LEFT JOIN bot_history_topology_counters counter
+    ON counter.session_id = $4::uuid
+),
+pending_topology_stats AS MATERIALIZED (
+  SELECT COUNT(*)::integer AS pending_count
+  FROM bot_history_topology_pending pending
+  CROSS JOIN coverage_bounds bounds
+  WHERE pending.transaction_id = pg_current_xact_id()
+    AND pending.session_id = $4::uuid
+    AND pending.turn_position BETWEEN bounds.first_turn_position AND bounds.last_turn_position
 ),
 gap_stats AS MATERIALIZED (
   SELECT COUNT(candidate.id)::integer AS visible_count
@@ -325,18 +342,31 @@ derived_shape AS MATERIALIZED (
     stats.anchor_start_ms,
     stats.anchor_end_ms,
     (MAX(parent.artifact_level) + 1)::integer AS artifact_level,
-    ARRAY_AGG(parent.id ORDER BY parent.ordinal)::uuid[] AS parent_ids
+    ARRAY_AGG(parent.id ORDER BY parent.ordinal)::uuid[] AS parent_ids,
+    topology.revision AS topology_revision,
+    bounds.first_turn_position AS range_start_turn_position,
+    bounds.last_turn_position AS range_end_turn_position
   FROM coverage_stats stats
   CROSS JOIN locked_parents parent
-  GROUP BY stats.coverage_count, stats.coverage, stats.anchor_start_ms, stats.anchor_end_ms
+  CROSS JOIN topology_snapshot topology
+  CROSS JOIN coverage_bounds bounds
+  GROUP BY
+    stats.coverage_count,
+    stats.coverage,
+    stats.anchor_start_ms,
+    stats.anchor_end_ms,
+    topology.revision,
+    bounds.first_turn_position,
+    bounds.last_turn_position
 ),
 eligible AS MATERIALIZED (
-  SELECT target.id, shape.message_count, shape.coverage, shape.anchor_start_ms, shape.anchor_end_ms, shape.artifact_level, shape.parent_ids
+  SELECT target.id, shape.message_count, shape.coverage, shape.anchor_start_ms, shape.anchor_end_ms, shape.artifact_level, shape.parent_ids, shape.topology_revision, shape.range_start_turn_position, shape.range_end_turn_position
   FROM locked_target target
   CROSS JOIN request_shape request
   CROSS JOIN parent_stats parents
   CROSS JOIN ancestor_stats ancestors
   CROSS JOIN source_lock_barrier source_locks
+  CROSS JOIN pending_topology_stats pending_topology
   CROSS JOIN parent_coverage_validity parent_coverage
   CROSS JOIN coverage_message_stats covered_messages
   CROSS JOIN gap_stats gaps
@@ -350,12 +380,16 @@ eligible AS MATERIALIZED (
     AND parent_coverage.valid
     AND ancestors.direct_count > 0
     AND ancestors.current_count = ancestors.direct_count
+    AND pending_topology.pending_count = 0
     AND coverage.coverage_count > 0
     AND coverage.coverage_count = coverage.distinct_source_count
     AND coverage.coverage_count = coverage.matched_source_count
     AND coverage.coverage_count = source_locks.locked_count
     AND covered_messages.matched_count = coverage.coverage_count
     AND covered_messages.ordered
+    AND shape.range_start_turn_position IS NOT NULL
+    AND shape.range_end_turn_position IS NOT NULL
+    AND shape.range_start_turn_position <= shape.range_end_turn_position
     AND gaps.visible_count = coverage.coverage_count
     AND coverage.valid
     AND BTRIM($5) <> ''
@@ -379,17 +413,36 @@ completed_rollup AS MATERIALIZED (
   WHERE rollup.id = eligible.id
   RETURNING rollup.id
 ),
+recorded_topology AS MATERIALIZED (
+  INSERT INTO bot_history_message_compact_topology (
+    compact_id,
+    session_id,
+    topology_revision,
+    range_start_turn_position,
+    range_end_turn_position
+  )
+  SELECT
+    completed.id,
+    $4::uuid,
+    eligible.topology_revision,
+    eligible.range_start_turn_position,
+    eligible.range_end_turn_position
+  FROM completed_rollup completed
+  JOIN eligible ON eligible.id = completed.id
+  RETURNING compact_id
+),
 superseded_parents AS (
   UPDATE bot_history_message_compacts parent
-  SET superseded_by = completed.id,
+  SET superseded_by = recorded.compact_id,
       superseded_at = now()
-  FROM completed_rollup completed
+  FROM recorded_topology recorded
   WHERE parent.id IN (SELECT parent_id FROM requested_parents)
   RETURNING parent.id
 )
 SELECT
   (
     (SELECT COUNT(*) FROM completed_rollup) = 1
+    AND (SELECT COUNT(*) FROM recorded_topology) = 1
     AND (SELECT COUNT(*) FROM superseded_parents) = request.requested_count
   )::boolean AS finalized,
   request.requested_count,

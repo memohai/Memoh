@@ -159,6 +159,99 @@ func TestArtifactProjectionAppliesSourceInvalidationToSessionlessLegacyArtifact(
 	}
 }
 
+func TestArtifactProjectionRestoresParentForEmptyCoverageDerivedSeed(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID     = "00000000-0000-0000-0000-00000000ba06"
+		sessionID = "00000000-0000-0000-0000-00000000fa06"
+		parentID  = "00000000-0000-0000-0000-00000000ca06"
+		derivedID = "00000000-0000-0000-0000-00000000ca07"
+	)
+	parent := projectionRow(t, parentID)
+	derived := projectionRow(t, derivedID)
+	for _, row := range []*sqlc.BotHistoryMessageCompact{&parent, &derived} {
+		row.BotID = mustProjectionUUID(t, botID)
+		row.SessionID = mustProjectionUUID(t, sessionID)
+	}
+	parent.SupersededBy, parent.SupersededAt = derived.ID, validTimestamp(1)
+	derived.ArtifactLevel = 1
+	derived.ParentIds = []pgtype.UUID{parent.ID}
+	queries := &sourceValidityProjectionQueries{
+		rows: map[pgtype.UUID]sqlc.BotHistoryMessageCompact{
+			parent.ID:  parent,
+			derived.ID: derived,
+		},
+		lineage: []sqlc.BotHistoryMessageCompact{derived, parent},
+		invalidSeeds: []sqlc.ListInvalidCompactionArtifactSeedsBySessionRow{{
+			ID:       derived.ID,
+			Coverage: []byte(`[]`),
+		}},
+	}
+	frontier, err := NewArtifactProjection(queries).LoadActiveSession(context.Background(), ArtifactOwner{
+		BotID:          botID,
+		SessionID:      sessionID,
+		SessionIDKnown: true,
+	})
+	if err != nil {
+		t.Fatalf("LoadActiveSession() error = %v", err)
+	}
+	if len(frontier.Artifacts) != 1 || frontier.Artifacts[0].ID != parentID {
+		t.Fatalf("frontier = %#v, want restored parent %q", frontier.Artifacts, parentID)
+	}
+}
+
+func TestArtifactProjectionRestoresLeavesForNestedEmptyCoverageDerivedSeeds(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID     = "00000000-0000-0000-0000-00000000ba07"
+		sessionID = "00000000-0000-0000-0000-00000000fa07"
+	)
+	ids := []string{
+		"00000000-0000-0000-0000-00000000cb01",
+		"00000000-0000-0000-0000-00000000cb02",
+		"00000000-0000-0000-0000-00000000cb03",
+		"00000000-0000-0000-0000-00000000cb04",
+		"00000000-0000-0000-0000-00000000cb05",
+	}
+	rows := make([]sqlc.BotHistoryMessageCompact, len(ids))
+	for index, id := range ids {
+		rows[index] = projectionRow(t, id)
+		rows[index].BotID = mustProjectionUUID(t, botID)
+		rows[index].SessionID = mustProjectionUUID(t, sessionID)
+	}
+	first, second, third, middle, top := &rows[0], &rows[1], &rows[2], &rows[3], &rows[4]
+	first.SupersededBy, first.SupersededAt = middle.ID, validTimestamp(1)
+	second.SupersededBy, second.SupersededAt = middle.ID, validTimestamp(1)
+	middle.ArtifactLevel = 1
+	middle.ParentIds = []pgtype.UUID{first.ID, second.ID}
+	middle.SupersededBy, middle.SupersededAt = top.ID, validTimestamp(2)
+	third.SupersededBy, third.SupersededAt = top.ID, validTimestamp(2)
+	top.ArtifactLevel = 2
+	top.ParentIds = []pgtype.UUID{middle.ID, third.ID}
+	queries := &sourceValidityProjectionQueries{
+		rows: map[pgtype.UUID]sqlc.BotHistoryMessageCompact{
+			first.ID: *first, second.ID: *second, third.ID: *third,
+			middle.ID: *middle, top.ID: *top,
+		},
+		lineage: rows,
+		invalidSeeds: []sqlc.ListInvalidCompactionArtifactSeedsBySessionRow{
+			{ID: middle.ID, Coverage: []byte(`[]`)},
+			{ID: top.ID, Coverage: []byte(`[]`)},
+		},
+	}
+	frontier, err := NewArtifactProjection(queries).LoadActiveSession(context.Background(), ArtifactOwner{
+		BotID: botID, SessionID: sessionID, SessionIDKnown: true,
+	})
+	if err != nil {
+		t.Fatalf("LoadActiveSession() error = %v", err)
+	}
+	if got := artifactIDs(frontier.Artifacts); !equalArtifactIDs(got, ids[:3]) {
+		t.Fatalf("nested fallback frontier = %#v, want leaves %#v", got, ids[:3])
+	}
+}
+
 func TestArtifactProjectionPropagatesSourceValidityStorageError(t *testing.T) {
 	t.Parallel()
 
@@ -191,10 +284,11 @@ func (*projectionQueries) ListInvalidCompactionArtifactSeedsBySession(context.Co
 }
 
 type sourceValidityProjectionQueries struct {
-	rows       map[pgtype.UUID]sqlc.BotHistoryMessageCompact
-	lineage    []sqlc.BotHistoryMessageCompact
-	invalidIDs []pgtype.UUID
-	invalidErr error
+	rows         map[pgtype.UUID]sqlc.BotHistoryMessageCompact
+	lineage      []sqlc.BotHistoryMessageCompact
+	invalidIDs   []pgtype.UUID
+	invalidSeeds []sqlc.ListInvalidCompactionArtifactSeedsBySessionRow
+	invalidErr   error
 }
 
 func (q *sourceValidityProjectionQueries) GetCompactionLogByID(_ context.Context, id pgtype.UUID) (sqlc.BotHistoryMessageCompact, error) {
@@ -220,6 +314,9 @@ func (q *sourceValidityProjectionQueries) ListCompactionArtifactParentIDsBySucce
 }
 
 func (q *sourceValidityProjectionQueries) ListInvalidCompactionArtifactSeedsBySession(context.Context, sqlc.ListInvalidCompactionArtifactSeedsBySessionParams) ([]sqlc.ListInvalidCompactionArtifactSeedsBySessionRow, error) {
+	if q.invalidSeeds != nil {
+		return q.invalidSeeds, q.invalidErr
+	}
 	seeds := make([]sqlc.ListInvalidCompactionArtifactSeedsBySessionRow, 0, len(q.invalidIDs))
 	for _, id := range q.invalidIDs {
 		seeds = append(seeds, sqlc.ListInvalidCompactionArtifactSeedsBySessionRow{ID: id, Coverage: q.rows[id].Coverage})
