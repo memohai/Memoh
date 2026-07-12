@@ -116,7 +116,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 				displayText = receipt.DisplayText
 				assets = chatAttachmentsToAssetRefs(receipt.Attachments)
 				persistMeta = receipt.Metadata
-				if receipt == req.UserReceipt {
+				if sameUserReceipt(receipt, req.UserReceipt) {
 					persistMeta = mergeMetadata(mergeMetadata(meta, buildInteractionMetadata(req)), receipt.Metadata)
 				} else {
 					injectionReceiptID = strings.TrimSpace(receipt.ID)
@@ -236,4 +236,15 @@ func commitInjectionReceipt(feed conversation.InjectionFeed, receiptID string) {
 		return
 	}
 	feed.CommitPersisted(strings.TrimSpace(receiptID))
+}
+
+func sameUserReceipt(candidate, leading *conversation.UserMessageReceipt) bool {
+	if candidate == nil || leading == nil {
+		return false
+	}
+	if candidate == leading {
+		return true
+	}
+	candidateID := strings.TrimSpace(candidate.ID)
+	return candidateID != "" && candidateID == strings.TrimSpace(leading.ID)
 }

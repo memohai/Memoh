@@ -162,7 +162,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		defer rc.closeInjectionBridge()
 		streamReq.Query = rc.query
 
-		go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), streamReq, streamReq.RawQuery)
+		go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), withoutInjectionCapabilities(streamReq), streamReq.RawQuery)
 
 		cfg := rc.runConfig
 		cfg.LiveToolStream = true
@@ -357,7 +357,7 @@ func (r *Resolver) streamChatWSResultWithHooks(
 	defer rc.closeInjectionBridge()
 	req.Query = rc.query
 
-	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
+	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), withoutInjectionCapabilities(req), req.RawQuery)
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

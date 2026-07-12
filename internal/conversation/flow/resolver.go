@@ -588,7 +588,7 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	defer r.finishPromptCompaction(ctx, req, rc)
 	req.Query = rc.query
 
-	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
+	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), withoutInjectionCapabilities(req), req.RawQuery)
 
 	cfg := rc.runConfig
 	cfg = r.prepareRunConfig(ctx, cfg)

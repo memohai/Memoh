@@ -20,6 +20,40 @@ type failingBatchMessageService struct {
 	batchInputs []messagepkg.PersistInput
 }
 
+func TestWithoutInjectionCapabilitiesPreservesRequestData(t *testing.T) {
+	t.Parallel()
+
+	source := make(chan conversation.InjectMessage)
+	req := conversation.ChatRequest{
+		BotID:    "bot-1",
+		InjectCh: source,
+		InjectionFeed: conversation.InjectionFeed{
+			Messages: source,
+			CommitPersisted: func(string) bool {
+				return true
+			},
+		},
+	}
+	clean := withoutInjectionCapabilities(req)
+	if clean.BotID != req.BotID || clean.InjectCh != nil || clean.InjectionFeed.Messages != nil ||
+		clean.InjectionFeed.CommitPersisted != nil {
+		t.Fatalf("sanitized request = %#v", clean)
+	}
+
+	runtime := withoutInjectionRuntime(resolvedContext{
+		injectionReceipts: newInjectionReceiptRegistry(),
+		injectionBridge:   &injectionBridge{},
+		runConfig: agentpkg.RunConfig{
+			InjectCh:         make(chan agentpkg.InjectMessage),
+			InjectedRecorder: func(agentpkg.InjectedReceipt) {},
+		},
+	})
+	if runtime.injectionReceipts != nil || runtime.injectionBridge != nil || runtime.runConfig.InjectCh != nil ||
+		runtime.runConfig.InjectedRecorder != nil {
+		t.Fatalf("sanitized runtime = %#v", runtime)
+	}
+}
+
 func (s *failingBatchMessageService) PersistToolTailRound(_ context.Context, inputs []messagepkg.PersistInput) ([]messagepkg.Message, bool, error) {
 	s.batchInputs = append(s.batchInputs, inputs...)
 	return nil, true, errors.New("batch failed")
@@ -78,6 +112,7 @@ func TestStoreMessagesCommitsOnlyInjectedReceiptAfterSequentialPersist(t *testin
 	committed := make([]string, 0, 1)
 	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
 	leading := &conversation.UserMessageReceipt{ID: "receipt-leading", DisplayText: "leading"}
+	leadingCopy := *leading
 	injected := &conversation.UserMessageReceipt{ID: "receipt-injected", DisplayText: "injected"}
 	resolver.storeMessages(context.Background(), conversation.ChatRequest{
 		BotID: storeRoundBotID, UserReceipt: leading,
@@ -89,7 +124,7 @@ func TestStoreMessagesCommitsOnlyInjectedReceiptAfterSequentialPersist(t *testin
 			return true
 		}},
 	}, []conversation.ModelMessage{
-		{Role: "user", Content: conversation.NewTextContent("leading"), UserReceipt: leading},
+		{Role: "user", Content: conversation.NewTextContent("leading"), UserReceipt: &leadingCopy},
 		{Role: "user", Content: conversation.NewTextContent("injected"), UserReceipt: injected},
 		{Role: "assistant", Content: conversation.NewTextContent("done")},
 	}, "", storeRoundOptions{})

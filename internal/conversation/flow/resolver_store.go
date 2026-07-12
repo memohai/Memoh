@@ -75,7 +75,7 @@ func (r *Resolver) storeRoundWithOptionsResult(ctx context.Context, req conversa
 
 	persisted := r.storeMessages(ctx, req, filtered, modelID, opts)
 	if !opts.SkipMemory && !req.SkipMemoryExtraction {
-		go r.storeMemory(context.WithoutCancel(ctx), req, filtered)
+		go r.storeMemory(context.WithoutCancel(ctx), withoutInjectionCapabilities(req), filtered)
 	}
 
 	return persisted, nil

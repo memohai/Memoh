@@ -106,6 +106,20 @@ func (rc resolvedContext) closeInjectionBridge() {
 	rc.injectionBridge.Close()
 }
 
+func withoutInjectionCapabilities(req conversation.ChatRequest) conversation.ChatRequest {
+	req.InjectCh = nil
+	req.InjectionFeed = conversation.InjectionFeed{}
+	return req
+}
+
+func withoutInjectionRuntime(rc resolvedContext) resolvedContext {
+	rc.injectionReceipts = nil
+	rc.injectionBridge = nil
+	rc.runConfig.InjectCh = nil
+	rc.runConfig.InjectedRecorder = nil
+	return rc
+}
+
 type injectionReceiptRegistry struct {
 	mu      sync.Mutex
 	pending map[agentpkg.InjectionReceiptID]conversation.UserMessageReceipt

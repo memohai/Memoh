@@ -45,8 +45,20 @@ func (p *triggerPromptProvider) DoGenerate(context.Context, sdk.GenerateParams) 
 	}, nil
 }
 
-func (*triggerPromptProvider) DoStream(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
-	return nil, errors.New("unexpected stream")
+func (p *triggerPromptProvider) DoStream(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+	if p.err != nil {
+		return nil, p.err
+	}
+	stream := make(chan sdk.StreamPart, 8)
+	stream <- &sdk.StartPart{}
+	stream <- &sdk.StartStepPart{}
+	stream <- &sdk.TextStartPart{ID: "text-1"}
+	stream <- &sdk.TextDeltaPart{ID: "text-1", Text: "done"}
+	stream <- &sdk.TextEndPart{ID: "text-1"}
+	stream <- &sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}
+	stream <- &sdk.FinishPart{FinishReason: sdk.FinishReasonStop}
+	close(stream)
+	return &sdk.StreamResult{Stream: stream}, nil
 }
 
 func TestFinishPromptCompactionConsumesKnownPressure(t *testing.T) {
@@ -105,9 +117,11 @@ func TestResolvedContextWithoutReceiptCannotClaimCompaction(t *testing.T) {
 func TestPromptReceiptConsumedAcrossSynchronousEntryPoints(t *testing.T) {
 	providerFailure := errors.New("provider failed")
 	for _, test := range []struct {
-		name        string
-		providerErr error
-		run         func(*Resolver) error
+		name                  string
+		providerErr           error
+		suppressProviderError bool
+		skipPromptCompaction  bool
+		run                   func(*Resolver) error
 	}{
 		{
 			name: "chat success",
@@ -136,6 +150,54 @@ func TestPromptReceiptConsumedAcrossSynchronousEntryPoints(t *testing.T) {
 					SkipTitleGeneration:  true,
 				})
 				return err
+			},
+		},
+		{
+			name:                 "stream chat success",
+			skipPromptCompaction: true,
+			run: func(resolver *Resolver) error {
+				chunks, errs := resolver.StreamChat(context.Background(), conversation.ChatRequest{
+					BotID:                "bot",
+					ChatID:               "chat",
+					SessionID:            "session",
+					Query:                "hello",
+					UserMessagePersisted: true,
+					SkipTitleGeneration:  true,
+				})
+				for range chunks {
+				}
+				var streamErr error
+				for err := range errs {
+					if err != nil {
+						streamErr = err
+					}
+				}
+				return streamErr
+			},
+		},
+		{
+			name:                  "stream chat provider error",
+			providerErr:           providerFailure,
+			suppressProviderError: true,
+			skipPromptCompaction:  true,
+			run: func(resolver *Resolver) error {
+				chunks, errs := resolver.StreamChat(context.Background(), conversation.ChatRequest{
+					BotID:                "bot",
+					ChatID:               "chat",
+					SessionID:            "session",
+					Query:                "hello",
+					UserMessagePersisted: true,
+					SkipTitleGeneration:  true,
+				})
+				for range chunks {
+				}
+				var streamErr error
+				for err := range errs {
+					if err != nil {
+						streamErr = err
+					}
+				}
+				return streamErr
 			},
 		},
 		{
@@ -180,6 +242,13 @@ func TestPromptReceiptConsumedAcrossSynchronousEntryPoints(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			bridgeCtx, cancelBridge := context.WithCancel(context.Background())
+			bridgeDone := make(chan struct{})
+			go func() {
+				<-bridgeCtx.Done()
+				close(bridgeDone)
+			}()
+			t.Cleanup(cancelBridge)
 			state := &initialPromptState{}
 			state.Store(initialPromptResult{
 				AccountingReady: true,
@@ -197,6 +266,10 @@ func TestPromptReceiptConsumedAcrossSynchronousEntryPoints(t *testing.T) {
 				},
 				provider:    sqlc.Provider{ClientType: "trigger-prompt"},
 				promptState: state,
+				injectionBridge: &injectionBridge{
+					cancel: cancelBridge,
+					done:   bridgeDone,
+				},
 			}
 			triggered := make(chan int, 1)
 			resolver := &Resolver{
@@ -215,19 +288,29 @@ func TestPromptReceiptConsumedAcrossSynchronousEntryPoints(t *testing.T) {
 			if test.providerErr == nil && err != nil {
 				t.Fatalf("entry point error = %v", err)
 			}
-			if test.providerErr != nil && !errors.Is(err, test.providerErr) {
+			if test.providerErr != nil && !test.suppressProviderError && !errors.Is(err, test.providerErr) {
 				t.Fatalf("entry point error = %v, want %v", err, test.providerErr)
 			}
-			select {
-			case pressure := <-triggered:
-				if pressure != 47 {
-					t.Fatalf("triggered pressure = %d, want 47", pressure)
-				}
-			case <-time.After(time.Second):
-				t.Fatal("entry point did not trigger prompt compaction")
+			if test.suppressProviderError && err != nil {
+				t.Fatalf("stream entry point error = %v, want nil", err)
 			}
-			if _, _, claimed := resolved.claimCompactionPressure(); claimed {
-				t.Fatal("entry point left the receipt unconsumed")
+			if !test.skipPromptCompaction {
+				select {
+				case pressure := <-triggered:
+					if pressure != 47 {
+						t.Fatalf("triggered pressure = %d, want 47", pressure)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("entry point did not trigger prompt compaction")
+				}
+				if _, _, claimed := resolved.claimCompactionPressure(); claimed {
+					t.Fatal("entry point left the receipt unconsumed")
+				}
+			}
+			select {
+			case <-bridgeDone:
+			case <-time.After(time.Second):
+				t.Fatal("entry point did not close injection bridge")
 			}
 		})
 	}

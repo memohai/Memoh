@@ -42,7 +42,12 @@ func (r *Resolver) finishPromptCompaction(ctx context.Context, req conversation.
 	if r.promptCompactionFn != nil {
 		compact = r.promptCompactionFn
 	}
-	go compact(context.WithoutCancel(ctx), req, rc, pressure)
+	go compact(
+		context.WithoutCancel(ctx),
+		withoutInjectionCapabilities(req),
+		withoutInjectionRuntime(rc),
+		pressure,
+	)
 }
 
 func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, inputTokens int) {
