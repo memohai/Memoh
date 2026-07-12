@@ -64,9 +64,13 @@ type routeState struct {
 // It decides whether a new message should be injected into an active stream,
 // run in parallel, or be queued.
 type RouteDispatcher struct {
-	mu     sync.RWMutex
-	routes map[string]*routeState
-	logger *slog.Logger
+	mu             sync.RWMutex
+	routes         map[string]*routeState
+	lifecycleMu    sync.Mutex
+	routeLifecycle map[string]*routeLifecycleState
+	nextLeaseID    uint64
+	nextEpoch      uint64
+	logger         *slog.Logger
 }
 
 // NewRouteDispatcher creates a dispatcher with background cleanup.
@@ -75,8 +79,9 @@ func NewRouteDispatcher(logger *slog.Logger) *RouteDispatcher {
 		logger = slog.Default()
 	}
 	return &RouteDispatcher{
-		routes: make(map[string]*routeState),
-		logger: logger.With(slog.String("component", "route_dispatcher")),
+		routes:         make(map[string]*routeState),
+		routeLifecycle: make(map[string]*routeLifecycleState),
+		logger:         logger.With(slog.String("component", "route_dispatcher")),
 	}
 }
 
