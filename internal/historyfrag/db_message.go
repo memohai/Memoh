@@ -51,6 +51,12 @@ func FromDBMessageWithLogger(log *slog.Logger, msg messagepkg.Message, fallback 
 	ref.HashScope = contextfrag.HashScopeSourcePayload
 	ref.ContentHash = DBMessageSourceHash(msg).Value
 	scope := scopeFromDBMessage(msg, fallback)
+	if sourceContext.Version == messagesource.Version1 {
+		scope.DisplayName = sourceContext.SenderDisplayName
+		scope.Platform = sourceContext.Platform
+		scope.ConversationType = sourceContext.ConversationType
+		scope.ConversationName = sourceContext.ConversationName
+	}
 	provenance := contextfrag.Provenance{
 		Source:    string(SourceDBMessage),
 		SourceID:  rowID,

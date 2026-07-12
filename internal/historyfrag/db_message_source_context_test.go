@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/messagesource"
@@ -139,6 +140,73 @@ func TestFromDBMessageKeepsLiveScopeOutOfCanonicalSourceHash(t *testing.T) {
 	}
 	if first.Scope.ReplyTarget == second.Scope.ReplyTarget {
 		t.Fatal("test setup did not vary live placement scope")
+	}
+}
+
+func TestFromDBMessageUsesCanonicalSourceContextForRestackScope(t *testing.T) {
+	t.Parallel()
+
+	msg := messagepkg.Message{
+		ID:                      "row-1",
+		BotID:                   "bot-1",
+		SessionID:               "session-1",
+		SenderChannelIdentityID: "identity-1",
+		SenderDisplayName:       "Renamed Sender",
+		Platform:                "live-platform",
+		ExternalMessageID:       "message-1",
+		SourceReplyToMessageID:  "message-0",
+		EventID:                 "event-1",
+		Role:                    "user",
+		Content:                 conversation.NewTextContent("hello"),
+		SourceContext: messagesource.NewV1(
+			"Historical Sender",
+			"telegram",
+			"group",
+			"Historical Room",
+		),
+	}
+	record, err := FromDBMessage(msg, ScopeFallback{
+		ChatID:           "chat-1",
+		ConversationType: "private",
+		ConversationName: "Renamed Room",
+		ReplyTarget:      "live-target",
+	})
+	if err != nil {
+		t.Fatalf("source record: %v", err)
+	}
+	for name, scope := range map[string]contextfrag.Scope{
+		"record": record.Scope,
+		"frag":   ToFrag(record).Scope,
+	} {
+		if scope.DisplayName != "Historical Sender" || scope.Platform != "telegram" ||
+			scope.ConversationType != "group" || scope.ConversationName != "Historical Room" {
+			t.Fatalf("%s canonical scope = %+v", name, scope)
+		}
+		if scope.ChatID != "chat-1" || scope.ReplyTarget != "live-target" ||
+			scope.CurrentMessageID != "message-1" || scope.ReplyToMessageID != "message-0" {
+			t.Fatalf("%s placement scope = %+v", name, scope)
+		}
+	}
+	emptyContextMessage := msg
+	emptyContextMessage.SourceContext = messagesource.NewV1("", "", "", "")
+	emptyContextRecord, err := FromDBMessage(emptyContextMessage, ScopeFallback{
+		ChatID: "chat-1", ConversationType: "private",
+		ConversationName: "Live Room", ReplyTarget: "live-target",
+	})
+	if err != nil {
+		t.Fatalf("empty source context record: %v", err)
+	}
+	for name, scope := range map[string]contextfrag.Scope{
+		"record": emptyContextRecord.Scope,
+		"frag":   ToFrag(emptyContextRecord).Scope,
+	} {
+		if scope.DisplayName != "" || scope.Platform != "" ||
+			scope.ConversationType != "" || scope.ConversationName != "" {
+			t.Fatalf("%s empty canonical scope leaked live values: %+v", name, scope)
+		}
+		if scope.ChatID != "chat-1" || scope.ReplyTarget != "live-target" {
+			t.Fatalf("%s empty canonical scope lost placement: %+v", name, scope)
+		}
 	}
 }
 
