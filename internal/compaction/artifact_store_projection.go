@@ -143,18 +143,20 @@ func (p ArtifactProjection) LoadActiveSession(ctx context.Context, owner Artifac
 	if err != nil {
 		return ArtifactFrontier{}, err
 	}
-	if invalidSourceCoveragePresent(invalidSources) {
-		return p.loadActiveSessionWithFullLineage(ctx, owner, invalidSources)
-	}
 	metadata := make([]artifactLineageMetadata, 0, len(metadataRows))
 	expected := make(map[string]artifactLineageMetadata, len(metadataRows))
+	lineageValidated := true
 	for _, row := range metadataRows {
+		lineageValidated = lineageValidated && row.LineageValidated
 		artifact, err := artifactMetadataFromDBRow(row)
 		if err != nil {
 			return ArtifactFrontier{}, err
 		}
 		metadata = append(metadata, artifact)
 		expected[artifact.ID] = artifact
+	}
+	if !lineageValidated {
+		return p.loadActiveSessionWithFullLineage(ctx, owner, invalidSources)
 	}
 	plan := buildArtifactProjectionPlan(metadata, owner, invalidSources)
 	if len(plan.active) == 0 {
@@ -227,15 +229,6 @@ func (p ArtifactProjection) loadActiveSessionWithFullLineage(
 		artifacts = append(artifacts, artifact)
 	}
 	return buildArtifactFrontierExcludingInvalidSources(artifacts, owner, invalidSources), nil
-}
-
-func invalidSourceCoveragePresent(invalidSources map[string][]CoveredSource) bool {
-	for _, coverage := range invalidSources {
-		if len(coverage) > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 func artifactFrontierFromProjectionPlan(

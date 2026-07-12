@@ -44,6 +44,79 @@ func TestLoadActiveSessionHydratesOnlyActiveTerminalPayload(t *testing.T) {
 	}
 }
 
+func TestLoadActiveSessionFallsBackForUnvalidatedLineage(t *testing.T) {
+	t.Parallel()
+
+	owner, terminal := projectionPayloadTerminal(t)
+	queries := &sourceValidityProjectionQueries{
+		rows:        map[pgtype.UUID]sqlc.BotHistoryMessageCompact{terminal.ID: terminal},
+		lineage:     []sqlc.BotHistoryMessageCompact{terminal},
+		unvalidated: true,
+	}
+	frontier, err := NewArtifactProjection(queries).LoadActiveSession(context.Background(), owner)
+	if err != nil {
+		t.Fatalf("LoadActiveSession() error = %v", err)
+	}
+	if queries.fullLineageCalls != 1 || len(queries.payloadCalls) != 0 {
+		t.Fatalf("unvalidated loads = full %d, payload %#v, want full lineage", queries.fullLineageCalls, queries.payloadCalls)
+	}
+	if len(frontier.Artifacts) != 1 || frontier.Artifacts[0].ID != terminal.ID.String() {
+		t.Fatalf("frontier = %#v, want legacy terminal", frontier.Artifacts)
+	}
+}
+
+func TestLoadActiveSessionFallsBackForMixedValidationProvenance(t *testing.T) {
+	t.Parallel()
+
+	owner, parents, terminal := projectionPayloadLineage(t)
+	queries := &sourceValidityProjectionQueries{
+		rows: map[pgtype.UUID]sqlc.BotHistoryMessageCompact{
+			parents[0].ID: parents[0],
+			parents[1].ID: parents[1],
+			terminal.ID:   terminal,
+		},
+		lineage: []sqlc.BotHistoryMessageCompact{parents[0], parents[1], terminal},
+		unvalidatedIDs: map[pgtype.UUID]struct{}{
+			parents[0].ID: {},
+		},
+	}
+	frontier, err := NewArtifactProjection(queries).LoadActiveSession(context.Background(), owner)
+	if err != nil {
+		t.Fatalf("LoadActiveSession() error = %v", err)
+	}
+	if queries.fullLineageCalls != 1 || len(queries.payloadCalls) != 0 {
+		t.Fatalf("mixed-provenance loads = full %d, payload %#v, want full lineage", queries.fullLineageCalls, queries.payloadCalls)
+	}
+	if len(frontier.Artifacts) != 1 || frontier.Artifacts[0].ID != terminal.ID.String() {
+		t.Fatalf("frontier = %#v, want resolved terminal", frontier.Artifacts)
+	}
+}
+
+func TestLoadActiveSessionKeepsValidatedInvalidationOnMetadataPath(t *testing.T) {
+	t.Parallel()
+
+	owner, parents, terminal := projectionPayloadLineage(t)
+	queries := &sourceValidityProjectionQueries{
+		rows: map[pgtype.UUID]sqlc.BotHistoryMessageCompact{
+			parents[0].ID: parents[0],
+			parents[1].ID: parents[1],
+			terminal.ID:   terminal,
+		},
+		lineage:    []sqlc.BotHistoryMessageCompact{parents[0], parents[1], terminal},
+		invalidIDs: []pgtype.UUID{parents[0].ID},
+	}
+	frontier, err := NewArtifactProjection(queries).LoadActiveSession(context.Background(), owner)
+	if err != nil {
+		t.Fatalf("LoadActiveSession() error = %v", err)
+	}
+	if queries.fullLineageCalls != 0 || len(queries.payloadCalls) != 1 || !sameProjectionUUIDSet(queries.payloadCalls[0], parents[1].ID) {
+		t.Fatalf("validated invalidation loads = full %d, payload %#v, want valid fallback only", queries.fullLineageCalls, queries.payloadCalls)
+	}
+	if len(frontier.Artifacts) != 1 || frontier.Artifacts[0].ID != parents[1].ID.String() {
+		t.Fatalf("frontier = %#v, want valid parent fallback", frontier.Artifacts)
+	}
+}
+
 func TestLoadActiveSessionRejectsInvalidPayloadResultSet(t *testing.T) {
 	t.Parallel()
 

@@ -407,17 +407,19 @@ func historyRecord(id string, msg conversation.ModelMessage, mutate func(*histor
 
 type recordingCompactionLogQueries struct {
 	dbstore.Queries
-	logs         []sqlc.BotHistoryMessageCompact
-	refs         map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow
-	byID         map[pgtype.UUID]sqlc.BotHistoryMessageCompact
-	invalidIDs   []pgtype.UUID
-	sessionID    pgtype.UUID
-	listCalls    int
-	refCalls     []pgtype.UUID
-	getCalls     []pgtype.UUID
-	payloadCalls [][]pgtype.UUID
-	listErr      error
-	refErr       error
+	logs          []sqlc.BotHistoryMessageCompact
+	refs          map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow
+	byID          map[pgtype.UUID]sqlc.BotHistoryMessageCompact
+	invalidIDs    []pgtype.UUID
+	validatedIDs  map[pgtype.UUID]struct{}
+	sessionID     pgtype.UUID
+	listCalls     int
+	metadataCalls int
+	refCalls      []pgtype.UUID
+	getCalls      []pgtype.UUID
+	payloadCalls  [][]pgtype.UUID
+	listErr       error
+	refErr        error
 }
 
 func (q *recordingCompactionLogQueries) GetCompactionLogByID(_ context.Context, compactID pgtype.UUID) (sqlc.BotHistoryMessageCompact, error) {
@@ -443,9 +445,10 @@ func (q *recordingCompactionLogQueries) ListCompactionArtifactLineageBySession(_
 
 func (q *recordingCompactionLogQueries) ListCompactionArtifactLineageMetadataBySession(_ context.Context, sessionID pgtype.UUID) ([]sqlc.ListCompactionArtifactLineageMetadataBySessionRow, error) {
 	q.sessionID = sessionID
-	q.listCalls++
+	q.metadataCalls++
 	rows := make([]sqlc.ListCompactionArtifactLineageMetadataBySessionRow, 0, len(q.logs))
 	for _, row := range q.logs {
+		_, lineageValidated := q.validatedIDs[row.ID]
 		coverageCount := int32(0)
 		var coverage []json.RawMessage
 		if len(row.Coverage) > 0 && json.Unmarshal(row.Coverage, &coverage) != nil {
@@ -455,7 +458,7 @@ func (q *recordingCompactionLogQueries) ListCompactionArtifactLineageMetadataByS
 		}
 		rows = append(rows, sqlc.ListCompactionArtifactLineageMetadataBySessionRow{
 			ID: row.ID, BotID: row.BotID, SessionID: row.SessionID, Status: row.Status,
-			HasSummary: strings.TrimSpace(row.Summary) != "", CoverageCount: coverageCount,
+			HasSummary: strings.TrimSpace(row.Summary) != "", LineageValidated: lineageValidated, CoverageCount: coverageCount,
 			AnchorStartMs: row.AnchorStartMs, AnchorEndMs: row.AnchorEndMs,
 			ArtifactLevel: row.ArtifactLevel, ParentIds: row.ParentIds,
 			SupersededBy: row.SupersededBy, SupersededAt: row.SupersededAt, StartedAt: row.StartedAt,

@@ -121,8 +121,9 @@ func TestArtifactProjectionAppliesSourceInvalidationForSessionAndPointLoads(t *t
 			validSibling.ID:  validSibling,
 			derived.ID:       derived,
 		},
-		lineage:    []sqlc.BotHistoryMessageCompact{derived, invalidParent, validSibling},
-		invalidIDs: []pgtype.UUID{invalidParent.ID},
+		lineage:     []sqlc.BotHistoryMessageCompact{derived, invalidParent, validSibling},
+		invalidIDs:  []pgtype.UUID{invalidParent.ID},
+		unvalidated: true,
 	}
 	projection := NewArtifactProjection(queries)
 	owner := ArtifactOwner{BotID: botID, SessionID: sessionID, SessionIDKnown: true}
@@ -308,6 +309,8 @@ type sourceValidityProjectionQueries struct {
 	invalidIDs       []pgtype.UUID
 	invalidSeeds     []sqlc.ListInvalidCompactionArtifactSeedsBySessionRow
 	invalidErr       error
+	unvalidated      bool
+	unvalidatedIDs   map[pgtype.UUID]struct{}
 	payloadFn        func([]pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error)
 	metadataCalls    int
 	fullLineageCalls int
@@ -329,7 +332,14 @@ func (q *sourceValidityProjectionQueries) ListCompactionArtifactLineageBySession
 
 func (q *sourceValidityProjectionQueries) ListCompactionArtifactLineageMetadataBySession(context.Context, pgtype.UUID) ([]sqlc.ListCompactionArtifactLineageMetadataBySessionRow, error) {
 	q.metadataCalls++
-	return projectionMetadataRows(q.lineage), nil
+	rows := projectionMetadataRows(q.lineage)
+	for index := range rows {
+		_, unvalidated := q.unvalidatedIDs[rows[index].ID]
+		if q.unvalidated || unvalidated {
+			rows[index].LineageValidated = false
+		}
+	}
+	return rows, nil
 }
 
 func (q *sourceValidityProjectionQueries) ListCompactionArtifactPayloadsByIDs(_ context.Context, ids []pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
@@ -379,7 +389,7 @@ func projectionMetadataRows(rows []sqlc.BotHistoryMessageCompact) []sqlc.ListCom
 		}
 		metadata = append(metadata, sqlc.ListCompactionArtifactLineageMetadataBySessionRow{
 			ID: row.ID, BotID: row.BotID, SessionID: row.SessionID, Status: row.Status,
-			HasSummary: strings.TrimSpace(row.Summary) != "", CoverageCount: coverageCount,
+			HasSummary: strings.TrimSpace(row.Summary) != "", LineageValidated: true, CoverageCount: coverageCount,
 			AnchorStartMs: row.AnchorStartMs, AnchorEndMs: row.AnchorEndMs,
 			ArtifactLevel: row.ArtifactLevel, ParentIds: row.ParentIds,
 			SupersededBy: row.SupersededBy, SupersededAt: row.SupersededAt, StartedAt: row.StartedAt,
