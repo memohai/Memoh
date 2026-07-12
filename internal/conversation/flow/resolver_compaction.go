@@ -98,58 +98,6 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 	r.compactionService.TriggerCompaction(ctx, cfg)
 }
 
-// runCompactionSync runs compaction synchronously when context reaches
-// 70% of the model's context window and reports the session-scoped result.
-// A noop (failure cooldown, another compaction in flight, or nothing to
-// compact) leaves this turn's context untouched: the request proceeds as-is,
-// possibly still above the threshold, and the next turn re-evaluates.
-func (r *Resolver) runCompactionSync(ctx context.Context, req conversation.ChatRequest, inputTokens, contextTokenBudget int) compaction.Result {
-	if r.compactionService == nil || r.settingsService == nil {
-		r.logger.Warn("compaction sync: skipped, service or settings nil")
-		return compaction.Result{}
-	}
-	botSettings, err := r.settingsService.GetBot(ctx, req.BotID)
-	if err != nil {
-		r.logger.Warn("compaction sync: failed to load settings", slog.Any("error", err))
-		return compaction.Result{}
-	}
-	if !botSettings.CompactionEnabled {
-		r.logger.Warn("compaction sync: compaction disabled, skipping")
-		return compaction.Result{}
-	}
-
-	cfg, err := r.buildCompactionConfig(ctx, req, botSettings, inputTokens)
-	if err != nil {
-		r.logger.Warn("compaction sync: failed to build config", slog.Any("error", err))
-		return compaction.Result{}
-	}
-	if cfg.ModelID == "" {
-		// Same skip path as the async trigger above — no model or model
-		// disabled means there is nothing to compact.
-		return compaction.Result{}
-	}
-	cfg.TargetTokens = syncCompactionTargetTokens(contextTokenBudget, cfg.Ratio)
-
-	r.logger.Info("compaction sync: running synchronously",
-		slog.String("bot_id", req.BotID),
-		slog.String("session_id", req.SessionID),
-		slog.Int("input_tokens", inputTokens),
-		slog.String("model_id", cfg.ModelID),
-	)
-
-	res, err := r.compactionService.RunCompactionSync(ctx, cfg)
-	if err != nil {
-		r.logger.Warn("compaction sync: failed", slog.Any("error", err))
-		return compaction.Result{}
-	}
-	r.logger.Info("compaction sync: finished",
-		slog.String("bot_id", req.BotID),
-		slog.String("session_id", req.SessionID),
-		slog.String("status", res.Status),
-	)
-	return res
-}
-
 // buildCompactionConfig resolves the compaction model, provider credentials,
 // and sets MaxCompactTokens to 90% of the compaction model's context window.
 func (r *Resolver) buildCompactionConfig(ctx context.Context, req conversation.ChatRequest, botSettings settings.Settings, inputTokens int) (compaction.TriggerConfig, error) {

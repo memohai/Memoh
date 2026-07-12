@@ -106,6 +106,34 @@ func TestFinishPromptCompactionConsumesUnknownPressureWithoutTriggering(t *testi
 	}
 }
 
+func TestFinishPromptCompactionDoesNotRetriggerPreSendAttempt(t *testing.T) {
+	t.Parallel()
+
+	state := &initialPromptState{}
+	state.Store(initialPromptResult{
+		AccountingReady: true,
+		Allocation:      contextbudget.Allocation{CompactableTokens: 31},
+	}, nil)
+	if !state.ClaimCompaction() {
+		t.Fatal("ClaimCompaction() = false, want pre-send owner")
+	}
+	triggered := make(chan struct{}, 1)
+	resolver := &Resolver{
+		logger: slog.New(slog.DiscardHandler),
+		promptCompactionFn: func(context.Context, conversation.ChatRequest, resolvedContext, int) {
+			triggered <- struct{}{}
+		},
+	}
+
+	resolver.finishPromptCompaction(context.Background(), conversation.ChatRequest{}, resolvedContext{promptState: state})
+
+	select {
+	case <-triggered:
+		t.Fatal("finishPromptCompaction() retriggered a pre-send attempt")
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
 func TestResolvedContextWithoutReceiptCannotClaimCompaction(t *testing.T) {
 	t.Parallel()
 

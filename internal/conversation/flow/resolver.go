@@ -106,6 +106,7 @@ type Resolver struct {
 	hookService        *hooks.Service
 	resolveContextFn   func(context.Context, conversation.ChatRequest) (resolvedContext, error)
 	promptCompactionFn func(context.Context, conversation.ChatRequest, resolvedContext, int)
+	syncCompactionFn   func(context.Context, conversation.ChatRequest, int, int) (compaction.Result, error)
 	memoryContextMu    sync.Mutex
 	memoryContextCache *memprovider.MemoryContextCache
 	acpPromptMu        sync.Mutex
@@ -382,8 +383,13 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	var historyRecords []historyfrag.HistoryRecord
 	var promptProjection budgetSourceProjection
 	var compactableTokens int
+	var preSendCompactionAttempted bool
 	if usePipeline {
 		built, buildErr := r.buildPipelineContext(ctx, req, 0)
+		if buildErr != nil {
+			return resolvedContext{}, buildErr
+		}
+		built, preSendCompactionAttempted, buildErr = r.drainPipelineHistoryContext(ctx, req, built, contextTokenBudget)
 		if buildErr != nil {
 			return resolvedContext{}, buildErr
 		}
@@ -392,92 +398,16 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		compactableTokens = built.Allocation.CompactableTokens
 	} else if r.conversationSvc != nil {
 		historyFallback := historyScopeFallbackFromChatRequest(req)
-		loaded, loadErr := r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
-		if loadErr != nil {
-			r.logger.Error("resolve: loadHistoryRecords failed",
-				slog.String("bot_id", req.BotID),
-				slog.Any("error", loadErr),
-			)
-			return resolvedContext{}, loadErr
+		built, buildErr := r.buildRawHistoryContext(ctx, req, historyFallback)
+		if buildErr != nil {
+			return resolvedContext{}, buildErr
 		}
-		loaded = pruneHistoryForGateway(loaded)
-		loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
-		loaded = dedupePersistedCurrentUserMessage(loaded, req)
-		loaded, loadErr = r.ensureRequiredHistoryMessage(ctx, loaded, req)
-		if loadErr != nil {
-			r.logger.Error("resolve: load required history message failed",
-				slog.String("bot_id", req.BotID),
-				slog.Any("error", loadErr),
-			)
-			return resolvedContext{}, loadErr
-		}
-		loaded, loadErr = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
-		if loadErr != nil {
-			return resolvedContext{}, loadErr
-		}
-		built, buildErr := assembleHistoryContext(r.logger, loaded, nil)
+		built, preSendCompactionAttempted, buildErr = r.drainRawHistoryContext(ctx, req, historyFallback, built, contextTokenBudget)
 		if buildErr != nil {
 			return resolvedContext{}, buildErr
 		}
 		historyRecords = built.HistoryRecords
 		promptProjection = built.Projection
-		emittedTokens := built.EmittedTokens
-		rawPressure := built.Allocation.CompactableTokens
-		// When context reaches the shared budget share, run synchronous
-		// compaction before sending the request. contextTokenBudget is the
-		// authoritative limit for how much context the user wants to send
-		// to the LLM.
-		compactionThreshold := 0
-		if contextTokenBudget > 0 {
-			compactionThreshold = contextTokenBudget * compactionBudgetThresholdPercent / 100
-		}
-		// The trigger only counts raw (compactable) rows: active summaries can
-		// never be compacted away, so including them would make the trigger
-		// self-sustaining once accumulated summaries cross the threshold.
-		if compactionThreshold > 0 && rawPressure >= compactionThreshold {
-			r.logger.Warn("resolve: context reached compaction threshold, running synchronous compaction",
-				slog.String("bot_id", req.BotID),
-				slog.Int("estimated_tokens", emittedTokens),
-				slog.Int("compactable_tokens", rawPressure),
-				slog.Int("context_token_budget", contextTokenBudget),
-				slog.Int("compaction_threshold", compactionThreshold),
-			)
-			// Reload and post-process only when this run actually produced a
-			// summary. A noop (cooldown, in-flight, nothing markable) keeps
-			// this turn's context untouched — possibly still above the
-			// threshold — and the next turn re-evaluates.
-			if res := r.runCompactionSync(ctx, req, rawPressure, contextTokenBudget); res.Status == compaction.StatusOK {
-				loaded, loadErr = r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
-				if loadErr != nil {
-					r.logger.Error("resolve: reload messages after compaction failed",
-						slog.String("bot_id", req.BotID),
-						slog.Any("error", loadErr),
-					)
-					return resolvedContext{}, loadErr
-				}
-				loaded = pruneHistoryForGateway(loaded)
-				loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
-				loaded = dedupePersistedCurrentUserMessage(loaded, req)
-				loaded, loadErr = r.ensureRequiredHistoryMessage(ctx, loaded, req)
-				if loadErr != nil {
-					r.logger.Error("resolve: reload required history message failed",
-						slog.String("bot_id", req.BotID),
-						slog.Any("error", loadErr),
-					)
-					return resolvedContext{}, loadErr
-				}
-				loaded, loadErr = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
-				if loadErr != nil {
-					return resolvedContext{}, loadErr
-				}
-				built, buildErr = assembleHistoryContext(r.logger, loaded, nil)
-				if buildErr != nil {
-					return resolvedContext{}, buildErr
-				}
-				historyRecords = built.HistoryRecords
-				promptProjection = built.Projection
-			}
-		}
 		compactableTokens = built.Allocation.CompactableTokens
 	}
 	fixedMessages := make([]conversation.ModelMessage, 0, 1+len(reqMessages))
@@ -531,6 +461,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	runCfg.ContextFrags = historyContextFragsForMessages(messages, historyRecords)
 	runCfg.Messages = baselineMessages
 	runCfg, promptState := withInitialPromptMaterializer(runCfg, promptPlan, promptProjection)
+	if preSendCompactionAttempted {
+		promptState.ClaimCompaction()
+	}
 	// When using the pipeline the user message is already in the RC;
 	// don't send it to the LLM again. headerifiedQuery is still kept
 	// for storeRound so the user message gets persisted.
