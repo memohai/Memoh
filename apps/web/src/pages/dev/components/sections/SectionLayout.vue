@@ -94,7 +94,7 @@ const dialogName = ref('')
           <AccordionItem value="item-1">
             <AccordionTrigger>What is a workspace runtime?</AccordionTrigger>
             <AccordionContent>
-              An isolated container (or trusted local sandbox) where a bot can edit files,
+              An isolated workspace (or trusted local folder) where a bot can edit files,
               run commands, and host tools.
             </AccordionContent>
           </AccordionItem>

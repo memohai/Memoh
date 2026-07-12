@@ -63,7 +63,7 @@ function isContainerCreateStreamEvent(value: unknown): value is ContainerCreateS
 function toError(error: unknown): Error {
   if (error instanceof Error) return error
   if (typeof error === 'string' && error.trim()) return new Error(error)
-  return new Error('Container create stream failed')
+  return new Error('Workspace creation stream failed')
 }
 
 export async function postBotsByBotIdContainerStream(
@@ -85,7 +85,7 @@ export async function postBotsByBotIdContainerStream(
     },
     responseValidator: async (data) => {
       if (!isContainerCreateStreamEvent(data)) {
-        throw new Error('Invalid container create stream event')
+        throw new Error('Invalid workspace creation stream event')
       }
     },
     sseMaxRetryAttempts: 1,
@@ -95,7 +95,7 @@ export async function postBotsByBotIdContainerStream(
     stream: (async function* () {
       for await (const event of result.stream as AsyncGenerator<unknown, void, unknown>) {
         if (!isContainerCreateStreamEvent(event)) {
-          throw new Error('Invalid container create stream event')
+          throw new Error('Invalid workspace creation stream event')
         }
         yield event
       }

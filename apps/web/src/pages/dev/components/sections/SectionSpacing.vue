@@ -110,7 +110,7 @@ const primitiveRungs = [
             <Switch :model-value="true" />
           </SettingsRow>
           <SettingsRow
-            label="Container"
+            label="Workspace"
             description="Rebuild the workspace when runtime files change."
           >
             <Button
@@ -288,7 +288,7 @@ const primitiveRungs = [
             status="ok"
           />
           <MetricReadout
-            label="Container"
+            label="Workspace"
             value="Unreachable"
             status="error"
           />
