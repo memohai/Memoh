@@ -318,6 +318,46 @@ WHERE c.session_id = $1
   )
 ORDER BY c.anchor_start_ms ASC, c.started_at ASC, c.id ASC;
 
+-- name: ListCompactionArtifactLineageMetadataBySession :many
+SELECT
+  c.id,
+  c.bot_id,
+  c.session_id,
+  c.status,
+  (BTRIM(c.summary) <> '')::boolean AS has_summary,
+  CASE
+    WHEN jsonb_typeof(c.coverage) = 'array' THEN jsonb_array_length(c.coverage)
+    ELSE -1
+  END::integer AS coverage_count,
+  c.anchor_start_ms,
+  c.anchor_end_ms,
+  c.artifact_level,
+  c.parent_ids,
+  c.superseded_by,
+  c.superseded_at,
+  c.started_at
+FROM bot_history_message_compacts c
+WHERE c.session_id = $1
+  AND (
+    c.status = 'ok'
+    OR EXISTS (
+      SELECT 1
+      FROM bot_history_message_compacts parent
+      WHERE parent.session_id = $1
+        AND parent.status = 'ok'
+        AND parent.superseded_by = c.id
+    )
+  )
+ORDER BY c.anchor_start_ms ASC, c.started_at ASC, c.id ASC;
+
+-- name: ListCompactionArtifactPayloadsByIDs :many
+SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
+       artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
+       superseded_by, superseded_at, started_at, completed_at
+FROM bot_history_message_compacts
+WHERE id = ANY(sqlc.arg(ids)::uuid[])
+ORDER BY id ASC;
+
 -- name: ListInvalidCompactionArtifactSeedsBySession :many
 WITH direct_invalid AS (
   SELECT compact.id, compact.coverage

@@ -529,6 +529,89 @@ func (q *Queries) ListCompactionArtifactLineageBySession(ctx context.Context, se
 	return items, nil
 }
 
+const listCompactionArtifactLineageMetadataBySession = `-- name: ListCompactionArtifactLineageMetadataBySession :many
+SELECT
+  c.id,
+  c.bot_id,
+  c.session_id,
+  c.status,
+  (BTRIM(c.summary) <> '')::boolean AS has_summary,
+  CASE
+    WHEN jsonb_typeof(c.coverage) = 'array' THEN jsonb_array_length(c.coverage)
+    ELSE -1
+  END::integer AS coverage_count,
+  c.anchor_start_ms,
+  c.anchor_end_ms,
+  c.artifact_level,
+  c.parent_ids,
+  c.superseded_by,
+  c.superseded_at,
+  c.started_at
+FROM bot_history_message_compacts c
+WHERE c.session_id = $1
+  AND (
+    c.status = 'ok'
+    OR EXISTS (
+      SELECT 1
+      FROM bot_history_message_compacts parent
+      WHERE parent.session_id = $1
+        AND parent.status = 'ok'
+        AND parent.superseded_by = c.id
+    )
+  )
+ORDER BY c.anchor_start_ms ASC, c.started_at ASC, c.id ASC
+`
+
+type ListCompactionArtifactLineageMetadataBySessionRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	BotID         pgtype.UUID        `json:"bot_id"`
+	SessionID     pgtype.UUID        `json:"session_id"`
+	Status        string             `json:"status"`
+	HasSummary    bool               `json:"has_summary"`
+	CoverageCount int32              `json:"coverage_count"`
+	AnchorStartMs int64              `json:"anchor_start_ms"`
+	AnchorEndMs   int64              `json:"anchor_end_ms"`
+	ArtifactLevel int32              `json:"artifact_level"`
+	ParentIds     []pgtype.UUID      `json:"parent_ids"`
+	SupersededBy  pgtype.UUID        `json:"superseded_by"`
+	SupersededAt  pgtype.Timestamptz `json:"superseded_at"`
+	StartedAt     pgtype.Timestamptz `json:"started_at"`
+}
+
+func (q *Queries) ListCompactionArtifactLineageMetadataBySession(ctx context.Context, sessionID pgtype.UUID) ([]ListCompactionArtifactLineageMetadataBySessionRow, error) {
+	rows, err := q.db.Query(ctx, listCompactionArtifactLineageMetadataBySession, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCompactionArtifactLineageMetadataBySessionRow
+	for rows.Next() {
+		var i ListCompactionArtifactLineageMetadataBySessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.Status,
+			&i.HasSummary,
+			&i.CoverageCount,
+			&i.AnchorStartMs,
+			&i.AnchorEndMs,
+			&i.ArtifactLevel,
+			&i.ParentIds,
+			&i.SupersededBy,
+			&i.SupersededAt,
+			&i.StartedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCompactionArtifactParentEdges = `-- name: ListCompactionArtifactParentEdges :many
 SELECT parent_id, ordinal
 FROM bot_history_message_compact_parent_edges
@@ -590,6 +673,55 @@ func (q *Queries) ListCompactionArtifactParentIDsBySuccessor(ctx context.Context
 			return nil, err
 		}
 		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCompactionArtifactPayloadsByIDs = `-- name: ListCompactionArtifactPayloadsByIDs :many
+SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
+       artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
+       superseded_by, superseded_at, started_at, completed_at
+FROM bot_history_message_compacts
+WHERE id = ANY($1::uuid[])
+ORDER BY id ASC
+`
+
+func (q *Queries) ListCompactionArtifactPayloadsByIDs(ctx context.Context, ids []pgtype.UUID) ([]BotHistoryMessageCompact, error) {
+	rows, err := q.db.Query(ctx, listCompactionArtifactPayloadsByIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BotHistoryMessageCompact
+	for rows.Next() {
+		var i BotHistoryMessageCompact
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.Status,
+			&i.Summary,
+			&i.MessageCount,
+			&i.ErrorMessage,
+			&i.Usage,
+			&i.ModelID,
+			&i.ArtifactVersion,
+			&i.Coverage,
+			&i.AnchorStartMs,
+			&i.AnchorEndMs,
+			&i.ArtifactLevel,
+			&i.ParentIds,
+			&i.SupersededBy,
+			&i.SupersededAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
