@@ -245,6 +245,220 @@ SELECT EXISTS (
 	}
 }
 
+func TestCompactionClaimInvalidationPostgresPath(t *testing.T) {
+	pool := openCompactionFinalizeTestPool(t)
+	ctx := context.Background()
+	installListUncompactedFixture(t, ctx, pool)
+	if _, err := pool.Exec(ctx, `
+ALTER TABLE bot_history_messages
+  ADD COLUMN turn_superseded_by_turn_id UUID,
+  ADD COLUMN turn_superseded_at TIMESTAMPTZ,
+  ADD COLUMN turn_superseded_reason TEXT;
+CREATE TABLE bot_history_message_assets (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  message_id UUID NOT NULL REFERENCES bot_history_messages(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'attachment',
+  ordinal INTEGER NOT NULL DEFAULT 0,
+  content_hash TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (message_id, content_hash)
+);
+CREATE TABLE bot_history_message_compact_parent_edges (
+  artifact_id UUID NOT NULL REFERENCES bot_history_message_compacts(id) ON DELETE CASCADE,
+  parent_id UUID NOT NULL REFERENCES bot_history_message_compacts(id),
+  ordinal INTEGER NOT NULL,
+  PRIMARY KEY (artifact_id, parent_id)
+);
+CREATE OR REPLACE FUNCTION resolve_history_message_source_context(bot_history_messages)
+RETURNS JSONB
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT '{"version":1,"sender_display_name":"","platform":"","conversation_type":"","conversation_name":""}'::jsonb
+$$
+`); err != nil {
+		t.Fatalf("create claim invalidation fixture: %v", err)
+	}
+	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0109_compaction_source_revision.up.sql")); err != nil {
+		t.Fatalf("apply source revision migration: %v", err)
+	}
+
+	botID, sessionID := testUUID(), testUUID()
+	queries := sqlc.New(pool)
+	legacyMessageID, legacyLogID := testUUID(), testUUID()
+	insertFinalizeMessages(t, ctx, pool, botID, sessionID, []pgtype.UUID{legacyMessageID})
+	insertFinalizeLogs(t, ctx, pool, botID, sessionID, []pgtype.UUID{legacyLogID})
+	legacySource := listSingleCompactionSource(t, ctx, queries, sessionID, legacyMessageID)
+	legacyResult, err := queries.FinalizeCompactionArtifact(ctx, finalizeParams(
+		legacyLogID,
+		botID,
+		sessionID,
+		[]pgtype.UUID{legacyMessageID},
+		[]string{legacySource.SourceVersion},
+		"pre-migration summary",
+	))
+	if err != nil || !legacyResult.Finalized {
+		t.Fatalf("finalize pre-migration artifact = result:%+v error:%v", legacyResult, err)
+	}
+	var legacySourceContext []byte
+	if err := pool.QueryRow(ctx, `SELECT source_context FROM bot_history_messages WHERE id = $1`, legacyMessageID).Scan(&legacySourceContext); err != nil {
+		t.Fatalf("read pre-migration source context: %v", err)
+	}
+	if legacySourceContext != nil {
+		t.Fatalf("pre-migration compacted source context = %s, want NULL", legacySourceContext)
+	}
+	if _, err := pool.Exec(ctx, `
+CREATE OR REPLACE FUNCTION capture_history_message_source_context()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.source_context IS NULL
+     AND (
+       TG_OP = 'INSERT'
+       OR (OLD.compact_id IS NOT NULL AND NEW.compact_id IS NULL)
+     ) THEN
+    NEW.source_context := resolve_history_message_source_context(NEW);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER history_message_source_context_capture
+BEFORE INSERT OR UPDATE OF compact_id, source_context ON bot_history_messages
+FOR EACH ROW
+EXECUTE FUNCTION capture_history_message_source_context()
+`); err != nil {
+		t.Fatalf("activate source context capture: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0112_compaction_claim_invalidation.up.sql")); err != nil {
+		t.Fatalf("apply claim invalidation migration: %v", err)
+	}
+	assertCompactionClaimCurrent(t, ctx, pool, legacyLogID, true)
+	if _, err := pool.Exec(ctx, `UPDATE bot_history_messages SET content = '{"legacy_edited":true}' WHERE id = $1`, legacyMessageID); err != nil {
+		t.Fatalf("mutate pre-migration compacted source: %v", err)
+	}
+	assertCompactionClaimCurrent(t, ctx, pool, legacyLogID, false)
+
+	mutations := []struct {
+		name   string
+		mutate func(pgtype.UUID) error
+	}{
+		{
+			name: "content edit",
+			mutate: func(messageID pgtype.UUID) error {
+				_, err := pool.Exec(ctx, `UPDATE bot_history_messages SET content = '{"edited":true}' WHERE id = $1`, messageID)
+				return err
+			},
+		},
+		{
+			name: "hide",
+			mutate: func(messageID pgtype.UUID) error {
+				_, err := pool.Exec(ctx, `UPDATE bot_history_messages SET turn_visible = false WHERE id = $1`, messageID)
+				return err
+			},
+		},
+		{
+			name: "asset insert",
+			mutate: func(messageID pgtype.UUID) error {
+				_, err := pool.Exec(ctx, `
+INSERT INTO bot_history_message_assets (message_id, content_hash)
+VALUES ($1, 'post-compact-asset')
+`, messageID)
+				return err
+			},
+		},
+		{
+			name: "delete",
+			mutate: func(messageID pgtype.UUID) error {
+				_, err := pool.Exec(ctx, `DELETE FROM bot_history_messages WHERE id = $1`, messageID)
+				return err
+			},
+		},
+	}
+	invalidLogIDs := []pgtype.UUID{legacyLogID}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			messageID, logID := testUUID(), testUUID()
+			invalidLogIDs = append(invalidLogIDs, logID)
+			insertFinalizeMessages(t, ctx, pool, botID, sessionID, []pgtype.UUID{messageID})
+			insertFinalizeLogs(t, ctx, pool, botID, sessionID, []pgtype.UUID{logID})
+			source := listSingleCompactionSource(t, ctx, queries, sessionID, messageID)
+			result, err := queries.FinalizeCompactionArtifact(ctx, finalizeParams(
+				logID,
+				botID,
+				sessionID,
+				[]pgtype.UUID{messageID},
+				[]string{source.SourceVersion},
+				mutation.name+" summary",
+			))
+			if err != nil || !result.Finalized {
+				t.Fatalf("finalize artifact = result:%+v error:%v", result, err)
+			}
+			assertCompactionClaimCurrent(t, ctx, pool, logID, true)
+
+			if err := mutation.mutate(messageID); err != nil {
+				t.Fatalf("mutate compacted source: %v", err)
+			}
+			assertCompactionClaimCurrent(t, ctx, pool, logID, false)
+		})
+	}
+	preservedMessageID, preservedLogID := testUUID(), testUUID()
+	insertFinalizeMessages(t, ctx, pool, botID, sessionID, []pgtype.UUID{preservedMessageID})
+	insertFinalizeLogs(t, ctx, pool, botID, sessionID, []pgtype.UUID{preservedLogID})
+	preservedSource := listSingleCompactionSource(t, ctx, queries, sessionID, preservedMessageID)
+	preservedResult, err := queries.FinalizeCompactionArtifact(ctx, finalizeParams(
+		preservedLogID,
+		botID,
+		sessionID,
+		[]pgtype.UUID{preservedMessageID},
+		[]string{preservedSource.SourceVersion},
+		"preserved summary",
+	))
+	if err != nil || !preservedResult.Finalized {
+		t.Fatalf("finalize preserved artifact = result:%+v error:%v", preservedResult, err)
+	}
+
+	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0112_compaction_claim_invalidation.down.sql")); err != nil {
+		t.Fatalf("roll back claim invalidation migration: %v", err)
+	}
+	var invalidLogsRemaining int
+	if err := pool.QueryRow(ctx, `
+SELECT COUNT(*)
+FROM bot_history_message_compacts
+WHERE id = ANY($1::uuid[])
+`, invalidLogIDs).Scan(&invalidLogsRemaining); err != nil {
+		t.Fatalf("count retired invalid artifacts: %v", err)
+	}
+	if invalidLogsRemaining != 0 {
+		t.Fatalf("invalid artifacts remaining after rollback = %d, want 0", invalidLogsRemaining)
+	}
+	var validLogsRemaining int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM bot_history_message_compacts WHERE id = $1`, preservedLogID).Scan(&validLogsRemaining); err != nil {
+		t.Fatalf("count preserved valid artifact: %v", err)
+	}
+	if validLogsRemaining != 1 {
+		t.Fatalf("valid artifacts remaining after rollback = %d, want 1", validLogsRemaining)
+	}
+}
+
+func assertCompactionClaimCurrent(t *testing.T, ctx context.Context, pool *pgxpool.Pool, compactID pgtype.UUID, want bool) {
+	t.Helper()
+	var current bool
+	if err := pool.QueryRow(ctx, `
+SELECT sources_current
+FROM bot_history_message_compact_claim_validity
+WHERE compact_id = $1
+`, compactID).Scan(&current); err != nil {
+		t.Fatalf("read compaction claim validity: %v", err)
+	}
+	if current != want {
+		t.Fatalf("compaction claim current = %v, want %v", current, want)
+	}
+}
+
 func listSingleCompactionSource(
 	t *testing.T,
 	ctx context.Context,

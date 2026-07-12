@@ -157,6 +157,7 @@ type BotHistoryMessage struct {
 	ModelID                 pgtype.UUID        `json:"model_id"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
 	CompactClaimFinalized   bool               `json:"compact_claim_finalized"`
+	CompactClaimInvalidated bool               `json:"compact_claim_invalidated"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	TurnID                  pgtype.UUID        `json:"turn_id"`
@@ -202,6 +203,11 @@ type BotHistoryMessageCompact struct {
 	SupersededAt    pgtype.Timestamptz `json:"superseded_at"`
 	StartedAt       pgtype.Timestamptz `json:"started_at"`
 	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
+}
+
+type BotHistoryMessageCompactClaimValidity struct {
+	CompactID      pgtype.UUID `json:"compact_id"`
+	SourcesCurrent pgtype.Bool `json:"sources_current"`
 }
 
 type BotHistoryMessageCompactParentEdge struct {
