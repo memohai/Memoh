@@ -62,12 +62,21 @@ type LoopDetectionConfig struct {
 
 // InjectMessage carries a user message to be injected into a running agent
 // stream between tool rounds via the PrepareStep hook.
+type InjectionReceiptID string
+
 type InjectMessage struct {
+	ReceiptID       InjectionReceiptID
 	Text            string
 	HeaderifiedText string
 	// ImageParts carries inline images (data URL or public URL) to attach
 	// alongside the injected text when the model supports vision input.
 	ImageParts []sdk.ImagePart
+}
+
+type InjectedReceipt struct {
+	ID          InjectionReceiptID
+	ModelText   string
+	InsertAfter int
 }
 
 // InitialPromptMaterializer owns the one-time provider prompt projection after
@@ -129,10 +138,9 @@ type RunConfig struct {
 	InjectCh <-chan InjectMessage
 
 	// InjectedRecorder is called each time a message is injected via
-	// PrepareStep, recording the headerified text and the number of SDK
-	// output messages that preceded the injection. Used by the resolver
-	// to interleave injected messages at the correct position in storeRound.
-	InjectedRecorder func(headerifiedText string, insertAfter int)
+	// PrepareStep, recording its opaque receipt, model text, and the number
+	// of SDK output messages that preceded the injection.
+	InjectedRecorder func(InjectedReceipt)
 
 	// BackgroundManager provides access to the background task system.
 	// When non-nil, the agent loop refreshes running task summaries at step

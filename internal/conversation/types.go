@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+
+	"github.com/memohai/memoh/internal/messagesource"
 )
 
 // Conversation kind constants.
@@ -93,12 +95,13 @@ type UpdateSettingsRequest struct {
 // ModelMessage is the canonical message format exchanged with the agent gateway.
 // Aligned with Vercel AI SDK ModelMessage structure.
 type ModelMessage struct {
-	Role       string          `json:"role"`
-	Content    json.RawMessage `json:"content,omitempty"`
-	Usage      json.RawMessage `json:"-"`
-	ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
-	ToolCallID string          `json:"tool_call_id,omitempty"`
-	Name       string          `json:"name,omitempty"`
+	Role        string              `json:"role"`
+	Content     json.RawMessage     `json:"content,omitempty"`
+	Usage       json.RawMessage     `json:"-"`
+	ToolCalls   []ToolCall          `json:"tool_calls,omitempty"`
+	ToolCallID  string              `json:"tool_call_id,omitempty"`
+	Name        string              `json:"name,omitempty"`
+	UserReceipt *UserMessageReceipt `json:"-"`
 }
 
 // TextContent extracts the plain text from the message content.
@@ -316,12 +319,27 @@ type InjectMessage struct {
 	Text            string
 	Attachments     []ChatAttachment
 	HeaderifiedText string
+	Receipt         UserMessageReceipt
+}
+
+type UserMessageReceipt struct {
+	ID                      string
+	DisplayText             string
+	SenderChannelIdentityID string
+	SenderUserID            string
+	ExternalMessageID       string
+	SourceReplyToMessageID  string
+	EventID                 string
+	SourceContext           messagesource.Context
+	Metadata                map[string]any
+	Attachments             []ChatAttachment
 }
 
 // InjectedMessageRecord records a message that was injected via PrepareStep,
 // together with its position in the output message sequence.
 type InjectedMessageRecord struct {
-	HeaderifiedText string
+	ModelText string
+	Receipt   UserMessageReceipt
 	// InsertAfter is the number of SDK output messages that existed before
 	// this injection. Used to determine the correct insertion position when
 	// interleaving injected messages into the persisted round.

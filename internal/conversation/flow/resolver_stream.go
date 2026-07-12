@@ -530,8 +530,11 @@ func (r *Resolver) persistTerminalSnapshotResult(
 	}
 	roundMessages := prependTurnUserMessage(storeReq, outputMessages)
 
-	if rc.injectedRecords != nil && len(*rc.injectedRecords) > 0 {
-		roundMessages = interleaveInjectedMessages(roundMessages, *rc.injectedRecords)
+	if rc.injectionReceipts != nil {
+		injections := rc.injectionReceipts.recordsSnapshot()
+		if len(injections) > 0 {
+			roundMessages = interleaveInjectedMessages(roundMessages, injections)
+		}
 	}
 
 	persisted, err = r.storeRoundWithOptionsResult(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
@@ -628,18 +631,21 @@ func interleaveInjectedMessages(round []conversation.ModelMessage, injections []
 	for i, msg := range round {
 		result = append(result, msg)
 		for injIdx < len(injections) && injections[injIdx].InsertAfter == i {
-			result = append(result, conversation.ModelMessage{
-				Role:    "user",
-				Content: conversation.NewTextContent(injections[injIdx].HeaderifiedText),
-			})
+			result = append(result, injectedModelMessage(injections[injIdx]))
 			injIdx++
 		}
 	}
 	for ; injIdx < len(injections); injIdx++ {
-		result = append(result, conversation.ModelMessage{
-			Role:    "user",
-			Content: conversation.NewTextContent(injections[injIdx].HeaderifiedText),
-		})
+		result = append(result, injectedModelMessage(injections[injIdx]))
 	}
 	return result
+}
+
+func injectedModelMessage(record conversation.InjectedMessageRecord) conversation.ModelMessage {
+	receipt := record.Receipt
+	return conversation.ModelMessage{
+		Role:        "user",
+		Content:     conversation.NewTextContent(record.ModelText),
+		UserReceipt: &receipt,
+	}
 }

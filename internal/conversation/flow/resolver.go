@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/accounts"
@@ -282,7 +283,7 @@ type resolvedContext struct {
 	provider                    sqlc.Provider
 	query                       string // headerified persistable query
 	userMessageAlreadyInContext bool
-	injectedRecords             *[]conversation.InjectedMessageRecord
+	injectionReceipts           *injectionReceiptRegistry
 	compactableTokens           int
 	compactableTokensKnown      bool
 	contextTokenBudget          int // token budget used to clamp compaction triggers
@@ -540,19 +541,31 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	runCfg.ContextScope = buildContextFragScope(req, displayName, runCfg.Identity)
 	runCfg = runCfg.RefreshContextFrag()
 
-	var injectedRecords *[]conversation.InjectedMessageRecord
+	var injectionReceipts *injectionReceiptRegistry
 	if req.InjectCh != nil {
 		agentInjectCh := make(chan agentpkg.InjectMessage, cap(req.InjectCh))
+		registry := newInjectionReceiptRegistry()
+		injectionReceipts = registry
 		go func() {
 			for msg := range req.InjectCh {
+				receiptID, receipt, err := registry.admit(msg)
+				if err != nil {
+					if r.logger != nil {
+						r.logger.Warn("reject injection receipt",
+							slog.String("receipt_id", strings.TrimSpace(msg.Receipt.ID)),
+							slog.Any("error", err))
+					}
+					continue
+				}
 				agentMsg := agentpkg.InjectMessage{
-					Text:            msg.Text,
+					ReceiptID:       receiptID,
+					Text:            receipt.DisplayText,
 					HeaderifiedText: msg.HeaderifiedText,
 				}
 				// Inline any image attachments from the injected message so the
 				// model receives them as vision input alongside the text.
-				if runCfg.SupportsImageInput && len(msg.Attachments) > 0 {
-					agentMsg.ImageParts = r.inlineInjectAttachments(ctx, req.BotID, msg.Attachments)
+				if runCfg.SupportsImageInput && len(receipt.Attachments) > 0 {
+					agentMsg.ImageParts = r.inlineInjectAttachments(ctx, req.BotID, receipt.Attachments)
 				}
 				agentInjectCh <- agentMsg
 			}
@@ -560,16 +573,14 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		}()
 		runCfg.InjectCh = agentInjectCh
 
-		records := make([]conversation.InjectedMessageRecord, 0)
-		injectedRecords = &records
-		var recMu sync.Mutex
-		runCfg.InjectedRecorder = func(headerifiedText string, insertAfter int) {
-			recMu.Lock()
-			*injectedRecords = append(*injectedRecords, conversation.InjectedMessageRecord{
-				HeaderifiedText: headerifiedText,
-				InsertAfter:     insertAfter,
-			})
-			recMu.Unlock()
+		runCfg.InjectedRecorder = func(receipt agentpkg.InjectedReceipt) {
+			if registry.record(receipt) {
+				return
+			}
+			if r.logger != nil {
+				r.logger.Warn("ignore unknown injection receipt",
+					slog.String("receipt_id", string(receipt.ID)))
+			}
 		}
 	}
 
@@ -579,12 +590,119 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		provider:                    provider,
 		query:                       headerifiedQuery,
 		userMessageAlreadyInContext: usePipeline,
-		injectedRecords:             injectedRecords,
+		injectionReceipts:           injectionReceipts,
 		compactableTokens:           compactableTokens,
 		compactableTokensKnown:      true,
 		contextTokenBudget:          contextTokenBudget,
 		promptState:                 promptState,
 	}, nil
+}
+
+type injectionReceiptRegistry struct {
+	mu      sync.Mutex
+	pending map[agentpkg.InjectionReceiptID]conversation.UserMessageReceipt
+	seen    map[agentpkg.InjectionReceiptID]struct{}
+	records []conversation.InjectedMessageRecord
+}
+
+var errDuplicateInjectionReceipt = errors.New("duplicate injection receipt")
+
+func newInjectionReceiptRegistry() *injectionReceiptRegistry {
+	return &injectionReceiptRegistry{
+		pending: make(map[agentpkg.InjectionReceiptID]conversation.UserMessageReceipt),
+		seen:    make(map[agentpkg.InjectionReceiptID]struct{}),
+		records: make([]conversation.InjectedMessageRecord, 0),
+	}
+}
+
+func (r *injectionReceiptRegistry) admit(msg conversation.InjectMessage) (agentpkg.InjectionReceiptID, conversation.UserMessageReceipt, error) {
+	receipt, err := snapshotInjectionReceipt(msg)
+	if err != nil {
+		return "", conversation.UserMessageReceipt{}, err
+	}
+	receiptID := agentpkg.InjectionReceiptID(strings.TrimSpace(receipt.ID))
+	if receiptID == "" {
+		receiptID = agentpkg.InjectionReceiptID(uuid.NewString())
+	}
+	receipt.ID = string(receiptID)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.seen[receiptID]; exists {
+		return "", conversation.UserMessageReceipt{}, errDuplicateInjectionReceipt
+	}
+	r.seen[receiptID] = struct{}{}
+	r.pending[receiptID] = receipt
+	return receiptID, receipt, nil
+}
+
+func (r *injectionReceiptRegistry) record(observed agentpkg.InjectedReceipt) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	receipt, ok := r.pending[observed.ID]
+	if !ok {
+		return false
+	}
+	delete(r.pending, observed.ID)
+	r.records = append(r.records, conversation.InjectedMessageRecord{
+		ModelText:   observed.ModelText,
+		Receipt:     receipt,
+		InsertAfter: observed.InsertAfter,
+	})
+	return true
+}
+
+func (r *injectionReceiptRegistry) recordsSnapshot() []conversation.InjectedMessageRecord {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]conversation.InjectedMessageRecord(nil), r.records...)
+}
+
+func snapshotInjectionReceipt(msg conversation.InjectMessage) (conversation.UserMessageReceipt, error) {
+	receipt := msg.Receipt
+	receipt.DisplayText = msg.Text
+	metadata, err := cloneInjectionMetadata(receipt.Metadata)
+	if err != nil {
+		return conversation.UserMessageReceipt{}, fmt.Errorf("clone injection metadata: %w", err)
+	}
+	receipt.Metadata = metadata
+	attachments, err := cloneInjectionAttachments(msg.Attachments)
+	if err != nil {
+		return conversation.UserMessageReceipt{}, err
+	}
+	receipt.Attachments = attachments
+	return receipt, nil
+}
+
+func cloneInjectionAttachments(attachments []conversation.ChatAttachment) ([]conversation.ChatAttachment, error) {
+	if len(attachments) == 0 {
+		return nil, nil
+	}
+	cloned := make([]conversation.ChatAttachment, len(attachments))
+	for i, attachment := range attachments {
+		cloned[i] = attachment
+		metadata, err := cloneInjectionMetadata(attachment.Metadata)
+		if err != nil {
+			return nil, fmt.Errorf("clone injection attachment %d metadata: %w", i, err)
+		}
+		cloned[i].Metadata = metadata
+	}
+	return cloned, nil
+}
+
+func cloneInjectionMetadata(metadata map[string]any) (map[string]any, error) {
+	if len(metadata) == 0 {
+		return nil, nil
+	}
+	raw, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, err
+	}
+	var cloned map[string]any
+	if err := json.Unmarshal(raw, &cloned); err != nil {
+		return nil, err
+	}
+	return cloned, nil
 }
 
 // Chat sends a synchronous chat request and stores the result.

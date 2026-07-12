@@ -510,8 +510,8 @@ func TestAgentStreamReadMediaPersistsInjectedImageInTerminalMessages(t *testing.
 		SupportsImageInput: true,
 		SupportsToolCall:   true,
 		InjectCh:           injectCh,
-		InjectedRecorder: func(_ string, got int) {
-			insertAfter = got
+		InjectedRecorder: func(receipt InjectedReceipt) {
+			insertAfter = receipt.InsertAfter
 		},
 		Identity: SessionContext{
 			BotID: "bot-1",

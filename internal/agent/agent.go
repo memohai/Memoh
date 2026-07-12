@@ -241,7 +241,11 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 						}
 						p.Messages = append(p.Messages, sdk.UserMessage(text, extra...))
 						if cfg.InjectedRecorder != nil {
-							cfg.InjectedRecorder(text, insertAfter)
+							cfg.InjectedRecorder(InjectedReceipt{
+								ID:          injected.ReceiptID,
+								ModelText:   text,
+								InsertAfter: insertAfter,
+							})
 						}
 						a.logger.Info("injected user message into agent stream",
 							slog.String("bot_id", cfg.Identity.BotID),

@@ -646,9 +646,11 @@ func TestStreamInjectedRecorderCountsOnlyCompletedOutputMessages(t *testing.T) {
 		},
 	}}}})
 	injectCh := make(chan InjectMessage, 1)
-	injectCh <- InjectMessage{Text: "injected"}
+	injectCh <- InjectMessage{ReceiptID: "receipt-1", Text: "injected"}
 	close(injectCh)
 	insertAfter := -1
+	recordedReceiptID := ""
+	recordedText := ""
 
 	for range agent.Stream(context.Background(), RunConfig{
 		Model:            &sdk.Model{ID: "claude-test", Provider: modelProvider, Type: sdk.ModelTypeChat},
@@ -656,8 +658,10 @@ func TestStreamInjectedRecorderCountsOnlyCompletedOutputMessages(t *testing.T) {
 		Messages:         []sdk.Message{sdk.UserMessage("initial")},
 		SupportsToolCall: true,
 		InjectCh:         injectCh,
-		InjectedRecorder: func(_ string, got int) {
-			insertAfter = got
+		InjectedRecorder: func(receipt InjectedReceipt) {
+			recordedReceiptID = string(receipt.ID)
+			recordedText = receipt.ModelText
+			insertAfter = receipt.InsertAfter
 		},
 		InitialPromptMaterializer: func(_ context.Context, cfg RunConfig, _ []sdk.Tool) (RunConfig, error) {
 			cfg.Messages = append([]sdk.Message(nil), cfg.Messages...)
@@ -668,5 +672,8 @@ func TestStreamInjectedRecorderCountsOnlyCompletedOutputMessages(t *testing.T) {
 
 	if insertAfter != 2 {
 		t.Fatalf("injected insertAfter = %d, want two completed output messages", insertAfter)
+	}
+	if recordedReceiptID != "receipt-1" || recordedText != "injected" {
+		t.Fatalf("recorded injection = %q/%q, want receipt-1/injected", recordedReceiptID, recordedText)
 	}
 }
