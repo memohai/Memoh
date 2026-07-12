@@ -264,6 +264,37 @@ func TestInitialPromptMaterializerRunsOnceAfterToolAssembly(t *testing.T) {
 	}
 }
 
+func TestMaterializeInitialPromptStripsRearmedCallback(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+	rearmed := func(_ context.Context, cfg RunConfig, _ []sdk.Tool) (RunConfig, error) {
+		calls += 100
+		return cfg, nil
+	}
+	materialized, err := MaterializeInitialPrompt(context.Background(), RunConfig{
+		Messages: []sdk.Message{sdk.UserMessage("baseline")},
+		InitialPromptMaterializer: func(_ context.Context, cfg RunConfig, _ []sdk.Tool) (RunConfig, error) {
+			calls++
+			cfg.Messages = []sdk.Message{sdk.UserMessage("materialized")}
+			cfg.InitialPromptMaterializer = rearmed
+			return cfg, nil
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("MaterializeInitialPrompt() error = %v", err)
+	}
+	if materialized.InitialPromptMaterializer != nil {
+		t.Fatal("materialized config retained a rearmed callback")
+	}
+	if _, err := MaterializeInitialPrompt(context.Background(), materialized, nil); err != nil {
+		t.Fatalf("second MaterializeInitialPrompt() error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("materializer calls = %d, want 1", calls)
+	}
+}
+
 func TestInitialPromptMaterializerErrorStopsProvider(t *testing.T) {
 	sentinel := errors.New("materialize failed")
 	provider := &usageRecordingProvider{}

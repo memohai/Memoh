@@ -337,6 +337,104 @@ func TestHandleReplyWithAgentACPConsumesPreparedPromptAndReceipt(t *testing.T) {
 	}
 }
 
+func TestHandleReplyWithAgentACPMaterializesPreparedPrompt(t *testing.T) {
+	t.Parallel()
+
+	var materializeCalls atomic.Int32
+	receipt := &countingDirectDiscussReceipt{}
+	preparer := &capturingDirectDiscussPromptPreparer{prepared: PreparedDirectDiscussPrompt{
+		RunConfig: agentpkg.RunConfig{
+			Messages: []sdk.Message{sdk.UserMessage("baseline must not escape")},
+			InitialPromptMaterializer: func(_ context.Context, cfg agentpkg.RunConfig, tools []sdk.Tool) (agentpkg.RunConfig, error) {
+				materializeCalls.Add(1)
+				if len(tools) != 0 {
+					t.Fatalf("ACP materializer tools = %d, want none", len(tools))
+				}
+				cfg.Messages = []sdk.Message{sdk.UserMessage("materialized ACP context")}
+				return cfg, nil
+			},
+		},
+		Receipt: receipt,
+	}}
+	resolver := &fakeRunConfigResolver{resolveResult: ResolveRunConfigResult{
+		RuntimeType:                 sessionpkg.RuntimeACPAgent,
+		DirectDiscussPromptPreparer: preparer,
+	}}
+	runtime := &fakeDiscussRuntimeStreamer{}
+	driver := NewDiscussDriver(DiscussDriverDeps{Resolver: resolver, RuntimeStreamer: runtime})
+	sess := &discussSession{
+		config: DiscussSessionConfig{
+			BotID:            "bot",
+			SessionID:        "session",
+			ConversationType: channel.ConversationTypeGroup,
+		},
+		lastProcessedMs: 50,
+	}
+	rc := RenderedContext{{
+		MessageID:    "current",
+		ReceivedAtMs: 100,
+		MentionsMe:   true,
+		Content:      []RenderedContentPiece{{Type: "text", Text: "current"}},
+	}}
+
+	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, &fakeDiscussStreamer{})
+
+	if materializeCalls.Load() != 1 {
+		t.Fatalf("materializer calls = %d, want 1", materializeCalls.Load())
+	}
+	if runtime.calls != 1 || !strings.Contains(runtime.lastReq.Query, "materialized ACP context") || strings.Contains(runtime.lastReq.Query, "baseline must not escape") {
+		t.Fatalf("ACP runtime = calls:%d query:%q", runtime.calls, runtime.lastReq.Query)
+	}
+	if receipt.calls.Load() != 1 {
+		t.Fatalf("receipt calls = %d, want 1", receipt.calls.Load())
+	}
+}
+
+func TestHandleReplyWithAgentACPFinishesFailedMaterialization(t *testing.T) {
+	t.Parallel()
+
+	sentinel := errors.New("materialize failed")
+	var materializeCalls atomic.Int32
+	receipt := &countingDirectDiscussReceipt{err: sentinel}
+	preparer := &capturingDirectDiscussPromptPreparer{prepared: PreparedDirectDiscussPrompt{
+		RunConfig: agentpkg.RunConfig{
+			InitialPromptMaterializer: func(context.Context, agentpkg.RunConfig, []sdk.Tool) (agentpkg.RunConfig, error) {
+				materializeCalls.Add(1)
+				return agentpkg.RunConfig{}, sentinel
+			},
+		},
+		Receipt: receipt,
+	}}
+	resolver := &fakeRunConfigResolver{resolveResult: ResolveRunConfigResult{
+		RuntimeType:                 sessionpkg.RuntimeACPAgent,
+		DirectDiscussPromptPreparer: preparer,
+	}}
+	runtime := &fakeDiscussRuntimeStreamer{}
+	driver := NewDiscussDriver(DiscussDriverDeps{Resolver: resolver, RuntimeStreamer: runtime})
+	sess := &discussSession{
+		config: DiscussSessionConfig{
+			BotID:            "bot",
+			SessionID:        "session",
+			ConversationType: channel.ConversationTypeGroup,
+		},
+		lastProcessedMs: 50,
+	}
+
+	driver.handleReplyWithAgent(context.Background(), sess, RenderedContext{{
+		MessageID:    "current",
+		ReceivedAtMs: 100,
+		MentionsMe:   true,
+		Content:      []RenderedContentPiece{{Type: "text", Text: "current"}},
+	}}, driver.logger, &fakeDiscussStreamer{})
+
+	if materializeCalls.Load() != 1 || receipt.calls.Load() != 1 {
+		t.Fatalf("failed materialization = materialize:%d receipt:%d, want 1/1", materializeCalls.Load(), receipt.calls.Load())
+	}
+	if runtime.calls != 0 || sess.lastProcessedMs != 50 {
+		t.Fatalf("failed materialization advanced runtime/cursor = calls:%d cursor:%d", runtime.calls, sess.lastProcessedMs)
+	}
+}
+
 func TestHandleReplyWithAgentACPDoesNotConsumeReceiptWithoutRuntimeAttempt(t *testing.T) {
 	t.Parallel()
 

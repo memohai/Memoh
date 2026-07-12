@@ -270,7 +270,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
 		return
 	}
-	materializedCfg, err := materializeInitialPrompt(streamCtx, cfg, sdkTools)
+	materializedCfg, err := MaterializeInitialPrompt(streamCtx, cfg, sdkTools)
 	if err != nil {
 		turnError = err.Error()
 		sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
@@ -695,7 +695,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	if err != nil {
 		return nil, err
 	}
-	materializedCfg, err := materializeInitialPrompt(genCtx, cfg, sdkTools)
+	materializedCfg, err := MaterializeInitialPrompt(genCtx, cfg, sdkTools)
 	if err != nil {
 		return nil, err
 	}
@@ -773,13 +773,17 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	}, nil
 }
 
-func materializeInitialPrompt(ctx context.Context, cfg RunConfig, tools []sdk.Tool) (RunConfig, error) {
+// MaterializeInitialPrompt finalizes a one-time prompt projection for runtimes
+// that send a RunConfig without going through Agent.
+func MaterializeInitialPrompt(ctx context.Context, cfg RunConfig, tools []sdk.Tool) (RunConfig, error) {
 	materializer := cfg.InitialPromptMaterializer
 	if materializer == nil {
 		return cfg, nil
 	}
 	cfg.InitialPromptMaterializer = nil
-	return materializer(ctx, cfg, tools)
+	materialized, err := materializer(ctx, cfg, tools)
+	materialized.InitialPromptMaterializer = nil
+	return materialized, err
 }
 
 func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTools []sdk.Tool, prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams) []sdk.GenerateOption {

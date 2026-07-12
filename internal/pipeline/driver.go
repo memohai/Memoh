@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -336,7 +337,16 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 			log.Error("discuss ACP runtime: prompt receipt not configured")
 			return
 		}
-		attempted, completed := d.streamDiscussACPRuntime(ctx, cfg, prepared.RunConfig.Messages, log)
+		materialized, materializeErr := agentpkg.MaterializeInitialPrompt(ctx, prepared.RunConfig, nil)
+		if materializeErr != nil {
+			log.Error("discuss ACP runtime: materialize prompt failed", slog.Any("error", materializeErr))
+			if finishErr := prepared.Receipt.Finish(ctx); finishErr != nil && !errors.Is(finishErr, materializeErr) {
+				log.Error("discuss ACP runtime: finish failed prompt", slog.Any("error", finishErr))
+			}
+			return
+		}
+		materialized = materialized.RefreshContextFrag()
+		attempted, completed := d.streamDiscussACPRuntime(ctx, cfg, materialized.Messages, log)
 		if attempted {
 			if finishErr := prepared.Receipt.Finish(ctx); finishErr != nil {
 				log.Error("discuss ACP runtime: finish prompt failed", slog.Any("error", finishErr))
