@@ -60,6 +60,7 @@ DROP TABLE IF EXISTS bot_email_bindings CASCADE;
 DROP TABLE IF EXISTS email_oauth_tokens CASCADE;
 DROP TABLE IF EXISTS email_providers CASCADE;
 DROP TABLE IF EXISTS schedule_logs CASCADE;
+DROP TABLE IF EXISTS bot_history_message_compact_validations CASCADE;
 DROP TABLE IF EXISTS bot_history_message_compact_parent_edges CASCADE;
 DROP TABLE IF EXISTS bot_history_message_compacts CASCADE;
 DROP FUNCTION IF EXISTS sync_compaction_artifact_parent_edges();

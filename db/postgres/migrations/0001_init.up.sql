@@ -1048,6 +1048,10 @@ CREATE INDEX IF NOT EXISTS idx_compacts_bot_session ON bot_history_message_compa
 CREATE INDEX IF NOT EXISTS idx_compacts_active_session ON bot_history_message_compacts(session_id, anchor_start_ms, started_at) WHERE status = 'ok' AND superseded_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_compacts_session_lineage ON bot_history_message_compacts(session_id, status, superseded_by);
 
+CREATE TABLE IF NOT EXISTS bot_history_message_compact_validations (
+  compact_id UUID PRIMARY KEY REFERENCES bot_history_message_compacts(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS bot_history_message_compact_parent_edges (
   artifact_id UUID NOT NULL,
   parent_id UUID NOT NULL,

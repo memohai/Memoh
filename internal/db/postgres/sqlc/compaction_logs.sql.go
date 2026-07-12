@@ -374,7 +374,19 @@ completed_log AS (
       completed_at = now()
   FROM locked_log, request_shape shape, finalized_state state, retirement_guard
   WHERE compact.id = locked_log.id
-  RETURNING compact.status, state.finalized
+  RETURNING compact.id, compact.status, state.finalized
+),
+validated_artifact AS MATERIALIZED (
+  INSERT INTO bot_history_message_compact_validations (compact_id)
+  SELECT completed.id
+  FROM completed_log completed
+  WHERE completed.finalized
+  ON CONFLICT (compact_id) DO UPDATE SET compact_id = EXCLUDED.compact_id
+  RETURNING compact_id
+),
+validation_guard AS MATERIALIZED (
+  SELECT COUNT(*)::integer AS validated_count
+  FROM validated_artifact
 )
 SELECT
   COALESCE(completed.finalized, false)::boolean AS finalized,
@@ -383,6 +395,7 @@ SELECT
   stats.matched_count,
   stats.claimed_count
 FROM finalization_stats stats
+CROSS JOIN validation_guard
 LEFT JOIN completed_log completed ON true
 `
 
@@ -536,6 +549,11 @@ SELECT
   c.session_id,
   c.status,
   (BTRIM(c.summary) <> '')::boolean AS has_summary,
+  EXISTS (
+    SELECT 1
+    FROM bot_history_message_compact_validations validation
+    WHERE validation.compact_id = c.id
+  )::boolean AS lineage_validated,
   CASE
     WHEN jsonb_typeof(c.coverage) = 'array' THEN jsonb_array_length(c.coverage)
     ELSE -1
@@ -563,19 +581,20 @@ ORDER BY c.anchor_start_ms ASC, c.started_at ASC, c.id ASC
 `
 
 type ListCompactionArtifactLineageMetadataBySessionRow struct {
-	ID            pgtype.UUID        `json:"id"`
-	BotID         pgtype.UUID        `json:"bot_id"`
-	SessionID     pgtype.UUID        `json:"session_id"`
-	Status        string             `json:"status"`
-	HasSummary    bool               `json:"has_summary"`
-	CoverageCount int32              `json:"coverage_count"`
-	AnchorStartMs int64              `json:"anchor_start_ms"`
-	AnchorEndMs   int64              `json:"anchor_end_ms"`
-	ArtifactLevel int32              `json:"artifact_level"`
-	ParentIds     []pgtype.UUID      `json:"parent_ids"`
-	SupersededBy  pgtype.UUID        `json:"superseded_by"`
-	SupersededAt  pgtype.Timestamptz `json:"superseded_at"`
-	StartedAt     pgtype.Timestamptz `json:"started_at"`
+	ID               pgtype.UUID        `json:"id"`
+	BotID            pgtype.UUID        `json:"bot_id"`
+	SessionID        pgtype.UUID        `json:"session_id"`
+	Status           string             `json:"status"`
+	HasSummary       bool               `json:"has_summary"`
+	LineageValidated bool               `json:"lineage_validated"`
+	CoverageCount    int32              `json:"coverage_count"`
+	AnchorStartMs    int64              `json:"anchor_start_ms"`
+	AnchorEndMs      int64              `json:"anchor_end_ms"`
+	ArtifactLevel    int32              `json:"artifact_level"`
+	ParentIds        []pgtype.UUID      `json:"parent_ids"`
+	SupersededBy     pgtype.UUID        `json:"superseded_by"`
+	SupersededAt     pgtype.Timestamptz `json:"superseded_at"`
+	StartedAt        pgtype.Timestamptz `json:"started_at"`
 }
 
 func (q *Queries) ListCompactionArtifactLineageMetadataBySession(ctx context.Context, sessionID pgtype.UUID) ([]ListCompactionArtifactLineageMetadataBySessionRow, error) {
@@ -593,6 +612,7 @@ func (q *Queries) ListCompactionArtifactLineageMetadataBySession(ctx context.Con
 			&i.SessionID,
 			&i.Status,
 			&i.HasSummary,
+			&i.LineageValidated,
 			&i.CoverageCount,
 			&i.AnchorStartMs,
 			&i.AnchorEndMs,

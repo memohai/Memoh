@@ -224,6 +224,10 @@ type BotHistoryMessageCompactTopology struct {
 	RangeEndTurnPosition   int64       `json:"range_end_turn_position"`
 }
 
+type BotHistoryMessageCompactValidation struct {
+	CompactID pgtype.UUID `json:"compact_id"`
+}
+
 type BotHistoryTopologyCounter struct {
 	SessionID pgtype.UUID `json:"session_id"`
 	Revision  int64       `json:"revision"`

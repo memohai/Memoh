@@ -135,6 +135,9 @@ EXECUTE FUNCTION bump_history_message_source_revision();
 	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0112_compaction_claim_invalidation.up.sql")); err != nil {
 		t.Fatalf("apply claim invalidation migration: %v", err)
 	}
+	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0114_compaction_validation_provenance.up.sql")); err != nil {
+		t.Fatalf("apply validation provenance migration: %v", err)
+	}
 	return pool
 }
 

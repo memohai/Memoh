@@ -44,6 +44,7 @@ func TestCompactionTopologyBaselineMigrationDownRemovesTopologyObjectsPostgresPa
 	}
 
 	for _, relation := range []string{
+		"bot_history_message_compact_validations",
 		"bot_history_topology_counters",
 		"bot_history_topology_positions",
 		"bot_history_topology_pending",

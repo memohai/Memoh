@@ -255,7 +255,19 @@ completed_log AS (
       completed_at = now()
   FROM locked_log, request_shape shape, finalized_state state, retirement_guard
   WHERE compact.id = locked_log.id
-  RETURNING compact.status, state.finalized
+  RETURNING compact.id, compact.status, state.finalized
+),
+validated_artifact AS MATERIALIZED (
+  INSERT INTO bot_history_message_compact_validations (compact_id)
+  SELECT completed.id
+  FROM completed_log completed
+  WHERE completed.finalized
+  ON CONFLICT (compact_id) DO UPDATE SET compact_id = EXCLUDED.compact_id
+  RETURNING compact_id
+),
+validation_guard AS MATERIALIZED (
+  SELECT COUNT(*)::integer AS validated_count
+  FROM validated_artifact
 )
 SELECT
   COALESCE(completed.finalized, false)::boolean AS finalized,
@@ -264,6 +276,7 @@ SELECT
   stats.matched_count,
   stats.claimed_count
 FROM finalization_stats stats
+CROSS JOIN validation_guard
 LEFT JOIN completed_log completed ON true;
 
 -- name: GetCompactionLogByID :one
@@ -325,6 +338,11 @@ SELECT
   c.session_id,
   c.status,
   (BTRIM(c.summary) <> '')::boolean AS has_summary,
+  EXISTS (
+    SELECT 1
+    FROM bot_history_message_compact_validations validation
+    WHERE validation.compact_id = c.id
+  )::boolean AS lineage_validated,
   CASE
     WHEN jsonb_typeof(c.coverage) = 'array' THEN jsonb_array_length(c.coverage)
     ELSE -1

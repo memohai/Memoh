@@ -413,6 +413,13 @@ completed_rollup AS MATERIALIZED (
   WHERE rollup.id = eligible.id
   RETURNING rollup.id
 ),
+validated_rollup AS MATERIALIZED (
+  INSERT INTO bot_history_message_compact_validations (compact_id)
+  SELECT completed.id
+  FROM completed_rollup completed
+  ON CONFLICT (compact_id) DO UPDATE SET compact_id = EXCLUDED.compact_id
+  RETURNING compact_id
+),
 recorded_topology AS MATERIALIZED (
   INSERT INTO bot_history_message_compact_topology (
     compact_id,
@@ -422,13 +429,13 @@ recorded_topology AS MATERIALIZED (
     range_end_turn_position
   )
   SELECT
-    completed.id,
+    completed.compact_id,
     $4::uuid,
     eligible.topology_revision,
     eligible.range_start_turn_position,
     eligible.range_end_turn_position
-  FROM completed_rollup completed
-  JOIN eligible ON eligible.id = completed.id
+  FROM validated_rollup completed
+  JOIN eligible ON eligible.id = completed.compact_id
   RETURNING compact_id
 ),
 superseded_parents AS (
@@ -442,6 +449,7 @@ superseded_parents AS (
 SELECT
   (
     (SELECT COUNT(*) FROM completed_rollup) = 1
+    AND (SELECT COUNT(*) FROM validated_rollup) = 1
     AND (SELECT COUNT(*) FROM recorded_topology) = 1
     AND (SELECT COUNT(*) FROM superseded_parents) = request.requested_count
   )::boolean AS finalized,
