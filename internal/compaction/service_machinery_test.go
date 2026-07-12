@@ -84,6 +84,7 @@ type fakeQueries struct {
 	priorLogs       []sqlc.BotHistoryMessageCompact
 	completeErr     error
 	listPanic       bool
+	onComplete      func()
 
 	created   bool
 	markedIDs []pgtype.UUID
@@ -112,6 +113,9 @@ func (f *fakeQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMess
 }
 
 func (f *fakeQueries) CompleteCompactionLog(_ context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
+	if f.onComplete != nil {
+		f.onComplete()
+	}
 	if f.completeErr != nil {
 		return sqlc.BotHistoryMessageCompact{}, f.completeErr
 	}

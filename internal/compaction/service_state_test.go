@@ -733,6 +733,54 @@ func TestPreHookPanicArmsCooldownAndReleasesSlot(t *testing.T) {
 	}
 }
 
+// TestPostCompactHookPanicDoesNotPoisonASuccessfulRun pins the post-hook
+// panic containment: the compaction itself succeeded and its outcome is
+// already persisted, so a panicking PostCompact hook must not escape the
+// recovery defer (crashing async triggers), must not turn the published
+// result into a lie, and must not arm the failure cooldown. The panicking
+// hook service is swapped in mid-run, after the pre-hook already passed.
+func TestPostCompactHookPanicDoesNotPoisonASuccessfulRun(t *testing.T) {
+	t.Parallel()
+
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	stub := &stubModel{summary: "SUMMARY-OK"}
+	svc := newMachineryService(q)
+	provider := &panickingHookProvider{}
+	provider.armed.Store(true)
+	q.onComplete = func() {
+		svc.SetHookService(hooks.NewService(slog.New(slog.DiscardHandler), provider))
+	}
+	cfg := machineryConfig(stub, 450)
+
+	recovered := make(chan any, 1)
+	results := make(chan Result, 1)
+	errs := make(chan error, 1)
+	go func() {
+		defer func() { recovered <- recover() }()
+		res, err := svc.RunCompactionSync(context.Background(), cfg)
+		results <- res
+		errs <- err
+	}()
+	if r := <-recovered; r != nil {
+		t.Fatalf("a post-hook panic must be contained, but escaped: %v", r)
+	}
+	if err := <-errs; err != nil {
+		t.Fatalf("a post-hook panic must not fail the completed compaction: %v", err)
+	}
+	if res := <-results; res.Status != StatusOK || res.Summary != "SUMMARY-OK" {
+		t.Fatalf("completed compaction result lost to a post-hook panic: %#v", res)
+	}
+	if provider.calls.Load() == 0 {
+		t.Fatal("the post-hook must actually have run (and panicked)")
+	}
+
+	q.onComplete = nil
+	svc.SetHookService(nil)
+	if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
+		t.Fatalf("a contained post-hook panic must not arm the cooldown: res=%#v err=%v", res, err)
+	}
+}
+
 type doneHiddenContext struct{ context.Context }
 
 func (doneHiddenContext) Done() <-chan struct{} { return nil }

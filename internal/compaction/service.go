@@ -237,13 +237,7 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result,
 		if !preHookRan {
 			return
 		}
-		extra := map[string]any{}
-		if compactErr != nil {
-			extra["error"] = compactErr.Error()
-		}
-		if err := s.runCompactionHook(context.WithoutCancel(ctx), hooks.EventPostCompact, cfg, extra); err != nil && s.logger != nil {
-			s.logger.Warn("post compaction hook failed", slog.String("bot_id", cfg.BotID), slog.Any("error", err))
-		}
+		s.runPostCompactHook(context.WithoutCancel(ctx), cfg, compactErr)
 	}()
 
 	if err := s.runCompactionHook(ctx, hooks.EventPreCompact, cfg, nil); err != nil {
@@ -264,6 +258,27 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result,
 
 	compactRes, compactErr = s.doCompaction(ctx, botUUID, sessionUUID, cfg)
 	return compactRes, nil, compactErr
+}
+
+// runPostCompactHook dispatches PostCompact after the compaction outcome is
+// already decided and published state is settled. Post-hook failures are
+// advisory, so an error only logs a warning — and a panic is contained here:
+// letting it escape would blow past the recovery defer's already-spent
+// recover(), crash async triggers, and publish the pre-panic result to
+// waiters as if nothing happened.
+func (s *Service) runPostCompactHook(ctx context.Context, cfg TriggerConfig, compactErr error) {
+	defer func() {
+		if r := recover(); r != nil && s.logger != nil {
+			s.logger.Warn("post compaction hook panicked", slog.String("bot_id", cfg.BotID), slog.Any("panic", r))
+		}
+	}()
+	extra := map[string]any{}
+	if compactErr != nil {
+		extra["error"] = compactErr.Error()
+	}
+	if err := s.runCompactionHook(ctx, hooks.EventPostCompact, cfg, extra); err != nil && s.logger != nil {
+		s.logger.Warn("post compaction hook failed", slog.String("bot_id", cfg.BotID), slog.Any("error", err))
+	}
 }
 
 func (s *Service) runCompactionHook(ctx context.Context, eventName string, cfg TriggerConfig, extra map[string]any) error {
