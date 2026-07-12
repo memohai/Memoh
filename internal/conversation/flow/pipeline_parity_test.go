@@ -250,3 +250,139 @@ func assertValidToolClosures(t *testing.T, label string, messages []conversation
 		t.Fatalf("%s unresolved tool calls: %#v", label, pending)
 	}
 }
+
+func TestFlowAndPipelinePathsAlignAgedOutArtifactsAcrossRounds(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID          = "11111111-1111-1111-1111-111111111111"
+		sessionID      = "22222222-2222-2222-2222-222222222222"
+		artifactOld    = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+		artifactMid    = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+		artifactInside = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+		budget         = 5_000
+	)
+	base := time.Now().UTC().Add(-time.Minute)
+	at := base.Add
+	toolCall := sdkMessagesToModelMessages([]sdk.Message{{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{
+			sdk.ToolCallPart{ToolCallID: "call-1", ToolName: "exec", Input: map[string]any{}},
+		},
+	}})[0]
+	toolResult := sdkMessagesToModelMessages([]sdk.Message{
+		sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "exec", Result: "ok"}),
+	})[0]
+
+	agedOutOld := []messagepkg.Message{
+		pipelineHistoryMessage(t, "user-0", botID, sessionID, "external-0", at(10*time.Millisecond), "user", "ancient question"),
+		pipelineHistoryMessage(t, "assistant-0", botID, sessionID, "", at(20*time.Millisecond), "assistant", "ancient answer"),
+	}
+	agedOutMid := []messagepkg.Message{
+		pipelineHistoryMessage(t, "user-mid2", botID, sessionID, "external-mid2", at(550*time.Millisecond), "user", "second round question"),
+		pipelineHistoryMessage(t, "assistant-mid2", botID, sessionID, "", at(560*time.Millisecond), "assistant", "second round answer"),
+	}
+	rows := []messagepkg.Message{
+		pipelineHistoryMessage(t, "user-a", botID, sessionID, "external-a", at(100*time.Millisecond), "user", "old question a"),
+		pipelineHistoryMessage(t, "assistant-a", botID, sessionID, "", at(150*time.Millisecond), "assistant", "old answer a"),
+		pipelineHistoryMessage(t, "user-mid", botID, sessionID, "external-mid", at(300*time.Millisecond), "user", "middle question"),
+		pipelineModelHistoryMessage(t, "assistant-tool", botID, sessionID, at(400*time.Millisecond), toolCall),
+		pipelineModelHistoryMessage(t, "tool-result", botID, sessionID, at(450*time.Millisecond), toolResult),
+		pipelineHistoryMessage(t, "assistant-final", botID, sessionID, "", at(500*time.Millisecond), "assistant", "tool finished"),
+		pipelineHistoryMessage(t, "user-b", botID, sessionID, "external-b", at(600*time.Millisecond), "user", "old question b"),
+		pipelineHistoryMessage(t, "assistant-b", botID, sessionID, "", at(650*time.Millisecond), "assistant", "old answer b"),
+		pipelineHistoryMessage(t, "user-current", botID, sessionID, "external-current", at(800*time.Millisecond), "user", "current question"),
+	}
+	for _, index := range []int{0, 1} {
+		rows[index].CompactID = artifactInside
+	}
+
+	p := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
+	for _, event := range []pipelinepkg.MessageEvent{
+		parityPipelineEvent(sessionID, "external-a", at(100*time.Millisecond), "old question a"),
+		parityPipelineEvent(sessionID, "external-mid", at(300*time.Millisecond), "middle question"),
+		parityPipelineEvent(sessionID, "external-b", at(600*time.Millisecond), "old question b"),
+		parityPipelineEvent(sessionID, "external-current", at(800*time.Millisecond), "current question"),
+	} {
+		p.PushEvent(sessionID, event)
+	}
+	queries := &recordingCompactionLogQueries{logs: []sqlc.BotHistoryMessageCompact{
+		pipelineArtifactRow(t, artifactMid, botID, sessionID, "second round span", agedOutMid, at(3*time.Second)),
+		pipelineArtifactRow(t, artifactOld, botID, sessionID, "ancient span", agedOutOld, at(time.Second)),
+		pipelineArtifactRow(t, artifactInside, botID, sessionID, "condensed exchange a", rows[0:2], at(2*time.Second)),
+	}}
+	resolver := &Resolver{
+		logger:         slog.New(slog.DiscardHandler),
+		pipeline:       p,
+		messageService: &pipelineContextMessageService{rows: rows},
+		queries:        queries,
+	}
+	req := conversation.ChatRequest{
+		BotID:             botID,
+		ChatID:            "chat-1",
+		SessionID:         sessionID,
+		ConversationType:  "group",
+		ReplyTarget:       "target",
+		Query:             "current question",
+		ExternalMessageID: "external-current",
+	}
+	ctx := context.Background()
+
+	loaded, err := resolver.loadHistoryRecords(ctx, historyScopeFallbackFromChatRequest(req), sessionID, defaultMaxContextMinutes)
+	if err != nil {
+		t.Fatalf("loadHistoryRecords() error = %v", err)
+	}
+	loaded = pruneHistoryForGateway(loaded)
+	loaded, err = resolver.replaceCompactedMessages(ctx, sessionID, compactionSummaryScope(
+		req.BotID,
+		req.ChatID,
+		req.SessionID,
+		req.ConversationType,
+		req.ConversationName,
+		req.ReplyTarget,
+	), loaded)
+	if err != nil {
+		t.Fatalf("replaceCompactedMessages() error = %v", err)
+	}
+	flowMessages, flowRecords, _ := trimMessagesAndRecordsByTokens(nil, loaded, budget)
+	pipelineBuild, err := resolver.buildPipelineContext(ctx, req, budget)
+	if err != nil {
+		t.Fatalf("buildPipelineContext() error = %v", err)
+	}
+
+	wantTexts := []string{
+		"ancient span",
+		"condensed exchange a",
+		"middle question",
+		"", // tool call carries no text
+		"", // tool result carries no text
+		"tool finished",
+		"second round span",
+		"old question b",
+		"old answer b",
+		"current question",
+	}
+	for label, messages := range map[string][]conversation.ModelMessage{"flow": flowMessages, "pipeline": pipelineBuild.Messages} {
+		if len(messages) != len(wantTexts) {
+			t.Fatalf("%s message count = %d, want %d: %#v", label, len(messages), len(wantTexts), modelMessageTexts(messages))
+		}
+		for i, want := range wantTexts {
+			if _, text := normalizeParityMessage(messages[i]); text != want {
+				t.Fatalf("%s message %d = %q, want %q\nall: %#v", label, i, text, want, modelMessageTexts(messages))
+			}
+		}
+	}
+	for i := range flowMessages {
+		flowRole, flowText := normalizeParityMessage(flowMessages[i])
+		pipelineRole, pipelineText := normalizeParityMessage(pipelineBuild.Messages[i])
+		if flowRole != pipelineRole || flowText != pipelineText {
+			t.Fatalf("message %d mismatch: flow=(%q, %q) pipeline=(%q, %q)", i, flowRole, flowText, pipelineRole, pipelineText)
+		}
+	}
+	flowFrags := historyContextFragsForMessages(flowMessages, flowRecords)
+	pipelineFrags := historyContextFragsForMessages(pipelineBuild.Messages, pipelineBuild.HistoryRecords)
+	assertParitySummaryFrags(t, "flow", flowFrags, []string{artifactOld, artifactInside, artifactMid})
+	assertParitySummaryFrags(t, "pipeline", pipelineFrags, []string{artifactOld, artifactInside, artifactMid})
+	assertValidToolClosures(t, "flow", flowMessages)
+	assertValidToolClosures(t, "pipeline", pipelineBuild.Messages)
+}
