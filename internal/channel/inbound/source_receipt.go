@@ -28,7 +28,7 @@ func buildInboundUserReceipt(
 		Source: messagesource.V1Candidate{
 			SenderDisplayName: identity.DisplayName,
 			Platform:          msg.Channel.String(),
-			ConversationType:  channel.NormalizeConversationType(msg.Conversation.Type),
+			ConversationType:  canonicalSourceConversationType(msg.Conversation.Type),
 			ConversationName:  msg.Conversation.Name,
 		},
 	})
@@ -58,4 +58,17 @@ func buildInboundUserReceipt(
 		Metadata:    metadata,
 		Attachments: append([]conversation.ChatAttachment(nil), attachments...),
 	}, nil
+}
+
+func canonicalSourceConversationType(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "p2p", "direct", channel.ConversationTypePrivate:
+		return channel.ConversationTypePrivate
+	case channel.ConversationTypeGroup:
+		return channel.ConversationTypeGroup
+	case channel.ConversationTypeThread:
+		return channel.ConversationTypeThread
+	default:
+		return ""
+	}
 }

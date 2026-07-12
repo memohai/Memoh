@@ -63,16 +63,18 @@ func TestBuildInboundUserReceiptCapturesCanonicalOrigin(t *testing.T) {
 func TestBuildInboundUserReceiptUsesZeroContextForIncompleteOrigin(t *testing.T) {
 	t.Parallel()
 
-	receipt, err := buildInboundUserReceipt(
-		InboundIdentity{ChannelIdentityID: "11111111-1111-1111-1111-111111111111", DisplayName: "Alice"},
-		channel.InboundMessage{Channel: channel.ChannelTypeTelegram, Conversation: channel.Conversation{Type: "group"}},
-		"hello", nil, "route-1", "",
-	)
-	if err != nil {
-		t.Fatalf("buildInboundUserReceipt() error = %v", err)
-	}
-	if receipt.Origin.Values().Context != (messagesource.Context{}) {
-		t.Fatalf("incomplete origin context = %+v", receipt.Origin.Values().Context)
+	for _, conversationType := range []string{"", "mystery"} {
+		receipt, err := buildInboundUserReceipt(
+			InboundIdentity{ChannelIdentityID: "11111111-1111-1111-1111-111111111111", DisplayName: "Alice"},
+			channel.InboundMessage{Channel: channel.ChannelTypeTelegram, Conversation: channel.Conversation{Type: conversationType, Name: "Alice Chat"}},
+			"hello", nil, "route-1", "",
+		)
+		if err != nil {
+			t.Fatalf("buildInboundUserReceipt(%q) error = %v", conversationType, err)
+		}
+		if receipt.Origin.Values().Context != (messagesource.Context{}) {
+			t.Fatalf("origin context for type %q = %+v", conversationType, receipt.Origin.Values().Context)
+		}
 	}
 }
 
