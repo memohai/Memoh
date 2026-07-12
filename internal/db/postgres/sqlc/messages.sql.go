@@ -835,6 +835,7 @@ inserted AS (
     model_id,
     event_id,
     display_text,
+    source_context,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -856,6 +857,7 @@ inserted AS (
     $14::uuid,
     $15::uuid,
     $16::text,
+    $17::jsonb,
     target.turn_id,
     target.turn_position,
     target.turn_message_seq,
@@ -916,6 +918,7 @@ type CreateMessageInHistoryTurnByRequestParams struct {
 	ModelID                 pgtype.UUID `json:"model_id"`
 	EventID                 pgtype.UUID `json:"event_id"`
 	DisplayText             pgtype.Text `json:"display_text"`
+	SourceContext           []byte      `json:"source_context"`
 }
 
 type CreateMessageInHistoryTurnByRequestRow struct {
@@ -955,6 +958,7 @@ func (q *Queries) CreateMessageInHistoryTurnByRequest(ctx context.Context, arg C
 		arg.ModelID,
 		arg.EventID,
 		arg.DisplayText,
+		arg.SourceContext,
 	)
 	var i CreateMessageInHistoryTurnByRequestRow
 	err := row.Scan(
@@ -1027,6 +1031,7 @@ inserted AS (
     model_id,
     event_id,
     display_text,
+    source_context,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -1048,6 +1053,7 @@ inserted AS (
     $14::uuid,
     $15::uuid,
     $16::text,
+    $17::jsonb,
     target.turn_id,
     target.turn_position,
     target.turn_message_seq,
@@ -1082,6 +1088,7 @@ type CreateMessageInHistoryTurnByRequestAndBindParams struct {
 	ModelID                 pgtype.UUID `json:"model_id"`
 	EventID                 pgtype.UUID `json:"event_id"`
 	DisplayText             pgtype.Text `json:"display_text"`
+	SourceContext           []byte      `json:"source_context"`
 }
 
 type CreateMessageInHistoryTurnByRequestAndBindRow struct {
@@ -1107,6 +1114,7 @@ func (q *Queries) CreateMessageInHistoryTurnByRequestAndBind(ctx context.Context
 		arg.ModelID,
 		arg.EventID,
 		arg.DisplayText,
+		arg.SourceContext,
 	)
 	var i CreateMessageInHistoryTurnByRequestAndBindRow
 	err := row.Scan(&i.ID, &i.CreatedAt)
@@ -1138,6 +1146,7 @@ inserted_message AS (
     model_id,
     event_id,
     display_text,
+    source_context,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -1160,9 +1169,10 @@ inserted_message AS (
     $14::uuid,
     $15::uuid,
     $16::text,
-    $17,
-    next_position.position,
+    $17::jsonb,
     $18,
+    next_position.position,
+    $19,
     true
   FROM next_position
   RETURNING
@@ -1192,6 +1202,7 @@ type CreateMessageWithHistoryTurnParams struct {
 	ModelID                 pgtype.UUID `json:"model_id"`
 	EventID                 pgtype.UUID `json:"event_id"`
 	DisplayText             pgtype.Text `json:"display_text"`
+	SourceContext           []byte      `json:"source_context"`
 	TurnID                  pgtype.UUID `json:"turn_id"`
 	TurnMessageSeq          pgtype.Int8 `json:"turn_message_seq"`
 }
@@ -1219,6 +1230,7 @@ func (q *Queries) CreateMessageWithHistoryTurn(ctx context.Context, arg CreateMe
 		arg.ModelID,
 		arg.EventID,
 		arg.DisplayText,
+		arg.SourceContext,
 		arg.TurnID,
 		arg.TurnMessageSeq,
 	)
@@ -1235,8 +1247,8 @@ WITH target AS (
     existing.turn_position,
     bool_or(existing.turn_visible) AS turn_visible
   FROM bot_history_messages existing
-  WHERE existing.turn_id = $17
-    AND existing.session_id = $18::uuid
+  WHERE existing.turn_id = $18
+    AND existing.session_id = $19::uuid
     AND existing.bot_id = $2
     AND existing.turn_position IS NOT NULL
   GROUP BY existing.turn_id, existing.session_id, existing.turn_position
@@ -1259,6 +1271,7 @@ INSERT INTO bot_history_messages (
   model_id,
   event_id,
   display_text,
+  source_context,
   turn_id,
   turn_position,
   turn_message_seq,
@@ -1281,9 +1294,10 @@ SELECT
   $13::uuid,
   $14::uuid,
   $15::text,
+  $16::jsonb,
   target.turn_id,
   target.turn_position,
-  $16,
+  $17,
   target.turn_visible
 FROM target
 RETURNING
@@ -1321,6 +1335,7 @@ type CreateMessageWithTurnParams struct {
 	ModelID                 pgtype.UUID `json:"model_id"`
 	EventID                 pgtype.UUID `json:"event_id"`
 	DisplayText             pgtype.Text `json:"display_text"`
+	SourceContext           []byte      `json:"source_context"`
 	TurnMessageSeq          pgtype.Int8 `json:"turn_message_seq"`
 	TurnID                  pgtype.UUID `json:"turn_id"`
 	SessionID               pgtype.UUID `json:"session_id"`
@@ -1362,6 +1377,7 @@ func (q *Queries) CreateMessageWithTurn(ctx context.Context, arg CreateMessageWi
 		arg.ModelID,
 		arg.EventID,
 		arg.DisplayText,
+		arg.SourceContext,
 		arg.TurnMessageSeq,
 		arg.TurnID,
 		arg.SessionID,
@@ -1404,7 +1420,8 @@ WITH input_rows(
   runtime_type,
   model_id,
   event_id,
-  display_text
+  display_text,
+  source_context
 ) AS (
   VALUES
       (
@@ -1422,64 +1439,68 @@ WITH input_rows(
         $10::text,
         $11::uuid,
         $12::uuid,
-        $13::text
+        $13::text,
+        $14::jsonb
       ),
       (
         2::bigint,
-        $14::uuid,
         $15::uuid,
         $16::uuid,
-        $17::text,
+        $17::uuid,
         $18::text,
+        $19::text,
         'assistant'::text,
-        $19::jsonb,
         $20::jsonb,
         $21::jsonb,
-        $22::text,
+        $22::jsonb,
         $23::text,
-        $24::uuid,
+        $24::text,
         $25::uuid,
-        $26::text
+        $26::uuid,
+        $27::text,
+        $28::jsonb
       ),
       (
         3::bigint,
-        $27::uuid,
-        $28::uuid,
         $29::uuid,
-        $30::text,
-        $31::text,
+        $30::uuid,
+        $31::uuid,
+        $32::text,
+        $33::text,
         'tool'::text,
-        $32::jsonb,
-        $33::jsonb,
         $34::jsonb,
-        $35::text,
-        $36::text,
-        $37::uuid,
-        $38::uuid,
-        $39::text
+        $35::jsonb,
+        $36::jsonb,
+        $37::text,
+        $38::text,
+        $39::uuid,
+        $40::uuid,
+        $41::text,
+        $42::jsonb
       ),
       (
         4::bigint,
-        $40::uuid,
-        $41::uuid,
-        $42::uuid,
-        $43::text,
-        $44::text,
+        $43::uuid,
+        $44::uuid,
+        $45::uuid,
+        $46::text,
+        $47::text,
         'assistant'::text,
-        $45::jsonb,
-        $46::jsonb,
-        $47::jsonb,
-        $48::text,
-        $49::text,
-        $50::uuid,
-        $51::uuid,
-        $52::text
+        $48::jsonb,
+        $49::jsonb,
+        $50::jsonb,
+        $51::text,
+        $52::text,
+        $53::uuid,
+        $54::uuid,
+        $55::text,
+        $56::jsonb
       )
 ),
 next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
-  WHERE bot_sessions.id = $53
+  WHERE bot_sessions.id = $57
   RETURNING (next_turn_position - 1)::bigint AS position
 ),
 inserted_messages AS (
@@ -1500,6 +1521,7 @@ inserted_messages AS (
     model_id,
     event_id,
     display_text,
+    source_context,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -1507,8 +1529,8 @@ inserted_messages AS (
   )
   SELECT
     input.message_id,
-    $54,
-    $53,
+    $58,
+    $57,
     input.sender_channel_identity_id,
     input.sender_user_id,
     input.external_message_id,
@@ -1522,7 +1544,8 @@ inserted_messages AS (
     input.model_id,
     input.event_id,
     input.display_text,
-    $55,
+    input.source_context,
+    $59,
     next_position.position,
     input.turn_message_seq,
     true
@@ -1548,6 +1571,7 @@ type CreateToolTailRoundParams struct {
 	UserModelID                              pgtype.UUID `json:"user_model_id"`
 	UserEventID                              pgtype.UUID `json:"user_event_id"`
 	UserDisplayText                          pgtype.Text `json:"user_display_text"`
+	UserSourceContext                        []byte      `json:"user_source_context"`
 	ToolCallAssistantMessageID               pgtype.UUID `json:"tool_call_assistant_message_id"`
 	ToolCallAssistantSenderChannelIdentityID pgtype.UUID `json:"tool_call_assistant_sender_channel_identity_id"`
 	ToolCallAssistantSenderUserID            pgtype.UUID `json:"tool_call_assistant_sender_user_id"`
@@ -1561,6 +1585,7 @@ type CreateToolTailRoundParams struct {
 	ToolCallAssistantModelID                 pgtype.UUID `json:"tool_call_assistant_model_id"`
 	ToolCallAssistantEventID                 pgtype.UUID `json:"tool_call_assistant_event_id"`
 	ToolCallAssistantDisplayText             pgtype.Text `json:"tool_call_assistant_display_text"`
+	ToolCallAssistantSourceContext           []byte      `json:"tool_call_assistant_source_context"`
 	ToolMessageID                            pgtype.UUID `json:"tool_message_id"`
 	ToolSenderChannelIdentityID              pgtype.UUID `json:"tool_sender_channel_identity_id"`
 	ToolSenderUserID                         pgtype.UUID `json:"tool_sender_user_id"`
@@ -1574,6 +1599,7 @@ type CreateToolTailRoundParams struct {
 	ToolModelID                              pgtype.UUID `json:"tool_model_id"`
 	ToolEventID                              pgtype.UUID `json:"tool_event_id"`
 	ToolDisplayText                          pgtype.Text `json:"tool_display_text"`
+	ToolSourceContext                        []byte      `json:"tool_source_context"`
 	FinalAssistantMessageID                  pgtype.UUID `json:"final_assistant_message_id"`
 	FinalAssistantSenderChannelIdentityID    pgtype.UUID `json:"final_assistant_sender_channel_identity_id"`
 	FinalAssistantSenderUserID               pgtype.UUID `json:"final_assistant_sender_user_id"`
@@ -1587,6 +1613,7 @@ type CreateToolTailRoundParams struct {
 	FinalAssistantModelID                    pgtype.UUID `json:"final_assistant_model_id"`
 	FinalAssistantEventID                    pgtype.UUID `json:"final_assistant_event_id"`
 	FinalAssistantDisplayText                pgtype.Text `json:"final_assistant_display_text"`
+	FinalAssistantSourceContext              []byte      `json:"final_assistant_source_context"`
 	SessionID                                pgtype.UUID `json:"session_id"`
 	BotID                                    pgtype.UUID `json:"bot_id"`
 	TurnID                                   pgtype.UUID `json:"turn_id"`
@@ -1612,6 +1639,7 @@ func (q *Queries) CreateToolTailRound(ctx context.Context, arg CreateToolTailRou
 		arg.UserModelID,
 		arg.UserEventID,
 		arg.UserDisplayText,
+		arg.UserSourceContext,
 		arg.ToolCallAssistantMessageID,
 		arg.ToolCallAssistantSenderChannelIdentityID,
 		arg.ToolCallAssistantSenderUserID,
@@ -1625,6 +1653,7 @@ func (q *Queries) CreateToolTailRound(ctx context.Context, arg CreateToolTailRou
 		arg.ToolCallAssistantModelID,
 		arg.ToolCallAssistantEventID,
 		arg.ToolCallAssistantDisplayText,
+		arg.ToolCallAssistantSourceContext,
 		arg.ToolMessageID,
 		arg.ToolSenderChannelIdentityID,
 		arg.ToolSenderUserID,
@@ -1638,6 +1667,7 @@ func (q *Queries) CreateToolTailRound(ctx context.Context, arg CreateToolTailRou
 		arg.ToolModelID,
 		arg.ToolEventID,
 		arg.ToolDisplayText,
+		arg.ToolSourceContext,
 		arg.FinalAssistantMessageID,
 		arg.FinalAssistantSenderChannelIdentityID,
 		arg.FinalAssistantSenderUserID,
@@ -1651,6 +1681,7 @@ func (q *Queries) CreateToolTailRound(ctx context.Context, arg CreateToolTailRou
 		arg.FinalAssistantModelID,
 		arg.FinalAssistantEventID,
 		arg.FinalAssistantDisplayText,
+		arg.FinalAssistantSourceContext,
 		arg.SessionID,
 		arg.BotID,
 		arg.TurnID,

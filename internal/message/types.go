@@ -92,6 +92,7 @@ type PersistInput struct {
 	Assets                  []AssetRef
 	ModelID                 string
 	EventID                 string
+	SourceContext           messagesource.Context
 	DisplayText             string
 	TurnRequestMessageID    string
 	SkipHistoryTurn         bool

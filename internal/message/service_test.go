@@ -126,12 +126,14 @@ func (*runtimeSnapshotQueries) LinkUnassignedMessagesAfterHistoryTurnAssistant(c
 func TestPersistResolvesRuntimeSnapshotFromSession(t *testing.T) {
 	queries := &runtimeSnapshotQueries{}
 	svc := NewService(nil, queries)
+	sourceContext := messagesource.NewV1("Historical Sender", "telegram", "group", "Historical Room")
 
 	msg, err := svc.Persist(context.Background(), PersistInput{
-		BotID:     "11111111-1111-1111-1111-111111111111",
-		SessionID: "22222222-2222-2222-2222-222222222222",
-		Role:      "user",
-		Content:   []byte(`{"type":"text","text":"hello"}`),
+		BotID:         "11111111-1111-1111-1111-111111111111",
+		SessionID:     "22222222-2222-2222-2222-222222222222",
+		Role:          "user",
+		Content:       []byte(`{"type":"text","text":"hello"}`),
+		SourceContext: sourceContext,
 	})
 	if err != nil {
 		t.Fatalf("Persist() error = %v", err)
@@ -142,6 +144,48 @@ func TestPersistResolvesRuntimeSnapshotFromSession(t *testing.T) {
 	}
 	if msg.SessionMode != "chat" || msg.RuntimeType != "acp_agent" {
 		t.Fatalf("message runtime snapshot = %q/%q, want chat/acp_agent", msg.SessionMode, msg.RuntimeType)
+	}
+	if got := messagesource.DecodeOrInvalid(queries.created.SourceContext); got != sourceContext {
+		t.Fatalf("CreateMessage source context = %+v, want %+v", got, sourceContext)
+	}
+	if msg.SourceContext != sourceContext {
+		t.Fatalf("message source context = %+v, want %+v", msg.SourceContext, sourceContext)
+	}
+}
+
+func TestPersistRejectsUnsupportedSourceContext(t *testing.T) {
+	t.Parallel()
+
+	queries := &runtimeSnapshotQueries{}
+	svc := NewService(nil, queries)
+	_, err := svc.Persist(context.Background(), PersistInput{
+		BotID:         "11111111-1111-1111-1111-111111111111",
+		SessionID:     "22222222-2222-2222-2222-222222222222",
+		Role:          "user",
+		Content:       []byte(`{"type":"text","text":"hello"}`),
+		SourceContext: messagesource.Context{Version: 2},
+	})
+	if err == nil {
+		t.Fatal("Persist() accepted unsupported source context")
+	}
+}
+
+func TestPersistLeavesAbsentSourceContextForDatabaseFallback(t *testing.T) {
+	t.Parallel()
+
+	queries := &runtimeSnapshotQueries{}
+	svc := NewService(nil, queries)
+	msg, err := svc.Persist(context.Background(), PersistInput{
+		BotID:     "11111111-1111-1111-1111-111111111111",
+		SessionID: "22222222-2222-2222-2222-222222222222",
+		Role:      "user",
+		Content:   []byte(`{"type":"text","text":"hello"}`),
+	})
+	if err != nil {
+		t.Fatalf("Persist() error = %v", err)
+	}
+	if queries.created.SourceContext != nil || msg.SourceContext != (messagesource.Context{}) {
+		t.Fatalf("absent source context = raw %q message %+v", queries.created.SourceContext, msg.SourceContext)
 	}
 }
 

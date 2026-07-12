@@ -85,6 +85,7 @@ INSERT INTO bot_history_messages (
   model_id,
   event_id,
   display_text,
+  source_context,
   turn_id,
   turn_position,
   turn_message_seq,
@@ -107,6 +108,7 @@ SELECT
   sqlc.narg(model_id)::uuid,
   sqlc.narg(event_id)::uuid,
   sqlc.narg(display_text)::text,
+  sqlc.narg(source_context)::jsonb,
   target.turn_id,
   target.turn_position,
   sqlc.arg(turn_message_seq),
@@ -161,6 +163,7 @@ inserted_message AS (
     model_id,
     event_id,
     display_text,
+    source_context,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -183,6 +186,7 @@ inserted_message AS (
     sqlc.narg(model_id)::uuid,
     sqlc.narg(event_id)::uuid,
     sqlc.narg(display_text)::text,
+    sqlc.narg(source_context)::jsonb,
     sqlc.arg(turn_id),
     next_position.position,
     sqlc.arg(turn_message_seq),
@@ -246,6 +250,7 @@ inserted AS (
     model_id,
     event_id,
     display_text,
+    source_context,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -267,6 +272,7 @@ inserted AS (
     sqlc.narg(model_id)::uuid,
     sqlc.narg(event_id)::uuid,
     sqlc.narg(display_text)::text,
+    sqlc.narg(source_context)::jsonb,
     target.turn_id,
     target.turn_position,
     target.turn_message_seq,
@@ -358,6 +364,7 @@ inserted AS (
     model_id,
     event_id,
     display_text,
+    source_context,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -379,6 +386,7 @@ inserted AS (
     sqlc.narg(model_id)::uuid,
     sqlc.narg(event_id)::uuid,
     sqlc.narg(display_text)::text,
+    sqlc.narg(source_context)::jsonb,
     target.turn_id,
     target.turn_position,
     target.turn_message_seq,
@@ -411,7 +419,8 @@ WITH input_rows(
   runtime_type,
   model_id,
   event_id,
-  display_text
+  display_text,
+  source_context
 ) AS (
   VALUES
       (
@@ -429,7 +438,8 @@ WITH input_rows(
         sqlc.arg(user_runtime_type)::text,
         sqlc.narg(user_model_id)::uuid,
         sqlc.narg(user_event_id)::uuid,
-        sqlc.narg(user_display_text)::text
+        sqlc.narg(user_display_text)::text,
+        sqlc.narg(user_source_context)::jsonb
       ),
       (
         2::bigint,
@@ -446,7 +456,8 @@ WITH input_rows(
         sqlc.arg(tool_call_assistant_runtime_type)::text,
         sqlc.narg(tool_call_assistant_model_id)::uuid,
         sqlc.narg(tool_call_assistant_event_id)::uuid,
-        sqlc.narg(tool_call_assistant_display_text)::text
+        sqlc.narg(tool_call_assistant_display_text)::text,
+        sqlc.narg(tool_call_assistant_source_context)::jsonb
       ),
       (
         3::bigint,
@@ -463,7 +474,8 @@ WITH input_rows(
         sqlc.arg(tool_runtime_type)::text,
         sqlc.narg(tool_model_id)::uuid,
         sqlc.narg(tool_event_id)::uuid,
-        sqlc.narg(tool_display_text)::text
+        sqlc.narg(tool_display_text)::text,
+        sqlc.narg(tool_source_context)::jsonb
       ),
       (
         4::bigint,
@@ -480,7 +492,8 @@ WITH input_rows(
         sqlc.arg(final_assistant_runtime_type)::text,
         sqlc.narg(final_assistant_model_id)::uuid,
         sqlc.narg(final_assistant_event_id)::uuid,
-        sqlc.narg(final_assistant_display_text)::text
+        sqlc.narg(final_assistant_display_text)::text,
+        sqlc.narg(final_assistant_source_context)::jsonb
       )
 ),
 next_position AS (
@@ -507,6 +520,7 @@ inserted_messages AS (
     model_id,
     event_id,
     display_text,
+    source_context,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -529,6 +543,7 @@ inserted_messages AS (
     input.model_id,
     input.event_id,
     input.display_text,
+    input.source_context,
     sqlc.arg(turn_id),
     next_position.position,
     input.turn_message_seq,

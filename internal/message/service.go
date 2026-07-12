@@ -188,6 +188,7 @@ func (s *DBService) PersistToolTailRound(ctx context.Context, inputs []PersistIn
 		UserModelID:                              prepared[0].createArg.ModelID,
 		UserEventID:                              prepared[0].createArg.EventID,
 		UserDisplayText:                          prepared[0].createArg.DisplayText,
+		UserSourceContext:                        prepared[0].createArg.SourceContext,
 		ToolCallAssistantMessageID:               messageIDs[1],
 		ToolCallAssistantSenderChannelIdentityID: prepared[1].createArg.SenderChannelIdentityID,
 		ToolCallAssistantSenderUserID:            prepared[1].createArg.SenderUserID,
@@ -201,6 +202,7 @@ func (s *DBService) PersistToolTailRound(ctx context.Context, inputs []PersistIn
 		ToolCallAssistantModelID:                 prepared[1].createArg.ModelID,
 		ToolCallAssistantEventID:                 prepared[1].createArg.EventID,
 		ToolCallAssistantDisplayText:             prepared[1].createArg.DisplayText,
+		ToolCallAssistantSourceContext:           prepared[1].createArg.SourceContext,
 		ToolMessageID:                            messageIDs[2],
 		ToolSenderChannelIdentityID:              prepared[2].createArg.SenderChannelIdentityID,
 		ToolSenderUserID:                         prepared[2].createArg.SenderUserID,
@@ -214,6 +216,7 @@ func (s *DBService) PersistToolTailRound(ctx context.Context, inputs []PersistIn
 		ToolModelID:                              prepared[2].createArg.ModelID,
 		ToolEventID:                              prepared[2].createArg.EventID,
 		ToolDisplayText:                          prepared[2].createArg.DisplayText,
+		ToolSourceContext:                        prepared[2].createArg.SourceContext,
 		FinalAssistantMessageID:                  messageIDs[3],
 		FinalAssistantSenderChannelIdentityID:    prepared[3].createArg.SenderChannelIdentityID,
 		FinalAssistantSenderUserID:               prepared[3].createArg.SenderUserID,
@@ -227,6 +230,7 @@ func (s *DBService) PersistToolTailRound(ctx context.Context, inputs []PersistIn
 		FinalAssistantModelID:                    prepared[3].createArg.ModelID,
 		FinalAssistantEventID:                    prepared[3].createArg.EventID,
 		FinalAssistantDisplayText:                prepared[3].createArg.DisplayText,
+		FinalAssistantSourceContext:              prepared[3].createArg.SourceContext,
 		BotID:                                    prepared[0].botID,
 		SessionID:                                prepared[0].sessionID,
 		TurnID:                                   turnID,
@@ -313,6 +317,13 @@ func (s *DBService) preparePersistMessage(ctx context.Context, input PersistInpu
 	if err != nil {
 		return preparedPersistMessage{}, fmt.Errorf("marshal message metadata: %w", err)
 	}
+	var sourceContext []byte
+	if input.SourceContext != (messagesource.Context{}) {
+		sourceContext, err = messagesource.Encode(input.SourceContext)
+		if err != nil {
+			return preparedPersistMessage{}, fmt.Errorf("encode message source context: %w", err)
+		}
+	}
 
 	content := input.Content
 	if len(content) == 0 {
@@ -337,6 +348,7 @@ func (s *DBService) preparePersistMessage(ctx context.Context, input PersistInpu
 			ModelID:                 pgModelID,
 			EventID:                 pgEventID,
 			DisplayText:             toPgText(input.DisplayText),
+			SourceContext:           sourceContext,
 		},
 		metadata:  metadata,
 		botID:     pgBotID,
@@ -414,6 +426,7 @@ func (s *DBService) persist(ctx context.Context, input PersistInput) (Message, e
 	}
 
 	result := toMessageFromCreate(row)
+	result.SourceContext = messagesource.DecodeOrInvalid(createArg.SourceContext)
 	if !input.SkipHistoryTurn {
 		if err := s.persistHistoryTurn(ctx, prepared.botID, prepared.sessionID, row.ID, input.Role, pgTurnRequestMessageID); err != nil {
 			s.cleanupPersistedMessage(ctx, row.ID)
@@ -453,6 +466,7 @@ func persistDirectHistoryMessage(
 			ModelID:                 createArg.ModelID,
 			EventID:                 createArg.EventID,
 			DisplayText:             createArg.DisplayText,
+			SourceContext:           createArg.SourceContext,
 			TurnID:                  turnID,
 			TurnMessageSeq:          pgtype.Int8{Int64: 1, Valid: true},
 		})
@@ -481,6 +495,7 @@ func persistDirectHistoryMessage(
 			ModelID:                 createArg.ModelID,
 			EventID:                 createArg.EventID,
 			DisplayText:             createArg.DisplayText,
+			SourceContext:           createArg.SourceContext,
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Message{}, pgtype.UUID{}, false, nil
@@ -1296,7 +1311,7 @@ func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
 }
 
 func toMessageFromCreateWithHistoryTurn(row sqlc.CreateMessageWithHistoryTurnRow, createArg sqlc.CreateMessageParams, metadata map[string]any) Message {
-	return toMessageFieldsWithMetadata(
+	m := toMessageFieldsWithMetadata(
 		row.ID,
 		createArg.BotID,
 		createArg.SessionID,
@@ -1318,10 +1333,12 @@ func toMessageFromCreateWithHistoryTurn(row sqlc.CreateMessageWithHistoryTurnRow
 		row.CreatedAt,
 		metadata,
 	)
+	m.SourceContext = messagesource.DecodeOrInvalid(createArg.SourceContext)
+	return m
 }
 
 func toMessageFromCreateInHistoryTurnByRequestAndBind(row sqlc.CreateMessageInHistoryTurnByRequestAndBindRow, createArg sqlc.CreateMessageParams, metadata map[string]any) Message {
-	return toMessageFieldsWithMetadata(
+	m := toMessageFieldsWithMetadata(
 		row.ID,
 		createArg.BotID,
 		createArg.SessionID,
@@ -1343,10 +1360,12 @@ func toMessageFromCreateInHistoryTurnByRequestAndBind(row sqlc.CreateMessageInHi
 		row.CreatedAt,
 		metadata,
 	)
+	m.SourceContext = messagesource.DecodeOrInvalid(createArg.SourceContext)
+	return m
 }
 
 func toMessageFromToolTailRound(row sqlc.CreateToolTailRoundRow, createArg sqlc.CreateMessageParams, metadata map[string]any) Message {
-	return toMessageFieldsWithMetadata(
+	m := toMessageFieldsWithMetadata(
 		row.ID,
 		createArg.BotID,
 		createArg.SessionID,
@@ -1368,6 +1387,8 @@ func toMessageFromToolTailRound(row sqlc.CreateToolTailRoundRow, createArg sqlc.
 		row.CreatedAt,
 		metadata,
 	)
+	m.SourceContext = messagesource.DecodeOrInvalid(createArg.SourceContext)
+	return m
 }
 
 func extractPlatformFromMetadata(metadata []byte) pgtype.Text {
