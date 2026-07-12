@@ -221,15 +221,14 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result,
 			panic(r)
 		}
 		switch {
-		case compactErr == nil:
+		case compactErr == nil, errors.Is(compactErr, ErrCompactionSourceChanged):
+			// A source change means another writer already claimed the rows —
+			// the session is healthy, so the cooldown clears like a success.
 			s.clearCompactionFailure(cfg.SessionID)
 		case !preHookRan:
 			// A pre-hook error or deny is bot policy, not a model failure;
 			// it must not arm the cooldown (panics above still do).
-		case errors.Is(compactErr, ErrCompactionSourceChanged):
-			// The sources moved under this attempt (another writer claimed
-			// them) — not a model failure, so the cooldown stays clear.
-		case ctx.Err() != nil:
+		case callerInterruptionOnly(ctx, compactErr):
 			// The caller's request was canceled or hit its deadline — not a
 			// model failure. Arming the five-minute cooldown here would
 			// silence auto-compaction for a healthy session just because the
@@ -284,6 +283,33 @@ func (s *Service) runPostCompactHook(ctx context.Context, cfg TriggerConfig, com
 	if err := s.runCompactionHook(ctx, hooks.EventPostCompact, cfg, extra); err != nil && s.logger != nil {
 		s.logger.Warn("post compaction hook failed", slog.String("bot_id", cfg.BotID), slog.Any("error", err))
 	}
+}
+
+func callerInterruptionOnly(ctx context.Context, err error) bool {
+	cause := ctx.Err()
+	return cause != nil && errorTreeMatchesOnly(err, cause)
+}
+
+func errorTreeMatchesOnly(err, target error) bool {
+	if err == nil {
+		return false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		children := joined.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !errorTreeMatchesOnly(child, target) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped := errors.Unwrap(err); wrapped != nil {
+		return errorTreeMatchesOnly(wrapped, target)
+	}
+	return errors.Is(err, target)
 }
 
 func (s *Service) runCompactionHook(ctx context.Context, eventName string, cfg TriggerConfig, extra map[string]any) error {

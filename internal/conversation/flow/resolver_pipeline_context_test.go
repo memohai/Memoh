@@ -15,7 +15,6 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/historyfrag"
 	messagepkg "github.com/memohai/memoh/internal/message"
-	"github.com/memohai/memoh/internal/models"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 )
 

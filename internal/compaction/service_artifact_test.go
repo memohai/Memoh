@@ -169,8 +169,10 @@ func TestDoCompactionReturnsSuccessfulArtifactFinalizationError(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	q.beforeFinalize = cancel
+	service := newMachineryService(q)
 
-	_, err := newMachineryService(q).RunCompactionSync(ctx, machineryConfig(&stubModel{summary: "SUMMARY"}, 200))
+	config := machineryConfig(&stubModel{summary: "SUMMARY"}, 200)
+	_, err := service.RunCompactionSync(ctx, config)
 	if !errors.Is(err, finalizeErr) {
 		t.Fatalf("RunCompactionSync error = %v, want %v", err, finalizeErr)
 	}
@@ -185,6 +187,9 @@ func TestDoCompactionReturnsSuccessfulArtifactFinalizationError(t *testing.T) {
 			q.completeCtxErr,
 			q.completeDeadline,
 		)
+	}
+	if !service.inFailureCooldown(config.SessionID) {
+		t.Fatal("finalization failure concurrent with caller cancellation did not arm cooldown")
 	}
 }
 
