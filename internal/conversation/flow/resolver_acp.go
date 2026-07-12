@@ -80,6 +80,7 @@ func (r *Resolver) isACPAgentSession(ctx context.Context, req conversation.ChatR
 }
 
 func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRequest, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) error {
+	req = withoutInjectionCapabilities(req)
 	if r.acpPool == nil {
 		return errors.New("ACP session pool is not configured")
 	}
@@ -127,7 +128,7 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 	}
 	req.Query = strings.TrimSpace(req.Query)
 	req = r.persistACPLeadingUserMessage(context.WithoutCancel(ctx), req)
-	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
+	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), withoutInjectionCapabilities(req), req.RawQuery)
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -345,6 +346,7 @@ func mergeACPRuntimeMetadata(metadata, runtimeMetadata map[string]any) map[strin
 }
 
 func (r *Resolver) streamACPAgentChunks(ctx context.Context, req conversation.ChatRequest, chunkCh chan<- conversation.StreamChunk, errCh chan<- error) {
+	req = withoutInjectionCapabilities(req)
 	eventCh := make(chan WSStreamEvent)
 	done := make(chan error, 1)
 	go func() {
@@ -617,7 +619,7 @@ func (r *Resolver) persistACPRound(ctx context.Context, req conversation.ChatReq
 		MessageMetadataByIndex:  metadataByIndex,
 	})
 	if err == nil && promptErr == nil && req.UserMessagePersisted && !req.SkipMemoryExtraction {
-		go r.storeMemory(context.WithoutCancel(ctx), req, round)
+		go r.storeMemory(context.WithoutCancel(ctx), withoutInjectionCapabilities(req), round)
 	}
 	return err
 }

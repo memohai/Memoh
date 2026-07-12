@@ -504,7 +504,12 @@ func (r *Resolver) persistTerminalSnapshotResult(
 			return
 		}
 		if pressure, known, claimed := rc.claimCompactionPressure(); claimed && known && pressure > 0 {
-			go r.maybeCompact(context.WithoutCancel(ctx), req, rc, pressure)
+			go r.maybeCompact(
+				context.WithoutCancel(ctx),
+				withoutInjectionCapabilities(req),
+				withoutInjectionRuntime(rc),
+				pressure,
+			)
 		}
 	}()
 
