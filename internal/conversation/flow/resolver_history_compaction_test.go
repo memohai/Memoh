@@ -305,7 +305,7 @@ func recordSequenceIDs(records []historyfrag.HistoryRecord) []string {
 	return ids
 }
 
-func TestPrependMissingCompactionSummariesMergesAtAnchorPositions(t *testing.T) {
+func TestMergeMissingCompactionSummariesMergesAtAnchorPositions(t *testing.T) {
 	t.Parallel()
 
 	scope := contextfrag.Scope{BotID: "bot-1", SessionID: "session-1"}
@@ -332,7 +332,7 @@ func TestPrependMissingCompactionSummariesMergesAtAnchorPositions(t *testing.T) 
 	}
 }
 
-func TestPrependMissingCompactionSummariesDoesNotSplitToolExchanges(t *testing.T) {
+func TestMergeMissingCompactionSummariesDoesNotSplitToolExchanges(t *testing.T) {
 	t.Parallel()
 
 	scope := contextfrag.Scope{BotID: "bot-1", SessionID: "session-1"}
@@ -358,7 +358,7 @@ func TestPrependMissingCompactionSummariesDoesNotSplitToolExchanges(t *testing.T
 	}
 }
 
-func TestPrependMissingCompactionSummariesKeepsUnanchoredSummariesFirst(t *testing.T) {
+func TestMergeMissingCompactionSummariesKeepsUnanchoredSummariesFirst(t *testing.T) {
 	t.Parallel()
 
 	scope := contextfrag.Scope{BotID: "bot-1", SessionID: "session-1"}

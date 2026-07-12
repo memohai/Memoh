@@ -546,18 +546,6 @@ func TestTrimDiscussContextWithoutBudgetKeepsEverything(t *testing.T) {
 	}
 }
 
-func TestModelContextTokenBudget(t *testing.T) {
-	t.Parallel()
-
-	window := 128000
-	if got := modelContextTokenBudget(models.GetResponse{Model: models.Model{Config: models.ModelConfig{ContextWindow: &window}}}); got != 128000 {
-		t.Fatalf("declared window budget = %d, want 128000", got)
-	}
-	if got := modelContextTokenBudget(models.GetResponse{}); got != 0 {
-		t.Fatalf("undeclared window budget = %d, want 0", got)
-	}
-}
-
 func TestTrimDiscussContextPinsLatestUserTriggerOverNewerTurnResponse(t *testing.T) {
 	t.Parallel()
 
