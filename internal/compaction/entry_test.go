@@ -67,6 +67,60 @@ func TestRenderEntryContentToolCallName(t *testing.T) {
 	}
 }
 
+func TestRenderEntryContentToolCallIncludesInput(t *testing.T) {
+	t.Parallel()
+
+	// For write/exec-style tools the result is often just "ok" — the arguments
+	// are what describe the action. They must survive into the summarizer input.
+	mm := conversation.ModelMessage{
+		Role:    "assistant",
+		Content: []byte(`[{"type":"tool-call","toolName":"exec_command","toolCallId":"c1","input":{"cmd":"make"}}]`),
+	}
+	got := renderEntryContent(mm)
+	if !strings.Contains(got, "exec_command") {
+		t.Fatalf("render should mention tool call name: %q", got)
+	}
+	if !strings.Contains(got, `"cmd":"make"`) {
+		t.Fatalf("tool call arguments lost from summarizer input: %q", got)
+	}
+}
+
+func TestRenderEntryContentToolCallEmptyInputStaysBareMarker(t *testing.T) {
+	t.Parallel()
+
+	mm := conversation.ModelMessage{
+		Role:    "assistant",
+		Content: []byte(`[{"type":"tool-call","toolName":"screenshot","toolCallId":"c1","input":{}}]`),
+	}
+	if got := renderEntryContent(mm); got != "[tool_call: screenshot]" {
+		t.Fatalf("empty input should render a bare marker, got %q", got)
+	}
+}
+
+func TestRenderEntryContentToolCallInputBoundedAndScrubbed(t *testing.T) {
+	t.Parallel()
+
+	blob := strings.Repeat("QUJD", 100)
+	big := strings.Repeat("word ", 1000)
+	mm := conversation.ModelMessage{
+		Role:    "assistant",
+		Content: []byte(`[{"type":"tool-call","toolName":"upload","toolCallId":"c1","input":{"data":"` + blob + `","note":"` + big + `"}}]`),
+	}
+	got := renderEntryContent(mm)
+	if strings.Contains(got, blob) || strings.Contains(got, "QUJDQUJDQUJD") {
+		t.Fatalf("base64 payload in tool arguments leaked: %q", got[:80])
+	}
+	if !strings.Contains(got, "[media]") {
+		t.Fatalf("expected media marker for scrubbed argument payload: %q", got)
+	}
+	if len(got) > toolOutputMaxBytes+64 {
+		t.Fatalf("oversized tool arguments not bounded: %d bytes", len(got))
+	}
+	if !strings.Contains(got, "[truncated]") {
+		t.Fatalf("expected truncation marker on oversized arguments: %q", got[:80])
+	}
+}
+
 func TestRenderEntryContentToolResultOutcomeNotRawJSON(t *testing.T) {
 	t.Parallel()
 
@@ -421,5 +475,8 @@ func TestRenderEntryContentTopLevelToolCalls(t *testing.T) {
 	got := renderEntryContent(mm)
 	if !strings.Contains(got, "search") {
 		t.Fatalf("render should mention top-level tool call: %q", got)
+	}
+	if !strings.Contains(got, `"q":"x"`) {
+		t.Fatalf("top-level tool call arguments lost from summarizer input: %q", got)
 	}
 }

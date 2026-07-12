@@ -34,6 +34,7 @@ var (
 type entryPart struct {
 	Type     string          `json:"type"`
 	ToolName string          `json:"toolName"`
+	Input    json.RawMessage `json:"input"`
 	Output   json.RawMessage `json:"output"`
 	Result   json.RawMessage `json:"result"`
 }
@@ -92,8 +93,9 @@ func cleanEntryMetadataValue(value string) string {
 
 // renderEntryContent turns a stored history message into clean text for the
 // summarizer prompt: plain text is surfaced directly, media is reduced to a
-// marker, tool calls show their name, and tool results show their outcome text
-// (falling back to a marker) instead of dumping the raw stored JSON.
+// marker, tool calls show their name and bounded arguments, and tool results
+// show their outcome text (falling back to a marker) instead of dumping the
+// raw stored JSON.
 func renderEntryContent(mm conversation.ModelMessage) string {
 	parts := parseEntryParts(mm.Content)
 
@@ -119,7 +121,7 @@ func renderEntryContent(mm conversation.ModelMessage) string {
 			segs = append(segs, "[file]")
 		case isToolCallPartType(p.Type):
 			sawToolCallPart = true
-			segs = append(segs, toolCallMarker(p.ToolName))
+			segs = append(segs, toolCallMarker(p.ToolName, p.Input))
 		case isToolResultPartType(p.Type):
 			segs = append(segs, renderToolResult(p.Output, p.Result))
 		}
@@ -127,7 +129,7 @@ func renderEntryContent(mm conversation.ModelMessage) string {
 
 	if !sawToolCallPart {
 		for _, tc := range mm.ToolCalls {
-			segs = append(segs, toolCallMarker(tc.Function.Name))
+			segs = append(segs, toolCallMarker(tc.Function.Name, json.RawMessage(tc.Function.Arguments)))
 		}
 	}
 
@@ -154,12 +156,21 @@ func parseEntryParts(content json.RawMessage) []entryPart {
 	return parts
 }
 
-func toolCallMarker(name string) string {
+// toolCallMarker names the call and carries its arguments: for write/exec-style
+// tools the result is often just a success marker, so the arguments are what
+// tell the summarizer what was actually done. Arguments get the same media
+// scrub and length bound as tool results.
+func toolCallMarker(name string, input json.RawMessage) string {
 	name = strings.TrimSpace(name)
-	if name == "" {
-		return "[tool_call]"
+	marker := "[tool_call]"
+	if name != "" {
+		marker = "[tool_call: " + name + "]"
 	}
-	return "[tool_call: " + name + "]"
+	args := strings.TrimSpace(string(input))
+	if args == "" || args == "null" || args == "{}" {
+		return marker
+	}
+	return marker + " " + sanitizeToolText(args)
 }
 
 // renderToolResult surfaces a tool result's outcome for the summarizer: a clean

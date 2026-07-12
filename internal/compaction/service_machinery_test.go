@@ -211,6 +211,9 @@ func TestDoCompactionMarksToolAwareWindowAndRendersCleanPrompt(t *testing.T) {
 	if !strings.Contains(stub.prompt, "build ok done") {
 		t.Fatalf("structured tool outcome missing from prompt:\n%s", stub.prompt)
 	}
+	if !strings.Contains(stub.prompt, `"cmd":"make"`) {
+		t.Fatalf("tool call arguments missing from prompt:\n%s", stub.prompt)
+	}
 	if !strings.Contains(stub.prompt, "[media]") || strings.Contains(stub.prompt, "QUJDQUJDQUJD") {
 		t.Fatalf("base64 image result not scrubbed in prompt")
 	}
