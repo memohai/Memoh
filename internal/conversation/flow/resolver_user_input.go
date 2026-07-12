@@ -288,19 +288,6 @@ func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.R
 		return err
 	}
 
-	rc, err := r.prepareContinuationRunConfig(
-		ctx,
-		resolved.RunConfig,
-		historyScopeFallbackFromUserInputRequest(req),
-		compactionSummaryScope(firstNonEmpty(req.BotID, input.BotID), "", req.SessionID, req.ConversationType, "", req.ReplyTarget),
-		eventCh,
-		req.ToolCallID,
-		resolved.ContextTokenBudget,
-	)
-	if err != nil {
-		return err
-	}
-
 	chatReq := conversation.ChatRequest{
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,
@@ -311,6 +298,19 @@ func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.R
 		ReplyTarget:             req.ReplyTarget,
 		ConversationType:        req.ConversationType,
 		UserMessagePersisted:    true,
+	}
+	rc, err := r.prepareContinuationRunConfig(
+		ctx,
+		chatReq,
+		resolved.RunConfig,
+		historyScopeFallbackFromUserInputRequest(req),
+		compactionSummaryScope(firstNonEmpty(req.BotID, input.BotID), "", req.SessionID, req.ConversationType, "", req.ReplyTarget),
+		eventCh,
+		req.ToolCallID,
+		resolved.ContextTokenBudget,
+	)
+	if err != nil {
+		return err
 	}
 
 	rc.model = models.GetResponse{ID: resolved.ModelID}

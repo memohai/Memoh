@@ -9,6 +9,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/contextassembly"
 	"github.com/memohai/memoh/internal/contextbudget"
 	"github.com/memohai/memoh/internal/contextfrag"
@@ -19,6 +20,7 @@ import (
 
 func (r *Resolver) prepareContinuationRunConfig(
 	ctx context.Context,
+	req conversation.ChatRequest,
 	base agent.RunConfig,
 	fallback historyfrag.ScopeFallback,
 	summaryScope contextfrag.Scope,
@@ -26,23 +28,23 @@ func (r *Resolver) prepareContinuationRunConfig(
 	continuationToolCallID string,
 	contextTokenBudget int,
 ) (resolvedContext, error) {
-	loaded, err := r.loadHistoryRecords(ctx, fallback, summaryScope.SessionID, defaultMaxContextMinutes)
+	built, err := r.buildContinuationHistoryContext(ctx, fallback, summaryScope, continuationToolCallID)
 	if err != nil {
 		return resolvedContext{}, err
 	}
-	loaded = pruneHistoryForGateway(loaded)
-	loaded, err = r.replaceCompactedMessages(ctx, summaryScope.SessionID, summaryScope, loaded)
+	built, attempted, err := r.drainContinuationHistoryContext(
+		ctx,
+		req,
+		fallback,
+		summaryScope,
+		continuationToolCallID,
+		built,
+		contextTokenBudget,
+	)
 	if err != nil {
 		return resolvedContext{}, err
 	}
-	built, err := assembleHistoryContext(r.logger, loaded, nil)
-	if err != nil {
-		return resolvedContext{}, err
-	}
-	projection, err := requireContinuationToolOccurrence(built.Projection, continuationToolCallID)
-	if err != nil {
-		return resolvedContext{}, err
-	}
+	projection := built.Projection
 	plan, err := buildInitialPromptPlan(projection, nil, contextTokenBudget)
 	if err != nil {
 		return resolvedContext{}, err
@@ -59,6 +61,9 @@ func (r *Resolver) prepareContinuationRunConfig(
 	base.LiveToolStream = eventCh != nil
 	base.CanRequestUserInput = r.canDeliverUserInputWS(eventCh)
 	base, state := withInitialPromptMaterializer(base, plan, projection)
+	if attempted {
+		state.ClaimCompaction()
+	}
 	base = r.prepareRunConfig(ctx, base)
 	return resolvedContext{
 		runConfig:              base,
@@ -67,6 +72,57 @@ func (r *Resolver) prepareContinuationRunConfig(
 		contextTokenBudget:     contextTokenBudget,
 		promptState:            state,
 	}, nil
+}
+
+func (r *Resolver) buildContinuationHistoryContext(
+	ctx context.Context,
+	fallback historyfrag.ScopeFallback,
+	summaryScope contextfrag.Scope,
+	continuationToolCallID string,
+) (historyContextBuild, error) {
+	loaded, err := r.loadHistoryRecords(ctx, fallback, summaryScope.SessionID, defaultMaxContextMinutes)
+	if err != nil {
+		return historyContextBuild{}, err
+	}
+	loaded = pruneHistoryForGateway(loaded)
+	loaded, err = r.replaceCompactedMessages(ctx, summaryScope.SessionID, summaryScope, loaded)
+	if err != nil {
+		return historyContextBuild{}, err
+	}
+	built, err := assembleHistoryContext(r.logger, loaded, nil)
+	if err != nil {
+		return historyContextBuild{}, err
+	}
+	built.Projection, err = requireContinuationToolOccurrence(built.Projection, continuationToolCallID)
+	if err != nil {
+		return historyContextBuild{}, err
+	}
+	return built, nil
+}
+
+func (r *Resolver) drainContinuationHistoryContext(
+	ctx context.Context,
+	req conversation.ChatRequest,
+	fallback historyfrag.ScopeFallback,
+	summaryScope contextfrag.Scope,
+	continuationToolCallID string,
+	initial historyContextBuild,
+	contextTokenBudget int,
+) (historyContextBuild, bool, error) {
+	drained, _, attempted, err := drainPreSendCompaction(
+		ctx,
+		initial,
+		initial.Allocation.CompactableTokens,
+		preSendCompactionThreshold(contextTokenBudget),
+		func(ctx context.Context, pressure int) (compaction.Result, error) {
+			return r.runCompactionSyncResult(ctx, req, pressure, contextTokenBudget)
+		},
+		func(ctx context.Context) (historyContextBuild, int, error) {
+			rebuilt, err := r.buildContinuationHistoryContext(ctx, fallback, summaryScope, continuationToolCallID)
+			return rebuilt, rebuilt.Allocation.CompactableTokens, err
+		},
+	)
+	return drained, attempted, err
 }
 
 func requireContinuationToolOccurrence(

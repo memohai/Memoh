@@ -12,6 +12,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/contextbudget"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
@@ -47,6 +48,7 @@ func TestPrepareContinuationRunConfigReplacesStaleContextAndSetsCapabilities(t *
 
 	got, err := resolver.prepareContinuationRunConfig(
 		context.Background(),
+		conversation.ChatRequest{},
 		base,
 		historyfrag.ScopeFallback{},
 		contextfrag.Scope{},
@@ -79,6 +81,7 @@ func TestPrepareContinuationRunConfigDefersFinalBudgetAndReportsRawPressure(t *t
 
 	oldest := strings.Repeat("old ", 20000)
 	resolver := &Resolver{
+		logger: slog.New(slog.DiscardHandler),
 		messageService: &continuationHistoryService{history: []messagepkg.Message{
 			persistedHistoryMessage(t, "old", "user", oldest),
 			persistedHistoryMessage(t, "new", "assistant", "recent answer"),
@@ -86,6 +89,7 @@ func TestPrepareContinuationRunConfigDefersFinalBudgetAndReportsRawPressure(t *t
 	}
 	rc, err := resolver.prepareContinuationRunConfig(
 		context.Background(),
+		conversation.ChatRequest{},
 		agent.RunConfig{},
 		historyfrag.ScopeFallback{},
 		contextfrag.Scope{SessionID: "session-1"},
@@ -138,10 +142,11 @@ func TestPrepareContinuationRunConfigRequiresLatestToolResultOccurrence(t *testi
 			Result:     "yes",
 		})),
 	)
-	resolver := &Resolver{messageService: &continuationHistoryService{history: history}}
+	resolver := &Resolver{logger: slog.New(slog.DiscardHandler), messageService: &continuationHistoryService{history: history}}
 
 	rc, err := resolver.prepareContinuationRunConfig(
 		context.Background(),
+		conversation.ChatRequest{},
 		agent.RunConfig{},
 		historyfrag.ScopeFallback{},
 		contextfrag.Scope{SessionID: "session-1"},
@@ -162,6 +167,114 @@ func TestPrepareContinuationRunConfigRequiresLatestToolResultOccurrence(t *testi
 	}
 	if len(materialized.Messages) >= len(rc.runConfig.Messages) {
 		t.Fatalf("tight final budget did not trim older continuation history: before=%d after=%d", len(rc.runConfig.Messages), len(materialized.Messages))
+	}
+}
+
+func TestPrepareContinuationRunConfigDrainsAndRepinsToolOccurrence(t *testing.T) {
+	t.Parallel()
+
+	old := persistedHistoryMessage(t, "old", "user", strings.Repeat("old raw context ", 1000))
+	call := persistedSDKHistoryMessage(t, "call", sdk.Message{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{sdk.ToolCallPart{
+			ToolCallID: "call-current",
+			ToolName:   "request_user_input",
+			Input:      map[string]any{"question": "continue?"},
+		}},
+	})
+	result := persistedSDKHistoryMessage(t, "result", sdk.ToolMessage(sdk.ToolResultPart{
+		ToolCallID: "call-current",
+		ToolName:   "request_user_input",
+		Result:     "yes",
+	}))
+	history := &continuationHistoryService{history: []messagepkg.Message{old, call, result}}
+	attempts := 0
+	var compactReq conversation.ChatRequest
+	resolver := &Resolver{
+		logger:         slog.New(slog.DiscardHandler),
+		messageService: history,
+		syncCompactionFn: func(_ context.Context, req conversation.ChatRequest, _, _ int) (compaction.Result, error) {
+			attempts++
+			compactReq = req
+			history.history = []messagepkg.Message{call, result}
+			return compaction.Result{Status: compaction.StatusOK}, nil
+		},
+	}
+
+	rc, err := resolver.prepareContinuationRunConfig(
+		context.Background(),
+		conversation.ChatRequest{BotID: "bot", SessionID: "session-1", UserID: "user"},
+		agent.RunConfig{},
+		historyfrag.ScopeFallback{},
+		contextfrag.Scope{BotID: "bot", SessionID: "session-1"},
+		nil,
+		"call-current",
+		2000,
+	)
+	if err != nil {
+		t.Fatalf("prepareContinuationRunConfig() error = %v", err)
+	}
+	if attempts != 1 || rc.compactableTokens >= preSendCompactionThreshold(2000) {
+		t.Fatalf("continuation drain = attempts:%d pressure:%d", attempts, rc.compactableTokens)
+	}
+	if compactReq.BotID != "bot" || compactReq.SessionID != "session-1" || compactReq.UserID != "user" {
+		t.Fatalf("continuation compaction request = %#v", compactReq)
+	}
+	if rc.promptState.ClaimCompaction() {
+		t.Fatal("post-send compaction claim remained available after pre-send attempt")
+	}
+	materialized, err := rc.runConfig.InitialPromptMaterializer(context.Background(), rc.runConfig, nil)
+	if err != nil {
+		t.Fatalf("InitialPromptMaterializer() error = %v", err)
+	}
+	analysis := messageconv.AnalyzeSDKToolOccurrences(materialized.Messages)
+	if len(analysis.Matches) != 1 || analysis.Matches[0].CallID != "call-current" {
+		t.Fatalf("rebuilt continuation occurrence was not pinned: %#v", analysis)
+	}
+	if strings.Contains(strings.Join(messageTexts(materialized.Messages), "\n"), "old raw context") {
+		t.Fatalf("materialized continuation retained pre-compaction history: %#v", materialized.Messages)
+	}
+}
+
+func TestPrepareContinuationRunConfigRejectsCompactionThatRemovedRequiredOccurrence(t *testing.T) {
+	t.Parallel()
+
+	old := persistedHistoryMessage(t, "old", "user", strings.Repeat("old raw context ", 1000))
+	call := persistedSDKHistoryMessage(t, "call", sdk.Message{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{sdk.ToolCallPart{
+			ToolCallID: "call-current",
+			ToolName:   "request_user_input",
+			Input:      map[string]any{"question": "continue?"},
+		}},
+	})
+	result := persistedSDKHistoryMessage(t, "result", sdk.ToolMessage(sdk.ToolResultPart{
+		ToolCallID: "call-current",
+		ToolName:   "request_user_input",
+		Result:     "yes",
+	}))
+	history := &continuationHistoryService{history: []messagepkg.Message{old, call, result}}
+	resolver := &Resolver{
+		logger:         slog.New(slog.DiscardHandler),
+		messageService: history,
+		syncCompactionFn: func(context.Context, conversation.ChatRequest, int, int) (compaction.Result, error) {
+			history.history = nil
+			return compaction.Result{Status: compaction.StatusOK}, nil
+		},
+	}
+
+	_, err := resolver.prepareContinuationRunConfig(
+		context.Background(),
+		conversation.ChatRequest{BotID: "bot", SessionID: "session-1", UserID: "user"},
+		agent.RunConfig{},
+		historyfrag.ScopeFallback{},
+		contextfrag.Scope{BotID: "bot", SessionID: "session-1"},
+		nil,
+		"call-current",
+		2000,
+	)
+	if err == nil || !strings.Contains(err.Error(), `continuation tool occurrence "call-current" was not found`) {
+		t.Fatalf("prepareContinuationRunConfig() error = %v", err)
 	}
 }
 
@@ -315,6 +428,7 @@ func TestPrepareContinuationRunConfigPropagatesArtifactProjectionFailure(t *test
 	resolver := &Resolver{queries: &recordingCompactionLogQueries{listErr: sentinel}}
 	got, err := resolver.prepareContinuationRunConfig(
 		context.Background(),
+		conversation.ChatRequest{},
 		agent.RunConfig{Query: "must not survive"},
 		historyfrag.ScopeFallback{},
 		contextfrag.Scope{SessionID: "00000000-0000-0000-0000-00000000f401"},

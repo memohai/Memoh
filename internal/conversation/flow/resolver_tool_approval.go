@@ -271,19 +271,6 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 		return err
 	}
 
-	rc, err := r.prepareContinuationRunConfig(
-		ctx,
-		resolved.RunConfig,
-		historyScopeFallbackFromToolApprovalRequest(approval),
-		compactionSummaryScope(firstNonEmpty(approval.BotID, input.BotID), "", approval.SessionID, approval.ConversationType, "", approval.ReplyTarget),
-		eventCh,
-		approval.ToolCallID,
-		resolved.ContextTokenBudget,
-	)
-	if err != nil {
-		return err
-	}
-
 	req := conversation.ChatRequest{
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,
@@ -294,6 +281,19 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 		ReplyTarget:             approval.ReplyTarget,
 		ConversationType:        approval.ConversationType,
 		UserMessagePersisted:    true,
+	}
+	rc, err := r.prepareContinuationRunConfig(
+		ctx,
+		req,
+		resolved.RunConfig,
+		historyScopeFallbackFromToolApprovalRequest(approval),
+		compactionSummaryScope(firstNonEmpty(approval.BotID, input.BotID), "", approval.SessionID, approval.ConversationType, "", approval.ReplyTarget),
+		eventCh,
+		approval.ToolCallID,
+		resolved.ContextTokenBudget,
+	)
+	if err != nil {
+		return err
 	}
 
 	rc.model = models.GetResponse{ID: resolved.ModelID}
