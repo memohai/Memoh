@@ -194,7 +194,7 @@ Memoh/
 │   ├── desktop/                #   Native Electron app (@memohai/desktop): hosted-server renderer, tray, menus, preload IPC
 │   └── web/                    #   Main web app (@memohai/web, Vue 3) — see apps/web/AGENTS.md
 ├── packages/                   # Shared TypeScript libraries
-│   ├── ui/                     #   Shared UI component library (@felinic/ui) — git submodule → github.com/memohai/ui; also owns the memoh-web / memoh-ui-owners agent skills (loaded through cross-platform wrappers in .agents/skills/)
+│   ├── ui/                     #   Shared UI component library (@felinic/ui) — git submodule → github.com/memohai/ui; its AGENTS.md routes agents to the UI-owned Web guidance
 │   ├── sdk/                    #   TypeScript SDK (@memohai/sdk, auto-generated from OpenAPI)
 │   ├── icons/                  #   Brand/provider icon library (@memohai/icon)
 │   └── config/                 #   Shared configuration utilities (@memohai/config)
@@ -237,7 +237,7 @@ Before making changes to a directory, check whether that directory (or its neare
 Key local developer guides:
 - `apps/web/AGENTS.md` — web frontend architecture, routing, page conventions, and i18n rules.
 - `apps/desktop/AGENTS.md` — Electron shell, hosted-server bootstrap, tray/menu/preload rules.
-- `packages/ui/AGENTS.md` — design language contract: tokens, radius, shadow, motion, and the UI contract guard.
+- `packages/ui/AGENTS.md` — UI-owned entry point for the design contract and adjacent Web composition guidance. Read it before Web/UI work; do not duplicate its skills under `.agents/skills/`.
 
 ### README Localization
 
