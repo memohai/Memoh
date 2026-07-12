@@ -715,7 +715,7 @@ export type ChannelAttachment = {
     mime?: string;
     name?: string;
     /**
-     * container-local filesystem path
+     * workspace-local filesystem path
      */
     path?: string;
     platform_key?: string;
@@ -4386,7 +4386,7 @@ export type GetBotsByBotIdContainerResponse = GetBotsByBotIdContainerResponses[k
 
 export type PostBotsByBotIdContainerData = {
     /**
-     * Create container payload
+     * Create workspace payload
      */
     body: HandlersCreateContainerRequest;
     path: {
@@ -4414,7 +4414,7 @@ export type PostBotsByBotIdContainerError = PostBotsByBotIdContainerErrors[keyof
 
 export type PostBotsByBotIdContainerResponses = {
     /**
-     * SSE stream of container creation events
+     * SSE stream of workspace creation events
      */
     200: HandlersCreateContainerResponse;
 };
@@ -4749,7 +4749,7 @@ export type GetBotsByBotIdContainerFsData = {
     };
     query: {
         /**
-         * Container path
+         * Workspace path
          */
         path: string;
     };
@@ -4884,7 +4884,7 @@ export type GetBotsByBotIdContainerFsDownloadData = {
     };
     query: {
         /**
-         * Container file path
+         * Workspace file path
          */
         path: string;
     };
@@ -4974,7 +4974,7 @@ export type GetBotsByBotIdContainerFsListData = {
     };
     query: {
         /**
-         * Container directory path
+         * Workspace directory path
          */
         path: string;
     };
@@ -5058,7 +5058,7 @@ export type GetBotsByBotIdContainerFsReadData = {
     };
     query: {
         /**
-         * Container file path
+         * Workspace file path
          */
         path: string;
     };
@@ -5139,7 +5139,7 @@ export type PostBotsByBotIdContainerFsRenameResponse = PostBotsByBotIdContainerF
 export type PostBotsByBotIdContainerFsUploadData = {
     body: {
         /**
-         * Destination container path
+         * Destination workspace path
          */
         path: string;
         /**

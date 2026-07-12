@@ -251,8 +251,8 @@
           "list": "List all skills"
         },
         "fs": {
-          "list": "List files in the container",
-          "read": "Read a file from the container"
+          "list": "List files in the workspace",
+          "read": "Read a file from the workspace"
         },
         "status": {
           "show": "Show current session status",
@@ -532,7 +532,7 @@
     "email": "View email configuration",
     "heartbeat": "View heartbeat logs",
     "skill": "View bot skills",
-    "fs": "Browse container files",
+    "fs": "Browse workspace files",
     "access": "Inspect identity and permissions",
     "compact": "Compact conversation context"
   }

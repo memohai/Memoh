@@ -1729,7 +1729,7 @@ const docTemplate = `{
                 "tags": [
                     "containerd"
                 ],
-                "summary": "Get container info for bot",
+                "summary": "Get workspace info for bot",
                 "parameters": [
                     {
                         "type": "string",
@@ -1764,7 +1764,7 @@ const docTemplate = `{
                 "tags": [
                     "containerd"
                 ],
-                "summary": "Create and start MCP container for bot",
+                "summary": "Create and start workspace for bot",
                 "parameters": [
                     {
                         "type": "string",
@@ -1774,7 +1774,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Create container payload",
+                        "description": "Create workspace payload",
                         "name": "payload",
                         "in": "body",
                         "required": true,
@@ -1785,7 +1785,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "SSE stream of container creation events",
+                        "description": "SSE stream of workspace creation events",
                         "schema": {
                             "$ref": "#/definitions/handlers.CreateContainerResponse"
                         }
@@ -1808,7 +1808,7 @@ const docTemplate = `{
                 "tags": [
                     "containerd"
                 ],
-                "summary": "Delete MCP container for bot",
+                "summary": "Delete workspace for bot",
                 "parameters": [
                     {
                         "type": "string",
@@ -1997,7 +1997,7 @@ const docTemplate = `{
                 "tags": [
                     "containerd"
                 ],
-                "summary": "Restore previously preserved data into container",
+                "summary": "Restore previously preserved data into workspace",
                 "parameters": [
                     {
                         "type": "string",
@@ -2034,7 +2034,7 @@ const docTemplate = `{
                 "tags": [
                     "containerd"
                 ],
-                "summary": "Check workspace display availability for bot container",
+                "summary": "Check workspace display availability for bot",
                 "parameters": [
                     {
                         "type": "string",
@@ -2209,7 +2209,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/container/fs": {
             "get": {
-                "description": "Returns metadata about a file or directory at the given container path",
+                "description": "Returns metadata about a file or directory at the given workspace path",
                 "tags": [
                     "containerd"
                 ],
@@ -2224,7 +2224,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Container path",
+                        "description": "Workspace path",
                         "name": "path",
                         "in": "query",
                         "required": true
@@ -2328,7 +2328,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/container/fs/delete": {
             "post": {
-                "description": "Deletes a file or directory at the given container path",
+                "description": "Deletes a file or directory at the given workspace path",
                 "tags": [
                     "containerd"
                 ],
@@ -2387,7 +2387,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/container/fs/download": {
             "get": {
-                "description": "Downloads a file from the container with appropriate Content-Type",
+                "description": "Downloads a file from the workspace with appropriate Content-Type",
                 "produces": [
                     "application/octet-stream"
                 ],
@@ -2405,7 +2405,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Container file path",
+                        "description": "Workspace file path",
                         "name": "path",
                         "in": "query",
                         "required": true
@@ -2506,7 +2506,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/container/fs/list": {
             "get": {
-                "description": "Lists files and directories at the given container path",
+                "description": "Lists files and directories at the given workspace path",
                 "tags": [
                     "containerd"
                 ],
@@ -2521,7 +2521,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Container directory path",
+                        "description": "Workspace directory path",
                         "name": "path",
                         "in": "query",
                         "required": true
@@ -2557,7 +2557,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/container/fs/mkdir": {
             "post": {
-                "description": "Creates a directory (and parents) at the given container path",
+                "description": "Creates a directory (and parents) at the given workspace path",
                 "tags": [
                     "containerd"
                 ],
@@ -2625,7 +2625,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Container file path",
+                        "description": "Workspace file path",
                         "name": "path",
                         "in": "query",
                         "required": true
@@ -2720,7 +2720,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/container/fs/upload": {
             "post": {
-                "description": "Uploads a binary file to the given container path",
+                "description": "Uploads a binary file to the given workspace path",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -2738,7 +2738,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Destination container path",
+                        "description": "Destination workspace path",
                         "name": "path",
                         "in": "formData",
                         "required": true
@@ -2837,7 +2837,7 @@ const docTemplate = `{
                 "tags": [
                     "containerd"
                 ],
-                "summary": "Get current container metrics for bot",
+                "summary": "Get current workspace metrics for bot",
                 "parameters": [
                     {
                         "type": "string",
@@ -2866,7 +2866,7 @@ const docTemplate = `{
                 "tags": [
                     "containerd"
                 ],
-                "summary": "Update container metrics settings for bot",
+                "summary": "Update workspace metrics settings for bot",
                 "parameters": [
                     {
                         "type": "string",
@@ -2912,7 +2912,7 @@ const docTemplate = `{
                 "tags": [
                     "containerd"
                 ],
-                "summary": "List skills from the bot container",
+                "summary": "List skills from the bot workspace",
                 "parameters": [
                     {
                         "type": "string",
@@ -3148,7 +3148,7 @@ const docTemplate = `{
                 "tags": [
                     "containerd"
                 ],
-                "summary": "Create container snapshot for bot",
+                "summary": "Create workspace snapshot for bot",
                 "parameters": [
                     {
                         "type": "string",
@@ -3200,7 +3200,7 @@ const docTemplate = `{
                 "tags": [
                     "containerd"
                 ],
-                "summary": "Rollback container to a previous snapshot version",
+                "summary": "Roll back workspace to a previous snapshot version",
                 "parameters": [
                     {
                         "type": "string",
@@ -3246,7 +3246,7 @@ const docTemplate = `{
                 "tags": [
                     "containerd"
                 ],
-                "summary": "Start container task for bot",
+                "summary": "Start workspace for bot",
                 "parameters": [
                     {
                         "type": "string",
@@ -3283,7 +3283,7 @@ const docTemplate = `{
                 "tags": [
                     "containerd"
                 ],
-                "summary": "Stop container task for bot",
+                "summary": "Stop workspace for bot",
                 "parameters": [
                     {
                         "type": "string",
@@ -3320,7 +3320,7 @@ const docTemplate = `{
                 "tags": [
                     "containerd"
                 ],
-                "summary": "Check terminal availability for bot container",
+                "summary": "Check terminal availability for bot workspace",
                 "parameters": [
                     {
                         "type": "string",
@@ -3351,7 +3351,7 @@ const docTemplate = `{
                 "tags": [
                     "containerd"
                 ],
-                "summary": "Interactive WebSocket terminal for bot container",
+                "summary": "Interactive WebSocket terminal for bot workspace",
                 "parameters": [
                     {
                         "type": "string",
@@ -3993,7 +3993,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/mcp-stdio": {
             "post": {
-                "description": "Start a stdio MCP process in the bot container and expose it as MCP HTTP endpoint.",
+                "description": "Start a stdio MCP process in the bot workspace and expose it as an MCP HTTP endpoint.",
                 "tags": [
                     "containerd"
                 ],
@@ -4046,7 +4046,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/mcp-stdio/{connection_id}": {
             "post": {
-                "description": "Proxies MCP JSON-RPC requests to a stdio MCP process in the container.",
+                "description": "Proxies MCP JSON-RPC requests to a stdio MCP process in the workspace.",
                 "tags": [
                     "containerd"
                 ],
@@ -4946,7 +4946,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/memory/rebuild": {
             "post": {
-                "description": "Read memory files from the container filesystem (source of truth) and restore missing entries to memory storage",
+                "description": "Read memory files from the workspace filesystem (source of truth) and restore missing entries to memory storage",
                 "produces": [
                     "application/json"
                 ],
@@ -7273,7 +7273,7 @@ const docTemplate = `{
                 "tags": [
                     "supermarket"
                 ],
-                "summary": "Install skill from supermarket to bot container",
+                "summary": "Install skill from supermarket to bot workspace",
                 "parameters": [
                     {
                         "type": "string",
@@ -14848,7 +14848,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "path": {
-                    "description": "container-local filesystem path",
+                    "description": "workspace-local filesystem path",
                     "type": "string"
                 },
                 "platform_key": {

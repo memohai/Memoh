@@ -639,7 +639,7 @@ export const getBotsByBotIdCompactionLogsQuery = defineQueryOptions<Options<GetB
 }));
 
 /**
- * Delete MCP container for bot
+ * Delete workspace for bot
  */
 export const deleteBotsByBotIdContainerMutation = (options?: Partial<Options<DeleteBotsByBotIdContainerData>>): UseMutationOptions<unknown, Options<DeleteBotsByBotIdContainerData>, DeleteBotsByBotIdContainerError> => ({
     mutation: async (vars) => {
@@ -655,7 +655,7 @@ export const deleteBotsByBotIdContainerMutation = (options?: Partial<Options<Del
 export const getBotsByBotIdContainerQueryKey = (options: Options<GetBotsByBotIdContainerData>) => createQueryKey('getBotsByBotIdContainer', options);
 
 /**
- * Get container info for bot
+ * Get workspace info for bot
  */
 export const getBotsByBotIdContainerQuery = defineQueryOptions<Options<GetBotsByBotIdContainerData>, GetBotsByBotIdContainerResponse, GetBotsByBotIdContainerError>((options: Options<GetBotsByBotIdContainerData>) => ({
     key: getBotsByBotIdContainerQueryKey(options),
@@ -670,7 +670,7 @@ export const getBotsByBotIdContainerQuery = defineQueryOptions<Options<GetBotsBy
 }));
 
 /**
- * Create and start MCP container for bot
+ * Create and start workspace for bot
  */
 export const postBotsByBotIdContainerMutation = (options?: Partial<Options<PostBotsByBotIdContainerData>>): UseMutationOptions<PostBotsByBotIdContainerResponse, Options<PostBotsByBotIdContainerData>, PostBotsByBotIdContainerError> => ({
     mutation: async (vars) => {
@@ -726,7 +726,7 @@ export const postBotsByBotIdContainerBrowserSessionsBySessionIdKeepaliveMutation
 });
 
 /**
- * Restore previously preserved data into container
+ * Restore previously preserved data into workspace
  */
 export const postBotsByBotIdContainerDataRestoreMutation = (options?: Partial<Options<PostBotsByBotIdContainerDataRestoreData>>): UseMutationOptions<PostBotsByBotIdContainerDataRestoreResponse, Options<PostBotsByBotIdContainerDataRestoreData>, PostBotsByBotIdContainerDataRestoreError> => ({
     mutation: async (vars) => {
@@ -742,7 +742,7 @@ export const postBotsByBotIdContainerDataRestoreMutation = (options?: Partial<Op
 export const getBotsByBotIdContainerDisplayQueryKey = (options: Options<GetBotsByBotIdContainerDisplayData>) => createQueryKey('getBotsByBotIdContainerDisplay', options);
 
 /**
- * Check workspace display availability for bot container
+ * Check workspace display availability for bot
  */
 export const getBotsByBotIdContainerDisplayQuery = defineQueryOptions<Options<GetBotsByBotIdContainerDisplayData>, GetBotsByBotIdContainerDisplayResponse, GetBotsByBotIdContainerDisplayError>((options: Options<GetBotsByBotIdContainerDisplayData>) => ({
     key: getBotsByBotIdContainerDisplayQueryKey(options),
@@ -806,7 +806,7 @@ export const getBotsByBotIdContainerFsQueryKey = (options: Options<GetBotsByBotI
 /**
  * Get file or directory info
  *
- * Returns metadata about a file or directory at the given container path
+ * Returns metadata about a file or directory at the given workspace path
  */
 export const getBotsByBotIdContainerFsQuery = defineQueryOptions<Options<GetBotsByBotIdContainerFsData>, GetBotsByBotIdContainerFsResponse, GetBotsByBotIdContainerFsError>((options: Options<GetBotsByBotIdContainerFsData>) => ({
     key: getBotsByBotIdContainerFsQueryKey(options),
@@ -839,7 +839,7 @@ export const postBotsByBotIdContainerFsArchiveMutation = (options?: Partial<Opti
 /**
  * Delete a file or directory
  *
- * Deletes a file or directory at the given container path
+ * Deletes a file or directory at the given workspace path
  */
 export const postBotsByBotIdContainerFsDeleteMutation = (options?: Partial<Options<PostBotsByBotIdContainerFsDeleteData>>): UseMutationOptions<PostBotsByBotIdContainerFsDeleteResponse, Options<PostBotsByBotIdContainerFsDeleteData>, PostBotsByBotIdContainerFsDeleteError> => ({
     mutation: async (vars) => {
@@ -857,7 +857,7 @@ export const getBotsByBotIdContainerFsDownloadQueryKey = (options: Options<GetBo
 /**
  * Download a file as binary stream
  *
- * Downloads a file from the container with appropriate Content-Type
+ * Downloads a file from the workspace with appropriate Content-Type
  */
 export const getBotsByBotIdContainerFsDownloadQuery = defineQueryOptions<Options<GetBotsByBotIdContainerFsDownloadData>, unknown, GetBotsByBotIdContainerFsDownloadError>((options: Options<GetBotsByBotIdContainerFsDownloadData>) => ({
     key: getBotsByBotIdContainerFsDownloadQueryKey(options),
@@ -892,7 +892,7 @@ export const getBotsByBotIdContainerFsListQueryKey = (options: Options<GetBotsBy
 /**
  * List directory contents
  *
- * Lists files and directories at the given container path
+ * Lists files and directories at the given workspace path
  */
 export const getBotsByBotIdContainerFsListQuery = defineQueryOptions<Options<GetBotsByBotIdContainerFsListData>, GetBotsByBotIdContainerFsListResponse, GetBotsByBotIdContainerFsListError>((options: Options<GetBotsByBotIdContainerFsListData>) => ({
     key: getBotsByBotIdContainerFsListQueryKey(options),
@@ -909,7 +909,7 @@ export const getBotsByBotIdContainerFsListQuery = defineQueryOptions<Options<Get
 /**
  * Create a directory
  *
- * Creates a directory (and parents) at the given container path
+ * Creates a directory (and parents) at the given workspace path
  */
 export const postBotsByBotIdContainerFsMkdirMutation = (options?: Partial<Options<PostBotsByBotIdContainerFsMkdirData>>): UseMutationOptions<PostBotsByBotIdContainerFsMkdirResponse, Options<PostBotsByBotIdContainerFsMkdirData>, PostBotsByBotIdContainerFsMkdirError> => ({
     mutation: async (vars) => {
@@ -960,7 +960,7 @@ export const postBotsByBotIdContainerFsRenameMutation = (options?: Partial<Optio
 /**
  * Upload a file via multipart form
  *
- * Uploads a binary file to the given container path
+ * Uploads a binary file to the given workspace path
  */
 export const postBotsByBotIdContainerFsUploadMutation = (options?: Partial<Options<PostBotsByBotIdContainerFsUploadData>>): UseMutationOptions<PostBotsByBotIdContainerFsUploadResponse, Options<PostBotsByBotIdContainerFsUploadData>, PostBotsByBotIdContainerFsUploadError> => ({
     mutation: async (vars) => {
@@ -992,7 +992,7 @@ export const postBotsByBotIdContainerFsWriteMutation = (options?: Partial<Option
 export const getBotsByBotIdContainerMetricsQueryKey = (options: Options<GetBotsByBotIdContainerMetricsData>) => createQueryKey('getBotsByBotIdContainerMetrics', options);
 
 /**
- * Get current container metrics for bot
+ * Get current workspace metrics for bot
  */
 export const getBotsByBotIdContainerMetricsQuery = defineQueryOptions<Options<GetBotsByBotIdContainerMetricsData>, GetBotsByBotIdContainerMetricsResponse, GetBotsByBotIdContainerMetricsError>((options: Options<GetBotsByBotIdContainerMetricsData>) => ({
     key: getBotsByBotIdContainerMetricsQueryKey(options),
@@ -1007,7 +1007,7 @@ export const getBotsByBotIdContainerMetricsQuery = defineQueryOptions<Options<Ge
 }));
 
 /**
- * Update container metrics settings for bot
+ * Update workspace metrics settings for bot
  */
 export const putBotsByBotIdContainerMetricsMutation = (options?: Partial<Options<PutBotsByBotIdContainerMetricsData>>): UseMutationOptions<PutBotsByBotIdContainerMetricsResponse, Options<PutBotsByBotIdContainerMetricsData>, PutBotsByBotIdContainerMetricsError> => ({
     mutation: async (vars) => {
@@ -1037,7 +1037,7 @@ export const deleteBotsByBotIdContainerSkillsMutation = (options?: Partial<Optio
 export const getBotsByBotIdContainerSkillsQueryKey = (options: Options<GetBotsByBotIdContainerSkillsData>) => createQueryKey('getBotsByBotIdContainerSkills', options);
 
 /**
- * List skills from the bot container
+ * List skills from the bot workspace
  */
 export const getBotsByBotIdContainerSkillsQuery = defineQueryOptions<Options<GetBotsByBotIdContainerSkillsData>, GetBotsByBotIdContainerSkillsResponse, GetBotsByBotIdContainerSkillsError>((options: Options<GetBotsByBotIdContainerSkillsData>) => ({
     key: getBotsByBotIdContainerSkillsQueryKey(options),
@@ -1097,7 +1097,7 @@ export const getBotsByBotIdContainerSnapshotsQuery = defineQueryOptions<Options<
 }));
 
 /**
- * Create container snapshot for bot
+ * Create workspace snapshot for bot
  */
 export const postBotsByBotIdContainerSnapshotsMutation = (options?: Partial<Options<PostBotsByBotIdContainerSnapshotsData>>): UseMutationOptions<PostBotsByBotIdContainerSnapshotsResponse, Options<PostBotsByBotIdContainerSnapshotsData>, PostBotsByBotIdContainerSnapshotsError> => ({
     mutation: async (vars) => {
@@ -1111,7 +1111,7 @@ export const postBotsByBotIdContainerSnapshotsMutation = (options?: Partial<Opti
 });
 
 /**
- * Rollback container to a previous snapshot version
+ * Roll back workspace to a previous snapshot version
  */
 export const postBotsByBotIdContainerSnapshotsRollbackMutation = (options?: Partial<Options<PostBotsByBotIdContainerSnapshotsRollbackData>>): UseMutationOptions<PostBotsByBotIdContainerSnapshotsRollbackResponse, Options<PostBotsByBotIdContainerSnapshotsRollbackData>, PostBotsByBotIdContainerSnapshotsRollbackError> => ({
     mutation: async (vars) => {
@@ -1125,7 +1125,7 @@ export const postBotsByBotIdContainerSnapshotsRollbackMutation = (options?: Part
 });
 
 /**
- * Start container task for bot
+ * Start workspace for bot
  */
 export const postBotsByBotIdContainerStartMutation = (options?: Partial<Options<PostBotsByBotIdContainerStartData>>): UseMutationOptions<PostBotsByBotIdContainerStartResponse, Options<PostBotsByBotIdContainerStartData>, PostBotsByBotIdContainerStartError> => ({
     mutation: async (vars) => {
@@ -1139,7 +1139,7 @@ export const postBotsByBotIdContainerStartMutation = (options?: Partial<Options<
 });
 
 /**
- * Stop container task for bot
+ * Stop workspace for bot
  */
 export const postBotsByBotIdContainerStopMutation = (options?: Partial<Options<PostBotsByBotIdContainerStopData>>): UseMutationOptions<PostBotsByBotIdContainerStopResponse, Options<PostBotsByBotIdContainerStopData>, PostBotsByBotIdContainerStopError> => ({
     mutation: async (vars) => {
@@ -1155,7 +1155,7 @@ export const postBotsByBotIdContainerStopMutation = (options?: Partial<Options<P
 export const getBotsByBotIdContainerTerminalQueryKey = (options: Options<GetBotsByBotIdContainerTerminalData>) => createQueryKey('getBotsByBotIdContainerTerminal', options);
 
 /**
- * Check terminal availability for bot container
+ * Check terminal availability for bot workspace
  */
 export const getBotsByBotIdContainerTerminalQuery = defineQueryOptions<Options<GetBotsByBotIdContainerTerminalData>, GetBotsByBotIdContainerTerminalResponse, GetBotsByBotIdContainerTerminalError>((options: Options<GetBotsByBotIdContainerTerminalData>) => ({
     key: getBotsByBotIdContainerTerminalQueryKey(options),
@@ -1172,7 +1172,7 @@ export const getBotsByBotIdContainerTerminalQuery = defineQueryOptions<Options<G
 export const getBotsByBotIdContainerTerminalWsQueryKey = (options: Options<GetBotsByBotIdContainerTerminalWsData>) => createQueryKey('getBotsByBotIdContainerTerminalWs', options);
 
 /**
- * Interactive WebSocket terminal for bot container
+ * Interactive WebSocket terminal for bot workspace
  */
 export const getBotsByBotIdContainerTerminalWsQuery = defineQueryOptions<Options<GetBotsByBotIdContainerTerminalWsData>, unknown, GetBotsByBotIdContainerTerminalWsError>((options: Options<GetBotsByBotIdContainerTerminalWsData>) => ({
     key: getBotsByBotIdContainerTerminalWsQueryKey(options),
@@ -1399,7 +1399,7 @@ export const postBotsByBotIdMcpOpsBatchDeleteMutation = (options?: Partial<Optio
 /**
  * Create MCP stdio proxy
  *
- * Start a stdio MCP process in the bot container and expose it as MCP HTTP endpoint.
+ * Start a stdio MCP process in the bot workspace and expose it as an MCP HTTP endpoint.
  */
 export const postBotsByBotIdMcpStdioMutation = (options?: Partial<Options<PostBotsByBotIdMcpStdioData>>): UseMutationOptions<PostBotsByBotIdMcpStdioResponse, Options<PostBotsByBotIdMcpStdioData>, PostBotsByBotIdMcpStdioError> => ({
     mutation: async (vars) => {
@@ -1415,7 +1415,7 @@ export const postBotsByBotIdMcpStdioMutation = (options?: Partial<Options<PostBo
 /**
  * MCP stdio proxy (JSON-RPC)
  *
- * Proxies MCP JSON-RPC requests to a stdio MCP process in the container.
+ * Proxies MCP JSON-RPC requests to a stdio MCP process in the workspace.
  */
 export const postBotsByBotIdMcpStdioByConnectionIdMutation = (options?: Partial<Options<PostBotsByBotIdMcpStdioByConnectionIdData>>): UseMutationOptions<PostBotsByBotIdMcpStdioByConnectionIdResponse, Options<PostBotsByBotIdMcpStdioByConnectionIdData>, PostBotsByBotIdMcpStdioByConnectionIdError> => ({
     mutation: async (vars) => {
@@ -1725,7 +1725,7 @@ export const postBotsByBotIdMemoryIngestMutation = (options?: Partial<Options<Po
 /**
  * Rebuild memories from filesystem
  *
- * Read memory files from the container filesystem (source of truth) and restore missing entries to memory storage
+ * Read memory files from the workspace filesystem (source of truth) and restore missing entries to memory storage
  */
 export const postBotsByBotIdMemoryRebuildMutation = (options?: Partial<Options<PostBotsByBotIdMemoryRebuildData>>): UseMutationOptions<PostBotsByBotIdMemoryRebuildResponse, Options<PostBotsByBotIdMemoryRebuildData>, PostBotsByBotIdMemoryRebuildError> => ({
     mutation: async (vars) => {
@@ -2424,7 +2424,7 @@ export const postBotsByBotIdSupermarketInstallPluginMutation = (options?: Partia
 });
 
 /**
- * Install skill from supermarket to bot container
+ * Install skill from supermarket to bot workspace
  */
 export const postBotsByBotIdSupermarketInstallSkillMutation = (options?: Partial<Options<PostBotsByBotIdSupermarketInstallSkillData>>): UseMutationOptions<PostBotsByBotIdSupermarketInstallSkillResponse, Options<PostBotsByBotIdSupermarketInstallSkillData>, PostBotsByBotIdSupermarketInstallSkillError> => ({
     mutation: async (vars) => {

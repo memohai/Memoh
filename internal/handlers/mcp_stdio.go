@@ -606,7 +606,7 @@ type mcpStdioSession struct {
 
 // CreateMCPStdio godoc
 // @Summary Create MCP stdio proxy
-// @Description Start a stdio MCP process in the bot container and expose it as MCP HTTP endpoint.
+// @Description Start a stdio MCP process in the bot workspace and expose it as an MCP HTTP endpoint.
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Param payload body MCPStdioRequest true "Stdio MCP payload"
@@ -671,7 +671,7 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 
 // HandleMCPStdio godoc
 // @Summary MCP stdio proxy (JSON-RPC)
-// @Description Proxies MCP JSON-RPC requests to a stdio MCP process in the container.
+// @Description Proxies MCP JSON-RPC requests to a stdio MCP process in the workspace.
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Param connection_id path string true "Connection ID"

@@ -411,8 +411,8 @@ func TestListChecksReportsSetupFailureAsSingleIssue(t *testing.T) {
 	if initCheck.Status != BotCheckStatusError {
 		t.Fatalf("container.init status = %q, want error", initCheck.Status)
 	}
-	if initCheck.Detail != "Workspace setup did not complete. Check the server logs for details." {
-		t.Fatalf("container.init detail = %q, want stable workspace detail", initCheck.Detail)
+	if !strings.Contains(initCheck.Detail, "127.0.0.1:7897") {
+		t.Fatalf("container.init detail = %q, want setup failure detail", initCheck.Detail)
 	}
 	recordCheck := findBotCheck(t, checks, BotCheckTypeContainerRecord)
 	if recordCheck.Status != BotCheckStatusUnknown {
@@ -461,10 +461,24 @@ func TestRecordContainerSetupFailureTruncatesLongMessages(t *testing.T) {
 	}
 }
 
-func TestSanitizeSetupFailureMessagePreservesTechnicalTerminology(t *testing.T) {
-	message := sanitizeSetupFailureMessage("container runtime failed")
+func TestSanitizeDiagnosticMessagePreservesTechnicalTerminology(t *testing.T) {
+	message := sanitizeDiagnosticMessage("container runtime failed", "workspace operation failed")
 	if message != "container runtime failed" {
 		t.Fatalf("message = %q, want technical terminology preserved", message)
+	}
+}
+
+func TestSanitizeDiagnosticMessageRedactsSecrets(t *testing.T) {
+	message := sanitizeDiagnosticMessage("dial https://admin:secret@example.com?token=abc123", "workspace operation failed")
+	if message != "dial https://***:***@example.com?token=***" {
+		t.Fatalf("message = %q, want credentials and token redacted", message)
+	}
+}
+
+func TestSanitizeDiagnosticMessageUsesCallerFallback(t *testing.T) {
+	message := sanitizeDiagnosticMessage("", "workspace reachability check failed")
+	if message != "workspace reachability check failed" {
+		t.Fatalf("message = %q, want caller fallback", message)
 	}
 }
 

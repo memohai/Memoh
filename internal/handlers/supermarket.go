@@ -285,7 +285,7 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 }
 
 // InstallSkill godoc
-// @Summary Install skill from supermarket to bot container
+// @Summary Install skill from supermarket to bot workspace
 // @Tags supermarket
 // @Param bot_id path string true "Bot ID"
 // @Param payload body InstallSkillRequest true "Install skill request"

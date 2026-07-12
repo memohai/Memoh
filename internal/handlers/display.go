@@ -64,7 +64,7 @@ type displayRuntimeProbe struct {
 }
 
 // GetDisplayInfo godoc
-// @Summary Check workspace display availability for bot container
+// @Summary Check workspace display availability for bot
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} displayInfoResponse

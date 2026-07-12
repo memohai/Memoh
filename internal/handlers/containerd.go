@@ -320,11 +320,11 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 }
 
 // CreateContainer godoc
-// @Summary Create and start MCP container for bot
+// @Summary Create and start workspace for bot
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
-// @Param payload body CreateContainerRequest true "Create container payload"
-// @Success 200 {object} CreateContainerResponse "SSE stream of container creation events"
+// @Param payload body CreateContainerRequest true "Create workspace payload"
+// @Success 200 {object} CreateContainerResponse "SSE stream of workspace creation events"
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container [post].
@@ -559,7 +559,7 @@ func (h *ContainerdHandler) clearContainerSetupFailure(ctx context.Context, botI
 }
 
 // GetContainer godoc
-// @Summary Get container info for bot
+// @Summary Get workspace info for bot
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} GetContainerResponse
@@ -596,7 +596,7 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 }
 
 // GetContainerMetrics godoc
-// @Summary Get current container metrics for bot
+// @Summary Get current workspace metrics for bot
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} GetContainerMetricsResponse
@@ -616,7 +616,7 @@ func (h *ContainerdHandler) GetContainerMetrics(c echo.Context) error {
 }
 
 // UpdateContainerMetrics godoc
-// @Summary Update container metrics settings for bot
+// @Summary Update workspace metrics settings for bot
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Param payload body UpdateContainerMetricsRequest true "Metrics settings payload"
@@ -695,7 +695,7 @@ func (h *ContainerdHandler) buildContainerMetricsResponse(
 }
 
 // DeleteContainer godoc
-// @Summary Delete MCP container for bot
+// @Summary Delete workspace for bot
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Param preserve_data query bool false "Export /data before deletion"
@@ -716,7 +716,7 @@ func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 }
 
 // StartContainer godoc
-// @Summary Start container task for bot
+// @Summary Start workspace for bot
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} object
@@ -738,7 +738,7 @@ func (h *ContainerdHandler) StartContainer(c echo.Context) error {
 }
 
 // StopContainer godoc
-// @Summary Stop container task for bot
+// @Summary Stop workspace for bot
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} object
@@ -760,7 +760,7 @@ func (h *ContainerdHandler) StopContainer(c echo.Context) error {
 }
 
 // CreateSnapshot godoc
-// @Summary Create container snapshot for bot
+// @Summary Create workspace snapshot for bot
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Param payload body CreateSnapshotRequest true "Create snapshot payload"
@@ -849,7 +849,7 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 }
 
 // RollbackSnapshot godoc
-// @Summary Rollback container to a previous snapshot version
+// @Summary Roll back workspace to a previous snapshot version
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Param payload body RollbackRequest true "Rollback payload"
@@ -881,7 +881,7 @@ func (h *ContainerdHandler) RollbackSnapshot(c echo.Context) error {
 }
 
 // RestorePreservedData godoc
-// @Summary Restore previously preserved data into container
+// @Summary Restore previously preserved data into workspace
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} object

@@ -63,7 +63,7 @@ func (h *ContainerdHandler) SetPluginService(service PluginInstallationLister) {
 }
 
 // ListSkills godoc
-// @Summary List skills from the bot container
+// @Summary List skills from the bot workspace
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} SkillsResponse

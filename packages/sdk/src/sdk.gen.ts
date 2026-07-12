@@ -343,17 +343,17 @@ export const deleteBotsByBotIdCompactionLogs = <ThrowOnError extends boolean = f
 export const getBotsByBotIdCompactionLogs = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdCompactionLogsData, ThrowOnError>): RequestResult<GetBotsByBotIdCompactionLogsResponses, GetBotsByBotIdCompactionLogsErrors, ThrowOnError> => (options.client ?? client).get<GetBotsByBotIdCompactionLogsResponses, GetBotsByBotIdCompactionLogsErrors, ThrowOnError>({ url: '/bots/{bot_id}/compaction/logs', ...options });
 
 /**
- * Delete MCP container for bot
+ * Delete workspace for bot
  */
 export const deleteBotsByBotIdContainer = <ThrowOnError extends boolean = false>(options: Options<DeleteBotsByBotIdContainerData, ThrowOnError>): RequestResult<DeleteBotsByBotIdContainerResponses, DeleteBotsByBotIdContainerErrors, ThrowOnError> => (options.client ?? client).delete<DeleteBotsByBotIdContainerResponses, DeleteBotsByBotIdContainerErrors, ThrowOnError>({ url: '/bots/{bot_id}/container', ...options });
 
 /**
- * Get container info for bot
+ * Get workspace info for bot
  */
 export const getBotsByBotIdContainer = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdContainerData, ThrowOnError>): RequestResult<GetBotsByBotIdContainerResponses, GetBotsByBotIdContainerErrors, ThrowOnError> => (options.client ?? client).get<GetBotsByBotIdContainerResponses, GetBotsByBotIdContainerErrors, ThrowOnError>({ url: '/bots/{bot_id}/container', ...options });
 
 /**
- * Create and start MCP container for bot
+ * Create and start workspace for bot
  */
 export const postBotsByBotIdContainer = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdContainerData, ThrowOnError>): RequestResult<PostBotsByBotIdContainerResponses, PostBotsByBotIdContainerErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdContainerResponses, PostBotsByBotIdContainerErrors, ThrowOnError>({
     url: '/bots/{bot_id}/container',
@@ -387,12 +387,12 @@ export const deleteBotsByBotIdContainerBrowserSessionsBySessionId = <ThrowOnErro
 export const postBotsByBotIdContainerBrowserSessionsBySessionIdKeepalive = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdContainerBrowserSessionsBySessionIdKeepaliveData, ThrowOnError>): RequestResult<PostBotsByBotIdContainerBrowserSessionsBySessionIdKeepaliveResponses, PostBotsByBotIdContainerBrowserSessionsBySessionIdKeepaliveErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdContainerBrowserSessionsBySessionIdKeepaliveResponses, PostBotsByBotIdContainerBrowserSessionsBySessionIdKeepaliveErrors, ThrowOnError>({ url: '/bots/{bot_id}/container/browser/sessions/{session_id}/keepalive', ...options });
 
 /**
- * Restore previously preserved data into container
+ * Restore previously preserved data into workspace
  */
 export const postBotsByBotIdContainerDataRestore = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdContainerDataRestoreData, ThrowOnError>): RequestResult<PostBotsByBotIdContainerDataRestoreResponses, PostBotsByBotIdContainerDataRestoreErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdContainerDataRestoreResponses, PostBotsByBotIdContainerDataRestoreErrors, ThrowOnError>({ url: '/bots/{bot_id}/container/data/restore', ...options });
 
 /**
- * Check workspace display availability for bot container
+ * Check workspace display availability for bot
  */
 export const getBotsByBotIdContainerDisplay = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdContainerDisplayData, ThrowOnError>): RequestResult<GetBotsByBotIdContainerDisplayResponses, GetBotsByBotIdContainerDisplayErrors, ThrowOnError> => (options.client ?? client).get<GetBotsByBotIdContainerDisplayResponses, GetBotsByBotIdContainerDisplayErrors, ThrowOnError>({ url: '/bots/{bot_id}/container/display', ...options });
 
@@ -428,7 +428,7 @@ export const postBotsByBotIdContainerDisplayWebrtcOffer = <ThrowOnError extends 
 /**
  * Get file or directory info
  *
- * Returns metadata about a file or directory at the given container path
+ * Returns metadata about a file or directory at the given workspace path
  */
 export const getBotsByBotIdContainerFs = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdContainerFsData, ThrowOnError>): RequestResult<GetBotsByBotIdContainerFsResponses, GetBotsByBotIdContainerFsErrors, ThrowOnError> => (options.client ?? client).get<GetBotsByBotIdContainerFsResponses, GetBotsByBotIdContainerFsErrors, ThrowOnError>({ url: '/bots/{bot_id}/container/fs', ...options });
 
@@ -449,7 +449,7 @@ export const postBotsByBotIdContainerFsArchive = <ThrowOnError extends boolean =
 /**
  * Delete a file or directory
  *
- * Deletes a file or directory at the given container path
+ * Deletes a file or directory at the given workspace path
  */
 export const postBotsByBotIdContainerFsDelete = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdContainerFsDeleteData, ThrowOnError>): RequestResult<PostBotsByBotIdContainerFsDeleteResponses, PostBotsByBotIdContainerFsDeleteErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdContainerFsDeleteResponses, PostBotsByBotIdContainerFsDeleteErrors, ThrowOnError>({
     url: '/bots/{bot_id}/container/fs/delete',
@@ -463,7 +463,7 @@ export const postBotsByBotIdContainerFsDelete = <ThrowOnError extends boolean = 
 /**
  * Download a file as binary stream
  *
- * Downloads a file from the container with appropriate Content-Type
+ * Downloads a file from the workspace with appropriate Content-Type
  */
 export const getBotsByBotIdContainerFsDownload = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdContainerFsDownloadData, ThrowOnError>): RequestResult<GetBotsByBotIdContainerFsDownloadResponses, GetBotsByBotIdContainerFsDownloadErrors, ThrowOnError> => (options.client ?? client).get<GetBotsByBotIdContainerFsDownloadResponses, GetBotsByBotIdContainerFsDownloadErrors, ThrowOnError>({ url: '/bots/{bot_id}/container/fs/download', ...options });
 
@@ -484,14 +484,14 @@ export const postBotsByBotIdContainerFsExtract = <ThrowOnError extends boolean =
 /**
  * List directory contents
  *
- * Lists files and directories at the given container path
+ * Lists files and directories at the given workspace path
  */
 export const getBotsByBotIdContainerFsList = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdContainerFsListData, ThrowOnError>): RequestResult<GetBotsByBotIdContainerFsListResponses, GetBotsByBotIdContainerFsListErrors, ThrowOnError> => (options.client ?? client).get<GetBotsByBotIdContainerFsListResponses, GetBotsByBotIdContainerFsListErrors, ThrowOnError>({ url: '/bots/{bot_id}/container/fs/list', ...options });
 
 /**
  * Create a directory
  *
- * Creates a directory (and parents) at the given container path
+ * Creates a directory (and parents) at the given workspace path
  */
 export const postBotsByBotIdContainerFsMkdir = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdContainerFsMkdirData, ThrowOnError>): RequestResult<PostBotsByBotIdContainerFsMkdirResponses, PostBotsByBotIdContainerFsMkdirErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdContainerFsMkdirResponses, PostBotsByBotIdContainerFsMkdirErrors, ThrowOnError>({
     url: '/bots/{bot_id}/container/fs/mkdir',
@@ -526,7 +526,7 @@ export const postBotsByBotIdContainerFsRename = <ThrowOnError extends boolean = 
 /**
  * Upload a file via multipart form
  *
- * Uploads a binary file to the given container path
+ * Uploads a binary file to the given workspace path
  */
 export const postBotsByBotIdContainerFsUpload = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdContainerFsUploadData, ThrowOnError>): RequestResult<PostBotsByBotIdContainerFsUploadResponses, PostBotsByBotIdContainerFsUploadErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdContainerFsUploadResponses, PostBotsByBotIdContainerFsUploadErrors, ThrowOnError>({
     ...formDataBodySerializer,
@@ -553,12 +553,12 @@ export const postBotsByBotIdContainerFsWrite = <ThrowOnError extends boolean = f
 });
 
 /**
- * Get current container metrics for bot
+ * Get current workspace metrics for bot
  */
 export const getBotsByBotIdContainerMetrics = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdContainerMetricsData, ThrowOnError>): RequestResult<GetBotsByBotIdContainerMetricsResponses, GetBotsByBotIdContainerMetricsErrors, ThrowOnError> => (options.client ?? client).get<GetBotsByBotIdContainerMetricsResponses, GetBotsByBotIdContainerMetricsErrors, ThrowOnError>({ url: '/bots/{bot_id}/container/metrics', ...options });
 
 /**
- * Update container metrics settings for bot
+ * Update workspace metrics settings for bot
  */
 export const putBotsByBotIdContainerMetrics = <ThrowOnError extends boolean = false>(options: Options<PutBotsByBotIdContainerMetricsData, ThrowOnError>): RequestResult<PutBotsByBotIdContainerMetricsResponses, PutBotsByBotIdContainerMetricsErrors, ThrowOnError> => (options.client ?? client).put<PutBotsByBotIdContainerMetricsResponses, PutBotsByBotIdContainerMetricsErrors, ThrowOnError>({
     url: '/bots/{bot_id}/container/metrics',
@@ -582,7 +582,7 @@ export const deleteBotsByBotIdContainerSkills = <ThrowOnError extends boolean = 
 });
 
 /**
- * List skills from the bot container
+ * List skills from the bot workspace
  */
 export const getBotsByBotIdContainerSkills = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdContainerSkillsData, ThrowOnError>): RequestResult<GetBotsByBotIdContainerSkillsResponses, GetBotsByBotIdContainerSkillsErrors, ThrowOnError> => (options.client ?? client).get<GetBotsByBotIdContainerSkillsResponses, GetBotsByBotIdContainerSkillsErrors, ThrowOnError>({ url: '/bots/{bot_id}/container/skills', ...options });
 
@@ -616,7 +616,7 @@ export const postBotsByBotIdContainerSkillsActions = <ThrowOnError extends boole
 export const getBotsByBotIdContainerSnapshots = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdContainerSnapshotsData, ThrowOnError>): RequestResult<GetBotsByBotIdContainerSnapshotsResponses, GetBotsByBotIdContainerSnapshotsErrors, ThrowOnError> => (options.client ?? client).get<GetBotsByBotIdContainerSnapshotsResponses, GetBotsByBotIdContainerSnapshotsErrors, ThrowOnError>({ url: '/bots/{bot_id}/container/snapshots', ...options });
 
 /**
- * Create container snapshot for bot
+ * Create workspace snapshot for bot
  */
 export const postBotsByBotIdContainerSnapshots = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdContainerSnapshotsData, ThrowOnError>): RequestResult<PostBotsByBotIdContainerSnapshotsResponses, PostBotsByBotIdContainerSnapshotsErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdContainerSnapshotsResponses, PostBotsByBotIdContainerSnapshotsErrors, ThrowOnError>({
     url: '/bots/{bot_id}/container/snapshots',
@@ -628,7 +628,7 @@ export const postBotsByBotIdContainerSnapshots = <ThrowOnError extends boolean =
 });
 
 /**
- * Rollback container to a previous snapshot version
+ * Roll back workspace to a previous snapshot version
  */
 export const postBotsByBotIdContainerSnapshotsRollback = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdContainerSnapshotsRollbackData, ThrowOnError>): RequestResult<PostBotsByBotIdContainerSnapshotsRollbackResponses, PostBotsByBotIdContainerSnapshotsRollbackErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdContainerSnapshotsRollbackResponses, PostBotsByBotIdContainerSnapshotsRollbackErrors, ThrowOnError>({
     url: '/bots/{bot_id}/container/snapshots/rollback',
@@ -640,22 +640,22 @@ export const postBotsByBotIdContainerSnapshotsRollback = <ThrowOnError extends b
 });
 
 /**
- * Start container task for bot
+ * Start workspace for bot
  */
 export const postBotsByBotIdContainerStart = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdContainerStartData, ThrowOnError>): RequestResult<PostBotsByBotIdContainerStartResponses, PostBotsByBotIdContainerStartErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdContainerStartResponses, PostBotsByBotIdContainerStartErrors, ThrowOnError>({ url: '/bots/{bot_id}/container/start', ...options });
 
 /**
- * Stop container task for bot
+ * Stop workspace for bot
  */
 export const postBotsByBotIdContainerStop = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdContainerStopData, ThrowOnError>): RequestResult<PostBotsByBotIdContainerStopResponses, PostBotsByBotIdContainerStopErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdContainerStopResponses, PostBotsByBotIdContainerStopErrors, ThrowOnError>({ url: '/bots/{bot_id}/container/stop', ...options });
 
 /**
- * Check terminal availability for bot container
+ * Check terminal availability for bot workspace
  */
 export const getBotsByBotIdContainerTerminal = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdContainerTerminalData, ThrowOnError>): RequestResult<GetBotsByBotIdContainerTerminalResponses, GetBotsByBotIdContainerTerminalErrors, ThrowOnError> => (options.client ?? client).get<GetBotsByBotIdContainerTerminalResponses, GetBotsByBotIdContainerTerminalErrors, ThrowOnError>({ url: '/bots/{bot_id}/container/terminal', ...options });
 
 /**
- * Interactive WebSocket terminal for bot container
+ * Interactive WebSocket terminal for bot workspace
  */
 export const getBotsByBotIdContainerTerminalWs = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdContainerTerminalWsData, ThrowOnError>): RequestResult<unknown, GetBotsByBotIdContainerTerminalWsErrors, ThrowOnError> => (options.client ?? client).get<unknown, GetBotsByBotIdContainerTerminalWsErrors, ThrowOnError>({ url: '/bots/{bot_id}/container/terminal/ws', ...options });
 
@@ -772,7 +772,7 @@ export const postBotsByBotIdMcpOpsBatchDelete = <ThrowOnError extends boolean = 
 /**
  * Create MCP stdio proxy
  *
- * Start a stdio MCP process in the bot container and expose it as MCP HTTP endpoint.
+ * Start a stdio MCP process in the bot workspace and expose it as an MCP HTTP endpoint.
  */
 export const postBotsByBotIdMcpStdio = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdMcpStdioData, ThrowOnError>): RequestResult<PostBotsByBotIdMcpStdioResponses, PostBotsByBotIdMcpStdioErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdMcpStdioResponses, PostBotsByBotIdMcpStdioErrors, ThrowOnError>({
     url: '/bots/{bot_id}/mcp-stdio',
@@ -786,7 +786,7 @@ export const postBotsByBotIdMcpStdio = <ThrowOnError extends boolean = false>(op
 /**
  * MCP stdio proxy (JSON-RPC)
  *
- * Proxies MCP JSON-RPC requests to a stdio MCP process in the container.
+ * Proxies MCP JSON-RPC requests to a stdio MCP process in the workspace.
  */
 export const postBotsByBotIdMcpStdioByConnectionId = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdMcpStdioByConnectionIdData, ThrowOnError>): RequestResult<PostBotsByBotIdMcpStdioByConnectionIdResponses, PostBotsByBotIdMcpStdioByConnectionIdErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdMcpStdioByConnectionIdResponses, PostBotsByBotIdMcpStdioByConnectionIdErrors, ThrowOnError>({
     url: '/bots/{bot_id}/mcp-stdio/{connection_id}',
@@ -982,7 +982,7 @@ export const postBotsByBotIdMemoryIngest = <ThrowOnError extends boolean = false
 /**
  * Rebuild memories from filesystem
  *
- * Read memory files from the container filesystem (source of truth) and restore missing entries to memory storage
+ * Read memory files from the workspace filesystem (source of truth) and restore missing entries to memory storage
  */
 export const postBotsByBotIdMemoryRebuild = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdMemoryRebuildData, ThrowOnError>): RequestResult<PostBotsByBotIdMemoryRebuildResponses, PostBotsByBotIdMemoryRebuildErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdMemoryRebuildResponses, PostBotsByBotIdMemoryRebuildErrors, ThrowOnError>({ url: '/bots/{bot_id}/memory/rebuild', ...options });
 
@@ -1353,7 +1353,7 @@ export const postBotsByBotIdSupermarketInstallPlugin = <ThrowOnError extends boo
 });
 
 /**
- * Install skill from supermarket to bot container
+ * Install skill from supermarket to bot workspace
  */
 export const postBotsByBotIdSupermarketInstallSkill = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdSupermarketInstallSkillData, ThrowOnError>): RequestResult<PostBotsByBotIdSupermarketInstallSkillResponses, PostBotsByBotIdSupermarketInstallSkillErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdSupermarketInstallSkillResponses, PostBotsByBotIdSupermarketInstallSkillErrors, ThrowOnError>({
     url: '/bots/{bot_id}/supermarket/install-skill',
