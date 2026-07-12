@@ -110,6 +110,9 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 				displayText = receipt.DisplayText
 				assets = chatAttachmentsToAssetRefs(receipt.Attachments)
 				persistMeta = receipt.Metadata
+				if i == 0 {
+					persistMeta = mergeMetadata(mergeMetadata(meta, buildInteractionMetadata(req)), receipt.Metadata)
+				}
 				sourceContext = origin.Context
 			} else if isOriginalQuery {
 				updatesLatestExternalMessage = true

@@ -44,6 +44,71 @@ func TestBuildInteractionMetadataIncludesForwardConversation(t *testing.T) {
 	}
 }
 
+func TestPrependTurnUserMessageCarriesSourceReceipt(t *testing.T) {
+	t.Parallel()
+
+	receipt := &conversation.UserMessageReceipt{
+		ID:          "receipt-1",
+		DisplayText: "hello",
+		Origin: mustStoreEnvelope(t, messagesource.EnvelopeInput{
+			ExternalMessageID: "external-1",
+			Source: messagesource.V1Candidate{
+				SenderDisplayName: "Alice", Platform: "telegram", ConversationType: "private", ConversationName: "Chat",
+			},
+		}),
+	}
+	round := prependTurnUserMessage(conversation.ChatRequest{Query: "model hello", UserReceipt: receipt}, []conversation.ModelMessage{
+		{Role: "assistant", Content: conversation.NewTextContent("hi")},
+	})
+	if len(round) != 2 || round[0].UserReceipt != receipt || round[0].TextContent() != "model hello" {
+		t.Fatalf("prepended round = %#v", round)
+	}
+}
+
+func TestStoreMessagesLeadingReceiptPreservesTurnInteractionMetadata(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	receipt := &conversation.UserMessageReceipt{
+		DisplayText: "run alpha",
+		Metadata: map[string]any{
+			"route_id": "captured-route",
+			"platform": "telegram",
+			"reply":    map[string]any{"message_id": "captured-reply"},
+		},
+	}
+	resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID:           storeRoundBotID,
+		SessionID:       "44444444-4444-4444-4444-444444444444",
+		Query:           "run alpha",
+		RouteID:         "request-route",
+		CurrentChannel:  "slack",
+		UserMessageKind: conversation.UserMessageKindSkillActivation,
+		RequestedSkills: []conversation.RequestedSkillContext{{Name: "alpha", SourceKind: "managed", Identity: "managed|alpha"}},
+		SkillActivation: conversation.NewSkillActivation([]conversation.RequestedSkillContext{{Name: "alpha", SourceKind: "managed"}}, "run alpha"),
+		SessionType:     "chat",
+		RuntimeType:     "model",
+	}, []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("run alpha"), UserReceipt: receipt},
+		{Role: "assistant", Content: conversation.NewTextContent("done")},
+	}, "", storeRoundOptions{})
+
+	if len(messages.persisted) != 2 {
+		t.Fatalf("persisted messages = %d, want 2", len(messages.persisted))
+	}
+	metadata := messages.persisted[0].Metadata
+	if metadata["route_id"] != "captured-route" || metadata["platform"] != "telegram" ||
+		metadata["user_message_kind"] != conversation.UserMessageKindSkillActivation ||
+		metadata["model_requested_skills"] == nil || metadata["skill_activation"] == nil {
+		t.Fatalf("leading receipt metadata = %#v", metadata)
+	}
+	reply, _ := metadata["reply"].(map[string]any)
+	if reply["message_id"] != "captured-reply" {
+		t.Fatalf("receipt reply metadata was overwritten: %#v", metadata)
+	}
+}
+
 func TestBuildInteractionMetadataIncludesRequestedSkills(t *testing.T) {
 	t.Parallel()
 

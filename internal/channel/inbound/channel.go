@@ -32,6 +32,7 @@ import (
 	"github.com/memohai/memoh/internal/i18n"
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	"github.com/memohai/memoh/internal/messagesource"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	skillset "github.com/memohai/memoh/internal/skills"
@@ -886,6 +887,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			modelText = strings.TrimSpace(conversation.SkillActivationModelQuery(skillActivation))
 		} else {
 			text = strings.TrimSpace(msg.Message.PlainText())
+			if !isLocalChannelType(msg.Channel) {
+				_, text = DetectMode(text)
+			}
 			modelText = text
 		}
 	}
@@ -932,6 +936,10 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 
 			switch inboundMode {
 			case ModeInject:
+				receipt, receiptErr := buildInboundUserReceipt(identity, msg, text, attachments, routeID, eventID)
+				if receiptErr != nil {
+					return receiptErr
+				}
 				// Don't persist here — the injected message will be interleaved
 				// at the correct position within the round by
 				// interleaveInjectedMessages in storeRound.
@@ -939,6 +947,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 					Text:            text,
 					Attachments:     attachments,
 					HeaderifiedText: headerifiedText,
+					Receipt:         receipt,
 				})
 				if injected {
 					p.sendModeConfirmation(ctx, sender, msg, identity, "inject")
@@ -952,7 +961,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				return nil
 
 			case ModeQueue:
-				p.persistPassiveMessage(ctx, identity, msg, text, attachments, routeID, sessionID, eventID)
 				p.dispatcher.Enqueue(routeID, QueuedTask{
 					Ctx:         ctx,
 					Cfg:         cfg,
@@ -1132,6 +1140,10 @@ startStream:
 		}()
 	}
 
+	userReceipt, err := buildInboundUserReceipt(identity, msg, text, attachments, resolved.RouteID, eventID)
+	if err != nil {
+		return err
+	}
 	chatReq := conversation.ChatRequest{
 		BotID:                     identity.BotID,
 		ChatID:                    activeChatID,
@@ -1171,6 +1183,7 @@ startStream:
 		RequestedSkills:           requestedSkillContexts,
 		OutboundAssetCollector:    assetCollector,
 		EventID:                   eventID,
+		UserReceipt:               &userReceipt,
 	}
 	if injectCh != nil {
 		chatReq.InjectCh = injectCh
@@ -1836,6 +1849,10 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 	if trimmedText == "" && len(attachments) == 0 {
 		return
 	}
+	receipt, receiptErr := buildInboundUserReceipt(ident, msg, trimmedText, attachments, routeID, eventID)
+	if receiptErr != nil && p.logger != nil {
+		p.logger.Warn("build passive message source receipt failed", slog.Any("error", receiptErr))
+	}
 
 	var attachmentPaths []string
 	for _, att := range attachments {
@@ -1875,6 +1892,10 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 	if forward := messageForwardMetadata(msg.Message.Forward); forward != nil {
 		meta["forward"] = forward
 	}
+	if receiptErr == nil {
+		meta = receipt.Metadata
+		attachments = receipt.Attachments
+	}
 
 	var assets []messagepkg.AssetRef
 	for i, att := range attachments {
@@ -1899,18 +1920,35 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 		assets = append(assets, ref)
 	}
 
+	senderChannelIdentityID := strings.TrimSpace(ident.ChannelIdentityID)
+	senderUserID := strings.TrimSpace(ident.UserID)
+	externalMessageID := strings.TrimSpace(msg.Message.ID)
+	sourceReplyToMessageID := inboundReplyMessageID(msg.Message.Reply)
+	messageEventID := eventID
+	sourceContext := messagesource.Context{}
+	if receiptErr == nil {
+		origin := receipt.Origin.Values()
+		senderChannelIdentityID = origin.SenderChannelIdentityID
+		senderUserID = origin.SenderUserID
+		externalMessageID = origin.ExternalMessageID
+		sourceReplyToMessageID = origin.SourceReplyToMessageID
+		messageEventID = origin.EventID
+		sourceContext = origin.Context
+	}
+
 	if _, err := p.message.Persist(ctx, messagepkg.PersistInput{
 		BotID:                   botID,
 		SessionID:               sessionID,
-		SenderChannelIdentityID: strings.TrimSpace(ident.ChannelIdentityID),
-		SenderUserID:            strings.TrimSpace(ident.UserID),
-		ExternalMessageID:       strings.TrimSpace(msg.Message.ID),
-		SourceReplyToMessageID:  inboundReplyMessageID(msg.Message.Reply),
+		SenderChannelIdentityID: senderChannelIdentityID,
+		SenderUserID:            senderUserID,
+		ExternalMessageID:       externalMessageID,
+		SourceReplyToMessageID:  sourceReplyToMessageID,
 		Role:                    "user",
 		Content:                 serialized,
 		Metadata:                meta,
 		Assets:                  assets,
-		EventID:                 eventID,
+		EventID:                 messageEventID,
+		SourceContext:           sourceContext,
 		DisplayText:             trimmedText,
 	}); err != nil && p.logger != nil {
 		p.logger.Warn("persist passive message failed", slog.Any("error", err), slog.String("bot_id", botID))
