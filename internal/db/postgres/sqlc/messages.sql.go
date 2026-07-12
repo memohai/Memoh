@@ -667,7 +667,8 @@ INSERT INTO bot_history_messages (
   runtime_type,
   model_id,
   event_id,
-  display_text
+  display_text,
+  source_context
 )
 VALUES (
   $1,
@@ -684,7 +685,8 @@ VALUES (
   $12,
   $13::uuid,
   $14::uuid,
-  $15::text
+  $15::text,
+  $16::jsonb
 )
 RETURNING
   id,
@@ -721,6 +723,7 @@ type CreateMessageParams struct {
 	ModelID                 pgtype.UUID `json:"model_id"`
 	EventID                 pgtype.UUID `json:"event_id"`
 	DisplayText             pgtype.Text `json:"display_text"`
+	SourceContext           []byte      `json:"source_context"`
 }
 
 type CreateMessageRow struct {
@@ -759,6 +762,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 		arg.ModelID,
 		arg.EventID,
 		arg.DisplayText,
+		arg.SourceContext,
 	)
 	var i CreateMessageRow
 	err := row.Scan(
@@ -2586,6 +2590,7 @@ SELECT
   m.turn_superseded_by_turn_id,
   m.turn_superseded_at,
   m.turn_superseded_reason,
+  m.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
@@ -2620,6 +2625,7 @@ type ListAllMessagesForBackupRow struct {
 	TurnSupersededByTurnID  pgtype.UUID        `json:"turn_superseded_by_turn_id"`
 	TurnSupersededAt        pgtype.Timestamptz `json:"turn_superseded_at"`
 	TurnSupersededReason    pgtype.Text        `json:"turn_superseded_reason"`
+	SourceContext           []byte             `json:"source_context"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
 	Platform                pgtype.Text        `json:"platform"`
@@ -2658,6 +2664,7 @@ func (q *Queries) ListAllMessagesForBackup(ctx context.Context, botID pgtype.UUI
 			&i.TurnSupersededByTurnID,
 			&i.TurnSupersededAt,
 			&i.TurnSupersededReason,
+			&i.SourceContext,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
 			&i.Platform,

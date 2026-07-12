@@ -14,7 +14,8 @@ INSERT INTO bot_history_messages (
   runtime_type,
   model_id,
   event_id,
-  display_text
+  display_text,
+  source_context
 )
 VALUES (
   sqlc.arg(bot_id),
@@ -31,7 +32,8 @@ VALUES (
   sqlc.arg(runtime_type),
   sqlc.narg(model_id)::uuid,
   sqlc.narg(event_id)::uuid,
-  sqlc.narg(display_text)::text
+  sqlc.narg(display_text)::text,
+  sqlc.narg(source_context)::jsonb
 )
 RETURNING
   id,
@@ -1364,6 +1366,7 @@ SELECT
   m.turn_superseded_by_turn_id,
   m.turn_superseded_at,
   m.turn_superseded_reason,
+  m.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
