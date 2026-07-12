@@ -233,14 +233,21 @@ func TestDoCompactionMarksToolAwareWindowAndRendersCleanPrompt(t *testing.T) {
 
 func TestDoCompactionSkipsWhitespaceOnlyPriorSummaries(t *testing.T) {
 	rows := machineryCorpus(t)
+	stub := &stubModel{summary: "S3"}
+	cfg := machineryConfig(stub, 450)
 	q := &fakeQueries{
 		uncompacted: rows,
-		priorLogs:   []sqlc.BotHistoryMessageCompact{{Summary: "  \n\t", Status: "ok"}},
+		priorLogs: []sqlc.BotHistoryMessageCompact{{
+			ID:        pgtype.UUID{Bytes: uuid.New(), Valid: true},
+			BotID:     pgtype.UUID{Bytes: uuid.MustParse(cfg.BotID), Valid: true},
+			SessionID: pgtype.UUID{Bytes: uuid.MustParse(cfg.SessionID), Valid: true},
+			Summary:   "  \n\t",
+			Status:    "ok",
+		}},
 	}
-	stub := &stubModel{summary: "S3"}
 	svc := newMachineryService(q)
 
-	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450)); err != nil {
+	if _, err := svc.RunCompactionSync(context.Background(), cfg); err != nil {
 		t.Fatalf("RunCompactionSync: %v", err)
 	}
 	if strings.Contains(stub.prompt, "The following are summaries of earlier parts") {
@@ -286,6 +293,7 @@ func TestDoCompactionWarnsWhenEntryFloorsExceedBudget(t *testing.T) {
 		t.Fatalf("budget overshoot not surfaced in logs:\n%s", logBuf.String())
 	}
 }
+
 func TestDoCompactionAllEmptyWindowSkipsModelAndMarking(t *testing.T) {
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
 		mkRow(t, "assistant", `[{"type":"reasoning","text":"thinking a"}]`, 100),

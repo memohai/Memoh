@@ -285,3 +285,99 @@ func TestReplaceRecentCompactedMessagesLoadsEveryKnownNullSessionGroup(t *testin
 		t.Fatalf("point-loaded compact groups = %d, want 2: %#v", len(queries.getCalls), queries.getCalls)
 	}
 }
+
+func anchoredSummaryRecord(id, summary string, anchor time.Time, scope contextfrag.Scope) historyfrag.HistoryRecord {
+	artifact := compaction.Artifact{
+		ID:            id,
+		BotID:         scope.BotID,
+		SessionID:     scope.SessionID,
+		Summary:       summary,
+		AnchorStartMs: anchor.UnixMilli(),
+	}
+	return artifact.HistoryRecord(scope)
+}
+
+func recordSequenceIDs(records []historyfrag.HistoryRecord) []string {
+	ids := make([]string, 0, len(records))
+	for _, record := range records {
+		ids = append(ids, record.Ref.ID)
+	}
+	return ids
+}
+
+func TestPrependMissingCompactionSummariesMergesAtAnchorPositions(t *testing.T) {
+	t.Parallel()
+
+	scope := contextfrag.Scope{BotID: "bot-1", SessionID: "session-1"}
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	timed := func(record historyfrag.HistoryRecord, at time.Time) historyfrag.HistoryRecord {
+		record.CreatedAt = at
+		return record
+	}
+	messages := []historyfrag.HistoryRecord{
+		timed(historyRecord("m-1", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("first")}, nil), base.Add(10*time.Minute)),
+		timed(historyRecord("m-2", conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("second")}, nil), base.Add(20*time.Minute)),
+		timed(historyRecord("m-3", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("third")}, nil), base.Add(30*time.Minute)),
+	}
+	summaries := []historyfrag.HistoryRecord{
+		anchoredSummaryRecord("artifact-early", "early span", base.Add(time.Minute), scope),
+		anchoredSummaryRecord("artifact-mid", "mid span", base.Add(25*time.Minute), scope),
+	}
+
+	got := mergeMissingCompactionSummaries(messages, summaries)
+
+	want := []string{"artifact-early", "m-1", "m-2", "artifact-mid", "m-3"}
+	if !reflect.DeepEqual(recordSequenceIDs(got), want) {
+		t.Fatalf("aged-out summaries not merged at anchor positions:\n got %v\nwant %v", recordSequenceIDs(got), want)
+	}
+}
+
+func TestPrependMissingCompactionSummariesDoesNotSplitToolExchanges(t *testing.T) {
+	t.Parallel()
+
+	scope := contextfrag.Scope{BotID: "bot-1", SessionID: "session-1"}
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	timed := func(record historyfrag.HistoryRecord, at time.Time) historyfrag.HistoryRecord {
+		record.CreatedAt = at
+		return record
+	}
+	messages := []historyfrag.HistoryRecord{
+		timed(historyRecord("m-call", conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("calling")}, nil), base.Add(10*time.Minute)),
+		timed(historyRecord("m-result", conversation.ModelMessage{Role: "tool", Content: conversation.NewTextContent("result")}, nil), base.Add(20*time.Minute)),
+		timed(historyRecord("m-after", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("after")}, nil), base.Add(30*time.Minute)),
+	}
+	summaries := []historyfrag.HistoryRecord{
+		anchoredSummaryRecord("artifact-between", "between call and result", base.Add(15*time.Minute), scope),
+	}
+
+	got := mergeMissingCompactionSummaries(messages, summaries)
+
+	want := []string{"m-call", "m-result", "artifact-between", "m-after"}
+	if !reflect.DeepEqual(recordSequenceIDs(got), want) {
+		t.Fatalf("summary split a tool exchange:\n got %v\nwant %v", recordSequenceIDs(got), want)
+	}
+}
+
+func TestPrependMissingCompactionSummariesKeepsUnanchoredSummariesFirst(t *testing.T) {
+	t.Parallel()
+
+	scope := contextfrag.Scope{BotID: "bot-1", SessionID: "session-1"}
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	timed := func(record historyfrag.HistoryRecord, at time.Time) historyfrag.HistoryRecord {
+		record.CreatedAt = at
+		return record
+	}
+	messages := []historyfrag.HistoryRecord{
+		timed(historyRecord("m-1", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("first")}, nil), base.Add(10*time.Minute)),
+	}
+	summaries := []historyfrag.HistoryRecord{
+		anchoredSummaryRecord("artifact-legacy", "legacy summary", time.UnixMilli(0), scope),
+	}
+
+	got := mergeMissingCompactionSummaries(messages, summaries)
+
+	want := []string{"artifact-legacy", "m-1"}
+	if !reflect.DeepEqual(recordSequenceIDs(got), want) {
+		t.Fatalf("unanchored summary not kept first:\n got %v\nwant %v", recordSequenceIDs(got), want)
+	}
+}

@@ -86,7 +86,7 @@ func (r *Resolver) replaceCompactedMessages(ctx context.Context, sessionID strin
 	messages = replaceCompactedHistoryRecordsWithResolver(messages, scope, resolve)
 	sessionSummaries := summaryRecordsFromArtifacts(missingCompactionArtifacts(messages, frontier.Artifacts, blocked), scope)
 	if len(sessionSummaries) > 0 {
-		messages = prependMissingCompactionSummaries(messages, sessionSummaries)
+		messages = mergeMissingCompactionSummaries(messages, sessionSummaries)
 	}
 	return r.refreshCompactedSummaryCoverage(ctx, messages, resolve), nil
 }
@@ -341,7 +341,7 @@ func (r *Resolver) coveredRefsForCompact(ctx context.Context, compactID pgtype.U
 	return refs
 }
 
-func prependMissingCompactionSummaries(messages []historyfrag.HistoryRecord, summaries []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
+func mergeMissingCompactionSummaries(messages []historyfrag.HistoryRecord, summaries []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
 	if len(summaries) == 0 {
 		return messages
 	}
@@ -374,9 +374,23 @@ func prependMissingCompactionSummaries(messages []historyfrag.HistoryRecord, sum
 	if len(missing) == 0 {
 		return messages
 	}
+	// Merge each aged-out summary at its anchor position instead of batching
+	// the whole set at the front, mirroring the pipeline path's anchor-ordered
+	// composition. A summary never lands directly before a tool-result record:
+	// results follow their call contiguously, so flushing there would split
+	// the exchange.
 	out := make([]historyfrag.HistoryRecord, 0, len(missing)+len(messages))
-	out = append(out, missing...)
-	out = append(out, messages...)
+	next := 0
+	for i, record := range messages {
+		if !strings.EqualFold(strings.TrimSpace(record.ModelMessage.Role), "tool") {
+			for next < len(missing) && !missing[next].CreatedAt.After(record.CreatedAt) {
+				out = append(out, missing[next])
+				next++
+			}
+		}
+		out = append(out, messages[i])
+	}
+	out = append(out, missing[next:]...)
 	return out
 }
 
