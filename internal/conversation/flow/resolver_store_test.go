@@ -82,6 +82,7 @@ func TestStoreMessagesLeadingReceiptPreservesTurnInteractionMetadata(t *testing.
 		BotID:           storeRoundBotID,
 		SessionID:       "44444444-4444-4444-4444-444444444444",
 		Query:           "run alpha",
+		UserReceipt:     receipt,
 		RouteID:         "request-route",
 		CurrentChannel:  "slack",
 		UserMessageKind: conversation.UserMessageKindSkillActivation,
@@ -106,6 +107,38 @@ func TestStoreMessagesLeadingReceiptPreservesTurnInteractionMetadata(t *testing.
 	reply, _ := metadata["reply"].(map[string]any)
 	if reply["message_id"] != "captured-reply" {
 		t.Fatalf("receipt reply metadata was overwritten: %#v", metadata)
+	}
+}
+
+func TestStoreMessagesIndexZeroInjectionDoesNotInheritTurnMetadata(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	leadingReceipt := &conversation.UserMessageReceipt{ID: "leading-receipt"}
+	injectedReceipt := &conversation.UserMessageReceipt{
+		ID:       "injected-receipt",
+		Metadata: map[string]any{"route_id": "injected-route", "platform": "telegram"},
+	}
+	resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID:           storeRoundBotID,
+		SessionID:       "44444444-4444-4444-4444-444444444444",
+		Query:           "leading",
+		UserReceipt:     leadingReceipt,
+		RouteID:         "outer-route",
+		CurrentChannel:  "slack",
+		UserMessageKind: conversation.UserMessageKindSkillActivation,
+		SessionType:     "chat",
+		RuntimeType:     "model",
+	}, []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("injected"), UserReceipt: injectedReceipt},
+		{Role: "assistant", Content: conversation.NewTextContent("done")},
+	}, "", storeRoundOptions{})
+
+	metadata := messages.persisted[0].Metadata
+	if metadata["route_id"] != "injected-route" || metadata["platform"] != "telegram" ||
+		metadata["user_message_kind"] != nil {
+		t.Fatalf("index-zero injection inherited outer metadata: %#v", metadata)
 	}
 }
 
