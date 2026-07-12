@@ -855,7 +855,7 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 	if hasSetupFailure {
 		initCheck.Status = BotCheckStatusError
 		initCheck.Summary = "Workspace initialization failed."
-		initCheck.Detail = setupFailure.Message
+		initCheck.Detail = "Workspace setup did not complete. Check the server logs for details."
 		initCheck.Metadata = setupFailure.metadata()
 	}
 	checks = append(checks, initCheck)
@@ -948,9 +948,11 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 		dataCheck.Status = BotCheckStatusUnknown
 		dataCheck.Summary = "Workspace reachability check is not configured."
 	} else if err := s.containerReachability(ctx, row.ID.String()); err != nil {
+		s.logger.Warn("workspace reachability check failed",
+			slog.String("bot_id", row.ID.String()), slog.Any("error", err))
 		dataCheck.Status = BotCheckStatusError
 		dataCheck.Summary = "Workspace is not reachable via gRPC."
-		dataCheck.Detail = sanitizeSetupFailureMessage(err.Error())
+		dataCheck.Detail = "The workspace runtime did not respond. Check the server logs for details."
 	} else {
 		dataCheck.Status = BotCheckStatusOK
 		dataCheck.Summary = "Workspace is reachable via gRPC."

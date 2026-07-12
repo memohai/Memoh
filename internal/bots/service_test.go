@@ -411,8 +411,8 @@ func TestListChecksReportsSetupFailureAsSingleIssue(t *testing.T) {
 	if initCheck.Status != BotCheckStatusError {
 		t.Fatalf("container.init status = %q, want error", initCheck.Status)
 	}
-	if !strings.Contains(initCheck.Detail, "127.0.0.1:7897") {
-		t.Fatalf("container.init detail = %q, want setup failure detail", initCheck.Detail)
+	if initCheck.Detail != "Workspace setup did not complete. Check the server logs for details." {
+		t.Fatalf("container.init detail = %q, want stable workspace detail", initCheck.Detail)
 	}
 	recordCheck := findBotCheck(t, checks, BotCheckTypeContainerRecord)
 	if recordCheck.Status != BotCheckStatusUnknown {
@@ -461,10 +461,10 @@ func TestRecordContainerSetupFailureTruncatesLongMessages(t *testing.T) {
 	}
 }
 
-func TestSanitizeSetupFailureMessageUsesWorkspaceTerminology(t *testing.T) {
-	message := sanitizeSetupFailureMessage("Container setup failed: container not reachable")
-	if message != "workspace setup failed: workspace not reachable" {
-		t.Fatalf("message = %q, want workspace terminology", message)
+func TestSanitizeSetupFailureMessagePreservesTechnicalTerminology(t *testing.T) {
+	message := sanitizeSetupFailureMessage("container runtime failed")
+	if message != "container runtime failed" {
+		t.Fatalf("message = %q, want technical terminology preserved", message)
 	}
 }
 
