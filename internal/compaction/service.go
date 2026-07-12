@@ -89,7 +89,8 @@ func (s *Service) endSessionCompaction(sessionID string, run *inflightRun, res R
 }
 
 // inFailureCooldown reports whether sessionID failed compaction recently
-// enough that a new attempt should be skipped.
+// enough that a new attempt should be skipped. An entry found expired is
+// deleted so failedAt does not accumulate sessions that never run again.
 func (s *Service) inFailureCooldown(sessionID string) bool {
 	s.inflightMu.Lock()
 	defer s.inflightMu.Unlock()
@@ -97,7 +98,11 @@ func (s *Service) inFailureCooldown(sessionID string) bool {
 	if !ok {
 		return false
 	}
-	return s.nowFn().Sub(failedAt) < compactionFailureCooldown
+	if s.nowFn().Sub(failedAt) >= compactionFailureCooldown {
+		delete(s.failedAt, sessionID)
+		return false
+	}
+	return true
 }
 
 func (s *Service) recordCompactionFailure(sessionID string) {

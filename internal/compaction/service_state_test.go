@@ -781,6 +781,33 @@ func TestPostCompactHookPanicDoesNotPoisonASuccessfulRun(t *testing.T) {
 	}
 }
 
+// TestExpiredFailureCooldownEntryIsDropped keeps failedAt from growing with
+// sessions that failed once and never came back: an entry found expired is
+// deleted on the spot instead of lingering until a later success or restart.
+func TestExpiredFailureCooldownEntryIsDropped(t *testing.T) {
+	t.Parallel()
+
+	svc := newMachineryService(&fakeQueries{})
+	now := time.Now()
+	svc.nowFn = func() time.Time { return now }
+
+	svc.recordCompactionFailure("session-1")
+	if !svc.inFailureCooldown("session-1") {
+		t.Fatal("fresh failure must be in cooldown")
+	}
+
+	now = now.Add(compactionFailureCooldown + time.Second)
+	if svc.inFailureCooldown("session-1") {
+		t.Fatal("cooldown must expire")
+	}
+	svc.inflightMu.Lock()
+	_, lingering := svc.failedAt["session-1"]
+	svc.inflightMu.Unlock()
+	if lingering {
+		t.Fatal("expired cooldown entry must be dropped from failedAt")
+	}
+}
+
 type doneHiddenContext struct{ context.Context }
 
 func (doneHiddenContext) Done() <-chan struct{} { return nil }
