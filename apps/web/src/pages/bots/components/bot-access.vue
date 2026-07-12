@@ -268,7 +268,7 @@
         <Dialog v-model:open="rulesOpen">
           <DialogPanel view-swap>
             <!-- Header follows the "centered title needs both flanks
-                 balanced" rule (memoh-web skill § dialog header fork), via the
+                 balanced" rule (web skill § dialog header fork), via the
                  shared DialogViewHeader: centered over a populated LIST (the
                  body weight below anchors it); the form view and the bare
                  empty state flush LEFT — the form is a workbench (one focused
@@ -1511,7 +1511,7 @@ const filteredAdvancedRules = computed(() => {
 // the back chevron in form view, or the list body's own weight below. The bare
 // empty state has neither (no chevron, only a centered "No rules" block), so a
 // centered title would float untethered — it drops to the workbench default
-// (title left, close right). See the memoh-web skill § dialog header fork.
+// (title left, close right). See the web skill § dialog header fork.
 // Centered ONLY over a populated list (its body weight anchors the title;
 // human-reviewed as the golden list form). The form view is a workbench —
 // left title, no back chevron (tried centered+chevron, read odd; footer

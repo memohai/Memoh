@@ -22,7 +22,7 @@ The terminal state as of 2026-07-06:
   InlineLoadingRow, SectionGroup, SidebarPanelHeader, SidebarNavButton, DockPanelFrame,
   ConfirmDeleteDialog, and the onboarding wizard family (StepExitShell / StepFrame /
   FooterNav / ChoiceTile / HintBox). The building contract for all of these is the
-  `memoh-ui-owners` skill.
+  `ui-owners` skill.
 - **Three audits closed all reachable debt, and a post-review residual pass (2026-07-06)
   drained what they missed.** The Phase-3 census (35 settings files) → 21 files migrated.
   The **click-surface audit** (40 dialog/popover files) →
@@ -46,7 +46,7 @@ The terminal state as of 2026-07-06:
   `ui-spin-baseline.json` — new hand-spun loaders hard-fail. These catch the SettingsRow
   and loader slices (the rare literals); they are backstops, not debt finders. WARN count
   is held at **zero**.
-- **The building contract is `memoh-ui-owners`** (the skill). The older `memoh-spacing`
+- **The building contract is `ui-owners`** (the skill). The older `memoh-spacing`
   skill (the cartography/role-taxonomy method that derived this vocabulary) has been
   deleted from the repo (2026-07); its history is recoverable from git if the research
   trail is ever needed again.
@@ -83,7 +83,7 @@ The terminal state as of 2026-07-06:
   enable/test/delete actions, a capability badge, and a status line, a materially richer
   interaction contract than "click to open the edit dialog," so forcing it onto the same
   owner would have been unifying two different relationships, not one. Recorded in
-  `memoh-ui-owners` SKILL.md (Rows section + decision map).
+  `ui-owners` SKILL.md (Rows section + decision map).
 
 ---
 

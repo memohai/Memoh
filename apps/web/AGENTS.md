@@ -10,9 +10,9 @@ In deploy/server mode this package is served as the standalone Web frontend. The
 
 Before writing or changing anything under `apps/web` — pages, components, layout, copy, or styling — **read** the Web development skill:
 
-- **Skill**: `.agents/skills/memoh-web/SKILL.md`
-- **Lookup**: `.agents/skills/memoh-web/reference.md` (recipes, reference-page map, component picker)
-- **Owner vocabulary**: `.agents/skills/memoh-ui-owners/SKILL.md` — the composition layer.
+- **Skill**: `.agents/skills/web/SKILL.md`
+- **Lookup**: `.agents/skills/web/reference.md` (recipes, reference-page map, component picker)
+- **Owner vocabulary**: `.agents/skills/ui-owners/SKILL.md` — the composition layer.
   Every recurring spatial shape (settings row, form field, section card, stat tile, banner,
   loading/empty state, delete confirm, page frame…) has exactly ONE owner component; compose
   the owner instead of hand-writing `<div class="flex … border-b …">`. That file is the
@@ -542,9 +542,9 @@ Chat supports two transport modes: **Server-Sent Events (SSE)** and **WebSocket*
 
 ## Development Rules
 
-- **Read `.agents/skills/memoh-web/SKILL.md` first** for any UI or page work (see § Agent Skill above).
+- **Read `.agents/skills/web/SKILL.md` first** for any UI or page work (see § Agent Skill above).
 - Use Vue 3 Composition API with `<script setup>` exclusively.
-- Style with Tailwind utility classes; avoid `<style>` blocks. Follow `packages/ui/AGENTS.md` and `.agents/skills/memoh-web/SKILL.md`.
+- Style with Tailwind utility classes; avoid `<style>` blocks. Follow `packages/ui/AGENTS.md` and `.agents/skills/web/SKILL.md`.
 - **Always use semantic color tokens** (`text-foreground`, `bg-card`, `border-border`, `text-muted-foreground`, `bg-accent`, etc.) instead of raw colors (`gray-*`, `bg-white`, `text-black`). Never introduce hardcoded Tailwind color classes for themed elements — this breaks dark mode consistency.
 - Use `@felinic/ui` components for all UI primitives; do not import Reka UI directly.
 - Use `lucide-vue-next` for all UI icons. Use `@memohai/icon` for brand/provider logos. **Never use FontAwesome** — do not add `<FontAwesomeIcon>`, do not import from `@fortawesome/*`, do not use inline SVG or base64-encoded SVG in templates.

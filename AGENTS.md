@@ -194,7 +194,7 @@ Memoh/
 │   ├── desktop/                #   Native Electron app (@memohai/desktop): hosted-server renderer, tray, menus, preload IPC
 │   └── web/                    #   Main web app (@memohai/web, Vue 3) — see apps/web/AGENTS.md
 ├── packages/                   # Shared TypeScript libraries
-│   ├── ui/                     #   Shared UI component library (@felinic/ui) — git submodule → github.com/memohai/ui; also owns the memoh-web / memoh-ui-owners agent skills (loaded through cross-platform wrappers in .agents/skills/)
+│   ├── ui/                     #   Shared UI component library (@felinic/ui) — git submodule → github.com/memohai/ui; also owns the web / ui-owners agent skills (loaded through cross-platform wrappers in .agents/skills/)
 │   ├── sdk/                    #   TypeScript SDK (@memohai/sdk, auto-generated from OpenAPI)
 │   ├── icons/                  #   Brand/provider icon library (@memohai/icon)
 │   └── config/                 #   Shared configuration utilities (@memohai/config)
