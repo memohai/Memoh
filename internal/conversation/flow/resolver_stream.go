@@ -58,13 +58,12 @@ func finishStreamPostPersist(
 	ctx context.Context,
 	rc resolvedContext,
 	persisted []messagepkg.Message,
-	postPersistApplied bool,
 	postPersist func(context.Context, []messagepkg.Message) error,
 ) error {
 	if promptErr := rc.promptMaterializationError(); promptErr != nil {
 		return promptErr
 	}
-	if postPersist == nil || postPersistApplied {
+	if postPersist == nil {
 		return nil
 	}
 	return postPersist(context.WithoutCancel(ctx), persisted)
@@ -388,7 +387,7 @@ func (r *Resolver) streamChatWSResultWithHooks(
 	var toolCallCount int
 	var hasVisibleOutput bool
 	var persistedMessages []messagepkg.Message
-	postPersistApplied := false
+	var terminalEvent WSStreamEvent
 	for event := range agentEventCh {
 		idleCancel.Reset() // each event resets the idle timer
 
@@ -432,14 +431,11 @@ func (r *Resolver) streamChatWSResultWithHooks(
 			}
 		}
 
-		if event.IsTerminal() && postPersist != nil && !postPersistApplied {
-			if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
-				return persistedMessages, err
-			}
-			postPersistApplied = true
-		}
-
 		if !clientGone && shouldForwardAgentStreamEvent(rc, event) {
+			if event.IsTerminal() {
+				terminalEvent = append(terminalEvent[:0], data...)
+				continue
+			}
 			select {
 			case eventCh <- json.RawMessage(data):
 			case <-ctx.Done():
@@ -479,8 +475,14 @@ func (r *Resolver) streamChatWSResultWithHooks(
 		}
 	}
 
-	if err := finishStreamPostPersist(ctx, rc, persistedMessages, postPersistApplied, postPersist); err != nil {
+	if err := finishStreamPostPersist(ctx, rc, persistedMessages, postPersist); err != nil {
 		return persistedMessages, err
+	}
+	if !clientGone && len(terminalEvent) > 0 {
+		select {
+		case eventCh <- terminalEvent:
+		case <-ctx.Done():
+		}
 	}
 
 	return persistedMessages, nil
