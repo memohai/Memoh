@@ -391,6 +391,7 @@ func remoteModelsFromTemplate(def registry.ProviderDefinition) []RemoteModel {
 		out = append(out, RemoteModel{
 			ID:               model.ModelID,
 			Name:             model.Name,
+			Description:      configStringPtr(cfg, "description"),
 			Type:             modelType,
 			Compatibilities:  configStringSlice(cfg, "compatibilities"),
 			ReasoningEfforts: configStringSlice(cfg, "reasoning_efforts"),
@@ -589,6 +590,18 @@ func configStringSlice(cfg map[string]any, key string) []string {
 	default:
 		return nil
 	}
+}
+
+func configStringPtr(cfg map[string]any, key string) *string {
+	if cfg == nil {
+		return nil
+	}
+	value, ok := cfg[key].(string)
+	if !ok {
+		return nil
+	}
+	value = strings.TrimSpace(value)
+	return &value
 }
 
 func configIntPtr(cfg map[string]any, key string) *int {

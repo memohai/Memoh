@@ -944,6 +944,8 @@
     "modelIdRequired": "Model ID is required",
     "displayName": "Display Name",
     "displayNamePlaceholder": "Custom display name",
+    "description": "Description",
+    "descriptionPlaceholder": "Briefly describe the model's purpose or strengths",
     "dimensions": "Dimensions",
     "dimensionsPlaceholder": "e.g. 1536",
     "dimensionsMin": "Dimensions must be greater than 0",

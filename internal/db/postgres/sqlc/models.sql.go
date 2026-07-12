@@ -1456,7 +1456,11 @@ VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (provider_id, model_id) DO UPDATE SET
   name = EXCLUDED.name,
   type = EXCLUDED.type,
-  config = EXCLUDED.config,
+  config = CASE
+    WHEN models.config ? 'description'
+      THEN EXCLUDED.config || jsonb_build_object('description', models.config -> 'description')
+    ELSE EXCLUDED.config
+  END,
   updated_at = now()
 RETURNING id, model_id, name, provider_id, type, enable, config, created_at, updated_at
 `

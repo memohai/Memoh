@@ -14,9 +14,11 @@
       :class="{ 'pl-1': searchAligned }"
     >
       <div class="flex min-w-0 items-center gap-2">
-        <span class="truncate text-[13px] font-medium text-foreground">
-          {{ model.name || model.model_id }}
-        </span>
+        <ModelDescriptionTooltip :description="modelDescription">
+          <span class="truncate text-[13px] font-medium text-foreground">
+            {{ model.name || model.model_id }}
+          </span>
+        </ModelDescriptionTooltip>
         <Badge
           v-if="model.type === 'embedding'"
           variant="outline"
@@ -123,11 +125,13 @@ import {
 } from '@felinic/ui'
 import { Zap, Settings, Trash2, Binary } from 'lucide-vue-next'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import ModelDescriptionTooltip from '@/components/model-description-tooltip/index.vue'
 import { postModelsByIdTest, putModelsById } from '@memohai/sdk'
 import type { ModelsGetResponse, ModelsTestResponse, ModelsUpdateRequest } from '@memohai/sdk'
 import { useQueryCache } from '@pinia/colada'
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { getModelDescription } from '@/utils/model-description'
 
 const props = withDefaults(defineProps<{
   model: ModelsGetResponse
@@ -150,6 +154,7 @@ const enableLoading = ref(false)
 const enableOverride = ref<boolean | null>(null)
 
 const enabled = computed(() => enableOverride.value ?? props.model.enable ?? true)
+const modelDescription = computed(() => getModelDescription(props.model.config))
 
 // Show the id as a second line only when a real custom name is hiding it.
 const showModelId = computed(() => {

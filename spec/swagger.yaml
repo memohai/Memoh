@@ -3883,6 +3883,8 @@ definitions:
         type: array
       context_window:
         type: integer
+      description:
+        type: string
       dimensions:
         type: integer
       reasoning_efforts:

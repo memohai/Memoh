@@ -40,6 +40,7 @@ func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 // Create adds a new model to the database.
 func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, error) {
 	model := req.toModel(ResolveEnable(req.Enable, true))
+	model.Config = normalizeModelConfig(model.Config)
 	if err := model.Validate(); err != nil {
 		return AddResponse{}, fmt.Errorf("validation failed: %w", err)
 	}
@@ -263,6 +264,7 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 	}
 
 	model := req.toModel(ResolveEnable(req.Enable, current.Enable))
+	model.Config = normalizeModelConfig(model.Config)
 	if err := model.Validate(); err != nil {
 		return GetResponse{}, fmt.Errorf("validation failed: %w", err)
 	}
@@ -321,6 +323,7 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 	}
 
 	model := req.toModel(ResolveEnable(req.Enable, current.Enable))
+	model.Config = normalizeModelConfig(model.Config)
 	if err := model.Validate(); err != nil {
 		return GetResponse{}, fmt.Errorf("validation failed: %w", err)
 	}

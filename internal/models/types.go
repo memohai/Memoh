@@ -2,6 +2,7 @@ package models
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -110,11 +111,20 @@ var validThinkingModes = map[string]struct{}{
 // ThinkingMode is the discovered thinking behavior; empty = unknown (legacy data),
 // resolved via SupportsReasoning / ResolveThinkingMode.
 type ModelConfig struct {
+	Description      *string  `json:"description,omitempty"`
 	Dimensions       *int     `json:"dimensions,omitempty"`
 	Compatibilities  []string `json:"compatibilities,omitempty"`
 	ContextWindow    *int     `json:"context_window,omitempty"`
 	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
 	ThinkingMode     string   `json:"thinking_mode,omitempty"`
+}
+
+func normalizeModelConfig(config ModelConfig) ModelConfig {
+	if config.Description != nil {
+		description := strings.TrimSpace(*config.Description)
+		config.Description = &description
+	}
+	return config
 }
 
 type Model struct {

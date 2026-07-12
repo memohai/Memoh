@@ -158,7 +158,12 @@ func (f *fakeQueries) UpsertRegistryModel(_ context.Context, arg sqlc.UpsertRegi
 		if f.models[i].ProviderID == arg.ProviderID && f.models[i].ModelID == arg.ModelID {
 			f.models[i].Name = arg.Name
 			f.models[i].Type = arg.Type
-			f.models[i].Config = append([]byte(nil), arg.Config...)
+			existingConfig := jsonMapBytes(f.models[i].Config)
+			incomingConfig := jsonMapBytes(arg.Config)
+			if description, ok := existingConfig["description"]; ok {
+				incomingConfig["description"] = description
+			}
+			f.models[i].Config, _ = json.Marshal(incomingConfig)
 			return f.models[i], nil
 		}
 	}
@@ -174,6 +179,14 @@ func (f *fakeQueries) UpsertRegistryModel(_ context.Context, arg sqlc.UpsertRegi
 	f.models = append(f.models, m)
 	f.modelInserts++
 	return m, nil
+}
+
+func jsonMapBytes(raw []byte) map[string]any {
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil || out == nil {
+		return map[string]any{}
+	}
+	return out
 }
 
 // mutateProvider applies direct row edits, standing in for the raw SQL UPDATEs
@@ -308,6 +321,38 @@ func TestSyncTwiceIsIdempotent(t *testing.T) {
 		t.Fatalf("model row id changed across syncs: %s -> %s", modelRowID.String(), q.models[0].ID.String())
 	}
 	assertRegistrySource(t, q.providers[0].Metadata, "openai.yaml")
+}
+
+func TestSyncSeedsDescriptionThenPreservesUserOverride(t *testing.T) {
+	ctx := context.Background()
+	q := newFakeQueries()
+	logger := discardLogger()
+
+	def := openAIDefinition()
+	def.Models[0].Config["description"] = "Template description"
+	if err := Sync(ctx, logger, q, []ProviderDefinition{def}); err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+	if got := jsonMap(t, q.models[0].Config)["description"]; got != "Template description" {
+		t.Fatalf("description = %#v, want template description", got)
+	}
+
+	q.models[0].Config = []byte(`{"context_window":128000,"description":"Custom description"}`)
+	def.Models[0].Config["description"] = "Updated template description"
+	if err := Sync(ctx, logger, q, []ProviderDefinition{def}); err != nil {
+		t.Fatalf("second sync: %v", err)
+	}
+	if got := jsonMap(t, q.models[0].Config)["description"]; got != "Custom description" {
+		t.Fatalf("description = %#v, want preserved custom description", got)
+	}
+
+	q.models[0].Config = []byte(`{"context_window":128000,"description":""}`)
+	if err := Sync(ctx, logger, q, []ProviderDefinition{def}); err != nil {
+		t.Fatalf("third sync: %v", err)
+	}
+	if got := jsonMap(t, q.models[0].Config)["description"]; got != "" {
+		t.Fatalf("description = %#v, want preserved explicit clear", got)
+	}
 }
 
 func TestSyncUpdatesProviderWhenRegistryNameChanges(t *testing.T) {
