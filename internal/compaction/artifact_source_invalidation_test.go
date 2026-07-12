@@ -2,7 +2,9 @@ package compaction
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -132,6 +134,9 @@ func TestArtifactProjectionAppliesSourceInvalidationForSessionAndPointLoads(t *t
 	if len(frontier.Artifacts) != 1 || frontier.Artifacts[0].ID != validSiblingID {
 		t.Fatalf("session frontier = %#v, want valid sibling fallback", frontier.Artifacts)
 	}
+	if queries.fullLineageCalls != 1 || len(queries.payloadCalls) != 0 {
+		t.Fatalf("non-empty invalid coverage calls = full %d, payload %#v, want full-lineage fallback", queries.fullLineageCalls, queries.payloadCalls)
+	}
 	active, err := projection.LoadActiveByID(context.Background(), validSiblingID, owner)
 	if err != nil || active.ID != validSiblingID {
 		t.Fatalf("LoadActiveByID(valid sibling) = %#v, %v", active, err)
@@ -250,6 +255,20 @@ func TestArtifactProjectionRestoresLeavesForNestedEmptyCoverageDerivedSeeds(t *t
 	if got := artifactIDs(frontier.Artifacts); !equalArtifactIDs(got, ids[:3]) {
 		t.Fatalf("nested fallback frontier = %#v, want leaves %#v", got, ids[:3])
 	}
+	if queries.fullLineageCalls != 0 || len(queries.payloadCalls) != 1 || !sameProjectionUUIDSet(queries.payloadCalls[0], first.ID, second.ID, third.ID) {
+		t.Fatalf("nested fallback loads = full %d, payload %#v, want only leaf payloads", queries.fullLineageCalls, queries.payloadCalls)
+	}
+	for _, leaf := range []*sqlc.BotHistoryMessageCompact{first, second, third} {
+		resolved, ok := frontier.Resolve(leaf.ID.String())
+		if !ok || resolved.ID != leaf.ID.String() {
+			t.Fatalf("Resolve(%s) = %#v, %v, want restored leaf", leaf.ID, resolved, ok)
+		}
+	}
+	for _, excluded := range []*sqlc.BotHistoryMessageCompact{middle, top} {
+		if _, ok := frontier.Resolve(excluded.ID.String()); ok {
+			t.Fatalf("Resolve(%s) unexpectedly retained invalid derived alias", excluded.ID)
+		}
+	}
 }
 
 func TestArtifactProjectionPropagatesSourceValidityStorageError(t *testing.T) {
@@ -284,11 +303,15 @@ func (*projectionQueries) ListInvalidCompactionArtifactSeedsBySession(context.Co
 }
 
 type sourceValidityProjectionQueries struct {
-	rows         map[pgtype.UUID]sqlc.BotHistoryMessageCompact
-	lineage      []sqlc.BotHistoryMessageCompact
-	invalidIDs   []pgtype.UUID
-	invalidSeeds []sqlc.ListInvalidCompactionArtifactSeedsBySessionRow
-	invalidErr   error
+	rows             map[pgtype.UUID]sqlc.BotHistoryMessageCompact
+	lineage          []sqlc.BotHistoryMessageCompact
+	invalidIDs       []pgtype.UUID
+	invalidSeeds     []sqlc.ListInvalidCompactionArtifactSeedsBySessionRow
+	invalidErr       error
+	payloadFn        func([]pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error)
+	metadataCalls    int
+	fullLineageCalls int
+	payloadCalls     [][]pgtype.UUID
 }
 
 func (q *sourceValidityProjectionQueries) GetCompactionLogByID(_ context.Context, id pgtype.UUID) (sqlc.BotHistoryMessageCompact, error) {
@@ -300,7 +323,27 @@ func (q *sourceValidityProjectionQueries) GetCompactionLogByID(_ context.Context
 }
 
 func (q *sourceValidityProjectionQueries) ListCompactionArtifactLineageBySession(context.Context, pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
+	q.fullLineageCalls++
 	return q.lineage, nil
+}
+
+func (q *sourceValidityProjectionQueries) ListCompactionArtifactLineageMetadataBySession(context.Context, pgtype.UUID) ([]sqlc.ListCompactionArtifactLineageMetadataBySessionRow, error) {
+	q.metadataCalls++
+	return projectionMetadataRows(q.lineage), nil
+}
+
+func (q *sourceValidityProjectionQueries) ListCompactionArtifactPayloadsByIDs(_ context.Context, ids []pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
+	q.payloadCalls = append(q.payloadCalls, append([]pgtype.UUID(nil), ids...))
+	if q.payloadFn != nil {
+		return q.payloadFn(ids)
+	}
+	rows := make([]sqlc.BotHistoryMessageCompact, 0, len(ids))
+	for _, id := range ids {
+		if row, ok := q.rows[id]; ok {
+			rows = append(rows, row)
+		}
+	}
+	return rows, nil
 }
 
 func (q *sourceValidityProjectionQueries) ListCompactionArtifactParentIDsBySuccessor(_ context.Context, arg sqlc.ListCompactionArtifactParentIDsBySuccessorParams) ([]pgtype.UUID, error) {
@@ -322,6 +365,27 @@ func (q *sourceValidityProjectionQueries) ListInvalidCompactionArtifactSeedsBySe
 		seeds = append(seeds, sqlc.ListInvalidCompactionArtifactSeedsBySessionRow{ID: id, Coverage: q.rows[id].Coverage})
 	}
 	return seeds, q.invalidErr
+}
+
+func projectionMetadataRows(rows []sqlc.BotHistoryMessageCompact) []sqlc.ListCompactionArtifactLineageMetadataBySessionRow {
+	metadata := make([]sqlc.ListCompactionArtifactLineageMetadataBySessionRow, 0, len(rows))
+	for _, row := range rows {
+		coverageCount := int32(0)
+		var coverage []json.RawMessage
+		if len(row.Coverage) > 0 && json.Unmarshal(row.Coverage, &coverage) != nil {
+			coverageCount = -1
+		} else if len(row.Coverage) > 0 {
+			coverageCount = int32(len(coverage)) //nolint:gosec // test coverage is bounded
+		}
+		metadata = append(metadata, sqlc.ListCompactionArtifactLineageMetadataBySessionRow{
+			ID: row.ID, BotID: row.BotID, SessionID: row.SessionID, Status: row.Status,
+			HasSummary: strings.TrimSpace(row.Summary) != "", CoverageCount: coverageCount,
+			AnchorStartMs: row.AnchorStartMs, AnchorEndMs: row.AnchorEndMs,
+			ArtifactLevel: row.ArtifactLevel, ParentIds: row.ParentIds,
+			SupersededBy: row.SupersededBy, SupersededAt: row.SupersededAt, StartedAt: row.StartedAt,
+		})
+	}
+	return metadata
 }
 
 func artifactIDs(artifacts []Artifact) []string {

@@ -128,6 +128,24 @@ func (f *fakeQueries) ListCompactionArtifactLineageBySession(_ context.Context, 
 	return f.priorLogs, nil
 }
 
+func (f *fakeQueries) ListCompactionArtifactLineageMetadataBySession(_ context.Context, _ pgtype.UUID) ([]sqlc.ListCompactionArtifactLineageMetadataBySessionRow, error) {
+	return projectionMetadataRows(f.priorLogs), nil
+}
+
+func (f *fakeQueries) ListCompactionArtifactPayloadsByIDs(_ context.Context, ids []pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
+	wanted := make(map[pgtype.UUID]struct{}, len(ids))
+	for _, id := range ids {
+		wanted[id] = struct{}{}
+	}
+	rows := make([]sqlc.BotHistoryMessageCompact, 0, len(ids))
+	for _, row := range f.priorLogs {
+		if _, ok := wanted[row.ID]; ok {
+			rows = append(rows, row)
+		}
+	}
+	return rows, nil
+}
+
 func (f *fakeQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) error {
 	f.legacyMarkCalled = true
 	return fmt.Errorf("%w: %d messages", errLegacyCompactionMark, len(arg.Column2))

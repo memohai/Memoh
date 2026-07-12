@@ -17,7 +17,9 @@ import (
 type artifactProjectionQueries interface {
 	GetCompactionLogByID(context.Context, pgtype.UUID) (sqlc.BotHistoryMessageCompact, error)
 	ListCompactionArtifactLineageBySession(context.Context, pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error)
+	ListCompactionArtifactLineageMetadataBySession(context.Context, pgtype.UUID) ([]sqlc.ListCompactionArtifactLineageMetadataBySessionRow, error)
 	ListCompactionArtifactParentIDsBySuccessor(context.Context, sqlc.ListCompactionArtifactParentIDsBySuccessorParams) ([]pgtype.UUID, error)
+	ListCompactionArtifactPayloadsByIDs(context.Context, []pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error)
 	ListInvalidCompactionArtifactSeedsBySession(context.Context, sqlc.ListInvalidCompactionArtifactSeedsBySessionParams) ([]sqlc.ListInvalidCompactionArtifactSeedsBySessionRow, error)
 }
 
@@ -129,15 +131,90 @@ func (p ArtifactProjection) LoadActiveSession(ctx context.Context, owner Artifac
 	if err != nil {
 		return ArtifactFrontier{}, err
 	}
-	rows, err := p.queries.ListCompactionArtifactLineageBySession(ctx, sessionUUID)
+	metadataRows, err := p.queries.ListCompactionArtifactLineageMetadataBySession(ctx, sessionUUID)
 	if err != nil {
 		return ArtifactFrontier{}, err
 	}
 	botID := strings.TrimSpace(owner.BotID)
-	if botID == "" && len(rows) > 0 {
-		botID = formatUUID(rows[0].BotID)
+	if botID == "" && len(metadataRows) > 0 {
+		botID = formatUUID(metadataRows[0].BotID)
 	}
 	invalidSources, err := p.loadInvalidSources(ctx, botID, sessionUUID)
+	if err != nil {
+		return ArtifactFrontier{}, err
+	}
+	if invalidSourceCoveragePresent(invalidSources) {
+		return p.loadActiveSessionWithFullLineage(ctx, owner, invalidSources)
+	}
+	metadata := make([]artifactLineageMetadata, 0, len(metadataRows))
+	expected := make(map[string]artifactLineageMetadata, len(metadataRows))
+	for _, row := range metadataRows {
+		artifact, err := artifactMetadataFromDBRow(row)
+		if err != nil {
+			return ArtifactFrontier{}, err
+		}
+		metadata = append(metadata, artifact)
+		expected[artifact.ID] = artifact
+	}
+	plan := buildArtifactProjectionPlan(metadata, owner, invalidSources)
+	if len(plan.active) == 0 {
+		return artifactFrontierFromProjectionPlan(plan, nil, owner), nil
+	}
+	requested := make(map[string]artifactLineageMetadata, len(plan.active))
+	ids := make([]pgtype.UUID, 0, len(plan.active))
+	for _, artifact := range plan.active {
+		id, err := db.ParseUUID(artifact.ID)
+		if err != nil {
+			return ArtifactFrontier{}, err
+		}
+		requested[artifact.ID] = artifact
+		ids = append(ids, id)
+	}
+	payloadRows, err := p.queries.ListCompactionArtifactPayloadsByIDs(ctx, ids)
+	if err != nil {
+		return ArtifactFrontier{}, err
+	}
+	payloads := make(map[string]Artifact, len(payloadRows))
+	for _, row := range payloadRows {
+		artifact, err := artifactFromDBRow(row)
+		if err != nil {
+			return ArtifactFrontier{}, err
+		}
+		effective, ok := requested[artifact.ID]
+		if !ok {
+			return ArtifactFrontier{}, fmt.Errorf("load compaction artifact payloads: unexpected artifact %s", artifact.ID)
+		}
+		if _, duplicate := payloads[artifact.ID]; duplicate {
+			return ArtifactFrontier{}, fmt.Errorf("load compaction artifact payloads: duplicate artifact %s", artifact.ID)
+		}
+		if !artifactPayloadMatchesMetadata(artifact, expected[artifact.ID]) {
+			return ArtifactFrontier{}, fmt.Errorf("load compaction artifact payloads: artifact %s changed after projection", artifact.ID)
+		}
+		artifact.ParentIDs = nil
+		artifact.SupersededBy = effective.SupersededBy
+		artifact.SupersededAt = effective.SupersededAt
+		payloads[artifact.ID] = artifact
+	}
+	if len(payloads) != len(requested) {
+		return ArtifactFrontier{}, fmt.Errorf("load compaction artifact payloads: got %d artifacts, want %d", len(payloads), len(requested))
+	}
+	hydrated := make([]Artifact, 0, len(plan.active))
+	for _, artifact := range plan.active {
+		hydrated = append(hydrated, payloads[artifact.ID])
+	}
+	return artifactFrontierFromProjectionPlan(plan, hydrated, owner), nil
+}
+
+func (p ArtifactProjection) loadActiveSessionWithFullLineage(
+	ctx context.Context,
+	owner ArtifactOwner,
+	invalidSources map[string][]CoveredSource,
+) (ArtifactFrontier, error) {
+	sessionUUID, err := db.ParseUUID(owner.SessionID)
+	if err != nil {
+		return ArtifactFrontier{}, err
+	}
+	rows, err := p.queries.ListCompactionArtifactLineageBySession(ctx, sessionUUID)
 	if err != nil {
 		return ArtifactFrontier{}, err
 	}
@@ -150,6 +227,61 @@ func (p ArtifactProjection) LoadActiveSession(ctx context.Context, owner Artifac
 		artifacts = append(artifacts, artifact)
 	}
 	return buildArtifactFrontierExcludingInvalidSources(artifacts, owner, invalidSources), nil
+}
+
+func invalidSourceCoveragePresent(invalidSources map[string][]CoveredSource) bool {
+	for _, coverage := range invalidSources {
+		if len(coverage) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func artifactFrontierFromProjectionPlan(
+	plan artifactProjectionPlan,
+	hydrated []Artifact,
+	owner ArtifactOwner,
+) ArtifactFrontier {
+	frontier := buildArtifactFrontierForOwner(hydrated, owner)
+	aliases := make(map[string]string, len(plan.aliases))
+	for alias, activeID := range plan.aliases {
+		if _, ok := frontier.byID[activeID]; ok {
+			aliases[alias] = activeID
+		}
+	}
+	frontier.aliases = aliases
+	frontier.Issues = append(plan.issues, frontier.Issues...)
+	sortLineageIssues(frontier.Issues)
+	return frontier
+}
+
+func artifactPayloadMatchesMetadata(artifact Artifact, metadata artifactLineageMetadata) bool {
+	return artifact.ID == metadata.ID &&
+		artifact.BotID == metadata.BotID &&
+		artifact.SessionID == metadata.SessionID &&
+		artifact.Status == metadata.Status &&
+		(strings.TrimSpace(artifact.Summary) != "") == metadata.HasSummary &&
+		(artifact.CoverageMalformed || len(artifact.Coverage) == metadata.CoverageCount) &&
+		artifact.AnchorStartMs == metadata.AnchorStartMs &&
+		artifact.AnchorEndMs == metadata.AnchorEndMs &&
+		artifact.Level == metadata.Level &&
+		equalArtifactIDSequence(artifact.ParentIDs, metadata.ParentIDs) &&
+		artifact.SupersededBy == metadata.SupersededBy &&
+		artifact.SupersededAt.Equal(metadata.SupersededAt) &&
+		artifact.StartedAt.Equal(metadata.StartedAt)
+}
+
+func equalArtifactIDSequence(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func (p ArtifactProjection) LoadActiveByID(ctx context.Context, id string, owner ArtifactOwner) (Artifact, error) {

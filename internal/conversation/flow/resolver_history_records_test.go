@@ -407,16 +407,17 @@ func historyRecord(id string, msg conversation.ModelMessage, mutate func(*histor
 
 type recordingCompactionLogQueries struct {
 	dbstore.Queries
-	logs       []sqlc.BotHistoryMessageCompact
-	refs       map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow
-	byID       map[pgtype.UUID]sqlc.BotHistoryMessageCompact
-	invalidIDs []pgtype.UUID
-	sessionID  pgtype.UUID
-	listCalls  int
-	refCalls   []pgtype.UUID
-	getCalls   []pgtype.UUID
-	listErr    error
-	refErr     error
+	logs         []sqlc.BotHistoryMessageCompact
+	refs         map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow
+	byID         map[pgtype.UUID]sqlc.BotHistoryMessageCompact
+	invalidIDs   []pgtype.UUID
+	sessionID    pgtype.UUID
+	listCalls    int
+	refCalls     []pgtype.UUID
+	getCalls     []pgtype.UUID
+	payloadCalls [][]pgtype.UUID
+	listErr      error
+	refErr       error
 }
 
 func (q *recordingCompactionLogQueries) GetCompactionLogByID(_ context.Context, compactID pgtype.UUID) (sqlc.BotHistoryMessageCompact, error) {
@@ -438,6 +439,44 @@ func (q *recordingCompactionLogQueries) ListCompactionArtifactLineageBySession(_
 	q.sessionID = sessionID
 	q.listCalls++
 	return q.logs, q.listErr
+}
+
+func (q *recordingCompactionLogQueries) ListCompactionArtifactLineageMetadataBySession(_ context.Context, sessionID pgtype.UUID) ([]sqlc.ListCompactionArtifactLineageMetadataBySessionRow, error) {
+	q.sessionID = sessionID
+	q.listCalls++
+	rows := make([]sqlc.ListCompactionArtifactLineageMetadataBySessionRow, 0, len(q.logs))
+	for _, row := range q.logs {
+		coverageCount := int32(0)
+		var coverage []json.RawMessage
+		if len(row.Coverage) > 0 && json.Unmarshal(row.Coverage, &coverage) != nil {
+			coverageCount = -1
+		} else if len(row.Coverage) > 0 {
+			coverageCount = int32(len(coverage)) //nolint:gosec // test coverage is bounded
+		}
+		rows = append(rows, sqlc.ListCompactionArtifactLineageMetadataBySessionRow{
+			ID: row.ID, BotID: row.BotID, SessionID: row.SessionID, Status: row.Status,
+			HasSummary: strings.TrimSpace(row.Summary) != "", CoverageCount: coverageCount,
+			AnchorStartMs: row.AnchorStartMs, AnchorEndMs: row.AnchorEndMs,
+			ArtifactLevel: row.ArtifactLevel, ParentIds: row.ParentIds,
+			SupersededBy: row.SupersededBy, SupersededAt: row.SupersededAt, StartedAt: row.StartedAt,
+		})
+	}
+	return rows, q.listErr
+}
+
+func (q *recordingCompactionLogQueries) ListCompactionArtifactPayloadsByIDs(_ context.Context, ids []pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
+	q.payloadCalls = append(q.payloadCalls, append([]pgtype.UUID(nil), ids...))
+	wanted := make(map[pgtype.UUID]struct{}, len(ids))
+	for _, id := range ids {
+		wanted[id] = struct{}{}
+	}
+	rows := make([]sqlc.BotHistoryMessageCompact, 0, len(ids))
+	for _, row := range q.logs {
+		if _, ok := wanted[row.ID]; ok {
+			rows = append(rows, row)
+		}
+	}
+	return rows, nil
 }
 
 func persistedCoverage(t *testing.T, id string) []byte {
