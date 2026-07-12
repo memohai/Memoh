@@ -405,7 +405,12 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 	if displayText == "" {
 		displayText = strings.TrimSpace(req.Query)
 	}
-	if displayText == "" && len(req.Attachments) == 0 {
+	attachments := req.Attachments
+	if receipt := req.UserReceipt; receipt != nil {
+		displayText = receipt.DisplayText
+		attachments = receipt.Attachments
+	}
+	if displayText == "" && len(attachments) == 0 {
 		return req
 	}
 	contentText := strings.TrimSpace(req.Query)
@@ -422,7 +427,7 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 	}
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
 	sessionMode, runtimeType := r.persistSessionRuntimeSnapshot(ctx, req)
-	persisted, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
+	input := messagepkg.PersistInput{
 		BotID:                   req.BotID,
 		SessionID:               req.SessionID,
 		SenderChannelIdentityID: senderChannelIdentityID,
@@ -432,12 +437,23 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 		Role:                    "user",
 		Content:                 content,
 		Metadata:                mergeMetadata(buildRouteMetadata(req), buildInteractionMetadata(req)),
-		Assets:                  chatAttachmentsToAssetRefs(req.Attachments),
+		Assets:                  chatAttachmentsToAssetRefs(attachments),
 		EventID:                 req.EventID,
 		DisplayText:             displayText,
 		SessionMode:             sessionMode,
 		RuntimeType:             runtimeType,
-	})
+	}
+	if receipt := req.UserReceipt; receipt != nil {
+		origin := receipt.Origin.Values()
+		input.SenderChannelIdentityID = origin.SenderChannelIdentityID
+		input.SenderUserID = origin.SenderUserID
+		input.ExternalMessageID = origin.ExternalMessageID
+		input.SourceReplyToMessageID = origin.SourceReplyToMessageID
+		input.EventID = origin.EventID
+		input.SourceContext = origin.Context
+		input.Metadata = mergeMetadata(input.Metadata, receipt.Metadata)
+	}
+	persisted, err := r.messageService.Persist(ctx, input)
 	if err != nil {
 		r.logger.Warn("persist ACP leading user message failed",
 			slog.String("bot_id", req.BotID),
