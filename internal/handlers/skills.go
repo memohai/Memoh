@@ -63,7 +63,7 @@ func (h *ContainerdHandler) SetPluginService(service PluginInstallationLister) {
 }
 
 // ListSkills godoc
-// @Summary List skills from the bot container
+// @Summary List skills from the bot workspace
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} SkillsResponse
@@ -134,7 +134,7 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("container not reachable: %v", err))
+		return echo.NewHTTPError(http.StatusInternalServerError, "workspace is not reachable")
 	}
 
 	for _, raw := range req.Skills {
@@ -182,7 +182,7 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("container not reachable: %v", err))
+		return echo.NewHTTPError(http.StatusInternalServerError, "workspace is not reachable")
 	}
 
 	for _, name := range req.Names {
@@ -226,7 +226,7 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("container not reachable: %v", err))
+		return echo.NewHTTPError(http.StatusInternalServerError, "workspace is not reachable")
 	}
 	roots, pluginRoots, err := h.skillDiscoveryRoots(ctx, botID)
 	if err != nil {

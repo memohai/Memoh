@@ -29,7 +29,7 @@ type containerSetupFailure struct {
 	At      string
 }
 
-// RecordContainerSetupFailure persists a sanitized container setup failure so
+// RecordContainerSetupFailure persists a sanitized workspace setup failure so
 // runtime diagnostics can explain why a ready bot is unhealthy.
 func (s *Service) RecordContainerSetupFailure(ctx context.Context, botID, phase string, setupErr error) error {
 	if s.queries == nil {
@@ -51,7 +51,7 @@ func (s *Service) RecordContainerSetupFailure(ctx context.Context, botID, phase 
 	workspace := cloneMetadataSection(metadata[botWorkspaceMetadataKey])
 	workspace[botLastSetupErrorMetadataKey] = map[string]any{
 		"phase":   normalizeSetupFailurePhase(phase),
-		"message": sanitizeSetupFailureMessage(errorMessage(setupErr)),
+		"message": sanitizeDiagnosticMessage(errorMessage(setupErr), "workspace setup failed"),
 		"at":      time.Now().UTC().Format(time.RFC3339),
 	}
 	metadata[botWorkspaceMetadataKey] = workspace
@@ -59,7 +59,7 @@ func (s *Service) RecordContainerSetupFailure(ctx context.Context, botID, phase 
 }
 
 // ClearContainerSetupFailure removes stale setup failure diagnostics after a
-// successful container setup or manual container creation.
+// successful workspace setup or manual workspace creation.
 func (s *Service) ClearContainerSetupFailure(ctx context.Context, botID string) error {
 	if s.queries == nil {
 		return errors.New("bot queries not configured")
@@ -160,10 +160,10 @@ func normalizeSetupFailurePhase(phase string) string {
 	}
 }
 
-func sanitizeSetupFailureMessage(message string) string {
+func sanitizeDiagnosticMessage(message, fallback string) string {
 	message = strings.TrimSpace(message)
 	if message == "" {
-		message = "container setup failed"
+		message = fallback
 	}
 	message = diagnosticURLUserinfoPattern.ReplaceAllString(message, "${1}***:***@")
 	message = diagnosticSecretParamPattern.ReplaceAllString(message, "${1}=***")

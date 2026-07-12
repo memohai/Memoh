@@ -117,7 +117,7 @@ func runA11yAction(ctx context.Context, client *bridge.Client, action, ref, text
 
 func lookupComputerRef(ctx context.Context, containers bridge.Provider, botID, ref string) (*a11ySnapshotItem, error) {
 	if containers == nil {
-		return nil, errors.New("workspace container provider is not configured")
+		return nil, errors.New("workspace runtime provider is not configured")
 	}
 	client, err := containers.MCPClient(ctx, botID)
 	if err != nil {

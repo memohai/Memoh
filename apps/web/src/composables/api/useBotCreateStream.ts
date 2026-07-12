@@ -2,6 +2,7 @@ import { client } from '@memohai/sdk/client'
 import type { Options } from '@memohai/sdk'
 import type { BotsBot, HandlersCreateContainerResponse, PostBotsData } from '@memohai/sdk'
 import type { ContainerCreateLayerStatus } from './useContainerStream'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 
 // codesync(bot-create-stream): keep these manual SSE payload types in sync
 // with internal/handlers/users.go.
@@ -15,7 +16,13 @@ export type BotCreateStreamEvent =
   | { type: 'restoring' }
   | { type: 'complete'; container: HandlersCreateContainerResponse }
   | { type: 'ready'; bot: BotsBot }
-  | { type: 'error'; message: string }
+  | {
+    type: 'error'
+    code?: string
+    i18n_key?: string
+    args?: Record<string, string>
+    message: string
+  }
 
 export type BotCreateStreamResult = {
   stream: AsyncGenerator<BotCreateStreamEvent, void, unknown>
@@ -168,6 +175,9 @@ function isBotCreateStreamEvent(value: unknown): value is BotCreateStreamEvent {
       return !!event.container && typeof event.container === 'object'
     case 'error':
       return typeof event.message === 'string'
+        && (event.code === undefined || typeof event.code === 'string')
+        && (event.i18n_key === undefined || typeof event.i18n_key === 'string')
+        && (event.args === undefined || (!!event.args && typeof event.args === 'object'))
     default:
       return false
   }
@@ -211,7 +221,9 @@ export async function postBotsStream(
           throw new Error('Invalid bot create stream event')
         }
         streamError = undefined
-        yield event
+        yield event.type === 'error'
+          ? { ...event, message: resolveApiErrorMessage(event, event.message) }
+          : event
       }
 
       if (streamError) {

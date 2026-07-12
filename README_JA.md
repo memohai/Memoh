@@ -28,7 +28,7 @@
 
 ## Memoh とは？
 
-Memoh はオープンソースのマルチ Agent プラットフォームです。各 Agent には専用のクラウドコンピューターが割り当てられます — ファイルシステム、Desktop、Browser、ネットワーク、長期記憶を備えた独立 Container です。ノートパソコンを閉じても Agent は 24 時間稼働し続けます。
+Memoh はオープンソースのマルチ Agent プラットフォームです。各 Agent には専用のクラウドコンピューターが割り当てられます — ファイルシステム、Desktop、Browser、ネットワーク、長期記憶を備えた独立した Workspace です。ノートパソコンを閉じても Agent は 24 時間稼働し続けます。
 
 自分の API Key で Memoh 組み込みの Agent を動かすだけでなく、既存の Claude Code や Codex Agent を Memoh Workspace にホストすることもできます。
 
@@ -82,21 +82,21 @@ GitHub が自動生成する「Source code」
 
 ## Memoh を選ぶ理由
 
-- **すべての Agent に専用コンピューター**: 専用のファイルシステム、ネットワーク、Desktop、Browser を備えた隔離 Container。
+- **すべての Agent に専用コンピューター**: 専用のファイルシステム、ネットワーク、Desktop、Browser を備えた隔離された Workspace。
 - **Multi-user, multi-bot**: 自分用に 1 つ、家族やチームメンバーごとに 1 つ、または 1 台のマシンで複数の Bot をまとめて運用できます。
 - **軽量**: 自分のインフラにセルフホストすることも、Memoh Cloud に接続することもできます。
 
 ## Features
 
 - **Multi-bot & multi-user**: 複数の Bot が、個別チャット、グループチャット、Bot 同士の会話に対応します。Cross-platform identity binding も利用できます。
-- **Containerized Workspace**: 各 Bot は専用の Container で動作し、ファイルシステム、ネットワーク、Tool、Desktop を持ちます。
+- **隔離された Workspace**: 各 Bot は専用のファイルシステム、ネットワーク、Tool、Desktop を持ちます。
 - **Built-in memory**: セッションやプラットフォームをまたいだ長期記憶を標準搭載。[Mem0](https://mem0.ai) や OpenViking も利用できます。
 - **10+ channels**: Telegram、Discord、Lark、WeChat、QQ、Email などに対応しています。
 - **MCP**: 外部 Tool server に接続できます。各 Bot が自分の接続を管理します。
 - **Plugins**: パッケージ化された Skill、Tool、連携をインストールして、Bot の能力を拡張できます。
 - **Agent Hosting**: ACP 経由で外部 Agent を Memoh Workspace にホストできます。現在は Codex と Claude Code に対応し、Bot ごとに設定できます。
-- **Browser Use**: Container 内の Browser を操作できます。
-- **Computer Use**: GUI が必要な作業のために Container の Desktop を操作できます。
+- **Browser Use**: Workspace 内の Browser を操作できます。
+- **Computer Use**: GUI が必要な作業のために Workspace の Desktop を操作できます。
 - **Skills & Supermarket**: モジュール化された Skill、Supermarket からの curated template インストール、sub-agent への委譲に対応します。
 - **Automation**: スケジュールタスクと周期的な heartbeat を実行できます。
 

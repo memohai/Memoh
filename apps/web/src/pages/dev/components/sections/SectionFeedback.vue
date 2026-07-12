@@ -201,7 +201,7 @@ onBeforeUnmount(() => clearInterval(progressTimer))
       <div class="lg:col-span-2">
         <Specimen
           label="<Progress>"
-          note="neutral rail + selection-blue fill — container pull / upload progress"
+          note="neutral rail + selection-blue fill — workspace setup / upload progress"
         >
           <div class="flex w-full max-w-md flex-col gap-4">
             <Progress :model-value="30" />

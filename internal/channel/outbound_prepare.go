@@ -278,7 +278,7 @@ func prepareContainerAttachment(
 		return Attachment{}, PreparedAttachment{}, errors.New("attachment store is not configured")
 	}
 	if strings.TrimSpace(botID) == "" {
-		return Attachment{}, PreparedAttachment{}, errors.New("bot id is required for container attachments")
+		return Attachment{}, PreparedAttachment{}, errors.New("bot id is required for workspace attachments")
 	}
 	sourcePath := strings.TrimSpace(item.Path)
 	if item.Name == "" {
@@ -298,16 +298,16 @@ func prepareContainerAttachment(
 	ingester, ok := store.(ContainerAttachmentIngester)
 	if !ok {
 		if err != nil {
-			return Attachment{}, PreparedAttachment{}, fmt.Errorf("prepare container attachment: lookup asset: %w", err)
+			return Attachment{}, PreparedAttachment{}, fmt.Errorf("prepare workspace attachment: lookup asset: %w", err)
 		}
-		return Attachment{}, PreparedAttachment{}, errors.New("attachment store does not support container file ingestion")
+		return Attachment{}, PreparedAttachment{}, errors.New("attachment store does not support workspace file ingestion")
 	}
 	asset, ingestErr := ingester.IngestContainerFile(ctx, botID, sourcePath)
 	if ingestErr != nil {
 		if err != nil {
-			return Attachment{}, PreparedAttachment{}, fmt.Errorf("prepare container attachment: lookup asset: %w; ingest container file: %w", err, ingestErr)
+			return Attachment{}, PreparedAttachment{}, fmt.Errorf("prepare workspace attachment: lookup asset: %w; ingest workspace file: %w", err, ingestErr)
 		}
-		return Attachment{}, PreparedAttachment{}, fmt.Errorf("prepare container attachment: %w", ingestErr)
+		return Attachment{}, PreparedAttachment{}, fmt.Errorf("prepare workspace attachment: %w", ingestErr)
 	}
 	applyPreparedAsset(store, asset, botID, &item, sourcePath)
 	return item, preparedUploadAttachment(store, botID, item), nil

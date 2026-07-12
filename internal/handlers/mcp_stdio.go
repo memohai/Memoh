@@ -606,7 +606,7 @@ type mcpStdioSession struct {
 
 // CreateMCPStdio godoc
 // @Summary Create MCP stdio proxy
-// @Description Start a stdio MCP process in the bot container and expose it as MCP HTTP endpoint.
+// @Description Start a stdio MCP process in the bot workspace and expose it as an MCP HTTP endpoint.
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Param payload body MCPStdioRequest true "Stdio MCP payload"
@@ -633,7 +633,7 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 	}
 	containerID, err := h.manager.ContainerID(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "container not found for bot")
+		return echo.NewHTTPError(http.StatusNotFound, "workspace runtime not found for bot")
 	}
 
 	sess, err := h.startContainerdMCPCommandSession(ctx, botID, containerID, req)
@@ -671,7 +671,7 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 
 // HandleMCPStdio godoc
 // @Summary MCP stdio proxy (JSON-RPC)
-// @Description Proxies MCP JSON-RPC requests to a stdio MCP process in the container.
+// @Description Proxies MCP JSON-RPC requests to a stdio MCP process in the workspace.
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Param connection_id path string true "Connection ID"
@@ -730,7 +730,7 @@ func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context
 	// Get gRPC client for the bot container via manager
 	client, err := h.manager.MCPClient(ctx, botID)
 	if err != nil {
-		return nil, fmt.Errorf("get container client: %w", err)
+		return nil, fmt.Errorf("get workspace runtime client: %w", err)
 	}
 
 	command := buildShellCommand(req)

@@ -251,8 +251,8 @@
           "list": "すべてのSkillをリストする"
         },
         "fs": {
-          "list": "Container内のファイルを一覧表示する",
-          "read": "Containerからファイルを読み取る"
+          "list": "Workspace 内のファイルを一覧表示する",
+          "read": "Workspace 内のファイルを読み取る"
         },
         "status": {
           "show": "現在のSessionのステータスを表示する",
@@ -532,7 +532,7 @@
     "email": "電子Email設定を表示する",
     "heartbeat": "ハートビートログを表示する",
     "skill": "BotのSkillを表示する",
-    "fs": "Containerファイルを参照する",
+    "fs": "Workspace のファイルを参照する",
     "access": "ID と権限を検査する",
     "compact": "コンパクトな会話コンテキスト"
   }

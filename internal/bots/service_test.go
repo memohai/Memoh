@@ -461,6 +461,27 @@ func TestRecordContainerSetupFailureTruncatesLongMessages(t *testing.T) {
 	}
 }
 
+func TestSanitizeDiagnosticMessagePreservesTechnicalTerminology(t *testing.T) {
+	message := sanitizeDiagnosticMessage("container runtime failed", "workspace operation failed")
+	if message != "container runtime failed" {
+		t.Fatalf("message = %q, want technical terminology preserved", message)
+	}
+}
+
+func TestSanitizeDiagnosticMessageRedactsSecrets(t *testing.T) {
+	message := sanitizeDiagnosticMessage("dial https://admin:secret@example.com?token=abc123", "workspace operation failed")
+	if message != "dial https://***:***@example.com?token=***" {
+		t.Fatalf("message = %q, want credentials and token redacted", message)
+	}
+}
+
+func TestSanitizeDiagnosticMessageUsesCallerFallback(t *testing.T) {
+	message := sanitizeDiagnosticMessage("", "workspace reachability check failed")
+	if message != "workspace reachability check failed" {
+		t.Fatalf("message = %q, want caller fallback", message)
+	}
+}
+
 func findBotCheck(t *testing.T, checks []BotCheck, id string) BotCheck {
 	t.Helper()
 	for _, check := range checks {

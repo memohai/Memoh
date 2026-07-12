@@ -7,11 +7,11 @@ import (
 )
 
 func (h *Handler) buildFSGroup() *CommandGroup {
-	g := newCommandGroup("fs", "Browse container filesystem")
-	g.DefaultAction = "list" // bare /fs lands on the container root listing
+	g := newCommandGroup("fs", "Browse workspace files")
+	g.DefaultAction = "list" // bare /fs lands on the workspace root listing
 	g.Register(SubCommand{
 		Name:  "list",
-		Usage: "list [path] - List files in the container",
+		Usage: "list [path] - List files in the workspace",
 		Handler: func(cc CommandContext) (string, error) {
 			if h.containerFS == nil {
 				return cc.T("cmd.fs.unavailable"), nil
@@ -48,7 +48,7 @@ func (h *Handler) buildFSGroup() *CommandGroup {
 	})
 	g.Register(SubCommand{
 		Name:  "read",
-		Usage: "read <path> - Read a file from the container",
+		Usage: "read <path> - Read a file from the workspace",
 		Handler: func(cc CommandContext) (string, error) {
 			if h.containerFS == nil {
 				return cc.T("cmd.fs.unavailable"), nil

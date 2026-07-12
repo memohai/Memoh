@@ -427,9 +427,9 @@ func readTarGzFile(raw []byte, name string) ([]byte, error) {
 
 func TestIsWorkspaceRestoreRetryable(t *testing.T) {
 	retryable := []string{
-		"get container: not found",
+		"get workspace runtime: not found",
 		"No such container: workspace-123",
-		"container not reachable: connection refused",
+		"workspace is not reachable: connection refused",
 	}
 	for _, msg := range retryable {
 		if !isWorkspaceRestoreRetryable(errString(msg)) {

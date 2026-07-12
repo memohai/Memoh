@@ -569,8 +569,11 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 		}
 		return true
 	}
-	sendError := func(message string) {
-		_ = send(createContainerErrorEvent{Type: "error", Message: message})
+	sendError := func(code, i18nKey, message string) {
+		_ = send(createContainerErrorEvent{
+			Type: "error", Code: code, I18nKey: i18nKey,
+			Args: map[string]string{}, Message: message,
+		})
 	}
 
 	send(createBotStreamBotEvent{Type: "bot_created", Bot: scrubBotForResponse(bot)})
@@ -622,10 +625,10 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 				slog.String("bot_id", bot.ID),
 				slog.Any("error", readyErr),
 			)
-			sendError("container setup failed: " + err.Error() + "; ready status update failed: " + readyErr.Error())
+			sendError("workspace_setup_failed", "bots.create.failedSubtitle", "workspace setup failed; ready status update failed")
 			return nil
 		}
-		sendError("container setup failed: " + err.Error())
+		sendError("workspace_setup_failed", "bots.create.failedSubtitle", "workspace setup failed")
 		return nil
 	}
 
@@ -641,7 +644,7 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 			slog.String("bot_id", bot.ID),
 			slog.Any("error", err),
 		)
-		sendError("ready status update failed: " + err.Error())
+		sendError("bot_ready_update_failed", "bots.create.failedSubtitle", "ready status update failed: "+err.Error())
 		return nil
 	}
 	// Mirror the non-streaming path: write ACP workspace config (e.g.
@@ -652,7 +655,7 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 		if err := h.prepareACPWorkspaceConfig(lifecycleCtx, readyBot); err != nil {
 			h.logger.Warn("write ACP workspace config after stream bot create failed",
 				slog.String("bot_id", readyBot.ID), slog.Any("error", err))
-			sendError("write ACP workspace config: " + err.Error())
+			sendError("workspace_config_write_failed", "bots.create.failedSubtitle", "write ACP workspace config: "+err.Error())
 		}
 	}
 	send(createBotStreamBotEvent{Type: "ready", Bot: scrubBotForResponse(readyBot)})

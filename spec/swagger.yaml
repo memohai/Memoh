@@ -1186,7 +1186,7 @@ definitions:
       name:
         type: string
       path:
-        description: container-local filesystem path
+        description: workspace-local filesystem path
         type: string
       platform_key:
         type: string
@@ -5958,7 +5958,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Delete MCP container for bot
+      summary: Delete workspace for bot
       tags:
       - containerd
     get:
@@ -5981,7 +5981,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get container info for bot
+      summary: Get workspace info for bot
       tags:
       - containerd
     post:
@@ -5991,7 +5991,7 @@ paths:
         name: bot_id
         required: true
         type: string
-      - description: Create container payload
+      - description: Create workspace payload
         in: body
         name: payload
         required: true
@@ -5999,7 +5999,7 @@ paths:
           $ref: '#/definitions/handlers.CreateContainerRequest'
       responses:
         "200":
-          description: SSE stream of container creation events
+          description: SSE stream of workspace creation events
           schema:
             $ref: '#/definitions/handlers.CreateContainerResponse'
         "400":
@@ -6010,7 +6010,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Create and start MCP container for bot
+      summary: Create and start workspace for bot
       tags:
       - containerd
   /bots/{bot_id}/container/browser/sessions:
@@ -6132,7 +6132,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Restore previously preserved data into container
+      summary: Restore previously preserved data into workspace
       tags:
       - containerd
   /bots/{bot_id}/container/display:
@@ -6152,7 +6152,7 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Check workspace display availability for bot container
+      summary: Check workspace display availability for bot
       tags:
       - containerd
   /bots/{bot_id}/container/display/prepare:
@@ -6254,7 +6254,7 @@ paths:
       - containerd
   /bots/{bot_id}/container/fs:
     get:
-      description: Returns metadata about a file or directory at the given container
+      description: Returns metadata about a file or directory at the given workspace
         path
       parameters:
       - description: Bot ID
@@ -6262,7 +6262,7 @@ paths:
         name: bot_id
         required: true
         type: string
-      - description: Container path
+      - description: Workspace path
         in: query
         name: path
         required: true
@@ -6335,7 +6335,7 @@ paths:
       - containerd
   /bots/{bot_id}/container/fs/delete:
     post:
-      description: Deletes a file or directory at the given container path
+      description: Deletes a file or directory at the given workspace path
       parameters:
       - description: Bot ID
         in: path
@@ -6374,14 +6374,14 @@ paths:
       - containerd
   /bots/{bot_id}/container/fs/download:
     get:
-      description: Downloads a file from the container with appropriate Content-Type
+      description: Downloads a file from the workspace with appropriate Content-Type
       parameters:
       - description: Bot ID
         in: path
         name: bot_id
         required: true
         type: string
-      - description: Container file path
+      - description: Workspace file path
         in: query
         name: path
         required: true
@@ -6454,14 +6454,14 @@ paths:
       - containerd
   /bots/{bot_id}/container/fs/list:
     get:
-      description: Lists files and directories at the given container path
+      description: Lists files and directories at the given workspace path
       parameters:
       - description: Bot ID
         in: path
         name: bot_id
         required: true
         type: string
-      - description: Container directory path
+      - description: Workspace directory path
         in: query
         name: path
         required: true
@@ -6488,7 +6488,7 @@ paths:
       - containerd
   /bots/{bot_id}/container/fs/mkdir:
     post:
-      description: Creates a directory (and parents) at the given container path
+      description: Creates a directory (and parents) at the given workspace path
       parameters:
       - description: Bot ID
         in: path
@@ -6530,7 +6530,7 @@ paths:
         name: bot_id
         required: true
         type: string
-      - description: Container file path
+      - description: Workspace file path
         in: query
         name: path
         required: true
@@ -6598,14 +6598,14 @@ paths:
     post:
       consumes:
       - multipart/form-data
-      description: Uploads a binary file to the given container path
+      description: Uploads a binary file to the given workspace path
       parameters:
       - description: Bot ID
         in: path
         name: bot_id
         required: true
         type: string
-      - description: Destination container path
+      - description: Destination workspace path
         in: formData
         name: path
         required: true
@@ -6687,7 +6687,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get current container metrics for bot
+      summary: Get current workspace metrics for bot
       tags:
       - containerd
     put:
@@ -6716,7 +6716,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Update container metrics settings for bot
+      summary: Update workspace metrics settings for bot
       tags:
       - containerd
   /bots/{bot_id}/container/skills:
@@ -6781,7 +6781,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List skills from the bot container
+      summary: List skills from the bot workspace
       tags:
       - containerd
     post:
@@ -6905,7 +6905,7 @@ paths:
           description: Snapshots currently not supported on this backend
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Create container snapshot for bot
+      summary: Create workspace snapshot for bot
       tags:
       - containerd
   /bots/{bot_id}/container/snapshots/rollback:
@@ -6935,7 +6935,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Rollback container to a previous snapshot version
+      summary: Roll back workspace to a previous snapshot version
       tags:
       - containerd
   /bots/{bot_id}/container/start:
@@ -6959,7 +6959,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Start container task for bot
+      summary: Start workspace for bot
       tags:
       - containerd
   /bots/{bot_id}/container/stop:
@@ -6983,7 +6983,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Stop container task for bot
+      summary: Stop workspace for bot
       tags:
       - containerd
   /bots/{bot_id}/container/terminal:
@@ -7003,7 +7003,7 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Check terminal availability for bot container
+      summary: Check terminal availability for bot workspace
       tags:
       - containerd
   /bots/{bot_id}/container/terminal/ws:
@@ -7039,7 +7039,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Interactive WebSocket terminal for bot container
+      summary: Interactive WebSocket terminal for bot workspace
       tags:
       - containerd
   /bots/{bot_id}/email-bindings:
@@ -7434,8 +7434,8 @@ paths:
       - mcp
   /bots/{bot_id}/mcp-stdio:
     post:
-      description: Start a stdio MCP process in the bot container and expose it as
-        MCP HTTP endpoint.
+      description: Start a stdio MCP process in the bot workspace and expose it as
+        an MCP HTTP endpoint.
       parameters:
       - description: Bot ID
         in: path
@@ -7470,7 +7470,7 @@ paths:
       - containerd
   /bots/{bot_id}/mcp-stdio/{connection_id}:
     post:
-      description: Proxies MCP JSON-RPC requests to a stdio MCP process in the container.
+      description: Proxies MCP JSON-RPC requests to a stdio MCP process in the workspace.
       parameters:
       - description: Bot ID
         in: path
@@ -8170,7 +8170,7 @@ paths:
       - memory
   /bots/{bot_id}/memory/rebuild:
     post:
-      description: Read memory files from the container filesystem (source of truth)
+      description: Read memory files from the workspace filesystem (source of truth)
         and restore missing entries to memory storage
       parameters:
       - description: Bot ID
@@ -9667,7 +9667,7 @@ paths:
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Install skill from supermarket to bot container
+      summary: Install skill from supermarket to bot workspace
       tags:
       - supermarket
   /bots/{bot_id}/token-usage:

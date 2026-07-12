@@ -941,7 +941,7 @@ func (h *MemoryHandler) ChatUsage(c echo.Context) error {
 
 // ChatRebuild godoc
 // @Summary Rebuild memories from filesystem
-// @Description Read memory files from the container filesystem (source of truth) and restore missing entries to memory storage
+// @Description Read memory files from the workspace filesystem (source of truth) and restore missing entries to memory storage
 // @Tags memory
 // @Produce json
 // @Param bot_id path string true "Bot ID"

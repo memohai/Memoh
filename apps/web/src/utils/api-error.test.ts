@@ -62,4 +62,20 @@ describe('resolveApiErrorMessage', () => {
   it('falls back to existing detail extraction', () => {
     expect(resolveApiErrorMessage({ detail: 'plain detail' }, 'fallback')).toBe('plain detail')
   })
+
+  it.each([
+    ['zh', '启动工作区失败'],
+    ['ja', 'Workspace を起動できませんでした'],
+  ])('localizes workspace errors for %s instead of exposing backend English', (language, expected) => {
+    locale = language
+
+    const message = resolveApiErrorMessage({
+      code: 'workspace_start_failed',
+      i18n_key: 'bots.container.startFailed',
+      args: {},
+      message: 'failed to start container: connection refused',
+    }, 'fallback')
+
+    expect(message).toBe(expected)
+  })
 })

@@ -232,8 +232,8 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 		t.Fatalf("last event type = %#v, want error; events=%#v", last["type"], events)
 	}
 	message, _ := last["message"].(string)
-	if !strings.Contains(message, "container setup failed: image pull failed") {
-		t.Fatalf("error message = %q, want setup failure details", message)
+	if message != "workspace setup failed" {
+		t.Fatalf("error message = %q, want stable workspace setup failure", message)
 	}
 	setupError := requireStreamLastSetupError(t, streamDB.persistedMetadata)
 	if setupError["phase"] != "setup" {

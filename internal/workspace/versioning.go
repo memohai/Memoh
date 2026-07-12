@@ -440,7 +440,7 @@ func (m *Manager) replaceContainerSnapshot(ctx context.Context, botID, container
 	// Recreate the task and restore the container network before the next
 	// workspace operation.
 	if err := m.startTaskAndEnsureNetwork(ctx, botID, containerID); err != nil {
-		return fmt.Errorf("restart container after snapshot replace: %w", err)
+		return fmt.Errorf("restart workspace runtime after snapshot replace: %w", err)
 	}
 	return nil
 }

@@ -431,7 +431,8 @@ type FileSystemHandleLike =
 
 function isTransientWorkspaceError(error: unknown): boolean {
   const detail = resolveApiErrorMessage(error, '').toLowerCase()
-  return detail.includes('container not reachable')
+  return detail.includes('workspace is not reachable')
+    || detail.includes('container not reachable')
     || detail.includes('unavailable')
     || detail.includes('client connection is closing')
     || detail.includes('transport is closing')

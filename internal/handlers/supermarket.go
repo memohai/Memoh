@@ -285,7 +285,7 @@ func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 }
 
 // InstallSkill godoc
-// @Summary Install skill from supermarket to bot container
+// @Summary Install skill from supermarket to bot workspace
 // @Tags supermarket
 // @Param bot_id path string true "Bot ID"
 // @Param payload body InstallSkillRequest true "Install skill request"
@@ -315,7 +315,7 @@ func (h *SupermarketHandler) InstallSkill(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.containers.MCPClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("container not reachable: %v", err))
+		return echo.NewHTTPError(http.StatusInternalServerError, "workspace is not reachable")
 	}
 
 	downloadURL := h.baseURL + "/api/skills/" + skillID + "/download"
@@ -465,11 +465,11 @@ func (h *SupermarketHandler) fetchPluginEntry(c echo.Context, pluginID string) (
 func (h *SupermarketHandler) installPluginBundle(ctx context.Context, botID, downloadPluginID, targetPluginID string) (pluginBundleInstallResult, error) {
 	result := newPluginBundleInstallResult()
 	if h.containers == nil {
-		return pluginBundleInstallResult{}, errors.New("container provider is not configured")
+		return pluginBundleInstallResult{}, errors.New("workspace runtime provider is not configured")
 	}
 	client, err := h.containers.MCPClient(ctx, botID)
 	if err != nil {
-		return pluginBundleInstallResult{}, fmt.Errorf("container not reachable: %w", err)
+		return pluginBundleInstallResult{}, fmt.Errorf("workspace is not reachable: %w", err)
 	}
 
 	downloadURL := h.baseURL + "/api/plugins/" + url.PathEscape(strings.TrimSpace(downloadPluginID)) + "/download"
@@ -511,11 +511,11 @@ func (h *SupermarketHandler) runPluginInstallScripts(ctx context.Context, botID,
 		return result, nil
 	}
 	if h.containers == nil {
-		return result, errors.New("container provider is not configured")
+		return result, errors.New("workspace runtime provider is not configured")
 	}
 	client, err := h.containers.MCPClient(ctx, botID)
 	if err != nil {
-		return result, fmt.Errorf("container not reachable: %w", err)
+		return result, fmt.Errorf("workspace is not reachable: %w", err)
 	}
 	return runPluginInstallCommands(ctx, client, botID, pluginID, []string(commands))
 }
