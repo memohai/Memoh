@@ -1491,12 +1491,12 @@ FOR EACH ROW
 EXECUTE FUNCTION invalidate_compaction_claim_on_source_revision();
 
 CREATE TABLE IF NOT EXISTS bot_history_topology_counters (
-  session_id UUID PRIMARY KEY REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  session_id UUID PRIMARY KEY,
   revision BIGINT NOT NULL CHECK (revision > 0)
 );
 
 CREATE TABLE IF NOT EXISTS bot_history_topology_positions (
-  session_id UUID NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  session_id UUID NOT NULL,
   turn_position BIGINT NOT NULL,
   revision BIGINT NOT NULL CHECK (revision > 0),
   PRIMARY KEY (session_id, turn_position)
@@ -1514,7 +1514,7 @@ CREATE TABLE IF NOT EXISTS bot_history_topology_pending (
 
 CREATE TABLE IF NOT EXISTS bot_history_message_compact_topology (
   compact_id UUID PRIMARY KEY REFERENCES bot_history_message_compacts(id) ON DELETE CASCADE,
-  session_id UUID NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  session_id UUID NOT NULL,
   topology_revision BIGINT NOT NULL CHECK (topology_revision >= 0),
   range_start_turn_position BIGINT NOT NULL,
   range_end_turn_position BIGINT NOT NULL,
@@ -1590,6 +1590,23 @@ BEGIN
   DELETE FROM bot_history_topology_pending
   WHERE transaction_id = current_transaction_id;
 
+  RETURN NULL;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION cleanup_history_topology_session()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  DELETE FROM bot_history_message_compact_topology
+  WHERE session_id = OLD.id;
+  DELETE FROM bot_history_topology_pending
+  WHERE session_id = OLD.id;
+  DELETE FROM bot_history_topology_positions
+  WHERE session_id = OLD.id;
+  DELETE FROM bot_history_topology_counters
+  WHERE session_id = OLD.id;
   RETURN NULL;
 END;
 $$;
@@ -1678,6 +1695,12 @@ AFTER INSERT ON bot_history_topology_pending
 DEFERRABLE INITIALLY DEFERRED
 FOR EACH ROW
 EXECUTE FUNCTION flush_history_topology_positions();
+
+CREATE CONSTRAINT TRIGGER history_topology_session_cleanup
+AFTER DELETE ON bot_sessions
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW
+EXECUTE FUNCTION cleanup_history_topology_session();
 
 CREATE OR REPLACE FUNCTION bump_message_source_revision_for_asset()
 RETURNS TRIGGER

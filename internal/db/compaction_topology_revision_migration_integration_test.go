@@ -332,6 +332,7 @@ INSERT INTO bot_history_message_compact_topology (
 		"enqueue_history_topology_position(uuid,bigint)",
 		"record_history_message_topology_change()",
 		"flush_history_topology_positions()",
+		"cleanup_history_topology_session()",
 	} {
 		var found *string
 		if err := pool.QueryRow(ctx, `SELECT to_regprocedure($1)::text`, function).Scan(&found); err != nil {

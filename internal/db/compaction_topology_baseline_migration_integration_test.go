@@ -61,6 +61,7 @@ func TestCompactionTopologyBaselineMigrationDownRemovesTopologyObjectsPostgresPa
 		"enqueue_history_topology_position(uuid,bigint)",
 		"record_history_message_topology_change()",
 		"flush_history_topology_positions()",
+		"cleanup_history_topology_session()",
 	} {
 		var count int
 		if err := tx.QueryRow(ctx, `
