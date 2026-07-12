@@ -17,6 +17,18 @@ DROP FUNCTION IF EXISTS capture_history_message_source_context();
 DROP FUNCTION IF EXISTS resolve_history_message_source_context(bot_history_messages);
 DROP FUNCTION IF EXISTS normalize_history_message_source_text(TEXT);
 
+DROP TRIGGER IF EXISTS history_message_topology_capture
+  ON bot_history_messages;
+DROP TRIGGER IF EXISTS history_topology_pending_flush
+  ON bot_history_topology_pending;
+DROP FUNCTION IF EXISTS flush_history_topology_positions();
+DROP FUNCTION IF EXISTS record_history_message_topology_change();
+DROP FUNCTION IF EXISTS enqueue_history_topology_position(UUID, BIGINT);
+DROP TABLE IF EXISTS bot_history_message_compact_topology;
+DROP TABLE IF EXISTS bot_history_topology_pending;
+DROP TABLE IF EXISTS bot_history_topology_positions;
+DROP TABLE IF EXISTS bot_history_topology_counters;
+
 DROP TRIGGER IF EXISTS compaction_message_claim_finalize
   ON bot_history_message_compacts;
 DROP TRIGGER IF EXISTS compaction_message_claim_insert_guard

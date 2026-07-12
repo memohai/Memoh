@@ -216,6 +216,31 @@ type BotHistoryMessageCompactParentEdge struct {
 	Ordinal    int32       `json:"ordinal"`
 }
 
+type BotHistoryMessageCompactTopology struct {
+	CompactID              pgtype.UUID `json:"compact_id"`
+	SessionID              pgtype.UUID `json:"session_id"`
+	TopologyRevision       int64       `json:"topology_revision"`
+	RangeStartTurnPosition int64       `json:"range_start_turn_position"`
+	RangeEndTurnPosition   int64       `json:"range_end_turn_position"`
+}
+
+type BotHistoryTopologyCounter struct {
+	SessionID pgtype.UUID `json:"session_id"`
+	Revision  int64       `json:"revision"`
+}
+
+type BotHistoryTopologyPending struct {
+	TransactionID pgtype.Uint64 `json:"transaction_id"`
+	SessionID     pgtype.UUID   `json:"session_id"`
+	TurnPosition  int64         `json:"turn_position"`
+}
+
+type BotHistoryTopologyPosition struct {
+	SessionID    pgtype.UUID `json:"session_id"`
+	TurnPosition int64       `json:"turn_position"`
+	Revision     int64       `json:"revision"`
+}
+
 type BotPluginInstallation struct {
 	ID          pgtype.UUID        `json:"id"`
 	BotID       pgtype.UUID        `json:"bot_id"`
