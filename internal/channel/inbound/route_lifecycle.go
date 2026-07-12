@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/memohai/memoh/internal/conversation"
 )
@@ -22,6 +23,7 @@ type routeAdmissionKind uint8
 
 const (
 	routeAdmissionRejected routeAdmissionKind = iota
+	routeAdmissionStale
 	routeAdmissionStartPrimary
 	routeAdmissionStartParallel
 	routeAdmissionInject
@@ -39,6 +41,7 @@ type routeAdmission struct {
 	Kind   routeAdmissionKind
 	Lease  *routeLease
 	Ticket *injectionTicket
+	Err    error
 }
 
 type routeHandoff struct {
@@ -53,12 +56,15 @@ var (
 )
 
 type routeLease struct {
-	dispatcher *RouteDispatcher
-	routeID    string
-	leaseID    uint64
-	epoch      uint64
-	primary    bool
-	inbox      <-chan conversation.InjectMessage
+	dispatcher      *RouteDispatcher
+	routeID         string
+	leaseID         uint64
+	epoch           uint64
+	primary         bool
+	inbox           <-chan conversation.InjectMessage
+	cancelMu        sync.Mutex
+	cancel          context.CancelFunc
+	cancelRequested bool
 }
 
 type injectionTicket struct {
@@ -70,6 +76,7 @@ type injectionTicket struct {
 }
 
 type routeLifecycleState struct {
+	scopeID      string
 	nextTicketID uint64
 	nextSequence uint64
 	primaryID    uint64
@@ -81,11 +88,9 @@ type routeLifecycleState struct {
 }
 
 type routeLeaseState struct {
-	lease           *routeLease
-	inbox           chan conversation.InjectMessage
-	cancel          context.CancelFunc
-	cancelRequested bool
-	handoff         *routeHandoff
+	lease   *routeLease
+	inbox   chan conversation.InjectMessage
+	handoff *routeHandoff
 }
 
 type routeTicketState struct {
@@ -115,50 +120,66 @@ func (d *RouteDispatcher) Admit(routeID string, intent routeIntent, work *deferr
 		return routeAdmission{Kind: routeAdmissionRejected}
 	}
 	routeID = strings.TrimSpace(routeID)
+	scopeID := strings.TrimSpace(work.sessionID)
 	d.lifecycleMu.Lock()
-	defer d.lifecycleMu.Unlock()
-	state := d.lifecycleState(routeID)
+	state := d.routeLifecycle[routeID]
+	if state != nil && state.scopeID != scopeID {
+		d.lifecycleMu.Unlock()
+		return routeAdmission{Kind: routeAdmissionStale}
+	}
+	if state == nil {
+		state = d.lifecycleState(routeID, scopeID)
+	}
 	sequence := state.takeSequence()
 	hasActiveLease := len(state.leases) > 0
 	hasPrimary := state.primaryID != 0
 
+	var admission routeAdmission
 	switch intent {
 	case routeIntentStartOnly:
 		if hasPrimary || len(state.backlog) > 0 {
-			return routeAdmission{Kind: routeAdmissionRejected}
+			admission = routeAdmission{Kind: routeAdmissionRejected}
+			break
 		}
-		return routeAdmission{Kind: routeAdmissionStartPrimary, Lease: d.newPrimaryLease(routeID, state)}
+		admission = routeAdmission{Kind: routeAdmissionStartPrimary, Lease: d.newPrimaryLease(routeID, state)}
 	case routeIntentParallel:
 		if !hasActiveLease {
-			return routeAdmission{Kind: routeAdmissionStartPrimary, Lease: d.newPrimaryLease(routeID, state)}
+			admission = routeAdmission{Kind: routeAdmissionStartPrimary, Lease: d.newPrimaryLease(routeID, state)}
+			break
 		}
-		return routeAdmission{Kind: routeAdmissionStartParallel, Lease: d.newParallelLease(routeID, state)}
+		admission = routeAdmission{Kind: routeAdmissionStartParallel, Lease: d.newParallelLease(routeID, state)}
 	case routeIntentQueue:
 		if !hasActiveLease {
-			return routeAdmission{Kind: routeAdmissionStartPrimary, Lease: d.newPrimaryLease(routeID, state)}
+			admission = routeAdmission{Kind: routeAdmissionStartPrimary, Lease: d.newPrimaryLease(routeID, state)}
+			break
 		}
 		state.insertBacklog(sequencedTurn{sequence: sequence, work: work})
-		return routeAdmission{Kind: routeAdmissionQueued}
+		admission = routeAdmission{Kind: routeAdmissionQueued}
 	case routeIntentContinue:
 		if hasPrimary {
-			return routeAdmission{Kind: routeAdmissionInject, Ticket: d.newInjectionTicket(routeID, state, sequence, work)}
+			admission = routeAdmission{Kind: routeAdmissionInject, Ticket: d.newInjectionTicket(routeID, state, sequence, work)}
+			break
 		}
 		if !hasActiveLease || len(state.backlog) == 0 {
-			return routeAdmission{Kind: routeAdmissionStartPrimary, Lease: d.newPrimaryLease(routeID, state)}
+			admission = routeAdmission{Kind: routeAdmissionStartPrimary, Lease: d.newPrimaryLease(routeID, state)}
+			break
 		}
 		state.insertBacklog(sequencedTurn{sequence: sequence, work: work})
-		return routeAdmission{Kind: routeAdmissionQueued}
+		admission = routeAdmission{Kind: routeAdmissionQueued}
 	default:
-		return routeAdmission{Kind: routeAdmissionRejected}
+		admission = routeAdmission{Kind: routeAdmissionRejected}
 	}
+	d.lifecycleMu.Unlock()
+	return admission
 }
 
-func (d *RouteDispatcher) lifecycleState(routeID string) *routeLifecycleState {
+func (d *RouteDispatcher) lifecycleState(routeID, scopeID string) *routeLifecycleState {
 	state := d.routeLifecycle[routeID]
 	if state != nil {
 		return state
 	}
 	state = &routeLifecycleState{
+		scopeID:  scopeID,
 		leases:   make(map[uint64]*routeLeaseState),
 		tickets:  make(map[uint64]*routeTicketState),
 		receipts: make(map[string]uint64),
@@ -277,20 +298,55 @@ func (l *routeLease) Inbox() <-chan conversation.InjectMessage {
 }
 
 func (l *routeLease) BindCancel(cancel context.CancelFunc) {
-	if l == nil || l.dispatcher == nil || cancel == nil {
+	if l == nil || cancel == nil {
 		return
 	}
-	d := l.dispatcher
-	callNow := false
-	d.lifecycleMu.Lock()
-	if state := d.routeLifecycle[l.routeID]; state != nil {
-		if leaseState := state.leases[l.leaseID]; leaseState != nil && leaseState.lease.epoch == l.epoch {
-			leaseState.cancel = cancel
-			callNow = leaseState.cancelRequested
-		}
+	l.cancelMu.Lock()
+	if l.cancel != nil {
+		l.cancelMu.Unlock()
+		return
 	}
-	d.lifecycleMu.Unlock()
+	l.cancel = cancel
+	callNow := l.cancelRequested
+	l.cancelMu.Unlock()
 	if callNow {
+		cancel()
+	}
+}
+
+func (l *routeLease) AdoptScope(scopeID string) bool {
+	if l == nil || l.dispatcher == nil {
+		return false
+	}
+	d := l.dispatcher
+	d.lifecycleMu.Lock()
+	defer d.lifecycleMu.Unlock()
+	state := d.routeLifecycle[l.routeID]
+	if state == nil || state.primaryID != l.leaseID || len(state.leases) != 1 ||
+		len(state.backlog) != 0 || len(state.tickets) != 0 {
+		return false
+	}
+	leaseState := state.leases[l.leaseID]
+	if leaseState == nil || leaseState.lease.epoch != l.epoch || !leaseState.lease.primary {
+		return false
+	}
+	state.scopeID = strings.TrimSpace(scopeID)
+	return true
+}
+
+func (l *routeLease) requestCancel() {
+	if l == nil {
+		return
+	}
+	l.cancelMu.Lock()
+	if l.cancelRequested {
+		l.cancelMu.Unlock()
+		return
+	}
+	l.cancelRequested = true
+	cancel := l.cancel
+	l.cancelMu.Unlock()
+	if cancel != nil {
 		cancel()
 	}
 }
@@ -365,7 +421,6 @@ func (l *routeLease) Release() *routeHandoff {
 		return nil
 	}
 	if len(state.backlog) == 0 {
-		delete(d.routeLifecycle, l.routeID)
 		return nil
 	}
 	next := state.backlog[0]
@@ -436,27 +491,71 @@ func (d *RouteDispatcher) CancelAll(routeID string) int {
 		return 0
 	}
 	routeID = strings.TrimSpace(routeID)
-	var cancels []context.CancelFunc
+	var leases []*routeLease
 	d.lifecycleMu.Lock()
 	state := d.routeLifecycle[routeID]
 	if state != nil {
 		for _, leaseState := range state.leases {
-			if leaseState.cancel == nil {
-				leaseState.cancelRequested = true
-				continue
-			}
-			cancels = append(cancels, leaseState.cancel)
+			leases = append(leases, leaseState.lease)
 		}
 	}
-	count := 0
-	if state != nil {
-		count = len(state.leases)
-	}
 	d.lifecycleMu.Unlock()
-	for _, cancel := range cancels {
-		cancel()
+	cancelRouteLeases(leases)
+	return len(leases)
+}
+
+func (d *RouteDispatcher) CurrentScope(routeID string) (string, bool) {
+	if d == nil || strings.TrimSpace(routeID) == "" {
+		return "", false
 	}
-	return count
+	d.lifecycleMu.Lock()
+	defer d.lifecycleMu.Unlock()
+	state := d.routeLifecycle[strings.TrimSpace(routeID)]
+	if state == nil {
+		return "", false
+	}
+	return state.scopeID, true
+}
+
+func (d *RouteDispatcher) AdvanceScope(routeID, scopeID string) int {
+	if d == nil || strings.TrimSpace(routeID) == "" {
+		return 0
+	}
+	routeID = strings.TrimSpace(routeID)
+	scopeID = strings.TrimSpace(scopeID)
+	d.lifecycleMu.Lock()
+	state := d.routeLifecycle[routeID]
+	if state != nil && state.scopeID == scopeID {
+		d.lifecycleMu.Unlock()
+		return 0
+	}
+	var leases []*routeLease
+	if state != nil {
+		leases = d.detachLifecycleState(routeID, state)
+	}
+	d.lifecycleState(routeID, scopeID)
+	d.lifecycleMu.Unlock()
+	cancelRouteLeases(leases)
+	return len(leases)
+}
+
+func (d *RouteDispatcher) detachLifecycleState(routeID string, state *routeLifecycleState) []*routeLease {
+	leases := make([]*routeLease, 0, len(state.leases))
+	for _, leaseState := range state.leases {
+		leases = append(leases, leaseState.lease)
+		if leaseState.inbox != nil {
+			drainInjectCh(leaseState.inbox)
+			close(leaseState.inbox)
+		}
+	}
+	delete(d.routeLifecycle, routeID)
+	return leases
+}
+
+func cancelRouteLeases(leases []*routeLease) {
+	for _, lease := range leases {
+		lease.requestCancel()
+	}
 }
 
 func (s *routeLifecycleState) insertBacklog(turn sequencedTurn) {

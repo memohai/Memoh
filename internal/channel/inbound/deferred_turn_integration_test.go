@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/identities"
@@ -21,6 +22,8 @@ func TestQueuedDeferredDiscussTurnActivatesOnceWithoutReenteringIngress(t *testi
 	gateway := &fakeChatGateway{resp: conversation.ChatResponse{Messages: []conversation.ModelMessage{{
 		Role: "assistant", Content: conversation.NewTextContent("done"),
 	}}}}
+	started := make(chan conversation.ChatRequest, 1)
+	gateway.onChat = func(req conversation.ChatRequest) { started <- req }
 	processor := NewChannelInboundProcessor(
 		slog.New(slog.DiscardHandler), nil, chatService, chatService, gateway,
 		identityService, &fakePolicyService{}, "", 0,
@@ -31,7 +34,9 @@ func TestQueuedDeferredDiscussTurnActivatesOnceWithoutReenteringIngress(t *testi
 	pipeline := pipelinepkg.NewPipeline(pipelinepkg.RenderParams{})
 	processor.SetPipeline(pipeline, nil, nil)
 	dispatcher := NewRouteDispatcher(slog.New(slog.DiscardHandler))
-	dispatcher.MarkActive("route-1")
+	activeTurn := testDeferredTurn("active")
+	activeTurn.sessionID = "session-1"
+	primary := dispatcher.Admit("route-1", routeIntentContinue, activeTurn)
 	processor.SetDispatcher(dispatcher)
 	sender := &fakeReplySender{}
 	message := channel.InboundMessage{
@@ -58,7 +63,17 @@ func TestQueuedDeferredDiscussTurnActivatesOnceWithoutReenteringIngress(t *testi
 	}
 	message.Metadata["model_id"] = "mutated"
 
-	processor.drainQueue(context.Background(), "route-1")
+	handoff := primary.Lease.Release()
+	if handoff == nil {
+		t.Fatal("queued turn did not produce a handoff")
+	}
+	processor.startRouteHandoff(context.Background(), handoff)
+	var promoted conversation.ChatRequest
+	select {
+	case promoted = <-started:
+	case <-time.After(time.Second):
+		t.Fatal("queued turn was not promoted")
+	}
 	ic, loaded := pipeline.GetIC("session-1")
 	if !loaded || len(ic.Nodes) != 1 {
 		t.Fatalf("pipeline after promotion = loaded:%v context:%#v", loaded, ic)
@@ -66,7 +81,7 @@ func TestQueuedDeferredDiscussTurnActivatesOnceWithoutReenteringIngress(t *testi
 	if identityService.calls != 1 {
 		t.Fatalf("queued promotion reentered identity resolution %d times", identityService.calls)
 	}
-	if gateway.gotReq.Query != "queued" || gateway.gotReq.Model != "model-original" {
-		t.Fatalf("promoted request = %#v", gateway.gotReq)
+	if promoted.Query != "queued" || promoted.Model != "model-original" {
+		t.Fatalf("promoted request = %#v", promoted)
 	}
 }

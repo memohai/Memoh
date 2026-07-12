@@ -175,6 +175,7 @@ type ChannelInboundProcessor struct {
 	identity            *IdentityResolver
 	policy              PolicyService
 	dispatcher          *RouteDispatcher
+	routeTransitions    routeTransitionRegistry
 	acl                 chatACL
 	observer            channel.StreamObserver
 	speechService       speechSynthesizer
@@ -191,10 +192,8 @@ type ChannelInboundProcessor struct {
 	permissionChecker   BotPermissionChecker
 	skillResolver       RequestedSkillResolver
 
-	// activeStreams maps "botID:routeID" to a context.CancelFunc for the
-	// currently running agent stream. Used by /stop to abort generation
-	// on external channels (Telegram, Discord, etc.).
-	activeStreams sync.Map
+	// activeStreams owns cancellation for local or dispatcher-less streams.
+	activeStreams activeStreamRegistry
 }
 
 // NewChannelInboundProcessor creates a processor with channel identity-based resolution.
@@ -704,10 +703,39 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if isUserInputResponseCommand(cmdText) && isDirectedAtBot(msg) {
 		return p.handleUserInputResponseCommand(ctx, msg, sender, identity, resolved.RouteID, sessionID, cmdText)
 	}
+	var reservedRouteLease *routeLease
+	var reservedRouteTransitionUnlock func()
 	if pendingSkillIntent != nil && p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
-		if p.dispatcher.IsActive(strings.TrimSpace(resolved.RouteID)) {
+		reservation := &deferredTurn{
+			id:        strings.TrimSpace(msg.Message.ID),
+			ctx:       context.WithoutCancel(ctx),
+			identity:  identity,
+			sessionID: strings.TrimSpace(sessionID),
+		}
+		var admission routeAdmission
+		if sessionID == "" {
+			admission, reservedRouteTransitionUnlock = p.reserveSessionlessRouteStart(strings.TrimSpace(resolved.RouteID), reservation)
+		} else {
+			admission = p.admitRouteTurn(ctx, strings.TrimSpace(resolved.RouteID), routeIntentStartOnly, reservation)
+		}
+		if admission.Kind == routeAdmissionStale {
+			if admission.Err != nil {
+				return admission.Err
+			}
+			return errStaleRouteScope
+		}
+		if admission.Kind != routeAdmissionStartPrimary || admission.Lease == nil {
 			return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
 		}
+		reservedRouteLease = admission.Lease
+		defer func() {
+			if reservedRouteLease != nil {
+				p.releaseRouteLease(context.WithoutCancel(ctx), reservedRouteLease)
+			}
+			if reservedRouteTransitionUnlock != nil {
+				reservedRouteTransitionUnlock()
+			}
+		}()
 	}
 
 	var requestedSkillContexts []conversation.RequestedSkillContext
@@ -779,7 +807,13 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			if pendingSkillIntent != nil && !newSessionSpecSupportsRequestedSkills(spec) {
 				return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
 			}
-			sess, createErr := p.sessionEnsurer.CreateNewSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), spec)
+			var sess SessionResult
+			var createErr error
+			if reservedRouteTransitionUnlock != nil {
+				sess, _, createErr = p.ensureRouteSessionLocked(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), spec, reservedRouteLease)
+			} else {
+				sess, _, createErr = p.ensureRouteSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), spec)
+			}
 			if createErr != nil {
 				if p.logger != nil {
 					p.logger.Warn("auto-create session failed", slog.Any("error", createErr))
@@ -790,6 +824,13 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			sessionType = sess.Type
 			sessionRuntime = sess.Runtime
 			sessionRuntimeOwner = sess.RuntimeOwnerAccountID
+			if pendingSkillIntent != nil && !sessionSupportsRequestedSkills(sess) {
+				return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
+			}
+			if reservedRouteTransitionUnlock != nil {
+				reservedRouteTransitionUnlock()
+				reservedRouteTransitionUnlock = nil
+			}
 		}
 	}
 
@@ -850,7 +891,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if err != nil {
 		return err
 	}
-	routeID := strings.TrimSpace(resolved.RouteID)
 	canDispatchDiscuss := sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil &&
 		p.pipeline != nil && sessionID != "" && !turn.hasPendingSkill
 
@@ -937,72 +977,28 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		return nil
 	}
 
-	if p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode == ModeQueue && !turn.hasPendingSkill {
-		if p.dispatcher.admitDeferred(routeID, turn) == routeAdmissionQueued {
-			p.sendModeConfirmation(ctx, sender, msg, identity, "queue")
-			return nil
-		}
-	}
-	turn.ActivateOnce(ctx, p)
-
-	// --- Dispatcher-based mode handling (inject / queue) ---
-	// For non-parallel modes, when a route already has an active agent stream,
-	// short-circuit here instead of starting a new stream.
-	if p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
-		if p.dispatcher.IsActive(routeID) {
-			if pendingSkillIntent != nil {
-				return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
-			}
-			headerifiedText := flow.FormatUserHeader(flow.UserMessageHeaderInput{
-				MessageID:         strings.TrimSpace(msg.Message.ID),
-				ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
-				DisplayName:       strings.TrimSpace(identity.DisplayName),
-				Channel:           msg.Channel.String(),
-				ConversationType:  strings.TrimSpace(msg.Conversation.Type),
-				ConversationName:  strings.TrimSpace(msg.Conversation.Name),
-				Target:            strings.TrimSpace(msg.ReplyTarget),
-				AttachmentPaths:   collectAttachmentPaths(attachments),
-				Time:              time.Now().UTC(),
-			}, text)
-
-			if inboundMode == ModeInject {
-				receipt := turn.receipt
-				// Don't persist here — the injected message will be interleaved
-				// at the correct position within the round by
-				// interleaveInjectedMessages in storeRound.
-				injected := p.dispatcher.Inject(routeID, InjectMessage{
-					Text:            text,
-					Attachments:     receipt.Attachments,
-					HeaderifiedText: headerifiedText,
-					Receipt:         receipt,
-				})
-				if injected {
-					p.sendModeConfirmation(ctx, sender, msg, identity, "inject")
-				} else {
-					if p.logger != nil {
-						p.logger.Warn("inject failed (channel full), falling through to new stream",
-							slog.String("route_id", routeID))
-					}
-					goto startStream
-				}
-				return nil
-			}
-		}
-	}
-
-startStream:
-	return p.runDeferredTurn(ctx, turn)
+	lease := reservedRouteLease
+	reservedRouteLease = nil
+	return p.dispatchDeferredTurn(ctx, turn, lease)
 }
 
-func (p *ChannelInboundProcessor) runDeferredTurn(ctx context.Context, turn *deferredTurn) (retErr error) {
-	return p.runDeferredTurnWithRelease(ctx, turn, true)
-}
-
-func (p *ChannelInboundProcessor) runDeferredTurnWithRelease(
-	ctx context.Context,
-	turn *deferredTurn,
-	releaseRoute bool,
-) (retErr error) {
+func (p *ChannelInboundProcessor) runDeferredTurn(ctx context.Context, turn *deferredTurn, lease *routeLease) (retErr error) {
+	if lease != nil {
+		defer p.releaseRouteLease(context.WithoutCancel(ctx), lease)
+	}
+	streamCtx, streamCancel := context.WithCancel(ctx)
+	defer streamCancel()
+	streamKey := strings.TrimSpace(turn.identity.BotID) + ":" + strings.TrimSpace(turn.resolved.RouteID)
+	if lease != nil {
+		lease.BindCancel(streamCancel)
+	} else {
+		ownerID, registerErr := p.registerActiveStream(ctx, turn.identity.BotID, streamKey, turn.resolved.RouteID, turn.sessionID, streamCancel)
+		if registerErr != nil {
+			return registerErr
+		}
+		defer p.activeStreams.Remove(streamKey, ownerID)
+	}
+	ctx = streamCtx
 	turn.ActivateOnce(ctx, p)
 	cfg := turn.cfg
 	msg := turn.msg
@@ -1022,24 +1018,8 @@ func (p *ChannelInboundProcessor) runDeferredTurnWithRelease(
 	sessionRuntimeOwner := turn.sessionRuntimeOwner
 	acpRuntimeSession := turn.acpRuntimeSession
 	activeChatID := turn.activeChatID
-	inboundMode := turn.inboundMode
 	eventID := turn.eventID
 	userReceipt := turn.receipt
-	routeID := strings.TrimSpace(resolved.RouteID)
-	var injectCh <-chan conversation.InjectMessage
-	if turn.routeOwnerTransferred {
-		injectCh = turn.transferredInjectCh
-		if releaseRoute {
-			defer func() {
-				p.drainQueue(context.WithoutCancel(ctx), routeID)
-			}()
-		}
-	} else if p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
-		injectCh = p.dispatcher.MarkActive(routeID)
-		defer func() {
-			p.drainQueue(context.WithoutCancel(ctx), routeID)
-		}()
-	}
 
 	// Issue chat token for reply routing.
 	chatToken := ""
@@ -1232,8 +1212,11 @@ func (p *ChannelInboundProcessor) runDeferredTurnWithRelease(
 		EventID:                   eventID,
 		UserReceipt:               &userReceipt,
 	}
-	if injectCh != nil {
-		chatReq.InjectCh = injectCh
+	if lease != nil && lease.Inbox() != nil {
+		chatReq.InjectionFeed = conversation.InjectionFeed{
+			Messages:        lease.Inbox(),
+			CommitPersisted: lease.CommitPersisted,
+		}
 	}
 	if mid, _ := msg.Metadata["model_id"].(string); strings.TrimSpace(mid) != "" {
 		chatReq.Model = strings.TrimSpace(mid)
@@ -1241,14 +1224,6 @@ func (p *ChannelInboundProcessor) runDeferredTurnWithRelease(
 	if re, _ := msg.Metadata["reasoning_effort"].(string); strings.TrimSpace(re) != "" {
 		chatReq.ReasoningEffort = strings.TrimSpace(re)
 	}
-	// Create a cancellable context so /stop can abort the stream.
-	streamCtx, streamCancel := context.WithCancel(ctx)
-	defer streamCancel()
-
-	streamKey := strings.TrimSpace(identity.BotID) + ":" + strings.TrimSpace(resolved.RouteID)
-	p.activeStreams.Store(streamKey, streamCancel)
-	defer p.activeStreams.Delete(streamKey)
-
 	chunkCh, streamErrCh := p.runner.StreamChat(streamCtx, chatReq)
 
 	var (
@@ -1465,60 +1440,6 @@ func (p *ChannelInboundProcessor) accessDeniedRole(ctx context.Context, identity
 		return ""
 	}
 	return role
-}
-
-// drainQueue marks the route as done and processes any queued tasks.
-func (p *ChannelInboundProcessor) drainQueue(ctx context.Context, routeID string) {
-	if p.dispatcher == nil {
-		return
-	}
-	var queuedTasks []QueuedTask
-	for {
-		result := p.dispatcher.MarkDone(routeID)
-		for _, fn := range result.PendingPersists {
-			fn(ctx)
-		}
-		queuedTasks = append(queuedTasks, result.QueuedTasks...)
-		if len(result.DeferredTurns) == 0 {
-			break
-		}
-		turn := result.DeferredTurns[0]
-		if p.logger != nil {
-			p.logger.Info("processing deferred turn",
-				slog.String("route_id", routeID),
-				slog.String("query", strings.TrimSpace(turn.text)),
-			)
-		}
-		runCtx := turn.ctx //nolint:contextcheck // deferred work retains its original detached admission context
-		if runCtx == nil {
-			runCtx = ctx
-		}
-		if err := p.runDeferredTurnWithRelease(runCtx, turn, false); err != nil {
-			if p.logger != nil {
-				p.logger.Error("deferred turn processing failed",
-					slog.String("route_id", routeID),
-					slog.Any("error", err),
-				)
-			}
-		}
-	}
-
-	for _, task := range queuedTasks {
-		if p.logger != nil {
-			p.logger.Info("processing queued task",
-				slog.String("route_id", routeID),
-				slog.String("query", strings.TrimSpace(task.Text)),
-			)
-		}
-		if err := p.HandleInbound(ctx, task.Cfg, task.Msg, task.Sender); err != nil { //nolint:contextcheck // ctx is already WithoutCancel from the defer caller
-			if p.logger != nil {
-				p.logger.Error("queued task processing failed",
-					slog.String("route_id", routeID),
-					slog.Any("error", err),
-				)
-			}
-		}
-	}
 }
 
 func collectAttachmentPaths(attachments []conversation.ChatAttachment) []string {
@@ -3450,18 +3371,22 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 	}
 
 	streamKey := strings.TrimSpace(identity.BotID) + ":" + strings.TrimSpace(resolved.RouteID)
-	cancelVal, loaded := p.activeStreams.LoadAndDelete(streamKey)
-	if !loaded {
+	if p.dispatcher != nil && !isLocalChannelType(msg.Channel) {
+		if canceled := p.dispatcher.CancelAll(resolved.RouteID); canceled == 0 {
+			return nil
+		}
+		if p.logger != nil {
+			p.logger.Info("agent stream aborted via /stop command",
+				slog.String("bot_id", strings.TrimSpace(identity.BotID)),
+				slog.String("route_id", strings.TrimSpace(resolved.RouteID)),
+				slog.String("channel", msg.Channel.String()))
+		}
+		return nil
+	}
+	if p.activeStreams.CancelAll(streamKey) == 0 {
 		// No active stream — silently ignore.
 		return nil
 	}
-
-	cancelFn, ok := cancelVal.(context.CancelFunc)
-	if !ok {
-		return nil
-	}
-
-	cancelFn()
 	if p.logger != nil {
 		p.logger.Info("agent stream aborted via /stop command",
 			slog.String("bot_id", strings.TrimSpace(identity.BotID)),
@@ -3670,29 +3595,58 @@ func splitFirstCommandField(text string) (head, tail string) {
 }
 
 func (p *ChannelInboundProcessor) streamToolApprovalCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, approvalRunner ToolApprovalRunner, input flow.ToolApprovalResponseInput) error {
-	return p.streamContinuationCommand(ctx, msg, sender, identity, routeID, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
+	return p.streamContinuationCommand(ctx, msg, sender, identity, routeID, input.SessionID, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
 		return approvalRunner.RespondToolApproval(runCtx, input, eventCh)
 	})
 }
 
 func (p *ChannelInboundProcessor) streamUserInputResponseCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, userInputRunner UserInputRunner, input flow.UserInputResponseInput) error {
-	return p.streamContinuationCommand(ctx, msg, sender, identity, routeID, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
+	return p.streamContinuationCommand(ctx, msg, sender, identity, routeID, input.SessionID, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
 		return userInputRunner.RespondUserInput(runCtx, input, eventCh)
 	})
 }
 
 type streamContinuationFunc func(context.Context, chan<- flow.WSStreamEvent) error
 
-func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, run streamContinuationFunc) error {
+func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID, sessionID string, run streamContinuationFunc) error {
 	target := strings.TrimSpace(msg.ReplyTarget)
 	if target == "" {
 		return errors.New("reply target missing")
 	}
 	routeID = strings.TrimSpace(routeID)
+	var lease *routeLease
 	if routeID != "" && p.dispatcher != nil && !isLocalChannelType(msg.Channel) {
-		p.dispatcher.MarkActive(routeID)
-		defer p.drainQueue(context.WithoutCancel(ctx), routeID)
+		admission := p.admitRouteTurn(ctx, routeID, routeIntentParallel, &deferredTurn{
+			id:        strings.TrimSpace(msg.Message.ID),
+			ctx:       context.WithoutCancel(ctx),
+			identity:  identity,
+			sessionID: strings.TrimSpace(sessionID),
+		})
+		if admission.Kind == routeAdmissionStale {
+			if admission.Err != nil {
+				return admission.Err
+			}
+			return errStaleRouteScope
+		}
+		if (admission.Kind != routeAdmissionStartPrimary && admission.Kind != routeAdmissionStartParallel) || admission.Lease == nil {
+			return errors.New("continuation route admission rejected")
+		}
+		lease = admission.Lease
+		defer p.releaseRouteLease(context.WithoutCancel(ctx), lease)
 	}
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+	streamKey := strings.TrimSpace(identity.BotID) + ":" + routeID
+	if lease != nil {
+		lease.BindCancel(runCancel)
+	} else {
+		ownerID, registerErr := p.registerActiveStream(ctx, identity.BotID, streamKey, routeID, sessionID, runCancel)
+		if registerErr != nil {
+			return registerErr
+		}
+		defer p.activeStreams.Remove(streamKey, ownerID)
+	}
+	ctx = runCtx
 	sourceMessageID := strings.TrimSpace(msg.Message.ID)
 	replyRef := &channel.ReplyRef{Target: target}
 	if sourceMessageID != "" {
@@ -3729,7 +3683,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 	errCh := make(chan error, 1)
 	go func() {
 		defer close(eventCh)
-		errCh <- run(ctx, eventCh)
+		errCh <- run(runCtx, eventCh)
 		close(errCh)
 	}()
 
@@ -4137,7 +4091,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	} else {
 		spec.CreatedByUserID = strings.TrimSpace(spec.CreatedByUserID)
 	}
-	sess, err := p.sessionEnsurer.CreateNewSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), spec)
+	sess, canceled, err := p.createNewRouteSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), spec)
 	if err != nil {
 		if p.logger != nil {
 			p.logger.Warn("create new session via /new command failed", slog.Any("error", err))
@@ -4150,7 +4104,13 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 			Message: plainTextMessage(friendlyOps(loc, "ops.verb.startSession"), caps),
 		})
 	}
-	p.cancelActiveStreamForRoute(identity.BotID, resolved.RouteID, "new session created")
+	if canceled > 0 && p.logger != nil {
+		p.logger.Info("agent stream aborted",
+			slog.String("bot_id", strings.TrimSpace(identity.BotID)),
+			slog.String("route_id", strings.TrimSpace(resolved.RouteID)),
+			slog.String("reason", "new session created"),
+		)
+	}
 
 	modeLabel = newSessionDisplayModeLabel(loc, spec)
 	if p.logger != nil {
@@ -4180,27 +4140,6 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		out.Reply = &channel.ReplyRef{MessageID: mid}
 	}
 	return sender.Send(ctx, channel.OutboundMessage{Target: target, Message: out})
-}
-
-func (p *ChannelInboundProcessor) cancelActiveStreamForRoute(botID, routeID, reason string) bool {
-	streamKey := strings.TrimSpace(botID) + ":" + strings.TrimSpace(routeID)
-	cancelVal, loaded := p.activeStreams.LoadAndDelete(streamKey)
-	if !loaded {
-		return false
-	}
-	cancelFn, ok := cancelVal.(context.CancelFunc)
-	if !ok {
-		return false
-	}
-	cancelFn()
-	if p.logger != nil {
-		p.logger.Info("agent stream aborted",
-			slog.String("bot_id", strings.TrimSpace(botID)),
-			slog.String("route_id", strings.TrimSpace(routeID)),
-			slog.String("reason", strings.TrimSpace(reason)),
-		)
-	}
-	return true
 }
 
 func newSessionConfirmModeText(spec NewSessionSpec) string {

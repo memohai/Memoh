@@ -312,13 +312,14 @@ func (f *fakeSessionEnsurer) CreateNewSession(_ context.Context, _, routeID, _ s
 		return SessionResult{}, f.createErr
 	}
 	if strings.TrimSpace(f.activeSession.ID) == "" {
-		return SessionResult{
+		f.activeSession = SessionResult{
 			ID:                    "created-session",
 			Type:                  spec.Type,
 			Mode:                  spec.Mode,
 			Runtime:               spec.Runtime,
 			RuntimeOwnerAccountID: spec.RuntimeOwnerAccountID,
-		}, nil
+		}
+		f.activeErr = nil
 	}
 	return f.activeSession, nil
 }
@@ -769,7 +770,8 @@ func TestChannelInboundProcessorActiveRouteCarriesInjectionReceiptAndQueuesWitho
 		slog.New(slog.DiscardHandler), nil, chatSvc, chatSvc, &fakeChatGateway{}, channelIdentitySvc, &fakePolicyService{}, "", 0,
 	)
 	dispatcher := NewRouteDispatcher(slog.New(slog.DiscardHandler))
-	injectCh := dispatcher.MarkActive("route-active")
+	primary := dispatcher.Admit("route-active", routeIntentContinue, testDeferredTurn("active"))
+	injectCh := primary.Lease.Inbox()
 	processor.SetDispatcher(dispatcher)
 	sender := &fakeReplySender{}
 	cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelTypeTelegram}
@@ -800,6 +802,9 @@ func TestChannelInboundProcessorActiveRouteCarriesInjectionReceiptAndQueuesWitho
 		origin.Context != messagesource.NewV1("Alice", "telegram", "private", "Alice Chat") {
 		t.Fatalf("injected receipt = %+v origin=%+v", injected.Receipt, origin)
 	}
+	if !primary.Lease.CommitPersisted(injected.Receipt.ID) {
+		t.Fatal("durably persisted injection was not committed")
+	}
 
 	queuedMessage := baseMessage
 	queuedMessage.Message = channel.Message{ID: "external-queued", Text: "/next queued"}
@@ -809,10 +814,11 @@ func TestChannelInboundProcessorActiveRouteCarriesInjectionReceiptAndQueuesWitho
 	if len(chatSvc.persistedIn) != 0 {
 		t.Fatalf("queued message was pre-persisted %d times", len(chatSvc.persistedIn))
 	}
-	result := dispatcher.MarkDone("route-active")
-	if len(result.DeferredTurns) != 1 || result.DeferredTurns[0].text != "queued" || len(result.QueuedTasks) != 0 {
-		t.Fatalf("deferred turns = %#v queued tasks = %#v", result.DeferredTurns, result.QueuedTasks)
+	handoff := primary.Lease.Release()
+	if handoff == nil || handoff.work == nil || handoff.work.text != "queued" {
+		t.Fatalf("route handoff = %#v", handoff)
 	}
+	handoff.Abort()
 }
 
 func TestChannelInboundProcessorRespondCommandRoutesUserInput(t *testing.T) {
@@ -1573,7 +1579,10 @@ func TestChannelInboundProcessorRejectsDirectSkillBeforeActiveStreamInjection(t 
 	processor.SetACLService(&fakeChatACL{allowed: true})
 	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1", Type: sessionpkg.TypeChat, Runtime: sessionpkg.RuntimeModel}})
 	dispatcher := NewRouteDispatcher(slog.Default())
-	dispatcher.MarkActive("route-skill-use-active")
+	activeTurn := testDeferredTurn("active")
+	activeTurn.sessionID = "session-1"
+	primary := dispatcher.Admit("route-skill-use-active", routeIntentContinue, activeTurn)
+	t.Cleanup(func() { primary.Lease.Release() })
 	processor.SetDispatcher(dispatcher)
 	sender := &fakeReplySender{}
 
@@ -1665,7 +1674,7 @@ func TestChannelInboundProcessorRejectsDirectSkillDuringContinuationStream(t *te
 	}
 }
 
-func TestChannelInboundProcessorDirectSkillStartsStreamWithDispatcherInjectCh(t *testing.T) {
+func TestChannelInboundProcessorDirectSkillStartsStreamWithLeasedInjectionFeed(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: testChannelIdentityUUID}}
 	policySvc := &fakePolicyService{}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-skill-use-dispatch", RouteID: "route-skill-use-dispatch"}}
@@ -1714,8 +1723,8 @@ func TestChannelInboundProcessorDirectSkillStartsStreamWithDispatcherInjectCh(t 
 	if gateway.gotReq.SkillActivation == nil || len(gateway.gotReq.SkillActivation.Skills) != 1 || gateway.gotReq.SkillActivation.Skills[0].Name != "alpha" {
 		t.Fatalf("SkillActivation = %#v, want alpha", gateway.gotReq.SkillActivation)
 	}
-	if gateway.gotReq.InjectCh == nil {
-		t.Fatal("StreamChat InjectCh is nil, want dispatcher injection channel")
+	if gateway.gotReq.InjectionFeed.Messages == nil || gateway.gotReq.InjectionFeed.CommitPersisted == nil {
+		t.Fatal("StreamChat InjectionFeed is incomplete, want leased injection feed")
 	}
 	if len(gateway.gotReq.RequestedSkills) != 1 || gateway.gotReq.RequestedSkills[0].Name != "alpha" || gateway.gotReq.RequestedSkills[0].Content != "alpha skill content" {
 		t.Fatalf("StreamChat requested skills = %#v, want resolved alpha", gateway.gotReq.RequestedSkills)
