@@ -224,13 +224,18 @@ func TestStoreMessagesPreservesReceiptWhenToolTailBatchDeclines(t *testing.T) {
 
 	messages := &decliningBatchMessageService{}
 	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
-	sourceContext := messagesource.NewV1("Sender", "telegram", "private", "Chat")
-	receipt := &conversation.UserMessageReceipt{
-		DisplayText:       "hello",
+	origin := mustStoreEnvelope(t, messagesource.EnvelopeInput{
 		ExternalMessageID: "external-user",
 		EventID:           "33333333-3333-3333-3333-333333333333",
-		SourceContext:     sourceContext,
-		Metadata:          map[string]any{"platform": "telegram"},
+		Source: messagesource.V1Candidate{
+			SenderDisplayName: "Sender", Platform: "telegram", ConversationType: "private", ConversationName: "Chat",
+		},
+	})
+	sourceContext := origin.Values().Context
+	receipt := &conversation.UserMessageReceipt{
+		DisplayText: "hello",
+		Origin:      origin,
+		Metadata:    map[string]any{"platform": "telegram"},
 	}
 	resolver.storeMessages(context.Background(), conversation.ChatRequest{
 		BotID: storeRoundBotID, SessionID: "44444444-4444-4444-4444-444444444444",
@@ -246,7 +251,7 @@ func TestStoreMessagesPreservesReceiptWhenToolTailBatchDeclines(t *testing.T) {
 		t.Fatalf("batch attempt=%d sequential=%d, want 4/4", len(messages.batchInputs), len(messages.persisted))
 	}
 	for _, inputs := range [][]messagepkg.PersistInput{messages.batchInputs, messages.persisted} {
-		if inputs[0].ExternalMessageID != "external-user" || inputs[0].EventID != receipt.EventID ||
+		if inputs[0].ExternalMessageID != "external-user" || inputs[0].EventID != origin.Values().EventID ||
 			inputs[0].SourceContext != sourceContext || inputs[0].Metadata["platform"] != "telegram" ||
 			inputs[1].SourceReplyToMessageID != "external-user" {
 			t.Fatalf("batch fallback changed receipt provenance: %#v", inputs)
@@ -262,17 +267,24 @@ func TestStoreMessagesUsesPerMessageInjectionReceipt(t *testing.T) {
 		messageService: messages,
 		logger:         slog.New(slog.DiscardHandler),
 	}
-	sourceContext := messagesource.NewV1("Injected Sender", "telegram", "group", "Injected Room")
-	receipt := &conversation.UserMessageReceipt{
-		ID:                      "receipt-b",
-		DisplayText:             "raw injected text",
+	originInput := messagesource.EnvelopeInput{
 		SenderChannelIdentityID: "11111111-1111-1111-1111-111111111111",
 		SenderUserID:            "22222222-2222-2222-2222-222222222222",
 		ExternalMessageID:       "external-b",
 		SourceReplyToMessageID:  "reply-b",
 		EventID:                 "33333333-3333-3333-3333-333333333333",
-		SourceContext:           sourceContext,
-		Metadata:                map[string]any{"route_id": "route-b", "platform": "telegram"},
+		Source: messagesource.V1Candidate{
+			SenderDisplayName: "Injected Sender", Platform: "telegram", ConversationType: "group", ConversationName: "Injected Room",
+		},
+	}
+	origin := mustStoreEnvelope(t, originInput)
+	originValues := origin.Values()
+	sourceContext := originValues.Context
+	receipt := &conversation.UserMessageReceipt{
+		ID:          "receipt-b",
+		DisplayText: "raw injected text",
+		Origin:      origin,
+		Metadata:    map[string]any{"route_id": "route-b", "platform": "telegram"},
 		Attachments: []conversation.ChatAttachment{{
 			ContentHash: "asset-b",
 			Mime:        "image/png",
@@ -302,11 +314,11 @@ func TestStoreMessagesUsesPerMessageInjectionReceipt(t *testing.T) {
 		t.Fatalf("persisted inputs = %d, want 5", len(messages.persisted))
 	}
 	injected := messages.persisted[2]
-	if injected.SenderChannelIdentityID != receipt.SenderChannelIdentityID ||
-		injected.SenderUserID != receipt.SenderUserID ||
-		injected.ExternalMessageID != receipt.ExternalMessageID ||
-		injected.SourceReplyToMessageID != receipt.SourceReplyToMessageID ||
-		injected.EventID != receipt.EventID || injected.SourceContext != sourceContext ||
+	if injected.SenderChannelIdentityID != originValues.SenderChannelIdentityID ||
+		injected.SenderUserID != originValues.SenderUserID ||
+		injected.ExternalMessageID != originValues.ExternalMessageID ||
+		injected.SourceReplyToMessageID != originValues.SourceReplyToMessageID ||
+		injected.EventID != originValues.EventID || injected.SourceContext != sourceContext ||
 		injected.DisplayText != receipt.DisplayText || injected.Metadata["route_id"] != "route-b" ||
 		injected.Metadata["platform"] != "telegram" {
 		t.Fatalf("injected provenance = %#v, want receipt %#v", injected, receipt)
@@ -341,7 +353,8 @@ func TestStoreMessagesUsesPerMessageInjectionReceipt(t *testing.T) {
 	withoutExternal := &recordingMessageService{}
 	resolver.messageService = withoutExternal
 	receiptWithoutExternal := *receipt
-	receiptWithoutExternal.ExternalMessageID = ""
+	originInput.ExternalMessageID = ""
+	receiptWithoutExternal.Origin = mustStoreEnvelope(t, originInput)
 	resolver.storeMessages(context.Background(), conversation.ChatRequest{
 		BotID: storeRoundBotID, SessionID: "44444444-4444-4444-4444-444444444444",
 		Query: "initial", ExternalMessageID: "external-a", SessionType: "chat", RuntimeType: "model",
@@ -372,7 +385,13 @@ func TestStoreRoundRemapsMetadataAcrossSyntheticToolClosure(t *testing.T) {
 		}},
 	}})[0]
 	failureMetadata := map[string]any{"error": "runtime failed", "stop_reason": "error"}
-	sourceContext := messagesource.NewV1("Original Sender", "telegram", "private", "Original Chat")
+	origin := mustStoreEnvelope(t, messagesource.EnvelopeInput{
+		ExternalMessageID: "external-original",
+		Source: messagesource.V1Candidate{
+			SenderDisplayName: "Original Sender", Platform: "telegram", ConversationType: "private", ConversationName: "Original Chat",
+		},
+	})
+	sourceContext := origin.Values().Context
 
 	_, err := resolver.storeRoundWithOptionsResult(context.Background(), conversation.ChatRequest{
 		BotID:       storeRoundBotID,
@@ -385,9 +404,8 @@ func TestStoreRoundRemapsMetadataAcrossSyntheticToolClosure(t *testing.T) {
 			Role:    "user",
 			Content: conversation.NewTextContent("hello"),
 			UserReceipt: &conversation.UserMessageReceipt{
-				ExternalMessageID: "external-original",
-				DisplayText:       "hello",
-				SourceContext:     sourceContext,
+				DisplayText: "hello",
+				Origin:      origin,
 			},
 		},
 		call,
@@ -415,4 +433,13 @@ func TestStoreRoundRemapsMetadataAcrossSyntheticToolClosure(t *testing.T) {
 		messages.batchInputs[0].SourceContext != sourceContext {
 		t.Fatalf("tool closure repair lost user receipt: %#v", messages.batchInputs[0])
 	}
+}
+
+func mustStoreEnvelope(t *testing.T, input messagesource.EnvelopeInput) messagesource.Envelope {
+	t.Helper()
+	envelope, err := messagesource.NewEnvelope(input)
+	if err != nil {
+		t.Fatalf("new source envelope: %v", err)
+	}
+	return envelope
 }

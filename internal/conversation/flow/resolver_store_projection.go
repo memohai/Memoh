@@ -100,16 +100,17 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			updatesLatestExternalMessage := false
 
 			if receipt := msg.UserReceipt; receipt != nil {
+				origin := receipt.Origin.Values()
 				updatesLatestExternalMessage = true
-				messageSenderChannelIdentityID = strings.TrimSpace(receipt.SenderChannelIdentityID)
-				messageSenderUserID = strings.TrimSpace(receipt.SenderUserID)
-				externalMessageID = strings.TrimSpace(receipt.ExternalMessageID)
-				sourceReplyToMessageID = strings.TrimSpace(receipt.SourceReplyToMessageID)
-				messageEventID = strings.TrimSpace(receipt.EventID)
+				messageSenderChannelIdentityID = origin.SenderChannelIdentityID
+				messageSenderUserID = origin.SenderUserID
+				externalMessageID = origin.ExternalMessageID
+				sourceReplyToMessageID = origin.SourceReplyToMessageID
+				messageEventID = origin.EventID
 				displayText = receipt.DisplayText
 				assets = chatAttachmentsToAssetRefs(receipt.Attachments)
 				persistMeta = receipt.Metadata
-				sourceContext = receipt.SourceContext
+				sourceContext = origin.Context
 			} else if isOriginalQuery {
 				updatesLatestExternalMessage = true
 				messageSenderChannelIdentityID = senderChannelIdentityID

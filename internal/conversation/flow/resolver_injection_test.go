@@ -7,6 +7,7 @@ import (
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/messagesource"
 )
 
 func TestInterleaveInjectedMessagesKeepsSameTextReceiptsDistinct(t *testing.T) {
@@ -20,18 +21,22 @@ func TestInterleaveInjectedMessagesKeepsSameTextReceiptsDistinct(t *testing.T) {
 		{
 			ModelText: "same text",
 			Receipt: conversation.UserMessageReceipt{
-				ID:                      "receipt-a",
-				SenderChannelIdentityID: "identity-a",
-				ExternalMessageID:       "external-a",
+				ID: "receipt-a",
+				Origin: mustInjectionEnvelope(t, messagesource.EnvelopeInput{
+					SenderChannelIdentityID: "11111111-1111-1111-1111-111111111111",
+					ExternalMessageID:       "external-a",
+				}),
 			},
 			InsertAfter: 1,
 		},
 		{
 			ModelText: "same text",
 			Receipt: conversation.UserMessageReceipt{
-				ID:                      "receipt-b",
-				SenderChannelIdentityID: "identity-b",
-				ExternalMessageID:       "external-b",
+				ID: "receipt-b",
+				Origin: mustInjectionEnvelope(t, messagesource.EnvelopeInput{
+					SenderChannelIdentityID: "22222222-2222-2222-2222-222222222222",
+					ExternalMessageID:       "external-b",
+				}),
 			},
 			InsertAfter: 1,
 		},
@@ -43,13 +48,17 @@ func TestInterleaveInjectedMessagesKeepsSameTextReceiptsDistinct(t *testing.T) {
 	}
 	for i, want := range injections {
 		message := got[i+2]
+		if message.UserReceipt == nil {
+			t.Fatalf("injected message %d receipt is nil", i)
+		}
+		gotOrigin := message.UserReceipt.Origin.Values()
+		wantOrigin := want.Receipt.Origin.Values()
 		if message.TextContent() != "same text" {
 			t.Fatalf("injected message %d text = %q", i, message.TextContent())
 		}
-		if message.UserReceipt == nil ||
-			message.UserReceipt.ID != want.Receipt.ID ||
-			message.UserReceipt.SenderChannelIdentityID != want.Receipt.SenderChannelIdentityID ||
-			message.UserReceipt.ExternalMessageID != want.Receipt.ExternalMessageID {
+		if message.UserReceipt.ID != want.Receipt.ID ||
+			gotOrigin.SenderChannelIdentityID != wantOrigin.SenderChannelIdentityID ||
+			gotOrigin.ExternalMessageID != wantOrigin.ExternalMessageID {
 			t.Fatalf("injected message %d receipt = %#v, want %#v", i, message.UserReceipt, want.Receipt)
 		}
 	}
@@ -66,9 +75,11 @@ func TestInjectionReceiptRegistryCorrelatesOutOfOrderSameTextReceipts(t *testing
 			"nested": map[string]any{"key": "value-a"},
 		}}},
 		Receipt: conversation.UserMessageReceipt{
-			ID:                      "receipt-a",
-			SenderChannelIdentityID: "identity-a",
-			ExternalMessageID:       "external-a",
+			ID: "receipt-a",
+			Origin: mustInjectionEnvelope(t, messagesource.EnvelopeInput{
+				SenderChannelIdentityID: "11111111-1111-1111-1111-111111111111",
+				ExternalMessageID:       "external-a",
+			}),
 			Metadata: map[string]any{
 				"reply": map[string]any{"message_id": "reply-a"},
 				"items": []any{"item-a"},
@@ -90,9 +101,11 @@ func TestInjectionReceiptRegistryCorrelatesOutOfOrderSameTextReceipts(t *testing
 		Text:        "same text",
 		Attachments: []conversation.ChatAttachment{{ContentHash: "asset-b"}},
 		Receipt: conversation.UserMessageReceipt{
-			ID:                      "receipt-b",
-			SenderChannelIdentityID: "identity-b",
-			ExternalMessageID:       "external-b",
+			ID: "receipt-b",
+			Origin: mustInjectionEnvelope(t, messagesource.EnvelopeInput{
+				SenderChannelIdentityID: "22222222-2222-2222-2222-222222222222",
+				ExternalMessageID:       "external-b",
+			}),
 		},
 	})
 	if err != nil {
@@ -124,11 +137,13 @@ func TestInjectionReceiptRegistryCorrelatesOutOfOrderSameTextReceipts(t *testing
 	if len(records) != 2 {
 		t.Fatalf("recorded receipts = %d, want 2", len(records))
 	}
-	if records[0].Receipt.SenderChannelIdentityID != "identity-b" ||
-		records[0].Receipt.ExternalMessageID != "external-b" ||
+	firstRecordedOrigin := records[0].Receipt.Origin.Values()
+	secondRecordedOrigin := records[1].Receipt.Origin.Values()
+	if firstRecordedOrigin.SenderChannelIdentityID != "22222222-2222-2222-2222-222222222222" ||
+		firstRecordedOrigin.ExternalMessageID != "external-b" ||
 		records[0].Receipt.Attachments[0].ContentHash != "asset-b" ||
-		records[1].Receipt.SenderChannelIdentityID != "identity-a" ||
-		records[1].Receipt.ExternalMessageID != "external-a" ||
+		secondRecordedOrigin.SenderChannelIdentityID != "11111111-1111-1111-1111-111111111111" ||
+		secondRecordedOrigin.ExternalMessageID != "external-a" ||
 		records[1].Receipt.Attachments[0].ContentHash != "asset-a" {
 		t.Fatalf("out-of-order correlation swapped receipts: %#v", records)
 	}
@@ -148,4 +163,13 @@ func TestInjectionReceiptRegistryCorrelatesOutOfOrderSameTextReceipts(t *testing
 	if got := len(registry.recordsSnapshot()); got != 2 {
 		t.Fatalf("fail-closed recorder appended %d receipts", got)
 	}
+}
+
+func mustInjectionEnvelope(t *testing.T, input messagesource.EnvelopeInput) messagesource.Envelope {
+	t.Helper()
+	envelope, err := messagesource.NewEnvelope(input)
+	if err != nil {
+		t.Fatalf("new source envelope: %v", err)
+	}
+	return envelope
 }

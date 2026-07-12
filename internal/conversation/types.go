@@ -323,16 +323,11 @@ type InjectMessage struct {
 }
 
 type UserMessageReceipt struct {
-	ID                      string
-	DisplayText             string
-	SenderChannelIdentityID string
-	SenderUserID            string
-	ExternalMessageID       string
-	SourceReplyToMessageID  string
-	EventID                 string
-	SourceContext           messagesource.Context
-	Metadata                map[string]any
-	Attachments             []ChatAttachment
+	ID          string
+	DisplayText string
+	Origin      messagesource.Envelope
+	Metadata    map[string]any
+	Attachments []ChatAttachment
 }
 
 // InjectedMessageRecord records a message that was injected via PrepareStep,
