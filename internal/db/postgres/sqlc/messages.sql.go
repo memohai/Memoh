@@ -4463,15 +4463,18 @@ LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN bot_channel_routes r ON r.id = s.route_id
 WHERE m.session_id = $1
-  -- Rows stay eligible unless their compact log holds a usable summary,
-  -- matching the read path's substitution predicate (status ok AND non-blank
-  -- summary). This also reclaims rows stranded by a crash between mark and
-  -- complete, by deleted logs, and legacy status='ok' rows whose summary is
-  -- empty or whitespace-only (the pre-existing poison states).
+  -- Rows whose compact claim is absent, incomplete, or invalidated stay
+  -- eligible so current visible source content can be compacted again. A
+  -- usable (non-blank) summary is part of a valid claim: legacy status='ok'
+  -- rows with empty or whitespace-only summaries (the pre-existing poison
+  -- states) reclaim like any other stale claim.
   AND (m.compact_id IS NULL OR NOT EXISTS (
-    SELECT 1 FROM bot_history_message_compacts c
-    WHERE c.id = m.compact_id AND c.status = 'ok'
-      AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL
+    SELECT 1
+    FROM bot_history_message_compact_claim_validity validity
+    JOIN bot_history_message_compacts claim_log ON claim_log.id = validity.compact_id
+    WHERE validity.compact_id = m.compact_id
+      AND validity.sources_current
+      AND NULLIF(BTRIM(claim_log.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL
   ))
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC

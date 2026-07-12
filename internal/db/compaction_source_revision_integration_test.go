@@ -381,15 +381,16 @@ VALUES ($1, 'post-compact-asset')
 	invalidLogIDs := []pgtype.UUID{legacyLogID}
 	for _, mutation := range mutations {
 		t.Run(mutation.name, func(t *testing.T) {
+			mutationSessionID := testUUID()
 			messageID, logID := testUUID(), testUUID()
 			invalidLogIDs = append(invalidLogIDs, logID)
-			insertFinalizeMessages(t, ctx, pool, botID, sessionID, []pgtype.UUID{messageID})
-			insertFinalizeLogs(t, ctx, pool, botID, sessionID, []pgtype.UUID{logID})
-			source := listSingleCompactionSource(t, ctx, queries, sessionID, messageID)
+			insertFinalizeMessages(t, ctx, pool, botID, mutationSessionID, []pgtype.UUID{messageID})
+			insertFinalizeLogs(t, ctx, pool, botID, mutationSessionID, []pgtype.UUID{logID})
+			source := listSingleCompactionSource(t, ctx, queries, mutationSessionID, messageID)
 			result, err := queries.FinalizeCompactionArtifact(ctx, finalizeParams(
 				logID,
 				botID,
-				sessionID,
+				mutationSessionID,
 				[]pgtype.UUID{messageID},
 				[]string{source.SourceVersion},
 				mutation.name+" summary",
@@ -405,14 +406,15 @@ VALUES ($1, 'post-compact-asset')
 			assertCompactionClaimCurrent(t, ctx, pool, logID, false)
 		})
 	}
+	preservedSessionID := testUUID()
 	preservedMessageID, preservedLogID := testUUID(), testUUID()
-	insertFinalizeMessages(t, ctx, pool, botID, sessionID, []pgtype.UUID{preservedMessageID})
-	insertFinalizeLogs(t, ctx, pool, botID, sessionID, []pgtype.UUID{preservedLogID})
-	preservedSource := listSingleCompactionSource(t, ctx, queries, sessionID, preservedMessageID)
+	insertFinalizeMessages(t, ctx, pool, botID, preservedSessionID, []pgtype.UUID{preservedMessageID})
+	insertFinalizeLogs(t, ctx, pool, botID, preservedSessionID, []pgtype.UUID{preservedLogID})
+	preservedSource := listSingleCompactionSource(t, ctx, queries, preservedSessionID, preservedMessageID)
 	preservedResult, err := queries.FinalizeCompactionArtifact(ctx, finalizeParams(
 		preservedLogID,
 		botID,
-		sessionID,
+		preservedSessionID,
 		[]pgtype.UUID{preservedMessageID},
 		[]string{preservedSource.SourceVersion},
 		"preserved summary",

@@ -174,7 +174,15 @@ locked_sources AS MATERIALIZED (
         WHERE existing_compact.id::text = requested.expected_compact_id
           AND existing_compact.bot_id = sqlc.arg(bot_id)
           AND existing_compact.session_id = sqlc.arg(session_id)
-          AND existing_compact.status <> 'ok'
+          AND (
+            existing_compact.status <> 'ok'
+            OR EXISTS (
+              SELECT 1
+              FROM bot_history_message_compact_claim_validity validity
+              WHERE validity.compact_id = existing_compact.id
+                AND NOT validity.sources_current
+            )
+          )
       )
     )
   ORDER BY message.id
@@ -182,7 +190,9 @@ locked_sources AS MATERIALIZED (
 ),
 claimed_sources AS (
   UPDATE bot_history_messages message
-  SET compact_id = sqlc.arg(compact_id)
+  SET compact_id = sqlc.arg(compact_id),
+      compact_claim_finalized = false,
+      compact_claim_invalidated = false
   FROM locked_log, eligible_request request
   WHERE message.id IN (SELECT id FROM locked_sources)
     AND (SELECT COUNT(*) FROM locked_sources) = request.requested_count
@@ -307,6 +317,17 @@ WHERE c.session_id = $1
     )
   )
 ORDER BY c.anchor_start_ms ASC, c.started_at ASC, c.id ASC;
+
+-- name: ListInvalidCompactionArtifactIDsBySession :many
+SELECT compact.id
+FROM bot_history_message_compacts compact
+JOIN bot_history_message_compact_claim_validity validity
+  ON validity.compact_id = compact.id
+WHERE compact.session_id = $1
+  AND compact.status = 'ok'
+  AND compact.artifact_level = 0
+  AND NOT validity.sources_current
+ORDER BY compact.id ASC;
 
 -- name: DeleteCompactionLogsByBot :exec
 DELETE FROM bot_history_message_compacts WHERE bot_id = $1;

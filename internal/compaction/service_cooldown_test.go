@@ -51,7 +51,7 @@ func TestRunCompactionInterruptedModelCallDoesNotArmFailureCooldown(t *testing.T
 
 			recovered := &stubModel{summary: "recovered summary"}
 			cfg.HTTPClient = &http.Client{Transport: recovered}
-			result, err := service.RunCompactionSyncResult(context.Background(), cfg)
+			result, err := service.RunCompactionSync(context.Background(), cfg)
 			if err != nil {
 				t.Fatalf("healthy retry after interruption: %v", err)
 			}
@@ -76,7 +76,7 @@ func TestProviderTimeoutStillArmsFailureCooldown(t *testing.T) {
 
 	recovered := &stubModel{summary: "must stay cooled down"}
 	cfg.HTTPClient = &http.Client{Transport: recovered}
-	result, err := service.RunCompactionSyncResult(context.Background(), cfg)
+	result, err := service.RunCompactionSync(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("automatic retry during provider cooldown: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestInterruptedManualBypassPreservesExistingFailureCooldown(t *testing.T) {
 
 	recovered := &stubModel{summary: "old cooldown expired"}
 	cfg.HTTPClient = &http.Client{Transport: recovered}
-	result, err := service.RunCompactionSyncResult(context.Background(), cfg)
+	result, err := service.RunCompactionSync(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("automatic retry after original cooldown: %v", err)
 	}

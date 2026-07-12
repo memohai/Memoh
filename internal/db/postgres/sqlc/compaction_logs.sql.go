@@ -293,7 +293,15 @@ locked_sources AS MATERIALIZED (
         WHERE existing_compact.id::text = requested.expected_compact_id
           AND existing_compact.bot_id = $6
           AND existing_compact.session_id = $7
-          AND existing_compact.status <> 'ok'
+          AND (
+            existing_compact.status <> 'ok'
+            OR EXISTS (
+              SELECT 1
+              FROM bot_history_message_compact_claim_validity validity
+              WHERE validity.compact_id = existing_compact.id
+                AND NOT validity.sources_current
+            )
+          )
       )
     )
   ORDER BY message.id
@@ -301,7 +309,9 @@ locked_sources AS MATERIALIZED (
 ),
 claimed_sources AS (
   UPDATE bot_history_messages message
-  SET compact_id = $5
+  SET compact_id = $5,
+      compact_claim_finalized = false,
+      compact_claim_invalidated = false
   FROM locked_log, eligible_request request
   WHERE message.id IN (SELECT id FROM locked_sources)
     AND (SELECT COUNT(*) FROM locked_sources) = request.requested_count
@@ -636,6 +646,38 @@ func (q *Queries) ListCompactionLogsByBot(ctx context.Context, arg ListCompactio
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listInvalidCompactionArtifactIDsBySession = `-- name: ListInvalidCompactionArtifactIDsBySession :many
+SELECT compact.id
+FROM bot_history_message_compacts compact
+JOIN bot_history_message_compact_claim_validity validity
+  ON validity.compact_id = compact.id
+WHERE compact.session_id = $1
+  AND compact.status = 'ok'
+  AND compact.artifact_level = 0
+  AND NOT validity.sources_current
+ORDER BY compact.id ASC
+`
+
+func (q *Queries) ListInvalidCompactionArtifactIDsBySession(ctx context.Context, sessionID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listInvalidCompactionArtifactIDsBySession, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

@@ -235,7 +235,7 @@ func TestDoCompactionReconcilesCommittedAttemptAfterCreateResponseLoss(t *testin
 		createCommits: []bool{true},
 	}}
 
-	result, err := newMachineryService(q).RunCompactionSyncResult(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 100))
+	result, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 100))
 	if err != nil {
 		t.Fatalf("RunCompactionSyncResult error = %v, want reconciled success", err)
 	}
@@ -259,7 +259,7 @@ func TestDoCompactionRetriesUncommittedCreateWithStableAttemptID(t *testing.T) {
 		createErrors: []error{initialFailure},
 	}}
 
-	result, err := newMachineryService(q).RunCompactionSyncResult(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 100))
+	result, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 100))
 	if err != nil {
 		t.Fatalf("RunCompactionSyncResult error = %v, want retried success", err)
 	}
@@ -291,7 +291,7 @@ func TestDoCompactionReconcilesCommittedAttemptAfterCreateRetry(t *testing.T) {
 		getErrors:     []error{reconcileFailure},
 	}}
 
-	result, err := newMachineryService(q).RunCompactionSyncResult(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 100))
+	result, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 100))
 	if err != nil {
 		t.Fatalf("RunCompactionSyncResult error = %v, want retry reconciliation success", err)
 	}
