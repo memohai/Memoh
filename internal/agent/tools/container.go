@@ -364,8 +364,7 @@ func (p *ContainerProvider) getClient(ctx context.Context, botID string) (*bridg
 	}
 	client, err := p.clients.MCPClient(ctx, botID)
 	if err != nil {
-		p.logger.Warn("workspace client unavailable", slog.String("bot_id", botID), slog.Any("error", err))
-		return nil, errors.New("workspace is not reachable")
+		return nil, fmt.Errorf("workspace is not reachable: %w", err)
 	}
 	return client, nil
 }

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"net"
 	"strings"
 	"testing"
@@ -18,10 +19,11 @@ const readImageHint = "Also supports reading image files (PNG, JPEG, GIF, WebP)"
 
 type containerTestBridgeProvider struct {
 	client *bridge.Client
+	err    error
 }
 
 func (p containerTestBridgeProvider) MCPClient(context.Context, string) (*bridge.Client, error) {
-	return p.client, nil
+	return p.client, p.err
 }
 
 type largeReadTestContainerService struct {
@@ -126,6 +128,20 @@ func TestContainerApplyPatchDescriptionDoesNotReferenceSiblingTools(t *testing.T
 		return
 	}
 	t.Fatalf("apply_patch tool not found")
+}
+
+func TestContainerProviderPreservesWorkspaceClientError(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("runtime unavailable")
+	provider := NewContainerProvider(nil, containerTestBridgeProvider{err: cause}, nil, "")
+	_, err := provider.getClient(context.Background(), "bot-1")
+	if !errors.Is(err, cause) {
+		t.Fatalf("getClient() error = %v, want wrapped runtime cause", err)
+	}
+	if !strings.Contains(err.Error(), "workspace is not reachable") {
+		t.Fatalf("getClient() error = %v, want Workspace-oriented context", err)
+	}
 }
 
 func TestContainerReadLargeFileErrorDoesNotReferenceSiblingTools(t *testing.T) {

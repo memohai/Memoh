@@ -322,7 +322,10 @@ export class BotDisplayConnection {
   private canPrepareDisplay(info: DisplayInfoPayload): boolean {
     const reason = info.unavailable_reason ?? ''
     if (!info.enabled) return false
-    if (reason === 'workspace is not reachable' || reason === 'manager not configured') return false
+    // Desktop can connect to older hosted servers that still return the legacy reason.
+    if (reason === 'workspace is not reachable'
+      || reason === 'container not reachable'
+      || reason === 'manager not configured') return false
     if (info.encoder_available === false && reason === 'gstreamer unavailable') return false
     return !info.available
       || !info.running
@@ -409,6 +412,7 @@ export class BotDisplayConnection {
   private formatUnavailableReason(reason: string): string {
     const map: Record<string, string> = {
       'workspace is not reachable': this.t('chat.display.unavailable.container'),
+      'container not reachable': this.t('chat.display.unavailable.container'),
       'display bundle unavailable': this.t('chat.display.unavailable.bundle'),
       'display server not reachable': this.t('chat.display.unavailable.server'),
       'gstreamer unavailable': this.t('chat.display.unavailable.encoder'),

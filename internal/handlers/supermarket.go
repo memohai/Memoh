@@ -469,7 +469,7 @@ func (h *SupermarketHandler) installPluginBundle(ctx context.Context, botID, dow
 	}
 	client, err := h.containers.MCPClient(ctx, botID)
 	if err != nil {
-		return pluginBundleInstallResult{}, errors.New("workspace is not reachable")
+		return pluginBundleInstallResult{}, fmt.Errorf("workspace is not reachable: %w", err)
 	}
 
 	downloadURL := h.baseURL + "/api/plugins/" + url.PathEscape(strings.TrimSpace(downloadPluginID)) + "/download"
@@ -515,7 +515,7 @@ func (h *SupermarketHandler) runPluginInstallScripts(ctx context.Context, botID,
 	}
 	client, err := h.containers.MCPClient(ctx, botID)
 	if err != nil {
-		return result, errors.New("workspace is not reachable")
+		return result, fmt.Errorf("workspace is not reachable: %w", err)
 	}
 	return runPluginInstallCommands(ctx, client, botID, pluginID, []string(commands))
 }

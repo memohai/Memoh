@@ -87,7 +87,8 @@ func (h *ContainerdHandler) GetDisplayInfo(c echo.Context) error {
 
 	resp.Enabled = h.manager.BotDisplayEnabled(ctx, botID)
 	if _, err := h.manager.MCPClient(ctx, botID); err != nil {
-		resp.UnavailableReason = "workspace is not reachable"
+		// unavailable_reason is a wire-level enum consumed by older Desktop clients.
+		resp.UnavailableReason = "container not reachable"
 		return c.JSON(http.StatusOK, resp)
 	}
 
