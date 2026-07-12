@@ -56,6 +56,7 @@ type routeState struct {
 	activeOwners    int
 	injectCh        chan InjectMessage
 	queue           []QueuedTask
+	deferredTurns   []*deferredTurn
 	pendingPersists []PersistFunc
 	lastUsed        time.Time
 }
@@ -138,6 +139,7 @@ func (d *RouteDispatcher) MarkActive(routeID string) <-chan InjectMessage {
 type MarkDoneResult struct {
 	PendingPersists []PersistFunc
 	QueuedTasks     []QueuedTask
+	DeferredTurns   []*deferredTurn
 }
 
 // MarkDone releases active ownership for a route. It returns pending persist
@@ -172,7 +174,15 @@ func (d *RouteDispatcher) MarkDone(routeID string) MarkDoneResult {
 		rs.queue = nil
 	}
 
-	return MarkDoneResult{PendingPersists: persists, QueuedTasks: tasks}
+	var deferredTurns []*deferredTurn
+	if len(rs.deferredTurns) > 0 {
+		turn := rs.deferredTurns[0]
+		rs.deferredTurns = rs.deferredTurns[1:]
+		transferRouteOwner(rs, turn)
+		deferredTurns = append(deferredTurns, turn)
+	}
+
+	return MarkDoneResult{PendingPersists: persists, QueuedTasks: tasks, DeferredTurns: deferredTurns}
 }
 
 // AddPendingPersist records a deferred persist closure to be executed after the
@@ -239,6 +249,30 @@ func (d *RouteDispatcher) Enqueue(routeID string, task QueuedTask) {
 	}
 }
 
+func (d *RouteDispatcher) admitDeferred(routeID string, turn *deferredTurn) routeAdmissionKind {
+	routeID = strings.TrimSpace(routeID)
+	if routeID == "" || turn == nil {
+		return routeAdmissionRejected
+	}
+	rs := d.getOrCreate(routeID)
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if rs.activeOwners == 0 {
+		transferRouteOwner(rs, turn)
+		rs.lastUsed = time.Now()
+		return routeAdmissionStartPrimary
+	}
+	rs.deferredTurns = append(rs.deferredTurns, turn)
+	rs.lastUsed = time.Now()
+	return routeAdmissionQueued
+}
+
+func transferRouteOwner(rs *routeState, turn *deferredTurn) {
+	rs.activeOwners = 1
+	turn.routeOwnerTransferred = true
+	turn.transferredInjectCh = rs.injectCh
+}
+
 // Cleanup removes idle route states older than maxAge.
 func (d *RouteDispatcher) Cleanup(maxAge time.Duration) {
 	d.mu.Lock()
@@ -246,7 +280,7 @@ func (d *RouteDispatcher) Cleanup(maxAge time.Duration) {
 	cutoff := time.Now().Add(-maxAge)
 	for id, rs := range d.routes {
 		rs.mu.Lock()
-		idle := rs.activeOwners == 0 && rs.lastUsed.Before(cutoff) && len(rs.queue) == 0
+		idle := rs.activeOwners == 0 && rs.lastUsed.Before(cutoff) && len(rs.queue) == 0 && len(rs.deferredTurns) == 0
 		rs.mu.Unlock()
 		if idle {
 			delete(d.routes, id)

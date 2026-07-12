@@ -818,44 +818,48 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		return err
 	}
 
-	// Push event into the DCP pipeline (persist + in-memory projection).
-	// On first access for a session, replay persisted events to warm the pipeline.
-	var latestRC pipelinepkg.RenderedContext
-	var eventID string
-	if p.pipeline != nil && sessionID != "" && pendingSkillIntent == nil {
-		if _, loaded := p.pipeline.GetIC(sessionID); !loaded {
-			p.replayPipelineSession(ctx, sessionID)
-		}
-		pipelineMsg := msg
-		pipelineMsg.Message = msg.Message
-		pipelineMsg.Message.Attachments = resolvedAttachments
-		event := pipelinepkg.AdaptInbound(pipelineMsg, sessionID, identity.ChannelIdentityID, identity.DisplayName)
-		if p.eventStore != nil {
-			eid, persistErr := p.eventStore.PersistEvent(ctx, identity.BotID, sessionID, event)
-			if persistErr != nil {
-				if p.logger != nil {
-					p.logger.Warn("persist pipeline event failed", slog.Any("error", persistErr))
-				}
-			} else {
-				eventID = eid
-			}
-		}
-		latestRC = p.pipeline.PushEvent(sessionID, event)
+	activeChatID := strings.TrimSpace(identity.BotID)
+	if activeChatID == "" {
+		activeChatID = strings.TrimSpace(resolved.ChatID)
 	}
-	if eventID != "" {
-		boundReceipt, bindErr := bindInboundReceiptEventID(preparedReceipt, eventID)
-		if bindErr != nil {
-			if p.logger != nil {
-				p.logger.Warn("bind inbound source event failed", slog.Any("error", bindErr))
-			}
-			eventID = ""
-		} else {
-			preparedReceipt = boundReceipt
-		}
+	turn, err := prepareDeferredTurn(deferredTurn{
+		id:                  preparedReceipt.ID,
+		ctx:                 ctx,
+		cfg:                 cfg,
+		msg:                 msg,
+		sender:              sender,
+		identity:            identity,
+		resolved:            resolved,
+		resolvedAttachments: resolvedAttachments,
+		attachments:         attachments,
+		replyAttachments:    replyAttachments,
+		text:                text,
+		modelText:           modelText,
+		userMessageKind:     userMessageKind,
+		userVisibleText:     userVisibleText,
+		requestedSkills:     requestedSkillContexts,
+		skillActivation:     skillActivation,
+		hasPendingSkill:     pendingSkillIntent != nil,
+		sessionID:           sessionID,
+		sessionRuntimeOwner: sessionRuntimeOwner,
+		acpRuntimeSession:   acpRuntimeSession,
+		activeChatID:        activeChatID,
+		inboundMode:         inboundMode,
+		receipt:             preparedReceipt,
+	})
+	if err != nil {
+		return err
 	}
+	routeID := strings.TrimSpace(resolved.RouteID)
+	canDispatchDiscuss := sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil &&
+		p.pipeline != nil && sessionID != "" && !turn.hasPendingSkill
 
 	// Discuss mode: dispatch to the discuss driver and return.
 	// The discuss driver autonomously decides whether to call the LLM.
+	var latestRC pipelinepkg.RenderedContext
+	if canDispatchDiscuss {
+		latestRC = turn.ActivateOnce(ctx, p)
+	}
 	if sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil && latestRC != nil {
 		chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
 		sessionToken := p.issueSessionBearerToken(ctx, identity, acpRuntimeSession, sessionRuntimeOwner, chatToken)
@@ -873,15 +877,8 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			ChatToken:         chatToken,
 			ToolHTTPURL:       acpMCPToolsURLFromEnv(identity.BotID),
 		})
-		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, eventID, &preparedReceipt)
+		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, turn.eventID, &turn.receipt)
 		return nil
-	}
-
-	// Bot-centric history container:
-	// always persist channel traffic under bot_id so WebUI can view unified cross-platform history.
-	activeChatID := strings.TrimSpace(identity.BotID)
-	if activeChatID == "" {
-		activeChatID = strings.TrimSpace(resolved.ChatID)
 	}
 
 	if sessionType == sessionpkg.TypeDiscuss || shouldTrigger {
@@ -910,10 +907,20 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			modelText = text
 		}
 	}
-	preparedReceipt.DisplayText = strings.TrimSpace(text)
+	turn.msg.Message.Text = msg.Message.Text
+	if transcript, ok := msg.Message.Metadata["transcript"].(string); ok {
+		if turn.msg.Message.Metadata == nil {
+			turn.msg.Message.Metadata = make(map[string]any)
+		}
+		turn.msg.Message.Metadata["transcript"] = transcript
+	}
+	turn.text = text
+	turn.modelText = modelText
+	turn.receipt.DisplayText = strings.TrimSpace(text)
 
 	if !shouldTrigger {
-		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, eventID, &preparedReceipt)
+		turn.ActivateOnce(ctx, p)
+		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, turn.eventID, &turn.receipt)
 		if p.logger != nil {
 			p.logger.Info(
 				"inbound not triggering assistant (group trigger condition not met)",
@@ -930,7 +937,13 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		return nil
 	}
 
-	routeID := strings.TrimSpace(resolved.RouteID)
+	if p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode == ModeQueue && !turn.hasPendingSkill {
+		if p.dispatcher.admitDeferred(routeID, turn) == routeAdmissionQueued {
+			p.sendModeConfirmation(ctx, sender, msg, identity, "queue")
+			return nil
+		}
+	}
+	turn.ActivateOnce(ctx, p)
 
 	// --- Dispatcher-based mode handling (inject / queue) ---
 	// For non-parallel modes, when a route already has an active agent stream,
@@ -952,9 +965,8 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				Time:              time.Now().UTC(),
 			}, text)
 
-			switch inboundMode {
-			case ModeInject:
-				receipt := preparedReceipt
+			if inboundMode == ModeInject {
+				receipt := turn.receipt
 				// Don't persist here — the injected message will be interleaved
 				// at the correct position within the round by
 				// interleaveInjectedMessages in storeRound.
@@ -974,53 +986,24 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 					goto startStream
 				}
 				return nil
-
-			case ModeQueue:
-				p.dispatcher.Enqueue(routeID, QueuedTask{
-					Ctx:         ctx,
-					Cfg:         cfg,
-					Msg:         msg,
-					Sender:      sender,
-					Ident:       identity,
-					Text:        text,
-					Attachments: attachments,
-				})
-				p.sendModeConfirmation(ctx, sender, msg, identity, "queue")
-				return nil
 			}
 		}
 	}
 
 startStream:
-	return p.runDeferredTurn(ctx, &deferredTurn{
-		id:                  preparedReceipt.ID,
-		ctx:                 ctx,
-		cfg:                 cfg,
-		msg:                 msg,
-		sender:              sender,
-		identity:            identity,
-		resolved:            resolved,
-		resolvedAttachments: resolvedAttachments,
-		attachments:         attachments,
-		replyAttachments:    replyAttachments,
-		text:                text,
-		modelText:           modelText,
-		userMessageKind:     userMessageKind,
-		userVisibleText:     userVisibleText,
-		requestedSkills:     requestedSkillContexts,
-		skillActivation:     skillActivation,
-		hasPendingSkill:     pendingSkillIntent != nil,
-		sessionID:           sessionID,
-		sessionRuntimeOwner: sessionRuntimeOwner,
-		acpRuntimeSession:   acpRuntimeSession,
-		activeChatID:        activeChatID,
-		inboundMode:         inboundMode,
-		eventID:             eventID,
-		receipt:             preparedReceipt,
-	})
+	return p.runDeferredTurn(ctx, turn)
 }
 
 func (p *ChannelInboundProcessor) runDeferredTurn(ctx context.Context, turn *deferredTurn) (retErr error) {
+	return p.runDeferredTurnWithRelease(ctx, turn, true)
+}
+
+func (p *ChannelInboundProcessor) runDeferredTurnWithRelease(
+	ctx context.Context,
+	turn *deferredTurn,
+	releaseRoute bool,
+) (retErr error) {
+	turn.ActivateOnce(ctx, p)
 	cfg := turn.cfg
 	msg := turn.msg
 	sender := turn.sender
@@ -1043,6 +1026,20 @@ func (p *ChannelInboundProcessor) runDeferredTurn(ctx context.Context, turn *def
 	eventID := turn.eventID
 	userReceipt := turn.receipt
 	routeID := strings.TrimSpace(resolved.RouteID)
+	var injectCh <-chan conversation.InjectMessage
+	if turn.routeOwnerTransferred {
+		injectCh = turn.transferredInjectCh
+		if releaseRoute {
+			defer func() {
+				p.drainQueue(context.WithoutCancel(ctx), routeID)
+			}()
+		}
+	} else if p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
+		injectCh = p.dispatcher.MarkActive(routeID)
+		defer func() {
+			p.drainQueue(context.WithoutCancel(ctx), routeID)
+		}()
+	}
 
 	// Issue chat token for reply routing.
 	chatToken := ""
@@ -1192,18 +1189,6 @@ func (p *ChannelInboundProcessor) runDeferredTurn(ctx context.Context, turn *def
 		result := make([]conversation.OutboundAssetRef, len(outboundAssetRefs))
 		copy(result, outboundAssetRefs)
 		return result
-	}
-
-	// Mark this route as active in the dispatcher so subsequent messages
-	// can be injected or queued. Produces the inject channel for this stream.
-	// Parallel mode (/now) skips the dispatcher entirely — it must not
-	// interfere with the active flag or drain the queue of another stream.
-	var injectCh <-chan conversation.InjectMessage
-	if p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
-		injectCh = p.dispatcher.MarkActive(routeID)
-		defer func() {
-			p.drainQueue(context.WithoutCancel(ctx), routeID)
-		}()
 	}
 
 	chatReq := conversation.ChatRequest{
@@ -1487,13 +1472,38 @@ func (p *ChannelInboundProcessor) drainQueue(ctx context.Context, routeID string
 	if p.dispatcher == nil {
 		return
 	}
-	result := p.dispatcher.MarkDone(routeID)
-
-	for _, fn := range result.PendingPersists {
-		fn(ctx)
+	var queuedTasks []QueuedTask
+	for {
+		result := p.dispatcher.MarkDone(routeID)
+		for _, fn := range result.PendingPersists {
+			fn(ctx)
+		}
+		queuedTasks = append(queuedTasks, result.QueuedTasks...)
+		if len(result.DeferredTurns) == 0 {
+			break
+		}
+		turn := result.DeferredTurns[0]
+		if p.logger != nil {
+			p.logger.Info("processing deferred turn",
+				slog.String("route_id", routeID),
+				slog.String("query", strings.TrimSpace(turn.text)),
+			)
+		}
+		runCtx := turn.ctx //nolint:contextcheck // deferred work retains its original detached admission context
+		if runCtx == nil {
+			runCtx = ctx
+		}
+		if err := p.runDeferredTurnWithRelease(runCtx, turn, false); err != nil {
+			if p.logger != nil {
+				p.logger.Error("deferred turn processing failed",
+					slog.String("route_id", routeID),
+					slog.Any("error", err),
+				)
+			}
+		}
 	}
 
-	for _, task := range result.QueuedTasks {
+	for _, task := range queuedTasks {
 		if p.logger != nil {
 			p.logger.Info("processing queued task",
 				slog.String("route_id", routeID),

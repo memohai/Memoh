@@ -810,8 +810,8 @@ func TestChannelInboundProcessorActiveRouteCarriesInjectionReceiptAndQueuesWitho
 		t.Fatalf("queued message was pre-persisted %d times", len(chatSvc.persistedIn))
 	}
 	result := dispatcher.MarkDone("route-active")
-	if len(result.QueuedTasks) != 1 || result.QueuedTasks[0].Text != "queued" {
-		t.Fatalf("queued tasks = %#v", result.QueuedTasks)
+	if len(result.DeferredTurns) != 1 || result.DeferredTurns[0].text != "queued" || len(result.QueuedTasks) != 0 {
+		t.Fatalf("deferred turns = %#v queued tasks = %#v", result.DeferredTurns, result.QueuedTasks)
 	}
 }
 
