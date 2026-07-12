@@ -1,6 +1,7 @@
 package inbound
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -51,13 +52,41 @@ func buildInboundUserReceipt(
 	if len(metadata) == 0 {
 		metadata = nil
 	}
+	attachmentSnapshot, err := snapshotInboundAttachments(attachments)
+	if err != nil {
+		return conversation.UserMessageReceipt{}, err
+	}
 	return conversation.UserMessageReceipt{
 		ID:          uuid.NewString(),
 		DisplayText: strings.TrimSpace(text),
 		Origin:      origin,
 		Metadata:    metadata,
-		Attachments: append([]conversation.ChatAttachment(nil), attachments...),
+		Attachments: attachmentSnapshot,
 	}, nil
+}
+
+func snapshotInboundAttachments(attachments []conversation.ChatAttachment) ([]conversation.ChatAttachment, error) {
+	if len(attachments) == 0 {
+		return nil, nil
+	}
+	snapshot := make([]conversation.ChatAttachment, len(attachments))
+	for i, attachment := range attachments {
+		snapshot[i] = attachment
+		if len(attachment.Metadata) == 0 {
+			snapshot[i].Metadata = nil
+			continue
+		}
+		raw, err := json.Marshal(attachment.Metadata)
+		if err != nil {
+			return nil, fmt.Errorf("snapshot inbound attachment %d metadata: %w", i, err)
+		}
+		var metadata map[string]any
+		if err := json.Unmarshal(raw, &metadata); err != nil {
+			return nil, fmt.Errorf("snapshot inbound attachment %d metadata: %w", i, err)
+		}
+		snapshot[i].Metadata = metadata
+	}
+	return snapshot, nil
 }
 
 func canonicalSourceConversationType(raw string) string {

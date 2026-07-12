@@ -11,6 +11,11 @@ import (
 func TestBuildInboundUserReceiptCapturesCanonicalOrigin(t *testing.T) {
 	t.Parallel()
 
+	attachments := []conversation.ChatAttachment{{
+		ContentHash: "asset-1",
+		Mime:        "image/png",
+		Metadata:    map[string]any{"nested": map[string]any{"source": "original"}},
+	}}
 	receipt, err := buildInboundUserReceipt(
 		InboundIdentity{
 			ChannelIdentityID: "11111111-1111-1111-1111-111111111111",
@@ -31,7 +36,7 @@ func TestBuildInboundUserReceiptCapturesCanonicalOrigin(t *testing.T) {
 			Conversation: channel.Conversation{Type: "direct", Name: "Alice Chat"},
 		},
 		"  hello  ",
-		[]conversation.ChatAttachment{{ContentHash: "asset-1", Mime: "image/png"}},
+		attachments,
 		" route-1 ",
 		"33333333-3333-3333-3333-333333333333",
 	)
@@ -40,6 +45,10 @@ func TestBuildInboundUserReceiptCapturesCanonicalOrigin(t *testing.T) {
 	}
 	if receipt.ID == "" || receipt.DisplayText != "hello" || len(receipt.Attachments) != 1 {
 		t.Fatalf("receipt payload = %+v", receipt)
+	}
+	attachments[0].Metadata["nested"].(map[string]any)["source"] = "mutated"
+	if receipt.Attachments[0].Metadata["nested"].(map[string]any)["source"] != "original" {
+		t.Fatalf("receipt attachment metadata aliased input: %#v", receipt.Attachments[0].Metadata)
 	}
 	origin := receipt.Origin.Values()
 	if origin.SenderChannelIdentityID != "11111111-1111-1111-1111-111111111111" ||
@@ -57,6 +66,21 @@ func TestBuildInboundUserReceiptCapturesCanonicalOrigin(t *testing.T) {
 	if reply["message_id"] != "reply-1" || reply["sender"] != "Bob" || reply["preview"] != "earlier" ||
 		forward["message_id"] != "forward-1" || forward["sender"] != "Carol" {
 		t.Fatalf("interaction metadata = %#v", receipt.Metadata)
+	}
+}
+
+func TestBuildInboundUserReceiptRejectsUncloneableAttachmentMetadata(t *testing.T) {
+	t.Parallel()
+
+	if _, err := buildInboundUserReceipt(
+		InboundIdentity{ChannelIdentityID: "11111111-1111-1111-1111-111111111111", DisplayName: "Alice"},
+		channel.InboundMessage{Channel: channel.ChannelTypeTelegram, Conversation: channel.Conversation{Type: "private", Name: "Alice Chat"}},
+		"hello",
+		[]conversation.ChatAttachment{{Metadata: map[string]any{"invalid": make(chan struct{})}}},
+		"route-1",
+		"",
+	); err == nil {
+		t.Fatal("uncloneable attachment metadata was accepted")
 	}
 }
 
