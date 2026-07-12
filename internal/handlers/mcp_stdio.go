@@ -633,7 +633,7 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 	}
 	containerID, err := h.manager.ContainerID(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "container not found for bot")
+		return echo.NewHTTPError(http.StatusNotFound, "workspace runtime not found for bot")
 	}
 
 	sess, err := h.startContainerdMCPCommandSession(ctx, botID, containerID, req)

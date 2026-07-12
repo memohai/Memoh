@@ -270,7 +270,7 @@ func fsHTTPError(err error) *echo.HTTPError {
 	case errors.Is(err, bridge.ErrForbidden):
 		return echo.NewHTTPError(http.StatusForbidden, err.Error())
 	case errors.Is(err, bridge.ErrUnavailable):
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "container not reachable")
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
 	default:
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -308,7 +308,7 @@ func (h *ContainerdHandler) FSStat(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
 	}
 
 	entry, err := client.Stat(ctx, containerPath)
@@ -355,7 +355,7 @@ func (h *ContainerdHandler) FSList(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
 	}
 
 	entries, err := client.ListDirAll(ctx, containerPath, false)
@@ -413,7 +413,7 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
 	}
 
 	rc, err := client.ReadRaw(ctx, containerPath)
@@ -472,7 +472,7 @@ func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
 	}
 
 	entry, err := client.Stat(ctx, containerPath)
@@ -537,7 +537,7 @@ func (h *ContainerdHandler) FSArchive(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
 	}
 	for _, p := range paths {
 		if _, err := client.Stat(ctx, p); err != nil {
@@ -666,7 +666,7 @@ func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
 	}
 
 	if req.ExpectedRevision != nil {
@@ -727,7 +727,7 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
 	}
 
 	file, err := c.FormFile("file")
@@ -783,7 +783,7 @@ func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
 	}
 
 	if err := client.Mkdir(ctx, containerPath); err != nil {
@@ -830,7 +830,7 @@ func (h *ContainerdHandler) FSDelete(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
 	}
 
 	if err := client.DeleteFile(ctx, containerPath, req.Recursive); err != nil {
@@ -877,7 +877,7 @@ func (h *ContainerdHandler) FSRename(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
 	}
 
 	if err := client.Rename(ctx, oldPath, newPath); err != nil {
@@ -924,7 +924,7 @@ func (h *ContainerdHandler) FSExtract(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, fmt.Sprintf("container not reachable: %v", err))
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
 	}
 	entry, err := client.Stat(ctx, containerPath)
 	if err != nil {

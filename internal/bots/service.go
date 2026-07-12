@@ -778,15 +778,15 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 			Type:     BotCheckTypeContainerRecord,
 			TitleKey: "bots.checks.titles.containerRecord",
 			Status:   BotCheckStatusUnknown,
-			Summary:  "Container record is pending.",
-			Detail:   "Container record will be checked after initialization.",
+			Summary:  "Workspace runtime record is pending.",
+			Detail:   "The workspace runtime record will be checked after initialization.",
 		})
 		checks = append(checks, BotCheck{
 			ID:       BotCheckTypeContainerTask,
 			Type:     BotCheckTypeContainerTask,
 			TitleKey: "bots.checks.titles.containerTask",
 			Status:   BotCheckStatusUnknown,
-			Summary:  "Container task state is pending.",
+			Summary:  "Workspace runtime state is pending.",
 			Detail:   "Task state will be checked after initialization.",
 		})
 		checks = append(checks, BotCheck{
@@ -794,7 +794,7 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 			Type:     BotCheckTypeContainerData,
 			TitleKey: "bots.checks.titles.containerDataPath",
 			Status:   BotCheckStatusUnknown,
-			Summary:  "Container reachability check is pending.",
+			Summary:  "Workspace reachability check is pending.",
 			Detail:   "Reachability will be checked after initialization.",
 		})
 		if includeDynamic {
@@ -816,15 +816,15 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 			Type:     BotCheckTypeContainerRecord,
 			TitleKey: "bots.checks.titles.containerRecord",
 			Status:   BotCheckStatusUnknown,
-			Summary:  "Container record check is skipped.",
-			Detail:   "Bot is deleting and container checks are paused.",
+			Summary:  "Workspace runtime record check is skipped.",
+			Detail:   "The bot is being deleted, so workspace checks are paused.",
 		})
 		checks = append(checks, BotCheck{
 			ID:       BotCheckTypeContainerTask,
 			Type:     BotCheckTypeContainerTask,
 			TitleKey: "bots.checks.titles.containerTask",
 			Status:   BotCheckStatusUnknown,
-			Summary:  "Container task check is skipped.",
+			Summary:  "Workspace runtime check is skipped.",
 			Detail:   "Bot is deleting and task checks are paused.",
 		})
 		checks = append(checks, BotCheck{
@@ -832,7 +832,7 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 			Type:     BotCheckTypeContainerData,
 			TitleKey: "bots.checks.titles.containerDataPath",
 			Status:   BotCheckStatusUnknown,
-			Summary:  "Container reachability check is skipped.",
+			Summary:  "Workspace reachability check is skipped.",
 			Detail:   "Bot is deleting and reachability checks are paused.",
 		})
 		if includeDynamic {
@@ -854,7 +854,7 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 	}
 	if hasSetupFailure {
 		initCheck.Status = BotCheckStatusError
-		initCheck.Summary = "Container initialization failed."
+		initCheck.Summary = "Workspace initialization failed."
 		initCheck.Detail = setupFailure.Message
 		initCheck.Metadata = setupFailure.metadata()
 	}
@@ -868,13 +868,13 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 				Type:     BotCheckTypeContainerRecord,
 				TitleKey: "bots.checks.titles.containerRecord",
 				Status:   BotCheckStatusError,
-				Summary:  "Container record is missing.",
-				Detail:   "No container is attached to this bot.",
+				Summary:  "Workspace runtime record is missing.",
+				Detail:   "No workspace runtime is attached to this bot.",
 			}
 			if hasSetupFailure {
 				recordCheck.Status = BotCheckStatusUnknown
-				recordCheck.Summary = "Container record was not created."
-				recordCheck.Detail = "Container record cannot be checked until initialization succeeds."
+				recordCheck.Summary = "Workspace runtime record was not created."
+				recordCheck.Detail = "The workspace runtime record cannot be checked until initialization succeeds."
 				recordCheck.Metadata = setupFailure.metadata()
 			}
 			checks = append(checks, recordCheck)
@@ -883,16 +883,16 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 				Type:     BotCheckTypeContainerTask,
 				TitleKey: "bots.checks.titles.containerTask",
 				Status:   BotCheckStatusUnknown,
-				Summary:  "Container task state is unknown.",
-				Detail:   "Task state cannot be determined without a container record.",
+				Summary:  "Workspace runtime state is unknown.",
+				Detail:   "The runtime state cannot be determined without a workspace runtime record.",
 			})
 			checks = append(checks, BotCheck{
 				ID:       BotCheckTypeContainerData,
 				Type:     BotCheckTypeContainerData,
 				TitleKey: "bots.checks.titles.containerDataPath",
 				Status:   BotCheckStatusUnknown,
-				Summary:  "Container reachability is unknown.",
-				Detail:   "Reachability cannot be determined without a container record.",
+				Summary:  "Workspace reachability is unknown.",
+				Detail:   "Reachability cannot be determined without a workspace runtime record.",
 			})
 			if includeDynamic {
 				checks = s.appendDynamicChecks(ctx, row.ID.String(), checks)
@@ -907,8 +907,8 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 		Type:     BotCheckTypeContainerRecord,
 		TitleKey: "bots.checks.titles.containerRecord",
 		Status:   BotCheckStatusOK,
-		Summary:  "Container record exists.",
-		Detail:   fmt.Sprintf("container_id=%s", strings.TrimSpace(containerRow.ContainerID)),
+		Summary:  "Workspace runtime record exists.",
+		Detail:   fmt.Sprintf("runtime_id=%s", strings.TrimSpace(containerRow.ContainerID)),
 		Metadata: map[string]any{
 			"container_id": strings.TrimSpace(containerRow.ContainerID),
 			"namespace":    strings.TrimSpace(containerRow.Namespace),
@@ -922,12 +922,12 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 		Type:     BotCheckTypeContainerTask,
 		TitleKey: "bots.checks.titles.containerTask",
 		Status:   BotCheckStatusWarn,
-		Summary:  "Container task state needs attention.",
+		Summary:  "Workspace runtime state needs attention.",
 	}
 	switch taskStatus {
 	case "running", "created", "stopped", "paused":
 		taskCheck.Status = BotCheckStatusOK
-		taskCheck.Summary = "Container task state is reported."
+		taskCheck.Summary = "Workspace runtime state is reported."
 		taskCheck.Detail = fmt.Sprintf("status=%s", taskStatus)
 	case "":
 		taskCheck.Detail = "status is empty"
@@ -942,18 +942,18 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 		Type:     BotCheckTypeContainerData,
 		TitleKey: "bots.checks.titles.containerDataPath",
 		Status:   BotCheckStatusWarn,
-		Summary:  "Container reachability needs attention.",
+		Summary:  "Workspace reachability needs attention.",
 	}
 	if s.containerReachability == nil {
 		dataCheck.Status = BotCheckStatusUnknown
-		dataCheck.Summary = "Container reachability check not configured."
+		dataCheck.Summary = "Workspace reachability check is not configured."
 	} else if err := s.containerReachability(ctx, row.ID.String()); err != nil {
 		dataCheck.Status = BotCheckStatusError
-		dataCheck.Summary = "Container is not reachable via gRPC."
-		dataCheck.Detail = err.Error()
+		dataCheck.Summary = "Workspace is not reachable via gRPC."
+		dataCheck.Detail = sanitizeSetupFailureMessage(err.Error())
 	} else {
 		dataCheck.Status = BotCheckStatusOK
-		dataCheck.Summary = "Container is reachable via gRPC."
+		dataCheck.Summary = "Workspace is reachable via gRPC."
 	}
 	checks = append(checks, dataCheck)
 	if includeDynamic {

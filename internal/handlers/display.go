@@ -87,7 +87,7 @@ func (h *ContainerdHandler) GetDisplayInfo(c echo.Context) error {
 
 	resp.Enabled = h.manager.BotDisplayEnabled(ctx, botID)
 	if _, err := h.manager.MCPClient(ctx, botID); err != nil {
-		resp.UnavailableReason = "container not reachable"
+		resp.UnavailableReason = "workspace is not reachable"
 		return c.JSON(http.StatusOK, resp)
 	}
 
@@ -278,11 +278,7 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 
 	client, err := h.manager.MCPClient(ctx, botID)
 	if err != nil || client == nil {
-		if err != nil {
-			sendError("checking", "workspace_not_reachable", "chat.display.unavailable.container", "workspace container is not reachable: "+err.Error())
-		} else {
-			sendError("checking", "workspace_not_reachable", "chat.display.unavailable.container", "workspace container is not reachable")
-		}
+		sendError("checking", "workspace_not_reachable", "chat.display.unavailable.container", "workspace is not reachable")
 		return nil
 	}
 

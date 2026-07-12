@@ -19,8 +19,9 @@ const (
 )
 
 var (
-	diagnosticURLUserinfoPattern = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)([^/\s:@]+):([^/\s@]+)@`)
-	diagnosticSecretParamPattern = regexp.MustCompile(`(?i)\b(token|password|passwd|pwd|secret|api_key|access_token)=([^&\s]+)`)
+	diagnosticURLUserinfoPattern   = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)([^/\s:@]+):([^/\s@]+)@`)
+	diagnosticSecretParamPattern   = regexp.MustCompile(`(?i)\b(token|password|passwd|pwd|secret|api_key|access_token)=([^&\s]+)`)
+	diagnosticContainerTermPattern = regexp.MustCompile(`(?i)\bcontainers?\b`)
 )
 
 type containerSetupFailure struct {
@@ -163,10 +164,11 @@ func normalizeSetupFailurePhase(phase string) string {
 func sanitizeSetupFailureMessage(message string) string {
 	message = strings.TrimSpace(message)
 	if message == "" {
-		message = "container setup failed"
+		message = "workspace setup failed"
 	}
 	message = diagnosticURLUserinfoPattern.ReplaceAllString(message, "${1}***:***@")
 	message = diagnosticSecretParamPattern.ReplaceAllString(message, "${1}=***")
+	message = diagnosticContainerTermPattern.ReplaceAllString(message, "workspace")
 	runes := []rune(message)
 	if len(runes) > botSetupFailureMessageMaxRune {
 		message = string(runes[:botSetupFailureMessageMaxRune])

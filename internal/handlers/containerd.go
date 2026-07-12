@@ -454,14 +454,14 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		h.logger.Error("container start failed",
 			slog.String("bot_id", botID), slog.Any("error", err))
 		h.recordContainerSetupFailure(ctx, botID, "start", err)
-		sendError("workspace_start_failed", "bots.container.createFailed", "container start failed: "+err.Error())
+		sendError("workspace_start_failed", "bots.container.createFailed", "workspace failed to start")
 		return nil
 	}
 	if workspaceBackend != "local" {
 		if err := h.manager.WaitForWorkspaceReady(ctx, botID); err != nil {
 			h.logger.Error("container bridge not ready",
 				slog.String("bot_id", botID), slog.Any("error", err))
-			sendError("workspace_not_ready", "bots.container.createFailed", "container bridge not ready: "+err.Error())
+			sendError("workspace_not_ready", "bots.container.createFailed", "workspace runtime is not ready")
 			return nil
 		}
 	}
@@ -480,7 +480,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	if err != nil {
 		h.logger.Error("container ID resolution failed after start",
 			slog.String("bot_id", botID), slog.Any("error", err))
-		sendError("workspace_runtime_id_failed", "bots.container.createFailed", "container ID resolution failed: "+err.Error())
+		sendError("workspace_runtime_id_failed", "bots.container.createFailed", "workspace runtime ID could not be resolved")
 		return nil
 	}
 
@@ -574,7 +574,7 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 	status, err := h.manager.GetContainerInfo(c.Request().Context(), botID)
 	if err != nil {
 		if errors.Is(err, workspace.ErrContainerNotFound) {
-			return newI18nHTTPError(http.StatusNotFound, "workspace_not_found", "bots.container.loadFailed", "container not found for bot")
+			return newI18nHTTPError(http.StatusNotFound, "workspace_not_found", "bots.container.loadFailed", "workspace not found for bot")
 		}
 		return newI18nHTTPError(http.StatusInternalServerError, "workspace_load_failed", "bots.container.loadFailed", err.Error())
 	}
@@ -730,7 +730,7 @@ func (h *ContainerdHandler) StartContainer(c echo.Context) error {
 	}
 	if err := h.manager.EnsureRunning(c.Request().Context(), botID); err != nil {
 		if errors.Is(err, workspace.ErrContainerNotFound) {
-			return newI18nHTTPError(http.StatusNotFound, "workspace_not_found", "bots.container.startFailed", "container not found for bot")
+			return newI18nHTTPError(http.StatusNotFound, "workspace_not_found", "bots.container.startFailed", "workspace not found for bot")
 		}
 		return newI18nHTTPError(http.StatusInternalServerError, "workspace_start_failed", "bots.container.startFailed", err.Error())
 	}
@@ -752,7 +752,7 @@ func (h *ContainerdHandler) StopContainer(c echo.Context) error {
 	}
 	if err := h.manager.StopBot(c.Request().Context(), botID); err != nil {
 		if errors.Is(err, workspace.ErrContainerNotFound) {
-			return newI18nHTTPError(http.StatusNotFound, "workspace_not_found", "bots.container.stopFailed", "container not found for bot")
+			return newI18nHTTPError(http.StatusNotFound, "workspace_not_found", "bots.container.stopFailed", "workspace not found for bot")
 		}
 		return newI18nHTTPError(http.StatusInternalServerError, "workspace_stop_failed", "bots.container.stopFailed", err.Error())
 	}
@@ -771,7 +771,7 @@ func (h *ContainerdHandler) StopContainer(c echo.Context) error {
 // @Router /bots/{bot_id}/container/snapshots [post].
 func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 	if h.containerBackend == "apple" {
-		return newI18nHTTPError(http.StatusNotImplemented, "workspace_snapshots_unsupported", "bots.container.snapshotActionFailed", "snapshots currently not supported on Apple Container backend")
+		return newI18nHTTPError(http.StatusNotImplemented, "workspace_snapshots_unsupported", "bots.container.snapshotActionFailed", "snapshots are not supported by the Apple runtime backend")
 	}
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -787,7 +787,7 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 	created, err := h.manager.CreateSnapshot(c.Request().Context(), botID, req.SnapshotName, workspace.SnapshotSourceManual)
 	if err != nil {
 		if ctr.IsNotFound(err) {
-			return newI18nHTTPError(http.StatusNotFound, "workspace_not_found", "bots.container.snapshotActionFailed", "container not found")
+			return newI18nHTTPError(http.StatusNotFound, "workspace_not_found", "bots.container.snapshotActionFailed", "workspace not found")
 		}
 		return newI18nHTTPError(http.StatusInternalServerError, "workspace_snapshot_create_failed", "bots.container.snapshotActionFailed", err.Error())
 	}
@@ -812,7 +812,7 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 // @Router /bots/{bot_id}/container/snapshots [get].
 func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 	if h.containerBackend == "apple" {
-		return newI18nHTTPError(http.StatusNotImplemented, "workspace_snapshots_unsupported", "bots.container.snapshotLoadFailed", "snapshots currently not supported on Apple Container backend")
+		return newI18nHTTPError(http.StatusNotImplemented, "workspace_snapshots_unsupported", "bots.container.snapshotLoadFailed", "snapshots are not supported by the Apple runtime backend")
 	}
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
@@ -825,13 +825,13 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 	data, err := h.manager.ListBotSnapshotData(c.Request().Context(), botID)
 	if err != nil {
 		if ctr.IsNotFound(err) {
-			return newI18nHTTPError(http.StatusNotFound, "workspace_not_found", "bots.container.snapshotLoadFailed", "container not found")
+			return newI18nHTTPError(http.StatusNotFound, "workspace_not_found", "bots.container.snapshotLoadFailed", "workspace not found")
 		}
 		return newI18nHTTPError(http.StatusInternalServerError, "workspace_snapshots_load_failed", "bots.container.snapshotLoadFailed", err.Error())
 	}
 
 	if req := strings.TrimSpace(c.QueryParam("snapshotter")); req != "" && req != data.Snapshotter {
-		return newI18nHTTPError(http.StatusBadRequest, "workspace_snapshotter_mismatch", "bots.container.snapshotLoadFailed", "snapshotter does not match container snapshotter")
+		return newI18nHTTPError(http.StatusBadRequest, "workspace_snapshotter_mismatch", "bots.container.snapshotLoadFailed", "snapshotter does not match the workspace runtime")
 	}
 
 	snapshotKey := strings.TrimSpace(data.Info.StorageRef.Key)
@@ -843,7 +843,7 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 			slog.String("snapshotter", data.Snapshotter),
 			slog.String("snapshot_key", snapshotKey),
 		)
-		return newI18nHTTPError(http.StatusInternalServerError, "workspace_snapshot_chain_not_found", "bots.container.snapshotLoadFailed", "container snapshot chain not found")
+		return newI18nHTTPError(http.StatusInternalServerError, "workspace_snapshot_chain_not_found", "bots.container.snapshotLoadFailed", "workspace snapshot chain not found")
 	}
 	return c.JSON(http.StatusOK, resp)
 }

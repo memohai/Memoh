@@ -119,7 +119,7 @@ func TestScrubBotChecksForResponseDropsDetailsForNonManage(t *testing.T) {
 		{
 			ID:      bots.BotCheckTypeContainerInit,
 			Status:  bots.BotCheckStatusError,
-			Summary: "Container initialization failed.",
+			Summary: "Workspace initialization failed.",
 			Detail:  "registry token leaked",
 			Metadata: map[string]any{
 				"setup_error_phase": "setup",

@@ -625,10 +625,10 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 				slog.String("bot_id", bot.ID),
 				slog.Any("error", readyErr),
 			)
-			sendError("workspace_setup_failed", "bots.create.failedSubtitle", "container setup failed: "+err.Error()+"; ready status update failed: "+readyErr.Error())
+			sendError("workspace_setup_failed", "bots.create.failedSubtitle", "workspace setup failed; ready status update failed")
 			return nil
 		}
-		sendError("workspace_setup_failed", "bots.create.failedSubtitle", "container setup failed: "+err.Error())
+		sendError("workspace_setup_failed", "bots.create.failedSubtitle", "workspace setup failed")
 		return nil
 	}
 

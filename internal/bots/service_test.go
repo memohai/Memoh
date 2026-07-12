@@ -461,6 +461,13 @@ func TestRecordContainerSetupFailureTruncatesLongMessages(t *testing.T) {
 	}
 }
 
+func TestSanitizeSetupFailureMessageUsesWorkspaceTerminology(t *testing.T) {
+	message := sanitizeSetupFailureMessage("Container setup failed: container not reachable")
+	if message != "workspace setup failed: workspace not reachable" {
+		t.Fatalf("message = %q, want workspace terminology", message)
+	}
+}
+
 func findBotCheck(t *testing.T, checks []BotCheck, id string) BotCheck {
 	t.Helper()
 	for _, check := range checks {
