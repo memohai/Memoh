@@ -1,12 +1,20 @@
 import { client } from '@memohai/sdk/client'
 import type { Options } from '@memohai/sdk'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 
 // codesync(display-prepare-stream): keep these manual SSE payload types in sync
 // with internal/handlers/display.go.
 export type DisplayPrepareStreamEvent =
   | { type: 'progress'; step?: string; message?: string; percent?: number }
   | { type: 'complete'; step?: string; message?: string; percent?: number }
-  | { type: 'error'; step?: string; message: string }
+  | {
+    type: 'error'
+    step?: string
+    code?: string
+    i18n_key?: string
+    args?: Record<string, string>
+    message: string
+  }
 
 export type DisplayPrepareStreamData = {
   path: { bot_id: string }
@@ -27,6 +35,9 @@ function isDisplayPrepareStreamEvent(value: unknown): value is DisplayPrepareStr
     case 'error':
       return typeof event.message === 'string'
         && (event.step === undefined || typeof event.step === 'string')
+        && (event.code === undefined || typeof event.code === 'string')
+        && (event.i18n_key === undefined || typeof event.i18n_key === 'string')
+        && (event.args === undefined || (!!event.args && typeof event.args === 'object'))
     default:
       return false
   }
@@ -67,7 +78,9 @@ export async function postBotsByBotIdContainerDisplayPrepareStream(
         if (!isDisplayPrepareStreamEvent(event)) {
           throw new Error('Invalid display preparation stream event')
         }
-        yield event
+        yield event.type === 'error'
+          ? { ...event, message: resolveApiErrorMessage(event, event.message) }
+          : event
       }
       if (streamError) {
         throw toError(streamError)

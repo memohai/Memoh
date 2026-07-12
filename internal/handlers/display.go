@@ -222,10 +222,13 @@ const (
 )
 
 type displayPrepareStreamEvent struct {
-	Type    string `json:"type"`
-	Step    string `json:"step,omitempty"`
-	Message string `json:"message,omitempty"`
-	Percent int    `json:"percent,omitempty"`
+	Type    string            `json:"type"`
+	Step    string            `json:"step,omitempty"`
+	Code    string            `json:"code,omitempty"`
+	I18nKey string            `json:"i18n_key,omitempty"`
+	Args    map[string]string `json:"args,omitempty"`
+	Message string            `json:"message,omitempty"`
+	Percent int               `json:"percent,omitempty"`
 }
 
 // PrepareDisplay godoc
@@ -256,26 +259,29 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 	send := func(payload displayPrepareStreamEvent) {
 		_ = writeSSEJSON(writer, flusher, payload)
 	}
-	sendError := func(step, message string) {
-		send(displayPrepareStreamEvent{Type: "error", Step: step, Message: message})
+	sendError := func(step, code, i18nKey, message string) {
+		send(displayPrepareStreamEvent{
+			Type: "error", Step: step, Code: code, I18nKey: i18nKey,
+			Args: map[string]string{}, Message: message,
+		})
 	}
 
 	ctx := c.Request().Context()
 	if h.manager == nil {
-		sendError("checking", "manager not configured")
+		sendError("checking", "workspace_manager_unavailable", "chat.display.unavailable.manager", "manager not configured")
 		return nil
 	}
 	if !h.manager.BotDisplayEnabled(ctx, botID) {
-		sendError("checking", "workspace display is not enabled")
+		sendError("checking", "workspace_display_disabled", "chat.display.unavailable.disabled", "workspace display is not enabled")
 		return nil
 	}
 
 	client, err := h.manager.MCPClient(ctx, botID)
 	if err != nil || client == nil {
 		if err != nil {
-			sendError("checking", "workspace container is not reachable: "+err.Error())
+			sendError("checking", "workspace_not_reachable", "chat.display.unavailable.container", "workspace container is not reachable: "+err.Error())
 		} else {
-			sendError("checking", "workspace container is not reachable")
+			sendError("checking", "workspace_not_reachable", "chat.display.unavailable.container", "workspace container is not reachable")
 		}
 		return nil
 	}
@@ -289,7 +295,7 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 
 	stream, err := client.ExecStream(ctx, displayPrepareCommand(), "/", 1200)
 	if err != nil {
-		sendError("checking", "start display preparation failed: "+err.Error())
+		sendError("checking", "workspace_display_prepare_failed", "chat.display.prepare.failed", "start display preparation failed: "+err.Error())
 		return nil
 	}
 	defer func() { _ = stream.Close() }()
@@ -305,7 +311,7 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 			break
 		}
 		if recvErr != nil {
-			sendError(lastStep, "display preparation stream failed: "+recvErr.Error())
+			sendError(lastStep, "workspace_display_prepare_failed", "chat.display.prepare.failed", "display preparation stream failed: "+recvErr.Error())
 			return nil
 		}
 		switch msg.GetStream() {
@@ -348,7 +354,7 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 		if message == "" {
 			message = "display preparation failed"
 		}
-		sendError(lastStep, message)
+		sendError(lastStep, "workspace_display_prepare_failed", "chat.display.prepare.failed", message)
 		return nil
 	}
 	if !completed {

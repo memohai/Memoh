@@ -4,6 +4,7 @@ import type {
   HandlersCreateContainerResponse,
   PostBotsByBotIdContainerData,
 } from '@memohai/sdk'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 
 export type ContainerCreateLayerStatus = {
   ref: string
@@ -21,7 +22,13 @@ export type ContainerCreateStreamEvent =
   | { type: 'creating' }
   | { type: 'restoring' }
   | { type: 'complete'; container: HandlersCreateContainerResponse }
-  | { type: 'error'; message: string }
+  | {
+    type: 'error'
+    code?: string
+    i18n_key?: string
+    args?: Record<string, string>
+    message: string
+  }
 
 export type ContainerCreateStreamResult = {
   stream: AsyncGenerator<ContainerCreateStreamEvent, void, unknown>
@@ -55,6 +62,9 @@ function isContainerCreateStreamEvent(value: unknown): value is ContainerCreateS
       return !!event.container && typeof event.container === 'object'
     case 'error':
       return typeof event.message === 'string'
+        && (event.code === undefined || typeof event.code === 'string')
+        && (event.i18n_key === undefined || typeof event.i18n_key === 'string')
+        && (event.args === undefined || (!!event.args && typeof event.args === 'object'))
     default:
       return false
   }
@@ -97,7 +107,9 @@ export async function postBotsByBotIdContainerStream(
         if (!isContainerCreateStreamEvent(event)) {
           throw new Error('Invalid workspace creation stream event')
         }
-        yield event
+        yield event.type === 'error'
+          ? { ...event, message: resolveApiErrorMessage(event, event.message) }
+          : event
       }
 
       if (streamError) {
