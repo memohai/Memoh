@@ -25,8 +25,7 @@ func TestWithoutInjectionCapabilitiesPreservesRequestData(t *testing.T) {
 
 	source := make(chan conversation.InjectMessage)
 	req := conversation.ChatRequest{
-		BotID:    "bot-1",
-		InjectCh: source,
+		BotID: "bot-1",
 		InjectionFeed: conversation.InjectionFeed{
 			Messages: source,
 			CommitPersisted: func(string) bool {
@@ -35,7 +34,7 @@ func TestWithoutInjectionCapabilitiesPreservesRequestData(t *testing.T) {
 		},
 	}
 	clean := withoutInjectionCapabilities(req)
-	if clean.BotID != req.BotID || clean.InjectCh != nil || clean.InjectionFeed.Messages != nil ||
+	if clean.BotID != req.BotID || clean.InjectionFeed.Messages != nil ||
 		clean.InjectionFeed.CommitPersisted != nil {
 		t.Fatalf("sanitized request = %#v", clean)
 	}

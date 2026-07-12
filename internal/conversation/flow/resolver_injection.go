@@ -38,9 +38,6 @@ func (r *Resolver) startInjectionBridge(
 ) (agentpkg.RunConfig, *injectionReceiptRegistry, *injectionBridge) {
 	messages := req.InjectionFeed.Messages
 	if messages == nil {
-		messages = req.InjectCh
-	}
-	if messages == nil {
 		return runConfig, nil, nil
 	}
 
@@ -107,7 +104,6 @@ func (rc resolvedContext) closeInjectionBridge() {
 }
 
 func withoutInjectionCapabilities(req conversation.ChatRequest) conversation.ChatRequest {
-	req.InjectCh = nil
 	req.InjectionFeed = conversation.InjectionFeed{}
 	return req
 }

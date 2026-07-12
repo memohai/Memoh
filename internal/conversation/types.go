@@ -274,9 +274,6 @@ type ChatRequest struct {
 	// Set by the inbound channel processor; called by the resolver at persist time.
 	OutboundAssetCollector func() []OutboundAssetRef `json:"-"`
 
-	// InjectCh receives user messages to inject into the active agent stream
-	// between tool rounds via the PrepareStep hook. Nil means no injection.
-	InjectCh <-chan InjectMessage `json:"-"`
 	// InjectionFeed owns the injection stream and acknowledges receipts only
 	// after their user rows are durably persisted.
 	InjectionFeed InjectionFeed `json:"-"`

@@ -38,7 +38,7 @@ func TestRejectRequestedSkillsAllowsModelChatSession(t *testing.T) {
 	}
 
 	req := requestedSkillGuardRequest("session-1")
-	req.InjectCh = make(chan conversation.InjectMessage)
+	req.InjectionFeed.Messages = make(chan conversation.InjectMessage)
 	if err := resolver.rejectRequestedSkillsIfUnsupportedContext(context.Background(), req); err != nil {
 		t.Fatalf("rejectRequestedSkillsIfUnsupportedContext() error = %v, want nil", err)
 	}
