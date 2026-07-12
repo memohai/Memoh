@@ -413,8 +413,18 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 
 	// A single markable group larger than the whole budget survives trim by
 	// design (progress guarantee); truncate its rendered entries rather than
-	// send a prompt the model rejects on every pass.
+	// send a prompt the model rejects on every pass. Entry floors can still
+	// exceed the budget when that group holds enough rows, so recheck and
+	// surface the overshoot instead of claiming an unconditional cap.
 	entries = capEntriesToBudget(entries, maxCompactTokens-priorTokens)
+	if cost := entriesPromptCost(entries); cost+priorTokens > maxCompactTokens {
+		s.logger.Warn("compaction: entry floors exceed the budget, prompt may overflow the compaction window",
+			slog.Int("entries", len(entries)),
+			slog.Int("entry_tokens", cost),
+			slog.Int("max_compact_tokens", maxCompactTokens),
+			slog.String("session_id", cfg.SessionID),
+		)
+	}
 
 	userPrompt := buildUserPrompt(priorSummaries, entries)
 

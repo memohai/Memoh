@@ -94,6 +94,26 @@ func TestCapEntriesToBudgetHoldsTheTotalAcrossManyEntries(t *testing.T) {
 	}
 }
 
+// TestCapEntriesToBudgetFloorsCanExceedBudget pins the documented limit of
+// the cap: entries are never dropped, so when the per-entry floors alone
+// exceed maxTokens the capped total still does. entriesPromptCost is the
+// recheck callers use to detect that overshoot.
+func TestCapEntriesToBudgetFloorsCanExceedBudget(t *testing.T) {
+	t.Parallel()
+
+	entries := make([]messageEntry, 100)
+	for i := range entries {
+		entries[i] = messageEntry{Role: "tool", Content: "[tool result]"}
+	}
+	capped := capEntriesToBudget(entries, 50)
+	if len(capped) != len(entries) {
+		t.Fatalf("entries dropped: got %d, want %d (ids must stay aligned)", len(capped), len(entries))
+	}
+	if got := entriesPromptCost(capped); got <= 50 {
+		t.Fatalf("floors of 100 minimal entries cannot fit 50 tokens, got %d — update the cap's documentation if this now holds", got)
+	}
+}
+
 func TestCapEntriesToBudgetKeepsCheapShortEntries(t *testing.T) {
 	t.Parallel()
 

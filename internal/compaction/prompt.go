@@ -69,6 +69,11 @@ func priorContextTokens(summaries []string) int {
 // saw. This only engages when a single markable group exceeds the whole
 // budget: the alternative is a prompt the compaction model rejects on every
 // pass, which stalls the session behind the failure cooldown forever.
+//
+// The bound is therefore best-effort, not absolute: every entry keeps at
+// least its floor, so when one unsplittable group holds enough entries that
+// the floors alone exceed maxTokens, the capped total still does. Callers
+// that need the real cost recheck with entriesPromptCost.
 func capEntriesToBudget(entries []messageEntry, maxTokens int) []messageEntry {
 	if maxTokens <= 0 {
 		maxTokens = 1
@@ -113,6 +118,16 @@ func capEntriesToBudget(entries []messageEntry, maxTokens int) []messageEntry {
 		capped[i] = entry
 	}
 	return capped
+}
+
+// entriesPromptCost is the estimated prompt cost of the rendered entries,
+// using the same per-entry accounting as capEntriesToBudget.
+func entriesPromptCost(entries []messageEntry) int {
+	total := 0
+	for _, entry := range entries {
+		total += estimateBytesAsTokens(entry.Content) + estimateBytesAsTokens(entry.Role) + 1
+	}
+	return total
 }
 
 func capPriorSummaries(summaries []string, maxTokens int) []string {
