@@ -344,10 +344,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		}
 	}
 
-	contextTokenBudget := 0
-	if chatModel.Config.ContextWindow != nil && *chatModel.Config.ContextWindow > 0 {
-		contextTokenBudget = *chatModel.Config.ContextWindow
-	}
+	contextTokenBudget := modelContextTokenBudget(chatModel)
 
 	var messages []conversation.ModelMessage
 	var historyRecords []historyfrag.HistoryRecord
@@ -1137,10 +1134,18 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 
 	cfg = r.prepareRunConfig(ctx, cfg)
 	return pipelinepkg.ResolveRunConfigResult{
-		RunConfig:   cfg,
-		ModelID:     chatModel.ID,
-		RuntimeType: runtimeType,
+		RunConfig:          cfg,
+		ModelID:            chatModel.ID,
+		RuntimeType:        runtimeType,
+		ContextTokenBudget: modelContextTokenBudget(chatModel),
 	}, nil
+}
+
+func modelContextTokenBudget(model models.GetResponse) int {
+	if model.Config.ContextWindow != nil && *model.Config.ContextWindow > 0 {
+		return *model.Config.ContextWindow
+	}
+	return 0
 }
 
 // prepareRunConfig generates the system prompt and appends the user message.

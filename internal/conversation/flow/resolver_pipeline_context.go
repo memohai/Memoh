@@ -237,25 +237,95 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
-func trimComposedPipelineMessages(
-	log *slog.Logger,
-	entries []composedPipelineMessage,
-	maxTokens int,
-) pipelineContextBuild {
+type composedTrimEntry struct {
+	tokens int
+	role   string
+	keep   bool
+}
+
+// composedTrimCutoff finds how many oldest entries exceed maxTokens, keeping
+// the newest ones whole and never cutting directly before a tool-result row
+// so a tool exchange is not split at the boundary.
+func composedTrimCutoff(entries []composedTrimEntry, maxTokens int) int {
 	cutoff := 0
 	if maxTokens > 0 {
 		tokens := 0
 		for i := len(entries) - 1; i >= 0; i-- {
-			tokens += estimateMessageTokens(entries[i].message)
+			tokens += entries[i].tokens
 			if tokens > maxTokens {
 				cutoff = i + 1
 				break
 			}
 		}
-		for cutoff < len(entries) && strings.EqualFold(strings.TrimSpace(entries[cutoff].message.Role), "tool") {
+		for cutoff < len(entries) && strings.EqualFold(strings.TrimSpace(entries[cutoff].role), "tool") {
 			cutoff++
 		}
 	}
+	return cutoff
+}
+
+// TrimDiscussContext bounds a discuss-composed context to the chat model's
+// window with the same semantics as the flow pipeline branch: newest entries
+// are kept, artifact summaries survive the dropped prefix, the latest entry
+// is pinned, and a truncation notice marks the cut. Entries are metered with
+// the flow path's estimator so the returned estimate shares its unit.
+func (r *Resolver) TrimDiscussContext(messages []pipelinepkg.ContextMessage, contextTokenBudget int) ([]pipelinepkg.ContextMessage, int) {
+	entries := make([]composedTrimEntry, len(messages))
+	total := 0
+	for i, message := range messages {
+		entries[i] = composedTrimEntry{
+			tokens: estimateMessageTokens(contextMessageForMetering(message)),
+			role:   message.Role,
+			keep:   strings.TrimSpace(message.CompactionArtifactID) != "" || i == len(messages)-1,
+		}
+		total += entries[i].tokens
+	}
+	cutoff := composedTrimCutoff(entries, contextTokenBudget)
+	if cutoff == 0 {
+		return messages, total
+	}
+	if r.logger != nil {
+		r.logger.Info("trim discuss context",
+			slog.Int("total_messages", len(messages)),
+			slog.Int("max_tokens", contextTokenBudget),
+			slog.Int("kept_messages", len(messages)-cutoff),
+		)
+	}
+	notice := historyTruncationNotice()
+	out := make([]pipelinepkg.ContextMessage, 0, len(messages)-cutoff+1)
+	out = append(out, pipelinepkg.ContextMessage{Role: notice.Role, Content: notice.TextContent()})
+	estimated := estimateMessageTokens(notice)
+	for i, message := range messages {
+		if i < cutoff && !entries[i].keep {
+			continue
+		}
+		out = append(out, message)
+		estimated += entries[i].tokens
+	}
+	return out, estimated
+}
+
+func contextMessageForMetering(message pipelinepkg.ContextMessage) conversation.ModelMessage {
+	if len(message.RawContent) > 0 {
+		return conversation.ModelMessage{Role: message.Role, Content: message.RawContent}
+	}
+	return conversation.ModelMessage{Role: message.Role, Content: conversation.NewTextContent(message.Content)}
+}
+
+func trimComposedPipelineMessages(
+	log *slog.Logger,
+	entries []composedPipelineMessage,
+	maxTokens int,
+) pipelineContextBuild {
+	trimEntries := make([]composedTrimEntry, len(entries))
+	for i, entry := range entries {
+		trimEntries[i] = composedTrimEntry{
+			tokens: estimateMessageTokens(entry.message),
+			role:   entry.message.Role,
+			keep:   entry.hasSummary || entry.forceKeep,
+		}
+	}
+	cutoff := composedTrimCutoff(trimEntries, maxTokens)
 	if cutoff > 0 && log != nil {
 		log.Info("trim pipeline context",
 			slog.Int("total_messages", len(entries)),

@@ -21,6 +21,9 @@ type ResolveRunConfigResult struct {
 	RunConfig   agentpkg.RunConfig
 	ModelID     string // database UUID of the selected model
 	RuntimeType string
+	// ContextTokenBudget is the chat model's declared context window, or 0
+	// when the model does not declare one (or the runtime has no chat model).
+	ContextTokenBudget int
 }
 
 // RunConfigResolver resolves a complete agent RunConfig and persists output
@@ -30,6 +33,7 @@ type RunConfigResolver interface {
 	InlineImageAttachments(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart
 	LoadContextHistoryProjection(ctx context.Context, botID, sessionID string) (ContextHistoryProjection, error)
 	MaybeCompactSession(ctx context.Context, botID, sessionID, userID string, inputTokens, contextTokenBudget int)
+	TrimDiscussContext(messages []ContextMessage, contextTokenBudget int) ([]ContextMessage, int)
 	StoreRound(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform string, messages []sdk.Message, modelID string) error
 }
 
@@ -317,7 +321,7 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 		}
 		attempted, completed := d.streamDiscussACPRuntime(ctx, cfg, composed, addressed, log)
 		if attempted {
-			d.maybeCompactDiscussContext(ctx, cfg, composed.EstimatedTokens, 0)
+			d.maybeCompactDiscussContext(ctx, cfg, composed.EstimatedTokens, resolved.ContextTokenBudget)
 		}
 		if completed {
 			d.advanceDiscussCursor(ctx, sess, cfg, consumedMs, log)
@@ -326,7 +330,11 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 	}
 	runConfig := resolved.RunConfig
 
-	contextEntries := repairSDKContextToolClosures(contextMessagesToSDKEntries(composed.Messages))
+	composedMessages, estimatedTokens := composed.Messages, composed.EstimatedTokens
+	if resolved.ContextTokenBudget > 0 {
+		composedMessages, estimatedTokens = d.deps.Resolver.TrimDiscussContext(composedMessages, resolved.ContextTokenBudget)
+	}
+	contextEntries := repairSDKContextToolClosures(contextMessagesToSDKEntries(composedMessages))
 	runConfig.Messages = sdkMessagesFromContextEntries(contextEntries)
 	runConfig.ContextFrags = append(
 		runConfig.ContextFrags,
@@ -382,9 +390,9 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 	}
 	inputTokens := usageInputTokens(finalUsage)
 	if inputTokens <= 0 {
-		inputTokens = composed.EstimatedTokens
+		inputTokens = estimatedTokens
 	}
-	d.maybeCompactDiscussContext(ctx, cfg, inputTokens, 0)
+	d.maybeCompactDiscussContext(ctx, cfg, inputTokens, resolved.ContextTokenBudget)
 	if !terminalReceived {
 		return
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/historyfrag"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	"github.com/memohai/memoh/internal/models"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 )
 
@@ -482,4 +483,63 @@ func modelMessageTexts(messages []conversation.ModelMessage) []string {
 		texts = append(texts, message.TextContent())
 	}
 	return texts
+}
+
+func TestTrimDiscussContextKeepsSummariesAndNotice(t *testing.T) {
+	t.Parallel()
+
+	r := &Resolver{logger: slog.New(slog.DiscardHandler)}
+	summary := pipelinepkg.ContextMessage{Role: "user", Content: "<summary>\ncondensed history\n</summary>", CompactionArtifactID: "artifact-a"}
+	old := pipelinepkg.ContextMessage{Role: "user", Content: strings.Repeat("old context ", 100)}
+	latest := pipelinepkg.ContextMessage{Role: "user", Content: "latest trigger"}
+	budget := estimateMessageTokens(contextMessageForMetering(latest))
+
+	messages, estimated := r.TrimDiscussContext([]pipelinepkg.ContextMessage{summary, old, latest}, budget)
+
+	if len(messages) != 3 {
+		t.Fatalf("messages = %d, want notice+summary+latest: %#v", len(messages), messages)
+	}
+	if messages[0].Role != "system" || !strings.Contains(messages[0].Content, "trimmed") {
+		t.Fatalf("missing truncation notice: %#v", messages[0])
+	}
+	if messages[1].CompactionArtifactID != "artifact-a" {
+		t.Fatalf("summary not retained: %#v", messages)
+	}
+	if messages[2].Content != "latest trigger" {
+		t.Fatalf("latest trigger not retained: %#v", messages)
+	}
+	wantEstimate := 0
+	for _, message := range messages {
+		wantEstimate += estimateMessageTokens(contextMessageForMetering(message))
+	}
+	if estimated != wantEstimate {
+		t.Fatalf("estimated = %d, want %d", estimated, wantEstimate)
+	}
+}
+
+func TestTrimDiscussContextWithoutBudgetKeepsEverything(t *testing.T) {
+	t.Parallel()
+
+	r := &Resolver{logger: slog.New(slog.DiscardHandler)}
+	old := pipelinepkg.ContextMessage{Role: "user", Content: "old context"}
+	latest := pipelinepkg.ContextMessage{Role: "user", Content: "latest trigger"}
+
+	messages, estimated := r.TrimDiscussContext([]pipelinepkg.ContextMessage{old, latest}, 0)
+
+	want := estimateMessageTokens(contextMessageForMetering(old)) + estimateMessageTokens(contextMessageForMetering(latest))
+	if len(messages) != 2 || estimated != want {
+		t.Fatalf("untrimmed passthrough broken: %d messages, estimate %d want %d", len(messages), estimated, want)
+	}
+}
+
+func TestModelContextTokenBudget(t *testing.T) {
+	t.Parallel()
+
+	window := 128000
+	if got := modelContextTokenBudget(models.GetResponse{Model: models.Model{Config: models.ModelConfig{ContextWindow: &window}}}); got != 128000 {
+		t.Fatalf("declared window budget = %d, want 128000", got)
+	}
+	if got := modelContextTokenBudget(models.GetResponse{}); got != 0 {
+		t.Fatalf("undeclared window budget = %d, want 0", got)
+	}
 }

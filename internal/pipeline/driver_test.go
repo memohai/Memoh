@@ -831,6 +831,18 @@ type fakeRunConfigResolver struct {
 	compactionInputTokens int
 	compactionBudget      int
 	compactionUserID      string
+	trimCalls             int
+	trimBudget            int
+	trimFn                func(messages []ContextMessage, contextTokenBudget int) ([]ContextMessage, int)
+}
+
+func (f *fakeRunConfigResolver) TrimDiscussContext(messages []ContextMessage, contextTokenBudget int) ([]ContextMessage, int) {
+	f.trimCalls++
+	f.trimBudget = contextTokenBudget
+	if f.trimFn != nil {
+		return f.trimFn(messages, contextTokenBudget)
+	}
+	return messages, 0
 }
 
 func (f *fakeRunConfigResolver) ResolveRunConfig(_ context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error) {
