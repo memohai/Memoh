@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"testing"
 
@@ -250,6 +251,15 @@ func TestBuildInteractionMetadataIncludesPublicSkillActivation(t *testing.T) {
 type batchRecordingMessageService struct {
 	recordingMessageService
 	batchInputs []messagepkg.PersistInput
+}
+
+type failingRecordingMessageService struct {
+	recordingMessageService
+}
+
+func (s *failingRecordingMessageService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
+	s.persisted = append(s.persisted, input)
+	return messagepkg.Message{}, errors.New("persist failed")
 }
 
 type decliningBatchMessageService struct {

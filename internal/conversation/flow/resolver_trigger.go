@@ -38,6 +38,7 @@ func (r *Resolver) TriggerSchedule(ctx context.Context, botID string, payload sc
 	if err != nil {
 		return schedule.TriggerResult{}, err
 	}
+	defer rc.closeInjectionBridge()
 	defer r.finishPromptCompaction(ctx, req, rc)
 
 	cfg := rc.runConfig
@@ -99,6 +100,7 @@ func (r *Resolver) TriggerHeartbeat(ctx context.Context, botID string, payload h
 	if err != nil {
 		return heartbeat.TriggerResult{}, err
 	}
+	defer rc.closeInjectionBridge()
 	defer r.finishPromptCompaction(ctx, req, rc)
 
 	cfg := rc.runConfig

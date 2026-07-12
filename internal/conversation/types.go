@@ -277,6 +277,9 @@ type ChatRequest struct {
 	// InjectCh receives user messages to inject into the active agent stream
 	// between tool rounds via the PrepareStep hook. Nil means no injection.
 	InjectCh <-chan InjectMessage `json:"-"`
+	// InjectionFeed owns the injection stream and acknowledges receipts only
+	// after their user rows are durably persisted.
+	InjectionFeed InjectionFeed `json:"-"`
 
 	Query           string                  `json:"query"`
 	Model           string                  `json:"model,omitempty"`
@@ -321,6 +324,11 @@ type InjectMessage struct {
 	Attachments     []ChatAttachment
 	HeaderifiedText string
 	Receipt         UserMessageReceipt
+}
+
+type InjectionFeed struct {
+	Messages        <-chan InjectMessage
+	CommitPersisted func(receiptID string) bool
 }
 
 type UserMessageReceipt struct {

@@ -1,14 +1,203 @@
 package flow
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"sync"
 	"testing"
+	"time"
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
+	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/messagesource"
 )
+
+type failingBatchMessageService struct {
+	recordingMessageService
+	batchInputs []messagepkg.PersistInput
+}
+
+func (s *failingBatchMessageService) PersistToolTailRound(_ context.Context, inputs []messagepkg.PersistInput) ([]messagepkg.Message, bool, error) {
+	s.batchInputs = append(s.batchInputs, inputs...)
+	return nil, true, errors.New("batch failed")
+}
+
+func TestInjectionBridgeCancellationUnblocksDeliveryAndJoins(t *testing.T) {
+	t.Parallel()
+
+	source := make(chan conversation.InjectMessage)
+	resolver := &Resolver{logger: slog.New(slog.DiscardHandler)}
+	runConfig, _, bridge := resolver.startInjectionBridge(context.Background(), conversation.ChatRequest{
+		InjectionFeed: conversation.InjectionFeed{Messages: source},
+	}, agentpkg.RunConfig{})
+	if bridge == nil || runConfig.InjectCh == nil {
+		t.Fatal("injection bridge was not created")
+	}
+
+	sourceDelivered := make(chan struct{})
+	go func() {
+		source <- conversation.InjectMessage{Text: "injected", Receipt: conversation.UserMessageReceipt{ID: "receipt-1"}}
+		close(sourceDelivered)
+	}()
+	select {
+	case <-sourceDelivered:
+	case <-time.After(time.Second):
+		t.Fatal("bridge did not receive source message")
+	}
+
+	joined := make(chan struct{})
+	var wait sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			bridge.Close()
+		}()
+	}
+	go func() {
+		wait.Wait()
+		close(joined)
+	}()
+	select {
+	case <-joined:
+	case <-time.After(time.Second):
+		t.Fatal("bridge cancellation did not join blocked delivery")
+	}
+	if _, open := <-runConfig.InjectCh; open {
+		t.Fatal("agent injection channel remained open after bridge join")
+	}
+}
+
+func TestStoreMessagesCommitsOnlyInjectedReceiptAfterSequentialPersist(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	committed := make([]string, 0, 1)
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	leading := &conversation.UserMessageReceipt{ID: "receipt-leading", DisplayText: "leading"}
+	injected := &conversation.UserMessageReceipt{ID: "receipt-injected", DisplayText: "injected"}
+	resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID: storeRoundBotID, UserReceipt: leading,
+		InjectionFeed: conversation.InjectionFeed{CommitPersisted: func(receiptID string) bool {
+			if len(messages.persisted) == 0 {
+				t.Fatal("commit callback ran before Persist returned")
+			}
+			committed = append(committed, receiptID)
+			return true
+		}},
+	}, []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("leading"), UserReceipt: leading},
+		{Role: "user", Content: conversation.NewTextContent("injected"), UserReceipt: injected},
+		{Role: "assistant", Content: conversation.NewTextContent("done")},
+	}, "", storeRoundOptions{})
+
+	if len(committed) != 1 || committed[0] != injected.ID {
+		t.Fatalf("committed receipts = %#v", committed)
+	}
+	if len(messages.persisted) != 3 {
+		t.Fatalf("persist inputs = %#v", messages.persisted)
+	}
+}
+
+func TestStoreMessagesDoesNotCommitInjectionReceiptAfterPersistFailure(t *testing.T) {
+	t.Parallel()
+
+	messages := &failingRecordingMessageService{}
+	committed := make([]string, 0, 1)
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID: storeRoundBotID,
+		InjectionFeed: conversation.InjectionFeed{CommitPersisted: func(receiptID string) bool {
+			committed = append(committed, receiptID)
+			return true
+		}},
+	}, []conversation.ModelMessage{{
+		Role: "user", Content: conversation.NewTextContent("injected"),
+		UserReceipt: &conversation.UserMessageReceipt{ID: "receipt-failed", DisplayText: "injected"},
+	}}, "", storeRoundOptions{})
+
+	if len(committed) != 0 {
+		t.Fatalf("failed persist committed receipts = %#v", committed)
+	}
+}
+
+func TestStoreMessagesCommitsInjectionReceiptAfterAtomicBatch(t *testing.T) {
+	t.Parallel()
+
+	messages := &batchRecordingMessageService{}
+	committed := make([]string, 0, 1)
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	receipt := &conversation.UserMessageReceipt{ID: "receipt-batch", DisplayText: "injected"}
+	resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID: storeRoundBotID, SessionID: "33333333-3333-3333-3333-333333333333",
+		SessionType: "chat", RuntimeType: "model",
+		InjectionFeed: conversation.InjectionFeed{CommitPersisted: func(receiptID string) bool {
+			if len(messages.batchInputs) != 4 {
+				t.Fatal("commit callback ran before atomic batch returned")
+			}
+			committed = append(committed, receiptID)
+			return true
+		}},
+	}, injectionToolTailMessages(receipt), "", storeRoundOptions{})
+
+	if len(committed) != 1 || committed[0] != receipt.ID {
+		t.Fatalf("batch committed receipts = %#v", committed)
+	}
+}
+
+func TestStoreMessagesDoesNotCommitInjectionReceiptAfterAtomicBatchFailure(t *testing.T) {
+	t.Parallel()
+
+	messages := &failingBatchMessageService{}
+	committed := make([]string, 0, 1)
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	receipt := &conversation.UserMessageReceipt{ID: "receipt-batch-failed", DisplayText: "injected"}
+	resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID: storeRoundBotID, SessionID: "33333333-3333-3333-3333-333333333333",
+		SessionType: "chat", RuntimeType: "model",
+		InjectionFeed: conversation.InjectionFeed{CommitPersisted: func(receiptID string) bool {
+			committed = append(committed, receiptID)
+			return true
+		}},
+	}, injectionToolTailMessages(receipt), "", storeRoundOptions{})
+
+	if len(committed) != 0 || len(messages.persisted) != 0 {
+		t.Fatalf("failed batch commits=%#v sequential=%d", committed, len(messages.persisted))
+	}
+}
+
+func TestStoreMessagesCommitsInjectionReceiptOnceAfterBatchDeclines(t *testing.T) {
+	t.Parallel()
+
+	messages := &decliningBatchMessageService{}
+	committed := make([]string, 0, 1)
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	receipt := &conversation.UserMessageReceipt{ID: "receipt-batch-declined", DisplayText: "injected"}
+	resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID: storeRoundBotID, SessionID: "33333333-3333-3333-3333-333333333333",
+		SessionType: "chat", RuntimeType: "model",
+		InjectionFeed: conversation.InjectionFeed{CommitPersisted: func(receiptID string) bool {
+			committed = append(committed, receiptID)
+			return true
+		}},
+	}, injectionToolTailMessages(receipt), "", storeRoundOptions{})
+
+	if len(messages.persisted) != 4 || len(committed) != 1 || committed[0] != receipt.ID {
+		t.Fatalf("declined batch sequential=%d commits=%#v", len(messages.persisted), committed)
+	}
+}
+
+func injectionToolTailMessages(receipt *conversation.UserMessageReceipt) []conversation.ModelMessage {
+	return []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("injected"), UserReceipt: receipt},
+		{Role: "assistant", Content: conversation.NewTextContent("call")},
+		{Role: "tool", Content: conversation.NewTextContent("result")},
+		{Role: "assistant", Content: conversation.NewTextContent("done")},
+	}
+}
 
 func TestInterleaveInjectedMessagesKeepsSameTextReceiptsDistinct(t *testing.T) {
 	t.Parallel()

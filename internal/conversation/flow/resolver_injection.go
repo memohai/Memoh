@@ -1,9 +1,11 @@
 package flow
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -12,6 +14,97 @@ import (
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
 )
+
+type injectionBridge struct {
+	cancel    context.CancelFunc
+	done      <-chan struct{}
+	closeOnce sync.Once
+}
+
+func (b *injectionBridge) Close() {
+	if b == nil {
+		return
+	}
+	b.closeOnce.Do(func() {
+		b.cancel()
+		<-b.done
+	})
+}
+
+func (r *Resolver) startInjectionBridge(
+	ctx context.Context,
+	req conversation.ChatRequest,
+	runConfig agentpkg.RunConfig,
+) (agentpkg.RunConfig, *injectionReceiptRegistry, *injectionBridge) {
+	messages := req.InjectionFeed.Messages
+	if messages == nil {
+		messages = req.InjectCh
+	}
+	if messages == nil {
+		return runConfig, nil, nil
+	}
+
+	agentMessages := make(chan agentpkg.InjectMessage, cap(messages))
+	registry := newInjectionReceiptRegistry()
+	bridgeCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	bridge := &injectionBridge{cancel: cancel, done: done}
+	go func() {
+		defer close(done)
+		defer close(agentMessages)
+		for {
+			var message conversation.InjectMessage
+			var open bool
+			select {
+			case <-bridgeCtx.Done():
+				return
+			case message, open = <-messages:
+				if !open {
+					return
+				}
+			}
+
+			receiptID, receipt, err := registry.admit(message)
+			if err != nil {
+				if r.logger != nil {
+					r.logger.Warn("reject injection receipt",
+						slog.String("receipt_id", strings.TrimSpace(message.Receipt.ID)),
+						slog.Any("error", err))
+				}
+				continue
+			}
+			agentMessage := agentpkg.InjectMessage{
+				ReceiptID:       receiptID,
+				Text:            receipt.DisplayText,
+				HeaderifiedText: message.HeaderifiedText,
+			}
+			if runConfig.SupportsImageInput && len(receipt.Attachments) > 0 {
+				agentMessage.ImageParts = r.inlineInjectAttachments(bridgeCtx, req.BotID, receipt.Attachments)
+			}
+			select {
+			case <-bridgeCtx.Done():
+				return
+			case agentMessages <- agentMessage:
+			}
+		}
+	}()
+
+	runConfig.InjectCh = agentMessages
+	runConfig.InjectedRecorder = func(receipt agentpkg.InjectedReceipt) {
+		if registry.record(receipt) {
+			return
+		}
+		if r.logger != nil {
+			r.logger.Warn("ignore unknown injection receipt",
+				slog.String("receipt_id", string(receipt.ID)))
+		}
+	}
+	return runConfig, registry, bridge
+}
+
+func (rc resolvedContext) closeInjectionBridge() {
+	rc.injectionBridge.Close()
+}
 
 type injectionReceiptRegistry struct {
 	mu      sync.Mutex

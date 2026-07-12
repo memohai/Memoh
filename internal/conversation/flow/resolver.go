@@ -283,6 +283,7 @@ type resolvedContext struct {
 	query                       string // headerified persistable query
 	userMessageAlreadyInContext bool
 	injectionReceipts           *injectionReceiptRegistry
+	injectionBridge             *injectionBridge
 	compactableTokens           int
 	compactableTokensKnown      bool
 	contextTokenBudget          int // token budget used to clamp compaction triggers
@@ -540,48 +541,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	runCfg.ContextScope = buildContextFragScope(req, displayName, runCfg.Identity)
 	runCfg = runCfg.RefreshContextFrag()
 
-	var injectionReceipts *injectionReceiptRegistry
-	if req.InjectCh != nil {
-		agentInjectCh := make(chan agentpkg.InjectMessage, cap(req.InjectCh))
-		registry := newInjectionReceiptRegistry()
-		injectionReceipts = registry
-		go func() {
-			for msg := range req.InjectCh {
-				receiptID, receipt, err := registry.admit(msg)
-				if err != nil {
-					if r.logger != nil {
-						r.logger.Warn("reject injection receipt",
-							slog.String("receipt_id", strings.TrimSpace(msg.Receipt.ID)),
-							slog.Any("error", err))
-					}
-					continue
-				}
-				agentMsg := agentpkg.InjectMessage{
-					ReceiptID:       receiptID,
-					Text:            receipt.DisplayText,
-					HeaderifiedText: msg.HeaderifiedText,
-				}
-				// Inline any image attachments from the injected message so the
-				// model receives them as vision input alongside the text.
-				if runCfg.SupportsImageInput && len(receipt.Attachments) > 0 {
-					agentMsg.ImageParts = r.inlineInjectAttachments(ctx, req.BotID, receipt.Attachments)
-				}
-				agentInjectCh <- agentMsg
-			}
-			close(agentInjectCh)
-		}()
-		runCfg.InjectCh = agentInjectCh
-
-		runCfg.InjectedRecorder = func(receipt agentpkg.InjectedReceipt) {
-			if registry.record(receipt) {
-				return
-			}
-			if r.logger != nil {
-				r.logger.Warn("ignore unknown injection receipt",
-					slog.String("receipt_id", string(receipt.ID)))
-			}
-		}
-	}
+	runCfg, injectionReceipts, injectionBridge := r.startInjectionBridge(ctx, req, runCfg)
 
 	return resolvedContext{
 		runConfig:                   runCfg,
@@ -590,6 +550,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		query:                       headerifiedQuery,
 		userMessageAlreadyInContext: usePipeline,
 		injectionReceipts:           injectionReceipts,
+		injectionBridge:             injectionBridge,
 		compactableTokens:           compactableTokens,
 		compactableTokensKnown:      true,
 		contextTokenBudget:          contextTokenBudget,
@@ -623,6 +584,7 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	if err != nil {
 		return conversation.ChatResponse{}, err
 	}
+	defer rc.closeInjectionBridge()
 	defer r.finishPromptCompaction(ctx, req, rc)
 	req.Query = rc.query
 

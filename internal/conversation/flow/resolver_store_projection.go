@@ -11,6 +11,11 @@ import (
 	"github.com/memohai/memoh/internal/messagesource"
 )
 
+type projectedPersistInput struct {
+	input              messagepkg.PersistInput
+	injectionReceiptID string
+}
+
 func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) []messagepkg.Message {
 	if r.messageService == nil {
 		return nil
@@ -49,7 +54,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 	}
 	latestExternalMessageID := strings.TrimSpace(req.ExternalMessageID)
 	legacyOriginalUserEligible := !req.UserMessagePersisted && !req.ReusePersistedUserMessage
-	persistInputs := make([]messagepkg.PersistInput, 0, len(messages))
+	projections := make([]projectedPersistInput, 0, len(messages))
 	for i, msg := range messages {
 		msg = normalizeUserMessageContent(msg)
 
@@ -75,6 +80,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		assets := []messagepkg.AssetRef(nil)
 		persistMeta := meta
 		sourceContext := messagesource.Context{}
+		injectionReceiptID := ""
 		if msg.Role == "user" {
 			// Only the user message whose text matches req.Query is the
 			// "real" turn-leading query from the user. Other user-role
@@ -112,6 +118,8 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 				persistMeta = receipt.Metadata
 				if receipt == req.UserReceipt {
 					persistMeta = mergeMetadata(mergeMetadata(meta, buildInteractionMetadata(req)), receipt.Metadata)
+				} else {
+					injectionReceiptID = strings.TrimSpace(receipt.ID)
 				}
 				sourceContext = origin.Context
 			} else if isOriginalQuery {
@@ -151,7 +159,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		if extraMeta := opts.MessageMetadataByIndex[i]; len(extraMeta) > 0 {
 			persistMeta = mergeMetadata(persistMeta, extraMeta)
 		}
-		persistInputs = append(persistInputs, messagepkg.PersistInput{
+		projections = append(projections, projectedPersistInput{input: messagepkg.PersistInput{
 			BotID:                   req.BotID,
 			SessionID:               req.SessionID,
 			SenderChannelIdentityID: messageSenderChannelIdentityID,
@@ -171,7 +179,11 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			RuntimeType:             runtimeType,
 			TurnRequestMessageID:    turnRequestMessageID,
 			SkipHistoryTurn:         req.SkipHistoryTurn,
-		})
+		}, injectionReceiptID: injectionReceiptID})
+	}
+	persistInputs := make([]messagepkg.PersistInput, len(projections))
+	for index, projection := range projections {
+		persistInputs[index] = projection.input
 	}
 	if batcher, ok := r.messageService.(messagepkg.ToolTailRoundPersister); ok {
 		if persisted, handled, err := batcher.PersistToolTailRound(ctx, persistInputs); handled || err != nil {
@@ -179,16 +191,23 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 				r.logger.Warn("persist tool tail round failed", slog.Any("error", err))
 				return nil
 			}
+			commitInjectionProjections(req.InjectionFeed, projections)
 			return persisted
 		}
 	}
-	return r.persistMessageInputs(ctx, persistInputs, turnRequestMessageID)
+	return r.persistMessageInputs(ctx, projections, turnRequestMessageID, req.InjectionFeed)
 }
 
-func (r *Resolver) persistMessageInputs(ctx context.Context, inputs []messagepkg.PersistInput, initialTurnRequestMessageID string) []messagepkg.Message {
-	persisted := make([]messagepkg.Message, 0, len(inputs))
+func (r *Resolver) persistMessageInputs(
+	ctx context.Context,
+	projections []projectedPersistInput,
+	initialTurnRequestMessageID string,
+	feed conversation.InjectionFeed,
+) []messagepkg.Message {
+	persisted := make([]messagepkg.Message, 0, len(projections))
 	turnRequestMessageID := strings.TrimSpace(initialTurnRequestMessageID)
-	for _, input := range inputs {
+	for _, projection := range projections {
+		input := projection.input
 		if !input.SkipHistoryTurn {
 			input.TurnRequestMessageID = turnRequestMessageID
 		}
@@ -201,6 +220,20 @@ func (r *Resolver) persistMessageInputs(ctx context.Context, inputs []messagepkg
 			turnRequestMessageID = persistedMessage.ID
 		}
 		persisted = append(persisted, persistedMessage)
+		commitInjectionReceipt(feed, projection.injectionReceiptID)
 	}
 	return persisted
+}
+
+func commitInjectionProjections(feed conversation.InjectionFeed, projections []projectedPersistInput) {
+	for _, projection := range projections {
+		commitInjectionReceipt(feed, projection.injectionReceiptID)
+	}
+}
+
+func commitInjectionReceipt(feed conversation.InjectionFeed, receiptID string) {
+	if feed.CommitPersisted == nil || strings.TrimSpace(receiptID) == "" {
+		return
+	}
+	feed.CommitPersisted(strings.TrimSpace(receiptID))
 }

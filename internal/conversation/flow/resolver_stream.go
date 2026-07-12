@@ -159,6 +159,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 			errCh <- err
 			return
 		}
+		defer rc.closeInjectionBridge()
 		streamReq.Query = rc.query
 
 		go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), streamReq, streamReq.RawQuery)
@@ -353,6 +354,7 @@ func (r *Resolver) streamChatWSResultWithHooks(
 		)
 		return nil, fmt.Errorf("resolve: %w", err)
 	}
+	defer rc.closeInjectionBridge()
 	req.Query = rc.query
 
 	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
