@@ -52,11 +52,6 @@ var (
 	errRouteHandoffStartMissing = errors.New("route handoff start function missing")
 )
 
-type deferredTurn struct {
-	id  string
-	ctx context.Context
-}
-
 type routeLease struct {
 	dispatcher *RouteDispatcher
 	routeID    string

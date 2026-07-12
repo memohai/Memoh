@@ -992,7 +992,57 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 
 startStream:
-	userReceipt := preparedReceipt
+	return p.runDeferredTurn(ctx, &deferredTurn{
+		id:                  preparedReceipt.ID,
+		ctx:                 ctx,
+		cfg:                 cfg,
+		msg:                 msg,
+		sender:              sender,
+		identity:            identity,
+		resolved:            resolved,
+		resolvedAttachments: resolvedAttachments,
+		attachments:         attachments,
+		replyAttachments:    replyAttachments,
+		text:                text,
+		modelText:           modelText,
+		userMessageKind:     userMessageKind,
+		userVisibleText:     userVisibleText,
+		requestedSkills:     requestedSkillContexts,
+		skillActivation:     skillActivation,
+		hasPendingSkill:     pendingSkillIntent != nil,
+		sessionID:           sessionID,
+		sessionRuntimeOwner: sessionRuntimeOwner,
+		acpRuntimeSession:   acpRuntimeSession,
+		activeChatID:        activeChatID,
+		inboundMode:         inboundMode,
+		eventID:             eventID,
+		receipt:             preparedReceipt,
+	})
+}
+
+func (p *ChannelInboundProcessor) runDeferredTurn(ctx context.Context, turn *deferredTurn) (retErr error) {
+	cfg := turn.cfg
+	msg := turn.msg
+	sender := turn.sender
+	identity := turn.identity
+	resolved := turn.resolved
+	resolvedAttachments := turn.resolvedAttachments
+	attachments := turn.attachments
+	replyAttachments := turn.replyAttachments
+	text := turn.text
+	modelText := turn.modelText
+	userMessageKind := turn.userMessageKind
+	userVisibleText := turn.userVisibleText
+	requestedSkillContexts := turn.requestedSkills
+	skillActivation := turn.skillActivation
+	sessionID := turn.sessionID
+	sessionRuntimeOwner := turn.sessionRuntimeOwner
+	acpRuntimeSession := turn.acpRuntimeSession
+	activeChatID := turn.activeChatID
+	inboundMode := turn.inboundMode
+	eventID := turn.eventID
+	userReceipt := turn.receipt
+	routeID := strings.TrimSpace(resolved.RouteID)
 
 	// Issue chat token for reply routing.
 	chatToken := ""
@@ -1112,7 +1162,7 @@ startStream:
 		stream = channel.NewTeeStream(stream, p.observer, strings.TrimSpace(identity.BotID), msg.Channel)
 		// Broadcast the inbound user message so WebUI can display it.
 		broadcastText := text
-		if pendingSkillIntent != nil {
+		if turn.hasPendingSkill {
 			broadcastText = userVisibleText
 		}
 		p.broadcastInboundMessage(ctx, strings.TrimSpace(identity.BotID), msg, broadcastText, identity, resolvedAttachments)
@@ -1186,8 +1236,8 @@ startStream:
 		UserMessageKind:           userMessageKind,
 		UserVisibleText:           userVisibleText,
 		SkillActivation:           skillActivation,
-		SkipMemoryExtraction:      pendingSkillIntent != nil && userVisibleText == "",
-		SkipTitleGeneration:       pendingSkillIntent != nil && userVisibleText == "",
+		SkipMemoryExtraction:      turn.hasPendingSkill && userVisibleText == "",
+		SkipTitleGeneration:       turn.hasPendingSkill && userVisibleText == "",
 		CurrentChannel:            msg.Channel.String(),
 		Channels:                  []string{msg.Channel.String()},
 		UserMessagePersisted:      false,
