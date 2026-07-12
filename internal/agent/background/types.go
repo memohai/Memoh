@@ -35,7 +35,7 @@ type Task struct {
 	WorkDir        string
 	Status         TaskStatus
 	ExitCode       int32
-	OutputFile     string // path inside container where output is being written
+	OutputFile     string // path inside the workspace where output is being written
 	Result         map[string]any
 	Error          string
 	StartedAt      time.Time

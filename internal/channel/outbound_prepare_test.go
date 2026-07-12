@@ -783,7 +783,7 @@ func TestPrepareContainerAttachment_StoreWithoutIngesterFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when store does not implement ContainerAttachmentIngester")
 	}
-	if !strings.Contains(err.Error(), "does not support container file ingestion") {
+	if !strings.Contains(err.Error(), "does not support workspace file ingestion") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

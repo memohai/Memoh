@@ -92,7 +92,7 @@ func (p *Provider) OpenContainerFile(ctx context.Context, botID, containerPath s
 		return client.ReadRaw(ctx, filepath.Clean(containerPath))
 	}
 	if subPath == "" || strings.Contains(subPath, "..") {
-		return nil, errors.New("invalid container path")
+		return nil, errors.New("invalid workspace path")
 	}
 	client, err := p.clients.MCPClient(ctx, botID)
 	if err != nil {

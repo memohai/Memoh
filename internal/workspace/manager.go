@@ -44,7 +44,7 @@ const (
 )
 
 // ErrContainerNotFound is returned when no container exists for a bot.
-var ErrContainerNotFound = errors.New("container not found for bot")
+var ErrContainerNotFound = errors.New("workspace not found for bot")
 
 // ContainerStatus combines DB records with live containerd state.
 type ContainerStatus struct {

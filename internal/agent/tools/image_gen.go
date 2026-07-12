@@ -214,12 +214,12 @@ func (p *ImageGenProvider) execGenerateImage(ctx context.Context, session Sessio
 	containerPath := fmt.Sprintf("%s/%d.%s", imageDir, time.Now().UnixMilli(), ext)
 
 	if p.containers == nil {
-		return p.unsavedImageResult(session, toolCallID, image, "Image generated (container not reachable, not saved to disk)"), nil
+		return p.unsavedImageResult(session, toolCallID, image, "Image generated, but the workspace is not reachable, so the file was not saved"), nil
 	}
 
 	client, clientErr := p.containers.MCPClient(ctx, botID)
 	if clientErr != nil {
-		return p.unsavedImageResult(session, toolCallID, image, "Image generated (container not reachable, not saved to disk)"), nil
+		return p.unsavedImageResult(session, toolCallID, image, "Image generated, but the workspace is not reachable, so the file was not saved"), nil
 	}
 
 	// Best-effort mkdir: a transient exec failure must not block saving when the

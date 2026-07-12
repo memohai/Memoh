@@ -675,7 +675,7 @@ func isWorkspaceRestoreRetryable(err error) bool {
 	retryable := []string{
 		"not found",
 		"no such container",
-		"container not reachable",
+		"workspace is not reachable",
 		"connection refused",
 	}
 	for _, item := range retryable {

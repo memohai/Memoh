@@ -17,7 +17,7 @@ type statusRuntime interface {
 	GetTaskInfo(ctx context.Context, containerID string) (ctr.TaskInfo, error)
 }
 
-var ErrWorkspaceContainerMissing = errors.New("workspace container is not created")
+var ErrWorkspaceContainerMissing = errors.New("workspace is not created")
 
 type Service struct {
 	queries          dbstore.Queries
@@ -122,7 +122,7 @@ func (s *Service) StatusBot(ctx context.Context, botID string) (BotStatus, error
 				Provider:    cfg.Provider,
 				State:       "workspace_missing",
 				Title:       "Workspace Missing",
-				Description: "Bot workspace container is not created yet. Start the bot once before checking overlay status.",
+				Description: "The bot workspace has not been created yet. Start the bot once before checking overlay status.",
 			}, ws), nil
 		}
 		return BotStatus{}, err

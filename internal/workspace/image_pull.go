@@ -37,7 +37,7 @@ func (m *Manager) PrepareImageForCreate(ctx context.Context, image string, opts 
 
 	imageService, ok := m.service.(ctr.ImageService)
 	if !ok {
-		return ImagePrepareResult{Mode: ImagePrepareDelegated, ImageRef: primary, Message: "container backend handles image pulling"}, nil
+		return ImagePrepareResult{Mode: ImagePrepareDelegated, ImageRef: primary, Message: "runtime backend handles image pulling"}, nil
 	}
 
 	if policy == config.ImagePullPolicyIfNotPresent {
@@ -47,7 +47,7 @@ func (m *Manager) PrepareImageForCreate(ctx context.Context, image string, opts 
 				return ImagePrepareResult{Mode: ImagePrepareSkipped, ImageRef: candidate, Image: info, Message: "image already present"}, nil
 			}
 			if errors.Is(err, ctr.ErrNotSupported) {
-				return ImagePrepareResult{Mode: ImagePrepareDelegated, ImageRef: primary, Message: "container backend handles image pulling"}, nil
+				return ImagePrepareResult{Mode: ImagePrepareDelegated, ImageRef: primary, Message: "runtime backend handles image pulling"}, nil
 			}
 			if !ctr.IsNotFound(err) {
 				m.logger.Info("image lookup failed, attempting pull",
@@ -68,7 +68,7 @@ func (m *Manager) PrepareImageForCreate(ctx context.Context, image string, opts 
 			return ImagePrepareResult{Mode: ImagePreparePulled, ImageRef: candidate, Image: info, Message: message}, nil
 		}
 		if errors.Is(err, ctr.ErrNotSupported) {
-			return ImagePrepareResult{Mode: ImagePrepareDelegated, ImageRef: primary, Message: "container backend handles image pulling"}, nil
+			return ImagePrepareResult{Mode: ImagePrepareDelegated, ImageRef: primary, Message: "runtime backend handles image pulling"}, nil
 		}
 		lastErr = err
 		if i+1 < len(candidates) {

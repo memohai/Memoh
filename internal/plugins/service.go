@@ -464,7 +464,9 @@ func (s *Service) installBundledSkills(ctx context.Context, botID string, row sq
 	}
 	client, err := s.bridges.MCPClient(ctx, botID)
 	if err != nil {
-		return fmt.Errorf("install plugin skills: container not reachable: %w", err)
+		s.logger.Warn("install plugin skills failed because workspace is unavailable",
+			slog.String("bot_id", botID), slog.Any("error", err))
+		return errors.New("install plugin skills: workspace is not reachable")
 	}
 	for _, skill := range manifest.BundledSkills {
 		name := strings.TrimSpace(skill.Name)
@@ -510,7 +512,9 @@ func (s *Service) uninstallBundledSkills(ctx context.Context, botID string, row 
 	}
 	client, err := s.bridges.MCPClient(ctx, botID)
 	if err != nil {
-		return fmt.Errorf("uninstall plugin skills: container not reachable: %w", err)
+		s.logger.Warn("uninstall plugin skills failed because workspace is unavailable",
+			slog.String("bot_id", botID), slog.Any("error", err))
+		return errors.New("uninstall plugin skills: workspace is not reachable")
 	}
 	for _, skill := range manifest.BundledSkills {
 		name := strings.TrimSpace(skill.Name)

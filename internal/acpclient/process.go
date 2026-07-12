@@ -204,7 +204,7 @@ func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir strin
 		if isHermesAgent(opts.AgentID) {
 			hermesHome := strings.TrimSpace(opts.HermesHome)
 			if hermesHome == "" {
-				return nil, nil, errors.New("container Hermes managed setup requires HERMES_HOME isolation")
+				return nil, nil, errors.New("hermes managed setup in an isolated workspace requires HERMES_HOME isolation")
 			}
 			env = withoutEnvKeys(withoutBlockedEnvNames(opts.Env, HermesManagedUnsetEnvKeys()), "HOME", "PATH", "CODEX_HOME")
 			env = append(env, "HOME="+dataMountPath, "PATH="+defaultContainerPath, "HERMES_HOME="+hermesHome)

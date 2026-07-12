@@ -127,7 +127,7 @@ func (m *Manager) ensureContainerNetworkAndGetIP(ctx context.Context, botID, con
 		}
 		return result.Runtime.IP, nil
 	}
-	return "", fmt.Errorf("network setup failed for container %s: %w", containerID, lastErr)
+	return "", fmt.Errorf("network setup failed for workspace runtime %s: %w", containerID, lastErr)
 }
 
 func (m *Manager) ensureContainerNetwork(ctx context.Context, containerID, botID string) error {
@@ -414,7 +414,7 @@ func (m *Manager) setupBotContainer(ctx context.Context, botID string, progress 
 		}
 	} else {
 		image = "local"
-		emit(ContainerSetupEvent{Type: "pull_skipped", Image: image, Message: "local workspace does not use container images"})
+		emit(ContainerSetupEvent{Type: "pull_skipped", Image: image, Message: "local workspaces do not use runtime images"})
 	}
 	gpu, err := m.resolveWorkspaceGPU(ctx, botID)
 	if err != nil {

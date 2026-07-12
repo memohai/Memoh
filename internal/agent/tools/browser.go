@@ -601,7 +601,7 @@ func (p *BrowserProvider) ensureDisplayEnabled(ctx context.Context, botID string
 
 func (p *BrowserProvider) ensureCDP(ctx context.Context, botID string) (*bridge.Client, error) {
 	if p.containers == nil {
-		return nil, errors.New("workspace container provider is not configured")
+		return nil, errors.New("workspace runtime provider is not configured")
 	}
 	client, err := p.containers.MCPClient(ctx, botID)
 	if err != nil {
@@ -1929,7 +1929,7 @@ func (p *BrowserProvider) screenshotDir(name string) string {
 
 func (p *BrowserProvider) saveBytes(ctx context.Context, botID, path string, data []byte) error {
 	if p.containers == nil {
-		return errors.New("workspace container provider is not configured")
+		return errors.New("workspace runtime provider is not configured")
 	}
 	client, err := p.containers.MCPClient(ctx, botID)
 	if err != nil {

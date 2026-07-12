@@ -402,7 +402,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	}
 	if workspaceBackend == "local" {
 		image = "local"
-		send(createContainerPullStatusEvent{Type: "pull_skipped", Image: image, Message: "local workspace does not use container images"})
+		send(createContainerPullStatusEvent{Type: "pull_skipped", Image: image, Message: "local workspaces do not use runtime images"})
 	} else {
 		// Phase 1: Pull image with progress
 		send(createContainerPullingEvent{Type: "pulling", Image: image})

@@ -285,8 +285,8 @@ func (p *ContainerProvider) resolveToolWorkspace(ctx context.Context, session Se
 	}
 	return toolWorkspace{
 		defaultWorkDir:          wd,
-		locationDescription:     "inside the bot container",
-		absolutePathDescription: "inside container",
+		locationDescription:     "inside the bot workspace",
+		absolutePathDescription: "inside the workspace",
 	}
 }
 
@@ -364,7 +364,8 @@ func (p *ContainerProvider) getClient(ctx context.Context, botID string) (*bridg
 	}
 	client, err := p.clients.MCPClient(ctx, botID)
 	if err != nil {
-		return nil, fmt.Errorf("container not reachable: %w", err)
+		p.logger.Warn("workspace client unavailable", slog.String("bot_id", botID), slog.Any("error", err))
+		return nil, errors.New("workspace is not reachable")
 	}
 	return client, nil
 }

@@ -9,7 +9,7 @@ import (
 
 // ErrContainerFileNotSupported is returned when no underlying provider
 // implements ContainerFileOpener.
-var ErrContainerFileNotSupported = errors.New("provider does not support container file reading")
+var ErrContainerFileNotSupported = errors.New("provider does not support workspace file reading")
 
 // Provider abstracts object storage operations.
 type Provider interface {

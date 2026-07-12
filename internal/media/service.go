@@ -158,7 +158,7 @@ func (s *Service) IngestContainerFile(ctx context.Context, botID, containerPath 
 	}
 	f, err := opener.OpenContainerFile(ctx, botID, containerPath)
 	if err != nil {
-		return Asset{}, fmt.Errorf("open container file: %w", err)
+		return Asset{}, fmt.Errorf("open workspace file: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 	ext := path.Ext(containerPath)

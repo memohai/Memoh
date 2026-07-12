@@ -730,7 +730,7 @@ func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context
 	// Get gRPC client for the bot container via manager
 	client, err := h.manager.MCPClient(ctx, botID)
 	if err != nil {
-		return nil, fmt.Errorf("get container client: %w", err)
+		return nil, fmt.Errorf("get workspace runtime client: %w", err)
 	}
 
 	command := buildShellCommand(req)
