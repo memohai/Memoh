@@ -653,31 +653,42 @@ func (q *Queries) ListCompactionLogsByBot(ctx context.Context, arg ListCompactio
 	return items, nil
 }
 
-const listInvalidCompactionArtifactIDsBySession = `-- name: ListInvalidCompactionArtifactIDsBySession :many
-SELECT compact.id
+const listInvalidCompactionArtifactSeedsBySession = `-- name: ListInvalidCompactionArtifactSeedsBySession :many
+SELECT compact.id, compact.coverage
 FROM bot_history_message_compacts compact
 JOIN bot_history_message_compact_claim_validity validity
   ON validity.compact_id = compact.id
-WHERE compact.session_id = $1
+WHERE compact.bot_id = $1
+  AND compact.session_id IS NOT DISTINCT FROM $2::uuid
   AND compact.status = 'ok'
   AND compact.artifact_level = 0
   AND NOT validity.sources_current
 ORDER BY compact.id ASC
 `
 
-func (q *Queries) ListInvalidCompactionArtifactIDsBySession(ctx context.Context, sessionID pgtype.UUID) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listInvalidCompactionArtifactIDsBySession, sessionID)
+type ListInvalidCompactionArtifactSeedsBySessionParams struct {
+	BotID     pgtype.UUID `json:"bot_id"`
+	SessionID pgtype.UUID `json:"session_id"`
+}
+
+type ListInvalidCompactionArtifactSeedsBySessionRow struct {
+	ID       pgtype.UUID `json:"id"`
+	Coverage []byte      `json:"coverage"`
+}
+
+func (q *Queries) ListInvalidCompactionArtifactSeedsBySession(ctx context.Context, arg ListInvalidCompactionArtifactSeedsBySessionParams) ([]ListInvalidCompactionArtifactSeedsBySessionRow, error) {
+	rows, err := q.db.Query(ctx, listInvalidCompactionArtifactSeedsBySession, arg.BotID, arg.SessionID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []pgtype.UUID
+	var items []ListInvalidCompactionArtifactSeedsBySessionRow
 	for rows.Next() {
-		var id pgtype.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i ListInvalidCompactionArtifactSeedsBySessionRow
+		if err := rows.Scan(&i.ID, &i.Coverage); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

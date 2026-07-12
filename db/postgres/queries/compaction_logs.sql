@@ -318,12 +318,13 @@ WHERE c.session_id = $1
   )
 ORDER BY c.anchor_start_ms ASC, c.started_at ASC, c.id ASC;
 
--- name: ListInvalidCompactionArtifactIDsBySession :many
-SELECT compact.id
+-- name: ListInvalidCompactionArtifactSeedsBySession :many
+SELECT compact.id, compact.coverage
 FROM bot_history_message_compacts compact
 JOIN bot_history_message_compact_claim_validity validity
   ON validity.compact_id = compact.id
-WHERE compact.session_id = $1
+WHERE compact.bot_id = sqlc.arg(bot_id)
+  AND compact.session_id IS NOT DISTINCT FROM sqlc.narg(session_id)::uuid
   AND compact.status = 'ok'
   AND compact.artifact_level = 0
   AND NOT validity.sources_current

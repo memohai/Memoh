@@ -407,15 +407,16 @@ func historyRecord(id string, msg conversation.ModelMessage, mutate func(*histor
 
 type recordingCompactionLogQueries struct {
 	dbstore.Queries
-	logs      []sqlc.BotHistoryMessageCompact
-	refs      map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow
-	byID      map[pgtype.UUID]sqlc.BotHistoryMessageCompact
-	sessionID pgtype.UUID
-	listCalls int
-	refCalls  []pgtype.UUID
-	getCalls  []pgtype.UUID
-	listErr   error
-	refErr    error
+	logs       []sqlc.BotHistoryMessageCompact
+	refs       map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow
+	byID       map[pgtype.UUID]sqlc.BotHistoryMessageCompact
+	invalidIDs []pgtype.UUID
+	sessionID  pgtype.UUID
+	listCalls  int
+	refCalls   []pgtype.UUID
+	getCalls   []pgtype.UUID
+	listErr    error
+	refErr     error
 }
 
 func (q *recordingCompactionLogQueries) GetCompactionLogByID(_ context.Context, compactID pgtype.UUID) (sqlc.BotHistoryMessageCompact, error) {

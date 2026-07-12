@@ -18,6 +18,7 @@ type artifactProjectionQueries interface {
 	GetCompactionLogByID(context.Context, pgtype.UUID) (sqlc.BotHistoryMessageCompact, error)
 	ListCompactionArtifactLineageBySession(context.Context, pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error)
 	ListCompactionArtifactParentIDsBySuccessor(context.Context, sqlc.ListCompactionArtifactParentIDsBySuccessorParams) ([]pgtype.UUID, error)
+	ListInvalidCompactionArtifactSeedsBySession(context.Context, sqlc.ListInvalidCompactionArtifactSeedsBySessionParams) ([]sqlc.ListInvalidCompactionArtifactSeedsBySessionRow, error)
 }
 
 type ArtifactProjection struct {
@@ -26,6 +27,98 @@ type ArtifactProjection struct {
 
 func NewArtifactProjection(queries artifactProjectionQueries) ArtifactProjection {
 	return ArtifactProjection{queries: queries}
+}
+
+func buildArtifactFrontierExcludingInvalidSources(
+	artifacts []Artifact,
+	owner ArtifactOwner,
+	invalidSources map[string][]CoveredSource,
+) ArtifactFrontier {
+	if len(invalidSources) == 0 {
+		return buildArtifactFrontierForOwner(artifacts, owner)
+	}
+	nodes := make(map[string]Artifact, len(artifacts))
+	successors := make(map[string][]string, len(artifacts))
+	invalidCoverage := make(map[string][]CoveredSource)
+	for _, sources := range invalidSources {
+		for _, source := range sources {
+			key := source.Ref.StableKey()
+			invalidCoverage[key] = append(invalidCoverage[key], source)
+		}
+	}
+	for _, artifact := range artifacts {
+		nodes[artifact.ID] = artifact
+		if artifact.SupersededBy != "" {
+			successors[artifact.ID] = append(successors[artifact.ID], artifact.SupersededBy)
+		}
+		for _, parentID := range artifact.ParentIDs {
+			successors[parentID] = append(successors[parentID], artifact.ID)
+		}
+	}
+	queue := make([]string, 0, len(invalidSources))
+	for id := range invalidSources {
+		queue = append(queue, id)
+	}
+	for _, artifact := range artifacts {
+		if artifact.Level > 0 && hasUnattributedInvalidCoverage(artifact, nodes, invalidSources, invalidCoverage) {
+			queue = append(queue, artifact.ID)
+		}
+	}
+	invalid := make(map[string]struct{}, len(queue))
+	for next := 0; next < len(queue); next++ {
+		id := queue[next]
+		if _, seen := invalid[id]; seen {
+			continue
+		}
+		invalid[id] = struct{}{}
+		queue = append(queue, successors[id]...)
+	}
+	current := make([]Artifact, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		if _, excluded := invalid[artifact.ID]; excluded {
+			continue
+		}
+		if _, successorExcluded := invalid[artifact.SupersededBy]; successorExcluded {
+			artifact.SupersededBy = ""
+			artifact.SupersededAt = time.Time{}
+		}
+		current = append(current, artifact)
+	}
+	return buildArtifactFrontierForOwner(current, owner)
+}
+
+func hasUnattributedInvalidCoverage(
+	artifact Artifact,
+	nodes map[string]Artifact,
+	invalidSources map[string][]CoveredSource,
+	invalidCoverage map[string][]CoveredSource,
+) bool {
+	provided := make(map[string][]CoveredSource)
+	for _, parentID := range artifact.ParentIDs {
+		if _, invalid := invalidSources[parentID]; invalid {
+			continue
+		}
+		for _, source := range nodes[parentID].Coverage {
+			key := source.Ref.StableKey()
+			provided[key] = append(provided[key], source)
+		}
+	}
+	for _, source := range artifact.Coverage {
+		key := source.Ref.StableKey()
+		if coveredSourceMatchesAny(source, invalidCoverage[key]) && !coveredSourceMatchesAny(source, provided[key]) {
+			return true
+		}
+	}
+	return false
+}
+
+func coveredSourceMatchesAny(source CoveredSource, candidates []CoveredSource) bool {
+	for _, candidate := range candidates {
+		if compatibleCoveredSource(source, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func (p ArtifactProjection) LoadActiveSession(ctx context.Context, owner ArtifactOwner) (ArtifactFrontier, error) {
@@ -40,6 +133,14 @@ func (p ArtifactProjection) LoadActiveSession(ctx context.Context, owner Artifac
 	if err != nil {
 		return ArtifactFrontier{}, err
 	}
+	botID := strings.TrimSpace(owner.BotID)
+	if botID == "" && len(rows) > 0 {
+		botID = formatUUID(rows[0].BotID)
+	}
+	invalidSources, err := p.loadInvalidSources(ctx, botID, sessionUUID)
+	if err != nil {
+		return ArtifactFrontier{}, err
+	}
 	artifacts := make([]Artifact, 0, len(rows))
 	for _, row := range rows {
 		artifact, err := artifactFromDBRow(row)
@@ -48,7 +149,7 @@ func (p ArtifactProjection) LoadActiveSession(ctx context.Context, owner Artifac
 		}
 		artifacts = append(artifacts, artifact)
 	}
-	return buildArtifactFrontierForOwner(artifacts, owner), nil
+	return buildArtifactFrontierExcludingInvalidSources(artifacts, owner, invalidSources), nil
 }
 
 func (p ArtifactProjection) LoadActiveByID(ctx context.Context, id string, owner ArtifactOwner) (Artifact, error) {
@@ -63,7 +164,22 @@ func (p ArtifactProjection) LoadActiveByID(ctx context.Context, id string, owner
 	if err != nil {
 		return Artifact{}, err
 	}
-	frontier := buildArtifactFrontierForOwner(artifacts, owner)
+	var sessionID pgtype.UUID
+	if len(artifacts) > 0 && artifacts[0].SessionID != "" {
+		sessionID, err = db.ParseUUID(artifacts[0].SessionID)
+		if err != nil {
+			return Artifact{}, err
+		}
+	}
+	botID := ""
+	if len(artifacts) > 0 {
+		botID = artifacts[0].BotID
+	}
+	invalidSources, err := p.loadInvalidSources(ctx, botID, sessionID)
+	if err != nil {
+		return Artifact{}, err
+	}
+	frontier := buildArtifactFrontierExcludingInvalidSources(artifacts, owner, invalidSources)
 	if artifact, ok := frontier.Resolve(startID); ok {
 		return artifact, nil
 	}
@@ -71,6 +187,32 @@ func (p ArtifactProjection) LoadActiveByID(ctx context.Context, id string, owner
 		return Artifact{}, &LineageError{Issue: frontier.Issues[0]}
 	}
 	return Artifact{}, &LineageError{Issue: LineageIssue{Kind: LineageIssueInactiveSuccessor, ArtifactID: startID}}
+}
+
+func (p ArtifactProjection) loadInvalidSources(ctx context.Context, botID string, sessionID pgtype.UUID) (map[string][]CoveredSource, error) {
+	var botUUID pgtype.UUID
+	var err error
+	if strings.TrimSpace(botID) != "" {
+		botUUID, err = db.ParseUUID(botID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	seeds, err := p.queries.ListInvalidCompactionArtifactSeedsBySession(ctx, sqlc.ListInvalidCompactionArtifactSeedsBySessionParams{
+		BotID:     botUUID,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("load invalid compaction artifacts: %w", err)
+	}
+	invalid := make(map[string][]CoveredSource, len(seeds))
+	for _, seed := range seeds {
+		if id := formatUUID(seed.ID); id != "" {
+			coverage, _ := DecodeArtifactCoverage(seed.Coverage)
+			invalid[id] = coverage
+		}
+	}
+	return invalid, nil
 }
 
 func (p ArtifactProjection) loadConnectedLineage(ctx context.Context, startID string) ([]Artifact, error) {
