@@ -911,3 +911,13 @@ func lastMessageFragContains(frags []contextfrag.ContextFrag, needle string) boo
 	}
 	return false
 }
+
+func TestContextMessagesToSDKEntriesPreservesSystemRole(t *testing.T) {
+	t.Parallel()
+
+	entries := contextMessagesToSDKEntries([]ContextMessage{{Role: "system", Content: "[System Notice] history trimmed"}})
+
+	if len(entries) != 1 || entries[0].Message.Role != sdk.MessageRoleSystem {
+		t.Fatalf("system context message reached the model as %q, want system role", entries[0].Message.Role)
+	}
+}

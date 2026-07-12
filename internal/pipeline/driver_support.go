@@ -282,9 +282,12 @@ func contextMessagesToSDKEntries(messages []ContextMessage) []sdkContextMessage 
 				}
 			}
 		}
-		if message.Role == "assistant" {
+		switch {
+		case strings.EqualFold(message.Role, "assistant"):
 			entry.Message = sdk.AssistantMessage(message.Content)
-		} else {
+		case strings.EqualFold(message.Role, "system"):
+			entry.Message = sdk.SystemMessage(message.Content)
+		default:
 			entry.Message = sdk.UserMessage(message.Content)
 		}
 		result = append(result, entry)

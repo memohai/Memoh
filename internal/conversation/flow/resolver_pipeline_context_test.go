@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -541,5 +542,64 @@ func TestModelContextTokenBudget(t *testing.T) {
 	}
 	if got := modelContextTokenBudget(models.GetResponse{}); got != 0 {
 		t.Fatalf("undeclared window budget = %d, want 0", got)
+	}
+}
+
+func TestTrimDiscussContextPinsLatestUserTriggerOverNewerTurnResponse(t *testing.T) {
+	t.Parallel()
+
+	r := &Resolver{logger: slog.New(slog.DiscardHandler)}
+	trigger := pipelinepkg.ContextMessage{Role: "user", Content: strings.Repeat("triggering question ", 30)}
+	reply := pipelinepkg.ContextMessage{Role: "assistant", Content: "previous reply"}
+	budget := estimateMessageTokens(contextMessageForMetering(reply)) + 1
+
+	messages, _ := r.TrimDiscussContext([]pipelinepkg.ContextMessage{trigger, reply}, budget)
+
+	foundTrigger := false
+	for _, message := range messages {
+		if message.Role == "user" && strings.Contains(message.Content, "triggering question") {
+			foundTrigger = true
+		}
+	}
+	if !foundTrigger {
+		t.Fatalf("the triggering user message was trimmed away while the bot's own reply survived: %#v", messages)
+	}
+}
+
+func TestTrimDiscussContextNeverEmitsOrphanToolResults(t *testing.T) {
+	t.Parallel()
+
+	r := &Resolver{logger: slog.New(slog.DiscardHandler)}
+	call := pipelinepkg.ContextMessage{Role: "assistant", RawContent: json.RawMessage(`[{"type":"tool_call","tool_call_id":"call-1","tool_name":"exec","input":{"cmd":"` + strings.Repeat("x", 400) + `"}}]`)}
+	result := pipelinepkg.ContextMessage{Role: "tool", RawContent: json.RawMessage(`[{"type":"tool_result","tool_call_id":"call-1","tool_name":"exec","result":"ok"}]`)}
+	user := pipelinepkg.ContextMessage{Role: "user", Content: "please run it"}
+	budget := estimateMessageTokens(contextMessageForMetering(result)) + 1
+
+	messages, estimated := r.TrimDiscussContext([]pipelinepkg.ContextMessage{user, call, result}, budget)
+
+	haveCall := false
+	for _, message := range messages {
+		if message.Role == "assistant" {
+			haveCall = true
+		}
+	}
+	wantEstimate := 0
+	for _, message := range messages {
+		if message.Role == "tool" && !haveCall {
+			t.Fatalf("orphan tool result emitted without its call: %#v", messages)
+		}
+		wantEstimate += estimateMessageTokens(contextMessageForMetering(message))
+	}
+	if estimated != wantEstimate {
+		t.Fatalf("estimate = %d counts messages that were not emitted (want %d)", estimated, wantEstimate)
+	}
+	foundTrigger := false
+	for _, message := range messages {
+		if message.Role == "user" && strings.Contains(message.Content, "please run it") {
+			foundTrigger = true
+		}
+	}
+	if !foundTrigger {
+		t.Fatalf("latest user trigger lost: %#v", messages)
 	}
 }

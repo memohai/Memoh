@@ -266,17 +266,28 @@ func composedTrimCutoff(entries []composedTrimEntry, maxTokens int) int {
 
 // TrimDiscussContext bounds a discuss-composed context to the chat model's
 // window with the same semantics as the flow pipeline branch: newest entries
-// are kept, artifact summaries survive the dropped prefix, the latest entry
-// is pinned, and a truncation notice marks the cut. Entries are metered with
-// the flow path's estimator so the returned estimate shares its unit.
+// are kept, artifact summaries survive the dropped prefix, the latest user
+// message is pinned as the current trigger (a persisted turn response may
+// postdate it, so the positionally-last entry is not the trigger — and
+// pinning a tool row would strand a result without its call), and a
+// truncation notice marks the cut. Entries are metered with the flow path's
+// estimator so the returned estimate shares its unit.
 func (r *Resolver) TrimDiscussContext(messages []pipelinepkg.ContextMessage, contextTokenBudget int) ([]pipelinepkg.ContextMessage, int) {
+	pinned := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if strings.TrimSpace(messages[i].CompactionArtifactID) == "" &&
+			strings.EqualFold(strings.TrimSpace(messages[i].Role), "user") {
+			pinned = i
+			break
+		}
+	}
 	entries := make([]composedTrimEntry, len(messages))
 	total := 0
 	for i, message := range messages {
 		entries[i] = composedTrimEntry{
 			tokens: estimateMessageTokens(contextMessageForMetering(message)),
 			role:   message.Role,
-			keep:   strings.TrimSpace(message.CompactionArtifactID) != "" || i == len(messages)-1,
+			keep:   strings.TrimSpace(message.CompactionArtifactID) != "" || i == pinned,
 		}
 		total += entries[i].tokens
 	}
