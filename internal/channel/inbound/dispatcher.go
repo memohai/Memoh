@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/conversation"
@@ -260,51 +262,41 @@ func drainInjectCh(ch chan InjectMessage) {
 // DetectMode parses a message prefix to determine the inbound mode.
 // Returns the mode and the text with the prefix stripped.
 func DetectMode(text string) (InboundMode, string) {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return ModeInject, trimmed
+	if mode, remainder, ok := parseModeCommand(text); ok {
+		return mode, remainder
 	}
-
-	type modePrefix struct {
-		prefix string
-		mode   InboundMode
-	}
-	prefixes := []modePrefix{
-		{"/now ", ModeParallel},
-		{"/next ", ModeQueue},
-		{"/btw ", ModeInject},
-	}
-	lower := strings.ToLower(trimmed)
-	for _, mp := range prefixes {
-		if strings.HasPrefix(lower, mp.prefix) {
-			return mp.mode, strings.TrimSpace(trimmed[len(mp.prefix):])
-		}
-	}
-	// Exact match without trailing text (bare command)
-	barePrefixes := []modePrefix{
-		{"/now", ModeParallel},
-		{"/next", ModeQueue},
-		{"/btw", ModeInject},
-	}
-	for _, mp := range barePrefixes {
-		if lower == mp.prefix {
-			return mp.mode, ""
-		}
-	}
-	return ModeInject, trimmed
+	return ModeInject, strings.TrimSpace(text)
 }
 
 // IsModeCommand reports whether the text is a mode-prefix command
 // (/btw, /now, /next), so the generic command handler should skip it.
 func IsModeCommand(text string) bool {
-	trimmed := strings.ToLower(strings.TrimSpace(text))
-	if trimmed == "" {
-		return false
-	}
-	for _, prefix := range []string{"/now", "/next", "/btw"} {
-		if trimmed == prefix || strings.HasPrefix(trimmed, prefix+" ") || strings.HasPrefix(trimmed, prefix+"\t") {
-			return true
+	_, _, ok := parseModeCommand(text)
+	return ok
+}
+
+func parseModeCommand(text string) (InboundMode, string, bool) {
+	trimmed := strings.TrimSpace(text)
+	lower := strings.ToLower(trimmed)
+	for _, candidate := range []struct {
+		command string
+		mode    InboundMode
+	}{
+		{command: "/now", mode: ModeParallel},
+		{command: "/next", mode: ModeQueue},
+		{command: "/btw", mode: ModeInject},
+	} {
+		if lower == candidate.command {
+			return candidate.mode, "", true
+		}
+		if !strings.HasPrefix(lower, candidate.command) {
+			continue
+		}
+		remainder := trimmed[len(candidate.command):]
+		delimiter, _ := utf8.DecodeRuneInString(remainder)
+		if unicode.IsSpace(delimiter) {
+			return candidate.mode, strings.TrimSpace(remainder), true
 		}
 	}
-	return false
+	return ModeInject, trimmed, false
 }
