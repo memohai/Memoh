@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	"github.com/memohai/memoh/internal/messagesource"
 )
 
 func TestBuildInteractionMetadataIncludesForwardConversation(t *testing.T) {
@@ -152,6 +154,16 @@ type batchRecordingMessageService struct {
 	batchInputs []messagepkg.PersistInput
 }
 
+type decliningBatchMessageService struct {
+	recordingMessageService
+	batchInputs []messagepkg.PersistInput
+}
+
+func (s *decliningBatchMessageService) PersistToolTailRound(_ context.Context, inputs []messagepkg.PersistInput) ([]messagepkg.Message, bool, error) {
+	s.batchInputs = append(s.batchInputs, inputs...)
+	return nil, false, nil
+}
+
 func (s *batchRecordingMessageService) PersistToolTailRound(_ context.Context, inputs []messagepkg.PersistInput) ([]messagepkg.Message, bool, error) {
 	s.batchInputs = append(s.batchInputs, inputs...)
 	return recordedMessages(inputs), true, nil
@@ -207,6 +219,142 @@ func TestFindAssistantMessageForToolCall(t *testing.T) {
 	}
 }
 
+func TestStoreMessagesPreservesReceiptWhenToolTailBatchDeclines(t *testing.T) {
+	t.Parallel()
+
+	messages := &decliningBatchMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	sourceContext := messagesource.NewV1("Sender", "telegram", "private", "Chat")
+	receipt := &conversation.UserMessageReceipt{
+		DisplayText:       "hello",
+		ExternalMessageID: "external-user",
+		EventID:           "33333333-3333-3333-3333-333333333333",
+		SourceContext:     sourceContext,
+		Metadata:          map[string]any{"platform": "telegram"},
+	}
+	resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID: storeRoundBotID, SessionID: "44444444-4444-4444-4444-444444444444",
+		Query: "hello", SessionType: "chat", RuntimeType: "model",
+	}, []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("hello"), UserReceipt: receipt},
+		{Role: "assistant", Content: conversation.NewTextContent("call")},
+		{Role: "tool", Content: conversation.NewTextContent("result")},
+		{Role: "assistant", Content: conversation.NewTextContent("done")},
+	}, "", storeRoundOptions{})
+
+	if len(messages.batchInputs) != 4 || len(messages.persisted) != 4 {
+		t.Fatalf("batch attempt=%d sequential=%d, want 4/4", len(messages.batchInputs), len(messages.persisted))
+	}
+	for _, inputs := range [][]messagepkg.PersistInput{messages.batchInputs, messages.persisted} {
+		if inputs[0].ExternalMessageID != "external-user" || inputs[0].EventID != receipt.EventID ||
+			inputs[0].SourceContext != sourceContext || inputs[0].Metadata["platform"] != "telegram" ||
+			inputs[1].SourceReplyToMessageID != "external-user" {
+			t.Fatalf("batch fallback changed receipt provenance: %#v", inputs)
+		}
+	}
+}
+
+func TestStoreMessagesUsesPerMessageInjectionReceipt(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+	sourceContext := messagesource.NewV1("Injected Sender", "telegram", "group", "Injected Room")
+	receipt := &conversation.UserMessageReceipt{
+		ID:                      "receipt-b",
+		DisplayText:             "raw injected text",
+		SenderChannelIdentityID: "11111111-1111-1111-1111-111111111111",
+		SenderUserID:            "22222222-2222-2222-2222-222222222222",
+		ExternalMessageID:       "external-b",
+		SourceReplyToMessageID:  "reply-b",
+		EventID:                 "33333333-3333-3333-3333-333333333333",
+		SourceContext:           sourceContext,
+		Metadata:                map[string]any{"route_id": "route-b", "platform": "telegram"},
+		Attachments: []conversation.ChatAttachment{{
+			ContentHash: "asset-b",
+			Mime:        "image/png",
+			Name:        "b.png",
+			Size:        42,
+			Metadata:    map[string]any{"storage_key": "assets/b.png", "source": "injected"},
+		}},
+	}
+	resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID:             storeRoundBotID,
+		SessionID:         "44444444-4444-4444-4444-444444444444",
+		Query:             "initial",
+		ExternalMessageID: "external-a",
+		RouteID:           "route-a",
+		CurrentChannel:    "slack",
+		SessionType:       "chat",
+		RuntimeType:       "model",
+	}, []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("initial")},
+		{Role: "assistant", Content: conversation.NewTextContent("working")},
+		{Role: "user", Content: conversation.NewTextContent("<message>raw injected text</message>"), UserReceipt: receipt},
+		{Role: "user", Content: conversation.NewTextContent("initial")},
+		{Role: "assistant", Content: conversation.NewTextContent("done")},
+	}, "", storeRoundOptions{})
+
+	if len(messages.persisted) != 5 {
+		t.Fatalf("persisted inputs = %d, want 5", len(messages.persisted))
+	}
+	injected := messages.persisted[2]
+	if injected.SenderChannelIdentityID != receipt.SenderChannelIdentityID ||
+		injected.SenderUserID != receipt.SenderUserID ||
+		injected.ExternalMessageID != receipt.ExternalMessageID ||
+		injected.SourceReplyToMessageID != receipt.SourceReplyToMessageID ||
+		injected.EventID != receipt.EventID || injected.SourceContext != sourceContext ||
+		injected.DisplayText != receipt.DisplayText || injected.Metadata["route_id"] != "route-b" ||
+		injected.Metadata["platform"] != "telegram" {
+		t.Fatalf("injected provenance = %#v, want receipt %#v", injected, receipt)
+	}
+	if len(injected.Assets) != 1 || injected.Assets[0].ContentHash != "asset-b" ||
+		injected.Assets[0].Role != "attachment" || injected.Assets[0].Ordinal != 0 ||
+		injected.Assets[0].Mime != "image/png" || injected.Assets[0].SizeBytes != 42 ||
+		injected.Assets[0].Name != "b.png" || injected.Assets[0].StorageKey != "assets/b.png" ||
+		injected.Assets[0].Metadata["source"] != "injected" {
+		t.Fatalf("injected assets = %#v", injected.Assets)
+	}
+	var storedModelMessage conversation.ModelMessage
+	if err := json.Unmarshal(injected.Content, &storedModelMessage); err != nil {
+		t.Fatalf("decode injected model content: %v", err)
+	}
+	if storedModelMessage.TextContent() != "<message>raw injected text</message>" || storedModelMessage.UserReceipt != nil {
+		t.Fatalf("injected model content = %#v", storedModelMessage)
+	}
+	synthetic := messages.persisted[3]
+	if synthetic.SenderChannelIdentityID != "" || synthetic.SenderUserID != "" ||
+		synthetic.ExternalMessageID != "" || synthetic.EventID != "" ||
+		synthetic.SourceReplyToMessageID != "" || synthetic.SourceContext != (messagesource.Context{}) ||
+		len(synthetic.Metadata) != 0 || len(synthetic.Assets) != 0 {
+		t.Fatalf("synthetic user inherited provenance: %#v", synthetic)
+	}
+	if messages.persisted[1].SourceReplyToMessageID != "external-a" ||
+		messages.persisted[4].SourceReplyToMessageID != "external-b" {
+		t.Fatalf("assistant source replies did not follow the latest real user: before=%q after=%q",
+			messages.persisted[1].SourceReplyToMessageID, messages.persisted[4].SourceReplyToMessageID)
+	}
+
+	withoutExternal := &recordingMessageService{}
+	resolver.messageService = withoutExternal
+	receiptWithoutExternal := *receipt
+	receiptWithoutExternal.ExternalMessageID = ""
+	resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID: storeRoundBotID, SessionID: "44444444-4444-4444-4444-444444444444",
+		Query: "initial", ExternalMessageID: "external-a", SessionType: "chat", RuntimeType: "model",
+	}, []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("initial")},
+		{Role: "user", Content: conversation.NewTextContent("injected"), UserReceipt: &receiptWithoutExternal},
+		{Role: "assistant", Content: conversation.NewTextContent("done")},
+	}, "", storeRoundOptions{})
+	if got := withoutExternal.persisted[2].SourceReplyToMessageID; got != "" {
+		t.Fatalf("assistant after receipt without external ID replied to %q, want empty", got)
+	}
+}
+
 func TestStoreRoundRemapsMetadataAcrossSyntheticToolClosure(t *testing.T) {
 	t.Parallel()
 
@@ -224,6 +372,7 @@ func TestStoreRoundRemapsMetadataAcrossSyntheticToolClosure(t *testing.T) {
 		}},
 	}})[0]
 	failureMetadata := map[string]any{"error": "runtime failed", "stop_reason": "error"}
+	sourceContext := messagesource.NewV1("Original Sender", "telegram", "private", "Original Chat")
 
 	_, err := resolver.storeRoundWithOptionsResult(context.Background(), conversation.ChatRequest{
 		BotID:       storeRoundBotID,
@@ -232,7 +381,15 @@ func TestStoreRoundRemapsMetadataAcrossSyntheticToolClosure(t *testing.T) {
 		SessionType: "chat",
 		RuntimeType: "acp_agent",
 	}, []conversation.ModelMessage{
-		{Role: "user", Content: conversation.NewTextContent("hello")},
+		{
+			Role:    "user",
+			Content: conversation.NewTextContent("hello"),
+			UserReceipt: &conversation.UserMessageReceipt{
+				ExternalMessageID: "external-original",
+				DisplayText:       "hello",
+				SourceContext:     sourceContext,
+			},
+		},
 		call,
 		{Role: "assistant", Content: conversation.NewTextContent("runtime failed")},
 	}, "", storeRoundOptions{
@@ -253,5 +410,9 @@ func TestStoreRoundRemapsMetadataAcrossSyntheticToolClosure(t *testing.T) {
 	}
 	if messages.batchInputs[3].Metadata["error"] != "runtime failed" || messages.batchInputs[3].Metadata["stop_reason"] != "error" {
 		t.Fatalf("failure metadata moved or disappeared: %#v", messages.batchInputs[3].Metadata)
+	}
+	if messages.batchInputs[0].ExternalMessageID != "external-original" ||
+		messages.batchInputs[0].SourceContext != sourceContext {
+		t.Fatalf("tool closure repair lost user receipt: %#v", messages.batchInputs[0])
 	}
 }

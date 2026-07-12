@@ -35,6 +35,7 @@ func repairToolCallClosuresWithSources(messages []conversation.ModelMessage, rea
 		message := converted[0]
 		if !entry.Synthetic && entry.SourceIndex >= 0 && entry.SourceIndex < len(messages) {
 			message.Usage = messages[entry.SourceIndex].Usage
+			message.UserReceipt = messages[entry.SourceIndex].UserReceipt
 		}
 		repaired.messages = append(repaired.messages, message)
 		sourceIndex := -1
