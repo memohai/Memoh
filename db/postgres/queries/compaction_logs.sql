@@ -347,7 +347,7 @@ WITH direct_invalid AS (
       OR EXISTS (
         SELECT 1
         FROM bot_history_topology_pending pending
-        WHERE pending.transaction_id = pg_current_xact_id()
+        WHERE pending.transaction_id = pg_current_xact_id_if_assigned()
           AND pending.session_id = topology.session_id
           AND pending.turn_position BETWEEN
               topology.range_start_turn_position AND topology.range_end_turn_position

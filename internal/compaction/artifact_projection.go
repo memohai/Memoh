@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/internal/contextfrag"
+	"github.com/memohai/memoh/internal/historyfrag"
 )
 
 type LineageIssueKind string
@@ -70,7 +71,16 @@ func (f ArtifactFrontier) Resolve(lineageID string) (Artifact, bool) {
 
 func (f ArtifactFrontier) ResolveCoveredRef(ref contextfrag.ContextRef) (Artifact, bool) {
 	covered, ok := f.coverage[ref.StableKey()]
-	if !ok || !compatibleCoverageRef(ref, covered.ref) {
+	if !ok || !compatibleCoverageRef(ref, covered.source.Ref) {
+		return Artifact{}, false
+	}
+	artifact, ok := f.byID[covered.artifactID]
+	return artifact, ok
+}
+
+func (f ArtifactFrontier) ResolveCoveredRecord(record historyfrag.HistoryRecord) (Artifact, bool) {
+	covered, ok := f.coverage[record.Ref.StableKey()]
+	if !ok || !coveredSourceMatchesRecord(covered.source, record) {
 		return Artifact{}, false
 	}
 	artifact, ok := f.byID[covered.artifactID]
@@ -88,7 +98,7 @@ func (f ArtifactFrontier) ResolveCoverageIdentity(ref contextfrag.ContextRef) (A
 
 type artifactCoverageAlias struct {
 	artifactID string
-	ref        contextfrag.ContextRef
+	source     CoveredSource
 }
 
 func buildArtifactFrontier(artifacts []Artifact) ArtifactFrontier {
@@ -159,7 +169,7 @@ func buildArtifactFrontierForOwner(artifacts []Artifact, owner ArtifactOwner) Ar
 			key := source.Ref.StableKey()
 			previous, exists := coverageOwners[key]
 			if !exists || previous.artifactID == artifactID {
-				coverageOwners[key] = artifactCoverageAlias{artifactID: artifactID, ref: source.Ref}
+				coverageOwners[key] = artifactCoverageAlias{artifactID: artifactID, source: source}
 				continue
 			}
 			lineageIssue := LineageIssue{Kind: LineageIssueCoverageOverlap, ArtifactID: artifactID, RelatedID: previous.artifactID}
@@ -179,7 +189,7 @@ func buildArtifactFrontierForOwner(artifacts []Artifact, owner ArtifactOwner) Ar
 	coverageOwners = make(map[string]artifactCoverageAlias)
 	for artifactID, artifact := range active {
 		for _, source := range artifact.Coverage {
-			coverageOwners[source.Ref.StableKey()] = artifactCoverageAlias{artifactID: artifactID, ref: source.Ref}
+			coverageOwners[source.Ref.StableKey()] = artifactCoverageAlias{artifactID: artifactID, source: source}
 		}
 	}
 

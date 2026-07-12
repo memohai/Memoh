@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/memohai/memoh/internal/contextfrag"
+	"github.com/memohai/memoh/internal/historyfrag"
 )
 
 func TestArtifactFrontierRejectsDerivedCoverageThatDropsParentSources(t *testing.T) {
@@ -22,6 +23,46 @@ func TestArtifactFrontierRejectsDerivedCoverageThatDropsParentSources(t *testing
 
 	if len(frontier.Artifacts) != 0 || !hasLineageIssue(frontier.Issues, LineageIssueCoverageMismatch) {
 		t.Fatalf("incomplete derived coverage was accepted: frontier=%#v issues=%#v", frontier.Artifacts, frontier.Issues)
+	}
+}
+
+func TestArtifactFrontierResolvesCoveredRecordByExactPersistedSource(t *testing.T) {
+	t.Parallel()
+
+	artifact := testArtifact("exact-record")
+	source := testCoverage("row-1")[0]
+	source.ExternalMessageID = " external-1 "
+	source.SourceReplyToMessageID = " reply-1 "
+	source.CreatedAtMs = 42
+	artifact.Coverage = []CoveredSource{source}
+	frontier := buildArtifactFrontier([]Artifact{artifact})
+	record := historyfrag.HistoryRecord{
+		Ref:                    source.Ref,
+		ExternalMessageID:      "external-1",
+		SourceReplyToMessageID: "reply-1",
+		CreatedAt:              time.UnixMilli(42),
+	}
+	if resolved, ok := frontier.ResolveCoveredRecord(record); !ok || resolved.ID != artifact.ID {
+		t.Fatalf("exact covered record = %#v, %v; want %q", resolved, ok, artifact.ID)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*historyfrag.HistoryRecord)
+	}{
+		{name: "hash", mutate: func(record *historyfrag.HistoryRecord) { record.Ref.ContentHash = "different" }},
+		{name: "external id", mutate: func(record *historyfrag.HistoryRecord) { record.ExternalMessageID = "different" }},
+		{name: "reply id", mutate: func(record *historyfrag.HistoryRecord) { record.SourceReplyToMessageID = "different" }},
+		{name: "created at", mutate: func(record *historyfrag.HistoryRecord) { record.CreatedAt = time.UnixMilli(43) }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			changed := record
+			test.mutate(&changed)
+			if _, ok := frontier.ResolveCoveredRecord(changed); ok {
+				t.Fatalf("mismatched %s resolved through exact coverage", test.name)
+			}
+		})
 	}
 }
 

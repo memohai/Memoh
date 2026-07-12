@@ -63,19 +63,23 @@ func (a Artifact) HistoryRecord(scope contextfrag.Scope) historyfrag.HistoryReco
 }
 
 func (a Artifact) CoversRecord(record historyfrag.HistoryRecord) bool {
-	createdAtMs := int64(0)
-	if !record.CreatedAt.IsZero() {
-		createdAtMs = record.CreatedAt.UnixMilli()
-	}
 	for _, source := range a.Coverage {
-		if compatibleCoverageRef(record.Ref, source.Ref) &&
-			strings.TrimSpace(source.ExternalMessageID) == strings.TrimSpace(record.ExternalMessageID) &&
-			strings.TrimSpace(source.SourceReplyToMessageID) == strings.TrimSpace(record.SourceReplyToMessageID) &&
-			source.CreatedAtMs == createdAtMs {
+		if coveredSourceMatchesRecord(source, record) {
 			return true
 		}
 	}
 	return false
+}
+
+func coveredSourceMatchesRecord(source CoveredSource, record historyfrag.HistoryRecord) bool {
+	createdAtMs := int64(0)
+	if !record.CreatedAt.IsZero() {
+		createdAtMs = record.CreatedAt.UnixMilli()
+	}
+	return compatibleCoverageRef(record.Ref, source.Ref) &&
+		strings.TrimSpace(source.ExternalMessageID) == strings.TrimSpace(record.ExternalMessageID) &&
+		strings.TrimSpace(source.SourceReplyToMessageID) == strings.TrimSpace(record.SourceReplyToMessageID) &&
+		source.CreatedAtMs == createdAtMs
 }
 
 type artifactMetadata struct {

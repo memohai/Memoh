@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/internal/contextfrag"
+	"github.com/memohai/memoh/internal/historyfrag"
 )
 
 type ArtifactCatalog struct {
@@ -40,6 +41,14 @@ func (c *ArtifactCatalog) ResolveCoveredRef(owner ArtifactOwner, ref contextfrag
 	return frontier.ResolveCoveredRef(ref)
 }
 
+func (c *ArtifactCatalog) ResolveCoveredRecord(owner ArtifactOwner, record historyfrag.HistoryRecord) (Artifact, bool) {
+	frontier, ok := c.frontiers[normalizeArtifactOwner(owner)]
+	if !ok {
+		return Artifact{}, false
+	}
+	return frontier.ResolveCoveredRecord(record)
+}
+
 func (c *ArtifactCatalog) ResolveCoverageIdentity(owner ArtifactOwner, ref contextfrag.ContextRef) (Artifact, bool) {
 	frontier, ok := c.frontiers[normalizeArtifactOwner(owner)]
 	if !ok {
@@ -62,7 +71,7 @@ func NewArtifactAliasFrontier(lineageID string, artifact Artifact) ArtifactFront
 	}
 	coverage := make(map[string]artifactCoverageAlias, len(artifact.Coverage))
 	for _, source := range artifact.Coverage {
-		coverage[source.Ref.StableKey()] = artifactCoverageAlias{artifactID: artifact.ID, ref: source.Ref}
+		coverage[source.Ref.StableKey()] = artifactCoverageAlias{artifactID: artifact.ID, source: source}
 	}
 	return ArtifactFrontier{
 		Artifacts: []Artifact{artifact},
@@ -119,7 +128,9 @@ func MergeArtifactFrontiers(frontiers ...ArtifactFrontier) ArtifactFrontier {
 		}
 		for key, covered := range frontier.coverage {
 			if existing, ok := merged.coverage[key]; ok &&
-				(existing.artifactID != covered.artifactID || !compatibleCoverageRef(existing.ref, covered.ref) || !compatibleCoverageRef(covered.ref, existing.ref)) {
+				(existing.artifactID != covered.artifactID ||
+					!compatibleCoveredSource(existing.source, covered.source) ||
+					!compatibleCoveredSource(covered.source, existing.source)) {
 				conflicted[existing.artifactID] = struct{}{}
 				conflicted[covered.artifactID] = struct{}{}
 				addIssue(LineageIssueCoverageOverlap, existing.artifactID, covered.artifactID)

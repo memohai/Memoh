@@ -219,16 +219,15 @@ func resolveCatalogArtifact(catalog *compaction.ArtifactCatalog, owner compactio
 	if compactID := strings.TrimSpace(record.CompactID); compactID != "" {
 		if artifact, ok := catalog.Resolve(owner, compactID); ok {
 			isSummary := record.SourceKind == historyfrag.SourceCompactionLog && record.Kind == contextfrag.KindConversationSummary
-			if isSummary || (!artifact.CoverageMalformed && len(artifact.Coverage) == 0) || artifact.CoversRecord(record) {
+			covered, coverageMatches := catalog.ResolveCoveredRecord(owner, record)
+			if isSummary ||
+				(!artifact.CoverageMalformed && len(artifact.Coverage) == 0) ||
+				(coverageMatches && covered.ID == artifact.ID) {
 				return artifact, true
 			}
 		}
 	}
-	artifact, ok := catalog.ResolveCoverageIdentity(owner, record.Ref)
-	if !ok || !artifact.CoversRecord(record) {
-		return compaction.Artifact{}, false
-	}
-	return artifact, true
+	return catalog.ResolveCoveredRecord(owner, record)
 }
 
 func conflictingArtifactIDs(catalog *compaction.ArtifactCatalog, messages []historyfrag.HistoryRecord, fallback contextfrag.Scope) map[string]struct{} {
@@ -239,7 +238,11 @@ func conflictingArtifactIDs(catalog *compaction.ArtifactCatalog, messages []hist
 		}
 		owner := recordArtifactOwner(record, fallback)
 		check := func(artifact compaction.Artifact, ok bool) {
-			if !ok || len(artifact.Coverage) == 0 || artifact.CoversRecord(record) {
+			if !ok || len(artifact.Coverage) == 0 {
+				return
+			}
+			covered, matches := catalog.ResolveCoveredRecord(owner, record)
+			if matches && covered.ID == artifact.ID {
 				return
 			}
 			blocked[artifact.ID] = struct{}{}
