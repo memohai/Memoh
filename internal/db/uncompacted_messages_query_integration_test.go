@@ -66,18 +66,20 @@ func TestListUncompactedMessagesReclaimEligibility(t *testing.T) {
 	}
 
 	logs := map[string]string{
-		"usable":  uuid.NewString(),
-		"error":   uuid.NewString(),
-		"pending": uuid.NewString(),
-		"poison":  uuid.NewString(),
+		"usable":     uuid.NewString(),
+		"error":      uuid.NewString(),
+		"pending":    uuid.NewString(),
+		"poison":     uuid.NewString(),
+		"whitespace": uuid.NewString(),
 	}
 	if _, err := tx.Exec(ctx, `
 INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary) VALUES
-  ($1, $5, $6, 'ok', 'a usable summary'),
-  ($2, $5, $6, 'error', ''),
-  ($3, $5, $6, 'pending', ''),
-  ($4, $5, $6, 'ok', '')
-`, logs["usable"], logs["error"], logs["pending"], logs["poison"], botID, sessionID); err != nil {
+  ($1, $6, $7, 'ok', 'a usable summary'),
+  ($2, $6, $7, 'error', ''),
+  ($3, $6, $7, 'pending', ''),
+  ($4, $6, $7, 'ok', ''),
+  ($5, $6, $7, 'ok', E'  \n\t')
+`, logs["usable"], logs["error"], logs["pending"], logs["poison"], logs["whitespace"], botID, sessionID); err != nil {
 		t.Fatalf("insert compact logs: %v", err)
 	}
 
@@ -93,6 +95,7 @@ INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summar
 		{name: "log failed", compactID: logs["error"], eligible: true},
 		{name: "log never completed", compactID: logs["pending"], eligible: true},
 		{name: "legacy ok with empty summary", compactID: logs["poison"], eligible: true},
+		{name: "legacy ok with whitespace-only summary", compactID: logs["whitespace"], eligible: true},
 		{name: "passive sync", metadata: `{"trigger_mode":"passive_sync"}`, eligible: false},
 	}
 	wantEligible := make(map[string]string)

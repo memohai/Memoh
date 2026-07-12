@@ -4348,13 +4348,14 @@ LEFT JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN bot_channel_routes r ON r.id = s.route_id
 WHERE m.session_id = $1
   -- Rows stay eligible unless their compact log holds a usable summary,
-  -- matching the read path's substitution predicate (status ok AND non-empty
+  -- matching the read path's substitution predicate (status ok AND non-blank
   -- summary). This also reclaims rows stranded by a crash between mark and
   -- complete, by deleted logs, and legacy status='ok' rows whose summary is
-  -- empty (the pre-existing poison state).
+  -- empty or whitespace-only (the pre-existing poison states).
   AND (m.compact_id IS NULL OR NOT EXISTS (
     SELECT 1 FROM bot_history_message_compacts c
-    WHERE c.id = m.compact_id AND c.status = 'ok' AND c.summary <> ''
+    WHERE c.id = m.compact_id AND c.status = 'ok'
+      AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL
   ))
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC

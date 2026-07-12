@@ -348,7 +348,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	}
 	var priorSummaries []string
 	for _, l := range priorLogs {
-		if l.Summary != "" {
+		if strings.TrimSpace(l.Summary) != "" {
 			priorSummaries = append(priorSummaries, l.Summary)
 		}
 	}

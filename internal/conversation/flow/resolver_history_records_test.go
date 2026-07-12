@@ -148,6 +148,14 @@ func TestReplaceCompactedHistoryRecordsKeepsOriginalGroupWithoutSummary(t *testi
 	if gotMessages := historyfrag.ToModelMessages(gotEmpty); !reflect.DeepEqual(gotMessages, historyfrag.ToModelMessages(records)) {
 		t.Fatalf("empty summary should keep original group:\ngot  %#v\nwant %#v", gotMessages, historyfrag.ToModelMessages(records))
 	}
+
+	// A legacy status='ok' log can hold a whitespace-only summary (main never
+	// trimmed). Substituting it would drop the raw rows for nothing, and the
+	// reclaim SQL treats such rows as still eligible — the read path must agree.
+	gotWhitespace := replaceCompactedHistoryRecords(records, map[string]string{"compact-1": "  \n\t"}, contextfrag.Scope{})
+	if gotMessages := historyfrag.ToModelMessages(gotWhitespace); !reflect.DeepEqual(gotMessages, historyfrag.ToModelMessages(records)) {
+		t.Fatalf("whitespace-only summary should keep original group:\ngot  %#v\nwant %#v", gotMessages, historyfrag.ToModelMessages(records))
+	}
 }
 
 func TestReplaceCompactedHistoryRecordsKeepsMustKeepIslandOrdering(t *testing.T) {

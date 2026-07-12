@@ -239,6 +239,23 @@ func TestDoCompactionInjectsPriorContext(t *testing.T) {
 	}
 }
 
+func TestDoCompactionSkipsWhitespaceOnlyPriorSummaries(t *testing.T) {
+	rows := machineryCorpus(t)
+	q := &fakeQueries{
+		uncompacted: rows,
+		priorLogs:   []sqlc.BotHistoryMessageCompact{{Summary: "  \n\t", Status: "ok"}},
+	}
+	stub := &stubModel{summary: "S3"}
+	svc := newMachineryService(q)
+
+	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450)); err != nil {
+		t.Fatalf("RunCompactionSync: %v", err)
+	}
+	if strings.Contains(stub.prompt, "The following are summaries of earlier parts") {
+		t.Fatalf("whitespace-only prior summary injected as prior context:\n%s", stub.prompt)
+	}
+}
+
 func TestDoCompactionAllEmptyWindowSkipsModelAndMarking(t *testing.T) {
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
 		mkRow(t, "assistant", `[{"type":"reasoning","text":"thinking a"}]`, 100),
