@@ -7,6 +7,11 @@ DROP FUNCTION IF EXISTS bump_message_source_revision_for_asset();
 DROP TRIGGER IF EXISTS history_message_source_revision_bump
   ON bot_history_messages;
 DROP FUNCTION IF EXISTS bump_history_message_source_revision();
+DROP TRIGGER IF EXISTS history_message_source_context_capture
+  ON bot_history_messages;
+DROP FUNCTION IF EXISTS capture_history_message_source_context();
+DROP FUNCTION IF EXISTS resolve_history_message_source_context(bot_history_messages);
+DROP FUNCTION IF EXISTS normalize_history_message_source_text(TEXT);
 
 DROP TRIGGER IF EXISTS compaction_message_claim_finalize
   ON bot_history_message_compacts;

@@ -361,7 +361,8 @@ ALTER TABLE bot_history_messages
   ADD COLUMN runtime_type TEXT NOT NULL DEFAULT 'model',
   ADD COLUMN model_id UUID,
   ADD COLUMN event_id UUID,
-  ADD COLUMN display_text TEXT;
+  ADD COLUMN display_text TEXT,
+  ADD COLUMN source_context JSONB;
 CREATE TABLE channel_identities (
   id UUID PRIMARY KEY,
   display_name TEXT,
