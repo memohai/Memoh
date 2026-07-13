@@ -316,6 +316,7 @@ type InjectMessage struct {
 	Text            string
 	Attachments     []ChatAttachment
 	HeaderifiedText string
+	Applied         func()
 }
 
 // InjectedMessageRecord records a message that was injected via PrepareStep,
