@@ -44,28 +44,32 @@
           {{ vRow.row.label }}
         </div>
 
-        <button
+        <ModelDescriptionTooltip
           v-else
-          :id="`${listboxId}-${vRow.virtual.index}`"
-          type="button"
-          role="option"
-          :aria-selected="modelValue === vRow.row.option.value"
-          :aria-setsize="optionCount"
-          :aria-posinset="vRow.row.posinset"
-          :data-highlighted="activeIndex === vRow.virtual.index ? '' : undefined"
-          :class="menuItemClass"
-          @click="$emit('update:modelValue', vRow.row.option.value)"
-          @pointermove="activeIndex = vRow.virtual.index"
+          :description="vRow.row.option.description"
         >
-          <span
-            class="min-w-0 flex-1 truncate text-left"
-            :title="vRow.row.option.label"
-          >{{ vRow.row.option.label }}</span>
-          <Check
-            v-if="modelValue === vRow.row.option.value"
-            class="ml-2 size-4 shrink-0"
-          />
-        </button>
+          <button
+            :id="`${listboxId}-${vRow.virtual.index}`"
+            type="button"
+            role="option"
+            :aria-selected="modelValue === vRow.row.option.value"
+            :aria-setsize="optionCount"
+            :aria-posinset="vRow.row.posinset"
+            :data-highlighted="activeIndex === vRow.virtual.index ? '' : undefined"
+            :class="menuItemClass"
+            @click="$emit('update:modelValue', vRow.row.option.value)"
+            @pointermove="activeIndex = vRow.virtual.index"
+          >
+            <span
+              class="min-w-0 flex-1 truncate text-left"
+              :title="vRow.row.option.label"
+            >{{ vRow.row.option.label }}</span>
+            <Check
+              v-if="modelValue === vRow.row.option.value"
+              class="ml-2 size-4 shrink-0"
+            />
+          </button>
+        </ModelDescriptionTooltip>
       </div>
     </div>
   </div>
@@ -78,10 +82,13 @@ import { Check } from 'lucide-vue-next'
 import { menuItemClass, menuLabelClass, menuSearchHeaderClass, menuSearchInputClass, virtualListboxClass } from '@felinic/ui'
 import type { ModelsGetResponse, ModelsModelType, ProvidersGetResponse } from '@memohai/sdk'
 import { useListboxKeyboard } from '@/composables/useListboxKeyboard'
+import ModelDescriptionTooltip from '@/components/model-description-tooltip/index.vue'
+import { getModelDescription, matchesModelSearch } from '@/utils/model-description'
 
 export interface ModelOption {
   value: string
   label: string
+  modelId: string
   description?: string
   groupKey: string
   groupLabel: string
@@ -151,7 +158,8 @@ const options = computed<ModelOption[]>(() =>
     return {
       value: model.id || model.model_id || '',
       label: model.name || model.model_id || '',
-      description: model.name ? model.model_id : undefined,
+      modelId: model.model_id || '',
+      description: getModelDescription(model.config),
       groupKey: providerId,
       groupLabel: providerMap.value.get(providerId) ?? providerId,
       keywords: [model.model_id ?? '', model.name ?? ''],
@@ -166,6 +174,7 @@ const noneOption = computed<ModelOption | undefined>(() =>
     ? {
         value: '',
         label: props.noneLabel,
+        modelId: '',
         description: undefined,
         groupKey: '',
         groupLabel: '',
@@ -178,11 +187,7 @@ const filteredOptions = computed(() => {
   const keyword = searchTerm.value.trim().toLowerCase()
   if (!keyword) return options.value
   return options.value.filter((opt) => {
-    const terms = [opt.label, opt.description, ...opt.keywords]
-      .filter((t): t is string => Boolean(t))
-      .join(' ')
-      .toLowerCase()
-    return terms.includes(keyword)
+    return matchesModelSearch(keyword, [opt.label, opt.modelId, opt.description, ...opt.keywords])
   })
 })
 

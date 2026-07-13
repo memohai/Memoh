@@ -896,6 +896,8 @@
     "modelIdRequired": "モデル ID を入力してください",
     "displayName": "表示名",
     "displayNamePlaceholder": "カスタム表示名",
+    "description": "モデルの説明",
+    "descriptionPlaceholder": "モデルの用途や特徴を簡潔に入力",
     "dimensions": "寸法",
     "dimensionsPlaceholder": "例: 1536",
     "dimensionsMin": "次元数は 0 より大きい値にしてください",

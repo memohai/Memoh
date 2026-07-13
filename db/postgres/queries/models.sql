@@ -188,7 +188,11 @@ VALUES (sqlc.arg(model_id), sqlc.arg(name), sqlc.arg(provider_id), sqlc.arg(type
 ON CONFLICT (provider_id, model_id) DO UPDATE SET
   name = EXCLUDED.name,
   type = EXCLUDED.type,
-  config = EXCLUDED.config,
+  config = CASE
+    WHEN models.config ? 'description'
+      THEN EXCLUDED.config || jsonb_build_object('description', models.config -> 'description')
+    ELSE EXCLUDED.config
+  END,
   updated_at = now()
 RETURNING *;
 

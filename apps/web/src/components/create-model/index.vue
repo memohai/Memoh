@@ -95,6 +95,27 @@
             </FieldStack>
           </FormField>
 
+          <FormField
+            v-slot="{ componentField }"
+            name="description"
+          >
+            <FieldStack for="create-model-description">
+              <template #label>
+                <Label for="create-model-description">
+                  {{ $t('models.description') }}
+                  <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
+                </Label>
+              </template>
+              <FormControl>
+                <Textarea
+                  id="create-model-description"
+                  :placeholder="$t('models.descriptionPlaceholder')"
+                  v-bind="componentField"
+                />
+              </FormControl>
+            </FieldStack>
+          </FormField>
+
           <!-- Dimensions (embedding only) -->
           <FormField
             v-if="selectedType === 'embedding'"
@@ -179,6 +200,7 @@ import {
   SelectValue,
   Checkbox,
   Label,
+  Textarea,
 } from '@felinic/ui'
 import type { ButtonVariants } from '@felinic/ui'
 import { useForm } from 'vee-validate'
@@ -193,6 +215,7 @@ import { COMPATIBILITY_OPTIONS } from '@/constants/compatibilities'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import FieldStack from '@/components/settings/field-stack.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
+import { buildModelConfig } from './model-config'
 
 interface ModelTypeOption {
   value: string
@@ -207,6 +230,7 @@ const formSchema = toTypedSchema(z.object({
   type: z.string().min(1, t('models.typeRequired')),
   model_id: z.string().min(1, t('models.modelIdRequired')),
   name: z.string().optional(),
+  description: z.string().optional(),
   dimensions: z.coerce.number().min(1, t('models.dimensionsMin')).optional(),
   context_window: z.coerce.number().min(1, t('models.contextWindowMin')).optional(),
 }))
@@ -305,18 +329,14 @@ async function addModel() {
 
   if (!type || !model_id) return
 
-  const config: Record<string, unknown> = {}
-
-  if (type === 'embedding') {
-    const dim = form.values.dimensions ?? (isEdit ? fallback!.config?.dimensions : undefined)
-    if (dim) config.dimensions = dim
-  }
-
-  if (type === 'chat') {
-    config.compatibilities = selectedCompat.value
-    const ctxWin = form.values.context_window ?? (isEdit ? fallback!.config?.context_window : undefined)
-    if (ctxWin) config.context_window = ctxWin
-  }
+  const config = buildModelConfig({
+    type,
+    description: form.values.description,
+    dimensions: form.values.dimensions ?? (isEdit ? fallback!.config?.dimensions : undefined),
+    contextWindow: form.values.context_window ?? (isEdit ? fallback!.config?.context_window : undefined),
+    compatibilities: selectedCompat.value,
+    existing: isEdit ? fallback!.config : undefined,
+  })
 
   const payload: Record<string, unknown> = {
     type,
@@ -369,6 +389,7 @@ watch(open, async () => {
         // Older models stored name === model_id. Don't surface that as a
         // "custom" name in the field — treat it as empty so editing starts clean.
         name: name && name !== model_id ? name : '',
+        description: config?.description ?? '',
         dimensions: config?.dimensions,
         context_window: config?.context_window,
       },
@@ -380,6 +401,7 @@ watch(open, async () => {
         type: props.defaultType,
         model_id: '',
         name: '',
+        description: '',
         dimensions: undefined,
         context_window: undefined,
       },

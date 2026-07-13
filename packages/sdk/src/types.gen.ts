@@ -2329,6 +2329,7 @@ export type ModelsGetResponse = {
 export type ModelsModelConfig = {
     compatibilities?: Array<string>;
     context_window?: number;
+    description?: string;
     dimensions?: number;
     reasoning_efforts?: Array<string>;
     thinking_mode?: string;

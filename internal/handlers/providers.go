@@ -357,6 +357,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 			name = m.ID
 		}
 		cfg := models.ModelConfig{
+			Description:      m.Description,
 			Compatibilities:  compatibilities,
 			ReasoningEfforts: m.ReasoningEfforts,
 			ThinkingMode:     m.ThinkingMode,
@@ -428,6 +429,11 @@ func (h *ProvidersHandler) fillExistingModel(ctx context.Context, providerID, mo
 func mergeDiscoveredConfig(existing, discovered models.ModelConfig) (models.ModelConfig, bool) {
 	out := existing
 	changed := false
+	if out.Description == nil && discovered.Description != nil {
+		description := strings.TrimSpace(*discovered.Description)
+		out.Description = &description
+		changed = true
+	}
 	// Capability-discovery fields: a present discovery wins. The fetch layer
 	// (applyCapabilities) has already let an explicit upstream claim take
 	// precedence over the registry, so whatever arrives here is the freshest

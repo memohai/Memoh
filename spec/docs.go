@@ -18906,6 +18906,9 @@ const docTemplate = `{
                 "context_window": {
                     "type": "integer"
                 },
+                "description": {
+                    "type": "string"
+                },
                 "dimensions": {
                     "type": "integer"
                 },

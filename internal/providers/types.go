@@ -100,6 +100,7 @@ type OAuthAuthorizeResponse struct {
 // RemoteModel represents a model returned by the provider's /v1/models endpoint.
 type RemoteModel struct {
 	ID               string   `json:"id"`
+	Description      *string  `json:"description,omitempty"`
 	Object           string   `json:"object"`
 	Created          int64    `json:"created"`
 	OwnedBy          string   `json:"owned_by"`

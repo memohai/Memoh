@@ -65,14 +65,16 @@
                 class="group/row relative flex items-center gap-1 rounded-md px-1 transition-colors duration-75"
                 :class="modelValue === vRow.row.option.value ? 'bg-[var(--overlay-hover)]' : 'hover:bg-[var(--overlay-hover-light)]'"
               >
-                <button
-                  type="button"
-                  class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-control"
-                  :class="modelValue === vRow.row.option.value ? 'font-medium text-foreground' : 'text-foreground'"
-                  @click="commitModel(vRow.row.option.value)"
-                >
-                  <span class="min-w-0 flex-1 truncate">{{ vRow.row.option.label }}</span>
-                </button>
+                <ModelDescriptionTooltip :description="vRow.row.option.description">
+                  <button
+                    type="button"
+                    class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-control"
+                    :class="modelValue === vRow.row.option.value ? 'font-medium text-foreground' : 'text-foreground'"
+                    @click="commitModel(vRow.row.option.value)"
+                  >
+                    <span class="min-w-0 flex-1 truncate">{{ vRow.row.option.label }}</span>
+                  </button>
+                </ModelDescriptionTooltip>
 
                 <div class="flex shrink-0 items-center gap-1 pr-1">
                   <Check
@@ -160,6 +162,8 @@ import {
   resolveEffortLevels,
   availableEffortsForMode,
 } from '@/pages/bots/components/reasoning-effort'
+import ModelDescriptionTooltip from '@/components/model-description-tooltip/index.vue'
+import { getModelDescription, matchesModelSearch } from '@/utils/model-description'
 
 const props = defineProps<{
   models: ModelsGetResponse[]
@@ -197,6 +201,8 @@ const typeFilteredModels = computed(() =>
 interface ModelOption {
   value: string
   label: string
+  modelId: string
+  description?: string
   groupKey: string
   groupLabel: string
   config: ModelsGetResponse['config']
@@ -223,6 +229,8 @@ const options = computed<ModelOption[]>(() =>
     return {
       value: model.id || model.model_id || '',
       label: model.name || model.model_id || '',
+      modelId: model.model_id || '',
+      description: getModelDescription(model.config),
       groupKey: providerId,
       groupLabel: providerMap.value.get(providerId) ?? providerId,
       config: model.config,
@@ -234,9 +242,7 @@ const options = computed<ModelOption[]>(() =>
 const filteredGroups = computed(() => {
   const keyword = searchTerm.value.trim().toLowerCase()
   const filtered = keyword
-    ? options.value.filter((opt) =>
-        [opt.label, opt.value].some((s) => s.toLowerCase().includes(keyword)),
-      )
+    ? options.value.filter(opt => matchesModelSearch(keyword, [opt.label, opt.modelId, opt.description]))
     : options.value
 
   const groups = new Map<string, { key: string; label: string; items: ModelOption[] }>()
