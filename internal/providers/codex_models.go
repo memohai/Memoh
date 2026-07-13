@@ -115,7 +115,7 @@ func (s *Service) listCodexRemoteModels(ctx context.Context, baseURL string, cre
 		reasoningEfforts := make([]string, 0, len(model.SupportedReasoningLevels))
 		for _, level := range model.SupportedReasoningLevels {
 			effort := strings.TrimSpace(level.Effort)
-			if effort != "" && !containsFold(reasoningEfforts, effort) {
+			if models.IsValidReasoningEffort(effort) && !containsFold(reasoningEfforts, effort) {
 				reasoningEfforts = append(reasoningEfforts, effort)
 			}
 		}

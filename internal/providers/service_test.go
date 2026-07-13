@@ -128,6 +128,7 @@ func TestListCodexRemoteModels(t *testing.T) {
 						{"effort": "low"},
 						{"effort": "medium"},
 						{"effort": "high"},
+						{"effort": "future"},
 						{"effort": "xhigh"},
 						{"effort": "max"},
 						{"effort": "ultra"},
