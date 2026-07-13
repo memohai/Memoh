@@ -269,12 +269,13 @@ func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir strin
 // prepareLocalProcessEnv builds the managed env overrides for a local (desktop)
 // workspace. Local agents run as host processes that inherit the host
 // environment (the bridge appends our entries onto os.Environ), so we only add
-// the BYOK overrides and never touch HOME/PATH. Self mode returns no overrides
-// so the host's own agent login is used as-is.
+// the BYOK overrides and never touch HOME/PATH. Self mode keeps the host's own
+// agent login and config, but still carries the narrow runtime-isolation
+// overrides that do not affect authentication.
 func prepareLocalProcessEnv(opts processOptions) ([]string, error) {
 	mode := normalizeSetupMode(opts.SetupMode)
 	if mode == SetupModeSelf {
-		return nil, nil
+		return npmCacheEnv(opts.Env), nil
 	}
 	env := append([]string(nil), opts.Env...)
 	if isCodexAgent(opts.AgentID) {
@@ -525,6 +526,16 @@ func withoutEnvKeys(env []string, keys ...string) []string {
 		out = append(out, item)
 	}
 	return out
+}
+
+func npmCacheEnv(env []string) []string {
+	for i := len(env) - 1; i >= 0; i-- {
+		key, _, ok := strings.Cut(env[i], "=")
+		if ok && strings.EqualFold(key, "NPM_CONFIG_CACHE") {
+			return []string{env[i]}
+		}
+	}
+	return nil
 }
 
 func withoutBlockedEnvNames(env []string, blocked []string) []string {

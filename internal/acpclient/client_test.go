@@ -65,6 +65,57 @@ func (w *rotatingTestWorkspace) WorkspaceInfo(context.Context, string) (bridge.W
 	return w.info, nil
 }
 
+func TestRunnerResolveACPAdapterVersion(t *testing.T) {
+	client, recorder := newRecordingBridgeClient(t)
+	command := "npm view @agentclientprotocol/codex-acp dist-tags.latest --json"
+	recorder.setStdout(command, "\"1.2.3-beta.1\"\n")
+	runner := NewRunner(nil, testWorkspace{
+		client: client,
+		info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendContainer,
+			DefaultWorkDir: "/data",
+		},
+	})
+	env := []string{"NPM_CONFIG_CACHE=/data/.memoh/acp/npm-cache", "SSL_CERT_FILE=/opt/memoh/toolkit/certs/ca-certificates.crt"}
+
+	version, err := runner.ResolveACPAdapterVersion(context.Background(), "bot-1", "@agentclientprotocol/codex-acp", env)
+	if err != nil {
+		t.Fatalf("ResolveACPAdapterVersion() error = %v", err)
+	}
+	if version != "1.2.3-beta.1" {
+		t.Fatalf("ResolveACPAdapterVersion() = %q", version)
+	}
+	records := recorder.records()
+	if len(records) != 1 {
+		t.Fatalf("adapter version exec records = %#v", records)
+	}
+	record := records[0]
+	if record.Command != command || record.WorkDir != "/data" || record.Timeout != acpAdapterVersionLookupTimeoutSeconds {
+		t.Fatalf("adapter version exec record = %#v", record)
+	}
+	if len(record.Env) != len(env) || record.Env[0] != env[0] || record.Env[1] != env[1] {
+		t.Fatalf("adapter version exec env = %#v, want %#v", record.Env, env)
+	}
+}
+
+func TestRunnerResolveACPAdapterVersionRejectsMutableOrUnsafeSpecs(t *testing.T) {
+	client, recorder := newRecordingBridgeClient(t)
+	command := "npm view @agentclientprotocol/codex-acp dist-tags.latest --json"
+	runner := NewRunner(nil, testWorkspace{
+		client: client,
+		info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendContainer,
+			DefaultWorkDir: "/data",
+		},
+	})
+	for _, output := range []string{`"latest"`, `"1.2"`, `"1.2.3; touch /tmp/pwned"`, `{}`} {
+		recorder.setStdout(command, output)
+		if _, err := runner.ResolveACPAdapterVersion(context.Background(), "bot-1", "@agentclientprotocol/codex-acp", nil); err == nil {
+			t.Fatalf("ResolveACPAdapterVersion() unexpectedly accepted %s", output)
+		}
+	}
+}
+
 func TestRunnerRunLocalWorkspaceFakeAgent(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "project")

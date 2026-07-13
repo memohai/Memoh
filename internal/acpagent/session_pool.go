@@ -92,6 +92,10 @@ type SessionPool struct {
 	userInput pendingUserInputCanceller
 	timeout   time.Duration
 
+	adapterMu                  sync.Mutex
+	adapterStates              map[string]*adapterUpgradeState
+	dynamicAdapterStartTimeout time.Duration
+
 	mu        sync.RWMutex
 	runtimes  map[string]*runtimeHandle
 	bySession map[string]string
@@ -959,7 +963,7 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	if err != nil {
 		return fail(err)
 	}
-	sess, err := p.runner.StartSession(startCtx, acpclient.StartRequest{
+	startReq := acpclient.StartRequest{
 		AgentID:                h.agentID,
 		BotID:                  h.botID,
 		ProjectPath:            h.projectPath,
@@ -984,7 +988,23 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		ToolGateway:     p.tools,
 		ToolSession:     h.stableToolIdentity(),
 		ToolApproval:    p.approval,
-	}, opts.Sink)
+	}
+
+	var sess *acpclient.Session
+	sess, err = p.startDynamicAdapter(startCtx, profile, workspaceInfo, startReq, opts.Sink)
+	if err != nil {
+		if startCtx.Err() != nil {
+			return fail(err)
+		}
+		p.logger.Warn("dynamic ACP adapter unavailable; falling back to bundled version",
+			slog.String("bot_id", h.botID),
+			slog.String("agent_id", h.agentID),
+			slog.String("runtime_id", h.id),
+			slog.Any("error", err))
+	}
+	if sess == nil {
+		sess, err = p.runner.StartSession(startCtx, startReq, opts.Sink)
+	}
 	if err != nil {
 		return fail(err)
 	}
