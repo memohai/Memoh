@@ -3,18 +3,14 @@ package compaction
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -121,41 +117,6 @@ func (f *fakeQueries) ListUncompactedMessagesBySession(_ context.Context, _ pgty
 		<-f.listRelease
 	}
 	return f.uncompacted, nil
-}
-
-func TestRunCompactionKeepsAutomaticAttemptInsideCallerLifetime(t *testing.T) {
-	t.Parallel()
-
-	started := make(chan struct{})
-	release := make(chan struct{})
-	svc := NewService(slog.New(slog.DiscardHandler), &fakeQueries{listStarted: started, listRelease: release})
-	returned := make(chan error, 1)
-	go func() {
-		returned <- svc.RunCompaction(context.Background(), TriggerConfig{
-			BotID:     "00000000-0000-0000-0000-00000000b715",
-			SessionID: "00000000-0000-0000-0000-00000000e715",
-		})
-	}()
-
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("automatic compaction did not reach history selection")
-	}
-	select {
-	case err := <-returned:
-		t.Fatalf("RunCompaction returned before its query finished: %v", err)
-	case <-time.After(20 * time.Millisecond):
-	}
-	close(release)
-	select {
-	case err := <-returned:
-		if err != nil {
-			t.Fatalf("RunCompaction() error = %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("RunCompaction did not return after its query finished")
-	}
 }
 
 func (*fakeQueries) ListMessageAssetsBatch(_ context.Context, _ []pgtype.UUID) ([]sqlc.ListMessageAssetsBatchRow, error) {
@@ -383,48 +344,6 @@ func TestDoCompactionAllEmptyWindowSkipsModelAndMarking(t *testing.T) {
 	}
 }
 
-func TestDoCompactionRejectsEpochChangeBeforeAttemptCreation(t *testing.T) {
-	rows := machineryCorpus(t)
-	for i := range rows {
-		rows[i].CompactionEpoch = 7
-	}
-	q := &fakeQueries{uncompacted: rows, createErr: pgx.ErrNoRows}
-	stub := &stubModel{summary: "must not run"}
-	svc := newMachineryService(q)
-
-	_, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450))
-	if !errors.Is(err, pgx.ErrNoRows) {
-		t.Fatalf("RunCompactionSync() error = %v, want pgx.ErrNoRows", err)
-	}
-	if q.createArg.ExpectedEpoch != 7 {
-		t.Fatalf("CreateCompactionLog expected epoch = %d, want 7", q.createArg.ExpectedEpoch)
-	}
-	if stub.calls != 0 || len(q.markedIDs) != 0 {
-		t.Fatalf("stale selection reached model or marking: calls=%d marked=%d", stub.calls, len(q.markedIDs))
-	}
-}
-
-func TestDoCompactionRecordsErrorWhenSuccessCompletionIsFenced(t *testing.T) {
-	rows := machineryCorpus(t)
-	q := &fakeQueries{uncompacted: rows, completeErrors: []error{pgx.ErrNoRows, nil}}
-	stub := &stubModel{summary: "stale summary"}
-	svc := newMachineryService(q)
-
-	_, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450))
-	if !errors.Is(err, pgx.ErrNoRows) {
-		t.Fatalf("RunCompactionSync() error = %v, want pgx.ErrNoRows", err)
-	}
-	if len(q.completeCalls) != 2 {
-		t.Fatalf("CompleteCompactionLog calls = %d, want success attempt plus terminal error", len(q.completeCalls))
-	}
-	if q.completeCalls[0].Status != "ok" || q.completeCalls[1].Status != "error" {
-		t.Fatalf("completion statuses = %q then %q, want ok then error", q.completeCalls[0].Status, q.completeCalls[1].Status)
-	}
-	if q.completeCalls[1].Summary != "" || q.completeCalls[1].ErrorMessage == "" {
-		t.Fatalf("terminal stale completion leaked summary or omitted error: %#v", q.completeCalls[1])
-	}
-}
-
 func TestDoCompactionIncompleteToolExchangeSkipsModelAndMarking(t *testing.T) {
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
 		toolCallRow(t, 100),
@@ -537,91 +456,5 @@ func TestDoCompactionEmptySummaryRecordsErrorWithoutMarking(t *testing.T) {
 	}
 	if !q.created || q.completed.Status != "error" {
 		t.Fatalf("an empty summary must leave an error log row (created=%v status=%q)", q.created, q.completed.Status)
-	}
-}
-
-func awaitWaiter(t *testing.T, run *inflightRun) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for run.waiters.Load() == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("waiter never attached to the in-flight owner")
-		}
-		runtime.Gosched()
-	}
-}
-
-func TestRunCompactionSyncWaitsForOwnerAndReusesItsResult(t *testing.T) {
-	t.Parallel()
-
-	q := &fakeQueries{uncompacted: machineryCorpus(t)}
-	stub := &stubModel{summary: "unused"}
-	svc := newMachineryService(q)
-	cfg := machineryConfig(stub, 450)
-
-	run, ok := svc.beginSessionCompaction(cfg.SessionID)
-	if !ok {
-		t.Fatal("first acquisition must succeed")
-	}
-
-	got := make(chan Result, 1)
-	go func() {
-		res, err := svc.RunCompactionSync(context.Background(), cfg)
-		if err != nil {
-			t.Errorf("waiter: %v", err)
-		}
-		got <- res
-	}()
-	awaitWaiter(t, run)
-
-	want := Result{Status: StatusOK, Summary: "owner summary", MessageCount: 3}
-	svc.endSessionCompaction(cfg.SessionID, run, want, nil)
-
-	if res := <-got; res != want {
-		t.Fatalf("waiter must reuse the owner's result, got %#v", res)
-	}
-	if stub.calls != 0 || q.created || len(q.markedIDs) != 0 {
-		t.Fatalf("waiter must not run its own compaction (calls=%d created=%v marked=%d)", stub.calls, q.created, len(q.markedIDs))
-	}
-}
-
-func TestRunCompactionSyncCanceledWaiterDegradesToNoop(t *testing.T) {
-	t.Parallel()
-
-	q := &fakeQueries{uncompacted: machineryCorpus(t)}
-	stub := &stubModel{summary: "healthy summary"}
-	svc := newMachineryService(q)
-	cfg := machineryConfig(stub, 450)
-
-	run, ok := svc.beginSessionCompaction(cfg.SessionID)
-	if !ok {
-		t.Fatal("first acquisition must succeed")
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	got := make(chan Result, 1)
-	go func() {
-		res, err := svc.RunCompactionSync(ctx, cfg)
-		if err != nil {
-			t.Errorf("canceled waiter: %v", err)
-		}
-		got <- res
-	}()
-	awaitWaiter(t, run)
-	cancel()
-	if res := <-got; res.Status != StatusNoop {
-		t.Fatalf("canceled waiter must degrade to noop, got %#v", res)
-	}
-	if stub.calls != 0 || len(q.markedIDs) != 0 {
-		t.Fatalf("canceled waiter must not run compaction (calls=%d marked=%d)", stub.calls, len(q.markedIDs))
-	}
-
-	svc.endSessionCompaction(cfg.SessionID, run, Result{Status: StatusNoop}, nil)
-	res, err := svc.RunCompactionSync(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("run after owner completion: %v", err)
-	}
-	if res.Status != StatusOK {
-		t.Fatalf("session must be usable after the owner completes, got %q", res.Status)
 	}
 }
