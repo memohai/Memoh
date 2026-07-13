@@ -5,8 +5,8 @@ description: |
   新增任何面向用户的后端错误、或前端需要根据错误做业务分支时，必须先读本 skill。
   核心约束：业务判断只依赖稳定 code，用户文案由前端按语言本地化，私有诊断永不进入响应。
 metadata:
-  trigger: 新增/修改后端错误响应、SSE 错误事件、前端错误分支或错误文案
-  pilot: bot.name_taken（HTTP 409）、workspace.unreachable（HTTP 503 + SSE）、workspace.display_prepare_failed（SSE），参照实现见下文文件清单
+  trigger: 新增/修改后端错误响应、SSE 错误事件、前端错误分支或错误文案；审查错误处理相关改动
+  pilot: bot.name_taken（HTTP 409）、workspace.unreachable（HTTP 503 + SSE）、workspace.display_prepare_failed（SSE），参照实现文件见各节开头
 ---
 
 # Memoh 错误处理架构
@@ -31,9 +31,12 @@ metadata:
 
 1. **catalog 注册**（`internal/apperror/error.go`）：
    ```go
-   CodeXxxYyy Code = "xxx.yyy"   // 命名：<域>.<条件>，snake_case，点分层
+   CodeXxxYyy Code = "xxx.yyy"   // 段间用点分层（<域>.<条件>），段内 snake_case
+   //   ✓ workspace.display_prepare_failed   ✗ workspace_display.prepare-failed
    ```
    catalog 条目给 `HTTPStatus`、英文 `Detail`、`AllowedArgs` 白名单（没有公开参数就不写）。
+   目前只走 SSE 的错误也必须给 `HTTPStatus`（选语义最接近的档，如中途失败 500、
+   连接不上 503）——同一 code 未来出现在 HTTP 路径时不允许再改档。
 2. **调用点**：领域 sentinel error → `apperror.New(code, args)`（无底层 cause）
    或 `apperror.Wrap(code, cause, args)`（保留 cause 供日志）。映射放在 handler 边界，
    不要让 apperror 渗入领域层。
@@ -53,6 +56,9 @@ metadata:
   禁止 `message.includes('...')` 判断业务状态（legacy 兼容兜底除外，必须带注释说明目标旧版本）。
 - **文案**：三语言 locale 各加 `errors.xxx.yyy` 键（code 的点 = JSON 嵌套层级）。
   `resolveApiErrorMessage` 自动按 `errors.<code>` → `i18n_key`（legacy）→ `detail` 顺序渲染。
+  **错误文案是 UX，不是英文 detail 的翻译**：要回答用户"接下来能做什么"——
+  可重试的说"请稍后重试"（如 `workspace.unreachable` 的 zh 文案），需要用户改输入的
+  指向那个输入（如 `bot.name_taken`）；无法行动的错误才允许只陈述事实。
 - **HTTP status**：`apiErrorStatus(error)`。Problem body 自带 `status` 字段——这是刻意设计，
   因为 hey-api client `throw jsonError` 只抛 body、会丢 HTTP status，不要"优化"掉 body 里的 status。
 - **SSE 流**：新流复制现有三件套模式（`useBotCreateStream.ts` 为范例）：
@@ -70,6 +76,28 @@ metadata:
   不要求一次性迁移。同一 handler 内 legacy `sendError` 与新 `sendAppError` 双轨并存是过渡态。
 - `bot-create-progress` 里 409→`bot.name_taken` 的启发式是旧服务器兜底，
   新增场景禁止模仿"从 status 猜 code"。
+
+## 验证（新增/修改错误后必跑）
+
+```bash
+go test ./internal/apperror/... ./internal/server/... ./internal/handlers/...
+cd apps/web && pnpm vitest run src/utils/api-error.test.ts src/composables/api/sse-error.test.ts
+```
+
+有运行环境时实测 wire 形状（登录取 token 后）：
+
+```bash
+# HTTP：期望 application/problem+json + code/args/request_id，body 无底层诊断
+curl -si -X POST $HOST/bots -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+  -d '{"name":"<已存在的名字>","display_name":"x"}'          # 409 bot.name_taken
+curl -si "$HOST/bots/$BOT/container/fs/list?path=/" -H "Authorization: Bearer $T"
+#   ↑ 先 POST .../container/stop 再测，期望 503 workspace.unreachable
+# SSE：期望 data: {"type":"error","code":"...","request_id":"..."}，无 stderr/dial 细节
+curl -sN -X POST "$HOST/bots/$BOT/container/display/prepare" \
+  -H "Authorization: Bearer $T" -H 'Accept: text/event-stream'
+```
+
+泄漏自查一句话：把 cause 换成 `errors.New("SECRET")`，任何用户可见输出里 grep 不到 SECRET。
 
 ## 已知坑（试点审查沉淀）
 
