@@ -68,6 +68,65 @@ describe('approval response tracker', () => {
     expect(rollbackApproval).not.toHaveBeenCalled()
   })
 
+  it('marks only responses on the disconnected bot as awaiting resync', () => {
+    const tracker = createApprovalResponseTracker({ rollbackApproval: vi.fn() })
+    tracker.beginApprovalResponse({
+      ...input('stream-1', 'approval-1'),
+      decision: 'approve',
+      shortId: 7,
+    })
+    tracker.beginApprovalResponse({
+      ...input('stream-2', 'approval-2'),
+      botId: 'bot-2',
+    })
+
+    tracker.markPendingApprovalResponsesUncertain('bot-1')
+
+    expect(tracker.getApprovalResponse('stream-1')).toMatchObject({
+      awaitingResync: true,
+      replaySent: false,
+      decision: 'approve',
+      shortId: 7,
+    })
+    expect(tracker.getApprovalResponse('stream-2')?.awaitingResync).toBe(false)
+    expect(tracker.hasUncertainApprovalResponse('bot-1', 'session-1')).toBe(true)
+    expect(tracker.hasUncertainApprovalResponse('bot-2', 'session-1')).toBe(false)
+    tracker.resetApprovalResponses()
+  })
+
+  it('marks a reconnect replay only once until the next disconnect', () => {
+    const tracker = createApprovalResponseTracker({ rollbackApproval: vi.fn() })
+    tracker.beginApprovalResponse({ ...input('stream-1'), decision: 'approve' })
+    tracker.markPendingApprovalResponsesUncertain('bot-1')
+
+    expect(tracker.markApprovalResponseReplaySent('stream-1')).toBe(true)
+    expect(tracker.markApprovalResponseReplaySent('stream-1')).toBe(false)
+    expect(tracker.getApprovalResponse('stream-1')).toMatchObject({
+      awaitingResync: true,
+      replaySent: true,
+    })
+
+    tracker.markPendingApprovalResponsesUncertain('bot-1')
+    expect(tracker.markApprovalResponseReplaySent('stream-1')).toBe(true)
+  })
+
+  it('keeps an uncertain response locked after its ordinary expiry', () => {
+    let currentTime = 1_000
+    const rollbackApproval = vi.fn()
+    const tracker = createApprovalResponseTracker({
+      rollbackApproval,
+      now: () => currentTime,
+      ttlMs: 100,
+    })
+    tracker.beginApprovalResponse({ ...input('stream-1'), decision: 'approve' })
+    tracker.markPendingApprovalResponsesUncertain('bot-1')
+
+    currentTime = 1_100
+    expect(tracker.hasPendingApprovalResponse('approval-1')).toBe(true)
+    expect(tracker.getApprovalResponse('stream-1')).toMatchObject({ awaitingResync: true })
+    expect(rollbackApproval).not.toHaveBeenCalled()
+  })
+
   it('expires abandoned responses, rolls them back, and allows a retry', () => {
     let currentTime = 1_000
     const rollbackApproval = vi.fn()

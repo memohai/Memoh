@@ -1,13 +1,26 @@
 import { computed, reactive, type Ref } from 'vue'
-import type { ChatAssistantTurn } from './types'
+import type { ChatAssistantTurn, ChatMessage, ChatUserTurn } from './types'
+
+export interface RuntimeReplacementState {
+  kind: 'retry' | 'edit'
+  optimisticUserTurn: ChatUserTurn | null
+  replacedTurns: ChatMessage[]
+  restoreForkAnchor: (() => void) | null
+  applied: boolean
+}
 
 export interface AssistantStream {
   readonly streamId: string
-  readonly assistantTurn: ChatAssistantTurn
+  assistantTurn: ChatAssistantTurn
   readonly botId: string
-  readonly sessionId: string
+  sessionId: string
   readonly composerScope: string
   readonly viewId: string
+  runtimeReplacement?: RuntimeReplacementState
+  runtimeObserved: boolean
+  runtimeGeneration: string
+  abortRequested: boolean
+  abortSentGeneration: string
 }
 
 interface PendingAssistantStream extends AssistantStream {
@@ -28,22 +41,33 @@ export interface TrackAssistantStreamInput {
   sessionId: string
   composerScope?: string
   viewId?: string
+  runtimeGeneration?: string
 }
 
 interface AssistantStreamRegistryDeps {
   currentBotId: Ref<string | null>
   sessionId: Ref<string | null>
   finishAssistantTurn: (turn: ChatAssistantTurn) => void
+  beforeReject?: (stream: AssistantStream, error: Error) => void
+  onTracked?: (stream: AssistantStream) => void
+  onFinished?: (stream: AssistantStream) => void
 }
 
 type BeforeReject = (streamId: string) => void
 
 const TERMINAL_STREAM_HISTORY_LIMIT = 512
 
-export function createAssistantStreamRegistry({ currentBotId, sessionId, finishAssistantTurn }: AssistantStreamRegistryDeps) {
+export function createAssistantStreamRegistry({
+  currentBotId,
+  sessionId,
+  finishAssistantTurn,
+  beforeReject,
+  onTracked,
+  onFinished,
+}: AssistantStreamRegistryDeps) {
   const streams = reactive(new Map<string, PendingAssistantStream>())
   const createdSessionsByStream = new Map<string, string>()
-  const terminalStreamIds = new Set<string>()
+  const terminalStreams = new Map<string, string>()
 
   function activeStreams(): PendingAssistantStream[] {
     return [...streams.values()]
@@ -127,20 +151,26 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
         reject(new Error(`stream_id ${id} is already active`))
         return
       }
-      if (terminalStreamIds.has(id)) {
+      if (isTerminalStream(id, input.runtimeGeneration)) {
         reject(new Error(`stream_id ${id} is already terminal`))
         return
       }
-      streams.set(id, {
+      const stream: PendingAssistantStream = {
         streamId: id,
         assistantTurn: input.assistantTurn,
         botId: input.botId,
         sessionId: input.sessionId.trim(),
         composerScope: input.composerScope?.trim() || 'chat',
         viewId: input.viewId?.trim() || 'chat',
+        runtimeObserved: false,
+        runtimeGeneration: input.runtimeGeneration?.trim() ?? '',
+        abortRequested: false,
+        abortSentGeneration: '',
         resolve,
         reject,
-      })
+      }
+      streams.set(id, stream)
+      onTracked?.(stream)
     })
   }
 
@@ -151,26 +181,41 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
   function finishAssistantStream(streamId: string): PendingAssistantStream | undefined {
     const stream = streams.get(streamId.trim())
     if (!stream) return undefined
-    rememberTerminalStream(stream.streamId)
+    rememberTerminalStream(stream.streamId, stream.runtimeGeneration)
     streams.delete(stream.streamId)
     if (!activeStreams().some(active => active.assistantTurn === stream.assistantTurn)) {
       finishAssistantTurn(stream.assistantTurn)
     }
+    onFinished?.(stream)
     return stream
   }
 
-  function rememberTerminalStream(streamId: string) {
+  function rememberTerminalStream(streamId: string, generation = '') {
     const id = streamId.trim()
     if (!id) return
-    terminalStreamIds.add(id)
-    if (terminalStreamIds.size <= TERMINAL_STREAM_HISTORY_LIMIT) return
-    const oldest = terminalStreamIds.values().next().value
-    if (oldest) terminalStreamIds.delete(oldest)
+    terminalStreams.delete(id)
+    terminalStreams.set(id, generation.trim())
+    if (terminalStreams.size <= TERMINAL_STREAM_HISTORY_LIMIT) return
+    const oldest = terminalStreams.keys().next().value
+    if (oldest) terminalStreams.delete(oldest)
   }
 
-  function isTerminalStream(streamId: string | undefined): boolean {
+  function isTerminalStream(streamId: string | undefined, generation?: string): boolean {
     const id = streamId?.trim()
-    return Boolean(id && terminalStreamIds.has(id))
+    if (!id) return false
+    const terminalGeneration = terminalStreams.get(id)
+    if (terminalGeneration === undefined) return false
+    const requestedGeneration = generation?.trim() ?? ''
+    return !requestedGeneration || terminalGeneration === requestedGeneration
+  }
+
+  function terminalStreamGeneration(streamId: string | undefined): string | undefined {
+    const id = streamId?.trim()
+    return id ? terminalStreams.get(id) : undefined
+  }
+
+  function forgetTerminalStream(streamId: string) {
+    terminalStreams.delete(streamId.trim())
   }
 
   function resolveAssistantStream(streamId: string) {
@@ -178,6 +223,8 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
   }
 
   function rejectAssistantStream(streamId: string, error: Error) {
+    const stream = streams.get(streamId.trim())
+    if (stream) beforeReject?.(stream, error)
     finishAssistantStream(streamId)?.reject(error)
   }
 
@@ -215,12 +262,13 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
 
   function clearStreamHistory() {
     createdSessionsByStream.clear()
-    terminalStreamIds.clear()
+    terminalStreams.clear()
   }
 
   return {
     streaming,
     streamingSessionId,
+    activeStreams,
     activeUnboundStreamIds,
     assistantStreamsForSession,
     isSessionStreaming,
@@ -232,6 +280,8 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
     rejectAssistantStream,
     discardAssistantStream,
     isTerminalStream,
+    terminalStreamGeneration,
+    forgetTerminalStream,
     rejectAllStreams,
     recordCreatedSession,
     createdSessionIdForStream,

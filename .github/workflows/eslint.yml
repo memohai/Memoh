@@ -93,4 +93,4 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Run Vitest
-        run: pnpm test --run --testTimeout=15000 apps/web/src/composables/api/useChat.ws.test.ts apps/web/src/store/chat-list.test.ts
+        run: pnpm test --run --testTimeout=15000 apps/web/src/composables/api/useChat.ws.test.ts apps/web/src/store/session-runtime-reducer.test.ts apps/web/src/store/chat/approval-responses.test.ts apps/web/src/store/chat/assistant-streams.test.ts apps/web/src/store/chat/realtime.test.ts apps/web/src/store/chat/transcript.test.ts apps/web/src/store/chat-list.test.ts

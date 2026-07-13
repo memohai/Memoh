@@ -209,6 +209,34 @@ describe('chat transcript controller', () => {
     expect(transcript.messages).toHaveLength(1)
   })
 
+  it('keeps identical runtime errors distinct by stream generation across refreshes', () => {
+    const { transcript } = makeTranscript()
+    const userA = { ...rawUser('user-a', 'same prompt'), external_message_id: 'stream-reused' }
+    const userB = { ...rawUser('user-b', 'same prompt', '2026-01-01T00:01:00.000Z'), external_message_id: 'stream-reused' }
+    const identityA = { streamId: 'stream-reused', generation: 'generation-a' }
+    const identityB = { streamId: 'stream-reused', generation: 'generation-b' }
+
+    transcript.replaceMessages([userA], 'session-1')
+    const failedA = assistant('assistant-a')
+    transcript.appendToView(failedA)
+    transcript.appendAssistantError(failedA, 'session-1', 'Response stopped', true, identityA)
+
+    transcript.replaceMessages([userA, userB], 'session-1')
+    const failedB = assistant('assistant-b')
+    transcript.appendToView(failedB)
+    transcript.appendAssistantError(failedB, 'session-1', 'Response stopped', true, identityB)
+
+    transcript.replaceMessages([userA, userB], 'session-1')
+
+    const errors = transcript.messages.filter((turn): turn is ChatAssistantTurn =>
+      turn.role === 'assistant'
+      && turn.messages.some(block => block.type === 'error' && block.content === 'Response stopped'))
+    expect(errors).toHaveLength(2)
+    expect(errors[0]?.id).not.toBe(errors[1]?.id)
+    expect(transcript.assistantTurnForRuntimeError('session-1', identityA)).toBe(errors[0])
+    expect(transcript.assistantTurnForRuntimeError('session-1', identityB)).toBe(errors[1])
+  })
+
   it('routes completed tool messages through the fs mutation beacon', () => {
     const { transcript, bumpFsChangedAtIfFsMutation } = makeTranscript()
     const turn = assistant('assistant-1')
@@ -340,7 +368,7 @@ describe('chat transcript controller', () => {
 
     expect(transcript.loadingMessages.value).toBe(false)
     expect(transcript.hasMoreOlder.value).toBe(true)
-    expect(onRefreshApplied).toHaveBeenCalledWith('session-1', '2026-01-01T00:00:02.000Z')
+    expect(onRefreshApplied).toHaveBeenCalledWith('bot-1', 'session-1', '2026-01-01T00:00:02.000Z')
   })
 
   it('drops an older-page response that resolves after the active session changes', async () => {

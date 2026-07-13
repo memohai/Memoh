@@ -12,10 +12,10 @@ import {
   type ChatRealtimeTransport,
 } from './realtime'
 
-interface FakeRetryingStream {
+interface FakeRetryingStream extends ReturnType<ChatRealtimeTransport['createRetryingStream']> {
   attempt: ((signal: AbortSignal) => Promise<void>) | null
-  start: ReturnType<typeof vi.fn>
-  stop: ReturnType<typeof vi.fn>
+  start: ReturnType<typeof vi.fn<(attempt: (signal: AbortSignal) => Promise<void>) => void>>
+  stop: ReturnType<typeof vi.fn<() => void>>
 }
 
 function createFakeRetryingStream(): FakeRetryingStream {
@@ -29,7 +29,11 @@ function createFakeRetryingStream(): FakeRetryingStream {
   return stream
 }
 
-function createSocket(connected = true): ChatWebSocket & { send: ReturnType<typeof vi.fn>, abort: ReturnType<typeof vi.fn>, close: ReturnType<typeof vi.fn> } {
+function createSocket(connected = true): ChatWebSocket & {
+  send: ReturnType<typeof vi.fn<(message: WSClientMessage) => void>>
+  abort: ReturnType<typeof vi.fn<(streamId: string, sessionId: string, generation: string) => void>>
+  close: ReturnType<typeof vi.fn<() => void>>
+} {
   return {
     connected,
     send: vi.fn(),
@@ -118,10 +122,10 @@ describe('chat realtime controller', () => {
     const { controller, sockets } = makeController()
     controller.startWebSocket('bot-1')
 
-    expect(controller.abortWebSocketStream('stream-1', 'bot-2')).toBe(false)
-    expect(controller.abortWebSocketStream('stream-1', 'bot-1')).toBe(true)
+    expect(controller.abortWebSocketStream('stream-1', 'bot-2', 'session-1', 'generation-1')).toBe(false)
+    expect(controller.abortWebSocketStream('stream-1', 'bot-1', 'session-1', 'generation-1')).toBe(true)
     expect(sockets[0]!.socket.abort).toHaveBeenCalledOnce()
-    expect(sockets[0]!.socket.abort).toHaveBeenCalledWith('stream-1')
+    expect(sockets[0]!.socket.abort).toHaveBeenCalledWith('stream-1', 'session-1', 'generation-1')
   })
 
   it('starts the same session once and prepares every retry attempt', async () => {

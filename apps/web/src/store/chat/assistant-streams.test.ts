@@ -14,13 +14,13 @@ function assistantTurn(id: string): ChatAssistantTurn {
   }
 }
 
-function makeRegistry(activeSessionId: string | null = 'session-a') {
+function makeRegistry(activeSessionId: string | null = 'session-a', onTracked?: Parameters<typeof createAssistantStreamRegistry>[0]['onTracked']) {
   const currentBotId = ref<string | null>('bot-1')
   const sessionId = ref<string | null>(activeSessionId)
   const finishAssistantTurn = vi.fn((turn: ChatAssistantTurn) => {
     turn.streaming = false
   })
-  const registry = createAssistantStreamRegistry({ currentBotId, sessionId, finishAssistantTurn })
+  const registry = createAssistantStreamRegistry({ currentBotId, sessionId, finishAssistantTurn, onTracked })
   return { registry, currentBotId, sessionId, finishAssistantTurn }
 }
 
@@ -41,6 +41,21 @@ function track(
 }
 
 describe('assistant stream registry', () => {
+  it('notifies synchronously after a stream is registered', async () => {
+    const onTracked = vi.fn()
+    const { registry } = makeRegistry('session-a', onTracked)
+    const entry = track(registry, 'stream-tracked')
+
+    expect(onTracked).toHaveBeenCalledOnce()
+    expect(onTracked).toHaveBeenCalledWith(expect.objectContaining({
+      streamId: 'stream-tracked', botId: 'bot-1', sessionId: 'session-a',
+    }))
+    expect(registry.getAssistantStream('stream-tracked')).toBeDefined()
+
+    registry.resolveAssistantStream('stream-tracked')
+    await entry.completion
+  })
+
   it('registers synchronously and resolves only after removing the active stream', async () => {
     const { registry, finishAssistantTurn } = makeRegistry()
     const { turn, completion } = track(registry, 'stream-1')

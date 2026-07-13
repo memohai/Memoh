@@ -6,6 +6,11 @@ export interface ApprovalResponse {
   readonly botId: string
   readonly sessionId: string
   readonly silent: boolean
+  readonly decision?: 'approve' | 'reject'
+  readonly shortId?: number
+  awaitingResync: boolean
+  replaySent: boolean
+  replayFailed: boolean
 }
 
 export interface BeginApprovalResponseInput {
@@ -14,6 +19,8 @@ export interface BeginApprovalResponseInput {
   botId: string
   sessionId: string
   silent: boolean
+  decision?: 'approve' | 'reject'
+  shortId?: number
   rollback?: () => void
 }
 
@@ -68,6 +75,10 @@ export function createApprovalResponseTracker({
       response.cancelExpiry = scheduleExpiry(() => expireResponse(streamId), remaining)
       return
     }
+    if (response.awaitingResync) {
+      response.cancelExpiry = undefined
+      return
+    }
     const expired = settleApprovalResponse(streamId, 'expired')
     if (expired) onExpired(expired)
   }
@@ -105,6 +116,11 @@ export function createApprovalResponseTracker({
       botId,
       sessionId,
       silent: input.silent,
+      decision: input.decision,
+      shortId: input.shortId,
+      awaitingResync: false,
+      replaySent: false,
+      replayFailed: false,
       startedAt: now(),
       rollback: input.rollback,
     }
@@ -133,6 +149,42 @@ export function createApprovalResponseTracker({
 
   function pendingApprovalResponses(): ApprovalResponse[] {
     return [...responses.values()]
+  }
+
+  function markPendingApprovalResponsesUncertain(botId: string) {
+    const id = botId.trim()
+    if (!id) return
+    for (const response of responses.values()) {
+      if (response.botId === id) {
+        response.awaitingResync = true
+        response.replaySent = false
+        response.replayFailed = false
+      }
+    }
+  }
+
+  function markApprovalResponseReplaySent(streamId: string): boolean {
+    const response = responses.get(streamId.trim())
+    if (!response || !response.awaitingResync || response.replaySent) return false
+    response.replaySent = true
+    return true
+  }
+
+  function markApprovalResponseReplayFailed(streamId: string): boolean {
+    const response = responses.get(streamId.trim())
+    if (!response || !response.awaitingResync || !response.replaySent) return false
+    response.replayFailed = true
+    return true
+  }
+
+  function hasUncertainApprovalResponse(botId: string, sessionId: string): boolean {
+    const bid = botId.trim()
+    const sid = sessionId.trim()
+    if (!bid || !sid) return false
+    for (const response of responses.values()) {
+      if (response.awaitingResync && response.botId === bid && response.sessionId === sid) return true
+    }
+    return false
   }
 
   function pendingApprovalResponsesForSession(botId: string, sessionId: string): ApprovalResponse[] {
@@ -165,6 +217,10 @@ export function createApprovalResponseTracker({
     getApprovalResponse,
     settleApprovalResponse,
     pendingApprovalResponses,
+    markPendingApprovalResponsesUncertain,
+    markApprovalResponseReplaySent,
+    markApprovalResponseReplayFailed,
+    hasUncertainApprovalResponse,
     pendingApprovalResponsesForSession,
     discardAllApprovalResponses,
     isTerminalApprovalResponse,

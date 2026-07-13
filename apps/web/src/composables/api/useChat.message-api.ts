@@ -2,13 +2,14 @@ import { client } from '@memohai/sdk/client'
 import {
   getBotsByBotIdMessages,
   getBotsByBotIdMessagesLocate,
+  getBotsByBotIdSessionsBySessionIdRuntime,
   getBotsByBotIdSessionsBySessionIdMessagesEvents,
   getBotsByBotIdSessionsEvents,
   getBotsByBotIdSkillsCatalog,
   postBotsByBotIdQuickActionsExecute,
   postBotsByBotIdWebMessages,
 } from '@memohai/sdk'
-import type { ChannelAttachment, ChannelMessage, HandlersLocalChannelMessageRequest } from '@memohai/sdk'
+import type { ChannelAttachment, ChannelMessage, HandlersLocalChannelMessageRequest, SessionruntimeSnapshot } from '@memohai/sdk'
 import type {
   BotSessionActivityEvent,
   ChatAttachment,
@@ -61,6 +62,19 @@ export async function fetchMessagesUI(
   })
 
   return (response.data as { items?: UITurn[] } | undefined)?.items ?? []
+}
+
+export async function fetchSessionRuntime(botId: string, sessionId: string, signal?: AbortSignal): Promise<SessionruntimeSnapshot> {
+  const bid = botId.trim()
+  const sid = sessionId.trim()
+  if (!bid || !sid) throw new Error('bot id and session id are required')
+  const { data } = await getBotsByBotIdSessionsBySessionIdRuntime({
+    path: { bot_id: bid, session_id: sid },
+    signal,
+    throwOnError: true,
+  })
+  if (!data) throw new Error('session runtime response is empty')
+  return data
 }
 
 export interface LocateMessageResult {
