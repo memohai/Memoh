@@ -63,6 +63,13 @@
           {{ testResult?.message }}
         </span>
       </div>
+      <p
+        v-if="modelDescription"
+        data-model-description
+        class="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-body text-muted-foreground"
+      >
+        {{ modelDescription }}
+      </p>
     </div>
 
     <div class="flex shrink-0 items-center gap-0.5">
