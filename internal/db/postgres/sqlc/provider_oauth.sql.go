@@ -12,7 +12,7 @@ import (
 )
 
 const deleteProviderOAuthToken = `-- name: DeleteProviderOAuthToken :exec
-DELETE FROM provider_oauth_tokens WHERE provider_id = $1
+DELETE FROM provider_oauth_tokens WHERE tenant_id = app.current_tenant_id() AND provider_id = $1
 `
 
 func (q *Queries) DeleteProviderOAuthToken(ctx context.Context, providerID pgtype.UUID) error {
@@ -21,7 +21,7 @@ func (q *Queries) DeleteProviderOAuthToken(ctx context.Context, providerID pgtyp
 }
 
 const getProviderOAuthTokenByProvider = `-- name: GetProviderOAuthTokenByProvider :one
-SELECT id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, created_at, updated_at, tenant_id FROM provider_oauth_tokens WHERE provider_id = $1
+SELECT id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, created_at, updated_at, tenant_id FROM provider_oauth_tokens WHERE tenant_id = app.current_tenant_id() AND provider_id = $1
 `
 
 func (q *Queries) GetProviderOAuthTokenByProvider(ctx context.Context, providerID pgtype.UUID) (ProviderOauthToken, error) {
@@ -45,7 +45,7 @@ func (q *Queries) GetProviderOAuthTokenByProvider(ctx context.Context, providerI
 }
 
 const getProviderOAuthTokenByState = `-- name: GetProviderOAuthTokenByState :one
-SELECT id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, created_at, updated_at, tenant_id FROM provider_oauth_tokens WHERE state = $1 AND state != ''
+SELECT id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, created_at, updated_at, tenant_id FROM provider_oauth_tokens WHERE tenant_id = app.current_tenant_id() AND state = $1 AND state != ''
 `
 
 func (q *Queries) GetProviderOAuthTokenByState(ctx context.Context, state string) (ProviderOauthToken, error) {
@@ -75,7 +75,7 @@ VALUES (
   $2,
   $3
 )
-ON CONFLICT (provider_id) DO UPDATE SET
+ON CONFLICT (tenant_id, provider_id) DO UPDATE SET
   state = EXCLUDED.state,
   pkce_code_verifier = EXCLUDED.pkce_code_verifier,
   updated_at = now()
@@ -113,7 +113,7 @@ VALUES (
   $7,
   $8
 )
-ON CONFLICT (provider_id) DO UPDATE SET
+ON CONFLICT (tenant_id, provider_id) DO UPDATE SET
   access_token = EXCLUDED.access_token,
   refresh_token = EXCLUDED.refresh_token,
   expires_at = EXCLUDED.expires_at,

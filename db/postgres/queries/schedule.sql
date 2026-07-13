@@ -6,18 +6,18 @@ RETURNING id, name, description, pattern, max_calls, current_calls, created_at, 
 -- name: GetScheduleByID :one
 SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, tenant_id
 FROM schedule
-WHERE id = $1;
+WHERE tenant_id = app.current_tenant_id() AND id = $1;
 
 -- name: ListSchedulesByBot :many
 SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, tenant_id
 FROM schedule
-WHERE bot_id = $1
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
 ORDER BY created_at DESC;
 
 -- name: ListEnabledSchedules :many
 SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, tenant_id
 FROM schedule
-WHERE enabled = true
+WHERE tenant_id = app.current_tenant_id() AND enabled = true
 ORDER BY created_at DESC;
 
 -- name: UpdateSchedule :one
@@ -29,12 +29,12 @@ SET name = $2,
     enabled = $6,
     command = $7,
     updated_at = now()
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id() AND id = $1
 RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, tenant_id;
 
 -- name: DeleteSchedule :exec
 DELETE FROM schedule
-WHERE id = $1;
+WHERE tenant_id = app.current_tenant_id() AND id = $1;
 
 -- name: IncrementScheduleCalls :one
 UPDATE schedule
@@ -44,6 +44,6 @@ SET current_calls = current_calls + 1,
       ELSE enabled
     END,
     updated_at = now()
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id() AND id = $1
 RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, tenant_id;
 

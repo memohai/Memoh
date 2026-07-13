@@ -63,7 +63,7 @@ func (q *Queries) CreateBotEmailBinding(ctx context.Context, arg CreateBotEmailB
 }
 
 const deleteBotEmailBinding = `-- name: DeleteBotEmailBinding :exec
-DELETE FROM bot_email_bindings WHERE id = $1
+DELETE FROM bot_email_bindings WHERE tenant_id = app.current_tenant_id() AND id = $1
 `
 
 func (q *Queries) DeleteBotEmailBinding(ctx context.Context, id pgtype.UUID) error {
@@ -73,7 +73,7 @@ func (q *Queries) DeleteBotEmailBinding(ctx context.Context, id pgtype.UUID) err
 
 const getBotEmailBindingByBotAndProvider = `-- name: GetBotEmailBindingByBotAndProvider :one
 SELECT id, bot_id, email_provider_id, email_address, can_read, can_write, can_delete, config, created_at, updated_at, tenant_id FROM bot_email_bindings
-WHERE bot_id = $1 AND email_provider_id = $2
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND email_provider_id = $2
 `
 
 type GetBotEmailBindingByBotAndProviderParams struct {
@@ -101,7 +101,7 @@ func (q *Queries) GetBotEmailBindingByBotAndProvider(ctx context.Context, arg Ge
 }
 
 const getBotEmailBindingByID = `-- name: GetBotEmailBindingByID :one
-SELECT id, bot_id, email_provider_id, email_address, can_read, can_write, can_delete, config, created_at, updated_at, tenant_id FROM bot_email_bindings WHERE id = $1
+SELECT id, bot_id, email_provider_id, email_address, can_read, can_write, can_delete, config, created_at, updated_at, tenant_id FROM bot_email_bindings WHERE tenant_id = app.current_tenant_id() AND id = $1
 `
 
 func (q *Queries) GetBotEmailBindingByID(ctx context.Context, id pgtype.UUID) (BotEmailBinding, error) {
@@ -125,7 +125,7 @@ func (q *Queries) GetBotEmailBindingByID(ctx context.Context, id pgtype.UUID) (B
 
 const listBotEmailBindings = `-- name: ListBotEmailBindings :many
 SELECT id, bot_id, email_provider_id, email_address, can_read, can_write, can_delete, config, created_at, updated_at, tenant_id FROM bot_email_bindings
-WHERE bot_id = $1
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
 ORDER BY created_at DESC
 `
 
@@ -163,7 +163,7 @@ func (q *Queries) ListBotEmailBindings(ctx context.Context, botID pgtype.UUID) (
 
 const listBotEmailBindingsByProvider = `-- name: ListBotEmailBindingsByProvider :many
 SELECT id, bot_id, email_provider_id, email_address, can_read, can_write, can_delete, config, created_at, updated_at, tenant_id FROM bot_email_bindings
-WHERE email_provider_id = $1
+WHERE tenant_id = app.current_tenant_id() AND email_provider_id = $1
 ORDER BY created_at DESC
 `
 
@@ -201,7 +201,7 @@ func (q *Queries) ListBotEmailBindingsByProvider(ctx context.Context, emailProvi
 
 const listReadableBindingsByProvider = `-- name: ListReadableBindingsByProvider :many
 SELECT id, bot_id, email_provider_id, email_address, can_read, can_write, can_delete, config, created_at, updated_at, tenant_id FROM bot_email_bindings
-WHERE email_provider_id = $1 AND can_read = TRUE
+WHERE tenant_id = app.current_tenant_id() AND email_provider_id = $1 AND can_read = TRUE
 ORDER BY created_at DESC
 `
 
@@ -246,7 +246,7 @@ SET
   can_delete = $4,
   config = $5,
   updated_at = now()
-WHERE id = $6
+WHERE tenant_id = app.current_tenant_id() AND id = $6
 RETURNING id, bot_id, email_provider_id, email_address, can_read, can_write, can_delete, config, created_at, updated_at, tenant_id
 `
 

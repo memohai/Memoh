@@ -23,7 +23,7 @@ SELECT
   created_at,
   tenant_id
 FROM snapshots
-WHERE container_id = $1
+WHERE tenant_id = app.current_tenant_id() AND container_id = $1
   AND runtime_snapshot_name = $2
 LIMIT 1
 `
@@ -62,7 +62,7 @@ SELECT
   created_at,
   tenant_id
 FROM snapshots
-WHERE container_id = $1
+WHERE tenant_id = app.current_tenant_id() AND container_id = $1
 ORDER BY created_at DESC
 `
 
@@ -108,8 +108,8 @@ SELECT
   s.created_at,
   cv.version
 FROM snapshots s
-LEFT JOIN container_versions cv ON cv.snapshot_id = s.id
-WHERE s.container_id = $1
+LEFT JOIN container_versions cv ON cv.snapshot_id = s.id AND cv.tenant_id = app.current_tenant_id()
+WHERE s.tenant_id = app.current_tenant_id() AND s.container_id = $1
 ORDER BY s.created_at DESC
 `
 
@@ -172,7 +172,7 @@ VALUES (
   $5,
   $6
 )
-ON CONFLICT (container_id, runtime_snapshot_name) DO UPDATE
+ON CONFLICT (tenant_id, container_id, runtime_snapshot_name) DO UPDATE
 SET
   display_name = EXCLUDED.display_name,
   parent_runtime_snapshot_name = EXCLUDED.parent_runtime_snapshot_name,

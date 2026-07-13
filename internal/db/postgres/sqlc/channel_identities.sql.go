@@ -51,7 +51,7 @@ func (q *Queries) CreateChannelIdentity(ctx context.Context, arg CreateChannelId
 const getChannelIdentityByChannelSubject = `-- name: GetChannelIdentityByChannelSubject :one
 SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, tenant_id
 FROM channel_identities
-WHERE channel_type = $1 AND channel_subject_id = $2
+WHERE tenant_id = app.current_tenant_id() AND channel_type = $1 AND channel_subject_id = $2
 `
 
 type GetChannelIdentityByChannelSubjectParams struct {
@@ -79,7 +79,7 @@ func (q *Queries) GetChannelIdentityByChannelSubject(ctx context.Context, arg Ge
 const getChannelIdentityByID = `-- name: GetChannelIdentityByID :one
 SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, tenant_id
 FROM channel_identities
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id() AND id = $1
 `
 
 func (q *Queries) GetChannelIdentityByID(ctx context.Context, id pgtype.UUID) (ChannelIdentity, error) {
@@ -102,7 +102,7 @@ func (q *Queries) GetChannelIdentityByID(ctx context.Context, id pgtype.UUID) (C
 const getChannelIdentityByIDForUpdate = `-- name: GetChannelIdentityByIDForUpdate :one
 SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, tenant_id
 FROM channel_identities
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id() AND id = $1
 FOR UPDATE
 `
 
@@ -136,10 +136,13 @@ SELECT
   ci.tenant_id
 FROM channel_identities ci
 WHERE
-  $1::text = ''
-  OR ci.channel_type ILIKE '%' || $1::text || '%'
-  OR ci.channel_subject_id ILIKE '%' || $1::text || '%'
-  OR COALESCE(ci.display_name, '') ILIKE '%' || $1::text || '%'
+  ci.tenant_id = app.current_tenant_id()
+  AND (
+    $1::text = ''
+    OR ci.channel_type ILIKE '%' || $1::text || '%'
+    OR ci.channel_subject_id ILIKE '%' || $1::text || '%'
+    OR COALESCE(ci.display_name, '') ILIKE '%' || $1::text || '%'
+  )
 ORDER BY ci.updated_at DESC
 LIMIT $2
 `

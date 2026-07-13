@@ -94,7 +94,7 @@ func (q *Queries) CreateBotACLRule(ctx context.Context, arg CreateBotACLRulePara
 }
 
 const deleteBotACLRuleByID = `-- name: DeleteBotACLRuleByID :exec
-DELETE FROM bot_acl_rules WHERE id = $1
+DELETE FROM bot_acl_rules WHERE tenant_id = app.current_tenant_id() AND id = $1
 `
 
 func (q *Queries) DeleteBotACLRuleByID(ctx context.Context, id pgtype.UUID) error {
@@ -106,7 +106,7 @@ const evaluateBotACLRule = `-- name: EvaluateBotACLRule :one
 SELECT COALESCE((
   SELECT r.effect
   FROM bot_acl_rules r
-  WHERE r.bot_id = b.id
+  WHERE r.tenant_id = app.current_tenant_id() AND r.bot_id = b.id
     AND r.enabled = true
     AND r.action = $1
     AND r.effect <> b.acl_default_effect
@@ -118,7 +118,7 @@ SELECT COALESCE((
   LIMIT 1
 ), b.acl_default_effect) AS effect
 FROM bots b
-WHERE b.id = $7
+WHERE b.tenant_id = app.current_tenant_id() AND b.id = $7
 `
 
 type EvaluateBotACLRuleParams struct {
@@ -149,7 +149,7 @@ func (q *Queries) EvaluateBotACLRule(ctx context.Context, arg EvaluateBotACLRule
 }
 
 const getBotACLDefaultEffect = `-- name: GetBotACLDefaultEffect :one
-SELECT acl_default_effect FROM bots WHERE id = $1
+SELECT acl_default_effect FROM bots WHERE tenant_id = app.current_tenant_id() AND id = $1
 `
 
 func (q *Queries) GetBotACLDefaultEffect(ctx context.Context, id pgtype.UUID) (string, error) {
@@ -186,13 +186,14 @@ SELECT
   )::text AS source_conversation_name,
   COALESCE(NULLIF(TRIM(COALESCE(source_route.metadata->>'conversation_avatar_url', '')), ''), '')::text AS source_conversation_avatar_url
 FROM bot_acl_rules r
-LEFT JOIN channel_identities ci ON ci.id = r.channel_identity_id
-LEFT JOIN bot_channel_routes source_route ON source_route.bot_id = r.bot_id
+LEFT JOIN channel_identities ci ON ci.id = r.channel_identity_id AND ci.tenant_id = app.current_tenant_id()
+LEFT JOIN bot_channel_routes source_route ON source_route.tenant_id = app.current_tenant_id()
+  AND source_route.bot_id = r.bot_id
   AND r.source_conversation_id IS NOT NULL
   AND source_route.external_conversation_id = r.source_conversation_id
   AND COALESCE(source_route.external_thread_id, '') = COALESCE(r.source_thread_id, '')
   AND (r.source_channel IS NULL OR source_route.channel_type = r.source_channel)
-WHERE r.bot_id = $1
+WHERE r.tenant_id = app.current_tenant_id() AND r.bot_id = $1
   AND r.action = 'chat.trigger'
 ORDER BY r.created_at DESC
 `
@@ -262,7 +263,7 @@ func (q *Queries) ListBotACLRules(ctx context.Context, botID pgtype.UUID) ([]Lis
 }
 
 const setBotACLDefaultEffect = `-- name: SetBotACLDefaultEffect :exec
-UPDATE bots SET acl_default_effect = $2, updated_at = now() WHERE id = $1
+UPDATE bots SET acl_default_effect = $2, updated_at = now() WHERE tenant_id = app.current_tenant_id() AND id = $1
 `
 
 type SetBotACLDefaultEffectParams struct {
@@ -288,7 +289,7 @@ SET
   source_conversation_id = $9::text,
   source_thread_id = $10::text,
   updated_at = now()
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id() AND id = $1
 RETURNING id, bot_id, action, effect, channel_identity_id, source_channel, source_conversation_type, source_conversation_id, source_thread_id, created_by_user_id, created_at, updated_at, enabled, description, subject_channel_type, tenant_id
 `
 

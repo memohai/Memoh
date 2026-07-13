@@ -17,7 +17,7 @@ SELECT
   overlay_provider,
   overlay_config
 FROM bots
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id() AND id = $1
 `
 
 type GetBotOverlayConfigRow struct {

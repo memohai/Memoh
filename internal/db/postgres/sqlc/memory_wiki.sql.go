@@ -13,7 +13,7 @@ import (
 
 const countMemoryEdgesByBot = `-- name: CountMemoryEdgesByBot :one
 SELECT COUNT(*) FROM memory_edges
-WHERE bot_id = $1
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
 `
 
 func (q *Queries) CountMemoryEdgesByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
@@ -25,7 +25,7 @@ func (q *Queries) CountMemoryEdgesByBot(ctx context.Context, botID pgtype.UUID) 
 
 const countMemoryNodesByBot = `-- name: CountMemoryNodesByBot :one
 SELECT COUNT(*) FROM memory_nodes
-WHERE bot_id = $1
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
 `
 
 func (q *Queries) CountMemoryNodesByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
@@ -37,7 +37,7 @@ func (q *Queries) CountMemoryNodesByBot(ctx context.Context, botID pgtype.UUID) 
 
 const deleteAllMemoryEdgesByBot = `-- name: DeleteAllMemoryEdgesByBot :exec
 DELETE FROM memory_edges
-WHERE bot_id = $1
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
 `
 
 func (q *Queries) DeleteAllMemoryEdgesByBot(ctx context.Context, botID pgtype.UUID) error {
@@ -47,7 +47,7 @@ func (q *Queries) DeleteAllMemoryEdgesByBot(ctx context.Context, botID pgtype.UU
 
 const deleteAllMemoryNodesByBot = `-- name: DeleteAllMemoryNodesByBot :exec
 DELETE FROM memory_nodes
-WHERE bot_id = $1
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
 `
 
 func (q *Queries) DeleteAllMemoryNodesByBot(ctx context.Context, botID pgtype.UUID) error {
@@ -57,7 +57,7 @@ func (q *Queries) DeleteAllMemoryNodesByBot(ctx context.Context, botID pgtype.UU
 
 const deleteMemoryEdgesByRelForBot = `-- name: DeleteMemoryEdgesByRelForBot :exec
 DELETE FROM memory_edges
-WHERE bot_id = $1 AND rel = $2
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND rel = $2
 `
 
 type DeleteMemoryEdgesByRelForBotParams struct {
@@ -72,7 +72,7 @@ func (q *Queries) DeleteMemoryEdgesByRelForBot(ctx context.Context, arg DeleteMe
 
 const deleteMemoryEdgesForNode = `-- name: DeleteMemoryEdgesForNode :exec
 DELETE FROM memory_edges
-WHERE bot_id = $1 AND (src_node = $2 OR dst_node = $2)
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND (src_node = $2 OR dst_node = $2)
 `
 
 type DeleteMemoryEdgesForNodeParams struct {
@@ -87,7 +87,7 @@ func (q *Queries) DeleteMemoryEdgesForNode(ctx context.Context, arg DeleteMemory
 
 const deleteMemoryNode = `-- name: DeleteMemoryNode :exec
 DELETE FROM memory_nodes
-WHERE bot_id = $1 AND id = $2
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND id = $2
 `
 
 type DeleteMemoryNodeParams struct {
@@ -102,7 +102,7 @@ func (q *Queries) DeleteMemoryNode(ctx context.Context, arg DeleteMemoryNodePara
 
 const getMemoryNode = `-- name: GetMemoryNode :one
 SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at, tenant_id FROM memory_nodes
-WHERE bot_id = $1 AND id = $2
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND id = $2
 `
 
 type GetMemoryNodeParams struct {
@@ -138,7 +138,7 @@ func (q *Queries) GetMemoryNode(ctx context.Context, arg GetMemoryNodeParams) (M
 const insertMemoryEdge = `-- name: InsertMemoryEdge :exec
 INSERT INTO memory_edges (bot_id, src_node, dst_node, rel, weight, metadata)
 VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (bot_id, src_node, dst_node, rel) DO UPDATE SET
+ON CONFLICT (tenant_id, bot_id, src_node, dst_node, rel) DO UPDATE SET
   weight = EXCLUDED.weight,
   metadata = EXCLUDED.metadata
 `
@@ -166,7 +166,7 @@ func (q *Queries) InsertMemoryEdge(ctx context.Context, arg InsertMemoryEdgePara
 
 const listMemoryEdgesByBot = `-- name: ListMemoryEdgesByBot :many
 SELECT id, bot_id, src_node, dst_node, rel, weight, metadata, created_at, tenant_id FROM memory_edges
-WHERE bot_id = $1
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
 `
 
 func (q *Queries) ListMemoryEdgesByBot(ctx context.Context, botID pgtype.UUID) ([]MemoryEdge, error) {
@@ -201,7 +201,7 @@ func (q *Queries) ListMemoryEdgesByBot(ctx context.Context, botID pgtype.UUID) (
 
 const listMemoryEdgesByRel = `-- name: ListMemoryEdgesByRel :many
 SELECT id, bot_id, src_node, dst_node, rel, weight, metadata, created_at, tenant_id FROM memory_edges
-WHERE bot_id = $1 AND rel = $2
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND rel = $2
 `
 
 type ListMemoryEdgesByRelParams struct {
@@ -241,7 +241,7 @@ func (q *Queries) ListMemoryEdgesByRel(ctx context.Context, arg ListMemoryEdgesB
 
 const listMemoryEdgesFromNode = `-- name: ListMemoryEdgesFromNode :many
 SELECT id, bot_id, src_node, dst_node, rel, weight, metadata, created_at, tenant_id FROM memory_edges
-WHERE bot_id = $1 AND src_node = $2
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND src_node = $2
 ORDER BY weight DESC
 `
 
@@ -282,7 +282,7 @@ func (q *Queries) ListMemoryEdgesFromNode(ctx context.Context, arg ListMemoryEdg
 
 const listMemoryNodesByBot = `-- name: ListMemoryNodesByBot :many
 SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at, tenant_id FROM memory_nodes
-WHERE bot_id = $1
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
 ORDER BY captured_at ASC
 `
 
@@ -326,7 +326,7 @@ func (q *Queries) ListMemoryNodesByBot(ctx context.Context, botID pgtype.UUID) (
 
 const listMemoryNodesByBotLayer = `-- name: ListMemoryNodesByBotLayer :many
 SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at, tenant_id FROM memory_nodes
-WHERE bot_id = $1 AND layer = $2
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND layer = $2
 ORDER BY captured_at ASC
 `
 
@@ -375,7 +375,7 @@ func (q *Queries) ListMemoryNodesByBotLayer(ctx context.Context, arg ListMemoryN
 
 const listMemoryNodesByBotProfile = `-- name: ListMemoryNodesByBotProfile :many
 SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at, tenant_id FROM memory_nodes
-WHERE bot_id = $1 AND profile_ref = $2
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND profile_ref = $2
 ORDER BY captured_at ASC
 `
 
@@ -428,7 +428,7 @@ INSERT INTO memory_nodes (
   metadata, source_message_ids, profile_ref, topic, captured_at, expires_at
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-ON CONFLICT (id) DO UPDATE SET
+ON CONFLICT (tenant_id, id) DO UPDATE SET
   body = EXCLUDED.body,
   hash = EXCLUDED.hash,
   layer = EXCLUDED.layer,

@@ -24,7 +24,8 @@ WHERE m.session_id = sqlc.arg(session_id)
 -- name: GetLatestSessionIDByBot :one
 SELECT s.id
 FROM bot_sessions s
-WHERE s.bot_id = sqlc.arg(bot_id)
+WHERE s.tenant_id = app.current_tenant_id()
+  AND s.bot_id = sqlc.arg(bot_id)
   AND s.type = 'chat'
   AND s.deleted_at IS NULL
 ORDER BY s.updated_at DESC

@@ -12,7 +12,7 @@ import (
 )
 
 const getBotWorkspaceResourceLimits = `-- name: GetBotWorkspaceResourceLimits :one
-SELECT bot_id, cpu_millicores, memory_bytes, storage_bytes, created_at, updated_at, tenant_id FROM bot_workspace_resource_limits WHERE bot_id = $1
+SELECT bot_id, cpu_millicores, memory_bytes, storage_bytes, created_at, updated_at, tenant_id FROM bot_workspace_resource_limits WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
 `
 
 func (q *Queries) GetBotWorkspaceResourceLimits(ctx context.Context, botID pgtype.UUID) (BotWorkspaceResourceLimit, error) {
@@ -40,7 +40,7 @@ VALUES (
   $3,
   $4
 )
-ON CONFLICT (bot_id) DO UPDATE SET
+ON CONFLICT (tenant_id, bot_id) DO UPDATE SET
   cpu_millicores = EXCLUDED.cpu_millicores,
   memory_bytes = EXCLUDED.memory_bytes,
   storage_bytes = EXCLUDED.storage_bytes,

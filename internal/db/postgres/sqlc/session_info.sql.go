@@ -45,7 +45,8 @@ func (q *Queries) GetLatestAssistantUsage(ctx context.Context, sessionID pgtype.
 const getLatestSessionIDByBot = `-- name: GetLatestSessionIDByBot :one
 SELECT s.id
 FROM bot_sessions s
-WHERE s.bot_id = $1
+WHERE s.tenant_id = app.current_tenant_id()
+  AND s.bot_id = $1
   AND s.type = 'chat'
   AND s.deleted_at IS NULL
 ORDER BY s.updated_at DESC

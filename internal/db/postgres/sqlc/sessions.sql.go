@@ -84,10 +84,12 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (B
 
 const deleteSessionDiscussCursorsByBot = `-- name: DeleteSessionDiscussCursorsByBot :exec
 DELETE FROM bot_session_discuss_cursors
-WHERE session_id IN (
+WHERE tenant_id = app.current_tenant_id()
+  AND session_id IN (
   SELECT id
   FROM bot_sessions
-  WHERE bot_id = $1
+  WHERE tenant_id = app.current_tenant_id()
+    AND bot_id = $1
 )
 `
 
@@ -100,7 +102,8 @@ const forkSessionFromAssistantMessage = `-- name: ForkSessionFromAssistantMessag
 WITH source_session AS (
   SELECT s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata, s.next_turn_position, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at, s.tenant_id
   FROM bot_sessions s
-  WHERE s.id = $1
+  WHERE s.tenant_id = app.current_tenant_id()
+    AND s.id = $1
     AND s.bot_id = $2
     AND s.type = 'chat'
     AND s.deleted_at IS NULL
@@ -282,6 +285,7 @@ copied_assets AS (
   FROM bot_history_message_assets a
   JOIN copy_messages cm ON cm.old_message_id = a.message_id
   JOIN inserted_messages im ON im.id = cm.new_message_id
+  WHERE a.tenant_id = app.current_tenant_id()
   RETURNING id
 )
 SELECT cs.id, cs.bot_id, cs.route_id, cs.channel_type, cs.type, cs.session_mode, cs.runtime_type, cs.runtime_metadata, cs.title, cs.metadata, cs.next_turn_position, cs.parent_session_id, cs.created_by_user_id, cs.created_at, cs.updated_at, cs.deleted_at, cs.tenant_id
@@ -354,7 +358,9 @@ const getActiveSessionForRoute = `-- name: GetActiveSessionForRoute :one
 SELECT s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata, s.next_turn_position, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at, s.tenant_id
 FROM bot_sessions s
 JOIN bot_channel_routes r ON r.active_session_id = s.id
-WHERE r.id = $1
+WHERE s.tenant_id = app.current_tenant_id()
+  AND r.tenant_id = app.current_tenant_id()
+  AND r.id = $1
   AND s.deleted_at IS NULL
 `
 
@@ -386,7 +392,8 @@ func (q *Queries) GetActiveSessionForRoute(ctx context.Context, routeID pgtype.U
 const getSessionByID = `-- name: GetSessionByID :one
 SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, tenant_id
 FROM bot_sessions
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id()
+  AND id = $1
   AND deleted_at IS NULL
 `
 
@@ -418,7 +425,8 @@ func (q *Queries) GetSessionByID(ctx context.Context, id pgtype.UUID) (BotSessio
 const getSessionDiscussCursor = `-- name: GetSessionDiscussCursor :one
 SELECT session_id, scope_key, route_id, source, consumed_cursor, updated_at, tenant_id
 FROM bot_session_discuss_cursors
-WHERE session_id = $1
+WHERE tenant_id = app.current_tenant_id()
+  AND session_id = $1
   AND scope_key = $2
 `
 
@@ -446,7 +454,9 @@ const listSessionDiscussCursorsByBot = `-- name: ListSessionDiscussCursorsByBot 
 SELECT c.session_id, c.scope_key, c.route_id, c.source, c.consumed_cursor, c.updated_at, c.tenant_id
 FROM bot_session_discuss_cursors c
 JOIN bot_sessions s ON s.id = c.session_id
-WHERE s.bot_id = $1
+WHERE c.tenant_id = app.current_tenant_id()
+  AND s.tenant_id = app.current_tenant_id()
+  AND s.bot_id = $1
 ORDER BY c.updated_at ASC, c.session_id ASC, c.scope_key ASC
 `
 
@@ -485,8 +495,9 @@ SELECT
   r.metadata AS route_metadata,
   r.conversation_type AS route_conversation_type
 FROM bot_sessions s
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id
-WHERE s.bot_id = $1
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id AND r.tenant_id = app.current_tenant_id()
+WHERE s.tenant_id = app.current_tenant_id()
+  AND s.bot_id = $1
   AND s.deleted_at IS NULL
 ORDER BY s.updated_at DESC
 `
@@ -556,8 +567,9 @@ SELECT
   r.metadata AS route_metadata,
   r.conversation_type AS route_conversation_type
 FROM bot_sessions s
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id
-WHERE s.bot_id = $1
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id AND r.tenant_id = app.current_tenant_id()
+WHERE s.tenant_id = app.current_tenant_id()
+  AND s.bot_id = $1
   AND s.created_by_user_id = $2
   AND s.deleted_at IS NULL
 ORDER BY s.updated_at DESC
@@ -633,8 +645,9 @@ SELECT
   r.metadata AS route_metadata,
   r.conversation_type AS route_conversation_type
 FROM bot_sessions s
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id
-WHERE s.bot_id = $1
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id AND r.tenant_id = app.current_tenant_id()
+WHERE s.tenant_id = app.current_tenant_id()
+  AND s.bot_id = $1
   AND s.created_by_user_id = $2
   AND s.deleted_at IS NULL
   AND s.type = ANY($3::text[])
@@ -737,8 +750,9 @@ SELECT
   r.metadata AS route_metadata,
   r.conversation_type AS route_conversation_type
 FROM bot_sessions s
-LEFT JOIN bot_channel_routes r ON r.id = s.route_id
-WHERE s.bot_id = $1
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id AND r.tenant_id = app.current_tenant_id()
+WHERE s.tenant_id = app.current_tenant_id()
+  AND s.bot_id = $1
   AND s.deleted_at IS NULL
   AND s.type = ANY($2::text[])
   AND (
@@ -837,7 +851,8 @@ func (q *Queries) ListSessionsByBotPaged(ctx context.Context, arg ListSessionsBy
 const listSessionsByRoute = `-- name: ListSessionsByRoute :many
 SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, tenant_id
 FROM bot_sessions
-WHERE route_id = $1
+WHERE tenant_id = app.current_tenant_id()
+  AND route_id = $1
   AND deleted_at IS NULL
 ORDER BY updated_at DESC
 `
@@ -883,7 +898,8 @@ func (q *Queries) ListSessionsByRoute(ctx context.Context, routeID pgtype.UUID) 
 const listSubagentSessionsByParent = `-- name: ListSubagentSessionsByParent :many
 SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, tenant_id
 FROM bot_sessions
-WHERE parent_session_id = $1
+WHERE tenant_id = app.current_tenant_id()
+  AND parent_session_id = $1
   AND deleted_at IS NULL
 ORDER BY created_at DESC
 `
@@ -929,7 +945,7 @@ func (q *Queries) ListSubagentSessionsByParent(ctx context.Context, parentSessio
 const setSessionNextTurnPosition = `-- name: SetSessionNextTurnPosition :exec
 UPDATE bot_sessions
 SET next_turn_position = $1::bigint
-WHERE id = $2
+WHERE tenant_id = app.current_tenant_id() AND id = $2
 `
 
 type SetSessionNextTurnPositionParams struct {
@@ -945,7 +961,7 @@ func (q *Queries) SetSessionNextTurnPosition(ctx context.Context, arg SetSession
 const softDeleteSession = `-- name: SoftDeleteSession :exec
 UPDATE bot_sessions
 SET deleted_at = now(), updated_at = now()
-WHERE id = $1 AND deleted_at IS NULL
+WHERE tenant_id = app.current_tenant_id() AND id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) SoftDeleteSession(ctx context.Context, id pgtype.UUID) error {
@@ -956,7 +972,7 @@ func (q *Queries) SoftDeleteSession(ctx context.Context, id pgtype.UUID) error {
 const softDeleteSessionsByBot = `-- name: SoftDeleteSessionsByBot :exec
 UPDATE bot_sessions
 SET deleted_at = now(), updated_at = now()
-WHERE bot_id = $1 AND deleted_at IS NULL
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) SoftDeleteSessionsByBot(ctx context.Context, botID pgtype.UUID) error {
@@ -967,7 +983,7 @@ func (q *Queries) SoftDeleteSessionsByBot(ctx context.Context, botID pgtype.UUID
 const touchSession = `-- name: TouchSession :exec
 UPDATE bot_sessions
 SET updated_at = now()
-WHERE id = $1 AND deleted_at IS NULL
+WHERE tenant_id = app.current_tenant_id() AND id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) TouchSession(ctx context.Context, id pgtype.UUID) error {
@@ -978,7 +994,7 @@ func (q *Queries) TouchSession(ctx context.Context, id pgtype.UUID) error {
 const updateSessionMetadata = `-- name: UpdateSessionMetadata :one
 UPDATE bot_sessions
 SET metadata = $1, updated_at = now()
-WHERE id = $2 AND deleted_at IS NULL
+WHERE tenant_id = app.current_tenant_id() AND id = $2 AND deleted_at IS NULL
 RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, tenant_id
 `
 
@@ -1015,7 +1031,7 @@ func (q *Queries) UpdateSessionMetadata(ctx context.Context, arg UpdateSessionMe
 const updateSessionTitle = `-- name: UpdateSessionTitle :one
 UPDATE bot_sessions
 SET title = $1, updated_at = now()
-WHERE id = $2 AND deleted_at IS NULL
+WHERE tenant_id = app.current_tenant_id() AND id = $2 AND deleted_at IS NULL
 RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, tenant_id
 `
 
@@ -1057,7 +1073,7 @@ SET type = $1,
     runtime_metadata = $4,
     metadata = $5,
     updated_at = now()
-WHERE id = $6 AND deleted_at IS NULL
+WHERE tenant_id = app.current_tenant_id() AND id = $6 AND deleted_at IS NULL
 RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, tenant_id
 `
 
@@ -1113,7 +1129,7 @@ VALUES (
   $4,
   $5
 )
-ON CONFLICT (session_id, scope_key) DO UPDATE
+ON CONFLICT (tenant_id, session_id, scope_key) DO UPDATE
 SET route_id = COALESCE(EXCLUDED.route_id, bot_session_discuss_cursors.route_id),
     source = EXCLUDED.source,
     consumed_cursor = GREATEST(bot_session_discuss_cursors.consumed_cursor, EXCLUDED.consumed_cursor),

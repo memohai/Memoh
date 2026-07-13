@@ -17,7 +17,8 @@ SET status = 'approved',
     decision_reason = $1,
     decided_by_channel_identity_id = $2,
     decided_at = now()
-WHERE id = $3
+WHERE tenant_id = app.current_tenant_id()
+  AND id = $3
   AND status = 'pending'
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, tenant_id
 `
@@ -64,7 +65,8 @@ UPDATE tool_approval_requests
 SET status = 'cancelled',
     decision_reason = $1,
     decided_at = now()
-WHERE bot_id = $2
+WHERE tenant_id = app.current_tenant_id()
+  AND bot_id = $2
   AND session_id = $3
   AND status = 'pending'
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, tenant_id
@@ -148,7 +150,8 @@ INSERT INTO tool_approval_requests (
   (
     SELECT COALESCE(MAX(short_id), 0) + 1
     FROM tool_approval_requests
-    WHERE session_id = $2
+    WHERE tenant_id = app.current_tenant_id()
+      AND session_id = $2
   ),
   $9,
   $10,
@@ -156,7 +159,7 @@ INSERT INTO tool_approval_requests (
   $12,
   $13
 )
-ON CONFLICT (session_id, tool_call_id) DO UPDATE
+ON CONFLICT (tenant_id, session_id, tool_call_id) DO UPDATE
 SET tool_input = CASE
   WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.tool_input
   ELSE tool_approval_requests.tool_input
@@ -228,7 +231,8 @@ func (q *Queries) CreateToolApprovalRequest(ctx context.Context, arg CreateToolA
 const getLatestPendingToolApprovalBySession = `-- name: GetLatestPendingToolApprovalBySession :one
 SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, tenant_id
 FROM tool_approval_requests
-WHERE bot_id = $1
+WHERE tenant_id = app.current_tenant_id()
+  AND bot_id = $1
   AND session_id = $2
   AND status = 'pending'
 ORDER BY created_at DESC, short_id DESC
@@ -274,7 +278,8 @@ func (q *Queries) GetLatestPendingToolApprovalBySession(ctx context.Context, arg
 const getPendingToolApprovalByReplyMessage = `-- name: GetPendingToolApprovalByReplyMessage :one
 SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, tenant_id
 FROM tool_approval_requests
-WHERE bot_id = $1
+WHERE tenant_id = app.current_tenant_id()
+  AND bot_id = $1
   AND session_id = $2
   AND prompt_external_message_id = $3
   AND status = 'pending'
@@ -322,7 +327,8 @@ func (q *Queries) GetPendingToolApprovalByReplyMessage(ctx context.Context, arg 
 const getPendingToolApprovalBySessionShortID = `-- name: GetPendingToolApprovalBySessionShortID :one
 SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, tenant_id
 FROM tool_approval_requests
-WHERE bot_id = $1
+WHERE tenant_id = app.current_tenant_id()
+  AND bot_id = $1
   AND session_id = $2
   AND short_id = $3
   AND status = 'pending'
@@ -368,7 +374,7 @@ func (q *Queries) GetPendingToolApprovalBySessionShortID(ctx context.Context, ar
 const getToolApprovalRequest = `-- name: GetToolApprovalRequest :one
 SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, tenant_id
 FROM tool_approval_requests
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id() AND id = $1
 `
 
 func (q *Queries) GetToolApprovalRequest(ctx context.Context, id pgtype.UUID) (ToolApprovalRequest, error) {
@@ -405,7 +411,8 @@ func (q *Queries) GetToolApprovalRequest(ctx context.Context, id pgtype.UUID) (T
 const listPendingToolApprovalsBySession = `-- name: ListPendingToolApprovalsBySession :many
 SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, tenant_id
 FROM tool_approval_requests
-WHERE bot_id = $1
+WHERE tenant_id = app.current_tenant_id()
+  AND bot_id = $1
   AND session_id = $2
   AND status = 'pending'
 ORDER BY created_at ASC, short_id ASC
@@ -463,7 +470,8 @@ func (q *Queries) ListPendingToolApprovalsBySession(ctx context.Context, arg Lis
 const listToolApprovalsBySession = `-- name: ListToolApprovalsBySession :many
 SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, tenant_id
 FROM tool_approval_requests
-WHERE bot_id = $1
+WHERE tenant_id = app.current_tenant_id()
+  AND bot_id = $1
   AND session_id = $2
 ORDER BY created_at ASC, short_id ASC
 `
@@ -520,7 +528,8 @@ func (q *Queries) ListToolApprovalsBySession(ctx context.Context, arg ListToolAp
 const listToolApprovalsBySessionToolCalls = `-- name: ListToolApprovalsBySessionToolCalls :many
 SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, tenant_id
 FROM tool_approval_requests
-WHERE bot_id = $1
+WHERE tenant_id = app.current_tenant_id()
+  AND bot_id = $1
   AND session_id = $2
   AND tool_call_id = ANY($3::text[])
 ORDER BY created_at ASC, short_id ASC
@@ -582,7 +591,8 @@ SET status = 'rejected',
     decision_reason = $1,
     decided_by_channel_identity_id = $2,
     decided_at = now()
-WHERE id = $3
+WHERE tenant_id = app.current_tenant_id()
+  AND id = $3
   AND status = 'pending'
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, tenant_id
 `
@@ -628,7 +638,7 @@ const updateToolApprovalPromptMessage = `-- name: UpdateToolApprovalPromptMessag
 UPDATE tool_approval_requests
 SET prompt_message_id = $1,
     prompt_external_message_id = $2
-WHERE id = $3
+WHERE tenant_id = app.current_tenant_id() AND id = $3
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, operation, tool_input, short_id, status, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, tenant_id
 `
 

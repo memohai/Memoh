@@ -51,7 +51,7 @@ func (q *Queries) CreateSearchProvider(ctx context.Context, arg CreateSearchProv
 }
 
 const deleteSearchProvider = `-- name: DeleteSearchProvider :exec
-DELETE FROM search_providers WHERE id = $1
+DELETE FROM search_providers WHERE tenant_id = app.current_tenant_id() AND id = $1
 `
 
 func (q *Queries) DeleteSearchProvider(ctx context.Context, id pgtype.UUID) error {
@@ -60,7 +60,7 @@ func (q *Queries) DeleteSearchProvider(ctx context.Context, id pgtype.UUID) erro
 }
 
 const getSearchProviderByID = `-- name: GetSearchProviderByID :one
-SELECT id, name, provider, config, enable, created_at, updated_at, tenant_id FROM search_providers WHERE id = $1
+SELECT id, name, provider, config, enable, created_at, updated_at, tenant_id FROM search_providers WHERE tenant_id = app.current_tenant_id() AND id = $1
 `
 
 func (q *Queries) GetSearchProviderByID(ctx context.Context, id pgtype.UUID) (SearchProvider, error) {
@@ -80,7 +80,7 @@ func (q *Queries) GetSearchProviderByID(ctx context.Context, id pgtype.UUID) (Se
 }
 
 const getSearchProviderByName = `-- name: GetSearchProviderByName :one
-SELECT id, name, provider, config, enable, created_at, updated_at, tenant_id FROM search_providers WHERE name = $1
+SELECT id, name, provider, config, enable, created_at, updated_at, tenant_id FROM search_providers WHERE tenant_id = app.current_tenant_id() AND name = $1
 `
 
 func (q *Queries) GetSearchProviderByName(ctx context.Context, name string) (SearchProvider, error) {
@@ -101,6 +101,7 @@ func (q *Queries) GetSearchProviderByName(ctx context.Context, name string) (Sea
 
 const listSearchProviders = `-- name: ListSearchProviders :many
 SELECT id, name, provider, config, enable, created_at, updated_at, tenant_id FROM search_providers
+WHERE tenant_id = app.current_tenant_id()
 ORDER BY created_at DESC
 `
 
@@ -135,7 +136,7 @@ func (q *Queries) ListSearchProviders(ctx context.Context) ([]SearchProvider, er
 
 const listSearchProvidersByProvider = `-- name: ListSearchProvidersByProvider :many
 SELECT id, name, provider, config, enable, created_at, updated_at, tenant_id FROM search_providers
-WHERE provider = $1
+WHERE tenant_id = app.current_tenant_id() AND provider = $1
 ORDER BY created_at DESC
 `
 
@@ -176,7 +177,7 @@ SET
   config = $3,
   enable = $4,
   updated_at = now()
-WHERE id = $5
+WHERE tenant_id = app.current_tenant_id() AND id = $5
 RETURNING id, name, provider, config, enable, created_at, updated_at, tenant_id
 `
 

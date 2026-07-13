@@ -14,7 +14,8 @@ import (
 const countAccounts = `-- name: CountAccounts :one
 SELECT COUNT(*)::bigint AS count
 FROM users
-WHERE username IS NOT NULL
+WHERE tenant_id = app.current_tenant_id()
+  AND username IS NOT NULL
   AND password_hash IS NOT NULL
 `
 
@@ -36,7 +37,7 @@ SET username = $1,
     is_active = $7,
     data_root = $8,
     updated_at = now()
-WHERE id = $9
+WHERE tenant_id = app.current_tenant_id() AND id = $9
 RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id
 `
 
@@ -120,7 +121,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 }
 
 const getAccountByIdentity = `-- name: GetAccountByIdentity :one
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id FROM users WHERE username = $1 OR email = $1
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id FROM users WHERE tenant_id = app.current_tenant_id() AND (username = $1 OR email = $1)
 `
 
 func (q *Queries) GetAccountByIdentity(ctx context.Context, identity pgtype.Text) (User, error) {
@@ -147,7 +148,7 @@ func (q *Queries) GetAccountByIdentity(ctx context.Context, identity pgtype.Text
 }
 
 const getAccountByUserID = `-- name: GetAccountByUserID :one
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id FROM users WHERE id = $1
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id FROM users WHERE tenant_id = app.current_tenant_id() AND id = $1
 `
 
 func (q *Queries) GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (User, error) {
@@ -176,7 +177,7 @@ func (q *Queries) GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (U
 const getUserByID = `-- name: GetUserByID :one
 SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id
 FROM users
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id() AND id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error) {
@@ -204,7 +205,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 
 const listAccounts = `-- name: ListAccounts :many
 SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id FROM users
-WHERE username IS NOT NULL
+WHERE tenant_id = app.current_tenant_id() AND username IS NOT NULL
 ORDER BY created_at DESC
 `
 
@@ -254,7 +255,7 @@ SET username = NULL,
     data_root = NULL,
     is_active = FALSE,
     updated_at = now()
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id() AND id = $1
 RETURNING id
 `
 
@@ -268,7 +269,8 @@ func (q *Queries) RemoveMember(ctx context.Context, userID pgtype.UUID) (pgtype.
 const searchAccounts = `-- name: SearchAccounts :many
 SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id
 FROM users
-WHERE username IS NOT NULL
+WHERE tenant_id = app.current_tenant_id()
+  AND username IS NOT NULL
   AND (
     $1::text = ''
     OR username ILIKE '%' || $1::text || '%'
@@ -327,7 +329,7 @@ SET role = $1::user_role,
     avatar_url = $3,
     is_active = $4,
     updated_at = now()
-WHERE id = $5
+WHERE tenant_id = app.current_tenant_id() AND id = $5
 RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id
 `
 
@@ -372,7 +374,7 @@ const updateAccountLastLogin = `-- name: UpdateAccountLastLogin :one
 UPDATE users
 SET last_login_at = now(),
     updated_at = now()
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id() AND id = $1
 RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id
 `
 
@@ -403,7 +405,7 @@ const updateAccountPassword = `-- name: UpdateAccountPassword :one
 UPDATE users
 SET password_hash = $2,
     updated_at = now()
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id() AND id = $1
 RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id
 `
 
@@ -443,7 +445,7 @@ SET display_name = $2,
     is_active = $5,
     metadata = $6,
     updated_at = now()
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id() AND id = $1
 RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id
 `
 
@@ -500,7 +502,7 @@ VALUES (
   $9,
   '{}'::jsonb
 )
-ON CONFLICT (username) DO UPDATE SET
+ON CONFLICT (tenant_id, username) DO UPDATE SET
   email = EXCLUDED.email,
   password_hash = EXCLUDED.password_hash,
   role = EXCLUDED.role,

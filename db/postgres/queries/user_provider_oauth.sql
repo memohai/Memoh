@@ -23,7 +23,7 @@ VALUES (
   sqlc.arg(pkce_code_verifier),
   sqlc.arg(metadata)
 )
-ON CONFLICT (provider_id, user_id) DO UPDATE SET
+ON CONFLICT (tenant_id, provider_id, user_id) DO UPDATE SET
   access_token = EXCLUDED.access_token,
   refresh_token = EXCLUDED.refresh_token,
   expires_at = EXCLUDED.expires_at,
@@ -37,12 +37,12 @@ RETURNING *;
 
 -- name: GetUserProviderOAuthToken :one
 SELECT * FROM user_provider_oauth_tokens
-WHERE provider_id = sqlc.arg(provider_id)
+WHERE tenant_id = app.current_tenant_id() AND provider_id = sqlc.arg(provider_id)
   AND user_id = sqlc.arg(user_id);
 
 -- name: GetUserProviderOAuthTokenByState :one
 SELECT * FROM user_provider_oauth_tokens
-WHERE state = sqlc.arg(state)
+WHERE tenant_id = app.current_tenant_id() AND state = sqlc.arg(state)
   AND state != '';
 
 -- name: UpdateUserProviderOAuthState :exec
@@ -54,7 +54,7 @@ VALUES (
   sqlc.arg(pkce_code_verifier),
   sqlc.arg(metadata)
 )
-ON CONFLICT (provider_id, user_id) DO UPDATE SET
+ON CONFLICT (tenant_id, provider_id, user_id) DO UPDATE SET
   state = EXCLUDED.state,
   pkce_code_verifier = EXCLUDED.pkce_code_verifier,
   metadata = EXCLUDED.metadata,
@@ -62,5 +62,5 @@ ON CONFLICT (provider_id, user_id) DO UPDATE SET
 
 -- name: DeleteUserProviderOAuthToken :exec
 DELETE FROM user_provider_oauth_tokens
-WHERE provider_id = sqlc.arg(provider_id)
+WHERE tenant_id = app.current_tenant_id() AND provider_id = sqlc.arg(provider_id)
   AND user_id = sqlc.arg(user_id);

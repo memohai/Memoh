@@ -6,18 +6,18 @@ RETURNING id, channel_type, channel_subject_id, display_name, avatar_url, metada
 -- name: GetChannelIdentityByID :one
 SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, tenant_id
 FROM channel_identities
-WHERE id = $1;
+WHERE tenant_id = app.current_tenant_id() AND id = $1;
 
 -- name: GetChannelIdentityByIDForUpdate :one
 SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, tenant_id
 FROM channel_identities
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id() AND id = $1
 FOR UPDATE;
 
 -- name: GetChannelIdentityByChannelSubject :one
 SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, tenant_id
 FROM channel_identities
-WHERE channel_type = $1 AND channel_subject_id = $2;
+WHERE tenant_id = app.current_tenant_id() AND channel_type = $1 AND channel_subject_id = $2;
 
 -- name: UpsertChannelIdentityByChannelSubject :one
 INSERT INTO channel_identities (channel_type, channel_subject_id, display_name, avatar_url, metadata)
@@ -43,10 +43,13 @@ SELECT
   ci.tenant_id
 FROM channel_identities ci
 WHERE
-  sqlc.arg(query)::text = ''
-  OR ci.channel_type ILIKE '%' || sqlc.arg(query)::text || '%'
-  OR ci.channel_subject_id ILIKE '%' || sqlc.arg(query)::text || '%'
-  OR COALESCE(ci.display_name, '') ILIKE '%' || sqlc.arg(query)::text || '%'
+  ci.tenant_id = app.current_tenant_id()
+  AND (
+    sqlc.arg(query)::text = ''
+    OR ci.channel_type ILIKE '%' || sqlc.arg(query)::text || '%'
+    OR ci.channel_subject_id ILIKE '%' || sqlc.arg(query)::text || '%'
+    OR COALESCE(ci.display_name, '') ILIKE '%' || sqlc.arg(query)::text || '%'
+  )
 ORDER BY ci.updated_at DESC
 LIMIT sqlc.arg(limit_count);
 

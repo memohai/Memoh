@@ -43,7 +43,8 @@ SELECT
   created_at,
   updated_at
 FROM bot_channel_routes
-WHERE bot_id = $1
+WHERE tenant_id = app.current_tenant_id()
+  AND bot_id = $1
   AND channel_type = sqlc.arg(platform)
   AND external_conversation_id = sqlc.arg(conversation_id)
   AND COALESCE(external_thread_id, '') = COALESCE(sqlc.narg(thread_id), '')
@@ -65,7 +66,7 @@ SELECT
   created_at,
   updated_at
 FROM bot_channel_routes
-WHERE id = $1;
+WHERE tenant_id = app.current_tenant_id() AND id = $1;
 
 -- name: ListChatRoutes :many
 SELECT
@@ -83,24 +84,24 @@ SELECT
   created_at,
   updated_at
 FROM bot_channel_routes
-WHERE bot_id = sqlc.arg(chat_id)
+WHERE tenant_id = app.current_tenant_id() AND bot_id = sqlc.arg(chat_id)
 ORDER BY created_at ASC;
 
 -- name: UpdateChatRouteReplyTarget :exec
 UPDATE bot_channel_routes
 SET default_reply_target = sqlc.arg(reply_target), updated_at = now()
-WHERE id = sqlc.arg(id);
+WHERE tenant_id = app.current_tenant_id() AND id = sqlc.arg(id);
 
 -- name: UpdateChatRouteMetadata :exec
 UPDATE bot_channel_routes
 SET metadata = sqlc.arg(metadata), updated_at = now()
-WHERE id = sqlc.arg(id);
+WHERE tenant_id = app.current_tenant_id() AND id = sqlc.arg(id);
 
 -- name: SetRouteActiveSession :exec
 UPDATE bot_channel_routes
 SET active_session_id = sqlc.narg(active_session_id)::uuid, updated_at = now()
-WHERE id = sqlc.arg(id);
+WHERE tenant_id = app.current_tenant_id() AND id = sqlc.arg(id);
 
 -- name: DeleteChatRoute :exec
 DELETE FROM bot_channel_routes
-WHERE id = $1;
+WHERE tenant_id = app.current_tenant_id() AND id = $1;

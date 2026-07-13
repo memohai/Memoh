@@ -14,9 +14,9 @@ import (
 const countTokenUsageRecords = `-- name: CountTokenUsageRecords :one
 SELECT COUNT(*)::bigint AS total
 FROM bot_history_messages m
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-LEFT JOIN bot_sessions ps ON ps.id = s.parent_session_id
-WHERE m.bot_id = $1
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
+LEFT JOIN bot_sessions ps ON ps.id = s.parent_session_id AND ps.tenant_id = app.current_tenant_id()
+WHERE m.tenant_id = app.current_tenant_id() AND m.bot_id = $1
   AND m.usage IS NOT NULL
   AND m.created_at >= $2
   AND m.created_at < $3
@@ -100,9 +100,9 @@ SELECT
   COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint), 0)::bigint AS cache_read_tokens,
   COALESCE(SUM((m.usage->'outputTokenDetails'->>'reasoningTokens')::bigint), 0)::bigint AS reasoning_tokens
 FROM bot_history_messages m
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-LEFT JOIN bot_sessions ps ON ps.id = s.parent_session_id
-WHERE m.bot_id = $1
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
+LEFT JOIN bot_sessions ps ON ps.id = s.parent_session_id AND ps.tenant_id = app.current_tenant_id()
+WHERE m.tenant_id = app.current_tenant_id() AND m.bot_id = $1
   AND m.usage IS NOT NULL
   AND m.created_at >= $2
   AND m.created_at < $3
@@ -198,11 +198,11 @@ SELECT
   COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS input_tokens,
   COALESCE(SUM((m.usage->>'outputTokens')::bigint), 0)::bigint AS output_tokens
 FROM bot_history_messages m
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-LEFT JOIN bot_sessions ps ON ps.id = s.parent_session_id
-LEFT JOIN models mo ON mo.id = m.model_id
-LEFT JOIN providers lp ON lp.id = mo.provider_id
-WHERE m.bot_id = $1
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
+LEFT JOIN bot_sessions ps ON ps.id = s.parent_session_id AND ps.tenant_id = app.current_tenant_id()
+LEFT JOIN models mo ON mo.id = m.model_id AND mo.tenant_id = app.current_tenant_id()
+LEFT JOIN providers lp ON lp.id = mo.provider_id AND lp.tenant_id = app.current_tenant_id()
+WHERE m.tenant_id = app.current_tenant_id() AND m.bot_id = $1
   AND m.usage IS NOT NULL
   AND m.created_at >= $2
   AND m.created_at < $3
@@ -320,11 +320,11 @@ SELECT
   COALESCE((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint, 0)::bigint AS cache_read_tokens,
   COALESCE((m.usage->'outputTokenDetails'->>'reasoningTokens')::bigint, 0)::bigint AS reasoning_tokens
 FROM bot_history_messages m
-LEFT JOIN bot_sessions s ON s.id = m.session_id
-LEFT JOIN bot_sessions ps ON ps.id = s.parent_session_id
-LEFT JOIN models mo ON mo.id = m.model_id
-LEFT JOIN providers lp ON lp.id = mo.provider_id
-WHERE m.bot_id = $1
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
+LEFT JOIN bot_sessions ps ON ps.id = s.parent_session_id AND ps.tenant_id = app.current_tenant_id()
+LEFT JOIN models mo ON mo.id = m.model_id AND mo.tenant_id = app.current_tenant_id()
+LEFT JOIN providers lp ON lp.id = mo.provider_id AND lp.tenant_id = app.current_tenant_id()
+WHERE m.tenant_id = app.current_tenant_id() AND m.bot_id = $1
   AND m.usage IS NOT NULL
   AND m.created_at >= $2
   AND m.created_at < $3

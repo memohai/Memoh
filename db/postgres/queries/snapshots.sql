@@ -15,7 +15,7 @@ VALUES (
   sqlc.arg(snapshotter),
   sqlc.arg(source)
 )
-ON CONFLICT (container_id, runtime_snapshot_name) DO UPDATE
+ON CONFLICT (tenant_id, container_id, runtime_snapshot_name) DO UPDATE
 SET
   display_name = EXCLUDED.display_name,
   parent_runtime_snapshot_name = EXCLUDED.parent_runtime_snapshot_name,
@@ -35,7 +35,7 @@ SELECT
   created_at,
   tenant_id
 FROM snapshots
-WHERE container_id = sqlc.arg(container_id)
+WHERE tenant_id = app.current_tenant_id() AND container_id = sqlc.arg(container_id)
 ORDER BY created_at DESC;
 
 -- name: ListSnapshotsWithVersionByContainerID :many
@@ -50,8 +50,8 @@ SELECT
   s.created_at,
   cv.version
 FROM snapshots s
-LEFT JOIN container_versions cv ON cv.snapshot_id = s.id
-WHERE s.container_id = sqlc.arg(container_id)
+LEFT JOIN container_versions cv ON cv.snapshot_id = s.id AND cv.tenant_id = app.current_tenant_id()
+WHERE s.tenant_id = app.current_tenant_id() AND s.container_id = sqlc.arg(container_id)
 ORDER BY s.created_at DESC;
 
 -- name: GetSnapshotByContainerAndRuntimeName :one
@@ -66,6 +66,6 @@ SELECT
   created_at,
   tenant_id
 FROM snapshots
-WHERE container_id = sqlc.arg(container_id)
+WHERE tenant_id = app.current_tenant_id() AND container_id = sqlc.arg(container_id)
   AND runtime_snapshot_name = sqlc.arg(runtime_snapshot_name)
 LIMIT 1;

@@ -57,7 +57,7 @@ func (q *Queries) CreateSchedule(ctx context.Context, arg CreateScheduleParams) 
 
 const deleteSchedule = `-- name: DeleteSchedule :exec
 DELETE FROM schedule
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id() AND id = $1
 `
 
 func (q *Queries) DeleteSchedule(ctx context.Context, id pgtype.UUID) error {
@@ -68,7 +68,7 @@ func (q *Queries) DeleteSchedule(ctx context.Context, id pgtype.UUID) error {
 const getScheduleByID = `-- name: GetScheduleByID :one
 SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, tenant_id
 FROM schedule
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id() AND id = $1
 `
 
 func (q *Queries) GetScheduleByID(ctx context.Context, id pgtype.UUID) (Schedule, error) {
@@ -99,7 +99,7 @@ SET current_calls = current_calls + 1,
       ELSE enabled
     END,
     updated_at = now()
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id() AND id = $1
 RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, tenant_id
 `
 
@@ -126,7 +126,7 @@ func (q *Queries) IncrementScheduleCalls(ctx context.Context, id pgtype.UUID) (S
 const listEnabledSchedules = `-- name: ListEnabledSchedules :many
 SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, tenant_id
 FROM schedule
-WHERE enabled = true
+WHERE tenant_id = app.current_tenant_id() AND enabled = true
 ORDER BY created_at DESC
 `
 
@@ -166,7 +166,7 @@ func (q *Queries) ListEnabledSchedules(ctx context.Context) ([]Schedule, error) 
 const listSchedulesByBot = `-- name: ListSchedulesByBot :many
 SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, tenant_id
 FROM schedule
-WHERE bot_id = $1
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
 ORDER BY created_at DESC
 `
 
@@ -212,7 +212,7 @@ SET name = $2,
     enabled = $6,
     command = $7,
     updated_at = now()
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id() AND id = $1
 RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, tenant_id
 `
 

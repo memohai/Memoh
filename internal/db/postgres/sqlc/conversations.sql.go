@@ -24,8 +24,8 @@ SELECT
   b.created_at,
   b.updated_at
 FROM bots b
-LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
-WHERE b.id = $6
+LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id AND chat_models.tenant_id = app.current_tenant_id()
+WHERE b.tenant_id = app.current_tenant_id() AND b.id = $6
 LIMIT 1
 `
 
@@ -79,14 +79,14 @@ func (q *Queries) CreateChat(ctx context.Context, arg CreateChatParams) (CreateC
 const deleteChat = `-- name: DeleteChat :exec
 WITH deleted_messages AS (
   DELETE FROM bot_history_messages
-  WHERE bot_id = $1
+  WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
 ),
 deleted_sessions AS (
   DELETE FROM bot_sessions
-  WHERE bot_id = $1
+  WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
 )
 DELETE FROM bot_channel_routes bcr
-WHERE bcr.bot_id = $1
+WHERE bcr.tenant_id = app.current_tenant_id() AND bcr.bot_id = $1
 `
 
 func (q *Queries) DeleteChat(ctx context.Context, chatID pgtype.UUID) error {
@@ -107,8 +107,8 @@ SELECT
   b.created_at,
   b.updated_at
 FROM bots b
-LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
-WHERE b.id = $1
+LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id AND chat_models.tenant_id = app.current_tenant_id()
+WHERE b.tenant_id = app.current_tenant_id() AND b.id = $1
 `
 
 type GetChatByIDRow struct {
@@ -145,7 +145,7 @@ func (q *Queries) GetChatByID(ctx context.Context, id pgtype.UUID) (GetChatByIDR
 const getChatParticipant = `-- name: GetChatParticipant :one
 SELECT b.id AS chat_id, b.owner_user_id AS user_id, 'owner'::text AS role, b.created_at AS joined_at
 FROM bots b
-WHERE b.id = $1 AND b.owner_user_id = $2
+WHERE b.tenant_id = app.current_tenant_id() AND b.id = $1 AND b.owner_user_id = $2
 LIMIT 1
 `
 
@@ -179,7 +179,7 @@ SELECT
   'owner'::text AS participant_role,
   NULL::timestamptz AS last_observed_at
 FROM bots b
-WHERE b.id = $1
+WHERE b.tenant_id = app.current_tenant_id() AND b.id = $1
   AND b.owner_user_id = $2
 LIMIT 1
 `
@@ -208,8 +208,8 @@ SELECT
   chat_models.id AS model_id,
   b.updated_at
 FROM bots b
-LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
-WHERE b.id = $1
+LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id AND chat_models.tenant_id = app.current_tenant_id()
+WHERE b.tenant_id = app.current_tenant_id() AND b.id = $1
 `
 
 type GetChatSettingsRow struct {
@@ -228,7 +228,7 @@ func (q *Queries) GetChatSettings(ctx context.Context, id pgtype.UUID) (GetChatS
 const listChatParticipants = `-- name: ListChatParticipants :many
 SELECT b.id AS chat_id, b.owner_user_id AS user_id, 'owner'::text AS role, b.created_at AS joined_at
 FROM bots b
-WHERE b.id = $1
+WHERE b.tenant_id = app.current_tenant_id() AND b.id = $1
 ORDER BY joined_at ASC
 `
 
@@ -277,8 +277,8 @@ SELECT
   b.created_at,
   b.updated_at
 FROM bots b
-LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
-WHERE b.id = $1
+LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id AND chat_models.tenant_id = app.current_tenant_id()
+WHERE b.tenant_id = app.current_tenant_id() AND b.id = $1
   AND b.owner_user_id = $2
 ORDER BY b.updated_at DESC
 `
@@ -345,8 +345,8 @@ SELECT
   b.created_at,
   b.updated_at
 FROM bots b
-LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
-WHERE b.id = $1
+LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id AND chat_models.tenant_id = app.current_tenant_id()
+WHERE b.tenant_id = app.current_tenant_id() AND b.id = $1
 ORDER BY b.created_at DESC
 `
 
@@ -413,8 +413,8 @@ SELECT
   END)::text AS participant_role,
   NULL::timestamptz AS last_observed_at
 FROM bots b
-LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id
-WHERE b.id = $2
+LEFT JOIN models chat_models ON chat_models.id = b.chat_model_id AND chat_models.tenant_id = app.current_tenant_id()
+WHERE b.tenant_id = app.current_tenant_id() AND b.id = $2
   AND b.owner_user_id = $1
 ORDER BY b.updated_at DESC
 `
@@ -479,7 +479,7 @@ SELECT 1
 WHERE EXISTS (
   SELECT 1
   FROM bots b
-  WHERE b.id = $1
+  WHERE b.tenant_id = app.current_tenant_id() AND b.id = $1
     AND b.owner_user_id = $2
 )
 `
@@ -497,7 +497,7 @@ func (q *Queries) RemoveChatParticipant(ctx context.Context, arg RemoveChatParti
 const touchChat = `-- name: TouchChat :exec
 UPDATE bots
 SET updated_at = now()
-WHERE id = $1
+WHERE tenant_id = app.current_tenant_id() AND id = $1
 `
 
 func (q *Queries) TouchChat(ctx context.Context, chatID pgtype.UUID) error {
@@ -510,7 +510,7 @@ WITH updated AS (
   UPDATE bots
   SET display_name = $1,
       updated_at = now()
-  WHERE bots.id = $2
+  WHERE bots.tenant_id = app.current_tenant_id() AND bots.id = $2
   RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, command_ui_language, reasoning_enabled, reasoning_effort, chat_model_id, chat_runtime, chat_acp_agent_id, chat_acp_project_path, chat_acp_project_mode, search_provider_id, fetch_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, heartbeat_model_id, compaction_enabled, compaction_threshold, compaction_ratio, compaction_model_id, title_model_id, image_model_id, discuss_probe_model_id, tts_model_id, transcription_model_id, video_model_id, persist_full_tool_results, show_tool_calls_in_im, tool_approval_config, display_enabled, overlay_provider, overlay_enabled, overlay_config, metadata, created_at, updated_at, acl_default_effect, tenant_id
 )
 SELECT
@@ -525,7 +525,7 @@ SELECT
   updated.created_at,
   updated.updated_at
 FROM updated
-LEFT JOIN models chat_models ON chat_models.id = updated.chat_model_id
+LEFT JOIN models chat_models ON chat_models.id = updated.chat_model_id AND chat_models.tenant_id = app.current_tenant_id()
 `
 
 type UpdateChatTitleParams struct {
@@ -571,7 +571,7 @@ updated AS (
   UPDATE bots
   SET chat_model_id = COALESCE($1::uuid, bots.chat_model_id),
       updated_at = now()
-  WHERE bots.id = $2
+  WHERE bots.tenant_id = app.current_tenant_id() AND bots.id = $2
   RETURNING bots.id, bots.chat_model_id, bots.updated_at
 )
 SELECT
@@ -579,7 +579,7 @@ SELECT
   chat_models.id AS model_id,
   updated.updated_at
 FROM updated
-LEFT JOIN models chat_models ON chat_models.id = updated.chat_model_id
+LEFT JOIN models chat_models ON chat_models.id = updated.chat_model_id AND chat_models.tenant_id = app.current_tenant_id()
 `
 
 type UpsertChatSettingsParams struct {
