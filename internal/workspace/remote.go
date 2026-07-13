@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -139,9 +140,7 @@ func (s *RemoteWorkspaceService) ClientForBot(ctx context.Context, botID string)
 	if !ok || connection == nil || connection.Client == nil {
 		return nil, true, ErrRemoteRuntimeOffline
 	}
-	if !hasRuntimeCapability(connection.Info.Capabilities, userruntime.CapabilityFS) ||
-		!hasRuntimeCapability(connection.Info.Capabilities, userruntime.CapabilityExec) ||
-		!hasRuntimeCapability(connection.Info.Capabilities, userruntime.CapabilityWorkspaceScope) {
+	if !supportsRemoteWorkspace(connection.Info.Capabilities) {
 		return nil, true, ErrRemoteRuntimeClientUpdateNeeded
 	}
 	client := connection.Client.WithOutgoingMetadata(map[string]string{
@@ -161,7 +160,12 @@ func (s *RemoteWorkspaceService) WorkspaceInfo(ctx context.Context, botID string
 	}
 	defaultWorkDir := "/data"
 	runtimeOS := ""
-	if s.runtimes != nil {
+	// Same gates as ClientForBot: a transferred or revoked binding must not
+	// reveal the previous owner's workspace base or OS through prompt/tool
+	// metadata, so keep the neutral defaults instead of consulting the live
+	// connection.
+	ownerMatches := record.RuntimeUserID == record.BotOwnerUserID
+	if ownerMatches && !record.RuntimeRevoked && s.runtimes != nil {
 		if connection, online := s.runtimes.Connection(record.RuntimeID); online && connection != nil {
 			defaultWorkDir = remoteWorkspaceWorkDir(connection.Info, record.WorkspacePath)
 			runtimeOS = connection.Info.OS
@@ -238,9 +242,7 @@ func (s *RemoteWorkspaceService) binding(record dbstore.BotRemoteRuntimeBindingR
 		binding.OS = connection.Info.OS
 		binding.Arch = connection.Info.Arch
 		binding.Capabilities = append([]string(nil), connection.Info.Capabilities...)
-		if !hasRuntimeCapability(connection.Info.Capabilities, userruntime.CapabilityFS) ||
-			!hasRuntimeCapability(connection.Info.Capabilities, userruntime.CapabilityExec) ||
-			!hasRuntimeCapability(connection.Info.Capabilities, userruntime.CapabilityWorkspaceScope) {
+		if !supportsRemoteWorkspace(connection.Info.Capabilities) {
 			binding.Status = RemoteBindingStatusClientUpdateRequired
 		} else {
 			binding.Status = RemoteBindingStatusOnline
@@ -293,11 +295,8 @@ func canonicalWorkspaceUUID(value string) (string, bool) {
 	return id.String(), true
 }
 
-func hasRuntimeCapability(capabilities []string, required string) bool {
-	for _, capability := range capabilities {
-		if capability == required {
-			return true
-		}
-	}
-	return false
+func supportsRemoteWorkspace(capabilities []string) bool {
+	return slices.Contains(capabilities, userruntime.CapabilityFS) &&
+		slices.Contains(capabilities, userruntime.CapabilityExec) &&
+		slices.Contains(capabilities, userruntime.CapabilityWorkspaceScope)
 }

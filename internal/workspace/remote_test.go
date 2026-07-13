@@ -182,6 +182,39 @@ func TestRemoteWorkspaceInfoMatchesNativeLocalWorkDirSemantics(t *testing.T) {
 	}
 }
 
+func TestRemoteWorkspaceInfoHidesPreviousOwnerPathAfterTransferOrRevoke(t *testing.T) {
+	for name, mutate := range map[string]func(*dbstore.BotRemoteRuntimeBindingRecord){
+		"owner mismatch": func(record *dbstore.BotRemoteRuntimeBindingRecord) {
+			record.BotOwnerUserID = "44444444-4444-4444-8444-444444444444"
+		},
+		"revoked": func(record *dbstore.BotRemoteRuntimeBindingRecord) { record.RuntimeRevoked = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			record := dbstore.BotRemoteRuntimeBindingRecord{
+				BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID, WorkspacePath: "projects/demo",
+				RuntimeUserID: remoteTestOwnerID, BotOwnerUserID: remoteTestOwnerID,
+			}
+			mutate(&record)
+			// The previous owner's runtime stays connected: its workspace base
+			// and OS must still not leak into prompt/tool workspace info.
+			service := &RemoteWorkspaceService{
+				store: &fakeRemoteBindingStore{record: record, exists: true},
+				runtimes: fakeRuntimeConnections{remoteTestRuntimeID: {
+					RuntimeID: remoteTestRuntimeID,
+					Info:      userruntime.RuntimeInfo{WorkspaceBase: "/Users/alice/workspaces", OS: "darwin"},
+				}},
+			}
+			info, bound, err := service.WorkspaceInfo(context.Background(), remoteTestBotID)
+			if err != nil || !bound {
+				t.Fatalf("WorkspaceInfo bound=%v err=%v", bound, err)
+			}
+			if info.Backend != bridge.WorkspaceBackendRemote || info.OS != "" || info.DefaultWorkDir != "/data" {
+				t.Fatalf("WorkspaceInfo leaked previous owner details: %#v", info)
+			}
+		})
+	}
+}
+
 func TestRemoteWorkspaceBoundFailuresNeverLookUnbound(t *testing.T) {
 	base := dbstore.BotRemoteRuntimeBindingRecord{
 		BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID, WorkspacePath: ".",
