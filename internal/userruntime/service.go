@@ -3,7 +3,9 @@ package userruntime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -14,6 +16,10 @@ var (
 	ErrInvalidInput              = errors.New("invalid runtime input")
 	ErrRuntimeConnectionNotReady = errors.New("runtime connection is no longer ready")
 )
+
+// maxRuntimeNameBytes matches the hostname cap in handshake metadata and
+// keeps (user_id, lower(name)) well under the Postgres btree index row limit.
+const maxRuntimeNameBytes = 255
 
 type ConnectionCommitGuard func() error
 
@@ -41,6 +47,9 @@ func (s *Service) CreateRuntime(ctx context.Context, userID string, req CreateRu
 	name := strings.TrimSpace(req.Name)
 	if userID == "" || name == "" {
 		return Runtime{}, ErrInvalidInput
+	}
+	if len(name) > maxRuntimeNameBytes || strings.ContainsRune(name, '\x00') || !utf8.ValidString(name) {
+		return Runtime{}, fmt.Errorf("%w: name must be valid UTF-8 of at most %d bytes", ErrInvalidInput, maxRuntimeNameBytes)
 	}
 	key, err := NewKey()
 	if err != nil {

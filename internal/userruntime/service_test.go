@@ -3,6 +3,7 @@ package userruntime
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -61,6 +62,24 @@ func (s *serviceTestStore) RevokeUserRuntime(_ context.Context, runtimeID, userI
 	}
 	s.revoked = true
 	return nil
+}
+
+func TestCreateRuntimeCapsNameLength(t *testing.T) {
+	service := NewService(&serviceTestStore{}, NewHub(nil))
+	for name, value := range map[string]string{
+		"too long":     strings.Repeat("a", maxRuntimeNameBytes+1),
+		"nul byte":     "work\x00station",
+		"invalid utf8": "work\xffstation",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := service.CreateRuntime(context.Background(), "user-1", CreateRuntimeRequest{Name: value}); !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("CreateRuntime error = %v, want ErrInvalidInput", err)
+			}
+		})
+	}
+	if _, err := service.CreateRuntime(context.Background(), "user-1", CreateRuntimeRequest{Name: strings.Repeat("a", maxRuntimeNameBytes)}); err != nil {
+		t.Fatalf("CreateRuntime max-length name error = %v", err)
+	}
 }
 
 func TestServiceRegistrationConnectionAndRevoke(t *testing.T) {
