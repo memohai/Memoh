@@ -40,7 +40,7 @@ func TestModel_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "valid chat model with ultra reasoning",
+			name: "invalid chat model with unsupported reasoning effort",
 			model: models.Model{
 				ModelID:    "gpt-5.6-sol",
 				Name:       "GPT-5.6-Sol",
@@ -50,7 +50,7 @@ func TestModel_Validate(t *testing.T) {
 					ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max", "ultra"},
 				},
 			},
-			wantErr: false,
+			wantErr: true,
 		},
 		{
 			name: "valid embedding model",

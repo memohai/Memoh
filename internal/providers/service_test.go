@@ -98,24 +98,23 @@ models:
 func TestListCodexRemoteModels(t *testing.T) {
 	t.Parallel()
 
+	type observedRequest struct {
+		method        string
+		path          string
+		clientVersion string
+		authorization string
+		accountID     string
+		originator    string
+	}
+	requestCh := make(chan observedRequest, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			t.Fatalf("method = %s, want GET", r.Method)
-		}
-		if r.URL.Path != "/backend-api/codex/models" {
-			t.Fatalf("path = %q, want /backend-api/codex/models", r.URL.Path)
-		}
-		if got := r.URL.Query().Get("client_version"); got != codexModelsClientVersion {
-			t.Fatalf("client_version = %q, want %q", got, codexModelsClientVersion)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
-			t.Fatalf("authorization = %q", got)
-		}
-		if got := r.Header.Get("chatgpt-account-id"); got != "acct_123" {
-			t.Fatalf("chatgpt-account-id = %q", got)
-		}
-		if got := r.Header.Get("originator"); got != "codex_cli_rs" {
-			t.Fatalf("originator = %q", got)
+		requestCh <- observedRequest{
+			method:        r.Method,
+			path:          r.URL.Path,
+			clientVersion: r.URL.Query().Get("client_version"),
+			authorization: r.Header.Get("Authorization"),
+			accountID:     r.Header.Get("chatgpt-account-id"),
+			originator:    r.Header.Get("originator"),
 		}
 
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -155,6 +154,25 @@ func TestListCodexRemoteModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list Codex models: %v", err)
 	}
+	request := <-requestCh
+	if request.method != http.MethodGet {
+		t.Errorf("method = %s, want GET", request.method)
+	}
+	if request.path != "/backend-api/codex/models" {
+		t.Errorf("path = %q, want /backend-api/codex/models", request.path)
+	}
+	if request.clientVersion != codexModelsClientVersion {
+		t.Errorf("client_version = %q, want %q", request.clientVersion, codexModelsClientVersion)
+	}
+	if request.authorization != "Bearer access-token" {
+		t.Errorf("authorization = %q", request.authorization)
+	}
+	if request.accountID != "acct_123" {
+		t.Errorf("chatgpt-account-id = %q", request.accountID)
+	}
+	if request.originator != "codex_cli_rs" {
+		t.Errorf("originator = %q", request.originator)
+	}
 	if len(remoteModels) != 1 {
 		t.Fatalf("models = %d, want 1", len(remoteModels))
 	}
@@ -165,7 +183,7 @@ func TestListCodexRemoteModels(t *testing.T) {
 	if got := strings.Join(model.Compatibilities, ","); got != "tool-call,vision,reasoning" {
 		t.Fatalf("compatibilities = %q", got)
 	}
-	if got := strings.Join(model.ReasoningEfforts, ","); got != "low,medium,high,xhigh,max,ultra" {
+	if got := strings.Join(model.ReasoningEfforts, ","); got != "low,medium,high,xhigh,max" {
 		t.Fatalf("reasoning efforts = %q", got)
 	}
 	if model.ThinkingMode != models.ThinkingModeToggle {

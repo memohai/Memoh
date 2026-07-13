@@ -163,6 +163,14 @@ func TestResolveReasoningConfig(t *testing.T) {
 			},
 		},
 	}
+	codexModel := models.GetResponse{
+		Model: models.Model{
+			Config: models.ModelConfig{
+				ThinkingMode:     models.ThinkingModeToggle,
+				ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"},
+			},
+		},
+	}
 	noneEffortModel := models.GetResponse{
 		Model: models.Model{
 			Config: models.ModelConfig{
@@ -267,11 +275,18 @@ func TestResolveReasoningConfig(t *testing.T) {
 			want:          &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortXHigh},
 		},
 		{
-			name:          "openai wire drops max and falls back to medium",
+			name:          "generic openai compatibility drops max and falls back to medium",
 			model:         adaptiveModel,
 			requestEffort: models.ReasoningEffortMax,
 			clientType:    string(models.ClientTypeOpenAICompletions),
 			want:          &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortMedium},
+		},
+		{
+			name:          "codex wire preserves max",
+			model:         codexModel,
+			requestEffort: models.ReasoningEffortMax,
+			clientType:    string(models.ClientTypeOpenAICodex),
+			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortMax},
 		},
 		{
 			name:          "anthropic wire preserves max",
