@@ -94,7 +94,7 @@ export function createHandshakeMetadata(
     arch: requiredMetadataString(machine.arch, 'arch', 64),
     client_version: requiredMetadataString(version, 'client_version', 128),
     workspace_base: workspace,
-    capabilities: runtimeCapabilities(machine.os),
+    capabilities: runtimeCapabilities(),
   }
 }
 

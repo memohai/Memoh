@@ -20,10 +20,15 @@ const readImageHint = "Also supports reading image files (PNG, JPEG, GIF, WebP)"
 type containerTestBridgeProvider struct {
 	client *bridge.Client
 	err    error
+	info   bridge.WorkspaceInfo
 }
 
 func (p containerTestBridgeProvider) MCPClient(context.Context, string) (*bridge.Client, error) {
 	return p.client, p.err
+}
+
+func (p containerTestBridgeProvider) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
+	return p.info, nil
 }
 
 type largeReadTestContainerService struct {
@@ -141,6 +146,50 @@ func TestContainerProviderPreservesWorkspaceClientError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "workspace is not reachable") {
 		t.Fatalf("getClient() error = %v, want Workspace-oriented context", err)
+	}
+}
+
+func TestContainerExecDescriptionUsesRemoteWindowsCommands(t *testing.T) {
+	t.Parallel()
+
+	provider := NewContainerProvider(nil, containerTestBridgeProvider{info: bridge.WorkspaceInfo{
+		Backend:        bridge.WorkspaceBackendRemote,
+		OS:             "win32",
+		DefaultWorkDir: `C:\Users\alice\Memoh`,
+	}}, nil, "")
+	toolList, err := provider.Tools(context.Background(), SessionContext{BotID: "bot-1"})
+	if err != nil {
+		t.Fatalf("Tools() error = %v", err)
+	}
+	tool := toolByNameForTest(t, toolList, ToolExec())
+	for _, expected := range []string{"cmd.exe", "run_in_background", "Do not use start"} {
+		if !strings.Contains(tool.Description, expected) {
+			t.Fatalf("Windows exec description does not contain %q:\n%s", expected, tool.Description)
+		}
+	}
+	params, ok := tool.Parameters.(map[string]any)
+	if !ok {
+		t.Fatalf("exec parameters = %T, want map[string]any", tool.Parameters)
+	}
+	properties, ok := params["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("exec properties = %T, want map[string]any", params["properties"])
+	}
+	command, ok := properties["command"].(map[string]any)
+	if !ok {
+		t.Fatalf("command schema = %T, want map[string]any", properties["command"])
+	}
+	commandDescription, _ := command["description"].(string)
+	if !strings.Contains(commandDescription, "dir") || strings.Contains(commandDescription, "ls -la") {
+		t.Fatalf("Windows command description = %q", commandDescription)
+	}
+	description, ok := properties["description"].(map[string]any)
+	if !ok {
+		t.Fatalf("description schema = %T, want map[string]any", properties["description"])
+	}
+	descriptionText, _ := description["description"].(string)
+	if strings.Contains(descriptionText, "ls -la") || strings.Contains(descriptionText, "curl") {
+		t.Fatalf("Windows description guidance = %q", descriptionText)
 	}
 }
 

@@ -8,6 +8,7 @@ import { mapNodeError, rpcError } from '../rpc'
 import type { ExecInput, ExecOutput } from '../types'
 import { guardedEnvironment } from './guards'
 import type { ResolvePathOptions } from './paths'
+import { shellSpawnSpec } from './shell'
 
 export interface ExecPathGuard {
   workspaceRoot: string
@@ -115,9 +116,6 @@ export class WorkspaceExecService {
     onSpawn: (child: ChildProcessWithoutNullStreams) => void,
   ): Promise<ChildProcessWithoutNullStreams> {
     assertExecAdmissionActive(call, admissionActive)
-    if (process.platform === 'win32') {
-      throw rpcError(status.UNIMPLEMENTED, 'exec is not implemented on Windows in Remote Runtime M1')
-    }
     if (request.pty) {
       throw rpcError(status.UNIMPLEMENTED, 'PTY is not implemented by Remote Runtime M1')
     }
@@ -140,11 +138,14 @@ export class WorkspaceExecService {
     })
 
     assertExecAdmissionActive(call, admissionActive)
-    const child = spawn('/bin/sh', ['-c', command], {
+    const shell = shellSpawnSpec(command)
+    const child = spawn(shell.command, shell.args, {
       cwd: workDirectory,
       env: environment,
-      detached: true,
+      detached: shell.detached,
+      shell: shell.shell,
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: shell.windowsHide,
     })
     onSpawn(child)
     // Registration starts immediately after spawn() and adds the PID/PGID to

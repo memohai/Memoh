@@ -225,26 +225,27 @@ Delete a file:
 		},
 		{
 			Name: ToolExec().String(),
-			Description: fmt.Sprintf(`Execute a shell command %s. Runs in %s by default.
+			Description: fmt.Sprintf(`Execute a %s command %s. Runs in %s by default.
 
 # Instructions
+%s
 - Use this tool to run shell commands for installing packages, running scripts, building code, running tests, and other system operations.
 - If your command will take a long time (package installs, builds, test suites), set run_in_background to true. The call returns a task ID immediately. You do not need to add '&' at the end of the command when using this parameter.
 - If waiting for a background task, use wait_until(task_id): it returns with a reason (completed/failed/killed/stalled/idle/timeout) and the latest output_tail. Then use get_background_status(task_id) to inspect result.
 - For processes that never exit on their own (dev servers, watch mode), use run_in_background, then wait_until(task_id): once output settles it returns with reason 'idle' — check output_tail for the ready message (e.g. a local URL) and proceed. Do not wait for such processes to complete.
 - You may specify a custom timeout (up to %d seconds) for commands you know will take longer than the default %d seconds. If a foreground command times out, it will be automatically moved to the background; use wait_until(task_id), then get_background_status(task_id).
-- Avoid unnecessary sleep commands:
+- Avoid unnecessary delay commands:
   - Do not sleep between commands that can run immediately — just run them.
-  - If your command is long running, use run_in_background. No sleep needed.
-  - Do not retry failing commands in a sleep loop — diagnose the root cause.
+  - If your command is long running, use run_in_background. No delay needed.
+  - Do not retry failing commands in a delay loop — diagnose the root cause.
   - If waiting for a background task, use wait_until(task_id).
-  - sleep N (N >= 2) in foreground is blocked. If you genuinely need a short delay, keep it under 2 seconds.`, workspace.locationDescription, wd, background.MaxExecTimeout, background.DefaultExecTimeout),
+%s`, workspace.shellDescription, workspace.locationDescription, wd, workspace.platformInstructions, background.MaxExecTimeout, background.DefaultExecTimeout, workspace.delayInstruction),
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"command":           map[string]any{"type": "string", "description": "Shell command to run (e.g. ls -la, npm install, python script.py)"},
+					"command":           map[string]any{"type": "string", "description": fmt.Sprintf("Command to run (e.g. %s)", workspace.commandExamples)},
 					"work_dir":          map[string]any{"type": "string", "description": fmt.Sprintf("Working directory (default: %s)", wd)},
-					"description":       map[string]any{"type": "string", "description": `Clear, concise description of what this command does in active voice. For simple commands keep it brief (5-10 words): ls -la → "List files with details". For complex commands add enough context: curl -s url | jq '.data[]' → "Fetch JSON and extract data array".`},
+					"description":       map[string]any{"type": "string", "description": workspace.descriptionExamples},
 					"timeout":           map[string]any{"type": "integer", "description": fmt.Sprintf("Timeout in seconds (default: %d, max: %d). Only applies to foreground execution. Commands that exceed this timeout are automatically moved to background.", background.DefaultExecTimeout, background.MaxExecTimeout), "minimum": 1, "maximum": background.MaxExecTimeout},
 					"run_in_background": map[string]any{"type": "boolean", "description": "If true, run the command in the background. Returns immediately with a task ID. Use wait_until(task_id), then get_background_status(task_id) to inspect result. Use for long-running commands (installs, builds, test suites) and for processes that never exit (dev servers, watch mode). You do not need to use '&' at the end of the command."},
 				},
@@ -261,6 +262,11 @@ type toolWorkspace struct {
 	defaultWorkDir          string
 	locationDescription     string
 	absolutePathDescription string
+	shellDescription        string
+	commandExamples         string
+	descriptionExamples     string
+	platformInstructions    string
+	delayInstruction        string
 }
 
 func (p *ContainerProvider) resolveToolWorkspace(ctx context.Context, session SessionContext) toolWorkspace {
@@ -277,25 +283,32 @@ func (p *ContainerProvider) resolveToolWorkspace(ctx context.Context, session Se
 	if wd == "" {
 		wd = p.execWorkDir
 	}
-	if strings.EqualFold(info.Backend, bridge.WorkspaceBackendLocal) {
-		return toolWorkspace{
-			defaultWorkDir:          wd,
-			locationDescription:     "on the local machine",
-			absolutePathDescription: "host path",
-		}
-	}
-	if strings.EqualFold(info.Backend, bridge.WorkspaceBackendRemote) {
-		return toolWorkspace{
-			defaultWorkDir:          wd,
-			locationDescription:     "on the connected remote machine",
-			absolutePathDescription: "remote workspace path",
-		}
-	}
-	return toolWorkspace{
+	workspace := toolWorkspace{
 		defaultWorkDir:          wd,
 		locationDescription:     "inside the bot workspace",
 		absolutePathDescription: "inside the workspace",
+		shellDescription:        "shell",
+		commandExamples:         "ls -la, npm install, python script.py",
+		descriptionExamples:     `Clear, concise description of what this command does in active voice. For simple commands keep it brief (5-10 words): ls -la → "List files with details". For complex commands add enough context: curl -s url | jq '.data[]' → "Fetch JSON and extract data array".`,
+		delayInstruction:        "  - sleep N (N >= 2) in foreground is blocked. If you genuinely need a short delay, keep it under 2 seconds.",
 	}
+	switch {
+	case strings.EqualFold(info.Backend, bridge.WorkspaceBackendLocal):
+		workspace.locationDescription = "on the local machine"
+		workspace.absolutePathDescription = "host path"
+	case strings.EqualFold(info.Backend, bridge.WorkspaceBackendRemote):
+		workspace.locationDescription = "on the connected remote machine"
+		workspace.absolutePathDescription = "remote workspace path"
+		if strings.EqualFold(info.OS, "win32") {
+			workspace.shellDescription = "Windows Command Prompt (cmd.exe)"
+			workspace.commandExamples = "dir, npm install, python script.py"
+			workspace.descriptionExamples = `Clear, concise description of what this command does in active voice. For simple commands keep it brief (5-10 words): dir → "List files and folders". For complex commands add enough context to explain the operation and expected result.`
+			workspace.platformInstructions = `- This remote machine uses Windows Command Prompt (cmd.exe). Use Windows command syntax and commands such as dir, type, and where; do not assume POSIX commands such as ls, cat, pwd, or sleep are installed.
+- Do not use start to detach a command. Use run_in_background so the Runtime retains ownership of the process tree.`
+			workspace.delayInstruction = "  - Do not use timeout /t or ping loops to wait for background work; use wait_until."
+		}
+	}
+	return workspace
 }
 
 func (p *ContainerProvider) hookWorkspaceInfo(ctx context.Context, session SessionContext) hooks.WorkspaceInfo {

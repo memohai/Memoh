@@ -1,4 +1,6 @@
-import type { ChildProcess } from 'node:child_process'
+import { execFile, type ChildProcess } from 'node:child_process'
+
+import { windowsSystemExecutable } from './core/shell'
 
 interface LiveChild {
   process: ChildProcess
@@ -43,6 +45,22 @@ export class ChildSupervisor {
     if (!record || record.process !== child) {
       return
     }
+    if (process.platform === 'win32') {
+      try {
+        await terminateWindowsProcessTree(record.pgid)
+      } catch (error) {
+        if (processExists(record.pgid)) {
+          this.warn(`failed to terminate runtime child ${child.pid}: ${safeError(error)}`)
+          return
+        }
+      }
+      if (!await waitForChildExit(child, 2_000)) {
+        this.warn(`runtime child ${child.pid} did not exit after taskkill`)
+        return
+      }
+      this.unregister(child.pid)
+      return
+    }
     try {
       killGroup(record.pgid)
     } catch (error) {
@@ -66,6 +84,10 @@ export class ChildSupervisor {
 
   private handleChildExit(pid: number): void {
     const record = this.live.get(pid)
+    if (process.platform === 'win32') {
+      this.unregister(pid)
+      return
+    }
     if (record && processGroupExists(record.pgid)) {
       this.monitorProcessGroup(pid)
       return
@@ -104,6 +126,53 @@ export class ChildSupervisor {
       this.groupMonitors.delete(pid)
     }
   }
+}
+
+async function terminateWindowsProcessTree(pid: number): Promise<void> {
+  if (!processExists(pid)) {
+    return
+  }
+  const executable = windowsSystemExecutable('taskkill.exe')
+  await new Promise<void>((resolve, reject) => {
+    execFile(executable, ['/pid', String(pid), '/t', '/f'], { windowsHide: true }, error => {
+      if (!error || !processExists(pid)) {
+        resolve()
+      } else {
+        reject(error)
+      }
+    })
+  })
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function waitForChildExit(child: ChildProcess, timeout: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return true
+  }
+  return new Promise(resolve => {
+    let settled = false
+    const finish = (exited: boolean) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      clearTimeout(timer)
+      child.off('exit', onExit)
+      resolve(exited)
+    }
+    const onExit = () => finish(true)
+    const timer = setTimeout(() => finish(child.exitCode !== null || child.signalCode !== null), timeout)
+    timer.unref()
+    child.once('exit', onExit)
+  })
 }
 
 function killGroup(pgid: number): void {

@@ -25,7 +25,7 @@ describe('PathGuard', () => {
     await mkdir(outside)
     await writeFile(join(collision, 'secret'), 'nope')
     await writeFile(join(outside, 'secret'), 'nope')
-    await symlink(outside, join(root, 'escape'))
+    await symlink(outside, join(root, 'escape'), process.platform === 'win32' ? 'junction' : 'dir')
     const guard = await PathGuard.create(root)
 
     await expect(guard.resolve('/data/../work-secret/secret')).rejects.toMatchObject({ code: status.PERMISSION_DENIED })

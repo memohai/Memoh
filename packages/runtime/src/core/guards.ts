@@ -1,5 +1,4 @@
-import { platform } from 'node:os'
-import { delimiter, isAbsolute } from 'node:path'
+import { posix, win32 } from 'node:path'
 
 import { status } from '@grpc/grpc-js'
 
@@ -11,6 +10,10 @@ const blockedNames = new Set([
   'ENV',
   'PATH',
   'SHELL',
+  'COMSPEC',
+  'SYSTEMROOT',
+  'WINDIR',
+  'PATHEXT',
   'IFS',
   'MEMOH_RUNTIME_KEY',
 ])
@@ -30,18 +33,24 @@ const inheritedExactNames = new Set([
   'TERM',
   'COLORTERM',
   'TZ',
+  'USERNAME',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'PROGRAMDATA',
+  'SYSTEMDRIVE',
+  'SYSTEMROOT',
+  'WINDIR',
+  'COMSPEC',
+  'PATHEXT',
 ])
-
-const defaultPath = process.platform === 'win32'
-  ? 'C:\\Windows\\System32;C:\\Windows'
-  : process.platform === 'darwin'
-    ? '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
-    : '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
 const validEnvironmentName = /^[A-Za-z_][A-Za-z0-9_]*$/
 
-export function runtimeCapabilities(os = platform()): Array<'fs' | 'exec' | 'workspace_scope'> {
-  return os === 'win32' ? ['fs', 'workspace_scope'] : ['fs', 'exec', 'workspace_scope']
+export function runtimeCapabilities(): Array<'fs' | 'exec' | 'workspace_scope'> {
+  return ['fs', 'exec', 'workspace_scope']
 }
 
 export interface GuardedEnvironmentOptions {
@@ -66,7 +75,7 @@ export function guardedEnvironment(
       throw rpcError(status.INVALID_ARGUMENT, `invalid environment variable name: ${name}`)
     }
     assertSafeEnvironmentName(name)
-    environment[name] = value
+    environment[process.platform === 'win32' ? name.toUpperCase() : name] = value
   }
   return environment
 }
@@ -94,7 +103,10 @@ function unsetEnvironment(environment: NodeJS.ProcessEnv, requested: readonly st
   }
 }
 
-export function inheritedEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function inheritedEnvironment(
+  source: NodeJS.ProcessEnv,
+  os: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {}
   let inheritedPath: string | undefined
   for (const [name, value] of Object.entries(source)) {
@@ -110,8 +122,8 @@ export function inheritedEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessE
       environment[normalized] = value
     }
   }
-  environment.PATH = safeInheritedPath(inheritedPath)
-  environment.SHELL = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh'
+  environment.PATH = safeInheritedPath(inheritedPath, os)
+  environment.SHELL = os === 'win32' ? 'cmd.exe' : '/bin/sh'
   return environment
 }
 
@@ -126,12 +138,22 @@ export function assertSafeEnvironmentName(name: string): void {
   }
 }
 
-function safeInheritedPath(value: string | undefined): string {
+function safeInheritedPath(value: string | undefined, os: NodeJS.Platform): string {
   if (!value || value.includes('\0')) {
-    return defaultPath
+    return defaultPath(os)
   }
+  const paths = os === 'win32' ? win32 : posix
   const entries = value
-    .split(delimiter)
-    .filter(entry => entry.length > 0 && isAbsolute(entry))
-  return entries.length > 0 ? [...new Set(entries)].join(delimiter) : defaultPath
+    .split(paths.delimiter)
+    .filter(entry => entry.length > 0 && paths.isAbsolute(entry))
+  return entries.length > 0 ? [...new Set(entries)].join(paths.delimiter) : defaultPath(os)
+}
+
+function defaultPath(os: NodeJS.Platform): string {
+  if (os === 'win32') {
+    return String.raw`C:\Windows\System32;C:\Windows`
+  }
+  return os === 'darwin'
+    ? '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+    : '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 }

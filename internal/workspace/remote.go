@@ -160,13 +160,16 @@ func (s *RemoteWorkspaceService) WorkspaceInfo(ctx context.Context, botID string
 		return bridge.WorkspaceInfo{}, bound, err
 	}
 	defaultWorkDir := "/data"
+	runtimeOS := ""
 	if s.runtimes != nil {
 		if connection, online := s.runtimes.Connection(record.RuntimeID); online && connection != nil {
 			defaultWorkDir = remoteWorkspaceWorkDir(connection.Info, record.WorkspacePath)
+			runtimeOS = connection.Info.OS
 		}
 	}
 	return bridge.WorkspaceInfo{
 		Backend:        bridge.WorkspaceBackendRemote,
+		OS:             runtimeOS,
 		DefaultWorkDir: defaultWorkDir,
 	}, true, nil
 }

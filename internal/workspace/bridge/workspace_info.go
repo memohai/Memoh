@@ -12,6 +12,7 @@ const (
 
 type WorkspaceInfo struct {
 	Backend         string
+	OS              string
 	DefaultWorkDir  string
 	LocalDataRoot   string
 	ACPToolsHTTPURL string

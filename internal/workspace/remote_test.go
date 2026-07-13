@@ -150,23 +150,35 @@ func TestRemoteWorkspaceClientCarriesPersistentBotScope(t *testing.T) {
 }
 
 func TestRemoteWorkspaceInfoMatchesNativeLocalWorkDirSemantics(t *testing.T) {
-	store := &fakeRemoteBindingStore{exists: true, record: dbstore.BotRemoteRuntimeBindingRecord{
-		BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID, WorkspacePath: "projects/demo",
-		RuntimeUserID: remoteTestOwnerID, BotOwnerUserID: remoteTestOwnerID,
-	}}
-	service := &RemoteWorkspaceService{
-		store: store,
-		runtimes: fakeRuntimeConnections{remoteTestRuntimeID: {
-			RuntimeID: remoteTestRuntimeID,
-			Info:      userruntime.RuntimeInfo{WorkspaceBase: "/Users/alice/workspaces", OS: "darwin"},
-		}},
-	}
-	info, bound, err := service.WorkspaceInfo(context.Background(), remoteTestBotID)
-	if err != nil || !bound {
-		t.Fatalf("WorkspaceInfo bound=%v err=%v", bound, err)
-	}
-	if info.DefaultWorkDir != "/Users/alice/workspaces/projects/demo" {
-		t.Fatalf("DefaultWorkDir = %q", info.DefaultWorkDir)
+	for _, tc := range []struct {
+		name          string
+		os            string
+		workspaceBase string
+		wantWorkDir   string
+	}{
+		{name: "macOS", os: "darwin", workspaceBase: "/Users/alice/workspaces", wantWorkDir: "/Users/alice/workspaces/projects/demo"},
+		{name: "Windows", os: "win32", workspaceBase: `C:\Users\alice\workspaces`, wantWorkDir: `C:\Users\alice\workspaces\projects\demo`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeRemoteBindingStore{exists: true, record: dbstore.BotRemoteRuntimeBindingRecord{
+				BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID, WorkspacePath: "projects/demo",
+				RuntimeUserID: remoteTestOwnerID, BotOwnerUserID: remoteTestOwnerID,
+			}}
+			service := &RemoteWorkspaceService{
+				store: store,
+				runtimes: fakeRuntimeConnections{remoteTestRuntimeID: {
+					RuntimeID: remoteTestRuntimeID,
+					Info:      userruntime.RuntimeInfo{WorkspaceBase: tc.workspaceBase, OS: tc.os},
+				}},
+			}
+			info, bound, err := service.WorkspaceInfo(context.Background(), remoteTestBotID)
+			if err != nil || !bound {
+				t.Fatalf("WorkspaceInfo bound=%v err=%v", bound, err)
+			}
+			if info.Backend != bridge.WorkspaceBackendRemote || info.OS != tc.os || info.DefaultWorkDir != tc.wantWorkDir {
+				t.Fatalf("WorkspaceInfo = %#v", info)
+			}
+		})
 	}
 }
 

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -132,32 +132,50 @@ describe('ContainerService', () => {
     expect(chunks.every(chunk => chunk.length <= 64 * 1024)).toBe(true)
   })
 
-  it('runs POSIX exec, preserves stream order, and rejects dangerous env', async () => {
-    if (process.platform === 'win32') {
-      return
-    }
-    const output = await exec({ command: 'printf out; printf err >&2; exit 7', work_dir: '/data' })
+  it('runs host shell commands, streams output, and rejects dangerous env', async () => {
+    const outputScript = await writeNodeFixture('output.cjs', `
+process.stdout.write('out')
+process.stderr.write('err')
+process.exitCode = 7
+`)
+    const output = await exec({ command: nodeScriptCommand(outputScript), work_dir: '/data' })
     expect(Buffer.concat(output.filter(frame => frame.stream === 0).map(frame => frame.data)).toString()).toBe('out')
     expect(Buffer.concat(output.filter(frame => frame.stream === 1).map(frame => frame.data)).toString()).toBe('err')
     expect(output.at(-1)).toMatchObject({ stream: 2, exit_code: 7 })
 
-    await expect(exec({ command: 'true', work_dir: '/data', env: ['PATH=/tmp'] }))
+    await expect(exec({ command: 'echo ok', work_dir: '/data', env: ['PATH=/tmp'] }))
       .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
-    await expect(exec({ command: 'true', work_dir: '/data', pty: true }))
+    await expect(exec({ command: 'echo ok', work_dir: '/data', pty: true }))
       .rejects.toMatchObject({ code: status.UNIMPLEMENTED })
 
-    const timedOut = await exec({ command: 'sleep 10', work_dir: '/data', timeout_seconds: 1 })
-    expect(timedOut.at(-1)).toMatchObject({ stream: 2, exit_code: 137 })
+    const timeoutScript = await writeNodeFixture('timeout.cjs', 'setInterval(() => {}, 1_000)\n')
+    const timedOut = await exec({ command: nodeScriptCommand(timeoutScript), work_dir: '/data', timeout_seconds: 1 })
+    expect(timedOut.at(-1)).toMatchObject({ stream: 2 })
+    expect(timedOut.at(-1)?.exit_code).not.toBe(0)
+    if (process.platform !== 'win32') {
+      expect(timedOut.at(-1)?.exit_code).toBe(137)
+    }
   })
 
-  it('terminates connection-owned process groups on server close', async () => {
-    if (process.platform === 'win32') {
-      return
-    }
+  it('terminates connection-owned process trees on server close', async () => {
     const pidPath = join(root, 'pid')
+    const childScript = await writeNodeFixture('child.cjs', 'setInterval(() => {}, 1_000)\n')
+    const parentScript = await writeNodeFixture('parent.cjs', `
+const { spawn } = require('node:child_process')
+const { writeFileSync } = require('node:fs')
+
+const [pidPath, childPath] = process.argv.slice(2)
+const child = spawn(process.execPath, [childPath], { stdio: 'ignore', windowsHide: true })
+writeFileSync(pidPath, String(child.pid))
+setInterval(() => {}, 1_000)
+`)
     const stream = client.Exec(scopeMetadata())
     stream.on('error', () => undefined)
-    stream.write({ command: `echo $$ > ${JSON.stringify(pidPath)}; sleep 60`, work_dir: '/data', timeout_seconds: -1 })
+    stream.write({
+      command: nodeScriptCommand(parentScript, pidPath, childScript),
+      work_dir: '/data',
+      timeout_seconds: -1,
+    })
     await waitUntil(async () => {
       try {
         return Number(await readFile(pidPath, 'utf8')) > 0
@@ -167,7 +185,7 @@ describe('ContainerService', () => {
     })
     const pid = Number(await readFile(pidPath, 'utf8'))
     await running.close()
-    await waitUntil(async () => !processExists(pid))
+    await waitUntil(async () => !processExists(pid), 10_000)
     expect(processExists(pid)).toBe(false)
     stream.cancel()
   })
@@ -189,15 +207,13 @@ describe('ContainerService', () => {
     expect(firstRead.content).toBe('first\n')
     expect(secondRead.content).toBe('second\n')
 
-    if (process.platform !== 'win32') {
-      const canonicalRoot = await realpath(root)
-      const [firstExec, secondExec] = await Promise.all([
-        exec({ command: 'pwd', work_dir: '/data' }, first),
-        exec({ command: 'pwd', work_dir: '/data' }, second),
-      ])
-      expect(stdout(firstExec).trim()).toBe(join(canonicalRoot, 'bots', workspaceID))
-      expect(stdout(secondExec).trim()).toBe(join(canonicalRoot, 'bots', secondID))
-    }
+    const cwdScript = await writeNodeFixture('cwd.cjs', 'process.stdout.write(process.cwd())\n')
+    const [firstExec, secondExec] = await Promise.all([
+      exec({ command: nodeScriptCommand(cwdScript), work_dir: '/data' }, first),
+      exec({ command: nodeScriptCommand(cwdScript), work_dir: '/data' }, second),
+    ])
+    expect(normalizePath(stdout(firstExec))).toBe(normalizePath(await realpath(join(root, 'bots', workspaceID))))
+    expect(normalizePath(stdout(secondExec))).toBe(normalizePath(await realpath(join(root, 'bots', secondID))))
   })
 
   it('lets two Bot scopes explicitly share one workspace path', async () => {
@@ -224,7 +240,7 @@ describe('ContainerService', () => {
   it('rejects unscoped and malformed workspace access', async () => {
     await expect(unaryUnscoped(client.ReadFile.bind(client), { path: '/data/nope' }))
       .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
-    await expect(exec({ command: 'true', work_dir: '/data' }, new Metadata()))
+    await expect(exec({ command: 'echo ok', work_dir: '/data' }, new Metadata()))
       .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
     await expect(unary(client.WriteFile.bind(client), { path: '/data/nope', content: Buffer.from('x') }, scopeMetadata(workspaceID, '../escape')))
       .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
@@ -245,10 +261,8 @@ describe('ContainerService', () => {
     await expect(unary(client.WriteFile.bind(client), { path: '/data/nope', content: Buffer.from('x') }, invalidUTF8))
       .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
 
-    if (process.platform !== 'win32') {
-      await expect(exec({ command: 'true', work_dir: tmpdir() }))
-        .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
-    }
+    await expect(exec({ command: 'echo ok', work_dir: tmpdir() }))
+      .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
   })
 
   it('requires valid workspace scope metadata for an empty WriteRaw stream', async () => {
@@ -337,6 +351,32 @@ function scopeMetadata(id = workspaceID, path = `bots/${id}`): Metadata {
 
 function stdout(frames: ExecOutput[]): string {
   return Buffer.concat(frames.filter(frame => frame.stream === 0).map(frame => frame.data)).toString()
+}
+
+async function writeNodeFixture(name: string, source: string): Promise<string> {
+  const path = join(root, name)
+  await writeFile(path, source)
+  return path
+}
+
+function nodeScriptCommand(scriptPath: string, ...args: string[]): string {
+  return `node ${[scriptPath, ...args].map(quoteShellArgument).join(' ')}`
+}
+
+function quoteShellArgument(value: string): string {
+  if (process.platform === 'win32') {
+    if (value.includes('"')) {
+      throw new Error('Windows test paths must not contain quotes')
+    }
+    return `"${value}"`
+  }
+  const escaped = value.replaceAll('\u0027', '\u0027"\u0027"\u0027')
+  return `'${escaped}'`
+}
+
+function normalizePath(value: string): string {
+  const path = value.trim()
+  return process.platform === 'win32' ? path.toLowerCase() : path
 }
 
 async function waitUntil(predicate: () => Promise<boolean>, timeout = 5_000): Promise<void> {

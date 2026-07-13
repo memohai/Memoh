@@ -56,6 +56,13 @@ describe('runtime handshake', () => {
       'workspace_base',
     ])
     expect(headers['X-Memoh-Runtime-Metadata']).not.toContain('=')
+
+    const windowsMetadata = createHandshakeMetadata(String.raw`C:\Users\alice\Memoh`, '1.2.3', {
+      hostname: 'alice-pc',
+      os: 'win32',
+      arch: 'x64',
+    })
+    expect(windowsMetadata.capabilities).toContain('exec')
   })
 
   it('allows plaintext only for an explicitly enabled loopback target', () => {
