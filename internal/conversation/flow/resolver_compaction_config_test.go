@@ -116,6 +116,44 @@ func TestEffectiveCompactionThreshold(t *testing.T) {
 	}
 }
 
+func TestAsyncCompactionInputTokensPrefersKnownCompactableHistory(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name          string
+		resolved      resolvedContext
+		providerInput int
+		want          int
+	}{
+		{
+			name:          "excludes summaries and prompt overhead",
+			resolved:      resolvedContext{compactableTokens: 4000, compactableTokensKnown: true},
+			providerInput: 9000,
+			want:          4000,
+		},
+		{
+			name:          "known summary-only history stays zero",
+			resolved:      resolvedContext{compactableTokensKnown: true},
+			providerInput: 9000,
+			want:          0,
+		},
+		{
+			name:          "pipeline without a raw projection falls back to provider usage",
+			resolved:      resolvedContext{},
+			providerInput: 9000,
+			want:          9000,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := asyncCompactionInputTokens(tc.resolved, tc.providerInput); got != tc.want {
+				t.Fatalf("asyncCompactionInputTokens() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSyncCompactionTargetTokens(t *testing.T) {
 	t.Parallel()
 

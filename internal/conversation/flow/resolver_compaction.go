@@ -33,7 +33,15 @@ func effectiveCompactionThreshold(threshold, contextTokenBudget int) int {
 	return threshold
 }
 
+func asyncCompactionInputTokens(rc resolvedContext, providerInputTokens int) int {
+	if rc.compactableTokensKnown {
+		return rc.compactableTokens
+	}
+	return providerInputTokens
+}
+
 func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, inputTokens int) {
+	inputTokens = asyncCompactionInputTokens(rc, inputTokens)
 	if r.compactionService == nil || r.settingsService == nil {
 		r.logger.Info("compaction: skipped, service or settings nil")
 		return
