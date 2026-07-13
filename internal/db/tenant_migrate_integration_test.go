@@ -9,6 +9,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -141,46 +143,116 @@ func TestSingletonTenantSeededAfterMigrate(t *testing.T) {
 	}
 }
 
-// migrateSteps runs a migrate command (up/down with optional arg) against the DSN.
-func migrateSteps(t *testing.T, dsn, command string, args []string) error {
+// stepDown rolls back exactly n migration steps using the golang-migrate library
+// directly. The repo's RunMigrate("down") rolls back ALL migrations, so tests
+// that need single-step reversibility use this helper instead.
+func stepDown(t *testing.T, dsn string, n int) {
 	t.Helper()
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	return db.RunMigrate(logger, pgConfigFromDSN(t, dsn), postgresMigrationsFS(t), command, args)
+	src, err := iofs.New(postgresMigrationsFS(t), ".")
+	if err != nil {
+		t.Fatalf("iofs: %v", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
+	if err != nil {
+		t.Fatalf("migrate init: %v", err)
+	}
+	defer func() { _, _ = m.Close() }()
+	if err := m.Steps(-n); err != nil {
+		t.Fatalf("step down %d: %v", n, err)
+	}
 }
 
-// TestTenantsRootMigrationReversible verifies 0106 is cleanly reversible on a
-// clean singleton database (up -> down one step -> up again), and that the down
-// safety gate refuses to drop the root when a non-default tenant exists.
-func TestTenantsRootMigrationReversible(t *testing.T) {
+// stepUp applies exactly n migration steps using the golang-migrate library.
+func stepUp(t *testing.T, dsn string, n int) {
+	t.Helper()
+	src, err := iofs.New(postgresMigrationsFS(t), ".")
+	if err != nil {
+		t.Fatalf("iofs: %v", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
+	if err != nil {
+		t.Fatalf("migrate init: %v", err)
+	}
+	defer func() { _, _ = m.Close() }()
+	if err := m.Steps(n); err != nil {
+		t.Fatalf("step up %d: %v", n, err)
+	}
+}
+
+// TestTenantChainReversible verifies the full tenant migration chain
+// (0106..0109) is cleanly reversible: a full step-down of the tenant migrations
+// removes all tenant objects, and a step-up re-applies them. It also verifies
+// the 0106 down safety gate refuses to drop the tenants root when a non-default
+// tenant exists.
+func TestTenantChainReversible(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
 	dsn := tenantMigrationDSN(t)
 
-	// Roll back the single 0106 step (clean singleton): must succeed and drop tenants.
-	if err := migrateSteps(t, dsn, "down", []string{"1"}); err != nil {
-		t.Fatalf("down 1 on clean singleton: %v", err)
-	}
-	var exists bool
+	// Number of tenant migrations layered on top of the base chain (0106..0109).
+	const tenantSteps = 4
+
+	// Step the tenant migrations down; tenants + app schema must be gone.
+	stepDown(t, dsn, tenantSteps)
+	var tenantsExists, appExists bool
 	if err := pool.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM information_schema.tables
-			WHERE table_schema='public' AND table_name='tenants')`).Scan(&exists); err != nil {
-		t.Fatalf("check tenants after down: %v", err)
+			WHERE table_schema='public' AND table_name='tenants')`).Scan(&tenantsExists); err != nil {
+		t.Fatalf("check tenants after step down: %v", err)
 	}
-	if exists {
-		t.Fatal("down 1 must drop tenants on a clean singleton database")
+	if err := pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name='app')`).Scan(&appExists); err != nil {
+		t.Fatalf("check app schema after step down: %v", err)
+	}
+	if tenantsExists {
+		t.Error("tenants root must be dropped after stepping down the tenant migrations")
+	}
+	if appExists {
+		t.Error("app schema must be dropped after stepping down the tenant migrations")
 	}
 
-	// Re-apply.
-	if err := migrateSteps(t, dsn, "up", nil); err != nil {
-		t.Fatalf("re-up: %v", err)
+	// Re-apply and confirm the composite-key final state is restored.
+	stepUp(t, dsn, tenantSteps)
+	var setNull int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM pg_constraint con
+		  JOIN pg_class c ON c.oid = con.conrelid
+		  JOIN pg_namespace n ON n.oid = c.relnamespace
+		 WHERE con.contype='f' AND con.confdeltype='n' AND n.nspname='public'`).Scan(&setNull); err != nil {
+		t.Fatalf("count set null after re-up: %v", err)
 	}
+	if setNull != 0 {
+		t.Errorf("after re-up expected 0 SET NULL FKs, got %d", setNull)
+	}
+}
 
-	// Insert a non-default tenant, then attempt down: the safety gate must refuse.
-	if _, err := pool.Exec(ctx, `INSERT INTO tenants (id, slug) VALUES (gen_random_uuid(), 'other')`); err != nil {
+// TestTenantsRootDownSafetyGate verifies 0106's down safety gate: when a
+// non-default tenant exists, stepping the tenant migrations down must fail
+// closed rather than dropping tenant data.
+func TestTenantsRootDownSafetyGate(t *testing.T) {
+	ctx := context.Background()
+	pool := freshMigratedDB(t)
+	dsn := tenantMigrationDSN(t)
+
+	// Seed a second tenant + its fence so the DB is genuinely multi-tenant.
+	const t2 = "00000000-0000-0000-0000-0000000000f2"
+	if _, err := pool.Exec(ctx, `INSERT INTO tenants (id, slug) VALUES ($1, 'other')`, t2); err != nil {
 		t.Fatalf("insert non-default tenant: %v", err)
 	}
-	if err := migrateSteps(t, dsn, "down", []string{"1"}); err == nil {
-		t.Fatal("down 1 must fail closed when a non-default tenant exists")
+
+	// Stepping the tenant migrations down must fail closed (0108's down gate
+	// trips first on the non-default tenant_id, before 0106 is reached).
+	src, err := iofs.New(postgresMigrationsFS(t), ".")
+	if err != nil {
+		t.Fatalf("iofs: %v", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
+	if err != nil {
+		t.Fatalf("migrate init: %v", err)
+	}
+	defer func() { _, _ = m.Close() }()
+	if err := m.Steps(-4); err == nil {
+		t.Fatal("stepping tenant migrations down must fail closed with a non-default tenant present")
 	}
 }
 
