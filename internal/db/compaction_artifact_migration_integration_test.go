@@ -225,7 +225,7 @@ VALUES
 		t.Fatalf("delete session history through generated query: %v", err)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_messages", 2)
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 9)
+	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 3)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", sessionID, 1)
 
 	parsedForeignBotID, err := ParseUUID(foreignBotID)
@@ -236,7 +236,7 @@ VALUES
 		t.Fatalf("delete bot history through generated query: %v", err)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_messages", 1)
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 9)
+	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 2)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", foreignSessionID, 1)
 
 	parsedRepairSessionID, err := ParseUUID(repairSessionID)
@@ -247,17 +247,24 @@ VALUES
 		t.Fatalf("delete repaired session history through generated query: %v", err)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_messages", 0)
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 9)
+	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 1)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", repairSessionID, 2)
 
-	for _, artifactBotID := range []string{botID, foreignBotID, repairBotID, logOnlyBotID} {
-		parsedArtifactBotID, err := ParseUUID(artifactBotID)
-		if err != nil {
-			t.Fatalf("parse artifact bot id: %v", err)
-		}
-		if err := queries.DeleteCompactionLogsByBot(ctx, parsedArtifactBotID); err != nil {
-			t.Fatalf("delete artifacts through generated query: %v", err)
-		}
+	parsedBotID, err := ParseUUID(botID)
+	if err != nil {
+		t.Fatalf("parse bot id: %v", err)
+	}
+	if err := queries.DeleteCompactionLogsByBot(ctx, parsedBotID); err != nil {
+		t.Fatalf("fence in-flight compaction before deleting logs: %v", err)
+	}
+	assertCompactionEpoch(t, ctx, tx, "bot_sessions", sessionID, 2)
+
+	parsedLogOnlyBotID, err := ParseUUID(logOnlyBotID)
+	if err != nil {
+		t.Fatalf("parse log-only bot id: %v", err)
+	}
+	if err := queries.DeleteCompactionLogsByBot(ctx, parsedLogOnlyBotID); err != nil {
+		t.Fatalf("delete artifacts through generated query: %v", err)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 0)
 

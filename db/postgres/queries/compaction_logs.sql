@@ -4,6 +4,7 @@ SELECT sqlc.arg(bot_id), owner_session.id, owner_session.compaction_epoch
 FROM bot_sessions owner_session
 WHERE owner_session.id = sqlc.arg(session_id)
   AND owner_session.bot_id = sqlc.arg(bot_id)
+  AND owner_session.compaction_epoch = sqlc.arg(expected_epoch)
 RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
           artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
           superseded_by, superseded_at, compaction_epoch, started_at, completed_at;
@@ -112,4 +113,12 @@ WHERE c.session_id = owner_session.id
 ORDER BY c.anchor_start_ms ASC, c.started_at ASC, c.id ASC;
 
 -- name: DeleteCompactionLogsByBot :exec
-DELETE FROM bot_history_message_compacts WHERE bot_id = $1;
+WITH invalidated_sessions AS (
+  UPDATE bot_sessions
+  SET compaction_epoch = compaction_epoch + 1
+  WHERE bot_id = sqlc.arg(target_bot_id)
+  RETURNING id
+)
+DELETE FROM bot_history_message_compacts AS compacts
+WHERE compacts.bot_id = sqlc.arg(target_bot_id)
+  AND (SELECT count(*) FROM invalidated_sessions) >= 0;

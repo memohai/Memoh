@@ -110,18 +110,20 @@ SELECT $1, owner_session.id, owner_session.compaction_epoch
 FROM bot_sessions owner_session
 WHERE owner_session.id = $2
   AND owner_session.bot_id = $1
+  AND owner_session.compaction_epoch = $3
 RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
           artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
           superseded_by, superseded_at, compaction_epoch, started_at, completed_at
 `
 
 type CreateCompactionLogParams struct {
-	BotID     pgtype.UUID `json:"bot_id"`
-	SessionID pgtype.UUID `json:"session_id"`
+	BotID         pgtype.UUID `json:"bot_id"`
+	SessionID     pgtype.UUID `json:"session_id"`
+	ExpectedEpoch int64       `json:"expected_epoch"`
 }
 
 func (q *Queries) CreateCompactionLog(ctx context.Context, arg CreateCompactionLogParams) (BotHistoryMessageCompact, error) {
-	row := q.db.QueryRow(ctx, createCompactionLog, arg.BotID, arg.SessionID)
+	row := q.db.QueryRow(ctx, createCompactionLog, arg.BotID, arg.SessionID, arg.ExpectedEpoch)
 	var i BotHistoryMessageCompact
 	err := row.Scan(
 		&i.ID,
@@ -149,11 +151,19 @@ func (q *Queries) CreateCompactionLog(ctx context.Context, arg CreateCompactionL
 }
 
 const deleteCompactionLogsByBot = `-- name: DeleteCompactionLogsByBot :exec
-DELETE FROM bot_history_message_compacts WHERE bot_id = $1
+WITH invalidated_sessions AS (
+  UPDATE bot_sessions
+  SET compaction_epoch = compaction_epoch + 1
+  WHERE bot_id = $1
+  RETURNING id
+)
+DELETE FROM bot_history_message_compacts AS compacts
+WHERE compacts.bot_id = $1
+  AND (SELECT count(*) FROM invalidated_sessions) >= 0
 `
 
-func (q *Queries) DeleteCompactionLogsByBot(ctx context.Context, botID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteCompactionLogsByBot, botID)
+func (q *Queries) DeleteCompactionLogsByBot(ctx context.Context, targetBotID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteCompactionLogsByBot, targetBotID)
 	return err
 }
 

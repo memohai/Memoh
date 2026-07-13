@@ -1051,7 +1051,7 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, ac
 	}
 
 	eventCh := make(chan flow.WSStreamEvent, 64)
-	releaseCompaction := h.resolver.DeferStreamCompaction(streamID)
+	releaseCompaction := h.resolver.DeferSessionCompaction(botID, sessionID)
 	go func() {
 		defer streamCancel()
 		err := func() error {

@@ -1675,10 +1675,16 @@ WITH invalidated_sessions AS (
   SET compaction_epoch = compaction_epoch + 1
   WHERE bot_id = $1
   RETURNING id
+),
+deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts AS compact
+  WHERE compact.bot_id = $1
+    AND (SELECT count(*) FROM invalidated_sessions) >= 0
+  RETURNING compact.id
 )
 DELETE FROM bot_history_messages AS message
 WHERE message.bot_id = $1
-  AND (SELECT count(*) FROM invalidated_sessions) >= 0
+  AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0
 `
 
 func (q *Queries) DeleteMessagesByBot(ctx context.Context, targetBotID pgtype.UUID) error {
@@ -1720,10 +1726,16 @@ WITH invalidated_session AS (
   SET compaction_epoch = compaction_epoch + 1
   WHERE id = $1
   RETURNING id
+),
+deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts AS compact
+  WHERE compact.session_id = $1
+    AND (SELECT count(*) FROM invalidated_session) >= 0
+  RETURNING compact.id
 )
 DELETE FROM bot_history_messages AS message
 WHERE message.session_id = $1
-  AND (SELECT count(*) FROM invalidated_session) >= 0
+  AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0
 `
 
 func (q *Queries) DeleteMessagesBySession(ctx context.Context, targetSessionID pgtype.UUID) error {
@@ -4424,6 +4436,7 @@ SELECT
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform,
+  s.compaction_epoch,
   r.conversation_type AS conversation_type,
   COALESCE(
     NULLIF(TRIM(COALESCE(r.metadata->>'conversation_name', '')), ''),
@@ -4433,7 +4446,7 @@ SELECT
   r.default_reply_target AS reply_target
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
+JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN bot_channel_routes r ON r.id = s.route_id
 WHERE m.session_id = $1
   -- Rows stay eligible unless their compact log holds a usable summary,
@@ -4473,6 +4486,7 @@ type ListUncompactedMessagesBySessionRow struct {
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
 	Platform                pgtype.Text        `json:"platform"`
+	CompactionEpoch         int64              `json:"compaction_epoch"`
 	ConversationType        pgtype.Text        `json:"conversation_type"`
 	ConversationName        string             `json:"conversation_name"`
 	ReplyTarget             pgtype.Text        `json:"reply_target"`
@@ -4506,6 +4520,7 @@ func (q *Queries) ListUncompactedMessagesBySession(ctx context.Context, sessionI
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
 			&i.Platform,
+			&i.CompactionEpoch,
 			&i.ConversationType,
 			&i.ConversationName,
 			&i.ReplyTarget,

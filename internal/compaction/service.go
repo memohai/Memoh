@@ -463,8 +463,9 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	// completed summary.
 	persistCtx := context.WithoutCancel(ctx)
 	logRow, err := s.queries.CreateCompactionLog(persistCtx, sqlc.CreateCompactionLogParams{
-		BotID:     botUUID,
-		SessionID: sessionUUID,
+		BotID:         botUUID,
+		SessionID:     sessionUUID,
+		ExpectedEpoch: rows[0].CompactionEpoch,
 	})
 	if err != nil {
 		return Result{}, err
@@ -507,6 +508,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		// The rows are already marked, but the log never reached status=ok, so
 		// the reclaim SQL keeps them eligible for a later pass. Reporting ok
 		// here would claim a summary that was never persisted.
+		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, err
 	}
 	return Result{Status: StatusOK, Summary: result.Text, MessageCount: len(compactedMessageIDs)}, nil

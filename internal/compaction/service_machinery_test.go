@@ -3,6 +3,7 @@ package compaction
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -88,13 +90,21 @@ type fakeQueries struct {
 	onComplete      func()
 	markedRowCount  *int64
 
-	created   bool
-	markedIDs []pgtype.UUID
-	completed sqlc.CompleteCompactionLogParams
+	created        bool
+	createArg      sqlc.CreateCompactionLogParams
+	createErr      error
+	markedIDs      []pgtype.UUID
+	completed      sqlc.CompleteCompactionLogParams
+	completeCalls  []sqlc.CompleteCompactionLogParams
+	completeErrors []error
 }
 
-func (f *fakeQueries) CreateCompactionLog(_ context.Context, _ sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
+func (f *fakeQueries) CreateCompactionLog(_ context.Context, arg sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
 	f.created = true
+	f.createArg = arg
+	if f.createErr != nil {
+		return sqlc.BotHistoryMessageCompact{}, f.createErr
+	}
 	return sqlc.BotHistoryMessageCompact{ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}}, nil
 }
 
@@ -122,8 +132,16 @@ func (f *fakeQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMess
 }
 
 func (f *fakeQueries) CompleteCompactionLog(_ context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
+	f.completeCalls = append(f.completeCalls, arg)
 	if f.onComplete != nil {
 		f.onComplete()
+	}
+	if len(f.completeErrors) > 0 {
+		err := f.completeErrors[0]
+		f.completeErrors = f.completeErrors[1:]
+		if err != nil {
+			return sqlc.BotHistoryMessageCompact{}, err
+		}
 	}
 	if f.completeErr != nil {
 		return sqlc.BotHistoryMessageCompact{}, f.completeErr
@@ -319,6 +337,48 @@ func TestDoCompactionAllEmptyWindowSkipsModelAndMarking(t *testing.T) {
 	}
 	if q.created {
 		t.Fatal("a no-op compaction must not create a log row")
+	}
+}
+
+func TestDoCompactionRejectsEpochChangeBeforeAttemptCreation(t *testing.T) {
+	rows := machineryCorpus(t)
+	for i := range rows {
+		rows[i].CompactionEpoch = 7
+	}
+	q := &fakeQueries{uncompacted: rows, createErr: pgx.ErrNoRows}
+	stub := &stubModel{summary: "must not run"}
+	svc := newMachineryService(q)
+
+	_, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450))
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("RunCompactionSync() error = %v, want pgx.ErrNoRows", err)
+	}
+	if q.createArg.ExpectedEpoch != 7 {
+		t.Fatalf("CreateCompactionLog expected epoch = %d, want 7", q.createArg.ExpectedEpoch)
+	}
+	if stub.calls != 0 || len(q.markedIDs) != 0 {
+		t.Fatalf("stale selection reached model or marking: calls=%d marked=%d", stub.calls, len(q.markedIDs))
+	}
+}
+
+func TestDoCompactionRecordsErrorWhenSuccessCompletionIsFenced(t *testing.T) {
+	rows := machineryCorpus(t)
+	q := &fakeQueries{uncompacted: rows, completeErrors: []error{pgx.ErrNoRows, nil}}
+	stub := &stubModel{summary: "stale summary"}
+	svc := newMachineryService(q)
+
+	_, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450))
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("RunCompactionSync() error = %v, want pgx.ErrNoRows", err)
+	}
+	if len(q.completeCalls) != 2 {
+		t.Fatalf("CompleteCompactionLog calls = %d, want success attempt plus terminal error", len(q.completeCalls))
+	}
+	if q.completeCalls[0].Status != "ok" || q.completeCalls[1].Status != "error" {
+		t.Fatalf("completion statuses = %q then %q, want ok then error", q.completeCalls[0].Status, q.completeCalls[1].Status)
+	}
+	if q.completeCalls[1].Summary != "" || q.completeCalls[1].ErrorMessage == "" {
+		t.Fatalf("terminal stale completion leaked summary or omitted error: %#v", q.completeCalls[1])
 	}
 }
 

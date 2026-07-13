@@ -2213,10 +2213,16 @@ WITH invalidated_sessions AS (
   SET compaction_epoch = compaction_epoch + 1
   WHERE bot_id = sqlc.arg(target_bot_id)
   RETURNING id
+),
+deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts AS compact
+  WHERE compact.bot_id = sqlc.arg(target_bot_id)
+    AND (SELECT count(*) FROM invalidated_sessions) >= 0
+  RETURNING compact.id
 )
 DELETE FROM bot_history_messages AS message
 WHERE message.bot_id = sqlc.arg(target_bot_id)
-  AND (SELECT count(*) FROM invalidated_sessions) >= 0;
+  AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0;
 
 -- name: DeleteMessagesBySession :exec
 WITH invalidated_session AS (
@@ -2224,10 +2230,16 @@ WITH invalidated_session AS (
   SET compaction_epoch = compaction_epoch + 1
   WHERE id = sqlc.arg(target_session_id)
   RETURNING id
+),
+deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts AS compact
+  WHERE compact.session_id = sqlc.arg(target_session_id)
+    AND (SELECT count(*) FROM invalidated_session) >= 0
+  RETURNING compact.id
 )
 DELETE FROM bot_history_messages AS message
 WHERE message.session_id = sqlc.arg(target_session_id)
-  AND (SELECT count(*) FROM invalidated_session) >= 0;
+  AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0;
 
 -- name: DeleteMessagesByIDs :exec
 WITH deleted AS (
@@ -2407,6 +2419,7 @@ SELECT
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform,
+  s.compaction_epoch,
   r.conversation_type AS conversation_type,
   COALESCE(
     NULLIF(TRIM(COALESCE(r.metadata->>'conversation_name', '')), ''),
@@ -2416,7 +2429,7 @@ SELECT
   r.default_reply_target AS reply_target
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
+JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN bot_channel_routes r ON r.id = s.route_id
 WHERE m.session_id = $1
   -- Rows stay eligible unless their compact log holds a usable summary,

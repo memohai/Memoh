@@ -114,8 +114,8 @@ type Resolver struct {
 	sessionTurnMu       sync.Mutex
 	sessionTurnRefs     map[string]int // key: "botID:sessionID" → active turn refcount
 	sessionTurnLocks    map[string]*sync.Mutex
-	streamCompactionMu  sync.Mutex
-	streamCompactions   map[string]chan struct{}
+	sessionCompactionMu sync.Mutex
+	sessionCompactions  map[string]*sessionCompactionGate
 	timeout             time.Duration
 	memorySearchTimeout time.Duration
 	clockLocation       *time.Location

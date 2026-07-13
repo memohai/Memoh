@@ -102,6 +102,20 @@ func TestPostgresStaleCompactionAttemptCannotCompleteOK(t *testing.T) {
 		t.Fatalf("hide claimed turn: %v", err)
 	}
 	assertSessionCompactionEpoch(t, ctx, tx, 1)
+	if _, err := queries.CreateCompactionLog(ctx, dbsqlc.CreateCompactionLogParams{
+		BotID:        mustTestUUID(t, postgresMessageTestBotID),
+		SessionID:    mustTestUUID(t, postgresMessageTestSessionID),
+		ExpectedEpoch: 0,
+	}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("create compaction log with stale epoch = %v, want pgx.ErrNoRows", err)
+	}
+	if _, err := queries.CreateCompactionLog(ctx, dbsqlc.CreateCompactionLogParams{
+		BotID:        mustTestUUID(t, postgresMessageTestBotID),
+		SessionID:    mustTestUUID(t, postgresMessageTestSessionID),
+		ExpectedEpoch: 1,
+	}); err != nil {
+		t.Fatalf("create compaction log with current epoch: %v", err)
+	}
 
 	complete := dbsqlc.CompleteCompactionLogParams{
 		ID:           log.ID,
