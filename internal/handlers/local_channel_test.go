@@ -167,14 +167,17 @@ func TestWSStreamRegistry_AbortsOnlyTargetStream(t *testing.T) {
 	abortA := make(chan struct{}, 1)
 	abortB := make(chan struct{}, 1)
 
-	if err := registry.register(&activeWSStream{streamID: "stream-a", cancel: cancelA, abortCh: abortA}); err != nil {
+	if err := registry.register(&activeWSStream{streamID: "stream-a", sessionID: "session-a", cancel: cancelA, abortCh: abortA}); err != nil {
 		t.Fatalf("register stream-a: %v", err)
 	}
-	if err := registry.register(&activeWSStream{streamID: "stream-b", cancel: cancelB, abortCh: abortB}); err != nil {
+	if err := registry.register(&activeWSStream{streamID: "stream-b", sessionID: "session-b", cancel: cancelB, abortCh: abortB}); err != nil {
 		t.Fatalf("register stream-b: %v", err)
 	}
 
-	if !registry.abort("stream-a") {
+	if registry.abort("stream-a", "session-b") {
+		t.Fatal("expected stream-a abort with wrong session to fail")
+	}
+	if !registry.abort("stream-a", "session-a") {
 		t.Fatal("expected stream-a abort to succeed")
 	}
 

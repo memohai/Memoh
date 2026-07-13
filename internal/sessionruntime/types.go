@@ -120,7 +120,7 @@ type QueuedRunView struct {
 
 type CurrentRunView struct {
 	StreamID            string                   `json:"stream_id"`
-	Generation          string                   `json:"generation"`
+	Generation          string                   `json:"generation" validate:"required"`
 	Status              string                   `json:"status"`
 	OwnerID             string                   `json:"owner_id,omitempty"`
 	OwnerLeaseExpiresAt *time.Time               `json:"owner_lease_expires_at,omitempty"`

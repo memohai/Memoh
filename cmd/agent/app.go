@@ -101,6 +101,7 @@ import (
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/server"
 	sessionpkg "github.com/memohai/memoh/internal/session"
+	"github.com/memohai/memoh/internal/sessionruntime"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/storage/providers/containerfs"
 	"github.com/memohai/memoh/internal/storage/providers/fallback"
@@ -194,6 +195,31 @@ func provideDBQueries(postgresStore *postgresstore.Store) (dbstore.Queries, erro
 		return nil, errors.New("postgres store not configured")
 	}
 	return postgresstore.NewQueriesWithPool(postgresStore.Pool(), postgresStore.SQLC()), nil
+}
+
+func provideSessionRuntime(lc fx.Lifecycle, log *slog.Logger, cfg config.Config) (*sessionruntime.Manager, error) {
+	manager, err := sessionruntime.NewManagerFromConfig(log, cfg.SessionRuntime)
+	if err != nil {
+		return nil, fmt.Errorf("session runtime: %w", err)
+	}
+	lc.Append(sessionRuntimeLifecycleHook(manager))
+	return manager, nil
+}
+
+func sessionRuntimeLifecycleHook(manager *sessionruntime.Manager) fx.Hook {
+	return fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			if err := manager.Start(ctx); err != nil {
+				cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancelCleanup()
+				return errors.Join(err, manager.CloseContext(cleanupCtx))
+			}
+			return nil
+		},
+		OnStop: func(ctx context.Context) error {
+			return manager.CloseContext(ctx)
+		},
+	}
 }
 
 func provideAccountStore(postgresStore *postgresstore.Store) (dbstore.AccountStore, error) {
@@ -845,11 +871,12 @@ func provideProviderOAuthHandler(providersService *providers.Service, acpCodexOA
 	return handler
 }
 
-func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service, resolver *flow.Resolver, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service, rc *boot.RuntimeConfig, commandHandler *command.Handler, containerdHandler *handlers.ContainerdHandler) *handlers.LocalChannelHandler {
+func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service, resolver *flow.Resolver, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service, rc *boot.RuntimeConfig, commandHandler *command.Handler, containerdHandler *handlers.ContainerdHandler, runtimeManager *sessionruntime.Manager) *handlers.LocalChannelHandler {
 	h := handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, chatService, hub, botService, accountService, sessionService)
 	h.SetResolver(resolver)
 	h.SetCommandHandler(commandHandler)
 	h.SetRuntimeSkillResolver(containerdHandler)
+	h.SetSessionRuntime(runtimeManager)
 	h.SetAuthTokenConfig(rc.JwtSecret, rc.JwtExpiresIn)
 	h.SetMediaService(mediaService)
 	h.SetSpeechService(audioService, &settingsSpeechModelResolver{settings: settingsService})

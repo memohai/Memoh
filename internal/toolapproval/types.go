@@ -74,4 +74,5 @@ type Request struct {
 	CreatedAt               time.Time      `json:"created_at"`
 	DecidedAt               *time.Time     `json:"decided_at,omitempty"`
 	DecidedByUser           bool           `json:"decided_by_user,omitempty"`
+	RuntimeFenced           bool           `json:"-"`
 }

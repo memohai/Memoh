@@ -167,9 +167,24 @@ func (a *Agent) baseHookRequest(ctx context.Context, cfg RunConfig, event string
 	}
 }
 
-func (a *Agent) runTurnHook(ctx context.Context, cfg RunConfig, eventName, errMsg string) {
+// Terminal hook authority intentionally outlives user cancellation and is
+// revoked only when runtime ownership ends.
+func (a *Agent) runTurnHook(ctx context.Context, cfg RunConfig, eventName, errMsg string) { //nolint:contextcheck
 	if a == nil || a.hookService == nil {
 		return
+	}
+	if authority := cfg.TerminalHookAuthority; authority.Context != nil {
+		if err := context.Cause(authority.Context); err != nil {
+			a.logSkippedTurnHook(cfg, eventName, err)
+			return
+		}
+		ctx = authority.Context
+		if authority.Validate != nil {
+			if err := authority.Validate(ctx); err != nil {
+				a.logSkippedTurnHook(cfg, eventName, err)
+				return
+			}
+		}
 	}
 	req := a.baseHookRequest(ctx, cfg, eventName)
 	req.Turn = map[string]any{
@@ -189,6 +204,18 @@ func (a *Agent) runTurnHook(ctx context.Context, cfg RunConfig, eventName, errMs
 			slog.Any("error", err),
 		)
 	}
+}
+
+func (a *Agent) logSkippedTurnHook(cfg RunConfig, eventName string, err error) {
+	if a == nil || a.logger == nil {
+		return
+	}
+	a.logger.Warn("skip turn hook after runtime ownership loss",
+		slog.String("event", eventName),
+		slog.String("bot_id", cfg.Identity.BotID),
+		slog.String("session_id", cfg.Identity.SessionID),
+		slog.Any("error", err),
+	)
 }
 
 func (a *Agent) applyBeforeModelCallHook(ctx context.Context, cfg RunConfig, step int) (RunConfig, error) {

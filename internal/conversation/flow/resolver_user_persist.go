@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
@@ -14,10 +15,7 @@ import (
 // before writing a user turn ahead of agent execution. Web skill activations
 // use this so a denied hook cannot leave a persisted user-only special turn.
 func (r *Resolver) ApplyUserMessageHookAndPersistUserTurn(ctx context.Context, req conversation.ChatRequest) (conversation.ChatRequest, messagepkg.Message, error) {
-	if req.RawQuery == "" {
-		req.RawQuery = strings.TrimSpace(req.Query)
-	}
-	nextReq, err := r.applyUserMessageHook(ctx, req)
+	nextReq, err := r.PrepareUserMessageWS(ctx, req)
 	if err != nil {
 		return req, messagepkg.Message{}, err
 	}
@@ -28,6 +26,37 @@ func (r *Resolver) ApplyUserMessageHookAndPersistUserTurn(ctx context.Context, r
 	nextReq.UserMessagePersisted = true
 	nextReq.PersistedUserMessageID = persisted.ID
 	return nextReq, persisted, nil
+}
+
+// PrepareUserMessageWS applies the user-message hook before runtime admission
+// without writing history. The resulting request can be used to publish the
+// canonical runtime request turn and must not run the hook a second time.
+func (r *Resolver) PrepareUserMessageWS(ctx context.Context, req conversation.ChatRequest) (conversation.ChatRequest, error) {
+	if req.RawQuery == "" {
+		req.RawQuery = strings.TrimSpace(req.Query)
+	}
+	nextReq, err := r.applyUserMessageHook(ctx, req)
+	if err != nil {
+		return req, err
+	}
+	nextReq.UserMessageHookApplied = true
+	return nextReq, nil
+}
+
+// RuntimeRequestUserTurn returns the canonical, non-durable user turn shown
+// while an ordinary WebSocket run is active.
+func RuntimeRequestUserTurn(req conversation.ChatRequest, timestamp time.Time) *conversation.UITurn {
+	return &conversation.UITurn{
+		Role:              "user",
+		Text:              userTurnDisplayText(req),
+		UserMessageKind:   strings.TrimSpace(req.UserMessageKind),
+		SkillActivation:   req.SkillActivation,
+		Attachments:       uiAttachmentsFromChatAttachments(req.Attachments),
+		Timestamp:         timestamp,
+		Platform:          strings.TrimSpace(req.CurrentChannel),
+		SenderUserID:      strings.TrimSpace(req.UserID),
+		ExternalMessageID: strings.TrimSpace(req.ExternalMessageID),
+	}
 }
 
 // persistUserTurn writes a user turn before agent execution. It is used after
@@ -51,12 +80,6 @@ func (r *Resolver) persistUserTurn(ctx context.Context, req conversation.ChatReq
 	if err != nil {
 		return messagepkg.Message{}, err
 	}
-	displayText := strings.TrimSpace(req.Query)
-	if strings.TrimSpace(req.UserVisibleText) != "" || req.UserMessageKind == conversation.UserMessageKindSkillActivation {
-		displayText = strings.TrimSpace(req.UserVisibleText)
-	} else if strings.TrimSpace(req.RawQuery) != "" {
-		displayText = strings.TrimSpace(req.RawQuery)
-	}
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
 	sessionMode, runtimeType := r.persistSessionRuntimeSnapshot(ctx, req)
 	return r.messageService.Persist(ctx, messagepkg.PersistInput{
@@ -71,10 +94,20 @@ func (r *Resolver) persistUserTurn(ctx context.Context, req conversation.ChatReq
 		Metadata:                mergeMetadata(buildRouteMetadata(req), buildInteractionMetadata(req)),
 		Assets:                  chatAttachmentsToAssetRefs(req.Attachments),
 		EventID:                 req.EventID,
-		DisplayText:             displayText,
+		DisplayText:             userTurnDisplayText(req),
 		SessionMode:             sessionMode,
 		RuntimeType:             runtimeType,
 	})
+}
+
+func userTurnDisplayText(req conversation.ChatRequest) string {
+	if strings.TrimSpace(req.UserVisibleText) != "" || req.UserMessageKind == conversation.UserMessageKindSkillActivation {
+		return strings.TrimSpace(req.UserVisibleText)
+	}
+	if strings.TrimSpace(req.RawQuery) != "" {
+		return strings.TrimSpace(req.RawQuery)
+	}
+	return strings.TrimSpace(req.Query)
 }
 
 func persistedUserTurnText(req conversation.ChatRequest) string {

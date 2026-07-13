@@ -837,6 +837,7 @@ func requestFromRow(row sqlc.UserInputRequest) Request {
 		ReplyTarget:             strings.TrimSpace(row.ReplyTarget),
 		ConversationType:        strings.TrimSpace(row.ConversationType),
 		CreatedAt:               row.CreatedAt.Time,
+		RuntimeFenced:           row.RuntimeFencingToken.Valid,
 	}
 	if row.RouteID.Valid {
 		req.RouteID = uuid.UUID(row.RouteID.Bytes).String()

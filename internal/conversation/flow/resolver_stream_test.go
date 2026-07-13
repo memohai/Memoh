@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -18,6 +19,32 @@ import (
 type recordingMessageService struct {
 	persisted []messagepkg.PersistInput
 	replaced  int
+}
+
+func TestPrepareRunConfigCarriesTerminalHookAuthority(t *testing.T) {
+	t.Parallel()
+
+	authorityCtx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	validated := false
+	authority := agentpkg.TerminalHookAuthority{
+		Context: authorityCtx,
+		Validate: func(context.Context) error {
+			validated = true
+			return nil
+		},
+	}
+	resolver := &Resolver{}
+	got := resolver.prepareRunConfig(WithTerminalHookAuthority(context.Background(), authority), agentpkg.RunConfig{})
+	if got.TerminalHookAuthority.Context != authorityCtx || got.TerminalHookAuthority.Validate == nil {
+		t.Fatalf("terminal hook authority = %#v", got.TerminalHookAuthority)
+	}
+	if err := got.TerminalHookAuthority.Validate(context.Background()); err != nil {
+		t.Fatalf("validate terminal hook authority: %v", err)
+	}
+	if !validated {
+		t.Fatal("prepared terminal hook authority did not retain its validator")
+	}
 }
 
 func (s *recordingMessageService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
@@ -119,7 +146,7 @@ func TestPersistPartialResultDoesNotStoreUserOnlyFailure(t *testing.T) {
 		logger:         slog.New(slog.DiscardHandler),
 	}
 
-	resolver.persistPartialResult(
+	_, _ = resolver.persistPartialResult(
 		context.Background(),
 		conversation.ChatRequest{
 			BotID:     "bot-1",
@@ -255,6 +282,36 @@ func TestPersistTerminalSnapshotStoresAssistantOutput(t *testing.T) {
 	}
 	if messages.persisted[0].Role != "user" || messages.persisted[1].Role != "assistant" {
 		t.Fatalf("unexpected persisted roles: %q, %q", messages.persisted[0].Role, messages.persisted[1].Role)
+	}
+}
+
+func TestPersistTerminalSnapshotStopsBeforeWriteWhenPersistenceGuardFails(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+	ownershipLost := errors.New("runtime ownership lost")
+	ctx := WithPersistenceGuard(context.Background(), func(context.Context) error {
+		return ownershipLost
+	})
+
+	err := resolver.persistTerminalSnapshot(
+		ctx,
+		conversation.ChatRequest{BotID: "bot-1", SessionID: "session-1", Query: "hello"},
+		resolvedContext{},
+		terminalSnapshot{
+			sdkMessages:   []sdk.Message{sdk.AssistantMessage("late output")},
+			visibleOutput: true,
+		},
+	)
+	if !errors.Is(err, ownershipLost) {
+		t.Fatalf("persist terminal snapshot error = %v, want ownership loss", err)
+	}
+	if len(messages.persisted) != 0 {
+		t.Fatalf("ownership-lost stream persisted messages: %#v", messages.persisted)
 	}
 }
 

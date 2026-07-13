@@ -248,6 +248,7 @@ type ChatRequest struct {
 	ForwardSender                string           `json:"-"`
 	ForwardDate                  int64            `json:"-"`
 	UserMessagePersisted         bool             `json:"-"`
+	UserMessageHookApplied       bool             `json:"-"`
 	PersistedUserMessageID       string           `json:"-"`
 	ReusePersistedUserMessage    bool             `json:"-"`
 	EventID                      string           `json:"-"`

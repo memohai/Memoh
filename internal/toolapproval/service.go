@@ -672,6 +672,7 @@ func requestFromRow(row sqlc.ToolApprovalRequest) Request {
 		ReplyTarget:             strings.TrimSpace(row.ReplyTarget),
 		ConversationType:        strings.TrimSpace(row.ConversationType),
 		CreatedAt:               row.CreatedAt.Time,
+		RuntimeFenced:           row.RuntimeFencingToken.Valid,
 	}
 	if req.Operation == "" {
 		req.Operation, _ = OperationForTool(req.ToolName)

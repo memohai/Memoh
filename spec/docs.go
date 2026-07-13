@@ -6949,6 +6949,66 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/sessions/{session_id}/runtime": {
+            "get": {
+                "description": "Returns the current live runtime snapshot for a chat session.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Get session runtime state",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/sessionruntime.Snapshot"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/sessions/{session_id}/status": {
             "get": {
                 "description": "Get aggregated info for a chat session including message count, context usage, cache stats, and used skills",
@@ -19915,6 +19975,135 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "sessionruntime.CurrentRunView": {
+            "type": "object",
+            "required": [
+                "generation"
+            ],
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "generation": {
+                    "type": "string"
+                },
+                "messages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/conversation.UIMessage"
+                    }
+                },
+                "operation": {
+                    "$ref": "#/definitions/sessionruntime.RunOperationView"
+                },
+                "owner_id": {
+                    "type": "string"
+                },
+                "owner_lease_expires_at": {
+                    "type": "string"
+                },
+                "request_user_turn": {
+                    "$ref": "#/definitions/conversation.UITurn"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "steer": {
+                    "$ref": "#/definitions/sessionruntime.SteerState"
+                },
+                "stream_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "sessionruntime.QueuedRunView": {
+            "type": "object",
+            "properties": {
+                "stream_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "sessionruntime.RunOperationView": {
+            "type": "object",
+            "required": [
+                "kind",
+                "replace_from_message_id"
+            ],
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "retry",
+                        "edit"
+                    ]
+                },
+                "replace_from_message_id": {
+                    "type": "string"
+                },
+                "replacement_user_turn": {
+                    "$ref": "#/definitions/conversation.UITurn"
+                }
+            }
+        },
+        "sessionruntime.Snapshot": {
+            "type": "object",
+            "properties": {
+                "bot_id": {
+                    "type": "string"
+                },
+                "current_run_view": {
+                    "$ref": "#/definitions/sessionruntime.CurrentRunView"
+                },
+                "epoch": {
+                    "type": "string"
+                },
+                "queue": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/sessionruntime.QueuedRunView"
+                    }
+                },
+                "seq": {
+                    "type": "integer"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "sessionruntime.SteerState": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "text": {
                     "type": "string"
                 },
                 "updated_at": {

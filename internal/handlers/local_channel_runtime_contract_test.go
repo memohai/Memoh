@@ -16,6 +16,21 @@ import (
 	"github.com/memohai/memoh/internal/conversation/flow"
 )
 
+func TestLocalChannelHandlerBoundsRuntimeCommands(t *testing.T) {
+	handler := &LocalChannelHandler{runtimeCommandSlots: make(chan struct{}, 1)}
+	if !handler.tryAcquireRuntimeCommand() {
+		t.Fatal("first runtime command slot was rejected")
+	}
+	if handler.tryAcquireRuntimeCommand() {
+		t.Fatal("runtime command above the configured bound was accepted")
+	}
+	handler.releaseRuntimeCommand()
+	if !handler.tryAcquireRuntimeCommand() {
+		t.Fatal("released runtime command slot was not reusable")
+	}
+	handler.releaseRuntimeCommand()
+}
+
 const (
 	runtimeContractBotID     = "11111111-1111-1111-1111-111111111111"
 	runtimeContractSessionID = "22222222-2222-2222-2222-222222222222"

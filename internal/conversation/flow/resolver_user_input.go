@@ -12,6 +12,7 @@ import (
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/runtimefence"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/userinput"
 )
@@ -41,6 +42,43 @@ type UserInputResponseInput struct {
 	Reason                     string
 	ChatToken                  string
 	SuppressActivePromptAttach bool
+	ResolveOnly                bool
+}
+
+func (r *Resolver) PrepareUserInputResponse(ctx context.Context, input UserInputResponseInput) (runtimefence.PreservedDecision, error) {
+	if r.userInput == nil {
+		return runtimefence.PreservedDecision{}, errors.New("user input service not configured")
+	}
+	target, err := r.userInput.ResolveTarget(ctx, userinput.ResolveInput{
+		BotID:                  input.BotID,
+		SessionID:              input.SessionID,
+		ExplicitID:             firstNonEmpty(input.ExplicitID, input.UserInputID),
+		ReplyExternalMessageID: input.ReplyExternalMessageID,
+	})
+	if err != nil {
+		return runtimefence.PreservedDecision{}, err
+	}
+	if err := runtimefence.ValidateScope(ctx, target.BotID, target.SessionID); err != nil {
+		return runtimefence.PreservedDecision{}, err
+	}
+	if userinput.IsACPMCPRequest(target) {
+		if err := r.authorizeACPUserInputResponse(ctx, target, input); err != nil {
+			return runtimefence.PreservedDecision{}, err
+		}
+	}
+	if !input.Canceled {
+		answers := input.Answers
+		if len(answers) == 0 && strings.TrimSpace(input.TextAnswer) != "" {
+			answers, err = userInputAnswersFromText(target.UIPayload, input.TextAnswer)
+			if err != nil {
+				return runtimefence.PreservedDecision{}, err
+			}
+		}
+		if err := userinput.ValidateAnswers(target.UIPayload, answers); err != nil {
+			return runtimefence.PreservedDecision{}, err
+		}
+	}
+	return runtimefence.PreservedDecision{Kind: runtimefence.DecisionUserInput, ID: target.ID}, nil
 }
 
 func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponseInput, eventCh chan<- WSStreamEvent) error {
@@ -56,6 +94,9 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 	if err != nil {
 		return err
 	}
+	if err := runtimefence.ValidateScope(ctx, target.BotID, target.SessionID); err != nil {
+		return err
+	}
 
 	isACPMCP := userinput.IsACPMCPRequest(target)
 	if isACPMCP {
@@ -63,7 +104,10 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 			return err
 		}
 	}
-	if isACPMCP && !r.userInput.CanRespond(target) {
+	if isACPMCP && !input.ResolveOnly && !r.userInput.CanRespond(target) {
+		if target.RuntimeFenced {
+			return ErrRuntimeDecisionOwnerUnavailable
+		}
 		if _, err := r.userInput.Cancel(ctx, userinput.CancelInput{
 			RequestID:              target.ID,
 			ActorChannelIdentityID: input.ActorChannelIdentityID,
@@ -113,6 +157,9 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 			return emitApprovalAck(ctx, eventCh)
 		}
 		return err
+	}
+	if input.ResolveOnly {
+		return emitApprovalAck(ctx, eventCh)
 	}
 	if userinput.IsACPMCPRequest(resolved) {
 		// An ACP/MCP waiter is blocked on this request and resumes the run

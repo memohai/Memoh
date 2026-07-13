@@ -14,6 +14,7 @@ import (
 	"github.com/memohai/memoh/internal/contextlimit"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/runtimefence"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/toolapproval"
 )
@@ -30,6 +31,35 @@ type ToolApprovalResponseInput struct {
 	Reason                     string
 	ChatToken                  string
 	SuppressActivePromptAttach bool
+	ResolveOnly                bool
+}
+
+func (r *Resolver) PrepareToolApprovalResponse(ctx context.Context, input ToolApprovalResponseInput) (runtimefence.PreservedDecision, error) {
+	if r.toolApproval == nil {
+		return runtimefence.PreservedDecision{}, errors.New("tool approval service not configured")
+	}
+	target, err := r.toolApproval.ResolveTarget(ctx, toolapproval.ResolveInput{
+		BotID:                  input.BotID,
+		SessionID:              input.SessionID,
+		ExplicitID:             firstNonEmpty(input.ExplicitID, input.ApprovalID),
+		ReplyExternalMessageID: input.ReplyExternalMessageID,
+	})
+	if err != nil {
+		return runtimefence.PreservedDecision{}, err
+	}
+	if err := runtimefence.ValidateScope(ctx, target.BotID, target.SessionID); err != nil {
+		return runtimefence.PreservedDecision{}, err
+	}
+	_, err = r.authorizeToolApprovalResponse(ctx, target, input)
+	if err != nil {
+		return runtimefence.PreservedDecision{}, err
+	}
+	switch strings.ToLower(strings.TrimSpace(input.Decision)) {
+	case "approve", "approved", "reject", "rejected":
+	default:
+		return runtimefence.PreservedDecision{}, fmt.Errorf("unknown tool approval decision %q", input.Decision)
+	}
+	return runtimefence.PreservedDecision{Kind: runtimefence.DecisionToolApproval, ID: target.ID}, nil
 }
 
 func (r *Resolver) RespondToolApproval(ctx context.Context, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
@@ -45,10 +75,21 @@ func (r *Resolver) RespondToolApproval(ctx context.Context, input ToolApprovalRe
 	if err != nil {
 		return err
 	}
-	if isACP, err := r.isACPToolApprovalSession(ctx, target.SessionID); err != nil {
+	if err := runtimefence.ValidateScope(ctx, target.BotID, target.SessionID); err != nil {
 		return err
-	} else if isACP {
+	}
+	isACP, err := r.authorizeToolApprovalResponse(ctx, target, input)
+	if err != nil {
+		return err
+	}
+	if input.ResolveOnly {
+		return r.resolveToolApprovalDecision(ctx, target, input, eventCh)
+	}
+	if isACP {
 		return r.respondACPToolApproval(ctx, target, input, eventCh)
+	}
+	if r.toolApproval.CanRespond(target) {
+		return r.respondLiveToolApproval(ctx, target, input, eventCh)
 	}
 
 	var toolResult sdk.ToolResultPart
@@ -80,6 +121,28 @@ func (r *Resolver) RespondToolApproval(ctx context.Context, input ToolApprovalRe
 	return r.storeToolResultAndContinue(ctx, target, input, toolResult, eventCh)
 }
 
+// A live waiter owns tool execution and continuation inside the active run.
+// The response path only resolves the decision so the waiter can resume.
+func (r *Resolver) respondLiveToolApproval(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
+	return r.resolveToolApprovalDecision(ctx, target, input, eventCh)
+}
+
+func (r *Resolver) resolveToolApprovalDecision(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
+	switch strings.ToLower(strings.TrimSpace(input.Decision)) {
+	case "approve", "approved":
+		if _, err := r.toolApproval.Approve(ctx, target.ID, input.ActorChannelIdentityID, input.Reason); err != nil {
+			return err
+		}
+	case "reject", "rejected":
+		if _, err := r.toolApproval.Reject(ctx, target.ID, input.ActorChannelIdentityID, input.Reason); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unknown tool approval decision %q", input.Decision)
+	}
+	return emitApprovalAck(ctx, eventCh)
+}
+
 func (r *Resolver) toolOutputLimit() contextlimit.ToolOutputLimit {
 	limit := agentpkg.DefaultLimits().ToolOutputLimit()
 	if r != nil && r.agent != nil {
@@ -104,22 +167,11 @@ func (r *Resolver) limitToolApprovalResult(result sdk.ToolApprovalResult, toolNa
 	return result
 }
 
-func (r *Resolver) isACPToolApprovalSession(ctx context.Context, sessionID string) (bool, error) {
-	if r == nil || r.sessionService == nil {
-		return false, nil
-	}
-	sess, err := r.sessionService.Get(ctx, sessionID)
-	if err != nil {
-		return false, err
-	}
-	return sessionpkg.IsACPRuntime(sess), nil
-}
-
 func (r *Resolver) respondACPToolApproval(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
-	if err := r.authorizeACPToolApprovalResponse(ctx, target, input); err != nil {
-		return err
-	}
 	if !r.toolApproval.CanRespond(target) {
+		if target.RuntimeFenced {
+			return ErrRuntimeDecisionOwnerUnavailable
+		}
 		_, err := r.toolApproval.Reject(ctx, target.ID, "", "tool approval expired: the requesting tool call is no longer waiting")
 		if err != nil && !errors.Is(err, toolapproval.ErrAlreadyDecided) {
 			return err
@@ -161,6 +213,60 @@ func (r *Resolver) respondACPToolApproval(ctx context.Context, target toolapprov
 		})
 	}
 	return emitApprovalAck(ctx, eventCh)
+}
+
+func (r *Resolver) authorizeToolApprovalResponse(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput) (bool, error) {
+	if r == nil || r.sessionService == nil {
+		return false, errors.New("session service not configured")
+	}
+	if r.botPermissions == nil {
+		return false, errors.New("bot permission checker not configured")
+	}
+	sessionID := firstNonEmpty(target.SessionID, input.SessionID)
+	sess, err := r.sessionService.Get(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	botID := firstNonEmpty(target.BotID, input.BotID)
+	if strings.TrimSpace(sess.BotID) == "" || strings.TrimSpace(botID) == "" || sess.BotID != botID {
+		return false, toolapproval.ErrForbidden
+	}
+	if sessionpkg.IsACPRuntime(sess) {
+		return true, r.authorizeACPToolApprovalResponse(ctx, target, input)
+	}
+
+	actorID := firstNonEmpty(input.ActorUserID, input.ActorChannelIdentityID)
+	if actorID == "" {
+		return false, toolapproval.ErrForbidden
+	}
+	if ok, err := r.botPermissions.HasBotPermission(ctx, botID, actorID, bots.PermissionManage); err != nil {
+		return false, err
+	} else if ok {
+		return false, nil
+	}
+	if strings.TrimSpace(sess.CreatedByUserID) == "" || sess.CreatedByUserID != actorID {
+		return false, toolapproval.ErrForbidden
+	}
+	required := toolApprovalSessionPermission(sess)
+	if ok, err := r.botPermissions.HasBotPermission(ctx, botID, actorID, required); err != nil {
+		return false, err
+	} else if !ok {
+		return false, toolapproval.ErrForbidden
+	}
+	return false, nil
+}
+
+func toolApprovalSessionPermission(sess sessionpkg.Session) string {
+	mode := strings.TrimSpace(sess.SessionMode)
+	if !sessionpkg.IsKnownSessionMode(mode) {
+		mode, _ = sessionpkg.DescriptorFromLegacyType(sess.Type)
+	}
+	switch mode {
+	case sessionpkg.TypeChat, sessionpkg.TypeSubagent:
+		return bots.PermissionChat
+	default:
+		return bots.PermissionManage
+	}
 }
 
 func (r *Resolver) authorizeACPToolApprovalResponse(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput) error {
