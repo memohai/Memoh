@@ -43,6 +43,11 @@ func TestCompactionArtifactMigrationPostgresPath(t *testing.T) {
 		t.Fatalf("set search path: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
+CREATE TABLE bot_sessions (
+  id UUID PRIMARY KEY,
+  bot_id UUID NOT NULL
+);
+
 CREATE TABLE bot_history_message_compacts (
   id UUID PRIMARY KEY,
   bot_id UUID NOT NULL,
@@ -73,12 +78,19 @@ CREATE TABLE bot_history_messages (
 	parentTwoID := "00000000-0000-0000-0000-00000000d003"
 	unlinkedID := "00000000-0000-0000-0000-00000000d004"
 	foreignArtifactID := "00000000-0000-0000-0000-00000000d101"
+	crossOwnerArtifactID := "00000000-0000-0000-0000-00000000d102"
 	logOnlyArtifactID := "00000000-0000-0000-0000-00000000d201"
 	botID := "00000000-0000-0000-0000-00000000b001"
 	foreignBotID := "00000000-0000-0000-0000-00000000b101"
 	logOnlyBotID := "00000000-0000-0000-0000-00000000b201"
 	sessionID := "00000000-0000-0000-0000-00000000e001"
 	foreignSessionID := "00000000-0000-0000-0000-00000000e101"
+	if _, err := tx.Exec(ctx, `
+INSERT INTO bot_sessions (id, bot_id)
+VALUES ($1, $2), ($3, $4)
+	`, sessionID, botID, foreignSessionID, foreignBotID); err != nil {
+		t.Fatalf("insert sessions: %v", err)
+	}
 	if _, err := tx.Exec(ctx, `
 INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary)
 VALUES ($1, $2, $3, 'ok', 'legacy summary')
@@ -144,6 +156,12 @@ INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summar
 VALUES ($1, $2, $3, 'ok', 'foreign artifact')
 	`, foreignArtifactID, foreignBotID, foreignSessionID); err != nil {
 		t.Fatalf("insert foreign artifact: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary)
+VALUES ($1, $2, $3, 'ok', 'cross-owner artifact')
+	`, crossOwnerArtifactID, foreignBotID, sessionID); err != nil {
+		t.Fatalf("insert cross-owner artifact: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
 INSERT INTO bot_history_message_compacts (id, bot_id, status, summary)
@@ -236,6 +254,9 @@ func assertGeneratedLineageQueries(t *testing.T, ctx context.Context, queries *s
 	}
 	seen := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
+		if row.BotID != parsedBotID {
+			t.Fatalf("session lineage query crossed bot ownership: row=%s bot=%s want=%s", row.ID, row.BotID, parsedBotID)
+		}
 		seen[row.ID.String()] = struct{}{}
 	}
 	for _, id := range append(parentIDs, activeID) {
