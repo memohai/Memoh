@@ -3,9 +3,11 @@
 -- so sqlc can see the column) and backfill it to the default singleton tenant
 -- (schema contract phases A/B).
 --
--- New incremental (existing migrations untouched). tenant_id is added NULLABLE
--- and backfilled to DEFAULT_TENANT_ID; a later migration tightens it to NOT NULL
--- after composite keys/FKs land. Existing installs upgrade in place (no wipe).
+-- New incremental (existing migrations untouched). tenant_id is added NULLABLE,
+-- given a DEFAULT of app.current_tenant_id() (so INSERTs auto-fill the current
+-- tenant), and backfilled to the default singleton; a later migration tightens
+-- it to NOT NULL after composite keys/FKs land. Existing installs upgrade in
+-- place (no wipe).
 --
 -- The ADD COLUMN statements are STATIC (one literal ALTER per table) rather than
 -- a dynamic DO/EXECUTE loop, because sqlc parses the schema declaratively and
@@ -66,6 +68,62 @@ ALTER TABLE IF EXISTS public.user_channel_identity_bindings ADD COLUMN IF NOT EX
 ALTER TABLE IF EXISTS public.user_input_requests ADD COLUMN IF NOT EXISTS tenant_id uuid;
 ALTER TABLE IF EXISTS public.user_provider_oauth_tokens ADD COLUMN IF NOT EXISTS tenant_id uuid;
 ALTER TABLE IF EXISTS public.users ADD COLUMN IF NOT EXISTS tenant_id uuid;
+
+
+-- Give tenant_id a DEFAULT so any INSERT (sqlc-generated or raw) auto-fills the
+-- current tenant from the session/transaction GUC. Fail-closed: if the GUC is
+-- unset, app.current_tenant_id() raises rather than inserting a NULL/guessed tenant.
+ALTER TABLE IF EXISTS public.bot_acl_rules ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.bot_channel_admins ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.bot_channel_configs ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.bot_channel_routes ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.bot_email_bindings ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.bot_heartbeat_logs ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.bot_history_message_assets ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.bot_history_message_compacts ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.bot_history_messages ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.bot_plugin_installations ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.bot_plugin_resources ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.bot_session_discuss_cursors ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.bot_session_events ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.bot_sessions ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.bot_storage_bindings ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.bot_user_grants ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.bot_workspace_resource_limits ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.bots ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.channel_identities ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.channel_link_codes ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.container_versions ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.containers ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.email_oauth_tokens ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.email_outbox ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.email_providers ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.fetch_providers ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.lifecycle_events ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.mcp_connections ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.mcp_oauth_tokens ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.media_assets ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.memory_edges ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.memory_nodes ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.memory_providers ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.model_variants ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.models ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.provider_oauth_tokens ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.providers ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.schedule ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.schedule_logs ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.search_providers ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.snapshots ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.storage_providers ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.tasks ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.tool_approval_requests ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.tts_models ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.tts_providers ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.user_channel_bindings ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.user_channel_identity_bindings ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.user_input_requests ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.user_provider_oauth_tokens ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
+ALTER TABLE IF EXISTS public.users ALTER COLUMN tenant_id SET DEFAULT app.current_tenant_id();
 
 -- Backfill every present tenant table to the default singleton. Dynamic because
 -- sqlc ignores UPDATE statements; enumerating the applied schema keeps this

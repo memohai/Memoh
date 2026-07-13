@@ -22,7 +22,7 @@ WHERE channel_type = $1 AND channel_subject_id = $2;
 -- name: UpsertChannelIdentityByChannelSubject :one
 INSERT INTO channel_identities (channel_type, channel_subject_id, display_name, avatar_url, metadata)
 VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (channel_type, channel_subject_id)
+ON CONFLICT (tenant_id, channel_type, channel_subject_id)
 DO UPDATE SET
   display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), channel_identities.display_name),
   avatar_url = COALESCE(NULLIF(EXCLUDED.avatar_url, ''), channel_identities.avatar_url),
