@@ -1,4 +1,4 @@
--- 0114_compaction_validation_provenance
+-- 0115_compaction_validation_provenance
 -- Identify artifacts produced by strict atomic finalizers.
 
 CREATE TABLE IF NOT EXISTS bot_history_message_compact_validations (

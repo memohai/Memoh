@@ -1,4 +1,4 @@
--- 0107_compaction_terminal_status
+-- 0108_compaction_terminal_status
 -- Protect terminal compaction attempts from late status transitions.
 
 CREATE OR REPLACE FUNCTION guard_compaction_log_terminal_status()

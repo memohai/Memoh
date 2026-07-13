@@ -279,10 +279,10 @@ func installRollupParentEdgesFixture(t *testing.T, pool *pgxpool.Pool) {
 	if _, err := pool.Exec(context.Background(), `CREATE TABLE IF NOT EXISTS bot_sessions (id UUID PRIMARY KEY)`); err != nil {
 		t.Fatalf("install rollup session fixture: %v", err)
 	}
-	if _, err := pool.Exec(context.Background(), readEmbeddedMigration(t, "postgres/migrations/0106_compaction_artifact_parent_edges.up.sql")); err != nil {
+	if _, err := pool.Exec(context.Background(), readEmbeddedMigration(t, "postgres/migrations/0107_compaction_artifact_parent_edges.up.sql")); err != nil {
 		t.Fatalf("install rollup parent edges fixture: %v", err)
 	}
-	if _, err := pool.Exec(context.Background(), readEmbeddedMigration(t, "postgres/migrations/0113_compaction_topology_positions.up.sql")); err != nil {
+	if _, err := pool.Exec(context.Background(), readEmbeddedMigration(t, "postgres/migrations/0114_compaction_topology_positions.up.sql")); err != nil {
 		t.Fatalf("install rollup topology fixture: %v", err)
 	}
 }

@@ -1,4 +1,4 @@
--- 0111_activate_message_source_context
+-- 0112_activate_message_source_context
 -- Activate immutable source envelopes without invalidating successful legacy artifacts.
 -- Maintenance-window migration: stop all pre-0111 writers before applying it.
 

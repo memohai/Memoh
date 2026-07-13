@@ -1,4 +1,4 @@
--- 0113_compaction_topology_positions
+-- 0114_compaction_topology_positions
 -- Track range-local history topology changes for derived compaction validity.
 
 LOCK TABLE bot_history_message_compacts IN SHARE ROW EXCLUSIVE MODE;

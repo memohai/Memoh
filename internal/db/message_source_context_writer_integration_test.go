@@ -15,9 +15,9 @@ func TestMessageWritersPersistExplicitSourceContextPostgresPath(t *testing.T) {
 	ctx := context.Background()
 	installListUncompactedFixture(t, ctx, pool)
 	installSourceContextFixture(t, ctx, pool)
-	applySourceContextMigration(t, ctx, pool, "0109_compaction_source_revision.up.sql")
-	applySourceContextMigration(t, ctx, pool, "0110_message_source_context.up.sql")
-	applySourceContextMigration(t, ctx, pool, "0111_activate_message_source_context.up.sql")
+	applySourceContextMigration(t, ctx, pool, "0110_compaction_source_revision.up.sql")
+	applySourceContextMigration(t, ctx, pool, "0111_message_source_context.up.sql")
+	applySourceContextMigration(t, ctx, pool, "0112_activate_message_source_context.up.sql")
 
 	botID, sessionID, routeID := testUUID(), testUUID(), testUUID()
 	identityID, eventID := testUUID(), testUUID()

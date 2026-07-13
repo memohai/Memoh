@@ -1,4 +1,4 @@
--- 0108_compaction_claim_finalization
+-- 0109_compaction_claim_finalization
 -- Remove finalized message ownership guards.
 
 DROP TRIGGER IF EXISTS compaction_message_claim_finalize

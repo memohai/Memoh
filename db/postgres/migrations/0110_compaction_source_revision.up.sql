@@ -1,4 +1,4 @@
--- 0109_compaction_source_revision
+-- 0110_compaction_source_revision
 -- Give each persisted history source an explicit aggregate revision.
 
 LOCK TABLE bot_history_message_assets IN SHARE ROW EXCLUSIVE MODE;

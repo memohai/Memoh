@@ -34,7 +34,7 @@ CREATE TABLE bot_history_message_assets (
 `); err != nil {
 		t.Fatalf("create message asset fixture: %v", err)
 	}
-	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0109_compaction_source_revision.up.sql")); err != nil {
+	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0110_compaction_source_revision.up.sql")); err != nil {
 		t.Fatalf("apply source revision migration: %v", err)
 	}
 
@@ -202,7 +202,7 @@ CREATE TABLE bot_history_message_assets (
 `); err != nil {
 		t.Fatalf("create legacy asset fixture: %v", err)
 	}
-	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0109_compaction_source_revision.up.sql")); err != nil {
+	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0110_compaction_source_revision.up.sql")); err != nil {
 		t.Fatalf("apply source revision migration: %v", err)
 	}
 
@@ -225,7 +225,7 @@ VALUES ($1, $2, 'attachment', 0)
 	if after != before+1 {
 		t.Fatalf("legacy asset revision = %d, want %d", after, before+1)
 	}
-	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0109_compaction_source_revision.down.sql")); err != nil {
+	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0110_compaction_source_revision.down.sql")); err != nil {
 		t.Fatalf("rollback source revision migration: %v", err)
 	}
 	var revisionColumnExists bool
@@ -281,7 +281,7 @@ $$
 `); err != nil {
 		t.Fatalf("create claim invalidation fixture: %v", err)
 	}
-	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0109_compaction_source_revision.up.sql")); err != nil {
+	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0110_compaction_source_revision.up.sql")); err != nil {
 		t.Fatalf("apply source revision migration: %v", err)
 	}
 
@@ -333,7 +333,7 @@ EXECUTE FUNCTION capture_history_message_source_context()
 		t.Fatalf("activate source context capture: %v", err)
 	}
 
-	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0112_compaction_claim_invalidation.up.sql")); err != nil {
+	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0113_compaction_claim_invalidation.up.sql")); err != nil {
 		t.Fatalf("apply claim invalidation migration: %v", err)
 	}
 	assertCompactionClaimCurrent(t, ctx, pool, legacyLogID, true)
@@ -423,7 +423,7 @@ VALUES ($1, 'post-compact-asset')
 		t.Fatalf("finalize preserved artifact = result:%+v error:%v", preservedResult, err)
 	}
 
-	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0112_compaction_claim_invalidation.down.sql")); err != nil {
+	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0113_compaction_claim_invalidation.down.sql")); err != nil {
 		t.Fatalf("roll back claim invalidation migration: %v", err)
 	}
 	var invalidLogsRemaining int

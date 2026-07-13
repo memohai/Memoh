@@ -1,4 +1,4 @@
--- 0113_compaction_topology_positions
+-- 0114_compaction_topology_positions
 -- Remove range-local history topology tracking.
 
 DROP TRIGGER IF EXISTS history_message_topology_capture

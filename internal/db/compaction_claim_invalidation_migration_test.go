@@ -10,11 +10,11 @@ func TestCompactionClaimInvalidationMigrationContract(t *testing.T) {
 
 	baseline := readEmbeddedMigration(t, "postgres/migrations/0001_init.up.sql")
 	baselineDown := readEmbeddedMigration(t, "postgres/migrations/0001_init.down.sql")
-	up := readEmbeddedMigration(t, "postgres/migrations/0112_compaction_claim_invalidation.up.sql")
-	down := readEmbeddedMigration(t, "postgres/migrations/0112_compaction_claim_invalidation.down.sql")
+	up := readEmbeddedMigration(t, "postgres/migrations/0113_compaction_claim_invalidation.up.sql")
+	down := readEmbeddedMigration(t, "postgres/migrations/0113_compaction_claim_invalidation.down.sql")
 
-	if !strings.HasPrefix(up, "-- 0112_compaction_claim_invalidation\n-- Invalidate durable compaction claims") ||
-		!strings.HasPrefix(down, "-- 0112_compaction_claim_invalidation\n-- Remove compaction claim invalidation") {
+	if !strings.HasPrefix(up, "-- 0113_compaction_claim_invalidation\n-- Invalidate durable compaction claims") ||
+		!strings.HasPrefix(down, "-- 0113_compaction_claim_invalidation\n-- Remove compaction claim invalidation") {
 		t.Fatal("0112 migration pair is missing the required name and description headers")
 	}
 	for name, sql := range map[string]string{"baseline": baseline, "up": up} {

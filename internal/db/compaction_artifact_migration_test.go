@@ -73,11 +73,11 @@ func TestCompactionTerminalStatusMigrationPreservesTerminalAttempts(t *testing.T
 
 	baseline := readEmbeddedMigration(t, "postgres/migrations/0001_init.up.sql")
 	baselineDown := readEmbeddedMigration(t, "postgres/migrations/0001_init.down.sql")
-	up := readEmbeddedMigration(t, "postgres/migrations/0107_compaction_terminal_status.up.sql")
-	down := readEmbeddedMigration(t, "postgres/migrations/0107_compaction_terminal_status.down.sql")
+	up := readEmbeddedMigration(t, "postgres/migrations/0108_compaction_terminal_status.up.sql")
+	down := readEmbeddedMigration(t, "postgres/migrations/0108_compaction_terminal_status.down.sql")
 
-	if !strings.HasPrefix(up, "-- 0107_compaction_terminal_status\n-- Protect terminal compaction attempts") ||
-		!strings.HasPrefix(down, "-- 0107_compaction_terminal_status\n-- Remove the compaction terminal status guard") {
+	if !strings.HasPrefix(up, "-- 0108_compaction_terminal_status\n-- Protect terminal compaction attempts") ||
+		!strings.HasPrefix(down, "-- 0108_compaction_terminal_status\n-- Remove the compaction terminal status guard") {
 		t.Fatal("0107 migration pair is missing the required name and description headers")
 	}
 	for name, sql := range map[string]string{"baseline": baseline, "up": up} {

@@ -1,4 +1,4 @@
--- 0112_compaction_claim_invalidation
+-- 0113_compaction_claim_invalidation
 -- Remove compaction claim invalidation after retiring known-stale lineages.
 
 LOCK TABLE bot_history_message_compacts IN SHARE ROW EXCLUSIVE MODE;

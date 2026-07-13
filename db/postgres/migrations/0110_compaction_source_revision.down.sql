@@ -1,4 +1,4 @@
--- 0109_compaction_source_revision
+-- 0110_compaction_source_revision
 -- Remove explicit history source revisions.
 
 DROP TRIGGER IF EXISTS history_message_asset_source_revision_bump

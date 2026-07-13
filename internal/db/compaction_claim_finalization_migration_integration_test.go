@@ -16,11 +16,11 @@ func TestCompactionClaimFinalizationMigrationContract(t *testing.T) {
 	t.Parallel()
 	baseline := readEmbeddedMigration(t, "postgres/migrations/0001_init.up.sql")
 	baselineDown := readEmbeddedMigration(t, "postgres/migrations/0001_init.down.sql")
-	up := readEmbeddedMigration(t, "postgres/migrations/0108_compaction_claim_finalization.up.sql")
-	down := readEmbeddedMigration(t, "postgres/migrations/0108_compaction_claim_finalization.down.sql")
+	up := readEmbeddedMigration(t, "postgres/migrations/0109_compaction_claim_finalization.up.sql")
+	down := readEmbeddedMigration(t, "postgres/migrations/0109_compaction_claim_finalization.down.sql")
 
-	if !strings.HasPrefix(up, "-- 0108_compaction_claim_finalization\n-- Finalize message ownership") ||
-		!strings.HasPrefix(down, "-- 0108_compaction_claim_finalization\n-- Remove finalized message ownership") {
+	if !strings.HasPrefix(up, "-- 0109_compaction_claim_finalization\n-- Finalize message ownership") ||
+		!strings.HasPrefix(down, "-- 0109_compaction_claim_finalization\n-- Remove finalized message ownership") {
 		t.Fatal("0108 migration pair is missing the required name and description headers")
 	}
 	for name, sql := range map[string]string{"baseline": baseline, "up": up} {
@@ -129,7 +129,7 @@ CREATE TABLE bot_history_messages (
 		t.Fatalf("create pre-0108 schema: %v", err)
 	}
 
-	up := readEmbeddedMigration(t, "postgres/migrations/0108_compaction_claim_finalization.up.sql")
+	up := readEmbeddedMigration(t, "postgres/migrations/0109_compaction_claim_finalization.up.sql")
 	inconsistentLogID := testUUID()
 	if _, err := tx.Exec(ctx, `INSERT INTO bot_history_message_compacts (id, status, message_count) VALUES ($1, 'ok', 1)`, inconsistentLogID); err != nil {
 		t.Fatalf("insert inconsistent historical compact: %v", err)
@@ -403,7 +403,7 @@ UPDATE bot_history_messages SET compact_id = $1 WHERE id = $2
 	}
 	assertClaimMarker(t, ctx, tx, deletableMessageID, pgtype.UUID{}, false)
 
-	down := readEmbeddedMigration(t, "postgres/migrations/0108_compaction_claim_finalization.down.sql")
+	down := readEmbeddedMigration(t, "postgres/migrations/0109_compaction_claim_finalization.down.sql")
 	if _, err := tx.Exec(ctx, down); err != nil {
 		t.Fatalf("apply 0108 down: %v", err)
 	}

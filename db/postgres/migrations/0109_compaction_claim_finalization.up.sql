@@ -1,4 +1,4 @@
--- 0108_compaction_claim_finalization
+-- 0109_compaction_claim_finalization
 -- Finalize message ownership when a direct compaction artifact succeeds.
 
 LOCK TABLE bot_history_message_compacts IN SHARE ROW EXCLUSIVE MODE;

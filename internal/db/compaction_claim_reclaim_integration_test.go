@@ -40,10 +40,10 @@ CREATE TABLE bot_history_message_compact_parent_edges (
 `); err != nil {
 		t.Fatalf("create claim reclaim fixture: %v", err)
 	}
-	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0109_compaction_source_revision.up.sql")); err != nil {
+	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0110_compaction_source_revision.up.sql")); err != nil {
 		t.Fatalf("apply source revision migration: %v", err)
 	}
-	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0112_compaction_claim_invalidation.up.sql")); err != nil {
+	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0113_compaction_claim_invalidation.up.sql")); err != nil {
 		t.Fatalf("apply claim invalidation migration: %v", err)
 	}
 

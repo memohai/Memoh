@@ -1,4 +1,4 @@
--- 0112_compaction_claim_invalidation
+-- 0113_compaction_claim_invalidation
 -- Invalidate durable compaction claims when their source snapshot changes.
 
 LOCK TABLE bot_history_message_compacts IN SHARE ROW EXCLUSIVE MODE;

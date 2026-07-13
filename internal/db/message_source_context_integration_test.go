@@ -17,8 +17,8 @@ func TestFinalizeCompactionArtifactSourceContextActivationPostgresPath(t *testin
 	ctx := context.Background()
 	installListUncompactedFixture(t, ctx, pool)
 	installSourceContextFixture(t, ctx, pool)
-	applySourceContextMigration(t, ctx, pool, "0109_compaction_source_revision.up.sql")
-	applySourceContextMigration(t, ctx, pool, "0110_message_source_context.up.sql")
+	applySourceContextMigration(t, ctx, pool, "0110_compaction_source_revision.up.sql")
+	applySourceContextMigration(t, ctx, pool, "0111_message_source_context.up.sql")
 	botID, sessionID, routeID := testUUID(), testUUID(), testUUID()
 	identityID, eventID := testUUID(), testUUID()
 	insertSourceContextParents(t, ctx, pool, botID, sessionID, routeID, identityID, eventID)
@@ -73,7 +73,7 @@ VALUES
 	eventRevision := readMessageSourceRevision(t, ctx, pool, eventMessageID)
 	fallbackRevision := readMessageSourceRevision(t, ctx, pool, fallbackMessageID)
 	coveredRevision := readMessageSourceRevision(t, ctx, pool, coveredMessageID)
-	applySourceContextMigration(t, ctx, pool, "0111_activate_message_source_context.up.sql")
+	applySourceContextMigration(t, ctx, pool, "0112_activate_message_source_context.up.sql")
 	var pendingStatus, pendingError string
 	if err := pool.QueryRow(ctx, `SELECT status, error_message FROM bot_history_message_compacts WHERE id = $1`, pendingLogID).Scan(&pendingStatus, &pendingError); err != nil {
 		t.Fatalf("read retired pending attempt: %v", err)
@@ -243,7 +243,7 @@ SELECT id, $4, 0 FROM inserted
 	}
 	createDeletedSourceArtifact(t, ctx, pool, queries)
 
-	applySourceContextMigration(t, ctx, pool, "0111_activate_message_source_context.down.sql")
+	applySourceContextMigration(t, ctx, pool, "0112_activate_message_source_context.down.sql")
 	for _, messageID := range []pgtype.UUID{eventMessageID, fallbackMessageID, coveredMessageID, newMessageID, backupMessage.ID} {
 		assertStoredSourceContextAbsent(t, ctx, pool, messageID)
 	}

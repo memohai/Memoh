@@ -44,7 +44,7 @@ CREATE TABLE bot_history_message_compacts (
 `); err != nil {
 		t.Fatalf("create pre-0107 schema: %v", err)
 	}
-	up := readEmbeddedMigration(t, "postgres/migrations/0107_compaction_terminal_status.up.sql")
+	up := readEmbeddedMigration(t, "postgres/migrations/0108_compaction_terminal_status.up.sql")
 	if _, err := tx.Exec(ctx, up); err != nil {
 		t.Fatalf("apply 0107 up: %v", err)
 	}
@@ -78,7 +78,7 @@ UPDATE bot_history_message_compacts SET status = 'ok' WHERE id = $1
 UPDATE bot_history_message_compacts SET status = 'error' WHERE id = $1
 `, okLogID)
 
-	down := readEmbeddedMigration(t, "postgres/migrations/0107_compaction_terminal_status.down.sql")
+	down := readEmbeddedMigration(t, "postgres/migrations/0108_compaction_terminal_status.down.sql")
 	if _, err := tx.Exec(ctx, down); err != nil {
 		t.Fatalf("apply 0107 down: %v", err)
 	}

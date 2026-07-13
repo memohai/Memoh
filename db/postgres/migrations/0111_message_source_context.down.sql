@@ -1,4 +1,4 @@
--- 0110_message_source_context
+-- 0111_message_source_context
 -- Remove dormant message source-context storage and validation.
 
 ALTER TABLE bot_history_messages

@@ -59,7 +59,7 @@ CREATE TABLE bot_history_messages (
 		t.Fatalf("create pre-0113 schema: %v", err)
 	}
 
-	up := readEmbeddedMigration(t, "postgres/migrations/0113_compaction_topology_positions.up.sql")
+	up := readEmbeddedMigration(t, "postgres/migrations/0114_compaction_topology_positions.up.sql")
 	if _, err := tx.Exec(ctx, up); err != nil {
 		t.Fatalf("apply 0113 up: %v", err)
 	}
@@ -134,7 +134,7 @@ INSERT INTO bot_history_message_compact_topology (
 		t.Fatalf("insert compact topology: %v", err)
 	}
 
-	down := readEmbeddedMigration(t, "postgres/migrations/0113_compaction_topology_positions.down.sql")
+	down := readEmbeddedMigration(t, "postgres/migrations/0114_compaction_topology_positions.down.sql")
 	if _, err := tx.Exec(ctx, down); err != nil {
 		t.Fatalf("apply 0113 down: %v", err)
 	}
@@ -301,13 +301,13 @@ INSERT INTO bot_history_message_compact_topology (
 		t.Fatalf("session deletion removed compact log")
 	}
 
-	up := readEmbeddedMigration(t, "postgres/migrations/0113_compaction_topology_positions.up.sql")
+	up := readEmbeddedMigration(t, "postgres/migrations/0114_compaction_topology_positions.up.sql")
 	if _, err := pool.Exec(ctx, up); err != nil {
 		t.Fatalf("reapply 0113 with topology data: %v", err)
 	}
 	assertCommittedTopologyRevision(t, ctx, pool, sessionA, 5)
 
-	down := readEmbeddedMigration(t, "postgres/migrations/0113_compaction_topology_positions.down.sql")
+	down := readEmbeddedMigration(t, "postgres/migrations/0114_compaction_topology_positions.down.sql")
 	if _, err := pool.Exec(ctx, down); err != nil {
 		t.Fatalf("apply 0113 down after data: %v", err)
 	}
@@ -398,7 +398,7 @@ CREATE TABLE bot_history_messages (
 `); err != nil {
 		t.Fatalf("create topology commit fixture: %v", err)
 	}
-	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0113_compaction_topology_positions.up.sql")); err != nil {
+	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0114_compaction_topology_positions.up.sql")); err != nil {
 		t.Fatalf("apply topology commit migration: %v", err)
 	}
 	return pool

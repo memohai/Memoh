@@ -1,4 +1,4 @@
--- 0110_message_source_context
+-- 0111_message_source_context
 -- Add dormant storage for the versioned message-owned source envelope.
 
 ALTER TABLE bot_history_messages

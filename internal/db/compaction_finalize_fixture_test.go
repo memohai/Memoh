@@ -90,8 +90,8 @@ CREATE TABLE bot_history_messages (
 		t.Fatalf("create finalize fixture: %v", err)
 	}
 	for _, migration := range []string{
-		"postgres/migrations/0107_compaction_terminal_status.up.sql",
-		"postgres/migrations/0108_compaction_claim_finalization.up.sql",
+		"postgres/migrations/0108_compaction_terminal_status.up.sql",
+		"postgres/migrations/0109_compaction_claim_finalization.up.sql",
 	} {
 		if _, err := pool.Exec(ctx, readEmbeddedMigration(t, migration)); err != nil {
 			t.Fatalf("apply %s: %v", migration, err)
@@ -132,10 +132,10 @@ EXECUTE FUNCTION bump_history_message_source_revision();
 `); err != nil {
 		t.Fatalf("install source revision fixture: %v", err)
 	}
-	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0112_compaction_claim_invalidation.up.sql")); err != nil {
+	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0113_compaction_claim_invalidation.up.sql")); err != nil {
 		t.Fatalf("apply claim invalidation migration: %v", err)
 	}
-	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0114_compaction_validation_provenance.up.sql")); err != nil {
+	if _, err := pool.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0115_compaction_validation_provenance.up.sql")); err != nil {
 		t.Fatalf("apply validation provenance migration: %v", err)
 	}
 	return pool
