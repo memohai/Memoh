@@ -1869,6 +1869,7 @@
       "pathDescription": "Leave blank for {path}. Enter . for the Runtime root. Bots using the same path share files.",
       "status": "Connection status",
       "unknownComputer": "Unavailable computer",
+      "invalidBindingDescription": "This binding belonged to the previous owner and no longer works. Switch to the Bot’s existing workspace or one of your computers, then save to remove it.",
       "noComputers": "No computers connected",
       "noComputersDescription": "Connect a computer first, then assign it to this Bot here.",
       "nativeWorkspaceSaved": "Switched back to the Bot’s existing workspace",

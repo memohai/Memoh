@@ -1869,6 +1869,7 @@
       "pathDescription": "留空时使用 {path}。填写 . 表示 Runtime 根目录；多个 Bot 使用同一路径会共享文件。",
       "status": "连接状态",
       "unknownComputer": "不可用的电脑",
+      "invalidBindingDescription": "此绑定属于前任所有者，已无法使用。切换到 Bot 原有工作区或你自己的电脑并保存即可移除。",
       "noComputers": "还没有连接电脑",
       "noComputersDescription": "先连接一台电脑，之后就可以在这里分配给当前 Bot。",
       "nativeWorkspaceSaved": "已切换回 Bot 原有工作区",

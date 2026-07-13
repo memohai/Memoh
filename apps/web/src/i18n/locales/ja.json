@@ -1848,6 +1848,7 @@
       "pathDescription": "空欄の場合は {path} を使用します。. は Runtime のルートを表します。同じパスを使う Bot はファイルを共有します。",
       "status": "接続状態",
       "unknownComputer": "利用できないコンピューター",
+      "invalidBindingDescription": "このバインディングは前の所有者のもので、利用できません。Bot の既存ワークスペースまたは自分のコンピューターに切り替えて保存すると削除されます。",
       "noComputers": "接続済みのコンピューターはありません",
       "noComputersDescription": "先にコンピューターを接続すると、ここで現在の Bot に割り当てられます。",
       "nativeWorkspaceSaved": "Bot の既存ワークスペースに戻しました",

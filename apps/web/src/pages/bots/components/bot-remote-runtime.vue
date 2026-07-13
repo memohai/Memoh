@@ -53,6 +53,13 @@
                 {{ t('bots.remoteRuntime.nativeWorkspace') }}
               </SelectItem>
               <SelectItem
+                v-if="staleBinding"
+                :value="staleBindingSource"
+                disabled
+              >
+                {{ staleBindingLabel }}
+              </SelectItem>
+              <SelectItem
                 v-for="runtime in runtimeItems"
                 :key="runtime.id"
                 :value="runtime.id!"
@@ -80,9 +87,9 @@
         </SettingsRow>
 
         <SettingsRow
-          v-if="usesRemoteRuntime"
+          v-if="usesRemoteRuntime || hasInvalidSelection"
           :label="t('bots.remoteRuntime.status')"
-          :description="selectedRuntime?.name || binding?.runtime_name || t('bots.remoteRuntime.unknownComputer')"
+          :description="statusDescription"
         >
           <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span
@@ -144,6 +151,10 @@ const props = defineProps<{
 }>()
 
 const nativeSource = '__native_workspace__'
+// Sentinel for a persisted binding whose runtime_id was redacted by the
+// server (owner_mismatch): it must stay distinct from nativeSource so the
+// invalid state is visible and switching to native counts as a change.
+const invalidBindingSource = '__invalid_binding__'
 const { t } = useI18n()
 const router = useRouter()
 
@@ -198,12 +209,32 @@ const initialLoading = computed(() =>
   bindingLoading.value || (runtimesLoading.value && runtimes.value === undefined),
 )
 const loadFailed = computed(() => bindingLoadFailed.value || (runtimesError.value && runtimes.value === undefined))
-const usesRemoteRuntime = computed(() => selectedSource.value !== nativeSource)
+const usesRemoteRuntime = computed(() =>
+  selectedSource.value !== nativeSource && selectedSource.value !== invalidBindingSource,
+)
+const hasInvalidSelection = computed(() => selectedSource.value === invalidBindingSource)
 const selectedRuntime = computed(() =>
   runtimeItems.value.find(runtime => runtime.id === selectedSource.value),
 )
+// A persisted binding whose runtime is not offered by the runtime list:
+// either redacted by the server (owner_mismatch) or no longer listed
+// (revoked). Rendered as a disabled item so the Select is never blank.
+const staleBinding = computed(() => {
+  const value = binding.value
+  if (!value) return null
+  if (!value.runtime_id) return value
+  return runtimeItems.value.some(runtime => runtime.id === value.runtime_id) ? null : value
+})
+const staleBindingSource = computed(() => staleBinding.value?.runtime_id || invalidBindingSource)
+const staleBindingLabel = computed(() => {
+  const name = staleBinding.value?.runtime_name || t('bots.remoteRuntime.unknownComputer')
+  return `${name} · ${statusLabel(staleBinding.value?.status || 'offline')}`
+})
 const defaultWorkspacePath = computed(() => `bots/${props.botId || '<bot-id>'}`)
-const persistedSource = computed(() => binding.value?.runtime_id || nativeSource)
+const persistedSource = computed(() => {
+  if (!binding.value) return nativeSource
+  return binding.value.runtime_id || invalidBindingSource
+})
 const persistedPath = computed(() => binding.value?.workspace_path || defaultWorkspacePath.value)
 const effectivePath = computed(() => workspacePath.value.trim() || defaultWorkspacePath.value)
 const hasChanges = computed(() => {
@@ -218,12 +249,17 @@ const canSave = computed(() =>
   && (selectedSource.value === nativeSource || !!selectedRuntime.value),
 )
 const effectiveStatus = computed(() => {
+  if (hasInvalidSelection.value) return binding.value?.status || 'owner_mismatch'
   if (!usesRemoteRuntime.value) return 'offline'
   if (binding.value?.runtime_id === selectedSource.value) {
     const status = binding.value.status || 'offline'
     if (status === 'owner_mismatch' || status === 'revoked' || status === 'client_update_required') return status
   }
   return selectedRuntime.value?.online ? 'online' : 'offline'
+})
+const statusDescription = computed(() => {
+  if (hasInvalidSelection.value) return t('bots.remoteRuntime.invalidBindingDescription')
+  return selectedRuntime.value?.name || binding.value?.runtime_name || t('bots.remoteRuntime.unknownComputer')
 })
 
 async function loadBinding(): Promise<void> {
@@ -257,7 +293,7 @@ async function loadBinding(): Promise<void> {
 
 function applyBinding(value: WorkspaceRemoteWorkspaceBinding | null): void {
   binding.value = value
-  selectedSource.value = value?.runtime_id || nativeSource
+  selectedSource.value = value ? (value.runtime_id || invalidBindingSource) : nativeSource
   workspacePath.value = value?.workspace_path || ''
 }
 
