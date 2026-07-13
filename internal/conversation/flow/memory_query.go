@@ -62,7 +62,7 @@ func (r *Resolver) buildMemoryQuery(ctx context.Context, req conversation.ChatRe
 		}
 		return builder.Build(req, nil)
 	}
-	loaded, err = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
+	loaded, err = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded, true)
 	if err != nil {
 		if r.logger != nil {
 			r.logger.Warn("memory query compaction frontier load failed", slog.String("session_id", req.SessionID), slog.Any("error", err))

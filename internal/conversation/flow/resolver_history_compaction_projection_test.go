@@ -57,6 +57,41 @@ func TestReplaceCompactedMessagesLoadsSessionSummaryWithoutRecentRows(t *testing
 	}
 }
 
+func TestReplaceCompactedMessagesDoesNotInsertMissingSummaryAcrossIntentionalCutoff(t *testing.T) {
+	t.Parallel()
+
+	sessionID := "00000000-0000-0000-0000-00000000f014"
+	compactID := "00000000-0000-0000-0000-00000000c014"
+	queries := &recordingCompactionLogQueries{
+		logs: []sqlc.BotHistoryMessageCompact{
+			{
+				ID:        mustPGUUID(t, compactID),
+				SessionID: mustPGUUID(t, sessionID),
+				Status:    "ok",
+				Summary:   "content intentionally excluded by the retry cutoff",
+			},
+		},
+	}
+	resolver := &Resolver{queries: queries}
+	recent := []historyfrag.HistoryRecord{
+		historyRecord("required-user", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("retry")}, nil),
+	}
+
+	got, err := resolver.replaceCompactedMessages(
+		context.Background(),
+		sessionID,
+		contextfrag.Scope{SessionID: sessionID},
+		recent,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("replaceCompactedMessages() error = %v", err)
+	}
+	if len(got) != 1 || got[0].DBMessageID != "required-user" {
+		t.Fatalf("cutoff request reactivated an absent summary: %#v", got)
+	}
+}
+
 func TestReplaceCompactedMessagesLoadsSessionSummaryCoverageFromCompactedRows(t *testing.T) {
 	t.Parallel()
 
@@ -377,6 +412,7 @@ func TestReplaceCompactedMessagesPropagatesFrontierStorageError(t *testing.T) {
 		"00000000-0000-0000-0000-00000000f011",
 		contextfrag.Scope{},
 		[]historyfrag.HistoryRecord{historyRecord("row-current", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("current")}, nil)},
+		true,
 	)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("replaceCompactedMessages error = %v, want %v", err, sentinel)

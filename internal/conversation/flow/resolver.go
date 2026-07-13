@@ -379,7 +379,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			)
 			return resolvedContext{}, loadErr
 		}
-		loaded, loadErr = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
+		loaded, loadErr = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded, strings.TrimSpace(req.HistoryCutoffBeforeMessageID) == "")
 		if loadErr != nil {
 			return resolvedContext{}, loadErr
 		}
@@ -429,7 +429,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 					)
 					return resolvedContext{}, loadErr
 				}
-				loaded, loadErr = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
+				loaded, loadErr = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded, strings.TrimSpace(req.HistoryCutoffBeforeMessageID) == "")
 				if loadErr != nil {
 					return resolvedContext{}, loadErr
 				}

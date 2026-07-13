@@ -56,7 +56,7 @@ func sameModelMessage(a conversation.ModelMessage, b conversation.ModelMessage) 
 		string(a.Content) == string(b.Content)
 }
 
-func (r *Resolver) replaceCompactedMessages(ctx context.Context, sessionID string, scope contextfrag.Scope, messages []historyfrag.HistoryRecord) ([]historyfrag.HistoryRecord, error) {
+func (r *Resolver) replaceCompactedMessages(ctx context.Context, sessionID string, scope contextfrag.Scope, messages []historyfrag.HistoryRecord, includeMissingArtifacts bool) ([]historyfrag.HistoryRecord, error) {
 	if r.queries == nil {
 		return messages, nil
 	}
@@ -84,9 +84,11 @@ func (r *Resolver) replaceCompactedMessages(ctx context.Context, sessionID strin
 		return artifact, ok
 	}
 	messages = replaceCompactedHistoryRecordsWithResolver(messages, scope, resolve)
-	sessionSummaries := summaryRecordsFromArtifacts(missingCompactionArtifacts(messages, frontier.Artifacts, blocked), scope)
-	if len(sessionSummaries) > 0 {
-		messages = mergeMissingCompactionSummaries(messages, sessionSummaries)
+	if includeMissingArtifacts {
+		sessionSummaries := summaryRecordsFromArtifacts(missingCompactionArtifacts(messages, frontier.Artifacts, blocked), scope)
+		if len(sessionSummaries) > 0 {
+			messages = mergeMissingCompactionSummaries(messages, sessionSummaries)
+		}
 	}
 	return r.refreshCompactedSummaryCoverage(ctx, messages, resolve), nil
 }

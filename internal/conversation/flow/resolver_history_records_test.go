@@ -462,7 +462,7 @@ func recordTexts(records []historyfrag.HistoryRecord) []string {
 
 func mustReplaceCompactedMessages(t *testing.T, resolver *Resolver, sessionID string, scope contextfrag.Scope, records []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
 	t.Helper()
-	replaced, err := resolver.replaceCompactedMessages(context.Background(), sessionID, scope, records)
+	replaced, err := resolver.replaceCompactedMessages(context.Background(), sessionID, scope, records, true)
 	if err != nil {
 		t.Fatalf("replaceCompactedMessages: %v", err)
 	}
