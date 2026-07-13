@@ -125,12 +125,14 @@ apply*:
 
 | Table | Applied-state fact | Resolved disposition |
 |---|---|---|
-| `media_assets` | created `0007`, never dropped → **EXISTS** | **normal tenant table** — tenantize in `0106+` |
-| `tasks` | created `0063`, never dropped → **EXISTS** (VARCHAR PK, soft `bot_id`, no FK) | **normal tenant table** — tenantize in `0106+`; add composite PK `(tenant_id, id)` |
+| `media_assets` | created `0007`, never dropped → **EXISTS** | **normal tenant table** — tenantize in `0108+` |
+| `tasks` | created `0063`, never dropped → **EXISTS** (VARCHAR PK, soft `bot_id`, no FK) | **normal tenant table** — tenantize; composite PK `(tenant_id, id)` |
+| `tts_providers`, `tts_models` | created `0029`; `0061` would drop them but **early-returns on fresh DBs** → **EXIST on fresh install** (verified via live `information_schema`) | **normal tenant tables** on the fresh/greenfield path — tenantize |
 | `channel_identity_bind_codes` | in `0001`, **dropped by `0080`** → **DOES NOT EXIST** | **out of scope** — do not tenantize (already gone) |
-| `browser_contexts`, `tts_providers`, `tts_models`, `bot_inbox`, `subagents`, `bot_members`, `bot_preauth_keys`, `email_provider_owner_map` | created & dropped in history → **DO NOT EXIST** | out of scope (already gone) |
+| `browser_contexts`, `bot_inbox`, `subagents`, `bot_members`, `bot_preauth_keys`, `email_provider_owner_map` | created & dropped in history → **DO NOT EXIST** | out of scope (already gone) |
 
-Net: tenantization targets the **49-table applied final state** = canonical 48
-− `channel_identity_bind_codes` + `media_assets` + `tasks`. Downstream tasks must
-enumerate tenant tables by querying the applied schema (e.g. `information_schema`),
-not by reading `0001_init.up.sql`.
+Net: tenantization targets the **51-table applied final state** on a fresh install
+(53 base tables − `schema_migrations` − `tenants` root), enumerated from the live
+`information_schema`, NOT from `0001_init.up.sql` text. Static drop-scans are
+insufficient — `0061`'s guarded early-return means a raw "has a DROP" check
+wrongly excludes the tts pair.

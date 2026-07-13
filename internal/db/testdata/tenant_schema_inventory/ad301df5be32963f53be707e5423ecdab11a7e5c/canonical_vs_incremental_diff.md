@@ -66,6 +66,31 @@ runs the migrate driver over the embedded `*.sql` set (`db/embed.go` embeds
   becomes a `normal tenant table` (PK → `(tenant_id, id)`; the soft `bot_id` reference
   needs same-tenant application validation per §8.5).
 
+## Drift table 4 — `tts_providers` / `tts_models` (PATH-DEPENDENT drift) — CORRECTED
+
+**Correction (verified against a live PostgreSQL 18 full apply):** an earlier
+revision of this doc listed `tts_providers` / `tts_models` as "fully-historical
+(dropped by 0061)". That is **wrong for a fresh install**. The truth is
+path-dependent:
+
+- `0029_tts_provider.up.sql` creates both tables (`CREATE TABLE IF NOT EXISTS`,
+  UUID `id` PK).
+- `0061_unify_providers.up.sql` migrates + drops them, **but its whole DO block
+  early-returns** (`IF NOT EXISTS (… 'llm_providers') THEN RETURN`). On a fresh
+  DB, `0001_init` already ships the unified `providers` schema and there is no
+  `llm_providers`, so `0061` does **nothing** and the tts DROP never runs.
+
+Result:
+- **Fresh install (0001→0105):** `tts_providers` + `tts_models` **survive** →
+  present in the applied final state.
+- **Legacy upgrade (had `llm_providers`):** `0061` runs fully and **drops** them.
+
+Both tables therefore are **normal tenant tables on the fresh/greenfield path**
+and must be tenantized. Because Cloud/self-hosted greenfield installs run the
+fresh path, they are in scope. Tenantization enumerates tables from the applied
+`information_schema`, so it naturally picks them up on whichever path the target
+DB actually took.
+
 ## Drift table 3 — `channel_identity_bind_codes` (REVERSE drift)
 
 - **Created**: canonical `0001_init.up.sql` (line ~414) AND
@@ -97,8 +122,6 @@ churn, listed for completeness and because several carry historical-extra SET NU
 | Table | Created (up) | Dropped (up) | Historical SET NULL it carried |
 |---|---|---|---|
 | `browser_contexts` | `0027_browser_contexts.up.sql` | `0078_drop_browser_gateway.up.sql` | (parent of) `bots.browser_context_id → browser_contexts` |
-| `tts_providers` | `0029_tts_provider.up.sql` | `0061_unify_providers.up.sql` (dynamic `EXECUTE 'DROP …'`) | — |
-| `tts_models` | `0029_tts_provider.up.sql` | `0061_unify_providers.up.sql` (dynamic) | (parent of) `bots.tts_model_id → tts_models` (later retargeted to `models`) |
 | `bot_inbox` | `0011_add_inbox.up.sql` | `0039_drop_inbox.up.sql` | — |
 | `subagents` | (pre-0043; created earlier) | `0043_drop_subagents_add_parent_session.up.sql` | — |
 | `bot_members` | (earlier) | `0031_chat_acl_remove_bot_members.up.sql` | — |
@@ -139,13 +162,15 @@ churn, listed for completeness and because several carry historical-extra SET NU
 | Canonical `ON DELETE SET NULL` | 47 (== oracle) |
 | Historical-extra SET NULL (not in canonical) | 7 |
 | Total distinct SET NULL across history | 54 |
-| Forward-drift tables (in full-apply, not in canonical) | 2 — `media_assets`, `tasks` |
+| Forward-drift tables (in fresh full-apply, not in canonical) | 4 — `media_assets`, `tasks`, `tts_providers`, `tts_models` |
 | Reverse-drift tables (in canonical, dropped by incremental) | 1 — `channel_identity_bind_codes` |
-| Fully-historical tables (never in canonical, dropped in history) | `browser_contexts`, `tts_providers`, `tts_models`, `bot_inbox`, `subagents`, `bot_members`, `bot_preauth_keys`, `email_provider_owner_map`, `_memoh_history_turn_backfill` (transient) |
-| Effective final table set on fresh full-apply | 49 (canonical 48 − `channel_identity_bind_codes` + `media_assets` + `tasks`) |
+| Fully-historical tables (never survive; dropped in history) | `browser_contexts`, `bot_inbox`, `subagents`, `bot_members`, `bot_preauth_keys`, `email_provider_owner_map`, `_memoh_history_turn_backfill` (transient) |
+| Effective tenant tables on a fresh full-apply | **51** (verified via `information_schema`: 53 base tables − `schema_migrations` tooling − `tenants` root); tts pair survives because `0061` early-returns on fresh DBs |
 
-**Action for implementers**: before tenantizing, upstream owners must reconcile these
-three drift points — either re-sync canonical `0001_init.up.sql` to the true final state
-(add `media_assets` + `tasks`, remove `channel_identity_bind_codes` +
-`channel_identities.user_id`), or explicitly document why canonical intentionally differs.
-The tenantization work should target the reconciled final state, not raw canonical.
+**Action for implementers**: the source of truth is the **applied schema**, not
+canonical text (see `BASE.md` migration policy — existing migrations are frozen;
+we do NOT re-sync `0001_init`). Tenantization enumerates tenant tables from the
+live `information_schema` after applying `0001→0107`, so it targets the true
+applied state on whichever path (fresh vs legacy) the DB took. Do not rely on the
+canonical text or on static drop-scans (which miss guarded/early-return blocks
+like `0061`).
