@@ -490,8 +490,8 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 
 	modelUUID := db.ParseUUIDOrEmpty(cfg.ModelID)
 	marked, err := s.queries.MarkMessagesCompacted(persistCtx, sqlc.MarkMessagesCompactedParams{
-		CompactID: logID,
-		Column2:   compactedMessageIDs,
+		CompactID:  logID,
+		MessageIds: compactedMessageIDs,
 	})
 	if err != nil {
 		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)

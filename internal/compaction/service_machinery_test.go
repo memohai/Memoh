@@ -114,11 +114,11 @@ func (f *fakeQueries) ListCompactionArtifactLineageBySession(_ context.Context, 
 }
 
 func (f *fakeQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) (int64, error) {
-	f.markedIDs = append([]pgtype.UUID(nil), arg.Column2...)
+	f.markedIDs = append([]pgtype.UUID(nil), arg.MessageIds...)
 	if f.markedRowCount != nil {
 		return *f.markedRowCount, nil
 	}
-	return int64(len(arg.Column2)), nil
+	return int64(len(arg.MessageIds)), nil
 }
 
 func (f *fakeQueries) CompleteCompactionLog(_ context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {

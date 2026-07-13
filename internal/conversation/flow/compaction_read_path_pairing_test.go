@@ -48,8 +48,8 @@ func (f *pairingQueries) CreateCompactionLog(context.Context, sqlc.CreateCompact
 }
 
 func (f *pairingQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) (int64, error) {
-	f.markedIDs = append([]pgtype.UUID(nil), arg.Column2...)
-	return int64(len(arg.Column2)), nil
+	f.markedIDs = append([]pgtype.UUID(nil), arg.MessageIds...)
+	return int64(len(arg.MessageIds)), nil
 }
 
 func (*pairingQueries) CompleteCompactionLog(_ context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {

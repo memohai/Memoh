@@ -77,7 +77,11 @@ func (q *Queries) CreateChat(ctx context.Context, arg CreateChatParams) (CreateC
 }
 
 const deleteChat = `-- name: DeleteChat :exec
-WITH deleted_messages AS (
+WITH deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts
+  WHERE bot_id = $1
+),
+deleted_messages AS (
   DELETE FROM bot_history_messages
   WHERE bot_id = $1
 ),

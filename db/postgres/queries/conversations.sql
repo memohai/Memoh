@@ -128,7 +128,11 @@ SET updated_at = now()
 WHERE id = sqlc.arg(chat_id);
 
 -- name: DeleteChat :exec
-WITH deleted_messages AS (
+WITH deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts
+  WHERE bot_id = sqlc.arg(chat_id)
+),
+deleted_messages AS (
   DELETE FROM bot_history_messages
   WHERE bot_id = sqlc.arg(chat_id)
 ),

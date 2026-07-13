@@ -23,10 +23,22 @@ SET status = $2,
     anchor_start_ms = $9,
     anchor_end_ms = $10,
     completed_at = now()
-WHERE id = $1
+WHERE bot_history_message_compacts.id = $1
+  AND status = 'pending'
+  AND (
+    $2 <> 'ok'
+    OR session_id IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM bot_sessions owner_session
+      WHERE owner_session.id = bot_history_message_compacts.session_id
+        AND owner_session.bot_id = bot_history_message_compacts.bot_id
+        AND owner_session.compaction_epoch = bot_history_message_compacts.compaction_epoch
+    )
+  )
 RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
           artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
-          superseded_by, superseded_at, started_at, completed_at
+          superseded_by, superseded_at, compaction_epoch, started_at, completed_at
 `
 
 type CompleteCompactionLogParams struct {
@@ -74,6 +86,7 @@ func (q *Queries) CompleteCompactionLog(ctx context.Context, arg CompleteCompact
 		&i.ParentIds,
 		&i.SupersededBy,
 		&i.SupersededAt,
+		&i.CompactionEpoch,
 		&i.StartedAt,
 		&i.CompletedAt,
 	)
@@ -92,11 +105,14 @@ func (q *Queries) CountCompactionLogsByBot(ctx context.Context, botID pgtype.UUI
 }
 
 const createCompactionLog = `-- name: CreateCompactionLog :one
-INSERT INTO bot_history_message_compacts (bot_id, session_id)
-VALUES ($1, $2)
+INSERT INTO bot_history_message_compacts (bot_id, session_id, compaction_epoch)
+SELECT $1, owner_session.id, owner_session.compaction_epoch
+FROM bot_sessions owner_session
+WHERE owner_session.id = $2
+  AND owner_session.bot_id = $1
 RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
           artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
-          superseded_by, superseded_at, started_at, completed_at
+          superseded_by, superseded_at, compaction_epoch, started_at, completed_at
 `
 
 type CreateCompactionLogParams struct {
@@ -125,6 +141,7 @@ func (q *Queries) CreateCompactionLog(ctx context.Context, arg CreateCompactionL
 		&i.ParentIds,
 		&i.SupersededBy,
 		&i.SupersededAt,
+		&i.CompactionEpoch,
 		&i.StartedAt,
 		&i.CompletedAt,
 	)
@@ -143,9 +160,19 @@ func (q *Queries) DeleteCompactionLogsByBot(ctx context.Context, botID pgtype.UU
 const getCompactionLogByID = `-- name: GetCompactionLogByID :one
 SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
        artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
-       superseded_by, superseded_at, started_at, completed_at
-FROM bot_history_message_compacts
-WHERE id = $1
+       superseded_by, superseded_at, compaction_epoch, started_at, completed_at
+FROM bot_history_message_compacts compact
+WHERE compact.id = $1
+  AND (
+    compact.session_id IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM bot_sessions owner_session
+      WHERE owner_session.id = compact.session_id
+        AND owner_session.bot_id = compact.bot_id
+        AND owner_session.compaction_epoch = compact.compaction_epoch
+    )
+  )
 `
 
 func (q *Queries) GetCompactionLogByID(ctx context.Context, id pgtype.UUID) (BotHistoryMessageCompact, error) {
@@ -169,6 +196,7 @@ func (q *Queries) GetCompactionLogByID(ctx context.Context, id pgtype.UUID) (Bot
 		&i.ParentIds,
 		&i.SupersededBy,
 		&i.SupersededAt,
+		&i.CompactionEpoch,
 		&i.StartedAt,
 		&i.CompletedAt,
 	)
@@ -178,12 +206,13 @@ func (q *Queries) GetCompactionLogByID(ctx context.Context, id pgtype.UUID) (Bot
 const listCompactionArtifactLineageBySession = `-- name: ListCompactionArtifactLineageBySession :many
 SELECT c.id, c.bot_id, c.session_id, c.status, c.summary, c.message_count, c.error_message, c.usage, c.model_id,
        c.artifact_version, c.coverage, c.anchor_start_ms, c.anchor_end_ms, c.artifact_level, c.parent_ids,
-       c.superseded_by, c.superseded_at, c.started_at, c.completed_at
+       c.superseded_by, c.superseded_at, c.compaction_epoch, c.started_at, c.completed_at
 FROM bot_history_message_compacts c
 JOIN bot_sessions owner_session
   ON owner_session.id = $1
  AND owner_session.bot_id = c.bot_id
 WHERE c.session_id = owner_session.id
+  AND c.compaction_epoch = owner_session.compaction_epoch
   AND (
     c.status = 'ok'
     OR EXISTS (
@@ -191,6 +220,7 @@ WHERE c.session_id = owner_session.id
       FROM bot_history_message_compacts parent
       WHERE parent.bot_id = owner_session.bot_id
         AND parent.session_id = owner_session.id
+        AND parent.compaction_epoch = owner_session.compaction_epoch
         AND parent.status = 'ok'
         AND parent.superseded_by = c.id
     )
@@ -225,6 +255,7 @@ func (q *Queries) ListCompactionArtifactLineageBySession(ctx context.Context, id
 			&i.ParentIds,
 			&i.SupersededBy,
 			&i.SupersededAt,
+			&i.CompactionEpoch,
 			&i.StartedAt,
 			&i.CompletedAt,
 		); err != nil {
@@ -239,23 +270,35 @@ func (q *Queries) ListCompactionArtifactLineageBySession(ctx context.Context, id
 }
 
 const listCompactionArtifactParentIDsBySuccessor = `-- name: ListCompactionArtifactParentIDsBySuccessor :many
-SELECT id
-FROM bot_history_message_compacts
-WHERE superseded_by = $1
-  AND bot_id = $2
-  AND session_id IS NOT DISTINCT FROM $3::uuid
-  AND status = 'ok'
-ORDER BY id ASC
+SELECT parent.id
+FROM bot_history_message_compacts parent
+JOIN bot_sessions owner_session
+  ON owner_session.id = $1::uuid
+ AND owner_session.bot_id = $2
+WHERE parent.superseded_by = $3
+  AND parent.bot_id = owner_session.bot_id
+  AND parent.session_id = owner_session.id
+  AND parent.compaction_epoch = owner_session.compaction_epoch
+  AND parent.status = 'ok'
+  AND EXISTS (
+    SELECT 1
+    FROM bot_history_message_compacts successor
+    WHERE successor.id = parent.superseded_by
+      AND successor.bot_id = owner_session.bot_id
+      AND successor.session_id = owner_session.id
+      AND successor.compaction_epoch = owner_session.compaction_epoch
+  )
+ORDER BY parent.id ASC
 `
 
 type ListCompactionArtifactParentIDsBySuccessorParams struct {
-	SuccessorID pgtype.UUID `json:"successor_id"`
-	BotID       pgtype.UUID `json:"bot_id"`
 	SessionID   pgtype.UUID `json:"session_id"`
+	BotID       pgtype.UUID `json:"bot_id"`
+	SuccessorID pgtype.UUID `json:"successor_id"`
 }
 
 func (q *Queries) ListCompactionArtifactParentIDsBySuccessor(ctx context.Context, arg ListCompactionArtifactParentIDsBySuccessorParams) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listCompactionArtifactParentIDsBySuccessor, arg.SuccessorID, arg.BotID, arg.SessionID)
+	rows, err := q.db.Query(ctx, listCompactionArtifactParentIDsBySuccessor, arg.SessionID, arg.BotID, arg.SuccessorID)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +320,7 @@ func (q *Queries) ListCompactionArtifactParentIDsBySuccessor(ctx context.Context
 const listCompactionLogsByBot = `-- name: ListCompactionLogsByBot :many
 SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
        artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
-       superseded_by, superseded_at, started_at, completed_at
+       superseded_by, superseded_at, compaction_epoch, started_at, completed_at
 FROM bot_history_message_compacts
 WHERE bot_id = $1
 ORDER BY started_at DESC
@@ -317,6 +360,7 @@ func (q *Queries) ListCompactionLogsByBot(ctx context.Context, arg ListCompactio
 			&i.ParentIds,
 			&i.SupersededBy,
 			&i.SupersededAt,
+			&i.CompactionEpoch,
 			&i.StartedAt,
 			&i.CompletedAt,
 		); err != nil {

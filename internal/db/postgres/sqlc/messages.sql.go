@@ -1684,8 +1684,26 @@ func (q *Queries) DeleteMessagesByBot(ctx context.Context, targetBotID pgtype.UU
 }
 
 const deleteMessagesByIDs = `-- name: DeleteMessagesByIDs :exec
-DELETE FROM bot_history_messages
-WHERE id = ANY($1::uuid[])
+WITH deleted AS (
+  DELETE FROM bot_history_messages
+  WHERE id = ANY($1::uuid[])
+  RETURNING session_id, compact_id
+),
+compaction_epoch_bump AS (
+  UPDATE bot_sessions session
+  SET compaction_epoch = session.compaction_epoch + 1
+  WHERE EXISTS (
+    SELECT 1
+    FROM deleted changed
+    JOIN bot_history_message_compacts compact ON compact.id = changed.compact_id
+    WHERE changed.session_id = session.id
+      AND compact.bot_id = session.bot_id
+      AND compact.session_id = session.id
+      AND compact.compaction_epoch = session.compaction_epoch
+  )
+  RETURNING session.id
+)
+SELECT (SELECT count(*) FROM deleted) + (SELECT count(*) * 0 FROM compaction_epoch_bump)
 `
 
 func (q *Queries) DeleteMessagesByIDs(ctx context.Context, ids []pgtype.UUID) error {
@@ -2253,9 +2271,28 @@ func (q *Queries) GetVisibleMessageCursorByIDBySession(ctx context.Context, arg 
 }
 
 const hideMessagesByHistoryTurn = `-- name: HideMessagesByHistoryTurn :exec
-UPDATE bot_history_messages
-SET turn_visible = false
-WHERE turn_id = $1
+WITH hidden AS (
+  UPDATE bot_history_messages
+  SET turn_visible = false
+  WHERE turn_id = $1
+    AND turn_visible = true
+  RETURNING session_id, compact_id
+),
+compaction_epoch_bump AS (
+  UPDATE bot_sessions session
+  SET compaction_epoch = session.compaction_epoch + 1
+  WHERE EXISTS (
+    SELECT 1
+    FROM hidden changed
+    JOIN bot_history_message_compacts compact ON compact.id = changed.compact_id
+    WHERE changed.session_id = session.id
+      AND compact.bot_id = session.bot_id
+      AND compact.session_id = session.id
+      AND compact.compaction_epoch = session.compaction_epoch
+  )
+  RETURNING session.id
+)
+SELECT (SELECT count(*) FROM hidden) + (SELECT count(*) * 0 FROM compaction_epoch_bump)
 `
 
 func (q *Queries) HideMessagesByHistoryTurn(ctx context.Context, turnID pgtype.UUID) error {
@@ -4400,7 +4437,11 @@ WHERE m.session_id = $1
   -- empty or whitespace-only (the pre-existing poison states).
   AND (m.compact_id IS NULL OR NOT EXISTS (
     SELECT 1 FROM bot_history_message_compacts c
-    WHERE c.id = m.compact_id AND c.status = 'ok'
+    WHERE c.id = m.compact_id
+      AND c.bot_id = m.bot_id
+      AND c.session_id = s.id
+      AND c.compaction_epoch = s.compaction_epoch
+      AND c.status = 'ok'
       AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL
   ))
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
@@ -4769,22 +4810,31 @@ func (q *Queries) LockHistoryTurnAppendByRequest(ctx context.Context, arg LockHi
 }
 
 const markMessagesCompacted = `-- name: MarkMessagesCompacted :execrows
-UPDATE bot_history_messages
-SET compact_id = $1
-WHERE id = ANY($2::uuid[])
-  AND turn_visible = true
-  AND turn_id IS NOT NULL
-  AND turn_position IS NOT NULL
-  AND turn_message_seq IS NOT NULL
+UPDATE bot_history_messages message
+SET compact_id = compact.id
+FROM bot_history_message_compacts compact
+JOIN bot_sessions owner_session
+  ON owner_session.id = compact.session_id
+ AND owner_session.bot_id = compact.bot_id
+ AND owner_session.compaction_epoch = compact.compaction_epoch
+WHERE compact.id = $1
+  AND compact.status = 'pending'
+  AND message.id = ANY($2::uuid[])
+  AND message.bot_id = compact.bot_id
+  AND message.session_id = compact.session_id
+  AND message.turn_visible = true
+  AND message.turn_id IS NOT NULL
+  AND message.turn_position IS NOT NULL
+  AND message.turn_message_seq IS NOT NULL
 `
 
 type MarkMessagesCompactedParams struct {
-	CompactID pgtype.UUID   `json:"compact_id"`
-	Column2   []pgtype.UUID `json:"column_2"`
+	CompactID  pgtype.UUID   `json:"compact_id"`
+	MessageIds []pgtype.UUID `json:"message_ids"`
 }
 
 func (q *Queries) MarkMessagesCompacted(ctx context.Context, arg MarkMessagesCompactedParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markMessagesCompacted, arg.CompactID, arg.Column2)
+	result, err := q.db.Exec(ctx, markMessagesCompacted, arg.CompactID, arg.MessageIds)
 	if err != nil {
 		return 0, err
 	}
@@ -4875,9 +4925,32 @@ replacement_input AS (
       )
     )
 ),
+affected_compaction_sessions AS MATERIALIZED (
+  SELECT DISTINCT old.session_id
+  FROM bot_history_messages old
+  JOIN replacement_input ON replacement_input.session_id = old.session_id
+  JOIN bot_history_message_compacts compact ON compact.id = old.compact_id
+  JOIN bot_sessions session ON session.id = old.session_id
+  WHERE old.turn_id = $1
+    AND old.session_id = $2
+    AND old.turn_superseded_at IS NULL
+    AND old.id IS DISTINCT FROM replacement_input.replacement_request_message_id
+    AND old.id IS DISTINCT FROM replacement_input.replacement_assistant_message_id
+    AND compact.bot_id = session.bot_id
+    AND compact.session_id = session.id
+    AND compact.compaction_epoch = session.compaction_epoch
+),
 next_position AS (
   UPDATE bot_sessions s
-  SET next_turn_position = next_turn_position + 1
+  SET next_turn_position = next_turn_position + 1,
+      compaction_epoch = compaction_epoch + CASE
+        WHEN EXISTS (
+          SELECT 1
+          FROM affected_compaction_sessions affected
+          WHERE affected.session_id = s.id
+        ) THEN 1
+        ELSE 0
+      END
   FROM replacement_input
   WHERE s.id = replacement_input.session_id
   RETURNING s.next_turn_position - 1 AS position
@@ -4910,7 +4983,7 @@ updated AS (
     AND old.turn_superseded_at IS NULL
     AND old.id IS DISTINCT FROM replacement.request_message_id
     AND old.id IS DISTINCT FROM replacement.assistant_message_id
-  RETURNING old.turn_id
+  RETURNING old.turn_id, old.session_id, old.compact_id
 ),
 updated_turn AS (
   SELECT DISTINCT turn_id AS id FROM updated
@@ -5168,7 +5241,25 @@ WITH updated AS (
     m.turn_superseded_by_turn_id,
     m.turn_superseded_at,
     m.turn_superseded_reason,
+    m.compact_id,
     m.created_at
+),
+compaction_epoch_bump AS (
+  UPDATE bot_sessions session
+  SET compaction_epoch = session.compaction_epoch + 1
+  WHERE EXISTS (
+    SELECT 1
+    FROM updated changed
+    JOIN bot_history_message_compacts compact ON compact.id = changed.compact_id
+    WHERE changed.session_id = session.id
+      AND compact.bot_id = changed.bot_id
+      AND compact.session_id = session.id
+      AND compact.compaction_epoch = session.compaction_epoch
+  )
+  RETURNING session.id
+),
+compaction_epoch_done AS (
+  SELECT COUNT(*) AS count FROM compaction_epoch_bump
 )
 SELECT
   updated.turn_id AS id,
@@ -5183,6 +5274,7 @@ SELECT
   MIN(updated.created_at)::timestamptz AS created_at,
   COALESCE(MAX(updated.turn_superseded_at), MAX(updated.created_at))::timestamptz AS updated_at
 FROM updated
+CROSS JOIN compaction_epoch_done
 GROUP BY updated.turn_id, updated.session_id, updated.turn_position
 `
 

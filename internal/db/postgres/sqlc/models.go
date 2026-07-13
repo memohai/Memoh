@@ -197,6 +197,7 @@ type BotHistoryMessageCompact struct {
 	ParentIds       []pgtype.UUID      `json:"parent_ids"`
 	SupersededBy    pgtype.UUID        `json:"superseded_by"`
 	SupersededAt    pgtype.Timestamptz `json:"superseded_at"`
+	CompactionEpoch int64              `json:"compaction_epoch"`
 	StartedAt       pgtype.Timestamptz `json:"started_at"`
 	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
 }
@@ -240,6 +241,7 @@ type BotSession struct {
 	Title            string             `json:"title"`
 	Metadata         []byte             `json:"metadata"`
 	NextTurnPosition int64              `json:"next_turn_position"`
+	CompactionEpoch  int64              `json:"compaction_epoch"`
 	ParentSessionID  pgtype.UUID        `json:"parent_session_id"`
 	CreatedByUserID  pgtype.UUID        `json:"created_by_user_id"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`

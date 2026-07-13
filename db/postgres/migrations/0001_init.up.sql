@@ -458,6 +458,7 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   title TEXT NOT NULL DEFAULT '',
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   next_turn_position BIGINT NOT NULL DEFAULT 1,
+  compaction_epoch BIGINT NOT NULL DEFAULT 0,
   parent_session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
   created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -850,10 +851,12 @@ CREATE TABLE IF NOT EXISTS bot_history_message_compacts (
   parent_ids UUID[] NOT NULL DEFAULT '{}'::uuid[],
   superseded_by UUID REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL,
   superseded_at TIMESTAMPTZ,
+  compaction_epoch BIGINT NOT NULL DEFAULT 0,
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   completed_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_compacts_bot_session ON bot_history_message_compacts(bot_id, session_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_compacts_owner_epoch ON bot_history_message_compacts(bot_id, session_id, compaction_epoch, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_compacts_active_session ON bot_history_message_compacts(session_id, anchor_start_ms, started_at) WHERE status = 'ok' AND superseded_at IS NULL;
 
 ALTER TABLE bot_history_messages ADD CONSTRAINT fk_compact_id FOREIGN KEY (compact_id) REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL;
