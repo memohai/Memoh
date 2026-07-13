@@ -30,24 +30,17 @@ const (
 type RuntimeConnectHandler struct {
 	log     *slog.Logger
 	service *userruntime.Service
-	hub     *userruntime.Hub
 	pipe    userruntime.Pipe
-
-	transportTimeout  time.Duration
-	activationTimeout time.Duration
 }
 
-func NewRuntimeConnectHandler(log *slog.Logger, service *userruntime.Service, hub *userruntime.Hub, pipe userruntime.Pipe) *RuntimeConnectHandler {
+func NewRuntimeConnectHandler(log *slog.Logger, service *userruntime.Service, pipe userruntime.Pipe) *RuntimeConnectHandler {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &RuntimeConnectHandler{
-		log:               log.With(slog.String("handler", "runtime_connect")),
-		service:           service,
-		hub:               hub,
-		pipe:              pipe,
-		transportTimeout:  runtimeReadinessTimeout,
-		activationTimeout: runtimeActivationTimeout,
+		log:     log.With(slog.String("handler", "runtime_connect")),
+		service: service,
+		pipe:    pipe,
 	}
 }
 
@@ -93,12 +86,8 @@ func (h *RuntimeConnectHandler) Connect(c echo.Context) error {
 		cancelLifetime()
 		_ = conn.CloseNow()
 	}()
-	transportTimeout := h.transportTimeout
-	if transportTimeout <= 0 {
-		transportTimeout = runtimeReadinessTimeout
-	}
-	transportCtx, cancelTransport := context.WithTimeout(ctx, transportTimeout)
-	grpcConn, err := h.pipe.ClientConn(transportCtx, netConn, runtime.ID)
+	transportCtx, cancelTransport := context.WithTimeout(ctx, runtimeReadinessTimeout)
+	grpcConn, err := h.pipe.ClientConn(transportCtx, netConn)
 	cancelTransport()
 	if err != nil {
 		h.log.Warn("create runtime transport failed", slog.String("runtime_id", runtime.ID), slog.Any("error", err))
@@ -122,11 +111,7 @@ func (h *RuntimeConnectHandler) Connect(c echo.Context) error {
 		h.log.Warn("runtime readiness probe failed", slog.String("runtime_id", runtime.ID), slog.Any("error", err))
 		return nil
 	}
-	activationTimeout := h.activationTimeout
-	if activationTimeout <= 0 {
-		activationTimeout = runtimeActivationTimeout
-	}
-	activationCtx, cancelActivation := context.WithTimeout(ctx, activationTimeout)
+	activationCtx, cancelActivation := context.WithTimeout(ctx, runtimeActivationTimeout)
 	transportLost := make(chan connectivity.State, 1)
 	transportGuard := newRuntimeTransportCommitGuard(grpcConn, cancelActivation)
 	// Start observing immediately after readiness. Persistence may block, and a
@@ -147,7 +132,7 @@ func (h *RuntimeConnectHandler) Connect(c echo.Context) error {
 		return nil
 	}
 	disconnectReason := "runtime connection closed"
-	defer func() { h.hub.Unregister(runtime.ID, connection, disconnectReason) }()
+	defer func() { h.service.DeactivateConnection(runtime.ID, connection, disconnectReason) }()
 
 	ticker := time.NewTicker(25 * time.Second)
 	defer ticker.Stop()

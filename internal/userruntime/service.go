@@ -3,7 +3,6 @@ package userruntime
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -21,18 +20,13 @@ type ConnectionCommitGuard func() error
 // Service owns the small persistent credential registry and the in-memory
 // reverse-RPC connections. Bot/session routing belongs outside this package.
 type Service struct {
-	log            *slog.Logger
 	store          dbstore.UserRuntimeStore
 	hub            *Hub
 	lifecycleLocks *runtimeLifecycleLocks
 }
 
-func NewService(log *slog.Logger, store dbstore.UserRuntimeStore, hub *Hub) *Service {
-	if log == nil {
-		log = slog.Default()
-	}
+func NewService(store dbstore.UserRuntimeStore, hub *Hub) *Service {
 	return &Service{
-		log:            log.With(slog.String("component", "user_runtime")),
 		store:          store,
 		hub:            hub,
 		lifecycleLocks: newRuntimeLifecycleLocks(),
@@ -160,12 +154,19 @@ func (s *Service) ActivateConnection(ctx context.Context, key, runtimeID string,
 		ClientVersion: info.ClientVersion,
 		Capabilities:  append([]string(nil), info.Capabilities...),
 	}
-	return s.hub.RegisterGuarded(connection, func() error {
+	return s.hub.registerGuarded(connection, func() error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		return guard()
 	})
+}
+
+func (s *Service) DeactivateConnection(runtimeID string, connection *Connection, reason string) {
+	if s == nil || s.hub == nil {
+		return
+	}
+	s.hub.unregister(runtimeID, connection, reason)
 }
 
 func (s *Service) Connection(runtimeID string) (*Connection, bool) {

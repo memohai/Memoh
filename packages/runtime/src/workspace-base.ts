@@ -9,7 +9,6 @@ export interface WorkspaceBaseSelection {
   serverUrl: string
   key: string
   workspaceBase?: string
-  legacyWorkspaceRoot?: string
   homeDirectory?: string
 }
 
@@ -28,7 +27,7 @@ export function managedWorkspaceBase(
 }
 
 export function selectWorkspaceBase(selection: WorkspaceBaseSelection): string {
-  const explicit = selection.workspaceBase ?? selection.legacyWorkspaceRoot
+  const explicit = selection.workspaceBase
   if (explicit?.trim()) {
     return resolve(explicit.trim())
   }

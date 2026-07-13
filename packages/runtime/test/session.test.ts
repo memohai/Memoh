@@ -62,7 +62,7 @@ describe('runtime handshake', () => {
       os: 'win32',
       arch: 'x64',
     })
-    expect(windowsMetadata.capabilities).toContain('exec')
+    expect(windowsMetadata.workspace_base).toBe(String.raw`C:\Users\alice\Memoh`)
   })
 
   it('allows plaintext only for an explicitly enabled loopback target', () => {

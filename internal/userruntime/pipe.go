@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strings"
 	"sync"
 
 	"google.golang.org/grpc"
@@ -23,7 +22,7 @@ var (
 )
 
 type Pipe interface {
-	ClientConn(ctx context.Context, conn net.Conn, runtimeID string) (*grpc.ClientConn, error)
+	ClientConn(ctx context.Context, conn net.Conn) (*grpc.ClientConn, error)
 }
 
 // DirectPipe runs a single gRPC h2c client connection directly over the byte
@@ -40,18 +39,13 @@ func NewDirectPipe() *DirectPipe {
 	return &DirectPipe{}
 }
 
-func (*DirectPipe) ClientConn(ctx context.Context, conn net.Conn, runtimeID string) (*grpc.ClientConn, error) {
+func (*DirectPipe) ClientConn(ctx context.Context, conn net.Conn) (*grpc.ClientConn, error) {
 	if conn == nil {
 		return nil, ErrInvalidPipeConnection
 	}
 	if ctx == nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("%w: context is required", ErrInvalidPipeConnection)
-	}
-	runtimeID = strings.TrimSpace(runtimeID)
-	if runtimeID == "" {
-		_ = conn.Close()
-		return nil, fmt.Errorf("%w: runtime ID is required", ErrInvalidPipeConnection)
 	}
 	if err := ctx.Err(); err != nil {
 		_ = conn.Close()

@@ -46,7 +46,7 @@ export function runtimeConnectUrl(serverUrl: string): URL {
     url.protocol = 'wss:'
   }
   const basePath = url.pathname.replace(/\/+$/, '')
-  url.pathname = `${basePath}/runtimes/connect` || '/runtimes/connect'
+  url.pathname = `${basePath}/runtimes/connect`
   url.search = ''
   url.hash = ''
   return url

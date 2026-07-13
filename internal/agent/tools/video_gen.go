@@ -332,9 +332,6 @@ func (p *VideoGenProvider) saveGeneratedVideo(ctx context.Context, botID, taskID
 	if clientErr != nil {
 		return result, "Video generated but workspace is not reachable, so it was not saved to disk."
 	}
-	if _, err := client.Exec(ctx, fmt.Sprintf("mkdir -p %s", shellQuote(videoDir)), "/", 5); err != nil {
-		return result, fmt.Sprintf("Video generated but failed to prepare output directory: %s", err.Error())
-	}
 	if writeErr := client.WriteFile(ctx, containerPath, data); writeErr != nil {
 		return result, fmt.Sprintf("Video generated but failed to save: %s", writeErr.Error())
 	}

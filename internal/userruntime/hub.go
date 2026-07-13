@@ -68,17 +68,11 @@ func NewHub(log *slog.Logger) *Hub {
 	}
 }
 
-// Register atomically publishes an already-ready connection, then closes the
-// superseded generation outside the Hub lock.
-func (h *Hub) Register(connection *Connection) {
-	_ = h.RegisterGuarded(connection, nil)
-}
-
-// RegisterGuarded atomically checks an already-ready connection at the exact
+// registerGuarded atomically checks an already-ready connection at the exact
 // publication boundary. The guard runs while the Hub lock is held, so an
 // observed transport loss cannot race between the final check and replacing a
 // healthy generation.
-func (h *Hub) RegisterGuarded(connection *Connection, guard func() error) error {
+func (h *Hub) registerGuarded(connection *Connection, guard func() error) error {
 	if h == nil || connection == nil || connection.RuntimeID == "" || connection.ConnectionID == "" || connection.Client == nil {
 		return errors.New("invalid runtime connection")
 	}
@@ -135,8 +129,8 @@ func (h *Hub) Kick(runtimeID string, reason string) {
 	}
 }
 
-// Unregister removes only the exact generation owned by the exiting handler.
-func (h *Hub) Unregister(runtimeID string, connection *Connection, reason string) {
+// unregister removes only the exact generation owned by the exiting handler.
+func (h *Hub) unregister(runtimeID string, connection *Connection, reason string) {
 	if h == nil || runtimeID == "" || connection == nil {
 		return
 	}

@@ -39,17 +39,13 @@ describe('managed workspace base', () => {
     expect(managedWorkspaceBase('https://example.test/other', firstKey, home)).not.toBe(first)
   })
 
-  it('prefers explicit and legacy overrides over the managed default', async () => {
+  it('prefers an explicit override over the managed default', async () => {
     const home = await temporaryRoot()
     const explicit = join(home, 'explicit')
-    const legacy = join(home, 'legacy')
 
     expect(selectWorkspaceBase({
-      serverUrl: 'https://example.test', key: firstKey, workspaceBase: explicit, legacyWorkspaceRoot: legacy,
+      serverUrl: 'https://example.test', key: firstKey, workspaceBase: explicit,
     })).toBe(explicit)
-    expect(selectWorkspaceBase({
-      serverUrl: 'https://example.test', key: firstKey, legacyWorkspaceRoot: legacy,
-    })).toBe(legacy)
     expect(selectWorkspaceBase({
       serverUrl: 'https://example.test', key: firstKey, homeDirectory: home,
     })).toBe(managedWorkspaceBase('https://example.test', firstKey, home))

@@ -60,8 +60,8 @@ func (*runtimeConnectTestService) Stat(_ context.Context, req *pb.StatRequest) (
 func TestRuntimeConnectActivatesReadyConnectionAndUnregistersDisconnect(t *testing.T) {
 	store := newRuntimeConnectTestStore()
 	hub := userruntime.NewHub(nil)
-	service := userruntime.NewService(nil, store, hub)
-	handler := NewRuntimeConnectHandler(nil, service, hub, userruntime.NewDirectPipe())
+	service := userruntime.NewService(store, hub)
+	handler := NewRuntimeConnectHandler(nil, service, userruntime.NewDirectPipe())
 	e := echo.New()
 	handler.Register(e)
 	httpServer := httptest.NewServer(e)

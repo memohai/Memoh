@@ -28,7 +28,9 @@ func TestHubReplacesOnlyAfterNewConnectionIsRegistered(t *testing.T) {
 		Client:       testBridgeClient(t),
 		Close:        func(string) { oldClosed.Add(1) },
 	}
-	hub.Register(old)
+	if err := hub.registerGuarded(old, nil); err != nil {
+		t.Fatalf("register old connection: %v", err)
+	}
 
 	var newClosed atomic.Int32
 	current := &Connection{
@@ -37,7 +39,9 @@ func TestHubReplacesOnlyAfterNewConnectionIsRegistered(t *testing.T) {
 		Client:       testBridgeClient(t),
 		Close:        func(string) { newClosed.Add(1) },
 	}
-	hub.Register(current)
+	if err := hub.registerGuarded(current, nil); err != nil {
+		t.Fatalf("register current connection: %v", err)
+	}
 	if oldClosed.Load() != 1 {
 		t.Fatal("replacement returned before canceling the old connection")
 	}
@@ -46,7 +50,7 @@ func TestHubReplacesOnlyAfterNewConnectionIsRegistered(t *testing.T) {
 	}
 
 	// The superseded handler can exit later without deleting the replacement.
-	hub.Unregister("runtime-1", old, "old handler exited")
+	hub.unregister("runtime-1", old, "old handler exited")
 	if got, ok := hub.Get("runtime-1"); !ok || got != current {
 		t.Fatalf("old unregister removed current connection")
 	}
@@ -70,12 +74,14 @@ func TestHubShutdownRemovesAndClosesAllConnections(t *testing.T) {
 	hub := NewHub(nil)
 	var closed atomic.Int32
 	for index, runtimeID := range []string{"runtime-1", "runtime-2"} {
-		hub.Register(&Connection{
+		if err := hub.registerGuarded(&Connection{
 			RuntimeID:    runtimeID,
 			ConnectionID: fmt.Sprintf("connection-%d", index),
 			Client:       testBridgeClient(t),
 			Close:        func(string) { closed.Add(1) },
-		})
+		}, nil); err != nil {
+			t.Fatalf("register connection: %v", err)
+		}
 	}
 	if err := hub.Shutdown(context.Background()); err != nil {
 		t.Fatalf("Shutdown() error = %v", err)
@@ -95,7 +101,7 @@ func TestHubShutdownRemovesAndClosesAllConnections(t *testing.T) {
 		Client:       testBridgeClient(t),
 		Close:        func(string) { closed.Add(1) },
 	}
-	hub.Register(late)
+	_ = hub.registerGuarded(late, nil)
 	if closed.Load() != 3 {
 		t.Fatal("late registration was not closed synchronously")
 	}

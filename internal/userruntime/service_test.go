@@ -66,7 +66,7 @@ func (s *serviceTestStore) RevokeUserRuntime(_ context.Context, runtimeID, userI
 func TestServiceRegistrationConnectionAndRevoke(t *testing.T) {
 	store := &serviceTestStore{}
 	hub := NewHub(nil)
-	service := NewService(nil, store, hub)
+	service := NewService(store, hub)
 	created, err := service.CreateRuntime(context.Background(), "user-1", CreateRuntimeRequest{Name: "Workstation"})
 	if err != nil {
 		t.Fatalf("CreateRuntime() error = %v", err)

@@ -224,11 +224,6 @@ func (p *ImageGenProvider) execGenerateImage(ctx context.Context, session Sessio
 		return p.unsavedImageResult(session, toolCallID, image, "Image generated, but the workspace is not reachable, so the file was not saved"), nil
 	}
 
-	// Best-effort mkdir: a transient exec failure must not block saving when the
-	// directory already exists — WriteFile below is the authoritative check.
-	mkdirCmd := fmt.Sprintf("mkdir -p %s", shellQuote(imageDir))
-	_, _ = client.Exec(ctx, mkdirCmd, "/", 5)
-
 	if writeErr := client.WriteFile(ctx, containerPath, imgBytes); writeErr != nil {
 		return p.unsavedImageResult(session, toolCallID, image, fmt.Sprintf("Image generated (failed to save: %s)", writeErr.Error())), nil
 	}

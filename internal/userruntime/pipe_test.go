@@ -51,7 +51,7 @@ func TestDirectPipeWebSocketRoundTripAndDisconnect(t *testing.T) {
 		ws.SetReadLimit(RuntimeGRPCMessageLimit)
 
 		readyCtx, cancelReady := context.WithTimeout(r.Context(), 2*time.Second)
-		conn, err := NewDirectPipe().ClientConn(readyCtx, stream, "runtime-test")
+		conn, err := NewDirectPipe().ClientConn(readyCtx, stream)
 		cancelReady()
 		if err != nil {
 			roundTrip <- result{err: err}

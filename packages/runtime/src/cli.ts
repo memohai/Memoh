@@ -16,7 +16,6 @@ async function main(args: string[]): Promise<void> {
     serverUrl,
     key,
     workspaceBase: valueAfter(args, '--workspace-base'),
-    legacyWorkspaceRoot: valueAfter(args, '--workspace-root'),
   })
   const controller = new AbortController()
   const stop = () => controller.abort()
@@ -54,7 +53,6 @@ function valueAfter(args: string[], name: string): string | undefined {
 
 function usage(exitCode: number): never {
   console.error('Usage: memoh-runtime --server <url> --key <key> [--workspace-base <path>] [--insecure-localhost]')
-  console.error('       --workspace-root remains available as a legacy alias for --workspace-base')
   process.exit(exitCode)
 }
 

@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest'
 import {
   assertSafeEnvironmentName,
   inheritedEnvironment,
-  runtimeCapabilities,
 } from '../src/core/guards'
 
 describe('runtime guards', () => {
@@ -97,6 +96,5 @@ describe('runtime guards', () => {
     })
     expect(environment).not.toHaveProperty('MEMOH_RUNTIME_KEY')
     expect(environment).not.toHaveProperty('GITHUB_TOKEN')
-    expect(runtimeCapabilities()).toContain('exec')
   })
 })
