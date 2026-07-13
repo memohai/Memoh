@@ -101,6 +101,12 @@ curl -sN -X POST "$HOST/bots/$BOT/container/display/prepare" \
 
 ## 已知坑（试点审查沉淀）
 
+- **迁移一个 handler 时列全它的错误出口再动手**（`grep -n 'NewHTTPError\|sendError'
+  该文件`，别用 head 截断）。端点级迁移最容易漏"操作中途"的出口：
+  `getGRPCClient` 成功不等于 workspace 可用——连接池缓存的 client 会在首次调用
+  （Mkdir/WriteFile）才失败，这些 per-op 错误若还是 `fmt.Sprintf("%v", err)`
+  就把 unix socket 路径泄给用户（skills.go 迁移时实测抓到的真实泄漏）。
+  bridge 操作错误一律走 `fsHTTPError` 分类，不要手写 500。
 - `apperror.Error` **刻意不实现 `Unwrap`**：`errors.Is(err, cause)` 穿不透，取 cause 用
   `apperror.CauseOf`。这是防止基础设施错误变成 API 契约，不是疏漏，别"修"它。
 - Problem 的 `detail` 英文文案与前端 `en.json` 是双源，改文案要两边同步
