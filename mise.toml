@@ -56,6 +56,11 @@ depends = [
   "//:swagger-generate"
 ]
 
+[tasks.runtime-contract-fixtures]
+description = "Regenerate the committed session runtime contract fixtures"
+env = { UPDATE_RUNTIME_CONTRACT_FIXTURES = "1" }
+run = "go test ./internal/handlers -run 'ContractFixtureIsCurrent$' -count=1"
+
 [tasks.sqlc-generate]
 description = "Generate SQL code"
 run = "sqlc generate"

@@ -379,6 +379,7 @@ type localChannelSessionAuthQueries struct {
 	chat             sqlc.GetChatByIDRow
 	session          sqlc.BotSession
 	grants           []sqlc.ListBotUserGrantsForUserRow
+	listGrants       func(context.Context, sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error)
 	createSession    func(context.Context, sqlc.CreateSessionParams) (sqlc.BotSession, error)
 	getSessionByID   func(context.Context, pgtype.UUID) (sqlc.BotSession, error)
 	setActiveSession func(context.Context, sqlc.SetRouteActiveSessionParams) error
@@ -413,7 +414,10 @@ func (q localChannelSessionAuthQueries) GetChatByID(_ context.Context, _ pgtype.
 	return q.chat, nil
 }
 
-func (q localChannelSessionAuthQueries) ListBotUserGrantsForUser(_ context.Context, _ sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
+func (q localChannelSessionAuthQueries) ListBotUserGrantsForUser(ctx context.Context, params sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
+	if q.listGrants != nil {
+		return q.listGrants(ctx, params)
+	}
 	return q.grants, nil
 }
 

@@ -10,6 +10,7 @@ on:
       - ".golangci.yml"
       - "db/postgres/queries/**/*.sql"
       - "db/postgres/migrations/**/*.sql"
+      - "apps/web/src/store/__fixtures__/runtime-*.contract.json"
       - ".github/workflows/go-ci.yml"
   pull_request:
     branches: ["main"]
@@ -20,6 +21,7 @@ on:
       - ".golangci.yml"
       - "db/postgres/queries/**/*.sql"
       - "db/postgres/migrations/**/*.sql"
+      - "apps/web/src/store/__fixtures__/runtime-*.contract.json"
       - ".github/workflows/go-ci.yml"
   workflow_dispatch:
 
@@ -103,7 +105,13 @@ jobs:
           MEMOH_TEST_DISTRIBUTED_REQUIRED: "1"
           RUNTIME_URL: redis://127.0.0.1:${{ job.services.runtime.ports['6379'] }}/0
           RUNTIME_ENV_NAME: ${{ matrix.env_name }}
-        run: env "$RUNTIME_ENV_NAME=$RUNTIME_URL" go test -v -race -count=1 -timeout 90s ./internal/sessionruntime
+        run: |
+          env "$RUNTIME_ENV_NAME=$RUNTIME_URL" \
+            go test -v -race -count=1 -timeout 90s \
+            ./internal/sessionruntime ./internal/handlers ./cmd/agent
+          env "$RUNTIME_ENV_NAME=$RUNTIME_URL" \
+            go test -v -race -count=1 -timeout 90s \
+            -run '^TestACPWorkspaceEffectsRejectStaleRedisOwner$' ./internal/acpclient
 
   session-runtime-postgres:
     name: Session Runtime (PostgreSQL fencing)
@@ -123,6 +131,15 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      valkey:
+        image: valkey/valkey:8-alpine
+        ports:
+          - 6379/tcp
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -132,6 +149,8 @@ jobs:
       - name: Run durable runtime fencing contracts
         env:
           MEMOH_TEST_POSTGRES_REQUIRED: "1"
+          MEMOH_TEST_CROSS_BACKEND_REQUIRED: "1"
+          MEMOH_TEST_VALKEY_URL: redis://127.0.0.1:${{ job.services.valkey.ports['6379'] }}/0
           TEST_POSTGRES_BOOTSTRAP_SCHEMA: "1"
           TEST_POSTGRES_DSN: postgres://postgres:postgres@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/memoh_runtime_test?sslmode=disable
         run: |
@@ -139,5 +158,7 @@ jobs:
             -run '^TestPostgresRuntimeFence' ./internal/runtimefence
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
             -run '^TestPostgresRuntimeFence' ./internal/message
+          TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
+            -run '^TestPostgresRuntimeFence' ./internal/sessionruntime
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
             -run '^TestPostgresRuntimeFence' ./internal/acpagent

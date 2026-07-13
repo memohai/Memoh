@@ -1,0 +1,63 @@
+{
+  "version": 2,
+  "retry_snapshot": {
+    "bot_id": "bot-1",
+    "epoch": "epoch-runtime-contract-v1",
+    "seq": 2,
+    "session_id": "session-1",
+    "snapshot": {
+      "bot_id": "bot-1",
+      "current_run_view": {
+        "generation": "generation-stream-retry-operation",
+        "messages": [],
+        "operation": {
+          "kind": "retry",
+          "replace_from_message_id": "assistant-old"
+        },
+        "started_at": "2026-07-10T00:00:00Z",
+        "status": "running",
+        "stream_id": "stream-retry-operation",
+        "updated_at": "2026-07-10T00:00:00Z"
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "queue": [],
+      "seq": 2,
+      "session_id": "session-1",
+      "updated_at": "2026-07-10T00:00:00Z"
+    },
+    "type": "runtime_snapshot"
+  },
+  "edit_snapshot": {
+    "bot_id": "bot-1",
+    "epoch": "epoch-runtime-contract-v1",
+    "seq": 2,
+    "session_id": "session-1",
+    "snapshot": {
+      "bot_id": "bot-1",
+      "current_run_view": {
+        "generation": "generation-stream-edit-operation",
+        "messages": [],
+        "operation": {
+          "kind": "edit",
+          "replace_from_message_id": "user-old",
+          "replacement_user_turn": {
+            "platform": "local",
+            "role": "user",
+            "text": "edited prompt",
+            "timestamp": "2026-07-10T00:00:00Z"
+          }
+        },
+        "started_at": "2026-07-10T00:00:00Z",
+        "status": "running",
+        "stream_id": "stream-edit-operation",
+        "updated_at": "2026-07-10T00:00:00Z"
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "queue": [],
+      "seq": 2,
+      "session_id": "session-1",
+      "updated_at": "2026-07-10T00:00:00Z"
+    },
+    "type": "runtime_snapshot"
+  }
+}

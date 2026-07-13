@@ -1,0 +1,140 @@
+{
+  "version": 4,
+  "scenario": "interrupted_run",
+  "runtime_snapshot": {
+    "bot_id": "bot-1",
+    "epoch": "epoch-runtime-contract-v1",
+    "seq": 5,
+    "session_id": "session-1",
+    "snapshot": {
+      "bot_id": "bot-1",
+      "current_run_view": {
+        "error": "runtime interrupted",
+        "generation": "generation-stream-interrupted",
+        "messages": [
+          {
+            "content": "partial output",
+            "id": 0,
+            "type": "text"
+          }
+        ],
+        "request_user_turn": {
+          "attachments": [
+            {
+              "content_hash": "sha256:notes",
+              "name": "notes.txt",
+              "type": "file"
+            }
+          ],
+          "external_message_id": "stream-interrupted",
+          "platform": "local",
+          "role": "user",
+          "sender_user_id": "user-1",
+          "text": "Inspect the workspace",
+          "timestamp": "2026-07-10T00:00:00Z"
+        },
+        "started_at": "2026-07-10T00:00:00Z",
+        "status": "errored",
+        "stream_id": "stream-interrupted",
+        "updated_at": "2026-07-10T00:00:10Z"
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "queue": [],
+      "seq": 5,
+      "session_id": "session-1",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    "type": "runtime_snapshot"
+  },
+  "runtime_stream": [
+    {
+      "bot_id": "bot-1",
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 2,
+      "session_id": "session-1",
+      "snapshot": {
+        "bot_id": "bot-1",
+        "current_run_view": {
+          "generation": "generation-stream-interrupted",
+          "messages": [],
+          "request_user_turn": {
+            "attachments": [
+              {
+                "content_hash": "sha256:notes",
+                "name": "notes.txt",
+                "type": "file"
+              }
+            ],
+            "external_message_id": "stream-interrupted",
+            "platform": "local",
+            "role": "user",
+            "sender_user_id": "user-1",
+            "text": "Inspect the workspace",
+            "timestamp": "2026-07-10T00:00:00Z"
+          },
+          "started_at": "2026-07-10T00:00:00Z",
+          "status": "running",
+          "stream_id": "stream-interrupted",
+          "updated_at": "2026-07-10T00:00:10Z"
+        },
+        "epoch": "epoch-runtime-contract-v1",
+        "queue": [],
+        "seq": 2,
+        "session_id": "session-1",
+        "updated_at": "2026-07-10T00:00:10Z"
+      },
+      "type": "runtime_snapshot"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "message_appends": [
+          {
+            "content": "partial output",
+            "id": 0,
+            "type": "text"
+          }
+        ]
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 3,
+      "session_id": "session-1",
+      "stream_id": "stream-interrupted",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "run": {
+          "error": "runtime interrupted",
+          "stream_id": "stream-interrupted",
+          "updated_at": "2026-07-10T00:00:10Z"
+        }
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 4,
+      "session_id": "session-1",
+      "stream_id": "stream-interrupted",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "run": {
+          "error": "runtime interrupted",
+          "status": "errored",
+          "stream_id": "stream-interrupted",
+          "updated_at": "2026-07-10T00:00:10Z"
+        }
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 5,
+      "session_id": "session-1",
+      "stream_id": "stream-interrupted",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    }
+  ]
+}
