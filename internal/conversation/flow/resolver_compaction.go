@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/conversation"
@@ -130,6 +131,8 @@ func (r *Resolver) runCompactionSync(ctx context.Context, req conversation.ChatR
 		slog.String("model_id", cfg.ModelID),
 	)
 
+	done := r.enterSessionCompactionForStream(req.BotID, req.SessionID, strings.TrimSpace(req.StreamID))
+	defer done()
 	res, err := r.compactionService.RunCompactionSync(ctx, cfg)
 	if err != nil {
 		r.logger.Warn("compaction sync: failed", slog.Any("error", err))
