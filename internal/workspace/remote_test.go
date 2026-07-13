@@ -27,11 +27,15 @@ const (
 )
 
 type fakeRemoteBindingStore struct {
-	record dbstore.BotRemoteRuntimeBindingRecord
-	exists bool
+	record    dbstore.BotRemoteRuntimeBindingRecord
+	exists    bool
+	upsertErr error
 }
 
 func (s *fakeRemoteBindingStore) UpsertBotRemoteRuntimeBinding(_ context.Context, input dbstore.UpsertBotRemoteRuntimeBindingInput) (dbstore.BotRemoteRuntimeBindingRecord, error) {
+	if s.upsertErr != nil {
+		return dbstore.BotRemoteRuntimeBindingRecord{}, s.upsertErr
+	}
 	s.record.BotID = input.BotID
 	s.record.RuntimeID = input.RuntimeID
 	s.record.WorkspacePath = input.WorkspacePath
@@ -112,6 +116,17 @@ func TestRemoteWorkspaceBindingDefaultsToPerBotPath(t *testing.T) {
 		}); !errors.Is(err, ErrInvalidRemoteWorkspacePath) {
 			t.Fatalf("Bind workspace_path %q error = %v", invalid, err)
 		}
+	}
+}
+
+func TestRemoteWorkspaceBindReportsUnusableRuntimeDistinctly(t *testing.T) {
+	service := &RemoteWorkspaceService{
+		store:    &fakeRemoteBindingStore{upsertErr: db.ErrNotFound},
+		runtimes: fakeRuntimeConnections{},
+	}
+	_, err := service.Bind(context.Background(), remoteTestBotID, BindRemoteWorkspaceRequest{RuntimeID: remoteTestRuntimeID})
+	if !errors.Is(err, ErrRemoteRuntimeNotUsable) {
+		t.Fatalf("Bind error = %v, want ErrRemoteRuntimeNotUsable", err)
 	}
 }
 

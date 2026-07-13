@@ -11,6 +11,7 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
+	ctr "github.com/memohai/memoh/internal/container"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/userruntime"
 	"github.com/memohai/memoh/internal/workspace"
@@ -22,21 +23,30 @@ type botRemoteRuntimeService interface {
 	Unbind(ctx context.Context, botID string) error
 }
 
-type BotRemoteRuntimeHandler struct {
-	log      *slog.Logger
-	service  botRemoteRuntimeService
-	bots     *bots.Service
-	accounts *accounts.Service
+type botWorkspaceStopper interface {
+	StopBot(ctx context.Context, botID string) error
 }
 
-func NewBotRemoteRuntimeHandler(log *slog.Logger, service *workspace.RemoteWorkspaceService, botService *bots.Service, accountService *accounts.Service) *BotRemoteRuntimeHandler {
+type BotRemoteRuntimeHandler struct {
+	log        *slog.Logger
+	service    botRemoteRuntimeService
+	workspaces botWorkspaceStopper
+	bots       *bots.Service
+	accounts   *accounts.Service
+}
+
+func NewBotRemoteRuntimeHandler(log *slog.Logger, service *workspace.RemoteWorkspaceService, manager *workspace.Manager, botService *bots.Service, accountService *accounts.Service) *BotRemoteRuntimeHandler {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &BotRemoteRuntimeHandler{
+	handler := &BotRemoteRuntimeHandler{
 		log: log.With(slog.String("handler", "bot_remote_runtime")), service: service,
 		bots: botService, accounts: accountService,
 	}
+	if manager != nil {
+		handler.workspaces = manager
+	}
+	return handler
 }
 
 func (h *BotRemoteRuntimeHandler) Register(e *echo.Echo) {
@@ -69,11 +79,30 @@ func (h *BotRemoteRuntimeHandler) Bind(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	// Once bound, the container is hidden from status and StopBot refuses,
+	// so a still-running container would keep consuming resources with no
+	// stop path in the UI. Stop it before the first bind takes effect.
+	h.stopStaleContainer(c.Request().Context(), botID)
 	binding, err := h.service.Bind(c.Request().Context(), botID, req)
 	if err != nil {
 		return botRemoteRuntimeHTTPError(h.log, err)
 	}
 	return c.JSON(http.StatusOK, binding)
+}
+
+// stopStaleContainer is best-effort: an absent container or an existing
+// binding (rebind) is normal, and a container backend failure must not
+// block the binding itself.
+func (h *BotRemoteRuntimeHandler) stopStaleContainer(ctx context.Context, botID string) {
+	if h.workspaces == nil {
+		return
+	}
+	err := h.workspaces.StopBot(ctx, botID)
+	if err == nil || errors.Is(err, ctr.ErrNotSupported) || errors.Is(err, workspace.ErrContainerNotFound) {
+		return
+	}
+	h.log.Warn("stop stale container before remote bind failed",
+		slog.String("bot_id", botID), slog.Any("error", err))
 }
 
 // Get godoc
@@ -138,6 +167,8 @@ func botRemoteRuntimeHTTPError(log *slog.Logger, err error) error {
 	switch {
 	case errors.Is(err, workspace.ErrInvalidRemoteWorkspacePath), errors.Is(err, userruntime.ErrInvalidInput):
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	case errors.Is(err, workspace.ErrRemoteRuntimeNotUsable):
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	case errors.Is(err, workspace.ErrRemoteWorkspaceNotBound), errors.Is(err, db.ErrNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, "remote runtime binding not found")
 	default:

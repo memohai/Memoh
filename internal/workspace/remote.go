@@ -31,6 +31,7 @@ const (
 
 var (
 	ErrRemoteWorkspaceNotBound         = errors.New("remote workspace is not bound")
+	ErrRemoteRuntimeNotUsable          = errors.New("remote runtime not found, revoked, or owned by another user")
 	ErrRemoteRuntimeOffline            = errors.New("remote runtime is offline")
 	ErrRemoteRuntimeRevoked            = errors.New("remote runtime has been revoked")
 	ErrRemoteRuntimeOwnerMismatch      = errors.New("remote runtime no longer belongs to the bot owner")
@@ -92,6 +93,11 @@ func (s *RemoteWorkspaceService) Bind(ctx context.Context, botID string, req Bin
 	record, err := s.store.UpsertBotRemoteRuntimeBinding(ctx, dbstore.UpsertBotRemoteRuntimeBindingInput{
 		BotID: botID, RuntimeID: runtimeID, WorkspacePath: workspacePath,
 	})
+	if errors.Is(err, db.ErrNotFound) {
+		// The guarded INSERT ... SELECT matched no usable runtime row: the
+		// caller supplied a bad runtime, not a missing binding.
+		return RemoteWorkspaceBinding{}, ErrRemoteRuntimeNotUsable
+	}
 	if err != nil {
 		return RemoteWorkspaceBinding{}, err
 	}
