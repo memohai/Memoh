@@ -3,6 +3,7 @@ package compaction
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -199,5 +200,26 @@ func TestDoCompactionReturnsSuccessfulArtifactFinalizationError(t *testing.T) {
 	}
 	if len(q.markedIDs) != 2 {
 		t.Fatalf("marked ids = %v, want generated artifact rows marked before finalization", q.markedIDs)
+	}
+}
+
+func TestDoCompactionRejectsPartialSourceMarking(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `"old question"`, 100),
+		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", `"current question"`, 100),
+		mkRow(t, "assistant", `"current answer"`, 100),
+	}
+	markedRows := int64(1)
+	q := &fakeQueries{uncompacted: rows, markedRowCount: &markedRows}
+
+	_, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 200))
+	if err == nil || !strings.Contains(err.Error(), "marked 1 of 2") {
+		t.Fatalf("RunCompactionSync error = %v, want partial-mark failure", err)
+	}
+	if q.completed.Status != "error" || q.completed.Summary != "" {
+		t.Fatalf("partial mark published an artifact: %#v", q.completed)
 	}
 }

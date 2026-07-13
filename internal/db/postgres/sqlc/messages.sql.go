@@ -4768,10 +4768,14 @@ func (q *Queries) LockHistoryTurnAppendByRequest(ctx context.Context, arg LockHi
 	return err
 }
 
-const markMessagesCompacted = `-- name: MarkMessagesCompacted :exec
+const markMessagesCompacted = `-- name: MarkMessagesCompacted :execrows
 UPDATE bot_history_messages
 SET compact_id = $1
 WHERE id = ANY($2::uuid[])
+  AND turn_visible = true
+  AND turn_id IS NOT NULL
+  AND turn_position IS NOT NULL
+  AND turn_message_seq IS NOT NULL
 `
 
 type MarkMessagesCompactedParams struct {
@@ -4779,9 +4783,12 @@ type MarkMessagesCompactedParams struct {
 	Column2   []pgtype.UUID `json:"column_2"`
 }
 
-func (q *Queries) MarkMessagesCompacted(ctx context.Context, arg MarkMessagesCompactedParams) error {
-	_, err := q.db.Exec(ctx, markMessagesCompacted, arg.CompactID, arg.Column2)
-	return err
+func (q *Queries) MarkMessagesCompacted(ctx context.Context, arg MarkMessagesCompactedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markMessagesCompacted, arg.CompactID, arg.Column2)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const replaceHistoryTurn = `-- name: ReplaceHistoryTurn :one

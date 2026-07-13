@@ -489,10 +489,16 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	usageJSON, _ := json.Marshal(result.Usage)
 
 	modelUUID := db.ParseUUIDOrEmpty(cfg.ModelID)
-	if err := s.queries.MarkMessagesCompacted(persistCtx, sqlc.MarkMessagesCompactedParams{
+	marked, err := s.queries.MarkMessagesCompacted(persistCtx, sqlc.MarkMessagesCompactedParams{
 		CompactID: logID,
 		Column2:   compactedMessageIDs,
-	}); err != nil {
+	})
+	if err != nil {
+		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+		return Result{}, err
+	}
+	if marked != int64(len(compactedMessageIDs)) {
+		err = fmt.Errorf("marked %d of %d compaction source rows", marked, len(compactedMessageIDs))
 		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, err
 	}

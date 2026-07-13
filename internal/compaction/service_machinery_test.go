@@ -86,6 +86,7 @@ type fakeQueries struct {
 	completeErr     error
 	listPanic       bool
 	onComplete      func()
+	markedRowCount  *int64
 
 	created   bool
 	markedIDs []pgtype.UUID
@@ -112,9 +113,12 @@ func (f *fakeQueries) ListCompactionArtifactLineageBySession(_ context.Context, 
 	return f.priorLogs, nil
 }
 
-func (f *fakeQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) error {
+func (f *fakeQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) (int64, error) {
 	f.markedIDs = append([]pgtype.UUID(nil), arg.Column2...)
-	return nil
+	if f.markedRowCount != nil {
+		return *f.markedRowCount, nil
+	}
+	return int64(len(arg.Column2)), nil
 }
 
 func (f *fakeQueries) CompleteCompactionLog(_ context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {

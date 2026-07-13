@@ -47,9 +47,9 @@ func (f *pairingQueries) CreateCompactionLog(context.Context, sqlc.CreateCompact
 	return sqlc.BotHistoryMessageCompact{ID: f.logID}, nil
 }
 
-func (f *pairingQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) error {
+func (f *pairingQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) (int64, error) {
 	f.markedIDs = append([]pgtype.UUID(nil), arg.Column2...)
-	return nil
+	return int64(len(arg.Column2)), nil
 }
 
 func (*pairingQueries) CompleteCompactionLog(_ context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {

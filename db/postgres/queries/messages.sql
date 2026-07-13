@@ -2284,10 +2284,14 @@ WHERE m.bot_id = sqlc.arg(bot_id)
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
 
--- name: MarkMessagesCompacted :exec
+-- name: MarkMessagesCompacted :execrows
 UPDATE bot_history_messages
 SET compact_id = $1
-WHERE id = ANY($2::uuid[]);
+WHERE id = ANY($2::uuid[])
+  AND turn_visible = true
+  AND turn_id IS NOT NULL
+  AND turn_position IS NOT NULL
+  AND turn_message_seq IS NOT NULL;
 
 -- name: ListUncompactedMessagesBySession :many
 SELECT

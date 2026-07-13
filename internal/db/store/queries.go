@@ -340,7 +340,7 @@ type Queries interface {
 	ListUserChannelBindingsByPlatform(ctx context.Context, channelType string) ([]dbsqlc.UserChannelBinding, error)
 	ListVersionsByContainerID(ctx context.Context, containerID string) ([]dbsqlc.ListVersionsByContainerIDRow, error)
 	ListVisibleChatsByBotAndUser(ctx context.Context, arg dbsqlc.ListVisibleChatsByBotAndUserParams) ([]dbsqlc.ListVisibleChatsByBotAndUserRow, error)
-	MarkMessagesCompacted(ctx context.Context, arg dbsqlc.MarkMessagesCompactedParams) error
+	MarkMessagesCompacted(ctx context.Context, arg dbsqlc.MarkMessagesCompactedParams) (int64, error)
 	NextVersion(ctx context.Context, containerID string) (int32, error)
 	RejectToolApprovalRequest(ctx context.Context, arg dbsqlc.RejectToolApprovalRequestParams) (dbsqlc.ToolApprovalRequest, error)
 	RedeemChannelLinkCode(ctx context.Context, arg dbsqlc.RedeemChannelLinkCodeParams) (dbsqlc.UserChannelIdentityBinding, error)
