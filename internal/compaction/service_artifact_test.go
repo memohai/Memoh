@@ -68,6 +68,37 @@ func TestDoCompactionPersistsDurableCoverageAndAnchor(t *testing.T) {
 	}
 }
 
+func TestDoCompactionOrdersDurableCoverageBySourceTime(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `"old question"`, 100),
+		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", `"current question"`, 100),
+		mkRow(t, "assistant", `"current answer"`, 100),
+	}
+	rows[0].CreatedAt = pgtype.Timestamptz{Time: time.UnixMilli(2000), Valid: true}
+	rows[1].CreatedAt = pgtype.Timestamptz{Time: time.UnixMilli(1000), Valid: true}
+	rows[2].CreatedAt = pgtype.Timestamptz{Time: time.UnixMilli(3000), Valid: true}
+	rows[3].CreatedAt = pgtype.Timestamptz{Time: time.UnixMilli(4000), Valid: true}
+	q := &fakeQueries{uncompacted: rows}
+
+	if _, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(&stubModel{summary: "SUMMARY"}, 200)); err != nil {
+		t.Fatalf("RunCompactionSync: %v", err)
+	}
+
+	coverage, err := DecodeArtifactCoverage(q.completed.Coverage)
+	if err != nil {
+		t.Fatalf("decode coverage: %v", err)
+	}
+	if len(coverage) != 2 || coverage[0].Ref.ID != formatUUID(rows[1].ID) || coverage[1].Ref.ID != formatUUID(rows[0].ID) {
+		t.Fatalf("coverage = %#v, want source-time order", coverage)
+	}
+	if q.completed.AnchorStartMs != 1000 || q.completed.AnchorEndMs != 2000 {
+		t.Fatalf("anchor = %d..%d, want 1000..2000", q.completed.AnchorStartMs, q.completed.AnchorEndMs)
+	}
+}
+
 func TestDoCompactionCoverageHashIncludesMessageAssets(t *testing.T) {
 	t.Parallel()
 

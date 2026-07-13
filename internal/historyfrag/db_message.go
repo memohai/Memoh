@@ -101,7 +101,6 @@ func DBMessageSourceHash(msg messagepkg.Message) contextfrag.FragmentHash {
 		SessionID:               strings.TrimSpace(msg.SessionID),
 		SenderChannelIdentityID: strings.TrimSpace(msg.SenderChannelIdentityID),
 		SenderUserID:            strings.TrimSpace(msg.SenderUserID),
-		SenderDisplayName:       strings.TrimSpace(msg.SenderDisplayName),
 		Platform:                strings.TrimSpace(msg.Platform),
 		ExternalMessageID:       strings.TrimSpace(msg.ExternalMessageID),
 		SourceReplyToMessageID:  strings.TrimSpace(msg.SourceReplyToMessageID),
@@ -136,7 +135,6 @@ type dbMessageSourceHashPayload struct {
 	SessionID               string         `json:"session_id,omitempty"`
 	SenderChannelIdentityID string         `json:"sender_channel_identity_id,omitempty"`
 	SenderUserID            string         `json:"sender_user_id,omitempty"`
-	SenderDisplayName       string         `json:"sender_display_name,omitempty"`
 	Platform                string         `json:"platform,omitempty"`
 	ExternalMessageID       string         `json:"external_message_id,omitempty"`
 	SourceReplyToMessageID  string         `json:"source_reply_to_message_id,omitempty"`

@@ -233,6 +233,25 @@ func TestFromDBMessageContentHashChangesWhenRowContentChanges(t *testing.T) {
 	}
 }
 
+func TestDBMessageSourceHashIgnoresJoinedDisplayName(t *testing.T) {
+	t.Parallel()
+
+	msg := messagepkg.Message{
+		ID:                "row-1",
+		BotID:             "bot-1",
+		SessionID:         "session-1",
+		SenderDisplayName: "Alice",
+		Role:              "user",
+		Content:           persistedModelMessage(t, conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("hello")}),
+	}
+	original := DBMessageSourceHash(msg)
+	msg.SenderDisplayName = "Alice Renamed"
+
+	if renamed := DBMessageSourceHash(msg); renamed != original {
+		t.Fatalf("joined display name changed persisted source hash: original=%#v renamed=%#v", original, renamed)
+	}
+}
+
 func TestFromDBMessageContentHashChangesWhenAssetsChange(t *testing.T) {
 	t.Parallel()
 

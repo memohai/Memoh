@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -106,6 +107,9 @@ func artifactMetadataFor(items []CompactionCandidate, ids []pgtype.UUID) (artifa
 			CreatedAtMs:            createdAtMs,
 		})
 	}
+	sort.SliceStable(covered, func(i, j int) bool {
+		return covered[i].CreatedAtMs < covered[j].CreatedAtMs
+	})
 	encoded, err := json.Marshal(covered)
 	if err != nil {
 		return artifactMetadata{}, fmt.Errorf("encode compaction artifact coverage: %w", err)
