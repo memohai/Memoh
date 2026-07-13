@@ -836,7 +836,7 @@ CREATE INDEX IF NOT EXISTS idx_heartbeat_logs_bot_started ON bot_heartbeat_logs(
 CREATE TABLE IF NOT EXISTS bot_history_message_compacts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
+  session_id UUID REFERENCES bot_sessions(id) ON DELETE CASCADE,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'ok', 'error')),
   summary TEXT NOT NULL DEFAULT '',
   message_count INTEGER NOT NULL DEFAULT 0,

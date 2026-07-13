@@ -66,13 +66,19 @@ CREATE TABLE bot_history_messages (
   id UUID PRIMARY KEY,
   bot_id UUID NOT NULL,
   session_id UUID,
-  compact_id UUID REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL
+  compact_id UUID REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL,
+  turn_visible BOOLEAN NOT NULL DEFAULT true,
+  turn_id UUID,
+  turn_position BIGINT,
+  turn_message_seq BIGINT,
+  turn_superseded_at TIMESTAMPTZ
 );
 `); err != nil {
 		t.Fatalf("create pre-0106 compaction schema: %v", err)
 	}
 
 	legacyID := "00000000-0000-0000-0000-00000000c001"
+	repairArtifactID := "00000000-0000-0000-0000-00000000c101"
 	activeID := "00000000-0000-0000-0000-00000000d001"
 	parentOneID := "00000000-0000-0000-0000-00000000d002"
 	parentTwoID := "00000000-0000-0000-0000-00000000d003"
@@ -81,21 +87,37 @@ CREATE TABLE bot_history_messages (
 	crossOwnerArtifactID := "00000000-0000-0000-0000-00000000d102"
 	logOnlyArtifactID := "00000000-0000-0000-0000-00000000d201"
 	botID := "00000000-0000-0000-0000-00000000b001"
+	repairBotID := "00000000-0000-0000-0000-00000000b002"
 	foreignBotID := "00000000-0000-0000-0000-00000000b101"
 	logOnlyBotID := "00000000-0000-0000-0000-00000000b201"
 	sessionID := "00000000-0000-0000-0000-00000000e001"
+	repairSessionID := "00000000-0000-0000-0000-00000000e002"
 	foreignSessionID := "00000000-0000-0000-0000-00000000e101"
 	if _, err := tx.Exec(ctx, `
 INSERT INTO bot_sessions (id, bot_id)
-VALUES ($1, $2), ($3, $4)
-	`, sessionID, botID, foreignSessionID, foreignBotID); err != nil {
+VALUES ($1, $2), ($3, $4), ($5, $6)
+	`, sessionID, botID, foreignSessionID, foreignBotID, repairSessionID, repairBotID); err != nil {
 		t.Fatalf("insert sessions: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
 INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary)
-VALUES ($1, $2, $3, 'ok', 'legacy summary')
-`, legacyID, botID, sessionID); err != nil {
+VALUES
+  ($1, $2, $3, 'ok', 'legacy summary'),
+  ($4, $5, $6, 'ok', 'unsafe hidden summary')
+`, legacyID, botID, sessionID, repairArtifactID, repairBotID, repairSessionID); err != nil {
 		t.Fatalf("insert pre-0106 legacy artifact: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+INSERT INTO bot_history_messages (
+  id, bot_id, session_id, compact_id,
+  turn_visible, turn_id, turn_position, turn_message_seq, turn_superseded_at
+)
+VALUES (
+  '00000000-0000-0000-0000-00000000a002', $1, $2, $3,
+  false, '00000000-0000-0000-0000-00000000f002', 1, 1, now()
+)
+`, repairBotID, repairSessionID, repairArtifactID); err != nil {
+		t.Fatalf("insert hidden legacy source: %v", err)
 	}
 
 	up0106 := readEmbeddedMigration(t, "postgres/migrations/0106_compaction_artifacts.up.sql")
@@ -107,6 +129,20 @@ VALUES ($1, $2, $3, 'ok', 'legacy summary')
 	}
 	assertIndexExists(t, ctx, tx, "idx_compacts_active_session", true)
 	assertForeignKeyDeleteAction(t, ctx, tx, "bot_history_message_compacts", "bot_history_message_compacts_superseded_by_fkey", "n")
+
+	up0107 := readEmbeddedMigration(t, "postgres/migrations/0107_compaction_epoch.up.sql")
+	if _, err := tx.Exec(ctx, up0107); err != nil {
+		t.Fatalf("apply 0107 up: %v", err)
+	}
+	if _, err := tx.Exec(ctx, up0107); err != nil {
+		t.Fatalf("reapply 0107 up (idempotency): %v", err)
+	}
+	assertIndexExists(t, ctx, tx, "idx_compacts_owner_epoch", true)
+	assertForeignKeyDeleteAction(t, ctx, tx, "bot_history_message_compacts", "bot_history_message_compacts_session_id_fkey", "c")
+	assertCompactionEpoch(t, ctx, tx, "bot_sessions", sessionID, 0)
+	assertCompactionEpoch(t, ctx, tx, "bot_history_message_compacts", legacyID, 0)
+	assertCompactionEpoch(t, ctx, tx, "bot_sessions", repairSessionID, 1)
+	assertCompactionEpoch(t, ctx, tx, "bot_history_message_compacts", repairArtifactID, 0)
 
 	var (
 		legacyVersion  int32
@@ -188,8 +224,9 @@ VALUES
 	if err := queries.DeleteMessagesBySession(ctx, parsedSessionID); err != nil {
 		t.Fatalf("delete session history through generated query: %v", err)
 	}
-	assertRowCount(t, ctx, tx, "bot_history_messages", 1)
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 2)
+	assertRowCount(t, ctx, tx, "bot_history_messages", 2)
+	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 9)
+	assertCompactionEpoch(t, ctx, tx, "bot_sessions", sessionID, 1)
 
 	parsedForeignBotID, err := ParseUUID(foreignBotID)
 	if err != nil {
@@ -198,17 +235,40 @@ VALUES
 	if err := queries.DeleteMessagesByBot(ctx, parsedForeignBotID); err != nil {
 		t.Fatalf("delete bot history through generated query: %v", err)
 	}
-	assertRowCount(t, ctx, tx, "bot_history_messages", 0)
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 1)
+	assertRowCount(t, ctx, tx, "bot_history_messages", 1)
+	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 9)
+	assertCompactionEpoch(t, ctx, tx, "bot_sessions", foreignSessionID, 1)
 
-	parsedLogOnlyBotID, err := ParseUUID(logOnlyBotID)
+	parsedRepairSessionID, err := ParseUUID(repairSessionID)
 	if err != nil {
-		t.Fatalf("parse log-only bot id: %v", err)
+		t.Fatalf("parse repair session id: %v", err)
 	}
-	if err := queries.DeleteCompactionLogsByBot(ctx, parsedLogOnlyBotID); err != nil {
-		t.Fatalf("delete artifacts through generated query: %v", err)
+	if err := queries.DeleteMessagesBySession(ctx, parsedRepairSessionID); err != nil {
+		t.Fatalf("delete repaired session history through generated query: %v", err)
+	}
+	assertRowCount(t, ctx, tx, "bot_history_messages", 0)
+	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 9)
+	assertCompactionEpoch(t, ctx, tx, "bot_sessions", repairSessionID, 2)
+
+	for _, artifactBotID := range []string{botID, foreignBotID, repairBotID, logOnlyBotID} {
+		parsedArtifactBotID, err := ParseUUID(artifactBotID)
+		if err != nil {
+			t.Fatalf("parse artifact bot id: %v", err)
+		}
+		if err := queries.DeleteCompactionLogsByBot(ctx, parsedArtifactBotID); err != nil {
+			t.Fatalf("delete artifacts through generated query: %v", err)
+		}
 	}
 	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 0)
+
+	down0107 := readEmbeddedMigration(t, "postgres/migrations/0107_compaction_epoch.down.sql")
+	if _, err := tx.Exec(ctx, down0107); err != nil {
+		t.Fatalf("apply 0107 down: %v", err)
+	}
+	assertIndexExists(t, ctx, tx, "idx_compacts_owner_epoch", false)
+	assertForeignKeyDeleteAction(t, ctx, tx, "bot_history_message_compacts", "bot_history_message_compacts_session_id_fkey", "n")
+	assertColumnExists(t, ctx, tx, schema, "bot_sessions", "compaction_epoch", false)
+	assertColumnExists(t, ctx, tx, schema, "bot_history_message_compacts", "compaction_epoch", false)
 
 	down0106 := readEmbeddedMigration(t, "postgres/migrations/0106_compaction_artifacts.down.sql")
 	if _, err := tx.Exec(ctx, down0106); err != nil {
@@ -305,6 +365,37 @@ func assertIndexExists(t *testing.T, ctx context.Context, tx pgx.Tx, index strin
 	}
 	if got != want {
 		t.Fatalf("index %s existence = %v, want %v", index, got, want)
+	}
+}
+
+func assertCompactionEpoch(t *testing.T, ctx context.Context, tx pgx.Tx, table, id string, want int64) {
+	t.Helper()
+	var got int64
+	query := "SELECT compaction_epoch FROM " + pgx.Identifier{table}.Sanitize() + " WHERE id = $1"
+	if err := tx.QueryRow(ctx, query, id).Scan(&got); err != nil {
+		t.Fatalf("read %s compaction epoch: %v", table, err)
+	}
+	if got != want {
+		t.Fatalf("%s compaction epoch = %d, want %d", table, got, want)
+	}
+}
+
+func assertColumnExists(t *testing.T, ctx context.Context, tx pgx.Tx, schema, table, column string, want bool) {
+	t.Helper()
+	var got bool
+	if err := tx.QueryRow(ctx, `
+SELECT EXISTS (
+  SELECT 1
+  FROM information_schema.columns
+  WHERE table_schema = $1
+    AND table_name = $2
+    AND column_name = $3
+)
+`, schema, table, column).Scan(&got); err != nil {
+		t.Fatalf("inspect %s.%s: %v", table, column, err)
+	}
+	if got != want {
+		t.Fatalf("%s.%s existence = %v, want %v", table, column, got, want)
 	}
 }
 

@@ -1670,12 +1670,15 @@ func (q *Queries) CreateToolTailRound(ctx context.Context, arg CreateToolTailRou
 }
 
 const deleteMessagesByBot = `-- name: DeleteMessagesByBot :exec
-WITH deleted_compaction_artifacts AS (
-  DELETE FROM bot_history_message_compacts AS compact
-  WHERE compact.bot_id = $1
+WITH invalidated_sessions AS (
+  UPDATE bot_sessions
+  SET compaction_epoch = compaction_epoch + 1
+  WHERE bot_id = $1
+  RETURNING id
 )
 DELETE FROM bot_history_messages AS message
 WHERE message.bot_id = $1
+  AND (SELECT count(*) FROM invalidated_sessions) >= 0
 `
 
 func (q *Queries) DeleteMessagesByBot(ctx context.Context, targetBotID pgtype.UUID) error {
@@ -1712,12 +1715,15 @@ func (q *Queries) DeleteMessagesByIDs(ctx context.Context, ids []pgtype.UUID) er
 }
 
 const deleteMessagesBySession = `-- name: DeleteMessagesBySession :exec
-WITH deleted_compaction_artifacts AS (
-  DELETE FROM bot_history_message_compacts AS compact
-  WHERE compact.session_id = $1
+WITH invalidated_session AS (
+  UPDATE bot_sessions
+  SET compaction_epoch = compaction_epoch + 1
+  WHERE id = $1
+  RETURNING id
 )
 DELETE FROM bot_history_messages AS message
 WHERE message.session_id = $1
+  AND (SELECT count(*) FROM invalidated_session) >= 0
 `
 
 func (q *Queries) DeleteMessagesBySession(ctx context.Context, targetSessionID pgtype.UUID) error {

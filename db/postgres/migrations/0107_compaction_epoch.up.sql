@@ -7,6 +7,12 @@ ALTER TABLE bot_sessions
 ALTER TABLE bot_history_message_compacts
   ADD COLUMN IF NOT EXISTS compaction_epoch BIGINT NOT NULL DEFAULT 0;
 
+ALTER TABLE bot_history_message_compacts
+  DROP CONSTRAINT IF EXISTS bot_history_message_compacts_session_id_fkey;
+ALTER TABLE bot_history_message_compacts
+  ADD CONSTRAINT bot_history_message_compacts_session_id_fkey
+  FOREIGN KEY (session_id) REFERENCES bot_sessions(id) ON DELETE CASCADE;
+
 CREATE INDEX IF NOT EXISTS idx_compacts_owner_epoch
   ON bot_history_message_compacts(bot_id, session_id, compaction_epoch, started_at DESC);
 

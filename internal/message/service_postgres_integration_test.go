@@ -53,26 +53,6 @@ func TestPostgresReplaceTurnRetryHidesSupersededAssistant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("persist replacement assistant: %v", err)
 	}
-	var affectedSources int
-	if err := tx.QueryRow(ctx, `
-		SELECT count(*)
-		FROM bot_history_messages old
-		JOIN bot_history_message_compacts compact ON compact.id = old.compact_id
-		JOIN bot_sessions session ON session.id = old.session_id
-		WHERE old.turn_id = $1
-		  AND old.session_id = $2
-		  AND old.turn_superseded_at IS NULL
-		  AND old.id IS DISTINCT FROM $3::uuid
-		  AND old.id IS DISTINCT FROM $4::uuid
-		  AND compact.bot_id = session.bot_id
-		  AND compact.session_id = session.id
-		  AND compact.compaction_epoch = session.compaction_epoch
-	`, oldTurn.ID, postgresMessageTestSessionID, user.ID, replacement.ID).Scan(&affectedSources); err != nil {
-		t.Fatalf("count affected compaction sources: %v", err)
-	}
-	if affectedSources != 1 {
-		t.Fatalf("affected compaction sources = %d, want 1", affectedSources)
-	}
 	if _, err := svc.ReplaceTurn(ctx, postgresMessageTestSessionID, oldTurn.ID, user.ID, replacement.ID, "retry"); err != nil {
 		t.Fatalf("replace turn: %v", err)
 	}

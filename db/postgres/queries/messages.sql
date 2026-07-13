@@ -2208,20 +2208,26 @@ SELECT COUNT(*) FROM bot_visible_history_messages
 WHERE bot_id = sqlc.arg(bot_id);
 
 -- name: DeleteMessagesByBot :exec
-WITH deleted_compaction_artifacts AS (
-  DELETE FROM bot_history_message_compacts AS compact
-  WHERE compact.bot_id = sqlc.arg(target_bot_id)
+WITH invalidated_sessions AS (
+  UPDATE bot_sessions
+  SET compaction_epoch = compaction_epoch + 1
+  WHERE bot_id = sqlc.arg(target_bot_id)
+  RETURNING id
 )
 DELETE FROM bot_history_messages AS message
-WHERE message.bot_id = sqlc.arg(target_bot_id);
+WHERE message.bot_id = sqlc.arg(target_bot_id)
+  AND (SELECT count(*) FROM invalidated_sessions) >= 0;
 
 -- name: DeleteMessagesBySession :exec
-WITH deleted_compaction_artifacts AS (
-  DELETE FROM bot_history_message_compacts AS compact
-  WHERE compact.session_id = sqlc.arg(target_session_id)
+WITH invalidated_session AS (
+  UPDATE bot_sessions
+  SET compaction_epoch = compaction_epoch + 1
+  WHERE id = sqlc.arg(target_session_id)
+  RETURNING id
 )
 DELETE FROM bot_history_messages AS message
-WHERE message.session_id = sqlc.arg(target_session_id);
+WHERE message.session_id = sqlc.arg(target_session_id)
+  AND (SELECT count(*) FROM invalidated_session) >= 0;
 
 -- name: DeleteMessagesByIDs :exec
 WITH deleted AS (
