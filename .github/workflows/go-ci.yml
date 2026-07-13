@@ -67,3 +67,40 @@ jobs:
           name: go-coverage
           path: coverage.txt
           if-no-files-found: error
+
+  session-runtime-backend:
+    name: Session Runtime (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: Redis
+            image: redis:8-alpine
+            env_name: MEMOH_TEST_REDIS_URL
+          - target: Valkey
+            image: valkey/valkey:8-alpine
+            env_name: MEMOH_TEST_VALKEY_URL
+    services:
+      runtime:
+        image: ${{ matrix.image }}
+        ports:
+          - 6379/tcp
+        options: >-
+          --health-cmd "sh -c 'redis-cli ping || valkey-cli ping'"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run distributed session runtime contracts
+        env:
+          MEMOH_TEST_DISTRIBUTED_REQUIRED: "1"
+          RUNTIME_URL: redis://127.0.0.1:${{ job.services.runtime.ports['6379'] }}/0
+          RUNTIME_ENV_NAME: ${{ matrix.env_name }}
+        run: env "$RUNTIME_ENV_NAME=$RUNTIME_URL" go test -v -race -count=1 -timeout 90s ./internal/sessionruntime

@@ -107,11 +107,63 @@ func (m *Manager) markLostIfExpired(snapshot *Snapshot, now time.Time) bool {
 	return true
 }
 
+func streamLeaseExpiry(snapshot Snapshot, streamID string, fallback time.Time) time.Time {
+	if snapshot.CurrentRunView != nil && snapshot.CurrentRunView.StreamID == streamID && snapshot.CurrentRunView.OwnerLeaseExpiresAt != nil {
+		return *snapshot.CurrentRunView.OwnerLeaseExpiresAt
+	}
+	return fallback
+}
+
 func nonNilQueue(queue []QueuedRunView) []QueuedRunView {
 	if queue != nil {
 		return queue
 	}
 	return []QueuedRunView{}
+}
+
+func runtimeEventEpoch(event Event) string {
+	if epoch := strings.TrimSpace(event.Epoch); epoch != "" {
+		return epoch
+	}
+	if event.Snapshot != nil {
+		return strings.TrimSpace(event.Snapshot.Epoch)
+	}
+	return ""
+}
+
+func streamRefForRun(botID, sessionID string, run *CurrentRunView) StreamRef {
+	if run == nil {
+		return StreamRef{}
+	}
+	return StreamRef{
+		BotID:      strings.TrimSpace(botID),
+		SessionID:  strings.TrimSpace(sessionID),
+		StreamID:   strings.TrimSpace(run.StreamID),
+		OwnerID:    strings.TrimSpace(run.OwnerID),
+		Generation: strings.TrimSpace(run.Generation),
+	}
+}
+
+func runMatchesHandle(run *CurrentRunView, handle RunHandle) bool {
+	handle = handle.normalized()
+	return run != nil && run.StreamID == handle.StreamID && run.Generation == handle.Generation
+}
+
+func (m *Manager) streamRefForControl(ctrl *runControl) StreamRef {
+	if ctrl == nil {
+		return StreamRef{}
+	}
+	ownerID := ""
+	if m != nil && m.distributed != nil {
+		ownerID = m.ownerID
+	}
+	return StreamRef{
+		BotID:      ctrl.botID,
+		SessionID:  ctrl.sessionID,
+		StreamID:   ctrl.streamID,
+		OwnerID:    ownerID,
+		Generation: ctrl.generation,
+	}
 }
 
 func normalizeRunOperation(operation *RunOperationView) (*RunOperationView, error) {
@@ -174,17 +226,6 @@ func leaseRenewInterval(ttl time.Duration) time.Duration {
 	}
 	if interval < 10*time.Millisecond {
 		return 10 * time.Millisecond
-	}
-	return interval
-}
-
-func commandAckPollInterval(timeout time.Duration) time.Duration {
-	interval := timeout / 10
-	if interval <= 0 || interval > 50*time.Millisecond {
-		return 50 * time.Millisecond
-	}
-	if interval < 5*time.Millisecond {
-		return 5 * time.Millisecond
 	}
 	return interval
 }

@@ -41,6 +41,10 @@ const (
 var (
 	ErrCommandOwnerUnavailable = errors.New("runtime command owner is unavailable")
 	ErrCommandTargetNotActive  = errors.New("runtime command target is not active")
+	ErrCommandTargetMismatch   = errors.New("stream does not belong to this session")
+	ErrCommandExpired          = errors.New("runtime command expired before acknowledgement")
+	ErrCommandBusy             = errors.New("runtime command executor is busy")
+	ErrCommandPayloadConflict  = errors.New("runtime command payload conflicts with an earlier request")
 	ErrManagerClosed           = errors.New("session runtime manager is closed")
 	ErrRunOwnershipLost        = errors.New("runtime run ownership was lost")
 )
@@ -57,15 +61,44 @@ func (k Key) String() string {
 }
 
 type StreamRef struct {
-	BotID     string `json:"bot_id"`
-	SessionID string `json:"session_id"`
-	StreamID  string `json:"stream_id"`
-	OwnerID   string `json:"owner_id"`
+	BotID      string `json:"bot_id"`
+	SessionID  string `json:"session_id"`
+	StreamID   string `json:"stream_id"`
+	OwnerID    string `json:"owner_id"`
+	Generation string `json:"generation"`
+}
+
+// RunHandle identifies one admitted run. Stream IDs may be reused after a run
+// finishes, so owner-side mutations must also carry the run generation.
+type RunHandle struct {
+	BotID      string
+	SessionID  string
+	StreamID   string
+	Generation string
+}
+
+func (h RunHandle) normalized() RunHandle {
+	h.BotID = strings.TrimSpace(h.BotID)
+	h.SessionID = strings.TrimSpace(h.SessionID)
+	h.StreamID = strings.TrimSpace(h.StreamID)
+	h.Generation = strings.TrimSpace(h.Generation)
+	return h
+}
+
+func (h RunHandle) valid() bool {
+	h = h.normalized()
+	return h.BotID != "" && h.SessionID != "" && h.StreamID != "" && h.Generation != ""
+}
+
+func (h RunHandle) key() Key {
+	h = h.normalized()
+	return Key{BotID: h.BotID, SessionID: h.SessionID}
 }
 
 type Snapshot struct {
 	BotID          string          `json:"bot_id"`
 	SessionID      string          `json:"session_id"`
+	Epoch          string          `json:"epoch"`
 	Seq            int64           `json:"seq"`
 	CurrentRunView *CurrentRunView `json:"current_run_view,omitempty"`
 	Queue          []QueuedRunView `json:"queue"`
@@ -87,6 +120,7 @@ type QueuedRunView struct {
 
 type CurrentRunView struct {
 	StreamID            string                   `json:"stream_id"`
+	Generation          string                   `json:"generation"`
 	Status              string                   `json:"status"`
 	OwnerID             string                   `json:"owner_id,omitempty"`
 	OwnerLeaseExpiresAt *time.Time               `json:"owner_lease_expires_at,omitempty"`
@@ -127,6 +161,7 @@ type Event struct {
 	Type      string        `json:"type"`
 	BotID     string        `json:"bot_id"`
 	SessionID string        `json:"session_id"`
+	Epoch     string        `json:"epoch,omitempty"`
 	StreamID  string        `json:"stream_id,omitempty"`
 	Seq       int64         `json:"seq"`
 	UpdatedAt *time.Time    `json:"updated_at,omitempty"`
@@ -174,13 +209,16 @@ type Command struct {
 	BotID        string          `json:"bot_id"`
 	SessionID    string          `json:"session_id"`
 	StreamID     string          `json:"stream_id"`
+	Generation   string          `json:"generation"`
 	TargetID     string          `json:"target_id,omitempty"`
 	SteerID      string          `json:"steer_id,omitempty"`
 	Text         string          `json:"text,omitempty"`
 	Payload      json.RawMessage `json:"payload,omitempty"`
+	PayloadHash  string          `json:"payload_hash,omitempty"`
 	ErrorCode    string          `json:"error_code,omitempty"`
 	Error        string          `json:"error,omitempty"`
 	CreatedAt    time.Time       `json:"created_at"`
+	ExpiresAt    time.Time       `json:"expires_at,omitempty"`
 }
 
 type Subscription struct {
@@ -207,13 +245,21 @@ type Backend interface {
 // MemoryBackend intentionally does not implement this interface.
 type DistributedBackend interface {
 	Backend
-	UpdateActiveRun(ctx context.Context, key Key, streamID string, update ActiveRunUpdate) (Snapshot, bool, error)
+	UpdateActiveRun(ctx context.Context, key Key, streamID, generation string, update ActiveRunUpdate) (Snapshot, bool, error)
 	StartRun(ctx context.Context, key Key, ref StreamRef, update SnapshotUpdate) (Snapshot, bool, error)
-	RenewLease(ctx context.Context, key Key, streamID, ownerID string, renewedAt, expiresAt time.Time) error
+	ReleaseRun(ctx context.Context, key Key, ref StreamRef, update ActiveRunUpdate) (Snapshot, bool, error)
+	RenewLease(ctx context.Context, key Key, streamID, ownerID, generation string, renewedAt, expiresAt time.Time) error
+	ValidateRunOwnership(ctx context.Context, key Key, ref StreamRef) error
 	LoadStreamRef(ctx context.Context, streamID string) (StreamRef, bool, error)
-	DeleteStreamRef(ctx context.Context, streamID string) error
+	DeleteStreamRef(ctx context.Context, ref StreamRef) (bool, error)
 	PublishCommand(ctx context.Context, ownerID string, command Command) error
 	SubscribeCommands(ctx context.Context, ownerID string) (CommandSubscription, error)
+	StoreCommandResult(ctx context.Context, result Command, ttl time.Duration) error
+	LoadCommandResult(ctx context.Context, commandID string) (Command, bool, error)
+}
+
+type startupHealthChecker interface {
+	CheckHealth(ctx context.Context) error
 }
 
 type CommandSubscription struct {
