@@ -2207,7 +2207,7 @@ ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 SELECT COUNT(*) FROM bot_visible_history_messages
 WHERE bot_id = sqlc.arg(bot_id);
 
--- name: DeleteMessagesByBot :exec
+-- name: ClearHistoryByBot :exec
 WITH invalidated_sessions AS (
   UPDATE bot_sessions
   SET compaction_epoch = compaction_epoch + 1
@@ -2224,7 +2224,7 @@ DELETE FROM bot_history_messages AS message
 WHERE message.bot_id = sqlc.arg(target_bot_id)
   AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0;
 
--- name: DeleteMessagesBySession :exec
+-- name: ClearHistoryBySession :exec
 WITH invalidated_session AS (
   UPDATE bot_sessions
   SET compaction_epoch = compaction_epoch + 1

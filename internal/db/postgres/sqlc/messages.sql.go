@@ -304,6 +304,52 @@ func (q *Queries) BindLatestHistoryTurnAssistant(ctx context.Context, arg BindLa
 	return i, err
 }
 
+const clearHistoryByBot = `-- name: ClearHistoryByBot :exec
+WITH invalidated_sessions AS (
+  UPDATE bot_sessions
+  SET compaction_epoch = compaction_epoch + 1
+  WHERE bot_id = $1
+  RETURNING id
+),
+deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts AS compact
+  WHERE compact.bot_id = $1
+    AND (SELECT count(*) FROM invalidated_sessions) >= 0
+  RETURNING compact.id
+)
+DELETE FROM bot_history_messages AS message
+WHERE message.bot_id = $1
+  AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0
+`
+
+func (q *Queries) ClearHistoryByBot(ctx context.Context, targetBotID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, clearHistoryByBot, targetBotID)
+	return err
+}
+
+const clearHistoryBySession = `-- name: ClearHistoryBySession :exec
+WITH invalidated_session AS (
+  UPDATE bot_sessions
+  SET compaction_epoch = compaction_epoch + 1
+  WHERE id = $1
+  RETURNING id
+),
+deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts AS compact
+  WHERE compact.session_id = $1
+    AND (SELECT count(*) FROM invalidated_session) >= 0
+  RETURNING compact.id
+)
+DELETE FROM bot_history_messages AS message
+WHERE message.session_id = $1
+  AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0
+`
+
+func (q *Queries) ClearHistoryBySession(ctx context.Context, targetSessionID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, clearHistoryBySession, targetSessionID)
+	return err
+}
+
 const countMessagesByBot = `-- name: CountMessagesByBot :one
 SELECT COUNT(*) FROM bot_visible_history_messages
 WHERE bot_id = $1
@@ -1669,29 +1715,6 @@ func (q *Queries) CreateToolTailRound(ctx context.Context, arg CreateToolTailRou
 	return items, nil
 }
 
-const deleteMessagesByBot = `-- name: DeleteMessagesByBot :exec
-WITH invalidated_sessions AS (
-  UPDATE bot_sessions
-  SET compaction_epoch = compaction_epoch + 1
-  WHERE bot_id = $1
-  RETURNING id
-),
-deleted_compaction_artifacts AS (
-  DELETE FROM bot_history_message_compacts AS compact
-  WHERE compact.bot_id = $1
-    AND (SELECT count(*) FROM invalidated_sessions) >= 0
-  RETURNING compact.id
-)
-DELETE FROM bot_history_messages AS message
-WHERE message.bot_id = $1
-  AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0
-`
-
-func (q *Queries) DeleteMessagesByBot(ctx context.Context, targetBotID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteMessagesByBot, targetBotID)
-	return err
-}
-
 const deleteMessagesByIDs = `-- name: DeleteMessagesByIDs :exec
 WITH deleted AS (
   DELETE FROM bot_history_messages
@@ -1717,29 +1740,6 @@ SELECT (SELECT count(*) FROM deleted) + (SELECT count(*) * 0 FROM compaction_epo
 
 func (q *Queries) DeleteMessagesByIDs(ctx context.Context, ids []pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteMessagesByIDs, ids)
-	return err
-}
-
-const deleteMessagesBySession = `-- name: DeleteMessagesBySession :exec
-WITH invalidated_session AS (
-  UPDATE bot_sessions
-  SET compaction_epoch = compaction_epoch + 1
-  WHERE id = $1
-  RETURNING id
-),
-deleted_compaction_artifacts AS (
-  DELETE FROM bot_history_message_compacts AS compact
-  WHERE compact.session_id = $1
-    AND (SELECT count(*) FROM invalidated_session) >= 0
-  RETURNING compact.id
-)
-DELETE FROM bot_history_messages AS message
-WHERE message.session_id = $1
-  AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0
-`
-
-func (q *Queries) DeleteMessagesBySession(ctx context.Context, targetSessionID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteMessagesBySession, targetSessionID)
 	return err
 }
 

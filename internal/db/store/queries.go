@@ -122,9 +122,9 @@ type Queries interface {
 	DeleteMCPOAuthToken(ctx context.Context, connectionID pgtype.UUID) error
 	DeleteMemoryProvider(ctx context.Context, id pgtype.UUID) error
 	DeleteMessageAssets(ctx context.Context, messageID pgtype.UUID) error
-	DeleteMessagesByBot(ctx context.Context, botID pgtype.UUID) error
+	ClearHistoryByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteMessagesByIDs(ctx context.Context, ids []pgtype.UUID) error
-	DeleteMessagesBySession(ctx context.Context, sessionID pgtype.UUID) error
+	ClearHistoryBySession(ctx context.Context, sessionID pgtype.UUID) error
 	DeleteModel(ctx context.Context, id pgtype.UUID) error
 	DeleteModelByModelID(ctx context.Context, modelID string) error
 	DeleteSessionDiscussCursorsByBot(ctx context.Context, botID pgtype.UUID) error

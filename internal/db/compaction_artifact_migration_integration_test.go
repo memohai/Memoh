@@ -221,7 +221,7 @@ VALUES
 	if err != nil {
 		t.Fatalf("parse session id: %v", err)
 	}
-	if err := queries.DeleteMessagesBySession(ctx, parsedSessionID); err != nil {
+	if err := queries.ClearHistoryBySession(ctx, parsedSessionID); err != nil {
 		t.Fatalf("delete session history through generated query: %v", err)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_messages", 2)
@@ -232,7 +232,7 @@ VALUES
 	if err != nil {
 		t.Fatalf("parse foreign bot id: %v", err)
 	}
-	if err := queries.DeleteMessagesByBot(ctx, parsedForeignBotID); err != nil {
+	if err := queries.ClearHistoryByBot(ctx, parsedForeignBotID); err != nil {
 		t.Fatalf("delete bot history through generated query: %v", err)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_messages", 1)
@@ -243,7 +243,7 @@ VALUES
 	if err != nil {
 		t.Fatalf("parse repair session id: %v", err)
 	}
-	if err := queries.DeleteMessagesBySession(ctx, parsedRepairSessionID); err != nil {
+	if err := queries.ClearHistoryBySession(ctx, parsedRepairSessionID); err != nil {
 		t.Fatalf("delete repaired session history through generated query: %v", err)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_messages", 0)

@@ -1183,7 +1183,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		if err := q.DeleteSessionEventsByBot(ctx, pgBotID); err != nil {
 			return fmt.Errorf("clear session events: %w", err)
 		}
-		if err := q.DeleteMessagesByBot(ctx, pgBotID); err != nil {
+		if err := q.ClearHistoryByBot(ctx, pgBotID); err != nil {
 			return fmt.Errorf("clear history: %w", err)
 		}
 		if err := q.SoftDeleteSessionsByBot(ctx, pgBotID); err != nil {
