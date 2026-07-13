@@ -339,10 +339,37 @@ export function createTranscriptController({
     }
   }
 
-  function replaceMessages(items: UITurn[], targetSessionId?: string) {
+  function replaceMessages(items: UITurn[], targetSessionId?: string, options: { preserveOptimistic?: boolean } = {}) {
     onSnapshot(targetSessionId, items)
     const next = normalizeTurns(items, targetSessionId)
     adoptRenderIdentity(next)
+    if (options.preserveOptimistic) {
+      // A refresh snapshot can race the server persisting a just-sent turn:
+      // the first-send history fetch resolves after the optimistic user turn
+      // was appended but before the server has stored it, so the snapshot
+      // comes back without it. Carry unmatched optimistic USER turns over —
+      // assistants are excluded because the live stream re-attaches its own
+      // turn (reattachTurnToSession) and carrying it here would duplicate it
+      // against a persisted twin. Gated on an in-flight send (a streaming
+      // optimistic assistant): once the stream settled, the snapshot is
+      // authoritative and failed sends must not resurrect their turns.
+      const sendInFlight = messages.some(turn =>
+        isOptimisticTurn(turn) && turn.role === 'assistant' && turn.streaming)
+      if (sendInFlight) {
+        // Text match (not isSameLogicalTurn): its 5s timestamp tolerance can
+        // reject a genuine server twin (clock skew, slow persist), which
+        // would duplicate the user turn here.
+        const nextUserTexts = new Set(
+          next.filter(turn => turn.role === 'user').map(turn => turn.text.trim()),
+        )
+        const orphans = messages.filter(turn =>
+          isOptimisticTurn(turn)
+          && turn.role === 'user'
+          && !nextUserTexts.has(turn.text.trim()))
+        messages.splice(0, messages.length, ...next, ...orphans)
+        return
+      }
+    }
     messages.splice(0, messages.length, ...next)
   }
 
@@ -429,7 +456,11 @@ export function createTranscriptController({
       if (hasLoadedOlder.value) {
         mergeMessages(turns, sid)
       } else {
-        replaceMessages(turns, sid)
+        // preserveOptimistic: this refresh races the server persisting a
+        // just-sent turn (first send from a draft resolves history while the
+        // user message is still only optimistic locally) — a plain replace
+        // would blank the user's own message until the next refresh.
+        replaceMessages(turns, sid, { preserveOptimistic: true })
         // The API pages raw DB rows but returns merged UI turns, so a short
         // page is not proof that history ended. Only pagination can settle it.
         hasMoreOlder.value = true
