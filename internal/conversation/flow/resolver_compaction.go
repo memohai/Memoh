@@ -41,6 +41,7 @@ func asyncCompactionInputTokens(rc resolvedContext, providerInputTokens int) int
 }
 
 func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, inputTokens int) {
+	r.waitForStreamCompaction(req.StreamID)
 	inputTokens = asyncCompactionInputTokens(rc, inputTokens)
 	if r.compactionService == nil || r.settingsService == nil {
 		r.logger.Info("compaction: skipped, service or settings nil")
