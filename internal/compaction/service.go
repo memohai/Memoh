@@ -123,16 +123,12 @@ func ShouldCompact(inputTokens, threshold int) bool {
 	return threshold > 0 && inputTokens >= threshold
 }
 
-// TriggerCompaction runs compaction in the background. A session with a run
-// already in flight is skipped: the async trigger fires per request, so the
-// next turn re-evaluates the demand.
-func (s *Service) TriggerCompaction(ctx context.Context, cfg TriggerConfig) {
-	go func() {
-		bgCtx := context.WithoutCancel(ctx)
-		if _, _, err := s.runCompaction(bgCtx, cfg); err != nil {
-			s.logger.Error("compaction failed", slog.String("bot_id", cfg.BotID), slog.String("session_id", cfg.SessionID), slog.String("error", err.Error()))
-		}
-	}()
+// RunCompaction runs one automatic attempt without waiting for an existing
+// owner. The caller owns the goroutine lifetime so surrounding coordination
+// remains active until selection and persistence finish.
+func (s *Service) RunCompaction(ctx context.Context, cfg TriggerConfig) error {
+	_, _, err := s.runCompaction(context.WithoutCancel(ctx), cfg)
+	return err
 }
 
 // RunCompactionSync runs compaction synchronously and reports this session's

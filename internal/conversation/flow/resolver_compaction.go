@@ -89,7 +89,9 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 		// so the compaction service doesn't run hooks + fail on empty UUIDs.
 		return
 	}
-	r.compactionService.TriggerCompaction(ctx, cfg)
+	if err := r.compactionService.RunCompaction(ctx, cfg); err != nil {
+		r.logger.Error("compaction failed", slog.String("bot_id", cfg.BotID), slog.String("session_id", cfg.SessionID), slog.Any("error", err))
+	}
 }
 
 // runCompactionSync runs compaction synchronously when context reaches
