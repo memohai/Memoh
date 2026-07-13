@@ -123,6 +123,7 @@ type ModelConfig struct {
 	ContextWindow    *int     `json:"context_window,omitempty"`
 	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
 	ThinkingMode     string   `json:"thinking_mode,omitempty"`
+	CatalogAvailable *bool    `json:"catalog_available,omitempty"`
 }
 
 func normalizeModelConfig(config ModelConfig) ModelConfig {

@@ -562,6 +562,7 @@ type ProviderOauthToken struct {
 	TokenType        string             `json:"token_type"`
 	State            string             `json:"state"`
 	PkceCodeVerifier string             `json:"pkce_code_verifier"`
+	Metadata         []byte             `json:"metadata"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }

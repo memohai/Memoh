@@ -22,14 +22,27 @@
         v-if="providerId"
         class="ml-auto flex items-center gap-2"
       >
-        <ImportModelsDialog
-          :provider-id="providerId"
+        <LoadingButton
+          v-if="managed"
+          type="button"
+          variant="outline"
           size="sm"
-        />
-        <CreateModel
-          :id="providerId"
-          size="sm"
-        />
+          :loading="refreshLoading"
+          @click="refreshManagedModels"
+        >
+          <RefreshCw />
+          {{ $t('models.refreshModels') }}
+        </LoadingButton>
+        <template v-else>
+          <ImportModelsDialog
+            :provider-id="providerId"
+            size="sm"
+          />
+          <CreateModel
+            :id="providerId"
+            size="sm"
+          />
+        </template>
       </div>
     </div>
 
@@ -44,6 +57,7 @@
           :model="model"
           :delete-loading="deleteModelLoading"
           :search-aligned="searchVisible"
+          :managed="managed"
           @edit="(model) => $emit('edit', model)"
           @delete="(id) => $emit('delete', id)"
         />
@@ -110,13 +124,16 @@
         </EmptyMedia>
       </EmptyHeader>
       <EmptyTitle>{{ $t('models.emptyTitle') }}</EmptyTitle>
-      <EmptyDescription>{{ $t('models.emptyDescription') }}</EmptyDescription>
+      <EmptyDescription>
+        {{ $t(managed ? 'models.managedEmptyDescription' : 'models.emptyDescription') }}
+      </EmptyDescription>
     </Empty>
   </SettingsSection>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useQueryCache } from '@pinia/colada'
 import {
   Empty,
   EmptyDescription,
@@ -135,12 +152,16 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@felinic/ui'
-import { Search, List } from 'lucide-vue-next'
+import { Search, List, RefreshCw } from 'lucide-vue-next'
 import CreateModel from '@/components/create-model/index.vue'
 import ImportModelsDialog from '@/components/import-models-dialog/index.vue'
+import LoadingButton from '@/components/loading-button/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import ModelItem from './model-item.vue'
+import { postProvidersByIdImportModels } from '@memohai/sdk'
 import type { ModelsGetResponse } from '@memohai/sdk'
+import { toast } from '@felinic/ui'
+import { useI18n } from 'vue-i18n'
 
 const PAGE_SIZE = 8
 
@@ -148,6 +169,7 @@ const props = defineProps<{
   providerId: string | undefined
   models: ModelsGetResponse[] | undefined
   deleteModelLoading: boolean
+  managed?: boolean
 }>()
 
 defineEmits<{
@@ -157,6 +179,31 @@ defineEmits<{
 
 const searchQuery = ref('')
 const currentPage = ref(1)
+const refreshLoading = ref(false)
+const queryCache = useQueryCache()
+const { t } = useI18n()
+
+async function refreshManagedModels() {
+  if (!props.providerId) return
+  refreshLoading.value = true
+  try {
+    const { data } = await postProvidersByIdImportModels({
+      path: { id: props.providerId },
+      throwOnError: true,
+    })
+    queryCache.invalidateQueries({ key: ['provider-models'] })
+    queryCache.invalidateQueries({ key: ['models'] })
+    queryCache.invalidateQueries({ key: ['all-models'] })
+    toast.success(t('models.refreshSuccess', {
+      created: data?.created ?? 0,
+      updated: data?.updated ?? 0,
+    }))
+  } catch {
+    toast.error(t('models.refreshFailed'))
+  } finally {
+    refreshLoading.value = false
+  }
+}
 
 // Always offer search once there are models, so the box never disappears for a
 // short list (which read as inconsistent between providers). When it's shown,
@@ -165,9 +212,12 @@ const searchVisible = computed(() => !!props.models && props.models.length > 0)
 
 const filteredModels = computed(() => {
   if (!props.models) return []
-  if (!searchQuery.value) return props.models
+  const availableModels = props.managed
+    ? props.models.filter(model => model.config?.catalog_available !== false)
+    : props.models
+  if (!searchQuery.value) return availableModels
   const keyword = searchQuery.value.toLowerCase()
-  return props.models.filter((model) => {
+  return availableModels.filter((model) => {
     const name = (model.name ?? '').toLowerCase()
     const modelId = (model.model_id ?? '').toLowerCase()
     return name.includes(keyword) || modelId.includes(keyword)

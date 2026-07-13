@@ -3877,6 +3877,8 @@ definitions:
     type: object
   models.ModelConfig:
     properties:
+      catalog_available:
+        type: boolean
       compatibilities:
         items:
           type: string

@@ -18897,6 +18897,9 @@ const docTemplate = `{
         "models.ModelConfig": {
             "type": "object",
             "properties": {
+                "catalog_available": {
+                    "type": "boolean"
+                },
                 "compatibilities": {
                     "type": "array",
                     "items": {

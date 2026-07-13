@@ -93,6 +93,7 @@
       </Button>
 
       <Button
+        v-if="!managed"
         type="button"
         variant="ghost"
         size="icon-sm"
@@ -103,6 +104,7 @@
       </Button>
 
       <ConfirmPopover
+        v-if="!managed"
         :message="$t('models.deleteModelConfirm')"
         :loading="deleteLoading"
         @confirm="$emit('delete', model.id ?? '')"
@@ -144,8 +146,10 @@ const props = withDefaults(defineProps<{
   model: ModelsGetResponse
   deleteLoading: boolean
   searchAligned?: boolean
+  managed?: boolean
 }>(), {
   searchAligned: false,
+  managed: false,
 })
 
 defineEmits<{
