@@ -60,6 +60,7 @@ const (
 	ReasoningEffortHigh    = "high"
 	ReasoningEffortXHigh   = "xhigh"
 	ReasoningEffortMax     = "max"
+	ReasoningEffortUltra   = "ultra"
 )
 
 // ThinkingMode describes how a model's extended-thinking control behaves. It is
@@ -94,6 +95,7 @@ var validReasoningEfforts = map[string]struct{}{
 	ReasoningEffortHigh:    {},
 	ReasoningEffortXHigh:   {},
 	ReasoningEffortMax:     {},
+	ReasoningEffortUltra:   {},
 }
 
 var validThinkingModes = map[string]struct{}{

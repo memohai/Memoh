@@ -40,6 +40,19 @@ func TestModel_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "valid chat model with ultra reasoning",
+			model: models.Model{
+				ModelID:    "gpt-5.6-sol",
+				Name:       "GPT-5.6-Sol",
+				ProviderID: "11111111-1111-1111-1111-111111111111",
+				Type:       models.ModelTypeChat,
+				Config: models.ModelConfig{
+					ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max", "ultra"},
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "valid embedding model",
 			model: models.Model{
 				ModelID:    "text-embedding-ada-002",

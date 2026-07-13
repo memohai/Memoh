@@ -95,6 +95,86 @@ models:
 	}
 }
 
+func TestListCodexRemoteModels(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/backend-api/codex/models" {
+			t.Fatalf("path = %q, want /backend-api/codex/models", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("client_version"); got != codexModelsClientVersion {
+			t.Fatalf("client_version = %q, want %q", got, codexModelsClientVersion)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		if got := r.Header.Get("chatgpt-account-id"); got != "acct_123" {
+			t.Fatalf("chatgpt-account-id = %q", got)
+		}
+		if got := r.Header.Get("originator"); got != "codex_cli_rs" {
+			t.Fatalf("originator = %q", got)
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"models": []map[string]any{
+				{
+					"slug":         "gpt-5.6-sol",
+					"display_name": "GPT-5.6-Sol",
+					"visibility":   "list",
+					"supported_reasoning_levels": []map[string]any{
+						{"effort": "low"},
+						{"effort": "medium"},
+						{"effort": "high"},
+						{"effort": "xhigh"},
+						{"effort": "max"},
+						{"effort": "ultra"},
+					},
+					"context_window":   372000,
+					"input_modalities": []string{"text", "image"},
+				},
+				{
+					"slug":                       "internal-model",
+					"display_name":               "Internal Model",
+					"visibility":                 "hide",
+					"supported_reasoning_levels": []map[string]any{{"effort": "medium"}},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	svc := &Service{httpClient: server.Client()}
+	remoteModels, err := svc.listCodexRemoteModels(context.Background(), server.URL+"/backend-api", ModelCredentials{
+		APIKey:         "access-token",
+		CodexAccountID: "acct_123",
+	})
+	if err != nil {
+		t.Fatalf("list Codex models: %v", err)
+	}
+	if len(remoteModels) != 1 {
+		t.Fatalf("models = %d, want 1", len(remoteModels))
+	}
+	model := remoteModels[0]
+	if model.ID != "gpt-5.6-sol" || model.Name != "GPT-5.6-Sol" {
+		t.Fatalf("unexpected model: %#v", model)
+	}
+	if got := strings.Join(model.Compatibilities, ","); got != "tool-call,vision,reasoning" {
+		t.Fatalf("compatibilities = %q", got)
+	}
+	if got := strings.Join(model.ReasoningEfforts, ","); got != "low,medium,high,xhigh,max,ultra" {
+		t.Fatalf("reasoning efforts = %q", got)
+	}
+	if model.ThinkingMode != models.ThinkingModeToggle {
+		t.Fatalf("thinking mode = %q", model.ThinkingMode)
+	}
+	if model.ContextWindow == nil || *model.ContextWindow != 372000 {
+		t.Fatalf("context window = %#v", model.ContextWindow)
+	}
+}
+
 func TestNormalizeProviderConfig(t *testing.T) {
 	t.Parallel()
 
