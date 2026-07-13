@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"strconv"
 	"testing"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -189,8 +190,10 @@ func TestTenantChainReversible(t *testing.T) {
 	pool := freshMigratedDB(t)
 	dsn := tenantMigrationDSN(t)
 
-	// Number of tenant migrations layered on top of the base chain (0106..0109).
-	const tenantSteps = 4
+	// Number of tenant migrations layered on top of the base chain (>= 0106),
+	// computed from the embedded migration files so adding a migration doesn't
+	// break this test.
+	tenantSteps := countTenantMigrations(t)
 
 	// Step the tenant migrations down; tenants + app schema must be gone.
 	stepDown(t, dsn, tenantSteps)
@@ -251,8 +254,33 @@ func TestTenantsRootDownSafetyGate(t *testing.T) {
 		t.Fatalf("migrate init: %v", err)
 	}
 	defer func() { _, _ = m.Close() }()
-	if err := m.Steps(-4); err == nil {
+	if err := m.Steps(-countTenantMigrations(t)); err == nil {
 		t.Fatal("stepping tenant migrations down must fail closed with a non-default tenant present")
 	}
+}
+
+// countTenantMigrations returns how many embedded PostgreSQL migrations have a
+// version >= 106 (the tenant-core migrations added by this work).
+func countTenantMigrations(t *testing.T) int {
+	t.Helper()
+	entries, err := fs.ReadDir(postgresMigrationsFS(t), ".")
+	if err != nil {
+		t.Fatalf("read migrations dir: %v", err)
+	}
+	n := 0
+	for _, e := range entries {
+		name := e.Name()
+		if len(name) < 5 || name[len(name)-7:] != ".up.sql" {
+			continue
+		}
+		ver, err := strconv.Atoi(name[:4])
+		if err != nil {
+			continue
+		}
+		if ver >= 106 {
+			n++
+		}
+	}
+	return n
 }
 
