@@ -1,0 +1,2587 @@
+{
+  "base_commit": "ad301df5be32963f53be707e5423ecdab11a7e5c",
+  "canonical_source": "db/postgres/migrations/0001_init.up.sql",
+  "table_count": 48,
+  "extension": "pgcrypto",
+  "enum_types": [
+    "user_role"
+  ],
+  "note": "Inventory of the canonical (0001_init.up.sql) schema at the pinned base. 48 CREATE TABLE + 1 VIEW. Classification per tenant-schema contract §14. tenants (root) and tenant_write_fences (security meta) are NEW to-be-created tables and are NOT part of the canonical 48; see classification.md.",
+  "tables": [
+    {
+      "name": "bot_acl_rules",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "bot_acl_rules_unique_user",
+          "columns": [
+            "bot_id",
+            "action",
+            "effect",
+            "subject_kind",
+            "user_id",
+            "source_channel",
+            "source_conversation_type",
+            "source_conversation_id",
+            "source_thread_id"
+          ],
+          "nulls_not_distinct": true
+        },
+        {
+          "name": "bot_acl_rules_unique_channel_identity",
+          "columns": [
+            "bot_id",
+            "action",
+            "effect",
+            "subject_kind",
+            "channel_identity_id",
+            "source_channel",
+            "source_conversation_type",
+            "source_conversation_id",
+            "source_thread_id"
+          ],
+          "nulls_not_distinct": true
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "parent_table": "users",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "channel_identity_id"
+          ],
+          "parent_table": "channel_identities",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "created_by_user_id"
+          ],
+          "parent_table": "users",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_bot_acl_rules_bot_id",
+          "columns": [
+            "bot_id"
+          ]
+        },
+        {
+          "name": "idx_bot_acl_rules_user_id",
+          "columns": [
+            "user_id"
+          ]
+        },
+        {
+          "name": "idx_bot_acl_rules_channel_identity_id",
+          "columns": [
+            "channel_identity_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "bot_channel_admins",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "bot_channel_admins_unique",
+          "columns": [
+            "bot_id",
+            "channel_identity_id"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "channel_identity_id"
+          ],
+          "parent_table": "channel_identities",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "created_by_user_id"
+          ],
+          "parent_table": "users",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_bot_channel_admins_bot_id",
+          "columns": [
+            "bot_id"
+          ]
+        },
+        {
+          "name": "idx_bot_channel_admins_channel_identity_id",
+          "columns": [
+            "channel_identity_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "bot_channel_configs",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "bot_channel_unique",
+          "columns": [
+            "bot_id",
+            "channel_type"
+          ]
+        },
+        {
+          "name": "idx_bot_channel_external_identity",
+          "columns": [
+            "channel_type",
+            "external_identity"
+          ],
+          "via_unique_index": true
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_bot_channel_bot_id",
+          "columns": [
+            "bot_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "bot_channel_routes",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "idx_bot_channel_routes_unique",
+          "columns": [
+            "bot_id",
+            "channel_type",
+            "external_conversation_id",
+            "COALESCE(external_thread_id, '')"
+          ],
+          "via_unique_index": true
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "channel_config_id"
+          ],
+          "parent_table": "bot_channel_configs",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "active_session_id"
+          ],
+          "parent_table": "bot_sessions",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL",
+          "deferred_constraint": "fk_bot_channel_routes_active_session"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_bot_channel_routes_bot",
+          "columns": [
+            "bot_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "bot_email_bindings",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "bot_email_bindings_unique",
+          "columns": [
+            "bot_id",
+            "email_provider_id"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "email_provider_id"
+          ],
+          "parent_table": "email_providers",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_bot_email_bindings_bot_id",
+          "columns": [
+            "bot_id"
+          ]
+        },
+        {
+          "name": "idx_bot_email_bindings_provider_id",
+          "columns": [
+            "email_provider_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "bot_heartbeat_logs",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "session_id"
+          ],
+          "parent_table": "bot_sessions",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "model_id"
+          ],
+          "parent_table": "models",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_heartbeat_logs_bot_started",
+          "columns": [
+            "bot_id",
+            "started_at DESC"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "bot_history_message_assets",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "message_asset_content_unique",
+          "columns": [
+            "message_id",
+            "content_hash"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "message_id"
+          ],
+          "parent_table": "bot_history_messages",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_message_assets_message_id",
+          "columns": [
+            "message_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "bot_history_message_compacts",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "session_id"
+          ],
+          "parent_table": "bot_sessions",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "model_id"
+          ],
+          "parent_table": "models",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_compacts_bot_session",
+          "columns": [
+            "bot_id",
+            "session_id",
+            "started_at DESC"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "bot_history_messages",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "idx_bot_history_messages_turn_seq_unique",
+          "columns": [
+            "turn_id",
+            "turn_message_seq"
+          ],
+          "via_unique_index": true,
+          "partial": "turn_id IS NOT NULL AND turn_message_seq IS NOT NULL"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "session_id"
+          ],
+          "parent_table": "bot_sessions",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "sender_channel_identity_id"
+          ],
+          "parent_table": "channel_identities",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "NO ACTION"
+        },
+        {
+          "columns": [
+            "sender_account_user_id"
+          ],
+          "parent_table": "users",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "NO ACTION"
+        },
+        {
+          "columns": [
+            "model_id"
+          ],
+          "parent_table": "models",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "event_id"
+          ],
+          "parent_table": "bot_session_events",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "compact_id"
+          ],
+          "parent_table": "bot_history_message_compacts",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL",
+          "deferred_constraint": "fk_compact_id"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_bot_history_messages_bot_created",
+          "columns": [
+            "bot_id",
+            "created_at"
+          ]
+        },
+        {
+          "name": "idx_bot_history_messages_compact",
+          "columns": [
+            "compact_id"
+          ]
+        },
+        {
+          "name": "idx_bot_history_messages_session",
+          "columns": [
+            "session_id",
+            "created_at"
+          ]
+        },
+        {
+          "name": "idx_bot_history_messages_session_role_created",
+          "columns": [
+            "session_id",
+            "role",
+            "created_at",
+            "id"
+          ]
+        },
+        {
+          "name": "idx_bot_history_messages_turn",
+          "columns": [
+            "turn_id",
+            "turn_message_seq",
+            "created_at",
+            "id"
+          ],
+          "partial": "turn_id IS NOT NULL"
+        },
+        {
+          "name": "idx_bot_history_messages_visible_session_order",
+          "columns": [
+            "session_id",
+            "turn_position DESC",
+            "turn_message_seq DESC",
+            "created_at DESC",
+            "id DESC"
+          ],
+          "partial": "turn_visible = true\n    AND turn_id IS NOT NULL\n    AND turn_position IS NOT NULL\n    AND turn_message_seq IS NOT NULL"
+        },
+        {
+          "name": "idx_bot_history_messages_visible_session_source_order",
+          "columns": [
+            "session_id",
+            "source_message_id",
+            "turn_position DESC",
+            "turn_message_seq DESC",
+            "created_at DESC",
+            "id DESC"
+          ],
+          "partial": "turn_visible = true\n    AND source_message_id IS NOT NULL\n    AND turn_id IS NOT NULL\n    AND turn_position IS NOT NULL\n    AND turn_message_seq IS NOT NULL"
+        },
+        {
+          "name": "idx_bot_history_messages_session_source",
+          "columns": [
+            "session_id",
+            "source_message_id"
+          ]
+        },
+        {
+          "name": "idx_bot_history_messages_session_reply",
+          "columns": [
+            "session_id",
+            "source_reply_to_message_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "bot_plugin_installations",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "bot_plugin_installations_unique",
+          "columns": [
+            "bot_id",
+            "plugin_id"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_bot_plugin_installations_bot_id",
+          "columns": [
+            "bot_id"
+          ]
+        },
+        {
+          "name": "idx_bot_plugin_installations_plugin_id",
+          "columns": [
+            "plugin_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "bot_plugin_resources",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "bot_plugin_resources_unique",
+          "columns": [
+            "installation_id",
+            "resource_type",
+            "resource_key"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "installation_id"
+          ],
+          "parent_table": "bot_plugin_installations",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_bot_plugin_resources_installation_id",
+          "columns": [
+            "installation_id"
+          ]
+        },
+        {
+          "name": "idx_bot_plugin_resources_resource",
+          "columns": [
+            "resource_type",
+            "resource_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "bot_session_discuss_cursors",
+      "primary_key": [
+        "session_id",
+        "scope_key"
+      ],
+      "unique_constraints": [],
+      "foreign_keys": [
+        {
+          "columns": [
+            "session_id"
+          ],
+          "parent_table": "bot_sessions",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "route_id"
+          ],
+          "parent_table": "bot_channel_routes",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_bot_session_discuss_cursors_route",
+          "columns": [
+            "route_id"
+          ],
+          "partial": "route_id IS NOT NULL"
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "bot_session_events",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "idx_session_events_dedup",
+          "columns": [
+            "session_id",
+            "event_kind",
+            "external_message_id"
+          ],
+          "via_unique_index": true,
+          "partial": "external_message_id IS NOT NULL AND external_message_id != ''"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "session_id"
+          ],
+          "parent_table": "bot_sessions",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_session_events_session_received",
+          "columns": [
+            "session_id",
+            "received_at_ms"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "bot_sessions",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "route_id"
+          ],
+          "parent_table": "bot_channel_routes",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "parent_session_id"
+          ],
+          "parent_table": "bot_sessions",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "created_by_user_id"
+          ],
+          "parent_table": "users",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_bot_sessions_bot_id",
+          "columns": [
+            "bot_id"
+          ]
+        },
+        {
+          "name": "idx_bot_sessions_route_id",
+          "columns": [
+            "route_id"
+          ]
+        },
+        {
+          "name": "idx_bot_sessions_bot_active",
+          "columns": [
+            "bot_id",
+            "deleted_at"
+          ]
+        },
+        {
+          "name": "idx_bot_sessions_parent",
+          "columns": [
+            "parent_session_id"
+          ],
+          "partial": "parent_session_id IS NOT NULL"
+        },
+        {
+          "name": "idx_bot_sessions_created_by_user_id",
+          "columns": [
+            "created_by_user_id"
+          ],
+          "partial": "created_by_user_id IS NOT NULL"
+        },
+        {
+          "name": "idx_bot_sessions_bot_created_by",
+          "columns": [
+            "bot_id",
+            "created_by_user_id",
+            "deleted_at"
+          ]
+        },
+        {
+          "name": "idx_bot_sessions_bot_active_updated",
+          "columns": [
+            "bot_id",
+            "updated_at DESC",
+            "id DESC"
+          ],
+          "partial": "deleted_at IS NULL"
+        },
+        {
+          "name": "idx_bot_sessions_bot_mode_runtime_active_updated",
+          "columns": [
+            "bot_id",
+            "session_mode",
+            "runtime_type",
+            "updated_at DESC",
+            "id DESC"
+          ],
+          "partial": "deleted_at IS NULL"
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "bot_storage_bindings",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "bot_storage_bindings_unique",
+          "columns": [
+            "bot_id"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "storage_provider_id"
+          ],
+          "parent_table": "storage_providers",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_bot_storage_bindings_bot_id",
+          "columns": [
+            "bot_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "bot_user_grants",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "idx_bot_user_grants_unique_user",
+          "columns": [
+            "bot_id",
+            "user_id"
+          ],
+          "via_unique_index": true,
+          "partial": "subject_type = 'user'"
+        },
+        {
+          "name": "idx_bot_user_grants_unique_everyone",
+          "columns": [
+            "bot_id"
+          ],
+          "via_unique_index": true,
+          "partial": "subject_type = 'everyone'"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "parent_table": "users",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "created_by_user_id"
+          ],
+          "parent_table": "users",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_bot_user_grants_bot_id",
+          "columns": [
+            "bot_id"
+          ]
+        },
+        {
+          "name": "idx_bot_user_grants_user_id",
+          "columns": [
+            "user_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "bot_workspace_resource_limits",
+      "primary_key": [
+        "bot_id"
+      ],
+      "unique_constraints": [],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "bots",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "idx_bots_name",
+          "columns": [
+            "name"
+          ],
+          "via_unique_index": true
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "owner_user_id"
+          ],
+          "parent_table": "users",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "chat_model_id"
+          ],
+          "parent_table": "models",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "search_provider_id"
+          ],
+          "parent_table": "search_providers",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "fetch_provider_id"
+          ],
+          "parent_table": "fetch_providers",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "memory_provider_id"
+          ],
+          "parent_table": "memory_providers",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "heartbeat_model_id"
+          ],
+          "parent_table": "models",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "compaction_model_id"
+          ],
+          "parent_table": "models",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "title_model_id"
+          ],
+          "parent_table": "models",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "image_model_id"
+          ],
+          "parent_table": "models",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "discuss_probe_model_id"
+          ],
+          "parent_table": "models",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "tts_model_id"
+          ],
+          "parent_table": "models",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "transcription_model_id"
+          ],
+          "parent_table": "models",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "video_model_id"
+          ],
+          "parent_table": "models",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_bots_owner_user_id",
+          "columns": [
+            "owner_user_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "channel_identities",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "channel_identities_channel_type_subject_unique",
+          "columns": [
+            "channel_type",
+            "channel_subject_id"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "parent_table": "users",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_channel_identities_user_id",
+          "columns": [
+            "user_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "channel_identity_bind_codes",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "channel_identity_bind_codes_token_unique",
+          "columns": [
+            "token"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "issued_by_user_id"
+          ],
+          "parent_table": "users",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "NO ACTION"
+        },
+        {
+          "columns": [
+            "used_by_channel_identity_id"
+          ],
+          "parent_table": "channel_identities",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_channel_identity_bind_codes_channel_type",
+          "columns": [
+            "channel_type"
+          ]
+        }
+      ],
+      "classification": "待确认",
+      "classification_note": "待确认: present in canonical 0001 but DROPPED by incremental 0080_remove_channel_identity_binding.up.sql; absent from final full-apply state. Disposition owner must decide keep-vs-drop before tenantizing."
+    },
+    {
+      "name": "channel_link_codes",
+      "primary_key": [
+        "token"
+      ],
+      "unique_constraints": [],
+      "foreign_keys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "parent_table": "users",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "consumed_channel_identity_id"
+          ],
+          "parent_table": "channel_identities",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_channel_link_codes_user_id",
+          "columns": [
+            "user_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "container_versions",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": null,
+          "columns": [
+            "container_id",
+            "version"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "container_id"
+          ],
+          "parent_table": "containers",
+          "parent_columns": [
+            "container_id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "snapshot_id"
+          ],
+          "parent_table": "snapshots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "RESTRICT"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_container_versions_container_id",
+          "columns": [
+            "container_id"
+          ]
+        },
+        {
+          "name": "idx_container_versions_snapshot_id",
+          "columns": [
+            "snapshot_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "containers",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "containers_container_id_unique",
+          "columns": [
+            "container_id"
+          ]
+        },
+        {
+          "name": "containers_container_name_unique",
+          "columns": [
+            "container_name"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_containers_bot_id",
+          "columns": [
+            "bot_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "email_oauth_tokens",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": null,
+          "columns": [
+            "email_provider_id"
+          ],
+          "inline_column": true
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "email_provider_id"
+          ],
+          "parent_table": "email_providers",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_email_oauth_tokens_state",
+          "columns": [
+            "state"
+          ],
+          "partial": "state != ''"
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "email_outbox",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [],
+      "foreign_keys": [
+        {
+          "columns": [
+            "provider_id"
+          ],
+          "parent_table": "email_providers",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_email_outbox_provider_id",
+          "columns": [
+            "provider_id"
+          ]
+        },
+        {
+          "name": "idx_email_outbox_bot_id",
+          "columns": [
+            "bot_id",
+            "created_at DESC"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "email_providers",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "email_providers_user_name_unique",
+          "columns": [
+            "user_id",
+            "name"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "parent_table": "users",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_email_providers_user_id",
+          "columns": [
+            "user_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "fetch_providers",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "fetch_providers_name_unique",
+          "columns": [
+            "name"
+          ]
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "lifecycle_events",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [],
+      "foreign_keys": [
+        {
+          "columns": [
+            "container_id"
+          ],
+          "parent_table": "containers",
+          "parent_columns": [
+            "container_id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_lifecycle_events_container_id",
+          "columns": [
+            "container_id"
+          ]
+        },
+        {
+          "name": "idx_lifecycle_events_event_type",
+          "columns": [
+            "event_type"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "mcp_connections",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "mcp_connections_unique",
+          "columns": [
+            "bot_id",
+            "name"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "managed_by_plugin_installation_id"
+          ],
+          "parent_table": "bot_plugin_installations",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_mcp_connections_bot_id",
+          "columns": [
+            "bot_id"
+          ]
+        },
+        {
+          "name": "idx_mcp_connections_plugin_installation_id",
+          "columns": [
+            "managed_by_plugin_installation_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "mcp_oauth_tokens",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": null,
+          "columns": [
+            "connection_id"
+          ],
+          "inline_column": true
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "connection_id"
+          ],
+          "parent_table": "mcp_connections",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_mcp_oauth_tokens_connection_id",
+          "columns": [
+            "connection_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "memory_edges",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "memory_edges_unique",
+          "columns": [
+            "bot_id",
+            "src_node",
+            "dst_node",
+            "rel"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_memory_edges_src",
+          "columns": [
+            "bot_id",
+            "src_node"
+          ]
+        },
+        {
+          "name": "idx_memory_edges_dst",
+          "columns": [
+            "bot_id",
+            "dst_node"
+          ]
+        },
+        {
+          "name": "idx_memory_edges_rel",
+          "columns": [
+            "bot_id",
+            "rel"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "memory_nodes",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_memory_nodes_bot_layer",
+          "columns": [
+            "bot_id",
+            "layer"
+          ]
+        },
+        {
+          "name": "idx_memory_nodes_bot_topic",
+          "columns": [
+            "bot_id",
+            "topic"
+          ]
+        },
+        {
+          "name": "idx_memory_nodes_bot_prof",
+          "columns": [
+            "bot_id",
+            "profile_ref"
+          ]
+        },
+        {
+          "name": "idx_memory_nodes_updated",
+          "columns": [
+            "bot_id",
+            "updated_at DESC"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "memory_providers",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "memory_providers_name_unique",
+          "columns": [
+            "name"
+          ]
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "model_variants",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [],
+      "foreign_keys": [
+        {
+          "columns": [
+            "model_uuid"
+          ],
+          "parent_table": "models",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_model_variants_model_uuid",
+          "columns": [
+            "model_uuid"
+          ]
+        },
+        {
+          "name": "idx_model_variants_variant_id",
+          "columns": [
+            "variant_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "models",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "models_provider_id_model_id_unique",
+          "columns": [
+            "provider_id",
+            "model_id"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "provider_id"
+          ],
+          "parent_table": "providers",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "provider_oauth_tokens",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": null,
+          "columns": [
+            "provider_id"
+          ],
+          "inline_column": true
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "provider_id"
+          ],
+          "parent_table": "providers",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_provider_oauth_tokens_state",
+          "columns": [
+            "state"
+          ],
+          "partial": "state != ''"
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "providers",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "providers_name_unique",
+          "columns": [
+            "name"
+          ]
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "schedule",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_schedule_bot_id",
+          "columns": [
+            "bot_id"
+          ]
+        },
+        {
+          "name": "idx_schedule_enabled",
+          "columns": [
+            "enabled"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "schedule_logs",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [],
+      "foreign_keys": [
+        {
+          "columns": [
+            "schedule_id"
+          ],
+          "parent_table": "schedule",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "session_id"
+          ],
+          "parent_table": "bot_sessions",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "model_id"
+          ],
+          "parent_table": "models",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_schedule_logs_schedule",
+          "columns": [
+            "schedule_id",
+            "started_at DESC"
+          ]
+        },
+        {
+          "name": "idx_schedule_logs_bot",
+          "columns": [
+            "bot_id",
+            "started_at DESC"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "search_providers",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "search_providers_name_unique",
+          "columns": [
+            "name"
+          ]
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "snapshots",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "idx_snapshots_container_runtime_name",
+          "columns": [
+            "container_id",
+            "runtime_snapshot_name"
+          ],
+          "via_unique_index": true
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "container_id"
+          ],
+          "parent_table": "containers",
+          "parent_columns": [
+            "container_id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_snapshots_container_created_at",
+          "columns": [
+            "container_id",
+            "created_at DESC"
+          ]
+        },
+        {
+          "name": "idx_snapshots_runtime_name",
+          "columns": [
+            "runtime_snapshot_name"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "storage_providers",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "storage_providers_name_unique",
+          "columns": [
+            "name"
+          ]
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "tool_approval_requests",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "tool_approval_short_id_unique",
+          "columns": [
+            "session_id",
+            "short_id"
+          ]
+        },
+        {
+          "name": "tool_approval_tool_call_unique",
+          "columns": [
+            "session_id",
+            "tool_call_id"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "session_id"
+          ],
+          "parent_table": "bot_sessions",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "route_id"
+          ],
+          "parent_table": "bot_channel_routes",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "channel_identity_id"
+          ],
+          "parent_table": "channel_identities",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "requested_by_channel_identity_id"
+          ],
+          "parent_table": "channel_identities",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "decided_by_channel_identity_id"
+          ],
+          "parent_table": "channel_identities",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "requested_message_id"
+          ],
+          "parent_table": "bot_history_messages",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "prompt_message_id"
+          ],
+          "parent_table": "bot_history_messages",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_tool_approval_bot_status_created",
+          "columns": [
+            "bot_id",
+            "status",
+            "created_at"
+          ]
+        },
+        {
+          "name": "idx_tool_approval_session_status_created",
+          "columns": [
+            "session_id",
+            "status",
+            "created_at"
+          ]
+        },
+        {
+          "name": "idx_tool_approval_prompt_external",
+          "columns": [
+            "prompt_external_message_id"
+          ],
+          "partial": "prompt_external_message_id != ''"
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "user_channel_bindings",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "user_channel_bindings_unique",
+          "columns": [
+            "user_id",
+            "channel_type"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "parent_table": "users",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_user_channel_bindings_user_id",
+          "columns": [
+            "user_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "user_channel_identity_bindings",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "user_channel_identity_bindings_unique",
+          "columns": [
+            "user_id",
+            "channel_identity_id"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "parent_table": "users",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "channel_identity_id"
+          ],
+          "parent_table": "channel_identities",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_user_channel_identity_bindings_user_id",
+          "columns": [
+            "user_id"
+          ]
+        },
+        {
+          "name": "idx_user_channel_identity_bindings_channel_identity_id",
+          "columns": [
+            "channel_identity_id"
+          ]
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "user_input_requests",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "user_input_short_id_unique",
+          "columns": [
+            "session_id",
+            "short_id"
+          ]
+        },
+        {
+          "name": "user_input_tool_call_unique",
+          "columns": [
+            "session_id",
+            "tool_call_id"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "bot_id"
+          ],
+          "parent_table": "bots",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "session_id"
+          ],
+          "parent_table": "bot_sessions",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "route_id"
+          ],
+          "parent_table": "bot_channel_routes",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "channel_identity_id"
+          ],
+          "parent_table": "channel_identities",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "requested_by_channel_identity_id"
+          ],
+          "parent_table": "channel_identities",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "responded_by_channel_identity_id"
+          ],
+          "parent_table": "channel_identities",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "assistant_message_id"
+          ],
+          "parent_table": "bot_history_messages",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "tool_result_message_id"
+          ],
+          "parent_table": "bot_history_messages",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        },
+        {
+          "columns": [
+            "prompt_message_id"
+          ],
+          "parent_table": "bot_history_messages",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "SET NULL"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_user_input_bot_status_created",
+          "columns": [
+            "bot_id",
+            "status",
+            "created_at"
+          ]
+        },
+        {
+          "name": "idx_user_input_session_status_created",
+          "columns": [
+            "session_id",
+            "status",
+            "created_at"
+          ]
+        },
+        {
+          "name": "idx_user_input_prompt_external",
+          "columns": [
+            "prompt_external_message_id"
+          ],
+          "partial": "prompt_external_message_id != ''"
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "user_provider_oauth_tokens",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "user_provider_oauth_tokens_provider_user_unique",
+          "columns": [
+            "provider_id",
+            "user_id"
+          ]
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "provider_id"
+          ],
+          "parent_table": "providers",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "parent_table": "users",
+          "parent_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_user_provider_oauth_tokens_state",
+          "columns": [
+            "state"
+          ],
+          "partial": "state != ''"
+        }
+      ],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    },
+    {
+      "name": "users",
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "users_email_unique",
+          "columns": [
+            "email"
+          ]
+        },
+        {
+          "name": "users_username_unique",
+          "columns": [
+            "username"
+          ]
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [],
+      "classification": "normal tenant table",
+      "classification_note": "default: gets tenant_id per contract §14"
+    }
+  ],
+  "views": [
+    {
+      "name": "bot_visible_history_messages",
+      "base_table": "bot_history_messages",
+      "projects_tenant_column": false,
+      "filters_tenant_column": false,
+      "note": "Projects bot_id/session_id/sender_* (bot-scope) and filters turn_visible/turn_id/turn_position/turn_message_seq; no tenant column exists yet. Per contract §5.4 the view must project/enforce tenant_id once bot_history_messages is tenantized; it must not become a read bypass of tenant scope."
+    }
+  ]
+}
