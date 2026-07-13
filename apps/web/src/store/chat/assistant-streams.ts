@@ -7,6 +7,7 @@ export interface AssistantStream {
   readonly botId: string
   readonly sessionId: string
   readonly composerScope: string
+  readonly viewId: string
 }
 
 interface PendingAssistantStream extends AssistantStream {
@@ -26,6 +27,7 @@ export interface TrackAssistantStreamInput {
   botId: string
   sessionId: string
   composerScope?: string
+  viewId?: string
 }
 
 interface AssistantStreamRegistryDeps {
@@ -47,14 +49,6 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
     return [...streams.values()]
   }
 
-  function activeStreamIdsForSession(targetSessionId?: string | null): string[] {
-    const sid = (targetSessionId ?? '').trim()
-    if (!sid) return []
-    return activeStreams()
-      .filter(stream => stream.sessionId === sid)
-      .map(stream => stream.streamId)
-  }
-
   function activeUnboundStreamIds(botId: string | null | undefined, composerScope?: string): string[] {
     const bid = (botId ?? '').trim()
     const scope = composerScope?.trim()
@@ -66,15 +60,21 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
       .map(stream => stream.streamId)
   }
 
-  function assistantStreamsForSession(botId: string, targetSessionId: string): AssistantStream[] {
-    const bid = botId.trim()
-    const sid = targetSessionId.trim()
+  function assistantStreamsForSession(
+    botId: string | null | undefined,
+    targetSessionId: string | null | undefined,
+  ): AssistantStream[] {
+    const bid = (botId ?? '').trim()
+    const sid = (targetSessionId ?? '').trim()
     if (!bid || !sid) return []
     return activeStreams().filter(stream => stream.botId === bid && stream.sessionId === sid)
   }
 
-  function isSessionStreaming(targetSessionId?: string | null): boolean {
-    return activeStreamIdsForSession(targetSessionId).length > 0
+  function isSessionStreaming(
+    botId: string | null | undefined,
+    targetSessionId: string | null | undefined,
+  ): boolean {
+    return assistantStreamsForSession(botId, targetSessionId).length > 0
   }
 
   function isUnboundComposerStreaming(botId: string | null | undefined, composerScope?: string): boolean {
@@ -82,30 +82,36 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
   }
 
   const streamingSessionId = computed(() => {
+    const bid = (currentBotId.value ?? '').trim()
     const activeSid = (sessionId.value ?? '').trim()
-    const activeSessionIds = activeStreams().map(stream => stream.sessionId).filter(Boolean)
+    const activeSessionIds = activeStreams()
+      .filter(stream => stream.botId === bid)
+      .map(stream => stream.sessionId)
+      .filter(Boolean)
     if (activeSid && activeSessionIds.includes(activeSid)) return activeSid
     return activeSessionIds[0] ?? null
   })
 
   const streaming = computed(() => {
+    const bid = (currentBotId.value ?? '').trim()
     const activeSid = (sessionId.value ?? '').trim()
     return activeSid
-      ? isSessionStreaming(activeSid)
-      : isUnboundComposerStreaming(currentBotId.value)
+      ? isSessionStreaming(bid, activeSid)
+      : isUnboundComposerStreaming(bid)
   })
 
-  function fallbackStreamId(targetSessionId?: string | null): string {
-    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
-    return sid ? `session:${sid}:agent-stream` : 'legacy-stream'
+  function fallbackStreamId(botId: string, targetSessionId?: string | null): string {
+    const bid = botId.trim() || 'unbound'
+    const sid = (targetSessionId ?? '').trim()
+    return sid ? `session:${bid}:${sid}:agent-stream` : `bot:${bid}:legacy-stream`
   }
 
-  function streamIdForEvent(event: StreamIdentity, targetSessionId?: string): string {
+  function streamIdForEvent(botId: string, event: StreamIdentity, targetSessionId?: string): string {
     const explicit = (event.stream_id ?? '').trim()
     if (explicit) return explicit
     const sid = (event.session_id ?? targetSessionId ?? '').trim()
-    const activeIds = activeStreamIdsForSession(sid)
-    return activeIds.length === 1 ? activeIds[0]! : fallbackStreamId(sid)
+    const activeIds = assistantStreamsForSession(botId, sid).map(stream => stream.streamId)
+    return activeIds.length === 1 ? activeIds[0]! : fallbackStreamId(botId, sid)
   }
 
   // Promise construction registers synchronously. Callers rely on the stream
@@ -131,6 +137,7 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
         botId: input.botId,
         sessionId: input.sessionId.trim(),
         composerScope: input.composerScope?.trim() || 'chat',
+        viewId: input.viewId?.trim() || 'chat',
         resolve,
         reject,
       })
@@ -178,13 +185,6 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
     finishAssistantStream(streamId)?.resolve()
   }
 
-  function rejectSessionStreams(targetSessionId: string | null | undefined, error: Error, beforeReject?: BeforeReject) {
-    for (const streamId of activeStreamIdsForSession(targetSessionId)) {
-      beforeReject?.(streamId)
-      rejectAssistantStream(streamId, error)
-    }
-  }
-
   function rejectAllStreams(error: Error, beforeReject?: BeforeReject) {
     for (const stream of activeStreams()) {
       beforeReject?.(stream.streamId)
@@ -221,7 +221,6 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
   return {
     streaming,
     streamingSessionId,
-    activeStreamIdsForSession,
     activeUnboundStreamIds,
     assistantStreamsForSession,
     isSessionStreaming,
@@ -233,7 +232,6 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
     rejectAssistantStream,
     discardAssistantStream,
     isTerminalStream,
-    rejectSessionStreams,
     rejectAllStreams,
     recordCreatedSession,
     createdSessionIdForStream,

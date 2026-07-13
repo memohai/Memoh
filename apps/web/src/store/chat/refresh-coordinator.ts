@@ -6,7 +6,7 @@ interface ChatRefreshCoordinatorDeps {
   sessionId: Ref<string | null>
   fetchSessions: (botId: string) => Promise<FetchSessionsResult>
   applySessionsSnapshot: (response: FetchSessionsResult) => void
-  isSessionStreaming: (sessionId: string) => boolean
+  isSessionStreaming: (botId: string, sessionId: string) => boolean
   refreshCurrentSession: (botId: string, sessionId: string) => Promise<void>
 }
 
@@ -19,8 +19,7 @@ export function createChatRefreshCoordinator({
   refreshCurrentSession,
 }: ChatRefreshCoordinatorDeps) {
   const sessionListRequests = new Map<string, Promise<void>>()
-  let refreshTimer: ReturnType<typeof setTimeout> | null = null
-  let scheduledRefreshKey = ''
+  const sessionRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
   let scopeGeneration = 0
 
   function refreshSessionsList(botId: string): Promise<void> {
@@ -48,39 +47,50 @@ export function createChatRefreshCoordinator({
     return promise
   }
 
+  function scheduleSessionRefresh(botId: string, targetSessionId: string, delay = 100) {
+    const bid = botId.trim()
+    const sid = targetSessionId.trim()
+    if (!bid || !sid) return
+    const key = `${bid}:${sid}`
+    const previousTimer = sessionRefreshTimers.get(key)
+    if (previousTimer) clearTimeout(previousTimer)
+
+    const generation = scopeGeneration
+    const timer = setTimeout(() => {
+      if (sessionRefreshTimers.get(key) === timer) {
+        sessionRefreshTimers.delete(key)
+      }
+      if (generation !== scopeGeneration) return
+      if ((currentBotId.value ?? '').trim() !== bid) return
+      if (isSessionStreaming(bid, sid)) return
+      void refreshCurrentSession(bid, sid)
+    }, delay)
+    sessionRefreshTimers.set(key, timer)
+  }
+
+  // Compatibility for callers that still mean "the session focused right now".
+  // Capture that target at schedule time; later focus changes must not redirect
+  // or cancel the queued refresh.
   function scheduleRefreshCurrentSession(expectedSessionId?: string, delay = 100) {
     const bid = (currentBotId.value ?? '').trim()
     const sid = (sessionId.value ?? '').trim()
     if (!bid || !sid) return
     if (expectedSessionId?.trim() && expectedSessionId.trim() !== sid) return
-    const key = `${bid}:${sid}`
-    if (refreshTimer && scheduledRefreshKey === key) return
-    if (refreshTimer) clearTimeout(refreshTimer)
-
-    const generation = scopeGeneration
-    scheduledRefreshKey = key
-    refreshTimer = setTimeout(() => {
-      refreshTimer = null
-      scheduledRefreshKey = ''
-      if (generation !== scopeGeneration) return
-      if ((currentBotId.value ?? '').trim() !== bid || (sessionId.value ?? '').trim() !== sid) return
-      if (isSessionStreaming(sid)) return
-      void refreshCurrentSession(bid, sid)
-    }, delay)
+    scheduleSessionRefresh(bid, sid, delay)
   }
 
   function resetRefreshCoordinator() {
     scopeGeneration += 1
     sessionListRequests.clear()
-    if (refreshTimer) {
-      clearTimeout(refreshTimer)
-      refreshTimer = null
+    for (const timer of sessionRefreshTimers.values()) {
+      clearTimeout(timer)
     }
-    scheduledRefreshKey = ''
+    sessionRefreshTimers.clear()
   }
 
   return {
     refreshSessionsList,
+    scheduleSessionRefresh,
     scheduleRefreshCurrentSession,
     resetRefreshCoordinator,
   }

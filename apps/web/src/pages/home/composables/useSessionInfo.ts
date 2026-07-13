@@ -7,8 +7,11 @@ import { getBotsByBotIdSessionsBySessionIdStatus, postBotsByBotIdSessionsBySessi
 import type { HandlersSessionInfoResponse } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useChatStore } from '@/store/chat-list'
+import { useChatViewTarget } from './useChatViewContext'
 
 interface UseSessionInfoOptions {
+  botId?: Ref<string | null | undefined>
+  sessionId?: Ref<string | null | undefined>
   visible?: Ref<boolean>
   overrideModelId?: Ref<string>
   // The session status only reports a context window once the backend can
@@ -19,7 +22,13 @@ interface UseSessionInfoOptions {
 
 export function useSessionInfo(options: UseSessionInfoOptions = {}) {
   const chatStore = useChatStore()
-  const { currentBotId, sessionId } = storeToRefs(chatStore)
+  const storeRefs = storeToRefs(chatStore)
+  const viewTarget = useChatViewTarget()
+  const currentBotId = options.botId ?? computed(() => viewTarget.value.botId || storeRefs.currentBotId.value)
+  // The injected target already falls back to the global selection when there
+  // is no ChatPane provider. Within a provided Draft, null is the real target
+  // and must not inherit another pane's focused Session.
+  const sessionId = options.sessionId ?? computed(() => viewTarget.value.sessionId)
   const visible = options.visible ?? ref(true)
 
   const { data: info } = useQuery({

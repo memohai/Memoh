@@ -21,9 +21,9 @@ import i18n from '@/i18n'
 //   display panels, splits, tab order) persisted per bot
 // - the left activity-bar + side-panel state (active view, collapsed, width)
 //
-// The active chat session itself lives in the chat-selection store. The chat
-// panel is a singleton dockview panel whose content follows the active
-// session; files/terminals/browsers are multi-instance panels. Desktop is a
+// The active chat session itself lives in the chat-selection store. Chat
+// panels are multi-instance dockview views keyed by panel id; the global
+// selection still follows whichever chat view is active. Desktop is a
 // singleton WebRTC viewer per bot (DISPLAY_PANEL_ID).
 
 export type SidebarView = 'sessions' | 'files' | 'schedule'
@@ -620,7 +620,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       id,
       component: 'chat',
       title: chatTitleFallbackFor(sid),
-      params: { sessionId: sid },
+      params: {
+        sessionId: sid,
+        explicitSelection: chatStore.hasExplicitSessionSelection === true,
+      },
     })) {
       markEphemeral(id)
     }
@@ -746,12 +749,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     title: string
     params?: Record<string, unknown>
     groupId?: string
+    inactive?: boolean
   }): boolean {
     const dock = api.value
     if (!dock) return false
     const existing = dock.getPanel(opts.id)
     if (existing) {
-      focusPanel(existing)
+      if (!opts.inactive) focusPanel(existing)
       return true
     }
     const target = nonTerminalTarget(dock, opts.groupId)
@@ -769,6 +773,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       title: opts.title,
       params: opts.params,
       renderer: 'always',
+      inactive: opts.inactive,
       ...(target ? { position: target } : {}),
     })
     markEphemeral(opts.id)
@@ -886,7 +891,14 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
    * is focused; otherwise the open reuses the target group's ephemeral slot (so
    * browsing sessions in the sidebar swaps one preview tab, VS Code-style). The
    * tab starts ephemeral and pins when the user sends a message in it. */
-  function openSessionChat(opts: { sessionId: string, title?: string, groupId?: string, explicitSelection?: boolean }) {
+  function openSessionChat(opts: {
+    sessionId: string
+    title?: string
+    groupId?: string
+    explicitSelection?: boolean
+    groupLocal?: boolean
+    activate?: boolean
+  }) {
     const dock = api.value
     if (!dock) return
     const sid = opts.sessionId.trim()
@@ -896,9 +908,16 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (isDeletedSessionForCurrentBot(sid)) return
     const title = opts.title?.trim() || chatTitleFallbackFor(sid)
     const explicitSelection = opts.explicitSelection !== false
-    const existing = chatPanelForSession(sid)
+    const activate = opts.activate !== false
+    const existing = opts.groupLocal && opts.groupId
+      ? dock.getGroup(opts.groupId)?.panels.find(
+          panel => panelComponentOf(panel.id) === 'chat' && panelSessionId(panel) === sid,
+        )
+      : chatPanelForSession(sid)
     if (existing) {
       existing.api.setTitle(title)
+      existing.api.updateParameters({ explicitSelection })
+      if (!activate) return
       if (dock.activePanel?.id === existing.id) {
         selectChatSession(sid, explicitSelection)
         return
@@ -922,8 +941,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         )
       : undefined
     if (reusable) {
-      reusable.api.updateParameters({ sessionId: sid })
+      reusable.api.updateParameters({ sessionId: sid, explicitSelection })
       reusable.api.setTitle(title)
+      if (!activate) return
       setNextChatActivationExplicit(reusable.id, explicitSelection)
       focusPanel(reusable)
       // Repointing an already-active panel doesn't refire activation, so select
@@ -937,8 +957,31 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       id,
       component: 'chat',
       title,
-      params: { sessionId: sid },
+      params: { sessionId: sid, explicitSelection },
       groupId: opts.groupId,
+      inactive: !activate,
+    })
+  }
+
+  function openSessionChatFromView(opts: {
+    viewId: string
+    sessionId: string
+    title?: string
+    expectedSessionId?: string | null
+    explicitSelection?: boolean
+    activate?: boolean
+  }) {
+    const dock = api.value
+    const origin = dock?.getPanel(opts.viewId)
+    if (!dock || !origin || panelComponentOf(origin.id) !== 'chat') return
+    if ('expectedSessionId' in opts && panelSessionId(origin) !== opts.expectedSessionId) return
+    openSessionChat({
+      sessionId: opts.sessionId,
+      title: opts.title,
+      groupId: origin.group.id,
+      explicitSelection: opts.explicitSelection,
+      groupLocal: true,
+      activate: opts.activate,
     })
   }
 
@@ -946,11 +989,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
    * in New Tab": a single click (openSessionChat) reuses the group's ephemeral
    * chat slot so browsing the sidebar swaps one preview tab, but an explicit
    * right-click means "give me a separate tab" — so it lands as a pinned chat
-   * tab the preview slot can never evict. Stays in ONE group (chat split is
-   * disabled — a single global messages array means two visible chat panels
-   * would both render the active session), and tabs are mutually exclusive, so
-   * a pinned chat tab is safe: activating it renders its session. An already-open
-   * tab for the session is promoted to pinned + focused. */
+   * tab the preview slot can never evict. An already-open tab for the session is
+   * promoted to pinned + focused. */
   function openSessionChatPinned(opts: { sessionId: string, title?: string, groupId?: string }) {
     const dock = api.value
     if (!dock) return
@@ -974,19 +1014,23 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       id: nextChatPanelId(bid),
       component: 'chat',
       title,
-      params: { sessionId: sid },
+      params: { sessionId: sid, explicitSelection: true },
       renderer: 'always',
       ...(target ? { position: target } : {}),
     })
   }
 
-  /** Open or focus the single draft chat tab (no session yet). */
+  /** Open or focus a draft chat tab (no session yet). An explicit group owns its
+   * own draft; callers without a group retain the legacy global-first behavior. */
   function openDraftChat(opts?: { title?: string, groupId?: string, explicitSelection?: boolean }) {
     const dock = api.value
     if (!dock) return
     const bid = (currentBotId.value ?? '').trim()
     if (!bid) return
-    const existingDraft = dock.panels.find(
+    const draftCandidates = opts?.groupId
+      ? dock.getGroup(opts.groupId)?.panels ?? []
+      : dock.panels
+    const existingDraft = draftCandidates.find(
       p => panelComponentOf(p.id) === 'chat' && panelSessionId(p) === null,
     )
     if (existingDraft) {
@@ -1009,8 +1053,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     })
   }
 
-  // Activating a chat tab makes its session the live one (single global messages
-  // array). Gated to chat panels by the caller.
+  // Activating a chat tab focuses its panel-scoped state and mirrors its session
+  // into the global selection. Gated to chat panels by the caller.
   function activateChatSession(
     panel: { id: string, params?: Record<string, unknown> },
     options?: { explicitSelection?: boolean },
@@ -1019,10 +1063,19 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     // That is not a user click, and must not promote a stale restored chat tab into
     // an explicit chat-selection entry before chat initialization/default ACP wins.
     if (suppressPersist) return
+    // Switch the panel-scoped chat state before the global selection changes. ACP
+    // draft staging uses this transition to persist the old view before loading
+    // the newly focused panel.
+    chatStore.focusChatView(panel.id)
     const explicitOverride = consumeNextChatActivationExplicit(panel.id)
     const sid = panelSessionId(panel)
     if (sid) {
-      const explicitSelection = options?.explicitSelection ?? explicitOverride !== false
+      const panelExplicitSelection = typeof panel.params?.explicitSelection === 'boolean'
+        ? panel.params.explicitSelection
+        : true
+      const explicitSelection = options?.explicitSelection
+        ?? explicitOverride
+        ?? panelExplicitSelection
       selectChatSession(sid, explicitSelection)
     }
     else {
@@ -1052,12 +1105,16 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       // selection. Once loading settles, the loading watcher calls this again.
       if (!explicitSelection && chatStore.loadingChats) return
       if (isDeletedSessionForCurrentBot(sid)) return
-      if (activeIsChat && activeSession === sid) return
+      if (activeIsChat && activeSession === sid) {
+        chatStore.focusChatView(active.id)
+        return
+      }
       openSessionChat({ sessionId: sid, groupId, explicitSelection })
       return
     }
     if (!activeIsChat) return
     if (activeSession === null) {
+      chatStore.focusChatView(active.id)
       if (active.params?.explicitSelection !== explicitSelection) {
         active.api.updateParameters({ explicitSelection })
       }
@@ -1079,11 +1136,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const dock = api.value
     if (!dock) return
     const explicitSelection = !chatStore.sessionId && chatStore.hasExplicitSessionSelection === true
-    for (const panel of dock.panels) {
-      if (panelComponentOf(panel.id) !== 'chat' || panelSessionId(panel) !== null) continue
-      if (panel.params?.explicitSelection === explicitSelection) continue
-      panel.api.updateParameters({ explicitSelection })
-    }
+    const panel = dock.activePanel
+    if (!panel || panelComponentOf(panel.id) !== 'chat' || panelSessionId(panel) !== null) return
+    if (panel.params?.explicitSelection === explicitSelection) return
+    panel.api.updateParameters({ explicitSelection })
   }
 
   // Keep each open chat tab's title in step with its session's server title. Draft
@@ -1468,6 +1524,30 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const params = source.params as Record<string, unknown> | undefined
 
     switch (comp) {
+      case 'chat': {
+        const bid = (currentBotId.value ?? '').trim()
+        if (!bid) return
+        const id = nextChatPanelId(bid)
+        const explicitSelection = typeof params?.explicitSelection === 'boolean'
+          ? params.explicitSelection
+          : chatStore.hasExplicitSessionSelection === true
+        setNextChatActivationExplicit(id, explicitSelection)
+        dock.addPanel({
+          id,
+          component: 'chat',
+          title,
+          params: {
+            sessionId: params?.sessionId ?? null,
+            explicitSelection,
+          },
+          renderer: 'always',
+          position,
+        })
+        // Each split starts as this new group's preview slot. Choosing another
+        // session in that group repoints the split in place until the user sends.
+        markEphemeral(id)
+        break
+      }
       case 'terminal': {
         if (!hasCurrentPermission('workspace_exec')) return
         const bid = (currentBotId.value ?? '').trim()
@@ -1541,9 +1621,6 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         })
         break
       }
-      // No 'chat' case: the single global messages array means two chat panels in
-      // separate groups would both render the ACTIVE session (wrong data, not just
-      // stale). Splitting chat is disabled until per-session message state exists.
     }
   }
 
@@ -1855,25 +1932,88 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     () => prunePanels(),
   )
 
-  // A sent message pins the session's chat tab (it is no longer a preview). For a
-  // draft, this also repoints the active draft tab to the freshly created session.
+  // A sent message pins exactly the originating chat view (it is no longer a
+  // preview). Draft promotion also repoints only that view to the new session.
   watch(() => chatStore.userSentInSession, (sig) => {
     if (!sig) return
     const dock = api.value
-    if (!dock) return
-    let panel = chatPanelForSession(sig.id)
-    if (!panel && sig.wasDraft) {
-      const active = dock.activePanel
-      if (active && panelComponentOf(active.id) === 'chat' && panelSessionId(active) === null) {
-        active.api.updateParameters({ sessionId: sig.id })
-        panel = active
-      }
+    const bid = (currentBotId.value ?? '').trim()
+    if (!dock || !bid || sig.botId !== bid) return
+    const panel = dock.getPanel(sig.viewId)
+    if (!panel || panelComponentOf(panel.id) !== 'chat') return
+    const currentSessionId = panelSessionId(panel)
+    if (sig.wasDraft) {
+      // A delayed create must not overwrite a panel that has since been reused
+      // for another session.
+      if (currentSessionId && currentSessionId !== sig.id) return
+      panel.api.updateParameters({ sessionId: sig.id })
     }
-    if (panel) {
-      pinPanel(panel.id)
-      syncChatTitles()
-    }
+    else if (currentSessionId !== sig.id) return
+    pinPanel(panel.id)
+    syncChatTitles()
   })
+
+  // `/new` can finish resolving Agent defaults after focus has moved to a
+  // different split. The workspace owns the final Draft panel id because a
+  // preview can be reused in place while a pinned source must remain open and
+  // receive a new preview beside it.
+  watch(() => chatStore.draftViewRequested, (request) => {
+    if (!request) return
+    const dock = api.value
+    const bid = (currentBotId.value ?? '').trim()
+    if (!dock || request.botId !== bid) return
+    const panel = dock.getPanel(request.viewId)
+    if (!panel || panelComponentOf(panel.id) !== 'chat') return
+    if (panelSessionId(panel) !== request.expectedSessionId) return
+
+    const activate = request.activate && dock.activePanel?.id === panel.id
+    if (ephemeralPanels.value[panel.id]) {
+      chatStore.applyDraftViewRequest(request, activate)
+      panel.api.updateParameters({
+        sessionId: null,
+        explicitSelection: request.explicitSelection,
+      })
+      panel.api.setTitle(DEFAULT_CHAT_TITLE)
+      return
+    }
+
+    const id = nextChatPanelId(bid)
+    const draftRequest = { ...request, viewId: id }
+    if (activate) setNextChatActivationExplicit(id, request.explicitSelection)
+    if (!openEphemeral({
+      id,
+      component: 'chat',
+      title: DEFAULT_CHAT_TITLE,
+      params: {
+        sessionId: null,
+        explicitSelection: request.explicitSelection,
+      },
+      groupId: panel.group.id,
+      inactive: !activate,
+    })) return
+    chatStore.applyDraftViewRequest(draftRequest, activate)
+  }, { flush: 'sync' })
+
+  // A Fork belongs to the panel where it was requested, even if hydration
+  // completes after another split gains focus. Preview sources are repointed;
+  // pinned sources keep their Session and get a new preview in the same group.
+  watch(() => chatStore.forkedSessionRequested, (request) => {
+    if (!request) return
+    const dock = api.value
+    const bid = (currentBotId.value ?? '').trim()
+    if (!dock || request.botId !== bid) return
+    const panel = dock.getPanel(request.viewId)
+    if (!panel || panelComponentOf(panel.id) !== 'chat') return
+    if (panelSessionId(panel) !== request.expectedSessionId) return
+    openSessionChatFromView({
+      viewId: request.viewId,
+      sessionId: request.sessionId,
+      title: request.title,
+      expectedSessionId: request.expectedSessionId,
+      explicitSelection: request.explicitSelection,
+      activate: request.activate && dock.activePanel?.id === panel.id,
+    })
+  }, { flush: 'sync' })
 
   // Keep the active chat tab in step with the global session when it is set from
   // OUTSIDE a tab activation (initialize picking a session, an ACP session being
@@ -1960,6 +2100,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     showWorkbench,
     hideWorkbench,
     openSessionChat,
+    openSessionChatFromView,
     openSessionChatPinned,
     openDraftChat,
     openFile,

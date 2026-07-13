@@ -28,6 +28,12 @@ interface PendingACPStageSnapshot {
   modelId: string
 }
 
+export interface DetachedACPSession {
+  input: ACPAgentSessionInput
+  runtimeId: string
+  botId: string
+}
+
 export function acpSessionMetadata(input: ACPAgentSessionInput): Record<string, unknown> {
   const agentId = input.agentId.trim()
   const projectMode = input.projectMode?.trim() || ACP_DEFAULT_PROJECT_MODE
@@ -356,7 +362,7 @@ export function createACPStaging(deps: ACPStagingDeps) {
 
   // Detaches the staged ACP session without closing its warm runtime, so the
   // first send can bind the runtime to the real session.
-  function detachPendingACPSession(): { input: ACPAgentSessionInput; runtimeId: string; botId: string } | null {
+  function detachPendingACPSession(): DetachedACPSession | null {
     const pending = pendingACPSessionInput.value
     if (!pending) return null
     const runtimeId = pendingACPRuntimeId.value
@@ -383,6 +389,10 @@ export function createACPStaging(deps: ACPStagingDeps) {
     pendingACPSessionInput.value = null
     pendingACPRuntimeId.value = ''
     pendingACPBotId.value = ''
+  }
+
+  function discardDetachedACPSession(detached: DetachedACPSession) {
+    closeStagedRuntime(detached.botId, detached.runtimeId)
   }
 
   function pendingACPMatchesInput(input: ACPAgentSessionInput): boolean {
@@ -415,6 +425,7 @@ export function createACPStaging(deps: ACPStagingDeps) {
     detachPendingACPSession,
     restorePendingACPSession,
     releasePendingACPSession,
+    discardDetachedACPSession,
     pendingACPMatchesInput,
   }
 }

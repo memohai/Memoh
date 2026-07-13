@@ -188,6 +188,7 @@ import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
 import { useChatStore } from '@/store/chat-list'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
+import { useChatViewTarget } from '../composables/useChatViewContext'
 import {
   getToolDisplay,
   isDirPathTool,
@@ -203,6 +204,7 @@ import Capsule from './tool-detail/capsule.vue'
 const props = defineProps<{ block: ToolCallBlock, inGroup?: boolean }>()
 const { t } = useI18n()
 const chatStore = useChatStore()
+const chatViewTarget = useChatViewTarget()
 
 const openInFileManager = inject(openInFileManagerKey, undefined)
 
@@ -369,6 +371,6 @@ function handleOpenInFiles() {
 function handleApproval(decision: 'approve' | 'reject') {
   const approval = props.block.approval
   if (!approval) return
-  void chatStore.respondToolApproval(approval, decision)
+  void chatStore.respondToolApproval(approval, decision, chatViewTarget.value)
 }
 </script>

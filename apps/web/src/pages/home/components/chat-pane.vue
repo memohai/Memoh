@@ -127,7 +127,7 @@
           <ChatScrollRail
             :messages="messages"
             :scroll-el="scrollEl"
-            :enabled="isActive && !loadingChats"
+            :enabled="isVisible && !loadingChats"
             @jump="handleRailJump"
           />
         </section>
@@ -772,7 +772,7 @@
                       :aria-label="streaming ? 'Stop generating response' : 'Send message'"
                       class="absolute inset-0 size-9 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
                       :class="(sendButtonVisible || streaming) ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
-                      @click="streaming ? chatStore.abort() : handleSend()"
+                      @click="streaming ? chatStore.abort(paneTarget) : handleSend()"
                     >
                       <span
                         class="grid size-[20px] shrink-0 place-items-center"
@@ -838,6 +838,7 @@ import {
 } from 'lucide-vue-next'
 import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner, toast } from '@felinic/ui'
 import { useChatStore, type ACPAgentSessionInput, type ChatMessage } from '@/store/chat-list'
+import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { storeToRefs } from 'pinia'
 import { useIntersectionObserver } from '@vueuse/core'
 import { useQuery } from '@pinia/colada'
@@ -864,8 +865,10 @@ import { useMediaGallery } from '../composables/useMediaGallery'
 import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAttachments } from '../composables/useComposerAttachments'
 import { useComposerDrafts } from '../composables/useComposerDrafts'
 import { useComposerLayout } from '../composables/useComposerLayout'
+import { provideChatViewTarget } from '../composables/useChatViewContext'
 import { fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
 import { commandResultQuickActionText, isCommandResultItemSelectable } from './slash-command-result'
+import { captureChatPaneSendContext, matchesChatPaneSendContext } from './chat-pane-send'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
@@ -879,15 +882,18 @@ const props = withDefaults(defineProps<{
   // The session this pane renders (null = unsaved draft). Decoupled from tabId so
   // a draft→real promotion never remounts this pane.
   sessionId?: string | null
+  visible?: boolean
   active?: boolean
 }>(), {
   tabId: 'chat',
   sessionId: null,
+  visible: true,
   active: true,
 })
 
 const { t } = useI18n()
 const chatStore = useChatStore()
+const workspaceTabs = useWorkspaceTabsStore()
 const { pill: bgTaskPill, scrollToOffscreen, cleanup: cleanupBgTaskBeacons } = provideBgTaskBeacons()
 onBeforeUnmount(cleanupBgTaskBeacons)
 const {
@@ -914,30 +920,47 @@ const agentChanging = ref(false)
 const acpModelChanging = ref(false)
 
 const {
-  messages,
-  streaming,
   currentBotId,
   bots,
-  activeSession,
-  activeChatTarget,
-  activeChatReadOnly,
-  activeChatCanFork,
-  loadingOlder,
   loadingChats,
-  loadingMessages,
-  hasMoreOlder,
-  overrideModelId,
-  overrideReasoningEffort,
-  startupSendFailure,
-  pendingACPModelId,
-  pendingACPRuntimeStatus,
-  pendingACPRuntimeEnsuring,
   hasExplicitSessionSelection,
 } = storeToRefs(chatStore)
 
 const isActive = computed(() => props.active !== false)
+const isVisible = computed(() => props.visible !== false)
+const paneTarget = computed(() => ({
+  botId: currentBotId.value?.trim() ?? '',
+  sessionId: props.sessionId?.trim() || null,
+  viewId: props.tabId.trim() || 'chat',
+}))
+provideChatViewTarget(paneTarget)
+const pendingACPState = computed(() => chatStore.pendingACPStateFor(paneTarget.value))
+const pendingACPModelId = computed(() => pendingACPState.value?.modelId ?? '')
+const pendingACPRuntimeStatus = computed(() => pendingACPState.value?.runtimeStatus)
+const pendingACPRuntimeEnsuring = computed(() => pendingACPState.value?.ensuring ?? false)
+const paneView = computed(() => chatStore.chatView(paneTarget.value))
+const messages = computed(() => paneView.value.transcript.messages)
+const loadingMessages = computed(() => paneView.value.transcript.loadingMessages.value)
+const loadingOlder = computed(() => paneView.value.transcript.loadingOlder.value)
+const hasMoreOlder = computed(() => paneView.value.transcript.hasMoreOlder.value)
+const streaming = computed(() => chatStore.isChatViewStreaming(paneTarget.value))
+const creatingSession = computed(() => chatStore.isChatViewCreatingSession(paneTarget.value))
+const activeChatTarget = computed(() => chatStore.chatTargetFor(paneTarget.value))
+const activeSession = computed(() => activeChatTarget.value.session)
+const activeChatReadOnly = computed(() => chatStore.chatReadOnlyFor(paneTarget.value))
+const activeChatCanFork = computed(() => chatStore.chatCanForkFor(paneTarget.value))
+const overrideModelId = ref('')
+const overrideReasoningEffort = ref('')
+const paneComposerScope = computed(() => {
+  const botId = paneTarget.value.botId
+  return botId ? `${botId}:${paneTarget.value.viewId}` : 'chat'
+})
+const startupSendFailure = computed(() => chatStore.startupSendFailureFor(
+  paneTarget.value,
+  paneComposerScope.value,
+))
 const hasRenderedSession = computed(() =>
-  !!(props.sessionId || activeChatTarget.value.sessionId || chatStore.sessionId || '').trim(),
+  !!(paneTarget.value.sessionId || activeChatTarget.value.sessionId || '').trim(),
 )
 
 // A fresh, writable chat opens with the composer centred and a greeting above
@@ -1113,7 +1136,7 @@ const activeACPProjectLabel = computed(() => {
   const parts = path.split('/').filter(Boolean)
   return path ? parts[parts.length - 1] ?? path : t('chat.noProject')
 })
-const canChangeAgent = computed(() => !streaming.value && messages.value.length === 0)
+const canChangeAgent = computed(() => !streaming.value && !creatingSession.value && messages.value.length === 0)
 
 
 function messageMatchesForkSource(message: ChatMessage): boolean {
@@ -1146,7 +1169,7 @@ function showForkSourceDividerBefore(index: number): boolean {
 const composerMenuHasItems = computed(() =>
   (canChangeAgent.value && enabledACPProfiles.value.length > 0) || !activeIsACP.value,
 )
-const activeSessionId = computed(() => activeSession.value?.id ?? '')
+const activeSessionId = computed(() => paneTarget.value.sessionId ?? activeSession.value?.id ?? '')
 const requestedSkills = ref<RequestedSkillSelection[]>([])
 const skillSlashEnabled = computed(() => !activeIsACP.value && !activeIsPendingACP.value)
 const { data: safeSkillCatalog, isLoading: safeSkillCatalogLoading } = useQuery({
@@ -1178,7 +1201,7 @@ function addRequestedSkill(skill: RequestedSkillSelection) {
     inputText.value = ''
     saveInputDraft(inputDraftKey.value, '')
   }
-  chatStore.clearCommandEvent()
+  clearCurrentCommandEvent()
   void nextTick(focusTextarea)
 }
 
@@ -1190,13 +1213,13 @@ function removeRequestedSkill(skill: RequestedSkillSelection) {
 
 watch([currentBotId, activeSessionId], () => {
   requestedSkills.value = []
-  chatStore.clearCommandEvent()
+  clearCurrentCommandEvent()
 })
 
 watch(skillSlashEnabled, (enabled) => {
   if (enabled) return
   requestedSkills.value = []
-  chatStore.clearCommandEvent()
+  clearCurrentCommandEvent()
 })
 
 const slashQuickActions = computed(() => [
@@ -1280,6 +1303,9 @@ const {
   isCompacting: isCompactingSession,
   triggerCompact: triggerSessionCompact,
 } = useSessionInfo({
+  botId: computed(() => paneTarget.value.botId),
+  sessionId: computed(() => paneTarget.value.sessionId),
+  visible: isVisible,
   overrideModelId,
   fallbackContextWindow: computed(() => activeModel.value?.config?.context_window ?? null),
 })
@@ -1340,9 +1366,9 @@ function localQuickActionIDForSlash(text: string): string {
 }
 
 function currentPaneCommandScope() {
-  const activeBotId = (currentBotId.value ?? '').trim()
-  const renderedSessionId = (props.sessionId || activeSessionId.value || chatStore.sessionId || '').trim()
-  const paneScope = activeBotId && props.tabId.trim() ? `${activeBotId}:${props.tabId.trim()}` : 'chat'
+  const activeBotId = paneTarget.value.botId
+  const renderedSessionId = paneTarget.value.sessionId ?? ''
+  const paneScope = paneComposerScope.value
   return renderedSessionId
     ? { botId: activeBotId || undefined, sessionId: renderedSessionId, composerScope: paneScope }
     : { botId: activeBotId || undefined, composerScope: paneScope }
@@ -1585,25 +1611,27 @@ function pendingMatchesDefaultACP(input: ACPAgentSessionInput): boolean {
     && metadata?.acp_project_mode === (input.projectMode || ACP_DEFAULT_PROJECT_MODE)
 }
 
-watch([defaultACPUnavailableMessage, defaultACPLoading, currentBotId, hasExplicitSessionSelection], ([message, loading]) => {
+watch([defaultACPUnavailableMessage, defaultACPLoading, currentBotId, hasExplicitSessionSelection, isActive], ([message, loading, _bot, _explicit, focused]) => {
+  if (!focused) return
   clearDefaultACPComposerError()
   if (!message || !currentBotId.value) return
   if (hasExplicitSessionSelection.value) return
   if (!loading) {
-    chatStore.resetToEmptyComposer()
+    chatStore.resetToEmptyComposer({}, paneTarget.value)
   }
   defaultACPComposerError.value = message
   composerError.value = message
 }, { immediate: true })
 
-watch([defaultACPSessionInput, defaultACPLoading, currentBotId, hasExplicitSessionSelection, activeChatTarget], ([input, loading]) => {
+watch([defaultACPSessionInput, defaultACPLoading, currentBotId, hasExplicitSessionSelection, activeChatTarget, isActive], ([input, loading, _bot, _explicit, _target, focused]) => {
+  if (!focused) return
   if (!currentBotId.value) return
   if (!input) {
     if (!loading) {
       chatStore.cacheDefaultACPSession(null)
     }
     if (!loading && !hasExplicitSessionSelection.value && activeIsPendingACP.value) {
-      chatStore.resetToEmptyComposer()
+      chatStore.resetToEmptyComposer({}, paneTarget.value)
     }
     return
   }
@@ -1611,14 +1639,14 @@ watch([defaultACPSessionInput, defaultACPLoading, currentBotId, hasExplicitSessi
   if (hasExplicitSessionSelection.value) return
   clearDefaultACPComposerError()
   if (pendingMatchesDefaultACP(input)) return
-  chatStore.stageDefaultACPSession(input)
+  chatStore.stageDefaultACPSession(input, paneTarget.value)
 }, { immediate: true })
 
 watch([modelPopoverOpen, activeIsPendingACP, activeIsACP, activeSessionId], ([open, isPending, isACP, sessionID]) => {
   if (!open) return
   if (isPending) {
     if (pendingACPRuntimeStatus.value || pendingACPRuntimeEnsuring.value) return
-    void chatStore.ensurePendingACPRuntime().catch((error) => {
+    void chatStore.ensurePendingACPRuntime(paneTarget.value).catch((error) => {
       composerError.value = resolveApiErrorMessage(error, t('chat.agentSwitchFailed'))
     })
     return
@@ -1667,15 +1695,15 @@ async function selectACPAgent(profile: AcpprofilePublicProfile) {
   agentChanging.value = true
   composerError.value = ''
   try {
-    if (chatStore.sessionId) {
+    if (paneTarget.value.sessionId) {
       await withAgentSwitchTimeout(chatStore.updateCurrentSessionAgent({
         agentId,
-      }))
+      }, paneTarget.value))
     } else {
       chatStore.stageACPSession({
         agentId,
-      })
-      await withAgentSwitchTimeout(chatStore.ensurePendingACPRuntime())
+      }, {}, paneTarget.value)
+      await withAgentSwitchTimeout(chatStore.ensurePendingACPRuntime(paneTarget.value))
     }
     pendingFiles.value = []
   } catch (error) {
@@ -1688,8 +1716,8 @@ async function selectACPAgent(profile: AcpprofilePublicProfile) {
 async function selectMemohAgent() {
   if (agentChanging.value || !canChangeAgent.value) return
   agentPopoverOpen.value = false
-  if (!chatStore.sessionId) {
-    chatStore.resetToEmptyComposer({ explicitSelection: true })
+  if (!paneTarget.value.sessionId) {
+    chatStore.resetToEmptyComposer({ explicitSelection: true }, paneTarget.value)
     clearDefaultACPComposerError()
     composerError.value = ''
     pendingFiles.value = []
@@ -1699,7 +1727,7 @@ async function selectMemohAgent() {
   agentChanging.value = true
   composerError.value = ''
   try {
-    await withAgentSwitchTimeout(chatStore.updateCurrentSessionToMemoh())
+    await withAgentSwitchTimeout(chatStore.updateCurrentSessionToMemoh(paneTarget.value))
   } catch (error) {
     composerError.value = agentSwitchErrorMessage(error)
   } finally {
@@ -1724,7 +1752,7 @@ async function onACPModelSelected(model: AcpclientModelInfo) {
     acpModelChanging.value = true
     composerError.value = ''
     try {
-      await chatStore.setPendingACPModel(modelId)
+      await chatStore.setPendingACPModel(modelId, paneTarget.value)
     } catch (error) {
       composerError.value = resolveApiErrorMessage(error, t('chat.modelSwitchFailed'))
     } finally {
@@ -1750,7 +1778,7 @@ async function onPendingACPDefaultModelSelected() {
   composerError.value = ''
   try {
     // May reset the warm runtime back to the agent default model.
-    await chatStore.setPendingACPModel('')
+    await chatStore.setPendingACPModel('', paneTarget.value)
   } catch (error) {
     composerError.value = resolveApiErrorMessage(error, t('chat.modelSwitchFailed'))
   } finally {
@@ -1811,46 +1839,21 @@ const { inputDraftKey, saveInputDraft, clearAllDrafts } = useComposerDrafts({
 
 watch([
   startupSendFailure,
-  currentBotId,
-  () => chatStore.sessionId,
-  () => props.tabId,
-  isActive,
+  paneTarget,
+  isVisible,
 ], ([failure]) => {
-  if (!failure || !isActive.value) return
-  const discardFailure = () => chatStore.clearStartupSendFailure(failure.id)
-  if (failure.botId && failure.botId !== currentBotId.value) {
-    discardFailure()
-    return
-  }
+  if (!failure || !isVisible.value) return
+  if (failure.botId && failure.botId !== paneTarget.value.botId) return
   const failureScope = failure.composerScope?.trim()
   const paneScope = inputDraftKey.value || 'chat'
-  const renderedSessionId = (props.sessionId || activeSessionId.value || chatStore.sessionId || '').trim()
+  const renderedSessionId = paneTarget.value.sessionId ?? ''
   if (failureScope) {
-    if (failureScope !== paneScope) {
-      discardFailure()
-      return
-    }
+    if (failureScope !== paneScope) return
     if (failure.sessionId) {
-      if (renderedSessionId !== failure.sessionId) {
-        discardFailure()
-        return
-      }
-    } else if (renderedSessionId) {
-      discardFailure()
-      return
-    }
+      if (renderedSessionId !== failure.sessionId) return
+    } else if (renderedSessionId) return
   } else {
-    if (failure.sessionId && failure.sessionId !== chatStore.sessionId) {
-      discardFailure()
-      return
-    }
-    // This pane carries the session it renders directly now (was derived from tabId
-    // which is the stable panel id, not the session). A draft pane (null) still
-    // accepts the restore for the send it just attempted.
-    if (failure.sessionId && props.sessionId && props.sessionId !== failure.sessionId) {
-      discardFailure()
-      return
-    }
+    if (failure.sessionId && failure.sessionId !== renderedSessionId) return
   }
 
   inputText.value = failure.restoreInput
@@ -1932,8 +1935,8 @@ const {
   contentEl: descEl,
   lastTurnEl,
   messages,
-  isActive,
-  sessionId: computed(() => chatStore.sessionId),
+  isActive: isVisible,
+  sessionId: computed(() => paneTarget.value.sessionId ?? `draft:${paneTarget.value.viewId}`),
 })
 const showJumpToBottom = computed(() => showJumpToBottomFromScroll.value && !loadingChats.value)
 
@@ -1965,7 +1968,7 @@ async function ensureOlderLoaded() {
   if (!messages.value.length) return
   suppressAutoScrollForPrepend()
   try {
-    await chatStore.loadOlderMessages()
+    await chatStore.loadOlderMessages(paneTarget.value)
   } catch (error) {
     console.error('Failed to load older messages:', error)
   }
@@ -1974,7 +1977,7 @@ async function ensureOlderLoaded() {
 useIntersectionObserver(
   loadMoreSentinel,
   ([entry]) => {
-    if (!isActive.value) return
+    if (!isVisible.value) return
     if (!entry?.isIntersecting) return
     void ensureOlderLoaded()
   },
@@ -1996,9 +1999,9 @@ onDeactivated(() => {
 async function handleReplyJump(messageId: string) {
   const target = messageId.trim()
   if (!target) return
-  const localId = chatStore.findMessageIdByExternalId(target)
+  const localId = chatStore.findMessageIdByExternalId(target, paneTarget.value)
   if (localId && await scrollToMessage(localId)) return
-  const locatedId = await chatStore.locateMessageByExternalId(target)
+  const locatedId = await chatStore.locateMessageByExternalId(target, paneTarget.value)
   if (locatedId) {
     await scrollToMessage(locatedId)
   }
@@ -2008,10 +2011,17 @@ async function handleForkSourceClick() {
   const source = forkSource.value
   const botId = currentBotId.value?.trim() ?? ''
   if (!source || !botId || openingForkSource.value) return
+  const origin = { ...paneTarget.value }
   openingForkSource.value = true
   try {
     await fetchSession(botId, source.sessionId)
-    await chatStore.selectSession(source.sessionId, { explicitSelection: true })
+    workspaceTabs.openSessionChatFromView({
+      viewId: origin.viewId,
+      sessionId: source.sessionId,
+      title: source.title,
+      expectedSessionId: origin.sessionId,
+      explicitSelection: true,
+    })
   } catch {
     toast.error(t('chat.forkSourceUnavailable'))
   } finally {
@@ -2069,7 +2079,11 @@ function handleComposerKeydown(e: KeyboardEvent) {
 
 async function handleRetryMessage(messageId: string) {
   composerError.value = ''
-  const result = await chatStore.retryLatestAssistant(messageId)
+  const result = await chatStore.retryLatestAssistant(messageId, {
+    target: paneTarget.value,
+    modelId: overrideModelId.value,
+    reasoningEffort: overrideReasoningEffort.value,
+  })
   if (!result.ok && result.error) {
     composerError.value = result.error
   }
@@ -2078,7 +2092,11 @@ async function handleRetryMessage(messageId: string) {
 async function handleEditMessage(messageId: string, text: string, done?: (started: boolean) => void) {
   composerError.value = ''
   try {
-    const result = await chatStore.editLatestUser(messageId, text)
+    const result = await chatStore.editLatestUser(messageId, text, {
+      target: paneTarget.value,
+      modelId: overrideModelId.value,
+      reasoningEffort: overrideReasoningEffort.value,
+    })
     if (!result.ok && result.error) {
       composerError.value = result.error
     }
@@ -2123,9 +2141,12 @@ async function handleSend() {
   }
 
   const sentDraftKey = inputDraftKey.value
-  const sentComposerScope = inputDraftKey.value || 'chat'
-  const sentBotId = currentBotId.value ?? ''
-  const sentSessionId = activeSessionId.value || ''
+  const sentContext = captureChatPaneSendContext(
+    paneTarget.value,
+    inputDraftKey.value || 'chat',
+  )
+  const sentModelId = overrideModelId.value
+  const sentReasoningEffort = overrideReasoningEffort.value
   composerError.value = ''
   inputText.value = ''
   saveInputDraft(sentDraftKey, '')
@@ -2138,6 +2159,11 @@ async function handleSend() {
       attachments = await Promise.all(files.map(fileToAttachment))
     }
   } catch (error) {
+    if (!matchesChatPaneSendContext(
+      sentContext,
+      paneTarget.value,
+      inputDraftKey.value || 'chat',
+    )) return
     inputText.value = text
     pendingFiles.value = files
     requestedSkills.value = skills
@@ -2150,9 +2176,17 @@ async function handleSend() {
   // not leave a latent pin behind; startup failures roll the arm back.
   let rollbackPin: (() => void) | null = null
   const result = await chatStore.sendMessage(text, attachments, {
+    target: sentContext.target,
+    modelId: sentModelId,
+    reasoningEffort: sentReasoningEffort,
     requestedSkills: skills,
-    composerScope: sentComposerScope,
+    composerScope: sentContext.composerScope,
     onBeforeTurnAppend: () => {
+      if (!matchesChatPaneSendContext(
+        sentContext,
+        paneTarget.value,
+        inputDraftKey.value || 'chat',
+      )) return
       rollbackPin = pinAfterSend()
     },
     onTurnAppendAborted: () => {
@@ -2163,11 +2197,11 @@ async function handleSend() {
   rollbackPin = null
   if (!result.ok && result.stage === 'startup') {
     const restoreInput = result.restoreInput ?? text
-    const activeRenderedSessionId = (props.sessionId || activeSessionId.value || chatStore.sessionId || '').trim()
-    const stillOriginalComposer = (currentBotId.value ?? '') === sentBotId
-      && (inputDraftKey.value || 'chat') === sentComposerScope
-      && ((!sentSessionId && !activeRenderedSessionId) || (!!sentSessionId && activeRenderedSessionId === sentSessionId))
-    if (!stillOriginalComposer) return
+    if (!matchesChatPaneSendContext(
+      sentContext,
+      paneTarget.value,
+      inputDraftKey.value || 'chat',
+    )) return
     inputText.value = restoreInput
     saveInputDraft(sentDraftKey, restoreInput)
     pendingFiles.value = files

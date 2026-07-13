@@ -18,11 +18,17 @@ vi.hoisted(() => {
 })
 
 const api = vi.hoisted(() => ({
+  closeACPRuntime: vi.fn(),
   connectWebSocket: vi.fn(),
+  createACPRuntime: vi.fn(),
+  ensureACPRuntime: vi.fn(),
   fetchBots: vi.fn(),
   fetchMessagesUI: vi.fn(),
   fetchSession: vi.fn(),
   fetchSessions: vi.fn(),
+  locateMessageUI: vi.fn(),
+  setACPRuntimeModel: vi.fn(),
+  setACPRuntimeModelByID: vi.fn(),
   streamBotSessionsActivityEvents: vi.fn(),
   streamSessionMessageEvents: vi.fn(),
 }))
@@ -43,6 +49,18 @@ const colada = vi.hoisted(() => ({
 vi.mock('@/composables/api/useChat', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/composables/api/useChat')>()
   return { ...original, ...api }
+})
+vi.mock('@/i18n', () => ({
+  default: { global: { t: (key: string) => key } },
+}))
+vi.mock('@vueuse/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@vueuse/core')>()
+  const { ref } = await import('vue')
+  return {
+    ...actual,
+    useLocalStorage: (_key: string, initial: unknown) => ref(initial),
+    useStorage: (_key: string, initial: unknown) => ref(initial),
+  }
 })
 vi.mock('@pinia/colada', () => ({ useQuery: colada.useQuery }))
 
@@ -169,12 +187,13 @@ describe('useSubagentList', () => {
       title: 'Child task',
     }]
     const workspaceTabs = useWorkspaceTabsStore()
-    const openSessionChat = vi.spyOn(workspaceTabs, 'openSessionChat').mockImplementation(() => {})
+    const openSessionChat = vi.spyOn(workspaceTabs, 'openSessionChatFromView').mockImplementation(() => {})
 
     const { navigateToSession } = useSubagentList()
     navigateToSession('child-1')
 
     expect(openSessionChat).toHaveBeenCalledWith({
+      viewId: 'chat',
       sessionId: 'child-1',
       title: 'Child task',
     })

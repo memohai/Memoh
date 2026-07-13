@@ -38,15 +38,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Spinner } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
-import { storeToRefs } from 'pinia'
 import { useChatStore } from '@/store/chat-list'
+import { useChatViewTarget } from '../composables/useChatViewContext'
 
 // Fork-from-message dialog. The parent only opens it with the target message
-// id; the fork call itself goes through the chat store here, so a successful
-// fork also switches the active session as a side effect of forkMessage.
+// id; the fork call itself goes through the chat store, which routes the result
+// back to this panel even if another split gains focus while it is being made.
 const props = defineProps<{
   open: boolean
   messageId: string
@@ -58,7 +58,8 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const chatStore = useChatStore()
-const { activeSession } = storeToRefs(chatStore)
+const chatViewTarget = useChatViewTarget()
+const activeSession = computed(() => chatStore.chatTargetFor(chatViewTarget.value).session)
 
 const forkSessionTitle = ref('')
 const forkSubmitting = ref(false)
@@ -80,7 +81,7 @@ async function handleCreateFork() {
   if (!messageId || !title || forkSubmitting.value) return
   forkSubmitting.value = true
   try {
-    const ok = await chatStore.forkMessage(messageId, { title })
+    const ok = await chatStore.forkMessage(messageId, { title, target: chatViewTarget.value })
     if (ok) emit('update:open', false)
   } finally {
     forkSubmitting.value = false

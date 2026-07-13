@@ -62,7 +62,7 @@
               <SessionItem
                 :session="vRow.session"
                 :is-active="sessionId === vRow.session.id"
-                :streaming="chatStore.isSessionStreaming(vRow.session.id)"
+                :streaming="chatStore.isSessionStreaming(currentBotId, vRow.session.id)"
                 @select="handleSelect"
                 @open-new-tab="handleOpenNewTab"
                 @rename="openRenameSessionDialog"

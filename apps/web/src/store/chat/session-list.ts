@@ -1,4 +1,4 @@
-import { computed, ref, type Ref } from 'vue'
+import { computed, isRef, ref, type Ref } from 'vue'
 import type { SessionSummary, UITurn } from '@/composables/api/useChat.types'
 import {
   isSessionVisibleInSidebarMode,
@@ -23,7 +23,7 @@ export interface SessionListDeps {
   currentBotId: Ref<string | null>
   sessionId: Ref<string | null>
   // The active transcript, read (never written) by fork-anchor relocation.
-  messages: ChatMessage[]
+  messages: ChatMessage[] | Ref<ChatMessage[]>
 }
 
 export type SessionLookupSource = 'listed' | 'remembered' | 'unknown'
@@ -45,6 +45,7 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
   const sessionsCursor = ref<string | null>(null)
   const hasMoreSessions = ref(false)
   const loadingMoreSessions = ref(false)
+  const activeMessages = () => isRef(messages) ? messages.value : messages
 
   const activeSession = computed(() => knownSessionSummary(sessionId.value ?? ''))
   const knownSessions = computed<SessionSummary[]>(() => {
@@ -153,11 +154,15 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
     return Boolean(target) && forkMessageCandidates(message).includes(target)
   }
 
-  function latestInheritedAssistantBefore(index: number, session?: SessionSummary | null): string {
+  function latestInheritedAssistantBefore(
+    index: number,
+    session?: SessionSummary | null,
+    transcript = activeMessages(),
+  ): string {
     const cutoff = Date.parse(session?.created_at ?? '')
     const hasCutoff = Number.isFinite(cutoff)
     for (let i = index - 1; i >= 0; i--) {
-      const message = messages[i]
+      const message = transcript[i]
       if (message?.role !== 'assistant') continue
       if (hasCutoff) {
         const timestamp = Date.parse(message.timestamp)
@@ -168,7 +173,11 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
     return ''
   }
 
-  function updateForkAnchorForReplacedMessage(targetSessionId: string, target: ChatMessage): (() => void) | null {
+  function updateForkAnchorForReplacedMessage(
+    targetSessionId: string,
+    target: ChatMessage,
+    transcript = activeMessages(),
+  ): (() => void) | null {
     const sid = targetSessionId.trim()
     if (!sid) return null
     const known = knownSessionSummary(sid)
@@ -176,13 +185,13 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
     const currentAnchor = String(fork?.fork_message_id ?? '').trim()
     if (!known || !fork || !currentAnchor) return null
 
-    const targetIndex = messages.indexOf(target)
+    const targetIndex = transcript.indexOf(target)
     if (targetIndex < 0) return null
-    const replacedTailContainsAnchor = messages
+    const replacedTailContainsAnchor = transcript
       .slice(targetIndex)
       .some(message => messageMatchesForkAnchor(message, currentAnchor))
     if (!replacedTailContainsAnchor) return null
-    const nextAnchor = latestInheritedAssistantBefore(targetIndex, known)
+    const nextAnchor = latestInheritedAssistantBefore(targetIndex, known, transcript)
     if (nextAnchor === currentAnchor) return null
 
     const metadata = known.metadata && typeof known.metadata === 'object' ? known.metadata : {}
@@ -297,6 +306,8 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
   }
 
   function rememberSession(updated: SessionSummary) {
+    const bid = (updated.bot_id ?? currentBotId.value ?? '').trim()
+    if (deletedSessionIdsByBot.get(bid)?.has(updated.id)) return
     rememberedSessions.value = {
       ...rememberedSessions.value,
       [updated.id]: updated,
