@@ -77,6 +77,65 @@ func TestHandleReplyWithAgentConsumesCompactionArtifacts(t *testing.T) {
 	}
 }
 
+func TestDirectDiscussPromptRecipeReloadsAndRecomposesAtCursor(t *testing.T) {
+	t.Parallel()
+
+	rc := RenderedContext{
+		{MessageID: "old", ReceivedAtMs: 100, MentionsMe: true, Content: []RenderedContentPiece{{Type: "text", Text: "old rendered context"}}},
+		{MessageID: "current", ReceivedAtMs: 300, Content: []RenderedContentPiece{{Type: "text", Text: "current rendered context"}}},
+	}
+	artifact := CompactionArtifact{
+		ID:            "artifact-a",
+		Summary:       "condensed old context",
+		AnchorStartMs: 100,
+		Sources:       []CompactionSource{{ExternalMessageID: "old", CreatedAtMs: 200}},
+	}
+	preparer := &capturingDirectDiscussPromptPreparer{
+		rebuild: true,
+		prepared: PreparedDirectDiscussPrompt{
+			RunConfig: agentpkg.RunConfig{Messages: []sdk.Message{sdk.UserMessage("prepared")}},
+			Receipt:   &countingDirectDiscussReceipt{},
+		},
+	}
+	resolver := &fakeRunConfigResolver{
+		resolveResult: ResolveRunConfigResult{DirectDiscussPromptPreparer: preparer},
+		projectionFn: func(call int) (ContextHistoryProjection, error) {
+			if call == 1 {
+				return ContextHistoryProjection{}, nil
+			}
+			return ContextHistoryProjection{CompactionArtifacts: []CompactionArtifact{artifact}}, nil
+		},
+	}
+	driver := NewDiscussDriver(DiscussDriverDeps{Resolver: resolver})
+	sess := &discussSession{
+		config:          DiscussSessionConfig{BotID: "bot", SessionID: "session", UserID: "account-user"},
+		lastProcessedMs: 50,
+	}
+
+	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, &fakeDiscussStreamer{})
+
+	if resolver.projectionCalls != 2 {
+		t.Fatalf("history projection calls = %d, want initial load + recipe rebuild", resolver.projectionCalls)
+	}
+	if len(preparer.input.Sources) != 3 {
+		t.Fatalf("rebuilt prompt sources = %#v", preparer.input.Sources)
+	}
+	joined := sdkMessageText([]sdk.Message{
+		preparer.input.Sources[0].Message,
+		preparer.input.Sources[1].Message,
+		preparer.input.Sources[2].Message,
+	})
+	if strings.Contains(joined, "old rendered context") || !strings.Contains(joined, "condensed old context") || !strings.Contains(joined, "current rendered context") {
+		t.Fatalf("rebuilt prompt = %s", joined)
+	}
+	if preparer.input.Sources[0].SummaryFrag == nil || preparer.input.Sources[0].SummaryFrag.Ref.ID != "artifact-a" {
+		t.Fatalf("rebuilt summary provenance = %#v", preparer.input.Sources[0])
+	}
+	if !strings.Contains(sdkMessageText([]sdk.Message{preparer.input.Sources[2].Message}), "being addressed directly") {
+		t.Fatalf("rebuilt late binding forgot the attempt trigger: %#v", preparer.input.Sources[2].Message)
+	}
+}
+
 func TestHandleReplyWithAgentConsumesCoveredReplayWithoutCallingModel(t *testing.T) {
 	t.Parallel()
 

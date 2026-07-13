@@ -13,6 +13,7 @@ import (
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 )
@@ -297,8 +298,9 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 		log.Error("discuss: resolve run config failed", slog.Any("error", err))
 		return
 	}
+	promptCursor := sess.lastProcessedMs
 	if strings.TrimSpace(resolved.RuntimeType) == sessionpkg.RuntimeACPAgent {
-		isMentioned := wasRecentlyMentioned(activeRC, sess.lastProcessedMs)
+		isMentioned := wasRecentlyMentioned(activeRC, promptCursor)
 		// A direct/1:1 conversation is always "addressed" (matching the inbound
 		// layer's isDirectedAtBot/shouldTriggerAssistantResponse), so a DM
 		// discuss-ACP session must reply even without an explicit @-mention or
@@ -322,12 +324,22 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 			log.Error("discuss ACP runtime: prompt preparer not configured")
 			return
 		}
-		prepared, prepareErr := resolved.DirectDiscussPromptPreparer.PrepareDirectDiscussPrompt(ctx, buildDirectDiscussPromptInput(
+		initialPrompt := buildDirectDiscussPromptInput(
 			composed.Messages,
 			artifacts,
 			resolved.RunConfig.ContextScope,
 			buildLateBindingPrompt(addressed),
 			cfg.UserID,
+		)
+		prepared, prepareErr := resolved.DirectDiscussPromptPreparer.PrepareDirectDiscussPrompt(ctx, d.newDirectDiscussPromptRecipe(
+			cfg,
+			rc,
+			promptCursor,
+			resolved.RunConfig.ContextScope,
+			initialPrompt,
+			func(active RenderedContext) string {
+				return buildLateBindingPrompt(addressed || wasRecentlyMentioned(active, promptCursor))
+			},
 		))
 		if prepareErr != nil {
 			log.Error("discuss ACP runtime: prepare prompt failed", slog.Any("error", prepareErr))
@@ -357,18 +369,28 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 		}
 		return
 	}
-	isMentioned := wasRecentlyMentioned(activeRC, sess.lastProcessedMs)
+	isMentioned := wasRecentlyMentioned(activeRC, promptCursor)
 	lateBinding := buildLateBindingPrompt(isMentioned)
 	if resolved.DirectDiscussPromptPreparer == nil {
 		log.Error("discuss: prompt preparer not configured")
 		return
 	}
-	prepared, err := resolved.DirectDiscussPromptPreparer.PrepareDirectDiscussPrompt(ctx, buildDirectDiscussPromptInput(
+	initialPrompt := buildDirectDiscussPromptInput(
 		composed.Messages,
 		artifacts,
 		resolved.RunConfig.ContextScope,
 		lateBinding,
 		cfg.UserID,
+	)
+	prepared, err := resolved.DirectDiscussPromptPreparer.PrepareDirectDiscussPrompt(ctx, d.newDirectDiscussPromptRecipe(
+		cfg,
+		rc,
+		promptCursor,
+		resolved.RunConfig.ContextScope,
+		initialPrompt,
+		func(active RenderedContext) string {
+			return buildLateBindingPrompt(isMentioned || wasRecentlyMentioned(active, promptCursor))
+		},
 	))
 	if err != nil {
 		log.Error("discuss: prepare prompt failed", slog.Any("error", err))
@@ -430,6 +452,42 @@ func (d *DiscussDriver) handleReplyWithAgent(ctx context.Context, sess *discussS
 	// trigger another round; wall-clock would wrongly mark them processed.
 	consumedMs := latestRCEventAtMs(rc)
 	d.advanceDiscussCursor(ctx, sess, cfg, consumedMs, log)
+}
+
+func (d *DiscussDriver) newDirectDiscussPromptRecipe(
+	cfg DiscussSessionConfig,
+	rc RenderedContext,
+	cursor int64,
+	scope contextfrag.Scope,
+	initial DirectDiscussPromptInput,
+	lateBinding func(RenderedContext) string,
+) DirectDiscussPromptRecipe {
+	return DirectDiscussPromptRecipe{
+		Initial: initial,
+		Rebuild: func(ctx context.Context) (DirectDiscussPromptInput, error) {
+			history, err := d.deps.Resolver.LoadContextHistoryProjection(ctx, cfg.BotID, cfg.SessionID)
+			if err != nil {
+				return DirectDiscussPromptInput{}, err
+			}
+			active := ActiveRenderedContext(rc, history.CompactionArtifacts)
+			composed := composeContextWithArtifactsAtCursor(
+				rc,
+				history.TurnResponses,
+				history.CompactionArtifacts,
+				cursor,
+			)
+			if composed == nil {
+				return DirectDiscussPromptInput{}, errors.New("direct discuss context disappeared during prompt rebuild")
+			}
+			return buildDirectDiscussPromptInput(
+				composed.Messages,
+				history.CompactionArtifacts,
+				scope,
+				lateBinding(active),
+				cfg.UserID,
+			), nil
+		},
+	}
 }
 
 func (d *DiscussDriver) streamDiscussACPRuntime(

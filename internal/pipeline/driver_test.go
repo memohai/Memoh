@@ -765,6 +765,8 @@ type fakeRunConfigResolver struct {
 	turnResponses         []TurnResponseEntry
 	artifacts             []CompactionArtifact
 	artifactErr           error
+	projectionFn          func(int) (ContextHistoryProjection, error)
+	projectionCalls       int
 	compactionCalls       int
 	compactionInputTokens int
 	compactionBudget      int
@@ -813,6 +815,10 @@ func (f *fakeRunConfigResolver) InlineImageAttachments(ctx context.Context, botI
 }
 
 func (f *fakeRunConfigResolver) LoadContextHistoryProjection(context.Context, string, string) (ContextHistoryProjection, error) {
+	f.projectionCalls++
+	if f.projectionFn != nil {
+		return f.projectionFn(f.projectionCalls)
+	}
 	return ContextHistoryProjection{
 		TurnResponses:          f.turnResponses,
 		CompactionArtifacts:    f.artifacts,
@@ -840,8 +846,9 @@ type fakeDirectDiscussPromptPreparer struct {
 
 func (p *fakeDirectDiscussPromptPreparer) PrepareDirectDiscussPrompt(
 	ctx context.Context,
-	input DirectDiscussPromptInput,
+	recipe DirectDiscussPromptRecipe,
 ) (PreparedDirectDiscussPrompt, error) {
+	input := recipe.Initial
 	p.resolver.lastPromptInput = input
 	cfg := p.runConfig
 	cfg.Messages = nil

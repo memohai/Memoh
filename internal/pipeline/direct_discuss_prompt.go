@@ -28,6 +28,11 @@ type DirectDiscussPromptInput struct {
 	ActorUserID     string
 }
 
+type DirectDiscussPromptRecipe struct {
+	Initial DirectDiscussPromptInput
+	Rebuild func(context.Context) (DirectDiscussPromptInput, error)
+}
+
 type DirectDiscussPromptReceipt interface {
 	Finish(context.Context) error
 }
@@ -38,7 +43,7 @@ type PreparedDirectDiscussPrompt struct {
 }
 
 type DirectDiscussPromptPreparer interface {
-	PrepareDirectDiscussPrompt(context.Context, DirectDiscussPromptInput) (PreparedDirectDiscussPrompt, error)
+	PrepareDirectDiscussPrompt(context.Context, DirectDiscussPromptRecipe) (PreparedDirectDiscussPrompt, error)
 }
 
 func buildDirectDiscussPromptInput(

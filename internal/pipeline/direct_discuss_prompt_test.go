@@ -552,16 +552,24 @@ func TestHandleReplyWithAgentACPFinishesReceiptAcrossAttemptExits(t *testing.T) 
 type capturingDirectDiscussPromptPreparer struct {
 	calls    int
 	input    DirectDiscussPromptInput
+	rebuild  bool
 	prepared PreparedDirectDiscussPrompt
 	err      error
 }
 
 func (p *capturingDirectDiscussPromptPreparer) PrepareDirectDiscussPrompt(
-	_ context.Context,
-	input DirectDiscussPromptInput,
+	ctx context.Context,
+	recipe DirectDiscussPromptRecipe,
 ) (PreparedDirectDiscussPrompt, error) {
 	p.calls++
-	p.input = input
+	p.input = recipe.Initial
+	if p.rebuild {
+		var err error
+		p.input, err = recipe.Rebuild(ctx)
+		if err != nil {
+			return PreparedDirectDiscussPrompt{}, err
+		}
+	}
 	return p.prepared, p.err
 }
 

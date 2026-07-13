@@ -9,6 +9,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/contextassembly"
 	"github.com/memohai/memoh/internal/contextbudget"
 	"github.com/memohai/memoh/internal/contextfrag"
@@ -27,16 +28,48 @@ type directDiscussPromptPreparer struct {
 
 func (p *directDiscussPromptPreparer) PrepareDirectDiscussPrompt(
 	ctx context.Context,
-	input pipelinepkg.DirectDiscussPromptInput,
+	recipe pipelinepkg.DirectDiscussPromptRecipe,
 ) (pipelinepkg.PreparedDirectDiscussPrompt, error) {
 	if p == nil {
 		return pipelinepkg.PreparedDirectDiscussPrompt{}, errors.New("direct discuss prompt preparer is nil")
 	}
-	projection, imageRefs, err := projectDirectDiscussPromptSources(input)
+	snapshot, err := buildDirectDiscussPromptSnapshot(recipe.Initial)
 	if err != nil {
 		return pipelinepkg.PreparedDirectDiscussPrompt{}, err
 	}
-	nativeParts := p.resolveDirectDiscussNativeParts(ctx, imageRefs)
+	request := conversation.ChatRequest{
+		BotID:     p.runConfig.Identity.BotID,
+		SessionID: p.runConfig.Identity.SessionID,
+		UserID:    strings.TrimSpace(recipe.Initial.ActorUserID),
+	}
+	attempted := false
+	if recipe.Rebuild != nil {
+		snapshot, _, attempted, err = drainPreSendCompaction(
+			ctx,
+			snapshot,
+			snapshot.compactableTokens,
+			preSendCompactionThreshold(p.contextTokenBudget),
+			func(ctx context.Context, pressure int) (compaction.Result, error) {
+				if p.resolver == nil {
+					return compaction.Result{Status: compaction.StatusNoop}, nil
+				}
+				return p.resolver.runCompactionSyncResult(ctx, request, pressure, p.contextTokenBudget)
+			},
+			func(ctx context.Context) (directDiscussPromptSnapshot, int, error) {
+				input, rebuildErr := recipe.Rebuild(ctx)
+				if rebuildErr != nil {
+					return directDiscussPromptSnapshot{}, 0, rebuildErr
+				}
+				rebuilt, rebuildErr := buildDirectDiscussPromptSnapshot(input)
+				return rebuilt, rebuilt.compactableTokens, rebuildErr
+			},
+		)
+		if err != nil {
+			return pipelinepkg.PreparedDirectDiscussPrompt{}, err
+		}
+	}
+	projection := snapshot.projection
+	nativeParts := p.resolveDirectDiscussNativeParts(ctx, snapshot.imageRefs)
 	plan, err := newInitialPromptPlan(initialPromptPlanInput{
 		Sources:         projection.sources,
 		CurrentSourceID: projection.currentSourceID,
@@ -52,11 +85,6 @@ func (p *directDiscussPromptPreparer) PrepareDirectDiscussPrompt(
 	if err != nil {
 		return pipelinepkg.PreparedDirectDiscussPrompt{}, err
 	}
-	compactableTokens := 0
-	for _, source := range projection.sources {
-		compactableTokens += max(source.CompactableTokens, 0)
-	}
-
 	cfg := p.runConfig
 	cfg.Messages = baseline
 	cfg.SessionType = sessionpkg.TypeDiscuss
@@ -64,10 +92,13 @@ func (p *directDiscussPromptPreparer) PrepareDirectDiscussPrompt(
 	cfg.InlineImages = nil
 	cfg.ContextQueryMaterialized = false
 	cfg, state := withInitialPromptMaterializer(cfg, plan, projection)
+	if attempted {
+		state.ClaimCompaction()
+	}
 	cfg = cfg.RefreshContextFrag()
 
 	rc := resolvedContext{
-		compactableTokens:      compactableTokens,
+		compactableTokens:      snapshot.compactableTokens,
 		compactableTokensKnown: true,
 		contextTokenBudget:     p.contextTokenBudget,
 		promptState:            state,
@@ -75,7 +106,7 @@ func (p *directDiscussPromptPreparer) PrepareDirectDiscussPrompt(
 	req := conversation.ChatRequest{
 		BotID:     cfg.Identity.BotID,
 		SessionID: cfg.Identity.SessionID,
-		UserID:    strings.TrimSpace(input.ActorUserID),
+		UserID:    strings.TrimSpace(snapshot.input.ActorUserID),
 	}
 	receipt := &directDiscussPromptReceipt{
 		resolved: rc,
@@ -86,6 +117,30 @@ func (p *directDiscussPromptPreparer) PrepareDirectDiscussPrompt(
 		},
 	}
 	return pipelinepkg.PreparedDirectDiscussPrompt{RunConfig: cfg, Receipt: receipt}, nil
+}
+
+type directDiscussPromptSnapshot struct {
+	input             pipelinepkg.DirectDiscussPromptInput
+	projection        budgetSourceProjection
+	imageRefs         map[string][]pipelinepkg.ImageAttachmentRef
+	compactableTokens int
+}
+
+func buildDirectDiscussPromptSnapshot(input pipelinepkg.DirectDiscussPromptInput) (directDiscussPromptSnapshot, error) {
+	projection, imageRefs, err := projectDirectDiscussPromptSources(input)
+	if err != nil {
+		return directDiscussPromptSnapshot{}, err
+	}
+	compactableTokens := 0
+	for _, source := range projection.sources {
+		compactableTokens += max(source.CompactableTokens, 0)
+	}
+	return directDiscussPromptSnapshot{
+		input:             input,
+		projection:        projection,
+		imageRefs:         imageRefs,
+		compactableTokens: compactableTokens,
+	}, nil
 }
 
 func projectDirectDiscussPromptSources(

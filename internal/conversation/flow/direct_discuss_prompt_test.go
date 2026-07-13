@@ -13,6 +13,7 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/contextbudget"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
@@ -73,7 +74,7 @@ func TestDirectDiscussPromptPreparerOwnsFinalEnvelopeAndReceipt(t *testing.T) {
 		Kind:     contextfrag.KindConversationSummary,
 		Coverage: &contextfrag.SummaryCoverage{},
 	}
-	prepared, err := preparer.PrepareDirectDiscussPrompt(context.Background(), pipelinepkg.DirectDiscussPromptInput{
+	prepared, err := preparer.PrepareDirectDiscussPrompt(context.Background(), pipelinepkg.DirectDiscussPromptRecipe{Initial: pipelinepkg.DirectDiscussPromptInput{
 		ActorUserID:     "account-user",
 		CurrentSourceID: "current",
 		Sources: []pipelinepkg.DirectDiscussPromptSource{
@@ -88,7 +89,7 @@ func TestDirectDiscussPromptPreparerOwnsFinalEnvelopeAndReceipt(t *testing.T) {
 			},
 			{ID: "late", Message: lateBinding, Required: true},
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("PrepareDirectDiscussPrompt() error = %v", err)
 	}
@@ -188,7 +189,7 @@ func TestDirectDiscussPromptPreparerMaterializesImageOnlyCurrentSource(t *testin
 		contextTokenBudget: 100,
 	}
 
-	prepared, err := preparer.PrepareDirectDiscussPrompt(context.Background(), pipelinepkg.DirectDiscussPromptInput{
+	prepared, err := preparer.PrepareDirectDiscussPrompt(context.Background(), pipelinepkg.DirectDiscussPromptRecipe{Initial: pipelinepkg.DirectDiscussPromptInput{
 		CurrentSourceID: "current-image",
 		Sources: []pipelinepkg.DirectDiscussPromptSource{{
 			ID:          "current-image",
@@ -197,7 +198,7 @@ func TestDirectDiscussPromptPreparerMaterializesImageOnlyCurrentSource(t *testin
 			Compactable: true,
 			ImageRefs:   []pipelinepkg.ImageAttachmentRef{{ContentHash: "image"}},
 		}},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("PrepareDirectDiscussPrompt() error = %v", err)
 	}
@@ -233,6 +234,163 @@ func TestDirectDiscussPromptReceiptKeepsKnownZero(t *testing.T) {
 	}
 	if compactCalls.Load() != 0 {
 		t.Fatalf("known-zero receipt triggered compaction %d times", compactCalls.Load())
+	}
+}
+
+func TestDirectDiscussPromptPreparerDrainsThroughAuthoritativeRecipe(t *testing.T) {
+	t.Parallel()
+
+	initial := pipelinepkg.DirectDiscussPromptInput{
+		ActorUserID:     "account-user",
+		CurrentSourceID: "current",
+		Sources: []pipelinepkg.DirectDiscussPromptSource{
+			{
+				ID:          "old",
+				Message:     sdk.UserMessage(strings.Repeat("old raw context ", 1000)),
+				Compactable: true,
+				ImageRefs:   []pipelinepkg.ImageAttachmentRef{{ContentHash: "stale-image"}},
+			},
+			{
+				ID:          "current",
+				Message:     sdk.UserMessage("current"),
+				Required:    true,
+				Compactable: true,
+			},
+			{ID: "late", Message: sdk.UserMessage("late binding"), Required: true},
+		},
+	}
+	summaryFrag := contextfrag.ContextFrag{
+		Ref:      contextfrag.ContextRef{ID: "artifact-a"},
+		Kind:     contextfrag.KindConversationSummary,
+		Coverage: &contextfrag.SummaryCoverage{},
+	}
+	rebuilt := pipelinepkg.DirectDiscussPromptInput{
+		ActorUserID:     "account-user",
+		CurrentSourceID: "current",
+		Sources: []pipelinepkg.DirectDiscussPromptSource{
+			{ID: "summary", Message: sdk.UserMessage("condensed history"), Required: true, SummaryFrag: &summaryFrag},
+			{
+				ID:          "current",
+				Message:     sdk.UserMessage("current"),
+				Required:    true,
+				Compactable: true,
+				ImageRefs:   []pipelinepkg.ImageAttachmentRef{{ContentHash: "final-image"}},
+			},
+			{ID: "late", Message: sdk.UserMessage("late binding"), Required: true},
+		},
+	}
+	syncCalls := 0
+	rebuildCalls := 0
+	asyncCalls := 0
+	imageLoads := []string{}
+	var compactReq conversation.ChatRequest
+	resolver := &Resolver{
+		logger: slog.New(slog.DiscardHandler),
+		assetLoader: &fakeGatewayAssetLoader{openFn: func(_ context.Context, _, contentHash string) (io.ReadCloser, string, error) {
+			imageLoads = append(imageLoads, contentHash)
+			return io.NopCloser(strings.NewReader("image")), "image/png", nil
+		}},
+		syncCompactionFn: func(_ context.Context, req conversation.ChatRequest, _, _ int) (compaction.Result, error) {
+			syncCalls++
+			compactReq = req
+			return compaction.Result{Status: compaction.StatusOK}, nil
+		},
+	}
+	preparer := &directDiscussPromptPreparer{
+		resolver: resolver,
+		runConfig: agent.RunConfig{
+			SupportsImageInput: true,
+			Identity:           agent.SessionContext{BotID: "bot", SessionID: "session"},
+		},
+		contextTokenBudget: 2000,
+		compact: func(context.Context, conversation.ChatRequest, resolvedContext, int) {
+			asyncCalls++
+		},
+	}
+
+	prepared, err := preparer.PrepareDirectDiscussPrompt(context.Background(), pipelinepkg.DirectDiscussPromptRecipe{
+		Initial: initial,
+		Rebuild: func(context.Context) (pipelinepkg.DirectDiscussPromptInput, error) {
+			rebuildCalls++
+			return rebuilt, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareDirectDiscussPrompt() error = %v", err)
+	}
+	if syncCalls != 1 || rebuildCalls != 1 {
+		t.Fatalf("direct discuss drain = sync:%d rebuild:%d", syncCalls, rebuildCalls)
+	}
+	if compactReq.BotID != "bot" || compactReq.SessionID != "session" || compactReq.UserID != "account-user" {
+		t.Fatalf("direct discuss compaction request = %#v", compactReq)
+	}
+	materialized, err := prepared.RunConfig.InitialPromptMaterializer(context.Background(), prepared.RunConfig, nil)
+	if err != nil {
+		t.Fatalf("InitialPromptMaterializer() error = %v", err)
+	}
+	texts := messageTexts(materialized.Messages)
+	if strings.Contains(strings.Join(texts, "\n"), "old raw context") || !strings.Contains(strings.Join(texts, "\n"), "condensed history") {
+		t.Fatalf("materialized rebuilt prompt = %#v", texts)
+	}
+	if len(imageLoads) != 1 || imageLoads[0] != "final-image" {
+		t.Fatalf("resolved direct discuss images = %#v, want final snapshot only", imageLoads)
+	}
+	if !messageHasImage(materialized.Messages[1]) {
+		t.Fatalf("rebuilt current source lost native image: %#v", materialized.Messages)
+	}
+	if err := prepared.Receipt.Finish(context.Background()); err != nil {
+		t.Fatalf("Receipt.Finish() error = %v", err)
+	}
+	if asyncCalls != 0 {
+		t.Fatalf("pre-send attempt retriggered async compaction %d times", asyncCalls)
+	}
+}
+
+func TestDirectDiscussPromptPreparerDoesNotDrainWithoutAuthoritativeBudget(t *testing.T) {
+	t.Parallel()
+
+	input := pipelinepkg.DirectDiscussPromptInput{
+		ActorUserID: "account-user",
+		Sources: []pipelinepkg.DirectDiscussPromptSource{{
+			ID: "old", Message: sdk.UserMessage(strings.Repeat("old raw context ", 1000)), Compactable: true,
+		}},
+	}
+	syncCalls := 0
+	rebuildCalls := 0
+	asyncCalls := 0
+	resolver := &Resolver{
+		logger: slog.New(slog.DiscardHandler),
+		syncCompactionFn: func(context.Context, conversation.ChatRequest, int, int) (compaction.Result, error) {
+			syncCalls++
+			return compaction.Result{Status: compaction.StatusOK}, nil
+		},
+	}
+	preparer := &directDiscussPromptPreparer{
+		resolver:  resolver,
+		runConfig: agent.RunConfig{Identity: agent.SessionContext{BotID: "bot", SessionID: "session"}},
+		compact: func(context.Context, conversation.ChatRequest, resolvedContext, int) {
+			asyncCalls++
+		},
+	}
+
+	prepared, err := preparer.PrepareDirectDiscussPrompt(context.Background(), pipelinepkg.DirectDiscussPromptRecipe{
+		Initial: input,
+		Rebuild: func(context.Context) (pipelinepkg.DirectDiscussPromptInput, error) {
+			rebuildCalls++
+			return input, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareDirectDiscussPrompt() error = %v", err)
+	}
+	if syncCalls != 0 || rebuildCalls != 0 {
+		t.Fatalf("unknown-budget drain = sync:%d rebuild:%d", syncCalls, rebuildCalls)
+	}
+	if err := prepared.Receipt.Finish(context.Background()); err != nil {
+		t.Fatalf("Receipt.Finish() error = %v", err)
+	}
+	if asyncCalls != 1 {
+		t.Fatalf("unknown-budget async receipt calls = %d, want 1", asyncCalls)
 	}
 }
 
