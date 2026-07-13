@@ -407,6 +407,105 @@ func TestFromDBMessageScopeFallbackDoesNotChangeDurableRefID(t *testing.T) {
 	}
 }
 
+// TestFromDBMessageNormalizesBareContentPartObject covers a persisted row whose
+// content is a bare content-part object (no role/content wrapper), which used
+// to unmarshal successfully into an empty ModelMessage — unknown JSON fields
+// are ignored — and silently render as empty downstream.
+func TestFromDBMessageNormalizesBareContentPartObject(t *testing.T) {
+	t.Parallel()
+
+	msg := messagepkg.Message{
+		ID:      "row-1",
+		BotID:   "bot-1",
+		Role:    "user",
+		Content: json.RawMessage(`{"type":"text","text":"hello"}`),
+	}
+	record, err := FromDBMessage(msg, ScopeFallback{})
+	if err != nil {
+		t.Fatalf("FromDBMessage failed: %v", err)
+	}
+	if got := record.ModelMessage.TextContent(); got != "hello" {
+		t.Fatalf("TextContent() = %q, want %q", got, "hello")
+	}
+	if !record.ModelMessage.HasContent() {
+		t.Fatalf("HasContent() = false, want true for normalized bare content part")
+	}
+	if record.ModelMessage.Role != "user" {
+		t.Fatalf("Role = %q, want %q", record.ModelMessage.Role, "user")
+	}
+}
+
+// TestFromDBMessageLegitimateEmptyToolRowUnaffected proves the bare-content-part
+// normalization does not misfire on a real (if empty) tool-result wrapper, whose
+// "role" key already makes it a valid ModelMessage.
+func TestFromDBMessageLegitimateEmptyToolRowUnaffected(t *testing.T) {
+	t.Parallel()
+
+	msg := messagepkg.Message{
+		ID:      "row-2",
+		BotID:   "bot-1",
+		Role:    "tool",
+		Content: json.RawMessage(`{"role":"tool","tool_call_id":"x","content":""}`),
+	}
+	record, err := FromDBMessage(msg, ScopeFallback{})
+	if err != nil {
+		t.Fatalf("FromDBMessage failed: %v", err)
+	}
+	if record.ModelMessage.Role != "tool" {
+		t.Fatalf("Role = %q, want %q", record.ModelMessage.Role, "tool")
+	}
+	if got := record.ModelMessage.TextContent(); got != "" {
+		t.Fatalf("TextContent() = %q, want empty", got)
+	}
+	if record.ModelMessage.HasContent() {
+		t.Fatalf("HasContent() = true, want false for legitimate empty tool row")
+	}
+}
+
+// TestFromDBMessageEmptyObjectContentNotWrapped proves an empty `{}` payload is
+// left alone: it carries no content to recover, so it must not be turned into
+// a `[{}]` parts array.
+func TestFromDBMessageEmptyObjectContentNotWrapped(t *testing.T) {
+	t.Parallel()
+
+	msg := messagepkg.Message{
+		ID:      "row-3",
+		BotID:   "bot-1",
+		Role:    "user",
+		Content: json.RawMessage(`{}`),
+	}
+	record, err := FromDBMessage(msg, ScopeFallback{})
+	if err != nil {
+		t.Fatalf("FromDBMessage failed: %v", err)
+	}
+	if got := record.ModelMessage.TextContent(); got != "" {
+		t.Fatalf("TextContent() = %q, want empty", got)
+	}
+	if string(record.ModelMessage.Content) == "[{}]" {
+		t.Fatalf("empty object must not be wrapped into a parts array, got Content = %s", record.ModelMessage.Content)
+	}
+}
+
+// TestFromDBMessageNormalWrapperUnchanged proves a legitimate ModelMessage
+// wrapper still round-trips exactly as before the fix.
+func TestFromDBMessageNormalWrapperUnchanged(t *testing.T) {
+	t.Parallel()
+
+	msg := messagepkg.Message{
+		ID:      "row-4",
+		BotID:   "bot-1",
+		Role:    "assistant",
+		Content: json.RawMessage(`{"role":"assistant","content":"hi"}`),
+	}
+	record, err := FromDBMessage(msg, ScopeFallback{})
+	if err != nil {
+		t.Fatalf("FromDBMessage failed: %v", err)
+	}
+	if got := record.ModelMessage.TextContent(); got != "hi" {
+		t.Fatalf("TextContent() = %q, want %q", got, "hi")
+	}
+}
+
 func persistedModelMessage(t *testing.T, msg conversation.ModelMessage) json.RawMessage {
 	t.Helper()
 	return mustJSON(t, msg)

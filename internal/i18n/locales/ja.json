@@ -453,6 +453,7 @@
     "compact": {
       "unavailable": "現在、圧縮は利用できません。",
       "done": "✅ コンテキストが圧縮されました。",
+      "noop": "現在、圧縮できるコンテキストはありません。",
       "noModel": "このBotには圧縮Modelやチャット Modelが構成されていません。"
     },
     "toolApproval": {
