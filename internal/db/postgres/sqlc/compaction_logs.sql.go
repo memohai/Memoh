@@ -234,6 +234,38 @@ func (q *Queries) ListCompactionArtifactLineageBySession(ctx context.Context, se
 	return items, nil
 }
 
+const listCompactionArtifactParentEdges = `-- name: ListCompactionArtifactParentEdges :many
+SELECT parent_id, ordinal
+FROM bot_history_message_compact_parent_edges
+WHERE artifact_id = $1
+ORDER BY ordinal ASC
+`
+
+type ListCompactionArtifactParentEdgesRow struct {
+	ParentID pgtype.UUID `json:"parent_id"`
+	Ordinal  int32       `json:"ordinal"`
+}
+
+func (q *Queries) ListCompactionArtifactParentEdges(ctx context.Context, artifactID pgtype.UUID) ([]ListCompactionArtifactParentEdgesRow, error) {
+	rows, err := q.db.Query(ctx, listCompactionArtifactParentEdges, artifactID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCompactionArtifactParentEdgesRow
+	for rows.Next() {
+		var i ListCompactionArtifactParentEdgesRow
+		if err := rows.Scan(&i.ParentID, &i.Ordinal); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCompactionArtifactParentIDsBySuccessor = `-- name: ListCompactionArtifactParentIDsBySuccessor :many
 SELECT id
 FROM bot_history_message_compacts

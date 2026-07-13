@@ -848,13 +848,52 @@ CREATE TABLE IF NOT EXISTS bot_history_message_compacts (
   anchor_end_ms BIGINT NOT NULL DEFAULT 0,
   artifact_level INTEGER NOT NULL DEFAULT 0,
   parent_ids UUID[] NOT NULL DEFAULT '{}'::uuid[],
-  superseded_by UUID REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL,
+  superseded_by UUID,
   superseded_at TIMESTAMPTZ,
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  completed_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ,
+  CONSTRAINT bot_history_message_compacts_superseded_by_fkey FOREIGN KEY (superseded_by) REFERENCES bot_history_message_compacts(id),
+  CONSTRAINT compacts_supersession_markers_check CHECK ((superseded_by IS NULL) = (superseded_at IS NULL)),
+  CONSTRAINT compacts_not_self_superseded_check CHECK (superseded_by IS NULL OR superseded_by <> id)
 );
 CREATE INDEX IF NOT EXISTS idx_compacts_bot_session ON bot_history_message_compacts(bot_id, session_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_compacts_active_session ON bot_history_message_compacts(session_id, anchor_start_ms, started_at) WHERE status = 'ok' AND superseded_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_compacts_session_lineage ON bot_history_message_compacts(session_id, status, superseded_by);
+
+CREATE TABLE IF NOT EXISTS bot_history_message_compact_parent_edges (
+  artifact_id UUID NOT NULL,
+  parent_id UUID NOT NULL,
+  ordinal INTEGER NOT NULL,
+  CONSTRAINT compaction_artifact_parent_edges_pkey PRIMARY KEY (artifact_id, parent_id),
+  CONSTRAINT compaction_artifact_parent_edges_ordinal_key UNIQUE (artifact_id, ordinal),
+  CONSTRAINT compaction_artifact_parent_edges_ordinal_check CHECK (ordinal >= 0),
+  CONSTRAINT compaction_artifact_parent_edges_not_self_check CHECK (artifact_id <> parent_id),
+  CONSTRAINT compaction_artifact_parent_edges_artifact_fkey
+    FOREIGN KEY (artifact_id) REFERENCES bot_history_message_compacts(id) ON DELETE CASCADE,
+  CONSTRAINT compaction_artifact_parent_edges_parent_fkey
+    FOREIGN KEY (parent_id) REFERENCES bot_history_message_compacts(id)
+);
+
+CREATE OR REPLACE FUNCTION sync_compaction_artifact_parent_edges()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  DELETE FROM bot_history_message_compact_parent_edges
+  WHERE artifact_id = NEW.id;
+
+  INSERT INTO bot_history_message_compact_parent_edges (artifact_id, parent_id, ordinal)
+  SELECT NEW.id, parent.parent_id, (parent.ordinality - 1)::INTEGER
+  FROM unnest(NEW.parent_ids) WITH ORDINALITY AS parent(parent_id, ordinality);
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER compaction_artifact_parent_edges_sync
+AFTER INSERT OR UPDATE OF parent_ids ON bot_history_message_compacts
+FOR EACH ROW
+EXECUTE FUNCTION sync_compaction_artifact_parent_edges();
 
 ALTER TABLE bot_history_messages ADD CONSTRAINT fk_compact_id FOREIGN KEY (compact_id) REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL;
 

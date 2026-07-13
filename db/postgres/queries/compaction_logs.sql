@@ -38,6 +38,12 @@ WHERE superseded_by = sqlc.arg(successor_id)
   AND status = 'ok'
 ORDER BY id ASC;
 
+-- name: ListCompactionArtifactParentEdges :many
+SELECT parent_id, ordinal
+FROM bot_history_message_compact_parent_edges
+WHERE artifact_id = $1
+ORDER BY ordinal ASC;
+
 -- name: ListCompactionLogsByBot :many
 SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
        artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,

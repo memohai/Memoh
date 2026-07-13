@@ -201,6 +201,12 @@ type BotHistoryMessageCompact struct {
 	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
 }
 
+type BotHistoryMessageCompactParentEdge struct {
+	ArtifactID pgtype.UUID `json:"artifact_id"`
+	ParentID   pgtype.UUID `json:"parent_id"`
+	Ordinal    int32       `json:"ordinal"`
+}
+
 type BotPluginInstallation struct {
 	ID          pgtype.UUID        `json:"id"`
 	BotID       pgtype.UUID        `json:"bot_id"`

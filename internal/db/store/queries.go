@@ -241,6 +241,7 @@ type Queries interface {
 	ListChatParticipants(ctx context.Context, chatID pgtype.UUID) ([]dbsqlc.ListChatParticipantsRow, error)
 	ListChatRoutes(ctx context.Context, chatID pgtype.UUID) ([]dbsqlc.ListChatRoutesRow, error)
 	ListChatsByBotAndUser(ctx context.Context, arg dbsqlc.ListChatsByBotAndUserParams) ([]dbsqlc.ListChatsByBotAndUserRow, error)
+	ListCompactionArtifactParentEdges(ctx context.Context, artifactID pgtype.UUID) ([]dbsqlc.ListCompactionArtifactParentEdgesRow, error)
 	ListCompactionLogsByBot(ctx context.Context, arg dbsqlc.ListCompactionLogsByBotParams) ([]dbsqlc.BotHistoryMessageCompact, error)
 	ListEmailOutboxByBot(ctx context.Context, arg dbsqlc.ListEmailOutboxByBotParams) ([]dbsqlc.EmailOutbox, error)
 	ListEmailProviders(ctx context.Context) ([]dbsqlc.EmailProvider, error)
