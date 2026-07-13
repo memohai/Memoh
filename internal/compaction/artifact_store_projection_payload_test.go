@@ -234,13 +234,13 @@ func TestLoadActiveSessionQuarantinesHydratedCoverageOverlap(t *testing.T) {
 	}
 }
 
-func projectionPayloadLineage(t *testing.T) (ArtifactOwner, [2]sqlc.BotHistoryMessageCompact, sqlc.BotHistoryMessageCompact) {
+func projectionPayloadLineage(t *testing.T) (ArtifactOwner, []sqlc.BotHistoryMessageCompact, sqlc.BotHistoryMessageCompact) {
 	t.Helper()
 	const (
 		botID     = "00000000-0000-0000-0000-00000000bd01"
 		sessionID = "00000000-0000-0000-0000-00000000fd01"
 	)
-	parents := [2]sqlc.BotHistoryMessageCompact{
+	parents := []sqlc.BotHistoryMessageCompact{
 		projectionRow(t, "00000000-0000-0000-0000-00000000dd01"),
 		projectionRow(t, "00000000-0000-0000-0000-00000000dd02"),
 	}

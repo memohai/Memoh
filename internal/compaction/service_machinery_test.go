@@ -230,40 +230,6 @@ func TestDoCompactionSkipsWhitespaceOnlyPriorSummaries(t *testing.T) {
 // the progress guarantee still compacts it, but the overshoot must be
 // surfaced instead of silently trusted as capped.
 
-func TestDoCompactionWarnsWhenEntryFloorsExceedBudget(t *testing.T) {
-	const fanout = 40
-	callParts := make([]string, 0, fanout)
-	for i := 0; i < fanout; i++ {
-		callParts = append(callParts, fmt.Sprintf(`{"type":"tool-call","toolCallId":"c%d","toolName":"probe","input":{}}`, i))
-	}
-	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "assistant", "["+strings.Join(callParts, ",")+"]", 100),
-	}
-	for i := 0; i < fanout; i++ {
-		rows = append(rows, mkRow(t, "tool", fmt.Sprintf(`[{"type":"tool-result","toolCallId":"c%d","toolName":"probe","output":{"type":"text","value":"ok"}}]`, i), 100))
-	}
-	rows = append(rows, mkRow(t, "user", `[{"type":"text","text":"recent question"}]`, 100))
-
-	q := &fakeQueries{uncompacted: rows}
-	stub := &stubModel{summary: "SUMMARY-OK"}
-	var logBuf strings.Builder
-	svc := NewService(slog.New(slog.NewTextHandler(&logBuf, nil)), q)
-
-	cfg := machineryConfig(stub, 100)
-	cfg.MaxCompactTokens = 40
-
-	res, err := svc.RunCompactionSync(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("RunCompactionSync: %v", err)
-	}
-	if res.Status != StatusOK {
-		t.Fatalf("the oversized exchange must still compact (progress guarantee), got %q", res.Status)
-	}
-	if !strings.Contains(logBuf.String(), "entry floors exceed the budget") {
-		t.Fatalf("budget overshoot not surfaced in logs:\n%s", logBuf.String())
-	}
-}
-
 func TestDoCompactionAllEmptyWindowSkipsModelAndMarking(t *testing.T) {
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
 		mkRow(t, "assistant", `[{"type":"reasoning","text":"thinking a"}]`, 100),

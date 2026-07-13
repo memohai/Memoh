@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -436,4 +437,26 @@ WHERE id = $1
 			finalized,
 		)
 	}
+}
+
+func assertPostgresOperationFails(t *testing.T, ctx context.Context, tx pgx.Tx, name string, operation func() error) {
+	t.Helper()
+	savepoint := pgx.Identifier{"savepoint_" + name}.Sanitize()
+	if _, err := tx.Exec(ctx, "SAVEPOINT "+savepoint); err != nil {
+		t.Fatalf("create %s savepoint: %v", name, err)
+	}
+	if err := operation(); err == nil {
+		t.Fatalf("%s unexpectedly succeeded", name)
+	}
+	if _, err := tx.Exec(ctx, fmt.Sprintf("ROLLBACK TO SAVEPOINT %s", savepoint)); err != nil {
+		t.Fatalf("rollback %s savepoint: %v", name, err)
+	}
+}
+
+func assertPostgresStatementFails(t *testing.T, ctx context.Context, tx pgx.Tx, name, statement string, args ...any) {
+	t.Helper()
+	assertPostgresOperationFails(t, ctx, tx, name, func() error {
+		_, err := tx.Exec(ctx, statement, args...)
+		return err
+	})
 }

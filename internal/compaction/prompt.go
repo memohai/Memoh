@@ -52,17 +52,6 @@ const priorSeparatorTokens = 2
 // separators are charged, a non-positive budget drops everything, and when
 // the forced newest summary alone exceeds the budget its text is truncated
 // (marker included) so callers can rely on the returned total.
-// priorContextTokens is the prompt cost of the kept prior summaries — bodies
-// plus the per-summary separator — and must stay the single accounting both
-// capPriorSummaries and the shared-budget rebalance use.
-func priorContextTokens(summaries []string) int {
-	total := 0
-	for _, summary := range summaries {
-		total += estimateBytesAsTokens(summary) + priorSeparatorTokens
-	}
-	return total
-}
-
 // capEntriesToBudget truncates entry contents so their total prompt cost fits
 // maxTokens. Entries are never dropped — ids and entries are emitted together
 // by buildEntriesAndIDs, so dropping one would mark a row the summarizer never

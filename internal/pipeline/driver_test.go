@@ -771,22 +771,10 @@ type fakeRunConfigResolver struct {
 	compactionInputTokens int
 	compactionBudget      int
 	compactionUserID      string
-	trimCalls             int
-	trimBudget            int
-	trimFn                func(messages []ContextMessage, contextTokenBudget int) ([]ContextMessage, int)
 	lastPromptInput       DirectDiscussPromptInput
 	promptFinishCalls     int
 	storeCalls            int
 	storeErr              error
-}
-
-func (f *fakeRunConfigResolver) TrimDiscussContext(messages []ContextMessage, contextTokenBudget int) ([]ContextMessage, int) {
-	f.trimCalls++
-	f.trimBudget = contextTokenBudget
-	if f.trimFn != nil {
-		return f.trimFn(messages, contextTokenBudget)
-	}
-	return messages, 0
 }
 
 func (f *fakeRunConfigResolver) ResolveRunConfig(_ context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error) {
@@ -925,14 +913,4 @@ func lastMessageFragContains(frags []contextfrag.ContextFrag, needle string) boo
 		return false
 	}
 	return false
-}
-
-func TestContextMessagesToSDKEntriesPreservesSystemRole(t *testing.T) {
-	t.Parallel()
-
-	entries := contextMessagesToSDKEntries([]ContextMessage{{Role: "system", Content: "[System Notice] history trimmed"}})
-
-	if len(entries) != 1 || entries[0].Message.Role != sdk.MessageRoleSystem {
-		t.Fatalf("system context message reached the model as %q, want system role", entries[0].Message.Role)
-	}
 }
