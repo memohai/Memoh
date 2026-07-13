@@ -154,7 +154,7 @@ func TestPostgresAssetMutationInvalidatesClaimedCompaction(t *testing.T) {
 					ID:           log.ID,
 					Status:       "ok",
 					Summary:      "summary",
-					MessageCount: int32(len(messageIDs)),
+					MessageCount: 2,
 					Coverage:     []byte("[]"),
 				}); err != nil {
 					t.Fatalf("complete compaction log: %v", err)
@@ -211,7 +211,7 @@ func TestPostgresIdempotentAssetUpsertPreservesCurrentCompaction(t *testing.T) {
 		t.Fatalf("claim compaction sources = %d, %v", marked, err)
 	}
 	if _, err := queries.CompleteCompactionLog(ctx, dbsqlc.CompleteCompactionLogParams{
-		ID: log.ID, Status: "ok", Summary: "summary", MessageCount: int32(len(messageIDs)), Coverage: []byte("[]"),
+		ID: log.ID, Status: "ok", Summary: "summary", MessageCount: 2, Coverage: []byte("[]"),
 	}); err != nil {
 		t.Fatalf("complete compaction log: %v", err)
 	}

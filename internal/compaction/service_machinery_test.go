@@ -75,8 +75,6 @@ func decodePromptMessages(body []byte) string {
 	return sb.String()
 }
 
-// --- fake Queries (only the 5 methods compaction touches) ---------------------
-
 type fakeQueries struct {
 	dbstore.Queries // embedded interface; unimplemented methods would panic if called
 	uncompacted     []sqlc.ListUncompactedMessagesBySessionRow

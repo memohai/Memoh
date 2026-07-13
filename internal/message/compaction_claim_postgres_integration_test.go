@@ -47,11 +47,11 @@ func TestPostgresReclaimedCompactionCannotComplete(t *testing.T) {
 		t.Fatalf("stale claim reclamation = %d, %v", marked, err)
 	}
 
-	_, err = queries.CompleteCompactionLog(ctx, successfulCompaction(first.ID, len(messageIDs)))
+	_, err = queries.CompleteCompactionLog(ctx, successfulCompaction(first.ID))
 	if !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("reclaimed owner completion = %v, want pgx.ErrNoRows", err)
 	}
-	if _, err := queries.CompleteCompactionLog(ctx, successfulCompaction(second.ID, len(messageIDs))); err != nil {
+	if _, err := queries.CompleteCompactionLog(ctx, successfulCompaction(second.ID)); err != nil {
 		t.Fatalf("current owner completion: %v", err)
 	}
 }
@@ -82,7 +82,7 @@ func TestPostgresReclaimDoesNotOverwriteCompletedSource(t *testing.T) {
 	if rows, err := queries.ListUncompactedMessagesBySession(ctx, mustTestUUID(t, fixture.sessionID)); err != nil || len(rows) != len(messageIDs) {
 		t.Fatalf("stale source selection = %d, %v", len(rows), err)
 	}
-	if _, err := queries.CompleteCompactionLog(ctx, successfulCompaction(first.ID, len(messageIDs))); err != nil {
+	if _, err := queries.CompleteCompactionLog(ctx, successfulCompaction(first.ID)); err != nil {
 		t.Fatalf("complete selected source: %v", err)
 	}
 
@@ -122,7 +122,7 @@ func TestPostgresReclaimSerializesWithSourceCompletion(t *testing.T) {
 		t.Fatalf("begin completion: %v", err)
 	}
 	defer func() { _ = completeTx.Rollback(ctx) }()
-	if _, err := dbsqlc.New(completeTx).CompleteCompactionLog(ctx, successfulCompaction(first.ID, len(messageIDs))); err != nil {
+	if _, err := dbsqlc.New(completeTx).CompleteCompactionLog(ctx, successfulCompaction(first.ID)); err != nil {
 		t.Fatalf("complete source: %v", err)
 	}
 	markTx, err := fixture.pool.Begin(ctx)
@@ -153,6 +153,63 @@ func TestPostgresReclaimSerializesWithSourceCompletion(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("reclaim did not resume after source completion")
+	}
+}
+
+func TestPostgresSourceCompletionCannotPassCommittedReclaim(t *testing.T) {
+	fixture := setupCommittedCompactionFixture(t)
+	ctx := context.Background()
+	queries := dbsqlc.New(fixture.pool)
+	first := fixture.createLog(t)
+	second := fixture.createLog(t)
+	messageIDs := fixtureMessageIDs(t, fixture)
+	marked, err := queries.MarkMessagesCompacted(ctx, dbsqlc.MarkMessagesCompactedParams{
+		CompactID: first.ID, MessageIds: messageIDs, ExpectedCompactIds: emptyCompactionClaims(len(messageIDs)),
+	})
+	if err != nil || marked != int64(len(messageIDs)) {
+		t.Fatalf("first claim = %d, %v", marked, err)
+	}
+	if _, err := fixture.pool.Exec(ctx, `
+		UPDATE bot_history_message_compacts
+		SET started_at = now() - INTERVAL '16 minutes'
+		WHERE id = $1
+	`, first.ID); err != nil {
+		t.Fatalf("age first claim: %v", err)
+	}
+
+	markTx, err := fixture.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin reclamation: %v", err)
+	}
+	defer func() { _ = markTx.Rollback(ctx) }()
+	marked, err = dbsqlc.New(markTx).MarkMessagesCompacted(ctx, dbsqlc.MarkMessagesCompactedParams{
+		CompactID: second.ID, MessageIds: messageIDs, ExpectedCompactIds: repeatedCompactionClaim(first.ID, len(messageIDs)),
+	})
+	if err != nil || marked != int64(len(messageIDs)) {
+		t.Fatalf("reclaim source = %d, %v", marked, err)
+	}
+	completeTx, err := fixture.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin source completion: %v", err)
+	}
+	defer func() { _ = completeTx.Rollback(ctx) }()
+	completePID := postgresBackendPID(t, completeTx)
+	result := make(chan error, 1)
+	go func() {
+		_, err := dbsqlc.New(completeTx).CompleteCompactionLog(ctx, successfulCompaction(first.ID))
+		result <- err
+	}()
+	waitForPostgresLock(t, fixture.pool, completePID)
+	if err := markTx.Commit(ctx); err != nil {
+		t.Fatalf("commit reclamation: %v", err)
+	}
+	select {
+	case err := <-result:
+		if !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatalf("source completion after reclaim = %v, want pgx.ErrNoRows", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("source completion did not resume after reclamation")
 	}
 }
 
@@ -196,12 +253,12 @@ func repeatedCompactionClaim(id pgtype.UUID, count int) []pgtype.UUID {
 	return claims
 }
 
-func successfulCompaction(id pgtype.UUID, messageCount int) dbsqlc.CompleteCompactionLogParams {
+func successfulCompaction(id pgtype.UUID) dbsqlc.CompleteCompactionLogParams {
 	return dbsqlc.CompleteCompactionLogParams{
 		ID:           id,
 		Status:       "ok",
 		Summary:      "summary",
-		MessageCount: int32(messageCount),
+		MessageCount: 2,
 		Coverage:     []byte("[]"),
 	}
 }

@@ -1716,9 +1716,23 @@ func (q *Queries) CreateToolTailRound(ctx context.Context, arg CreateToolTailRou
 }
 
 const deleteMessagesByIDs = `-- name: DeleteMessagesByIDs :exec
-WITH deleted AS (
+WITH session_locator AS MATERIALIZED (
+  SELECT DISTINCT message.session_id
+  FROM bot_history_messages message
+  WHERE message.id = ANY($1::uuid[])
+    AND message.session_id IS NOT NULL
+),
+owner_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  JOIN session_locator locator ON locator.session_id = session.id
+  ORDER BY session.id
+  FOR UPDATE
+),
+deleted AS (
   DELETE FROM bot_history_messages
   WHERE id = ANY($1::uuid[])
+    AND (SELECT count(*) FROM owner_sessions) >= 0
   RETURNING session_id, compact_id
 ),
 compaction_epoch_bump AS (
@@ -2289,11 +2303,26 @@ func (q *Queries) GetVisibleMessageCursorByIDBySession(ctx context.Context, arg 
 }
 
 const hideMessagesByHistoryTurn = `-- name: HideMessagesByHistoryTurn :exec
-WITH hidden AS (
+WITH session_locator AS MATERIALIZED (
+  SELECT DISTINCT message.session_id
+  FROM bot_history_messages message
+  WHERE message.turn_id = $1
+    AND message.turn_visible = true
+    AND message.session_id IS NOT NULL
+),
+owner_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  JOIN session_locator locator ON locator.session_id = session.id
+  ORDER BY session.id
+  FOR UPDATE
+),
+hidden AS (
   UPDATE bot_history_messages
   SET turn_visible = false
   WHERE turn_id = $1
     AND turn_visible = true
+    AND (SELECT count(*) FROM owner_sessions) >= 0
   RETURNING session_id, compact_id
 ),
 compaction_epoch_bump AS (
@@ -4833,66 +4862,86 @@ func (q *Queries) LockHistoryTurnAppendByRequest(ctx context.Context, arg LockHi
 const markMessagesCompacted = `-- name: MarkMessagesCompacted :execrows
 WITH expected_claims AS MATERIALIZED (
   SELECT ids.message_id, claims.expected_compact_id
-  FROM UNNEST($2::uuid[]) WITH ORDINALITY AS ids(message_id, ordinal)
-  JOIN UNNEST($3::uuid[]) WITH ORDINALITY AS claims(expected_compact_id, ordinal)
+  FROM UNNEST($1::uuid[]) WITH ORDINALITY AS ids(message_id, ordinal)
+  JOIN UNNEST($2::uuid[]) WITH ORDINALITY AS claims(expected_compact_id, ordinal)
     USING (ordinal)
-), current_claims AS MATERIALIZED (
-  SELECT current_claim.id,
-         current_claim.bot_id,
-         current_claim.session_id,
-         current_claim.compaction_epoch,
-         current_claim.status,
-         current_claim.summary,
-         current_claim.started_at
+), target_compact AS MATERIALIZED (
+  SELECT compact.id, compact.bot_id, compact.session_id, compact.compaction_epoch
+  FROM bot_history_message_compacts compact
+  JOIN bot_sessions owner_session
+    ON owner_session.id = compact.session_id
+   AND owner_session.bot_id = compact.bot_id
+   AND owner_session.compaction_epoch = compact.compaction_epoch
+  WHERE compact.id = $3
+    AND compact.status = 'pending'
+), reclaimable_pending_claims AS MATERIALIZED (
+  SELECT current_claim.id
   FROM bot_history_message_compacts current_claim
-  WHERE current_claim.id = ANY($3::uuid[])
+  CROSS JOIN target_compact target
+  WHERE current_claim.id = ANY($2::uuid[])
+    AND current_claim.status = 'pending'
+    AND (
+      current_claim.bot_id IS DISTINCT FROM target.bot_id
+      OR current_claim.session_id IS DISTINCT FROM target.session_id
+      OR current_claim.compaction_epoch IS DISTINCT FROM target.compaction_epoch
+      OR current_claim.started_at <= now() - INTERVAL '15 minutes'
+    )
   ORDER BY current_claim.id
   FOR UPDATE
+), reclaimed_claims AS MATERIALIZED (
+  UPDATE bot_history_message_compacts current_claim
+  SET status = 'error',
+      error_message = 'source lease reclaimed',
+      completed_at = now()
+  FROM reclaimable_pending_claims reclaimable
+  WHERE current_claim.id = reclaimable.id
+    AND current_claim.status = 'pending'
+  RETURNING current_claim.id
 )
 UPDATE bot_history_messages message
-SET compact_id = compact.id
+SET compact_id = target.id
 FROM expected_claims claim,
-     bot_history_message_compacts compact
-JOIN bot_sessions owner_session
-  ON owner_session.id = compact.session_id
- AND owner_session.bot_id = compact.bot_id
- AND owner_session.compaction_epoch = compact.compaction_epoch
-WHERE compact.id = $1
-  AND compact.status = 'pending'
-  AND CARDINALITY($2::uuid[]) = CARDINALITY($3::uuid[])
+     target_compact target
+WHERE CARDINALITY($1::uuid[]) = CARDINALITY($2::uuid[])
   AND message.id = claim.message_id
   AND message.compact_id IS NOT DISTINCT FROM claim.expected_compact_id
-  AND message.bot_id = compact.bot_id
-  AND message.session_id = compact.session_id
+  AND message.bot_id = target.bot_id
+  AND message.session_id = target.session_id
   AND message.turn_visible = true
   AND message.turn_id IS NOT NULL
   AND message.turn_position IS NOT NULL
   AND message.turn_message_seq IS NOT NULL
   AND (
     claim.expected_compact_id IS NULL
-    OR NOT EXISTS (
+    OR EXISTS (
       SELECT 1
-      FROM current_claims current_claim
-      WHERE current_claim.id = claim.expected_compact_id
-        AND current_claim.bot_id = compact.bot_id
-        AND current_claim.session_id = compact.session_id
-        AND current_claim.compaction_epoch = owner_session.compaction_epoch
+      FROM reclaimed_claims reclaimed
+      WHERE reclaimed.id = claim.expected_compact_id
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM bot_history_message_compacts stable_claim
+      WHERE stable_claim.id = claim.expected_compact_id
+        AND stable_claim.status <> 'pending'
         AND (
-          (current_claim.status = 'ok' AND NULLIF(BTRIM(current_claim.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL)
-          OR (current_claim.status = 'pending' AND current_claim.started_at > now() - INTERVAL '15 minutes')
+          stable_claim.bot_id IS DISTINCT FROM target.bot_id
+          OR stable_claim.session_id IS DISTINCT FROM target.session_id
+          OR stable_claim.compaction_epoch IS DISTINCT FROM target.compaction_epoch
+          OR stable_claim.status <> 'ok'
+          OR NULLIF(BTRIM(stable_claim.summary, E' \t\n\r\f\x0B'), '') IS NULL
         )
     )
   )
 `
 
 type MarkMessagesCompactedParams struct {
-	CompactID          pgtype.UUID   `json:"compact_id"`
 	MessageIds         []pgtype.UUID `json:"message_ids"`
 	ExpectedCompactIds []pgtype.UUID `json:"expected_compact_ids"`
+	CompactID          pgtype.UUID   `json:"compact_id"`
 }
 
 func (q *Queries) MarkMessagesCompacted(ctx context.Context, arg MarkMessagesCompactedParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markMessagesCompacted, arg.CompactID, arg.MessageIds, arg.ExpectedCompactIds)
+	result, err := q.db.Exec(ctx, markMessagesCompacted, arg.MessageIds, arg.ExpectedCompactIds, arg.CompactID)
 	if err != nil {
 		return 0, err
 	}
@@ -4900,11 +4949,17 @@ func (q *Queries) MarkMessagesCompacted(ctx context.Context, arg MarkMessagesCom
 }
 
 const replaceHistoryTurn = `-- name: ReplaceHistoryTurn :one
-WITH old_turn_target AS (
+WITH owner_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.id = $1
+  FOR UPDATE
+),
+old_turn_target AS (
   SELECT m.turn_id, m.session_id, m.turn_position
   FROM bot_history_messages m
-  WHERE m.turn_id = $1
-    AND m.session_id = $2
+  JOIN owner_session owner ON owner.id = m.session_id
+  WHERE m.turn_id = $2
     AND m.turn_position IS NOT NULL
     AND m.turn_visible = true
   LIMIT 1
@@ -4940,7 +4995,7 @@ old_lock_guard AS (
 latest_turn AS (
   SELECT m.turn_id AS id
   FROM bot_history_messages m
-  WHERE m.session_id = $2
+  WHERE m.session_id = $1
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
     AND m.turn_visible = true
@@ -5033,8 +5088,8 @@ updated AS (
       turn_superseded_reason = $6,
       turn_visible = false
   FROM replacement
-  WHERE old.turn_id = $1
-    AND old.session_id = $2
+  WHERE old.turn_id = $2
+    AND old.session_id = $1
     AND old.turn_superseded_at IS NULL
     AND old.id IS DISTINCT FROM replacement.request_message_id
     AND old.id IS DISTINCT FROM replacement.assistant_message_id
@@ -5130,8 +5185,8 @@ CROSS JOIN linked_tail_done
 `
 
 type ReplaceHistoryTurnParams struct {
-	OldTurnID          pgtype.UUID        `json:"old_turn_id"`
 	SessionID          pgtype.UUID        `json:"session_id"`
+	OldTurnID          pgtype.UUID        `json:"old_turn_id"`
 	RequestMessageID   pgtype.UUID        `json:"request_message_id"`
 	AssistantMessageID pgtype.UUID        `json:"assistant_message_id"`
 	SupersededAt       pgtype.Timestamptz `json:"superseded_at"`
@@ -5154,8 +5209,8 @@ type ReplaceHistoryTurnRow struct {
 
 func (q *Queries) ReplaceHistoryTurn(ctx context.Context, arg ReplaceHistoryTurnParams) (ReplaceHistoryTurnRow, error) {
 	row := q.db.QueryRow(ctx, replaceHistoryTurn,
-		arg.OldTurnID,
 		arg.SessionID,
+		arg.OldTurnID,
 		arg.RequestMessageID,
 		arg.AssistantMessageID,
 		arg.SupersededAt,
@@ -5276,14 +5331,21 @@ func (q *Queries) SearchMessages(ctx context.Context, arg SearchMessagesParams) 
 }
 
 const supersedeHistoryTurn = `-- name: SupersedeHistoryTurn :one
-WITH updated AS (
+WITH owner_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.id = $1
+  FOR UPDATE
+),
+updated AS (
   UPDATE bot_history_messages m
-  SET turn_superseded_by_turn_id = $1,
-      turn_superseded_at = $2,
-      turn_superseded_reason = $3,
+  SET turn_superseded_by_turn_id = $2,
+      turn_superseded_at = $3,
+      turn_superseded_reason = $4,
       turn_visible = false
-  WHERE m.turn_id = $4
-    AND m.session_id = $5
+  FROM owner_session owner
+  WHERE m.turn_id = $5
+    AND m.session_id = owner.id
     AND m.turn_superseded_at IS NULL
   RETURNING
     m.turn_id,
@@ -5334,11 +5396,11 @@ GROUP BY updated.turn_id, updated.session_id, updated.turn_position
 `
 
 type SupersedeHistoryTurnParams struct {
+	SessionID          pgtype.UUID        `json:"session_id"`
 	SupersededByTurnID pgtype.UUID        `json:"superseded_by_turn_id"`
 	SupersededAt       pgtype.Timestamptz `json:"superseded_at"`
 	SupersededReason   pgtype.Text        `json:"superseded_reason"`
 	OldTurnID          pgtype.UUID        `json:"old_turn_id"`
-	SessionID          pgtype.UUID        `json:"session_id"`
 }
 
 type SupersedeHistoryTurnRow struct {
@@ -5357,11 +5419,11 @@ type SupersedeHistoryTurnRow struct {
 
 func (q *Queries) SupersedeHistoryTurn(ctx context.Context, arg SupersedeHistoryTurnParams) (SupersedeHistoryTurnRow, error) {
 	row := q.db.QueryRow(ctx, supersedeHistoryTurn,
+		arg.SessionID,
 		arg.SupersededByTurnID,
 		arg.SupersededAt,
 		arg.SupersededReason,
 		arg.OldTurnID,
-		arg.SessionID,
 	)
 	var i SupersedeHistoryTurnRow
 	err := row.Scan(
