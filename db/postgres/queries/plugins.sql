@@ -12,16 +12,16 @@ DO UPDATE SET plugin_name = EXCLUDED.plugin_name,
               metadata = EXCLUDED.metadata,
               manifest = EXCLUDED.manifest,
               updated_at = now()
-RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at;
+RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, tenant_id;
 
 -- name: GetBotPluginInstallationByID :one
-SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at
+SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, tenant_id
 FROM bot_plugin_installations
 WHERE bot_id = $1 AND id = $2
 LIMIT 1;
 
 -- name: ListBotPluginInstallations :many
-SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at
+SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, tenant_id
 FROM bot_plugin_installations
 WHERE bot_id = $1
 ORDER BY installed_at DESC;
@@ -32,7 +32,7 @@ SET status = $3,
     enabled = $4,
     updated_at = now()
 WHERE bot_id = $1 AND id = $2
-RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at;
+RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, tenant_id;
 
 -- name: DeleteBotPluginInstallation :exec
 DELETE FROM bot_plugin_installations
@@ -48,10 +48,10 @@ DO UPDATE SET resource_id = EXCLUDED.resource_id,
               status = EXCLUDED.status,
               metadata = EXCLUDED.metadata,
               updated_at = now()
-RETURNING id, installation_id, resource_type, resource_key, resource_id, status, metadata, created_at, updated_at;
+RETURNING id, installation_id, resource_type, resource_key, resource_id, status, metadata, created_at, updated_at, tenant_id;
 
 -- name: ListBotPluginResources :many
-SELECT id, installation_id, resource_type, resource_key, resource_id, status, metadata, created_at, updated_at
+SELECT id, installation_id, resource_type, resource_key, resource_id, status, metadata, created_at, updated_at, tenant_id
 FROM bot_plugin_resources
 WHERE installation_id = $1
 ORDER BY resource_type ASC, resource_key ASC;

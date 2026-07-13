@@ -1,13 +1,13 @@
 -- name: GetMCPConnectionByID :one
 SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-       managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at
+       managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, tenant_id
 FROM mcp_connections
 WHERE bot_id = $1 AND id = $2
 LIMIT 1;
 
 -- name: ListMCPConnectionsByBotID :many
 SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-       managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at
+       managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, tenant_id
 FROM mcp_connections
 WHERE bot_id = $1
 ORDER BY created_at DESC;
@@ -16,7 +16,7 @@ ORDER BY created_at DESC;
 INSERT INTO mcp_connections (bot_id, name, type, config, is_active, auth_type)
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at;
+          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, tenant_id;
 
 -- name: CreateManagedMCPConnection :one
 INSERT INTO mcp_connections (
@@ -25,7 +25,7 @@ INSERT INTO mcp_connections (
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at;
+          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, tenant_id;
 
 -- name: UpdateMCPConnection :one
 UPDATE mcp_connections
@@ -37,7 +37,7 @@ SET name = $3,
     updated_at = now()
 WHERE bot_id = $1 AND id = $2
 RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at;
+          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, tenant_id;
 
 -- name: UpdateMCPConnectionActive :exec
 UPDATE mcp_connections
@@ -82,4 +82,4 @@ DO UPDATE SET type = EXCLUDED.type,
               config = EXCLUDED.config,
               updated_at = now()
 RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at;
+          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, tenant_id;

@@ -28,7 +28,7 @@ func (q *Queries) DeleteUserProviderOAuthToken(ctx context.Context, arg DeleteUs
 }
 
 const getUserProviderOAuthToken = `-- name: GetUserProviderOAuthToken :one
-SELECT id, provider_id, user_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at FROM user_provider_oauth_tokens
+SELECT id, provider_id, user_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at, tenant_id FROM user_provider_oauth_tokens
 WHERE provider_id = $1
   AND user_id = $2
 `
@@ -55,12 +55,13 @@ func (q *Queries) GetUserProviderOAuthToken(ctx context.Context, arg GetUserProv
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const getUserProviderOAuthTokenByState = `-- name: GetUserProviderOAuthTokenByState :one
-SELECT id, provider_id, user_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at FROM user_provider_oauth_tokens
+SELECT id, provider_id, user_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at, tenant_id FROM user_provider_oauth_tokens
 WHERE state = $1
   AND state != ''
 `
@@ -82,6 +83,7 @@ func (q *Queries) GetUserProviderOAuthTokenByState(ctx context.Context, state st
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -156,7 +158,7 @@ ON CONFLICT (provider_id, user_id) DO UPDATE SET
   pkce_code_verifier = EXCLUDED.pkce_code_verifier,
   metadata = EXCLUDED.metadata,
   updated_at = now()
-RETURNING id, provider_id, user_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at
+RETURNING id, provider_id, user_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at, tenant_id
 `
 
 type UpsertUserProviderOAuthTokenParams struct {
@@ -200,6 +202,7 @@ func (q *Queries) UpsertUserProviderOAuthToken(ctx context.Context, arg UpsertUs
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }

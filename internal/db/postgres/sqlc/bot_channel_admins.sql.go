@@ -27,7 +27,7 @@ func (q *Queries) DeleteBotChannelAdmin(ctx context.Context, arg DeleteBotChanne
 }
 
 const getBotChannelAdmin = `-- name: GetBotChannelAdmin :one
-SELECT id, bot_id, channel_identity_id, granted, created_by_user_id, created_at, updated_at
+SELECT id, bot_id, channel_identity_id, granted, created_by_user_id, created_at, updated_at, tenant_id
 FROM bot_channel_admins
 WHERE bot_id = $1 AND channel_identity_id = $2
 `
@@ -48,6 +48,7 @@ func (q *Queries) GetBotChannelAdmin(ctx context.Context, arg GetBotChannelAdmin
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -133,7 +134,7 @@ VALUES (
 ON CONFLICT (bot_id, channel_identity_id) DO UPDATE
   SET granted = EXCLUDED.granted,
       updated_at = now()
-RETURNING id, bot_id, channel_identity_id, granted, created_by_user_id, created_at, updated_at
+RETURNING id, bot_id, channel_identity_id, granted, created_by_user_id, created_at, updated_at, tenant_id
 `
 
 type UpsertBotChannelAdminParams struct {
@@ -159,6 +160,7 @@ func (q *Queries) UpsertBotChannelAdmin(ctx context.Context, arg UpsertBotChanne
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }

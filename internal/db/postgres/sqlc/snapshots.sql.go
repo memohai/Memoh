@@ -20,7 +20,8 @@ SELECT
   parent_runtime_snapshot_name,
   snapshotter,
   source,
-  created_at
+  created_at,
+  tenant_id
 FROM snapshots
 WHERE container_id = $1
   AND runtime_snapshot_name = $2
@@ -44,6 +45,7 @@ func (q *Queries) GetSnapshotByContainerAndRuntimeName(ctx context.Context, arg 
 		&i.Snapshotter,
 		&i.Source,
 		&i.CreatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -57,7 +59,8 @@ SELECT
   parent_runtime_snapshot_name,
   snapshotter,
   source,
-  created_at
+  created_at,
+  tenant_id
 FROM snapshots
 WHERE container_id = $1
 ORDER BY created_at DESC
@@ -81,6 +84,7 @@ func (q *Queries) ListSnapshotsByContainerID(ctx context.Context, containerID st
 			&i.Snapshotter,
 			&i.Source,
 			&i.CreatedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -174,7 +178,7 @@ SET
   parent_runtime_snapshot_name = EXCLUDED.parent_runtime_snapshot_name,
   snapshotter = EXCLUDED.snapshotter,
   source = EXCLUDED.source
-RETURNING id, container_id, runtime_snapshot_name, display_name, parent_runtime_snapshot_name, snapshotter, source, created_at
+RETURNING id, container_id, runtime_snapshot_name, display_name, parent_runtime_snapshot_name, snapshotter, source, created_at, tenant_id
 `
 
 type UpsertSnapshotParams struct {
@@ -205,6 +209,7 @@ func (q *Queries) UpsertSnapshot(ctx context.Context, arg UpsertSnapshotParams) 
 		&i.Snapshotter,
 		&i.Source,
 		&i.CreatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }

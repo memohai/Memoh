@@ -20,7 +20,7 @@ SET status = $2,
     model_id = $6,
     completed_at = now()
 WHERE id = $1
-RETURNING id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at
+RETURNING id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at, tenant_id
 `
 
 type CompleteHeartbeatLogParams struct {
@@ -53,6 +53,7 @@ func (q *Queries) CompleteHeartbeatLog(ctx context.Context, arg CompleteHeartbea
 		&i.ModelID,
 		&i.StartedAt,
 		&i.CompletedAt,
+		&i.TenantID,
 	)
 	return i, err
 }

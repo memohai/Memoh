@@ -39,6 +39,6 @@ DELETE FROM bot_channel_admins
 WHERE bot_id = $1 AND channel_identity_id = $2;
 
 -- name: GetBotChannelAdmin :one
-SELECT id, bot_id, channel_identity_id, granted, created_by_user_id, created_at, updated_at
+SELECT id, bot_id, channel_identity_id, granted, created_by_user_id, created_at, updated_at, tenant_id
 FROM bot_channel_admins
 WHERE bot_id = $1 AND channel_identity_id = $2;

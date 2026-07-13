@@ -1,10 +1,10 @@
 -- name: CreateChannelLinkCode :one
 INSERT INTO channel_link_codes (token, user_id, channel_type, expires_at)
 VALUES ($1, $2, sqlc.narg(channel_type)::text, $3)
-RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at;
+RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at, tenant_id;
 
 -- name: GetChannelLinkCodeByToken :one
-SELECT token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at
+SELECT token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at, tenant_id
 FROM channel_link_codes
 WHERE token = $1;
 
@@ -23,21 +23,21 @@ SELECT user_id, $2
 FROM claimed
 ON CONFLICT (user_id, channel_identity_id) DO UPDATE
   SET updated_at = now()
-RETURNING id, user_id, channel_identity_id, created_at, updated_at;
+RETURNING id, user_id, channel_identity_id, created_at, updated_at, tenant_id;
 
 -- name: MarkChannelLinkCodeConsumed :one
 UPDATE channel_link_codes
 SET consumed_at = now(),
     consumed_channel_identity_id = $2
 WHERE token = $1 AND consumed_at IS NULL AND expires_at > now()
-RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at;
+RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at, tenant_id;
 
 -- name: UpsertUserChannelIdentityBinding :one
 INSERT INTO user_channel_identity_bindings (user_id, channel_identity_id)
 VALUES ($1, $2)
 ON CONFLICT (user_id, channel_identity_id) DO UPDATE
   SET updated_at = now()
-RETURNING id, user_id, channel_identity_id, created_at, updated_at;
+RETURNING id, user_id, channel_identity_id, created_at, updated_at, tenant_id;
 
 -- name: ListChannelIdentityBindingsForUser :many
 SELECT

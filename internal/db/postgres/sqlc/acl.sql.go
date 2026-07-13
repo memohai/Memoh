@@ -40,7 +40,7 @@ VALUES (
   $11::text,
   $4
 )
-RETURNING id, bot_id, action, effect, channel_identity_id, source_channel, source_conversation_type, source_conversation_id, source_thread_id, created_by_user_id, created_at, updated_at, enabled, description, subject_channel_type
+RETURNING id, bot_id, action, effect, channel_identity_id, source_channel, source_conversation_type, source_conversation_id, source_thread_id, created_by_user_id, created_at, updated_at, enabled, description, subject_channel_type, tenant_id
 `
 
 type CreateBotACLRuleParams struct {
@@ -88,6 +88,7 @@ func (q *Queries) CreateBotACLRule(ctx context.Context, arg CreateBotACLRulePara
 		&i.Enabled,
 		&i.Description,
 		&i.SubjectChannelType,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -288,7 +289,7 @@ SET
   source_thread_id = $10::text,
   updated_at = now()
 WHERE id = $1
-RETURNING id, bot_id, action, effect, channel_identity_id, source_channel, source_conversation_type, source_conversation_id, source_thread_id, created_by_user_id, created_at, updated_at, enabled, description, subject_channel_type
+RETURNING id, bot_id, action, effect, channel_identity_id, source_channel, source_conversation_type, source_conversation_id, source_thread_id, created_by_user_id, created_at, updated_at, enabled, description, subject_channel_type, tenant_id
 `
 
 type UpdateBotACLRuleParams struct {
@@ -334,6 +335,7 @@ func (q *Queries) UpdateBotACLRule(ctx context.Context, arg UpdateBotACLRulePara
 		&i.Enabled,
 		&i.Description,
 		&i.SubjectChannelType,
+		&i.TenantID,
 	)
 	return i, err
 }

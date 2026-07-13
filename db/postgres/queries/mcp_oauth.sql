@@ -3,7 +3,7 @@ SELECT id, connection_id, resource_metadata_url, authorization_server_url,
        authorization_endpoint, token_endpoint, registration_endpoint,
        scopes_supported, client_id, client_secret, access_token, refresh_token,
        token_type, expires_at, scope, pkce_code_verifier, state_param,
-       resource_uri, redirect_uri, created_at, updated_at
+       resource_uri, redirect_uri, created_at, updated_at, tenant_id
 FROM mcp_oauth_tokens
 WHERE connection_id = $1
 LIMIT 1;
@@ -13,7 +13,7 @@ SELECT id, connection_id, resource_metadata_url, authorization_server_url,
        authorization_endpoint, token_endpoint, registration_endpoint,
        scopes_supported, client_id, client_secret, access_token, refresh_token,
        token_type, expires_at, scope, pkce_code_verifier, state_param,
-       resource_uri, redirect_uri, created_at, updated_at
+       resource_uri, redirect_uri, created_at, updated_at, tenant_id
 FROM mcp_oauth_tokens
 WHERE state_param = $1
 LIMIT 1;
@@ -36,7 +36,7 @@ RETURNING id, connection_id, resource_metadata_url, authorization_server_url,
           authorization_endpoint, token_endpoint, registration_endpoint,
           scopes_supported, client_id, client_secret, access_token, refresh_token,
           token_type, expires_at, scope, pkce_code_verifier, state_param,
-          resource_uri, redirect_uri, created_at, updated_at;
+          resource_uri, redirect_uri, created_at, updated_at, tenant_id;
 
 -- name: UpdateMCPOAuthPKCEState :exec
 UPDATE mcp_oauth_tokens

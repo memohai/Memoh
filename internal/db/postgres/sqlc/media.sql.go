@@ -40,7 +40,7 @@ ON CONFLICT (message_id, content_hash) DO UPDATE SET
   ordinal = EXCLUDED.ordinal,
   name = EXCLUDED.name,
   metadata = EXCLUDED.metadata
-RETURNING id, message_id, role, ordinal, content_hash, name, metadata, created_at
+RETURNING id, message_id, role, ordinal, content_hash, name, metadata, created_at, tenant_id
 `
 
 type CreateMessageAssetParams struct {
@@ -71,6 +71,7 @@ func (q *Queries) CreateMessageAsset(ctx context.Context, arg CreateMessageAsset
 		&i.Name,
 		&i.Metadata,
 		&i.CreatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -78,7 +79,7 @@ func (q *Queries) CreateMessageAsset(ctx context.Context, arg CreateMessageAsset
 const createStorageProvider = `-- name: CreateStorageProvider :one
 INSERT INTO storage_providers (name, provider, config)
 VALUES ($1, $2, $3)
-RETURNING id, name, provider, config, created_at, updated_at
+RETURNING id, name, provider, config, created_at, updated_at, tenant_id
 `
 
 type CreateStorageProviderParams struct {
@@ -97,6 +98,7 @@ func (q *Queries) CreateStorageProvider(ctx context.Context, arg CreateStoragePr
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -111,7 +113,7 @@ func (q *Queries) DeleteMessageAssets(ctx context.Context, messageID pgtype.UUID
 }
 
 const getBotStorageBinding = `-- name: GetBotStorageBinding :one
-SELECT id, bot_id, storage_provider_id, base_path, created_at, updated_at FROM bot_storage_bindings WHERE bot_id = $1
+SELECT id, bot_id, storage_provider_id, base_path, created_at, updated_at, tenant_id FROM bot_storage_bindings WHERE bot_id = $1
 `
 
 func (q *Queries) GetBotStorageBinding(ctx context.Context, botID pgtype.UUID) (BotStorageBinding, error) {
@@ -124,12 +126,13 @@ func (q *Queries) GetBotStorageBinding(ctx context.Context, botID pgtype.UUID) (
 		&i.BasePath,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const getStorageProviderByID = `-- name: GetStorageProviderByID :one
-SELECT id, name, provider, config, created_at, updated_at FROM storage_providers WHERE id = $1
+SELECT id, name, provider, config, created_at, updated_at, tenant_id FROM storage_providers WHERE id = $1
 `
 
 func (q *Queries) GetStorageProviderByID(ctx context.Context, id pgtype.UUID) (StorageProvider, error) {
@@ -142,12 +145,13 @@ func (q *Queries) GetStorageProviderByID(ctx context.Context, id pgtype.UUID) (S
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const getStorageProviderByName = `-- name: GetStorageProviderByName :one
-SELECT id, name, provider, config, created_at, updated_at FROM storage_providers WHERE name = $1
+SELECT id, name, provider, config, created_at, updated_at, tenant_id FROM storage_providers WHERE name = $1
 `
 
 func (q *Queries) GetStorageProviderByName(ctx context.Context, name string) (StorageProvider, error) {
@@ -160,6 +164,7 @@ func (q *Queries) GetStorageProviderByName(ctx context.Context, name string) (St
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -255,7 +260,7 @@ func (q *Queries) ListMessageAssetsBatch(ctx context.Context, messageIds []pgtyp
 }
 
 const listStorageProviders = `-- name: ListStorageProviders :many
-SELECT id, name, provider, config, created_at, updated_at FROM storage_providers ORDER BY created_at DESC
+SELECT id, name, provider, config, created_at, updated_at, tenant_id FROM storage_providers ORDER BY created_at DESC
 `
 
 func (q *Queries) ListStorageProviders(ctx context.Context) ([]StorageProvider, error) {
@@ -274,6 +279,7 @@ func (q *Queries) ListStorageProviders(ctx context.Context) ([]StorageProvider, 
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -292,7 +298,7 @@ ON CONFLICT (bot_id) DO UPDATE SET
   storage_provider_id = EXCLUDED.storage_provider_id,
   base_path = EXCLUDED.base_path,
   updated_at = now()
-RETURNING id, bot_id, storage_provider_id, base_path, created_at, updated_at
+RETURNING id, bot_id, storage_provider_id, base_path, created_at, updated_at, tenant_id
 `
 
 type UpsertBotStorageBindingParams struct {
@@ -311,6 +317,7 @@ func (q *Queries) UpsertBotStorageBinding(ctx context.Context, arg UpsertBotStor
 		&i.BasePath,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }

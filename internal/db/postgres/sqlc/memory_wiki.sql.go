@@ -101,7 +101,7 @@ func (q *Queries) DeleteMemoryNode(ctx context.Context, arg DeleteMemoryNodePara
 }
 
 const getMemoryNode = `-- name: GetMemoryNode :one
-SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at FROM memory_nodes
+SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at, tenant_id FROM memory_nodes
 WHERE bot_id = $1 AND id = $2
 `
 
@@ -130,6 +130,7 @@ func (q *Queries) GetMemoryNode(ctx context.Context, arg GetMemoryNodeParams) (M
 		&i.ExpiresAt,
 		&i.UpdatedAt,
 		&i.CreatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -164,7 +165,7 @@ func (q *Queries) InsertMemoryEdge(ctx context.Context, arg InsertMemoryEdgePara
 }
 
 const listMemoryEdgesByBot = `-- name: ListMemoryEdgesByBot :many
-SELECT id, bot_id, src_node, dst_node, rel, weight, metadata, created_at FROM memory_edges
+SELECT id, bot_id, src_node, dst_node, rel, weight, metadata, created_at, tenant_id FROM memory_edges
 WHERE bot_id = $1
 `
 
@@ -186,6 +187,7 @@ func (q *Queries) ListMemoryEdgesByBot(ctx context.Context, botID pgtype.UUID) (
 			&i.Weight,
 			&i.Metadata,
 			&i.CreatedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -198,7 +200,7 @@ func (q *Queries) ListMemoryEdgesByBot(ctx context.Context, botID pgtype.UUID) (
 }
 
 const listMemoryEdgesByRel = `-- name: ListMemoryEdgesByRel :many
-SELECT id, bot_id, src_node, dst_node, rel, weight, metadata, created_at FROM memory_edges
+SELECT id, bot_id, src_node, dst_node, rel, weight, metadata, created_at, tenant_id FROM memory_edges
 WHERE bot_id = $1 AND rel = $2
 `
 
@@ -225,6 +227,7 @@ func (q *Queries) ListMemoryEdgesByRel(ctx context.Context, arg ListMemoryEdgesB
 			&i.Weight,
 			&i.Metadata,
 			&i.CreatedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -237,7 +240,7 @@ func (q *Queries) ListMemoryEdgesByRel(ctx context.Context, arg ListMemoryEdgesB
 }
 
 const listMemoryEdgesFromNode = `-- name: ListMemoryEdgesFromNode :many
-SELECT id, bot_id, src_node, dst_node, rel, weight, metadata, created_at FROM memory_edges
+SELECT id, bot_id, src_node, dst_node, rel, weight, metadata, created_at, tenant_id FROM memory_edges
 WHERE bot_id = $1 AND src_node = $2
 ORDER BY weight DESC
 `
@@ -265,6 +268,7 @@ func (q *Queries) ListMemoryEdgesFromNode(ctx context.Context, arg ListMemoryEdg
 			&i.Weight,
 			&i.Metadata,
 			&i.CreatedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -277,7 +281,7 @@ func (q *Queries) ListMemoryEdgesFromNode(ctx context.Context, arg ListMemoryEdg
 }
 
 const listMemoryNodesByBot = `-- name: ListMemoryNodesByBot :many
-SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at FROM memory_nodes
+SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at, tenant_id FROM memory_nodes
 WHERE bot_id = $1
 ORDER BY captured_at ASC
 `
@@ -308,6 +312,7 @@ func (q *Queries) ListMemoryNodesByBot(ctx context.Context, botID pgtype.UUID) (
 			&i.ExpiresAt,
 			&i.UpdatedAt,
 			&i.CreatedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -320,7 +325,7 @@ func (q *Queries) ListMemoryNodesByBot(ctx context.Context, botID pgtype.UUID) (
 }
 
 const listMemoryNodesByBotLayer = `-- name: ListMemoryNodesByBotLayer :many
-SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at FROM memory_nodes
+SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at, tenant_id FROM memory_nodes
 WHERE bot_id = $1 AND layer = $2
 ORDER BY captured_at ASC
 `
@@ -356,6 +361,7 @@ func (q *Queries) ListMemoryNodesByBotLayer(ctx context.Context, arg ListMemoryN
 			&i.ExpiresAt,
 			&i.UpdatedAt,
 			&i.CreatedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -368,7 +374,7 @@ func (q *Queries) ListMemoryNodesByBotLayer(ctx context.Context, arg ListMemoryN
 }
 
 const listMemoryNodesByBotProfile = `-- name: ListMemoryNodesByBotProfile :many
-SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at FROM memory_nodes
+SELECT id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at, tenant_id FROM memory_nodes
 WHERE bot_id = $1 AND profile_ref = $2
 ORDER BY captured_at ASC
 `
@@ -404,6 +410,7 @@ func (q *Queries) ListMemoryNodesByBotProfile(ctx context.Context, arg ListMemor
 			&i.ExpiresAt,
 			&i.UpdatedAt,
 			&i.CreatedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -434,7 +441,7 @@ ON CONFLICT (id) DO UPDATE SET
   topic = EXCLUDED.topic,
   expires_at = EXCLUDED.expires_at,
   updated_at = now()
-RETURNING id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at
+RETURNING id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at, tenant_id
 `
 
 type UpsertMemoryNodeParams struct {
@@ -489,6 +496,7 @@ func (q *Queries) UpsertMemoryNode(ctx context.Context, arg UpsertMemoryNodePara
 		&i.ExpiresAt,
 		&i.UpdatedAt,
 		&i.CreatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }

@@ -20,7 +20,7 @@ VALUES (
   $3,
   $5::uuid
 )
-RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at
+RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at, tenant_id
 `
 
 type CreateBotUserGrantParams struct {
@@ -49,6 +49,7 @@ func (q *Queries) CreateBotUserGrant(ctx context.Context, arg CreateBotUserGrant
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -63,7 +64,7 @@ func (q *Queries) DeleteBotUserGrantByID(ctx context.Context, id pgtype.UUID) er
 }
 
 const getBotUserGrantByID = `-- name: GetBotUserGrantByID :one
-SELECT id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at
+SELECT id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at, tenant_id
 FROM bot_user_grants
 WHERE id = $1
 `
@@ -80,6 +81,7 @@ func (q *Queries) GetBotUserGrantByID(ctx context.Context, id pgtype.UUID) (BotU
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -203,7 +205,7 @@ UPDATE bot_user_grants
 SET permissions = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at
+RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at, tenant_id
 `
 
 type UpdateBotUserGrantPermissionsParams struct {
@@ -223,6 +225,7 @@ func (q *Queries) UpdateBotUserGrantPermissions(ctx context.Context, arg UpdateB
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }

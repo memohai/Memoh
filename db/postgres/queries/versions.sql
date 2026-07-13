@@ -22,7 +22,7 @@ VALUES (
   sqlc.arg(snapshot_id),
   sqlc.arg(version)
 )
-RETURNING id, container_id, snapshot_id, version, created_at;
+RETURNING id, container_id, snapshot_id, version, created_at, tenant_id;
 
 -- name: GetVersionSnapshotRuntimeName :one
 SELECT s.runtime_snapshot_name

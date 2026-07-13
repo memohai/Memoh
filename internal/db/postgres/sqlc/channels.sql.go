@@ -27,7 +27,7 @@ func (q *Queries) DeleteBotChannelConfig(ctx context.Context, arg DeleteBotChann
 }
 
 const getBotChannelConfig = `-- name: GetBotChannelConfig :one
-SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at, tenant_id
 FROM bot_channel_configs
 WHERE bot_id = $1 AND channel_type = $2
 LIMIT 1
@@ -54,12 +54,13 @@ func (q *Queries) GetBotChannelConfig(ctx context.Context, arg GetBotChannelConf
 		&i.VerifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const getBotChannelConfigByExternalIdentity = `-- name: GetBotChannelConfigByExternalIdentity :one
-SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at, tenant_id
 FROM bot_channel_configs
 WHERE channel_type = $1 AND external_identity = $2
 LIMIT 1
@@ -86,12 +87,13 @@ func (q *Queries) GetBotChannelConfigByExternalIdentity(ctx context.Context, arg
 		&i.VerifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const getUserChannelBinding = `-- name: GetUserChannelBinding :one
-SELECT id, user_id, channel_type, config, created_at, updated_at
+SELECT id, user_id, channel_type, config, created_at, updated_at, tenant_id
 FROM user_channel_bindings
 WHERE user_id = $1 AND channel_type = $2
 LIMIT 1
@@ -112,12 +114,13 @@ func (q *Queries) GetUserChannelBinding(ctx context.Context, arg GetUserChannelB
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const listBotChannelConfigsByType = `-- name: ListBotChannelConfigsByType :many
-SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at, tenant_id
 FROM bot_channel_configs
 WHERE channel_type = $1
 ORDER BY created_at DESC
@@ -145,6 +148,7 @@ func (q *Queries) ListBotChannelConfigsByType(ctx context.Context, channelType s
 			&i.VerifiedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -157,7 +161,7 @@ func (q *Queries) ListBotChannelConfigsByType(ctx context.Context, channelType s
 }
 
 const listUserChannelBindingsByPlatform = `-- name: ListUserChannelBindingsByPlatform :many
-SELECT id, user_id, channel_type, config, created_at, updated_at
+SELECT id, user_id, channel_type, config, created_at, updated_at, tenant_id
 FROM user_channel_bindings
 WHERE channel_type = $1
 ORDER BY created_at DESC
@@ -179,6 +183,7 @@ func (q *Queries) ListUserChannelBindingsByPlatform(ctx context.Context, channel
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -218,7 +223,7 @@ SET
   disabled = $3,
   updated_at = now()
 WHERE bot_id = $1 AND channel_type = $2
-RETURNING id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+RETURNING id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at, tenant_id
 `
 
 type UpdateBotChannelConfigDisabledParams struct {
@@ -243,6 +248,7 @@ func (q *Queries) UpdateBotChannelConfigDisabled(ctx context.Context, arg Update
 		&i.VerifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -262,7 +268,7 @@ DO UPDATE SET
   disabled = EXCLUDED.disabled,
   verified_at = EXCLUDED.verified_at,
   updated_at = now()
-RETURNING id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+RETURNING id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at, tenant_id
 `
 
 type UpsertBotChannelConfigParams struct {
@@ -303,6 +309,7 @@ func (q *Queries) UpsertBotChannelConfig(ctx context.Context, arg UpsertBotChann
 		&i.VerifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -314,7 +321,7 @@ ON CONFLICT (user_id, channel_type)
 DO UPDATE SET
   config = EXCLUDED.config,
   updated_at = now()
-RETURNING id, user_id, channel_type, config, created_at, updated_at
+RETURNING id, user_id, channel_type, config, created_at, updated_at, tenant_id
 `
 
 type UpsertUserChannelBindingParams struct {
@@ -333,6 +340,7 @@ func (q *Queries) UpsertUserChannelBinding(ctx context.Context, arg UpsertUserCh
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }

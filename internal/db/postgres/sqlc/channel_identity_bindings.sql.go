@@ -14,7 +14,7 @@ import (
 const createChannelLinkCode = `-- name: CreateChannelLinkCode :one
 INSERT INTO channel_link_codes (token, user_id, channel_type, expires_at)
 VALUES ($1, $2, $4::text, $3)
-RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at
+RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at, tenant_id
 `
 
 type CreateChannelLinkCodeParams struct {
@@ -40,6 +40,7 @@ func (q *Queries) CreateChannelLinkCode(ctx context.Context, arg CreateChannelLi
 		&i.ConsumedAt,
 		&i.ConsumedChannelIdentityID,
 		&i.CreatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -60,7 +61,7 @@ func (q *Queries) DeleteUserChannelIdentityBinding(ctx context.Context, arg Dele
 }
 
 const getChannelLinkCodeByToken = `-- name: GetChannelLinkCodeByToken :one
-SELECT token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at
+SELECT token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at, tenant_id
 FROM channel_link_codes
 WHERE token = $1
 `
@@ -76,6 +77,7 @@ func (q *Queries) GetChannelLinkCodeByToken(ctx context.Context, token string) (
 		&i.ConsumedAt,
 		&i.ConsumedChannelIdentityID,
 		&i.CreatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -287,7 +289,7 @@ UPDATE channel_link_codes
 SET consumed_at = now(),
     consumed_channel_identity_id = $2
 WHERE token = $1 AND consumed_at IS NULL AND expires_at > now()
-RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at
+RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at, tenant_id
 `
 
 type MarkChannelLinkCodeConsumedParams struct {
@@ -306,6 +308,7 @@ func (q *Queries) MarkChannelLinkCodeConsumed(ctx context.Context, arg MarkChann
 		&i.ConsumedAt,
 		&i.ConsumedChannelIdentityID,
 		&i.CreatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -325,7 +328,7 @@ SELECT user_id, $2
 FROM claimed
 ON CONFLICT (user_id, channel_identity_id) DO UPDATE
   SET updated_at = now()
-RETURNING id, user_id, channel_identity_id, created_at, updated_at
+RETURNING id, user_id, channel_identity_id, created_at, updated_at, tenant_id
 `
 
 type RedeemChannelLinkCodeParams struct {
@@ -342,6 +345,7 @@ func (q *Queries) RedeemChannelLinkCode(ctx context.Context, arg RedeemChannelLi
 		&i.ChannelIdentityID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -351,7 +355,7 @@ INSERT INTO user_channel_identity_bindings (user_id, channel_identity_id)
 VALUES ($1, $2)
 ON CONFLICT (user_id, channel_identity_id) DO UPDATE
   SET updated_at = now()
-RETURNING id, user_id, channel_identity_id, created_at, updated_at
+RETURNING id, user_id, channel_identity_id, created_at, updated_at, tenant_id
 `
 
 type UpsertUserChannelIdentityBindingParams struct {
@@ -368,6 +372,7 @@ func (q *Queries) UpsertUserChannelIdentityBinding(ctx context.Context, arg Upse
 		&i.ChannelIdentityID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }

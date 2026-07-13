@@ -21,7 +21,7 @@ func (q *Queries) DeleteContainerByBotID(ctx context.Context, botID pgtype.UUID)
 }
 
 const getContainerByBotID = `-- name: GetContainerByBotID :one
-SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, workspace_backend, created_at, updated_at, last_started_at, last_stopped_at FROM containers WHERE bot_id = $1 ORDER BY updated_at DESC LIMIT 1
+SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, workspace_backend, created_at, updated_at, last_started_at, last_stopped_at, tenant_id FROM containers WHERE bot_id = $1 ORDER BY updated_at DESC LIMIT 1
 `
 
 func (q *Queries) GetContainerByBotID(ctx context.Context, botID pgtype.UUID) (Container, error) {
@@ -42,12 +42,13 @@ func (q *Queries) GetContainerByBotID(ctx context.Context, botID pgtype.UUID) (C
 		&i.UpdatedAt,
 		&i.LastStartedAt,
 		&i.LastStoppedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const listAutoStartContainers = `-- name: ListAutoStartContainers :many
-SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, workspace_backend, created_at, updated_at, last_started_at, last_stopped_at FROM containers WHERE auto_start = true ORDER BY updated_at DESC
+SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, workspace_backend, created_at, updated_at, last_started_at, last_stopped_at, tenant_id FROM containers WHERE auto_start = true ORDER BY updated_at DESC
 `
 
 func (q *Queries) ListAutoStartContainers(ctx context.Context) ([]Container, error) {
@@ -74,6 +75,7 @@ func (q *Queries) ListAutoStartContainers(ctx context.Context) ([]Container, err
 			&i.UpdatedAt,
 			&i.LastStartedAt,
 			&i.LastStoppedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}

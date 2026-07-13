@@ -3,13 +3,13 @@ DELETE FROM bot_channel_configs
 WHERE bot_id = $1 AND channel_type = $2;
 
 -- name: GetBotChannelConfig :one
-SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at, tenant_id
 FROM bot_channel_configs
 WHERE bot_id = $1 AND channel_type = $2
 LIMIT 1;
 
 -- name: GetBotChannelConfigByExternalIdentity :one
-SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at, tenant_id
 FROM bot_channel_configs
 WHERE channel_type = $1 AND external_identity = $2
 LIMIT 1;
@@ -29,7 +29,7 @@ DO UPDATE SET
   disabled = EXCLUDED.disabled,
   verified_at = EXCLUDED.verified_at,
   updated_at = now()
-RETURNING id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at;
+RETURNING id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at, tenant_id;
 
 -- name: UpdateBotChannelConfigDisabled :one
 UPDATE bot_channel_configs
@@ -37,7 +37,7 @@ SET
   disabled = $3,
   updated_at = now()
 WHERE bot_id = $1 AND channel_type = $2
-RETURNING id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at;
+RETURNING id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at, tenant_id;
 
 -- name: SaveMatrixSyncSinceToken :execrows
 UPDATE bot_channel_configs
@@ -48,13 +48,13 @@ SET routing = COALESCE(routing, '{}'::jsonb) || jsonb_build_object(
 WHERE id = $1;
 
 -- name: ListBotChannelConfigsByType :many
-SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at
+SELECT id, bot_id, channel_type, credentials, external_identity, self_identity, routing, capabilities, disabled, verified_at, created_at, updated_at, tenant_id
 FROM bot_channel_configs
 WHERE channel_type = $1
 ORDER BY created_at DESC;
 
 -- name: GetUserChannelBinding :one
-SELECT id, user_id, channel_type, config, created_at, updated_at
+SELECT id, user_id, channel_type, config, created_at, updated_at, tenant_id
 FROM user_channel_bindings
 WHERE user_id = $1 AND channel_type = $2
 LIMIT 1;
@@ -66,10 +66,10 @@ ON CONFLICT (user_id, channel_type)
 DO UPDATE SET
   config = EXCLUDED.config,
   updated_at = now()
-RETURNING id, user_id, channel_type, config, created_at, updated_at;
+RETURNING id, user_id, channel_type, config, created_at, updated_at, tenant_id;
 
 -- name: ListUserChannelBindingsByPlatform :many
-SELECT id, user_id, channel_type, config, created_at, updated_at
+SELECT id, user_id, channel_type, config, created_at, updated_at, tenant_id
 FROM user_channel_bindings
 WHERE channel_type = $1
 ORDER BY created_at DESC;

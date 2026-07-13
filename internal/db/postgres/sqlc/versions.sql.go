@@ -38,7 +38,7 @@ VALUES (
   $2,
   $3
 )
-RETURNING id, container_id, snapshot_id, version, created_at
+RETURNING id, container_id, snapshot_id, version, created_at, tenant_id
 `
 
 type InsertVersionParams struct {
@@ -56,6 +56,7 @@ func (q *Queries) InsertVersion(ctx context.Context, arg InsertVersionParams) (C
 		&i.SnapshotID,
 		&i.Version,
 		&i.CreatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }

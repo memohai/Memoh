@@ -21,7 +21,7 @@ SET
   parent_runtime_snapshot_name = EXCLUDED.parent_runtime_snapshot_name,
   snapshotter = EXCLUDED.snapshotter,
   source = EXCLUDED.source
-RETURNING id, container_id, runtime_snapshot_name, display_name, parent_runtime_snapshot_name, snapshotter, source, created_at;
+RETURNING id, container_id, runtime_snapshot_name, display_name, parent_runtime_snapshot_name, snapshotter, source, created_at, tenant_id;
 
 -- name: ListSnapshotsByContainerID :many
 SELECT
@@ -32,7 +32,8 @@ SELECT
   parent_runtime_snapshot_name,
   snapshotter,
   source,
-  created_at
+  created_at,
+  tenant_id
 FROM snapshots
 WHERE container_id = sqlc.arg(container_id)
 ORDER BY created_at DESC;
@@ -62,7 +63,8 @@ SELECT
   parent_runtime_snapshot_name,
   snapshotter,
   source,
-  created_at
+  created_at,
+  tenant_id
 FROM snapshots
 WHERE container_id = sqlc.arg(container_id)
   AND runtime_snapshot_name = sqlc.arg(runtime_snapshot_name)

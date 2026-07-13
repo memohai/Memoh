@@ -17,7 +17,7 @@ WHERE g.bot_id = $1
 ORDER BY g.subject_type DESC, g.created_at ASC;
 
 -- name: GetBotUserGrantByID :one
-SELECT id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at
+SELECT id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at, tenant_id
 FROM bot_user_grants
 WHERE id = $1;
 
@@ -39,14 +39,14 @@ VALUES (
   $3,
   sqlc.narg(created_by_user_id)::uuid
 )
-RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at;
+RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at, tenant_id;
 
 -- name: UpdateBotUserGrantPermissions :one
 UPDATE bot_user_grants
 SET permissions = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at;
+RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at, tenant_id;
 
 -- name: DeleteBotUserGrantByID :exec
 DELETE FROM bot_user_grants WHERE id = $1;

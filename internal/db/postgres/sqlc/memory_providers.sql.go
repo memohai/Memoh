@@ -25,7 +25,7 @@ func (q *Queries) CountMemoryProvidersByDefault(ctx context.Context) (int64, err
 const createMemoryProvider = `-- name: CreateMemoryProvider :one
 INSERT INTO memory_providers (name, provider, config, is_default)
 VALUES ($1, $2, $3, $4)
-RETURNING id, name, provider, config, is_default, created_at, updated_at
+RETURNING id, name, provider, config, is_default, created_at, updated_at, tenant_id
 `
 
 type CreateMemoryProviderParams struct {
@@ -51,6 +51,7 @@ func (q *Queries) CreateMemoryProvider(ctx context.Context, arg CreateMemoryProv
 		&i.IsDefault,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -65,7 +66,7 @@ func (q *Queries) DeleteMemoryProvider(ctx context.Context, id pgtype.UUID) erro
 }
 
 const getDefaultMemoryProvider = `-- name: GetDefaultMemoryProvider :one
-SELECT id, name, provider, config, is_default, created_at, updated_at FROM memory_providers WHERE is_default = true LIMIT 1
+SELECT id, name, provider, config, is_default, created_at, updated_at, tenant_id FROM memory_providers WHERE is_default = true LIMIT 1
 `
 
 func (q *Queries) GetDefaultMemoryProvider(ctx context.Context) (MemoryProvider, error) {
@@ -79,12 +80,13 @@ func (q *Queries) GetDefaultMemoryProvider(ctx context.Context) (MemoryProvider,
 		&i.IsDefault,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const getMemoryProviderByID = `-- name: GetMemoryProviderByID :one
-SELECT id, name, provider, config, is_default, created_at, updated_at FROM memory_providers WHERE id = $1
+SELECT id, name, provider, config, is_default, created_at, updated_at, tenant_id FROM memory_providers WHERE id = $1
 `
 
 func (q *Queries) GetMemoryProviderByID(ctx context.Context, id pgtype.UUID) (MemoryProvider, error) {
@@ -98,12 +100,13 @@ func (q *Queries) GetMemoryProviderByID(ctx context.Context, id pgtype.UUID) (Me
 		&i.IsDefault,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const listMemoryProviders = `-- name: ListMemoryProviders :many
-SELECT id, name, provider, config, is_default, created_at, updated_at FROM memory_providers ORDER BY created_at ASC
+SELECT id, name, provider, config, is_default, created_at, updated_at, tenant_id FROM memory_providers ORDER BY created_at ASC
 `
 
 func (q *Queries) ListMemoryProviders(ctx context.Context) ([]MemoryProvider, error) {
@@ -123,6 +126,7 @@ func (q *Queries) ListMemoryProviders(ctx context.Context) ([]MemoryProvider, er
 			&i.IsDefault,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -140,7 +144,7 @@ SET name = $2,
     config = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, provider, config, is_default, created_at, updated_at
+RETURNING id, name, provider, config, is_default, created_at, updated_at, tenant_id
 `
 
 type UpdateMemoryProviderParams struct {
@@ -160,6 +164,7 @@ func (q *Queries) UpdateMemoryProvider(ctx context.Context, arg UpdateMemoryProv
 		&i.IsDefault,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }

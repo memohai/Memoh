@@ -20,7 +20,7 @@ SET status = $2,
     model_id = $6,
     completed_at = now()
 WHERE id = $1
-RETURNING id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at
+RETURNING id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at, tenant_id
 `
 
 type CompleteScheduleLogParams struct {
@@ -54,6 +54,7 @@ func (q *Queries) CompleteScheduleLog(ctx context.Context, arg CompleteScheduleL
 		&i.ModelID,
 		&i.StartedAt,
 		&i.CompletedAt,
+		&i.TenantID,
 	)
 	return i, err
 }

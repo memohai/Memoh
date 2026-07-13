@@ -19,7 +19,7 @@ VALUES (
   $3,
   $4
 )
-RETURNING id, name, provider, config, enable, created_at, updated_at
+RETURNING id, name, provider, config, enable, created_at, updated_at, tenant_id
 `
 
 type CreateSearchProviderParams struct {
@@ -45,6 +45,7 @@ func (q *Queries) CreateSearchProvider(ctx context.Context, arg CreateSearchProv
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -59,7 +60,7 @@ func (q *Queries) DeleteSearchProvider(ctx context.Context, id pgtype.UUID) erro
 }
 
 const getSearchProviderByID = `-- name: GetSearchProviderByID :one
-SELECT id, name, provider, config, enable, created_at, updated_at FROM search_providers WHERE id = $1
+SELECT id, name, provider, config, enable, created_at, updated_at, tenant_id FROM search_providers WHERE id = $1
 `
 
 func (q *Queries) GetSearchProviderByID(ctx context.Context, id pgtype.UUID) (SearchProvider, error) {
@@ -73,12 +74,13 @@ func (q *Queries) GetSearchProviderByID(ctx context.Context, id pgtype.UUID) (Se
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const getSearchProviderByName = `-- name: GetSearchProviderByName :one
-SELECT id, name, provider, config, enable, created_at, updated_at FROM search_providers WHERE name = $1
+SELECT id, name, provider, config, enable, created_at, updated_at, tenant_id FROM search_providers WHERE name = $1
 `
 
 func (q *Queries) GetSearchProviderByName(ctx context.Context, name string) (SearchProvider, error) {
@@ -92,12 +94,13 @@ func (q *Queries) GetSearchProviderByName(ctx context.Context, name string) (Sea
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const listSearchProviders = `-- name: ListSearchProviders :many
-SELECT id, name, provider, config, enable, created_at, updated_at FROM search_providers
+SELECT id, name, provider, config, enable, created_at, updated_at, tenant_id FROM search_providers
 ORDER BY created_at DESC
 `
 
@@ -118,6 +121,7 @@ func (q *Queries) ListSearchProviders(ctx context.Context) ([]SearchProvider, er
 			&i.Enable,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -130,7 +134,7 @@ func (q *Queries) ListSearchProviders(ctx context.Context) ([]SearchProvider, er
 }
 
 const listSearchProvidersByProvider = `-- name: ListSearchProvidersByProvider :many
-SELECT id, name, provider, config, enable, created_at, updated_at FROM search_providers
+SELECT id, name, provider, config, enable, created_at, updated_at, tenant_id FROM search_providers
 WHERE provider = $1
 ORDER BY created_at DESC
 `
@@ -152,6 +156,7 @@ func (q *Queries) ListSearchProvidersByProvider(ctx context.Context, provider st
 			&i.Enable,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -172,7 +177,7 @@ SET
   enable = $4,
   updated_at = now()
 WHERE id = $5
-RETURNING id, name, provider, config, enable, created_at, updated_at
+RETURNING id, name, provider, config, enable, created_at, updated_at, tenant_id
 `
 
 type UpdateSearchProviderParams struct {
@@ -200,6 +205,7 @@ func (q *Queries) UpdateSearchProvider(ctx context.Context, arg UpdateSearchProv
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }

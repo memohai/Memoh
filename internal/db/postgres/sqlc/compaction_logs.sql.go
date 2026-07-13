@@ -21,7 +21,7 @@ SET status = $2,
     model_id = $7,
     completed_at = now()
 WHERE id = $1
-RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at
+RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, tenant_id
 `
 
 type CompleteCompactionLogParams struct {
@@ -57,6 +57,7 @@ func (q *Queries) CompleteCompactionLog(ctx context.Context, arg CompleteCompact
 		&i.ModelID,
 		&i.StartedAt,
 		&i.CompletedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -75,7 +76,7 @@ func (q *Queries) CountCompactionLogsByBot(ctx context.Context, botID pgtype.UUI
 const createCompactionLog = `-- name: CreateCompactionLog :one
 INSERT INTO bot_history_message_compacts (bot_id, session_id)
 VALUES ($1, $2)
-RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at
+RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, tenant_id
 `
 
 type CreateCompactionLogParams struct {
@@ -98,6 +99,7 @@ func (q *Queries) CreateCompactionLog(ctx context.Context, arg CreateCompactionL
 		&i.ModelID,
 		&i.StartedAt,
 		&i.CompletedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -112,7 +114,7 @@ func (q *Queries) DeleteCompactionLogsByBot(ctx context.Context, botID pgtype.UU
 }
 
 const getCompactionLogByID = `-- name: GetCompactionLogByID :one
-SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at
+SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, tenant_id
 FROM bot_history_message_compacts
 WHERE id = $1
 `
@@ -132,12 +134,13 @@ func (q *Queries) GetCompactionLogByID(ctx context.Context, id pgtype.UUID) (Bot
 		&i.ModelID,
 		&i.StartedAt,
 		&i.CompletedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const listCompactionLogsByBot = `-- name: ListCompactionLogsByBot :many
-SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at
+SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, tenant_id
 FROM bot_history_message_compacts
 WHERE bot_id = $1
 ORDER BY started_at DESC
@@ -171,6 +174,7 @@ func (q *Queries) ListCompactionLogsByBot(ctx context.Context, arg ListCompactio
 			&i.ModelID,
 			&i.StartedAt,
 			&i.CompletedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -183,7 +187,7 @@ func (q *Queries) ListCompactionLogsByBot(ctx context.Context, arg ListCompactio
 }
 
 const listCompactionLogsBySession = `-- name: ListCompactionLogsBySession :many
-SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at
+SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, tenant_id
 FROM bot_history_message_compacts
 WHERE session_id = $1
 ORDER BY started_at ASC
@@ -210,6 +214,7 @@ func (q *Queries) ListCompactionLogsBySession(ctx context.Context, sessionID pgt
 			&i.ModelID,
 			&i.StartedAt,
 			&i.CompletedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}

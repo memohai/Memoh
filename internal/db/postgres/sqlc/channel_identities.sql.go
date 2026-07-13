@@ -14,7 +14,7 @@ import (
 const createChannelIdentity = `-- name: CreateChannelIdentity :one
 INSERT INTO channel_identities (channel_type, channel_subject_id, display_name, avatar_url, metadata)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at
+RETURNING id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, tenant_id
 `
 
 type CreateChannelIdentityParams struct {
@@ -43,12 +43,13 @@ func (q *Queries) CreateChannelIdentity(ctx context.Context, arg CreateChannelId
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const getChannelIdentityByChannelSubject = `-- name: GetChannelIdentityByChannelSubject :one
-SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at
+SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, tenant_id
 FROM channel_identities
 WHERE channel_type = $1 AND channel_subject_id = $2
 `
@@ -70,12 +71,13 @@ func (q *Queries) GetChannelIdentityByChannelSubject(ctx context.Context, arg Ge
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const getChannelIdentityByID = `-- name: GetChannelIdentityByID :one
-SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at
+SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, tenant_id
 FROM channel_identities
 WHERE id = $1
 `
@@ -92,12 +94,13 @@ func (q *Queries) GetChannelIdentityByID(ctx context.Context, id pgtype.UUID) (C
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
 
 const getChannelIdentityByIDForUpdate = `-- name: GetChannelIdentityByIDForUpdate :one
-SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at
+SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, tenant_id
 FROM channel_identities
 WHERE id = $1
 FOR UPDATE
@@ -115,6 +118,7 @@ func (q *Queries) GetChannelIdentityByIDForUpdate(ctx context.Context, id pgtype
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
@@ -128,7 +132,8 @@ SELECT
   ci.avatar_url,
   ci.metadata,
   ci.created_at,
-  ci.updated_at
+  ci.updated_at,
+  ci.tenant_id
 FROM channel_identities ci
 WHERE
   $1::text = ''
@@ -162,6 +167,7 @@ func (q *Queries) SearchChannelIdentities(ctx context.Context, arg SearchChannel
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -182,7 +188,7 @@ DO UPDATE SET
   avatar_url = COALESCE(NULLIF(EXCLUDED.avatar_url, ''), channel_identities.avatar_url),
   metadata = EXCLUDED.metadata,
   updated_at = now()
-RETURNING id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at
+RETURNING id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, tenant_id
 `
 
 type UpsertChannelIdentityByChannelSubjectParams struct {
@@ -211,6 +217,7 @@ func (q *Queries) UpsertChannelIdentityByChannelSubject(ctx context.Context, arg
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TenantID,
 	)
 	return i, err
 }
