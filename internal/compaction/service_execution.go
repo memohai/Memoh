@@ -109,16 +109,52 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		// mark rows we cannot faithfully summarize. Leave them in raw history.
 		return Result{Status: StatusNoop}, nil
 	}
-	assetRows, err := s.queries.ListMessageAssetsBatch(ctx, compactedMessageIDs)
+	expectedCompactIDs, err := expectedCompactionClaims(rows, compactedMessageIDs)
 	if err != nil {
-		return Result{}, fmt.Errorf("load compaction message assets: %w", err)
+		return Result{}, err
+	}
+	// Claim the exact selected row versions before loading assets. Asset upserts
+	// lock the same message row, so either their mutation is visible below or
+	// they invalidate this attempt's epoch before it can complete.
+	persistCtx := context.WithoutCancel(ctx)
+	logRow, err := s.queries.CreateCompactionLog(persistCtx, sqlc.CreateCompactionLogParams{
+		BotID:         botUUID,
+		SessionID:     sessionUUID,
+		ExpectedEpoch: rows[0].CompactionEpoch,
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	logID := logRow.ID
+	marked, err := s.queries.MarkMessagesCompacted(persistCtx, sqlc.MarkMessagesCompactedParams{
+		CompactID:          logID,
+		MessageIds:         compactedMessageIDs,
+		ExpectedCompactIds: expectedCompactIDs,
+	})
+	if err != nil {
+		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+		return Result{}, err
+	}
+	if marked != int64(len(compactedMessageIDs)) {
+		err = fmt.Errorf("marked %d of %d compaction source rows", marked, len(compactedMessageIDs))
+		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+		return Result{}, err
+	}
+
+	assetRows, err := s.queries.ListMessageAssetsBatch(persistCtx, compactedMessageIDs)
+	if err != nil {
+		err = fmt.Errorf("load compaction message assets: %w", err)
+		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+		return Result{}, err
 	}
 	toCompact, err = candidatesWithAssets(toCompact, rows, assetRows)
 	if err != nil {
+		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, err
 	}
 	artifact, err := artifactMetadataFor(toCompact, compactedMessageIDs)
 	if err != nil {
+		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, err
 	}
 
@@ -153,21 +189,6 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		systemPrompt, []sdk.Message{sdk.UserMessage(userPrompt)}, nil,
 	)
 
-	// The log row is created only once a real attempt starts, so no-op runs do
-	// not accumulate rows. Persistence uses a non-cancellable context: a client
-	// disconnect mid-run must not strand rows marked compacted without a
-	// completed summary.
-	persistCtx := context.WithoutCancel(ctx)
-	logRow, err := s.queries.CreateCompactionLog(persistCtx, sqlc.CreateCompactionLogParams{
-		BotID:         botUUID,
-		SessionID:     sessionUUID,
-		ExpectedEpoch: rows[0].CompactionEpoch,
-	})
-	if err != nil {
-		return Result{}, err
-	}
-	logID := logRow.ID
-
 	result, err := sdk.GenerateTextResult(ctx,
 		sdk.WithModel(model),
 		sdk.WithSystem(systemPromptDecorated),
@@ -186,20 +207,6 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	usageJSON, _ := json.Marshal(result.Usage)
 
 	modelUUID := db.ParseUUIDOrEmpty(cfg.ModelID)
-	marked, err := s.queries.MarkMessagesCompacted(persistCtx, sqlc.MarkMessagesCompactedParams{
-		CompactID:  logID,
-		MessageIds: compactedMessageIDs,
-	})
-	if err != nil {
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
-		return Result{}, err
-	}
-	if marked != int64(len(compactedMessageIDs)) {
-		err = fmt.Errorf("marked %d of %d compaction source rows", marked, len(compactedMessageIDs))
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
-		return Result{}, err
-	}
-
 	if err := s.completeLog(persistCtx, logID, "ok", result.Text, "", len(compactedMessageIDs), usageJSON, modelUUID, &artifact); err != nil {
 		// The rows are already marked, but the log never reached status=ok, so
 		// the reclaim SQL keeps them eligible for a later pass. Reporting ok
@@ -208,6 +215,22 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		return Result{}, err
 	}
 	return Result{Status: StatusOK, Summary: result.Text, MessageCount: len(compactedMessageIDs)}, nil
+}
+
+func expectedCompactionClaims(rows []sqlc.ListUncompactedMessagesBySessionRow, messageIDs []pgtype.UUID) ([]pgtype.UUID, error) {
+	byID := make(map[pgtype.UUID]pgtype.UUID, len(rows))
+	for _, row := range rows {
+		byID[row.ID] = row.CompactID
+	}
+	expected := make([]pgtype.UUID, 0, len(messageIDs))
+	for _, id := range messageIDs {
+		claim, ok := byID[id]
+		if !ok {
+			return nil, fmt.Errorf("compaction source %s missing from selected rows", formatUUID(id))
+		}
+		expected = append(expected, claim)
+	}
+	return expected, nil
 }
 
 func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, summary, errMsg string, messageCount int, usage []byte, modelID pgtype.UUID, artifact *artifactMetadata) error {

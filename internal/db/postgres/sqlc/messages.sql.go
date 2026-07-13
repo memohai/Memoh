@@ -4449,19 +4449,19 @@ LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN bot_channel_routes r ON r.id = s.route_id
 WHERE m.session_id = $1
-  -- Rows stay eligible unless their compact log holds a usable summary,
-  -- matching the read path's substitution predicate (status ok AND non-blank
-  -- summary). This also reclaims rows stranded by a crash between mark and
-  -- complete, by deleted logs, and legacy status='ok' rows whose summary is
-  -- empty or whitespace-only (the pre-existing poison states).
+  -- A fresh pending claim is a 15-minute cross-process lease. Stale pending,
+  -- error, deleted, and blank-summary claims remain reclaimable; current OK
+  -- summaries stay ineligible exactly as on the read path.
   AND (m.compact_id IS NULL OR NOT EXISTS (
     SELECT 1 FROM bot_history_message_compacts c
     WHERE c.id = m.compact_id
       AND c.bot_id = m.bot_id
       AND c.session_id = s.id
       AND c.compaction_epoch = s.compaction_epoch
-      AND c.status = 'ok'
-      AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL
+      AND (
+        (c.status = 'ok' AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL)
+        OR (c.status = 'pending' AND c.started_at > now() - INTERVAL '15 minutes')
+      )
   ))
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
@@ -4831,16 +4831,25 @@ func (q *Queries) LockHistoryTurnAppendByRequest(ctx context.Context, arg LockHi
 }
 
 const markMessagesCompacted = `-- name: MarkMessagesCompacted :execrows
+WITH expected_claims AS MATERIALIZED (
+  SELECT ids.message_id, claims.expected_compact_id
+  FROM UNNEST($2::uuid[]) WITH ORDINALITY AS ids(message_id, ordinal)
+  JOIN UNNEST($3::uuid[]) WITH ORDINALITY AS claims(expected_compact_id, ordinal)
+    USING (ordinal)
+)
 UPDATE bot_history_messages message
 SET compact_id = compact.id
-FROM bot_history_message_compacts compact
+FROM expected_claims claim,
+     bot_history_message_compacts compact
 JOIN bot_sessions owner_session
   ON owner_session.id = compact.session_id
  AND owner_session.bot_id = compact.bot_id
  AND owner_session.compaction_epoch = compact.compaction_epoch
 WHERE compact.id = $1
   AND compact.status = 'pending'
-  AND message.id = ANY($2::uuid[])
+  AND CARDINALITY($2::uuid[]) = CARDINALITY($3::uuid[])
+  AND message.id = claim.message_id
+  AND message.compact_id IS NOT DISTINCT FROM claim.expected_compact_id
   AND message.bot_id = compact.bot_id
   AND message.session_id = compact.session_id
   AND message.turn_visible = true
@@ -4850,12 +4859,13 @@ WHERE compact.id = $1
 `
 
 type MarkMessagesCompactedParams struct {
-	CompactID  pgtype.UUID   `json:"compact_id"`
-	MessageIds []pgtype.UUID `json:"message_ids"`
+	CompactID          pgtype.UUID   `json:"compact_id"`
+	MessageIds         []pgtype.UUID `json:"message_ids"`
+	ExpectedCompactIds []pgtype.UUID `json:"expected_compact_ids"`
 }
 
 func (q *Queries) MarkMessagesCompacted(ctx context.Context, arg MarkMessagesCompactedParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markMessagesCompacted, arg.CompactID, arg.MessageIds)
+	result, err := q.db.Exec(ctx, markMessagesCompacted, arg.CompactID, arg.MessageIds, arg.ExpectedCompactIds)
 	if err != nil {
 		return 0, err
 	}
@@ -4892,7 +4902,7 @@ old_turn AS (
   GROUP BY old_turn_target.turn_id, old_turn_target.session_id, old_turn_target.turn_position
 ),
 old_lock AS (
-  SELECT m.id
+  SELECT m.id, m.bot_id, m.session_id, m.compact_id
   FROM bot_history_messages m
   JOIN old_turn ON old_turn.id = m.turn_id
   FOR UPDATE
@@ -4947,18 +4957,15 @@ replacement_input AS (
     )
 ),
 affected_compaction_sessions AS MATERIALIZED (
-  SELECT DISTINCT old.session_id
-  FROM bot_history_messages old
-  JOIN replacement_input ON replacement_input.session_id = old.session_id
-  JOIN bot_history_message_compacts compact ON compact.id = old.compact_id
-  JOIN bot_sessions session ON session.id = old.session_id
-  WHERE old.turn_id = $1
-    AND old.session_id = $2
-    AND old.turn_superseded_at IS NULL
-    AND old.id IS DISTINCT FROM replacement_input.replacement_request_message_id
-    AND old.id IS DISTINCT FROM replacement_input.replacement_assistant_message_id
-    AND compact.bot_id = session.bot_id
-    AND compact.session_id = session.id
+  SELECT DISTINCT locked.session_id
+  FROM old_lock locked
+  JOIN replacement_input ON replacement_input.session_id = locked.session_id
+  JOIN bot_history_message_compacts compact ON compact.id = locked.compact_id
+  JOIN bot_sessions session ON session.id = locked.session_id
+  WHERE locked.id IS DISTINCT FROM replacement_input.replacement_request_message_id
+    AND locked.id IS DISTINCT FROM replacement_input.replacement_assistant_message_id
+    AND compact.bot_id = locked.bot_id
+    AND compact.session_id = locked.session_id
     AND compact.compaction_epoch = session.compaction_epoch
 ),
 next_position AS (

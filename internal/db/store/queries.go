@@ -88,7 +88,7 @@ type Queries interface {
 	CreateHistoryTurn(ctx context.Context, arg dbsqlc.CreateHistoryTurnParams) (HistoryTurn, error)
 	CreateHistoryTurnWithIDAtPosition(ctx context.Context, arg dbsqlc.CreateHistoryTurnWithIDAtPositionParams) (HistoryTurn, error)
 	CreateMessage(ctx context.Context, arg dbsqlc.CreateMessageParams) (dbsqlc.CreateMessageRow, error)
-	CreateMessageAsset(ctx context.Context, arg dbsqlc.CreateMessageAssetParams) (dbsqlc.BotHistoryMessageAsset, error)
+	CreateMessageAsset(ctx context.Context, arg dbsqlc.CreateMessageAssetParams) (dbsqlc.CreateMessageAssetRow, error)
 	CreateModel(ctx context.Context, arg dbsqlc.CreateModelParams) (dbsqlc.Model, error)
 	CreateModelVariant(ctx context.Context, arg dbsqlc.CreateModelVariantParams) (dbsqlc.ModelVariant, error)
 	CreateProvider(ctx context.Context, arg dbsqlc.CreateProviderParams) (dbsqlc.Provider, error)

@@ -105,12 +105,17 @@ func (q *Queries) CountCompactionLogsByBot(ctx context.Context, botID pgtype.UUI
 }
 
 const createCompactionLog = `-- name: CreateCompactionLog :one
+WITH owner_session AS MATERIALIZED (
+  SELECT session.id, session.bot_id, session.compaction_epoch
+  FROM bot_sessions session
+  WHERE session.id = $2
+    AND session.bot_id = $1
+    AND session.compaction_epoch = $3
+  FOR UPDATE
+)
 INSERT INTO bot_history_message_compacts (bot_id, session_id, compaction_epoch)
 SELECT $1, owner_session.id, owner_session.compaction_epoch
-FROM bot_sessions owner_session
-WHERE owner_session.id = $2
-  AND owner_session.bot_id = $1
-  AND owner_session.compaction_epoch = $3
+FROM owner_session
 RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
           artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
           superseded_by, superseded_at, compaction_epoch, started_at, completed_at

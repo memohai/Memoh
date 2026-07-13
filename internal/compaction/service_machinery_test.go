@@ -423,7 +423,7 @@ func (f *failingModel) RoundTrip(*http.Request) (*http.Response, error) {
 	}, nil
 }
 
-func TestDoCompactionSummarizerFailureRecordsErrorWithoutMarking(t *testing.T) {
+func TestDoCompactionSummarizerFailureRecordsErrorWithReclaimableClaims(t *testing.T) {
 	rows := machineryCorpus(t)
 	q := &fakeQueries{uncompacted: rows}
 	svc := newMachineryService(q)
@@ -434,15 +434,15 @@ func TestDoCompactionSummarizerFailureRecordsErrorWithoutMarking(t *testing.T) {
 	if _, err := svc.RunCompactionSync(context.Background(), cfg); err == nil {
 		t.Fatal("summarizer failure must surface an error")
 	}
-	if len(q.markedIDs) != 0 {
-		t.Fatalf("nothing may be marked when the summarizer fails (marked=%d)", len(q.markedIDs))
+	if len(q.markedIDs) == 0 {
+		t.Fatal("a real attempt must claim its selected sources before summarization")
 	}
 	if !q.created || q.completed.Status != "error" {
 		t.Fatalf("a failed attempt must leave an error log row (created=%v status=%q)", q.created, q.completed.Status)
 	}
 }
 
-func TestDoCompactionEmptySummaryRecordsErrorWithoutMarking(t *testing.T) {
+func TestDoCompactionEmptySummaryRecordsErrorWithReclaimableClaims(t *testing.T) {
 	rows := machineryCorpus(t)
 	q := &fakeQueries{uncompacted: rows}
 	stub := &stubModel{summary: "   "}
@@ -451,8 +451,8 @@ func TestDoCompactionEmptySummaryRecordsErrorWithoutMarking(t *testing.T) {
 	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450)); err == nil {
 		t.Fatal("an empty summary must surface an error")
 	}
-	if len(q.markedIDs) != 0 {
-		t.Fatalf("nothing may be marked when the summary is empty (marked=%d)", len(q.markedIDs))
+	if len(q.markedIDs) == 0 {
+		t.Fatal("a real attempt must claim its selected sources before summarization")
 	}
 	if !q.created || q.completed.Status != "error" {
 		t.Fatalf("an empty summary must leave an error log row (created=%v status=%q)", q.created, q.completed.Status)

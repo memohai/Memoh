@@ -268,11 +268,11 @@ func beginPostgresMessageTestTx(t *testing.T, ctx context.Context) pgx.Tx {
 	}
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
-		t.Skipf("skip postgres integration test: cannot connect to database: %v", err)
+		t.Fatalf("connect to configured postgres integration database: %v", err)
 	}
 	t.Cleanup(pool.Close)
 	if err := pool.Ping(ctx); err != nil {
-		t.Skipf("skip postgres integration test: database ping failed: %v", err)
+		t.Fatalf("ping configured postgres integration database: %v", err)
 	}
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -292,8 +292,8 @@ func setupPostgresMessageTestFixtures(t *testing.T, ctx context.Context, tx pgx.
 		t.Fatalf("insert user: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO bots (id, owner_user_id, name)
-		VALUES ($1, $2, $3)
+		INSERT INTO bots (id, owner_user_id, type, name)
+		VALUES ($1, $2, 'personal', $3)
 	`, postgresMessageTestBotID, postgresMessageTestUserID, name); err != nil {
 		t.Fatalf("insert bot: %v", err)
 	}

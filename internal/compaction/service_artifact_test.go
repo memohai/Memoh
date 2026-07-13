@@ -174,8 +174,8 @@ func TestDoCompactionStopsWhenAssetsCannotBeLoaded(t *testing.T) {
 	if !errors.Is(err, assetErr) {
 		t.Fatalf("RunCompactionSync error = %v, want %v", err, assetErr)
 	}
-	if q.created || len(q.markedIDs) > 0 {
-		t.Fatalf("asset failure must stop before persistence: created=%v marked=%v", q.created, q.markedIDs)
+	if !q.created || len(q.markedIDs) == 0 || q.completed.Status != "error" {
+		t.Fatalf("asset failure must leave reclaimable error claims: created=%v marked=%v status=%q", q.created, q.markedIDs, q.completed.Status)
 	}
 }
 

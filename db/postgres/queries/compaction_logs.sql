@@ -1,10 +1,15 @@
 -- name: CreateCompactionLog :one
+WITH owner_session AS MATERIALIZED (
+  SELECT session.id, session.bot_id, session.compaction_epoch
+  FROM bot_sessions session
+  WHERE session.id = sqlc.arg(session_id)
+    AND session.bot_id = sqlc.arg(bot_id)
+    AND session.compaction_epoch = sqlc.arg(expected_epoch)
+  FOR UPDATE
+)
 INSERT INTO bot_history_message_compacts (bot_id, session_id, compaction_epoch)
 SELECT sqlc.arg(bot_id), owner_session.id, owner_session.compaction_epoch
-FROM bot_sessions owner_session
-WHERE owner_session.id = sqlc.arg(session_id)
-  AND owner_session.bot_id = sqlc.arg(bot_id)
-  AND owner_session.compaction_epoch = sqlc.arg(expected_epoch)
+FROM owner_session
 RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
           artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
           superseded_by, superseded_at, compaction_epoch, started_at, completed_at;
