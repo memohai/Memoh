@@ -79,9 +79,21 @@ func freshMigratedDB(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("ping: %v", err)
 	}
 
-	// Reset to a pristine schema so migrate up starts from empty.
-	if _, err := pool.Exec(ctx, "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"); err != nil {
+	// Reset to a pristine state so migrate up starts from empty. Drop the
+	// public + app schemas and the tenant roles created by 0107, since those
+	// live outside public and would otherwise survive across test runs.
+	reset := `
+		DROP SCHEMA IF EXISTS public CASCADE;
+		DROP SCHEMA IF EXISTS app CASCADE;
+		CREATE SCHEMA public;
+	`
+	if _, err := pool.Exec(ctx, reset); err != nil {
 		t.Fatalf("reset schema: %v", err)
+	}
+	for _, role := range []string{"memoh_runtime", "memoh_migrator", "memoh_break_glass", "memoh_owner"} {
+		// Reassign/drop owned objects first is unnecessary after schema drops;
+		// ignore "does not exist" and dependency errors defensively.
+		_, _ = pool.Exec(ctx, "DROP ROLE IF EXISTS "+role)
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
