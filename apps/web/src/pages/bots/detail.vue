@@ -609,6 +609,18 @@ watch(botId, () => {
   botNameDraft.value = ''
 })
 
+// Resolve the live workspace backend as soon as the bot is known: the tab
+// policy (container-only tabs hidden for local/remote) must not wait for the
+// user to open the Container tab.
+watch([botId, canManageBot], async ([id, manage]) => {
+  containerInfo.value = null
+  if (!id || !manage) return
+  const result = await getBotsByBotIdContainer({ path: { bot_id: id } })
+  if (result.error === undefined && botId.value === id) {
+    containerInfo.value = result.data ?? null
+  }
+}, { immediate: true })
+
 watch([activeTab, botId, canManageBot], ([tab]) => {
   if (!botId.value) {
     return

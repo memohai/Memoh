@@ -1,6 +1,6 @@
 import type { HostSurface } from './desktop-runtime'
 
-export type BotWorkspaceBackend = 'container' | 'local' | 'unknown'
+export type BotWorkspaceBackend = 'container' | 'local' | 'remote' | 'unknown'
 
 export interface BotDetailsTabRule {
   value: string
@@ -29,7 +29,9 @@ export function filterBotDetailsTabs<T extends BotDetailsTabRule>(
 
   return tabs.filter((tab) => {
     if (tab.hideForLocalWorkspace && context.botWorkspaceBackend === 'local') return false
-    if (tab.containerWorkspaceOnly && context.botWorkspaceBackend === 'local') return false
+    // Container-only tabs disappear for both non-container workspace forms:
+    // local (trusted host) and remote (user's own computer).
+    if (tab.containerWorkspaceOnly && (context.botWorkspaceBackend === 'local' || context.botWorkspaceBackend === 'remote')) return false
     return true
   })
 }

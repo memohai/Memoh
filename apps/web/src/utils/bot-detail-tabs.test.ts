@@ -33,4 +33,12 @@ describe('bot details tab policy', () => {
       botWorkspaceBackend: 'container',
     }).map(tab => tab.value)).toEqual(expect.arrayContaining(['desktop', 'container', 'network']))
   })
+
+  it('hides container runtime tabs for remote runtime bots', () => {
+    expect(filterBotDetailsTabs(tabs, {
+      host: 'desktop',
+      canManageBot: true,
+      botWorkspaceBackend: 'remote',
+    }).map(tab => tab.value)).toEqual(['overview', 'general'])
+  })
 })
