@@ -3,6 +3,7 @@ package compaction
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ type artifactQueries struct {
 
 func (q *artifactQueries) ListMessageAssetsBatch(_ context.Context, _ []pgtype.UUID) ([]sqlc.ListMessageAssetsBatchRow, error) {
 	q.assetCalls++
+	q.queryCalls = append(q.queryCalls, "assets")
 	return q.assets, q.assetsErr
 }
 
@@ -109,6 +111,8 @@ func TestDoCompactionCoverageHashIncludesMessageAssets(t *testing.T) {
 		mkRow(t, "user", `"current question"`, 100),
 		mkRow(t, "assistant", `"current answer"`, 100),
 	}
+	rows[0].CompactID = rows[2].ID
+	rows[1].CompactID = rows[3].ID
 	asset := sqlc.ListMessageAssetsBatchRow{
 		MessageID:   rows[0].ID,
 		Role:        "attachment",
@@ -152,6 +156,17 @@ func TestDoCompactionCoverageHashIncludesMessageAssets(t *testing.T) {
 	}
 	if q.assetCalls != 1 {
 		t.Fatalf("asset batch calls = %d, want 1", q.assetCalls)
+	}
+	wantMessageIDs := []pgtype.UUID{rows[0].ID, rows[1].ID}
+	if !slices.Equal(q.markArg.MessageIds, wantMessageIDs) {
+		t.Fatalf("claimed message IDs = %v, want %v", q.markArg.MessageIds, wantMessageIDs)
+	}
+	wantClaims := []pgtype.UUID{rows[0].CompactID, rows[1].CompactID}
+	if !slices.Equal(q.markArg.ExpectedCompactIds, wantClaims) {
+		t.Fatalf("expected compact IDs = %v, want %v", q.markArg.ExpectedCompactIds, wantClaims)
+	}
+	if !slices.Equal(q.queryCalls, []string{"mark", "assets"}) {
+		t.Fatalf("claim protocol calls = %v, want mark before assets", q.queryCalls)
 	}
 }
 

@@ -92,6 +92,8 @@ type fakeQueries struct {
 	createArg      sqlc.CreateCompactionLogParams
 	createErr      error
 	markedIDs      []pgtype.UUID
+	markArg        sqlc.MarkMessagesCompactedParams
+	queryCalls     []string
 	completed      sqlc.CompleteCompactionLogParams
 	completeCalls  []sqlc.CompleteCompactionLogParams
 	completeErrors []error
@@ -119,7 +121,8 @@ func (f *fakeQueries) ListUncompactedMessagesBySession(_ context.Context, _ pgty
 	return f.uncompacted, nil
 }
 
-func (*fakeQueries) ListMessageAssetsBatch(_ context.Context, _ []pgtype.UUID) ([]sqlc.ListMessageAssetsBatchRow, error) {
+func (f *fakeQueries) ListMessageAssetsBatch(_ context.Context, _ []pgtype.UUID) ([]sqlc.ListMessageAssetsBatchRow, error) {
+	f.queryCalls = append(f.queryCalls, "assets")
 	return nil, nil
 }
 
@@ -128,7 +131,11 @@ func (f *fakeQueries) ListCompactionArtifactLineageBySession(_ context.Context, 
 }
 
 func (f *fakeQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) (int64, error) {
+	f.queryCalls = append(f.queryCalls, "mark")
 	f.markedIDs = append([]pgtype.UUID(nil), arg.MessageIds...)
+	f.markArg = arg
+	f.markArg.MessageIds = append([]pgtype.UUID(nil), arg.MessageIds...)
+	f.markArg.ExpectedCompactIds = append([]pgtype.UUID(nil), arg.ExpectedCompactIds...)
 	if f.markedRowCount != nil {
 		return *f.markedRowCount, nil
 	}
