@@ -26,7 +26,7 @@ func TestParseHandshakeMetadataUnicodeAndCanonicalCapabilities(t *testing.T) {
 		"arch":           "arm64",
 		"client_version": "1.2.3",
 		"workspace_base": "/Users/张三/项目",
-		"capabilities":   []string{"exec", "fs", "workspace_scope", "exec"},
+		"capabilities":   []string{"exec", "fs", "workspace_scope", "exec", "tunnel_v9"},
 	})
 
 	info, err := ParseHandshakeMetadata(encoded)
@@ -37,7 +37,7 @@ func TestParseHandshakeMetadataUnicodeAndCanonicalCapabilities(t *testing.T) {
 		t.Fatalf("unicode metadata changed: %#v", info)
 	}
 	if got := strings.Join(info.Capabilities, ","); got != "exec,fs,workspace_scope" {
-		t.Fatalf("capabilities = %q, want exec,fs,workspace_scope", got)
+		t.Fatalf("capabilities = %q, want exec,fs,workspace_scope (unknown capability must be dropped, not rejected)", got)
 	}
 }
 
@@ -65,7 +65,7 @@ func TestParseHandshakeMetadataRejectsInvalidInputs(t *testing.T) {
 			value["workspace_base"] = "relative/path"
 			return encodeMetadataForTest(t, value)
 		},
-		"unsupported capability": func(value map[string]any) string {
+		"only unknown capabilities": func(value map[string]any) string {
 			value["capabilities"] = []string{"browser"}
 			return encodeMetadataForTest(t, value)
 		},

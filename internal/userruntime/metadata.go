@@ -116,7 +116,12 @@ func validateHandshakeInfo(info *HandshakeInfo) error {
 		switch capability {
 		case CapabilityFS, CapabilityExec, CapabilityWorkspaceScope:
 		default:
-			return fmt.Errorf("%w: unsupported capability %q", ErrInvalidMetadata, capability)
+			// A newer client may declare capabilities this server predates.
+			// Drop them instead of rejecting: routing only ever consults the
+			// known set (supportsRemoteWorkspace verifies the required trio
+			// independently), and a hard reject would brick updated clients
+			// against older self-hosted servers.
+			continue
 		}
 		if _, exists := seen[capability]; exists {
 			continue
@@ -125,7 +130,7 @@ func validateHandshakeInfo(info *HandshakeInfo) error {
 		capabilities = append(capabilities, capability)
 	}
 	if len(capabilities) == 0 {
-		return fmt.Errorf("%w: at least one capability is required", ErrInvalidMetadata)
+		return fmt.Errorf("%w: at least one supported capability is required", ErrInvalidMetadata)
 	}
 	sort.Strings(capabilities)
 	info.Capabilities = capabilities
