@@ -2147,12 +2147,20 @@ SELECT COUNT(*) FROM bot_visible_history_messages
 WHERE bot_id = sqlc.arg(bot_id);
 
 -- name: DeleteMessagesByBot :exec
-DELETE FROM bot_history_messages
-WHERE bot_id = sqlc.arg(bot_id);
+WITH deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts AS compact
+  WHERE compact.bot_id = sqlc.arg(target_bot_id)
+)
+DELETE FROM bot_history_messages AS message
+WHERE message.bot_id = sqlc.arg(target_bot_id);
 
 -- name: DeleteMessagesBySession :exec
-DELETE FROM bot_history_messages
-WHERE session_id = sqlc.arg(session_id);
+WITH deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts AS compact
+  WHERE compact.session_id = sqlc.arg(target_session_id)
+)
+DELETE FROM bot_history_messages AS message
+WHERE message.session_id = sqlc.arg(target_session_id);
 
 -- name: DeleteMessagesByIDs :exec
 DELETE FROM bot_history_messages

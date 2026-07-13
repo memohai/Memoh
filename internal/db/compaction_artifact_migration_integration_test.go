@@ -56,6 +56,13 @@ CREATE TABLE bot_history_message_compacts (
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   completed_at TIMESTAMPTZ
 );
+
+CREATE TABLE bot_history_messages (
+  id UUID PRIMARY KEY,
+  bot_id UUID NOT NULL,
+  session_id UUID,
+  compact_id UUID REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL
+);
 `); err != nil {
 		t.Fatalf("create pre-0106 compaction schema: %v", err)
 	}
@@ -66,8 +73,10 @@ CREATE TABLE bot_history_message_compacts (
 	parentTwoID := "00000000-0000-0000-0000-00000000d003"
 	unlinkedID := "00000000-0000-0000-0000-00000000d004"
 	foreignArtifactID := "00000000-0000-0000-0000-00000000d101"
+	logOnlyArtifactID := "00000000-0000-0000-0000-00000000d201"
 	botID := "00000000-0000-0000-0000-00000000b001"
 	foreignBotID := "00000000-0000-0000-0000-00000000b101"
+	logOnlyBotID := "00000000-0000-0000-0000-00000000b201"
 	sessionID := "00000000-0000-0000-0000-00000000e001"
 	foreignSessionID := "00000000-0000-0000-0000-00000000e101"
 	if _, err := tx.Exec(ctx, `
@@ -133,21 +142,55 @@ VALUES ($1, $2, $3, 'ok', 'unlinked')
 	if _, err := tx.Exec(ctx, `
 INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary)
 VALUES ($1, $2, $3, 'ok', 'foreign artifact')
-`, foreignArtifactID, foreignBotID, foreignSessionID); err != nil {
+	`, foreignArtifactID, foreignBotID, foreignSessionID); err != nil {
 		t.Fatalf("insert foreign artifact: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+INSERT INTO bot_history_message_compacts (id, bot_id, status, summary)
+VALUES ($1, $2, 'ok', 'log-only artifact')
+	`, logOnlyArtifactID, logOnlyBotID); err != nil {
+		t.Fatalf("insert log-only artifact: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+INSERT INTO bot_history_messages (id, bot_id, session_id, compact_id)
+VALUES
+  ('00000000-0000-0000-0000-00000000a001', $1, $2, $3),
+  ('00000000-0000-0000-0000-00000000a101', $4, $5, $6)
+	`, botID, sessionID, legacyID, foreignBotID, foreignSessionID, foreignArtifactID); err != nil {
+		t.Fatalf("insert compacted messages: %v", err)
 	}
 
 	queries := sqlc.New(tx)
 	assertGeneratedLineageQueries(t, ctx, queries, botID, sessionID, []string{parentOneID, parentTwoID}, activeID)
 
-	parsedBotID, err := ParseUUID(botID)
+	parsedSessionID, err := ParseUUID(sessionID)
 	if err != nil {
-		t.Fatalf("parse bot id: %v", err)
+		t.Fatalf("parse session id: %v", err)
 	}
-	if err := queries.DeleteCompactionLogsByBot(ctx, parsedBotID); err != nil {
+	if err := queries.DeleteMessagesBySession(ctx, parsedSessionID); err != nil {
+		t.Fatalf("delete session history through generated query: %v", err)
+	}
+	assertRowCount(t, ctx, tx, "bot_history_messages", 1)
+	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 2)
+
+	parsedForeignBotID, err := ParseUUID(foreignBotID)
+	if err != nil {
+		t.Fatalf("parse foreign bot id: %v", err)
+	}
+	if err := queries.DeleteMessagesByBot(ctx, parsedForeignBotID); err != nil {
+		t.Fatalf("delete bot history through generated query: %v", err)
+	}
+	assertRowCount(t, ctx, tx, "bot_history_messages", 0)
+	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 1)
+
+	parsedLogOnlyBotID, err := ParseUUID(logOnlyBotID)
+	if err != nil {
+		t.Fatalf("parse log-only bot id: %v", err)
+	}
+	if err := queries.DeleteCompactionLogsByBot(ctx, parsedLogOnlyBotID); err != nil {
 		t.Fatalf("delete artifacts through generated query: %v", err)
 	}
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 1)
+	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 0)
 
 	down0106 := readEmbeddedMigration(t, "postgres/migrations/0106_compaction_artifacts.down.sql")
 	if _, err := tx.Exec(ctx, down0106); err != nil {
@@ -170,7 +213,7 @@ WHERE table_schema = $1
 	if artifactColumns != 0 {
 		t.Fatalf("0106 down migration left %d artifact columns behind", artifactColumns)
 	}
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 1)
+	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 0)
 }
 
 func assertGeneratedLineageQueries(t *testing.T, ctx context.Context, queries *sqlc.Queries, botID, sessionID string, parentIDs []string, activeID string) {

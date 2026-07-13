@@ -1670,12 +1670,16 @@ func (q *Queries) CreateToolTailRound(ctx context.Context, arg CreateToolTailRou
 }
 
 const deleteMessagesByBot = `-- name: DeleteMessagesByBot :exec
-DELETE FROM bot_history_messages
-WHERE bot_id = $1
+WITH deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts AS compact
+  WHERE compact.bot_id = $1
+)
+DELETE FROM bot_history_messages AS message
+WHERE message.bot_id = $1
 `
 
-func (q *Queries) DeleteMessagesByBot(ctx context.Context, botID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteMessagesByBot, botID)
+func (q *Queries) DeleteMessagesByBot(ctx context.Context, targetBotID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteMessagesByBot, targetBotID)
 	return err
 }
 
@@ -1690,12 +1694,16 @@ func (q *Queries) DeleteMessagesByIDs(ctx context.Context, ids []pgtype.UUID) er
 }
 
 const deleteMessagesBySession = `-- name: DeleteMessagesBySession :exec
-DELETE FROM bot_history_messages
-WHERE session_id = $1
+WITH deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts AS compact
+  WHERE compact.session_id = $1
+)
+DELETE FROM bot_history_messages AS message
+WHERE message.session_id = $1
 `
 
-func (q *Queries) DeleteMessagesBySession(ctx context.Context, sessionID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteMessagesBySession, sessionID)
+func (q *Queries) DeleteMessagesBySession(ctx context.Context, targetSessionID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteMessagesBySession, targetSessionID)
 	return err
 }
 
