@@ -114,3 +114,23 @@ Contract §14 also lists these historical/peripheral objects as `待确认`, but
 vector stores (Qdrant). Their final dispositions are analyzed in
 `canonical_vs_incremental_diff.md`. Peripheral vector stores (Qdrant etc.) are an RFC
 open question, out of scope for the relational canonical inventory.
+
+## RESOLVED disposition (project decision)
+
+The source of truth for the final schema is the **applied state** of the migration
+chain on a real PostgreSQL 18 (`0001 → 0105`), NOT the text of `0001_init.up.sql`.
+Existing migrations are frozen and never edited (see `BASE.md` migration policy).
+The drift `待确认` items are therefore resolved by *what actually exists after full
+apply*:
+
+| Table | Applied-state fact | Resolved disposition |
+|---|---|---|
+| `media_assets` | created `0007`, never dropped → **EXISTS** | **normal tenant table** — tenantize in `0106+` |
+| `tasks` | created `0063`, never dropped → **EXISTS** (VARCHAR PK, soft `bot_id`, no FK) | **normal tenant table** — tenantize in `0106+`; add composite PK `(tenant_id, id)` |
+| `channel_identity_bind_codes` | in `0001`, **dropped by `0080`** → **DOES NOT EXIST** | **out of scope** — do not tenantize (already gone) |
+| `browser_contexts`, `tts_providers`, `tts_models`, `bot_inbox`, `subagents`, `bot_members`, `bot_preauth_keys`, `email_provider_owner_map` | created & dropped in history → **DO NOT EXIST** | out of scope (already gone) |
+
+Net: tenantization targets the **49-table applied final state** = canonical 48
+− `channel_identity_bind_codes` + `media_assets` + `tasks`. Downstream tasks must
+enumerate tenant tables by querying the applied schema (e.g. `information_schema`),
+not by reading `0001_init.up.sql`.

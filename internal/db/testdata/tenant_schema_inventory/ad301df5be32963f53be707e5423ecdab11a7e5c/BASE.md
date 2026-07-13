@@ -36,23 +36,47 @@ required before adding any corresponding acceptance gate.
 
 ## Migration facts
 
-- PostgreSQL canonical schema: `db/postgres/migrations/0001_init.up.sql`
-  (48 `CREATE TABLE`, 47 `ON DELETE SET NULL` in canonical).
 - PostgreSQL migration head at base: `0105_repair_superseded_message_visibility`.
 - Next available incremental number: **`0106`** (numbering has a documented
   historical gap `0100 → 0102`, i.e. no `0101`; this does not affect next-number
   assignment).
+- Historical file `db/postgres/migrations/0001_init.up.sql` has 48 `CREATE TABLE`
+  and 47 `ON DELETE SET NULL`, but it is a **historical snapshot, not the final
+  schema** (see policy below and `canonical_vs_incremental_diff.md`).
 - `ON DELETE SET NULL` occurrences across all migration files (up+down): 101.
 - sqlc queries: 43 files under `db/postgres/queries/`.
 
-## Upstream AGENTS migration rules (summary, authoritative at this SHA)
+## MIGRATION POLICY FOR THIS WORK (overrides upstream AGENTS)
 
-From `AGENTS.md` "Database, sqlc & Migrations":
+**This tenant-schema work does NOT modify any existing migration file** (`0001_init`
+through `0105`). Every change lands as a **new incremental** (`0106+`), paired
+`.up.sql`/`.down.sql`, idempotent DDL, applied on top of the existing chain.
 
-1. `db/postgres/migrations/0001_init.up.sql` is the **canonical** full schema;
-   every schema change must also update it to reflect the final state.
-2. Incremental files (`0002_`, ...) contain only the upgrade diff.
-3. Every incremental migration is **paired** (`.up.sql` + `.down.sql`).
+We deliberately **reject** the upstream `AGENTS.md` rule that treats
+`0001_init.up.sql` as the canonical full schema that must be back-filled to the
+final state. That rule is a mistaken invariant: at this base it is already
+violated (canonical omits `media_assets` and `tasks`, and still declares
+`channel_identity_bind_codes` which incremental `0080` drops). Editing frozen
+migrations to "re-sync canonical" would rewrite applied history and is forbidden
+here.
+
+**Source of truth for the final schema = the actual state produced by applying
+`0001 → 0105` (then our `0106+`) on an empty database**, verified against a real
+PostgreSQL 18, NOT the text of `0001_init.up.sql`. The `tables.json` /
+`set_null_fks.json` inventory in this directory records the canonical text for
+reference, but downstream tenantization targets the applied final state (49
+tables at base: canonical 48 − `channel_identity_bind_codes` + `media_assets`
++ `tasks`).
+
+## Upstream AGENTS migration rules (as written at this SHA — for reference)
+
+From `AGENTS.md` "Database, sqlc & Migrations" (item 1 is overridden above):
+
+1. ~~`db/postgres/migrations/0001_init.up.sql` is the canonical full schema;
+   every schema change must also update it to reflect the final state.~~
+   **OVERRIDDEN — see policy above; we do not edit frozen migrations.**
+2. Incremental files (`0002_`, ...) contain only the upgrade diff. **(kept)**
+3. Every incremental migration is **paired** (`.up.sql` + `.down.sql`). **(kept)**
 4. Header comment on each file (migration name + brief description).
 5. Idempotent DDL (`IF NOT EXISTS` / `IF EXISTS`).
 6. `.down.sql` must fully reverse `.up.sql` in reverse order.
