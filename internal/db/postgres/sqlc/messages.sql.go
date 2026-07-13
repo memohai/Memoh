@@ -4836,6 +4836,18 @@ WITH expected_claims AS MATERIALIZED (
   FROM UNNEST($2::uuid[]) WITH ORDINALITY AS ids(message_id, ordinal)
   JOIN UNNEST($3::uuid[]) WITH ORDINALITY AS claims(expected_compact_id, ordinal)
     USING (ordinal)
+), current_claims AS MATERIALIZED (
+  SELECT current_claim.id,
+         current_claim.bot_id,
+         current_claim.session_id,
+         current_claim.compaction_epoch,
+         current_claim.status,
+         current_claim.summary,
+         current_claim.started_at
+  FROM bot_history_message_compacts current_claim
+  WHERE current_claim.id = ANY($3::uuid[])
+  ORDER BY current_claim.id
+  FOR UPDATE
 )
 UPDATE bot_history_messages message
 SET compact_id = compact.id
@@ -4856,6 +4868,21 @@ WHERE compact.id = $1
   AND message.turn_id IS NOT NULL
   AND message.turn_position IS NOT NULL
   AND message.turn_message_seq IS NOT NULL
+  AND (
+    claim.expected_compact_id IS NULL
+    OR NOT EXISTS (
+      SELECT 1
+      FROM current_claims current_claim
+      WHERE current_claim.id = claim.expected_compact_id
+        AND current_claim.bot_id = compact.bot_id
+        AND current_claim.session_id = compact.session_id
+        AND current_claim.compaction_epoch = owner_session.compaction_epoch
+        AND (
+          (current_claim.status = 'ok' AND NULLIF(BTRIM(current_claim.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL)
+          OR (current_claim.status = 'pending' AND current_claim.started_at > now() - INTERVAL '15 minutes')
+        )
+    )
+  )
 `
 
 type MarkMessagesCompactedParams struct {

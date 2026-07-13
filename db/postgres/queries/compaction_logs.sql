@@ -30,13 +30,22 @@ WHERE bot_history_message_compacts.id = $1
   AND status = 'pending'
   AND (
     $2 <> 'ok'
-    OR session_id IS NULL
-    OR EXISTS (
-      SELECT 1
-      FROM bot_sessions owner_session
-      WHERE owner_session.id = bot_history_message_compacts.session_id
-        AND owner_session.bot_id = bot_history_message_compacts.bot_id
-        AND owner_session.compaction_epoch = bot_history_message_compacts.compaction_epoch
+    OR (
+      (
+        session_id IS NULL
+        OR EXISTS (
+          SELECT 1
+          FROM bot_sessions owner_session
+          WHERE owner_session.id = bot_history_message_compacts.session_id
+            AND owner_session.bot_id = bot_history_message_compacts.bot_id
+            AND owner_session.compaction_epoch = bot_history_message_compacts.compaction_epoch
+        )
+      )
+      AND (
+        SELECT count(*)
+        FROM bot_history_messages source_message
+        WHERE source_message.compact_id = bot_history_message_compacts.id
+      ) = $4
     )
   )
 RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,

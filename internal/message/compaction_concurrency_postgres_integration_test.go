@@ -151,10 +151,11 @@ func TestPostgresAssetMutationInvalidatesClaimedCompaction(t *testing.T) {
 			}
 			if status == "ok" {
 				if _, err := queries.CompleteCompactionLog(ctx, dbsqlc.CompleteCompactionLogParams{
-					ID:       log.ID,
-					Status:   "ok",
-					Summary:  "summary",
-					Coverage: []byte("[]"),
+					ID:           log.ID,
+					Status:       "ok",
+					Summary:      "summary",
+					MessageCount: int32(len(messageIDs)),
+					Coverage:     []byte("[]"),
 				}); err != nil {
 					t.Fatalf("complete compaction log: %v", err)
 				}
@@ -210,7 +211,7 @@ func TestPostgresIdempotentAssetUpsertPreservesCurrentCompaction(t *testing.T) {
 		t.Fatalf("claim compaction sources = %d, %v", marked, err)
 	}
 	if _, err := queries.CompleteCompactionLog(ctx, dbsqlc.CompleteCompactionLogParams{
-		ID: log.ID, Status: "ok", Summary: "summary", Coverage: []byte("[]"),
+		ID: log.ID, Status: "ok", Summary: "summary", MessageCount: int32(len(messageIDs)), Coverage: []byte("[]"),
 	}); err != nil {
 		t.Fatalf("complete compaction log: %v", err)
 	}
@@ -255,14 +256,13 @@ func TestPostgresAssetLinkBeforeClaimSerializesIntoSourceSnapshot(t *testing.T) 
 		t.Fatalf("begin mark transaction: %v", err)
 	}
 	defer func() { _ = markTx.Rollback(ctx) }()
+	markPID := postgresBackendPID(t, markTx)
 	type markResult struct {
 		count int64
 		err   error
 	}
-	started := make(chan struct{})
 	result := make(chan markResult, 1)
 	go func() {
-		close(started)
 		count, err := dbsqlc.New(markTx).MarkMessagesCompacted(ctx, dbsqlc.MarkMessagesCompactedParams{
 			CompactID:          log.ID,
 			MessageIds:         []pgtype.UUID{mustTestUUID(t, fixture.assistant.ID)},
@@ -270,12 +270,7 @@ func TestPostgresAssetLinkBeforeClaimSerializesIntoSourceSnapshot(t *testing.T) 
 		})
 		result <- markResult{count: count, err: err}
 	}()
-	<-started
-	select {
-	case got := <-result:
-		t.Fatalf("claim bypassed in-flight asset link: %+v", got)
-	case <-time.After(30 * time.Millisecond):
-	}
+	waitForPostgresLock(t, fixture.pool, markPID)
 	if err := assetTx.Commit(ctx); err != nil {
 		t.Fatalf("commit asset link: %v", err)
 	}
@@ -380,13 +375,12 @@ func TestPostgresReplaceTurnSeesConcurrentCompactionClaim(t *testing.T) {
 		t.Fatalf("begin replace transaction: %v", err)
 	}
 	defer func() { _ = replaceTx.Rollback(ctx) }()
+	replacePID := postgresBackendPID(t, replaceTx)
 	type replaceResult struct {
 		err error
 	}
-	started := make(chan struct{})
 	replaced := make(chan replaceResult, 1)
 	go func() {
-		close(started)
 		_, err := dbsqlc.New(replaceTx).ReplaceHistoryTurn(ctx, dbsqlc.ReplaceHistoryTurnParams{
 			OldTurnID:          mustTestUUID(t, fixture.turn.ID),
 			SessionID:          mustTestUUID(t, fixture.sessionID),
@@ -397,12 +391,7 @@ func TestPostgresReplaceTurnSeesConcurrentCompactionClaim(t *testing.T) {
 		})
 		replaced <- replaceResult{err: err}
 	}()
-	<-started
-	select {
-	case got := <-replaced:
-		t.Fatalf("replace bypassed in-flight claim: %v", got.err)
-	case <-time.After(30 * time.Millisecond):
-	}
+	waitForPostgresLock(t, fixture.pool, replacePID)
 	if err := markTx.Commit(ctx); err != nil {
 		t.Fatalf("commit concurrent claim: %v", err)
 	}
@@ -421,10 +410,11 @@ func TestPostgresReplaceTurnSeesConcurrentCompactionClaim(t *testing.T) {
 		t.Fatalf("replace after concurrent claim left epoch %d, want 1", got)
 	}
 	_, err = dbsqlc.New(fixture.pool).CompleteCompactionLog(ctx, dbsqlc.CompleteCompactionLogParams{
-		ID:       log.ID,
-		Status:   "ok",
-		Summary:  "stale summary",
-		Coverage: []byte("[]"),
+		ID:           log.ID,
+		Status:       "ok",
+		Summary:      "stale summary",
+		MessageCount: 1,
+		Coverage:     []byte("[]"),
 	})
 	if !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("stale completion after replacement = %v, want pgx.ErrNoRows", err)
