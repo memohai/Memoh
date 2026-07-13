@@ -77,20 +77,52 @@ func (q *Queries) CreateChat(ctx context.Context, arg CreateChatParams) (CreateC
 }
 
 const deleteChat = `-- name: DeleteChat :exec
-WITH deleted_compaction_artifacts AS (
-  DELETE FROM bot_history_message_compacts
-  WHERE bot_id = $1
+WITH target_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.bot_id = $1
+  ORDER BY session.id
+  FOR UPDATE
+),
+target_compaction_artifacts AS MATERIALIZED (
+  SELECT compact.id
+  FROM bot_history_message_compacts compact
+  WHERE compact.bot_id = $1
+    AND (SELECT count(*) FROM target_sessions) >= 0
+  ORDER BY compact.id
+  FOR UPDATE
+),
+deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts compact
+  USING target_compaction_artifacts target
+  WHERE compact.id = target.id
+  RETURNING compact.id
+),
+target_messages AS MATERIALIZED (
+  SELECT message.id
+  FROM bot_history_messages message
+  WHERE message.bot_id = $1
+    AND (SELECT count(*) FROM target_sessions) >= 0
+    AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0
+  ORDER BY message.id
+  FOR UPDATE
 ),
 deleted_messages AS (
-  DELETE FROM bot_history_messages
-  WHERE bot_id = $1
+  DELETE FROM bot_history_messages message
+  USING target_messages target
+  WHERE message.id = target.id
+  RETURNING message.id
 ),
 deleted_sessions AS (
-  DELETE FROM bot_sessions
-  WHERE bot_id = $1
+  DELETE FROM bot_sessions session
+  USING target_sessions target
+  WHERE session.id = target.id
+    AND (SELECT count(*) FROM deleted_messages) >= 0
+  RETURNING session.id
 )
 DELETE FROM bot_channel_routes bcr
 WHERE bcr.bot_id = $1
+  AND (SELECT count(*) FROM deleted_sessions) >= 0
 `
 
 func (q *Queries) DeleteChat(ctx context.Context, chatID pgtype.UUID) error {

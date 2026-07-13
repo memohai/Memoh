@@ -2233,38 +2233,87 @@ SELECT COUNT(*) FROM bot_visible_history_messages
 WHERE bot_id = sqlc.arg(bot_id);
 
 -- name: ClearHistoryByBot :exec
-WITH invalidated_sessions AS (
-  UPDATE bot_sessions
-  SET compaction_epoch = compaction_epoch + 1
-  WHERE bot_id = sqlc.arg(target_bot_id)
-  RETURNING id
+WITH target_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.bot_id = sqlc.arg(target_bot_id)
+  ORDER BY session.id
+  FOR UPDATE
+),
+invalidated_sessions AS (
+  UPDATE bot_sessions session
+  SET compaction_epoch = session.compaction_epoch + 1
+  FROM target_sessions target
+  WHERE session.id = target.id
+  RETURNING session.id
+),
+target_compaction_artifacts AS MATERIALIZED (
+  SELECT compact.id
+  FROM bot_history_message_compacts compact
+  WHERE compact.bot_id = sqlc.arg(target_bot_id)
+    AND (SELECT count(*) FROM target_sessions) >= 0
+  ORDER BY compact.id
+  FOR UPDATE
 ),
 deleted_compaction_artifacts AS (
   DELETE FROM bot_history_message_compacts AS compact
-  WHERE compact.bot_id = sqlc.arg(target_bot_id)
-    AND (SELECT count(*) FROM invalidated_sessions) >= 0
+  USING target_compaction_artifacts target
+  WHERE compact.id = target.id
   RETURNING compact.id
+),
+target_messages AS MATERIALIZED (
+  SELECT message.id
+  FROM bot_history_messages message
+  WHERE message.bot_id = sqlc.arg(target_bot_id)
+    AND (SELECT count(*) FROM target_sessions) >= 0
+    AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0
+  ORDER BY message.id
+  FOR UPDATE
 )
 DELETE FROM bot_history_messages AS message
-WHERE message.bot_id = sqlc.arg(target_bot_id)
-  AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0;
+USING target_messages target
+WHERE message.id = target.id;
 
 -- name: ClearHistoryBySession :exec
-WITH invalidated_session AS (
-  UPDATE bot_sessions
-  SET compaction_epoch = compaction_epoch + 1
-  WHERE id = sqlc.arg(target_session_id)
-  RETURNING id
+WITH target_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.id = sqlc.arg(target_session_id)
+  FOR UPDATE
+),
+invalidated_session AS (
+  UPDATE bot_sessions session
+  SET compaction_epoch = session.compaction_epoch + 1
+  FROM target_session target
+  WHERE session.id = target.id
+  RETURNING session.id
+),
+target_compaction_artifacts AS MATERIALIZED (
+  SELECT compact.id
+  FROM bot_history_message_compacts compact
+  WHERE compact.session_id = sqlc.arg(target_session_id)
+    AND (SELECT count(*) FROM target_session) >= 0
+  ORDER BY compact.id
+  FOR UPDATE
 ),
 deleted_compaction_artifacts AS (
   DELETE FROM bot_history_message_compacts AS compact
-  WHERE compact.session_id = sqlc.arg(target_session_id)
-    AND (SELECT count(*) FROM invalidated_session) >= 0
+  USING target_compaction_artifacts target
+  WHERE compact.id = target.id
   RETURNING compact.id
+),
+target_messages AS MATERIALIZED (
+  SELECT message.id
+  FROM bot_history_messages message
+  WHERE message.session_id = sqlc.arg(target_session_id)
+    AND (SELECT count(*) FROM target_session) >= 0
+    AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0
+  ORDER BY message.id
+  FOR UPDATE
 )
 DELETE FROM bot_history_messages AS message
-WHERE message.session_id = sqlc.arg(target_session_id)
-  AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0;
+USING target_messages target
+WHERE message.id = target.id;
 
 -- name: DeleteMessagesByIDs :exec
 WITH session_locator AS MATERIALIZED (
@@ -2280,11 +2329,19 @@ owner_sessions AS MATERIALIZED (
   ORDER BY session.id
   FOR UPDATE
 ),
-deleted AS (
-  DELETE FROM bot_history_messages
-  WHERE id = ANY(sqlc.arg(ids)::uuid[])
+target_messages AS MATERIALIZED (
+  SELECT message.id
+  FROM bot_history_messages message
+  WHERE message.id = ANY(sqlc.arg(ids)::uuid[])
     AND (SELECT count(*) FROM owner_sessions) >= 0
-  RETURNING session_id, compact_id
+  ORDER BY message.id
+  FOR UPDATE
+),
+deleted AS (
+  DELETE FROM bot_history_messages message
+  USING target_messages target
+  WHERE message.id = target.id
+  RETURNING message.session_id, message.compact_id
 ),
 compaction_epoch_bump AS (
   UPDATE bot_sessions session
@@ -2435,6 +2492,7 @@ WITH expected_claims AS MATERIALIZED (
    AND owner_session.compaction_epoch = compact.compaction_epoch
   WHERE compact.id = sqlc.arg(compact_id)
     AND compact.status = 'pending'
+  FOR UPDATE OF owner_session
 ), reclaimable_pending_claims AS MATERIALIZED (
   SELECT current_claim.id
   FROM bot_history_message_compacts current_claim

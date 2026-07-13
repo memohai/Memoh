@@ -165,15 +165,31 @@ func (q *Queries) CreateCompactionLog(ctx context.Context, arg CreateCompactionL
 }
 
 const deleteCompactionLogsByBot = `-- name: DeleteCompactionLogsByBot :exec
-WITH invalidated_sessions AS (
-  UPDATE bot_sessions
-  SET compaction_epoch = compaction_epoch + 1
-  WHERE bot_id = $1
-  RETURNING id
+WITH target_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.bot_id = $1
+  ORDER BY session.id
+  FOR UPDATE
+),
+invalidated_sessions AS (
+  UPDATE bot_sessions session
+  SET compaction_epoch = session.compaction_epoch + 1
+  FROM target_sessions target
+  WHERE session.id = target.id
+  RETURNING session.id
+),
+target_compaction_logs AS MATERIALIZED (
+  SELECT compact.id
+  FROM bot_history_message_compacts compact
+  WHERE compact.bot_id = $1
+    AND (SELECT count(*) FROM target_sessions) >= 0
+  ORDER BY compact.id
+  FOR UPDATE
 )
 DELETE FROM bot_history_message_compacts AS compacts
-WHERE compacts.bot_id = $1
-  AND (SELECT count(*) FROM invalidated_sessions) >= 0
+USING target_compaction_logs target
+WHERE compacts.id = target.id
 `
 
 func (q *Queries) DeleteCompactionLogsByBot(ctx context.Context, targetBotID pgtype.UUID) error {

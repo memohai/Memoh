@@ -213,6 +213,51 @@ func TestPostgresSourceCompletionCannotPassCommittedReclaim(t *testing.T) {
 	}
 }
 
+func TestPostgresCompactionClaimLocksSessionBeforeMessages(t *testing.T) {
+	fixture := setupCommittedCompactionFixture(t)
+	ctx := context.Background()
+	log := fixture.createLog(t)
+	sessionTx, err := fixture.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin session lock: %v", err)
+	}
+	defer func() { _ = sessionTx.Rollback(ctx) }()
+	if _, err := sessionTx.Exec(ctx, `SELECT id FROM bot_sessions WHERE id = $1 FOR UPDATE`, fixture.sessionID); err != nil {
+		t.Fatalf("lock compaction session: %v", err)
+	}
+	markTx, err := fixture.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin source claim: %v", err)
+	}
+	defer func() { _ = markTx.Rollback(ctx) }()
+	markPID := postgresBackendPID(t, markTx)
+	type markResult struct {
+		count int64
+		err   error
+	}
+	result := make(chan markResult, 1)
+	go func() {
+		count, err := dbsqlc.New(markTx).MarkMessagesCompacted(ctx, dbsqlc.MarkMessagesCompactedParams{
+			CompactID:          log.ID,
+			MessageIds:         []pgtype.UUID{mustTestUUID(t, fixture.assistant.ID)},
+			ExpectedCompactIds: emptyCompactionClaims(1),
+		})
+		result <- markResult{count: count, err: err}
+	}()
+	waitForPostgresLock(t, fixture.pool, markPID)
+	if err := sessionTx.Commit(ctx); err != nil {
+		t.Fatalf("commit session lock: %v", err)
+	}
+	select {
+	case got := <-result:
+		if got.err != nil || got.count != 1 {
+			t.Fatalf("claim after session lock = %+v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("claim did not resume after session lock")
+	}
+}
+
 func postgresBackendPID(t *testing.T, tx pgx.Tx) int32 {
 	t.Helper()
 	var pid int32
