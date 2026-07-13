@@ -542,7 +542,11 @@ const saveLoading = computed(() => isLoading.value || isUpdatingBot.value)
 
 function isNameConflict(error: unknown): boolean {
   const code = parseMemohError(error)?.code
-  return code === 'bot.name_taken' || (!code && apiErrorStatus(error) === 409)
+  if (code) return code === 'bot.name_taken'
+  if (apiErrorStatus(error) === 409) return true
+  // Desktop can connect to older hosted servers whose conflict response
+  // carries neither a code nor a status field — only the English message.
+  return resolveApiErrorMessage(error, '').toLowerCase().includes('already taken')
 }
 
 async function handleSave() {

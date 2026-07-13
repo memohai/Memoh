@@ -11,8 +11,9 @@ import (
 type Code string
 
 const (
-	CodeBotNameTaken         Code = "bot.name_taken"
-	CodeWorkspaceUnreachable Code = "workspace.unreachable"
+	CodeBotNameTaken                  Code = "bot.name_taken"
+	CodeWorkspaceUnreachable          Code = "workspace.unreachable"
+	CodeWorkspaceDisplayPrepareFailed Code = "workspace.display_prepare_failed"
 )
 
 // Definition is the single catalog entry for a public error contract.
@@ -23,6 +24,9 @@ type Definition struct {
 	AllowedArgs []string
 }
 
+// codesync(error-catalog): Detail strings double as the no-locale fallback for
+// clients; the localized copies live under errors.* in
+// apps/web/src/i18n/locales/{en,zh,ja}.json. Keep both sides in sync.
 var catalog = map[Code]Definition{
 	CodeBotNameTaken: {
 		HTTPStatus:  http.StatusConflict,
@@ -32,6 +36,12 @@ var catalog = map[Code]Definition{
 	CodeWorkspaceUnreachable: {
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The workspace could not be reached.",
+	},
+	// Distinct from workspace.unreachable: preparation started but broke
+	// mid-flight, so "could not be reached" would mislead the user.
+	CodeWorkspaceDisplayPrepareFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "Display preparation failed.",
 	},
 }
 

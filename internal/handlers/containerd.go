@@ -20,6 +20,7 @@ import (
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/container"
 	displaypkg "github.com/memohai/memoh/internal/display"
+	"github.com/memohai/memoh/internal/httpx"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/workspace"
@@ -397,7 +398,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 			I18nKey:   i18nKey,
 			Args:      map[string]string{},
 			Message:   message,
-			RequestID: requestID(c),
+			RequestID: httpx.RequestID(c),
 		})
 	}
 

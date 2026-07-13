@@ -20,13 +20,3 @@ func newI18nHTTPError(status int, code, i18nKey, message string) *echo.HTTPError
 		Args:       map[string]string{},
 	})
 }
-
-func requestID(c echo.Context) string {
-	if c == nil {
-		return ""
-	}
-	if id := c.Response().Header().Get(echo.HeaderXRequestID); id != "" {
-		return id
-	}
-	return c.Request().Header.Get(echo.HeaderXRequestID)
-}

@@ -6,7 +6,7 @@ description: |
   核心约束：业务判断只依赖稳定 code，用户文案由前端按语言本地化，私有诊断永不进入响应。
 metadata:
   trigger: 新增/修改后端错误响应、SSE 错误事件、前端错误分支或错误文案
-  pilot: bot.name_taken（HTTP 409）与 workspace.unreachable（HTTP 503 + SSE），参照实现见下文文件清单
+  pilot: bot.name_taken（HTTP 409）、workspace.unreachable（HTTP 503 + SSE）、workspace.display_prepare_failed（SSE），参照实现见下文文件清单
 ---
 
 # Memoh 错误处理架构
@@ -75,11 +75,11 @@ metadata:
 
 - `apperror.Error` **刻意不实现 `Unwrap`**：`errors.Is(err, cause)` 穿不透，取 cause 用
   `apperror.CauseOf`。这是防止基础设施错误变成 API 契约，不是疏漏，别"修"它。
-- `normalizeSSEFailure` 会把无 code 的 legacy JSON body 降级为 generic Error（连 status 一起丢），
-  legacy 兜底逻辑不要依赖该路径保留字段。
-- Problem 的 `detail` 英文文案与前端 `en.json` 是双源，改文案要两边同步（或只改前端——
-  detail 仅是无 locale 时的兜底）。
-- code 语义要精确：不要把"操作失败"笼统映射到 `workspace.unreachable` 之类的连接性 code，
+- Problem 的 `detail` 英文文案与前端 `en.json` 是双源，改文案要两边同步
+  （catalog 处有 `codesync(error-catalog)` 注释；detail 仅是无 locale 时的兜底）。
+- code 语义要精确：连接不上是 `workspace.unreachable`，连上后中途失败是
+  `workspace.display_prepare_failed`——不要把"操作失败"笼统映射到连接性 code，
   文案会误导用户；语义不同就开新 code。
 - 面向用户的响应里不放 stderr/exit code 等诊断——记日志（带 `request_id`），
   用户侧只给 catalog detail。
+- `requestID` 统一用 `internal/httpx.RequestID`，不要在包内再写局部副本。

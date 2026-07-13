@@ -24,6 +24,7 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/route"
 	"github.com/memohai/memoh/internal/db"
+	"github.com/memohai/memoh/internal/httpx"
 	"github.com/memohai/memoh/internal/identity"
 	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
@@ -578,7 +579,7 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 			I18nKey:   i18nKey,
 			Args:      map[string]string{},
 			Message:   message,
-			RequestID: requestID(c),
+			RequestID: httpx.RequestID(c),
 		})
 	}
 

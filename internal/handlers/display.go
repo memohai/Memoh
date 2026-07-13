@@ -17,6 +17,7 @@ import (
 
 	"github.com/memohai/memoh/internal/apperror"
 	displaypkg "github.com/memohai/memoh/internal/display"
+	"github.com/memohai/memoh/internal/httpx"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 	scriptassets "github.com/memohai/memoh/scripts"
@@ -290,10 +291,10 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 			I18nKey:   i18nKey,
 			Args:      map[string]string{},
 			Message:   message,
-			RequestID: requestID(c),
+			RequestID: httpx.RequestID(c),
 		})
 	}
-	streamRequestID := requestID(c)
+	streamRequestID := httpx.RequestID(c)
 	sendAppError := func(step string, code apperror.Code, cause error) {
 		if cause != nil {
 			h.logger.Error("display preparation failed",
@@ -349,7 +350,9 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 			break
 		}
 		if recvErr != nil {
-			sendAppError(lastStep, apperror.CodeWorkspaceUnreachable, recvErr)
+			// The bridge was reachable and preparation already started, so a
+			// broken stream is a prepare failure, not "workspace unreachable".
+			sendAppError(lastStep, apperror.CodeWorkspaceDisplayPrepareFailed, recvErr)
 			return nil
 		}
 		switch msg.GetStream() {

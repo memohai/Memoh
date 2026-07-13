@@ -34,6 +34,12 @@ export function normalizeSSEFailure(error: unknown, fallback: string): unknown {
   if (parseMemohError(error)) return error
   if (error instanceof Error) return error
   if (typeof error === 'string' && error.trim()) return new Error(error)
+  // Legacy servers reject with `{"message": ...}` and no code; keep the object
+  // so callers can still read its message and the status fetchSSEProblem added.
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>
+    if (typeof record.message === 'string' || typeof record.status === 'number') return error
+  }
   return new Error(fallback)
 }
 

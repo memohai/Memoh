@@ -11,6 +11,7 @@ import (
 
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/channel/publicmedia"
+	"github.com/memohai/memoh/internal/httpx"
 )
 
 type Server struct {
@@ -59,7 +60,7 @@ func NewServer(log *slog.Logger, addr string, jwtSecret string,
 				slog.Int("status", v.Status),
 				slog.Duration("latency", v.Latency),
 				slog.String("remote_ip", c.RealIP()),
-				slog.String("request_id", requestID(c)),
+				slog.String("request_id", httpx.RequestID(c)),
 			)
 			return nil
 		},

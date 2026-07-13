@@ -127,6 +127,23 @@ describe('useBotCreateProgressStore', () => {
     expect(store.setupError).toBe('This name is already taken.')
   })
 
+  it('recovers the name conflict from a legacy code-less 409 rejection', async () => {
+    postBotsStream.mockResolvedValue({
+      stream: (async function* (): AsyncGenerator<BotCreateStreamEvent, void, unknown> {
+        // Older hosted servers reject with echo's plain body; fetchSSEProblem
+        // attaches the HTTP status but there is no stable code to parse.
+        throw { message: 'bot name already taken', status: 409 }
+      })(),
+    })
+
+    const store = useBotCreateProgressStore()
+    await store.start({ name: 'ada', display_name: 'Ada' })
+
+    expect(store.status).toBe('error')
+    expect(store.errorCode).toBe('bot.name_taken')
+    expect(store.setupError).toBe('bot name already taken')
+  })
+
   it('applies model and memory settings after the bot is ready', async () => {
     const bot = { id: 'bot-1', name: 'ada' }
     postBotsStream.mockResolvedValue(streamOf([

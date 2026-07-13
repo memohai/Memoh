@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/memohai/memoh/internal/apperror"
@@ -57,5 +58,22 @@ func TestDisplayPrepareAppErrorUsesSharedWorkspaceCode(t *testing.T) {
 	}
 	if event.RequestID != "req-1" {
 		t.Fatalf("request_id = %q", event.RequestID)
+	}
+}
+
+func TestDisplayPrepareStreamBreakUsesPrepareFailedCode(t *testing.T) {
+	event := newDisplayPrepareAppError(
+		"installing",
+		apperror.Wrap(apperror.CodeWorkspaceDisplayPrepareFailed, errors.New("rpc error: stream reset"), nil),
+		"req-2",
+	)
+	if event.Code != string(apperror.CodeWorkspaceDisplayPrepareFailed) {
+		t.Fatalf("code = %q", event.Code)
+	}
+	if event.Message != "Display preparation failed." {
+		t.Fatalf("message = %q", event.Message)
+	}
+	if strings.Contains(event.Message, "stream reset") || strings.Contains(event.Detail, "stream reset") {
+		t.Fatal("private cause leaked into the stream event")
 	}
 }

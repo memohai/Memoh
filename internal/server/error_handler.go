@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/apperror"
+	"github.com/memohai/memoh/internal/httpx"
 )
 
 func newHTTPErrorHandler(log *slog.Logger, fallback echo.HTTPErrorHandler) echo.HTTPErrorHandler {
@@ -16,7 +17,7 @@ func newHTTPErrorHandler(log *slog.Logger, fallback echo.HTTPErrorHandler) echo.
 			return
 		}
 
-		problem, ok := apperror.ProblemFrom(err, requestID(c))
+		problem, ok := apperror.ProblemFrom(err, httpx.RequestID(c))
 		if !ok {
 			fallback(err, c)
 			return
@@ -45,14 +46,4 @@ func newHTTPErrorHandler(log *slog.Logger, fallback echo.HTTPErrorHandler) echo.
 			)
 		}
 	}
-}
-
-func requestID(c echo.Context) string {
-	if c == nil {
-		return ""
-	}
-	if id := c.Response().Header().Get(echo.HeaderXRequestID); id != "" {
-		return id
-	}
-	return c.Request().Header.Get(echo.HeaderXRequestID)
 }

@@ -48,4 +48,12 @@ describe('SSE error boundary', () => {
     const problem = { code: 'workspace.unreachable', args: {}, status: 503 }
     expect(normalizeSSEFailure(problem, 'fallback')).toBe(problem)
   })
+
+  it('keeps legacy code-less rejections readable for message and status consumers', () => {
+    const legacy = { message: 'bot name already taken', status: 409 }
+    expect(normalizeSSEFailure(legacy, 'fallback')).toBe(legacy)
+
+    const useless = { random: true }
+    expect(normalizeSSEFailure(useless, 'fallback')).toEqual(new Error('fallback'))
+  })
 })
