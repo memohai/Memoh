@@ -593,6 +593,9 @@ func (m *Manager) StartWithResolvedImage(ctx context.Context, botID, image strin
 }
 
 func (m *Manager) StartWithResolvedConfig(ctx context.Context, botID, image string, gpu WorkspaceGPUConfig) error {
+	if err := m.EnsureServerManaged(ctx, botID); err != nil {
+		return err
+	}
 	image = strings.TrimSpace(image)
 	if image == "" {
 		return errors.New("image is required")
@@ -601,6 +604,9 @@ func (m *Manager) StartWithResolvedConfig(ctx context.Context, botID, image stri
 }
 
 func (m *Manager) StartWithWorkspaceConfig(ctx context.Context, botID, image string, gpu WorkspaceGPUConfig, workspaceCfg WorkspaceStartConfig) error {
+	if err := m.EnsureServerManaged(ctx, botID); err != nil {
+		return err
+	}
 	switch strings.ToLower(strings.TrimSpace(workspaceCfg.Backend)) {
 	case "", bridge.WorkspaceBackendContainer:
 		return m.StartWithResolvedConfig(ctx, botID, image, gpu)

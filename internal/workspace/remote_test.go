@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -257,6 +258,47 @@ func TestRemoteWorkspaceBoundFailuresNeverLookUnbound(t *testing.T) {
 				t.Fatalf("ClientForBot bound=%v err=%v, want %v", bound, err, tc.want)
 			}
 		})
+	}
+}
+
+func TestManagerRefusesContainerLifecycleWhileRemoteBound(t *testing.T) {
+	service := &RemoteWorkspaceService{
+		store: &fakeRemoteBindingStore{
+			exists: true,
+			record: dbstore.BotRemoteRuntimeBindingRecord{
+				BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID, WorkspacePath: ".",
+				RuntimeUserID: remoteTestOwnerID, BotOwnerUserID: remoteTestOwnerID,
+			},
+		},
+		runtimes: fakeRuntimeConnections{},
+	}
+	manager := NewManager(slog.Default(), nil, nil, config.WorkspaceConfig{}, "", nil)
+	manager.SetRemoteWorkspaceService(service)
+
+	for name, call := range map[string]func() error{
+		"StartWithWorkspaceConfig": func() error {
+			return manager.StartWithWorkspaceConfig(context.Background(), remoteTestBotID, "img", WorkspaceGPUConfig{}, WorkspaceStartConfig{})
+		},
+		"StartWithResolvedConfig": func() error {
+			return manager.StartWithResolvedConfig(context.Background(), remoteTestBotID, "img", WorkspaceGPUConfig{})
+		},
+		"SetupBotContainer": func() error {
+			return manager.SetupBotContainer(context.Background(), remoteTestBotID)
+		},
+		"ImportData": func() error {
+			return manager.ImportData(context.Background(), remoteTestBotID, strings.NewReader("archive"))
+		},
+		"CreateSnapshot": func() error {
+			_, err := manager.CreateSnapshot(context.Background(), remoteTestBotID, "snap", "manual")
+			return err
+		},
+		"RollbackVersion": func() error {
+			return manager.RollbackVersion(context.Background(), remoteTestBotID, 1)
+		},
+	} {
+		if err := call(); !errors.Is(err, ErrWorkspaceNotServerManaged) {
+			t.Fatalf("%s error = %v, want ErrWorkspaceNotServerManaged", name, err)
+		}
 	}
 }
 

@@ -338,6 +338,14 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return newI18nHTTPError(http.StatusBadRequest, "workspace_create_request_invalid", "bots.container.createFailed", err.Error())
 	}
+	// Refuse before the SSE stream starts: a container created while the bot
+	// is bound to a remote runtime would be hidden and unstoppable.
+	if err := h.manager.EnsureServerManaged(c.Request().Context(), botID); err != nil {
+		if errors.Is(err, workspace.ErrWorkspaceNotServerManaged) {
+			return newI18nHTTPError(http.StatusConflict, "workspace_remote_managed", "bots.container.createFailed", "bot workspace is managed by a remote runtime")
+		}
+		return newI18nHTTPError(http.StatusInternalServerError, "workspace_create_failed", "bots.container.createFailed", err.Error())
+	}
 	// Image override lets administrators specify a custom base image.
 	// NOTE(saas): if this becomes a multi-tenant SaaS, image override must be
 	// validated against an allowlist to prevent SSRF and resource abuse.

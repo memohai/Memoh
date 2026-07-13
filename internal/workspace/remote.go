@@ -31,6 +31,7 @@ const (
 
 var (
 	ErrRemoteWorkspaceNotBound         = errors.New("remote workspace is not bound")
+	ErrWorkspaceNotServerManaged       = errors.New("workspace lifecycle is managed by a remote runtime")
 	ErrRemoteRuntimeNotUsable          = errors.New("remote runtime not found, revoked, or owned by another user")
 	ErrRemoteRuntimeOffline            = errors.New("remote runtime is offline")
 	ErrRemoteRuntimeRevoked            = errors.New("remote runtime has been revoked")

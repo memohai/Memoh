@@ -229,6 +229,22 @@ func (m *Manager) EnsureRunning(ctx context.Context, botID string) error {
 	return m.startTaskAndEnsureNetwork(ctx, botID, containerID)
 }
 
+// EnsureServerManaged refuses container-lifecycle mutations for a bot whose
+// workspace is bound to a remote runtime: a container created or started
+// while bound would be hidden from status, excluded from reconciliation, and
+// unstoppable until the binding is removed.
+func (m *Manager) EnsureServerManaged(ctx context.Context, botID string) error {
+	if m.remote == nil {
+		return nil
+	}
+	if _, err := m.remote.Get(ctx, botID); err == nil {
+		return ErrWorkspaceNotServerManaged
+	} else if !errors.Is(err, ErrRemoteWorkspaceNotBound) {
+		return err
+	}
+	return nil
+}
+
 // StopBot stops the container task for a bot and marks it stopped in DB.
 func (m *Manager) StopBot(ctx context.Context, botID string) error {
 	if m.remote != nil {
@@ -400,6 +416,9 @@ func (m *Manager) SetupBotContainerWithProgress(ctx context.Context, botID strin
 }
 
 func (m *Manager) setupBotContainer(ctx context.Context, botID string, progress ContainerSetupProgress) error {
+	if err := m.EnsureServerManaged(ctx, botID); err != nil {
+		return err
+	}
 	emit := func(event ContainerSetupEvent) {
 		if progress != nil {
 			progress(event)

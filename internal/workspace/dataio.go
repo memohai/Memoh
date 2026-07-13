@@ -81,6 +81,12 @@ func (m *Manager) ExportData(ctx context.Context, botID string) (io.ReadCloser, 
 // ImportData extracts a tar.gz archive into the container's /data directory.
 // The container is stopped during import and restarted afterwards.
 func (m *Manager) ImportData(ctx context.Context, botID string, r io.Reader) error {
+	// Import restarts the container afterwards and, in the archive flavor,
+	// writes through MCPClient — which routes to the remote workspace when
+	// bound. Both are wrong for a remote-managed bot.
+	if err := m.EnsureServerManaged(ctx, botID); err != nil {
+		return err
+	}
 	ref, err := m.loadLockedContainer(ctx, botID)
 	if err != nil {
 		return fmt.Errorf("get workspace runtime: %w", err)
