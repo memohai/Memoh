@@ -180,6 +180,83 @@ func stepUp(t *testing.T, dsn string, n int) {
 	}
 }
 
+// tryStepDown steps n migrations down and RETURNS any error (instead of failing
+// the test), so callers can assert a fail-closed down gate.
+func tryStepDown(t *testing.T, dsn string, n int) error {
+	t.Helper()
+	src, err := iofs.New(postgresMigrationsFS(t), ".")
+	if err != nil {
+		t.Fatalf("iofs: %v", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
+	if err != nil {
+		t.Fatalf("migrate init: %v", err)
+	}
+	defer func() { _, _ = m.Close() }()
+	return m.Steps(-n)
+}
+
+// resetToEmpty drops and recreates a pristine public schema (and the app schema
+// + tenant roles) WITHOUT applying any migrations, returning a connected pool.
+func resetToEmpty(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	dsn := tenantMigrationDSN(t)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	if err := pool.Ping(ctx); err != nil {
+		t.Fatalf("ping: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		DROP SCHEMA IF EXISTS public CASCADE;
+		DROP SCHEMA IF EXISTS app CASCADE;
+		CREATE SCHEMA public;`); err != nil {
+		t.Fatalf("reset schema: %v", err)
+	}
+	for _, role := range []string{"memoh_runtime", "memoh_migrator", "memoh_break_glass", "memoh_owner"} {
+		_, _ = pool.Exec(ctx, "DROP ROLE IF EXISTS "+role)
+	}
+	return pool
+}
+
+// stepUpToPreTenant applies the migration chain up to (but not including) the
+// tenantSteps tenant migrations — i.e. the "legacy install" pre-tenant state.
+func stepUpToPreTenant(t *testing.T, dsn string, tenantSteps int) {
+	t.Helper()
+	src, err := iofs.New(postgresMigrationsFS(t), ".")
+	if err != nil {
+		t.Fatalf("iofs: %v", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
+	if err != nil {
+		t.Fatalf("migrate init: %v", err)
+	}
+	defer func() { _, _ = m.Close() }()
+	total := countAllMigrations(t)
+	if err := m.Steps(total - tenantSteps); err != nil {
+		t.Fatalf("step up to pre-tenant (%d steps): %v", total-tenantSteps, err)
+	}
+}
+
+// countAllMigrations returns the number of up migrations in the embedded FS.
+func countAllMigrations(t *testing.T) int {
+	t.Helper()
+	entries, err := fs.ReadDir(postgresMigrationsFS(t), ".")
+	if err != nil {
+		t.Fatalf("read migrations dir: %v", err)
+	}
+	n := 0
+	for _, e := range entries {
+		if len(e.Name()) > 7 && e.Name()[len(e.Name())-7:] == ".up.sql" {
+			n++
+		}
+	}
+	return n
+}
+
 // TestTenantChainReversible verifies the full tenant migration chain
 // (0106..0109) is cleanly reversible: a full step-down of the tenant migrations
 // removes all tenant objects, and a step-up re-applies them. It also verifies
