@@ -66,7 +66,8 @@ const props = defineProps<{
   messages: ChatMessage[]
   // The chat scroll container; also observed here to track the active tick.
   scrollEl: Ref<HTMLElement | null> | HTMLElement | null
-  // Parent-level visibility gate (pane active + not booting).
+  // Parent-level visibility gate (pane visible + not booting). Split groups
+  // remain rendered together, even though dockview focuses only one of them.
   enabled: boolean
 }>()
 

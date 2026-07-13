@@ -95,46 +95,97 @@ describe('chat refresh coordinator', () => {
     expect(applySessionsSnapshot).not.toHaveBeenCalled()
   })
 
-  it('binds a debounced transcript refresh to its original bot and session', async () => {
+  it('binds the compatibility refresh to its original bot and session', async () => {
     vi.useFakeTimers()
     const { coordinator, sessionId, refreshCurrentSession } = makeCoordinator()
 
     coordinator.scheduleRefreshCurrentSession('session-1')
     sessionId.value = 'session-2'
-    await vi.runAllTimersAsync()
-    expect(refreshCurrentSession).not.toHaveBeenCalled()
-
-    sessionId.value = 'session-1'
-    coordinator.scheduleRefreshCurrentSession('session-1')
     await vi.runAllTimersAsync()
     expect(refreshCurrentSession).toHaveBeenCalledWith('bot-1', 'session-1')
   })
 
-  it('replaces an old-session debounce when the active session changes', async () => {
+  it('schedules transcript refreshes independently for different sessions', async () => {
     vi.useFakeTimers()
-    const { coordinator, sessionId, refreshCurrentSession } = makeCoordinator()
+    const { coordinator, refreshCurrentSession } = makeCoordinator()
 
-    coordinator.scheduleRefreshCurrentSession('session-1')
-    sessionId.value = 'session-2'
-    coordinator.scheduleRefreshCurrentSession('session-2')
+    coordinator.scheduleSessionRefresh('bot-1', 'session-a')
+    coordinator.scheduleSessionRefresh('bot-1', 'session-b')
     await vi.runAllTimersAsync()
 
-    expect(refreshCurrentSession).toHaveBeenCalledOnce()
-    expect(refreshCurrentSession).toHaveBeenCalledWith('bot-1', 'session-2')
+    expect(refreshCurrentSession).toHaveBeenCalledTimes(2)
+    expect(refreshCurrentSession).toHaveBeenCalledWith('bot-1', 'session-a')
+    expect(refreshCurrentSession).toHaveBeenCalledWith('bot-1', 'session-b')
   })
 
-  it('cancels scheduled refreshes and skips sessions that are still streaming', async () => {
+  it('debounces each session key without delaying other session keys', async () => {
+    vi.useFakeTimers()
+    const { coordinator, refreshCurrentSession } = makeCoordinator()
+
+    coordinator.scheduleSessionRefresh('bot-1', 'session-a')
+    coordinator.scheduleSessionRefresh('bot-1', 'session-b')
+    await vi.advanceTimersByTimeAsync(50)
+    coordinator.scheduleSessionRefresh('bot-1', 'session-a')
+    await vi.advanceTimersByTimeAsync(50)
+
+    expect(refreshCurrentSession).toHaveBeenCalledOnce()
+    expect(refreshCurrentSession).toHaveBeenCalledWith('bot-1', 'session-b')
+
+    await vi.advanceTimersByTimeAsync(50)
+    expect(refreshCurrentSession).toHaveBeenCalledTimes(2)
+    expect(refreshCurrentSession).toHaveBeenCalledWith('bot-1', 'session-a')
+  })
+
+  it('cancels all scheduled session refreshes on reset', async () => {
+    vi.useFakeTimers()
+    const { coordinator, refreshCurrentSession } = makeCoordinator()
+
+    coordinator.scheduleSessionRefresh('bot-1', 'session-a')
+    coordinator.scheduleSessionRefresh('bot-1', 'session-b')
+    coordinator.resetRefreshCoordinator()
+    await vi.runAllTimersAsync()
+
+    expect(refreshCurrentSession).not.toHaveBeenCalled()
+  })
+
+  it('skips only the target sessions that are still streaming', async () => {
     vi.useFakeTimers()
     const { coordinator, isSessionStreaming, refreshCurrentSession } = makeCoordinator()
 
-    coordinator.scheduleRefreshCurrentSession('session-1')
-    coordinator.resetRefreshCoordinator()
+    vi.mocked(isSessionStreaming).mockImplementation((botId, session) =>
+      botId === 'bot-1' && session === 'session-a',
+    )
+    coordinator.scheduleSessionRefresh('bot-1', 'session-a')
+    coordinator.scheduleSessionRefresh('bot-1', 'session-b')
     await vi.runAllTimersAsync()
-    expect(refreshCurrentSession).not.toHaveBeenCalled()
 
-    vi.mocked(isSessionStreaming).mockReturnValue(true)
-    coordinator.scheduleRefreshCurrentSession('session-1')
+    expect(refreshCurrentSession).toHaveBeenCalledOnce()
+    expect(refreshCurrentSession).toHaveBeenCalledWith('bot-1', 'session-b')
+  })
+
+  it('does not confuse the same session id across different bots', async () => {
+    vi.useFakeTimers()
+    const { coordinator, isSessionStreaming, refreshCurrentSession } = makeCoordinator()
+
+    vi.mocked(isSessionStreaming).mockImplementation((botId, session) =>
+      botId === 'bot-2' && session === 'shared-session',
+    )
+    coordinator.scheduleSessionRefresh('bot-1', 'shared-session')
     await vi.runAllTimersAsync()
+
+    expect(isSessionStreaming).toHaveBeenCalledWith('bot-1', 'shared-session')
+    expect(refreshCurrentSession).toHaveBeenCalledOnce()
+    expect(refreshCurrentSession).toHaveBeenCalledWith('bot-1', 'shared-session')
+  })
+
+  it('drops a scheduled session refresh when its bot is no longer active', async () => {
+    vi.useFakeTimers()
+    const { coordinator, currentBotId, refreshCurrentSession } = makeCoordinator()
+
+    coordinator.scheduleSessionRefresh('bot-1', 'session-a')
+    currentBotId.value = 'bot-2'
+    await vi.runAllTimersAsync()
+
     expect(refreshCurrentSession).not.toHaveBeenCalled()
   })
 })

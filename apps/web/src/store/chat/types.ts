@@ -51,6 +51,12 @@ export interface ToolCallBlock extends UIToolMessage {
 
 export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | AttachmentBlock | ErrorBlock
 
+export interface ChatViewTarget {
+  botId: string
+  sessionId: string | null
+  viewId: string
+}
+
 export type ActiveChatTarget =
   | {
       kind: 'session'
@@ -148,6 +154,9 @@ export interface SendMessageResult {
 }
 
 export interface SendMessageOptions {
+  target?: ChatViewTarget
+  modelId?: string
+  reasoningEffort?: string
   requestedSkills?: RequestedSkillSelection[]
   composerScope?: string
   /** Called immediately before a real chat turn is appended or dispatched. */

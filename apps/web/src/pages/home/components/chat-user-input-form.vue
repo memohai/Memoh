@@ -108,6 +108,7 @@ import { Button } from '@felinic/ui'
 import { Circle, CircleDot, Square, SquareCheck } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat-list'
 import type { UIUserInput, UIUserInputQuestion, WSUserInputAnswer } from '@/composables/api/useChat'
+import { useChatViewTarget } from '../composables/useChatViewContext'
 
 // Inline Q&A form for the ask_user tool. The parent decides WHICH pending
 // user-input to render (it scans the transcript); this component owns the
@@ -124,6 +125,7 @@ interface PendingUserInputDraft {
 }
 
 const chatStore = useChatStore()
+const chatViewTarget = useChatViewTarget()
 const drafts = ref<Record<string, PendingUserInputDraft>>({})
 
 const questions = computed(() => props.userInput.questions ?? [])
@@ -232,13 +234,13 @@ const canSubmit = computed(() => answers.value !== null)
 
 function handleSubmit() {
   if (!answers.value) return
-  void chatStore.respondUserInput(props.userInput, { answers: answers.value })
+  void chatStore.respondUserInput(props.userInput, { answers: answers.value }, chatViewTarget.value)
 }
 
 function handleCancel() {
   void chatStore.respondUserInput(props.userInput, {
     canceled: true,
     reason: 'user_canceled',
-  })
+  }, chatViewTarget.value)
 }
 </script>

@@ -1,11 +1,11 @@
 import { computed } from 'vue'
-import { storeToRefs } from 'pinia'
 import { useQuery } from '@pinia/colada'
 import { fetchSessions } from '@/composables/api/useChat'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import type { SessionSummary } from '@/composables/api/useChat'
 import type { ToolCallBlock } from '@/store/chat-list'
+import { useChatViewTarget } from './useChatViewContext'
 
 export interface SubagentSession {
   id: string
@@ -20,7 +20,10 @@ const ACTIVE_BACKGROUND_STATUSES = new Set(['queued', 'running', 'stalled'])
 export function useSubagentList() {
   const chatStore = useChatStore()
   const workspaceTabs = useWorkspaceTabsStore()
-  const { currentBotId, sessionId, messages } = storeToRefs(chatStore)
+  const target = useChatViewTarget()
+  const currentBotId = computed(() => target.value.botId || null)
+  const sessionId = computed(() => target.value.sessionId)
+  const messages = computed(() => chatStore.chatView(target.value).transcript.messages)
 
   const activeSubagentTasks = computed<SubagentSession[]>(() => {
     const seen = new Set<string>()
@@ -73,7 +76,8 @@ export function useSubagentList() {
   function navigateToSession(subagentSessionId: string) {
     if (!subagentSessionId || !currentBotId.value) return
     const agent = subagents.value.find(item => item.id === subagentSessionId)
-    workspaceTabs.openSessionChat({
+    workspaceTabs.openSessionChatFromView({
+      viewId: target.value.viewId,
       sessionId: subagentSessionId,
       title: agent?.title || agent?.agentId,
     })

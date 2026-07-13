@@ -1,5 +1,5 @@
 import { defineStore, storeToRefs } from 'pinia'
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { toast } from '@felinic/ui'
 import enMessages from '@/i18n/locales/en.json'
 import zhMessages from '@/i18n/locales/zh.json'
@@ -25,8 +25,16 @@ import {
 import { createFsChangeBeacon } from './chat/fs-beacon'
 import { createCommandEventRegistry } from './chat/command-events'
 import { createSessionList } from './chat/session-list'
-import { acpSessionMetadata, createACPStaging } from './chat/acp-staging'
+import {
+  acpSessionMetadata,
+  createACPStaging,
+  type DetachedACPSession,
+} from './chat/acp-staging'
 import { createTranscriptController } from './chat/transcript'
+import {
+  createChatViewRegistry,
+  type ChatViewEntry,
+} from './chat/view-registry'
 import { createAssistantStreamRegistry } from './chat/assistant-streams'
 import { createChatRealtimeController } from './chat/realtime'
 import { createACPRuntimeRegistry } from './chat/acp-runtime-registry'
@@ -44,7 +52,9 @@ import type {
   ACPAgentSessionInput,
   ActiveChatTarget,
   ChatAssistantTurn,
+  ChatMessage,
   ChatUserTurn,
+  ChatViewTarget,
   SendMessageOptions,
   SendMessageResult,
   SendMessageStage,
@@ -100,6 +110,7 @@ export type {
 // fs-change beacon lives in ./chat/fs-beacon; types re-exported so existing
 // consumers keep importing them from the store module.
 export type { FsChangeBatch, FsChangeEvent, FsToolKind } from './chat/fs-beacon'
+export type { ChatViewEntry, ChatViewTarget } from './chat/view-registry'
 
 function currentLocale() {
   const storage = globalThis.localStorage
@@ -196,7 +207,9 @@ export const useChatStore = defineStore('chat', () => {
     acpRuntimePending,
     acpRuntimeKey,
     clearACPRuntimeStatus,
+    ensureACPRuntimeFor,
     ensureACPRuntime,
+    setACPRuntimeModelFor,
     setACPRuntimeModel,
     resetACPRuntimeRegistry,
   } = acpRuntimeRegistry
@@ -216,61 +229,140 @@ export const useChatStore = defineStore('chat', () => {
     rememberBackgroundTask,
     applyPendingBackgroundEventsToTool,
   } = backgroundTasks
-  const transcript = createTranscriptController({
-    currentBotId,
-    sessionId,
+  const focusedChatViewId = ref('chat')
+  let transcriptSnapshotHook: (view: ChatViewEntry, targetSessionId: string | undefined, turns: import('@/composables/api/useChat.types').UITurn[]) => void = () => {}
+  let transcriptRefreshAppliedHook: (view: ChatViewEntry, targetSessionId: string, latestTimestamp?: string) => void = () => {}
+  let sessionStreamingProbe: (botId: string, targetSessionId: string) => boolean = () => false
+  let stopEvictedSessionStream: (botId: string, targetSessionId: string) => void = () => {}
+  let discardEvictedDraftStage: (view: ChatViewEntry) => void = () => {}
+  const chatViews = createChatViewRegistry({
     rememberBackgroundTask,
     applyPendingBackgroundEventsToTool,
     bumpFsChangedAtIfFsMutation,
     fetchMessages: fetchMessagesUI,
     locateMessage: locateMessageUI,
+    isSessionStreaming: (botId, targetSessionId) => sessionStreamingProbe(botId, targetSessionId),
+    onSnapshot: (view, targetSessionId, turns) => transcriptSnapshotHook(view, targetSessionId, turns),
+    onRefreshApplied: (view, targetSessionId, latestTimestamp) => {
+      transcriptRefreshAppliedHook(view, targetSessionId, latestTimestamp)
+    },
+    onEvict: (view) => {
+      if (view.kind === 'session' && view.sessionId) {
+        stopEvictedSessionStream(view.botId, view.sessionId)
+      } else if (view.kind === 'draft') {
+        discardEvictedDraftStage(view)
+      }
+    },
   })
-  const {
-    messages,
-    loadingMessages,
-    loadingOlder,
-    hasMoreOlder,
-    hasLoadedOlder,
-    normalizeTurn,
-    clearHistoryView,
-    prepareForInitialization,
-    markHistoryEmpty,
-    replaceHistoryView,
-    refreshCurrentSession,
-    loadInitialMessages,
-    fetchSessionWindow,
-    loadOlderMessages,
-    findMessageIdByExternalId,
-    locateMessageByExternalId,
-    isActiveSessionTarget,
-    appendTurnToSession,
-    reattachTurnToSession,
-    appendToView,
-    removeFromView,
-    removeTurnFromSession,
-    replaceTailFromTurn,
-    restoreTailFromOptimistic,
-    createOptimisticAssistantTurn,
-    createOptimisticUserTurn,
-    upsertAssistantUIMessage,
-    hasVisibleAssistantBlocks,
-    finishAssistantTurn,
-    snapshotToolApprovalStates,
-    assistantTurnForApproval,
-    restoreToolApprovalStates,
-    snapshotUserInputStates,
-    assistantTurnForUserInput,
-    restoreUserInputStates,
-    finalizeStreamFailure,
-    latestOptimisticUserText,
-    hasTurn,
-    findTurnByServerId,
-    isLatestVisibleUserTurn,
-    isLatestVisibleAssistantTurn,
-    markToolApprovalDecision,
-    markUserInputDecision,
-    resetUserScope: resetTranscriptUserScope,
-  } = transcript
+
+  function normalizedChatViewTarget(target?: Partial<ChatViewTarget>): ChatViewTarget {
+    const botId = (target?.botId ?? currentBotId.value ?? '').trim() || '__unbound__'
+    const targetSessionId = target && 'sessionId' in target
+      ? target.sessionId?.trim() || null
+      : sessionId.value?.trim() || null
+    const viewId = target?.viewId?.trim() || focusedChatViewId.value.trim() || 'chat'
+    return { botId, sessionId: targetSessionId, viewId }
+  }
+
+  function isFocusedChatTarget(target: ChatViewTarget): boolean {
+    const resolved = normalizedChatViewTarget(target)
+    if (
+      resolved.botId !== (currentBotId.value ?? '').trim()
+      || resolved.viewId !== focusedChatViewId.value
+    ) return false
+    const selectedSessionId = (sessionId.value ?? '').trim()
+    return resolved.sessionId
+      ? selectedSessionId === resolved.sessionId
+      : !selectedSessionId
+  }
+
+  const draftSessionCreations = reactive(new Set<string>())
+
+  function draftSessionCreationKey(target: ChatViewTarget): string {
+    const resolved = normalizedChatViewTarget(target)
+    return `${resolved.botId}\u0000${resolved.viewId}`
+  }
+
+  function isChatViewCreatingSession(target: ChatViewTarget): boolean {
+    const resolved = normalizedChatViewTarget(target)
+    return !resolved.sessionId && draftSessionCreations.has(draftSessionCreationKey(resolved))
+  }
+
+  function chatView(target?: Partial<ChatViewTarget>): ChatViewEntry {
+    return chatViews.getOrCreate(normalizedChatViewTarget(target))
+  }
+
+  function sessionTranscript(botId: string, targetSessionId: string) {
+    return chatViews.getOrCreate({
+      botId: botId.trim(),
+      sessionId: targetSessionId.trim(),
+      viewId: focusedChatViewId.value,
+    }).transcript
+  }
+
+  function activeTranscript() {
+    return chatView().transcript
+  }
+
+  function transcriptForTarget(target?: Partial<ChatViewTarget>) {
+    return chatView(target).transcript
+  }
+
+  function transcriptForTurn(turn: ChatMessage) {
+    return chatViews.entries().find(view => view.transcript.messages.includes(turn))?.transcript
+      ?? null
+  }
+
+  const messages = computed(() => activeTranscript().messages)
+  const loadingMessages = computed(() => activeTranscript().loadingMessages.value)
+  const loadingOlder = computed(() => activeTranscript().loadingOlder.value)
+  const hasMoreOlder = computed(() => activeTranscript().hasMoreOlder.value)
+  const hasLoadedOlder = computed({
+    get: () => activeTranscript().hasLoadedOlder.value,
+    set: value => { activeTranscript().hasLoadedOlder.value = value },
+  })
+
+  const normalizeTurn = (...args: Parameters<ReturnType<typeof createTranscriptController>['normalizeTurn']>) => activeTranscript().normalizeTurn(...args)
+  const clearHistoryView = (...args: Parameters<ReturnType<typeof createTranscriptController>['clearHistoryView']>) => activeTranscript().clearHistoryView(...args)
+  const prepareForInitialization = () => activeTranscript().prepareForInitialization()
+  const markHistoryEmpty = () => activeTranscript().markHistoryEmpty()
+  async function refreshCurrentSession(targetBotId?: string, targetSessionId?: string) {
+    const bid = (targetBotId ?? currentBotId.value ?? '').trim()
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
+    if (!bid || !sid) return
+    await sessionTranscript(bid, sid).refreshCurrentSession(bid, sid)
+  }
+  async function loadInitialMessages(botId: string, targetSessionId: string) {
+    const view = chatViews.getOrCreate({ botId, sessionId: targetSessionId, viewId: focusedChatViewId.value })
+    await view.transcript.loadInitialMessages(botId, targetSessionId)
+    view.initialized = true
+  }
+  const fetchSessionWindow = (botId: string, targetSessionId: string) => sessionTranscript(botId, targetSessionId).fetchSessionWindow(botId, targetSessionId)
+  const loadOlderMessages = (target?: ChatViewTarget) => transcriptForTarget(target).loadOlderMessages()
+  const findMessageIdByExternalId = (externalMessageId: string, target?: ChatViewTarget) => transcriptForTarget(target).findMessageIdByExternalId(externalMessageId)
+  const locateMessageByExternalId = (externalMessageId: string, target?: ChatViewTarget) => transcriptForTarget(target).locateMessageByExternalId(externalMessageId)
+  function isActiveSessionTarget(botId: string, targetSessionId: string) {
+    return currentBotId.value === botId.trim() && sessionId.value === targetSessionId.trim()
+  }
+  const appendTurnToSession = (botId: string, targetSessionId: string, turn: ChatMessage) => sessionTranscript(botId, targetSessionId).appendTurnToSession(botId, targetSessionId, turn)
+  const reattachTurnToSession = (botId: string, targetSessionId: string, turn: ChatMessage) => sessionTranscript(botId, targetSessionId).reattachTurnToSession(botId, targetSessionId, turn)
+  const removeTurnFromSession = (botId: string, targetSessionId: string, turn: ChatMessage) => {
+    const transcript = targetSessionId.trim()
+      ? sessionTranscript(botId, targetSessionId)
+      : transcriptForTurn(turn)
+    transcript?.removeTurnFromSession(botId, targetSessionId, turn)
+  }
+  const restoreTailFromOptimistic = (botId: string, targetSessionId: string, optimisticUserTurn: ChatUserTurn | null, assistantTurn: ChatAssistantTurn, replacedTurns: ChatMessage[]) => sessionTranscript(botId, targetSessionId).restoreTailFromOptimistic(botId, targetSessionId, optimisticUserTurn, assistantTurn, replacedTurns)
+  const createOptimisticAssistantTurn = () => activeTranscript().createOptimisticAssistantTurn()
+  const upsertAssistantUIMessage = (...args: Parameters<ReturnType<typeof createTranscriptController>['upsertAssistantUIMessage']>) => transcriptForTurn(args[0])?.upsertAssistantUIMessage(...args)
+  const hasVisibleAssistantBlocks = (turn: ChatAssistantTurn) => transcriptForTurn(turn)?.hasVisibleAssistantBlocks(turn) ?? false
+  const finishAssistantTurn = (turn: ChatAssistantTurn) => { transcriptForTurn(turn)?.finishAssistantTurn(turn) }
+  const finalizeStreamFailure = (assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string, error: Error) => {
+    transcriptForTurn(assistantTurn)?.finalizeStreamFailure(assistantTurn, botId, targetSessionId, error)
+  }
+  const hasTurn = (turn: ChatMessage) => chatViews.entries().some(view => view.transcript.hasTurn(turn))
+  const markToolApprovalDecision = (approvalId: string, status: 'approved' | 'rejected' | 'pending') => activeTranscript().markToolApprovalDecision(approvalId, status)
+  const resetTranscriptUserScope = () => chatViews.resetAll()
   const assistantStreams = createAssistantStreamRegistry({ currentBotId, sessionId, finishAssistantTurn })
   const {
     streaming,
@@ -278,6 +370,7 @@ export const useChatStore = defineStore('chat', () => {
     assistantStreamsForSession,
     activeUnboundStreamIds,
     isSessionStreaming,
+    isUnboundComposerStreaming,
     streamIdForEvent,
     trackAssistantStream,
     getAssistantStream,
@@ -291,6 +384,17 @@ export const useChatStore = defineStore('chat', () => {
     forgetCreatedSession,
     clearStreamHistory,
   } = assistantStreams
+  sessionStreamingProbe = isSessionStreaming
+
+  function isChatViewStreaming(target: ChatViewTarget, composerScope?: string): boolean {
+    const resolved = normalizedChatViewTarget(target)
+    return resolved.sessionId
+      ? isSessionStreaming(resolved.botId, resolved.sessionId)
+      : isUnboundComposerStreaming(
+          resolved.botId,
+          composerScope?.trim() || `${resolved.botId}:${resolved.viewId}`,
+        )
+  }
   const approvalResponses = createApprovalResponseTracker({
     rollbackApproval: approvalId => markToolApprovalDecision(approvalId, 'pending'),
     onExpired: handleExpiredApprovalResponse,
@@ -336,10 +440,12 @@ export const useChatStore = defineStore('chat', () => {
     clearDeletedSessionIds,
     clearRememberedSessions,
   } = sessionList
-  transcript.setSnapshotHook(syncForkAnchorFromUITurns)
-  transcript.setRefreshAppliedHook((targetSessionId, latestTimestamp) => {
+  transcriptSnapshotHook = (_view, targetSessionId, turns) => {
+    syncForkAnchorFromUITurns(targetSessionId, turns)
+  }
+  transcriptRefreshAppliedHook = (_view, targetSessionId, latestTimestamp) => {
     touchSessionInList(targetSessionId, latestTimestamp)
-  })
+  }
   const refreshCoordinator = createChatRefreshCoordinator({
     currentBotId,
     sessionId,
@@ -354,7 +460,7 @@ export const useChatStore = defineStore('chat', () => {
   })
   const {
     refreshSessionsList,
-    scheduleRefreshCurrentSession,
+    scheduleSessionRefresh,
     resetRefreshCoordinator,
   } = refreshCoordinator
   const realtime = createChatRealtimeController({
@@ -374,6 +480,73 @@ export const useChatStore = defineStore('chat', () => {
     startBotSessionsActivityStream,
     stopStreams,
   } = realtime
+  stopEvictedSessionStream = (botId, targetSessionId) => {
+    stopSessionMessagesStream(botId, targetSessionId)
+  }
+
+  function releaseHiddenSessionView(view: ChatViewEntry | null) {
+    if (!view || view.kind !== 'session' || !view.sessionId) return
+    if (view.visiblePanelIds.size > 0) return
+    // Visibility owns the live subscription; the registry independently owns
+    // cached transcript retention for streaming and pending interactions.
+    stopSessionMessagesStream(view.botId, view.sessionId)
+    chatViews.prune()
+  }
+
+  function bindChatView(panelId: string, target: ChatViewTarget, visible = true): ChatViewEntry {
+    const change = chatViews.bindPanel(panelId, normalizedChatViewTarget(target), visible)
+    if (panelId.trim() === focusedChatViewId.value && change.view.kind === 'draft') {
+      activateDraftACPStage({
+        botId: change.view.botId,
+        sessionId: null,
+        viewId: change.view.viewId,
+      })
+    }
+    releaseHiddenSessionView(change.deactivatedSession)
+    if (change.activatedSession?.sessionId) {
+      startSessionMessagesStream(change.activatedSession.botId, change.activatedSession.sessionId)
+    }
+    if (visible && change.view.kind === 'session' && change.view.sessionId) {
+      void ensureVisibleSessionSummary(change.view.botId, change.view.sessionId)
+    }
+    return change.view
+  }
+
+  function setChatViewVisible(panelId: string, visible: boolean) {
+    const change = chatViews.setPanelVisible(panelId, visible)
+    if (!change) return
+    releaseHiddenSessionView(change.deactivatedSession)
+    if (change.activatedSession?.sessionId) {
+      startSessionMessagesStream(change.activatedSession.botId, change.activatedSession.sessionId)
+    }
+    if (visible && change.view.kind === 'session' && change.view.sessionId) {
+      void ensureVisibleSessionSummary(change.view.botId, change.view.sessionId)
+    }
+  }
+
+  function unbindChatView(panelId: string) {
+    releaseHiddenSessionView(chatViews.unbindPanel(panelId))
+  }
+
+  function focusChatView(viewId: string) {
+    const id = viewId.trim()
+    if (!id || id === focusedChatViewId.value) return
+    saveLiveDraftACPStage()
+    focusedChatViewId.value = id
+    const view = chatViews.getPanel(id)
+    if (view?.kind === 'draft') {
+      activateDraftACPStage({ botId: view.botId, sessionId: null, viewId: view.viewId })
+    }
+  }
+
+  function promoteDraftChatView(target: ChatViewTarget, targetSessionId: string): ChatViewEntry {
+    invalidateDraftViewCommand(target)
+    const promoted = chatViews.promoteDraft(target.botId, target.viewId, targetSessionId)
+    if (promoted.visiblePanelIds.size > 0 && promoted.sessionId) {
+      startSessionMessagesStream(promoted.botId, promoted.sessionId)
+    }
+    return promoted
+  }
   const loading = ref(false)
   // `loadingChats` covers the bot-level boot path (sessions list fetch), so
   // the sidebar can show its skeleton + suppress its empty-state placeholder
@@ -390,12 +563,33 @@ export const useChatStore = defineStore('chat', () => {
   const bots = ref<Bot[]>([])
   const overrideModelId = ref<string>('')
   const overrideReasoningEffort = ref<string>('')
-  const startupSendFailure = ref<StartupSendFailure | null>(null)
+  const startupSendFailures = ref<Record<string, StartupSendFailure>>({})
+  function startupSendFailureKey(botId: string, targetSessionId: string, composerScope = '') {
+    const bid = botId.trim()
+    const scope = composerScope.trim()
+    if (scope) return `composer:${bid}:${scope}`
+    return `session:${bid}:${targetSessionId.trim()}`
+  }
+  function startupSendFailureFor(target: ChatViewTarget, composerScope = ''): StartupSendFailure | null {
+    const resolved = normalizedChatViewTarget(target)
+    const scopedKey = startupSendFailureKey(resolved.botId, resolved.sessionId ?? '', composerScope)
+    const scoped = startupSendFailures.value[scopedKey]
+    if (scoped) return scoped
+    if (resolved.sessionId) {
+      return startupSendFailures.value[startupSendFailureKey(resolved.botId, resolved.sessionId)] ?? null
+    }
+    return null
+  }
+  const startupSendFailure = computed(() => startupSendFailureFor(
+    normalizedChatViewTarget(),
+    focusedChatViewId.value === 'chat'
+      ? 'chat'
+      : `${(currentBotId.value ?? '').trim()}:${focusedChatViewId.value}`,
+  ))
   // Slash-command event registry (see ./chat/command-events for scoping rules).
   const commandEventRegistry = createCommandEventRegistry({ currentBotId, sessionId })
   const {
     commandEvent,
-    currentCommandScope,
     commandEventForScope,
     rememberCommandEvent,
     showCommandError,
@@ -407,8 +601,37 @@ export const useChatStore = defineStore('chat', () => {
   // whether that send just promoted a draft (created the session). The workspace
   // tab store watches this to pin the chat tab — a session you have sent in is no
   // longer an ephemeral "preview" tab. seq forces the watch to fire on repeats.
-  const userSentInSession = ref<{ id: string, wasDraft: boolean, seq: number } | null>(null)
+  const userSentInSession = ref<{
+    id: string
+    botId: string
+    viewId: string
+    wasDraft: boolean
+    seq: number
+  } | null>(null)
   let userSendSeq = 0
+  const draftViewRequested = ref<{
+    botId: string
+    viewId: string
+    expectedSessionId: string | null
+    explicitSelection: boolean
+    input: ACPAgentSessionInput | null
+    activate: boolean
+    seq: number
+  } | null>(null)
+  let draftViewRequestSeq = 0
+  const draftViewCommandVersions = new Map<string, number>()
+  let draftViewCommandSequence = 0
+  const forkedSessionRequested = ref<{
+    botId: string
+    viewId: string
+    expectedSessionId: string
+    sessionId: string
+    title: string
+    explicitSelection: true
+    activate: boolean
+    seq: number
+  } | null>(null)
+  let forkedSessionRequestSeq = 0
   // Bumps after a session delete succeeds. Consumers that own per-session UI
   // chrome must not infer deletion from the paginated session list: a valid open
   // tab can fall off the current page without being deleted.
@@ -416,6 +639,7 @@ export const useChatStore = defineStore('chat', () => {
   let deletedSessionSeq = 0
 
   let selectSessionRequestId = 0
+  const visibleSessionSummaryRequests = new Map<string, Promise<SessionSummary | null>>()
 
   const hasExplicitSessionSelection = computed(() => explicitSessionSelection.value)
 
@@ -456,6 +680,34 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function ensureVisibleSessionSummary(targetBotId: string, targetSessionId: string): Promise<SessionSummary | null> {
+    const bid = targetBotId.trim()
+    const sid = targetSessionId.trim()
+    if (!bid || !sid) return Promise.resolve(null)
+    const known = knownSessionSummary(sid)
+    if (known) return Promise.resolve(known)
+    const key = `${bid}\u0000${sid}`
+    const pending = visibleSessionSummaryRequests.get(key)
+    if (pending) return pending
+    const generation = userScopeGeneration
+    const request = (async () => {
+      try {
+        const fetched = await fetchSession(bid, sid)
+        if (generation !== userScopeGeneration || (currentBotId.value ?? '').trim() !== bid) return null
+        rememberSession(fetched)
+        return fetched
+      } catch {
+        return null
+      } finally {
+        if (visibleSessionSummaryRequests.get(key) === request) {
+          visibleSessionSummaryRequests.delete(key)
+        }
+      }
+    })()
+    visibleSessionSummaryRequests.set(key, request)
+    return request
+  }
+
 
 
 
@@ -471,13 +723,14 @@ export const useChatStore = defineStore('chat', () => {
     if (composerScope) deletedSignal.composerScope = composerScope
     deletedSession.value = deletedSignal
     clearACPRuntimeStatus(bid, sid)
+    stopSessionMessagesStream(bid, sid)
+    chatViews.removeSession(bid, sid)
     if ((currentBotId.value ?? '').trim() === bid) {
       removeSessionFromList(sid)
       if ((sessionId.value ?? '').trim() === sid) {
         sessionId.value = null
         explicitSessionSelection.value = false
         draftIntent.value = true
-        stopSessionMessagesStream()
         clearHistoryView()
       }
     }
@@ -506,7 +759,9 @@ export const useChatStore = defineStore('chat', () => {
       selectSessionRequestId++
     },
     clearTranscriptForDraft: () => {
-      stopSessionMessagesStream()
+      const bid = (currentBotId.value ?? '').trim()
+      const sid = (sessionId.value ?? '').trim()
+      if (bid && sid) stopSessionMessagesStream(bid, sid)
       clearHistoryView()
     },
   })
@@ -520,18 +775,216 @@ export const useChatStore = defineStore('chat', () => {
     rememberDefaultACPInput,
     cachedDefaultACPInput,
     cacheDefaultACPSession,
-    stageACPSession,
-    stageDefaultACPSession,
-    stageNewACPSession,
-    resetToEmptyComposer,
-    ensurePendingACPRuntime,
-    setPendingACPModel,
+    stageACPSession: stageFocusedACPSession,
+    stageDefaultACPSession: stageFocusedDefaultACPSession,
+    stageNewACPSession: stageFocusedNewACPSession,
+    resetToEmptyComposer: resetFocusedEmptyComposer,
+    ensurePendingACPRuntime: ensureFocusedPendingACPRuntime,
+    setPendingACPModel: setFocusedPendingACPModel,
     clearPendingACPSession,
     detachPendingACPSession,
     restorePendingACPSession,
     releasePendingACPSession,
-    pendingACPMatchesInput,
+    discardDetachedACPSession,
+    pendingACPMatchesInput: focusedPendingACPMatchesInput,
   } = acpStaging
+
+  interface DraftACPStage extends DetachedACPSession {
+    viewId: string
+  }
+
+  const draftACPStages = ref<Record<string, DraftACPStage>>({})
+  let liveDraftACP: { botId: string, viewId: string } | null = null
+
+  function draftACPStageKey(botId: string, viewId: string) {
+    return `${botId.trim()}\u0000${viewId.trim()}`
+  }
+
+  function sameDraftACPStage(left: { botId: string, viewId: string } | null, right: ChatViewTarget) {
+    return !!left
+      && left.botId === right.botId.trim()
+      && left.viewId === right.viewId.trim()
+      && !right.sessionId
+  }
+
+  function rememberDraftACPStage(target: Pick<ChatViewTarget, 'botId' | 'viewId'>, detached: DetachedACPSession) {
+    const key = draftACPStageKey(target.botId, target.viewId)
+    draftACPStages.value = {
+      ...draftACPStages.value,
+      [key]: {
+        botId: detached.botId.trim() || target.botId.trim(),
+        viewId: target.viewId.trim(),
+        input: { ...detached.input },
+        runtimeId: detached.runtimeId.trim(),
+      },
+    }
+  }
+
+  function syncLiveDraftACPStage() {
+    if (!liveDraftACP || !pendingACPSessionInput.value) return
+    rememberDraftACPStage(liveDraftACP, {
+      botId: liveDraftACP.botId,
+      input: pendingACPSessionInput.value,
+      runtimeId: pendingACPRuntimeId.value,
+    })
+  }
+
+  function saveLiveDraftACPStage() {
+    if (!liveDraftACP) return
+    const owner = liveDraftACP
+    const detached = detachPendingACPSession()
+    if (detached) rememberDraftACPStage(owner, detached)
+    liveDraftACP = null
+  }
+
+  function activateDraftACPStage(target: ChatViewTarget) {
+    const resolved = normalizedChatViewTarget(target)
+    if (resolved.sessionId || !resolved.botId || !resolved.viewId) return
+    if (sameDraftACPStage(liveDraftACP, resolved)) return
+    saveLiveDraftACPStage()
+    liveDraftACP = { botId: resolved.botId, viewId: resolved.viewId }
+    const saved = draftACPStages.value[draftACPStageKey(resolved.botId, resolved.viewId)]
+    if (saved) {
+      restorePendingACPSession(saved.input, saved.runtimeId, saved.botId)
+    } else {
+      releasePendingACPSession()
+    }
+  }
+
+  function forgetDraftACPStage(target: ChatViewTarget) {
+    const resolved = normalizedChatViewTarget(target)
+    const key = draftACPStageKey(resolved.botId, resolved.viewId)
+    if (sameDraftACPStage(liveDraftACP, resolved)) {
+      releasePendingACPSession()
+      liveDraftACP = null
+    }
+    if (!(key in draftACPStages.value)) return
+    const { [key]: _removed, ...rest } = draftACPStages.value
+    draftACPStages.value = rest
+  }
+
+  function discardDraftACPStage(target: ChatViewTarget) {
+    const resolved = normalizedChatViewTarget(target)
+    const key = draftACPStageKey(resolved.botId, resolved.viewId)
+    if (sameDraftACPStage(liveDraftACP, resolved)) {
+      clearPendingACPSession()
+      liveDraftACP = null
+    } else {
+      const saved = draftACPStages.value[key]
+      if (saved) discardDetachedACPSession(saved)
+    }
+    if (!(key in draftACPStages.value)) return
+    const { [key]: _removed, ...rest } = draftACPStages.value
+    draftACPStages.value = rest
+  }
+
+  discardEvictedDraftStage = (view) => {
+    draftViewCommandVersions.delete(draftSessionCreationKey({
+      botId: view.botId,
+      sessionId: null,
+      viewId: view.viewId,
+    }))
+    discardDraftACPStage({ botId: view.botId, sessionId: null, viewId: view.viewId })
+  }
+
+  function pendingACPStateFor(target: ChatViewTarget) {
+    const resolved = normalizedChatViewTarget(target)
+    if (resolved.sessionId) return null
+    const live = sameDraftACPStage(liveDraftACP, resolved)
+    const saved = live && pendingACPSessionInput.value
+      ? {
+          botId: liveDraftACP!.botId,
+          viewId: liveDraftACP!.viewId,
+          input: pendingACPSessionInput.value,
+          runtimeId: pendingACPRuntimeId.value,
+        }
+      : draftACPStages.value[draftACPStageKey(resolved.botId, resolved.viewId)]
+    if (!saved) return null
+    const runtimeKey = acpRuntimeKey(saved.botId, saved.runtimeId)
+    return {
+      input: { ...saved.input },
+      metadata: acpSessionMetadata(saved.input),
+      modelId: saved.input.modelId?.trim() ?? '',
+      runtimeId: saved.runtimeId,
+      runtimeStatus: runtimeKey ? acpRuntimeStatuses.value[runtimeKey] : undefined,
+      ensuring: live ? pendingACPRuntimeEnsuring.value : false,
+    }
+  }
+
+  function targetDraftForACP(target?: ChatViewTarget): ChatViewTarget {
+    const resolved = normalizedChatViewTarget(target)
+    return { ...resolved, sessionId: null }
+  }
+
+  function stageACPSession(
+    input: ACPAgentSessionInput,
+    options: { explicitSelection?: boolean } = {},
+    target?: ChatViewTarget,
+  ) {
+    const draft = targetDraftForACP(target)
+    invalidateDraftViewCommand(draft)
+    activateDraftACPStage(draft)
+    stageFocusedACPSession(input, options)
+    syncLiveDraftACPStage()
+  }
+
+  function stageDefaultACPSession(input: ACPAgentSessionInput, target?: ChatViewTarget) {
+    const draft = targetDraftForACP(target)
+    invalidateDraftViewCommand(draft)
+    activateDraftACPStage(draft)
+    stageFocusedDefaultACPSession(input)
+    syncLiveDraftACPStage()
+  }
+
+  function stageNewACPSession(input: ACPAgentSessionInput, target?: ChatViewTarget) {
+    const draft = targetDraftForACP(target)
+    invalidateDraftViewCommand(draft)
+    activateDraftACPStage(draft)
+    stageFocusedNewACPSession(input)
+    syncLiveDraftACPStage()
+  }
+
+  function resetToEmptyComposer(
+    options: { clearPendingACP?: boolean, explicitSelection?: boolean, draftIntent?: boolean } = {},
+    target?: ChatViewTarget,
+  ) {
+    const draft = targetDraftForACP(target)
+    invalidateDraftViewCommand(draft)
+    activateDraftACPStage(draft)
+    resetFocusedEmptyComposer(options)
+    if (options.clearPendingACP !== false) forgetDraftACPStage(draft)
+  }
+
+  async function ensurePendingACPRuntime(target?: ChatViewTarget) {
+    const draft = targetDraftForACP(target)
+    activateDraftACPStage(draft)
+    try {
+      return await ensureFocusedPendingACPRuntime()
+    } finally {
+      syncLiveDraftACPStage()
+    }
+  }
+
+  async function setPendingACPModel(modelId: string, target?: ChatViewTarget) {
+    const draft = targetDraftForACP(target)
+    invalidateDraftViewCommand(draft)
+    activateDraftACPStage(draft)
+    try {
+      await setFocusedPendingACPModel(modelId)
+    } finally {
+      syncLiveDraftACPStage()
+    }
+  }
+
+  function pendingACPMatchesInput(input: ACPAgentSessionInput, target?: ChatViewTarget) {
+    if (!target) return focusedPendingACPMatchesInput(input)
+    const state = pendingACPStateFor(target)
+    if (!state) return false
+    const metadata = acpSessionMetadata(input)
+    return state.metadata.acp_agent_id === metadata.acp_agent_id
+      && state.metadata.project_path === metadata.project_path
+      && state.metadata.acp_project_mode === metadata.acp_project_mode
+  }
 
   watch(currentBotId, (newId) => {
     if (newId) {
@@ -547,17 +1000,21 @@ export const useChatStore = defineStore('chat', () => {
 
   function refreshLoadingForSession(botId: string, targetSessionId: string) {
     if (!isActiveSessionTarget(botId, targetSessionId)) return
-    loading.value = isSessionStreaming(targetSessionId)
+    loading.value = isSessionStreaming(botId, targetSessionId)
+  }
+
+  function isActiveSessionStreaming() {
+    return isSessionStreaming(currentBotId.value, sessionId.value)
   }
 
 
-  function ensureDiscussStream(streamId: string, targetSessionId?: string) {
-    const id = streamIdForEvent({ stream_id: streamId, session_id: targetSessionId }, targetSessionId)
+  function ensureDiscussStream(streamId: string, targetSessionId: string, targetBotId: string) {
+    const id = streamIdForEvent(targetBotId, { stream_id: streamId, session_id: targetSessionId }, targetSessionId)
     const existing = getAssistantStream(id)
     if (existing) return existing
     if (isTerminalStream(id)) return null
-    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
-    const bid = (currentBotId.value ?? '').trim()
+    const sid = targetSessionId.trim()
+    const bid = targetBotId.trim()
     const assistantTurn = createOptimisticAssistantTurn()
     appendTurnToSession(bid, sid, assistantTurn)
     void trackAssistantStream({ streamId: id, assistantTurn, botId: bid, sessionId: sid }).catch((error: Error) => {
@@ -574,8 +1031,9 @@ export const useChatStore = defineStore('chat', () => {
     const bid = (pending?.botId || sourceBotId || currentBotId.value || '').trim()
     if (!bid || !eventSessionId) return
     const sid = recordCreatedSession(event.stream_id, eventSessionId) || eventSessionId
+    const viewId = pending?.viewId?.trim() || focusedChatViewId.value
+    const promoted = promoteDraftChatView({ botId: bid, sessionId: null, viewId }, sid)
     if ((currentBotId.value ?? '').trim() !== bid) return
-    if (sessionId.value && sessionId.value !== sid) return
 
     const now = new Date().toISOString()
     if (!knownSessionSummary(sid)) {
@@ -585,30 +1043,46 @@ export const useChatStore = defineStore('chat', () => {
         type: 'chat',
         session_mode: 'chat',
         runtime_type: 'model',
-        title: provisionalSessionTitle(latestOptimisticUserText()),
+        title: provisionalSessionTitle(promoted.transcript.latestOptimisticUserText()),
         created_at: now,
         updated_at: now,
       })
     }
+    userSentInSession.value = {
+      id: sid,
+      botId: bid,
+      viewId,
+      wasDraft: true,
+      seq: ++userSendSeq,
+    }
+    if (focusedChatViewId.value !== viewId) return
+    if (sessionId.value && sessionId.value !== sid) return
     sessionId.value = sid
     explicitSessionSelection.value = true
     draftIntent.value = false
-    userSentInSession.value = { id: sid, wasDraft: true, seq: ++userSendSeq }
   }
 
   function rememberStartupSendFailure(failure: Omit<StartupSendFailure, 'id'>) {
-    startupSendFailure.value = {
+    const stored: StartupSendFailure = {
       ...failure,
       id: nextId(),
       restoreAttachments: failure.restoreAttachments ? [...failure.restoreAttachments] : undefined,
       restoreRequestedSkills: failure.restoreRequestedSkills ? failure.restoreRequestedSkills.map(skill => ({ ...skill })) : undefined,
     }
+    const key = startupSendFailureKey(failure.botId, failure.sessionId, failure.composerScope)
+    startupSendFailures.value = { ...startupSendFailures.value, [key]: stored }
   }
 
   function clearStartupSendFailure(id?: string) {
-    if (!id || startupSendFailure.value?.id === id) {
-      startupSendFailure.value = null
+    if (!id) {
+      startupSendFailures.value = {}
+      return
     }
+    const next = { ...startupSendFailures.value }
+    for (const [key, failure] of Object.entries(next)) {
+      if (failure.id === id) delete next[key]
+    }
+    startupSendFailures.value = next
   }
 
   function pruneEmptyAssistantTurnIfPending(streamId: string) {
@@ -640,7 +1114,7 @@ export const useChatStore = defineStore('chat', () => {
     if (event.type === 'user_message') {
       const sid = (event.session_id ?? targetSessionId ?? sessionId.value ?? '').trim()
       const bid = sourceBotId || currentBotId.value || ''
-      const streamId = streamIdForEvent(event, sid)
+      const streamId = streamIdForEvent(bid, event, sid)
       if (isTerminalStream(streamId) || isTerminalApprovalResponse(streamId)) return
       appendTurnToSession(bid, sid, normalizeTurn(event.data))
       const pending = getAssistantStream(streamId)
@@ -661,14 +1135,15 @@ export const useChatStore = defineStore('chat', () => {
         if (pending) {
           const message = event.error?.message || 'slash command failed'
           rejectAssistantStream(invocationId, new CommandStreamError(message))
-          loading.value = isSessionStreaming(sessionId.value)
+          loading.value = isActiveSessionStreaming()
         }
       }
       return
     }
 
     const sid = (event.session_id ?? targetSessionId ?? sessionId.value ?? '').trim()
-    const streamId = streamIdForEvent(event, sid)
+    const bid = sourceBotId || currentBotId.value || ''
+    const streamId = streamIdForEvent(bid, event, sid)
     // The server may emit end after error. It must not recreate the stream, but
     // it still triggers the final authoritative refresh below.
     if ((isTerminalStream(streamId) || isTerminalApprovalResponse(streamId)) && event.type !== 'end') return
@@ -681,17 +1156,17 @@ export const useChatStore = defineStore('chat', () => {
         } else {
           settleApprovalResponse(streamId, 'succeeded')
         }
-        loading.value = isSessionStreaming(sessionId.value)
+        loading.value = isActiveSessionStreaming()
       }
       return
     }
 
     switch (event.type) {
       case 'start':
-        ensureDiscussStream(streamId, sid)
+        ensureDiscussStream(streamId, sid, bid)
         break
       case 'message':
-        const messageStream = ensureDiscussStream(streamId, sid)
+        const messageStream = ensureDiscussStream(streamId, sid, bid)
         if (messageStream) upsertAssistantUIMessage(messageStream.assistantTurn, event.data)
         break
       case 'end':
@@ -701,32 +1176,26 @@ export const useChatStore = defineStore('chat', () => {
         settleApprovalResponse(streamId, 'succeeded')
         pruneEmptyAssistantTurnIfPending(streamId)
         resolveAssistantStream(streamId)
-        loading.value = isSessionStreaming(sessionId.value)
-        // Only refresh when the ended stream belongs to the active session.
-        // Otherwise the REST round trip lands after the user has switched
-        // away and `refreshCurrentSession` drops the result anyway.
-        if (
-          endedSessionId
-          && !isSessionStreaming(endedSessionId)
-          && endedSessionId === (sessionId.value ?? '').trim()
-          && endedBotId === (currentBotId.value ?? '').trim()
-        ) {
-          void refreshCurrentSession(endedBotId, endedSessionId)
-        } else if (endedSessionId && !isSessionStreaming(endedSessionId)) {
-          // Background session: skip the REST refresh, but still bump the
-          // sidebar timestamp so the ended session floats to the top of the
-          // list instead of remaining ordered by its last streamed delta.
-          touchSessionInList(endedSessionId, new Date().toISOString())
+        loading.value = isActiveSessionStreaming()
+        if (endedSessionId && !isSessionStreaming(endedBotId, endedSessionId)) {
+          const endedView = chatViews.getSession(endedBotId, endedSessionId)
+          if (endedView) {
+            void refreshCurrentSession(endedBotId, endedSessionId)
+              .finally(() => releaseHiddenSessionView(endedView))
+          } else {
+            touchSessionInList(endedSessionId, new Date().toISOString())
+          }
         }
         break
       case 'error': {
-        const session = getAssistantStream(streamId) ?? ensureDiscussStream(streamId, sid)
+        const session = getAssistantStream(streamId) ?? ensureDiscussStream(streamId, sid, bid)
         if (!session) break
         const message = event.message || 'stream error'
         const stage: SendMessageStage = hasVisibleAssistantBlocks(session.assistantTurn) ? 'stream' : 'startup'
         settleApprovalResponse(streamId, 'failed')
         rejectAssistantStream(streamId, new StreamFailureError(message, stage))
-        loading.value = isSessionStreaming(sessionId.value)
+        loading.value = isActiveSessionStreaming()
+        releaseHiddenSessionView(chatViews.getSession(session.botId, session.sessionId) ?? null)
         break
       }
     }
@@ -753,6 +1222,8 @@ export const useChatStore = defineStore('chat', () => {
       currentBotId.value = null
     }
     resetTranscriptUserScope()
+    draftACPStages.value = {}
+    liveDraftACP = null
     loading.value = false
     loadingChats.value = false
     initializing.value = false
@@ -761,7 +1232,12 @@ export const useChatStore = defineStore('chat', () => {
     initializePromise = null
     overrideModelId.value = ''
     overrideReasoningEffort.value = ''
-    startupSendFailure.value = null
+    startupSendFailures.value = {}
+    draftViewRequested.value = null
+    forkedSessionRequested.value = null
+    draftViewCommandVersions.clear()
+    visibleSessionSummaryRequests.clear()
+    draftSessionCreations.clear()
     resetCommandEvents()
     resetFsBeacon()
     resetACPRuntimeRegistry()
@@ -803,7 +1279,13 @@ export const useChatStore = defineStore('chat', () => {
       if (eventSessionId && eventSessionId !== targetSessionId) return
       const task = normalizeBackgroundTask(event, event.type)
       if (!task) return
-      backgroundTasks.mergeBackgroundTaskIntoMatchingTools(rememberBackgroundTask(task), messages)
+      const view = chatViews.getSession(targetBotId, targetSessionId)
+      if (view) {
+        backgroundTasks.mergeBackgroundTaskIntoMatchingTools(
+          rememberBackgroundTask(task),
+          view.transcript.messages,
+        )
+      }
       if (eventSessionId) touchSessionInList(eventSessionId)
       return
     }
@@ -822,15 +1304,21 @@ export const useChatStore = defineStore('chat', () => {
     // already-known message ids — the comparison was unsound anyway because
     // `messages` holds aggregated UI turns whose ids live in a different
     // namespace from raw bot_history_messages.id. The downstream
-    // `scheduleRefreshCurrentSession` is debounced and idempotent, so an
+    // The keyed session refresh is debounced and idempotent, so an
     // occasional redundant REST round trip is cheap.
     const raw = event.message
     if (!raw) return
     const messageSessionId = String(raw.session_id ?? '').trim()
     if (messageSessionId && messageSessionId !== targetSessionId) return
     if (messageSessionId) touchSessionInList(messageSessionId, raw.created_at)
-    if (!shouldRefreshFromMessageCreated(targetBotId, sessionId.value, streamingSessionId.value, event)) return
-    scheduleRefreshCurrentSession(messageSessionId)
+    const sid = messageSessionId || targetSessionId
+    if (!shouldRefreshFromMessageCreated(
+      targetBotId,
+      sid,
+      isSessionStreaming(targetBotId, sid) ? sid : null,
+      event,
+    )) return
+    scheduleSessionRefresh(targetBotId, sid)
   }
 
   function handleBotSessionsActivityEvent(targetBotId: string, event: BotSessionActivityEvent) {
@@ -891,24 +1379,28 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function abort() {
+  function abort(target?: ChatViewTarget) {
+    const resolved = normalizedChatViewTarget(target)
     const abortError = new Error('aborted')
     abortError.name = 'AbortError'
     const approvalStreamIds = abortApprovalResponses(
-      pendingApprovalResponsesForSession(currentBotId.value ?? '', sessionId.value ?? ''),
+      pendingApprovalResponsesForSession(resolved.botId, resolved.sessionId ?? ''),
       'failed',
     )
-    const activeSessionId = (sessionId.value ?? '').trim()
-    const streamIds = activeSessionId
-      ? assistantStreams.activeStreamIdsForSession(activeSessionId)
-      : activeUnboundStreamIds(currentBotId.value)
+    const streamIds = resolved.sessionId
+      ? assistantStreamsForSession(resolved.botId, resolved.sessionId).map(stream => stream.streamId)
+      : activeUnboundStreamIds(
+          resolved.botId,
+          target ? `${resolved.botId}:${resolved.viewId}` : undefined,
+        )
     for (const streamId of streamIds) {
       if (!approvalStreamIds.has(streamId)) {
         abortWebSocketStream(streamId, getAssistantStream(streamId)?.botId)
       }
       rejectAssistantStream(streamId, abortError)
     }
-    loading.value = isSessionStreaming(sessionId.value)
+    loading.value = isActiveSessionStreaming()
+    chatViews.prune()
   }
 
   function abortApprovalResponses(responses: ApprovalResponse[], outcome: ApprovalResponseOutcome): Set<string> {
@@ -984,11 +1476,14 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  const activeChatTarget = computed<ActiveChatTarget>(() => {
-    const explicitSelection = explicitSessionSelection.value
-    const sid = (sessionId.value ?? '').trim()
+  function chatTargetFor(target?: ChatViewTarget): ActiveChatTarget {
+    const resolved = normalizedChatViewTarget(target)
+    const focused = resolved.viewId === focusedChatViewId.value
+      && resolved.botId === (currentBotId.value ?? '').trim()
+    const explicitSelection = focused ? explicitSessionSelection.value : false
+    const sid = (resolved.sessionId ?? '').trim()
     if (sid) {
-      const session = activeSession.value
+      const session = knownSessionSummary(sid)
       const runtimeType = session ? normalizedRuntimeType(session) : 'unknown'
       return {
         kind: 'session',
@@ -1002,8 +1497,8 @@ export const useChatStore = defineStore('chat', () => {
       }
     }
 
-    const metadata = pendingACPSessionMetadata.value
-    if (metadata) {
+    const pendingState = pendingACPStateFor(resolved)
+    if (pendingState) {
       return {
         kind: 'draft-acp',
         sessionId: null,
@@ -1011,7 +1506,7 @@ export const useChatStore = defineStore('chat', () => {
         runtimeType: 'acp_agent',
         isACP: true,
         isPendingACP: true,
-        metadata,
+        metadata: pendingState.metadata,
         explicitSelection,
       }
     }
@@ -1026,7 +1521,23 @@ export const useChatStore = defineStore('chat', () => {
       metadata: {},
       explicitSelection,
     }
-  })
+  }
+
+  const activeChatTarget = computed<ActiveChatTarget>(() => chatTargetFor())
+
+  function chatReadOnlyFor(target: ChatViewTarget): boolean {
+    const resolved = normalizedChatViewTarget(target)
+    const session = chatTargetFor(resolved).session
+    if (!session) return Boolean(resolved.sessionId)
+    const type = session.type ?? 'chat'
+    if (type === 'heartbeat' || type === 'schedule' || type === 'subagent') return true
+    const channelType = (session.channel_type ?? '').trim().toLowerCase()
+    return Boolean(channelType && channelType !== 'local')
+  }
+
+  function chatCanForkFor(target: ChatViewTarget): boolean {
+    return chatTargetFor(target).session?.type === 'chat'
+  }
 
 
 
@@ -1050,15 +1561,18 @@ export const useChatStore = defineStore('chat', () => {
 
 
 
-  async function createACPSession(input: ACPAgentSessionInput): Promise<{ session: SessionSummary; runtime?: AcpagentRuntimeStatus }> {
-    const bid = currentBotId.value ?? await ensureBot()
+  async function createACPSessionRecord(
+    botId: string,
+    input: ACPAgentSessionInput,
+  ): Promise<SessionSummary> {
+    const bid = botId.trim()
     if (!bid) throw new Error('Bot not ready')
     const metadata = acpSessionMetadata(input)
     const runtimeId = input.runtimeId?.trim() ?? ''
     const sessionMode = input.sessionMode === 'discuss' ? 'discuss' : 'chat'
     // The warm staged runtime is bound server-side inside session creation;
     // no separate adopt/bind round trip and nothing for a watcher to race.
-    const created = await createSession(bid, {
+    return createSession(bid, {
       title: input.title ?? '',
       type: sessionMode,
       sessionMode,
@@ -1067,29 +1581,139 @@ export const useChatStore = defineStore('chat', () => {
       runtimeMetadata: metadata,
       acpRuntimeId: runtimeId || undefined,
     })
-    upsertSession(created)
-    sessionId.value = created.id
-    explicitSessionSelection.value = true
-    draftIntent.value = false
-    clearHistoryView()
-    if (runtimeId) {
-      // The staged runtime now belongs to the session — reset local staging
-      // without closing it.
-      releasePendingACPSession()
-    } else {
-      clearPendingACPSession()
+  }
+
+  async function configureCreatedACPRuntime(
+    created: SessionSummary,
+    input: ACPAgentSessionInput,
+    botId: string,
+    generation: number,
+  ): Promise<AcpagentRuntimeStatus | undefined> {
+    const modelId = input.modelId?.trim() ?? ''
+    if (!input.startRuntime && !modelId) return undefined
+    const assertCurrentScope = () => {
+      if (generation === userScopeGeneration && (currentBotId.value ?? '').trim() === botId) return
+      const error = new Error('Chat scope changed during ACP runtime setup')
+      error.name = 'AbortError'
+      throw error
     }
-    const runtime = input.startRuntime ? await ensureACPRuntime(created.id) : undefined
+    assertCurrentScope()
+    let runtime = await ensureACPRuntimeFor(botId, created.id)
+    assertCurrentScope()
+    if (modelId && runtime.models?.current_model_id?.trim() !== modelId) {
+      runtime = await setACPRuntimeModelFor(botId, created.id, modelId)
+      assertCurrentScope()
+    }
+    return runtime
+  }
+
+  async function createACPSessionForTarget(
+    input: ACPAgentSessionInput,
+    target: ChatViewTarget,
+  ): Promise<{ session: SessionSummary; runtime?: AcpagentRuntimeStatus }> {
+    const draft = targetDraftForACP(target)
+    const generation = userScopeGeneration
+    const stagedBeforeCreate = pendingACPStateFor(draft)
+    const runtimeId = input.runtimeId?.trim() ?? ''
+    const created = await createACPSessionRecord(draft.botId, input)
+    const assertCurrentScope = () => {
+      if (
+        generation === userScopeGeneration
+        && (currentBotId.value ?? '').trim() === draft.botId
+      ) return
+      const error = new Error('Chat scope changed during ACP Session creation')
+      error.name = 'AbortError'
+      throw error
+    }
+
+    let runtime: AcpagentRuntimeStatus | undefined
+    try {
+      assertCurrentScope()
+      runtime = await configureCreatedACPRuntime(created, input, draft.botId, generation)
+      assertCurrentScope()
+    } catch (error) {
+      await rollbackFailedACPSessionCreation(created, draft, stagedBeforeCreate?.input ?? input, runtimeId, generation)
+      throw error
+    }
+
+    upsertSession(created)
+    rememberSession(created)
+    if (runtimeId) clearACPRuntimeStatus(draft.botId, runtimeId)
+    promoteDraftChatView(draft, created.id)
+    if (stagedBeforeCreate) {
+      if (runtimeId && stagedBeforeCreate.runtimeId === runtimeId) {
+        forgetDraftACPStage(draft)
+      } else {
+        discardDraftACPStage(draft)
+      }
+    }
+    if (isFocusedChatTarget(draft)) {
+      sessionId.value = created.id
+      explicitSessionSelection.value = true
+      draftIntent.value = false
+    }
     return { session: created, runtime }
   }
 
-  async function updateCurrentSessionAgent(input: ACPAgentSessionInput): Promise<{ session: SessionSummary; runtime?: AcpagentRuntimeStatus }> {
-    if (!sessionId.value) return createACPSession(input)
-    const bid = currentBotId.value ?? ''
-    const sid = sessionId.value
+  async function rollbackFailedACPSessionCreation(
+    created: SessionSummary,
+    draft: ChatViewTarget,
+    stagedInput: ACPAgentSessionInput,
+    stagedRuntimeId: string,
+    generation: number,
+  ) {
+    if (generation !== userScopeGeneration) return
+
+    markSessionDeleted(draft.botId, created.id)
+    stopSessionMessagesStream(draft.botId, created.id)
+    chatViews.removeSession(draft.botId, created.id)
+    clearACPRuntimeStatus(draft.botId, created.id)
+    if (stagedRuntimeId) clearACPRuntimeStatus(draft.botId, stagedRuntimeId)
+    if ((currentBotId.value ?? '').trim() === draft.botId) {
+      removeSessionFromList(created.id)
+    }
+
+    if (sameDraftACPStage(liveDraftACP, draft)) {
+      releasePendingACPSession()
+      liveDraftACP = null
+    }
+    rememberDraftACPStage(draft, {
+      botId: draft.botId,
+      input: normalizedACPInput({ ...stagedInput, runtimeId: undefined }),
+      runtimeId: '',
+    })
+    if (isFocusedChatTarget(draft)) activateDraftACPStage(draft)
+
+    try {
+      await requestDeleteSession(draft.botId, created.id)
+    } catch {
+      // The tombstone keeps a failed cleanup out of this client until auth reset.
+    }
+  }
+
+  async function createACPSession(input: ACPAgentSessionInput): Promise<{ session: SessionSummary; runtime?: AcpagentRuntimeStatus }> {
+    const bid = currentBotId.value ?? await ensureBot()
+    if (!bid) throw new Error('Bot not ready')
+    return createACPSessionForTarget(input, {
+      botId: bid,
+      sessionId: null,
+      viewId: focusedChatViewId.value,
+    })
+  }
+
+  async function updateCurrentSessionAgent(
+    input: ACPAgentSessionInput,
+    target?: ChatViewTarget,
+  ): Promise<{ session: SessionSummary; runtime?: AcpagentRuntimeStatus }> {
+    const resolved = normalizedChatViewTarget(target)
+    if (!resolved.sessionId) return createACPSessionForTarget(input, resolved)
+    const bid = resolved.botId
+    const sid = resolved.sessionId
     if (!bid) throw new Error('Bot not selected')
     const metadata = acpSessionMetadata(input)
-    const sessionMode = activeSession.value?.session_mode || (activeSession.value?.type === 'discuss' ? 'discuss' : 'chat')
+    const targetSession = knownSessionSummary(sid)
+    const sessionMode = targetSession?.session_mode || (targetSession?.type === 'discuss' ? 'discuss' : 'chat')
+    const generation = userScopeGeneration
     const updated = await requestUpdateSessionAgent(bid, sid, {
       type: sessionMode === 'discuss' ? 'discuss' : 'acp_agent',
       sessionMode,
@@ -1097,21 +1721,28 @@ export const useChatStore = defineStore('chat', () => {
       metadata,
       runtimeMetadata: metadata,
     })
+    if (generation !== userScopeGeneration || (currentBotId.value ?? '').trim() !== bid) return { session: updated }
     upsertSession(updated)
-    explicitSessionSelection.value = true
-    draftIntent.value = false
-    clearPendingACPSession()
+    if (isFocusedChatTarget(resolved)) {
+      explicitSessionSelection.value = true
+      draftIntent.value = false
+    }
     clearACPRuntimeStatus(bid, sid)
-    const runtime = input.startRuntime ? await ensureACPRuntime(sid) : undefined
+    const runtime = input.startRuntime ? await ensureACPRuntimeFor(bid, sid) : undefined
+    if (generation !== userScopeGeneration || (currentBotId.value ?? '').trim() !== bid) {
+      return { session: updated }
+    }
     return { session: updated, runtime }
   }
 
-  async function updateCurrentSessionToMemoh(): Promise<SessionSummary | null> {
-    clearPendingACPSession()
-    const bid = currentBotId.value ?? ''
-    const sid = sessionId.value ?? ''
+  async function updateCurrentSessionToMemoh(target?: ChatViewTarget): Promise<SessionSummary | null> {
+    const resolved = normalizedChatViewTarget(target)
+    const bid = resolved.botId
+    const sid = resolved.sessionId ?? ''
     if (!bid || !sid) return null
-    const sessionMode = activeSession.value?.session_mode || (activeSession.value?.type === 'discuss' ? 'discuss' : 'chat')
+    const targetSession = knownSessionSummary(sid)
+    const sessionMode = targetSession?.session_mode || (targetSession?.type === 'discuss' ? 'discuss' : 'chat')
+    const generation = userScopeGeneration
     const updated = await requestUpdateSessionAgent(bid, sid, {
       type: sessionMode === 'discuss' ? 'discuss' : 'chat',
       sessionMode,
@@ -1119,66 +1750,61 @@ export const useChatStore = defineStore('chat', () => {
       metadata: {},
       runtimeMetadata: {},
     })
+    if (generation !== userScopeGeneration || (currentBotId.value ?? '').trim() !== bid) return null
     upsertSession(updated)
-    explicitSessionSelection.value = true
-    draftIntent.value = false
+    if (isFocusedChatTarget(resolved)) {
+      explicitSessionSelection.value = true
+      draftIntent.value = false
+    }
     clearACPRuntimeStatus(bid, sid)
     return updated
   }
 
-  async function ensureActiveSession(firstPrompt?: string) {
-    if (sessionId.value) return
-    if (pendingACPSessionInput.value) {
-      const detached = detachPendingACPSession()
-      if (!detached) return
-      const pending = detached.input
-      const pendingModelId = pending.modelId?.trim() ?? ''
-      const runtimeId = detached.runtimeId
-      let created: SessionSummary
-      try {
-        ({ session: created } = await createACPSession({ ...pending, runtimeId }))
-      } catch (error) {
-        // Session creation failed: restore the staged agent (and keep its
-        // warm runtime) so the user can simply retry.
-        if (!pendingACPSessionInput.value && !sessionId.value) {
-          restorePendingACPSession(pending, runtimeId, detached.botId)
+  async function ensureChatViewSession(target: ChatViewTarget, firstPrompt?: string): Promise<ChatViewTarget> {
+    if (target.sessionId) return target
+    const creationKey = draftSessionCreationKey(target)
+    if (draftSessionCreations.has(creationKey)) {
+      throw new StreamFailureError('Session creation is already in progress', 'startup')
+    }
+    draftSessionCreations.add(creationKey)
+    try {
+      const pendingACP = pendingACPStateFor(target)
+      if (pendingACP) {
+        const { session: created } = await createACPSessionForTarget({
+          ...pendingACP.input,
+          runtimeId: pendingACP.runtimeId,
+        }, target)
+        if (firstPrompt?.trim() && !created.title?.trim()) {
+          created.title = provisionalSessionTitle(firstPrompt)
+          upsertSession(created)
+          rememberSession(created)
         }
+        return { ...target, sessionId: created.id }
+      }
+
+      const generation = userScopeGeneration
+      const created = await createSession(target.botId)
+      if (
+        generation !== userScopeGeneration
+        || (currentBotId.value ?? '').trim() !== target.botId
+      ) {
+        const error = new Error('Chat scope changed during Session creation')
+        error.name = 'AbortError'
         throw error
       }
-      const bid = currentBotId.value ?? ''
-      if (bid && runtimeId) {
-        clearACPRuntimeStatus(bid, runtimeId)
+      if (firstPrompt?.trim()) created.title = provisionalSessionTitle(firstPrompt)
+      upsertSession(created)
+      rememberSession(created)
+      promoteDraftChatView(target, created.id)
+      if (isFocusedChatTarget(target)) {
+        sessionId.value = created.id
+        explicitSessionSelection.value = true
+        draftIntent.value = false
       }
-      if (pendingModelId) {
-        // Bind carries the staged model with the runtime. Only when the bind
-        // fell back to a cold start does the model need re-applying.
-        const runtime = await ensureACPRuntime(created.id)
-        const currentModelId = runtime?.models?.current_model_id?.trim() ?? ''
-        if (currentModelId !== pendingModelId) {
-          await setACPRuntimeModel(pendingModelId)
-        }
-      }
-      return
+      return { ...target, sessionId: created.id }
+    } finally {
+      draftSessionCreations.delete(creationKey)
     }
-    const bid = currentBotId.value ?? await ensureBot()
-    if (!bid) throw new Error('Bot not ready')
-    const created = await createSession(bid)
-    // Show the first prompt optimistically as the title so the sidebar/tab never
-    // flashes "Untitled Session" while the server's title model runs. This is a
-    // LOCAL display value only — the server creates the session untitled and
-    // persists the real title via the title-generation flow. Keeping the session
-    // untitled server-side preserves the "title empty ⇒ needs an LLM title"
-    // invariant the backend guards on (restart-safe), and the optimistic value
-    // mirrors backend fallbackSessionTitle so the SSE-confirmed title lands
-    // without flicker.
-    if (firstPrompt?.trim()) {
-      created.title = provisionalSessionTitle(firstPrompt)
-    }
-    upsertSession(created)
-    sessionId.value = created.id
-    draftIntent.value = false
-    explicitSessionSelection.value = true
-    clearHistoryView()
   }
 
   // defaultRuntimeIsACP reports whether the bot's default chat runtime is an
@@ -1406,12 +2032,8 @@ export const useChatStore = defineStore('chat', () => {
     await run
   }
 
-  // Switching sessions is an explicit operation: stop the active SSE, blank
-  // the view, restart the SSE for the new session. We do NOT use a watcher on
-  // `sessionId` — a watcher fires asynchronously and races with operations
-  // that mutate `messages` between the assignment and the watcher microtask
-  // (e.g. an optimistic turn appended during `sendMessage` is wiped when the
-  // pending watcher finally runs `clearHistoryView()`).
+  // Selection changes focus only. Visible panel bindings own Session SSE
+  // lifetimes, and keyed transcript views retain their own cached history.
   //
   // We deliberately do NOT call `abortAllAssistantStreams()` here: an
   // assistant stream that started in session A keeps running server-side
@@ -1419,11 +2041,13 @@ export const useChatStore = defineStore('chat', () => {
   // the user comes back (the `appendTurnToSession` / WS handlers are
   // already gated on `sessionId.value === <stream's sessionId>`, so the
   // orphan does not bleed into B's view).
-  function switchActiveSession(sid: string) {
-    stopSessionMessagesStream()
-    clearHistoryView()
+  function switchActiveSession(sid: string, previousSessionId = '') {
     const bid = (currentBotId.value ?? '').trim()
     if (!bid || !sid) return
+    const previous = previousSessionId.trim()
+    if (previous && previous !== sid) {
+      releaseHiddenSessionView(chatViews.getSession(bid, previous) ?? null)
+    }
     startSessionMessagesStream(bid, sid)
   }
 
@@ -1445,14 +2069,15 @@ export const useChatStore = defineStore('chat', () => {
   async function selectSession(targetSessionId: string, options: { explicitSelection?: boolean } = {}) {
     const sid = targetSessionId.trim()
     if (!sid) return
-    const sameSession = sid === sessionId.value
+    const previousSessionId = (sessionId.value ?? '').trim()
+    const sameSession = sid === previousSessionId
     const requestId = ++selectSessionRequestId
     const bid = (currentBotId.value ?? '').trim()
     clearPendingACPSession()
     sessionId.value = sid
     draftIntent.value = false
     explicitSessionSelection.value = options.explicitSelection !== false
-    if (!sameSession) switchActiveSession(sid)
+    if (!sameSession) switchActiveSession(sid, previousSessionId)
     // Even when `sid` is already the persisted selection, a page refresh may
     // have no summary for it yet (for example an ACP session outside the first
     // sidebar page). Hydrate before consumers branch on runtime_type.
@@ -1484,9 +2109,86 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function handleWebNewCommand(text: string, attachments?: ChatAttachment[]): Promise<WebNewCommandResult> {
+  function normalizedACPInput(input: ACPAgentSessionInput): ACPAgentSessionInput {
+    const metadata = acpSessionMetadata(input)
+    return {
+      ...input,
+      agentId: String(metadata.acp_agent_id ?? ''),
+      projectPath: String(metadata.project_path ?? ''),
+      projectMode: String(metadata.acp_project_mode ?? ''),
+      modelId: input.modelId?.trim() ?? '',
+    }
+  }
+
+  function applyDraftViewRequest(
+    request: NonNullable<typeof draftViewRequested.value>,
+    mirrorGlobalSelection: boolean,
+  ) {
+    const target: ChatViewTarget = {
+      botId: request.botId,
+      sessionId: null,
+      viewId: request.viewId,
+    }
+    if (mirrorGlobalSelection) {
+      if (request.input) stageNewACPSession(request.input, target)
+      else resetToEmptyComposer({ explicitSelection: request.explicitSelection, draftIntent: true }, target)
+      return
+    }
+
+    const draft = chatView(target)
+    draft.transcript.clearHistoryView()
+    discardDraftACPStage(target)
+    if (request.input) {
+      rememberDraftACPStage(target, {
+        botId: request.botId,
+        input: normalizedACPInput(request.input),
+        runtimeId: '',
+      })
+    }
+  }
+
+  function requestDraftView(target: ChatViewTarget, input: ACPAgentSessionInput | null, activate = isFocusedChatTarget(target)) {
+    const resolved = normalizedChatViewTarget(target)
+    const request = {
+      botId: resolved.botId,
+      viewId: resolved.viewId,
+      expectedSessionId: resolved.sessionId,
+      explicitSelection: true,
+      input: input ? normalizedACPInput(input) : null,
+      activate,
+      seq: ++draftViewRequestSeq,
+    }
+    draftViewRequested.value = request
+  }
+
+  function invalidateDraftViewCommand(target: ChatViewTarget) {
+    const key = draftSessionCreationKey(target)
+    draftViewCommandVersions.delete(key)
+  }
+
+  function beginDraftViewCommand(target: ChatViewTarget) {
+    const key = draftSessionCreationKey(target)
+    const version = ++draftViewCommandSequence
+    draftViewCommandVersions.set(key, version)
+    return {
+      isCurrent: () => draftViewCommandVersions.get(key) === version,
+      finish: () => {
+        if (draftViewCommandVersions.get(key) === version) {
+          draftViewCommandVersions.delete(key)
+        }
+      },
+    }
+  }
+
+  async function handleWebNewCommand(
+    text: string,
+    attachments: ChatAttachment[] | undefined,
+    target: ChatViewTarget,
+  ): Promise<WebNewCommandResult> {
     const parsed = parseWebNewCommand(text)
     if (!parsed) return { kind: 'none' }
+    const generation = userScopeGeneration
+    const activate = isFocusedChatTarget(target)
     if (attachments?.length) {
       return { kind: 'error', message: 'Attachments are not supported with /new' }
     }
@@ -1495,21 +2197,36 @@ export const useChatStore = defineStore('chat', () => {
       if (parsed.mode === 'discuss') {
         return { kind: 'error', message: 'Discuss ACP sessions require an agent, for example /new discuss codex' }
       }
-      await createNewSession({ explicitSelection: true })
+      const command = beginDraftViewCommand(target)
+      if (command.isCurrent()) requestDraftView(target, null, activate)
+      command.finish()
       return { kind: 'handled' }
     }
     if (agentId !== 'codex' && agentId !== 'claude-code') {
       return { kind: 'error', message: `Unknown ACP agent "${agentId}"` }
     }
-    const bid = await ensureBot()
-    if (!bid) return { kind: 'error', message: 'Bot not ready' }
-    const defaults = await defaultACPSettingsForAgent(bid, agentId)
-    stageNewACPSession({
-      agentId,
-      sessionMode: parsed.mode === 'discuss' ? 'discuss' : 'chat',
-      ...defaults,
-    })
-    return { kind: 'handled' }
+    const command = beginDraftViewCommand(target)
+    try {
+      const targetBotId = target.botId === '__unbound__' ? '' : target.botId
+      const bid = targetBotId || await ensureBot()
+      if (!bid) return { kind: 'error', message: 'Bot not ready' }
+      const defaults = await defaultACPSettingsForAgent(bid, agentId)
+      if (
+        generation !== userScopeGeneration
+        || (currentBotId.value ?? '').trim() !== bid
+        || !command.isCurrent()
+      ) {
+        return { kind: 'handled' }
+      }
+      requestDraftView(target, {
+        agentId,
+        sessionMode: parsed.mode === 'discuss' ? 'discuss' : 'chat',
+        ...defaults,
+      }, activate)
+      return { kind: 'handled' }
+    } finally {
+      command.finish()
+    }
   }
 
   function isWebSlashInput(text: string): boolean {
@@ -1525,16 +2242,27 @@ export const useChatStore = defineStore('chat', () => {
     return ''
   }
 
-  async function handleWebSlashCommand(text: string, hasRequestedSkills = false, composerScope = 'chat'): Promise<WebSlashCommandResult> {
+  async function handleWebSlashCommand(
+    text: string,
+    hasRequestedSkills = false,
+    composerScope = 'chat',
+    target?: ChatViewTarget,
+  ): Promise<WebSlashCommandResult> {
     if (!isWebSlashInput(text) || hasRequestedSkills) return { kind: 'none' }
-    const bid = currentBotId.value ?? ''
+    const resolved = normalizedChatViewTarget(target)
+    const bid = resolved.botId
     if (!bid) return { kind: 'error', message: 'Bot not selected' }
-    const sid = sessionId.value ?? ''
+    const sid = resolved.sessionId ?? ''
     const scope = composerScope.trim() || 'chat'
+    const commandScope = {
+      botId: bid,
+      sessionId: sid || undefined,
+      composerScope: scope,
+    }
 
     const actionID = quickActionIDForSlash(text)
     if (!actionID) return { kind: 'none' }
-    const skillActivationAllowed = !activeChatTarget.value.isACP
+    const skillActivationAllowed = !chatTargetFor(resolved).isACP
     let event: CommandEventResponse | null
     try {
       event = await executeQuickAction(bid, actionID, {
@@ -1545,16 +2273,12 @@ export const useChatStore = defineStore('chat', () => {
       })
     } catch (error) {
       const message = resolveApiErrorMessage(error, commandErrorMessage('generic'))
-      showCommandError('generic', message, {
-        botId: bid,
-        sessionId: sid || undefined,
-        composerScope: scope,
-      })
+      showCommandError('generic', message, commandScope)
       return { kind: 'error', message }
     }
 
     if (!event) return { kind: 'none' }
-    rememberCommandEvent(event, { botId: bid, sessionId: sid || undefined, composerScope: scope })
+    rememberCommandEvent(event, commandScope)
     if (event.type === 'command_error') {
       return { kind: 'error', message: event.error?.message || commandErrorMessage('generic') }
     }
@@ -1567,8 +2291,11 @@ export const useChatStore = defineStore('chat', () => {
     const bid = currentBotId.value ?? ''
     if (!bid) throw new Error('Bot not selected')
     await requestDeleteSession(bid, delId)
+    abort({ botId: bid, sessionId: delId, viewId: focusedChatViewId.value })
     markSessionDeleted(bid, delId)
     deletedSession.value = { id: delId, botId: bid, seq: ++deletedSessionSeq }
+    stopSessionMessagesStream(bid, delId)
+    chatViews.removeSession(bid, delId)
     if ((currentBotId.value ?? '').trim() !== bid) return
     clearACPRuntimeStatus(bid, delId)
     removeSessionFromList(delId)
@@ -1579,7 +2306,6 @@ export const useChatStore = defineStore('chat', () => {
       sessionId.value = null
       explicitSessionSelection.value = false
       draftIntent.value = false
-      stopSessionMessagesStream()
       clearHistoryView()
       return
     }
@@ -1587,7 +2313,7 @@ export const useChatStore = defineStore('chat', () => {
     sessionId.value = next
     explicitSessionSelection.value = false
     draftIntent.value = false
-    switchActiveSession(next)
+    switchActiveSession(next, delId)
   }
 
   async function renameSession(targetSessionId: string, title: string): Promise<SessionSummary> {
@@ -1603,44 +2329,52 @@ export const useChatStore = defineStore('chat', () => {
     return updated
   }
 
-  async function forkMessage(messageId: string, options: { title?: string } = {}): Promise<boolean> {
-    const bid = (currentBotId.value ?? '').trim()
-    const sid = (sessionId.value ?? '').trim()
+  async function forkMessage(messageId: string, options: { title?: string, target?: ChatViewTarget } = {}): Promise<boolean> {
+    const target = normalizedChatViewTarget(options.target)
+    const bid = target.botId
+    const sid = target.sessionId ?? ''
     const mid = messageId.trim()
-    if (!bid || !sid || !mid || activeChatReadOnly.value || !activeChatCanFork.value || streaming.value || loadingMessages.value) return false
+    const view = chatView(target)
+    const generation = userScopeGeneration
+    const activate = isFocusedChatTarget(target)
+    if (
+      !bid || !sid || !mid
+      || chatReadOnlyFor(target)
+      || !chatCanForkFor(target)
+      || isChatViewStreaming(target)
+      || view.transcript.loadingMessages.value
+    ) return false
 
     const key = `${bid}:${sid}:${mid}`
     if (forkingMessages.has(key)) return false
     forkingMessages.add(key)
     try {
       const forked = await requestForkSessionFromMessage(bid, sid, mid, { title: options.title })
-      if ((currentBotId.value ?? '').trim() !== bid || (sessionId.value ?? '').trim() !== sid) {
-        void refreshSessionsList(bid)
-        return true
-      }
+      if (generation !== userScopeGeneration || (currentBotId.value ?? '').trim() !== bid) return true
 
       upsertSession(forked)
       rememberSession(forked)
       void refreshSessionsList(bid)
 
       const turns = await fetchSessionWindow(bid, forked.id)
+      if (generation !== userScopeGeneration || (currentBotId.value ?? '').trim() !== bid) return true
       const anchoredForked = withForkAnchorFromUITurns(forked, turns)
       if (anchoredForked !== forked) {
         upsertSession(anchoredForked)
         rememberSession(anchoredForked)
       }
-      if ((currentBotId.value ?? '').trim() !== bid || (sessionId.value ?? '').trim() !== sid) {
-        return true
+      sessionTranscript(bid, forked.id).replaceHistoryView(turns, forked.id)
+      forkedSessionRequested.value = {
+        botId: bid,
+        viewId: target.viewId,
+        expectedSessionId: sid,
+        sessionId: forked.id,
+        title: (anchoredForked.title ?? options.title ?? '').trim(),
+        explicitSelection: true,
+        activate,
+        seq: ++forkedSessionRequestSeq,
       }
-
-      selectSessionRequestId++
-      clearPendingACPSession()
-      stopSessionMessagesStream()
-      sessionId.value = forked.id
-      explicitSessionSelection.value = true
-      draftIntent.value = false
-      replaceHistoryView(turns, forked.id)
-      startSessionMessagesStream(bid, forked.id)
+      chatViews.prune()
       return true
     } catch (error) {
       toast.error(resolveApiErrorMessage(error, forkFailedMessage()))
@@ -1653,33 +2387,49 @@ export const useChatStore = defineStore('chat', () => {
   async function sendMessage(text: string, attachments?: ChatAttachment[], options: SendMessageOptions = {}): Promise<SendMessageResult> {
     const trimmed = text.trim()
     const requestedSkills = normalizeRequestedSkills(options.requestedSkills)
-    const composerScope = options.composerScope?.trim() || 'chat'
+    let viewTarget = normalizedChatViewTarget(options.target)
+    const composerScope = options.composerScope?.trim()
+      || (options.target ? `${viewTarget.botId}:${viewTarget.viewId}` : 'chat')
+    const commandScope = {
+      botId: viewTarget.botId,
+      sessionId: viewTarget.sessionId ?? undefined,
+      composerScope,
+    }
     if (!trimmed && !attachments?.length && requestedSkills.length === 0) return { ok: false, stage: 'startup' }
 
     if (requestedSkills.length > 0 && isWebSlashInput(trimmed)) {
       const message = commandErrorMessage('invalid_skill_slash_syntax')
-      showCommandError('invalid_skill_slash_syntax', message, currentCommandScope(composerScope))
+      showCommandError('invalid_skill_slash_syntax', message, commandScope)
       return { ok: false, stage: 'startup', error: message, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills) }
     }
 
     if (isWebSlashInput(trimmed) && attachments?.length) {
       const message = commandErrorMessage('slash_attachments_unsupported')
-      showCommandError('slash_attachments_unsupported', message, currentCommandScope(composerScope))
+      showCommandError('slash_attachments_unsupported', message, commandScope)
       return { ok: false, stage: 'startup', error: message, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills) }
     }
 
-    const newCommand = await handleWebNewCommand(trimmed, attachments)
+    const newCommand = await handleWebNewCommand(trimmed, attachments, viewTarget)
     if (newCommand.kind === 'handled') return { ok: true }
     if (newCommand.kind === 'error') {
       return { ok: false, stage: 'startup', error: newCommand.message, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills) }
     }
-    const slashCommand = await handleWebSlashCommand(trimmed, requestedSkills.length > 0, composerScope)
+    const slashCommand = await handleWebSlashCommand(trimmed, requestedSkills.length > 0, composerScope, viewTarget)
     if (slashCommand.kind === 'handled') return { ok: true }
     if (slashCommand.kind === 'error') {
       return { ok: false, stage: 'startup', error: slashCommand.message, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills) }
     }
-    clearCommandEvent(currentCommandScope(composerScope))
-    if (streaming.value || loadingMessages.value || !currentBotId.value) return { ok: false, stage: 'startup' }
+    if (viewTarget.sessionId && chatReadOnlyFor(viewTarget)) {
+      return { ok: false, stage: 'startup' }
+    }
+    clearCommandEvent(commandScope)
+    const initialView = chatView(viewTarget)
+    if (
+      isChatViewStreaming(viewTarget, composerScope)
+      || isChatViewCreatingSession(viewTarget)
+      || initialView.transcript.loadingMessages.value
+      || !viewTarget.botId
+    ) return { ok: false, stage: 'startup' }
 
     let assistantTurn: ChatAssistantTurn | null = null
     let userTurn: ChatUserTurn | null = null
@@ -1688,12 +2438,16 @@ export const useChatStore = defineStore('chat', () => {
     let sendStreamId = ''
     let turnAppendStarted = false
 
-    const wasDraft = !sessionId.value
+    const wasDraft = !viewTarget.sessionId
     const serverSlashActivation = isWebSlashInput(trimmed) && quickActionIDForSlash(trimmed) === ''
     const serverSkillActivation = requestedSkills.length > 0 || serverSlashActivation
-    if (serverSkillActivation && !sessionId.value && pendingACPSessionInput.value) {
+    if (
+      serverSkillActivation
+      && wasDraft
+      && pendingACPStateFor(viewTarget)
+    ) {
       const message = commandErrorMessage('unsupported_skill_slash_context')
-      showCommandError('unsupported_skill_slash_context', message, currentCommandScope(composerScope))
+      showCommandError('unsupported_skill_slash_context', message, commandScope)
       return { ok: false, stage: 'startup', error: message, restoreInput: text, restoreAttachments: attachments, restoreRequestedSkills: cloneRequestedSkills(requestedSkills), composerScope }
     }
 
@@ -1701,30 +2455,37 @@ export const useChatStore = defineStore('chat', () => {
     const deferSessionCreation = serverSkillActivation && wasDraft
     try {
       if (!deferSessionCreation) {
-        await ensureActiveSession(wasDraft ? trimmed : undefined)
+        viewTarget = await ensureChatViewSession(viewTarget, wasDraft ? trimmed : undefined)
       }
 
-      const bid = currentBotId.value!
-      const sid = sessionId.value ?? ''
+      const bid = viewTarget.botId
+      const sid = viewTarget.sessionId ?? ''
       if (!sid && !deferSessionCreation) throw new Error('Session not selected')
       sendBotId = bid
       sendSessionId = sid
       sendStreamId = createStreamId()
+      const sendTranscript = transcriptForTarget(viewTarget)
       // Tell the tab store to pin (and, for a draft, repoint) this session's tab.
       if (sid) {
-        userSentInSession.value = { id: sid, wasDraft, seq: ++userSendSeq }
+        userSentInSession.value = {
+          id: sid,
+          botId: bid,
+          viewId: viewTarget.viewId,
+          wasDraft,
+          seq: ++userSendSeq,
+        }
       }
 
-      assistantTurn = createOptimisticAssistantTurn()
+      assistantTurn = sendTranscript.createOptimisticAssistantTurn()
       turnAppendStarted = true
       options.onBeforeTurnAppend?.()
       if (!serverSkillActivation) {
-        userTurn = createOptimisticUserTurn(trimmed, attachments)
-        appendToView(userTurn, assistantTurn)
+        userTurn = sendTranscript.createOptimisticUserTurn(trimmed, attachments)
+        sendTranscript.appendToView(userTurn, assistantTurn)
       }
 
-      const modelId = overrideModelId.value || undefined
-      const effort = overrideReasoningEffort.value
+      const modelId = options.modelId?.trim() || overrideModelId.value || undefined
+      const effort = options.reasoningEffort?.trim() || overrideReasoningEffort.value
       const reasoningEffort = effort || undefined
 
       if (!ensureWebSocketConnected(bid)) {
@@ -1736,6 +2497,7 @@ export const useChatStore = defineStore('chat', () => {
         botId: bid,
         sessionId: sid,
         composerScope,
+        viewId: viewTarget.viewId,
       })
       if (!sendWebSocketMessage(bid, {
         type: 'message',
@@ -1751,7 +2513,9 @@ export const useChatStore = defineStore('chat', () => {
       })) throw new StreamFailureError('WebSocket is not connected', 'startup')
       await completion
       const createdSessionId = createdSessionIdForStream(sendStreamId)
-      const fallbackActiveSessionId = (currentBotId.value ?? '').trim() === bid ? sessionId.value ?? '' : ''
+      const fallbackActiveSessionId = !options.target && (currentBotId.value ?? '').trim() === bid
+        ? sessionId.value ?? ''
+        : ''
       const refreshSessionId = sendSessionId || createdSessionId || fallbackActiveSessionId
       forgetCreatedSession(sendStreamId)
       if (refreshSessionId) await refreshCurrentSession(bid, refreshSessionId)
@@ -1767,8 +2531,8 @@ export const useChatStore = defineStore('chat', () => {
         ? err.stage
         : (assistantTurn && hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
       const createdSessionId = sendStreamId ? createdSessionIdForStream(sendStreamId) : ''
-      const bid = sendBotId || currentBotId.value || ''
-      const sid = sendSessionId || (deferSessionCreation ? '' : sessionId.value || '')
+      const bid = sendBotId || viewTarget.botId || currentBotId.value || ''
+      const sid = sendSessionId || createdSessionId
 
       if (assistantTurn) finalizeStreamFailure(assistantTurn, bid, sid, err)
       if (!isAbort && stage === 'startup' && userTurn) {
@@ -1790,7 +2554,12 @@ export const useChatStore = defineStore('chat', () => {
       if (stage === 'startup') {
         const currentBid = (currentBotId.value ?? '').trim()
         const currentSid = (sessionId.value ?? '').trim()
-        const stillCurrent = currentBid === bid && (!sid || currentSid === sid)
+        const restoredOriginalDraft = deferSessionCreation
+          && wasDraft
+          && !currentSid
+          && focusedChatViewId.value === viewTarget.viewId
+        const stillCurrent = currentBid === bid
+          && (!sid || currentSid === sid || restoredOriginalDraft)
         const deferredDraftStillCurrent = !(deferSessionCreation && wasDraft && currentSid)
         const commandErrorRestoredDraft = isCommandError && deferSessionCreation && wasDraft && !currentSid
         if (stillCurrent && deferredDraftStillCurrent && (!isCommandError || commandErrorRestoredDraft)) {
@@ -1802,19 +2571,24 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function retryLatestAssistant(messageId: string): Promise<SendMessageResult> {
-    const bid = currentBotId.value ?? ''
-    const sid = sessionId.value ?? ''
+  async function retryLatestAssistant(
+    messageId: string,
+    options: { target?: ChatViewTarget, modelId?: string, reasoningEffort?: string } = {},
+  ): Promise<SendMessageResult> {
+    const viewTarget = normalizedChatViewTarget(options.target)
+    const bid = viewTarget.botId
+    const sid = viewTarget.sessionId ?? ''
+    const transcript = transcriptForTarget(viewTarget)
     const targetID = messageId.trim()
-    if (!bid || !sid || !targetID) return { ok: false, stage: 'startup' }
-    if (streaming.value || loadingMessages.value) return { ok: false, stage: 'startup' }
-    const target = findTurnByServerId(targetID)
-    if (!target || !isLatestVisibleAssistantTurn(target)) return { ok: false, stage: 'startup' }
+    if (!bid || !sid || !targetID || chatReadOnlyFor(viewTarget)) return { ok: false, stage: 'startup' }
+    if (isChatViewStreaming(viewTarget) || transcript.loadingMessages.value) return { ok: false, stage: 'startup' }
+    const target = transcript.findTurnByServerId(targetID)
+    if (!target || !transcript.isLatestVisibleAssistantTurn(target)) return { ok: false, stage: 'startup' }
 
     const streamId = createStreamId()
-    const assistantTurn = createOptimisticAssistantTurn()
-    const restoreForkAnchor = updateForkAnchorForReplacedMessage(sid, target)
-    const replacedTurns = replaceTailFromTurn(target, [assistantTurn])
+    const assistantTurn = transcript.createOptimisticAssistantTurn()
+    const restoreForkAnchor = updateForkAnchorForReplacedMessage(sid, target, transcript.messages)
+    const replacedTurns = transcript.replaceTailFromTurn(target, [assistantTurn])
     loading.value = true
     try {
       if (!ensureWebSocketConnected(bid)) {
@@ -1826,8 +2600,8 @@ export const useChatStore = defineStore('chat', () => {
         stream_id: streamId,
         session_id: sid,
         message_id: targetID,
-        model_id: overrideModelId.value || undefined,
-        reasoning_effort: overrideReasoningEffort.value || undefined,
+        model_id: options.modelId?.trim() || overrideModelId.value || undefined,
+        reasoning_effort: options.reasoningEffort?.trim() || overrideReasoningEffort.value || undefined,
       })) throw new StreamFailureError('WebSocket is not connected', 'startup')
       await completion
       await refreshCurrentSession(bid, sid)
@@ -1851,22 +2625,28 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function editLatestUser(messageId: string, text: string): Promise<SendMessageResult> {
+  async function editLatestUser(
+    messageId: string,
+    text: string,
+    options: { target?: ChatViewTarget, modelId?: string, reasoningEffort?: string } = {},
+  ): Promise<SendMessageResult> {
     const trimmed = text.trim()
-    const bid = currentBotId.value ?? ''
-    const sid = sessionId.value ?? ''
+    const viewTarget = normalizedChatViewTarget(options.target)
+    const bid = viewTarget.botId
+    const sid = viewTarget.sessionId ?? ''
+    const transcript = transcriptForTarget(viewTarget)
     const targetID = messageId.trim()
-    if (!bid || !sid || !targetID || !trimmed) return { ok: false, stage: 'startup' }
-    if (streaming.value || loadingMessages.value) return { ok: false, stage: 'startup' }
-    const target = findTurnByServerId(targetID)
-    if (!target || !isLatestVisibleUserTurn(target)) return { ok: false, stage: 'startup' }
+    if (!bid || !sid || !targetID || !trimmed || chatReadOnlyFor(viewTarget)) return { ok: false, stage: 'startup' }
+    if (isChatViewStreaming(viewTarget) || transcript.loadingMessages.value) return { ok: false, stage: 'startup' }
+    const target = transcript.findTurnByServerId(targetID)
+    if (!target || !transcript.isLatestVisibleUserTurn(target)) return { ok: false, stage: 'startup' }
     if (hasUserAttachments(target)) return { ok: false, stage: 'startup' }
 
     const streamId = createStreamId()
-    const userTurn = createOptimisticUserTurn(trimmed)
-    const assistantTurn = createOptimisticAssistantTurn()
-    const restoreForkAnchor = updateForkAnchorForReplacedMessage(sid, target)
-    const replacedTurns = replaceTailFromTurn(target, [userTurn, assistantTurn])
+    const userTurn = transcript.createOptimisticUserTurn(trimmed)
+    const assistantTurn = transcript.createOptimisticAssistantTurn()
+    const restoreForkAnchor = updateForkAnchorForReplacedMessage(sid, target, transcript.messages)
+    const replacedTurns = transcript.replaceTailFromTurn(target, [userTurn, assistantTurn])
     loading.value = true
     try {
       if (!ensureWebSocketConnected(bid)) {
@@ -1879,8 +2659,8 @@ export const useChatStore = defineStore('chat', () => {
         session_id: sid,
         message_id: targetID,
         text: trimmed,
-        model_id: overrideModelId.value || undefined,
-        reasoning_effort: overrideReasoningEffort.value || undefined,
+        model_id: options.modelId?.trim() || overrideModelId.value || undefined,
+        reasoning_effort: options.reasoningEffort?.trim() || overrideReasoningEffort.value || undefined,
       })) throw new StreamFailureError('WebSocket is not connected', 'startup')
       await completion
       await refreshCurrentSession(bid, sid)
@@ -1904,9 +2684,15 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function respondToolApproval(approval: UIToolApproval, decision: 'approve' | 'reject') {
-    const bid = currentBotId.value ?? ''
-    const sid = sessionId.value ?? ''
+  async function respondToolApproval(
+    approval: UIToolApproval,
+    decision: 'approve' | 'reject',
+    target?: ChatViewTarget,
+  ) {
+    const viewTarget = normalizedChatViewTarget(target)
+    const bid = viewTarget.botId
+    const sid = viewTarget.sessionId ?? ''
+    const transcript = transcriptForTarget(viewTarget)
     const approvalId = approval.approval_id?.trim()
     if (!bid || !sid || !approvalId) return false
     if (approval.status !== 'pending' || approval.can_approve === false) return false
@@ -1916,22 +2702,22 @@ export const useChatStore = defineStore('chat', () => {
       return false
     }
     const streamId = createStreamId()
-    const silent = isSessionStreaming(sid)
-    const previousApprovalStates = snapshotToolApprovalStates(approvalId)
+    const silent = isSessionStreaming(bid, sid)
+    const previousApprovalStates = transcript.snapshotToolApprovalStates(approvalId)
     if (!beginApprovalResponse({
       streamId,
       approvalId,
       botId: bid,
       sessionId: sid,
       silent,
-      rollback: () => restoreToolApprovalStates(previousApprovalStates),
+      rollback: () => transcript.restoreToolApprovalStates(previousApprovalStates),
     })) return false
     let assistantTurn: ChatAssistantTurn | null = null
     let appendedAssistantTurn = false
     if (!silent) {
-      assistantTurn = assistantTurnForApproval(approvalId) ?? createOptimisticAssistantTurn()
-      appendedAssistantTurn = !hasTurn(assistantTurn)
-      if (appendedAssistantTurn) appendToView(assistantTurn)
+      assistantTurn = transcript.assistantTurnForApproval(approvalId) ?? transcript.createOptimisticAssistantTurn()
+      appendedAssistantTurn = !transcript.hasTurn(assistantTurn)
+      if (appendedAssistantTurn) transcript.appendToView(assistantTurn)
       assistantTurn.streaming = true
       void trackAssistantStream({ streamId, assistantTurn, botId: bid, sessionId: sid }).catch((error: Error) => {
         finalizeStreamFailure(assistantTurn, bid, sid, error)
@@ -1940,7 +2726,7 @@ export const useChatStore = defineStore('chat', () => {
     }
     // Optimistically update the approved/rejected tool block before the
     // server snapshot arrives so the buttons disappear immediately.
-    markToolApprovalDecision(approvalId, decision === 'approve' ? 'approved' : 'rejected')
+    transcript.markToolApprovalDecision(approvalId, decision === 'approve' ? 'approved' : 'rejected')
     try {
       if (!sendWebSocketMessage(bid, {
         type: 'tool_approval_response',
@@ -1951,11 +2737,11 @@ export const useChatStore = defineStore('chat', () => {
         decision,
       })) throw new Error('WebSocket is not connected')
     } catch (error) {
-      restoreToolApprovalStates(previousApprovalStates)
+      transcript.restoreToolApprovalStates(previousApprovalStates)
       settleApprovalResponse(streamId, 'canceled')
       if (!silent) {
         discardAssistantStream(streamId)
-        if (assistantTurn && appendedAssistantTurn) removeFromView(assistantTurn)
+        if (assistantTurn && appendedAssistantTurn) transcript.removeFromView(assistantTurn)
       }
       loading.value = false
       toast.error(resolveApiErrorMessage(error, 'Failed to send tool approval response.'))
@@ -1967,41 +2753,44 @@ export const useChatStore = defineStore('chat', () => {
   async function respondUserInput(
     userInput: UIUserInput,
     payload: { answers?: WSUserInputAnswer[]; canceled?: boolean; reason?: string },
+    target?: ChatViewTarget,
   ) {
-    const bid = currentBotId.value ?? ''
-    const sid = sessionId.value ?? ''
+    const viewTarget = normalizedChatViewTarget(target)
+    const bid = viewTarget.botId
+    const sid = viewTarget.sessionId ?? ''
+    const transcript = transcriptForTarget(viewTarget)
     if (!bid || !sid || !userInput.user_input_id) return
     if (!ensureWebSocketConnected(bid)) {
       toast.error(userInputConnectionLostMessage())
       return
     }
     const streamId = createStreamId()
-    const previousUserInputStates = snapshotUserInputStates(userInput.user_input_id)
-    const assistantTurn = assistantTurnForUserInput(userInput.user_input_id) ?? createOptimisticAssistantTurn()
-    const appendedAssistantTurn = !hasTurn(assistantTurn)
-    if (appendedAssistantTurn) appendToView(assistantTurn)
+    const previousUserInputStates = transcript.snapshotUserInputStates(userInput.user_input_id)
+    const assistantTurn = transcript.assistantTurnForUserInput(userInput.user_input_id) ?? transcript.createOptimisticAssistantTurn()
+    const appendedAssistantTurn = !transcript.hasTurn(assistantTurn)
+    if (appendedAssistantTurn) transcript.appendToView(assistantTurn)
     assistantTurn.streaming = true
     void trackAssistantStream({ streamId, assistantTurn, botId: bid, sessionId: sid }).catch((error: Error) => {
       finalizeStreamFailure(assistantTurn, bid, sid, error)
       if (error.name === 'AbortError') {
-        restoreUserInputStates(previousUserInputStates)
+        transcript.restoreUserInputStates(previousUserInputStates)
         return
       }
       // While the main session stream is still active a refresh would
       // clobber its in-flight state; roll back and let its end refresh
       // bring truth.
-      if (isSessionStreaming(sid)) {
-        restoreUserInputStates(previousUserInputStates)
+      if (isSessionStreaming(bid, sid)) {
+        transcript.restoreUserInputStates(previousUserInputStates)
         return
       }
       void refreshCurrentSession(bid, sid).catch(() => {
-        restoreUserInputStates(previousUserInputStates)
+        transcript.restoreUserInputStates(previousUserInputStates)
       })
     })
     loading.value = true
 
     const status = payload.canceled ? 'canceled' : 'submitted'
-    markUserInputDecision(userInput.user_input_id, status)
+    transcript.markUserInputDecision(userInput.user_input_id, status)
 
     try {
       if (!sendWebSocketMessage(bid, {
@@ -2015,9 +2804,9 @@ export const useChatStore = defineStore('chat', () => {
         reason: payload.reason,
       })) throw new Error('WebSocket is not connected')
     } catch (error) {
-      restoreUserInputStates(previousUserInputStates)
+      transcript.restoreUserInputStates(previousUserInputStates)
       discardAssistantStream(streamId)
-      if (appendedAssistantTurn) removeFromView(assistantTurn)
+      if (appendedAssistantTurn) transcript.removeFromView(assistantTurn)
       loading.value = false
       toast.error(resolveApiErrorMessage(error, 'Failed to send user input response.'))
     }
@@ -2025,6 +2814,17 @@ export const useChatStore = defineStore('chat', () => {
 
   return {
     messages,
+    chatView,
+    bindChatView,
+    setChatViewVisible,
+    unbindChatView,
+    focusChatView,
+    promoteDraftChatView,
+    chatTargetFor,
+    chatReadOnlyFor,
+    chatCanForkFor,
+    isChatViewStreaming,
+    isChatViewCreatingSession,
     streaming,
     streamingSessionId,
     sessions,
@@ -2040,6 +2840,7 @@ export const useChatStore = defineStore('chat', () => {
     pendingACPRuntimeId,
     pendingACPRuntimeStatus,
     pendingACPRuntimeEnsuring,
+    pendingACPStateFor,
     sessionId,
     hasExplicitSessionSelection,
     currentBotId,
@@ -2062,6 +2863,7 @@ export const useChatStore = defineStore('chat', () => {
     overrideModelId,
     overrideReasoningEffort,
     startupSendFailure,
+    startupSendFailureFor,
     commandEvent,
     commandEventForScope,
     showCommandError,
@@ -2089,6 +2891,9 @@ export const useChatStore = defineStore('chat', () => {
     createNewSession,
     selectDraft,
     userSentInSession,
+    draftViewRequested,
+    applyDraftViewRequest,
+    forkedSessionRequested,
     deletedSession,
     removeSession,
     renameSession,
