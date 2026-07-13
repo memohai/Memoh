@@ -1,0 +1,16 @@
+{
+  "base_commit": "ad301df5be32963f53be707e5423ecdab11a7e5c",
+  "engines": ["postgresql"],
+  "postgres": {
+    "present": true,
+    "canonical": "db/postgres/migrations/0001_init.up.sql",
+    "migrations_glob": "db/postgres/migrations/*.sql",
+    "query_dir": "db/postgres/queries",
+    "sqlc_out": "internal/db/postgres/sqlc",
+    "head_version": "0105_repair_superseded_message_visibility"
+  },
+  "sqlc": {
+    "engine": "postgresql"
+  },
+  "blockers": []
+}
