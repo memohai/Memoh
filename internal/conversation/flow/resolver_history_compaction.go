@@ -56,14 +56,56 @@ func sameModelMessage(a conversation.ModelMessage, b conversation.ModelMessage) 
 		string(a.Content) == string(b.Content)
 }
 
-func (r *Resolver) replaceCompactedMessages(ctx context.Context, sessionID string, scope contextfrag.Scope, messages []historyfrag.HistoryRecord, includeMissingArtifacts bool) ([]historyfrag.HistoryRecord, error) {
+type compactionArtifactBoundary struct {
+	hasCutoff bool
+	cutoffMs  int64
+}
+
+func compactionArtifactBoundaryBeforeMessage(messages []historyfrag.HistoryRecord, messageID string) compactionArtifactBoundary {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return compactionArtifactBoundary{}
+	}
+	boundary := compactionArtifactBoundary{hasCutoff: true}
+	for _, message := range messages {
+		if strings.TrimSpace(message.DBMessageID) == messageID && !message.CreatedAt.IsZero() {
+			boundary.cutoffMs = message.CreatedAt.UnixMilli()
+			break
+		}
+	}
+	return boundary
+}
+
+func (r *Resolver) loadCompactionArtifactBoundary(ctx context.Context, messages []historyfrag.HistoryRecord, sessionID, messageID string) compactionArtifactBoundary {
+	boundary := compactionArtifactBoundaryBeforeMessage(messages, messageID)
+	if !boundary.hasCutoff || boundary.cutoffMs > 0 || r == nil || r.messageService == nil || strings.TrimSpace(sessionID) == "" {
+		return boundary
+	}
+	message, err := r.messageService.GetByIDBySession(ctx, sessionID, messageID)
+	if err == nil && !message.CreatedAt.IsZero() {
+		boundary.cutoffMs = message.CreatedAt.UnixMilli()
+	}
+	return boundary
+}
+
+func (b compactionArtifactBoundary) includes(artifact compaction.Artifact) bool {
+	if !b.hasCutoff {
+		return true
+	}
+	return b.cutoffMs > 0 &&
+		artifact.AnchorStartMs > 0 &&
+		artifact.AnchorStartMs <= artifact.AnchorEndMs &&
+		artifact.AnchorEndMs < b.cutoffMs
+}
+
+func (r *Resolver) replaceCompactedMessages(ctx context.Context, sessionID string, scope contextfrag.Scope, messages []historyfrag.HistoryRecord, boundary compactionArtifactBoundary) ([]historyfrag.HistoryRecord, error) {
 	if r.queries == nil {
 		return messages, nil
 	}
 	if strings.TrimSpace(sessionID) == "" {
 		// Sessionless (chat-scoped) loads have no session log list to draw from;
 		// resolve each in-window compact group individually.
-		return r.replaceRecentCompactedMessages(ctx, scope, messages)
+		return r.replaceRecentCompactedMessages(ctx, scope, messages, boundary)
 	}
 	frontier, err := r.loadActiveCompactionFrontier(ctx, scope.BotID, sessionID)
 	if err != nil {
@@ -78,24 +120,25 @@ func (r *Resolver) replaceCompactedMessages(ctx context.Context, sessionID strin
 	blocked := conflictingArtifactIDs(catalog, messages, scope)
 	resolve := func(record historyfrag.HistoryRecord) (compaction.Artifact, bool) {
 		artifact, ok := resolveCatalogArtifact(catalog, recordArtifactOwner(record, scope), record)
+		if !ok || !boundary.includes(artifact) {
+			return compaction.Artifact{}, false
+		}
 		if _, conflict := blocked[artifact.ID]; conflict {
 			return compaction.Artifact{}, false
 		}
-		return artifact, ok
+		return artifact, true
 	}
 	messages = replaceCompactedHistoryRecordsWithResolver(messages, scope, resolve)
-	if includeMissingArtifacts {
-		sessionSummaries := summaryRecordsFromArtifacts(missingCompactionArtifacts(messages, frontier.Artifacts, blocked), scope)
-		if len(sessionSummaries) > 0 {
-			messages = mergeMissingCompactionSummaries(messages, sessionSummaries)
-		}
+	sessionSummaries := summaryRecordsFromArtifacts(missingCompactionArtifacts(messages, frontier.Artifacts, blocked, boundary), scope)
+	if len(sessionSummaries) > 0 {
+		messages = mergeMissingCompactionSummaries(messages, sessionSummaries)
 	}
 	return r.refreshCompactedSummaryCoverage(ctx, messages, resolve), nil
 }
 
 // missingCompactionArtifacts filters the active frontier down to summaries not
 // already represented in the loaded records.
-func missingCompactionArtifacts(messages []historyfrag.HistoryRecord, artifacts []compaction.Artifact, blocked map[string]struct{}) []compaction.Artifact {
+func missingCompactionArtifacts(messages []historyfrag.HistoryRecord, artifacts []compaction.Artifact, blocked map[string]struct{}, boundary compactionArtifactBoundary) []compaction.Artifact {
 	seen := make(map[string]struct{}, len(messages))
 	for _, record := range messages {
 		if record.SourceKind == historyfrag.SourceCompactionLog {
@@ -106,6 +149,9 @@ func missingCompactionArtifacts(messages []historyfrag.HistoryRecord, artifacts 
 	}
 	missing := make([]compaction.Artifact, 0, len(artifacts))
 	for _, artifact := range artifacts {
+		if !boundary.includes(artifact) {
+			continue
+		}
 		if _, conflict := blocked[artifact.ID]; conflict {
 			continue
 		}
@@ -117,7 +163,7 @@ func missingCompactionArtifacts(messages []historyfrag.HistoryRecord, artifacts 
 	return missing
 }
 
-func (r *Resolver) replaceRecentCompactedMessages(ctx context.Context, scope contextfrag.Scope, messages []historyfrag.HistoryRecord) ([]historyfrag.HistoryRecord, error) {
+func (r *Resolver) replaceRecentCompactedMessages(ctx context.Context, scope contextfrag.Scope, messages []historyfrag.HistoryRecord, boundary compactionArtifactBoundary) ([]historyfrag.HistoryRecord, error) {
 	if r.queries == nil {
 		return messages, nil
 	}
@@ -178,10 +224,13 @@ func (r *Resolver) replaceRecentCompactedMessages(ctx context.Context, scope con
 	blocked := conflictingArtifactIDs(catalog, messages, scope)
 	resolve := func(record historyfrag.HistoryRecord) (compaction.Artifact, bool) {
 		artifact, ok := resolveCatalogArtifact(catalog, recordArtifactOwner(record, scope), record)
+		if !ok || !boundary.includes(artifact) {
+			return compaction.Artifact{}, false
+		}
 		if _, conflict := blocked[artifact.ID]; conflict {
 			return compaction.Artifact{}, false
 		}
-		return artifact, ok
+		return artifact, true
 	}
 
 	replaced := replaceCompactedHistoryRecordsWithResolver(messages, scope, resolve)

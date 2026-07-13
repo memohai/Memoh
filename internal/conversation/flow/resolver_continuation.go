@@ -20,7 +20,7 @@ func (r *Resolver) prepareContinuationRunConfig(
 		return agent.RunConfig{}, err
 	}
 	loaded = pruneHistoryForGateway(loaded)
-	loaded, err = r.replaceCompactedMessages(ctx, summaryScope.SessionID, summaryScope, loaded, true)
+	loaded, err = r.replaceCompactedMessages(ctx, summaryScope.SessionID, summaryScope, loaded, compactionArtifactBoundary{})
 	if err != nil {
 		return agent.RunConfig{}, err
 	}

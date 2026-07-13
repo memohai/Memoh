@@ -145,7 +145,7 @@ func filterMessagesBeforeID(messages []historyfrag.HistoryRecord, messageID stri
 			return messages[:i]
 		}
 	}
-	return messages
+	return nil
 }
 
 func compactionSummaryScope(botID, chatID, sessionID, conversationType, conversationName, replyTarget string) contextfrag.Scope {

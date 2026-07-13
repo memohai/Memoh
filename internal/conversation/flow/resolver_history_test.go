@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/historyfrag"
@@ -64,6 +65,32 @@ func TestEnsureRequiredHistoryMessageMergesVisibleWindowInOrder(t *testing.T) {
 	}
 	if !got[1].Required {
 		t.Fatalf("required message was not marked")
+	}
+}
+
+func TestFilterMessagesBeforeIDFailsClosedWhenCutoffIsMissing(t *testing.T) {
+	t.Parallel()
+
+	records := []historyfrag.HistoryRecord{
+		historyRecord("later-user", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("later")}, nil),
+	}
+	if got := filterMessagesBeforeID(records, "missing-cutoff"); len(got) != 0 {
+		t.Fatalf("missing cutoff retained history: %#v", got)
+	}
+}
+
+func TestLoadCompactionArtifactBoundaryFetchesCutoffOutsideLoadedWindow(t *testing.T) {
+	t.Parallel()
+
+	cutoff := persistedHistoryMessage(t, "old-cutoff", "assistant", "old answer")
+	cutoff.CreatedAt = time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	resolver := &Resolver{messageService: &requiredHistoryMessageService{
+		byID: map[string]messagepkg.Message{cutoff.ID: cutoff},
+	}}
+
+	boundary := resolver.loadCompactionArtifactBoundary(context.Background(), nil, "session-1", cutoff.ID)
+	if !boundary.hasCutoff || boundary.cutoffMs != cutoff.CreatedAt.UnixMilli() {
+		t.Fatalf("boundary = %+v, want cutoff at %d", boundary, cutoff.CreatedAt.UnixMilli())
 	}
 }
 

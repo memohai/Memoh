@@ -371,6 +371,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			return resolvedContext{}, loadErr
 		}
 		loaded = pruneHistoryForGateway(loaded)
+		artifactBoundary := r.loadCompactionArtifactBoundary(ctx, loaded, req.SessionID, req.HistoryCutoffBeforeMessageID)
 		loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
 		loaded = dedupePersistedCurrentUserMessage(loaded, req)
 		loaded, loadErr = r.ensureRequiredHistoryMessage(ctx, loaded, req)
@@ -381,7 +382,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			)
 			return resolvedContext{}, loadErr
 		}
-		loaded, loadErr = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded, strings.TrimSpace(req.HistoryCutoffBeforeMessageID) == "")
+		loaded, loadErr = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded, artifactBoundary)
 		if loadErr != nil {
 			return resolvedContext{}, loadErr
 		}
@@ -421,6 +422,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 					return resolvedContext{}, loadErr
 				}
 				loaded = pruneHistoryForGateway(loaded)
+				artifactBoundary = r.loadCompactionArtifactBoundary(ctx, loaded, req.SessionID, req.HistoryCutoffBeforeMessageID)
 				loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
 				loaded = dedupePersistedCurrentUserMessage(loaded, req)
 				loaded, loadErr = r.ensureRequiredHistoryMessage(ctx, loaded, req)
@@ -431,7 +433,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 					)
 					return resolvedContext{}, loadErr
 				}
-				loaded, loadErr = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded, strings.TrimSpace(req.HistoryCutoffBeforeMessageID) == "")
+				loaded, loadErr = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded, artifactBoundary)
 				if loadErr != nil {
 					return resolvedContext{}, loadErr
 				}

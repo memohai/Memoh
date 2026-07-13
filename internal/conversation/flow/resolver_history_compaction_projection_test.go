@@ -57,38 +57,59 @@ func TestReplaceCompactedMessagesLoadsSessionSummaryWithoutRecentRows(t *testing
 	}
 }
 
-func TestReplaceCompactedMessagesDoesNotInsertMissingSummaryAcrossIntentionalCutoff(t *testing.T) {
+func TestReplaceCompactedMessagesOnlyRestoresArtifactsWhollyBeforeIntentionalCutoff(t *testing.T) {
 	t.Parallel()
 
 	sessionID := "00000000-0000-0000-0000-00000000f014"
-	compactID := "00000000-0000-0000-0000-00000000c014"
+	oldCompactID := "00000000-0000-0000-0000-00000000c014"
+	unsafeCompactID := "00000000-0000-0000-0000-00000000c015"
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	queries := &recordingCompactionLogQueries{
 		logs: []sqlc.BotHistoryMessageCompact{
 			{
-				ID:        mustPGUUID(t, compactID),
-				SessionID: mustPGUUID(t, sessionID),
-				Status:    "ok",
-				Summary:   "content intentionally excluded by the retry cutoff",
+				ID:            mustPGUUID(t, oldCompactID),
+				SessionID:     mustPGUUID(t, sessionID),
+				Status:        "ok",
+				Summary:       "older condensed context",
+				AnchorStartMs: base.Add(time.Minute).UnixMilli(),
+				AnchorEndMs:   base.Add(5 * time.Minute).UnixMilli(),
+			},
+			{
+				ID:            mustPGUUID(t, unsafeCompactID),
+				SessionID:     mustPGUUID(t, sessionID),
+				Status:        "ok",
+				Summary:       "content excluded by the retry cutoff",
+				AnchorStartMs: base.Add(15 * time.Minute).UnixMilli(),
+				AnchorEndMs:   base.Add(25 * time.Minute).UnixMilli(),
 			},
 		},
 	}
 	resolver := &Resolver{queries: queries}
-	recent := []historyfrag.HistoryRecord{
-		historyRecord("required-user", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("retry")}, nil),
+	loaded := []historyfrag.HistoryRecord{
+		historyRecord("prior-user", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("prior")}, func(record *historyfrag.HistoryRecord) {
+			record.CreatedAt = base.Add(10 * time.Minute)
+			record.CompactID = unsafeCompactID
+		}),
+		historyRecord("cutoff-assistant", conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("old answer")}, func(record *historyfrag.HistoryRecord) {
+			record.CreatedAt = base.Add(20 * time.Minute)
+			record.CompactID = unsafeCompactID
+		}),
 	}
+	boundary := compactionArtifactBoundaryBeforeMessage(loaded, "cutoff-assistant")
 
 	got, err := resolver.replaceCompactedMessages(
 		context.Background(),
 		sessionID,
 		contextfrag.Scope{SessionID: sessionID},
-		recent,
-		false,
+		filterMessagesBeforeID(loaded, "cutoff-assistant"),
+		boundary,
 	)
 	if err != nil {
 		t.Fatalf("replaceCompactedMessages() error = %v", err)
 	}
-	if len(got) != 1 || got[0].DBMessageID != "required-user" {
-		t.Fatalf("cutoff request reactivated an absent summary: %#v", got)
+	want := []string{"<summary>\nolder condensed context\n</summary>", "prior"}
+	if gotTexts := recordTexts(got); !reflect.DeepEqual(gotTexts, want) {
+		t.Fatalf("cutoff projection = %#v, want %#v", gotTexts, want)
 	}
 }
 
@@ -412,7 +433,7 @@ func TestReplaceCompactedMessagesPropagatesFrontierStorageError(t *testing.T) {
 		"00000000-0000-0000-0000-00000000f011",
 		contextfrag.Scope{},
 		[]historyfrag.HistoryRecord{historyRecord("row-current", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("current")}, nil)},
-		true,
+		compactionArtifactBoundary{},
 	)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("replaceCompactedMessages error = %v, want %v", err, sentinel)
