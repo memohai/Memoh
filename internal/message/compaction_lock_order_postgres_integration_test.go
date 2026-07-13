@@ -159,8 +159,7 @@ func assertCompactionArtifactLockOrder(
 ) {
 	t.Helper()
 	ctx := context.Background()
-	highArtifactID := "ffffffff-ffff-4fff-8fff-fffffffffff1"
-	lowArtifactID := "00000000-0000-4000-8000-000000000011"
+	lowArtifactID, highArtifactID := orderedTestUUIDPair()
 	if _, err := fixture.pool.Exec(ctx, `
 		INSERT INTO bot_history_message_compacts (id, bot_id, session_id, compaction_epoch)
 		VALUES ($1, $3, $4, 0), ($2, $3, $4, 0)
@@ -229,8 +228,7 @@ func setupOrderedSessionFixture(t *testing.T) orderedSessionFixture {
 	if _, err := fixture.pool.Exec(ctx, `DELETE FROM bot_sessions WHERE id = $1`, fixture.sessionID); err != nil {
 		t.Fatalf("remove original fixture session: %v", err)
 	}
-	highSessionID := "ffffffff-ffff-4fff-8fff-fffffffffff0"
-	lowSessionID := "00000000-0000-4000-8000-000000000010"
+	lowSessionID, highSessionID := orderedTestUUIDPair()
 	if _, err := fixture.pool.Exec(ctx, `
 		INSERT INTO bot_sessions (id, bot_id, channel_type)
 		VALUES ($1, $3, 'local'), ($2, $3, 'local')
@@ -257,6 +255,14 @@ func setupOrderedSessionFixture(t *testing.T) orderedSessionFixture {
 		highMessage:                highMessage,
 		lowMessage:                 lowMessage,
 	}
+}
+
+func orderedTestUUIDPair() (string, string) {
+	low := uuid.New()
+	high := low
+	low[0] = 0
+	high[0] = 0xff
+	return low.String(), high.String()
 }
 
 func assertBotMutationLockOrder(
