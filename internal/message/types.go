@@ -110,6 +110,23 @@ type ToolTailRoundPersister interface {
 	PersistToolTailRound(ctx context.Context, inputs []PersistInput) ([]Message, bool, error)
 }
 
+type TurnReplacement struct {
+	OldTurnID        string
+	RequestMessageID string
+	Reason           string
+	SessionMetadata  map[string]any
+}
+
+type RoundPersistenceOptions struct {
+	Replacement *TurnReplacement
+}
+
+// AtomicRoundPersister writes a complete runtime round in one transaction.
+// Implementations must enforce any runtime fence carried by ctx.
+type AtomicRoundPersister interface {
+	PersistRound(ctx context.Context, inputs []PersistInput, options RoundPersistenceOptions) ([]Message, bool, error)
+}
+
 // Service defines message read/write behavior.
 type Service interface {
 	Writer

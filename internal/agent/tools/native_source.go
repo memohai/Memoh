@@ -181,6 +181,9 @@ func (s *NativeToolSource) CallTool(ctx context.Context, session mcp.ToolSession
 		if !approval.approved {
 			return s.limitMCPResult(toolName, mcp.BuildToolErrorResult(approval.message)), nil
 		}
+		if err := mcp.ValidateRuntimeGuard(ctx, session); err != nil {
+			return nil, err
+		}
 		result, err := tool.Execute(&sdk.ToolExecContext{
 			Context:  ctx,
 			ToolName: toolName,

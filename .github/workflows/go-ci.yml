@@ -104,3 +104,40 @@ jobs:
           RUNTIME_URL: redis://127.0.0.1:${{ job.services.runtime.ports['6379'] }}/0
           RUNTIME_ENV_NAME: ${{ matrix.env_name }}
         run: env "$RUNTIME_ENV_NAME=$RUNTIME_URL" go test -v -race -count=1 -timeout 90s ./internal/sessionruntime
+
+  session-runtime-postgres:
+    name: Session Runtime (PostgreSQL fencing)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: memoh_runtime_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U postgres -d memoh_runtime_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run durable runtime fencing contracts
+        env:
+          MEMOH_TEST_POSTGRES_REQUIRED: "1"
+          TEST_POSTGRES_BOOTSTRAP_SCHEMA: "1"
+          TEST_POSTGRES_DSN: postgres://postgres:postgres@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/memoh_runtime_test?sslmode=disable
+        run: |
+          go test -v -race -count=1 -timeout 90s \
+            -run '^TestPostgresRuntimeFence' ./internal/runtimefence
+          TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
+            -run '^TestPostgresRuntimeFence' ./internal/message
+          TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
+            -run '^TestPostgresRuntimeFence' ./internal/acpagent

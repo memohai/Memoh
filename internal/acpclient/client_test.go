@@ -23,7 +23,10 @@ import (
 	"github.com/memohai/memoh/internal/acpprofile"
 	"github.com/memohai/memoh/internal/agent/event"
 	"github.com/memohai/memoh/internal/config"
+	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/mcp"
+	"github.com/memohai/memoh/internal/runtimefence"
+	"github.com/memohai/memoh/internal/sessionruntime"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
@@ -1113,6 +1116,7 @@ func TestRequestPermissionOnlyAutoAllowsOnce(t *testing.T) {
 func TestRequestPermissionUsesMemohToolApproval(t *testing.T) {
 	t.Parallel()
 
+	wantFence := runtimefence.Fence{BotID: "bot-1", SessionID: "session-1", Token: 23}
 	approval := &fakeACPToolApproval{
 		decision: toolapproval.Request{
 			ID:      "approval-1",
@@ -1132,6 +1136,7 @@ func TestRequestPermissionUsesMemohToolApproval(t *testing.T) {
 			ChannelIdentityID: "channel-1",
 			CurrentPlatform:   "web",
 			ConversationType:  "private",
+			RuntimeFence:      wantFence,
 		},
 		events: &toolEventEmitter{},
 	}
@@ -1162,6 +1167,9 @@ func TestRequestPermissionUsesMemohToolApproval(t *testing.T) {
 	}
 	if approval.created.ToolCallID != "write-1" || approval.created.ToolName != "write" {
 		t.Fatalf("approval input = %#v", approval.created)
+	}
+	if approval.evaluateFence != wantFence {
+		t.Fatalf("approval fence = %#v, want %#v", approval.evaluateFence, wantFence)
 	}
 	if approval.created.BotID != "bot-1" || approval.created.SessionID != "session-1" || approval.created.ChannelIdentityID != "channel-1" {
 		t.Fatalf("approval context = %#v", approval.created)
@@ -2087,6 +2095,203 @@ func TestWriteTextFileUsesMemohToolApproval(t *testing.T) {
 	}
 	assertSingleApprovalWithStartEnd(t, collector.result().Events, approval.created.ToolCallID, "write", "approval-write")
 }
+
+func TestACPFileCallbacksRecheckRuntimeGuardAfterApproval(t *testing.T) {
+	guardErr := errors.New("runtime ownership lost")
+	tests := []struct {
+		name string
+		run  func(context.Context, *clientCallbacks) error
+	}{
+		{
+			name: "read",
+			run: func(ctx context.Context, callbacks *clientCallbacks) error {
+				_, err := callbacks.ReadTextFile(ctx, acp.ReadTextFileRequest{Path: "/data/input.txt"})
+				return err
+			},
+		},
+		{
+			name: "write",
+			run: func(ctx context.Context, callbacks *clientCallbacks) error {
+				_, err := callbacks.WriteTextFile(ctx, acp.WriteTextFileRequest{Path: "/data/output.txt", Content: "stale\n"})
+				return err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, server := newRecordingBridgeClient(t)
+			approval := &fakeACPToolApproval{decision: toolapproval.Request{
+				ID: "approval-" + tt.name, Status: toolapproval.StatusApproved,
+			}}
+			guardCalls := 0
+			callbacks := newClientCallbacks(
+				context.Background(), client, "/data", "/data", time.Second,
+				nil, nil, false, nil, true, approval, nil,
+				ToolSessionContext{
+					BotID: "bot-1", SessionID: "session-1", StreamID: "stream-1",
+					RuntimeGuard: func(context.Context) error {
+						guardCalls++
+						return guardErr
+					},
+				},
+				acpprofile.DefaultToolQuirks(),
+			)
+			callbacks.setPromptState(newEventCollector(), nil, callbacks.baseSession)
+
+			if err := tt.run(context.Background(), callbacks); !errors.Is(err, guardErr) {
+				t.Fatalf("%s error = %v, want runtime guard error", tt.name, err)
+			}
+			if approval.createdCount() != 1 || guardCalls != 1 {
+				t.Fatalf("%s approval/guard calls = %d/%d, want 1/1", tt.name, approval.createdCount(), guardCalls)
+			}
+			if reads, writes := server.readPaths(), server.writes(); len(reads) != 0 || len(writes) != 0 {
+				t.Fatalf("%s bridge effects after guard rejection = reads:%#v writes:%#v", tt.name, reads, writes)
+			}
+		})
+	}
+}
+
+func TestACPCreateTerminalRechecksRuntimeGuardAfterApproval(t *testing.T) {
+	guardErr := errors.New("runtime ownership lost")
+	client, server := newRecordingBridgeClient(t)
+	approval := &fakeACPToolApproval{decision: toolapproval.Request{
+		ID: "approval-terminal-guard", Status: toolapproval.StatusApproved,
+	}}
+	callbacks := newClientCallbacks(
+		context.Background(), client, "/workspace", "/workspace", time.Second,
+		nil, nil, false, nil, false, approval, nil,
+		ToolSessionContext{
+			BotID: "bot-1", SessionID: "session-1", StreamID: "stream-1",
+			RuntimeGuard: func(context.Context) error { return guardErr },
+		},
+		acpprofile.DefaultToolQuirks(),
+	)
+	callbacks.setPromptState(newEventCollector(), nil, callbacks.baseSession)
+
+	if _, err := callbacks.CreateTerminal(context.Background(), acp.CreateTerminalRequest{Command: "echo stale"}); !errors.Is(err, guardErr) {
+		t.Fatalf("CreateTerminal() error = %v, want runtime guard error", err)
+	}
+	if approval.createdCount() != 1 {
+		t.Fatalf("terminal approval calls = %d, want 1", approval.createdCount())
+	}
+	if records := server.records(); len(records) != 0 {
+		t.Fatalf("terminal effects after guard rejection = %#v", records)
+	}
+}
+
+func TestACPWorkspaceEffectsRejectStaleRedisOwner(t *testing.T) {
+	redisURL := strings.TrimSpace(os.Getenv("MEMOH_TEST_REDIS_URL"))
+	if redisURL == "" {
+		redisURL = strings.TrimSpace(os.Getenv("MEMOH_TEST_VALKEY_URL"))
+	}
+	if redisURL == "" {
+		if os.Getenv("MEMOH_TEST_DISTRIBUTED_REQUIRED") == "1" {
+			t.Fatal("distributed ACP workspace guard test is required, but Redis or Valkey is not configured")
+		}
+		t.Skip("set MEMOH_TEST_REDIS_URL or MEMOH_TEST_VALKEY_URL to run distributed ACP workspace guard test")
+	}
+
+	ctx := context.Background()
+	prefix := fmt.Sprintf("memoh:test:acp-workspace-guard:%d:", time.Now().UnixNano())
+	rawOwnerBackend, err := sessionruntime.NewRedisBackend(ctx, sessionruntime.RedisOptions{URL: redisURL, KeyPrefix: prefix, StateTTL: time.Minute})
+	if err != nil {
+		t.Fatalf("create stale owner backend: %v", err)
+	}
+	t.Cleanup(func() { _ = rawOwnerBackend.Close() })
+	owner := sessionruntime.NewManager(nonClosingDistributedBackend{DistributedBackend: rawOwnerBackend}, sessionruntime.Options{
+		OwnerID: "acp-workspace-owner-a", StateTTL: time.Minute, OwnerLeaseTTL: 100 * time.Millisecond,
+	})
+	if err := owner.Start(ctx); err != nil {
+		t.Fatalf("start stale owner manager: %v", err)
+	}
+	backendB, err := sessionruntime.NewRedisBackend(ctx, sessionruntime.RedisOptions{URL: redisURL, KeyPrefix: prefix, StateTTL: time.Minute})
+	if err != nil {
+		t.Fatalf("create takeover backend: %v", err)
+	}
+	takeover := sessionruntime.NewManager(backendB, sessionruntime.Options{
+		OwnerID: "acp-workspace-owner-b", StateTTL: time.Minute, OwnerLeaseTTL: 100 * time.Millisecond,
+	})
+	if err := takeover.Start(ctx); err != nil {
+		t.Fatalf("start takeover manager: %v", err)
+	}
+	t.Cleanup(func() { _ = takeover.Close() })
+
+	const (
+		botID     = "bot-acp-workspace-guard"
+		sessionID = "session-acp-workspace-guard"
+		streamA   = "stream-acp-workspace-owner-a"
+		streamB   = "stream-acp-workspace-owner-b"
+	)
+	ownerHandle, err := owner.StartRunHandle(ctx, botID, sessionID, streamA, make(chan struct{}, 1), func() {}, make(chan conversation.InjectMessage, 1))
+	if err != nil {
+		t.Fatalf("start stale owner run: %v", err)
+	}
+	ownerSnapshot, ok, err := rawOwnerBackend.Load(ctx, sessionruntime.Key{BotID: botID, SessionID: sessionID})
+	if err != nil || !ok || ownerSnapshot.CurrentRunView == nil || ownerSnapshot.CurrentRunView.OwnerLeaseExpiresAt == nil {
+		t.Fatalf("load stale owner lease = snapshot:%#v ok:%v err:%v", ownerSnapshot, ok, err)
+	}
+	ownerDeadline := *ownerSnapshot.CurrentRunView.OwnerLeaseExpiresAt
+	if err := owner.Close(); err != nil {
+		t.Fatalf("stop stale owner lease renewal: %v", err)
+	}
+	for {
+		now, err := backendB.Now(ctx)
+		if err != nil {
+			t.Fatalf("load Redis time: %v", err)
+		}
+		if !now.Before(ownerDeadline.Add(10 * time.Millisecond)) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if _, err := takeover.Snapshot(ctx, botID, sessionID); err != nil {
+		t.Fatalf("reconcile expired owner: %v", err)
+	}
+	if err := takeover.StartRun(ctx, botID, sessionID, streamB, make(chan struct{}, 1), func() {}, make(chan conversation.InjectMessage, 1)); err != nil {
+		t.Fatalf("start takeover run: %v", err)
+	}
+
+	bridgeClient, bridgeServer := newRecordingBridgeClient(t)
+	approval := &fakeACPToolApproval{decision: toolapproval.Request{ID: "approval-stale-owner", Status: toolapproval.StatusApproved}}
+	callbacks := newClientCallbacks(
+		ctx, bridgeClient, "/data", "/data", time.Second, nil, nil, false, nil, true, approval, nil,
+		ToolSessionContext{
+			BotID: botID, SessionID: sessionID, StreamID: streamA,
+			RuntimeGuard: func(guardCtx context.Context) error {
+				return owner.ValidateRunOwnership(guardCtx, ownerHandle)
+			},
+		},
+		acpprofile.DefaultToolQuirks(),
+	)
+	callbacks.setPromptState(newEventCollector(), nil, callbacks.baseSession)
+	for name, call := range map[string]func() error{
+		"read": func() error {
+			_, err := callbacks.ReadTextFile(ctx, acp.ReadTextFileRequest{Path: "/data/input.txt"})
+			return err
+		},
+		"write": func() error {
+			_, err := callbacks.WriteTextFile(ctx, acp.WriteTextFileRequest{Path: "/data/output.txt", Content: "stale\n"})
+			return err
+		},
+		"terminal": func() error {
+			_, err := callbacks.CreateTerminal(ctx, acp.CreateTerminalRequest{Command: "echo stale"})
+			return err
+		},
+	} {
+		if err := call(); !errors.Is(err, sessionruntime.ErrRunOwnershipLost) {
+			t.Fatalf("stale %s error = %v, want ErrRunOwnershipLost", name, err)
+		}
+	}
+	if reads, writes, execs := bridgeServer.readPaths(), bridgeServer.writes(), bridgeServer.records(); len(reads) != 0 || len(writes) != 0 || len(execs) != 0 {
+		t.Fatalf("stale owner bridge effects = reads:%#v writes:%#v execs:%#v", reads, writes, execs)
+	}
+}
+
+type nonClosingDistributedBackend struct {
+	sessionruntime.DistributedBackend
+}
+
+func (nonClosingDistributedBackend) Close() error { return nil }
 
 func TestWriteTextFileWithoutToolSessionIsRejectedWhenApprovalEnabled(t *testing.T) {
 	t.Parallel()
@@ -3124,17 +3329,22 @@ func (*fakeACPAgent) SetSessionMode(context.Context, acp.SetSessionModeRequest) 
 }
 
 type fakeACPToolApproval struct {
-	mu          sync.Mutex
-	created     toolapproval.CreatePendingInput
-	createCount int
-	decision    toolapproval.Request
-	evaluation  toolapproval.Evaluation
-	waiters     int
+	mu            sync.Mutex
+	created       toolapproval.CreatePendingInput
+	createCount   int
+	decision      toolapproval.Request
+	evaluation    toolapproval.Evaluation
+	waiters       int
+	evaluateFence runtimefence.Fence
 }
 
-func (f *fakeACPToolApproval) EvaluatePolicy(context.Context, toolapproval.CreatePendingInput) (toolapproval.Evaluation, error) {
-	if strings.TrimSpace(f.evaluation.Decision) != "" {
-		return f.evaluation, nil
+func (f *fakeACPToolApproval) EvaluatePolicy(ctx context.Context, _ toolapproval.CreatePendingInput) (toolapproval.Evaluation, error) {
+	f.mu.Lock()
+	f.evaluateFence, _ = runtimefence.FromContext(ctx)
+	evaluation := f.evaluation
+	f.mu.Unlock()
+	if strings.TrimSpace(evaluation.Decision) != "" {
+		return evaluation, nil
 	}
 	return toolapproval.Evaluation{Decision: toolapproval.DecisionNeedsApproval}, nil
 }

@@ -276,5 +276,14 @@ func MergeToolSessionContext(base, latest ToolSessionContext) ToolSessionContext
 	if latest.SupportsImageInput {
 		merged.SupportsImageInput = true
 	}
+	if latest.RuntimeFence.Valid() {
+		merged.RuntimeFence = latest.RuntimeFence
+	}
+	if latest.RunContext != nil {
+		merged.RunContext = latest.RunContext
+	}
+	if latest.RuntimeGuard != nil {
+		merged.RuntimeGuard = latest.RuntimeGuard
+	}
 	return merged
 }

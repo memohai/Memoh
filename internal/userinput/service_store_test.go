@@ -1,6 +1,7 @@
 package userinput
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -16,6 +17,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/decision"
+	"github.com/memohai/memoh/internal/runtimefence"
 )
 
 const (
@@ -73,19 +75,13 @@ func (q *fakeUserInputQueries) CreateUserInputRequest(_ context.Context, arg sql
 	now := time.Now()
 	if id, ok := q.byCall[storeCallKey(arg.SessionID, arg.ToolCallID)]; ok {
 		row := q.rows[id]
-		if !storeRowIsLivePending(row, now) {
+		sameExpiry := row.ExpiresAt.Valid == arg.ExpiresAt.Valid && (!row.ExpiresAt.Valid || row.ExpiresAt.Time.Equal(arg.ExpiresAt.Time))
+		if !storeRowIsLivePending(row, now) || row.RuntimeFencingToken.Valid ||
+			!bytes.Equal(row.InputJson, arg.InputJson) || !bytes.Equal(row.UiPayloadJson, arg.UiPayloadJson) ||
+			!bytes.Equal(row.ProviderMetadata, arg.ProviderMetadata) || !sameExpiry {
 			// ON CONFLICT DO UPDATE ... WHERE status='pending' matched no row.
 			return sqlc.UserInputRequest{}, pgx.ErrNoRows
 		}
-		row.InputJson = arg.InputJson
-		row.UiPayloadJson = arg.UiPayloadJson
-		row.ProviderMetadata = arg.ProviderMetadata
-		row.RequestedByChannelIdentityID = arg.RequestedByChannelIdentityID
-		row.SourcePlatform = arg.SourcePlatform
-		row.ReplyTarget = arg.ReplyTarget
-		row.ConversationType = arg.ConversationType
-		row.ExpiresAt = arg.ExpiresAt
-		row.UpdatedAt = pgtype.Timestamptz{Time: now, Valid: true}
 		return *row, nil
 	}
 	sessionKey := storeUUIDKey(arg.SessionID)
@@ -100,6 +96,7 @@ func (q *fakeUserInputQueries) CreateUserInputRequest(_ context.Context, arg sql
 		ToolName:                     arg.ToolName,
 		ShortID:                      q.nextShort[sessionKey],
 		Status:                       StatusPending,
+		RuntimeFencingToken:          arg.RuntimeFencingToken,
 		InputJson:                    arg.InputJson,
 		UiPayloadJson:                arg.UiPayloadJson,
 		ResultJson:                   []byte("{}"),
@@ -122,6 +119,23 @@ func (q *fakeUserInputQueries) GetUserInputRequest(_ context.Context, id pgtype.
 	defer q.mu.Unlock()
 	row, ok := q.rows[storeUUIDKey(id)]
 	if !ok {
+		return sqlc.UserInputRequest{}, pgx.ErrNoRows
+	}
+	return *row, nil
+}
+
+func (q *fakeUserInputQueries) GetRespondableUserInputRequest(_ context.Context, arg sqlc.GetRespondableUserInputRequestParams) (sqlc.UserInputRequest, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	row, ok := q.rows[storeUUIDKey(arg.ID)]
+	if !ok || row.Status != StatusPending {
+		return sqlc.UserInputRequest{}, pgx.ErrNoRows
+	}
+	if arg.RuntimeFencingToken.Valid {
+		if !row.RuntimeFencingToken.Valid || row.RuntimeFencingToken.Int64 != arg.RuntimeFencingToken.Int64 {
+			return sqlc.UserInputRequest{}, pgx.ErrNoRows
+		}
+	} else if row.RuntimeFencingToken.Valid || !storeRowIsLivePending(row, time.Now()) {
 		return sqlc.UserInputRequest{}, pgx.ErrNoRows
 	}
 	return *row, nil
@@ -411,7 +425,10 @@ func TestServiceCreatePendingIsIdempotentPerToolCall(t *testing.T) {
 		ToolCallID: "call-1",
 		Input: map[string]any{
 			"questions": []any{
-				map[string]any{"text": "Updated question?", "kind": QuestionKindText},
+				map[string]any{
+					"text": "Which plan?", "kind": QuestionKindSingleSelect,
+					"options": []any{map[string]any{"label": "Plan A"}, map[string]any{"label": "Plan B"}},
+				},
 			},
 		},
 	})
@@ -424,10 +441,20 @@ func TestServiceCreatePendingIsIdempotentPerToolCall(t *testing.T) {
 	if second.ShortID != first.ShortID {
 		t.Fatalf("duplicate tool call short_id = %d, want %d", second.ShortID, first.ShortID)
 	}
+	if _, err := svc.CreatePending(context.Background(), CreatePendingInput{
+		BotID:      storeTestBotID,
+		SessionID:  storeTestSessionID,
+		ToolCallID: "call-1",
+		Input: map[string]any{
+			"questions": []any{map[string]any{"text": "Changed question?", "kind": QuestionKindText}},
+		},
+	}); !errors.Is(err, ErrAlreadyDecided) {
+		t.Fatalf("changed duplicate payload error = %v, want ErrAlreadyDecided", err)
+	}
 
 	if _, err := svc.Submit(context.Background(), SubmitInput{
 		RequestID: second.ID,
-		Answers:   []QuestionAnswer{{QuestionID: "q1", Text: "done"}},
+		Answers:   []QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
 	}); err != nil {
 		t.Fatalf("submit duplicate row: %v", err)
 	}
@@ -539,6 +566,11 @@ func TestServiceExpiredRequestIsClosed(t *testing.T) {
 	}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("resolve target error = %v, want ErrNotFound", err)
 	}
+	if _, err := svc.ResolveTarget(context.Background(), ResolveInput{
+		BotID: storeTestBotID, SessionID: storeTestSessionID, ExplicitID: req.ID,
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("resolve expired explicit target error = %v, want ErrNotFound", err)
+	}
 
 	pending, err := svc.ListPendingBySession(context.Background(), storeTestBotID, storeTestSessionID)
 	if err != nil {
@@ -563,6 +595,40 @@ func TestServiceExpiredRequestIsClosed(t *testing.T) {
 		Answers:   []QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
 	}); err != nil {
 		t.Fatalf("submit live: %v", err)
+	}
+}
+
+func TestServiceResolveTargetKeepsClaimedRequestRespondableAfterExpiry(t *testing.T) {
+	t.Parallel()
+
+	queries := newFakeUserInputQueries()
+	svc := NewService(slog.New(slog.DiscardHandler), queries)
+	expired := time.Now().Add(-time.Minute)
+	req := createStorePending(t, svc, &expired, "call-claimed-expired")
+	queries.mu.Lock()
+	row := queries.rows[req.ID]
+	row.RuntimeFencingToken = pgtype.Int8{Int64: 7, Valid: true}
+	queries.mu.Unlock()
+	ctx := runtimefence.WithContext(context.Background(), runtimefence.Fence{
+		BotID: storeTestBotID, SessionID: storeTestSessionID, Token: 7,
+	})
+
+	resolved, err := svc.ResolveTarget(ctx, ResolveInput{
+		BotID: storeTestBotID, SessionID: storeTestSessionID, ExplicitID: req.ID,
+	})
+	if err != nil {
+		t.Fatalf("resolve claimed expired request: %v", err)
+	}
+	if resolved.ID != req.ID {
+		t.Fatalf("resolved request = %q, want %q", resolved.ID, req.ID)
+	}
+	if resolved.Status != StatusPending {
+		t.Fatalf("resolved status = %q, want pending", resolved.Status)
+	}
+	if _, err := svc.ResolveTarget(context.Background(), ResolveInput{
+		BotID: storeTestBotID, SessionID: storeTestSessionID, ExplicitID: req.ID,
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unfenced resolve error = %v, want ErrNotFound", err)
 	}
 }
 

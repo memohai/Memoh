@@ -18,6 +18,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/decision"
+	"github.com/memohai/memoh/internal/runtimefence"
 )
 
 const (
@@ -91,8 +92,12 @@ func (s *Service) resolveAndNotify(ctx context.Context, requestID string, row sq
 	resolved, err := requestFromRowOrErr(row, err)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			if req, getErr := s.Get(ctx, requestID); getErr == nil && req.Status != StatusPending {
-				return Request{}, ErrAlreadyDecided
+			if id, parseErr := db.ParseUUID(requestID); parseErr == nil {
+				if existing, getErr := s.queries.GetUserInputRequest(ctx, id); getErr == nil &&
+					(existing.Status != StatusPending || existing.RuntimeFencingToken.Valid ||
+						(existing.ExpiresAt.Valid && !existing.ExpiresAt.Time.After(time.Now()))) {
+					return Request{}, ErrAlreadyDecided
+				}
 			}
 		}
 		return Request{}, err
@@ -155,6 +160,7 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 		ChannelIdentityID:            channelIdentityID,
 		ToolCallID:                   toolCallID,
 		ToolName:                     toolName,
+		RuntimeFencingToken:          runtimeFencingToken(ctx),
 		InputJson:                    rawInput,
 		UiPayloadJson:                uiPayloadJSON,
 		ProviderMetadata:             providerMetadata,
@@ -164,19 +170,20 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 		ConversationType:             strings.TrimSpace(input.ConversationType),
 		ExpiresAt:                    optionalTime(input.ExpiresAt),
 	}
-	row, err := s.queries.CreateUserInputRequest(ctx, params)
+	var row sqlc.UserInputRequest
+	err = decision.InCreateTransaction(ctx, s.queries, input.BotID, input.SessionID, func(queries dbstore.Queries) error {
+		var createErr error
+		row, createErr = queries.CreateUserInputRequest(ctx, params)
+		return createErr
+	})
 	if err != nil {
 		if errors.Is(mapLookupErr(err), ErrNotFound) {
-			existing, getErr := s.queries.GetUserInputRequestBySessionToolCall(ctx, sqlc.GetUserInputRequestBySessionToolCallParams{
+			_, getErr := s.queries.GetUserInputRequestBySessionToolCall(ctx, sqlc.GetUserInputRequestBySessionToolCallParams{
 				SessionID:  sessionID,
 				ToolCallID: toolCallID,
 			})
 			if getErr == nil {
-				existingReq := requestFromRow(existing)
-				if existingReq.Status != StatusPending {
-					return Request{}, ErrAlreadyDecided
-				}
-				return existingReq, nil
+				return Request{}, ErrAlreadyDecided
 			}
 		}
 		return Request{}, mapLookupErr(err)
@@ -195,12 +202,15 @@ func (s *Service) ResolveTarget(ctx context.Context, input ResolveInput) (Reques
 	explicit := strings.TrimSpace(input.ExplicitID)
 	if strings.TrimSpace(input.SessionID) == "" && explicit != "" {
 		if parsed, err := db.ParseUUID(explicit); err == nil {
-			row, err := s.queries.GetUserInputRequest(ctx, parsed)
+			row, err := s.queries.GetRespondableUserInputRequest(ctx, sqlc.GetRespondableUserInputRequestParams{
+				ID:                  parsed,
+				RuntimeFencingToken: runtimeFencingToken(ctx),
+			})
 			if err != nil {
 				return Request{}, mapLookupErr(err)
 			}
-			req := requestFromRow(row)
-			if req.BotID != uuid.UUID(botID.Bytes).String() || req.Status != StatusPending {
+			req := requestFromRespondableRow(row)
+			if req.BotID != uuid.UUID(botID.Bytes).String() {
 				return Request{}, ErrNotFound
 			}
 			return req, nil
@@ -221,12 +231,15 @@ func (s *Service) ResolveTarget(ctx context.Context, input ResolveInput) (Reques
 			return requestFromRowOrErr(row, err)
 		}
 		if parsed, err := db.ParseUUID(explicit); err == nil {
-			row, err := s.queries.GetUserInputRequest(ctx, parsed)
+			row, err := s.queries.GetRespondableUserInputRequest(ctx, sqlc.GetRespondableUserInputRequestParams{
+				ID:                  parsed,
+				RuntimeFencingToken: runtimeFencingToken(ctx),
+			})
 			if err != nil {
 				return Request{}, mapLookupErr(err)
 			}
-			req := requestFromRow(row)
-			if req.BotID != uuid.UUID(botID.Bytes).String() || req.SessionID != uuid.UUID(sessionID.Bytes).String() || req.Status != StatusPending {
+			req := requestFromRespondableRow(row)
+			if req.BotID != uuid.UUID(botID.Bytes).String() || req.SessionID != uuid.UUID(sessionID.Bytes).String() {
 				return Request{}, ErrNotFound
 			}
 			return req, nil
@@ -322,12 +335,19 @@ func (s *Service) Submit(ctx context.Context, input SubmitInput) (Request, error
 	if err != nil {
 		return Request{}, err
 	}
-	req, err := s.Get(ctx, input.RequestID)
+	respondableRow, err := s.queries.GetRespondableUserInputRequest(ctx, sqlc.GetRespondableUserInputRequestParams{
+		ID:                  id,
+		RuntimeFencingToken: runtimeFencingToken(ctx),
+	})
 	if err != nil {
+		if errors.Is(mapLookupErr(err), ErrNotFound) {
+			return Request{}, ErrAlreadyDecided
+		}
 		return Request{}, err
 	}
-	if req.Status != StatusPending {
-		return Request{}, ErrAlreadyDecided
+	req := requestFromRespondableRow(respondableRow)
+	if err := runtimefence.ValidateScope(ctx, req.BotID, req.SessionID); err != nil {
+		return Request{}, err
 	}
 	result, err := submittedResult(req.UIPayload, input.Answers)
 	if err != nil {
@@ -337,10 +357,17 @@ func (s *Service) Submit(ctx context.Context, input SubmitInput) (Request, error
 	if err != nil {
 		return Request{}, err
 	}
-	row, err := s.queries.SubmitUserInputRequest(ctx, sqlc.SubmitUserInputRequestParams{
-		ID:                           id,
-		ResultJson:                   resultJSON,
-		RespondedByChannelIdentityID: actorID,
+	runtimeToken := runtimeFencingToken(ctx)
+	var row sqlc.UserInputRequest
+	err = s.withRuntimeFence(ctx, req.BotID, req.SessionID, func(queries dbstore.Queries) error {
+		var submitErr error
+		row, submitErr = queries.SubmitUserInputRequest(ctx, sqlc.SubmitUserInputRequestParams{
+			ID:                           id,
+			ResultJson:                   resultJSON,
+			RespondedByChannelIdentityID: actorID,
+			RuntimeFencingToken:          runtimeToken,
+		})
+		return submitErr
 	})
 	return s.resolveAndNotify(ctx, input.RequestID, row, err)
 }
@@ -362,10 +389,20 @@ func (s *Service) Cancel(ctx context.Context, input CancelInput) (Request, error
 	if err != nil {
 		return Request{}, err
 	}
-	row, err := s.queries.CancelUserInputRequest(ctx, sqlc.CancelUserInputRequestParams{
-		ID:                           id,
-		ResultJson:                   resultJSON,
-		RespondedByChannelIdentityID: actorID,
+	runtimeToken := runtimeFencingToken(ctx)
+	var row sqlc.UserInputRequest
+	err = s.withRuntimeFence(ctx, "", "", func(queries dbstore.Queries) error {
+		if err := validateUserInputFence(ctx, queries, id); err != nil {
+			return err
+		}
+		var cancelErr error
+		row, cancelErr = queries.CancelUserInputRequest(ctx, sqlc.CancelUserInputRequestParams{
+			ID:                           id,
+			ResultJson:                   resultJSON,
+			RespondedByChannelIdentityID: actorID,
+			RuntimeFencingToken:          runtimeToken,
+		})
+		return cancelErr
 	})
 	return s.resolveAndNotify(ctx, input.RequestID, row, err)
 }
@@ -386,10 +423,17 @@ func (s *Service) CancelPendingForSession(ctx context.Context, botID, sessionID,
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.CancelPendingUserInputsBySession(ctx, sqlc.CancelPendingUserInputsBySessionParams{
-		BotID:      pgBotID,
-		SessionID:  pgSessionID,
-		ResultJson: resultJSON,
+	params := sqlc.CancelPendingUserInputsBySessionParams{
+		BotID:               pgBotID,
+		SessionID:           pgSessionID,
+		ResultJson:          resultJSON,
+		RuntimeFencingToken: runtimeFencingToken(ctx),
+	}
+	var rows []sqlc.UserInputRequest
+	err = s.withRuntimeFence(ctx, botID, sessionID, func(queries dbstore.Queries) error {
+		var cancelErr error
+		rows, cancelErr = queries.CancelPendingUserInputsBySession(ctx, params)
+		return cancelErr
 	})
 	if err != nil {
 		return nil, err
@@ -418,9 +462,19 @@ func (s *Service) Fail(ctx context.Context, requestID string, result map[string]
 	if err != nil {
 		return Request{}, err
 	}
-	row, err := s.queries.FailUserInputRequest(ctx, sqlc.FailUserInputRequestParams{
-		ID:         id,
-		ResultJson: resultJSON,
+	runtimeToken := runtimeFencingToken(ctx)
+	var row sqlc.UserInputRequest
+	err = s.withRuntimeFence(ctx, "", "", func(queries dbstore.Queries) error {
+		if err := validateUserInputFence(ctx, queries, id); err != nil {
+			return err
+		}
+		var failErr error
+		row, failErr = queries.FailUserInputRequest(ctx, sqlc.FailUserInputRequestParams{
+			ID:                  id,
+			ResultJson:          resultJSON,
+			RuntimeFencingToken: runtimeToken,
+		})
+		return failErr
 	})
 	return s.resolveAndNotify(ctx, requestID, row, err)
 }
@@ -430,10 +484,18 @@ func (s *Service) UpdatePromptMessage(ctx context.Context, requestID, promptMess
 	if err != nil {
 		return Request{}, err
 	}
-	row, err := s.queries.UpdateUserInputPromptMessage(ctx, sqlc.UpdateUserInputPromptMessageParams{
-		ID:                      id,
-		PromptMessageID:         optionalUUID(promptMessageID),
-		PromptExternalMessageID: strings.TrimSpace(externalID),
+	var row sqlc.UserInputRequest
+	err = s.withRuntimeFence(ctx, "", "", func(queries dbstore.Queries) error {
+		if err := validateUserInputFence(ctx, queries, id); err != nil {
+			return err
+		}
+		var updateErr error
+		row, updateErr = queries.UpdateUserInputPromptMessage(ctx, sqlc.UpdateUserInputPromptMessageParams{
+			ID:                      id,
+			PromptMessageID:         optionalUUID(promptMessageID),
+			PromptExternalMessageID: strings.TrimSpace(externalID),
+		})
+		return updateErr
 	})
 	return requestFromRowOrErr(row, err)
 }
@@ -443,9 +505,17 @@ func (s *Service) UpdateAssistantMessage(ctx context.Context, requestID, message
 	if err != nil {
 		return Request{}, err
 	}
-	row, err := s.queries.UpdateUserInputAssistantMessage(ctx, sqlc.UpdateUserInputAssistantMessageParams{
-		ID:                 id,
-		AssistantMessageID: optionalUUID(messageID),
+	var row sqlc.UserInputRequest
+	err = s.withRuntimeFence(ctx, "", "", func(queries dbstore.Queries) error {
+		if err := validateUserInputFence(ctx, queries, id); err != nil {
+			return err
+		}
+		var updateErr error
+		row, updateErr = queries.UpdateUserInputAssistantMessage(ctx, sqlc.UpdateUserInputAssistantMessageParams{
+			ID:                 id,
+			AssistantMessageID: optionalUUID(messageID),
+		})
+		return updateErr
 	})
 	return requestFromRowOrErr(row, err)
 }
@@ -455,15 +525,50 @@ func (s *Service) UpdateToolResultMessage(ctx context.Context, requestID, messag
 	if err != nil {
 		return Request{}, err
 	}
-	row, err := s.queries.UpdateUserInputToolResultMessage(ctx, sqlc.UpdateUserInputToolResultMessageParams{
-		ID:                  id,
-		ToolResultMessageID: optionalUUID(messageID),
+	var row sqlc.UserInputRequest
+	err = s.withRuntimeFence(ctx, "", "", func(queries dbstore.Queries) error {
+		if err := validateUserInputFence(ctx, queries, id); err != nil {
+			return err
+		}
+		var updateErr error
+		row, updateErr = queries.UpdateUserInputToolResultMessage(ctx, sqlc.UpdateUserInputToolResultMessageParams{
+			ID:                  id,
+			ToolResultMessageID: optionalUUID(messageID),
+		})
+		return updateErr
 	})
 	return requestFromRowOrErr(row, err)
 }
 
 func (s *Service) ListPendingBySession(ctx context.Context, botID, sessionID string) ([]Request, error) {
 	return s.listBySession(ctx, botID, sessionID, true)
+}
+
+func (s *Service) withRuntimeFence(ctx context.Context, botID, sessionID string, fn func(dbstore.Queries) error) error {
+	if _, fenced := runtimefence.FromContext(ctx); !fenced {
+		return fn(s.queries)
+	}
+	return runtimefence.InTransaction(ctx, s.queries, botID, sessionID, fn)
+}
+
+func runtimeFencingToken(ctx context.Context) pgtype.Int8 {
+	fence, ok := runtimefence.FromContext(ctx)
+	if !ok {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: fence.Token, Valid: true}
+}
+
+func validateUserInputFence(ctx context.Context, queries dbstore.Queries, id pgtype.UUID) error {
+	if _, fenced := runtimefence.FromContext(ctx); !fenced {
+		return nil
+	}
+	row, err := queries.GetUserInputRequest(ctx, id)
+	if err != nil {
+		return err
+	}
+	request := requestFromRow(row)
+	return runtimefence.ValidateScope(ctx, request.BotID, request.SessionID)
 }
 
 func (s *Service) ListBySession(ctx context.Context, botID, sessionID string) ([]Request, error) {
@@ -563,6 +668,11 @@ func DeferredMetadata(req Request) map[string]any {
 
 // submittedResult validates the user's answers against the stored payload and
 // builds the tool result returned to the model. Every question must be answered.
+func ValidateAnswers(payload UIPayload, answers []QuestionAnswer) error {
+	_, err := submittedResult(payload, answers)
+	return err
+}
+
 func submittedResult(payload UIPayload, answers []QuestionAnswer) (map[string]any, error) {
 	if len(payload.Questions) == 0 {
 		return nil, errors.New("user input request has no questions")
@@ -698,6 +808,12 @@ func requestFromRowOrErr(row sqlc.UserInputRequest, err error) (Request, error) 
 		return Request{}, mapLookupErr(err)
 	}
 	return requestFromRow(row), nil
+}
+
+func requestFromRespondableRow(row sqlc.UserInputRequest) Request {
+	request := requestFromRow(row)
+	request.Status = strings.TrimSpace(row.Status)
+	return request
 }
 
 func mapLookupErr(err error) error {

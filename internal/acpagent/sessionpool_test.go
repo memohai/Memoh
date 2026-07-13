@@ -25,6 +25,7 @@ import (
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/mcp"
+	"github.com/memohai/memoh/internal/runtimefence"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
@@ -1594,6 +1595,10 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 	}
 
 	// During a prompt the live per-prompt fields overlay.
+	wantFence := runtimefence.Fence{BotID: "bot-1", SessionID: "session-1", Token: 29}
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	guardCalls := 0
 	active := acpclient.ToolSessionContext{
 		ChatID:             "chat-1",
 		SessionID:          "session-1",
@@ -1603,6 +1608,12 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 		ReplyTarget:        "reply-7",
 		ConversationType:   "private",
 		SupportsImageInput: true,
+		RuntimeFence:       wantFence,
+		RunContext:         runCtx,
+		RuntimeGuard: func(context.Context) error {
+			guardCalls++
+			return nil
+		},
 	}
 	h.state.Lock()
 	h.active = &active
@@ -1620,12 +1631,34 @@ func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
 	if !ctx.SupportsImageInput {
 		t.Fatalf("active tool context lost image capability: %#v", ctx)
 	}
+	if ctx.RuntimeFence != wantFence {
+		t.Fatalf("active tool context fence = %#v, want %#v", ctx.RuntimeFence, wantFence)
+	}
+	if ctx.RunContext != runCtx || ctx.RuntimeGuard == nil {
+		t.Fatalf("active tool context lost runtime lifecycle: %#v", ctx)
+	}
+	if err := ctx.RuntimeGuard(context.Background()); err != nil || guardCalls != 1 {
+		t.Fatalf("runtime guard = (%v, calls:%d), want one successful call", err, guardCalls)
+	}
 
 	// clearActive removes every per-prompt field again.
 	h.clearActive()
 	ctx = h.toolContext()
-	if ctx.StreamID != "" || ctx.SessionToken != "" || ctx.ChatID != "bot-1" || ctx.RuntimeActive || ctx.SupportsImageInput || !ctx.CanListUserInput {
+	if ctx.StreamID != "" || ctx.SessionToken != "" || ctx.ChatID != "bot-1" || ctx.RuntimeActive || ctx.SupportsImageInput || !ctx.CanListUserInput || ctx.RunContext != nil || ctx.RuntimeGuard != nil {
 		t.Fatalf("cleared tool context = %#v", ctx)
+	}
+}
+
+func TestToolSessionContextCarriesPromptRuntimeFence(t *testing.T) {
+	want := runtimefence.Fence{BotID: "bot-1", SessionID: "session-1", Token: 31}
+	ctx := runtimefence.WithContext(context.Background(), want)
+	guard := func(context.Context) error { return nil }
+	got := toolSessionContext(ctx, PromptInput{SessionID: want.SessionID, StreamID: "stream-1", RuntimeGuard: guard}, &runtimeHandle{id: "rt-1", botID: want.BotID})
+	if got.RuntimeFence != want {
+		t.Fatalf("tool session fence = %#v, want %#v", got.RuntimeFence, want)
+	}
+	if got.RunContext != ctx || got.RuntimeGuard == nil {
+		t.Fatalf("tool session runtime lifecycle = context:%v guard:%v", got.RunContext, got.RuntimeGuard != nil)
 	}
 }
 
@@ -1822,6 +1855,7 @@ func TestCloseSessionCancelsPendingDecisions(t *testing.T) {
 		status:       stateIdle,
 		boundSession: "session-1",
 		lastActive:   time.Now(),
+		hadPrompt:    true,
 	})
 
 	if err := pool.CloseSession("session-1"); err != nil {
@@ -1832,6 +1866,112 @@ func TestCloseSessionCancelsPendingDecisions(t *testing.T) {
 	}
 	if userInput.cancelBotID != "bot-1" || userInput.cancelSessionID != "session-1" || userInput.cancelReason == "" {
 		t.Fatalf("cancel pending user inputs = bot:%q session:%q reason:%q", userInput.cancelBotID, userInput.cancelSessionID, userInput.cancelReason)
+	}
+	if approval.cancelCount != 2 || userInput.cancelCount != 2 {
+		t.Fatalf("decision cleanup count = approval:%d user_input:%d, want pre and final cleanup", approval.cancelCount, userInput.cancelCount)
+	}
+}
+
+func TestCloseSessionWithoutPromptDoesNotCancelPendingDecisions(t *testing.T) {
+	t.Parallel()
+
+	approval := &fakeToolApprovalService{}
+	userInput := &fakeUserInputCanceller{}
+	pool := newSessionPool(nil, nil, fakeBotGetter{})
+	pool.SetToolApprovalService(approval)
+	pool.SetUserInputService(userInput)
+	injectRuntime(pool, &runtimeHandle{
+		id: "rt-ensure-only", botID: "bot-1", status: stateIdle,
+		boundSession: "session-1", lastActive: time.Now(),
+	})
+
+	if err := pool.CloseSession("session-1"); err != nil {
+		t.Fatalf("CloseSession() error = %v", err)
+	}
+	if approval.cancelCount != 0 || userInput.cancelCount != 0 {
+		t.Fatalf("ensure-only cleanup reached session decisions: approval=%d user_input=%d", approval.cancelCount, userInput.cancelCount)
+	}
+}
+
+func TestPendingDecisionCleanupRunsServicesIndependently(t *testing.T) {
+	t.Parallel()
+
+	approvalStarted := make(chan struct{}, 1)
+	approvalRelease := make(chan struct{})
+	inputStarted := make(chan struct{}, 1)
+	approval := &fakeToolApprovalService{cancelStarted: approvalStarted, cancelRelease: approvalRelease}
+	userInput := &fakeUserInputCanceller{cancelStarted: inputStarted}
+	pool := newSessionPool(nil, nil, fakeBotGetter{})
+	pool.SetToolApprovalService(approval)
+	pool.SetUserInputService(userInput)
+	done := make(chan struct{})
+	go func() {
+		pool.cancelPendingDecisions(context.Background(), "bot-1", "session-1", "cleanup")
+		close(done)
+	}()
+
+	select {
+	case <-approvalStarted:
+	case <-time.After(time.Second):
+		t.Fatal("approval cleanup did not start")
+	}
+	select {
+	case <-inputStarted:
+	case <-time.After(time.Second):
+		t.Fatal("user input cleanup waited for blocked approval cleanup")
+	}
+	close(approvalRelease)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("decision cleanup did not finish")
+	}
+}
+
+func TestCloseSessionCarriesLatestRuntimeFenceToDecisionCleanup(t *testing.T) {
+	want := runtimefence.Fence{BotID: "bot-1", SessionID: "session-1", Token: 37}
+	approval := &fakeToolApprovalService{}
+	userInput := &fakeUserInputCanceller{}
+	pool := newSessionPool(nil, nil, fakeBotGetter{})
+	pool.SetToolApprovalService(approval)
+	pool.SetUserInputService(userInput)
+	injectRuntime(pool, &runtimeHandle{
+		id:               "rt-fenced-cleanup",
+		botID:            want.BotID,
+		status:           stateIdle,
+		boundSession:     want.SessionID,
+		persistenceFence: want,
+		lastActive:       time.Now(),
+		hadPrompt:        true,
+	})
+
+	if err := pool.CloseSession(want.SessionID); err != nil {
+		t.Fatalf("CloseSession() error = %v", err)
+	}
+	if approval.cancelFence != want || userInput.cancelFence != want {
+		t.Fatalf("decision cleanup fences = approval:%#v user_input:%#v, want %#v", approval.cancelFence, userInput.cancelFence, want)
+	}
+	if approval.cancelCount != 2 || userInput.cancelCount != 2 {
+		t.Fatalf("fenced cleanup count = approval:%d user_input:%d, want pre and final cleanup", approval.cancelCount, userInput.cancelCount)
+	}
+}
+
+func TestStaleRuntimeHandleDoesNotCancelNewHandleDecisions(t *testing.T) {
+	approval := &fakeToolApprovalService{}
+	userInput := &fakeUserInputCanceller{}
+	pool := newSessionPool(nil, nil, fakeBotGetter{})
+	pool.SetToolApprovalService(approval)
+	pool.SetUserInputService(userInput)
+	old := &runtimeHandle{id: "rt-old", botID: "bot-1", boundSession: "session-1", status: stateIdle, lastActive: time.Now(), hadPrompt: true}
+	current := &runtimeHandle{id: "rt-current", botID: "bot-1", boundSession: "session-1", status: stateIdle, lastActive: time.Now(), hadPrompt: true}
+	injectRuntime(pool, old)
+	injectRuntime(pool, current)
+
+	if err := pool.closeHandle(old); err != nil {
+		t.Fatalf("close stale handle: %v", err)
+	}
+	if approval.cancelCount != 0 || userInput.cancelCount != 0 {
+		t.Fatalf("stale cleanup reached current decisions: approval=%d user_input=%d", approval.cancelCount, userInput.cancelCount)
 	}
 }
 
@@ -1857,6 +1997,10 @@ type fakeToolApprovalService struct {
 	cancelBotID     string
 	cancelSessionID string
 	cancelReason    string
+	cancelCount     int
+	cancelFence     runtimefence.Fence
+	cancelStarted   chan<- struct{}
+	cancelRelease   <-chan struct{}
 }
 
 func (*fakeToolApprovalService) EvaluatePolicy(context.Context, toolapproval.CreatePendingInput) (toolapproval.Evaluation, error) {
@@ -1883,10 +2027,18 @@ func (*fakeToolApprovalService) RegisterWaiter(string) func() {
 	return func() {}
 }
 
-func (f *fakeToolApprovalService) CancelPendingForSession(_ context.Context, botID, sessionID, reason string) ([]toolapproval.Request, error) {
+func (f *fakeToolApprovalService) CancelPendingForSession(ctx context.Context, botID, sessionID, reason string) ([]toolapproval.Request, error) {
+	if f.cancelStarted != nil {
+		f.cancelStarted <- struct{}{}
+	}
+	if f.cancelRelease != nil {
+		<-f.cancelRelease
+	}
 	f.cancelBotID = botID
 	f.cancelSessionID = sessionID
 	f.cancelReason = reason
+	f.cancelCount++
+	f.cancelFence, _ = runtimefence.FromContext(ctx)
 	return nil, nil
 }
 
@@ -1894,12 +2046,20 @@ type fakeUserInputCanceller struct {
 	cancelBotID     string
 	cancelSessionID string
 	cancelReason    string
+	cancelCount     int
+	cancelFence     runtimefence.Fence
+	cancelStarted   chan<- struct{}
 }
 
-func (f *fakeUserInputCanceller) CancelPendingForSession(_ context.Context, botID, sessionID, reason string) ([]userinput.Request, error) {
+func (f *fakeUserInputCanceller) CancelPendingForSession(ctx context.Context, botID, sessionID, reason string) ([]userinput.Request, error) {
+	if f.cancelStarted != nil {
+		f.cancelStarted <- struct{}{}
+	}
 	f.cancelBotID = botID
 	f.cancelSessionID = sessionID
 	f.cancelReason = reason
+	f.cancelCount++
+	f.cancelFence, _ = runtimefence.FromContext(ctx)
 	return nil, nil
 }
 

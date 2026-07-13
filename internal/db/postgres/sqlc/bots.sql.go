@@ -417,6 +417,20 @@ func (q *Queries) ListHeartbeatEnabledBots(ctx context.Context) ([]ListHeartbeat
 	return items, nil
 }
 
+const lockBotForSessionWrite = `-- name: LockBotForSessionWrite :one
+SELECT id
+FROM bots
+WHERE id = $1
+FOR KEY SHARE
+`
+
+func (q *Queries) LockBotForSessionWrite(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockBotForSessionWrite, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const updateBotOwner = `-- name: UpdateBotOwner :one
 UPDATE bots
 SET owner_user_id = $2,

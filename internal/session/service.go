@@ -20,7 +20,13 @@ import (
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/message/event"
+	"github.com/memohai/memoh/internal/runtimefence"
 )
+
+type runtimeFencedSessionWriter interface {
+	UpdateSessionTitleWithRuntimeFence(ctx context.Context, arg sqlc.UpdateSessionTitleWithRuntimeFenceParams) (sqlc.BotSession, error)
+	UpdateSessionMetadataWithRuntimeFence(ctx context.Context, arg sqlc.UpdateSessionMetadataWithRuntimeFenceParams) (sqlc.BotSession, error)
+}
 
 // Session represents a chat session within a bot.
 type Session struct {
@@ -743,10 +749,34 @@ func (s *Service) UpdateTitle(ctx context.Context, sessionID, title string) (Ses
 	if err != nil {
 		return Session{}, fmt.Errorf("invalid session id: %w", err)
 	}
-	row, err := s.queries.UpdateSessionTitle(ctx, sqlc.UpdateSessionTitleParams{
-		ID:    pgID,
-		Title: title,
-	})
+	var row sqlc.BotSession
+	if fence, fenced := runtimefence.FromContext(ctx); fenced {
+		if strings.TrimSpace(sessionID) != fence.SessionID {
+			return Session{}, runtimefence.ErrStale
+		}
+		writer, ok := s.queries.(runtimeFencedSessionWriter)
+		if !ok {
+			return Session{}, errors.New("session store does not support runtime fencing")
+		}
+		pgBotID, parseErr := dbpkg.ParseUUID(fence.BotID)
+		if parseErr != nil {
+			return Session{}, fmt.Errorf("invalid runtime fence bot id: %w", parseErr)
+		}
+		row, err = writer.UpdateSessionTitleWithRuntimeFence(ctx, sqlc.UpdateSessionTitleWithRuntimeFenceParams{
+			Title:               title,
+			ID:                  pgID,
+			BotID:               pgBotID,
+			RuntimeFencingToken: fence.Token,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Session{}, runtimefence.ErrStale
+		}
+	} else {
+		row, err = s.queries.UpdateSessionTitle(ctx, sqlc.UpdateSessionTitleParams{
+			ID:    pgID,
+			Title: title,
+		})
+	}
 	if err != nil {
 		return Session{}, err
 	}
@@ -766,10 +796,34 @@ func (s *Service) UpdateMetadata(ctx context.Context, sessionID string, metadata
 	if err != nil {
 		return Session{}, fmt.Errorf("marshal metadata: %w", err)
 	}
-	row, err := s.queries.UpdateSessionMetadata(ctx, sqlc.UpdateSessionMetadataParams{
-		ID:       pgID,
-		Metadata: metaBytes,
-	})
+	var row sqlc.BotSession
+	if fence, fenced := runtimefence.FromContext(ctx); fenced {
+		if strings.TrimSpace(sessionID) != fence.SessionID {
+			return Session{}, runtimefence.ErrStale
+		}
+		writer, ok := s.queries.(runtimeFencedSessionWriter)
+		if !ok {
+			return Session{}, errors.New("session store does not support runtime fencing")
+		}
+		pgBotID, parseErr := dbpkg.ParseUUID(fence.BotID)
+		if parseErr != nil {
+			return Session{}, fmt.Errorf("invalid runtime fence bot id: %w", parseErr)
+		}
+		row, err = writer.UpdateSessionMetadataWithRuntimeFence(ctx, sqlc.UpdateSessionMetadataWithRuntimeFenceParams{
+			Metadata:            metaBytes,
+			ID:                  pgID,
+			BotID:               pgBotID,
+			RuntimeFencingToken: fence.Token,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Session{}, runtimefence.ErrStale
+		}
+	} else {
+		row, err = s.queries.UpdateSessionMetadata(ctx, sqlc.UpdateSessionMetadataParams{
+			ID:       pgID,
+			Metadata: metaBytes,
+		})
+	}
 	if err != nil {
 		return Session{}, err
 	}

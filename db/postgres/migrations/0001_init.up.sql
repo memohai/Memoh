@@ -446,6 +446,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_channel_routes_unique
 CREATE INDEX IF NOT EXISTS idx_bot_channel_routes_bot ON bot_channel_routes(bot_id);
 
 -- bot_sessions: chat sessions within a bot, optionally linked to a channel route.
+CREATE SEQUENCE IF NOT EXISTS session_runtime_fencing_token_seq AS BIGINT NO CYCLE;
+
 CREATE TABLE IF NOT EXISTS bot_sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
@@ -458,6 +460,7 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   title TEXT NOT NULL DEFAULT '',
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   next_turn_position BIGINT NOT NULL DEFAULT 1,
+  runtime_fencing_token BIGINT NOT NULL DEFAULT 0 CHECK (runtime_fencing_token >= 0),
   parent_session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
   created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -614,6 +617,7 @@ CREATE TABLE IF NOT EXISTS tool_approval_requests (
   tool_input JSONB NOT NULL,
   short_id INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
+  runtime_fencing_token BIGINT,
   decision_reason TEXT NOT NULL DEFAULT '',
   requested_by_channel_identity_id UUID REFERENCES channel_identities(id) ON DELETE SET NULL,
   decided_by_channel_identity_id UUID REFERENCES channel_identities(id) ON DELETE SET NULL,
@@ -649,6 +653,7 @@ CREATE TABLE IF NOT EXISTS user_input_requests (
   tool_name TEXT NOT NULL DEFAULT 'ask_user',
   short_id INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
+  runtime_fencing_token BIGINT,
   input_json JSONB NOT NULL,
   ui_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   result_json JSONB NOT NULL DEFAULT '{}'::jsonb,

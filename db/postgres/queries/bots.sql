@@ -61,6 +61,12 @@ WHERE id = $1;
 -- name: DeleteBotByID :exec
 DELETE FROM bots WHERE id = $1;
 
+-- name: LockBotForSessionWrite :one
+SELECT id
+FROM bots
+WHERE id = $1
+FOR KEY SHARE;
+
 -- name: ListHeartbeatEnabledBots :many
 SELECT id, owner_user_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt
 FROM bots

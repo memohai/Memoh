@@ -20,6 +20,7 @@ import (
 	"github.com/memohai/memoh/internal/acpprofile"
 	"github.com/memohai/memoh/internal/agent/event"
 	"github.com/memohai/memoh/internal/mcp"
+	"github.com/memohai/memoh/internal/runtimefence"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -241,6 +242,10 @@ func (c *clientCallbacks) setPromptState(collector *eventCollector, sink EventSi
 }
 
 func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRequest) (acp.ReadTextFileResponse, error) {
+	session := c.currentToolSession()
+	ctx, cancel := mcp.BindRuntimeContext(ctx, session)
+	defer cancel()
+
 	toolID := "read-" + uuid.NewString()
 	input := map[string]any{"path": p.Path}
 	if p.Line != nil && *p.Line > 0 {
@@ -281,6 +286,10 @@ func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRe
 	if p.Limit != nil && *p.Limit > 0 {
 		limit = boundedPositiveInt32(*p.Limit)
 	}
+	if err := mcp.ValidateRuntimeGuard(ctx, session); err != nil {
+		toolErr = err
+		return acp.ReadTextFileResponse{}, err
+	}
 	resp, err := c.client.ReadFile(ctx, path, line, limit)
 	if err != nil {
 		toolErr = err
@@ -318,6 +327,10 @@ func (c *clientCallbacks) limitedApprovalRejectionMessage(toolName string, appro
 }
 
 func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFileRequest) (acp.WriteTextFileResponse, error) {
+	session := c.currentToolSession()
+	ctx, cancel := mcp.BindRuntimeContext(ctx, session)
+	defer cancel()
+
 	toolID := "write-" + uuid.NewString()
 	input := writeToolInput(p.Path, p.Content)
 	toolID, approval, err := c.approveCallbackTool(ctx, toolID, "write", input)
@@ -341,6 +354,10 @@ func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFile
 
 	path, err := c.resolvePath(p.Path)
 	if err != nil {
+		toolErr = err
+		return acp.WriteTextFileResponse{}, err
+	}
+	if err := mcp.ValidateRuntimeGuard(ctx, session); err != nil {
 		toolErr = err
 		return acp.WriteTextFileResponse{}, err
 	}
@@ -427,6 +444,19 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 	if c == nil {
 		return cancelledPermission(), nil
 	}
+	session := c.currentToolSession()
+	ctx, cancel := mcp.BindRuntimeContext(ctx, session)
+	defer cancel()
+	allowWithGuard := func() (acp.RequestPermissionResponse, error) {
+		resp := allowOncePermission(p)
+		if resp.Outcome.Cancelled != nil {
+			return resp, nil
+		}
+		if err := mcp.ValidateRuntimeGuard(ctx, session); err != nil {
+			return acp.RequestPermissionResponse{}, err
+		}
+		return resp, nil
+	}
 	if err := c.validatePermissionScope(p); err != nil {
 		// Security-relevant rejection: an agent asked to act outside the
 		// workspace root. Log it (an agent probing the boundary is exactly what
@@ -459,10 +489,10 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 				slog.String("title", title),
 				slog.String("kind", kind))
 		}
-		return allowOncePermission(p), nil
+		return allowWithGuard()
 	}
 	if c.approval == nil {
-		return allowOncePermission(p), nil
+		return allowWithGuard()
 	}
 	result, err := c.requireToolApproval(ctx, toolCallID, toolName, input)
 	if err != nil {
@@ -478,7 +508,10 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		// cancel the request: there was no user decision to report.
 		return cancelledPermission(), nil
 	}
-	resp := allowOncePermission(p)
+	resp, err := allowWithGuard()
+	if err != nil {
+		return acp.RequestPermissionResponse{}, err
+	}
 	if resp.Outcome.Cancelled != nil {
 		// The user approved but the agent offered no allow_once option, so the
 		// agent sees a cancellation and will not act - leaving a consumable
@@ -545,6 +578,7 @@ func (c *clientCallbacks) requireToolApproval(ctx context.Context, toolCallID, t
 	if strings.TrimSpace(session.BotID) == "" || strings.TrimSpace(session.SessionID) == "" {
 		return toolapproval.FlowResult{}, nil
 	}
+	ctx = runtimefence.WithContext(ctx, session.RuntimeFence)
 	return toolapproval.RunFlow(ctx, c.approval, toolapproval.FlowRequest{
 		Input: toolapproval.CreatePendingInput{
 			BotID:                        session.BotID,
@@ -961,6 +995,9 @@ func (c *clientCallbacks) SessionUpdate(_ context.Context, p acp.SessionNotifica
 }
 
 func (c *clientCallbacks) CreateTerminal(ctx context.Context, p acp.CreateTerminalRequest) (acp.CreateTerminalResponse, error) {
+	session := c.currentToolSession()
+	ctx, cancel := mcp.BindRuntimeContext(ctx, session)
+	defer cancel()
 	return c.terminals.CreateTerminal(ctx, p, func(toolCallID string, input map[string]any) (terminalApprovalResult, error) {
 		id, approval, err := c.approveCallbackTool(ctx, toolCallID, "exec", input)
 		return terminalApprovalResult{
@@ -968,6 +1005,11 @@ func (c *clientCallbacks) CreateTerminal(ctx context.Context, p acp.CreateTermin
 			ToolCallID:       id,
 			RejectionMessage: c.limitedApprovalRejectionMessage("exec", approval),
 		}, err
+	}, terminalRuntimeScope{
+		validate: func(guardCtx context.Context) error {
+			return mcp.ValidateRuntimeGuard(guardCtx, session)
+		},
+		runContext: session.RunContext,
 	})
 }
 

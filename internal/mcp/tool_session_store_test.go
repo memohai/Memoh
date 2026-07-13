@@ -1,6 +1,9 @@
 package mcp
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestToolSessionContextStoreMergesLatestPromptContext(t *testing.T) {
 	store := NewToolSessionContextStore()
@@ -39,6 +42,17 @@ func TestToolSessionContextMergePreservesUserInputCapability(t *testing.T) {
 	merged := MergeToolSessionContext(base, ToolSessionContext{CanRequestUserInput: true})
 	if !merged.CanRequestUserInput {
 		t.Fatalf("CanRequestUserInput = false, want true")
+	}
+}
+
+func TestToolSessionContextMergePreservesRuntimeLifecycle(t *testing.T) {
+	runCtx := context.Background()
+	guard := func(context.Context) error { return nil }
+	merged := MergeToolSessionContext(ToolSessionContext{BotID: "bot-1"}, ToolSessionContext{
+		RunContext: runCtx, RuntimeGuard: guard,
+	})
+	if merged.RunContext != runCtx || merged.RuntimeGuard == nil {
+		t.Fatalf("runtime lifecycle = context:%v guard:%v", merged.RunContext, merged.RuntimeGuard != nil)
 	}
 }
 

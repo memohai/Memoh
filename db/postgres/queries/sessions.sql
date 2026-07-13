@@ -215,6 +215,43 @@ FROM bot_sessions
 WHERE id = $1
   AND deleted_at IS NULL;
 
+-- name: NextSessionRuntimeFenceToken :one
+SELECT nextval('session_runtime_fencing_token_seq')::bigint;
+
+-- name: ActivateSessionRuntimeFence :one
+UPDATE bot_sessions
+SET runtime_fencing_token = sqlc.arg(runtime_fencing_token)
+WHERE id = sqlc.arg(session_id)
+  AND bot_id = sqlc.arg(bot_id)
+  AND runtime_fencing_token <= sqlc.arg(runtime_fencing_token)
+  AND deleted_at IS NULL
+RETURNING runtime_fencing_token;
+
+-- name: LockSessionRuntimeFenceForActivation :one
+SELECT runtime_fencing_token
+FROM bot_sessions
+WHERE id = sqlc.arg(session_id)
+  AND bot_id = sqlc.arg(bot_id)
+  AND deleted_at IS NULL
+FOR UPDATE;
+
+-- name: LockSessionRuntimeFence :one
+SELECT runtime_fencing_token
+FROM bot_sessions
+WHERE id = sqlc.arg(session_id)
+  AND bot_id = sqlc.arg(bot_id)
+  AND runtime_fencing_token = sqlc.arg(runtime_fencing_token)
+  AND deleted_at IS NULL
+FOR NO KEY UPDATE;
+
+-- name: LockSessionDecisionSequence :one
+SELECT id
+FROM bot_sessions
+WHERE id = sqlc.arg(session_id)
+  AND bot_id = sqlc.arg(bot_id)
+  AND deleted_at IS NULL
+FOR UPDATE;
+
 -- name: ListSessionsByBot :many
 SELECT
   s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
@@ -301,10 +338,28 @@ SET title = sqlc.arg(title), updated_at = now()
 WHERE id = sqlc.arg(id) AND deleted_at IS NULL
 RETURNING *;
 
+-- name: UpdateSessionTitleWithRuntimeFence :one
+UPDATE bot_sessions
+SET title = sqlc.arg(title), updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND bot_id = sqlc.arg(bot_id)
+  AND runtime_fencing_token = sqlc.arg(runtime_fencing_token)
+  AND deleted_at IS NULL
+RETURNING *;
+
 -- name: UpdateSessionMetadata :one
 UPDATE bot_sessions
 SET metadata = sqlc.arg(metadata), updated_at = now()
 WHERE id = sqlc.arg(id) AND deleted_at IS NULL
+RETURNING *;
+
+-- name: UpdateSessionMetadataWithRuntimeFence :one
+UPDATE bot_sessions
+SET metadata = sqlc.arg(metadata), updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND bot_id = sqlc.arg(bot_id)
+  AND runtime_fencing_token = sqlc.arg(runtime_fencing_token)
+  AND deleted_at IS NULL
 RETURNING *;
 
 -- name: UpdateSessionTypeAndMetadata :one
