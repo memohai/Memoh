@@ -18,6 +18,7 @@ import (
 	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/acpclient"
 	"github.com/memohai/memoh/internal/acpprofile"
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
@@ -436,6 +437,7 @@ func (h *UsersHandler) RemoveMember(c echo.Context) error {
 // @Success 201 {object} bots.Bot
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
+// @Failure 409 {object} apperror.Problem
 // @Failure 500 {object} ErrorResponse
 // @Router /bots [post].
 func (h *UsersHandler) CreateBot(c echo.Context) error {
@@ -525,7 +527,7 @@ func createBotHTTPError(err error, ownerFromToken bool) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if errors.Is(err, bots.ErrBotNameTaken) {
-		return echo.NewHTTPError(http.StatusConflict, err.Error())
+		return apperror.New(apperror.CodeBotNameTaken, map[string]string{"field": "name"})
 	}
 	if errors.Is(err, bots.ErrBotNameInvalid) || errors.Is(err, bots.ErrBotNameReserved) {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -571,8 +573,12 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 	}
 	sendError := func(code, i18nKey, message string) {
 		_ = send(createContainerErrorEvent{
-			Type: "error", Code: code, I18nKey: i18nKey,
-			Args: map[string]string{}, Message: message,
+			Type:      "error",
+			Code:      code,
+			I18nKey:   i18nKey,
+			Args:      map[string]string{},
+			Message:   message,
+			RequestID: requestID(c),
 		})
 	}
 
@@ -820,6 +826,7 @@ func (h *UsersHandler) ListBotChecks(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} apperror.Problem
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{id} [put].
 func (h *UsersHandler) UpdateBot(c echo.Context) error {
@@ -967,7 +974,7 @@ func stringMapEqual(a, b map[string]string) bool {
 
 func updateBotHTTPError(err error) error {
 	if errors.Is(err, bots.ErrBotNameTaken) {
-		return echo.NewHTTPError(http.StatusConflict, err.Error())
+		return apperror.New(apperror.CodeBotNameTaken, map[string]string{"field": "name"})
 	}
 	if errors.Is(err, bots.ErrBotNameInvalid) || errors.Is(err, bots.ErrBotNameReserved) {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())

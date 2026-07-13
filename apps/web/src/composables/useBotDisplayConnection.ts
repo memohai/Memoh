@@ -355,7 +355,10 @@ export class BotDisplayConnection {
       })
       for await (const event of stream) {
         if (event.type === 'error') {
-          throw new Error(event.message)
+          this.status.value = 'unavailable'
+          this.unavailableReason.value = resolveApiErrorMessage(event, this.t('chat.display.prepare.failed'))
+          this.prepareProgress.value = null
+          return false
         }
         this.prepareProgress.value = {
           percent: event.percent ?? this.prepareProgress.value?.percent ?? 0,

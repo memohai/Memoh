@@ -107,6 +107,26 @@ describe('useBotCreateProgressStore', () => {
     expect(store.lines.at(-1)).toMatchObject({ kind: 'error', status: 'error' })
   })
 
+  it('keeps the stable code when bot creation returns an HTTP problem', async () => {
+    postBotsStream.mockResolvedValue({
+      stream: (async function* (): AsyncGenerator<BotCreateStreamEvent, void, unknown> {
+        throw {
+          code: 'bot.name_taken',
+          args: { field: 'name' },
+          detail: 'This name is already taken.',
+          status: 409,
+        }
+      })(),
+    })
+
+    const store = useBotCreateProgressStore()
+    await store.start({ name: 'ada', display_name: 'Ada' })
+
+    expect(store.status).toBe('error')
+    expect(store.errorCode).toBe('bot.name_taken')
+    expect(store.setupError).toBe('This name is already taken.')
+  })
+
   it('applies model and memory settings after the bot is ready', async () => {
     const bot = { id: 'bot-1', name: 'ada' }
     postBotsStream.mockResolvedValue(streamOf([
@@ -158,5 +178,6 @@ describe('useBotCreateProgressStore', () => {
     expect(store.lines).toEqual([])
     expect(store.bot).toBeNull()
     expect(store.setupError).toBeNull()
+    expect(store.errorCode).toBeNull()
   })
 })

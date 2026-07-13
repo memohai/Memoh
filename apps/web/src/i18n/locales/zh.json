@@ -92,6 +92,14 @@
     "actionRequired": "需要操作",
     "preview": "预览"
   },
+  "errors": {
+    "bot": {
+      "name_taken": "该名称已被占用。"
+    },
+    "workspace": {
+      "unreachable": "暂时无法连接工作区，请稍后重试。"
+    }
+  },
   "auth": {
     "welcome": "欢迎回来",
     "pageTitle": "登录",

@@ -9,6 +9,14 @@ interface ResolveApiErrorMessageOptions {
 type ErrorRecord = Record<string, unknown>
 type Locale = 'en' | 'zh' | 'ja'
 
+export interface MemohError {
+  code: string
+  args: Record<string, unknown>
+  message?: string
+  requestId?: string
+  status?: number
+}
+
 const messagesByLocale = {
   en: enMessages,
   zh: zhMessages,
@@ -75,14 +83,17 @@ function renderI18nMessage(key: string, args?: ErrorRecord): string {
 
 function pickApiFeedbackMessage(error: unknown): string {
   for (const record of collectErrorRecords(error)) {
-    const key = record.i18n_key ?? record.i18nKey
-    if (typeof key !== 'string' || !key.trim()) {
-      continue
-    }
     const args = asRecord(record.args) ?? undefined
-    const rendered = renderI18nMessage(key, args)
-    if (rendered) {
-      return rendered
+
+    const explicitKey = record.i18n_key ?? record.i18nKey
+    if (typeof explicitKey === 'string' && explicitKey.trim()) {
+      const rendered = renderI18nMessage(explicitKey, args)
+      if (rendered) return rendered
+    }
+
+    if (typeof record.code === 'string' && record.code.trim()) {
+      const rendered = renderI18nMessage(`errors.${record.code.trim()}`, args)
+      if (rendered) return rendered
     }
   }
   return ''
@@ -103,6 +114,42 @@ function pickErrorDetail(error: unknown): string {
   }
 
   return ''
+}
+
+export function parseMemohError(error: unknown): MemohError | null {
+  for (const record of collectErrorRecords(error)) {
+    if (typeof record.code !== 'string' || !record.code.trim()) continue
+
+    const status = typeof record.status === 'number'
+      ? record.status
+      : typeof record.http_status === 'number'
+        ? record.http_status
+        : undefined
+    const requestId = record.request_id ?? record.requestId
+
+    return {
+      code: record.code.trim(),
+      args: asRecord(record.args) ?? {},
+      message: pickErrorDetail(record) || undefined,
+      requestId: typeof requestId === 'string' && requestId.trim() ? requestId.trim() : undefined,
+      status,
+    }
+  }
+  return null
+}
+
+export function isApiErrorCode(error: unknown, code: string): boolean {
+  return parseMemohError(error)?.code === code
+}
+
+export function apiErrorStatus(error: unknown): number | undefined {
+  const parsed = parseMemohError(error)
+  if (parsed?.status !== undefined) return parsed.status
+
+  for (const record of collectErrorRecords(error)) {
+    if (typeof record.status === 'number') return record.status
+  }
+  return undefined
 }
 
 export function resolveApiErrorMessage(

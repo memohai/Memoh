@@ -14,6 +14,7 @@ import {
   pushBotCreateTerminalLine,
   type BotCreateTerminalLine,
 } from '@/composables/api/botCreateTerminal'
+import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 
 // status reflects the bot-create lifecycle:
 //   idle     - nothing in flight (also the guard for the progress route)
@@ -65,6 +66,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
   const lines = ref<BotCreateTerminalLine[]>([])
   const bot = ref<BotsBot | null>(null)
   const setupError = ref<string | null>(null)
+  const errorCode = ref<string | null>(null)
 
   let lastPayload: BotsCreateBotRequest | null = null
   let lastOptions: StartBotCreateOptions = {}
@@ -79,6 +81,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     lines.value = []
     bot.value = null
     setupError.value = null
+    errorCode.value = null
   }
 
   function ensureErrorLine(message: string) {
@@ -94,6 +97,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     status.value = 'creating'
     bot.value = null
     setupError.value = null
+    errorCode.value = null
     progress.value = { phase: 'pulling' }
     display.value = options.display ?? {
       display_name: payload.display_name ?? payload.name ?? '',
@@ -122,6 +126,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       const createdBot = result.bot ?? null
       bot.value = createdBot
       setupError.value = result.setupError ?? null
+      errorCode.value = result.errorCode ?? null
 
       if (!createdBot) {
         ensureErrorLine(result.setupError ?? toMessage(undefined))
@@ -149,8 +154,11 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       }
       status.value = 'ready'
     } catch (error) {
-      const message = toMessage(error)
+      const parsed = parseMemohError(error)
+      const message = resolveApiErrorMessage(error, toMessage(error))
       setupError.value = message
+      errorCode.value = parsed?.code
+        ?? (apiErrorStatus(error) === 409 ? 'bot.name_taken' : null)
       // If a bot was already created, a later failure (settings, terminal or
       // cache bookkeeping) is non-fatal: the bot exists, so never downgrade it
       // to a hard error — otherwise a successful create is reported as failed.
@@ -176,6 +184,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     lines,
     bot,
     setupError,
+    errorCode,
     percent,
     isActive,
     start,

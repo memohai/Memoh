@@ -102,11 +102,12 @@ type createContainerRestoringEvent struct {
 }
 
 type createContainerErrorEvent struct {
-	Type    string            `json:"type"`
-	Code    string            `json:"code"`
-	I18nKey string            `json:"i18n_key"`
-	Args    map[string]string `json:"args"`
-	Message string            `json:"message"`
+	Type      string            `json:"type"`
+	Code      string            `json:"code"`
+	I18nKey   string            `json:"i18n_key,omitempty"`
+	Args      map[string]string `json:"args"`
+	Message   string            `json:"message"`
+	RequestID string            `json:"request_id,omitempty"`
 }
 
 type GetContainerResponse struct {
@@ -391,8 +392,12 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 
 	sendError := func(code, i18nKey, message string) {
 		send(createContainerErrorEvent{
-			Type: "error", Code: code, I18nKey: i18nKey,
-			Args: map[string]string{}, Message: message,
+			Type:      "error",
+			Code:      code,
+			I18nKey:   i18nKey,
+			Args:      map[string]string{},
+			Message:   message,
+			RequestID: requestID(c),
 		})
 	}
 

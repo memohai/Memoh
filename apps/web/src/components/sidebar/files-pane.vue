@@ -351,7 +351,7 @@ import {
   postBotsByBotIdContainerFsWrite,
 } from '@memohai/sdk'
 import type { HandlersFsFileInfo } from '@memohai/sdk'
-import { resolveApiErrorMessage } from '@/utils/api-error'
+import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { joinPath, parentPath } from '@/components/file-manager/utils'
 import FileTree from '@/components/file-manager/file-tree.vue'
@@ -430,6 +430,9 @@ type FileSystemHandleLike =
   | (FileSystemFileHandleLike & { kind: 'file' })
 
 function isTransientWorkspaceError(error: unknown): boolean {
+  if (isApiErrorCode(error, 'workspace.unreachable')) return true
+
+  // Desktop can connect to older hosted servers that only expose a message.
   const detail = resolveApiErrorMessage(error, '').toLowerCase()
   return detail.includes('workspace is not reachable')
     || detail.includes('container not reachable')
