@@ -114,7 +114,8 @@ target_turn AS (
     vm.turn_position AS position,
     vm.id AS message_id
   FROM source_session s
-  JOIN bot_visible_history_messages vm ON vm.session_id = s.id
+  JOIN bot_visible_history_messages vm ON vm.tenant_id = app.current_tenant_id()
+    AND vm.session_id = s.id
     AND vm.id = $3
     AND vm.role = 'assistant'
     AND vm.turn_id IS NOT NULL
@@ -146,7 +147,8 @@ copy_messages AS (
     vm.turn_position < tt.position
     OR vm.turn_position = tt.position
   )
-  WHERE vm.session_id = $1
+  WHERE vm.tenant_id = app.current_tenant_id()
+    AND vm.session_id = $1
   ORDER BY vm.turn_position ASC, vm.turn_message_seq ASC, vm.created_at ASC, vm.id ASC
 ),
 copy_turns AS (

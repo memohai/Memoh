@@ -305,6 +305,7 @@ type BotUserGrant struct {
 }
 
 type BotVisibleHistoryMessage struct {
+	TenantID                pgtype.UUID        `json:"tenant_id"`
 	TurnID                  pgtype.UUID        `json:"turn_id"`
 	TurnPosition            pgtype.Int8        `json:"turn_position"`
 	TurnMessageSeq          pgtype.Int8        `json:"turn_message_seq"`

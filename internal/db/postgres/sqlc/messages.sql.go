@@ -306,7 +306,7 @@ func (q *Queries) BindLatestHistoryTurnAssistant(ctx context.Context, arg BindLa
 
 const countMessagesByBot = `-- name: CountMessagesByBot :one
 SELECT COUNT(*) FROM bot_visible_history_messages
-WHERE bot_id = $1
+WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
 `
 
 func (q *Queries) CountMessagesByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
@@ -2366,7 +2366,8 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.bot_id = $1
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.bot_id = $1
   AND m.created_at >= $2
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.created_at ASC, m.id ASC
@@ -2466,7 +2467,8 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.session_id = $1
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.session_id = $1
   AND m.created_at >= $2
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
@@ -2744,7 +2746,8 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.bot_id = $1
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.bot_id = $1
 ORDER BY m.created_at ASC, m.id ASC
 LIMIT 10000
 `
@@ -3168,7 +3171,8 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.bot_id = $1
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.bot_id = $1
   AND m.created_at < $2
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT $3
@@ -3599,7 +3603,8 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.session_id = $1
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.session_id = $1
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 LIMIT 10000
 `
@@ -3690,7 +3695,8 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.bot_id = $1
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.bot_id = $1
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT $2
 `
@@ -3974,7 +3980,8 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.bot_id = $1
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.bot_id = $1
   AND m.created_at >= $2
 ORDER BY m.created_at ASC, m.id ASC
 `
@@ -4070,7 +4077,8 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.session_id = $1
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.session_id = $1
   AND m.created_at >= $2
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 `
@@ -4149,7 +4157,8 @@ WITH observed_routes AS (
     MAX(m.created_at)::timestamptz AS last_observed_at
   FROM bot_visible_history_messages m
   JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-  WHERE m.bot_id = $1
+  WHERE m.tenant_id = app.current_tenant_id()
+    AND m.bot_id = $1
     AND m.sender_channel_identity_id = $2::uuid
     AND s.route_id IS NOT NULL
   GROUP BY s.route_id
@@ -4237,7 +4246,8 @@ WITH observed_routes AS (
   FROM bot_visible_history_messages m
   JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
   JOIN bot_channel_routes r ON r.id = s.route_id AND r.tenant_id = app.current_tenant_id()
-  WHERE m.bot_id = $1
+  WHERE m.tenant_id = app.current_tenant_id()
+    AND m.bot_id = $1
     AND LOWER(TRIM(r.channel_type)) = LOWER(TRIM($2))
     AND s.route_id IS NOT NULL
   GROUP BY s.route_id
@@ -4321,7 +4331,7 @@ func (q *Queries) ListObservedConversationsByChannelType(ctx context.Context, ar
 const listUncompactedMessagesBySession = `-- name: ListUncompactedMessagesBySession :many
 SELECT id, bot_id, session_id, role, content, usage, sender_channel_identity_id, compact_id, created_at
 FROM bot_visible_history_messages
-WHERE session_id = $1
+WHERE tenant_id = app.current_tenant_id() AND session_id = $1
   AND compact_id IS NULL
 ORDER BY turn_position ASC, turn_message_seq ASC, created_at ASC, id ASC
 `
@@ -4957,7 +4967,8 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.bot_id = $1
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.bot_id = $1
   AND ($2::uuid IS NULL OR m.session_id = $2::uuid)
   AND ($3::uuid IS NULL OR m.sender_channel_identity_id = $3::uuid)
   AND ($4::timestamptz IS NULL OR m.created_at >= $4::timestamptz)

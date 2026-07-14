@@ -1343,7 +1343,8 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.bot_id = sqlc.arg(bot_id)
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.bot_id = sqlc.arg(bot_id)
 ORDER BY m.created_at ASC, m.id ASC
 LIMIT 10000;
 
@@ -1426,7 +1427,8 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.session_id = sqlc.arg(session_id)
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.session_id = sqlc.arg(session_id)
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 LIMIT 10000;
 
@@ -1454,7 +1456,8 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.bot_id = sqlc.arg(bot_id)
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.bot_id = sqlc.arg(bot_id)
   AND m.created_at >= sqlc.arg(created_at)
 ORDER BY m.created_at ASC, m.id ASC;
 
@@ -1482,7 +1485,8 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.session_id = sqlc.arg(session_id)
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.session_id = sqlc.arg(session_id)
   AND m.created_at >= sqlc.arg(created_at)
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
 
@@ -1511,7 +1515,8 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.bot_id = sqlc.arg(bot_id)
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.bot_id = sqlc.arg(bot_id)
   AND m.created_at >= sqlc.arg(created_at)
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.created_at ASC, m.id ASC;
@@ -1541,7 +1546,8 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.session_id = sqlc.arg(session_id)
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.session_id = sqlc.arg(session_id)
   AND m.created_at >= sqlc.arg(created_at)
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
@@ -1570,7 +1576,8 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.bot_id = sqlc.arg(bot_id)
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.bot_id = sqlc.arg(bot_id)
   AND m.created_at < sqlc.arg(created_at)
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
@@ -1676,7 +1683,8 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.bot_id = sqlc.arg(bot_id)
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.bot_id = sqlc.arg(bot_id)
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
 
@@ -2152,7 +2160,7 @@ ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 
 -- name: CountMessagesByBot :one
 SELECT COUNT(*) FROM bot_visible_history_messages
-WHERE bot_id = sqlc.arg(bot_id);
+WHERE tenant_id = app.current_tenant_id() AND bot_id = sqlc.arg(bot_id);
 
 -- name: DeleteMessagesByBot :exec
 DELETE FROM bot_history_messages
@@ -2173,7 +2181,8 @@ WITH observed_routes AS (
     MAX(m.created_at)::timestamptz AS last_observed_at
   FROM bot_visible_history_messages m
   JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-  WHERE m.bot_id = sqlc.arg(bot_id)
+  WHERE m.tenant_id = app.current_tenant_id()
+    AND m.bot_id = sqlc.arg(bot_id)
     AND m.sender_channel_identity_id = sqlc.arg(channel_identity_id)::uuid
     AND s.route_id IS NOT NULL
   GROUP BY s.route_id
@@ -2216,7 +2225,8 @@ WITH observed_routes AS (
   FROM bot_visible_history_messages m
   JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
   JOIN bot_channel_routes r ON r.id = s.route_id AND r.tenant_id = app.current_tenant_id()
-  WHERE m.bot_id = sqlc.arg(bot_id)
+  WHERE m.tenant_id = app.current_tenant_id()
+    AND m.bot_id = sqlc.arg(bot_id)
     AND LOWER(TRIM(r.channel_type)) = LOWER(TRIM(sqlc.arg(channel_type)))
     AND s.route_id IS NOT NULL
   GROUP BY s.route_id
@@ -2264,7 +2274,8 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.bot_id = sqlc.arg(bot_id)
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.bot_id = sqlc.arg(bot_id)
   AND (sqlc.narg(session_id)::uuid IS NULL OR m.session_id = sqlc.narg(session_id)::uuid)
   AND (sqlc.narg(contact_id)::uuid IS NULL OR m.sender_channel_identity_id = sqlc.narg(contact_id)::uuid)
   AND (sqlc.narg(start_time)::timestamptz IS NULL OR m.created_at >= sqlc.narg(start_time)::timestamptz)
@@ -2292,6 +2303,6 @@ WHERE tenant_id = app.current_tenant_id() AND id = ANY($2::uuid[]);
 -- name: ListUncompactedMessagesBySession :many
 SELECT id, bot_id, session_id, role, content, usage, sender_channel_identity_id, compact_id, created_at
 FROM bot_visible_history_messages
-WHERE session_id = $1
+WHERE tenant_id = app.current_tenant_id() AND session_id = $1
   AND compact_id IS NULL
 ORDER BY turn_position ASC, turn_message_seq ASC, created_at ASC, id ASC;

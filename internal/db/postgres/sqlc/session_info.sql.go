@@ -14,7 +14,7 @@ import (
 const countMessagesBySession = `-- name: CountMessagesBySession :one
 SELECT COUNT(*)::bigint AS message_count
 FROM bot_visible_history_messages
-WHERE session_id = $1
+WHERE tenant_id = app.current_tenant_id() AND session_id = $1
 `
 
 func (q *Queries) CountMessagesBySession(ctx context.Context, sessionID pgtype.UUID) (int64, error) {
@@ -28,7 +28,8 @@ const getLatestAssistantUsage = `-- name: GetLatestAssistantUsage :one
 SELECT
   COALESCE((m.usage->>'inputTokens')::bigint, 0)::bigint AS input_tokens
 FROM bot_visible_history_messages m
-WHERE m.session_id = $1
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.session_id = $1
   AND m.role = 'assistant'
   AND m.usage IS NOT NULL
 ORDER BY m.created_at DESC
@@ -65,7 +66,8 @@ SELECT
   COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS total_input_tokens,
   COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint), 0)::bigint AS cache_read_tokens
 FROM bot_visible_history_messages m
-WHERE m.session_id = $1
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.session_id = $1
   AND m.usage IS NOT NULL
 `
 
@@ -98,7 +100,8 @@ WITH requested AS (
            ELSE '[]'::jsonb
       END
     ) AS item
-  WHERE m.session_id = $1
+  WHERE m.tenant_id = app.current_tenant_id()
+    AND m.session_id = $1
     AND m.role = 'user'
     AND item->>'name' IS NOT NULL
     AND item->>'name' != ''
@@ -112,7 +115,8 @@ tool_payloads AS (
          ELSE '[]'::jsonb
     END AS content_json
   FROM bot_visible_history_messages m
-  WHERE m.session_id = $1
+  WHERE m.tenant_id = app.current_tenant_id()
+    AND m.session_id = $1
     AND m.role = 'assistant'
 ),
 tool_used AS (
