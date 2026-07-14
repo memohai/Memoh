@@ -2,56 +2,188 @@ package postgresstore
 
 import (
 	"context"
+	"strings"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
-func (s *Store) UpsertBotRemoteRuntimeBinding(ctx context.Context, input dbstore.UpsertBotRemoteRuntimeBindingInput) (dbstore.BotRemoteRuntimeBindingRecord, error) {
-	botID, err := db.ParseUUID(input.BotID)
+func (s *Store) CreateOrUpdateMount(ctx context.Context, botID, runtimeID, workspacePath string) (dbstore.BotRemoteRuntimeBindingRecord, error) {
+	parsedBotID, err := db.ParseUUID(botID)
 	if err != nil {
 		return dbstore.BotRemoteRuntimeBindingRecord{}, err
 	}
-	runtimeID, err := db.ParseUUID(input.RuntimeID)
+	parsedRuntimeID, err := db.ParseUUID(runtimeID)
 	if err != nil {
 		return dbstore.BotRemoteRuntimeBindingRecord{}, err
 	}
-	if _, err := s.queries.UpsertBotRemoteRuntimeBinding(ctx, dbsqlc.UpsertBotRemoteRuntimeBindingParams{
-		BotID: botID, RuntimeID: runtimeID, WorkspacePath: input.WorkspacePath,
-	}); err != nil {
+	targetID, err := s.queries.CreateOrUpdateBotRemoteRuntimeMount(ctx, dbsqlc.CreateOrUpdateBotRemoteRuntimeMountParams{
+		BotID: parsedBotID, RuntimeID: parsedRuntimeID, WorkspacePath: workspacePath,
+	})
+	if err != nil {
 		return dbstore.BotRemoteRuntimeBindingRecord{}, mapQueryErr(err)
 	}
-	return s.GetBotRemoteRuntimeBinding(ctx, input.BotID)
+	return s.GetMount(ctx, botID, targetID.String())
 }
 
-func (s *Store) GetBotRemoteRuntimeBinding(ctx context.Context, botID string) (dbstore.BotRemoteRuntimeBindingRecord, error) {
+func (s *Store) ListMounts(ctx context.Context, botID string) ([]dbstore.BotRemoteRuntimeBindingRecord, error) {
+	id, err := db.ParseUUID(botID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListBotRemoteRuntimeMounts(ctx, id)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	records := make([]dbstore.BotRemoteRuntimeBindingRecord, 0, len(rows))
+	for _, row := range rows {
+		records = append(records, remoteMountRecord(
+			row.ID, row.BotID, row.RuntimeID, row.WorkspacePath, row.IsPrimary, row.ToolApprovalConfig,
+			row.RuntimeName, row.RuntimeUserID, row.RuntimeUnavailable, row.BotOwnerUserID,
+			row.CreatedAt, row.UpdatedAt,
+		))
+	}
+	return records, nil
+}
+
+func (s *Store) GetMount(ctx context.Context, botID, targetID string) (dbstore.BotRemoteRuntimeBindingRecord, error) {
+	botUUID, targetUUID, err := parseRemoteMountIDs(botID, targetID)
+	if err != nil {
+		return dbstore.BotRemoteRuntimeBindingRecord{}, err
+	}
+	row, err := s.queries.GetBotRemoteRuntimeMount(ctx, dbsqlc.GetBotRemoteRuntimeMountParams{BotID: botUUID, TargetID: targetUUID})
+	if err != nil {
+		return dbstore.BotRemoteRuntimeBindingRecord{}, mapQueryErr(err)
+	}
+	return remoteMountRecord(
+		row.ID, row.BotID, row.RuntimeID, row.WorkspacePath, row.IsPrimary, row.ToolApprovalConfig,
+		row.RuntimeName, row.RuntimeUserID, row.RuntimeUnavailable, row.BotOwnerUserID,
+		row.CreatedAt, row.UpdatedAt,
+	), nil
+}
+
+func (s *Store) GetPrimaryMount(ctx context.Context, botID string) (dbstore.BotRemoteRuntimeBindingRecord, error) {
 	id, err := db.ParseUUID(botID)
 	if err != nil {
 		return dbstore.BotRemoteRuntimeBindingRecord{}, err
 	}
-	row, err := s.queries.GetBotRemoteRuntimeBinding(ctx, id)
+	row, err := s.queries.GetPrimaryBotRemoteRuntimeMount(ctx, id)
 	if err != nil {
 		return dbstore.BotRemoteRuntimeBindingRecord{}, mapQueryErr(err)
 	}
-	return dbstore.BotRemoteRuntimeBindingRecord{
-		BotID:          row.BotID.String(),
-		RuntimeID:      row.RuntimeID.String(),
-		WorkspacePath:  row.WorkspacePath,
-		RuntimeName:    row.RuntimeName,
-		RuntimeUserID:  row.RuntimeUserID.String(),
-		BotOwnerUserID: row.BotOwnerUserID.String(),
-		RuntimeRevoked: row.RuntimeUnavailable.Bool,
-		CreatedAt:      db.TimeFromPg(row.CreatedAt),
-		UpdatedAt:      db.TimeFromPg(row.UpdatedAt),
-	}, nil
+	return remoteMountRecord(
+		row.ID, row.BotID, row.RuntimeID, row.WorkspacePath, row.IsPrimary, row.ToolApprovalConfig,
+		row.RuntimeName, row.RuntimeUserID, row.RuntimeUnavailable, row.BotOwnerUserID,
+		row.CreatedAt, row.UpdatedAt,
+	), nil
 }
 
-func (s *Store) DeleteBotRemoteRuntimeBinding(ctx context.Context, botID string) error {
-	id, err := db.ParseUUID(botID)
+func (s *Store) SetPrimary(ctx context.Context, botID, targetID string) error {
+	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
 		return err
 	}
-	_, err = s.queries.DeleteBotRemoteRuntimeBinding(ctx, id)
+	if strings.TrimSpace(targetID) == "" || strings.EqualFold(strings.TrimSpace(targetID), "native") {
+		return mapQueryErr(s.queries.ClearBotRemoteRuntimePrimary(ctx, botUUID))
+	}
+	targetUUID, err := db.ParseUUID(targetID)
+	if err != nil {
+		return err
+	}
+	setPrimary := func(queries *dbsqlc.Queries) error {
+		if err := queries.ClearBotRemoteRuntimePrimary(ctx, botUUID); err != nil {
+			return mapQueryErr(err)
+		}
+		rows, err := queries.SetBotRemoteRuntimePrimary(ctx, dbsqlc.SetBotRemoteRuntimePrimaryParams{
+			BotID: botUUID, TargetID: targetUUID,
+		})
+		if err != nil {
+			return mapQueryErr(err)
+		}
+		if rows == 0 {
+			return db.ErrNotFound
+		}
+		return nil
+	}
+	if s.pool == nil {
+		// NewWithQueries is used only by focused store tests. Production stores
+		// always carry a pool and use the transaction below.
+		if _, err := s.GetMount(ctx, botID, targetID); err != nil {
+			return err
+		}
+		return setPrimary(s.queries)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setPrimary(s.queries.WithTx(tx)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) UpdateToolApproval(ctx context.Context, botID, targetID string, config dbstore.JSON) error {
+	botUUID, targetUUID, err := parseRemoteMountIDs(botID, targetID)
+	if err != nil {
+		return err
+	}
+	_, err = s.queries.UpdateBotRemoteRuntimeMountToolApproval(ctx, dbsqlc.UpdateBotRemoteRuntimeMountToolApprovalParams{
+		BotID: botUUID, TargetID: targetUUID, ToolApprovalConfig: config,
+	})
 	return mapQueryErr(err)
+}
+
+func (s *Store) DeleteMount(ctx context.Context, botID, targetID string) error {
+	botUUID, targetUUID, err := parseRemoteMountIDs(botID, targetID)
+	if err != nil {
+		return err
+	}
+	_, err = s.queries.DeleteBotRemoteRuntimeMount(ctx, dbsqlc.DeleteBotRemoteRuntimeMountParams{
+		BotID: botUUID, TargetID: targetUUID,
+	})
+	return mapQueryErr(err)
+}
+
+func parseRemoteMountIDs(botID, targetID string) (pgtype.UUID, pgtype.UUID, error) {
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return pgtype.UUID{}, pgtype.UUID{}, err
+	}
+	targetUUID, err := db.ParseUUID(targetID)
+	if err != nil {
+		return pgtype.UUID{}, pgtype.UUID{}, err
+	}
+	return botUUID, targetUUID, nil
+}
+
+func remoteMountRecord(
+	id, botID, runtimeID pgtype.UUID,
+	workspacePath string,
+	isPrimary bool,
+	toolApproval []byte,
+	runtimeName string,
+	runtimeUserID pgtype.UUID,
+	runtimeUnavailable pgtype.Bool,
+	botOwnerUserID pgtype.UUID,
+	createdAt, updatedAt pgtype.Timestamptz,
+) dbstore.BotRemoteRuntimeBindingRecord {
+	return dbstore.BotRemoteRuntimeBindingRecord{
+		ID:             id.String(),
+		BotID:          botID.String(),
+		RuntimeID:      runtimeID.String(),
+		WorkspacePath:  workspacePath,
+		IsPrimary:      isPrimary,
+		ToolApproval:   append(dbstore.JSON(nil), toolApproval...),
+		RuntimeName:    runtimeName,
+		RuntimeUserID:  runtimeUserID.String(),
+		BotOwnerUserID: botOwnerUserID.String(),
+		RuntimeRevoked: runtimeUnavailable.Bool,
+		CreatedAt:      db.TimeFromPg(createdAt),
+		UpdatedAt:      db.TimeFromPg(updatedAt),
+	}
 }

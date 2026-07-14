@@ -2,18 +2,19 @@ package workspace
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
 	"slices"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
 
 	"github.com/memohai/memoh/internal/db"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/userruntime"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -22,46 +23,82 @@ const (
 	RemoteWorkspaceIDMetadataKey   = "x-memoh-workspace-id"
 	RemoteWorkspacePathMetadataKey = "x-memoh-workspace-path-bin"
 
-	RemoteBindingStatusOnline               = "online"
-	RemoteBindingStatusOffline              = "offline"
-	RemoteBindingStatusRevoked              = "revoked"
-	RemoteBindingStatusOwnerMismatch        = "owner_mismatch"
-	RemoteBindingStatusClientUpdateRequired = "client_update_required"
+	WorkspaceTargetNative = "native"
+	WorkspaceTargetRemote = "remote"
+
+	WorkspaceTargetStatusOnline               = "online"
+	WorkspaceTargetStatusOffline              = "offline"
+	WorkspaceTargetStatusRevoked              = "revoked"
+	WorkspaceTargetStatusOwnerMismatch        = "owner_mismatch"
+	WorkspaceTargetStatusClientUpdateRequired = "client_update_required"
 )
 
 var (
-	ErrRemoteWorkspaceNotBound         = errors.New("remote workspace is not bound")
-	ErrWorkspaceNotServerManaged       = errors.New("workspace lifecycle is managed by a remote runtime")
-	ErrRemoteRuntimeNotUsable          = errors.New("remote runtime not found, revoked, or owned by another user")
-	ErrRemoteRuntimeOffline            = errors.New("remote runtime is offline")
-	ErrRemoteRuntimeRevoked            = errors.New("remote runtime has been revoked")
-	ErrRemoteRuntimeOwnerMismatch      = errors.New("remote runtime no longer belongs to the bot owner")
-	ErrRemoteRuntimeClientUpdateNeeded = errors.New("remote runtime client must be updated")
-	ErrInvalidRemoteWorkspacePath      = errors.New("invalid remote workspace path")
+	ErrWorkspaceTargetNotFound          = errors.New("workspace target not found")
+	ErrRemoteWorkspaceNotBound          = errors.New("remote workspace is not bound")
+	ErrRemoteRuntimeNotUsable           = errors.New("remote runtime not found, revoked, or owned by another user")
+	ErrRemoteRuntimeOffline             = errors.New("remote runtime is offline")
+	ErrRemoteRuntimeRevoked             = errors.New("remote runtime has been revoked")
+	ErrRemoteRuntimeOwnerMismatch       = errors.New("remote runtime no longer belongs to the bot owner")
+	ErrRemoteRuntimeClientUpdateNeeded  = errors.New("remote runtime client must be updated")
+	ErrInvalidRemoteWorkspacePath       = errors.New("invalid remote workspace path")
+	ErrInvalidWorkspaceToolApprovalMode = errors.New("invalid workspace tool approval mode")
 )
 
-type RemoteWorkspaceBinding struct {
-	BotID         string    `json:"bot_id"`
-	RuntimeID     string    `json:"runtime_id,omitempty"`
-	RuntimeName   string    `json:"runtime_name,omitempty"`
-	WorkspacePath string    `json:"workspace_path,omitempty"`
-	Status        string    `json:"status"`
-	Online        bool      `json:"online"`
-	Hostname      string    `json:"hostname,omitempty"`
-	OS            string    `json:"os,omitempty"`
-	Arch          string    `json:"arch,omitempty"`
-	Capabilities  []string  `json:"capabilities,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+type WorkspaceTargetToolApproval struct {
+	Read  settings.ToolApprovalMode `json:"read"`
+	Write settings.ToolApprovalMode `json:"write"`
+	Exec  settings.ToolApprovalMode `json:"exec"`
 }
 
-type BindRemoteWorkspaceRequest struct {
-	RuntimeID     string `json:"runtime_id" validate:"required"`
+// WorkspaceTarget is the aggregate shape consumed by clients. Callers address
+// mounts by TargetID; RuntimeID identifies the backing remote Runtime and is
+// empty for the Native target.
+type WorkspaceTarget struct {
+	TargetID           string                      `json:"target_id"`
+	Kind               string                      `json:"kind"`
+	RuntimeID          string                      `json:"runtime_id,omitempty"`
+	Name               string                      `json:"name"`
+	Primary            bool                        `json:"primary"`
+	Online             bool                        `json:"online"`
+	Status             string                      `json:"status"`
+	WorkspacePath      string                      `json:"workspace_path,omitempty"`
+	ToolApproval       WorkspaceTargetToolApproval `json:"tool_approval"`
+	ToolApprovalConfig settings.ToolApprovalConfig `json:"tool_approval_config"`
+}
+
+type WorkspaceTargetsResponse struct {
+	Targets []WorkspaceTarget `json:"targets"`
+}
+
+type MountRemoteWorkspaceRequest struct {
 	WorkspacePath string `json:"workspace_path,omitempty"`
 }
 
-// RemoteWorkspaceService resolves the persistent Bot-to-device binding while
-// userruntime.Service owns only device credentials and live connections.
+type SetPrimaryWorkspaceTargetRequest struct {
+	TargetID string `json:"target_id" validate:"required"`
+}
+
+type UpdateWorkspaceTargetToolApprovalRequest struct {
+	Read               settings.ToolApprovalMode    `json:"read,omitempty"`
+	Write              settings.ToolApprovalMode    `json:"write,omitempty"`
+	Exec               settings.ToolApprovalMode    `json:"exec,omitempty"`
+	ToolApprovalConfig *settings.ToolApprovalConfig `json:"tool_approval_config,omitempty"`
+}
+
+type ResolvedWorkspaceTarget struct {
+	TargetID      string
+	Kind          string
+	Name          string
+	Primary       bool
+	WorkspacePath string
+	Client        *bridge.Client
+	Info          bridge.WorkspaceInfo
+	Approval      settings.ToolApprovalConfig
+}
+
+// RemoteWorkspaceService owns persistent remote mounts. Live runtime
+// connections remain owned by userruntime.Service.
 type RemoteWorkspaceService struct {
 	store    dbstore.BotRemoteRuntimeBindingStore
 	runtimes runtimeConnectionResolver
@@ -75,122 +112,182 @@ func NewRemoteWorkspaceService(store dbstore.BotRemoteRuntimeBindingStore, runti
 	return &RemoteWorkspaceService{store: store, runtimes: runtimes}
 }
 
-func (s *RemoteWorkspaceService) Bind(ctx context.Context, botID string, req BindRemoteWorkspaceRequest) (RemoteWorkspaceBinding, error) {
+func (s *RemoteWorkspaceService) Mount(ctx context.Context, botID, runtimeID string, req MountRemoteWorkspaceRequest) (WorkspaceTarget, error) {
 	if s == nil || s.store == nil {
-		return RemoteWorkspaceBinding{}, errors.New("remote workspace service not configured")
+		return WorkspaceTarget{}, errors.New("remote workspace service not configured")
 	}
 	botID, ok := canonicalWorkspaceUUID(botID)
 	if !ok {
-		return RemoteWorkspaceBinding{}, userruntime.ErrInvalidInput
+		return WorkspaceTarget{}, userruntime.ErrInvalidInput
 	}
-	runtimeID, ok := canonicalWorkspaceUUID(req.RuntimeID)
+	runtimeID, ok = canonicalWorkspaceUUID(runtimeID)
 	if !ok {
-		return RemoteWorkspaceBinding{}, userruntime.ErrInvalidInput
+		return WorkspaceTarget{}, userruntime.ErrInvalidInput
 	}
 	workspacePath, err := normalizeRemoteWorkspacePath(req.WorkspacePath, botID)
 	if err != nil {
-		return RemoteWorkspaceBinding{}, err
+		return WorkspaceTarget{}, err
 	}
-	record, err := s.store.UpsertBotRemoteRuntimeBinding(ctx, dbstore.UpsertBotRemoteRuntimeBindingInput{
-		BotID: botID, RuntimeID: runtimeID, WorkspacePath: workspacePath,
-	})
+	record, err := s.store.CreateOrUpdateMount(ctx, botID, runtimeID, workspacePath)
 	if errors.Is(err, db.ErrNotFound) {
-		// The guarded INSERT ... SELECT matched no usable runtime row: the
-		// caller supplied a bad runtime, not a missing binding.
-		return RemoteWorkspaceBinding{}, ErrRemoteRuntimeNotUsable
+		return WorkspaceTarget{}, ErrRemoteRuntimeNotUsable
 	}
 	if err != nil {
-		return RemoteWorkspaceBinding{}, err
+		return WorkspaceTarget{}, err
 	}
-	return s.binding(record), nil
+	return s.target(record), nil
 }
 
-func (s *RemoteWorkspaceService) Get(ctx context.Context, botID string) (RemoteWorkspaceBinding, error) {
-	record, bound, err := s.record(ctx, botID)
+func (s *RemoteWorkspaceService) ListMounts(ctx context.Context, botID string) ([]WorkspaceTarget, error) {
+	records, err := s.listRecords(ctx, botID)
 	if err != nil {
-		return RemoteWorkspaceBinding{}, err
+		return nil, err
 	}
-	if !bound {
-		return RemoteWorkspaceBinding{}, ErrRemoteWorkspaceNotBound
+	targets := make([]WorkspaceTarget, 0, len(records))
+	for _, record := range records {
+		targets = append(targets, s.target(record))
 	}
-	return s.binding(record), nil
+	return targets, nil
 }
 
-func (s *RemoteWorkspaceService) Unbind(ctx context.Context, botID string) error {
+func (s *RemoteWorkspaceService) GetMount(ctx context.Context, botID, targetID string) (WorkspaceTarget, error) {
+	record, err := s.getRecord(ctx, botID, targetID)
+	if err != nil {
+		return WorkspaceTarget{}, err
+	}
+	return s.target(record), nil
+}
+
+func (s *RemoteWorkspaceService) GetPrimaryMount(ctx context.Context, botID string) (WorkspaceTarget, error) {
+	record, err := s.getPrimaryRecord(ctx, botID)
+	if err != nil {
+		return WorkspaceTarget{}, err
+	}
+	return s.target(record), nil
+}
+
+func (s *RemoteWorkspaceService) SetPrimary(ctx context.Context, botID, targetID string) error {
 	if s == nil || s.store == nil {
 		return errors.New("remote workspace service not configured")
 	}
 	botID, ok := canonicalWorkspaceUUID(botID)
 	if !ok {
-		return ErrRemoteWorkspaceNotBound
+		return userruntime.ErrInvalidInput
 	}
-	return s.store.DeleteBotRemoteRuntimeBinding(ctx, botID)
-}
-
-// ClientForBot returns whether a binding exists separately from the client
-// error. Callers must never fall back to Local/Container when bound is true.
-func (s *RemoteWorkspaceService) ClientForBot(ctx context.Context, botID string) (*bridge.Client, bool, error) {
-	record, bound, err := s.record(ctx, botID)
-	if err != nil || !bound {
-		return nil, bound, err
+	targetID = strings.TrimSpace(targetID)
+	if targetID == WorkspaceTargetNative {
+		return s.store.SetPrimary(ctx, botID, WorkspaceTargetNative)
+	}
+	record, err := s.getRecord(ctx, botID, targetID)
+	if err != nil {
+		return err
 	}
 	if record.RuntimeUserID != record.BotOwnerUserID {
-		return nil, true, ErrRemoteRuntimeOwnerMismatch
+		return ErrRemoteRuntimeOwnerMismatch
 	}
 	if record.RuntimeRevoked {
-		return nil, true, ErrRemoteRuntimeRevoked
+		return ErrRemoteRuntimeRevoked
 	}
-	if s.runtimes == nil {
-		return nil, true, ErrRemoteRuntimeOffline
-	}
-	connection, ok := s.runtimes.Connection(record.RuntimeID)
-	if !ok || connection == nil || connection.Client == nil {
-		return nil, true, ErrRemoteRuntimeOffline
-	}
-	if !supportsRemoteWorkspace(connection.Info.Capabilities) {
-		return nil, true, ErrRemoteRuntimeClientUpdateNeeded
-	}
-	client := connection.Client.WithOutgoingMetadata(map[string]string{
-		RemoteWorkspaceIDMetadataKey:   record.BotID,
-		RemoteWorkspacePathMetadataKey: record.WorkspacePath,
-	})
-	if client == nil {
-		return nil, true, ErrRemoteRuntimeOffline
-	}
-	return client, true, nil
+	return s.store.SetPrimary(ctx, botID, record.ID)
 }
 
-func (s *RemoteWorkspaceService) WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, bool, error) {
-	record, bound, err := s.record(ctx, botID)
-	if err != nil || !bound {
-		return bridge.WorkspaceInfo{}, bound, err
+func (s *RemoteWorkspaceService) UpdateToolApproval(ctx context.Context, botID, targetID string, modes WorkspaceTargetToolApproval) error {
+	record, err := s.getRecord(ctx, botID, targetID)
+	if err != nil {
+		return err
 	}
-	defaultWorkDir := "/data"
-	runtimeOS := ""
-	// Same gates as ClientForBot: a transferred or revoked binding must not
-	// reveal the previous owner's workspace base or OS through prompt/tool
-	// metadata, so keep the neutral defaults instead of consulting the live
-	// connection.
-	ownerMatches := record.RuntimeUserID == record.BotOwnerUserID
-	if ownerMatches && !record.RuntimeRevoked && s.runtimes != nil {
-		if connection, online := s.runtimes.Connection(record.RuntimeID); online && connection != nil {
-			defaultWorkDir = remoteWorkspaceWorkDir(connection.Info, record.WorkspacePath)
-			runtimeOS = connection.Info.OS
-		}
+	config, err := ApplyWorkspaceToolApprovalModes(toolApprovalConfig(record.ToolApproval), modes)
+	if err != nil {
+		return err
 	}
-	return bridge.WorkspaceInfo{
-		Backend:        bridge.WorkspaceBackendRemote,
-		OS:             runtimeOS,
-		DefaultWorkDir: defaultWorkDir,
-	}, true, nil
+	return s.updateToolApprovalConfig(ctx, record, config)
 }
 
-func (s *RemoteWorkspaceService) EnsureReady(ctx context.Context, botID string) (bool, error) {
-	client, bound, err := s.ClientForBot(ctx, botID)
-	if err != nil || !bound {
-		return bound, err
+func (s *RemoteWorkspaceService) UpdateToolApprovalConfig(ctx context.Context, botID, targetID string, config settings.ToolApprovalConfig) error {
+	if s == nil || s.store == nil {
+		return errors.New("remote workspace service not configured")
 	}
-	entry, err := client.Stat(ctx, "/")
+	record, err := s.getRecord(ctx, botID, targetID)
+	if err != nil {
+		return err
+	}
+	return s.updateToolApprovalConfig(ctx, record, settings.NormalizeToolApprovalConfig(config))
+}
+
+func (s *RemoteWorkspaceService) updateToolApprovalConfig(ctx context.Context, record dbstore.BotRemoteRuntimeBindingRecord, config settings.ToolApprovalConfig) error {
+	raw, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	return s.store.UpdateToolApproval(ctx, record.BotID, record.ID, raw)
+}
+
+func (s *RemoteWorkspaceService) DeleteMount(ctx context.Context, botID, targetID string) error {
+	if s == nil || s.store == nil {
+		return errors.New("remote workspace service not configured")
+	}
+	botID, ok := canonicalWorkspaceUUID(botID)
+	if !ok {
+		return ErrWorkspaceTargetNotFound
+	}
+	targetID, ok = canonicalWorkspaceUUID(targetID)
+	if !ok {
+		return ErrWorkspaceTargetNotFound
+	}
+	if err := s.store.DeleteMount(ctx, botID, targetID); errors.Is(err, db.ErrNotFound) {
+		return ErrWorkspaceTargetNotFound
+	} else {
+		return err
+	}
+}
+
+func (s *RemoteWorkspaceService) ResolveMount(ctx context.Context, botID, targetID string) (ResolvedWorkspaceTarget, error) {
+	record, err := s.getRecord(ctx, botID, targetID)
+	if err != nil {
+		return ResolvedWorkspaceTarget{}, err
+	}
+	return s.resolveRecord(record)
+}
+
+func (s *RemoteWorkspaceService) resolveRecord(record dbstore.BotRemoteRuntimeBindingRecord) (ResolvedWorkspaceTarget, error) {
+	client, connection, err := s.clientForRecord(record)
+	if err != nil {
+		return ResolvedWorkspaceTarget{}, err
+	}
+	return ResolvedWorkspaceTarget{
+		TargetID:      record.ID,
+		Kind:          WorkspaceTargetRemote,
+		Name:          record.RuntimeName,
+		Primary:       record.IsPrimary,
+		WorkspacePath: record.WorkspacePath,
+		Client:        client,
+		Info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendRemote,
+			OS:             connection.Info.OS,
+			DefaultWorkDir: remoteWorkspaceWorkDir(connection.Info, record.WorkspacePath),
+		},
+		Approval: toolApprovalConfig(record.ToolApproval),
+	}, nil
+}
+
+func (s *RemoteWorkspaceService) ResolvePrimary(ctx context.Context, botID string) (ResolvedWorkspaceTarget, bool, error) {
+	record, err := s.getPrimaryRecord(ctx, botID)
+	if errors.Is(err, ErrRemoteWorkspaceNotBound) {
+		return ResolvedWorkspaceTarget{}, false, nil
+	}
+	if err != nil {
+		return ResolvedWorkspaceTarget{}, false, err
+	}
+	target, err := s.resolveRecord(record)
+	return target, true, err
+}
+
+func (s *RemoteWorkspaceService) EnsurePrimaryReady(ctx context.Context, botID string) (bool, error) {
+	target, primary, err := s.ResolvePrimary(ctx, botID)
+	if err != nil || !primary {
+		return primary, err
+	}
+	entry, err := target.Client.Stat(ctx, "/")
 	if err != nil {
 		return true, fmt.Errorf("check remote workspace: %w", err)
 	}
@@ -200,62 +297,183 @@ func (s *RemoteWorkspaceService) EnsureReady(ctx context.Context, botID string) 
 	return true, nil
 }
 
-func (s *RemoteWorkspaceService) record(ctx context.Context, botID string) (dbstore.BotRemoteRuntimeBindingRecord, bool, error) {
+func (s *RemoteWorkspaceService) listRecords(ctx context.Context, botID string) ([]dbstore.BotRemoteRuntimeBindingRecord, error) {
 	if s == nil || s.store == nil {
-		return dbstore.BotRemoteRuntimeBindingRecord{}, false, nil
+		return nil, nil
 	}
 	botID, ok := canonicalWorkspaceUUID(botID)
 	if !ok {
-		return dbstore.BotRemoteRuntimeBindingRecord{}, false, nil
+		return nil, userruntime.ErrInvalidInput
 	}
-	record, err := s.store.GetBotRemoteRuntimeBinding(ctx, botID)
-	if errors.Is(err, db.ErrNotFound) {
-		return dbstore.BotRemoteRuntimeBindingRecord{}, false, nil
-	}
-	if err != nil {
-		return dbstore.BotRemoteRuntimeBindingRecord{}, false, err
-	}
-	return record, true, nil
+	return s.store.ListMounts(ctx, botID)
 }
 
-func (s *RemoteWorkspaceService) binding(record dbstore.BotRemoteRuntimeBindingRecord) RemoteWorkspaceBinding {
-	binding := RemoteWorkspaceBinding{
-		BotID: record.BotID, RuntimeID: record.RuntimeID, RuntimeName: record.RuntimeName,
-		WorkspacePath: record.WorkspacePath, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
+func (s *RemoteWorkspaceService) getRecord(ctx context.Context, botID, targetID string) (dbstore.BotRemoteRuntimeBindingRecord, error) {
+	if s == nil || s.store == nil {
+		return dbstore.BotRemoteRuntimeBindingRecord{}, ErrWorkspaceTargetNotFound
+	}
+	botID, botOK := canonicalWorkspaceUUID(botID)
+	targetID, targetOK := canonicalWorkspaceUUID(targetID)
+	if !botOK || !targetOK {
+		return dbstore.BotRemoteRuntimeBindingRecord{}, ErrWorkspaceTargetNotFound
+	}
+	record, err := s.store.GetMount(ctx, botID, targetID)
+	if errors.Is(err, db.ErrNotFound) {
+		return dbstore.BotRemoteRuntimeBindingRecord{}, ErrWorkspaceTargetNotFound
+	}
+	return record, err
+}
+
+func (s *RemoteWorkspaceService) getPrimaryRecord(ctx context.Context, botID string) (dbstore.BotRemoteRuntimeBindingRecord, error) {
+	if s == nil || s.store == nil {
+		return dbstore.BotRemoteRuntimeBindingRecord{}, ErrRemoteWorkspaceNotBound
+	}
+	botID, ok := canonicalWorkspaceUUID(botID)
+	if !ok {
+		return dbstore.BotRemoteRuntimeBindingRecord{}, userruntime.ErrInvalidInput
+	}
+	record, err := s.store.GetPrimaryMount(ctx, botID)
+	if errors.Is(err, db.ErrNotFound) {
+		return dbstore.BotRemoteRuntimeBindingRecord{}, ErrRemoteWorkspaceNotBound
+	}
+	return record, err
+}
+
+func (s *RemoteWorkspaceService) clientForRecord(record dbstore.BotRemoteRuntimeBindingRecord) (*bridge.Client, *userruntime.Connection, error) {
+	if record.RuntimeUserID != record.BotOwnerUserID {
+		return nil, nil, ErrRemoteRuntimeOwnerMismatch
+	}
+	if record.RuntimeRevoked {
+		return nil, nil, ErrRemoteRuntimeRevoked
+	}
+	if s.runtimes == nil {
+		return nil, nil, ErrRemoteRuntimeOffline
+	}
+	connection, ok := s.runtimes.Connection(record.RuntimeID)
+	if !ok || connection == nil || connection.Client == nil {
+		return nil, nil, ErrRemoteRuntimeOffline
+	}
+	if !supportsRemoteWorkspace(connection.Info.Capabilities) {
+		return nil, nil, ErrRemoteRuntimeClientUpdateNeeded
+	}
+	client := connection.Client.WithOutgoingMetadata(map[string]string{
+		RemoteWorkspaceIDMetadataKey:   record.BotID,
+		RemoteWorkspacePathMetadataKey: record.WorkspacePath,
+	})
+	if client == nil {
+		return nil, nil, ErrRemoteRuntimeOffline
+	}
+	return client, connection, nil
+}
+
+func (s *RemoteWorkspaceService) target(record dbstore.BotRemoteRuntimeBindingRecord) WorkspaceTarget {
+	approval := toolApprovalConfig(record.ToolApproval)
+	target := WorkspaceTarget{
+		TargetID:           record.ID,
+		Kind:               WorkspaceTargetRemote,
+		RuntimeID:          record.RuntimeID,
+		Name:               record.RuntimeName,
+		Primary:            record.IsPrimary,
+		WorkspacePath:      record.WorkspacePath,
+		ToolApproval:       WorkspaceToolApprovalModes(approval),
+		ToolApprovalConfig: approval,
 	}
 	switch {
 	case record.RuntimeUserID != record.BotOwnerUserID:
-		// A transferred Bot must not reveal the previous owner's device name,
-		// runtime ID, or path. Keep only enough state for the new owner to see
-		// that an invalid binding exists and remove it.
-		binding.RuntimeID = ""
-		binding.RuntimeName = ""
-		binding.WorkspacePath = ""
-		binding.Status = RemoteBindingStatusOwnerMismatch
+		target.Name = ""
+		target.RuntimeID = ""
+		target.WorkspacePath = ""
+		target.Status = WorkspaceTargetStatusOwnerMismatch
 	case record.RuntimeRevoked:
-		binding.Status = RemoteBindingStatusRevoked
+		target.Status = WorkspaceTargetStatusRevoked
+	case s.runtimes == nil:
+		target.Status = WorkspaceTargetStatusOffline
 	default:
-		if s.runtimes == nil {
-			binding.Status = RemoteBindingStatusOffline
-			break
-		}
 		connection, online := s.runtimes.Connection(record.RuntimeID)
-		binding.Online = online
-		if !online || connection == nil {
-			binding.Status = RemoteBindingStatusOffline
-			break
-		}
-		binding.Hostname = connection.Info.Hostname
-		binding.OS = connection.Info.OS
-		binding.Arch = connection.Info.Arch
-		binding.Capabilities = append([]string(nil), connection.Info.Capabilities...)
-		if !supportsRemoteWorkspace(connection.Info.Capabilities) {
-			binding.Status = RemoteBindingStatusClientUpdateRequired
-		} else {
-			binding.Status = RemoteBindingStatusOnline
+		target.Online = online && connection != nil && connection.Client != nil
+		switch {
+		case !target.Online:
+			target.Status = WorkspaceTargetStatusOffline
+		case !supportsRemoteWorkspace(connection.Info.Capabilities):
+			target.Status = WorkspaceTargetStatusClientUpdateRequired
+		default:
+			target.Status = WorkspaceTargetStatusOnline
 		}
 	}
-	return binding
+	return target
+}
+
+func DefaultRemoteToolApprovalConfig() settings.ToolApprovalConfig {
+	config := settings.ToolApprovalConfig{
+		Enabled: true,
+		Read: settings.ToolApprovalFilePolicy{
+			Mode: settings.ToolApprovalAllow, BypassGlobs: []string{}, ForceReviewGlobs: []string{},
+		},
+		Write: settings.ToolApprovalFilePolicy{
+			Mode: settings.ToolApprovalAsk, BypassGlobs: []string{}, ForceReviewGlobs: []string{},
+		},
+		Exec: settings.ToolApprovalExecPolicy{
+			Mode: settings.ToolApprovalAsk, BypassCommands: []string{}, ForceReviewCommands: []string{},
+		},
+	}
+	return settings.NormalizeToolApprovalConfig(config)
+}
+
+func toolApprovalConfig(raw dbstore.JSON) settings.ToolApprovalConfig {
+	if len(raw) == 0 {
+		return DefaultRemoteToolApprovalConfig()
+	}
+	var config settings.ToolApprovalConfig
+	if err := json.Unmarshal(raw, &config); err != nil {
+		return DefaultRemoteToolApprovalConfig()
+	}
+	return settings.NormalizeToolApprovalConfig(config)
+}
+
+func WorkspaceToolApprovalModes(config settings.ToolApprovalConfig) WorkspaceTargetToolApproval {
+	if !config.Enabled && config.Read.Mode == "" && config.Write.Mode == "" && config.Exec.Mode == "" {
+		return WorkspaceTargetToolApproval{Read: settings.ToolApprovalAllow, Write: settings.ToolApprovalAllow, Exec: settings.ToolApprovalAllow}
+	}
+	return WorkspaceTargetToolApproval{
+		Read:  effectiveFileApprovalMode(config.Read),
+		Write: effectiveFileApprovalMode(config.Write),
+		Exec:  effectiveExecApprovalMode(config.Exec),
+	}
+}
+
+func ApplyWorkspaceToolApprovalModes(config settings.ToolApprovalConfig, modes WorkspaceTargetToolApproval) (settings.ToolApprovalConfig, error) {
+	if !validToolApprovalMode(modes.Read) || !validToolApprovalMode(modes.Write) || !validToolApprovalMode(modes.Exec) {
+		return settings.ToolApprovalConfig{}, ErrInvalidWorkspaceToolApprovalMode
+	}
+	config.Enabled = true
+	config.Read.Mode = modes.Read
+	config.Write.Mode = modes.Write
+	config.Exec.Mode = modes.Exec
+	return settings.NormalizeToolApprovalConfig(config), nil
+}
+
+func effectiveFileApprovalMode(policy settings.ToolApprovalFilePolicy) settings.ToolApprovalMode {
+	if validToolApprovalMode(policy.Mode) {
+		return policy.Mode
+	}
+	if policy.RequireApproval {
+		return settings.ToolApprovalAsk
+	}
+	return settings.ToolApprovalAllow
+}
+
+func effectiveExecApprovalMode(policy settings.ToolApprovalExecPolicy) settings.ToolApprovalMode {
+	if validToolApprovalMode(policy.Mode) {
+		return policy.Mode
+	}
+	if policy.RequireApproval {
+		return settings.ToolApprovalAsk
+	}
+	return settings.ToolApprovalAllow
+}
+
+func validToolApprovalMode(mode settings.ToolApprovalMode) bool {
+	return mode == settings.ToolApprovalAllow || mode == settings.ToolApprovalAsk || mode == settings.ToolApprovalDeny
 }
 
 func normalizeRemoteWorkspacePath(raw, botID string) (string, error) {

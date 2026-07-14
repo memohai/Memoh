@@ -438,7 +438,7 @@ const searchIndex = computed(() => {
     { tab: 'general', key: 'bots.settings.dangerZone', keywords: ['delete', 'remove'] },
     { tab: 'container', key: 'bots.container.dataTitle', keywords: ['docker', 'image', 'gpu', 'volume'] },
     { tab: 'container', key: 'bots.container.metricsTitle', keywords: ['cpu', 'ram', 'storage'] },
-    { tab: 'remote-runtime', key: 'bots.remoteRuntime.title', keywords: ['remote runtime', 'computer', 'workspace', '远程', '电脑', '工作区', 'リモート'] },
+    { tab: 'remote-runtime', key: 'bots.remoteRuntime.title', keywords: ['files', 'commands', 'computer', 'server', '文件', '命令', '电脑', '服务器', 'ファイル', 'コマンド'] },
     { tab: 'memory', key: 'bots.memory.title', keywords: ['vector', 'database', 'pgvector', 'embed'] },
     { tab: 'channels', key: 'bots.channels.configured', keywords: ['telegram', 'discord', 'wechat', 'slack'] },
     { tab: 'access', key: 'bots.access.title', keywords: ['permissions', 'acl', 'rules', 'allow', 'deny'] },

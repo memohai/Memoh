@@ -221,11 +221,14 @@ type BotPluginResource struct {
 }
 
 type BotRemoteRuntimeBinding struct {
-	BotID         pgtype.UUID        `json:"bot_id"`
-	RuntimeID     pgtype.UUID        `json:"runtime_id"`
-	WorkspacePath string             `json:"workspace_path"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ID                 pgtype.UUID        `json:"id"`
+	BotID              pgtype.UUID        `json:"bot_id"`
+	RuntimeID          pgtype.UUID        `json:"runtime_id"`
+	WorkspacePath      string             `json:"workspace_path"`
+	IsPrimary          bool               `json:"is_primary"`
+	ToolApprovalConfig []byte             `json:"tool_approval_config"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
 type BotSession struct {

@@ -954,6 +954,7 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 			SourcePlatform:               p.CurrentPlatform,
 			ReplyTarget:                  p.ReplyTarget,
 			ConversationType:             p.ConversationType,
+			WorkspaceTargeted:            isWorkspaceTargetTool(call.ToolName),
 		}
 		forcedApprovalReason, forcedApproval := agentpkg.HookForcedApprovalReason(ctx)
 		if r.toolApproval == nil {
@@ -965,14 +966,24 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 			}
 			return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
 		}
-		if !forcedApproval {
-			eval, err := r.toolApproval.EvaluatePolicy(ctx, input)
-			if err != nil {
-				return sdk.ToolApprovalResult{}, err
-			}
-			if eval.Decision == toolapproval.DecisionBypass {
-				return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
-			}
+		eval, err := r.toolApproval.EvaluatePolicy(ctx, input)
+		if err != nil {
+			return sdk.ToolApprovalResult{}, err
+		}
+		input.ExecutionLocation = eval.ExecutionLocation
+		locationMetadata := executionLocationResultMetadata(eval.ExecutionLocation)
+		if eval.Decision == toolapproval.DecisionDeny {
+			return r.limitToolApprovalResult(sdk.ToolApprovalResult{
+				Decision: sdk.ToolApprovalDecisionRejected,
+				Reason:   toolapproval.PolicyDeniedReason,
+				Metadata: locationMetadata,
+			}, call.ToolName), nil
+		}
+		if eval.Decision == toolapproval.DecisionBypass && !forcedApproval {
+			return sdk.ToolApprovalResult{
+				Decision: sdk.ToolApprovalDecisionApproved,
+				Metadata: locationMetadata,
+			}, nil
 		}
 		if !isInteractiveApprovalSession(p.SessionType) {
 			req, err := r.toolApproval.CreatePending(ctx, input)
@@ -991,37 +1002,42 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 				Metadata:   approvalResultMetadata(rejected),
 			}, call.ToolName), nil
 		}
-		if forcedApproval {
-			req, err := r.toolApproval.CreatePending(ctx, input)
-			if err != nil {
-				return sdk.ToolApprovalResult{}, err
-			}
-			return sdk.ToolApprovalResult{
-				Decision:   sdk.ToolApprovalDecisionDeferred,
-				ApprovalID: req.ID,
-				Metadata:   approvalResultMetadata(req),
-			}, nil
-		}
-		eval, err := r.toolApproval.Evaluate(ctx, input)
+		req, err := r.toolApproval.CreatePending(ctx, input)
 		if err != nil {
 			return sdk.ToolApprovalResult{}, err
 		}
 		return sdk.ToolApprovalResult{
 			Decision:   sdk.ToolApprovalDecisionDeferred,
-			ApprovalID: eval.Request.ID,
-			Metadata:   approvalResultMetadata(eval.Request),
+			ApprovalID: req.ID,
+			Metadata:   approvalResultMetadata(req),
 		}, nil
 	}
 }
 
+func isWorkspaceTargetTool(toolName string) bool {
+	_, ok := toolapproval.OperationForTool(toolName)
+	return ok
+}
+
 func approvalResultMetadata(req toolapproval.Request) map[string]any {
-	return map[string]any{
+	metadata := map[string]any{
 		"short_id":     req.ShortID,
 		"status":       req.Status,
 		"tool_name":    req.ToolName,
 		"operation":    req.Operation,
 		"tool_call_id": req.ToolCallID,
 	}
+	if req.ExecutionLocation != nil {
+		metadata[toolapproval.ExecutionLocationMetadataKey] = req.ExecutionLocation
+	}
+	return metadata
+}
+
+func executionLocationResultMetadata(location *toolapproval.ExecutionLocation) map[string]any {
+	if location == nil {
+		return nil
+	}
+	return map[string]any{toolapproval.ExecutionLocationMetadataKey: location}
 }
 
 func isInteractiveApprovalSession(sessionType string) bool {

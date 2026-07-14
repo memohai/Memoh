@@ -248,6 +248,32 @@ func provideBridgeProvider(manage *workspace.Manager) bridge.Provider {
 	return manage
 }
 
+type nativeWorkspaceBridgeProvider struct {
+	manager *workspace.Manager
+}
+
+type workspaceTargetPolicyResolver struct {
+	manager *workspace.Manager
+}
+
+func (r workspaceTargetPolicyResolver) ResolveWorkspaceTargetPolicy(ctx context.Context, botID, targetID string) (toolapproval.WorkspaceTargetPolicy, error) {
+	resolved, err := r.manager.ResolveWorkspaceTarget(ctx, botID, targetID)
+	if err != nil {
+		return toolapproval.WorkspaceTargetPolicy{}, err
+	}
+	return toolapproval.WorkspaceTargetPolicy{
+		TargetID:      resolved.TargetID,
+		Kind:          resolved.Kind,
+		Name:          resolved.Name,
+		WorkspacePath: resolved.WorkspacePath,
+		Config:        resolved.Approval,
+	}, nil
+}
+
+func (p nativeWorkspaceBridgeProvider) MCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
+	return p.manager.NativeMCPClient(ctx, botID)
+}
+
 func providePluginBridgeProvider(provider bridge.Provider) pluginspkg.BridgeProvider {
 	return pluginspkg.BridgeProvider{Provider: provider}
 }
@@ -471,6 +497,7 @@ func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *mod
 	resolver.SetBackgroundManager(bgManager)
 	if toolApproval != nil {
 		toolApproval.SetHookService(hookService)
+		toolApproval.SetWorkspaceTargetPolicyResolver(workspaceTargetPolicyResolver{manager: workspaceManager})
 	}
 	resolver.SetToolApprovalService(toolApproval)
 	resolver.SetUserInputService(userInput)
@@ -794,7 +821,7 @@ func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, reg
 		agenttools.NewWebProvider(log, settingsService, searchProviderService),
 		agenttools.NewContainerProvider(log, manager, bgManager, config.DefaultDataMount, hookService),
 		agenttools.NewBackgroundProvider(log, bgManager),
-		agenttools.NewBrowserProvider(log, settingsService, manager, manager, config.DefaultDataMount),
+		agenttools.NewBrowserProvider(log, settingsService, nativeWorkspaceBridgeProvider{manager: manager}, manager, config.DefaultDataMount),
 		agenttools.NewEmailProvider(log, emailService, emailManager),
 		agenttools.NewWebFetchProvider(log, settingsService, fetchProviderService),
 		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService, bgManager),

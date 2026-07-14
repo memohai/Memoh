@@ -21,6 +21,7 @@ type fakeFlowService struct {
 	getResult    Request
 	getErr       error
 	getCalls     int
+	createCalls  int
 	waitCalls    int
 	waiters      int
 }
@@ -30,6 +31,7 @@ func (f *fakeFlowService) EvaluatePolicy(context.Context, CreatePendingInput) (E
 }
 
 func (f *fakeFlowService) CreatePending(_ context.Context, input CreatePendingInput) (Request, error) {
+	f.createCalls++
 	if f.createErr != nil {
 		return Request{}, f.createErr
 	}
@@ -108,6 +110,28 @@ func TestRunFlowPolicyBypass(t *testing.T) {
 	result, err := RunFlow(context.Background(), svc, flow)
 	if err != nil || !result.Approved {
 		t.Fatalf("RunFlow() = %+v, %v; want approved", result, err)
+	}
+}
+
+func TestRunFlowPolicyDenyDoesNotCreatePendingRequest(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeFlowService{evaluation: Evaluation{Decision: DecisionDeny}}
+	flow := flowInputFor(svc)
+	emitted := false
+	flow.Emit = func(Request) bool {
+		emitted = true
+		return true
+	}
+	result, err := RunFlow(context.Background(), svc, flow)
+	if err != nil {
+		t.Fatalf("RunFlow() error = %v", err)
+	}
+	if result.Approved || result.Status != StatusRejected || result.DecisionReason != PolicyDeniedReason {
+		t.Fatalf("RunFlow() = %+v, want policy rejection", result)
+	}
+	if svc.createCalls != 0 || svc.waitCalls != 0 || emitted {
+		t.Fatalf("deny created approval flow: createCalls=%d waitCalls=%d emitted=%v", svc.createCalls, svc.waitCalls, emitted)
 	}
 }
 

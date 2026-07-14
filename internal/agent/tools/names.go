@@ -7,12 +7,15 @@ import (
 // ToolName identifies a built-in Memoh agent tool.
 type ToolName = toolname.Name
 
-func ToolRead() ToolName                { return toolname.ToolRead() }
-func ToolWrite() ToolName               { return toolname.ToolWrite() }
-func ToolList() ToolName                { return toolname.ToolList() }
-func ToolEdit() ToolName                { return toolname.ToolEdit() }
-func ToolExec() ToolName                { return toolname.ToolExec() }
-func ToolApplyPatch() ToolName          { return toolname.ToolApplyPatch() }
+func ToolRead() ToolName       { return toolname.ToolRead() }
+func ToolWrite() ToolName      { return toolname.ToolWrite() }
+func ToolList() ToolName       { return toolname.ToolList() }
+func ToolEdit() ToolName       { return toolname.ToolEdit() }
+func ToolExec() ToolName       { return toolname.ToolExec() }
+func ToolApplyPatch() ToolName { return toolname.ToolApplyPatch() }
+func ToolListExecutionLocations() ToolName {
+	return toolname.ToolListExecutionLocations()
+}
 func ToolListBackground() ToolName      { return toolname.ToolListBackground() }
 func ToolGetBackgroundStatus() ToolName { return toolname.ToolGetBackgroundStatus() }
 func ToolKillBackground() ToolName      { return toolname.ToolKillBackground() }

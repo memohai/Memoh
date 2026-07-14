@@ -11,144 +11,251 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
-	ctr "github.com/memohai/memoh/internal/container"
 	"github.com/memohai/memoh/internal/db"
+	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/userruntime"
 	"github.com/memohai/memoh/internal/workspace"
 )
 
 type botRemoteRuntimeService interface {
-	Bind(ctx context.Context, botID string, req workspace.BindRemoteWorkspaceRequest) (workspace.RemoteWorkspaceBinding, error)
-	Get(ctx context.Context, botID string) (workspace.RemoteWorkspaceBinding, error)
-	Unbind(ctx context.Context, botID string) error
+	Mount(ctx context.Context, botID, runtimeID string, req workspace.MountRemoteWorkspaceRequest) (workspace.WorkspaceTarget, error)
+	GetMount(ctx context.Context, botID, targetID string) (workspace.WorkspaceTarget, error)
+	SetPrimary(ctx context.Context, botID, targetID string) error
+	UpdateToolApprovalConfig(ctx context.Context, botID, targetID string, config settings.ToolApprovalConfig) error
+	DeleteMount(ctx context.Context, botID, targetID string) error
 }
 
-type botWorkspaceStopper interface {
-	StopBot(ctx context.Context, botID string) error
+type workspaceTargetManager interface {
+	ListWorkspaceTargets(ctx context.Context, botID string) ([]workspace.WorkspaceTarget, error)
+}
+
+type workspaceTargetSettings interface {
+	GetBot(ctx context.Context, botID string) (settings.Settings, error)
+	UpsertBot(ctx context.Context, botID string, req settings.UpsertRequest) (settings.Settings, error)
 }
 
 type BotRemoteRuntimeHandler struct {
 	log        *slog.Logger
 	service    botRemoteRuntimeService
-	workspaces botWorkspaceStopper
+	workspaces workspaceTargetManager
+	settings   workspaceTargetSettings
 	bots       *bots.Service
 	accounts   *accounts.Service
 }
 
-func NewBotRemoteRuntimeHandler(log *slog.Logger, service *workspace.RemoteWorkspaceService, manager *workspace.Manager, botService *bots.Service, accountService *accounts.Service) *BotRemoteRuntimeHandler {
+func NewBotRemoteRuntimeHandler(
+	log *slog.Logger,
+	service *workspace.RemoteWorkspaceService,
+	manager *workspace.Manager,
+	settingsService *settings.Service,
+	botService *bots.Service,
+	accountService *accounts.Service,
+) *BotRemoteRuntimeHandler {
 	if log == nil {
 		log = slog.Default()
 	}
-	handler := &BotRemoteRuntimeHandler{
-		log: log.With(slog.String("handler", "bot_remote_runtime")), service: service,
-		bots: botService, accounts: accountService,
+	return &BotRemoteRuntimeHandler{
+		log:        log.With(slog.String("handler", "workspace_targets")),
+		service:    service,
+		workspaces: manager,
+		settings:   settingsService,
+		bots:       botService,
+		accounts:   accountService,
 	}
-	if manager != nil {
-		handler.workspaces = manager
-	}
-	return handler
 }
 
 func (h *BotRemoteRuntimeHandler) Register(e *echo.Echo) {
-	g := e.Group("/bots/:bot_id/remote-runtime")
-	g.PUT("", h.Bind)
-	g.GET("", h.Get)
-	g.DELETE("", h.Unbind)
+	g := e.Group("/bots/:bot_id/workspace-targets")
+	g.GET("", h.List)
+	g.PUT("/remotes/:runtime_id", h.Mount)
+	g.DELETE("/:target_id", h.Delete)
+	g.PUT("/primary", h.SetPrimary)
+	g.PUT("/:target_id/tool-approval", h.UpdateToolApproval)
 }
 
-// Bind godoc
-// @Summary Bind a Bot workspace to a Remote Runtime
-// @Description Route the Bot's persistent workspace through a user-owned Remote Runtime. An omitted workspace_path uses bots/{bot_id}; multiple Bots may explicitly share the same path.
-// @Tags bot-remote-runtime
+// List godoc
+// @Summary List a Bot's workspace targets
+// @Tags workspace-targets
+// @Produce json
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {object} workspace.WorkspaceTargetsResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/workspace-targets [get].
+func (h *BotRemoteRuntimeHandler) List(c echo.Context) error {
+	botID, err := h.requirePermission(c, bots.PermissionWorkspaceRead)
+	if err != nil {
+		return err
+	}
+	targets, err := h.workspaces.ListWorkspaceTargets(c.Request().Context(), botID)
+	if err != nil {
+		return workspaceTargetHTTPError(h.log, err)
+	}
+	return c.JSON(http.StatusOK, workspace.WorkspaceTargetsResponse{Targets: targets})
+}
+
+// Mount godoc
+// @Summary Add or update a Remote Runtime workspace target
+// @Tags workspace-targets
 // @Accept json
 // @Produce json
 // @Param bot_id path string true "Bot ID"
-// @Param request body workspace.BindRemoteWorkspaceRequest true "Remote workspace binding"
-// @Success 200 {object} workspace.RemoteWorkspaceBinding
+// @Param runtime_id path string true "Runtime ID"
+// @Param request body workspace.MountRemoteWorkspaceRequest true "Remote workspace mount"
+// @Success 200 {object} workspace.WorkspaceTarget
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/remote-runtime [put].
-func (h *BotRemoteRuntimeHandler) Bind(c echo.Context) error {
-	botID, err := h.requireManage(c)
+// @Router /bots/{bot_id}/workspace-targets/remotes/{runtime_id} [put].
+func (h *BotRemoteRuntimeHandler) Mount(c echo.Context) error {
+	botID, err := h.requirePermission(c, bots.PermissionManage)
 	if err != nil {
 		return err
 	}
-	var req workspace.BindRemoteWorkspaceRequest
+	var req workspace.MountRemoteWorkspaceRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	// Once bound, the container is hidden from status and StopBot refuses,
-	// so a still-running container would keep consuming resources with no
-	// stop path in the UI. Stop it before the first bind takes effect.
-	h.stopStaleContainer(c.Request().Context(), botID)
-	binding, err := h.service.Bind(c.Request().Context(), botID, req)
+	target, err := h.service.Mount(c.Request().Context(), botID, c.Param("runtime_id"), req)
 	if err != nil {
-		return botRemoteRuntimeHTTPError(h.log, err)
+		return workspaceTargetHTTPError(h.log, err)
 	}
-	return c.JSON(http.StatusOK, binding)
+	return c.JSON(http.StatusOK, target)
 }
 
-// stopStaleContainer is best-effort: an absent container or an existing
-// binding (rebind) is normal, and a container backend failure must not
-// block the binding itself.
-func (h *BotRemoteRuntimeHandler) stopStaleContainer(ctx context.Context, botID string) {
-	if h.workspaces == nil {
-		return
-	}
-	err := h.workspaces.StopBot(ctx, botID)
-	if err == nil || errors.Is(err, ctr.ErrNotSupported) || errors.Is(err, workspace.ErrContainerNotFound) {
-		return
-	}
-	h.log.Warn("stop stale container before remote bind failed",
-		slog.String("bot_id", botID), slog.Any("error", err))
-}
-
-// Get godoc
-// @Summary Get a Bot's Remote Runtime workspace binding
-// @Tags bot-remote-runtime
-// @Produce json
+// Delete godoc
+// @Summary Delete a Remote Runtime workspace target
+// @Description Remote files and the Native workspace are not deleted.
+// @Tags workspace-targets
 // @Param bot_id path string true "Bot ID"
-// @Success 200 {object} workspace.RemoteWorkspaceBinding
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/remote-runtime [get].
-func (h *BotRemoteRuntimeHandler) Get(c echo.Context) error {
-	botID, err := h.requireManage(c)
-	if err != nil {
-		return err
-	}
-	binding, err := h.service.Get(c.Request().Context(), botID)
-	if err != nil {
-		return botRemoteRuntimeHTTPError(h.log, err)
-	}
-	return c.JSON(http.StatusOK, binding)
-}
-
-// Unbind godoc
-// @Summary Remove a Bot's Remote Runtime workspace binding
-// @Description Stops routing new workspace calls to the Remote Runtime. Remote files are not deleted.
-// @Tags bot-remote-runtime
-// @Param bot_id path string true "Bot ID"
+// @Param target_id path string true "Workspace target ID"
 // @Success 204 "No Content"
+// @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/remote-runtime [delete].
-func (h *BotRemoteRuntimeHandler) Unbind(c echo.Context) error {
-	botID, err := h.requireManage(c)
+// @Router /bots/{bot_id}/workspace-targets/{target_id} [delete].
+func (h *BotRemoteRuntimeHandler) Delete(c echo.Context) error {
+	botID, err := h.requirePermission(c, bots.PermissionManage)
 	if err != nil {
 		return err
 	}
-	if err := h.service.Unbind(c.Request().Context(), botID); err != nil {
-		return botRemoteRuntimeHTTPError(h.log, err)
+	if strings.TrimSpace(c.Param("target_id")) == workspace.WorkspaceTargetNative {
+		return echo.NewHTTPError(http.StatusBadRequest, "native workspace target cannot be deleted")
+	}
+	if err := h.service.DeleteMount(c.Request().Context(), botID, c.Param("target_id")); err != nil {
+		return workspaceTargetHTTPError(h.log, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *BotRemoteRuntimeHandler) requireManage(c echo.Context) (string, error) {
+// SetPrimary godoc
+// @Summary Set a Bot's Primary workspace target
+// @Tags workspace-targets
+// @Accept json
+// @Param bot_id path string true "Bot ID"
+// @Param request body workspace.SetPrimaryWorkspaceTargetRequest true "Primary target"
+// @Success 204 "No Content"
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /bots/{bot_id}/workspace-targets/primary [put].
+func (h *BotRemoteRuntimeHandler) SetPrimary(c echo.Context) error {
+	botID, err := h.requirePermission(c, bots.PermissionManage)
+	if err != nil {
+		return err
+	}
+	var req workspace.SetPrimaryWorkspaceTargetRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if strings.TrimSpace(req.TargetID) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "target_id is required")
+	}
+	if err := h.service.SetPrimary(c.Request().Context(), botID, req.TargetID); err != nil {
+		return workspaceTargetHTTPError(h.log, err)
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+// UpdateToolApproval godoc
+// @Summary Update tool approval for one workspace target
+// @Description The read/write/exec fields are mode shortcuts. tool_approval_config preserves and updates advanced bypass/force rules.
+// @Tags workspace-targets
+// @Accept json
+// @Param bot_id path string true "Bot ID"
+// @Param target_id path string true "Workspace target ID"
+// @Param request body workspace.UpdateWorkspaceTargetToolApprovalRequest true "Target tool approval"
+// @Success 204 "No Content"
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /bots/{bot_id}/workspace-targets/{target_id}/tool-approval [put].
+func (h *BotRemoteRuntimeHandler) UpdateToolApproval(c echo.Context) error {
+	botID, err := h.requirePermission(c, bots.PermissionManage)
+	if err != nil {
+		return err
+	}
+	var req workspace.UpdateWorkspaceTargetToolApprovalRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	targetID := strings.TrimSpace(c.Param("target_id"))
+	config, err := h.resolveToolApprovalUpdate(c.Request().Context(), botID, targetID, req)
+	if err != nil {
+		return workspaceTargetHTTPError(h.log, err)
+	}
+	if targetID == workspace.WorkspaceTargetNative {
+		if h.settings == nil {
+			return workspaceTargetHTTPError(h.log, errors.New("settings service not configured"))
+		}
+		_, err = h.settings.UpsertBot(c.Request().Context(), botID, settings.UpsertRequest{ToolApprovalConfig: &config})
+	} else {
+		err = h.service.UpdateToolApprovalConfig(c.Request().Context(), botID, targetID, config)
+	}
+	if err != nil {
+		return workspaceTargetHTTPError(h.log, err)
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *BotRemoteRuntimeHandler) resolveToolApprovalUpdate(
+	ctx context.Context,
+	botID, targetID string,
+	req workspace.UpdateWorkspaceTargetToolApprovalRequest,
+) (settings.ToolApprovalConfig, error) {
+	var config settings.ToolApprovalConfig
+	if targetID == workspace.WorkspaceTargetNative {
+		if h.settings == nil {
+			return config, errors.New("settings service not configured")
+		}
+		current, err := h.settings.GetBot(ctx, botID)
+		if err != nil {
+			return config, err
+		}
+		config = current.ToolApprovalConfig
+	} else {
+		target, err := h.service.GetMount(ctx, botID, targetID)
+		if err != nil {
+			return config, err
+		}
+		config = target.ToolApprovalConfig
+	}
+	if req.ToolApprovalConfig != nil {
+		config = settings.NormalizeToolApprovalConfig(*req.ToolApprovalConfig)
+	}
+	hasModes := req.Read != "" || req.Write != "" || req.Exec != ""
+	if !hasModes {
+		if req.ToolApprovalConfig == nil {
+			return config, workspace.ErrInvalidWorkspaceToolApprovalMode
+		}
+		return config, nil
+	}
+	return workspace.ApplyWorkspaceToolApprovalModes(config, workspace.WorkspaceTargetToolApproval{
+		Read: req.Read, Write: req.Write, Exec: req.Exec,
+	})
+}
+
+func (h *BotRemoteRuntimeHandler) requirePermission(c echo.Context, permission string) (string, error) {
 	identityID, err := RequireChannelIdentityID(c)
 	if err != nil {
 		return "", err
@@ -157,23 +264,29 @@ func (h *BotRemoteRuntimeHandler) requireManage(c echo.Context) (string, error) 
 	if botID == "" {
 		return "", echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
 	}
-	if _, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.bots, h.accounts, identityID, botID, bots.PermissionManage); err != nil {
+	if _, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.bots, h.accounts, identityID, botID, permission); err != nil {
 		return "", err
 	}
 	return botID, nil
 }
 
-func botRemoteRuntimeHTTPError(log *slog.Logger, err error) error {
+func workspaceTargetHTTPError(log *slog.Logger, err error) error {
 	switch {
-	case errors.Is(err, workspace.ErrInvalidRemoteWorkspacePath), errors.Is(err, userruntime.ErrInvalidInput):
+	case errors.Is(err, workspace.ErrInvalidRemoteWorkspacePath),
+		errors.Is(err, workspace.ErrInvalidWorkspaceToolApprovalMode),
+		errors.Is(err, userruntime.ErrInvalidInput):
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	case errors.Is(err, workspace.ErrRemoteRuntimeNotUsable):
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
-	case errors.Is(err, workspace.ErrRemoteWorkspaceNotBound), errors.Is(err, db.ErrNotFound):
-		return echo.NewHTTPError(http.StatusNotFound, "remote runtime binding not found")
+	case errors.Is(err, workspace.ErrRemoteRuntimeNotUsable),
+		errors.Is(err, workspace.ErrWorkspaceTargetNotFound),
+		errors.Is(err, db.ErrNotFound):
+		return echo.NewHTTPError(http.StatusNotFound, "workspace target not found")
+	case errors.Is(err, workspace.ErrRemoteRuntimeRevoked),
+		errors.Is(err, workspace.ErrRemoteRuntimeOwnerMismatch),
+		errors.Is(err, workspace.ErrRemoteRuntimeClientUpdateNeeded):
+		return echo.NewHTTPError(http.StatusConflict, err.Error())
 	default:
 		if log != nil {
-			log.Error("bot remote runtime request failed", slog.Any("error", err))
+			log.Error("workspace target request failed", slog.Any("error", err))
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "internal server error")
 	}

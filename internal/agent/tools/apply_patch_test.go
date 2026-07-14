@@ -94,7 +94,7 @@ func TestBuildApplyPatchPlanMultipleOperations(t *testing.T) {
 			"obsolete.txt": "gone\n",
 			"old/name.txt": "old\n",
 		},
-	}, "/data", hunks)
+	}, toolWorkspace{defaultWorkDir: "/data"}, hunks)
 	if err != nil {
 		t.Fatalf("buildApplyPatchPlan() error = %v", err)
 	}
@@ -138,7 +138,7 @@ func TestBuildApplyPatchPlanRejectsMissingContextBeforeCommitPlan(t *testing.T) 
 
 	_, err = buildApplyPatchPlan(context.Background(), applyPatchFakeFS{
 		files: map[string]string{"modify.txt": "original\n"},
-	}, "/data", hunks)
+	}, toolWorkspace{defaultWorkDir: "/data"}, hunks)
 	if err == nil {
 		t.Fatal("expected missing context error")
 	}
@@ -159,7 +159,7 @@ func TestBuildApplyPatchPlanRejectsAddOverExistingFile(t *testing.T) {
 
 	_, err = buildApplyPatchPlan(context.Background(), applyPatchFakeFS{
 		files: map[string]string{"existing.txt": "old\n"},
-	}, "/data", hunks)
+	}, toolWorkspace{defaultWorkDir: "/data"}, hunks)
 	if err == nil {
 		t.Fatal("expected existing-file add error")
 	}
@@ -181,7 +181,7 @@ func TestBuildApplyPatchPlanInsertionOnlyUsesContext(t *testing.T) {
 
 	plan, err := buildApplyPatchPlan(context.Background(), applyPatchFakeFS{
 		files: map[string]string{"notes.txt": "intro\nheading\noutro\n"},
-	}, "/data", hunks)
+	}, toolWorkspace{defaultWorkDir: "/data"}, hunks)
 	if err != nil {
 		t.Fatalf("buildApplyPatchPlan() error = %v", err)
 	}
@@ -208,7 +208,7 @@ func TestBuildApplyPatchPlanMultipleInsertionOnlyChunksUseOriginalPositions(t *t
 
 	plan, err := buildApplyPatchPlan(context.Background(), applyPatchFakeFS{
 		files: map[string]string{"notes.txt": "a\nb\nc\n"},
-	}, "/data", hunks)
+	}, toolWorkspace{defaultWorkDir: "/data"}, hunks)
 	if err != nil {
 		t.Fatalf("buildApplyPatchPlan() error = %v", err)
 	}
@@ -243,14 +243,29 @@ func TestParseApplyPatchAllowsLiteralMarkerContextLines(t *testing.T) {
 }
 
 func TestNormalizeApplyPatchPathRejectsRelativeTraversal(t *testing.T) {
-	if _, err := normalizeApplyPatchPath("../outside.txt", "/data"); err == nil {
+	workspace := toolWorkspace{defaultWorkDir: "/data"}
+	if _, err := normalizeApplyPatchPath("../outside.txt", workspace); err == nil {
 		t.Fatal("expected traversal path to be rejected")
 	}
-	path, err := normalizeApplyPatchPath("/data/src/main.go", "/data")
+	path, err := normalizeApplyPatchPath("/data/src/main.go", workspace)
 	if err != nil {
 		t.Fatalf("normalizeApplyPatchPath() error = %v", err)
 	}
 	if path != "src/main.go" {
 		t.Fatalf("normalized path = %q, want src/main.go", path)
+	}
+}
+
+func TestNormalizeApplyPatchPathUsesRemoteWindowsSemantics(t *testing.T) {
+	workspace := toolWorkspace{defaultWorkDir: `C:\Users\alice`, windows: true}
+	got, err := normalizeApplyPatchPath(`C:\Users\alice\.zshrc`, workspace)
+	if err != nil {
+		t.Fatalf("normalizeApplyPatchPath() error = %v", err)
+	}
+	if got != `.zshrc` {
+		t.Fatalf("normalized path = %q, want .zshrc", got)
+	}
+	if _, err := normalizeApplyPatchPath(`..\outside.txt`, workspace); err == nil {
+		t.Fatal("expected Windows traversal path to be rejected")
 	}
 }

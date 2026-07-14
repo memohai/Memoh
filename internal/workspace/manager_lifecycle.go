@@ -186,11 +186,17 @@ func (m *Manager) waitTaskRunning(ctx context.Context, containerID string, timeo
 // If the task is stopped, it restarts and sets up networking.
 func (m *Manager) EnsureRunning(ctx context.Context, botID string) error {
 	if m.remote != nil {
-		bound, err := m.remote.EnsureReady(ctx, botID)
-		if bound || err != nil {
+		primary, err := m.remote.EnsurePrimaryReady(ctx, botID)
+		if primary || err != nil {
 			return err
 		}
 	}
+	return m.EnsureNativeRunning(ctx, botID)
+}
+
+// EnsureNativeRunning manages only the server-owned container/local workspace,
+// regardless of which target is currently Primary.
+func (m *Manager) EnsureNativeRunning(ctx context.Context, botID string) error {
 	containerID, err := m.ContainerID(ctx, botID)
 	if err != nil {
 		if errors.Is(err, ErrContainerNotFound) {
@@ -229,31 +235,8 @@ func (m *Manager) EnsureRunning(ctx context.Context, botID string) error {
 	return m.startTaskAndEnsureNetwork(ctx, botID, containerID)
 }
 
-// EnsureServerManaged refuses container-lifecycle mutations for a bot whose
-// workspace is bound to a remote runtime: a container created or started
-// while bound would be hidden from status, excluded from reconciliation, and
-// unstoppable until the binding is removed.
-func (m *Manager) EnsureServerManaged(ctx context.Context, botID string) error {
-	if m.remote == nil {
-		return nil
-	}
-	if _, err := m.remote.Get(ctx, botID); err == nil {
-		return ErrWorkspaceNotServerManaged
-	} else if !errors.Is(err, ErrRemoteWorkspaceNotBound) {
-		return err
-	}
-	return nil
-}
-
 // StopBot stops the container task for a bot and marks it stopped in DB.
 func (m *Manager) StopBot(ctx context.Context, botID string) error {
-	if m.remote != nil {
-		if _, err := m.remote.Get(ctx, botID); err == nil {
-			return ctr.ErrNotSupported
-		} else if !errors.Is(err, ErrRemoteWorkspaceNotBound) {
-			return err
-		}
-	}
 	containerID, err := m.ContainerID(ctx, botID)
 	if err != nil {
 		return err
@@ -281,26 +264,6 @@ func (m *Manager) StopBot(ctx context.Context, botID string) error {
 // GetContainerInfo returns current container status for a bot,
 // combining DB records with live containerd state.
 func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*ContainerStatus, error) {
-	if m.remote != nil {
-		binding, err := m.remote.Get(ctx, botID)
-		if err == nil {
-			return &ContainerStatus{
-				ContainerID:      "remote-" + binding.BotID,
-				WorkspaceBackend: bridge.WorkspaceBackendRemote,
-				RuntimeBackend:   bridge.WorkspaceBackendRemote,
-				Image:            bridge.WorkspaceBackendRemote,
-				Status:           binding.Status,
-				Namespace:        m.namespace,
-				ContainerPath:    "/data",
-				TaskRunning:      binding.Status == RemoteBindingStatusOnline,
-				CreatedAt:        binding.CreatedAt,
-				UpdatedAt:        binding.UpdatedAt,
-			}, nil
-		}
-		if !errors.Is(err, ErrRemoteWorkspaceNotBound) {
-			return nil, err
-		}
-	}
 	if m.queries != nil {
 		pgBotID, parseErr := db.ParseUUID(botID)
 		if parseErr == nil {
@@ -416,9 +379,6 @@ func (m *Manager) SetupBotContainerWithProgress(ctx context.Context, botID strin
 }
 
 func (m *Manager) setupBotContainer(ctx context.Context, botID string, progress ContainerSetupProgress) error {
-	if err := m.EnsureServerManaged(ctx, botID); err != nil {
-		return err
-	}
 	emit := func(event ContainerSetupEvent) {
 		if progress != nil {
 			progress(event)
@@ -579,16 +539,6 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 	for _, row := range rows {
 		containerID := row.ContainerID
 		botID := uuid.UUID(row.BotID.Bytes).String()
-		if m.remote != nil {
-			if _, err := m.remote.Get(ctx, botID); err == nil {
-				m.logger.Info("reconcile: remote workspace binding skips container start", slog.String("bot_id", botID))
-				continue
-			} else if !errors.Is(err, ErrRemoteWorkspaceNotBound) {
-				m.logger.Error("reconcile: resolve remote workspace binding failed", slog.String("bot_id", botID), slog.Any("error", err))
-				continue
-			}
-		}
-
 		_, err := m.service.GetContainer(ctx, containerID)
 		if err != nil {
 			if !ctr.IsNotFound(err) {
@@ -615,7 +565,7 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 
 			running := m.isTaskRunning(ctx, containerID)
 			if !running {
-				if err := m.EnsureRunning(ctx, botID); err != nil {
+				if err := m.EnsureNativeRunning(ctx, botID); err != nil {
 					m.logger.Error("reconcile: failed to start legacy container",
 						slog.String("bot_id", botID), slog.Any("error", err))
 					continue
@@ -653,7 +603,7 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 		// Task not running — try to start it.
 		m.logger.Warn("reconcile: task not running, starting",
 			slog.String("bot_id", botID), slog.String("container_id", containerID))
-		if err := m.EnsureRunning(ctx, botID); err != nil {
+		if err := m.EnsureNativeRunning(ctx, botID); err != nil {
 			m.logger.Error("reconcile: failed to start task",
 				slog.String("bot_id", botID), slog.Any("error", err))
 			m.markContainerStopped(ctx, botID)

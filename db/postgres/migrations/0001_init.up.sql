@@ -232,15 +232,24 @@ CREATE INDEX IF NOT EXISTS idx_user_runtimes_user_id ON user_runtimes(user_id);
 -- user-owned Remote Runtime. Paths are relative to the Runtime's advertised
 -- workspace base; the Runtime client resolves and confines them locally.
 CREATE TABLE IF NOT EXISTS bot_remote_runtime_bindings (
-  bot_id UUID PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
   runtime_id UUID NOT NULL REFERENCES user_runtimes(id) ON DELETE RESTRICT,
   workspace_path TEXT NOT NULL CHECK (btrim(workspace_path) <> ''),
+  is_primary BOOLEAN NOT NULL DEFAULT false,
+  tool_approval_config JSONB NOT NULL DEFAULT '{"enabled":true,"read":{"mode":"allow","bypass_globs":[],"force_review_globs":[]},"write":{"mode":"ask","bypass_globs":[],"force_review_globs":[]},"exec":{"mode":"ask","bypass_commands":[],"force_review_commands":[]}}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (bot_id, runtime_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_bot_remote_runtime_bindings_runtime_id
   ON bot_remote_runtime_bindings(runtime_id);
+CREATE INDEX IF NOT EXISTS idx_bot_remote_runtime_bindings_bot_id
+  ON bot_remote_runtime_bindings(bot_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_remote_runtime_bindings_primary
+  ON bot_remote_runtime_bindings(bot_id)
+  WHERE is_primary = TRUE;
 
 CREATE TABLE IF NOT EXISTS bot_acl_rules (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

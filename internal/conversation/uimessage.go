@@ -50,19 +50,25 @@ type UIForwardRef struct {
 
 // UIMessage is the normalized assistant output block used by the web frontend.
 type UIMessage struct {
-	ID          int               `json:"id"`
-	Type        UIMessageType     `json:"type"`
-	Content     string            `json:"content,omitempty"`
-	Name        string            `json:"name,omitempty"`
-	Input       any               `json:"input,omitempty"`
-	Output      any               `json:"output,omitempty"`
-	ToolCallID  string            `json:"tool_call_id,omitempty"`
-	Running     *bool             `json:"running,omitempty"`
-	Progress    []any             `json:"progress,omitempty"`
-	Approval    *UIToolApproval   `json:"approval,omitempty"`
-	UserInput   *UIUserInput      `json:"user_input,omitempty"`
-	Attachments []UIAttachment    `json:"attachments,omitempty"`
-	Background  *UIBackgroundTask `json:"background_task,omitempty"`
+	ID                int                  `json:"id"`
+	Type              UIMessageType        `json:"type"`
+	Content           string               `json:"content,omitempty"`
+	Name              string               `json:"name,omitempty"`
+	Input             any                  `json:"input,omitempty"`
+	Output            any                  `json:"output,omitempty"`
+	ToolCallID        string               `json:"tool_call_id,omitempty"`
+	Running           *bool                `json:"running,omitempty"`
+	Progress          []any                `json:"progress,omitempty"`
+	Approval          *UIToolApproval      `json:"approval,omitempty"`
+	ExecutionLocation *UIExecutionLocation `json:"execution_location,omitempty"`
+	UserInput         *UIUserInput         `json:"user_input,omitempty"`
+	Attachments       []UIAttachment       `json:"attachments,omitempty"`
+	Background        *UIBackgroundTask    `json:"background_task,omitempty"`
+}
+
+type UIExecutionLocation struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
 }
 
 type UIToolApproval struct {

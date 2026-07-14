@@ -5,12 +5,9 @@
     :description="t('bots.remoteRuntime.description')"
   >
     <template #actions>
-      <Button
-        :loading="saving"
-        :disabled="!canSave"
-        @click="save"
-      >
-        {{ t('common.save') }}
+      <Button @click="openAddDialog">
+        <Plus class="size-4" />
+        {{ t('bots.remoteRuntime.addComputer') }}
       </Button>
     </template>
 
@@ -38,100 +35,212 @@
 
       <template v-else>
         <SettingsRow
-          :label="t('bots.remoteRuntime.source')"
-          :description="t('bots.remoteRuntime.sourceDescription')"
-        >
-          <Select
-            v-model="selectedSource"
-            :disabled="saving"
-          >
-            <SelectTrigger class="w-64">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent align="end">
-              <SelectItem :value="nativeSource">
-                {{ t('bots.remoteRuntime.nativeWorkspace') }}
-              </SelectItem>
-              <SelectItem
-                v-if="staleBinding"
-                :value="staleBindingSource"
-                disabled
-              >
-                {{ staleBindingLabel }}
-              </SelectItem>
-              <SelectItem
-                v-for="runtime in runtimeItems"
-                :key="runtime.id"
-                :value="runtime.id!"
-              >
-                {{ runtime.name }} · {{ runtime.online ? t('runtimes.status.online') : t('runtimes.status.offline') }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </SettingsRow>
-
-        <SettingsRow
-          v-if="usesRemoteRuntime"
+          v-if="showThisComputerSetup"
           stack="sm"
-          :label="t('bots.remoteRuntime.path')"
-          :description="t('bots.remoteRuntime.pathDescription', { path: defaultWorkspacePath })"
-        >
-          <Input
-            v-model="workspacePath"
-            class="w-full sm:w-72"
-            :placeholder="defaultWorkspacePath"
-            :disabled="saving"
-            autocomplete="off"
-            spellcheck="false"
-          />
-        </SettingsRow>
-
-        <SettingsRow
-          v-if="usesRemoteRuntime || hasInvalidSelection"
-          :label="t('bots.remoteRuntime.status')"
-          :description="statusDescription"
-        >
-          <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span
-              class="size-1.5 rounded-full"
-              :class="effectiveStatus === 'online' ? 'bg-success' : effectiveStatus === 'offline' ? 'bg-accent-gray-border' : 'bg-destructive'"
-            />
-            {{ statusLabel(effectiveStatus) }}
-          </span>
-        </SettingsRow>
-
-        <SettingsRow
-          v-if="runtimeItems.length === 0"
-          :label="t('bots.remoteRuntime.noComputers')"
-          :description="t('bots.remoteRuntime.noComputersDescription')"
+          :label="t('bots.remoteRuntime.thisComputerOff')"
+          :description="t('bots.remoteRuntime.thisComputerOffDescription')"
         >
           <Button
             variant="outline"
             size="sm"
             @click="openComputers"
           >
-            {{ t('runtimes.connect') }}
+            {{ t('bots.remoteRuntime.openComputerSettings') }}
           </Button>
+        </SettingsRow>
+
+        <SettingsRow
+          stack="sm"
+          :label="t('bots.remoteRuntime.primary')"
+          :description="t('bots.remoteRuntime.primaryDescription')"
+        >
+          <Select
+            :model-value="primaryTargetId"
+            :disabled="primarySaving"
+            @update:model-value="setPrimary"
+          >
+            <SelectTrigger class="w-full sm:w-64">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="end">
+              <SelectItem
+                v-for="target in validTargets"
+                :key="target.target_id"
+                :value="target.target_id"
+                :disabled="!canSetPrimaryTarget(target)"
+              >
+                {{ targetName(target) }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+
+        <SettingsRow
+          v-for="target in validTargets"
+          :key="target.target_id"
+          stack="sm"
+          :label="targetName(target)"
+          :description="targetSummary(target)"
+        >
+          <div class="flex items-center gap-2">
+            <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span
+                class="size-1.5 rounded-full"
+                :class="statusDotClass(targetStatus(target))"
+              />
+              {{ statusLabel(targetStatus(target)) }}
+            </span>
+
+            <DropdownMenu v-if="target.kind === 'remote'">
+              <DropdownMenuTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  :aria-label="t('common.actions')"
+                >
+                  <MoreHorizontal class="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  v-if="canEditTarget(target)"
+                  @select="openEditDialog(target)"
+                >
+                  <Pencil class="size-4" />
+                  {{ t('common.edit') }}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator v-if="canEditTarget(target)" />
+                <DropdownMenuItem
+                  variant="destructive"
+                  @select="pendingDeleteTarget = target"
+                >
+                  <Trash2 class="size-4" />
+                  {{ t('bots.remoteRuntime.removeFromBot') }}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </SettingsRow>
       </template>
     </SettingsSection>
   </PageShell>
+
+  <Dialog v-model:open="mountDialogOpen">
+    <DialogContent>
+      <form @submit.prevent="saveMount">
+        <DialogHeader>
+          <DialogTitle>
+            {{ editingTarget ? t('bots.remoteRuntime.editTitle') : t('bots.remoteRuntime.addTitle') }}
+          </DialogTitle>
+          <DialogDescription>
+            {{ t('bots.remoteRuntime.mountDescription') }}
+          </DialogDescription>
+        </DialogHeader>
+
+        <FormStack class="mt-4">
+          <FieldStack
+            :label="t('bots.remoteRuntime.computer')"
+            :help="mountComputerHelp"
+          >
+            <Select
+              v-model="mountRuntimeId"
+              :disabled="!!editingTarget || runtimesLoading || mountSaving"
+            >
+              <SelectTrigger class="w-full">
+                <SelectValue :placeholder="t('bots.remoteRuntime.selectComputer')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="runtime in dialogRuntimeItems"
+                  :key="runtime.id"
+                  :value="runtime.id"
+                >
+                  {{ runtime.name }} · {{ runtime.online ? t('runtimes.status.online') : t('runtimes.status.offline') }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </FieldStack>
+
+          <FieldStack
+            :label="t('bots.remoteRuntime.path')"
+            :help="t('bots.remoteRuntime.pathDescription', { path: defaultWorkspacePath })"
+          >
+            <Input
+              v-model="mountWorkspacePath"
+              :placeholder="defaultWorkspacePath"
+              :disabled="mountSaving"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </FieldStack>
+        </FormStack>
+
+        <DialogFooter class="mt-4">
+          <Button
+            type="button"
+            variant="outline"
+            :disabled="mountSaving"
+            @click="mountDialogOpen = false"
+          >
+            {{ t('common.cancel') }}
+          </Button>
+          <Button
+            v-if="!editingTarget && !runtimesLoading && availableRuntimeItems.length === 0"
+            type="button"
+            @click="openComputers"
+          >
+            {{ t('runtimes.connect') }}
+          </Button>
+          <Button
+            v-else
+            type="submit"
+            :disabled="!canSaveMount"
+            :loading="mountSaving"
+          >
+            {{ editingTarget ? t('common.save') : t('common.add') }}
+          </Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
+  </Dialog>
+
+  <ConfirmDeleteDialog
+    :open="!!pendingDeleteTarget"
+    :title="t('bots.remoteRuntime.deleteTitle')"
+    :description="deleteDescription"
+    :confirm-label="t('bots.remoteRuntime.removeFromBot')"
+    :loading="deletingTarget"
+    @update:open="(open) => { if (!open) pendingDeleteTarget = null }"
+    @confirm="deleteTarget"
+  />
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, inject, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useMutation, useQuery } from '@pinia/colada'
 import {
-  deleteBotsByBotIdRemoteRuntime,
-  getBotsByBotIdRemoteRuntime,
+  deleteBotsByBotIdWorkspaceTargetsByTargetId,
+  getBotsByBotIdWorkspaceTargets,
   getUsersMeRuntimes,
-  putBotsByBotIdRemoteRuntime,
-  type WorkspaceRemoteWorkspaceBinding,
+  putBotsByBotIdWorkspaceTargetsPrimary,
+  putBotsByBotIdWorkspaceTargetsRemotesByRuntimeId,
+  type WorkspaceWorkspaceTarget,
 } from '@memohai/sdk'
 import {
   Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
   Input,
   Select,
   SelectContent,
@@ -140,23 +249,57 @@ import {
   SelectValue,
   toast,
 } from '@felinic/ui'
+import { MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-vue-next'
 import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
+import ConfirmDeleteDialog from '@/components/confirm-delete-dialog/index.vue'
+import FieldStack from '@/components/settings/field-stack.vue'
+import FormStack from '@/components/settings/form-stack.vue'
+import {
+  DesktopRuntimeKey,
+  type DesktopRuntimeState,
+} from '@/lib/desktop-shell'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const props = defineProps<{
   botId: string
 }>()
 
-const nativeSource = '__native_workspace__'
-// Sentinel for a persisted binding whose runtime_id was redacted by the
-// server (owner_mismatch): it must stay distinct from nativeSource so the
-// invalid state is visible and switching to native counts as a change.
-const invalidBindingSource = '__invalid_binding__'
+type ValidWorkspaceTarget = WorkspaceWorkspaceTarget & {
+  target_id: string
+  kind: string
+}
+
+type RuntimeOption = {
+  id: string
+  name: string
+  online: boolean
+}
+
 const { t } = useI18n()
 const router = useRouter()
+const desktopRuntimeBridge = inject(DesktopRuntimeKey, undefined)
+const desktopRuntimeState = ref<DesktopRuntimeState>()
+
+const {
+  data: workspaceTargetsResponse,
+  error: workspaceTargetsError,
+  isLoading: workspaceTargetsLoading,
+  refetch: refetchWorkspaceTargets,
+} = useQuery({
+  key: () => ['bot-workspace-targets', props.botId],
+  query: async () => {
+    const { data } = await getBotsByBotIdWorkspaceTargets({
+      path: { bot_id: props.botId },
+      throwOnError: true,
+    })
+    return data
+  },
+  enabled: () => !!props.botId,
+  refetchOnWindowFocus: true,
+})
 
 const {
   data: runtimes,
@@ -172,166 +315,282 @@ const {
   refetchOnWindowFocus: true,
 })
 
-const runtimeItems = computed(() => runtimes.value ?? [])
-const binding = ref<WorkspaceRemoteWorkspaceBinding | null>(null)
-const bindingLoading = ref(false)
-const bindingLoadFailed = ref(false)
-const selectedSource = ref(nativeSource)
-const workspacePath = ref('')
-let bindingRequestVersion = 0
+const targetItems = ref<WorkspaceWorkspaceTarget[]>([])
 
-const { mutateAsync: bindRuntime, isLoading: bindingSaving } = useMutation({
-  mutation: async (input: { runtimeID: string, path: string }) => {
-    const path = input.path.trim()
-    const { data } = await putBotsByBotIdRemoteRuntime({
+watch(workspaceTargetsResponse, (response) => {
+  if (!response) return
+  targetItems.value = (response.targets ?? []).map(target => ({
+    ...target,
+    tool_approval: target.tool_approval ? { ...target.tool_approval } : undefined,
+  }))
+}, { immediate: true })
+
+const validTargets = computed<ValidWorkspaceTarget[]>(() => (
+  targetItems.value.filter((target): target is ValidWorkspaceTarget => (
+    typeof target.target_id === 'string'
+    && target.target_id.length > 0
+    && typeof target.kind === 'string'
+    && target.kind.length > 0
+  ))
+))
+
+const runtimeItems = computed(() => runtimes.value ?? [])
+const mountedRuntimeIds = computed(() => new Set(
+  validTargets.value.map(target => target.runtime_id).filter((value): value is string => !!value),
+))
+const availableRuntimeItems = computed(() => runtimeItems.value.filter(runtime => (
+  !!runtime.id && !mountedRuntimeIds.value.has(runtime.id)
+)))
+const primaryTargetId = computed(() => (
+  validTargets.value.find(target => target.primary)?.target_id ?? 'native'
+))
+const initialLoading = computed(() => workspaceTargetsLoading.value && !workspaceTargetsResponse.value)
+const loadFailed = computed(() => !!workspaceTargetsError.value && !workspaceTargetsResponse.value)
+const defaultWorkspacePath = computed(() => 'bots/' + (props.botId || '<bot-id>'))
+const showThisComputerSetup = computed(() => (
+  !!desktopRuntimeBridge
+  && !!desktopRuntimeState.value
+  && !desktopRuntimeState.value.enabled
+))
+
+const mountDialogOpen = ref(false)
+const editingTarget = ref<ValidWorkspaceTarget | null>(null)
+const mountRuntimeId = ref('')
+const mountWorkspacePath = ref('')
+const pendingDeleteTarget = ref<ValidWorkspaceTarget | null>(null)
+
+const dialogRuntimeItems = computed<RuntimeOption[]>(() => {
+  const editing = editingTarget.value
+  if (editing?.runtime_id) {
+    const runtime = runtimeItems.value.find(item => item.id === editing.runtime_id)
+    return [{
+      id: editing.runtime_id,
+      name: runtime ? runtimeName(runtime) : targetName(editing),
+      online: runtime?.online ?? editing.online ?? false,
+    }]
+  }
+  return availableRuntimeItems.value.flatMap((runtime): RuntimeOption[] => (
+    runtime.id
+      ? [{
+          id: runtime.id,
+          name: runtimeName(runtime),
+          online: runtime.online ?? false,
+        }]
+      : []
+  ))
+})
+
+const mountComputerHelp = computed(() => {
+  if (runtimesError.value && !runtimes.value) return t('runtimes.loadFailedDescription')
+  if (!editingTarget.value && !runtimesLoading.value && availableRuntimeItems.value.length === 0) {
+    return t('bots.remoteRuntime.noAvailableComputers')
+  }
+  return t('bots.remoteRuntime.computerDescription')
+})
+
+const canSaveMount = computed(() => (
+  !!mountRuntimeId.value
+  && !runtimesLoading.value
+  && !mountSaving.value
+))
+
+const deleteDescription = computed(() => {
+  const target = pendingDeleteTarget.value
+  if (!target) return ''
+  return target.primary
+    ? t('bots.remoteRuntime.deletePrimaryDescription', { name: targetName(target) })
+    : t('bots.remoteRuntime.deleteDescription', { name: targetName(target) })
+})
+
+const { mutateAsync: setPrimaryRequest, isLoading: primarySaving } = useMutation({
+  mutation: async (targetId: string) => {
+    await putBotsByBotIdWorkspaceTargetsPrimary({
       path: { bot_id: props.botId },
-      body: {
-        runtime_id: input.runtimeID,
-        ...(path ? { workspace_path: path } : {}),
+      body: { target_id: targetId },
+      throwOnError: true,
+    })
+  },
+})
+
+const { mutateAsync: saveMountRequest, isLoading: mountSaving } = useMutation({
+  mutation: async (input: { runtimeId: string, workspacePath: string }) => {
+    const { data } = await putBotsByBotIdWorkspaceTargetsRemotesByRuntimeId({
+      path: {
+        bot_id: props.botId,
+        runtime_id: input.runtimeId,
       },
+      body: { workspace_path: input.workspacePath.trim() },
       throwOnError: true,
     })
     return data
   },
 })
 
-const { mutateAsync: unbindRuntime, isLoading: unbinding } = useMutation({
-  mutation: async () => {
-    await deleteBotsByBotIdRemoteRuntime({
-      path: { bot_id: props.botId },
+const { mutateAsync: deleteTargetRequest, isLoading: deletingTarget } = useMutation({
+  mutation: async (targetId: string) => {
+    await deleteBotsByBotIdWorkspaceTargetsByTargetId({
+      path: {
+        bot_id: props.botId,
+        target_id: targetId,
+      },
       throwOnError: true,
     })
   },
 })
 
-const saving = computed(() => bindingSaving.value || unbinding.value)
-const initialLoading = computed(() =>
-  bindingLoading.value || (runtimesLoading.value && runtimes.value === undefined),
-)
-const loadFailed = computed(() => bindingLoadFailed.value || (runtimesError.value && runtimes.value === undefined))
-const usesRemoteRuntime = computed(() =>
-  selectedSource.value !== nativeSource && selectedSource.value !== invalidBindingSource,
-)
-const hasInvalidSelection = computed(() => selectedSource.value === invalidBindingSource)
-const selectedRuntime = computed(() =>
-  runtimeItems.value.find(runtime => runtime.id === selectedSource.value),
-)
-// A persisted binding whose runtime is not offered by the runtime list:
-// either redacted by the server (owner_mismatch) or no longer listed
-// (revoked). Rendered as a disabled item so the Select is never blank.
-const staleBinding = computed(() => {
-  const value = binding.value
-  if (!value) return null
-  if (!value.runtime_id) return value
-  return runtimeItems.value.some(runtime => runtime.id === value.runtime_id) ? null : value
-})
-const staleBindingSource = computed(() => staleBinding.value?.runtime_id || invalidBindingSource)
-const staleBindingLabel = computed(() => {
-  const name = staleBinding.value?.runtime_name || t('bots.remoteRuntime.unknownComputer')
-  return `${name} · ${statusLabel(staleBinding.value?.status || 'offline')}`
-})
-const defaultWorkspacePath = computed(() => `bots/${props.botId || '<bot-id>'}`)
-const persistedSource = computed(() => {
-  if (!binding.value) return nativeSource
-  return binding.value.runtime_id || invalidBindingSource
-})
-const persistedPath = computed(() => binding.value?.workspace_path || defaultWorkspacePath.value)
-const effectivePath = computed(() => workspacePath.value.trim() || defaultWorkspacePath.value)
-const hasChanges = computed(() => {
-  if (selectedSource.value !== persistedSource.value) return true
-  return usesRemoteRuntime.value && effectivePath.value !== persistedPath.value
-})
-const canSave = computed(() =>
-  !initialLoading.value
-  && !loadFailed.value
-  && !saving.value
-  && hasChanges.value
-  && (selectedSource.value === nativeSource || !!selectedRuntime.value),
-)
-const effectiveStatus = computed(() => {
-  if (hasInvalidSelection.value) return binding.value?.status || 'owner_mismatch'
-  if (!usesRemoteRuntime.value) return 'offline'
-  if (binding.value?.runtime_id === selectedSource.value) {
-    const status = binding.value.status || 'offline'
-    if (status === 'owner_mismatch' || status === 'revoked' || status === 'client_update_required') return status
-  }
-  return selectedRuntime.value?.online ? 'online' : 'offline'
-})
-const statusDescription = computed(() => {
-  if (hasInvalidSelection.value) return t('bots.remoteRuntime.invalidBindingDescription')
-  return selectedRuntime.value?.name || binding.value?.runtime_name || t('bots.remoteRuntime.unknownComputer')
-})
+function targetName(target: WorkspaceWorkspaceTarget): string {
+  if (target.kind === 'native') return t('bots.remoteRuntime.nativeWorkspace')
+  return target.name || t('bots.remoteRuntime.unknownComputer')
+}
 
-async function loadBinding(): Promise<void> {
-  const botID = props.botId
-  const version = ++bindingRequestVersion
-  bindingLoadFailed.value = false
-  if (!botID) {
-    bindingLoading.value = false
-    return
+function runtimeName(runtime: { id?: string, name?: string, hostname?: string }): string {
+  return runtime.name || runtime.hostname || t('bots.remoteRuntime.unknownComputer')
+}
+
+function targetStatus(target: WorkspaceWorkspaceTarget): string {
+  return target.status || 'offline'
+}
+
+function statusLabel(status: string): string {
+  switch (status) {
+    case 'online':
+    case 'offline':
+    case 'revoked':
+    case 'owner_mismatch':
+    case 'client_update_required':
+      return t('runtimes.status.' + status)
+    default:
+      return status
   }
-  bindingLoading.value = true
+}
+
+function statusDotClass(status: string): string {
+  switch (status) {
+    case 'online':
+      return 'bg-success'
+    case 'offline':
+      return 'bg-accent-gray-border'
+    default:
+      return 'bg-destructive'
+  }
+}
+
+function targetSummary(target: WorkspaceWorkspaceTarget): string {
+  if (target.kind === 'native') return t('bots.remoteRuntime.serverDescription')
+  return t('bots.remoteRuntime.folderSummary', {
+    path: target.workspace_path || defaultWorkspacePath.value,
+  })
+}
+
+function canEditTarget(target: WorkspaceWorkspaceTarget): boolean {
+  return target.kind === 'remote'
+    && !!target.runtime_id
+    && target.status !== 'owner_mismatch'
+    && target.status !== 'revoked'
+}
+
+function canSetPrimaryTarget(target: WorkspaceWorkspaceTarget): boolean {
+  return target.status !== 'owner_mismatch' && target.status !== 'revoked'
+}
+
+async function setPrimary(value: unknown): Promise<void> {
+  const targetId = typeof value === 'string' ? value : ''
+  if (!targetId || targetId === primaryTargetId.value || primarySaving.value) return
+  const previous = primaryTargetId.value
+  setLocalPrimary(targetId)
   try {
-    const result = await getBotsByBotIdRemoteRuntime({ path: { bot_id: botID } })
-    if (version !== bindingRequestVersion) return
-    if (result.error !== undefined) {
-      if (result.response?.status === 404) {
-        applyBinding(null)
-        return
-      }
-      throw result.error
-    }
-    applyBinding(result.data ?? null)
+    await setPrimaryRequest(targetId)
+    void refetchWorkspaceTargets()
   } catch (error) {
-    if (version !== bindingRequestVersion) return
-    bindingLoadFailed.value = true
-    toast.error(resolveApiErrorMessage(error, t('bots.remoteRuntime.loadFailed')))
-  } finally {
-    if (version === bindingRequestVersion) bindingLoading.value = false
+    setLocalPrimary(previous)
+    toast.error(resolveApiErrorMessage(error, t('bots.remoteRuntime.primarySaveFailed')))
   }
 }
 
-function applyBinding(value: WorkspaceRemoteWorkspaceBinding | null): void {
-  binding.value = value
-  selectedSource.value = value ? (value.runtime_id || invalidBindingSource) : nativeSource
-  workspacePath.value = value?.workspace_path || ''
+function setLocalPrimary(targetId: string): void {
+  targetItems.value = targetItems.value.map(target => ({
+    ...target,
+    primary: target.target_id === targetId,
+  }))
 }
 
-async function save(): Promise<void> {
-  if (!canSave.value) return
+function openAddDialog(): void {
+  editingTarget.value = null
+  mountRuntimeId.value = availableRuntimeItems.value[0]?.id ?? ''
+  mountWorkspacePath.value = ''
+  mountDialogOpen.value = true
+}
+
+function openEditDialog(target: ValidWorkspaceTarget): void {
+  if (!target.runtime_id) return
+  editingTarget.value = target
+  mountRuntimeId.value = target.runtime_id
+  mountWorkspacePath.value = target.workspace_path || ''
+  mountDialogOpen.value = true
+}
+
+async function saveMount(): Promise<void> {
+  if (!canSaveMount.value) return
+  const editing = editingTarget.value
   try {
-    if (selectedSource.value === nativeSource) {
-      await unbindRuntime()
-      applyBinding(null)
-      toast.success(t('bots.remoteRuntime.nativeWorkspaceSaved'))
-      return
-    }
-    const result = await bindRuntime({
-      runtimeID: selectedSource.value,
-      path: workspacePath.value,
+    const saved = await saveMountRequest({
+      runtimeId: mountRuntimeId.value,
+      workspacePath: mountWorkspacePath.value,
     })
-    applyBinding(result)
-    toast.success(t('bots.remoteRuntime.bindSuccess'))
+    if (saved?.target_id) {
+      const index = targetItems.value.findIndex(target => target.target_id === saved.target_id)
+      if (index >= 0) {
+        targetItems.value = targetItems.value.map((target, itemIndex) => (
+          itemIndex === index ? saved : target
+        ))
+      } else {
+        targetItems.value = [...targetItems.value, saved]
+      }
+    }
+    mountDialogOpen.value = false
+    toast.success(editing
+      ? t('bots.remoteRuntime.updateSuccess')
+      : t('bots.remoteRuntime.addSuccess'))
+    void refetchWorkspaceTargets()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.remoteRuntime.saveFailed')))
   }
 }
 
+async function deleteTarget(): Promise<void> {
+  const target = pendingDeleteTarget.value
+  if (!target) return
+  try {
+    await deleteTargetRequest(target.target_id)
+    targetItems.value = targetItems.value
+      .filter(item => item.target_id !== target.target_id)
+      .map(item => ({
+        ...item,
+        primary: target.primary ? item.target_id === 'native' : item.primary,
+      }))
+    pendingDeleteTarget.value = null
+    toast.success(t('bots.remoteRuntime.deleteSuccess'))
+    void refetchWorkspaceTargets()
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('bots.remoteRuntime.deleteFailed')))
+  }
+}
+
 async function retry(): Promise<void> {
-  await Promise.all([refetchRuntimes(), loadBinding()])
+  await Promise.all([refetchWorkspaceTargets(), refetchRuntimes()])
 }
 
 function openComputers(): void {
+  mountDialogOpen.value = false
   void router.push({ name: 'runtimes' })
 }
 
-function statusLabel(status: string): string {
-  const known = new Set(['online', 'offline', 'revoked', 'owner_mismatch', 'client_update_required'])
-  return t(`runtimes.status.${known.has(status) ? status : 'offline'}`)
-}
-
-watch(() => props.botId, () => {
-  applyBinding(null)
-  void loadBinding()
-}, { immediate: true })
+onMounted(async () => {
+  if (!desktopRuntimeBridge) return
+  try {
+    desktopRuntimeState.value = await desktopRuntimeBridge.runtimeState()
+  } catch {
+    // The Computers page owns recovery UI for Desktop connection-state errors.
+  }
+})
 </script>

@@ -18,6 +18,7 @@ import (
 
 	"github.com/memohai/memoh/internal/agent/background"
 	"github.com/memohai/memoh/internal/hooks"
+	workspacepkg "github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
@@ -66,6 +67,10 @@ func (p *ContainerProvider) SetHookService(h *hooks.Service) {
 
 func (*ContainerProvider) Usage(_ context.Context, session SessionContext, available AvailableTools) string {
 	var parts []string
+	locationRef, hasLocationTool := available.Ref(ToolListExecutionLocations())
+	if hasLocationTool {
+		parts = append(parts, locationRef+": list the current Server Workspace and connected computers available to this Bot for file and command work")
+	}
 	if ref, ok := available.Ref(ToolRead()); ok {
 		text := ref + ": read file content"
 		if session.SupportsImageInput {
@@ -88,6 +93,9 @@ func (*ContainerProvider) Usage(_ context.Context, session SessionContext, avail
 	if ref, ok := available.Ref(ToolExec()); ok {
 		parts = append(parts, ref+": execute command")
 	}
+	if hasLocationTool && len(available.Refs(ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolApplyPatch(), ToolExec())) > 0 {
+		parts = append(parts, "Use "+locationRef+" when the user names a computer, you need a non-default location, availability may have changed, or a target call fails. Pass its `target_id` to file and command tools; omit `target_id` to use the default. Listing locations does not switch locations or folders.")
+	}
 	return usageSection("Basic Tools", parts)
 }
 
@@ -95,19 +103,21 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 	workspace := p.resolveToolWorkspace(ctx, session)
 	wd := workspace.defaultWorkDir
 	sess := session
+	targetParameter := p.workspaceTargetParameter()
 
 	readDesc := fmt.Sprintf("Read file content %s. Reads the full file by default; use line_offset and n_lines for pagination. Files up to ~16 MB are supported.", workspace.locationDescription)
 	if sess.SupportsImageInput {
 		readDesc += " Also supports reading image files (PNG, JPEG, GIF, WebP) — binary images are loaded into model context automatically."
 	}
 
-	return []sdk.Tool{
+	toolList := []sdk.Tool{
 		{
 			Name:        ToolRead().String(),
 			Description: readDesc,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
+					"target_id":   targetParameter,
 					"path":        map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
 					"line_offset": map[string]any{"type": "integer", "description": "Line number to start reading from (1-indexed). Default: 1.", "minimum": 1, "default": 1},
 					"n_lines":     map[string]any{"type": "integer", "description": "Number of lines to read. Default: read entire file.", "minimum": 1},
@@ -124,8 +134,9 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":    map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
-					"content": map[string]any{"type": "string", "description": "File content"},
+					"target_id": targetParameter,
+					"path":      map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
+					"content":   map[string]any{"type": "string", "description": "File content"},
 				},
 				"required": []string{"path", "content"},
 			},
@@ -139,6 +150,7 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
+					"target_id": targetParameter,
 					"path":      map[string]any{"type": "string", "description": fmt.Sprintf("Directory path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
 					"recursive": map[string]any{"type": "boolean", "description": "List recursively"},
 					"offset":    map[string]any{"type": "integer", "description": "Entry offset to start from (0-indexed). Default: 0.", "minimum": 0, "default": 0},
@@ -156,9 +168,10 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":     map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
-					"old_text": map[string]any{"type": "string", "description": "Exact text to find"},
-					"new_text": map[string]any{"type": "string", "description": "Replacement text"},
+					"target_id": targetParameter,
+					"path":      map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
+					"old_text":  map[string]any{"type": "string", "description": "Exact text to find"},
+					"new_text":  map[string]any{"type": "string", "description": "Replacement text"},
 				},
 				"required": []string{"path", "old_text", "new_text"},
 			},
@@ -215,7 +228,8 @@ Delete a file:
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"patch": map[string]any{"type": "string", "description": "Patch body using the apply_patch format. Paths are relative to the workspace by default, or absolute paths supported by the workspace backend."},
+					"target_id": targetParameter,
+					"patch":     map[string]any{"type": "string", "description": "Patch body using the apply_patch format. Paths are relative to the workspace by default, or absolute paths supported by the workspace backend."},
 				},
 				"required": []string{"patch"},
 			},
@@ -243,6 +257,7 @@ Delete a file:
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
+					"target_id":         targetParameter,
 					"command":           map[string]any{"type": "string", "description": fmt.Sprintf("Command to run (e.g. %s)", workspace.commandExamples)},
 					"work_dir":          map[string]any{"type": "string", "description": fmt.Sprintf("Working directory (default: %s)", wd)},
 					"description":       map[string]any{"type": "string", "description": workspace.descriptionExamples},
@@ -255,7 +270,11 @@ Delete a file:
 				return p.execExec(ctx.Context, sess, inputAsMap(input))
 			},
 		},
-	}, nil
+	}
+	if resolver, ok := p.clients.(workspaceTargetResolver); ok {
+		toolList = append([]sdk.Tool{p.listExecutionLocationsTool(sess, resolver)}, toolList...)
+	}
+	return toolList, nil
 }
 
 type toolWorkspace struct {
@@ -267,6 +286,32 @@ type toolWorkspace struct {
 	descriptionExamples     string
 	platformInstructions    string
 	delayInstruction        string
+	windows                 bool
+}
+
+type resolvedToolTarget struct {
+	id        string
+	client    *bridge.Client
+	workspace toolWorkspace
+}
+
+type workspaceTargetResolver interface {
+	ResolveWorkspaceTarget(ctx context.Context, botID, targetID string) (workspacepkg.ResolvedWorkspaceTarget, error)
+	ListWorkspaceTargets(ctx context.Context, botID string) ([]workspacepkg.WorkspaceTarget, error)
+}
+
+type executionLocation struct {
+	TargetID       string `json:"target_id"`
+	Name           string `json:"name"`
+	Type           string `json:"type"`
+	Default        bool   `json:"default"`
+	Available      bool   `json:"available"`
+	Status         string `json:"status"`
+	StartingFolder string `json:"starting_folder,omitempty"`
+}
+
+type listExecutionLocationsResult struct {
+	Locations []executionLocation `json:"locations"`
 }
 
 func (p *ContainerProvider) resolveToolWorkspace(ctx context.Context, session SessionContext) toolWorkspace {
@@ -279,9 +324,13 @@ func (p *ContainerProvider) resolveToolWorkspace(ctx context.Context, session Se
 			info = resolved
 		}
 	}
+	return toolWorkspaceFromInfo(info, p.execWorkDir)
+}
+
+func toolWorkspaceFromInfo(info bridge.WorkspaceInfo, fallbackWorkDir string) toolWorkspace {
 	wd := strings.TrimSpace(info.DefaultWorkDir)
 	if wd == "" {
-		wd = p.execWorkDir
+		wd = fallbackWorkDir
 	}
 	workspace := toolWorkspace{
 		defaultWorkDir:          wd,
@@ -300,6 +349,7 @@ func (p *ContainerProvider) resolveToolWorkspace(ctx context.Context, session Se
 		workspace.locationDescription = "on the connected remote machine"
 		workspace.absolutePathDescription = "remote workspace path"
 		if strings.EqualFold(info.OS, "win32") {
+			workspace.windows = true
 			workspace.shellDescription = "Windows Command Prompt (cmd.exe)"
 			workspace.commandExamples = "dir, npm install, python script.py"
 			workspace.descriptionExamples = `Clear, concise description of what this command does in active voice. For simple commands keep it brief (5-10 words): dir → "List files and folders". For complex commands add enough context to explain the operation and expected result.`
@@ -309,6 +359,100 @@ func (p *ContainerProvider) resolveToolWorkspace(ctx context.Context, session Se
 		}
 	}
 	return workspace
+}
+
+func (*ContainerProvider) workspaceTargetParameter() map[string]any {
+	return map[string]any{
+		"type":        "string",
+		"description": "Execution location target ID. Omit to use the default location.",
+	}
+}
+
+func (*ContainerProvider) listExecutionLocationsTool(session SessionContext, resolver workspaceTargetResolver) sdk.Tool {
+	return sdk.Tool{
+		Name: ToolListExecutionLocations().String(),
+		Description: "List the execution locations configured for this Bot for file operations and command execution, with current availability and status. " +
+			"Use the returned target_id with file and command tools when a non-default location is needed. " +
+			"The available field says whether a location can currently be used. This tool does not change the default location or starting folder.",
+		Parameters: emptyObjectSchema(),
+		Execute: func(ctx *sdk.ToolExecContext, _ any) (any, error) {
+			targets, err := resolver.ListWorkspaceTargets(ctx.Context, session.BotID)
+			if err != nil {
+				return nil, fmt.Errorf("list execution locations: %w", err)
+			}
+			locations := make([]executionLocation, 0, len(targets))
+			for _, target := range targets {
+				if strings.TrimSpace(target.TargetID) == "" {
+					continue
+				}
+				locations = append(locations, executionLocationFromTarget(target))
+			}
+			return listExecutionLocationsResult{Locations: locations}, nil
+		},
+	}
+}
+
+func executionLocationFromTarget(target workspacepkg.WorkspaceTarget) executionLocation {
+	status := strings.TrimSpace(target.Status)
+	if status == "" {
+		if target.Online {
+			status = workspacepkg.WorkspaceTargetStatusOnline
+		} else {
+			status = workspacepkg.WorkspaceTargetStatusOffline
+		}
+	}
+	name := strings.TrimSpace(target.Name)
+	targetType := "execution_location"
+	switch target.Kind {
+	case workspacepkg.WorkspaceTargetNative:
+		targetType = "server_workspace"
+		if name == "" {
+			name = "Server Workspace"
+		}
+	case workspacepkg.WorkspaceTargetRemote:
+		targetType = "connected_computer"
+		if name == "" {
+			name = "Unavailable connected computer"
+		}
+	}
+	return executionLocation{
+		TargetID:       strings.TrimSpace(target.TargetID),
+		Name:           name,
+		Type:           targetType,
+		Default:        target.Primary,
+		Available:      status == workspacepkg.WorkspaceTargetStatusOnline,
+		Status:         status,
+		StartingFolder: strings.TrimSpace(target.WorkspacePath),
+	}
+}
+
+func (p *ContainerProvider) resolveToolTarget(ctx context.Context, session SessionContext, args map[string]any) (resolvedToolTarget, error) {
+	targetID := StringArg(args, "target_id")
+	if resolver, ok := p.clients.(workspaceTargetResolver); ok {
+		resolved, err := resolver.ResolveWorkspaceTarget(ctx, session.BotID, targetID)
+		if err != nil {
+			return resolvedToolTarget{}, fmt.Errorf("workspace target is not reachable: %w", err)
+		}
+		if resolved.Client == nil {
+			return resolvedToolTarget{}, errors.New("workspace target is not reachable: client is unavailable")
+		}
+		return resolvedToolTarget{
+			id:        resolved.TargetID,
+			client:    resolved.Client,
+			workspace: toolWorkspaceFromInfo(resolved.Info, p.execWorkDir),
+		}, nil
+	}
+	if targetID != "" {
+		return resolvedToolTarget{}, errors.New("workspace target selection is not supported")
+	}
+	client, err := p.getClient(ctx, session.BotID)
+	if err != nil {
+		return resolvedToolTarget{}, err
+	}
+	return resolvedToolTarget{
+		client:    client,
+		workspace: p.resolveToolWorkspace(ctx, session),
+	}, nil
 }
 
 func (p *ContainerProvider) hookWorkspaceInfo(ctx context.Context, session SessionContext) hooks.WorkspaceInfo {
@@ -360,22 +504,36 @@ func (p *ContainerProvider) logWorkspaceToolHookError(eventName, botID, sessionI
 	)
 }
 
-func (*ContainerProvider) normalizePath(path, workDir string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return path
+func (w toolWorkspace) normalizePath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return value
 	}
-	prefix := strings.TrimRight(strings.TrimSpace(workDir), "/")
+	prefix := strings.TrimSpace(w.defaultWorkDir)
 	if prefix == "" {
 		prefix = defaultContainerExecWorkDir
 	}
-	if path == prefix {
+	if w.windows {
+		valueForCompare := strings.ReplaceAll(value, `\`, "/")
+		prefixForCompare := strings.TrimRight(strings.ReplaceAll(prefix, `\`, "/"), "/")
+		if strings.EqualFold(valueForCompare, prefixForCompare) {
+			return "."
+		}
+		if len(valueForCompare) > len(prefixForCompare) &&
+			strings.EqualFold(valueForCompare[:len(prefixForCompare)], prefixForCompare) &&
+			valueForCompare[len(prefixForCompare)] == '/' {
+			return strings.TrimLeft(valueForCompare[len(prefixForCompare)+1:], "/")
+		}
+		return value
+	}
+	prefix = strings.TrimRight(prefix, "/")
+	if value == prefix {
 		return "."
 	}
-	if strings.HasPrefix(path, prefix+"/") {
-		return strings.TrimLeft(strings.TrimPrefix(path, prefix+"/"), "/")
+	if strings.HasPrefix(value, prefix+"/") {
+		return strings.TrimLeft(strings.TrimPrefix(value, prefix+"/"), "/")
 	}
-	return path
+	return value
 }
 
 func (p *ContainerProvider) getClient(ctx context.Context, botID string) (*bridge.Client, error) {
@@ -394,11 +552,12 @@ func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
-	client, err := p.getClient(opCtx, session.BotID)
+	target, err := p.resolveToolTarget(opCtx, session, args)
 	if err != nil {
 		return nil, err
 	}
-	filePath := p.normalizePath(StringArg(args, "path"), p.resolveToolWorkspace(ctx, session).defaultWorkDir)
+	client := target.client
+	filePath := target.workspace.normalizePath(StringArg(args, "path"))
 	if filePath == "" {
 		return nil, errors.New("path is required")
 	}
@@ -488,11 +647,12 @@ func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContex
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
-	client, err := p.getClient(opCtx, session.BotID)
+	target, err := p.resolveToolTarget(opCtx, session, args)
 	if err != nil {
 		return nil, err
 	}
-	filePath := p.normalizePath(StringArg(args, "path"), p.resolveToolWorkspace(ctx, session).defaultWorkDir)
+	client := target.client
+	filePath := target.workspace.normalizePath(StringArg(args, "path"))
 	content := StringArg(args, "content")
 	if filePath == "" {
 		return nil, errors.New("path is required")
@@ -533,11 +693,12 @@ func (p *ContainerProvider) execList(ctx context.Context, session SessionContext
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
-	client, err := p.getClient(opCtx, session.BotID)
+	target, err := p.resolveToolTarget(opCtx, session, args)
 	if err != nil {
 		return nil, err
 	}
-	dirPath := p.normalizePath(StringArg(args, "path"), p.resolveToolWorkspace(ctx, session).defaultWorkDir)
+	client := target.client
+	dirPath := target.workspace.normalizePath(StringArg(args, "path"))
 	if dirPath == "" {
 		dirPath = "."
 	}
@@ -605,11 +766,12 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
-	client, err := p.getClient(opCtx, session.BotID)
+	target, err := p.resolveToolTarget(opCtx, session, args)
 	if err != nil {
 		return nil, err
 	}
-	filePath := p.normalizePath(StringArg(args, "path"), p.resolveToolWorkspace(ctx, session).defaultWorkDir)
+	client := target.client
+	filePath := target.workspace.normalizePath(StringArg(args, "path"))
 	oldText := StringArg(args, "old_text")
 	newText := StringArg(args, "new_text")
 	if filePath == "" || oldText == "" {
@@ -664,18 +826,18 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 }
 
 func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
-	botID := strings.TrimSpace(session.BotID)
-	client, err := p.getClient(ctx, botID)
+	target, err := p.resolveToolTarget(ctx, session, args)
 	if err != nil {
 		return nil, err
 	}
+	client := target.client
 	command := strings.TrimSpace(StringArg(args, "command"))
 	if command == "" {
 		return nil, errors.New("command is required")
 	}
 	workDir := strings.TrimSpace(StringArg(args, "work_dir"))
 	if workDir == "" {
-		workDir = p.resolveToolWorkspace(ctx, session).defaultWorkDir
+		workDir = target.workspace.defaultWorkDir
 	}
 	description := strings.TrimSpace(StringArg(args, "description"))
 

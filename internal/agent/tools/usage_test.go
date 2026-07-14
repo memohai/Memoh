@@ -153,17 +153,18 @@ func TestBuiltInToolsHaveUsageGuidanceOrExplicitExemption(t *testing.T) {
 	t.Parallel()
 
 	covered := map[ToolName]string{
-		ToolRead():                "container",
-		ToolWrite():               "container",
-		ToolList():                "container",
-		ToolEdit():                "container",
-		ToolExec():                "container",
-		ToolApplyPatch():          "container",
-		ToolListBackground():      "background",
-		ToolGetBackgroundStatus(): "background",
-		ToolKillBackground():      "background",
-		ToolWait():                "background",
-		ToolWaitUntil():           "background",
+		ToolRead():                   "container",
+		ToolWrite():                  "container",
+		ToolList():                   "container",
+		ToolEdit():                   "container",
+		ToolExec():                   "container",
+		ToolApplyPatch():             "container",
+		ToolListExecutionLocations(): "container",
+		ToolListBackground():         "background",
+		ToolGetBackgroundStatus():    "background",
+		ToolKillBackground():         "background",
+		ToolWait():                   "background",
+		ToolWaitUntil():              "background",
 
 		ToolSend():  "messaging",
 		ToolReact(): "messaging",
@@ -490,9 +491,9 @@ func TestContainerProviderUsageGatesRegisteredTools(t *testing.T) {
 		t.Fatalf("Usage without file tools = %q, want empty", got)
 	}
 
-	got := provider.Usage(context.Background(), SessionContext{SupportsImageInput: true}, availableToolsForTest(ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolApplyPatch(), ToolExec()))
+	got := provider.Usage(context.Background(), SessionContext{SupportsImageInput: true}, availableToolsForTest(ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolApplyPatch(), ToolExec(), ToolListExecutionLocations()))
 	assertUsageItemsAreBulleted(t, got)
-	for _, want := range []string{"`read`", "`write`", "`list`", "`edit`", "`apply_patch`", "`exec`", "also supports images"} {
+	for _, want := range []string{"`read`", "`write`", "`list`", "`edit`", "`apply_patch`", "`exec`", "`list_execution_locations`", "does not switch locations or folders", "also supports images"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Usage with basic tools should contain %q, got:\n%s", want, got)
 		}
@@ -506,7 +507,7 @@ func TestContainerProviderUsageGatesRegisteredTools(t *testing.T) {
 	if strings.Contains(got, "also supports images") {
 		t.Fatalf("Usage without image support should not mention image read support, got:\n%s", got)
 	}
-	for _, absent := range []string{"`write`", "`list`", "`edit`", "`apply_patch`", "`exec`", "`list_background`", "`get_background_status`", "`kill_background`"} {
+	for _, absent := range []string{"`write`", "`list`", "`edit`", "`apply_patch`", "`exec`", "`list_execution_locations`", "`list_background`", "`get_background_status`", "`kill_background`"} {
 		if strings.Contains(got, absent) {
 			t.Fatalf("Usage without %s should not mention it, got:\n%s", absent, got)
 		}
@@ -517,7 +518,7 @@ func TestContainerProviderUsageGatesRegisteredTools(t *testing.T) {
 	if !strings.Contains(got, "`apply_patch`") {
 		t.Fatalf("Usage with patch should mention it, got:\n%s", got)
 	}
-	for _, absent := range []string{"`read`", "`write`", "`exec`"} {
+	for _, absent := range []string{"`read`", "`write`", "`exec`", "`list_execution_locations`"} {
 		if strings.Contains(got, absent) {
 			t.Fatalf("Usage without %s should not mention it, got:\n%s", absent, got)
 		}

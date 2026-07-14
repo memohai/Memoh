@@ -2757,14 +2757,18 @@ export type SettingsToolApprovalConfig = {
 export type SettingsToolApprovalExecPolicy = {
     bypass_commands?: Array<string>;
     force_review_commands?: Array<string>;
+    mode?: SettingsToolApprovalMode;
     require_approval?: boolean;
 };
 
 export type SettingsToolApprovalFilePolicy = {
     bypass_globs?: Array<string>;
     force_review_globs?: Array<string>;
+    mode?: SettingsToolApprovalMode;
     require_approval?: boolean;
 };
+
+export type SettingsToolApprovalMode = 'allow' | 'ask' | 'deny';
 
 export type SettingsUpsertRequest = {
     acl_default_effect?: string;
@@ -2926,24 +2930,42 @@ export type WebhooktunnelStatus = {
     status?: string;
 };
 
-export type WorkspaceBindRemoteWorkspaceRequest = {
-    runtime_id: string;
+export type WorkspaceMountRemoteWorkspaceRequest = {
     workspace_path?: string;
 };
 
-export type WorkspaceRemoteWorkspaceBinding = {
-    arch?: string;
-    bot_id?: string;
-    capabilities?: Array<string>;
-    created_at?: string;
-    hostname?: string;
+export type WorkspaceSetPrimaryWorkspaceTargetRequest = {
+    target_id: string;
+};
+
+export type WorkspaceUpdateWorkspaceTargetToolApprovalRequest = {
+    exec?: SettingsToolApprovalMode;
+    read?: SettingsToolApprovalMode;
+    tool_approval_config?: SettingsToolApprovalConfig;
+    write?: SettingsToolApprovalMode;
+};
+
+export type WorkspaceWorkspaceTarget = {
+    kind?: string;
+    name?: string;
     online?: boolean;
-    os?: string;
+    primary?: boolean;
     runtime_id?: string;
-    runtime_name?: string;
     status?: string;
-    updated_at?: string;
+    target_id?: string;
+    tool_approval?: WorkspaceWorkspaceTargetToolApproval;
+    tool_approval_config?: SettingsToolApprovalConfig;
     workspace_path?: string;
+};
+
+export type WorkspaceWorkspaceTargetToolApproval = {
+    exec?: SettingsToolApprovalMode;
+    read?: SettingsToolApprovalMode;
+    write?: SettingsToolApprovalMode;
+};
+
+export type WorkspaceWorkspaceTargetsResponse = {
+    targets?: Array<WorkspaceWorkspaceTarget>;
 };
 
 export type GetAcpProfilesData = {
@@ -7818,125 +7840,6 @@ export type PostBotsByBotIdQuickActionsExecuteResponses = {
 
 export type PostBotsByBotIdQuickActionsExecuteResponse = PostBotsByBotIdQuickActionsExecuteResponses[keyof PostBotsByBotIdQuickActionsExecuteResponses];
 
-export type DeleteBotsByBotIdRemoteRuntimeData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/remote-runtime';
-};
-
-export type DeleteBotsByBotIdRemoteRuntimeErrors = {
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type DeleteBotsByBotIdRemoteRuntimeError = DeleteBotsByBotIdRemoteRuntimeErrors[keyof DeleteBotsByBotIdRemoteRuntimeErrors];
-
-export type DeleteBotsByBotIdRemoteRuntimeResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
-export type GetBotsByBotIdRemoteRuntimeData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/remote-runtime';
-};
-
-export type GetBotsByBotIdRemoteRuntimeErrors = {
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdRemoteRuntimeError = GetBotsByBotIdRemoteRuntimeErrors[keyof GetBotsByBotIdRemoteRuntimeErrors];
-
-export type GetBotsByBotIdRemoteRuntimeResponses = {
-    /**
-     * OK
-     */
-    200: WorkspaceRemoteWorkspaceBinding;
-};
-
-export type GetBotsByBotIdRemoteRuntimeResponse = GetBotsByBotIdRemoteRuntimeResponses[keyof GetBotsByBotIdRemoteRuntimeResponses];
-
-export type PutBotsByBotIdRemoteRuntimeData = {
-    /**
-     * Remote workspace binding
-     */
-    body: WorkspaceBindRemoteWorkspaceRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/remote-runtime';
-};
-
-export type PutBotsByBotIdRemoteRuntimeErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PutBotsByBotIdRemoteRuntimeError = PutBotsByBotIdRemoteRuntimeErrors[keyof PutBotsByBotIdRemoteRuntimeErrors];
-
-export type PutBotsByBotIdRemoteRuntimeResponses = {
-    /**
-     * OK
-     */
-    200: WorkspaceRemoteWorkspaceBinding;
-};
-
-export type PutBotsByBotIdRemoteRuntimeResponse = PutBotsByBotIdRemoteRuntimeResponses[keyof PutBotsByBotIdRemoteRuntimeResponses];
-
 export type GetBotsByBotIdScheduleData = {
     body?: never;
     path?: never;
@@ -9677,6 +9580,207 @@ export type GetBotsByBotIdWebWsErrors = {
 };
 
 export type GetBotsByBotIdWebWsError = GetBotsByBotIdWebWsErrors[keyof GetBotsByBotIdWebWsErrors];
+
+export type GetBotsByBotIdWorkspaceTargetsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/workspace-targets';
+};
+
+export type GetBotsByBotIdWorkspaceTargetsErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdWorkspaceTargetsError = GetBotsByBotIdWorkspaceTargetsErrors[keyof GetBotsByBotIdWorkspaceTargetsErrors];
+
+export type GetBotsByBotIdWorkspaceTargetsResponses = {
+    /**
+     * OK
+     */
+    200: WorkspaceWorkspaceTargetsResponse;
+};
+
+export type GetBotsByBotIdWorkspaceTargetsResponse = GetBotsByBotIdWorkspaceTargetsResponses[keyof GetBotsByBotIdWorkspaceTargetsResponses];
+
+export type PutBotsByBotIdWorkspaceTargetsPrimaryData = {
+    /**
+     * Primary target
+     */
+    body: WorkspaceSetPrimaryWorkspaceTargetRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/workspace-targets/primary';
+};
+
+export type PutBotsByBotIdWorkspaceTargetsPrimaryErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdWorkspaceTargetsPrimaryError = PutBotsByBotIdWorkspaceTargetsPrimaryErrors[keyof PutBotsByBotIdWorkspaceTargetsPrimaryErrors];
+
+export type PutBotsByBotIdWorkspaceTargetsPrimaryResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdData = {
+    /**
+     * Remote workspace mount
+     */
+    body: WorkspaceMountRemoteWorkspaceRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Runtime ID
+         */
+        runtime_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/workspace-targets/remotes/{runtime_id}';
+};
+
+export type PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdError = PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdErrors[keyof PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdErrors];
+
+export type PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdResponses = {
+    /**
+     * OK
+     */
+    200: WorkspaceWorkspaceTarget;
+};
+
+export type PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdResponse = PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdResponses[keyof PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdResponses];
+
+export type DeleteBotsByBotIdWorkspaceTargetsByTargetIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Workspace target ID
+         */
+        target_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/workspace-targets/{target_id}';
+};
+
+export type DeleteBotsByBotIdWorkspaceTargetsByTargetIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdWorkspaceTargetsByTargetIdError = DeleteBotsByBotIdWorkspaceTargetsByTargetIdErrors[keyof DeleteBotsByBotIdWorkspaceTargetsByTargetIdErrors];
+
+export type DeleteBotsByBotIdWorkspaceTargetsByTargetIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PutBotsByBotIdWorkspaceTargetsByTargetIdToolApprovalData = {
+    /**
+     * Target tool approval
+     */
+    body: WorkspaceUpdateWorkspaceTargetToolApprovalRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Workspace target ID
+         */
+        target_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/workspace-targets/{target_id}/tool-approval';
+};
+
+export type PutBotsByBotIdWorkspaceTargetsByTargetIdToolApprovalErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdWorkspaceTargetsByTargetIdToolApprovalError = PutBotsByBotIdWorkspaceTargetsByTargetIdToolApprovalErrors[keyof PutBotsByBotIdWorkspaceTargetsByTargetIdToolApprovalErrors];
+
+export type PutBotsByBotIdWorkspaceTargetsByTargetIdToolApprovalResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
 
 export type DeleteBotsByIdData = {
     body?: never;

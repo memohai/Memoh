@@ -6,6 +6,7 @@ import {
   type AppKeyboardCommand,
 } from '../shared/keyboard-commands'
 import type { ServerConnectResult, ServerConnectionResult } from '../shared/server-connection'
+import type { DesktopRuntimeConfig, DesktopRuntimeState } from '../shared/remote-runtime'
 
 // Renderer query-cache invalidation payload. Mirrors the subset of
 // Pinia Colada's `UseQueryEntryFilter` that survives structured-clone
@@ -34,6 +35,14 @@ const api = {
     probeServer: (): Promise<ServerConnectionResult> => ipcRenderer.invoke('desktop:probe-server'),
     connectServer: (baseUrl: string): Promise<ServerConnectResult> =>
       ipcRenderer.invoke('desktop:connect-server', baseUrl),
+    runtimeState: (): Promise<DesktopRuntimeState> => ipcRenderer.invoke('desktop:runtime-state'),
+    configureRuntime: (config: DesktopRuntimeConfig | null): Promise<DesktopRuntimeState> =>
+      ipcRenderer.invoke('desktop:configure-runtime', config),
+    onRuntimeStateChanged: (cb: (state: DesktopRuntimeState) => void): (() => void) => {
+      const listener = (_event: IpcRendererEvent, state: DesktopRuntimeState) => cb(state)
+      ipcRenderer.on('desktop:runtime-state-changed', listener)
+      return () => ipcRenderer.removeListener('desktop:runtime-state-changed', listener)
+    },
     // Push the renderer's authoritative menu accelerators (derived from the
     // Keyboard Shortcuts store) so the main process can rebuild native menu
     // items with the user's bindings instead of the static table defaults.

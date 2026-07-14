@@ -54,7 +54,7 @@ func (h *ContainerdHandler) GetTerminalInfo(c echo.Context) error {
 		return c.JSON(http.StatusOK, terminalInfoResponse{Available: false})
 	}
 
-	client, clientErr := h.manager.MCPClient(ctx, botID)
+	client, clientErr := h.manager.NativeMCPClient(ctx, botID)
 	if clientErr != nil || client == nil {
 		return c.JSON(http.StatusOK, terminalInfoResponse{Available: false})
 	}
@@ -88,7 +88,7 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "manager not configured")
 	}
 
-	client, err := h.manager.MCPClient(ctx, botID)
+	client, err := h.manager.NativeMCPClient(ctx, botID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "workspace is not reachable")
 	}

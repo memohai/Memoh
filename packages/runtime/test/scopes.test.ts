@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -25,6 +25,32 @@ describe('WorkspaceScopeRegistry', () => {
     const registry = new WorkspaceScopeRegistry(await PathGuard.create(root))
     const scope = await registry.resolve(scopeMetadata('.'))
     expect(scope.workspaceRoot).toBe(await realpath(root))
+  })
+
+  it('keeps relative paths in the mounted workspace while allowing absolute paths inside the runtime base', async () => {
+    const root = await temporaryRoot()
+    const mountRoot = join(root, 'bots', 'primary')
+    const sharedFile = join(root, 'shared.txt')
+    const outsideRoot = await temporaryRoot()
+    const outsideFile = join(outsideRoot, 'private.txt')
+    await mkdir(mountRoot, { recursive: true })
+    await Promise.all([
+      writeFile(join(mountRoot, 'bot.txt'), 'bot'),
+      writeFile(sharedFile, 'shared'),
+      writeFile(outsideFile, 'private'),
+    ])
+
+    const registry = new WorkspaceScopeRegistry(await PathGuard.create(root))
+    const scope = await registry.resolve(scopeMetadata('bots/primary'))
+    const canonicalBotFile = await realpath(join(mountRoot, 'bot.txt'))
+    const canonicalSharedFile = await realpath(sharedFile)
+    const canonicalOutsideFile = await realpath(outsideFile)
+
+    expect(scope.workspaceRoot).toBe(await realpath(mountRoot))
+    await expect(scope.resolve('bot.txt')).resolves.toBe(canonicalBotFile)
+    await expect(scope.resolve('/data/bot.txt')).resolves.toBe(canonicalBotFile)
+    await expect(scope.resolve(canonicalSharedFile)).resolves.toBe(canonicalSharedFile)
+    await expect(scope.resolve(canonicalOutsideFile)).rejects.toMatchObject({ code: status.PERMISSION_DENIED })
   })
 
   it('requires the binary workspace path metadata type', async () => {

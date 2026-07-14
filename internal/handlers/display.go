@@ -85,7 +85,7 @@ func (h *ContainerdHandler) GetDisplayInfo(c echo.Context) error {
 	}
 
 	resp.Enabled = h.manager.BotDisplayEnabled(ctx, botID)
-	if _, err := h.manager.MCPClient(ctx, botID); err != nil {
+	if _, err := h.manager.NativeMCPClient(ctx, botID); err != nil {
 		// unavailable_reason is a wire-level enum consumed by older Desktop clients.
 		resp.UnavailableReason = "container not reachable"
 		return c.JSON(http.StatusOK, resp)
@@ -100,7 +100,7 @@ func (h *ContainerdHandler) GetDisplayInfo(c echo.Context) error {
 	resp.UnavailableReason = status.UnavailableReason
 
 	if resp.Enabled {
-		client, err := h.manager.MCPClient(ctx, botID)
+		client, err := h.manager.NativeMCPClient(ctx, botID)
 		if err == nil && client != nil {
 			if probe, ok := probeDisplayRuntime(ctx, client); ok {
 				resp.ToolkitAvailable = probe.ToolkitAvailable
@@ -278,7 +278,7 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 		return nil
 	}
 
-	client, err := h.manager.MCPClient(ctx, botID)
+	client, err := h.manager.NativeMCPClient(ctx, botID)
 	if err != nil || client == nil {
 		sendError("checking", "workspace_not_reachable", "chat.display.unavailable.container", "workspace is not reachable")
 		return nil
@@ -493,7 +493,7 @@ func (h *ContainerdHandler) applyDisplayStyleAsync(ctx context.Context, botID st
 	go func() {
 		runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
 		defer cancel()
-		client, err := h.manager.MCPClient(runCtx, botID)
+		client, err := h.manager.NativeMCPClient(runCtx, botID)
 		if err != nil || client == nil {
 			if err != nil && h.logger != nil {
 				h.logger.Warn("display desktop style skipped", slog.String("bot_id", botID), slog.Any("error", err))

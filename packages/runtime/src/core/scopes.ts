@@ -38,7 +38,7 @@ export class WorkspaceScopeRegistry {
 
   private async create(workspacePath: string): Promise<PathGuard> {
     const root = await this.base.ensureDirectory(workspacePath)
-    return PathGuard.create(root, [root])
+    return PathGuard.create(root, [this.base.workspaceRoot])
   }
 }
 

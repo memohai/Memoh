@@ -41,9 +41,12 @@ type UserRuntimeStore interface {
 }
 
 type BotRemoteRuntimeBindingRecord struct {
+	ID             string
 	BotID          string
 	RuntimeID      string
 	WorkspacePath  string
+	IsPrimary      bool
+	ToolApproval   JSON
 	RuntimeName    string
 	RuntimeUserID  string
 	BotOwnerUserID string
@@ -52,16 +55,14 @@ type BotRemoteRuntimeBindingRecord struct {
 	UpdatedAt      time.Time
 }
 
-type UpsertBotRemoteRuntimeBindingInput struct {
-	BotID         string
-	RuntimeID     string
-	WorkspacePath string
-}
-
 type BotRemoteRuntimeBindingStore interface {
-	UpsertBotRemoteRuntimeBinding(ctx context.Context, input UpsertBotRemoteRuntimeBindingInput) (BotRemoteRuntimeBindingRecord, error)
-	GetBotRemoteRuntimeBinding(ctx context.Context, botID string) (BotRemoteRuntimeBindingRecord, error)
-	DeleteBotRemoteRuntimeBinding(ctx context.Context, botID string) error
+	CreateOrUpdateMount(ctx context.Context, botID, runtimeID, workspacePath string) (BotRemoteRuntimeBindingRecord, error)
+	ListMounts(ctx context.Context, botID string) ([]BotRemoteRuntimeBindingRecord, error)
+	GetMount(ctx context.Context, botID, targetID string) (BotRemoteRuntimeBindingRecord, error)
+	GetPrimaryMount(ctx context.Context, botID string) (BotRemoteRuntimeBindingRecord, error)
+	SetPrimary(ctx context.Context, botID, targetID string) error
+	UpdateToolApproval(ctx context.Context, botID, targetID string, config JSON) error
+	DeleteMount(ctx context.Context, botID, targetID string) error
 }
 
 type AccountRecord struct {

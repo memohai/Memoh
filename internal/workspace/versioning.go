@@ -66,9 +66,6 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 	if err := validateBotID(botID); err != nil {
 		return nil, err
 	}
-	if err := m.EnsureServerManaged(ctx, botID); err != nil {
-		return nil, err
-	}
 	if m.queries == nil {
 		return nil, errors.New("db is not configured")
 	}
@@ -332,12 +329,6 @@ func (m *Manager) ListVersions(ctx context.Context, botID string) ([]VersionInfo
 
 func (m *Manager) RollbackVersion(ctx context.Context, botID string, version int) error {
 	if err := validateBotID(botID); err != nil {
-		return err
-	}
-	// Rollback restarts the container and, in the archive flavor, restores
-	// data through MCPClient — which routes to the remote workspace when
-	// bound and would overwrite files on the user's machine.
-	if err := m.EnsureServerManaged(ctx, botID); err != nil {
 		return err
 	}
 	if m.queries == nil {

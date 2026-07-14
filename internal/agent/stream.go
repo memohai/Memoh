@@ -22,6 +22,7 @@ const (
 	EventReasoningEnd        = event.ReasoningEnd
 	EventToolCallInputStart  = event.ToolCallInputStart
 	EventToolCallStart       = event.ToolCallStart
+	EventToolCallMetadata    = event.ToolCallMetadata
 	EventToolCallProgress    = event.ToolCallProgress
 	EventToolCallEnd         = event.ToolCallEnd
 	EventToolApprovalRequest = event.ToolApprovalRequest

@@ -2,15 +2,18 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"strings"
 	"testing"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
+	workspacepkg "github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
@@ -21,6 +24,25 @@ type containerTestBridgeProvider struct {
 	client *bridge.Client
 	err    error
 	info   bridge.WorkspaceInfo
+}
+
+type containerTestTargetProvider struct {
+	containerTestBridgeProvider
+	targets       []workspacepkg.WorkspaceTarget
+	resolved      workspacepkg.ResolvedWorkspaceTarget
+	resolvedInput string
+	resolveErr    error
+	listCalls     int
+}
+
+func (p *containerTestTargetProvider) ResolveWorkspaceTarget(_ context.Context, _ string, targetID string) (workspacepkg.ResolvedWorkspaceTarget, error) {
+	p.resolvedInput = targetID
+	return p.resolved, p.resolveErr
+}
+
+func (p *containerTestTargetProvider) ListWorkspaceTargets(context.Context, string) ([]workspacepkg.WorkspaceTarget, error) {
+	p.listCalls++
+	return p.targets, nil
 }
 
 func (p containerTestBridgeProvider) MCPClient(context.Context, string) (*bridge.Client, error) {
@@ -190,6 +212,129 @@ func TestContainerExecDescriptionUsesRemoteWindowsCommands(t *testing.T) {
 	descriptionText, _ := description["description"].(string)
 	if strings.Contains(descriptionText, "ls -la") || strings.Contains(descriptionText, "curl") {
 		t.Fatalf("Windows description guidance = %q", descriptionText)
+	}
+}
+
+func TestContainerToolsDescribeOptionalExecutionLocationTarget(t *testing.T) {
+	t.Parallel()
+
+	targetProvider := &containerTestTargetProvider{targets: []workspacepkg.WorkspaceTarget{
+		{TargetID: workspacepkg.WorkspaceTargetNative, Kind: workspacepkg.WorkspaceTargetNative, Name: "Native workspace", Status: workspacepkg.WorkspaceTargetStatusOnline},
+		{TargetID: "target-1", Kind: workspacepkg.WorkspaceTargetRemote, Name: "Office PC", Primary: true, Status: workspacepkg.WorkspaceTargetStatusOffline},
+	}}
+	provider := NewContainerProvider(nil, targetProvider, nil, "")
+	toolList, err := provider.Tools(context.Background(), SessionContext{BotID: "bot-1"})
+	if err != nil {
+		t.Fatalf("Tools() error = %v", err)
+	}
+	if targetProvider.listCalls != 0 {
+		t.Fatalf("Tools() listed execution locations %d times; schemas must stay static", targetProvider.listCalls)
+	}
+	_ = toolByNameForTest(t, toolList, ToolListExecutionLocations())
+	for _, toolName := range []ToolName{ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolApplyPatch(), ToolExec()} {
+		tool := toolByNameForTest(t, toolList, toolName)
+		params, ok := tool.Parameters.(map[string]any)
+		if !ok {
+			t.Fatalf("%s parameters = %T", tool.Name, tool.Parameters)
+		}
+		properties, _ := params["properties"].(map[string]any)
+		target, _ := properties["target_id"].(map[string]any)
+		description, _ := target["description"].(string)
+		if !strings.Contains(description, "Omit to use the default location") || strings.Contains(description, "target-1") || strings.Contains(description, "Office PC") || strings.Contains(description, "offline") {
+			t.Fatalf("%s target_id description = %q", tool.Name, description)
+		}
+	}
+}
+
+func TestListExecutionLocationsReadsCurrentBotTargetsAtExecutionTime(t *testing.T) {
+	t.Parallel()
+
+	targetProvider := &containerTestTargetProvider{targets: []workspacepkg.WorkspaceTarget{
+		{
+			TargetID:      workspacepkg.WorkspaceTargetNative,
+			Kind:          workspacepkg.WorkspaceTargetNative,
+			Name:          "Server Workspace",
+			Primary:       true,
+			Online:        true,
+			Status:        workspacepkg.WorkspaceTargetStatusOnline,
+			WorkspacePath: "/data",
+		},
+		{
+			TargetID:      "target-1",
+			Kind:          workspacepkg.WorkspaceTargetRemote,
+			RuntimeID:     "runtime-id-must-not-leak",
+			Name:          "Office PC",
+			Status:        workspacepkg.WorkspaceTargetStatusOffline,
+			WorkspacePath: "projects/memoh",
+		},
+	}}
+	provider := NewContainerProvider(nil, targetProvider, nil, "")
+	toolList, err := provider.Tools(context.Background(), SessionContext{BotID: "bot-1"})
+	if err != nil {
+		t.Fatalf("Tools() error = %v", err)
+	}
+	if targetProvider.listCalls != 0 {
+		t.Fatalf("Tools() listed execution locations %d times; want 0", targetProvider.listCalls)
+	}
+
+	tool := toolByNameForTest(t, toolList, ToolListExecutionLocations())
+	raw, err := tool.Execute(&sdk.ToolExecContext{Context: context.Background()}, nil)
+	if err != nil {
+		t.Fatalf("list_execution_locations error = %v", err)
+	}
+	result, ok := raw.(listExecutionLocationsResult)
+	if !ok {
+		t.Fatalf("list_execution_locations result = %T", raw)
+	}
+	if targetProvider.listCalls != 1 || len(result.Locations) != 2 {
+		t.Fatalf("list calls/locations = %d/%d, want 1/2", targetProvider.listCalls, len(result.Locations))
+	}
+	remote := result.Locations[1]
+	if remote.TargetID != "target-1" || remote.Name != "Office PC" || remote.Type != "connected_computer" || remote.Default || remote.Available || remote.Status != workspacepkg.WorkspaceTargetStatusOffline || remote.StartingFolder != "projects/memoh" {
+		t.Fatalf("remote execution location = %#v", remote)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal execution locations: %v", err)
+	}
+	if strings.Contains(string(encoded), "runtime-id-must-not-leak") || strings.Contains(string(encoded), "tool_approval") {
+		t.Fatalf("private runtime fields leaked in result: %s", encoded)
+	}
+
+	targetProvider.targets[1].Online = true
+	targetProvider.targets[1].Status = workspacepkg.WorkspaceTargetStatusOnline
+	raw, err = tool.Execute(&sdk.ToolExecContext{Context: context.Background()}, nil)
+	if err != nil {
+		t.Fatalf("second list_execution_locations error = %v", err)
+	}
+	result = raw.(listExecutionLocationsResult)
+	if targetProvider.listCalls != 2 || !result.Locations[1].Available {
+		t.Fatalf("second call did not refresh live status: calls=%d location=%#v", targetProvider.listCalls, result.Locations[1])
+	}
+}
+
+func TestContainerProviderResolvesOneCanonicalTargetPerInvocation(t *testing.T) {
+	t.Parallel()
+
+	targetProvider := &containerTestTargetProvider{resolved: workspacepkg.ResolvedWorkspaceTarget{
+		TargetID: "canonical-target",
+		Client:   &bridge.Client{},
+		Info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendRemote,
+			OS:             "win32",
+			DefaultWorkDir: `C:\Users\alice\project`,
+		},
+	}}
+	provider := NewContainerProvider(nil, targetProvider, nil, "")
+	resolved, err := provider.resolveToolTarget(context.Background(), SessionContext{BotID: "bot-1"}, map[string]any{"target_id": "requested-target"})
+	if err != nil {
+		t.Fatalf("resolveToolTarget() error = %v", err)
+	}
+	if targetProvider.resolvedInput != "requested-target" || resolved.id != "canonical-target" {
+		t.Fatalf("resolved input/id = %q/%q", targetProvider.resolvedInput, resolved.id)
+	}
+	if !resolved.workspace.windows || resolved.workspace.defaultWorkDir != `C:\Users\alice\project` {
+		t.Fatalf("resolved workspace = %#v", resolved.workspace)
 	}
 }
 

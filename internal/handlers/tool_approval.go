@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
+	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/toolapproval"
@@ -19,7 +20,11 @@ type ToolApprovalHandler struct {
 	logger         *slog.Logger
 	botService     *bots.Service
 	accountService *accounts.Service
-	resolver       *flow.Resolver
+	resolver       toolApprovalResponder
+}
+
+type toolApprovalResponder interface {
+	RespondToolApproval(ctx context.Context, input flow.ToolApprovalResponseInput, eventCh chan<- flow.WSStreamEvent) error
 }
 
 type ToolApprovalDecisionRequest struct {
@@ -72,7 +77,7 @@ func (h *ToolApprovalHandler) Reject(c echo.Context) error {
 }
 
 func (h *ToolApprovalHandler) respond(c echo.Context, decision string) error {
-	channelIdentityID, err := RequireChannelIdentityID(c)
+	actorUserID, err := auth.UserIDFromContext(c)
 	if err != nil {
 		return err
 	}
@@ -85,8 +90,8 @@ func (h *ToolApprovalHandler) respond(c echo.Context, decision string) error {
 	_ = c.Bind(&req)
 	if err := h.resolver.RespondToolApproval(context.WithoutCancel(c.Request().Context()), flow.ToolApprovalResponseInput{
 		BotID:                  botID,
-		ActorChannelIdentityID: channelIdentityID,
-		ActorUserID:            channelIdentityID,
+		ActorChannelIdentityID: actorUserID,
+		ActorUserID:            actorUserID,
 		ApprovalID:             approvalID,
 		Decision:               decision,
 		Reason:                 strings.TrimSpace(req.Reason),

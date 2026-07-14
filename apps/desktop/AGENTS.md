@@ -9,8 +9,10 @@ menus, keyboard integration, cache invalidation, preload IPC, and the renderer
 bootstrap.
 
 Desktop does not start a local server, package database files, embed Qdrant, or
-ship a companion CLI. Use `MEMOH_DESKTOP_BASE_URL` to point the app at the target
-server. The default dev target is `http://localhost:18080`.
+install a companion CLI. It may embed the `@memohai/runtime` SDK so the Electron
+main process can connect this computer to the hosted server as a trusted Remote
+Runtime. Use `MEMOH_DESKTOP_BASE_URL` to point the app at the target server. The
+default dev target is `http://localhost:18080`.
 
 ## Tech Stack
 
@@ -20,7 +22,7 @@ server. The default dev target is `http://localhost:18080`.
 | Bundler | electron-vite 4 |
 | Renderer | Vue 3 + Vite 8 + Tailwind CSS 4 |
 | Packager | electron-builder 26 |
-| Reused packages | `@memohai/web`, `@felinic/ui`, `@memohai/sdk`, `@memohai/icon`, `@memohai/config` |
+| Reused packages | `@memohai/web`, `@felinic/ui`, `@memohai/sdk`, `@memohai/icon`, `@memohai/config`, `@memohai/runtime` |
 | Type checking | TypeScript + `vue-tsc` |
 
 ## Directory Structure
@@ -35,8 +37,10 @@ apps/desktop/
 │   └── install-icon-tools.mjs      # isolated icon generator dependencies
 ├── src/
 │   ├── main/index.ts              # Electron main process and IPC handlers
+│   ├── main/remote-runtime.ts     # safeStorage-backed Remote Runtime lifecycle
 │   ├── preload/index.ts           # typed renderer bridge
 │   ├── preload/global.d.ts        # renderer API typings
+│   ├── shared/remote-runtime.ts   # narrow structured-clone state/config types
 │   └── renderer/
 │       ├── src/main.ts            # Vue renderer bootstrap
 │       ├── src/chat/App.vue       # persistent shell root
@@ -90,6 +94,7 @@ source aliases just to silence type errors.
 - external URL handling
 - cache invalidation broadcast
 - renderer `/api` proxy target via `MEMOH_DESKTOP_BASE_URL`
+- encrypted Remote Runtime configuration and `RuntimeSession` lifecycle
 
 The preload bridge is the only renderer API surface for Electron/main-process
 behavior. Keep it small and typed in both `src/preload/index.ts` and
@@ -99,13 +104,19 @@ Current Desktop IPC includes:
 
 - `desktop:server-status`
 - `desktop:api-base-url`
+- `desktop:runtime-state`
+- `desktop:configure-runtime`
 - `desktop:set-menu-accelerators`
 - `desktop:open-external-url`
 - `desktop:broadcast-invalidate`
 - `window:close-self`
 
+Remote Runtime IPC is intentionally narrower than the SDK: the renderer may
+only read status or pass `{ runtimeId, name, key } | null`. `name` is the
+user-chosen Runtime display name; server URL, workspace base, OS device name,
+localhost policy, filesystem paths, and commands are owned by Main.
 Do not add IPC for local database auth, project-folder picking, server lifecycle,
-or CLI installation.
+arbitrary filesystem/command access, or CLI installation.
 
 ## Renderer
 
@@ -114,8 +125,9 @@ sets the SDK base URL from the main-process status, and registers desktop cache
 sync. Authentication belongs to the hosted server flow; the renderer should not
 inject local auto-login tokens.
 
-`chat/App.vue` provides `DesktopShellKey` so reused web components can adapt to
-Electron chrome without importing Electron.
+`chat/App.vue` provides `DesktopShellKey` and the narrow `DesktopRuntimeKey`
+bridge so reused web components can adapt to Electron without importing
+Electron or receiving Node privileges.
 
 ## Commands
 
@@ -133,9 +145,11 @@ pnpm --filter @memohai/desktop build
 
 `electron-builder.yml` is the only Desktop packaging config. The product name is
 `Memoh`, and packaged resources should only include the Electron application,
-icons, and compiled app bundles. Do not add server binaries, CLI binaries,
-database files, provider templates, workspace runtimes, Qdrant, or media
-runtimes to Desktop packaging.
+icons, compiled app bundles, and the `@memohai/runtime` JavaScript SDK/proto used
+by Main. Build the Runtime package before Desktop and keep `bridge.proto`
+unpacked for the gRPC loader. Do not add server binaries, installed CLI
+binaries, database files, provider templates, container runtimes, Qdrant, or
+media runtimes to Desktop packaging.
 
 ## Icons
 

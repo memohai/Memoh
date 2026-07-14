@@ -16,10 +16,15 @@ const (
 
 func BuildPrompt(req Request) channel.Message {
 	summary := summarizeInput(req)
+	location := ""
+	if req.ExecutionLocation != nil && strings.TrimSpace(req.ExecutionLocation.Name) != "" {
+		location = "\nLocation: " + strings.TrimSpace(req.ExecutionLocation.Name)
+	}
 	text := fmt.Sprintf(
-		"Tool approval required #%d\nTool: %s\nInput: %s\n\nApprove with /approve %d or reply to this message with /approve.\nReject with /reject %d [reason] or reply with /reject [reason].",
+		"Tool approval required #%d\nTool: %s%s\nInput: %s\n\nApprove with /approve %d or reply to this message with /approve.\nReject with /reject %d [reason] or reply with /reject [reason].",
 		req.ShortID,
 		req.ToolName,
+		location,
 		summary,
 		req.ShortID,
 		req.ShortID,

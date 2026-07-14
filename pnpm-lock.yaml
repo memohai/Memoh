@@ -74,6 +74,9 @@ importers:
       '@fontsource-variable/inter':
         specifier: ^5.2.8
         version: 5.2.8
+      '@memohai/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
     devDependencies:
       '@electron-toolkit/tsconfig':
         specifier: ^1.0.1

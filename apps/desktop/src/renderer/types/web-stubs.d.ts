@@ -247,6 +247,21 @@ declare module '@memohai/web/utils/timezones' {
 declare module '@memohai/web/lib/desktop-shell' {
   import type { InjectionKey } from 'vue'
   export const DesktopShellKey: InjectionKey<boolean>
+  export type DesktopRuntimeStatus = 'disabled' | 'connecting' | 'connected' | 'disconnected' | 'stopped' | 'error'
+  export interface DesktopRuntimeState {
+    enabled: boolean
+    runtimeId?: string
+    runtimeName?: string
+    status: DesktopRuntimeStatus
+    deviceName: string
+    error?: string
+  }
+  export interface DesktopRuntimeBridge {
+    runtimeState(): Promise<DesktopRuntimeState>
+    configureRuntime(config: { runtimeId: string, name: string, key: string } | null): Promise<DesktopRuntimeState>
+    onRuntimeStateChanged(listener: (state: DesktopRuntimeState) => void): () => void
+  }
+  export const DesktopRuntimeKey: InjectionKey<DesktopRuntimeBridge | undefined>
 }
 
 declare module '@memohai/web/lib/auth-session' {

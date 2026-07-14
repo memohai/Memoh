@@ -3,54 +3,84 @@ package handlers
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"testing"
 
 	"github.com/labstack/echo/v4"
 
-	ctr "github.com/memohai/memoh/internal/container"
+	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/workspace"
 )
 
-func TestBotRemoteRuntimeHTTPErrorDistinguishesUnusableRuntime(t *testing.T) {
-	err := botRemoteRuntimeHTTPError(nil, workspace.ErrRemoteRuntimeNotUsable)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusNotFound {
-		t.Fatalf("error = %v, want HTTP 404", err)
-	}
-	if httpErr.Message == "remote runtime binding not found" {
-		t.Fatal("an unusable runtime must not be reported as a missing binding")
-	}
-}
-
-type fakeWorkspaceStopper struct {
-	calls int
-	err   error
-}
-
-func (s *fakeWorkspaceStopper) StopBot(context.Context, string) error {
-	s.calls++
-	return s.err
-}
-
-func TestStopStaleContainerIsBestEffort(t *testing.T) {
-	for name, stopErr := range map[string]error{
-		"stopped":        nil,
-		"already bound":  ctr.ErrNotSupported,
-		"no container":   workspace.ErrContainerNotFound,
-		"backend failed": errors.New("containerd unavailable"),
+func TestWorkspaceTargetHTTPError(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		code int
+	}{
+		"invalid mode":       {workspace.ErrInvalidWorkspaceToolApprovalMode, http.StatusBadRequest},
+		"unusable runtime":   {workspace.ErrRemoteRuntimeNotUsable, http.StatusNotFound},
+		"missing target":     {workspace.ErrWorkspaceTargetNotFound, http.StatusNotFound},
+		"owner mismatch":     {workspace.ErrRemoteRuntimeOwnerMismatch, http.StatusConflict},
+		"client too old":     {workspace.ErrRemoteRuntimeClientUpdateNeeded, http.StatusConflict},
+		"unexpected failure": {errors.New("boom"), http.StatusInternalServerError},
 	} {
 		t.Run(name, func(t *testing.T) {
-			stopper := &fakeWorkspaceStopper{err: stopErr}
-			handler := &BotRemoteRuntimeHandler{log: slog.Default(), workspaces: stopper}
-			handler.stopStaleContainer(context.Background(), "bot-1")
-			if stopper.calls != 1 {
-				t.Fatalf("StopBot calls = %d, want 1", stopper.calls)
+			err := workspaceTargetHTTPError(nil, tc.err)
+			var httpErr *echo.HTTPError
+			if !errors.As(err, &httpErr) || httpErr.Code != tc.code {
+				t.Fatalf("error = %v, want HTTP %d", err, tc.code)
 			}
 		})
 	}
+}
 
-	// A handler without a workspace manager must not panic.
-	(&BotRemoteRuntimeHandler{log: slog.Default()}).stopStaleContainer(context.Background(), "bot-1")
+type fakeWorkspaceTargetService struct {
+	target workspace.WorkspaceTarget
+}
+
+func (*fakeWorkspaceTargetService) Mount(context.Context, string, string, workspace.MountRemoteWorkspaceRequest) (workspace.WorkspaceTarget, error) {
+	return workspace.WorkspaceTarget{}, nil
+}
+
+func (s *fakeWorkspaceTargetService) GetMount(context.Context, string, string) (workspace.WorkspaceTarget, error) {
+	return s.target, nil
+}
+
+func (*fakeWorkspaceTargetService) SetPrimary(context.Context, string, string) error { return nil }
+
+func (*fakeWorkspaceTargetService) UpdateToolApprovalConfig(context.Context, string, string, settings.ToolApprovalConfig) error {
+	return nil
+}
+
+func (*fakeWorkspaceTargetService) DeleteMount(context.Context, string, string) error { return nil }
+
+func TestModeShortcutPreservesAdvancedToolApprovalRules(t *testing.T) {
+	config := settings.DefaultToolApprovalConfig()
+	config.Enabled = true
+	config.Write.BypassGlobs = []string{"projects/safe/**"}
+	config.Exec.ForceReviewCommands = []string{"rm *"}
+	handler := &BotRemoteRuntimeHandler{service: &fakeWorkspaceTargetService{target: workspace.WorkspaceTarget{
+		TargetID: "44444444-4444-4444-8444-444444444444", ToolApprovalConfig: config,
+	}}}
+
+	updated, err := handler.resolveToolApprovalUpdate(
+		context.Background(),
+		"11111111-1111-4111-8111-111111111111",
+		"44444444-4444-4444-8444-444444444444",
+		workspace.UpdateWorkspaceTargetToolApprovalRequest{
+			Read: settings.ToolApprovalAllow, Write: settings.ToolApprovalAsk, Exec: settings.ToolApprovalDeny,
+		},
+	)
+	if err != nil {
+		t.Fatalf("resolveToolApprovalUpdate: %v", err)
+	}
+	if len(updated.Write.BypassGlobs) != 1 || updated.Write.BypassGlobs[0] != "projects/safe/**" {
+		t.Fatalf("write bypasses were lost: %#v", updated.Write.BypassGlobs)
+	}
+	if len(updated.Exec.ForceReviewCommands) != 1 || updated.Exec.ForceReviewCommands[0] != "rm *" {
+		t.Fatalf("exec force rules were lost: %#v", updated.Exec.ForceReviewCommands)
+	}
+	if updated.Exec.Mode != settings.ToolApprovalDeny {
+		t.Fatalf("exec mode = %q", updated.Exec.Mode)
+	}
 }

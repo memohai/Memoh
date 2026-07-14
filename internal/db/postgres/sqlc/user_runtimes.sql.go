@@ -11,6 +11,49 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearBotRemoteRuntimePrimary = `-- name: ClearBotRemoteRuntimePrimary :exec
+UPDATE bot_remote_runtime_bindings
+SET is_primary = FALSE,
+    updated_at = CASE WHEN is_primary THEN now() ELSE updated_at END
+WHERE bot_id = $1
+`
+
+func (q *Queries) ClearBotRemoteRuntimePrimary(ctx context.Context, botID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, clearBotRemoteRuntimePrimary, botID)
+	return err
+}
+
+const createOrUpdateBotRemoteRuntimeMount = `-- name: CreateOrUpdateBotRemoteRuntimeMount :one
+INSERT INTO bot_remote_runtime_bindings (bot_id, runtime_id, workspace_path)
+SELECT b.id, r.id, $1
+FROM bots b
+JOIN user_runtimes r
+  ON r.id = $2
+ AND r.user_id = b.owner_user_id
+ AND r.revoked_at IS NULL
+JOIN users owner
+  ON owner.id = b.owner_user_id
+ AND owner.is_active = TRUE
+WHERE b.id = $3
+ON CONFLICT (bot_id, runtime_id) DO UPDATE SET
+  workspace_path = EXCLUDED.workspace_path,
+  updated_at = now()
+RETURNING id
+`
+
+type CreateOrUpdateBotRemoteRuntimeMountParams struct {
+	WorkspacePath string      `json:"workspace_path"`
+	RuntimeID     pgtype.UUID `json:"runtime_id"`
+	BotID         pgtype.UUID `json:"bot_id"`
+}
+
+func (q *Queries) CreateOrUpdateBotRemoteRuntimeMount(ctx context.Context, arg CreateOrUpdateBotRemoteRuntimeMountParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, createOrUpdateBotRemoteRuntimeMount, arg.WorkspacePath, arg.RuntimeID, arg.BotID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createUserRuntime = `-- name: CreateUserRuntime :one
 INSERT INTO user_runtimes (user_id, name, api_token)
 VALUES ($1, $2, $3)
@@ -38,30 +81,33 @@ func (q *Queries) CreateUserRuntime(ctx context.Context, arg CreateUserRuntimePa
 	return i, err
 }
 
-const deleteBotRemoteRuntimeBinding = `-- name: DeleteBotRemoteRuntimeBinding :one
+const deleteBotRemoteRuntimeMount = `-- name: DeleteBotRemoteRuntimeMount :one
 DELETE FROM bot_remote_runtime_bindings
 WHERE bot_id = $1
-RETURNING bot_id, runtime_id, workspace_path, created_at, updated_at
+  AND id = $2
+RETURNING id
 `
 
-func (q *Queries) DeleteBotRemoteRuntimeBinding(ctx context.Context, botID pgtype.UUID) (BotRemoteRuntimeBinding, error) {
-	row := q.db.QueryRow(ctx, deleteBotRemoteRuntimeBinding, botID)
-	var i BotRemoteRuntimeBinding
-	err := row.Scan(
-		&i.BotID,
-		&i.RuntimeID,
-		&i.WorkspacePath,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+type DeleteBotRemoteRuntimeMountParams struct {
+	BotID    pgtype.UUID `json:"bot_id"`
+	TargetID pgtype.UUID `json:"target_id"`
 }
 
-const getBotRemoteRuntimeBinding = `-- name: GetBotRemoteRuntimeBinding :one
+func (q *Queries) DeleteBotRemoteRuntimeMount(ctx context.Context, arg DeleteBotRemoteRuntimeMountParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, deleteBotRemoteRuntimeMount, arg.BotID, arg.TargetID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const getBotRemoteRuntimeMount = `-- name: GetBotRemoteRuntimeMount :one
 SELECT
+  binding.id,
   binding.bot_id,
   binding.runtime_id,
   binding.workspace_path,
+  binding.is_primary,
+  binding.tool_approval_config,
   binding.created_at,
   binding.updated_at,
   runtime.name AS runtime_name,
@@ -73,12 +119,21 @@ JOIN user_runtimes runtime ON runtime.id = binding.runtime_id
 JOIN bots bot ON bot.id = binding.bot_id
 JOIN users owner ON owner.id = bot.owner_user_id
 WHERE binding.bot_id = $1
+  AND binding.id = $2
 `
 
-type GetBotRemoteRuntimeBindingRow struct {
+type GetBotRemoteRuntimeMountParams struct {
+	BotID    pgtype.UUID `json:"bot_id"`
+	TargetID pgtype.UUID `json:"target_id"`
+}
+
+type GetBotRemoteRuntimeMountRow struct {
+	ID                 pgtype.UUID        `json:"id"`
 	BotID              pgtype.UUID        `json:"bot_id"`
 	RuntimeID          pgtype.UUID        `json:"runtime_id"`
 	WorkspacePath      string             `json:"workspace_path"`
+	IsPrimary          bool               `json:"is_primary"`
+	ToolApprovalConfig []byte             `json:"tool_approval_config"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	RuntimeName        string             `json:"runtime_name"`
@@ -87,13 +142,73 @@ type GetBotRemoteRuntimeBindingRow struct {
 	BotOwnerUserID     pgtype.UUID        `json:"bot_owner_user_id"`
 }
 
-func (q *Queries) GetBotRemoteRuntimeBinding(ctx context.Context, botID pgtype.UUID) (GetBotRemoteRuntimeBindingRow, error) {
-	row := q.db.QueryRow(ctx, getBotRemoteRuntimeBinding, botID)
-	var i GetBotRemoteRuntimeBindingRow
+func (q *Queries) GetBotRemoteRuntimeMount(ctx context.Context, arg GetBotRemoteRuntimeMountParams) (GetBotRemoteRuntimeMountRow, error) {
+	row := q.db.QueryRow(ctx, getBotRemoteRuntimeMount, arg.BotID, arg.TargetID)
+	var i GetBotRemoteRuntimeMountRow
 	err := row.Scan(
+		&i.ID,
 		&i.BotID,
 		&i.RuntimeID,
 		&i.WorkspacePath,
+		&i.IsPrimary,
+		&i.ToolApprovalConfig,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RuntimeName,
+		&i.RuntimeUserID,
+		&i.RuntimeUnavailable,
+		&i.BotOwnerUserID,
+	)
+	return i, err
+}
+
+const getPrimaryBotRemoteRuntimeMount = `-- name: GetPrimaryBotRemoteRuntimeMount :one
+SELECT
+  binding.id,
+  binding.bot_id,
+  binding.runtime_id,
+  binding.workspace_path,
+  binding.is_primary,
+  binding.tool_approval_config,
+  binding.created_at,
+  binding.updated_at,
+  runtime.name AS runtime_name,
+  runtime.user_id AS runtime_user_id,
+  (runtime.revoked_at IS NOT NULL OR NOT owner.is_active) AS runtime_unavailable,
+  bot.owner_user_id AS bot_owner_user_id
+FROM bot_remote_runtime_bindings binding
+JOIN user_runtimes runtime ON runtime.id = binding.runtime_id
+JOIN bots bot ON bot.id = binding.bot_id
+JOIN users owner ON owner.id = bot.owner_user_id
+WHERE binding.bot_id = $1
+  AND binding.is_primary = TRUE
+`
+
+type GetPrimaryBotRemoteRuntimeMountRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	BotID              pgtype.UUID        `json:"bot_id"`
+	RuntimeID          pgtype.UUID        `json:"runtime_id"`
+	WorkspacePath      string             `json:"workspace_path"`
+	IsPrimary          bool               `json:"is_primary"`
+	ToolApprovalConfig []byte             `json:"tool_approval_config"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	RuntimeName        string             `json:"runtime_name"`
+	RuntimeUserID      pgtype.UUID        `json:"runtime_user_id"`
+	RuntimeUnavailable pgtype.Bool        `json:"runtime_unavailable"`
+	BotOwnerUserID     pgtype.UUID        `json:"bot_owner_user_id"`
+}
+
+func (q *Queries) GetPrimaryBotRemoteRuntimeMount(ctx context.Context, botID pgtype.UUID) (GetPrimaryBotRemoteRuntimeMountRow, error) {
+	row := q.db.QueryRow(ctx, getPrimaryBotRemoteRuntimeMount, botID)
+	var i GetPrimaryBotRemoteRuntimeMountRow
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.RuntimeID,
+		&i.WorkspacePath,
+		&i.IsPrimary,
+		&i.ToolApprovalConfig,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RuntimeName,
@@ -127,6 +242,76 @@ func (q *Queries) GetUserRuntimeByAPIToken(ctx context.Context, apiToken string)
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listBotRemoteRuntimeMounts = `-- name: ListBotRemoteRuntimeMounts :many
+SELECT
+  binding.id,
+  binding.bot_id,
+  binding.runtime_id,
+  binding.workspace_path,
+  binding.is_primary,
+  binding.tool_approval_config,
+  binding.created_at,
+  binding.updated_at,
+  runtime.name AS runtime_name,
+  runtime.user_id AS runtime_user_id,
+  (runtime.revoked_at IS NOT NULL OR NOT owner.is_active) AS runtime_unavailable,
+  bot.owner_user_id AS bot_owner_user_id
+FROM bot_remote_runtime_bindings binding
+JOIN user_runtimes runtime ON runtime.id = binding.runtime_id
+JOIN bots bot ON bot.id = binding.bot_id
+JOIN users owner ON owner.id = bot.owner_user_id
+WHERE binding.bot_id = $1
+ORDER BY binding.created_at ASC, binding.id ASC
+`
+
+type ListBotRemoteRuntimeMountsRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	BotID              pgtype.UUID        `json:"bot_id"`
+	RuntimeID          pgtype.UUID        `json:"runtime_id"`
+	WorkspacePath      string             `json:"workspace_path"`
+	IsPrimary          bool               `json:"is_primary"`
+	ToolApprovalConfig []byte             `json:"tool_approval_config"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	RuntimeName        string             `json:"runtime_name"`
+	RuntimeUserID      pgtype.UUID        `json:"runtime_user_id"`
+	RuntimeUnavailable pgtype.Bool        `json:"runtime_unavailable"`
+	BotOwnerUserID     pgtype.UUID        `json:"bot_owner_user_id"`
+}
+
+func (q *Queries) ListBotRemoteRuntimeMounts(ctx context.Context, botID pgtype.UUID) ([]ListBotRemoteRuntimeMountsRow, error) {
+	rows, err := q.db.Query(ctx, listBotRemoteRuntimeMounts, botID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListBotRemoteRuntimeMountsRow
+	for rows.Next() {
+		var i ListBotRemoteRuntimeMountsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.RuntimeID,
+			&i.WorkspacePath,
+			&i.IsPrimary,
+			&i.ToolApprovalConfig,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.RuntimeName,
+			&i.RuntimeUserID,
+			&i.RuntimeUnavailable,
+			&i.BotOwnerUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listUserRuntimes = `-- name: ListUserRuntimes :many
@@ -190,40 +375,45 @@ func (q *Queries) RevokeUserRuntime(ctx context.Context, arg RevokeUserRuntimePa
 	return i, err
 }
 
-const upsertBotRemoteRuntimeBinding = `-- name: UpsertBotRemoteRuntimeBinding :one
-INSERT INTO bot_remote_runtime_bindings (bot_id, runtime_id, workspace_path)
-SELECT b.id, r.id, $1
-FROM bots b
-JOIN user_runtimes r
-  ON r.id = $2
- AND r.user_id = b.owner_user_id
- AND r.revoked_at IS NULL
-JOIN users owner
-  ON owner.id = b.owner_user_id
- AND owner.is_active = TRUE
-WHERE b.id = $3
-ON CONFLICT (bot_id) DO UPDATE SET
-  runtime_id = EXCLUDED.runtime_id,
-  workspace_path = EXCLUDED.workspace_path,
-  updated_at = now()
-RETURNING bot_id, runtime_id, workspace_path, created_at, updated_at
+const setBotRemoteRuntimePrimary = `-- name: SetBotRemoteRuntimePrimary :execrows
+UPDATE bot_remote_runtime_bindings
+SET is_primary = TRUE,
+    updated_at = CASE WHEN is_primary THEN updated_at ELSE now() END
+WHERE bot_id = $1
+  AND id = $2
 `
 
-type UpsertBotRemoteRuntimeBindingParams struct {
-	WorkspacePath string      `json:"workspace_path"`
-	RuntimeID     pgtype.UUID `json:"runtime_id"`
-	BotID         pgtype.UUID `json:"bot_id"`
+type SetBotRemoteRuntimePrimaryParams struct {
+	BotID    pgtype.UUID `json:"bot_id"`
+	TargetID pgtype.UUID `json:"target_id"`
 }
 
-func (q *Queries) UpsertBotRemoteRuntimeBinding(ctx context.Context, arg UpsertBotRemoteRuntimeBindingParams) (BotRemoteRuntimeBinding, error) {
-	row := q.db.QueryRow(ctx, upsertBotRemoteRuntimeBinding, arg.WorkspacePath, arg.RuntimeID, arg.BotID)
-	var i BotRemoteRuntimeBinding
-	err := row.Scan(
-		&i.BotID,
-		&i.RuntimeID,
-		&i.WorkspacePath,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+func (q *Queries) SetBotRemoteRuntimePrimary(ctx context.Context, arg SetBotRemoteRuntimePrimaryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setBotRemoteRuntimePrimary, arg.BotID, arg.TargetID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateBotRemoteRuntimeMountToolApproval = `-- name: UpdateBotRemoteRuntimeMountToolApproval :one
+UPDATE bot_remote_runtime_bindings
+SET tool_approval_config = $1,
+    updated_at = now()
+WHERE bot_id = $2
+  AND id = $3
+RETURNING id
+`
+
+type UpdateBotRemoteRuntimeMountToolApprovalParams struct {
+	ToolApprovalConfig []byte      `json:"tool_approval_config"`
+	BotID              pgtype.UUID `json:"bot_id"`
+	TargetID           pgtype.UUID `json:"target_id"`
+}
+
+func (q *Queries) UpdateBotRemoteRuntimeMountToolApproval(ctx context.Context, arg UpdateBotRemoteRuntimeMountToolApprovalParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, updateBotRemoteRuntimeMountToolApproval, arg.ToolApprovalConfig, arg.BotID, arg.TargetID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }

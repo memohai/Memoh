@@ -12,10 +12,11 @@
   },
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "pnpm run prepare:electron && electron-vite dev",
-    "preview": "pnpm run prepare:electron && electron-vite build && electron-vite preview",
-    "start": "pnpm run prepare:electron && electron-vite preview",
+    "dev": "pnpm run prepare:electron && pnpm run prepare:runtime && electron-vite dev",
+    "preview": "pnpm run prepare:electron && pnpm run prepare:runtime && electron-vite build && electron-vite preview",
+    "start": "pnpm run prepare:electron && pnpm run prepare:runtime && electron-vite preview",
     "prepare:electron": "node scripts/ensure-electron.mjs",
+    "prepare:runtime": "pnpm --filter @memohai/runtime build",
     "build": "node scripts/build.mjs current -- --publish never",
     "build:dir": "node scripts/build.mjs current -- --dir --publish never",
     "build:unpack": "node scripts/build.mjs current -- --dir --publish never",
@@ -24,7 +25,7 @@
     "build:mac:x64": "node scripts/build.mjs darwin-x64 -- --mac --x64 --publish never",
     "build:linux:x64": "node scripts/build.mjs linux-x64 -- --linux --x64 --publish never",
     "build:win:x64": "node scripts/build.mjs win32-x64 -- --win --x64 --publish never",
-    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:node": "pnpm run prepare:runtime && tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
     "icons": "node scripts/install-icon-tools.mjs && pnpm --dir icon-tools icons"
@@ -32,14 +33,15 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/utils": "^4.0.0",
-    "@fontsource-variable/inter": "^5.2.8"
+    "@fontsource-variable/inter": "^5.2.8",
+    "@memohai/runtime": "workspace:*"
   },
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^1.0.1",
+    "@felinic/ui": "workspace:*",
     "@memohai/config": "workspace:*",
     "@memohai/icon": "workspace:*",
     "@memohai/sdk": "workspace:*",
-    "@felinic/ui": "workspace:*",
     "@memohai/web": "workspace:*",
     "@pinia/colada": "^0.21.2",
     "@tailwindcss/vite": "^4.2.2",

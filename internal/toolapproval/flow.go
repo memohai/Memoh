@@ -83,6 +83,12 @@ func RunFlow(ctx context.Context, svc FlowService, flow FlowRequest) (FlowResult
 	if eval.Decision == DecisionBypass {
 		return FlowResult{Approved: true, Status: StatusApproved}, nil
 	}
+	if eval.Decision == DecisionDeny {
+		return FlowResult{
+			Status:         StatusRejected,
+			DecisionReason: PolicyDeniedReason,
+		}, nil
+	}
 
 	waitTimeout := flow.WaitTimeout
 	if waitTimeout <= 0 {
@@ -291,6 +297,9 @@ func RequestMetadata(req Request) map[string]any {
 	}
 	if reason := strings.TrimSpace(req.DecisionReason); reason != "" {
 		metadata["decision_reason"] = reason
+	}
+	if req.ExecutionLocation != nil {
+		metadata[ExecutionLocationMetadataKey] = req.ExecutionLocation
 	}
 	return metadata
 }

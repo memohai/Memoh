@@ -309,6 +309,7 @@ func (s *NativeToolSource) requireApproval(ctx context.Context, session mcp.Tool
 			SourcePlatform:               session.CurrentPlatform,
 			ReplyTarget:                  session.ReplyTarget,
 			ConversationType:             session.ConversationType,
+			WorkspaceTargeted:            isWorkspaceTargetToolName(toolName),
 		},
 		Interactive:       strings.TrimSpace(session.StreamID) != "",
 		UndeliveredReason: "tool approval request was not delivered to the interactive stream",
@@ -324,6 +325,11 @@ func (s *NativeToolSource) requireApproval(ctx context.Context, session mcp.Tool
 		return nativeApprovalResult{approved: true}, nil
 	}
 	return nativeApprovalResult{message: toolapproval.RejectionMessage(result)}, nil
+}
+
+func isWorkspaceTargetToolName(toolName string) bool {
+	_, ok := toolapproval.OperationForTool(toolName)
+	return ok
 }
 
 func (s *NativeToolSource) emitToolApprovalRequest(session mcp.ToolSessionContext, req toolapproval.Request) bool {

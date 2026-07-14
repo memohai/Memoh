@@ -24,12 +24,15 @@ func (n Name) IsZero() bool {
 	return n.value == ""
 }
 
-func ToolRead() Name                { return newName("read") }
-func ToolWrite() Name               { return newName("write") }
-func ToolList() Name                { return newName("list") }
-func ToolEdit() Name                { return newName("edit") }
-func ToolExec() Name                { return newName("exec") }
-func ToolApplyPatch() Name          { return newName("apply_patch") }
+func ToolRead() Name       { return newName("read") }
+func ToolWrite() Name      { return newName("write") }
+func ToolList() Name       { return newName("list") }
+func ToolEdit() Name       { return newName("edit") }
+func ToolExec() Name       { return newName("exec") }
+func ToolApplyPatch() Name { return newName("apply_patch") }
+func ToolListExecutionLocations() Name {
+	return newName("list_execution_locations")
+}
 func ToolListBackground() Name      { return newName("list_background") }
 func ToolGetBackgroundStatus() Name { return newName("get_background_status") }
 func ToolKillBackground() Name      { return newName("kill_background") }
@@ -76,7 +79,7 @@ func ToolListEmail() Name         { return newName("list_email") }
 func ToolReadEmail() Name         { return newName("read_email") }
 
 var all = []Name{
-	ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolExec(), ToolApplyPatch(), ToolListBackground(), ToolGetBackgroundStatus(), ToolKillBackground(), ToolWait(), ToolWaitUntil(),
+	ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolExec(), ToolApplyPatch(), ToolListExecutionLocations(), ToolListBackground(), ToolGetBackgroundStatus(), ToolKillBackground(), ToolWait(), ToolWaitUntil(),
 	ToolSend(), ToolReact(), ToolSpeak(),
 	ToolGetContacts(), ToolListSessions(), ToolGetMessages(), ToolSearchMessages(), ToolSearchMemory(), ToolListSkills(), ToolUseSkill(), ToolSpawnAgent(), ToolSendMessage(), ToolListAgents(),
 	ToolListSchedule(), ToolGetSchedule(), ToolCreateSchedule(), ToolUpdateSchedule(), ToolDeleteSchedule(),
