@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ref, toRaw } from 'vue'
 import type { UIMessage, UITurn } from '@/composables/api/useChat.types'
+import { isOptimisticTurn } from '@/store/chat-list.normalize'
 import { createBackgroundTaskTracker } from './background-tasks'
 import { createTranscriptController } from './transcript'
 import type { ChatAssistantTurn, ChatUserTurn, ToolCallBlock } from './types'
@@ -294,6 +295,36 @@ describe('chat transcript controller', () => {
 
     expect(transcript.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
     expect(transcript.messages.filter(turn => turn.role === 'user')).toHaveLength(1)
+  })
+
+  it('does not let an older persisted twin swallow a re-sent optimistic prompt', async () => {
+    // The user sends the SAME text again in a session whose history already
+    // contains that prompt. The racing snapshot returns only the OLD row —
+    // the new send is not persisted yet. A text-set match would treat the
+    // new optimistic turn as "already present" and drop it; the count-based
+    // match reserves the old row for the old (non-optimistic) local turn.
+    const { transcript, fetchMessages } = makeTranscript()
+    transcript.replaceHistoryView([
+      rawUser('server-user-old', 'same prompt', '2026-01-01T00:00:00.000Z'),
+      rawAssistant('server-assistant-old', [], '2026-01-01T00:00:01.000Z'),
+    ], 'session-1')
+
+    const pending = deferred<UITurn[]>()
+    fetchMessages.mockReturnValueOnce(pending.promise)
+    const loading = transcript.loadInitialMessages('bot-1', 'session-1')
+    const assistantTurn = transcript.createOptimisticAssistantTurn()
+    const userTurn = transcript.createOptimisticUserTurn('same prompt')
+    transcript.appendToView(userTurn, assistantTurn)
+
+    pending.resolve([
+      rawUser('server-user-old', 'same prompt', '2026-01-01T00:00:00.000Z'),
+      rawAssistant('server-assistant-old', [], '2026-01-01T00:00:01.000Z'),
+    ])
+    await loading
+    transcript.reattachTurnToSession('bot-1', 'session-1', assistantTurn)
+
+    expect(transcript.messages.map(turn => `${turn.role}${isOptimisticTurn(turn) ? '*' : ''}`))
+      .toEqual(['user', 'assistant', 'user*', 'assistant*'])
   })
 
   it('owns refresh state and reports the latest applied timestamp', async () => {

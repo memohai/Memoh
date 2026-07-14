@@ -358,14 +358,35 @@ export function createTranscriptController({
       if (sendInFlight) {
         // Text match (not isSameLogicalTurn): its 5s timestamp tolerance can
         // reject a genuine server twin (clock skew, slow persist), which
-        // would duplicate the user turn here.
-        const nextUserTexts = new Set(
-          next.filter(turn => turn.role === 'user').map(turn => turn.text.trim()),
-        )
-        const orphans = messages.filter(turn =>
-          isOptimisticTurn(turn)
-          && turn.role === 'user'
-          && !nextUserTexts.has(turn.text.trim()))
+        // would duplicate the user turn here. Counted per occurrence, not a
+        // set: the snapshot absorbs one optimistic turn per matching row, so
+        // re-sending a prompt whose text already exists in history does not
+        // get swallowed by its older persisted twin.
+        const nextUserTextCounts = new Map<string, number>()
+        for (const turn of next) {
+          if (turn.role !== 'user') continue
+          const text = turn.text.trim()
+          nextUserTextCounts.set(text, (nextUserTextCounts.get(text) ?? 0) + 1)
+        }
+        // The snapshot's rows first cover the user turns that were already
+        // non-optimistic locally (they ARE those rows, minus paging drift);
+        // only the remainder can absorb optimistic turns.
+        for (const turn of messages) {
+          if (turn.role !== 'user' || isOptimisticTurn(turn)) continue
+          const text = turn.text.trim()
+          const left = nextUserTextCounts.get(text)
+          if (left) nextUserTextCounts.set(text, left - 1)
+        }
+        const orphans = messages.filter((turn) => {
+          if (!isOptimisticTurn(turn) || turn.role !== 'user') return false
+          const text = turn.text.trim()
+          const left = nextUserTextCounts.get(text)
+          if (left) {
+            nextUserTextCounts.set(text, left - 1)
+            return false
+          }
+          return true
+        })
         messages.splice(0, messages.length, ...next, ...orphans)
         return
       }
