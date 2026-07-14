@@ -973,6 +973,7 @@
     "refreshModels": "刷新模型",
     "refreshSuccess": "模型目录已刷新：新增 {created} 个，更新 {updated} 个",
     "refreshFailed": "刷新模型目录失败",
+    "refreshConfirmHint": "获取此账号当前可用的最新模型，并从模型选择器中移除已不可用的模型。",
     "importConfirmHint": "将从该服务商的 API 导入模型，默认兼容性为视觉、工具调用和推理。",
     "showingCount": "显示 {count} / {total}"
   },

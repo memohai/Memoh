@@ -130,16 +130,17 @@ func (s *Service) listCodexRemoteModels(ctx context.Context, baseURL string, cre
 		}
 
 		remoteModels = append(remoteModels, RemoteModel{
-			ID:               modelID,
-			Name:             name,
-			DisplayName:      name,
-			Object:           "model",
-			OwnedBy:          "openai-codex",
-			Type:             string(models.ModelTypeChat),
-			Compatibilities:  compatibilities,
-			ReasoningEfforts: reasoningEfforts,
-			ThinkingMode:     thinkingMode,
-			ContextWindow:    contextWindow,
+			ID:                modelID,
+			Name:              name,
+			DisplayName:       name,
+			Object:            "model",
+			OwnedBy:           "openai-codex",
+			Type:              string(models.ModelTypeChat),
+			Compatibilities:   compatibilities,
+			ReasoningEfforts:  reasoningEfforts,
+			ThinkingMode:      thinkingMode,
+			ContextWindow:     contextWindow,
+			CapabilitiesKnown: true,
 		})
 	}
 	return remoteModels, nil

@@ -973,6 +973,7 @@
     "refreshModels": "Refresh Models",
     "refreshSuccess": "Model catalog refreshed: {created} added, {updated} updated",
     "refreshFailed": "Failed to refresh the model catalog",
+    "refreshConfirmHint": "Fetch the latest models available to this account and remove unavailable models from model pickers.",
     "importConfirmHint": "Models will be imported from this provider's API with default compatibilities (vision, tool-call, reasoning).",
     "showingCount": "Showing {count} of {total}"
   },
