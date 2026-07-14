@@ -309,9 +309,19 @@ func (q *Queries) ListChatRoutes(ctx context.Context, chatID pgtype.UUID) ([]Lis
 }
 
 const setRouteActiveSession = `-- name: SetRouteActiveSession :exec
-UPDATE bot_channel_routes
-SET active_session_id = $1::uuid, updated_at = now()
-WHERE id = $2
+WITH destination_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.id = $1::uuid
+  FOR KEY SHARE
+)
+UPDATE bot_channel_routes route
+SET active_session_id = COALESCE(
+      (SELECT destination_session.id FROM destination_session),
+      $1::uuid
+    ),
+    updated_at = now()
+WHERE route.id = $2
 `
 
 type SetRouteActiveSessionParams struct {
