@@ -31,25 +31,38 @@ func DisplayStyleLogTailCommand() string {
 }
 
 func displayScriptPreamble() string {
-	return writeScript("/tmp/memoh-desktop-install.sh", "MEMOH_DESKTOP_INSTALL", sourceOrEmbedded("scripts/desktop-install.sh", DesktopInstall)) +
-		writeScript("/tmp/memoh-desktop-style.sh", "MEMOH_DESKTOP_STYLE", sourceOrEmbedded("scripts/desktop-style.sh", DesktopStyle)) +
+	return writeScript("/tmp/memoh-desktop-install.sh", "MEMOH_DESKTOP_INSTALL", desktopInstallScript()) +
+		writeScript("/tmp/memoh-desktop-style.sh", "MEMOH_DESKTOP_STYLE", desktopStyleScript()) +
 		writeScript("/tmp/memoh-desktop-apply-style.sh", "MEMOH_DESKTOP_APPLY_STYLE", displayApplyStyleScript())
 }
 
+func desktopInstallScript() string {
+	if data, err := os.ReadFile("scripts/desktop-install.sh"); err == nil {
+		return string(data)
+	}
+	return DesktopInstall
+}
+
+func desktopStyleScript() string {
+	if data, err := os.ReadFile("scripts/desktop-style.sh"); err == nil {
+		return string(data)
+	}
+	return DesktopStyle
+}
+
 func displayApplyStyleScript() string {
-	script := sourceOrEmbedded("scripts/display-apply-style.sh", DisplayApplyStyle)
+	script := DisplayApplyStyle
+	if data, err := os.ReadFile("scripts/display-apply-style.sh"); err == nil {
+		script = string(data)
+	}
 	return strings.ReplaceAll(script, "__MEMOH_DISPLAY_DESKTOP_STYLE_VERSION__", DesktopStyleVersion)
 }
 
 func displayPrepareScript() string {
-	return sourceOrEmbedded("scripts/display-prepare.sh", DisplayPrepare)
-}
-
-func sourceOrEmbedded(path, embedded string) string {
-	if data, err := os.ReadFile(path); err == nil {
+	if data, err := os.ReadFile("scripts/display-prepare.sh"); err == nil {
 		return string(data)
 	}
-	return embedded
+	return DisplayPrepare
 }
 
 func writeScript(path, delimiter, content string) string {
