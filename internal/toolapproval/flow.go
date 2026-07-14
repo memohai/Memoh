@@ -80,6 +80,7 @@ func RunFlow(ctx context.Context, svc FlowService, flow FlowRequest) (FlowResult
 	if err != nil {
 		return FlowResult{}, err
 	}
+	flow.Input.ExecutionLocation = eval.ExecutionLocation
 	if eval.Decision == DecisionBypass {
 		return FlowResult{Approved: true, Status: StatusApproved}, nil
 	}

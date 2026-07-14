@@ -206,7 +206,7 @@ func (p *ContainerProvider) execApplyPatch(ctx context.Context, session SessionC
 	if err != nil {
 		return nil, err
 	}
-	if res, err := p.runWorkspaceToolHook(ctx, session, hooks.EventBeforeFileWrite, map[string]any{
+	if res, err := p.runWorkspaceToolHook(ctx, session, target.hookWorkspaceInfo(p.execWorkDir), hooks.EventBeforeFileWrite, map[string]any{
 		"operation": "apply_patch",
 		"summary":   plan.summary(),
 		"files":     plan.files(),
@@ -219,7 +219,7 @@ func (p *ContainerProvider) execApplyPatch(ctx context.Context, session SessionC
 	if err := commitApplyPatchPlan(opCtx, client, plan); err != nil {
 		return nil, err
 	}
-	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, hooks.EventAfterFileWrite, map[string]any{
+	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, target.hookWorkspaceInfo(p.execWorkDir), hooks.EventAfterFileWrite, map[string]any{
 		"operation": "apply_patch",
 		"summary":   plan.summary(),
 		"files":     plan.files(),

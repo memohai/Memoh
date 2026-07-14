@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/memohai/memoh/internal/hooks"
 	workspacepkg "github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
@@ -33,6 +34,15 @@ type containerTestTargetProvider struct {
 	resolvedInput string
 	resolveErr    error
 	listCalls     int
+}
+
+type recordingWorkspaceHookService struct {
+	requests []hooks.Request
+}
+
+func (s *recordingWorkspaceHookService) Run(_ context.Context, req hooks.Request, _ hooks.ToolRunner) (hooks.Result, error) {
+	s.requests = append(s.requests, req)
+	return hooks.Result{Decision: hooks.DecisionAllow}, nil
 }
 
 func (p *containerTestTargetProvider) ResolveWorkspaceTarget(_ context.Context, _ string, targetID string) (workspacepkg.ResolvedWorkspaceTarget, error) {
@@ -338,6 +348,58 @@ func TestContainerProviderResolvesOneCanonicalTargetPerInvocation(t *testing.T) 
 	}
 	if !resolved.workspace.windows || resolved.workspace.defaultWorkDir != `C:\Users\alice\project` {
 		t.Fatalf("resolved workspace = %#v", resolved.workspace)
+	}
+}
+
+func TestContainerProviderHooksUseResolvedRemoteTarget(t *testing.T) {
+	t.Parallel()
+
+	targetProvider := &containerTestTargetProvider{
+		containerTestBridgeProvider: containerTestBridgeProvider{info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendContainer,
+			DefaultWorkDir: "/data",
+		}},
+		resolved: workspacepkg.ResolvedWorkspaceTarget{
+			TargetID: "remote-target",
+			Client:   &bridge.Client{},
+			Info: bridge.WorkspaceInfo{
+				Backend:        bridge.WorkspaceBackendRemote,
+				OS:             "win32",
+				DefaultWorkDir: `C:\Users\alice\project`,
+			},
+		},
+	}
+	provider := NewContainerProvider(nil, targetProvider, nil, "")
+	recorder := &recordingWorkspaceHookService{}
+	provider.hookService = recorder
+
+	target, err := provider.resolveToolTarget(context.Background(), SessionContext{BotID: "bot-1"}, map[string]any{"target_id": "remote-target"})
+	if err != nil {
+		t.Fatalf("resolveToolTarget() error = %v", err)
+	}
+	_, err = provider.execWithWorkspaceHooks(
+		context.Background(),
+		SessionContext{BotID: "bot-1", SessionID: "session-1"},
+		target.hookWorkspaceInfo(provider.execWorkDir),
+		"echo ok",
+		target.workspace.defaultWorkDir,
+		30,
+		false,
+		func() (any, error) { return map[string]any{"exit_code": 0}, nil },
+	)
+	if err != nil {
+		t.Fatalf("execWithWorkspaceHooks() error = %v", err)
+	}
+	if len(recorder.requests) != 2 {
+		t.Fatalf("hook requests = %d, want before and after", len(recorder.requests))
+	}
+	for _, req := range recorder.requests {
+		if req.Workspace.Runtime != bridge.WorkspaceBackendRemote || req.Workspace.CWD != `C:\Users\alice\project` {
+			t.Fatalf("hook workspace = %+v, want resolved remote target", req.Workspace)
+		}
+	}
+	if got := target.backgroundOutputDir(); got != remoteBackgroundOutputLogDir {
+		t.Fatalf("background output dir = %q, want %q", got, remoteBackgroundOutputLogDir)
 	}
 }
 

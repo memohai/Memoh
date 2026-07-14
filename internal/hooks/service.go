@@ -308,9 +308,9 @@ func (s *Service) runCommand(ctx context.Context, cfg Config, req Request, actio
 		workDir = strings.TrimSpace(source.PluginDir)
 	}
 	if workDir == "" {
-		workDir = strings.TrimSpace(req.Workspace.CWD)
-	}
-	if workDir == "" {
+		// Hook commands and their config belong to the provider's primary
+		// workspace. req.Workspace describes the operation being inspected and
+		// may point at a different runtime.
 		workDir = DefaultWorkDir
 	}
 	envMap := cfg.Env

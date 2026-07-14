@@ -27,7 +27,10 @@ import (
 // Does not match sleep inside pipelines, subshells, or scripts.
 var blockedSleepPattern = regexp.MustCompile(`^sleep\s+(\d+(?:\.\d+)?)(?:\s*[;&]|$)`)
 
-const defaultContainerExecWorkDir = "/data"
+const (
+	defaultContainerExecWorkDir  = "/data"
+	remoteBackgroundOutputLogDir = "/data/.memoh/background"
+)
 
 // containerOpTimeout is the maximum time allowed for individual file
 // operations (read, write, list, edit). Exec has its own timeout.
@@ -41,9 +44,13 @@ const largeFileThreshold = 512 * 1024 // 512 KB
 type ContainerProvider struct {
 	clients     bridge.Provider
 	bgManager   *background.Manager
-	hookService *hooks.Service
+	hookService workspaceHookService
 	execWorkDir string
 	logger      *slog.Logger
+}
+
+type workspaceHookService interface {
+	Run(ctx context.Context, req hooks.Request, runner hooks.ToolRunner) (hooks.Result, error)
 }
 
 func NewContainerProvider(log *slog.Logger, clients bridge.Provider, bgManager *background.Manager, execWorkDir string, hookServices ...*hooks.Service) *ContainerProvider {
@@ -292,7 +299,19 @@ type toolWorkspace struct {
 type resolvedToolTarget struct {
 	id        string
 	client    *bridge.Client
+	info      bridge.WorkspaceInfo
 	workspace toolWorkspace
+}
+
+func (t resolvedToolTarget) hookWorkspaceInfo(fallbackWorkDir string) hooks.WorkspaceInfo {
+	return hookWorkspaceInfoFromBridge(t.info, fallbackWorkDir)
+}
+
+func (t resolvedToolTarget) backgroundOutputDir() string {
+	if strings.EqualFold(strings.TrimSpace(t.info.Backend), bridge.WorkspaceBackendRemote) {
+		return remoteBackgroundOutputLogDir
+	}
+	return background.OutputLogDir
 }
 
 type workspaceTargetResolver interface {
@@ -315,6 +334,10 @@ type listExecutionLocationsResult struct {
 }
 
 func (p *ContainerProvider) resolveToolWorkspace(ctx context.Context, session SessionContext) toolWorkspace {
+	return toolWorkspaceFromInfo(p.resolveToolWorkspaceInfo(ctx, session), p.execWorkDir)
+}
+
+func (p *ContainerProvider) resolveToolWorkspaceInfo(ctx context.Context, session SessionContext) bridge.WorkspaceInfo {
 	info := bridge.WorkspaceInfo{
 		Backend:        bridge.WorkspaceBackendContainer,
 		DefaultWorkDir: p.execWorkDir,
@@ -324,7 +347,7 @@ func (p *ContainerProvider) resolveToolWorkspace(ctx context.Context, session Se
 			info = resolved
 		}
 	}
-	return toolWorkspaceFromInfo(info, p.execWorkDir)
+	return info
 }
 
 func toolWorkspaceFromInfo(info bridge.WorkspaceInfo, fallbackWorkDir string) toolWorkspace {
@@ -442,6 +465,7 @@ func (p *ContainerProvider) resolveToolTarget(ctx context.Context, session Sessi
 		return resolvedToolTarget{
 			id:        resolved.TargetID,
 			client:    resolved.Client,
+			info:      resolved.Info,
 			workspace: toolWorkspaceFromInfo(resolved.Info, p.execWorkDir),
 		}, nil
 	}
@@ -452,34 +476,30 @@ func (p *ContainerProvider) resolveToolTarget(ctx context.Context, session Sessi
 	if err != nil {
 		return resolvedToolTarget{}, err
 	}
+	info := p.resolveToolWorkspaceInfo(ctx, session)
 	return resolvedToolTarget{
 		client:    client,
-		workspace: p.resolveToolWorkspace(ctx, session),
+		info:      info,
+		workspace: toolWorkspaceFromInfo(info, p.execWorkDir),
 	}, nil
 }
 
-func (p *ContainerProvider) hookWorkspaceInfo(ctx context.Context, session SessionContext) hooks.WorkspaceInfo {
-	info := hooks.WorkspaceInfo{
-		CWD:     p.execWorkDir,
-		Runtime: bridge.WorkspaceBackendContainer,
+func hookWorkspaceInfoFromBridge(info bridge.WorkspaceInfo, fallbackWorkDir string) hooks.WorkspaceInfo {
+	cwd := strings.TrimSpace(info.DefaultWorkDir)
+	if cwd == "" {
+		cwd = strings.TrimSpace(fallbackWorkDir)
 	}
-	if resolver, ok := p.clients.(bridge.WorkspaceInfoProvider); ok {
-		if resolved, err := resolver.WorkspaceInfo(ctx, session.BotID); err == nil {
-			if strings.TrimSpace(resolved.DefaultWorkDir) != "" {
-				info.CWD = resolved.DefaultWorkDir
-			}
-			if strings.TrimSpace(resolved.Backend) != "" {
-				info.Runtime = resolved.Backend
-			}
-		}
+	if cwd == "" {
+		cwd = hooks.DefaultWorkDir
 	}
-	if strings.TrimSpace(info.CWD) == "" {
-		info.CWD = hooks.DefaultWorkDir
+	runtime := strings.TrimSpace(info.Backend)
+	if runtime == "" {
+		runtime = bridge.WorkspaceBackendContainer
 	}
-	return info
+	return hooks.WorkspaceInfo{CWD: cwd, Runtime: runtime}
 }
 
-func (p *ContainerProvider) runWorkspaceToolHook(ctx context.Context, session SessionContext, eventName string, extra map[string]any) (hooks.Result, error) {
+func (p *ContainerProvider) runWorkspaceToolHook(ctx context.Context, session SessionContext, workspace hooks.WorkspaceInfo, eventName string, extra map[string]any) (hooks.Result, error) {
 	if p == nil || p.hookService == nil {
 		return hooks.Result{Decision: hooks.DecisionAllow, RuntimeSupported: hooks.RuntimeSupported(eventName)}, nil
 	}
@@ -489,7 +509,7 @@ func (p *ContainerProvider) runWorkspaceToolHook(ctx context.Context, session Se
 		BotID:     session.BotID,
 		SessionID: session.SessionID,
 		ChatID:    session.ChatID,
-		Workspace: p.hookWorkspaceInfo(ctx, session),
+		Workspace: workspace,
 		Extra:     extra,
 	}
 	return p.hookService.Run(ctx, req, nil)
@@ -662,7 +682,7 @@ func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContex
 	}
 
 	data := []byte(content)
-	if res, err := p.runWorkspaceToolHook(ctx, session, hooks.EventBeforeFileWrite, map[string]any{
+	if res, err := p.runWorkspaceToolHook(ctx, session, target.hookWorkspaceInfo(p.execWorkDir), hooks.EventBeforeFileWrite, map[string]any{
 		"path":  filePath,
 		"bytes": len(data),
 	}); err != nil {
@@ -683,7 +703,7 @@ func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContex
 			return nil, err
 		}
 	}
-	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, hooks.EventAfterFileWrite, map[string]any{
+	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, target.hookWorkspaceInfo(p.execWorkDir), hooks.EventAfterFileWrite, map[string]any{
 		"path":  filePath,
 		"bytes": len(data),
 	}); err != nil {
@@ -798,7 +818,7 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 	}
 
 	updatedBytes := []byte(updated)
-	if res, err := p.runWorkspaceToolHook(ctx, session, hooks.EventBeforeFileWrite, map[string]any{
+	if res, err := p.runWorkspaceToolHook(ctx, session, target.hookWorkspaceInfo(p.execWorkDir), hooks.EventBeforeFileWrite, map[string]any{
 		"path":  filePath,
 		"bytes": len(updatedBytes),
 		"mode":  "edit",
@@ -818,7 +838,7 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 			return nil, err
 		}
 	}
-	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, hooks.EventAfterFileWrite, map[string]any{
+	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, target.hookWorkspaceInfo(p.execWorkDir), hooks.EventAfterFileWrite, map[string]any{
 		"path":  filePath,
 		"bytes": len(updatedBytes),
 		"mode":  "edit",
@@ -843,6 +863,8 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 		workDir = target.workspace.defaultWorkDir
 	}
 	description := strings.TrimSpace(StringArg(args, "description"))
+	hookWorkspace := target.hookWorkspaceInfo(p.execWorkDir)
+	backgroundOutputDir := target.backgroundOutputDir()
 
 	// Parse timeout (default 30s, max 600s).
 	timeout := background.DefaultExecTimeout
@@ -869,21 +891,21 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 
 	// Background execution path.
 	if runInBg && p.bgManager != nil {
-		return p.execWithWorkspaceHooks(ctx, session, command, workDir, timeout, true, func() (any, error) {
-			return p.execExecBackground(ctx, session, client, command, workDir, description)
+		return p.execWithWorkspaceHooks(ctx, session, hookWorkspace, command, workDir, timeout, true, func() (any, error) {
+			return p.execExecBackground(ctx, session, client, command, workDir, description, backgroundOutputDir)
 		})
 	}
 
 	// If we have a background manager, use streaming exec so we can flip
 	// to background on timeout without killing the process.
 	if p.bgManager != nil {
-		return p.execWithWorkspaceHooks(ctx, session, command, workDir, timeout, false, func() (any, error) {
-			return p.execExecWithFlip(ctx, session, client, command, workDir, description, timeout)
+		return p.execWithWorkspaceHooks(ctx, session, hookWorkspace, command, workDir, timeout, false, func() (any, error) {
+			return p.execExecWithFlip(ctx, session, client, command, workDir, description, backgroundOutputDir, timeout)
 		})
 	}
 
 	// Fallback: no background manager, plain synchronous exec.
-	wrapped, err := p.execWithWorkspaceHooks(ctx, session, command, workDir, timeout, false, func() (any, error) {
+	wrapped, err := p.execWithWorkspaceHooks(ctx, session, hookWorkspace, command, workDir, timeout, false, func() (any, error) {
 		result, err := client.Exec(ctx, command, workDir, timeout)
 		if err != nil {
 			return nil, err
@@ -898,8 +920,8 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 	return wrapped, nil
 }
 
-func (p *ContainerProvider) execWithWorkspaceHooks(ctx context.Context, session SessionContext, command, workDir string, timeout int32, background bool, run func() (any, error)) (any, error) {
-	if res, err := p.runWorkspaceToolHook(ctx, session, hooks.EventBeforeWorkspaceCommand, map[string]any{
+func (p *ContainerProvider) execWithWorkspaceHooks(ctx context.Context, session SessionContext, workspace hooks.WorkspaceInfo, command, workDir string, timeout int32, background bool, run func() (any, error)) (any, error) {
+	if res, err := p.runWorkspaceToolHook(ctx, session, workspace, hooks.EventBeforeWorkspaceCommand, map[string]any{
 		"command":           command,
 		"work_dir":          workDir,
 		"timeout_seconds":   timeout,
@@ -920,7 +942,7 @@ func (p *ContainerProvider) execWithWorkspaceHooks(ctx context.Context, session 
 	if runErr != nil {
 		extra["error"] = runErr.Error()
 	}
-	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, hooks.EventAfterWorkspaceCommand, extra); err != nil {
+	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, workspace, hooks.EventAfterWorkspaceCommand, extra); err != nil {
 		p.logWorkspaceToolHookError(hooks.EventAfterWorkspaceCommand, session.BotID, session.SessionID, err)
 	}
 	return result, runErr
@@ -1057,7 +1079,7 @@ func tailText(value string, maxBytes int) string {
 // agent gets an immediate "auto_backgrounded" response.
 func (p *ContainerProvider) execExecWithFlip(
 	ctx context.Context, session SessionContext, client *bridge.Client,
-	command, workDir, description string, softTimeout int32,
+	command, workDir, description, outputDir string, softTimeout int32,
 ) (any, error) {
 	// Start streaming exec with a large container-side timeout so the process
 	// keeps running even after we stop reading in the foreground.
@@ -1089,7 +1111,7 @@ func (p *ContainerProvider) execExecWithFlip(
 		// Soft timeout fired — flip the running stream to background.
 		// The container process is still alive; we hand off the stream reader
 		// goroutine to the background manager.
-		return p.flipToBackground(ctx, session, client, reader, command, workDir, description, softTimeout)
+		return p.flipToBackground(ctx, session, client, reader, command, workDir, description, outputDir, softTimeout)
 
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -1102,7 +1124,7 @@ func (p *ContainerProvider) flipToBackground(
 	ctx context.Context,
 	session SessionContext, client *bridge.Client,
 	reader *backgroundExecStreamReader,
-	command, workDir, description string, softTimeout int32,
+	command, workDir, description, outputDir string, softTimeout int32,
 ) (any, error) {
 	writeFn := func(ctx context.Context, path string, data []byte) error {
 		return client.WriteFile(ctx, path, data)
@@ -1110,7 +1132,7 @@ func (p *ContainerProvider) flipToBackground(
 
 	taskID, outputFile := p.bgManager.SpawnAdopt(
 		ctx,
-		session.BotID, session.SessionID, command, workDir, description,
+		session.BotID, session.SessionID, command, workDir, description, outputDir,
 		reader.Result(), writeFn,
 	)
 	// SetChunkHandler replays output collected during the foreground phase
@@ -1164,7 +1186,7 @@ func detectBlockedSleep(command string) string {
 // execExecBackground spawns the command as a background task and returns immediately.
 func (p *ContainerProvider) execExecBackground(
 	ctx context.Context, session SessionContext, client *bridge.Client,
-	command, workDir, description string,
+	command, workDir, description, outputDir string,
 ) (any, error) {
 	streamCtx, streamCancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(background.BackgroundExecTimeout)*time.Second)
 	stream, err := client.ExecStream(streamCtx, command, workDir, background.BackgroundExecTimeout)
@@ -1179,7 +1201,7 @@ func (p *ContainerProvider) execExecBackground(
 	}
 	taskID, outputFile := p.bgManager.SpawnAdopt(
 		ctx,
-		session.BotID, session.SessionID, command, workDir, description,
+		session.BotID, session.SessionID, command, workDir, description, outputDir,
 		reader.Result(), writeFn,
 	)
 	reader.SetChunkHandler(func(stream, chunk string) {
