@@ -21,7 +21,7 @@ func (q *Queries) DeleteProviderOAuthToken(ctx context.Context, providerID pgtyp
 }
 
 const getProviderOAuthTokenByProvider = `-- name: GetProviderOAuthTokenByProvider :one
-SELECT id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, created_at, updated_at FROM provider_oauth_tokens WHERE provider_id = $1
+SELECT id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at FROM provider_oauth_tokens WHERE provider_id = $1
 `
 
 func (q *Queries) GetProviderOAuthTokenByProvider(ctx context.Context, providerID pgtype.UUID) (ProviderOauthToken, error) {
@@ -37,6 +37,7 @@ func (q *Queries) GetProviderOAuthTokenByProvider(ctx context.Context, providerI
 		&i.TokenType,
 		&i.State,
 		&i.PkceCodeVerifier,
+		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -44,7 +45,7 @@ func (q *Queries) GetProviderOAuthTokenByProvider(ctx context.Context, providerI
 }
 
 const getProviderOAuthTokenByState = `-- name: GetProviderOAuthTokenByState :one
-SELECT id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, created_at, updated_at FROM provider_oauth_tokens WHERE state = $1 AND state != ''
+SELECT id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at FROM provider_oauth_tokens WHERE state = $1 AND state != ''
 `
 
 func (q *Queries) GetProviderOAuthTokenByState(ctx context.Context, state string) (ProviderOauthToken, error) {
@@ -60,6 +61,7 @@ func (q *Queries) GetProviderOAuthTokenByState(ctx context.Context, state string
 		&i.TokenType,
 		&i.State,
 		&i.PkceCodeVerifier,
+		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -67,15 +69,17 @@ func (q *Queries) GetProviderOAuthTokenByState(ctx context.Context, state string
 }
 
 const updateProviderOAuthState = `-- name: UpdateProviderOAuthState :exec
-INSERT INTO provider_oauth_tokens (provider_id, state, pkce_code_verifier)
+INSERT INTO provider_oauth_tokens (provider_id, state, pkce_code_verifier, metadata)
 VALUES (
   $1,
   $2,
-  $3
+  $3,
+  $4
 )
 ON CONFLICT (provider_id) DO UPDATE SET
   state = EXCLUDED.state,
   pkce_code_verifier = EXCLUDED.pkce_code_verifier,
+  metadata = EXCLUDED.metadata,
   updated_at = now()
 `
 
@@ -83,10 +87,16 @@ type UpdateProviderOAuthStateParams struct {
 	ProviderID       pgtype.UUID `json:"provider_id"`
 	State            string      `json:"state"`
 	PkceCodeVerifier string      `json:"pkce_code_verifier"`
+	Metadata         []byte      `json:"metadata"`
 }
 
 func (q *Queries) UpdateProviderOAuthState(ctx context.Context, arg UpdateProviderOAuthStateParams) error {
-	_, err := q.db.Exec(ctx, updateProviderOAuthState, arg.ProviderID, arg.State, arg.PkceCodeVerifier)
+	_, err := q.db.Exec(ctx, updateProviderOAuthState,
+		arg.ProviderID,
+		arg.State,
+		arg.PkceCodeVerifier,
+		arg.Metadata,
+	)
 	return err
 }
 
@@ -99,7 +109,8 @@ INSERT INTO provider_oauth_tokens (
   scope,
   token_type,
   state,
-  pkce_code_verifier
+  pkce_code_verifier,
+  metadata
 )
 VALUES (
   $1,
@@ -109,7 +120,8 @@ VALUES (
   $5,
   $6,
   $7,
-  $8
+  $8,
+  $9
 )
 ON CONFLICT (provider_id) DO UPDATE SET
   access_token = EXCLUDED.access_token,
@@ -119,8 +131,9 @@ ON CONFLICT (provider_id) DO UPDATE SET
   token_type = EXCLUDED.token_type,
   state = EXCLUDED.state,
   pkce_code_verifier = EXCLUDED.pkce_code_verifier,
+  metadata = EXCLUDED.metadata,
   updated_at = now()
-RETURNING id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, created_at, updated_at
+RETURNING id, provider_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata, created_at, updated_at
 `
 
 type UpsertProviderOAuthTokenParams struct {
@@ -132,6 +145,7 @@ type UpsertProviderOAuthTokenParams struct {
 	TokenType        string             `json:"token_type"`
 	State            string             `json:"state"`
 	PkceCodeVerifier string             `json:"pkce_code_verifier"`
+	Metadata         []byte             `json:"metadata"`
 }
 
 func (q *Queries) UpsertProviderOAuthToken(ctx context.Context, arg UpsertProviderOAuthTokenParams) (ProviderOauthToken, error) {
@@ -144,6 +158,7 @@ func (q *Queries) UpsertProviderOAuthToken(ctx context.Context, arg UpsertProvid
 		arg.TokenType,
 		arg.State,
 		arg.PkceCodeVerifier,
+		arg.Metadata,
 	)
 	var i ProviderOauthToken
 	err := row.Scan(
@@ -156,6 +171,7 @@ func (q *Queries) UpsertProviderOAuthToken(ctx context.Context, arg UpsertProvid
 		&i.TokenType,
 		&i.State,
 		&i.PkceCodeVerifier,
+		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

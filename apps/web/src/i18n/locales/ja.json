@@ -888,6 +888,7 @@
     "searchNoResults": "一致するモデルがありません",
     "emptyTitle": "モデルはまだありません",
     "emptyDescription": "手動で追加するか、このプロバイダーから完全なリストをインポートします。",
+    "managedEmptyDescription": "認証を完了してから、管理対象の Model カタログを更新してください。",
     "clientType": "クライアントの種類",
     "clientTypePlaceholder": "クライアントの種類を選択してください",
     "typeRequired": "種類を選択してください",
@@ -921,6 +922,9 @@
     "importModels": "モデルをインポート",
     "importSuccess": "{created}件のモデルをインポートしました。{skipped}件はスキップされました",
     "importFailed": "モデルのインポートに失敗しました",
+    "refreshModels": "Model を更新",
+    "refreshSuccess": "Model カタログを更新しました: {created} 件追加、{updated} 件更新",
+    "refreshFailed": "Model カタログの更新に失敗しました",
     "importConfirmHint": "このプロバイダーの API から、デフォルトの互換性（ビジョン、ツール呼び出し、推論）付きでモデルをインポートします。",
     "showingCount": "{total} の {count} を表示中"
   },
@@ -968,30 +972,19 @@
       "descriptionOff": "キャッシュを無効にすると、リクエストごとに完全なシステムプロンプトとツール一覧が再課金されます。厳密なコンテキスト分離が必要な場合にのみ使用してください。"
     },
     "oauth": {
-      "openaiTitle": "OpenAI OAuth",
-      "openaiDescription": "Codex 互換の OpenAI アクセスのために、ChatGPT アカウントでこのプロバイダーを認可します。",
+      "openaiDeviceHint": "OpenAI の確認ページでこのワンタイムコードを入力してください。",
       "openaiCreateHint": "まずプロバイダーを保存し、その後プロバイダーの詳細パネルから認可します。",
-      "githubTitle": "GitHub コパイロット OAuth",
-      "githubDescription": "現在の Memoh アカウントを GitHub Copilot に接続します。",
-      "githubDeviceTitle": "GitHub Copilot デバイスの認証",
-      "githubDeviceDescription": "デバイス認証を開始し、GitHubの認証ページを開き、以下のユーザーコードを入力します。",
       "githubCreateHint": "まずプロバイダーを保存し、その後プロバイダーの詳細パネルからデバイス認証を開始します。",
-      "githubDeviceHint": "検証を開くURL以下にこのユーザー コードを入力して、現在の Memoh アカウントを認証します。",
-      "authorize": "承認する",
-      "deviceAuthorize": "デバイス認証を開始する",
+      "githubDeviceHint": "GitHub の確認ページでこのワンタイムコードを入力してください。",
       "authorizeFailed": "認証の開始に失敗しました",
-      "authorizeTimedOut": "認証がタイムアウトしました。もう一度やり直してください。",
       "authorizeSuccess": "認可成功",
       "revoke": "取り消す",
       "revokeFailed": "認可の取り消しに失敗しました",
       "revokeSuccess": "認可が取り消されました",
       "copyFailed": "デバイスコードのコピーに失敗しました",
-      "connectedAccount": "接続されたアカウント",
-      "callback": "コールバック URL",
       "deviceVerificationUri": "検証URL",
       "deviceUserCode": "ユーザーコード",
       "deviceExpiresAt": "有効期限",
-      "statusFailed": "OAuthステータスのロードに失敗しました",
       "status": {
         "checking": "認証ステータスを確認しています...",
         "authorized": "認可された",
@@ -1001,7 +994,15 @@
         "expired": "認証の有効期限が切れました。続行するには再認証してください。",
         "missing": "まだ認可されていません。",
         "notConfigured": "このプロバイダーは OAuth 用に設定されていません。"
-      }
+      },
+      "sectionTitle": "アカウント",
+      "chatgptAccount": "ChatGPT アカウント",
+      "githubAccount": "GitHub アカウント",
+      "connect": "接続",
+      "openaiConnectHint": "ChatGPT アカウントでサインインすると、そのモデルを利用できます。",
+      "githubConnectHint": "GitHub アカウントでサインインすると、Copilot のモデルを利用できます。",
+      "revokeConfirm": "このアカウントの認可を取り消しますか?",
+      "connecting": "接続中"
     }
   },
   "webSearch": {
@@ -3108,5 +3109,12 @@
       "saveFailed": "保存できませんでした。もう一度お試しください。",
       "noProviderWarning": "AIプロバイダーがまだ設定されていません。「設定」→「プロバイダー」で追加するまで、Bot は応答できません。"
     }
+  },
+  "deviceCode": {
+    "copyAndOpen": "コピーして開く",
+    "retry": "新しいコードを取得",
+    "expiresIn": "{time}で期限切れになります",
+    "codeExpired": "コードは期限切れです",
+    "copyFailed": "コードをコピーできませんでした"
   }
 }

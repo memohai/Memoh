@@ -56,6 +56,7 @@
       <ModelList
         :provider-id="curProvider?.id"
         :models="modelDataList"
+        :managed="curProvider?.client_type === 'openai-codex'"
         :delete-model-loading="deleteModelLoading"
         @edit="handleEditModel"
         @delete="deleteModel"
