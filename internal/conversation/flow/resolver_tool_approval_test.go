@@ -35,12 +35,12 @@ func TestAuthorizeToolApprovalResponseMapsOperationPermission(t *testing.T) {
 			t.Parallel()
 			checker := &recordingToolApprovalPermissionChecker{allow: true}
 			resolver := &Resolver{botPermissions: checker}
-			err := resolver.authorizeToolApprovalResponse(context.Background(), toolapproval.Request{
+			err := resolver.authorizeToolApprovalOperation(context.Background(), toolapproval.Request{
 				BotID:     "bot-1",
 				Operation: tc.operation,
 			}, ToolApprovalResponseInput{ActorUserID: "user-1"})
 			if err != nil {
-				t.Fatalf("authorizeToolApprovalResponse() error = %v", err)
+				t.Fatalf("authorizeToolApprovalOperation() error = %v", err)
 			}
 			if checker.permission != tc.permission {
 				t.Fatalf("checked permission = %q, want %q", checker.permission, tc.permission)
@@ -58,13 +58,13 @@ func TestAuthorizeToolApprovalResponseFailsClosed(t *testing.T) {
 		{BotID: "bot-1", Operation: "unknown"},
 		{Operation: toolapproval.OperationRead},
 	} {
-		if err := resolver.authorizeToolApprovalResponse(context.Background(), target, ToolApprovalResponseInput{ActorUserID: "user-1"}); !errors.Is(err, toolapproval.ErrForbidden) {
-			t.Fatalf("authorizeToolApprovalResponse(%+v) error = %v, want forbidden", target, err)
+		if err := resolver.authorizeToolApprovalOperation(context.Background(), target, ToolApprovalResponseInput{ActorUserID: "user-1"}); !errors.Is(err, toolapproval.ErrForbidden) {
+			t.Fatalf("authorizeToolApprovalOperation(%+v) error = %v, want forbidden", target, err)
 		}
 	}
 
 	checker.allow = false
-	if err := resolver.authorizeToolApprovalResponse(context.Background(), toolapproval.Request{
+	if err := resolver.authorizeToolApprovalOperation(context.Background(), toolapproval.Request{
 		BotID:     "bot-1",
 		Operation: toolapproval.OperationWrite,
 	}, ToolApprovalResponseInput{ActorUserID: "user-1"}); !errors.Is(err, toolapproval.ErrForbidden) {

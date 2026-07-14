@@ -10,6 +10,7 @@ import (
 	"github.com/memohai/memoh/internal/channelaccess"
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/decisionruntime"
 	"github.com/memohai/memoh/internal/fetchproviders"
 	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/mcp"
@@ -64,6 +65,8 @@ func ServerModule() fx.Option {
 	return fx.Options(
 		fx.Provide(
 			boot.ProvideRuntimeConfig,
+			provideSessionRuntime,
+			decisionruntime.NewRouter,
 			provideContainerService,
 			provideOverlayProviderRegistry,
 			provideNetworkService,
@@ -104,6 +107,7 @@ func ServerModule() fx.Option {
 			provideMediaService,
 			provideAgent,
 			provideChatResolver,
+			provideBaseTurnService,
 			provideTurnService,
 			provideScheduleTriggerer,
 			provideHeartbeatSessionCreator,

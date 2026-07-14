@@ -70,9 +70,15 @@ type LoopDetectionConfig struct {
 type InjectMessage struct {
 	Text            string
 	HeaderifiedText string
+	Applied         func()
 	// ImageParts carries inline images (data URL or public URL) to attach
 	// alongside the injected text when the model supports vision input.
 	ImageParts []sdk.ImagePart
+}
+
+type TerminalHookAuthority struct {
+	Context  context.Context
+	Validate func(context.Context) error
 }
 
 // RunConfig holds everything needed for a single agent invocation.
@@ -109,6 +115,7 @@ type RunConfig struct {
 	Skills                      []SkillEntry
 	LoopDetection               LoopDetectionConfig
 	Retry                       RetryConfig
+	TerminalHookAuthority       TerminalHookAuthority
 
 	// PromptCacheTTL controls prompt caching for this run. Empty or
 	// unrecognized values default to 5m. Use "1h" for the long-cache tier

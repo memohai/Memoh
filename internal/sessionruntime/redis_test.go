@@ -2,6 +2,7 @@ package sessionruntime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -34,6 +35,27 @@ type dropCommandResultSubscriptionBackend struct {
 type dropNextRuntimePublishBackend struct {
 	DistributedBackend
 	dropNext atomic.Bool
+}
+
+type conflictOnceStartBackend struct {
+	*RedisBackend
+	delay time.Duration
+	once  sync.Once
+}
+
+func (b *conflictOnceStartBackend) StartRun(ctx context.Context, key Key, ref StreamRef, update ActiveRunUpdate) (Snapshot, bool, error) {
+	return b.RedisBackend.StartRun(ctx, key, ref, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
+		b.once.Do(func() {
+			time.Sleep(b.delay)
+			conflict := EmptySnapshot(key.BotID, key.SessionID)
+			conflict.Epoch = "epoch-conflict"
+			data, err := marshalRuntimeJSON(conflict)
+			if err == nil {
+				_ = b.client.Set(ctx, b.stateKey(key), data, b.stateTTL).Err()
+			}
+		})
+		return update(snapshot, now)
+	})
 }
 
 func (b *dropNextRuntimePublishBackend) arm() {
@@ -199,6 +221,12 @@ func TestRedisValkeyRuntimeManagerContractOptional(t *testing.T) {
 			runRedisDurableCommandResultContract(t, target.url)
 			runRedisBoundedCommandWorkersContract(t, target.url)
 			runRedisDuplicateCommandSaturationContract(t, target.url)
+			runRedisSnapshotFidelityContract(t, target.url)
+			runRedisPubSubFidelityContract(t, target.url)
+			runRedisActiveReaperContract(t, target.url)
+			runRedisBoundedTransactionConflictContract(t, target.url)
+			runRedisStartRunRetryClockContract(t, target.url)
+			runRedisNormalizedMessageAppendContract(t, target.url)
 		})
 	}
 	if !ran {
@@ -206,6 +234,292 @@ func TestRedisValkeyRuntimeManagerContractOptional(t *testing.T) {
 			t.Fatal("distributed session runtime contracts are required, but neither MEMOH_TEST_REDIS_URL nor MEMOH_TEST_VALKEY_URL is set")
 		}
 		t.Skip("set MEMOH_TEST_REDIS_URL and/or MEMOH_TEST_VALKEY_URL to run Redis and/or Valkey session runtime contracts")
+	}
+}
+
+func TestDecodeRedisSnapshotPreservesDynamicJSONShapes(t *testing.T) {
+	t.Parallel()
+
+	snapshot, err := decodeRedisSnapshot([]byte(`{
+  "bot_id":"bot-fidelity",
+  "session_id":"session-fidelity",
+  "epoch":"epoch-fidelity",
+  "seq":1,
+  "queue":[],
+  "current_run_view":{
+    "stream_id":"stream-fidelity",
+    "generation":"generation-fidelity",
+    "status":"running",
+    "messages":[{
+      "id":1,
+      "type":"tool",
+      "input":{"empty":[],"large":9007199254740993},
+      "progress":[[]]
+    }]
+  }
+}`))
+	if err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	message := snapshot.CurrentRunView.Messages[0]
+	input, ok := message.Input.(map[string]any)
+	if !ok {
+		t.Fatalf("decoded input = %#v", message.Input)
+	}
+	if empty, ok := input["empty"].([]any); !ok || len(empty) != 0 {
+		t.Fatalf("decoded empty array = %#v", input["empty"])
+	}
+	if large, ok := input["large"].(json.Number); !ok || large.String() != "9007199254740993" {
+		t.Fatalf("decoded large integer = %#v", input["large"])
+	}
+	if len(message.Progress) != 1 {
+		t.Fatalf("decoded progress = %#v", message.Progress)
+	}
+	if empty, ok := message.Progress[0].([]any); !ok || len(empty) != 0 {
+		t.Fatalf("decoded nested progress array = %#v", message.Progress[0])
+	}
+}
+
+func runRedisSnapshotFidelityContract(t *testing.T, redisURL string) {
+	t.Helper()
+
+	backend, err := NewRedisBackend(context.Background(), RedisOptions{
+		URL: redisURL, KeyPrefix: uniqueRuntimeBackendPrefix("snapshot-fidelity"), StateTTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("redis backend: %v", err)
+	}
+	t.Cleanup(func() { _ = backend.Close() })
+	key := Key{BotID: testBotID, SessionID: "session-snapshot-fidelity"}
+	input := map[string]any{
+		"empty": []any{},
+		"large": json.Number("9007199254740993"),
+	}
+	if _, changed, updateErr := backend.Update(context.Background(), key, func(Snapshot, bool) (Snapshot, bool, error) {
+		return Snapshot{
+			BotID: key.BotID, SessionID: key.SessionID, Epoch: "epoch-fidelity", Seq: 1,
+			Queue: []QueuedRunView{},
+			CurrentRunView: &CurrentRunView{
+				StreamID: "stream-fidelity", Generation: "generation-fidelity", Status: RunStatusRunning,
+				Messages: []conversation.UIMessage{{ID: 1, Type: conversation.UIMessageTool, Input: input, Progress: []any{[]any{}}}},
+			},
+		}, true, nil
+	}); updateErr != nil || !changed {
+		t.Fatalf("seed fidelity snapshot = changed:%v err:%v", changed, updateErr)
+	}
+	if _, changed, updateErr := backend.Update(context.Background(), key, func(snapshot Snapshot, _ bool) (Snapshot, bool, error) {
+		snapshot.Seq++
+		return snapshot, true, nil
+	}); updateErr != nil || !changed {
+		t.Fatalf("rewrite fidelity snapshot = changed:%v err:%v", changed, updateErr)
+	}
+	snapshot, ok, err := backend.Load(context.Background(), key)
+	if err != nil || !ok || snapshot.CurrentRunView == nil {
+		t.Fatalf("load fidelity snapshot = ok:%v err:%v snapshot:%#v", ok, err, snapshot)
+	}
+	message := snapshot.CurrentRunView.Messages[0]
+	gotInput, ok := message.Input.(map[string]any)
+	if !ok {
+		t.Fatalf("fidelity input = %#v", message.Input)
+	}
+	if empty, ok := gotInput["empty"].([]any); !ok || len(empty) != 0 {
+		t.Fatalf("fidelity empty array = %#v", gotInput["empty"])
+	}
+	if large, ok := gotInput["large"].(json.Number); !ok || large.String() != "9007199254740993" {
+		t.Fatalf("fidelity large integer = %#v", gotInput["large"])
+	}
+}
+
+func runRedisPubSubFidelityContract(t *testing.T, redisURL string) {
+	t.Helper()
+
+	backend, err := NewRedisBackend(context.Background(), RedisOptions{
+		URL: redisURL, KeyPrefix: uniqueRuntimeBackendPrefix("pubsub-fidelity"), StateTTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("redis backend: %v", err)
+	}
+	t.Cleanup(func() { _ = backend.Close() })
+	key := Key{BotID: testBotID, SessionID: "session-pubsub-fidelity"}
+	sub, err := backend.Subscribe(context.Background(), key)
+	if err != nil {
+		t.Fatalf("subscribe fidelity event: %v", err)
+	}
+	t.Cleanup(sub.Close)
+	input := map[string]any{"empty": []any{}, "large": json.Number("9007199254740993")}
+	if err := backend.Publish(context.Background(), Event{
+		Type: EventRuntimeDelta, BotID: key.BotID, SessionID: key.SessionID, Epoch: "epoch-fidelity", Seq: 1,
+		Delta: &RuntimeDelta{MessageUpserts: []conversation.UIMessage{{
+			ID: 1, Type: conversation.UIMessageTool, Input: input, Progress: []any{[]any{}},
+		}}},
+	}); err != nil {
+		t.Fatalf("publish fidelity event: %v", err)
+	}
+	select {
+	case event := <-sub.C:
+		if event.Delta == nil || len(event.Delta.MessageUpserts) != 1 {
+			t.Fatalf("fidelity event = %#v", event)
+		}
+		assertDynamicJSONFidelity(t, event.Delta.MessageUpserts[0])
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for fidelity event")
+	}
+}
+
+func runRedisActiveReaperContract(t *testing.T, redisURL string) {
+	t.Helper()
+
+	const leaseTTL = 120 * time.Millisecond
+	backend, err := NewRedisBackend(context.Background(), RedisOptions{
+		URL: redisURL, KeyPrefix: uniqueRuntimeBackendPrefix("active-reaper"), StateTTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("redis backend: %v", err)
+	}
+	manager := testRuntimeManagerWithOptions(t, backend, Options{
+		OwnerID: "active-reaper-owner", StateTTL: time.Minute, OwnerLeaseTTL: leaseTTL,
+	})
+	if err := manager.StartRun(context.Background(), testBotID, "session-active-reaper", "stream-active-reaper", make(chan struct{}, 1), func() {}, make(chan conversation.InjectMessage, 1)); err != nil {
+		t.Fatalf("start active reaper run: %v", err)
+	}
+	manager.stopLeaseRenewal(manager.localControlForScope(testBotID, "session-active-reaper", "stream-active-reaper"))
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		snapshot, ok, loadErr := backend.Load(context.Background(), Key{BotID: testBotID, SessionID: "session-active-reaper"})
+		if loadErr != nil {
+			t.Fatalf("load active reaper snapshot: %v", loadErr)
+		}
+		if ok && snapshot.CurrentRunView != nil && snapshot.CurrentRunView.Status == RunStatusLost {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("orphaned run was not reaped without a Snapshot call")
+}
+
+func runRedisBoundedTransactionConflictContract(t *testing.T, redisURL string) {
+	t.Helper()
+
+	backend, err := NewRedisBackend(context.Background(), RedisOptions{
+		URL: redisURL, KeyPrefix: uniqueRuntimeBackendPrefix("bounded-conflict"), StateTTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("redis backend: %v", err)
+	}
+	t.Cleanup(func() { _ = backend.Close() })
+	key := Key{BotID: testBotID, SessionID: "session-bounded-conflict"}
+	var attempts atomic.Int64
+	_, _, err = backend.Update(context.Background(), key, func(snapshot Snapshot, _ bool) (Snapshot, bool, error) {
+		attempt := attempts.Add(1)
+		conflict := Snapshot{BotID: key.BotID, SessionID: key.SessionID, Seq: attempt, Queue: []QueuedRunView{}, UpdatedAt: time.Now().UTC()}
+		data, marshalErr := json.Marshal(conflict)
+		if marshalErr != nil {
+			return snapshot, false, marshalErr
+		}
+		if setErr := backend.client.Set(context.Background(), backend.stateKey(key), data, time.Minute).Err(); setErr != nil {
+			return snapshot, false, setErr
+		}
+		conflict.Seq++
+		return conflict, true, nil
+	})
+	if !errors.Is(err, ErrBackendConflict) {
+		t.Fatalf("perpetual transaction conflict error = %v", err)
+	}
+	if got := attempts.Load(); got != redisTransactionMaxAttempts {
+		t.Fatalf("transaction attempts = %d, want %d", got, redisTransactionMaxAttempts)
+	}
+}
+
+func runRedisStartRunRetryClockContract(t *testing.T, redisURL string) {
+	t.Helper()
+
+	backend, err := NewRedisBackend(context.Background(), RedisOptions{
+		URL: redisURL, KeyPrefix: uniqueRuntimeBackendPrefix("start-retry-clock"), StateTTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("redis backend: %v", err)
+	}
+	conflicting := &conflictOnceStartBackend{RedisBackend: backend, delay: 250 * time.Millisecond}
+	manager := testRuntimeManagerWithOptions(t, conflicting, Options{
+		OwnerID: "start-retry-clock-owner", StateTTL: time.Minute, OwnerLeaseTTL: 150 * time.Millisecond,
+	})
+	if err := manager.StartRun(context.Background(), testBotID, "session-start-retry-clock", "stream-start-retry-clock", make(chan struct{}, 1), func() {}, make(chan conversation.InjectMessage, 1)); err != nil {
+		t.Fatalf("start run after transaction conflict: %v", err)
+	}
+	snapshot, err := manager.Snapshot(context.Background(), testBotID, "session-start-retry-clock")
+	if err != nil || snapshot.CurrentRunView == nil || snapshot.CurrentRunView.OwnerLeaseExpiresAt == nil {
+		t.Fatalf("retry clock snapshot = %#v err=%v", snapshot.CurrentRunView, err)
+	}
+	now, err := backend.Now(context.Background())
+	if err != nil {
+		t.Fatalf("redis time: %v", err)
+	}
+	if !snapshot.CurrentRunView.OwnerLeaseExpiresAt.After(now) {
+		t.Fatalf("retry committed expired lease: expires=%s now=%s", snapshot.CurrentRunView.OwnerLeaseExpiresAt, now)
+	}
+}
+
+func runRedisNormalizedMessageAppendContract(t *testing.T, redisURL string) {
+	t.Helper()
+
+	backend, err := NewRedisBackend(context.Background(), RedisOptions{
+		URL: redisURL, KeyPrefix: uniqueRuntimeBackendPrefix("normalized-append"), StateTTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("redis backend: %v", err)
+	}
+	manager := testRuntimeManagerWithOptions(t, backend, Options{
+		OwnerID: "normalized-append-owner", StateTTL: time.Minute, OwnerLeaseTTL: 30 * time.Second,
+	})
+	const sessionID = "session-normalized-append"
+	const streamID = "stream-normalized-append"
+	if err := manager.StartRun(context.Background(), testBotID, sessionID, streamID, make(chan struct{}, 1), func() {}, make(chan conversation.InjectMessage, 1)); err != nil {
+		t.Fatalf("start normalized append run: %v", err)
+	}
+	handle := requireRunHandle(t, manager, testBotID, sessionID, streamID)
+	if _, err := manager.HandleAgentEvent(context.Background(), handle, agentpkg.StreamEvent{Type: agentpkg.EventTextDelta, Delta: "hello"}); err != nil {
+		t.Fatalf("write initial text delta: %v", err)
+	}
+
+	key := Key{BotID: testBotID, SessionID: sessionID}
+	stateBefore, err := backend.client.Get(context.Background(), backend.stateKey(key)).Bytes()
+	if err != nil {
+		t.Fatalf("load normalized state before append: %v", err)
+	}
+	var persisted Snapshot
+	if err := unmarshalRuntimeJSON(stateBefore, &persisted); err != nil {
+		t.Fatalf("decode normalized state: %v", err)
+	}
+	if persisted.CurrentRunView == nil || len(persisted.CurrentRunView.Messages) != 1 || persisted.CurrentRunView.Messages[0].Content != "" {
+		t.Fatalf("normalized state retained streaming content: %#v", persisted.CurrentRunView)
+	}
+	field := redisMessageContentField(handle.Generation, persisted.CurrentRunView.Messages[0])
+	if content, err := backend.client.HGet(context.Background(), backend.contentKey(key), field).Result(); err != nil || content != "hello" {
+		t.Fatalf("initial normalized content = %q err=%v", content, err)
+	}
+
+	if _, err := manager.HandleAgentEvent(context.Background(), handle, agentpkg.StreamEvent{Type: agentpkg.EventTextDelta, Delta: " world"}); err != nil {
+		t.Fatalf("append normalized text delta: %v", err)
+	}
+	stateAfter, err := backend.client.Get(context.Background(), backend.stateKey(key)).Bytes()
+	if err != nil {
+		t.Fatalf("load normalized state after append: %v", err)
+	}
+	if string(stateAfter) != string(stateBefore) {
+		t.Fatal("normalized hot append rewrote the full snapshot state")
+	}
+	snapshot, ok, err := backend.Load(context.Background(), key)
+	if err != nil || !ok || snapshot.CurrentRunView == nil || len(snapshot.CurrentRunView.Messages) != 1 {
+		t.Fatalf("load hydrated normalized snapshot = ok:%v err:%v snapshot:%#v", ok, err, snapshot)
+	}
+	if content := snapshot.CurrentRunView.Messages[0].Content; content != "hello world" {
+		t.Fatalf("hydrated normalized content = %q", content)
+	}
+	if snapshot.Seq != persisted.Seq+1 {
+		t.Fatalf("hydrated normalized seq = %d, want %d", snapshot.Seq, persisted.Seq+1)
+	}
+	if !snapshot.UpdatedAt.After(persisted.UpdatedAt) && !snapshot.UpdatedAt.Equal(persisted.UpdatedAt) {
+		t.Fatalf("hydrated normalized update time regressed: before=%s after=%s", persisted.UpdatedAt, snapshot.UpdatedAt)
 	}
 }
 

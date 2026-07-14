@@ -2325,7 +2325,10 @@ func TestACPWorkspaceEffectsRejectStaleRedisOwner(t *testing.T) {
 		streamA   = "stream-acp-workspace-owner-a"
 		streamB   = "stream-acp-workspace-owner-b"
 	)
-	ownerHandle, err := owner.StartRunHandle(ctx, botID, sessionID, streamA, make(chan struct{}, 1), func() {}, make(chan conversation.InjectMessage, 1))
+	ownerHandle, err := owner.StartRunWithOptions(ctx, sessionruntime.RunStartOptions{
+		BotID: botID, SessionID: sessionID, StreamID: streamA,
+		AbortCh: make(chan struct{}, 1), Cancel: func() {}, InjectCh: make(chan conversation.InjectMessage, 1),
+	})
 	if err != nil {
 		t.Fatalf("start stale owner run: %v", err)
 	}

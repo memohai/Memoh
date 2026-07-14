@@ -17,6 +17,7 @@ import (
 
 type Manager struct {
 	backend        Backend
+	runState       runStateBackend
 	distributed    DistributedBackend
 	ownerID        string
 	stateTTL       time.Duration
@@ -46,6 +47,7 @@ type Manager struct {
 	shutdownOnce        sync.Once
 	shutdownDone        chan struct{}
 	shutdownErr         error
+	backgroundWG        sync.WaitGroup
 }
 
 type commandWaiter struct {
@@ -80,7 +82,7 @@ type runControl struct {
 	admissionComplete bool
 	abortRequested    bool
 	abortFinalizing   bool
-	finishRetryOnce   sync.Once
+	finalizeRetryOnce sync.Once
 	ownershipCancel   context.CancelCauseFunc
 	ownershipOnce     sync.Once
 }
@@ -156,6 +158,10 @@ func NewManager(backend Backend, opts Options) *Manager {
 		log = slog.Default()
 	}
 	distributed, _ := backend.(DistributedBackend)
+	var runState runStateBackend = localRunStateBackend{backend: backend}
+	if distributed != nil {
+		runState = distributedRunStateBackend{backend: distributed}
+	}
 	newEpoch := opts.EpochGenerator
 	if newEpoch == nil {
 		newEpoch = uuid.NewString
@@ -166,6 +172,7 @@ func NewManager(backend Backend, opts Options) *Manager {
 	}
 	return &Manager{
 		backend:                backend,
+		runState:               runState,
 		distributed:            distributed,
 		ownerID:                ownerID,
 		stateTTL:               stateTTL,
@@ -264,6 +271,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		return context.Canceled
 	}
 	commandDone := make(chan struct{})
+	var reaper ExpiredRunBackend
 	m.mu.Lock()
 	if m.isClosed() {
 		m.mu.Unlock()
@@ -277,6 +285,10 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	m.commandCancel = stopCommands
 	m.commandDone = commandDone
+	if candidate, ok := m.distributed.(ExpiredRunBackend); ok {
+		reaper = candidate
+		m.backgroundWG.Add(1)
+	}
 	m.mu.Unlock()
 	go func() {
 		jobs := make(chan Command, m.commandWorkers)
@@ -334,6 +346,12 @@ func (m *Manager) Start(ctx context.Context) error {
 			}
 		}
 	}()
+	if reaper != nil {
+		go func() {
+			defer m.backgroundWG.Done()
+			m.runExpiredRunReaper(commandCtx, reaper)
+		}()
+	}
 	return nil
 }
 
@@ -393,6 +411,7 @@ func (m *Manager) shutdown(ctx context.Context) error {
 	if commandDone != nil {
 		<-commandDone
 	}
+	m.backgroundWG.Wait()
 	m.subscriptionsMu.Lock()
 	m.subscriptionsClosed = true
 	m.subscriptionsMu.Unlock()
@@ -404,87 +423,68 @@ func (m *Manager) shutdown(ctx context.Context) error {
 	return errors.Join(releaseErr, controlErr, backendErr)
 }
 
-func (m *Manager) StartRun(ctx context.Context, botID, sessionID, streamID string, abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- conversation.InjectMessage) error {
-	_, err := m.StartRunHandle(ctx, botID, sessionID, streamID, abortCh, cancel, injectCh)
-	return err
-}
+const expiredRunReaperBatchSize = 128
 
-func (m *Manager) StartRunHandle(ctx context.Context, botID, sessionID, streamID string, abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- conversation.InjectMessage) (RunHandle, error) {
-	return m.StartRunWithAdmissionHandle(ctx, botID, sessionID, streamID, RunAdmissionView{}, abortCh, cancel, injectCh)
-}
-
-func (m *Manager) StartRunWithOperation(ctx context.Context, botID, sessionID, streamID string, operation *RunOperationView, abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- conversation.InjectMessage) error {
-	_, err := m.StartRunWithOperationHandle(ctx, botID, sessionID, streamID, operation, abortCh, cancel, injectCh)
-	return err
-}
-
-func (m *Manager) StartRunWithOperationHandle(ctx context.Context, botID, sessionID, streamID string, operation *RunOperationView, abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- conversation.InjectMessage) (RunHandle, error) {
-	return m.StartRunWithAdmissionHandle(ctx, botID, sessionID, streamID, RunAdmissionView{Operation: operation}, abortCh, cancel, injectCh)
-}
-
-func (m *Manager) StartRunWithAdmission(ctx context.Context, botID, sessionID, streamID string, admission RunAdmissionView, abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- conversation.InjectMessage) error {
-	_, err := m.StartRunWithAdmissionHandle(ctx, botID, sessionID, streamID, admission, abortCh, cancel, injectCh)
-	return err
-}
-
-func (m *Manager) StartRunWithAdmissionHandle(ctx context.Context, botID, sessionID, streamID string, admission RunAdmissionView, abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- conversation.InjectMessage) (RunHandle, error) {
-	return m.StartRunWithAdmissionBuilderHandle(ctx, botID, sessionID, streamID, func(context.Context, RunHandle) (RunAdmissionView, error) {
-		return admission, nil
-	}, abortCh, cancel, injectCh)
-}
-
-func (m *Manager) StartRunWithOperationBuilder(ctx context.Context, botID, sessionID, streamID string, builder func(context.Context) (*RunOperationView, error), abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- conversation.InjectMessage) error {
-	if builder == nil {
-		return errors.New("runtime operation builder is required")
-	}
-	_, err := m.StartRunWithOperationBuilderHandle(ctx, botID, sessionID, streamID, func(ctx context.Context, _ RunHandle) (*RunOperationView, error) {
-		return builder(ctx)
-	}, abortCh, cancel, injectCh)
-	return err
-}
-
-func (m *Manager) StartRunWithOperationBuilderHandle(ctx context.Context, botID, sessionID, streamID string, builder func(context.Context, RunHandle) (*RunOperationView, error), abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- conversation.InjectMessage) (RunHandle, error) {
-	if builder == nil {
-		return RunHandle{}, errors.New("runtime operation builder is required")
-	}
-	return m.StartRunWithAdmissionBuilderHandle(ctx, botID, sessionID, streamID, func(ctx context.Context, handle RunHandle) (RunAdmissionView, error) {
-		operation, err := builder(ctx, handle)
-		return RunAdmissionView{Operation: operation}, err
-	}, abortCh, cancel, injectCh)
-}
-
-// StartRunWithAdmissionBuilder reserves the cross-server run before executing
-// builder, then publishes the running view only after the canonical request
-// turn and optional replacement operation are ready.
-func (m *Manager) StartRunWithAdmissionBuilder(ctx context.Context, botID, sessionID, streamID string, builder func(context.Context) (RunAdmissionView, error), abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- conversation.InjectMessage) error {
-	if builder == nil {
-		return errors.New("runtime admission builder is required")
-	}
-	_, err := m.StartRunWithAdmissionBuilderHandle(ctx, botID, sessionID, streamID, func(ctx context.Context, _ RunHandle) (RunAdmissionView, error) {
-		return builder(ctx)
-	}, abortCh, cancel, injectCh)
-	return err
-}
-
-func (m *Manager) StartRunWithAdmissionBuilderAndOwnership(ctx context.Context, botID, sessionID, streamID string, builder func(context.Context) (RunAdmissionView, error), ownershipCancel context.CancelCauseFunc, abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- conversation.InjectMessage) error {
-	if builder == nil {
-		if ownershipCancel != nil {
-			ownershipCancel(ErrRunOwnershipLost)
+func (m *Manager) runExpiredRunReaper(ctx context.Context, reaper ExpiredRunBackend) {
+	interval := runtimeReconcileInterval(m.ownerLeaseTTL)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			keys, err := reaper.ListExpiredRunKeys(ctx, expiredRunReaperBatchSize)
+			if err != nil {
+				if ctx.Err() == nil {
+					m.logger.Warn("list expired runtime runs failed", slog.Any("error", err))
+				}
+				continue
+			}
+			for _, key := range keys {
+				if _, err := m.Snapshot(ctx, key.BotID, key.SessionID); err != nil && ctx.Err() == nil {
+					m.logger.Warn("reap expired runtime run failed", slog.Any("error", err), slog.String("session_id", key.SessionID))
+				}
+			}
 		}
-		return errors.New("runtime admission builder is required")
 	}
-	_, err := m.StartRunWithAdmissionBuilderAndOwnershipHandle(ctx, botID, sessionID, streamID, func(ctx context.Context, _ RunHandle) (RunAdmissionView, error) {
-		return builder(ctx)
-	}, ownershipCancel, abortCh, cancel, injectCh)
+}
+
+func (m *Manager) StartRun(ctx context.Context, botID, sessionID, streamID string, abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- conversation.InjectMessage) error {
+	_, err := m.StartRunWithOptions(ctx, RunStartOptions{
+		BotID: botID, SessionID: sessionID, StreamID: streamID,
+		AbortCh: abortCh, Cancel: cancel, InjectCh: injectCh,
+	})
 	return err
 }
 
-func (m *Manager) StartRunWithAdmissionBuilderHandle(ctx context.Context, botID, sessionID, streamID string, builder func(context.Context, RunHandle) (RunAdmissionView, error), abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- conversation.InjectMessage) (RunHandle, error) {
-	return m.startRunWithAdmissionBuilder(ctx, botID, sessionID, streamID, builder, nil, abortCh, cancel, injectCh)
-}
-
-func (m *Manager) StartRunWithAdmissionBuilderAndOwnershipHandle(ctx context.Context, botID, sessionID, streamID string, builder func(context.Context, RunHandle) (RunAdmissionView, error), ownershipCancel context.CancelCauseFunc, abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- conversation.InjectMessage) (RunHandle, error) {
-	return m.startRunWithAdmissionBuilder(ctx, botID, sessionID, streamID, builder, ownershipCancel, abortCh, cancel, injectCh)
+// StartRunWithOptions reserves the backend run before executing the optional
+// admission builder, then publishes the running view only after admission is
+// ready. This is the single advanced run-start entry point.
+func (m *Manager) StartRunWithOptions(ctx context.Context, options RunStartOptions) (RunHandle, error) {
+	if options.AdmissionBuilder != nil && (options.Admission.RequestUserTurn != nil || options.Admission.Operation != nil) {
+		if options.OwnershipCancel != nil {
+			options.OwnershipCancel(ErrRunOwnershipLost)
+		}
+		return RunHandle{}, errors.New("runtime admission and admission builder cannot both be set")
+	}
+	builder := options.AdmissionBuilder
+	if builder == nil {
+		builder = func(context.Context, RunHandle) (RunAdmissionView, error) {
+			return options.Admission, nil
+		}
+	}
+	return m.startRunWithAdmissionBuilder(
+		ctx,
+		options.BotID,
+		options.SessionID,
+		options.StreamID,
+		builder,
+		options.OwnershipCancel,
+		options.AbortCh,
+		options.Cancel,
+		options.InjectCh,
+	)
 }
 
 func (m *Manager) startRunWithAdmissionBuilder(ctx context.Context, botID, sessionID, streamID string, builder func(context.Context, RunHandle) (RunAdmissionView, error), ownershipCancel context.CancelCauseFunc, abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- conversation.InjectMessage) (RunHandle, error) {
@@ -563,25 +563,18 @@ func (m *Manager) startRunWithAdmissionBuilder(ctx context.Context, botID, sessi
 	m.mu.Unlock()
 
 	localLeaseStarted := time.Now()
-	now, err := m.backend.Now(ctx)
-	if err != nil {
-		m.removeLocalControl(streamID, ctrl)
-		return RunHandle{}, fmt.Errorf("load runtime backend time: %w", err)
-	}
 	key := Key{BotID: botID, SessionID: sessionID}
 	ownerID := ""
-	var leaseExpiresAt *time.Time
 	if m.distributed != nil {
 		ownerID = m.ownerID
-		expiresAt := now.Add(m.ownerLeaseTTL)
-		leaseExpiresAt = &expiresAt
 		// The backend claim below is authoritative, but a local deadline must
 		// exist before it returns so an abort can cancel blocked admission.
 		ctrl.setLeaseValidUntil(localLeaseStarted.Add(m.ownerLeaseTTL))
 	}
 	epoch := m.newEpoch()
 	var expiredRef StreamRef
-	claim := func(snapshot Snapshot, _ bool) (Snapshot, bool, error) {
+	claim := func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
+		expiredRef = StreamRef{}
 		if snapshot.CurrentRunView != nil && isActiveRunStatus(snapshot.CurrentRunView.Status) && snapshot.CurrentRunView.StreamID != streamID {
 			if m.distributed == nil || !m.markLostIfExpired(&snapshot, now) {
 				return snapshot, false, fmt.Errorf("session %q already has an active runtime run", sessionID)
@@ -592,6 +585,11 @@ func (m *Manager) startRunWithAdmissionBuilder(ctx context.Context, botID, sessi
 		snapshot.SessionID = sessionID
 		if strings.TrimSpace(snapshot.Epoch) == "" {
 			snapshot.Epoch = epoch
+		}
+		var leaseExpiresAt *time.Time
+		if m.distributed != nil {
+			expiresAt := now.Add(m.ownerLeaseTTL)
+			leaseExpiresAt = &expiresAt
 		}
 		snapshot.Seq++
 		snapshot.Queue = nonNilQueue(snapshot.Queue)
@@ -608,15 +606,9 @@ func (m *Manager) startRunWithAdmissionBuilder(ctx context.Context, botID, sessi
 		}
 		return snapshot, true, nil
 	}
-	var claimedSnapshot Snapshot
-	var changed bool
-	if m.distributed != nil {
-		claimedSnapshot, changed, err = m.distributed.StartRun(ctx, key, StreamRef{
-			BotID: botID, SessionID: sessionID, StreamID: streamID, OwnerID: m.ownerID, Generation: runGeneration,
-		}, claim)
-	} else {
-		claimedSnapshot, changed, err = m.backend.Update(ctx, key, claim)
-	}
+	claimedSnapshot, changed, err := m.runState.StartRun(ctx, key, StreamRef{
+		BotID: botID, SessionID: sessionID, StreamID: streamID, OwnerID: ownerID, Generation: runGeneration,
+	}, claim)
 	if err != nil {
 		if ctrl.abortWasRequested() {
 			reconcileErr := m.reconcileCanceledRunClaim(context.WithoutCancel(ctx), ctrl)
@@ -651,7 +643,9 @@ func (m *Manager) startRunWithAdmissionBuilder(ctx context.Context, botID, sessi
 	}
 	if m.distributed != nil {
 		localRenewalStarted := time.Now()
-		confirmCtx, confirmCancel := context.WithDeadline(context.WithoutCancel(ctx), ctrl.leaseDeadline())
+		deadline := localRenewalStarted.Add(m.ownerLeaseTTL)
+		ctrl.setLeaseValidUntil(deadline)
+		confirmCtx, confirmCancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
 		renewedAt, renewErr := m.backend.Now(confirmCtx)
 		if renewErr == nil {
 			renewErr = m.distributed.RenewLease(confirmCtx, key, streamID, m.ownerID, runGeneration, renewedAt, renewedAt.Add(m.ownerLeaseTTL))
@@ -671,7 +665,6 @@ func (m *Manager) startRunWithAdmissionBuilder(ctx context.Context, botID, sessi
 			}
 			return RunHandle{}, fmt.Errorf("confirm runtime owner lease: %w", renewErr)
 		}
-		deadline := localRenewalStarted.Add(m.ownerLeaseTTL)
 		if !time.Now().Before(deadline) {
 			ctrl.markReady()
 			m.removeLocalControl(streamID, ctrl)
@@ -778,6 +771,64 @@ func (m *Manager) reconcileCanceledRunClaim(ctx context.Context, ctrl *runContro
 }
 
 func (m *Manager) FinishRun(ctx context.Context, handle RunHandle, status, message string) error {
+	return m.finalizeRun(ctx, handle, runFinalization{
+		Status: strings.TrimSpace(status),
+		Error:  strings.TrimSpace(message),
+	}, false)
+}
+
+type runFinalization struct {
+	Status           string
+	Error            string
+	Messages         []conversation.UIMessage
+	HistoryCommitted bool
+	CanonicalReady   bool
+}
+
+func (m *Manager) FinalizeAgentEvent(ctx context.Context, handle RunHandle, event agentpkg.StreamEvent, canonicalReady bool, finalizationError string) ([]conversation.UIMessage, error) {
+	if event.Type != agentpkg.EventAgentEnd && event.Type != agentpkg.EventAgentAbort {
+		return nil, errors.New("terminal agent event is required")
+	}
+	if m == nil || m.backend == nil {
+		return nil, nil
+	}
+	handle = handle.normalized()
+	if !handle.valid() {
+		return nil, ErrRunOwnershipLost
+	}
+	ctrl := m.localControlForHandle(handle)
+	if ctrl == nil {
+		return nil, ErrRunOwnershipLost
+	}
+	if err := waitRunControlReady(ctx, ctrl); err != nil {
+		return nil, err
+	}
+	if m.localControlForHandle(handle) != ctrl {
+		return nil, ErrRunOwnershipLost
+	}
+	messages := ctrl.converter.ConvertTerminalMessages(event.Messages)
+	status := RunStatusCompleted
+	if event.Type == agentpkg.EventAgentAbort {
+		status = RunStatusAborted
+	}
+	finalizationError = strings.TrimSpace(finalizationError)
+	if finalizationError != "" {
+		status = RunStatusErrored
+	}
+	outcome := runFinalization{
+		Status:           status,
+		Error:            finalizationError,
+		Messages:         messages,
+		HistoryCommitted: event.HistoryCommitted,
+		CanonicalReady:   canonicalReady && event.HistoryCommitted,
+	}
+	if err := m.finalizeRun(ctx, handle, outcome, true); err != nil {
+		return messages, err
+	}
+	return messages, nil
+}
+
+func (m *Manager) finalizeRun(ctx context.Context, handle RunHandle, outcome runFinalization, terminalCommit bool) error {
 	if m == nil || m.backend == nil {
 		return nil
 	}
@@ -785,20 +836,24 @@ func (m *Manager) FinishRun(ctx context.Context, handle RunHandle, status, messa
 	if !handle.valid() {
 		return ErrRunOwnershipLost
 	}
+	outcome.Status = strings.ToLower(strings.TrimSpace(outcome.Status))
+	outcome.Error = strings.TrimSpace(outcome.Error)
+	if !isValidFinalRunStatus(outcome.Status) {
+		return fmt.Errorf("invalid runtime final status %q", outcome.Status)
+	}
+	outcome.CanonicalReady = outcome.CanonicalReady && outcome.HistoryCommitted
 	ctrl := m.localControlForHandle(handle)
 	if ctrl != nil {
 		ctrl.stopCommands()
 	}
-	status = strings.TrimSpace(status)
-	finishMessage := strings.TrimSpace(message)
-	changed, err := m.finishRunState(ctx, handle, status, finishMessage)
+	changed, err := m.finalizeRunState(ctx, handle, outcome)
 	if err == nil || changed {
 		m.cleanupFinishedRun(context.WithoutCancel(ctx), handle)
 		return err
 	}
 	if errors.Is(err, ErrRunOwnershipLost) {
-		snapshot, ok, loadErr := m.backend.Load(context.WithoutCancel(ctx), handle.key())
-		if loadErr == nil && ok && runMatchesHandle(snapshot.CurrentRunView, handle) && !isActiveRunStatus(snapshot.CurrentRunView.Status) {
+		committed, loadErr := m.finalizationCommitted(context.WithoutCancel(ctx), handle, outcome)
+		if loadErr == nil && committed {
 			m.cleanupFinishedRun(context.WithoutCancel(ctx), handle)
 			return nil
 		}
@@ -807,9 +862,16 @@ func (m *Manager) FinishRun(ctx context.Context, handle RunHandle, status, messa
 	}
 	if ctrl != nil && m.localControlForHandle(handle) == ctrl {
 		retryCtx := context.WithoutCancel(ctx)
-		ctrl.finishRetryOnce.Do(func() {
-			go m.retryFinishRun(retryCtx, ctrl, status, finishMessage)
+		clonedMessages, cloneErr := cloneUIMessages(outcome.Messages)
+		if cloneErr == nil {
+			outcome.Messages = clonedMessages
+		}
+		ctrl.finalizeRetryOnce.Do(func() {
+			go m.retryFinalizeRun(retryCtx, ctrl, outcome)
 		})
+		if terminalCommit {
+			return errors.Join(ErrTerminalCommitPending, err)
+		}
 	}
 	return err
 }
@@ -826,6 +888,10 @@ func rejectPendingSteerOnRunFinish(run *CurrentRunView, now time.Time) {
 }
 
 func (m *Manager) finishRunState(ctx context.Context, handle RunHandle, status, finishMessage string) (bool, error) {
+	return m.finalizeRunState(ctx, handle, runFinalization{Status: status, Error: finishMessage})
+}
+
+func (m *Manager) finalizeRunState(ctx context.Context, handle RunHandle, outcome runFinalization) (bool, error) {
 	admissionTerminal := false
 	_, changed, err := m.releaseActiveAndPublish(ctx, handle, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
 		run := snapshot.CurrentRunView
@@ -836,7 +902,7 @@ func (m *Manager) finishRunState(ctx context.Context, handle RunHandle, status, 
 			return snapshot, false, ErrRunOwnershipLost
 		}
 		admissionTerminal = strings.EqualFold(run.Status, RunStatusAdmitting)
-		finalStatus := status
+		finalStatus := strings.TrimSpace(outcome.Status)
 		if finalStatus == "" {
 			finalStatus = RunStatusCompleted
 			if strings.EqualFold(snapshot.CurrentRunView.Status, RunStatusAborting) {
@@ -845,29 +911,100 @@ func (m *Manager) finishRunState(ctx context.Context, handle RunHandle, status, 
 				finalStatus = RunStatusErrored
 			}
 		}
+		if finalStatus == RunStatusCompleted && strings.EqualFold(run.Status, RunStatusAborting) {
+			finalStatus = RunStatusAborted
+		}
+		if strings.TrimSpace(run.Error) != "" && outcome.Error == "" && finalStatus != RunStatusLost {
+			finalStatus = RunStatusErrored
+		}
 		snapshot.Seq++
 		snapshot.UpdatedAt = now
-		snapshot.CurrentRunView.Status = finalStatus
-		snapshot.CurrentRunView.UpdatedAt = now
-		switch {
-		case finishMessage != "":
-			snapshot.CurrentRunView.Error = finishMessage
-		case finalStatus == RunStatusCompleted || finalStatus == RunStatusAborted:
-			snapshot.CurrentRunView.Error = ""
+		for _, message := range outcome.Messages {
+			run.Messages = upsertUIMessage(run.Messages, message)
 		}
-		snapshot.CurrentRunView.OwnerLeaseExpiresAt = nil
-		rejectPendingSteerOnRunFinish(snapshot.CurrentRunView, now)
+		run.Status = finalStatus
+		run.UpdatedAt = now
+		run.HistoryCommitted = run.HistoryCommitted || outcome.HistoryCommitted
+		run.CanonicalReady = run.CanonicalReady || outcome.CanonicalReady
+		switch {
+		case outcome.Error != "":
+			run.Error = outcome.Error
+		case finalStatus == RunStatusCompleted || finalStatus == RunStatusAborted:
+			run.Error = ""
+		}
+		run.OwnerLeaseExpiresAt = nil
+		rejectPendingSteerOnRunFinish(run, now)
 		return snapshot, true, nil
 	}, func(snapshot Snapshot) RuntimeDelta {
 		if admissionTerminal {
 			return RuntimeDelta{CurrentRunView: snapshot.CurrentRunView}
 		}
-		return runtimeRunPatch(snapshot, true, true, true, m.distributed != nil)
+		delta := runtimeRunPatch(snapshot, true, true, true, m.distributed != nil)
+		delta.MessageUpserts = append([]conversation.UIMessage(nil), outcome.Messages...)
+		return delta
 	})
 	return changed, err
 }
 
-func (m *Manager) retryFinishRun(ctx context.Context, ctrl *runControl, status, message string) {
+func (m *Manager) finalizationCommitted(ctx context.Context, handle RunHandle, outcome runFinalization) (bool, error) {
+	snapshot, ok, err := m.backend.Load(ctx, handle.key())
+	if err != nil || !ok || !runMatchesHandle(snapshot.CurrentRunView, handle) {
+		return false, err
+	}
+	run := snapshot.CurrentRunView
+	if isActiveRunStatus(run.Status) || !finalRunStatusMatches(outcome.Status, run.Status) {
+		return false, nil
+	}
+	if outcome.HistoryCommitted && !run.HistoryCommitted {
+		return false, nil
+	}
+	if outcome.CanonicalReady && !run.CanonicalReady {
+		return false, nil
+	}
+	if outcome.Error != "" && run.Error != outcome.Error {
+		return false, nil
+	}
+	for _, expected := range outcome.Messages {
+		found := false
+		for _, actual := range run.Messages {
+			equal, equalErr := equalRuntimeJSON(actual, expected)
+			if equalErr != nil {
+				return false, equalErr
+			}
+			if equal {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func isValidFinalRunStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "", RunStatusCompleted, RunStatusAborted, RunStatusErrored, RunStatusLost:
+		return true
+	default:
+		return false
+	}
+}
+
+func finalRunStatusMatches(expected, actual string) bool {
+	expected = strings.TrimSpace(expected)
+	actual = strings.TrimSpace(actual)
+	if expected == "" {
+		return !isActiveRunStatus(actual)
+	}
+	if expected == RunStatusCompleted && actual == RunStatusAborted {
+		return true
+	}
+	return expected == actual
+}
+
+func (m *Manager) retryFinalizeRun(ctx context.Context, ctrl *runControl, outcome runFinalization) {
 	if ctrl == nil {
 		return
 	}
@@ -881,7 +1018,7 @@ func (m *Manager) retryFinishRun(ctx context.Context, ctrl *runControl, status, 
 		if m.localControlForHandle(ctrl.handle()) != ctrl {
 			return
 		}
-		changed, err := m.finishRunState(ctx, ctrl.handle(), status, message)
+		changed, err := m.finalizeRunState(ctx, ctrl.handle(), outcome)
 		if err == nil || changed {
 			if err != nil {
 				m.logger.Warn("publish runtime finish failed after state commit", slog.Any("error", err), slog.String("stream_id", ctrl.streamID))
@@ -890,7 +1027,12 @@ func (m *Manager) retryFinishRun(ctx context.Context, ctrl *runControl, status, 
 			return
 		}
 		if errors.Is(err, ErrRunOwnershipLost) {
-			m.forgetLocalControlForHandle(ctx, ctrl.handle())
+			committed, loadErr := m.finalizationCommitted(ctx, ctrl.handle(), outcome)
+			if loadErr == nil && committed {
+				m.cleanupFinishedRun(ctx, ctrl.handle())
+			} else {
+				m.forgetLocalControlForHandle(ctx, ctrl.handle())
+			}
 			return
 		}
 		m.logger.Warn("retry runtime finish failed", slog.Any("error", err), slog.String("stream_id", ctrl.streamID))
@@ -923,6 +1065,9 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 	if m == nil || m.backend == nil {
 		return nil, nil
 	}
+	if event.Type == agentpkg.EventAgentEnd || event.Type == agentpkg.EventAgentAbort {
+		return m.FinalizeAgentEvent(ctx, handle, event, event.HistoryCommitted, "")
+	}
 	handle = handle.normalized()
 	if !handle.valid() {
 		return nil, ErrRunOwnershipLost
@@ -941,8 +1086,6 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 	var messages []conversation.UIMessage
 	switch event.Type {
 	case agentpkg.EventAgentStart:
-	case agentpkg.EventAgentEnd, agentpkg.EventAgentAbort:
-		messages = ctrl.converter.ConvertTerminalMessages(event.Messages)
 	case agentpkg.EventError:
 	default:
 		messages = ctrl.converter.HandleEvent(conversation.UIStreamEventFromAgentEvent(event))
@@ -950,6 +1093,18 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 	delta, visibleChange := runtimeDeltaForAgentEvent(event, messages)
 	if !visibleChange {
 		return messages, nil
+	}
+	if len(delta.MessageAppends) == 1 {
+		handled, err := m.appendActiveMessageAndPublish(ctx, handle, delta.MessageAppends[0], delta)
+		if handled {
+			if err != nil {
+				if errors.Is(err, ErrRunOwnershipLost) {
+					return nil, err
+				}
+				return messages, err
+			}
+			return messages, nil
+		}
 	}
 
 	_, changed, err := m.updateActiveAndPublish(ctx, handle, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
@@ -967,27 +1122,7 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 		for _, msg := range messages {
 			run.Messages = upsertUIMessage(run.Messages, msg)
 		}
-		switch event.Type {
-		case agentpkg.EventAgentEnd:
-			switch {
-			case strings.TrimSpace(run.Error) != "":
-				run.Status = RunStatusErrored
-			case strings.EqualFold(run.Status, RunStatusAborting):
-				run.Status = RunStatusAborted
-			default:
-				run.Status = RunStatusCompleted
-			}
-			run.OwnerLeaseExpiresAt = nil
-			rejectPendingSteerOnRunFinish(run, now)
-		case agentpkg.EventAgentAbort:
-			if strings.TrimSpace(run.Error) != "" {
-				run.Status = RunStatusErrored
-			} else {
-				run.Status = RunStatusAborted
-			}
-			run.OwnerLeaseExpiresAt = nil
-			rejectPendingSteerOnRunFinish(run, now)
-		case agentpkg.EventError:
+		if event.Type == agentpkg.EventError {
 			run.Error = strings.TrimSpace(event.Error)
 			if run.Error == "" {
 				run.Error = "stream error"
@@ -995,10 +1130,7 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 		}
 		return snapshot, true, nil
 	}, func(snapshot Snapshot) RuntimeDelta {
-		switch event.Type {
-		case agentpkg.EventAgentEnd, agentpkg.EventAgentAbort:
-			delta.Run = runtimeRunPatch(snapshot, true, true, true, m.distributed != nil).Run
-		case agentpkg.EventError:
+		if event.Type == agentpkg.EventError {
 			delta.Run = runtimeRunPatch(snapshot, false, true, false, false).Run
 		}
 		return delta
@@ -1013,6 +1145,28 @@ func (m *Manager) HandleAgentEvent(ctx context.Context, handle RunHandle, event 
 		return nil, nil
 	}
 	return messages, nil
+}
+
+func (m *Manager) appendActiveMessageAndPublish(ctx context.Context, handle RunHandle, messageAppend RuntimeMessageAppend, delta RuntimeDelta) (bool, error) {
+	appender, ok := m.distributed.(StreamingDeltaBackend)
+	if !ok {
+		return false, nil
+	}
+	revision, applied, err := appender.AppendActiveRunMessage(ctx, handle.key(), StreamRef{
+		BotID: handle.BotID, SessionID: handle.SessionID, StreamID: handle.StreamID,
+		OwnerID: m.ownerID, Generation: handle.Generation,
+	}, messageAppend)
+	if err != nil || !applied {
+		return applied, err
+	}
+	snapshot := Snapshot{
+		BotID: handle.BotID, SessionID: handle.SessionID,
+		Epoch: revision.Epoch, Seq: revision.Seq, UpdatedAt: revision.UpdatedAt,
+	}
+	if err := m.publishRuntimeDelta(ctx, snapshot, handle.StreamID, delta); err != nil {
+		m.logger.Warn("publish runtime message append failed; subscribers will reconcile from snapshot", slog.Any("error", err), slog.String("stream_id", handle.StreamID))
+	}
+	return true, nil
 }
 
 func (m *Manager) Snapshot(ctx context.Context, botID, sessionID string) (Snapshot, error) {
@@ -1289,25 +1443,8 @@ func (m *Manager) updateActiveAndPublish(ctx context.Context, handle RunHandle, 
 	if !handle.valid() {
 		return Snapshot{}, false, ErrRunOwnershipLost
 	}
-	key := handle.key()
 	streamID := handle.StreamID
-	var snapshot Snapshot
-	var changed bool
-	var err error
-	if m.distributed != nil {
-		snapshot, changed, err = m.distributed.UpdateActiveRun(ctx, key, streamID, handle.Generation, update)
-	} else {
-		snapshot, changed, err = m.backend.Update(ctx, key, func(snapshot Snapshot, ok bool) (Snapshot, bool, error) {
-			if !ok || !runMatchesHandle(snapshot.CurrentRunView, handle) || !isActiveRunStatus(snapshot.CurrentRunView.Status) {
-				return snapshot, false, ErrRunOwnershipLost
-			}
-			now, nowErr := m.backend.Now(ctx)
-			if nowErr != nil {
-				return snapshot, false, nowErr
-			}
-			return update(snapshot, now)
-		})
-	}
+	snapshot, changed, err := m.runState.UpdateActiveRun(ctx, handle, update)
 	if err != nil || !changed {
 		return snapshot, changed, err
 	}
@@ -1323,9 +1460,6 @@ func (m *Manager) updateActiveAndPublish(ctx context.Context, handle RunHandle, 
 
 func (m *Manager) releaseActiveAndPublish(ctx context.Context, handle RunHandle, update ActiveRunUpdate, buildDelta func(Snapshot) RuntimeDelta) (Snapshot, bool, error) {
 	handle = handle.normalized()
-	if m.distributed == nil {
-		return m.updateActiveAndPublish(ctx, handle, update, buildDelta)
-	}
 	if !handle.valid() {
 		return Snapshot{}, false, ErrRunOwnershipLost
 	}
@@ -1333,7 +1467,7 @@ func (m *Manager) releaseActiveAndPublish(ctx context.Context, handle RunHandle,
 		BotID: handle.BotID, SessionID: handle.SessionID, StreamID: handle.StreamID,
 		OwnerID: m.ownerID, Generation: handle.Generation,
 	}
-	snapshot, changed, err := m.distributed.ReleaseRun(ctx, handle.key(), ref, update)
+	snapshot, changed, err := m.runState.ReleaseRun(ctx, handle, ref, update)
 	if err != nil || !changed {
 		return snapshot, changed, err
 	}

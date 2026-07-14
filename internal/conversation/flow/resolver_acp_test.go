@@ -142,6 +142,9 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 		t.Fatalf("events = %#v, want ACP stream delta", events)
 	}
 	end := requireStreamEvent(t, events, agentpkg.EventEnd)
+	if !end.HistoryCommitted {
+		t.Fatal("terminal ACP event did not acknowledge committed history")
+	}
 	if got := terminalAssistantText(t, end); got != "done from codex" {
 		t.Fatalf("terminal assistant text = %q, want done from codex", got)
 	}
@@ -292,6 +295,7 @@ func TestStreamChatWSRejectsConcurrentACPPromptForSameSession(t *testing.T) {
 func TestStreamChatRoutesACPAgentSessionToACPPool(t *testing.T) {
 	t.Parallel()
 
+	guardCalls := 0
 	pool := &recordingACPPrompter{
 		result: acpclient.PromptResult{
 			Text:       "done from codex",
@@ -322,7 +326,11 @@ func TestStreamChatRoutesACPAgentSessionToACPPool(t *testing.T) {
 		logger: slog.New(slog.DiscardHandler),
 	}
 
-	chunks, errs := resolver.StreamChat(context.Background(), conversation.ChatRequest{
+	ctx := WithPersistenceGuard(context.Background(), func(context.Context) error {
+		guardCalls++
+		return nil
+	})
+	chunks, errs := resolver.StreamChat(ctx, conversation.ChatRequest{
 		BotID:     "bot-1",
 		SessionID: "session-1",
 		Query:     "inspect the app",
@@ -336,6 +344,13 @@ func TestStreamChatRoutesACPAgentSessionToACPPool(t *testing.T) {
 	}
 	if pool.input.BotID != "bot-1" || pool.input.SessionID != "session-1" || pool.input.AgentID != "codex" || pool.input.ProjectPath != "/data/app" {
 		t.Fatalf("ACP prompt input = %#v", pool.input)
+	}
+	if pool.input.RuntimeGuard == nil {
+		t.Fatal("ACP prompt input is missing the runtime guard")
+	}
+	before := guardCalls
+	if err := pool.input.RuntimeGuard(context.Background()); err != nil || guardCalls != before+1 {
+		t.Fatalf("ACP runtime guard = (%v, calls:%d), want one additional successful call", err, guardCalls)
 	}
 	if !containsStreamEvent(events, agentpkg.EventStart) || !containsStreamEvent(events, agentpkg.EventEnd) {
 		t.Fatalf("events = %#v, want agent start/end", events)
@@ -1245,6 +1260,9 @@ func TestStreamACPAgentWSFailurePersistsRoundAndSkipsMemory(t *testing.T) {
 	}
 	events := drainAgentEvents(t, eventCh)
 	abort := requireStreamEvent(t, events, agentpkg.EventAbort)
+	if !abort.HistoryCommitted {
+		t.Fatal("aborted ACP event did not acknowledge committed history")
+	}
 	if got := terminalAssistantText(t, abort); got != "ACP agent failed to complete the turn. Please retry." {
 		t.Fatalf("terminal abort assistant text = %q, want sanitized failure", got)
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/conversation/flow"
+	"github.com/memohai/memoh/internal/decisionruntime"
 	"github.com/memohai/memoh/internal/toolapproval"
 )
 
@@ -31,12 +32,12 @@ type ToolApprovalDecisionRequest struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-func NewToolApprovalHandler(log *slog.Logger, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver) *ToolApprovalHandler {
+func NewToolApprovalHandler(log *slog.Logger, botService *bots.Service, accountService *accounts.Service, router *decisionruntime.Router) *ToolApprovalHandler {
 	return &ToolApprovalHandler{
 		logger:         log.With(slog.String("handler", "tool_approval")),
 		botService:     botService,
 		accountService: accountService,
-		resolver:       resolver,
+		resolver:       router,
 	}
 }
 

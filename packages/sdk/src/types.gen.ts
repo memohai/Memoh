@@ -2794,6 +2794,52 @@ export type SessionSession = {
     updated_at?: string;
 };
 
+export type SessionruntimeCurrentRunView = {
+    canonical_ready?: boolean;
+    error?: string;
+    generation: string;
+    history_committed?: boolean;
+    messages?: Array<ConversationUiMessage>;
+    operation?: SessionruntimeRunOperationView;
+    owner_id?: string;
+    owner_lease_expires_at?: string;
+    request_user_turn?: ConversationUiTurn;
+    started_at?: string;
+    status?: string;
+    steer?: SessionruntimeSteerState;
+    stream_id?: string;
+    updated_at?: string;
+};
+
+export type SessionruntimeQueuedRunView = {
+    stream_id?: string;
+};
+
+export type SessionruntimeRunOperationView = {
+    kind: 'retry' | 'edit';
+    replace_from_message_id: string;
+    replacement_user_turn?: ConversationUiTurn;
+};
+
+export type SessionruntimeSnapshot = {
+    bot_id?: string;
+    current_run_view?: SessionruntimeCurrentRunView;
+    epoch?: string;
+    queue?: Array<SessionruntimeQueuedRunView>;
+    seq?: number;
+    session_id?: string;
+    updated_at?: string;
+};
+
+export type SessionruntimeSteerState = {
+    created_at?: string;
+    error?: string;
+    id?: string;
+    status?: string;
+    text?: string;
+    updated_at?: string;
+};
+
 export type SettingsSettings = {
     acl_default_effect?: string;
     chat_acp_agent_id?: string;
@@ -8890,6 +8936,52 @@ export type GetBotsByBotIdSessionsBySessionIdMessagesEventsResponses = {
 };
 
 export type GetBotsByBotIdSessionsBySessionIdMessagesEventsResponse = GetBotsByBotIdSessionsBySessionIdMessagesEventsResponses[keyof GetBotsByBotIdSessionsBySessionIdMessagesEventsResponses];
+
+export type GetBotsByBotIdSessionsBySessionIdRuntimeData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/runtime';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdRuntimeErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdRuntimeError = GetBotsByBotIdSessionsBySessionIdRuntimeErrors[keyof GetBotsByBotIdSessionsBySessionIdRuntimeErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdRuntimeResponses = {
+    /**
+     * OK
+     */
+    200: SessionruntimeSnapshot;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdRuntimeResponse = GetBotsByBotIdSessionsBySessionIdRuntimeResponses[keyof GetBotsByBotIdSessionsBySessionIdRuntimeResponses];
 
 export type GetBotsByBotIdSessionsBySessionIdStatusData = {
     body?: never;

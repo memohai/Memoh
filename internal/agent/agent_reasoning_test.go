@@ -250,6 +250,42 @@ func TestBuildGenerateOptionsBackgroundPrepareKeepsCachedAnthropicSystemPromoted
 	}
 }
 
+func TestBuildGenerateOptionsAcknowledgesInjectedMessageAfterPrepareStep(t *testing.T) {
+	t.Parallel()
+
+	applied := make(chan struct{}, 2)
+	injectCh := make(chan InjectMessage, 1)
+	injectCh <- InjectMessage{
+		Text: "adjust course",
+		Applied: func() {
+			applied <- struct{}{}
+		},
+	}
+	close(injectCh)
+	cfg := RunConfig{
+		InjectCh: injectCh,
+		Identity: SessionContext{
+			BotID:     "bot-1",
+			SessionID: "session-1",
+		},
+	}
+	prepare := (*Agent)(nil).wrapPrepareStepWithInjectedMessages(cfg, 1, nil)
+	params := prepare(&sdk.GenerateParams{Messages: []sdk.Message{sdk.UserMessage("run"), sdk.AssistantMessage("tool result")}})
+	if params == nil || len(params.Messages) != 3 {
+		t.Fatalf("prepared messages = %#v, want injected user message", params)
+	}
+	select {
+	case <-applied:
+	default:
+		t.Fatal("injected message was not acknowledged after PrepareStep consumed it")
+	}
+	select {
+	case <-applied:
+		t.Fatal("injected message was acknowledged more than once")
+	default:
+	}
+}
+
 func TestBuildGenerateOptionsRunningTaskSummaryAppendsToCachedAnthropicSystemMessage(t *testing.T) {
 	t.Parallel()
 
