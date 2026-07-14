@@ -27,6 +27,22 @@ func TestPostgresChatDeleteAndRouteSwitchShareLockOrder(t *testing.T) {
 	})
 }
 
+func TestPostgresBotDeleteAndRouteDeleteShareLockOrder(t *testing.T) {
+	fixture := setupOrderedSessionFixture(t)
+	botID := mustTestUUID(t, fixture.botID)
+	assertDeleteAndRouteDeleteShareLockOrder(t, fixture, func(ctx context.Context, queries *dbsqlc.Queries) error {
+		return queries.DeleteBotByID(ctx, botID)
+	})
+}
+
+func TestPostgresChatDeleteAndRouteDeleteShareLockOrder(t *testing.T) {
+	fixture := setupOrderedSessionFixture(t)
+	botID := mustTestUUID(t, fixture.botID)
+	assertDeleteAndRouteDeleteShareLockOrder(t, fixture, func(ctx context.Context, queries *dbsqlc.Queries) error {
+		return queries.DeleteChat(ctx, botID)
+	})
+}
+
 func TestPostgresRouteSwitchPreservesNullAndMissingDestinationSemantics(t *testing.T) {
 	fixture := setupOrderedSessionFixture(t)
 	ctx := context.Background()
@@ -131,6 +147,110 @@ func assertDeleteAndRouteSwitchShareLockOrder(
 	}
 	if switchErr != nil {
 		t.Fatalf("switch active session after bot deletion: %v", switchErr)
+	}
+}
+
+func assertDeleteAndRouteDeleteShareLockOrder(
+	t *testing.T,
+	fixture orderedSessionFixture,
+	deleteBot func(context.Context, *dbsqlc.Queries) error,
+) {
+	t.Helper()
+	ctx := context.Background()
+	routeID := createActiveRoute(t, fixture)
+	if _, err := fixture.pool.Exec(ctx, `
+		UPDATE bot_sessions SET route_id = $1 WHERE id = $2
+	`, routeID, fixture.highSessionID); err != nil {
+		t.Fatalf("link session to deleted route: %v", err)
+	}
+
+	botTx, err := fixture.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin bot deletion: %v", err)
+	}
+	botOpen := true
+	defer func() {
+		if botOpen {
+			_ = botTx.Rollback(ctx)
+		}
+	}()
+	if _, err := botTx.Exec(ctx, `
+		SELECT id
+		FROM bot_sessions
+		WHERE bot_id = $1
+		ORDER BY id
+		FOR UPDATE
+	`, fixture.botID); err != nil {
+		t.Fatalf("lock deleted sessions: %v", err)
+	}
+
+	routeTx, err := fixture.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin route deletion: %v", err)
+	}
+	routeOpen := true
+	defer func() {
+		if routeOpen {
+			_ = routeTx.Rollback(ctx)
+		}
+	}()
+	routePID := postgresBackendPID(t, routeTx)
+	routeUUID := mustTestUUID(t, routeID)
+	routeDeleted := make(chan error, 1)
+	go func() {
+		routeDeleted <- dbsqlc.New(routeTx).DeleteChatRoute(ctx, routeUUID)
+	}()
+	waitForPostgresLock(t, fixture.pool, routePID)
+
+	probeTx, err := fixture.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin route order probe: %v", err)
+	}
+	_, probeErr := probeTx.Exec(ctx, `
+		SELECT id FROM bot_channel_routes WHERE id = $1 FOR UPDATE NOWAIT
+	`, routeID)
+	if rollbackErr := probeTx.Rollback(ctx); rollbackErr != nil {
+		t.Fatalf("release route order probe: %v", rollbackErr)
+	}
+	if probeErr != nil {
+		_ = botTx.Rollback(ctx)
+		botOpen = false
+		select {
+		case <-routeDeleted:
+		case <-time.After(3 * time.Second):
+			t.Fatal("route deletion did not resume during failed order probe cleanup")
+		}
+		_ = routeTx.Rollback(ctx)
+		routeOpen = false
+		t.Fatalf("route deletion locked route before its sessions: %v", probeErr)
+	}
+
+	deleteErr := deleteBot(ctx, dbsqlc.New(botTx))
+	if deleteErr == nil {
+		deleteErr = botTx.Commit(ctx)
+	} else {
+		_ = botTx.Rollback(ctx)
+	}
+	botOpen = false
+
+	var routeErr error
+	select {
+	case routeErr = <-routeDeleted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("route deletion did not resume after bot deletion")
+	}
+	if routeErr == nil {
+		routeErr = routeTx.Commit(ctx)
+	} else {
+		_ = routeTx.Rollback(ctx)
+	}
+	routeOpen = false
+
+	if deleteErr != nil {
+		t.Fatalf("delete bot while route deletion waits: %v", deleteErr)
+	}
+	if routeErr != nil {
+		t.Fatalf("delete route after bot deletion: %v", routeErr)
 	}
 }
 

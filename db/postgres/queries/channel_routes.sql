@@ -112,5 +112,13 @@ SET active_session_id = COALESCE(
 WHERE route.id = sqlc.arg(id);
 
 -- name: DeleteChatRoute :exec
-DELETE FROM bot_channel_routes
-WHERE id = $1;
+WITH route_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.route_id = sqlc.arg(id)
+  ORDER BY session.id
+  FOR UPDATE
+)
+DELETE FROM bot_channel_routes route
+WHERE route.id = sqlc.arg(id)
+  AND (SELECT count(*) FROM route_sessions) >= 0;

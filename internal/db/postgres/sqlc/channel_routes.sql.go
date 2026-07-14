@@ -101,8 +101,16 @@ func (q *Queries) CreateChatRoute(ctx context.Context, arg CreateChatRouteParams
 }
 
 const deleteChatRoute = `-- name: DeleteChatRoute :exec
-DELETE FROM bot_channel_routes
-WHERE id = $1
+WITH route_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.route_id = $1
+  ORDER BY session.id
+  FOR UPDATE
+)
+DELETE FROM bot_channel_routes route
+WHERE route.id = $1
+  AND (SELECT count(*) FROM route_sessions) >= 0
 `
 
 func (q *Queries) DeleteChatRoute(ctx context.Context, id pgtype.UUID) error {
