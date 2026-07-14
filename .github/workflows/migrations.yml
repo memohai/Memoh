@@ -7,6 +7,7 @@ on:
       - ".github/workflows/migrations.yml"
       - "db/postgres/migrations/**"
       - "db/postgres/queries/**"
+      - "internal/db/postgres/sqlc/**"
       - "internal/db/*migration*_test.go"
       - "internal/db/*postgres_integration_test.go"
       - "internal/message/*postgres_integration_test.go"
@@ -16,6 +17,7 @@ on:
       - ".github/workflows/migrations.yml"
       - "db/postgres/migrations/**"
       - "db/postgres/queries/**"
+      - "internal/db/postgres/sqlc/**"
       - "internal/db/*migration*_test.go"
       - "internal/db/*postgres_integration_test.go"
       - "internal/message/*postgres_integration_test.go"
@@ -51,6 +53,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+
+      - name: Verify generated PostgreSQL queries
+        run: |
+          go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
+          git diff --exit-code -- internal/db/postgres/sqlc
 
       - name: Build
         run: go build -o memoh-server ./cmd/agent
