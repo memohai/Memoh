@@ -401,8 +401,8 @@ func extractBase64Content(v string) string {
 	return value
 }
 
-func (a *WeComAdapter) getClient(botID string) *WSClient {
-	key := strings.TrimSpace(botID)
+func (a *WeComAdapter) getClient(configID, botID string) *WSClient {
+	key := wecomClientCacheKey(configID, botID)
 	if key == "" {
 		return nil
 	}
@@ -411,7 +411,16 @@ func (a *WeComAdapter) getClient(botID string) *WSClient {
 	return a.clients[key]
 }
 
-func (a *WeComAdapter) lookupCallbackContext(reply *channel.ReplyRef) (callbackContext, bool) {
+func wecomClientCacheKey(configID, botID string) string {
+	configID = strings.TrimSpace(configID)
+	botID = strings.TrimSpace(botID)
+	if configID == "" || botID == "" {
+		return ""
+	}
+	return configID + "\x00" + botID
+}
+
+func (a *WeComAdapter) lookupCallbackContext(configID string, reply *channel.ReplyRef) (callbackContext, bool) {
 	if a == nil || a.cache == nil || reply == nil {
 		return callbackContext{}, false
 	}
@@ -419,5 +428,5 @@ func (a *WeComAdapter) lookupCallbackContext(reply *channel.ReplyRef) (callbackC
 	if messageID == "" {
 		return callbackContext{}, false
 	}
-	return a.cache.Get(messageID)
+	return a.cache.Get(configID, messageID)
 }

@@ -94,6 +94,7 @@ func TestWeComAdapter_ReplyUsesRespondCmd(t *testing.T) {
 
 	adapter := NewWeComAdapter(nil)
 	cfg := channel.ChannelConfig{
+		ID: "config-a",
 		Credentials: map[string]any{
 			"botId":  "bot",
 			"secret": "sec",

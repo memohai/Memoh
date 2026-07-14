@@ -86,11 +86,11 @@ func TestOutboundStreamRejectsPushAfterClose(t *testing.T) {
 
 func TestSessionWebhookCacheExpiryAndValidity(t *testing.T) {
 	cache := newSessionWebhookCache(time.Hour)
-	cache.put("msg-1", sessionWebhookContext{
+	cache.put("config-a", "msg-1", sessionWebhookContext{
 		SessionWebhook: "https://example.com/hook",
 		ExpiredTime:    time.Now().Add(time.Minute).UnixMilli(),
 	})
-	got, ok := cache.get("msg-1")
+	got, ok := cache.get("config-a", "msg-1")
 	if !ok {
 		t.Fatal("expected cached webhook")
 	}
@@ -98,17 +98,38 @@ func TestSessionWebhookCacheExpiryAndValidity(t *testing.T) {
 		t.Fatal("expected webhook to be valid")
 	}
 
-	cache.put("msg-2", sessionWebhookContext{
+	cache.put("config-a", "msg-2", sessionWebhookContext{
 		SessionWebhook: "https://example.com/old",
 		ExpiredTime:    time.Now().Add(time.Minute).UnixMilli(),
 		CreatedAt:      time.Now().Add(-2 * time.Hour),
 	})
-	if _, ok := cache.get("msg-2"); ok {
+	if _, ok := cache.get("config-a", "msg-2"); ok {
 		t.Fatal("expected stale webhook to be evicted")
 	}
 
 	if (sessionWebhookContext{SessionWebhook: "https://example.com/expired", ExpiredTime: time.Now().Add(-time.Second).UnixMilli()}).isValid() {
 		t.Fatal("expected expired webhook to be invalid")
+	}
+}
+
+func TestSessionWebhookCacheIsScopedByConfig(t *testing.T) {
+	cache := newSessionWebhookCache(time.Hour)
+	cache.put("config-a", "shared-message", sessionWebhookContext{
+		SessionWebhook: "https://example.com/config-a",
+		ExpiredTime:    time.Now().Add(time.Minute).UnixMilli(),
+	})
+	cache.put("config-b", "shared-message", sessionWebhookContext{
+		SessionWebhook: "https://example.com/config-b",
+		ExpiredTime:    time.Now().Add(time.Minute).UnixMilli(),
+	})
+
+	first, ok := cache.get("config-a", "shared-message")
+	if !ok || first.SessionWebhook != "https://example.com/config-a" {
+		t.Fatalf("config-a webhook = %#v, found=%v", first, ok)
+	}
+	second, ok := cache.get("config-b", "shared-message")
+	if !ok || second.SessionWebhook != "https://example.com/config-b" {
+		t.Fatalf("config-b webhook = %#v, found=%v", second, ok)
 	}
 }
 

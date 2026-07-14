@@ -138,7 +138,7 @@ func (a *WeComAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, h
 		ReconnectMaxDelay:  30 * time.Second,
 	})
 
-	key := strings.TrimSpace(parsed.BotID)
+	key := wecomClientCacheKey(cfg.ID, parsed.BotID)
 	a.mu.Lock()
 	a.clients[key] = client
 	a.mu.Unlock()
@@ -185,7 +185,7 @@ func (a *WeComAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg 
 	if err != nil {
 		return err
 	}
-	client := a.getClient(parsed.BotID)
+	client := a.getClient(cfg.ID, parsed.BotID)
 	if client == nil {
 		return errors.New("wecom connection is not active")
 	}
@@ -198,7 +198,7 @@ func (a *WeComAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg 
 		reqID    string
 		buildErr error
 	)
-	if ctxMeta, ok := a.lookupCallbackContext(msg.Message.Message.Reply); ok {
+	if ctxMeta, ok := a.lookupCallbackContext(cfg.ID, msg.Message.Message.Reply); ok {
 		payload, cmd, reqID, buildErr = buildPreparedRespondPayload(ctx, msg.Message, ctxMeta.ReqID)
 	} else {
 		_ = targetKind
@@ -347,7 +347,7 @@ func (s *wecomOutboundStream) flush(ctx context.Context) error {
 	if msg.LogicalMessage().IsEmpty() {
 		return nil
 	}
-	if ctxMeta, ok := s.adapter.lookupCallbackContext(msg.Message.Reply); ok {
+	if ctxMeta, ok := s.adapter.lookupCallbackContext(s.cfg.ID, msg.Message.Reply); ok {
 		if err := s.adapter.sendRespondStream(ctx, s.cfg, msg, ctxMeta.ReqID, streamID, true); err != nil {
 			return err
 		}
@@ -400,7 +400,7 @@ func (s *wecomOutboundStream) pushPreview(ctx context.Context) error {
 		return nil
 	}
 	s.mu.Unlock()
-	if ctxMeta, ok := s.adapter.lookupCallbackContext(msg.Message.Reply); ok {
+	if ctxMeta, ok := s.adapter.lookupCallbackContext(s.cfg.ID, msg.Message.Reply); ok {
 		if err := s.adapter.sendRespondStream(ctx, s.cfg, msg, ctxMeta.ReqID, streamID, false); err != nil {
 			return err
 		}
@@ -444,7 +444,7 @@ func (a *WeComAdapter) sendRespondStream(ctx context.Context, cfg channel.Channe
 	if err != nil {
 		return err
 	}
-	client := a.getClient(parsed.BotID)
+	client := a.getClient(cfg.ID, parsed.BotID)
 	if client == nil {
 		return errors.New("wecom connection is not active")
 	}

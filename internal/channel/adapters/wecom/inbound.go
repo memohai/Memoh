@@ -22,7 +22,7 @@ func (a *WeComAdapter) handleFrame(ctx context.Context, cfg channel.ChannelConfi
 		if !ok {
 			return nil
 		}
-		a.rememberCallback(body.MsgID, frame.Headers.ReqID, body.ResponseURL, body.ChatID, body.From.UserID)
+		a.rememberCallback(cfg.ID, body.MsgID, frame.Headers.ReqID, body.ResponseURL, body.ChatID, body.From.UserID)
 		return handler(ctx, cfg, msg)
 	case WSCmdEventCallback:
 		if handler == nil {
@@ -36,7 +36,7 @@ func (a *WeComAdapter) handleFrame(ctx context.Context, cfg channel.ChannelConfi
 		if !ok {
 			return nil
 		}
-		a.rememberCallback(body.MsgID, frame.Headers.ReqID, body.ResponseURL, body.ChatID, body.From.UserID)
+		a.rememberCallback(cfg.ID, body.MsgID, frame.Headers.ReqID, body.ResponseURL, body.ChatID, body.From.UserID)
 		return handler(ctx, cfg, msg)
 	default:
 		return nil
@@ -309,7 +309,7 @@ func parseCreateTime(ts int64) time.Time {
 	return time.Now().UTC()
 }
 
-func (a *WeComAdapter) rememberCallback(msgID, reqID, responseURL, chatID, userID string) {
+func (a *WeComAdapter) rememberCallback(configID, msgID, reqID, responseURL, chatID, userID string) {
 	if a == nil || a.cache == nil {
 		return
 	}
@@ -320,7 +320,7 @@ func (a *WeComAdapter) rememberCallback(msgID, reqID, responseURL, chatID, userI
 	if strings.TrimSpace(reqID) == "" {
 		return
 	}
-	a.cache.Put(msgID, callbackContext{
+	a.cache.Put(configID, msgID, callbackContext{
 		ReqID:       strings.TrimSpace(reqID),
 		ResponseURL: strings.TrimSpace(responseURL),
 		ChatID:      strings.TrimSpace(chatID),

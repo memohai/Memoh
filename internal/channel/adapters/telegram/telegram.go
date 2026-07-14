@@ -102,11 +102,7 @@ func (a *TelegramAdapter) getOrCreateBot(cfg Config, configID string) (*tele.Bot
 	if getOrCreateBotForTest != nil {
 		return getOrCreateBotForTest(a, cfg.BotToken, configID)
 	}
-	cacheKey := strings.Join([]string{
-		cfg.BotToken,
-		cfg.baseURL(),
-		cfg.HTTPProxy.CacheKey(),
-	}, "\x00")
+	cacheKey := telegramBotCacheKey(cfg, configID)
 	a.mu.RLock()
 	bot, ok := a.bots[cacheKey]
 	a.mu.RUnlock()
@@ -144,6 +140,15 @@ func (a *TelegramAdapter) getOrCreateBot(cfg Config, configID string) (*tele.Bot
 	a.bots[cacheKey] = bot
 	a.fileEndpoints[bot] = cfg.fileEndpoint()
 	return bot, nil
+}
+
+func telegramBotCacheKey(cfg Config, configID string) string {
+	return strings.Join([]string{
+		strings.TrimSpace(configID),
+		cfg.BotToken,
+		cfg.baseURL(),
+		cfg.HTTPProxy.CacheKey(),
+	}, "\x00")
 }
 
 // getFileDirectURL resolves a file ID to a direct download URL,
