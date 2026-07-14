@@ -1,9 +1,101 @@
 package tools
 
 import (
+	"context"
+	"net"
 	"strings"
+	"sync"
 	"testing"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
+
+	"github.com/memohai/memoh/internal/workspace/bridge"
+	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
+
+type computerDisplayExecServer struct {
+	pb.UnimplementedContainerServiceServer
+
+	mu       sync.Mutex
+	ready    bool
+	commands []string
+}
+
+func (s *computerDisplayExecServer) Exec(stream pb.ContainerService_ExecServer) error {
+	req, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	command := req.GetCommand()
+	s.commands = append(s.commands, command)
+	exitCode := int32(0)
+	if strings.Contains(command, "memoh-computer-display-ready-probe") {
+		if !s.ready {
+			exitCode = 1
+		}
+	} else if strings.Contains(command, "/tmp/memoh-display-prepare.sh") {
+		s.ready = true
+	}
+	s.mu.Unlock()
+
+	return stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_EXIT, ExitCode: exitCode})
+}
+
+func newComputerDisplayTestClient(t *testing.T, server pb.ContainerServiceServer) *bridge.Client {
+	t.Helper()
+
+	listener := bufconn.Listen(1 << 20)
+	grpcServer := grpc.NewServer()
+	pb.RegisterContainerServiceServer(grpcServer, server)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = grpcServer.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		grpcServer.Stop()
+		<-done
+	})
+
+	dialer := func(ctx context.Context, _ string) (net.Conn, error) {
+		return listener.DialContext(ctx)
+	}
+	conn, err := grpc.NewClient(
+		"passthrough://bufnet",
+		grpc.WithContextDialer(dialer),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("grpc.NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return bridge.NewClientFromConn(conn)
+}
+
+func TestEnsureComputerDisplayHotStartsRuntime(t *testing.T) {
+	server := &computerDisplayExecServer{}
+	client := newComputerDisplayTestClient(t, server)
+	provider := &BrowserProvider{
+		containers: containerTestBridgeProvider{client: client},
+	}
+
+	if _, err := provider.ensureComputerDisplay(t.Context(), "bot-1"); err != nil {
+		t.Fatalf("ensureComputerDisplay() error = %v", err)
+	}
+
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.commands) != 3 {
+		t.Fatalf("expected readiness probe, preparation, and verification; got %d commands", len(server.commands))
+	}
+	if !strings.Contains(server.commands[1], "/tmp/memoh-display-prepare.sh") {
+		t.Fatalf("expected the shared display preparation command, got: %s", server.commands[1])
+	}
+}
 
 func TestBrowserKeyChordHelpers(t *testing.T) {
 	parts := splitKeyChord("Control+Shift+a")
