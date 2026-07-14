@@ -8,10 +8,9 @@ import (
 	"testing"
 	"time"
 
-	dbpkg "github.com/memohai/memoh/internal/db"
-
 	"github.com/jackc/pgx/v5"
 
+	dbpkg "github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	message "github.com/memohai/memoh/internal/message"
