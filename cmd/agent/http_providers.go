@@ -41,6 +41,7 @@ import (
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/server"
 	sessionpkg "github.com/memohai/memoh/internal/session"
+	"github.com/memohai/memoh/internal/sessionruntime"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
@@ -100,11 +101,12 @@ func provideProviderOAuthHandler(providersService *providers.Service, acpCodexOA
 	return handler
 }
 
-func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service, resolver *flow.Resolver, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service, rc *boot.RuntimeConfig, commandHandler *command.Handler, containerdHandler *handlers.ContainerdHandler) *handlers.LocalChannelHandler {
+func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service, resolver *flow.Resolver, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service, rc *boot.RuntimeConfig, commandHandler *command.Handler, containerdHandler *handlers.ContainerdHandler, runtimeManager *sessionruntime.Manager) *handlers.LocalChannelHandler {
 	h := handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, chatService, hub, botService, accountService, sessionService)
 	h.SetResolver(resolver)
 	h.SetCommandHandler(commandHandler)
 	h.SetRuntimeSkillResolver(containerdHandler)
+	h.SetSessionRuntime(runtimeManager)
 	h.SetAuthTokenConfig(rc.JwtSecret, rc.JwtExpiresIn)
 	h.SetMediaService(mediaService)
 	h.SetSpeechService(audioService, &webSpeechModelResolver{settings: settingsService})

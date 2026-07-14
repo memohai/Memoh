@@ -3,6 +3,8 @@ package flow
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -11,6 +13,7 @@ import (
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	"github.com/memohai/memoh/internal/runtimefence"
 )
 
 func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string) error {
@@ -66,7 +69,10 @@ func (r *Resolver) storeRoundWithOptionsResult(ctx context.Context, req conversa
 		return nil, nil
 	}
 
-	persisted := r.storeMessages(ctx, req, filtered, modelID, opts)
+	persisted, err := r.storeMessages(ctx, req, filtered, modelID, opts)
+	if err != nil {
+		return nil, err
+	}
 	if !opts.SkipMemory && !req.SkipMemoryExtraction {
 		go r.storeMemory(context.WithoutCancel(ctx), req, filtered)
 	}
@@ -110,12 +116,12 @@ func (r *Resolver) StoreRound(ctx context.Context, botID, sessionID, channelIden
 	return r.storeRound(ctx, req, modelMessages, modelID)
 }
 
-func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) []messagepkg.Message {
+func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) ([]messagepkg.Message, error) {
 	if r.messageService == nil {
-		return nil
+		return nil, errors.New("message service not configured")
 	}
 	if strings.TrimSpace(req.BotID) == "" {
-		return nil
+		return nil, errors.New("bot id is required for message persistence")
 	}
 
 	// Check bot setting for full tool result persistence.
@@ -161,8 +167,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 
 		content, err := json.Marshal(msg)
 		if err != nil {
-			r.logger.Warn("storeMessages: marshal failed", slog.Any("error", err))
-			continue
+			return nil, fmt.Errorf("marshal %s message: %w", msg.Role, err)
 		}
 		messageSenderChannelIdentityID := ""
 		messageSenderUserID := ""
@@ -248,13 +253,53 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			SkipHistoryTurn:         req.SkipHistoryTurn,
 		})
 	}
+	replacement := replacementPersistenceFromContext(ctx)
+	_, fenced := runtimefence.FromContext(ctx)
+	if fenced || replacement != nil {
+		roundPersister, ok := r.messageService.(messagepkg.AtomicRoundPersister)
+		if !ok {
+			if replacement != nil {
+				return nil, errors.New("message service does not support atomic replacement persistence")
+			}
+			return nil, errors.New("message service does not support runtime-fenced round persistence")
+		}
+		persistenceOptions := messagepkg.RoundPersistenceOptions{}
+		if replacement != nil {
+			if !replacement.forkAnchorPrepared {
+				forkAnchor, err := r.prepareForkAnchorUpdate(ctx, req.SessionID, replacement.replacedTailStartMessageID)
+				if err != nil {
+					return nil, fmt.Errorf("prepare replacement fork anchor: %w", err)
+				}
+				replacement.forkAnchor = forkAnchor
+				replacement.forkAnchorPrepared = true
+			}
+			persistenceOptions.Replacement = &messagepkg.TurnReplacement{
+				OldTurnID:        replacement.oldTurnID,
+				RequestMessageID: replacement.requestMessageID,
+				Reason:           replacement.reason,
+			}
+			if replacement.forkAnchor != nil {
+				persistenceOptions.Replacement.SessionMetadata = replacement.forkAnchor.metadata
+			}
+		}
+		persisted, handled, err := roundPersister.PersistRound(ctx, persistInputs, persistenceOptions)
+		if err != nil {
+			return nil, fmt.Errorf("persist atomic message round: %w", err)
+		}
+		if !handled {
+			return nil, errors.New("message service declined atomic round persistence")
+		}
+		if replacement != nil {
+			replacement.atomicCommitted = true
+		}
+		return persisted, nil
+	}
 	if batcher, ok := r.messageService.(messagepkg.ToolTailRoundPersister); ok {
 		if persisted, handled, err := batcher.PersistToolTailRound(ctx, persistInputs); handled || err != nil {
 			if err != nil {
-				r.logger.Warn("persist tool tail round failed", slog.Any("error", err))
-				return nil
+				return nil, fmt.Errorf("persist tool tail round: %w", err)
 			}
-			return persisted
+			return persisted, nil
 		}
 	}
 	return r.persistMessageInputs(ctx, persistInputs, turnRequestMessageID)
@@ -296,7 +341,7 @@ func (r *Resolver) persistSessionWorkspaceTarget(ctx context.Context, req conver
 	return err
 }
 
-func (r *Resolver) persistMessageInputs(ctx context.Context, inputs []messagepkg.PersistInput, initialTurnRequestMessageID string) []messagepkg.Message {
+func (r *Resolver) persistMessageInputs(ctx context.Context, inputs []messagepkg.PersistInput, initialTurnRequestMessageID string) ([]messagepkg.Message, error) {
 	persisted := make([]messagepkg.Message, 0, len(inputs))
 	turnRequestMessageID := strings.TrimSpace(initialTurnRequestMessageID)
 	for _, input := range inputs {
@@ -305,15 +350,31 @@ func (r *Resolver) persistMessageInputs(ctx context.Context, inputs []messagepkg
 		}
 		persistedMessage, err := r.messageService.Persist(ctx, input)
 		if err != nil {
-			r.logger.Warn("persist message failed", slog.Any("error", err))
-			continue
+			cleanupErr := r.cleanupPersistedRound(ctx, persisted)
+			return nil, errors.Join(fmt.Errorf("persist %s message: %w", input.Role, err), cleanupErr)
 		}
 		if strings.EqualFold(strings.TrimSpace(input.Role), "user") && !input.SkipHistoryTurn {
 			turnRequestMessageID = persistedMessage.ID
 		}
 		persisted = append(persisted, persistedMessage)
 	}
-	return persisted
+	return persisted, nil
+}
+
+func (r *Resolver) cleanupPersistedRound(ctx context.Context, persisted []messagepkg.Message) error {
+	ids := make([]string, 0, len(persisted))
+	for _, message := range persisted {
+		if id := strings.TrimSpace(message.ID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := r.messageService.DeleteByIDs(context.WithoutCancel(ctx), ids); err != nil {
+		return fmt.Errorf("cleanup partially persisted round: %w", err)
+	}
+	return nil
 }
 
 func (r *Resolver) persistSessionRuntimeSnapshot(ctx context.Context, req conversation.ChatRequest) (string, string) {
@@ -590,9 +651,9 @@ func (r *Resolver) resolvePersistSenderIDs(ctx context.Context, req conversation
 // falls back to a bot-wide search.
 // Used by the WebSocket path where attachment ingestion happens after message
 // persistence.
-func (r *Resolver) LinkOutboundAssets(ctx context.Context, botID, sessionID string, assets []messagepkg.AssetRef) {
+func (r *Resolver) LinkOutboundAssets(ctx context.Context, botID, sessionID string, assets []messagepkg.AssetRef) error {
 	if r.messageService == nil || len(assets) == 0 || strings.TrimSpace(botID) == "" {
-		return
+		return nil
 	}
 	var (
 		msgs []messagepkg.Message
@@ -610,8 +671,7 @@ func (r *Resolver) LinkOutboundAssets(ctx context.Context, botID, sessionID stri
 		msgs, err = r.messageService.ListLatest(ctx, botID, anchorSearchWindow)
 	}
 	if err != nil {
-		r.logger.Warn("LinkOutboundAssets: list latest failed", slog.Any("error", err))
-		return
+		return fmt.Errorf("list messages for outbound asset linking: %w", err)
 	}
 
 	latestAssistantID := ""
@@ -622,8 +682,7 @@ func (r *Resolver) LinkOutboundAssets(ctx context.Context, botID, sessionID stri
 		}
 	}
 	if latestAssistantID == "" {
-		r.logger.Warn("LinkOutboundAssets: no assistant message found", slog.String("bot_id", botID))
-		return
+		return errors.New("no assistant message found for outbound assets")
 	}
 
 	byMessage := map[string][]messagepkg.AssetRef{}
@@ -649,9 +708,10 @@ func (r *Resolver) LinkOutboundAssets(ctx context.Context, botID, sessionID stri
 			group[i].Ordinal = i
 		}
 		if linkErr := r.messageService.LinkAssets(ctx, id, group); linkErr != nil {
-			r.logger.Warn("LinkOutboundAssets: link failed", slog.Any("error", linkErr))
+			return fmt.Errorf("link outbound assets to message %s: %w", id, linkErr)
 		}
 	}
+	return nil
 }
 
 // findAssistantMessageForToolCall returns the ID of the assistant message

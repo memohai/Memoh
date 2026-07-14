@@ -68,6 +68,64 @@ func TestNewWSAppErrorEventUsesPublicCatalogOnly(t *testing.T) {
 	}
 }
 
+type closeTrackingWSConnection struct {
+	closed      chan struct{}
+	once        sync.Once
+	writeErr    error
+	deadlineSet chan time.Time
+}
+
+type deadlineBlockingWSConnection struct {
+	mu       sync.Mutex
+	deadline time.Time
+	closed   chan struct{}
+	once     sync.Once
+}
+
+func (c *deadlineBlockingWSConnection) SetWriteDeadline(deadline time.Time) error {
+	c.mu.Lock()
+	c.deadline = deadline
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *deadlineBlockingWSConnection) WriteMessage(int, []byte) error {
+	c.mu.Lock()
+	deadline := c.deadline
+	c.mu.Unlock()
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return context.DeadlineExceeded
+	case <-c.closed:
+		return errors.New("connection closed")
+	}
+}
+
+func (c *deadlineBlockingWSConnection) Close() error {
+	c.once.Do(func() { close(c.closed) })
+	return nil
+}
+
+func (c *closeTrackingWSConnection) SetWriteDeadline(deadline time.Time) error {
+	if c.deadlineSet != nil {
+		select {
+		case c.deadlineSet <- deadline:
+		default:
+		}
+	}
+	return nil
+}
+
+func (c *closeTrackingWSConnection) WriteMessage(int, []byte) error {
+	return c.writeErr
+}
+
+func (c *closeTrackingWSConnection) Close() error {
+	c.once.Do(func() { close(c.closed) })
+	return nil
+}
 func TestFormatLocalStreamEvent_UsesChannelEventShape(t *testing.T) {
 	t.Parallel()
 
@@ -154,8 +212,8 @@ func TestWSWriterIgnoresLateSendsAfterClose(t *testing.T) {
 
 		writer := newWSWriter(conn)
 		writer.Close()
-		writer.Send([]byte(`{"type":"late"}`))
-		writer.SendJSON(map[string]string{"type": "late"})
+		writer.SendContext(r.Context(), []byte(`{"type":"late"}`))
+		writer.SendJSONContext(r.Context(), map[string]string{"type": "late"})
 		writer.Close()
 		done <- nil
 	}))
@@ -192,14 +250,17 @@ func TestWSStreamRegistry_AbortsOnlyTargetStream(t *testing.T) {
 	abortA := make(chan struct{}, 1)
 	abortB := make(chan struct{}, 1)
 
-	if err := registry.register(&activeWSStream{streamID: "stream-a", cancel: cancelA, abortCh: abortA}); err != nil {
+	if err := registry.register(&activeWSStream{streamID: "stream-a", sessionID: "session-a", cancel: cancelA, abortCh: abortA}); err != nil {
 		t.Fatalf("register stream-a: %v", err)
 	}
-	if err := registry.register(&activeWSStream{streamID: "stream-b", cancel: cancelB, abortCh: abortB}); err != nil {
+	if err := registry.register(&activeWSStream{streamID: "stream-b", sessionID: "session-b", cancel: cancelB, abortCh: abortB}); err != nil {
 		t.Fatalf("register stream-b: %v", err)
 	}
 
-	if !registry.abort("stream-a") {
+	if registry.abort("stream-a", "session-b") {
+		t.Fatal("expected stream-a abort with wrong session to fail")
+	}
+	if !registry.abort("stream-a", "session-a") {
 		t.Fatal("expected stream-a abort to succeed")
 	}
 
@@ -312,6 +373,354 @@ func TestWSStreamRegistry_HasSessionTracksActiveStreams(t *testing.T) {
 	}
 }
 
+func TestWSStreamRegistry_RuntimeProtocolIsScopedAndStickyBySession(t *testing.T) {
+	t.Parallel()
+
+	registry := newWSStreamRegistry()
+	if !registry.legacyProtocolEnabled("session-a") || !registry.legacyProtocolEnabled("session-b") {
+		t.Fatal("legacy protocol should be enabled before runtime subscription")
+	}
+
+	registry.enableRuntimeProtocol("session-a")
+	if registry.legacyProtocolEnabled("session-a") {
+		t.Fatal("legacy protocol remained enabled for subscribed session")
+	}
+	if !registry.legacyProtocolEnabled("session-b") {
+		t.Fatal("runtime subscription disabled legacy protocol for another session")
+	}
+
+	if registry.legacyProtocolEnabled("session-a") {
+		t.Fatal("runtime protocol must remain sticky after subscription")
+	}
+}
+
+func TestWSStreamRegistry_RuntimeHandoffOrdersLegacyBeforeSnapshot(t *testing.T) {
+	t.Parallel()
+
+	registry := newWSStreamRegistry()
+	enteredLegacy := make(chan struct{})
+	releaseLegacy := make(chan struct{})
+	events := make(chan string, 2)
+	legacyDone := make(chan struct{})
+	go func() {
+		registry.forwardLegacyIfEnabled("session-a", func() {
+			close(enteredLegacy)
+			<-releaseLegacy
+			events <- "legacy"
+		})
+		close(legacyDone)
+	}()
+	<-enteredLegacy
+	lookupDone := make(chan struct{})
+	go func() {
+		registry.hasSession("session-a")
+		close(lookupDone)
+	}()
+	select {
+	case <-lookupDone:
+	case <-time.After(time.Second):
+		t.Fatal("blocked legacy enqueue held the stream registry lock")
+	}
+	unrelatedDone := make(chan struct{})
+	go func() {
+		registry.enableRuntimeProtocolAndSend("session-b", nil)
+		close(unrelatedDone)
+	}()
+	select {
+	case <-unrelatedDone:
+	case <-time.After(time.Second):
+		t.Fatal("blocked legacy enqueue delayed an unrelated session handoff")
+	}
+	handoffDone := make(chan struct{})
+	go func() {
+		registry.enableRuntimeProtocolAndSend("session-a", func() { events <- "snapshot" })
+		close(handoffDone)
+	}()
+	select {
+	case <-handoffDone:
+		t.Fatal("runtime handoff overtook an accepted legacy event")
+	default:
+	}
+	close(releaseLegacy)
+	<-legacyDone
+	<-handoffDone
+	if first, second := <-events, <-events; first != "legacy" || second != "snapshot" {
+		t.Fatalf("handoff order = %q, %q", first, second)
+	}
+	if registry.forwardLegacyIfEnabled("session-a", func() { events <- "late legacy" }) {
+		t.Fatal("legacy forwarding resumed after runtime handoff")
+	}
+}
+
+func TestWSStreamRegistry_RuntimeHandoffBoundsBlockedLegacyEnqueue(t *testing.T) {
+	t.Parallel()
+
+	registry := newWSStreamRegistry()
+	writer := &wsWriter{ch: make(chan wsWriteRequest, 1), stop: make(chan struct{}), done: make(chan struct{})}
+	writer.ch <- wsWriteRequest{data: []byte("fill writer queue")}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	legacyStarted := make(chan struct{})
+	go registry.forwardLegacyIfEnabled("session-a", func() {
+		close(legacyStarted)
+		writer.SendJSONBounded(ctx, map[string]string{"type": "message"})
+	})
+	<-legacyStarted
+	handoffDone := make(chan struct{})
+	go func() {
+		registry.enableRuntimeProtocolAndSend("session-a", nil)
+		close(handoffDone)
+	}()
+	select {
+	case <-handoffDone:
+	case <-time.After(time.Second):
+		t.Fatal("runtime handoff remained blocked after legacy enqueue deadline")
+	}
+}
+
+func TestWSWriterBoundedSendClosesConnectionOnBackpressure(t *testing.T) {
+	t.Parallel()
+
+	conn := &closeTrackingWSConnection{closed: make(chan struct{})}
+	writer := &wsWriter{
+		conn:       conn,
+		ch:         make(chan wsWriteRequest, 1),
+		stop:       make(chan struct{}),
+		done:       make(chan struct{}),
+		enqueueTTL: 20 * time.Millisecond,
+	}
+	writer.ch <- wsWriteRequest{data: []byte("fill writer queue")}
+
+	if writer.SendJSONBounded(context.Background(), map[string]string{"type": "runtime_delta"}) {
+		t.Fatal("bounded runtime write succeeded through a full writer queue")
+	}
+	select {
+	case <-conn.closed:
+	case <-time.After(time.Second):
+		t.Fatal("bounded runtime write did not close the websocket connection")
+	}
+}
+
+func TestWSWriterBoundsActualWriteAndStopsOnFailure(t *testing.T) {
+	t.Parallel()
+
+	conn := &closeTrackingWSConnection{
+		closed:      make(chan struct{}),
+		writeErr:    errors.New("write failed"),
+		deadlineSet: make(chan time.Time, 1),
+	}
+	writer := newWSWriter(conn)
+	defer writer.Close()
+
+	if !writer.SendJSONContext(context.Background(), map[string]string{"type": "runtime_delta"}) {
+		t.Fatal("failed to enqueue runtime frame")
+	}
+	select {
+	case deadline := <-conn.deadlineSet:
+		if !deadline.After(time.Now()) || deadline.After(time.Now().Add(wsWriterWriteTimeout+time.Second)) {
+			t.Fatalf("write deadline = %s", deadline)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("websocket write deadline was not set")
+	}
+	select {
+	case <-conn.closed:
+	case <-time.After(time.Second):
+		t.Fatal("websocket connection remained open after write failure")
+	}
+	select {
+	case <-writer.done:
+	case <-time.After(time.Second):
+		t.Fatal("websocket writer did not stop after write failure")
+	}
+	if writer.SendContext(context.Background(), []byte("late frame")) {
+		t.Fatal("websocket writer accepted a frame after write failure")
+	}
+}
+
+func TestWSWriterDeadlineStopsBlockedWrite(t *testing.T) {
+	t.Parallel()
+
+	conn := &deadlineBlockingWSConnection{closed: make(chan struct{})}
+	writer := &wsWriter{
+		conn:     conn,
+		ch:       make(chan wsWriteRequest, 1),
+		stop:     make(chan struct{}),
+		done:     make(chan struct{}),
+		writeTTL: 20 * time.Millisecond,
+	}
+	go writer.loop()
+	defer writer.Close()
+
+	if !writer.SendContext(context.Background(), []byte("blocked frame")) {
+		t.Fatal("writer did not accept the frame")
+	}
+	select {
+	case <-writer.done:
+	case <-time.After(time.Second):
+		t.Fatal("blocked websocket write exceeded its deadline")
+	}
+	select {
+	case <-conn.closed:
+	default:
+		t.Fatal("connection remained open after write deadline")
+	}
+}
+
+func TestWSWriterCallerCancellationDoesNotCloseConnection(t *testing.T) {
+	t.Parallel()
+
+	conn := &closeTrackingWSConnection{closed: make(chan struct{})}
+	writer := &wsWriter{
+		conn: conn,
+		ch:   make(chan wsWriteRequest, 1),
+		stop: make(chan struct{}),
+		done: make(chan struct{}),
+	}
+	writer.ch <- wsWriteRequest{data: []byte("fill writer queue")}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if writer.SendJSONBounded(ctx, map[string]string{"type": "runtime_delta"}) {
+		t.Fatal("send succeeded with a canceled caller context")
+	}
+	select {
+	case <-conn.closed:
+		t.Fatal("caller cancellation closed the websocket connection")
+	default:
+	}
+}
+
+func TestWSStreamRegistry_RuntimeSessionLimitRejectsOnlyNewSession(t *testing.T) {
+	t.Parallel()
+
+	registry := newWSStreamRegistryWithLimits(2, 8)
+	if !registry.enableRuntimeProtocolAndSend("session-a", nil) || !registry.enableRuntimeProtocolAndSend("session-b", nil) {
+		t.Fatal("runtime protocol rejected a session below the limit")
+	}
+	if registry.enableRuntimeProtocolAndSend("session-c", nil) {
+		t.Fatal("runtime protocol accepted a session above the limit")
+	}
+	if !registry.legacyProtocolEnabled("session-c") {
+		t.Fatal("rejected runtime subscription disabled the existing legacy protocol")
+	}
+	forwarded := false
+	if !registry.forwardLegacyIfEnabled("session-c", func() { forwarded = true }) || !forwarded {
+		t.Fatal("rejected runtime subscription poisoned an unrelated legacy session")
+	}
+}
+
+func TestWSStreamRegistry_IdenticalStreamIDsAreScopedBySession(t *testing.T) {
+	t.Parallel()
+
+	registry := newWSStreamRegistry()
+	abortA := make(chan struct{}, 1)
+	abortB := make(chan struct{}, 1)
+	_, cancelA := context.WithCancel(context.Background())
+	_, cancelB := context.WithCancel(context.Background())
+	defer cancelA()
+	defer cancelB()
+	for _, stream := range []*activeWSStream{
+		{streamID: "shared", sessionID: "session-a", cancel: cancelA, abortCh: abortA},
+		{streamID: "shared", sessionID: "session-b", cancel: cancelB, abortCh: abortB},
+	} {
+		if err := registry.register(stream); err != nil {
+			t.Fatalf("register %s: %v", stream.sessionID, err)
+		}
+	}
+	if _, ok := registry.sessionForStream("shared", ""); ok {
+		t.Fatal("unscoped lookup matched an ambiguous stream id")
+	}
+	if !registry.abort("shared", "session-b") {
+		t.Fatal("scoped abort did not find session-b")
+	}
+	select {
+	case <-abortB:
+	case <-time.After(time.Second):
+		t.Fatal("session-b abort was not delivered")
+	}
+	select {
+	case <-abortA:
+		t.Fatal("session-a received session-b abort")
+	default:
+	}
+	registry.finish("shared", "session-b")
+	if !registry.hasSession("session-a") || registry.hasSession("session-b") {
+		t.Fatal("scoped finish removed the wrong stream")
+	}
+}
+
+func TestWSStreamRegistry_ReusedStreamIDRequiresAbortGeneration(t *testing.T) {
+	t.Parallel()
+
+	registry := newWSStreamRegistry()
+	first := &activeWSStream{streamID: "shared", sessionID: "session-a", cancel: func() {}, abortCh: make(chan struct{}, 1)}
+	if err := registry.register(first); err != nil {
+		t.Fatalf("register first generation: %v", err)
+	}
+	if !registry.generationlessAbortAllowed("shared", "session-a") {
+		t.Fatal("first generation should allow an early generationless abort")
+	}
+	registry.finish("shared", "session-a")
+	second := &activeWSStream{streamID: "shared", sessionID: "session-a", cancel: func() {}, abortCh: make(chan struct{}, 1)}
+	if err := registry.register(second); err != nil {
+		t.Fatalf("register second generation: %v", err)
+	}
+	if registry.generationlessAbortAllowed("shared", "session-a") {
+		t.Fatal("reused stream id accepted a generationless abort")
+	}
+}
+
+func TestWSStreamRegistry_SeenStreamLimitRejectsNewRun(t *testing.T) {
+	t.Parallel()
+
+	registry := newWSStreamRegistryWithLimits(8, 2)
+	for _, streamID := range []string{"stream-a", "stream-b"} {
+		stream := &activeWSStream{streamID: streamID, sessionID: "session-a", cancel: func() {}, abortCh: make(chan struct{}, 1)}
+		if err := registry.register(stream); err != nil {
+			t.Fatalf("register %s: %v", streamID, err)
+		}
+	}
+	third := &activeWSStream{streamID: "stream-c", sessionID: "session-a", cancel: func() {}, abortCh: make(chan struct{}, 1)}
+	if err := registry.register(third); err == nil {
+		t.Fatal("stream registry accepted a run that could not retain its generationless-abort tombstone")
+	}
+	for _, streamID := range []string{"stream-a", "stream-b"} {
+		if !registry.generationlessAbortAllowed(streamID, "session-a") {
+			t.Fatalf("stream limit changed abort semantics for active run %s", streamID)
+		}
+	}
+}
+
+func TestWSRuntimeSubscriptionStopCancelsBlockedForwarderWrite(t *testing.T) {
+	t.Parallel()
+
+	forwardCtx, cancelForward := context.WithCancel(context.Background())
+	writer := &wsWriter{
+		ch:   make(chan wsWriteRequest, 1),
+		stop: make(chan struct{}),
+		done: make(chan struct{}),
+	}
+	writer.ch <- wsWriteRequest{data: []byte("fill writer queue")}
+	forwardDone := make(chan struct{})
+	go func() {
+		defer close(forwardDone)
+		writer.SendJSONContext(forwardCtx, map[string]string{"type": "runtime_delta"})
+	}()
+
+	sub := &wsRuntimeSubscription{close: cancelForward, done: forwardDone}
+	stopped := make(chan struct{})
+	go func() {
+		sub.stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("subscription stop blocked behind a full writer queue")
+	}
+}
+
 func TestShouldRejectWSRequestedSkillsForActiveStream(t *testing.T) {
 	t.Parallel()
 
@@ -401,6 +810,7 @@ type localChannelSessionAuthQueries struct {
 	chat             sqlc.GetChatByIDRow
 	session          sqlc.BotSession
 	grants           []sqlc.ListBotUserGrantsForUserRow
+	listGrants       func(context.Context, sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error)
 	createSession    func(context.Context, sqlc.CreateSessionParams) (sqlc.BotSession, error)
 	getSessionByID   func(context.Context, pgtype.UUID) (sqlc.BotSession, error)
 	setActiveSession func(context.Context, sqlc.SetRouteActiveSessionParams) error
@@ -435,7 +845,10 @@ func (q localChannelSessionAuthQueries) GetChatByID(_ context.Context, _ pgtype.
 	return q.chat, nil
 }
 
-func (q localChannelSessionAuthQueries) ListBotUserGrantsForUser(_ context.Context, _ sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
+func (q localChannelSessionAuthQueries) ListBotUserGrantsForUser(ctx context.Context, params sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
+	if q.listGrants != nil {
+		return q.listGrants(ctx, params)
+	}
 	return q.grants, nil
 }
 

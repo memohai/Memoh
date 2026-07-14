@@ -3,10 +3,12 @@ package flow
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	"github.com/memohai/memoh/internal/runtimefence"
 )
 
 func TestBuildInteractionMetadataIncludesForwardConversation(t *testing.T) {
@@ -150,6 +152,20 @@ type batchRecordingMessageService struct {
 	batchInputs []messagepkg.PersistInput
 }
 
+type atomicRecordingMessageService struct {
+	batchRecordingMessageService
+	roundInputs []messagepkg.PersistInput
+	options     messagepkg.RoundPersistenceOptions
+	fence       runtimefence.Fence
+}
+
+func (s *atomicRecordingMessageService) PersistRound(ctx context.Context, inputs []messagepkg.PersistInput, options messagepkg.RoundPersistenceOptions) ([]messagepkg.Message, bool, error) {
+	s.roundInputs = append(s.roundInputs, inputs...)
+	s.options = options
+	s.fence, _ = runtimefence.FromContext(ctx)
+	return recordedMessages(inputs), true, nil
+}
+
 func (s *batchRecordingMessageService) PersistToolTailRound(_ context.Context, inputs []messagepkg.PersistInput) ([]messagepkg.Message, bool, error) {
 	s.batchInputs = append(s.batchInputs, inputs...)
 	return recordedMessages(inputs), true, nil
@@ -164,7 +180,7 @@ func TestStoreMessagesUsesToolTailBatch(t *testing.T) {
 		logger:         slog.New(slog.DiscardHandler),
 	}
 
-	persisted := resolver.storeMessages(context.Background(), conversation.ChatRequest{
+	persisted, err := resolver.storeMessages(context.Background(), conversation.ChatRequest{
 		BotID:       storeRoundBotID,
 		SessionID:   "33333333-3333-3333-3333-333333333333",
 		Query:       "hello",
@@ -176,6 +192,9 @@ func TestStoreMessagesUsesToolTailBatch(t *testing.T) {
 		{Role: "tool", Content: conversation.NewTextContent("tool result")},
 		{Role: "assistant", Content: conversation.NewTextContent("done")},
 	}, "", storeRoundOptions{})
+	if err != nil {
+		t.Fatalf("storeMessages() error = %v", err)
+	}
 
 	if len(messages.batchInputs) != 4 {
 		t.Fatalf("batch inputs = %d, want 4", len(messages.batchInputs))
@@ -185,6 +204,133 @@ func TestStoreMessagesUsesToolTailBatch(t *testing.T) {
 	}
 	if len(persisted) != 4 {
 		t.Fatalf("persisted messages = %d, want 4", len(persisted))
+	}
+}
+
+func TestStoreMessagesUsesAtomicRoundForRuntimeFence(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "33333333-3333-3333-3333-333333333333"
+	messages := &atomicRecordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+	fence := runtimefence.Fence{BotID: storeRoundBotID, SessionID: sessionID, Token: 7}
+	ctx := runtimefence.WithContext(context.Background(), fence)
+
+	persisted, err := resolver.storeMessages(ctx, conversation.ChatRequest{
+		BotID:       storeRoundBotID,
+		SessionID:   sessionID,
+		Query:       "hello",
+		SessionType: "chat",
+		RuntimeType: "model",
+	}, []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("hello")},
+		{Role: "assistant", Content: conversation.NewTextContent("done")},
+	}, "", storeRoundOptions{})
+	if err != nil {
+		t.Fatalf("storeMessages() error = %v", err)
+	}
+	if len(messages.roundInputs) != 2 || len(persisted) != 2 {
+		t.Fatalf("atomic round inputs/persisted = %d/%d, want 2/2", len(messages.roundInputs), len(persisted))
+	}
+	if len(messages.batchInputs) != 0 || len(messages.persisted) != 0 {
+		t.Fatalf("non-fenced fallback used: batch=%d persist=%d", len(messages.batchInputs), len(messages.persisted))
+	}
+	if messages.fence != fence {
+		t.Fatalf("round fence = %#v, want %#v", messages.fence, fence)
+	}
+}
+
+func TestStoreMessagesCommitsReplacementWithFencedRound(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "33333333-3333-3333-3333-333333333333"
+	messages := &atomicRecordingMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	state := &replacementPersistenceState{
+		oldTurnID:          "turn-old",
+		requestMessageID:   "request-old",
+		reason:             "retry",
+		forkAnchor:         &forkAnchorUpdate{metadata: map[string]any{"forked_from": map[string]any{"fork_message_id": "assistant-parent"}}},
+		forkAnchorPrepared: true,
+	}
+	fence := runtimefence.Fence{BotID: storeRoundBotID, SessionID: sessionID, Token: 8}
+	ctx := runtimefence.WithContext(context.Background(), fence)
+	ctx = context.WithValue(ctx, replacementPersistenceContextKey{}, state)
+
+	_, err := resolver.storeMessages(ctx, conversation.ChatRequest{
+		BotID: storeRoundBotID, SessionID: sessionID, ReusePersistedUserMessage: true,
+		PersistedUserMessageID: "request-old", SkipHistoryTurn: true,
+	}, []conversation.ModelMessage{{Role: "assistant", Content: conversation.NewTextContent("replacement")}}, "", storeRoundOptions{})
+	if err != nil {
+		t.Fatalf("storeMessages() error = %v", err)
+	}
+	if !state.atomicCommitted {
+		t.Fatal("replacement was not marked atomically committed")
+	}
+	replacement := messages.options.Replacement
+	if replacement == nil || replacement.OldTurnID != "turn-old" || replacement.RequestMessageID != "request-old" || replacement.Reason != "retry" {
+		t.Fatalf("replacement options = %#v", replacement)
+	}
+	if replacement.SessionMetadata == nil {
+		t.Fatal("replacement fork metadata was not included in the transaction")
+	}
+}
+
+func TestStoreMessagesCommitsReplacementWithUnfencedRound(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "33333333-3333-3333-3333-333333333333"
+	messages := &atomicRecordingMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	state := &replacementPersistenceState{
+		oldTurnID:        "turn-old",
+		requestMessageID: "request-old",
+		reason:           "retry",
+	}
+	ctx := context.WithValue(context.Background(), replacementPersistenceContextKey{}, state)
+
+	_, err := resolver.storeMessages(ctx, conversation.ChatRequest{
+		BotID: storeRoundBotID, SessionID: sessionID, ReusePersistedUserMessage: true,
+		PersistedUserMessageID: "request-old", SkipHistoryTurn: true,
+	}, []conversation.ModelMessage{{Role: "assistant", Content: conversation.NewTextContent("replacement")}}, "", storeRoundOptions{})
+	if err != nil {
+		t.Fatalf("storeMessages() error = %v", err)
+	}
+	if !state.atomicCommitted {
+		t.Fatal("local replacement was not marked atomically committed")
+	}
+	if messages.fence.Valid() {
+		t.Fatalf("local replacement unexpectedly carried distributed fence %#v", messages.fence)
+	}
+	replacement := messages.options.Replacement
+	if replacement == nil || replacement.OldTurnID != "turn-old" || replacement.RequestMessageID != "request-old" || replacement.Reason != "retry" {
+		t.Fatalf("replacement options = %#v", replacement)
+	}
+	if len(messages.persisted) != 0 || len(messages.batchInputs) != 0 {
+		t.Fatalf("local replacement used non-atomic fallback: persist=%d batch=%d", len(messages.persisted), len(messages.batchInputs))
+	}
+}
+
+func TestStoreMessagesRejectsNonAtomicReplacementService(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	state := &replacementPersistenceState{oldTurnID: "turn-old", requestMessageID: "request-old", reason: "retry"}
+	ctx := context.WithValue(context.Background(), replacementPersistenceContextKey{}, state)
+
+	_, err := resolver.storeMessages(ctx, conversation.ChatRequest{
+		BotID: storeRoundBotID, SessionID: "33333333-3333-3333-3333-333333333333",
+		ReusePersistedUserMessage: true, PersistedUserMessageID: "request-old", SkipHistoryTurn: true,
+	}, []conversation.ModelMessage{{Role: "assistant", Content: conversation.NewTextContent("replacement")}}, "", storeRoundOptions{})
+	if err == nil || !strings.Contains(err.Error(), "atomic replacement persistence") {
+		t.Fatalf("storeMessages() error = %v, want atomic replacement requirement", err)
+	}
+	if len(messages.persisted) != 0 {
+		t.Fatalf("non-atomic replacement persisted %d messages", len(messages.persisted))
 	}
 }
 

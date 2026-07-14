@@ -4713,6 +4713,95 @@ definitions:
       updated_at:
         type: string
     type: object
+  sessionruntime.CurrentRunView:
+    properties:
+      canonical_ready:
+        type: boolean
+      error:
+        type: string
+      generation:
+        type: string
+      history_committed:
+        type: boolean
+      messages:
+        items:
+          $ref: '#/definitions/conversation.UIMessage'
+        type: array
+      operation:
+        $ref: '#/definitions/sessionruntime.RunOperationView'
+      owner_id:
+        type: string
+      owner_lease_expires_at:
+        type: string
+      request_user_turn:
+        $ref: '#/definitions/conversation.UITurn'
+      started_at:
+        type: string
+      status:
+        type: string
+      steer:
+        $ref: '#/definitions/sessionruntime.SteerState'
+      stream_id:
+        type: string
+      updated_at:
+        type: string
+    required:
+    - generation
+    type: object
+  sessionruntime.QueuedRunView:
+    properties:
+      stream_id:
+        type: string
+    type: object
+  sessionruntime.RunOperationView:
+    properties:
+      kind:
+        enum:
+        - retry
+        - edit
+        type: string
+      replace_from_message_id:
+        type: string
+      replacement_user_turn:
+        $ref: '#/definitions/conversation.UITurn'
+    required:
+    - kind
+    - replace_from_message_id
+    type: object
+  sessionruntime.Snapshot:
+    properties:
+      bot_id:
+        type: string
+      current_run_view:
+        $ref: '#/definitions/sessionruntime.CurrentRunView'
+      epoch:
+        type: string
+      queue:
+        items:
+          $ref: '#/definitions/sessionruntime.QueuedRunView'
+        type: array
+      seq:
+        type: integer
+      session_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  sessionruntime.SteerState:
+    properties:
+      created_at:
+        type: string
+      error:
+        type: string
+      id:
+        type: string
+      status:
+        type: string
+      text:
+        type: string
+      updated_at:
+        type: string
+    type: object
   settings.Settings:
     properties:
       acl_default_effect:
@@ -9794,6 +9883,46 @@ paths:
       summary: Stream message events for one session
       tags:
       - messages
+  /bots/{bot_id}/sessions/{session_id}/runtime:
+    get:
+      description: Returns the current live runtime snapshot for a chat session.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/sessionruntime.Snapshot'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get session runtime state
+      tags:
+      - sessions
   /bots/{bot_id}/sessions/{session_id}/status:
     get:
       description: Get aggregated info for a chat session including message count,

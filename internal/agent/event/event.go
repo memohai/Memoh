@@ -35,31 +35,32 @@ const (
 // StreamEvent is emitted by an agent runtime during streaming. The JSON
 // shape is the wire format WebSocket clients consume; do not change tags.
 type StreamEvent struct {
-	Type           StreamEventType  `json:"type"`
-	Delta          string           `json:"delta,omitempty"`
-	ToolName       string           `json:"toolName,omitempty"`
-	ToolCallID     string           `json:"toolCallId,omitempty"`
-	ApprovalID     string           `json:"approvalId,omitempty"`
-	UserInputID    string           `json:"userInputId,omitempty"`
-	ShortID        int              `json:"shortId,omitempty"`
-	Status         string           `json:"status,omitempty"`
-	Input          any              `json:"input,omitempty"`
-	Metadata       map[string]any   `json:"metadata,omitempty"`
-	Progress       any              `json:"progress,omitempty"`
-	Result         any              `json:"result,omitempty"`
-	Attachments    []FileAttachment `json:"attachments,omitempty"`
-	Reactions      []ReactionItem   `json:"reactions,omitempty"`
-	Speeches       []SpeechItem     `json:"speeches,omitempty"`
-	Messages       json.RawMessage  `json:"messages,omitempty"`
-	Usage          json.RawMessage  `json:"usage,omitempty"`
-	Reasoning      []string         `json:"reasoning,omitempty"`
-	Error          string           `json:"error,omitempty"`
-	Attempt        int              `json:"attempt,omitempty"`
-	MaxAttempt     int              `json:"maxAttempt,omitempty"`
-	RetryError     string           `json:"retryError,omitempty"`
-	StepNumber     int              `json:"stepNumber,omitempty"`
-	TotalSteps     int              `json:"totalSteps,omitempty"`
-	ProgressStatus string           `json:"progressStatus,omitempty"`
+	Type             StreamEventType  `json:"type"`
+	Delta            string           `json:"delta,omitempty"`
+	ToolName         string           `json:"toolName,omitempty"`
+	ToolCallID       string           `json:"toolCallId,omitempty"`
+	ApprovalID       string           `json:"approvalId,omitempty"`
+	UserInputID      string           `json:"userInputId,omitempty"`
+	ShortID          int              `json:"shortId,omitempty"`
+	Status           string           `json:"status,omitempty"`
+	Input            any              `json:"input,omitempty"`
+	Metadata         map[string]any   `json:"metadata,omitempty"`
+	Progress         any              `json:"progress,omitempty"`
+	Result           any              `json:"result,omitempty"`
+	Attachments      []FileAttachment `json:"attachments,omitempty"`
+	Reactions        []ReactionItem   `json:"reactions,omitempty"`
+	Speeches         []SpeechItem     `json:"speeches,omitempty"`
+	Messages         json.RawMessage  `json:"messages,omitempty"`
+	Usage            json.RawMessage  `json:"usage,omitempty"`
+	HistoryCommitted bool             `json:"history_committed,omitempty"`
+	Reasoning        []string         `json:"reasoning,omitempty"`
+	Error            string           `json:"error,omitempty"`
+	Attempt          int              `json:"attempt,omitempty"`
+	MaxAttempt       int              `json:"maxAttempt,omitempty"`
+	RetryError       string           `json:"retryError,omitempty"`
+	StepNumber       int              `json:"stepNumber,omitempty"`
+	TotalSteps       int              `json:"totalSteps,omitempty"`
+	ProgressStatus   string           `json:"progressStatus,omitempty"`
 }
 
 // IsTerminal returns true for events that signal end of stream.

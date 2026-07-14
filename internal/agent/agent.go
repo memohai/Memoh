@@ -22,12 +22,23 @@ import (
 
 // Agent is the core agent that handles LLM interactions.
 type Agent struct {
-	client         *sdk.Client
-	toolProviders  []tools.ToolProvider
-	bridgeProvider bridge.Provider
-	hookService    *hooks.Service
-	logger         *slog.Logger
-	limits         Limits
+	client                       *sdk.Client
+	toolProviders                []tools.ToolProvider
+	bridgeProvider               bridge.Provider
+	hookService                  hookServiceRunner
+	logger                       *slog.Logger
+	limits                       Limits
+	terminalHookTimeout          time.Duration
+	terminalEventDeliveryTimeout time.Duration
+}
+
+const (
+	defaultTerminalHookTimeout          = 15 * time.Second
+	defaultTerminalEventDeliveryTimeout = 5 * time.Second
+)
+
+type hookServiceRunner interface {
+	Run(context.Context, hooks.Request, hooks.ToolRunner) (hooks.Result, error)
 }
 
 // New creates a new Agent with the given dependencies.
@@ -36,13 +47,16 @@ func New(deps Deps) *Agent {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Agent{
+	agent := &Agent{
 		client:         sdk.NewClient(),
 		bridgeProvider: deps.BridgeProvider,
-		hookService:    deps.HookService,
 		logger:         logger.With(slog.String("service", "agent")),
 		limits:         deps.Limits.Normalize(),
 	}
+	if deps.HookService != nil {
+		agent.hookService = deps.HookService
+	}
+	return agent
 }
 
 // BridgeProvider returns the underlying bridge provider (workspace manager).
@@ -133,8 +147,14 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	streamCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	aborted := false
+	finished := false
 	turnError := ""
-	defer func() {
+	hookRan := false
+	runTerminalHook := func() {
+		if hookRan {
+			return
+		}
+		hookRan = true
 		event := hooks.EventTurnEnd
 		if aborted || strings.TrimSpace(turnError) != "" {
 			event = hooks.EventTurnError
@@ -142,8 +162,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				turnError = "agent run aborted"
 			}
 		}
-		a.runTurnHook(context.WithoutCancel(ctx), cfg, event, turnError)
-	}()
+		a.runTerminalTurnHook(ctx, cfg, event, turnError)
+	}
+	defer runTerminalHook()
 
 	// Stream emitter: tools targeting the current conversation push
 	// side-effect events (attachments, reactions, speech) directly here.
@@ -219,53 +240,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	}
 
 	initialMsgCount := len(cfg.Messages)
-
-	if cfg.InjectCh != nil {
-		basePrepare := prepareStep
-		prepareStep = func(p *sdk.GenerateParams) *sdk.GenerateParams {
-			if basePrepare != nil {
-				if override := basePrepare(p); override != nil {
-					p = override
-				}
-			}
-			for {
-				select {
-				case injected, ok := <-cfg.InjectCh:
-					if !ok {
-						break
-					}
-					text := strings.TrimSpace(injected.HeaderifiedText)
-					if text == "" {
-						text = strings.TrimSpace(injected.Text)
-					}
-					if text != "" || (cfg.SupportsImageInput && len(injected.ImageParts) > 0) {
-						insertAfter := len(p.Messages) - initialMsgCount
-						var extra []sdk.MessagePart
-						if cfg.SupportsImageInput {
-							for _, img := range injected.ImageParts {
-								if strings.TrimSpace(img.Image) != "" {
-									extra = append(extra, img)
-								}
-							}
-						}
-						p.Messages = append(p.Messages, sdk.UserMessage(text, extra...))
-						if cfg.InjectedRecorder != nil {
-							cfg.InjectedRecorder(text, insertAfter)
-						}
-						a.logger.Info("injected user message into agent stream",
-							slog.String("bot_id", cfg.Identity.BotID),
-							slog.Int("insert_after", insertAfter),
-							slog.Int("image_parts", len(extra)),
-						)
-					}
-					continue
-				default:
-				}
-				break
-			}
-			return p
-		}
-	}
+	prepareStep = a.wrapPrepareStepWithInjectedMessages(cfg, initialMsgCount, prepareStep)
 
 	prepareStep = a.wrapPrepareStepWithModelHook(streamCtx, cfg, prepareStep)
 	var err error
@@ -544,7 +519,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			aborted = true
 
 		case *sdk.FinishPart:
-			// handled after loop
+			finished = true
 		}
 
 		if aborted {
@@ -556,6 +531,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		for range streamResult.Stream {
 		}
 	}
+	aborted = streamEndedAborted(ctx, aborted, finished)
 
 	if textLoopProbeBuffer != nil {
 		textLoopProbeBuffer.Flush()
@@ -616,15 +592,76 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			)
 		}
 	}
+	runTerminalHook()
 	// Deliver the terminal event using a context that is NOT cancelled when
 	// the parent ctx is cancelled (user abort / idle timeout / loop-detect).
 	// Otherwise sendEvent would short-circuit on <-ctx.Done() and the consumer
 	// would never receive the partial messages accumulated so far, forcing it
 	// to fall back to a synthetic placeholder. A 5s deadline guards against
-	// a fully-disconnected consumer hanging this goroutine forever.
-	deliveryCtx, deliveryCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	// a fully-disconnected consumer hanging this goroutine forever. The timeout
+	// starts after the terminal hook so hook execution cannot consume delivery's
+	// entire budget.
+	deliveryCtx, deliveryCancel := context.WithTimeout(context.WithoutCancel(ctx), a.terminalDeliveryTimeout())
 	defer deliveryCancel()
 	sendEvent(deliveryCtx, ch, termEvent)
+}
+
+func streamEndedAborted(ctx context.Context, aborted, finished bool) bool {
+	return aborted || (ctx.Err() != nil && !finished)
+}
+
+func (a *Agent) wrapPrepareStepWithInjectedMessages(cfg RunConfig, initialMsgCount int, basePrepare func(*sdk.GenerateParams) *sdk.GenerateParams) func(*sdk.GenerateParams) *sdk.GenerateParams {
+	if cfg.InjectCh == nil {
+		return basePrepare
+	}
+	return func(p *sdk.GenerateParams) *sdk.GenerateParams {
+		if basePrepare != nil {
+			if override := basePrepare(p); override != nil {
+				p = override
+			}
+		}
+		for {
+			select {
+			case injected, ok := <-cfg.InjectCh:
+				if !ok {
+					break
+				}
+				text := strings.TrimSpace(injected.HeaderifiedText)
+				if text == "" {
+					text = strings.TrimSpace(injected.Text)
+				}
+				if text != "" || (cfg.SupportsImageInput && len(injected.ImageParts) > 0) {
+					insertAfter := len(p.Messages) - initialMsgCount
+					var extra []sdk.MessagePart
+					if cfg.SupportsImageInput {
+						for _, img := range injected.ImageParts {
+							if strings.TrimSpace(img.Image) != "" {
+								extra = append(extra, img)
+							}
+						}
+					}
+					p.Messages = append(p.Messages, sdk.UserMessage(text, extra...))
+					if injected.Applied != nil {
+						injected.Applied()
+					}
+					if cfg.InjectedRecorder != nil {
+						cfg.InjectedRecorder(text, insertAfter)
+					}
+					if a != nil && a.logger != nil {
+						a.logger.Info("injected user message into agent stream",
+							slog.String("bot_id", cfg.Identity.BotID),
+							slog.Int("insert_after", insertAfter),
+							slog.Int("image_parts", len(extra)),
+						)
+					}
+				}
+				continue
+			default:
+			}
+			break
+		}
+		return p
+	}
 }
 
 func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *GenerateResult, retErr error) {
@@ -637,7 +674,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 			event = hooks.EventTurnError
 			errMsg = retErr.Error()
 		}
-		a.runTurnHook(context.WithoutCancel(ctx), cfg, event, errMsg)
+		a.runTerminalTurnHook(ctx, cfg, event, errMsg)
 	}()
 	loopAbort := newLoopAbortState()
 

@@ -1,6 +1,7 @@
 package userinput
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -711,6 +712,34 @@ func submittedResult(payload UIPayload, answers []QuestionAnswer) (map[string]an
 		"answers":     resultAnswers,
 		"instruction": submitInstruction,
 	}, nil
+}
+
+// ResponseMatches reports whether a retry describes the terminal response
+// already stored for a request. It lets at-least-once command delivery
+// reconcile the crash window between the PostgreSQL commit and command-result
+// publication without treating a conflicting response as successful.
+func ResponseMatches(req Request, canceled bool, reason string, answers []QuestionAnswer) (bool, error) {
+	var (
+		expected map[string]any
+		err      error
+	)
+	if canceled {
+		expected = canceledResult(reason)
+	} else {
+		expected, err = submittedResult(req.UIPayload, answers)
+		if err != nil {
+			return false, err
+		}
+	}
+	expectedJSON, err := json.Marshal(expected)
+	if err != nil {
+		return false, err
+	}
+	actualJSON, err := json.Marshal(req.Result)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(expectedJSON, actualJSON), nil
 }
 
 func answerEntry(question UIQuestion, answer QuestionAnswer) (map[string]any, error) {

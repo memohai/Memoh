@@ -45,6 +45,7 @@ import (
 	pgvectordb "github.com/memohai/memoh/internal/db/pgvector"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/decisionruntime"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	"github.com/memohai/memoh/internal/fetchproviders"
 	"github.com/memohai/memoh/internal/handlers"
@@ -76,6 +77,7 @@ import (
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
 	sessionpkg "github.com/memohai/memoh/internal/session"
+	"github.com/memohai/memoh/internal/sessionruntime"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/storage/providers/containerfs"
 	"github.com/memohai/memoh/internal/storage/providers/fallback"
@@ -179,6 +181,31 @@ func provideDBQueries(postgresStore *postgresstore.Store) (dbstore.Queries, erro
 		return nil, errors.New("postgres store not configured")
 	}
 	return postgresstore.NewQueriesWithPool(postgresStore.Pool(), postgresStore.SQLC()), nil
+}
+
+func provideSessionRuntime(lc fx.Lifecycle, log *slog.Logger, cfg config.Config) (*sessionruntime.Manager, error) {
+	manager, err := sessionruntime.NewManagerFromConfig(log, cfg.SessionRuntime)
+	if err != nil {
+		return nil, fmt.Errorf("session runtime: %w", err)
+	}
+	lc.Append(sessionRuntimeLifecycleHook(manager))
+	return manager, nil
+}
+
+func sessionRuntimeLifecycleHook(manager *sessionruntime.Manager) fx.Hook {
+	return fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			if err := manager.Start(ctx); err != nil {
+				cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancelCleanup()
+				return errors.Join(err, manager.CloseContext(cleanupCtx))
+			}
+			return nil
+		},
+		OnStop: func(ctx context.Context) error {
+			return manager.CloseContext(ctx)
+		},
+	}
 }
 
 func provideAccountStore(postgresStore *postgresstore.Store) (dbstore.AccountStore, error) {
@@ -952,13 +979,17 @@ func (a *gatewayAssetLoaderAdapter) AccessPathForGateway(ctx context.Context, bo
 // provideTurnService binds the in-process turn adapter over the resolver
 // and native agent. Both chat and discuss turns flow through it; Channel
 // consumes it as the only agent surface.
-func provideTurnService(resolver *flow.Resolver, agent *agentpkg.Agent) turn.Service {
+func provideBaseTurnService(resolver *flow.Resolver, agent *agentpkg.Agent) *turninprocess.Adapter {
 	// The self-hosted runtime binds its DB pool to the singleton team, so
 	// the adapter fails closed on any other TeamID (turn.ErrTeamNotServed).
 	return turninprocess.New(resolver,
 		turninprocess.WithDiscuss(agent, resolver),
 		turninprocess.WithAllowedTeam(team.DefaultTeamID),
 	)
+}
+
+func provideTurnService(base *turninprocess.Adapter, router *decisionruntime.Router) turn.Service {
+	return decisionruntime.NewTurnService(base, router)
 }
 
 // resolverBotPermissionChecker duplicates the Channel module's inbound permission

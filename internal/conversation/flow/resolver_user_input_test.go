@@ -13,6 +13,7 @@ import (
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/runtimefence"
 	"github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/userinput"
 )
@@ -20,8 +21,11 @@ import (
 const testACPUserInputOwnerID = "owner-user"
 
 type fakeUserInputService struct {
-	target   userinput.Request
-	resolved userinput.Request
+	target     userinput.Request
+	resolved   userinput.Request
+	getTarget  userinput.Request
+	resolveErr error
+	getErr     error
 
 	submitCalls   int
 	cancelCalls   int
@@ -45,7 +49,11 @@ func (f *fakeUserInputService) CreatePending(context.Context, userinput.CreatePe
 }
 
 func (f *fakeUserInputService) ResolveTarget(context.Context, userinput.ResolveInput) (userinput.Request, error) {
-	return f.target, nil
+	return f.target, f.resolveErr
+}
+
+func (f *fakeUserInputService) Get(context.Context, string) (userinput.Request, error) {
+	return f.getTarget, f.getErr
 }
 
 func (f *fakeUserInputService) Submit(_ context.Context, input userinput.SubmitInput) (userinput.Request, error) {
@@ -322,6 +330,191 @@ func TestRespondUserInputContinuesChatSession(t *testing.T) {
 	}
 	if len(eventCh) != 0 {
 		t.Fatalf("chat continuation must not emit ack events, got %d", len(eventCh))
+	}
+}
+
+func TestPrepareUserInputResponseDoesNotResolveOrContinue(t *testing.T) {
+	t.Parallel()
+
+	target := userinput.Request{
+		ID: "input-prepare", BotID: "bot-1", SessionID: "session-1",
+		ToolCallID: "call-prepare", ToolName: userinput.ToolNameAskUser, Status: userinput.StatusPending,
+		UIPayload: userinput.UIPayload{Questions: []userinput.UIQuestion{{
+			ID: "q1", Kind: userinput.QuestionKindText,
+		}}},
+	}
+	fake := &fakeUserInputService{target: target}
+	resolver := &Resolver{
+		userInput: fake,
+		continueUserInputFn: func(context.Context, userinput.Request, UserInputResponseInput, sdk.ToolResultPart, chan<- WSStreamEvent) error {
+			t.Fatal("prepare continued the session")
+			return nil
+		},
+	}
+
+	prepared, err := resolver.PrepareUserInputResponse(context.Background(), UserInputResponseInput{
+		BotID: target.BotID, SessionID: target.SessionID, UserInputID: target.ID,
+		Answers: []userinput.QuestionAnswer{{QuestionID: "q1", Text: "continue"}},
+	})
+	if err != nil {
+		t.Fatalf("PrepareUserInputResponse() error = %v", err)
+	}
+	if prepared != (runtimefence.PreservedDecision{Kind: runtimefence.DecisionUserInput, ID: target.ID, BotID: target.BotID, SessionID: target.SessionID}) {
+		t.Fatalf("prepared decision = %#v", prepared)
+	}
+	if fake.submitCalls != 0 || fake.cancelCalls != 0 || fake.createCalls != 0 {
+		t.Fatalf("prepare mutated user input: submit/cancel/create = %d/%d/%d", fake.submitCalls, fake.cancelCalls, fake.createCalls)
+	}
+}
+
+func TestPrepareUserInputResponseReturnsCanonicalScopeForFencedTarget(t *testing.T) {
+	target := userinput.Request{
+		ID: "input-fenced", BotID: "bot-1", SessionID: "session-1", ToolCallID: "call-fenced",
+		ToolName: userinput.ToolNameAskUser, Status: userinput.StatusPending,
+		UIPayload: userinput.UIPayload{Questions: []userinput.UIQuestion{{ID: "q1", Kind: userinput.QuestionKindText}}},
+	}
+	resolver := &Resolver{userInput: &fakeUserInputService{
+		resolveErr: userinput.ErrNotFound,
+		getTarget:  target,
+	}}
+	if _, err := resolver.PrepareUserInputResponse(context.Background(), UserInputResponseInput{
+		BotID: target.BotID, UserInputID: target.ID,
+		Answers: []userinput.QuestionAnswer{{QuestionID: "q1", Text: "continue"}},
+	}); !errors.Is(err, userinput.ErrNotFound) {
+		t.Fatalf("pending-only prepare error = %v, want ErrNotFound", err)
+	}
+
+	prepared, err := resolver.PrepareUserInputResponseTarget(context.Background(), UserInputResponseInput{
+		BotID: target.BotID, UserInputID: target.ID,
+		Answers: []userinput.QuestionAnswer{{QuestionID: "q1", Text: "continue"}},
+	})
+	if err != nil {
+		t.Fatalf("PrepareUserInputResponseTarget() error = %v", err)
+	}
+	want := runtimefence.PreservedDecision{Kind: runtimefence.DecisionUserInput, ID: target.ID, BotID: target.BotID, SessionID: target.SessionID}
+	if prepared != want {
+		t.Fatalf("prepared decision = %#v, want %#v", prepared, want)
+	}
+}
+
+func TestPrepareUserInputResponseRejectsInvalidAnswersBeforeMutation(t *testing.T) {
+	t.Parallel()
+
+	target := userinput.Request{
+		ID: "input-invalid", BotID: "bot-1", SessionID: "session-1",
+		ToolCallID: "call-invalid", ToolName: userinput.ToolNameAskUser, Status: userinput.StatusPending,
+		UIPayload: userinput.UIPayload{Questions: []userinput.UIQuestion{{
+			ID: "q1", Kind: userinput.QuestionKindSingleSelect,
+			Options: []userinput.UIOption{{ID: "q1.o1", Label: "One"}, {ID: "q1.o2", Label: "Two"}},
+		}}},
+	}
+	fake := &fakeUserInputService{target: target}
+	resolver := &Resolver{userInput: fake}
+
+	_, err := resolver.PrepareUserInputResponse(context.Background(), UserInputResponseInput{
+		BotID: target.BotID, SessionID: target.SessionID, UserInputID: target.ID,
+		Answers: []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.unknown"}}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "has no option") {
+		t.Fatalf("PrepareUserInputResponse() error = %v, want invalid option", err)
+	}
+	if fake.submitCalls != 0 || fake.cancelCalls != 0 || fake.createCalls != 0 {
+		t.Fatalf("invalid prepare mutated user input: submit/cancel/create = %d/%d/%d", fake.submitCalls, fake.cancelCalls, fake.createCalls)
+	}
+}
+
+func TestRespondUserInputResolveOnlyWakesRemoteWaiterWithoutContinuation(t *testing.T) {
+	t.Parallel()
+
+	target := userinput.Request{
+		ID:               "input-remote",
+		BotID:            "bot-1",
+		SessionID:        "session-1",
+		ToolCallID:       "call-remote",
+		ToolName:         userinput.ToolNameAskUser,
+		Status:           userinput.StatusPending,
+		ProviderMetadata: map[string]any{"source": userinput.ProviderSourceACPMCP},
+	}
+	resolved := target
+	resolved.Status = userinput.StatusSubmitted
+	fake := &fakeUserInputService{
+		target:        target,
+		resolved:      resolved,
+		canRespond:    false,
+		canRespondSet: true,
+	}
+	resolver := &Resolver{
+		userInput: fake,
+		continueUserInputFn: func(context.Context, userinput.Request, UserInputResponseInput, sdk.ToolResultPart, chan<- WSStreamEvent) error {
+			t.Fatal("resolve-only response started a second continuation")
+			return nil
+		},
+	}
+	attachACPUserInputAuth(resolver)
+
+	err := resolver.RespondUserInput(context.Background(), UserInputResponseInput{
+		BotID:                  "bot-1",
+		SessionID:              "session-1",
+		ActorChannelIdentityID: testACPUserInputOwnerID,
+		ActorUserID:            testACPUserInputOwnerID,
+		UserInputID:            target.ID,
+		Answers:                []userinput.QuestionAnswer{{QuestionID: "q1", Text: "continue"}},
+		ResolveOnly:            true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("RespondUserInput(resolve only) error = %v", err)
+	}
+	if fake.submitCalls != 1 || fake.cancelCalls != 0 {
+		t.Fatalf("submit/cancel calls = %d/%d", fake.submitCalls, fake.cancelCalls)
+	}
+}
+
+func TestRespondUserInputResolveOnlyReconcilesCommittedRetry(t *testing.T) {
+	t.Parallel()
+
+	target := userinput.Request{
+		ID: "input-committed", BotID: "bot-1", SessionID: "session-1",
+		ToolCallID: "call-committed", ToolName: userinput.ToolNameAskUser, Status: userinput.StatusCanceled,
+		Result: map[string]any{
+			"status":      userinput.StatusCanceled,
+			"reason":      "not now",
+			"instruction": "The user canceled this input request. Do not ask the same question again; continue with a reasonable choice from the available context or briefly explain the next step.",
+		},
+	}
+	fake := &fakeUserInputService{resolveErr: userinput.ErrNotFound, getTarget: target}
+	resolver := &Resolver{userInput: fake}
+
+	err := resolver.RespondUserInput(context.Background(), UserInputResponseInput{
+		BotID: target.BotID, SessionID: target.SessionID, UserInputID: target.ID,
+		Canceled: true, Reason: "not now", ResolveOnly: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("same committed retry error = %v", err)
+	}
+	if fake.cancelCalls != 0 || fake.submitCalls != 0 {
+		t.Fatalf("same committed retry executed submit/cancel = %d/%d", fake.submitCalls, fake.cancelCalls)
+	}
+
+	err = resolver.RespondUserInput(context.Background(), UserInputResponseInput{
+		BotID: target.BotID, SessionID: target.SessionID, UserInputID: target.ID,
+		Canceled: true, Reason: "different reason", ResolveOnly: true,
+	}, nil)
+	if !errors.Is(err, userinput.ErrAlreadyDecided) {
+		t.Fatalf("conflicting committed retry error = %v, want ErrAlreadyDecided", err)
+	}
+}
+
+func TestRespondUserInputCommittedRetryPropagatesLookupFailure(t *testing.T) {
+	t.Parallel()
+
+	lookupErr := errors.New("user input database unavailable")
+	fake := &fakeUserInputService{resolveErr: userinput.ErrNotFound, getErr: lookupErr}
+	resolver := &Resolver{userInput: fake}
+	err := resolver.RespondUserInput(context.Background(), UserInputResponseInput{
+		BotID: "bot-1", SessionID: "session-1", UserInputID: "input-failed-lookup", ResolveOnly: true,
+	}, nil)
+	if !errors.Is(err, lookupErr) {
+		t.Fatalf("committed retry lookup error = %v, want %v", err, lookupErr)
 	}
 }
 
@@ -691,6 +884,33 @@ func TestRespondUserInputACPRequestWithoutWaiterCancelsInsteadOfSubmitting(t *te
 	}
 	if len(eventCh) != 2 {
 		t.Fatalf("ack events = %d, want 2", len(eventCh))
+	}
+}
+
+func TestRespondUserInputFencedACPRequestWithoutWaiterFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeUserInputService{
+		target: userinput.Request{
+			ID:               "input-fenced",
+			Status:           userinput.StatusPending,
+			ProviderMetadata: map[string]any{"source": userinput.ProviderSourceACPMCP},
+			RuntimeFenced:    true,
+		},
+	}
+	resolver := &Resolver{userInput: fake}
+	attachACPUserInputAuth(resolver)
+	err := resolver.RespondUserInput(context.Background(), UserInputResponseInput{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		ActorUserID: testACPUserInputOwnerID,
+		Answers:     []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
+	}, nil)
+	if !errors.Is(err, ErrRuntimeDecisionOwnerUnavailable) {
+		t.Fatalf("respond fenced orphan error = %v, want ErrRuntimeDecisionOwnerUnavailable", err)
+	}
+	if fake.submitCalls != 0 || fake.cancelCalls != 0 {
+		t.Fatalf("fenced orphan mutated decision: submit/cancel = %d/%d", fake.submitCalls, fake.cancelCalls)
 	}
 }
 

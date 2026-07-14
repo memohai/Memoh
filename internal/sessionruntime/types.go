@@ -47,6 +47,8 @@ var (
 	ErrCommandPayloadConflict  = errors.New("runtime command payload conflicts with an earlier request")
 	ErrManagerClosed           = errors.New("session runtime manager is closed")
 	ErrRunOwnershipLost        = errors.New("runtime run ownership was lost")
+	ErrBackendConflict         = errors.New("session runtime backend transaction conflict limit exceeded")
+	ErrTerminalCommitPending   = errors.New("runtime terminal commit is pending retry")
 )
 
 type Key struct {
@@ -120,7 +122,7 @@ type QueuedRunView struct {
 
 type CurrentRunView struct {
 	StreamID            string                   `json:"stream_id"`
-	Generation          string                   `json:"generation"`
+	Generation          string                   `json:"generation" validate:"required"`
 	Status              string                   `json:"status"`
 	OwnerID             string                   `json:"owner_id,omitempty"`
 	OwnerLeaseExpiresAt *time.Time               `json:"owner_lease_expires_at,omitempty"`
@@ -128,6 +130,8 @@ type CurrentRunView struct {
 	UpdatedAt           time.Time                `json:"updated_at"`
 	Messages            []conversation.UIMessage `json:"messages"`
 	RequestUserTurn     *conversation.UITurn     `json:"request_user_turn,omitempty"`
+	HistoryCommitted    bool                     `json:"history_committed,omitempty"`
+	CanonicalReady      bool                     `json:"canonical_ready"`
 	Error               string                   `json:"error,omitempty"`
 	Steer               *SteerState              `json:"steer,omitempty"`
 	Operation           *RunOperationView        `json:"operation,omitempty"`
@@ -140,6 +144,21 @@ type CurrentRunView struct {
 type RunAdmissionView struct {
 	RequestUserTurn *conversation.UITurn
 	Operation       *RunOperationView
+}
+
+// RunStartOptions contains the complete admission and owner-local control
+// contract for one run. AdmissionBuilder runs after the backend claim and may
+// use the generation-bearing handle for fenced persistence setup.
+type RunStartOptions struct {
+	BotID            string
+	SessionID        string
+	StreamID         string
+	Admission        RunAdmissionView
+	AdmissionBuilder func(context.Context, RunHandle) (RunAdmissionView, error)
+	OwnershipCancel  context.CancelCauseFunc
+	AbortCh          chan<- struct{}
+	Cancel           context.CancelFunc
+	InjectCh         chan<- conversation.InjectMessage
 }
 
 type RunOperationView struct {
@@ -185,6 +204,8 @@ type CurrentRunPatch struct {
 	StreamID            string      `json:"stream_id"`
 	Status              *string     `json:"status,omitempty"`
 	Error               *string     `json:"error,omitempty"`
+	HistoryCommitted    *bool       `json:"history_committed,omitempty"`
+	CanonicalReady      *bool       `json:"canonical_ready,omitempty"`
 	Steer               *SteerState `json:"steer,omitempty"`
 	UpdatedAt           *time.Time  `json:"updated_at,omitempty"`
 	OwnerLeaseExpiresAt *time.Time  `json:"owner_lease_expires_at,omitempty"`
@@ -246,7 +267,7 @@ type Backend interface {
 type DistributedBackend interface {
 	Backend
 	UpdateActiveRun(ctx context.Context, key Key, streamID, generation string, update ActiveRunUpdate) (Snapshot, bool, error)
-	StartRun(ctx context.Context, key Key, ref StreamRef, update SnapshotUpdate) (Snapshot, bool, error)
+	StartRun(ctx context.Context, key Key, ref StreamRef, update ActiveRunUpdate) (Snapshot, bool, error)
 	ReleaseRun(ctx context.Context, key Key, ref StreamRef, update ActiveRunUpdate) (Snapshot, bool, error)
 	RenewLease(ctx context.Context, key Key, streamID, ownerID, generation string, renewedAt, expiresAt time.Time) error
 	ValidateRunOwnership(ctx context.Context, key Key, ref StreamRef) error
@@ -256,6 +277,26 @@ type DistributedBackend interface {
 	SubscribeCommands(ctx context.Context, ownerID string) (CommandSubscription, error)
 	StoreCommandResult(ctx context.Context, result Command, ttl time.Duration) error
 	LoadCommandResult(ctx context.Context, commandID string) (Command, bool, error)
+}
+
+type RuntimeRevision struct {
+	Epoch     string
+	Seq       int64
+	UpdatedAt time.Time
+}
+
+// StreamingDeltaBackend is an optional normalized hot path. Implementations
+// may append only an existing text/reasoning content field; all arbitrary JSON
+// remains owned by the regular snapshot codec.
+type StreamingDeltaBackend interface {
+	AppendActiveRunMessage(ctx context.Context, key Key, ref StreamRef, messageAppend RuntimeMessageAppend) (RuntimeRevision, bool, error)
+}
+
+// ExpiredRunBackend is an optional capability used by Manager's active
+// orphan reaper. Implementations may temporarily claim returned keys to avoid
+// duplicate work; Manager validates each key atomically through Snapshot.
+type ExpiredRunBackend interface {
+	ListExpiredRunKeys(ctx context.Context, limit int64) ([]Key, error)
 }
 
 type startupHealthChecker interface {
