@@ -128,6 +128,14 @@ func TestPostgresChatDeleteAndBatchDeleteShareSessionLockOrder(t *testing.T) {
 	})
 }
 
+func TestPostgresBotDeleteAndBatchDeleteShareSessionLockOrder(t *testing.T) {
+	fixture := setupOrderedSessionFixture(t)
+	botID := mustTestUUID(t, fixture.botID)
+	assertBotMutationLockOrder(t, fixture, func(ctx context.Context, queries *dbsqlc.Queries) error {
+		return queries.DeleteBotByID(ctx, botID)
+	})
+}
+
 func TestPostgresCompactionLogDeleteAndBatchDeleteShareSessionLockOrder(t *testing.T) {
 	fixture := setupOrderedSessionFixture(t)
 	botID := mustTestUUID(t, fixture.botID)
