@@ -788,7 +788,43 @@ func TestSendSameConversationTextOnlyFails(t *testing.T) {
 	}
 }
 
-func TestSendSameConversationAttachmentWithTextFails(t *testing.T) {
+func TestSendSameConversationAttachmentWithTextDeliversAttachments(t *testing.T) {
+	t.Parallel()
+
+	sender := &testSender{}
+	exec := &Executor{
+		Sender:   sender,
+		Resolver: testResolver{},
+	}
+
+	result, err := exec.Send(context.Background(), SessionContext{
+		BotID:              "bot_1",
+		CanOmitTarget:      true,
+		AllowLocalShortcut: true,
+		CurrentPlatform:    "feishu",
+		ReplyTarget:        "chat_id:oc_group_1",
+	}, map[string]any{
+		"text":        "caption",
+		"attachments": []any{"screenshot.png"},
+	})
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	if !result.Local {
+		t.Fatal("expected local shortcut result")
+	}
+	if len(result.LocalAttachments) != 1 {
+		t.Fatalf("expected 1 local attachment, got %d", len(result.LocalAttachments))
+	}
+	if !result.LocalTextOmitted {
+		t.Fatal("expected LocalTextOmitted to be true")
+	}
+	if sender.called != 0 {
+		t.Fatalf("expected sender not called, got %d", sender.called)
+	}
+}
+
+func TestSendSameConversationAttachmentWithActionsFails(t *testing.T) {
 	t.Parallel()
 
 	sender := &testSender{}
@@ -804,8 +840,10 @@ func TestSendSameConversationAttachmentWithTextFails(t *testing.T) {
 		CurrentPlatform:    "feishu",
 		ReplyTarget:        "chat_id:oc_group_1",
 	}, map[string]any{
-		"text":        "caption",
-		"attachments": []any{"screenshot.png"},
+		"message": map[string]any{
+			"attachments": []any{"screenshot.png"},
+			"actions":     []any{map[string]any{"label": "Open", "url": "https://example.com"}},
+		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "standalone files or attachments") {
 		t.Fatalf("Send error = %v, want standalone attachment guidance", err)

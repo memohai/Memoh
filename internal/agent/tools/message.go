@@ -341,6 +341,10 @@ func (p *MessageProvider) execSend(ctx context.Context, session SessionContext, 
 			"delivered":   "current_conversation",
 			"attachments": len(atts),
 		}
+		if result.LocalTextOmitted {
+			resp["text_delivered"] = false
+			resp["note"] = "attachments were delivered to the current conversation, but message text is never sent this way; include it in your assistant reply text instead"
+		}
 		if result.MessageID != "" {
 			resp["message_id"] = result.MessageID
 		}
