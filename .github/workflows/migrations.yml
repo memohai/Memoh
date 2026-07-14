@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/migrations.yml"
+      - "sqlc.yaml"
       - "db/postgres/migrations/**"
       - "db/postgres/queries/**"
       - "internal/db/postgres/sqlc/**"
@@ -15,6 +16,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/migrations.yml"
+      - "sqlc.yaml"
       - "db/postgres/migrations/**"
       - "db/postgres/queries/**"
       - "internal/db/postgres/sqlc/**"
@@ -57,6 +59,11 @@ jobs:
       - name: Verify generated PostgreSQL queries
         run: |
           go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
+          untracked="$(git ls-files --others --exclude-standard -- internal/db/postgres/sqlc)"
+          if [ -n "$untracked" ]; then
+            printf 'Untracked generated SQL files:\n%s\n' "$untracked"
+            exit 1
+          fi
           git diff --exit-code -- internal/db/postgres/sqlc
 
       - name: Build
