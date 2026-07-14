@@ -12,7 +12,7 @@ import (
 )
 
 const getBotWorkspaceResourceLimits = `-- name: GetBotWorkspaceResourceLimits :one
-SELECT bot_id, cpu_millicores, memory_bytes, storage_bytes, created_at, updated_at, tenant_id FROM bot_workspace_resource_limits WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
+SELECT bot_id, cpu_millicores, memory_bytes, storage_bytes, created_at, updated_at, team_id FROM bot_workspace_resource_limits WHERE team_id = app.current_team_id() AND bot_id = $1
 `
 
 func (q *Queries) GetBotWorkspaceResourceLimits(ctx context.Context, botID pgtype.UUID) (BotWorkspaceResourceLimit, error) {
@@ -25,7 +25,7 @@ func (q *Queries) GetBotWorkspaceResourceLimits(ctx context.Context, botID pgtyp
 		&i.StorageBytes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -40,12 +40,12 @@ VALUES (
   $3,
   $4
 )
-ON CONFLICT (tenant_id, bot_id) DO UPDATE SET
+ON CONFLICT (team_id, bot_id) DO UPDATE SET
   cpu_millicores = EXCLUDED.cpu_millicores,
   memory_bytes = EXCLUDED.memory_bytes,
   storage_bytes = EXCLUDED.storage_bytes,
   updated_at = now()
-RETURNING bot_id, cpu_millicores, memory_bytes, storage_bytes, created_at, updated_at, tenant_id
+RETURNING bot_id, cpu_millicores, memory_bytes, storage_bytes, created_at, updated_at, team_id
 `
 
 type UpsertBotWorkspaceResourceLimitsParams struct {
@@ -70,7 +70,7 @@ func (q *Queries) UpsertBotWorkspaceResourceLimits(ctx context.Context, arg Upse
 		&i.StorageBytes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }

@@ -14,7 +14,7 @@ import (
 const createChannelLinkCode = `-- name: CreateChannelLinkCode :one
 INSERT INTO channel_link_codes (token, user_id, channel_type, expires_at)
 VALUES ($1, $2, $4::text, $3)
-RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at, tenant_id
+RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at, team_id
 `
 
 type CreateChannelLinkCodeParams struct {
@@ -40,14 +40,14 @@ func (q *Queries) CreateChannelLinkCode(ctx context.Context, arg CreateChannelLi
 		&i.ConsumedAt,
 		&i.ConsumedChannelIdentityID,
 		&i.CreatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const deleteUserChannelIdentityBinding = `-- name: DeleteUserChannelIdentityBinding :exec
 DELETE FROM user_channel_identity_bindings
-WHERE tenant_id = app.current_tenant_id() AND user_id = $1 AND channel_identity_id = $2
+WHERE team_id = app.current_team_id() AND user_id = $1 AND channel_identity_id = $2
 `
 
 type DeleteUserChannelIdentityBindingParams struct {
@@ -61,9 +61,9 @@ func (q *Queries) DeleteUserChannelIdentityBinding(ctx context.Context, arg Dele
 }
 
 const getChannelLinkCodeByToken = `-- name: GetChannelLinkCodeByToken :one
-SELECT token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at, tenant_id
+SELECT token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at, team_id
 FROM channel_link_codes
-WHERE tenant_id = app.current_tenant_id() AND token = $1
+WHERE team_id = app.current_team_id() AND token = $1
 `
 
 func (q *Queries) GetChannelLinkCodeByToken(ctx context.Context, token string) (ChannelLinkCode, error) {
@@ -77,7 +77,7 @@ func (q *Queries) GetChannelLinkCodeByToken(ctx context.Context, token string) (
 		&i.ConsumedAt,
 		&i.ConsumedChannelIdentityID,
 		&i.CreatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -94,8 +94,8 @@ SELECT
   ci.display_name AS channel_identity_display_name,
   ci.avatar_url AS channel_identity_avatar_url
 FROM user_channel_identity_bindings b
-LEFT JOIN channel_identities ci ON ci.id = b.channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-WHERE b.tenant_id = app.current_tenant_id()
+LEFT JOIN channel_identities ci ON ci.id = b.channel_identity_id AND ci.team_id = app.current_team_id()
+WHERE b.team_id = app.current_team_id()
 ORDER BY b.created_at DESC
 `
 
@@ -153,9 +153,9 @@ SELECT DISTINCT
   ci.display_name AS channel_identity_display_name,
   ci.avatar_url AS channel_identity_avatar_url
 FROM user_channel_identity_bindings b
-INNER JOIN bot_user_grants g ON g.user_id = b.user_id AND g.bot_id = $1 AND g.subject_type = 'user' AND g.tenant_id = app.current_tenant_id()
-LEFT JOIN channel_identities ci ON ci.id = b.channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-WHERE b.tenant_id = app.current_tenant_id()
+INNER JOIN bot_user_grants g ON g.user_id = b.user_id AND g.bot_id = $1 AND g.subject_type = 'user' AND g.team_id = app.current_team_id()
+LEFT JOIN channel_identities ci ON ci.id = b.channel_identity_id AND ci.team_id = app.current_team_id()
+WHERE b.team_id = app.current_team_id()
 ORDER BY b.created_at DESC
 `
 
@@ -213,8 +213,8 @@ SELECT
   ci.display_name AS channel_identity_display_name,
   ci.avatar_url AS channel_identity_avatar_url
 FROM user_channel_identity_bindings b
-LEFT JOIN channel_identities ci ON ci.id = b.channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-WHERE b.tenant_id = app.current_tenant_id() AND b.user_id = $1
+LEFT JOIN channel_identities ci ON ci.id = b.channel_identity_id AND ci.team_id = app.current_team_id()
+WHERE b.team_id = app.current_team_id() AND b.user_id = $1
 ORDER BY b.created_at DESC
 `
 
@@ -263,7 +263,7 @@ func (q *Queries) ListChannelIdentityBindingsForUser(ctx context.Context, userID
 const listUserIDsByChannelIdentity = `-- name: ListUserIDsByChannelIdentity :many
 SELECT user_id
 FROM user_channel_identity_bindings
-WHERE tenant_id = app.current_tenant_id() AND channel_identity_id = $1
+WHERE team_id = app.current_team_id() AND channel_identity_id = $1
 `
 
 func (q *Queries) ListUserIDsByChannelIdentity(ctx context.Context, channelIdentityID pgtype.UUID) ([]pgtype.UUID, error) {
@@ -290,8 +290,8 @@ const markChannelLinkCodeConsumed = `-- name: MarkChannelLinkCodeConsumed :one
 UPDATE channel_link_codes
 SET consumed_at = now(),
     consumed_channel_identity_id = $2
-WHERE tenant_id = app.current_tenant_id() AND token = $1 AND consumed_at IS NULL AND expires_at > now()
-RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at, tenant_id
+WHERE team_id = app.current_team_id() AND token = $1 AND consumed_at IS NULL AND expires_at > now()
+RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at, team_id
 `
 
 type MarkChannelLinkCodeConsumedParams struct {
@@ -310,7 +310,7 @@ func (q *Queries) MarkChannelLinkCodeConsumed(ctx context.Context, arg MarkChann
 		&i.ConsumedAt,
 		&i.ConsumedChannelIdentityID,
 		&i.CreatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -320,7 +320,7 @@ WITH claimed AS (
   UPDATE channel_link_codes
   SET consumed_at = now(),
       consumed_channel_identity_id = $2
-  WHERE tenant_id = app.current_tenant_id()
+  WHERE team_id = app.current_team_id()
     AND token = $1
     AND consumed_at IS NULL
     AND expires_at > now()
@@ -329,9 +329,9 @@ WITH claimed AS (
 INSERT INTO user_channel_identity_bindings (user_id, channel_identity_id)
 SELECT user_id, $2
 FROM claimed
-ON CONFLICT (tenant_id, user_id, channel_identity_id) DO UPDATE
+ON CONFLICT (team_id, user_id, channel_identity_id) DO UPDATE
   SET updated_at = now()
-RETURNING id, user_id, channel_identity_id, created_at, updated_at, tenant_id
+RETURNING id, user_id, channel_identity_id, created_at, updated_at, team_id
 `
 
 type RedeemChannelLinkCodeParams struct {
@@ -348,7 +348,7 @@ func (q *Queries) RedeemChannelLinkCode(ctx context.Context, arg RedeemChannelLi
 		&i.ChannelIdentityID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -356,9 +356,9 @@ func (q *Queries) RedeemChannelLinkCode(ctx context.Context, arg RedeemChannelLi
 const upsertUserChannelIdentityBinding = `-- name: UpsertUserChannelIdentityBinding :one
 INSERT INTO user_channel_identity_bindings (user_id, channel_identity_id)
 VALUES ($1, $2)
-ON CONFLICT (tenant_id, user_id, channel_identity_id) DO UPDATE
+ON CONFLICT (team_id, user_id, channel_identity_id) DO UPDATE
   SET updated_at = now()
-RETURNING id, user_id, channel_identity_id, created_at, updated_at, tenant_id
+RETURNING id, user_id, channel_identity_id, created_at, updated_at, team_id
 `
 
 type UpsertUserChannelIdentityBindingParams struct {
@@ -375,7 +375,7 @@ func (q *Queries) UpsertUserChannelIdentityBinding(ctx context.Context, arg Upse
 		&i.ChannelIdentityID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }

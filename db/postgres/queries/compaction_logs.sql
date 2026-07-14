@@ -1,7 +1,7 @@
 -- name: CreateCompactionLog :one
 INSERT INTO bot_history_message_compacts (bot_id, session_id)
 VALUES ($1, $2)
-RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, tenant_id;
+RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, team_id;
 
 -- name: CompleteCompactionLog :one
 UPDATE bot_history_message_compacts
@@ -12,29 +12,29 @@ SET status = $2,
     usage = $6,
     model_id = $7,
     completed_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $1
-RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, tenant_id;
+WHERE team_id = app.current_team_id() AND id = $1
+RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, team_id;
 
 -- name: GetCompactionLogByID :one
-SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, tenant_id
+SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, team_id
 FROM bot_history_message_compacts
-WHERE tenant_id = app.current_tenant_id() AND id = $1;
+WHERE team_id = app.current_team_id() AND id = $1;
 
 -- name: ListCompactionLogsByBot :many
-SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, tenant_id
+SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, team_id
 FROM bot_history_message_compacts
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
+WHERE team_id = app.current_team_id() AND bot_id = $1
 ORDER BY started_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: CountCompactionLogsByBot :one
-SELECT count(*) FROM bot_history_message_compacts WHERE tenant_id = app.current_tenant_id() AND bot_id = $1;
+SELECT count(*) FROM bot_history_message_compacts WHERE team_id = app.current_team_id() AND bot_id = $1;
 
 -- name: ListCompactionLogsBySession :many
-SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, tenant_id
+SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, team_id
 FROM bot_history_message_compacts
-WHERE tenant_id = app.current_tenant_id() AND session_id = $1
+WHERE team_id = app.current_team_id() AND session_id = $1
 ORDER BY started_at ASC;
 
 -- name: DeleteCompactionLogsByBot :exec
-DELETE FROM bot_history_message_compacts WHERE tenant_id = app.current_tenant_id() AND bot_id = $1;
+DELETE FROM bot_history_message_compacts WHERE team_id = app.current_team_id() AND bot_id = $1;

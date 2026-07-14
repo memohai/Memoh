@@ -65,6 +65,19 @@ func (r *graphRuntime) SetSemanticIndex(index *pgvectorIndex) {
 
 func (*graphRuntime) Mode() string { return string(ModeGraph) }
 
+func (r *graphRuntime) Close() error {
+	if r == nil {
+		return nil
+	}
+	if r.retry != nil {
+		r.retry.stop()
+	}
+	if r.semantic != nil {
+		r.semantic.Close()
+	}
+	return nil
+}
+
 func (r *graphRuntime) MemoryVersion(_ context.Context, botID string) string {
 	if r == nil || r.cache == nil {
 		return ""

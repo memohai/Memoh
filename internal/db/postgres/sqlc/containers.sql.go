@@ -12,7 +12,7 @@ import (
 )
 
 const deleteContainerByBotID = `-- name: DeleteContainerByBotID :exec
-DELETE FROM containers WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
+DELETE FROM containers WHERE team_id = app.current_team_id() AND bot_id = $1
 `
 
 func (q *Queries) DeleteContainerByBotID(ctx context.Context, botID pgtype.UUID) error {
@@ -21,7 +21,7 @@ func (q *Queries) DeleteContainerByBotID(ctx context.Context, botID pgtype.UUID)
 }
 
 const getContainerByBotID = `-- name: GetContainerByBotID :one
-SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, workspace_backend, created_at, updated_at, last_started_at, last_stopped_at, tenant_id FROM containers WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 ORDER BY updated_at DESC LIMIT 1
+SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, workspace_backend, created_at, updated_at, last_started_at, last_stopped_at, team_id FROM containers WHERE team_id = app.current_team_id() AND bot_id = $1 ORDER BY updated_at DESC LIMIT 1
 `
 
 func (q *Queries) GetContainerByBotID(ctx context.Context, botID pgtype.UUID) (Container, error) {
@@ -42,13 +42,13 @@ func (q *Queries) GetContainerByBotID(ctx context.Context, botID pgtype.UUID) (C
 		&i.UpdatedAt,
 		&i.LastStartedAt,
 		&i.LastStoppedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listAutoStartContainers = `-- name: ListAutoStartContainers :many
-SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, workspace_backend, created_at, updated_at, last_started_at, last_stopped_at, tenant_id FROM containers WHERE tenant_id = app.current_tenant_id() AND auto_start = true ORDER BY updated_at DESC
+SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, workspace_backend, created_at, updated_at, last_started_at, last_stopped_at, team_id FROM containers WHERE team_id = app.current_team_id() AND auto_start = true ORDER BY updated_at DESC
 `
 
 func (q *Queries) ListAutoStartContainers(ctx context.Context) ([]Container, error) {
@@ -75,7 +75,7 @@ func (q *Queries) ListAutoStartContainers(ctx context.Context) ([]Container, err
 			&i.UpdatedAt,
 			&i.LastStartedAt,
 			&i.LastStoppedAt,
-			&i.TenantID,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -90,7 +90,7 @@ func (q *Queries) ListAutoStartContainers(ctx context.Context) ([]Container, err
 const updateContainerStarted = `-- name: UpdateContainerStarted :exec
 UPDATE containers
 SET status = 'running', last_started_at = now(), updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
+WHERE team_id = app.current_team_id() AND bot_id = $1
 `
 
 func (q *Queries) UpdateContainerStarted(ctx context.Context, botID pgtype.UUID) error {
@@ -101,7 +101,7 @@ func (q *Queries) UpdateContainerStarted(ctx context.Context, botID pgtype.UUID)
 const updateContainerStatus = `-- name: UpdateContainerStatus :exec
 UPDATE containers
 SET status = $1, updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $2
+WHERE team_id = app.current_team_id() AND bot_id = $2
 `
 
 type UpdateContainerStatusParams struct {
@@ -117,7 +117,7 @@ func (q *Queries) UpdateContainerStatus(ctx context.Context, arg UpdateContainer
 const updateContainerStopped = `-- name: UpdateContainerStopped :exec
 UPDATE containers
 SET status = 'stopped', last_stopped_at = now(), updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
+WHERE team_id = app.current_team_id() AND bot_id = $1
 `
 
 func (q *Queries) UpdateContainerStopped(ctx context.Context, botID pgtype.UUID) error {
@@ -143,7 +143,7 @@ VALUES (
   $10,
   $11
 )
-ON CONFLICT (tenant_id, container_id) DO UPDATE SET
+ON CONFLICT (team_id, container_id) DO UPDATE SET
   bot_id = EXCLUDED.bot_id,
   container_name = EXCLUDED.container_name,
   image = EXCLUDED.image,

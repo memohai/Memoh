@@ -7,18 +7,18 @@ import (
 	"testing"
 )
 
-func TestTenantIDBackfilledOnFreshInstall(t *testing.T) {
+func TestTeamIDBackfilledOnFreshInstall(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
 
-	// Enumerate applied tenant tables.
+	// Enumerate applied team tables.
 	rows, err := pool.Query(ctx, `
 		SELECT table_name FROM information_schema.tables
 		WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-		  AND table_name NOT IN ('schema_migrations', 'tenants')
+		  AND table_name NOT IN ('schema_migrations', 'teams')
 		ORDER BY table_name`)
 	if err != nil {
-		t.Fatalf("enumerate tenant tables: %v", err)
+		t.Fatalf("enumerate team tables: %v", err)
 	}
 	var tables []string
 	for rows.Next() {
@@ -30,31 +30,31 @@ func TestTenantIDBackfilledOnFreshInstall(t *testing.T) {
 	}
 	rows.Close()
 	if len(tables) == 0 {
-		t.Fatal("expected a non-empty set of tenant tables")
+		t.Fatal("expected a non-empty set of team tables")
 	}
 
-	// Every tenant table must now have a tenant_id column, and it must be fully
-	// backfilled (zero NULLs) to DefaultTenantID.
+	// Every team table must now have a team_id column, and it must be fully
+	// backfilled (zero NULLs) to DefaultTeamID.
 	for _, tbl := range tables {
 		var hasCol bool
 		if err := pool.QueryRow(ctx, `
 			SELECT EXISTS (SELECT 1 FROM information_schema.columns
-				WHERE table_schema='public' AND table_name=$1 AND column_name='tenant_id')`, tbl,
+				WHERE table_schema='public' AND table_name=$1 AND column_name='team_id')`, tbl,
 		).Scan(&hasCol); err != nil {
-			t.Fatalf("check tenant_id on %s: %v", tbl, err)
+			t.Fatalf("check team_id on %s: %v", tbl, err)
 		}
 		if !hasCol {
-			t.Fatalf("tenant table %q is missing a tenant_id column", tbl)
+			t.Fatalf("team table %q is missing a team_id column", tbl)
 		}
 
 		var nulls int
 		if err := pool.QueryRow(ctx,
-			"SELECT count(*) FROM "+quoteIdent(tbl)+" WHERE tenant_id IS NULL",
+			"SELECT count(*) FROM "+quoteIdent(tbl)+" WHERE team_id IS NULL",
 		).Scan(&nulls); err != nil {
-			t.Fatalf("count NULL tenant_id on %s: %v", tbl, err)
+			t.Fatalf("count NULL team_id on %s: %v", tbl, err)
 		}
 		if nulls != 0 {
-			t.Fatalf("tenant table %q has %d rows with NULL tenant_id after backfill", tbl, nulls)
+			t.Fatalf("team table %q has %d rows with NULL team_id after backfill", tbl, nulls)
 		}
 	}
 

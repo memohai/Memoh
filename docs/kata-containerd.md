@@ -30,7 +30,7 @@ do not intercept private workspace addresses.
 
 For shared deployments, enable `[bridge_tls].mode = "strict"`. The default
 `disabled` mode keeps local installs simple, but it does not protect a shared
-Kata/CNI network from workspace-to-workspace bridge traffic. In a multi-tenant
+Kata/CNI network from workspace-to-workspace bridge traffic. In a multi-team
 Kata deployment, strict bridge mTLS is the required isolation layer unless your
 networking stack independently blocks workspace-to-workspace TCP access.
 

@@ -14,7 +14,7 @@ import (
 const allocateSessionTurnPosition = `-- name: AllocateSessionTurnPosition :one
 UPDATE bot_sessions
 SET next_turn_position = next_turn_position + 1
-WHERE tenant_id = app.current_tenant_id() AND id = $1
+WHERE team_id = app.current_team_id() AND id = $1
 RETURNING (next_turn_position - 1)::bigint AS position
 `
 
@@ -29,7 +29,7 @@ const appendMessageToHistoryTurnByRequest = `-- name: AppendMessageToHistoryTurn
 WITH target AS (
   SELECT request.turn_id, request.session_id, request.turn_position
   FROM bot_history_messages request
-  WHERE request.tenant_id = app.current_tenant_id() AND request.session_id = $2
+  WHERE request.team_id = app.current_team_id() AND request.session_id = $2
     AND request.id = $3
     AND request.turn_id IS NOT NULL
     AND request.turn_position IS NOT NULL
@@ -44,7 +44,7 @@ next_seq AS (
     target.turn_position,
     COALESCE(MAX(existing.turn_message_seq), 0) + 1 AS turn_message_seq
   FROM target
-  JOIN bot_history_messages existing ON existing.turn_id = target.turn_id AND existing.tenant_id = app.current_tenant_id()
+  JOIN bot_history_messages existing ON existing.turn_id = target.turn_id AND existing.team_id = app.current_team_id()
   GROUP BY target.turn_id, target.session_id, target.turn_position
 )
 UPDATE bot_history_messages m
@@ -56,7 +56,7 @@ SET turn_id = next_seq.turn_id,
     turn_superseded_at = NULL,
     turn_superseded_reason = NULL
 FROM next_seq
-WHERE m.tenant_id = app.current_tenant_id() AND m.id = $1
+WHERE m.team_id = app.current_team_id() AND m.id = $1
   AND m.session_id = next_seq.session_id
   AND m.turn_id IS NULL
 RETURNING m.id
@@ -79,7 +79,7 @@ const appendMessageToLatestHistoryTurn = `-- name: AppendMessageToLatestHistoryT
 WITH latest AS (
   SELECT visible.turn_id, visible.session_id, visible.turn_position
   FROM bot_history_messages visible
-  WHERE visible.tenant_id = app.current_tenant_id() AND visible.session_id = $2
+  WHERE visible.team_id = app.current_team_id() AND visible.session_id = $2
     AND visible.turn_id IS NOT NULL
     AND visible.turn_position IS NOT NULL
     AND visible.turn_message_seq IS NOT NULL
@@ -95,7 +95,7 @@ next_seq AS (
     latest.turn_position,
     COALESCE(MAX(existing.turn_message_seq), 0) + 1 AS turn_message_seq
   FROM latest
-  JOIN bot_history_messages existing ON existing.turn_id = latest.turn_id AND existing.tenant_id = app.current_tenant_id()
+  JOIN bot_history_messages existing ON existing.turn_id = latest.turn_id AND existing.team_id = app.current_team_id()
   GROUP BY latest.turn_id, latest.session_id, latest.turn_position
 )
 UPDATE bot_history_messages m
@@ -107,7 +107,7 @@ SET turn_id = next_seq.turn_id,
     turn_superseded_at = NULL,
     turn_superseded_reason = NULL
 FROM next_seq
-WHERE m.tenant_id = app.current_tenant_id() AND m.id = $1
+WHERE m.team_id = app.current_team_id() AND m.id = $1
   AND m.session_id = next_seq.session_id
   AND m.turn_id IS NULL
 RETURNING m.id
@@ -135,14 +135,14 @@ WITH target AS (
     request.id AS request_message_id,
     request.created_at AS request_created_at
   FROM bot_history_messages request
-  WHERE request.tenant_id = app.current_tenant_id() AND request.session_id = $1
+  WHERE request.team_id = app.current_team_id() AND request.session_id = $1
     AND request.id = $2
     AND request.turn_id IS NOT NULL
     AND request.turn_visible = true
     AND NOT EXISTS (
       SELECT 1
       FROM bot_history_messages assistant
-      WHERE assistant.tenant_id = app.current_tenant_id() AND assistant.turn_id = request.turn_id
+      WHERE assistant.team_id = app.current_team_id() AND assistant.turn_id = request.turn_id
         AND assistant.role = 'assistant'
         AND assistant.turn_message_seq = 2
         AND assistant.turn_visible = true
@@ -160,7 +160,7 @@ linked AS (
       turn_superseded_at = NULL,
       turn_superseded_reason = NULL
   FROM target
-  WHERE assistant.tenant_id = app.current_tenant_id() AND assistant.id = $3
+  WHERE assistant.team_id = app.current_team_id() AND assistant.id = $3
     AND assistant.session_id = target.session_id
   RETURNING assistant.id AS assistant_message_id, assistant.created_at AS assistant_created_at
 )
@@ -224,7 +224,7 @@ WITH target AS (
     request.id AS request_message_id,
     request.created_at AS request_created_at
   FROM bot_history_messages request
-  WHERE request.tenant_id = app.current_tenant_id() AND request.session_id = $1
+  WHERE request.team_id = app.current_team_id() AND request.session_id = $1
     AND request.role = 'user'
     AND request.turn_message_seq = 1
     AND request.turn_id IS NOT NULL
@@ -232,7 +232,7 @@ WITH target AS (
     AND NOT EXISTS (
       SELECT 1
       FROM bot_history_messages assistant
-      WHERE assistant.tenant_id = app.current_tenant_id() AND assistant.turn_id = request.turn_id
+      WHERE assistant.team_id = app.current_team_id() AND assistant.turn_id = request.turn_id
         AND assistant.role = 'assistant'
         AND assistant.turn_message_seq = 2
         AND assistant.turn_visible = true
@@ -251,7 +251,7 @@ linked AS (
       turn_superseded_at = NULL,
       turn_superseded_reason = NULL
   FROM target
-  WHERE assistant.tenant_id = app.current_tenant_id() AND assistant.id = $2
+  WHERE assistant.team_id = app.current_team_id() AND assistant.id = $2
     AND assistant.session_id = target.session_id
   RETURNING assistant.id AS assistant_message_id, assistant.created_at AS assistant_created_at
 )
@@ -306,7 +306,7 @@ func (q *Queries) BindLatestHistoryTurnAssistant(ctx context.Context, arg BindLa
 
 const countMessagesByBot = `-- name: CountMessagesByBot :one
 SELECT COUNT(*) FROM bot_visible_history_messages
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
+WHERE team_id = app.current_team_id() AND bot_id = $1
 `
 
 func (q *Queries) CountMessagesByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
@@ -320,7 +320,7 @@ const createHistoryTurn = `-- name: CreateHistoryTurn :one
 WITH next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
-  WHERE bot_sessions.tenant_id = app.current_tenant_id() AND bot_sessions.id = $1
+  WHERE bot_sessions.team_id = app.current_team_id() AND bot_sessions.id = $1
   RETURNING next_turn_position - 1 AS position
 ),
 input AS (
@@ -343,7 +343,7 @@ linked_request AS (
       turn_superseded_at = NULL,
       turn_superseded_reason = NULL
   FROM input
-  WHERE m.tenant_id = app.current_tenant_id() AND m.id = input.request_message_id
+  WHERE m.team_id = app.current_team_id() AND m.id = input.request_message_id
     AND m.session_id = input.session_id
     AND m.bot_id = input.bot_id
   RETURNING m.id, m.created_at
@@ -358,7 +358,7 @@ linked_assistant AS (
       turn_superseded_at = NULL,
       turn_superseded_reason = NULL
   FROM input
-  WHERE m.tenant_id = app.current_tenant_id() AND m.id = input.assistant_message_id
+  WHERE m.team_id = app.current_team_id() AND m.id = input.assistant_message_id
     AND m.session_id = input.session_id
     AND m.bot_id = input.bot_id
   RETURNING m.id, m.created_at
@@ -432,7 +432,7 @@ const createHistoryTurnWithID = `-- name: CreateHistoryTurnWithID :one
 WITH next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
-  WHERE bot_sessions.tenant_id = app.current_tenant_id() AND bot_sessions.id = $1
+  WHERE bot_sessions.team_id = app.current_team_id() AND bot_sessions.id = $1
   RETURNING next_turn_position - 1 AS position
 ),
 input AS (
@@ -455,7 +455,7 @@ linked_request AS (
       turn_superseded_at = NULL,
       turn_superseded_reason = NULL
   FROM input
-  WHERE m.tenant_id = app.current_tenant_id() AND m.id = input.request_message_id
+  WHERE m.team_id = app.current_team_id() AND m.id = input.request_message_id
     AND m.session_id = input.session_id
     AND m.bot_id = input.bot_id
   RETURNING m.id, m.created_at
@@ -470,7 +470,7 @@ linked_assistant AS (
       turn_superseded_at = NULL,
       turn_superseded_reason = NULL
   FROM input
-  WHERE m.tenant_id = app.current_tenant_id() AND m.id = input.assistant_message_id
+  WHERE m.team_id = app.current_team_id() AND m.id = input.assistant_message_id
     AND m.session_id = input.session_id
     AND m.bot_id = input.bot_id
   RETURNING m.id, m.created_at
@@ -562,7 +562,7 @@ linked_request AS (
       turn_superseded_at = NULL,
       turn_superseded_reason = NULL
   FROM input
-  WHERE m.tenant_id = app.current_tenant_id() AND m.id = input.request_message_id
+  WHERE m.team_id = app.current_team_id() AND m.id = input.request_message_id
     AND m.session_id = input.session_id
     AND m.bot_id = input.bot_id
   RETURNING m.id, m.created_at
@@ -577,7 +577,7 @@ linked_assistant AS (
       turn_superseded_at = NULL,
       turn_superseded_reason = NULL
   FROM input
-  WHERE m.tenant_id = app.current_tenant_id() AND m.id = input.assistant_message_id
+  WHERE m.team_id = app.current_team_id() AND m.id = input.assistant_message_id
     AND m.session_id = input.session_id
     AND m.bot_id = input.bot_id
   RETURNING m.id, m.created_at
@@ -792,7 +792,7 @@ WITH target AS (
       WHEN $1::text = 'assistant' AND NOT EXISTS (
         SELECT 1
         FROM bot_history_messages assistant
-        WHERE assistant.tenant_id = app.current_tenant_id() AND assistant.turn_id = turns.turn_id
+        WHERE assistant.team_id = app.current_team_id() AND assistant.turn_id = turns.turn_id
           AND assistant.role = 'assistant'
           AND assistant.turn_message_seq = 2
           AND assistant.turn_visible = true
@@ -800,13 +800,13 @@ WITH target AS (
       ELSE COALESCE((
         SELECT existing.turn_message_seq + 1
         FROM bot_history_messages existing
-        WHERE existing.tenant_id = app.current_tenant_id() AND existing.turn_id = turns.turn_id
+        WHERE existing.team_id = app.current_team_id() AND existing.turn_id = turns.turn_id
         ORDER BY existing.turn_message_seq DESC
         LIMIT 1
       ), 1)
     END AS turn_message_seq
   FROM bot_history_messages turns
-  WHERE turns.tenant_id = app.current_tenant_id() AND turns.session_id = $2
+  WHERE turns.team_id = app.current_team_id() AND turns.session_id = $2
     AND turns.id = $3
     AND turns.turn_id IS NOT NULL
     AND turns.turn_position IS NOT NULL
@@ -984,7 +984,7 @@ WITH target AS (
       WHEN $1::text = 'assistant' AND NOT EXISTS (
         SELECT 1
         FROM bot_history_messages assistant
-        WHERE assistant.tenant_id = app.current_tenant_id() AND assistant.turn_id = turns.turn_id
+        WHERE assistant.team_id = app.current_team_id() AND assistant.turn_id = turns.turn_id
           AND assistant.role = 'assistant'
           AND assistant.turn_message_seq = 2
           AND assistant.turn_visible = true
@@ -992,13 +992,13 @@ WITH target AS (
       ELSE COALESCE((
         SELECT existing.turn_message_seq + 1
         FROM bot_history_messages existing
-        WHERE existing.tenant_id = app.current_tenant_id() AND existing.turn_id = turns.turn_id
+        WHERE existing.team_id = app.current_team_id() AND existing.turn_id = turns.turn_id
         ORDER BY existing.turn_message_seq DESC
         LIMIT 1
       ), 1)
     END AS turn_message_seq
   FROM bot_history_messages turns
-  WHERE turns.tenant_id = app.current_tenant_id() AND turns.session_id = $2
+  WHERE turns.team_id = app.current_team_id() AND turns.session_id = $2
     AND turns.id = $3
     AND turns.turn_id IS NOT NULL
     AND turns.turn_position IS NOT NULL
@@ -1113,7 +1113,7 @@ const createMessageWithHistoryTurn = `-- name: CreateMessageWithHistoryTurn :one
 WITH next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
-  WHERE bot_sessions.tenant_id = app.current_tenant_id() AND bot_sessions.id = $1
+  WHERE bot_sessions.team_id = app.current_team_id() AND bot_sessions.id = $1
   RETURNING (next_turn_position - 1)::bigint AS position
 ),
 inserted_message AS (
@@ -1231,7 +1231,7 @@ WITH target AS (
     existing.turn_position,
     bool_or(existing.turn_visible) AS turn_visible
   FROM bot_history_messages existing
-  WHERE existing.tenant_id = app.current_tenant_id() AND existing.turn_id = $17
+  WHERE existing.team_id = app.current_team_id() AND existing.turn_id = $17
     AND existing.session_id = $18::uuid
     AND existing.bot_id = $2
     AND existing.turn_position IS NOT NULL
@@ -1475,7 +1475,7 @@ WITH input_rows(
 next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
-  WHERE bot_sessions.tenant_id = app.current_tenant_id() AND bot_sessions.id = $53
+  WHERE bot_sessions.team_id = app.current_team_id() AND bot_sessions.id = $53
   RETURNING (next_turn_position - 1)::bigint AS position
 ),
 inserted_messages AS (
@@ -1671,7 +1671,7 @@ func (q *Queries) CreateToolTailRound(ctx context.Context, arg CreateToolTailRou
 
 const deleteMessagesByBot = `-- name: DeleteMessagesByBot :exec
 DELETE FROM bot_history_messages
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
+WHERE team_id = app.current_team_id() AND bot_id = $1
 `
 
 func (q *Queries) DeleteMessagesByBot(ctx context.Context, botID pgtype.UUID) error {
@@ -1681,7 +1681,7 @@ func (q *Queries) DeleteMessagesByBot(ctx context.Context, botID pgtype.UUID) er
 
 const deleteMessagesByIDs = `-- name: DeleteMessagesByIDs :exec
 DELETE FROM bot_history_messages
-WHERE tenant_id = app.current_tenant_id() AND id = ANY($1::uuid[])
+WHERE team_id = app.current_team_id() AND id = ANY($1::uuid[])
 `
 
 func (q *Queries) DeleteMessagesByIDs(ctx context.Context, ids []pgtype.UUID) error {
@@ -1691,7 +1691,7 @@ func (q *Queries) DeleteMessagesByIDs(ctx context.Context, ids []pgtype.UUID) er
 
 const deleteMessagesBySession = `-- name: DeleteMessagesBySession :exec
 DELETE FROM bot_history_messages
-WHERE tenant_id = app.current_tenant_id() AND session_id = $1
+WHERE team_id = app.current_team_id() AND session_id = $1
 `
 
 func (q *Queries) DeleteMessagesBySession(ctx context.Context, sessionID pgtype.UUID) error {
@@ -1703,7 +1703,7 @@ const getHistoryTurnByID = `-- name: GetHistoryTurnByID :one
 WITH target AS (
   SELECT m.turn_id, m.session_id, m.turn_position
   FROM bot_history_messages m
-  WHERE m.tenant_id = app.current_tenant_id() AND m.turn_id = $1
+  WHERE m.team_id = app.current_team_id() AND m.turn_id = $1
     AND m.session_id = $2
     AND m.turn_position IS NOT NULL
     AND m.turn_visible = true
@@ -1723,7 +1723,7 @@ SELECT
   COALESCE(MAX(m.turn_superseded_at), MAX(m.created_at))::timestamptz AS updated_at
 FROM target
 JOIN bot_history_messages m
-  ON m.tenant_id = app.current_tenant_id()
+  ON m.team_id = app.current_team_id()
  AND m.turn_id = target.turn_id
  AND m.session_id = target.session_id
 GROUP BY target.turn_id, target.session_id, target.turn_position
@@ -1771,7 +1771,7 @@ const getLatestVisibleHistoryTurnBySession = `-- name: GetLatestVisibleHistoryTu
 WITH target AS (
   SELECT m.turn_id, m.session_id, m.turn_position
   FROM bot_history_messages m
-  WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+  WHERE m.team_id = app.current_team_id() AND m.session_id = $1
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
     AND m.turn_visible = true
@@ -1792,7 +1792,7 @@ SELECT
   COALESCE(MAX(m.turn_superseded_at), MAX(m.created_at))::timestamptz AS updated_at
 FROM target
 JOIN bot_history_messages m
-  ON m.tenant_id = app.current_tenant_id()
+  ON m.team_id = app.current_team_id()
  AND m.turn_id = target.turn_id
  AND m.session_id = target.session_id
 GROUP BY target.turn_id, target.session_id, target.turn_position
@@ -1855,9 +1855,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -1947,9 +1947,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -2035,9 +2035,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.id = $2
 LIMIT 1
@@ -2101,7 +2101,7 @@ const getVisibleHistoryTurnByMessage = `-- name: GetVisibleHistoryTurnByMessage 
 WITH target AS (
   SELECT m.turn_id, m.session_id, m.turn_position
   FROM bot_history_messages m
-  WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+  WHERE m.team_id = app.current_team_id() AND m.session_id = $1
     AND m.id = $2
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
@@ -2122,7 +2122,7 @@ SELECT
   COALESCE(MAX(m.turn_superseded_at), MAX(m.created_at))::timestamptz AS updated_at
 FROM target
 JOIN bot_history_messages m
-  ON m.tenant_id = app.current_tenant_id()
+  ON m.team_id = app.current_team_id()
  AND m.turn_id = target.turn_id
  AND m.session_id = target.session_id
 GROUP BY target.turn_id, target.session_id, target.turn_position
@@ -2173,7 +2173,7 @@ SELECT
   m.turn_message_seq,
   m.created_at
 FROM bot_history_messages m
-WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+WHERE m.team_id = app.current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -2214,7 +2214,7 @@ SELECT
   m.turn_message_seq,
   m.created_at
 FROM bot_history_messages m
-WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+WHERE m.team_id = app.current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -2250,7 +2250,7 @@ func (q *Queries) GetVisibleMessageCursorByIDBySession(ctx context.Context, arg 
 const hideMessagesByHistoryTurn = `-- name: HideMessagesByHistoryTurn :exec
 UPDATE bot_history_messages
 SET turn_visible = false
-WHERE tenant_id = app.current_tenant_id() AND turn_id = $1
+WHERE team_id = app.current_team_id() AND turn_id = $1
 `
 
 func (q *Queries) HideMessagesByHistoryTurn(ctx context.Context, turnID pgtype.UUID) error {
@@ -2266,7 +2266,7 @@ WITH target AS (
     existing.turn_position,
     bool_or(existing.turn_visible) AS turn_visible
   FROM bot_history_messages existing
-  WHERE existing.tenant_id = app.current_tenant_id() AND existing.turn_id = $3
+  WHERE existing.team_id = app.current_team_id() AND existing.turn_id = $3
     AND existing.turn_position IS NOT NULL
   GROUP BY existing.turn_id, existing.session_id, existing.turn_position
   LIMIT 1
@@ -2280,7 +2280,7 @@ SET turn_id = target.turn_id,
     turn_superseded_at = NULL,
     turn_superseded_reason = NULL
 FROM target
-WHERE m.tenant_id = app.current_tenant_id() AND m.id = $2
+WHERE m.team_id = app.current_team_id() AND m.id = $2
   AND m.session_id = target.session_id
 RETURNING m.id
 `
@@ -2307,7 +2307,7 @@ WITH target AS (
     assistant.created_at AS assistant_created_at,
     assistant.id AS assistant_id
   FROM bot_history_messages assistant
-  WHERE assistant.tenant_id = app.current_tenant_id() AND assistant.turn_id = $1
+  WHERE assistant.team_id = app.current_team_id() AND assistant.turn_id = $1
     AND assistant.role = 'assistant'
     AND assistant.turn_message_seq = 2
     AND assistant.turn_visible = true
@@ -2323,7 +2323,7 @@ tail AS (
   JOIN bot_history_messages m
     ON m.session_id = target.session_id
    AND m.role IN ('assistant', 'tool')
-  WHERE m.tenant_id = app.current_tenant_id() AND m.id <> target.assistant_id
+  WHERE m.team_id = app.current_team_id() AND m.id <> target.assistant_id
     AND m.turn_id IS NULL
     AND (m.created_at, m.id) > (target.assistant_created_at, target.assistant_id)
 )
@@ -2333,7 +2333,7 @@ SET turn_id = tail.turn_id,
     turn_visible = true,
     turn_message_seq = tail.turn_message_seq
 FROM tail
-WHERE m.tenant_id = app.current_tenant_id() AND m.id = tail.message_id
+WHERE m.team_id = app.current_team_id() AND m.id = tail.message_id
 `
 
 func (q *Queries) LinkUnassignedMessagesAfterHistoryTurnAssistant(ctx context.Context, turnID pgtype.UUID) error {
@@ -2364,9 +2364,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id()
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id()
   AND m.bot_id = $1
   AND m.created_at >= $2
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
@@ -2465,9 +2465,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id()
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id()
   AND m.session_id = $1
   AND m.created_at >= $2
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
@@ -2572,9 +2572,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id() AND m.bot_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id() AND m.bot_id = $1
 ORDER BY m.created_at ASC, m.id ASC
 `
 
@@ -2668,7 +2668,7 @@ SELECT
   MIN(m.created_at)::timestamptz AS created_at,
   COALESCE(MAX(m.turn_superseded_at), MAX(m.created_at))::timestamptz AS updated_at
 FROM bot_history_messages m
-WHERE m.tenant_id = app.current_tenant_id() AND m.bot_id = $1
+WHERE m.team_id = app.current_team_id() AND m.bot_id = $1
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
   AND m.session_id IS NOT NULL
@@ -2744,9 +2744,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id()
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id()
   AND m.bot_id = $1
 ORDER BY m.created_at ASC, m.id ASC
 LIMIT 10000
@@ -2836,9 +2836,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -2938,9 +2938,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -3056,9 +3056,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -3067,7 +3067,7 @@ WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
     > (
       SELECT c.turn_position, c.turn_message_seq, c.created_at, c.id
       FROM bot_history_messages c
-      WHERE c.tenant_id = app.current_tenant_id() AND c.session_id = $1
+      WHERE c.team_id = app.current_team_id() AND c.session_id = $1
         AND c.turn_visible = true
         AND c.turn_id IS NOT NULL
         AND c.turn_position IS NOT NULL
@@ -3169,9 +3169,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id()
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id()
   AND m.bot_id = $1
   AND m.created_at < $2
 ORDER BY m.created_at DESC, m.id DESC
@@ -3268,9 +3268,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -3370,9 +3370,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -3488,9 +3488,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -3499,7 +3499,7 @@ WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
     < (
       SELECT c.turn_position, c.turn_message_seq, c.created_at, c.id
       FROM bot_history_messages c
-      WHERE c.tenant_id = app.current_tenant_id() AND c.session_id = $1
+      WHERE c.team_id = app.current_team_id() AND c.session_id = $1
         AND c.turn_visible = true
         AND c.turn_id IS NOT NULL
         AND c.turn_position IS NOT NULL
@@ -3601,9 +3601,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id()
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id()
   AND m.session_id = $1
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 LIMIT 10000
@@ -3693,9 +3693,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id()
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id()
   AND m.bot_id = $1
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT $2
@@ -3790,9 +3790,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -3886,9 +3886,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -3978,9 +3978,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id()
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id()
   AND m.bot_id = $1
   AND m.created_at >= $2
 ORDER BY m.created_at ASC, m.id ASC
@@ -4075,9 +4075,9 @@ SELECT
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id()
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id()
   AND m.session_id = $1
   AND m.created_at >= $2
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
@@ -4156,8 +4156,8 @@ WITH observed_routes AS (
     s.route_id,
     MAX(m.created_at)::timestamptz AS last_observed_at
   FROM bot_visible_history_messages m
-  JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-  WHERE m.tenant_id = app.current_tenant_id()
+  JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+  WHERE m.team_id = app.current_team_id()
     AND m.bot_id = $1
     AND m.sender_channel_identity_id = $2::uuid
     AND s.route_id IS NOT NULL
@@ -4181,7 +4181,7 @@ SELECT
   COALESCE(NULLIF(TRIM(COALESCE(r.metadata->>'conversation_avatar_url', '')), ''), '')::text AS conversation_avatar_url,
   rr.last_observed_at
 FROM observed_routes rr
-JOIN bot_channel_routes r ON r.id = rr.route_id AND r.tenant_id = app.current_tenant_id()
+JOIN bot_channel_routes r ON r.id = rr.route_id AND r.team_id = app.current_team_id()
 GROUP BY
   r.id,
   r.channel_type,
@@ -4244,9 +4244,9 @@ WITH observed_routes AS (
     s.route_id,
     MAX(m.created_at)::timestamptz AS last_observed_at
   FROM bot_visible_history_messages m
-  JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-  JOIN bot_channel_routes r ON r.id = s.route_id AND r.tenant_id = app.current_tenant_id()
-  WHERE m.tenant_id = app.current_tenant_id()
+  JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+  JOIN bot_channel_routes r ON r.id = s.route_id AND r.team_id = app.current_team_id()
+  WHERE m.team_id = app.current_team_id()
     AND m.bot_id = $1
     AND LOWER(TRIM(r.channel_type)) = LOWER(TRIM($2))
     AND s.route_id IS NOT NULL
@@ -4270,7 +4270,7 @@ SELECT
   COALESCE(NULLIF(TRIM(COALESCE(r.metadata->>'conversation_avatar_url', '')), ''), '')::text AS conversation_avatar_url,
   rr.last_observed_at
 FROM observed_routes rr
-JOIN bot_channel_routes r ON r.id = rr.route_id AND r.tenant_id = app.current_tenant_id()
+JOIN bot_channel_routes r ON r.id = rr.route_id AND r.team_id = app.current_team_id()
 GROUP BY
   r.id,
   r.channel_type,
@@ -4358,14 +4358,14 @@ SELECT
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci
   ON ci.id = m.sender_channel_identity_id
- AND ci.tenant_id = app.current_tenant_id()
+ AND ci.team_id = app.current_team_id()
 LEFT JOIN bot_sessions s
   ON s.id = m.session_id
- AND s.tenant_id = app.current_tenant_id()
+ AND s.team_id = app.current_team_id()
 LEFT JOIN bot_channel_routes r
   ON r.id = s.route_id
- AND r.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id()
+ AND r.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id()
   AND m.session_id = $1
   -- Rows stay eligible unless their compact log holds a usable summary,
   -- matching the read path's substitution predicate (status ok AND non-blank
@@ -4374,7 +4374,7 @@ WHERE m.tenant_id = app.current_tenant_id()
   -- empty or whitespace-only (the pre-existing poison states).
   AND (m.compact_id IS NULL OR NOT EXISTS (
     SELECT 1 FROM bot_history_message_compacts c
-    WHERE c.tenant_id = app.current_tenant_id()
+    WHERE c.team_id = app.current_team_id()
       AND c.id = m.compact_id AND c.status = 'ok'
       AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL
   ))
@@ -4452,7 +4452,7 @@ const listVisibleMessagesFromBySession = `-- name: ListVisibleMessagesFromBySess
 WITH cursor_message AS (
   SELECT m.turn_position
   FROM bot_history_messages m
-  WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+  WHERE m.team_id = app.current_team_id() AND m.session_id = $1
     AND m.turn_visible = true
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
@@ -4482,9 +4482,9 @@ SELECT
   s.channel_type AS platform
 FROM bot_history_messages m
 CROSS JOIN cursor_message cursor
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
@@ -4570,7 +4570,7 @@ WITH target AS (
     m.turn_message_seq,
     m.created_at
   FROM bot_history_messages m
-  WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+  WHERE m.team_id = app.current_team_id() AND m.session_id = $1
     AND m.turn_visible = true
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
@@ -4583,7 +4583,7 @@ before_rows AS (
   SELECT m.id
   FROM bot_history_messages m
   CROSS JOIN target
-  WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+  WHERE m.team_id = app.current_team_id() AND m.session_id = $1
     AND m.turn_visible = true
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
@@ -4597,7 +4597,7 @@ after_rows AS (
   SELECT m.id
   FROM bot_history_messages m
   CROSS JOIN target
-  WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+  WHERE m.team_id = app.current_team_id() AND m.session_id = $1
     AND m.turn_visible = true
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
@@ -4639,9 +4639,9 @@ SELECT
 FROM window_rows w
 CROSS JOIN target
 JOIN bot_history_messages m ON m.id = w.id
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 `
@@ -4727,7 +4727,7 @@ func (q *Queries) LocateMessagesWindowByExternalIDBySession(ctx context.Context,
 const lockHistoryTurnAppendByRequest = `-- name: LockHistoryTurnAppendByRequest :exec
 SELECT pg_advisory_xact_lock(hashtextextended(m.turn_id::text, 0))
 FROM bot_history_messages m
-WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $1
+WHERE m.team_id = app.current_team_id() AND m.session_id = $1
   AND m.id = $2
   AND m.turn_id IS NOT NULL
 LIMIT 1
@@ -4746,7 +4746,7 @@ func (q *Queries) LockHistoryTurnAppendByRequest(ctx context.Context, arg LockHi
 const markMessagesCompacted = `-- name: MarkMessagesCompacted :exec
 UPDATE bot_history_messages
 SET compact_id = $1
-WHERE tenant_id = app.current_tenant_id() AND id = ANY($2::uuid[])
+WHERE team_id = app.current_team_id() AND id = ANY($2::uuid[])
 `
 
 type MarkMessagesCompactedParams struct {
@@ -4763,7 +4763,7 @@ const replaceHistoryTurn = `-- name: ReplaceHistoryTurn :one
 WITH old_turn_target AS (
   SELECT m.turn_id, m.session_id, m.turn_position
   FROM bot_history_messages m
-  WHERE m.tenant_id = app.current_tenant_id() AND m.turn_id = $1
+  WHERE m.team_id = app.current_team_id() AND m.turn_id = $1
     AND m.session_id = $2
     AND m.turn_position IS NOT NULL
     AND m.turn_visible = true
@@ -4784,7 +4784,7 @@ old_turn AS (
     MAX(m.created_at)::timestamptz AS updated_at
   FROM old_turn_target
   JOIN bot_history_messages m
-    ON m.tenant_id = app.current_tenant_id()
+    ON m.team_id = app.current_team_id()
    AND m.turn_id = old_turn_target.turn_id
    AND m.session_id = old_turn_target.session_id
   GROUP BY old_turn_target.turn_id, old_turn_target.session_id, old_turn_target.turn_position
@@ -4793,7 +4793,7 @@ old_lock AS (
   SELECT m.id
   FROM bot_history_messages m
   JOIN old_turn ON old_turn.id = m.turn_id
-  WHERE m.tenant_id = app.current_tenant_id()
+  WHERE m.team_id = app.current_team_id()
   FOR UPDATE
 ),
 old_lock_guard AS (
@@ -4802,7 +4802,7 @@ old_lock_guard AS (
 latest_turn AS (
   SELECT m.turn_id AS id
   FROM bot_history_messages m
-  WHERE m.tenant_id = app.current_tenant_id() AND m.session_id = $2
+  WHERE m.team_id = app.current_team_id() AND m.session_id = $2
     AND m.turn_id IS NOT NULL
     AND m.turn_position IS NOT NULL
     AND m.turn_visible = true
@@ -4822,7 +4822,7 @@ replacement_input AS (
       OR EXISTS (
         SELECT 1
         FROM bot_history_messages request_message
-        WHERE request_message.tenant_id = app.current_tenant_id() AND request_message.id = $3::uuid
+        WHERE request_message.team_id = app.current_team_id() AND request_message.id = $3::uuid
           AND request_message.session_id = old_turn.session_id
           AND request_message.role = 'user'
           AND (
@@ -4837,7 +4837,7 @@ replacement_input AS (
       OR EXISTS (
         SELECT 1
         FROM bot_history_messages assistant_message
-        WHERE assistant_message.tenant_id = app.current_tenant_id() AND assistant_message.id = $4::uuid
+        WHERE assistant_message.team_id = app.current_team_id() AND assistant_message.id = $4::uuid
           AND assistant_message.session_id = old_turn.session_id
           AND assistant_message.role = 'assistant'
           AND assistant_message.turn_id IS NULL
@@ -4849,7 +4849,7 @@ next_position AS (
   UPDATE bot_sessions s
   SET next_turn_position = next_turn_position + 1
   FROM replacement_input
-  WHERE s.tenant_id = app.current_tenant_id() AND s.id = replacement_input.session_id
+  WHERE s.team_id = app.current_team_id() AND s.id = replacement_input.session_id
   RETURNING s.next_turn_position - 1 AS position
 ),
 replacement AS (
@@ -4875,7 +4875,7 @@ updated AS (
       turn_superseded_reason = $6,
       turn_visible = false
   FROM replacement
-  WHERE old.tenant_id = app.current_tenant_id() AND old.turn_id = $1
+  WHERE old.team_id = app.current_team_id() AND old.turn_id = $1
     AND old.session_id = $2
     AND old.turn_superseded_at IS NULL
     AND old.id IS DISTINCT FROM replacement.request_message_id
@@ -4889,7 +4889,7 @@ hidden_old_messages AS (
   UPDATE bot_history_messages m
   SET turn_visible = false
   FROM updated_turn, replacement
-  WHERE m.tenant_id = app.current_tenant_id() AND m.turn_id = updated_turn.id
+  WHERE m.team_id = app.current_team_id() AND m.turn_id = updated_turn.id
     AND m.id IS DISTINCT FROM replacement.request_message_id
     AND m.id IS DISTINCT FROM replacement.assistant_message_id
   RETURNING m.id
@@ -4913,7 +4913,7 @@ linked_anchors AS (
   FROM replacement
   CROSS JOIN hidden_done
   JOIN updated_turn ON true
-  WHERE m.tenant_id = app.current_tenant_id()
+  WHERE m.team_id = app.current_team_id()
   AND (
     (
       m.id = replacement.request_message_id
@@ -4947,15 +4947,15 @@ linked_tail AS (
       replacement.position AS turn_position,
       2 + ROW_NUMBER() OVER (ORDER BY m.created_at, m.id) AS turn_message_seq
     FROM replacement
-    JOIN bot_history_messages assistant ON assistant.id = replacement.assistant_message_id AND assistant.tenant_id = app.current_tenant_id()
+    JOIN bot_history_messages assistant ON assistant.id = replacement.assistant_message_id AND assistant.team_id = app.current_team_id()
     JOIN bot_history_messages m
       ON m.session_id = replacement.session_id
      AND m.role IN ('assistant', 'tool')
-    WHERE m.tenant_id = app.current_tenant_id() AND m.id <> replacement.assistant_message_id
+    WHERE m.team_id = app.current_team_id() AND m.id <> replacement.assistant_message_id
       AND m.turn_id IS NULL
       AND (m.created_at, m.id) > (assistant.created_at, assistant.id)
   ) tail
-  WHERE m.tenant_id = app.current_tenant_id() AND m.id = tail.message_id
+  WHERE m.team_id = app.current_team_id() AND m.id = tail.message_id
   RETURNING m.id
 ),
 linked_anchors_done AS (
@@ -5035,9 +5035,9 @@ SELECT
   ci.display_name AS sender_display_name,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.tenant_id = app.current_tenant_id()
-WHERE m.tenant_id = app.current_tenant_id()
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = app.current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = app.current_team_id()
+WHERE m.team_id = app.current_team_id()
   AND m.bot_id = $1
   AND ($2::uuid IS NULL OR m.session_id = $2::uuid)
   AND ($3::uuid IS NULL OR m.sender_channel_identity_id = $3::uuid)
@@ -5128,7 +5128,7 @@ WITH updated AS (
       turn_superseded_at = $2,
       turn_superseded_reason = $3,
       turn_visible = false
-  WHERE m.tenant_id = app.current_tenant_id() AND m.turn_id = $4
+  WHERE m.team_id = app.current_team_id() AND m.turn_id = $4
     AND m.session_id = $5
     AND m.turn_superseded_at IS NULL
   RETURNING

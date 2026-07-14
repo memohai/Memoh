@@ -1,11 +1,11 @@
 -- name: ListMemoryProviders :many
-SELECT * FROM memory_providers WHERE tenant_id = app.current_tenant_id() ORDER BY created_at ASC;
+SELECT * FROM memory_providers WHERE team_id = app.current_team_id() ORDER BY created_at ASC;
 
 -- name: GetMemoryProviderByID :one
-SELECT * FROM memory_providers WHERE tenant_id = app.current_tenant_id() AND id = $1;
+SELECT * FROM memory_providers WHERE team_id = app.current_team_id() AND id = $1;
 
 -- name: GetDefaultMemoryProvider :one
-SELECT * FROM memory_providers WHERE tenant_id = app.current_tenant_id() AND is_default = true LIMIT 1;
+SELECT * FROM memory_providers WHERE team_id = app.current_team_id() AND is_default = true LIMIT 1;
 
 -- name: CreateMemoryProvider :one
 INSERT INTO memory_providers (name, provider, config, is_default)
@@ -17,11 +17,11 @@ UPDATE memory_providers
 SET name = $2,
     config = $3,
     updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $1
+WHERE team_id = app.current_team_id() AND id = $1
 RETURNING *;
 
 -- name: DeleteMemoryProvider :exec
-DELETE FROM memory_providers WHERE tenant_id = app.current_tenant_id() AND id = $1;
+DELETE FROM memory_providers WHERE team_id = app.current_team_id() AND id = $1;
 
 -- name: CountMemoryProvidersByDefault :one
-SELECT COUNT(*) FROM memory_providers WHERE tenant_id = app.current_tenant_id() AND is_default = true;
+SELECT COUNT(*) FROM memory_providers WHERE team_id = app.current_team_id() AND is_default = true;

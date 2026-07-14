@@ -13,7 +13,7 @@ import (
 
 const deleteBotChannelAdmin = `-- name: DeleteBotChannelAdmin :exec
 DELETE FROM bot_channel_admins
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND channel_identity_id = $2
+WHERE team_id = app.current_team_id() AND bot_id = $1 AND channel_identity_id = $2
 `
 
 type DeleteBotChannelAdminParams struct {
@@ -27,9 +27,9 @@ func (q *Queries) DeleteBotChannelAdmin(ctx context.Context, arg DeleteBotChanne
 }
 
 const getBotChannelAdmin = `-- name: GetBotChannelAdmin :one
-SELECT id, bot_id, channel_identity_id, granted, created_by_user_id, created_at, updated_at, tenant_id
+SELECT id, bot_id, channel_identity_id, granted, created_by_user_id, created_at, updated_at, team_id
 FROM bot_channel_admins
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND channel_identity_id = $2
+WHERE team_id = app.current_team_id() AND bot_id = $1 AND channel_identity_id = $2
 `
 
 type GetBotChannelAdminParams struct {
@@ -48,7 +48,7 @@ func (q *Queries) GetBotChannelAdmin(ctx context.Context, arg GetBotChannelAdmin
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -67,8 +67,8 @@ SELECT
   ci.display_name AS channel_identity_display_name,
   ci.avatar_url AS channel_identity_avatar_url
 FROM bot_channel_admins a
-LEFT JOIN channel_identities ci ON ci.id = a.channel_identity_id AND ci.tenant_id = app.current_tenant_id()
-WHERE a.tenant_id = app.current_tenant_id() AND a.bot_id = $1
+LEFT JOIN channel_identities ci ON ci.id = a.channel_identity_id AND ci.team_id = app.current_team_id()
+WHERE a.team_id = app.current_team_id() AND a.bot_id = $1
 ORDER BY a.created_at DESC
 `
 
@@ -131,10 +131,10 @@ VALUES (
   $3,
   $4::uuid
 )
-ON CONFLICT (tenant_id, bot_id, channel_identity_id) DO UPDATE
+ON CONFLICT (team_id, bot_id, channel_identity_id) DO UPDATE
   SET granted = EXCLUDED.granted,
       updated_at = now()
-RETURNING id, bot_id, channel_identity_id, granted, created_by_user_id, created_at, updated_at, tenant_id
+RETURNING id, bot_id, channel_identity_id, granted, created_by_user_id, created_at, updated_at, team_id
 `
 
 type UpsertBotChannelAdminParams struct {
@@ -160,7 +160,7 @@ func (q *Queries) UpsertBotChannelAdmin(ctx context.Context, arg UpsertBotChanne
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }

@@ -36,11 +36,13 @@ type semanticRetryEntry struct {
 // mean the semantic seed index is temporarily behind — never that a write was
 // lost. Deduped by (botID, nodeID): the newest body/hash wins.
 type semanticRetryQueue struct {
-	mu      sync.Mutex
-	pending map[string]semanticRetryEntry
-	order   []string // FIFO keys for capacity eviction
-	started bool
-	logger  *slog.Logger
+	mu       sync.Mutex
+	pending  map[string]semanticRetryEntry
+	order    []string // FIFO keys for capacity eviction
+	started  bool
+	stopCh   chan struct{}
+	stopOnce sync.Once
+	logger   *slog.Logger
 }
 
 func newSemanticRetryQueue(logger *slog.Logger) *semanticRetryQueue {
@@ -49,6 +51,7 @@ func newSemanticRetryQueue(logger *slog.Logger) *semanticRetryQueue {
 	}
 	return &semanticRetryQueue{
 		pending: map[string]semanticRetryEntry{},
+		stopCh:  make(chan struct{}),
 		logger:  logger,
 	}
 }
@@ -177,11 +180,23 @@ func (q *semanticRetryQueue) start(index semanticUpserter) {
 	go func() {
 		ticker := time.NewTicker(semanticRetryInterval)
 		defer ticker.Stop()
-		for range ticker.C {
-			if q.depth("") == 0 {
-				continue
+		for {
+			select {
+			case <-ticker.C:
+				if q.depth("") == 0 {
+					continue
+				}
+				q.flush(context.Background(), index)
+			case <-q.stopCh:
+				return
 			}
-			q.flush(context.Background(), index)
 		}
 	}()
+}
+
+func (q *semanticRetryQueue) stop() {
+	if q == nil {
+		return
+	}
+	q.stopOnce.Do(func() { close(q.stopCh) })
 }

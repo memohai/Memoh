@@ -19,7 +19,7 @@ VALUES (
   $3,
   $4
 )
-RETURNING id, name, provider, config, enable, created_at, updated_at, tenant_id
+RETURNING id, name, provider, config, enable, created_at, updated_at, team_id
 `
 
 type CreateSearchProviderParams struct {
@@ -45,13 +45,13 @@ func (q *Queries) CreateSearchProvider(ctx context.Context, arg CreateSearchProv
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const deleteSearchProvider = `-- name: DeleteSearchProvider :exec
-DELETE FROM search_providers WHERE tenant_id = app.current_tenant_id() AND id = $1
+DELETE FROM search_providers WHERE team_id = app.current_team_id() AND id = $1
 `
 
 func (q *Queries) DeleteSearchProvider(ctx context.Context, id pgtype.UUID) error {
@@ -60,7 +60,7 @@ func (q *Queries) DeleteSearchProvider(ctx context.Context, id pgtype.UUID) erro
 }
 
 const getSearchProviderByID = `-- name: GetSearchProviderByID :one
-SELECT id, name, provider, config, enable, created_at, updated_at, tenant_id FROM search_providers WHERE tenant_id = app.current_tenant_id() AND id = $1
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM search_providers WHERE team_id = app.current_team_id() AND id = $1
 `
 
 func (q *Queries) GetSearchProviderByID(ctx context.Context, id pgtype.UUID) (SearchProvider, error) {
@@ -74,13 +74,13 @@ func (q *Queries) GetSearchProviderByID(ctx context.Context, id pgtype.UUID) (Se
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getSearchProviderByName = `-- name: GetSearchProviderByName :one
-SELECT id, name, provider, config, enable, created_at, updated_at, tenant_id FROM search_providers WHERE tenant_id = app.current_tenant_id() AND name = $1
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM search_providers WHERE team_id = app.current_team_id() AND name = $1
 `
 
 func (q *Queries) GetSearchProviderByName(ctx context.Context, name string) (SearchProvider, error) {
@@ -94,14 +94,14 @@ func (q *Queries) GetSearchProviderByName(ctx context.Context, name string) (Sea
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listSearchProviders = `-- name: ListSearchProviders :many
-SELECT id, name, provider, config, enable, created_at, updated_at, tenant_id FROM search_providers
-WHERE tenant_id = app.current_tenant_id()
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM search_providers
+WHERE team_id = app.current_team_id()
 ORDER BY created_at DESC
 `
 
@@ -122,7 +122,7 @@ func (q *Queries) ListSearchProviders(ctx context.Context) ([]SearchProvider, er
 			&i.Enable,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TenantID,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -135,8 +135,8 @@ func (q *Queries) ListSearchProviders(ctx context.Context) ([]SearchProvider, er
 }
 
 const listSearchProvidersByProvider = `-- name: ListSearchProvidersByProvider :many
-SELECT id, name, provider, config, enable, created_at, updated_at, tenant_id FROM search_providers
-WHERE tenant_id = app.current_tenant_id() AND provider = $1
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM search_providers
+WHERE team_id = app.current_team_id() AND provider = $1
 ORDER BY created_at DESC
 `
 
@@ -157,7 +157,7 @@ func (q *Queries) ListSearchProvidersByProvider(ctx context.Context, provider st
 			&i.Enable,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TenantID,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -177,8 +177,8 @@ SET
   config = $3,
   enable = $4,
   updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $5
-RETURNING id, name, provider, config, enable, created_at, updated_at, tenant_id
+WHERE team_id = app.current_team_id() AND id = $5
+RETURNING id, name, provider, config, enable, created_at, updated_at, team_id
 `
 
 type UpdateSearchProviderParams struct {
@@ -206,7 +206,7 @@ func (q *Queries) UpdateSearchProvider(ctx context.Context, arg UpdateSearchProv
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }

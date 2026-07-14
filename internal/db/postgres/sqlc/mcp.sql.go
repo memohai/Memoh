@@ -15,7 +15,7 @@ const createMCPConnection = `-- name: CreateMCPConnection :one
 INSERT INTO mcp_connections (bot_id, name, type, config, is_active, auth_type)
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, tenant_id
+          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, team_id
 `
 
 type CreateMCPConnectionParams struct {
@@ -55,7 +55,7 @@ func (q *Queries) CreateMCPConnection(ctx context.Context, arg CreateMCPConnecti
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -67,7 +67,7 @@ INSERT INTO mcp_connections (
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, tenant_id
+          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, team_id
 `
 
 type CreateManagedMCPConnectionParams struct {
@@ -115,14 +115,14 @@ func (q *Queries) CreateManagedMCPConnection(ctx context.Context, arg CreateMana
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const deleteMCPConnection = `-- name: DeleteMCPConnection :exec
 DELETE FROM mcp_connections
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND id = $2
+WHERE team_id = app.current_team_id() AND bot_id = $1 AND id = $2
 `
 
 type DeleteMCPConnectionParams struct {
@@ -137,7 +137,7 @@ func (q *Queries) DeleteMCPConnection(ctx context.Context, arg DeleteMCPConnecti
 
 const deleteMCPConnectionsByPlugin = `-- name: DeleteMCPConnectionsByPlugin :exec
 DELETE FROM mcp_connections
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND managed_by_plugin_installation_id = $2
+WHERE team_id = app.current_team_id() AND bot_id = $1 AND managed_by_plugin_installation_id = $2
 `
 
 type DeleteMCPConnectionsByPluginParams struct {
@@ -152,9 +152,9 @@ func (q *Queries) DeleteMCPConnectionsByPlugin(ctx context.Context, arg DeleteMC
 
 const getMCPConnectionByID = `-- name: GetMCPConnectionByID :one
 SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-       managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, tenant_id
+       managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, team_id
 FROM mcp_connections
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND id = $2
+WHERE team_id = app.current_team_id() AND bot_id = $1 AND id = $2
 LIMIT 1
 `
 
@@ -184,16 +184,16 @@ func (q *Queries) GetMCPConnectionByID(ctx context.Context, arg GetMCPConnection
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listMCPConnectionsByBotID = `-- name: ListMCPConnectionsByBotID :many
 SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-       managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, tenant_id
+       managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, team_id
 FROM mcp_connections
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
+WHERE team_id = app.current_team_id() AND bot_id = $1
 ORDER BY created_at DESC
 `
 
@@ -224,7 +224,7 @@ func (q *Queries) ListMCPConnectionsByBotID(ctx context.Context, botID pgtype.UU
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TenantID,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -244,9 +244,9 @@ SET name = $3,
     is_active = $6,
     auth_type = $7,
     updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND id = $2
+WHERE team_id = app.current_team_id() AND bot_id = $1 AND id = $2
 RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, tenant_id
+          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, team_id
 `
 
 type UpdateMCPConnectionParams struct {
@@ -288,7 +288,7 @@ func (q *Queries) UpdateMCPConnection(ctx context.Context, arg UpdateMCPConnecti
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -297,7 +297,7 @@ const updateMCPConnectionActive = `-- name: UpdateMCPConnectionActive :exec
 UPDATE mcp_connections
 SET is_active = $3,
     updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND id = $2
+WHERE team_id = app.current_team_id() AND bot_id = $1 AND id = $2
 `
 
 type UpdateMCPConnectionActiveParams struct {
@@ -315,7 +315,7 @@ const updateMCPConnectionAuthType = `-- name: UpdateMCPConnectionAuthType :exec
 UPDATE mcp_connections
 SET auth_type = $2,
     updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $1
+WHERE team_id = app.current_team_id() AND id = $1
 `
 
 type UpdateMCPConnectionAuthTypeParams struct {
@@ -335,7 +335,7 @@ SET status = $3,
     last_probed_at = now(),
     status_message = $5,
     updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND id = $2
+WHERE team_id = app.current_team_id() AND bot_id = $1 AND id = $2
 `
 
 type UpdateMCPConnectionProbeResultParams struct {
@@ -361,7 +361,7 @@ const updateMCPConnectionsActiveByPlugin = `-- name: UpdateMCPConnectionsActiveB
 UPDATE mcp_connections
 SET is_active = $3,
     updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $1 AND managed_by_plugin_installation_id = $2
+WHERE team_id = app.current_team_id() AND bot_id = $1 AND managed_by_plugin_installation_id = $2
 `
 
 type UpdateMCPConnectionsActiveByPluginParams struct {
@@ -378,12 +378,12 @@ func (q *Queries) UpdateMCPConnectionsActiveByPlugin(ctx context.Context, arg Up
 const upsertMCPConnectionByName = `-- name: UpsertMCPConnectionByName :one
 INSERT INTO mcp_connections (bot_id, name, type, config)
 VALUES ($1, $2, $3, $4)
-ON CONFLICT (tenant_id, bot_id, name)
+ON CONFLICT (team_id, bot_id, name)
 DO UPDATE SET type = EXCLUDED.type,
               config = EXCLUDED.config,
               updated_at = now()
 RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
-          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, tenant_id
+          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at, team_id
 `
 
 type UpsertMCPConnectionByNameParams struct {
@@ -419,7 +419,7 @@ func (q *Queries) UpsertMCPConnectionByName(ctx context.Context, arg UpsertMCPCo
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }

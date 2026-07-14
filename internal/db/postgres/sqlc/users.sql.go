@@ -14,7 +14,7 @@ import (
 const countAccounts = `-- name: CountAccounts :one
 SELECT COUNT(*)::bigint AS count
 FROM users
-WHERE tenant_id = app.current_tenant_id()
+WHERE team_id = app.current_team_id()
   AND username IS NOT NULL
   AND password_hash IS NOT NULL
 `
@@ -37,8 +37,8 @@ SET username = $1,
     is_active = $7,
     data_root = $8,
     updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $9
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id
+WHERE team_id = app.current_team_id() AND id = $9
+RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
 `
 
 type CreateAccountParams struct {
@@ -81,7 +81,7 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (U
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -89,7 +89,7 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (U
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (is_active, metadata)
 VALUES ($1, $2)
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id
+RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
 `
 
 type CreateUserParams struct {
@@ -115,13 +115,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getAccountByIdentity = `-- name: GetAccountByIdentity :one
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id FROM users WHERE tenant_id = app.current_tenant_id() AND (username = $1 OR email = $1)
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id FROM users WHERE team_id = app.current_team_id() AND (username = $1 OR email = $1)
 `
 
 func (q *Queries) GetAccountByIdentity(ctx context.Context, identity pgtype.Text) (User, error) {
@@ -142,13 +142,13 @@ func (q *Queries) GetAccountByIdentity(ctx context.Context, identity pgtype.Text
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getAccountByUserID = `-- name: GetAccountByUserID :one
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id FROM users WHERE tenant_id = app.current_tenant_id() AND id = $1
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id FROM users WHERE team_id = app.current_team_id() AND id = $1
 `
 
 func (q *Queries) GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (User, error) {
@@ -169,15 +169,15 @@ func (q *Queries) GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (U
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
 FROM users
-WHERE tenant_id = app.current_tenant_id() AND id = $1
+WHERE team_id = app.current_team_id() AND id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error) {
@@ -198,14 +198,14 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listAccounts = `-- name: ListAccounts :many
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id FROM users
-WHERE tenant_id = app.current_tenant_id() AND username IS NOT NULL
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id FROM users
+WHERE team_id = app.current_team_id() AND username IS NOT NULL
 ORDER BY created_at DESC
 `
 
@@ -233,7 +233,7 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]User, error) {
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TenantID,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -255,7 +255,7 @@ SET username = NULL,
     data_root = NULL,
     is_active = FALSE,
     updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $1
+WHERE team_id = app.current_team_id() AND id = $1
 RETURNING id
 `
 
@@ -267,9 +267,9 @@ func (q *Queries) RemoveMember(ctx context.Context, userID pgtype.UUID) (pgtype.
 }
 
 const searchAccounts = `-- name: SearchAccounts :many
-SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id
+SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
 FROM users
-WHERE tenant_id = app.current_tenant_id()
+WHERE team_id = app.current_team_id()
   AND username IS NOT NULL
   AND (
     $1::text = ''
@@ -310,7 +310,7 @@ func (q *Queries) SearchAccounts(ctx context.Context, arg SearchAccountsParams) 
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TenantID,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -329,8 +329,8 @@ SET role = $1::user_role,
     avatar_url = $3,
     is_active = $4,
     updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $5
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id
+WHERE team_id = app.current_team_id() AND id = $5
+RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
 `
 
 type UpdateAccountAdminParams struct {
@@ -365,7 +365,7 @@ func (q *Queries) UpdateAccountAdmin(ctx context.Context, arg UpdateAccountAdmin
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -374,8 +374,8 @@ const updateAccountLastLogin = `-- name: UpdateAccountLastLogin :one
 UPDATE users
 SET last_login_at = now(),
     updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $1
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id
+WHERE team_id = app.current_team_id() AND id = $1
+RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
 `
 
 func (q *Queries) UpdateAccountLastLogin(ctx context.Context, id pgtype.UUID) (User, error) {
@@ -396,7 +396,7 @@ func (q *Queries) UpdateAccountLastLogin(ctx context.Context, id pgtype.UUID) (U
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -405,8 +405,8 @@ const updateAccountPassword = `-- name: UpdateAccountPassword :one
 UPDATE users
 SET password_hash = $2,
     updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $1
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id
+WHERE team_id = app.current_team_id() AND id = $1
+RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
 `
 
 type UpdateAccountPasswordParams struct {
@@ -432,7 +432,7 @@ func (q *Queries) UpdateAccountPassword(ctx context.Context, arg UpdateAccountPa
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -445,8 +445,8 @@ SET display_name = $2,
     is_active = $5,
     metadata = $6,
     updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $1
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id
+WHERE team_id = app.current_team_id() AND id = $1
+RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
 `
 
 type UpdateAccountProfileParams struct {
@@ -483,7 +483,7 @@ func (q *Queries) UpdateAccountProfile(ctx context.Context, arg UpdateAccountPro
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -502,7 +502,7 @@ VALUES (
   $9,
   '{}'::jsonb
 )
-ON CONFLICT (tenant_id, username) DO UPDATE SET
+ON CONFLICT (team_id, username) DO UPDATE SET
   email = EXCLUDED.email,
   password_hash = EXCLUDED.password_hash,
   role = EXCLUDED.role,
@@ -511,7 +511,7 @@ ON CONFLICT (tenant_id, username) DO UPDATE SET
   is_active = EXCLUDED.is_active,
   data_root = EXCLUDED.data_root,
   updated_at = now()
-RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, tenant_id
+RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at, team_id
 `
 
 type UpsertAccountByUsernameParams struct {
@@ -554,7 +554,7 @@ func (q *Queries) UpsertAccountByUsername(ctx context.Context, arg UpsertAccount
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }

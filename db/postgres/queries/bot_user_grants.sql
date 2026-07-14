@@ -12,19 +12,19 @@ SELECT
   u.display_name AS user_display_name,
   u.avatar_url AS user_avatar_url
 FROM bot_user_grants g
-LEFT JOIN users u ON u.id = g.user_id AND u.tenant_id = app.current_tenant_id()
-WHERE g.tenant_id = app.current_tenant_id() AND g.bot_id = $1
+LEFT JOIN users u ON u.id = g.user_id AND u.team_id = app.current_team_id()
+WHERE g.team_id = app.current_team_id() AND g.bot_id = $1
 ORDER BY g.subject_type DESC, g.created_at ASC;
 
 -- name: GetBotUserGrantByID :one
-SELECT id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at, tenant_id
+SELECT id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at, team_id
 FROM bot_user_grants
-WHERE tenant_id = app.current_tenant_id() AND id = $1;
+WHERE team_id = app.current_team_id() AND id = $1;
 
 -- name: ListBotUserGrantsForUser :many
 SELECT id, bot_id, subject_type, user_id, permissions
 FROM bot_user_grants
-WHERE tenant_id = app.current_tenant_id()
+WHERE team_id = app.current_team_id()
   AND bot_id = $1
   AND (
     subject_type = 'everyone'
@@ -40,14 +40,14 @@ VALUES (
   $3,
   sqlc.narg(created_by_user_id)::uuid
 )
-RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at, tenant_id;
+RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at, team_id;
 
 -- name: UpdateBotUserGrantPermissions :one
 UPDATE bot_user_grants
 SET permissions = $2,
     updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $1
-RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at, tenant_id;
+WHERE team_id = app.current_team_id() AND id = $1
+RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at, team_id;
 
 -- name: DeleteBotUserGrantByID :exec
-DELETE FROM bot_user_grants WHERE tenant_id = app.current_tenant_id() AND id = $1;
+DELETE FROM bot_user_grants WHERE team_id = app.current_team_id() AND id = $1;

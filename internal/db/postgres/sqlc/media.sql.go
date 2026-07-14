@@ -15,7 +15,7 @@ const countMessageAssetsByBot = `-- name: CountMessageAssetsByBot :one
 SELECT COUNT(*)
 FROM bot_history_message_assets a
 JOIN bot_history_messages m ON m.id = a.message_id
-WHERE a.tenant_id = app.current_tenant_id() AND m.tenant_id = app.current_tenant_id() AND m.bot_id = $1
+WHERE a.team_id = app.current_team_id() AND m.team_id = app.current_team_id() AND m.bot_id = $1
 `
 
 func (q *Queries) CountMessageAssetsByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
@@ -35,12 +35,12 @@ VALUES (
   $5,
   $6
 )
-ON CONFLICT (tenant_id, message_id, content_hash) DO UPDATE SET
+ON CONFLICT (team_id, message_id, content_hash) DO UPDATE SET
   role = EXCLUDED.role,
   ordinal = EXCLUDED.ordinal,
   name = EXCLUDED.name,
   metadata = EXCLUDED.metadata
-RETURNING id, message_id, role, ordinal, content_hash, name, metadata, created_at, tenant_id
+RETURNING id, message_id, role, ordinal, content_hash, name, metadata, created_at, team_id
 `
 
 type CreateMessageAssetParams struct {
@@ -71,7 +71,7 @@ func (q *Queries) CreateMessageAsset(ctx context.Context, arg CreateMessageAsset
 		&i.Name,
 		&i.Metadata,
 		&i.CreatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -79,7 +79,7 @@ func (q *Queries) CreateMessageAsset(ctx context.Context, arg CreateMessageAsset
 const createStorageProvider = `-- name: CreateStorageProvider :one
 INSERT INTO storage_providers (name, provider, config)
 VALUES ($1, $2, $3)
-RETURNING id, name, provider, config, created_at, updated_at, tenant_id
+RETURNING id, name, provider, config, created_at, updated_at, team_id
 `
 
 type CreateStorageProviderParams struct {
@@ -98,13 +98,13 @@ func (q *Queries) CreateStorageProvider(ctx context.Context, arg CreateStoragePr
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const deleteMessageAssets = `-- name: DeleteMessageAssets :exec
-DELETE FROM bot_history_message_assets WHERE tenant_id = app.current_tenant_id() AND message_id = $1
+DELETE FROM bot_history_message_assets WHERE team_id = app.current_team_id() AND message_id = $1
 `
 
 func (q *Queries) DeleteMessageAssets(ctx context.Context, messageID pgtype.UUID) error {
@@ -113,7 +113,7 @@ func (q *Queries) DeleteMessageAssets(ctx context.Context, messageID pgtype.UUID
 }
 
 const getBotStorageBinding = `-- name: GetBotStorageBinding :one
-SELECT id, bot_id, storage_provider_id, base_path, created_at, updated_at, tenant_id FROM bot_storage_bindings WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
+SELECT id, bot_id, storage_provider_id, base_path, created_at, updated_at, team_id FROM bot_storage_bindings WHERE team_id = app.current_team_id() AND bot_id = $1
 `
 
 func (q *Queries) GetBotStorageBinding(ctx context.Context, botID pgtype.UUID) (BotStorageBinding, error) {
@@ -126,13 +126,13 @@ func (q *Queries) GetBotStorageBinding(ctx context.Context, botID pgtype.UUID) (
 		&i.BasePath,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getStorageProviderByID = `-- name: GetStorageProviderByID :one
-SELECT id, name, provider, config, created_at, updated_at, tenant_id FROM storage_providers WHERE tenant_id = app.current_tenant_id() AND id = $1
+SELECT id, name, provider, config, created_at, updated_at, team_id FROM storage_providers WHERE team_id = app.current_team_id() AND id = $1
 `
 
 func (q *Queries) GetStorageProviderByID(ctx context.Context, id pgtype.UUID) (StorageProvider, error) {
@@ -145,13 +145,13 @@ func (q *Queries) GetStorageProviderByID(ctx context.Context, id pgtype.UUID) (S
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getStorageProviderByName = `-- name: GetStorageProviderByName :one
-SELECT id, name, provider, config, created_at, updated_at, tenant_id FROM storage_providers WHERE tenant_id = app.current_tenant_id() AND name = $1
+SELECT id, name, provider, config, created_at, updated_at, team_id FROM storage_providers WHERE team_id = app.current_team_id() AND name = $1
 `
 
 func (q *Queries) GetStorageProviderByName(ctx context.Context, name string) (StorageProvider, error) {
@@ -164,7 +164,7 @@ func (q *Queries) GetStorageProviderByName(ctx context.Context, name string) (St
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -172,7 +172,7 @@ func (q *Queries) GetStorageProviderByName(ctx context.Context, name string) (St
 const listMessageAssets = `-- name: ListMessageAssets :many
 SELECT id AS rel_id, message_id, role, ordinal, content_hash, name, metadata
 FROM bot_history_message_assets
-WHERE tenant_id = app.current_tenant_id() AND message_id = $1
+WHERE team_id = app.current_team_id() AND message_id = $1
 ORDER BY ordinal ASC
 `
 
@@ -217,7 +217,7 @@ func (q *Queries) ListMessageAssets(ctx context.Context, messageID pgtype.UUID) 
 const listMessageAssetsBatch = `-- name: ListMessageAssetsBatch :many
 SELECT id AS rel_id, message_id, role, ordinal, content_hash, name, metadata
 FROM bot_history_message_assets
-WHERE tenant_id = app.current_tenant_id() AND message_id = ANY($1::uuid[])
+WHERE team_id = app.current_team_id() AND message_id = ANY($1::uuid[])
 ORDER BY message_id, ordinal ASC
 `
 
@@ -260,7 +260,7 @@ func (q *Queries) ListMessageAssetsBatch(ctx context.Context, messageIds []pgtyp
 }
 
 const listStorageProviders = `-- name: ListStorageProviders :many
-SELECT id, name, provider, config, created_at, updated_at, tenant_id FROM storage_providers WHERE tenant_id = app.current_tenant_id() ORDER BY created_at DESC
+SELECT id, name, provider, config, created_at, updated_at, team_id FROM storage_providers WHERE team_id = app.current_team_id() ORDER BY created_at DESC
 `
 
 func (q *Queries) ListStorageProviders(ctx context.Context) ([]StorageProvider, error) {
@@ -279,7 +279,7 @@ func (q *Queries) ListStorageProviders(ctx context.Context) ([]StorageProvider, 
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TenantID,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -294,11 +294,11 @@ func (q *Queries) ListStorageProviders(ctx context.Context) ([]StorageProvider, 
 const upsertBotStorageBinding = `-- name: UpsertBotStorageBinding :one
 INSERT INTO bot_storage_bindings (bot_id, storage_provider_id, base_path)
 VALUES ($1, $2, $3)
-ON CONFLICT (tenant_id, bot_id) DO UPDATE SET
+ON CONFLICT (team_id, bot_id) DO UPDATE SET
   storage_provider_id = EXCLUDED.storage_provider_id,
   base_path = EXCLUDED.base_path,
   updated_at = now()
-RETURNING id, bot_id, storage_provider_id, base_path, created_at, updated_at, tenant_id
+RETURNING id, bot_id, storage_provider_id, base_path, created_at, updated_at, team_id
 `
 
 type UpsertBotStorageBindingParams struct {
@@ -317,7 +317,7 @@ func (q *Queries) UpsertBotStorageBinding(ctx context.Context, arg UpsertBotStor
 		&i.BasePath,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }

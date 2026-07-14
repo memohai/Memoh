@@ -14,24 +14,24 @@ VALUES (
 RETURNING *;
 
 -- name: GetEmailOutboxByID :one
-SELECT * FROM email_outbox WHERE tenant_id = app.current_tenant_id() AND id = sqlc.arg(id);
+SELECT * FROM email_outbox WHERE team_id = app.current_team_id() AND id = sqlc.arg(id);
 
 -- name: ListEmailOutboxByBot :many
 SELECT * FROM email_outbox
-WHERE tenant_id = app.current_tenant_id() AND bot_id = sqlc.arg(bot_id)
+WHERE team_id = app.current_team_id() AND bot_id = sqlc.arg(bot_id)
 ORDER BY created_at DESC
 LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
 
 -- name: CountEmailOutboxByBot :one
 SELECT count(*) FROM email_outbox
-WHERE tenant_id = app.current_tenant_id() AND bot_id = sqlc.arg(bot_id);
+WHERE team_id = app.current_team_id() AND bot_id = sqlc.arg(bot_id);
 
 -- name: UpdateEmailOutboxSent :exec
 UPDATE email_outbox
 SET message_id = sqlc.arg(message_id), status = 'sent', sent_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = sqlc.arg(id);
+WHERE team_id = app.current_team_id() AND id = sqlc.arg(id);
 
 -- name: UpdateEmailOutboxFailed :exec
 UPDATE email_outbox
 SET status = 'failed', error = sqlc.arg(error)
-WHERE tenant_id = app.current_tenant_id() AND id = sqlc.arg(id);
+WHERE team_id = app.current_team_id() AND id = sqlc.arg(id);

@@ -14,7 +14,7 @@ import (
 const createSchedule = `-- name: CreateSchedule :one
 INSERT INTO schedule (name, description, pattern, max_calls, enabled, command, bot_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, tenant_id
+RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id
 `
 
 type CreateScheduleParams struct {
@@ -50,14 +50,14 @@ func (q *Queries) CreateSchedule(ctx context.Context, arg CreateScheduleParams) 
 		&i.Enabled,
 		&i.Command,
 		&i.BotID,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const deleteSchedule = `-- name: DeleteSchedule :exec
 DELETE FROM schedule
-WHERE tenant_id = app.current_tenant_id() AND id = $1
+WHERE team_id = app.current_team_id() AND id = $1
 `
 
 func (q *Queries) DeleteSchedule(ctx context.Context, id pgtype.UUID) error {
@@ -66,9 +66,9 @@ func (q *Queries) DeleteSchedule(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getScheduleByID = `-- name: GetScheduleByID :one
-SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, tenant_id
+SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id
 FROM schedule
-WHERE tenant_id = app.current_tenant_id() AND id = $1
+WHERE team_id = app.current_team_id() AND id = $1
 `
 
 func (q *Queries) GetScheduleByID(ctx context.Context, id pgtype.UUID) (Schedule, error) {
@@ -86,7 +86,7 @@ func (q *Queries) GetScheduleByID(ctx context.Context, id pgtype.UUID) (Schedule
 		&i.Enabled,
 		&i.Command,
 		&i.BotID,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -99,8 +99,8 @@ SET current_calls = current_calls + 1,
       ELSE enabled
     END,
     updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $1
-RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, tenant_id
+WHERE team_id = app.current_team_id() AND id = $1
+RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id
 `
 
 func (q *Queries) IncrementScheduleCalls(ctx context.Context, id pgtype.UUID) (Schedule, error) {
@@ -118,15 +118,15 @@ func (q *Queries) IncrementScheduleCalls(ctx context.Context, id pgtype.UUID) (S
 		&i.Enabled,
 		&i.Command,
 		&i.BotID,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listEnabledSchedules = `-- name: ListEnabledSchedules :many
-SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, tenant_id
+SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id
 FROM schedule
-WHERE tenant_id = app.current_tenant_id() AND enabled = true
+WHERE team_id = app.current_team_id() AND enabled = true
 ORDER BY created_at DESC
 `
 
@@ -151,7 +151,7 @@ func (q *Queries) ListEnabledSchedules(ctx context.Context) ([]Schedule, error) 
 			&i.Enabled,
 			&i.Command,
 			&i.BotID,
-			&i.TenantID,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -164,9 +164,9 @@ func (q *Queries) ListEnabledSchedules(ctx context.Context) ([]Schedule, error) 
 }
 
 const listSchedulesByBot = `-- name: ListSchedulesByBot :many
-SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, tenant_id
+SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id
 FROM schedule
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
+WHERE team_id = app.current_team_id() AND bot_id = $1
 ORDER BY created_at DESC
 `
 
@@ -191,7 +191,7 @@ func (q *Queries) ListSchedulesByBot(ctx context.Context, botID pgtype.UUID) ([]
 			&i.Enabled,
 			&i.Command,
 			&i.BotID,
-			&i.TenantID,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -212,8 +212,8 @@ SET name = $2,
     enabled = $6,
     command = $7,
     updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $1
-RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, tenant_id
+WHERE team_id = app.current_team_id() AND id = $1
+RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id
 `
 
 type UpdateScheduleParams struct {
@@ -249,7 +249,7 @@ func (q *Queries) UpdateSchedule(ctx context.Context, arg UpdateScheduleParams) 
 		&i.Enabled,
 		&i.Command,
 		&i.BotID,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }

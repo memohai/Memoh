@@ -54,7 +54,7 @@ type Bot struct {
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
 	AclDefaultEffect       string             `json:"acl_default_effect"`
-	TenantID               pgtype.UUID        `json:"tenant_id"`
+	TeamID                 pgtype.UUID        `json:"team_id"`
 }
 
 type BotAclRule struct {
@@ -73,7 +73,7 @@ type BotAclRule struct {
 	Enabled                bool               `json:"enabled"`
 	Description            pgtype.Text        `json:"description"`
 	SubjectChannelType     pgtype.Text        `json:"subject_channel_type"`
-	TenantID               pgtype.UUID        `json:"tenant_id"`
+	TeamID                 pgtype.UUID        `json:"team_id"`
 }
 
 type BotChannelAdmin struct {
@@ -84,7 +84,7 @@ type BotChannelAdmin struct {
 	CreatedByUserID   pgtype.UUID        `json:"created_by_user_id"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-	TenantID          pgtype.UUID        `json:"tenant_id"`
+	TeamID            pgtype.UUID        `json:"team_id"`
 }
 
 type BotChannelConfig struct {
@@ -100,7 +100,7 @@ type BotChannelConfig struct {
 	VerifiedAt       pgtype.Timestamptz `json:"verified_at"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	TenantID         pgtype.UUID        `json:"tenant_id"`
+	TeamID           pgtype.UUID        `json:"team_id"`
 }
 
 type BotChannelRoute struct {
@@ -116,7 +116,7 @@ type BotChannelRoute struct {
 	Metadata               []byte             `json:"metadata"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
-	TenantID               pgtype.UUID        `json:"tenant_id"`
+	TeamID                 pgtype.UUID        `json:"team_id"`
 }
 
 type BotEmailBinding struct {
@@ -130,7 +130,7 @@ type BotEmailBinding struct {
 	Config          []byte             `json:"config"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	TenantID        pgtype.UUID        `json:"tenant_id"`
+	TeamID          pgtype.UUID        `json:"team_id"`
 }
 
 type BotHeartbeatLog struct {
@@ -144,7 +144,7 @@ type BotHeartbeatLog struct {
 	ModelID      pgtype.UUID        `json:"model_id"`
 	StartedAt    pgtype.Timestamptz `json:"started_at"`
 	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
-	TenantID     pgtype.UUID        `json:"tenant_id"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 }
 
 type BotHistoryMessage struct {
@@ -173,7 +173,7 @@ type BotHistoryMessage struct {
 	TurnSupersededAt        pgtype.Timestamptz `json:"turn_superseded_at"`
 	TurnSupersededReason    pgtype.Text        `json:"turn_superseded_reason"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
-	TenantID                pgtype.UUID        `json:"tenant_id"`
+	TeamID                  pgtype.UUID        `json:"team_id"`
 }
 
 type BotHistoryMessageAsset struct {
@@ -185,7 +185,7 @@ type BotHistoryMessageAsset struct {
 	Name        string             `json:"name"`
 	Metadata    []byte             `json:"metadata"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	TenantID    pgtype.UUID        `json:"tenant_id"`
+	TeamID      pgtype.UUID        `json:"team_id"`
 }
 
 type BotHistoryMessageCompact struct {
@@ -200,7 +200,7 @@ type BotHistoryMessageCompact struct {
 	ModelID      pgtype.UUID        `json:"model_id"`
 	StartedAt    pgtype.Timestamptz `json:"started_at"`
 	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
-	TenantID     pgtype.UUID        `json:"tenant_id"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 }
 
 type BotPluginInstallation struct {
@@ -216,7 +216,7 @@ type BotPluginInstallation struct {
 	Manifest    []byte             `json:"manifest"`
 	InstalledAt pgtype.Timestamptz `json:"installed_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	TenantID    pgtype.UUID        `json:"tenant_id"`
+	TeamID      pgtype.UUID        `json:"team_id"`
 }
 
 type BotPluginResource struct {
@@ -229,7 +229,7 @@ type BotPluginResource struct {
 	Metadata       []byte             `json:"metadata"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	TenantID       pgtype.UUID        `json:"tenant_id"`
+	TeamID         pgtype.UUID        `json:"team_id"`
 }
 
 type BotSession struct {
@@ -249,7 +249,7 @@ type BotSession struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
-	TenantID         pgtype.UUID        `json:"tenant_id"`
+	TeamID           pgtype.UUID        `json:"team_id"`
 }
 
 type BotSessionDiscussCursor struct {
@@ -259,7 +259,7 @@ type BotSessionDiscussCursor struct {
 	Source         string             `json:"source"`
 	ConsumedCursor int64              `json:"consumed_cursor"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	TenantID       pgtype.UUID        `json:"tenant_id"`
+	TeamID         pgtype.UUID        `json:"team_id"`
 }
 
 type BotSessionEvent struct {
@@ -272,7 +272,7 @@ type BotSessionEvent struct {
 	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
 	ReceivedAtMs            int64              `json:"received_at_ms"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
-	TenantID                pgtype.UUID        `json:"tenant_id"`
+	TeamID                  pgtype.UUID        `json:"team_id"`
 }
 
 type BotStorageBinding struct {
@@ -282,7 +282,7 @@ type BotStorageBinding struct {
 	BasePath          string             `json:"base_path"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-	TenantID          pgtype.UUID        `json:"tenant_id"`
+	TeamID            pgtype.UUID        `json:"team_id"`
 }
 
 type BotUserGrant struct {
@@ -294,11 +294,11 @@ type BotUserGrant struct {
 	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	TenantID        pgtype.UUID        `json:"tenant_id"`
+	TeamID          pgtype.UUID        `json:"team_id"`
 }
 
 type BotVisibleHistoryMessage struct {
-	TenantID                pgtype.UUID        `json:"tenant_id"`
+	TeamID                  pgtype.UUID        `json:"team_id"`
 	TurnID                  pgtype.UUID        `json:"turn_id"`
 	TurnPosition            pgtype.Int8        `json:"turn_position"`
 	TurnMessageSeq          pgtype.Int8        `json:"turn_message_seq"`
@@ -329,7 +329,7 @@ type BotWorkspaceResourceLimit struct {
 	StorageBytes  int64              `json:"storage_bytes"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	TenantID      pgtype.UUID        `json:"tenant_id"`
+	TeamID        pgtype.UUID        `json:"team_id"`
 }
 
 type ChannelIdentity struct {
@@ -341,7 +341,7 @@ type ChannelIdentity struct {
 	Metadata         []byte             `json:"metadata"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	TenantID         pgtype.UUID        `json:"tenant_id"`
+	TeamID           pgtype.UUID        `json:"team_id"`
 }
 
 type ChannelLinkCode struct {
@@ -352,7 +352,7 @@ type ChannelLinkCode struct {
 	ConsumedAt                pgtype.Timestamptz `json:"consumed_at"`
 	ConsumedChannelIdentityID pgtype.UUID        `json:"consumed_channel_identity_id"`
 	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
-	TenantID                  pgtype.UUID        `json:"tenant_id"`
+	TeamID                    pgtype.UUID        `json:"team_id"`
 }
 
 type Container struct {
@@ -370,7 +370,7 @@ type Container struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 	LastStartedAt    pgtype.Timestamptz `json:"last_started_at"`
 	LastStoppedAt    pgtype.Timestamptz `json:"last_stopped_at"`
-	TenantID         pgtype.UUID        `json:"tenant_id"`
+	TeamID           pgtype.UUID        `json:"team_id"`
 }
 
 type ContainerVersion struct {
@@ -379,7 +379,7 @@ type ContainerVersion struct {
 	SnapshotID  pgtype.UUID        `json:"snapshot_id"`
 	Version     int32              `json:"version"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	TenantID    pgtype.UUID        `json:"tenant_id"`
+	TeamID      pgtype.UUID        `json:"team_id"`
 }
 
 type EmailOauthToken struct {
@@ -393,7 +393,7 @@ type EmailOauthToken struct {
 	State           string             `json:"state"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	TenantID        pgtype.UUID        `json:"tenant_id"`
+	TeamID          pgtype.UUID        `json:"team_id"`
 }
 
 type EmailOutbox struct {
@@ -411,7 +411,7 @@ type EmailOutbox struct {
 	Error       string             `json:"error"`
 	SentAt      pgtype.Timestamptz `json:"sent_at"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	TenantID    pgtype.UUID        `json:"tenant_id"`
+	TeamID      pgtype.UUID        `json:"team_id"`
 }
 
 type EmailProvider struct {
@@ -422,7 +422,7 @@ type EmailProvider struct {
 	Config    []byte             `json:"config"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-	TenantID  pgtype.UUID        `json:"tenant_id"`
+	TeamID    pgtype.UUID        `json:"team_id"`
 }
 
 type FetchProvider struct {
@@ -433,7 +433,7 @@ type FetchProvider struct {
 	Enable    bool               `json:"enable"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-	TenantID  pgtype.UUID        `json:"tenant_id"`
+	TeamID    pgtype.UUID        `json:"team_id"`
 }
 
 type LifecycleEvent struct {
@@ -442,7 +442,7 @@ type LifecycleEvent struct {
 	EventType   string             `json:"event_type"`
 	Payload     []byte             `json:"payload"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	TenantID    pgtype.UUID        `json:"tenant_id"`
+	TeamID      pgtype.UUID        `json:"team_id"`
 }
 
 type McpConnection struct {
@@ -463,7 +463,7 @@ type McpConnection struct {
 	Metadata                      []byte             `json:"metadata"`
 	CreatedAt                     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt                     pgtype.Timestamptz `json:"updated_at"`
-	TenantID                      pgtype.UUID        `json:"tenant_id"`
+	TeamID                        pgtype.UUID        `json:"team_id"`
 }
 
 type McpOauthToken struct {
@@ -488,7 +488,7 @@ type McpOauthToken struct {
 	RedirectUri            string             `json:"redirect_uri"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
-	TenantID               pgtype.UUID        `json:"tenant_id"`
+	TeamID                 pgtype.UUID        `json:"team_id"`
 }
 
 type MediaAsset struct {
@@ -506,7 +506,7 @@ type MediaAsset struct {
 	DurationMs        pgtype.Int8        `json:"duration_ms"`
 	Metadata          []byte             `json:"metadata"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	TenantID          pgtype.UUID        `json:"tenant_id"`
+	TeamID            pgtype.UUID        `json:"team_id"`
 }
 
 type MemoryEdge struct {
@@ -518,7 +518,7 @@ type MemoryEdge struct {
 	Weight    float32            `json:"weight"`
 	Metadata  []byte             `json:"metadata"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	TenantID  pgtype.UUID        `json:"tenant_id"`
+	TeamID    pgtype.UUID        `json:"team_id"`
 }
 
 type MemoryNode struct {
@@ -538,7 +538,7 @@ type MemoryNode struct {
 	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	TenantID         pgtype.UUID        `json:"tenant_id"`
+	TeamID           pgtype.UUID        `json:"team_id"`
 }
 
 type MemoryProvider struct {
@@ -549,7 +549,7 @@ type MemoryProvider struct {
 	IsDefault bool               `json:"is_default"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-	TenantID  pgtype.UUID        `json:"tenant_id"`
+	TeamID    pgtype.UUID        `json:"team_id"`
 }
 
 type Model struct {
@@ -562,7 +562,7 @@ type Model struct {
 	Config     []byte             `json:"config"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
-	TenantID   pgtype.UUID        `json:"tenant_id"`
+	TeamID     pgtype.UUID        `json:"team_id"`
 }
 
 type ModelVariant struct {
@@ -573,7 +573,7 @@ type ModelVariant struct {
 	Metadata  []byte             `json:"metadata"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-	TenantID  pgtype.UUID        `json:"tenant_id"`
+	TeamID    pgtype.UUID        `json:"team_id"`
 }
 
 type Provider struct {
@@ -586,7 +586,7 @@ type Provider struct {
 	Metadata   []byte             `json:"metadata"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
-	TenantID   pgtype.UUID        `json:"tenant_id"`
+	TeamID     pgtype.UUID        `json:"team_id"`
 }
 
 type ProviderOauthToken struct {
@@ -602,7 +602,7 @@ type ProviderOauthToken struct {
 	Metadata         []byte             `json:"metadata"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	TenantID         pgtype.UUID        `json:"tenant_id"`
+	TeamID           pgtype.UUID        `json:"team_id"`
 }
 
 type Schedule struct {
@@ -617,7 +617,7 @@ type Schedule struct {
 	Enabled      bool               `json:"enabled"`
 	Command      string             `json:"command"`
 	BotID        pgtype.UUID        `json:"bot_id"`
-	TenantID     pgtype.UUID        `json:"tenant_id"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 }
 
 type ScheduleLog struct {
@@ -632,7 +632,7 @@ type ScheduleLog struct {
 	ModelID      pgtype.UUID        `json:"model_id"`
 	StartedAt    pgtype.Timestamptz `json:"started_at"`
 	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
-	TenantID     pgtype.UUID        `json:"tenant_id"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 }
 
 type SearchProvider struct {
@@ -643,7 +643,7 @@ type SearchProvider struct {
 	Enable    bool               `json:"enable"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-	TenantID  pgtype.UUID        `json:"tenant_id"`
+	TeamID    pgtype.UUID        `json:"team_id"`
 }
 
 type Snapshot struct {
@@ -655,7 +655,7 @@ type Snapshot struct {
 	Snapshotter               string             `json:"snapshotter"`
 	Source                    string             `json:"source"`
 	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
-	TenantID                  pgtype.UUID        `json:"tenant_id"`
+	TeamID                    pgtype.UUID        `json:"team_id"`
 }
 
 type StorageProvider struct {
@@ -665,7 +665,7 @@ type StorageProvider struct {
 	Config    []byte             `json:"config"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-	TenantID  pgtype.UUID        `json:"tenant_id"`
+	TeamID    pgtype.UUID        `json:"team_id"`
 }
 
 type Task struct {
@@ -678,10 +678,10 @@ type Task struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 	ExecID    pgtype.Text        `json:"exec_id"`
 	Pid       pgtype.Int4        `json:"pid"`
-	TenantID  pgtype.UUID        `json:"tenant_id"`
+	TeamID    pgtype.UUID        `json:"team_id"`
 }
 
-type Tenant struct {
+type Team struct {
 	ID        pgtype.UUID        `json:"id"`
 	Slug      pgtype.Text        `json:"slug"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
@@ -712,7 +712,7 @@ type ToolApprovalRequest struct {
 	ConversationType             string             `json:"conversation_type"`
 	CreatedAt                    pgtype.Timestamptz `json:"created_at"`
 	DecidedAt                    pgtype.Timestamptz `json:"decided_at"`
-	TenantID                     pgtype.UUID        `json:"tenant_id"`
+	TeamID                       pgtype.UUID        `json:"team_id"`
 }
 
 type TtsModel struct {
@@ -723,7 +723,7 @@ type TtsModel struct {
 	Config        []byte             `json:"config"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	TenantID      pgtype.UUID        `json:"tenant_id"`
+	TeamID        pgtype.UUID        `json:"team_id"`
 }
 
 type TtsProvider struct {
@@ -734,7 +734,7 @@ type TtsProvider struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 	Enable    bool               `json:"enable"`
-	TenantID  pgtype.UUID        `json:"tenant_id"`
+	TeamID    pgtype.UUID        `json:"team_id"`
 }
 
 type User struct {
@@ -752,7 +752,7 @@ type User struct {
 	Metadata     []byte             `json:"metadata"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	TenantID     pgtype.UUID        `json:"tenant_id"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 }
 
 type UserChannelBinding struct {
@@ -762,7 +762,7 @@ type UserChannelBinding struct {
 	Config      []byte             `json:"config"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	TenantID    pgtype.UUID        `json:"tenant_id"`
+	TeamID      pgtype.UUID        `json:"team_id"`
 }
 
 type UserChannelIdentityBinding struct {
@@ -771,7 +771,7 @@ type UserChannelIdentityBinding struct {
 	ChannelIdentityID pgtype.UUID        `json:"channel_identity_id"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-	TenantID          pgtype.UUID        `json:"tenant_id"`
+	TeamID            pgtype.UUID        `json:"team_id"`
 }
 
 type UserInputRequest struct {
@@ -802,7 +802,7 @@ type UserInputRequest struct {
 	RespondedAt                  pgtype.Timestamptz `json:"responded_at"`
 	CanceledAt                   pgtype.Timestamptz `json:"canceled_at"`
 	UpdatedAt                    pgtype.Timestamptz `json:"updated_at"`
-	TenantID                     pgtype.UUID        `json:"tenant_id"`
+	TeamID                       pgtype.UUID        `json:"team_id"`
 }
 
 type UserProviderOauthToken struct {
@@ -819,5 +819,5 @@ type UserProviderOauthToken struct {
 	Metadata         []byte             `json:"metadata"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	TenantID         pgtype.UUID        `json:"tenant_id"`
+	TeamID           pgtype.UUID        `json:"team_id"`
 }

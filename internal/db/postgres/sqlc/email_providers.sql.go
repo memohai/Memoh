@@ -19,7 +19,7 @@ VALUES (
   $3,
   $4
 )
-RETURNING id, user_id, name, provider, config, created_at, updated_at, tenant_id
+RETURNING id, user_id, name, provider, config, created_at, updated_at, team_id
 `
 
 type CreateEmailProviderParams struct {
@@ -45,13 +45,13 @@ func (q *Queries) CreateEmailProvider(ctx context.Context, arg CreateEmailProvid
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const deleteEmailProvider = `-- name: DeleteEmailProvider :exec
-DELETE FROM email_providers WHERE tenant_id = app.current_tenant_id() AND id = $1
+DELETE FROM email_providers WHERE team_id = app.current_team_id() AND id = $1
 `
 
 func (q *Queries) DeleteEmailProvider(ctx context.Context, id pgtype.UUID) error {
@@ -61,7 +61,7 @@ func (q *Queries) DeleteEmailProvider(ctx context.Context, id pgtype.UUID) error
 
 const deleteEmailProviderByIDAndUser = `-- name: DeleteEmailProviderByIDAndUser :exec
 DELETE FROM email_providers
-WHERE tenant_id = app.current_tenant_id() AND id = $1
+WHERE team_id = app.current_team_id() AND id = $1
   AND user_id = $2
 `
 
@@ -76,7 +76,7 @@ func (q *Queries) DeleteEmailProviderByIDAndUser(ctx context.Context, arg Delete
 }
 
 const getEmailProviderByID = `-- name: GetEmailProviderByID :one
-SELECT id, user_id, name, provider, config, created_at, updated_at, tenant_id FROM email_providers WHERE tenant_id = app.current_tenant_id() AND id = $1
+SELECT id, user_id, name, provider, config, created_at, updated_at, team_id FROM email_providers WHERE team_id = app.current_team_id() AND id = $1
 `
 
 func (q *Queries) GetEmailProviderByID(ctx context.Context, id pgtype.UUID) (EmailProvider, error) {
@@ -90,14 +90,14 @@ func (q *Queries) GetEmailProviderByID(ctx context.Context, id pgtype.UUID) (Ema
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getEmailProviderByIDAndUser = `-- name: GetEmailProviderByIDAndUser :one
-SELECT id, user_id, name, provider, config, created_at, updated_at, tenant_id FROM email_providers
-WHERE tenant_id = app.current_tenant_id() AND id = $1
+SELECT id, user_id, name, provider, config, created_at, updated_at, team_id FROM email_providers
+WHERE team_id = app.current_team_id() AND id = $1
   AND user_id = $2
 `
 
@@ -117,14 +117,14 @@ func (q *Queries) GetEmailProviderByIDAndUser(ctx context.Context, arg GetEmailP
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getEmailProviderByNameAndUser = `-- name: GetEmailProviderByNameAndUser :one
-SELECT id, user_id, name, provider, config, created_at, updated_at, tenant_id FROM email_providers
-WHERE tenant_id = app.current_tenant_id() AND user_id = $1
+SELECT id, user_id, name, provider, config, created_at, updated_at, team_id FROM email_providers
+WHERE team_id = app.current_team_id() AND user_id = $1
   AND name = $2
 `
 
@@ -144,14 +144,14 @@ func (q *Queries) GetEmailProviderByNameAndUser(ctx context.Context, arg GetEmai
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listEmailProviders = `-- name: ListEmailProviders :many
-SELECT id, user_id, name, provider, config, created_at, updated_at, tenant_id FROM email_providers
-WHERE tenant_id = app.current_tenant_id()
+SELECT id, user_id, name, provider, config, created_at, updated_at, team_id FROM email_providers
+WHERE team_id = app.current_team_id()
 ORDER BY created_at DESC
 `
 
@@ -172,7 +172,7 @@ func (q *Queries) ListEmailProviders(ctx context.Context) ([]EmailProvider, erro
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TenantID,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -185,8 +185,8 @@ func (q *Queries) ListEmailProviders(ctx context.Context) ([]EmailProvider, erro
 }
 
 const listEmailProvidersByProvider = `-- name: ListEmailProvidersByProvider :many
-SELECT id, user_id, name, provider, config, created_at, updated_at, tenant_id FROM email_providers
-WHERE tenant_id = app.current_tenant_id() AND provider = $1
+SELECT id, user_id, name, provider, config, created_at, updated_at, team_id FROM email_providers
+WHERE team_id = app.current_team_id() AND provider = $1
 ORDER BY created_at DESC
 `
 
@@ -207,7 +207,7 @@ func (q *Queries) ListEmailProvidersByProvider(ctx context.Context, provider str
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TenantID,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -220,8 +220,8 @@ func (q *Queries) ListEmailProvidersByProvider(ctx context.Context, provider str
 }
 
 const listEmailProvidersByUser = `-- name: ListEmailProvidersByUser :many
-SELECT id, user_id, name, provider, config, created_at, updated_at, tenant_id FROM email_providers
-WHERE tenant_id = app.current_tenant_id() AND user_id = $1
+SELECT id, user_id, name, provider, config, created_at, updated_at, team_id FROM email_providers
+WHERE team_id = app.current_team_id() AND user_id = $1
 ORDER BY created_at DESC
 `
 
@@ -242,7 +242,7 @@ func (q *Queries) ListEmailProvidersByUser(ctx context.Context, userID pgtype.UU
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TenantID,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -255,8 +255,8 @@ func (q *Queries) ListEmailProvidersByUser(ctx context.Context, userID pgtype.UU
 }
 
 const listEmailProvidersByUserAndProvider = `-- name: ListEmailProvidersByUserAndProvider :many
-SELECT id, user_id, name, provider, config, created_at, updated_at, tenant_id FROM email_providers
-WHERE tenant_id = app.current_tenant_id() AND user_id = $1
+SELECT id, user_id, name, provider, config, created_at, updated_at, team_id FROM email_providers
+WHERE team_id = app.current_team_id() AND user_id = $1
   AND provider = $2
 ORDER BY created_at DESC
 `
@@ -283,7 +283,7 @@ func (q *Queries) ListEmailProvidersByUserAndProvider(ctx context.Context, arg L
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.TenantID,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -302,8 +302,8 @@ SET
   provider = $2,
   config = $3,
   updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $4
-RETURNING id, user_id, name, provider, config, created_at, updated_at, tenant_id
+WHERE team_id = app.current_team_id() AND id = $4
+RETURNING id, user_id, name, provider, config, created_at, updated_at, team_id
 `
 
 type UpdateEmailProviderParams struct {
@@ -329,7 +329,7 @@ func (q *Queries) UpdateEmailProvider(ctx context.Context, arg UpdateEmailProvid
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -341,9 +341,9 @@ SET
   provider = $2,
   config = $3,
   updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $4
+WHERE team_id = app.current_team_id() AND id = $4
   AND user_id = $5
-RETURNING id, user_id, name, provider, config, created_at, updated_at, tenant_id
+RETURNING id, user_id, name, provider, config, created_at, updated_at, team_id
 `
 
 type UpdateEmailProviderByIDAndUserParams struct {
@@ -371,7 +371,7 @@ func (q *Queries) UpdateEmailProviderByIDAndUser(ctx context.Context, arg Update
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }

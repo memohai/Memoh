@@ -266,12 +266,12 @@ func provideMemoryLLM(modelsService *models.Service, settingsService *settings.S
 func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, accountService *accounts.Service, provider bridge.Provider, queries dbstore.Queries, cfg config.Config, wikiStore *wikistore.Store) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
 	fileStore := storefs.New(log, provider)
-	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
+	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(ctx context.Context, teamID, _ string, providerConfig map[string]any) (memprovider.Provider, error) {
 		var ws wikistore.Store
 		if wikiStore != nil {
 			ws = *wikiStore
 		}
-		runtime, err := membuiltin.NewBuiltinRuntimeFromConfig(log, providerConfig, fileStore, queries, cfg, ws)
+		runtime, err := membuiltin.NewBuiltinRuntimeFromConfigContext(ctx, log, providerConfig, fileStore, queries, cfg, ws, memprovider.FixedTeamIDResolver(teamID))
 		if err != nil {
 			return nil, err
 		}
@@ -280,25 +280,44 @@ func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatSe
 		p.ApplyProviderConfig(providerConfig)
 		return p, nil
 	})
-	registry.RegisterFactory(string(memprovider.ProviderMem0), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
+	registry.RegisterFactory(string(memprovider.ProviderMem0), func(_ context.Context, _, _ string, providerConfig map[string]any) (memprovider.Provider, error) {
 		return memmem0.NewMem0Provider(log, providerConfig, fileStore)
 	})
-	registry.RegisterFactory(string(memprovider.ProviderOpenViking), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
+	registry.RegisterFactory(string(memprovider.ProviderOpenViking), func(_ context.Context, _, _ string, providerConfig map[string]any) (memprovider.Provider, error) {
 		return memopenviking.NewOpenVikingProvider(log, providerConfig)
+	})
+	registry.SetConfigLoader(func(ctx context.Context, id string) (string, map[string]any, error) {
+		pgID, err := db.ParseUUID(id)
+		if err != nil {
+			return "", nil, err
+		}
+		row, err := queries.GetMemoryProviderByID(ctx, pgID)
+		if err != nil {
+			return "", nil, err
+		}
+		var providerConfig map[string]any
+		if len(row.Config) > 0 {
+			if err := json.Unmarshal(row.Config, &providerConfig); err != nil {
+				return "", nil, fmt.Errorf("unmarshal memory provider config: %w", err)
+			}
+		}
+		return row.Provider, providerConfig, nil
 	})
 	// Default provider for bots without an explicit memory_provider_id. Uses the
 	// graph runtime (PG nodes/edges as source of truth) when a wiki store is
 	// wired; falls back to the file runtime otherwise (e.g. bootstrap before the
 	// DB is ready).
-	var defaultRuntime membuiltin.Runtime
-	if wikiStore != nil {
-		defaultRuntime = membuiltin.NewGraphRuntime(log, *wikiStore, fileStore)
-	} else {
-		defaultRuntime = membuiltin.NewFileRuntime(fileStore)
-	}
-	defaultProvider := membuiltin.NewBuiltinProvider(log, defaultRuntime, chatService, accountService)
-	defaultProvider.SetLLM(llm)
-	registry.Register("__builtin_default__", defaultProvider)
+	registry.SetTeamDefaultFactory(func(_ context.Context, _ string) (memprovider.Provider, error) {
+		var defaultRuntime membuiltin.Runtime
+		if wikiStore != nil {
+			defaultRuntime = membuiltin.NewGraphRuntime(log, *wikiStore, fileStore)
+		} else {
+			defaultRuntime = membuiltin.NewFileRuntime(fileStore)
+		}
+		defaultProvider := membuiltin.NewBuiltinProvider(log, defaultRuntime, chatService, accountService)
+		defaultProvider.SetLLM(llm)
+		return defaultProvider, nil
+	})
 	return registry
 }
 
@@ -1270,6 +1289,9 @@ func startMemoryProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, mpService *
 				log.Info("memory providers ready", slog.Int("count", count), slog.String("default_id", resp.ID), slog.String("default_provider", resp.Provider))
 			}
 			return nil
+		},
+		OnStop: func(context.Context) error {
+			return registry.Close()
 		},
 	})
 }

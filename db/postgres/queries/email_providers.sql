@@ -9,36 +9,36 @@ VALUES (
 RETURNING *;
 
 -- name: GetEmailProviderByID :one
-SELECT * FROM email_providers WHERE tenant_id = app.current_tenant_id() AND id = sqlc.arg(id);
+SELECT * FROM email_providers WHERE team_id = app.current_team_id() AND id = sqlc.arg(id);
 
 -- name: GetEmailProviderByIDAndUser :one
 SELECT * FROM email_providers
-WHERE tenant_id = app.current_tenant_id() AND id = sqlc.arg(id)
+WHERE team_id = app.current_team_id() AND id = sqlc.arg(id)
   AND user_id = sqlc.arg(user_id);
 
 -- name: GetEmailProviderByNameAndUser :one
 SELECT * FROM email_providers
-WHERE tenant_id = app.current_tenant_id() AND user_id = sqlc.arg(user_id)
+WHERE team_id = app.current_team_id() AND user_id = sqlc.arg(user_id)
   AND name = sqlc.arg(name);
 
 -- name: ListEmailProviders :many
 SELECT * FROM email_providers
-WHERE tenant_id = app.current_tenant_id()
+WHERE team_id = app.current_team_id()
 ORDER BY created_at DESC;
 
 -- name: ListEmailProvidersByUser :many
 SELECT * FROM email_providers
-WHERE tenant_id = app.current_tenant_id() AND user_id = sqlc.arg(user_id)
+WHERE team_id = app.current_team_id() AND user_id = sqlc.arg(user_id)
 ORDER BY created_at DESC;
 
 -- name: ListEmailProvidersByProvider :many
 SELECT * FROM email_providers
-WHERE tenant_id = app.current_tenant_id() AND provider = sqlc.arg(provider)
+WHERE team_id = app.current_team_id() AND provider = sqlc.arg(provider)
 ORDER BY created_at DESC;
 
 -- name: ListEmailProvidersByUserAndProvider :many
 SELECT * FROM email_providers
-WHERE tenant_id = app.current_tenant_id() AND user_id = sqlc.arg(user_id)
+WHERE team_id = app.current_team_id() AND user_id = sqlc.arg(user_id)
   AND provider = sqlc.arg(provider)
 ORDER BY created_at DESC;
 
@@ -49,7 +49,7 @@ SET
   provider = sqlc.arg(provider),
   config = sqlc.arg(config),
   updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = sqlc.arg(id)
+WHERE team_id = app.current_team_id() AND id = sqlc.arg(id)
 RETURNING *;
 
 -- name: UpdateEmailProviderByIDAndUser :one
@@ -59,14 +59,14 @@ SET
   provider = sqlc.arg(provider),
   config = sqlc.arg(config),
   updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = sqlc.arg(id)
+WHERE team_id = app.current_team_id() AND id = sqlc.arg(id)
   AND user_id = sqlc.arg(user_id)
 RETURNING *;
 
 -- name: DeleteEmailProvider :exec
-DELETE FROM email_providers WHERE tenant_id = app.current_tenant_id() AND id = sqlc.arg(id);
+DELETE FROM email_providers WHERE team_id = app.current_team_id() AND id = sqlc.arg(id);
 
 -- name: DeleteEmailProviderByIDAndUser :exec
 DELETE FROM email_providers
-WHERE tenant_id = app.current_tenant_id() AND id = sqlc.arg(id)
+WHERE team_id = app.current_team_id() AND id = sqlc.arg(id)
   AND user_id = sqlc.arg(user_id);

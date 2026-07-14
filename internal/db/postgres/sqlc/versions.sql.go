@@ -15,7 +15,7 @@ const getVersionSnapshotRuntimeName = `-- name: GetVersionSnapshotRuntimeName :o
 SELECT s.runtime_snapshot_name
 FROM container_versions cv
 JOIN snapshots s ON s.id = cv.snapshot_id
-WHERE cv.tenant_id = app.current_tenant_id() AND s.tenant_id = app.current_tenant_id() AND cv.container_id = $1
+WHERE cv.team_id = app.current_team_id() AND s.team_id = app.current_team_id() AND cv.container_id = $1
   AND cv.version = $2
 `
 
@@ -38,7 +38,7 @@ VALUES (
   $2,
   $3
 )
-RETURNING id, container_id, snapshot_id, version, created_at, tenant_id
+RETURNING id, container_id, snapshot_id, version, created_at, team_id
 `
 
 type InsertVersionParams struct {
@@ -56,7 +56,7 @@ func (q *Queries) InsertVersion(ctx context.Context, arg InsertVersionParams) (C
 		&i.SnapshotID,
 		&i.Version,
 		&i.CreatedAt,
-		&i.TenantID,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -72,7 +72,7 @@ SELECT
   s.display_name
 FROM container_versions cv
 JOIN snapshots s ON s.id = cv.snapshot_id
-WHERE cv.tenant_id = app.current_tenant_id() AND s.tenant_id = app.current_tenant_id() AND cv.container_id = $1
+WHERE cv.team_id = app.current_team_id() AND s.team_id = app.current_team_id() AND cv.container_id = $1
 ORDER BY cv.version ASC
 `
 
@@ -115,7 +115,7 @@ func (q *Queries) ListVersionsByContainerID(ctx context.Context, containerID str
 }
 
 const nextVersion = `-- name: NextVersion :one
-SELECT COALESCE(MAX(version), 0) + 1 FROM container_versions WHERE tenant_id = app.current_tenant_id() AND container_id = $1
+SELECT COALESCE(MAX(version), 0) + 1 FROM container_versions WHERE team_id = app.current_team_id() AND container_id = $1
 `
 
 func (q *Queries) NextVersion(ctx context.Context, containerID string) (int32, error) {

@@ -102,7 +102,7 @@ func (q *Queries) CreateChatRoute(ctx context.Context, arg CreateChatRouteParams
 
 const deleteChatRoute = `-- name: DeleteChatRoute :exec
 DELETE FROM bot_channel_routes
-WHERE tenant_id = app.current_tenant_id() AND id = $1
+WHERE team_id = app.current_team_id() AND id = $1
 `
 
 func (q *Queries) DeleteChatRoute(ctx context.Context, id pgtype.UUID) error {
@@ -126,7 +126,7 @@ SELECT
   created_at,
   updated_at
 FROM bot_channel_routes
-WHERE tenant_id = app.current_tenant_id()
+WHERE team_id = app.current_team_id()
   AND bot_id = $1
   AND channel_type = $2
   AND external_conversation_id = $3
@@ -199,7 +199,7 @@ SELECT
   created_at,
   updated_at
 FROM bot_channel_routes
-WHERE tenant_id = app.current_tenant_id() AND id = $1
+WHERE team_id = app.current_team_id() AND id = $1
 `
 
 type GetChatRouteByIDRow struct {
@@ -255,7 +255,7 @@ SELECT
   created_at,
   updated_at
 FROM bot_channel_routes
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
+WHERE team_id = app.current_team_id() AND bot_id = $1
 ORDER BY created_at ASC
 `
 
@@ -312,7 +312,7 @@ func (q *Queries) ListChatRoutes(ctx context.Context, chatID pgtype.UUID) ([]Lis
 const setRouteActiveSession = `-- name: SetRouteActiveSession :exec
 UPDATE bot_channel_routes
 SET active_session_id = $1::uuid, updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $2
+WHERE team_id = app.current_team_id() AND id = $2
 `
 
 type SetRouteActiveSessionParams struct {
@@ -328,7 +328,7 @@ func (q *Queries) SetRouteActiveSession(ctx context.Context, arg SetRouteActiveS
 const updateChatRouteMetadata = `-- name: UpdateChatRouteMetadata :exec
 UPDATE bot_channel_routes
 SET metadata = $1, updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $2
+WHERE team_id = app.current_team_id() AND id = $2
 `
 
 type UpdateChatRouteMetadataParams struct {
@@ -344,7 +344,7 @@ func (q *Queries) UpdateChatRouteMetadata(ctx context.Context, arg UpdateChatRou
 const updateChatRouteReplyTarget = `-- name: UpdateChatRouteReplyTarget :exec
 UPDATE bot_channel_routes
 SET default_reply_target = $1, updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $2
+WHERE team_id = app.current_team_id() AND id = $2
 `
 
 type UpdateChatRouteReplyTargetParams struct {

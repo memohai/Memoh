@@ -11,31 +11,31 @@ SET status = $2,
     usage = $5,
     model_id = $6,
     completed_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = $1
-RETURNING id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at, tenant_id;
+WHERE team_id = app.current_team_id() AND id = $1
+RETURNING id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at, team_id;
 
 -- name: ListScheduleLogsByBot :many
 SELECT id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM schedule_logs
-WHERE tenant_id = app.current_tenant_id() AND bot_id = $1
+WHERE team_id = app.current_team_id() AND bot_id = $1
 ORDER BY started_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: CountScheduleLogsByBot :one
-SELECT count(*) FROM schedule_logs WHERE tenant_id = app.current_tenant_id() AND bot_id = $1;
+SELECT count(*) FROM schedule_logs WHERE team_id = app.current_team_id() AND bot_id = $1;
 
 -- name: ListScheduleLogsBySchedule :many
 SELECT id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM schedule_logs
-WHERE tenant_id = app.current_tenant_id() AND schedule_id = $1
+WHERE team_id = app.current_team_id() AND schedule_id = $1
 ORDER BY started_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: CountScheduleLogsBySchedule :one
-SELECT count(*) FROM schedule_logs WHERE tenant_id = app.current_tenant_id() AND schedule_id = $1;
+SELECT count(*) FROM schedule_logs WHERE team_id = app.current_team_id() AND schedule_id = $1;
 
 -- name: DeleteScheduleLogsByBot :exec
-DELETE FROM schedule_logs WHERE tenant_id = app.current_tenant_id() AND bot_id = $1;
+DELETE FROM schedule_logs WHERE team_id = app.current_team_id() AND bot_id = $1;
 
 -- name: DeleteScheduleLogsBySchedule :exec
-DELETE FROM schedule_logs WHERE tenant_id = app.current_tenant_id() AND schedule_id = $1;
+DELETE FROM schedule_logs WHERE team_id = app.current_team_id() AND schedule_id = $1;

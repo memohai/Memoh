@@ -14,7 +14,7 @@ import (
 const countMessagesBySession = `-- name: CountMessagesBySession :one
 SELECT COUNT(*)::bigint AS message_count
 FROM bot_visible_history_messages
-WHERE tenant_id = app.current_tenant_id() AND session_id = $1
+WHERE team_id = app.current_team_id() AND session_id = $1
 `
 
 func (q *Queries) CountMessagesBySession(ctx context.Context, sessionID pgtype.UUID) (int64, error) {
@@ -28,7 +28,7 @@ const getLatestAssistantUsage = `-- name: GetLatestAssistantUsage :one
 SELECT
   COALESCE((m.usage->>'inputTokens')::bigint, 0)::bigint AS input_tokens
 FROM bot_visible_history_messages m
-WHERE m.tenant_id = app.current_tenant_id()
+WHERE m.team_id = app.current_team_id()
   AND m.session_id = $1
   AND m.role = 'assistant'
   AND m.usage IS NOT NULL
@@ -46,7 +46,7 @@ func (q *Queries) GetLatestAssistantUsage(ctx context.Context, sessionID pgtype.
 const getLatestSessionIDByBot = `-- name: GetLatestSessionIDByBot :one
 SELECT s.id
 FROM bot_sessions s
-WHERE s.tenant_id = app.current_tenant_id()
+WHERE s.team_id = app.current_team_id()
   AND s.bot_id = $1
   AND s.type = 'chat'
   AND s.deleted_at IS NULL
@@ -66,7 +66,7 @@ SELECT
   COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS total_input_tokens,
   COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint), 0)::bigint AS cache_read_tokens
 FROM bot_visible_history_messages m
-WHERE m.tenant_id = app.current_tenant_id()
+WHERE m.team_id = app.current_team_id()
   AND m.session_id = $1
   AND m.usage IS NOT NULL
 `
@@ -100,7 +100,7 @@ WITH requested AS (
            ELSE '[]'::jsonb
       END
     ) AS item
-  WHERE m.tenant_id = app.current_tenant_id()
+  WHERE m.team_id = app.current_team_id()
     AND m.session_id = $1
     AND m.role = 'user'
     AND item->>'name' IS NOT NULL
@@ -115,7 +115,7 @@ tool_payloads AS (
          ELSE '[]'::jsonb
     END AS content_json
   FROM bot_visible_history_messages m
-  WHERE m.tenant_id = app.current_tenant_id()
+  WHERE m.team_id = app.current_team_id()
     AND m.session_id = $1
     AND m.role = 'assistant'
 ),

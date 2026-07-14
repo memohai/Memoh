@@ -339,7 +339,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		return newI18nHTTPError(http.StatusBadRequest, "workspace_create_request_invalid", "bots.container.createFailed", err.Error())
 	}
 	// Image override lets administrators specify a custom base image.
-	// NOTE(saas): if this becomes a multi-tenant SaaS, image override must be
+	// NOTE(saas): if this becomes a multi-team SaaS, image override must be
 	// validated against an allowlist to prevent SSRF and resource abuse.
 	ctx := c.Request().Context()
 	imageOverride := strings.TrimSpace(req.Image)

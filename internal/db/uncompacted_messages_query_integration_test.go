@@ -26,8 +26,8 @@ func TestListUncompactedMessagesReclaimEligibility(t *testing.T) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000001', true)"); err != nil {
-		t.Fatalf("bind singleton tenant: %v", err)
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.team_id', '00000000-0000-0000-0000-000000000001', true)"); err != nil {
+		t.Fatalf("bind singleton team: %v", err)
 	}
 
 	userID := uuid.NewString()

@@ -9,19 +9,19 @@ VALUES (
 RETURNING *;
 
 -- name: GetFetchProviderByID :one
-SELECT * FROM fetch_providers WHERE tenant_id = app.current_tenant_id() AND id = sqlc.arg(id);
+SELECT * FROM fetch_providers WHERE team_id = app.current_team_id() AND id = sqlc.arg(id);
 
 -- name: GetFetchProviderByName :one
-SELECT * FROM fetch_providers WHERE tenant_id = app.current_tenant_id() AND name = sqlc.arg(name);
+SELECT * FROM fetch_providers WHERE team_id = app.current_team_id() AND name = sqlc.arg(name);
 
 -- name: ListFetchProviders :many
 SELECT * FROM fetch_providers
-WHERE tenant_id = app.current_tenant_id()
+WHERE team_id = app.current_team_id()
 ORDER BY created_at DESC;
 
 -- name: ListFetchProvidersByProvider :many
 SELECT * FROM fetch_providers
-WHERE tenant_id = app.current_tenant_id() AND provider = sqlc.arg(provider)
+WHERE team_id = app.current_team_id() AND provider = sqlc.arg(provider)
 ORDER BY created_at DESC;
 
 -- name: UpdateFetchProvider :one
@@ -32,8 +32,8 @@ SET
   config = sqlc.arg(config),
   enable = sqlc.arg(enable),
   updated_at = now()
-WHERE tenant_id = app.current_tenant_id() AND id = sqlc.arg(id)
+WHERE team_id = app.current_team_id() AND id = sqlc.arg(id)
 RETURNING *;
 
 -- name: DeleteFetchProvider :exec
-DELETE FROM fetch_providers WHERE tenant_id = app.current_tenant_id() AND id = sqlc.arg(id);
+DELETE FROM fetch_providers WHERE team_id = app.current_team_id() AND id = sqlc.arg(id);

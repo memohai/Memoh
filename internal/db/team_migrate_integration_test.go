@@ -21,7 +21,7 @@ import (
 	embeddeddb "github.com/memohai/memoh/db"
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/tenant"
+	"github.com/memohai/memoh/internal/team"
 )
 
 func sqlState(err error) string {
@@ -33,16 +33,16 @@ func sqlState(err error) string {
 }
 
 var (
-	tenantTestDBSeq atomic.Uint64
-	tenantTestDBs   sync.Map
+	teamTestDBSeq atomic.Uint64
+	teamTestDBs   sync.Map
 )
 
-// tenantMigrationDSN creates a database dedicated to the current test. Tenant
+// teamMigrationDSN creates a database dedicated to the current test. Team
 // migration tests drop schemas and step migrations backward, so they must not
 // share TEST_POSTGRES_DSN with other integration packages.
-func tenantMigrationDSN(t *testing.T) string {
+func teamMigrationDSN(t *testing.T) string {
 	t.Helper()
-	if dsn, ok := tenantTestDBs.Load(t.Name()); ok {
+	if dsn, ok := teamTestDBs.Load(t.Name()); ok {
 		return dsn.(string)
 	}
 
@@ -60,7 +60,7 @@ func tenantMigrationDSN(t *testing.T) string {
 	}
 	defer admin.Close()
 
-	dbName := "memoh_tenant_test_" + strconv.Itoa(os.Getpid()) + "_" + strconv.FormatUint(tenantTestDBSeq.Add(1), 10)
+	dbName := "memoh_team_test_" + strconv.Itoa(os.Getpid()) + "_" + strconv.FormatUint(teamTestDBSeq.Add(1), 10)
 	if _, err := admin.Exec(context.Background(), "CREATE DATABASE "+dbName); err != nil {
 		t.Fatalf("create isolated test database: %v", err)
 	}
@@ -78,9 +78,9 @@ func tenantMigrationDSN(t *testing.T) string {
 		Database: dbName,
 		SSLMode:  sslMode,
 	})
-	tenantTestDBs.Store(t.Name(), testDSN)
+	teamTestDBs.Store(t.Name(), testDSN)
 	t.Cleanup(func() {
-		tenantTestDBs.Delete(t.Name())
+		teamTestDBs.Delete(t.Name())
 		cleanup, err := pgxpool.NewWithConfig(context.Background(), cfg.Copy())
 		if err != nil {
 			return
@@ -125,7 +125,7 @@ func postgresMigrationsFS(t *testing.T) fs.FS {
 // freshMigratedDB applies the full migration chain to the test's isolated DB.
 func freshMigratedDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := tenantMigrationDSN(t)
+	dsn := teamMigrationDSN(t)
 	ctx := context.Background()
 
 	pool, err := pgxpool.New(ctx, dsn)
@@ -144,47 +144,47 @@ func freshMigratedDB(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-func TestSingletonTenantSeededAfterMigrate(t *testing.T) {
+func TestSingletonTeamSeededAfterMigrate(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
 
 	var count int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM tenants").Scan(&count); err != nil {
-		t.Fatalf("count tenants: %v", err)
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM teams").Scan(&count); err != nil {
+		t.Fatalf("count teams: %v", err)
 	}
 	if count != 1 {
-		t.Fatalf("expected exactly 1 seeded tenant, got %d", count)
+		t.Fatalf("expected exactly 1 seeded team, got %d", count)
 	}
 
 	var id, slug string
-	if err := pool.QueryRow(ctx, "SELECT id::text, slug FROM tenants").Scan(&id, &slug); err != nil {
-		t.Fatalf("select tenant: %v", err)
+	if err := pool.QueryRow(ctx, "SELECT id::text, slug FROM teams").Scan(&id, &slug); err != nil {
+		t.Fatalf("select team: %v", err)
 	}
-	if id != tenant.DefaultTenantID {
-		t.Fatalf("seeded tenant id = %q, want DefaultTenantID %q", id, tenant.DefaultTenantID)
+	if id != team.DefaultTeamID {
+		t.Fatalf("seeded team id = %q, want DefaultTeamID %q", id, team.DefaultTeamID)
 	}
 	if slug != "default" {
-		t.Fatalf("seeded tenant slug = %q, want %q", slug, "default")
+		t.Fatalf("seeded team slug = %q, want %q", slug, "default")
 	}
 
-	// tenants root must NOT carry a redundant tenant_id column (it is the root:
-	// its own id IS the tenant id).
-	var hasTenantID bool
+	// teams root must NOT carry a redundant team_id column (it is the root:
+	// its own id IS the team id).
+	var hasTeamID bool
 	if err := pool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM information_schema.columns
-			WHERE table_schema = 'public' AND table_name = 'tenants' AND column_name = 'tenant_id'
-		)`).Scan(&hasTenantID); err != nil {
-		t.Fatalf("check tenants columns: %v", err)
+			WHERE table_schema = 'public' AND table_name = 'teams' AND column_name = 'team_id'
+		)`).Scan(&hasTeamID); err != nil {
+		t.Fatalf("check teams columns: %v", err)
 	}
-	if hasTenantID {
-		t.Fatal("tenants root must not have a redundant tenant_id column")
+	if hasTeamID {
+		t.Fatal("teams root must not have a redundant team_id column")
 	}
 }
 
 func TestMigrationsDoNotRequireClusterRolePrivileges(t *testing.T) {
 	ctx := context.Background()
-	adminDSN := tenantMigrationDSN(t)
+	adminDSN := teamMigrationDSN(t)
 	adminCfg, err := pgconn.ParseConfig(adminDSN)
 	if err != nil {
 		t.Fatalf("parse isolated database DSN: %v", err)
@@ -194,7 +194,7 @@ func TestMigrationsDoNotRequireClusterRolePrivileges(t *testing.T) {
 		t.Fatalf("connect isolated database: %v", err)
 	}
 
-	role := "memoh_migration_test_" + strconv.Itoa(os.Getpid()) + "_" + strconv.FormatUint(tenantTestDBSeq.Add(1), 10)
+	role := "memoh_migration_test_" + strconv.Itoa(os.Getpid()) + "_" + strconv.FormatUint(teamTestDBSeq.Add(1), 10)
 	const password = "migration_test_password"
 	if _, err := admin.Exec(ctx, "CREATE ROLE "+role+" LOGIN NOSUPERUSER NOCREATEROLE NOBYPASSRLS PASSWORD '"+password+"'"); err != nil {
 		t.Fatalf("create limited migration role: %v", err)
@@ -278,7 +278,7 @@ func tryStepDown(t *testing.T, dsn string, n int) error {
 // resetToEmpty returns a connection to the test's isolated, empty database.
 func resetToEmpty(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := tenantMigrationDSN(t)
+	dsn := teamMigrationDSN(t)
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -291,9 +291,9 @@ func resetToEmpty(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// stepUpToPreTenant applies the migration chain up to (but not including) the
-// tenantSteps tenant migrations — i.e. the "legacy install" pre-tenant state.
-func stepUpToPreTenant(t *testing.T, dsn string, tenantSteps int) {
+// stepUpToPreTeam applies the migration chain up to (but not including) the
+// teamSteps team migrations — i.e. the "legacy install" pre-team state.
+func stepUpToPreTeam(t *testing.T, dsn string, teamSteps int) {
 	t.Helper()
 	src, err := iofs.New(postgresMigrationsFS(t), ".")
 	if err != nil {
@@ -305,8 +305,8 @@ func stepUpToPreTenant(t *testing.T, dsn string, tenantSteps int) {
 	}
 	defer func() { _, _ = m.Close() }()
 	total := countAllMigrations(t)
-	if err := m.Steps(total - tenantSteps); err != nil {
-		t.Fatalf("step up to pre-tenant (%d steps): %v", total-tenantSteps, err)
+	if err := m.Steps(total - teamSteps); err != nil {
+		t.Fatalf("step up to pre-team (%d steps): %v", total-teamSteps, err)
 	}
 }
 
@@ -326,41 +326,41 @@ func countAllMigrations(t *testing.T) int {
 	return n
 }
 
-// TestTenantChainReversible verifies the full tenant migration chain
-// is cleanly reversible: stepping down the consolidated tenant migration
-// removes all tenant objects, and a step-up re-applies them. It also verifies
-// the down safety gate refuses to drop the tenants root when a non-default
-// tenant exists.
-func TestTenantChainReversible(t *testing.T) {
+// TestTeamChainReversible verifies the full team migration chain
+// is cleanly reversible: stepping down the consolidated team migration
+// removes all team objects, and a step-up re-applies them. It also verifies
+// the down safety gate refuses to drop the teams root when a non-default
+// team exists.
+func TestTeamChainReversible(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
-	dsn := tenantMigrationDSN(t)
+	dsn := teamMigrationDSN(t)
 
-	// The tenant core is intentionally one consolidated migration.
-	tenantSteps := countTenantMigrations(t)
+	// The team core is intentionally one consolidated migration.
+	teamSteps := countTeamMigrations(t)
 
-	// Step the tenant migrations down; tenants + app schema must be gone.
-	stepDown(t, dsn, tenantSteps)
-	var tenantsExists, appExists bool
+	// Step the team migrations down; teams + app schema must be gone.
+	stepDown(t, dsn, teamSteps)
+	var teamsExists, appExists bool
 	if err := pool.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM information_schema.tables
-			WHERE table_schema='public' AND table_name='tenants')`).Scan(&tenantsExists); err != nil {
-		t.Fatalf("check tenants after step down: %v", err)
+			WHERE table_schema='public' AND table_name='teams')`).Scan(&teamsExists); err != nil {
+		t.Fatalf("check teams after step down: %v", err)
 	}
 	if err := pool.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name='app')`).Scan(&appExists); err != nil {
 		t.Fatalf("check app schema after step down: %v", err)
 	}
-	if tenantsExists {
-		t.Error("tenants root must be dropped after stepping down the tenant migrations")
+	if teamsExists {
+		t.Error("teams root must be dropped after stepping down the team migrations")
 	}
 	if appExists {
-		t.Error("app schema must be dropped after stepping down the tenant migrations")
+		t.Error("app schema must be dropped after stepping down the team migrations")
 	}
 
 	// Re-apply and confirm SET NULL actions target only the original reference
-	// column rather than the non-null tenant_id column.
-	stepUp(t, dsn, tenantSteps)
+	// column rather than the non-null team_id column.
+	stepUp(t, dsn, teamSteps)
 	var unsafeSetNull int
 	if err := pool.QueryRow(ctx, `
 		SELECT count(*) FROM pg_constraint con
@@ -370,29 +370,29 @@ func TestTenantChainReversible(t *testing.T) {
 		   AND (con.confdelsetcols IS NULL OR EXISTS (
 		       SELECT 1 FROM pg_attribute a
 		        WHERE a.attrelid=con.conrelid AND a.attnum=ANY(con.confdelsetcols)
-		          AND a.attname='tenant_id'))`).Scan(&unsafeSetNull); err != nil {
+		          AND a.attname='team_id'))`).Scan(&unsafeSetNull); err != nil {
 		t.Fatalf("count set null after re-up: %v", err)
 	}
 	if unsafeSetNull != 0 {
-		t.Errorf("after re-up found %d SET NULL FKs that can clear tenant_id", unsafeSetNull)
+		t.Errorf("after re-up found %d SET NULL FKs that can clear team_id", unsafeSetNull)
 	}
 }
 
-// TestTenantsRootDownSafetyGate verifies the root down safety gate: when a
-// non-default tenant exists, stepping the tenant migrations down must fail
-// closed rather than dropping tenant data.
-func TestTenantsRootDownSafetyGate(t *testing.T) {
+// TestTeamsRootDownSafetyGate verifies the root down safety gate: when a
+// non-default team exists, stepping the team migrations down must fail
+// closed rather than dropping team data.
+func TestTeamsRootDownSafetyGate(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
-	dsn := tenantMigrationDSN(t)
+	dsn := teamMigrationDSN(t)
 
-	// Seed a second tenant so rollback must preserve the tenant root.
+	// Seed a second team so rollback must preserve the team root.
 	const t2 = "00000000-0000-0000-0000-0000000000f2"
-	if _, err := pool.Exec(ctx, `INSERT INTO tenants (id, slug) VALUES ($1, 'other')`, t2); err != nil {
-		t.Fatalf("insert non-default tenant: %v", err)
+	if _, err := pool.Exec(ctx, `INSERT INTO teams (id, slug) VALUES ($1, 'other')`, t2); err != nil {
+		t.Fatalf("insert non-default team: %v", err)
 	}
 
-	// Stepping the tenant migration down must fail closed.
+	// Stepping the team migration down must fail closed.
 	src, err := iofs.New(postgresMigrationsFS(t), ".")
 	if err != nil {
 		t.Fatalf("iofs: %v", err)
@@ -402,28 +402,28 @@ func TestTenantsRootDownSafetyGate(t *testing.T) {
 		t.Fatalf("migrate init: %v", err)
 	}
 	defer func() { _, _ = m.Close() }()
-	if err := m.Steps(-countTenantMigrations(t)); err == nil {
-		t.Fatal("stepping tenant migrations down must fail closed with a non-default tenant present")
+	if err := m.Steps(-countTeamMigrations(t)); err == nil {
+		t.Fatal("stepping team migrations down must fail closed with a non-default team present")
 	}
 }
 
-// countTenantMigrations asserts that this PR contributes exactly one migration.
-func countTenantMigrations(t *testing.T) int {
+// countTeamMigrations asserts that this PR contributes exactly one migration.
+func countTeamMigrations(t *testing.T) int {
 	t.Helper()
 	entries, err := fs.ReadDir(postgresMigrationsFS(t), ".")
 	if err != nil {
 		t.Fatalf("read migrations dir: %v", err)
 	}
-	const tenantMigration = "0107_tenant_core.up.sql"
+	const teamMigration = "0107_team_core.up.sql"
 	found := false
 	for _, e := range entries {
-		if e.Name() == tenantMigration {
+		if e.Name() == teamMigration {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("missing consolidated tenant migration %s", tenantMigration)
+		t.Fatalf("missing consolidated team migration %s", teamMigration)
 	}
 	return 1
 }

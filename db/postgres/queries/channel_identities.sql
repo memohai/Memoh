@@ -1,34 +1,34 @@
 -- name: CreateChannelIdentity :one
 INSERT INTO channel_identities (channel_type, channel_subject_id, display_name, avatar_url, metadata)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, tenant_id;
+RETURNING id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, team_id;
 
 -- name: GetChannelIdentityByID :one
-SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, tenant_id
+SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, team_id
 FROM channel_identities
-WHERE tenant_id = app.current_tenant_id() AND id = $1;
+WHERE team_id = app.current_team_id() AND id = $1;
 
 -- name: GetChannelIdentityByIDForUpdate :one
-SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, tenant_id
+SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, team_id
 FROM channel_identities
-WHERE tenant_id = app.current_tenant_id() AND id = $1
+WHERE team_id = app.current_team_id() AND id = $1
 FOR UPDATE;
 
 -- name: GetChannelIdentityByChannelSubject :one
-SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, tenant_id
+SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, team_id
 FROM channel_identities
-WHERE tenant_id = app.current_tenant_id() AND channel_type = $1 AND channel_subject_id = $2;
+WHERE team_id = app.current_team_id() AND channel_type = $1 AND channel_subject_id = $2;
 
 -- name: UpsertChannelIdentityByChannelSubject :one
 INSERT INTO channel_identities (channel_type, channel_subject_id, display_name, avatar_url, metadata)
 VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (tenant_id, channel_type, channel_subject_id)
+ON CONFLICT (team_id, channel_type, channel_subject_id)
 DO UPDATE SET
   display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), channel_identities.display_name),
   avatar_url = COALESCE(NULLIF(EXCLUDED.avatar_url, ''), channel_identities.avatar_url),
   metadata = EXCLUDED.metadata,
   updated_at = now()
-RETURNING id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, tenant_id;
+RETURNING id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, team_id;
 
 -- name: SearchChannelIdentities :many
 SELECT
@@ -40,10 +40,10 @@ SELECT
   ci.metadata,
   ci.created_at,
   ci.updated_at,
-  ci.tenant_id
+  ci.team_id
 FROM channel_identities ci
 WHERE
-  ci.tenant_id = app.current_tenant_id()
+  ci.team_id = app.current_team_id()
   AND (
     sqlc.arg(query)::text = ''
     OR ci.channel_type ILIKE '%' || sqlc.arg(query)::text || '%'

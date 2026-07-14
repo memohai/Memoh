@@ -138,3 +138,17 @@ func TestSemanticRetryQueueCapacityEvictsOldest(t *testing.T) {
 		t.Fatal("newest entry should be present")
 	}
 }
+
+func TestSemanticRetryQueueStopIsIdempotent(t *testing.T) {
+	t.Parallel()
+	q := newSemanticRetryQueue(nil)
+
+	q.stop()
+	q.stop()
+
+	select {
+	case <-q.stopCh:
+	default:
+		t.Fatal("stop channel remains open")
+	}
+}

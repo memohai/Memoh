@@ -1,11 +1,13 @@
 package builtin
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 
 	"github.com/memohai/memoh/internal/config"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	adapters "github.com/memohai/memoh/internal/memory/adapters"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 	"github.com/memohai/memoh/internal/memory/wikistore"
 )
@@ -19,11 +21,18 @@ import (
 // relational store. The pgvector semantic seed index itself uses the dedicated
 // [pgvector] database, so Local stores intentionally run graph-only.
 func NewBuiltinRuntimeFromConfig(logger *slog.Logger, providerConfig map[string]any, store *storefs.Service, queries dbstore.Queries, cfg config.Config, wikiStore wikistore.Store) (Runtime, error) {
+	return NewBuiltinRuntimeFromConfigContext(context.Background(), logger, providerConfig, store, queries, cfg, wikiStore, nil)
+}
+
+// NewBuiltinRuntimeFromConfigContext builds a team-owned runtime. resolver is
+// fixed by the registry at provider instantiation time so asynchronous index
+// retries retain the same team even after the request context is gone.
+func NewBuiltinRuntimeFromConfigContext(ctx context.Context, logger *slog.Logger, providerConfig map[string]any, store *storefs.Service, queries dbstore.Queries, cfg config.Config, wikiStore wikistore.Store, resolver adapters.TeamIDResolver) (Runtime, error) {
 	if wikiStore == nil {
 		return nil, errors.New("graph runtime: wiki store not configured")
 	}
 	runtime := NewGraphRuntime(logger, wikiStore, store)
-	semantic, err := newPGVectorIndex(logger, providerConfig, queries, cfg.PGVector)
+	semantic, err := newPGVectorIndex(ctx, logger, providerConfig, queries, cfg.PGVector, resolver)
 	if err != nil {
 		return nil, err
 	}

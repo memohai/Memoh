@@ -10,18 +10,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// nonTenantPublicTables are the public tables that are NOT tenant business
-// tables: tooling metadata and the tenants root (whose own id IS the tenant id).
-var nonTenantPublicTables = map[string]bool{
+// nonTeamPublicTables are the public tables that are NOT team business
+// tables: tooling metadata and the teams root (whose own id IS the team id).
+var nonTeamPublicTables = map[string]bool{
 	"schema_migrations": true,
-	"tenants":           true,
+	"teams":             true,
 }
 
-// TestTenantViewGuard verifies that views over tenant tables do not bypass RLS.
+// TestTeamViewGuard verifies that views over team tables do not bypass RLS.
 // Every public view must run with
-// security_invoker = true (so the caller's RLS applies), project a tenant_id
+// security_invoker = true (so the caller's RLS applies), project a team_id
 // column (so consumers can scope explicitly and the isolation is auditable).
-func TestTenantViewGuard(t *testing.T) {
+func TestTeamViewGuard(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
 
@@ -48,21 +48,21 @@ func TestTenantViewGuard(t *testing.T) {
 		if v.secInvoker != "true" {
 			t.Errorf("view %s must be WITH (security_invoker = true) to respect caller RLS, got %q", v.name, v.secInvoker)
 		}
-		// (2) must project a tenant_id column.
-		var hasTenantID bool
+		// (2) must project a team_id column.
+		var hasTeamID bool
 		if err := pool.QueryRow(ctx, `
 			SELECT EXISTS (SELECT 1 FROM information_schema.columns
-				WHERE table_schema='public' AND table_name=$1 AND column_name='tenant_id')`, v.name).Scan(&hasTenantID); err != nil {
+				WHERE table_schema='public' AND table_name=$1 AND column_name='team_id')`, v.name).Scan(&hasTeamID); err != nil {
 			t.Fatalf("view %s columns: %v", v.name, err)
 		}
-		if !hasTenantID {
-			t.Errorf("view %s must project tenant_id", v.name)
+		if !hasTeamID {
+			t.Errorf("view %s must project team_id", v.name)
 		}
 	}
 }
 
-// TestTenantSchemaGuard asserts the tenant schema invariants structurally.
-func TestTenantSchemaGuard(t *testing.T) {
+// TestTeamSchemaGuard asserts the team schema invariants structurally.
+func TestTeamSchemaGuard(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
 
@@ -72,34 +72,34 @@ func TestTenantSchemaGuard(t *testing.T) {
 	}
 
 	for _, tbl := range tables {
-		if nonTenantPublicTables[tbl] {
+		if nonTeamPublicTables[tbl] {
 			continue
 		}
-		// (1) tenant_id column exists and is NOT NULL.
+		// (1) team_id column exists and is NOT NULL.
 		var isNullable string
 		if err := pool.QueryRow(ctx, `
 			SELECT is_nullable FROM information_schema.columns
-			 WHERE table_schema='public' AND table_name=$1 AND column_name='tenant_id'`, tbl).Scan(&isNullable); err != nil {
-			t.Errorf("tenant table %s: missing tenant_id column: %v", tbl, err)
+			 WHERE table_schema='public' AND table_name=$1 AND column_name='team_id'`, tbl).Scan(&isNullable); err != nil {
+			t.Errorf("team table %s: missing team_id column: %v", tbl, err)
 			continue
 		}
 		if isNullable != "NO" {
-			t.Errorf("tenant table %s: tenant_id must be NOT NULL", tbl)
+			t.Errorf("team table %s: team_id must be NOT NULL", tbl)
 		}
 
-		// (2) Existing PK remains stable and has a tenant-prefixed helper key.
+		// (2) Existing PK remains stable and has a team-prefixed helper key.
 		var helperKeys int
 		if err := pool.QueryRow(ctx, `
 			SELECT count(*) FROM pg_constraint
 			 WHERE conrelid=('public.'||quote_ident($1))::regclass
-			   AND contype='u' AND conname LIKE 'memoh_tenant_key_%'`, tbl).Scan(&helperKeys); err != nil {
-			t.Fatalf("tenant key check %s: %v", tbl, err)
+			   AND contype='u' AND conname LIKE 'memoh_team_key_%'`, tbl).Scan(&helperKeys); err != nil {
+			t.Fatalf("team key check %s: %v", tbl, err)
 		}
 		if helperKeys != 1 {
-			t.Errorf("tenant table %s: expected one tenant-prefixed helper key, got %d", tbl, helperKeys)
+			t.Errorf("team table %s: expected one team-prefixed helper key, got %d", tbl, helperKeys)
 		}
 
-		// (3) has a root FK (tenant_id) -> tenants(id).
+		// (3) has a root FK (team_id) -> teams(id).
 		var hasRootFK bool
 		if err := pool.QueryRow(ctx, `
 			SELECT EXISTS (
@@ -107,11 +107,11 @@ func TestTenantSchemaGuard(t *testing.T) {
 				  JOIN pg_class rt ON rt.oid = con.confrelid
 				  JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = ANY(con.conkey)
 				 WHERE con.contype='f' AND con.conrelid = ('public.'||quote_ident($1))::regclass
-				   AND rt.relname='tenants' AND a.attname='tenant_id')`, tbl).Scan(&hasRootFK); err != nil {
+				   AND rt.relname='teams' AND a.attname='team_id')`, tbl).Scan(&hasRootFK); err != nil {
 			t.Fatalf("root FK check %s: %v", tbl, err)
 		}
 		if !hasRootFK {
-			t.Errorf("tenant table %s: missing root FK (tenant_id) -> tenants(id)", tbl)
+			t.Errorf("team table %s: missing root FK (team_id) -> teams(id)", tbl)
 		}
 
 		// (4) RLS enabled + forced.
@@ -123,12 +123,12 @@ func TestTenantSchemaGuard(t *testing.T) {
 			t.Fatalf("rls check %s: %v", tbl, err)
 		}
 		if !rls || !force {
-			t.Errorf("tenant table %s: must have RLS enabled+forced (got rls=%v force=%v)", tbl, rls, force)
+			t.Errorf("team table %s: must have RLS enabled+forced (got rls=%v force=%v)", tbl, rls, force)
 		}
 
 	}
 
-	// (5) SET NULL may clear the original reference, but never tenant_id.
+	// (5) SET NULL may clear the original reference, but never team_id.
 	var unsafeSetNull int
 	if err := pool.QueryRow(ctx, `
 		SELECT count(*) FROM pg_constraint con
@@ -138,27 +138,27 @@ func TestTenantSchemaGuard(t *testing.T) {
 		   AND (con.confdelsetcols IS NULL OR EXISTS (
 		       SELECT 1 FROM pg_attribute a
 		        WHERE a.attrelid=con.conrelid AND a.attnum=ANY(con.confdelsetcols)
-		          AND a.attname='tenant_id'))`).Scan(&unsafeSetNull); err != nil {
+		          AND a.attname='team_id'))`).Scan(&unsafeSetNull); err != nil {
 		t.Fatalf("set null check: %v", err)
 	}
 	if unsafeSetNull != 0 {
-		t.Errorf("found %d SET NULL FKs that can clear tenant_id", unsafeSetNull)
+		t.Errorf("found %d SET NULL FKs that can clear team_id", unsafeSetNull)
 	}
 
-	// (6) tenants root special case: PK is (id) only, no redundant tenant_id, FORCE RLS.
-	var rootHasTenantID bool
+	// (6) teams root special case: PK is (id) only, no redundant team_id, FORCE RLS.
+	var rootHasTeamID bool
 	if err := pool.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM information_schema.columns
-			WHERE table_schema='public' AND table_name='tenants' AND column_name='tenant_id')`).Scan(&rootHasTenantID); err != nil {
-		t.Fatalf("root tenant_id check: %v", err)
+			WHERE table_schema='public' AND table_name='teams' AND column_name='team_id')`).Scan(&rootHasTeamID); err != nil {
+		t.Fatalf("root team_id check: %v", err)
 	}
-	if rootHasTenantID {
-		t.Error("tenants root must not have a redundant tenant_id column")
+	if rootHasTeamID {
+		t.Error("teams root must not have a redundant team_id column")
 	}
 	var rootRLS, rootForce bool
-	_ = pool.QueryRow(ctx, `SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid='public.tenants'::regclass`).Scan(&rootRLS, &rootForce)
+	_ = pool.QueryRow(ctx, `SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid='public.teams'::regclass`).Scan(&rootRLS, &rootForce)
 	if !rootRLS || !rootForce {
-		t.Error("tenants root must have RLS enabled+forced")
+		t.Error("teams root must have RLS enabled+forced")
 	}
 
 	// (7) NULLS NOT DISTINCT must be preserved on bot_acl_rules_unique_target
@@ -176,13 +176,13 @@ func TestTenantSchemaGuard(t *testing.T) {
 	}
 }
 
-// TestRLSPolicyGuard verifies every tenant table has four tenant-only policies.
+// TestRLSPolicyGuard verifies every team table has four team-only policies.
 func TestRLSPolicyGuard(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
 
 	for _, tbl := range publicBaseTables(t, ctx, pool) {
-		if nonTenantPublicTables[tbl] {
+		if nonTeamPublicTables[tbl] {
 			continue
 		}
 		var policyCount int
@@ -191,10 +191,10 @@ func TestRLSPolicyGuard(t *testing.T) {
 			t.Fatalf("policy count %s: %v", tbl, err)
 		}
 		if policyCount < 4 {
-			t.Errorf("tenant table %s: expected >= 4 per-command policies, got %d", tbl, policyCount)
+			t.Errorf("team table %s: expected >= 4 per-command policies, got %d", tbl, policyCount)
 		}
 
-		// Every policy must resolve the tenant from the database context and must
+		// Every policy must resolve the team from the database context and must
 		// not depend on deployment-specific write-fencing helpers.
 		rows, err := pool.Query(ctx, `
 			SELECT cmd, COALESCE(qual,''), COALESCE(with_check,'')
@@ -206,8 +206,8 @@ func TestRLSPolicyGuard(t *testing.T) {
 			var cmd, qual, withCheck string
 			_ = rows.Scan(&cmd, &qual, &withCheck)
 			body := qual + " " + withCheck
-			if !strings.Contains(body, "current_tenant_id") {
-				t.Errorf("%s policy %s must call current_tenant_id()", tbl, cmd)
+			if !strings.Contains(body, "current_team_id") {
+				t.Errorf("%s policy %s must call current_team_id()", tbl, cmd)
 			}
 			if strings.Contains(body, "fence") {
 				t.Errorf("%s policy %s must not contain deployment-specific fencing", tbl, cmd)
