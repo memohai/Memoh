@@ -68,6 +68,35 @@ reference, but downstream tenantization targets the applied final state (49
 tables at base: canonical 48 − `channel_identity_bind_codes` + `media_assets`
 + `tasks`).
 
+### Open PR-review question: canonical-authority reconciliation
+
+An independent review noted that "updating `0001_init` to the final state" is
+NOT the same as "rewriting applied incremental history" — the upstream rule only
+asks that `0001_init` (the canonical file) reflect the final state, which does
+not require touching `0002`–`0105`. So there are two defensible ways to land this
+upstream, to be decided at PR time:
+
+1. **Keep `0001_init` frozen, revise the AGENTS rule** (this doc's current
+   stance): declare applied-state the source of truth and note the canonical
+   invariant is already violated at base. Smaller diff; changes upstream policy.
+2. **Back-fill `0001_init` to the tenant-ized final state** (satisfy AGENTS as
+   written): edit only `0001_init.up.sql` (a fresh-install file), leaving the
+   incrementals `0002`–`0105` untouched. Our `0106+` are idempotent
+   (`IF NOT EXISTS`), so they no-op on a fresh install and still upgrade legacy
+   installs. Larger, error-prone diff; keeps upstream policy intact.
+
+Either is acceptable; the choice is a project/PR decision, not a correctness one.
+
+### Note: SET NULL clear-refs are repository-level, not CTE
+
+Empirically verified on PostgreSQL 18: a single-statement CTE that clears a child
+column and then deletes the parent does NOT satisfy the FK — the DELETE's
+`ON DELETE RESTRICT` check does not observe a same-statement data-modifying CTE's
+UPDATE, so it still errors. The schema contract's requirement ("repository clears
+the nullable ref column in the SAME TRANSACTION, then deletes the parent") is
+therefore implemented as SEPARATE statements inside a transaction
+(`internal/db/postgres/store/clear_refs.go`), which is verified to work.
+
 ## Upstream AGENTS migration rules (as written at this SHA — for reference)
 
 From `AGENTS.md` "Database, sqlc & Migrations" (item 1 is overridden above):

@@ -17,6 +17,61 @@ var nonTenantPublicTables = map[string]bool{
 	"tenants":           true,
 }
 
+// TestTenantViewGuard is the view portion of G-SCHEMA/G-RLS-STATIC: a view that
+// reads tenant tables must not bypass RLS. Every public view must run with
+// security_invoker = true (so the caller's RLS applies), project a tenant_id
+// column (so consumers can scope explicitly and the isolation is auditable), and
+// not be owned by a BYPASSRLS/superuser role. This guard would have caught the
+// bot_visible_history_messages cross-tenant leak.
+func TestTenantViewGuard(t *testing.T) {
+	ctx := context.Background()
+	pool := freshMigratedDB(t)
+
+	rows, err := pool.Query(ctx, `
+		SELECT c.relname, pg_get_userbyid(c.relowner) AS owner,
+		       COALESCE((SELECT option_value FROM pg_options_to_table(c.reloptions)
+		                  WHERE option_name='security_invoker'), 'false') AS security_invoker
+		  FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+		 WHERE c.relkind='v' AND n.nspname='public'`)
+	if err != nil {
+		t.Fatalf("list views: %v", err)
+	}
+	type view struct{ name, owner, secInvoker string }
+	var views []view
+	for rows.Next() {
+		var v view
+		_ = rows.Scan(&v.name, &v.owner, &v.secInvoker)
+		views = append(views, v)
+	}
+	rows.Close()
+
+	for _, v := range views {
+		// (1) security_invoker must be true.
+		if v.secInvoker != "true" {
+			t.Errorf("view %s must be WITH (security_invoker = true) to respect caller RLS, got %q", v.name, v.secInvoker)
+		}
+		// (2) owner must not bypass RLS or be superuser.
+		var bypass, super bool
+		if err := pool.QueryRow(ctx,
+			`SELECT rolbypassrls, rolsuper FROM pg_roles WHERE rolname=$1`, v.owner).Scan(&bypass, &super); err != nil {
+			t.Fatalf("view %s owner attrs: %v", v.name, err)
+		}
+		if bypass || super {
+			t.Errorf("view %s owner %q must not be BYPASSRLS/superuser (got bypass=%v super=%v)", v.name, v.owner, bypass, super)
+		}
+		// (3) must project a tenant_id column.
+		var hasTenantID bool
+		if err := pool.QueryRow(ctx, `
+			SELECT EXISTS (SELECT 1 FROM information_schema.columns
+				WHERE table_schema='public' AND table_name=$1 AND column_name='tenant_id')`, v.name).Scan(&hasTenantID); err != nil {
+			t.Fatalf("view %s columns: %v", v.name, err)
+		}
+		if !hasTenantID {
+			t.Errorf("view %s must project tenant_id", v.name)
+		}
+	}
+}
+
 // TestTenantSchemaGuard is the G-SCHEMA static guard: it asserts the applied
 // schema satisfies the tenant schema contract structurally, so future changes
 // cannot silently regress isolation.
@@ -76,6 +131,19 @@ func TestTenantSchemaGuard(t *testing.T) {
 		if !rls || !force {
 			t.Errorf("tenant table %s: must have RLS enabled+forced (got rls=%v force=%v)", tbl, rls, force)
 		}
+
+		// (5) owner must be memoh_owner (NOLOGIN/non-super/non-bypass) so FORCE
+		// RLS actually applies to owner-context access.
+		var owner string
+		if err := pool.QueryRow(ctx, `
+			SELECT pg_get_userbyid(c.relowner) FROM pg_class c
+			  JOIN pg_namespace n ON n.oid=c.relnamespace
+			 WHERE n.nspname='public' AND c.relname=$1`, tbl).Scan(&owner); err != nil {
+			t.Fatalf("owner check %s: %v", tbl, err)
+		}
+		if owner != "memoh_owner" {
+			t.Errorf("tenant table %s: owner must be memoh_owner, is %q (FORCE RLS only binds the ordinary owner)", tbl, owner)
+		}
 	}
 
 	// (5) No ON DELETE SET NULL on any composite FK that carries tenant_id.
@@ -107,6 +175,20 @@ func TestTenantSchemaGuard(t *testing.T) {
 	_ = pool.QueryRow(ctx, `SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid='public.tenants'::regclass`).Scan(&rootRLS, &rootForce)
 	if !rootRLS || !rootForce {
 		t.Error("tenants root must have RLS enabled+forced")
+	}
+
+	// (7) NULLS NOT DISTINCT must be preserved on bot_acl_rules_unique_target
+	// (the composite-key rebuild must not silently widen it to a plain UNIQUE,
+	// which would let duplicate ACL rules with NULL key columns through).
+	var nnd bool
+	if err := pool.QueryRow(ctx, `
+		SELECT i.indnullsnotdistinct FROM pg_constraint con
+		  JOIN pg_index i ON i.indexrelid = con.conindid
+		 WHERE con.conname = 'bot_acl_rules_unique_target'`).Scan(&nnd); err != nil {
+		t.Fatalf("nulls-not-distinct check: %v", err)
+	}
+	if !nnd {
+		t.Error("bot_acl_rules_unique_target must be UNIQUE NULLS NOT DISTINCT (semantics widened)")
 	}
 }
 
@@ -175,6 +257,37 @@ func TestFenceSecurityGuard(t *testing.T) {
 	if super {
 		t.Error("memoh_runtime must NOT be a superuser")
 	}
+
+	// memoh_owner must have no LOGIN/superuser/bypass member (the temporary
+	// CURRENT_USER membership granted during migration must be revoked; leaving
+	// a superuser in owner's membership lets it assume owner and bypass RLS).
+	rows, err := pool.Query(ctx, `
+		SELECT r.rolname, r.rolcanlogin, r.rolsuper, r.rolbypassrls
+		  FROM pg_auth_members m
+		  JOIN pg_roles g ON g.oid = m.roleid
+		  JOIN pg_roles r ON r.oid = m.member
+		 WHERE g.rolname = 'memoh_owner'`)
+	if err != nil {
+		t.Fatalf("owner membership: %v", err)
+	}
+	for rows.Next() {
+		var name string
+		var canLogin, isSuper, isBypass bool
+		_ = rows.Scan(&name, &canLogin, &isSuper, &isBypass)
+		// memoh_migrator is the one allowed member: BYPASSRLS is its own
+		// attribute, used via explicit SET ROLE for controlled DDL. Anything
+		// else is suspect — especially a superuser/bypass or a stray LOGIN role.
+		if name == "memoh_migrator" {
+			continue
+		}
+		if isSuper || isBypass {
+			t.Errorf("memoh_owner has a superuser/bypass member %q (must be revoked; it could assume owner and bypass RLS)", name)
+		}
+		if canLogin {
+			t.Errorf("memoh_owner has an unexpected LOGIN member %q", name)
+		}
+	}
+	rows.Close()
 }
 
 // TestRLSPolicyGuard is the policy portion of G-RLS-STATIC: every tenant table

@@ -6,6 +6,15 @@ import (
 	"github.com/google/uuid"
 )
 
+// This package carries the request-scoped tenant identity in Go. Note the
+// DATABASE-level tenant scope is enforced separately by the PostgreSQL session
+// GUC app.tenant_id (bound on connect via db.SetDefaultTenantOnConnect, and per
+// transaction by Cloud's trusted-context adapter): tenant queries scope
+// themselves with app.current_tenant_id() and tenant_id defaults to it, so the
+// Go ID here is not what filters rows — the GUC is. This context type is for
+// application logic and for the adapter that sets the GUC, not a substitute for
+// it.
+
 // ID is a tenant identifier. In upstream single-tenant installs it is always
 // DefaultTenantID; Cloud binds it per request from trusted context.
 type ID = uuid.UUID
