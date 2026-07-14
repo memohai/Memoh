@@ -1,6 +1,7 @@
 package userinput
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -16,6 +17,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/decision"
+	"github.com/memohai/memoh/internal/runtimefence"
 )
 
 const (
@@ -67,19 +69,32 @@ func storeRowIsLivePending(row *sqlc.UserInputRequest, now time.Time) bool {
 	return row.Status == StatusPending && (!row.ExpiresAt.Valid || row.ExpiresAt.Time.After(now))
 }
 
+func storeFenceMatches(left, right pgtype.Int8) bool {
+	return left.Valid == right.Valid && (!left.Valid || left.Int64 == right.Int64)
+}
+
+func storeRowAllowsDecision(row *sqlc.UserInputRequest, token pgtype.Int8, now time.Time) bool {
+	if row.Status != StatusPending {
+		return false
+	}
+	if row.RuntimeFencingToken.Valid {
+		return token.Valid && row.RuntimeFencingToken.Int64 == token.Int64
+	}
+	return !row.ExpiresAt.Valid || row.ExpiresAt.Time.After(now)
+}
+
 func (q *fakeUserInputQueries) CreateUserInputRequest(_ context.Context, arg sqlc.CreateUserInputRequestParams) (sqlc.UserInputRequest, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	now := time.Now()
 	if id, ok := q.byCall[storeCallKey(arg.SessionID, arg.ToolCallID)]; ok {
 		row := q.rows[id]
-		if !storeRowIsLivePending(row, now) {
+		if !storeRowIsLivePending(row, now) || !storeFenceMatches(row.RuntimeFencingToken, arg.RuntimeFencingToken) ||
+			!bytes.Equal(row.InputJson, arg.InputJson) || !bytes.Equal(row.UiPayloadJson, arg.UiPayloadJson) ||
+			!bytes.Equal(row.ProviderMetadata, arg.ProviderMetadata) || row.WorkspaceTargetID != arg.WorkspaceTargetID {
 			// ON CONFLICT DO UPDATE ... WHERE status='pending' matched no row.
 			return sqlc.UserInputRequest{}, pgx.ErrNoRows
 		}
-		row.InputJson = arg.InputJson
-		row.UiPayloadJson = arg.UiPayloadJson
-		row.ProviderMetadata = arg.ProviderMetadata
 		row.RequestedByChannelIdentityID = arg.RequestedByChannelIdentityID
 		row.SourcePlatform = arg.SourcePlatform
 		row.ReplyTarget = arg.ReplyTarget
@@ -96,10 +111,12 @@ func (q *fakeUserInputQueries) CreateUserInputRequest(_ context.Context, arg sql
 		SessionID:                    arg.SessionID,
 		RouteID:                      arg.RouteID,
 		ChannelIdentityID:            arg.ChannelIdentityID,
+		WorkspaceTargetID:            arg.WorkspaceTargetID,
 		ToolCallID:                   arg.ToolCallID,
 		ToolName:                     arg.ToolName,
 		ShortID:                      q.nextShort[sessionKey],
 		Status:                       StatusPending,
+		RuntimeFencingToken:          arg.RuntimeFencingToken,
 		InputJson:                    arg.InputJson,
 		UiPayloadJson:                arg.UiPayloadJson,
 		InteractionJson:              []byte("{}"),
@@ -142,6 +159,23 @@ func (q *fakeUserInputQueries) GetUserInputRequest(_ context.Context, id pgtype.
 	return *row, nil
 }
 
+func (q *fakeUserInputQueries) GetRespondableUserInputRequest(_ context.Context, arg sqlc.GetRespondableUserInputRequestParams) (sqlc.UserInputRequest, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	row, ok := q.rows[storeUUIDKey(arg.ID)]
+	if !ok || row.Status != StatusPending {
+		return sqlc.UserInputRequest{}, pgx.ErrNoRows
+	}
+	if arg.RuntimeFencingToken.Valid {
+		if !row.RuntimeFencingToken.Valid || row.RuntimeFencingToken.Int64 != arg.RuntimeFencingToken.Int64 {
+			return sqlc.UserInputRequest{}, pgx.ErrNoRows
+		}
+	} else if row.RuntimeFencingToken.Valid || !storeRowIsLivePending(row, time.Now()) {
+		return sqlc.UserInputRequest{}, pgx.ErrNoRows
+	}
+	return *row, nil
+}
+
 func (q *fakeUserInputQueries) GetUserInputRequestBySessionToolCall(_ context.Context, arg sqlc.GetUserInputRequestBySessionToolCallParams) (sqlc.UserInputRequest, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -157,7 +191,7 @@ func (q *fakeUserInputQueries) SubmitUserInputRequest(_ context.Context, arg sql
 	defer q.mu.Unlock()
 	now := time.Now()
 	row, ok := q.rows[storeUUIDKey(arg.ID)]
-	if !ok || !storeRowIsLivePending(row, now) {
+	if !ok || !storeRowAllowsDecision(row, arg.RuntimeFencingToken, now) {
 		return sqlc.UserInputRequest{}, pgx.ErrNoRows
 	}
 	stamp := pgtype.Timestamptz{Time: now, Valid: true}
@@ -174,7 +208,7 @@ func (q *fakeUserInputQueries) CancelUserInputRequest(_ context.Context, arg sql
 	defer q.mu.Unlock()
 	now := time.Now()
 	row, ok := q.rows[storeUUIDKey(arg.ID)]
-	if !ok || !storeRowIsLivePending(row, now) {
+	if !ok || !storeRowAllowsDecision(row, arg.RuntimeFencingToken, now) {
 		return sqlc.UserInputRequest{}, pgx.ErrNoRows
 	}
 	stamp := pgtype.Timestamptz{Time: now, Valid: true}
@@ -223,6 +257,100 @@ func (q *fakeUserInputQueries) ListPendingUserInputsBySession(_ context.Context,
 func newStoreUserInputService(t *testing.T) *Service {
 	t.Helper()
 	return NewService(slog.New(slog.DiscardHandler), newFakeUserInputQueries())
+}
+
+func TestFakeUserInputQueriesMatchesFencedSQLGuards(t *testing.T) {
+	t.Parallel()
+
+	queries := newFakeUserInputQueries()
+	botID := pgtype.UUID{Bytes: [16]byte(uuid.MustParse(storeTestBotID)), Valid: true}
+	sessionID := pgtype.UUID{Bytes: [16]byte(uuid.MustParse(storeTestSessionID)), Valid: true}
+	create := func(callID string, token int64) sqlc.UserInputRequest {
+		t.Helper()
+		row, err := queries.CreateUserInputRequest(context.Background(), sqlc.CreateUserInputRequestParams{
+			BotID:               botID,
+			SessionID:           sessionID,
+			WorkspaceTargetID:   "workspace-a",
+			ToolCallID:          callID,
+			ToolName:            ToolNameAskUser,
+			RuntimeFencingToken: pgtype.Int8{Int64: token, Valid: true},
+			InputJson:           []byte(`{"questions":[]}`),
+			UiPayloadJson:       []byte(`{"questions":[]}`),
+			ProviderMetadata:    []byte(`{}`),
+		})
+		if err != nil {
+			t.Fatalf("create fenced fake row: %v", err)
+		}
+		return row
+	}
+
+	row := create("same-fence", 7)
+	replayExpiry := time.Now().Add(time.Hour).Round(time.Microsecond)
+	requesterID := pgtype.UUID{Bytes: [16]byte(uuid.New()), Valid: true}
+	replay, err := queries.CreateUserInputRequest(context.Background(), sqlc.CreateUserInputRequestParams{
+		BotID: botID, SessionID: sessionID, WorkspaceTargetID: "workspace-a",
+		ToolCallID: "same-fence", ToolName: ToolNameAskUser,
+		RuntimeFencingToken: pgtype.Int8{Int64: 7, Valid: true},
+		InputJson:           []byte(`{"questions":[]}`), UiPayloadJson: []byte(`{"questions":[]}`), ProviderMetadata: []byte(`{}`),
+		RequestedByChannelIdentityID: requesterID, SourcePlatform: "web", ReplyTarget: "reply-a",
+		ConversationType: "direct", ExpiresAt: pgtype.Timestamptz{Time: replayExpiry, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("same-fence replay: %v", err)
+	}
+	if replay.ID != row.ID {
+		t.Fatalf("same-fence replay id = %s, want %s", replay.ID, row.ID)
+	}
+	if replay.RequestedByChannelIdentityID != requesterID || replay.SourcePlatform != "web" ||
+		replay.ReplyTarget != "reply-a" || replay.ConversationType != "direct" ||
+		!replay.ExpiresAt.Valid || !replay.ExpiresAt.Time.Equal(replayExpiry) {
+		t.Fatalf("same-fence replay did not update mutable routing fields: %#v", replay)
+	}
+	if _, err := queries.CreateUserInputRequest(context.Background(), sqlc.CreateUserInputRequestParams{
+		BotID:               botID,
+		SessionID:           sessionID,
+		WorkspaceTargetID:   "workspace-a",
+		ToolCallID:          "same-fence",
+		ToolName:            ToolNameAskUser,
+		RuntimeFencingToken: pgtype.Int8{Int64: 8, Valid: true},
+		InputJson:           []byte(`{"questions":[]}`),
+		UiPayloadJson:       []byte(`{"questions":[]}`),
+		ProviderMetadata:    []byte(`{}`),
+	}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("stale create error = %v, want pgx.ErrNoRows", err)
+	}
+	queries.mu.Lock()
+	queries.rows[storeUUIDKey(row.ID)].ExpiresAt = pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true}
+	queries.mu.Unlock()
+	if _, err := queries.SubmitUserInputRequest(context.Background(), sqlc.SubmitUserInputRequestParams{
+		ID: row.ID, ResultJson: []byte(`{"status":"submitted"}`),
+		RuntimeFencingToken: pgtype.Int8{Int64: 8, Valid: true},
+	}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("stale submit error = %v, want pgx.ErrNoRows", err)
+	}
+	if _, err := queries.SubmitUserInputRequest(context.Background(), sqlc.SubmitUserInputRequestParams{
+		ID: row.ID, ResultJson: []byte(`{"status":"submitted"}`),
+		RuntimeFencingToken: pgtype.Int8{Int64: 7, Valid: true},
+	}); err != nil {
+		t.Fatalf("matching-fence expired submit: %v", err)
+	}
+
+	cancelRow := create("matching-cancel", 9)
+	queries.mu.Lock()
+	queries.rows[storeUUIDKey(cancelRow.ID)].ExpiresAt = pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true}
+	queries.mu.Unlock()
+	if _, err := queries.CancelUserInputRequest(context.Background(), sqlc.CancelUserInputRequestParams{
+		ID: cancelRow.ID, ResultJson: []byte(`{"status":"canceled"}`),
+		RuntimeFencingToken: pgtype.Int8{Int64: 10, Valid: true},
+	}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("stale cancel error = %v, want pgx.ErrNoRows", err)
+	}
+	if _, err := queries.CancelUserInputRequest(context.Background(), sqlc.CancelUserInputRequestParams{
+		ID: cancelRow.ID, ResultJson: []byte(`{"status":"canceled"}`),
+		RuntimeFencingToken: pgtype.Int8{Int64: 9, Valid: true},
+	}); err != nil {
+		t.Fatalf("matching-fence expired cancel: %v", err)
+	}
 }
 
 func createStorePending(t *testing.T, svc *Service, expiresAt *time.Time, callID string) Request {
@@ -426,7 +554,10 @@ func TestServiceCreatePendingIsIdempotentPerToolCall(t *testing.T) {
 		ToolCallID: "call-1",
 		Input: map[string]any{
 			"questions": []any{
-				map[string]any{"text": "Updated question?", "kind": QuestionKindText},
+				map[string]any{
+					"text": "Which plan?", "kind": QuestionKindSingleSelect,
+					"options": []any{map[string]any{"label": "Plan A"}, map[string]any{"label": "Plan B"}},
+				},
 			},
 		},
 	})
@@ -439,10 +570,20 @@ func TestServiceCreatePendingIsIdempotentPerToolCall(t *testing.T) {
 	if second.ShortID != first.ShortID {
 		t.Fatalf("duplicate tool call short_id = %d, want %d", second.ShortID, first.ShortID)
 	}
+	if _, err := svc.CreatePending(context.Background(), CreatePendingInput{
+		BotID:      storeTestBotID,
+		SessionID:  storeTestSessionID,
+		ToolCallID: "call-1",
+		Input: map[string]any{
+			"questions": []any{map[string]any{"text": "Changed question?", "kind": QuestionKindText}},
+		},
+	}); !errors.Is(err, ErrAlreadyDecided) {
+		t.Fatalf("changed duplicate payload error = %v, want ErrAlreadyDecided", err)
+	}
 
 	if _, err := svc.Submit(context.Background(), SubmitInput{
 		RequestID: second.ID,
-		Answers:   []QuestionAnswer{{QuestionID: "q1", Text: "done"}},
+		Answers:   []QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
 	}); err != nil {
 		t.Fatalf("submit duplicate row: %v", err)
 	}
@@ -554,6 +695,11 @@ func TestServiceExpiredRequestIsClosed(t *testing.T) {
 	}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("resolve target error = %v, want ErrNotFound", err)
 	}
+	if _, err := svc.ResolveTarget(context.Background(), ResolveInput{
+		BotID: storeTestBotID, SessionID: storeTestSessionID, ExplicitID: req.ID,
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("resolve expired explicit target error = %v, want ErrNotFound", err)
+	}
 
 	pending, err := svc.ListPendingBySession(context.Background(), storeTestBotID, storeTestSessionID)
 	if err != nil {
@@ -578,6 +724,40 @@ func TestServiceExpiredRequestIsClosed(t *testing.T) {
 		Answers:   []QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
 	}); err != nil {
 		t.Fatalf("submit live: %v", err)
+	}
+}
+
+func TestServiceResolveTargetKeepsClaimedRequestRespondableAfterExpiry(t *testing.T) {
+	t.Parallel()
+
+	queries := newFakeUserInputQueries()
+	svc := NewService(slog.New(slog.DiscardHandler), queries)
+	expired := time.Now().Add(-time.Minute)
+	req := createStorePending(t, svc, &expired, "call-claimed-expired")
+	queries.mu.Lock()
+	row := queries.rows[req.ID]
+	row.RuntimeFencingToken = pgtype.Int8{Int64: 7, Valid: true}
+	queries.mu.Unlock()
+	ctx := runtimefence.WithContext(context.Background(), runtimefence.Fence{
+		BotID: storeTestBotID, SessionID: storeTestSessionID, Token: 7,
+	})
+
+	resolved, err := svc.ResolveTarget(ctx, ResolveInput{
+		BotID: storeTestBotID, SessionID: storeTestSessionID, ExplicitID: req.ID,
+	})
+	if err != nil {
+		t.Fatalf("resolve claimed expired request: %v", err)
+	}
+	if resolved.ID != req.ID {
+		t.Fatalf("resolved request = %q, want %q", resolved.ID, req.ID)
+	}
+	if resolved.Status != StatusPending {
+		t.Fatalf("resolved status = %q, want pending", resolved.Status)
+	}
+	if _, err := svc.ResolveTarget(context.Background(), ResolveInput{
+		BotID: storeTestBotID, SessionID: storeTestSessionID, ExplicitID: req.ID,
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unfenced resolve error = %v, want ErrNotFound", err)
 	}
 }
 

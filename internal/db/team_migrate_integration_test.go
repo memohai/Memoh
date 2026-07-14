@@ -337,7 +337,7 @@ func TestTeamChainReversible(t *testing.T) {
 	dsn := teamMigrationDSN(t)
 
 	// The team core is intentionally one consolidated migration.
-	teamSteps := countTeamMigrations(t)
+	teamSteps := countMigrationsFromTeamCore(t)
 
 	// Step the team migration down; teams + the public helper must be gone.
 	stepDown(t, dsn, teamSteps)
@@ -402,13 +402,15 @@ func TestTeamsRootDownSafetyGate(t *testing.T) {
 		t.Fatalf("migrate init: %v", err)
 	}
 	defer func() { _, _ = m.Close() }()
-	if err := m.Steps(-countTeamMigrations(t)); err == nil {
+	if err := m.Steps(-countMigrationsFromTeamCore(t)); err == nil {
 		t.Fatal("stepping team migrations down must fail closed with a non-default team present")
 	}
 }
 
-// countTeamMigrations asserts that this PR contributes exactly one migration.
-func countTeamMigrations(t *testing.T) int {
+// countMigrationsFromTeamCore returns the number of migrations from the
+// consolidated team migration through the current chain tip. Team migration
+// tests must cross that whole boundary even when later migrations are added.
+func countMigrationsFromTeamCore(t *testing.T) int {
 	t.Helper()
 	entries, err := fs.ReadDir(postgresMigrationsFS(t), ".")
 	if err != nil {
@@ -416,14 +418,17 @@ func countTeamMigrations(t *testing.T) int {
 	}
 	const teamMigration = "0112_team_core.up.sql"
 	found := false
+	count := 0
 	for _, e := range entries {
 		if e.Name() == teamMigration {
 			found = true
-			break
+		}
+		if found && len(e.Name()) > 7 && e.Name()[len(e.Name())-7:] == ".up.sql" {
+			count++
 		}
 	}
 	if !found {
 		t.Fatalf("missing consolidated team migration %s", teamMigration)
 	}
-	return 1
+	return count
 }

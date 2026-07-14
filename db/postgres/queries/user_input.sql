@@ -21,6 +21,7 @@ INSERT INTO user_input_requests (
   tool_call_id,
   tool_name,
   short_id,
+  runtime_fencing_token,
   input_json,
   ui_payload_json,
   provider_metadata,
@@ -38,6 +39,7 @@ INSERT INTO user_input_requests (
   sqlc.arg(tool_call_id),
   sqlc.arg(tool_name),
   next_short_id.short_id,
+  sqlc.narg(runtime_fencing_token),
   sqlc.arg(input_json),
   sqlc.arg(ui_payload_json),
   sqlc.arg(provider_metadata),
@@ -49,17 +51,18 @@ INSERT INTO user_input_requests (
 FROM locked_session
 CROSS JOIN next_short_id
 ON CONFLICT (team_id, session_id, tool_call_id) DO UPDATE
-SET input_json = EXCLUDED.input_json,
-    ui_payload_json = EXCLUDED.ui_payload_json,
-    provider_metadata = EXCLUDED.provider_metadata,
-    workspace_target_id = EXCLUDED.workspace_target_id,
-    requested_by_channel_identity_id = EXCLUDED.requested_by_channel_identity_id,
+SET requested_by_channel_identity_id = EXCLUDED.requested_by_channel_identity_id,
     source_platform = EXCLUDED.source_platform,
     reply_target = EXCLUDED.reply_target,
     conversation_type = EXCLUDED.conversation_type,
     expires_at = EXCLUDED.expires_at,
     updated_at = now()
 WHERE user_input_requests.status = 'pending'
+  AND user_input_requests.runtime_fencing_token IS NOT DISTINCT FROM EXCLUDED.runtime_fencing_token
+  AND user_input_requests.input_json = EXCLUDED.input_json
+  AND user_input_requests.ui_payload_json = EXCLUDED.ui_payload_json
+  AND user_input_requests.provider_metadata = EXCLUDED.provider_metadata
+  AND user_input_requests.workspace_target_id = EXCLUDED.workspace_target_id
   AND (user_input_requests.expires_at IS NULL OR user_input_requests.expires_at > now())
 RETURNING *;
 
@@ -67,6 +70,42 @@ RETURNING *;
 SELECT *
 FROM user_input_requests
 WHERE team_id = public.memoh_current_team_id() AND id = $1;
+
+-- name: GetRespondableUserInputRequest :one
+SELECT *
+FROM user_input_requests
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(id)
+  AND status = 'pending'
+  AND (
+    (
+      sqlc.narg(runtime_fencing_token)::bigint IS NOT NULL
+      AND runtime_fencing_token = sqlc.narg(runtime_fencing_token)::bigint
+    )
+    OR (
+      sqlc.narg(runtime_fencing_token)::bigint IS NULL
+      AND runtime_fencing_token IS NULL
+      AND (expires_at IS NULL OR expires_at > now())
+    )
+  );
+
+-- name: ClaimUserInputRequestForRuntime :one
+UPDATE user_input_requests
+SET runtime_fencing_token = sqlc.arg(runtime_fencing_token),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(id)
+  AND bot_id = sqlc.arg(bot_id)
+  AND session_id = sqlc.arg(session_id)
+  AND status = 'pending'
+  AND (
+    runtime_fencing_token = sqlc.arg(runtime_fencing_token)
+    OR (
+      (runtime_fencing_token IS NULL OR runtime_fencing_token < sqlc.arg(runtime_fencing_token))
+      AND (expires_at IS NULL OR expires_at > now())
+    )
+  )
+RETURNING *;
 
 -- name: GetUserInputRequestBySessionToolCall :one
 SELECT *
@@ -151,7 +190,10 @@ SET status = 'submitted',
 WHERE team_id = public.memoh_current_team_id()
   AND id = sqlc.arg(id)
   AND status = 'pending'
-  AND (expires_at IS NULL OR expires_at > now())
+  AND (
+    runtime_fencing_token = sqlc.narg(runtime_fencing_token)::bigint
+    OR (runtime_fencing_token IS NULL AND (expires_at IS NULL OR expires_at > now()))
+  )
 RETURNING *;
 
 -- name: CancelUserInputRequest :one
@@ -165,7 +207,10 @@ SET status = 'canceled',
 WHERE team_id = public.memoh_current_team_id()
   AND id = sqlc.arg(id)
   AND status = 'pending'
-  AND (expires_at IS NULL OR expires_at > now())
+  AND (
+    runtime_fencing_token = sqlc.narg(runtime_fencing_token)::bigint
+    OR (runtime_fencing_token IS NULL AND (expires_at IS NULL OR expires_at > now()))
+  )
 RETURNING *;
 
 -- name: CancelPendingUserInputsBySession :many
@@ -179,7 +224,25 @@ WHERE team_id = public.memoh_current_team_id()
   AND bot_id = sqlc.arg(bot_id)
   AND session_id = sqlc.arg(session_id)
   AND status = 'pending'
-  AND (expires_at IS NULL OR expires_at > now())
+  AND (
+    runtime_fencing_token = sqlc.narg(runtime_fencing_token)::bigint
+    OR (runtime_fencing_token IS NULL AND (expires_at IS NULL OR expires_at > now()))
+  )
+RETURNING *;
+
+-- name: SupersedePendingUserInputsBySession :many
+UPDATE user_input_requests
+SET status = 'canceled',
+    result_json = sqlc.arg(result_json),
+    responded_at = now(),
+    canceled_at = now(),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id)
+  AND session_id = sqlc.arg(session_id)
+  AND status = 'pending'
+  AND runtime_fencing_token IS NOT NULL
+  AND id IS DISTINCT FROM sqlc.narg(preserve_id)::uuid
 RETURNING *;
 
 -- name: FailUserInputRequest :one
@@ -190,7 +253,10 @@ SET status = 'failed',
 WHERE team_id = public.memoh_current_team_id()
   AND id = sqlc.arg(id)
   AND status = 'pending'
-  AND (expires_at IS NULL OR expires_at > now())
+  AND (
+    runtime_fencing_token = sqlc.narg(runtime_fencing_token)::bigint
+    OR (runtime_fencing_token IS NULL AND (expires_at IS NULL OR expires_at > now()))
+  )
 RETURNING *;
 
 -- name: ListPendingUserInputsBySession :many

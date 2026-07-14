@@ -109,6 +109,7 @@ type Request struct {
 	CreatedAt               time.Time            `json:"created_at"`
 	RespondedAt             *time.Time           `json:"responded_at,omitempty"`
 	CanceledAt              *time.Time           `json:"canceled_at,omitempty"`
+	RuntimeFenced           bool                 `json:"-"`
 }
 
 // TextInteractionState is the durable ask_user cursor shared by every input

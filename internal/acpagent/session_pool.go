@@ -27,6 +27,7 @@ import (
 	"github.com/memohai/memoh/internal/agent/event"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/mcp"
+	"github.com/memohai/memoh/internal/runtimefence"
 	"github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
@@ -131,15 +132,19 @@ type runtimeHandle struct {
 
 	// state guards the mutable snapshot below. Leaf lock: never acquire
 	// other locks while holding it.
-	state          sync.Mutex
-	session        *acpclient.Session
-	status         string
-	lastActive     time.Time
-	boundSession   string
-	defaultModelID string
-	active         *acpclient.ToolSessionContext
-	startCancel    context.CancelFunc
-	closed         bool
+	state                    sync.Mutex
+	session                  *acpclient.Session
+	status                   string
+	lastActive               time.Time
+	boundSession             string
+	defaultModelID           string
+	active                   *acpclient.ToolSessionContext
+	persistenceFence         runtimefence.Fence
+	startCancel              context.CancelFunc
+	closed                   bool
+	hadPrompt                bool
+	decisionPreCleanupOnce   sync.Once
+	decisionFinalCleanupOnce sync.Once
 }
 
 // PromptInput carries one prompt (or runtime control call) for a chat
@@ -174,6 +179,7 @@ type PromptInput struct {
 	RuntimeOwnerAccountID string
 	ForceFreshRuntime     bool
 	Sink                  acpclient.EventSink
+	RuntimeGuard          func(context.Context) error
 }
 
 // CreateRuntimeInput describes a pre-session runtime creation request.
@@ -582,8 +588,12 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 	sess := h.session
 	h.status = stateActive
 	h.lastActive = time.Now()
-	toolCtx := toolSessionContext(input, h)
+	toolCtx := toolSessionContext(ctx, input, h)
 	h.active = &toolCtx
+	h.hadPrompt = true
+	if toolCtx.RuntimeFence.Valid() {
+		h.persistenceFence = toolCtx.RuntimeFence
+	}
 	h.state.Unlock()
 	// Cleanup is defer-based so error paths can never leave a stale
 	// per-prompt context or sink behind.
@@ -992,8 +1002,12 @@ func (p *SessionPool) closeHandle(h *runtimeHandle) error {
 	h.startCancel = nil
 	bound := h.boundSession
 	activeSession := ""
+	fence := h.persistenceFence
 	if h.active != nil {
 		activeSession = strings.TrimSpace(h.active.SessionID)
+		if h.active.RuntimeFence.Valid() {
+			fence = h.active.RuntimeFence
+		}
 		h.active = nil
 	}
 	h.state.Unlock()
@@ -1001,15 +1015,15 @@ func (p *SessionPool) closeHandle(h *runtimeHandle) error {
 	if cancel != nil {
 		cancel()
 	}
-	var closeErr error
-	if sess != nil {
-		closeErr = sess.Close()
-	}
 	sessionID := strings.TrimSpace(bound)
 	if sessionID == "" {
 		sessionID = activeSession
 	}
-	p.cancelPendingDecisions(h.botID, sessionID, "decision cancelled: ACP runtime closed before a response arrived")
+	p.cancelHandlePendingDecisions(h, sessionID, fence, decisionCleanupPre, "decision cancelled: ACP runtime closed before a response arrived")
+	var closeErr error
+	if sess != nil {
+		closeErr = sess.Close()
+	}
 
 	h.op.Lock()
 	defer h.op.Unlock()
@@ -1060,18 +1074,20 @@ func (p *SessionPool) teardown(h *runtimeHandle) error {
 	h.startCancel = nil
 	bound := h.boundSession
 	activeSession := ""
+	fence := h.persistenceFence
 	if h.active != nil {
 		activeSession = strings.TrimSpace(h.active.SessionID)
+		if h.active.RuntimeFence.Valid() {
+			fence = h.active.RuntimeFence
+		}
 	}
 	h.active = nil
 	h.state.Unlock()
-
-	p.mu.Lock()
-	delete(p.runtimes, h.id)
-	if bound != "" && p.bySession[bound] == h.id {
-		delete(p.bySession, bound)
+	sessionID := strings.TrimSpace(bound)
+	if sessionID == "" {
+		sessionID = activeSession
 	}
-	p.mu.Unlock()
+	p.cancelHandlePendingDecisions(h, sessionID, fence, decisionCleanupPre, "decision cancelled: ACP runtime closed before a response arrived")
 
 	if cancel != nil {
 		cancel()
@@ -1080,40 +1096,104 @@ func (p *SessionPool) teardown(h *runtimeHandle) error {
 	if sess != nil {
 		closeErr = sess.Close()
 	}
-	sessionID := strings.TrimSpace(bound)
-	if sessionID == "" {
-		sessionID = activeSession
+	p.cancelHandlePendingDecisions(h, sessionID, fence, decisionCleanupFinal, "decision cancelled: ACP runtime closed before a response arrived")
+
+	p.mu.Lock()
+	delete(p.runtimes, h.id)
+	if bound != "" && p.bySession[bound] == h.id {
+		delete(p.bySession, bound)
 	}
-	p.cancelPendingDecisions(h.botID, sessionID, "decision cancelled: ACP runtime closed before a response arrived")
+	p.mu.Unlock()
 	return closeErr
 }
 
-func (p *SessionPool) cancelPendingDecisions(botID, sessionID, reason string) {
+type decisionCleanupPhase uint8
+
+const (
+	decisionCleanupPre decisionCleanupPhase = iota
+	decisionCleanupFinal
+)
+
+func (p *SessionPool) cancelHandlePendingDecisions(h *runtimeHandle, sessionID string, fence runtimefence.Fence, phase decisionCleanupPhase, reason string) {
+	if p == nil || h == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	h.state.Lock()
+	hadPrompt := h.hadPrompt
+	h.state.Unlock()
+	if !fence.Valid() && !hadPrompt {
+		return
+	}
+	p.mu.RLock()
+	currentID := p.bySession[sessionID]
+	p.mu.RUnlock()
+	if currentID != "" && currentID != h.id {
+		return
+	}
+	var once *sync.Once
+	switch phase {
+	case decisionCleanupPre:
+		once = &h.decisionPreCleanupOnce
+	case decisionCleanupFinal:
+		once = &h.decisionFinalCleanupOnce
+	default:
+		return
+	}
+	once.Do(func() {
+		ctx := context.Background()
+		if fence.Valid() {
+			ctx = runtimefence.WithContext(ctx, fence)
+		}
+		p.cancelPendingDecisions(ctx, h.botID, sessionID, reason)
+	})
+}
+
+//nolint:contextcheck // lifecycle cleanup is detached from the closed prompt but retains its fence value.
+func (p *SessionPool) cancelPendingDecisions(parent context.Context, botID, sessionID, reason string) {
 	botID = strings.TrimSpace(botID)
 	sessionID = strings.TrimSpace(sessionID)
 	if p == nil || botID == "" || sessionID == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	if parent == nil {
+		parent = context.Background()
+	}
+	var cleanup sync.WaitGroup
 	if approval, ok := p.approval.(interface {
 		CancelPendingForSession(context.Context, string, string, string) ([]toolapproval.Request, error)
 	}); ok {
-		if _, err := approval.CancelPendingForSession(ctx, botID, sessionID, reason); err != nil {
-			p.logger.Warn("cancel pending ACP approvals failed",
-				slog.Any("error", err),
-				slog.String("bot_id", botID),
-				slog.String("session_id", sessionID))
-		}
+		cleanup.Add(1)
+		go func() {
+			defer cleanup.Done()
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
+			defer cancel()
+			if _, err := approval.CancelPendingForSession(ctx, botID, sessionID, reason); err != nil && !errors.Is(err, runtimefence.ErrStale) {
+				p.logger.Warn("cancel pending ACP approvals failed",
+					slog.Any("error", err),
+					slog.String("bot_id", botID),
+					slog.String("session_id", sessionID))
+			}
+		}()
 	}
 	if p.userInput != nil {
-		if _, err := p.userInput.CancelPendingForSession(ctx, botID, sessionID, reason); err != nil {
-			p.logger.Warn("cancel pending ACP user inputs failed",
-				slog.Any("error", err),
-				slog.String("bot_id", botID),
-				slog.String("session_id", sessionID))
-		}
+		cleanup.Add(1)
+		go func() {
+			defer cleanup.Done()
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
+			defer cancel()
+			if _, err := p.userInput.CancelPendingForSession(ctx, botID, sessionID, reason); err != nil && !errors.Is(err, runtimefence.ErrStale) {
+				p.logger.Warn("cancel pending ACP user inputs failed",
+					slog.Any("error", err),
+					slog.String("bot_id", botID),
+					slog.String("session_id", sessionID))
+			}
+		}()
 	}
+	cleanup.Wait()
 }
 
 func (p *SessionPool) CloseAll() {
@@ -1398,6 +1478,11 @@ func (h *runtimeHandle) toolContext() mcp.ToolSessionContext {
 	if h.active.SupportsImageInput {
 		ctx.SupportsImageInput = true
 	}
+	if h.active.RuntimeFence.Valid() {
+		ctx.RuntimeFence = h.active.RuntimeFence
+	}
+	ctx.RunContext = h.active.RunContext
+	ctx.RuntimeGuard = h.active.RuntimeGuard
 	return ctx
 }
 
@@ -1420,7 +1505,8 @@ func (h *runtimeHandle) setStatus(status string) {
 	h.state.Unlock()
 }
 
-func toolSessionContext(input PromptInput, h *runtimeHandle) acpclient.ToolSessionContext {
+func toolSessionContext(ctx context.Context, input PromptInput, h *runtimeHandle) acpclient.ToolSessionContext {
+	fence, _ := runtimefence.FromContext(ctx)
 	return acpclient.ToolSessionContext{
 		BotID:               h.botID,
 		ChatID:              firstNonEmpty(input.ChatID, h.botID),
@@ -1437,6 +1523,9 @@ func toolSessionContext(input PromptInput, h *runtimeHandle) acpclient.ToolSessi
 		CanRequestUserInput: input.CanRequestUserInput,
 		IsSubagent:          false,
 		SupportsImageInput:  input.SupportsImageInput,
+		RuntimeFence:        fence,
+		RunContext:          ctx,
+		RuntimeGuard:        input.RuntimeGuard,
 	}
 }
 

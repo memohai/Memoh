@@ -18,6 +18,7 @@ import (
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/decision"
 	"github.com/memohai/memoh/internal/hooks"
+	"github.com/memohai/memoh/internal/runtimefence"
 	"github.com/memohai/memoh/internal/settings"
 )
 
@@ -143,7 +144,7 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 	if err := s.runApprovalHook(ctx, hooks.EventBeforeApprovalCreate, input, Request{}, true); err != nil {
 		return Request{}, err
 	}
-	row, err := s.queries.CreateToolApprovalRequest(ctx, sqlc.CreateToolApprovalRequestParams{
+	params := sqlc.CreateToolApprovalRequestParams{
 		BotID:                        botID,
 		SessionID:                    sessionID,
 		RouteID:                      optionalUUID(input.RouteID),
@@ -153,13 +154,23 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 		ToolName:                     strings.TrimSpace(input.ToolName),
 		Operation:                    operation,
 		ToolInput:                    toolInput,
+		RuntimeFencingToken:          runtimeFencingToken(ctx),
 		RequestedByChannelIdentityID: requestedByID,
 		RequestedMessageID:           optionalUUID(input.RequestedMessageID),
 		SourcePlatform:               strings.TrimSpace(input.SourcePlatform),
 		ReplyTarget:                  strings.TrimSpace(input.ReplyTarget),
 		ConversationType:             strings.TrimSpace(input.ConversationType),
+	}
+	var row sqlc.ToolApprovalRequest
+	err = decision.InCreateTransaction(ctx, s.queries, input.BotID, input.SessionID, func(queries dbstore.Queries) error {
+		var createErr error
+		row, createErr = queries.CreateToolApprovalRequest(ctx, params)
+		return createErr
 	})
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Request{}, ErrAlreadyDecided
+		}
 		return Request{}, err
 	}
 	req := requestFromRow(row)
@@ -254,10 +265,20 @@ func (s *Service) Approve(ctx context.Context, approvalID, actorID, reason strin
 	if err != nil {
 		return Request{}, err
 	}
-	row, err := s.queries.ApproveToolApprovalRequest(ctx, sqlc.ApproveToolApprovalRequestParams{
-		ID:                         id,
-		Reason:                     strings.TrimSpace(reason),
-		DecidedByChannelIdentityID: decidedBy,
+	runtimeToken := runtimeFencingToken(ctx)
+	var row sqlc.ToolApprovalRequest
+	err = s.withRuntimeFence(ctx, "", "", func(queries dbstore.Queries) error {
+		if err := validateToolApprovalFence(ctx, queries, id); err != nil {
+			return err
+		}
+		var approveErr error
+		row, approveErr = queries.ApproveToolApprovalRequest(ctx, sqlc.ApproveToolApprovalRequestParams{
+			ID:                         id,
+			Reason:                     strings.TrimSpace(reason),
+			DecidedByChannelIdentityID: decidedBy,
+			RuntimeFencingToken:        runtimeToken,
+		})
+		return approveErr
 	})
 	req, err := s.resolveAndNotify(ctx, approvalID, row, err)
 	if err == nil && strings.TrimSpace(actorID) != "" {
@@ -278,10 +299,20 @@ func (s *Service) Reject(ctx context.Context, approvalID, actorID, reason string
 	if err != nil {
 		return Request{}, err
 	}
-	row, err := s.queries.RejectToolApprovalRequest(ctx, sqlc.RejectToolApprovalRequestParams{
-		ID:                         id,
-		Reason:                     strings.TrimSpace(reason),
-		DecidedByChannelIdentityID: decidedBy,
+	runtimeToken := runtimeFencingToken(ctx)
+	var row sqlc.ToolApprovalRequest
+	err = s.withRuntimeFence(ctx, "", "", func(queries dbstore.Queries) error {
+		if err := validateToolApprovalFence(ctx, queries, id); err != nil {
+			return err
+		}
+		var rejectErr error
+		row, rejectErr = queries.RejectToolApprovalRequest(ctx, sqlc.RejectToolApprovalRequestParams{
+			ID:                         id,
+			Reason:                     strings.TrimSpace(reason),
+			DecidedByChannelIdentityID: decidedBy,
+			RuntimeFencingToken:        runtimeToken,
+		})
+		return rejectErr
 	})
 	req, err := s.resolveAndNotify(ctx, approvalID, row, err)
 	if err == nil && strings.TrimSpace(actorID) != "" {
@@ -311,10 +342,17 @@ func (s *Service) CancelPendingForSession(ctx context.Context, botID, sessionID,
 	if reason == "" {
 		reason = "tool approval cancelled: the turn that requested it ended"
 	}
-	rows, err := s.queries.CancelPendingToolApprovalsBySession(ctx, sqlc.CancelPendingToolApprovalsBySessionParams{
-		BotID:     pgBotID,
-		SessionID: pgSessionID,
-		Reason:    reason,
+	params := sqlc.CancelPendingToolApprovalsBySessionParams{
+		BotID:               pgBotID,
+		SessionID:           pgSessionID,
+		Reason:              reason,
+		RuntimeFencingToken: runtimeFencingToken(ctx),
+	}
+	var rows []sqlc.ToolApprovalRequest
+	err = s.withRuntimeFence(ctx, botID, sessionID, func(queries dbstore.Queries) error {
+		var cancelErr error
+		rows, cancelErr = queries.CancelPendingToolApprovalsBySession(ctx, params)
+		return cancelErr
 	})
 	if err != nil {
 		return nil, err
@@ -326,6 +364,33 @@ func (s *Service) CancelPendingForSession(ctx context.Context, botID, sessionID,
 		s.notifyResolved(req)
 	}
 	return requests, nil
+}
+
+func (s *Service) withRuntimeFence(ctx context.Context, botID, sessionID string, fn func(dbstore.Queries) error) error {
+	if _, fenced := runtimefence.FromContext(ctx); !fenced {
+		return fn(s.queries)
+	}
+	return runtimefence.InTransaction(ctx, s.queries, botID, sessionID, fn)
+}
+
+func runtimeFencingToken(ctx context.Context) pgtype.Int8 {
+	fence, ok := runtimefence.FromContext(ctx)
+	if !ok {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: fence.Token, Valid: true}
+}
+
+func validateToolApprovalFence(ctx context.Context, queries dbstore.Queries, id pgtype.UUID) error {
+	if _, fenced := runtimefence.FromContext(ctx); !fenced {
+		return nil
+	}
+	row, err := queries.GetToolApprovalRequest(ctx, id)
+	if err != nil {
+		return err
+	}
+	request := requestFromRow(row)
+	return runtimefence.ValidateScope(ctx, request.BotID, request.SessionID)
 }
 
 func (s *Service) Get(ctx context.Context, approvalID string) (Request, error) {
@@ -455,8 +520,11 @@ func (s *Service) resolveAndNotify(ctx context.Context, approvalID string, row s
 	req, err := requestFromRowOrErr(row, err)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			if existing, getErr := s.Get(ctx, approvalID); getErr == nil && existing.Status != StatusPending {
-				return Request{}, ErrAlreadyDecided
+			if id, parseErr := db.ParseUUID(approvalID); parseErr == nil {
+				if existing, getErr := s.queries.GetToolApprovalRequest(ctx, id); getErr == nil &&
+					(existing.Status != StatusPending || existing.RuntimeFencingToken.Valid) {
+					return Request{}, ErrAlreadyDecided
+				}
 			}
 		}
 		return Request{}, err
@@ -486,10 +554,18 @@ func (s *Service) UpdatePromptMessage(ctx context.Context, approvalID, promptMes
 	if err != nil {
 		return Request{}, err
 	}
-	row, err := s.queries.UpdateToolApprovalPromptMessage(ctx, sqlc.UpdateToolApprovalPromptMessageParams{
-		ID:                      id,
-		PromptMessageID:         optionalUUID(promptMessageID),
-		PromptExternalMessageID: strings.TrimSpace(externalID),
+	var row sqlc.ToolApprovalRequest
+	err = s.withRuntimeFence(ctx, "", "", func(queries dbstore.Queries) error {
+		if err := validateToolApprovalFence(ctx, queries, id); err != nil {
+			return err
+		}
+		var updateErr error
+		row, updateErr = queries.UpdateToolApprovalPromptMessage(ctx, sqlc.UpdateToolApprovalPromptMessageParams{
+			ID:                      id,
+			PromptMessageID:         optionalUUID(promptMessageID),
+			PromptExternalMessageID: strings.TrimSpace(externalID),
+		})
+		return updateErr
 	})
 	return requestFromRowOrErr(row, err)
 }
@@ -644,6 +720,7 @@ func requestFromRow(row sqlc.ToolApprovalRequest) Request {
 		ReplyTarget:             strings.TrimSpace(row.ReplyTarget),
 		ConversationType:        strings.TrimSpace(row.ConversationType),
 		CreatedAt:               row.CreatedAt.Time,
+		RuntimeFenced:           row.RuntimeFencingToken.Valid,
 	}
 	if req.Operation == "" {
 		req.Operation, _ = OperationForTool(req.ToolName)

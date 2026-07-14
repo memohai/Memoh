@@ -394,6 +394,38 @@ func TestNativeToolSourceWaitsForApprovalAndPublishesRequest(t *testing.T) {
 	}
 }
 
+func TestNativeToolSourceRechecksRuntimeGuardAfterApproval(t *testing.T) {
+	guardErr := errors.New("runtime ownership lost")
+	executed := false
+	provider := &nativeSourceTestProvider{tools: []sdk.Tool{{
+		Name: ToolExec().String(), Parameters: map[string]any{"type": "object"},
+		Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+			executed = true
+			return "executed", nil
+		},
+	}}}
+	approval := &nativeSourceApproval{decision: toolapproval.Request{
+		ID: "approval-guard", Status: toolapproval.StatusApproved,
+	}}
+	source := NewNativeToolSource(nil, []ToolProvider{provider}, NativeToolSourceOptions{
+		AllowAll: true, Approval: approval, ToolEvents: &nativeSourceToolEvents{delivered: true},
+	})
+
+	_, err := source.CallTool(context.Background(), mcp.ToolSessionContext{
+		BotID: "bot-1", SessionID: "session-1", StreamID: "stream-1",
+		RuntimeGuard: func(context.Context) error { return guardErr },
+	}, ToolExec().String(), map[string]any{"command": "touch stale"})
+	if !errors.Is(err, guardErr) {
+		t.Fatalf("CallTool() error = %v, want runtime guard error", err)
+	}
+	if approval.created.ToolName != ToolExec().String() {
+		t.Fatalf("approval input = %#v, want approval before guard", approval.created)
+	}
+	if executed {
+		t.Fatal("tool executed after runtime guard rejection")
+	}
+}
+
 func TestNativeToolSourceRejectedApprovalDoesNotExecute(t *testing.T) {
 	executed := false
 	provider := &nativeSourceTestProvider{

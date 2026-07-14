@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -133,7 +134,7 @@ func TestCreateTerminalHonorsOutputByteLimitRequest(t *testing.T) {
 				Command:         "printf",
 				Args:            []string{"HEAD" + strings.Repeat("x", 5000) + "TAIL"},
 				OutputByteLimit: &maxBytes,
-			}, nil)
+			}, nil, terminalRuntimeScope{})
 			if err != nil {
 				t.Fatalf("CreateTerminal returned error: %v", err)
 			}
@@ -161,6 +162,28 @@ func TestCreateTerminalHonorsOutputByteLimitRequest(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCreateTerminalStopsWhenOwningRunIsCanceled(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	manager := newTerminalManager(context.Background(), newTestBridgeClient(t, root), "/data", "/data", 30, nil, true, nil, false, nil)
+	term, err := manager.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
+		Command: "sleep",
+		Args:    []string{"30"},
+	}, nil, terminalRuntimeScope{runContext: runCtx})
+	if err != nil {
+		cancelRun()
+		t.Fatalf("CreateTerminal() error = %v", err)
+	}
+	cancelRun()
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelWait()
+	if _, err := manager.WaitForTerminalExit(waitCtx, acp.WaitForTerminalExitRequest{TerminalId: term.TerminalId}); err != nil {
+		t.Fatalf("terminal did not stop with its owning run: %v", err)
 	}
 }
 

@@ -118,6 +118,13 @@ WHERE bot.team_id = public.memoh_current_team_id()
   AND (SELECT count(*) FROM target_sessions) >= 0
   AND (SELECT count(*) FROM deleted_sessions) >= 0;
 
+-- name: LockBotForSessionWrite :one
+SELECT id
+FROM bots
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $1
+FOR KEY SHARE;
+
 -- name: ListHeartbeatEnabledBots :many
 SELECT id, owner_user_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt
 FROM bots

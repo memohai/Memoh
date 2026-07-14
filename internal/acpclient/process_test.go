@@ -497,7 +497,7 @@ func TestCreateTerminalFiltersBlockedHermesEnv(t *testing.T) {
 			{Name: "OPENROUTER_API_KEY", Value: "sk-router"},
 			{Name: "CUSTOM_FLAG", Value: "1"},
 		},
-	}, nil)
+	}, nil, terminalRuntimeScope{})
 	if err != nil {
 		t.Fatalf("CreateTerminal() error = %v", err)
 	}
@@ -542,7 +542,7 @@ func TestCreateTerminalPassesUnsetEnvWithoutCleanEnv(t *testing.T) {
 		false,
 		nil,
 	)
-	term, err := manager.CreateTerminal(context.Background(), acp.CreateTerminalRequest{Command: "env"}, nil)
+	term, err := manager.CreateTerminal(context.Background(), acp.CreateTerminalRequest{Command: "env"}, nil, terminalRuntimeScope{})
 	if err != nil {
 		t.Fatalf("CreateTerminal() error = %v", err)
 	}
@@ -969,6 +969,7 @@ type recordingBridgeServer struct {
 	mu    sync.Mutex
 	execs []execRecord
 	files []writeRecord
+	reads []string
 	dirs_ []string
 	exits map[string]int32
 	seqs  map[string][]int32
@@ -1028,6 +1029,13 @@ func (s *recordingBridgeServer) WriteFile(_ context.Context, req *pb.WriteFileRe
 	return &pb.WriteFileResponse{}, nil
 }
 
+func (s *recordingBridgeServer) ReadFile(_ context.Context, req *pb.ReadFileRequest) (*pb.ReadFileResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reads = append(s.reads, req.GetPath())
+	return &pb.ReadFileResponse{Content: "recorded input\n", TotalLines: 1}, nil
+}
+
 func (s *recordingBridgeServer) Mkdir(_ context.Context, req *pb.MkdirRequest) (*pb.MkdirResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1049,6 +1057,12 @@ func (s *recordingBridgeServer) writes() []writeRecord {
 	out := make([]writeRecord, len(s.files))
 	copy(out, s.files)
 	return out
+}
+
+func (s *recordingBridgeServer) readPaths() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.reads...)
 }
 
 func (s *recordingBridgeServer) dirs() []string {

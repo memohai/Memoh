@@ -254,24 +254,25 @@ type BotRemoteRuntimeBinding struct {
 }
 
 type BotSession struct {
-	ID               pgtype.UUID        `json:"id"`
-	BotID            pgtype.UUID        `json:"bot_id"`
-	RouteID          pgtype.UUID        `json:"route_id"`
-	ChannelType      pgtype.Text        `json:"channel_type"`
-	Type             string             `json:"type"`
-	SessionMode      string             `json:"session_mode"`
-	RuntimeType      string             `json:"runtime_type"`
-	RuntimeMetadata  []byte             `json:"runtime_metadata"`
-	Title            string             `json:"title"`
-	Metadata         []byte             `json:"metadata"`
-	NextTurnPosition int64              `json:"next_turn_position"`
-	CompactionEpoch  int64              `json:"compaction_epoch"`
-	ParentSessionID  pgtype.UUID        `json:"parent_session_id"`
-	CreatedByUserID  pgtype.UUID        `json:"created_by_user_id"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
-	TeamID           pgtype.UUID        `json:"team_id"`
+	ID                  pgtype.UUID        `json:"id"`
+	BotID               pgtype.UUID        `json:"bot_id"`
+	RouteID             pgtype.UUID        `json:"route_id"`
+	ChannelType         pgtype.Text        `json:"channel_type"`
+	Type                string             `json:"type"`
+	SessionMode         string             `json:"session_mode"`
+	RuntimeType         string             `json:"runtime_type"`
+	RuntimeMetadata     []byte             `json:"runtime_metadata"`
+	Title               string             `json:"title"`
+	Metadata            []byte             `json:"metadata"`
+	NextTurnPosition    int64              `json:"next_turn_position"`
+	CompactionEpoch     int64              `json:"compaction_epoch"`
+	RuntimeFencingToken int64              `json:"runtime_fencing_token"`
+	ParentSessionID     pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID     pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt           pgtype.Timestamptz `json:"deleted_at"`
+	TeamID              pgtype.UUID        `json:"team_id"`
 }
 
 type BotSessionDiscussCursor struct {
@@ -724,6 +725,7 @@ type ToolApprovalRequest struct {
 	ToolInput                    []byte             `json:"tool_input"`
 	ShortID                      int32              `json:"short_id"`
 	Status                       string             `json:"status"`
+	RuntimeFencingToken          pgtype.Int8        `json:"runtime_fencing_token"`
 	DecisionReason               string             `json:"decision_reason"`
 	RequestedByChannelIdentityID pgtype.UUID        `json:"requested_by_channel_identity_id"`
 	DecidedByChannelIdentityID   pgtype.UUID        `json:"decided_by_channel_identity_id"`
@@ -808,6 +810,7 @@ type UserInputRequest struct {
 	ToolName                     string             `json:"tool_name"`
 	ShortID                      int32              `json:"short_id"`
 	Status                       string             `json:"status"`
+	RuntimeFencingToken          pgtype.Int8        `json:"runtime_fencing_token"`
 	InputJson                    []byte             `json:"input_json"`
 	UiPayloadJson                []byte             `json:"ui_payload_json"`
 	InteractionJson              []byte             `json:"interaction_json"`

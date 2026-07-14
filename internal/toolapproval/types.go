@@ -110,4 +110,5 @@ type Request struct {
 	DecidedAt               *time.Time         `json:"decided_at,omitempty"`
 	DecidedByUser           bool               `json:"decided_by_user,omitempty"`
 	ExecutionLocation       *ExecutionLocation `json:"execution_location,omitempty"`
+	RuntimeFenced           bool               `json:"-"`
 }

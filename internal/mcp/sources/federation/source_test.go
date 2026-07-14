@@ -2,6 +2,7 @@ package federation
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 
@@ -122,6 +123,31 @@ func TestSourceCallToolRoutesToSSEConnection(t *testing.T) {
 	}
 	if ok, _ := result["ok"].(bool); !ok {
 		t.Fatalf("expected ok=true in result")
+	}
+}
+
+func TestSourceCallToolRechecksRuntimeGuardBeforeFederatedEffect(t *testing.T) {
+	guardErr := errors.New("runtime ownership lost")
+	gateway := &testGateway{listSSE: []mcpgw.ToolDescriptor{{
+		Name: "search", InputSchema: map[string]any{"type": "object"},
+	}}}
+	lister := &testConnectionLister{items: []mcpgw.Connection{{
+		ID: "conn-guard", Name: "Remote SSE", Type: "sse", Active: true,
+		Config: map[string]any{"url": "http://example.com/sse"},
+	}}}
+	source := NewSource(slog.Default(), gateway, lister)
+	if _, err := source.ListTools(context.Background(), mcpgw.ToolSessionContext{BotID: "bot-1"}); err != nil {
+		t.Fatalf("prime routes: %v", err)
+	}
+
+	_, err := source.CallTool(context.Background(), mcpgw.ToolSessionContext{
+		BotID: "bot-1", RuntimeGuard: func(context.Context) error { return guardErr },
+	}, "remote_sse_search", nil)
+	if !errors.Is(err, guardErr) {
+		t.Fatalf("CallTool() error = %v, want runtime guard error", err)
+	}
+	if gateway.lastCallType != "" {
+		t.Fatalf("federated effect executed through %q after guard rejection", gateway.lastCallType)
 	}
 }
 

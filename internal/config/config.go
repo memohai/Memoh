@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -47,27 +48,28 @@ const (
 )
 
 type Config struct {
-	Log           LogConfig           `toml:"log"`
-	Server        ServerConfig        `toml:"server"`
-	Admin         AdminConfig         `toml:"admin"`
-	Auth          AuthConfig          `toml:"auth"`
-	Agent         AgentConfig         `toml:"agent"`
-	Timezone      string              `toml:"timezone"`
-	Database      DatabaseConfig      `toml:"database"`
-	Container     ContainerConfig     `toml:"container"`
-	Containerd    ContainerdConfig    `toml:"containerd"`
-	Docker        DockerConfig        `toml:"docker"`
-	Apple         AppleConfig         `toml:"apple"`
-	Local         LocalConfig         `toml:"local"`
-	Workspace     WorkspaceConfig     `toml:"workspace"`
-	Postgres      PostgresConfig      `toml:"postgres"`
-	PGVector      PGVectorConfig      `toml:"pgvector"`
-	Registry      RegistryConfig      `toml:"registry"`
-	Supermarket   SupermarketConfig   `toml:"supermarket"`
-	OAuthClients  OAuthClientsConfig  `toml:"oauth_clients"`
-	InstanceID    string              `toml:"instance_id"`
-	BridgeTLS     BridgeTLSConfig     `toml:"bridge_tls"`
-	WebhookTunnel WebhookTunnelConfig `toml:"webhook_tunnel"`
+	Log            LogConfig            `toml:"log"`
+	Server         ServerConfig         `toml:"server"`
+	Admin          AdminConfig          `toml:"admin"`
+	Auth           AuthConfig           `toml:"auth"`
+	Agent          AgentConfig          `toml:"agent"`
+	Timezone       string               `toml:"timezone"`
+	Database       DatabaseConfig       `toml:"database"`
+	Container      ContainerConfig      `toml:"container"`
+	Containerd     ContainerdConfig     `toml:"containerd"`
+	Docker         DockerConfig         `toml:"docker"`
+	Apple          AppleConfig          `toml:"apple"`
+	Local          LocalConfig          `toml:"local"`
+	Workspace      WorkspaceConfig      `toml:"workspace"`
+	Postgres       PostgresConfig       `toml:"postgres"`
+	PGVector       PGVectorConfig       `toml:"pgvector"`
+	Registry       RegistryConfig       `toml:"registry"`
+	Supermarket    SupermarketConfig    `toml:"supermarket"`
+	OAuthClients   OAuthClientsConfig   `toml:"oauth_clients"`
+	SessionRuntime SessionRuntimeConfig `toml:"session_runtime"`
+	InstanceID     string               `toml:"instance_id"`
+	BridgeTLS      BridgeTLSConfig      `toml:"bridge_tls"`
+	WebhookTunnel  WebhookTunnelConfig  `toml:"webhook_tunnel"`
 }
 
 const (
@@ -165,6 +167,98 @@ type AgentConfig struct {
 	ToolOutputMaxBytes  int `toml:"tool_output_max_bytes"`
 	ToolOutputMaxLines  int `toml:"tool_output_max_lines"`
 	SystemFilesMaxBytes int `toml:"system_files_max_bytes"`
+}
+
+const (
+	SessionRuntimeBackendMemory = "memory"
+	SessionRuntimeBackendRedis  = "redis"
+
+	DefaultSessionRuntimeStateTTL       = "24h"
+	DefaultSessionRuntimeOwnerLeaseTTL  = "30s"
+	DefaultSessionRuntimeRedisURL       = "redis://127.0.0.1:6379/0"
+	DefaultSessionRuntimeRedisKeyPrefix = "memoh:session_runtime:"
+	MinSessionRuntimeOwnerLeaseTTL      = time.Second
+)
+
+type SessionRuntimeConfig struct {
+	Backend       string                    `toml:"backend"`
+	StateTTL      string                    `toml:"state_ttl"`
+	OwnerLeaseTTL string                    `toml:"owner_lease_ttl"`
+	Redis         SessionRuntimeRedisConfig `toml:"redis"`
+}
+
+type SessionRuntimeRedisConfig struct {
+	URL       string `toml:"url"`
+	KeyPrefix string `toml:"key_prefix"`
+}
+
+func (c SessionRuntimeConfig) BackendOrDefault() string {
+	backend := strings.TrimSpace(strings.ToLower(c.Backend))
+	if backend == "" {
+		return SessionRuntimeBackendMemory
+	}
+	return backend
+}
+
+func (c SessionRuntimeConfig) StateTTLOrDefault() string {
+	if strings.TrimSpace(c.StateTTL) != "" {
+		return strings.TrimSpace(c.StateTTL)
+	}
+	return DefaultSessionRuntimeStateTTL
+}
+
+func (c SessionRuntimeConfig) OwnerLeaseTTLOrDefault() string {
+	if strings.TrimSpace(c.OwnerLeaseTTL) != "" {
+		return strings.TrimSpace(c.OwnerLeaseTTL)
+	}
+	return DefaultSessionRuntimeOwnerLeaseTTL
+}
+
+func (c SessionRuntimeRedisConfig) URLOrDefault() string {
+	if strings.TrimSpace(c.URL) != "" {
+		return strings.TrimSpace(c.URL)
+	}
+	return DefaultSessionRuntimeRedisURL
+}
+
+func (c SessionRuntimeRedisConfig) KeyPrefixOrDefault() string {
+	if strings.TrimSpace(c.KeyPrefix) != "" {
+		return strings.TrimSpace(c.KeyPrefix)
+	}
+	return DefaultSessionRuntimeRedisKeyPrefix
+}
+
+func (c SessionRuntimeConfig) Validate() error {
+	backend := c.BackendOrDefault()
+	switch backend {
+	case SessionRuntimeBackendMemory, SessionRuntimeBackendRedis:
+	default:
+		return fmt.Errorf("unsupported session_runtime backend %q", c.Backend)
+	}
+	stateTTL, err := time.ParseDuration(c.StateTTLOrDefault())
+	if err != nil {
+		return fmt.Errorf("invalid session_runtime state_ttl %q: %w", c.StateTTL, err)
+	}
+	if stateTTL <= 0 {
+		return fmt.Errorf("invalid session_runtime state_ttl %q: must be positive", c.StateTTLOrDefault())
+	}
+	if backend == SessionRuntimeBackendMemory {
+		return nil
+	}
+	ownerLeaseTTL, err := time.ParseDuration(c.OwnerLeaseTTLOrDefault())
+	if err != nil {
+		return fmt.Errorf("invalid session_runtime owner_lease_ttl %q: %w", c.OwnerLeaseTTL, err)
+	}
+	if ownerLeaseTTL <= 0 {
+		return fmt.Errorf("invalid session_runtime owner_lease_ttl %q: must be positive", c.OwnerLeaseTTLOrDefault())
+	}
+	if ownerLeaseTTL < MinSessionRuntimeOwnerLeaseTTL {
+		return fmt.Errorf("invalid session_runtime owner_lease_ttl %q: must be at least %s", c.OwnerLeaseTTLOrDefault(), MinSessionRuntimeOwnerLeaseTTL)
+	}
+	if stateTTL < ownerLeaseTTL {
+		return fmt.Errorf("invalid session_runtime state_ttl %q: must be greater than or equal to owner_lease_ttl %q", c.StateTTLOrDefault(), c.OwnerLeaseTTLOrDefault())
+	}
+	return nil
 }
 
 type DatabaseConfig struct {
@@ -482,6 +576,15 @@ func Load(path string) (Config, error) {
 			Database: DefaultPGDatabase,
 			SSLMode:  DefaultPGSSLMode,
 		},
+		SessionRuntime: SessionRuntimeConfig{
+			Backend:       SessionRuntimeBackendMemory,
+			StateTTL:      DefaultSessionRuntimeStateTTL,
+			OwnerLeaseTTL: DefaultSessionRuntimeOwnerLeaseTTL,
+			Redis: SessionRuntimeRedisConfig{
+				URL:       DefaultSessionRuntimeRedisURL,
+				KeyPrefix: DefaultSessionRuntimeRedisKeyPrefix,
+			},
+		},
 	}
 
 	if path == "" {
@@ -547,6 +650,9 @@ func (cfg Config) validate() error {
 		return fmt.Errorf("unsupported database driver %q", cfg.Database.DriverOrDefault())
 	}
 	if err := cfg.WebhookTunnel.Validate(); err != nil {
+		return err
+	}
+	if err := cfg.SessionRuntime.Validate(); err != nil {
 		return err
 	}
 	return nil
