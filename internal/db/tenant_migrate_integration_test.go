@@ -327,18 +327,16 @@ func countAllMigrations(t *testing.T) int {
 }
 
 // TestTenantChainReversible verifies the full tenant migration chain
-// (0106 onward) is cleanly reversible: a full step-down of the tenant migrations
+// is cleanly reversible: stepping down the consolidated tenant migration
 // removes all tenant objects, and a step-up re-applies them. It also verifies
-// the 0106 down safety gate refuses to drop the tenants root when a non-default
+// the down safety gate refuses to drop the tenants root when a non-default
 // tenant exists.
 func TestTenantChainReversible(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
 	dsn := tenantMigrationDSN(t)
 
-	// Number of tenant migrations layered on top of the base chain (>= 0106),
-	// computed from the embedded migration files so adding a migration doesn't
-	// break this test.
+	// The tenant core is intentionally one consolidated migration.
 	tenantSteps := countTenantMigrations(t)
 
 	// Step the tenant migrations down; tenants + app schema must be gone.
@@ -380,7 +378,7 @@ func TestTenantChainReversible(t *testing.T) {
 	}
 }
 
-// TestTenantsRootDownSafetyGate verifies 0106's down safety gate: when a
+// TestTenantsRootDownSafetyGate verifies the root down safety gate: when a
 // non-default tenant exists, stepping the tenant migrations down must fail
 // closed rather than dropping tenant data.
 func TestTenantsRootDownSafetyGate(t *testing.T) {
@@ -394,8 +392,7 @@ func TestTenantsRootDownSafetyGate(t *testing.T) {
 		t.Fatalf("insert non-default tenant: %v", err)
 	}
 
-	// Stepping the tenant migrations down must fail closed (0108's down gate
-	// trips first on the non-default tenant_id, before 0106 is reached).
+	// Stepping the tenant migration down must fail closed.
 	src, err := iofs.New(postgresMigrationsFS(t), ".")
 	if err != nil {
 		t.Fatalf("iofs: %v", err)
@@ -410,27 +407,23 @@ func TestTenantsRootDownSafetyGate(t *testing.T) {
 	}
 }
 
-// countTenantMigrations returns how many embedded PostgreSQL migrations have a
-// version >= 106 (the tenant-core migrations added by this work).
+// countTenantMigrations asserts that this PR contributes exactly one migration.
 func countTenantMigrations(t *testing.T) int {
 	t.Helper()
 	entries, err := fs.ReadDir(postgresMigrationsFS(t), ".")
 	if err != nil {
 		t.Fatalf("read migrations dir: %v", err)
 	}
-	n := 0
+	const tenantMigration = "0107_tenant_core.up.sql"
+	found := false
 	for _, e := range entries {
-		name := e.Name()
-		if len(name) < 5 || name[len(name)-7:] != ".up.sql" {
-			continue
-		}
-		ver, err := strconv.Atoi(name[:4])
-		if err != nil {
-			continue
-		}
-		if ver >= 106 {
-			n++
+		if e.Name() == tenantMigration {
+			found = true
+			break
 		}
 	}
-	return n
+	if !found {
+		t.Fatalf("missing consolidated tenant migration %s", tenantMigration)
+	}
+	return 1
 }

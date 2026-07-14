@@ -10,7 +10,7 @@ import (
 // TestMigrateLegacyInstallPreservesRows simulates upgrading an EXISTING
 // (pre-tenant) install: it applies the migration chain up to the last
 // pre-tenant migration, seeds representative business data, then applies the
-// tenant migrations (0106+). It asserts no rows are lost, every row is
+// the consolidated tenant migration. It asserts no rows are lost, every row is
 // backfilled to the default tenant, and the schema reached the final
 // tenant-scoped shape. Existing installs upgrade in place without a wipe.
 func TestMigrateLegacyInstallPreservesRows(t *testing.T) {
