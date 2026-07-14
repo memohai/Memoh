@@ -878,13 +878,19 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 }
 
 const createMessageInHistoryTurnByRequest = `-- name: CreateMessageInHistoryTurnByRequest :one
-WITH target AS (
+WITH owner_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.id = $1
+  FOR UPDATE
+),
+target AS MATERIALIZED (
   SELECT
     turns.turn_id,
     turns.session_id,
     turns.turn_position,
     CASE
-      WHEN $1::text = 'assistant' AND NOT EXISTS (
+      WHEN $2::text = 'assistant' AND NOT EXISTS (
         SELECT 1
         FROM bot_history_messages assistant
         WHERE assistant.turn_id = turns.turn_id
@@ -901,13 +907,14 @@ WITH target AS (
       ), 1)
     END AS turn_message_seq
   FROM bot_history_messages turns
-  WHERE turns.session_id = $2
+  JOIN owner_session owner ON owner.id = turns.session_id
+  WHERE turns.session_id = $1
     AND turns.id = $3
     AND turns.turn_id IS NOT NULL
     AND turns.turn_position IS NOT NULL
     AND turns.turn_visible = true
   LIMIT 1
-  FOR UPDATE
+  FOR UPDATE OF turns
 ),
 inserted AS (
   INSERT INTO bot_history_messages (
@@ -938,7 +945,7 @@ inserted AS (
     $6::uuid,
     $7::text,
     $8::text,
-    $1::text,
+    $2::text,
     $9,
     $10,
     $11,
@@ -991,8 +998,8 @@ FROM inserted
 `
 
 type CreateMessageInHistoryTurnByRequestParams struct {
-	Role                    string      `json:"role"`
 	SessionID               pgtype.UUID `json:"session_id"`
+	Role                    string      `json:"role"`
 	RequestMessageID        pgtype.UUID `json:"request_message_id"`
 	BotID                   pgtype.UUID `json:"bot_id"`
 	SenderChannelIdentityID pgtype.UUID `json:"sender_channel_identity_id"`
@@ -1030,8 +1037,8 @@ type CreateMessageInHistoryTurnByRequestRow struct {
 
 func (q *Queries) CreateMessageInHistoryTurnByRequest(ctx context.Context, arg CreateMessageInHistoryTurnByRequestParams) (CreateMessageInHistoryTurnByRequestRow, error) {
 	row := q.db.QueryRow(ctx, createMessageInHistoryTurnByRequest,
-		arg.Role,
 		arg.SessionID,
+		arg.Role,
 		arg.RequestMessageID,
 		arg.BotID,
 		arg.SenderChannelIdentityID,
@@ -1070,13 +1077,19 @@ func (q *Queries) CreateMessageInHistoryTurnByRequest(ctx context.Context, arg C
 }
 
 const createMessageInHistoryTurnByRequestAndBind = `-- name: CreateMessageInHistoryTurnByRequestAndBind :one
-WITH target AS (
+WITH owner_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.id = $1
+  FOR UPDATE
+),
+target AS MATERIALIZED (
   SELECT
     turns.turn_id,
     turns.session_id,
     turns.turn_position,
     CASE
-      WHEN $1::text = 'assistant' AND NOT EXISTS (
+      WHEN $2::text = 'assistant' AND NOT EXISTS (
         SELECT 1
         FROM bot_history_messages assistant
         WHERE assistant.turn_id = turns.turn_id
@@ -1093,13 +1106,14 @@ WITH target AS (
       ), 1)
     END AS turn_message_seq
   FROM bot_history_messages turns
-  WHERE turns.session_id = $2
+  JOIN owner_session owner ON owner.id = turns.session_id
+  WHERE turns.session_id = $1
     AND turns.id = $3
     AND turns.turn_id IS NOT NULL
     AND turns.turn_position IS NOT NULL
     AND turns.turn_visible = true
   LIMIT 1
-  FOR UPDATE
+  FOR UPDATE OF turns
 ),
 inserted AS (
   INSERT INTO bot_history_messages (
@@ -1130,7 +1144,7 @@ inserted AS (
     $6::uuid,
     $7::text,
     $8::text,
-    $1::text,
+    $2::text,
     $9,
     $10,
     $11,
@@ -1157,8 +1171,8 @@ JOIN target ON true
 `
 
 type CreateMessageInHistoryTurnByRequestAndBindParams struct {
-	Role                    string      `json:"role"`
 	SessionID               pgtype.UUID `json:"session_id"`
+	Role                    string      `json:"role"`
 	RequestMessageID        pgtype.UUID `json:"request_message_id"`
 	BotID                   pgtype.UUID `json:"bot_id"`
 	SenderChannelIdentityID pgtype.UUID `json:"sender_channel_identity_id"`
@@ -1182,8 +1196,8 @@ type CreateMessageInHistoryTurnByRequestAndBindRow struct {
 
 func (q *Queries) CreateMessageInHistoryTurnByRequestAndBind(ctx context.Context, arg CreateMessageInHistoryTurnByRequestAndBindParams) (CreateMessageInHistoryTurnByRequestAndBindRow, error) {
 	row := q.db.QueryRow(ctx, createMessageInHistoryTurnByRequestAndBind,
-		arg.Role,
 		arg.SessionID,
+		arg.Role,
 		arg.RequestMessageID,
 		arg.BotID,
 		arg.SenderChannelIdentityID,

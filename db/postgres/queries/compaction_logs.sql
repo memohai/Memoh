@@ -15,7 +15,27 @@ RETURNING id, bot_id, session_id, status, summary, message_count, error_message,
           superseded_by, superseded_at, compaction_epoch, started_at, completed_at;
 
 -- name: CompleteCompactionLog :one
-UPDATE bot_history_message_compacts
+WITH target_compact AS MATERIALIZED (
+  SELECT compact.id, compact.session_id
+  FROM bot_history_message_compacts compact
+  WHERE compact.id = $1
+    AND compact.status = 'pending'
+),
+owner_session AS MATERIALIZED (
+  SELECT session.id, session.bot_id, session.compaction_epoch
+  FROM bot_sessions session
+  JOIN target_compact compact ON compact.session_id = session.id
+  FOR UPDATE OF session
+),
+locked_compact AS MATERIALIZED (
+  SELECT compact.id
+  FROM bot_history_message_compacts compact
+  JOIN target_compact target ON target.id = compact.id
+  LEFT JOIN owner_session owner ON owner.id = target.session_id
+  WHERE target.session_id IS NULL OR owner.id IS NOT NULL
+  FOR UPDATE OF compact
+)
+UPDATE bot_history_message_compacts compact
 SET status = $2,
     summary = $3,
     message_count = $4,
@@ -26,31 +46,34 @@ SET status = $2,
     anchor_start_ms = $9,
     anchor_end_ms = $10,
     completed_at = now()
-WHERE bot_history_message_compacts.id = $1
-  AND status = 'pending'
+FROM locked_compact locked
+WHERE compact.id = locked.id
+  AND compact.status = 'pending'
   AND (
     $2 <> 'ok'
     OR (
       (
-        session_id IS NULL
+        compact.session_id IS NULL
         OR EXISTS (
           SELECT 1
-          FROM bot_sessions owner_session
-          WHERE owner_session.id = bot_history_message_compacts.session_id
-            AND owner_session.bot_id = bot_history_message_compacts.bot_id
-            AND owner_session.compaction_epoch = bot_history_message_compacts.compaction_epoch
+          FROM owner_session owner
+          WHERE owner.id = compact.session_id
+            AND owner.bot_id = compact.bot_id
+            AND owner.compaction_epoch = compact.compaction_epoch
         )
       )
       AND (
         SELECT count(*)
         FROM bot_history_messages source_message
-        WHERE source_message.compact_id = bot_history_message_compacts.id
+        WHERE source_message.compact_id = compact.id
       ) = $4
     )
   )
-RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
-          artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
-          superseded_by, superseded_at, compaction_epoch, started_at, completed_at;
+RETURNING compact.id, compact.bot_id, compact.session_id, compact.status, compact.summary,
+          compact.message_count, compact.error_message, compact.usage, compact.model_id,
+          compact.artifact_version, compact.coverage, compact.anchor_start_ms, compact.anchor_end_ms,
+          compact.artifact_level, compact.parent_ids, compact.superseded_by, compact.superseded_at,
+          compact.compaction_epoch, compact.started_at, compact.completed_at;
 
 -- name: GetCompactionLogByID :one
 SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,

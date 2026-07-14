@@ -196,7 +196,13 @@ SELECT
 FROM inserted_message;
 
 -- name: CreateMessageInHistoryTurnByRequest :one
-WITH target AS (
+WITH owner_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.id = sqlc.arg(session_id)
+  FOR UPDATE
+),
+target AS MATERIALIZED (
   SELECT
     turns.turn_id,
     turns.session_id,
@@ -219,13 +225,14 @@ WITH target AS (
       ), 1)
     END AS turn_message_seq
   FROM bot_history_messages turns
+  JOIN owner_session owner ON owner.id = turns.session_id
   WHERE turns.session_id = sqlc.arg(session_id)
     AND turns.id = sqlc.arg(request_message_id)
     AND turns.turn_id IS NOT NULL
     AND turns.turn_position IS NOT NULL
     AND turns.turn_visible = true
   LIMIT 1
-  FOR UPDATE
+  FOR UPDATE OF turns
 ),
 inserted AS (
   INSERT INTO bot_history_messages (
@@ -308,7 +315,13 @@ SELECT
 FROM inserted;
 
 -- name: CreateMessageInHistoryTurnByRequestAndBind :one
-WITH target AS (
+WITH owner_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.id = sqlc.arg(session_id)
+  FOR UPDATE
+),
+target AS MATERIALIZED (
   SELECT
     turns.turn_id,
     turns.session_id,
@@ -331,13 +344,14 @@ WITH target AS (
       ), 1)
     END AS turn_message_seq
   FROM bot_history_messages turns
+  JOIN owner_session owner ON owner.id = turns.session_id
   WHERE turns.session_id = sqlc.arg(session_id)
     AND turns.id = sqlc.arg(request_message_id)
     AND turns.turn_id IS NOT NULL
     AND turns.turn_position IS NOT NULL
     AND turns.turn_visible = true
   LIMIT 1
-  FOR UPDATE
+  FOR UPDATE OF turns
 ),
 inserted AS (
   INSERT INTO bot_history_messages (
