@@ -109,10 +109,12 @@ BEGIN
 
     -- ===== Phase 3: rebuild UNIQUE constraints with tenant_id prepended =====
     FOR rec IN
-        SELECT c.relname AS table_name, con.conname, con.conrelid, con.conkey
+        SELECT c.relname AS table_name, con.conname, con.conrelid, con.conkey,
+               i.indnullsnotdistinct AS nulls_not_distinct
           FROM pg_constraint con
           JOIN pg_class c ON c.oid = con.conrelid
           JOIN pg_namespace n ON n.oid = c.relnamespace
+          JOIN pg_index i ON i.indexrelid = con.conindid
          WHERE con.contype = 'u' AND n.nspname = 'public'
            AND c.relname NOT IN ('schema_migrations', 'tenants')
     LOOP
@@ -125,8 +127,13 @@ BEGIN
           FROM unnest(rec.conkey) WITH ORDINALITY AS k(attnum, ord)
           JOIN pg_attribute a ON a.attrelid = rec.conrelid AND a.attnum = k.attnum;
         EXECUTE format('ALTER TABLE public.%I DROP CONSTRAINT %I', rec.table_name, rec.conname);
-        EXECUTE format('ALTER TABLE public.%I ADD CONSTRAINT %I UNIQUE (%s)',
-                       rec.table_name, rec.conname, cols);
+        -- Preserve NULLS NOT DISTINCT: a bare UNIQUE would widen the semantics
+        -- (NULLs become distinct), letting duplicate rows with NULL key columns
+        -- through (e.g. bot_acl_rules_unique_target).
+        EXECUTE format('ALTER TABLE public.%I ADD CONSTRAINT %I UNIQUE %s (%s)',
+                       rec.table_name, rec.conname,
+                       CASE WHEN rec.nulls_not_distinct THEN 'NULLS NOT DISTINCT' ELSE '' END,
+                       cols);
     END LOOP;
 
     -- ===== Phase 4: recreate FKs as composite, SET NULL -> RESTRICT =====
@@ -167,6 +174,12 @@ BEGIN
     END LOOP;
 END
 $$;
+
+-- Lock down the FK-backup table: owned by memoh_owner, no runtime/PUBLIC access.
+-- It exists only so the down migration can restore exact FK actions; runtime
+-- must never see it.
+ALTER TABLE app.tenant_fk_original OWNER TO memoh_owner;
+REVOKE ALL ON TABLE app.tenant_fk_original FROM PUBLIC, memoh_runtime;
 
 -- ===== Phase 3b: partial / expression unique indexes with tenant_id prepended =====
 DROP INDEX IF EXISTS idx_bot_channel_external_identity;

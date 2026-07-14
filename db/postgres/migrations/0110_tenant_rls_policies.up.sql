@@ -101,3 +101,41 @@ DROP POLICY IF EXISTS tenants_self_select ON public.tenants;
 CREATE POLICY tenants_self_select ON public.tenants
     FOR SELECT TO memoh_runtime
     USING (id = app.current_tenant_id());
+
+-- ---------------------------------------------------------------------------
+-- Reassign ownership of the tenant tables, sequences, and views to memoh_owner.
+-- The tables were created by the bootstrap/migration role (a superuser), which
+-- is NOT subject to RLS. FORCE ROW LEVEL SECURITY only forces the ordinary table
+-- OWNER into RLS, so the owner must be memoh_owner (NOLOGIN, NOSUPERUSER,
+-- NOBYPASSRLS). ALTER DEFAULT PRIVILEGES FOR ROLE memoh_owner (0107) only covers
+-- objects memoh_owner creates; these pre-existing tables need an explicit
+-- reassignment. Runs as the migration superuser, which can reassign ownership.
+DO $$
+DECLARE obj text;
+BEGIN
+    FOR obj IN
+        SELECT quote_ident(n.nspname) || '.' || quote_ident(c.relname)
+          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+           AND c.relname <> 'schema_migrations'
+    LOOP
+        EXECUTE format('ALTER TABLE %s OWNER TO memoh_owner', obj);
+    END LOOP;
+
+    FOR obj IN
+        SELECT quote_ident(n.nspname) || '.' || quote_ident(c.relname)
+          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'public' AND c.relkind = 'S'
+    LOOP
+        EXECUTE format('ALTER SEQUENCE %s OWNER TO memoh_owner', obj);
+    END LOOP;
+
+    FOR obj IN
+        SELECT quote_ident(n.nspname) || '.' || quote_ident(c.relname)
+          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'public' AND c.relkind = 'v'
+    LOOP
+        EXECUTE format('ALTER VIEW %s OWNER TO memoh_owner', obj);
+    END LOOP;
+END
+$$;

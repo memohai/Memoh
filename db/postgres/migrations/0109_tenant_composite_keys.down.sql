@@ -19,6 +19,7 @@ DECLARE
     rec record;
     default_tenant constant uuid := '00000000-0000-0000-0000-000000000001';
     orig_del text;
+    orig_upd text;
 BEGIN
     -- Fail-closed gate: refuse if any tenant table holds a non-default tenant_id.
     FOR rec IN
@@ -70,10 +71,12 @@ BEGIN
 
     -- Restore single-column UNIQUE constraints (strip leading tenant_id).
     FOR rec IN
-        SELECT c.relname AS table_name, con.conname, con.conrelid, con.conkey
+        SELECT c.relname AS table_name, con.conname, con.conrelid, con.conkey,
+               i.indnullsnotdistinct AS nulls_not_distinct
           FROM pg_constraint con
           JOIN pg_class c ON c.oid = con.conrelid
           JOIN pg_namespace n ON n.oid = c.relnamespace
+          JOIN pg_index i ON i.indexrelid = con.conindid
          WHERE con.contype = 'u' AND n.nspname = 'public'
            AND c.relname NOT IN ('schema_migrations', 'tenants')
     LOOP
@@ -81,8 +84,9 @@ BEGIN
             CONTINUE;
         END IF;
         EXECUTE format('ALTER TABLE public.%I DROP CONSTRAINT %I', rec.table_name, rec.conname);
-        EXECUTE format('ALTER TABLE public.%I ADD CONSTRAINT %I UNIQUE (%s)',
+        EXECUTE format('ALTER TABLE public.%I ADD CONSTRAINT %I UNIQUE %s (%s)',
             rec.table_name, rec.conname,
+            CASE WHEN rec.nulls_not_distinct THEN 'NULLS NOT DISTINCT' ELSE '' END,
             (SELECT string_agg(quote_ident(a.attname), ', ' ORDER BY k.ord)
                FROM unnest(rec.conkey) WITH ORDINALITY AS k(attnum, ord)
                JOIN pg_attribute a ON a.attrelid=rec.conrelid AND a.attnum=k.attnum
@@ -94,9 +98,12 @@ BEGIN
         orig_del := CASE rec.del_type WHEN 'c' THEN 'CASCADE' WHEN 'r' THEN 'RESTRICT'
                                       WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT'
                                       ELSE 'NO ACTION' END;
+        orig_upd := CASE rec.upd_type WHEN 'c' THEN 'CASCADE' WHEN 'r' THEN 'RESTRICT'
+                                      WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT'
+                                      ELSE 'NO ACTION' END;
         EXECUTE format(
-            'ALTER TABLE public.%I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES public.%I (%I) ON DELETE %s',
-            rec.child_table, rec.fk_name, rec.child_col, rec.parent_table, rec.parent_col, orig_del);
+            'ALTER TABLE public.%I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES public.%I (%I) ON UPDATE %s ON DELETE %s',
+            rec.child_table, rec.fk_name, rec.child_col, rec.parent_table, rec.parent_col, orig_upd, orig_del);
     END LOOP;
 
     DROP TABLE IF EXISTS app.tenant_fk_original;

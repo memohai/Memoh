@@ -347,3 +347,10 @@ GRANT EXECUTE ON FUNCTION app.cas_tenant_write_fence(uuid, bigint, bigint, boole
 INSERT INTO app.tenant_write_fences (tenant_id, fencing_token, write_enabled)
 VALUES ('00000000-0000-0000-0000-000000000001', 1, true)
 ON CONFLICT (tenant_id) DO NOTHING;
+
+-- Revoke the temporary owner membership granted to the migration role for the
+-- SET ROLE above. Leaving a (superuser) login role in memoh_owner's membership
+-- would let it assume owner and, being superuser, bypass RLS. A deployment that
+-- needs to run further owner-DDL must re-grant this membership under controlled,
+-- audited conditions (§4.4), not rely on it persisting from this migration.
+REVOKE memoh_owner FROM CURRENT_USER;
