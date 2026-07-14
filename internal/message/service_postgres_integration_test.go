@@ -292,8 +292,8 @@ func setupPostgresMessageTestFixtures(t *testing.T, ctx context.Context, tx pgx.
 		t.Fatalf("insert user: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO bots (id, owner_user_id, type, name)
-		VALUES ($1, $2, 'personal', $3)
+		INSERT INTO bots (id, owner_user_id, name)
+		VALUES ($1, $2, $3)
 	`, postgresMessageTestBotID, postgresMessageTestUserID, name); err != nil {
 		t.Fatalf("insert bot: %v", err)
 	}

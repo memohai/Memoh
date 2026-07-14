@@ -52,8 +52,8 @@ func setupCommittedCompactionFixture(t *testing.T) committedCompactionFixture {
 		t.Fatalf("insert fixture user: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO bots (id, owner_user_id, type, name)
-		VALUES ($1, $2, 'personal', $3)
+		INSERT INTO bots (id, owner_user_id, name)
+		VALUES ($1, $2, $3)
 	`, botID, userID, name); err != nil {
 		t.Fatalf("insert fixture bot: %v", err)
 	}
