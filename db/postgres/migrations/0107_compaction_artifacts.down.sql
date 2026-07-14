@@ -1,4 +1,4 @@
--- 0106_compaction_artifacts
+-- 0107_compaction_artifacts
 -- Remove summary artifact coverage, anchors, and frontier lineage.
 
 DROP INDEX IF EXISTS idx_compacts_active_session;

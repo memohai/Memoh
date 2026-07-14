@@ -1,4 +1,4 @@
--- 0107_compaction_epoch
+-- 0108_compaction_epoch
 -- Fence session compaction artifacts when their source history is rewritten.
 
 ALTER TABLE bot_sessions

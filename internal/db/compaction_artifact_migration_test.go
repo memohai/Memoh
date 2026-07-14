@@ -5,19 +5,19 @@ import (
 	"testing"
 )
 
-func TestCompactionArtifactMigrationPreservesPublished0106Schema(t *testing.T) {
+func TestCompactionArtifactMigrationPreservesPublished0107Schema(t *testing.T) {
 	t.Parallel()
 
-	up := readEmbeddedMigration(t, "postgres/migrations/0106_compaction_artifacts.up.sql")
-	down := readEmbeddedMigration(t, "postgres/migrations/0106_compaction_artifacts.down.sql")
+	up := readEmbeddedMigration(t, "postgres/migrations/0107_compaction_artifacts.up.sql")
+	down := readEmbeddedMigration(t, "postgres/migrations/0107_compaction_artifacts.down.sql")
 
-	if !strings.HasPrefix(up, "-- 0106_compaction_artifacts\n-- Persist summary artifact") ||
-		!strings.HasPrefix(down, "-- 0106_compaction_artifacts\n-- Remove summary artifact") {
-		t.Fatal("0106 migration pair is missing the required name and description headers")
+	if !strings.HasPrefix(up, "-- 0107_compaction_artifacts\n-- Persist summary artifact") ||
+		!strings.HasPrefix(down, "-- 0107_compaction_artifacts\n-- Remove summary artifact") {
+		t.Fatal("0107 migration pair is missing the required name and description headers")
 	}
 	if !strings.Contains(up, "superseded_by UUID REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL") ||
 		!strings.Contains(up, "CREATE INDEX IF NOT EXISTS idx_compacts_active_session") {
-		t.Fatal("0106 up migration no longer matches its published schema")
+		t.Fatal("0107 up migration no longer matches its published schema")
 	}
 	for _, repair := range []string{
 		"compacts_supersession_markers_check",
@@ -26,7 +26,7 @@ func TestCompactionArtifactMigrationPreservesPublished0106Schema(t *testing.T) {
 		"DROP CONSTRAINT IF EXISTS bot_history_message_compacts_superseded_by_fkey",
 	} {
 		if strings.Contains(up, repair) || strings.Contains(down, repair) {
-			t.Fatalf("0106 migration pair contains post-publication repair %q", repair)
+			t.Fatalf("0107 migration pair contains post-publication repair %q", repair)
 		}
 	}
 	for _, removed := range []string{
@@ -37,12 +37,12 @@ func TestCompactionArtifactMigrationPreservesPublished0106Schema(t *testing.T) {
 		"DROP COLUMN IF EXISTS coverage",
 	} {
 		if !strings.Contains(down, removed) {
-			t.Fatalf("0106 down migration does not reverse published object %q", removed)
+			t.Fatalf("0107 down migration does not reverse published object %q", removed)
 		}
 	}
 }
 
-func TestCompactionArtifactCanonicalSchemaMatchesPublished0106(t *testing.T) {
+func TestCompactionArtifactCanonicalSchemaMatchesPublished0107(t *testing.T) {
 	t.Parallel()
 
 	baseline := readEmbeddedMigration(t, "postgres/migrations/0001_init.up.sql")
@@ -52,7 +52,7 @@ func TestCompactionArtifactCanonicalSchemaMatchesPublished0106(t *testing.T) {
 		"CREATE INDEX IF NOT EXISTS idx_compacts_active_session",
 	} {
 		if !strings.Contains(baseline, required) {
-			t.Fatalf("canonical 0001 schema is missing published 0106 object %q", required)
+			t.Fatalf("canonical 0001 schema is missing published 0107 object %q", required)
 		}
 	}
 	for _, deferred := range []string{
