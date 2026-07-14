@@ -79,6 +79,7 @@ CREATE TABLE bot_history_messages (
 
 	legacyID := "00000000-0000-0000-0000-00000000c001"
 	repairArtifactID := "00000000-0000-0000-0000-00000000c101"
+	clearedArtifactID := "00000000-0000-0000-0000-00000000c201"
 	activeID := "00000000-0000-0000-0000-00000000d001"
 	parentOneID := "00000000-0000-0000-0000-00000000d002"
 	parentTwoID := "00000000-0000-0000-0000-00000000d003"
@@ -88,23 +89,26 @@ CREATE TABLE bot_history_messages (
 	logOnlyArtifactID := "00000000-0000-0000-0000-00000000d201"
 	botID := "00000000-0000-0000-0000-00000000b001"
 	repairBotID := "00000000-0000-0000-0000-00000000b002"
+	clearedBotID := "00000000-0000-0000-0000-00000000b003"
 	foreignBotID := "00000000-0000-0000-0000-00000000b101"
 	logOnlyBotID := "00000000-0000-0000-0000-00000000b201"
 	sessionID := "00000000-0000-0000-0000-00000000e001"
 	repairSessionID := "00000000-0000-0000-0000-00000000e002"
+	clearedSessionID := "00000000-0000-0000-0000-00000000e003"
 	foreignSessionID := "00000000-0000-0000-0000-00000000e101"
 	if _, err := tx.Exec(ctx, `
-INSERT INTO bot_sessions (id, bot_id)
-VALUES ($1, $2), ($3, $4), ($5, $6)
-	`, sessionID, botID, foreignSessionID, foreignBotID, repairSessionID, repairBotID); err != nil {
+	INSERT INTO bot_sessions (id, bot_id)
+	VALUES ($1, $2), ($3, $4), ($5, $6), ($7, $8)
+		`, sessionID, botID, foreignSessionID, foreignBotID, repairSessionID, repairBotID, clearedSessionID, clearedBotID); err != nil {
 		t.Fatalf("insert sessions: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary)
-VALUES
-  ($1, $2, $3, 'ok', 'legacy summary'),
-  ($4, $5, $6, 'ok', 'unsafe hidden summary')
-`, legacyID, botID, sessionID, repairArtifactID, repairBotID, repairSessionID); err != nil {
+	INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary, message_count)
+	VALUES
+	  ($1, $2, $3, 'ok', 'legacy summary', 1),
+	  ($4, $5, $6, 'ok', 'unsafe hidden summary', 1),
+	  ($7, $8, $9, 'ok', 'deleted secret survives', 1)
+	`, legacyID, botID, sessionID, repairArtifactID, repairBotID, repairSessionID, clearedArtifactID, clearedBotID, clearedSessionID); err != nil {
 		t.Fatalf("insert pre-0106 legacy artifact: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
@@ -112,12 +116,17 @@ INSERT INTO bot_history_messages (
   id, bot_id, session_id, compact_id,
   turn_visible, turn_id, turn_position, turn_message_seq, turn_superseded_at
 )
-VALUES (
-  '00000000-0000-0000-0000-00000000a002', $1, $2, $3,
-  false, '00000000-0000-0000-0000-00000000f002', 1, 1, now()
-)
-`, repairBotID, repairSessionID, repairArtifactID); err != nil {
-		t.Fatalf("insert hidden legacy source: %v", err)
+	VALUES
+	  ('00000000-0000-0000-0000-00000000a001', $1, $2, $3, true, '00000000-0000-0000-0000-00000000f001', 1, 1, NULL),
+	  ('00000000-0000-0000-0000-00000000a002', $4, $5, $6, false, '00000000-0000-0000-0000-00000000f002', 1, 1, now()),
+	  ('00000000-0000-0000-0000-00000000a003', $7, $8, $9, true, '00000000-0000-0000-0000-00000000f003', 1, 1, NULL)
+	`, botID, sessionID, legacyID, repairBotID, repairSessionID, repairArtifactID, clearedBotID, clearedSessionID, clearedArtifactID); err != nil {
+		t.Fatalf("insert legacy sources: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+	DELETE FROM bot_history_messages WHERE id = '00000000-0000-0000-0000-00000000a003'
+	`); err != nil {
+		t.Fatalf("simulate legacy history clear: %v", err)
 	}
 
 	up0106 := readEmbeddedMigration(t, "postgres/migrations/0106_compaction_artifacts.up.sql")
@@ -143,6 +152,19 @@ VALUES (
 	assertCompactionEpoch(t, ctx, tx, "bot_history_message_compacts", legacyID, 0)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", repairSessionID, 1)
 	assertCompactionEpoch(t, ctx, tx, "bot_history_message_compacts", repairArtifactID, 0)
+	assertCompactionEpoch(t, ctx, tx, "bot_sessions", clearedSessionID, 1)
+	assertCompactionEpoch(t, ctx, tx, "bot_history_message_compacts", clearedArtifactID, 0)
+	parsedClearedSessionID, err := ParseUUID(clearedSessionID)
+	if err != nil {
+		t.Fatalf("parse cleared session id: %v", err)
+	}
+	clearedLineage, err := sqlc.New(tx).ListCompactionArtifactLineageBySession(ctx, parsedClearedSessionID)
+	if err != nil {
+		t.Fatalf("query cleared session lineage: %v", err)
+	}
+	if len(clearedLineage) != 0 {
+		t.Fatalf("cleared session retained active lineage: %#v", clearedLineage)
+	}
 
 	var (
 		legacyVersion  int32
@@ -206,11 +228,9 @@ VALUES ($1, $2, 'ok', 'log-only artifact')
 		t.Fatalf("insert log-only artifact: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO bot_history_messages (id, bot_id, session_id, compact_id)
-VALUES
-  ('00000000-0000-0000-0000-00000000a001', $1, $2, $3),
-  ('00000000-0000-0000-0000-00000000a101', $4, $5, $6)
-	`, botID, sessionID, legacyID, foreignBotID, foreignSessionID, foreignArtifactID); err != nil {
+	INSERT INTO bot_history_messages (id, bot_id, session_id, compact_id)
+	VALUES ('00000000-0000-0000-0000-00000000a101', $1, $2, $3)
+		`, foreignBotID, foreignSessionID, foreignArtifactID); err != nil {
 		t.Fatalf("insert compacted messages: %v", err)
 	}
 
@@ -225,7 +245,7 @@ VALUES
 		t.Fatalf("delete session history through generated query: %v", err)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_messages", 2)
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 3)
+	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 4)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", sessionID, 1)
 
 	parsedForeignBotID, err := ParseUUID(foreignBotID)
@@ -236,7 +256,7 @@ VALUES
 		t.Fatalf("delete bot history through generated query: %v", err)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_messages", 1)
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 2)
+	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 3)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", foreignSessionID, 1)
 
 	parsedRepairSessionID, err := ParseUUID(repairSessionID)
@@ -247,8 +267,13 @@ VALUES
 		t.Fatalf("delete repaired session history through generated query: %v", err)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_messages", 0)
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 1)
+	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 2)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", repairSessionID, 2)
+	if err := queries.ClearHistoryBySession(ctx, parsedClearedSessionID); err != nil {
+		t.Fatalf("delete cleared session history through generated query: %v", err)
+	}
+	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 1)
+	assertCompactionEpoch(t, ctx, tx, "bot_sessions", clearedSessionID, 2)
 
 	parsedBotID, err := ParseUUID(botID)
 	if err != nil {
