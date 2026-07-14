@@ -175,7 +175,7 @@ func openACPRuntimeFencePostgresPool(t *testing.T, ctx context.Context) *pgxpool
 			t.Fatalf("apply canonical postgres schema: %v", err)
 		}
 	}
-	migration, err := os.ReadFile("../../db/postgres/migrations/0106_session_runtime_fencing_token.up.sql")
+	migration, err := os.ReadFile("../../db/postgres/migrations/0107_session_runtime_fencing_token.up.sql")
 	if err != nil {
 		t.Fatalf("read runtime fence migration: %v", err)
 	}

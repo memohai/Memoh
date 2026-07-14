@@ -1,4 +1,4 @@
--- 0106_session_runtime_fencing_token
+-- 0107_session_runtime_fencing_token
 -- Remove the distributed session runtime persistence fence.
 
 ALTER TABLE user_input_requests

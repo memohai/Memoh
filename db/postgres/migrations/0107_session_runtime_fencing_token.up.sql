@@ -1,4 +1,4 @@
--- 0106_session_runtime_fencing_token
+-- 0107_session_runtime_fencing_token
 -- Add a monotonic PostgreSQL fence for distributed session runtime writes.
 
 CREATE SEQUENCE IF NOT EXISTS session_runtime_fencing_token_seq AS BIGINT NO CYCLE;
