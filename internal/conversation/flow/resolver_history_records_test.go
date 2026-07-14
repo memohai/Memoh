@@ -148,6 +148,44 @@ func TestReplaceCompactedHistoryRecordsKeepsOriginalGroupWithoutSummary(t *testi
 	if gotMessages := historyfrag.ToModelMessages(gotEmpty); !reflect.DeepEqual(gotMessages, historyfrag.ToModelMessages(records)) {
 		t.Fatalf("empty summary should keep original group:\ngot  %#v\nwant %#v", gotMessages, historyfrag.ToModelMessages(records))
 	}
+
+	// A legacy status='ok' log can hold a whitespace-only summary (main never
+	// trimmed). Substituting it would drop the raw rows for nothing, and the
+	// reclaim SQL treats such rows as still eligible — the read path must agree.
+	gotWhitespace := replaceCompactedHistoryRecords(records, map[string]string{"compact-1": "  \n\t"}, contextfrag.Scope{})
+	if gotMessages := historyfrag.ToModelMessages(gotWhitespace); !reflect.DeepEqual(gotMessages, historyfrag.ToModelMessages(records)) {
+		t.Fatalf("whitespace-only summary should keep original group:\ngot  %#v\nwant %#v", gotMessages, historyfrag.ToModelMessages(records))
+	}
+}
+
+func TestReplaceCompactedHistoryRecordsKeepsMustKeepIslandOrdering(t *testing.T) {
+	t.Parallel()
+
+	// The selector now marks only the contiguous run before a must-keep island
+	// (the ask_user exchange) under one compact_id; the island and the run after
+	// it stay raw. The read path must drop the summary in place and preserve
+	// order — "mid q" stays AFTER the ask_user exchange, never folded before it.
+	records := []historyfrag.HistoryRecord{
+		historyRecord("row-old", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("old q")}, func(r *historyfrag.HistoryRecord) {
+			r.CompactID = "compact-1"
+		}),
+		historyRecord("row-ask-call", conversation.ModelMessage{Role: "assistant", Content: conversation.NewTextContent("ask you something")}, nil),
+		historyRecord("row-ask-result", conversation.ModelMessage{Role: "tool", Content: conversation.NewTextContent("answered")}, nil),
+		historyRecord("row-mid", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("mid q")}, nil),
+		historyRecord("row-current", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("current")}, nil),
+	}
+
+	got := replaceCompactedHistoryRecords(records, map[string]string{"compact-1": "condensed"}, contextfrag.Scope{})
+	want := []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("<summary>\ncondensed\n</summary>")},
+		{Role: "assistant", Content: conversation.NewTextContent("ask you something")},
+		{Role: "tool", Content: conversation.NewTextContent("answered")},
+		{Role: "user", Content: conversation.NewTextContent("mid q")},
+		{Role: "user", Content: conversation.NewTextContent("current")},
+	}
+	if gotMessages := historyfrag.ToModelMessages(got); !reflect.DeepEqual(gotMessages, want) {
+		t.Fatalf("must-keep island ordering broken:\ngot  %#v\nwant %#v", gotMessages, want)
+	}
 }
 
 func TestHistoryRecordPathPreservesLegacyResolverMessagePipeline(t *testing.T) {

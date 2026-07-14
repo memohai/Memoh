@@ -390,33 +390,37 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 				slog.Int("context_token_budget", contextTokenBudget),
 				slog.Int("compaction_threshold", compactionThreshold),
 			)
-			r.runCompactionSync(ctx, req, estimatedTokens)
-			// Reload messages after compaction.
-			loaded, loadErr = r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
-			if loadErr != nil {
-				r.logger.Error("resolve: reload messages after compaction failed",
-					slog.String("bot_id", req.BotID),
-					slog.Any("error", loadErr),
-				)
-				return resolvedContext{}, loadErr
+			// Reload and post-process only when this run actually produced a
+			// summary. A noop (cooldown, in-flight, nothing markable) keeps
+			// this turn's context untouched — possibly still above the
+			// threshold — and the next turn re-evaluates.
+			if res := r.runCompactionSync(ctx, req, estimatedTokens); res.Status == compaction.StatusOK {
+				loaded, loadErr = r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
+				if loadErr != nil {
+					r.logger.Error("resolve: reload messages after compaction failed",
+						slog.String("bot_id", req.BotID),
+						slog.Any("error", loadErr),
+					)
+					return resolvedContext{}, loadErr
+				}
+				loaded = pruneHistoryForGateway(loaded)
+				loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
+				loaded = dedupePersistedCurrentUserMessage(loaded, req)
+				loaded, loadErr = r.ensureRequiredHistoryMessage(ctx, loaded, req)
+				if loadErr != nil {
+					r.logger.Error("resolve: reload required history message failed",
+						slog.String("bot_id", req.BotID),
+						slog.Any("error", loadErr),
+					)
+					return resolvedContext{}, loadErr
+				}
+				loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
+				messages, estimatedTokens = trimMessagesByTokens(r.logger, loaded, contextTokenBudget)
+				// Remove tool messages from the recent context — they are large
+				// and unnecessary when we already have a summary. Keep only
+				// user/assistant conversation turns.
+				messages = stripToolMessages(messages)
 			}
-			loaded = pruneHistoryForGateway(loaded)
-			loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
-			loaded = dedupePersistedCurrentUserMessage(loaded, req)
-			loaded, loadErr = r.ensureRequiredHistoryMessage(ctx, loaded, req)
-			if loadErr != nil {
-				r.logger.Error("resolve: reload required history message failed",
-					slog.String("bot_id", req.BotID),
-					slog.Any("error", loadErr),
-				)
-				return resolvedContext{}, loadErr
-			}
-			loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
-			messages, estimatedTokens = trimMessagesByTokens(r.logger, loaded, contextTokenBudget)
-			// Remove tool messages from the recent context — they are large
-			// and unnecessary when we already have a summary. Keep only
-			// user/assistant conversation turns.
-			messages = stripToolMessages(messages)
 		}
 		_ = estimatedTokens
 	}
@@ -812,10 +816,11 @@ func pickEffort(requested string, botSettings settings.Settings, effortLevels []
 }
 
 // effectiveReasoningEfforts intersects the model's advertised effort levels
-// with the wire format's accepted set. OpenAI-format clients reject "max", so
-// it is excluded here. This is the primary filter; openAIWireEffort in
-// models/sdk.go and the Twilight SDK provider layer act as defence-in-depth.
-// Keep isOpenAIReasoningWire in sync with the frontend OPENAI_FORMAT_CLIENT_TYPES.
+// with the selected client's current wire policy. Generic OpenAI-format clients
+// retain the existing max-to-xhigh compatibility behavior, while Codex uses its
+// catalog levels directly. openAIWireEffort in models/sdk.go is defence-in-depth.
+// Keep normalizesMaxReasoningEffort in sync with the frontend
+// MAX_NORMALIZED_CLIENT_TYPES.
 func effectiveReasoningEfforts(effortLevels []string, clientType string) []string {
 	levels := effortLevels
 	if len(levels) == 0 {
@@ -823,7 +828,7 @@ func effectiveReasoningEfforts(effortLevels []string, clientType string) []strin
 	}
 	out := make([]string, 0, len(levels))
 	for _, e := range levels {
-		if isOpenAIReasoningWire(clientType) && e == models.ReasoningEffortMax {
+		if normalizesMaxReasoningEffort(clientType) && e == models.ReasoningEffortMax {
 			continue
 		}
 		if !hasEffort(out, e) {
@@ -833,11 +838,12 @@ func effectiveReasoningEfforts(effortLevels []string, clientType string) []strin
 	return out
 }
 
-// isOpenAIReasoningWire returns true for client types whose wire format rejects
-// "max" effort. Keep in sync with OPENAI_FORMAT_CLIENT_TYPES in reasoning-effort.ts.
-func isOpenAIReasoningWire(clientType string) bool {
+// normalizesMaxReasoningEffort reports whether the current compatibility policy
+// maps "max" to "xhigh". Keep in sync with MAX_NORMALIZED_CLIENT_TYPES in
+// reasoning-effort.ts.
+func normalizesMaxReasoningEffort(clientType string) bool {
 	switch models.ClientType(clientType) {
-	case models.ClientTypeOpenAICompletions, models.ClientTypeOpenAIResponses, models.ClientTypeOpenAICodex:
+	case models.ClientTypeOpenAICompletions, models.ClientTypeOpenAIResponses:
 		return true
 	default:
 		return false

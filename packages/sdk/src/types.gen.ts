@@ -2327,6 +2327,7 @@ export type ModelsGetResponse = {
 };
 
 export type ModelsModelConfig = {
+    catalog_available?: boolean;
     compatibilities?: Array<string>;
     context_window?: number;
     description?: string;

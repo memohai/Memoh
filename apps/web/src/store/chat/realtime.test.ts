@@ -42,10 +42,12 @@ function createSocket(connected = true): ChatWebSocket & { send: ReturnType<type
 
 function makeController() {
   const sockets: Array<{ botId: string, handler: (event: UIStreamEvent) => void, socket: ReturnType<typeof createSocket> }> = []
-  const sessionRetry = createFakeRetryingStream()
-  const activityRetry = createFakeRetryingStream()
-  const retryingStreams = [sessionRetry, activityRetry]
-  const sessionHandlers: Array<(event: SessionMessageStreamEvent) => void> = []
+  const retryingStreams: FakeRetryingStream[] = []
+  const sessionHandlers: Array<{
+    botId: string
+    sessionId: string
+    handler: (event: SessionMessageStreamEvent) => void
+  }> = []
   const activityHandlers: Array<(event: BotSessionActivityEvent) => void> = []
   const callbacks: ChatRealtimeCallbacks = {
     onWebSocketEvent: vi.fn(),
@@ -59,23 +61,27 @@ function makeController() {
       sockets.push({ botId, handler, socket })
       return socket
     }),
-    streamSessionMessageEvents: vi.fn(async (_botId, _sessionId, _signal, handler) => {
-      sessionHandlers.push(handler)
+    streamSessionMessageEvents: vi.fn(async (botId, sessionId, _signal, handler) => {
+      sessionHandlers.push({ botId, sessionId, handler })
     }),
     streamBotSessionsActivityEvents: vi.fn(async (_botId, _signal, handler) => {
       activityHandlers.push(handler)
     }),
-    createRetryingStream: vi.fn(() => retryingStreams.shift()!),
+    createRetryingStream: vi.fn(() => {
+      const stream = createFakeRetryingStream()
+      retryingStreams.push(stream)
+      return stream
+    }),
   }
+  const controller = createChatRealtimeController(callbacks, transport)
   return {
     callbacks,
     transport,
     sockets,
     sessionHandlers,
     activityHandlers,
-    sessionRetry,
-    activityRetry,
-    controller: createChatRealtimeController(callbacks, transport),
+    retryingStreams,
+    controller,
   }
 }
 
@@ -118,25 +124,103 @@ describe('chat realtime controller', () => {
     expect(sockets[0]!.socket.abort).toHaveBeenCalledWith('stream-1')
   })
 
-  it('prepares every session attempt and suppresses events after replacement', async () => {
-    const { controller, callbacks, sessionRetry, sessionHandlers } = makeController()
+  it('starts the same session once and prepares every retry attempt', async () => {
+    const { controller, callbacks, transport, retryingStreams, sessionHandlers } = makeController()
     controller.startSessionMessagesStream('bot-1', 'session-1')
-    await sessionRetry.attempt!(new AbortController().signal)
-    expect(callbacks.prepareSessionMessages).toHaveBeenCalledWith('bot-1', 'session-1')
-    const staleHandler = sessionHandlers[0]!
+    controller.startSessionMessagesStream(' bot-1 ', ' session-1 ')
 
-    controller.startSessionMessagesStream('bot-1', 'session-2')
+    const sessionRetry = retryingStreams[1]!
+    expect(transport.createRetryingStream).toHaveBeenCalledTimes(2)
+    expect(sessionRetry.start).toHaveBeenCalledOnce()
+
     await sessionRetry.attempt!(new AbortController().signal)
+    const staleHandler = sessionHandlers[0]!.handler
+    await sessionRetry.attempt!(new AbortController().signal)
+    expect(callbacks.prepareSessionMessages).toHaveBeenCalledTimes(2)
+    expect(callbacks.prepareSessionMessages).toHaveBeenNthCalledWith(1, 'bot-1', 'session-1')
+    expect(callbacks.prepareSessionMessages).toHaveBeenNthCalledWith(2, 'bot-1', 'session-1')
+
     staleHandler({ type: 'ping' } as SessionMessageStreamEvent)
-    sessionHandlers[1]!({ type: 'ping' } as SessionMessageStreamEvent)
+    sessionHandlers[1]!.handler({ type: 'ping' } as SessionMessageStreamEvent)
 
+    expect(callbacks.onSessionMessageEvent).toHaveBeenCalledOnce()
+    expect(callbacks.onSessionMessageEvent).toHaveBeenCalledWith('bot-1', 'session-1', { type: 'ping' })
+  })
+
+  it('keeps different session streams alive concurrently', async () => {
+    const { controller, callbacks, retryingStreams, sessionHandlers } = makeController()
+    controller.startSessionMessagesStream('bot-1', 'session-1')
+    controller.startSessionMessagesStream('bot-1', 'session-2')
+
+    const firstRetry = retryingStreams[1]!
+    const secondRetry = retryingStreams[2]!
+    await firstRetry.attempt!(new AbortController().signal)
+    await secondRetry.attempt!(new AbortController().signal)
+
+    sessionHandlers.find(item => item.sessionId === 'session-1')!.handler({ type: 'ping' })
+    sessionHandlers.find(item => item.sessionId === 'session-2')!.handler({ type: 'ping' })
+
+    expect(firstRetry.stop).not.toHaveBeenCalled()
+    expect(secondRetry.stop).not.toHaveBeenCalled()
+    expect(callbacks.onSessionMessageEvent).toHaveBeenCalledTimes(2)
+    expect(callbacks.onSessionMessageEvent).toHaveBeenCalledWith('bot-1', 'session-1', { type: 'ping' })
+    expect(callbacks.onSessionMessageEvent).toHaveBeenCalledWith('bot-1', 'session-2', { type: 'ping' })
+  })
+
+  it('stops only the requested session and suppresses its late events', async () => {
+    const { controller, callbacks, retryingStreams, sessionHandlers } = makeController()
+    controller.startSessionMessagesStream('bot-1', 'session-1')
+    controller.startSessionMessagesStream('bot-1', 'session-2')
+
+    const firstRetry = retryingStreams[1]!
+    const secondRetry = retryingStreams[2]!
+    await firstRetry.attempt!(new AbortController().signal)
+    await secondRetry.attempt!(new AbortController().signal)
+    const firstHandler = sessionHandlers.find(item => item.sessionId === 'session-1')!.handler
+    const secondHandler = sessionHandlers.find(item => item.sessionId === 'session-2')!.handler
+
+    controller.stopSessionMessagesStream('bot-1', 'session-1')
+    firstHandler({ type: 'ping' })
+    secondHandler({ type: 'ping' })
+
+    expect(firstRetry.stop).toHaveBeenCalledOnce()
+    expect(secondRetry.stop).not.toHaveBeenCalled()
     expect(callbacks.onSessionMessageEvent).toHaveBeenCalledOnce()
     expect(callbacks.onSessionMessageEvent).toHaveBeenCalledWith('bot-1', 'session-2', { type: 'ping' })
   })
 
+  it('restarts a stopped session without accepting events from the old connection', async () => {
+    const { controller, callbacks, retryingStreams, sessionHandlers } = makeController()
+    controller.startSessionMessagesStream('bot-1', 'session-1')
+    await retryingStreams[1]!.attempt!(new AbortController().signal)
+    const staleHandler = sessionHandlers[0]!.handler
+
+    controller.stopSessionMessagesStream('bot-1', 'session-1')
+    controller.startSessionMessagesStream('bot-1', 'session-1')
+    await retryingStreams[2]!.attempt!(new AbortController().signal)
+
+    staleHandler({ type: 'ping' })
+    sessionHandlers[1]!.handler({ type: 'ping' })
+
+    expect(callbacks.onSessionMessageEvent).toHaveBeenCalledOnce()
+    expect(callbacks.onSessionMessageEvent).toHaveBeenCalledWith('bot-1', 'session-1', { type: 'ping' })
+  })
+
+  it('stops every session stream when no target is provided', () => {
+    const { controller, retryingStreams } = makeController()
+    controller.startSessionMessagesStream('bot-1', 'session-1')
+    controller.startSessionMessagesStream('bot-1', 'session-2')
+
+    controller.stopSessionMessagesStream()
+
+    expect(retryingStreams[1]!.stop).toHaveBeenCalledOnce()
+    expect(retryingStreams[2]!.stop).toHaveBeenCalledOnce()
+  })
+
   it('suppresses bot activity from a stopped generation', async () => {
-    const { controller, callbacks, activityRetry, activityHandlers } = makeController()
+    const { controller, callbacks, retryingStreams, activityHandlers } = makeController()
     controller.startBotSessionsActivityStream('bot-1')
+    const activityRetry = retryingStreams[0]!
     await activityRetry.attempt!(new AbortController().signal)
     const staleHandler = activityHandlers[0]!
 

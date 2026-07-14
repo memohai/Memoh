@@ -26,6 +26,12 @@ const (
 	MaxExecTimeout int32 = 600
 	// BackgroundExecTimeout is the timeout for background tasks (30 minutes).
 	BackgroundExecTimeout int32 = 1800
+	// DefaultWaitTimeout bounds a single wait_until call. The task keeps
+	// running afterwards; callers re-wait to keep observing.
+	DefaultWaitTimeout = 120 * time.Second
+	// DefaultIdleThreshold is how long an exec task's output must stay quiet
+	// before a waiter is woken with WaitIdle.
+	DefaultIdleThreshold = 20 * time.Second
 	// DefaultCleanupInterval is how often the manager prunes old completed tasks.
 	DefaultCleanupInterval = time.Hour
 	// DefaultTaskRetention is how long completed tasks are retained in memory.
@@ -582,27 +588,63 @@ func (m *Manager) KillForSession(botID, sessionID, taskID string) error {
 }
 
 // WaitForSessionTask waits until a task reaches a terminal state or needs
-// attention. It returns the current snapshot when the task is completed,
-// failed, killed, or stalled.
-func (m *Manager) WaitForSessionTask(ctx context.Context, botID, sessionID, taskID string) (TaskSnapshot, error) {
+// attention, and reports why the wait ended. Besides completed/failed/killed/
+// stalled, a running exec task whose output stays quiet for idleThreshold
+// returns WaitIdle — the signal that a server-style command has settled and
+// its ready banner is in the output tail. idleThreshold <= 0 disables idle
+// wake-ups; non-exec kinds (agent, spawn, video) have no output stream, so
+// idle never applies to them.
+func (m *Manager) WaitForSessionTask(ctx context.Context, botID, sessionID, taskID string, idleThreshold time.Duration) (TaskSnapshot, WaitOutcome, error) {
 	task := m.GetForSession(botID, sessionID, taskID)
 	if task == nil {
-		return TaskSnapshot{}, fmt.Errorf("task %s not found", taskID)
+		return TaskSnapshot{}, "", fmt.Errorf("task %s not found", taskID)
 	}
 	for {
 		task.mu.Lock()
 		status := task.Status
 		stalled := task.stalled && status == TaskRunning
-		done := status == TaskCompleted || status == TaskFailed || status == TaskKilled || stalled
+		kind := task.Kind
+		lastOutputAt := task.lastOutputAt
+		if lastOutputAt.IsZero() {
+			lastOutputAt = task.StartedAt
+		}
 		ch := task.changeChanLocked()
 		task.mu.Unlock()
-		if done {
-			return task.Snapshot(), nil
+
+		switch {
+		case status == TaskCompleted:
+			return task.Snapshot(), WaitCompleted, nil
+		case status == TaskFailed:
+			return task.Snapshot(), WaitFailed, nil
+		case status == TaskKilled:
+			return task.Snapshot(), WaitKilled, nil
+		case stalled:
+			return task.Snapshot(), WaitStalled, nil
+		}
+
+		var idleC <-chan time.Time
+		var idleTimer *time.Timer
+		if idleThreshold > 0 && kind == KindExec && status == TaskRunning {
+			remaining := time.Until(lastOutputAt.Add(idleThreshold))
+			if remaining <= 0 {
+				return task.Snapshot(), WaitIdle, nil
+			}
+			idleTimer = time.NewTimer(remaining)
+			idleC = idleTimer.C
 		}
 		select {
 		case <-ctx.Done():
-			return task.Snapshot(), ctx.Err()
+			if idleTimer != nil {
+				idleTimer.Stop()
+			}
+			return task.Snapshot(), "", ctx.Err()
 		case <-ch:
+			if idleTimer != nil {
+				idleTimer.Stop()
+			}
+		case <-idleC:
+			// Re-loop: output may have grown since the timer was armed, in
+			// which case the next iteration re-arms with the new deadline.
 		}
 	}
 }

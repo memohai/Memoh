@@ -15,6 +15,11 @@ interface RetryingStream {
   stop: () => void
 }
 
+interface SessionMessagesConnection {
+  stream: RetryingStream
+  generation: number
+}
+
 export interface ChatRealtimeCallbacks {
   onWebSocketEvent: (botId: string, event: UIStreamEvent) => void
   prepareSessionMessages: (botId: string, sessionId: string) => Promise<void>
@@ -45,9 +50,8 @@ export function createChatRealtimeController(
   let activeWebSocket: ChatWebSocket | null = null
   let activeWebSocketBotId = ''
   let webSocketGeneration = 0
-  let sessionMessagesGeneration = 0
   let botSessionsActivityGeneration = 0
-  const sessionMessagesStream = transport.createRetryingStream()
+  const sessionMessagesConnections = new Map<string, SessionMessagesConnection>()
   const botSessionsActivityStream = transport.createRetryingStream()
 
   function stopWebSocket() {
@@ -98,27 +102,59 @@ export function createChatRealtimeController(
     return true
   }
 
-  function stopSessionMessagesStream() {
-    sessionMessagesGeneration += 1
-    sessionMessagesStream.stop()
+  function sessionMessagesKey(botId: string, sessionId: string) {
+    return `${botId}\u0000${sessionId}`
+  }
+
+  function stopSessionMessagesConnection(key: string, connection: SessionMessagesConnection) {
+    if (sessionMessagesConnections.get(key) !== connection) return
+    connection.generation += 1
+    sessionMessagesConnections.delete(key)
+    connection.stream.stop()
+  }
+
+  function stopSessionMessagesStream(botId?: string, sessionId?: string) {
+    if (botId === undefined && sessionId === undefined) {
+      for (const [key, connection] of sessionMessagesConnections) {
+        stopSessionMessagesConnection(key, connection)
+      }
+      return
+    }
+
+    const bid = (botId ?? '').trim()
+    const sid = (sessionId ?? '').trim()
+    if (!bid || !sid) return
+    const key = sessionMessagesKey(bid, sid)
+    const connection = sessionMessagesConnections.get(key)
+    if (connection) stopSessionMessagesConnection(key, connection)
   }
 
   function startSessionMessagesStream(botId: string, sessionId: string) {
-    stopSessionMessagesStream()
     const bid = botId.trim()
     const sid = sessionId.trim()
     if (!bid || !sid) return
+    const key = sessionMessagesKey(bid, sid)
+    if (sessionMessagesConnections.has(key)) return
 
-    const generation = sessionMessagesGeneration
-    sessionMessagesStream.start(async (signal) => {
+    const connection: SessionMessagesConnection = {
+      stream: transport.createRetryingStream(),
+      generation: 0,
+    }
+    sessionMessagesConnections.set(key, connection)
+    connection.stream.start(async (signal) => {
+      const generation = ++connection.generation
+      const isCurrent = () => sessionMessagesConnections.get(key) === connection
+        && connection.generation === generation
       try {
         await callbacks.prepareSessionMessages(bid, sid)
       } catch (error) {
-        console.error('Failed to load session messages:', error)
+        if (isCurrent() && !signal.aborted) {
+          console.error('Failed to load session messages:', error)
+        }
       }
-      if (generation !== sessionMessagesGeneration || signal.aborted) return
+      if (!isCurrent() || signal.aborted) return
       await transport.streamSessionMessageEvents(bid, sid, signal, (event) => {
-        if (generation !== sessionMessagesGeneration) return
+        if (!isCurrent() || signal.aborted) return
         callbacks.onSessionMessageEvent(bid, sid, event)
       })
     })

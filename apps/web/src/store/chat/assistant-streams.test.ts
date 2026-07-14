@@ -28,12 +28,13 @@ function track(
   registry: ReturnType<typeof createAssistantStreamRegistry>,
   streamId: string,
   targetSessionId = 'session-a',
+  botId = 'bot-1',
 ) {
   const turn = assistantTurn(`turn-${streamId}`)
   const completion = registry.trackAssistantStream({
     streamId,
     assistantTurn: turn,
-    botId: 'bot-1',
+    botId,
     sessionId: targetSessionId,
   })
   return { turn, completion }
@@ -88,19 +89,27 @@ describe('assistant stream registry', () => {
     await expect(track(registry, 'stream-1').completion).rejects.toThrow('stream_id stream-1 is already terminal')
   })
 
-  it('reactively prioritizes the selected streaming session', async () => {
-    const { registry, sessionId } = makeRegistry('session-b')
+  it('reactively prioritizes only the selected bot streaming session', async () => {
+    const { registry, currentBotId, sessionId } = makeRegistry('session-b')
     const first = track(registry, 'stream-a', 'session-a')
     const second = track(registry, 'stream-b', 'session-b')
+    const otherBot = track(registry, 'stream-other', 'session-b', 'bot-2')
 
     expect(registry.streaming.value).toBe(true)
     expect(registry.streamingSessionId.value).toBe('session-b')
     expect(registry.assistantStreamsForSession('bot-1', 'session-a').map(stream => stream.streamId)).toEqual(['stream-a'])
     expect(registry.assistantStreamsForSession('bot-2', 'session-a')).toEqual([])
+    expect(registry.isSessionStreaming('bot-1', 'session-b')).toBe(true)
+    expect(registry.isSessionStreaming('bot-2', 'session-b')).toBe(true)
 
     sessionId.value = 'session-c'
     expect(registry.streaming.value).toBe(false)
     expect(registry.streamingSessionId.value).toBe('session-a')
+
+    currentBotId.value = 'bot-2'
+    expect(registry.streaming.value).toBe(false)
+    expect(registry.streamingSessionId.value).toBe('session-b')
+    currentBotId.value = 'bot-1'
 
     registry.resolveAssistantStream('stream-a')
     await first.completion
@@ -109,18 +118,21 @@ describe('assistant stream registry', () => {
     registry.resolveAssistantStream('stream-b')
     await second.completion
     expect(registry.streamingSessionId.value).toBeNull()
+
+    registry.resolveAssistantStream('stream-other')
+    await otherBot.completion
   })
 
   it('routes missing event ids only when the session has one unambiguous stream', async () => {
     const { registry } = makeRegistry()
     const first = track(registry, 'stream-a')
 
-    expect(registry.streamIdForEvent({ session_id: 'session-a' })).toBe('stream-a')
-    expect(registry.streamIdForEvent({ stream_id: 'explicit', session_id: 'session-a' })).toBe('explicit')
+    expect(registry.streamIdForEvent('bot-1', { session_id: 'session-a' })).toBe('stream-a')
+    expect(registry.streamIdForEvent('bot-1', { stream_id: 'explicit', session_id: 'session-a' })).toBe('explicit')
 
     const second = track(registry, 'stream-b')
-    expect(registry.streamIdForEvent({ session_id: 'session-a' })).toBe('session:session-a:agent-stream')
-    expect(registry.streamIdForEvent({}, '')).toBe('legacy-stream')
+    expect(registry.streamIdForEvent('bot-1', { session_id: 'session-a' })).toBe('session:bot-1:session-a:agent-stream')
+    expect(registry.streamIdForEvent('bot-1', {}, '')).toBe('bot:bot-1:legacy-stream')
 
     registry.resolveAssistantStream('stream-a')
     registry.resolveAssistantStream('stream-b')
@@ -187,7 +199,7 @@ describe('assistant stream registry', () => {
     expect(registry.isTerminalStream('terminal-stream')).toBe(false)
   })
 
-  it('rejects session and global snapshots in insertion order', async () => {
+  it('rejects the global stream snapshot in insertion order', async () => {
     const { registry } = makeRegistry()
     const first = track(registry, 'stream-a1', 'session-a')
     const second = track(registry, 'stream-b1', 'session-b')
@@ -196,18 +208,11 @@ describe('assistant stream registry', () => {
     const failure = new Error('aborted')
     const beforeReject: string[] = []
 
-    registry.rejectSessionStreams('session-a', failure, (streamId) => {
-      expect(registry.getAssistantStream(streamId)).toBeDefined()
-      beforeReject.push(streamId)
-    })
-    expect(beforeReject).toEqual(['stream-a1', 'stream-a2'])
-    expect(registry.getAssistantStream('stream-b1')).toBeDefined()
-
     registry.rejectAllStreams(failure, (streamId) => {
       expect(registry.getAssistantStream(streamId)).toBeDefined()
       beforeReject.push(streamId)
     })
-    expect(beforeReject).toEqual(['stream-a1', 'stream-a2', 'stream-b1'])
+    expect(beforeReject).toEqual(['stream-a1', 'stream-b1', 'stream-a2'])
     expect(await Promise.all(completions)).toEqual([failure, failure, failure])
   })
 })

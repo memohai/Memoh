@@ -331,6 +331,8 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	resp := providers.ImportModelsResponse{
 		Models: make([]string, 0),
 	}
+	managedCodex := models.ClientType(provider.ClientType) == models.ClientTypeOpenAICodex
+	availableModelIDs := make(map[string]struct{}, len(remoteModels))
 
 	// Bulk import lands disabled — the user picks which ones to expose in
 	// model pickers afterward, to avoid flooding bot config with dozens of
@@ -338,6 +340,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	disabled := false
 
 	for _, m := range remoteModels {
+		availableModelIDs[m.ID] = struct{}{}
 		modelType := models.ModelTypeChat
 		if strings.TrimSpace(m.Type) == string(models.ModelTypeEmbedding) {
 			modelType = models.ModelTypeEmbedding
@@ -363,6 +366,10 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 			ThinkingMode:     m.ThinkingMode,
 			ContextWindow:    m.ContextWindow,
 			Dimensions:       m.Dimensions,
+		}
+		if managedCodex {
+			available := true
+			cfg.CatalogAvailable = &available
 		}
 		_, err := h.modelsService.Create(ctx, models.AddRequest{
 			ModelID:    m.ID,
@@ -390,8 +397,39 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 		resp.Created++
 		resp.Models = append(resp.Models, m.ID)
 	}
+	if managedCodex {
+		h.markUnavailableCodexModels(ctx, id, availableModelIDs)
+	}
 
 	return c.JSON(http.StatusOK, resp)
+}
+
+func (h *ProvidersHandler) markUnavailableCodexModels(ctx context.Context, providerID string, available map[string]struct{}) {
+	existingModels, err := h.modelsService.ListByProviderID(ctx, providerID)
+	if err != nil {
+		h.logger.Warn("failed to list Codex models for catalog reconciliation", slog.Any("error", err))
+		return
+	}
+	for _, existing := range existingModels {
+		if _, ok := available[existing.ModelID]; ok {
+			continue
+		}
+		unavailable := false
+		if existing.Config.CatalogAvailable != nil && !*existing.Config.CatalogAvailable {
+			continue
+		}
+		config := existing.Config
+		config.CatalogAvailable = &unavailable
+		if _, err := h.modelsService.UpdateByProviderAndModelID(ctx, providerID, existing.ModelID, models.UpdateRequest{
+			ModelID:    existing.ModelID,
+			Name:       existing.Name,
+			ProviderID: existing.ProviderID,
+			Type:       existing.Type,
+			Config:     config,
+		}); err != nil {
+			h.logger.Warn("failed to mark stale Codex model unavailable", slog.String("model_id", existing.ModelID), slog.Any("error", err))
+		}
+	}
 }
 
 // fillExistingModel refreshes an existing model's capability-discovery fields
@@ -449,6 +487,10 @@ func mergeDiscoveredConfig(existing, discovered models.ModelConfig) (models.Mode
 	}
 	if discovered.ContextWindow != nil && (out.ContextWindow == nil || *discovered.ContextWindow != *out.ContextWindow) {
 		out.ContextWindow = discovered.ContextWindow
+		changed = true
+	}
+	if discovered.CatalogAvailable != nil && (out.CatalogAvailable == nil || *discovered.CatalogAvailable != *out.CatalogAvailable) {
+		out.CatalogAvailable = discovered.CatalogAvailable
 		changed = true
 	}
 	// Compatibilities are additive: keep anything already present and add the

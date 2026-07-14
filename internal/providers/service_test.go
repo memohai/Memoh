@@ -95,6 +95,105 @@ models:
 	}
 }
 
+func TestListCodexRemoteModels(t *testing.T) {
+	t.Parallel()
+
+	type observedRequest struct {
+		method        string
+		path          string
+		clientVersion string
+		authorization string
+		accountID     string
+		originator    string
+	}
+	requestCh := make(chan observedRequest, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCh <- observedRequest{
+			method:        r.Method,
+			path:          r.URL.Path,
+			clientVersion: r.URL.Query().Get("client_version"),
+			authorization: r.Header.Get("Authorization"),
+			accountID:     r.Header.Get("chatgpt-account-id"),
+			originator:    r.Header.Get("originator"),
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"models": []map[string]any{
+				{
+					"slug":         "gpt-5.6-sol",
+					"display_name": "GPT-5.6-Sol",
+					"visibility":   "list",
+					"supported_reasoning_levels": []map[string]any{
+						{"effort": "low"},
+						{"effort": "medium"},
+						{"effort": "high"},
+						{"effort": "future"},
+						{"effort": "xhigh"},
+						{"effort": "max"},
+						{"effort": "ultra"},
+					},
+					"context_window":   372000,
+					"input_modalities": []string{"text", "image"},
+				},
+				{
+					"slug":                       "internal-model",
+					"display_name":               "Internal Model",
+					"visibility":                 "hide",
+					"supported_reasoning_levels": []map[string]any{{"effort": "medium"}},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	svc := &Service{httpClient: server.Client()}
+	remoteModels, err := svc.listCodexRemoteModels(context.Background(), server.URL+"/backend-api", ModelCredentials{
+		APIKey:         "access-token",
+		CodexAccountID: "acct_123",
+	})
+	if err != nil {
+		t.Fatalf("list Codex models: %v", err)
+	}
+	request := <-requestCh
+	if request.method != http.MethodGet {
+		t.Errorf("method = %s, want GET", request.method)
+	}
+	if request.path != "/backend-api/codex/models" {
+		t.Errorf("path = %q, want /backend-api/codex/models", request.path)
+	}
+	if request.clientVersion != codexModelsClientVersion {
+		t.Errorf("client_version = %q, want %q", request.clientVersion, codexModelsClientVersion)
+	}
+	if request.authorization != "Bearer access-token" {
+		t.Errorf("authorization = %q", request.authorization)
+	}
+	if request.accountID != "acct_123" {
+		t.Errorf("chatgpt-account-id = %q", request.accountID)
+	}
+	if request.originator != "codex_cli_rs" {
+		t.Errorf("originator = %q", request.originator)
+	}
+	if len(remoteModels) != 1 {
+		t.Fatalf("models = %d, want 1", len(remoteModels))
+	}
+	model := remoteModels[0]
+	if model.ID != "gpt-5.6-sol" || model.Name != "GPT-5.6-Sol" {
+		t.Fatalf("unexpected model: %#v", model)
+	}
+	if got := strings.Join(model.Compatibilities, ","); got != "tool-call,vision,reasoning" {
+		t.Fatalf("compatibilities = %q", got)
+	}
+	if got := strings.Join(model.ReasoningEfforts, ","); got != "low,medium,high,xhigh,max" {
+		t.Fatalf("reasoning efforts = %q", got)
+	}
+	if model.ThinkingMode != models.ThinkingModeToggle {
+		t.Fatalf("thinking mode = %q", model.ThinkingMode)
+	}
+	if model.ContextWindow == nil || *model.ContextWindow != 372000 {
+		t.Fatalf("context window = %#v", model.ContextWindow)
+	}
+}
+
 func TestNormalizeProviderConfig(t *testing.T) {
 	t.Parallel()
 

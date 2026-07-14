@@ -24,7 +24,7 @@ func TestCompleteAgentTaskStoresResultAndWakesWaiter(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	snap, err := mgr.WaitForSessionTask(ctx, "bot1", "sess1", taskID)
+	snap, _, err := mgr.WaitForSessionTask(ctx, "bot1", "sess1", taskID, 0)
 	if err != nil {
 		t.Fatalf("WaitForSessionTask returned error: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestCompleteSpawnTaskStoresBranches(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	snap, err := mgr.WaitForSessionTask(ctx, "bot1", "sess1", taskID)
+	snap, _, err := mgr.WaitForSessionTask(ctx, "bot1", "sess1", taskID, 0)
 	if err != nil {
 		t.Fatalf("WaitForSessionTask returned error: %v", err)
 	}

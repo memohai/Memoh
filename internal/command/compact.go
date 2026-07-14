@@ -59,8 +59,12 @@ func (h *Handler) buildCompactGroup() *CommandGroup {
 				return "", err
 			}
 
-			if err := h.compactionService.RunCompactionSync(cc.Ctx, cfg); err != nil {
+			res, err := h.compactionService.RunCompactionSync(cc.Ctx, cfg)
+			if err != nil {
 				return "", fmt.Errorf("compaction failed: %w", err)
+			}
+			if res.Status != compaction.StatusOK {
+				return cc.T("cmd.compact.noop"), nil
 			}
 			return cc.T("cmd.compact.done"), nil
 		},
@@ -108,6 +112,7 @@ func (h *Handler) buildCompactConfig(cc CommandContext, sessionID string) (compa
 		Ratio:            100,
 		TotalInputTokens: 1,
 		PromptCacheTTL:   providers.ProviderConfigString(compactProvider, "prompt_cache_ttl"),
+		Manual:           true,
 	}
 	if compactModel.Config.ContextWindow != nil && *compactModel.Config.ContextWindow > 0 {
 		cfg.MaxCompactTokens = *compactModel.Config.ContextWindow * 90 / 100

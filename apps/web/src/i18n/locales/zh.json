@@ -936,6 +936,7 @@
     "searchNoResults": "没有匹配的模型",
     "emptyTitle": "暂无模型",
     "emptyDescription": "手动添加，或从该服务商导入完整列表。",
+    "managedEmptyDescription": "请先完成授权，再刷新托管模型目录。",
     "clientType": "客户端类型",
     "clientTypePlaceholder": "选择客户端类型",
     "typeRequired": "请选择类型",
@@ -969,6 +970,9 @@
     "importModels": "导入模型",
     "importSuccess": "成功导入 {created} 个模型，跳过 {skipped} 个",
     "importFailed": "导入模型失败",
+    "refreshModels": "刷新模型",
+    "refreshSuccess": "模型目录已刷新：新增 {created} 个，更新 {updated} 个",
+    "refreshFailed": "刷新模型目录失败",
     "importConfirmHint": "将从该服务商的 API 导入模型，默认兼容性为视觉、工具调用和推理。",
     "showingCount": "显示 {count} / {total}"
   },
@@ -1016,30 +1020,19 @@
       "descriptionOff": "关闭后每次请求都会重新计费完整的系统提示词与工具列表，仅在需要严格隔离上下文时使用。"
     },
     "oauth": {
-      "openaiTitle": "OpenAI OAuth",
-      "openaiDescription": "使用你的 ChatGPT 账号为该提供商授权，以启用 Codex 兼容的 OpenAI 访问。",
+      "openaiDeviceHint": "在 OpenAI 验证页面输入此一次性验证码。",
       "openaiCreateHint": "请先保存提供商，再到详情面板完成授权。",
-      "githubTitle": "GitHub Copilot OAuth",
-      "githubDescription": "为当前 Memoh 账号连接 GitHub Copilot。",
-      "githubDeviceTitle": "GitHub Copilot Device Authorization",
-      "githubDeviceDescription": "启动设备授权后，打开 GitHub 验证页面并输入下方显示的用户代码。",
       "githubCreateHint": "请先保存提供商，再到详情面板启动设备授权。",
-      "githubDeviceHint": "打开下方验证地址，并输入这个用户代码，为当前 Memoh 账号完成授权。",
-      "authorize": "授权",
-      "deviceAuthorize": "启动设备授权",
+      "githubDeviceHint": "在 GitHub 验证页面输入此一次性验证码。",
       "authorizeFailed": "启动授权失败",
-      "authorizeTimedOut": "授权超时，请重试。",
       "authorizeSuccess": "授权成功",
       "revoke": "撤销授权",
       "revokeFailed": "撤销授权失败",
       "revokeSuccess": "授权已撤销",
       "copyFailed": "复制设备代码失败",
-      "connectedAccount": "已连接账号",
-      "callback": "回调地址",
       "deviceVerificationUri": "验证地址",
       "deviceUserCode": "用户代码",
       "deviceExpiresAt": "过期时间",
-      "statusFailed": "加载 OAuth 状态失败",
       "status": {
         "checking": "正在检查授权状态...",
         "authorized": "已授权",
@@ -1049,7 +1042,15 @@
         "expired": "授权已过期，请重新授权。",
         "missing": "尚未授权。",
         "notConfigured": "当前提供商未正确配置 OAuth。"
-      }
+      },
+      "sectionTitle": "账号",
+      "chatgptAccount": "ChatGPT 账号",
+      "githubAccount": "GitHub 账号",
+      "connect": "连接",
+      "openaiConnectHint": "登录 ChatGPT 账号后即可使用其模型。",
+      "githubConnectHint": "登录 GitHub 账号后即可使用 Copilot 模型。",
+      "revokeConfirm": "确定撤销此账号的授权？",
+      "connecting": "连接中"
     }
   },
   "webSearch": {
@@ -3143,5 +3144,12 @@
       "saveFailed": "保存失败，请重试",
       "noProviderWarning": "你尚未配置 AI 服务商，Bot 将无法回复消息。请前往 设置 → 服务商 添加"
     }
+  },
+  "deviceCode": {
+    "copyAndOpen": "复制并打开",
+    "retry": "重新获取验证码",
+    "expiresIn": "{time} 后过期",
+    "codeExpired": "验证码已过期",
+    "copyFailed": "复制验证码失败"
   }
 }

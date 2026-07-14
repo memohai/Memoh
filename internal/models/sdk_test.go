@@ -387,6 +387,17 @@ func TestNewSDKChatModelOpenAIWireMapsMaxEffortToXHigh(t *testing.T) {
 	}
 }
 
+func TestOpenAIWireEffortPreservesMaxForCodex(t *testing.T) {
+	t.Parallel()
+
+	if got := openAIWireEffort(ClientTypeOpenAICodex, ReasoningEffortMax); got != ReasoningEffortMax {
+		t.Fatalf("openAIWireEffort() = %q, want %q", got, ReasoningEffortMax)
+	}
+	if got := openAIWireEffort(ClientTypeOpenAIResponses, ReasoningEffortMax); got != ReasoningEffortXHigh {
+		t.Fatalf("openAIWireEffort() = %q, want %q", got, ReasoningEffortXHigh)
+	}
+}
+
 func TestNewSDKChatModelAnthropicThinkingWire(t *testing.T) {
 	t.Parallel()
 

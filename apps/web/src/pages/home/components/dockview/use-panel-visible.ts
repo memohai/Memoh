@@ -12,3 +12,17 @@ export function usePanelVisible(api: DockviewPanelApi): Ref<boolean> {
   onBeforeUnmount(() => disposable.dispose())
   return visible
 }
+
+export function usePanelFocused(api: DockviewPanelApi): Ref<boolean> {
+  const focused = ref(api.isActive && api.isGroupActive)
+  const sync = () => {
+    focused.value = api.isActive && api.isGroupActive
+  }
+  const panelDisposable = api.onDidActiveChange(sync)
+  const groupDisposable = api.onDidActiveGroupChange(sync)
+  onBeforeUnmount(() => {
+    panelDisposable.dispose()
+    groupDisposable.dispose()
+  })
+  return focused
+}

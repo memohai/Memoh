@@ -4329,23 +4329,81 @@ func (q *Queries) ListObservedConversationsByChannelType(ctx context.Context, ar
 }
 
 const listUncompactedMessagesBySession = `-- name: ListUncompactedMessagesBySession :many
-SELECT id, bot_id, session_id, role, content, usage, sender_channel_identity_id, compact_id, created_at
-FROM bot_visible_history_messages
-WHERE tenant_id = app.current_tenant_id() AND session_id = $1
-  AND compact_id IS NULL
-ORDER BY turn_position ASC, turn_message_seq ASC, created_at ASC, id ASC
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.event_id,
+  m.display_text,
+  m.compact_id,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform,
+  r.conversation_type AS conversation_type,
+  COALESCE(
+    NULLIF(TRIM(COALESCE(r.metadata->>'conversation_name', '')), ''),
+    NULLIF(TRIM(COALESCE(r.metadata->>'conversation_handle', '')), ''),
+    ''
+  )::text AS conversation_name,
+  r.default_reply_target AS reply_target
+FROM bot_visible_history_messages m
+LEFT JOIN channel_identities ci
+  ON ci.id = m.sender_channel_identity_id
+ AND ci.tenant_id = app.current_tenant_id()
+LEFT JOIN bot_sessions s
+  ON s.id = m.session_id
+ AND s.tenant_id = app.current_tenant_id()
+LEFT JOIN bot_channel_routes r
+  ON r.id = s.route_id
+ AND r.tenant_id = app.current_tenant_id()
+WHERE m.tenant_id = app.current_tenant_id()
+  AND m.session_id = $1
+  -- Rows stay eligible unless their compact log holds a usable summary,
+  -- matching the read path's substitution predicate (status ok AND non-blank
+  -- summary). This also reclaims rows stranded by a crash between mark and
+  -- complete, by deleted logs, and legacy status='ok' rows whose summary is
+  -- empty or whitespace-only (the pre-existing poison states).
+  AND (m.compact_id IS NULL OR NOT EXISTS (
+    SELECT 1 FROM bot_history_message_compacts c
+    WHERE c.tenant_id = app.current_tenant_id()
+      AND c.id = m.compact_id AND c.status = 'ok'
+      AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL
+  ))
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 `
 
 type ListUncompactedMessagesBySessionRow struct {
 	ID                      pgtype.UUID        `json:"id"`
 	BotID                   pgtype.UUID        `json:"bot_id"`
 	SessionID               pgtype.UUID        `json:"session_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
+	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
+	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
 	Role                    string             `json:"role"`
 	Content                 []byte             `json:"content"`
+	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
-	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
+	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
+	Platform                pgtype.Text        `json:"platform"`
+	ConversationType        pgtype.Text        `json:"conversation_type"`
+	ConversationName        string             `json:"conversation_name"`
+	ReplyTarget             pgtype.Text        `json:"reply_target"`
 }
 
 func (q *Queries) ListUncompactedMessagesBySession(ctx context.Context, sessionID pgtype.UUID) ([]ListUncompactedMessagesBySessionRow, error) {
@@ -4361,12 +4419,24 @@ func (q *Queries) ListUncompactedMessagesBySession(ctx context.Context, sessionI
 			&i.ID,
 			&i.BotID,
 			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
 			&i.Role,
 			&i.Content,
+			&i.Metadata,
 			&i.Usage,
-			&i.SenderChannelIdentityID,
+			&i.EventID,
+			&i.DisplayText,
 			&i.CompactID,
 			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
+			&i.ConversationType,
+			&i.ConversationName,
+			&i.ReplyTarget,
 		); err != nil {
 			return nil, err
 		}

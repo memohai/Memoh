@@ -947,6 +947,7 @@ CREATE TABLE IF NOT EXISTS provider_oauth_tokens (
   token_type TEXT NOT NULL DEFAULT '',
   state TEXT NOT NULL DEFAULT '',
   pkce_code_verifier TEXT NOT NULL DEFAULT '',
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

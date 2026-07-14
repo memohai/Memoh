@@ -97,6 +97,12 @@ var validReasoningEfforts = map[string]struct{}{
 	ReasoningEffortMax:     {},
 }
 
+// IsValidReasoningEffort reports whether effort can be stored in ModelConfig.
+func IsValidReasoningEffort(effort string) bool {
+	_, ok := validReasoningEfforts[effort]
+	return ok
+}
+
 var validThinkingModes = map[string]struct{}{
 	ThinkingModeAdaptive:     {},
 	ThinkingModeToggle:       {},
@@ -117,6 +123,7 @@ type ModelConfig struct {
 	ContextWindow    *int     `json:"context_window,omitempty"`
 	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
 	ThinkingMode     string   `json:"thinking_mode,omitempty"`
+	CatalogAvailable *bool    `json:"catalog_available,omitempty"`
 }
 
 func normalizeModelConfig(config ModelConfig) ModelConfig {
@@ -170,7 +177,7 @@ func (m *Model) Validate() error {
 		}
 	}
 	for _, effort := range m.Config.ReasoningEfforts {
-		if _, ok := validReasoningEfforts[effort]; !ok {
+		if !IsValidReasoningEffort(effort) {
 			return errors.New("invalid reasoning effort: " + effort)
 		}
 	}

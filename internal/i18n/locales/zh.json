@@ -453,6 +453,7 @@
     "compact": {
       "unavailable": "上下文压缩暂不可用。",
       "done": "✅ 上下文已压缩。",
+      "noop": "当前没有可压缩的内容。",
       "noModel": "此机器人未配置压缩模型或对话模型。"
     },
     "toolApproval": {

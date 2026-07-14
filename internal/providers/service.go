@@ -12,7 +12,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	githubcopilot "github.com/memohai/twilight-ai/provider/github/copilot"
-	openaicodex "github.com/memohai/twilight-ai/provider/openai/codex"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	memohcopilot "github.com/memohai/memoh/internal/copilot"
@@ -335,16 +334,19 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return nil, fmt.Errorf("get provider: %w", err)
 	}
 
+	clientType := models.ClientType(provider.ClientType)
+	if clientType == models.ClientTypeOpenAICodex {
+		return s.fetchCodexRemoteModels(ctx, provider)
+	}
+
 	if models, ok := s.fetchTemplateModels(provider); ok {
 		return models, nil
 	}
 
 	var remoteModels []RemoteModel
-	switch {
-	case models.ClientType(provider.ClientType) == models.ClientTypeGitHubCopilot:
+	switch clientType {
+	case models.ClientTypeGitHubCopilot:
 		remoteModels, err = s.fetchGitHubCopilotModels(ctx, provider)
-	case supportsOAuth(provider):
-		remoteModels = fetchCodexCatalogModels()
 	default:
 		remoteModels, err = s.fetchRemoteModelsViaSDK(ctx, provider)
 	}
@@ -430,30 +432,6 @@ func (s *Service) fetchGitHubCopilotModels(ctx context.Context, provider sqlc.Pr
 		})
 	}
 	return remoteModels, nil
-}
-
-func fetchCodexCatalogModels() []RemoteModel {
-	catalog := openaicodex.Catalog()
-	remoteModels := make([]RemoteModel, 0, len(catalog))
-	for _, model := range catalog {
-		compatibilities := make([]string, 0, 2)
-		if model.SupportsToolCall {
-			compatibilities = append(compatibilities, models.CompatToolCall)
-		}
-		if model.SupportsReasoning {
-			compatibilities = append(compatibilities, models.CompatReasoning)
-		}
-		remoteModels = append(remoteModels, RemoteModel{
-			ID:               model.ID,
-			Name:             model.DisplayName,
-			Object:           "model",
-			OwnedBy:          "openai-codex",
-			Type:             "chat",
-			Compatibilities:  compatibilities,
-			ReasoningEfforts: append([]string(nil), model.ReasoningEfforts...),
-		})
-	}
-	return remoteModels
 }
 
 func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {

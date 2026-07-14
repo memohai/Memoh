@@ -285,7 +285,8 @@ BEGIN
      WHERE con.contype = 'f'
        AND n.nspname = 'public'
        AND c.relname IN (SELECT table_name FROM _tenant_tables)
-       AND rt.relname IN (SELECT table_name FROM _tenant_tables);
+       AND rt.relname IN (SELECT table_name FROM _tenant_tables)
+       AND cardinality(con.conkey) = 1;
 
     -- Safety: this algorithm only handles single-column business FKs.
     IF EXISTS (SELECT 1 FROM _fk_saved WHERE ncols <> 1) THEN

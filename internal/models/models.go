@@ -163,7 +163,7 @@ func (s *Service) ListEnabled(ctx context.Context) ([]GetResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list enabled models: %w", err)
 	}
-	return s.convertToGetResponseList(dbModels), nil
+	return s.convertToEnabledGetResponseList(dbModels), nil
 }
 
 // ListEnabledByType returns models from enabled providers filtered by type.
@@ -175,7 +175,7 @@ func (s *Service) ListEnabledByType(ctx context.Context, modelType ModelType) ([
 	if err != nil {
 		return nil, fmt.Errorf("failed to list enabled models by type: %w", err)
 	}
-	return s.convertToGetResponseList(dbModels), nil
+	return s.convertToEnabledGetResponseList(dbModels), nil
 }
 
 // ListEnabledByProviderClientType returns models from enabled providers with
@@ -188,7 +188,7 @@ func (s *Service) ListEnabledByProviderClientType(ctx context.Context, clientTyp
 	if err != nil {
 		return nil, fmt.Errorf("failed to list enabled models by provider client type: %w", err)
 	}
-	return s.convertToGetResponseList(dbModels), nil
+	return s.convertToEnabledGetResponseList(dbModels), nil
 }
 
 // ListByProviderID returns models filtered by provider ID.
@@ -447,6 +447,20 @@ func (s *Service) convertToGetResponseList(dbModels []sqlc.Model) []GetResponse 
 	responses := make([]GetResponse, 0, len(dbModels))
 	for _, dbModel := range dbModels {
 		responses = append(responses, s.convertToGetResponse(dbModel))
+	}
+	return responses
+}
+
+func (s *Service) convertToEnabledGetResponseList(dbModels []sqlc.Model) []GetResponse {
+	responses := make([]GetResponse, 0, len(dbModels))
+	for _, dbModel := range dbModels {
+		response := s.convertToGetResponse(dbModel)
+		// Catalog availability is independent from the user's enable choice. Keeping
+		// that choice stored lets a temporarily removed model return enabled later.
+		if response.Config.CatalogAvailable != nil && !*response.Config.CatalogAvailable {
+			continue
+		}
+		responses = append(responses, response)
 	}
 	return responses
 }

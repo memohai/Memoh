@@ -5,6 +5,21 @@ import (
 	"time"
 )
 
+// Compaction result statuses reported by RunCompactionSync.
+const (
+	StatusOK   = "ok"   // messages were compacted into a summary
+	StatusNoop = "noop" // nothing to compact (already compact, cooled down, or in flight)
+)
+
+// Result is the scoped outcome of a synchronous compaction. Callers use it to
+// respond with this session's own result instead of reading unscoped bot-wide
+// logs. A failed attempt returns an error, not a Result.
+type Result struct {
+	Status       string
+	Summary      string
+	MessageCount int
+}
+
 // Log represents a compaction log entry.
 type Log struct {
 	ID           string     `json:"id"`
@@ -41,4 +56,10 @@ type TriggerConfig struct {
 	MaxCompactTokens int // if > 0, cap compaction input to this many tokens (e.g. 90% of model window)
 	TargetTokens     int // if > 0, compaction goal: reduce context to this many tokens (used by sync compaction)
 	PromptCacheTTL   string
+
+	// Manual marks a user-initiated compaction (slash command, HTTP endpoint).
+	// Such a request bypasses the per-session failure cooldown so a user who
+	// just fixed their credentials/model isn't told "done" while nothing runs.
+	// Automatic per-request paths leave this false to keep the cooldown backstop.
+	Manual bool
 }

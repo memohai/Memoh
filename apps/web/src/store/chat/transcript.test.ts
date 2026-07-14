@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ref, toRaw } from 'vue'
 import type { UIMessage, UITurn } from '@/composables/api/useChat.types'
+import { isOptimisticTurn } from '@/store/chat-list.normalize'
 import { createBackgroundTaskTracker } from './background-tasks'
 import { createTranscriptController } from './transcript'
 import type { ChatAssistantTurn, ChatUserTurn, ToolCallBlock } from './types'
@@ -242,6 +243,88 @@ describe('chat transcript controller', () => {
     const tool = (turns[0] as ChatAssistantTurn).messages[0] as ToolCallBlock
     expect(tool.backgroundTask?.status).toBe('completed')
     expect(tool.done).toBe(true)
+  })
+
+  it('keeps optimistic turns the initial-history snapshot does not contain yet', async () => {
+    // First send from a draft: promoteDraftChatView starts the per-session
+    // SSE, whose prepare step refreshes history. That fetch can resolve
+    // AFTER the optimistic user+assistant turns were appended but BEFORE the
+    // server persisted the send — the snapshot comes back empty. The refresh
+    // replace must carry the unmatched optimistic turns over instead of
+    // blanking the user's own message until the stream-end refresh.
+    const { transcript, fetchMessages } = makeTranscript()
+    const pending = deferred<UITurn[]>()
+    fetchMessages.mockReturnValueOnce(pending.promise)
+
+    const loading = transcript.loadInitialMessages('bot-1', 'session-1')
+    const assistantTurn = transcript.createOptimisticAssistantTurn()
+    const userTurn = transcript.createOptimisticUserTurn('hello first')
+    transcript.appendToView(userTurn, assistantTurn)
+
+    pending.resolve([])
+    await loading
+    // The user turn is carried over by the replace itself; the streaming
+    // assistant is restored by the caller's reattach step (chat-list's
+    // prepareSessionMessages finally block), mirrored here.
+    transcript.reattachTurnToSession('bot-1', 'session-1', assistantTurn)
+
+    expect(transcript.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
+    expect(transcript.messages[0]).toMatchObject({ role: 'user', text: 'hello first' })
+  })
+
+  it('adopts carried-over optimistic turns once the snapshot contains their server twins', async () => {
+    const { transcript, fetchMessages } = makeTranscript()
+    // Round 1: optimistic turns survive an empty snapshot (as above).
+    fetchMessages.mockResolvedValueOnce([])
+    const loading = transcript.loadInitialMessages('bot-1', 'session-1')
+    const assistantTurn = transcript.createOptimisticAssistantTurn()
+    const userTurn = transcript.createOptimisticUserTurn('hello first')
+    transcript.appendToView(userTurn, assistantTurn)
+    await loading
+
+    // Round 2 (stream-end refresh): the server now returns persisted twins —
+    // no duplicates, the optimistic pair collapses into the server rows.
+    // Server timestamps sit next to the optimistic client clock (the twin
+    // match tolerates 5s of skew), unlike the fixed dates used elsewhere.
+    const now = new Date().toISOString()
+    fetchMessages.mockResolvedValueOnce([
+      rawUser('server-user', 'hello first', now),
+      rawAssistant('server-assistant', [], now),
+    ])
+    await transcript.refreshCurrentSession('bot-1', 'session-1')
+
+    expect(transcript.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
+    expect(transcript.messages.filter(turn => turn.role === 'user')).toHaveLength(1)
+  })
+
+  it('does not let an older persisted twin swallow a re-sent optimistic prompt', async () => {
+    // The user sends the SAME text again in a session whose history already
+    // contains that prompt. The racing snapshot returns only the OLD row —
+    // the new send is not persisted yet. A text-set match would treat the
+    // new optimistic turn as "already present" and drop it; the count-based
+    // match reserves the old row for the old (non-optimistic) local turn.
+    const { transcript, fetchMessages } = makeTranscript()
+    transcript.replaceHistoryView([
+      rawUser('server-user-old', 'same prompt', '2026-01-01T00:00:00.000Z'),
+      rawAssistant('server-assistant-old', [], '2026-01-01T00:00:01.000Z'),
+    ], 'session-1')
+
+    const pending = deferred<UITurn[]>()
+    fetchMessages.mockReturnValueOnce(pending.promise)
+    const loading = transcript.loadInitialMessages('bot-1', 'session-1')
+    const assistantTurn = transcript.createOptimisticAssistantTurn()
+    const userTurn = transcript.createOptimisticUserTurn('same prompt')
+    transcript.appendToView(userTurn, assistantTurn)
+
+    pending.resolve([
+      rawUser('server-user-old', 'same prompt', '2026-01-01T00:00:00.000Z'),
+      rawAssistant('server-assistant-old', [], '2026-01-01T00:00:01.000Z'),
+    ])
+    await loading
+    transcript.reattachTurnToSession('bot-1', 'session-1', assistantTurn)
+
+    expect(transcript.messages.map(turn => `${turn.role}${isOptimisticTurn(turn) ? '*' : ''}`))
+      .toEqual(['user', 'assistant', 'user*', 'assistant*'])
   })
 
   it('owns refresh state and reports the latest applied timestamp', async () => {

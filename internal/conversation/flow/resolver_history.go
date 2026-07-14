@@ -346,7 +346,7 @@ func (r *Resolver) replaceCompactedMessages(ctx context.Context, scope contextfr
 			r.logger.Warn("replaceCompactedMessages: failed to load compact log", slog.String("compact_id", compactID), slog.Any("error", err))
 			continue
 		}
-		if log.Status == "ok" && log.Summary != "" {
+		if log.Status == "ok" && strings.TrimSpace(log.Summary) != "" {
 			summaries[compactID] = log.Summary
 		}
 	}
@@ -387,7 +387,7 @@ func replaceCompactedHistoryRecords(messages []historyfrag.HistoryRecord, summar
 			continue
 		}
 		summary, ok := summaries[m.CompactID]
-		if !ok || summary == "" {
+		if !ok || strings.TrimSpace(summary) == "" {
 			for _, idx := range compactGroups[m.CompactID] {
 				result = append(result, messages[idx])
 			}

@@ -70,9 +70,9 @@ export function createACPRuntimeRegistry(
     setACPRuntimePending(botId, targetSessionId, false)
   }
 
-  async function ensureACPRuntime(sessionID?: string): Promise<AcpagentRuntimeStatus> {
-    const bid = currentBotId.value?.trim() ?? ''
-    const sid = sessionID?.trim() || sessionId.value?.trim() || ''
+  async function ensureACPRuntimeFor(botID: string, sessionID: string): Promise<AcpagentRuntimeStatus> {
+    const bid = botID.trim()
+    const sid = sessionID.trim()
     if (!bid || !sid) throw new Error('ACP session is not selected')
     const key = acpRuntimeKey(bid, sid)
     const existing = requests.get(key)
@@ -101,9 +101,15 @@ export function createACPRuntimeRegistry(
     return request
   }
 
-  async function setACPRuntimeModel(modelID: string, sessionID?: string): Promise<AcpagentRuntimeStatus> {
+  async function ensureACPRuntime(sessionID?: string): Promise<AcpagentRuntimeStatus> {
     const bid = currentBotId.value?.trim() ?? ''
     const sid = sessionID?.trim() || sessionId.value?.trim() || ''
+    return ensureACPRuntimeFor(bid, sid)
+  }
+
+  async function setACPRuntimeModelFor(botID: string, sessionID: string, modelID: string): Promise<AcpagentRuntimeStatus> {
+    const bid = botID.trim()
+    const sid = sessionID.trim()
     const mid = modelID.trim()
     if (!bid || !sid || !mid) throw new Error('ACP model is not selected')
     const key = acpRuntimeKey(bid, sid)
@@ -115,6 +121,12 @@ export function createACPRuntimeRegistry(
       setACPRuntimeStatus(bid, sid, runtime)
     }
     return runtime
+  }
+
+  async function setACPRuntimeModel(modelID: string, sessionID?: string): Promise<AcpagentRuntimeStatus> {
+    const bid = currentBotId.value?.trim() ?? ''
+    const sid = sessionID?.trim() || sessionId.value?.trim() || ''
+    return setACPRuntimeModelFor(bid, sid, modelID)
   }
 
   function resetACPRuntimeRegistry() {
@@ -131,7 +143,9 @@ export function createACPRuntimeRegistry(
     acpRuntimeKey,
     setACPRuntimeStatus,
     clearACPRuntimeStatus,
+    ensureACPRuntimeFor,
     ensureACPRuntime,
+    setACPRuntimeModelFor,
     setACPRuntimeModel,
     resetACPRuntimeRegistry,
   }

@@ -7,7 +7,8 @@ INSERT INTO provider_oauth_tokens (
   scope,
   token_type,
   state,
-  pkce_code_verifier
+  pkce_code_verifier,
+  metadata
 )
 VALUES (
   sqlc.arg(provider_id),
@@ -17,7 +18,8 @@ VALUES (
   sqlc.arg(scope),
   sqlc.arg(token_type),
   sqlc.arg(state),
-  sqlc.arg(pkce_code_verifier)
+  sqlc.arg(pkce_code_verifier),
+  sqlc.arg(metadata)
 )
 ON CONFLICT (tenant_id, provider_id) DO UPDATE SET
   access_token = EXCLUDED.access_token,
@@ -27,6 +29,7 @@ ON CONFLICT (tenant_id, provider_id) DO UPDATE SET
   token_type = EXCLUDED.token_type,
   state = EXCLUDED.state,
   pkce_code_verifier = EXCLUDED.pkce_code_verifier,
+  metadata = EXCLUDED.metadata,
   updated_at = now()
 RETURNING *;
 
@@ -37,15 +40,17 @@ SELECT * FROM provider_oauth_tokens WHERE tenant_id = app.current_tenant_id() AN
 SELECT * FROM provider_oauth_tokens WHERE tenant_id = app.current_tenant_id() AND state = sqlc.arg(state) AND state != '';
 
 -- name: UpdateProviderOAuthState :exec
-INSERT INTO provider_oauth_tokens (provider_id, state, pkce_code_verifier)
+INSERT INTO provider_oauth_tokens (provider_id, state, pkce_code_verifier, metadata)
 VALUES (
   sqlc.arg(provider_id),
   sqlc.arg(state),
-  sqlc.arg(pkce_code_verifier)
+  sqlc.arg(pkce_code_verifier),
+  sqlc.arg(metadata)
 )
 ON CONFLICT (tenant_id, provider_id) DO UPDATE SET
   state = EXCLUDED.state,
   pkce_code_verifier = EXCLUDED.pkce_code_verifier,
+  metadata = EXCLUDED.metadata,
   updated_at = now();
 
 -- name: DeleteProviderOAuthToken :exec

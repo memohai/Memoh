@@ -84,6 +84,34 @@ const chatStoreMock = vi.hoisted(() => ({
   createNewSession: vi.fn(async () => {}),
   deletedSession: undefined as unknown as ReturnType<typeof ref<{ id: string, botId: string, seq: number, composerScope?: string } | null>>,
   pendingACPSessionInput: undefined as unknown as ReturnType<typeof ref<Record<string, unknown> | null>>,
+  draftViewRequested: undefined as unknown as ReturnType<typeof ref<{
+    botId: string
+    viewId: string
+    expectedSessionId: string | null
+    explicitSelection: boolean
+    input: Record<string, unknown> | null
+    activate: boolean
+    seq: number
+  } | null>>,
+  applyDraftViewRequest: vi.fn(),
+  forkedSessionRequested: undefined as unknown as ReturnType<typeof ref<{
+    botId: string
+    viewId: string
+    expectedSessionId: string
+    sessionId: string
+    title: string
+    explicitSelection: true
+    activate: boolean
+    seq: number
+  } | null>>,
+  userSentInSession: undefined as unknown as ReturnType<typeof ref<{
+    id: string
+    botId: string
+    viewId: string
+    wasDraft: boolean
+    seq: number
+  } | null>>,
+  focusChatView: vi.fn(),
   selectSession: vi.fn(async (sessionId: string, options?: { explicitSelection?: boolean }) => {
     useChatSelectionStore().setSession(sessionId, options)
     chatStoreMock.sessionId = sessionId
@@ -115,9 +143,17 @@ vi.mock('@/store/chat-list', () => ({
       return chatStoreMock.loadingChats
     },
     activeSession: null,
-    userSentInSession: null,
+    get userSentInSession() {
+      return chatStoreMock.userSentInSession.value
+    },
     get pendingACPSessionInput() {
       return chatStoreMock.pendingACPSessionInput.value
+    },
+    get draftViewRequested() {
+      return chatStoreMock.draftViewRequested.value
+    },
+    get forkedSessionRequested() {
+      return chatStoreMock.forkedSessionRequested.value
     },
     get deletedSession() {
       return chatStoreMock.deletedSession.value
@@ -135,8 +171,10 @@ vi.mock('@/store/chat-list', () => ({
     isSessionStreaming: vi.fn(() => false),
     knownSessionSummary: chatStoreMock.knownSessionSummary,
     createNewSession: chatStoreMock.createNewSession,
+    focusChatView: chatStoreMock.focusChatView,
     selectSession: chatStoreMock.selectSession,
     selectDraft: chatStoreMock.selectDraft,
+    applyDraftViewRequest: chatStoreMock.applyDraftViewRequest,
   }),
 }))
 
@@ -145,6 +183,7 @@ interface FakePanel {
   component: string
   params: Record<string, unknown>
   title: string
+  renderer?: string
   group?: FakeGroup
   api: {
     setActive: () => void
@@ -171,6 +210,8 @@ interface FakeGroup {
 
 function createFakeDock() {
   const panels: FakePanel[] = []
+  const groups: FakeGroup[] = []
+  const groupActivePanels = new Map<string, FakePanel | null>()
   const removeListeners: Array<(panel: FakePanel) => void> = []
   // Mirror dockview v7's real onDidActivePanelChange payload: `{ panel, origin }`.
   // The old fake used `{ activePanel }` (the v6 shape); that masked the v6→v7
@@ -179,7 +220,9 @@ function createFakeDock() {
   const layoutListeners: Array<() => void> = []
   const closeVetoPanelIds = new Set<string>()
   let activePanel: FakePanel | null = null
+  let nextGroupNumber = 1
   const setActivePanel = (panel: FakePanel | null) => {
+    if (panel?.group) groupActivePanels.set(panel.group.id, panel)
     if (activePanel === panel) return
     activePanel = panel
     activePanelListeners.forEach(listener => listener({ panel: panel ?? undefined }))
@@ -217,37 +260,42 @@ function createFakeDock() {
       },
     }
   }
-  const groupElement = {
-    classList: {
-      toggle: vi.fn(),
-    },
-  } as unknown as HTMLElement
-  const group: FakeGroup = {
-    id: 'group-1',
-    element: groupElement,
-    api: {
-      getHeaderPosition: () => 'top' as const,
-      setHeaderPosition: vi.fn(),
-      setActivePanel: (panel: FakePanel) => setActivePanel(panel),
-      setActive: () => setActivePanel(activePanel ?? panels[0] ?? null),
-      setSize: vi.fn(),
-    },
-    get panels() {
-      return panels
-    },
-    get activePanel() {
-      return activePanel
-    },
+  const createGroup = (id = `group-${++nextGroupNumber}`): FakeGroup => {
+    const groupElement = {
+      classList: {
+        toggle: vi.fn(),
+      },
+    } as unknown as HTMLElement
+    const group: FakeGroup = {
+      id,
+      element: groupElement,
+      api: {
+        getHeaderPosition: () => 'top' as const,
+        setHeaderPosition: vi.fn(),
+        setActivePanel: (panel: FakePanel) => setActivePanel(panel),
+        setActive: () => setActivePanel(group.activePanel),
+        setSize: vi.fn(),
+      },
+      get panels() {
+        return panels.filter(panel => panel.group === group)
+      },
+      get activePanel() {
+        return groupActivePanels.get(group.id) ?? group.panels[0] ?? null
+      },
+    }
+    groups.push(group)
+    return group
   }
+  const primaryGroup = createGroup('group-1')
 
   const dock = {
     panels,
-    groups: [group],
+    groups,
     get activePanel() {
       return activePanel
     },
     get activeGroup() {
-      return activePanel?.group ?? group
+      return activePanel?.group ?? primaryGroup
     },
     onDidActivePanelChange: activePanelDisposable,
     onDidLayoutChange: layoutDisposable,
@@ -259,7 +307,7 @@ function createFakeDock() {
     onWillDragPanel: noopDisposable,
     onWillDragGroup: noopDisposable,
     getGroup(id: string) {
-      return id === 'group-1' ? group : undefined
+      return groups.find(group => group.id === id)
     },
     getPanel(id: string) {
       return panels.find((p) => p.id === id)
@@ -269,21 +317,42 @@ function createFakeDock() {
       component: string
       title?: string
       params?: Record<string, unknown>
+      renderer?: string
+      inactive?: boolean
       position?: { referenceGroup: string; direction: string }
     }) {
+      const referenceGroup = options.position
+        ? groups.find(group => group.id === options.position?.referenceGroup)
+        : undefined
+      const targetGroup = options.position?.direction === 'within'
+        ? referenceGroup ?? activePanel?.group ?? primaryGroup
+        : options.position
+          ? createGroup()
+          : activePanel?.group ?? primaryGroup
       const panel: FakePanel = {
         id: options.id,
         component: options.component,
         params: { ...(options.params ?? {}) },
         title: options.title ?? '',
+        renderer: options.renderer,
         api: {
           setActive: () => setActivePanel(panel),
           close: () => {
             if (closeVetoPanelIds.has(panel.id)) return
+            const ownerGroup = panel.group
             const idx = panels.indexOf(panel)
             if (idx >= 0) panels.splice(idx, 1)
+            const replacement = ownerGroup?.panels[0] ?? null
+            if (ownerGroup && groupActivePanels.get(ownerGroup.id) === panel) {
+              groupActivePanels.set(ownerGroup.id, replacement)
+            }
+            if (ownerGroup && ownerGroup !== primaryGroup && ownerGroup.panels.length === 0) {
+              const groupIndex = groups.indexOf(ownerGroup)
+              if (groupIndex >= 0) groups.splice(groupIndex, 1)
+              groupActivePanels.delete(ownerGroup.id)
+            }
             removeListeners.forEach(listener => listener(panel))
-            if (activePanel === panel) setActivePanel(panels[0] ?? null)
+            if (activePanel === panel) setActivePanel(replacement ?? panels[0] ?? null)
             emitLayoutChange()
           },
           setTitle: (title: string) => {
@@ -297,14 +366,16 @@ function createFakeDock() {
           },
         },
       }
-      panel.group = group
+      panel.group = targetGroup
       panels.push(panel)
-      setActivePanel(panel)
+      if (!options.inactive) setActivePanel(panel)
       emitLayoutChange()
       return panel
     },
     clear() {
       panels.splice(0, panels.length)
+      groups.splice(1, groups.length - 1)
+      groupActivePanels.clear()
       setActivePanel(null)
       emitLayoutChange()
     },
@@ -332,15 +403,62 @@ function createFakeDock() {
       }
     },
     fromJSON(data?: {
+      grid?: {
+        root?: {
+          type: 'leaf' | 'branch'
+          data: unknown
+        }
+      }
       panels?: Record<string, {
         id?: string
         contentComponent?: string
         title?: string
         params?: Record<string, unknown>
       }>
+      activeGroup?: string
     }) {
       dock.clear()
+      type SerializedNode = {
+        type: 'leaf' | 'branch'
+        data: SerializedNode[] | { id?: string; views?: string[]; activeView?: string }
+      }
+      const leaves: Array<{ id?: string; views?: string[]; activeView?: string }> = []
+      const visit = (node?: SerializedNode) => {
+        if (!node) return
+        if (node.type === 'branch') {
+          for (const child of node.data as SerializedNode[]) visit(child)
+          return
+        }
+        leaves.push(node.data as { id?: string; views?: string[]; activeView?: string })
+      }
+      visit(data?.grid?.root as SerializedNode | undefined)
+
+      if (leaves.length === 0) {
+        leaves.push({ id: primaryGroup.id, views: Object.keys(data?.panels ?? {}) })
+      }
+      const serializedGroups = new Map<string, FakeGroup>()
+      leaves.forEach((leaf, index) => {
+        const group = index === 0 ? primaryGroup : createGroup()
+        if (leaf.id) serializedGroups.set(leaf.id, group)
+        for (const id of leaf.views ?? []) {
+          const panel = data?.panels?.[id]
+          if (!panel) continue
+          dock.addPanel({
+            id: panel.id ?? id,
+            component: panel.contentComponent ?? 'unknown',
+            title: panel.title,
+            params: panel.params,
+            inactive: true,
+            position: { referenceGroup: group.id, direction: 'within' },
+          })
+        }
+        const active = group.panels.find(panel => panel.id === leaf.activeView) ?? group.panels[0] ?? null
+        groupActivePanels.set(group.id, active)
+      })
+      const activeGroup = data?.activeGroup ? serializedGroups.get(data.activeGroup) : primaryGroup
+      setActivePanel(activeGroup?.activePanel ?? panels[0] ?? null)
       for (const [id, panel] of Object.entries(data?.panels ?? {})) {
+        if (dock.getPanel(id)) continue
         dock.addPanel({
           id: panel.id ?? id,
           component: panel.contentComponent ?? 'unknown',
@@ -385,13 +503,18 @@ describe('workspace layout store', () => {
     localStorage.clear()
     window.localStorage.clear()
     chatStoreMock.createNewSession.mockClear()
+    chatStoreMock.focusChatView.mockClear()
     chatStoreMock.selectSession.mockClear()
     chatStoreMock.selectDraft.mockClear()
+    chatStoreMock.applyDraftViewRequest.mockClear()
     chatStoreMock.sessionId = null
     chatStoreMock.hasExplicitSessionSelection = false
     chatStoreMock.loadingChats = false
     chatStoreMock.deletedSession = ref(null)
     chatStoreMock.pendingACPSessionInput = ref(null)
+    chatStoreMock.draftViewRequested = ref(null)
+    chatStoreMock.forkedSessionRequested = ref(null)
+    chatStoreMock.userSentInSession = ref(null)
     chatStoreMock.sessions = reactive([]) as typeof chatStoreMock.sessions
     chatStoreMock.knownSessions = reactive([]) as typeof chatStoreMock.knownSessions
     chatStoreMock.knownSessionSummary.mockImplementation((sessionId: string) =>
@@ -416,6 +539,22 @@ describe('workspace layout store', () => {
   function emitDeletedSession(id: string, botId = 'bot-1', composerScope?: string) {
     const prevSeq = chatStoreMock.deletedSession.value?.seq ?? 0
     chatStoreMock.deletedSession.value = { id, botId, seq: prevSeq + 1, composerScope }
+  }
+
+  function emitUserSentInSession(
+    id: string,
+    viewId: string,
+    wasDraft: boolean,
+    botId = 'bot-1',
+  ) {
+    const prevSeq = chatStoreMock.userSentInSession.value?.seq ?? 0
+    chatStoreMock.userSentInSession.value = {
+      id,
+      botId,
+      viewId,
+      wasDraft,
+      seq: prevSeq + 1,
+    }
   }
 
   it('opens browser panels and updates their address', () => {
@@ -504,6 +643,41 @@ describe('workspace layout store', () => {
 
     expect(dock.panels.filter((p) => p.component === 'chat')).toHaveLength(1)
     expect(dock.activePanel?.component).toBe('chat')
+  })
+
+  it('keeps drafts group-scoped and promotes only the view that sent', async () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openDraftChat({ title: 'Left draft', groupId: 'group-1' })
+    const leftDraft = dock.activePanel!
+    store.splitGroup('group-1', 'right')
+    const rightDraft = dock.activePanel!
+
+    expect(rightDraft.id).not.toBe(leftDraft.id)
+    expect(rightDraft.group?.id).not.toBe(leftDraft.group?.id)
+    expect(dock.panels.filter(panel => panel.component === 'chat')).toHaveLength(2)
+
+    // An explicit group focuses that group's own draft, even while another
+    // draft exists elsewhere in the dock.
+    store.openDraftChat({ groupId: leftDraft.group!.id })
+    expect(dock.activePanel?.id).toBe(leftDraft.id)
+
+    emitUserSentInSession('ignored-session', rightDraft.id, true, 'other-bot')
+    await nextTick()
+    expect(leftDraft.params.sessionId ?? null).toBeNull()
+    expect(rightDraft.params.sessionId ?? null).toBeNull()
+
+    // The signal points at the inactive right view. Promotion must not guess the
+    // active (left) draft.
+    emitUserSentInSession('right-session', rightDraft.id, true)
+    await nextTick()
+
+    expect(leftDraft.params.sessionId ?? null).toBeNull()
+    expect(rightDraft.params.sessionId).toBe('right-session')
+    expect(store.ephemeralPanels[leftDraft.id]).toBe(true)
+    expect(store.ephemeralPanels[rightDraft.id]).toBeUndefined()
   })
 
   it('marks sidebar-created draft chats as non-explicit so default ACP can stage', () => {
@@ -1027,15 +1201,311 @@ describe('workspace layout store', () => {
     expect(chat.title).toBe('New Session')
   })
 
-  it('does not split chat panels (single global session)', () => {
+  it('splits a chat session into a second group and reuses the split preview in place', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
     store.registerApi(dock as never)
 
-    store.openSessionChat({ sessionId: 's1', title: 'Session' })
+    store.openSessionChat({
+      sessionId: 's1',
+      title: 'Session',
+      explicitSelection: false,
+    })
+    const source = dock.panels.find(panel => panel.component === 'chat')!
     store.splitGroup('group-1', 'right')
 
-    expect(dock.panels.filter((p) => p.component === 'chat')).toHaveLength(1)
+    const split = dock.panels.find(panel => panel.component === 'chat' && panel.id !== source.id)!
+    expect(dock.panels.filter(panel => panel.component === 'chat')).toHaveLength(2)
+    expect(split.params).toMatchObject({ sessionId: 's1', explicitSelection: false })
+    expect(split.title).toBe('Session')
+    expect(split.renderer).toBe('always')
+    expect(split.group?.id).not.toBe(source.group?.id)
+    expect(store.ephemeralPanels[split.id]).toBe(true)
+    expect(chatStoreMock.focusChatView).toHaveBeenLastCalledWith(split.id)
+
+    store.openSessionChat({
+      sessionId: 's2',
+      title: 'Other session',
+      groupId: split.group!.id,
+    })
+
+    expect(dock.panels.filter(panel => panel.component === 'chat')).toHaveLength(2)
+    expect(dock.getPanel(source.id)?.params.sessionId).toBe('s1')
+    expect(dock.getPanel(split.id)?.params.sessionId).toBe('s2')
+    expect(dock.getPanel(split.id)?.title).toBe('Other session')
+  })
+
+  it('applies a late Draft request only to its originating split', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openSessionChat({ sessionId: 'session-a', title: 'A' })
+    const origin = dock.activePanel!
+    store.splitGroup(origin.group!.id, 'right')
+    const other = dock.activePanel!
+    store.openSessionChat({ sessionId: 'session-b', title: 'B', groupId: other.group!.id })
+    expect(dock.activePanel?.id).toBe(other.id)
+
+    const request = {
+      botId: 'bot-1',
+      viewId: origin.id,
+      expectedSessionId: 'session-a',
+      explicitSelection: true,
+      input: { agentId: 'codex' },
+      activate: true,
+      seq: 1,
+    }
+    chatStoreMock.draftViewRequested.value = request
+
+    expect(dock.getPanel(origin.id)?.params).toMatchObject({ sessionId: null, explicitSelection: true })
+    expect(dock.getPanel(origin.id)?.title).toBe('New Session')
+    expect(dock.getPanel(other.id)?.params.sessionId).toBe('session-b')
+    expect(dock.activePanel?.id).toBe(other.id)
+    expect(chatStoreMock.applyDraftViewRequest).toHaveBeenCalledWith(request, false)
+  })
+
+  it('keeps a pinned Session and opens its requested Draft as a new preview', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openSessionChatPinned({ sessionId: 'session-a', title: 'A' })
+    const origin = dock.activePanel!
+
+    const request = {
+      botId: 'bot-1',
+      viewId: origin.id,
+      expectedSessionId: 'session-a',
+      explicitSelection: true,
+      input: { agentId: 'codex' },
+      activate: true,
+      seq: 1,
+    }
+    chatStoreMock.draftViewRequested.value = request
+
+    const draft = dock.panels.find(panel => panel.component === 'chat' && panel.params.sessionId == null)!
+    expect(dock.panels.filter(panel => panel.component === 'chat')).toHaveLength(2)
+    expect(origin.params.sessionId).toBe('session-a')
+    expect(store.ephemeralPanels[origin.id]).toBeUndefined()
+    expect(draft.group?.id).toBe(origin.group?.id)
+    expect(store.ephemeralPanels[draft.id]).toBe(true)
+    expect(dock.activePanel?.id).toBe(draft.id)
+    expect(chatStoreMock.applyDraftViewRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ ...request, viewId: draft.id }),
+      true,
+    )
+  })
+
+  it('does not focus a pinned Session Draft when its request resolves behind another split', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openSessionChatPinned({ sessionId: 'session-a', title: 'A' })
+    const origin = dock.activePanel!
+    store.splitGroup(origin.group!.id, 'right')
+    const other = dock.activePanel!
+    store.openSessionChat({ sessionId: 'session-b', title: 'B', groupId: other.group!.id })
+
+    chatStoreMock.draftViewRequested.value = {
+      botId: 'bot-1',
+      viewId: origin.id,
+      expectedSessionId: 'session-a',
+      explicitSelection: true,
+      input: null,
+      activate: true,
+      seq: 1,
+    }
+
+    const draft = origin.group!.panels.find(panel => panel.params.sessionId == null)!
+    expect(origin.params.sessionId).toBe('session-a')
+    expect(draft).toBeTruthy()
+    expect(store.ephemeralPanels[draft.id]).toBe(true)
+    expect(dock.activePanel?.id).toBe(other.id)
+    expect(chatStoreMock.applyDraftViewRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ viewId: draft.id, expectedSessionId: 'session-a' }),
+      false,
+    )
+  })
+
+  it('routes a late Fork to its originating preview without changing the focused split', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openSessionChat({ sessionId: 'session-a', title: 'A' })
+    const origin = dock.activePanel!
+    store.splitGroup(origin.group!.id, 'right')
+    const other = dock.activePanel!
+    store.openSessionChat({ sessionId: 'session-b', title: 'B', groupId: other.group!.id })
+
+    chatStoreMock.forkedSessionRequested.value = {
+      botId: 'bot-1',
+      viewId: origin.id,
+      expectedSessionId: 'session-a',
+      sessionId: 'fork-a',
+      title: 'Fork A',
+      explicitSelection: true,
+      activate: true,
+      seq: 1,
+    }
+
+    expect(origin.params.sessionId).toBe('fork-a')
+    expect(origin.title).toBe('Fork A')
+    expect(other.params.sessionId).toBe('session-b')
+    expect(dock.activePanel?.id).toBe(other.id)
+  })
+
+  it('keeps a pinned Fork source and opens the Fork in the same group', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openSessionChatPinned({ sessionId: 'session-a', title: 'A' })
+    const origin = dock.activePanel!
+
+    chatStoreMock.forkedSessionRequested.value = {
+      botId: 'bot-1',
+      viewId: origin.id,
+      expectedSessionId: 'session-a',
+      sessionId: 'fork-a',
+      title: 'Fork A',
+      explicitSelection: true,
+      activate: true,
+      seq: 1,
+    }
+
+    const fork = dock.panels.find(panel => panel.params.sessionId === 'fork-a')!
+    expect(origin.params.sessionId).toBe('session-a')
+    expect(fork.group?.id).toBe(origin.group?.id)
+    expect(store.ephemeralPanels[fork.id]).toBe(true)
+    expect(dock.activePanel?.id).toBe(fork.id)
+  })
+
+  it('ignores a Fork result after its origin has been rebound', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openSessionChat({ sessionId: 'session-a', title: 'A' })
+    const origin = dock.activePanel!
+    store.openSessionChat({ sessionId: 'session-c', title: 'C', groupId: origin.group!.id })
+
+    chatStoreMock.forkedSessionRequested.value = {
+      botId: 'bot-1',
+      viewId: origin.id,
+      expectedSessionId: 'session-a',
+      sessionId: 'fork-a',
+      title: 'Fork A',
+      explicitSelection: true,
+      activate: true,
+      seq: 1,
+    }
+
+    expect(origin.params.sessionId).toBe('session-c')
+    expect(dock.panels.some(panel => panel.params.sessionId === 'fork-a')).toBe(false)
+  })
+
+  it('routes a Fork only to the same-Session split where it was requested', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openSessionChat({ sessionId: 'session-a', title: 'A' })
+    const left = dock.activePanel!
+    store.splitGroup(left.group!.id, 'right')
+    const right = dock.activePanel!
+
+    chatStoreMock.forkedSessionRequested.value = {
+      botId: 'bot-1',
+      viewId: right.id,
+      expectedSessionId: 'session-a',
+      sessionId: 'fork-right',
+      title: 'Fork right',
+      explicitSelection: true,
+      activate: true,
+      seq: 1,
+    }
+
+    expect(left.params.sessionId).toBe('session-a')
+    expect(right.params.sessionId).toBe('fork-right')
+    expect(dock.activePanel?.id).toBe(right.id)
+  })
+
+  it('opens a related Session in the originating split instead of the focused split', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openSessionChat({ sessionId: 'session-a', title: 'A' })
+    const origin = dock.activePanel!
+    store.splitGroup(origin.group!.id, 'right')
+    const other = dock.activePanel!
+    store.openSessionChat({ sessionId: 'session-b', title: 'B', groupId: other.group!.id })
+
+    store.openSessionChatFromView({
+      viewId: origin.id,
+      sessionId: 'child-a',
+      title: 'Child A',
+      expectedSessionId: 'session-a',
+    })
+
+    expect(dock.getPanel(origin.id)?.params.sessionId).toBe('child-a')
+    expect(dock.getPanel(origin.id)?.title).toBe('Child A')
+    expect(dock.getPanel(other.id)?.params.sessionId).toBe('session-b')
+    expect(dock.activePanel?.id).toBe(origin.id)
+  })
+
+  it('restores two Chat panels without crossing their Session params', async () => {
+    localStorage.setItem('workspace-layout', JSON.stringify({
+      'bot-1': {
+        layout: {
+          grid: {
+            root: {
+              type: 'branch',
+              data: [
+                {
+                  type: 'leaf',
+                  size: 600,
+                  data: { id: 'left', views: ['chat:1'], activeView: 'chat:1' },
+                },
+                {
+                  type: 'leaf',
+                  size: 600,
+                  data: { id: 'right', views: ['chat:2'], activeView: 'chat:2' },
+                },
+              ],
+            },
+            width: 1200,
+            height: 800,
+            orientation: 'HORIZONTAL',
+          },
+          panels: {
+            'chat:1': {
+              id: 'chat:1',
+              contentComponent: 'chat',
+              title: 'A',
+              params: { sessionId: 'session-a', explicitSelection: true },
+            },
+            'chat:2': {
+              id: 'chat:2',
+              contentComponent: 'chat',
+              title: 'B',
+              params: { sessionId: 'session-b', explicitSelection: true },
+            },
+          },
+          activeGroup: 'left',
+        },
+        chatCounter: 2,
+        ephemeralIds: [],
+      },
+    }))
+    chatStoreMock.sessionId = 'session-a'
+    chatStoreMock.hasExplicitSessionSelection = true
+    useChatSelectionStore().setSession('session-a')
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+
+    store.registerApi(dock as never)
+    await nextTick()
+
+    expect(dock.getPanel('chat:1')?.params.sessionId).toBe('session-a')
+    expect(dock.getPanel('chat:2')?.params.sessionId).toBe('session-b')
+    expect(dock.getPanel('chat:1')?.group?.id).not.toBe(dock.getPanel('chat:2')?.group?.id)
+    expect(chatStoreMock.focusChatView).toHaveBeenLastCalledWith('chat:1')
   })
 
   it('opens multiple schedule panels and focuses an existing schedule', () => {
