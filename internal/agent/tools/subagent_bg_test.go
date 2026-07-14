@@ -463,7 +463,7 @@ func TestBusyAgentQueuesAndRunsFIFO(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	snap, err := mgr.WaitForSessionTask(ctx, session.BotID, session.SessionID, third["task_id"].(string))
+	snap, _, err := mgr.WaitForSessionTask(ctx, session.BotID, session.SessionID, third["task_id"].(string), 0)
 	if err != nil {
 		t.Fatalf("WaitForSessionTask returned error: %v", err)
 	}
@@ -572,7 +572,7 @@ func TestBackgroundWaitTimeoutDoesNotCancelRunningAgentTask(t *testing.T) {
 
 	waitCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	if _, err := mgr.WaitForSessionTask(waitCtx, session.BotID, session.SessionID, started["task_id"].(string)); err == nil {
+	if _, _, err := mgr.WaitForSessionTask(waitCtx, session.BotID, session.SessionID, started["task_id"].(string), 0); err == nil {
 		t.Fatal("expected wait timeout")
 	}
 	if task := mgr.GetForSession("bot1", "parent1", started["task_id"].(string)); task == nil || task.Snapshot().Status != background.TaskRunning {

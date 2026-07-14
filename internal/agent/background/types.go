@@ -41,13 +41,31 @@ type Task struct {
 	StartedAt      time.Time
 	CompletedAt    time.Time
 
-	mu       sync.Mutex
-	cancel   context.CancelFunc
-	stalled  bool            // true once the task appears stuck on interactive input
-	changed  chan struct{}   // closed and replaced whenever waiters should re-check task state
-	output   strings.Builder // buffered output tail
-	branches []SpawnBranch   // spawn-kind branch outcomes, set at completion
+	mu           sync.Mutex
+	cancel       context.CancelFunc
+	stalled      bool            // true once the task appears stuck on interactive input
+	changed      chan struct{}   // closed and replaced whenever waiters should re-check task state
+	output       strings.Builder // buffered output tail
+	lastOutputAt time.Time       // when output last grew; zero means no output yet
+	branches     []SpawnBranch   // spawn-kind branch outcomes, set at completion
 }
+
+// WaitOutcome explains why a wait on a task returned.
+type WaitOutcome string
+
+const (
+	WaitCompleted WaitOutcome = "completed"
+	WaitFailed    WaitOutcome = "failed"
+	WaitKilled    WaitOutcome = "killed"
+	WaitStalled   WaitOutcome = "stalled"
+	// WaitIdle means the command is still running but produced no new output
+	// for the idle threshold — for server-style commands this usually means
+	// startup is done and the ready banner is already in the output tail.
+	WaitIdle WaitOutcome = "idle"
+	// WaitTimeout is never returned by the manager itself; the tool layer uses
+	// it when the caller-supplied wait budget elapses before any other outcome.
+	WaitTimeout WaitOutcome = "timeout"
+)
 
 // TaskSnapshot is a lock-safe, immutable view of a task for handler/UI code.
 type TaskSnapshot struct {
@@ -72,6 +90,7 @@ type TaskSnapshot struct {
 	Branches       []SpawnBranch
 	StartedAt      time.Time
 	CompletedAt    time.Time
+	LastOutputAt   time.Time
 	Duration       time.Duration
 	Stalled        bool
 }
@@ -110,6 +129,7 @@ func (t *Task) Snapshot() TaskSnapshot {
 		Branches:       append([]SpawnBranch(nil), t.branches...),
 		StartedAt:      t.StartedAt,
 		CompletedAt:    t.CompletedAt,
+		LastOutputAt:   t.lastOutputAt,
 		Duration:       duration,
 		Stalled:        t.stalled && t.Status == TaskRunning,
 	}
@@ -146,6 +166,7 @@ func (t *Task) AppendOutput(s string) {
 
 func (t *Task) appendOutputLocked(s string) {
 	t.output.WriteString(s)
+	t.lastOutputAt = time.Now()
 	// Keep tail bounded
 	if t.output.Len() > maxTailBytes*2 {
 		tail := t.output.String()
