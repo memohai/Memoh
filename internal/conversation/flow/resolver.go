@@ -442,7 +442,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 				// Remove tool messages from the recent context — they are large
 				// and unnecessary when we already have a summary. Keep only
 				// user/assistant conversation turns.
-				messages = stripToolMessages(messages)
+				messages = stripToolMessagesWhenCompactionSummaryIsActive(messages, historyRecords)
 			}
 		}
 	}

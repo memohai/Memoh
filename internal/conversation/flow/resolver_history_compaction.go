@@ -55,6 +55,17 @@ func sameModelMessage(a conversation.ModelMessage, b conversation.ModelMessage) 
 		string(a.Content) == string(b.Content)
 }
 
+func stripToolMessagesWhenCompactionSummaryIsActive(messages []conversation.ModelMessage, records []historyfrag.HistoryRecord) []conversation.ModelMessage {
+	for _, record := range records {
+		if record.SourceKind == historyfrag.SourceCompactionLog &&
+			record.Kind == contextfrag.KindConversationSummary &&
+			record.Lifecycle == historyfrag.LifecycleActiveSummary {
+			return stripToolMessages(messages)
+		}
+	}
+	return messages
+}
+
 type compactionArtifactBoundary struct {
 	hasCutoff bool
 	cutoffMs  int64
