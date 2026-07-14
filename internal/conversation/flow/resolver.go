@@ -362,31 +362,20 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		messages = r.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
 	} else if r.conversationSvc != nil {
 		historyFallback := historyScopeFallbackFromChatRequest(req)
-		loaded, loadErr := r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
+		prepared, loadErr := r.prepareHistoryContext(ctx, req, historyFallback, contextTokenBudget)
 		if loadErr != nil {
-			r.logger.Error("resolve: loadHistoryRecords failed",
+			r.logger.Error("resolve: prepare history context failed",
 				slog.String("bot_id", req.BotID),
+				slog.String("stage", "initial"),
 				slog.Any("error", loadErr),
 			)
 			return resolvedContext{}, loadErr
 		}
-		loaded = pruneHistoryForGateway(loaded)
-		artifactBoundary := r.loadCompactionArtifactBoundary(ctx, loaded, req.SessionID, req.HistoryCutoffBeforeMessageID)
-		loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
-		loaded = dedupePersistedCurrentUserMessage(loaded, req)
-		loaded, loadErr = r.ensureRequiredHistoryMessage(ctx, loaded, req)
-		if loadErr != nil {
-			r.logger.Error("resolve: load required history message failed",
-				slog.String("bot_id", req.BotID),
-				slog.Any("error", loadErr),
-			)
-			return resolvedContext{}, loadErr
-		}
-		loaded, loadErr = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded, artifactBoundary)
-		if loadErr != nil {
-			return resolvedContext{}, loadErr
-		}
-		messages, historyRecords, estimatedTokens = trimMessagesAndRecordsByTokens(r.logger, loaded, contextTokenBudget)
+		messages = prepared.messages
+		historyRecords = prepared.records
+		estimatedTokens = prepared.estimatedTokens
+		compactableTokens = prepared.compactableTokens
+		compactableTokensKnown = true
 		// When context reaches the shared budget share, run synchronous
 		// compaction before sending the request. contextTokenBudget is the
 		// authoritative limit for how much context the user wants to send
@@ -398,8 +387,6 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		// The trigger only counts raw (compactable) rows: active summaries can
 		// never be compacted away, so including them would make the trigger
 		// self-sustaining once accumulated summaries cross the threshold.
-		compactableTokens = totalCompactableHistoryTokens(loaded)
-		compactableTokensKnown = true
 		if compactionThreshold > 0 && compactableTokens >= compactionThreshold {
 			r.logger.Warn("resolve: context reached compaction threshold, running synchronous compaction",
 				slog.String("bot_id", req.BotID),
@@ -413,32 +400,19 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			// this turn's context untouched — possibly still above the
 			// threshold — and the next turn re-evaluates.
 			if res := r.runCompactionSync(ctx, req, compactableTokens, contextTokenBudget); res.Status == compaction.StatusOK {
-				loaded, loadErr = r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
+				prepared, loadErr = r.prepareHistoryContext(ctx, req, historyFallback, contextTokenBudget)
 				if loadErr != nil {
-					r.logger.Error("resolve: reload messages after compaction failed",
+					r.logger.Error("resolve: prepare history context failed",
 						slog.String("bot_id", req.BotID),
+						slog.String("stage", "post_compaction"),
 						slog.Any("error", loadErr),
 					)
 					return resolvedContext{}, loadErr
 				}
-				loaded = pruneHistoryForGateway(loaded)
-				artifactBoundary = r.loadCompactionArtifactBoundary(ctx, loaded, req.SessionID, req.HistoryCutoffBeforeMessageID)
-				loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
-				loaded = dedupePersistedCurrentUserMessage(loaded, req)
-				loaded, loadErr = r.ensureRequiredHistoryMessage(ctx, loaded, req)
-				if loadErr != nil {
-					r.logger.Error("resolve: reload required history message failed",
-						slog.String("bot_id", req.BotID),
-						slog.Any("error", loadErr),
-					)
-					return resolvedContext{}, loadErr
-				}
-				loaded, loadErr = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded, artifactBoundary)
-				if loadErr != nil {
-					return resolvedContext{}, loadErr
-				}
-				compactableTokens = totalCompactableHistoryTokens(loaded)
-				messages, historyRecords, estimatedTokens = trimMessagesAndRecordsByTokens(r.logger, loaded, contextTokenBudget)
+				messages = prepared.messages
+				historyRecords = prepared.records
+				estimatedTokens = prepared.estimatedTokens
+				compactableTokens = prepared.compactableTokens
 				// Remove tool messages from the recent context — they are large
 				// and unnecessary when we already have a summary. Keep only
 				// user/assistant conversation turns.
