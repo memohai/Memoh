@@ -17,6 +17,11 @@ import (
 const (
 	maxWaitDuration                = 300 * time.Second
 	backgroundWaitProgressInterval = 30 * time.Second
+
+	minWaitUntilTimeout = 1 * time.Second
+	maxWaitUntilTimeout = 600 * time.Second
+	minIdleTimeout      = 1 * time.Second
+	maxIdleTimeout      = 300 * time.Second
 )
 
 // BackgroundProvider exposes background task observation and control tools.
@@ -39,7 +44,7 @@ func (*BackgroundProvider) Usage(_ context.Context, _ SessionContext, available 
 		parts = append(parts, ref+": wait for a short fixed duration when there is no specific task to observe")
 	}
 	if ref, ok := available.Ref(ToolWaitUntil()); ok {
-		parts = append(parts, ref+": wait for a background task to complete, fail, be killed, or appear stalled")
+		parts = append(parts, ref+": observe a background task until it finishes, stalls, goes quiet (idle), or the wait times out")
 	}
 	if ref, ok := available.Ref(ToolGetBackgroundStatus()); ok {
 		parts = append(parts, ref+": inspect a background task and read its result")
@@ -50,7 +55,7 @@ func (*BackgroundProvider) Usage(_ context.Context, _ SessionContext, available 
 	if len(parts) == 0 {
 		return ""
 	}
-	parts = append(parts, "After starting long work in the background, call `wait_until(task_id)` and then `get_background_status(task_id)` to read `result`.")
+	parts = append(parts, "After starting long work in the background, call `wait_until(task_id)`: it returns with a `reason` (completed/failed/killed/stalled/idle/timeout) and the latest `output_tail`. For finite work (installs, builds, tests), re-wait until it completes, then read `result` via `get_background_status(task_id)`. For servers/watchers that never exit, `reason: \"idle\"` with a ready message in `output_tail` means the service is up — proceed instead of waiting for completion.")
 	return usageSection("Background Tasks", parts)
 }
 
@@ -87,11 +92,13 @@ func (p *BackgroundProvider) Tools(_ context.Context, session SessionContext) ([
 		},
 		{
 			Name:        ToolWaitUntil().String(),
-			Description: "Wait until a background task completes, fails, is killed, or appears stalled. Call get_background_status afterward to inspect result.",
+			Description: "Observe a background task for a bounded time. Returns with a reason: completed/failed/killed, stalled (interactive prompt), idle (still running but output quiet for idle_timeout), or timeout — always with the latest output_tail. For servers/watchers that never exit (dev server, watch mode), reason 'idle' plus a ready message in output_tail (e.g. a local URL) means the service is up; do not keep waiting for completion.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"task_id": map[string]any{"type": "string", "description": "Background task ID"},
+					"task_id":      map[string]any{"type": "string", "description": "Background task ID"},
+					"timeout":      map[string]any{"type": "number", "description": "Max seconds to wait before returning with reason 'timeout'. Default 120, max 600. The task keeps running; call wait_until again to keep observing.", "minimum": 1, "maximum": 600},
+					"idle_timeout": map[string]any{"type": "number", "description": "Seconds of output silence after which a running command returns with reason 'idle'. Default 20, max 300. Only applies to exec tasks.", "minimum": 1, "maximum": 300},
 				},
 				"required": []string{"task_id"},
 			},
@@ -187,18 +194,34 @@ func (p *BackgroundProvider) execWaitUntil(ctx context.Context, session SessionC
 	if taskID == "" {
 		return nil, errors.New("task_id is required")
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, time.Duration(background.BackgroundExecTimeout)*time.Second)
-	defer cancel()
-	s, err := p.waitForSessionTaskWithProgress(waitCtx, session.BotID, session.SessionID, taskID, sendProgress)
+	timeout, err := optionalDurationArg(args, "timeout", background.DefaultWaitTimeout, minWaitUntilTimeout, maxWaitUntilTimeout)
 	if err != nil {
 		return nil, err
+	}
+	idleThreshold, err := optionalDurationArg(args, "idle_timeout", background.DefaultIdleThreshold, minIdleTimeout, maxIdleTimeout)
+	if err != nil {
+		return nil, err
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	s, outcome, err := p.waitForSessionTaskWithProgress(waitCtx, session.BotID, session.SessionID, taskID, idleThreshold, sendProgress)
+	if err != nil {
+		if !errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+			return nil, err
+		}
+		// The wait budget elapsed; the task itself is still running.
+		outcome = background.WaitTimeout
 	}
 	result := map[string]any{
 		"task_id":    s.TaskID,
 		"kind":       string(s.Kind),
 		"status":     statusString(s),
+		"reason":     string(outcome),
 		"stalled":    s.Stalled,
 		"started_at": session.FormatTime(s.StartedAt),
+	}
+	if s.OutputTail != "" {
+		result["output_tail"] = s.OutputTail
 	}
 	if s.CompletedAt.IsZero() {
 		return result, nil
@@ -208,19 +231,20 @@ func (p *BackgroundProvider) execWaitUntil(ctx context.Context, session SessionC
 	return result, nil
 }
 
-func (p *BackgroundProvider) waitForSessionTaskWithProgress(ctx context.Context, botID, sessionID, taskID string, sendProgress func(any)) (background.TaskSnapshot, error) {
+func (p *BackgroundProvider) waitForSessionTaskWithProgress(ctx context.Context, botID, sessionID, taskID string, idleThreshold time.Duration, sendProgress func(any)) (background.TaskSnapshot, background.WaitOutcome, error) {
 	if sendProgress == nil {
-		return p.bgManager.WaitForSessionTask(ctx, botID, sessionID, taskID)
+		return p.bgManager.WaitForSessionTask(ctx, botID, sessionID, taskID, idleThreshold)
 	}
 
 	type waitResult struct {
 		snapshot background.TaskSnapshot
+		outcome  background.WaitOutcome
 		err      error
 	}
 	resultCh := make(chan waitResult, 1)
 	go func() {
-		s, err := p.bgManager.WaitForSessionTask(ctx, botID, sessionID, taskID)
-		resultCh <- waitResult{snapshot: s, err: err}
+		s, outcome, err := p.bgManager.WaitForSessionTask(ctx, botID, sessionID, taskID, idleThreshold)
+		resultCh <- waitResult{snapshot: s, outcome: outcome, err: err}
 	}()
 
 	progress := func() {
@@ -235,9 +259,16 @@ func (p *BackgroundProvider) waitForSessionTaskWithProgress(ctx context.Context,
 	for {
 		select {
 		case result := <-resultCh:
-			return result.snapshot, result.err
+			return result.snapshot, result.outcome, result.err
 		case <-ctx.Done():
-			return background.TaskSnapshot{}, ctx.Err()
+			// Give the waiter goroutine a moment to hand back the snapshot it
+			// captured at cancellation, so timeout results still carry a tail.
+			select {
+			case result := <-resultCh:
+				return result.snapshot, result.outcome, result.err
+			case <-time.After(time.Second):
+				return background.TaskSnapshot{}, "", ctx.Err()
+			}
 		case <-ticker.C:
 			progress()
 		}
@@ -334,12 +365,13 @@ func backgroundStatusMap(session SessionContext, s background.TaskSnapshot) map[
 	default:
 		result["command"] = s.Command
 		result["output_file"] = s.OutputFile
-		execResult := map[string]any{"output_file": s.OutputFile}
+		// The tail is live while the task runs — it is how the agent sees a
+		// server's ready banner without waiting for the process to exit.
+		result["output_tail"] = s.OutputTail
+		execResult := map[string]any{"output_file": s.OutputFile, "output_tail": s.OutputTail}
 		if s.Status != background.TaskRunning && s.Status != background.TaskQueued {
 			result["exit_code"] = s.ExitCode
-			result["output_tail"] = s.OutputTail
 			execResult["exit_code"] = s.ExitCode
-			execResult["output_tail"] = s.OutputTail
 		}
 		result["result"] = execResult
 	}
@@ -358,6 +390,37 @@ func durationArg(args map[string]any, key string) (time.Duration, error) {
 	if !ok {
 		return 0, fmt.Errorf("%s is required", key)
 	}
+	duration, err := secondsValue(raw, key)
+	if err != nil {
+		return 0, err
+	}
+	if duration > maxWaitDuration {
+		duration = maxWaitDuration
+	}
+	return duration, nil
+}
+
+// optionalDurationArg reads a seconds argument, falling back to def when the
+// key is absent and clamping present values into [minD, maxD].
+func optionalDurationArg(args map[string]any, key string, def, minD, maxD time.Duration) (time.Duration, error) {
+	raw, ok := args[key]
+	if !ok || raw == nil {
+		return def, nil
+	}
+	duration, err := secondsValue(raw, key)
+	if err != nil {
+		return 0, err
+	}
+	if duration < minD {
+		duration = minD
+	}
+	if duration > maxD {
+		duration = maxD
+	}
+	return duration, nil
+}
+
+func secondsValue(raw any, key string) (time.Duration, error) {
 	var seconds float64
 	switch v := raw.(type) {
 	case float64:
@@ -380,11 +443,7 @@ func durationArg(args map[string]any, key string) (time.Duration, error) {
 	if math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds <= 0 {
 		return 0, fmt.Errorf("%s must be > 0", key)
 	}
-	duration := time.Duration(seconds * float64(time.Second))
-	if duration > maxWaitDuration {
-		duration = maxWaitDuration
-	}
-	return duration, nil
+	return time.Duration(seconds * float64(time.Second)), nil
 }
 
 type jsonNumber interface {

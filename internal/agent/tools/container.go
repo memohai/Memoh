@@ -230,7 +230,8 @@ Delete a file:
 # Instructions
 - Use this tool to run shell commands for installing packages, running scripts, building code, running tests, and other system operations.
 - If your command will take a long time (package installs, builds, test suites), set run_in_background to true. The call returns a task ID immediately. You do not need to add '&' at the end of the command when using this parameter.
-- If waiting for a background task, use wait_until(task_id), then get_background_status(task_id) to inspect result.
+- If waiting for a background task, use wait_until(task_id): it returns with a reason (completed/failed/killed/stalled/idle/timeout) and the latest output_tail. Then use get_background_status(task_id) to inspect result.
+- For processes that never exit on their own (dev servers, watch mode), use run_in_background, then wait_until(task_id): once output settles it returns with reason 'idle' — check output_tail for the ready message (e.g. a local URL) and proceed. Do not wait for such processes to complete.
 - You may specify a custom timeout (up to %d seconds) for commands you know will take longer than the default %d seconds. If a foreground command times out, it will be automatically moved to the background; use wait_until(task_id), then get_background_status(task_id).
 - Avoid unnecessary sleep commands:
   - Do not sleep between commands that can run immediately — just run them.
@@ -245,7 +246,7 @@ Delete a file:
 					"work_dir":          map[string]any{"type": "string", "description": fmt.Sprintf("Working directory (default: %s)", wd)},
 					"description":       map[string]any{"type": "string", "description": `Clear, concise description of what this command does in active voice. For simple commands keep it brief (5-10 words): ls -la → "List files with details". For complex commands add enough context: curl -s url | jq '.data[]' → "Fetch JSON and extract data array".`},
 					"timeout":           map[string]any{"type": "integer", "description": fmt.Sprintf("Timeout in seconds (default: %d, max: %d). Only applies to foreground execution. Commands that exceed this timeout are automatically moved to background.", background.DefaultExecTimeout, background.MaxExecTimeout), "minimum": 1, "maximum": background.MaxExecTimeout},
-					"run_in_background": map[string]any{"type": "boolean", "description": "If true, run the command in the background. Returns immediately with a task ID. Use wait_until(task_id), then get_background_status(task_id) to inspect result. Use for long-running commands (installs, builds, test suites). You do not need to use '&' at the end of the command."},
+					"run_in_background": map[string]any{"type": "boolean", "description": "If true, run the command in the background. Returns immediately with a task ID. Use wait_until(task_id), then get_background_status(task_id) to inspect result. Use for long-running commands (installs, builds, test suites) and for processes that never exit (dev servers, watch mode). You do not need to use '&' at the end of the command."},
 				},
 				"required": []string{"command"},
 			},
@@ -927,6 +928,8 @@ func (p *ContainerProvider) flipToBackground(
 		session.BotID, session.SessionID, command, workDir, description,
 		reader.Result(), writeFn,
 	)
+	// SetChunkHandler replays output collected during the foreground phase
+	// into the task buffer, so the tail below already contains it.
 	reader.SetChunkHandler(func(stream, chunk string) {
 		p.bgManager.RecordOutput(taskID, stream, chunk)
 	})
@@ -937,18 +940,25 @@ func (p *ContainerProvider) flipToBackground(
 		slog.Int("soft_timeout_seconds", int(softTimeout)),
 	)
 
-	return map[string]any{
+	result := map[string]any{
 		"status":      "auto_backgrounded",
 		"task_id":     taskID,
 		"output_file": outputFile,
 		"message": fmt.Sprintf(
 			"Command exceeded the foreground timeout (%ds) and has been moved to the background with task ID: %s. "+
-				"The process is still running — no work was lost. "+
-				"Output is being written to: %s. Use wait_until(task_id) to wait, then get_background_status(task_id) to inspect result. "+
+				"The process is still running — no work was lost; output collected so far is in output_tail. "+
+				"Use wait_until(task_id) to keep observing: it returns when the task finishes, stalls, or goes quiet (reason 'idle') — for servers, a ready message in output_tail means it is up. "+
+				"The full log is written to %s after the task ends. "+
 				"For long-running commands, use run_in_background: true from the start to avoid this delay.",
 			softTimeout, taskID, outputFile,
 		),
-	}, nil
+	}
+	if task := p.bgManager.Get(taskID); task != nil {
+		if tail := task.OutputTail(); tail != "" {
+			result["output_tail"] = tail
+		}
+	}
+	return result, nil
 }
 
 // detectBlockedSleep checks if the command starts with `sleep N` where N >= 2.
@@ -995,7 +1005,12 @@ func (p *ContainerProvider) execExecBackground(
 		"status":      "background_started",
 		"task_id":     taskID,
 		"output_file": outputFile,
-		"message":     fmt.Sprintf("Command started in background with task ID: %s. Output is being written to: %s. Use wait_until(task_id) to wait, then get_background_status(task_id) to inspect result.", taskID, outputFile),
+		"message": fmt.Sprintf(
+			"Command started in background with task ID: %s. "+
+				"Use wait_until(task_id) to observe it: it returns when the task finishes, stalls on a prompt, or output goes quiet (reason 'idle'), always with the latest output_tail — for servers, a ready message there means it is up. "+
+				"get_background_status(task_id) also shows output_tail while running. The full log is written to %s after the task ends.",
+			taskID, outputFile,
+		),
 	}, nil
 }
 
