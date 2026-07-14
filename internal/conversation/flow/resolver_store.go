@@ -44,7 +44,9 @@ func (r *Resolver) storeRoundWithOptionsResult(ctx context.Context, req conversa
 		fullRound = append(fullRound, m)
 	}
 	if !opts.AllowPendingToolCalls {
-		fullRound = repairToolCallClosures(fullRound, syntheticToolClosureError)
+		repaired := repairToolCallClosuresWithSources(fullRound, syntheticToolClosureError)
+		fullRound = repaired.messages
+		opts.MessageMetadataByIndex = remapMessageMetadata(opts.MessageMetadataByIndex, repaired.sourceIndexes)
 	}
 
 	// Filter out empty assistant messages (content: []) that result from LLM
@@ -52,15 +54,20 @@ func (r *Resolver) storeRoundWithOptionsResult(ctx context.Context, req conversa
 	// no value and pollute the conversation history, causing subsequent turns
 	// to also produce empty responses.
 	filtered := make([]conversation.ModelMessage, 0, len(fullRound))
-	for _, m := range fullRound {
+	filteredMetadata := make(map[int]map[string]any)
+	for index, m := range fullRound {
 		if m.Role == "assistant" && isEmptyAssistantMessage(m) && !opts.AllowEmptyAssistantText {
 			r.logger.Warn("skipping empty assistant message in storeRound",
 				slog.String("bot_id", req.BotID),
 			)
 			continue
 		}
+		if metadata := opts.MessageMetadataByIndex[index]; len(metadata) > 0 {
+			filteredMetadata[len(filtered)] = metadata
+		}
 		filtered = append(filtered, m)
 	}
+	opts.MessageMetadataByIndex = filteredMetadata
 
 	if len(filtered) == 0 {
 		return nil, nil
@@ -68,10 +75,29 @@ func (r *Resolver) storeRoundWithOptionsResult(ctx context.Context, req conversa
 
 	persisted := r.storeMessages(ctx, req, filtered, modelID, opts)
 	if !opts.SkipMemory && !req.SkipMemoryExtraction {
-		go r.storeMemory(context.WithoutCancel(ctx), req, filtered)
+		go r.storeMemory(context.WithoutCancel(ctx), withoutInjectionCapabilities(req), filtered)
 	}
 
 	return persisted, nil
+}
+
+func remapMessageMetadata(
+	metadata map[int]map[string]any,
+	sourceIndexes []int,
+) map[int]map[string]any {
+	if len(metadata) == 0 || len(sourceIndexes) == 0 {
+		return nil
+	}
+	remapped := make(map[int]map[string]any)
+	for outputIndex, sourceIndex := range sourceIndexes {
+		if sourceIndex < 0 {
+			continue
+		}
+		if sourceMetadata := metadata[sourceIndex]; len(sourceMetadata) > 0 {
+			remapped[outputIndex] = sourceMetadata
+		}
+	}
+	return remapped
 }
 
 // isEmptyAssistantMessage returns true if an assistant message has no
@@ -108,175 +134,6 @@ func (r *Resolver) StoreRound(ctx context.Context, botID, sessionID, channelIden
 		UserMessagePersisted:    true,
 	}
 	return r.storeRound(ctx, req, modelMessages, modelID)
-}
-
-func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) []messagepkg.Message {
-	if r.messageService == nil {
-		return nil
-	}
-	if strings.TrimSpace(req.BotID) == "" {
-		return nil
-	}
-
-	// Check bot setting for full tool result persistence.
-	pruneToolResults := true
-	if botSettings, err := r.loadBotSettings(ctx, req.BotID); err == nil {
-		pruneToolResults = !botSettings.PersistFullToolResults
-	}
-	meta := buildRouteMetadata(req)
-	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
-	sessionMode, runtimeType := r.persistSessionRuntimeSnapshot(ctx, req)
-
-	// Determine the last assistant message index for outbound asset attachment.
-	lastAssistantIdx := -1
-	if req.OutboundAssetCollector != nil {
-		for i := len(messages) - 1; i >= 0; i-- {
-			if messages[i].Role == "assistant" {
-				lastAssistantIdx = i
-				break
-			}
-		}
-	}
-	var outboundAssets []messagepkg.AssetRef
-	if lastAssistantIdx >= 0 {
-		outboundAssets = outboundAssetRefsToMessageRefs(req.OutboundAssetCollector())
-	}
-
-	turnRequestMessageID := ""
-	if req.UserMessagePersisted || req.ReusePersistedUserMessage {
-		turnRequestMessageID = strings.TrimSpace(req.PersistedUserMessageID)
-	}
-	persistInputs := make([]messagepkg.PersistInput, 0, len(messages))
-	for i, msg := range messages {
-		msg = normalizeUserMessageContent(msg)
-
-		// Prune tool results at store time to reduce DB bloat.
-		// This prevents ~10KB+ tool outputs from being stored verbatim.
-		if pruneToolResults {
-			if pruned, changed := pruneMessageForGateway(msg); changed {
-				msg = pruned
-			}
-		}
-
-		content, err := json.Marshal(msg)
-		if err != nil {
-			r.logger.Warn("storeMessages: marshal failed", slog.Any("error", err))
-			continue
-		}
-		messageSenderChannelIdentityID := ""
-		messageSenderUserID := ""
-		externalMessageID := ""
-		sourceReplyToMessageID := ""
-		messageEventID := ""
-		displayText := ""
-		assets := []messagepkg.AssetRef(nil)
-		persistMeta := meta
-		if msg.Role == "user" {
-			messageSenderChannelIdentityID = senderChannelIdentityID
-			messageSenderUserID = senderUserID
-
-			// Only the user message whose text matches req.Query is the
-			// "real" turn-leading query from the user. Other user-role
-			// messages in this round are synthetic — typically:
-			//   1. Mid-turn IM platform injects (the user typed again
-			//      while the bot was working).
-			//   2. The image-only user message that the read-media tool
-			//      decoration appends after a successful image read so
-			//      that the next LLM step can see the image.
-			// For (2) the message has no text content; for both (1) and
-			// (2), splatting req.RawQuery / req.ExternalMessageID /
-			// req.EventID across them was wrong: it forced the UI to
-			// display the original query text on a synthetic image-only
-			// turn (the read-tool case), and falsely linked unrelated
-			// messages to the same inbound IM event.
-			ownText := strings.TrimSpace(msg.TextContent())
-			isOriginalSkillActivation := req.UserMessageKind == conversation.UserMessageKindSkillActivation &&
-				strings.TrimSpace(req.Query) == "" &&
-				ownText == "" &&
-				i == 0
-			isOriginalQuery := (ownText != "" && ownText == strings.TrimSpace(req.Query)) || isOriginalSkillActivation
-
-			if isOriginalQuery {
-				externalMessageID = req.ExternalMessageID
-				sourceReplyToMessageID = req.SourceReplyToMessageID
-				messageEventID = req.EventID
-				switch {
-				case strings.TrimSpace(req.UserVisibleText) != "" || req.UserMessageKind == conversation.UserMessageKindSkillActivation:
-					displayText = strings.TrimSpace(req.UserVisibleText)
-				case req.RawQuery != "":
-					displayText = req.RawQuery
-				default:
-					displayText = strings.TrimSpace(req.Query)
-				}
-				assets = chatAttachmentsToAssetRefs(req.Attachments)
-				persistMeta = mergeMetadata(meta, buildInteractionMetadata(req))
-			} else {
-				// Use the message's own text as display text. For the
-				// read-media image-only injection this is empty, so
-				// DisplayContent stays empty and ConvertMessagesToUITurns
-				// drops the turn entirely (no text + no assets).
-				displayText = ownText
-			}
-		} else if strings.TrimSpace(req.ExternalMessageID) != "" {
-			sourceReplyToMessageID = req.ExternalMessageID
-		}
-		if i == lastAssistantIdx && len(outboundAssets) > 0 {
-			assets = append(assets, outboundAssets...)
-		}
-		if extraMeta := opts.MessageMetadataByIndex[i]; len(extraMeta) > 0 {
-			persistMeta = mergeMetadata(persistMeta, extraMeta)
-		}
-		persistInputs = append(persistInputs, messagepkg.PersistInput{
-			BotID:                   req.BotID,
-			SessionID:               req.SessionID,
-			SenderChannelIdentityID: messageSenderChannelIdentityID,
-			SenderUserID:            messageSenderUserID,
-			ExternalMessageID:       externalMessageID,
-			SourceReplyToMessageID:  sourceReplyToMessageID,
-			Role:                    msg.Role,
-			Content:                 content,
-			Metadata:                persistMeta,
-			Usage:                   msg.Usage,
-			Assets:                  assets,
-			ModelID:                 modelID,
-			EventID:                 messageEventID,
-			DisplayText:             displayText,
-			SessionMode:             sessionMode,
-			RuntimeType:             runtimeType,
-			TurnRequestMessageID:    turnRequestMessageID,
-			SkipHistoryTurn:         req.SkipHistoryTurn,
-		})
-	}
-	if batcher, ok := r.messageService.(messagepkg.ToolTailRoundPersister); ok {
-		if persisted, handled, err := batcher.PersistToolTailRound(ctx, persistInputs); handled || err != nil {
-			if err != nil {
-				r.logger.Warn("persist tool tail round failed", slog.Any("error", err))
-				return nil
-			}
-			return persisted
-		}
-	}
-	return r.persistMessageInputs(ctx, persistInputs, turnRequestMessageID)
-}
-
-func (r *Resolver) persistMessageInputs(ctx context.Context, inputs []messagepkg.PersistInput, initialTurnRequestMessageID string) []messagepkg.Message {
-	persisted := make([]messagepkg.Message, 0, len(inputs))
-	turnRequestMessageID := strings.TrimSpace(initialTurnRequestMessageID)
-	for _, input := range inputs {
-		if !input.SkipHistoryTurn {
-			input.TurnRequestMessageID = turnRequestMessageID
-		}
-		persistedMessage, err := r.messageService.Persist(ctx, input)
-		if err != nil {
-			r.logger.Warn("persist message failed", slog.Any("error", err))
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(input.Role), "user") && !input.SkipHistoryTurn {
-			turnRequestMessageID = persistedMessage.ID
-		}
-		persisted = append(persisted, persistedMessage)
-	}
-	return persisted
 }
 
 func (r *Resolver) persistSessionRuntimeSnapshot(ctx context.Context, req conversation.ChatRequest) (string, string) {

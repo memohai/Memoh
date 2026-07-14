@@ -14,7 +14,8 @@ INSERT INTO bot_history_messages (
   runtime_type,
   model_id,
   event_id,
-  display_text
+  display_text,
+  source_context
 )
 VALUES (
   sqlc.arg(bot_id),
@@ -31,7 +32,8 @@ VALUES (
   sqlc.arg(runtime_type),
   sqlc.narg(model_id)::uuid,
   sqlc.narg(event_id)::uuid,
-  sqlc.narg(display_text)::text
+  sqlc.narg(display_text)::text,
+  sqlc.narg(source_context)::jsonb
 )
 RETURNING
   id,
@@ -83,6 +85,7 @@ INSERT INTO bot_history_messages (
   model_id,
   event_id,
   display_text,
+  source_context,
   turn_id,
   turn_position,
   turn_message_seq,
@@ -105,6 +108,7 @@ SELECT
   sqlc.narg(model_id)::uuid,
   sqlc.narg(event_id)::uuid,
   sqlc.narg(display_text)::text,
+  sqlc.narg(source_context)::jsonb,
   target.turn_id,
   target.turn_position,
   sqlc.arg(turn_message_seq),
@@ -159,6 +163,7 @@ inserted_message AS (
     model_id,
     event_id,
     display_text,
+    source_context,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -181,6 +186,7 @@ inserted_message AS (
     sqlc.narg(model_id)::uuid,
     sqlc.narg(event_id)::uuid,
     sqlc.narg(display_text)::text,
+    sqlc.narg(source_context)::jsonb,
     sqlc.arg(turn_id),
     next_position.position,
     sqlc.arg(turn_message_seq),
@@ -244,6 +250,7 @@ inserted AS (
     model_id,
     event_id,
     display_text,
+    source_context,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -265,6 +272,7 @@ inserted AS (
     sqlc.narg(model_id)::uuid,
     sqlc.narg(event_id)::uuid,
     sqlc.narg(display_text)::text,
+    sqlc.narg(source_context)::jsonb,
     target.turn_id,
     target.turn_position,
     target.turn_message_seq,
@@ -356,6 +364,7 @@ inserted AS (
     model_id,
     event_id,
     display_text,
+    source_context,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -377,6 +386,7 @@ inserted AS (
     sqlc.narg(model_id)::uuid,
     sqlc.narg(event_id)::uuid,
     sqlc.narg(display_text)::text,
+    sqlc.narg(source_context)::jsonb,
     target.turn_id,
     target.turn_position,
     target.turn_message_seq,
@@ -409,7 +419,8 @@ WITH input_rows(
   runtime_type,
   model_id,
   event_id,
-  display_text
+  display_text,
+  source_context
 ) AS (
   VALUES
       (
@@ -427,7 +438,8 @@ WITH input_rows(
         sqlc.arg(user_runtime_type)::text,
         sqlc.narg(user_model_id)::uuid,
         sqlc.narg(user_event_id)::uuid,
-        sqlc.narg(user_display_text)::text
+        sqlc.narg(user_display_text)::text,
+        sqlc.narg(user_source_context)::jsonb
       ),
       (
         2::bigint,
@@ -444,7 +456,8 @@ WITH input_rows(
         sqlc.arg(tool_call_assistant_runtime_type)::text,
         sqlc.narg(tool_call_assistant_model_id)::uuid,
         sqlc.narg(tool_call_assistant_event_id)::uuid,
-        sqlc.narg(tool_call_assistant_display_text)::text
+        sqlc.narg(tool_call_assistant_display_text)::text,
+        sqlc.narg(tool_call_assistant_source_context)::jsonb
       ),
       (
         3::bigint,
@@ -461,7 +474,8 @@ WITH input_rows(
         sqlc.arg(tool_runtime_type)::text,
         sqlc.narg(tool_model_id)::uuid,
         sqlc.narg(tool_event_id)::uuid,
-        sqlc.narg(tool_display_text)::text
+        sqlc.narg(tool_display_text)::text,
+        sqlc.narg(tool_source_context)::jsonb
       ),
       (
         4::bigint,
@@ -478,7 +492,8 @@ WITH input_rows(
         sqlc.arg(final_assistant_runtime_type)::text,
         sqlc.narg(final_assistant_model_id)::uuid,
         sqlc.narg(final_assistant_event_id)::uuid,
-        sqlc.narg(final_assistant_display_text)::text
+        sqlc.narg(final_assistant_display_text)::text,
+        sqlc.narg(final_assistant_source_context)::jsonb
       )
 ),
 next_position AS (
@@ -505,6 +520,7 @@ inserted_messages AS (
     model_id,
     event_id,
     display_text,
+    source_context,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -527,6 +543,7 @@ inserted_messages AS (
     input.model_id,
     input.event_id,
     input.display_text,
+    input.source_context,
     sqlc.arg(turn_id),
     next_position.position,
     input.turn_message_seq,
@@ -1364,6 +1381,7 @@ SELECT
   m.turn_superseded_by_turn_id,
   m.turn_superseded_at,
   m.turn_superseded_reason,
+  m.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
@@ -1497,10 +1515,12 @@ SELECT
   m.display_text,
   m.compact_id,
   m.created_at,
+  source_row.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
+JOIN bot_history_messages source_row ON source_row.id = m.id
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
@@ -1527,14 +1547,36 @@ SELECT
   m.display_text,
   m.compact_id,
   m.created_at,
+  source_row.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
+JOIN bot_history_messages source_row ON source_row.id = m.id
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
   AND m.created_at >= sqlc.arg(created_at)
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
+
+-- name: GetLatestActiveTurnResponseAtBySession :one
+SELECT MAX(m.created_at)::timestamptz
+FROM bot_visible_history_messages m
+WHERE m.session_id = sqlc.arg(session_id)
+  AND m.role IN ('assistant', 'tool')
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync');
+
+-- name: ListUncoveredTurnResponsesBySession :many
+SELECT
+  m.id,
+  m.role,
+  m.content,
+  m.created_at
+FROM bot_visible_history_messages m
+WHERE m.session_id = sqlc.arg(session_id)
+  AND m.role IN ('assistant', 'tool')
+  AND m.id <> ALL(sqlc.arg(covered_message_ids)::uuid[])
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
 
@@ -2127,6 +2169,7 @@ SELECT
   m.display_text,
   m.compact_id,
   m.created_at,
+  m.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
@@ -2277,9 +2320,26 @@ ORDER BY m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: MarkMessagesCompacted :exec
-UPDATE bot_history_messages
-SET compact_id = $1
-WHERE id = ANY($2::uuid[]);
+WITH target_compact AS MATERIALIZED (
+  SELECT compact.id
+  FROM bot_history_message_compacts compact
+  WHERE compact.id = sqlc.arg(compact_id)
+    AND compact.status = 'pending'
+    AND compact.artifact_level = 0
+  FOR SHARE OF compact
+),
+locked_messages AS MATERIALIZED (
+  SELECT message.id
+  FROM bot_history_messages message
+  CROSS JOIN target_compact
+  WHERE message.id = ANY(sqlc.arg(column_2)::uuid[])
+  ORDER BY message.id
+  FOR UPDATE OF message
+)
+UPDATE bot_history_messages message
+SET compact_id = target_compact.id
+FROM target_compact, locked_messages
+WHERE message.id = locked_messages.id;
 
 -- name: ListUncompactedMessagesBySession :many
 SELECT
@@ -2298,6 +2358,8 @@ SELECT
   m.display_text,
   m.compact_id,
   m.created_at,
+  COALESCE(to_jsonb(source_row)->>'source_revision', source_row.xmin::text)::text AS source_version,
+  source_row.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform,
@@ -2309,19 +2371,38 @@ SELECT
   )::text AS conversation_name,
   r.default_reply_target AS reply_target
 FROM bot_visible_history_messages m
+JOIN bot_history_messages source_row ON source_row.id = m.id
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN bot_channel_routes r ON r.id = s.route_id
 WHERE m.session_id = $1
-  -- Rows stay eligible unless their compact log holds a usable summary,
-  -- matching the read path's substitution predicate (status ok AND non-blank
-  -- summary). This also reclaims rows stranded by a crash between mark and
-  -- complete, by deleted logs, and legacy status='ok' rows whose summary is
-  -- empty or whitespace-only (the pre-existing poison states).
+  -- Rows whose compact claim is absent, incomplete, or invalidated stay
+  -- eligible so current visible source content can be compacted again. A
+  -- usable (non-blank) summary is part of a valid claim: legacy status='ok'
+  -- rows with empty or whitespace-only summaries (the pre-existing poison
+  -- states) reclaim like any other stale claim.
   AND (m.compact_id IS NULL OR NOT EXISTS (
-    SELECT 1 FROM bot_history_message_compacts c
-    WHERE c.id = m.compact_id AND c.status = 'ok'
-      AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL
+    SELECT 1
+    FROM bot_history_message_compact_claim_validity validity
+    JOIN bot_history_message_compacts claim_log ON claim_log.id = validity.compact_id
+    WHERE validity.compact_id = m.compact_id
+      AND validity.sources_current
+      AND NULLIF(BTRIM(claim_log.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL
   ))
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
+
+-- name: ListMessageRefsByCompactID :many
+-- Backfills identity/anchor coverage for summaries that predate persisted
+-- artifact coverage without pulling every compacted row's content, usage,
+-- or assets.
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.created_at
+FROM bot_history_messages m
+WHERE m.compact_id = $1
+ORDER BY m.created_at ASC, m.id ASC;

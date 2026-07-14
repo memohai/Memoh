@@ -2,7 +2,6 @@ package flow
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -289,61 +288,33 @@ func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.R
 		return err
 	}
 
-	loaded, err := r.loadHistoryRecords(ctx, historyScopeFallbackFromUserInputRequest(req), req.SessionID, defaultMaxContextMinutes)
-	if err != nil {
-		return err
-	}
-	loaded = pruneHistoryForGateway(loaded)
-	loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(firstNonEmpty(req.BotID, input.BotID), "", req.SessionID, req.ConversationType, "", req.ReplyTarget), loaded)
-	messages, _ := trimMessagesByTokens(r.logger, loaded, 0)
-
-	cfg := resolved.RunConfig
-	cfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(sanitizeMessages(messages)))
-	cfg.Query = ""
-	cfg.LiveToolStream = eventCh != nil
-	cfg.CanRequestUserInput = r.canDeliverUserInputWS(eventCh)
-	cfg = r.prepareRunConfig(ctx, cfg)
-
 	chatReq := conversation.ChatRequest{
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,
 		SessionID:               req.SessionID,
+		UserID:                  strings.TrimSpace(input.ActorUserID),
 		SourceChannelIdentityID: firstNonEmpty(req.ChannelIdentityID, input.ActorChannelIdentityID),
 		CurrentChannel:          req.SourcePlatform,
 		ReplyTarget:             req.ReplyTarget,
 		ConversationType:        req.ConversationType,
 		UserMessagePersisted:    true,
 	}
-
-	stream := r.agent.Stream(ctx, cfg)
-	stored := false
-	for event := range stream {
-		data, err := json.Marshal(event)
-		if err != nil {
-			continue
-		}
-		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
-			if snap, ok := extractTerminalSnapshot(data); ok {
-				if storeErr := r.persistTerminalSnapshot(
-					context.WithoutCancel(ctx),
-					chatReq,
-					resolvedContext{model: models.GetResponse{ID: resolved.ModelID}},
-					snap,
-				); storeErr != nil {
-					return storeErr
-				}
-				stored = true
-			}
-		}
-		if eventCh != nil {
-			select {
-			case eventCh <- json.RawMessage(data):
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
+	rc, err := r.prepareContinuationRunConfig(
+		ctx,
+		chatReq,
+		resolved.RunConfig,
+		historyScopeFallbackFromUserInputRequest(req),
+		compactionSummaryScope(firstNonEmpty(req.BotID, input.BotID), "", req.SessionID, req.ConversationType, "", req.ReplyTarget),
+		eventCh,
+		req.ToolCallID,
+		resolved.ContextTokenBudget,
+	)
+	if err != nil {
+		return err
 	}
-	return nil
+
+	rc.model = models.GetResponse{ID: resolved.ModelID}
+	return r.streamContinuation(ctx, chatReq, rc, eventCh)
 }
 
 func withLocalWebUserInputReplyTarget(req userinput.Request) userinput.Request {

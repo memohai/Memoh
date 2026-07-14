@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"encoding/json"
 	"testing"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -104,5 +105,36 @@ func TestRepairToolCallClosures_PreservesValidAssistantToolPair(t *testing.T) {
 	results := extractToolResultParts(repaired[1])
 	if len(results) != 1 || results[0].ToolCallID != "web_search:1" {
 		t.Fatalf("unexpected repaired tool results: %#v", results)
+	}
+}
+
+func TestRepairToolCallClosuresPreservesSourceUsage(t *testing.T) {
+	t.Parallel()
+
+	messages := sdkMessagesToModelMessages([]sdk.Message{
+		{
+			Role: sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{sdk.ToolCallPart{
+				ToolCallID: " call-1 ",
+				ToolName:   " lookup ",
+				Input:      map[string]any{},
+			}},
+		},
+		sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "wrong", Result: "ok"}),
+	})
+	messages[0].Usage = json.RawMessage(`{"inputTokens":3}`)
+	messages[1].Usage = json.RawMessage(`{"outputTokens":4}`)
+
+	repaired := repairToolCallClosures(messages, syntheticToolClosureError)
+	if len(repaired) != 2 {
+		t.Fatalf("repaired messages = %d, want 2", len(repaired))
+	}
+	if string(repaired[0].Usage) != string(messages[0].Usage) || string(repaired[1].Usage) != string(messages[1].Usage) {
+		t.Fatalf("usage changed: got %s / %s want %s / %s", repaired[0].Usage, repaired[1].Usage, messages[0].Usage, messages[1].Usage)
+	}
+	call := extractAssistantToolCallParts(repaired[0])[0]
+	result := extractToolResultParts(repaired[1])[0]
+	if call.ToolCallID != "call-1" || call.ToolName != "lookup" || result.ToolCallID != call.ToolCallID || result.ToolName != call.ToolName {
+		t.Fatalf("normalized closure mismatch: call=%#v result=%#v", call, result)
 	}
 }

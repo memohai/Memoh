@@ -3,7 +3,7 @@ package compaction
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,14 +17,17 @@ import (
 
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/models"
 )
 
 // --- stub summarizer model (intercepts the SDK HTTP call) ---------------------
 
 type stubModel struct {
-	summary string
-	calls   int
-	prompt  string // decoded text of the captured request messages
+	summary      string
+	finishReason string
+	calls        int
+	prompt       string // decoded text of the captured request messages
+	maxTokens    int
 }
 
 func (s *stubModel) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -32,9 +35,18 @@ func (s *stubModel) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.Body != nil {
 		body, _ := io.ReadAll(req.Body)
 		s.prompt = decodePromptMessages(body)
+		var wire struct {
+			MaxCompletionTokens int `json:"max_completion_tokens"`
+		}
+		_ = json.Unmarshal(body, &wire)
+		s.maxTokens = wire.MaxCompletionTokens
+	}
+	finishReason := s.finishReason
+	if finishReason == "" {
+		finishReason = "stop"
 	}
 	resp := `{"id":"stub","object":"chat.completion","created":0,"model":"stub",` +
-		`"choices":[{"index":0,"message":{"role":"assistant","content":` + jsonStr(s.summary) + `},"finish_reason":"stop"}],` +
+		`"choices":[{"index":0,"message":{"role":"assistant","content":` + jsonStr(s.summary) + `},"finish_reason":` + jsonStr(finishReason) + `}],` +
 		`"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120}}`
 	return &http.Response{
 		StatusCode: http.StatusOK,
@@ -77,53 +89,6 @@ func decodePromptMessages(body []byte) string {
 	return sb.String()
 }
 
-// --- fake Queries (only the 5 methods compaction touches) ---------------------
-
-type fakeQueries struct {
-	dbstore.Queries // embedded interface; unimplemented methods would panic if called
-	uncompacted     []sqlc.ListUncompactedMessagesBySessionRow
-	priorLogs       []sqlc.BotHistoryMessageCompact
-	completeErr     error
-	listPanic       bool
-	onComplete      func()
-
-	created   bool
-	markedIDs []pgtype.UUID
-	completed sqlc.CompleteCompactionLogParams
-}
-
-func (f *fakeQueries) CreateCompactionLog(_ context.Context, _ sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
-	f.created = true
-	return sqlc.BotHistoryMessageCompact{ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}}, nil
-}
-
-func (f *fakeQueries) ListUncompactedMessagesBySession(_ context.Context, _ pgtype.UUID) ([]sqlc.ListUncompactedMessagesBySessionRow, error) {
-	if f.listPanic {
-		panic("boom: injected query panic")
-	}
-	return f.uncompacted, nil
-}
-
-func (f *fakeQueries) ListCompactionLogsBySession(_ context.Context, _ pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
-	return f.priorLogs, nil
-}
-
-func (f *fakeQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) error {
-	f.markedIDs = append([]pgtype.UUID(nil), arg.Column2...)
-	return nil
-}
-
-func (f *fakeQueries) CompleteCompactionLog(_ context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
-	if f.onComplete != nil {
-		f.onComplete()
-	}
-	if f.completeErr != nil {
-		return sqlc.BotHistoryMessageCompact{}, f.completeErr
-	}
-	f.completed = arg
-	return sqlc.BotHistoryMessageCompact{ID: arg.ID, Status: arg.Status, Summary: arg.Summary}, nil
-}
-
 // --- harness ------------------------------------------------------------------
 
 func newMachineryService(q dbstore.Queries) *Service {
@@ -132,14 +97,16 @@ func newMachineryService(q dbstore.Queries) *Service {
 
 func machineryConfig(stub *stubModel, targetTokens int) TriggerConfig {
 	return TriggerConfig{
-		BotID:        uuid.NewString(),
-		SessionID:    uuid.NewString(),
-		ModelID:      "stub-model",
-		ClientType:   "openai-completions",
-		APIKey:       "test",
-		BaseURL:      "http://stub.invalid",
-		HTTPClient:   &http.Client{Transport: stub},
-		TargetTokens: targetTokens,
+		BotID:              uuid.NewString(),
+		SessionID:          uuid.NewString(),
+		ModelID:            "stub-model",
+		ClientType:         "openai-completions",
+		APIKey:             "test",
+		BaseURL:            "http://stub.invalid",
+		HTTPClient:         &http.Client{Transport: stub},
+		TargetTokens:       targetTokens,
+		ContextTokenBudget: 32_000,
+		MaxCompactTokens:   28_800,
 	}
 }
 
@@ -157,7 +124,7 @@ func idSet(ids []pgtype.UUID) map[pgtype.UUID]bool {
 func machineryCorpus(t *testing.T) []sqlc.ListUncompactedMessagesBySessionRow {
 	t.Helper()
 	b64 := strings.Repeat("QUJD", 100) // 400 base64 chars
-	return []sqlc.ListUncompactedMessagesBySessionRow{
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
 		mkRow(t, "user", `[{"type":"text","text":"deploy please"}]`, 100),                                                                                          // 0
 		mkRow(t, "assistant", `[{"type":"text","text":"on it"},{"type":"tool-call","toolCallId":"A","toolName":"screenshot","input":{}}]`, 100),                    // 1 call A
 		mkRow(t, "tool", `[{"type":"tool-result","toolCallId":"A","toolName":"screenshot","result":{"mime":"image/png","data":"`+b64+`"}}]`, 100),                  // 2 result A (base64)
@@ -169,6 +136,10 @@ func machineryCorpus(t *testing.T) []sqlc.ListUncompactedMessagesBySessionRow {
 		mkRow(t, "user", `[{"type":"text","text":"recent question"}]`, 100),                                                                                        // 8
 		mkRow(t, "assistant", `[{"type":"text","text":"recent answer"}]`, 100),                                                                                     // 9
 	}
+	for index := range rows {
+		rows[index].CreatedAt = pgtype.Timestamptz{Time: time.UnixMilli(int64(index+10) * 1000), Valid: true}
+	}
+	return rows
 }
 
 // --- tests --------------------------------------------------------------------
@@ -208,8 +179,11 @@ func TestDoCompactionMarksToolAwareWindowAndRendersCleanPrompt(t *testing.T) {
 	if !marked[rows[6].ID] {
 		t.Fatalf("tool result B must be pulled into the compact set with its call")
 	}
-	if q.completed.Status != "ok" || q.completed.Summary != "SUMMARY-OK" || q.completed.MessageCount != 7 {
-		t.Fatalf("complete log = status=%q summary=%q count=%d", q.completed.Status, q.completed.Summary, q.completed.MessageCount)
+	if q.finalizeCalls != 1 || q.finalized.Summary != "SUMMARY-OK" || len(q.finalized.MessageIds) != 7 {
+		t.Fatalf("finalization = calls=%d summary=%q count=%d", q.finalizeCalls, q.finalized.Summary, len(q.finalized.MessageIds))
+	}
+	if q.completed.Status != "" || q.legacyMarkCalled {
+		t.Fatalf("successful finalization used split persistence: complete=%q legacy_mark=%v", q.completed.Status, q.legacyMarkCalled)
 	}
 
 	// The summarizer prompt must carry clean rendered outcomes, no media, no noise.
@@ -227,33 +201,23 @@ func TestDoCompactionMarksToolAwareWindowAndRendersCleanPrompt(t *testing.T) {
 	}
 }
 
-func TestDoCompactionInjectsPriorContext(t *testing.T) {
-	rows := machineryCorpus(t)
-	q := &fakeQueries{
-		uncompacted: rows,
-		priorLogs:   []sqlc.BotHistoryMessageCompact{{Summary: "earlier-segment-summary", Status: "ok"}},
-	}
-	stub := &stubModel{summary: "S2"}
-	svc := newMachineryService(q)
-
-	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450)); err != nil {
-		t.Fatalf("RunCompactionSync: %v", err)
-	}
-	if !strings.Contains(stub.prompt, "prior_context") || !strings.Contains(stub.prompt, "earlier-segment-summary") {
-		t.Fatalf("prior summary not injected as prior context:\n%s", stub.prompt)
-	}
-}
-
 func TestDoCompactionSkipsWhitespaceOnlyPriorSummaries(t *testing.T) {
 	rows := machineryCorpus(t)
+	stub := &stubModel{summary: "S3"}
+	cfg := machineryConfig(stub, 450)
 	q := &fakeQueries{
 		uncompacted: rows,
-		priorLogs:   []sqlc.BotHistoryMessageCompact{{Summary: "  \n\t", Status: "ok"}},
+		priorLogs: []sqlc.BotHistoryMessageCompact{{
+			ID:        pgtype.UUID{Bytes: uuid.New(), Valid: true},
+			BotID:     pgtype.UUID{Bytes: uuid.MustParse(cfg.BotID), Valid: true},
+			SessionID: pgtype.UUID{Bytes: uuid.MustParse(cfg.SessionID), Valid: true},
+			Summary:   "  \n\t",
+			Status:    "ok",
+		}},
 	}
-	stub := &stubModel{summary: "S3"}
 	svc := newMachineryService(q)
 
-	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450)); err != nil {
+	if _, err := svc.RunCompactionSync(context.Background(), cfg); err != nil {
 		t.Fatalf("RunCompactionSync: %v", err)
 	}
 	if strings.Contains(stub.prompt, "The following are summaries of earlier parts") {
@@ -265,39 +229,6 @@ func TestDoCompactionSkipsWhitespaceOnlyPriorSummaries(t *testing.T) {
 // tool exchange with more minimal entries than MaxCompactTokens can hold:
 // the progress guarantee still compacts it, but the overshoot must be
 // surfaced instead of silently trusted as capped.
-func TestDoCompactionWarnsWhenEntryFloorsExceedBudget(t *testing.T) {
-	const fanout = 40
-	callParts := make([]string, 0, fanout)
-	for i := 0; i < fanout; i++ {
-		callParts = append(callParts, fmt.Sprintf(`{"type":"tool-call","toolCallId":"c%d","toolName":"probe","input":{}}`, i))
-	}
-	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "assistant", "["+strings.Join(callParts, ",")+"]", 100),
-	}
-	for i := 0; i < fanout; i++ {
-		rows = append(rows, mkRow(t, "tool", fmt.Sprintf(`[{"type":"tool-result","toolCallId":"c%d","toolName":"probe","output":{"type":"text","value":"ok"}}]`, i), 100))
-	}
-	rows = append(rows, mkRow(t, "user", `[{"type":"text","text":"recent question"}]`, 100))
-
-	q := &fakeQueries{uncompacted: rows}
-	stub := &stubModel{summary: "SUMMARY-OK"}
-	var logBuf strings.Builder
-	svc := NewService(slog.New(slog.NewTextHandler(&logBuf, nil)), q)
-
-	cfg := machineryConfig(stub, 100)
-	cfg.MaxCompactTokens = 40
-
-	res, err := svc.RunCompactionSync(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("RunCompactionSync: %v", err)
-	}
-	if res.Status != StatusOK {
-		t.Fatalf("the oversized exchange must still compact (progress guarantee), got %q", res.Status)
-	}
-	if !strings.Contains(logBuf.String(), "entry floors exceed the budget") {
-		t.Fatalf("budget overshoot not surfaced in logs:\n%s", logBuf.String())
-	}
-}
 
 func TestDoCompactionAllEmptyWindowSkipsModelAndMarking(t *testing.T) {
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
@@ -354,7 +285,7 @@ func TestDoCompactionMarksOnlyContiguousRunAcrossEmptyMiddleRow(t *testing.T) {
 	// order. doCompaction must mark only the first contiguous run (row 0) and
 	// leave row 2 for a later pass.
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `[{"type":"text","text":"old question"}]`, 100),       // 0
+		mkRow(t, "user", jsonStr(strings.Repeat("old question ", 20)), 100),    // 0
 		mkRow(t, "assistant", `[{"type":"reasoning","text":"thinking"}]`, 100), // 1 renders empty
 		mkRow(t, "assistant", `[{"type":"text","text":"old answer"}]`, 100),    // 2
 		mkRow(t, "user", `[{"type":"text","text":"recent question"}]`, 100),    // 3 kept
@@ -370,8 +301,8 @@ func TestDoCompactionMarksOnlyContiguousRunAcrossEmptyMiddleRow(t *testing.T) {
 	if len(q.markedIDs) != 1 || q.markedIDs[0] != rows[0].ID {
 		t.Fatalf("marked = %d ids, want only the contiguous leading run [row 0]", len(q.markedIDs))
 	}
-	if q.completed.Status != "ok" || q.completed.MessageCount != 1 {
-		t.Fatalf("complete log = status=%q count=%d, want ok/1", q.completed.Status, q.completed.MessageCount)
+	if q.finalizeCalls != 1 || len(q.finalized.MessageIds) != 1 {
+		t.Fatalf("finalization = calls=%d count=%d, want 1/1", q.finalizeCalls, len(q.finalized.MessageIds))
 	}
 }
 
@@ -521,5 +452,90 @@ func TestRunCompactionSyncCanceledWaiterDegradesToNoop(t *testing.T) {
 	}
 	if res.Status != StatusOK {
 		t.Fatalf("session must be usable after the owner completes, got %q", res.Status)
+	}
+}
+
+func TestDoCompactionSendsSummaryOutputLimit(t *testing.T) {
+	t.Parallel()
+
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	stub := &stubModel{summary: "SUMMARY-OK"}
+	cfg := machineryConfig(stub, 450)
+	cfg.ContextTokenBudget = 10_000
+
+	if _, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg); err != nil {
+		t.Fatalf("RunCompactionSync: %v", err)
+	}
+	if stub.maxTokens != 1_000 {
+		t.Fatalf("max_completion_tokens = %d, want 1000", stub.maxTokens)
+	}
+}
+
+func TestDoCompactionRejectsUnknownContextBudgetBeforeAttempt(t *testing.T) {
+	t.Parallel()
+
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	stub := &stubModel{summary: "unused"}
+	cfg := machineryConfig(stub, 450)
+	cfg.ContextTokenBudget = 0
+
+	_, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg)
+	if !errors.Is(err, errCompactionBudgetUnknown) {
+		t.Fatalf("RunCompactionSync error = %v, want errCompactionBudgetUnknown", err)
+	}
+	if stub.calls != 0 || q.created || len(q.markedIDs) != 0 {
+		t.Fatalf("unknown budget started attempt: calls=%d created=%v marked=%d", stub.calls, q.created, len(q.markedIDs))
+	}
+}
+
+func TestDoCompactionRejectsProviderWithoutOutputLimitBeforeAttempt(t *testing.T) {
+	t.Parallel()
+
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	stub := &stubModel{summary: "unused"}
+	cfg := machineryConfig(stub, 450)
+	cfg.ClientType = string(models.ClientTypeOpenAICodex)
+
+	_, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg)
+	if !errors.Is(err, errCompactionOutputLimitUnsupported) {
+		t.Fatalf("RunCompactionSync error = %v, want errCompactionOutputLimitUnsupported", err)
+	}
+	if stub.calls != 0 || q.created || len(q.markedIDs) != 0 {
+		t.Fatalf("unsupported output limit started attempt: calls=%d created=%v marked=%d", stub.calls, q.created, len(q.markedIDs))
+	}
+}
+
+func TestDoCompactionRejectsTruncatedSummaryWithoutMarking(t *testing.T) {
+	t.Parallel()
+
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	stub := &stubModel{summary: "partial summary", finishReason: "length"}
+
+	_, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 450))
+	if !errors.Is(err, errIncompleteSummary) {
+		t.Fatalf("RunCompactionSync error = %v, want errIncompleteSummary", err)
+	}
+	if len(q.markedIDs) != 0 || !q.created || q.completed.Status != "error" {
+		t.Fatalf("truncated summary persisted: marked=%d created=%v status=%q", len(q.markedIDs), q.created, q.completed.Status)
+	}
+}
+
+func TestDoCompactionRejectsNonShrinkingSummaryWithoutMarking(t *testing.T) {
+	t.Parallel()
+
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", jsonStr(strings.Repeat("raw context ", 100)), 0),
+		mkRow(t, "assistant", jsonStr(strings.Repeat("raw answer ", 100)), 0),
+		mkRow(t, "user", jsonStr("current question"), 0),
+	}
+	q := &fakeQueries{uncompacted: rows}
+	stub := &stubModel{summary: strings.Repeat("summary expands instead of shrinking ", 200)}
+
+	_, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 1))
+	if !errors.Is(err, errIneffectiveSummary) {
+		t.Fatalf("RunCompactionSync error = %v, want errIneffectiveSummary", err)
+	}
+	if len(q.markedIDs) != 0 || !q.created || q.completed.Status != "error" {
+		t.Fatalf("non-shrinking summary persisted: marked=%d created=%v status=%q", len(q.markedIDs), q.created, q.completed.Status)
 	}
 }

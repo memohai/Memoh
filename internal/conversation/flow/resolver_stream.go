@@ -50,6 +50,25 @@ func hasVisibleAgentStreamOutput(event agentpkg.StreamEvent) bool {
 	}
 }
 
+func shouldForwardAgentStreamEvent(rc resolvedContext, event agentpkg.StreamEvent) bool {
+	return event.Type != agentpkg.EventError || rc.promptMaterializationError() == nil
+}
+
+func finishStreamPostPersist(
+	ctx context.Context,
+	rc resolvedContext,
+	persisted []messagepkg.Message,
+	postPersist func(context.Context, []messagepkg.Message) error,
+) error {
+	if promptErr := rc.promptMaterializationError(); promptErr != nil {
+		return promptErr
+	}
+	if postPersist == nil {
+		return nil
+	}
+	return postPersist(context.WithoutCancel(ctx), persisted)
+}
+
 // extractTerminalSnapshot decodes a terminal stream event payload into the
 // raw SDK messages plus auxiliary metadata. Returns ok=false when the event
 // has no usable messages.
@@ -139,9 +158,10 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 			errCh <- err
 			return
 		}
+		defer rc.closeInjectionBridge()
 		streamReq.Query = rc.query
 
-		go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), streamReq, streamReq.RawQuery)
+		go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), withoutInjectionCapabilities(streamReq), streamReq.RawQuery)
 
 		cfg := rc.runConfig
 		cfg.LiveToolStream = true
@@ -206,7 +226,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 			// the client disconnects we keep draining eventCh so the agent
 			// goroutine can finish and the terminal event (with partial
 			// messages) is captured for persistence above.
-			if !clientGone {
+			if !clientGone && shouldForwardAgentStreamEvent(rc, event) {
 				select {
 				case chunkCh <- conversation.StreamChunk(data):
 				case <-ctx.Done():
@@ -220,15 +240,11 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		// snapshot are treated as unsent so the Web UI can restore the draft
 		// without polluting history.
 		if !stored {
-			switch {
-			case hasSnapshot:
-				_ = r.persistPartialResult(ctx, streamReq, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
-			default:
-				r.logger.Info("skip persisting failed startup stream",
-					slog.String("bot_id", streamReq.BotID),
-					slog.String("chat_id", streamReq.ChatID),
-				)
+			var partialMessages []sdk.Message
+			if hasSnapshot {
+				partialMessages = lastSnapshot.sdkMessages
 			}
+			_ = r.persistPartialResult(ctx, streamReq, rc, partialMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
 		}
 
 		if idleCancel.DidFire() {
@@ -251,6 +267,10 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 					}
 				}
 			}
+		}
+
+		if promptErr := rc.promptMaterializationError(); promptErr != nil {
+			errCh <- promptErr
 		}
 	}()
 	return chunkCh, errCh
@@ -333,9 +353,10 @@ func (r *Resolver) streamChatWSResultWithHooks(
 		)
 		return nil, fmt.Errorf("resolve: %w", err)
 	}
+	defer rc.closeInjectionBridge()
 	req.Query = rc.query
 
-	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
+	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), withoutInjectionCapabilities(req), req.RawQuery)
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -366,7 +387,7 @@ func (r *Resolver) streamChatWSResultWithHooks(
 	var toolCallCount int
 	var hasVisibleOutput bool
 	var persistedMessages []messagepkg.Message
-	postPersistApplied := false
+	var terminalEvent WSStreamEvent
 	for event := range agentEventCh {
 		idleCancel.Reset() // each event resets the idle timer
 
@@ -410,14 +431,11 @@ func (r *Resolver) streamChatWSResultWithHooks(
 			}
 		}
 
-		if event.IsTerminal() && postPersist != nil && !postPersistApplied {
-			if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
-				return persistedMessages, err
+		if !clientGone && shouldForwardAgentStreamEvent(rc, event) {
+			if event.IsTerminal() {
+				terminalEvent = append(terminalEvent[:0], data...)
+				continue
 			}
-			postPersistApplied = true
-		}
-
-		if !clientGone {
 			select {
 			case eventCh <- json.RawMessage(data):
 			case <-ctx.Done():
@@ -428,15 +446,11 @@ func (r *Resolver) streamChatWSResultWithHooks(
 
 	// Intermediate persistence on abort/error
 	if !stored {
-		switch {
-		case hasSnapshot:
-			persistedMessages = r.persistPartialResult(ctx, req, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
-		default:
-			r.logger.Info("skip persisting failed startup ws stream",
-				slog.String("bot_id", req.BotID),
-				slog.String("chat_id", req.ChatID),
-			)
+		var partialMessages []sdk.Message
+		if hasSnapshot {
+			partialMessages = lastSnapshot.sdkMessages
 		}
+		persistedMessages = r.persistPartialResult(ctx, req, rc, partialMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
 	}
 
 	if idleCancel.DidFire() {
@@ -461,9 +475,13 @@ func (r *Resolver) streamChatWSResultWithHooks(
 		}
 	}
 
-	if postPersist != nil && !postPersistApplied {
-		if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
-			return persistedMessages, err
+	if err := finishStreamPostPersist(ctx, rc, persistedMessages, postPersist); err != nil {
+		return persistedMessages, err
+	}
+	if !clientGone && len(terminalEvent) > 0 {
+		select {
+		case eventCh <- terminalEvent:
+		case <-ctx.Done():
 		}
 	}
 
@@ -471,14 +489,32 @@ func (r *Resolver) streamChatWSResultWithHooks(
 }
 
 // persistTerminalSnapshot stores the SDK messages produced by an agent run
-// (or partial run) into bot history. Triggers compaction when usage data
-// indicates the context is large.
+// (or partial run) into bot history and evaluates raw history pressure.
 func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, snap terminalSnapshot) error {
 	_, err := r.persistTerminalSnapshotResult(ctx, req, rc, snap)
 	return err
 }
 
-func (r *Resolver) persistTerminalSnapshotResult(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, snap terminalSnapshot) ([]messagepkg.Message, error) {
+func (r *Resolver) persistTerminalSnapshotResult(
+	ctx context.Context,
+	req conversation.ChatRequest,
+	rc resolvedContext,
+	snap terminalSnapshot,
+) (persisted []messagepkg.Message, err error) {
+	defer func() {
+		if err != nil {
+			return
+		}
+		if pressure, known, claimed := rc.claimCompactionPressure(); claimed && known && pressure > 0 {
+			go r.maybeCompact(
+				context.WithoutCancel(ctx),
+				withoutInjectionCapabilities(req),
+				withoutInjectionRuntime(rc),
+				pressure,
+			)
+		}
+	}()
+
 	outputMessages := sdkMessagesToModelMessages(snap.sdkMessages)
 	if snap.aborted && !snap.visibleOutput {
 		r.logger.Info("skip persisting aborted terminal snapshot before visible output",
@@ -503,19 +539,18 @@ func (r *Resolver) persistTerminalSnapshotResult(ctx context.Context, req conver
 	}
 	roundMessages := prependTurnUserMessage(storeReq, outputMessages)
 
-	if rc.injectedRecords != nil && len(*rc.injectedRecords) > 0 {
-		roundMessages = interleaveInjectedMessages(roundMessages, *rc.injectedRecords)
+	if rc.injectionReceipts != nil {
+		injections := rc.injectionReceipts.recordsSnapshot()
+		if len(injections) > 0 {
+			roundMessages = interleaveInjectedMessages(roundMessages, injections)
+		}
 	}
 
-	persisted, err := r.storeRoundWithOptionsResult(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
+	persisted, err = r.storeRoundWithOptionsResult(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
 		AllowPendingToolCalls: snap.deferredToolID != "",
 	})
 	if err != nil {
 		return nil, err
-	}
-
-	if inputTokens := extractInputTokensFromUsage(snap.usage); inputTokens > 0 {
-		go r.maybeCompact(context.WithoutCancel(ctx), req, rc, inputTokens)
 	}
 
 	return persisted, nil
@@ -567,12 +602,6 @@ func (r *Resolver) persistPartialResult(
 				slog.Int("partial_messages", len(partialMessages)),
 				slog.Bool("idle_timeout", wasIdleTimeout),
 			)
-			// Trigger compaction on the failure path so that oversized
-			// contexts don't deadlock (where the LLM can never succeed and
-			// therefore compaction never fires).
-			if rc.estimatedTokens > 0 {
-				r.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
-			}
 			return persisted
 		}
 		r.logger.Error("failed to persist partial agent messages",
@@ -588,8 +617,10 @@ func (r *Resolver) persistPartialResult(
 		slog.Bool("visible_output", hasVisibleOutput),
 	)
 
-	if rc.estimatedTokens > 0 {
-		r.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
+	// Trigger compaction on the failure path so oversized raw history cannot
+	// deadlock a session before the provider emits a persistable snapshot.
+	if pressure, known, claimed := rc.claimCompactionPressure(); claimed && known && pressure > 0 {
+		r.maybeCompact(persistCtx, req, rc, pressure)
 	}
 	return nil
 }
@@ -609,31 +640,21 @@ func interleaveInjectedMessages(round []conversation.ModelMessage, injections []
 	for i, msg := range round {
 		result = append(result, msg)
 		for injIdx < len(injections) && injections[injIdx].InsertAfter == i {
-			result = append(result, conversation.ModelMessage{
-				Role:    "user",
-				Content: conversation.NewTextContent(injections[injIdx].HeaderifiedText),
-			})
+			result = append(result, injectedModelMessage(injections[injIdx]))
 			injIdx++
 		}
 	}
 	for ; injIdx < len(injections); injIdx++ {
-		result = append(result, conversation.ModelMessage{
-			Role:    "user",
-			Content: conversation.NewTextContent(injections[injIdx].HeaderifiedText),
-		})
+		result = append(result, injectedModelMessage(injections[injIdx]))
 	}
 	return result
 }
 
-func extractInputTokensFromUsage(raw json.RawMessage) int {
-	if len(raw) == 0 {
-		return 0
+func injectedModelMessage(record conversation.InjectedMessageRecord) conversation.ModelMessage {
+	receipt := record.Receipt
+	return conversation.ModelMessage{
+		Role:        "user",
+		Content:     conversation.NewTextContent(record.ModelText),
+		UserReceipt: &receipt,
 	}
-	var u struct {
-		InputTokens int `json:"inputTokens"`
-	}
-	if json.Unmarshal(raw, &u) != nil {
-		return 0
-	}
-	return u.InputTokens
 }

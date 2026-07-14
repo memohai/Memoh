@@ -149,6 +149,9 @@ func TestResolveRunConfigSkipsModelResolutionForACPRuntime(t *testing.T) {
 	if got.ModelID != "" || got.RunConfig.Model != nil {
 		t.Fatalf("ACP runtime should not resolve a model, model_id=%q model=%#v", got.ModelID, got.RunConfig.Model)
 	}
+	if got.ContextTokenBudget != 0 || got.DirectDiscussPromptPreparer == nil {
+		t.Fatalf("ACP prompt capability = budget:%d preparer:%#v, want explicit unknown budget and preparer", got.ContextTokenBudget, got.DirectDiscussPromptPreparer)
+	}
 }
 
 func TestApprovalResultMetadata(t *testing.T) {

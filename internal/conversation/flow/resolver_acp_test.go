@@ -23,6 +23,7 @@ import (
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	"github.com/memohai/memoh/internal/messagesource"
 	"github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/toolapproval"
@@ -33,6 +34,64 @@ const (
 	storeRoundBotID            = "11111111-1111-1111-1111-111111111111"
 	storeRoundMemoryProviderID = "22222222-2222-2222-2222-222222222222"
 )
+
+func TestPersistACPLeadingUserMessageUsesSealedReceipt(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	origin := mustStoreEnvelope(t, messagesource.EnvelopeInput{
+		SenderChannelIdentityID: "11111111-1111-1111-1111-111111111111",
+		SenderUserID:            "22222222-2222-2222-2222-222222222222",
+		ExternalMessageID:       "captured-external",
+		SourceReplyToMessageID:  "captured-reply",
+		EventID:                 "33333333-3333-3333-3333-333333333333",
+		Source: messagesource.V1Candidate{
+			SenderDisplayName: "Alice", Platform: "telegram", ConversationType: "private", ConversationName: "Alice Chat",
+		},
+	})
+	receipt := &conversation.UserMessageReceipt{
+		ID:          "receipt-1",
+		DisplayText: "captured display",
+		Origin:      origin,
+		Metadata:    map[string]any{"route_id": "captured-route", "platform": "telegram"},
+		Attachments: []conversation.ChatAttachment{{ContentHash: "captured-asset", Mime: "image/png"}},
+	}
+	got := resolver.persistACPLeadingUserMessage(context.Background(), conversation.ChatRequest{
+		BotID:                   storeRoundBotID,
+		SessionID:               "44444444-4444-4444-4444-444444444444",
+		Query:                   "model query",
+		RawQuery:                "legacy display",
+		SourceChannelIdentityID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+		UserID:                  "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+		ExternalMessageID:       "legacy-external",
+		SourceReplyToMessageID:  "legacy-reply",
+		EventID:                 "cccccccc-cccc-cccc-cccc-cccccccccccc",
+		RouteID:                 "legacy-route",
+		CurrentChannel:          "slack",
+		UserMessageKind:         conversation.UserMessageKindSkillActivation,
+		UserReceipt:             receipt,
+		Attachments:             []conversation.ChatAttachment{{ContentHash: "legacy-asset"}},
+	})
+
+	if !got.UserMessagePersisted || len(messages.persisted) != 1 {
+		t.Fatalf("ACP leading persistence = %#v, inputs=%d", got, len(messages.persisted))
+	}
+	input := messages.persisted[0]
+	values := origin.Values()
+	if input.SenderChannelIdentityID != values.SenderChannelIdentityID || input.SenderUserID != values.SenderUserID ||
+		input.ExternalMessageID != values.ExternalMessageID || input.SourceReplyToMessageID != values.SourceReplyToMessageID ||
+		input.EventID != values.EventID || input.SourceContext != values.Context || input.DisplayText != receipt.DisplayText {
+		t.Fatalf("ACP leading provenance = %#v", input)
+	}
+	if len(input.Assets) != 1 || input.Assets[0].ContentHash != "captured-asset" {
+		t.Fatalf("ACP leading assets = %#v", input.Assets)
+	}
+	if input.Metadata["route_id"] != "captured-route" || input.Metadata["platform"] != "telegram" ||
+		input.Metadata["user_message_kind"] != conversation.UserMessageKindSkillActivation {
+		t.Fatalf("ACP leading metadata = %#v", input.Metadata)
+	}
+}
 
 func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 	t.Parallel()

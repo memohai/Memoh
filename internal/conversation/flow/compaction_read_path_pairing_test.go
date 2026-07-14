@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -27,6 +28,14 @@ type pairingQueries struct {
 	markedIDs   []pgtype.UUID
 }
 
+func (*pairingQueries) ListInvalidCompactionArtifactSeedsBySession(context.Context, sqlc.ListInvalidCompactionArtifactSeedsBySessionParams) ([]sqlc.ListInvalidCompactionArtifactSeedsBySessionRow, error) {
+	return nil, nil
+}
+
+func (*pairingQueries) ListCompactionArtifactLineageMetadataBySession(context.Context, pgtype.UUID) ([]sqlc.ListCompactionArtifactLineageMetadataBySessionRow, error) {
+	return nil, nil
+}
+
 func (f *pairingQueries) ListUncompactedMessagesBySession(context.Context, pgtype.UUID) ([]sqlc.ListUncompactedMessagesBySessionRow, error) {
 	return f.uncompacted, nil
 }
@@ -35,8 +44,39 @@ func (*pairingQueries) ListCompactionLogsBySession(context.Context, pgtype.UUID)
 	return nil, nil
 }
 
-func (f *pairingQueries) CreateCompactionLog(context.Context, sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
-	return sqlc.BotHistoryMessageCompact{ID: f.logID}, nil
+func (*pairingQueries) ListCompactionArtifactLineageBySession(context.Context, pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
+	return nil, nil
+}
+
+func (*pairingQueries) ListMessageAssetsBatch(context.Context, []pgtype.UUID) ([]sqlc.ListMessageAssetsBatchRow, error) {
+	return nil, nil
+}
+
+func (f *pairingQueries) CreateCompactionLog(_ context.Context, arg sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
+	if arg.ID.Valid {
+		f.logID = arg.ID
+	}
+	return sqlc.BotHistoryMessageCompact{
+		ID:              f.logID,
+		BotID:           arg.BotID,
+		SessionID:       arg.SessionID,
+		Status:          "pending",
+		ArtifactVersion: 1,
+		Coverage:        json.RawMessage(`[]`),
+		StartedAt:       pgtype.Timestamptz{Valid: true},
+	}, nil
+}
+
+func (f *pairingQueries) FinalizeCompactionArtifact(_ context.Context, arg sqlc.FinalizeCompactionArtifactParams) (sqlc.FinalizeCompactionArtifactRow, error) {
+	f.markedIDs = append([]pgtype.UUID(nil), arg.MessageIds...)
+	count := int32(len(arg.MessageIds)) //nolint:gosec // test corpus is bounded
+	return sqlc.FinalizeCompactionArtifactRow{
+		Finalized:      true,
+		Status:         "ok",
+		RequestedCount: count,
+		MatchedCount:   count,
+		ClaimedCount:   count,
+	}, nil
 }
 
 func (f *pairingQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) error {
@@ -64,10 +104,11 @@ func (s pairingSummarizer) RoundTrip(*http.Request) (*http.Response, error) {
 func pairingRow(t *testing.T, role, content string) sqlc.ListUncompactedMessagesBySessionRow {
 	t.Helper()
 	return sqlc.ListUncompactedMessagesBySessionRow{
-		ID:      pgtype.UUID{Bytes: uuid.New(), Valid: true},
-		Role:    role,
-		Content: []byte(content),
-		Usage:   []byte(`{"outputTokens":100}`),
+		ID:            pgtype.UUID{Bytes: uuid.New(), Valid: true},
+		Role:          role,
+		Content:       []byte(content),
+		Usage:         []byte(`{"outputTokens":100}`),
+		SourceVersion: "1",
 	}
 }
 
@@ -82,8 +123,8 @@ func TestSelectorToReadPathPreservesOrderEndToEnd(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		pairingRow(t, "user", `"old q"`),
-		pairingRow(t, "assistant", `"old a"`),
+		pairingRow(t, "user", `"old question repeated for replay budget, old question repeated for replay budget, old question repeated"`),
+		pairingRow(t, "assistant", `"old answer repeated for replay budget, old answer repeated for replay budget, old answer repeated ok"`),
 		pairingRow(t, "assistant", `[{"type":"tool-call","toolCallId":"ask-1","toolName":"ask_user","input":{"questions":[]}}]`),
 		pairingRow(t, "tool", `[{"type":"tool-result","toolCallId":"ask-1","toolName":"ask_user","output":"answered"}]`),
 		pairingRow(t, "user", `"mid q"`),
@@ -96,14 +137,15 @@ func TestSelectorToReadPathPreservesOrderEndToEnd(t *testing.T) {
 	svc := compaction.NewService(slog.New(slog.DiscardHandler), q)
 
 	res, err := svc.RunCompactionSync(context.Background(), compaction.TriggerConfig{
-		BotID:        uuid.NewString(),
-		SessionID:    uuid.NewString(),
-		ModelID:      "stub-model",
-		ClientType:   "openai-completions",
-		APIKey:       "test",
-		BaseURL:      "http://stub.invalid",
-		HTTPClient:   &http.Client{Transport: pairingSummarizer{summary: "condensed old exchange"}},
-		TargetTokens: 200,
+		BotID:              uuid.NewString(),
+		SessionID:          uuid.NewString(),
+		ModelID:            "stub-model",
+		ClientType:         "openai-completions",
+		APIKey:             "test",
+		BaseURL:            "http://stub.invalid",
+		HTTPClient:         &http.Client{Transport: pairingSummarizer{summary: "condensed old exchange"}},
+		TargetTokens:       200,
+		ContextTokenBudget: 32_000,
 	})
 	if err != nil {
 		t.Fatalf("RunCompactionSync: %v", err)

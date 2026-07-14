@@ -2,6 +2,7 @@ package compaction
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -10,6 +11,7 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/historyfrag"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	"github.com/memohai/memoh/internal/messagesource"
 )
 
 // itemsFromRows classifies each uncompacted row into a typed CompactionCandidate.
@@ -53,6 +55,46 @@ func itemsFromRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]Compactio
 	return items, barrierCount
 }
 
+func candidatesWithAssets(items []CompactionCandidate, rows []sqlc.ListUncompactedMessagesBySessionRow, assetRows []sqlc.ListMessageAssetsBatchRow) ([]CompactionCandidate, error) {
+	rowByID := make(map[pgtype.UUID]sqlc.ListUncompactedMessagesBySessionRow, len(rows))
+	for _, row := range rows {
+		rowByID[row.ID] = row
+	}
+	assets := assetsByMessageID(assetRows)
+	out := append([]CompactionCandidate(nil), items...)
+	for i := range out {
+		if out[i].Record.Ref.ID == "" {
+			continue
+		}
+		row, ok := rowByID[out[i].ID]
+		if !ok {
+			return nil, fmt.Errorf("compaction candidate %s missing source row", formatUUID(out[i].ID))
+		}
+		msg := rowToMessage(row)
+		msg.Assets = assets[row.ID]
+		record, err := historyfrag.FromDBMessage(msg, rowScopeFallback(row))
+		if err != nil {
+			return nil, fmt.Errorf("rebuild compaction candidate %s with assets: %w", formatUUID(out[i].ID), err)
+		}
+		out[i].Record = record
+	}
+	return out, nil
+}
+
+func assetsByMessageID(rows []sqlc.ListMessageAssetsBatchRow) map[pgtype.UUID][]messagepkg.MessageAsset {
+	assets := make(map[pgtype.UUID][]messagepkg.MessageAsset)
+	for _, row := range rows {
+		assets[row.MessageID] = append(assets[row.MessageID], messagepkg.MessageAsset{
+			ContentHash: strings.TrimSpace(row.ContentHash),
+			Role:        strings.TrimSpace(row.Role),
+			Ordinal:     int(row.Ordinal),
+			Name:        strings.TrimSpace(row.Name),
+			Metadata:    metadataMap(row.Metadata),
+		})
+	}
+	return assets
+}
+
 func rawToolShape(row sqlc.ListUncompactedMessagesBySessionRow) (preserveToolClosure, toolResult bool) {
 	toolResult = strings.EqualFold(strings.TrimSpace(row.Role), "tool")
 	if toolResult {
@@ -91,6 +133,7 @@ func rowToMessage(row sqlc.ListUncompactedMessagesBySessionRow) messagepkg.Messa
 		SenderDisplayName:       textValue(row.SenderDisplayName),
 		SenderAvatarURL:         textValue(row.SenderAvatarUrl),
 		Platform:                textValue(row.Platform),
+		SourceContext:           messagesource.DecodeOrInvalid(row.SourceContext),
 		ExternalMessageID:       textValue(row.ExternalMessageID),
 		SourceReplyToMessageID:  textValue(row.SourceReplyToMessageID),
 		Role:                    row.Role,

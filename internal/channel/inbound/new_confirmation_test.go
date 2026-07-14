@@ -204,7 +204,9 @@ func TestHandleNewSessionCommandCancelsActiveStream(t *testing.T) {
 		sessionEnsurer: ensurer,
 	}
 	cancelled := make(chan struct{})
-	p.activeStreams.Store("bot-1:"+routeID, context.CancelFunc(func() { close(cancelled) }))
+	if _, accepted := p.activeStreams.Register("bot-1:"+routeID, "old-session", context.CancelFunc(func() { close(cancelled) })); !accepted {
+		t.Fatal("active stream registration was rejected")
+	}
 
 	sender := &fakeReplySender{}
 	msg := channel.InboundMessage{
@@ -228,7 +230,7 @@ func TestHandleNewSessionCommandCancelsActiveStream(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("/new did not cancel the active stream for the route")
 	}
-	if _, ok := p.activeStreams.Load("bot-1:" + routeID); ok {
+	if got := p.activeStreams.Count("bot-1:" + routeID); got != 0 {
 		t.Fatal("active stream remained registered after /new")
 	}
 }

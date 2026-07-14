@@ -80,6 +80,7 @@ func (r *Resolver) isACPAgentSession(ctx context.Context, req conversation.ChatR
 }
 
 func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRequest, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) error {
+	req = withoutInjectionCapabilities(req)
 	if r.acpPool == nil {
 		return errors.New("ACP session pool is not configured")
 	}
@@ -127,7 +128,7 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 	}
 	req.Query = strings.TrimSpace(req.Query)
 	req = r.persistACPLeadingUserMessage(context.WithoutCancel(ctx), req)
-	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
+	go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), withoutInjectionCapabilities(req), req.RawQuery)
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -345,6 +346,7 @@ func mergeACPRuntimeMetadata(metadata, runtimeMetadata map[string]any) map[strin
 }
 
 func (r *Resolver) streamACPAgentChunks(ctx context.Context, req conversation.ChatRequest, chunkCh chan<- conversation.StreamChunk, errCh chan<- error) {
+	req = withoutInjectionCapabilities(req)
 	eventCh := make(chan WSStreamEvent)
 	done := make(chan error, 1)
 	go func() {
@@ -405,7 +407,12 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 	if displayText == "" {
 		displayText = strings.TrimSpace(req.Query)
 	}
-	if displayText == "" && len(req.Attachments) == 0 {
+	attachments := req.Attachments
+	if receipt := req.UserReceipt; receipt != nil {
+		displayText = receipt.DisplayText
+		attachments = receipt.Attachments
+	}
+	if displayText == "" && len(attachments) == 0 {
 		return req
 	}
 	contentText := strings.TrimSpace(req.Query)
@@ -422,7 +429,7 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 	}
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
 	sessionMode, runtimeType := r.persistSessionRuntimeSnapshot(ctx, req)
-	persisted, err := r.messageService.Persist(ctx, messagepkg.PersistInput{
+	input := messagepkg.PersistInput{
 		BotID:                   req.BotID,
 		SessionID:               req.SessionID,
 		SenderChannelIdentityID: senderChannelIdentityID,
@@ -432,12 +439,23 @@ func (r *Resolver) persistACPLeadingUserMessage(ctx context.Context, req convers
 		Role:                    "user",
 		Content:                 content,
 		Metadata:                mergeMetadata(buildRouteMetadata(req), buildInteractionMetadata(req)),
-		Assets:                  chatAttachmentsToAssetRefs(req.Attachments),
+		Assets:                  chatAttachmentsToAssetRefs(attachments),
 		EventID:                 req.EventID,
 		DisplayText:             displayText,
 		SessionMode:             sessionMode,
 		RuntimeType:             runtimeType,
-	})
+	}
+	if receipt := req.UserReceipt; receipt != nil {
+		origin := receipt.Origin.Values()
+		input.SenderChannelIdentityID = origin.SenderChannelIdentityID
+		input.SenderUserID = origin.SenderUserID
+		input.ExternalMessageID = origin.ExternalMessageID
+		input.SourceReplyToMessageID = origin.SourceReplyToMessageID
+		input.EventID = origin.EventID
+		input.SourceContext = origin.Context
+		input.Metadata = mergeMetadata(input.Metadata, receipt.Metadata)
+	}
+	persisted, err := r.messageService.Persist(ctx, input)
 	if err != nil {
 		r.logger.Warn("persist ACP leading user message failed",
 			slog.String("bot_id", req.BotID),
@@ -601,7 +619,7 @@ func (r *Resolver) persistACPRound(ctx context.Context, req conversation.ChatReq
 		MessageMetadataByIndex:  metadataByIndex,
 	})
 	if err == nil && promptErr == nil && req.UserMessagePersisted && !req.SkipMemoryExtraction {
-		go r.storeMemory(context.WithoutCancel(ctx), req, round)
+		go r.storeMemory(context.WithoutCancel(ctx), withoutInjectionCapabilities(req), round)
 	}
 	return err
 }

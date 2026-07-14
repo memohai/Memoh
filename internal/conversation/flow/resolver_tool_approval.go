@@ -2,7 +2,6 @@ package flow
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -272,61 +271,33 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 		return err
 	}
 
-	loaded, err := r.loadHistoryRecords(ctx, historyScopeFallbackFromToolApprovalRequest(approval), approval.SessionID, defaultMaxContextMinutes)
-	if err != nil {
-		return err
-	}
-	loaded = pruneHistoryForGateway(loaded)
-	loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(firstNonEmpty(approval.BotID, input.BotID), "", approval.SessionID, approval.ConversationType, "", approval.ReplyTarget), loaded)
-	messages, _ := trimMessagesByTokens(r.logger, loaded, 0)
-
-	cfg := resolved.RunConfig
-	cfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(sanitizeMessages(messages)))
-	cfg.Query = ""
-	cfg.LiveToolStream = eventCh != nil
-	cfg.CanRequestUserInput = r.canDeliverUserInputWS(eventCh)
-	cfg = r.prepareRunConfig(ctx, cfg)
-
 	req := conversation.ChatRequest{
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,
 		SessionID:               approval.SessionID,
+		UserID:                  strings.TrimSpace(input.ActorUserID),
 		SourceChannelIdentityID: firstNonEmpty(approval.ChannelIdentityID, input.ActorChannelIdentityID),
 		CurrentChannel:          approval.SourcePlatform,
 		ReplyTarget:             approval.ReplyTarget,
 		ConversationType:        approval.ConversationType,
 		UserMessagePersisted:    true,
 	}
-
-	stream := r.agent.Stream(ctx, cfg)
-	stored := false
-	for event := range stream {
-		data, err := json.Marshal(event)
-		if err != nil {
-			continue
-		}
-		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
-			if snap, ok := extractTerminalSnapshot(data); ok {
-				if storeErr := r.persistTerminalSnapshot(
-					context.WithoutCancel(ctx),
-					req,
-					resolvedContext{model: models.GetResponse{ID: resolved.ModelID}},
-					snap,
-				); storeErr != nil {
-					return storeErr
-				}
-				stored = true
-			}
-		}
-		if eventCh != nil {
-			select {
-			case eventCh <- json.RawMessage(data):
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
+	rc, err := r.prepareContinuationRunConfig(
+		ctx,
+		req,
+		resolved.RunConfig,
+		historyScopeFallbackFromToolApprovalRequest(approval),
+		compactionSummaryScope(firstNonEmpty(approval.BotID, input.BotID), "", approval.SessionID, approval.ConversationType, "", approval.ReplyTarget),
+		eventCh,
+		approval.ToolCallID,
+		resolved.ContextTokenBudget,
+	)
+	if err != nil {
+		return err
 	}
-	return nil
+
+	rc.model = models.GetResponse{ID: resolved.ModelID}
+	return r.streamContinuation(ctx, req, rc, eventCh)
 }
 
 func withLocalWebReplyTarget(req toolapproval.Request) toolapproval.Request {

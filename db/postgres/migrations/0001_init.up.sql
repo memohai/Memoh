@@ -517,6 +517,8 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent')),
   model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   compact_id UUID,
+  compact_claim_finalized BOOLEAN NOT NULL DEFAULT false,
+  compact_claim_invalidated BOOLEAN NOT NULL DEFAULT false,
   event_id UUID REFERENCES bot_session_events(id) ON DELETE SET NULL,
   display_text TEXT,
   turn_id UUID,
@@ -526,7 +528,43 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   turn_superseded_by_turn_id UUID,
   turn_superseded_at TIMESTAMPTZ,
   turn_superseded_reason TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  source_revision BIGINT NOT NULL DEFAULT 1,
+  source_context JSONB,
+  CONSTRAINT compact_claim_finalized_requires_owner
+    CHECK (NOT compact_claim_finalized OR compact_id IS NOT NULL),
+  CONSTRAINT compact_claim_invalidation_requires_finalized
+    CHECK (NOT compact_claim_invalidated OR compact_claim_finalized),
+  CONSTRAINT history_message_source_revision_positive
+    CHECK (source_revision > 0),
+  CONSTRAINT history_message_source_context_valid
+    CHECK (
+      source_context IS NULL
+      OR (
+        jsonb_typeof(source_context) = 'object'
+        AND source_context ?& ARRAY[
+          'version',
+          'sender_display_name',
+          'platform',
+          'conversation_type',
+          'conversation_name'
+        ]
+        AND source_context - ARRAY[
+          'version',
+          'sender_display_name',
+          'platform',
+          'conversation_type',
+          'conversation_name'
+        ] = '{}'::jsonb
+        AND jsonb_typeof(source_context->'version') = 'number'
+        AND source_context->'version' = '1'::jsonb
+        AND source_context->>'version' = '1'
+        AND jsonb_typeof(source_context->'sender_display_name') = 'string'
+        AND jsonb_typeof(source_context->'platform') = 'string'
+        AND jsonb_typeof(source_context->'conversation_type') = 'string'
+        AND jsonb_typeof(source_context->'conversation_name') = 'string'
+      )
+    )
 );
 
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_bot_created ON bot_history_messages(bot_id, created_at);
@@ -587,6 +625,156 @@ WHERE m.turn_visible = true
   AND m.turn_id IS NOT NULL
   AND m.turn_position IS NOT NULL
   AND m.turn_message_seq IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION normalize_history_message_source_text(value TEXT)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+PARALLEL SAFE
+AS $$
+  SELECT btrim(
+    value,
+    U&'\0009\000A\000B\000C\000D\0020\0085\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\2028\2029\202F\205F\3000'
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION resolve_history_message_source_context(
+  source_message bot_history_messages
+)
+RETURNS JSONB
+LANGUAGE sql
+STABLE
+AS $$
+WITH matched_event AS MATERIALIZED (
+  SELECT event.event_data
+  FROM bot_session_events event
+  WHERE event.id = source_message.event_id
+    AND event.bot_id = source_message.bot_id
+    AND event.event_kind = 'message'
+    AND (
+      source_message.session_id IS NULL
+      OR event.session_id = source_message.session_id
+    )
+    AND (
+      source_message.sender_channel_identity_id IS NULL
+      OR event.sender_channel_identity_id IS NULL
+      OR event.sender_channel_identity_id = source_message.sender_channel_identity_id
+    )
+  LIMIT 1
+), matched_identity AS MATERIALIZED (
+  SELECT identity.display_name, identity.channel_type
+  FROM channel_identities identity
+  WHERE identity.id = source_message.sender_channel_identity_id
+  LIMIT 1
+), matched_session AS MATERIALIZED (
+  SELECT session.channel_type, session.route_id
+  FROM bot_sessions session
+  WHERE session.id = source_message.session_id
+    AND session.bot_id = source_message.bot_id
+  LIMIT 1
+), matched_route AS MATERIALIZED (
+  SELECT route.channel_type, route.conversation_type, route.metadata
+  FROM bot_channel_routes route
+  JOIN matched_session session ON session.route_id = route.id
+  WHERE route.bot_id = source_message.bot_id
+  LIMIT 1
+)
+SELECT jsonb_build_object(
+  'version', 1,
+  'sender_display_name', COALESCE(
+    NULLIF(normalize_history_message_source_text(CASE
+      WHEN jsonb_typeof(event.event_data #> '{sender,display_name}') = 'string'
+      THEN event.event_data #>> '{sender,display_name}'
+    END), ''),
+    NULLIF(normalize_history_message_source_text(identity.display_name), ''),
+    ''
+  ),
+  'platform', COALESCE(
+    NULLIF(normalize_history_message_source_text(CASE
+      WHEN jsonb_typeof(event.event_data #> '{conversation,channel}') = 'string'
+      THEN event.event_data #>> '{conversation,channel}'
+    END), ''),
+    NULLIF(normalize_history_message_source_text(CASE
+      WHEN jsonb_typeof(source_message.metadata->'platform') = 'string'
+      THEN source_message.metadata->>'platform'
+    END), ''),
+    NULLIF(normalize_history_message_source_text(route.channel_type), ''),
+    NULLIF(normalize_history_message_source_text(session.channel_type), ''),
+    NULLIF(normalize_history_message_source_text(identity.channel_type), ''),
+    ''
+  ),
+  'conversation_type', CASE LOWER(COALESCE(
+    NULLIF(normalize_history_message_source_text(CASE
+      WHEN jsonb_typeof(event.event_data #> '{conversation,conversation_type}') = 'string'
+      THEN event.event_data #>> '{conversation,conversation_type}'
+    END), ''),
+    NULLIF(normalize_history_message_source_text(route.conversation_type), ''),
+    ''
+  ))
+    WHEN '' THEN ''
+    WHEN 'p2p' THEN 'private'
+    WHEN 'direct' THEN 'private'
+    WHEN 'dm' THEN 'private'
+    WHEN 'private' THEN 'private'
+    WHEN 'thread' THEN 'thread'
+    WHEN 'topic' THEN 'thread'
+    ELSE 'group'
+  END,
+  'conversation_name', COALESCE(
+    NULLIF(normalize_history_message_source_text(CASE
+      WHEN jsonb_typeof(event.event_data #> '{conversation,conversation_name}') = 'string'
+      THEN event.event_data #>> '{conversation,conversation_name}'
+    END), ''),
+    NULLIF(normalize_history_message_source_text(CASE
+      WHEN jsonb_typeof(route.metadata->'conversation_name') = 'string'
+      THEN route.metadata->>'conversation_name'
+    END), ''),
+    NULLIF(normalize_history_message_source_text(CASE
+      WHEN jsonb_typeof(route.metadata->'conversation_handle') = 'string'
+      THEN route.metadata->>'conversation_handle'
+    END), ''),
+    ''
+  )
+)
+FROM (SELECT 1) seed
+LEFT JOIN matched_event event ON true
+LEFT JOIN matched_identity identity ON true
+LEFT JOIN matched_session session ON true
+LEFT JOIN matched_route route ON true;
+$$;
+
+CREATE OR REPLACE FUNCTION capture_history_message_source_context()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF TG_OP = 'UPDATE'
+     AND NEW.source_context IS DISTINCT FROM OLD.source_context
+     AND (OLD.source_context IS NOT NULL OR NEW.source_context IS NULL) THEN
+    RAISE EXCEPTION 'message % source context is immutable once captured', OLD.id
+      USING ERRCODE = '23514';
+  END IF;
+
+  IF NEW.source_context IS NOT NULL THEN
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'INSERT'
+     OR (
+       OLD.compact_id IS NOT NULL
+       AND NEW.compact_id IS NULL
+     ) THEN
+    NEW.source_context := resolve_history_message_source_context(NEW);
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER history_message_source_context_capture
+BEFORE INSERT OR UPDATE OF compact_id, source_context ON bot_history_messages
+FOR EACH ROW
+EXECUTE FUNCTION capture_history_message_source_context();
 
 CREATE TABLE IF NOT EXISTS bot_session_discuss_cursors (
   session_id UUID NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
@@ -842,12 +1030,732 @@ CREATE TABLE IF NOT EXISTS bot_history_message_compacts (
   error_message TEXT NOT NULL DEFAULT '',
   usage JSONB,
   model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  artifact_version INTEGER NOT NULL DEFAULT 1,
+  coverage JSONB NOT NULL DEFAULT '[]'::jsonb,
+  anchor_start_ms BIGINT NOT NULL DEFAULT 0,
+  anchor_end_ms BIGINT NOT NULL DEFAULT 0,
+  artifact_level INTEGER NOT NULL DEFAULT 0,
+  parent_ids UUID[] NOT NULL DEFAULT '{}'::uuid[],
+  superseded_by UUID,
+  superseded_at TIMESTAMPTZ,
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  completed_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ,
+  CONSTRAINT bot_history_message_compacts_superseded_by_fkey FOREIGN KEY (superseded_by) REFERENCES bot_history_message_compacts(id),
+  CONSTRAINT compacts_supersession_markers_check CHECK ((superseded_by IS NULL) = (superseded_at IS NULL)),
+  CONSTRAINT compacts_not_self_superseded_check CHECK (superseded_by IS NULL OR superseded_by <> id)
 );
 CREATE INDEX IF NOT EXISTS idx_compacts_bot_session ON bot_history_message_compacts(bot_id, session_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_compacts_active_session ON bot_history_message_compacts(session_id, anchor_start_ms, started_at) WHERE status = 'ok' AND superseded_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_compacts_session_lineage ON bot_history_message_compacts(session_id, status, superseded_by);
+
+CREATE TABLE IF NOT EXISTS bot_history_message_compact_validations (
+  compact_id UUID PRIMARY KEY REFERENCES bot_history_message_compacts(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS bot_history_message_compact_parent_edges (
+  artifact_id UUID NOT NULL,
+  parent_id UUID NOT NULL,
+  ordinal INTEGER NOT NULL,
+  CONSTRAINT compaction_artifact_parent_edges_pkey PRIMARY KEY (artifact_id, parent_id),
+  CONSTRAINT compaction_artifact_parent_edges_ordinal_key UNIQUE (artifact_id, ordinal),
+  CONSTRAINT compaction_artifact_parent_edges_ordinal_check CHECK (ordinal >= 0),
+  CONSTRAINT compaction_artifact_parent_edges_not_self_check CHECK (artifact_id <> parent_id),
+  CONSTRAINT compaction_artifact_parent_edges_artifact_fkey
+    FOREIGN KEY (artifact_id) REFERENCES bot_history_message_compacts(id) ON DELETE CASCADE,
+  CONSTRAINT compaction_artifact_parent_edges_parent_fkey
+    FOREIGN KEY (parent_id) REFERENCES bot_history_message_compacts(id)
+);
+
+CREATE OR REPLACE FUNCTION sync_compaction_artifact_parent_edges()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  DELETE FROM bot_history_message_compact_parent_edges
+  WHERE artifact_id = NEW.id;
+
+  INSERT INTO bot_history_message_compact_parent_edges (artifact_id, parent_id, ordinal)
+  SELECT NEW.id, parent.parent_id, (parent.ordinality - 1)::INTEGER
+  FROM unnest(NEW.parent_ids) WITH ORDINALITY AS parent(parent_id, ordinality);
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER compaction_artifact_parent_edges_sync
+AFTER INSERT OR UPDATE OF parent_ids ON bot_history_message_compacts
+FOR EACH ROW
+EXECUTE FUNCTION sync_compaction_artifact_parent_edges();
 
 ALTER TABLE bot_history_messages ADD CONSTRAINT fk_compact_id FOREIGN KEY (compact_id) REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL;
+
+CREATE OR REPLACE VIEW bot_history_message_compact_claim_validity AS
+SELECT
+  compact.id AS compact_id,
+  (
+    compact.message_count > 0
+    AND claims.claimed_count = compact.message_count
+    AND claims.current_count = compact.message_count
+    AND jsonb_typeof(compact.coverage) = 'array'
+    AND (
+      coverage.coverage_count = 0
+      OR (
+        coverage.coverage_count = compact.message_count
+        AND coverage.distinct_source_count = compact.message_count
+        AND coverage.matched_source_count = compact.message_count
+      )
+    )
+  ) AS sources_current
+FROM bot_history_message_compacts compact
+CROSS JOIN LATERAL (
+  SELECT
+    COUNT(*)::integer AS claimed_count,
+    COUNT(*) FILTER (WHERE
+      message.bot_id = compact.bot_id
+      AND message.session_id IS NOT DISTINCT FROM compact.session_id
+      AND message.turn_visible = true
+      AND message.turn_id IS NOT NULL
+      AND message.turn_position IS NOT NULL
+      AND message.turn_message_seq IS NOT NULL
+      AND (message.metadata->>'trigger_mode' IS NULL OR message.metadata->>'trigger_mode' <> 'passive_sync')
+      AND message.compact_claim_finalized = true
+      AND message.compact_claim_invalidated = false
+    )::integer AS current_count
+  FROM bot_history_messages message
+  WHERE message.compact_id = compact.id
+) claims
+CROSS JOIN LATERAL (
+  SELECT
+    COUNT(*)::integer AS coverage_count,
+    COUNT(DISTINCT covered.source->'ref'->>'id')::integer AS distinct_source_count,
+    COUNT(*) FILTER (WHERE
+      jsonb_typeof(covered.source) = 'object'
+      AND jsonb_typeof(covered.source->'ref') = 'object'
+      AND jsonb_typeof(covered.source->'ref'->'id') = 'string'
+      AND EXISTS (
+        SELECT 1
+        FROM bot_history_messages message
+        WHERE message.compact_id = compact.id
+          AND message.id::text = covered.source->'ref'->>'id'
+      )
+    )::integer AS matched_source_count
+  FROM jsonb_array_elements(
+    CASE
+      WHEN jsonb_typeof(compact.coverage) = 'array' THEN compact.coverage
+      ELSE '[]'::jsonb
+    END
+  ) covered(source)
+) coverage
+WHERE compact.status = 'ok'
+  AND compact.artifact_level = 0;
+
+CREATE OR REPLACE FUNCTION guard_compaction_log_terminal_status()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF OLD.status IN ('ok', 'error')
+     AND (
+       NEW.status IS DISTINCT FROM OLD.status
+       OR NEW.summary IS DISTINCT FROM OLD.summary
+       OR NEW.message_count IS DISTINCT FROM OLD.message_count
+       OR NEW.error_message IS DISTINCT FROM OLD.error_message
+       OR NEW.usage IS DISTINCT FROM OLD.usage
+       OR (
+         NEW.model_id IS DISTINCT FROM OLD.model_id
+         AND NOT (
+           NEW.model_id IS NULL
+           AND OLD.model_id IS NOT NULL
+           AND NOT EXISTS (
+             SELECT 1
+             FROM models model
+             WHERE model.id = OLD.model_id
+           )
+         )
+       )
+       OR NEW.artifact_version IS DISTINCT FROM OLD.artifact_version
+       OR NEW.coverage IS DISTINCT FROM OLD.coverage
+       OR NEW.anchor_start_ms IS DISTINCT FROM OLD.anchor_start_ms
+       OR NEW.anchor_end_ms IS DISTINCT FROM OLD.anchor_end_ms
+       OR NEW.artifact_level IS DISTINCT FROM OLD.artifact_level
+       OR NEW.parent_ids IS DISTINCT FROM OLD.parent_ids
+       OR NEW.started_at IS DISTINCT FROM OLD.started_at
+       OR NEW.completed_at IS DISTINCT FROM OLD.completed_at
+     ) THEN
+    RAISE EXCEPTION 'compaction attempt % has immutable terminal artifact state', OLD.id
+      USING ERRCODE = '23514';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER compaction_log_terminal_status_guard
+BEFORE UPDATE OF status ON bot_history_message_compacts
+FOR EACH ROW
+EXECUTE FUNCTION guard_compaction_log_terminal_status();
+
+CREATE TRIGGER compaction_log_terminal_artifact_guard
+BEFORE UPDATE OF summary, message_count, error_message, usage, model_id,
+  artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
+  started_at, completed_at ON bot_history_message_compacts
+FOR EACH ROW
+EXECUTE FUNCTION guard_compaction_log_terminal_status();
+
+CREATE OR REPLACE FUNCTION guard_compaction_message_claim()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  target_status TEXT;
+  target_level INTEGER;
+  old_claim_current BOOLEAN;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.compact_id IS NOT NULL
+       OR NEW.compact_claim_finalized
+       OR NEW.compact_claim_invalidated THEN
+      RAISE EXCEPTION 'new message % cannot start with a compaction claim', NEW.id
+        USING ERRCODE = '23514';
+    END IF;
+
+    RETURN NEW;
+  END IF;
+
+  IF NEW.compact_id IS NULL THEN
+    IF OLD.compact_claim_finalized
+       AND EXISTS (
+         SELECT 1
+         FROM bot_history_message_compacts compact
+         WHERE compact.id = OLD.compact_id
+       ) THEN
+      SELECT validity.sources_current
+      INTO old_claim_current
+      FROM bot_history_message_compact_claim_validity validity
+      WHERE validity.compact_id = OLD.compact_id;
+
+      IF COALESCE(old_claim_current, true) THEN
+        RAISE EXCEPTION 'message % has a current finalized compaction claim owned by %', OLD.id, OLD.compact_id
+          USING ERRCODE = '23514';
+      END IF;
+    END IF;
+
+    NEW.compact_claim_finalized := false;
+    NEW.compact_claim_invalidated := false;
+    RETURN NEW;
+  END IF;
+
+  IF OLD.compact_claim_finalized
+     AND NEW.compact_id IS DISTINCT FROM OLD.compact_id THEN
+    SELECT validity.sources_current
+    INTO old_claim_current
+    FROM bot_history_message_compact_claim_validity validity
+    WHERE validity.compact_id = OLD.compact_id;
+
+    IF COALESCE(old_claim_current, true) THEN
+      RAISE EXCEPTION 'message % has a current finalized compaction claim owned by %', OLD.id, OLD.compact_id
+        USING ERRCODE = '23514';
+    END IF;
+  END IF;
+
+  IF OLD.compact_claim_finalized
+     AND NEW.compact_id IS NOT DISTINCT FROM OLD.compact_id
+     AND NEW.compact_claim_finalized IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'message % has a finalized compaction claim owned by %', OLD.id, OLD.compact_id
+      USING ERRCODE = '23514';
+  END IF;
+
+  IF OLD.compact_claim_invalidated
+     AND NEW.compact_id IS NOT DISTINCT FROM OLD.compact_id
+     AND NEW.compact_claim_invalidated IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'message % has an invalidated compaction claim owned by %', OLD.id, OLD.compact_id
+      USING ERRCODE = '23514';
+  END IF;
+
+  IF NOT OLD.compact_claim_finalized
+     AND NEW.compact_claim_finalized THEN
+    SELECT compact.status, compact.artifact_level
+    INTO target_status, target_level
+    FROM bot_history_message_compacts compact
+    WHERE compact.id = NEW.compact_id;
+
+    IF NOT FOUND OR target_status <> 'ok' OR target_level <> 0 THEN
+      RAISE EXCEPTION 'message % compaction claim can only be finalized with its successful direct artifact', OLD.id
+        USING ERRCODE = '23514';
+    END IF;
+
+    NEW.compact_claim_invalidated := false;
+  END IF;
+
+  IF OLD.compact_id IS DISTINCT FROM NEW.compact_id THEN
+    SELECT compact.status, compact.artifact_level
+    INTO target_status, target_level
+    FROM bot_history_message_compacts compact
+    WHERE compact.id = NEW.compact_id
+    FOR SHARE NOWAIT;
+
+    IF NOT FOUND OR target_status <> 'pending' OR target_level <> 0 THEN
+      RAISE EXCEPTION 'message % cannot claim terminal or derived compaction attempt %', OLD.id, NEW.compact_id
+        USING ERRCODE = '23514';
+    END IF;
+
+    NEW.compact_claim_finalized := false;
+    NEW.compact_claim_invalidated := false;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION finalize_compaction_message_claims()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  claimed_ids UUID[];
+  expected_ids UUID[];
+BEGIN
+  IF NEW.artifact_level > 0 THEN
+    IF cardinality(NEW.parent_ids) = 0
+       OR NEW.message_count <= 0
+       OR jsonb_typeof(NEW.coverage) IS DISTINCT FROM 'array'
+       OR jsonb_array_length(NEW.coverage) = 0
+       OR EXISTS (
+         SELECT 1
+         FROM bot_history_messages message
+         WHERE message.compact_id = NEW.id
+       ) THEN
+      RAISE EXCEPTION 'derived compaction artifact % has invalid parents, coverage, or direct message claims', NEW.id
+        USING ERRCODE = '23514';
+    END IF;
+
+    RETURN NULL;
+  END IF;
+  IF NEW.artifact_level < 0 THEN
+    RAISE EXCEPTION 'compaction attempt % has invalid artifact level %', NEW.id, NEW.artifact_level
+      USING ERRCODE = '23514';
+  END IF;
+  IF cardinality(NEW.parent_ids) > 0 THEN
+    RAISE EXCEPTION 'direct compaction attempt % cannot have parent artifacts', NEW.id
+      USING ERRCODE = '23514';
+  END IF;
+  IF NEW.message_count <= 0 THEN
+    RAISE EXCEPTION 'direct compaction attempt % has no claimed messages', NEW.id
+      USING ERRCODE = '23514';
+  END IF;
+
+  SELECT COALESCE(array_agg(claim.id ORDER BY claim.id), ARRAY[]::UUID[])
+  INTO claimed_ids
+  FROM (
+    SELECT message.id
+    FROM bot_history_messages message
+    WHERE message.compact_id = NEW.id
+    ORDER BY message.id
+    FOR UPDATE
+  ) claim;
+
+  IF jsonb_typeof(NEW.coverage) IS DISTINCT FROM 'array' THEN
+    RAISE EXCEPTION 'compaction attempt % has invalid coverage', NEW.id
+      USING ERRCODE = '23514';
+  ELSIF jsonb_array_length(NEW.coverage) > 0 THEN
+    SELECT COALESCE(array_agg(expected.id ORDER BY expected.id), ARRAY[]::UUID[])
+    INTO expected_ids
+    FROM (
+      SELECT (covered.source->'ref'->>'id')::UUID AS id
+      FROM jsonb_array_elements(NEW.coverage) AS covered(source)
+    ) expected;
+
+    IF cardinality(expected_ids) <> NEW.message_count
+       OR claimed_ids IS DISTINCT FROM expected_ids THEN
+      RAISE EXCEPTION 'compaction attempt % claim set does not match coverage', NEW.id
+        USING ERRCODE = '23514';
+    END IF;
+  ELSIF cardinality(claimed_ids) <> NEW.message_count THEN
+    RAISE EXCEPTION 'legacy compaction attempt % claimed % messages, expected %',
+      NEW.id, cardinality(claimed_ids), NEW.message_count
+      USING ERRCODE = '23514';
+  END IF;
+
+  UPDATE bot_history_messages
+  SET compact_claim_finalized = true
+  WHERE compact_id = NEW.id
+    AND compact_claim_finalized = false;
+
+  RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER compaction_message_claim_guard
+BEFORE UPDATE OF compact_id, compact_claim_finalized, compact_claim_invalidated ON bot_history_messages
+FOR EACH ROW
+EXECUTE FUNCTION guard_compaction_message_claim();
+
+CREATE TRIGGER compaction_message_claim_insert_guard
+BEFORE INSERT ON bot_history_messages
+FOR EACH ROW
+EXECUTE FUNCTION guard_compaction_message_claim();
+
+CREATE TRIGGER compaction_message_claim_finalize
+AFTER UPDATE OF status ON bot_history_message_compacts
+FOR EACH ROW
+WHEN (OLD.status = 'pending' AND NEW.status = 'ok')
+EXECUTE FUNCTION finalize_compaction_message_claims();
+
+CREATE OR REPLACE FUNCTION bump_history_message_source_revision()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF ROW(
+    OLD.id,
+    OLD.bot_id,
+    OLD.session_id,
+    OLD.sender_channel_identity_id,
+    OLD.sender_account_user_id,
+    OLD.source_message_id,
+    OLD.source_reply_to_message_id,
+    OLD.role,
+    OLD.content,
+    OLD.metadata,
+    OLD.usage,
+    OLD.session_mode,
+    OLD.runtime_type,
+    OLD.model_id,
+    OLD.event_id,
+    OLD.display_text,
+    OLD.turn_id,
+    OLD.turn_position,
+    OLD.turn_message_seq,
+    OLD.turn_visible,
+    OLD.turn_superseded_by_turn_id,
+    OLD.turn_superseded_at,
+    OLD.turn_superseded_reason,
+    OLD.created_at,
+    OLD.source_context
+  ) IS DISTINCT FROM ROW(
+    NEW.id,
+    NEW.bot_id,
+    NEW.session_id,
+    NEW.sender_channel_identity_id,
+    NEW.sender_account_user_id,
+    NEW.source_message_id,
+    NEW.source_reply_to_message_id,
+    NEW.role,
+    NEW.content,
+    NEW.metadata,
+    NEW.usage,
+    NEW.session_mode,
+    NEW.runtime_type,
+    NEW.model_id,
+    NEW.event_id,
+    NEW.display_text,
+    NEW.turn_id,
+    NEW.turn_position,
+    NEW.turn_message_seq,
+    NEW.turn_visible,
+    NEW.turn_superseded_by_turn_id,
+    NEW.turn_superseded_at,
+    NEW.turn_superseded_reason,
+    NEW.created_at,
+    NEW.source_context
+  ) OR NEW.source_revision IS DISTINCT FROM OLD.source_revision THEN
+    NEW.source_revision := OLD.source_revision + 1;
+  ELSE
+    NEW.source_revision := OLD.source_revision;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER history_message_source_revision_bump
+BEFORE UPDATE ON bot_history_messages
+FOR EACH ROW
+EXECUTE FUNCTION bump_history_message_source_revision();
+
+CREATE OR REPLACE FUNCTION invalidate_compaction_claim_on_source_revision()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF OLD.compact_claim_finalized
+     AND NEW.compact_claim_finalized
+     AND NEW.compact_id IS NOT DISTINCT FROM OLD.compact_id
+     AND NEW.source_revision IS DISTINCT FROM OLD.source_revision THEN
+    NEW.compact_claim_invalidated := true;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER history_message_source_revision_invalidation
+BEFORE UPDATE ON bot_history_messages
+FOR EACH ROW
+EXECUTE FUNCTION invalidate_compaction_claim_on_source_revision();
+
+CREATE TABLE IF NOT EXISTS bot_history_topology_counters (
+  session_id UUID PRIMARY KEY,
+  revision BIGINT NOT NULL CHECK (revision > 0)
+);
+
+CREATE TABLE IF NOT EXISTS bot_history_topology_positions (
+  session_id UUID NOT NULL,
+  turn_position BIGINT NOT NULL,
+  revision BIGINT NOT NULL CHECK (revision > 0),
+  PRIMARY KEY (session_id, turn_position)
+);
+
+CREATE INDEX IF NOT EXISTS idx_history_topology_positions_session_revision
+  ON bot_history_topology_positions (session_id, revision, turn_position);
+
+CREATE TABLE IF NOT EXISTS bot_history_topology_pending (
+  transaction_id XID8 NOT NULL,
+  session_id UUID NOT NULL,
+  turn_position BIGINT NOT NULL,
+  PRIMARY KEY (transaction_id, session_id, turn_position)
+);
+
+CREATE TABLE IF NOT EXISTS bot_history_message_compact_topology (
+  compact_id UUID PRIMARY KEY REFERENCES bot_history_message_compacts(id) ON DELETE CASCADE,
+  session_id UUID NOT NULL,
+  topology_revision BIGINT NOT NULL CHECK (topology_revision >= 0),
+  range_start_turn_position BIGINT NOT NULL,
+  range_end_turn_position BIGINT NOT NULL,
+  CONSTRAINT compaction_topology_range_order_check
+    CHECK (range_start_turn_position <= range_end_turn_position)
+);
+
+CREATE INDEX IF NOT EXISTS idx_compaction_topology_session_range
+  ON bot_history_message_compact_topology (
+    session_id,
+    range_start_turn_position,
+    range_end_turn_position
+  );
+
+CREATE OR REPLACE FUNCTION enqueue_history_topology_position(
+  target_session_id UUID,
+  target_turn_position BIGINT
+)
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF target_session_id IS NULL
+     OR target_turn_position IS NULL THEN
+    RETURN;
+  END IF;
+
+  INSERT INTO bot_history_topology_pending (
+    transaction_id,
+    session_id,
+    turn_position
+  ) VALUES (
+    pg_current_xact_id(),
+    target_session_id,
+    target_turn_position
+  )
+  ON CONFLICT DO NOTHING;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION flush_history_topology_positions()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  current_transaction_id XID8 := pg_current_xact_id();
+  changed_session RECORD;
+  next_revision BIGINT;
+BEGIN
+  FOR changed_session IN
+    SELECT pending.session_id
+    FROM bot_history_topology_pending pending
+    JOIN bot_sessions session ON session.id = pending.session_id
+    WHERE pending.transaction_id = current_transaction_id
+    GROUP BY pending.session_id
+    ORDER BY pending.session_id
+  LOOP
+    INSERT INTO bot_history_topology_counters (session_id, revision)
+    VALUES (changed_session.session_id, 1)
+    ON CONFLICT (session_id) DO UPDATE
+    SET revision = bot_history_topology_counters.revision + 1
+    RETURNING revision INTO next_revision;
+
+    INSERT INTO bot_history_topology_positions (session_id, turn_position, revision)
+    SELECT pending.session_id, pending.turn_position, next_revision
+    FROM bot_history_topology_pending pending
+    WHERE pending.transaction_id = current_transaction_id
+      AND pending.session_id = changed_session.session_id
+    ON CONFLICT (session_id, turn_position) DO UPDATE
+    SET revision = EXCLUDED.revision;
+  END LOOP;
+
+  DELETE FROM bot_history_topology_pending
+  WHERE transaction_id = current_transaction_id;
+
+  RETURN NULL;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION cleanup_history_topology_session()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  DELETE FROM bot_history_message_compact_topology
+  WHERE session_id = OLD.id;
+  DELETE FROM bot_history_topology_pending
+  WHERE session_id = OLD.id;
+  DELETE FROM bot_history_topology_positions
+  WHERE session_id = OLD.id;
+  DELETE FROM bot_history_topology_counters
+  WHERE session_id = OLD.id;
+  RETURN NULL;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION record_history_message_topology_change()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  old_eligible BOOLEAN := false;
+  new_eligible BOOLEAN := false;
+  topology_changed BOOLEAN := true;
+BEGIN
+  IF TG_OP <> 'INSERT' THEN
+    old_eligible := OLD.session_id IS NOT NULL
+      AND OLD.turn_visible
+      AND OLD.turn_id IS NOT NULL
+      AND OLD.turn_position IS NOT NULL
+      AND OLD.turn_message_seq IS NOT NULL
+      AND (OLD.metadata->>'trigger_mode' IS NULL OR OLD.metadata->>'trigger_mode' <> 'passive_sync');
+  END IF;
+
+  IF TG_OP <> 'DELETE' THEN
+    new_eligible := NEW.session_id IS NOT NULL
+      AND NEW.turn_visible
+      AND NEW.turn_id IS NOT NULL
+      AND NEW.turn_position IS NOT NULL
+      AND NEW.turn_message_seq IS NOT NULL
+      AND (NEW.metadata->>'trigger_mode' IS NULL OR NEW.metadata->>'trigger_mode' <> 'passive_sync');
+  END IF;
+
+  IF TG_OP = 'UPDATE' THEN
+    topology_changed := ROW(
+      OLD.id,
+      OLD.bot_id,
+      OLD.session_id,
+      OLD.turn_id,
+      OLD.turn_position,
+      OLD.turn_message_seq,
+      OLD.turn_visible,
+      OLD.metadata->>'trigger_mode',
+      OLD.created_at
+    ) IS DISTINCT FROM ROW(
+      NEW.id,
+      NEW.bot_id,
+      NEW.session_id,
+      NEW.turn_id,
+      NEW.turn_position,
+      NEW.turn_message_seq,
+      NEW.turn_visible,
+      NEW.metadata->>'trigger_mode',
+      NEW.created_at
+    );
+  END IF;
+
+  IF NOT topology_changed OR (NOT old_eligible AND NOT new_eligible) THEN
+    RETURN COALESCE(NEW, OLD);
+  END IF;
+
+  IF old_eligible
+     AND new_eligible
+     AND OLD.session_id = NEW.session_id THEN
+    PERFORM enqueue_history_topology_position(NEW.session_id, OLD.turn_position);
+    PERFORM enqueue_history_topology_position(NEW.session_id, NEW.turn_position);
+    RETURN NEW;
+  END IF;
+
+  IF old_eligible THEN
+    PERFORM enqueue_history_topology_position(OLD.session_id, OLD.turn_position);
+  END IF;
+  IF new_eligible THEN
+    PERFORM enqueue_history_topology_position(NEW.session_id, NEW.turn_position);
+  END IF;
+
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+CREATE TRIGGER history_message_topology_capture
+AFTER INSERT OR DELETE OR UPDATE ON bot_history_messages
+FOR EACH ROW
+EXECUTE FUNCTION record_history_message_topology_change();
+
+CREATE CONSTRAINT TRIGGER history_topology_pending_flush
+AFTER INSERT ON bot_history_topology_pending
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW
+EXECUTE FUNCTION flush_history_topology_positions();
+
+CREATE CONSTRAINT TRIGGER history_topology_session_cleanup
+AFTER DELETE ON bot_sessions
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW
+EXECUTE FUNCTION cleanup_history_topology_session();
+
+CREATE OR REPLACE FUNCTION bump_message_source_revision_for_asset()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF TG_OP = 'UPDATE'
+     AND (to_jsonb(OLD) - 'created_at') IS NOT DISTINCT FROM (to_jsonb(NEW) - 'created_at') THEN
+    RETURN NULL;
+  END IF;
+
+  IF TG_OP = 'INSERT' THEN
+    PERFORM message.id
+    FROM bot_history_messages message
+    WHERE message.id = NEW.message_id
+    ORDER BY message.id
+    FOR UPDATE;
+
+    UPDATE bot_history_messages
+    SET source_revision = source_revision + 1
+    WHERE id = NEW.message_id;
+  ELSIF TG_OP = 'DELETE' THEN
+    PERFORM message.id
+    FROM bot_history_messages message
+    WHERE message.id = OLD.message_id
+    ORDER BY message.id
+    FOR UPDATE;
+
+    UPDATE bot_history_messages
+    SET source_revision = source_revision + 1
+    WHERE id = OLD.message_id;
+  ELSE
+    PERFORM message.id
+    FROM bot_history_messages message
+    WHERE message.id IN (OLD.message_id, NEW.message_id)
+    ORDER BY message.id
+    FOR UPDATE;
+
+    UPDATE bot_history_messages
+    SET source_revision = source_revision + 1
+    WHERE id IN (OLD.message_id, NEW.message_id);
+  END IF;
+
+  RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER history_message_asset_source_revision_bump
+AFTER INSERT OR UPDATE OR DELETE ON bot_history_message_assets
+FOR EACH ROW
+EXECUTE FUNCTION bump_message_source_revision_for_asset();
 
 -- schedule_logs: structured execution records for scheduled tasks.
 CREATE TABLE IF NOT EXISTS schedule_logs (

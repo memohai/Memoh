@@ -8,6 +8,8 @@ import (
 
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/historyfrag"
+	"github.com/memohai/memoh/internal/messagesource"
 )
 
 func TestRenderEntryContentPlainString(t *testing.T) {
@@ -312,11 +314,43 @@ func TestBuildEntriesAndIDsIncludesDirectedSignalHeader(t *testing.T) {
 		"[platform: telegram]",
 		"[conversation_type: group]",
 		"[conversation_name: Ops Room]",
-		"[reply_target: thread-9]",
 		"please handle this in context",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("entry missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "reply_target") {
+		t.Fatalf("entry leaked delivery control-plane context:\n%s", got)
+	}
+}
+
+func TestRenderEntryHeaderUsesCanonicalSourceContext(t *testing.T) {
+	t.Parallel()
+
+	got := renderEntryHeader(historyfrag.HistoryRecord{
+		SenderDisplayName: "Live Sender",
+		Platform:          "live-platform",
+		SourceContext: messagesource.NewV1(
+			"Historical Sender",
+			"telegram",
+			"group",
+			"Historical Room",
+		),
+	})
+	for _, want := range []string{
+		"[sender: Historical Sender]",
+		"[platform: telegram]",
+		"[conversation_type: group]",
+		"[conversation_name: Historical Room]",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("canonical header missing %q:\n%s", want, got)
+		}
+	}
+	for _, excluded := range []string{"Live Sender", "live-platform", "reply_target"} {
+		if strings.Contains(got, excluded) {
+			t.Fatalf("canonical header leaked %q:\n%s", excluded, got)
 		}
 	}
 }

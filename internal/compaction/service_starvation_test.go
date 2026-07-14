@@ -17,9 +17,9 @@ func starvationCorpus(t *testing.T) []sqlc.ListUncompactedMessagesBySessionRow {
 		mkRow(t, "assistant", `[{"type":"reasoning","text":"internal chain of thought"}]`, 400),                          // 0: renders empty
 		mkRow(t, "assistant", `[{"type":"tool-call","toolCallId":"U","toolName":"ask_user","input":{}}]`, 40),            // 1: must-keep call
 		mkRow(t, "tool", `[{"type":"tool-result","toolCallId":"U","toolName":"ask_user","output":"user said yes"}]`, 40), // 2: must-keep result
-		mkRow(t, "user", `"old question"`, 400),    // 3
-		mkRow(t, "assistant", `"old answer"`, 400), // 4
-		mkRow(t, "user", `"current question"`, 40), // 5: protected current turn
+		mkRow(t, "user", jsonStr(strings.Repeat("old question ", 30)), 400),                                              // 3
+		mkRow(t, "assistant", jsonStr(strings.Repeat("old answer ", 30)), 400),                                           // 4
+		mkRow(t, "user", `"current question"`, 40),                                                                       // 5: protected current turn
 	}
 }
 
@@ -88,8 +88,8 @@ func TestDoCompactionCompactsBehindOversizedRenderEmptyHead(t *testing.T) {
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
 		mkRow(t, "assistant", `[{"type":"reasoning","text":"a"}]`, 20000), // renders empty, huge raw estimate
 		mkRow(t, "assistant", `[{"type":"reasoning","text":"b"}]`, 20000),
-		mkRow(t, "user", `"old question"`, 100),
-		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", jsonStr(strings.Repeat("old question ", 30)), 100),
+		mkRow(t, "assistant", jsonStr(strings.Repeat("old answer ", 30)), 100),
 		mkRow(t, "user", `"current question"`, 40),
 	}
 	q := &fakeQueries{uncompacted: rows}
@@ -117,8 +117,8 @@ func TestDoCompactionCompactsBehindOversizedIncompleteExchange(t *testing.T) {
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
 		mkRow(t, "assistant", `[{"type":"text","text":"running the tool"},{"type":"tool-call","toolCallId":"x","toolName":"exec","input":{}}]`, 40000),
 		mkRow(t, "tool", `[{"type":"binary","data":"opaque"}]`, 100), // unrecognized part renders empty -> exchange incomplete
-		mkRow(t, "user", `"old question"`, 100),
-		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", jsonStr(strings.Repeat("old question ", 30)), 100),
+		mkRow(t, "assistant", jsonStr(strings.Repeat("old answer ", 30)), 100),
 		mkRow(t, "user", `"current question"`, 40),
 	}
 	q := &fakeQueries{uncompacted: rows}

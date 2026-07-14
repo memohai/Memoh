@@ -12,7 +12,45 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 )
 
-func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatRequest, _ resolvedContext, inputTokens int) {
+// compactionBudgetThresholdPercent is the shared budget share at which
+// compaction triggers: the pre-send synchronous backstop fires when
+// compactable history reaches it, and async triggers clamp the user
+// threshold to it so they fire before the blocking backstop does.
+const compactionBudgetThresholdPercent = 70
+
+// effectiveCompactionThreshold clamps the user-configured absolute threshold
+// to the budget share, so an absolute default (e.g. 100000) still fires on
+// models whose context window never reaches it. A non-positive threshold
+// keeps async compaction disabled.
+func effectiveCompactionThreshold(threshold, contextTokenBudget int) int {
+	if threshold <= 0 || contextTokenBudget <= 0 {
+		return threshold
+	}
+	budgetThreshold := contextTokenBudget * compactionBudgetThresholdPercent / 100
+	if budgetThreshold > 0 && budgetThreshold < threshold {
+		return budgetThreshold
+	}
+	return threshold
+}
+
+func (r *Resolver) finishPromptCompaction(ctx context.Context, req conversation.ChatRequest, rc resolvedContext) {
+	pressure, known, claimed := rc.claimCompactionPressure()
+	if !claimed || !known || pressure <= 0 {
+		return
+	}
+	compact := r.maybeCompact
+	if r.promptCompactionFn != nil {
+		compact = r.promptCompactionFn
+	}
+	go compact(
+		context.WithoutCancel(ctx),
+		withoutInjectionCapabilities(req),
+		withoutInjectionRuntime(rc),
+		pressure,
+	)
+}
+
+func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, inputTokens int) {
 	if r.compactionService == nil || r.settingsService == nil {
 		r.logger.Info("compaction: skipped, service or settings nil")
 		return
@@ -29,10 +67,11 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 		)
 		return
 	}
-	if !compaction.ShouldCompact(inputTokens, botSettings.CompactionThreshold) {
+	threshold := effectiveCompactionThreshold(botSettings.CompactionThreshold, rc.contextTokenBudget)
+	if !compaction.ShouldCompact(inputTokens, threshold) {
 		r.logger.Info("compaction: skipped, below threshold",
 			slog.Int("input_tokens", inputTokens),
-			slog.Int("threshold", botSettings.CompactionThreshold),
+			slog.Int("threshold", threshold),
 		)
 		return
 	}
@@ -41,7 +80,7 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 		slog.String("bot_id", req.BotID),
 		slog.String("session_id", req.SessionID),
 		slog.Int("input_tokens", inputTokens),
-		slog.Int("threshold", botSettings.CompactionThreshold),
+		slog.Int("threshold", threshold),
 		slog.Int("ratio", botSettings.CompactionRatio),
 	)
 
@@ -57,57 +96,6 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 		return
 	}
 	r.compactionService.TriggerCompaction(ctx, cfg)
-}
-
-// runCompactionSync runs compaction synchronously when context reaches
-// 70% of the model's context window and reports the session-scoped result.
-// A noop (failure cooldown, another compaction in flight, or nothing to
-// compact) leaves this turn's context untouched: the request proceeds as-is,
-// possibly still above the threshold, and the next turn re-evaluates.
-func (r *Resolver) runCompactionSync(ctx context.Context, req conversation.ChatRequest, inputTokens int) compaction.Result {
-	if r.compactionService == nil || r.settingsService == nil {
-		r.logger.Warn("compaction sync: skipped, service or settings nil")
-		return compaction.Result{}
-	}
-	botSettings, err := r.settingsService.GetBot(ctx, req.BotID)
-	if err != nil {
-		r.logger.Warn("compaction sync: failed to load settings", slog.Any("error", err))
-		return compaction.Result{}
-	}
-	if !botSettings.CompactionEnabled {
-		r.logger.Warn("compaction sync: compaction disabled, skipping")
-		return compaction.Result{}
-	}
-
-	cfg, err := r.buildCompactionConfig(ctx, req, botSettings, inputTokens)
-	if err != nil {
-		r.logger.Warn("compaction sync: failed to build config", slog.Any("error", err))
-		return compaction.Result{}
-	}
-	if cfg.ModelID == "" {
-		// Same skip path as the async trigger above — no model or model
-		// disabled means there is nothing to compact.
-		return compaction.Result{}
-	}
-
-	r.logger.Info("compaction sync: running synchronously",
-		slog.String("bot_id", req.BotID),
-		slog.String("session_id", req.SessionID),
-		slog.Int("input_tokens", inputTokens),
-		slog.String("model_id", cfg.ModelID),
-	)
-
-	res, err := r.compactionService.RunCompactionSync(ctx, cfg)
-	if err != nil {
-		r.logger.Warn("compaction sync: failed", slog.Any("error", err))
-		return compaction.Result{}
-	}
-	r.logger.Info("compaction sync: finished",
-		slog.String("bot_id", req.BotID),
-		slog.String("session_id", req.SessionID),
-		slog.String("status", res.Status),
-	)
-	return res
 }
 
 // buildCompactionConfig resolves the compaction model, provider credentials,
@@ -162,12 +150,19 @@ func (r *Resolver) buildCompactionConfig(ctx context.Context, req conversation.C
 
 	// Cap compaction input to 90% of the compaction model's context window.
 	if compactModel.Config.ContextWindow != nil && *compactModel.Config.ContextWindow > 0 {
-		cfg.MaxCompactTokens = *compactModel.Config.ContextWindow * 90 / 100
+		cfg.ContextTokenBudget = *compactModel.Config.ContextWindow
+		cfg.MaxCompactTokens = cfg.ContextTokenBudget * 90 / 100
 	}
-	// For sync compaction: keep only the last few messages (~2000 tokens ≈ 3 messages).
-	// The summary provides reference context; if the LLM needs details,
-	// it will use tools (memory_read, search) to look them up.
-	cfg.TargetTokens = 2000
 
 	return cfg, nil
+}
+
+// syncCompactionTargetTokens derives the synchronous-compaction goal from the
+// context budget: after compaction the kept tail should be the (100-ratio)%
+// share the user asked to preserve, instead of a fixed absolute size.
+func syncCompactionTargetTokens(contextTokenBudget, ratio int) int {
+	if contextTokenBudget <= 0 || ratio >= 100 {
+		return 0
+	}
+	return contextTokenBudget * (100 - ratio) / 100
 }

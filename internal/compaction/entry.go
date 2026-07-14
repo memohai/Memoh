@@ -8,6 +8,7 @@ import (
 
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/historyfrag"
+	"github.com/memohai/memoh/internal/messagesource"
 )
 
 // toolOutputMaxBytes bounds the tool-result outcome rendered into the summarizer
@@ -74,11 +75,17 @@ func renderEntryHeader(record historyfrag.HistoryRecord) string {
 
 	add("message_id", record.ExternalMessageID)
 	add("reply_to", record.SourceReplyToMessageID)
-	add("sender", record.SenderDisplayName)
-	add("platform", record.Platform)
-	add("conversation_type", record.Scope.ConversationType)
-	add("conversation_name", record.Scope.ConversationName)
-	add("reply_target", record.Scope.ReplyTarget)
+	if record.SourceContext.Version == messagesource.Version1 {
+		add("sender", record.SourceContext.SenderDisplayName)
+		add("platform", record.SourceContext.Platform)
+		add("conversation_type", record.SourceContext.ConversationType)
+		add("conversation_name", record.SourceContext.ConversationName)
+	} else {
+		add("sender", record.SenderDisplayName)
+		add("platform", record.Platform)
+		add("conversation_type", record.Scope.ConversationType)
+		add("conversation_name", record.Scope.ConversationName)
+	}
 	return strings.Join(lines, "\n")
 }
 

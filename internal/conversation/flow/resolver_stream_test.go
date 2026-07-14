@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -9,105 +10,69 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/contextbudget"
 	"github.com/memohai/memoh/internal/conversation"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/settings"
 )
 
-type recordingMessageService struct {
-	persisted []messagepkg.PersistInput
-	replaced  int
+func TestResolvedContextCompactionPressureUsesFinalRawReceipt(t *testing.T) {
+	t.Parallel()
+
+	state := &initialPromptState{}
+	state.Store(initialPromptResult{
+		AccountingReady: true,
+		Allocation: contextbudget.Allocation{
+			CompactableTokens: 0,
+		},
+		TotalTokens: 12000,
+	}, nil)
+	rc := resolvedContext{
+		compactableTokens:      9000,
+		compactableTokensKnown: true,
+		promptState:            state,
+	}
+
+	if got, known := rc.compactionPressure(); !known || got != 0 {
+		t.Fatalf("compactionPressure() = %d known=%v, want summary-only final raw pressure 0/true", got, known)
+	}
+	state.Store(initialPromptResult{
+		AccountingReady: true,
+		Allocation: contextbudget.Allocation{
+			CompactableTokens: 91,
+		},
+	}, nil)
+	if got, known := rc.compactionPressure(); !known || got != 91 {
+		t.Fatalf("compactionPressure() = %d known=%v, want raw pressure 91/true", got, known)
+	}
 }
 
-func (s *recordingMessageService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
-	s.persisted = append(s.persisted, input)
-	return messagepkg.Message{ID: "message-id", SessionID: input.SessionID, Role: input.Role, Content: input.Content, DisplayContent: input.DisplayText}, nil
+func TestResolvedContextCompactionPressureFallsBackBeforeAccounting(t *testing.T) {
+	t.Parallel()
+
+	sentinel := errors.New("tool schema failed")
+	state := &initialPromptState{}
+	state.Store(initialPromptResult{}, sentinel)
+	rc := resolvedContext{
+		compactableTokens:      23,
+		compactableTokensKnown: true,
+		promptState:            state,
+	}
+
+	if got, known := rc.compactionPressure(); !known || got != 23 {
+		t.Fatalf("compactionPressure() = %d known=%v, want pre-materialization raw pressure 23/true", got, known)
+	}
+	if !errors.Is(rc.promptMaterializationError(), sentinel) {
+		t.Fatalf("promptMaterializationError() = %v, want %v", rc.promptMaterializationError(), sentinel)
+	}
 }
 
-func (*recordingMessageService) List(context.Context, string) ([]messagepkg.Message, error) {
-	return nil, nil
-}
+func TestResolvedContextCompactionPressureRemainsUnknownWithoutReceipt(t *testing.T) {
+	t.Parallel()
 
-func (*recordingMessageService) ListSince(context.Context, string, time.Time) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*recordingMessageService) ListActiveSince(context.Context, string, time.Time) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*recordingMessageService) ListLatest(context.Context, string, int32) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*recordingMessageService) ListBefore(context.Context, string, time.Time, int32) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*recordingMessageService) ListBySession(context.Context, string) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*recordingMessageService) ListSinceBySession(context.Context, string, time.Time) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*recordingMessageService) ListActiveSinceBySession(context.Context, string, time.Time) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*recordingMessageService) ListLatestBySession(context.Context, string, int32) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*recordingMessageService) ListBeforeBySession(context.Context, string, time.Time, int32) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*recordingMessageService) ListBeforeMessageBySession(context.Context, string, string, int32) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*recordingMessageService) LocateByExternalIDBySession(context.Context, string, string, int32, int32) (messagepkg.LocateResult, error) {
-	return messagepkg.LocateResult{}, nil
-}
-
-func (*recordingMessageService) GetByIDBySession(context.Context, string, string) (messagepkg.Message, error) {
-	return messagepkg.Message{}, nil
-}
-
-func (*recordingMessageService) ListVisibleFromBySession(context.Context, string, string) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*recordingMessageService) GetVisibleTurnByMessage(context.Context, string, string) (messagepkg.HistoryTurn, error) {
-	return messagepkg.HistoryTurn{}, nil
-}
-
-func (*recordingMessageService) GetLatestVisibleTurnBySession(context.Context, string) (messagepkg.HistoryTurn, error) {
-	return messagepkg.HistoryTurn{}, nil
-}
-
-func (s *recordingMessageService) ReplaceTurn(context.Context, string, string, string, string, string) (messagepkg.HistoryTurn, error) {
-	s.replaced++
-	return messagepkg.HistoryTurn{}, nil
-}
-
-func (*recordingMessageService) DeleteByIDs(context.Context, []string) error {
-	return nil
-}
-
-func (*recordingMessageService) DeleteByBot(context.Context, string) error {
-	return nil
-}
-
-func (*recordingMessageService) DeleteBySession(context.Context, string) error {
-	return nil
-}
-
-func (*recordingMessageService) LinkAssets(context.Context, string, []messagepkg.AssetRef) error {
-	return nil
+	if got, known := (resolvedContext{}).compactionPressure(); known || got != 0 {
+		t.Fatalf("compactionPressure() = %d known=%v, want unknown zero", got, known)
+	}
 }
 
 func TestPersistPartialResultDoesNotStoreUserOnlyFailure(t *testing.T) {

@@ -8,6 +8,7 @@ type ICMessage struct {
 	MessageID        string           `json:"message_id"`
 	Sender           *CanonicalUser   `json:"sender,omitempty"`
 	ReceivedAtMs     int64            `json:"received_at_ms"`
+	LastEventAtMs    int64            `json:"last_event_at_ms,omitempty"`
 	TimestampSec     int64            `json:"timestamp_sec"`
 	UTCOffsetMin     int              `json:"utc_offset_min"`
 	Content          []ContentNode    `json:"content"`
@@ -196,18 +197,19 @@ func reduceMessage(ic *IntermediateContext, event MessageEvent) {
 	}
 
 	msg := &ICMessage{
-		Type:         "message",
-		MessageID:    event.MessageID,
-		Sender:       event.Sender,
-		ReceivedAtMs: event.ReceivedAtMs,
-		TimestampSec: event.TimestampSec,
-		UTCOffsetMin: event.UTCOffsetMin,
-		Content:      event.Content,
-		Attachments:  event.Attachments,
-		IsSelfSent:   event.IsSelfSent,
-		MentionsMe:   event.MentionsMe,
-		RepliesToMe:  event.RepliesToMe,
-		Conversation: event.Conversation,
+		Type:          "message",
+		MessageID:     event.MessageID,
+		Sender:        event.Sender,
+		ReceivedAtMs:  event.ReceivedAtMs,
+		LastEventAtMs: event.ReceivedAtMs,
+		TimestampSec:  event.TimestampSec,
+		UTCOffsetMin:  event.UTCOffsetMin,
+		Content:       event.Content,
+		Attachments:   event.Attachments,
+		IsSelfSent:    event.IsSelfSent,
+		MentionsMe:    event.MentionsMe,
+		RepliesToMe:   event.RepliesToMe,
+		Conversation:  event.Conversation,
 	}
 
 	if event.ReplyToMessageID != "" {
@@ -265,6 +267,7 @@ func reduceEdit(ic *IntermediateContext, event EditEvent) {
 	}
 	msg.Content = event.Content
 	msg.Attachments = event.Attachments
+	msg.LastEventAtMs = event.ReceivedAtMs
 	msg.EditedAtSec = event.TimestampSec
 	msg.EditUTCOffsetMin = event.UTCOffsetMin
 }
@@ -277,6 +280,7 @@ func reduceDelete(ic *IntermediateContext, event DeleteEvent) {
 		}
 		if msg := ic.Nodes[idx].Message; msg != nil {
 			msg.Deleted = true
+			msg.LastEventAtMs = event.ReceivedAtMs
 		}
 	}
 }

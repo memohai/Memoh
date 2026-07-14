@@ -7,6 +7,8 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/contextassembly"
+	"github.com/memohai/memoh/internal/contextbudget"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
 )
@@ -106,6 +108,50 @@ func TestPrepareRunConfigDoesNotDoubleCountPipelineInlineImages(t *testing.T) {
 	}
 	if !messagesContainImage(got.Messages) {
 		t.Fatalf("prepared messages do not contain injected image: %#v", got.Messages)
+	}
+}
+
+func TestPrepareRunConfigDefersPipelineImageToIdentifiedPromptSource(t *testing.T) {
+	t.Parallel()
+
+	current := sdk.UserMessage("pipeline current user")
+	memory := sdk.UserMessage("memory context")
+	image := sdk.ImagePart{Image: "data:image/png;base64,abc", MediaType: "image/png"}
+	plan := mustInitialPromptPlan(t, initialPromptPlanInput{
+		Sources: []contextassembly.Source{
+			{ID: "pipeline-current:message-1", Message: current},
+			{ID: "memory", Message: memory, Retention: contextbudget.RetentionRequired},
+		},
+		CurrentSourceID: "pipeline-current:message-1",
+	})
+	resolver := &Resolver{}
+	cfg := agent.RunConfig{
+		Messages:     promptBaseline(t, plan),
+		InlineImages: []sdk.ImagePart{image},
+		InitialPromptMaterializer: func(context.Context, agent.RunConfig, []sdk.Tool) (agent.RunConfig, error) {
+			return agent.RunConfig{}, nil
+		},
+	}
+
+	prepared := resolver.prepareRunConfig(context.Background(), cfg)
+	if prepared.ContextQueryMaterialized || messagesContainImage(prepared.Messages) {
+		t.Fatalf("prepareRunConfig attached pipeline image before stable source materialization: %#v", prepared.Messages)
+	}
+	if len(contextfrag.Render(prepared.ContextFrags).InlineImages) != 1 {
+		t.Fatalf("deferred inline images missing from pre-provider context: %#v", prepared.ContextFrags)
+	}
+
+	result, err := plan.Materialize(context.Background(), prepared, nil)
+	if err != nil {
+		t.Fatalf("Materialize() error = %v", err)
+	}
+	result.Config = result.Config.RefreshContextFrag()
+	if !messageHasImage(result.Config.Messages[0]) || messageHasImage(result.Config.Messages[1]) {
+		t.Fatalf("pipeline image attached to memory instead of current source: %#v", result.Config.Messages)
+	}
+	rendered := contextfrag.Render(result.Config.ContextFrags)
+	if len(rendered.InlineImages) != 0 || result.Config.ContextManifest.Counts.Images != 1 {
+		t.Fatalf("post-materialization image accounting = inline:%#v manifest:%#v", rendered.InlineImages, result.Config.ContextManifest)
 	}
 }
 

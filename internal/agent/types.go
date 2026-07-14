@@ -62,7 +62,10 @@ type LoopDetectionConfig struct {
 
 // InjectMessage carries a user message to be injected into a running agent
 // stream between tool rounds via the PrepareStep hook.
+type InjectionReceiptID string
+
 type InjectMessage struct {
+	ReceiptID       InjectionReceiptID
 	Text            string
 	HeaderifiedText string
 	// ImageParts carries inline images (data URL or public URL) to attach
@@ -70,35 +73,46 @@ type InjectMessage struct {
 	ImageParts []sdk.ImagePart
 }
 
+type InjectedReceipt struct {
+	ID          InjectionReceiptID
+	ModelText   string
+	InsertAfter int
+}
+
+// InitialPromptMaterializer owns the one-time provider prompt projection after
+// tools and step-zero hooks are known, but before prompt-cache representation.
+type InitialPromptMaterializer func(context.Context, RunConfig, []sdk.Tool) (RunConfig, error)
+
 // RunConfig holds everything needed for a single agent invocation.
 type RunConfig struct {
-	Model                    *sdk.Model
-	ReasoningEffort          string
-	ReasoningActive          bool
-	ReasoningDisabled        bool
-	ReasoningAdaptive        bool
-	ReasoningOffEffort       string
-	ChatCompletionsCompat    string
-	Messages                 []sdk.Message
-	Query                    string
-	System                   string
-	ContextFrags             []contextfrag.ContextFrag
-	ContextManifest          contextfrag.Manifest
-	ContextScope             contextfrag.Scope
-	ContextQueryMaterialized bool
-	ContextToolUsage         string
-	ContextDynamicMutators   []contextfrag.DynamicMutator
-	SessionType              string
-	LiveToolStream           bool
-	CanRequestUserInput      bool
-	SupportsImageInput       bool
-	SupportsToolCall         bool
-	InlineImages             []sdk.ImagePart
-	Identity                 SessionContext
-	Bot                      BotInfo
-	Skills                   []SkillEntry
-	LoopDetection            LoopDetectionConfig
-	Retry                    RetryConfig
+	Model                     *sdk.Model
+	ReasoningEffort           string
+	ReasoningActive           bool
+	ReasoningDisabled         bool
+	ReasoningAdaptive         bool
+	ReasoningOffEffort        string
+	ChatCompletionsCompat     string
+	Messages                  []sdk.Message
+	Query                     string
+	System                    string
+	ContextFrags              []contextfrag.ContextFrag
+	ContextManifest           contextfrag.Manifest
+	ContextScope              contextfrag.Scope
+	ContextQueryMaterialized  bool
+	ContextToolUsage          string
+	ContextDynamicMutators    []contextfrag.DynamicMutator
+	InitialPromptMaterializer InitialPromptMaterializer
+	SessionType               string
+	LiveToolStream            bool
+	CanRequestUserInput       bool
+	SupportsImageInput        bool
+	SupportsToolCall          bool
+	InlineImages              []sdk.ImagePart
+	Identity                  SessionContext
+	Bot                       BotInfo
+	Skills                    []SkillEntry
+	LoopDetection             LoopDetectionConfig
+	Retry                     RetryConfig
 
 	// PromptCacheTTL controls prompt caching for this run. Empty or
 	// unrecognized values default to 5m. Use "1h" for the long-cache tier
@@ -124,10 +138,9 @@ type RunConfig struct {
 	InjectCh <-chan InjectMessage
 
 	// InjectedRecorder is called each time a message is injected via
-	// PrepareStep, recording the headerified text and the number of SDK
-	// output messages that preceded the injection. Used by the resolver
-	// to interleave injected messages at the correct position in storeRound.
-	InjectedRecorder func(headerifiedText string, insertAfter int)
+	// PrepareStep, recording its opaque receipt, model text, and the number
+	// of SDK output messages that preceded the injection.
+	InjectedRecorder func(InjectedReceipt)
 
 	// BackgroundManager provides access to the background task system.
 	// When non-nil, the agent loop refreshes running task summaries at step

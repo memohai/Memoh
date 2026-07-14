@@ -667,7 +667,8 @@ INSERT INTO bot_history_messages (
   runtime_type,
   model_id,
   event_id,
-  display_text
+  display_text,
+  source_context
 )
 VALUES (
   $1,
@@ -684,7 +685,8 @@ VALUES (
   $12,
   $13::uuid,
   $14::uuid,
-  $15::text
+  $15::text,
+  $16::jsonb
 )
 RETURNING
   id,
@@ -721,6 +723,7 @@ type CreateMessageParams struct {
 	ModelID                 pgtype.UUID `json:"model_id"`
 	EventID                 pgtype.UUID `json:"event_id"`
 	DisplayText             pgtype.Text `json:"display_text"`
+	SourceContext           []byte      `json:"source_context"`
 }
 
 type CreateMessageRow struct {
@@ -759,6 +762,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 		arg.ModelID,
 		arg.EventID,
 		arg.DisplayText,
+		arg.SourceContext,
 	)
 	var i CreateMessageRow
 	err := row.Scan(
@@ -831,6 +835,7 @@ inserted AS (
     model_id,
     event_id,
     display_text,
+    source_context,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -852,6 +857,7 @@ inserted AS (
     $14::uuid,
     $15::uuid,
     $16::text,
+    $17::jsonb,
     target.turn_id,
     target.turn_position,
     target.turn_message_seq,
@@ -912,6 +918,7 @@ type CreateMessageInHistoryTurnByRequestParams struct {
 	ModelID                 pgtype.UUID `json:"model_id"`
 	EventID                 pgtype.UUID `json:"event_id"`
 	DisplayText             pgtype.Text `json:"display_text"`
+	SourceContext           []byte      `json:"source_context"`
 }
 
 type CreateMessageInHistoryTurnByRequestRow struct {
@@ -951,6 +958,7 @@ func (q *Queries) CreateMessageInHistoryTurnByRequest(ctx context.Context, arg C
 		arg.ModelID,
 		arg.EventID,
 		arg.DisplayText,
+		arg.SourceContext,
 	)
 	var i CreateMessageInHistoryTurnByRequestRow
 	err := row.Scan(
@@ -1023,6 +1031,7 @@ inserted AS (
     model_id,
     event_id,
     display_text,
+    source_context,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -1044,6 +1053,7 @@ inserted AS (
     $14::uuid,
     $15::uuid,
     $16::text,
+    $17::jsonb,
     target.turn_id,
     target.turn_position,
     target.turn_message_seq,
@@ -1078,6 +1088,7 @@ type CreateMessageInHistoryTurnByRequestAndBindParams struct {
 	ModelID                 pgtype.UUID `json:"model_id"`
 	EventID                 pgtype.UUID `json:"event_id"`
 	DisplayText             pgtype.Text `json:"display_text"`
+	SourceContext           []byte      `json:"source_context"`
 }
 
 type CreateMessageInHistoryTurnByRequestAndBindRow struct {
@@ -1103,6 +1114,7 @@ func (q *Queries) CreateMessageInHistoryTurnByRequestAndBind(ctx context.Context
 		arg.ModelID,
 		arg.EventID,
 		arg.DisplayText,
+		arg.SourceContext,
 	)
 	var i CreateMessageInHistoryTurnByRequestAndBindRow
 	err := row.Scan(&i.ID, &i.CreatedAt)
@@ -1134,6 +1146,7 @@ inserted_message AS (
     model_id,
     event_id,
     display_text,
+    source_context,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -1156,9 +1169,10 @@ inserted_message AS (
     $14::uuid,
     $15::uuid,
     $16::text,
-    $17,
-    next_position.position,
+    $17::jsonb,
     $18,
+    next_position.position,
+    $19,
     true
   FROM next_position
   RETURNING
@@ -1188,6 +1202,7 @@ type CreateMessageWithHistoryTurnParams struct {
 	ModelID                 pgtype.UUID `json:"model_id"`
 	EventID                 pgtype.UUID `json:"event_id"`
 	DisplayText             pgtype.Text `json:"display_text"`
+	SourceContext           []byte      `json:"source_context"`
 	TurnID                  pgtype.UUID `json:"turn_id"`
 	TurnMessageSeq          pgtype.Int8 `json:"turn_message_seq"`
 }
@@ -1215,6 +1230,7 @@ func (q *Queries) CreateMessageWithHistoryTurn(ctx context.Context, arg CreateMe
 		arg.ModelID,
 		arg.EventID,
 		arg.DisplayText,
+		arg.SourceContext,
 		arg.TurnID,
 		arg.TurnMessageSeq,
 	)
@@ -1231,8 +1247,8 @@ WITH target AS (
     existing.turn_position,
     bool_or(existing.turn_visible) AS turn_visible
   FROM bot_history_messages existing
-  WHERE existing.turn_id = $17
-    AND existing.session_id = $18::uuid
+  WHERE existing.turn_id = $18
+    AND existing.session_id = $19::uuid
     AND existing.bot_id = $2
     AND existing.turn_position IS NOT NULL
   GROUP BY existing.turn_id, existing.session_id, existing.turn_position
@@ -1255,6 +1271,7 @@ INSERT INTO bot_history_messages (
   model_id,
   event_id,
   display_text,
+  source_context,
   turn_id,
   turn_position,
   turn_message_seq,
@@ -1277,9 +1294,10 @@ SELECT
   $13::uuid,
   $14::uuid,
   $15::text,
+  $16::jsonb,
   target.turn_id,
   target.turn_position,
-  $16,
+  $17,
   target.turn_visible
 FROM target
 RETURNING
@@ -1317,6 +1335,7 @@ type CreateMessageWithTurnParams struct {
 	ModelID                 pgtype.UUID `json:"model_id"`
 	EventID                 pgtype.UUID `json:"event_id"`
 	DisplayText             pgtype.Text `json:"display_text"`
+	SourceContext           []byte      `json:"source_context"`
 	TurnMessageSeq          pgtype.Int8 `json:"turn_message_seq"`
 	TurnID                  pgtype.UUID `json:"turn_id"`
 	SessionID               pgtype.UUID `json:"session_id"`
@@ -1358,6 +1377,7 @@ func (q *Queries) CreateMessageWithTurn(ctx context.Context, arg CreateMessageWi
 		arg.ModelID,
 		arg.EventID,
 		arg.DisplayText,
+		arg.SourceContext,
 		arg.TurnMessageSeq,
 		arg.TurnID,
 		arg.SessionID,
@@ -1400,7 +1420,8 @@ WITH input_rows(
   runtime_type,
   model_id,
   event_id,
-  display_text
+  display_text,
+  source_context
 ) AS (
   VALUES
       (
@@ -1418,64 +1439,68 @@ WITH input_rows(
         $10::text,
         $11::uuid,
         $12::uuid,
-        $13::text
+        $13::text,
+        $14::jsonb
       ),
       (
         2::bigint,
-        $14::uuid,
         $15::uuid,
         $16::uuid,
-        $17::text,
+        $17::uuid,
         $18::text,
+        $19::text,
         'assistant'::text,
-        $19::jsonb,
         $20::jsonb,
         $21::jsonb,
-        $22::text,
+        $22::jsonb,
         $23::text,
-        $24::uuid,
+        $24::text,
         $25::uuid,
-        $26::text
+        $26::uuid,
+        $27::text,
+        $28::jsonb
       ),
       (
         3::bigint,
-        $27::uuid,
-        $28::uuid,
         $29::uuid,
-        $30::text,
-        $31::text,
+        $30::uuid,
+        $31::uuid,
+        $32::text,
+        $33::text,
         'tool'::text,
-        $32::jsonb,
-        $33::jsonb,
         $34::jsonb,
-        $35::text,
-        $36::text,
-        $37::uuid,
-        $38::uuid,
-        $39::text
+        $35::jsonb,
+        $36::jsonb,
+        $37::text,
+        $38::text,
+        $39::uuid,
+        $40::uuid,
+        $41::text,
+        $42::jsonb
       ),
       (
         4::bigint,
-        $40::uuid,
-        $41::uuid,
-        $42::uuid,
-        $43::text,
-        $44::text,
+        $43::uuid,
+        $44::uuid,
+        $45::uuid,
+        $46::text,
+        $47::text,
         'assistant'::text,
-        $45::jsonb,
-        $46::jsonb,
-        $47::jsonb,
-        $48::text,
-        $49::text,
-        $50::uuid,
-        $51::uuid,
-        $52::text
+        $48::jsonb,
+        $49::jsonb,
+        $50::jsonb,
+        $51::text,
+        $52::text,
+        $53::uuid,
+        $54::uuid,
+        $55::text,
+        $56::jsonb
       )
 ),
 next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
-  WHERE bot_sessions.id = $53
+  WHERE bot_sessions.id = $57
   RETURNING (next_turn_position - 1)::bigint AS position
 ),
 inserted_messages AS (
@@ -1496,6 +1521,7 @@ inserted_messages AS (
     model_id,
     event_id,
     display_text,
+    source_context,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -1503,8 +1529,8 @@ inserted_messages AS (
   )
   SELECT
     input.message_id,
-    $54,
-    $53,
+    $58,
+    $57,
     input.sender_channel_identity_id,
     input.sender_user_id,
     input.external_message_id,
@@ -1518,7 +1544,8 @@ inserted_messages AS (
     input.model_id,
     input.event_id,
     input.display_text,
-    $55,
+    input.source_context,
+    $59,
     next_position.position,
     input.turn_message_seq,
     true
@@ -1544,6 +1571,7 @@ type CreateToolTailRoundParams struct {
 	UserModelID                              pgtype.UUID `json:"user_model_id"`
 	UserEventID                              pgtype.UUID `json:"user_event_id"`
 	UserDisplayText                          pgtype.Text `json:"user_display_text"`
+	UserSourceContext                        []byte      `json:"user_source_context"`
 	ToolCallAssistantMessageID               pgtype.UUID `json:"tool_call_assistant_message_id"`
 	ToolCallAssistantSenderChannelIdentityID pgtype.UUID `json:"tool_call_assistant_sender_channel_identity_id"`
 	ToolCallAssistantSenderUserID            pgtype.UUID `json:"tool_call_assistant_sender_user_id"`
@@ -1557,6 +1585,7 @@ type CreateToolTailRoundParams struct {
 	ToolCallAssistantModelID                 pgtype.UUID `json:"tool_call_assistant_model_id"`
 	ToolCallAssistantEventID                 pgtype.UUID `json:"tool_call_assistant_event_id"`
 	ToolCallAssistantDisplayText             pgtype.Text `json:"tool_call_assistant_display_text"`
+	ToolCallAssistantSourceContext           []byte      `json:"tool_call_assistant_source_context"`
 	ToolMessageID                            pgtype.UUID `json:"tool_message_id"`
 	ToolSenderChannelIdentityID              pgtype.UUID `json:"tool_sender_channel_identity_id"`
 	ToolSenderUserID                         pgtype.UUID `json:"tool_sender_user_id"`
@@ -1570,6 +1599,7 @@ type CreateToolTailRoundParams struct {
 	ToolModelID                              pgtype.UUID `json:"tool_model_id"`
 	ToolEventID                              pgtype.UUID `json:"tool_event_id"`
 	ToolDisplayText                          pgtype.Text `json:"tool_display_text"`
+	ToolSourceContext                        []byte      `json:"tool_source_context"`
 	FinalAssistantMessageID                  pgtype.UUID `json:"final_assistant_message_id"`
 	FinalAssistantSenderChannelIdentityID    pgtype.UUID `json:"final_assistant_sender_channel_identity_id"`
 	FinalAssistantSenderUserID               pgtype.UUID `json:"final_assistant_sender_user_id"`
@@ -1583,6 +1613,7 @@ type CreateToolTailRoundParams struct {
 	FinalAssistantModelID                    pgtype.UUID `json:"final_assistant_model_id"`
 	FinalAssistantEventID                    pgtype.UUID `json:"final_assistant_event_id"`
 	FinalAssistantDisplayText                pgtype.Text `json:"final_assistant_display_text"`
+	FinalAssistantSourceContext              []byte      `json:"final_assistant_source_context"`
 	SessionID                                pgtype.UUID `json:"session_id"`
 	BotID                                    pgtype.UUID `json:"bot_id"`
 	TurnID                                   pgtype.UUID `json:"turn_id"`
@@ -1608,6 +1639,7 @@ func (q *Queries) CreateToolTailRound(ctx context.Context, arg CreateToolTailRou
 		arg.UserModelID,
 		arg.UserEventID,
 		arg.UserDisplayText,
+		arg.UserSourceContext,
 		arg.ToolCallAssistantMessageID,
 		arg.ToolCallAssistantSenderChannelIdentityID,
 		arg.ToolCallAssistantSenderUserID,
@@ -1621,6 +1653,7 @@ func (q *Queries) CreateToolTailRound(ctx context.Context, arg CreateToolTailRou
 		arg.ToolCallAssistantModelID,
 		arg.ToolCallAssistantEventID,
 		arg.ToolCallAssistantDisplayText,
+		arg.ToolCallAssistantSourceContext,
 		arg.ToolMessageID,
 		arg.ToolSenderChannelIdentityID,
 		arg.ToolSenderUserID,
@@ -1634,6 +1667,7 @@ func (q *Queries) CreateToolTailRound(ctx context.Context, arg CreateToolTailRou
 		arg.ToolModelID,
 		arg.ToolEventID,
 		arg.ToolDisplayText,
+		arg.ToolSourceContext,
 		arg.FinalAssistantMessageID,
 		arg.FinalAssistantSenderChannelIdentityID,
 		arg.FinalAssistantSenderUserID,
@@ -1647,6 +1681,7 @@ func (q *Queries) CreateToolTailRound(ctx context.Context, arg CreateToolTailRou
 		arg.FinalAssistantModelID,
 		arg.FinalAssistantEventID,
 		arg.FinalAssistantDisplayText,
+		arg.FinalAssistantSourceContext,
 		arg.SessionID,
 		arg.BotID,
 		arg.TurnID,
@@ -1764,6 +1799,21 @@ func (q *Queries) GetHistoryTurnByID(ctx context.Context, arg GetHistoryTurnByID
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getLatestActiveTurnResponseAtBySession = `-- name: GetLatestActiveTurnResponseAtBySession :one
+SELECT MAX(m.created_at)::timestamptz
+FROM bot_visible_history_messages m
+WHERE m.session_id = $1
+  AND m.role IN ('assistant', 'tool')
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+`
+
+func (q *Queries) GetLatestActiveTurnResponseAtBySession(ctx context.Context, sessionID pgtype.UUID) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getLatestActiveTurnResponseAtBySession, sessionID)
+	var column_1 pgtype.Timestamptz
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const getLatestVisibleHistoryTurnBySession = `-- name: GetLatestVisibleHistoryTurnBySession :one
@@ -2357,10 +2407,12 @@ SELECT
   m.display_text,
   m.compact_id,
   m.created_at,
+  source_row.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
+JOIN bot_history_messages source_row ON source_row.id = m.id
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = $1
@@ -2392,6 +2444,7 @@ type ListActiveMessagesSinceRow struct {
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SourceContext           []byte             `json:"source_context"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
 	Platform                pgtype.Text        `json:"platform"`
@@ -2424,6 +2477,7 @@ func (q *Queries) ListActiveMessagesSince(ctx context.Context, arg ListActiveMes
 			&i.DisplayText,
 			&i.CompactID,
 			&i.CreatedAt,
+			&i.SourceContext,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
 			&i.Platform,
@@ -2457,10 +2511,12 @@ SELECT
   m.display_text,
   m.compact_id,
   m.created_at,
+  source_row.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
 FROM bot_visible_history_messages m
+JOIN bot_history_messages source_row ON source_row.id = m.id
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = $1
@@ -2492,6 +2548,7 @@ type ListActiveMessagesSinceBySessionRow struct {
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SourceContext           []byte             `json:"source_context"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
 	Platform                pgtype.Text        `json:"platform"`
@@ -2524,6 +2581,7 @@ func (q *Queries) ListActiveMessagesSinceBySession(ctx context.Context, arg List
 			&i.DisplayText,
 			&i.CompactID,
 			&i.CreatedAt,
+			&i.SourceContext,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
 			&i.Platform,
@@ -2563,6 +2621,7 @@ SELECT
   m.turn_superseded_by_turn_id,
   m.turn_superseded_at,
   m.turn_superseded_reason,
+  m.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
@@ -2597,6 +2656,7 @@ type ListAllMessagesForBackupRow struct {
 	TurnSupersededByTurnID  pgtype.UUID        `json:"turn_superseded_by_turn_id"`
 	TurnSupersededAt        pgtype.Timestamptz `json:"turn_superseded_at"`
 	TurnSupersededReason    pgtype.Text        `json:"turn_superseded_reason"`
+	SourceContext           []byte             `json:"source_context"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
 	Platform                pgtype.Text        `json:"platform"`
@@ -2635,6 +2695,7 @@ func (q *Queries) ListAllMessagesForBackup(ctx context.Context, botID pgtype.UUI
 			&i.TurnSupersededByTurnID,
 			&i.TurnSupersededAt,
 			&i.TurnSupersededReason,
+			&i.SourceContext,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
 			&i.Platform,
@@ -2706,6 +2767,58 @@ func (q *Queries) ListHistoryTurnsByBot(ctx context.Context, botID pgtype.UUID) 
 			&i.SupersededReason,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMessageRefsByCompactID = `-- name: ListMessageRefsByCompactID :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.created_at
+FROM bot_history_messages m
+WHERE m.compact_id = $1
+ORDER BY m.created_at ASC, m.id ASC
+`
+
+type ListMessageRefsByCompactIDRow struct {
+	ID                     pgtype.UUID        `json:"id"`
+	BotID                  pgtype.UUID        `json:"bot_id"`
+	SessionID              pgtype.UUID        `json:"session_id"`
+	ExternalMessageID      pgtype.Text        `json:"external_message_id"`
+	SourceReplyToMessageID pgtype.Text        `json:"source_reply_to_message_id"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+}
+
+// Backfills identity/anchor coverage for summaries that predate persisted
+// artifact coverage without pulling every compacted row's content, usage,
+// or assets.
+func (q *Queries) ListMessageRefsByCompactID(ctx context.Context, compactID pgtype.UUID) ([]ListMessageRefsByCompactIDRow, error) {
+	rows, err := q.db.Query(ctx, listMessageRefsByCompactID, compactID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMessageRefsByCompactIDRow
+	for rows.Next() {
+		var i ListMessageRefsByCompactIDRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -4332,6 +4445,8 @@ SELECT
   m.display_text,
   m.compact_id,
   m.created_at,
+  COALESCE(to_jsonb(source_row)->>'source_revision', source_row.xmin::text)::text AS source_version,
+  source_row.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform,
@@ -4343,19 +4458,23 @@ SELECT
   )::text AS conversation_name,
   r.default_reply_target AS reply_target
 FROM bot_visible_history_messages m
+JOIN bot_history_messages source_row ON source_row.id = m.id
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN bot_channel_routes r ON r.id = s.route_id
 WHERE m.session_id = $1
-  -- Rows stay eligible unless their compact log holds a usable summary,
-  -- matching the read path's substitution predicate (status ok AND non-blank
-  -- summary). This also reclaims rows stranded by a crash between mark and
-  -- complete, by deleted logs, and legacy status='ok' rows whose summary is
-  -- empty or whitespace-only (the pre-existing poison states).
+  -- Rows whose compact claim is absent, incomplete, or invalidated stay
+  -- eligible so current visible source content can be compacted again. A
+  -- usable (non-blank) summary is part of a valid claim: legacy status='ok'
+  -- rows with empty or whitespace-only summaries (the pre-existing poison
+  -- states) reclaim like any other stale claim.
   AND (m.compact_id IS NULL OR NOT EXISTS (
-    SELECT 1 FROM bot_history_message_compacts c
-    WHERE c.id = m.compact_id AND c.status = 'ok'
-      AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL
+    SELECT 1
+    FROM bot_history_message_compact_claim_validity validity
+    JOIN bot_history_message_compacts claim_log ON claim_log.id = validity.compact_id
+    WHERE validity.compact_id = m.compact_id
+      AND validity.sources_current
+      AND NULLIF(BTRIM(claim_log.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL
   ))
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
@@ -4377,6 +4496,8 @@ type ListUncompactedMessagesBySessionRow struct {
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SourceVersion           string             `json:"source_version"`
+	SourceContext           []byte             `json:"source_context"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
 	Platform                pgtype.Text        `json:"platform"`
@@ -4410,12 +4531,65 @@ func (q *Queries) ListUncompactedMessagesBySession(ctx context.Context, sessionI
 			&i.DisplayText,
 			&i.CompactID,
 			&i.CreatedAt,
+			&i.SourceVersion,
+			&i.SourceContext,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
 			&i.Platform,
 			&i.ConversationType,
 			&i.ConversationName,
 			&i.ReplyTarget,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUncoveredTurnResponsesBySession = `-- name: ListUncoveredTurnResponsesBySession :many
+SELECT
+  m.id,
+  m.role,
+  m.content,
+  m.created_at
+FROM bot_visible_history_messages m
+WHERE m.session_id = $1
+  AND m.role IN ('assistant', 'tool')
+  AND m.id <> ALL($2::uuid[])
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+`
+
+type ListUncoveredTurnResponsesBySessionParams struct {
+	SessionID         pgtype.UUID   `json:"session_id"`
+	CoveredMessageIds []pgtype.UUID `json:"covered_message_ids"`
+}
+
+type ListUncoveredTurnResponsesBySessionRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	Role      string             `json:"role"`
+	Content   []byte             `json:"content"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListUncoveredTurnResponsesBySession(ctx context.Context, arg ListUncoveredTurnResponsesBySessionParams) ([]ListUncoveredTurnResponsesBySessionRow, error) {
+	rows, err := q.db.Query(ctx, listUncoveredTurnResponsesBySession, arg.SessionID, arg.CoveredMessageIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUncoveredTurnResponsesBySessionRow
+	for rows.Next() {
+		var i ListUncoveredTurnResponsesBySessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Role,
+			&i.Content,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -4456,6 +4630,7 @@ SELECT
   m.display_text,
   m.compact_id,
   m.created_at,
+  m.source_context,
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform
@@ -4495,6 +4670,7 @@ type ListVisibleMessagesFromBySessionRow struct {
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CompactID               pgtype.UUID        `json:"compact_id"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SourceContext           []byte             `json:"source_context"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
 	Platform                pgtype.Text        `json:"platform"`
@@ -4527,6 +4703,7 @@ func (q *Queries) ListVisibleMessagesFromBySession(ctx context.Context, arg List
 			&i.DisplayText,
 			&i.CompactID,
 			&i.CreatedAt,
+			&i.SourceContext,
 			&i.SenderDisplayName,
 			&i.SenderAvatarUrl,
 			&i.Platform,
@@ -4723,9 +4900,26 @@ func (q *Queries) LockHistoryTurnAppendByRequest(ctx context.Context, arg LockHi
 }
 
 const markMessagesCompacted = `-- name: MarkMessagesCompacted :exec
-UPDATE bot_history_messages
-SET compact_id = $1
-WHERE id = ANY($2::uuid[])
+WITH target_compact AS MATERIALIZED (
+  SELECT compact.id
+  FROM bot_history_message_compacts compact
+  WHERE compact.id = $1
+    AND compact.status = 'pending'
+    AND compact.artifact_level = 0
+  FOR SHARE OF compact
+),
+locked_messages AS MATERIALIZED (
+  SELECT message.id
+  FROM bot_history_messages message
+  CROSS JOIN target_compact
+  WHERE message.id = ANY($2::uuid[])
+  ORDER BY message.id
+  FOR UPDATE OF message
+)
+UPDATE bot_history_messages message
+SET compact_id = target_compact.id
+FROM target_compact, locked_messages
+WHERE message.id = locked_messages.id
 `
 
 type MarkMessagesCompactedParams struct {

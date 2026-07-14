@@ -3,12 +3,14 @@ package compaction
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/messagesource"
 	"github.com/memohai/memoh/internal/userinput"
 )
 
@@ -20,9 +22,10 @@ func testUUID(t *testing.T) pgtype.UUID {
 func mkRow(t *testing.T, role, content string, outputTokens int) sqlc.ListUncompactedMessagesBySessionRow {
 	t.Helper()
 	row := sqlc.ListUncompactedMessagesBySessionRow{
-		ID:      testUUID(t),
-		Role:    role,
-		Content: json.RawMessage(content),
+		ID:            testUUID(t),
+		Role:          role,
+		Content:       json.RawMessage(content),
+		SourceVersion: "1",
 	}
 	if outputTokens > 0 {
 		row.Usage = json.RawMessage(`{"outputTokens":` + strconv.Itoa(outputTokens) + `}`)
@@ -117,6 +120,44 @@ func TestItemsFromRowsPreservesDirectedSignalMetadata(t *testing.T) {
 		record.Scope.ConversationName != "Ops Room" ||
 		record.Scope.ReplyTarget != "thread-9" {
 		t.Fatalf("directed signal was not preserved: %#v scope=%#v", record, record.Scope)
+	}
+}
+
+func TestItemsFromRowsHydratesStoredSourceContext(t *testing.T) {
+	t.Parallel()
+
+	row := mkRow(t, "user", `"hello"`, 0)
+	row.SourceContext = []byte(`{"version":1,"sender_display_name":"Historical Sender","platform":"telegram","conversation_type":"group","conversation_name":"Historical Room"}`)
+	row.SenderDisplayName = pgtype.Text{String: "Live Sender", Valid: true}
+	row.Platform = pgtype.Text{String: "live-platform", Valid: true}
+	row.ConversationType = pgtype.Text{String: "private", Valid: true}
+	row.ConversationName = "Current Room"
+	row.ReplyTarget = pgtype.Text{String: "current-target", Valid: true}
+
+	items, barrierCount := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{row})
+	if barrierCount != 0 || len(items) != 1 {
+		t.Fatalf("items=%d barriers=%d, want one canonical item", len(items), barrierCount)
+	}
+	want := messagesource.NewV1("Historical Sender", "telegram", "group", "Historical Room")
+	if items[0].Record.SourceContext != want {
+		t.Fatalf("source context = %+v, want %+v", items[0].Record.SourceContext, want)
+	}
+	rendered := renderCandidateEntry(items[0].Record)
+	for _, excluded := range []string{"Live Sender", "live-platform", "Current Room", "current-target", "reply_target"} {
+		if strings.Contains(rendered, excluded) {
+			t.Fatalf("canonical entry leaked %q:\n%s", excluded, rendered)
+		}
+	}
+}
+
+func TestItemsFromRowsKeepsMalformedSourceContextAsBarrier(t *testing.T) {
+	t.Parallel()
+
+	row := mkRow(t, "user", `"hello"`, 0)
+	row.SourceContext = []byte(`{"version":2,"sender_display_name":"Alice","platform":"telegram","conversation_type":"group","conversation_name":"Ops Room"}`)
+	items, barrierCount := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{row})
+	if barrierCount != 1 || len(items) != 1 || !items[0].HasPolicy(CompactPolicyMustKeep) {
+		t.Fatalf("items=%#v barriers=%d, want malformed source barrier", items, barrierCount)
 	}
 }
 

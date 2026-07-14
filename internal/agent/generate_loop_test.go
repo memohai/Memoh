@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -11,7 +13,9 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/agent/background"
 	agenttools "github.com/memohai/memoh/internal/agent/tools"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 type staticToolProvider struct {
@@ -359,8 +363,10 @@ func TestRunMidStreamRetryMarksTextLoopCancellationAsAborted(t *testing.T) {
 
 	repeatedChunk := strings.Repeat("abcd", 64)
 	var observedCancel atomic.Bool
+	var retryParams sdk.GenerateParams
 	modelProvider := &atomicMockProvider{
-		stream: func(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+		stream: func(ctx context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
+			retryParams = cloneGenerateParams(params)
 			ch := make(chan sdk.StreamPart)
 			go func() {
 				defer close(ch)
@@ -433,6 +439,8 @@ func TestRunMidStreamRetryMarksTextLoopCancellationAsAborted(t *testing.T) {
 		"api error 500",
 		&strings.Builder{},
 		textLoopProbeBuffer,
+		nil,
+		nil,
 	)
 
 	if retryResult == nil {
@@ -446,5 +454,226 @@ func TestRunMidStreamRetryMarksTextLoopCancellationAsAborted(t *testing.T) {
 	}
 	if !aborted {
 		t.Fatal("expected runMidStreamRetry to report aborted when retry stream hit text-loop cancellation")
+	}
+	if len(retryParams.Messages) != 2 {
+		t.Fatalf("retry messages = %#v, want materialized prefix plus previous output", retryParams.Messages)
+	}
+	if got := retryParams.Messages[0].Content[0].(sdk.TextPart).Text; got != "retry text loop" {
+		t.Fatalf("retry prefix = %q", got)
+	}
+	if got := retryParams.Messages[1].Content[0].(sdk.TextPart).Text; got != "previous step" {
+		t.Fatalf("retry output = %q", got)
+	}
+}
+
+func TestStreamMidStreamRetryPreservesPreparedInjection(t *testing.T) {
+	t.Parallel()
+
+	retryParams := make(chan sdk.GenerateParams, 1)
+	modelProvider := &atomicMockProvider{
+		handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+			switch call {
+			case 1:
+				return &sdk.GenerateResult{
+					FinishReason: sdk.FinishReasonToolCalls,
+					Usage:        sdk.Usage{InputTokens: 11, TotalTokens: 11},
+					ToolCalls: []sdk.ToolCall{{
+						ToolCallID: "call-1",
+						ToolName:   "noop_tool",
+						Input:      map[string]any{},
+					}},
+				}, nil
+			case 2:
+				return nil, errors.New("api error 500")
+			default:
+				retryParams <- cloneGenerateParams(params)
+				return &sdk.GenerateResult{
+					Text:         "done",
+					FinishReason: sdk.FinishReasonStop,
+					Usage:        sdk.Usage{InputTokens: 13, TotalTokens: 13},
+				}, nil
+			}
+		},
+	}
+	a := New(Deps{})
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+		Name:       "noop_tool",
+		Parameters: &jsonschema.Schema{Type: "object"},
+		Execute: func(*sdk.ToolExecContext, any) (any, error) {
+			return "ok", nil
+		},
+	}}}})
+	injectCh := make(chan InjectMessage, 1)
+	injectCh <- InjectMessage{Text: "keep this injection"}
+	close(injectCh)
+	var materializerCalls atomic.Int32
+
+	var terminal StreamEvent
+	for event := range a.Stream(context.Background(), RunConfig{
+		Model:            &sdk.Model{ID: "mock-model", Provider: modelProvider, Type: sdk.ModelTypeChat},
+		Messages:         []sdk.Message{sdk.UserMessage("initial")},
+		SupportsToolCall: true,
+		InjectCh:         injectCh,
+		InitialPromptMaterializer: func(_ context.Context, cfg RunConfig, _ []sdk.Tool) (RunConfig, error) {
+			materializerCalls.Add(1)
+			return cfg, nil
+		},
+	}) {
+		if event.IsTerminal() {
+			terminal = event
+		}
+	}
+
+	params := <-retryParams
+	found := false
+	for _, message := range params.Messages {
+		for _, part := range message.Content {
+			text, ok := part.(sdk.TextPart)
+			if ok && text.Text == "keep this injection" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("retry messages lost prepared injection: %#v", params.Messages)
+	}
+	if got := materializerCalls.Load(); got != 1 {
+		t.Fatalf("materializer calls = %d, want 1", got)
+	}
+	var usage sdk.Usage
+	if err := json.Unmarshal(terminal.Usage, &usage); err != nil {
+		t.Fatalf("unmarshal terminal usage: %v", err)
+	}
+	if usage.InputTokens != 24 {
+		t.Fatalf("terminal input tokens = %d, want initial and retry steps", usage.InputTokens)
+	}
+}
+
+func TestStreamMidStreamRetryKeepsBackgroundBaseline(t *testing.T) {
+	t.Parallel()
+
+	bgMgr := background.New(nil)
+	taskCtx, cancelTask := context.WithCancel(context.Background())
+	defer cancelTask()
+	started := make(chan struct{})
+	bgMgr.Spawn(taskCtx, "bot-1", "session-1", "long task", "/repo", "Long task", func(ctx context.Context, _, _ string, _ int32) (*bridge.ExecResult, error) {
+		close(started)
+		<-ctx.Done()
+		return &bridge.ExecResult{ExitCode: -1}, ctx.Err()
+	}, nil, nil)
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("background task did not start")
+	}
+
+	finalParams := make(chan sdk.GenerateParams, 1)
+	modelProvider := &atomicMockProvider{
+		handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+			switch call {
+			case 1, 3:
+				return &sdk.GenerateResult{
+					FinishReason: sdk.FinishReasonToolCalls,
+					ToolCalls: []sdk.ToolCall{{
+						ToolCallID: fmt.Sprintf("call-%d", call),
+						ToolName:   "noop_tool",
+						Input:      map[string]any{},
+					}},
+				}, nil
+			case 2:
+				return nil, errors.New("api error 500")
+			default:
+				finalParams <- cloneGenerateParams(params)
+				return &sdk.GenerateResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+			}
+		},
+	}
+	a := New(Deps{})
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+		Name:       "noop_tool",
+		Parameters: &jsonschema.Schema{Type: "object"},
+		Execute: func(*sdk.ToolExecContext, any) (any, error) {
+			return "ok", nil
+		},
+	}}}})
+
+	for range a.Stream(context.Background(), RunConfig{
+		Model:             &sdk.Model{ID: "mock-model", Provider: modelProvider, Type: sdk.ModelTypeChat},
+		System:            "base system",
+		Messages:          []sdk.Message{sdk.UserMessage("initial")},
+		SupportsToolCall:  true,
+		BackgroundManager: bgMgr,
+		Identity:          SessionContext{BotID: "bot-1", SessionID: "session-1"},
+	}) {
+	}
+
+	params := <-finalParams
+	if got := strings.Count(params.System, "Currently running background tasks:"); got != 1 {
+		t.Fatalf("background summary count = %d, want 1:\n%s", got, params.System)
+	}
+}
+
+type anthropicAtomicProvider struct {
+	*atomicMockProvider
+}
+
+func (*anthropicAtomicProvider) Name() string { return "anthropic-messages" }
+
+func TestStreamInjectedRecorderCountsOnlyCompletedOutputMessages(t *testing.T) {
+	t.Parallel()
+
+	modelProvider := &anthropicAtomicProvider{atomicMockProvider: &atomicMockProvider{
+		handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+			if call == 1 {
+				return &sdk.GenerateResult{
+					FinishReason: sdk.FinishReasonToolCalls,
+					ToolCalls: []sdk.ToolCall{{
+						ToolCallID: "call-1",
+						ToolName:   "noop_tool",
+						Input:      map[string]any{},
+					}},
+				}, nil
+			}
+			return &sdk.GenerateResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+		},
+	}}
+	agent := New(Deps{})
+	agent.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+		Name:       "noop_tool",
+		Parameters: &jsonschema.Schema{Type: "object"},
+		Execute: func(*sdk.ToolExecContext, any) (any, error) {
+			return "ok", nil
+		},
+	}}}})
+	injectCh := make(chan InjectMessage, 1)
+	injectCh <- InjectMessage{ReceiptID: "receipt-1", Text: "injected"}
+	close(injectCh)
+	insertAfter := -1
+	recordedReceiptID := ""
+	recordedText := ""
+
+	for range agent.Stream(context.Background(), RunConfig{
+		Model:            &sdk.Model{ID: "claude-test", Provider: modelProvider, Type: sdk.ModelTypeChat},
+		System:           "cached system",
+		Messages:         []sdk.Message{sdk.UserMessage("initial")},
+		SupportsToolCall: true,
+		InjectCh:         injectCh,
+		InjectedRecorder: func(receipt InjectedReceipt) {
+			recordedReceiptID = string(receipt.ID)
+			recordedText = receipt.ModelText
+			insertAfter = receipt.InsertAfter
+		},
+		InitialPromptMaterializer: func(_ context.Context, cfg RunConfig, _ []sdk.Tool) (RunConfig, error) {
+			cfg.Messages = append([]sdk.Message(nil), cfg.Messages...)
+			return cfg, nil
+		},
+	}) {
+	}
+
+	if insertAfter != 2 {
+		t.Fatalf("injected insertAfter = %d, want two completed output messages", insertAfter)
+	}
+	if recordedReceiptID != "receipt-1" || recordedText != "injected" {
+		t.Fatalf("recorded injection = %q/%q, want receipt-1/injected", recordedReceiptID, recordedText)
 	}
 }

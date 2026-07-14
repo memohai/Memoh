@@ -34,8 +34,9 @@ func prependTurnUserMessage(req conversation.ChatRequest, output []conversation.
 	}
 	round := make([]conversation.ModelMessage, 0, 1+len(output))
 	round = append(round, conversation.ModelMessage{
-		Role:    "user",
-		Content: conversation.NewTextContent(req.Query),
+		Role:        "user",
+		Content:     conversation.NewTextContent(req.Query),
+		UserReceipt: req.UserReceipt,
 	})
 	return append(round, output...)
 }

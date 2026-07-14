@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/workspace/bridge"
@@ -122,8 +125,8 @@ func TestRunCompactionManualRequestBypassesFailureCooldown(t *testing.T) {
 	if manualStub.calls != 1 {
 		t.Fatalf("manual request must call the model, not skip on cooldown (calls=%d)", manualStub.calls)
 	}
-	if !q.created || len(q.markedIDs) == 0 || q.completed.Status != "ok" {
-		t.Fatalf("manual run must do real work: created=%v marked=%d status=%q", q.created, len(q.markedIDs), q.completed.Status)
+	if !q.created || len(q.markedIDs) == 0 || q.finalizeCalls == 0 {
+		t.Fatalf("manual run must do real work: created=%v marked=%d finalized=%d", q.created, len(q.markedIDs), q.finalizeCalls)
 	}
 
 	// An automatic request in the same window still respects the cooldown: the
@@ -306,59 +309,6 @@ func TestRunCompactionSyncModelFailureStillArmsCooldown(t *testing.T) {
 	}
 }
 
-func TestRunCompactionSyncSurfacesCompletionPersistenceFailure(t *testing.T) {
-	t.Parallel()
-
-	q := &fakeQueries{uncompacted: machineryCorpus(t), completeErr: errors.New("db down")}
-	svc := newMachineryService(q)
-	stub := &stubModel{summary: "durable summary"}
-
-	res, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 200))
-	if err == nil {
-		t.Fatal("completion persistence failure must surface an error")
-	}
-	if res.Status == StatusOK {
-		t.Fatal("result must not claim ok when the summary was never persisted")
-	}
-}
-
-func TestDoCompactionSharesPromptBudgetWithPriorContext(t *testing.T) {
-	t.Parallel()
-
-	rows := make([]sqlc.ListUncompactedMessagesBySessionRow, 0, 13)
-	for i := 0; i < 12; i++ {
-		role := "user"
-		if i%2 == 1 {
-			role = "assistant"
-		}
-		rows = append(rows, textRow(t, role, 100))
-	}
-	rows = append(rows, mkRow(t, "user", `"current"`, 40))
-
-	run := func(t *testing.T, priorLogs []sqlc.BotHistoryMessageCompact) int {
-		t.Helper()
-		q := &fakeQueries{uncompacted: rows, priorLogs: priorLogs}
-		stub := &stubModel{summary: "condensed"}
-		svc := newMachineryService(q)
-		cfg := machineryConfig(stub, 100)
-		cfg.MaxCompactTokens = 1000
-		res, err := svc.RunCompactionSync(context.Background(), cfg)
-		if err != nil {
-			t.Fatalf("RunCompactionSync: %v", err)
-		}
-		if res.Status != StatusOK {
-			t.Fatalf("status = %q, want %q", res.Status, StatusOK)
-		}
-		return len(q.markedIDs)
-	}
-
-	without := run(t, nil)
-	with := run(t, []sqlc.BotHistoryMessageCompact{{Status: "ok", Summary: strings.Repeat("p", 1200)}})
-	if with >= without {
-		t.Fatalf("prior context must carve out of the entries budget: marked %d with prior, %d without", with, without)
-	}
-}
-
 func TestDoCompactionSacrificesPriorContextForOversizedEntries(t *testing.T) {
 	t.Parallel()
 
@@ -368,15 +318,14 @@ func TestDoCompactionSacrificesPriorContextForOversizedEntries(t *testing.T) {
 		mkRow(t, "user", `"current"`, 40),
 	}
 	prior := strings.Repeat("history so far ", 70) // ~262 tokens, within the 1/4 allowance
-	q := &fakeQueries{
-		uncompacted: rows,
-		priorLogs:   []sqlc.BotHistoryMessageCompact{{Status: "ok", Summary: prior}},
-	}
 	stub := &stubModel{summary: "condensed"}
-	svc := newMachineryService(q)
-
 	cfg := machineryConfig(stub, 100)
 	cfg.MaxCompactTokens = 1000
+	q := &fakeQueries{
+		uncompacted: rows,
+		priorLogs:   []sqlc.BotHistoryMessageCompact{priorLogFor(t, cfg, prior)},
+	}
+	svc := newMachineryService(q)
 	res, err := svc.RunCompactionSync(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("RunCompactionSync: %v", err)
@@ -404,56 +353,24 @@ func TestDoCompactionSacrificesPriorContextForOversizedEntries(t *testing.T) {
 func TestDoCompactionCountsPriorSeparatorsInSharedBudget(t *testing.T) {
 	t.Parallel()
 
+	stub := &stubModel{summary: "condensed"}
+	cfg := machineryConfig(stub, 100)
+	cfg.MaxCompactTokens = 1000
 	priors := make([]sqlc.BotHistoryMessageCompact, 0, 100)
 	for i := 0; i < 100; i++ {
-		priors = append(priors, sqlc.BotHistoryMessageCompact{Status: "ok", Summary: "abcd"})
+		priors = append(priors, priorLogFor(t, cfg, "abcd"))
 	}
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
 		textRow(t, "user", 917),
 		mkRow(t, "user", `"current"`, 40),
 	}
 	q := &fakeQueries{uncompacted: rows, priorLogs: priors}
-	stub := &stubModel{summary: "condensed"}
 	svc := newMachineryService(q)
-
-	cfg := machineryConfig(stub, 100)
-	cfg.MaxCompactTokens = 1000
 	if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
 		t.Fatalf("RunCompactionSync = %v, %v", res, err)
 	}
 	if got := estimateBytesAsTokens(stub.prompt); got > 1000+320 {
 		t.Fatalf("combined prompt ~%d tokens: prior separators must count toward the shared budget", got)
-	}
-}
-
-func TestDoCompactionTruncatesEntriesPastTheTotalCap(t *testing.T) {
-	t.Parallel()
-
-	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		textRow(t, "user", 1202),
-		mkRow(t, "user", `"current"`, 40),
-	}
-	q := &fakeQueries{uncompacted: rows}
-	stub := &stubModel{summary: "condensed"}
-	svc := newMachineryService(q)
-
-	cfg := machineryConfig(stub, 100)
-	cfg.MaxCompactTokens = 1000
-	res, err := svc.RunCompactionSync(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("RunCompactionSync: %v", err)
-	}
-	if res.Status != StatusOK {
-		t.Fatalf("status = %q, want %q", res.Status, StatusOK)
-	}
-	if len(q.markedIDs) != 1 || q.markedIDs[0] != rows[0].ID {
-		t.Fatalf("marked = %v, want the oversized row", q.markedIDs)
-	}
-	if !strings.Contains(stub.prompt, truncationMarker) {
-		t.Fatal("an entry larger than the whole budget must be truncated, not sent verbatim")
-	}
-	if got := estimateBytesAsTokens(stub.prompt); got > 1000+320 {
-		t.Fatalf("combined prompt ~%d tokens, want within the total cap plus fixed overhead", got)
 	}
 }
 
@@ -747,7 +664,7 @@ func TestPostCompactHookPanicDoesNotPoisonASuccessfulRun(t *testing.T) {
 	svc := newMachineryService(q)
 	provider := &panickingHookProvider{}
 	provider.armed.Store(true)
-	q.onComplete = func() {
+	q.beforeFinalize = func() {
 		svc.SetHookService(hooks.NewService(slog.New(slog.DiscardHandler), provider))
 	}
 	cfg := machineryConfig(stub, 450)
@@ -774,7 +691,7 @@ func TestPostCompactHookPanicDoesNotPoisonASuccessfulRun(t *testing.T) {
 		t.Fatal("the post-hook must actually have run (and panicked)")
 	}
 
-	q.onComplete = nil
+	q.beforeFinalize = nil
 	svc.SetHookService(nil)
 	if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
 		t.Fatalf("a contained post-hook panic must not arm the cooldown: res=%#v err=%v", res, err)
@@ -811,3 +728,14 @@ func TestExpiredFailureCooldownEntryIsDropped(t *testing.T) {
 type doneHiddenContext struct{ context.Context }
 
 func (doneHiddenContext) Done() <-chan struct{} { return nil }
+
+func priorLogFor(t *testing.T, cfg TriggerConfig, summary string) sqlc.BotHistoryMessageCompact {
+	t.Helper()
+	return sqlc.BotHistoryMessageCompact{
+		ID:        pgtype.UUID{Bytes: uuid.New(), Valid: true},
+		BotID:     pgtype.UUID{Bytes: uuid.MustParse(cfg.BotID), Valid: true},
+		SessionID: pgtype.UUID{Bytes: uuid.MustParse(cfg.SessionID), Valid: true},
+		Status:    "ok",
+		Summary:   summary,
+	}
+}

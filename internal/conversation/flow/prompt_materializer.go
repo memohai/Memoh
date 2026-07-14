@@ -1,0 +1,486 @@
+package flow
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
+	"strings"
+	"sync"
+
+	sdk "github.com/memohai/twilight-ai/sdk"
+
+	"github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/contextassembly"
+	"github.com/memohai/memoh/internal/contextbudget"
+	"github.com/memohai/memoh/internal/messageconv"
+)
+
+type initialPromptPlan struct {
+	sources             []contextassembly.Source
+	baselineMessages    []sdk.Message
+	nativePartsBySource map[string][]sdk.MessagePart
+	currentSourceID     string
+	contextBudget       int
+	notice              string
+}
+
+type initialPromptPlanInput struct {
+	Sources         []contextassembly.Source
+	CurrentSourceID string
+	ContextBudget   int
+	Notice          string
+	StripTools      bool
+	NativeParts     map[string][]sdk.MessagePart
+}
+
+type initialPromptResult struct {
+	AccountingReady bool
+	Config          agent.RunConfig
+	Entries         []contextassembly.Entry
+	Allocation      contextbudget.Allocation
+	FixedTokens     int
+	MessageTokens   int
+	TotalTokens     int
+}
+
+type initialPromptOutcome struct {
+	AccountingReady bool
+	Allocation      contextbudget.Allocation
+	FixedTokens     int
+	MessageTokens   int
+	TotalTokens     int
+	Err             error
+}
+
+type initialPromptState struct {
+	mu                sync.Mutex
+	outcome           initialPromptOutcome
+	set               bool
+	compactionClaimed bool
+}
+
+func (s *initialPromptState) ClaimCompaction() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.compactionClaimed {
+		return false
+	}
+	s.compactionClaimed = true
+	return true
+}
+
+func (s *initialPromptState) Store(result initialPromptResult, err error) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.outcome = initialPromptOutcome{
+		AccountingReady: result.AccountingReady,
+		Allocation:      clonePromptAllocation(result.Allocation),
+		FixedTokens:     result.FixedTokens,
+		MessageTokens:   result.MessageTokens,
+		TotalTokens:     result.TotalTokens,
+		Err:             err,
+	}
+	s.set = true
+	s.mu.Unlock()
+}
+
+func (s *initialPromptState) Snapshot() (initialPromptOutcome, bool) {
+	if s == nil {
+		return initialPromptOutcome{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	outcome := s.outcome
+	outcome.Allocation = clonePromptAllocation(outcome.Allocation)
+	return outcome, s.set
+}
+
+func clonePromptAllocation(allocation contextbudget.Allocation) contextbudget.Allocation {
+	allocation.Kept = append([]contextbudget.Decision(nil), allocation.Kept...)
+	allocation.Dropped = append([]contextbudget.Decision(nil), allocation.Dropped...)
+	return allocation
+}
+
+func withInitialPromptMaterializer(
+	cfg agent.RunConfig,
+	plan initialPromptPlan,
+	projection budgetSourceProjection,
+) (agent.RunConfig, *initialPromptState) {
+	state := &initialPromptState{}
+	cfg.InitialPromptMaterializer = func(ctx context.Context, prepared agent.RunConfig, tools []sdk.Tool) (agent.RunConfig, error) {
+		result, err := plan.Materialize(ctx, prepared, tools)
+		result.Config.ContextFrags = contextFragsForPromptEntries(result.Entries, projection)
+		state.Store(result, err)
+		return result.Config, err
+	}
+	return cfg, state
+}
+
+type PromptEnvelopeOverflowError struct {
+	ContextBudget int
+	FixedTokens   int
+	MessageLimit  int
+	TotalTokens   int
+	RequiredIDs   []string
+	Result        contextassembly.Result
+	Cause         error
+}
+
+func (e *PromptEnvelopeOverflowError) Error() string {
+	return fmt.Sprintf("provider prompt exceeds context budget: emitted %d tokens with limit %d", e.TotalTokens, e.ContextBudget)
+}
+
+func (e *PromptEnvelopeOverflowError) Unwrap() error {
+	return e.Cause
+}
+
+func newInitialPromptPlan(input initialPromptPlanInput) (initialPromptPlan, error) {
+	sources, err := clonePromptSources(input.Sources)
+	if err != nil {
+		return initialPromptPlan{}, err
+	}
+	if input.StripTools {
+		sources = applyPromptToolPolicy(sources)
+	}
+	if input.CurrentSourceID != "" {
+		currentIndex, err := uniquePromptSourceIndex(sources, input.CurrentSourceID)
+		if err != nil {
+			return initialPromptPlan{}, err
+		}
+		if sources[currentIndex].Message.Role != sdk.MessageRoleUser {
+			return initialPromptPlan{}, fmt.Errorf("current prompt source %q must have user role", input.CurrentSourceID)
+		}
+		sources[currentIndex].Retention = contextbudget.RetentionRequired
+	}
+	nativeParts, err := clonePromptNativeParts(input.NativeParts)
+	if err != nil {
+		return initialPromptPlan{}, err
+	}
+	for sourceID, parts := range nativeParts {
+		if len(parts) == 0 {
+			continue
+		}
+		sourceIndex, err := uniquePromptSourceIndex(sources, sourceID)
+		if err != nil {
+			return initialPromptPlan{}, err
+		}
+		if sources[sourceIndex].Message.Role != sdk.MessageRoleUser {
+			return initialPromptPlan{}, fmt.Errorf("native prompt source %q must have user role", sourceID)
+		}
+		sources[sourceIndex].Retention = contextbudget.RetentionRequired
+	}
+	baselineSources, err := clonePromptSources(sources)
+	if err != nil {
+		return initialPromptPlan{}, err
+	}
+	for sourceID, parts := range nativeParts {
+		if err := appendPromptNativeParts(baselineSources, sourceID, parts); err != nil {
+			return initialPromptPlan{}, err
+		}
+	}
+	assembled, err := contextassembly.Assemble(contextassembly.Request{
+		Sources:             baselineSources,
+		SyntheticToolResult: syntheticToolClosureError,
+	})
+	if err != nil {
+		return initialPromptPlan{}, err
+	}
+	baseline := make([]sdk.Message, len(assembled.Entries))
+	for index, entry := range assembled.Entries {
+		baseline[index] = entry.Message
+	}
+	return initialPromptPlan{
+		sources:             sources,
+		baselineMessages:    baseline,
+		nativePartsBySource: nativeParts,
+		currentSourceID:     input.CurrentSourceID,
+		contextBudget:       input.ContextBudget,
+		notice:              input.Notice,
+	}, nil
+}
+
+func applyPromptToolPolicy(sources []contextassembly.Source) []contextassembly.Source {
+	protected := requiredPromptOccurrenceSources(sources)
+	for index := range sources {
+		source := &sources[index]
+		if source.Retention == contextbudget.RetentionRequired || source.Retention == contextbudget.RetentionDrop || protected[index] {
+			continue
+		}
+		messages := messageconv.SDKMessagesToModelMessages([]sdk.Message{source.Message})
+		if len(messages) != 1 {
+			continue
+		}
+		message := messages[0]
+		if !strings.EqualFold(message.Role, string(sdk.MessageRoleTool)) &&
+			(!strings.EqualFold(message.Role, string(sdk.MessageRoleAssistant)) || !hasToolCallContent(message)) {
+			continue
+		}
+		filtered := stripToolMessages(messages)
+		if len(filtered) == 0 {
+			source.Retention = contextbudget.RetentionDrop
+			source.PolicyReason = contextbudget.DropPolicy
+			continue
+		}
+		usage := source.Message.Usage
+		source.Message = messageconv.ModelMessageToSDKMessage(filtered[0])
+		source.Message.Usage = usage
+	}
+	return sources
+}
+
+func requiredPromptOccurrenceSources(sources []contextassembly.Source) []bool {
+	messages := make([]sdk.Message, len(sources))
+	protected := make([]bool, len(sources))
+	for index, source := range sources {
+		messages[index] = source.Message
+		protected[index] = source.Retention == contextbudget.RetentionRequired
+	}
+	matches := messageconv.AnalyzeSDKToolOccurrences(messages).Matches
+	for changed := true; changed; {
+		changed = false
+		for _, match := range matches {
+			if protected[match.CallCarrierIndex] == protected[match.ResultCarrierIndex] {
+				continue
+			}
+			protected[match.CallCarrierIndex] = true
+			protected[match.ResultCarrierIndex] = true
+			changed = true
+		}
+	}
+	return protected
+}
+
+func (p initialPromptPlan) BaselineMessages() ([]sdk.Message, error) {
+	messages := make([]sdk.Message, len(p.baselineMessages))
+	for index, message := range p.baselineMessages {
+		cloned, err := clonePromptMessage(message)
+		if err != nil {
+			return nil, err
+		}
+		messages[index] = cloned
+	}
+	return messages, nil
+}
+
+func (p initialPromptPlan) Materialize(_ context.Context, cfg agent.RunConfig, tools []sdk.Tool) (initialPromptResult, error) {
+	if !hasPromptBaseline(cfg.Messages, p.baselineMessages) {
+		return initialPromptResult{}, errors.New("initial prompt baseline changed before materialization")
+	}
+
+	sources, err := clonePromptSources(p.sources)
+	if err != nil {
+		return initialPromptResult{}, err
+	}
+	for sourceID, parts := range p.nativePartsBySource {
+		if err := appendPromptNativeParts(sources, sourceID, parts); err != nil {
+			return initialPromptResult{}, err
+		}
+		if len(parts) > 0 {
+			cfg.ContextQueryMaterialized = true
+		}
+	}
+	if !cfg.ContextQueryMaterialized {
+		imageParts, err := promptImageParts(cfg.InlineImages)
+		if err != nil {
+			return initialPromptResult{}, err
+		}
+		if len(imageParts) > 0 {
+			if p.currentSourceID == "" {
+				return initialPromptResult{}, errors.New("inline images require a current prompt source identity")
+			}
+			currentIndex, err := uniquePromptSourceIndex(sources, p.currentSourceID)
+			if err != nil {
+				return initialPromptResult{}, err
+			}
+			current := &sources[currentIndex]
+			current.Message.Content = append(current.Message.Content, imageParts...)
+			current.Retention = contextbudget.RetentionRequired
+			cfg.ContextQueryMaterialized = true
+		}
+	}
+	for index, message := range cfg.Messages[len(p.baselineMessages):] {
+		cloned, err := clonePromptMessage(message)
+		if err != nil {
+			return initialPromptResult{}, fmt.Errorf("clone prepared prompt message %d: %w", index, err)
+		}
+		sources = append(sources, contextassembly.Source{
+			ID:        fmt.Sprintf("prepared:%d", index),
+			Message:   cloned,
+			Retention: contextbudget.RetentionRequired,
+		})
+	}
+
+	fixedTokens, err := providerFixedPromptTokens(cfg, tools)
+	if err != nil {
+		return initialPromptResult{}, err
+	}
+	var messageLimit *int
+	limit := 0
+	if p.contextBudget > 0 {
+		limit = max(p.contextBudget-fixedTokens, 0)
+		messageLimit = &limit
+	}
+	assembled, assembleErr := contextassembly.Assemble(contextassembly.Request{
+		Sources:             sources,
+		EnvelopeLimit:       messageLimit,
+		Notice:              p.notice,
+		SyntheticToolResult: syntheticToolClosureError,
+	})
+	result := initialPromptResult{
+		AccountingReady: true,
+		Config:          cfg,
+		Entries:         assembled.Entries,
+		Allocation:      assembled.Allocation,
+		FixedTokens:     fixedTokens,
+		MessageTokens:   assembled.EmittedTokens,
+		TotalTokens:     fixedTokens + assembled.EmittedTokens,
+	}
+	result.Config.Messages = make([]sdk.Message, len(assembled.Entries))
+	for index, entry := range assembled.Entries {
+		cloned, err := clonePromptMessage(entry.Message)
+		if err != nil {
+			return result, err
+		}
+		result.Config.Messages[index] = cloned
+	}
+	if p.contextBudget <= 0 || result.TotalTokens <= p.contextBudget {
+		return result, assembleErr
+	}
+	return result, &PromptEnvelopeOverflowError{
+		ContextBudget: p.contextBudget,
+		FixedTokens:   fixedTokens,
+		MessageLimit:  limit,
+		TotalTokens:   result.TotalTokens,
+		RequiredIDs:   requiredPromptSourceIDs(sources),
+		Result:        assembled,
+		Cause:         assembleErr,
+	}
+}
+
+func uniquePromptSourceIndex(sources []contextassembly.Source, id string) (int, error) {
+	index := -1
+	for sourceIndex, source := range sources {
+		if source.ID != id {
+			continue
+		}
+		if index >= 0 {
+			return -1, fmt.Errorf("current prompt source %q is not unique", id)
+		}
+		index = sourceIndex
+	}
+	if index < 0 {
+		return -1, fmt.Errorf("current prompt source %q was not found", id)
+	}
+	return index, nil
+}
+
+func hasPromptBaseline(messages []sdk.Message, baseline []sdk.Message) bool {
+	if len(messages) < len(baseline) {
+		return false
+	}
+	for index := range baseline {
+		if !reflect.DeepEqual(messages[index], baseline[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+func promptImageParts(images []sdk.ImagePart) ([]sdk.MessagePart, error) {
+	parts := make([]sdk.MessagePart, 0, len(images))
+	for _, image := range images {
+		if strings.TrimSpace(image.Image) != "" {
+			parts = append(parts, image)
+		}
+	}
+	if len(parts) == 0 {
+		return nil, nil
+	}
+	cloned, err := clonePromptMessage(sdk.Message{Role: sdk.MessageRoleUser, Content: parts})
+	if err != nil {
+		return nil, fmt.Errorf("clone inline prompt images: %w", err)
+	}
+	return cloned.Content, nil
+}
+
+func providerFixedPromptTokens(cfg agent.RunConfig, tools []sdk.Tool) (int, error) {
+	toolTokens, err := messageconv.EstimateSDKToolDefinitionTokens(tools)
+	if err != nil {
+		return 0, err
+	}
+	return contextbudget.EstimateTextTokens(cfg.System) + toolTokens, nil
+}
+
+func clonePromptSources(sources []contextassembly.Source) ([]contextassembly.Source, error) {
+	cloned := make([]contextassembly.Source, len(sources))
+	for index, source := range sources {
+		cloned[index] = source
+		message, err := clonePromptMessage(source.Message)
+		if err != nil {
+			return nil, fmt.Errorf("clone prompt source %q: %w", source.ID, err)
+		}
+		cloned[index].Message = message
+	}
+	return cloned, nil
+}
+
+func clonePromptNativeParts(partsBySource map[string][]sdk.MessagePart) (map[string][]sdk.MessagePart, error) {
+	if len(partsBySource) == 0 {
+		return nil, nil
+	}
+	cloned := make(map[string][]sdk.MessagePart, len(partsBySource))
+	for sourceID, parts := range partsBySource {
+		message, err := clonePromptMessage(sdk.Message{Role: sdk.MessageRoleUser, Content: parts})
+		if err != nil {
+			return nil, fmt.Errorf("clone native prompt parts for %q: %w", sourceID, err)
+		}
+		cloned[sourceID] = message.Content
+	}
+	return cloned, nil
+}
+
+func appendPromptNativeParts(sources []contextassembly.Source, sourceID string, parts []sdk.MessagePart) error {
+	if len(parts) == 0 {
+		return nil
+	}
+	index, err := uniquePromptSourceIndex(sources, sourceID)
+	if err != nil {
+		return err
+	}
+	message, err := clonePromptMessage(sdk.Message{Role: sdk.MessageRoleUser, Content: parts})
+	if err != nil {
+		return fmt.Errorf("clone native prompt parts for %q: %w", sourceID, err)
+	}
+	sources[index].Message.Content = append(sources[index].Message.Content, message.Content...)
+	sources[index].Retention = contextbudget.RetentionRequired
+	return nil
+}
+
+func clonePromptMessage(message sdk.Message) (sdk.Message, error) {
+	encoded, err := json.Marshal(message)
+	if err != nil {
+		return sdk.Message{}, fmt.Errorf("marshal prompt message: %w", err)
+	}
+	var cloned sdk.Message
+	if err := json.Unmarshal(encoded, &cloned); err != nil {
+		return sdk.Message{}, fmt.Errorf("unmarshal prompt message: %w", err)
+	}
+	return cloned, nil
+}
+
+func requiredPromptSourceIDs(sources []contextassembly.Source) []string {
+	ids := make([]string, 0)
+	for _, source := range sources {
+		if source.Retention == contextbudget.RetentionRequired {
+			ids = append(ids, source.ID)
+		}
+	}
+	return ids
+}

@@ -503,13 +503,3 @@ func markableGroupCost(items []CompactionCandidate, group []int) int {
 	}
 	return cost
 }
-
-// markableCompactCost sums markableGroupCost across the span — the tokens its
-// entries will actually occupy in the summarizer prompt.
-func markableCompactCost(items []CompactionCandidate) int {
-	total := 0
-	for _, group := range toolExchangeGroups(items) {
-		total += markableGroupCost(items, group)
-	}
-	return total
-}

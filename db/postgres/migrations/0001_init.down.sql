@@ -1,5 +1,56 @@
 ALTER TABLE IF EXISTS bot_channel_routes DROP CONSTRAINT IF EXISTS fk_bot_channel_routes_active_session;
 ALTER TABLE IF EXISTS bot_history_messages DROP CONSTRAINT IF EXISTS fk_compact_id;
+DROP VIEW IF EXISTS bot_history_message_compact_claim_validity;
+
+DROP TRIGGER IF EXISTS history_message_source_revision_invalidation
+  ON bot_history_messages;
+DROP FUNCTION IF EXISTS invalidate_compaction_claim_on_source_revision();
+DROP TRIGGER IF EXISTS history_message_asset_source_revision_bump
+  ON bot_history_message_assets;
+DROP FUNCTION IF EXISTS bump_message_source_revision_for_asset();
+DROP TRIGGER IF EXISTS history_message_source_revision_bump
+  ON bot_history_messages;
+DROP FUNCTION IF EXISTS bump_history_message_source_revision();
+DROP TRIGGER IF EXISTS history_message_source_context_capture
+  ON bot_history_messages;
+DROP FUNCTION IF EXISTS capture_history_message_source_context();
+DROP FUNCTION IF EXISTS resolve_history_message_source_context(bot_history_messages);
+DROP FUNCTION IF EXISTS normalize_history_message_source_text(TEXT);
+
+DROP TRIGGER IF EXISTS history_message_topology_capture
+  ON bot_history_messages;
+DROP TRIGGER IF EXISTS history_topology_pending_flush
+  ON bot_history_topology_pending;
+DROP TRIGGER IF EXISTS history_topology_session_cleanup
+  ON bot_sessions;
+DROP FUNCTION IF EXISTS cleanup_history_topology_session();
+DROP FUNCTION IF EXISTS flush_history_topology_positions();
+DROP FUNCTION IF EXISTS record_history_message_topology_change();
+DROP FUNCTION IF EXISTS enqueue_history_topology_position(UUID, BIGINT);
+DROP TABLE IF EXISTS bot_history_message_compact_topology;
+DROP TABLE IF EXISTS bot_history_topology_pending;
+DROP TABLE IF EXISTS bot_history_topology_positions;
+DROP TABLE IF EXISTS bot_history_topology_counters;
+
+DROP TRIGGER IF EXISTS compaction_message_claim_finalize
+  ON bot_history_message_compacts;
+DROP TRIGGER IF EXISTS compaction_message_claim_insert_guard
+  ON bot_history_messages;
+DROP TRIGGER IF EXISTS compaction_message_claim_guard
+  ON bot_history_messages;
+DROP TRIGGER IF EXISTS compaction_log_terminal_artifact_guard
+  ON bot_history_message_compacts;
+DROP FUNCTION IF EXISTS finalize_compaction_message_claims();
+DROP FUNCTION IF EXISTS guard_compaction_message_claim();
+ALTER TABLE IF EXISTS bot_history_messages
+  DROP CONSTRAINT IF EXISTS compact_claim_invalidation_requires_finalized,
+  DROP COLUMN IF EXISTS compact_claim_invalidated,
+  DROP CONSTRAINT IF EXISTS compact_claim_finalized_requires_owner,
+  DROP COLUMN IF EXISTS compact_claim_finalized;
+
+DROP TRIGGER IF EXISTS compaction_log_terminal_status_guard
+  ON bot_history_message_compacts;
+DROP FUNCTION IF EXISTS guard_compaction_log_terminal_status();
 
 DROP TABLE IF EXISTS bot_user_grants CASCADE;
 DROP TABLE IF EXISTS user_provider_oauth_tokens CASCADE;
@@ -9,7 +60,10 @@ DROP TABLE IF EXISTS bot_email_bindings CASCADE;
 DROP TABLE IF EXISTS email_oauth_tokens CASCADE;
 DROP TABLE IF EXISTS email_providers CASCADE;
 DROP TABLE IF EXISTS schedule_logs CASCADE;
+DROP TABLE IF EXISTS bot_history_message_compact_validations CASCADE;
+DROP TABLE IF EXISTS bot_history_message_compact_parent_edges CASCADE;
 DROP TABLE IF EXISTS bot_history_message_compacts CASCADE;
+DROP FUNCTION IF EXISTS sync_compaction_artifact_parent_edges();
 DROP TABLE IF EXISTS bot_heartbeat_logs CASCADE;
 DROP TABLE IF EXISTS bot_history_message_assets CASCADE;
 DROP TABLE IF EXISTS media_assets CASCADE;

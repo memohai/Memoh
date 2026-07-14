@@ -75,6 +75,15 @@ type readMediaInjection struct {
 	message   sdk.Message
 }
 
+func (s *readMediaDecorationState) injectedMessageCount() int {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.injections)
+}
+
 func (s *readMediaDecorationState) prepareStep(params *sdk.GenerateParams) *sdk.GenerateParams {
 	if s == nil || params == nil {
 		return nil

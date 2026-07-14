@@ -3,7 +3,9 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,85 +15,9 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/messageconv"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 )
-
-func TestExtractNewImageRefs(t *testing.T) {
-	rc := RenderedContext{
-		{ReceivedAtMs: 100, ImageRefs: []ImageAttachmentRef{{ContentHash: "old-hash", Mime: "image/png"}}},
-		{ReceivedAtMs: 200, IsMyself: true, ImageRefs: []ImageAttachmentRef{{ContentHash: "self-hash"}}},
-		{ReceivedAtMs: 300, ImageRefs: []ImageAttachmentRef{{ContentHash: "new-hash", Mime: "image/jpeg"}}},
-		{ReceivedAtMs: 400, ImageRefs: nil},
-	}
-
-	refs := extractNewImageRefs(rc, 150)
-	if len(refs) != 1 {
-		t.Fatalf("expected 1 ref, got %d", len(refs))
-	}
-	if refs[0].ContentHash != "new-hash" {
-		t.Fatalf("expected new-hash, got %q", refs[0].ContentHash)
-	}
-	if refs[0].Mime != "image/jpeg" {
-		t.Fatalf("expected image/jpeg, got %q", refs[0].Mime)
-	}
-}
-
-func TestExtractNewImageRefs_IncludesMultiple(t *testing.T) {
-	rc := RenderedContext{
-		{ReceivedAtMs: 100},
-		{ReceivedAtMs: 200, ImageRefs: []ImageAttachmentRef{
-			{ContentHash: "a"},
-			{ContentHash: "b"},
-		}},
-		{ReceivedAtMs: 300, ImageRefs: []ImageAttachmentRef{{ContentHash: "c"}}},
-	}
-	refs := extractNewImageRefs(rc, 50)
-	if len(refs) != 3 {
-		t.Fatalf("expected 3 refs, got %d", len(refs))
-	}
-}
-
-func TestInjectImagePartsIntoLastUserMessage(t *testing.T) {
-	msgs := []sdk.Message{
-		sdk.UserMessage("hello"),
-		sdk.AssistantMessage("hi"),
-		sdk.UserMessage("look at this"),
-	}
-	parts := []sdk.ImagePart{
-		{Image: "data:image/png;base64,abc", MediaType: "image/png"},
-	}
-
-	injectImagePartsIntoLastUserMessage(msgs, parts)
-
-	lastUser := msgs[2]
-	if len(lastUser.Content) != 2 {
-		t.Fatalf("expected 2 content parts, got %d", len(lastUser.Content))
-	}
-	imgPart, ok := lastUser.Content[1].(sdk.ImagePart)
-	if !ok {
-		t.Fatalf("expected ImagePart, got %T", lastUser.Content[1])
-	}
-	if imgPart.Image != "data:image/png;base64,abc" {
-		t.Fatalf("unexpected image: %q", imgPart.Image)
-	}
-}
-
-func TestInjectImagePartsIntoLastUserMessage_Empty(t *testing.T) {
-	msgs := []sdk.Message{sdk.UserMessage("hello")}
-	injectImagePartsIntoLastUserMessage(msgs, nil)
-	if len(msgs[0].Content) != 1 {
-		t.Fatalf("expected no change, got %d parts", len(msgs[0].Content))
-	}
-}
-
-func TestInjectImagePartsIntoLastUserMessage_SkipsEmptyImage(t *testing.T) {
-	msgs := []sdk.Message{sdk.UserMessage("hello")}
-	parts := []sdk.ImagePart{{Image: "", MediaType: "image/png"}}
-	injectImagePartsIntoLastUserMessage(msgs, parts)
-	if len(msgs[0].Content) != 1 {
-		t.Fatalf("expected no change, got %d parts", len(msgs[0].Content))
-	}
-}
 
 func TestHandleReplyWithAgent_InlinesImages(t *testing.T) {
 	rc := RenderedContext{
@@ -277,6 +203,9 @@ func TestHandleReplyWithAgent_UsesRuntimeStreamerForACPDiscuss(t *testing.T) {
 	if !runtime.lastReq.ForceFreshRuntime {
 		t.Fatal("discuss ACP runtime request should force a fresh runtime each turn")
 	}
+	if resolver.promptFinishCalls != 1 {
+		t.Fatalf("ACP receipt finish calls = %d, want 1", resolver.promptFinishCalls)
+	}
 	if sess.lastProcessedMs != 200 {
 		t.Fatalf("lastProcessedMs = %d, want 200", sess.lastProcessedMs)
 	}
@@ -407,6 +336,12 @@ func TestHandleReplyWithAgent_ACPDiscussDoesNotAdvanceCursorWithoutRuntimeStream
 	if sess.lastProcessedMs != 0 {
 		t.Fatalf("lastProcessedMs = %d, want 0 when ACP runtime streamer is missing", sess.lastProcessedMs)
 	}
+	if resolver.compactionCalls != 0 {
+		t.Fatalf("missing-runtime compaction calls = %d, want 0", resolver.compactionCalls)
+	}
+	if resolver.promptFinishCalls != 0 {
+		t.Fatalf("missing-runtime receipt finish calls = %d, want 0", resolver.promptFinishCalls)
+	}
 }
 
 func TestHandleReplyWithAgent_ACPDiscussDoesNotAdvanceCursorOnRuntimeError(t *testing.T) {
@@ -433,8 +368,10 @@ func TestHandleReplyWithAgent_ACPDiscussDoesNotAdvanceCursorOnRuntimeError(t *te
 		config: DiscussSessionConfig{
 			BotID:     "bot-1",
 			SessionID: "sess-1",
+			UserID:    "account-user",
 		},
 	}
+	wantEstimate := ComposeContext(rc, nil).EstimatedTokens
 
 	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
 
@@ -443,6 +380,20 @@ func TestHandleReplyWithAgent_ACPDiscussDoesNotAdvanceCursorOnRuntimeError(t *te
 	}
 	if sess.lastProcessedMs != 0 {
 		t.Fatalf("lastProcessedMs = %d, want 0 when ACP runtime stream fails", sess.lastProcessedMs)
+	}
+	if resolver.compactionCalls != 1 || resolver.compactionInputTokens != wantEstimate {
+		t.Fatalf(
+			"failed ACP compaction = calls:%d input:%d, want one call with %d",
+			resolver.compactionCalls,
+			resolver.compactionInputTokens,
+			wantEstimate,
+		)
+	}
+	if resolver.compactionUserID != "account-user" {
+		t.Fatalf("failed ACP compaction principal = %q, want account user", resolver.compactionUserID)
+	}
+	if resolver.promptFinishCalls != 1 {
+		t.Fatalf("failed ACP receipt finish calls = %d, want 1", resolver.promptFinishCalls)
 	}
 }
 
@@ -482,6 +433,12 @@ func TestHandleReplyWithAgent_ACPDiscussSkipsRuntimeForPassiveMessage(t *testing
 
 	if runtime.calls != 0 {
 		t.Fatalf("runtime calls = %d, want 0 for a passive (unmentioned) group message", runtime.calls)
+	}
+	if resolver.compactionCalls != 0 {
+		t.Fatalf("passive ACP compaction calls = %d, want 0", resolver.compactionCalls)
+	}
+	if len(resolver.lastPromptInput.Sources) != 0 || resolver.promptFinishCalls != 0 {
+		t.Fatalf("passive ACP prompt lifecycle = sources:%d finish:%d, want none", len(resolver.lastPromptInput.Sources), resolver.promptFinishCalls)
 	}
 	if fakeAgent.lastConfig != nil {
 		t.Fatal("ordinary agent should not be invoked for ACP discuss runtime")
@@ -553,19 +510,19 @@ func TestAnchorFromTRs(t *testing.T) {
 	}
 }
 
-func TestLatestRCReceivedAtMs(t *testing.T) {
+func TestLatestRCEventAtMs(t *testing.T) {
 	t.Parallel()
 
-	if got := latestRCReceivedAtMs(nil); got != 0 {
+	if got := latestRCEventAtMs(nil); got != 0 {
 		t.Fatalf("empty RC = %d, want 0", got)
 	}
-	got := latestRCReceivedAtMs(RenderedContext{
+	got := latestRCEventAtMs(RenderedContext{
 		{ReceivedAtMs: 100},
 		{ReceivedAtMs: 900},
-		{ReceivedAtMs: 500, IsMyself: true},
+		{ReceivedAtMs: 500, LastEventAtMs: 1_100, IsMyself: true},
 	})
-	if got != 900 {
-		t.Fatalf("latest = %d, want 900", got)
+	if got != 1_100 {
+		t.Fatalf("latest = %d, want 1100", got)
 	}
 }
 
@@ -585,9 +542,8 @@ func TestHandleReplyWithAgent_ColdStartAnchoredByTR(t *testing.T) {
 	resolver := &fakeRunConfigResolver{}
 
 	driver := NewDiscussDriver(DiscussDriverDeps{
-		Pipeline:       NewPipeline(RenderParams{}),
-		Resolver:       resolver,
-		MessageService: nil,
+		Pipeline: NewPipeline(RenderParams{}),
+		Resolver: resolver,
 	})
 
 	sess := &discussSession{
@@ -595,10 +551,8 @@ func TestHandleReplyWithAgent_ColdStartAnchoredByTR(t *testing.T) {
 		lastProcessedMs: 0,
 	}
 
-	// Simulate a previously answered round by pre-stuffing a TR newer than
-	// the RC segment's ReceivedAtMs. Since we cannot inject MessageService
-	// easily, we instead pre-set lastProcessedMs as the anchor would.
-	sess.lastProcessedMs = 200 // mimic anchorFromTRs result
+	// Simulate the cursor after a previously answered round.
+	sess.lastProcessedMs = 200
 
 	driver.handleReplyWithAgent(context.Background(), sess, rc, driver.logger, fakeAgent)
 
@@ -765,12 +719,20 @@ func TestHandleReplyWithAgentRefreshesContextFragAfterLateBinding(t *testing.T) 
 
 type fakeDiscussStreamer struct {
 	lastConfig *agentpkg.RunConfig
+	endUsage   []byte
+	events     []agentpkg.StreamEvent
 }
 
 func (f *fakeDiscussStreamer) Stream(_ context.Context, cfg agentpkg.RunConfig) <-chan agentpkg.StreamEvent {
 	f.lastConfig = &cfg
-	ch := make(chan agentpkg.StreamEvent, 1)
-	ch <- agentpkg.StreamEvent{Type: agentpkg.EventAgentEnd}
+	events := f.events
+	if events == nil {
+		events = []agentpkg.StreamEvent{{Type: agentpkg.EventAgentEnd, Usage: f.endUsage}}
+	}
+	ch := make(chan agentpkg.StreamEvent, len(events))
+	for _, event := range events {
+		ch <- event
+	}
 	close(ch)
 	return ch
 }
@@ -797,16 +759,40 @@ func (f *fakeDiscussRuntimeStreamer) StreamChat(_ context.Context, req conversat
 }
 
 type fakeRunConfigResolver struct {
-	resolveResult ResolveRunConfigResult
-	resolveFn     func(botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
-	inlineFn      func(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart
+	resolveResult         ResolveRunConfigResult
+	resolveFn             func(botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error)
+	inlineFn              func(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart
+	turnResponses         []TurnResponseEntry
+	artifacts             []CompactionArtifact
+	artifactErr           error
+	projectionFn          func(int) (ContextHistoryProjection, error)
+	projectionCalls       int
+	compactionCalls       int
+	compactionInputTokens int
+	compactionBudget      int
+	compactionUserID      string
+	lastPromptInput       DirectDiscussPromptInput
+	promptFinishCalls     int
+	storeCalls            int
+	storeErr              error
 }
 
 func (f *fakeRunConfigResolver) ResolveRunConfig(_ context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error) {
+	var result ResolveRunConfigResult
+	var err error
 	if f.resolveFn != nil {
-		return f.resolveFn(botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken)
+		result, err = f.resolveFn(botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken)
+	} else {
+		result = f.resolveResult
 	}
-	return f.resolveResult, nil
+	if err == nil && result.DirectDiscussPromptPreparer == nil {
+		result.DirectDiscussPromptPreparer = &fakeDirectDiscussPromptPreparer{
+			resolver:  f,
+			runConfig: result.RunConfig,
+			budget:    result.ContextTokenBudget,
+		}
+	}
+	return result, err
 }
 
 func (f *fakeRunConfigResolver) InlineImageAttachments(ctx context.Context, botID string, refs []ImageAttachmentRef) []sdk.ImagePart {
@@ -816,7 +802,82 @@ func (f *fakeRunConfigResolver) InlineImageAttachments(ctx context.Context, botI
 	return nil
 }
 
-func (*fakeRunConfigResolver) StoreRound(_ context.Context, _, _, _, _ string, _ []sdk.Message, _ string) error {
+func (f *fakeRunConfigResolver) LoadContextHistoryProjection(context.Context, string, string) (ContextHistoryProjection, error) {
+	f.projectionCalls++
+	if f.projectionFn != nil {
+		return f.projectionFn(f.projectionCalls)
+	}
+	return ContextHistoryProjection{
+		TurnResponses:          f.turnResponses,
+		CompactionArtifacts:    f.artifacts,
+		LatestTurnResponseAtMs: anchorFromTRs(f.turnResponses),
+	}, f.artifactErr
+}
+
+func (f *fakeRunConfigResolver) MaybeCompactSession(_ context.Context, _, _, userID string, inputTokens, contextTokenBudget int) {
+	f.compactionCalls++
+	f.compactionInputTokens = inputTokens
+	f.compactionBudget = contextTokenBudget
+	f.compactionUserID = userID
+}
+
+func (f *fakeRunConfigResolver) StoreRound(_ context.Context, _, _, _, _ string, _ []sdk.Message, _ string) error {
+	f.storeCalls++
+	return f.storeErr
+}
+
+type fakeDirectDiscussPromptPreparer struct {
+	resolver  *fakeRunConfigResolver
+	runConfig agentpkg.RunConfig
+	budget    int
+}
+
+func (p *fakeDirectDiscussPromptPreparer) PrepareDirectDiscussPrompt(
+	ctx context.Context,
+	recipe DirectDiscussPromptRecipe,
+) (PreparedDirectDiscussPrompt, error) {
+	input := recipe.Initial
+	p.resolver.lastPromptInput = input
+	cfg := p.runConfig
+	cfg.Messages = nil
+	compactableTokens := 0
+	for index, source := range input.Sources {
+		message := source.Message
+		if cfg.SupportsImageInput && len(source.ImageRefs) > 0 {
+			for _, image := range p.resolver.InlineImageAttachments(ctx, cfg.Identity.BotID, source.ImageRefs) {
+				if strings.TrimSpace(image.Image) != "" {
+					message.Content = append(message.Content, image)
+				}
+			}
+		}
+		cfg.Messages = append(cfg.Messages, message)
+		if source.SummaryFrag != nil {
+			frag := *source.SummaryFrag
+			frag.ID = fmt.Sprintf("message.%03d", index)
+			frag.Provenance.Index = index
+			cfg.ContextFrags = append(cfg.ContextFrags, frag)
+		}
+		if source.Compactable {
+			compactableTokens += messageconv.EstimateSDKMessageTokens(source.Message)
+		}
+	}
+	cfg = cfg.RefreshContextFrag()
+	receipt := &fakeDirectDiscussPromptReceipt{finish: func() {
+		p.resolver.promptFinishCalls++
+		if compactableTokens > 0 {
+			p.resolver.MaybeCompactSession(ctx, cfg.Identity.BotID, cfg.Identity.SessionID, input.ActorUserID, compactableTokens, p.budget)
+		}
+	}}
+	return PreparedDirectDiscussPrompt{RunConfig: cfg, Receipt: receipt}, nil
+}
+
+type fakeDirectDiscussPromptReceipt struct {
+	once   sync.Once
+	finish func()
+}
+
+func (r *fakeDirectDiscussPromptReceipt) Finish(context.Context) error {
+	r.once.Do(r.finish)
 	return nil
 }
 

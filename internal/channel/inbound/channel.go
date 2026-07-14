@@ -175,6 +175,7 @@ type ChannelInboundProcessor struct {
 	identity            *IdentityResolver
 	policy              PolicyService
 	dispatcher          *RouteDispatcher
+	routeTransitions    routeTransitionRegistry
 	acl                 chatACL
 	observer            channel.StreamObserver
 	speechService       speechSynthesizer
@@ -191,10 +192,8 @@ type ChannelInboundProcessor struct {
 	permissionChecker   BotPermissionChecker
 	skillResolver       RequestedSkillResolver
 
-	// activeStreams maps "botID:routeID" to a context.CancelFunc for the
-	// currently running agent stream. Used by /stop to abort generation
-	// on external channels (Telegram, Discord, etc.).
-	activeStreams sync.Map
+	// activeStreams owns cancellation for local or dispatcher-less streams.
+	activeStreams activeStreamRegistry
 }
 
 // NewChannelInboundProcessor creates a processor with channel identity-based resolution.
@@ -573,6 +572,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			Message: out,
 		})
 	}
+	if _, err := buildInboundSourceEnvelope(identity, msg, ""); err != nil {
+		return err
+	}
 
 	resolvedAttachments := p.ingestInboundAttachments(ctx, cfg, msg, strings.TrimSpace(identity.BotID), msg.Message.Attachments)
 	msg.Message.Attachments = resolvedAttachments
@@ -663,7 +665,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			}
 			return nil
 		}
-		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, "")
+		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, "", nil)
 		if p.logger != nil {
 			p.logger.Info(
 				"inbound denied by acl — event not ingested",
@@ -701,10 +703,39 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if isUserInputResponseCommand(cmdText) && isDirectedAtBot(msg) {
 		return p.handleUserInputResponseCommand(ctx, msg, sender, identity, resolved.RouteID, sessionID, cmdText)
 	}
+	var reservedRouteLease *routeLease
+	var reservedRouteTransitionUnlock func()
 	if pendingSkillIntent != nil && p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
-		if p.dispatcher.IsActive(strings.TrimSpace(resolved.RouteID)) {
+		reservation := &deferredTurn{
+			id:        strings.TrimSpace(msg.Message.ID),
+			ctx:       context.WithoutCancel(ctx),
+			identity:  identity,
+			sessionID: strings.TrimSpace(sessionID),
+		}
+		var admission routeAdmission
+		if sessionID == "" {
+			admission, reservedRouteTransitionUnlock = p.reserveSessionlessRouteStart(strings.TrimSpace(resolved.RouteID), reservation)
+		} else {
+			admission = p.admitRouteTurn(ctx, strings.TrimSpace(resolved.RouteID), routeIntentStartOnly, reservation)
+		}
+		if admission.Kind == routeAdmissionStale {
+			if admission.Err != nil {
+				return admission.Err
+			}
+			return errStaleRouteScope
+		}
+		if admission.Kind != routeAdmissionStartPrimary || admission.Lease == nil {
 			return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
 		}
+		reservedRouteLease = admission.Lease
+		defer func() {
+			if reservedRouteLease != nil {
+				p.releaseRouteLease(context.WithoutCancel(ctx), reservedRouteLease)
+			}
+			if reservedRouteTransitionUnlock != nil {
+				reservedRouteTransitionUnlock()
+			}
+		}()
 	}
 
 	var requestedSkillContexts []conversation.RequestedSkillContext
@@ -776,7 +807,13 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			if pendingSkillIntent != nil && !newSessionSpecSupportsRequestedSkills(spec) {
 				return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
 			}
-			sess, createErr := p.sessionEnsurer.CreateNewSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), spec)
+			var sess SessionResult
+			var createErr error
+			if reservedRouteTransitionUnlock != nil {
+				sess, _, createErr = p.ensureRouteSessionLocked(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), spec, reservedRouteLease)
+			} else {
+				sess, _, createErr = p.ensureRouteSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), spec)
+			}
 			if createErr != nil {
 				if p.logger != nil {
 					p.logger.Warn("auto-create session failed", slog.Any("error", createErr))
@@ -787,6 +824,13 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			sessionType = sess.Type
 			sessionRuntime = sess.Runtime
 			sessionRuntimeOwner = sess.RuntimeOwnerAccountID
+			if pendingSkillIntent != nil && !sessionSupportsRequestedSkills(sess) {
+				return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
+			}
+			if reservedRouteTransitionUnlock != nil {
+				reservedRouteTransitionUnlock()
+				reservedRouteTransitionUnlock = nil
+			}
 		}
 	}
 
@@ -803,41 +847,59 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			err = p.requireACPRuntimeActor(ctx, identity, ownerPrincipal)
 		}
 		if err != nil {
-			p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, "")
+			p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, "", nil)
 			if shouldTrigger || isDirectedAtBot(msg) {
 				return p.sendACPFeedbackError(ctx, sender, msg, identity, err)
 			}
 			return nil
 		}
 	}
-
-	// Push event into the DCP pipeline (persist + in-memory projection).
-	// On first access for a session, replay persisted events to warm the pipeline.
-	var latestRC pipelinepkg.RenderedContext
-	var eventID string
-	if p.pipeline != nil && sessionID != "" && pendingSkillIntent == nil {
-		if _, loaded := p.pipeline.GetIC(sessionID); !loaded {
-			p.replayPipelineSession(ctx, sessionID)
-		}
-		pipelineMsg := msg
-		pipelineMsg.Message = msg.Message
-		pipelineMsg.Message.Attachments = resolvedAttachments
-		event := pipelinepkg.AdaptInbound(pipelineMsg, sessionID, identity.ChannelIdentityID, identity.DisplayName)
-		if p.eventStore != nil {
-			eid, persistErr := p.eventStore.PersistEvent(ctx, identity.BotID, sessionID, event)
-			if persistErr != nil {
-				if p.logger != nil {
-					p.logger.Warn("persist pipeline event failed", slog.Any("error", persistErr))
-				}
-			} else {
-				eventID = eid
-			}
-		}
-		latestRC = p.pipeline.PushEvent(sessionID, event)
+	preparedReceipt, err := buildInboundUserReceipt(identity, msg, text, attachments, resolved.RouteID, "")
+	if err != nil {
+		return err
 	}
+
+	activeChatID := strings.TrimSpace(identity.BotID)
+	if activeChatID == "" {
+		activeChatID = strings.TrimSpace(resolved.ChatID)
+	}
+	turn, err := prepareDeferredTurn(deferredTurn{
+		id:                  preparedReceipt.ID,
+		ctx:                 ctx,
+		cfg:                 cfg,
+		msg:                 msg,
+		sender:              sender,
+		identity:            identity,
+		resolved:            resolved,
+		resolvedAttachments: resolvedAttachments,
+		attachments:         attachments,
+		replyAttachments:    replyAttachments,
+		text:                text,
+		modelText:           modelText,
+		userMessageKind:     userMessageKind,
+		userVisibleText:     userVisibleText,
+		requestedSkills:     requestedSkillContexts,
+		skillActivation:     skillActivation,
+		hasPendingSkill:     pendingSkillIntent != nil,
+		sessionID:           sessionID,
+		sessionRuntimeOwner: sessionRuntimeOwner,
+		acpRuntimeSession:   acpRuntimeSession,
+		activeChatID:        activeChatID,
+		inboundMode:         inboundMode,
+		receipt:             preparedReceipt,
+	})
+	if err != nil {
+		return err
+	}
+	canDispatchDiscuss := sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil &&
+		p.pipeline != nil && sessionID != "" && !turn.hasPendingSkill
 
 	// Discuss mode: dispatch to the discuss driver and return.
 	// The discuss driver autonomously decides whether to call the LLM.
+	var latestRC pipelinepkg.RenderedContext
+	if canDispatchDiscuss {
+		latestRC = turn.ActivateOnce(ctx, p)
+	}
 	if sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil && latestRC != nil {
 		chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
 		sessionToken := p.issueSessionBearerToken(ctx, identity, acpRuntimeSession, sessionRuntimeOwner, chatToken)
@@ -845,6 +907,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			BotID:             identity.BotID,
 			SessionID:         sessionID,
 			RouteID:           resolved.RouteID,
+			UserID:            identity.UserID,
 			ChannelIdentityID: identity.ChannelIdentityID,
 			ReplyTarget:       strings.TrimSpace(msg.ReplyTarget),
 			CurrentPlatform:   msg.Channel.String(),
@@ -854,15 +917,8 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			ChatToken:         chatToken,
 			ToolHTTPURL:       acpMCPToolsURLFromEnv(identity.BotID),
 		})
-		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, eventID)
+		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, turn.eventID, &turn.receipt)
 		return nil
-	}
-
-	// Bot-centric history container:
-	// always persist channel traffic under bot_id so WebUI can view unified cross-platform history.
-	activeChatID := strings.TrimSpace(identity.BotID)
-	if activeChatID == "" {
-		activeChatID = strings.TrimSpace(resolved.ChatID)
 	}
 
 	if sessionType == sessionpkg.TypeDiscuss || shouldTrigger {
@@ -885,12 +941,26 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			modelText = strings.TrimSpace(conversation.SkillActivationModelQuery(skillActivation))
 		} else {
 			text = strings.TrimSpace(msg.Message.PlainText())
+			if !isLocalChannelType(msg.Channel) {
+				_, text = DetectMode(text)
+			}
 			modelText = text
 		}
 	}
+	turn.msg.Message.Text = msg.Message.Text
+	if transcript, ok := msg.Message.Metadata["transcript"].(string); ok {
+		if turn.msg.Message.Metadata == nil {
+			turn.msg.Message.Metadata = make(map[string]any)
+		}
+		turn.msg.Message.Metadata["transcript"] = transcript
+	}
+	turn.text = text
+	turn.modelText = modelText
+	turn.receipt.DisplayText = strings.TrimSpace(text)
 
 	if !shouldTrigger {
-		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, eventID)
+		turn.ActivateOnce(ctx, p)
+		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, turn.eventID, &turn.receipt)
 		if p.logger != nil {
 			p.logger.Info(
 				"inbound not triggering assistant (group trigger condition not met)",
@@ -907,67 +977,49 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		return nil
 	}
 
-	routeID := strings.TrimSpace(resolved.RouteID)
+	lease := reservedRouteLease
+	reservedRouteLease = nil
+	return p.dispatchDeferredTurn(ctx, turn, lease)
+}
 
-	// --- Dispatcher-based mode handling (inject / queue) ---
-	// For non-parallel modes, when a route already has an active agent stream,
-	// short-circuit here instead of starting a new stream.
-	if p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
-		if p.dispatcher.IsActive(routeID) {
-			if pendingSkillIntent != nil {
-				return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
-			}
-			headerifiedText := flow.FormatUserHeader(flow.UserMessageHeaderInput{
-				MessageID:         strings.TrimSpace(msg.Message.ID),
-				ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
-				DisplayName:       strings.TrimSpace(identity.DisplayName),
-				Channel:           msg.Channel.String(),
-				ConversationType:  strings.TrimSpace(msg.Conversation.Type),
-				ConversationName:  strings.TrimSpace(msg.Conversation.Name),
-				Target:            strings.TrimSpace(msg.ReplyTarget),
-				AttachmentPaths:   collectAttachmentPaths(attachments),
-				Time:              time.Now().UTC(),
-			}, text)
-
-			switch inboundMode {
-			case ModeInject:
-				// Don't persist here — the injected message will be interleaved
-				// at the correct position within the round by
-				// interleaveInjectedMessages in storeRound.
-				injected := p.dispatcher.Inject(routeID, InjectMessage{
-					Text:            text,
-					Attachments:     attachments,
-					HeaderifiedText: headerifiedText,
-				})
-				if injected {
-					p.sendModeConfirmation(ctx, sender, msg, identity, "inject")
-				} else {
-					if p.logger != nil {
-						p.logger.Warn("inject failed (channel full), falling through to new stream",
-							slog.String("route_id", routeID))
-					}
-					goto startStream
-				}
-				return nil
-
-			case ModeQueue:
-				p.persistPassiveMessage(ctx, identity, msg, text, attachments, routeID, sessionID, eventID)
-				p.dispatcher.Enqueue(routeID, QueuedTask{
-					Ctx:         ctx,
-					Cfg:         cfg,
-					Msg:         msg,
-					Sender:      sender,
-					Ident:       identity,
-					Text:        text,
-					Attachments: attachments,
-				})
-				p.sendModeConfirmation(ctx, sender, msg, identity, "queue")
-				return nil
-			}
-		}
+func (p *ChannelInboundProcessor) runDeferredTurn(ctx context.Context, turn *deferredTurn, lease *routeLease) (retErr error) {
+	if lease != nil {
+		defer p.releaseRouteLease(context.WithoutCancel(ctx), lease)
 	}
-
-startStream:
+	streamCtx, streamCancel := context.WithCancel(ctx)
+	defer streamCancel()
+	streamKey := strings.TrimSpace(turn.identity.BotID) + ":" + strings.TrimSpace(turn.resolved.RouteID)
+	if lease != nil {
+		lease.BindCancel(streamCancel)
+	} else {
+		ownerID, registerErr := p.registerActiveStream(ctx, turn.identity.BotID, streamKey, turn.resolved.RouteID, turn.sessionID, streamCancel)
+		if registerErr != nil {
+			return registerErr
+		}
+		defer p.activeStreams.Remove(streamKey, ownerID)
+	}
+	ctx = streamCtx
+	turn.ActivateOnce(ctx, p)
+	cfg := turn.cfg
+	msg := turn.msg
+	sender := turn.sender
+	identity := turn.identity
+	resolved := turn.resolved
+	resolvedAttachments := turn.resolvedAttachments
+	attachments := turn.attachments
+	replyAttachments := turn.replyAttachments
+	text := turn.text
+	modelText := turn.modelText
+	userMessageKind := turn.userMessageKind
+	userVisibleText := turn.userVisibleText
+	requestedSkillContexts := turn.requestedSkills
+	skillActivation := turn.skillActivation
+	sessionID := turn.sessionID
+	sessionRuntimeOwner := turn.sessionRuntimeOwner
+	acpRuntimeSession := turn.acpRuntimeSession
+	activeChatID := turn.activeChatID
+	eventID := turn.eventID
+	userReceipt := turn.receipt
 
 	// Issue chat token for reply routing.
 	chatToken := ""
@@ -1087,7 +1139,7 @@ startStream:
 		stream = channel.NewTeeStream(stream, p.observer, strings.TrimSpace(identity.BotID), msg.Channel)
 		// Broadcast the inbound user message so WebUI can display it.
 		broadcastText := text
-		if pendingSkillIntent != nil {
+		if turn.hasPendingSkill {
 			broadcastText = userVisibleText
 		}
 		p.broadcastInboundMessage(ctx, strings.TrimSpace(identity.BotID), msg, broadcastText, identity, resolvedAttachments)
@@ -1117,18 +1169,6 @@ startStream:
 		result := make([]conversation.OutboundAssetRef, len(outboundAssetRefs))
 		copy(result, outboundAssetRefs)
 		return result
-	}
-
-	// Mark this route as active in the dispatcher so subsequent messages
-	// can be injected or queued. Produces the inject channel for this stream.
-	// Parallel mode (/now) skips the dispatcher entirely — it must not
-	// interfere with the active flag or drain the queue of another stream.
-	var injectCh <-chan conversation.InjectMessage
-	if p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
-		injectCh = p.dispatcher.MarkActive(routeID)
-		defer func() {
-			p.drainQueue(context.WithoutCancel(ctx), routeID)
-		}()
 	}
 
 	chatReq := conversation.ChatRequest{
@@ -1161,8 +1201,8 @@ startStream:
 		UserMessageKind:           userMessageKind,
 		UserVisibleText:           userVisibleText,
 		SkillActivation:           skillActivation,
-		SkipMemoryExtraction:      pendingSkillIntent != nil && userVisibleText == "",
-		SkipTitleGeneration:       pendingSkillIntent != nil && userVisibleText == "",
+		SkipMemoryExtraction:      turn.hasPendingSkill && userVisibleText == "",
+		SkipTitleGeneration:       turn.hasPendingSkill && userVisibleText == "",
 		CurrentChannel:            msg.Channel.String(),
 		Channels:                  []string{msg.Channel.String()},
 		UserMessagePersisted:      false,
@@ -1170,9 +1210,13 @@ startStream:
 		RequestedSkills:           requestedSkillContexts,
 		OutboundAssetCollector:    assetCollector,
 		EventID:                   eventID,
+		UserReceipt:               &userReceipt,
 	}
-	if injectCh != nil {
-		chatReq.InjectCh = injectCh
+	if lease != nil && lease.Inbox() != nil {
+		chatReq.InjectionFeed = conversation.InjectionFeed{
+			Messages:        lease.Inbox(),
+			CommitPersisted: lease.CommitPersisted,
+		}
 	}
 	if mid, _ := msg.Metadata["model_id"].(string); strings.TrimSpace(mid) != "" {
 		chatReq.Model = strings.TrimSpace(mid)
@@ -1180,14 +1224,6 @@ startStream:
 	if re, _ := msg.Metadata["reasoning_effort"].(string); strings.TrimSpace(re) != "" {
 		chatReq.ReasoningEffort = strings.TrimSpace(re)
 	}
-	// Create a cancellable context so /stop can abort the stream.
-	streamCtx, streamCancel := context.WithCancel(ctx)
-	defer streamCancel()
-
-	streamKey := strings.TrimSpace(identity.BotID) + ":" + strings.TrimSpace(resolved.RouteID)
-	p.activeStreams.Store(streamKey, streamCancel)
-	defer p.activeStreams.Delete(streamKey)
-
 	chunkCh, streamErrCh := p.runner.StreamChat(streamCtx, chatReq)
 
 	var (
@@ -1404,35 +1440,6 @@ func (p *ChannelInboundProcessor) accessDeniedRole(ctx context.Context, identity
 		return ""
 	}
 	return role
-}
-
-// drainQueue marks the route as done and processes any queued tasks.
-func (p *ChannelInboundProcessor) drainQueue(ctx context.Context, routeID string) {
-	if p.dispatcher == nil {
-		return
-	}
-	result := p.dispatcher.MarkDone(routeID)
-
-	for _, fn := range result.PendingPersists {
-		fn(ctx)
-	}
-
-	for _, task := range result.QueuedTasks {
-		if p.logger != nil {
-			p.logger.Info("processing queued task",
-				slog.String("route_id", routeID),
-				slog.String("query", strings.TrimSpace(task.Text)),
-			)
-		}
-		if err := p.HandleInbound(ctx, task.Cfg, task.Msg, task.Sender); err != nil { //nolint:contextcheck // ctx is already WithoutCancel from the defer caller
-			if p.logger != nil {
-				p.logger.Error("queued task processing failed",
-					slog.String("route_id", routeID),
-					slog.Any("error", err),
-				)
-			}
-		}
-	}
 }
 
 func collectAttachmentPaths(attachments []conversation.ChatAttachment) []string {
@@ -1823,6 +1830,7 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 	text string,
 	attachments []conversation.ChatAttachment,
 	routeID, sessionID, eventID string,
+	preparedReceipt *conversation.UserMessageReceipt,
 ) {
 	if p.message == nil {
 		return
@@ -1834,6 +1842,19 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 	trimmedText := strings.TrimSpace(text)
 	if trimmedText == "" && len(attachments) == 0 {
 		return
+	}
+	var receipt conversation.UserMessageReceipt
+	if preparedReceipt == nil {
+		var receiptErr error
+		receipt, receiptErr = buildInboundUserReceipt(ident, msg, trimmedText, attachments, routeID, eventID)
+		if receiptErr != nil {
+			if p.logger != nil {
+				p.logger.Warn("build passive message source receipt failed", slog.Any("error", receiptErr))
+			}
+			return
+		}
+	} else {
+		receipt = *preparedReceipt
 	}
 
 	var attachmentPaths []string
@@ -1864,16 +1885,8 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 		return
 	}
 
-	meta := map[string]any{
-		"route_id": strings.TrimSpace(routeID),
-		"platform": msg.Channel.String(),
-	}
-	if reply := messageReplyMetadata(msg.Message.Reply); reply != nil {
-		meta["reply"] = reply
-	}
-	if forward := messageForwardMetadata(msg.Message.Forward); forward != nil {
-		meta["forward"] = forward
-	}
+	meta := receipt.Metadata
+	attachments = receipt.Attachments
 
 	var assets []messagepkg.AssetRef
 	for i, att := range attachments {
@@ -1898,18 +1911,21 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 		assets = append(assets, ref)
 	}
 
+	origin := receipt.Origin.Values()
+
 	if _, err := p.message.Persist(ctx, messagepkg.PersistInput{
 		BotID:                   botID,
 		SessionID:               sessionID,
-		SenderChannelIdentityID: strings.TrimSpace(ident.ChannelIdentityID),
-		SenderUserID:            strings.TrimSpace(ident.UserID),
-		ExternalMessageID:       strings.TrimSpace(msg.Message.ID),
-		SourceReplyToMessageID:  inboundReplyMessageID(msg.Message.Reply),
+		SenderChannelIdentityID: origin.SenderChannelIdentityID,
+		SenderUserID:            origin.SenderUserID,
+		ExternalMessageID:       origin.ExternalMessageID,
+		SourceReplyToMessageID:  origin.SourceReplyToMessageID,
 		Role:                    "user",
 		Content:                 serialized,
 		Metadata:                meta,
 		Assets:                  assets,
-		EventID:                 eventID,
+		EventID:                 origin.EventID,
+		SourceContext:           origin.Context,
 		DisplayText:             trimmedText,
 	}); err != nil && p.logger != nil {
 		p.logger.Warn("persist passive message failed", slog.Any("error", err), slog.String("bot_id", botID))
@@ -3355,18 +3371,22 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 	}
 
 	streamKey := strings.TrimSpace(identity.BotID) + ":" + strings.TrimSpace(resolved.RouteID)
-	cancelVal, loaded := p.activeStreams.LoadAndDelete(streamKey)
-	if !loaded {
+	if p.dispatcher != nil && !isLocalChannelType(msg.Channel) {
+		if canceled := p.dispatcher.CancelAll(resolved.RouteID); canceled == 0 {
+			return nil
+		}
+		if p.logger != nil {
+			p.logger.Info("agent stream aborted via /stop command",
+				slog.String("bot_id", strings.TrimSpace(identity.BotID)),
+				slog.String("route_id", strings.TrimSpace(resolved.RouteID)),
+				slog.String("channel", msg.Channel.String()))
+		}
+		return nil
+	}
+	if p.activeStreams.CancelAll(streamKey) == 0 {
 		// No active stream — silently ignore.
 		return nil
 	}
-
-	cancelFn, ok := cancelVal.(context.CancelFunc)
-	if !ok {
-		return nil
-	}
-
-	cancelFn()
 	if p.logger != nil {
 		p.logger.Info("agent stream aborted via /stop command",
 			slog.String("bot_id", strings.TrimSpace(identity.BotID)),
@@ -3575,29 +3595,58 @@ func splitFirstCommandField(text string) (head, tail string) {
 }
 
 func (p *ChannelInboundProcessor) streamToolApprovalCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, approvalRunner ToolApprovalRunner, input flow.ToolApprovalResponseInput) error {
-	return p.streamContinuationCommand(ctx, msg, sender, identity, routeID, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
+	return p.streamContinuationCommand(ctx, msg, sender, identity, routeID, input.SessionID, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
 		return approvalRunner.RespondToolApproval(runCtx, input, eventCh)
 	})
 }
 
 func (p *ChannelInboundProcessor) streamUserInputResponseCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, userInputRunner UserInputRunner, input flow.UserInputResponseInput) error {
-	return p.streamContinuationCommand(ctx, msg, sender, identity, routeID, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
+	return p.streamContinuationCommand(ctx, msg, sender, identity, routeID, input.SessionID, func(runCtx context.Context, eventCh chan<- flow.WSStreamEvent) error {
 		return userInputRunner.RespondUserInput(runCtx, input, eventCh)
 	})
 }
 
 type streamContinuationFunc func(context.Context, chan<- flow.WSStreamEvent) error
 
-func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, run streamContinuationFunc) error {
+func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID, sessionID string, run streamContinuationFunc) error {
 	target := strings.TrimSpace(msg.ReplyTarget)
 	if target == "" {
 		return errors.New("reply target missing")
 	}
 	routeID = strings.TrimSpace(routeID)
+	var lease *routeLease
 	if routeID != "" && p.dispatcher != nil && !isLocalChannelType(msg.Channel) {
-		p.dispatcher.MarkActive(routeID)
-		defer p.drainQueue(context.WithoutCancel(ctx), routeID)
+		admission := p.admitRouteTurn(ctx, routeID, routeIntentParallel, &deferredTurn{
+			id:        strings.TrimSpace(msg.Message.ID),
+			ctx:       context.WithoutCancel(ctx),
+			identity:  identity,
+			sessionID: strings.TrimSpace(sessionID),
+		})
+		if admission.Kind == routeAdmissionStale {
+			if admission.Err != nil {
+				return admission.Err
+			}
+			return errStaleRouteScope
+		}
+		if (admission.Kind != routeAdmissionStartPrimary && admission.Kind != routeAdmissionStartParallel) || admission.Lease == nil {
+			return errors.New("continuation route admission rejected")
+		}
+		lease = admission.Lease
+		defer p.releaseRouteLease(context.WithoutCancel(ctx), lease)
 	}
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+	streamKey := strings.TrimSpace(identity.BotID) + ":" + routeID
+	if lease != nil {
+		lease.BindCancel(runCancel)
+	} else {
+		ownerID, registerErr := p.registerActiveStream(ctx, identity.BotID, streamKey, routeID, sessionID, runCancel)
+		if registerErr != nil {
+			return registerErr
+		}
+		defer p.activeStreams.Remove(streamKey, ownerID)
+	}
+	ctx = runCtx
 	sourceMessageID := strings.TrimSpace(msg.Message.ID)
 	replyRef := &channel.ReplyRef{Target: target}
 	if sourceMessageID != "" {
@@ -3634,7 +3683,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 	errCh := make(chan error, 1)
 	go func() {
 		defer close(eventCh)
-		errCh <- run(ctx, eventCh)
+		errCh <- run(runCtx, eventCh)
 		close(errCh)
 	}()
 
@@ -4042,7 +4091,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	} else {
 		spec.CreatedByUserID = strings.TrimSpace(spec.CreatedByUserID)
 	}
-	sess, err := p.sessionEnsurer.CreateNewSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), spec)
+	sess, canceled, err := p.createNewRouteSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), spec)
 	if err != nil {
 		if p.logger != nil {
 			p.logger.Warn("create new session via /new command failed", slog.Any("error", err))
@@ -4055,7 +4104,13 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 			Message: plainTextMessage(friendlyOps(loc, "ops.verb.startSession"), caps),
 		})
 	}
-	p.cancelActiveStreamForRoute(identity.BotID, resolved.RouteID, "new session created")
+	if canceled > 0 && p.logger != nil {
+		p.logger.Info("agent stream aborted",
+			slog.String("bot_id", strings.TrimSpace(identity.BotID)),
+			slog.String("route_id", strings.TrimSpace(resolved.RouteID)),
+			slog.String("reason", "new session created"),
+		)
+	}
 
 	modeLabel = newSessionDisplayModeLabel(loc, spec)
 	if p.logger != nil {
@@ -4085,27 +4140,6 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		out.Reply = &channel.ReplyRef{MessageID: mid}
 	}
 	return sender.Send(ctx, channel.OutboundMessage{Target: target, Message: out})
-}
-
-func (p *ChannelInboundProcessor) cancelActiveStreamForRoute(botID, routeID, reason string) bool {
-	streamKey := strings.TrimSpace(botID) + ":" + strings.TrimSpace(routeID)
-	cancelVal, loaded := p.activeStreams.LoadAndDelete(streamKey)
-	if !loaded {
-		return false
-	}
-	cancelFn, ok := cancelVal.(context.CancelFunc)
-	if !ok {
-		return false
-	}
-	cancelFn()
-	if p.logger != nil {
-		p.logger.Info("agent stream aborted",
-			slog.String("bot_id", strings.TrimSpace(botID)),
-			slog.String("route_id", strings.TrimSpace(routeID)),
-			slog.String("reason", strings.TrimSpace(reason)),
-		)
-	}
-	return true
 }
 
 func newSessionConfirmModeText(spec NewSessionSpec) string {

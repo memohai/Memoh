@@ -5,6 +5,7 @@ import (
 
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/messagesource"
 )
 
 const CollectorHistoryRecords = "history_records"
@@ -20,7 +21,7 @@ type Lifecycle string
 
 const (
 	LifecyclePersisted     Lifecycle = "persisted"
-	LifecycleLegacySummary Lifecycle = "legacy_summary"
+	LifecycleActiveSummary Lifecycle = "active_summary"
 )
 
 type ScopeFallback struct {
@@ -47,12 +48,14 @@ type HistoryRecord struct {
 	ExternalMessageID string
 	EventID           string
 	SessionID         string
+	SessionIDKnown    bool
 	BotID             string
 
 	SenderChannelIdentityID string
 	SenderUserID            string
 	SenderDisplayName       string
 	Platform                string
+	SourceContext           messagesource.Context
 	SourceReplyToMessageID  string
 
 	CompactID string
@@ -64,6 +67,8 @@ type HistoryRecord struct {
 	// Required marks a record that must survive trimming/compaction because it
 	// is pinned by a retry/edit request (conversation.ChatRequest.RequiredHistoryMessageID).
 	Required bool
+
+	Coverage *contextfrag.SummaryCoverage
 }
 
 type MediaRef struct {

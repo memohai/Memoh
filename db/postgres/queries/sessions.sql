@@ -55,11 +55,16 @@ copy_messages AS (
     vm.runtime_type,
     vm.model_id,
     vm.display_text,
+    COALESCE(
+      source_row.source_context,
+      resolve_history_message_source_context(source_row)
+    ) AS source_context,
     vm.turn_id AS old_turn_id,
     vm.turn_position,
     vm.turn_message_seq,
     vm.created_at
   FROM bot_visible_history_messages vm
+  JOIN bot_history_messages source_row ON source_row.id = vm.id
   JOIN target_turn tt ON (
     vm.turn_position < tt.position
     OR vm.turn_position = tt.position
@@ -152,6 +157,7 @@ inserted_messages AS (
     runtime_type,
     model_id,
     display_text,
+    source_context,
     turn_id,
     turn_position,
     turn_message_seq,
@@ -174,6 +180,7 @@ inserted_messages AS (
     cm.runtime_type,
     cm.model_id,
     cm.display_text,
+    cm.source_context,
     ct.new_turn_id,
     ct.new_position,
     cm.turn_message_seq,

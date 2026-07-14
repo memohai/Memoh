@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+
+	"github.com/memohai/memoh/internal/messagesource"
 )
 
 // Conversation kind constants.
@@ -93,12 +95,13 @@ type UpdateSettingsRequest struct {
 // ModelMessage is the canonical message format exchanged with the agent gateway.
 // Aligned with Vercel AI SDK ModelMessage structure.
 type ModelMessage struct {
-	Role       string          `json:"role"`
-	Content    json.RawMessage `json:"content,omitempty"`
-	Usage      json.RawMessage `json:"-"`
-	ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
-	ToolCallID string          `json:"tool_call_id,omitempty"`
-	Name       string          `json:"name,omitempty"`
+	Role        string              `json:"role"`
+	Content     json.RawMessage     `json:"content,omitempty"`
+	Usage       json.RawMessage     `json:"-"`
+	ToolCalls   []ToolCall          `json:"tool_calls,omitempty"`
+	ToolCallID  string              `json:"tool_call_id,omitempty"`
+	Name        string              `json:"name,omitempty"`
+	UserReceipt *UserMessageReceipt `json:"-"`
 }
 
 // TextContent extracts the plain text from the message content.
@@ -222,57 +225,58 @@ type OutboundAssetRef struct {
 
 // ChatRequest is the input for Chat and StreamChat.
 type ChatRequest struct {
-	BotID                        string           `json:"-"`
-	ChatID                       string           `json:"-"`
-	SessionID                    string           `json:"-"`
-	StreamID                     string           `json:"-"`
-	Token                        string           `json:"-"`
-	UserID                       string           `json:"-"`
-	SourceChannelIdentityID      string           `json:"-"`
-	DisplayName                  string           `json:"-"`
-	RouteID                      string           `json:"-"`
-	ChatToken                    string           `json:"-"`
-	ExternalMessageID            string           `json:"-"`
-	ReplyTarget                  string           `json:"-"`
-	ConversationType             string           `json:"-"`
-	ConversationName             string           `json:"-"`
-	SourceReplyToMessageID       string           `json:"-"`
-	ReplySender                  string           `json:"-"`
-	ReplyPreview                 string           `json:"-"`
-	ReplyAttachments             []ChatAttachment `json:"-"`
-	MentionsBot                  bool             `json:"-"`
-	RepliesToBot                 bool             `json:"-"`
-	ForwardMessageID             string           `json:"-"`
-	ForwardFromUserID            string           `json:"-"`
-	ForwardFromConversationID    string           `json:"-"`
-	ForwardSender                string           `json:"-"`
-	ForwardDate                  int64            `json:"-"`
-	UserMessagePersisted         bool             `json:"-"`
-	PersistedUserMessageID       string           `json:"-"`
-	ReusePersistedUserMessage    bool             `json:"-"`
-	EventID                      string           `json:"-"`
-	RawQuery                     string           `json:"-"`
-	ModelQuery                   string           `json:"-"`
-	UserMessageKind              string           `json:"-"`
-	UserVisibleText              string           `json:"-"`
-	SkillActivation              *SkillActivation `json:"-"`
-	ToolHTTPURL                  string           `json:"-"`
-	SessionType                  string           `json:"-"`
-	RuntimeType                  string           `json:"-"`
-	SkipMemoryExtraction         bool             `json:"-"`
-	SkipHistoryTurn              bool             `json:"-"`
-	SkipTitleGeneration          bool             `json:"-"`
-	ForceFreshRuntime            bool             `json:"-"`
-	HistoryCutoffBeforeMessageID string           `json:"-"`
-	RequiredHistoryMessageID     string           `json:"-"`
+	BotID                        string              `json:"-"`
+	ChatID                       string              `json:"-"`
+	SessionID                    string              `json:"-"`
+	StreamID                     string              `json:"-"`
+	Token                        string              `json:"-"`
+	UserID                       string              `json:"-"`
+	SourceChannelIdentityID      string              `json:"-"`
+	DisplayName                  string              `json:"-"`
+	RouteID                      string              `json:"-"`
+	ChatToken                    string              `json:"-"`
+	ExternalMessageID            string              `json:"-"`
+	ReplyTarget                  string              `json:"-"`
+	ConversationType             string              `json:"-"`
+	ConversationName             string              `json:"-"`
+	SourceReplyToMessageID       string              `json:"-"`
+	ReplySender                  string              `json:"-"`
+	ReplyPreview                 string              `json:"-"`
+	ReplyAttachments             []ChatAttachment    `json:"-"`
+	MentionsBot                  bool                `json:"-"`
+	RepliesToBot                 bool                `json:"-"`
+	ForwardMessageID             string              `json:"-"`
+	ForwardFromUserID            string              `json:"-"`
+	ForwardFromConversationID    string              `json:"-"`
+	ForwardSender                string              `json:"-"`
+	ForwardDate                  int64               `json:"-"`
+	UserMessagePersisted         bool                `json:"-"`
+	PersistedUserMessageID       string              `json:"-"`
+	ReusePersistedUserMessage    bool                `json:"-"`
+	UserReceipt                  *UserMessageReceipt `json:"-"`
+	EventID                      string              `json:"-"`
+	RawQuery                     string              `json:"-"`
+	ModelQuery                   string              `json:"-"`
+	UserMessageKind              string              `json:"-"`
+	UserVisibleText              string              `json:"-"`
+	SkillActivation              *SkillActivation    `json:"-"`
+	ToolHTTPURL                  string              `json:"-"`
+	SessionType                  string              `json:"-"`
+	RuntimeType                  string              `json:"-"`
+	SkipMemoryExtraction         bool                `json:"-"`
+	SkipHistoryTurn              bool                `json:"-"`
+	SkipTitleGeneration          bool                `json:"-"`
+	ForceFreshRuntime            bool                `json:"-"`
+	HistoryCutoffBeforeMessageID string              `json:"-"`
+	RequiredHistoryMessageID     string              `json:"-"`
 
 	// OutboundAssetCollector returns asset refs accumulated during outbound streaming.
 	// Set by the inbound channel processor; called by the resolver at persist time.
 	OutboundAssetCollector func() []OutboundAssetRef `json:"-"`
 
-	// InjectCh receives user messages to inject into the active agent stream
-	// between tool rounds via the PrepareStep hook. Nil means no injection.
-	InjectCh <-chan InjectMessage `json:"-"`
+	// InjectionFeed owns the injection stream and acknowledges receipts only
+	// after their user rows are durably persisted.
+	InjectionFeed InjectionFeed `json:"-"`
 
 	Query           string                  `json:"query"`
 	Model           string                  `json:"model,omitempty"`
@@ -316,12 +320,27 @@ type InjectMessage struct {
 	Text            string
 	Attachments     []ChatAttachment
 	HeaderifiedText string
+	Receipt         UserMessageReceipt
+}
+
+type InjectionFeed struct {
+	Messages        <-chan InjectMessage
+	CommitPersisted func(receiptID string) bool
+}
+
+type UserMessageReceipt struct {
+	ID          string
+	DisplayText string
+	Origin      messagesource.Envelope
+	Metadata    map[string]any
+	Attachments []ChatAttachment
 }
 
 // InjectedMessageRecord records a message that was injected via PrepareStep,
 // together with its position in the output message sequence.
 type InjectedMessageRecord struct {
-	HeaderifiedText string
+	ModelText string
+	Receipt   UserMessageReceipt
 	// InsertAfter is the number of SDK output messages that existed before
 	// this injection. Used to determine the correct insertion position when
 	// interleaving injected messages into the persisted round.

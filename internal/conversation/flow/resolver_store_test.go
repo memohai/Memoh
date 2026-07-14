@@ -2,11 +2,16 @@ package flow
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"log/slog"
 	"testing"
 
+	sdk "github.com/memohai/twilight-ai/sdk"
+
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	"github.com/memohai/memoh/internal/messagesource"
 )
 
 func TestBuildInteractionMetadataIncludesForwardConversation(t *testing.T) {
@@ -37,6 +42,104 @@ func TestBuildInteractionMetadataIncludesForwardConversation(t *testing.T) {
 		forward["sender"] != "Source Channel" ||
 		forward["date"] != int64(1710000000) {
 		t.Fatalf("unexpected forward metadata: %#v", forward)
+	}
+}
+
+func TestPrependTurnUserMessageCarriesSourceReceipt(t *testing.T) {
+	t.Parallel()
+
+	receipt := &conversation.UserMessageReceipt{
+		ID:          "receipt-1",
+		DisplayText: "hello",
+		Origin: mustStoreEnvelope(t, messagesource.EnvelopeInput{
+			ExternalMessageID: "external-1",
+			Source: messagesource.V1Candidate{
+				SenderDisplayName: "Alice", Platform: "telegram", ConversationType: "private", ConversationName: "Chat",
+			},
+		}),
+	}
+	round := prependTurnUserMessage(conversation.ChatRequest{Query: "model hello", UserReceipt: receipt}, []conversation.ModelMessage{
+		{Role: "assistant", Content: conversation.NewTextContent("hi")},
+	})
+	if len(round) != 2 || round[0].UserReceipt != receipt || round[0].TextContent() != "model hello" {
+		t.Fatalf("prepended round = %#v", round)
+	}
+}
+
+func TestStoreMessagesLeadingReceiptPreservesTurnInteractionMetadata(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	receipt := &conversation.UserMessageReceipt{
+		DisplayText: "run alpha",
+		Metadata: map[string]any{
+			"route_id": "captured-route",
+			"platform": "telegram",
+			"reply":    map[string]any{"message_id": "captured-reply"},
+		},
+	}
+	resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID:           storeRoundBotID,
+		SessionID:       "44444444-4444-4444-4444-444444444444",
+		Query:           "run alpha",
+		UserReceipt:     receipt,
+		RouteID:         "request-route",
+		CurrentChannel:  "slack",
+		UserMessageKind: conversation.UserMessageKindSkillActivation,
+		RequestedSkills: []conversation.RequestedSkillContext{{Name: "alpha", SourceKind: "managed", Identity: "managed|alpha"}},
+		SkillActivation: conversation.NewSkillActivation([]conversation.RequestedSkillContext{{Name: "alpha", SourceKind: "managed"}}, "run alpha"),
+		SessionType:     "chat",
+		RuntimeType:     "model",
+	}, []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("run alpha"), UserReceipt: receipt},
+		{Role: "assistant", Content: conversation.NewTextContent("done")},
+	}, "", storeRoundOptions{})
+
+	if len(messages.persisted) != 2 {
+		t.Fatalf("persisted messages = %d, want 2", len(messages.persisted))
+	}
+	metadata := messages.persisted[0].Metadata
+	if metadata["route_id"] != "captured-route" || metadata["platform"] != "telegram" ||
+		metadata["user_message_kind"] != conversation.UserMessageKindSkillActivation ||
+		metadata["model_requested_skills"] == nil || metadata["skill_activation"] == nil {
+		t.Fatalf("leading receipt metadata = %#v", metadata)
+	}
+	reply, _ := metadata["reply"].(map[string]any)
+	if reply["message_id"] != "captured-reply" {
+		t.Fatalf("receipt reply metadata was overwritten: %#v", metadata)
+	}
+}
+
+func TestStoreMessagesIndexZeroInjectionDoesNotInheritTurnMetadata(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	leadingReceipt := &conversation.UserMessageReceipt{ID: "leading-receipt"}
+	injectedReceipt := &conversation.UserMessageReceipt{
+		ID:       "injected-receipt",
+		Metadata: map[string]any{"route_id": "injected-route", "platform": "telegram"},
+	}
+	resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID:           storeRoundBotID,
+		SessionID:       "44444444-4444-4444-4444-444444444444",
+		Query:           "leading",
+		UserReceipt:     leadingReceipt,
+		RouteID:         "outer-route",
+		CurrentChannel:  "slack",
+		UserMessageKind: conversation.UserMessageKindSkillActivation,
+		SessionType:     "chat",
+		RuntimeType:     "model",
+	}, []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("injected"), UserReceipt: injectedReceipt},
+		{Role: "assistant", Content: conversation.NewTextContent("done")},
+	}, "", storeRoundOptions{})
+
+	metadata := messages.persisted[0].Metadata
+	if metadata["route_id"] != "injected-route" || metadata["platform"] != "telegram" ||
+		metadata["user_message_kind"] != nil {
+		t.Fatalf("index-zero injection inherited outer metadata: %#v", metadata)
 	}
 }
 
@@ -150,6 +253,25 @@ type batchRecordingMessageService struct {
 	batchInputs []messagepkg.PersistInput
 }
 
+type failingRecordingMessageService struct {
+	recordingMessageService
+}
+
+func (s *failingRecordingMessageService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
+	s.persisted = append(s.persisted, input)
+	return messagepkg.Message{}, errors.New("persist failed")
+}
+
+type decliningBatchMessageService struct {
+	recordingMessageService
+	batchInputs []messagepkg.PersistInput
+}
+
+func (s *decliningBatchMessageService) PersistToolTailRound(_ context.Context, inputs []messagepkg.PersistInput) ([]messagepkg.Message, bool, error) {
+	s.batchInputs = append(s.batchInputs, inputs...)
+	return nil, false, nil
+}
+
 func (s *batchRecordingMessageService) PersistToolTailRound(_ context.Context, inputs []messagepkg.PersistInput) ([]messagepkg.Message, bool, error) {
 	s.batchInputs = append(s.batchInputs, inputs...)
 	return recordedMessages(inputs), true, nil
@@ -203,4 +325,229 @@ func TestFindAssistantMessageForToolCall(t *testing.T) {
 	if got := findAssistantMessageForToolCall(msgs, "call-404"); got != "" {
 		t.Fatalf("findAssistantMessageForToolCall unknown id = %q, want empty", got)
 	}
+}
+
+func TestStoreMessagesPreservesReceiptWhenToolTailBatchDeclines(t *testing.T) {
+	t.Parallel()
+
+	messages := &decliningBatchMessageService{}
+	resolver := &Resolver{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	origin := mustStoreEnvelope(t, messagesource.EnvelopeInput{
+		ExternalMessageID: "external-user",
+		EventID:           "33333333-3333-3333-3333-333333333333",
+		Source: messagesource.V1Candidate{
+			SenderDisplayName: "Sender", Platform: "telegram", ConversationType: "private", ConversationName: "Chat",
+		},
+	})
+	sourceContext := origin.Values().Context
+	receipt := &conversation.UserMessageReceipt{
+		DisplayText: "hello",
+		Origin:      origin,
+		Metadata:    map[string]any{"platform": "telegram"},
+	}
+	resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID: storeRoundBotID, SessionID: "44444444-4444-4444-4444-444444444444",
+		Query: "hello", SessionType: "chat", RuntimeType: "model",
+	}, []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("hello"), UserReceipt: receipt},
+		{Role: "assistant", Content: conversation.NewTextContent("call")},
+		{Role: "tool", Content: conversation.NewTextContent("result")},
+		{Role: "assistant", Content: conversation.NewTextContent("done")},
+	}, "", storeRoundOptions{})
+
+	if len(messages.batchInputs) != 4 || len(messages.persisted) != 4 {
+		t.Fatalf("batch attempt=%d sequential=%d, want 4/4", len(messages.batchInputs), len(messages.persisted))
+	}
+	for _, inputs := range [][]messagepkg.PersistInput{messages.batchInputs, messages.persisted} {
+		if inputs[0].ExternalMessageID != "external-user" || inputs[0].EventID != origin.Values().EventID ||
+			inputs[0].SourceContext != sourceContext || inputs[0].Metadata["platform"] != "telegram" ||
+			inputs[1].SourceReplyToMessageID != "external-user" {
+			t.Fatalf("batch fallback changed receipt provenance: %#v", inputs)
+		}
+	}
+}
+
+func TestStoreMessagesUsesPerMessageInjectionReceipt(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+	originInput := messagesource.EnvelopeInput{
+		SenderChannelIdentityID: "11111111-1111-1111-1111-111111111111",
+		SenderUserID:            "22222222-2222-2222-2222-222222222222",
+		ExternalMessageID:       "external-b",
+		SourceReplyToMessageID:  "reply-b",
+		EventID:                 "33333333-3333-3333-3333-333333333333",
+		Source: messagesource.V1Candidate{
+			SenderDisplayName: "Injected Sender", Platform: "telegram", ConversationType: "group", ConversationName: "Injected Room",
+		},
+	}
+	origin := mustStoreEnvelope(t, originInput)
+	originValues := origin.Values()
+	sourceContext := originValues.Context
+	receipt := &conversation.UserMessageReceipt{
+		ID:          "receipt-b",
+		DisplayText: "raw injected text",
+		Origin:      origin,
+		Metadata:    map[string]any{"route_id": "route-b", "platform": "telegram"},
+		Attachments: []conversation.ChatAttachment{{
+			ContentHash: "asset-b",
+			Mime:        "image/png",
+			Name:        "b.png",
+			Size:        42,
+			Metadata:    map[string]any{"storage_key": "assets/b.png", "source": "injected"},
+		}},
+	}
+	resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID:             storeRoundBotID,
+		SessionID:         "44444444-4444-4444-4444-444444444444",
+		Query:             "initial",
+		ExternalMessageID: "external-a",
+		RouteID:           "route-a",
+		CurrentChannel:    "slack",
+		SessionType:       "chat",
+		RuntimeType:       "model",
+	}, []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("initial")},
+		{Role: "assistant", Content: conversation.NewTextContent("working")},
+		{Role: "user", Content: conversation.NewTextContent("<message>raw injected text</message>"), UserReceipt: receipt},
+		{Role: "user", Content: conversation.NewTextContent("initial")},
+		{Role: "assistant", Content: conversation.NewTextContent("done")},
+	}, "", storeRoundOptions{})
+
+	if len(messages.persisted) != 5 {
+		t.Fatalf("persisted inputs = %d, want 5", len(messages.persisted))
+	}
+	injected := messages.persisted[2]
+	if injected.SenderChannelIdentityID != originValues.SenderChannelIdentityID ||
+		injected.SenderUserID != originValues.SenderUserID ||
+		injected.ExternalMessageID != originValues.ExternalMessageID ||
+		injected.SourceReplyToMessageID != originValues.SourceReplyToMessageID ||
+		injected.EventID != originValues.EventID || injected.SourceContext != sourceContext ||
+		injected.DisplayText != receipt.DisplayText || injected.Metadata["route_id"] != "route-b" ||
+		injected.Metadata["platform"] != "telegram" {
+		t.Fatalf("injected provenance = %#v, want receipt %#v", injected, receipt)
+	}
+	if len(injected.Assets) != 1 || injected.Assets[0].ContentHash != "asset-b" ||
+		injected.Assets[0].Role != "attachment" || injected.Assets[0].Ordinal != 0 ||
+		injected.Assets[0].Mime != "image/png" || injected.Assets[0].SizeBytes != 42 ||
+		injected.Assets[0].Name != "b.png" || injected.Assets[0].StorageKey != "assets/b.png" ||
+		injected.Assets[0].Metadata["source"] != "injected" {
+		t.Fatalf("injected assets = %#v", injected.Assets)
+	}
+	var storedModelMessage conversation.ModelMessage
+	if err := json.Unmarshal(injected.Content, &storedModelMessage); err != nil {
+		t.Fatalf("decode injected model content: %v", err)
+	}
+	if storedModelMessage.TextContent() != "<message>raw injected text</message>" || storedModelMessage.UserReceipt != nil {
+		t.Fatalf("injected model content = %#v", storedModelMessage)
+	}
+	synthetic := messages.persisted[3]
+	if synthetic.SenderChannelIdentityID != "" || synthetic.SenderUserID != "" ||
+		synthetic.ExternalMessageID != "" || synthetic.EventID != "" ||
+		synthetic.SourceReplyToMessageID != "" || synthetic.SourceContext != (messagesource.Context{}) ||
+		len(synthetic.Metadata) != 0 || len(synthetic.Assets) != 0 {
+		t.Fatalf("synthetic user inherited provenance: %#v", synthetic)
+	}
+	if messages.persisted[1].SourceReplyToMessageID != "external-a" ||
+		messages.persisted[4].SourceReplyToMessageID != "external-b" {
+		t.Fatalf("assistant source replies did not follow the latest real user: before=%q after=%q",
+			messages.persisted[1].SourceReplyToMessageID, messages.persisted[4].SourceReplyToMessageID)
+	}
+
+	withoutExternal := &recordingMessageService{}
+	resolver.messageService = withoutExternal
+	receiptWithoutExternal := *receipt
+	originInput.ExternalMessageID = ""
+	receiptWithoutExternal.Origin = mustStoreEnvelope(t, originInput)
+	resolver.storeMessages(context.Background(), conversation.ChatRequest{
+		BotID: storeRoundBotID, SessionID: "44444444-4444-4444-4444-444444444444",
+		Query: "initial", ExternalMessageID: "external-a", SessionType: "chat", RuntimeType: "model",
+	}, []conversation.ModelMessage{
+		{Role: "user", Content: conversation.NewTextContent("initial")},
+		{Role: "user", Content: conversation.NewTextContent("injected"), UserReceipt: &receiptWithoutExternal},
+		{Role: "assistant", Content: conversation.NewTextContent("done")},
+	}, "", storeRoundOptions{})
+	if got := withoutExternal.persisted[2].SourceReplyToMessageID; got != "" {
+		t.Fatalf("assistant after receipt without external ID replied to %q, want empty", got)
+	}
+}
+
+func TestStoreRoundRemapsMetadataAcrossSyntheticToolClosure(t *testing.T) {
+	t.Parallel()
+
+	messages := &batchRecordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+	call := sdkMessagesToModelMessages([]sdk.Message{{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{sdk.ToolCallPart{
+			ToolCallID: "call-1",
+			ToolName:   "lookup",
+			Input:      map[string]any{},
+		}},
+	}})[0]
+	failureMetadata := map[string]any{"error": "runtime failed", "stop_reason": "error"}
+	origin := mustStoreEnvelope(t, messagesource.EnvelopeInput{
+		ExternalMessageID: "external-original",
+		Source: messagesource.V1Candidate{
+			SenderDisplayName: "Original Sender", Platform: "telegram", ConversationType: "private", ConversationName: "Original Chat",
+		},
+	})
+	sourceContext := origin.Values().Context
+
+	_, err := resolver.storeRoundWithOptionsResult(context.Background(), conversation.ChatRequest{
+		BotID:       storeRoundBotID,
+		SessionID:   "33333333-3333-3333-3333-333333333333",
+		Query:       "hello",
+		SessionType: "chat",
+		RuntimeType: "acp_agent",
+	}, []conversation.ModelMessage{
+		{
+			Role:    "user",
+			Content: conversation.NewTextContent("hello"),
+			UserReceipt: &conversation.UserMessageReceipt{
+				DisplayText: "hello",
+				Origin:      origin,
+			},
+		},
+		call,
+		{Role: "assistant", Content: conversation.NewTextContent("runtime failed")},
+	}, "", storeRoundOptions{
+		SkipMemory:             true,
+		MessageMetadataByIndex: map[int]map[string]any{2: failureMetadata},
+	})
+	if err != nil {
+		t.Fatalf("storeRoundWithOptionsResult() error = %v", err)
+	}
+	if len(messages.batchInputs) != 4 {
+		t.Fatalf("persisted inputs = %d, want user, call, synthetic result, failure", len(messages.batchInputs))
+	}
+	if messages.batchInputs[2].Role != "tool" {
+		t.Fatalf("input[2] role = %q, want synthetic tool", messages.batchInputs[2].Role)
+	}
+	if _, leaked := messages.batchInputs[2].Metadata["error"]; leaked {
+		t.Fatalf("synthetic tool inherited failure metadata: %#v", messages.batchInputs[2].Metadata)
+	}
+	if messages.batchInputs[3].Metadata["error"] != "runtime failed" || messages.batchInputs[3].Metadata["stop_reason"] != "error" {
+		t.Fatalf("failure metadata moved or disappeared: %#v", messages.batchInputs[3].Metadata)
+	}
+	if messages.batchInputs[0].ExternalMessageID != "external-original" ||
+		messages.batchInputs[0].SourceContext != sourceContext {
+		t.Fatalf("tool closure repair lost user receipt: %#v", messages.batchInputs[0])
+	}
+}
+
+func mustStoreEnvelope(t *testing.T, input messagesource.EnvelopeInput) messagesource.Envelope {
+	t.Helper()
+	envelope, err := messagesource.NewEnvelope(input)
+	if err != nil {
+		t.Fatalf("new source envelope: %v", err)
+	}
+	return envelope
 }

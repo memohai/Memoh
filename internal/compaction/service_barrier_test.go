@@ -2,6 +2,7 @@ package compaction
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -26,14 +27,19 @@ func TestDoCompactionDoesNotSplitToolExchangeAtUnparseableBarrier(t *testing.T) 
 			rows := []sqlc.ListUncompactedMessagesBySessionRow{
 				toolCallRow(t, 100),
 				toolResultRow(t, 100),
-				mkRow(t, "user", `"old question"`, 100),
-				mkRow(t, "assistant", `"old answer"`, 100),
+				mkRow(t, "user", jsonStr(strings.Repeat("old question ", 20)), 100),
+				mkRow(t, "assistant", jsonStr(strings.Repeat("old answer ", 20)), 100),
 				mkRow(t, "user", `"current question"`, 100),
 				mkRow(t, "assistant", `"current answer"`, 100),
 			}
 			if tt.bareCall {
 				rows[0].Content = []byte(`{"type":"tool-call","toolCallId":"c1","toolName":"search","input":{}}`)
 			}
+			priorCompactIDs := []pgtype.UUID{testUUID(t), testUUID(t)}
+			rows[2].SourceVersion = "selected-version-2"
+			rows[2].CompactID = priorCompactIDs[0]
+			rows[3].SourceVersion = "selected-version-3"
+			rows[3].CompactID = priorCompactIDs[1]
 			rows[tt.breakIndex].ID = pgtype.UUID{Valid: false}
 			q := &fakeQueries{uncompacted: rows}
 			stub := &stubModel{summary: "SUMMARY"}
@@ -44,6 +50,17 @@ func TestDoCompactionDoesNotSplitToolExchangeAtUnparseableBarrier(t *testing.T) 
 
 			if len(q.markedIDs) != 2 || q.markedIDs[0] != rows[2].ID || q.markedIDs[1] != rows[3].ID {
 				t.Fatalf("marked ids = %#v, want only the complete run after the protected tool exchange", q.markedIDs)
+			}
+			if len(q.finalized.SourceVersions) != 2 ||
+				q.finalized.SourceVersions[0] != "selected-version-2" ||
+				q.finalized.SourceVersions[1] != "selected-version-3" ||
+				q.finalized.ExpectedCompactIds[0] != formatUUID(priorCompactIDs[0]) ||
+				q.finalized.ExpectedCompactIds[1] != formatUUID(priorCompactIDs[1]) {
+				t.Fatalf(
+					"non-prefix snapshots = versions:%#v owners:%#v",
+					q.finalized.SourceVersions,
+					q.finalized.ExpectedCompactIds,
+				)
 			}
 		})
 	}

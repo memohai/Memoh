@@ -62,7 +62,13 @@ func (r *Resolver) buildMemoryQuery(ctx context.Context, req conversation.ChatRe
 		}
 		return builder.Build(req, nil)
 	}
-	loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
+	loaded, err = r.replaceCompactedMessages(ctx, req.SessionID, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
+	if err != nil {
+		if r.logger != nil {
+			r.logger.Warn("memory query compaction frontier load failed", slog.String("session_id", req.SessionID), slog.Any("error", err))
+		}
+		return builder.Build(req, nil)
+	}
 	loaded = dedupePersistedCurrentUserMessage(loaded, req)
 	return builder.Build(req, loaded)
 }

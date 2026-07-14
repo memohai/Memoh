@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -205,7 +206,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		prepareStep = readMediaState.prepareStep
 	}
 
-	initialMsgCount := len(cfg.Messages)
+	var completedOutputMessages atomic.Int64
 
 	if cfg.InjectCh != nil {
 		basePrepare := prepareStep
@@ -226,7 +227,10 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 						text = strings.TrimSpace(injected.Text)
 					}
 					if text != "" || (cfg.SupportsImageInput && len(injected.ImageParts) > 0) {
-						insertAfter := len(p.Messages) - initialMsgCount
+						insertAfter := int(completedOutputMessages.Load())
+						if readMediaState != nil {
+							insertAfter += readMediaState.injectedMessageCount()
+						}
 						var extra []sdk.MessagePart
 						if cfg.SupportsImageInput {
 							for _, img := range injected.ImageParts {
@@ -237,7 +241,11 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 						}
 						p.Messages = append(p.Messages, sdk.UserMessage(text, extra...))
 						if cfg.InjectedRecorder != nil {
-							cfg.InjectedRecorder(text, insertAfter)
+							cfg.InjectedRecorder(InjectedReceipt{
+								ID:          injected.ReceiptID,
+								ModelText:   text,
+								InsertAfter: insertAfter,
+							})
 						}
 						a.logger.Info("injected user message into agent stream",
 							slog.String("bot_id", cfg.Identity.BotID),
@@ -262,14 +270,24 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
 		return
 	}
+	materializedCfg, err := MaterializeInitialPrompt(streamCtx, cfg, sdkTools)
+	if err != nil {
+		turnError = err.Error()
+		sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
+		return
+	}
+	cfg = materializedCfg
 	cfg = cfg.RefreshContextFragWithDynamicMutators(readMediaState != nil, a != nil && a.hookService != nil, true)
-	opts := a.buildGenerateOptions(cfg, sdkTools, approvalTools, prepareStep)
+	preparedPrompts := &preparedPromptTracker{}
+	opts := a.buildGenerateOptionsTracked(cfg, sdkTools, approvalTools, prepareStep, preparedPrompts)
 	modelStepIndex := 0
-	opts = append(opts, sdk.WithOnStep(func(step *sdk.StepResult) *sdk.GenerateParams {
+	observeStep := func(step *sdk.StepResult) *sdk.GenerateParams {
+		completedOutputMessages.Add(int64(len(step.Messages)))
 		a.runAfterModelCallHook(streamCtx, cfg, step, modelStepIndex)
 		modelStepIndex++
 		return nil
-	}))
+	}
+	opts = append(opts, sdk.WithOnStep(observeStep))
 
 	retryCfg := cfg.Retry
 	if retryCfg.MaxAttempts <= 0 {
@@ -516,6 +534,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 					ctx, streamCtx, cancel, toolLoopAbortCallIDs,
 					ch, cfg, sdkTools, approvalTools, prepareStep, streamResult,
 					stepNumber, errMsg, &allText, textLoopProbeBuffer,
+					preparedPrompts, observeStep,
 				)
 				if !aborted {
 					turnError = ""
@@ -676,6 +695,11 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	if err != nil {
 		return nil, err
 	}
+	materializedCfg, err := MaterializeInitialPrompt(genCtx, cfg, sdkTools)
+	if err != nil {
+		return nil, err
+	}
+	cfg = materializedCfg
 	cfg = cfg.RefreshContextFragWithDynamicMutators(readMediaState != nil, a != nil && a.hookService != nil, false)
 	opts := a.buildGenerateOptions(cfg, sdkTools, approvalTools, prepareStep)
 	modelStepIndex := 0
@@ -749,7 +773,30 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	}, nil
 }
 
+// MaterializeInitialPrompt finalizes a one-time prompt projection for runtimes
+// that send a RunConfig without going through Agent.
+func MaterializeInitialPrompt(ctx context.Context, cfg RunConfig, tools []sdk.Tool) (RunConfig, error) {
+	materializer := cfg.InitialPromptMaterializer
+	if materializer == nil {
+		return cfg, nil
+	}
+	cfg.InitialPromptMaterializer = nil
+	materialized, err := materializer(ctx, cfg, tools)
+	materialized.InitialPromptMaterializer = nil
+	return materialized, err
+}
+
 func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTools []sdk.Tool, prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams) []sdk.GenerateOption {
+	return a.buildGenerateOptionsTracked(cfg, tools, approvalTools, prepareStep, nil)
+}
+
+func (a *Agent) buildGenerateOptionsTracked(
+	cfg RunConfig,
+	tools []sdk.Tool,
+	approvalTools []sdk.Tool,
+	prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams,
+	preparedPrompts *preparedPromptTracker,
+) []sdk.GenerateOption {
 	system, messages, tools := models.ApplyPromptCache(
 		cfg.Model, cfg.PromptCacheTTL, cfg.System, cfg.Messages, tools,
 	)
@@ -805,6 +852,16 @@ func (a *Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, approvalTo
 			}
 		}
 		return pruneOldToolResults(p, keepSteps, threshold)
+	}
+	if preparedPrompts != nil {
+		basePrepare := midTaskPrune
+		midTaskPrune = func(p *sdk.GenerateParams) *sdk.GenerateParams {
+			if override := basePrepare(p); override != nil {
+				p = override
+			}
+			preparedPrompts.Store(p)
+			return p
+		}
 	}
 	opts = append(opts, sdk.WithPrepareStep(midTaskPrune))
 
@@ -1298,6 +1355,8 @@ func (a *Agent) runMidStreamRetry(
 	errMsg string,
 	allText *strings.Builder,
 	textLoopProbeBuffer *TextLoopProbeBuffer,
+	preparedPrompts *preparedPromptTracker,
+	observeStep func(*sdk.StepResult) *sdk.GenerateParams,
 ) (*sdk.StreamResult, bool) {
 	// Drain the previous stream before reading prevResult.Messages.
 	// This avoids racing with the SDK's final StreamResult write.
@@ -1334,9 +1393,20 @@ func (a *Agent) runMidStreamRetry(
 		// Use buildGenerateOptions so retry benefits from mid-task pruning,
 		// media resolution, and other prepare-step logic — same as initial stream.
 		retryCfgCopy := cfg
-		retryCfgCopy.Messages = prevResult.Messages
+		prepared, hasPrepared := preparedPrompts.Load()
+		if !hasPrepared {
+			retryCfgCopy.Messages = make([]sdk.Message, 0, len(cfg.Messages)+len(prevResult.Messages))
+			retryCfgCopy.Messages = append(retryCfgCopy.Messages, cfg.Messages...)
+			retryCfgCopy.Messages = append(retryCfgCopy.Messages, prevResult.Messages...)
+		}
 		retryCfgCopy = retryCfgCopy.RefreshContextFrag()
-		retryOpts := a.buildGenerateOptions(retryCfgCopy, sdkTools, approvalTools, prepareStep)
+		retryOpts := a.buildGenerateOptionsTracked(retryCfgCopy, sdkTools, approvalTools, prepareStep, preparedPrompts)
+		if hasPrepared {
+			retryOpts = append(retryOpts, sdk.WithSystem(prepared.System), sdk.WithMessages(prepared.Messages))
+		}
+		if observeStep != nil {
+			retryOpts = append(retryOpts, sdk.WithOnStep(observeStep))
+		}
 
 		retryResult, retryErr := a.client.StreamText(streamCtx, retryOpts...)
 		if retryErr != nil {
@@ -1474,6 +1544,12 @@ func (a *Agent) runMidStreamRetry(
 			merged = append(merged, prevResult.Messages...)
 			merged = append(merged, retryResult.Messages...)
 			retryResult.Messages = merged
+		}
+		if len(prevResult.Steps) > 0 {
+			merged := make([]sdk.StepResult, 0, len(prevResult.Steps)+len(retryResult.Steps))
+			merged = append(merged, prevResult.Steps...)
+			merged = append(merged, retryResult.Steps...)
+			retryResult.Steps = merged
 		}
 		return retryResult, aborted || detectGenerateLoopAbort(streamCtx, streamCtx.Err()) != nil
 	}

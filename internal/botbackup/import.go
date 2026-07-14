@@ -1355,6 +1355,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			RuntimeType:            runtimeType,
 			EventID:                eventID,
 			DisplayText:            item.DisplayText,
+			SourceContext:          item.SourceContext,
 		})
 		if err != nil {
 			return fmt.Errorf("message: %w", err)

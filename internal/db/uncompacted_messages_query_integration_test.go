@@ -73,12 +73,12 @@ func TestListUncompactedMessagesReclaimEligibility(t *testing.T) {
 		"whitespace": uuid.NewString(),
 	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary) VALUES
-  ($1, $6, $7, 'ok', 'a usable summary'),
-  ($2, $6, $7, 'error', ''),
-  ($3, $6, $7, 'pending', ''),
-  ($4, $6, $7, 'ok', ''),
-  ($5, $6, $7, 'ok', E'  \n\t')
+INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary, message_count) VALUES
+  ($1, $6, $7, 'ok', 'a usable summary', 1),
+  ($2, $6, $7, 'error', '', 0),
+  ($3, $6, $7, 'pending', '', 0),
+  ($4, $6, $7, 'ok', '', 1),
+  ($5, $6, $7, 'ok', E'  \n\t', 1)
 `, logs["usable"], logs["error"], logs["pending"], logs["poison"], logs["whitespace"], botID, sessionID); err != nil {
 		t.Fatalf("insert compact logs: %v", err)
 	}
@@ -99,6 +99,12 @@ INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summar
 		{name: "passive sync", metadata: `{"trigger_mode":"passive_sync"}`, eligible: false},
 	}
 	wantEligible := make(map[string]string)
+	// The fixtures model rows that predate the claim-guard triggers (an
+	// upgraded database), so they are inserted with triggers disabled the
+	// way replication/restore paths write historical data.
+	if _, err := tx.Exec(ctx, "SET LOCAL session_replication_role = replica"); err != nil {
+		t.Fatalf("disable triggers for legacy fixtures: %v", err)
+	}
 	for i, f := range fixtures {
 		id := uuid.NewString()
 		metadata := f.metadata
@@ -120,6 +126,22 @@ VALUES
 		if f.eligible {
 			wantEligible[id] = f.name
 		}
+	}
+
+	// Mirror the 0109 upgrade backfill: legacy claims against a successful
+	// artifact arrive finalized on an upgraded database.
+	if _, err := tx.Exec(ctx, `
+UPDATE bot_history_messages message
+SET compact_claim_finalized = true
+FROM bot_history_message_compacts compact
+WHERE message.compact_id = compact.id
+  AND compact.status = 'ok'
+  AND message.compact_claim_finalized = false
+`); err != nil {
+		t.Fatalf("apply legacy claim backfill: %v", err)
+	}
+	if _, err := tx.Exec(ctx, "SET LOCAL session_replication_role = origin"); err != nil {
+		t.Fatalf("re-enable triggers: %v", err)
 	}
 
 	var sessionUUID pgtype.UUID

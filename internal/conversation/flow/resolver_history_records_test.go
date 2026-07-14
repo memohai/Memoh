@@ -1,14 +1,21 @@
 package flow
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	"github.com/jackc/pgx/v5/pgtype"
 
+	agentpkg "github.com/memohai/memoh/internal/agent"
+	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/contextfrag"
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/db"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/historyfrag"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/toolapproval"
@@ -49,7 +56,7 @@ func TestDedupePersistedCurrentUserMessageUsesHistoryRecordProvenance(t *testing
 	}
 }
 
-func TestReplaceCompactedHistoryRecordsUsesLegacySummaryRecord(t *testing.T) {
+func TestReplaceCompactedHistoryRecordsUsesTypedSummaryRecord(t *testing.T) {
 	t.Parallel()
 
 	records := []historyfrag.HistoryRecord{
@@ -74,17 +81,23 @@ func TestReplaceCompactedHistoryRecordsUsesLegacySummaryRecord(t *testing.T) {
 		t.Fatalf("expected 2 records, got %d", len(got))
 	}
 	summary := got[0]
-	if summary.SourceKind != historyfrag.SourceCompactionLog || summary.Lifecycle != historyfrag.LifecycleLegacySummary {
+	if summary.SourceKind != historyfrag.SourceCompactionLog || summary.Lifecycle != historyfrag.LifecycleActiveSummary {
 		t.Fatalf("summary record source/lifecycle mismatch: %#v", summary)
 	}
-	if summary.Kind != contextfrag.KindConversationEvent {
-		t.Fatalf("summary should remain conversation_event in PR1, got %s", summary.Kind)
+	if summary.Kind != contextfrag.KindConversationSummary {
+		t.Fatalf("summary should be conversation_summary, got %s", summary.Kind)
 	}
 	if summary.Ref.Namespace != "compaction_log" || summary.Ref.ID != "compact-1" || summary.Ref.Durability != contextfrag.RefDurable {
 		t.Fatalf("summary ref should be durable compaction log identity: %#v", summary.Ref)
 	}
-	if frag := historyfrag.ToFrag(summary); frag.Kind != contextfrag.KindConversationEvent || frag.Slot != contextfrag.SlotHistory {
-		t.Fatalf("summary frag should stay history conversation event in PR1: %#v", frag)
+	if summary.Coverage == nil || len(summary.Coverage.CoveredRefs) != 2 {
+		t.Fatalf("summary should cover compacted records: %#v", summary.Coverage)
+	}
+	if summary.Coverage.CoveredRefs[0].ID != "row-1" || summary.Coverage.CoveredRefs[1].ID != "row-2" {
+		t.Fatalf("summary coverage should preserve covered record refs: %#v", summary.Coverage.CoveredRefs)
+	}
+	if frag := historyfrag.ToFrag(summary); frag.Kind != contextfrag.KindConversationSummary || frag.Slot != contextfrag.SlotHistory || frag.Coverage == nil {
+		t.Fatalf("summary frag should carry active summary coverage: %#v", frag)
 	}
 }
 
@@ -188,92 +201,100 @@ func TestReplaceCompactedHistoryRecordsKeepsMustKeepIslandOrdering(t *testing.T)
 	}
 }
 
-func TestHistoryRecordPathPreservesLegacyResolverMessagePipeline(t *testing.T) {
+func TestHistoryContextFragsForMessagesCarriesActiveSummaryCoverage(t *testing.T) {
 	t.Parallel()
 
-	assistantToolCallSDK := sdk.Message{
-		Role: sdk.MessageRoleAssistant,
-		Content: []sdk.MessagePart{
-			sdk.ToolCallPart{
-				ToolCallID: "call-1",
-				ToolName:   "lookup",
-				Input:      map[string]any{"q": "memoh"},
-			},
-		},
+	covered := []contextfrag.ContextRef{
+		{Namespace: "bot_history_message", ID: "row-1", Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable},
 	}
-	assistantToolCall := sdkMessagesToModelMessages([]sdk.Message{assistantToolCallSDK})[0]
-	toolResultSDK := sdk.ToolMessage(sdk.ToolResultPart{
-		ToolCallID: "call-1",
-		ToolName:   "lookup",
-		Result:     "tool result",
-	})
-	toolResult := sdkMessagesToModelMessages([]sdk.Message{toolResultSDK})[0]
-	rows := []messagepkg.Message{
-		dbHistoryRow(t, "row-compact-user", "user", conversation.NewTextContent("old compacted user"), func(msg *messagepkg.Message) {
-			msg.CompactID = "compact-ok"
-		}),
-		dbHistoryRow(t, "row-compact-assistant", "assistant", conversation.NewTextContent("old compacted assistant"), func(msg *messagepkg.Message) {
-			msg.CompactID = "compact-ok"
-		}),
-		dbHistoryRow(t, "row-missing-summary", "user", conversation.NewTextContent("missing summary body"), func(msg *messagepkg.Message) {
-			msg.CompactID = "compact-missing"
-		}),
-		dbHistoryRow(t, "row-current", "user", conversation.NewTextContent("already persisted current"), func(msg *messagepkg.Message) {
-			msg.SessionID = "sess-1"
-			msg.ExternalMessageID = "msg-current"
-			msg.Platform = "telegram"
-			msg.SenderChannelIdentityID = "sender-1"
-		}),
-		{
-			ID:      "row-plain",
-			BotID:   "bot-1",
-			Role:    "user",
-			Content: conversation.NewTextContent("plain string content"),
-		},
-		dbHistoryRow(t, "row-tool-call", "assistant", mustRawJSON(t, assistantToolCall), nil),
-		dbHistoryRow(t, "row-tool-result", "tool", mustRawJSON(t, toolResult), nil),
+	summary := historyfrag.SummaryRecord("compact-1", "condensed", covered, contextfrag.Scope{BotID: "bot-1"})
+	records := []historyfrag.HistoryRecord{
+		summary,
+		historyRecord("row-2", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent("new")}, nil),
+	}
+	messages := []conversation.ModelMessage{
+		summary.ModelMessage,
+		{Role: "user", Content: conversation.NewTextContent("new")},
 	}
 
-	records := make([]historyfrag.HistoryRecord, 0, len(rows))
-	for _, row := range rows {
-		record, err := historyfrag.FromDBMessage(row, historyfrag.ScopeFallback{ChatID: "chat-1"})
-		if err != nil {
-			t.Fatalf("FromDBMessage(%s): %v", row.ID, err)
+	frags := historyContextFragsForMessages(messages, records)
+
+	if len(frags) != 1 {
+		t.Fatalf("summary frags = %d, want 1: %#v", len(frags), frags)
+	}
+	if frags[0].ID != "message.000" || frags[0].Provenance.Index != 0 {
+		t.Fatalf("summary frag should align with final message index: %#v", frags[0])
+	}
+	if frags[0].Kind != contextfrag.KindConversationSummary || frags[0].Coverage == nil {
+		t.Fatalf("summary frag lost kind/coverage: %#v", frags[0])
+	}
+
+	cfg := agentpkg.RunConfig{
+		Messages:     modelMessagesToSDKMessages(messages),
+		ContextFrags: frags,
+	}.RefreshContextFrag()
+	if len(cfg.ContextManifest.CoverageTrace) != 1 {
+		t.Fatalf("run config manifest lost summary coverage: %#v", cfg.ContextManifest)
+	}
+	summaryItems := 0
+	for _, item := range cfg.ContextManifest.Items {
+		if item.Kind == contextfrag.KindConversationSummary {
+			summaryItems++
 		}
-		records = append(records, record)
 	}
-	records = dedupePersistedCurrentUserMessage(records, conversation.ChatRequest{
-		UserMessagePersisted:    true,
-		SessionID:               "sess-1",
-		ExternalMessageID:       "msg-current",
-		CurrentChannel:          "telegram",
-		SourceChannelIdentityID: "sender-1",
-	})
-	records = replaceCompactedHistoryRecords(records, map[string]string{"compact-ok": "condensed"}, contextfrag.Scope{})
-	got, tokens := trimMessagesByTokens(nil, records, 0)
+	if summaryItems != 1 {
+		t.Fatalf("run config manifest summary items = %d, want 1: %#v", summaryItems, cfg.ContextManifest.Items)
+	}
+}
 
-	want := []conversation.ModelMessage{
-		{Role: "user", Content: conversation.NewTextContent("<summary>\ncondensed\n</summary>")},
-		{Role: "user", Content: conversation.NewTextContent("missing summary body")},
-		{Role: "user", Content: conversation.NewTextContent("plain string content")},
-		assistantToolCall,
-		toolResult,
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("history pipeline payload mismatch:\ngot  %#v\nwant %#v", got, want)
-	}
-	if tokens == 0 {
-		t.Fatal("history pipeline should report estimated tokens for retained records")
+func TestHistoryContextFragsPreserveEverySummaryRecordAfterTrim(t *testing.T) {
+	t.Parallel()
+
+	firstCovered := []contextfrag.ContextRef{{Namespace: "bot_history_message", ID: "old-covered", Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable}}
+	secondCovered := []contextfrag.ContextRef{{Namespace: "bot_history_message", ID: "new-covered", Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable}}
+	first := historyfrag.SummaryRecord("compact-old", "same summary", firstCovered, contextfrag.Scope{})
+	second := historyfrag.SummaryRecord("compact-new", "same summary", secondCovered, contextfrag.Scope{})
+	records := []historyfrag.HistoryRecord{
+		first,
+		historyRecord("row-long", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(strings.Repeat("x", 400))}, nil),
+		second,
 	}
 
-	repaired := repairToolCallClosures(sanitizeMessages(got), syntheticToolClosureError)
-	assertSameJSON(t, modelMessagesToSDKMessages(nonNilModelMessages(repaired)), []sdk.Message{
-		sdk.UserMessage("<summary>\ncondensed\n</summary>"),
-		sdk.UserMessage("missing summary body"),
-		sdk.UserMessage("plain string content"),
-		assistantToolCallSDK,
-		toolResultSDK,
-	})
+	budget := estimateMessageTokens(historyTruncationNotice()) + estimateMessageTokens(first.ModelMessage) + estimateMessageTokens(second.ModelMessage)
+	messages, retained, _ := trimMessagesAndRecordsByTokens(nil, records, budget)
+	frags := historyContextFragsForMessages(messages, retained)
+
+	if len(frags) != 2 || frags[0].Coverage == nil || frags[1].Coverage == nil {
+		t.Fatalf("summary frag coverage mismatch: %#v", frags)
+	}
+	if got := []string{frags[0].Coverage.CoveredRefs[0].ID, frags[1].Coverage.CoveredRefs[0].ID}; !equalStrings(got, []string{"old-covered", "new-covered"}) {
+		t.Fatalf("summary coverage = %#v, want both retained summaries", got)
+	}
+}
+
+func TestHistoryAssemblyCompactableTokensExcludeSummariesAndIgnoreBudget(t *testing.T) {
+	t.Parallel()
+
+	summary := historyfrag.SummaryRecord("compact-big", strings.Repeat("s", 4000), nil, contextfrag.Scope{})
+	raw := historyRecord("row-1", conversation.ModelMessage{Role: "user", Content: conversation.NewTextContent(strings.Repeat("r", 400))}, nil)
+	records := []historyfrag.HistoryRecord{summary, raw}
+
+	unlimited, err := assembleHistoryContext(nil, records, nil)
+	if err != nil {
+		t.Fatalf("assemble unlimited history: %v", err)
+	}
+	limit := estimateMessageTokens(historyTruncationNotice()) + estimateMessageTokens(summary.ModelMessage)
+	limited, err := assembleHistoryContext(nil, records, &limit)
+	if err != nil {
+		t.Fatalf("assemble limited history: %v", err)
+	}
+	compactable := unlimited.Allocation.CompactableTokens
+	if compactable <= 0 || limited.Allocation.CompactableTokens != compactable {
+		t.Fatal("raw rows must count toward the compactable estimate")
+	}
+	if want := estimateMessageTokens(raw.ModelMessage); compactable != want {
+		t.Fatalf("compactable = %d, want raw-only estimate %d", compactable, want)
+	}
 }
 
 func TestHistoryScopeFallbackFromChatRequestUsesRequestTopology(t *testing.T) {
@@ -363,11 +384,14 @@ func assertSameJSON(t *testing.T, got any, want any) {
 func historyRecord(id string, msg conversation.ModelMessage, mutate func(*historyfrag.HistoryRecord)) historyfrag.HistoryRecord {
 	record := historyfrag.HistoryRecord{
 		Ref: contextfrag.ContextRef{
-			Namespace:  "bot_history_message",
-			ID:         id,
-			Version:    1,
-			Schema:     contextfrag.SchemaContextRef,
-			Durability: contextfrag.RefDurable,
+			Namespace:   "bot_history_message",
+			ID:          id,
+			Version:     1,
+			HashAlgo:    contextfrag.HashAlgoSHA256,
+			HashScope:   contextfrag.HashScopeSourcePayload,
+			ContentHash: testHistorySourceHash(id),
+			Schema:      contextfrag.SchemaContextRef,
+			Durability:  contextfrag.RefDurable,
 		},
 		Kind:         contextfrag.KindConversationEvent,
 		SourceKind:   historyfrag.SourceDBMessage,
@@ -379,4 +403,136 @@ func historyRecord(id string, msg conversation.ModelMessage, mutate func(*histor
 		mutate(&record)
 	}
 	return record
+}
+
+type recordingCompactionLogQueries struct {
+	dbstore.Queries
+	logs          []sqlc.BotHistoryMessageCompact
+	refs          map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow
+	byID          map[pgtype.UUID]sqlc.BotHistoryMessageCompact
+	invalidIDs    []pgtype.UUID
+	validatedIDs  map[pgtype.UUID]struct{}
+	sessionID     pgtype.UUID
+	listCalls     int
+	metadataCalls int
+	refCalls      []pgtype.UUID
+	getCalls      []pgtype.UUID
+	payloadCalls  [][]pgtype.UUID
+	listErr       error
+	refErr        error
+}
+
+func (q *recordingCompactionLogQueries) GetCompactionLogByID(_ context.Context, compactID pgtype.UUID) (sqlc.BotHistoryMessageCompact, error) {
+	q.getCalls = append(q.getCalls, compactID)
+	return q.byID[compactID], nil
+}
+
+func (q *recordingCompactionLogQueries) ListCompactionArtifactParentIDsBySuccessor(_ context.Context, arg sqlc.ListCompactionArtifactParentIDsBySuccessorParams) ([]pgtype.UUID, error) {
+	var ids []pgtype.UUID
+	for _, row := range q.byID {
+		if row.Status == "ok" && row.SupersededBy == arg.SuccessorID && row.BotID == arg.BotID && row.SessionID == arg.SessionID {
+			ids = append(ids, row.ID)
+		}
+	}
+	return ids, nil
+}
+
+func (q *recordingCompactionLogQueries) ListCompactionArtifactLineageBySession(_ context.Context, sessionID pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
+	q.sessionID = sessionID
+	q.listCalls++
+	return q.logs, q.listErr
+}
+
+func (q *recordingCompactionLogQueries) ListCompactionArtifactLineageMetadataBySession(_ context.Context, sessionID pgtype.UUID) ([]sqlc.ListCompactionArtifactLineageMetadataBySessionRow, error) {
+	q.sessionID = sessionID
+	q.metadataCalls++
+	rows := make([]sqlc.ListCompactionArtifactLineageMetadataBySessionRow, 0, len(q.logs))
+	for _, row := range q.logs {
+		_, lineageValidated := q.validatedIDs[row.ID]
+		coverageCount := int32(0)
+		var coverage []json.RawMessage
+		if len(row.Coverage) > 0 && json.Unmarshal(row.Coverage, &coverage) != nil {
+			coverageCount = -1
+		} else if len(row.Coverage) > 0 {
+			coverageCount = int32(len(coverage)) //nolint:gosec // test coverage is bounded
+		}
+		rows = append(rows, sqlc.ListCompactionArtifactLineageMetadataBySessionRow{
+			ID: row.ID, BotID: row.BotID, SessionID: row.SessionID, Status: row.Status,
+			HasSummary: strings.TrimSpace(row.Summary) != "", LineageValidated: lineageValidated, CoverageCount: coverageCount,
+			AnchorStartMs: row.AnchorStartMs, AnchorEndMs: row.AnchorEndMs,
+			ArtifactLevel: row.ArtifactLevel, ParentIds: row.ParentIds,
+			SupersededBy: row.SupersededBy, SupersededAt: row.SupersededAt, StartedAt: row.StartedAt,
+		})
+	}
+	return rows, q.listErr
+}
+
+func (q *recordingCompactionLogQueries) ListCompactionArtifactPayloadsByIDs(_ context.Context, ids []pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
+	q.payloadCalls = append(q.payloadCalls, append([]pgtype.UUID(nil), ids...))
+	wanted := make(map[pgtype.UUID]struct{}, len(ids))
+	for _, id := range ids {
+		wanted[id] = struct{}{}
+	}
+	rows := make([]sqlc.BotHistoryMessageCompact, 0, len(ids))
+	for _, row := range q.logs {
+		if _, ok := wanted[row.ID]; ok {
+			rows = append(rows, row)
+		}
+	}
+	return rows, nil
+}
+
+func persistedCoverage(t *testing.T, id string) []byte {
+	t.Helper()
+	raw, err := json.Marshal([]compaction.CoveredSource{{
+		Ref: contextfrag.ContextRef{
+			Namespace:   "bot_history_message",
+			ID:          id,
+			Version:     1,
+			HashAlgo:    contextfrag.HashAlgoSHA256,
+			HashScope:   contextfrag.HashScopeSourcePayload,
+			ContentHash: testHistorySourceHash(id),
+			Schema:      contextfrag.SchemaContextRef,
+			Durability:  contextfrag.RefDurable,
+		},
+	}})
+	if err != nil {
+		t.Fatalf("marshal persisted coverage: %v", err)
+	}
+	return raw
+}
+
+func testHistorySourceHash(id string) string {
+	return "test-source-hash-" + id
+}
+
+func recordTexts(records []historyfrag.HistoryRecord) []string {
+	texts := make([]string, 0, len(records))
+	for _, record := range records {
+		texts = append(texts, record.ModelMessage.TextContent())
+	}
+	return texts
+}
+
+func mustReplaceCompactedMessages(t *testing.T, resolver *Resolver, sessionID string, scope contextfrag.Scope, records []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
+	t.Helper()
+	replaced, err := resolver.replaceCompactedMessages(context.Background(), sessionID, scope, records)
+	if err != nil {
+		t.Fatalf("replaceCompactedMessages: %v", err)
+	}
+	return replaced
+}
+
+func (q *recordingCompactionLogQueries) ListMessageRefsByCompactID(_ context.Context, compactID pgtype.UUID) ([]sqlc.ListMessageRefsByCompactIDRow, error) {
+	q.refCalls = append(q.refCalls, compactID)
+	return q.refs[compactID], q.refErr
+}
+
+func mustPGUUID(t *testing.T, value string) pgtype.UUID {
+	t.Helper()
+	id, err := db.ParseUUID(value)
+	if err != nil {
+		t.Fatalf("parse uuid %q: %v", value, err)
+	}
+	return id
 }
