@@ -36,6 +36,6 @@ func NewBuiltinRuntimeFromConfigContext(ctx context.Context, logger *slog.Logger
 	if err != nil {
 		return nil, err
 	}
-	runtime.SetSemanticIndex(semantic)
+	runtime.SetSemanticIndex(ctx, semantic)
 	return runtime, nil
 }

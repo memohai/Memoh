@@ -40,8 +40,11 @@ type semanticRetryQueue struct {
 	pending  map[string]semanticRetryEntry
 	order    []string // FIFO keys for capacity eviction
 	started  bool
+	stopped  bool
 	stopCh   chan struct{}
 	stopOnce sync.Once
+	cancel   context.CancelFunc
+	done     chan struct{}
 	logger   *slog.Logger
 }
 
@@ -166,18 +169,27 @@ func (q *semanticRetryQueue) flush(ctx context.Context, index semanticUpserter) 
 	}
 }
 
-// start launches the background retry loop. Idempotent. The loop lives for
-// the process lifetime, matching the runtime it belongs to.
-func (q *semanticRetryQueue) start(index semanticUpserter) {
+// start launches the background retry loop. Idempotent. The loop lives until
+// the owning runtime closes it.
+func (q *semanticRetryQueue) start(ctx context.Context, index semanticUpserter) {
+	if index == nil {
+		return
+	}
+	workerCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	q.mu.Lock()
-	if q.started || index == nil {
+	if q.started || q.stopped {
 		q.mu.Unlock()
+		cancel()
 		return
 	}
 	q.started = true
+	q.cancel = cancel
+	q.done = make(chan struct{})
+	done := q.done
 	q.mu.Unlock()
 
 	go func() {
+		defer close(done)
 		ticker := time.NewTicker(semanticRetryInterval)
 		defer ticker.Stop()
 		for {
@@ -186,7 +198,9 @@ func (q *semanticRetryQueue) start(index semanticUpserter) {
 				if q.depth("") == 0 {
 					continue
 				}
-				q.flush(context.Background(), index)
+				q.flush(workerCtx, index)
+			case <-workerCtx.Done():
+				return
 			case <-q.stopCh:
 				return
 			}
@@ -198,5 +212,18 @@ func (q *semanticRetryQueue) stop() {
 	if q == nil {
 		return
 	}
-	q.stopOnce.Do(func() { close(q.stopCh) })
+	q.stopOnce.Do(func() {
+		q.mu.Lock()
+		q.stopped = true
+		cancel := q.cancel
+		done := q.done
+		q.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		close(q.stopCh)
+		if done != nil {
+			<-done
+		}
+	})
 }

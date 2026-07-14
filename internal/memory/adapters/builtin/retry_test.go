@@ -142,6 +142,7 @@ func TestSemanticRetryQueueCapacityEvictsOldest(t *testing.T) {
 func TestSemanticRetryQueueStopIsIdempotent(t *testing.T) {
 	t.Parallel()
 	q := newSemanticRetryQueue(nil)
+	q.start(context.Background(), &fakeUpserter{})
 
 	q.stop()
 	q.stop()
@@ -150,5 +151,10 @@ func TestSemanticRetryQueueStopIsIdempotent(t *testing.T) {
 	case <-q.stopCh:
 	default:
 		t.Fatal("stop channel remains open")
+	}
+	select {
+	case <-q.done:
+	default:
+		t.Fatal("retry worker remains active after stop")
 	}
 }

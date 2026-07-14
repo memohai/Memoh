@@ -194,9 +194,6 @@ func newPGVectorIndex(ctx context.Context, logger *slog.Logger, providerConfig m
 		logger.Debug("graph: pgvector semantic index disabled without relational query store", slog.String("embedding_model_id", modelRef))
 		return nil, nil
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if resolver == nil {
 		resolver = adapters.FixedTeamIDResolver(team.DefaultTeamID)
 	}
@@ -211,11 +208,11 @@ func newPGVectorIndex(ctx context.Context, logger *slog.Logger, providerConfig m
 	// Bootstrap the schema on a plain connection first: RegisterTypes fails on
 	// a fresh database where the vector type does not exist yet, so the
 	// extension must be created before the typed pool opens its first conn.
-	if err := bootstrapPgvectorSchema(context.Background(), poolCfg.ConnConfig); err != nil {
+	if err := bootstrapPgvectorSchema(ctx, poolCfg.ConnConfig); err != nil {
 		return nil, err
 	}
 	poolCfg.AfterConnect = pgxvec.RegisterTypes
-	pool, err := pgxpool.NewWithConfig(context.Background(), poolCfg)
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return nil, fmt.Errorf("pgvector semantic index: connect: %w", err)
 	}
@@ -228,7 +225,7 @@ func newPGVectorIndex(ctx context.Context, logger *slog.Logger, providerConfig m
 		resolveTeam: resolver,
 		logger:      logger,
 	}
-	if err := index.ensureStore(context.Background()); err != nil {
+	if err := index.ensureStore(ctx); err != nil {
 		pool.Close()
 		return nil, err
 	}
