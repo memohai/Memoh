@@ -15,13 +15,13 @@ import BackendCard from '@/components/settings/backend-card.vue'
 import DetailPane from '@/components/settings/detail-pane.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import SectionGroup from '@/components/section-group/index.vue'
-import { useViewSwap } from '@/composables/useViewSwap'
+import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
 
-const { data: providerData } = useQuery({
+const { data: providerData, isLoading: providersLoading } = useQuery({
   key: () => ['search-providers'],
   query: async () => {
     const { data } = await getSearchProviders({ throwOnError: true })
@@ -29,7 +29,7 @@ const { data: providerData } = useQuery({
   },
 })
 
-const { data: fetchProviderData } = useQuery({
+const { data: fetchProviderData, isLoading: fetchProvidersLoading } = useQuery({
   key: () => ['fetch-providers'],
   query: async () => {
     const { data } = await getFetchProviders({ throwOnError: true })
@@ -42,11 +42,11 @@ const curFetchProvider = ref<FetchprovidersGetResponse>()
 provide('curSearchProvider', curProvider)
 provide('curFetchProvider', curFetchProvider)
 
-// 'detail' query key: see useViewSwap.ts — makes re-clicking Web Search in the
-// settings sidebar while a provider's detail is open actually navigate back.
-// detailKind stays a local ref, not mirrored — same reasoning as voice/index.vue.
-const { view, direction, openDetail, backToList } = useViewSwap('detail')
-const detailKind = ref<'search' | 'fetch'>('search')
+type WebDetailKind = 'search' | 'fetch'
+type WebDetail =
+  | { kind: 'search', provider: SearchprovidersGetResponse }
+  | { kind: 'fetch', provider: FetchprovidersGetResponse }
+const detailKind = ref<WebDetailKind>('search')
 const openStatus = reactive({
   addSearchOpen: false,
   addFetchOpen: false,
@@ -69,16 +69,43 @@ const fetchProviders = computed<FetchprovidersGetResponse[]>(() => {
   })
 })
 
+const { view, direction, openDetail, backToList: closeProvider } = useRoutedViewSwap<WebDetail>({
+  key: 'provider',
+  items: () => [
+    ...providers.value.map(provider => ({ kind: 'search' as const, provider })),
+    ...fetchProviders.value.map(provider => ({ kind: 'fetch' as const, provider })),
+  ],
+  selected: () => {
+    if (detailKind.value === 'search' && curProvider.value) {
+      return { kind: 'search', provider: curProvider.value }
+    }
+    if (detailKind.value === 'fetch' && curFetchProvider.value) {
+      return { kind: 'fetch', provider: curFetchProvider.value }
+    }
+    return undefined
+  },
+  select: (detail) => {
+    detailKind.value = detail?.kind ?? 'search'
+    curProvider.value = detail?.kind === 'search' ? detail.provider : undefined
+    curFetchProvider.value = detail?.kind === 'fetch' ? detail.provider : undefined
+  },
+  getRouteValue: detail => `${detail.kind}:${detail.provider.id}`,
+  isLoading: routeValue => routeValue.startsWith('search:')
+    ? providersLoading.value
+    : routeValue.startsWith('fetch:') && fetchProvidersLoading.value,
+  isReady: routeValue => routeValue.startsWith('search:')
+    ? providerData.value !== undefined
+    : routeValue.startsWith('fetch:')
+      ? fetchProviderData.value !== undefined
+      : true,
+})
+
 function openProvider(provider: SearchprovidersGetResponse) {
-  curProvider.value = provider
-  detailKind.value = 'search'
-  openDetail()
+  openDetail({ kind: 'search', provider })
 }
 
 function openFetchProvider(provider: FetchprovidersGetResponse) {
-  curFetchProvider.value = provider
-  detailKind.value = 'fetch'
-  openDetail()
+  openDetail({ kind: 'fetch', provider })
 }
 
 watch(() => openStatus.addSearchOpen, (isOpen, wasOpen) => {
@@ -93,21 +120,6 @@ watch(() => openStatus.addFetchOpen, (isOpen, wasOpen) => {
   }
 })
 
-watch(providers, (list) => {
-  const id = curProvider.value?.id
-  if (!id) return
-  const found = list.find((p) => p.id === id)
-  if (found) curProvider.value = found
-  else if (view.value === 'detail' && detailKind.value === 'search') backToList()
-})
-
-watch(fetchProviders, (list) => {
-  const id = curFetchProvider.value?.id
-  if (!id) return
-  const found = list.find((p) => p.id === id)
-  if (found) curFetchProvider.value = found
-  else if (view.value === 'detail' && detailKind.value === 'fetch') backToList()
-})
 </script>
 
 <template>
@@ -225,7 +237,7 @@ watch(fetchProviders, (list) => {
       v-else
       width="narrow"
       :back-label="t('webSearch.title')"
-      @back="backToList()"
+      @back="closeProvider"
     >
       <ProviderSetting v-if="detailKind === 'search' && curProvider?.id" />
       <FetchProviderSetting v-else-if="detailKind === 'fetch' && curFetchProvider?.id" />

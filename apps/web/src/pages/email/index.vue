@@ -20,7 +20,7 @@ import AddEmailProvider from './components/add-email-provider.vue'
 import ProviderSetting from './components/provider-setting.vue'
 import BackendCard from '@/components/settings/backend-card.vue'
 import DetailPane from '@/components/settings/detail-pane.vue'
-import { useViewSwap } from '@/composables/useViewSwap'
+import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import EmailProviderIcon from '@/components/email-provider-icon/index.vue'
@@ -28,7 +28,7 @@ import EmailProviderIcon from '@/components/email-provider-icon/index.vue'
 const { t } = useI18n()
 const queryCache = useQueryCache()
 
-const { data: providerData } = useQuery({
+const { data: providerData, isLoading: providersLoading } = useQuery({
   key: () => ['email-providers'],
   query: async () => {
     const { data } = await getEmailProviders({ throwOnError: true })
@@ -39,15 +39,22 @@ const { data: providerData } = useQuery({
 const curProvider = ref<EmailProviderResponse>()
 provide('curEmailProvider', curProvider)
 
-// 'detail' query key: see useViewSwap.ts — makes re-clicking Email in the
-// settings sidebar while a provider's detail is open actually navigate back.
-const { view, direction, openDetail, backToList } = useViewSwap('detail')
 const searchQuery = ref('')
 const openStatus = reactive({ addOpen: false })
 
 const providers = computed<EmailProviderResponse[]>(() =>
   Array.isArray(providerData.value) ? providerData.value : [],
 )
+
+const { view, direction, openDetail: openProvider, backToList: closeProvider } = useRoutedViewSwap({
+  key: 'provider',
+  items: () => providers.value,
+  selected: () => curProvider.value,
+  select: provider => curProvider.value = provider,
+  getRouteValue: provider => provider.id ?? '',
+  isLoading: () => providersLoading.value,
+  isReady: () => providerData.value !== undefined,
+})
 
 const showSearch = computed(() => providers.value.length > 0)
 
@@ -58,25 +65,6 @@ const filteredProviders = computed(() => {
     (p.name ?? '').toLowerCase().includes(keyword)
     || (p.provider ?? '').toLowerCase().includes(keyword),
   )
-})
-
-function openProvider(provider: EmailProviderResponse) {
-  curProvider.value = provider
-  openDetail()
-}
-
-// Keep the open provider synced with refreshed data; if it was deleted while
-// open, fall back to the list.
-watch(providers, (list) => {
-  const currentId = curProvider.value?.id
-  if (!currentId) return
-  const stillExists = list.find(p => p.id === currentId)
-  if (stillExists) {
-    curProvider.value = stillExists
-  }
-  else if (view.value === 'detail') {
-    backToList()
-  }
 })
 
 // A provider may have been created in the add dialog — refresh on close.
@@ -175,7 +163,7 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
       v-else
       width="narrow"
       :back-label="t('email.title')"
-      @back="backToList()"
+      @back="closeProvider"
     >
       <ProviderSetting v-if="curProvider?.id" />
     </DetailPane>

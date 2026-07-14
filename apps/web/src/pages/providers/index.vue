@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useQuery } from '@pinia/colada'
 import {
   Button,
@@ -21,7 +21,7 @@ import AddProvider from '@/components/add-provider/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import BackendCard from '@/components/settings/backend-card.vue'
 import DetailPane from '@/components/settings/detail-pane.vue'
-import { useViewSwap } from '@/composables/useViewSwap'
+import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import { avatarInitials } from '@/composables/useAvatarInitials'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 import PageShell from '@/components/page-shell/index.vue'
@@ -29,7 +29,7 @@ import ModelSetting from './model-setting.vue'
 
 const { t } = useI18n()
 
-const { data: providerData } = useQuery({
+const { data: providerData, isLoading: providersLoading } = useQuery({
   key: () => ['providers'],
   query: async () => {
     const { data } = await getProviders({ throwOnError: true })
@@ -47,11 +47,6 @@ const { data: modelData } = useQuery({
 
 const curProvider = ref<ProvidersGetResponse>()
 
-// 'detail' query key: mirrors detail-open into the URL so re-clicking Providers
-// in the settings sidebar while a provider's detail is open actually navigates
-// back to the list, instead of being dropped as a duplicate push (see
-// useViewSwap.ts).
-const { view, direction, openDetail, backToList } = useViewSwap('detail')
 const searchQuery = ref('')
 const addOpen = ref(false)
 
@@ -62,6 +57,16 @@ const providers = computed<ProvidersGetResponse[]>(() => {
     const be = b.enable !== false ? 1 : 0
     return be - ae
   })
+})
+
+const { view, direction, openDetail: openProvider, backToList: closeProvider } = useRoutedViewSwap({
+  key: 'provider',
+  items: () => providers.value,
+  selected: () => curProvider.value,
+  select: provider => curProvider.value = provider,
+  getRouteValue: provider => provider.id ?? '',
+  isLoading: () => providersLoading.value,
+  isReady: () => providerData.value !== undefined,
 })
 
 const modelCountByProvider = computed(() => {
@@ -100,23 +105,6 @@ function modelCount(id: string | undefined) {
   return id ? (modelCountByProvider.value[id] ?? 0) : 0
 }
 
-function openProvider(provider: ProvidersGetResponse) {
-  curProvider.value = provider
-  openDetail()
-}
-
-// Sync the open provider with refreshed data; if it was deleted while open,
-// fall back to the gallery.
-watch(providers, (list) => {
-  const currentId = curProvider.value?.id
-  if (!currentId) return
-  const stillExists = list.find((p) => p.id === currentId)
-  if (stillExists) {
-    curProvider.value = stillExists
-  } else if (view.value === 'detail') {
-    backToList()
-  }
-})
 </script>
 
 <template>
@@ -224,7 +212,7 @@ watch(providers, (list) => {
       v-else
       width="narrow"
       :back-label="t('sidebar.providers')"
-      @back="backToList()"
+      @back="closeProvider"
     >
       <ModelSetting
         v-if="curProvider?.id"
