@@ -240,7 +240,10 @@ func TestContainerToolsDescribeOptionalExecutionLocationTarget(t *testing.T) {
 		properties, _ := params["properties"].(map[string]any)
 		target, _ := properties["target_id"].(map[string]any)
 		description, _ := target["description"].(string)
-		if !strings.Contains(description, "Omit to use the default location") || strings.Contains(description, "target-1") || strings.Contains(description, "Office PC") || strings.Contains(description, "offline") {
+		if !strings.Contains(description, "Exact target_id returned by list_execution_locations") ||
+			!strings.Contains(description, "Do not pass a location name, type, or runtime ID") ||
+			!strings.Contains(description, "Omit to use the default location") ||
+			strings.Contains(description, "target-1") || strings.Contains(description, "Office PC") || strings.Contains(description, "offline") {
 			t.Fatalf("%s target_id description = %q", tool.Name, description)
 		}
 	}
@@ -335,6 +338,25 @@ func TestContainerProviderResolvesOneCanonicalTargetPerInvocation(t *testing.T) 
 	}
 	if !resolved.workspace.windows || resolved.workspace.defaultWorkDir != `C:\Users\alice\project` {
 		t.Fatalf("resolved workspace = %#v", resolved.workspace)
+	}
+}
+
+func TestContainerProviderExplainsHowToRecoverFromMissingTarget(t *testing.T) {
+	t.Parallel()
+
+	targetProvider := &containerTestTargetProvider{resolveErr: workspacepkg.ErrWorkspaceTargetNotFound}
+	provider := NewContainerProvider(nil, targetProvider, nil, "")
+	_, err := provider.resolveToolTarget(context.Background(), SessionContext{BotID: "bot-1"}, map[string]any{"target_id": "server_workspace"})
+	if err == nil {
+		t.Fatal("resolveToolTarget() returned nil error")
+	}
+	if !errors.Is(err, workspacepkg.ErrWorkspaceTargetNotFound) {
+		t.Fatalf("resolveToolTarget() error = %v, want workspace target not found", err)
+	}
+	for _, want := range []string{"target_id", ToolListExecutionLocations().String(), "retry"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("resolveToolTarget() error = %q, want %q", err, want)
+		}
 	}
 }
 

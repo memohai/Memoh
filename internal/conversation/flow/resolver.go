@@ -41,6 +41,7 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
+	"github.com/memohai/memoh/internal/workspace"
 )
 
 const (
@@ -968,6 +969,25 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 		}
 		eval, err := r.toolApproval.EvaluatePolicy(ctx, input)
 		if err != nil {
+			if input.WorkspaceTargeted && errors.Is(err, workspace.ErrWorkspaceTargetNotFound) {
+				requestedTargetID := ""
+				if args, ok := call.Input.(map[string]any); ok {
+					requestedTargetID = strings.TrimSpace(readAnyString(args["target_id"]))
+				}
+				if r.logger != nil {
+					r.logger.Warn("workspace tool target not found during approval",
+						slog.String("bot_id", p.BotID),
+						slog.String("tool_name", call.ToolName),
+						slog.String("tool_call_id", call.ToolCallID),
+						slog.String("requested_target_id", requestedTargetID),
+					)
+				}
+				// Twilight treats approval handler errors as fatal to the whole run.
+				// A missing target is invalid model input, so let the tool execute
+				// and return its normal, instructional error instead. This is safe
+				// only for not-found targets: they cannot execute or bypass policy.
+				return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
+			}
 			return sdk.ToolApprovalResult{}, err
 		}
 		input.ExecutionLocation = eval.ExecutionLocation

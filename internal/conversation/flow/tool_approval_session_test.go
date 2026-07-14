@@ -17,10 +17,19 @@ import (
 	"github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/toolapproval"
+	"github.com/memohai/memoh/internal/workspace"
 )
 
 type denyToolApprovalSettingsQueries struct {
 	dbstore.Queries
+}
+
+type workspaceTargetPolicyErrorResolver struct {
+	err error
+}
+
+func (r workspaceTargetPolicyErrorResolver) ResolveWorkspaceTargetPolicy(context.Context, string, string) (toolapproval.WorkspaceTargetPolicy, error) {
+	return toolapproval.WorkspaceTargetPolicy{}, r.err
 }
 
 func (*denyToolApprovalSettingsQueries) GetSettingsByBotID(_ context.Context, botID pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
@@ -103,6 +112,57 @@ func TestToolApprovalPolicyDenyWinsOverHookForcedApproval(t *testing.T) {
 	}
 	if result.Decision != sdk.ToolApprovalDecisionRejected || result.Reason != toolapproval.PolicyDeniedReason {
 		t.Fatalf("result = %+v, want policy rejection", result)
+	}
+}
+
+func TestToolApprovalHandlerOnlyRecoversMissingWorkspaceTarget(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		resolveErr   error
+		wantApproved bool
+	}{
+		{name: "missing target", resolveErr: workspace.ErrWorkspaceTargetNotFound, wantApproved: true},
+		{name: "offline target", resolveErr: workspace.ErrRemoteRuntimeOffline},
+		{name: "internal failure", resolveErr: errors.New("database unavailable")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			log := slog.New(slog.DiscardHandler)
+			approvalService := toolapproval.NewService(log, nil, nil)
+			approvalService.SetWorkspaceTargetPolicyResolver(workspaceTargetPolicyErrorResolver{err: tt.resolveErr})
+			resolver := &Resolver{toolApproval: approvalService, logger: log}
+			handler := resolver.buildToolApprovalHandler(baseRunConfigParams{
+				BotID:       "bot-1",
+				SessionID:   "session-1",
+				SessionType: sessionmode.Chat,
+			})
+
+			result, err := handler(context.Background(), sdk.ToolCall{
+				ToolCallID: "call-1",
+				ToolName:   "exec",
+				Input: map[string]any{
+					"command":   "node --version",
+					"target_id": "server_workspace",
+				},
+			})
+			if tt.wantApproved {
+				if err != nil {
+					t.Fatalf("handler returned error: %v", err)
+				}
+				if result.Decision != sdk.ToolApprovalDecisionApproved {
+					t.Fatalf("decision = %q, want approved", result.Decision)
+				}
+				return
+			}
+			if !errors.Is(err, tt.resolveErr) {
+				t.Fatalf("handler error = %v, want %v", err, tt.resolveErr)
+			}
+		})
 	}
 }
 

@@ -364,7 +364,7 @@ func toolWorkspaceFromInfo(info bridge.WorkspaceInfo, fallbackWorkDir string) to
 func (*ContainerProvider) workspaceTargetParameter() map[string]any {
 	return map[string]any{
 		"type":        "string",
-		"description": "Execution location target ID. Omit to use the default location.",
+		"description": "Exact target_id returned by list_execution_locations. Do not pass a location name, type, or runtime ID. Omit to use the default location.",
 	}
 }
 
@@ -431,6 +431,9 @@ func (p *ContainerProvider) resolveToolTarget(ctx context.Context, session Sessi
 	if resolver, ok := p.clients.(workspaceTargetResolver); ok {
 		resolved, err := resolver.ResolveWorkspaceTarget(ctx, session.BotID, targetID)
 		if err != nil {
+			if errors.Is(err, workspacepkg.ErrWorkspaceTargetNotFound) {
+				return resolvedToolTarget{}, fmt.Errorf("execution location target_id is invalid or is no longer configured for this Bot; call %s and retry with a returned target_id: %w", ToolListExecutionLocations().String(), err)
+			}
 			return resolvedToolTarget{}, fmt.Errorf("workspace target is not reachable: %w", err)
 		}
 		if resolved.Client == nil {
