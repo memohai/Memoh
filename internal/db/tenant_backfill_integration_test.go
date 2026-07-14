@@ -58,17 +58,6 @@ func TestTenantIDBackfilledOnFreshInstall(t *testing.T) {
 		}
 	}
 
-	// Every tenants row must have exactly one fence (fence count == tenants count).
-	var fenceCount, tenantCount int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM app.tenant_write_fences").Scan(&fenceCount); err != nil {
-		t.Fatalf("count fences: %v", err)
-	}
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM tenants").Scan(&tenantCount); err != nil {
-		t.Fatalf("count tenants: %v", err)
-	}
-	if fenceCount != tenantCount {
-		t.Fatalf("fence count %d != tenants count %d", fenceCount, tenantCount)
-	}
 }
 
 // quoteIdent double-quotes a SQL identifier for safe interpolation of a table

@@ -18,6 +18,15 @@ BEGIN
          WHERE n.nspname = 'public'
            AND NOT i.indisprimary AND NOT i.indisunique
            AND am.amname = 'btree'
+           AND EXISTS (
+               SELECT 1
+                 FROM pg_constraint con
+                 JOIN pg_class parent ON parent.oid = con.confrelid
+                WHERE con.conrelid = tc.oid
+                  AND con.contype = 'f'
+                  AND parent.relnamespace = n.oid
+                  AND parent.relname = 'tenants'
+           )
            AND (SELECT attname FROM pg_attribute
                  WHERE attrelid = i.indrelid AND attnum = i.indkey[0]) = 'tenant_id'
            AND array_length(i.indkey, 1) > 1

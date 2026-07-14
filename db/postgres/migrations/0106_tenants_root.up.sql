@@ -22,9 +22,8 @@ CREATE TABLE IF NOT EXISTS tenants (
 -- When present it must be unique cell-wide; NULL slugs are allowed and excluded.
 CREATE UNIQUE INDEX IF NOT EXISTS tenants_slug_unique ON tenants (slug) WHERE slug IS NOT NULL;
 
--- Seed the singleton tenant idempotently. Self-hosted installs run as exactly
--- this one tenant; Cloud creates one row per team (tenant_id = team_id) and
--- never uses this singleton as the multi-tenant source of truth.
+-- Seed the singleton tenant idempotently. Existing self-hosted installations
+-- continue to use this tenant without any configuration changes.
 INSERT INTO tenants (id, slug)
 VALUES ('00000000-0000-0000-0000-000000000001', 'default')
 ON CONFLICT (id) DO NOTHING;

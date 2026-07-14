@@ -9,52 +9,60 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// TestTenantCompositeKeys verifies the atomic composite-key migration:
-//   - every tenant table PK leads with tenant_id
+// TestTenantCompositeKeys verifies the tenant-key migration:
+//   - existing primary keys stay stable and gain a tenant-prefixed unique key
 //   - every tenant table has a root FK (tenant_id) -> tenants(id)
 //   - every business FK is composite and carries tenant_id
-//   - no ON DELETE SET NULL remains on any tenant-table FK (all -> RESTRICT/etc.)
+//   - ON DELETE SET NULL clears only the original reference column
 //   - a cross-tenant child insert is rejected; same-tenant self-reference works
 func TestTenantCompositeKeys(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
 
-	// (1) Every tenant table PK must lead with tenant_id.
+	// (1) Every tenant table has a helper unique key leading with tenant_id.
 	rows, err := pool.Query(ctx, `
-		SELECT c.relname,
-		       (SELECT a.attname FROM pg_attribute a
-		         WHERE a.attrelid = con.conrelid AND a.attnum = con.conkey[1])
+		SELECT c.relname, count(helper.oid)
 		  FROM pg_constraint con
 		  JOIN pg_class c ON c.oid = con.conrelid
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
+		  LEFT JOIN pg_constraint helper
+		    ON helper.conrelid=con.conrelid AND helper.contype='u'
+		   AND helper.conname LIKE 'memoh_tenant_key_%'
 		 WHERE con.contype = 'p' AND n.nspname = 'public'
-		   AND c.relname NOT IN ('schema_migrations', 'tenants')`)
+		   AND EXISTS (SELECT 1 FROM pg_attribute a
+		                WHERE a.attrelid=c.oid AND a.attname='tenant_id' AND NOT a.attisdropped)
+		 GROUP BY c.relname`)
 	if err != nil {
 		t.Fatalf("enumerate PKs: %v", err)
 	}
 	for rows.Next() {
-		var tbl, firstCol string
-		if err := rows.Scan(&tbl, &firstCol); err != nil {
+		var tbl string
+		var helperCount int
+		if err := rows.Scan(&tbl, &helperCount); err != nil {
 			t.Fatalf("scan pk: %v", err)
 		}
-		if firstCol != "tenant_id" {
-			t.Errorf("PK of %s must lead with tenant_id, leads with %q", tbl, firstCol)
+		if helperCount != 1 {
+			t.Errorf("%s must have one tenant-prefixed helper key, got %d", tbl, helperCount)
 		}
 	}
 	rows.Close()
 
-	// (2) No ON DELETE SET NULL may remain on any public tenant-table FK.
-	var setNull int
+	// (2) SET NULL must never include tenant_id in its target column list.
+	var unsafeSetNull int
 	if err := pool.QueryRow(ctx, `
 		SELECT count(*) FROM pg_constraint con
 		  JOIN pg_class c ON c.oid = con.conrelid
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
 		 WHERE con.contype = 'f' AND con.confdeltype = 'n'
-		   AND n.nspname = 'public'`).Scan(&setNull); err != nil {
+		   AND n.nspname = 'public'
+		   AND (con.confdelsetcols IS NULL OR EXISTS (
+		       SELECT 1 FROM pg_attribute a
+		        WHERE a.attrelid=con.conrelid AND a.attnum=ANY(con.confdelsetcols)
+		          AND a.attname='tenant_id'))`).Scan(&unsafeSetNull); err != nil {
 		t.Fatalf("count SET NULL: %v", err)
 	}
-	if setNull != 0 {
-		t.Errorf("expected 0 ON DELETE SET NULL FKs after migration, got %d", setNull)
+	if unsafeSetNull != 0 {
+		t.Errorf("found %d SET NULL FKs that can clear tenant_id", unsafeSetNull)
 	}
 
 	// (3) Every tenant table must have a root FK (tenant_id) -> tenants(id).

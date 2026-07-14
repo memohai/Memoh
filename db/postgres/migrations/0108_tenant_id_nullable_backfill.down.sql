@@ -18,12 +18,15 @@ BEGIN
           FROM pg_catalog.pg_class c
           JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
          WHERE n.nspname = 'public'
-           AND c.relkind = 'r'
-           AND c.relname NOT IN ('schema_migrations', 'tenants')
+           AND c.relkind IN ('r', 'p')
            AND EXISTS (
-               SELECT 1 FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = c.relname
-                  AND column_name = 'tenant_id'
+               SELECT 1
+                 FROM pg_attribute a
+                 JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+                WHERE a.attrelid = c.oid
+                  AND a.attname = 'tenant_id'
+                  AND NOT a.attisdropped
+                  AND pg_get_expr(d.adbin, d.adrelid) LIKE '%app.current_tenant_id()%'
            )
     LOOP
         EXECUTE format(
@@ -37,14 +40,23 @@ BEGIN
         END IF;
     END LOOP;
 
-    -- Safe: drop the column everywhere it exists.
+    -- Safe: drop only columns introduced by the matching up migration. User
+    -- tables that happen to define their own tenant_id are left untouched.
     FOR tbl IN
         SELECT c.relname
           FROM pg_catalog.pg_class c
           JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
          WHERE n.nspname = 'public'
-           AND c.relkind = 'r'
-           AND c.relname NOT IN ('schema_migrations', 'tenants')
+           AND c.relkind IN ('r', 'p')
+           AND EXISTS (
+               SELECT 1
+                 FROM pg_attribute a
+                 JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+                WHERE a.attrelid = c.oid
+                  AND a.attname = 'tenant_id'
+                  AND NOT a.attisdropped
+                  AND pg_get_expr(d.adbin, d.adrelid) LIKE '%app.current_tenant_id()%'
+           )
          ORDER BY c.relname
     LOOP
         EXECUTE format('ALTER TABLE public.%I DROP COLUMN IF EXISTS tenant_id', tbl);

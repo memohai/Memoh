@@ -8,13 +8,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type AppTenantWriteFence struct {
-	TenantID     pgtype.UUID        `json:"tenant_id"`
-	FencingToken int64              `json:"fencing_token"`
-	WriteEnabled bool               `json:"write_enabled"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-}
-
 type Bot struct {
 	ID                     pgtype.UUID        `json:"id"`
 	OwnerUserID            pgtype.UUID        `json:"owner_user_id"`

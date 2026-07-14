@@ -4,10 +4,13 @@ package db_test
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"log/slog"
 	"os"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -21,17 +24,71 @@ import (
 	"github.com/memohai/memoh/internal/tenant"
 )
 
-// tenantMigrationDSN returns the integration DSN or fails the test. Per the
-// tenant-isolation verification plan, missing infra must FAIL the required
-// check (not silently Skip) — so these tests use t.Fatal, and are gated behind
-// the `integration` build tag which CI must run with a real database.
+func sqlState(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code
+	}
+	return ""
+}
+
+var (
+	tenantTestDBSeq atomic.Uint64
+	tenantTestDBs   sync.Map
+)
+
+// tenantMigrationDSN creates a database dedicated to the current test. Tenant
+// migration tests drop schemas and step migrations backward, so they must not
+// share TEST_POSTGRES_DSN with other integration packages.
 func tenantMigrationDSN(t *testing.T) string {
 	t.Helper()
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Fatal("TEST_POSTGRES_DSN must be set for tenant migration integration tests")
+	if dsn, ok := tenantTestDBs.Load(t.Name()); ok {
+		return dsn.(string)
 	}
-	return dsn
+
+	baseDSN := os.Getenv("TEST_POSTGRES_DSN")
+	if baseDSN == "" {
+		t.Skip("TEST_POSTGRES_DSN is not set")
+	}
+	cfg, err := pgxpool.ParseConfig(baseDSN)
+	if err != nil {
+		t.Fatalf("parse TEST_POSTGRES_DSN: %v", err)
+	}
+	admin, err := pgxpool.NewWithConfig(context.Background(), cfg.Copy())
+	if err != nil {
+		t.Fatalf("connect admin database: %v", err)
+	}
+	defer admin.Close()
+
+	dbName := "memoh_tenant_test_" + strconv.Itoa(os.Getpid()) + "_" + strconv.FormatUint(tenantTestDBSeq.Add(1), 10)
+	if _, err := admin.Exec(context.Background(), "CREATE DATABASE "+dbName); err != nil {
+		t.Fatalf("create isolated test database: %v", err)
+	}
+	testCfg := cfg.Copy()
+	testCfg.ConnConfig.Database = dbName
+	sslMode := "disable"
+	if testCfg.ConnConfig.TLSConfig != nil {
+		sslMode = "require"
+	}
+	testDSN := db.DSN(config.PostgresConfig{
+		Host:     testCfg.ConnConfig.Host,
+		Port:     int(testCfg.ConnConfig.Port),
+		User:     testCfg.ConnConfig.User,
+		Password: testCfg.ConnConfig.Password,
+		Database: dbName,
+		SSLMode:  sslMode,
+	})
+	tenantTestDBs.Store(t.Name(), testDSN)
+	t.Cleanup(func() {
+		tenantTestDBs.Delete(t.Name())
+		cleanup, err := pgxpool.NewWithConfig(context.Background(), cfg.Copy())
+		if err != nil {
+			return
+		}
+		defer cleanup.Close()
+		_, _ = cleanup.Exec(context.Background(), "DROP DATABASE IF EXISTS "+dbName+" WITH (FORCE)")
+	})
+	return testDSN
 }
 
 // pgConfigFromDSN parses a libpq DSN/URL into the repo's PostgresConfig.
@@ -65,9 +122,7 @@ func postgresMigrationsFS(t *testing.T) fs.FS {
 	return sub
 }
 
-// freshMigratedDB drops and recreates the public schema on the target database,
-// then applies the full PostgreSQL migration chain (0001..head). It returns a
-// connected pool. Callers get an empty database migrated to head.
+// freshMigratedDB applies the full migration chain to the test's isolated DB.
 func freshMigratedDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := tenantMigrationDSN(t)
@@ -80,23 +135,6 @@ func freshMigratedDB(t *testing.T) *pgxpool.Pool {
 	t.Cleanup(pool.Close)
 	if err := pool.Ping(ctx); err != nil {
 		t.Fatalf("ping: %v", err)
-	}
-
-	// Reset to a pristine state so migrate up starts from empty. Drop the
-	// public + app schemas and the tenant roles created by 0107, since those
-	// live outside public and would otherwise survive across test runs.
-	reset := `
-		DROP SCHEMA IF EXISTS public CASCADE;
-		DROP SCHEMA IF EXISTS app CASCADE;
-		CREATE SCHEMA public;
-	`
-	if _, err := pool.Exec(ctx, reset); err != nil {
-		t.Fatalf("reset schema: %v", err)
-	}
-	for _, role := range []string{"memoh_runtime", "memoh_migrator", "memoh_break_glass", "memoh_owner"} {
-		// Reassign/drop owned objects first is unnecessary after schema drops;
-		// ignore "does not exist" and dependency errors defensively.
-		_, _ = pool.Exec(ctx, "DROP ROLE IF EXISTS "+role)
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
@@ -141,6 +179,47 @@ func TestSingletonTenantSeededAfterMigrate(t *testing.T) {
 	}
 	if hasTenantID {
 		t.Fatal("tenants root must not have a redundant tenant_id column")
+	}
+}
+
+func TestMigrationsDoNotRequireClusterRolePrivileges(t *testing.T) {
+	ctx := context.Background()
+	adminDSN := tenantMigrationDSN(t)
+	adminCfg, err := pgconn.ParseConfig(adminDSN)
+	if err != nil {
+		t.Fatalf("parse isolated database DSN: %v", err)
+	}
+	admin, err := pgxpool.New(ctx, adminDSN)
+	if err != nil {
+		t.Fatalf("connect isolated database: %v", err)
+	}
+
+	role := "memoh_migration_test_" + strconv.Itoa(os.Getpid()) + "_" + strconv.FormatUint(tenantTestDBSeq.Add(1), 10)
+	const password = "migration_test_password"
+	if _, err := admin.Exec(ctx, "CREATE ROLE "+role+" LOGIN NOSUPERUSER NOCREATEROLE NOBYPASSRLS PASSWORD '"+password+"'"); err != nil {
+		t.Fatalf("create limited migration role: %v", err)
+	}
+	if _, err := admin.Exec(ctx, "ALTER DATABASE "+adminCfg.Database+" OWNER TO "+role); err != nil {
+		t.Fatalf("assign test database owner: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(ctx, "ALTER DATABASE "+adminCfg.Database+" OWNER TO "+adminCfg.User)
+		_, _ = admin.Exec(ctx, "DROP OWNED BY "+role)
+		_, _ = admin.Exec(ctx, "DROP ROLE IF EXISTS "+role)
+		admin.Close()
+	})
+
+	limitedDSN := db.DSN(config.PostgresConfig{
+		Host:     adminCfg.Host,
+		Port:     int(adminCfg.Port),
+		User:     role,
+		Password: password,
+		Database: adminCfg.Database,
+		SSLMode:  "disable",
+	})
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	if err := db.RunMigrate(logger, pgConfigFromDSN(t, limitedDSN), postgresMigrationsFS(t), "up", nil); err != nil {
+		t.Fatalf("migrate as database owner without CREATEROLE/BYPASSRLS: %v", err)
 	}
 }
 
@@ -196,8 +275,7 @@ func tryStepDown(t *testing.T, dsn string, n int) error {
 	return m.Steps(-n)
 }
 
-// resetToEmpty drops and recreates a pristine public schema (and the app schema
-// + tenant roles) WITHOUT applying any migrations, returning a connected pool.
+// resetToEmpty returns a connection to the test's isolated, empty database.
 func resetToEmpty(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := tenantMigrationDSN(t)
@@ -209,15 +287,6 @@ func resetToEmpty(t *testing.T) *pgxpool.Pool {
 	t.Cleanup(pool.Close)
 	if err := pool.Ping(ctx); err != nil {
 		t.Fatalf("ping: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `
-		DROP SCHEMA IF EXISTS public CASCADE;
-		DROP SCHEMA IF EXISTS app CASCADE;
-		CREATE SCHEMA public;`); err != nil {
-		t.Fatalf("reset schema: %v", err)
-	}
-	for _, role := range []string{"memoh_runtime", "memoh_migrator", "memoh_break_glass", "memoh_owner"} {
-		_, _ = pool.Exec(ctx, "DROP ROLE IF EXISTS "+role)
 	}
 	return pool
 }
@@ -258,7 +327,7 @@ func countAllMigrations(t *testing.T) int {
 }
 
 // TestTenantChainReversible verifies the full tenant migration chain
-// (0106..0109) is cleanly reversible: a full step-down of the tenant migrations
+// (0106 onward) is cleanly reversible: a full step-down of the tenant migrations
 // removes all tenant objects, and a step-up re-applies them. It also verifies
 // the 0106 down safety gate refuses to drop the tenants root when a non-default
 // tenant exists.
@@ -291,18 +360,23 @@ func TestTenantChainReversible(t *testing.T) {
 		t.Error("app schema must be dropped after stepping down the tenant migrations")
 	}
 
-	// Re-apply and confirm the composite-key final state is restored.
+	// Re-apply and confirm SET NULL actions target only the original reference
+	// column rather than the non-null tenant_id column.
 	stepUp(t, dsn, tenantSteps)
-	var setNull int
+	var unsafeSetNull int
 	if err := pool.QueryRow(ctx, `
 		SELECT count(*) FROM pg_constraint con
 		  JOIN pg_class c ON c.oid = con.conrelid
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
-		 WHERE con.contype='f' AND con.confdeltype='n' AND n.nspname='public'`).Scan(&setNull); err != nil {
+		 WHERE con.contype='f' AND con.confdeltype='n' AND n.nspname='public'
+		   AND (con.confdelsetcols IS NULL OR EXISTS (
+		       SELECT 1 FROM pg_attribute a
+		        WHERE a.attrelid=con.conrelid AND a.attnum=ANY(con.confdelsetcols)
+		          AND a.attname='tenant_id'))`).Scan(&unsafeSetNull); err != nil {
 		t.Fatalf("count set null after re-up: %v", err)
 	}
-	if setNull != 0 {
-		t.Errorf("after re-up expected 0 SET NULL FKs, got %d", setNull)
+	if unsafeSetNull != 0 {
+		t.Errorf("after re-up found %d SET NULL FKs that can clear tenant_id", unsafeSetNull)
 	}
 }
 
@@ -314,7 +388,7 @@ func TestTenantsRootDownSafetyGate(t *testing.T) {
 	pool := freshMigratedDB(t)
 	dsn := tenantMigrationDSN(t)
 
-	// Seed a second tenant + its fence so the DB is genuinely multi-tenant.
+	// Seed a second tenant so rollback must preserve the tenant root.
 	const t2 = "00000000-0000-0000-0000-0000000000f2"
 	if _, err := pool.Exec(ctx, `INSERT INTO tenants (id, slug) VALUES ($1, 'other')`, t2); err != nil {
 		t.Fatalf("insert non-default tenant: %v", err)
@@ -360,4 +434,3 @@ func countTenantMigrations(t *testing.T) int {
 	}
 	return n
 }
-

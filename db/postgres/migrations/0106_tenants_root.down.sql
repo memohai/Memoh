@@ -3,8 +3,8 @@
 --
 -- Down safety gate: only allow rollback when the database is still a clean
 -- singleton — i.e. there is no tenant other than the default. If any
--- non-default tenant exists, this is a multi-tenant (Cloud) database and
--- dropping the root would orphan/lose tenant data, so we fail closed rather
+-- non-default tenant exists, dropping the root would orphan tenant data, so we
+-- fail closed rather
 -- than silently destroy data. (A wipe is never an acceptable rollback.)
 
 DO $$

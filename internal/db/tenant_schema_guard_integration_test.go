@@ -17,18 +17,16 @@ var nonTenantPublicTables = map[string]bool{
 	"tenants":           true,
 }
 
-// TestTenantViewGuard is the view portion of G-SCHEMA/G-RLS-STATIC: a view that
-// reads tenant tables must not bypass RLS. Every public view must run with
+// TestTenantViewGuard verifies that views over tenant tables do not bypass RLS.
+// Every public view must run with
 // security_invoker = true (so the caller's RLS applies), project a tenant_id
-// column (so consumers can scope explicitly and the isolation is auditable), and
-// not be owned by a BYPASSRLS/superuser role. This guard would have caught the
-// bot_visible_history_messages cross-tenant leak.
+// column (so consumers can scope explicitly and the isolation is auditable).
 func TestTenantViewGuard(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
 
 	rows, err := pool.Query(ctx, `
-		SELECT c.relname, pg_get_userbyid(c.relowner) AS owner,
+		SELECT c.relname,
 		       COALESCE((SELECT option_value FROM pg_options_to_table(c.reloptions)
 		                  WHERE option_name='security_invoker'), 'false') AS security_invoker
 		  FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -36,11 +34,11 @@ func TestTenantViewGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list views: %v", err)
 	}
-	type view struct{ name, owner, secInvoker string }
+	type view struct{ name, secInvoker string }
 	var views []view
 	for rows.Next() {
 		var v view
-		_ = rows.Scan(&v.name, &v.owner, &v.secInvoker)
+		_ = rows.Scan(&v.name, &v.secInvoker)
 		views = append(views, v)
 	}
 	rows.Close()
@@ -50,16 +48,7 @@ func TestTenantViewGuard(t *testing.T) {
 		if v.secInvoker != "true" {
 			t.Errorf("view %s must be WITH (security_invoker = true) to respect caller RLS, got %q", v.name, v.secInvoker)
 		}
-		// (2) owner must not bypass RLS or be superuser.
-		var bypass, super bool
-		if err := pool.QueryRow(ctx,
-			`SELECT rolbypassrls, rolsuper FROM pg_roles WHERE rolname=$1`, v.owner).Scan(&bypass, &super); err != nil {
-			t.Fatalf("view %s owner attrs: %v", v.name, err)
-		}
-		if bypass || super {
-			t.Errorf("view %s owner %q must not be BYPASSRLS/superuser (got bypass=%v super=%v)", v.name, v.owner, bypass, super)
-		}
-		// (3) must project a tenant_id column.
+		// (2) must project a tenant_id column.
 		var hasTenantID bool
 		if err := pool.QueryRow(ctx, `
 			SELECT EXISTS (SELECT 1 FROM information_schema.columns
@@ -72,9 +61,7 @@ func TestTenantViewGuard(t *testing.T) {
 	}
 }
 
-// TestTenantSchemaGuard is the G-SCHEMA static guard: it asserts the applied
-// schema satisfies the tenant schema contract structurally, so future changes
-// cannot silently regress isolation.
+// TestTenantSchemaGuard asserts the tenant schema invariants structurally.
 func TestTenantSchemaGuard(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
@@ -100,9 +87,16 @@ func TestTenantSchemaGuard(t *testing.T) {
 			t.Errorf("tenant table %s: tenant_id must be NOT NULL", tbl)
 		}
 
-		// (2) PK leads with tenant_id.
-		if col := firstPKColumn(t, ctx, pool, tbl); col != "tenant_id" {
-			t.Errorf("tenant table %s: PK must lead with tenant_id, leads with %q", tbl, col)
+		// (2) Existing PK remains stable and has a tenant-prefixed helper key.
+		var helperKeys int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*) FROM pg_constraint
+			 WHERE conrelid=('public.'||quote_ident($1))::regclass
+			   AND contype='u' AND conname LIKE 'memoh_tenant_key_%'`, tbl).Scan(&helperKeys); err != nil {
+			t.Fatalf("tenant key check %s: %v", tbl, err)
+		}
+		if helperKeys != 1 {
+			t.Errorf("tenant table %s: expected one tenant-prefixed helper key, got %d", tbl, helperKeys)
 		}
 
 		// (3) has a root FK (tenant_id) -> tenants(id).
@@ -132,33 +126,23 @@ func TestTenantSchemaGuard(t *testing.T) {
 			t.Errorf("tenant table %s: must have RLS enabled+forced (got rls=%v force=%v)", tbl, rls, force)
 		}
 
-		// (5) owner must be memoh_owner (NOLOGIN/non-super/non-bypass) so FORCE
-		// RLS actually applies to owner-context access.
-		var owner string
-		if err := pool.QueryRow(ctx, `
-			SELECT pg_get_userbyid(c.relowner) FROM pg_class c
-			  JOIN pg_namespace n ON n.oid=c.relnamespace
-			 WHERE n.nspname='public' AND c.relname=$1`, tbl).Scan(&owner); err != nil {
-			t.Fatalf("owner check %s: %v", tbl, err)
-		}
-		if owner != "memoh_owner" {
-			t.Errorf("tenant table %s: owner must be memoh_owner, is %q (FORCE RLS only binds the ordinary owner)", tbl, owner)
-		}
 	}
 
-	// (5) No ON DELETE SET NULL on any composite FK that carries tenant_id.
-	var setNullComposite int
+	// (5) SET NULL may clear the original reference, but never tenant_id.
+	var unsafeSetNull int
 	if err := pool.QueryRow(ctx, `
 		SELECT count(*) FROM pg_constraint con
 		  JOIN pg_class c ON c.oid=con.conrelid
 		  JOIN pg_namespace n ON n.oid=c.relnamespace
 		 WHERE con.contype='f' AND con.confdeltype='n' AND n.nspname='public'
-		   AND EXISTS (SELECT 1 FROM pg_attribute a
-		               WHERE a.attrelid=con.conrelid AND a.attnum=ANY(con.conkey) AND a.attname='tenant_id')`).Scan(&setNullComposite); err != nil {
+		   AND (con.confdelsetcols IS NULL OR EXISTS (
+		       SELECT 1 FROM pg_attribute a
+		        WHERE a.attrelid=con.conrelid AND a.attnum=ANY(con.confdelsetcols)
+		          AND a.attname='tenant_id'))`).Scan(&unsafeSetNull); err != nil {
 		t.Fatalf("set null check: %v", err)
 	}
-	if setNullComposite != 0 {
-		t.Errorf("found %d composite FKs carrying tenant_id with ON DELETE SET NULL (must be RESTRICT/NO ACTION)", setNullComposite)
+	if unsafeSetNull != 0 {
+		t.Errorf("found %d SET NULL FKs that can clear tenant_id", unsafeSetNull)
 	}
 
 	// (6) tenants root special case: PK is (id) only, no redundant tenant_id, FORCE RLS.
@@ -192,107 +176,7 @@ func TestTenantSchemaGuard(t *testing.T) {
 	}
 }
 
-// TestFenceSecurityGuard is the fence portion of G-RLS-STATIC / G-ROLE: the
-// write-fence meta-table must have NO RLS, zero runtime/PUBLIC table ACL, and
-// the two helpers must have the exact frozen signatures + SECURITY DEFINER.
-func TestFenceSecurityGuard(t *testing.T) {
-	ctx := context.Background()
-	pool := freshMigratedDB(t)
-
-	// Fence table: no RLS.
-	var fRLS, fForce bool
-	if err := pool.QueryRow(ctx, `
-		SELECT relrowsecurity, relforcerowsecurity FROM pg_class
-		 WHERE oid='app.tenant_write_fences'::regclass`).Scan(&fRLS, &fForce); err != nil {
-		t.Fatalf("fence rls: %v", err)
-	}
-	if fRLS || fForce {
-		t.Errorf("app.tenant_write_fences must NOT have RLS (got rls=%v force=%v)", fRLS, fForce)
-	}
-
-	// Runtime has zero table privileges on the fence table.
-	var runtimeFencePrivs int
-	if err := pool.QueryRow(ctx, `
-		SELECT count(*) FROM information_schema.role_table_grants
-		 WHERE table_schema='app' AND table_name='tenant_write_fences' AND grantee='memoh_runtime'`).Scan(&runtimeFencePrivs); err != nil {
-		t.Fatalf("fence acl: %v", err)
-	}
-	if runtimeFencePrivs != 0 {
-		t.Errorf("memoh_runtime must have zero table privileges on app.tenant_write_fences, got %d", runtimeFencePrivs)
-	}
-
-	// Helper signatures: assert (void, SECURITY DEFINER), matches (boolean,
-	// SECURITY DEFINER); current_tenant_id (uuid), current_fencing_token (bigint).
-	checkFn := func(name, wantRet string, wantSecdef bool) {
-		var retType string
-		var secdef bool
-		if err := pool.QueryRow(ctx, `
-			SELECT pg_catalog.format_type(p.prorettype, NULL), p.prosecdef
-			  FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-			 WHERE n.nspname='app' AND p.proname=$1`, name).Scan(&retType, &secdef); err != nil {
-			t.Errorf("helper %s: %v", name, err)
-			return
-		}
-		if retType != wantRet {
-			t.Errorf("app.%s must return %s, returns %s", name, wantRet, retType)
-		}
-		if secdef != wantSecdef {
-			t.Errorf("app.%s SECURITY DEFINER = %v, want %v", name, secdef, wantSecdef)
-		}
-	}
-	checkFn("assert_tenant_write_fence", "void", true)
-	checkFn("tenant_write_fence_matches", "boolean", true)
-	checkFn("current_tenant_id", "uuid", false)
-	checkFn("current_fencing_token", "bigint", false)
-
-	// Runtime must NOT be BYPASSRLS and must not be a superuser.
-	var bypass, super bool
-	if err := pool.QueryRow(ctx, `
-		SELECT rolbypassrls, rolsuper FROM pg_roles WHERE rolname='memoh_runtime'`).Scan(&bypass, &super); err != nil {
-		t.Fatalf("runtime role attrs: %v", err)
-	}
-	if bypass {
-		t.Error("memoh_runtime must NOT have BYPASSRLS")
-	}
-	if super {
-		t.Error("memoh_runtime must NOT be a superuser")
-	}
-
-	// memoh_owner must have no LOGIN/superuser/bypass member (the temporary
-	// CURRENT_USER membership granted during migration must be revoked; leaving
-	// a superuser in owner's membership lets it assume owner and bypass RLS).
-	rows, err := pool.Query(ctx, `
-		SELECT r.rolname, r.rolcanlogin, r.rolsuper, r.rolbypassrls
-		  FROM pg_auth_members m
-		  JOIN pg_roles g ON g.oid = m.roleid
-		  JOIN pg_roles r ON r.oid = m.member
-		 WHERE g.rolname = 'memoh_owner'`)
-	if err != nil {
-		t.Fatalf("owner membership: %v", err)
-	}
-	for rows.Next() {
-		var name string
-		var canLogin, isSuper, isBypass bool
-		_ = rows.Scan(&name, &canLogin, &isSuper, &isBypass)
-		// memoh_migrator is the one allowed member: BYPASSRLS is its own
-		// attribute, used via explicit SET ROLE for controlled DDL. Anything
-		// else is suspect — especially a superuser/bypass or a stray LOGIN role.
-		if name == "memoh_migrator" {
-			continue
-		}
-		if isSuper || isBypass {
-			t.Errorf("memoh_owner has a superuser/bypass member %q (must be revoked; it could assume owner and bypass RLS)", name)
-		}
-		if canLogin {
-			t.Errorf("memoh_owner has an unexpected LOGIN member %q", name)
-		}
-	}
-	rows.Close()
-}
-
-// TestRLSPolicyGuard is the policy portion of G-RLS-STATIC: every tenant table
-// has the four per-command policies, and the write policies call the lock-free
-// fence-matches helper (not the lock-holding assert).
+// TestRLSPolicyGuard verifies every tenant table has four tenant-only policies.
 func TestRLSPolicyGuard(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
@@ -310,9 +194,8 @@ func TestRLSPolicyGuard(t *testing.T) {
 			t.Errorf("tenant table %s: expected >= 4 per-command policies, got %d", tbl, policyCount)
 		}
 
-		// Write policies (INSERT/UPDATE/DELETE) must reference the lock-free
-		// tenant_write_fence_matches() and must NOT reference the lock-holding
-		// assert_tenant_write_fence().
+		// Every policy must resolve the tenant from the database context and must
+		// not depend on deployment-specific write-fencing helpers.
 		rows, err := pool.Query(ctx, `
 			SELECT cmd, COALESCE(qual,''), COALESCE(with_check,'')
 			  FROM pg_policies WHERE schemaname='public' AND tablename=$1`, tbl)
@@ -323,13 +206,11 @@ func TestRLSPolicyGuard(t *testing.T) {
 			var cmd, qual, withCheck string
 			_ = rows.Scan(&cmd, &qual, &withCheck)
 			body := qual + " " + withCheck
-			if strings.Contains(body, "assert_tenant_write_fence") {
-				t.Errorf("%s policy %s must not call the lock-holding assert_tenant_write_fence()", tbl, cmd)
+			if !strings.Contains(body, "current_tenant_id") {
+				t.Errorf("%s policy %s must call current_tenant_id()", tbl, cmd)
 			}
-			if cmd == "INSERT" || cmd == "UPDATE" || cmd == "DELETE" {
-				if !strings.Contains(body, "tenant_write_fence_matches") {
-					t.Errorf("%s %s policy must call tenant_write_fence_matches()", tbl, cmd)
-				}
+			if strings.Contains(body, "fence") {
+				t.Errorf("%s policy %s must not contain deployment-specific fencing", tbl, cmd)
 			}
 		}
 		rows.Close()
@@ -355,16 +236,3 @@ func publicBaseTables(t *testing.T, ctx context.Context, pool *pgxpool.Pool) []s
 	rows.Close()
 	return out
 }
-
-func firstPKColumn(t *testing.T, ctx context.Context, pool *pgxpool.Pool, table string) string {
-	t.Helper()
-	var col string
-	if err := pool.QueryRow(ctx, `
-		SELECT a.attname FROM pg_constraint con
-		  JOIN pg_attribute a ON a.attrelid=con.conrelid AND a.attnum=con.conkey[1]
-		 WHERE con.contype='p' AND con.conrelid=('public.'||quote_ident($1))::regclass`, table).Scan(&col); err != nil {
-		return ""
-	}
-	return col
-}
-

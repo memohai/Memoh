@@ -1,10 +1,7 @@
 -- 0111_tenant_view_security (down)
 -- Restore the view to its pre-0111 shape (the 0103 definition: no tenant_id
 -- projection, no security_invoker). This reverts to the prior state; the
--- security fix lives only in the up. The GRANT is revoked and ownership left as
--- recreated (CREATE OR REPLACE by the migration role resets it).
-
-REVOKE SELECT ON bot_visible_history_messages FROM memoh_runtime;
+-- security fix lives only in the up.
 
 -- Column order changes (tenant_id-first back to turn_id-first), so drop+recreate.
 DROP VIEW IF EXISTS bot_visible_history_messages;

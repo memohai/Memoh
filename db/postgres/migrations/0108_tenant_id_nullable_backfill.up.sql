@@ -1,7 +1,7 @@
 -- 0108_tenant_id_nullable_backfill
 -- Add a nullable tenant_id column to every tenant business table (STATIC ALTERs
 -- so sqlc can see the column) and backfill it to the default singleton tenant
--- (schema contract phases A/B).
+-- before tenant-scoped constraints are installed.
 --
 -- New incremental (existing migrations untouched). tenant_id is added NULLABLE,
 -- given a DEFAULT of app.current_tenant_id() (so INSERTs auto-fill the current
@@ -138,11 +138,16 @@ BEGIN
           FROM pg_catalog.pg_class c
           JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
          WHERE n.nspname = 'public'
-           AND c.relkind = 'r'
-           AND c.relname NOT IN ('schema_migrations', 'tenants')
-           AND EXISTS (SELECT 1 FROM information_schema.columns
-                        WHERE table_schema = 'public' AND table_name = c.relname
-                          AND column_name = 'tenant_id')
+           AND c.relkind IN ('r', 'p')
+           AND EXISTS (
+               SELECT 1
+                 FROM pg_attribute a
+                 JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+                WHERE a.attrelid = c.oid
+                  AND a.attname = 'tenant_id'
+                  AND NOT a.attisdropped
+                  AND pg_get_expr(d.adbin, d.adrelid) LIKE '%app.current_tenant_id()%'
+           )
          ORDER BY c.relname
     LOOP
         EXECUTE format('UPDATE public.%I SET tenant_id = %L WHERE tenant_id IS NULL', tbl, default_tenant);

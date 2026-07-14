@@ -4,57 +4,80 @@ package db_test
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// TestTenantRLSForceEnabled asserts every tenant table (and the tenants root)
-// has RLS ENABLED + FORCED with the correct per-command policies, and that the
-// fence meta-table has RLS OFF (security design §5, §6).
+// rlsConn returns a connection running as a non-superuser test role. Roles are
+// test setup only; production migrations intentionally do not create or alter
+// cluster-wide roles.
+func rlsConn(t *testing.T, ownerPool *pgxpool.Pool, dsn string) *pgx.Conn {
+	t.Helper()
+	ctx := context.Background()
+	role := fmt.Sprintf("memoh_rls_test_%d_%d", os.Getpid(), tenantTestDBSeq.Add(1))
+	if _, err := ownerPool.Exec(ctx, "CREATE ROLE "+role+" NOLOGIN NOSUPERUSER NOBYPASSRLS"); err != nil {
+		t.Fatalf("create RLS test role: %v", err)
+	}
+	grants := []string{
+		"GRANT USAGE ON SCHEMA public, app TO " + role,
+		"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO " + role,
+		"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO " + role,
+		"GRANT EXECUTE ON FUNCTION app.current_tenant_id() TO " + role,
+	}
+	for _, grant := range grants {
+		if _, err := ownerPool.Exec(ctx, grant); err != nil {
+			t.Fatalf("grant RLS test role: %v", err)
+		}
+	}
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect for RLS test: %v", err)
+	}
+	if _, err := conn.Exec(ctx, "SET ROLE "+role); err != nil {
+		_ = conn.Close(ctx)
+		t.Fatalf("set RLS test role: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = conn.Close(ctx)
+		_, _ = ownerPool.Exec(ctx, "DROP OWNED BY "+role)
+		_, _ = ownerPool.Exec(ctx, "DROP ROLE IF EXISTS "+role)
+	})
+	return conn
+}
+
 func TestTenantRLSForceEnabled(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
 
-	// Every public tenant table + tenants root must be relrowsecurity AND
-	// relforcerowsecurity.
 	rows, err := pool.Query(ctx, `
 		SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
 		  FROM pg_class c
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
-		 WHERE c.relkind = 'r' AND n.nspname = 'public'
-		   AND c.relname NOT IN ('schema_migrations')`)
+		 WHERE c.relkind IN ('r', 'p') AND n.nspname = 'public'
+		   AND (c.relname='tenants' OR EXISTS (
+		       SELECT 1 FROM pg_constraint con
+		       JOIN pg_class parent ON parent.oid=con.confrelid
+		        WHERE con.conrelid=c.oid AND con.contype='f' AND parent.relname='tenants'))`)
 	if err != nil {
-		t.Fatalf("enumerate tables: %v", err)
+		t.Fatalf("enumerate tenant tables: %v", err)
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var name string
-		var rls, force bool
-		if err := rows.Scan(&name, &rls, &force); err != nil {
-			t.Fatalf("scan: %v", err)
+		var enabled, forced bool
+		if err := rows.Scan(&name, &enabled, &forced); err != nil {
+			t.Fatalf("scan tenant table: %v", err)
 		}
-		if !rls || !force {
-			t.Errorf("table %s must have RLS enabled+forced, got rls=%v force=%v", name, rls, force)
+		if !enabled || !forced {
+			t.Errorf("table %s must have RLS enabled and forced", name)
 		}
-	}
-	rows.Close()
-
-	// The fence meta-table must NOT have RLS (its boundary is ACL, not RLS).
-	var fenceRLS, fenceForce bool
-	if err := pool.QueryRow(ctx, `
-		SELECT c.relrowsecurity, c.relforcerowsecurity FROM pg_class c
-		  JOIN pg_namespace n ON n.oid = c.relnamespace
-		 WHERE n.nspname = 'app' AND c.relname = 'tenant_write_fences'`).Scan(&fenceRLS, &fenceForce); err != nil {
-		t.Fatalf("fence rls: %v", err)
-	}
-	if fenceRLS || fenceForce {
-		t.Errorf("app.tenant_write_fences must NOT have RLS, got rls=%v force=%v", fenceRLS, fenceForce)
 	}
 }
 
-// TestTenantRLSDynamicIsolation exercises the runtime role under RLS: with a
-// tenant GUC bound, a SELECT sees only that tenant's rows; a write requires the
-// fence assert; cross-tenant writes are rejected; missing GUC is fail-closed.
 func TestTenantRLSDynamicIsolation(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
@@ -62,31 +85,18 @@ func TestTenantRLSDynamicIsolation(t *testing.T) {
 	const t1 = "00000000-0000-0000-0000-000000000001"
 	const t2 = "00000000-0000-0000-0000-0000000000f2"
 
-	// Seed tenant2 + its fence (enabled, token 1) via the migrator-owned path.
 	if _, err := pool.Exec(ctx, `INSERT INTO tenants (id, slug) VALUES ($1, 't2')`, t2); err != nil {
 		t.Fatalf("seed tenant2: %v", err)
 	}
-	if _, err := pool.Exec(ctx,
-		`INSERT INTO app.tenant_write_fences (tenant_id, fencing_token, write_enabled) VALUES ($1, 1, true)`, t2); err != nil {
-		t.Fatalf("seed tenant2 fence: %v", err)
-	}
+	rc := rlsConn(t, pool, dsn)
 
-	rc := runtimeConn(t, pool, dsn)
-
-	// Helper to run a write tx as runtime with both GUCs + assert.
-	writeAs := func(tenant string, fn func(tx pgx.Tx) error) error {
+	writeAs := func(tenantID string, fn func(pgx.Tx) error) error {
 		tx, err := rc.Begin(ctx)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = tx.Rollback(ctx) }()
-		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", tenant); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, "SELECT set_config('app.fencing_token', '1', true)"); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, "SELECT app.assert_tenant_write_fence()"); err != nil {
+		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", tenantID); err != nil {
 			return err
 		}
 		if err := fn(tx); err != nil {
@@ -95,58 +105,56 @@ func TestTenantRLSDynamicIsolation(t *testing.T) {
 		return tx.Commit(ctx)
 	}
 
-	// t1 inserts a provider.
-	if err := writeAs(t1, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO providers (tenant_id, name, client_type) VALUES ($1, 'p1', 'openai-completions')`, t1)
-		return err
-	}); err != nil {
-		t.Fatalf("t1 insert: %v", err)
-	}
-	// t2 inserts a provider with the same name (allowed — tenant-scoped unique).
-	if err := writeAs(t2, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO providers (tenant_id, name, client_type) VALUES ($1, 'p1', 'openai-completions')`, t2)
-		return err
-	}); err != nil {
-		t.Fatalf("t2 insert: %v", err)
+	for _, tc := range []struct{ tenantID, name string }{{t1, "p1"}, {t2, "p1"}} {
+		if err := writeAs(tc.tenantID, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx,
+				`INSERT INTO providers (tenant_id, name, client_type) VALUES ($1, $2, 'openai-completions')`,
+				tc.tenantID, tc.name)
+			return err
+		}); err != nil {
+			t.Fatalf("insert provider for %s: %v", tc.tenantID, err)
+		}
 	}
 
-	// Under t1's context, a SELECT must see exactly one provider (t1's).
-	readCount := func(tenant string) int {
+	readCount := func(tenantID string) int {
 		tx, err := rc.Begin(ctx)
 		if err != nil {
 			t.Fatalf("begin read: %v", err)
 		}
 		defer func() { _ = tx.Rollback(ctx) }()
-		_, _ = tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", tenant)
-		_, _ = tx.Exec(ctx, "SELECT set_config('app.fencing_token', '1', true)")
-		var n int
-		if err := tx.QueryRow(ctx, "SELECT count(*) FROM providers").Scan(&n); err != nil {
-			t.Fatalf("count providers as %s: %v", tenant, err)
+		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", tenantID); err != nil {
+			t.Fatalf("bind tenant: %v", err)
 		}
-		return n
+		var count int
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM providers").Scan(&count); err != nil {
+			t.Fatalf("count providers: %v", err)
+		}
+		return count
 	}
 	if got := readCount(t1); got != 1 {
-		t.Errorf("t1 must see exactly its own provider, saw %d", got)
+		t.Errorf("tenant 1 saw %d providers, want 1", got)
 	}
 	if got := readCount(t2); got != 1 {
-		t.Errorf("t2 must see exactly its own provider, saw %d", got)
+		t.Errorf("tenant 2 saw %d providers, want 1", got)
 	}
 
-	// Cross-tenant write (WITH CHECK): under t1 context, insert tenant_id=t2 -> 42501.
 	err := writeAs(t1, func(tx pgx.Tx) error {
-		_, e := tx.Exec(ctx, `INSERT INTO providers (tenant_id, name, client_type) VALUES ($1, 'x', 'openai-completions')`, t2)
-		return e
+		_, err := tx.Exec(ctx,
+			`INSERT INTO providers (tenant_id, name, client_type) VALUES ($1, 'cross', 'openai-completions')`, t2)
+		return err
 	})
 	if sqlState(err) != "42501" {
-		t.Errorf("cross-tenant INSERT (WITH CHECK) must be 42501, got %q", sqlState(err))
+		t.Errorf("cross-tenant insert SQLSTATE = %q, want 42501", sqlState(err))
 	}
 
-	// Missing tenant GUC -> fail-closed 42501 on the write assert.
-	tx, _ := rc.Begin(ctx)
-	_, _ = tx.Exec(ctx, "SELECT set_config('app.fencing_token', '1', true)")
-	_, e := tx.Exec(ctx, "SELECT app.assert_tenant_write_fence()")
+	tx, err := rc.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin missing-context write: %v", err)
+	}
+	_, writeErr := tx.Exec(ctx,
+		`INSERT INTO providers (tenant_id, name, client_type) VALUES ($1, 'missing', 'openai-completions')`, t1)
 	_ = tx.Rollback(ctx)
-	if sqlState(e) != "42501" {
-		t.Errorf("missing tenant GUC must be 42501, got %q", sqlState(e))
+	if sqlState(writeErr) != "42501" {
+		t.Errorf("missing tenant context SQLSTATE = %q, want 42501", sqlState(writeErr))
 	}
 }

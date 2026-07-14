@@ -28,8 +28,7 @@ func OpenPostgres(ctx context.Context, cfg config.PostgresConfig) (*pgxpool.Pool
 	// Bind the singleton tenant on every new connection. Tenant business queries
 	// scope themselves with app.current_tenant_id(), which fail-closed raises if
 	// app.tenant_id is unset. Upstream is single-tenant, so we set the default
-	// tenant at the session level here. (Cloud's multi-tenant adapter overrides
-	// this per transaction with SET LOCAL from trusted context.)
+	// tenant at the session level here.
 	poolCfg.AfterConnect = SetDefaultTenantOnConnect
 	return pgxpool.NewWithConfig(ctx, poolCfg)
 }
