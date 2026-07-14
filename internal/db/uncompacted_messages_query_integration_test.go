@@ -1,15 +1,13 @@
-package db
+//go:build integration
+
+package db_test
 
 import (
 	"context"
-	"os"
-	"strings"
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
@@ -20,36 +18,16 @@ import (
 // read path's substitution predicate, and passive_sync rows never enter the
 // candidate set.
 func TestListUncompactedMessagesReclaimEligibility(t *testing.T) {
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("TEST_POSTGRES_DSN is not set")
-	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect postgres: %v", err)
-	}
-	defer pool.Close()
-	if err := pool.Ping(ctx); err != nil {
-		t.Fatalf("ping postgres: %v", err)
-	}
+	pool := freshMigratedDB(t)
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	schema := "uncompacted_query_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	quotedSchema := pgx.Identifier{schema}.Sanitize()
-	if _, err := tx.Exec(ctx, "CREATE SCHEMA "+quotedSchema); err != nil {
-		t.Fatalf("create schema: %v", err)
-	}
-	if _, err := tx.Exec(ctx, "SET LOCAL search_path TO "+quotedSchema+", public"); err != nil {
-		t.Fatalf("set search path: %v", err)
-	}
-	baseline := readEmbeddedMigration(t, "postgres/migrations/0001_init.up.sql")
-	if _, err := tx.Exec(ctx, baseline); err != nil {
-		t.Fatalf("apply 0001 baseline: %v", err)
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000001', true)"); err != nil {
+		t.Fatalf("bind singleton tenant: %v", err)
 	}
 
 	userID := uuid.NewString()
@@ -58,7 +36,7 @@ func TestListUncompactedMessagesReclaimEligibility(t *testing.T) {
 	if _, err := tx.Exec(ctx, `INSERT INTO users (id) VALUES ($1)`, userID); err != nil {
 		t.Fatalf("insert user: %v", err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO bots (id, owner_user_id, type, name) VALUES ($1, $2, 'personal', 'reclaim-test')`, botID, userID); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO bots (id, owner_user_id, name) VALUES ($1, $2, 'reclaim-test')`, botID, userID); err != nil {
 		t.Fatalf("insert bot: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO bot_sessions (id, bot_id) VALUES ($1, $2)`, sessionID, botID); err != nil {
