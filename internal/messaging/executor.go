@@ -67,6 +67,10 @@ type SendResult struct {
 	// The caller should emit the resolved attachments as stream events.
 	Local            bool
 	LocalAttachments []channel.Attachment
+	// LocalTextOmitted is true when the local shortcut delivered the
+	// attachments but dropped accompanying text/parts; the caller should tell
+	// the model to restate that text in its assistant reply.
+	LocalTextOmitted bool
 }
 
 // ReactResult is the success payload returned after reacting.
@@ -142,6 +146,7 @@ func (e *Executor) sendWithMode(
 			Target:           plan.target,
 			Local:            true,
 			LocalAttachments: plan.message.Attachments,
+			LocalTextOmitted: localShortcutOmitsText(plan.message),
 		}, nil
 	}
 
@@ -242,13 +247,20 @@ func validateSendArguments(args map[string]any) error {
 	return nil
 }
 
+// localShortcutCanRepresent reports whether the message can be delivered by
+// emitting stream events into the current reply: it must carry attachments and
+// nothing that requires a real channel send (actions, reply refs, forwards).
+// Text and parts are tolerated but not delivered — the model is told to
+// restate them in its assistant reply (see SendResult.LocalTextOmitted).
 func localShortcutCanRepresent(msg channel.Message) bool {
-	return strings.TrimSpace(msg.Text) == "" &&
-		len(msg.Parts) == 0 &&
-		len(msg.Attachments) > 0 &&
+	return len(msg.Attachments) > 0 &&
 		len(msg.Actions) == 0 &&
 		msg.Reply == nil &&
 		msg.Forward == nil
+}
+
+func localShortcutOmitsText(msg channel.Message) bool {
+	return strings.TrimSpace(msg.Text) != "" || len(msg.Parts) > 0
 }
 
 func (e *Executor) buildOutboundMessage(
