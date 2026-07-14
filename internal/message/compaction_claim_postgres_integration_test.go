@@ -56,6 +56,48 @@ func TestPostgresReclaimedCompactionCannotComplete(t *testing.T) {
 	}
 }
 
+func TestPostgresMismatchedClaimArraysDoNotReclaimSource(t *testing.T) {
+	fixture := setupCommittedCompactionFixture(t)
+	ctx := context.Background()
+	queries := dbsqlc.New(fixture.pool)
+	first := fixture.createLog(t)
+	second := fixture.createLog(t)
+	messageIDs := fixtureMessageIDs(t, fixture)
+	marked, err := queries.MarkMessagesCompacted(ctx, dbsqlc.MarkMessagesCompactedParams{
+		CompactID:          first.ID,
+		MessageIds:         messageIDs,
+		ExpectedCompactIds: emptyCompactionClaims(len(messageIDs)),
+	})
+	if err != nil || marked != int64(len(messageIDs)) {
+		t.Fatalf("first claim = %d, %v", marked, err)
+	}
+	if _, err := fixture.pool.Exec(ctx, `
+		UPDATE bot_history_message_compacts
+		SET started_at = now() - INTERVAL '16 minutes'
+		WHERE id = $1
+	`, first.ID); err != nil {
+		t.Fatalf("age first claim: %v", err)
+	}
+
+	marked, err = queries.MarkMessagesCompacted(ctx, dbsqlc.MarkMessagesCompactedParams{
+		CompactID:          second.ID,
+		MessageIds:         messageIDs[:1],
+		ExpectedCompactIds: repeatedCompactionClaim(first.ID, 2),
+	})
+	if err != nil || marked != 0 {
+		t.Fatalf("mismatched claim = %d, %v, want zero rows", marked, err)
+	}
+	var status string
+	if err := fixture.pool.QueryRow(ctx, `
+		SELECT status FROM bot_history_message_compacts WHERE id = $1
+	`, first.ID).Scan(&status); err != nil {
+		t.Fatalf("read first claim status: %v", err)
+	}
+	if status != "pending" {
+		t.Fatalf("first claim status after mismatched input = %q, want pending", status)
+	}
+}
+
 func TestPostgresReclaimDoesNotOverwriteCompletedSource(t *testing.T) {
 	fixture := setupCommittedCompactionFixture(t)
 	ctx := context.Background()
@@ -255,6 +297,107 @@ func TestPostgresCompactionClaimLocksSessionBeforeMessages(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("claim did not resume after session lock")
+	}
+}
+
+func TestPostgresCrossOwnerClaimLocksArtifactsInIDOrder(t *testing.T) {
+	fixture := setupOrderedSessionFixture(t)
+	ctx := context.Background()
+	targetArtifactID, staleArtifactID := orderedTestUUIDPair()
+	if _, err := fixture.pool.Exec(ctx, `
+		INSERT INTO bot_history_message_compacts (
+			id, bot_id, session_id, compaction_epoch
+		)
+		VALUES ($1, $3, $4, 0), ($2, $3, $5, 0)
+	`, targetArtifactID, staleArtifactID, fixture.botID, fixture.lowSessionID, fixture.highSessionID); err != nil {
+		t.Fatalf("insert cross-owner claims: %v", err)
+	}
+	if _, err := fixture.pool.Exec(ctx, `
+		UPDATE bot_history_messages SET compact_id = $1 WHERE id = $2
+	`, staleArtifactID, fixture.lowMessage.ID); err != nil {
+		t.Fatalf("assign stale foreign claim: %v", err)
+	}
+
+	blockerTx, err := fixture.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin target artifact blocker: %v", err)
+	}
+	defer func() { _ = blockerTx.Rollback(ctx) }()
+	if _, err := blockerTx.Exec(ctx, `
+		SELECT id FROM bot_history_message_compacts WHERE id = $1 FOR UPDATE
+	`, targetArtifactID); err != nil {
+		t.Fatalf("lock target artifact: %v", err)
+	}
+
+	markTx, err := fixture.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin cross-owner claim: %v", err)
+	}
+	defer func() { _ = markTx.Rollback(ctx) }()
+	markPID := postgresBackendPID(t, markTx)
+	targetUUID := mustTestUUID(t, targetArtifactID)
+	staleUUID := mustTestUUID(t, staleArtifactID)
+	messageUUID := mustTestUUID(t, fixture.lowMessage.ID)
+	type markResult struct {
+		count int64
+		err   error
+	}
+	marked := make(chan markResult, 1)
+	go func() {
+		count, err := dbsqlc.New(markTx).MarkMessagesCompacted(ctx, dbsqlc.MarkMessagesCompactedParams{
+			CompactID:          targetUUID,
+			MessageIds:         []pgtype.UUID{messageUUID},
+			ExpectedCompactIds: []pgtype.UUID{staleUUID},
+		})
+		marked <- markResult{count: count, err: err}
+	}()
+	waitForPostgresLock(t, fixture.pool, markPID)
+
+	probeTx, err := fixture.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin artifact order probe: %v", err)
+	}
+	if _, err := probeTx.Exec(ctx, `
+		SELECT id FROM bot_history_message_compacts WHERE id = $1 FOR UPDATE NOWAIT
+	`, staleArtifactID); err != nil {
+		_ = probeTx.Rollback(ctx)
+		t.Fatalf("cross-owner claim locked high artifact before low target: %v", err)
+	}
+	if err := probeTx.Rollback(ctx); err != nil {
+		t.Fatalf("release artifact order probe: %v", err)
+	}
+	if err := blockerTx.Commit(ctx); err != nil {
+		t.Fatalf("release target artifact: %v", err)
+	}
+
+	select {
+	case got := <-marked:
+		if got.err != nil || got.count != 1 {
+			t.Fatalf("cross-owner claim after target release = %+v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cross-owner claim did not resume after target release")
+	}
+	if err := markTx.Commit(ctx); err != nil {
+		t.Fatalf("commit cross-owner claim: %v", err)
+	}
+	var foreignStatus string
+	if err := fixture.pool.QueryRow(ctx, `
+		SELECT status FROM bot_history_message_compacts WHERE id = $1
+	`, staleArtifactID).Scan(&foreignStatus); err != nil {
+		t.Fatalf("read foreign claim status: %v", err)
+	}
+	if foreignStatus != "pending" {
+		t.Fatalf("foreign claim status = %q, want pending", foreignStatus)
+	}
+	var currentClaim pgtype.UUID
+	if err := fixture.pool.QueryRow(ctx, `
+		SELECT compact_id FROM bot_history_messages WHERE id = $1
+	`, fixture.lowMessage.ID).Scan(&currentClaim); err != nil {
+		t.Fatalf("read current message claim: %v", err)
+	}
+	if currentClaim != targetUUID {
+		t.Fatalf("current message claim = %v, want %v", currentClaim, targetUUID)
 	}
 }
 

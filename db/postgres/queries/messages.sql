@@ -2497,47 +2497,143 @@ WITH expected_claims AS MATERIALIZED (
   FROM UNNEST(sqlc.arg(message_ids)::uuid[]) WITH ORDINALITY AS ids(message_id, ordinal)
   JOIN UNNEST(sqlc.arg(expected_compact_ids)::uuid[]) WITH ORDINALITY AS claims(expected_compact_id, ordinal)
     USING (ordinal)
+), artifact_locator AS MATERIALIZED (
+  SELECT compact.id, compact.session_id
+  FROM bot_history_message_compacts compact
+  WHERE compact.id = sqlc.arg(compact_id)
+    OR compact.id = ANY(sqlc.arg(expected_compact_ids)::uuid[])
+), owner_sessions AS MATERIALIZED (
+  SELECT session.id, session.bot_id, session.compaction_epoch
+  FROM bot_sessions session
+  JOIN (
+    SELECT DISTINCT locator.session_id
+    FROM artifact_locator locator
+    WHERE locator.session_id IS NOT NULL
+  ) owner ON owner.session_id = session.id
+  ORDER BY session.id
+  FOR UPDATE OF session
+), locked_artifacts AS MATERIALIZED (
+  SELECT
+    compact.id,
+    compact.bot_id,
+    compact.session_id,
+    compact.compaction_epoch,
+    compact.status,
+    compact.summary,
+    compact.started_at
+  FROM bot_history_message_compacts compact
+  JOIN artifact_locator locator ON locator.id = compact.id
+  WHERE (SELECT count(*) FROM owner_sessions) >= 0
+    AND (
+      compact.session_id IS NULL
+      OR EXISTS (
+        SELECT 1
+        FROM owner_sessions owner
+        WHERE owner.id = compact.session_id
+      )
+    )
+  ORDER BY compact.id
+  FOR UPDATE OF compact
 ), target_compact AS MATERIALIZED (
   SELECT compact.id, compact.bot_id, compact.session_id, compact.compaction_epoch
-  FROM bot_history_message_compacts compact
-  JOIN bot_sessions owner_session
-    ON owner_session.id = compact.session_id
-   AND owner_session.bot_id = compact.bot_id
-   AND owner_session.compaction_epoch = compact.compaction_epoch
+  FROM locked_artifacts compact
+  JOIN owner_sessions owner
+    ON owner.id = compact.session_id
+   AND owner.bot_id = compact.bot_id
+   AND owner.compaction_epoch = compact.compaction_epoch
   WHERE compact.id = sqlc.arg(compact_id)
     AND compact.status = 'pending'
-  FOR UPDATE OF owner_session
-), reclaimable_pending_claims AS MATERIALIZED (
+), foreign_pending_claims AS MATERIALIZED (
   SELECT current_claim.id
-  FROM bot_history_message_compacts current_claim
+  FROM locked_artifacts current_claim
   CROSS JOIN target_compact target
   WHERE current_claim.id = ANY(sqlc.arg(expected_compact_ids)::uuid[])
     AND current_claim.status = 'pending'
     AND (
       current_claim.bot_id IS DISTINCT FROM target.bot_id
       OR current_claim.session_id IS DISTINCT FROM target.session_id
-      OR current_claim.compaction_epoch IS DISTINCT FROM target.compaction_epoch
+    )
+), reclaimable_pending_claims AS MATERIALIZED (
+  SELECT current_claim.id
+  FROM locked_artifacts current_claim
+  CROSS JOIN target_compact target
+  WHERE current_claim.id = ANY(sqlc.arg(expected_compact_ids)::uuid[])
+    AND current_claim.status = 'pending'
+    AND CARDINALITY(sqlc.arg(message_ids)::uuid[]) = CARDINALITY(sqlc.arg(expected_compact_ids)::uuid[])
+    AND current_claim.bot_id IS NOT DISTINCT FROM target.bot_id
+    AND current_claim.session_id IS NOT DISTINCT FROM target.session_id
+    AND (
+      current_claim.compaction_epoch IS DISTINCT FROM target.compaction_epoch
       OR current_claim.started_at <= now() - INTERVAL '15 minutes'
     )
   ORDER BY current_claim.id
-  FOR UPDATE
+), stable_claims AS MATERIALIZED (
+  SELECT current_claim.id
+  FROM locked_artifacts current_claim
+  CROSS JOIN target_compact target
+  WHERE current_claim.id = ANY(sqlc.arg(expected_compact_ids)::uuid[])
+    AND current_claim.status <> 'pending'
+    AND (
+      current_claim.bot_id IS DISTINCT FROM target.bot_id
+      OR current_claim.session_id IS DISTINCT FROM target.session_id
+      OR current_claim.compaction_epoch IS DISTINCT FROM target.compaction_epoch
+      OR current_claim.status <> 'ok'
+      OR NULLIF(BTRIM(current_claim.summary, E' \t\n\r\f\x0B'), '') IS NULL
+    )
+), locked_messages AS MATERIALIZED (
+  SELECT message.id, claim.expected_compact_id
+  FROM bot_history_messages message
+  JOIN expected_claims claim ON claim.message_id = message.id
+  CROSS JOIN target_compact target
+  WHERE CARDINALITY(sqlc.arg(message_ids)::uuid[]) = CARDINALITY(sqlc.arg(expected_compact_ids)::uuid[])
+    AND message.compact_id IS NOT DISTINCT FROM claim.expected_compact_id
+    AND message.bot_id = target.bot_id
+    AND message.session_id = target.session_id
+    AND message.turn_visible = true
+    AND message.turn_id IS NOT NULL
+    AND message.turn_position IS NOT NULL
+    AND message.turn_message_seq IS NOT NULL
+    AND (
+      claim.expected_compact_id IS NULL
+      OR EXISTS (
+        SELECT 1
+        FROM reclaimable_pending_claims reclaimable
+        WHERE reclaimable.id = claim.expected_compact_id
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM foreign_pending_claims foreign_claim
+        WHERE foreign_claim.id = claim.expected_compact_id
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM stable_claims stable
+        WHERE stable.id = claim.expected_compact_id
+      )
+    )
+  ORDER BY message.id
+  FOR UPDATE OF message
+), claims_to_reclaim AS MATERIALIZED (
+  SELECT DISTINCT reclaimable.id
+  FROM reclaimable_pending_claims reclaimable
+  JOIN locked_messages message
+    ON message.expected_compact_id = reclaimable.id
 ), reclaimed_claims AS MATERIALIZED (
   UPDATE bot_history_message_compacts current_claim
   SET status = 'error',
       error_message = 'source lease reclaimed',
       completed_at = now()
-  FROM reclaimable_pending_claims reclaimable
+  FROM claims_to_reclaim reclaimable
   WHERE current_claim.id = reclaimable.id
     AND current_claim.status = 'pending'
   RETURNING current_claim.id
 )
 UPDATE bot_history_messages message
 SET compact_id = target.id
-FROM expected_claims claim,
+FROM locked_messages locked,
      target_compact target
-WHERE CARDINALITY(sqlc.arg(message_ids)::uuid[]) = CARDINALITY(sqlc.arg(expected_compact_ids)::uuid[])
-  AND message.id = claim.message_id
-  AND message.compact_id IS NOT DISTINCT FROM claim.expected_compact_id
+WHERE message.id = locked.id
+  AND message.compact_id IS NOT DISTINCT FROM locked.expected_compact_id
   AND message.bot_id = target.bot_id
   AND message.session_id = target.session_id
   AND message.turn_visible = true
@@ -2545,24 +2641,21 @@ WHERE CARDINALITY(sqlc.arg(message_ids)::uuid[]) = CARDINALITY(sqlc.arg(expected
   AND message.turn_position IS NOT NULL
   AND message.turn_message_seq IS NOT NULL
   AND (
-    claim.expected_compact_id IS NULL
+    locked.expected_compact_id IS NULL
     OR EXISTS (
       SELECT 1
       FROM reclaimed_claims reclaimed
-      WHERE reclaimed.id = claim.expected_compact_id
+      WHERE reclaimed.id = locked.expected_compact_id
     )
     OR EXISTS (
       SELECT 1
-      FROM bot_history_message_compacts stable_claim
-      WHERE stable_claim.id = claim.expected_compact_id
-        AND stable_claim.status <> 'pending'
-        AND (
-          stable_claim.bot_id IS DISTINCT FROM target.bot_id
-          OR stable_claim.session_id IS DISTINCT FROM target.session_id
-          OR stable_claim.compaction_epoch IS DISTINCT FROM target.compaction_epoch
-          OR stable_claim.status <> 'ok'
-          OR NULLIF(BTRIM(stable_claim.summary, E' \t\n\r\f\x0B'), '') IS NULL
-        )
+      FROM foreign_pending_claims foreign_claim
+      WHERE foreign_claim.id = locked.expected_compact_id
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM stable_claims stable
+      WHERE stable.id = locked.expected_compact_id
     )
   );
 
