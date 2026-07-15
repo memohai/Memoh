@@ -534,6 +534,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			ConversationType:  strings.TrimSpace(msg.Conversation.Type),
 			ConversationID:    strings.TrimSpace(msg.Conversation.ID),
 			ThreadID:          extractThreadID(msg),
+			CommandTarget:     telegramGroupBotUsername(msg),
 			Locale:            loc.Locale(),
 		})
 		var caps channel.ChannelCapabilities

@@ -64,8 +64,8 @@ func formatStartWelcomeMessage(t *i18n.Localizer, botUsername string) string {
 	b.WriteString("\n\n")
 	b.WriteString(t.T("startWelcome.intro"))
 	fmt.Fprintf(&b, "\n\n%s", t.T("startWelcome.tip", map[string]any{
-		"new":  addressedCommandRef("new", botUsername),
-		"help": addressedCommandRef("help", botUsername),
+		"new":  command.CommandText("new", botUsername),
+		"help": command.CommandText("help", botUsername),
 	}))
 	appendTelegramGroupCommandTip(&b, t, botUsername)
 	return b.String()
@@ -82,8 +82,8 @@ func formatNewSessionMessage(t *i18n.Localizer, modeLabel string, cc command.Cur
 	b.WriteString(command.MdBold(t.T("newSession.title", map[string]any{"mode": modeLabel})))
 	appendCurrentContextLines(&b, t, cc)
 	fmt.Fprintf(&b, "\n\n%s", t.T("newSession.tip", map[string]any{
-		"model":     addressedCommandRef("model", botUsername),
-		"reasoning": addressedCommandRef("reasoning", botUsername),
+		"model":     command.CommandText("model", botUsername),
+		"reasoning": command.CommandText("reasoning", botUsername),
 	}))
 	appendTelegramGroupCommandTip(&b, t, botUsername)
 	return b.String()
@@ -100,26 +100,13 @@ func telegramGroupBotUsername(msg channel.InboundMessage) string {
 	return strings.TrimPrefix(strings.TrimSpace(username), "@")
 }
 
-func addressedCommandRef(cmd, botUsername string) string {
-	username := strings.TrimPrefix(strings.TrimSpace(botUsername), "@")
-	if username == "" {
-		return command.CmdRef(cmd)
-	}
-	parts := strings.Fields(strings.TrimPrefix(strings.TrimSpace(cmd), "/"))
-	if len(parts) == 0 {
-		return command.CmdRef(cmd)
-	}
-	parts[0] += "@" + username
-	return command.CmdRef(strings.Join(parts, " "))
-}
-
 func appendTelegramGroupCommandTip(b *strings.Builder, t *i18n.Localizer, botUsername string) {
 	username := strings.TrimPrefix(strings.TrimSpace(botUsername), "@")
 	if username == "" {
 		return
 	}
 	fmt.Fprintf(b, "\n\n%s", t.T("groupCommand.telegramTip", map[string]any{
-		"bot": command.MdCode("@" + username),
+		"bot": "@" + username,
 	}))
 }
 

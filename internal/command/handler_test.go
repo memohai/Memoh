@@ -581,7 +581,7 @@ func TestTruncate(t *testing.T) {
 func TestGlobalHelp_AllGroups(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(nil)
-	help := h.registry.GlobalHelp()
+	help := h.registry.GlobalHelp(i18n.New("en"), "")
 	for _, group := range []string{
 		"schedule", "mcp", "settings",
 		"model", "memory", "search", "usage",
@@ -590,6 +590,27 @@ func TestGlobalHelp_AllGroups(t *testing.T) {
 		if !strings.Contains(help, "/"+group) {
 			t.Errorf("missing /%s in global help", group)
 		}
+	}
+}
+
+func TestGlobalHelpAddressesTelegramGroupCommands(t *testing.T) {
+	t.Parallel()
+	h := newTestHandler(nil)
+	help := h.registry.GlobalHelp(i18n.New("en"), "snowluocat_bot")
+	for _, commandName := range []string{"help", "start", "new", "link", "compact"} {
+		want := "/" + commandName + "@snowluocat_bot"
+		if !strings.Contains(help, want) {
+			t.Errorf("addressed global help missing %q:\n%s", want, help)
+		}
+		if strings.Contains(help, "`"+want+"`") {
+			t.Errorf("single-token command %q must remain tap-to-send, not code-spanned", want)
+		}
+	}
+	if strings.Contains(help, "group's actions") || strings.Contains(help, "<group>") {
+		t.Errorf("global help leaked internal command-group terminology:\n%s", help)
+	}
+	if !strings.Contains(help, "`/help@snowluocat_bot model`") {
+		t.Errorf("multi-word help example should remain copyable as a complete command:\n%s", help)
 	}
 }
 

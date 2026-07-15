@@ -271,8 +271,8 @@ func TestFormatStartWelcomeMessage(t *testing.T) {
 	for _, want := range []string{
 		"**👋 Hi there!**",
 		"Just send me a message",
-		"`/help` shows what I can do.",
-		"`/new` starts a clean slate anytime.",
+		"/help shows what I can do.",
+		"/new starts a clean slate anytime.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("message missing %q:\n%s", want, got)
@@ -288,9 +288,9 @@ func TestFormatStartWelcomeMessage(t *testing.T) {
 func TestFormatStartWelcomeMessageTelegramGroup(t *testing.T) {
 	got := formatStartWelcomeMessage(i18n.New("en"), "snowluocat_bot")
 	for _, want := range []string{
-		"`/help@snowluocat_bot` shows what I can do.",
-		"`/new@snowluocat_bot` starts a clean slate anytime.",
-		"include `@snowluocat_bot` immediately after the command",
+		"/help@snowluocat_bot shows what I can do.",
+		"/new@snowluocat_bot starts a clean slate anytime.",
+		"include @snowluocat_bot immediately after the command",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Telegram group welcome missing %q:\n%s", want, got)
@@ -316,13 +316,13 @@ func TestFormatNewSessionMessage(t *testing.T) {
 			t.Errorf("message missing %q:\n%s", want, got)
 		}
 	}
-	// Setup values are plain; only the closing tip carries tap-to-copy command
-	// refs (`/model`, `/reasoning`), so check the value lines specifically.
+	// Setup values are plain, and the closing single-token commands stay plain so
+	// Telegram can render them as tap-to-send command entities.
 	if strings.Contains(got, "`Claude Opus 4.7 (Anthropic)`") {
 		t.Errorf("model value should be plain, not code-spanned:\n%s", got)
 	}
-	if !strings.Contains(got, "Tip: adjust anytime with `/model` or `/reasoning`.") {
-		t.Errorf("expected tap-to-copy tip:\n%s", got)
+	if !strings.Contains(got, "Tip: adjust anytime with /model or /reasoning.") {
+		t.Errorf("expected tap-to-send command tip:\n%s", got)
 	}
 	// Markup strips cleanly for plain-text channels.
 	plain := channel.StripInlineMarkup(got)
@@ -352,9 +352,9 @@ func TestFormatNewSessionMessageTelegramGroup(t *testing.T) {
 		ChatModel: "Claude Opus 4.7 (Anthropic)",
 	}, "@snowluocat_bot")
 	for _, want := range []string{
-		"`/model@snowluocat_bot`",
-		"`/reasoning@snowluocat_bot`",
-		"include `@snowluocat_bot` immediately after the command",
+		"/model@snowluocat_bot",
+		"/reasoning@snowluocat_bot",
+		"include @snowluocat_bot immediately after the command",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Telegram group new-session message missing %q:\n%s", want, got)

@@ -128,22 +128,24 @@ func (r *Registry) RegisterGroup(group *CommandGroup) {
 	r.order = append(r.order, group.Name)
 }
 
-// GlobalHelp returns the top-level help text listing all commands. Single-token
-// commands are rendered as plain "/cmd" (not code spans) so Telegram linkifies
-// them as tap-to-send; multi-word sub-actions stay tap-to-copy in GroupHelp.
-func (r *Registry) GlobalHelp(localizers ...*i18n.Localizer) string {
-	t := helpLocalizer(localizers...)
+// GlobalHelp returns the top-level help text listing all commands. Commands are
+// plain tokens so Telegram renders them as tap-to-send; when commandTarget is
+// present, each token uses Telegram's explicit /command@bot group grammar.
+func (r *Registry) GlobalHelp(t *i18n.Localizer, commandTarget string) string {
+	t = helpLocalizer(t)
 	var b strings.Builder
 	b.WriteString(MdBold(t.T("cmd.help.availableCommands")) + "\n\n")
-	b.WriteString("- /help — " + t.T("cmd.help.top.help") + "\n")
-	b.WriteString("- /start — " + t.T("cmd.help.top.start") + "\n")
-	b.WriteString("- /new — " + t.T("cmd.help.top.new") + "\n")
-	b.WriteString("- /stop — " + t.T("cmd.help.top.stop") + "\n")
+	b.WriteString("- " + CommandText("help", commandTarget) + " — " + t.T("cmd.help.top.help") + "\n")
+	b.WriteString("- " + CommandText("start", commandTarget) + " — " + t.T("cmd.help.top.start") + "\n")
+	b.WriteString("- " + CommandText("new", commandTarget) + " — " + t.T("cmd.help.top.new") + "\n")
+	b.WriteString("- " + CommandText("stop", commandTarget) + " — " + t.T("cmd.help.top.stop") + "\n")
 	for _, name := range r.order {
 		group := r.groups[name]
-		fmt.Fprintf(&b, "- /%s — %s\n", group.Name, commandDescription(t, group))
+		fmt.Fprintf(&b, "- %s — %s\n", CommandText(group.Name, commandTarget), commandDescription(t, group))
 	}
-	b.WriteString("\n" + t.T("cmd.help.globalHint"))
+	b.WriteString("\n" + t.T("cmd.help.globalHint", map[string]any{
+		"example": MdCode(CommandText("help model", commandTarget)),
+	}))
 	return strings.TrimRight(b.String(), "\n")
 }
 

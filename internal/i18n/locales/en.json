@@ -187,7 +187,7 @@
         "approve": "approve the latest or specified pending tool call",
         "reject": "reject the latest or specified pending tool call"
       },
-      "globalHint": "Send any command to run it. For a group's actions, send /help <group> — e.g. /help model.",
+      "globalHint": "Tap a command above to run it. To see a command's actions, type {example}.",
       "runForDetails": "Run {command} for details.",
       "summaryLabel": "Summary:",
       "usageLabel": "Usage:",

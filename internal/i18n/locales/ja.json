@@ -187,7 +187,7 @@
         "approve": "最新のまたは指定された保留中のTool呼び出しを承認します",
         "reject": "最新または指定された保留中のTool呼び出しを拒否します"
       },
-      "globalHint": "任意のコマンドを送信して実行します。グループのアクションについては、/help を送信してください<group>— 例: /ヘルプModel。",
+      "globalHint": "上のコマンドをタップすると実行できます。コマンドの操作一覧を見るには {example} と入力してください。",
       "runForDetails": "詳細については、{command} を実行してください。",
       "summaryLabel": "まとめ：",
       "usageLabel": "使い方：",

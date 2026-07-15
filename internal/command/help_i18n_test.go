@@ -27,6 +27,35 @@ func TestHelpUsesCommandUILocale(t *testing.T) {
 	}
 }
 
+func TestHelpUsesCommandTarget(t *testing.T) {
+	t.Parallel()
+	h := newTestHandler(nil)
+
+	res, err := h.ExecuteResult(context.Background(), ExecuteInput{
+		Text:          "/help@snowluocat_bot",
+		CommandTarget: "snowluocat_bot",
+		Locale:        "en",
+	})
+	if err != nil {
+		t.Fatalf("ExecuteResult addressed /help: %v", err)
+	}
+	if res == nil {
+		t.Fatal("nil result")
+	}
+	for _, want := range []string{
+		"/help@snowluocat_bot — show this help",
+		"/link@snowluocat_bot — Link this account",
+		"`/help@snowluocat_bot model`",
+	} {
+		if !strings.Contains(res.Text, want) {
+			t.Fatalf("addressed help missing %q:\n%s", want, res.Text)
+		}
+	}
+	if strings.Contains(res.Text, "group's actions") || strings.Contains(res.Text, "<group>") {
+		t.Fatalf("addressed help leaked internal group terminology:\n%s", res.Text)
+	}
+}
+
 func TestGroupAndActionHelpUseCommandUILocale(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(nil)

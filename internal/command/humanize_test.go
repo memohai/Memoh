@@ -5,6 +5,27 @@ import (
 	"time"
 )
 
+func TestCommandText(t *testing.T) {
+	tests := []struct {
+		name     string
+		command  string
+		target   string
+		expected string
+	}{
+		{name: "plain", command: "help", expected: "/help"},
+		{name: "addressed", command: "/help", target: "@snowluocat_bot", expected: "/help@snowluocat_bot"},
+		{name: "arguments follow target", command: "help model", target: "snowluocat_bot", expected: "/help@snowluocat_bot model"},
+		{name: "preserve existing target", command: "/help@other_bot", target: "snowluocat_bot", expected: "/help@other_bot"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CommandText(tt.command, tt.target); got != tt.expected {
+				t.Fatalf("CommandText(%q, %q) = %q, want %q", tt.command, tt.target, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestRelativeSince(t *testing.T) {
 	now := time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
