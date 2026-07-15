@@ -32,6 +32,8 @@ type containerTestTargetProvider struct {
 	targets       []workspacepkg.WorkspaceTarget
 	resolved      workspacepkg.ResolvedWorkspaceTarget
 	resolvedInput string
+	resolvedCtx   string
+	listedCtx     string
 	resolveErr    error
 	listCalls     int
 }
@@ -45,13 +47,15 @@ func (s *recordingWorkspaceHookService) Run(_ context.Context, req hooks.Request
 	return hooks.Result{Decision: hooks.DecisionAllow}, nil
 }
 
-func (p *containerTestTargetProvider) ResolveWorkspaceTarget(_ context.Context, _ string, targetID string) (workspacepkg.ResolvedWorkspaceTarget, error) {
+func (p *containerTestTargetProvider) ResolveWorkspaceTarget(ctx context.Context, _ string, targetID string) (workspacepkg.ResolvedWorkspaceTarget, error) {
 	p.resolvedInput = targetID
+	p.resolvedCtx = workspacepkg.WorkspaceTargetFromContext(ctx)
 	return p.resolved, p.resolveErr
 }
 
-func (p *containerTestTargetProvider) ListWorkspaceTargets(context.Context, string) ([]workspacepkg.WorkspaceTarget, error) {
+func (p *containerTestTargetProvider) ListWorkspaceTargets(ctx context.Context, _ string) ([]workspacepkg.WorkspaceTarget, error) {
 	p.listCalls++
+	p.listedCtx = workspacepkg.WorkspaceTargetFromContext(ctx)
 	return p.targets, nil
 }
 
@@ -326,6 +330,52 @@ func TestListExecutionLocationsReadsCurrentBotTargetsAtExecutionTime(t *testing.
 	}
 }
 
+func TestListExecutionLocationsUsesRequestOverrideAsDefault(t *testing.T) {
+	t.Parallel()
+
+	targetProvider := &containerTestTargetProvider{targets: []workspacepkg.WorkspaceTarget{
+		{
+			TargetID: workspacepkg.WorkspaceTargetNative,
+			Kind:     workspacepkg.WorkspaceTargetNative,
+			Name:     "Server Workspace",
+			Primary:  true,
+			Online:   true,
+			Status:   workspacepkg.WorkspaceTargetStatusOnline,
+		},
+		{
+			TargetID: "target-1",
+			Kind:     workspacepkg.WorkspaceTargetRemote,
+			Name:     "Office PC",
+			Online:   true,
+			Status:   workspacepkg.WorkspaceTargetStatusOnline,
+		},
+	}}
+	provider := NewContainerProvider(nil, targetProvider, nil, "")
+	toolList, err := provider.Tools(context.Background(), SessionContext{
+		BotID:               "bot-1",
+		WorkspaceTargetID:   "target-1",
+		WorkspaceTargetKind: workspacepkg.WorkspaceTargetRemote,
+	})
+	if err != nil {
+		t.Fatalf("Tools() error = %v", err)
+	}
+	tool := toolByNameForTest(t, toolList, ToolListExecutionLocations())
+	if !strings.Contains(tool.Description, "current turn's default") {
+		t.Fatalf("list_execution_locations description = %q", tool.Description)
+	}
+	raw, err := tool.Execute(&sdk.ToolExecContext{Context: context.Background()}, nil)
+	if err != nil {
+		t.Fatalf("list_execution_locations error = %v", err)
+	}
+	result := raw.(listExecutionLocationsResult)
+	if len(result.Locations) != 2 || result.Locations[0].Default || !result.Locations[1].Default {
+		t.Fatalf("request defaults = %#v", result.Locations)
+	}
+	if targetProvider.listedCtx != "target-1" {
+		t.Fatalf("list context target = %q, want target-1", targetProvider.listedCtx)
+	}
+}
+
 func TestContainerProviderResolvesOneCanonicalTargetPerInvocation(t *testing.T) {
 	t.Parallel()
 
@@ -339,15 +389,39 @@ func TestContainerProviderResolvesOneCanonicalTargetPerInvocation(t *testing.T) 
 		},
 	}}
 	provider := NewContainerProvider(nil, targetProvider, nil, "")
-	resolved, err := provider.resolveToolTarget(context.Background(), SessionContext{BotID: "bot-1"}, map[string]any{"target_id": "requested-target"})
+	resolved, err := provider.resolveToolTarget(context.Background(), SessionContext{BotID: "bot-1", WorkspaceTargetID: "request-default"}, map[string]any{"target_id": "requested-target"})
 	if err != nil {
 		t.Fatalf("resolveToolTarget() error = %v", err)
 	}
-	if targetProvider.resolvedInput != "requested-target" || resolved.id != "canonical-target" {
-		t.Fatalf("resolved input/id = %q/%q", targetProvider.resolvedInput, resolved.id)
+	if targetProvider.resolvedInput != "requested-target" || targetProvider.resolvedCtx != "request-default" || resolved.id != "canonical-target" {
+		t.Fatalf("resolved input/context/id = %q/%q/%q", targetProvider.resolvedInput, targetProvider.resolvedCtx, resolved.id)
 	}
 	if !resolved.workspace.windows || resolved.workspace.defaultWorkDir != `C:\Users\alice\project` {
 		t.Fatalf("resolved workspace = %#v", resolved.workspace)
+	}
+}
+
+func TestContainerProviderUsesRequestTargetWhenToolTargetIsOmitted(t *testing.T) {
+	t.Parallel()
+
+	targetProvider := &containerTestTargetProvider{resolved: workspacepkg.ResolvedWorkspaceTarget{
+		TargetID: "request-target",
+		Client:   &bridge.Client{},
+		Info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendRemote,
+			DefaultWorkDir: "/workspace",
+		},
+	}}
+	provider := NewContainerProvider(nil, targetProvider, nil, "")
+	resolved, err := provider.resolveToolTarget(context.Background(), SessionContext{
+		BotID:             "bot-1",
+		WorkspaceTargetID: "request-target",
+	}, nil)
+	if err != nil {
+		t.Fatalf("resolveToolTarget() error = %v", err)
+	}
+	if targetProvider.resolvedInput != "" || targetProvider.resolvedCtx != "request-target" || resolved.id != "request-target" {
+		t.Fatalf("resolved input/context/id = %q/%q/%q", targetProvider.resolvedInput, targetProvider.resolvedCtx, resolved.id)
 	}
 }
 

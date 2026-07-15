@@ -1039,6 +1039,11 @@ export type ConversationUiBackgroundTask = {
     task_id?: string;
 };
 
+export type ConversationUiExecutionLocation = {
+    kind?: string;
+    name?: string;
+};
+
 export type ConversationUiForwardRef = {
     date?: number;
     from_conversation_id?: string;
@@ -1052,6 +1057,7 @@ export type ConversationUiMessage = {
     attachments?: Array<ConversationUiAttachment>;
     background_task?: ConversationUiBackgroundTask;
     content?: string;
+    execution_location?: ConversationUiExecutionLocation;
     id?: number;
     input?: unknown;
     name?: string;
@@ -1683,6 +1689,7 @@ export type HandlersLocalChannelMessageRequest = {
     message: ChannelMessage;
     model_id?: string;
     reasoning_effort?: string;
+    workspace_target_id?: string;
 };
 
 export type HandlersLoginRequest = {

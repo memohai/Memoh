@@ -122,6 +122,7 @@ func (q *Queries) UpdateUserProviderOAuthState(ctx context.Context, arg UpdateUs
 }
 
 const upsertUserProviderOAuthToken = `-- name: UpsertUserProviderOAuthToken :one
+
 INSERT INTO user_provider_oauth_tokens (
   provider_id,
   user_id,
@@ -172,6 +173,8 @@ type UpsertUserProviderOAuthTokenParams struct {
 	Metadata         []byte             `json:"metadata"`
 }
 
+// Legacy per-user OAuth storage retained for rollback compatibility.
+// Active provider OAuth flows do not read or write these rows.
 func (q *Queries) UpsertUserProviderOAuthToken(ctx context.Context, arg UpsertUserProviderOAuthTokenParams) (UserProviderOauthToken, error) {
 	row := q.db.QueryRow(ctx, upsertUserProviderOAuthToken,
 		arg.ProviderID,

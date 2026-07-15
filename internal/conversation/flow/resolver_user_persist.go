@@ -14,6 +14,13 @@ import (
 // before writing a user turn ahead of agent execution. Web skill activations
 // use this so a denied hook cannot leave a persisted user-only special turn.
 func (r *Resolver) ApplyUserMessageHookAndPersistUserTurn(ctx context.Context, req conversation.ChatRequest) (conversation.ChatRequest, messagepkg.Message, error) {
+	if req.WorkspaceTarget == nil {
+		var err error
+		ctx, req, err = r.prepareWorkspaceRequest(ctx, req)
+		if err != nil {
+			return req, messagepkg.Message{}, err
+		}
+	}
 	if req.RawQuery == "" {
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
@@ -68,7 +75,7 @@ func (r *Resolver) persistUserTurn(ctx context.Context, req conversation.ChatReq
 		SourceReplyToMessageID:  req.SourceReplyToMessageID,
 		Role:                    "user",
 		Content:                 content,
-		Metadata:                mergeMetadata(buildRouteMetadata(req), buildInteractionMetadata(req)),
+		Metadata:                mergeMetadata(mergeMetadata(buildRouteMetadata(req), buildInteractionMetadata(req)), workspaceTargetMetadata(req.WorkspaceTarget)),
 		Assets:                  chatAttachmentsToAssetRefs(req.Attachments),
 		EventID:                 req.EventID,
 		DisplayText:             displayText,

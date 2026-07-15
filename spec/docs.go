@@ -16072,6 +16072,17 @@ const docTemplate = `{
                 }
             }
         },
+        "conversation.UIExecutionLocation": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "conversation.UIForwardRef": {
             "type": "object",
             "properties": {
@@ -16109,6 +16120,9 @@ const docTemplate = `{
                 },
                 "content": {
                     "type": "string"
+                },
+                "execution_location": {
+                    "$ref": "#/definitions/conversation.UIExecutionLocation"
                 },
                 "id": {
                     "type": "integer"
@@ -17678,6 +17692,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "reasoning_effort": {
+                    "type": "string"
+                },
+                "workspace_target_id": {
                     "type": "string"
                 }
             }

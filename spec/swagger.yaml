@@ -1772,6 +1772,13 @@ definitions:
       task_id:
         type: string
     type: object
+  conversation.UIExecutionLocation:
+    properties:
+      kind:
+        type: string
+      name:
+        type: string
+    type: object
   conversation.UIForwardRef:
     properties:
       date:
@@ -1797,6 +1804,8 @@ definitions:
         $ref: '#/definitions/conversation.UIBackgroundTask'
       content:
         type: string
+      execution_location:
+        $ref: '#/definitions/conversation.UIExecutionLocation'
       id:
         type: integer
       input: {}
@@ -2825,6 +2834,8 @@ definitions:
       model_id:
         type: string
       reasoning_effort:
+        type: string
+      workspace_target_id:
         type: string
     required:
     - message

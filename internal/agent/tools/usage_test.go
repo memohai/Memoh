@@ -499,6 +499,19 @@ func TestContainerProviderUsageGatesRegisteredTools(t *testing.T) {
 		}
 	}
 
+	got = provider.Usage(context.Background(), SessionContext{
+		WorkspaceTargetID:   "target-1",
+		WorkspaceTargetKind: "remote",
+		WorkspaceTargetName: "Office PC",
+		WorkspacePath:       "projects/memoh",
+	}, availableToolsForTest(ToolRead(), ToolExec(), ToolListExecutionLocations(), ToolBrowserObserve(), ToolComputerObserve()))
+	assertUsageItemsAreBulleted(t, got)
+	for _, want := range []string{"request-selected connected computer", "Office PC", "projects/memoh", "explicit `target_id` still takes precedence", "request-selected default for this turn", "Browser Use and Computer Use", "native Server Workspace", "`browser_observe`", "`computer_observe`", "`target_id` `native`"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Usage with a request target should contain %q, got:\n%s", want, got)
+		}
+	}
+
 	got = provider.Usage(context.Background(), SessionContext{}, availableToolsForTest(ToolRead()))
 	assertUsageItemsAreBulleted(t, got)
 	if !strings.Contains(got, "`read`") {

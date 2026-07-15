@@ -16,6 +16,7 @@ import (
 	"github.com/memohai/memoh/internal/models"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/toolapproval"
+	"github.com/memohai/memoh/internal/workspace"
 )
 
 type ToolApprovalResponseInput struct {
@@ -50,6 +51,7 @@ func (r *Resolver) RespondToolApproval(ctx context.Context, input ToolApprovalRe
 	} else if isACP {
 		return r.respondACPToolApproval(ctx, target, input, eventCh)
 	}
+	ctx = workspace.WithWorkspaceTarget(ctx, target.WorkspaceTargetID)
 	if err := r.authorizeToolApprovalResponse(ctx, target, input); err != nil {
 		return err
 	}
@@ -248,6 +250,7 @@ func emitApprovalAck(ctx context.Context, eventCh chan<- WSStreamEvent) error {
 }
 
 func (r *Resolver) executeApprovedTool(ctx context.Context, req toolapproval.Request, input ToolApprovalResponseInput) (sdk.ToolResultPart, error) {
+	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
 	req = withLocalWebReplyTarget(req)
 	resolved, err := r.ResolveRunConfig(ctx,
 		input.BotID,
@@ -270,6 +273,11 @@ func (r *Resolver) executeApprovedTool(ctx context.Context, req toolapproval.Req
 
 func (r *Resolver) storeToolResultAndContinue(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error {
 	approval = withLocalWebReplyTarget(approval)
+	ctx = workspace.WithWorkspaceTarget(ctx, approval.WorkspaceTargetID)
+	target, err := r.resolveWorkspaceTargetSnapshot(ctx, input.BotID, approval.WorkspaceTargetID)
+	if err != nil {
+		return err
+	}
 	modelMessages := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(result)})
 	storeReq := conversation.ChatRequest{
 		BotID:                   input.BotID,
@@ -280,7 +288,9 @@ func (r *Resolver) storeToolResultAndContinue(ctx context.Context, approval tool
 		ReplyTarget:             approval.ReplyTarget,
 		ConversationType:        approval.ConversationType,
 		UserMessagePersisted:    true,
+		WorkspaceTargetID:       approval.WorkspaceTargetID,
 	}
+	storeReq.WorkspaceTarget = target
 	if err := r.storeRoundWithOptions(ctx, storeReq, modelMessages, "", storeRoundOptions{AllowPendingToolCalls: true}); err != nil {
 		return err
 	}
@@ -289,6 +299,7 @@ func (r *Resolver) storeToolResultAndContinue(ctx context.Context, approval tool
 
 func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
 	approval = withLocalWebReplyTarget(approval)
+	ctx = workspace.WithWorkspaceTarget(ctx, approval.WorkspaceTargetID)
 	resolved, err := r.ResolveRunConfig(ctx,
 		input.BotID,
 		approval.SessionID,
@@ -326,6 +337,8 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 		ReplyTarget:             approval.ReplyTarget,
 		ConversationType:        approval.ConversationType,
 		UserMessagePersisted:    true,
+		WorkspaceTargetID:       approval.WorkspaceTargetID,
+		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}
 
 	stream := r.agent.Stream(ctx, cfg)

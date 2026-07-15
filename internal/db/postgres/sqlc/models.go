@@ -654,6 +654,7 @@ type ToolApprovalRequest struct {
 	SessionID                    pgtype.UUID        `json:"session_id"`
 	RouteID                      pgtype.UUID        `json:"route_id"`
 	ChannelIdentityID            pgtype.UUID        `json:"channel_identity_id"`
+	WorkspaceTargetID            string             `json:"workspace_target_id"`
 	ToolCallID                   string             `json:"tool_call_id"`
 	ToolName                     string             `json:"tool_name"`
 	Operation                    string             `json:"operation"`
@@ -733,6 +734,7 @@ type UserInputRequest struct {
 	SessionID                    pgtype.UUID        `json:"session_id"`
 	RouteID                      pgtype.UUID        `json:"route_id"`
 	ChannelIdentityID            pgtype.UUID        `json:"channel_identity_id"`
+	WorkspaceTargetID            string             `json:"workspace_target_id"`
 	ToolCallID                   string             `json:"tool_call_id"`
 	ToolName                     string             `json:"tool_name"`
 	ShortID                      int32              `json:"short_id"`

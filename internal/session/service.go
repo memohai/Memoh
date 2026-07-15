@@ -298,6 +298,11 @@ func (s *Service) ForkFromAssistantMessage(ctx context.Context, input ForkFromAs
 		forkTitle = title + " fork"
 	}
 	meta := nonNilMap(source.Metadata)
+	// A fork is a new execution branch. It inherits conversation context, but
+	// starts from the Bot's current Primary Computer instead of silently
+	// carrying the source Session's last request-scoped target.
+	delete(meta, "workspace_target_id")
+	delete(meta, "workspace_target")
 	meta["forked_from"] = map[string]any{
 		"session_id": source.ID,
 		"title":      title,

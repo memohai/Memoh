@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -19,6 +20,79 @@ import (
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
 )
+
+func injectWorkspaceTransitionRecords(records []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
+	if len(records) == 0 {
+		return records
+	}
+	result := make([]historyfrag.HistoryRecord, 0, len(records)+2)
+	var previous *conversation.WorkspaceTarget
+	for _, record := range records {
+		if current := workspaceTargetFromMetadata(record.Metadata); current != nil && !sameWorkspaceTarget(previous, current) {
+			text := fmt.Sprintf("[Execution location] Earlier file and command operations from this point belong to %q (target_id=%q).", current.Name, current.TargetID)
+			if previous != nil {
+				text = fmt.Sprintf("[Execution location changed] The default execution location changed from %q (target_id=%q) to %q (target_id=%q). Files, processes, and working-directory state do not transfer between them.", previous.Name, previous.TargetID, current.Name, current.TargetID)
+			}
+			result = append(result, historyfrag.HistoryRecord{ModelMessage: conversation.ModelMessage{Role: "system", Content: conversation.NewTextContent(text)}})
+			previous = current
+		}
+		result = append(result, record)
+	}
+	return result
+}
+
+func sameWorkspaceTarget(left, right *conversation.WorkspaceTarget) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return strings.TrimSpace(left.TargetID) == strings.TrimSpace(right.TargetID) &&
+		strings.TrimSpace(left.Kind) == strings.TrimSpace(right.Kind) &&
+		strings.TrimSpace(left.WorkspacePath) == strings.TrimSpace(right.WorkspacePath)
+}
+
+func workspaceTargetFromMetadata(metadata map[string]any) *conversation.WorkspaceTarget {
+	if len(metadata) == 0 {
+		return nil
+	}
+	raw, ok := metadata["execution_location"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	target := &conversation.WorkspaceTarget{
+		TargetID:      strings.TrimSpace(readAnyString(raw["target_id"])),
+		Kind:          strings.TrimSpace(readAnyString(raw["kind"])),
+		Name:          strings.TrimSpace(readAnyString(raw["name"])),
+		WorkspacePath: strings.TrimSpace(readAnyString(raw["workspace_path"])),
+	}
+	if target.TargetID == "" {
+		return nil
+	}
+	if target.Name == "" {
+		target.Name = target.TargetID
+	}
+	return target
+}
+
+func (r *Resolver) currentWorkspaceContextMessage(ctx context.Context, req conversation.ChatRequest) *conversation.ModelMessage {
+	current := req.WorkspaceTarget
+	if current == nil || strings.TrimSpace(current.TargetID) == "" {
+		return nil
+	}
+	var previous *conversation.WorkspaceTarget
+	if r != nil && r.sessionService != nil && strings.TrimSpace(req.SessionID) != "" {
+		if sess, err := r.sessionService.Get(ctx, req.SessionID); err == nil {
+			if raw, ok := sess.Metadata["workspace_target"].(map[string]any); ok {
+				previous = workspaceTargetFromMetadata(map[string]any{"execution_location": raw})
+			}
+		}
+	}
+	text := fmt.Sprintf("[Current execution location] The default Computer for this request is %q (target_id=%q, kind=%q, starting_folder=%q). Workspace tools that omit target_id run there.", current.Name, current.TargetID, current.Kind, current.WorkspacePath)
+	if previous != nil && !sameWorkspaceTarget(previous, current) {
+		text = fmt.Sprintf("[Current execution location changed] The default Computer for this request changed from %q (target_id=%q) to %q (target_id=%q, kind=%q, starting_folder=%q). Earlier file and command results belong to their recorded Computer. Do not assume files, processes, or working-directory state exist on the new Computer; inspect it before continuing.", previous.Name, previous.TargetID, current.Name, current.TargetID, current.Kind, current.WorkspacePath)
+	}
+	message := conversation.ModelMessage{Role: "system", Content: conversation.NewTextContent(text)}
+	return &message
+}
 
 func (r *Resolver) loadHistoryRecords(ctx context.Context, fallback historyfrag.ScopeFallback, sessionID string, maxContextMinutes int) ([]historyfrag.HistoryRecord, error) {
 	if r.messageService == nil {

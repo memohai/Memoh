@@ -265,6 +265,7 @@ type ChatRequest struct {
 	ForceFreshRuntime            bool             `json:"-"`
 	HistoryCutoffBeforeMessageID string           `json:"-"`
 	RequiredHistoryMessageID     string           `json:"-"`
+	WorkspaceTarget              *WorkspaceTarget `json:"-"`
 
 	// OutboundAssetCollector returns asset refs accumulated during outbound streaming.
 	// Set by the inbound channel processor; called by the resolver at persist time.
@@ -274,15 +275,27 @@ type ChatRequest struct {
 	// between tool rounds via the PrepareStep hook. Nil means no injection.
 	InjectCh <-chan InjectMessage `json:"-"`
 
-	Query           string                  `json:"query"`
-	Model           string                  `json:"model,omitempty"`
-	Provider        string                  `json:"provider,omitempty"`
-	ReasoningEffort string                  `json:"reasoning_effort,omitempty"`
-	Channels        []string                `json:"channels,omitempty"`
-	CurrentChannel  string                  `json:"current_channel,omitempty"`
-	Messages        []ModelMessage          `json:"messages,omitempty"`
-	Attachments     []ChatAttachment        `json:"attachments,omitempty"`
-	RequestedSkills []RequestedSkillContext `json:"-"`
+	Query             string                  `json:"query"`
+	Model             string                  `json:"model,omitempty"`
+	Provider          string                  `json:"provider,omitempty"`
+	ReasoningEffort   string                  `json:"reasoning_effort,omitempty"`
+	WorkspaceTargetID string                  `json:"workspace_target_id,omitempty"`
+	Channels          []string                `json:"channels,omitempty"`
+	CurrentChannel    string                  `json:"current_channel,omitempty"`
+	Messages          []ModelMessage          `json:"messages,omitempty"`
+	Attachments       []ChatAttachment        `json:"attachments,omitempty"`
+	RequestedSkills   []RequestedSkillContext `json:"-"`
+}
+
+// WorkspaceTarget is the immutable execution-location snapshot resolved for
+// one agent request. TargetID addresses either the Server Workspace (native)
+// or one Bot-scoped remote workspace binding; runtime IDs are intentionally
+// not exposed here because they bypass the binding's path and policy.
+type WorkspaceTarget struct {
+	TargetID      string `json:"target_id"`
+	Kind          string `json:"kind"`
+	Name          string `json:"name"`
+	WorkspacePath string `json:"workspace_path,omitempty"`
 }
 
 type RequestedSkillContext struct {

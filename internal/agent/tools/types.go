@@ -91,6 +91,12 @@ type SessionContext struct {
 	CanListUserInput    bool
 	SupportsImageInput  bool
 	IsSubagent          bool
+	// WorkspaceTargetID is the request-scoped default for file and command
+	// tools. An explicit tool target_id still takes precedence.
+	WorkspaceTargetID   string
+	WorkspaceTargetKind string
+	WorkspaceTargetName string
+	WorkspacePath       string
 	Skills              map[string]SkillDetail
 	TimezoneLocation    *time.Location
 	Emitter             StreamEmitter

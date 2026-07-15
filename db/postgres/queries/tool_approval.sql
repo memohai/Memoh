@@ -4,6 +4,7 @@ INSERT INTO tool_approval_requests (
   session_id,
   route_id,
   channel_identity_id,
+  workspace_target_id,
   tool_call_id,
   tool_name,
   operation,
@@ -19,6 +20,7 @@ INSERT INTO tool_approval_requests (
   sqlc.arg(session_id),
   sqlc.narg(route_id),
   sqlc.narg(channel_identity_id),
+  sqlc.arg(workspace_target_id),
   sqlc.arg(tool_call_id),
   sqlc.arg(tool_name),
   sqlc.arg(operation),
@@ -38,6 +40,10 @@ ON CONFLICT (session_id, tool_call_id) DO UPDATE
 SET tool_input = CASE
   WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.tool_input
   ELSE tool_approval_requests.tool_input
+END,
+workspace_target_id = CASE
+  WHEN tool_approval_requests.status = 'pending' THEN EXCLUDED.workspace_target_id
+  ELSE tool_approval_requests.workspace_target_id
 END
 RETURNING *;
 
