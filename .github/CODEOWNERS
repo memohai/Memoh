@@ -1,2 +1,158 @@
-apps/web/          @qqqqqf-q
-packages/ui/       @qqqqqf-q
+# Memoh code ownership
+#
+# Keep broad defaults above more specific rules. CODEOWNERS uses the last
+# matching pattern, so domain rules below override the backend defaults.
+
+# Repository governance and shared development infrastructure
+/.github/                        @memohai/maintainers
+/.agents/                        @memohai/maintainers
+/.claude/                        @memohai/maintainers
+/.husky/                         @memohai/maintainers
+/.vscode/                        @memohai/maintainers
+/.zed/                           @memohai/maintainers
+/AGENTS.md                       @memohai/maintainers
+/CLAUDE.md                       @memohai/maintainers
+/CONTRIBUTING.md                 @memohai/maintainers
+/LICENSE                         @memohai/maintainers
+/README*.md                      @memohai/maintainers
+/.gitattributes                  @memohai/maintainers
+/.gitignore                      @memohai/maintainers
+/.gitmodules                     @memohai/maintainers
+/.golangci.yml                   @memohai/maintainers
+/bump.config.ts                  @memohai/maintainers
+/go.mod                          @memohai/maintainers
+/mise.toml                       @memohai/maintainers
+/package.json                    @memohai/maintainers
+/pnpm-workspace.yaml             @memohai/maintainers
+/scripts/                        @memohai/maintainers
+/assets/                         @memohai/maintainers
+/docs/                           @memohai/maintainers
+
+# Backend defaults and API contracts
+/.air.toml                       @memohai/backend
+/cmd/                            @memohai/backend
+/conf/                           @memohai/backend
+/db/                             @memohai/backend
+/internal/                       @memohai/backend
+/packages/sdk/                   @memohai/backend
+/openapi-ts.config.ts            @memohai/backend
+/sqlc.yaml                       @memohai/backend
+
+# Agent loop, orchestration, context, and approval flow
+/internal/agent/                 @memohai/agent-loop
+/internal/agentpayload/          @memohai/agent-loop
+/internal/compaction/            @memohai/agent-loop
+/internal/contextfrag/           @memohai/agent-loop
+/internal/contextlimit/          @memohai/agent-loop
+/internal/conversation/          @memohai/agent-loop
+/internal/decision/              @memohai/agent-loop
+/internal/healthcheck/checkers/mcp/ @memohai/agent-loop
+/internal/heartbeat/             @memohai/agent-loop
+/internal/historyfrag/           @memohai/agent-loop
+/internal/hooks/                 @memohai/agent-loop
+/internal/mcp/                   @memohai/agent-loop
+/internal/memory/                @memohai/agent-loop
+/internal/pipeline/              @memohai/agent-loop
+/internal/prune/                 @memohai/agent-loop
+/internal/schedule/              @memohai/agent-loop
+/internal/session/               @memohai/agent-loop
+/internal/skills/                @memohai/agent-loop
+/internal/toolapproval/          @memohai/agent-loop
+/internal/userinput/             @memohai/agent-loop
+
+# Channels, messaging, identities, and commands
+/internal/acl/                   @memohai/channel
+/internal/channel/               @memohai/channel
+/internal/channelaccess/         @memohai/channel
+/internal/command/               @memohai/channel
+/internal/commandsyntax/         @memohai/channel
+/internal/email/                 @memohai/channel
+/internal/healthcheck/checkers/channel/ @memohai/channel
+/internal/i18n/                  @memohai/channel
+/internal/identity/              @memohai/channel
+/internal/message/               @memohai/channel
+/internal/messageconv/           @memohai/channel
+/internal/messaging/             @memohai/channel
+/internal/slash/                 @memohai/channel
+/internal/webhooktunnel/         @memohai/channel
+
+# Workspace runtime, ACP, containers, display, and bridge tooling
+/.dockerignore                   @memohai/runtime
+/Cargo.toml                      @memohai/runtime
+/DEPLOYMENT.md                   @memohai/runtime
+/docker-compose*.yml             @memohai/runtime
+/crates/                         @memohai/runtime
+/devenv/                         @memohai/runtime
+/docker/                         @memohai/runtime
+/packages/runtime/               @memohai/runtime
+/cmd/bridge/                     @memohai/runtime
+/cmd/gen-bridge-mtls/            @memohai/runtime
+/internal/acpagent/              @memohai/runtime
+/internal/acpclient/             @memohai/runtime
+/internal/acpfeedback/           @memohai/runtime
+/internal/acpprofile/            @memohai/runtime
+/internal/boot/                  @memohai/runtime
+/internal/container/             @memohai/runtime
+/internal/display/               @memohai/runtime
+/internal/network/               @memohai/runtime
+/internal/storage/               @memohai/runtime
+/internal/userruntime/           @memohai/runtime
+/internal/workspace/             @memohai/runtime
+/internal/workspacetemplate/     @memohai/runtime
+
+# Domain-specific repository scripts. Unlisted setup and release scripts keep
+# the maintainers default declared above.
+/scripts/db-*.sh                          @memohai/backend
+/scripts/sync-openrouter-models.sh        @memohai/backend
+/scripts/audit-kata-github-verification.sh @memohai/runtime
+/scripts/check-kata-*.sh                  @memohai/runtime
+/scripts/diagnose-kata-dev-stack.sh       @memohai/runtime
+/scripts/display-*                        @memohai/runtime
+/scripts/display.go                       @memohai/runtime
+/scripts/gen-bridge-mtls.sh                @memohai/runtime
+/scripts/prepare-kata-github-runner.sh     @memohai/runtime
+/scripts/run-kata-github-e2e.sh            @memohai/runtime
+/scripts/check-patched-deps.mjs            @memohai/web
+/scripts/check-ui-contract.mjs             @memohai/web
+/scripts/ui-*-baseline.json                @memohai/web
+/scripts/desktop-*.sh                      @memohai/desktop
+
+# Web client and shared browser-facing packages
+/apps/web/                       @memohai/web
+/packages/icons/                 @memohai/web
+/packages/ui                     @memohai/web
+/patches/                        @memohai/web
+
+# Desktop client and native packaging
+/apps/desktop/                   @memohai/desktop
+
+# Shared frontend configuration requests both teams for review. CODEOWNERS
+# approval semantics remain any-one-of while review enforcement is advisory.
+/packages/config/                @memohai/web @memohai/desktop
+/eslint.config.mjs               @memohai/web @memohai/desktop
+/tsconfig.json                   @memohai/web @memohai/desktop
+/vitest.config.ts                @memohai/web @memohai/desktop
+
+# Generated outputs and machine-maintained lock files intentionally have no
+# code owner. Review their source definitions, generators, or manifests instead.
+/Cargo.lock
+/go.sum
+/pnpm-lock.yaml
+/skills-lock.json
+/spec/
+/internal/db/postgres/sqlc/
+/internal/workspace/bridgepb/bridge.pb.go
+/internal/workspace/bridgepb/bridge_grpc.pb.go
+/packages/sdk/src/
+/packages/icons/src/
+/apps/web/src/components/file-manager/seti/seti.woff
+/apps/web/src/components/file-manager/seti/vs-seti-icon-theme.json
+/apps/desktop/build/
+/apps/desktop/resources/icon.png
+/apps/desktop/resources/tray-icon.png
+/apps/desktop/icon-tools/pnpm-lock.yaml
+
+# These icon components are hand-maintained exceptions inside generated output.
+/packages/icons/src/icons/Codex.vue       @memohai/web
+/packages/icons/src/icons/CodexColor.vue  @memohai/web
+/packages/icons/src/icons/Misskey.vue     @memohai/web
