@@ -377,6 +377,14 @@ func TestTelegramGroupBotUsername(t *testing.T) {
 	if got := telegramGroupBotUsername(group); got != "snowluocat_bot" {
 		t.Fatalf("telegramGroupBotUsername(group) = %q", got)
 	}
+	group.Metadata = nil
+	if got := telegramGroupBotUsername(group); got != "" {
+		t.Fatalf("telegramGroupBotUsername(missing metadata) = %q, want empty", got)
+	}
+	group.Metadata = map[string]any{"bot_username": true}
+	if got := telegramGroupBotUsername(group); got != "" {
+		t.Fatalf("telegramGroupBotUsername(malformed metadata) = %q, want empty", got)
+	}
 	group.Conversation.Type = channel.ConversationTypePrivate
 	if got := telegramGroupBotUsername(group); got != "" {
 		t.Fatalf("telegramGroupBotUsername(private) = %q, want empty", got)

@@ -92,6 +92,8 @@ func formatNewSessionMessage(t *i18n.Localizer, modeLabel string, cc command.Cur
 // telegramGroupBotUsername returns the Bot API username only where Telegram's
 // group privacy rules make explicit /command@bot addressing useful. Other
 // channels use different addressing syntax, and private chats do not need it.
+// Missing or malformed metadata intentionally degrades to no tip: command
+// execution remains valid, while this renderer stays independent of adapters.
 func telegramGroupBotUsername(msg channel.InboundMessage) string {
 	if msg.Channel != channel.ChannelTypeTelegram || msg.Conversation.Type != channel.ConversationTypeGroup {
 		return ""
