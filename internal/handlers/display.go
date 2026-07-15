@@ -393,15 +393,20 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 	if exitCode != 0 && !completed {
 		diagnostic := strings.TrimSpace(stderrText.String())
 		if diagnostic == "" {
-			diagnostic = fmt.Sprintf("display preparation exited with status %d", exitCode)
+			diagnostic = "no stderr output"
 		}
-		h.logger.Error("display preparation command failed",
-			slog.String("code", "workspace_display_prepare_failed"),
-			slog.String("request_id", streamRequestID),
-			slog.Int("exit_code", int(exitCode)),
-			slog.String("stderr", diagnostic),
-		)
-		sendError(lastStep, "workspace_display_prepare_failed", "chat.display.prepare.failed", "Display preparation failed.")
+		// A non-zero exit without a `complete` marker means the prepare script
+		// itself failed (unsupported base image, package install, browser
+		// launch, network). Route it through the shared app-error envelope so
+		// the SSE `error` event carries the stable
+		// `workspace.display_prepare_failed` code — identical to the mid-stream
+		// recvErr path above — instead of the legacy underscore string that the
+		// frontend's parseMemohError/isApiErrorCode branches can't match.
+		// sendAppError logs the private cause (exit code + stderr) with the
+		// request id, and apperror.PublicFrom renders only the catalog Detail,
+		// so the diagnostic never leaks into the user-facing response.
+		cause := fmt.Errorf("display preparation exited with status %d: %s", exitCode, diagnostic)
+		sendAppError(lastStep, apperror.CodeWorkspaceDisplayPrepareFailed, cause)
 		return nil
 	}
 	if !completed {
