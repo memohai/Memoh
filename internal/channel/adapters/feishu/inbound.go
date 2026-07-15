@@ -161,6 +161,7 @@ func extractFeishuInbound(event *larkim.P2MessageReceiveV1, botOpenID string, lo
 		Source:     "feishu",
 		Metadata: map[string]any{
 			"is_mentioned":      isMentioned,
+			"bot_alias":         feishuBotMentionAlias(mentions, botOpenID),
 			"raw_chat_type":     chatTypeRaw,
 			"mentions":          feishuMentionsMetadata(mentions),
 			"mentioned_targets": feishuMentionTargets(mentions),

@@ -267,12 +267,12 @@ func TestRenderModelPickerProviderGrid(t *testing.T) {
 }
 
 func TestFormatStartWelcomeMessage(t *testing.T) {
-	got := formatStartWelcomeMessage(i18n.New("en"))
+	got := formatStartWelcomeMessage(i18n.New("en"), "")
 	for _, want := range []string{
 		"**👋 Hi there!**",
 		"Just send me a message",
-		"`/help` shows what I can do.",
-		"`/new` starts a clean slate anytime.",
+		"/help shows what I can do.",
+		"/new starts a clean slate anytime.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("message missing %q:\n%s", want, got)
@@ -285,11 +285,27 @@ func TestFormatStartWelcomeMessage(t *testing.T) {
 	}
 }
 
+func TestFormatStartWelcomeMessageTelegramGroup(t *testing.T) {
+	got := formatStartWelcomeMessage(i18n.New("en"), "snowluocat_bot")
+	for _, want := range []string{
+		"/help shows what I can do.",
+		"/new starts a clean slate anytime.",
+		"for example `/help@snowluocat_bot`",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Telegram group welcome missing %q:\n%s", want, got)
+		}
+	}
+	if count := strings.Count(got, "snowluocat_bot"); count != 1 {
+		t.Errorf("Telegram group welcome repeats bot username %d times, want once:\n%s", count, got)
+	}
+}
+
 func TestFormatNewSessionMessage(t *testing.T) {
 	got := formatNewSessionMessage(i18n.New("en"), "chat", command.CurrentContext{
 		ChatModel: "Claude Opus 4.7 (Anthropic)", HeartbeatModel: "DeepSeek V4 (DeepSeek)",
 		ReasoningEnabled: true, ReasoningEffort: "medium", ContextWindow: "128.0K",
-	})
+	}, "")
 	// A fresh-start card confirms the full setup: model (+provider), reasoning,
 	// and context budget. Header is bold; values are plain (display names/enums).
 	for _, want := range []string{
@@ -303,13 +319,13 @@ func TestFormatNewSessionMessage(t *testing.T) {
 			t.Errorf("message missing %q:\n%s", want, got)
 		}
 	}
-	// Setup values are plain; only the closing tip carries tap-to-copy command
-	// refs (`/model`, `/reasoning`), so check the value lines specifically.
+	// Setup values are plain, and the closing single-token commands stay plain so
+	// Telegram can render them as tap-to-send command entities.
 	if strings.Contains(got, "`Claude Opus 4.7 (Anthropic)`") {
 		t.Errorf("model value should be plain, not code-spanned:\n%s", got)
 	}
-	if !strings.Contains(got, "Tip: adjust anytime with `/model` or `/reasoning`.") {
-		t.Errorf("expected tap-to-copy tip:\n%s", got)
+	if !strings.Contains(got, "Tip: adjust anytime with /model or /reasoning.") {
+		t.Errorf("expected tap-to-send command tip:\n%s", got)
 	}
 	// Markup strips cleanly for plain-text channels.
 	plain := channel.StripInlineMarkup(got)
@@ -319,7 +335,7 @@ func TestFormatNewSessionMessage(t *testing.T) {
 
 	// Reasoning off is still shown (it sets expectations on a fresh start); no
 	// heartbeat and no known context window are omitted.
-	off := formatNewSessionMessage(i18n.New("en"), "discussion", command.CurrentContext{ChatModel: "(none)", HeartbeatModel: "(none)", ReasoningEnabled: false})
+	off := formatNewSessionMessage(i18n.New("en"), "discussion", command.CurrentContext{ChatModel: "(none)", HeartbeatModel: "(none)", ReasoningEnabled: false}, "")
 	if !strings.Contains(off, "Reasoning: off") {
 		t.Errorf("reasoning state should be confirmed on the fresh-start card: %s", off)
 	}
@@ -331,6 +347,52 @@ func TestFormatNewSessionMessage(t *testing.T) {
 	}
 	if strings.Contains(off, "Context:") {
 		t.Errorf("unknown context window should be omitted: %s", off)
+	}
+}
+
+func TestFormatNewSessionMessageTelegramGroup(t *testing.T) {
+	got := formatNewSessionMessage(i18n.New("en"), "chat", command.CurrentContext{
+		ChatModel: "Claude Opus 4.7 (Anthropic)",
+	}, "@snowluocat_bot")
+	for _, want := range []string{
+		"/model",
+		"/reasoning",
+		"for example `/help@snowluocat_bot`",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Telegram group new-session message missing %q:\n%s", want, got)
+		}
+	}
+	if count := strings.Count(got, "snowluocat_bot"); count != 1 {
+		t.Errorf("Telegram group new-session message repeats bot username %d times, want once:\n%s", count, got)
+	}
+}
+
+func TestTelegramGroupBotUsername(t *testing.T) {
+	group := channel.InboundMessage{
+		Channel:      channel.ChannelTypeTelegram,
+		Conversation: channel.Conversation{Type: channel.ConversationTypeGroup},
+		Metadata:     map[string]any{"bot_username": "@snowluocat_bot"},
+	}
+	if got := telegramGroupBotUsername(group); got != "snowluocat_bot" {
+		t.Fatalf("telegramGroupBotUsername(group) = %q", got)
+	}
+	group.Metadata = nil
+	if got := telegramGroupBotUsername(group); got != "" {
+		t.Fatalf("telegramGroupBotUsername(missing metadata) = %q, want empty", got)
+	}
+	group.Metadata = map[string]any{"bot_username": true}
+	if got := telegramGroupBotUsername(group); got != "" {
+		t.Fatalf("telegramGroupBotUsername(malformed metadata) = %q, want empty", got)
+	}
+	group.Conversation.Type = channel.ConversationTypePrivate
+	if got := telegramGroupBotUsername(group); got != "" {
+		t.Fatalf("telegramGroupBotUsername(private) = %q, want empty", got)
+	}
+	group.Conversation.Type = channel.ConversationTypeGroup
+	group.Channel = channel.ChannelTypeDiscord
+	if got := telegramGroupBotUsername(group); got != "" {
+		t.Fatalf("telegramGroupBotUsername(discord) = %q, want empty", got)
 	}
 }
 

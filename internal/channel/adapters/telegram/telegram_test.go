@@ -105,6 +105,30 @@ func TestIsTelegramBotMentioned(t *testing.T) {
 			t.Fatalf("expected no mention")
 		}
 	})
+
+	t.Run("username prefix collision", func(t *testing.T) {
+		t.Parallel()
+		msg := &tele.Message{Text: "/new discuss @memohbot_extra"}
+		if isTelegramBotMentioned(msg, "memohbot") {
+			t.Fatal("longer username must not count as the current bot mention")
+		}
+	})
+
+	t.Run("email local part", func(t *testing.T) {
+		t.Parallel()
+		msg := &tele.Message{Text: "send this to alice@memohbot"}
+		if isTelegramBotMentioned(msg, "memohbot") {
+			t.Fatal("email address must not count as a bot mention")
+		}
+	})
+
+	t.Run("punctuated exact mention", func(t *testing.T) {
+		t.Parallel()
+		msg := &tele.Message{Text: "(@MemohBot), please respond"}
+		if !isTelegramBotMentioned(msg, "memohbot") {
+			t.Fatal("exact mention with punctuation should count")
+		}
+	})
 }
 
 func TestTelegramDescriptorIncludesStreaming(t *testing.T) {
@@ -501,6 +525,9 @@ func TestBuildTelegramInboundMessage_RichMentionDoesNotDuplicatePlainText(t *tes
 	}
 	if got, _ := inbound.Metadata["raw_text"].(string); got != body {
 		t.Fatalf("raw_text = %q, want %q", got, body)
+	}
+	if got, _ := inbound.Metadata["bot_username"].(string); got != "memoh1bot" {
+		t.Fatalf("bot_username = %q, want memoh1bot", got)
 	}
 }
 

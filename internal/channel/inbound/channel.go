@@ -448,11 +448,16 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// In group chats, only process if the message is directed at this bot
 	// (via @mention or reply) to avoid all bots responding to the same command.
 	cmdText := rawTextForCommand(msg, text)
-	slashDecision := slash.Decision{Kind: slash.DecisionNormalChat, Directed: isDirectedAtBot(msg)}
-	if !isToolApprovalCommand(cmdText) && !isUserInputResponseCommand(cmdText) {
-		slashDecision = p.classifyChannelSlash(cmdText, msg, identity)
-	}
+	slashDecision := p.classifyChannelSlash(cmdText, msg, identity)
+	invocation := slashDecision.Invocation
 	slashDirected := slashDecision.Directed
+	isNewCommand := invocationHasResource(invocation, "new")
+	isStartCommand := invocationHasResource(invocation, "start")
+	isStopCommand := invocationHasResource(invocation, "stop")
+	isStatusCommand := invocationHasResource(invocation, "status", "context")
+	isToolApprovalCommand := invocationHasResource(invocation, "approve", "reject")
+	isUserInputResponseCommand := invocationHasResource(invocation, "respond")
+	isModeCommand := invocationHasResource(invocation, "now", "next", "btw")
 	var pendingSkillIntent *slash.SkillIntent
 	switch slashDecision.Kind {
 	case slash.DecisionRejectNoop:
@@ -477,13 +482,14 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// /start is intentionally left ungated: it only returns a static welcome
 	// message and acts as the onboarding entry point for users who cannot chat yet.
 	if (isDirectedAtBot(msg) || slashDirected) &&
-		(isNewSessionCommand(cmdText) || isStopCommand(cmdText) || isStatusCommand(cmdText)) &&
+		(isNewCommand || isStopCommand || isStatusCommand) &&
 		p.commandHandler != nil {
 		ok, accErr := p.commandHandler.CommandAccess(ctx, command.ExecuteInput{
 			BotID:             strings.TrimSpace(identity.BotID),
 			ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
 			UserID:            strings.TrimSpace(identity.UserID),
 			Text:              cmdText,
+			Invocation:        invocation,
 			ChannelType:       msg.Channel.String(),
 			ConversationType:  strings.TrimSpace(msg.Conversation.Type),
 			ConversationID:    strings.TrimSpace(msg.Conversation.ID),
@@ -501,32 +507,34 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			return p.sendSlashError(ctx, sender, msg, slash.CodePermissionDenied)
 		}
 	}
-	if isStartCommand(cmdText) && (isDirectedAtBot(msg) || slashDirected) {
+	if isStartCommand && (isDirectedAtBot(msg) || slashDirected) {
 		return p.handleStartCommand(ctx, msg, sender, identity)
 	}
-	if isNewSessionCommand(cmdText) && (isDirectedAtBot(msg) || slashDirected) {
-		return p.handleNewSessionCommand(ctx, cfg, msg, sender, identity)
+	if isNewCommand && invocation != nil && (isDirectedAtBot(msg) || slashDirected) {
+		return p.handleNewSessionCommand(ctx, cfg, msg, sender, identity, *invocation)
 	}
-	if isStopCommand(cmdText) && (isDirectedAtBot(msg) || slashDirected) {
+	if isStopCommand && (isDirectedAtBot(msg) || slashDirected) {
 		return p.handleStopCommand(ctx, cfg, msg, sender, identity)
 	}
-	if isStatusCommand(cmdText) && (isDirectedAtBot(msg) || slashDirected) {
-		return p.handleStatusCommand(ctx, cfg, msg, sender, identity)
+	if isStatusCommand && invocation != nil && (isDirectedAtBot(msg) || slashDirected) {
+		return p.handleStatusCommand(ctx, cfg, msg, sender, identity, *invocation)
 	}
 
 	// Skip generic command handler for mode-prefix commands (/btw, /now, /next)
 	// so they pass through to mode detection below.
-	if pendingSkillIntent == nil && p.commandHandler != nil && p.commandHandler.IsCommand(cmdText) && !IsModeCommand(cmdText) && !isToolApprovalCommand(cmdText) && !isUserInputResponseCommand(cmdText) && (isDirectedAtBot(msg) || slashDirected) {
+	if pendingSkillIntent == nil && slashDecision.Kind == slash.DecisionCommandAction && p.commandHandler != nil && !isModeCommand && !isToolApprovalCommand && !isUserInputResponseCommand && invocation != nil && (isDirectedAtBot(msg) || slashDirected) {
 		loc := p.localizer(ctx, identity.BotID)
 		result, err := p.commandHandler.ExecuteResult(ctx, command.ExecuteInput{
 			BotID:             strings.TrimSpace(identity.BotID),
 			ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
 			UserID:            strings.TrimSpace(identity.UserID),
 			Text:              cmdText,
+			Invocation:        invocation,
 			ChannelType:       msg.Channel.String(),
 			ConversationType:  strings.TrimSpace(msg.Conversation.Type),
 			ConversationID:    strings.TrimSpace(msg.Conversation.ID),
 			ThreadID:          extractThreadID(msg),
+			CommandTarget:     telegramGroupBotUsername(msg),
 			Locale:            loc.Locale(),
 		})
 		var caps channel.ChannelCapabilities
@@ -557,23 +565,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		})
 	}
 
-	// Slash-command-shaped input that is NOT a known command (and not a mode
-	// command like /btw, a tool-approval, or /new//stop//status handled above):
-	// reply with a hint instead of forwarding the mistyped command to the model.
-	if pendingSkillIntent == nil && (isDirectedAtBot(msg) || slashDirected) && p.commandHandler != nil &&
-		p.commandHandler.IsCommandShaped(cmdText) &&
-		!p.commandHandler.IsCommand(cmdText) &&
-		!IsModeCommand(cmdText) && !isToolApprovalCommand(cmdText) && !isUserInputResponseCommand(cmdText) {
-		out := applyMessageFormat(channel.Message{Text: command.UnknownCommandMessage(p.localizer(ctx, identity.BotID), cmdText)}, p.channelCaps(msg.Channel))
-		if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
-			out.Reply = &channel.ReplyRef{MessageID: mid}
-		}
-		return sender.Send(ctx, channel.OutboundMessage{
-			Target:  strings.TrimSpace(msg.ReplyTarget),
-			Message: out,
-		})
-	}
-
 	resolvedAttachments := p.ingestInboundAttachments(ctx, cfg, msg, strings.TrimSpace(identity.BotID), msg.Message.Attachments)
 	msg.Message.Attachments = resolvedAttachments
 	if msg.Message.Reply != nil && len(msg.Message.Reply.Attachments) > 0 {
@@ -589,6 +580,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// Must run after buildInboundQuery so the prefix is stripped from the final text.
 	inboundMode := ModeInject
 	if !isLocalChannelType(msg.Channel) {
+		if isModeCommand && invocation != nil {
+			text = invocation.CommandText
+		}
 		inboundMode, text = DetectMode(text)
 	}
 	threadID := extractThreadID(msg)
@@ -695,11 +689,11 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		return nil
 	}
 
-	if isToolApprovalCommand(cmdText) && isDirectedAtBot(msg) {
-		return p.handleToolApprovalCommand(ctx, msg, sender, identity, resolved.RouteID, sessionID, cmdText)
+	if isToolApprovalCommand && invocation != nil && (isDirectedAtBot(msg) || slashDirected) {
+		return p.handleToolApprovalCommand(ctx, msg, sender, identity, resolved.RouteID, sessionID, *invocation)
 	}
-	if isUserInputResponseCommand(cmdText) && isDirectedAtBot(msg) {
-		return p.handleUserInputResponseCommand(ctx, msg, sender, identity, resolved.RouteID, sessionID, cmdText)
+	if isUserInputResponseCommand && invocation != nil && (isDirectedAtBot(msg) || slashDirected) {
+		return p.handleUserInputResponseCommand(ctx, msg, sender, identity, resolved.RouteID, sessionID, *invocation)
 	}
 	if pendingSkillIntent != nil && p.dispatcher != nil && !isLocalChannelType(msg.Channel) && inboundMode != ModeParallel {
 		if p.dispatcher.IsActive(strings.TrimSpace(resolved.RouteID)) {
@@ -1481,9 +1475,32 @@ func (p *ChannelInboundProcessor) classifyChannelSlash(text string, msg channel.
 		SupportsMode:   !isLocalChannelType(msg.Channel),
 		BotAliases:     channelSlashAliases(msg, identity),
 		KnownCommand: func(resource string) bool {
-			return p.commandHandler != nil && p.commandHandler.IsCommand("/"+resource)
+			return isChannelControlResource(resource) ||
+				(p.commandHandler != nil && p.commandHandler.HasCommandResource(resource))
 		},
 	})
+}
+
+func isChannelControlResource(resource string) bool {
+	switch strings.ToLower(strings.TrimSpace(resource)) {
+	case "start", "new", "stop", "status", "context", "approve", "reject", "respond":
+		return true
+	default:
+		return false
+	}
+}
+
+func invocationHasResource(invocation *command.Invocation, resources ...string) bool {
+	if invocation == nil {
+		return false
+	}
+	resource := strings.ToLower(strings.TrimSpace(invocation.Parsed.Resource))
+	for _, candidate := range resources {
+		if resource == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func hasSlashControlAttachments(msg channel.InboundMessage) bool {
@@ -1532,14 +1549,15 @@ func forwardHasOrMayHaveAttachments(forward *channel.ForwardRef) bool {
 func channelSlashAliases(msg channel.InboundMessage, identity InboundIdentity) []string {
 	aliases := []string{
 		identity.BotID,
-		identity.DisplayName,
 		msg.BotID,
-		msg.ReplyTarget,
 	}
 	for _, key := range []string{"bot_username", "bot_name", "bot_alias"} {
 		if value, ok := msg.Metadata[key].(string); ok {
 			aliases = append(aliases, value)
 		}
+	}
+	if values, ok := msg.Metadata["bot_aliases"].([]string); ok {
+		aliases = append(aliases, values...)
 	}
 	out := make([]string, 0, len(aliases))
 	seen := map[string]struct{}{}
@@ -3293,20 +3311,6 @@ func (p *ChannelInboundProcessor) enrichConversationAvatar(ctx context.Context, 
 	}
 }
 
-// isStopCommand returns true when the command text is "/stop" (with
-// optional Telegram-style @botname suffix and trailing whitespace).
-func isStopCommand(cmdText string) bool {
-	extracted := command.ExtractCommandText(cmdText)
-	if extracted == "" {
-		return false
-	}
-	parsed, err := command.Parse(extracted)
-	if err != nil {
-		return false
-	}
-	return parsed.Resource == "stop"
-}
-
 // handleStopCommand resolves the route for the current conversation and
 // cancels any active agent stream, effectively aborting the generation.
 func (p *ChannelInboundProcessor) handleStopCommand(
@@ -3377,22 +3381,6 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 	return nil
 }
 
-// isStartCommand returns true when the command text is "/start" (with optional
-// Telegram-style @botname suffix and a deep-link payload). Telegram deep links
-// deliver "/start <payload>" (and "/start@bot <payload>" in groups), which Parse
-// reads as an Action/Args; the payload is ignored — any /start opens the welcome.
-func isStartCommand(cmdText string) bool {
-	extracted := command.ExtractCommandText(cmdText)
-	if extracted == "" {
-		return false
-	}
-	parsed, err := command.Parse(extracted)
-	if err != nil {
-		return false
-	}
-	return parsed.Resource == "start"
-}
-
 // handleStartCommand replies with a lightweight welcome. Unlike /new it does not
 // reset the active session or show configuration — it only opens the door.
 func (p *ChannelInboundProcessor) handleStartCommand(
@@ -3407,67 +3395,16 @@ func (p *ChannelInboundProcessor) handleStartCommand(
 	}
 	loc := p.localizer(ctx, identity.BotID)
 	caps := p.channelCaps(msg.Channel)
+	botUsername := telegramGroupBotUsername(msg)
 
-	out := applyMessageFormat(channel.Message{Text: formatStartWelcomeMessage(loc)}, caps)
+	out := applyMessageFormat(channel.Message{Text: formatStartWelcomeMessage(loc, botUsername)}, caps)
 	if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
 		out.Reply = &channel.ReplyRef{MessageID: mid}
 	}
 	return sender.Send(ctx, channel.OutboundMessage{Target: target, Message: out})
 }
 
-// isNewSessionCommand returns true when the command text is "/new" (with
-// optional Telegram-style @botname suffix and trailing whitespace).
-func isNewSessionCommand(cmdText string) bool {
-	extracted := command.ExtractCommandText(cmdText)
-	if extracted == "" {
-		return false
-	}
-	parsed, err := command.Parse(extracted)
-	if err != nil {
-		return false
-	}
-	return parsed.Resource == "new"
-}
-
-// isStatusCommand matches the session-scoped read commands (/status, /context)
-// that need the active session resolved before dispatch.
-func isStatusCommand(cmdText string) bool {
-	extracted := command.ExtractCommandText(cmdText)
-	if extracted == "" {
-		return false
-	}
-	parsed, err := command.Parse(extracted)
-	if err != nil {
-		return false
-	}
-	return parsed.Resource == "status" || parsed.Resource == "context"
-}
-
-func isToolApprovalCommand(cmdText string) bool {
-	extracted := command.ExtractCommandText(cmdText)
-	if extracted == "" {
-		return false
-	}
-	parsed, err := command.Parse(extracted)
-	if err != nil {
-		return false
-	}
-	return parsed.Resource == "approve" || parsed.Resource == "reject"
-}
-
-func isUserInputResponseCommand(cmdText string) bool {
-	extracted := command.ExtractCommandText(cmdText)
-	if extracted == "" {
-		return false
-	}
-	parsed, err := command.Parse(extracted)
-	if err != nil {
-		return false
-	}
-	return parsed.Resource == "respond"
-}
-
-func (p *ChannelInboundProcessor) handleToolApprovalCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID, sessionID, cmdText string) error {
+func (p *ChannelInboundProcessor) handleToolApprovalCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID, sessionID string, invocation command.Invocation) error {
 	loc := p.localizer(ctx, identity.BotID)
 	caps := p.channelCaps(msg.Channel)
 	approvalRunner, ok := p.runner.(ToolApprovalRunner)
@@ -3477,14 +3414,7 @@ func (p *ChannelInboundProcessor) handleToolApprovalCommand(ctx context.Context,
 			Message: applyMessageFormat(channel.Message{Text: loc.T("cmd.toolApproval.unavailable")}, caps),
 		})
 	}
-	extracted := command.ExtractCommandText(cmdText)
-	parsed, err := command.Parse(extracted)
-	if err != nil {
-		return sender.Send(ctx, channel.OutboundMessage{
-			Target:  strings.TrimSpace(msg.ReplyTarget),
-			Message: applyMessageFormat(channel.Message{Text: loc.T("cmd.toolApproval.parseFailed")}, caps),
-		})
-	}
+	parsed := invocation.Parsed
 	explicitID := ""
 	reason := ""
 	replyExternalID := ""
@@ -3511,7 +3441,7 @@ func (p *ChannelInboundProcessor) handleToolApprovalCommand(ctx context.Context,
 	})
 }
 
-func (p *ChannelInboundProcessor) handleUserInputResponseCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID, sessionID, cmdText string) error {
+func (p *ChannelInboundProcessor) handleUserInputResponseCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID, sessionID string, invocation command.Invocation) error {
 	loc := p.localizer(ctx, identity.BotID)
 	caps := p.channelCaps(msg.Channel)
 	userInputRunner, ok := p.runner.(UserInputRunner)
@@ -3525,7 +3455,7 @@ func (p *ChannelInboundProcessor) handleUserInputResponseCommand(ctx context.Con
 	if msg.Message.Reply != nil {
 		replyExternalID = strings.TrimSpace(msg.Message.Reply.MessageID)
 	}
-	explicitID, answerText, err := parseUserInputResponseCommand(cmdText, replyExternalID != "")
+	explicitID, answerText, err := parseUserInputResponseInvocation(invocation, replyExternalID != "")
 	if err != nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  strings.TrimSpace(msg.ReplyTarget),
@@ -3544,23 +3474,14 @@ func (p *ChannelInboundProcessor) handleUserInputResponseCommand(ctx context.Con
 	})
 }
 
-func parseUserInputResponseCommand(cmdText string, hasReplyTarget bool) (explicitID, answerText string, err error) {
-	extracted := strings.TrimSpace(command.ExtractCommandText(cmdText))
-	if extracted == "" || !strings.HasPrefix(extracted, "/") {
-		return "", "", errors.New("command must start with /")
-	}
-	resource, rest := splitFirstCommandField(strings.TrimSpace(strings.TrimPrefix(extracted, "/")))
-	resource = strings.ToLower(strings.TrimSpace(resource))
-	if idx := strings.IndexByte(resource, '@'); idx > 0 {
-		resource = resource[:idx]
-	}
-	if resource != "respond" {
+func parseUserInputResponseInvocation(invocation command.Invocation, hasReplyTarget bool) (explicitID, answerText string, err error) {
+	if invocation.Parsed.Resource != "respond" {
 		return "", "", errors.New("not a respond command")
 	}
 	if hasReplyTarget {
-		return "", strings.TrimSpace(rest), nil
+		return "", strings.TrimSpace(invocation.Rest), nil
 	}
-	explicitID, answerText = splitFirstCommandField(rest)
+	explicitID, answerText = splitFirstCommandField(invocation.Rest)
 	return strings.TrimSpace(explicitID), strings.TrimSpace(answerText), nil
 }
 
@@ -3835,35 +3756,23 @@ func looksLikeApprovalID(value string) bool {
 	return true
 }
 
-func resolveNewSessionType(cmdText string, msg channel.InboundMessage) (string, error) {
-	spec, err := resolveNewSessionSpec(cmdText, msg)
-	if err != nil {
-		return "", err
-	}
-	return spec.Type, nil
-}
-
-// resolveNewSessionSpec determines the session mode/runtime for /new.
+// resolveNewSessionSpecParsed determines the session mode/runtime for /new.
 // /new chat → chat+model, /new codex → default-mode+ACP, /new chat codex →
 // chat+ACP, /new discuss codex → discuss+ACP.
-func resolveNewSessionSpec(cmdText string, msg channel.InboundMessage) (NewSessionSpec, error) {
-	extracted := command.ExtractCommandText(cmdText)
-	parsed, _ := command.Parse(extracted)
-
-	explicit := strings.ToLower(strings.TrimSpace(parsed.Action))
-	// A bare flag in the mode slot (e.g. "/new --confirm" typed by hand, where
-	// extractFlags leaves the unrecognized --confirm as the first positional)
-	// is not a session type. Treat it as no explicit mode and fall through to
-	// context defaults rather than erroring with "unknown session type --confirm".
-	if strings.HasPrefix(explicit, "-") {
-		explicit = ""
+func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.InboundMessage) (NewSessionSpec, error) {
+	operands := newSessionOperands(parsed)
+	explicit := ""
+	var args []string
+	if len(operands) > 0 {
+		explicit = strings.ToLower(strings.TrimSpace(operands[0]))
+		args = operands[1:]
 	}
 	mode := ""
 	agentID := ""
 	switch explicit {
 	case "chat":
 		mode = sessionpkg.TypeChat
-		agentID = firstNewSessionAgentArg(parsed.Args)
+		agentID = firstNewSessionAgentArg(args)
 		if agentID != "" && isGroupConversation(msg) {
 			return NewSessionSpec{}, groupChatACPUnsupportedFeedback()
 		}
@@ -3872,7 +3781,7 @@ func resolveNewSessionSpec(cmdText string, msg channel.InboundMessage) (NewSessi
 			return NewSessionSpec{}, errors.New("discuss mode is not supported via WebUI — use a channel adapter (Telegram, Discord, etc.)")
 		}
 		mode = sessionpkg.TypeDiscuss
-		agentID = firstNewSessionAgentArg(parsed.Args)
+		agentID = firstNewSessionAgentArg(args)
 	case "":
 		// Default: local → chat, group → discuss, DM → chat.
 		switch {
@@ -3925,6 +3834,30 @@ func resolveNewSessionSpec(cmdText string, msg channel.InboundMessage) (NewSessi
 	return spec, nil
 }
 
+// newSessionOperands applies /new's grammar after the shared syntax parser.
+// Mentions address chat participants rather than naming a session mode or ACP
+// profile, and callback flags control execution rather than session semantics.
+func newSessionOperands(parsed command.ParsedCommand) []string {
+	values := make([]string, 0, 1+len(parsed.Args))
+	values = append(values, parsed.Action)
+	values = append(values, parsed.Args...)
+	operands := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || strings.HasPrefix(value, "-") || isMentionArgument(value) {
+			continue
+		}
+		operands = append(operands, value)
+	}
+	return operands
+}
+
+func isMentionArgument(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.HasPrefix(value, "@") ||
+		(strings.HasPrefix(value, "<@") && strings.HasSuffix(value, ">"))
+}
+
 func firstNewSessionAgentArg(args []string) string {
 	for _, arg := range args {
 		arg = strings.TrimSpace(arg)
@@ -3946,6 +3879,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	msg channel.InboundMessage,
 	sender channel.StreamReplySender,
 	identity InboundIdentity,
+	invocation command.Invocation,
 ) error {
 	target := strings.TrimSpace(msg.ReplyTarget)
 	if target == "" {
@@ -3954,8 +3888,8 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	loc := p.localizer(ctx, identity.BotID)
 	caps := p.channelCaps(msg.Channel)
 
-	cmdText := rawTextForCommand(msg, msg.Message.PlainText())
-	spec, err := resolveNewSessionSpec(cmdText, msg)
+	parsed := invocation.Parsed
+	spec, err := resolveNewSessionSpecParsed(parsed, msg)
 	if err != nil {
 		if feedback := acpFeedbackFromError(err); feedback != nil {
 			return p.sendACPFeedbackError(ctx, sender, msg, identity, feedback)
@@ -3993,7 +3927,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	// performs the reset. Non-button channels reset immediately (unchanged).
 	modeText := newSessionConfirmModeText(spec)
 	modeLabel := newSessionDisplayModeLabel(loc, spec)
-	if caps.Buttons && !newCommandConfirmed(cmdText) {
+	if caps.Buttons && !newCommandConfirmedParsed(parsed) {
 		return p.sendNewConfirmation(ctx, msg, sender, loc, modeText, modeLabel, caps)
 	}
 
@@ -4070,11 +4004,20 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		)
 	}
 	text := loc.T("newSession.title", map[string]any{"mode": modeLabel})
+	botUsername := telegramGroupBotUsername(msg)
+	renderedSessionDetails := false
 	if p.commandHandler != nil {
 		if cc, err := p.commandHandler.CurrentContext(ctx, identity.BotID); err == nil {
 			cc = currentContextForNewSessionSpec(cc, spec)
-			text = formatNewSessionMessage(loc, modeLabel, cc)
+			text = formatNewSessionMessage(loc, modeLabel, cc, botUsername)
+			renderedSessionDetails = true
 		}
+	}
+	if botUsername != "" && !renderedSessionDetails {
+		var b strings.Builder
+		b.WriteString(text)
+		appendTelegramGroupCommandTip(&b, loc, botUsername)
+		text = b.String()
 	}
 	out := applyMessageFormat(channel.Message{Text: text}, p.channelCaps(msg.Channel))
 	// When confirmed via the inline button, edit the confirmation message into
@@ -4549,13 +4492,7 @@ func newSessionMetadataString(metadata map[string]any, key string) string {
 	return strings.TrimSpace(value)
 }
 
-// newCommandConfirmed reports whether a /new command carries the "--confirm"
-// marker added when the user taps the confirmation button.
-func newCommandConfirmed(cmdText string) bool {
-	parsed, err := command.Parse(command.ExtractCommandText(cmdText))
-	if err != nil {
-		return false
-	}
+func newCommandConfirmedParsed(parsed command.ParsedCommand) bool {
 	for _, a := range parsed.Args {
 		if a == "--confirm" {
 			return true
@@ -4595,6 +4532,7 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 	msg channel.InboundMessage,
 	sender channel.StreamReplySender,
 	identity InboundIdentity,
+	invocation command.Invocation,
 ) error {
 	target := strings.TrimSpace(msg.ReplyTarget)
 	if target == "" {
@@ -4654,6 +4592,7 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 		ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
 		UserID:            strings.TrimSpace(identity.UserID),
 		Text:              rawTextForCommand(msg, strings.TrimSpace(msg.Message.PlainText())),
+		Invocation:        &invocation,
 		ChannelType:       msg.Channel.String(),
 		ConversationType:  strings.TrimSpace(msg.Conversation.Type),
 		ConversationID:    strings.TrimSpace(msg.Conversation.ID),

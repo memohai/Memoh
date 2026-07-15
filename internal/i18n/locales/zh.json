@@ -20,6 +20,9 @@
     "intro": "直接发消息给我，我们就能开始聊。",
     "tip": "第一次来？用 {help} 看看我能做什么；想从头开始，随时用 {new}。"
   },
+  "groupCommand": {
+    "telegramTip": "群聊提示：手动输入命令时请明确发给我，例如 {example}。"
+  },
   "newSession": {
     "title": "✨ 已开启新{mode}。",
     "modeChat": "对话",
@@ -184,7 +187,7 @@
         "approve": "批准待执行的工具调用",
         "reject": "拒绝待执行的工具调用"
       },
-      "globalHint": "发送命令即可执行。查看某组操作：/help <group>，如 /help model。",
+      "globalHint": "点击上面的命令即可执行。",
       "runForDetails": "运行 {command} 查看详情。",
       "summaryLabel": "说明：",
       "usageLabel": "用法：",

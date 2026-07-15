@@ -68,6 +68,69 @@ func TestClassifyChannelDirectSkillActivationWithBotSuffix(t *testing.T) {
 	}
 }
 
+func TestClassifyChannelCommandAddressingForms(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{name: "leading mention", text: "@memoh1bot /new discuss", want: "/new discuss"},
+		{name: "command suffix", text: "/new@memoh1bot discuss", want: "/new discuss"},
+		{name: "action suffix", text: "/new discuss@memoh1bot", want: "/new discuss"},
+		{name: "mention after command", text: "/new @memoh1bot", want: "/new"},
+		{name: "mention after action", text: "/new discuss @memoh1bot", want: "/new discuss"},
+		{name: "multiple leading mentions", text: "@alice @memoh1bot /new discuss", want: "/new discuss"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			decision := Classify(ClassifyInput{
+				Text:       tt.text,
+				Surface:    SurfaceChannel,
+				IsGroup:    true,
+				BotAliases: []string{"memoh1bot"},
+				KnownCommand: func(resource string) bool {
+					return resource == "new"
+				},
+			})
+			if decision.Kind != DecisionCommandAction || !decision.Directed || decision.Invocation == nil {
+				t.Fatalf("decision = %#v, want directed command invocation", decision)
+			}
+			if decision.Command.Raw != tt.want || decision.Invocation.CommandText != tt.want {
+				t.Fatalf("command text = %q / %q, want %q", decision.Command.Raw, decision.Invocation.CommandText, tt.want)
+			}
+		})
+	}
+}
+
+func TestClassifyChannelCommandForOtherBotIsIgnored(t *testing.T) {
+	t.Parallel()
+
+	for _, text := range []string{
+		"@otherbot /new discuss",
+		"/new@otherbot discuss",
+	} {
+		t.Run(text, func(t *testing.T) {
+			t.Parallel()
+			decision := Classify(ClassifyInput{
+				Text:       text,
+				Surface:    SurfaceChannel,
+				IsGroup:    true,
+				Directed:   true,
+				BotAliases: []string{"memoh1bot"},
+				KnownCommand: func(resource string) bool {
+					return resource == "new"
+				},
+			})
+			if decision.Kind != DecisionRejectNoop || decision.Directed {
+				t.Fatalf("decision = %#v, want undirected reject noop", decision)
+			}
+		})
+	}
+}
+
 func TestClassifyFixedCommandBeatsSkillSelector(t *testing.T) {
 	decision := Classify(ClassifyInput{
 		Text:    "/skill list",
