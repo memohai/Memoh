@@ -547,6 +547,9 @@ func TestSlackHandleMessageEventStoresDMChannelID(t *testing.T) {
 		if got := msg.Sender.Attribute("channel_id"); got != "D123" {
 			t.Fatalf("unexpected channel_id: %q", got)
 		}
+		if got, _ := msg.Metadata["bot_alias"].(string); got != "UBOT" {
+			t.Fatalf("bot_alias = %q, want UBOT", got)
+		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for inbound message")
 	}
@@ -782,7 +785,7 @@ func TestSlackHandleAppMentionEventPreservesAttachments(t *testing.T) {
 	}, cfg, func(_ context.Context, _ channel.ChannelConfig, msg channel.InboundMessage) error {
 		msgCh <- msg
 		return nil
-	})
+	}, "UBOT")
 
 	select {
 	case msg := <-msgCh:
@@ -791,6 +794,9 @@ func TestSlackHandleAppMentionEventPreservesAttachments(t *testing.T) {
 		}
 		if got := msg.Message.Attachments[0].PlatformKey; got != "F123" {
 			t.Fatalf("unexpected attachment platform key: %q", got)
+		}
+		if got, _ := msg.Metadata["bot_alias"].(string); got != "UBOT" {
+			t.Fatalf("bot_alias = %q, want UBOT", got)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for inbound mention message")
@@ -821,7 +827,7 @@ func TestSlackHandleAppMentionEventPreservesPrivateChannelType(t *testing.T) {
 	}, cfg, func(_ context.Context, _ channel.ChannelConfig, msg channel.InboundMessage) error {
 		msgCh <- msg
 		return nil
-	})
+	}, "UBOT")
 
 	select {
 	case msg := <-msgCh:

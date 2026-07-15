@@ -16,6 +16,7 @@ import (
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/i18n"
 	sessionpkg "github.com/memohai/memoh/internal/session"
+	"github.com/memohai/memoh/internal/slash"
 )
 
 func mustCommandInvocation(t *testing.T, text string) command.Invocation {
@@ -148,6 +149,29 @@ func TestChannelSlashAliasesExcludeSenderAndReplyTarget(t *testing.T) {
 	}
 	if !strings.Contains(joined, "memoh1bot") {
 		t.Fatalf("aliases = %#v, want adapter-provided bot username", aliases)
+	}
+}
+
+func TestClassifySlackAppMentionCommandUsesAdapterBotAlias(t *testing.T) {
+	t.Parallel()
+	msg := channel.InboundMessage{
+		BotID:   "bot-1",
+		Channel: channel.ChannelTypeSlack,
+		Conversation: channel.Conversation{
+			ID:   "C123",
+			Type: channel.ConversationTypeGroup,
+		},
+		Metadata: map[string]any{
+			"bot_alias":    "UBOT",
+			"is_mentioned": true,
+		},
+	}
+	decision := (&ChannelInboundProcessor{}).classifyChannelSlash("<@UBOT> /new discuss", msg, InboundIdentity{BotID: "bot-1"})
+	if decision.Kind != slash.DecisionCommandAction || !decision.Directed || decision.Invocation == nil {
+		t.Fatalf("decision = %#v, want directed Slack command", decision)
+	}
+	if decision.Invocation.CommandText != "/new discuss" {
+		t.Fatalf("command text = %q, want /new discuss", decision.Invocation.CommandText)
 	}
 }
 
