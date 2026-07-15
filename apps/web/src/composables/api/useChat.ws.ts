@@ -20,6 +20,7 @@ export interface WSClientMessage {
   requested_skills?: RequestedSkillRequest[]
   model_id?: string
   reasoning_effort?: string
+  workspace_target_id?: string
   approval_id?: string
   user_input_id?: string
   short_id?: number
