@@ -159,7 +159,6 @@
   },
   "runtimes": {
     "title": "コンピューター",
-    "description": "Bot で使うコンピューターを接続し、各 Bot の「接続済みのコンピューター」から追加します。",
     "connect": "コンピューターを接続",
     "connectOther": "別のコンピューターを接続",
     "computers": "接続済みのコンピューター",
@@ -1865,7 +1864,7 @@
       "network": "ネットワーク",
       "memory": "メモリ",
       "channels": "プラットフォーム",
-      "remoteRuntime": "接続済みのコンピューター",
+      "remoteRuntime": "コンピューター",
       "container": "Workspace",
       "mcp": "MCP",
       "heartbeat": "ハートビート",
@@ -1881,8 +1880,7 @@
       "settings": "設定"
     },
     "remoteRuntime": {
-      "title": "接続済みのコンピューター",
-      "description": "この Bot は、既存の Workspace に加えて、接続済みのコンピューターでファイル操作やコマンド実行ができます。",
+      "title": "コンピューター",
       "workspaceTitle": "使用場所",
       "loading": "使用場所を読み込んでいます...",
       "loadFailed": "使用場所を読み込めませんでした",

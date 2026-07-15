@@ -162,7 +162,6 @@
   },
   "runtimes": {
     "title": "电脑",
-    "description": "连接可供 Bot 使用的电脑，再到每个 Bot 的“已连接电脑”中添加。",
     "connect": "连接电脑",
     "connectOther": "连接其他电脑",
     "computers": "已连接的电脑",
@@ -1886,7 +1885,7 @@
       "network": "网络",
       "memory": "记忆",
       "channels": "平台",
-      "remoteRuntime": "已连接电脑",
+      "remoteRuntime": "电脑",
       "container": "工作区",
       "mcp": "MCP",
       "heartbeat": "心跳",
@@ -1902,8 +1901,7 @@
       "settings": "设置"
     },
     "remoteRuntime": {
-      "title": "已连接电脑",
-      "description": "让这个 Bot 在原有工作区之外，还可以使用已连接电脑读写文件和执行命令。",
+      "title": "电脑",
       "workspaceTitle": "使用位置",
       "loading": "正在加载使用位置...",
       "loadFailed": "无法加载使用位置",
