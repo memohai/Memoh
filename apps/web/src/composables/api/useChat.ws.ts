@@ -1,4 +1,5 @@
 import { sdkAuthQuery, sdkWebSocketUrl } from '@/lib/api-client'
+import { parseSessionRuntimeStateEvent } from '@memohai/sdk/session-runtime'
 import type { ChatAttachment, RequestedSkillRequest, UIStreamEvent, UIStreamEventHandler } from './useChat.types'
 
 export interface WSUserInputAnswer {
@@ -9,8 +10,9 @@ export interface WSUserInputAnswer {
 }
 
 export interface WSClientMessage {
-  type: 'message' | 'abort' | 'tool_approval_response' | 'user_input_response' | 'retry_message' | 'edit_message'
+  type: 'message' | 'abort' | 'tool_approval_response' | 'user_input_response' | 'retry_message' | 'edit_message' | 'runtime_subscribe' | 'runtime_unsubscribe'
   stream_id?: string
+  generation?: string
   invocation_id?: string
   composer_scope?: string
   text?: string
@@ -33,7 +35,7 @@ export interface WSClientMessage {
 
 export interface ChatWebSocket {
   send: (msg: WSClientMessage) => void
-  abort: (streamId: string) => void
+  abort: (streamId: string, sessionId: string, generation?: string) => void
   close: () => void
   readonly connected: boolean
   onOpen: (() => void) | null
@@ -63,7 +65,6 @@ export function connectWebSocket(
   let closed = false
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let reconnectDelay = 1000
-  const sendQueue: string[] = []
 
   const handle: ChatWebSocket = {
     send(msg: WSClientMessage) {
@@ -72,14 +73,19 @@ export function connectWebSocket(
         ws.send(payload)
         return
       }
-      sendQueue.push(payload)
+      throw new Error('WebSocket is not connected')
     },
-    abort(streamId: string) {
+    abort(streamId: string, sessionId: string, generation?: string) {
       const id = streamId.trim()
-      if (!id) return
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'abort', stream_id: id }))
-      }
+      const sid = sessionId.trim()
+      const runGeneration = generation?.trim() ?? ''
+      if (!id || !sid) return
+      handle.send({
+        type: 'abort',
+        stream_id: id,
+        session_id: sid,
+        ...(runGeneration ? { generation: runGeneration } : {}),
+      })
     },
     close() {
       closed = true
@@ -107,9 +113,6 @@ export function connectWebSocket(
     ws.onopen = () => {
       isConnected = true
       reconnectDelay = 1000
-      while (sendQueue.length > 0 && ws?.readyState === WebSocket.OPEN) {
-        ws.send(sendQueue.shift()!)
-      }
       handle.onOpen?.()
     }
 
@@ -125,26 +128,40 @@ export function connectWebSocket(
 
     ws.onmessage = (event) => {
       if (typeof event.data !== 'string') return
+      let parsed: unknown
       try {
-        const parsed = JSON.parse(event.data)
-        if (!parsed || typeof parsed !== 'object') return
-        const eventType = String(parsed.type ?? '').trim()
-        if (
-          eventType !== 'start'
-          && eventType !== 'message'
-          && eventType !== 'end'
-          && eventType !== 'error'
-          && eventType !== 'session_created'
-          && eventType !== 'user_message'
-          && eventType !== 'command_result'
-          && eventType !== 'command_error'
-        ) {
-          return
-        }
-        onStreamEvent(parsed as UIStreamEvent)
+        parsed = JSON.parse(event.data)
       } catch {
         // Ignore unparsable messages.
+        return
       }
+      if (!parsed || typeof parsed !== 'object') return
+      const eventType = String((parsed as { type?: unknown }).type ?? '').trim()
+      if (
+        eventType !== 'start'
+        && eventType !== 'message'
+        && eventType !== 'end'
+        && eventType !== 'error'
+        && eventType !== 'session_created'
+        && eventType !== 'user_message'
+        && eventType !== 'command_result'
+        && eventType !== 'command_error'
+        && eventType !== 'runtime_snapshot'
+        && eventType !== 'runtime_delta'
+        && eventType !== 'runtime_dropped'
+      ) {
+        return
+      }
+      if (eventType === 'runtime_snapshot' || eventType === 'runtime_delta' || eventType === 'runtime_dropped') {
+        const runtimeEvent = parseSessionRuntimeStateEvent(parsed)
+        if (!runtimeEvent) {
+          ws?.close()
+          return
+        }
+        onStreamEvent(runtimeEvent)
+        return
+      }
+      onStreamEvent(parsed as UIStreamEvent)
     }
   }
 

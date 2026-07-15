@@ -27,7 +27,6 @@ import (
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/command"
-	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -1562,60 +1561,17 @@ func TestExecuteWebQuickActionHelpListsAllQuickActions(t *testing.T) {
 	}
 }
 
-func TestPostMessageRejectsSlashOnLegacyRESTEndpoint(t *testing.T) {
+func TestLocalChannelRoutesExcludeLegacyRESTSend(t *testing.T) {
 	t.Parallel()
 
-	const (
-		botID       = "11111111-1111-1111-1111-111111111111"
-		currentUser = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-	)
-	queries := localChannelSessionAuthQueries{
-		bot: testBotRow(botID, map[string]any{}),
-		chat: sqlc.GetChatByIDRow{
-			ID:              testUUID(botID),
-			BotID:           testUUID(botID),
-			Kind:            conversation.KindDirect,
-			Title:           pgtype.Text{String: "bot", Valid: true},
-			CreatedByUserID: testUUID(currentUser),
-			Metadata:        []byte(`{}`),
-			CreatedAt:       pgtype.Timestamptz{Valid: true},
-			UpdatedAt:       pgtype.Timestamptz{Valid: true},
-		},
-	}
-	handler := &LocalChannelHandler{
-		channelType:    channel.ChannelTypeLocal,
-		channelManager: &channel.Manager{},
-		channelStore:   &channel.Store{},
-		chatService:    conversation.NewService(nil, queries),
-		botService:     bots.NewService(nil, queries),
-		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
-		logger:         slog.Default(),
-	}
-
-	body := strings.NewReader(`{"message":{"text":"/help"}}`)
-	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/local/messages", body)
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	rec := httptest.NewRecorder()
 	e := echo.New()
-	c := testAuthContext(e, req, rec, currentUser)
-	c.SetParamNames("bot_id")
-	c.SetParamValues(botID)
+	handler := &LocalChannelHandler{channelType: channel.ChannelTypeLocal}
+	handler.Register(e)
 
-	if err := handler.PostMessage(c); err != nil {
-		t.Fatalf("PostMessage: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	var event CommandEventResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &event); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if event.Type != "command_error" {
-		t.Fatalf("event type = %q, want command_error; event=%#v", event.Type, event)
-	}
-	if event.Error == nil || event.Error.Code != slash.CodeUnsupportedLegacyEndpoint {
-		t.Fatalf("error = %#v, want code %q", event.Error, slash.CodeUnsupportedLegacyEndpoint)
+	for _, route := range e.Routes() {
+		if route.Method == http.MethodPost && route.Path == "/bots/:bot_id/local/messages" {
+			t.Fatal("legacy REST send route must not be registered")
+		}
 	}
 }
 

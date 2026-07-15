@@ -126,6 +126,9 @@ export interface ChatAssistantTurn {
   streaming: boolean
   // See ChatUserTurn.__optimistic.
   __optimistic?: boolean
+  // Client-only terminal feedback has no database message identity and must
+  // never be used as a retry/edit/fork target.
+  __ephemeral?: boolean
 }
 
 export interface ChatSystemTurn {
