@@ -7,6 +7,7 @@ require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.0
 	github.com/bwmarrin/discordgo v0.29.0
 	github.com/coder/acp-go-sdk v0.13.0
+	github.com/coder/websocket v1.8.14
 	github.com/containerd/cgroups/v3 v3.1.2
 	github.com/containerd/containerd/api v1.10.0
 	github.com/containerd/containerd/v2 v2.2.1
@@ -33,7 +34,7 @@ require (
 	github.com/mailgun/mailgun-go/v5 v5.14.0
 	github.com/memohai/acgo v0.0.0-20260221232113-babac0d6acd7
 	github.com/memohai/dingtalk-stream-sdk-go v0.0.0-20260405113102-87e23096b978
-	github.com/memohai/twilight-ai v0.4.1-0.20260708041258-f7bcb57fcaab
+	github.com/memohai/twilight-ai v0.4.1-0.20260713114708-c19f5170bfe6
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/opencontainers/runtime-spec v1.3.0

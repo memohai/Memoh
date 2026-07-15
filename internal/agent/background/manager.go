@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -26,12 +27,18 @@ const (
 	MaxExecTimeout int32 = 600
 	// BackgroundExecTimeout is the timeout for background tasks (30 minutes).
 	BackgroundExecTimeout int32 = 1800
+	// DefaultWaitTimeout bounds a single wait_until call. The task keeps
+	// running afterwards; callers re-wait to keep observing.
+	DefaultWaitTimeout = 120 * time.Second
+	// DefaultIdleThreshold is how long an exec task's output must stay quiet
+	// before a waiter is woken with WaitIdle.
+	DefaultIdleThreshold = 20 * time.Second
 	// DefaultCleanupInterval is how often the manager prunes old completed tasks.
 	DefaultCleanupInterval = time.Hour
 	// DefaultTaskRetention is how long completed tasks are retained in memory.
 	DefaultTaskRetention = 24 * time.Hour
-	// OutputLogDir is the directory inside the container where background
-	// task output logs are written.
+	// OutputLogDir is the default directory where background task output logs
+	// are written.
 	OutputLogDir = "/tmp/memoh-bg"
 
 	// stallCheckInterval is how often the stall watchdog checks output growth.
@@ -174,13 +181,13 @@ func (m *Manager) Spawn(
 // where a foreground stream is handed off without killing the process.
 func (m *Manager) SpawnAdopt(
 	parentCtx context.Context,
-	botID, sessionID, command, workDir, description string,
+	botID, sessionID, command, workDir, description, outputDir string,
 	resultCh <-chan AdoptResult,
 	writeFn WriteFileFunc,
 ) (taskID, outputFile string) {
 	m.mu.Lock()
 	taskID = m.newTaskIDLocked(botID)
-	outputFile = fmt.Sprintf("%s/%s.log", OutputLogDir, taskID)
+	outputFile = backgroundOutputFile(outputDir, taskID)
 
 	task := &Task{
 		ID:          taskID,
@@ -257,7 +264,7 @@ func (m *Manager) runAdopt(parentCtx context.Context, task *Task, resultCh <-cha
 	defer cancel()
 
 	// Ensure output directory exists.
-	_ = ensureOutputDir(ctx, writeFn)
+	_ = ensureOutputDir(ctx, writeFn, task.OutputFile)
 
 	// Start stall watchdog.
 	go m.stallWatchdog(ctx, task)
@@ -304,7 +311,7 @@ func (m *Manager) run(parentCtx context.Context, task *Task, execFn ExecFunc, wr
 	defer cancel()
 
 	// Ensure output directory exists.
-	_ = ensureOutputDir(ctx, writeFn)
+	_ = ensureOutputDir(ctx, writeFn, task.OutputFile)
 
 	// Start stall watchdog to detect commands waiting for interactive input.
 	go m.stallWatchdog(ctx, task)
@@ -436,19 +443,27 @@ func readSentinelExitCode(ctx context.Context, path string, readFn ReadFileFunc)
 	return int32(ec), nil //nolint:gosec // G115: exit codes are 0-255
 }
 
-func ensureOutputDir(ctx context.Context, writeFn WriteFileFunc) error {
+func backgroundOutputFile(outputDir, taskID string) string {
+	outputDir = strings.TrimSpace(outputDir)
+	if outputDir == "" {
+		outputDir = OutputLogDir
+	}
+	return path.Join(outputDir, taskID+".log")
+}
+
+func ensureOutputDir(ctx context.Context, writeFn WriteFileFunc, outputFile string) error {
 	if writeFn == nil {
 		return nil
 	}
 	// Create a marker file to ensure the directory exists.
-	return writeFn(ctx, OutputLogDir+"/.keep", []byte(""))
+	return writeFn(ctx, path.Join(path.Dir(outputFile), ".keep"), []byte(""))
 }
 
 func ensureOutputFile(ctx context.Context, writeFn WriteFileFunc, path string) error {
 	if writeFn == nil {
 		return nil
 	}
-	if err := ensureOutputDir(ctx, writeFn); err != nil {
+	if err := ensureOutputDir(ctx, writeFn, path); err != nil {
 		return err
 	}
 	return writeFn(ctx, path, []byte(""))
@@ -582,27 +597,63 @@ func (m *Manager) KillForSession(botID, sessionID, taskID string) error {
 }
 
 // WaitForSessionTask waits until a task reaches a terminal state or needs
-// attention. It returns the current snapshot when the task is completed,
-// failed, killed, or stalled.
-func (m *Manager) WaitForSessionTask(ctx context.Context, botID, sessionID, taskID string) (TaskSnapshot, error) {
+// attention, and reports why the wait ended. Besides completed/failed/killed/
+// stalled, a running exec task whose output stays quiet for idleThreshold
+// returns WaitIdle — the signal that a server-style command has settled and
+// its ready banner is in the output tail. idleThreshold <= 0 disables idle
+// wake-ups; non-exec kinds (agent, spawn, video) have no output stream, so
+// idle never applies to them.
+func (m *Manager) WaitForSessionTask(ctx context.Context, botID, sessionID, taskID string, idleThreshold time.Duration) (TaskSnapshot, WaitOutcome, error) {
 	task := m.GetForSession(botID, sessionID, taskID)
 	if task == nil {
-		return TaskSnapshot{}, fmt.Errorf("task %s not found", taskID)
+		return TaskSnapshot{}, "", fmt.Errorf("task %s not found", taskID)
 	}
 	for {
 		task.mu.Lock()
 		status := task.Status
 		stalled := task.stalled && status == TaskRunning
-		done := status == TaskCompleted || status == TaskFailed || status == TaskKilled || stalled
+		kind := task.Kind
+		lastOutputAt := task.lastOutputAt
+		if lastOutputAt.IsZero() {
+			lastOutputAt = task.StartedAt
+		}
 		ch := task.changeChanLocked()
 		task.mu.Unlock()
-		if done {
-			return task.Snapshot(), nil
+
+		switch {
+		case status == TaskCompleted:
+			return task.Snapshot(), WaitCompleted, nil
+		case status == TaskFailed:
+			return task.Snapshot(), WaitFailed, nil
+		case status == TaskKilled:
+			return task.Snapshot(), WaitKilled, nil
+		case stalled:
+			return task.Snapshot(), WaitStalled, nil
+		}
+
+		var idleC <-chan time.Time
+		var idleTimer *time.Timer
+		if idleThreshold > 0 && kind == KindExec && status == TaskRunning {
+			remaining := time.Until(lastOutputAt.Add(idleThreshold))
+			if remaining <= 0 {
+				return task.Snapshot(), WaitIdle, nil
+			}
+			idleTimer = time.NewTimer(remaining)
+			idleC = idleTimer.C
 		}
 		select {
 		case <-ctx.Done():
-			return task.Snapshot(), ctx.Err()
+			if idleTimer != nil {
+				idleTimer.Stop()
+			}
+			return task.Snapshot(), "", ctx.Err()
 		case <-ch:
+			if idleTimer != nil {
+				idleTimer.Stop()
+			}
+		case <-idleC:
+			// Re-loop: output may have grown since the timer was armed, in
+			// which case the next iteration re-arms with the new deadline.
 		}
 	}
 }

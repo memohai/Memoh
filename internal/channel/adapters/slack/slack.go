@@ -372,7 +372,7 @@ func (a *SlackAdapter) handleSocketModeEvent(
 		case *slackevents.MessageEvent:
 			a.handleMessageEvent(ctx, conn, ev, cfg, handler, selfUserID)
 		case *slackevents.AppMentionEvent:
-			a.handleAppMentionEvent(ctx, conn, ev, cfg, handler)
+			a.handleAppMentionEvent(ctx, conn, ev, cfg, handler, selfUserID)
 		}
 
 	case socketmode.EventTypeConnecting:
@@ -480,6 +480,7 @@ func (a *SlackAdapter) handleMessageEvent(
 		ReceivedAt: time.Now().UTC(),
 		Source:     "slack",
 		Metadata: map[string]any{
+			"bot_alias":    strings.TrimSpace(selfUserID),
 			"channel_type": ev.ChannelType,
 			"channel_name": conversationName,
 			"is_mentioned": isMentioned,
@@ -510,6 +511,7 @@ func (a *SlackAdapter) handleAppMentionEvent(
 	ev *slackevents.AppMentionEvent,
 	cfg channel.ChannelConfig,
 	handler channel.InboundHandler,
+	selfUserID string,
 ) {
 	if ev.BotID != "" || ev.User == "" {
 		return
@@ -562,6 +564,7 @@ func (a *SlackAdapter) handleAppMentionEvent(
 		ReceivedAt: time.Now().UTC(),
 		Source:     "slack",
 		Metadata: map[string]any{
+			"bot_alias":    strings.TrimSpace(selfUserID),
 			"channel_name": conversationName,
 			"is_mentioned": true,
 			"thread_ts":    threadID,

@@ -320,7 +320,9 @@ func (p *VideoGenProvider) saveGeneratedVideo(ctx context.Context, botID, taskID
 	}
 	videoDir := strings.TrimRight(p.dataMount, "/") + strings.TrimPrefix(videoGenDir, "/data")
 	if resolver, ok := p.containers.(bridge.WorkspaceInfoProvider); ok {
-		if info, err := resolver.WorkspaceInfo(ctx, botID); err == nil && info.Backend == bridge.WorkspaceBackendLocal && strings.TrimSpace(info.DefaultWorkDir) != "" {
+		if info, err := resolver.WorkspaceInfo(ctx, botID); err == nil &&
+			(info.Backend == bridge.WorkspaceBackendLocal || info.Backend == bridge.WorkspaceBackendRemote) &&
+			strings.TrimSpace(info.DefaultWorkDir) != "" {
 			videoDir = strings.TrimRight(info.DefaultWorkDir, "/") + "/generated-videos"
 		}
 	}
@@ -329,9 +331,6 @@ func (p *VideoGenProvider) saveGeneratedVideo(ctx context.Context, botID, taskID
 	client, clientErr := p.containers.MCPClient(ctx, botID)
 	if clientErr != nil {
 		return result, "Video generated but workspace is not reachable, so it was not saved to disk."
-	}
-	if _, err := client.Exec(ctx, fmt.Sprintf("mkdir -p %s", shellQuote(videoDir)), "/", 5); err != nil {
-		return result, fmt.Sprintf("Video generated but failed to prepare output directory: %s", err.Error())
 	}
 	if writeErr := client.WriteFile(ctx, containerPath, data); writeErr != nil {
 		return result, fmt.Sprintf("Video generated but failed to save: %s", writeErr.Error())

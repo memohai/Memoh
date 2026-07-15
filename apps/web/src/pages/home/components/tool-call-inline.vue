@@ -31,6 +31,11 @@
         :title="display.fullTarget || display.target"
       >{{ display.target }}</span>
       <span
+        v-if="executionLocationLabel"
+        class="shrink-0 text-muted-foreground"
+        :title="t('chat.tools.executionLocation')"
+      >· {{ executionLocationLabel }}</span>
+      <span
         v-if="display.diffAdd"
         class="font-mono shrink-0 text-success-foreground"
       >+{{ display.diffAdd }}</span>
@@ -81,6 +86,11 @@
         :class="targetClass"
         :title="display.fullTarget || display.target"
       >{{ display.target }}</span>
+      <span
+        v-if="executionLocationLabel"
+        class="shrink-0 text-muted-foreground"
+        :title="t('chat.tools.executionLocation')"
+      >· {{ executionLocationLabel }}</span>
       <span
         v-if="display.diffAdd"
         class="font-mono shrink-0 text-success-foreground"
@@ -209,6 +219,12 @@ const chatViewTarget = useChatViewTarget()
 const openInFileManager = inject(openInFileManagerKey, undefined)
 
 const display = computed(() => getToolDisplay(props.block))
+const executionLocationLabel = computed(() => {
+  const location = props.block.execution_location
+  if (!location) return ''
+  if (location.kind === 'native') return t('bots.remoteRuntime.nativeWorkspace')
+  return location.name?.trim() || ''
+})
 
 // Persisted, user-driven toggle (survives the post-turn refetch/remount).
 const collapseKey = computed(() => toolCollapseKey(props.block))

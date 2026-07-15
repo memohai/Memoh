@@ -1,6 +1,9 @@
 <template>
   <form @submit="editProvider">
-    <SettingsSection :title="$t('provider.configurationTitle')">
+    <SettingsSection
+      v-if="!isManagedOAuthProvider"
+      :title="$t('provider.configurationTitle')"
+    >
       <!-- Field rows are grouped so the LAST one keeps its `last:border-b-0`
            (no trailing inset hairline) — the footer below owns the only divider,
            and it spans full width. -->
@@ -78,7 +81,7 @@
         </FormField>
 
         <FormField
-          v-if="!isProviderOAuthClientType(form.values.client_type)"
+          v-if="!isManagedOAuthClientType(form.values.client_type)"
           v-slot="{ componentField, errorMessage }"
           name="api_key"
         >
@@ -203,160 +206,121 @@
       </template>
     </SettingsSection>
 
-    <!-- OAuth -->
+    <!-- OAuth 账号:设备码授权。结构镜像 profile/connected-accounts-section(同一
+         形状的已重构参考):一行账号状态 + 行内动作,等待输码时才在卡片内追加
+         居中的验证码块(倒计时 + 复制并打开),轮询在后台静默完成授权。 -->
     <SettingsSection
-      v-if="isProviderOAuthClientType(form.values.client_type)"
-      class="mt-6"
+      v-if="isManagedOAuthClientType(form.values.client_type)"
+      :title="$t('provider.oauth.sectionTitle')"
+      :class="{ 'mt-6': !isManagedOAuthProvider }"
     >
-      <div class="p-4 space-y-3 text-xs">
-        <div class="space-y-1">
-          <div class="font-medium">
-            {{ $t(form.values.client_type === 'github-copilot' ? 'provider.oauth.githubDeviceTitle' : 'provider.oauth.openaiTitle') }}
-          </div>
-          <div class="text-muted-foreground">
-            {{ $t(form.values.client_type === 'github-copilot' ? 'provider.oauth.githubDeviceDescription' : 'provider.oauth.openaiDescription') }}
-          </div>
-          <div
-            class="text-xs"
-            :class="oauthExpired ? 'text-destructive' : 'text-muted-foreground'"
-          >
-            <template v-if="oauthStatusLoading">
-              {{ $t('provider.oauth.status.checking') }}
-            </template>
-            <template v-else-if="oauthStatus && !oauthStatus.configured">
-              {{ $t('provider.oauth.status.notConfigured') }}
-            </template>
-            <template v-else-if="oauthExpired">
-              {{ $t('provider.oauth.status.expired') }}
-            </template>
-            <template v-else-if="oauthStatus?.has_token">
-              {{ $t(form.values.client_type === 'github-copilot' ? 'provider.oauth.status.authorizedCurrent' : 'provider.oauth.status.authorized') }}
-            </template>
-            <template v-else-if="oauthStatus?.device?.pending">
-              {{ $t('provider.oauth.status.pendingDevice') }}
-            </template>
-            <template v-else>
-              {{ $t('provider.oauth.status.missing') }}
-            </template>
-          </div>
-          <div
-            v-if="oauthStatus?.callback_url"
-            class="text-xs text-muted-foreground"
-          >
-            {{ $t('provider.oauth.callback') }}: {{ oauthStatus.callback_url }}
-          </div>
-        </div>
+      <!-- AutoHeight:状态切换(尤其设备码块出现/收起)让卡片平滑生长,不硬切。 -->
+      <AutoHeight>
+        <!-- 首次加载:借行高稳住卡片,状态到达时不跳动。
+             ui-allow-shape: skeleton borrowing the row height, not a data row. -->
         <div
-          v-if="form.values.client_type === 'github-copilot'
-            && oauthStatus?.device?.pending
-            && !oauthStatus?.has_token
-            && oauthStatus?.device?.user_code
-            && oauthStatus?.device?.verification_uri"
-          class="rounded-md bg-muted-soft p-3 space-y-2"
+          v-if="oauthStatusLoading && !oauthStatus"
+          class="mx-4 flex min-h-[3.75rem] items-center justify-center py-3"
         >
-          <div class="text-muted-foreground">
-            {{ $t('provider.oauth.githubDeviceHint') }}
-          </div>
-          <div class="space-y-1">
-            <div class="font-medium">
-              {{ $t('provider.oauth.deviceVerificationUri') }}
-            </div>
-            <code class="block break-all rounded bg-background px-2 py-1 select-all">{{ oauthStatus?.device?.verification_uri }}</code>
-          </div>
-          <div class="space-y-1">
-            <div class="font-medium">
-              {{ $t('provider.oauth.deviceUserCode') }}
-            </div>
-            <div class="flex items-center gap-2">
-              <code class="block flex-1 rounded bg-background px-2 py-1 text-sm tracking-[0.3em] select-all">{{ oauthStatus?.device?.user_code }}</code>
+          <Spinner class="size-5 text-muted-foreground" />
+        </div>
+
+        <!-- 已连接:身份就是这一行的全部内容;撤销会切断在用的授权,须经确认。 -->
+        <SettingsRow
+          v-else-if="oauthConnected"
+          :label="accountLabel"
+          :description="connectedIdentity || $t('provider.oauth.status.authorizedCurrent')"
+        >
+          <ConfirmPopover
+            :message="$t('provider.oauth.revokeConfirm')"
+            :confirm-text="$t('provider.oauth.revoke')"
+            :loading="revokeLoading"
+            @confirm="handleRevoke"
+          >
+            <template #trigger>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                @click="handleCopyDeviceCode"
+                class="shrink-0 text-muted-foreground"
+                :disabled="revokeLoading"
               >
-                <Copy />
-                {{ $t('common.copy') }}
+                {{ $t('provider.oauth.revoke') }}
               </Button>
-            </div>
-          </div>
+            </template>
+          </ConfirmPopover>
+        </SettingsRow>
+
+        <!-- 后端未配置 OAuth:说明原因,没有可给的动作。 -->
+        <SettingsRow
+          v-else-if="oauthStatus && !oauthStatus.configured"
+          :label="accountLabel"
+          :description="$t('provider.oauth.status.notConfigured')"
+        />
+
+        <template v-else>
+          <!-- 未连接 / 已过期:一行状态 + 长显的开关按钮。设备码流程进行中时它翻成
+               "取消"(前端本地收起,服务端的码留给它自然过期);再点"连接"签发新码。 -->
+          <SettingsRow
+            :label="accountLabel"
+            :description="oauthExpired ? $t('provider.oauth.status.expired') : connectDescription"
+          >
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              class="shrink-0"
+              :disabled="!props.provider?.id"
+              :loading="authorizeLoading"
+              loading-mode="manual"
+              @click="devicePending ? cancelDeviceAuthorization() : handleAuthorize()"
+            >
+              <!-- 三态 label:Connect → Connecting…(按下变长,给等待一个视觉
+                   挽留点) → Cancel(码到手收短)。宽度过渡由 LabelSwap 负责;
+                   manual loading 只借 busy 铬层挡双击,spinner 在 connecting
+                   slot 里占图标位,文字不被盖。 -->
+              <LabelSwap :active="authorizeLoading ? 'connecting' : devicePending ? 'cancel' : 'connect'">
+                <template #connect>
+                  <KeyRound />
+                  {{ $t('provider.oauth.connect') }}
+                </template>
+                <template #connecting>
+                  <Spinner />
+                  {{ $t('provider.oauth.connecting') }}
+                </template>
+                <template #cancel>
+                  {{ $t('common.cancel') }}
+                </template>
+              </LabelSwap>
+            </Button>
+          </SettingsRow>
+
+          <!-- 输码时刻交给 owner;这层 wrapper 只负责它在卡片里的定位。
+               py-6 是有意偏离 connected-accounts link-code 块的 py-4:那是行内
+               工具块(说明+输入行),这是居中英雄面板 —— 关系不同,留白档位不同;
+               贴着分隔线的英雄内容需要更大的呼吸(人眼裁决 2026-07-13)。 -->
           <div
-            v-if="oauthStatus?.device?.expires_at"
-            class="text-muted-foreground"
+            v-if="devicePending"
+            class="mx-4 border-b border-border py-6 last:border-b-0"
           >
-            {{ $t('provider.oauth.deviceExpiresAt') }}: {{ oauthStatus.device.expires_at }}
+            <DeviceCodePanel
+              :code="oauthStatus?.device?.user_code ?? ''"
+              :verification-uri="oauthStatus?.device?.verification_uri ?? ''"
+              :expires-at="oauthStatus?.device?.expires_at ?? ''"
+              :hint="$t(form.values.client_type === 'github-copilot' ? 'provider.oauth.githubDeviceHint' : 'provider.oauth.openaiDeviceHint')"
+              :retry-loading="authorizeLoading"
+              @retry="handleAuthorize"
+            />
           </div>
-          <div class="flex items-center gap-2 text-foreground">
-            <Spinner class="size-4" />
-            <span>{{ $t('provider.oauth.status.oauthing') }}</span>
-          </div>
-        </div>
-        <div
-          v-if="form.values.client_type === 'github-copilot' && oauthStatus?.has_token && !oauthExpired"
-          class="rounded-md bg-muted-soft p-3 space-y-1"
-        >
-          <div class="font-medium">
-            {{ $t('provider.oauth.connectedAccount') }}
-          </div>
-          <div class="text-sm font-medium">
-            {{ oauthStatus?.account?.email || oauthStatus?.account?.label || oauthStatus?.account?.name || oauthStatus?.account?.login || $t('provider.oauth.status.authorizedCurrent') }}
-          </div>
-          <div
-            v-if="[oauthStatus?.account?.login?.trim() ? `@${oauthStatus.account.login.trim()}` : '', oauthStatus?.account?.email?.trim() ?? ''].filter(Boolean).join(' · ')"
-            class="text-xs text-muted-foreground"
-          >
-            {{ [oauthStatus?.account?.login?.trim() ? `@${oauthStatus.account.login.trim()}` : '', oauthStatus?.account?.email?.trim() ?? ''].filter(Boolean).join(' · ') }}
-          </div>
-        </div>
-        <div class="flex gap-2">
-          <LoadingButton
-            v-if="props.provider?.id
-              && isProviderOAuthClientType(form.values.client_type)
-              && !(
-                form.values.client_type === 'github-copilot'
-                && oauthStatus?.device?.pending
-                && !oauthStatus?.has_token
-                && oauthStatus?.device?.user_code
-                && oauthStatus?.device?.verification_uri
-              )
-              && (!oauthStatus?.has_token || oauthExpired)"
-            type="button"
-            variant="outline"
-            size="sm"
-            :disabled="!props.provider?.id || !isProviderOAuthClientType(form.values.client_type) || oauthStatusLoading"
-            :loading="authorizeLoading"
-            @click="handleAuthorize"
-          >
-            <KeyRound />
-            {{ $t(form.values.client_type === 'github-copilot' ? 'provider.oauth.deviceAuthorize' : 'provider.oauth.authorize') }}
-          </LoadingButton>
-          <Button
-            v-if="webOAuthFlow"
-            type="button"
-            variant="ghost"
-            size="sm"
-            @click="cancelWebOAuthAuthorization"
-          >
-            {{ $t('common.cancel') }}
-          </Button>
-          <LoadingButton
-            v-if="oauthStatus?.has_token"
-            type="button"
-            variant="ghost"
-            size="sm"
-            :loading="revokeLoading"
-            @click="handleRevoke"
-          >
-            {{ $t('provider.oauth.revoke') }}
-          </LoadingButton>
-        </div>
-      </div>
+        </template>
+      </AutoHeight>
     </SettingsSection>
   </form>
 </template>
 
 <script setup lang="ts">
 import {
+  AutoHeight,
   Input,
   Button,
   FormControl,
@@ -366,6 +330,7 @@ import {
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
+  LabelSwap,
   Select,
   SelectContent,
   SelectItem,
@@ -373,12 +338,16 @@ import {
   SelectValue,
   Spinner,
 } from '@felinic/ui'
-import { AlertCircle, Copy, KeyRound, RefreshCw } from 'lucide-vue-next'
+import { AlertCircle, KeyRound, RefreshCw } from 'lucide-vue-next'
+import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import DeviceCodePanel from '@/components/device-code-panel/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import SettingsSection from '@/components/settings/section.vue'
-import { useClipboard } from '@/composables/useClipboard'
-import { LLM_CLIENT_TYPE_LIST } from '@/constants/client-types'
+import {
+  isManagedOAuthClientType,
+  MANUAL_LLM_CLIENT_TYPE_LIST,
+} from '@/constants/client-types'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
@@ -398,10 +367,10 @@ import type {
 } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@felinic/ui'
-import { startOAuthPopupFlow, type OAuthPopupFlowController } from '@/utils/oauth/popup-flow'
+import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
 
 const { t } = useI18n()
-const { copyText } = useClipboard()
+const { syncProviderModelCatalog } = useProviderModelCatalog()
 
 type ProviderWithAuth = Partial<ProvidersGetResponse>
 
@@ -425,14 +394,12 @@ function supportsPromptCache(clientType: string | undefined): boolean {
   return !!clientType && PROMPT_CACHE_CLIENT_TYPES.has(clientType)
 }
 
-function isProviderOAuthClientType(clientType: string | undefined): boolean {
-  return clientType === 'openai-codex' || clientType === 'github-copilot'
-}
-
 const props = defineProps<{
   provider: ProviderWithAuth | undefined
   editLoading: boolean
 }>()
+
+const isManagedOAuthProvider = computed(() => isManagedOAuthClientType(props.provider?.client_type))
 
 const emit = defineEmits<{
   submit: [values: Record<string, unknown>]
@@ -446,9 +413,6 @@ const oauthStatusLoading = ref(false)
 const authorizeLoading = ref(false)
 const revokeLoading = ref(false)
 const devicePollTimer = ref<number | null>(null)
-const webOAuthFlow = ref<OAuthPopupFlowController | null>(null)
-const webOAuthPollIntervalMs = 2000
-const webOAuthPollTimeoutMs = 5 * 60 * 1000
 
 const testStatus = computed(() => {
   if (testResult.value?.status === 'ok') return 'ok'
@@ -515,7 +479,7 @@ watch(() => props.provider?.id, () => {
 })
 
 const clientTypeOptions = computed(() =>
-  LLM_CLIENT_TYPE_LIST.map((ct) => ({
+  MANUAL_LLM_CLIENT_TYPE_LIST.map((ct) => ({
     value: ct.value,
     label: ct.label,
   })),
@@ -532,7 +496,7 @@ const providerSchema = toTypedSchema(z.object({
   const existingSecret = getStoredSecret(
     props.provider?.config as Record<string, unknown> | undefined,
   )
-  if (!isProviderOAuthClientType(value.client_type) && !value.api_key?.trim() && !existingSecret.trim()) {
+  if (!isManagedOAuthClientType(value.client_type) && !value.api_key?.trim() && !existingSecret.trim()) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['api_key'],
@@ -567,7 +531,7 @@ watch(() => props.provider, (newVal) => {
 }, { immediate: true })
 
 watch(() => form.values.client_type, (clientType) => {
-  if (!isProviderOAuthClientType(clientType)) {
+  if (!isManagedOAuthClientType(clientType)) {
     oauthStatus.value = null
   }
   if (clientType === 'openai-codex' && !form.values.base_url) {
@@ -579,7 +543,7 @@ watch(() => form.values.client_type, (clientType) => {
 })
 
 watch(() => [props.provider?.id, form.values.client_type] as const, async ([id, clientType]) => {
-  if (!id || (clientType !== 'openai-codex' && clientType !== 'github-copilot')) {
+  if (!id || !isManagedOAuthClientType(clientType)) {
     oauthStatus.value = null
     return
   }
@@ -640,22 +604,41 @@ const editProvider = form.handleSubmit(async (value) => {
 })
 
 const oauthExpired = computed(() => Boolean(oauthStatus.value?.has_token && oauthStatus.value?.expired))
+const oauthConnected = computed(() => Boolean(oauthStatus.value?.has_token) && !oauthExpired.value)
+
+// 行标签按账号体系命名(用户的 outcome),而不是"设备授权"这类流程名。
+const accountLabel = computed(() =>
+  t(form.values.client_type === 'github-copilot' ? 'provider.oauth.githubAccount' : 'provider.oauth.chatgptAccount'),
+)
+
+const connectDescription = computed(() =>
+  t(form.values.client_type === 'github-copilot' ? 'provider.oauth.githubConnectHint' : 'provider.oauth.openaiConnectHint'),
+)
+
+// 连接后的身份行:优先邮箱/显示名,附 @login;两者皆空时由模板回退到"已连接"。
+const connectedIdentity = computed(() => {
+  const account = oauthStatus.value?.account
+  if (!account) return ''
+  const login = account.login?.trim()
+  return [
+    account.email?.trim() || account.label?.trim() || account.name?.trim() || '',
+    login ? `@${login}` : '',
+  ].filter(Boolean).join(' · ')
+})
+
+const devicePending = computed(() => Boolean(
+  oauthStatus.value?.mode === 'device'
+  && oauthStatus.value.device?.pending
+  && !oauthStatus.value.has_token
+  && oauthStatus.value.device.user_code
+  && oauthStatus.value.device.verification_uri,
+))
 
 function clearDevicePollTimer() {
   if (devicePollTimer.value !== null) {
     window.clearTimeout(devicePollTimer.value)
     devicePollTimer.value = null
   }
-}
-
-function clearWebPollTimer() {
-  webOAuthFlow.value?.cancel()
-  webOAuthFlow.value = null
-}
-
-function clearPollTimers() {
-  clearDevicePollTimer()
-  clearWebPollTimer()
 }
 
 async function fetchOAuthStatus(): Promise<ProvidersOAuthStatus | null> {
@@ -679,7 +662,7 @@ async function fetchOAuthStatus(): Promise<ProvidersOAuthStatus | null> {
 }
 
 async function pollOAuthAuthorization(notifyOnSuccess = false) {
-  if (!props.provider?.id || form.values.client_type !== 'github-copilot') return
+  if (!props.provider?.id || oauthStatus.value?.mode !== 'device') return
   try {
     const { data } = await postProvidersByIdOauthPoll({
       path: { id: props.provider.id },
@@ -691,6 +674,14 @@ async function pollOAuthAuthorization(notifyOnSuccess = false) {
     oauthStatus.value = nextStatus
     if (notifyOnSuccess && becameAuthorized) {
       toast.success(t('provider.oauth.authorizeSuccess'))
+      // Both managed OAuth providers need an account-scoped model catalog.
+      // Sync immediately after the token is stored so the provider is usable
+      // without a second manual action; failure leaves Refresh available.
+      try {
+        await syncProviderModelCatalog(props.provider.id)
+      } catch {
+        toast.error(t('models.refreshFailed'))
+      }
     }
   } catch (error) {
     clearDevicePollTimer()
@@ -700,10 +691,7 @@ async function pollOAuthAuthorization(notifyOnSuccess = false) {
 
 watch(oauthStatus, (status) => {
   clearDevicePollTimer()
-  if (form.values.client_type !== 'github-copilot') {
-    return
-  }
-  if (!status?.device?.pending || status.has_token) {
+  if (status?.mode !== 'device' || !status.device?.pending || status.has_token) {
     return
   }
   const intervalSeconds = Math.max(status.device.interval_seconds ?? 5, 1)
@@ -713,11 +701,16 @@ watch(oauthStatus, (status) => {
 })
 
 onBeforeUnmount(() => {
-  clearPollTimers()
+  clearDevicePollTimer()
 })
 
-function cancelWebOAuthAuthorization() {
-  webOAuthFlow.value?.cancel()
+// 前端本地取消:providers 侧没有 cancel API(ACP 有),只能清掉本地 device 状态、
+// 停掉轮询,服务端签发的码留给它自然过期。代价:刷新后 status 若仍带 pending 会
+// 重新展开 —— 已报备,待后端补 cancel endpoint 后在此接上。
+function cancelDeviceAuthorization() {
+  clearDevicePollTimer()
+  if (!oauthStatus.value) return
+  oauthStatus.value = { ...oauthStatus.value, device: undefined }
 }
 
 async function handleAuthorize() {
@@ -730,83 +723,27 @@ async function handleAuthorize() {
     })
     if (!data) throw new Error(t('provider.oauth.authorizeFailed'))
     const result = data as ProvidersOAuthAuthorizeResponse
-    if (result.mode === 'device') {
-      oauthStatus.value = {
-        configured: true,
-        mode: 'device',
-        has_token: false,
-        expired: false,
-        callback_url: '',
-        device: result.device,
-      }
-      authorizeLoading.value = false
-      return
+    if (result.mode !== 'device' || !result.device) {
+      throw new Error(t('provider.oauth.authorizeFailed'))
     }
-    if (!result.auth_url) throw new Error(t('provider.oauth.authorizeFailed'))
-    const popup = window.open(result.auth_url, 'provider-oauth', 'width=600,height=720')
-    if (!popup) throw new Error(t('provider.oauth.authorizeFailed'))
-    // Supersede any in-flight popup silently: dispose() (not cancel()) so the
-    // previous flow's onAborted doesn't clear this attempt's loading state or
-    // close the window we just reused.
-    webOAuthFlow.value?.dispose()
-    webOAuthFlow.value = startOAuthPopupFlow<ProvidersOAuthStatus>({
-      popup,
-      target: window,
-      expectedSource: popup,
-      messageType: 'memoh-provider-oauth-success',
-      pollIntervalMs: webOAuthPollIntervalMs,
-      timeoutMs: webOAuthPollTimeoutMs,
-      pollStatus: fetchOAuthStatus,
-      isAuthorized: status => Boolean(status?.has_token && !status.expired),
-      onAuthorized: async () => {
-        webOAuthFlow.value = null
-        toast.success(t('provider.oauth.authorizeSuccess'))
-        await fetchOAuthStatus()
-        authorizeLoading.value = false
-      },
-      onAborted: (reason) => {
-        webOAuthFlow.value = null
-        authorizeLoading.value = false
-        if (reason === 'timeout') {
-          toast.error(t('provider.oauth.authorizeTimedOut'))
-        }
-      },
-    })
+    oauthStatus.value = {
+      configured: true,
+      mode: 'device',
+      has_token: false,
+      expired: false,
+      callback_url: '',
+      device: result.device,
+    }
   } catch (error) {
-    clearWebPollTimer()
     toast.error(error instanceof Error ? error.message : t('provider.oauth.authorizeFailed'))
+  } finally {
     authorizeLoading.value = false
   }
 }
 
-async function handleCopyDeviceCode() {
-  const userCode = oauthStatus.value?.device?.user_code?.trim()
-  const verificationUri = oauthStatus.value?.device?.verification_uri?.trim()
-  if (!userCode || !verificationUri) return
-
-  const popup = window.open('', 'provider-device-oauth', 'width=960,height=720')
-  const copied = await copyText(userCode)
-
-  if (!copied) {
-    popup?.close()
-    toast.error(t('provider.oauth.copyFailed'))
-    return
-  }
-
-  toast.success(t('common.copied'))
-
-  if (popup) {
-    popup.location.href = verificationUri
-    popup.focus()
-    return
-  }
-
-  window.open(verificationUri, '_blank', 'width=960,height=720')
-}
-
 async function handleRevoke() {
   if (!props.provider?.id) return
-  clearPollTimers()
+  clearDevicePollTimer()
   revokeLoading.value = true
   try {
     await deleteProvidersByIdOauthToken({

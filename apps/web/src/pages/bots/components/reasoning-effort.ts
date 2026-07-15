@@ -9,9 +9,10 @@ export type ThinkingMode = 'toggle' | 'adaptive' | 'only_adaptive' | 'none'
 // Effort tiers the UI understands, ordered weakest → strongest.
 export const KNOWN_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 
-// Keep in sync with isOpenAIReasoningWire in internal/conversation/flow/resolver.go
-// and the Twilight SDK's openai provider package.
-const OPENAI_FORMAT_CLIENT_TYPES = new Set(['openai-completions', 'openai-responses', 'openai-codex'])
+// Keep in sync with normalizesMaxReasoningEffort in internal/conversation/flow/resolver.go.
+// Generic OpenAI-format clients retain the existing max-to-xhigh compatibility
+// behavior; Codex uses the effort levels advertised by its catalog directly.
+const MAX_NORMALIZED_CLIENT_TYPES = new Set(['openai-completions', 'openai-responses'])
 
 export const EFFORT_LABELS: Record<string, string> = {
   [REASONING_EFFORT_DISABLE]: 'chat.reasoningOff',
@@ -56,15 +57,15 @@ export function resolveThinkingMode(config?: ModelConfigLike | null): ThinkingMo
 }
 
 // resolveEffortLevels returns the model's supported effort tiers (filtered to
-// known ones), falling back to the common low/medium/high subset. OpenAI-format
-// clients use xhigh as the highest effort tier, even when the underlying model
-// exposes an Anthropic-style max tier.
+// known ones), falling back to the common low/medium/high subset. Generic
+// OpenAI-format clients use xhigh as the highest effort tier, while Codex can
+// expose max directly.
 export function resolveEffortLevels(config?: ModelConfigLike | null, clientType?: string | null): string[] {
   const efforts = (config?.reasoning_efforts ?? []).filter((e) =>
     (KNOWN_EFFORTS as readonly string[]).includes(e),
   )
   const levels = efforts.length > 0 ? efforts : ['low', 'medium', 'high']
-  if (OPENAI_FORMAT_CLIENT_TYPES.has(clientType ?? '')) {
+  if (MAX_NORMALIZED_CLIENT_TYPES.has(clientType ?? '')) {
     return levels.filter((e) => e !== 'max')
   }
   return levels

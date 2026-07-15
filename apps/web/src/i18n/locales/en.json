@@ -141,6 +141,7 @@
     "session": "Sessions",
     "chat": "Chat",
     "bots": "Bots",
+    "runtimes": "Computers",
     "providers": "Providers",
     "webSearch": "Web Search",
     "memory": "Memory",
@@ -167,6 +168,77 @@
     "about": "About",
     "switchBot": "Switch bot",
     "manageBots": "Manage Bots"
+  },
+  "runtimes": {
+    "title": "Computers",
+    "description": "Connect computers for Bots to use. Add each computer to a Bot under Connected computers.",
+    "connect": "Connect computer",
+    "connectOther": "Connect another computer",
+    "computers": "Connected computers",
+    "otherComputers": "Other computers",
+    "loadingComputers": "Loading computers...",
+    "loadFailed": "Couldn’t load computers",
+    "loadFailedDescription": "Check the server connection and try again.",
+    "retry": "Retry",
+    "emptyTitle": "No computers connected",
+    "emptyDescription": "Create a connection command, then run it on the computer you want Memoh to use.",
+    "emptyOtherTitle": "No other computers connected",
+    "emptyOtherDescription": "Connect another computer if you want a Bot to use a different machine.",
+    "waitingForConnection": "Waiting for the command to run",
+    "connected": "Ready",
+    "copyCommand": "Copy connection command",
+    "revoke": "Disconnect",
+    "revokeTitle": "Disconnect this computer?",
+    "revokeDescription": "{name} will disconnect and its connection key will stop working. Files on the computer are not deleted.",
+    "revokeSuccess": "Computer disconnected",
+    "revokeFailed": "Couldn’t disconnect computer",
+    "status": {
+      "online": "Online",
+      "offline": "Offline",
+      "revoked": "Access removed",
+      "owner_mismatch": "No longer available",
+      "client_update_required": "Update required"
+    },
+    "thisComputer": {
+      "title": "This computer",
+      "allow": "Let Bots use this computer",
+      "description": "Turn this on to name and connect this computer. You can then add it to individual Bots.",
+      "enabledDescription": "{name} is the name shown in Bot settings, approvals, and chat history. Only Bots you add it to can access files in your home folder and run commands as you.",
+      "fallbackName": "Memoh Desktop",
+      "dialogTitle": "Make this computer available",
+      "dialogDescription": "Choose the name that will identify this computer everywhere you use Memoh.",
+      "nameHelp": "Use a name you will recognize in Bot settings, approvals, and chat history.",
+      "confirm": "Make available",
+      "loading": "Loading this computer...",
+      "loadFailed": "Couldn’t read this computer’s connection",
+      "loadFailedDescription": "Restart Memoh Desktop and try again.",
+      "invalidCredential": "The Server did not return usable connection details.",
+      "enableFailed": "Couldn’t make this computer available",
+      "disableFailed": "Couldn’t turn off access to this computer",
+      "status": {
+        "disabled": "Off",
+        "connecting": "Connecting",
+        "connected": "Ready",
+        "disconnected": "Reconnecting",
+        "stopped": "Unavailable",
+        "error": "Needs attention"
+      }
+    },
+    "connectDialog": {
+      "title": "Connect a computer",
+      "description": "Give this connection a name you’ll recognize.",
+      "name": "Computer name",
+      "nameHelp": "You can use a location or purpose, such as Office Mac.",
+      "namePlaceholder": "Office Mac",
+      "nameRequired": "Enter a computer name",
+      "create": "Create command",
+      "createFailed": "Couldn’t create connection",
+      "runTitle": "Run this command",
+      "runDescription": "Run it on the computer you want Memoh to use, and keep the process running.",
+      "command": "Connection command",
+      "keyOnce": "This command contains a private connection key. Disconnecting the computer makes the key stop working immediately.",
+      "done": "Done"
+    }
   },
   "breadcrumb": {
     "main": "Home"
@@ -508,6 +580,7 @@
       "edit": "Edit",
       "apply_patch": "Patch",
       "list": "List",
+      "list_execution_locations": "Check computers and Server Workspace",
       "exec": "Run",
       "bg_status": "Background",
       "list_background": "List background tasks",
@@ -609,7 +682,8 @@
       "generic": "Tool",
       "approve": "Allow",
       "reject": "Reject",
-      "pendingApproval": "pending approval",
+    "pendingApproval": "pending approval",
+    "executionLocation": "Execution location",
       "pendingUserInput": "waiting for input",
       "userInputSubmitted": "answered",
       "userInputCanceled": "canceled",
@@ -945,6 +1019,7 @@
     "searchNoResults": "No matching models",
     "emptyTitle": "No models yet",
     "emptyDescription": "Add one manually, or import the full list from this provider.",
+    "managedEmptyDescription": "Authorize the provider, then refresh the managed model catalog.",
     "clientType": "Client Type",
     "clientTypePlaceholder": "Select client type",
     "typeRequired": "Type is required",
@@ -978,6 +1053,10 @@
     "importModels": "Import Models",
     "importSuccess": "Successfully imported {created} models, skipped {skipped}",
     "importFailed": "Failed to import models",
+    "refreshModels": "Refresh Models",
+    "refreshSuccess": "Model catalog refreshed: {created} added, {updated} updated",
+    "refreshFailed": "Failed to refresh the model catalog",
+    "refreshConfirmHint": "Fetch the latest models available to this account and remove unavailable models from model pickers.",
     "importConfirmHint": "Models will be imported from this provider's API with default compatibilities (vision, tool-call, reasoning).",
     "showingCount": "Showing {count} of {total}"
   },
@@ -1025,30 +1104,19 @@
       "descriptionOff": "Disabling caching rebills the full system prompt and tool list on every request. Only use this for strict context isolation."
     },
     "oauth": {
-      "openaiTitle": "OpenAI OAuth",
-      "openaiDescription": "Authorize this provider with your ChatGPT account for Codex-compatible OpenAI access.",
+      "openaiDeviceHint": "Enter this one-time code on OpenAI's verification page.",
       "openaiCreateHint": "Save the provider first, then authorize it from the provider details panel.",
-      "githubTitle": "GitHub Copilot OAuth",
-      "githubDescription": "Connect the current Memoh account with GitHub Copilot.",
-      "githubDeviceTitle": "GitHub Copilot Device Authorization",
-      "githubDeviceDescription": "Start device authorization, open GitHub's verification page, and enter the user code shown below.",
       "githubCreateHint": "Save the provider first, then start device authorization from the provider details panel.",
-      "githubDeviceHint": "Open the verification URL below and enter this user code to authorize the current Memoh account.",
-      "authorize": "Authorize",
-      "deviceAuthorize": "Start Device Authorization",
+      "githubDeviceHint": "Enter this one-time code on GitHub's verification page.",
       "authorizeFailed": "Failed to start authorization",
-      "authorizeTimedOut": "Authorization timed out. Try again.",
       "authorizeSuccess": "Authorization successful",
       "revoke": "Revoke",
       "revokeFailed": "Failed to revoke authorization",
       "revokeSuccess": "Authorization revoked",
       "copyFailed": "Failed to copy device code",
-      "connectedAccount": "Connected Account",
-      "callback": "Callback URL",
       "deviceVerificationUri": "Verification URL",
       "deviceUserCode": "User Code",
       "deviceExpiresAt": "Expires At",
-      "statusFailed": "Failed to load OAuth status",
       "status": {
         "checking": "Checking authorization status...",
         "authorized": "Authorized",
@@ -1058,7 +1126,15 @@
         "expired": "Authorization expired. Re-authorize to continue.",
         "missing": "Not authorized yet.",
         "notConfigured": "This provider is not configured for OAuth."
-      }
+      },
+      "sectionTitle": "Account",
+      "chatgptAccount": "ChatGPT account",
+      "githubAccount": "GitHub account",
+      "connect": "Connect",
+      "openaiConnectHint": "Sign in with your ChatGPT account to use its models.",
+      "githubConnectHint": "Sign in with GitHub to use Copilot models.",
+      "revokeConfirm": "Revoke authorization for this account?",
+      "connecting": "Connecting"
     }
   },
   "webSearch": {
@@ -1463,7 +1539,21 @@
   "bots": {
     "toolApproval": {
       "title": "Tool Call Approval",
-      "intro": "Review actions before this bot writes files or runs commands.",
+      "intro": "Choose what this Bot may do in its Workspace and on each connected computer.",
+      "loading": "Loading approval rules...",
+      "loadFailed": "Couldn’t load tool approval",
+      "loadFailedDescription": "Check the server connection and try again.",
+      "saveFailed": "Couldn’t save tool approval",
+      "target": {
+        "title": "Location",
+        "label": "Workspace or computer",
+        "description": "Rules apply only to the selected Workspace or computer."
+      },
+      "modes": {
+        "allow": "Allow",
+        "ask": "Ask",
+        "deny": "Deny"
+      },
       "status": {
         "on": "Approval is on",
         "off": "Approval is off"
@@ -1805,6 +1895,7 @@
       "network": "Network",
       "memory": "Memory",
       "channels": "Platforms",
+      "remoteRuntime": "Connected computers",
       "container": "Workspace",
       "mcp": "MCP",
       "heartbeat": "Heartbeat",
@@ -1818,6 +1909,44 @@
       "access": "Access",
       "terminal": "Terminal",
       "settings": "Settings"
+    },
+    "remoteRuntime": {
+      "title": "Connected computers",
+      "description": "Let this Bot use connected computers in addition to its existing Workspace. This only changes where file and command work runs.",
+      "workspaceTitle": "Work locations",
+      "loading": "Loading work locations...",
+      "loadFailed": "Couldn’t load work locations",
+      "loadFailedDescription": "Check the server connection and try again.",
+      "addComputer": "Add computer",
+      "primary": "Default location",
+      "primaryDescription": "Used for files and commands unless another location is chosen. Memoh does not switch locations automatically when it is offline.",
+      "primarySaveFailed": "Couldn’t change the default location",
+      "defaultBadge": "Default",
+      "nativeWorkspace": "Server Workspace",
+      "serverDescription": "This Bot’s existing Workspace on the Server.",
+      "folderSummary": "Starting folder: {path}",
+      "thisComputerOff": "Use this computer",
+      "thisComputerOffDescription": "Turn on access under Computers first, then add this computer here.",
+      "openComputerSettings": "Open computer settings",
+      "computer": "Computer",
+      "computerDescription": "Choose a computer already made available under Computers.",
+      "selectComputer": "Select a computer",
+      "noAvailableComputers": "No additional computers are available. Make one available under Computers first.",
+      "path": "Starting folder",
+      "pathDescription": "Relative to the folder shared with Memoh. Leave blank to use {path}; use . for the shared folder itself.",
+      "unknownComputer": "Unavailable computer",
+      "addTitle": "Add a computer to this Bot",
+      "editTitle": "Edit this computer",
+      "mountDescription": "Choose a computer and the folder where this Bot starts file and command work.",
+      "addSuccess": "Computer added to Bot",
+      "updateSuccess": "Computer settings updated",
+      "saveFailed": "Couldn’t save the computer",
+      "removeFromBot": "Remove from Bot",
+      "deleteTitle": "Remove this computer from the Bot?",
+      "deleteDescription": "{name} will be removed from this Bot. Files on the computer are not deleted.",
+      "deletePrimaryDescription": "{name} is the default location. Removing it makes the Server Workspace the default. Files on the computer are not deleted.",
+      "deleteSuccess": "Computer removed from Bot",
+      "deleteFailed": "Couldn’t remove the computer from this Bot"
     },
     "desktop": {
       "title": "Desktop Environment",
@@ -3152,5 +3281,12 @@
       "saveFailed": "Failed to save, please try again",
       "noProviderWarning": "You haven't configured an AI provider yet. Your bot won't be able to reply until you add one in Settings → Providers"
     }
+  },
+  "deviceCode": {
+    "copyAndOpen": "Copy & Open",
+    "retry": "Get a new code",
+    "expiresIn": "Expires in {time}",
+    "codeExpired": "Code expired",
+    "copyFailed": "Failed to copy the code"
   }
 }

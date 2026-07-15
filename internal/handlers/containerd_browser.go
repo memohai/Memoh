@@ -195,7 +195,7 @@ func (h *ContainerdHandler) CreateBrowserSession(c echo.Context) error {
 		strings.EqualFold(strings.TrimSpace(status.WorkspaceBackend), bridge.WorkspaceBackendLocal) {
 		return echo.NewHTTPError(http.StatusBadRequest, "browser tab is not available for local workspaces")
 	}
-	if _, err := h.manager.MCPClient(ctx, botID); err != nil {
+	if _, err := h.manager.NativeMCPClient(ctx, botID); err != nil {
 		return echo.NewHTTPError(http.StatusBadGateway, "workspace is not reachable: "+err.Error())
 	}
 
@@ -274,7 +274,7 @@ func (h *ContainerdHandler) HandleBrowserProxy(c echo.Context) error {
 	if h.manager == nil {
 		return echo.NewHTTPError(http.StatusBadGateway, "manager not configured")
 	}
-	client, err := h.manager.MCPClient(c.Request().Context(), session.BotID)
+	client, err := h.manager.NativeMCPClient(c.Request().Context(), session.BotID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadGateway, "workspace is not reachable: "+err.Error())
 	}

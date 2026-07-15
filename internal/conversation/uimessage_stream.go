@@ -100,7 +100,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		c.reasoning = nil
 		return nil
 
-	case "tool_call_start", "tool_call_input_start":
+	case "tool_call_start", "tool_call_input_start", "tool_call_metadata":
 		state := c.findToolState(event.ToolCallID, event.ToolName)
 		if state == nil {
 			state = &uiToolStreamState{
@@ -120,6 +120,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		if event.Input != nil {
 			state.Message.Input = event.Input
 		}
+		applyExecutionLocationMetadata(&state.Message, event.Metadata)
 		if trimmed := strings.TrimSpace(event.ToolCallID); trimmed != "" {
 			state.Message.ToolCallID = trimmed
 			c.tools[trimmed] = state
@@ -149,6 +150,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		if event.Input != nil {
 			state.Message.Input = event.Input
 		}
+		applyExecutionLocationMetadata(&state.Message, event.Metadata)
 		return []UIMessage{cloneToolStreamMessage(state.Message)}
 
 	case "tool_approval_request":
@@ -170,6 +172,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		if event.Input != nil {
 			state.Message.Input = event.Input
 		}
+		applyExecutionLocationMetadata(&state.Message, event.Metadata)
 		if trimmed := strings.TrimSpace(event.ToolName); trimmed != "" {
 			state.Message.Name = trimmed
 		}
@@ -209,6 +212,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		if event.Input != nil {
 			state.Message.Input = event.Input
 		}
+		applyExecutionLocationMetadata(&state.Message, event.Metadata)
 		if trimmed := strings.TrimSpace(event.ToolName); trimmed != "" {
 			state.Message.Name = trimmed
 		}
@@ -250,6 +254,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		if event.Input != nil {
 			state.Message.Input = event.Input
 		}
+		applyExecutionLocationMetadata(&state.Message, event.Metadata)
 		applyToolResultToUIMessage(&state.Message, event.Output)
 		if state.Message.ToolCallID != "" && !isBackgroundToolStillRunning(state.Message) {
 			delete(c.tools, state.Message.ToolCallID)
@@ -378,8 +383,21 @@ func (c *UIMessageStreamConverter) findToolState(toolCallID, toolName string) *u
 
 func cloneToolStreamMessage(message UIMessage) UIMessage {
 	clone := message
+	if message.ExecutionLocation != nil {
+		location := *message.ExecutionLocation
+		clone.ExecutionLocation = &location
+	}
 	if len(message.Progress) > 0 {
 		clone.Progress = append([]any(nil), message.Progress...)
 	}
 	return clone
+}
+
+func applyExecutionLocationMetadata(message *UIMessage, metadata map[string]any) {
+	if message == nil {
+		return
+	}
+	if location := extractExecutionLocationMetadata(metadata); location != nil {
+		message.ExecutionLocation = location
+	}
 }

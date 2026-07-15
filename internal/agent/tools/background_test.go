@@ -2,12 +2,14 @@ package tools
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/agent/background"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 func TestBackgroundProviderWaitAndInspectAgentResult(t *testing.T) {
@@ -233,6 +235,98 @@ func TestBackgroundProviderWaitUntilEmitsProgressWhileWaiting(t *testing.T) {
 	}
 	if waitRes.(map[string]any)["status"] != "completed" {
 		t.Fatalf("wait_until payload = %v, want completed", waitRes)
+	}
+}
+
+func startRunningExecTask(t *testing.T, mgr *background.Manager) string {
+	t.Helper()
+	taskID, _ := mgr.Spawn(
+		context.Background(),
+		"bot1",
+		"sess1",
+		"npm run dev",
+		"/data",
+		"Dev server",
+		func(ctx context.Context, _, _ string, _ int32) (*bridge.ExecResult, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+		nil,
+		nil,
+	)
+	t.Cleanup(func() { _ = mgr.Kill(taskID) })
+	return taskID
+}
+
+func TestGetBackgroundStatusIncludesTailWhileRunning(t *testing.T) {
+	mgr := background.New(nil)
+	p := NewBackgroundProvider(nil, mgr)
+	session := SessionContext{BotID: "bot1", SessionID: "sess1"}
+
+	taskID := startRunningExecTask(t, mgr)
+	mgr.RecordOutput(taskID, "stdout", "  ➜  Local: http://localhost:5173/\n")
+
+	statusRes, err := p.execGetBackgroundStatus(context.Background(), session, map[string]any{"task_id": taskID})
+	if err != nil {
+		t.Fatalf("get_background_status failed: %v", err)
+	}
+	sm := statusRes.(map[string]any)
+	if sm["status"] != "running" {
+		t.Fatalf("status = %v, want running", sm["status"])
+	}
+	tail, _ := sm["output_tail"].(string)
+	if !strings.Contains(tail, "localhost:5173") {
+		t.Fatalf("output_tail = %q, want live tail while running", tail)
+	}
+	if _, ok := sm["exit_code"]; ok {
+		t.Fatalf("running status should not expose exit_code: %v", sm)
+	}
+}
+
+func TestWaitUntilReturnsIdleWithTailForQuietService(t *testing.T) {
+	mgr := background.New(nil)
+	p := NewBackgroundProvider(nil, mgr)
+	session := SessionContext{BotID: "bot1", SessionID: "sess1"}
+
+	taskID := startRunningExecTask(t, mgr)
+	mgr.RecordOutput(taskID, "stdout", "  ➜  Local: http://localhost:5173/\n")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	res, err := p.execWaitUntil(ctx, session, map[string]any{"task_id": taskID, "idle_timeout": 1, "timeout": 30}, nil)
+	if err != nil {
+		t.Fatalf("wait_until failed: %v", err)
+	}
+	rm := res.(map[string]any)
+	if rm["reason"] != "idle" || rm["status"] != "running" {
+		t.Fatalf("wait_until payload = %v, want running/idle", rm)
+	}
+	tail, _ := rm["output_tail"].(string)
+	if !strings.Contains(tail, "localhost:5173") {
+		t.Fatalf("output_tail = %q, want ready banner", tail)
+	}
+}
+
+func TestWaitUntilTimeoutReturnsSnapshotInsteadOfError(t *testing.T) {
+	mgr := background.New(nil)
+	p := NewBackgroundProvider(nil, mgr)
+	session := SessionContext{BotID: "bot1", SessionID: "sess1"}
+
+	taskID, _, err := mgr.StartSpawnTask(context.Background(), "bot1", "sess1", "long spawn")
+	if err != nil {
+		t.Fatalf("StartSpawnTask failed: %v", err)
+	}
+	t.Cleanup(func() { _ = mgr.Kill(taskID) })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	res, err := p.execWaitUntil(ctx, session, map[string]any{"task_id": taskID, "timeout": 1}, nil)
+	if err != nil {
+		t.Fatalf("wait_until should return a snapshot on timeout, got error: %v", err)
+	}
+	rm := res.(map[string]any)
+	if rm["reason"] != "timeout" || rm["status"] != "running" {
+		t.Fatalf("wait_until payload = %v, want running/timeout", rm)
 	}
 }
 

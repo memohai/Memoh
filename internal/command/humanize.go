@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/memohai/memoh/internal/i18n"
 )
 
 // humanizeTime renders a timestamp relative to now ("just now", "5m ago",
@@ -123,11 +125,39 @@ func formatTokens(n int64) string {
 func MdBold(s string) string { return "**" + s + "**" }
 func MdCode(s string) string { return "`" + s + "`" }
 
+// CommandText renders a slash command and optionally addresses its first token
+// to a bot username. Keeping the suffix next to the resource is required for
+// Telegram's /command@bot grammar; any arguments remain after that token.
+func CommandText(cmd, botUsername string) string {
+	parts := strings.Fields(strings.TrimPrefix(strings.TrimSpace(cmd), "/"))
+	if len(parts) == 0 {
+		return "/"
+	}
+	username := strings.TrimPrefix(strings.TrimSpace(botUsername), "@")
+	if username != "" && !strings.Contains(parts[0], "@") {
+		parts[0] += "@" + username
+	}
+	return "/" + strings.Join(parts, " ")
+}
+
+// TelegramGroupCommandTip explains the one transport-specific rule users need
+// when typing commands manually. Command lists stay visually clean; the bot
+// username appears once in this complete, copyable example.
+func TelegramGroupCommandTip(t *i18n.Localizer, botUsername string) string {
+	username := strings.TrimPrefix(strings.TrimSpace(botUsername), "@")
+	if username == "" {
+		return ""
+	}
+	return t.T("groupCommand.telegramTip", map[string]any{
+		"example": MdCode(CommandText("help", username)),
+	})
+}
+
 // CmdRef renders a slash-command reference as a tap-to-copy code span: on
 // Telegram a code span is tap-to-copy monospace, and on text-only channels the
 // backticks strip cleanly. Accepts "schedule list" or "/schedule list".
 func CmdRef(cmd string) string {
-	return MdCode("/" + strings.TrimPrefix(strings.TrimSpace(cmd), "/"))
+	return MdCode(CommandText(cmd, ""))
 }
 
 var cronWeekdays = [7]string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}

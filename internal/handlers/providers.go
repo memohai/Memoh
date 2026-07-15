@@ -331,6 +331,8 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	resp := providers.ImportModelsResponse{
 		Models: make([]string, 0),
 	}
+	managedCatalog := providers.IsManagedModelCatalogClientType(models.ClientType(provider.ClientType))
+	availableModelIDs := make(map[string]struct{}, len(remoteModels))
 
 	// Bulk import lands disabled — the user picks which ones to expose in
 	// model pickers afterward, to avoid flooding bot config with dozens of
@@ -338,12 +340,13 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	disabled := false
 
 	for _, m := range remoteModels {
+		availableModelIDs[m.ID] = struct{}{}
 		modelType := models.ModelTypeChat
 		if strings.TrimSpace(m.Type) == string(models.ModelTypeEmbedding) {
 			modelType = models.ModelTypeEmbedding
 		}
 		compatibilities := m.Compatibilities
-		if len(compatibilities) == 0 && modelType == models.ModelTypeChat {
+		if len(compatibilities) == 0 && modelType == models.ModelTypeChat && !m.CapabilitiesKnown {
 			// No capability info at all (no upstream claim, no registry match):
 			// fall back to a permissive default, but respect an explicit
 			// "no reasoning" discovery so we don't advertise thinking falsely.
@@ -364,6 +367,10 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 			ContextWindow:    m.ContextWindow,
 			Dimensions:       m.Dimensions,
 		}
+		if managedCatalog {
+			available := true
+			cfg.CatalogAvailable = &available
+		}
 		_, err := h.modelsService.Create(ctx, models.AddRequest{
 			ModelID:    m.ID,
 			Name:       name,
@@ -376,7 +383,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 			if errors.Is(err, models.ErrModelIDAlreadyExists) {
 				// Upsert/assert: re-importing fills in newly discovered
 				// capabilities on existing models without clobbering user config.
-				if h.fillExistingModel(ctx, id, m.ID, cfg) {
+				if h.fillExistingModel(ctx, id, m.ID, cfg, managedCatalog && m.CapabilitiesKnown) {
 					resp.Updated++
 				} else {
 					resp.Skipped++
@@ -390,26 +397,61 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 		resp.Created++
 		resp.Models = append(resp.Models, m.ID)
 	}
+	if managedCatalog {
+		h.markUnavailableManagedModels(ctx, id, availableModelIDs)
+	}
 
 	return c.JSON(http.StatusOK, resp)
 }
 
+func (h *ProvidersHandler) markUnavailableManagedModels(ctx context.Context, providerID string, available map[string]struct{}) {
+	existingModels, err := h.modelsService.ListByProviderID(ctx, providerID)
+	if err != nil {
+		h.logger.Warn("failed to list managed models for catalog reconciliation", slog.Any("error", err))
+		return
+	}
+	for _, existing := range existingModels {
+		if _, ok := available[existing.ModelID]; ok {
+			continue
+		}
+		unavailable := false
+		if existing.Config.CatalogAvailable != nil && !*existing.Config.CatalogAvailable {
+			continue
+		}
+		config := existing.Config
+		config.CatalogAvailable = &unavailable
+		if _, err := h.modelsService.UpdateByProviderAndModelID(ctx, providerID, existing.ModelID, models.UpdateRequest{
+			ModelID:    existing.ModelID,
+			Name:       existing.Name,
+			ProviderID: existing.ProviderID,
+			Type:       existing.Type,
+			Config:     config,
+		}); err != nil {
+			h.logger.Warn("failed to mark stale managed model unavailable", slog.String("model_id", existing.ModelID), slog.Any("error", err))
+		}
+	}
+}
+
 // fillExistingModel refreshes an existing model's capability-discovery fields
-// from the latest trusted discovery (upstream + litellm registry) and adds
-// missing compatibility tokens. Re-import is a refresh: newer discovery
-// overwrites stale capability values (thinking_mode / effort tiers / context
-// window) rather than only filling blanks, so an old, less-accurate import
-// (e.g. an effort list missing xhigh/max) cannot survive. Returns true if the
-// model was changed and persisted.
+// from the latest trusted discovery. Managed catalogs replace authoritative
+// capability fields exactly, including removal; generic discovery keeps its
+// additive compatibility behavior because an empty field can mean unknown.
+// Returns true if the model was changed and persisted.
 //
 // The lookup is provider-scoped because model_id is only unique per provider;
 // same-named models under other providers must not affect this refresh.
-func (h *ProvidersHandler) fillExistingModel(ctx context.Context, providerID, modelID string, discovered models.ModelConfig) bool {
+func (h *ProvidersHandler) fillExistingModel(ctx context.Context, providerID, modelID string, discovered models.ModelConfig, replaceCapabilities bool) bool {
 	existing, err := h.modelsService.GetByProviderAndModelID(ctx, providerID, modelID)
 	if err != nil {
 		return false
 	}
-	merged, changed := mergeDiscoveredConfig(existing.Config, discovered)
+	var merged models.ModelConfig
+	var changed bool
+	if replaceCapabilities {
+		merged, changed = mergeManagedDiscoveredConfig(existing.Config, discovered)
+	} else {
+		merged, changed = mergeDiscoveredConfig(existing.Config, discovered)
+	}
 	if !changed {
 		return false
 	}
@@ -424,6 +466,23 @@ func (h *ProvidersHandler) fillExistingModel(ctx context.Context, providerID, mo
 		return false
 	}
 	return true
+}
+
+func mergeManagedDiscoveredConfig(existing, discovered models.ModelConfig) (models.ModelConfig, bool) {
+	out, changed := mergeDiscoveredConfig(existing, discovered)
+	if !slices.Equal(out.Compatibilities, discovered.Compatibilities) {
+		out.Compatibilities = append([]string(nil), discovered.Compatibilities...)
+		changed = true
+	}
+	if !slices.Equal(out.ReasoningEfforts, discovered.ReasoningEfforts) {
+		out.ReasoningEfforts = append([]string(nil), discovered.ReasoningEfforts...)
+		changed = true
+	}
+	if discovered.ThinkingMode != "" && out.ThinkingMode != discovered.ThinkingMode {
+		out.ThinkingMode = discovered.ThinkingMode
+		changed = true
+	}
+	return out, changed
 }
 
 func mergeDiscoveredConfig(existing, discovered models.ModelConfig) (models.ModelConfig, bool) {
@@ -449,6 +508,10 @@ func mergeDiscoveredConfig(existing, discovered models.ModelConfig) (models.Mode
 	}
 	if discovered.ContextWindow != nil && (out.ContextWindow == nil || *discovered.ContextWindow != *out.ContextWindow) {
 		out.ContextWindow = discovered.ContextWindow
+		changed = true
+	}
+	if discovered.CatalogAvailable != nil && (out.CatalogAvailable == nil || *discovered.CatalogAvailable != *out.CatalogAvailable) {
+		out.CatalogAvailable = discovered.CatalogAvailable
 		changed = true
 	}
 	// Compatibilities are additive: keep anything already present and add the

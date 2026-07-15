@@ -150,6 +150,25 @@ func TestExecute_Help(t *testing.T) {
 	}
 }
 
+func TestExecuteResultUsesProvidedInvocation(t *testing.T) {
+	t.Parallel()
+	h := newTestHandler(&fakeRoleResolver{role: "owner"})
+	invocation, err := ParseInvocation(InvocationInput{Text: "/help @memoh1bot", BotAliases: []string{"memoh1bot"}})
+	if err != nil {
+		t.Fatalf("ParseInvocation() error = %v", err)
+	}
+	result, err := h.ExecuteResult(context.Background(), ExecuteInput{
+		Text:       "this deliberately is not reparsable",
+		Invocation: &invocation,
+	})
+	if err != nil {
+		t.Fatalf("ExecuteResult() error = %v", err)
+	}
+	if !strings.Contains(result.Text, "Available commands") {
+		t.Fatalf("result = %q, want global help", result.Text)
+	}
+}
+
 func TestExecute_HelpGroup(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(&fakeRoleResolver{role: "owner"})
@@ -562,7 +581,7 @@ func TestTruncate(t *testing.T) {
 func TestGlobalHelp_AllGroups(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(nil)
-	help := h.registry.GlobalHelp()
+	help := h.registry.GlobalHelp(i18n.New("en"), "")
 	for _, group := range []string{
 		"schedule", "mcp", "settings",
 		"model", "memory", "search", "usage",
@@ -571,6 +590,30 @@ func TestGlobalHelp_AllGroups(t *testing.T) {
 		if !strings.Contains(help, "/"+group) {
 			t.Errorf("missing /%s in global help", group)
 		}
+	}
+}
+
+func TestGlobalHelpKeepsTelegramGroupCommandsCompact(t *testing.T) {
+	t.Parallel()
+	h := newTestHandler(nil)
+	help := h.registry.GlobalHelp(i18n.New("en"), "snowluocat_bot")
+	for _, commandName := range []string{"help", "start", "new", "link", "compact"} {
+		want := "/" + commandName
+		if !strings.Contains(help, "- "+want+" —") {
+			t.Errorf("compact global help missing list row for %q:\n%s", want, help)
+		}
+		if strings.Contains(help, "- `"+want+"`") || strings.Contains(help, "- "+want+"@snowluocat_bot") {
+			t.Errorf("single-token command %q must remain tap-to-send, not code-spanned", want)
+		}
+	}
+	if strings.Contains(help, "group's actions") || strings.Contains(help, "<group>") {
+		t.Errorf("global help leaked internal command-group terminology:\n%s", help)
+	}
+	if !strings.Contains(help, "for example `/help@snowluocat_bot`") {
+		t.Errorf("global help should explain manual group addressing once:\n%s", help)
+	}
+	if count := strings.Count(help, "snowluocat_bot"); count != 1 {
+		t.Errorf("global help repeats bot username %d times, want once:\n%s", count, help)
 	}
 }
 

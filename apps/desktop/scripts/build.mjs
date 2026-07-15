@@ -57,5 +57,6 @@ function run(command, args, extraEnv = {}) {
   })
 }
 
+runPnpm(['--filter', '@memohai/runtime', 'build'])
 runPnpm(['exec', 'electron-vite', 'build'])
 runPnpm(['exec', 'electron-builder', ...builderArgs], macToolchainEnv)

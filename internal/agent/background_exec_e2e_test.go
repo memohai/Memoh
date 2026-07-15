@@ -357,7 +357,7 @@ func TestE2E_ForegroundTimeoutFlip(t *testing.T) {
 	// Wait for the background task to complete and verify the snapshot result.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	snap, err := bgMgr.WaitForSessionTask(ctx, "bot-test-2", "sess-2", taskID)
+	snap, _, err := bgMgr.WaitForSessionTask(ctx, "bot-test-2", "sess-2", taskID, 0)
 	if err != nil {
 		t.Fatalf("WaitForSessionTask returned error: %v", err)
 	}

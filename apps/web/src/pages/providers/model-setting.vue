@@ -56,6 +56,7 @@
       <ModelList
         :provider-id="curProvider?.id"
         :models="modelDataList"
+        :managed="isManagedModelCatalogClientType(curProvider?.client_type)"
         :delete-model-loading="deleteModelLoading"
         @edit="handleEditModel"
         @delete="deleteModel"
@@ -80,6 +81,7 @@ import { putProvidersById, deleteProvidersById, getProvidersByIdModels, deleteMo
 import type { ModelsGetResponse, ProvidersGetResponse, ProvidersUpdateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@felinic/ui'
+import { isManagedModelCatalogClientType } from '@/constants/client-types'
 
 // ---- Model 编辑状态（provide 给 CreateModel） ----
 const openModel = reactive<{

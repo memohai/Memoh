@@ -1,263 +1,222 @@
 <template>
   <PageShell
     variant="tab"
-    :title="$t('bots.toolApproval.title')"
-    :description="$t('bots.toolApproval.intro')"
+    :title="t('bots.toolApproval.title')"
+    :description="t('bots.toolApproval.intro')"
   >
-    <template #actions>
-      <Button
-        :disabled="!hasChanges"
-        :loading="saveLoading"
-        @click="handleSave"
-      >
-        {{ $t('common.saveChanges') }}
-      </Button>
-    </template>
+    <SettingsSection v-if="initialLoading">
+      <InlineLoadingRow surface="card-row">
+        {{ t('bots.toolApproval.loading') }}
+      </InlineLoadingRow>
+    </SettingsSection>
 
-    <div class="space-y-8">
-      <!-- Status card: the page's center of gravity. The toggle controls whether any
-           prompt ever fires; the body tells the user what that means right now. -->
-      <SettingsSection>
-        <SettingsRow :label="form.tool_approval_config.enabled ? $t('bots.toolApproval.status.on') : $t('bots.toolApproval.status.off')">
-          <Switch
-            :model-value="form.tool_approval_config.enabled"
-            @update:model-value="(val) => form.tool_approval_config.enabled = !!val"
+    <SettingsSection v-else-if="loadFailed">
+      <SettingsRow
+        :label="t('bots.toolApproval.loadFailed')"
+        :description="t('bots.toolApproval.loadFailedDescription')"
+      >
+        <Button
+          variant="outline"
+          size="sm"
+          @click="refetchWorkspaceTargets()"
+        >
+          {{ t('runtimes.retry') }}
+        </Button>
+      </SettingsRow>
+    </SettingsSection>
+
+    <div
+      v-else
+      class="space-y-8"
+    >
+      <SettingsSection
+        v-for="target in validTargets"
+        :key="target.target_id"
+        :title="targetName(target)"
+      >
+        <SettingsRow
+          v-for="tool in approvalTools"
+          :key="target.target_id + ':' + tool"
+          stack="sm"
+          :label="t('bots.toolApproval.toolNames.' + tool)"
+          :description="t('bots.toolApproval.tools.' + tool)"
+        >
+          <SegmentedControl
+            :model-value="modeFor(target, tool)"
+            :items="modeItems"
+            :aria-label="t('bots.toolApproval.toolNames.' + tool)"
+            class="w-full sm:w-fit"
+            @update:model-value="(value) => updateMode(target, tool, value)"
           />
         </SettingsRow>
-      </SettingsSection>
-
-      <!-- Tool rules: a summary row per tool, with at most one inline editor open at a
-           time. The summary shows default behavior + exception counts so the user reads
-           the whole posture without expanding anything. -->
-      <SettingsSection :title="$t('bots.toolApproval.rules.title')">
-        <template #actions>
-          <Button
-            variant="outline"
-            size="sm"
-            @click="resetToRecommended"
-          >
-            <RotateCcw class="size-4" />
-            {{ $t('bots.toolApproval.rules.reset') }}
-          </Button>
-        </template>
-
-        <ExpandableSettingsRow
-          v-for="tool in approvalTools"
-          :key="tool"
-          :label="$t(`bots.toolApproval.toolNames.${tool}`)"
-          :open="expandedTool === tool"
-          @update:open="(val) => setExpanded(tool, val)"
-        >
-          <template #trailing>
-            <span class="hidden text-xs text-muted-foreground sm:inline">
-              {{ toolApprovalPolicy(tool).require_approval ? $t('bots.toolApproval.behavior.review') : $t('bots.toolApproval.behavior.auto') }}
-            </span>
-          </template>
-
-          <template #expanded>
-            <FormStack>
-              <FieldStack :label="$t('bots.toolApproval.behavior.label')">
-                <SegmentedControl
-                  :model-value="toolApprovalPolicy(tool).require_approval ? 'review' : 'auto'"
-                  :items="behaviorItems"
-                  :aria-label="$t('bots.toolApproval.behavior.label')"
-                  class="w-full sm:w-fit"
-                  @update:model-value="(val) => toolApprovalPolicy(tool).require_approval = val === 'review'"
-                />
-              </FieldStack>
-
-              <!-- Auto-approve exceptions only make sense when the default is to review.
-                   An auto-by-default tool would treat them as redundant, so they're hidden. -->
-              <FieldStack
-                v-if="toolApprovalPolicy(tool).require_approval"
-                :label="tool === 'exec' ? $t('bots.toolApproval.autoApprove.commandsTitle') : $t('bots.toolApproval.autoApprove.pathsTitle')"
-              >
-                <Textarea
-                  :model-value="bypassText(tool)"
-                  :placeholder="tool === 'exec' ? $t('bots.toolApproval.placeholders.execCommands') : $t('bots.toolApproval.placeholders.filePaths')"
-                  class="min-h-24 resize-none font-mono text-xs"
-                  @update:model-value="(val) => updateBypass(tool, String(val))"
-                />
-              </FieldStack>
-
-              <FieldStack :label="tool === 'exec' ? $t('bots.toolApproval.review.commandsTitle') : $t('bots.toolApproval.review.pathsTitle')">
-                <Textarea
-                  :model-value="forceReviewText(tool)"
-                  :placeholder="tool === 'exec' ? $t('bots.toolApproval.placeholders.execReview') : $t('bots.toolApproval.placeholders.fileReview')"
-                  class="min-h-24 resize-none font-mono text-xs"
-                  @update:model-value="(val) => updateForceReview(tool, String(val))"
-                />
-              </FieldStack>
-            </FormStack>
-          </template>
-        </ExpandableSettingsRow>
       </SettingsSection>
     </div>
   </PageShell>
 </template>
 
 <script setup lang="ts">
-import {
-  Textarea,
-  Button,
-  Switch,
-  SegmentedControl,
-} from '@felinic/ui'
-import { RotateCcw } from 'lucide-vue-next'
-import { reactive, computed, watch, ref } from 'vue'
-import type { Ref } from 'vue'
-import { toast } from '@felinic/ui'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getBotsByBotIdSettings, putBotsByBotIdSettings } from '@memohai/sdk'
-import type { SettingsSettings } from '@memohai/sdk'
-import { resolveApiErrorMessage } from '@/utils/api-error'
+import { useMutation, useQuery } from '@pinia/colada'
+import {
+  getBotsByBotIdWorkspaceTargets,
+  putBotsByBotIdWorkspaceTargetsByTargetIdToolApproval,
+  type WorkspaceUpdateWorkspaceTargetToolApprovalRequest,
+  type WorkspaceWorkspaceTarget,
+} from '@memohai/sdk'
+import {
+  Button,
+  SegmentedControl,
+  toast,
+} from '@felinic/ui'
+import PageShell from '@/components/page-shell/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import SettingsRow from '@/components/settings/row.vue'
-import ExpandableSettingsRow from '@/components/settings/expandable-row.vue'
-import FieldStack from '@/components/settings/field-stack.vue'
-import FormStack from '@/components/settings/form-stack.vue'
-import PageShell from '@/components/page-shell/index.vue'
-import {
-  defaultToolApprovalConfig,
-  normalizeToolApprovalConfig,
-  type ApprovalTool,
-  type ToolApprovalConfig,
-  type ToolApprovalExecPolicy,
-  type ToolApprovalFilePolicy,
+import InlineLoadingRow from '@/components/inline-loading-row/index.vue'
+import { resolveApiErrorMessage } from '@/utils/api-error'
+import type {
+  ApprovalTool,
+  ToolApprovalMode,
 } from './tool-approval-config'
 
 const props = defineProps<{
   botId: string
 }>()
 
-const approvalTools: ApprovalTool[] = ['read', 'write', 'exec']
+type ValidWorkspaceTarget = WorkspaceWorkspaceTarget & {
+  target_id: string
+  kind: string
+}
 
+const approvalTools: ApprovalTool[] = ['read', 'write', 'exec']
 const { t } = useI18n()
 
-const botIdRef = computed(() => props.botId) as Ref<string>
-
-const queryCache = useQueryCache()
-
-const { data: settings } = useQuery({
-  key: () => ['bot-settings', botIdRef.value],
+const {
+  data: workspaceTargetsResponse,
+  error: workspaceTargetsError,
+  isLoading: workspaceTargetsLoading,
+  refetch: refetchWorkspaceTargets,
+} = useQuery({
+  key: () => ['bot-workspace-targets', props.botId],
   query: async () => {
-    const { data } = await getBotsByBotIdSettings({ path: { bot_id: botIdRef.value }, throwOnError: true })
-    return data
-  },
-  enabled: () => !!botIdRef.value,
-})
-
-const { mutateAsync: updateSettings, isLoading: saveLoading } = useMutation({
-  mutation: async (body: Partial<SettingsSettings> & { tool_approval_config?: ToolApprovalConfig }) => {
-    const { data } = await putBotsByBotIdSettings({
-      path: { bot_id: botIdRef.value },
-      body,
+    const { data } = await getBotsByBotIdWorkspaceTargets({
+      path: { bot_id: props.botId },
       throwOnError: true,
     })
     return data
   },
-  onSettled: () => queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] }),
+  enabled: () => !!props.botId,
+  refetchOnWindowFocus: true,
 })
 
-const form = reactive<{ tool_approval_config: ToolApprovalConfig }>({
-  tool_approval_config: defaultToolApprovalConfig(),
-})
+const targetItems = ref<WorkspaceWorkspaceTarget[]>([])
+const savingTool = ref<ApprovalTool | null>(null)
 
-const expandedTool = ref<ApprovalTool | null>(null)
-
-// At most one editor open at a time: opening a row collapses any other. Each
-// row is a controlled ExpandableSettingsRow driven off this single ref.
-function setExpanded(tool: ApprovalTool, open: boolean) {
-  expandedTool.value = open ? tool : (expandedTool.value === tool ? null : expandedTool.value)
-}
-
-const behaviorItems = computed(() => [
-  { value: 'review', label: t('bots.toolApproval.behavior.review') },
-  { value: 'auto', label: t('bots.toolApproval.behavior.auto') },
-])
-
-function toolApprovalPolicy(tool: ApprovalTool) {
-  return form.tool_approval_config[tool]
-}
-
-function bypassList(tool: ApprovalTool): string[] {
-  const policy = toolApprovalPolicy(tool)
-  return tool === 'exec'
-    ? (policy as ToolApprovalExecPolicy).bypass_commands
-    : (policy as ToolApprovalFilePolicy).bypass_globs
-}
-
-function forceReviewList(tool: ApprovalTool): string[] {
-  const policy = toolApprovalPolicy(tool)
-  return tool === 'exec'
-    ? (policy as ToolApprovalExecPolicy).force_review_commands
-    : (policy as ToolApprovalFilePolicy).force_review_globs
-}
-
-function bypassText(tool: ApprovalTool): string {
-  return bypassList(tool).join('\n')
-}
-
-function forceReviewText(tool: ApprovalTool): string {
-  return forceReviewList(tool).join('\n')
-}
-
-function parseList(raw: string): string[] {
-  return raw.split(/\r?\n|,/).map(item => item.trim()).filter(Boolean)
-}
-
-function updateBypass(tool: ApprovalTool, raw: string) {
-  const values = parseList(raw)
-  if (tool === 'exec') {
-    form.tool_approval_config.exec.bypass_commands = values
-  } else {
-    form.tool_approval_config[tool].bypass_globs = values
-  }
-}
-
-function updateForceReview(tool: ApprovalTool, raw: string) {
-  const values = parseList(raw)
-  if (tool === 'exec') {
-    form.tool_approval_config.exec.force_review_commands = values
-  } else {
-    form.tool_approval_config[tool].force_review_globs = values
-  }
-}
-
-function resetToRecommended() {
-  const defaults = defaultToolApprovalConfig()
-  // Keep the enable state — it's the user's top-level decision, not a rule.
-  form.tool_approval_config.read = defaults.read
-  form.tool_approval_config.write = defaults.write
-  form.tool_approval_config.exec = defaults.exec
-}
-
-watch(settings, (val) => {
-  if (val) {
-    form.tool_approval_config = normalizeToolApprovalConfig(
-      (val as SettingsSettings & { tool_approval_config?: unknown }).tool_approval_config,
-    )
-  }
+watch(workspaceTargetsResponse, (response) => {
+  if (!response) return
+  targetItems.value = (response.targets ?? []).map(target => ({
+    ...target,
+    tool_approval: target.tool_approval ? { ...target.tool_approval } : undefined,
+  }))
 }, { immediate: true })
 
-function serverConfig(): ToolApprovalConfig {
-  return normalizeToolApprovalConfig(
-    (settings.value as SettingsSettings & { tool_approval_config?: unknown } | undefined)?.tool_approval_config,
-  )
-}
+const validTargets = computed<ValidWorkspaceTarget[]>(() => (
+  targetItems.value.filter((target): target is ValidWorkspaceTarget => (
+    typeof target.target_id === 'string'
+    && target.target_id.length > 0
+    && typeof target.kind === 'string'
+    && target.kind.length > 0
+  ))
+))
+const initialLoading = computed(() => workspaceTargetsLoading.value && !workspaceTargetsResponse.value)
+const loadFailed = computed(() => !!workspaceTargetsError.value && !workspaceTargetsResponse.value)
+const modeItems = computed(() => [
+  {
+    value: 'allow' as const,
+    label: t('bots.toolApproval.modes.allow'),
+    disabled: !!savingTool.value,
+  },
+  {
+    value: 'ask' as const,
+    label: t('bots.toolApproval.modes.ask'),
+    disabled: !!savingTool.value,
+  },
+  {
+    value: 'deny' as const,
+    label: t('bots.toolApproval.modes.deny'),
+    disabled: !!savingTool.value,
+  },
+])
 
-const hasChanges = computed(() => {
-  if (!settings.value) return false
-  return JSON.stringify(form.tool_approval_config) !== JSON.stringify(serverConfig())
+const { mutateAsync: updateToolApproval } = useMutation({
+  mutation: async (input: {
+    targetId: string
+    body: WorkspaceUpdateWorkspaceTargetToolApprovalRequest
+  }) => {
+    await putBotsByBotIdWorkspaceTargetsByTargetIdToolApproval({
+      path: {
+        bot_id: props.botId,
+        target_id: input.targetId,
+      },
+      body: input.body,
+      throwOnError: true,
+    })
+  },
 })
 
-async function handleSave() {
+function targetName(target: WorkspaceWorkspaceTarget): string {
+  if (target.kind === 'native') return t('bots.remoteRuntime.nativeWorkspace')
+  return target.name || t('bots.remoteRuntime.unknownComputer')
+}
+
+function isMode(value: unknown): value is ToolApprovalMode {
+  return value === 'allow' || value === 'ask' || value === 'deny'
+}
+
+function defaultMode(target: ValidWorkspaceTarget, tool: ApprovalTool): ToolApprovalMode {
+  if (tool === 'read') return 'allow'
+  if (tool === 'write') return 'ask'
+  return target.kind === 'remote' ? 'ask' : 'allow'
+}
+
+function modeFor(target: ValidWorkspaceTarget, tool: ApprovalTool): ToolApprovalMode {
+  const value = target.tool_approval?.[tool]
+  return isMode(value) ? value : defaultMode(target, tool)
+}
+
+async function updateMode(
+  target: ValidWorkspaceTarget,
+  tool: ApprovalTool,
+  value: string | number,
+): Promise<void> {
+  if (!isMode(value) || savingTool.value) return
+  if (modeFor(target, tool) === value) return
+
+  const previous = modeFor(target, tool)
+  target.tool_approval = {
+    ...target.tool_approval,
+    [tool]: value,
+  }
+  savingTool.value = tool
   try {
-    await updateSettings({ tool_approval_config: form.tool_approval_config })
-    toast.success(t('bots.settings.saveSuccess'))
+    await updateToolApproval({
+      targetId: target.target_id,
+      body: {
+        read: modeFor(target, 'read'),
+        write: modeFor(target, 'write'),
+        exec: modeFor(target, 'exec'),
+      },
+    })
+    void refetchWorkspaceTargets()
   } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+    target.tool_approval = {
+      ...target.tool_approval,
+      [tool]: previous,
+    }
+    toast.error(resolveApiErrorMessage(error, t('bots.toolApproval.saveFailed')))
+  } finally {
+    savingTool.value = null
   }
 }
+
 </script>

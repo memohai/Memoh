@@ -6,6 +6,38 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 )
 
+func needsApproval(cfg settings.ToolApprovalConfig, toolName string, input any) bool {
+	return policyDecision(cfg, toolName, input) == DecisionNeedsApproval
+}
+
+func TestPolicyDecisionExplicitModes(t *testing.T) {
+	t.Parallel()
+
+	cfg := settings.DefaultToolApprovalConfig()
+	cfg.Enabled = false
+	cfg.Read.Mode = settings.ToolApprovalAllow
+	cfg.Read.ForceReviewGlobs = []string{"/etc/**"}
+	cfg.Write.Mode = settings.ToolApprovalDeny
+	cfg.Write.ForceReviewGlobs = []string{"/data/secret/**"}
+	cfg.Exec.Mode = settings.ToolApprovalAsk
+	cfg.Exec.RequireApproval = false
+
+	if got := policyDecision(cfg, "read", map[string]any{"path": "/etc/passwd"}); got != DecisionBypass {
+		t.Fatalf("read allow decision = %q, want bypass", got)
+	}
+	if got := policyDecision(cfg, "write", map[string]any{"path": "/data/secret/token"}); got != DecisionDeny {
+		t.Fatalf("write deny decision = %q, want deny", got)
+	}
+	if got := policyDecision(cfg, "exec", map[string]any{"command": "go test ./..."}); got != DecisionNeedsApproval {
+		t.Fatalf("exec ask decision = %q, want needs approval", got)
+	}
+
+	cfg.Exec.BypassCommands = []string{"go test *"}
+	if got := policyDecision(cfg, "exec", map[string]any{"command": "go test ./..."}); got != DecisionBypass {
+		t.Fatalf("exec ask bypass decision = %q, want bypass", got)
+	}
+}
+
 func TestNeedsApprovalFileBypass(t *testing.T) {
 	cfg := settings.DefaultToolApprovalConfig()
 	cfg.Enabled = true

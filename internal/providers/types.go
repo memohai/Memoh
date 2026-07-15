@@ -1,6 +1,10 @@
 package providers
 
-import "time"
+import (
+	"time"
+
+	"github.com/memohai/memoh/internal/models"
+)
 
 // CreateRequest represents a request to create a new provider.
 type CreateRequest struct {
@@ -99,19 +103,20 @@ type OAuthAuthorizeResponse struct {
 
 // RemoteModel represents a model returned by the provider's /v1/models endpoint.
 type RemoteModel struct {
-	ID               string   `json:"id"`
-	Description      *string  `json:"description,omitempty"`
-	Object           string   `json:"object"`
-	Created          int64    `json:"created"`
-	OwnedBy          string   `json:"owned_by"`
-	Name             string   `json:"name,omitempty"`
-	DisplayName      string   `json:"display_name,omitempty"`
-	Type             string   `json:"type,omitempty"`
-	Compatibilities  []string `json:"compatibilities,omitempty"`
-	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
-	ThinkingMode     string   `json:"thinking_mode,omitempty"`
-	ContextWindow    *int     `json:"context_window,omitempty"`
-	Dimensions       *int     `json:"dimensions,omitempty"`
+	ID                string   `json:"id"`
+	Description       *string  `json:"description,omitempty"`
+	Object            string   `json:"object"`
+	Created           int64    `json:"created"`
+	OwnedBy           string   `json:"owned_by"`
+	Name              string   `json:"name,omitempty"`
+	DisplayName       string   `json:"display_name,omitempty"`
+	Type              string   `json:"type,omitempty"`
+	Compatibilities   []string `json:"compatibilities,omitempty"`
+	ReasoningEfforts  []string `json:"reasoning_efforts,omitempty"`
+	ThinkingMode      string   `json:"thinking_mode,omitempty"`
+	ContextWindow     *int     `json:"context_window,omitempty"`
+	Dimensions        *int     `json:"dimensions,omitempty"`
+	CapabilitiesKnown bool     `json:"-"`
 }
 
 // ImportModelsResponse represents the response for importing models.
@@ -120,4 +125,10 @@ type ImportModelsResponse struct {
 	Updated int      `json:"updated"`
 	Skipped int      `json:"skipped"`
 	Models  []string `json:"models"`
+}
+
+// IsManagedModelCatalogClientType reports whether model rows are reconciled
+// against an account-scoped upstream catalog instead of manually maintained.
+func IsManagedModelCatalogClientType(clientType models.ClientType) bool {
+	return clientType == models.ClientTypeOpenAICodex || clientType == models.ClientTypeGitHubCopilot
 }

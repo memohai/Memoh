@@ -55,6 +55,12 @@ export const SETTINGS_ROUTE_SPECS: SettingsRouteSpec[] = [
     meta: { breadcrumb: i18nRef('sidebar.providers') }
   },
   {
+    name: 'runtimes',
+    path: '/settings/runtimes',
+    loader: () => import('@memohai/web/pages/runtimes/index.vue'),
+    meta: { breadcrumb: i18nRef('sidebar.runtimes') }
+  },
+  {
     name: 'people',
     path: '/settings/people',
     loader: () => import('@memohai/web/pages/people/index.vue'),

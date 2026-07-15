@@ -12,12 +12,12 @@ import ProviderSetting from './components/provider-setting.vue'
 import BackendCard from '@/components/settings/backend-card.vue'
 import DetailPane from '@/components/settings/detail-pane.vue'
 import PageShell from '@/components/page-shell/index.vue'
-import { useViewSwap } from '@/composables/useViewSwap'
+import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 
 const { t } = useI18n()
 
-const { data: providerData } = useQuery({
+const { data: providerData, isLoading: providersLoading } = useQuery({
   key: () => ['memory-providers'],
   query: async () => {
     const { data } = await getMemoryProviders({ throwOnError: true })
@@ -35,10 +35,6 @@ const externalProviders = computed(() => providers.value.filter((p) => p.provide
 const curProvider = ref<AdaptersProviderGetResponse | null>(null)
 provide('curMemoryProvider', curProvider)
 
-// 'detail' query key: mirrors detail-open into the URL so re-clicking Memory
-// in the settings sidebar while a backend's detail is open actually navigates
-// back (see useViewSwap.ts).
-const { view, direction, openDetail, backToList } = useViewSwap('detail')
 const advancedOpen = ref(false)
 const openStatus = reactive({ addOpen: false })
 
@@ -53,23 +49,27 @@ const builtinRef = ref<InstanceType<typeof BuiltinConfig> | null>(null)
 // one-shot so a later manual collapse isn't fought by refreshed data.
 let didAutoOpen = false
 
-function openExternal(provider: AdaptersProviderGetResponse) {
-  curProvider.value = provider
-  openDetail()
-}
+// Page-owned query key (unique under settings KeepAlive — see useViewSwap.ts).
+const {
+  view,
+  direction,
+  isDetailLoading,
+  openDetail: openExternal,
+  backToList: closeExternal,
+} = useRoutedViewSwap({
+  key: 'memoryBackend',
+  items: () => externalProviders.value,
+  selected: () => curProvider.value ?? undefined,
+  select: provider => curProvider.value = provider ?? null,
+  getRouteValue: provider => provider.id ?? '',
+  isLoading: () => providersLoading.value,
+  isReady: () => providerData.value !== undefined,
+})
 
 watch(externalProviders, (list) => {
   if (!didAutoOpen && list.length > 0) {
     advancedOpen.value = true
     didAutoOpen = true
-  }
-  const currentId = curProvider.value?.id
-  if (!currentId) return
-  const stillExists = list.find((p) => p.id === currentId)
-  if (stillExists) {
-    curProvider.value = stillExists
-  } else if (view.value === 'detail') {
-    backToList()
   }
 }, { immediate: true })
 </script>
@@ -167,7 +167,8 @@ watch(externalProviders, (list) => {
       v-else
       width="narrow"
       :back-label="t('sidebar.memory')"
-      @back="backToList()"
+      :loading="isDetailLoading || !curProvider?.id"
+      @back="closeExternal"
     >
       <ProviderSetting v-if="curProvider?.id" />
     </DetailPane>

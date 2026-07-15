@@ -560,6 +560,9 @@ func TestExtractFeishuInboundMentionBotMatched(t *testing.T) {
 	if !ok || !mentioned {
 		t.Fatalf("expected mention flag when bot is mentioned")
 	}
+	if alias, _ := got.Metadata["bot_alias"].(string); alias != "@open_id:"+botOpenID {
+		t.Fatalf("bot_alias = %q, want current bot mention alias", alias)
+	}
 }
 
 func TestExtractFeishuInboundMentionKeyRewriteAndTargets(t *testing.T) {

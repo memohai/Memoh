@@ -3,16 +3,41 @@ package flow
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/agent/sessionmode"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/session"
+	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/toolapproval"
+	"github.com/memohai/memoh/internal/workspace"
 )
+
+type denyToolApprovalSettingsQueries struct {
+	dbstore.Queries
+}
+
+type workspaceTargetPolicyErrorResolver struct {
+	err error
+}
+
+func (r workspaceTargetPolicyErrorResolver) ResolveWorkspaceTargetPolicy(context.Context, string, string) (toolapproval.WorkspaceTargetPolicy, error) {
+	return toolapproval.WorkspaceTargetPolicy{}, r.err
+}
+
+func (*denyToolApprovalSettingsQueries) GetSettingsByBotID(_ context.Context, botID pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
+	return sqlc.GetSettingsByBotIDRow{
+		BotID:              botID,
+		ToolApprovalConfig: []byte(`{"read":{"mode":"deny"}}`),
+	}, nil
+}
 
 func TestIsInteractiveApprovalSession(t *testing.T) {
 	t.Parallel()
@@ -61,6 +86,83 @@ func TestToolApprovalHandlerLimitsForcedApprovalRejectionReason(t *testing.T) {
 	}
 	if !strings.Contains(result.Reason, "[memoh pruned]") {
 		t.Fatalf("approval reason missing prune marker:\n%s", result.Reason)
+	}
+}
+
+func TestToolApprovalPolicyDenyWinsOverHookForcedApproval(t *testing.T) {
+	t.Parallel()
+
+	log := slog.New(slog.DiscardHandler)
+	settingsService := settings.NewService(log, &denyToolApprovalSettingsQueries{}, nil, nil)
+	approvalService := toolapproval.NewService(log, nil, settingsService)
+	resolver := &Resolver{toolApproval: approvalService}
+	handler := resolver.buildToolApprovalHandler(baseRunConfigParams{
+		BotID:       "11111111-1111-1111-1111-111111111111",
+		SessionID:   "22222222-2222-2222-2222-222222222222",
+		SessionType: sessionmode.Chat,
+	})
+
+	result, err := handler(agentpkg.ContextWithHookForcedApproval(context.Background(), "hook asks for review"), sdk.ToolCall{
+		ToolCallID: "call-1",
+		ToolName:   "read",
+		Input:      map[string]any{"path": "/data/file.txt"},
+	})
+	if err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if result.Decision != sdk.ToolApprovalDecisionRejected || result.Reason != toolapproval.PolicyDeniedReason {
+		t.Fatalf("result = %+v, want policy rejection", result)
+	}
+}
+
+func TestToolApprovalHandlerOnlyRecoversMissingWorkspaceTarget(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		resolveErr   error
+		wantApproved bool
+	}{
+		{name: "missing target", resolveErr: workspace.ErrWorkspaceTargetNotFound, wantApproved: true},
+		{name: "offline target", resolveErr: workspace.ErrRemoteRuntimeOffline},
+		{name: "internal failure", resolveErr: errors.New("database unavailable")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			log := slog.New(slog.DiscardHandler)
+			approvalService := toolapproval.NewService(log, nil, nil)
+			approvalService.SetWorkspaceTargetPolicyResolver(workspaceTargetPolicyErrorResolver{err: tt.resolveErr})
+			resolver := &Resolver{toolApproval: approvalService, logger: log}
+			handler := resolver.buildToolApprovalHandler(baseRunConfigParams{
+				BotID:       "bot-1",
+				SessionID:   "session-1",
+				SessionType: sessionmode.Chat,
+			})
+
+			result, err := handler(context.Background(), sdk.ToolCall{
+				ToolCallID: "call-1",
+				ToolName:   "exec",
+				Input: map[string]any{
+					"command":   "node --version",
+					"target_id": "server_workspace",
+				},
+			})
+			if tt.wantApproved {
+				if err != nil {
+					t.Fatalf("handler returned error: %v", err)
+				}
+				if result.Decision != sdk.ToolApprovalDecisionApproved {
+					t.Fatalf("decision = %q, want approved", result.Decision)
+				}
+				return
+			}
+			if !errors.Is(err, tt.resolveErr) {
+				t.Fatalf("handler error = %v, want %v", err, tt.resolveErr)
+			}
+		})
 	}
 }
 

@@ -707,6 +707,33 @@ func TestConvertModelMessagesToUIAssistantMessagesIncludesUserInputMetadata(t *t
 	}
 }
 
+func TestConvertModelMessagesToUIAssistantMessagesIncludesExecutionLocation(t *testing.T) {
+	t.Parallel()
+
+	messages := ConvertModelMessagesToUIAssistantMessages([]ModelMessage{{
+		Role: "assistant",
+		Content: mustUIRawJSON(t, []map[string]any{{
+			"type":       "tool-call",
+			"toolCallId": "call-1",
+			"toolName":   "exec",
+			"input":      map[string]any{"command": "pwd"},
+			"providerMetadata": map[string]any{
+				"execution_location": map[string]any{
+					"kind": "remote",
+					"name": "Office Mac",
+				},
+			},
+		}}),
+	}})
+
+	if len(messages) != 1 || messages[0].ExecutionLocation == nil {
+		t.Fatalf("messages = %#v, want execution location", messages)
+	}
+	if got := *messages[0].ExecutionLocation; got.Kind != "remote" || got.Name != "Office Mac" {
+		t.Fatalf("execution location = %#v", got)
+	}
+}
+
 func TestConvertMessagesToUITurnsIncludesReplyAndForwardMetadata(t *testing.T) {
 	now := time.Now().UTC()
 	turns := ConvertMessagesToUITurns([]messagepkg.Message{{
@@ -1011,6 +1038,36 @@ func TestUIMessageStreamConverterAccumulatesToolProgress(t *testing.T) {
 	}
 	if end[0].ID != start[0].ID || len(end[0].Progress) != 2 {
 		t.Fatalf("expected final snapshot to keep id and progress, got %#v", end[0])
+	}
+}
+
+func TestUIMessageStreamConverterAddsExecutionLocationToExistingTool(t *testing.T) {
+	t.Parallel()
+
+	converter := NewUIMessageStreamConverter()
+	start := converter.HandleEvent(UIMessageStreamEvent{
+		Type:       "tool_call_start",
+		ToolName:   "exec",
+		ToolCallID: "call-1",
+		Input:      map[string]any{"command": "pwd"},
+	})
+	update := converter.HandleEvent(UIMessageStreamEvent{
+		Type:       "tool_call_metadata",
+		ToolName:   "exec",
+		ToolCallID: "call-1",
+		Metadata: map[string]any{
+			"execution_location": map[string]any{
+				"kind": "remote",
+				"name": "Office Mac",
+			},
+		},
+	})
+
+	if len(start) != 1 || len(update) != 1 || update[0].ID != start[0].ID {
+		t.Fatalf("start/update = %#v/%#v, want one stable tool block", start, update)
+	}
+	if update[0].ExecutionLocation == nil || update[0].ExecutionLocation.Name != "Office Mac" {
+		t.Fatalf("execution location = %#v", update[0].ExecutionLocation)
 	}
 }
 

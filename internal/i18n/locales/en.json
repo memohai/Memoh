@@ -20,6 +20,9 @@
     "intro": "Just send me a message and we'll get going.",
     "tip": "New here? {help} shows what I can do. {new} starts a clean slate anytime."
   },
+  "groupCommand": {
+    "telegramTip": "Group chat: when typing a command manually, address it to me, for example {example}."
+  },
   "newSession": {
     "title": "✨ New {mode} started.",
     "modeChat": "chat",
@@ -184,7 +187,7 @@
         "approve": "approve the latest or specified pending tool call",
         "reject": "reject the latest or specified pending tool call"
       },
-      "globalHint": "Send any command to run it. For a group's actions, send /help <group> — e.g. /help model.",
+      "globalHint": "Tap a command above to run it.",
       "runForDetails": "Run {command} for details.",
       "summaryLabel": "Summary:",
       "usageLabel": "Usage:",
@@ -453,6 +456,7 @@
     "compact": {
       "unavailable": "Compaction isn't available right now.",
       "done": "✅ Context compacted.",
+      "noop": "Nothing to compact right now.",
       "noModel": "No compaction or chat model is configured for this bot."
     },
     "toolApproval": {

@@ -174,3 +174,15 @@ func TestServerKeepsLegacyHTTPErrorBehavior(t *testing.T) {
 		t.Fatalf("legacy body changed: %s", rec.Body.String())
 	}
 }
+
+func TestShouldSkipJWTOnlyForRuntimeConnectEndpoint(t *testing.T) {
+	t.Parallel()
+	if !shouldSkipJWT("/runtimes/connect") {
+		t.Fatal("Runtime key endpoint must authenticate before JWT middleware")
+	}
+	for _, path := range []string{"/runtimes", "/runtimes/connect/extra", "/users/me/runtimes"} {
+		if shouldSkipJWT(path) {
+			t.Fatalf("path=%q unexpectedly skips JWT", path)
+		}
+	}
+}

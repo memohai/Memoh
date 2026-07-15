@@ -27,6 +27,7 @@ type Service struct {
 	settings *settings.Service
 	hooks    *hooks.Service
 	logger   *slog.Logger
+	targets  WorkspaceTargetPolicyResolver
 
 	waiter *decision.Waiter[Request]
 }
@@ -49,30 +50,62 @@ func (s *Service) SetHookService(h *hooks.Service) {
 	}
 }
 
+func (s *Service) SetWorkspaceTargetPolicyResolver(resolver WorkspaceTargetPolicyResolver) {
+	if s != nil {
+		s.targets = resolver
+	}
+}
+
 func (s *Service) Evaluate(ctx context.Context, input CreatePendingInput) (Evaluation, error) {
 	eval, err := s.EvaluatePolicy(ctx, input)
-	if err != nil || eval.Decision == DecisionBypass {
+	if err != nil || eval.Decision != DecisionNeedsApproval {
 		return eval, err
 	}
+	input.ExecutionLocation = eval.ExecutionLocation
 	req, err := s.CreatePending(ctx, input)
 	if err != nil {
 		return Evaluation{}, err
 	}
-	return Evaluation{Decision: DecisionNeedsApproval, Request: req}, nil
+	return Evaluation{Decision: DecisionNeedsApproval, Request: req, ExecutionLocation: eval.ExecutionLocation}, nil
 }
 
 func (s *Service) EvaluatePolicy(ctx context.Context, input CreatePendingInput) (Evaluation, error) {
-	if s == nil || s.settings == nil {
+	if s == nil {
+		return Evaluation{Decision: DecisionBypass}, nil
+	}
+	if input.WorkspaceTargeted && s.targets != nil {
+		args, ok := input.ToolInput.(map[string]any)
+		if !ok {
+			return Evaluation{}, errors.New("workspace tool input must be an object")
+		}
+		target, err := s.targets.ResolveWorkspaceTargetPolicy(ctx, input.BotID, readString(args, "target_id"))
+		if err != nil {
+			return Evaluation{}, err
+		}
+		if strings.TrimSpace(target.TargetID) == "" {
+			return Evaluation{}, errors.New("workspace target resolver returned an empty target_id")
+		}
+		// Mutate the original map so immediate execution and a deferred pending
+		// request use the same canonical target even if Primary changes later.
+		args["target_id"] = target.TargetID
+		return Evaluation{
+			Decision: policyDecision(target.Config, input.ToolName, args),
+			ExecutionLocation: &ExecutionLocation{
+				TargetID:      strings.TrimSpace(target.TargetID),
+				Kind:          strings.TrimSpace(target.Kind),
+				Name:          strings.TrimSpace(target.Name),
+				WorkspacePath: strings.TrimSpace(target.WorkspacePath),
+			},
+		}, nil
+	}
+	if s.settings == nil {
 		return Evaluation{Decision: DecisionBypass}, nil
 	}
 	botSettings, err := s.settings.GetBot(ctx, input.BotID)
 	if err != nil {
 		return Evaluation{}, err
 	}
-	if !needsApproval(botSettings.ToolApprovalConfig, input.ToolName, input.ToolInput) {
-		return Evaluation{Decision: DecisionBypass}, nil
-	}
-	return Evaluation{Decision: DecisionNeedsApproval}, nil
+	return Evaluation{Decision: policyDecision(botSettings.ToolApprovalConfig, input.ToolName, input.ToolInput)}, nil
 }
 
 func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (Request, error) {
@@ -125,11 +158,20 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 		return Request{}, err
 	}
 	req := requestFromRow(row)
+	req.ExecutionLocation = cloneExecutionLocation(input.ExecutionLocation)
 	if req.Status != StatusPending {
 		return Request{}, ErrAlreadyDecided
 	}
 	_ = s.runApprovalHook(ctx, hooks.EventApprovalRequested, input, req, false)
 	return req, nil
+}
+
+func cloneExecutionLocation(location *ExecutionLocation) *ExecutionLocation {
+	if location == nil {
+		return nil
+	}
+	clone := *location
+	return &clone
 }
 
 func (s *Service) ResolveTarget(ctx context.Context, input ResolveInput) (Request, error) {

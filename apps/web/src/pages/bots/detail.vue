@@ -260,7 +260,7 @@ import {
 import {
   SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, Settings, MessageSquare,
   BrainCircuit, ShieldAlert, HeartPulse, Database, Mail, Link, Clock, Server, FileBox, Zap,
-  Monitor, Globe, Bot as BotIcon, PackageOpen, ChevronLeft, Workflow
+  Monitor, Globe, Bot as BotIcon, PackageOpen, ChevronLeft, Workflow, Laptop
 } from 'lucide-vue-next'
 import { computed, ref, watch, onMounted, toValue, nextTick, inject } from 'vue'
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
@@ -296,6 +296,7 @@ import BotEmail from './components/bot-email.vue'
 import BotOverview from './components/bot-overview.vue'
 import BotSchedule from './components/bot-schedule.vue'
 import BotContainer from './components/bot-container.vue'
+import BotRemoteRuntime from './components/bot-remote-runtime.vue'
 import BotAccess from './components/bot-access.vue'
 import BotAcp from './components/bot-acp.vue'
 import AvatarEditDialog from './components/avatar-edit-dialog.vue'
@@ -392,6 +393,7 @@ const tabList = computed(() => {
     { value: 'overview', label: 'bots.tabs.overview', icon: LayoutDashboard, component: BotOverview, params: {} },
     { value: 'general', label: 'bots.tabs.general', icon: Settings, component: BotSettings, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
     { value: 'desktop', label: 'bots.tabs.desktop', icon: Monitor, component: BotDesktop, params: { 'bot-id': bot_id }, containerWorkspaceOnly: true },
+    { value: 'remote-runtime', label: 'bots.tabs.remoteRuntime', icon: Laptop, component: BotRemoteRuntime, params: { 'bot-id': bot_id } },
     { value: 'container', label: 'bots.tabs.container', icon: Server, component: BotContainer, params: {}, containerWorkspaceOnly: true },
     { value: 'network', label: 'bots.tabs.network', icon: Globe, component: BotNetwork, params: { 'bot-id': bot_id }, containerWorkspaceOnly: true },
     { value: 'memory', label: 'bots.tabs.memory', icon: Database, component: BotMemory, params: { 'bot-id': bot_id } },
@@ -436,6 +438,7 @@ const searchIndex = computed(() => {
     { tab: 'general', key: 'bots.settings.dangerZone', keywords: ['delete', 'remove'] },
     { tab: 'container', key: 'bots.container.dataTitle', keywords: ['docker', 'image', 'gpu', 'volume'] },
     { tab: 'container', key: 'bots.container.metricsTitle', keywords: ['cpu', 'ram', 'storage'] },
+    { tab: 'remote-runtime', key: 'bots.remoteRuntime.title', keywords: ['files', 'commands', 'computer', 'server', '文件', '命令', '电脑', '服务器', 'ファイル', 'コマンド'] },
     { tab: 'memory', key: 'bots.memory.title', keywords: ['vector', 'database', 'pgvector', 'embed'] },
     { tab: 'channels', key: 'bots.channels.configured', keywords: ['telegram', 'discord', 'wechat', 'slack'] },
     { tab: 'access', key: 'bots.access.title', keywords: ['permissions', 'acl', 'rules', 'allow', 'deny'] },
@@ -481,7 +484,7 @@ function selectTab(value: string): void {
 const groupedTabs = computed(() => {
   const coreKeys = ['overview', 'general', 'channels']
   const capabilityKeys = ['plugins', 'skills', 'hooks', 'tool-approval', 'acp', 'mcp', 'memory']
-  const runtimeKeys = ['desktop', 'container', 'network', 'schedule', 'compaction', 'heartbeat']
+  const runtimeKeys = ['desktop', 'remote-runtime', 'container', 'network', 'schedule', 'compaction', 'heartbeat']
   const securityKeys = ['access', 'email']
 
   return [
@@ -605,6 +608,18 @@ watch(botId, () => {
   isEditingBotName.value = false
   botNameDraft.value = ''
 })
+
+// Resolve the live workspace backend as soon as the bot is known: the tab
+// policy (container-only tabs hidden for local/remote) must not wait for the
+// user to open the Container tab.
+watch([botId, canManageBot], async ([id, manage]) => {
+  containerInfo.value = null
+  if (!id || !manage) return
+  const result = await getBotsByBotIdContainer({ path: { bot_id: id } })
+  if (result.error === undefined && botId.value === id) {
+    containerInfo.value = result.data ?? null
+  }
+}, { immediate: true })
 
 watch([activeTab, botId, canManageBot], ([tab]) => {
   if (!botId.value) {

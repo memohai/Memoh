@@ -191,7 +191,7 @@ func BuildReasoningOptions(cfg SDKModelConfig) []sdk.GenerateOption {
 		case rc.Disabled:
 			return []sdk.GenerateOption{sdk.WithReasoningEffort(ReasoningEffortNone)}
 		case rc.Active && rc.Effort != "":
-			return []sdk.GenerateOption{sdk.WithReasoningEffort(openAIWireEffort(rc.Effort))}
+			return []sdk.GenerateOption{sdk.WithReasoningEffort(openAIWireEffort(ct, rc.Effort))}
 		default:
 			return nil
 		}
@@ -214,20 +214,20 @@ func BuildReasoningOptions(cfg SDKModelConfig) []sdk.GenerateOption {
 		return nil
 
 	case ClientTypeOpenAIResponses, ClientTypeOpenAICodex, ClientTypeOpenAICompletions:
-		return openAIEffortOptions(rc)
+		return openAIEffortOptions(ct, rc)
 
 	default:
-		return openAIEffortOptions(rc)
+		return openAIEffortOptions(ct, rc)
 	}
 }
 
 // openAIEffortOptions maps a reasoning decision to OpenAI-style reasoning.effort.
 // OpenAI models have no real on/off switch, so "off" is approximated by the
 // lowest effort the model supports (none when available, otherwise minimal).
-func openAIEffortOptions(rc *ReasoningConfig) []sdk.GenerateOption {
+func openAIEffortOptions(clientType ClientType, rc *ReasoningConfig) []sdk.GenerateOption {
 	switch {
 	case rc.Active:
-		effort := openAIWireEffort(rc.Effort)
+		effort := openAIWireEffort(clientType, rc.Effort)
 		if effort == "" {
 			effort = ReasoningEffortMedium
 		}
@@ -239,7 +239,7 @@ func openAIEffortOptions(rc *ReasoningConfig) []sdk.GenerateOption {
 		// When the model advertises no such off-ish tier, OffEffort is empty and
 		// we omit reasoning_effort entirely so the provider default (no thinking
 		// for toggle/Anthropic-compat models) applies.
-		off := openAIWireEffort(rc.OffEffort)
+		off := openAIWireEffort(clientType, rc.OffEffort)
 		if off == "" {
 			return nil
 		}
@@ -249,13 +249,10 @@ func openAIEffortOptions(rc *ReasoningConfig) []sdk.GenerateOption {
 	}
 }
 
-// openAIWireEffort is a last-resort guard that rewrites effort values the
-// OpenAI wire format rejects. The primary filter lives in the resolver's
-// effectiveReasoningEfforts (which removes "max" from the selectable set for
-// OpenAI-format clients), and the Twilight SDK's openai provider package
-// also normalizes max→xhigh independently. This function is defence-in-depth.
-func openAIWireEffort(effort string) string {
-	if effort == ReasoningEffortMax {
+// openAIWireEffort retains the generic OpenAI clients' existing max-to-xhigh
+// compatibility behavior. Codex accepts the catalog-advertised max value.
+func openAIWireEffort(clientType ClientType, effort string) string {
+	if clientType != ClientTypeOpenAICodex && effort == ReasoningEffortMax {
 		return ReasoningEffortXHigh
 	}
 	return effort

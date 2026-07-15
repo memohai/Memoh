@@ -402,7 +402,7 @@ func (m *Manager) archiveSnapshotPath(key string) string {
 // It is best-effort context for the export dialog; callers should treat an
 // error (e.g. a stopped or unreachable container) as "unknown".
 func (m *Manager) CountData(ctx context.Context, botID string) (int, error) {
-	client, err := m.MCPClient(ctx, botID)
+	client, err := m.nativeMCPClient(ctx, botID)
 	if err != nil {
 		return 0, fmt.Errorf("grpc connect: %w", err)
 	}
@@ -420,7 +420,7 @@ func (m *Manager) CountData(ctx context.Context, botID string) (int, error) {
 }
 
 func (m *Manager) exportDataViaGRPC(ctx context.Context, botID string) (io.ReadCloser, error) {
-	client, err := m.MCPClient(ctx, botID)
+	client, err := m.nativeMCPClient(ctx, botID)
 	if err != nil {
 		return nil, fmt.Errorf("grpc connect: %w", err)
 	}
@@ -540,7 +540,7 @@ func (m *Manager) restoreArchiveSnapshotFromRef(ctx context.Context, ref *locked
 	}
 	defer func() { _ = f.Close() }()
 
-	client, err := m.MCPClient(ctx, ref.botID)
+	client, err := m.nativeMCPClient(ctx, ref.botID)
 	if err != nil {
 		return fmt.Errorf("grpc connect: %w", err)
 	}
@@ -552,7 +552,7 @@ func (m *Manager) restoreArchiveSnapshotFromRef(ctx context.Context, ref *locked
 }
 
 func (m *Manager) importDataViaGRPC(ctx context.Context, botID string, r io.Reader) error {
-	client, err := m.MCPClient(ctx, botID)
+	client, err := m.nativeMCPClient(ctx, botID)
 	if err != nil {
 		return fmt.Errorf("grpc connect: %w", err)
 	}

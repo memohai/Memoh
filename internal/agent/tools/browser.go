@@ -23,24 +23,26 @@ import (
 	displaypkg "github.com/memohai/memoh/internal/display"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/workspace/bridge"
+	scriptassets "github.com/memohai/memoh/scripts"
 )
 
 const (
-	browserCDPAddress             = "127.0.0.1:9222"
-	browserCDPBaseURL             = "http://" + browserCDPAddress
-	browserToolTimeout            = 45 * time.Second
-	browserStartupTimeout         = 12 * time.Second
-	browserScreenshotSubdir       = "browser-screenshots"
-	computerScreenshotSubdir      = "computer-screenshots"
-	defaultComputerWidth          = 1280
-	defaultComputerHeight         = 800
-	rfbButtonLeft            byte = 1
-	rfbButtonMiddle          byte = 2
-	rfbButtonRight           byte = 4
-	rfbWheelUp               byte = 8
-	rfbWheelDown             byte = 16
-	rfbWheelLeft             byte = 32
-	rfbWheelRight            byte = 64
+	browserCDPAddress                   = "127.0.0.1:9222"
+	browserCDPBaseURL                   = "http://" + browserCDPAddress
+	browserToolTimeout                  = 45 * time.Second
+	browserStartupTimeout               = 12 * time.Second
+	computerDisplayStartupTimeout int32 = 1200
+	browserScreenshotSubdir             = "browser-screenshots"
+	computerScreenshotSubdir            = "computer-screenshots"
+	defaultComputerWidth                = 1280
+	defaultComputerHeight               = 800
+	rfbButtonLeft                 byte  = 1
+	rfbButtonMiddle               byte  = 2
+	rfbButtonRight                byte  = 4
+	rfbWheelUp                    byte  = 8
+	rfbWheelDown                  byte  = 16
+	rfbWheelLeft                  byte  = 32
+	rfbWheelRight                 byte  = 64
 )
 
 type BrowserProvider struct {
@@ -352,6 +354,9 @@ func (p *BrowserProvider) execComputerScreenshot(ctx context.Context, session Se
 	if err != nil {
 		return nil, err
 	}
+	if _, err := p.ensureComputerDisplay(ctx, botID); err != nil {
+		return nil, err
+	}
 	img, mime, err := p.display.Screenshot(ctx, botID)
 	if err != nil {
 		return nil, err
@@ -364,7 +369,7 @@ func (p *BrowserProvider) execComputerSnapshot(ctx context.Context, session Sess
 	if err != nil {
 		return nil, err
 	}
-	client, err := p.containers.MCPClient(ctx, botID)
+	client, err := p.ensureComputerDisplay(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
@@ -386,6 +391,9 @@ func (p *BrowserProvider) execComputerAction(ctx context.Context, session Sessio
 	action := StringArg(args, "action")
 	if action == "" {
 		return nil, errors.New("action is required")
+	}
+	if _, err := p.ensureComputerDisplay(ctx, botID); err != nil {
+		return nil, err
 	}
 	ref := normalizeBrowserRef(StringArg(args, "ref"))
 	switch action {
@@ -583,6 +591,55 @@ func (p *BrowserProvider) requireComputerDisplay(session SessionContext) (string
 		return "", errors.New("workspace display service is not configured")
 	}
 	return botID, nil
+}
+
+const computerDisplayReadyCommand = `# memoh-computer-display-ready-probe
+test -S /tmp/.X11-unix/X99 &&
+awk -v port="$(printf '%04X' 5999)" 'toupper($2) ~ ":" port "$" && $4 == "0A" { found = 1 } END { exit found ? 0 : 1 }' /proc/net/tcp /proc/net/tcp6 2>/dev/null`
+
+func (p *BrowserProvider) ensureComputerDisplay(ctx context.Context, botID string) (*bridge.Client, error) {
+	if p.containers == nil {
+		return nil, errors.New("workspace runtime provider is not configured")
+	}
+	client, err := p.containers.MCPClient(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	if computerDisplayReady(ctx, client) {
+		return client, nil
+	}
+
+	result, err := client.Exec(ctx, scriptassets.DisplayPrepareCommand(), "/", computerDisplayStartupTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("prepare workspace desktop: %w", err)
+	}
+	if result == nil || result.ExitCode != 0 {
+		diagnostic := "display preparation failed"
+		if result != nil {
+			diagnostic = strings.TrimSpace(result.Stderr)
+			if diagnostic == "" {
+				diagnostic = strings.TrimSpace(result.Stdout)
+			}
+			if diagnostic == "" {
+				diagnostic = fmt.Sprintf("display preparation exited with code %d", result.ExitCode)
+			}
+		}
+		return nil, errors.New(diagnostic)
+	}
+	if !computerDisplayReady(ctx, client) {
+		return nil, errors.New("workspace desktop did not become reachable after preparation")
+	}
+	return client, nil
+}
+
+func computerDisplayReady(ctx context.Context, client *bridge.Client) bool {
+	if client == nil {
+		return false
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	result, err := client.Exec(probeCtx, computerDisplayReadyCommand, "/", 3)
+	return err == nil && result != nil && result.ExitCode == 0
 }
 
 func (p *BrowserProvider) ensureDisplayEnabled(ctx context.Context, botID string) error {

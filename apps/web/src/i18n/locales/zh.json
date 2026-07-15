@@ -141,6 +141,7 @@
     "session": "会话列表",
     "chat": "对话",
     "bots": "智能体",
+    "runtimes": "电脑",
     "providers": "模型服务商",
     "settings": "系统设置",
     "webSearch": "搜索引擎",
@@ -167,6 +168,77 @@
     "about": "关于",
     "switchBot": "切换智能体",
     "manageBots": "管理智能体"
+  },
+  "runtimes": {
+    "title": "电脑",
+    "description": "连接可供 Bot 使用的电脑，再到每个 Bot 的“已连接电脑”中添加。",
+    "connect": "连接电脑",
+    "connectOther": "连接其他电脑",
+    "computers": "已连接的电脑",
+    "otherComputers": "其他电脑",
+    "loadingComputers": "正在加载电脑...",
+    "loadFailed": "无法加载电脑",
+    "loadFailedDescription": "请检查服务器连接后重试。",
+    "retry": "重试",
+    "emptyTitle": "还没有连接电脑",
+    "emptyDescription": "创建连接命令，然后在你希望 Memoh 使用的电脑上运行它。",
+    "emptyOtherTitle": "还没有连接其他电脑",
+    "emptyOtherDescription": "如果希望 Bot 使用其他设备，可以再连接一台电脑。",
+    "waitingForConnection": "等待运行连接命令",
+    "connected": "可用",
+    "copyCommand": "复制连接命令",
+    "revoke": "断开连接",
+    "revokeTitle": "断开这台电脑的连接？",
+    "revokeDescription": "{name} 将断开连接，原连接密钥也会失效。电脑上的文件不会被删除。",
+    "revokeSuccess": "已断开电脑连接",
+    "revokeFailed": "无法断开电脑连接",
+    "status": {
+      "online": "在线",
+      "offline": "离线",
+      "revoked": "已移除权限",
+      "owner_mismatch": "已不可用",
+      "client_update_required": "需要更新"
+    },
+    "thisComputer": {
+      "title": "这台电脑",
+      "allow": "允许 Bot 使用这台电脑",
+      "description": "打开后需要给这台电脑命名并建立连接，然后才能将它添加给各个 Bot。",
+      "enabledDescription": "{name} 是这台电脑在 Bot 设置、审批和聊天记录中显示的名称。只有添加了它的 Bot 才能访问你主目录下的文件，并以当前用户身份执行命令。",
+      "fallbackName": "Memoh Desktop",
+      "dialogTitle": "允许使用这台电脑",
+      "dialogDescription": "给这台电脑起一个固定名称，以后在任何设备上使用 Memoh 时都会显示这个名称。",
+      "nameHelp": "请填写一个在 Bot 设置、审批和聊天记录中都容易辨认的名称。",
+      "confirm": "允许使用",
+      "loading": "正在读取这台电脑...",
+      "loadFailed": "无法读取这台电脑的连接状态",
+      "loadFailedDescription": "请重启 Memoh Desktop 后重试。",
+      "invalidCredential": "服务器没有返回可用的连接信息。",
+      "enableFailed": "无法允许 Bot 使用这台电脑",
+      "disableFailed": "无法关闭这台电脑的使用权限",
+      "status": {
+        "disabled": "已关闭",
+        "connecting": "连接中",
+        "connected": "可用",
+        "disconnected": "正在重连",
+        "stopped": "不可用",
+        "error": "需要处理"
+      }
+    },
+    "connectDialog": {
+      "title": "连接一台电脑",
+      "description": "给这个连接起一个容易辨认的名称。",
+      "name": "电脑名称",
+      "nameHelp": "可以按位置或用途命名，例如“办公室 Mac”。",
+      "namePlaceholder": "办公室 Mac",
+      "nameRequired": "请输入电脑名称",
+      "create": "创建命令",
+      "createFailed": "无法创建连接",
+      "runTitle": "运行这条命令",
+      "runDescription": "在你希望 Memoh 使用的电脑上运行，并保持进程运行。",
+      "command": "连接命令",
+      "keyOnce": "命令中包含私密的连接密钥。断开这台电脑后，密钥会立即失效。",
+      "done": "完成"
+    }
   },
   "breadcrumb": {
     "main": "首页"
@@ -508,6 +580,7 @@
       "edit": "编辑",
       "apply_patch": "应用补丁",
       "list": "列出",
+      "list_execution_locations": "查看电脑和服务器工作区",
       "exec": "执行",
       "bg_status": "后台任务",
       "list_background": "列出后台任务",
@@ -609,7 +682,8 @@
       "generic": "调用工具",
       "approve": "允许",
       "reject": "拒绝",
-      "pendingApproval": "等待审核",
+    "pendingApproval": "等待审核",
+    "executionLocation": "执行位置",
       "pendingUserInput": "等待输入",
       "userInputSubmitted": "已回答",
       "userInputCanceled": "已取消",
@@ -945,6 +1019,7 @@
     "searchNoResults": "没有匹配的模型",
     "emptyTitle": "暂无模型",
     "emptyDescription": "手动添加，或从该服务商导入完整列表。",
+    "managedEmptyDescription": "请先完成授权，再刷新托管模型目录。",
     "clientType": "客户端类型",
     "clientTypePlaceholder": "选择客户端类型",
     "typeRequired": "请选择类型",
@@ -978,6 +1053,10 @@
     "importModels": "导入模型",
     "importSuccess": "成功导入 {created} 个模型，跳过 {skipped} 个",
     "importFailed": "导入模型失败",
+    "refreshModels": "刷新模型",
+    "refreshSuccess": "模型目录已刷新：新增 {created} 个，更新 {updated} 个",
+    "refreshFailed": "刷新模型目录失败",
+    "refreshConfirmHint": "获取此账号当前可用的最新模型，并从模型选择器中移除已不可用的模型。",
     "importConfirmHint": "将从该服务商的 API 导入模型，默认兼容性为视觉、工具调用和推理。",
     "showingCount": "显示 {count} / {total}"
   },
@@ -1025,30 +1104,19 @@
       "descriptionOff": "关闭后每次请求都会重新计费完整的系统提示词与工具列表，仅在需要严格隔离上下文时使用。"
     },
     "oauth": {
-      "openaiTitle": "OpenAI OAuth",
-      "openaiDescription": "使用你的 ChatGPT 账号为该提供商授权，以启用 Codex 兼容的 OpenAI 访问。",
+      "openaiDeviceHint": "在 OpenAI 验证页面输入此一次性验证码。",
       "openaiCreateHint": "请先保存提供商，再到详情面板完成授权。",
-      "githubTitle": "GitHub Copilot OAuth",
-      "githubDescription": "为当前 Memoh 账号连接 GitHub Copilot。",
-      "githubDeviceTitle": "GitHub Copilot Device Authorization",
-      "githubDeviceDescription": "启动设备授权后，打开 GitHub 验证页面并输入下方显示的用户代码。",
       "githubCreateHint": "请先保存提供商，再到详情面板启动设备授权。",
-      "githubDeviceHint": "打开下方验证地址，并输入这个用户代码，为当前 Memoh 账号完成授权。",
-      "authorize": "授权",
-      "deviceAuthorize": "启动设备授权",
+      "githubDeviceHint": "在 GitHub 验证页面输入此一次性验证码。",
       "authorizeFailed": "启动授权失败",
-      "authorizeTimedOut": "授权超时，请重试。",
       "authorizeSuccess": "授权成功",
       "revoke": "撤销授权",
       "revokeFailed": "撤销授权失败",
       "revokeSuccess": "授权已撤销",
       "copyFailed": "复制设备代码失败",
-      "connectedAccount": "已连接账号",
-      "callback": "回调地址",
       "deviceVerificationUri": "验证地址",
       "deviceUserCode": "用户代码",
       "deviceExpiresAt": "过期时间",
-      "statusFailed": "加载 OAuth 状态失败",
       "status": {
         "checking": "正在检查授权状态...",
         "authorized": "已授权",
@@ -1058,7 +1126,15 @@
         "expired": "授权已过期，请重新授权。",
         "missing": "尚未授权。",
         "notConfigured": "当前提供商未正确配置 OAuth。"
-      }
+      },
+      "sectionTitle": "账号",
+      "chatgptAccount": "ChatGPT 账号",
+      "githubAccount": "GitHub 账号",
+      "connect": "连接",
+      "openaiConnectHint": "登录 ChatGPT 账号后即可使用其模型。",
+      "githubConnectHint": "登录 GitHub 账号后即可使用 Copilot 模型。",
+      "revokeConfirm": "确定撤销此账号的授权？",
+      "connecting": "连接中"
     }
   },
   "webSearch": {
@@ -1463,7 +1539,21 @@
   "bots": {
     "toolApproval": {
       "title": "工具调用审核",
-      "intro": "在 Bot 写入文件或运行命令前，先审核它的动作。",
+      "intro": "分别设置这个 Bot 在工作区和每台已连接电脑上可以执行的操作。",
+      "loading": "正在加载审核规则...",
+      "loadFailed": "无法加载工具审核",
+      "loadFailedDescription": "请检查服务器连接后重试。",
+      "saveFailed": "无法保存工具审核",
+      "target": {
+        "title": "审核位置",
+        "label": "工作区或电脑",
+        "description": "规则只对当前选择的工作区或电脑生效。"
+      },
+      "modes": {
+        "allow": "允许",
+        "ask": "询问",
+        "deny": "拒绝"
+      },
       "status": {
         "on": "审核已开启",
         "off": "审核已关闭"
@@ -1805,6 +1895,7 @@
       "network": "网络",
       "memory": "记忆",
       "channels": "平台",
+      "remoteRuntime": "已连接电脑",
       "container": "工作区",
       "mcp": "MCP",
       "heartbeat": "心跳",
@@ -1818,6 +1909,44 @@
       "access": "访问控制",
       "terminal": "终端",
       "settings": "设置"
+    },
+    "remoteRuntime": {
+      "title": "已连接电脑",
+      "description": "让这个 Bot 在原有工作区之外，还可以使用已连接电脑读写文件和执行命令。",
+      "workspaceTitle": "使用位置",
+      "loading": "正在加载使用位置...",
+      "loadFailed": "无法加载使用位置",
+      "loadFailedDescription": "请检查服务器连接后重试。",
+      "addComputer": "添加电脑",
+      "primary": "默认位置",
+      "primaryDescription": "未另行选择时，文件和命令会在这里执行。该位置离线时，Memoh 不会自动切换到其他位置。",
+      "primarySaveFailed": "无法切换默认位置",
+      "defaultBadge": "默认",
+      "nativeWorkspace": "服务器工作区",
+      "serverDescription": "这个 Bot 原有的服务器工作区。",
+      "folderSummary": "起始文件夹：{path}",
+      "thisComputerOff": "使用这台电脑",
+      "thisComputerOffDescription": "先到“电脑”中打开使用权限，再在这里添加这台电脑。",
+      "openComputerSettings": "打开电脑设置",
+      "computer": "电脑",
+      "computerDescription": "从“电脑”中已允许使用的电脑里选择一台。",
+      "selectComputer": "选择电脑",
+      "noAvailableComputers": "没有其他可用的电脑。请先到“电脑”中连接或打开一台电脑。",
+      "path": "起始文件夹",
+      "pathDescription": "相对于允许 Memoh 使用的文件夹。留空时使用 {path}；填写 . 表示直接使用该文件夹。",
+      "unknownComputer": "不可用的电脑",
+      "addTitle": "将电脑添加给这个 Bot",
+      "editTitle": "编辑这台电脑",
+      "mountDescription": "选择一台电脑，并设置这个 Bot 读写文件和执行命令的起始文件夹。",
+      "addSuccess": "已将电脑添加给 Bot",
+      "updateSuccess": "已更新电脑设置",
+      "saveFailed": "无法保存电脑",
+      "removeFromBot": "从 Bot 中移除",
+      "deleteTitle": "从这个 Bot 中移除这台电脑？",
+      "deleteDescription": "将从这个 Bot 中移除 {name}，不会删除电脑上的文件。",
+      "deletePrimaryDescription": "{name} 当前是默认位置。移除后，服务器工作区会成为默认位置；电脑上的文件不会被删除。",
+      "deleteSuccess": "已从 Bot 中移除电脑",
+      "deleteFailed": "无法从这个 Bot 中移除电脑"
     },
     "desktop": {
       "title": "桌面环境",
@@ -3152,5 +3281,12 @@
       "saveFailed": "保存失败，请重试",
       "noProviderWarning": "你尚未配置 AI 服务商，Bot 将无法回复消息。请前往 设置 → 服务商 添加"
     }
+  },
+  "deviceCode": {
+    "copyAndOpen": "复制并打开",
+    "retry": "重新获取验证码",
+    "expiresIn": "{time} 后过期",
+    "codeExpired": "验证码已过期",
+    "copyFailed": "复制验证码失败"
   }
 }

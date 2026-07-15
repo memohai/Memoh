@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -23,6 +24,7 @@ import (
 	"github.com/memohai/memoh/internal/hooks"
 	"github.com/memohai/memoh/internal/identity"
 	netctl "github.com/memohai/memoh/internal/network"
+	"github.com/memohai/memoh/internal/settings"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -96,6 +98,7 @@ type Manager struct {
 	containerLocks    map[string]*sync.Mutex
 	grpcPool          *bridge.Pool
 	bridgeTLS         *BridgeTLSRuntimeOptions
+	remote            *RemoteWorkspaceService
 	legacyMu          sync.RWMutex
 	legacyIPs         map[string]string // botID → IP for pre-bridge containers
 }
@@ -132,6 +135,10 @@ func NewManager(log *slog.Logger, service runtimeService, networkController netc
 
 func (m *Manager) SetHookService(h *hooks.Service) {
 	m.hookService = h
+}
+
+func (m *Manager) SetRemoteWorkspaceService(service *RemoteWorkspaceService) {
+	m.remote = service
 }
 
 // SetBridgeTLS enables strict mTLS on TCP bridge dials and injects bridge-side
@@ -240,9 +247,7 @@ func (m *Manager) clearLegacyRoute(botID string) {
 	m.grpcPool.Remove(botID)
 }
 
-// MCPClient returns a gRPC client for the given bot's container.
-// Implements bridge.Provider.
-func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
+func (m *Manager) nativeMCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
 	if provider, ok := m.service.(bridge.Provider); ok {
 		client, err := provider.MCPClient(ctx, botID)
 		if err == nil {
@@ -255,12 +260,73 @@ func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, 
 	return m.grpcPool.Get(ctx, botID)
 }
 
+func (m *Manager) NativeMCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
+	return m.nativeMCPClient(ctx, botID)
+}
+
+// MCPClient implements bridge.Provider and resolves the Bot's Primary target.
+func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
+	if m.remote != nil {
+		if target, primary, err := m.remote.ResolvePrimary(ctx, botID); err != nil || primary {
+			return target.Client, err
+		}
+	}
+	return m.nativeMCPClient(ctx, botID)
+}
+
+func (m *Manager) ResolveWorkspaceTarget(ctx context.Context, botID, targetID string) (ResolvedWorkspaceTarget, error) {
+	targetID = strings.TrimSpace(targetID)
+	if targetID == "" && m.remote != nil {
+		if target, primary, err := m.remote.ResolvePrimary(ctx, botID); err != nil || primary {
+			return target, err
+		}
+	}
+	if targetID == "" || targetID == WorkspaceTargetNative {
+		primary := targetID == ""
+		if targetID == WorkspaceTargetNative && m.remote != nil {
+			if _, err := m.remote.GetPrimaryMount(ctx, botID); err == nil {
+				primary = false
+			} else if !errors.Is(err, ErrRemoteWorkspaceNotBound) {
+				return ResolvedWorkspaceTarget{}, err
+			} else {
+				primary = true
+			}
+		}
+		client, err := m.nativeMCPClient(ctx, botID)
+		if err != nil {
+			return ResolvedWorkspaceTarget{}, err
+		}
+		info, err := m.nativeWorkspaceInfo(ctx, botID)
+		if err != nil {
+			return ResolvedWorkspaceTarget{}, err
+		}
+		approval, err := m.nativeToolApprovalConfig(ctx, botID)
+		if err != nil {
+			return ResolvedWorkspaceTarget{}, err
+		}
+		return ResolvedWorkspaceTarget{
+			TargetID:      WorkspaceTargetNative,
+			Kind:          WorkspaceTargetNative,
+			Name:          "Server Workspace",
+			Primary:       primary,
+			WorkspacePath: info.DefaultWorkDir,
+			Client:        client,
+			Info:          info,
+			Approval:      approval,
+		}, nil
+	}
+	if _, ok := canonicalWorkspaceUUID(targetID); !ok || m.remote == nil {
+		return ResolvedWorkspaceTarget{}, ErrWorkspaceTargetNotFound
+	}
+	return m.remote.ResolveMount(ctx, botID, targetID)
+}
+
 func (m *Manager) WaitForWorkspaceReady(ctx context.Context, botID string) error {
 	deadline := time.Now().Add(bridgeReadyTimeout)
 	var lastErr error
 	for {
 		attemptCtx, cancel := context.WithTimeout(ctx, bridgeReadyRPCTimeout)
-		client, err := m.MCPClient(attemptCtx, botID)
+		client, err := m.nativeMCPClient(attemptCtx, botID)
 		if err == nil {
 			_, err = client.Stat(attemptCtx, "/")
 		}
@@ -282,6 +348,15 @@ func (m *Manager) WaitForWorkspaceReady(ctx context.Context, botID string) error
 }
 
 func (m *Manager) WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error) {
+	if m.remote != nil {
+		if target, primary, err := m.remote.ResolvePrimary(ctx, botID); err != nil || primary {
+			return target.Info, err
+		}
+	}
+	return m.nativeWorkspaceInfo(ctx, botID)
+}
+
+func (m *Manager) nativeWorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error) {
 	if provider, ok := m.service.(bridge.WorkspaceInfoProvider); ok {
 		info, err := provider.WorkspaceInfo(ctx, botID)
 		if err == nil {
@@ -296,6 +371,73 @@ func (m *Manager) WorkspaceInfo(ctx context.Context, botID string) (bridge.Works
 		DefaultWorkDir: config.DefaultDataMount,
 	}
 	return withACPToolsEndpoint(info), nil
+}
+
+func (m *Manager) nativeToolApprovalConfig(ctx context.Context, botID string) (settings.ToolApprovalConfig, error) {
+	config := settings.DefaultToolApprovalConfig()
+	if m.queries == nil {
+		return config, nil
+	}
+	id, err := db.ParseUUID(botID)
+	if err != nil {
+		return settings.ToolApprovalConfig{}, err
+	}
+	row, err := m.queries.GetSettingsByBotID(ctx, id)
+	if err != nil {
+		return settings.ToolApprovalConfig{}, err
+	}
+	if len(row.ToolApprovalConfig) > 0 {
+		if err := json.Unmarshal(row.ToolApprovalConfig, &config); err != nil {
+			return settings.ToolApprovalConfig{}, err
+		}
+	}
+	return settings.NormalizeToolApprovalConfig(config), nil
+}
+
+func (m *Manager) ListWorkspaceTargets(ctx context.Context, botID string) ([]WorkspaceTarget, error) {
+	approval, err := m.nativeToolApprovalConfig(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	info, err := m.nativeWorkspaceInfo(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	native := WorkspaceTarget{
+		TargetID:           WorkspaceTargetNative,
+		Kind:               WorkspaceTargetNative,
+		Name:               "Server Workspace",
+		Primary:            true,
+		Status:             WorkspaceTargetStatusOffline,
+		WorkspacePath:      info.DefaultWorkDir,
+		ToolApproval:       WorkspaceToolApprovalModes(approval),
+		ToolApprovalConfig: approval,
+	}
+	if status, statusErr := m.GetContainerInfo(ctx, botID); statusErr == nil {
+		native.Online = status.TaskRunning
+		if native.Online {
+			native.Status = WorkspaceTargetStatusOnline
+		} else if strings.TrimSpace(status.Status) != "" {
+			native.Status = status.Status
+		}
+	} else if !errors.Is(statusErr, ErrContainerNotFound) && !ctr.IsNotFound(statusErr) {
+		return nil, statusErr
+	}
+	targets := []WorkspaceTarget{native}
+	if m.remote == nil {
+		return targets, nil
+	}
+	remoteTargets, err := m.remote.ListMounts(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	for _, target := range remoteTargets {
+		if target.Primary {
+			targets[0].Primary = false
+		}
+		targets = append(targets, target)
+	}
+	return targets, nil
 }
 
 func withACPToolsEndpoint(info bridge.WorkspaceInfo) bridge.WorkspaceInfo {
@@ -467,7 +609,7 @@ func (m *Manager) BotDisplayEnabled(ctx context.Context, botID string) bool {
 }
 
 func (m *Manager) DisplayDialContext(ctx context.Context, botID, network, address string) (net.Conn, error) {
-	client, err := m.MCPClient(ctx, botID)
+	client, err := m.nativeMCPClient(ctx, botID)
 	if err != nil {
 		return nil, err
 	}

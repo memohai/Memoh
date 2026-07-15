@@ -4,6 +4,16 @@ export interface ClientTypeMeta {
   hint: string
 }
 
+const MANAGED_OAUTH_CLIENT_TYPES = new Set(['openai-codex', 'github-copilot'])
+
+export function isManagedOAuthClientType(clientType: unknown): boolean {
+  return typeof clientType === 'string' && MANAGED_OAUTH_CLIENT_TYPES.has(clientType)
+}
+
+export function isManagedModelCatalogClientType(clientType: unknown): boolean {
+  return isManagedOAuthClientType(clientType)
+}
+
 export const CLIENT_TYPE_META: Record<string, ClientTypeMeta> = {
   'openai-responses': {
     value: 'openai-responses',
@@ -131,3 +141,8 @@ export const CLIENT_TYPE_LIST: ClientTypeMeta[] = Object.values(CLIENT_TYPE_META
 
 export const LLM_CLIENT_TYPE_LIST: ClientTypeMeta[] = CLIENT_TYPE_LIST
   .filter(ct => !ct.value.endsWith('-speech') && !ct.value.endsWith('-transcription') && !ct.value.endsWith('-video'))
+
+// Managed OAuth providers are created from their dedicated presets. Keeping
+// them out of generic selectors prevents partially configured instances.
+export const MANUAL_LLM_CLIENT_TYPE_LIST: ClientTypeMeta[] = LLM_CLIENT_TYPE_LIST
+  .filter(ct => !isManagedOAuthClientType(ct.value))

@@ -102,5 +102,6 @@ func isBackendPath(p string) bool {
 		strings.HasPrefix(p, "/api") ||
 		strings.HasPrefix(p, "/auth") ||
 		strings.HasPrefix(p, "/channels") ||
-		strings.HasPrefix(p, "/containers")
+		strings.HasPrefix(p, "/containers") ||
+		strings.HasPrefix(p, "/runtimes/")
 }

@@ -31,12 +31,12 @@ func TestSpawnCompletesAndWaits(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	snap, err := mgr.WaitForSessionTask(ctx, "bot1", "sess1", taskID)
+	snap, outcome, err := mgr.WaitForSessionTask(ctx, "bot1", "sess1", taskID, 0)
 	if err != nil {
 		t.Fatalf("WaitForSessionTask returned error: %v", err)
 	}
-	if snap.Status != TaskCompleted {
-		t.Fatalf("status = %s, want completed", snap.Status)
+	if snap.Status != TaskCompleted || outcome != WaitCompleted {
+		t.Fatalf("status = %s outcome = %s, want completed", snap.Status, outcome)
 	}
 	if snap.OutputTail != "ok\n" {
 		t.Fatalf("output tail = %q, want ok", snap.OutputTail)
@@ -61,15 +61,61 @@ func TestSpawnFailurePreservesUnknownExitCode(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	snap, err := mgr.WaitForSessionTask(ctx, "bot1", "sess1", taskID)
+	snap, outcome, err := mgr.WaitForSessionTask(ctx, "bot1", "sess1", taskID, 0)
 	if err != nil {
 		t.Fatalf("WaitForSessionTask returned error: %v", err)
 	}
-	if snap.Status != TaskFailed {
-		t.Fatalf("status = %s, want failed", snap.Status)
+	if snap.Status != TaskFailed || outcome != WaitFailed {
+		t.Fatalf("status = %s outcome = %s, want failed", snap.Status, outcome)
 	}
 	if snap.ExitCode != -1 {
 		t.Fatalf("exit code = %d, want -1", snap.ExitCode)
+	}
+}
+
+func TestSpawnAdoptUsesSelectedOutputDirectory(t *testing.T) {
+	mgr := New(nil)
+	resultCh := make(chan AdoptResult, 1)
+	resultCh <- AdoptResult{Stdout: "ok\n", ExitCode: 0, ExitReceived: true}
+	writes := make(chan string, 8)
+	const outputDir = "/data/.memoh/background"
+
+	taskID, outputFile := mgr.SpawnAdopt(
+		context.Background(),
+		"bot1",
+		"sess1",
+		"echo ok",
+		"/data",
+		"Say ok",
+		outputDir,
+		resultCh,
+		func(_ context.Context, path string, _ []byte) error {
+			writes <- path
+			return nil
+		},
+	)
+	if !strings.HasPrefix(outputFile, outputDir+"/") {
+		t.Fatalf("output file = %q, want it under %q", outputFile, outputDir)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, _, err := mgr.WaitForSessionTask(ctx, "bot1", "sess1", taskID, 0); err != nil {
+		t.Fatalf("WaitForSessionTask returned error: %v", err)
+	}
+
+	seenOutput := false
+	for len(writes) > 0 {
+		writtenPath := <-writes
+		if !strings.HasPrefix(writtenPath, outputDir+"/") {
+			t.Fatalf("write path = %q, want it under %q", writtenPath, outputDir)
+		}
+		if writtenPath == outputFile {
+			seenOutput = true
+		}
+	}
+	if !seenOutput {
+		t.Fatalf("output file %q was not written", outputFile)
 	}
 }
 
@@ -95,7 +141,7 @@ func TestKillWakesWaiter(t *testing.T) {
 	done := make(chan TaskSnapshot, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		snap, err := mgr.WaitForSessionTask(waitCtx, "bot1", "sess1", taskID)
+		snap, _, err := mgr.WaitForSessionTask(waitCtx, "bot1", "sess1", taskID, 0)
 		if err != nil {
 			errCh <- err
 			return
@@ -144,12 +190,62 @@ func TestWaitForSessionTaskReturnsStalled(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	snap, err := mgr.WaitForSessionTask(ctx, "bot1", "sess1", taskID)
+	snap, outcome, err := mgr.WaitForSessionTask(ctx, "bot1", "sess1", taskID, 0)
 	if err != nil {
 		t.Fatalf("WaitForSessionTask returned error: %v", err)
 	}
-	if !snap.Stalled || snap.Status != TaskRunning {
-		t.Fatalf("snapshot = %+v, want running stalled task", snap)
+	if !snap.Stalled || snap.Status != TaskRunning || outcome != WaitStalled {
+		t.Fatalf("snapshot = %+v outcome = %s, want running stalled task", snap, outcome)
+	}
+	_ = mgr.Kill(taskID)
+}
+
+func TestWaitForSessionTaskReturnsIdleWhenOutputSettles(t *testing.T) {
+	mgr := New(nil)
+	taskID, _ := mgr.Spawn(
+		context.Background(),
+		"bot1",
+		"sess1",
+		"npm run dev",
+		"/data",
+		"Dev server",
+		func(ctx context.Context, _, _ string, _ int32) (*bridge.ExecResult, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+		nil,
+		nil,
+	)
+	mgr.RecordOutput(taskID, "stdout", "VITE ready\n  ➜  Local: http://localhost:5173/\n")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	snap, outcome, err := mgr.WaitForSessionTask(ctx, "bot1", "sess1", taskID, 50*time.Millisecond)
+	if err != nil {
+		t.Fatalf("WaitForSessionTask returned error: %v", err)
+	}
+	if outcome != WaitIdle {
+		t.Fatalf("outcome = %s, want idle", outcome)
+	}
+	if snap.Status != TaskRunning {
+		t.Fatalf("status = %s, want running", snap.Status)
+	}
+	if !strings.Contains(snap.OutputTail, "localhost:5173") {
+		t.Fatalf("output tail = %q, want ready banner", snap.OutputTail)
+	}
+	_ = mgr.Kill(taskID)
+}
+
+func TestWaitForSessionTaskIdleIgnoresNonExecTasks(t *testing.T) {
+	mgr := New(nil)
+	taskID, _, err := mgr.StartSpawnTask(context.Background(), "bot1", "sess1", "long spawn")
+	if err != nil {
+		t.Fatalf("StartSpawnTask failed: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if _, _, err := mgr.WaitForSessionTask(ctx, "bot1", "sess1", taskID, 20*time.Millisecond); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want deadline exceeded (idle must not fire for spawn tasks)", err)
 	}
 	_ = mgr.Kill(taskID)
 }

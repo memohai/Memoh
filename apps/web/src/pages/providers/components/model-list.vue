@@ -25,8 +25,10 @@
         <ImportModelsDialog
           :provider-id="providerId"
           size="sm"
+          :mode="(models?.length ?? 0) > 0 ? 'refresh' : 'import'"
         />
         <CreateModel
+          v-if="!managed"
           :id="providerId"
           size="sm"
         />
@@ -44,6 +46,7 @@
           :model="model"
           :delete-loading="deleteModelLoading"
           :search-aligned="searchVisible"
+          :managed="managed"
           @edit="(model) => $emit('edit', model)"
           @delete="(id) => $emit('delete', id)"
         />
@@ -110,7 +113,9 @@
         </EmptyMedia>
       </EmptyHeader>
       <EmptyTitle>{{ $t('models.emptyTitle') }}</EmptyTitle>
-      <EmptyDescription>{{ $t('models.emptyDescription') }}</EmptyDescription>
+      <EmptyDescription>
+        {{ $t(managed ? 'models.managedEmptyDescription' : 'models.emptyDescription') }}
+      </EmptyDescription>
     </Empty>
   </SettingsSection>
 </template>
@@ -148,6 +153,7 @@ const props = defineProps<{
   providerId: string | undefined
   models: ModelsGetResponse[] | undefined
   deleteModelLoading: boolean
+  managed?: boolean
 }>()
 
 defineEmits<{
@@ -157,7 +163,6 @@ defineEmits<{
 
 const searchQuery = ref('')
 const currentPage = ref(1)
-
 // Always offer search once there are models, so the box never disappears for a
 // short list (which read as inconsistent between providers). When it's shown,
 // model rows align their text to the search placeholder.
@@ -165,9 +170,12 @@ const searchVisible = computed(() => !!props.models && props.models.length > 0)
 
 const filteredModels = computed(() => {
   if (!props.models) return []
-  if (!searchQuery.value) return props.models
+  const availableModels = props.managed
+    ? props.models.filter(model => model.config?.catalog_available !== false)
+    : props.models
+  if (!searchQuery.value) return availableModels
   const keyword = searchQuery.value.toLowerCase()
-  return props.models.filter((model) => {
+  return availableModels.filter((model) => {
     const name = (model.name ?? '').toLowerCase()
     const modelId = (model.model_id ?? '').toLowerCase()
     return name.includes(keyword) || modelId.includes(keyword)

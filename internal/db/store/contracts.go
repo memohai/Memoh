@@ -19,6 +19,52 @@ type Page struct {
 	Offset int32
 }
 
+type UserRuntimeRecord struct {
+	ID        string
+	UserID    string
+	Name      string
+	APIToken  string //nolint:gosec // owner-readable Remote Runtime credential by product design
+	CreatedAt time.Time
+}
+
+type CreateUserRuntimeInput struct {
+	UserID   string
+	Name     string
+	APIToken string //nolint:gosec // owner-readable Remote Runtime credential by product design
+}
+
+type UserRuntimeStore interface {
+	CreateUserRuntime(ctx context.Context, input CreateUserRuntimeInput) (UserRuntimeRecord, error)
+	GetUserRuntimeByAPIToken(ctx context.Context, apiToken string) (UserRuntimeRecord, error)
+	ListUserRuntimes(ctx context.Context, userID string) ([]UserRuntimeRecord, error)
+	RevokeUserRuntime(ctx context.Context, runtimeID, userID string) error
+}
+
+type BotRemoteRuntimeBindingRecord struct {
+	ID             string
+	BotID          string
+	RuntimeID      string
+	WorkspacePath  string
+	IsPrimary      bool
+	ToolApproval   JSON
+	RuntimeName    string
+	RuntimeUserID  string
+	BotOwnerUserID string
+	RuntimeRevoked bool
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type BotRemoteRuntimeBindingStore interface {
+	CreateOrUpdateMount(ctx context.Context, botID, runtimeID, workspacePath string) (BotRemoteRuntimeBindingRecord, error)
+	ListMounts(ctx context.Context, botID string) ([]BotRemoteRuntimeBindingRecord, error)
+	GetMount(ctx context.Context, botID, targetID string) (BotRemoteRuntimeBindingRecord, error)
+	GetPrimaryMount(ctx context.Context, botID string) (BotRemoteRuntimeBindingRecord, error)
+	SetPrimary(ctx context.Context, botID, targetID string) error
+	UpdateToolApproval(ctx context.Context, botID, targetID string, config JSON) error
+	DeleteMount(ctx context.Context, botID, targetID string) error
+}
+
 type AccountRecord struct {
 	ID              string
 	Username        string

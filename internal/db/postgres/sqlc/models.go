@@ -220,6 +220,17 @@ type BotPluginResource struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
+type BotRemoteRuntimeBinding struct {
+	ID                 pgtype.UUID        `json:"id"`
+	BotID              pgtype.UUID        `json:"bot_id"`
+	RuntimeID          pgtype.UUID        `json:"runtime_id"`
+	WorkspacePath      string             `json:"workspace_path"`
+	IsPrimary          bool               `json:"is_primary"`
+	ToolApprovalConfig []byte             `json:"tool_approval_config"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
 type BotSession struct {
 	ID               pgtype.UUID        `json:"id"`
 	BotID            pgtype.UUID        `json:"bot_id"`
@@ -562,6 +573,7 @@ type ProviderOauthToken struct {
 	TokenType        string             `json:"token_type"`
 	State            string             `json:"state"`
 	PkceCodeVerifier string             `json:"pkce_code_verifier"`
+	Metadata         []byte             `json:"metadata"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
@@ -759,4 +771,14 @@ type UserProviderOauthToken struct {
 	Metadata         []byte             `json:"metadata"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UserRuntime struct {
+	ID        pgtype.UUID        `json:"id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Name      string             `json:"name"`
+	ApiToken  string             `json:"api_token"`
+	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }

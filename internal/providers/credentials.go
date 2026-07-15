@@ -49,9 +49,16 @@ func (s *Service) ResolveModelCredentials(ctx context.Context, provider sqlc.Pro
 		if err != nil {
 			return ModelCredentials{}, err
 		}
-		accountID, err := codexAccountIDFromToken(token)
-		if err != nil {
-			return ModelCredentials{}, err
+		accountID, tokenErr := codexAccountIDFromToken(token)
+		if tokenErr != nil {
+			tokenRow, rowErr := s.getOAuthToken(ctx, provider.ID.String())
+			if rowErr != nil {
+				return ModelCredentials{}, tokenErr
+			}
+			accountID = strings.TrimSpace(stringValue(tokenRow.Metadata, metadataCodexAccountIDKey))
+			if accountID == "" {
+				return ModelCredentials{}, tokenErr
+			}
 		}
 		return ModelCredentials{
 			APIKey:         token,

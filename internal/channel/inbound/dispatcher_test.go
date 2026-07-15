@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/memohai/memoh/internal/command"
 )
 
 func TestDetectMode(t *testing.T) {
@@ -60,8 +62,13 @@ func TestIsStartCommand(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			if got := isStartCommand(tt.input); got != tt.want {
-				t.Errorf("isStartCommand(%q) = %v, want %v", tt.input, got, tt.want)
+			invocation, err := command.ParseInvocation(command.InvocationInput{
+				Text:       tt.input,
+				BotAliases: []string{"MemohBot"},
+			})
+			got := err == nil && invocationHasResource(&invocation, "start")
+			if got != tt.want {
+				t.Errorf("start invocation for %q = %v, want %v (error: %v)", tt.input, got, tt.want, err)
 			}
 		})
 	}

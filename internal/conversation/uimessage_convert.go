@@ -43,11 +43,12 @@ type uiContentPart struct {
 }
 
 type uiExtractedToolCall struct {
-	ID        string
-	Name      string
-	Input     any
-	Approval  *UIToolApproval
-	UserInput *UIUserInput
+	ID                string
+	Name              string
+	Input             any
+	Approval          *UIToolApproval
+	ExecutionLocation *UIExecutionLocation
+	UserInput         *UIUserInput
 }
 
 type uiExtractedToolResult struct {
@@ -118,13 +119,14 @@ func ConvertModelMessagesToUIAssistantMessages(messages []ModelMessage) []UIMess
 
 			for _, call := range extractPersistedToolCalls(&decoded) {
 				appendPendingAssistantMessage(pending, UIMessage{
-					Type:       UIMessageTool,
-					Name:       call.Name,
-					Input:      call.Input,
-					ToolCallID: call.ID,
-					Running:    uiBoolPtr(true),
-					Approval:   call.Approval,
-					UserInput:  call.UserInput,
+					Type:              UIMessageTool,
+					Name:              call.Name,
+					Input:             call.Input,
+					ToolCallID:        call.ID,
+					Running:           uiBoolPtr(true),
+					Approval:          call.Approval,
+					ExecutionLocation: call.ExecutionLocation,
+					UserInput:         call.UserInput,
 				})
 				if call.ID != "" {
 					pending.ToolIndexes[call.ID] = len(pending.Turn.Messages) - 1
@@ -434,6 +436,9 @@ func upsertPendingToolCall(pending *uiPendingAssistantTurn, call uiExtractedTool
 			if call.Approval != nil {
 				msg.Approval = call.Approval
 			}
+			if call.ExecutionLocation != nil {
+				msg.ExecutionLocation = call.ExecutionLocation
+			}
 			if call.UserInput != nil {
 				msg.UserInput = call.UserInput
 			}
@@ -442,13 +447,14 @@ func upsertPendingToolCall(pending *uiPendingAssistantTurn, call uiExtractedTool
 		}
 	}
 	block := UIMessage{
-		Type:       UIMessageTool,
-		Name:       call.Name,
-		Input:      call.Input,
-		ToolCallID: call.ID,
-		Running:    uiBoolPtr(true),
-		Approval:   call.Approval,
-		UserInput:  call.UserInput,
+		Type:              UIMessageTool,
+		Name:              call.Name,
+		Input:             call.Input,
+		ToolCallID:        call.ID,
+		Running:           uiBoolPtr(true),
+		Approval:          call.Approval,
+		ExecutionLocation: call.ExecutionLocation,
+		UserInput:         call.UserInput,
 	}
 	appendPendingAssistantMessage(pending, block)
 	if call.ID != "" {
@@ -747,11 +753,12 @@ func extractPersistedToolCalls(message *uiDecodedModelMessage) []uiExtractedTool
 			continue
 		}
 		calls = append(calls, uiExtractedToolCall{
-			ID:        strings.TrimSpace(part.ToolCallID),
-			Name:      strings.TrimSpace(part.ToolName),
-			Input:     part.Input,
-			Approval:  extractApprovalMetadata(part.ProviderMetadata),
-			UserInput: extractUserInputMetadata(part.ProviderMetadata),
+			ID:                strings.TrimSpace(part.ToolCallID),
+			Name:              strings.TrimSpace(part.ToolName),
+			Input:             part.Input,
+			Approval:          extractApprovalMetadata(part.ProviderMetadata),
+			ExecutionLocation: extractExecutionLocationMetadata(part.ProviderMetadata),
+			UserInput:         extractUserInputMetadata(part.ProviderMetadata),
 		})
 	}
 	if len(calls) > 0 {
@@ -803,6 +810,30 @@ func extractApprovalMetadata(metadata map[string]any) *UIToolApproval {
 		DecisionReason: stringFromAny(obj["decision_reason"]),
 		CanApprove:     boolFromAny(obj["can_approve"], true),
 	}
+}
+
+func extractExecutionLocationMetadata(metadata map[string]any) *UIExecutionLocation {
+	if metadata == nil {
+		return nil
+	}
+	raw, ok := metadata["execution_location"]
+	if !ok {
+		return nil
+	}
+	location := &UIExecutionLocation{}
+	if obj, ok := raw.(map[string]any); ok {
+		location.Kind = stringFromAny(obj["kind"])
+		location.Name = stringFromAny(obj["name"])
+	} else {
+		encoded, err := json.Marshal(raw)
+		if err != nil || json.Unmarshal(encoded, location) != nil {
+			return nil
+		}
+	}
+	if location.Kind == "" || location.Name == "" {
+		return nil
+	}
+	return location
 }
 
 func extractUserInputMetadata(metadata map[string]any) *UIUserInput {

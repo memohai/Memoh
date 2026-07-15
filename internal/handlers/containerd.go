@@ -734,7 +734,7 @@ func (h *ContainerdHandler) StartContainer(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := h.manager.EnsureRunning(c.Request().Context(), botID); err != nil {
+	if err := h.manager.EnsureNativeRunning(c.Request().Context(), botID); err != nil {
 		if errors.Is(err, workspace.ErrContainerNotFound) {
 			return newI18nHTTPError(http.StatusNotFound, "workspace_not_found", "bots.container.startFailed", "workspace not found for bot")
 		}

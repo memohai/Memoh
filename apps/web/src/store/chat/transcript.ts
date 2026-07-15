@@ -339,10 +339,58 @@ export function createTranscriptController({
     }
   }
 
-  function replaceMessages(items: UITurn[], targetSessionId?: string) {
+  function replaceMessages(items: UITurn[], targetSessionId?: string, options: { preserveOptimistic?: boolean } = {}) {
     onSnapshot(targetSessionId, items)
     const next = normalizeTurns(items, targetSessionId)
     adoptRenderIdentity(next)
+    if (options.preserveOptimistic) {
+      // A refresh snapshot can race the server persisting a just-sent turn:
+      // the first-send history fetch resolves after the optimistic user turn
+      // was appended but before the server has stored it, so the snapshot
+      // comes back without it. Carry unmatched optimistic USER turns over —
+      // assistants are excluded because the live stream re-attaches its own
+      // turn (reattachTurnToSession) and carrying it here would duplicate it
+      // against a persisted twin. Gated on an in-flight send (a streaming
+      // optimistic assistant): once the stream settled, the snapshot is
+      // authoritative and failed sends must not resurrect their turns.
+      const sendInFlight = messages.some(turn =>
+        isOptimisticTurn(turn) && turn.role === 'assistant' && turn.streaming)
+      if (sendInFlight) {
+        // Text match (not isSameLogicalTurn): its 5s timestamp tolerance can
+        // reject a genuine server twin (clock skew, slow persist), which
+        // would duplicate the user turn here. Counted per occurrence, not a
+        // set: the snapshot absorbs one optimistic turn per matching row, so
+        // re-sending a prompt whose text already exists in history does not
+        // get swallowed by its older persisted twin.
+        const nextUserTextCounts = new Map<string, number>()
+        for (const turn of next) {
+          if (turn.role !== 'user') continue
+          const text = turn.text.trim()
+          nextUserTextCounts.set(text, (nextUserTextCounts.get(text) ?? 0) + 1)
+        }
+        // The snapshot's rows first cover the user turns that were already
+        // non-optimistic locally (they ARE those rows, minus paging drift);
+        // only the remainder can absorb optimistic turns.
+        for (const turn of messages) {
+          if (turn.role !== 'user' || isOptimisticTurn(turn)) continue
+          const text = turn.text.trim()
+          const left = nextUserTextCounts.get(text)
+          if (left) nextUserTextCounts.set(text, left - 1)
+        }
+        const orphans = messages.filter((turn) => {
+          if (!isOptimisticTurn(turn) || turn.role !== 'user') return false
+          const text = turn.text.trim()
+          const left = nextUserTextCounts.get(text)
+          if (left) {
+            nextUserTextCounts.set(text, left - 1)
+            return false
+          }
+          return true
+        })
+        messages.splice(0, messages.length, ...next, ...orphans)
+        return
+      }
+    }
     messages.splice(0, messages.length, ...next)
   }
 
@@ -429,7 +477,11 @@ export function createTranscriptController({
       if (hasLoadedOlder.value) {
         mergeMessages(turns, sid)
       } else {
-        replaceMessages(turns, sid)
+        // preserveOptimistic: this refresh races the server persisting a
+        // just-sent turn (first send from a draft resolves history while the
+        // user message is still only optimistic locally) — a plain replace
+        // would blank the user's own message until the next refresh.
+        replaceMessages(turns, sid, { preserveOptimistic: true })
         // The API pages raw DB rows but returns merged UI turns, so a short
         // page is not proof that history ended. Only pagination can settle it.
         hasMoreOlder.value = true
@@ -664,6 +716,7 @@ export function createTranscriptController({
       result: incoming.result ?? existing.result,
       output: incoming.output ?? existing.output,
       approval: mergeApprovalState(existing.approval, incoming.approval),
+      execution_location: incoming.execution_location ?? existing.execution_location,
       userInput: incoming.userInput ?? existing.userInput,
       user_input: incoming.user_input ?? existing.user_input,
       backgroundTask: incoming.backgroundTask ?? existing.backgroundTask,

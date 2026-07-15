@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
@@ -37,6 +38,27 @@ type execCancelTestServer struct {
 	pb.UnimplementedContainerServiceServer
 	started   chan struct{}
 	cancelled chan struct{}
+}
+
+type metadataCaptureTestServer struct {
+	pb.UnimplementedContainerServiceServer
+	unary  chan metadata.MD
+	stream chan metadata.MD
+}
+
+func (s *metadataCaptureTestServer) Stat(ctx context.Context, _ *pb.StatRequest) (*pb.StatResponse, error) {
+	md, _ := metadata.FromIncomingContext(ctx)
+	s.unary <- md
+	return &pb.StatResponse{Entry: &pb.FileEntry{IsDir: true}}, nil
+}
+
+func (s *metadataCaptureTestServer) Exec(stream pb.ContainerService_ExecServer) error {
+	md, _ := metadata.FromIncomingContext(stream.Context())
+	s.stream <- md
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+	return stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_EXIT})
 }
 
 func newExecCancelTestServer() *execCancelTestServer {
@@ -408,5 +430,54 @@ func TestExecStreamCloseCancelsServerContext(t *testing.T) {
 	case <-server.cancelled:
 	case <-time.After(10 * time.Second):
 		t.Fatal("server stream context was not cancelled after ExecStream.Close")
+	}
+}
+
+func TestClientWithOutgoingMetadataScopesUnaryAndStreamingWithoutOwningConnection(t *testing.T) {
+	server := &metadataCaptureTestServer{
+		unary: make(chan metadata.MD, 2), stream: make(chan metadata.MD, 1),
+	}
+	root := newTestClient(t, server)
+	scoped := root.WithOutgoingMetadata(map[string]string{
+		"x-memoh-workspace-id":   "11111111-1111-4111-8111-111111111111",
+		"x-memoh-workspace-path": "bots/one",
+	})
+	if scoped == nil {
+		t.Fatal("WithOutgoingMetadata returned nil")
+	}
+	if _, err := scoped.Stat(context.Background(), "/"); err != nil {
+		t.Fatalf("scoped Stat: %v", err)
+	}
+	assertMetadataValue(t, <-server.unary, "x-memoh-workspace-path", "bots/one")
+
+	result, err := scoped.Exec(context.Background(), "true", "/data", 5)
+	if err != nil {
+		t.Fatalf("scoped Exec: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("scoped Exec exit code = %d", result.ExitCode)
+	}
+	assertMetadataValue(t, <-server.stream, "x-memoh-workspace-id", "11111111-1111-4111-8111-111111111111")
+
+	if err := scoped.Close(); err != nil {
+		t.Fatalf("scoped Close: %v", err)
+	}
+	if _, err := root.Stat(context.Background(), "/"); err != nil {
+		t.Fatalf("root client was closed by scoped view: %v", err)
+	}
+	assertMetadataValue(t, <-server.unary, "x-memoh-workspace-id", "")
+}
+
+func assertMetadataValue(t *testing.T, md metadata.MD, key, want string) {
+	t.Helper()
+	values := md.Get(key)
+	if want == "" {
+		if len(values) != 0 {
+			t.Fatalf("metadata %s = %v, want absent", key, values)
+		}
+		return
+	}
+	if len(values) != 1 || values[0] != want {
+		t.Fatalf("metadata %s = %v, want %q", key, values, want)
 	}
 }

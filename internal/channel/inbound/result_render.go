@@ -58,15 +58,16 @@ func appendCurrentContextLines(b *strings.Builder, t *i18n.Localizer, cc command
 // formatStartWelcomeMessage builds the /start doorway greeting. It welcomes the
 // user and invites the first message — it does not reset history or dump bot
 // configuration (that is /new's job after a fresh session is created).
-func formatStartWelcomeMessage(t *i18n.Localizer) string {
+func formatStartWelcomeMessage(t *i18n.Localizer, botUsername string) string {
 	var b strings.Builder
 	b.WriteString(command.MdBold(t.T("startWelcome.title")))
 	b.WriteString("\n\n")
 	b.WriteString(t.T("startWelcome.intro"))
 	fmt.Fprintf(&b, "\n\n%s", t.T("startWelcome.tip", map[string]any{
-		"new":  command.CmdRef("new"),
-		"help": command.CmdRef("help"),
+		"new":  command.CommandText("new", ""),
+		"help": command.CommandText("help", ""),
 	}))
+	appendTelegramGroupCommandTip(&b, t, botUsername)
 	return b.String()
 }
 
@@ -76,15 +77,35 @@ func formatStartWelcomeMessage(t *i18n.Localizer) string {
 // much context budget they have. These are not "defaults to hide"; on this
 // surface they reassure and inform. Markdown markers are authored unconditionally
 // and stripped later for non-markdown channels.
-func formatNewSessionMessage(t *i18n.Localizer, modeLabel string, cc command.CurrentContext) string {
+func formatNewSessionMessage(t *i18n.Localizer, modeLabel string, cc command.CurrentContext, botUsername string) string {
 	var b strings.Builder
 	b.WriteString(command.MdBold(t.T("newSession.title", map[string]any{"mode": modeLabel})))
 	appendCurrentContextLines(&b, t, cc)
 	fmt.Fprintf(&b, "\n\n%s", t.T("newSession.tip", map[string]any{
-		"model":     command.CmdRef("model"),
-		"reasoning": command.CmdRef("reasoning"),
+		"model":     command.CommandText("model", ""),
+		"reasoning": command.CommandText("reasoning", ""),
 	}))
+	appendTelegramGroupCommandTip(&b, t, botUsername)
 	return b.String()
+}
+
+// telegramGroupBotUsername returns the Bot API username only where Telegram's
+// group privacy rules make explicit /command@bot addressing useful. Other
+// channels use different addressing syntax, and private chats do not need it.
+// Missing or malformed metadata intentionally degrades to no tip: command
+// execution remains valid, while this renderer stays independent of adapters.
+func telegramGroupBotUsername(msg channel.InboundMessage) string {
+	if msg.Channel != channel.ChannelTypeTelegram || msg.Conversation.Type != channel.ConversationTypeGroup {
+		return ""
+	}
+	username, _ := msg.Metadata["bot_username"].(string)
+	return strings.TrimPrefix(strings.TrimSpace(username), "@")
+}
+
+func appendTelegramGroupCommandTip(b *strings.Builder, t *i18n.Localizer, botUsername string) {
+	if tip := command.TelegramGroupCommandTip(t, botUsername); tip != "" {
+		fmt.Fprintf(b, "\n\n%s", tip)
+	}
 }
 
 // localizer resolves the command-UI Localizer for a bot, used for renderer
