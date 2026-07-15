@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { effectScope, nextTick, ref } from 'vue'
+import { effectScope, nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useRoutedViewSwap } from './useViewSwap'
+import { useViewSwap } from './useViewSwap'
 
 const mocks = vi.hoisted(() => ({
-  route: { query: {} as Record<string, string> },
+  route: { query: {} as Record<string, string | undefined> },
   replace: vi.fn(),
 }))
 
@@ -13,77 +13,49 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ replace: mocks.replace }),
 }))
 
-interface Item {
-  routeValue: string
-}
-
-function setupSwap() {
-  const items = ref<Item[]>([])
-  const selected = ref<Item>()
-  const loading = ref(false)
-  const ready = ref(false)
+function setupSwap(key = 'provider') {
   const scope = effectScope()
-  const swap = scope.run(() => useRoutedViewSwap({
-    key: 'provider',
-    items: () => items.value,
-    selected: () => selected.value,
-    select: item => selected.value = item,
-    getRouteValue: item => item.routeValue,
-    isLoading: () => loading.value,
-    isReady: () => ready.value,
-  }))!
-
-  return { items, selected, loading, ready, scope, swap }
+  const swap = scope.run(() => useViewSwap(key))!
+  return { scope, swap }
 }
 
-describe('useRoutedViewSwap', () => {
+describe('useViewSwap', () => {
   beforeEach(() => {
     mocks.route.query = {}
     mocks.replace.mockReset()
   })
 
-  it('waits for fresh data before resolving a typed resource key', async () => {
-    mocks.route.query = { provider: 'fetch:two' }
-    const state = setupSwap()
-    state.items.value = [{ routeValue: 'search:one' }]
-    state.loading.value = true
-    state.ready.value = true
-    await nextTick()
+  it('writes the resource id into a page-owned query key without history', () => {
+    mocks.route.query = { tab: 'kept' }
+    const { scope, swap } = setupSwap('emailProvider')
 
-    expect(state.selected.value).toBeUndefined()
-    expect(mocks.replace).not.toHaveBeenCalled()
+    swap.openDetail('email-1')
 
-    state.items.value = [
-      { routeValue: 'search:one' },
-      { routeValue: 'fetch:two' },
-    ]
-    state.loading.value = false
-    await nextTick()
-
-    expect(state.selected.value?.routeValue).toBe('fetch:two')
-    state.scope.stop()
-  })
-
-  it('removes an invalid resource key once its source is ready', async () => {
-    mocks.route.query = { provider: 'search:missing', tab: 'voice' }
-    const state = setupSwap()
-    state.ready.value = true
-    await nextTick()
-
-    expect(mocks.replace).toHaveBeenCalledWith({ query: { tab: 'voice' } })
-    state.scope.stop()
-  })
-
-  it('writes the selected resource key without creating history', () => {
-    mocks.route.query = { tab: 'voice' }
-    const state = setupSwap()
-
-    state.swap.openDetail({ routeValue: 'speech:one' })
-
-    expect(state.selected.value?.routeValue).toBe('speech:one')
+    expect(swap.view.value).toBe('detail')
     expect(mocks.replace).toHaveBeenCalledWith({
-      query: { tab: 'voice', provider: 'speech:one' },
+      query: { tab: 'kept', emailProvider: 'email-1' },
     })
-    state.scope.stop()
+    scope.stop()
+  })
+
+  it('opens detail from a non-empty query value on mount', () => {
+    mocks.route.query = { provider: 'abc' }
+    const { scope, swap } = setupSwap('provider')
+
+    expect(swap.view.value).toBe('detail')
+    expect(swap.queryValue.value).toBe('abc')
+    scope.stop()
+  })
+
+  it('clears only its own query key when returning to the list', async () => {
+    mocks.route.query = { provider: 'abc', tab: 'kept' }
+    const { scope, swap } = setupSwap('provider')
+
+    swap.backToList()
+    await nextTick()
+
+    expect(swap.view.value).toBe('list')
+    expect(mocks.replace).toHaveBeenCalledWith({ query: { tab: 'kept' } })
+    scope.stop()
   })
 })

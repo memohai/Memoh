@@ -1,4 +1,4 @@
-import { computed, ref, watch, watchEffect } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 // Motion for the in-place list <-> detail swap (a frontend page switch with no
@@ -18,52 +18,60 @@ import { useRoute, useRouter } from 'vue-router'
 
 export type SwapDirection = 'forward' | 'back'
 
-type ViewSwapQuerySync = {
-  key: string
-  detailValue: () => string
-}
-
 /**
  * Drives a two-pane (list <-> detail) swap inside a single page. Render the list
  * when `view === 'list'` and the detail when `view === 'detail'`, wrapped in the
  * SwapTransition component. `direction` tells that component which way to slide.
  *
- * Pass a query config whose `detailValue` returns a stable resource ID. It is
- * written with router.replace — an in-page state sync, not a navigation, same
- * contract as useSyncedQueryParam. The resource ID lets a refresh restore the
- * exact item. Query mirroring is required for the settings-sidebar
+ * Pass `queryKey` to mirror the detail state into the URL as `?<queryKey>=<value>`
+ * (written with router.replace — an in-page state sync, not a navigation, same
+ * contract as useSyncedQueryParam). The value is whatever the page hands
+ * `openDetail` — pages pass the open resource's stable ID so a refresh can
+ * restore the exact item (the page resolves `queryValue` back to an object
+ * itself; this composable stays ignorant of what the value means). Mirroring
+ * into the query is also required for the settings-sidebar
  * "re-click the tab you're already on" affordance to work: sidebar navigation
  * is a plain `router.push({ name })` with no query. If detail state lives ONLY
  * in a local ref, re-clicking the current tab resolves to the exact same
  * location the router is already at, so Vue Router treats it as a duplicate
  * push and silently drops it — the page never hears about it, so a detail view
- * left open has no way to snap back to its list. Mirroring the state into the
+ * left open has no way to snap back to its list. Mirroring the value into the
  * query makes list-vs-detail part of the resolved location, so leaving detail
  * open changes the URL, and a bare re-push to the tab's un-queried route is a
  * genuinely different destination that the router actually navigates to. Omit
- * the config for swaps that don't need this (e.g. a swap nested inside another
+ * `queryKey` for swaps that don't need this (e.g. a swap nested inside another
  * already-synced tab) — `view` then stays purely local, as before.
+ *
+ * The `queryKey` MUST be unique per settings page. `useRoute()` reads the ONE
+ * global route, and every settings page stays mounted under <KeepAlive>
+ * (settings-section/index.vue) after you navigate away — so a cached page's
+ * watchers keep reading the live URL. If two pages shared a key, the cached
+ * page would read the active page's value off the shared key, fail to resolve
+ * that foreign ID against its own list, and strip the query — snapping the
+ * active page's detail shut. Distinct keys keep each page's URL state its own;
+ * a page only ever sees the key it wrote, so there is nothing to fight over.
  */
-export function useViewSwap(querySync?: ViewSwapQuerySync) {
-  const queryKey = querySync?.key
+export function useViewSwap(queryKey?: string) {
   const route = queryKey ? useRoute() : null
   const router = queryKey ? useRouter() : null
 
+  // The raw query value ('' when absent). Detail is open iff it's non-empty —
+  // the page owns what the value means (a resource ID); we only care presence.
   const queryValue = computed(() => {
     if (!queryKey || !route) return ''
     const value = route.query[queryKey]
     return typeof value === 'string' ? value : ''
   })
-  const queryDetail = computed(() => queryValue.value.length > 0)
+  const queryDetail = computed(() => queryValue.value !== '')
   const view = ref<'list' | 'detail'>(queryDetail.value ? 'detail' : 'list')
   const direction = ref<SwapDirection>('forward')
 
   if (queryKey && route && router) {
-    // Reacts to the query value changing for ANY reason — our own replace()
+    // Reacts to the query flag changing for ANY reason — our own replace()
     // calls below, but also external navigations we don't control: a sidebar
     // re-click that lands on the un-queried route, or the user's own browser
     // back/forward. Whatever the cause, `view` must follow the URL, and losing
-    // the value always reads as "closing", so it always animates as 'back'.
+    // the flag always reads as "closing", so it always animates as 'back'.
     // The equality guard skips the case where openDetail/backToList already
     // applied this exact state locally before writing the query, so the two
     // never fight over `direction` for the same transition.
@@ -74,20 +82,20 @@ export function useViewSwap(querySync?: ViewSwapQuerySync) {
     })
   }
 
-  function openDetail(onSwitched?: () => void) {
+  // `detailValue` is what lands in the URL. Falls back to '1' so an unkeyed or
+  // legacy call still flips the view and keeps the sidebar-re-click affordance
+  // — but keyed pages should always pass the resource ID, or a refresh has
+  // nothing to restore.
+  function openDetail(detailValue?: string) {
     direction.value = 'forward'
-    onSwitched?.()
     view.value = 'detail'
     if (queryKey && route && router) {
-      const detailValue = querySync?.detailValue()
-      if (!detailValue) return
-      void router.replace({ query: { ...route.query, [queryKey]: detailValue } })
+      void router.replace({ query: { ...route.query, [queryKey]: detailValue || '1' } })
     }
   }
 
-  function backToList(onSwitched?: () => void) {
+  function backToList() {
     direction.value = 'back'
-    onSwitched?.()
     view.value = 'list'
     if (queryKey && route && router) {
       const { [queryKey]: _drop, ...rest } = route.query
@@ -96,62 +104,4 @@ export function useViewSwap(querySync?: ViewSwapQuerySync) {
   }
 
   return { view, direction, queryValue, openDetail, backToList }
-}
-
-interface RoutedViewSwapOptions<T> {
-  key: string
-  items: () => readonly T[]
-  selected: () => T | undefined
-  select: (item: T | undefined) => void
-  getRouteValue: (item: T) => string
-  isLoading: (routeValue: string) => boolean
-  isReady: (routeValue: string) => boolean
-}
-
-/**
- * Adds resource resolution to useViewSwap. The URL remains the source of truth,
- * while the selected object is refreshed from the latest query result. A route
- * is rejected only after its relevant data source is ready and no longer
- * loading, because Pinia Colada may expose stale cached items during a refresh.
- */
-export function useRoutedViewSwap<T>(options: RoutedViewSwapOptions<T>) {
-  const swap = useViewSwap({
-    key: options.key,
-    detailValue: () => {
-      const selected = options.selected()
-      return selected ? options.getRouteValue(selected) : ''
-    },
-  })
-
-  function openDetail(item: T) {
-    if (!options.getRouteValue(item)) return
-    swap.openDetail(() => options.select(item))
-  }
-
-  function backToList() {
-    swap.backToList(() => options.select(undefined))
-  }
-
-  watchEffect(() => {
-    const routeValue = swap.queryValue.value
-    if (!routeValue) {
-      options.select(undefined)
-      return
-    }
-
-    const selected = options.items().find(item => options.getRouteValue(item) === routeValue)
-    if (selected) {
-      options.select(selected)
-    } else if (!options.isLoading(routeValue) && options.isReady(routeValue)) {
-      backToList()
-    }
-  })
-
-  return {
-    view: swap.view,
-    direction: swap.direction,
-    queryValue: swap.queryValue,
-    openDetail,
-    backToList,
-  }
 }

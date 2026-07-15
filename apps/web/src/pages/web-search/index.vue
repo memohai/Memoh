@@ -15,13 +15,13 @@ import BackendCard from '@/components/settings/backend-card.vue'
 import DetailPane from '@/components/settings/detail-pane.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import SectionGroup from '@/components/section-group/index.vue'
-import { useRoutedViewSwap } from '@/composables/useViewSwap'
+import { useViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
 
-const { data: providerData, isLoading: providersLoading } = useQuery({
+const { data: providerData } = useQuery({
   key: () => ['search-providers'],
   query: async () => {
     const { data } = await getSearchProviders({ throwOnError: true })
@@ -29,7 +29,7 @@ const { data: providerData, isLoading: providersLoading } = useQuery({
   },
 })
 
-const { data: fetchProviderData, isLoading: fetchProvidersLoading } = useQuery({
+const { data: fetchProviderData } = useQuery({
   key: () => ['fetch-providers'],
   query: async () => {
     const { data } = await getFetchProviders({ throwOnError: true })
@@ -42,11 +42,12 @@ const curFetchProvider = ref<FetchprovidersGetResponse>()
 provide('curSearchProvider', curProvider)
 provide('curFetchProvider', curFetchProvider)
 
-type WebDetailKind = 'search' | 'fetch'
-type WebDetail =
-  | { kind: 'search', provider: SearchprovidersGetResponse }
-  | { kind: 'fetch', provider: FetchprovidersGetResponse }
-const detailKind = ref<WebDetailKind>('search')
+// 'webProvider' query key (unique per settings page — see useViewSwap.ts),
+// valued `<kind>:<id>` — the detail pane can show either a search or a fetch
+// provider, so the URL must carry which list the ID belongs to for a refresh
+// to restore the right pane. Also keeps the sidebar re-click affordance working.
+const { view, direction, queryValue, openDetail, backToList } = useViewSwap('webProvider')
+const detailKind = ref<'search' | 'fetch'>('search')
 const openStatus = reactive({
   addSearchOpen: false,
   addFetchOpen: false,
@@ -69,43 +70,16 @@ const fetchProviders = computed<FetchprovidersGetResponse[]>(() => {
   })
 })
 
-const { view, direction, openDetail, backToList: closeProvider } = useRoutedViewSwap<WebDetail>({
-  key: 'provider',
-  items: () => [
-    ...providers.value.map(provider => ({ kind: 'search' as const, provider })),
-    ...fetchProviders.value.map(provider => ({ kind: 'fetch' as const, provider })),
-  ],
-  selected: () => {
-    if (detailKind.value === 'search' && curProvider.value) {
-      return { kind: 'search', provider: curProvider.value }
-    }
-    if (detailKind.value === 'fetch' && curFetchProvider.value) {
-      return { kind: 'fetch', provider: curFetchProvider.value }
-    }
-    return undefined
-  },
-  select: (detail) => {
-    detailKind.value = detail?.kind ?? 'search'
-    curProvider.value = detail?.kind === 'search' ? detail.provider : undefined
-    curFetchProvider.value = detail?.kind === 'fetch' ? detail.provider : undefined
-  },
-  getRouteValue: detail => `${detail.kind}:${detail.provider.id}`,
-  isLoading: routeValue => routeValue.startsWith('search:')
-    ? providersLoading.value
-    : routeValue.startsWith('fetch:') && fetchProvidersLoading.value,
-  isReady: routeValue => routeValue.startsWith('search:')
-    ? providerData.value !== undefined
-    : routeValue.startsWith('fetch:')
-      ? fetchProviderData.value !== undefined
-      : true,
-})
-
 function openProvider(provider: SearchprovidersGetResponse) {
-  openDetail({ kind: 'search', provider })
+  curProvider.value = provider
+  detailKind.value = 'search'
+  openDetail(`search:${provider.id}`)
 }
 
 function openFetchProvider(provider: FetchprovidersGetResponse) {
-  openDetail({ kind: 'fetch', provider })
+  curFetchProvider.value = provider
+  detailKind.value = 'fetch'
+  openDetail(`fetch:${provider.id}`)
 }
 
 watch(() => openStatus.addSearchOpen, (isOpen, wasOpen) => {
@@ -120,6 +94,42 @@ watch(() => openStatus.addFetchOpen, (isOpen, wasOpen) => {
   }
 })
 
+// Resolve the URL's `<kind>:<id>` against the matching list: restores the open
+// provider (and which pane kind) on refresh, follows refetched data, and falls
+// back to the list if it was deleted while open. Each kind only consults its
+// own list and only treats "not found" as deleted once that list's data has
+// actually arrived — the empty list during the initial fetch proves nothing.
+watch([queryValue, providers, fetchProviders], ([raw, search, fetchList]) => {
+  if (!raw) return
+  const sep = raw.indexOf(':')
+  if (sep === -1) {
+    // Malformed value (hand-edited URL) — nothing will ever match it.
+    backToList()
+    return
+  }
+  const kind = raw.slice(0, sep)
+  const id = raw.slice(sep + 1)
+  if (kind === 'search') {
+    const found = search.find((p) => p.id === id)
+    if (found) {
+      detailKind.value = 'search'
+      curProvider.value = found
+    } else if (providerData.value !== undefined) {
+      backToList()
+    }
+  } else if (kind === 'fetch') {
+    const found = fetchList.find((p) => p.id === id)
+    if (found) {
+      detailKind.value = 'fetch'
+      curFetchProvider.value = found
+    } else if (fetchProviderData.value !== undefined) {
+      backToList()
+    }
+  } else {
+    // Unknown kind — nothing will ever match it.
+    backToList()
+  }
+}, { immediate: true })
 </script>
 
 <template>
@@ -237,7 +247,7 @@ watch(() => openStatus.addFetchOpen, (isOpen, wasOpen) => {
       v-else
       width="narrow"
       :back-label="t('webSearch.title')"
-      @back="closeProvider"
+      @back="backToList()"
     >
       <ProviderSetting v-if="detailKind === 'search' && curProvider?.id" />
       <FetchProviderSetting v-else-if="detailKind === 'fetch' && curFetchProvider?.id" />

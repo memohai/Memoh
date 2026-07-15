@@ -5,7 +5,6 @@ import type { Component, Ref, Slots } from 'vue'
 
 const mocks = vi.hoisted(() => ({
   providerData: undefined as unknown as Ref<Array<Record<string, unknown>> | undefined>,
-  providersLoading: undefined as unknown as Ref<boolean>,
   modelData: undefined as unknown as Ref<Array<Record<string, unknown>>>,
   route: { query: {} as Record<string, string> },
   replace: vi.fn(),
@@ -19,12 +18,11 @@ vi.mock('vue-router', () => ({
 vi.mock('@pinia/colada', async () => {
   const { ref } = await import('vue')
   mocks.providerData = ref()
-  mocks.providersLoading = ref(false)
   mocks.modelData = ref([])
   return {
     useQuery: ({ key }: { key: () => string[] }) => key()[0] === 'providers'
-      ? { data: mocks.providerData, isLoading: mocks.providersLoading }
-      : { data: mocks.modelData, isLoading: ref(false) },
+      ? { data: mocks.providerData }
+      : { data: mocks.modelData },
   }
 })
 
@@ -106,12 +104,12 @@ async function mountPage() {
 
 describe('provider route state', () => {
   beforeEach(async () => {
+    vi.resetModules()
     ProviderPage = (await import('./index.vue')).default
     mocks.providerData.value = [
       { id: 'provider-one', name: 'One', enable: true },
       { id: 'provider-two', name: 'Two', enable: true },
     ]
-    mocks.providersLoading.value = false
     mocks.modelData.value = []
     mocks.route.query = {}
     mocks.replace.mockReset()
@@ -121,23 +119,18 @@ describe('provider route state', () => {
     document.body.innerHTML = ''
   })
 
-  it('waits for a stale provider query to refresh before resolving the URL', async () => {
+  it('restores the detail pane from the provider query after data loads', async () => {
     mocks.route.query = { provider: 'provider-two' }
-    mocks.providerData.value = [
-      { id: 'provider-one', name: 'One', enable: true },
-    ]
-    mocks.providersLoading.value = true
+    mocks.providerData.value = undefined
 
     const { app, root } = await mountPage()
-
-    expect(mocks.replace).not.toHaveBeenCalled()
     expect(root.querySelector('[data-testid="provider-detail"]')).toBeNull()
+    expect(mocks.replace).not.toHaveBeenCalled()
 
     mocks.providerData.value = [
       { id: 'provider-one', name: 'One', enable: true },
       { id: 'provider-two', name: 'Two', enable: true },
     ]
-    mocks.providersLoading.value = false
     await nextTick()
 
     expect(root.querySelector('[data-testid="provider-detail"]')?.textContent).toBe('provider-two:Two')

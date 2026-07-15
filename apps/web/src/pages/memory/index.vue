@@ -12,12 +12,12 @@ import ProviderSetting from './components/provider-setting.vue'
 import BackendCard from '@/components/settings/backend-card.vue'
 import DetailPane from '@/components/settings/detail-pane.vue'
 import PageShell from '@/components/page-shell/index.vue'
-import { useRoutedViewSwap } from '@/composables/useViewSwap'
+import { useViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 
 const { t } = useI18n()
 
-const { data: providerData, isLoading: providersLoading } = useQuery({
+const { data: providerData } = useQuery({
   key: () => ['memory-providers'],
   query: async () => {
     const { data } = await getMemoryProviders({ throwOnError: true })
@@ -35,6 +35,11 @@ const externalProviders = computed(() => providers.value.filter((p) => p.provide
 const curProvider = ref<AdaptersProviderGetResponse | null>(null)
 provide('curMemoryProvider', curProvider)
 
+// 'memoryBackend' query key (unique per settings page — see useViewSwap.ts):
+// the open backend's ID lives in the URL, so a refresh restores the exact
+// detail view, and re-clicking Memory in the settings sidebar while a detail
+// is open navigates back.
+const { view, direction, queryValue, openDetail, backToList } = useViewSwap('memoryBackend')
 const advancedOpen = ref(false)
 const openStatus = reactive({ addOpen: false })
 
@@ -49,21 +54,27 @@ const builtinRef = ref<InstanceType<typeof BuiltinConfig> | null>(null)
 // one-shot so a later manual collapse isn't fought by refreshed data.
 let didAutoOpen = false
 
-const { view, direction, openDetail: openExternal, backToList: closeExternal } = useRoutedViewSwap({
-  key: 'provider',
-  items: () => externalProviders.value,
-  selected: () => curProvider.value ?? undefined,
-  select: provider => curProvider.value = provider ?? null,
-  getRouteValue: provider => provider.id ?? '',
-  isLoading: () => providersLoading.value,
-  isReady: () => providerData.value !== undefined,
-})
+function openExternal(provider: AdaptersProviderGetResponse) {
+  curProvider.value = provider
+  openDetail(provider.id)
+}
 
 watch(externalProviders, (list) => {
   if (!didAutoOpen && list.length > 0) {
     advancedOpen.value = true
     didAutoOpen = true
   }
+}, { immediate: true })
+
+// Resolve the URL's backend ID against the loaded list: restores the open
+// backend on refresh, follows refetched data, and falls back to the list if
+// it was deleted while open. Only treat "not found" as deleted once data has
+// actually arrived — the empty list during the initial fetch proves nothing.
+watch([queryValue, externalProviders], ([id, list]) => {
+  if (!id) return
+  const found = list.find((p) => p.id === id)
+  if (found) curProvider.value = found
+  else if (providerData.value !== undefined) backToList()
 }, { immediate: true })
 </script>
 
@@ -160,7 +171,7 @@ watch(externalProviders, (list) => {
       v-else
       width="narrow"
       :back-label="t('sidebar.memory')"
-      @back="closeExternal"
+      @back="backToList()"
     >
       <ProviderSetting v-if="curProvider?.id" />
     </DetailPane>

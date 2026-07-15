@@ -12,7 +12,7 @@ import BackendCard from '@/components/settings/backend-card.vue'
 import DetailPane from '@/components/settings/detail-pane.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import SectionGroup from '@/components/section-group/index.vue'
-import { useRoutedViewSwap } from '@/composables/useViewSwap'
+import { useViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 import SpeechSetting from '@/pages/speech/components/provider-setting.vue'
 import TranscriptionSetting from '@/pages/transcription/provider-setting.vue'
@@ -20,14 +20,14 @@ import TranscriptionSetting from '@/pages/transcription/provider-setting.vue'
 const { t } = useI18n()
 const queryCache = useQueryCache()
 
-const { data: speechData, isLoading: speechLoading } = useQuery({
+const { data: speechData } = useQuery({
   key: () => ['speech-providers'],
   query: async () => {
     const { data } = await getSpeechProviders({ throwOnError: true })
     return data
   },
 })
-const { data: transcriptionData, isLoading: transcriptionLoading } = useQuery({
+const { data: transcriptionData } = useQuery({
   key: () => ['transcription-providers'],
   query: async () => {
     const { data } = await getTranscriptionProviders({ throwOnError: true })
@@ -40,9 +40,13 @@ const curTranscription = ref<AudioSpeechProviderResponse>()
 provide('curTtsProvider', curTts)
 provide('curTranscriptionProvider', curTranscription)
 
-type VoiceDetailKind = 'speech' | 'transcription'
-type VoiceDetail = { kind: VoiceDetailKind, provider: AudioSpeechProviderResponse }
-const detailKind = ref<VoiceDetailKind>('speech')
+// 'voiceProvider' query key (unique per settings page — see useViewSwap.ts),
+// valued `<kind>:<id>` — the detail pane can show either a speech or a
+// transcription provider, and both lists hold the same response type, so the
+// URL must carry which list the ID belongs to for a refresh to restore the
+// right pane. Also keeps the sidebar re-click affordance working.
+const { view, direction, queryValue, openDetail, backToList } = useViewSwap('voiceProvider')
+const detailKind = ref<'speech' | 'transcription'>('speech')
 const openStatus = reactive({ addSpeechOpen: false, addTranscriptionOpen: false })
 
 async function importSpeechModels(providerId: string) {
@@ -78,32 +82,6 @@ const transcriptionProviders = computed<AudioSpeechProviderResponse[]>(() =>
   Array.isArray(transcriptionData.value) ? sortByEnabled(transcriptionData.value) : [],
 )
 
-const { view, direction, openDetail, backToList: closeProvider } = useRoutedViewSwap<VoiceDetail>({
-  key: 'provider',
-  items: () => [
-    ...speechProviders.value.map(provider => ({ kind: 'speech' as const, provider })),
-    ...transcriptionProviders.value.map(provider => ({ kind: 'transcription' as const, provider })),
-  ],
-  selected: () => {
-    const provider = detailKind.value === 'speech' ? curTts.value : curTranscription.value
-    return provider ? { kind: detailKind.value, provider } : undefined
-  },
-  select: (detail) => {
-    detailKind.value = detail?.kind ?? 'speech'
-    curTts.value = detail?.kind === 'speech' ? detail.provider : undefined
-    curTranscription.value = detail?.kind === 'transcription' ? detail.provider : undefined
-  },
-  getRouteValue: detail => `${detail.kind}:${detail.provider.id}`,
-  isLoading: routeValue => routeValue.startsWith('speech:')
-    ? speechLoading.value
-    : routeValue.startsWith('transcription:') && transcriptionLoading.value,
-  isReady: routeValue => routeValue.startsWith('speech:')
-    ? speechData.value !== undefined
-    : routeValue.startsWith('transcription:')
-      ? transcriptionData.value !== undefined
-      : true,
-})
-
 const addProviderNames = computed(() => [
   ...speechProviders.value.map((p) => ({ name: p.name })),
   ...transcriptionProviders.value.map((p) => ({ name: p.name })),
@@ -115,11 +93,15 @@ function getInitials(name: string | undefined) {
 }
 
 function openSpeech(provider: AudioSpeechProviderResponse) {
-  openDetail({ kind: 'speech', provider })
+  curTts.value = provider
+  detailKind.value = 'speech'
+  openDetail(`speech:${provider.id}`)
 }
 
 function openTranscription(provider: AudioSpeechProviderResponse) {
-  openDetail({ kind: 'transcription', provider })
+  curTranscription.value = provider
+  detailKind.value = 'transcription'
+  openDetail(`transcription:${provider.id}`)
 }
 
 // Each section adds its own kind of provider, so refresh just that list when
@@ -135,6 +117,42 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
   }
 })
 
+// Resolve the URL's `<kind>:<id>` against the matching list: restores the open
+// provider (and which pane kind) on refresh, follows refetched data, and falls
+// back to the list if it was deleted while open. Each kind only consults its
+// own list and only treats "not found" as deleted once that list's data has
+// actually arrived — the empty list during the initial fetch proves nothing.
+watch([queryValue, speechProviders, transcriptionProviders], ([raw, speech, transcription]) => {
+  if (!raw) return
+  const sep = raw.indexOf(':')
+  if (sep === -1) {
+    // Malformed value (hand-edited URL) — nothing will ever match it.
+    backToList()
+    return
+  }
+  const kind = raw.slice(0, sep)
+  const id = raw.slice(sep + 1)
+  if (kind === 'speech') {
+    const found = speech.find((p) => p.id === id)
+    if (found) {
+      detailKind.value = 'speech'
+      curTts.value = found
+    } else if (speechData.value !== undefined) {
+      backToList()
+    }
+  } else if (kind === 'transcription') {
+    const found = transcription.find((p) => p.id === id)
+    if (found) {
+      detailKind.value = 'transcription'
+      curTranscription.value = found
+    } else if (transcriptionData.value !== undefined) {
+      backToList()
+    }
+  } else {
+    // Unknown kind — nothing will ever match it.
+    backToList()
+  }
+}, { immediate: true })
 </script>
 
 <template>
@@ -271,7 +289,7 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
       v-else
       width="narrow"
       :back-label="t('voice.title')"
-      @back="closeProvider"
+      @back="backToList()"
     >
       <SpeechSetting v-if="detailKind === 'speech' && curTts?.id" />
       <TranscriptionSetting v-else-if="detailKind === 'transcription' && curTranscription?.id" />
