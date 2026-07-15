@@ -954,7 +954,8 @@ CREATE TABLE IF NOT EXISTS provider_oauth_tokens (
 
 CREATE INDEX IF NOT EXISTS idx_provider_oauth_tokens_state ON provider_oauth_tokens(state) WHERE state != '';
 
--- user_provider_oauth_tokens: per-user OAuth2 tokens for providers with user-scoped auth (e.g. GitHub Copilot)
+-- user_provider_oauth_tokens: legacy per-user OAuth2 storage retained for rollback compatibility.
+-- Active Codex and GitHub Copilot credentials are provider-scoped in provider_oauth_tokens.
 CREATE TABLE IF NOT EXISTS user_provider_oauth_tokens (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   provider_id UUID NOT NULL REFERENCES providers(id) ON DELETE CASCADE,

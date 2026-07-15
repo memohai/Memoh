@@ -20,7 +20,6 @@ import (
 	memohcopilot "github.com/memohai/memoh/internal/copilot"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/oauthctx"
 )
 
 const probeTimeout = DefaultProviderProbeTimeout
@@ -236,18 +235,7 @@ func (s *Service) resolveModelCredentials(ctx context.Context, provider sqlc.Pro
 }
 
 func (s *Service) resolveGitHubCopilotAccessToken(ctx context.Context, provider sqlc.Provider) (string, error) {
-	userID := oauthctx.UserIDFromContext(ctx)
-	if userID == "" {
-		return "", errors.New("github copilot requires a current user")
-	}
-	userUUID, err := db.ParseUUID(userID)
-	if err != nil {
-		return "", err
-	}
-	row, err := s.queries.GetUserProviderOAuthToken(ctx, sqlc.GetUserProviderOAuthTokenParams{
-		ProviderID: provider.ID,
-		UserID:     userUUID,
-	})
+	row, err := s.queries.GetProviderOAuthTokenByProvider(ctx, provider.ID)
 	if err != nil {
 		return "", err
 	}

@@ -1,3 +1,6 @@
+-- Legacy per-user OAuth storage retained for rollback compatibility.
+-- Active provider OAuth flows do not read or write these rows.
+
 -- name: UpsertUserProviderOAuthToken :one
 INSERT INTO user_provider_oauth_tokens (
   provider_id,
