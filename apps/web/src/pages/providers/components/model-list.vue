@@ -22,27 +22,16 @@
         v-if="providerId"
         class="ml-auto flex items-center gap-2"
       >
-        <LoadingButton
-          v-if="managed"
-          type="button"
-          variant="outline"
+        <ImportModelsDialog
+          :provider-id="providerId"
           size="sm"
-          :loading="refreshLoading"
-          @click="refreshManagedModels"
-        >
-          <RefreshCw />
-          {{ $t('models.refreshModels') }}
-        </LoadingButton>
-        <template v-else>
-          <ImportModelsDialog
-            :provider-id="providerId"
-            size="sm"
-          />
-          <CreateModel
-            :id="providerId"
-            size="sm"
-          />
-        </template>
+          :mode="(models?.length ?? 0) > 0 ? 'refresh' : 'import'"
+        />
+        <CreateModel
+          v-if="!managed"
+          :id="providerId"
+          size="sm"
+        />
       </div>
     </div>
 
@@ -133,7 +122,6 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { useQueryCache } from '@pinia/colada'
 import {
   Empty,
   EmptyDescription,
@@ -152,16 +140,12 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@felinic/ui'
-import { Search, List, RefreshCw } from 'lucide-vue-next'
+import { Search, List } from 'lucide-vue-next'
 import CreateModel from '@/components/create-model/index.vue'
 import ImportModelsDialog from '@/components/import-models-dialog/index.vue'
-import LoadingButton from '@/components/loading-button/index.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import ModelItem from './model-item.vue'
-import { postProvidersByIdImportModels } from '@memohai/sdk'
 import type { ModelsGetResponse } from '@memohai/sdk'
-import { toast } from '@felinic/ui'
-import { useI18n } from 'vue-i18n'
 
 const PAGE_SIZE = 8
 
@@ -179,32 +163,6 @@ defineEmits<{
 
 const searchQuery = ref('')
 const currentPage = ref(1)
-const refreshLoading = ref(false)
-const queryCache = useQueryCache()
-const { t } = useI18n()
-
-async function refreshManagedModels() {
-  if (!props.providerId) return
-  refreshLoading.value = true
-  try {
-    const { data } = await postProvidersByIdImportModels({
-      path: { id: props.providerId },
-      throwOnError: true,
-    })
-    queryCache.invalidateQueries({ key: ['provider-models'] })
-    queryCache.invalidateQueries({ key: ['models'] })
-    queryCache.invalidateQueries({ key: ['all-models'] })
-    toast.success(t('models.refreshSuccess', {
-      created: data?.created ?? 0,
-      updated: data?.updated ?? 0,
-    }))
-  } catch {
-    toast.error(t('models.refreshFailed'))
-  } finally {
-    refreshLoading.value = false
-  }
-}
-
 // Always offer search once there are models, so the box never disappears for a
 // short list (which read as inconsistent between providers). When it's shown,
 // model rows align their text to the search placeholder.

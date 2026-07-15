@@ -13,7 +13,7 @@ import {
   type ProvidersCreateRequest,
   type ModelsGetResponse,
 } from '@memohai/sdk'
-import { LLM_CLIENT_TYPE_LIST } from '@/constants/client-types'
+import { MANUAL_LLM_CLIENT_TYPE_LIST } from '@/constants/client-types'
 import type { ProviderPreset } from '@/constants/provider-presets'
 
 export function useProviderSetup(options: {
@@ -62,7 +62,7 @@ export function useProviderSetup(options: {
   const providerModels = computed<ModelsGetResponse[]>(() => providerModelsState.value.data ?? [])
 
   const availableClientTypes = computed(() =>
-    LLM_CLIENT_TYPE_LIST.filter(ct => !['openai-codex', 'github-copilot'].includes(ct.value)),
+    MANUAL_LLM_CLIENT_TYPE_LIST,
   )
 
   const baseUrlPlaceholder = computed(() => {

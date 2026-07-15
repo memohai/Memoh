@@ -24,7 +24,6 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthctx"
 )
 
 const (
@@ -74,7 +73,6 @@ var (
 
 type oauthTokenRecord struct {
 	ProviderID       string
-	UserID           string
 	AccessToken      string //nolint:gosec // Runtime token payload persisted encrypted at rest.
 	RefreshToken     string //nolint:gosec // Runtime token payload persisted encrypted at rest.
 	ExpiresAt        time.Time
@@ -170,13 +168,10 @@ func providerMetadata(raw []byte) map[string]any {
 	return metadata
 }
 
-func oauthLogAttrs(providerID, userID string, err error) []any {
+func oauthLogAttrs(providerID string, err error) []any {
 	attrs := []any{}
 	if strings.TrimSpace(providerID) != "" {
 		attrs = append(attrs, slog.String("provider_id", providerID))
-	}
-	if strings.TrimSpace(userID) != "" {
-		attrs = append(attrs, slog.String("user_id", userID))
 	}
 	if err != nil {
 		attrs = append(attrs, slog.Any("error", err))
@@ -247,10 +242,6 @@ func supportsOAuth(provider sqlc.Provider) bool {
 	}
 }
 
-func isUserScopedOAuthProvider(provider sqlc.Provider) bool {
-	return models.ClientType(provider.ClientType) == models.ClientTypeGitHubCopilot
-}
-
 func (s *Service) StartOAuthAuthorization(ctx context.Context, providerID string) (*OAuthAuthorizeResponse, error) {
 	provider, err := s.loadOAuthProvider(ctx, providerID)
 	if err != nil {
@@ -280,12 +271,8 @@ func (s *Service) StartOAuthAuthorization(ctx context.Context, providerID string
 		return &OAuthAuthorizeResponse{Mode: "device", Device: device.toStatus()}, nil
 	}
 
-	if isUserScopedOAuthProvider(provider) {
-		userID := oauthctx.UserIDFromContext(ctx)
-		if userID == "" {
-			return nil, errors.New("github copilot oauth requires a current user")
-		}
-		device, err := s.startGitHubDeviceAuthorization(ctx, providerID, userID, cfg)
+	if models.ClientType(provider.ClientType) == models.ClientTypeGitHubCopilot {
+		device, err := s.startGitHubDeviceAuthorization(ctx, providerID, cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -581,12 +568,6 @@ func (s *Service) ExchangeOpenAICodexACPDeviceCode(ctx context.Context, authoriz
 }
 
 func (s *Service) HandleOAuthCallback(ctx context.Context, state, code string) (string, error) {
-	if userToken, err := s.getUserOAuthTokenByState(ctx, state); err == nil {
-		return s.handleUserScopedOAuthCallback(ctx, userToken, code)
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return "", err
-	}
-
 	token, err := s.getOAuthTokenByState(ctx, state)
 	if err != nil {
 		return "", err
@@ -648,45 +629,7 @@ func openAICodexACPAuthIssuerBase() string {
 	return issuer
 }
 
-func (s *Service) handleUserScopedOAuthCallback(ctx context.Context, token *oauthTokenRecord, code string) (string, error) {
-	providerUUID, err := db.ParseUUID(token.ProviderID)
-	if err != nil {
-		return "", err
-	}
-	provider, err := s.queries.GetProviderByID(ctx, providerUUID)
-	if err != nil {
-		return "", fmt.Errorf("get provider: %w", err)
-	}
-	if !isUserScopedOAuthProvider(provider) {
-		return "", errors.New("provider does not use user-scoped oauth")
-	}
-
-	cfg := s.oauthConfigForProvider(provider)
-	resp, err := s.exchangeCode(ctx, cfg, code, token.PKCECodeVerifier)
-	if err != nil {
-		return "", err
-	}
-	if err := s.saveUserOAuthToken(ctx, token.ProviderID, token.UserID, oauthTokenRecord{
-		ProviderID:  token.ProviderID,
-		UserID:      token.UserID,
-		AccessToken: resp.AccessToken,
-		RefreshToken: firstNonEmpty(
-			resp.RefreshToken,
-			token.RefreshToken,
-		),
-		ExpiresAt:        expiresAtFromNow(resp.ExpiresIn),
-		Scope:            firstNonEmpty(resp.Scope, cfg.Scopes),
-		TokenType:        firstNonEmpty(resp.TokenType, "bearer"),
-		State:            "",
-		PKCECodeVerifier: "",
-		Metadata:         token.Metadata,
-	}); err != nil {
-		return "", err
-	}
-	return provider.ID.String(), nil
-}
-
-func (s *Service) startGitHubDeviceAuthorization(ctx context.Context, providerID, userID string, cfg oauthConfig) (*OAuthDeviceStatus, error) {
+func (s *Service) startGitHubDeviceAuthorization(ctx context.Context, providerID string, cfg oauthConfig) (*OAuthDeviceStatus, error) {
 	resp, err := s.requestDeviceAuthorization(ctx, cfg)
 	if err != nil {
 		return nil, err
@@ -699,7 +642,13 @@ func (s *Service) startGitHubDeviceAuthorization(ctx context.Context, providerID
 		ExpiresAt:       expiresAtFromNow(resp.ExpiresIn),
 		IntervalSeconds: resp.Interval,
 	}
-	if err := s.updateUserOAuthState(ctx, providerID, userID, "", "", device.toMetadata()); err != nil {
+	// Copilot is a shared Provider credential, just like Codex and API-key
+	// providers. Starting a new login replaces the previous shared credential
+	// so status cannot mix an authorized account with a pending device code.
+	if err := s.saveOAuthToken(ctx, providerID, oauthTokenRecord{
+		ProviderID: providerID,
+		Metadata:   device.toMetadata(),
+	}); err != nil {
 		return nil, err
 	}
 	return device.toStatus(), nil
@@ -719,22 +668,13 @@ func (s *Service) GetOAuthStatus(ctx context.Context, providerID string) (*OAuth
 	if !status.Configured {
 		return status, nil
 	}
-	if isUserScopedOAuthProvider(provider) || models.ClientType(provider.ClientType) == models.ClientTypeOpenAICodex {
+	if models.ClientType(provider.ClientType) == models.ClientTypeOpenAICodex ||
+		models.ClientType(provider.ClientType) == models.ClientTypeGitHubCopilot {
 		status.Mode = "device"
 		status.CallbackURL = ""
 	}
 
-	userID := ""
-	var token *oauthTokenRecord
-	if isUserScopedOAuthProvider(provider) {
-		userID = oauthctx.UserIDFromContext(ctx)
-		if userID == "" {
-			return nil, errors.New("github copilot oauth requires a current user")
-		}
-		token, err = s.getUserOAuthToken(ctx, providerID, userID)
-	} else {
-		token, err = s.getOAuthToken(ctx, providerID)
-	}
+	token, err := s.getOAuthToken(ctx, providerID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return status, nil
@@ -751,8 +691,8 @@ func (s *Service) GetOAuthStatus(ctx context.Context, providerID string) (*OAuth
 	if status.Mode == "device" {
 		status.Device = deviceMetadataFromMap(token.Metadata).toStatus()
 	}
-	if isUserScopedOAuthProvider(provider) {
-		account, accountErr := s.resolveGitHubOAuthAccount(ctx, providerID, userID, token)
+	if models.ClientType(provider.ClientType) == models.ClientTypeGitHubCopilot {
+		account, accountErr := s.resolveGitHubOAuthAccount(ctx, providerID, token)
 		if accountErr != nil {
 			return nil, accountErr
 		}
@@ -766,19 +706,19 @@ func (s *Service) PollOAuthAuthorization(ctx context.Context, providerID string)
 	if err != nil {
 		return nil, err
 	}
-	if models.ClientType(provider.ClientType) == models.ClientTypeOpenAICodex {
+	switch models.ClientType(provider.ClientType) {
+	case models.ClientTypeOpenAICodex:
 		return s.pollOpenAICodexProviderAuthorization(ctx, provider)
-	}
-	if !isUserScopedOAuthProvider(provider) {
+	case models.ClientTypeGitHubCopilot:
+		return s.pollGitHubCopilotProviderAuthorization(ctx, provider)
+	default:
 		return nil, errors.New("provider does not support device authorization")
 	}
+}
 
-	userID := oauthctx.UserIDFromContext(ctx)
-	if userID == "" {
-		return nil, errors.New("github copilot oauth requires a current user")
-	}
-
-	token, err := s.getUserOAuthToken(ctx, providerID, userID)
+func (s *Service) pollGitHubCopilotProviderAuthorization(ctx context.Context, provider sqlc.Provider) (*OAuthStatus, error) {
+	providerID := provider.ID.String()
+	token, err := s.getOAuthToken(ctx, providerID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return s.GetOAuthStatus(ctx, providerID)
@@ -790,7 +730,7 @@ func (s *Service) PollOAuthAuthorization(ctx context.Context, providerID string)
 		return s.GetOAuthStatus(ctx, providerID)
 	}
 	if !device.ExpiresAt.IsZero() && time.Now().After(device.ExpiresAt) {
-		if err := s.updateUserOAuthState(ctx, providerID, userID, "", "", nil); err != nil {
+		if err := s.updateOAuthState(ctx, providerID, "", "", nil); err != nil {
 			return nil, err
 		}
 		return s.GetOAuthStatus(ctx, providerID)
@@ -808,13 +748,13 @@ func (s *Service) PollOAuthAuthorization(ctx context.Context, providerID string)
 		case "slow_down":
 			if resp.Interval > 0 {
 				device.IntervalSeconds = resp.Interval
-				if err := s.updateUserOAuthState(ctx, providerID, userID, "", "", device.toMetadata()); err != nil {
+				if err := s.updateOAuthState(ctx, providerID, "", "", device.toMetadata()); err != nil {
 					return nil, err
 				}
 			}
 			return s.GetOAuthStatus(ctx, providerID)
 		case "expired_token", "access_denied", "incorrect_device_code", "unsupported_grant_type":
-			if err := s.updateUserOAuthState(ctx, providerID, userID, "", "", nil); err != nil {
+			if err := s.updateOAuthState(ctx, providerID, "", "", nil); err != nil {
 				return nil, err
 			}
 			return s.GetOAuthStatus(ctx, providerID)
@@ -825,12 +765,11 @@ func (s *Service) PollOAuthAuthorization(ctx context.Context, providerID string)
 
 	account, err := s.fetchGitHubOAuthAccount(ctx, resp.AccessToken)
 	if err != nil {
-		s.logger.Warn("fetch github oauth account failed", oauthLogAttrs(providerID, userID, err)...)
+		s.logger.Warn("fetch github oauth account failed", oauthLogAttrs(providerID, err)...)
 	}
 
-	if err := s.saveUserOAuthToken(ctx, providerID, userID, oauthTokenRecord{
+	if err := s.saveOAuthToken(ctx, providerID, oauthTokenRecord{
 		ProviderID:   providerID,
-		UserID:       userID,
 		AccessToken:  resp.AccessToken,
 		RefreshToken: firstNonEmpty(resp.RefreshToken, token.RefreshToken),
 		ExpiresAt:    expiresAtFromNow(resp.ExpiresIn),
@@ -900,13 +839,6 @@ func (s *Service) RevokeOAuthToken(ctx context.Context, providerID string) error
 		return errors.New("provider does not support oauth")
 	}
 
-	if isUserScopedOAuthProvider(provider) {
-		userID := oauthctx.UserIDFromContext(ctx)
-		if userID == "" {
-			return errors.New("github copilot oauth requires a current user")
-		}
-		return s.deleteUserOAuthToken(ctx, providerID, userID)
-	}
 	return s.queries.DeleteProviderOAuthToken(ctx, provider.ID)
 }
 
@@ -916,18 +848,6 @@ func (s *Service) GetValidAccessToken(ctx context.Context, providerID string) (s
 		return "", err
 	}
 	cfg := s.oauthConfigForProvider(provider)
-
-	if isUserScopedOAuthProvider(provider) {
-		userID := oauthctx.UserIDFromContext(ctx)
-		if userID == "" {
-			return "", errors.New("github copilot requires a current user")
-		}
-		token, err := s.getUserOAuthToken(ctx, providerID, userID)
-		if err != nil {
-			return "", err
-		}
-		return s.resolveValidUserOAuthToken(ctx, cfg, token)
-	}
 
 	token, err := s.getOAuthToken(ctx, providerID)
 	if err != nil {
@@ -963,39 +883,6 @@ func (s *Service) resolveValidProviderOAuthToken(ctx context.Context, cfg oauthC
 		Metadata:         token.Metadata,
 	}
 	if err := s.saveOAuthToken(ctx, token.ProviderID, saved); err != nil {
-		return "", err
-	}
-	return saved.AccessToken, nil
-}
-
-func (s *Service) resolveValidUserOAuthToken(ctx context.Context, cfg oauthConfig, token *oauthTokenRecord) (string, error) {
-	if strings.TrimSpace(token.AccessToken) == "" {
-		return "", errors.New("oauth token is missing access token")
-	}
-	if token.ExpiresAt.IsZero() || time.Now().Add(oauthExpirySkew).Before(token.ExpiresAt) {
-		return token.AccessToken, nil
-	}
-	if strings.TrimSpace(token.RefreshToken) == "" {
-		return "", errors.New("oauth token expired and no refresh token is available")
-	}
-
-	refreshed, err := s.refreshAccessToken(ctx, cfg, token.RefreshToken)
-	if err != nil {
-		return "", err
-	}
-	saved := oauthTokenRecord{
-		ProviderID:       token.ProviderID,
-		UserID:           token.UserID,
-		AccessToken:      refreshed.AccessToken,
-		RefreshToken:     firstNonEmpty(refreshed.RefreshToken, token.RefreshToken),
-		ExpiresAt:        expiresAtFromNow(refreshed.ExpiresIn),
-		Scope:            firstNonEmpty(refreshed.Scope, token.Scope),
-		TokenType:        firstNonEmpty(refreshed.TokenType, token.TokenType),
-		State:            token.State,
-		PKCECodeVerifier: token.PKCECodeVerifier,
-		Metadata:         token.Metadata,
-	}
-	if err := s.saveUserOAuthToken(ctx, token.ProviderID, token.UserID, saved); err != nil {
 		return "", err
 	}
 	return saved.AccessToken, nil
@@ -1072,115 +959,9 @@ func (s *Service) saveOAuthToken(ctx context.Context, providerID string, token o
 	return err
 }
 
-func (s *Service) getUserOAuthToken(ctx context.Context, providerID, userID string) (*oauthTokenRecord, error) {
-	providerUUID, err := db.ParseUUID(providerID)
-	if err != nil {
-		return nil, err
-	}
-	userUUID, err := db.ParseUUID(userID)
-	if err != nil {
-		return nil, err
-	}
-	row, err := s.queries.GetUserProviderOAuthToken(ctx, sqlc.GetUserProviderOAuthTokenParams{
-		ProviderID: providerUUID,
-		UserID:     userUUID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return toUserProviderOAuthToken(row), nil
-}
-
-func (s *Service) getUserOAuthTokenByState(ctx context.Context, state string) (*oauthTokenRecord, error) {
-	row, err := s.queries.GetUserProviderOAuthTokenByState(ctx, state)
-	if err != nil {
-		return nil, err
-	}
-	return toUserProviderOAuthToken(row), nil
-}
-
-func (s *Service) updateUserOAuthState(ctx context.Context, providerID, userID, state, codeVerifier string, metadata map[string]any) error {
-	providerUUID, err := db.ParseUUID(providerID)
-	if err != nil {
-		return err
-	}
-	userUUID, err := db.ParseUUID(userID)
-	if err != nil {
-		return err
-	}
-	return s.queries.UpdateUserProviderOAuthState(ctx, sqlc.UpdateUserProviderOAuthStateParams{
-		ProviderID:       providerUUID,
-		UserID:           userUUID,
-		State:            state,
-		PkceCodeVerifier: codeVerifier,
-		Metadata:         metadataJSON(metadata),
-	})
-}
-
-func (s *Service) saveUserOAuthToken(ctx context.Context, providerID, userID string, token oauthTokenRecord) error {
-	providerUUID, err := db.ParseUUID(providerID)
-	if err != nil {
-		return err
-	}
-	userUUID, err := db.ParseUUID(userID)
-	if err != nil {
-		return err
-	}
-	var expiresAt pgtype.Timestamptz
-	if !token.ExpiresAt.IsZero() {
-		expiresAt = pgtype.Timestamptz{Time: token.ExpiresAt, Valid: true}
-	}
-	_, err = s.queries.UpsertUserProviderOAuthToken(ctx, sqlc.UpsertUserProviderOAuthTokenParams{
-		ProviderID:       providerUUID,
-		UserID:           userUUID,
-		AccessToken:      token.AccessToken,
-		RefreshToken:     token.RefreshToken,
-		ExpiresAt:        expiresAt,
-		Scope:            token.Scope,
-		TokenType:        token.TokenType,
-		State:            token.State,
-		PkceCodeVerifier: token.PKCECodeVerifier,
-		Metadata:         metadataJSON(token.Metadata),
-	})
-	return err
-}
-
-func (s *Service) deleteUserOAuthToken(ctx context.Context, providerID, userID string) error {
-	providerUUID, err := db.ParseUUID(providerID)
-	if err != nil {
-		return err
-	}
-	userUUID, err := db.ParseUUID(userID)
-	if err != nil {
-		return err
-	}
-	return s.queries.DeleteUserProviderOAuthToken(ctx, sqlc.DeleteUserProviderOAuthTokenParams{
-		ProviderID: providerUUID,
-		UserID:     userUUID,
-	})
-}
-
 func toProviderOAuthToken(row sqlc.ProviderOauthToken) *oauthTokenRecord {
 	token := &oauthTokenRecord{
 		ProviderID:       row.ProviderID.String(),
-		AccessToken:      row.AccessToken,
-		RefreshToken:     row.RefreshToken,
-		Scope:            row.Scope,
-		TokenType:        row.TokenType,
-		State:            row.State,
-		PKCECodeVerifier: row.PkceCodeVerifier,
-		Metadata:         providerMetadata(row.Metadata),
-	}
-	if row.ExpiresAt.Valid {
-		token.ExpiresAt = row.ExpiresAt.Time
-	}
-	return token
-}
-
-func toUserProviderOAuthToken(row sqlc.UserProviderOauthToken) *oauthTokenRecord {
-	token := &oauthTokenRecord{
-		ProviderID:       row.ProviderID.String(),
-		UserID:           row.UserID.String(),
 		AccessToken:      row.AccessToken,
 		RefreshToken:     row.RefreshToken,
 		Scope:            row.Scope,
@@ -1331,7 +1112,7 @@ func (a oauthAccountMetadata) isZero() bool {
 	return a.Label == "" && a.Login == "" && a.Name == "" && a.Email == "" && a.AvatarURL == "" && a.ProfileURL == ""
 }
 
-func (s *Service) resolveGitHubOAuthAccount(ctx context.Context, providerID, userID string, token *oauthTokenRecord) (*OAuthAccount, error) {
+func (s *Service) resolveGitHubOAuthAccount(ctx context.Context, providerID string, token *oauthTokenRecord) (*OAuthAccount, error) {
 	account := accountMetadataFromMap(token.Metadata)
 	if status := account.toStatus(); status != nil {
 		return status, nil
@@ -1342,13 +1123,13 @@ func (s *Service) resolveGitHubOAuthAccount(ctx context.Context, providerID, use
 
 	refreshedAccount, err := s.fetchGitHubOAuthAccount(ctx, token.AccessToken)
 	if err != nil {
-		s.logger.Warn("refresh github oauth account metadata failed", oauthLogAttrs(providerID, userID, err)...)
+		s.logger.Warn("refresh github oauth account metadata failed", oauthLogAttrs(providerID, err)...)
 		return nil, nil
 	}
 
 	updatedToken := *token
 	updatedToken.Metadata = refreshedAccount.toMetadata()
-	if err := s.saveUserOAuthToken(ctx, providerID, userID, updatedToken); err != nil {
+	if err := s.saveOAuthToken(ctx, providerID, updatedToken); err != nil {
 		return nil, err
 	}
 	return refreshedAccount.toStatus(), nil

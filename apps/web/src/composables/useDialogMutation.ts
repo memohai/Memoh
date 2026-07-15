@@ -1,19 +1,19 @@
 import { toast } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
-interface DialogMutationOptions {
+interface DialogMutationOptions<T> {
   fallbackMessage: string
-  onSuccess?: () => void | Promise<void>
+  onSuccess?: (result: T) => void | Promise<void>
 }
 
 export function useDialogMutation() {
-  async function run(
-    mutation: () => Promise<unknown>,
-    options: DialogMutationOptions,
+  async function run<T>(
+    mutation: () => Promise<T>,
+    options: DialogMutationOptions<T>,
   ): Promise<boolean> {
     try {
-      await mutation()
-      await options.onSuccess?.()
+      const result = await mutation()
+      await options.onSuccess?.(result)
       return true
     } catch (error) {
       toast.error(resolveApiErrorMessage(error, options.fallbackMessage, { prefixFallback: true }))

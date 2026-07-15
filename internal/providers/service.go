@@ -11,10 +11,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	githubcopilot "github.com/memohai/twilight-ai/provider/github/copilot"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
-	memohcopilot "github.com/memohai/memoh/internal/copilot"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -335,21 +333,18 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 	}
 
 	clientType := models.ClientType(provider.ClientType)
-	if clientType == models.ClientTypeOpenAICodex {
+	switch clientType {
+	case models.ClientTypeOpenAICodex:
 		return s.fetchCodexRemoteModels(ctx, provider)
+	case models.ClientTypeGitHubCopilot:
+		return s.fetchGitHubCopilotModels(ctx, provider)
 	}
 
 	if models, ok := s.fetchTemplateModels(provider); ok {
 		return models, nil
 	}
 
-	var remoteModels []RemoteModel
-	switch clientType {
-	case models.ClientTypeGitHubCopilot:
-		remoteModels, err = s.fetchGitHubCopilotModels(ctx, provider)
-	default:
-		remoteModels, err = s.fetchRemoteModelsViaSDK(ctx, provider)
-	}
+	remoteModels, err := s.fetchRemoteModelsViaSDK(ctx, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -403,35 +398,6 @@ func remoteModelsFromTemplate(def registry.ProviderDefinition) []RemoteModel {
 		})
 	}
 	return out
-}
-
-func (s *Service) fetchGitHubCopilotModels(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {
-	creds, err := s.ResolveModelCredentials(ctx, provider)
-	if err != nil {
-		return nil, err
-	}
-	sdkProvider := memohcopilot.NewProvider(creds.APIKey, nil)
-	if result := sdkProvider.Test(ctx); result.Status != sdk.ProviderStatusOK {
-		return nil, fmt.Errorf("github copilot provider test failed: %s", result.Message)
-	}
-
-	catalog := githubcopilot.Catalog()
-	remoteModels := make([]RemoteModel, 0, len(catalog))
-	for _, model := range catalog {
-		remoteModels = append(remoteModels, RemoteModel{
-			ID:      model.ID,
-			Name:    model.DisplayName,
-			Object:  "model",
-			OwnedBy: "github-copilot",
-			Type:    "chat",
-			Compatibilities: []string{
-				models.CompatVision,
-				models.CompatToolCall,
-				models.CompatReasoning,
-			},
-		})
-	}
-	return remoteModels, nil
 }
 
 func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {

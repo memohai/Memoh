@@ -45,3 +45,31 @@ func TestMergeDiscoveredConfigFillsOnlyMissingDescription(t *testing.T) {
 		})
 	}
 }
+
+func TestMergeManagedDiscoveredConfigReplacesCapabilities(t *testing.T) {
+	t.Parallel()
+
+	existing := models.ModelConfig{
+		Compatibilities:  []string{models.CompatVision, models.CompatToolCall, models.CompatReasoning},
+		ReasoningEfforts: []string{models.ReasoningEffortHigh},
+		ThinkingMode:     models.ThinkingModeToggle,
+	}
+	discovered := models.ModelConfig{
+		Compatibilities: []string{models.CompatToolCall},
+		ThinkingMode:    models.ThinkingModeNone,
+	}
+
+	got, changed := mergeManagedDiscoveredConfig(existing, discovered)
+	if !changed {
+		t.Fatal("expected managed capability refresh to report a change")
+	}
+	if len(got.Compatibilities) != 1 || got.Compatibilities[0] != models.CompatToolCall {
+		t.Fatalf("compatibilities = %#v", got.Compatibilities)
+	}
+	if len(got.ReasoningEfforts) != 0 {
+		t.Fatalf("reasoning efforts = %#v, want empty", got.ReasoningEfforts)
+	}
+	if got.ThinkingMode != models.ThinkingModeNone {
+		t.Fatalf("thinking mode = %q, want none", got.ThinkingMode)
+	}
+}

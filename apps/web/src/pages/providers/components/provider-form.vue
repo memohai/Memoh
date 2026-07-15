@@ -1,7 +1,7 @@
 <template>
   <form @submit="editProvider">
     <SettingsSection
-      v-if="!isCodexProvider"
+      v-if="!isManagedOAuthProvider"
       :title="$t('provider.configurationTitle')"
     >
       <!-- Field rows are grouped so the LAST one keeps its `last:border-b-0`
@@ -81,7 +81,7 @@
         </FormField>
 
         <FormField
-          v-if="!isProviderOAuthClientType(form.values.client_type)"
+          v-if="!isManagedOAuthClientType(form.values.client_type)"
           v-slot="{ componentField, errorMessage }"
           name="api_key"
         >
@@ -210,9 +210,9 @@
          形状的已重构参考):一行账号状态 + 行内动作,等待输码时才在卡片内追加
          居中的验证码块(倒计时 + 复制并打开),轮询在后台静默完成授权。 -->
     <SettingsSection
-      v-if="isProviderOAuthClientType(form.values.client_type)"
+      v-if="isManagedOAuthClientType(form.values.client_type)"
       :title="$t('provider.oauth.sectionTitle')"
-      :class="{ 'mt-6': !isCodexProvider }"
+      :class="{ 'mt-6': !isManagedOAuthProvider }"
     >
       <!-- AutoHeight:状态切换(尤其设备码块出现/收起)让卡片平滑生长,不硬切。 -->
       <AutoHeight>
@@ -344,7 +344,10 @@ import DeviceCodePanel from '@/components/device-code-panel/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import SettingsRow from '@/components/settings/row.vue'
 import SettingsSection from '@/components/settings/section.vue'
-import { LLM_CLIENT_TYPE_LIST } from '@/constants/client-types'
+import {
+  isManagedOAuthClientType,
+  MANUAL_LLM_CLIENT_TYPE_LIST,
+} from '@/constants/client-types'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
@@ -364,8 +367,10 @@ import type {
 } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@felinic/ui'
+import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
 
 const { t } = useI18n()
+const { syncProviderModelCatalog } = useProviderModelCatalog()
 
 type ProviderWithAuth = Partial<ProvidersGetResponse>
 
@@ -389,16 +394,12 @@ function supportsPromptCache(clientType: string | undefined): boolean {
   return !!clientType && PROMPT_CACHE_CLIENT_TYPES.has(clientType)
 }
 
-function isProviderOAuthClientType(clientType: string | undefined): boolean {
-  return clientType === 'openai-codex' || clientType === 'github-copilot'
-}
-
 const props = defineProps<{
   provider: ProviderWithAuth | undefined
   editLoading: boolean
 }>()
 
-const isCodexProvider = computed(() => props.provider?.client_type === 'openai-codex')
+const isManagedOAuthProvider = computed(() => isManagedOAuthClientType(props.provider?.client_type))
 
 const emit = defineEmits<{
   submit: [values: Record<string, unknown>]
@@ -478,7 +479,7 @@ watch(() => props.provider?.id, () => {
 })
 
 const clientTypeOptions = computed(() =>
-  LLM_CLIENT_TYPE_LIST.map((ct) => ({
+  MANUAL_LLM_CLIENT_TYPE_LIST.map((ct) => ({
     value: ct.value,
     label: ct.label,
   })),
@@ -495,7 +496,7 @@ const providerSchema = toTypedSchema(z.object({
   const existingSecret = getStoredSecret(
     props.provider?.config as Record<string, unknown> | undefined,
   )
-  if (!isProviderOAuthClientType(value.client_type) && !value.api_key?.trim() && !existingSecret.trim()) {
+  if (!isManagedOAuthClientType(value.client_type) && !value.api_key?.trim() && !existingSecret.trim()) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['api_key'],
@@ -530,7 +531,7 @@ watch(() => props.provider, (newVal) => {
 }, { immediate: true })
 
 watch(() => form.values.client_type, (clientType) => {
-  if (!isProviderOAuthClientType(clientType)) {
+  if (!isManagedOAuthClientType(clientType)) {
     oauthStatus.value = null
   }
   if (clientType === 'openai-codex' && !form.values.base_url) {
@@ -542,7 +543,7 @@ watch(() => form.values.client_type, (clientType) => {
 })
 
 watch(() => [props.provider?.id, form.values.client_type] as const, async ([id, clientType]) => {
-  if (!id || (clientType !== 'openai-codex' && clientType !== 'github-copilot')) {
+  if (!id || !isManagedOAuthClientType(clientType)) {
     oauthStatus.value = null
     return
   }
@@ -673,6 +674,14 @@ async function pollOAuthAuthorization(notifyOnSuccess = false) {
     oauthStatus.value = nextStatus
     if (notifyOnSuccess && becameAuthorized) {
       toast.success(t('provider.oauth.authorizeSuccess'))
+      // Both managed OAuth providers need an account-scoped model catalog.
+      // Sync immediately after the token is stored so the provider is usable
+      // without a second manual action; failure leaves Refresh available.
+      try {
+        await syncProviderModelCatalog(props.provider.id)
+      } catch {
+        toast.error(t('models.refreshFailed'))
+      }
     }
   } catch (error) {
     clearDevicePollTimer()

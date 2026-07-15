@@ -98,7 +98,7 @@
             </FieldStack>
           </FormField>
           <div
-            v-else-if="isOAuthClientType(form.values.client_type)"
+            v-else-if="isManagedOAuthClientType(form.values.client_type)"
             class="rounded-lg border p-3 text-xs text-muted-foreground"
           >
             {{ $t(form.values.client_type === 'github-copilot' ? 'provider.oauth.githubCreateHint' : 'provider.oauth.openaiCreateHint') }}
@@ -193,7 +193,11 @@ import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import FieldStack from '@/components/settings/field-stack.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
-import { LLM_CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
+import {
+  CLIENT_TYPE_META,
+  isManagedOAuthClientType,
+  MANUAL_LLM_CLIENT_TYPE_LIST,
+} from '@/constants/client-types'
 import { toast } from '@felinic/ui'
 import { computed, ref, watch } from 'vue'
 import { providerPresets } from '@/constants/provider-presets'
@@ -248,17 +252,13 @@ function getPresetById(id: string | undefined): ProviderPreset | null {
   return providerPresets.find(preset => preset.id === id) ?? null
 }
 
-function isOAuthClientType(clientType: unknown): boolean {
-  return clientType === 'openai-codex' || clientType === 'github-copilot'
-}
-
 const apiKeyRequired = computed(() => {
-  if (isOAuthClientType(form.values.client_type)) return false
+  if (isManagedOAuthClientType(form.values.client_type)) return false
   return selectedPreset.value?.requiresApiKey !== false
 })
 
 const clientTypeOptions = computed(() =>
-  LLM_CLIENT_TYPE_LIST.map((ct) => ({
+  MANUAL_LLM_CLIENT_TYPE_LIST.map((ct) => ({
     value: ct.value,
     label: ct.label,
     description: ct.hint,
@@ -327,7 +327,7 @@ const providerSchema = toTypedSchema(z.object({
   client_type: z.string().min(1, t('provider.clientTypeRequired')),
   auto_import: z.boolean().optional(),
 }).superRefine((value, ctx) => {
-  const requiresApiKey = !isOAuthClientType(value.client_type) && selectedPreset.value?.requiresApiKey !== false
+  const requiresApiKey = !isManagedOAuthClientType(value.client_type) && selectedPreset.value?.requiresApiKey !== false
   if (requiresApiKey && !value.api_key?.trim()) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
