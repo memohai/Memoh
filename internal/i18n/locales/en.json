@@ -20,6 +20,9 @@
     "intro": "Just send me a message and we'll get going.",
     "tip": "New here? {help} shows what I can do. {new} starts a clean slate anytime."
   },
+  "groupCommand": {
+    "telegramTip": "Group chat: include {bot} immediately after the command, as shown above, so Telegram sends it to me."
+  },
   "newSession": {
     "title": "✨ New {mode} started.",
     "modeChat": "chat",

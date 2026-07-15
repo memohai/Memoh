@@ -3391,8 +3391,9 @@ func (p *ChannelInboundProcessor) handleStartCommand(
 	}
 	loc := p.localizer(ctx, identity.BotID)
 	caps := p.channelCaps(msg.Channel)
+	botUsername := telegramGroupBotUsername(msg)
 
-	out := applyMessageFormat(channel.Message{Text: formatStartWelcomeMessage(loc)}, caps)
+	out := applyMessageFormat(channel.Message{Text: formatStartWelcomeMessage(loc, botUsername)}, caps)
 	if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
 		out.Reply = &channel.ReplyRef{MessageID: mid}
 	}
@@ -3999,11 +4000,20 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		)
 	}
 	text := loc.T("newSession.title", map[string]any{"mode": modeLabel})
+	botUsername := telegramGroupBotUsername(msg)
+	renderedSessionDetails := false
 	if p.commandHandler != nil {
 		if cc, err := p.commandHandler.CurrentContext(ctx, identity.BotID); err == nil {
 			cc = currentContextForNewSessionSpec(cc, spec)
-			text = formatNewSessionMessage(loc, modeLabel, cc)
+			text = formatNewSessionMessage(loc, modeLabel, cc, botUsername)
+			renderedSessionDetails = true
 		}
+	}
+	if botUsername != "" && !renderedSessionDetails {
+		var b strings.Builder
+		b.WriteString(text)
+		appendTelegramGroupCommandTip(&b, loc, botUsername)
+		text = b.String()
 	}
 	out := applyMessageFormat(channel.Message{Text: text}, p.channelCaps(msg.Channel))
 	// When confirmed via the inline button, edit the confirmation message into

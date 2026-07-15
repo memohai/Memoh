@@ -20,6 +20,9 @@
     "intro": "直接发消息给我，我们就能开始聊。",
     "tip": "第一次来？用 {help} 看看我能做什么；想从头开始，随时用 {new}。"
   },
+  "groupCommand": {
+    "telegramTip": "群聊提示：请像上面这样在命令后紧跟 {bot}，Telegram 才会把命令发送给我。"
+  },
   "newSession": {
     "title": "✨ 已开启新{mode}。",
     "modeChat": "对话",

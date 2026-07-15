@@ -267,7 +267,7 @@ func TestRenderModelPickerProviderGrid(t *testing.T) {
 }
 
 func TestFormatStartWelcomeMessage(t *testing.T) {
-	got := formatStartWelcomeMessage(i18n.New("en"))
+	got := formatStartWelcomeMessage(i18n.New("en"), "")
 	for _, want := range []string{
 		"**👋 Hi there!**",
 		"Just send me a message",
@@ -285,11 +285,24 @@ func TestFormatStartWelcomeMessage(t *testing.T) {
 	}
 }
 
+func TestFormatStartWelcomeMessageTelegramGroup(t *testing.T) {
+	got := formatStartWelcomeMessage(i18n.New("en"), "snowluocat_bot")
+	for _, want := range []string{
+		"`/help@snowluocat_bot` shows what I can do.",
+		"`/new@snowluocat_bot` starts a clean slate anytime.",
+		"include `@snowluocat_bot` immediately after the command",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Telegram group welcome missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestFormatNewSessionMessage(t *testing.T) {
 	got := formatNewSessionMessage(i18n.New("en"), "chat", command.CurrentContext{
 		ChatModel: "Claude Opus 4.7 (Anthropic)", HeartbeatModel: "DeepSeek V4 (DeepSeek)",
 		ReasoningEnabled: true, ReasoningEffort: "medium", ContextWindow: "128.0K",
-	})
+	}, "")
 	// A fresh-start card confirms the full setup: model (+provider), reasoning,
 	// and context budget. Header is bold; values are plain (display names/enums).
 	for _, want := range []string{
@@ -319,7 +332,7 @@ func TestFormatNewSessionMessage(t *testing.T) {
 
 	// Reasoning off is still shown (it sets expectations on a fresh start); no
 	// heartbeat and no known context window are omitted.
-	off := formatNewSessionMessage(i18n.New("en"), "discussion", command.CurrentContext{ChatModel: "(none)", HeartbeatModel: "(none)", ReasoningEnabled: false})
+	off := formatNewSessionMessage(i18n.New("en"), "discussion", command.CurrentContext{ChatModel: "(none)", HeartbeatModel: "(none)", ReasoningEnabled: false}, "")
 	if !strings.Contains(off, "Reasoning: off") {
 		t.Errorf("reasoning state should be confirmed on the fresh-start card: %s", off)
 	}
@@ -331,6 +344,41 @@ func TestFormatNewSessionMessage(t *testing.T) {
 	}
 	if strings.Contains(off, "Context:") {
 		t.Errorf("unknown context window should be omitted: %s", off)
+	}
+}
+
+func TestFormatNewSessionMessageTelegramGroup(t *testing.T) {
+	got := formatNewSessionMessage(i18n.New("en"), "chat", command.CurrentContext{
+		ChatModel: "Claude Opus 4.7 (Anthropic)",
+	}, "@snowluocat_bot")
+	for _, want := range []string{
+		"`/model@snowluocat_bot`",
+		"`/reasoning@snowluocat_bot`",
+		"include `@snowluocat_bot` immediately after the command",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Telegram group new-session message missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestTelegramGroupBotUsername(t *testing.T) {
+	group := channel.InboundMessage{
+		Channel:      channel.ChannelTypeTelegram,
+		Conversation: channel.Conversation{Type: channel.ConversationTypeGroup},
+		Metadata:     map[string]any{"bot_username": "@snowluocat_bot"},
+	}
+	if got := telegramGroupBotUsername(group); got != "snowluocat_bot" {
+		t.Fatalf("telegramGroupBotUsername(group) = %q", got)
+	}
+	group.Conversation.Type = channel.ConversationTypePrivate
+	if got := telegramGroupBotUsername(group); got != "" {
+		t.Fatalf("telegramGroupBotUsername(private) = %q, want empty", got)
+	}
+	group.Conversation.Type = channel.ConversationTypeGroup
+	group.Channel = channel.ChannelTypeDiscord
+	if got := telegramGroupBotUsername(group); got != "" {
+		t.Fatalf("telegramGroupBotUsername(discord) = %q, want empty", got)
 	}
 }
 
