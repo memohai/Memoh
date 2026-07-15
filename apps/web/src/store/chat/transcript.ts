@@ -716,6 +716,7 @@ export function createTranscriptController({
       result: incoming.result ?? existing.result,
       output: incoming.output ?? existing.output,
       approval: mergeApprovalState(existing.approval, incoming.approval),
+      execution_location: incoming.execution_location ?? existing.execution_location,
       userInput: incoming.userInput ?? existing.userInput,
       user_input: incoming.user_input ?? existing.user_input,
       backgroundTask: incoming.backgroundTask ?? existing.backgroundTask,

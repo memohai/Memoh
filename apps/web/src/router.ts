@@ -111,6 +111,14 @@ const routes = [
         },
       },
       {
+        name: 'runtimes',
+        path: 'runtimes',
+        component: () => import('@/pages/runtimes/index.vue'),
+        meta: {
+          breadcrumb: i18nRef('sidebar.runtimes'),
+        },
+      },
+      {
         name: 'web-search',
         path: 'web-search',
         component: () => import('@/pages/web-search/index.vue'),

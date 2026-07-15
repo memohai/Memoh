@@ -227,8 +227,14 @@ export interface UIToolMessage {
   running: boolean
   progress?: unknown[]
   approval?: UIToolApproval
+  execution_location?: UIExecutionLocation
   user_input?: UIUserInput
   background_task?: UIBackgroundTask
+}
+
+export interface UIExecutionLocation {
+  kind: string
+  name: string
 }
 
 export interface UIBackgroundTask {

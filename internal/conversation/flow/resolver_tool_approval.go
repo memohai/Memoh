@@ -50,6 +50,9 @@ func (r *Resolver) RespondToolApproval(ctx context.Context, input ToolApprovalRe
 	} else if isACP {
 		return r.respondACPToolApproval(ctx, target, input, eventCh)
 	}
+	if err := r.authorizeToolApprovalResponse(ctx, target, input); err != nil {
+		return err
+	}
 
 	var toolResult sdk.ToolResultPart
 	switch strings.ToLower(strings.TrimSpace(input.Decision)) {
@@ -176,7 +179,7 @@ func (r *Resolver) authorizeACPToolApprovalResponse(ctx context.Context, target 
 		return err
 	}
 	if !sessionpkg.IsACPRuntime(sess) {
-		return nil
+		return r.authorizeToolApprovalResponse(ctx, target, input)
 	}
 	botID := firstNonEmpty(target.BotID, input.BotID)
 	if strings.TrimSpace(sess.BotID) != "" && strings.TrimSpace(botID) != "" && sess.BotID != botID {
@@ -185,6 +188,7 @@ func (r *Resolver) authorizeACPToolApprovalResponse(ctx context.Context, target 
 	if strings.TrimSpace(botID) == "" {
 		botID = sess.BotID
 	}
+	target.BotID = botID
 	actorID := firstNonEmpty(input.ActorUserID, input.ActorChannelIdentityID)
 	if actorID == "" {
 		return toolapproval.ErrForbidden
@@ -194,12 +198,38 @@ func (r *Resolver) authorizeACPToolApprovalResponse(ctx context.Context, target 
 	if runtimeOwnerID == "" || runtimeOwnerID != actorID {
 		return toolapproval.ErrForbidden
 	}
-	if ok, err := r.botPermissions.HasBotPermission(ctx, botID, actorID, bots.PermissionWorkspaceExec); err != nil {
+	return r.authorizeToolApprovalResponse(ctx, target, input)
+}
+
+func (r *Resolver) authorizeToolApprovalResponse(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput) error {
+	if r == nil || r.botPermissions == nil {
+		return errors.New("bot permission checker not configured")
+	}
+	botID := firstNonEmpty(target.BotID, input.BotID)
+	actorID := firstNonEmpty(input.ActorUserID, input.ActorChannelIdentityID)
+	permission, ok := toolApprovalPermission(target.Operation)
+	if strings.TrimSpace(botID) == "" || strings.TrimSpace(actorID) == "" || !ok {
+		return toolapproval.ErrForbidden
+	}
+	if ok, err := r.botPermissions.HasBotPermission(ctx, botID, actorID, permission); err != nil {
 		return err
 	} else if !ok {
 		return toolapproval.ErrForbidden
 	}
 	return nil
+}
+
+func toolApprovalPermission(operation string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(operation)) {
+	case toolapproval.OperationRead:
+		return bots.PermissionWorkspaceRead, true
+	case toolapproval.OperationWrite:
+		return bots.PermissionWorkspaceWrite, true
+	case toolapproval.OperationExec:
+		return bots.PermissionWorkspaceExec, true
+	default:
+		return "", false
+	}
 }
 
 func emitApprovalAck(ctx context.Context, eventCh chan<- WSStreamEvent) error {

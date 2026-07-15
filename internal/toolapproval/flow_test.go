@@ -21,6 +21,8 @@ type fakeFlowService struct {
 	getResult    Request
 	getErr       error
 	getCalls     int
+	createCalls  int
+	createdInput CreatePendingInput
 	waitCalls    int
 	waiters      int
 }
@@ -30,6 +32,8 @@ func (f *fakeFlowService) EvaluatePolicy(context.Context, CreatePendingInput) (E
 }
 
 func (f *fakeFlowService) CreatePending(_ context.Context, input CreatePendingInput) (Request, error) {
+	f.createCalls++
+	f.createdInput = input
 	if f.createErr != nil {
 		return Request{}, f.createErr
 	}
@@ -39,6 +43,7 @@ func (f *fakeFlowService) CreatePending(_ context.Context, input CreatePendingIn
 	}
 	req.ToolCallID = input.ToolCallID
 	req.ToolName = input.ToolName
+	req.ExecutionLocation = input.ExecutionLocation
 	if req.Status == "" {
 		req.Status = StatusPending
 	}
@@ -111,6 +116,28 @@ func TestRunFlowPolicyBypass(t *testing.T) {
 	}
 }
 
+func TestRunFlowPolicyDenyDoesNotCreatePendingRequest(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeFlowService{evaluation: Evaluation{Decision: DecisionDeny}}
+	flow := flowInputFor(svc)
+	emitted := false
+	flow.Emit = func(Request) bool {
+		emitted = true
+		return true
+	}
+	result, err := RunFlow(context.Background(), svc, flow)
+	if err != nil {
+		t.Fatalf("RunFlow() error = %v", err)
+	}
+	if result.Approved || result.Status != StatusRejected || result.DecisionReason != PolicyDeniedReason {
+		t.Fatalf("RunFlow() = %+v, want policy rejection", result)
+	}
+	if svc.createCalls != 0 || svc.waitCalls != 0 || emitted {
+		t.Fatalf("deny created approval flow: createCalls=%d waitCalls=%d emitted=%v", svc.createCalls, svc.waitCalls, emitted)
+	}
+}
+
 func TestRunFlowNonInteractiveAutoRejects(t *testing.T) {
 	t.Parallel()
 	svc := &fakeFlowService{evaluation: Evaluation{Decision: DecisionNeedsApproval}}
@@ -131,8 +158,14 @@ func TestRunFlowNonInteractiveAutoRejects(t *testing.T) {
 
 func TestRunFlowApprovedEmitsPendingAndDecision(t *testing.T) {
 	t.Parallel()
+	location := &ExecutionLocation{
+		TargetID:      "target-1",
+		Kind:          "remote",
+		Name:          "Office Mac",
+		WorkspacePath: "projects/memoh",
+	}
 	svc := &fakeFlowService{
-		evaluation: Evaluation{Decision: DecisionNeedsApproval},
+		evaluation: Evaluation{Decision: DecisionNeedsApproval, ExecutionLocation: location},
 		decided:    Request{ID: "approval-1", Status: StatusApproved, DecidedByUser: true},
 	}
 	var emitted []Request
@@ -153,6 +186,9 @@ func TestRunFlowApprovedEmitsPendingAndDecision(t *testing.T) {
 	}
 	if emitted[1].ToolCallID != "call-1" || emitted[1].ToolName != "exec" {
 		t.Fatalf("decision snapshot lost request identity: %+v", emitted[1])
+	}
+	if svc.createdInput.ExecutionLocation != location || emitted[0].ExecutionLocation != location || emitted[1].ExecutionLocation != location {
+		t.Fatalf("execution location was not preserved: input=%+v emitted=%+v", svc.createdInput.ExecutionLocation, emitted)
 	}
 	if svc.waiters != 0 {
 		t.Fatalf("waiter count after RunFlow = %d, want released", svc.waiters)

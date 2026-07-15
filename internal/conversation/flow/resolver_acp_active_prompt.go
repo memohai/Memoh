@@ -264,6 +264,7 @@ func (o acpActivePromptForwardOptions) skip(ev agentpkg.StreamEvent) bool {
 		return sameNonEmpty(ev.ToolCallID, o.SkipToolCallID)
 	case agentpkg.EventToolCallInputStart,
 		agentpkg.EventToolCallStart,
+		agentpkg.EventToolCallMetadata,
 		agentpkg.EventToolCallProgress,
 		agentpkg.EventToolCallEnd:
 		return sameNonEmpty(ev.ToolCallID, o.SkipToolCallID)

@@ -18,6 +18,7 @@ import (
 
 	"github.com/memohai/memoh/internal/agent/background"
 	"github.com/memohai/memoh/internal/hooks"
+	workspacepkg "github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
@@ -26,7 +27,10 @@ import (
 // Does not match sleep inside pipelines, subshells, or scripts.
 var blockedSleepPattern = regexp.MustCompile(`^sleep\s+(\d+(?:\.\d+)?)(?:\s*[;&]|$)`)
 
-const defaultContainerExecWorkDir = "/data"
+const (
+	defaultContainerExecWorkDir  = "/data"
+	remoteBackgroundOutputLogDir = "/data/.memoh/background"
+)
 
 // containerOpTimeout is the maximum time allowed for individual file
 // operations (read, write, list, edit). Exec has its own timeout.
@@ -40,9 +44,13 @@ const largeFileThreshold = 512 * 1024 // 512 KB
 type ContainerProvider struct {
 	clients     bridge.Provider
 	bgManager   *background.Manager
-	hookService *hooks.Service
+	hookService workspaceHookService
 	execWorkDir string
 	logger      *slog.Logger
+}
+
+type workspaceHookService interface {
+	Run(ctx context.Context, req hooks.Request, runner hooks.ToolRunner) (hooks.Result, error)
 }
 
 func NewContainerProvider(log *slog.Logger, clients bridge.Provider, bgManager *background.Manager, execWorkDir string, hookServices ...*hooks.Service) *ContainerProvider {
@@ -66,6 +74,10 @@ func (p *ContainerProvider) SetHookService(h *hooks.Service) {
 
 func (*ContainerProvider) Usage(_ context.Context, session SessionContext, available AvailableTools) string {
 	var parts []string
+	locationRef, hasLocationTool := available.Ref(ToolListExecutionLocations())
+	if hasLocationTool {
+		parts = append(parts, locationRef+": list the current Server Workspace and connected computers available to this Bot for file and command work")
+	}
 	if ref, ok := available.Ref(ToolRead()); ok {
 		text := ref + ": read file content"
 		if session.SupportsImageInput {
@@ -88,6 +100,9 @@ func (*ContainerProvider) Usage(_ context.Context, session SessionContext, avail
 	if ref, ok := available.Ref(ToolExec()); ok {
 		parts = append(parts, ref+": execute command")
 	}
+	if hasLocationTool && len(available.Refs(ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolApplyPatch(), ToolExec())) > 0 {
+		parts = append(parts, "Use "+locationRef+" when the user names a computer, you need a non-default location, availability may have changed, or a target call fails. Pass its `target_id` to file and command tools; omit `target_id` to use the default. Listing locations does not switch locations or folders.")
+	}
 	return usageSection("Basic Tools", parts)
 }
 
@@ -95,19 +110,21 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 	workspace := p.resolveToolWorkspace(ctx, session)
 	wd := workspace.defaultWorkDir
 	sess := session
+	targetParameter := p.workspaceTargetParameter()
 
 	readDesc := fmt.Sprintf("Read file content %s. Reads the full file by default; use line_offset and n_lines for pagination. Files up to ~16 MB are supported.", workspace.locationDescription)
 	if sess.SupportsImageInput {
 		readDesc += " Also supports reading image files (PNG, JPEG, GIF, WebP) — binary images are loaded into model context automatically."
 	}
 
-	return []sdk.Tool{
+	toolList := []sdk.Tool{
 		{
 			Name:        ToolRead().String(),
 			Description: readDesc,
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
+					"target_id":   targetParameter,
 					"path":        map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
 					"line_offset": map[string]any{"type": "integer", "description": "Line number to start reading from (1-indexed). Default: 1.", "minimum": 1, "default": 1},
 					"n_lines":     map[string]any{"type": "integer", "description": "Number of lines to read. Default: read entire file.", "minimum": 1},
@@ -124,8 +141,9 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":    map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
-					"content": map[string]any{"type": "string", "description": "File content"},
+					"target_id": targetParameter,
+					"path":      map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
+					"content":   map[string]any{"type": "string", "description": "File content"},
 				},
 				"required": []string{"path", "content"},
 			},
@@ -139,6 +157,7 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
+					"target_id": targetParameter,
 					"path":      map[string]any{"type": "string", "description": fmt.Sprintf("Directory path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
 					"recursive": map[string]any{"type": "boolean", "description": "List recursively"},
 					"offset":    map[string]any{"type": "integer", "description": "Entry offset to start from (0-indexed). Default: 0.", "minimum": 0, "default": 0},
@@ -156,9 +175,10 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":     map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
-					"old_text": map[string]any{"type": "string", "description": "Exact text to find"},
-					"new_text": map[string]any{"type": "string", "description": "Replacement text"},
+					"target_id": targetParameter,
+					"path":      map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
+					"old_text":  map[string]any{"type": "string", "description": "Exact text to find"},
+					"new_text":  map[string]any{"type": "string", "description": "Replacement text"},
 				},
 				"required": []string{"path", "old_text", "new_text"},
 			},
@@ -215,7 +235,8 @@ Delete a file:
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"patch": map[string]any{"type": "string", "description": "Patch body using the apply_patch format. Paths are relative to the workspace by default, or absolute paths supported by the workspace backend."},
+					"target_id": targetParameter,
+					"patch":     map[string]any{"type": "string", "description": "Patch body using the apply_patch format. Paths are relative to the workspace by default, or absolute paths supported by the workspace backend."},
 				},
 				"required": []string{"patch"},
 			},
@@ -225,26 +246,28 @@ Delete a file:
 		},
 		{
 			Name: ToolExec().String(),
-			Description: fmt.Sprintf(`Execute a shell command %s. Runs in %s by default.
+			Description: fmt.Sprintf(`Execute a %s command %s. Runs in %s by default.
 
 # Instructions
+%s
 - Use this tool to run shell commands for installing packages, running scripts, building code, running tests, and other system operations.
 - If your command will take a long time (package installs, builds, test suites), set run_in_background to true. The call returns a task ID immediately. You do not need to add '&' at the end of the command when using this parameter.
 - If waiting for a background task, use wait_until(task_id): it returns with a reason (completed/failed/killed/stalled/idle/timeout) and the latest output_tail. Then use get_background_status(task_id) to inspect result.
 - For processes that never exit on their own (dev servers, watch mode), use run_in_background, then wait_until(task_id): once output settles it returns with reason 'idle' — check output_tail for the ready message (e.g. a local URL) and proceed. Do not wait for such processes to complete.
 - You may specify a custom timeout (up to %d seconds) for commands you know will take longer than the default %d seconds. If a foreground command times out, it will be automatically moved to the background; use wait_until(task_id), then get_background_status(task_id).
-- Avoid unnecessary sleep commands:
+- Avoid unnecessary delay commands:
   - Do not sleep between commands that can run immediately — just run them.
-  - If your command is long running, use run_in_background. No sleep needed.
-  - Do not retry failing commands in a sleep loop — diagnose the root cause.
+  - If your command is long running, use run_in_background. No delay needed.
+  - Do not retry failing commands in a delay loop — diagnose the root cause.
   - If waiting for a background task, use wait_until(task_id).
-  - sleep N (N >= 2) in foreground is blocked. If you genuinely need a short delay, keep it under 2 seconds.`, workspace.locationDescription, wd, background.MaxExecTimeout, background.DefaultExecTimeout),
+%s`, workspace.shellDescription, workspace.locationDescription, wd, workspace.platformInstructions, background.MaxExecTimeout, background.DefaultExecTimeout, workspace.delayInstruction),
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"command":           map[string]any{"type": "string", "description": "Shell command to run (e.g. ls -la, npm install, python script.py)"},
+					"target_id":         targetParameter,
+					"command":           map[string]any{"type": "string", "description": fmt.Sprintf("Command to run (e.g. %s)", workspace.commandExamples)},
 					"work_dir":          map[string]any{"type": "string", "description": fmt.Sprintf("Working directory (default: %s)", wd)},
-					"description":       map[string]any{"type": "string", "description": `Clear, concise description of what this command does in active voice. For simple commands keep it brief (5-10 words): ls -la → "List files with details". For complex commands add enough context: curl -s url | jq '.data[]' → "Fetch JSON and extract data array".`},
+					"description":       map[string]any{"type": "string", "description": workspace.descriptionExamples},
 					"timeout":           map[string]any{"type": "integer", "description": fmt.Sprintf("Timeout in seconds (default: %d, max: %d). Only applies to foreground execution. Commands that exceed this timeout are automatically moved to background.", background.DefaultExecTimeout, background.MaxExecTimeout), "minimum": 1, "maximum": background.MaxExecTimeout},
 					"run_in_background": map[string]any{"type": "boolean", "description": "If true, run the command in the background. Returns immediately with a task ID. Use wait_until(task_id), then get_background_status(task_id) to inspect result. Use for long-running commands (installs, builds, test suites) and for processes that never exit (dev servers, watch mode). You do not need to use '&' at the end of the command."},
 				},
@@ -254,16 +277,67 @@ Delete a file:
 				return p.execExec(ctx.Context, sess, inputAsMap(input))
 			},
 		},
-	}, nil
+	}
+	if resolver, ok := p.clients.(workspaceTargetResolver); ok {
+		toolList = append([]sdk.Tool{p.listExecutionLocationsTool(sess, resolver)}, toolList...)
+	}
+	return toolList, nil
 }
 
 type toolWorkspace struct {
 	defaultWorkDir          string
 	locationDescription     string
 	absolutePathDescription string
+	shellDescription        string
+	commandExamples         string
+	descriptionExamples     string
+	platformInstructions    string
+	delayInstruction        string
+	windows                 bool
+}
+
+type resolvedToolTarget struct {
+	id        string
+	client    *bridge.Client
+	info      bridge.WorkspaceInfo
+	workspace toolWorkspace
+}
+
+func (t resolvedToolTarget) hookWorkspaceInfo(fallbackWorkDir string) hooks.WorkspaceInfo {
+	return hookWorkspaceInfoFromBridge(t.info, fallbackWorkDir)
+}
+
+func (t resolvedToolTarget) backgroundOutputDir() string {
+	if strings.EqualFold(strings.TrimSpace(t.info.Backend), bridge.WorkspaceBackendRemote) {
+		return remoteBackgroundOutputLogDir
+	}
+	return background.OutputLogDir
+}
+
+type workspaceTargetResolver interface {
+	ResolveWorkspaceTarget(ctx context.Context, botID, targetID string) (workspacepkg.ResolvedWorkspaceTarget, error)
+	ListWorkspaceTargets(ctx context.Context, botID string) ([]workspacepkg.WorkspaceTarget, error)
+}
+
+type executionLocation struct {
+	TargetID       string `json:"target_id"`
+	Name           string `json:"name"`
+	Type           string `json:"type"`
+	Default        bool   `json:"default"`
+	Available      bool   `json:"available"`
+	Status         string `json:"status"`
+	StartingFolder string `json:"starting_folder,omitempty"`
+}
+
+type listExecutionLocationsResult struct {
+	Locations []executionLocation `json:"locations"`
 }
 
 func (p *ContainerProvider) resolveToolWorkspace(ctx context.Context, session SessionContext) toolWorkspace {
+	return toolWorkspaceFromInfo(p.resolveToolWorkspaceInfo(ctx, session), p.execWorkDir)
+}
+
+func (p *ContainerProvider) resolveToolWorkspaceInfo(ctx context.Context, session SessionContext) bridge.WorkspaceInfo {
 	info := bridge.WorkspaceInfo{
 		Backend:        bridge.WorkspaceBackendContainer,
 		DefaultWorkDir: p.execWorkDir,
@@ -273,46 +347,159 @@ func (p *ContainerProvider) resolveToolWorkspace(ctx context.Context, session Se
 			info = resolved
 		}
 	}
-	wd := strings.TrimSpace(info.DefaultWorkDir)
-	if wd == "" {
-		wd = p.execWorkDir
-	}
-	if strings.EqualFold(info.Backend, bridge.WorkspaceBackendLocal) {
-		return toolWorkspace{
-			defaultWorkDir:          wd,
-			locationDescription:     "on the local machine",
-			absolutePathDescription: "host path",
-		}
-	}
-	return toolWorkspace{
-		defaultWorkDir:          wd,
-		locationDescription:     "inside the bot workspace",
-		absolutePathDescription: "inside the workspace",
-	}
-}
-
-func (p *ContainerProvider) hookWorkspaceInfo(ctx context.Context, session SessionContext) hooks.WorkspaceInfo {
-	info := hooks.WorkspaceInfo{
-		CWD:     p.execWorkDir,
-		Runtime: bridge.WorkspaceBackendContainer,
-	}
-	if resolver, ok := p.clients.(bridge.WorkspaceInfoProvider); ok {
-		if resolved, err := resolver.WorkspaceInfo(ctx, session.BotID); err == nil {
-			if strings.TrimSpace(resolved.DefaultWorkDir) != "" {
-				info.CWD = resolved.DefaultWorkDir
-			}
-			if strings.TrimSpace(resolved.Backend) != "" {
-				info.Runtime = resolved.Backend
-			}
-		}
-	}
-	if strings.TrimSpace(info.CWD) == "" {
-		info.CWD = hooks.DefaultWorkDir
-	}
 	return info
 }
 
-func (p *ContainerProvider) runWorkspaceToolHook(ctx context.Context, session SessionContext, eventName string, extra map[string]any) (hooks.Result, error) {
+func toolWorkspaceFromInfo(info bridge.WorkspaceInfo, fallbackWorkDir string) toolWorkspace {
+	wd := strings.TrimSpace(info.DefaultWorkDir)
+	if wd == "" {
+		wd = fallbackWorkDir
+	}
+	workspace := toolWorkspace{
+		defaultWorkDir:          wd,
+		locationDescription:     "inside the bot workspace",
+		absolutePathDescription: "inside the workspace",
+		shellDescription:        "shell",
+		commandExamples:         "ls -la, npm install, python script.py",
+		descriptionExamples:     `Clear, concise description of what this command does in active voice. For simple commands keep it brief (5-10 words): ls -la → "List files with details". For complex commands add enough context: curl -s url | jq '.data[]' → "Fetch JSON and extract data array".`,
+		delayInstruction:        "  - sleep N (N >= 2) in foreground is blocked. If you genuinely need a short delay, keep it under 2 seconds.",
+	}
+	switch {
+	case strings.EqualFold(info.Backend, bridge.WorkspaceBackendLocal):
+		workspace.locationDescription = "on the local machine"
+		workspace.absolutePathDescription = "host path"
+	case strings.EqualFold(info.Backend, bridge.WorkspaceBackendRemote):
+		workspace.locationDescription = "on the connected remote machine"
+		workspace.absolutePathDescription = "remote workspace path"
+		if strings.EqualFold(info.OS, "win32") {
+			workspace.windows = true
+			workspace.shellDescription = "Windows Command Prompt (cmd.exe)"
+			workspace.commandExamples = "dir, npm install, python script.py"
+			workspace.descriptionExamples = `Clear, concise description of what this command does in active voice. For simple commands keep it brief (5-10 words): dir → "List files and folders". For complex commands add enough context to explain the operation and expected result.`
+			workspace.platformInstructions = `- This remote machine uses Windows Command Prompt (cmd.exe). Use Windows command syntax and commands such as dir, type, and where; do not assume POSIX commands such as ls, cat, pwd, or sleep are installed.
+- Do not use start to detach a command. Use run_in_background so the Runtime retains ownership of the process tree.`
+			workspace.delayInstruction = "  - Do not use timeout /t or ping loops to wait for background work; use wait_until."
+		}
+	}
+	return workspace
+}
+
+func (*ContainerProvider) workspaceTargetParameter() map[string]any {
+	return map[string]any{
+		"type":        "string",
+		"description": "Exact target_id returned by list_execution_locations. Do not pass a location name, type, or runtime ID. Omit to use the default location.",
+	}
+}
+
+func (*ContainerProvider) listExecutionLocationsTool(session SessionContext, resolver workspaceTargetResolver) sdk.Tool {
+	return sdk.Tool{
+		Name: ToolListExecutionLocations().String(),
+		Description: "List the execution locations configured for this Bot for file operations and command execution, with current availability and status. " +
+			"Use the returned target_id with file and command tools when a non-default location is needed. " +
+			"The available field says whether a location can currently be used. This tool does not change the default location or starting folder.",
+		Parameters: emptyObjectSchema(),
+		Execute: func(ctx *sdk.ToolExecContext, _ any) (any, error) {
+			targets, err := resolver.ListWorkspaceTargets(ctx.Context, session.BotID)
+			if err != nil {
+				return nil, fmt.Errorf("list execution locations: %w", err)
+			}
+			locations := make([]executionLocation, 0, len(targets))
+			for _, target := range targets {
+				if strings.TrimSpace(target.TargetID) == "" {
+					continue
+				}
+				locations = append(locations, executionLocationFromTarget(target))
+			}
+			return listExecutionLocationsResult{Locations: locations}, nil
+		},
+	}
+}
+
+func executionLocationFromTarget(target workspacepkg.WorkspaceTarget) executionLocation {
+	status := strings.TrimSpace(target.Status)
+	if status == "" {
+		if target.Online {
+			status = workspacepkg.WorkspaceTargetStatusOnline
+		} else {
+			status = workspacepkg.WorkspaceTargetStatusOffline
+		}
+	}
+	name := strings.TrimSpace(target.Name)
+	targetType := "execution_location"
+	switch target.Kind {
+	case workspacepkg.WorkspaceTargetNative:
+		targetType = "server_workspace"
+		if name == "" {
+			name = "Server Workspace"
+		}
+	case workspacepkg.WorkspaceTargetRemote:
+		targetType = "connected_computer"
+		if name == "" {
+			name = "Unavailable connected computer"
+		}
+	}
+	return executionLocation{
+		TargetID:       strings.TrimSpace(target.TargetID),
+		Name:           name,
+		Type:           targetType,
+		Default:        target.Primary,
+		Available:      status == workspacepkg.WorkspaceTargetStatusOnline,
+		Status:         status,
+		StartingFolder: strings.TrimSpace(target.WorkspacePath),
+	}
+}
+
+func (p *ContainerProvider) resolveToolTarget(ctx context.Context, session SessionContext, args map[string]any) (resolvedToolTarget, error) {
+	targetID := StringArg(args, "target_id")
+	if resolver, ok := p.clients.(workspaceTargetResolver); ok {
+		resolved, err := resolver.ResolveWorkspaceTarget(ctx, session.BotID, targetID)
+		if err != nil {
+			if errors.Is(err, workspacepkg.ErrWorkspaceTargetNotFound) {
+				return resolvedToolTarget{}, fmt.Errorf("execution location target_id is invalid or is no longer configured for this Bot; call %s and retry with a returned target_id: %w", ToolListExecutionLocations().String(), err)
+			}
+			return resolvedToolTarget{}, fmt.Errorf("workspace target is not reachable: %w", err)
+		}
+		if resolved.Client == nil {
+			return resolvedToolTarget{}, errors.New("workspace target is not reachable: client is unavailable")
+		}
+		return resolvedToolTarget{
+			id:        resolved.TargetID,
+			client:    resolved.Client,
+			info:      resolved.Info,
+			workspace: toolWorkspaceFromInfo(resolved.Info, p.execWorkDir),
+		}, nil
+	}
+	if targetID != "" {
+		return resolvedToolTarget{}, errors.New("workspace target selection is not supported")
+	}
+	client, err := p.getClient(ctx, session.BotID)
+	if err != nil {
+		return resolvedToolTarget{}, err
+	}
+	info := p.resolveToolWorkspaceInfo(ctx, session)
+	return resolvedToolTarget{
+		client:    client,
+		info:      info,
+		workspace: toolWorkspaceFromInfo(info, p.execWorkDir),
+	}, nil
+}
+
+func hookWorkspaceInfoFromBridge(info bridge.WorkspaceInfo, fallbackWorkDir string) hooks.WorkspaceInfo {
+	cwd := strings.TrimSpace(info.DefaultWorkDir)
+	if cwd == "" {
+		cwd = strings.TrimSpace(fallbackWorkDir)
+	}
+	if cwd == "" {
+		cwd = hooks.DefaultWorkDir
+	}
+	runtime := strings.TrimSpace(info.Backend)
+	if runtime == "" {
+		runtime = bridge.WorkspaceBackendContainer
+	}
+	return hooks.WorkspaceInfo{CWD: cwd, Runtime: runtime}
+}
+
+func (p *ContainerProvider) runWorkspaceToolHook(ctx context.Context, session SessionContext, workspace hooks.WorkspaceInfo, eventName string, extra map[string]any) (hooks.Result, error) {
 	if p == nil || p.hookService == nil {
 		return hooks.Result{Decision: hooks.DecisionAllow, RuntimeSupported: hooks.RuntimeSupported(eventName)}, nil
 	}
@@ -322,7 +509,7 @@ func (p *ContainerProvider) runWorkspaceToolHook(ctx context.Context, session Se
 		BotID:     session.BotID,
 		SessionID: session.SessionID,
 		ChatID:    session.ChatID,
-		Workspace: p.hookWorkspaceInfo(ctx, session),
+		Workspace: workspace,
 		Extra:     extra,
 	}
 	return p.hookService.Run(ctx, req, nil)
@@ -340,22 +527,36 @@ func (p *ContainerProvider) logWorkspaceToolHookError(eventName, botID, sessionI
 	)
 }
 
-func (*ContainerProvider) normalizePath(path, workDir string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return path
+func (w toolWorkspace) normalizePath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return value
 	}
-	prefix := strings.TrimRight(strings.TrimSpace(workDir), "/")
+	prefix := strings.TrimSpace(w.defaultWorkDir)
 	if prefix == "" {
 		prefix = defaultContainerExecWorkDir
 	}
-	if path == prefix {
+	if w.windows {
+		valueForCompare := strings.ReplaceAll(value, `\`, "/")
+		prefixForCompare := strings.TrimRight(strings.ReplaceAll(prefix, `\`, "/"), "/")
+		if strings.EqualFold(valueForCompare, prefixForCompare) {
+			return "."
+		}
+		if len(valueForCompare) > len(prefixForCompare) &&
+			strings.EqualFold(valueForCompare[:len(prefixForCompare)], prefixForCompare) &&
+			valueForCompare[len(prefixForCompare)] == '/' {
+			return strings.TrimLeft(valueForCompare[len(prefixForCompare)+1:], "/")
+		}
+		return value
+	}
+	prefix = strings.TrimRight(prefix, "/")
+	if value == prefix {
 		return "."
 	}
-	if strings.HasPrefix(path, prefix+"/") {
-		return strings.TrimLeft(strings.TrimPrefix(path, prefix+"/"), "/")
+	if strings.HasPrefix(value, prefix+"/") {
+		return strings.TrimLeft(strings.TrimPrefix(value, prefix+"/"), "/")
 	}
-	return path
+	return value
 }
 
 func (p *ContainerProvider) getClient(ctx context.Context, botID string) (*bridge.Client, error) {
@@ -374,11 +575,12 @@ func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
-	client, err := p.getClient(opCtx, session.BotID)
+	target, err := p.resolveToolTarget(opCtx, session, args)
 	if err != nil {
 		return nil, err
 	}
-	filePath := p.normalizePath(StringArg(args, "path"), p.resolveToolWorkspace(ctx, session).defaultWorkDir)
+	client := target.client
+	filePath := target.workspace.normalizePath(StringArg(args, "path"))
 	if filePath == "" {
 		return nil, errors.New("path is required")
 	}
@@ -468,18 +670,19 @@ func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContex
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
-	client, err := p.getClient(opCtx, session.BotID)
+	target, err := p.resolveToolTarget(opCtx, session, args)
 	if err != nil {
 		return nil, err
 	}
-	filePath := p.normalizePath(StringArg(args, "path"), p.resolveToolWorkspace(ctx, session).defaultWorkDir)
+	client := target.client
+	filePath := target.workspace.normalizePath(StringArg(args, "path"))
 	content := StringArg(args, "content")
 	if filePath == "" {
 		return nil, errors.New("path is required")
 	}
 
 	data := []byte(content)
-	if res, err := p.runWorkspaceToolHook(ctx, session, hooks.EventBeforeFileWrite, map[string]any{
+	if res, err := p.runWorkspaceToolHook(ctx, session, target.hookWorkspaceInfo(p.execWorkDir), hooks.EventBeforeFileWrite, map[string]any{
 		"path":  filePath,
 		"bytes": len(data),
 	}); err != nil {
@@ -500,7 +703,7 @@ func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContex
 			return nil, err
 		}
 	}
-	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, hooks.EventAfterFileWrite, map[string]any{
+	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, target.hookWorkspaceInfo(p.execWorkDir), hooks.EventAfterFileWrite, map[string]any{
 		"path":  filePath,
 		"bytes": len(data),
 	}); err != nil {
@@ -513,11 +716,12 @@ func (p *ContainerProvider) execList(ctx context.Context, session SessionContext
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
-	client, err := p.getClient(opCtx, session.BotID)
+	target, err := p.resolveToolTarget(opCtx, session, args)
 	if err != nil {
 		return nil, err
 	}
-	dirPath := p.normalizePath(StringArg(args, "path"), p.resolveToolWorkspace(ctx, session).defaultWorkDir)
+	client := target.client
+	dirPath := target.workspace.normalizePath(StringArg(args, "path"))
 	if dirPath == "" {
 		dirPath = "."
 	}
@@ -585,11 +789,12 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
-	client, err := p.getClient(opCtx, session.BotID)
+	target, err := p.resolveToolTarget(opCtx, session, args)
 	if err != nil {
 		return nil, err
 	}
-	filePath := p.normalizePath(StringArg(args, "path"), p.resolveToolWorkspace(ctx, session).defaultWorkDir)
+	client := target.client
+	filePath := target.workspace.normalizePath(StringArg(args, "path"))
 	oldText := StringArg(args, "old_text")
 	newText := StringArg(args, "new_text")
 	if filePath == "" || oldText == "" {
@@ -613,7 +818,7 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 	}
 
 	updatedBytes := []byte(updated)
-	if res, err := p.runWorkspaceToolHook(ctx, session, hooks.EventBeforeFileWrite, map[string]any{
+	if res, err := p.runWorkspaceToolHook(ctx, session, target.hookWorkspaceInfo(p.execWorkDir), hooks.EventBeforeFileWrite, map[string]any{
 		"path":  filePath,
 		"bytes": len(updatedBytes),
 		"mode":  "edit",
@@ -633,7 +838,7 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 			return nil, err
 		}
 	}
-	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, hooks.EventAfterFileWrite, map[string]any{
+	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, target.hookWorkspaceInfo(p.execWorkDir), hooks.EventAfterFileWrite, map[string]any{
 		"path":  filePath,
 		"bytes": len(updatedBytes),
 		"mode":  "edit",
@@ -644,20 +849,22 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 }
 
 func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
-	botID := strings.TrimSpace(session.BotID)
-	client, err := p.getClient(ctx, botID)
+	target, err := p.resolveToolTarget(ctx, session, args)
 	if err != nil {
 		return nil, err
 	}
+	client := target.client
 	command := strings.TrimSpace(StringArg(args, "command"))
 	if command == "" {
 		return nil, errors.New("command is required")
 	}
 	workDir := strings.TrimSpace(StringArg(args, "work_dir"))
 	if workDir == "" {
-		workDir = p.resolveToolWorkspace(ctx, session).defaultWorkDir
+		workDir = target.workspace.defaultWorkDir
 	}
 	description := strings.TrimSpace(StringArg(args, "description"))
+	hookWorkspace := target.hookWorkspaceInfo(p.execWorkDir)
+	backgroundOutputDir := target.backgroundOutputDir()
 
 	// Parse timeout (default 30s, max 600s).
 	timeout := background.DefaultExecTimeout
@@ -684,21 +891,21 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 
 	// Background execution path.
 	if runInBg && p.bgManager != nil {
-		return p.execWithWorkspaceHooks(ctx, session, command, workDir, timeout, true, func() (any, error) {
-			return p.execExecBackground(ctx, session, client, command, workDir, description)
+		return p.execWithWorkspaceHooks(ctx, session, hookWorkspace, command, workDir, timeout, true, func() (any, error) {
+			return p.execExecBackground(ctx, session, client, command, workDir, description, backgroundOutputDir)
 		})
 	}
 
 	// If we have a background manager, use streaming exec so we can flip
 	// to background on timeout without killing the process.
 	if p.bgManager != nil {
-		return p.execWithWorkspaceHooks(ctx, session, command, workDir, timeout, false, func() (any, error) {
-			return p.execExecWithFlip(ctx, session, client, command, workDir, description, timeout)
+		return p.execWithWorkspaceHooks(ctx, session, hookWorkspace, command, workDir, timeout, false, func() (any, error) {
+			return p.execExecWithFlip(ctx, session, client, command, workDir, description, backgroundOutputDir, timeout)
 		})
 	}
 
 	// Fallback: no background manager, plain synchronous exec.
-	wrapped, err := p.execWithWorkspaceHooks(ctx, session, command, workDir, timeout, false, func() (any, error) {
+	wrapped, err := p.execWithWorkspaceHooks(ctx, session, hookWorkspace, command, workDir, timeout, false, func() (any, error) {
 		result, err := client.Exec(ctx, command, workDir, timeout)
 		if err != nil {
 			return nil, err
@@ -713,8 +920,8 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 	return wrapped, nil
 }
 
-func (p *ContainerProvider) execWithWorkspaceHooks(ctx context.Context, session SessionContext, command, workDir string, timeout int32, background bool, run func() (any, error)) (any, error) {
-	if res, err := p.runWorkspaceToolHook(ctx, session, hooks.EventBeforeWorkspaceCommand, map[string]any{
+func (p *ContainerProvider) execWithWorkspaceHooks(ctx context.Context, session SessionContext, workspace hooks.WorkspaceInfo, command, workDir string, timeout int32, background bool, run func() (any, error)) (any, error) {
+	if res, err := p.runWorkspaceToolHook(ctx, session, workspace, hooks.EventBeforeWorkspaceCommand, map[string]any{
 		"command":           command,
 		"work_dir":          workDir,
 		"timeout_seconds":   timeout,
@@ -735,7 +942,7 @@ func (p *ContainerProvider) execWithWorkspaceHooks(ctx context.Context, session 
 	if runErr != nil {
 		extra["error"] = runErr.Error()
 	}
-	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, hooks.EventAfterWorkspaceCommand, extra); err != nil {
+	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, workspace, hooks.EventAfterWorkspaceCommand, extra); err != nil {
 		p.logWorkspaceToolHookError(hooks.EventAfterWorkspaceCommand, session.BotID, session.SessionID, err)
 	}
 	return result, runErr
@@ -872,7 +1079,7 @@ func tailText(value string, maxBytes int) string {
 // agent gets an immediate "auto_backgrounded" response.
 func (p *ContainerProvider) execExecWithFlip(
 	ctx context.Context, session SessionContext, client *bridge.Client,
-	command, workDir, description string, softTimeout int32,
+	command, workDir, description, outputDir string, softTimeout int32,
 ) (any, error) {
 	// Start streaming exec with a large container-side timeout so the process
 	// keeps running even after we stop reading in the foreground.
@@ -904,7 +1111,7 @@ func (p *ContainerProvider) execExecWithFlip(
 		// Soft timeout fired — flip the running stream to background.
 		// The container process is still alive; we hand off the stream reader
 		// goroutine to the background manager.
-		return p.flipToBackground(ctx, session, client, reader, command, workDir, description, softTimeout)
+		return p.flipToBackground(ctx, session, client, reader, command, workDir, description, outputDir, softTimeout)
 
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -917,7 +1124,7 @@ func (p *ContainerProvider) flipToBackground(
 	ctx context.Context,
 	session SessionContext, client *bridge.Client,
 	reader *backgroundExecStreamReader,
-	command, workDir, description string, softTimeout int32,
+	command, workDir, description, outputDir string, softTimeout int32,
 ) (any, error) {
 	writeFn := func(ctx context.Context, path string, data []byte) error {
 		return client.WriteFile(ctx, path, data)
@@ -925,7 +1132,7 @@ func (p *ContainerProvider) flipToBackground(
 
 	taskID, outputFile := p.bgManager.SpawnAdopt(
 		ctx,
-		session.BotID, session.SessionID, command, workDir, description,
+		session.BotID, session.SessionID, command, workDir, description, outputDir,
 		reader.Result(), writeFn,
 	)
 	// SetChunkHandler replays output collected during the foreground phase
@@ -979,7 +1186,7 @@ func detectBlockedSleep(command string) string {
 // execExecBackground spawns the command as a background task and returns immediately.
 func (p *ContainerProvider) execExecBackground(
 	ctx context.Context, session SessionContext, client *bridge.Client,
-	command, workDir, description string,
+	command, workDir, description, outputDir string,
 ) (any, error) {
 	streamCtx, streamCancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(background.BackgroundExecTimeout)*time.Second)
 	stream, err := client.ExecStream(streamCtx, command, workDir, background.BackgroundExecTimeout)
@@ -994,7 +1201,7 @@ func (p *ContainerProvider) execExecBackground(
 	}
 	taskID, outputFile := p.bgManager.SpawnAdopt(
 		ctx,
-		session.BotID, session.SessionID, command, workDir, description,
+		session.BotID, session.SessionID, command, workDir, description, outputDir,
 		reader.Result(), writeFn,
 	)
 	reader.SetChunkHandler(func(stream, chunk string) {

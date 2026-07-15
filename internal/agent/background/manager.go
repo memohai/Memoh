@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -36,8 +37,8 @@ const (
 	DefaultCleanupInterval = time.Hour
 	// DefaultTaskRetention is how long completed tasks are retained in memory.
 	DefaultTaskRetention = 24 * time.Hour
-	// OutputLogDir is the directory inside the container where background
-	// task output logs are written.
+	// OutputLogDir is the default directory where background task output logs
+	// are written.
 	OutputLogDir = "/tmp/memoh-bg"
 
 	// stallCheckInterval is how often the stall watchdog checks output growth.
@@ -180,13 +181,13 @@ func (m *Manager) Spawn(
 // where a foreground stream is handed off without killing the process.
 func (m *Manager) SpawnAdopt(
 	parentCtx context.Context,
-	botID, sessionID, command, workDir, description string,
+	botID, sessionID, command, workDir, description, outputDir string,
 	resultCh <-chan AdoptResult,
 	writeFn WriteFileFunc,
 ) (taskID, outputFile string) {
 	m.mu.Lock()
 	taskID = m.newTaskIDLocked(botID)
-	outputFile = fmt.Sprintf("%s/%s.log", OutputLogDir, taskID)
+	outputFile = backgroundOutputFile(outputDir, taskID)
 
 	task := &Task{
 		ID:          taskID,
@@ -263,7 +264,7 @@ func (m *Manager) runAdopt(parentCtx context.Context, task *Task, resultCh <-cha
 	defer cancel()
 
 	// Ensure output directory exists.
-	_ = ensureOutputDir(ctx, writeFn)
+	_ = ensureOutputDir(ctx, writeFn, task.OutputFile)
 
 	// Start stall watchdog.
 	go m.stallWatchdog(ctx, task)
@@ -310,7 +311,7 @@ func (m *Manager) run(parentCtx context.Context, task *Task, execFn ExecFunc, wr
 	defer cancel()
 
 	// Ensure output directory exists.
-	_ = ensureOutputDir(ctx, writeFn)
+	_ = ensureOutputDir(ctx, writeFn, task.OutputFile)
 
 	// Start stall watchdog to detect commands waiting for interactive input.
 	go m.stallWatchdog(ctx, task)
@@ -442,19 +443,27 @@ func readSentinelExitCode(ctx context.Context, path string, readFn ReadFileFunc)
 	return int32(ec), nil //nolint:gosec // G115: exit codes are 0-255
 }
 
-func ensureOutputDir(ctx context.Context, writeFn WriteFileFunc) error {
+func backgroundOutputFile(outputDir, taskID string) string {
+	outputDir = strings.TrimSpace(outputDir)
+	if outputDir == "" {
+		outputDir = OutputLogDir
+	}
+	return path.Join(outputDir, taskID+".log")
+}
+
+func ensureOutputDir(ctx context.Context, writeFn WriteFileFunc, outputFile string) error {
 	if writeFn == nil {
 		return nil
 	}
 	// Create a marker file to ensure the directory exists.
-	return writeFn(ctx, OutputLogDir+"/.keep", []byte(""))
+	return writeFn(ctx, path.Join(path.Dir(outputFile), ".keep"), []byte(""))
 }
 
 func ensureOutputFile(ctx context.Context, writeFn WriteFileFunc, path string) error {
 	if writeFn == nil {
 		return nil
 	}
-	if err := ensureOutputDir(ctx, writeFn); err != nil {
+	if err := ensureOutputDir(ctx, writeFn, path); err != nil {
 		return err
 	}
 	return writeFn(ctx, path, []byte(""))

@@ -129,6 +129,7 @@
     "session": "セッション",
     "chat": "チャット",
     "bots": "Bot",
+    "runtimes": "コンピューター",
     "providers": "プロバイダー",
     "webSearch": "ウェブ検索",
     "memory": "メモリ",
@@ -155,6 +156,77 @@
     "about": "Memoh について",
     "switchBot": "Botを切り替え",
     "manageBots": "Botを管理"
+  },
+  "runtimes": {
+    "title": "コンピューター",
+    "description": "Bot で使うコンピューターを接続し、各 Bot の「接続済みのコンピューター」から追加します。",
+    "connect": "コンピューターを接続",
+    "connectOther": "別のコンピューターを接続",
+    "computers": "接続済みのコンピューター",
+    "otherComputers": "その他のコンピューター",
+    "loadingComputers": "コンピューターを読み込んでいます...",
+    "loadFailed": "コンピューターを読み込めませんでした",
+    "loadFailedDescription": "Server への接続を確認して、もう一度お試しください。",
+    "retry": "再試行",
+    "emptyTitle": "接続済みのコンピューターはありません",
+    "emptyDescription": "接続コマンドを作成し、Memoh で使用するコンピューター上で実行してください。",
+    "emptyOtherTitle": "他のコンピューターは接続されていません",
+    "emptyOtherDescription": "Bot で別の端末を使う場合は、もう一台接続してください。",
+    "waitingForConnection": "接続コマンドの実行待ち",
+    "connected": "利用可能",
+    "copyCommand": "接続コマンドをコピー",
+    "revoke": "接続を解除",
+    "revokeTitle": "このコンピューターの接続を解除しますか?",
+    "revokeDescription": "{name} は切断され、接続キーも使用できなくなります。コンピューター上のファイルは削除されません。",
+    "revokeSuccess": "コンピューターの接続を解除しました",
+    "revokeFailed": "コンピューターの接続を解除できませんでした",
+    "status": {
+      "online": "オンライン",
+      "offline": "オフライン",
+      "revoked": "アクセス解除済み",
+      "owner_mismatch": "利用できません",
+      "client_update_required": "更新が必要です"
+    },
+    "thisComputer": {
+      "title": "このコンピューター",
+      "allow": "Bot にこのコンピューターの使用を許可",
+      "description": "オンにすると、このコンピューターに名前を付けて接続し、各 Bot に追加できるようになります。",
+      "enabledDescription": "{name} は Bot の設定、承認、チャット履歴に表示される名前です。追加した Bot だけが、ホームフォルダー内のファイルにアクセスし、現在のユーザーとしてコマンドを実行できます。",
+      "fallbackName": "Memoh Desktop",
+      "dialogTitle": "このコンピューターを使用可能にする",
+      "dialogDescription": "どの端末から Memoh を使っても識別できる、固定の名前を付けてください。",
+      "nameHelp": "Bot の設定、承認、チャット履歴で識別しやすい名前を入力してください。",
+      "confirm": "使用可能にする",
+      "loading": "このコンピューターを読み込んでいます...",
+      "loadFailed": "このコンピューターの接続状態を読み込めませんでした",
+      "loadFailedDescription": "Memoh Desktop を再起動して、もう一度お試しください。",
+      "invalidCredential": "Server から有効な接続情報が返されませんでした。",
+      "enableFailed": "Bot にこのコンピューターの使用を許可できませんでした",
+      "disableFailed": "このコンピューターの使用許可をオフにできませんでした",
+      "status": {
+        "disabled": "オフ",
+        "connecting": "接続中",
+        "connected": "利用可能",
+        "disconnected": "再接続中",
+        "stopped": "利用不可",
+        "error": "確認が必要"
+      }
+    },
+    "connectDialog": {
+      "title": "コンピューターを接続",
+      "description": "識別しやすい接続名を付けてください。",
+      "name": "コンピューター名",
+      "nameHelp": "場所や用途に合わせて、たとえば「Office Mac」のように指定できます。",
+      "namePlaceholder": "Office Mac",
+      "nameRequired": "コンピューター名を入力してください",
+      "create": "コマンドを作成",
+      "createFailed": "接続を作成できませんでした",
+      "runTitle": "このコマンドを実行してください",
+      "runDescription": "Memoh で使用するコンピューター上で実行し、プロセスを起動したままにしてください。",
+      "command": "接続コマンド",
+      "keyOnce": "コマンドには非公開の接続キーが含まれます。コンピューターの接続を解除すると、キーは直ちに使用できなくなります。",
+      "done": "完了"
+    }
   },
   "breadcrumb": {
     "main": "ホーム"
@@ -468,6 +540,7 @@
       "edit": "編集",
       "apply_patch": "パッチ",
       "list": "リスト",
+      "list_execution_locations": "コンピューターと Server Workspace を確認",
       "exec": "実行",
       "bg_status": "背景",
       "list_background": "バックグラウンドタスクをリストする",
@@ -569,7 +642,8 @@
       "generic": "ツール",
       "approve": "許可する",
       "reject": "拒否する",
-      "pendingApproval": "承認待ち",
+    "pendingApproval": "承認待ち",
+    "executionLocation": "実行場所",
       "pendingUserInput": "入力を待っています",
       "userInputSubmitted": "答えた",
       "userInputCanceled": "キャンセル",
@@ -1436,10 +1510,24 @@
       "resetDefaults": "デフォルトにリセット",
       "confirmReset": "すべてのツール承認ルールをデフォルト状態に戻しますか?",
       "resetWarningExtra": "カスタムのバイパスルールとレビュー必須ルールは失われます。",
-      "title": "ツール呼び出しの承認",
-      "intro": "Bot がファイルを読み取る、ファイルを変更する、またはコマンドを実行する前に承認を要求します。操作ごとにルールを設定できます。バイパスパターンは自動承認され、レビュー必須パターンは承認を強制します。",
-      "rules": {
-        "title": "ツールルール",
+    "title": "ツール呼び出しの承認",
+    "intro": "この Bot が Workspace と各接続済みコンピューターで実行できる操作を設定します。",
+    "loading": "承認ルールを読み込んでいます...",
+    "loadFailed": "Tool の承認設定を読み込めませんでした",
+      "loadFailedDescription": "Server への接続を確認して、もう一度お試しください。",
+    "saveFailed": "Tool の承認設定を保存できませんでした",
+    "target": {
+      "title": "承認対象",
+      "label": "Workspace またはコンピューター",
+      "description": "ルールは選択した Workspace またはコンピューターにのみ適用されます。"
+    },
+    "modes": {
+      "allow": "許可",
+      "ask": "確認",
+      "deny": "拒否"
+      },
+    "rules": {
+      "title": "ツールルール",
         "reset": "推奨設定にリセット"
       },
       "behavior": {
@@ -1455,15 +1543,15 @@
         "pathsTitle": "常にレビューを要求",
         "commandsTitle": "常にレビューを要求"
       },
-      "toolNames": {
-        "read": "ファイル読み取り",
-        "write": "ファイル書き込み",
-        "exec": "シェルコマンド"
-      },
-      "tools": {
-        "read": "ワークスペース内のファイルを読み取り、ディレクトリを一覧表示する",
-        "write": "ワークスペース内でファイルの書き込み、編集、patch の適用を行う",
-        "exec": "Workspace 内でシェルコマンドを実行する"
+    "toolNames": {
+      "read": "ファイル読み取り",
+      "write": "ファイル書き込み",
+      "exec": "シェルコマンド"
+    },
+    "tools": {
+      "read": "ワークスペース内のファイルを読み取り、ディレクトリを一覧表示する",
+      "write": "ワークスペース内でファイルの書き込み、編集、patch の適用を行う",
+      "exec": "Workspace 内でシェルコマンドを実行する"
       },
       "toolDisabledHint": "この操作では現在、承認は要求されていません。以下のルールは、スイッチを有効にした後に適用されます。",
       "bypass": "バイパス (許可リスト)",
@@ -1776,6 +1864,7 @@
       "network": "ネットワーク",
       "memory": "メモリ",
       "channels": "プラットフォーム",
+      "remoteRuntime": "接続済みのコンピューター",
       "container": "Workspace",
       "mcp": "MCP",
       "heartbeat": "ハートビート",
@@ -1789,6 +1878,44 @@
       "access": "アクセス",
       "terminal": "Terminal",
       "settings": "設定"
+    },
+    "remoteRuntime": {
+      "title": "接続済みのコンピューター",
+      "description": "この Bot は、既存の Workspace に加えて、接続済みのコンピューターでファイル操作やコマンド実行ができます。",
+      "workspaceTitle": "使用場所",
+      "loading": "使用場所を読み込んでいます...",
+      "loadFailed": "使用場所を読み込めませんでした",
+      "loadFailedDescription": "Server への接続を確認して、もう一度お試しください。",
+      "addComputer": "コンピューターを追加",
+      "primary": "既定の場所",
+      "primaryDescription": "別の場所を選ばない限り、ファイルとコマンドはここで実行されます。オフラインでも自動的に別の場所へ切り替わりません。",
+      "primarySaveFailed": "既定の場所を変更できませんでした",
+      "defaultBadge": "既定",
+      "nativeWorkspace": "Server Workspace",
+      "serverDescription": "Server 上にあるこの Bot の既存 Workspace です。",
+      "folderSummary": "開始フォルダー: {path}",
+      "thisComputerOff": "このコンピューターを使う",
+      "thisComputerOffDescription": "先に「コンピューター」で使用を許可し、その後ここで追加します。",
+      "openComputerSettings": "コンピューター設定を開く",
+      "computer": "コンピューター",
+      "computerDescription": "「コンピューター」で使用可能にしたコンピューターから選びます。",
+      "selectComputer": "コンピューターを選択",
+      "noAvailableComputers": "追加できるコンピューターがありません。先に「コンピューター」で接続または使用を許可してください。",
+      "path": "開始フォルダー",
+      "pathDescription": "Memoh と共有するフォルダーからの相対位置です。空欄の場合は {path}、. を入力すると共有フォルダー自体を使用します。",
+      "unknownComputer": "利用できないコンピューター",
+      "addTitle": "この Bot にコンピューターを追加",
+      "editTitle": "このコンピューターを編集",
+      "mountDescription": "コンピューターと、この Bot がファイル操作やコマンド実行を開始するフォルダーを選びます。",
+      "addSuccess": "Bot にコンピューターを追加しました",
+      "updateSuccess": "コンピューターの設定を更新しました",
+      "saveFailed": "コンピューターを保存できませんでした",
+      "removeFromBot": "Bot から削除",
+      "deleteTitle": "この Bot からコンピューターを削除しますか?",
+      "deleteDescription": "{name} をこの Bot から削除します。コンピューター上のファイルは削除されません。",
+      "deletePrimaryDescription": "{name} は既定の場所です。削除すると Server Workspace が既定の場所になります。コンピューター上のファイルは削除されません。",
+      "deleteSuccess": "Bot からコンピューターを削除しました",
+      "deleteFailed": "この Bot からコンピューターを削除できませんでした"
     },
     "desktop": {
       "title": "Desktop環境",

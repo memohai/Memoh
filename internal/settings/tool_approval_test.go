@@ -101,6 +101,24 @@ func TestToolApprovalConfigUnmarshalMergesEditOnlyWithDefaultWrite(t *testing.T)
 	}
 }
 
+func TestToolApprovalConfigNormalizesExplicitModes(t *testing.T) {
+	t.Parallel()
+
+	var cfg ToolApprovalConfig
+	if err := json.Unmarshal([]byte(`{
+		"read":{"mode":" ALLOW "},
+		"write":{"mode":"ask"},
+		"exec":{"mode":"DENY"}
+	}`), &cfg); err != nil {
+		t.Fatalf("unmarshal tool approval modes: %v", err)
+	}
+	cfg = NormalizeToolApprovalConfig(cfg)
+
+	if cfg.Read.Mode != ToolApprovalAllow || cfg.Write.Mode != ToolApprovalAsk || cfg.Exec.Mode != ToolApprovalDeny {
+		t.Fatalf("normalized modes = read:%q write:%q exec:%q", cfg.Read.Mode, cfg.Write.Mode, cfg.Exec.Mode)
+	}
+}
+
 func sameStrings(left, right []string) bool {
 	if len(left) != len(right) {
 		return false

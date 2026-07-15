@@ -73,6 +73,52 @@ func TestSpawnFailurePreservesUnknownExitCode(t *testing.T) {
 	}
 }
 
+func TestSpawnAdoptUsesSelectedOutputDirectory(t *testing.T) {
+	mgr := New(nil)
+	resultCh := make(chan AdoptResult, 1)
+	resultCh <- AdoptResult{Stdout: "ok\n", ExitCode: 0, ExitReceived: true}
+	writes := make(chan string, 8)
+	const outputDir = "/data/.memoh/background"
+
+	taskID, outputFile := mgr.SpawnAdopt(
+		context.Background(),
+		"bot1",
+		"sess1",
+		"echo ok",
+		"/data",
+		"Say ok",
+		outputDir,
+		resultCh,
+		func(_ context.Context, path string, _ []byte) error {
+			writes <- path
+			return nil
+		},
+	)
+	if !strings.HasPrefix(outputFile, outputDir+"/") {
+		t.Fatalf("output file = %q, want it under %q", outputFile, outputDir)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, _, err := mgr.WaitForSessionTask(ctx, "bot1", "sess1", taskID, 0); err != nil {
+		t.Fatalf("WaitForSessionTask returned error: %v", err)
+	}
+
+	seenOutput := false
+	for len(writes) > 0 {
+		writtenPath := <-writes
+		if !strings.HasPrefix(writtenPath, outputDir+"/") {
+			t.Fatalf("write path = %q, want it under %q", writtenPath, outputDir)
+		}
+		if writtenPath == outputFile {
+			seenOutput = true
+		}
+	}
+	if !seenOutput {
+		t.Fatalf("output file %q was not written", outputFile)
+	}
+}
+
 func TestKillWakesWaiter(t *testing.T) {
 	mgr := New(nil)
 	taskID, _ := mgr.Spawn(

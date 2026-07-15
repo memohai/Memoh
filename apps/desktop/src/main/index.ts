@@ -5,13 +5,16 @@ import {
   BrowserWindow,
   ipcMain,
   nativeImage,
+  safeStorage,
   Tray,
   screen,
   type BrowserWindowConstructorOptions,
+  type IpcMainInvokeEvent,
   type MenuItemConstructorOptions,
 } from 'electron'
 import { join } from 'node:path'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir, hostname } from 'node:os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import iconPng from '../../resources/icon.png?asset'
 import trayIconPng from '../../resources/tray-icon.png?asset'
@@ -19,6 +22,8 @@ import { acceleratorForCommand, appKeyboardCommands, type AppKeyboardCommand } f
 import { dispatchFocusedWindowCommand } from './window-commands'
 import { dispatchRendererNavigate } from './window-navigation'
 import { maybeSelfInstallMacOS } from './self-install'
+import { DesktopRemoteRuntimeManager } from './remote-runtime'
+import { isTrustedRendererUrl } from './renderer-trust'
 import {
   normalizeBaseUrl,
   normalizeServerInput,
@@ -27,6 +32,7 @@ import {
   type ServerConnectResult,
   type ServerConnectionResult,
 } from '../shared/server-connection'
+import type { DesktopRuntimeConfig } from '../shared/remote-runtime'
 
 const DESKTOP_PRODUCT_NAME = 'Memoh'
 const DEFAULT_BASE_URL = is.dev ? 'http://localhost:18080' : 'http://localhost:8080'
@@ -63,6 +69,9 @@ let appTray: Tray | null = null
 let isQuitting = false
 let windowStatesCache: StoredWindowStates | null = null
 let sessionBaseUrlOverride = ''
+let remoteRuntimeManager: DesktopRemoteRuntimeManager | null = null
+let quitCleanupStarted = false
+let quitCleanupFinished = false
 
 function windowStatePath(): string {
   return join(app.getPath('userData'), 'window-state.json')
@@ -205,18 +214,52 @@ async function connectToServer(rawBaseUrl: unknown): Promise<ServerConnectResult
   if (!result.ok) return result
   writeProfileBaseUrl(result.baseUrl)
   sessionBaseUrlOverride = result.baseUrl
+  const changed = result.baseUrl !== previousBaseUrl
+  if (changed) {
+    await remoteRuntimeManager?.restore()
+  }
   return {
     ...result,
-    changed: result.baseUrl !== previousBaseUrl,
+    changed,
   }
 }
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
   isQuitting = true
+  if (quitCleanupFinished) return
+  event.preventDefault()
+  if (quitCleanupStarted) return
+  quitCleanupStarted = true
+  const cleanup = remoteRuntimeManager?.stop() ?? Promise.resolve()
+  void cleanup
+    .catch(error => console.warn('failed to stop desktop runtime during quit', error))
+    .finally(() => {
+      quitCleanupFinished = true
+      app.quit()
+    })
 })
 
 function applyExternalLinkHandler(window: BrowserWindow): void {
   attachExternalLinkGuards(window.webContents)
+}
+
+function productionRendererEntry(): string {
+  return join(__dirname, '../renderer/index.html')
+}
+
+function isTrustedRendererNavigation(url: string): boolean {
+  return isTrustedRendererUrl(url, {
+    devBaseUrl: is.dev ? process.env.ELECTRON_RENDERER_URL : undefined,
+    productionEntry: productionRendererEntry(),
+  })
+}
+
+function assertTrustedRenderer(event: IpcMainInvokeEvent): void {
+  const senderWindow = BrowserWindow.fromWebContents(event.sender)
+  const senderUrl = event.senderFrame?.url || event.sender.getURL()
+  if (!chatWindow || senderWindow !== chatWindow || !isTrustedRendererNavigation(senderUrl)) {
+    throw new Error('IPC request rejected from an untrusted renderer')
+  }
 }
 
 function normalizeExternalUrl(rawURL: unknown): { url: string, protocol: string, supported: boolean } {
@@ -250,13 +293,20 @@ function attachExternalLinkGuards(webContents: Electron.WebContents): void {
     return { action: 'deny' }
   })
 
-  webContents.on('will-navigate', (event, url) => {
+  const guardNavigation = (event: Electron.Event, url: string): void => {
+    if (isTrustedRendererNavigation(url)) return
+    event.preventDefault()
     const external = normalizeExternalUrl(url)
-    if (external.protocol === 'about:' || (!external.supported && external.protocol !== 'file:')) {
-      console.warn('blocked unsupported navigation URL', external.url || url)
-      event.preventDefault()
+    if (!external.supported) {
+      console.warn('blocked untrusted navigation URL', external.url || url)
+      return
     }
-  })
+    void shell.openExternal(external.url).catch((error) => {
+      console.error('failed to open external navigation URL', external.url, error)
+    })
+  }
+  webContents.on('will-navigate', guardNavigation)
+  webContents.on('will-redirect', guardNavigation)
 }
 
 async function openExternalUrl(rawURL: unknown): Promise<void> {
@@ -275,7 +325,7 @@ function loadRendererEntry(window: BrowserWindow, entry: 'index'): void {
     window.loadURL(`${base}/${entry}.html`)
     return
   }
-  window.loadFile(join(__dirname, `../renderer/${entry}.html`))
+  window.loadFile(productionRendererEntry())
 }
 
 function createTrayIcon(): Electron.NativeImage {
@@ -370,10 +420,22 @@ function buildTrayMenu(bots: TrayBot[] = []): Electron.Menu {
     },
     { type: 'separator' },
     {
+      label: desktopRuntimeTrayLabel(),
+      enabled: false,
+    },
+    { type: 'separator' },
+    {
       label: `Quit ${DESKTOP_PRODUCT_NAME}`,
       click: quitFromTray,
     },
   ])
+}
+
+function desktopRuntimeTrayLabel(): string {
+  const state = remoteRuntimeManager?.runtimeState()
+  if (!state?.enabled) return 'Computer access: Off'
+  const label = state.status.charAt(0).toUpperCase() + state.status.slice(1)
+  return `${state.runtimeName || 'Computer access'}: ${label}`
 }
 
 // The main process has no credentials of its own, so it never fetches bots
@@ -578,17 +640,61 @@ app.whenReady().then(async () => {
     attachExternalLinkGuards(window.webContents)
   })
 
+  remoteRuntimeManager = new DesktopRemoteRuntimeManager({
+    configPath: join(app.getPath('userData'), 'remote-runtime.json'),
+    currentServerUrl: getDesktopApiBaseUrl,
+    workspaceBase: homedir(),
+    deviceName: hostname(),
+    encryption: {
+      isAvailable: () => safeStorage.isEncryptionAvailable(),
+      encrypt: value => safeStorage.encryptString(value),
+      decrypt: value => safeStorage.decryptString(value),
+    },
+    warn: (message, error) => console.warn(message, error),
+  })
+  remoteRuntimeManager.onStateChanged((state) => {
+    setTrayMenu()
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send('desktop:runtime-state-changed', state)
+      }
+    }
+  })
+  await remoteRuntimeManager.restore()
+
   createAppTray()
 
   ipcMain.handle('window:close-self', (event) => {
+    assertTrustedRenderer(event)
     const sender = BrowserWindow.fromWebContents(event.sender)
     sender?.close()
   })
-  ipcMain.handle('desktop:server-status', () => getDesktopServerStatus())
-  ipcMain.handle('desktop:api-base-url', () => getDesktopApiBaseUrl())
-  ipcMain.handle('desktop:probe-server', () => probeConfiguredServer())
-  ipcMain.handle('desktop:connect-server', (_event, baseUrl: unknown) => connectToServer(baseUrl))
-  ipcMain.handle('desktop:set-menu-accelerators', async (_event, rawPayload: unknown) => {
+  ipcMain.handle('desktop:server-status', (event) => {
+    assertTrustedRenderer(event)
+    return getDesktopServerStatus()
+  })
+  ipcMain.handle('desktop:api-base-url', (event) => {
+    assertTrustedRenderer(event)
+    return getDesktopApiBaseUrl()
+  })
+  ipcMain.handle('desktop:probe-server', (event) => {
+    assertTrustedRenderer(event)
+    return probeConfiguredServer()
+  })
+  ipcMain.handle('desktop:connect-server', (event, baseUrl: unknown) => {
+    assertTrustedRenderer(event)
+    return connectToServer(baseUrl)
+  })
+  ipcMain.handle('desktop:runtime-state', (event) => {
+    assertTrustedRenderer(event)
+    return requireRemoteRuntimeManager().runtimeState()
+  })
+  ipcMain.handle('desktop:configure-runtime', (event, config: unknown) => {
+    assertTrustedRenderer(event)
+    return requireRemoteRuntimeManager().configure(normalizeDesktopRuntimeConfig(config))
+  })
+  ipcMain.handle('desktop:set-menu-accelerators', async (event, rawPayload: unknown) => {
+    assertTrustedRenderer(event)
     if (!rawPayload || typeof rawPayload !== 'object') return
     const incoming = new Map<string, string>()
     for (const [command, accelerator] of Object.entries(rawPayload as Record<string, unknown>)) {
@@ -611,12 +717,17 @@ app.whenReady().then(async () => {
     }
     await rebuildAppMenu()
   })
-  ipcMain.handle('desktop:open-external-url', (_event, rawURL: unknown) => openExternalUrl(rawURL))
-  ipcMain.handle('desktop:set-tray-bots', (_event, payload: unknown) => {
+  ipcMain.handle('desktop:open-external-url', (event, rawURL: unknown) => {
+    assertTrustedRenderer(event)
+    return openExternalUrl(rawURL)
+  })
+  ipcMain.handle('desktop:set-tray-bots', (event, payload: unknown) => {
+    assertTrustedRenderer(event)
     trayBots = normalizeTrayBots(payload)
     setTrayMenu()
   })
   ipcMain.handle('desktop:broadcast-invalidate', (event, payload: unknown) => {
+    assertTrustedRenderer(event)
     const senderId = event.sender.id
     for (const target of BrowserWindow.getAllWindows()) {
       if (target.isDestroyed()) continue
@@ -637,3 +748,22 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
+
+function requireRemoteRuntimeManager(): DesktopRemoteRuntimeManager {
+  if (!remoteRuntimeManager) throw new Error('desktop runtime manager is not ready')
+  return remoteRuntimeManager
+}
+
+function normalizeDesktopRuntimeConfig(value: unknown): DesktopRuntimeConfig | null {
+  if (value === null) return null
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('runtime configuration must contain runtimeId, name, and key')
+  }
+  const record = value as Record<string, unknown>
+  if (typeof record.runtimeId !== 'string' || typeof record.name !== 'string' || typeof record.key !== 'string') {
+    throw new Error('runtime configuration must contain runtimeId, name, and key')
+  }
+  const name = record.name.trim()
+  if (!name) throw new Error('runtime configuration name is required')
+  return { runtimeId: record.runtimeId, name, key: record.key }
+}

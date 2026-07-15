@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/metadata"
 
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
@@ -30,15 +31,17 @@ type Client struct {
 	svc       pb.ContainerServiceClient
 	target    string
 	createdAt time.Time
+	ownsConn  bool
 }
 
 // NewClientFromConn wraps an existing gRPC connection into a Client.
 // Intended for testing with in-process transports such as bufconn.
 func NewClientFromConn(conn *grpc.ClientConn) *Client {
 	return &Client{
-		conn:   conn,
-		svc:    pb.NewContainerServiceClient(conn),
-		target: conn.Target(),
+		conn:     conn,
+		svc:      pb.NewContainerServiceClient(conn),
+		target:   conn.Target(),
+		ownsConn: true,
 	}
 }
 
@@ -84,11 +87,63 @@ func DialTLS(_ context.Context, target string, tlsOpts *TLSOptions) (*Client, er
 		svc:       pb.NewContainerServiceClient(conn),
 		target:    target,
 		createdAt: time.Now(),
+		ownsConn:  true,
 	}, nil
 }
 
 func (c *Client) Close() error {
+	if c == nil || !c.ownsConn || c.conn == nil {
+		return nil
+	}
 	return c.conn.Close()
+}
+
+// WithOutgoingMetadata returns a non-owning view of the same gRPC connection.
+// Every unary and streaming RPC sent through the view carries the supplied
+// metadata. Closing the view is intentionally a no-op: the root client owns
+// the device connection and may be shared by multiple Bot workspaces.
+func (c *Client) WithOutgoingMetadata(values map[string]string) *Client {
+	if c == nil || c.conn == nil {
+		return nil
+	}
+	conn := &outgoingMetadataConn{ClientConnInterface: c.conn, values: cloneStringMap(values)}
+	return &Client{
+		conn:      c.conn,
+		svc:       pb.NewContainerServiceClient(conn),
+		target:    c.target,
+		createdAt: c.createdAt,
+		ownsConn:  false,
+	}
+}
+
+type outgoingMetadataConn struct {
+	grpc.ClientConnInterface
+	values map[string]string
+}
+
+func (c *outgoingMetadataConn) Invoke(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error {
+	return c.ClientConnInterface.Invoke(withOutgoingMetadata(ctx, c.values), method, args, reply, opts...)
+}
+
+func (c *outgoingMetadataConn) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+	return c.ClientConnInterface.NewStream(withOutgoingMetadata(ctx, c.values), desc, method, opts...)
+}
+
+func withOutgoingMetadata(ctx context.Context, values map[string]string) context.Context {
+	md, _ := metadata.FromOutgoingContext(ctx)
+	md = md.Copy()
+	for key, value := range values {
+		md.Set(key, value)
+	}
+	return metadata.NewOutgoingContext(ctx, md)
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func (c *Client) ReadFile(ctx context.Context, path string, lineOffset, nLines int32) (*pb.ReadFileResponse, error) {

@@ -17,6 +17,7 @@ const (
 	ReasoningEnd        StreamEventType = "reasoning_end"
 	ToolCallInputStart  StreamEventType = "tool_call_input_start"
 	ToolCallStart       StreamEventType = "tool_call_start"
+	ToolCallMetadata    StreamEventType = "tool_call_metadata"
 	ToolCallProgress    StreamEventType = "tool_call_progress"
 	ToolCallEnd         StreamEventType = "tool_call_end"
 	ToolApprovalRequest StreamEventType = "tool_approval_request"

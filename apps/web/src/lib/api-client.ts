@@ -37,6 +37,26 @@ function browserOrigin(): string {
   return origin || `${protocol}//${host}`
 }
 
+/**
+ * Return the configured HTTP API base as an absolute URL.
+ *
+ * The Remote Runtime CLI needs the same public base URL as the generated SDK:
+ * hosted Web normally uses `/api`, while the desktop shell configures a direct
+ * local-server URL. Keeping this derivation next to SDK setup prevents pages
+ * from guessing which prefix the current host uses.
+ */
+export function sdkApiBaseUrl(): string {
+  const configured = client.getConfig().baseUrl?.trim() || '/api'
+  const normalized = configured.endsWith('/') ? configured : `${configured}/`
+  let url: URL
+  try {
+    url = new URL(normalized)
+  } catch {
+    url = new URL(normalized, `${browserOrigin()}/`)
+  }
+  return url.toString().replace(/\/$/, '')
+}
+
 export function sdkWebSocketUrl(options: SdkUrlOptions): string {
   const url = new URL(sdkApiUrl(options), browserOrigin())
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'

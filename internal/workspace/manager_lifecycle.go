@@ -185,6 +185,18 @@ func (m *Manager) waitTaskRunning(ctx context.Context, containerID string, timeo
 // If the container is missing, it rebuilds via SetupBotContainer.
 // If the task is stopped, it restarts and sets up networking.
 func (m *Manager) EnsureRunning(ctx context.Context, botID string) error {
+	if m.remote != nil {
+		primary, err := m.remote.EnsurePrimaryReady(ctx, botID)
+		if primary || err != nil {
+			return err
+		}
+	}
+	return m.EnsureNativeRunning(ctx, botID)
+}
+
+// EnsureNativeRunning manages only the server-owned container/local workspace,
+// regardless of which target is currently Primary.
+func (m *Manager) EnsureNativeRunning(ctx context.Context, botID string) error {
 	containerID, err := m.ContainerID(ctx, botID)
 	if err != nil {
 		if errors.Is(err, ErrContainerNotFound) {
@@ -527,7 +539,6 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 	for _, row := range rows {
 		containerID := row.ContainerID
 		botID := uuid.UUID(row.BotID.Bytes).String()
-
 		_, err := m.service.GetContainer(ctx, containerID)
 		if err != nil {
 			if !ctr.IsNotFound(err) {
@@ -554,7 +565,7 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 
 			running := m.isTaskRunning(ctx, containerID)
 			if !running {
-				if err := m.EnsureRunning(ctx, botID); err != nil {
+				if err := m.EnsureNativeRunning(ctx, botID); err != nil {
 					m.logger.Error("reconcile: failed to start legacy container",
 						slog.String("bot_id", botID), slog.Any("error", err))
 					continue
@@ -592,7 +603,7 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 		// Task not running — try to start it.
 		m.logger.Warn("reconcile: task not running, starting",
 			slog.String("bot_id", botID), slog.String("container_id", containerID))
-		if err := m.EnsureRunning(ctx, botID); err != nil {
+		if err := m.EnsureNativeRunning(ctx, botID); err != nil {
 			m.logger.Error("reconcile: failed to start task",
 				slog.String("bot_id", botID), slog.Any("error", err))
 			m.markContainerStopped(ctx, botID)
@@ -667,6 +678,8 @@ func workspaceBackendFromRecord(recordValue, containerID string) string {
 	switch strings.ToLower(strings.TrimSpace(recordValue)) {
 	case bridge.WorkspaceBackendLocal:
 		return bridge.WorkspaceBackendLocal
+	case bridge.WorkspaceBackendRemote:
+		return bridge.WorkspaceBackendRemote
 	case bridge.WorkspaceBackendContainer:
 		return bridge.WorkspaceBackendContainer
 	}

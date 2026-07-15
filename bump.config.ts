@@ -4,6 +4,7 @@ export default defineConfig({
   files: [
     'package.json',
     'packages/sdk/package.json',
+    'packages/runtime/package.json',
     'packages/icons/package.json',
     'packages/config/package.json',
     'apps/web/package.json',

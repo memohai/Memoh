@@ -763,7 +763,7 @@ func TestAuthorizeACPToolApprovalRequiresRuntimeOwnerOrManage(t *testing.T) {
 			},
 		},
 	}
-	target := toolapproval.Request{BotID: "bot-1", SessionID: "session-1"}
+	target := toolapproval.Request{BotID: "bot-1", SessionID: "session-1", Operation: toolapproval.OperationExec}
 
 	if err := resolver.authorizeACPToolApprovalResponse(context.Background(), target, ToolApprovalResponseInput{ActorUserID: ownerID}); err != nil {
 		t.Fatalf("owner authorization error = %v", err)

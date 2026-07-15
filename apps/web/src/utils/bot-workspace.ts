@@ -9,7 +9,11 @@ export function workspaceBackendFromMetadata(metadata: unknown): string {
 }
 
 export function resolveBotWorkspaceBackend(metadata: unknown, workspaceBackend?: string | null): BotWorkspaceBackend {
-  const backend = workspaceBackendFromMetadata(metadata) || (workspaceBackend ?? '').trim().toLowerCase()
+  const live = (workspaceBackend ?? '').trim().toLowerCase()
+  // A remote runtime binding is live routing state, not creation-time
+  // metadata, so it wins over whatever backend the bot was created with.
+  if (live === 'remote') return 'remote'
+  const backend = workspaceBackendFromMetadata(metadata) || live
   if (backend === 'local') return 'local'
   if (backend === 'container') return 'container'
   return 'unknown'

@@ -63,11 +63,11 @@ type BotSnapshotData struct {
 }
 
 func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, source string) (*SnapshotCreateInfo, error) {
-	if m.queries == nil {
-		return nil, errors.New("db is not configured")
-	}
 	if err := validateBotID(botID); err != nil {
 		return nil, err
+	}
+	if m.queries == nil {
+		return nil, errors.New("db is not configured")
 	}
 
 	ref, err := m.loadLockedContainer(ctx, botID)
@@ -328,11 +328,11 @@ func (m *Manager) ListVersions(ctx context.Context, botID string) ([]VersionInfo
 }
 
 func (m *Manager) RollbackVersion(ctx context.Context, botID string, version int) error {
-	if m.queries == nil {
-		return errors.New("db is not configured")
-	}
 	if err := validateBotID(botID); err != nil {
 		return err
+	}
+	if m.queries == nil {
+		return errors.New("db is not configured")
 	}
 	if version < 1 || version > math.MaxInt32 {
 		return errors.New("version out of range")

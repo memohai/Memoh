@@ -1,0 +1,32 @@
+package toolapproval
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestBuildPromptIncludesStableExecutionLocationName(t *testing.T) {
+	t.Parallel()
+
+	prompt := BuildPrompt(Request{
+		ID:         "approval-1",
+		ShortID:    7,
+		ToolCallID: "call-1",
+		ToolName:   "exec",
+		Operation:  OperationExec,
+		ToolInput:  map[string]any{"command": "pwd"},
+		ExecutionLocation: &ExecutionLocation{
+			TargetID:      "internal-runtime-id",
+			Kind:          "remote",
+			Name:          "Office Mac",
+			WorkspacePath: "/Users/alice",
+		},
+	})
+
+	if !strings.Contains(prompt.Text, "Location: Office Mac") {
+		t.Fatalf("prompt = %q, want stable execution location", prompt.Text)
+	}
+	if strings.Contains(prompt.Text, "internal-runtime-id") || strings.Contains(prompt.Text, "/Users/alice") {
+		t.Fatalf("prompt leaked internal execution details: %q", prompt.Text)
+	}
+}

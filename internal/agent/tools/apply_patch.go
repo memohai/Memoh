@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
+	pathpkg "path"
 	"sort"
 	"strings"
 
@@ -189,10 +189,11 @@ func (p *ContainerProvider) execApplyPatch(ctx context.Context, session SessionC
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
-	client, err := p.getClient(opCtx, session.BotID)
+	target, err := p.resolveToolTarget(opCtx, session, inputAsMap(input))
 	if err != nil {
 		return nil, err
 	}
+	client := target.client
 	hunks, err := parseApplyPatch(patch)
 	if err != nil {
 		return nil, err
@@ -201,12 +202,11 @@ func (p *ContainerProvider) execApplyPatch(ctx context.Context, session SessionC
 		return nil, errors.New("no files were modified")
 	}
 
-	workspace := p.resolveToolWorkspace(ctx, session)
-	plan, err := buildApplyPatchPlan(opCtx, bridgeApplyPatchFS{client: client}, workspace.defaultWorkDir, hunks)
+	plan, err := buildApplyPatchPlan(opCtx, bridgeApplyPatchFS{client: client}, target.workspace, hunks)
 	if err != nil {
 		return nil, err
 	}
-	if res, err := p.runWorkspaceToolHook(ctx, session, hooks.EventBeforeFileWrite, map[string]any{
+	if res, err := p.runWorkspaceToolHook(ctx, session, target.hookWorkspaceInfo(p.execWorkDir), hooks.EventBeforeFileWrite, map[string]any{
 		"operation": "apply_patch",
 		"summary":   plan.summary(),
 		"files":     plan.files(),
@@ -219,7 +219,7 @@ func (p *ContainerProvider) execApplyPatch(ctx context.Context, session SessionC
 	if err := commitApplyPatchPlan(opCtx, client, plan); err != nil {
 		return nil, err
 	}
-	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, hooks.EventAfterFileWrite, map[string]any{
+	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, target.hookWorkspaceInfo(p.execWorkDir), hooks.EventAfterFileWrite, map[string]any{
 		"operation": "apply_patch",
 		"summary":   plan.summary(),
 		"files":     plan.files(),
@@ -473,12 +473,12 @@ func parseApplyPatchUpdateLine(hunk *applyPatchHunk, line, updateLine string, li
 	return nil
 }
 
-func buildApplyPatchPlan(ctx context.Context, fs applyPatchReadFS, defaultWorkDir string, hunks []applyPatchHunk) (*applyPatchPlan, error) {
+func buildApplyPatchPlan(ctx context.Context, fs applyPatchReadFS, workspace toolWorkspace, hunks []applyPatchHunk) (*applyPatchPlan, error) {
 	files := make(map[string]applyPatchVirtualFile)
 	plan := &applyPatchPlan{}
 
 	for _, hunk := range hunks {
-		path, err := normalizeApplyPatchPath(hunk.path, defaultWorkDir)
+		path, err := normalizeApplyPatchPath(hunk.path, workspace)
 		if err != nil {
 			return nil, err
 		}
@@ -521,7 +521,7 @@ func buildApplyPatchPlan(ctx context.Context, fs applyPatchReadFS, defaultWorkDi
 				return nil, err
 			}
 			if hunk.movePath != "" {
-				movePath, err := normalizeApplyPatchPath(hunk.movePath, defaultWorkDir)
+				movePath, err := normalizeApplyPatchPath(hunk.movePath, workspace)
 				if err != nil {
 					return nil, err
 				}
@@ -556,32 +556,47 @@ func buildApplyPatchPlan(ctx context.Context, fs applyPatchReadFS, defaultWorkDi
 	return plan, nil
 }
 
-func normalizeApplyPatchPath(rawPath, defaultWorkDir string) (string, error) {
-	path := strings.TrimSpace(rawPath)
-	if path == "" {
+func normalizeApplyPatchPath(rawPath string, workspace toolWorkspace) (string, error) {
+	value := strings.TrimSpace(rawPath)
+	if value == "" {
 		return "", errors.New("patch path is required")
 	}
-	if strings.Contains(path, "\x00") {
+	if strings.Contains(value, "\x00") {
 		return "", fmt.Errorf("patch path contains null byte: %q", rawPath)
 	}
-	workDir := strings.TrimRight(strings.TrimSpace(defaultWorkDir), "/")
-	if workDir == "" {
-		workDir = defaultContainerExecWorkDir
+	value = workspace.normalizePath(value)
+	if workspace.windows {
+		return normalizeWindowsApplyPatchPath(value, rawPath)
 	}
-	if path == workDir {
+	clean := pathpkg.Clean(value)
+	if clean == "." || clean == "/" {
 		return "", fmt.Errorf("patch path must refer to a file: %s", rawPath)
 	}
-	if strings.HasPrefix(path, workDir+"/") {
-		path = strings.TrimLeft(strings.TrimPrefix(path, workDir+"/"), "/")
-	}
-	clean := filepath.Clean(path)
-	if clean == "." || clean == string(filepath.Separator) {
-		return "", fmt.Errorf("patch path must refer to a file: %s", rawPath)
-	}
-	if !filepath.IsAbs(clean) && (clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator))) {
+	if !strings.HasPrefix(clean, "/") && (clean == ".." || strings.HasPrefix(clean, "../")) {
 		return "", fmt.Errorf("patch path escapes workspace: %s", rawPath)
 	}
 	return clean, nil
+}
+
+func normalizeWindowsApplyPatchPath(value, rawPath string) (string, error) {
+	forward := strings.ReplaceAll(value, `\`, "/")
+	if len(forward) >= 2 && forward[1] == ':' && (len(forward) == 2 || forward[2] != '/') {
+		return "", fmt.Errorf("drive-relative patch path is not supported: %s", rawPath)
+	}
+	unc := strings.HasPrefix(forward, "//")
+	clean := pathpkg.Clean(forward)
+	if clean == "." || clean == "/" || (len(clean) == 2 && clean[1] == ':') {
+		return "", fmt.Errorf("patch path must refer to a file: %s", rawPath)
+	}
+	isDriveAbsolute := len(clean) >= 3 && clean[1] == ':' && clean[2] == '/'
+	isRootAbsolute := strings.HasPrefix(clean, "/")
+	if !isDriveAbsolute && !isRootAbsolute && (clean == ".." || strings.HasPrefix(clean, "../")) {
+		return "", fmt.Errorf("patch path escapes workspace: %s", rawPath)
+	}
+	if unc && strings.HasPrefix(clean, "/") {
+		clean = "/" + clean
+	}
+	return strings.ReplaceAll(clean, "/", `\`), nil
 }
 
 func statApplyPatchVirtualFile(ctx context.Context, fs applyPatchReadFS, files map[string]applyPatchVirtualFile, path string) (applyPatchVirtualFile, error) {

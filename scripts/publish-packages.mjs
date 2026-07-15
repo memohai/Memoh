@@ -14,6 +14,7 @@ const ROOT_DIR = dirname(dirname(fileURLToPath(import.meta.url)))
 const CANDIDATE_DIRS = [
   'apps/desktop',
   'apps/web',
+  'packages/runtime',
   'packages/sdk',
   'packages/ui',
   'packages/icons',

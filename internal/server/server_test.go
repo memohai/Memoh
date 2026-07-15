@@ -75,3 +75,15 @@ func TestShouldSkipJWT_MCPOAuthCallbackPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestShouldSkipJWTOnlyForRuntimeConnectEndpoint(t *testing.T) {
+	t.Parallel()
+	if !shouldSkipJWT("/runtimes/connect") {
+		t.Fatal("Runtime key endpoint must authenticate before JWT middleware")
+	}
+	for _, path := range []string{"/runtimes", "/runtimes/connect/extra", "/users/me/runtimes"} {
+		if shouldSkipJWT(path) {
+			t.Fatalf("path=%q unexpectedly skips JWT", path)
+		}
+	}
+}

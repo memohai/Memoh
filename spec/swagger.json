@@ -8126,6 +8126,271 @@
                 }
             }
         },
+        "/bots/{bot_id}/workspace-targets": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "workspace-targets"
+                ],
+                "summary": "List a Bot's workspace targets",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/workspace.WorkspaceTargetsResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/workspace-targets/primary": {
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "workspace-targets"
+                ],
+                "summary": "Set a Bot's Primary workspace target",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Primary target",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/workspace.SetPrimaryWorkspaceTargetRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/workspace-targets/remotes/{runtime_id}": {
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "workspace-targets"
+                ],
+                "summary": "Add or update a Remote Runtime workspace target",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Runtime ID",
+                        "name": "runtime_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Remote workspace mount",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/workspace.MountRemoteWorkspaceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/workspace.WorkspaceTarget"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/workspace-targets/{target_id}": {
+            "delete": {
+                "description": "Remote files and the Native workspace are not deleted.",
+                "tags": [
+                    "workspace-targets"
+                ],
+                "summary": "Delete a Remote Runtime workspace target",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace target ID",
+                        "name": "target_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/workspace-targets/{target_id}/tool-approval": {
+            "put": {
+                "description": "The read/write/exec fields are mode shortcuts. tool_approval_config preserves and updates advanced bypass/force rules.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "workspace-targets"
+                ],
+                "summary": "Update tool approval for one workspace target",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace target ID",
+                        "name": "target_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Target tool approval",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/workspace.UpdateWorkspaceTargetToolApprovalRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{id}": {
             "get": {
                 "description": "Get a bot by ID (owner/admin only)",
@@ -12536,6 +12801,124 @@
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/me/runtimes": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user-runtimes"
+                ],
+                "summary": "List Remote Runtime credentials",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/userruntime.Runtime"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Register a Remote Runtime and return its reusable API token.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user-runtimes"
+                ],
+                "summary": "Create a Remote Runtime credential",
+                "parameters": [
+                    {
+                        "description": "Runtime configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/userruntime.CreateRuntimeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/userruntime.Runtime"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/me/runtimes/{id}": {
+            "delete": {
+                "tags": [
+                    "user-runtimes"
+                ],
+                "summary": "Revoke a Remote Runtime credential",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Runtime ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -20053,6 +20436,9 @@
                         "type": "string"
                     }
                 },
+                "mode": {
+                    "$ref": "#/definitions/settings.ToolApprovalMode"
+                },
                 "require_approval": {
                     "type": "boolean"
                 }
@@ -20073,10 +20459,26 @@
                         "type": "string"
                     }
                 },
+                "mode": {
+                    "$ref": "#/definitions/settings.ToolApprovalMode"
+                },
                 "require_approval": {
                     "type": "boolean"
                 }
             }
+        },
+        "settings.ToolApprovalMode": {
+            "type": "string",
+            "enum": [
+                "allow",
+                "ask",
+                "deny"
+            ],
+            "x-enum-varnames": [
+                "ToolApprovalAllow",
+                "ToolApprovalAsk",
+                "ToolApprovalDeny"
+            ]
         },
         "settings.UpsertRequest": {
             "type": "object",
@@ -20242,6 +20644,55 @@
                     "type": "string"
                 },
                 "text": {
+                    "type": "string"
+                }
+            }
+        },
+        "userruntime.CreateRuntimeRequest": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "userruntime.Runtime": {
+            "type": "object",
+            "properties": {
+                "arch": {
+                    "type": "string"
+                },
+                "capabilities": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "client_version": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "hostname": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "online": {
+                    "type": "boolean"
+                },
+                "os": {
+                    "type": "string"
+                },
+                "workspace_base": {
                     "type": "string"
                 }
             }
@@ -20442,6 +20893,102 @@
                 },
                 "status": {
                     "type": "string"
+                }
+            }
+        },
+        "workspace.MountRemoteWorkspaceRequest": {
+            "type": "object",
+            "properties": {
+                "workspace_path": {
+                    "type": "string"
+                }
+            }
+        },
+        "workspace.SetPrimaryWorkspaceTargetRequest": {
+            "type": "object",
+            "required": [
+                "target_id"
+            ],
+            "properties": {
+                "target_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "workspace.UpdateWorkspaceTargetToolApprovalRequest": {
+            "type": "object",
+            "properties": {
+                "exec": {
+                    "$ref": "#/definitions/settings.ToolApprovalMode"
+                },
+                "read": {
+                    "$ref": "#/definitions/settings.ToolApprovalMode"
+                },
+                "tool_approval_config": {
+                    "$ref": "#/definitions/settings.ToolApprovalConfig"
+                },
+                "write": {
+                    "$ref": "#/definitions/settings.ToolApprovalMode"
+                }
+            }
+        },
+        "workspace.WorkspaceTarget": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "online": {
+                    "type": "boolean"
+                },
+                "primary": {
+                    "type": "boolean"
+                },
+                "runtime_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "target_id": {
+                    "type": "string"
+                },
+                "tool_approval": {
+                    "$ref": "#/definitions/workspace.WorkspaceTargetToolApproval"
+                },
+                "tool_approval_config": {
+                    "$ref": "#/definitions/settings.ToolApprovalConfig"
+                },
+                "workspace_path": {
+                    "type": "string"
+                }
+            }
+        },
+        "workspace.WorkspaceTargetToolApproval": {
+            "type": "object",
+            "properties": {
+                "exec": {
+                    "$ref": "#/definitions/settings.ToolApprovalMode"
+                },
+                "read": {
+                    "$ref": "#/definitions/settings.ToolApprovalMode"
+                },
+                "write": {
+                    "$ref": "#/definitions/settings.ToolApprovalMode"
+                }
+            }
+        },
+        "workspace.WorkspaceTargetsResponse": {
+            "type": "object",
+            "properties": {
+                "targets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/workspace.WorkspaceTarget"
+                    }
                 }
             }
         }

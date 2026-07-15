@@ -2,6 +2,7 @@ package settings
 
 import (
 	"encoding/json"
+	"strings"
 )
 
 const (
@@ -96,16 +97,26 @@ type ToolApprovalConfig struct {
 	Exec    ToolApprovalExecPolicy `json:"exec"`
 }
 
+type ToolApprovalMode string
+
+const (
+	ToolApprovalAllow ToolApprovalMode = "allow"
+	ToolApprovalAsk   ToolApprovalMode = "ask"
+	ToolApprovalDeny  ToolApprovalMode = "deny"
+)
+
 type ToolApprovalFilePolicy struct {
-	RequireApproval  bool     `json:"require_approval"`
-	BypassGlobs      []string `json:"bypass_globs"`
-	ForceReviewGlobs []string `json:"force_review_globs"`
+	Mode             ToolApprovalMode `json:"mode,omitempty"`
+	RequireApproval  bool             `json:"require_approval"`
+	BypassGlobs      []string         `json:"bypass_globs"`
+	ForceReviewGlobs []string         `json:"force_review_globs"`
 }
 
 type ToolApprovalExecPolicy struct {
-	RequireApproval     bool     `json:"require_approval"`
-	BypassCommands      []string `json:"bypass_commands"`
-	ForceReviewCommands []string `json:"force_review_commands"`
+	Mode                ToolApprovalMode `json:"mode,omitempty"`
+	RequireApproval     bool             `json:"require_approval"`
+	BypassCommands      []string         `json:"bypass_commands"`
+	ForceReviewCommands []string         `json:"force_review_commands"`
 }
 
 func DefaultToolApprovalConfig() ToolApprovalConfig {
@@ -197,6 +208,11 @@ func unmarshalFilePolicy(data []byte, defaults ToolApprovalFilePolicy) (ToolAppr
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return policy, err
 	}
+	if value, ok := raw["mode"]; ok {
+		if err := json.Unmarshal(value, &policy.Mode); err != nil {
+			return policy, err
+		}
+	}
 	if value, ok := raw["require_approval"]; ok {
 		if err := json.Unmarshal(value, &policy.RequireApproval); err != nil {
 			return policy, err
@@ -221,6 +237,11 @@ func unmarshalExecPolicy(data []byte, defaults ToolApprovalExecPolicy) (ToolAppr
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return policy, err
 	}
+	if value, ok := raw["mode"]; ok {
+		if err := json.Unmarshal(value, &policy.Mode); err != nil {
+			return policy, err
+		}
+	}
 	if value, ok := raw["require_approval"]; ok {
 		if err := json.Unmarshal(value, &policy.RequireApproval); err != nil {
 			return policy, err
@@ -241,6 +262,7 @@ func unmarshalExecPolicy(data []byte, defaults ToolApprovalExecPolicy) (ToolAppr
 
 func cloneFilePolicy(policy ToolApprovalFilePolicy) ToolApprovalFilePolicy {
 	return ToolApprovalFilePolicy{
+		Mode:             normalizeToolApprovalMode(policy.Mode),
 		RequireApproval:  policy.RequireApproval,
 		BypassGlobs:      append([]string(nil), policy.BypassGlobs...),
 		ForceReviewGlobs: append([]string(nil), policy.ForceReviewGlobs...),
@@ -249,6 +271,7 @@ func cloneFilePolicy(policy ToolApprovalFilePolicy) ToolApprovalFilePolicy {
 
 func cloneExecPolicy(policy ToolApprovalExecPolicy) ToolApprovalExecPolicy {
 	return ToolApprovalExecPolicy{
+		Mode:                normalizeToolApprovalMode(policy.Mode),
 		RequireApproval:     policy.RequireApproval,
 		BypassCommands:      append([]string(nil), policy.BypassCommands...),
 		ForceReviewCommands: append([]string(nil), policy.ForceReviewCommands...),
@@ -257,6 +280,7 @@ func cloneExecPolicy(policy ToolApprovalExecPolicy) ToolApprovalExecPolicy {
 
 func mergeFilePolicies(left, right ToolApprovalFilePolicy) ToolApprovalFilePolicy {
 	return ToolApprovalFilePolicy{
+		Mode:             mergeToolApprovalModes(left.Mode, right.Mode),
 		RequireApproval:  left.RequireApproval || right.RequireApproval,
 		BypassGlobs:      mergeStringLists(left.BypassGlobs, right.BypassGlobs),
 		ForceReviewGlobs: mergeStringLists(left.ForceReviewGlobs, right.ForceReviewGlobs),
@@ -282,6 +306,7 @@ func mergeStringLists(left, right []string) []string {
 }
 
 func normalizeFilePolicy(policy, defaults ToolApprovalFilePolicy) ToolApprovalFilePolicy {
+	defaults.Mode = normalizeToolApprovalMode(policy.Mode)
 	defaults.RequireApproval = policy.RequireApproval
 	if policy.BypassGlobs != nil {
 		defaults.BypassGlobs = append([]string(nil), policy.BypassGlobs...)
@@ -293,6 +318,7 @@ func normalizeFilePolicy(policy, defaults ToolApprovalFilePolicy) ToolApprovalFi
 }
 
 func normalizeExecPolicy(policy, defaults ToolApprovalExecPolicy) ToolApprovalExecPolicy {
+	defaults.Mode = normalizeToolApprovalMode(policy.Mode)
 	defaults.RequireApproval = policy.RequireApproval
 	if policy.BypassCommands != nil {
 		defaults.BypassCommands = append([]string(nil), policy.BypassCommands...)
@@ -301,4 +327,28 @@ func normalizeExecPolicy(policy, defaults ToolApprovalExecPolicy) ToolApprovalEx
 		defaults.ForceReviewCommands = append([]string(nil), policy.ForceReviewCommands...)
 	}
 	return defaults
+}
+
+func normalizeToolApprovalMode(mode ToolApprovalMode) ToolApprovalMode {
+	switch ToolApprovalMode(strings.ToLower(strings.TrimSpace(string(mode)))) {
+	case ToolApprovalAllow:
+		return ToolApprovalAllow
+	case ToolApprovalAsk:
+		return ToolApprovalAsk
+	case ToolApprovalDeny:
+		return ToolApprovalDeny
+	default:
+		return ""
+	}
+}
+
+func mergeToolApprovalModes(left, right ToolApprovalMode) ToolApprovalMode {
+	left = normalizeToolApprovalMode(left)
+	right = normalizeToolApprovalMode(right)
+	for _, mode := range []ToolApprovalMode{ToolApprovalDeny, ToolApprovalAsk, ToolApprovalAllow} {
+		if left == mode || right == mode {
+			return mode
+		}
+	}
+	return ""
 }

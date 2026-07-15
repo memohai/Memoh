@@ -9,64 +9,106 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 )
 
-func needsApproval(cfg settings.ToolApprovalConfig, toolName string, input any) bool {
+func policyDecision(cfg settings.ToolApprovalConfig, toolName string, input any) string {
 	cfg = settings.NormalizeToolApprovalConfig(cfg)
-	if !cfg.Enabled {
-		return false
-	}
-
 	args := inputMap(input)
 	operation, ok := OperationForTool(toolName)
-	switch {
-	case ok && operation == OperationRead:
+	if !ok {
+		return DecisionBypass
+	}
+	switch operation {
+	case OperationRead:
+		if decision, decided := explicitModeDecision(cfg.Read.Mode); decided {
+			if decision != DecisionNeedsApproval {
+				return decision
+			}
+		} else if !cfg.Enabled {
+			return DecisionBypass
+		}
 		targets := approvalPaths(args)
 		if matchesAnyPathGlob(targets, cfg.Read.ForceReviewGlobs) {
-			return true
+			return DecisionNeedsApproval
 		}
 		if pathsBypass(targets, cfg.Read.BypassGlobs) {
-			return false
+			return DecisionBypass
 		}
-		if !cfg.Read.RequireApproval {
-			return false
+		if cfg.Read.Mode == settings.ToolApprovalAsk || cfg.Read.RequireApproval {
+			return DecisionNeedsApproval
 		}
-		return true
-	case ok && operation == OperationWrite:
+		return DecisionBypass
+	case OperationWrite:
+		if decision, decided := explicitModeDecision(cfg.Write.Mode); decided {
+			if decision != DecisionNeedsApproval {
+				return decision
+			}
+		} else if !cfg.Enabled {
+			return DecisionBypass
+		}
 		if strings.EqualFold(strings.TrimSpace(toolName), "apply_patch") {
 			targets := applyPatchPaths(readString(args, "patch"))
 			if matchesAnyPathGlob(targets, cfg.Write.ForceReviewGlobs) {
-				return true
+				return DecisionNeedsApproval
 			}
 			if pathsBypass(targets, cfg.Write.BypassGlobs) {
-				return false
+				return DecisionBypass
 			}
-			return cfg.Write.RequireApproval || len(cfg.Write.ForceReviewGlobs) > 0
+			if cfg.Write.Mode == settings.ToolApprovalAsk || cfg.Write.RequireApproval || len(cfg.Write.ForceReviewGlobs) > 0 {
+				return DecisionNeedsApproval
+			}
+			return DecisionBypass
 		}
 		targets := approvalPaths(args)
 		if matchesAnyPathGlob(targets, cfg.Write.ForceReviewGlobs) {
-			return true
+			return DecisionNeedsApproval
 		}
 		if pathsBypass(targets, cfg.Write.BypassGlobs) {
-			return false
+			return DecisionBypass
 		}
-		if !cfg.Write.RequireApproval {
-			return false
+		if cfg.Write.Mode == settings.ToolApprovalAsk || cfg.Write.RequireApproval {
+			return DecisionNeedsApproval
 		}
-		return true
-	case ok && operation == OperationExec:
+		return DecisionBypass
+	case OperationExec:
+		if decision, decided := explicitModeDecision(cfg.Exec.Mode); decided {
+			if decision != DecisionNeedsApproval {
+				return decision
+			}
+		} else if !cfg.Enabled {
+			return DecisionBypass
+		}
 		command := readString(args, "command")
 		if matchesCommand(command, cfg.Exec.ForceReviewCommands) {
-			return true
+			return DecisionNeedsApproval
 		}
 		exe, ok := simpleExecutable(command)
 		if !ok {
-			return cfg.Exec.RequireApproval
+			if cfg.Exec.Mode == settings.ToolApprovalAsk || cfg.Exec.RequireApproval {
+				return DecisionNeedsApproval
+			}
+			return DecisionBypass
 		}
 		if matchesCommandWithExecutable(command, exe, cfg.Exec.BypassCommands) {
-			return false
+			return DecisionBypass
 		}
-		return cfg.Exec.RequireApproval
+		if cfg.Exec.Mode == settings.ToolApprovalAsk || cfg.Exec.RequireApproval {
+			return DecisionNeedsApproval
+		}
+		return DecisionBypass
 	default:
-		return false
+		return DecisionBypass
+	}
+}
+
+func explicitModeDecision(mode settings.ToolApprovalMode) (string, bool) {
+	switch mode {
+	case settings.ToolApprovalAllow:
+		return DecisionBypass, true
+	case settings.ToolApprovalAsk:
+		return DecisionNeedsApproval, true
+	case settings.ToolApprovalDeny:
+		return DecisionDeny, true
+	default:
+		return "", false
 	}
 }
 

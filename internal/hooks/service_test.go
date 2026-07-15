@@ -674,6 +674,57 @@ func TestRunLoadsConfigAndExecutesCommandHook(t *testing.T) {
 	}
 }
 
+func TestRunCommandHookDoesNotUseTargetWorkspaceAsExecutionDirectory(t *testing.T) {
+	t.Parallel()
+
+	cfg := `{
+		"version": 1,
+		"enabled": true,
+		"hooks": [{
+			"name": "remote guard",
+			"event": "BeforeWorkspaceCommand",
+			"actions": [{
+				"type": "command",
+				"command": "node /data/.memoh/guard.js"
+			}]
+		}]
+	}`
+	server := &hookBridgeTestServer{
+		files:  map[string][]byte{DefaultConfigPath: []byte(cfg)},
+		stdout: `{"decision":"allow"}`,
+	}
+	service := NewService(nil, hookBridgeProvider{client: newHookBridgeTestClient(t, server)})
+
+	_, err := service.Run(context.Background(), Request{
+		Event: EventBeforeWorkspaceCommand,
+		BotID: "bot-1",
+		Workspace: WorkspaceInfo{
+			CWD:     `C:\Users\alice\project`,
+			Runtime: bridge.WorkspaceBackendRemote,
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.execs) != 1 {
+		t.Fatalf("exec count = %d, want 1", len(server.execs))
+	}
+	exec := server.execs[0]
+	if exec.workDir != DefaultWorkDir {
+		t.Fatalf("hook work_dir = %q, want primary workspace %q", exec.workDir, DefaultWorkDir)
+	}
+	var req Request
+	if err := json.Unmarshal(exec.stdin, &req); err != nil {
+		t.Fatalf("stdin is not hook request JSON: %v", err)
+	}
+	if req.Workspace.CWD != `C:\Users\alice\project` || req.Workspace.Runtime != bridge.WorkspaceBackendRemote {
+		t.Fatalf("hook request lost target workspace metadata: %+v", req.Workspace)
+	}
+}
+
 func TestRunLoadsReadyPluginHooksWithPluginRuntimeDefaults(t *testing.T) {
 	t.Parallel()
 

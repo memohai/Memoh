@@ -51,3 +51,5 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
 npmRebuild: false
+asarUnpack:
+  - node_modules/@memohai/runtime/dist/bridge.proto

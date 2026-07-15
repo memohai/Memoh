@@ -176,6 +176,16 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
 	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
+	toolExecutionMetadata := newToolExecutionMetadataRegistry(func(call sdk.ToolCall, metadata map[string]any) {
+		sendEvent(ctx, ch, StreamEvent{
+			Type:       EventToolCallMetadata,
+			ToolName:   call.ToolName,
+			ToolCallID: call.ToolCallID,
+			Input:      call.Input,
+			Metadata:   metadata,
+		})
+	})
+	cfg.ToolApprovalHandler = toolExecutionMetadata.wrap(cfg.ToolApprovalHandler)
 
 	// Loop detection setup
 	var textLoopGuard *TextLoopGuard
@@ -413,6 +423,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				Type:       EventToolCallProgress,
 				ToolName:   p.ToolName,
 				ToolCallID: p.ToolCallID,
+				Metadata:   toolExecutionMetadata.metadata(p.ToolCallID),
 				Progress:   p.Content,
 			}) {
 				aborted = true
@@ -450,6 +461,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				ToolName:   p.ToolName,
 				ToolCallID: p.ToolCallID,
 				Input:      p.Input,
+				Metadata:   toolExecutionMetadata.metadata(p.ToolCallID),
 				Result:     p.Output,
 			}) || !sendEvent(ctx, ch, StreamEvent{
 				Type:           EventProgress,
@@ -473,6 +485,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				Type:       EventToolCallEnd,
 				ToolName:   p.ToolName,
 				ToolCallID: p.ToolCallID,
+				Metadata:   toolExecutionMetadata.metadata(p.ToolCallID),
 				Error:      p.Error.Error(),
 			}) {
 				aborted = true
@@ -552,6 +565,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	if streamResult.DeferredToolApproval != nil {
 		finalMessages = annotateDeferredApproval(finalMessages, *streamResult.DeferredToolApproval)
 	}
+	finalMessages = toolExecutionMetadata.annotate(finalMessages)
 	var totalUsage sdk.Usage
 	for _, step := range streamResult.Steps {
 		totalUsage.InputTokens += step.Usage.InputTokens
@@ -653,6 +667,8 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
 	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
+	toolExecutionMetadata := newToolExecutionMetadataRegistry(nil)
+	cfg.ToolApprovalHandler = toolExecutionMetadata.wrap(cfg.ToolApprovalHandler)
 
 	var toolLoopGuard *ToolLoopGuard
 	var textLoopGuard *TextLoopGuard
@@ -739,6 +755,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	if readMediaState != nil {
 		finalMessages = readMediaState.mergeMessages(genResult.Steps, finalMessages)
 	}
+	finalMessages = toolExecutionMetadata.annotate(finalMessages)
 	return &GenerateResult{
 		Messages:    finalMessages,
 		Text:        genResult.Text,
@@ -918,7 +935,7 @@ func appendToolUsageToSystem(system, toolUsage string) string {
 func markApprovalTools(sdkTools []sdk.Tool) []sdk.Tool {
 	for i := range sdkTools {
 		switch sdkTools[i].Name {
-		case tools.ToolWrite().String(), tools.ToolEdit().String(), tools.ToolApplyPatch().String(), tools.ToolExec().String():
+		case tools.ToolRead().String(), tools.ToolList().String(), tools.ToolWrite().String(), tools.ToolEdit().String(), tools.ToolApplyPatch().String(), tools.ToolExec().String():
 			sdkTools[i].RequireApproval = true
 		}
 	}
