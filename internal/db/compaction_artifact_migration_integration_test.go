@@ -74,7 +74,7 @@ CREATE TABLE bot_history_messages (
   turn_superseded_at TIMESTAMPTZ
 );
 `); err != nil {
-		t.Fatalf("create pre-0106 compaction schema: %v", err)
+		t.Fatalf("create pre-0108 compaction schema: %v", err)
 	}
 
 	legacyID := "00000000-0000-0000-0000-00000000c001"
@@ -109,7 +109,7 @@ CREATE TABLE bot_history_messages (
 	  ($4, $5, $6, 'ok', 'unsafe hidden summary', 1),
 	  ($7, $8, $9, 'ok', 'deleted secret survives', 1)
 	`, legacyID, botID, sessionID, repairArtifactID, repairBotID, repairSessionID, clearedArtifactID, clearedBotID, clearedSessionID); err != nil {
-		t.Fatalf("insert pre-0107 legacy artifact: %v", err)
+		t.Fatalf("insert pre-0108 legacy artifact: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
 INSERT INTO bot_history_messages (
@@ -129,22 +129,22 @@ INSERT INTO bot_history_messages (
 		t.Fatalf("simulate legacy history clear: %v", err)
 	}
 
-	up0107 := readEmbeddedMigration(t, "postgres/migrations/0107_compaction_artifacts.up.sql")
-	if _, err := tx.Exec(ctx, up0107); err != nil {
-		t.Fatalf("apply 0107 up: %v", err)
-	}
-	if _, err := tx.Exec(ctx, up0107); err != nil {
-		t.Fatalf("reapply 0107 up (idempotency): %v", err)
-	}
-	assertIndexExists(t, ctx, tx, "idx_compacts_active_session", true)
-	assertForeignKeyDeleteAction(t, ctx, tx, "bot_history_message_compacts", "bot_history_message_compacts_superseded_by_fkey", "n")
-
-	up0108 := readEmbeddedMigration(t, "postgres/migrations/0108_compaction_epoch.up.sql")
+	up0108 := readEmbeddedMigration(t, "postgres/migrations/0108_compaction_artifacts.up.sql")
 	if _, err := tx.Exec(ctx, up0108); err != nil {
 		t.Fatalf("apply 0108 up: %v", err)
 	}
 	if _, err := tx.Exec(ctx, up0108); err != nil {
 		t.Fatalf("reapply 0108 up (idempotency): %v", err)
+	}
+	assertIndexExists(t, ctx, tx, "idx_compacts_active_session", true)
+	assertForeignKeyDeleteAction(t, ctx, tx, "bot_history_message_compacts", "bot_history_message_compacts_superseded_by_fkey", "n")
+
+	up0109 := readEmbeddedMigration(t, "postgres/migrations/0109_compaction_epoch.up.sql")
+	if _, err := tx.Exec(ctx, up0109); err != nil {
+		t.Fatalf("apply 0109 up: %v", err)
+	}
+	if _, err := tx.Exec(ctx, up0109); err != nil {
+		t.Fatalf("reapply 0109 up (idempotency): %v", err)
 	}
 	assertIndexExists(t, ctx, tx, "idx_compacts_owner_epoch", true)
 	assertForeignKeyDeleteAction(t, ctx, tx, "bot_history_message_compacts", "bot_history_message_compacts_session_id_fkey", "c")
@@ -293,18 +293,18 @@ VALUES ($1, $2, 'ok', 'log-only artifact')
 	}
 	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 0)
 
-	down0108 := readEmbeddedMigration(t, "postgres/migrations/0108_compaction_epoch.down.sql")
-	if _, err := tx.Exec(ctx, down0108); err != nil {
-		t.Fatalf("apply 0108 down: %v", err)
+	down0109 := readEmbeddedMigration(t, "postgres/migrations/0109_compaction_epoch.down.sql")
+	if _, err := tx.Exec(ctx, down0109); err != nil {
+		t.Fatalf("apply 0109 down: %v", err)
 	}
 	assertIndexExists(t, ctx, tx, "idx_compacts_owner_epoch", false)
 	assertForeignKeyDeleteAction(t, ctx, tx, "bot_history_message_compacts", "bot_history_message_compacts_session_id_fkey", "n")
 	assertColumnExists(t, ctx, tx, schema, "bot_sessions", "compaction_epoch", false)
 	assertColumnExists(t, ctx, tx, schema, "bot_history_message_compacts", "compaction_epoch", false)
 
-	down0107 := readEmbeddedMigration(t, "postgres/migrations/0107_compaction_artifacts.down.sql")
-	if _, err := tx.Exec(ctx, down0107); err != nil {
-		t.Fatalf("apply 0107 down: %v", err)
+	down0108 := readEmbeddedMigration(t, "postgres/migrations/0108_compaction_artifacts.down.sql")
+	if _, err := tx.Exec(ctx, down0108); err != nil {
+		t.Fatalf("apply 0108 down: %v", err)
 	}
 	assertIndexExists(t, ctx, tx, "idx_compacts_active_session", false)
 	var artifactColumns int
@@ -318,10 +318,10 @@ WHERE table_schema = $1
     'artifact_level', 'parent_ids', 'superseded_by', 'superseded_at'
   )
 `, schema).Scan(&artifactColumns); err != nil {
-		t.Fatalf("inspect 0107 down reversal: %v", err)
+		t.Fatalf("inspect 0108 down reversal: %v", err)
 	}
 	if artifactColumns != 0 {
-		t.Fatalf("0107 down migration left %d artifact columns behind", artifactColumns)
+		t.Fatalf("0108 down migration left %d artifact columns behind", artifactColumns)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 0)
 }

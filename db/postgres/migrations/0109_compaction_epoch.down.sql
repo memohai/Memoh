@@ -1,4 +1,4 @@
--- 0108_compaction_epoch (rollback)
+-- 0109_compaction_epoch (rollback)
 -- Restore nullable artifact session ownership and remove epoch fencing.
 
 DROP INDEX IF EXISTS idx_compacts_owner_epoch;

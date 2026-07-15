@@ -1,4 +1,4 @@
--- 0107_compaction_artifacts
+-- 0108_compaction_artifacts
 -- Persist summary artifact coverage, anchors, and frontier lineage.
 
 ALTER TABLE bot_history_message_compacts
