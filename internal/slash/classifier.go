@@ -1,6 +1,7 @@
 package slash
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/memohai/memoh/internal/commandsyntax"
@@ -68,7 +69,7 @@ func Classify(input ClassifyInput) Decision {
 		Directed:   input.Directed,
 	})
 	if err != nil {
-		if input.Surface == SurfaceChannel && err == commandsyntax.ErrCommandForOtherBot {
+		if input.Surface == SurfaceChannel && errors.Is(err, commandsyntax.ErrCommandForOtherBot) {
 			return Decision{Kind: DecisionRejectNoop, Directed: false}
 		}
 		return Decision{Kind: DecisionNormalChat, Directed: input.Directed}

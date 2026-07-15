@@ -4,10 +4,11 @@ import "github.com/memohai/memoh/internal/commandsyntax"
 
 // ParsedCommand remains an alias so command handlers and callers can migrate to
 // the shared syntax package without duplicating the parser implementation.
-type ParsedCommand = commandsyntax.ParsedCommand
-
-type Invocation = commandsyntax.Invocation
-type InvocationInput = commandsyntax.InvocationInput
+type (
+	ParsedCommand   = commandsyntax.ParsedCommand
+	Invocation      = commandsyntax.Invocation
+	InvocationInput = commandsyntax.InvocationInput
+)
 
 var (
 	ErrNotCommand         = commandsyntax.ErrNotCommand
