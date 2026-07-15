@@ -1,4 +1,4 @@
-import { computed, reactive, type Ref } from 'vue'
+import { computed, reactive, toRaw, type Ref } from 'vue'
 import type { ChatAssistantTurn } from './types'
 
 export interface AssistantStream {
@@ -12,8 +12,16 @@ export interface AssistantStream {
 
 interface PendingAssistantStream extends AssistantStream {
   sessionId: string
+  appendMessages: boolean
+  messageIds: Map<number, number>
   resolve: () => void
   reject: (error: Error) => void
+}
+
+interface AssistantStreamMessage {
+  id: number
+  type: string
+  tool_call_id?: string
 }
 
 export interface StreamIdentity {
@@ -138,6 +146,8 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
         sessionId: input.sessionId.trim(),
         composerScope: input.composerScope?.trim() || 'chat',
         viewId: input.viewId?.trim() || 'chat',
+        appendMessages: input.assistantTurn.messages.length > 0,
+        messageIds: new Map(),
         resolve,
         reject,
       })
@@ -146,6 +156,42 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
 
   function getAssistantStream(streamId: string): AssistantStream | undefined {
     return streams.get(streamId.trim())
+  }
+
+  // Each server-side continuation owns a fresh UI-message converter whose ids
+  // start at zero. A response to ask_user / tool approval resumes inside the
+  // existing assistant turn, so those stream-local ids must be translated into
+  // the turn's id namespace instead of overwriting its earlier blocks.
+  function mapAssistantStreamMessage<T extends AssistantStreamMessage>(streamId: string, message: T): T {
+    const stream = streams.get(streamId.trim())
+    if (!stream) return message
+
+    const mappedId = stream.messageIds.get(message.id)
+    if (mappedId !== undefined) {
+      return mappedId === message.id ? message : { ...message, id: mappedId }
+    }
+
+    const toolCallId = message.type === 'tool' ? message.tool_call_id?.trim() : ''
+    const existingTool = toolCallId
+      ? stream.assistantTurn.messages.find(block =>
+          block.type === 'tool'
+          && (block.toolCallId === toolCallId || block.tool_call_id === toolCallId),
+        )
+      : undefined
+
+    let targetId = existingTool?.id
+    if (targetId === undefined) {
+      const turn = toRaw(stream.assistantTurn)
+      const reservedIds = activeStreams()
+        .filter(active => toRaw(active.assistantTurn) === turn)
+        .flatMap(active => [...active.messageIds.values()])
+      const occupiedIds = [...stream.assistantTurn.messages.map(block => block.id), ...reservedIds]
+      targetId = stream.appendMessages || occupiedIds.includes(message.id)
+        ? occupiedIds.reduce((maxId, id) => Math.max(maxId, id), -1) + 1
+        : message.id
+    }
+    stream.messageIds.set(message.id, targetId)
+    return targetId === message.id ? message : { ...message, id: targetId }
   }
 
   function finishAssistantStream(streamId: string): PendingAssistantStream | undefined {
@@ -228,6 +274,7 @@ export function createAssistantStreamRegistry({ currentBotId, sessionId, finishA
     streamIdForEvent,
     trackAssistantStream,
     getAssistantStream,
+    mapAssistantStreamMessage,
     resolveAssistantStream,
     rejectAssistantStream,
     discardAssistantStream,
