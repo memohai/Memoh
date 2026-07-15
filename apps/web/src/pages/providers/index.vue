@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useQuery } from '@pinia/colada'
 import {
   Button,
@@ -21,7 +21,7 @@ import AddProvider from '@/components/add-provider/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import BackendCard from '@/components/settings/backend-card.vue'
 import DetailPane from '@/components/settings/detail-pane.vue'
-import { useViewSwap } from '@/composables/useViewSwap'
+import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import { avatarInitials } from '@/composables/useAvatarInitials'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 import PageShell from '@/components/page-shell/index.vue'
@@ -29,7 +29,7 @@ import ModelSetting from './model-setting.vue'
 
 const { t } = useI18n()
 
-const { data: providerData } = useQuery({
+const { data: providerData, isLoading: providersLoading } = useQuery({
   key: () => ['providers'],
   query: async () => {
     const { data } = await getProviders({ throwOnError: true })
@@ -46,13 +46,6 @@ const { data: modelData } = useQuery({
 })
 
 const curProvider = ref<ProvidersGetResponse>()
-
-// 'provider' query key (unique per settings page — see useViewSwap.ts): the
-// open provider's ID lives in the URL, so a refresh (or a shared link) restores
-// the exact detail view, and re-clicking Providers in the settings sidebar
-// while a detail is open navigates back to the list instead of being dropped as
-// a duplicate push.
-const { view, direction, queryValue, openDetail, backToList } = useViewSwap('provider')
 const searchQuery = ref('')
 const addOpen = ref(false)
 
@@ -63,6 +56,23 @@ const providers = computed<ProvidersGetResponse[]>(() => {
     const be = b.enable !== false ? 1 : 0
     return be - ae
   })
+})
+
+// Page-owned query key (unique under settings KeepAlive — see useViewSwap.ts).
+const {
+  view,
+  direction,
+  isDetailLoading,
+  openDetail: openProvider,
+  backToList: closeProvider,
+} = useRoutedViewSwap({
+  key: 'provider',
+  items: () => providers.value,
+  selected: () => curProvider.value,
+  select: provider => curProvider.value = provider,
+  getRouteValue: provider => provider.id ?? '',
+  isLoading: () => providersLoading.value,
+  isReady: () => providerData.value !== undefined,
 })
 
 const modelCountByProvider = computed(() => {
@@ -100,27 +110,6 @@ function providerSubtitle(provider: ProvidersGetResponse) {
 function modelCount(id: string | undefined) {
   return id ? (modelCountByProvider.value[id] ?? 0) : 0
 }
-
-function openProvider(provider: ProvidersGetResponse) {
-  curProvider.value = provider
-  openDetail(provider.id)
-}
-
-// Resolve the URL's provider ID against the loaded list. One watch covers all
-// three cases: a refresh restores the open provider once data arrives, a
-// background refetch swaps in the fresh object, and a provider deleted while
-// open falls back to the gallery. The not-found branch must wait for data to
-// actually arrive — during the initial fetch the list is empty, which is not
-// evidence the provider is gone.
-watch([queryValue, providers], ([id, list]) => {
-  if (!id) return
-  const found = list.find((p) => p.id === id)
-  if (found) {
-    curProvider.value = found
-  } else if (providerData.value !== undefined) {
-    backToList()
-  }
-}, { immediate: true })
 </script>
 
 <template>
@@ -228,7 +217,8 @@ watch([queryValue, providers], ([id, list]) => {
       v-else
       width="narrow"
       :back-label="t('sidebar.providers')"
-      @back="backToList()"
+      :loading="isDetailLoading || !curProvider?.id"
+      @back="closeProvider"
     >
       <ModelSetting
         v-if="curProvider?.id"

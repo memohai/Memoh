@@ -20,7 +20,7 @@ import AddEmailProvider from './components/add-email-provider.vue'
 import ProviderSetting from './components/provider-setting.vue'
 import BackendCard from '@/components/settings/backend-card.vue'
 import DetailPane from '@/components/settings/detail-pane.vue'
-import { useViewSwap } from '@/composables/useViewSwap'
+import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import SwapTransition from '@/components/settings/swap-transition.vue'
 import PageShell from '@/components/page-shell/index.vue'
 import EmailProviderIcon from '@/components/email-provider-icon/index.vue'
@@ -28,7 +28,7 @@ import EmailProviderIcon from '@/components/email-provider-icon/index.vue'
 const { t } = useI18n()
 const queryCache = useQueryCache()
 
-const { data: providerData } = useQuery({
+const { data: providerData, isLoading: providersLoading } = useQuery({
   key: () => ['email-providers'],
   query: async () => {
     const { data } = await getEmailProviders({ throwOnError: true })
@@ -39,17 +39,29 @@ const { data: providerData } = useQuery({
 const curProvider = ref<EmailProviderResponse>()
 provide('curEmailProvider', curProvider)
 
-// 'emailProvider' query key (unique per settings page — see useViewSwap.ts):
-// the open provider's ID lives in the URL, so a refresh restores the exact
-// detail view, and re-clicking Email in the settings sidebar while a detail is
-// open navigates back.
-const { view, direction, queryValue, openDetail, backToList } = useViewSwap('emailProvider')
 const searchQuery = ref('')
 const openStatus = reactive({ addOpen: false })
 
 const providers = computed<EmailProviderResponse[]>(() =>
   Array.isArray(providerData.value) ? providerData.value : [],
 )
+
+// Page-owned query key (unique under settings KeepAlive — see useViewSwap.ts).
+const {
+  view,
+  direction,
+  isDetailLoading,
+  openDetail: openProvider,
+  backToList: closeProvider,
+} = useRoutedViewSwap({
+  key: 'emailProvider',
+  items: () => providers.value,
+  selected: () => curProvider.value,
+  select: provider => curProvider.value = provider,
+  getRouteValue: provider => provider.id ?? '',
+  isLoading: () => providersLoading.value,
+  isReady: () => providerData.value !== undefined,
+})
 
 const showSearch = computed(() => providers.value.length > 0)
 
@@ -61,26 +73,6 @@ const filteredProviders = computed(() => {
     || (p.provider ?? '').toLowerCase().includes(keyword),
   )
 })
-
-function openProvider(provider: EmailProviderResponse) {
-  curProvider.value = provider
-  openDetail(provider.id)
-}
-
-// Resolve the URL's provider ID against the loaded list: restores the open
-// provider on refresh, follows refetched data, and falls back to the list if
-// it was deleted while open. Only treat "not found" as deleted once data has
-// actually arrived — the empty list during the initial fetch proves nothing.
-watch([queryValue, providers], ([id, list]) => {
-  if (!id) return
-  const found = list.find(p => p.id === id)
-  if (found) {
-    curProvider.value = found
-  }
-  else if (providerData.value !== undefined) {
-    backToList()
-  }
-}, { immediate: true })
 
 // A provider may have been created in the add dialog — refresh on close.
 watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
@@ -178,7 +170,8 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
       v-else
       width="narrow"
       :back-label="t('email.title')"
-      @back="backToList()"
+      :loading="isDetailLoading || !curProvider?.id"
+      @back="closeProvider"
     >
       <ProviderSetting v-if="curProvider?.id" />
     </DetailPane>
