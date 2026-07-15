@@ -53,6 +53,36 @@ describe('approval response tracker', () => {
     expect(rollbackApproval).toHaveBeenCalledOnce()
   })
 
+  it('isolates the same response stream id across sessions', () => {
+    const tracker = createApprovalResponseTracker({ rollbackApproval: vi.fn() })
+    expect(tracker.beginApprovalResponse(input('shared-stream', 'shared-approval'))).toBe(true)
+    expect(tracker.beginApprovalResponse({
+      ...input('shared-stream', 'shared-approval'),
+      sessionId: 'session-2',
+    })).toBe(true)
+
+    expect(tracker.hasPendingApprovalResponse('shared-approval', 'bot-1', 'session-1')).toBe(true)
+    expect(tracker.hasPendingApprovalResponse('shared-approval', 'bot-1', 'session-2')).toBe(true)
+
+    expect(tracker.getApprovalResponse('shared-stream')).toBeUndefined()
+    expect(tracker.settleApprovalResponse('shared-stream', 'succeeded')).toBeUndefined()
+    expect(tracker.settleApprovalResponse('shared-stream', 'succeeded', 'bot-1', 'session-1')?.approvalId)
+      .toBe('shared-approval')
+    expect(tracker.isTerminalApprovalResponse('shared-stream')).toBe(true)
+    expect(tracker.isTerminalApprovalResponse('shared-stream', 'bot-1', 'session-1')).toBe(true)
+    expect(tracker.isTerminalApprovalResponse('shared-stream', 'bot-1')).toBe(true)
+    expect(tracker.isTerminalApprovalResponse('shared-stream', 'bot-1', 'session-2')).toBe(false)
+    expect(tracker.getApprovalResponse('shared-stream', 'bot-1', 'session-2')?.approvalId)
+      .toBe('shared-approval')
+
+    expect(tracker.settleApprovalResponse('shared-stream', 'succeeded', 'bot-1', 'session-2')?.approvalId)
+      .toBe('shared-approval')
+    expect(tracker.isTerminalApprovalResponse('shared-stream')).toBe(false)
+    expect(tracker.isTerminalApprovalResponse('shared-stream', 'bot-1')).toBe(false)
+    expect(tracker.isTerminalApprovalResponse('shared-stream', 'bot-1', 'session-1')).toBe(true)
+    expect(tracker.isTerminalApprovalResponse('shared-stream', 'bot-1', 'session-2')).toBe(true)
+  })
+
   it('uses the response-owned rollback when its transcript is no longer current', () => {
     const rollbackApproval = vi.fn()
     const rollbackResponse = vi.fn()
@@ -66,6 +96,65 @@ describe('approval response tracker', () => {
 
     expect(rollbackResponse).toHaveBeenCalledOnce()
     expect(rollbackApproval).not.toHaveBeenCalled()
+  })
+
+  it('marks only responses on the disconnected bot as awaiting resync', () => {
+    const tracker = createApprovalResponseTracker({ rollbackApproval: vi.fn() })
+    tracker.beginApprovalResponse({
+      ...input('stream-1', 'approval-1'),
+      decision: 'approve',
+      shortId: 7,
+    })
+    tracker.beginApprovalResponse({
+      ...input('stream-2', 'approval-2'),
+      botId: 'bot-2',
+    })
+
+    tracker.markPendingApprovalResponsesUncertain('bot-1')
+
+    expect(tracker.getApprovalResponse('stream-1')).toMatchObject({
+      awaitingResync: true,
+      replaySent: false,
+      decision: 'approve',
+      shortId: 7,
+    })
+    expect(tracker.getApprovalResponse('stream-2')?.awaitingResync).toBe(false)
+    expect(tracker.hasUncertainApprovalResponse('bot-1', 'session-1')).toBe(true)
+    expect(tracker.hasUncertainApprovalResponse('bot-2', 'session-1')).toBe(false)
+    tracker.resetApprovalResponses()
+  })
+
+  it('marks a reconnect replay only once until the next disconnect', () => {
+    const tracker = createApprovalResponseTracker({ rollbackApproval: vi.fn() })
+    tracker.beginApprovalResponse({ ...input('stream-1'), decision: 'approve' })
+    tracker.markPendingApprovalResponsesUncertain('bot-1')
+
+    expect(tracker.markApprovalResponseReplaySent('stream-1')).toBe(true)
+    expect(tracker.markApprovalResponseReplaySent('stream-1')).toBe(false)
+    expect(tracker.getApprovalResponse('stream-1')).toMatchObject({
+      awaitingResync: true,
+      replaySent: true,
+    })
+
+    tracker.markPendingApprovalResponsesUncertain('bot-1')
+    expect(tracker.markApprovalResponseReplaySent('stream-1')).toBe(true)
+  })
+
+  it('expires an uncertain response after the bounded recovery window', () => {
+    let currentTime = 1_000
+    const rollbackApproval = vi.fn()
+    const tracker = createApprovalResponseTracker({
+      rollbackApproval,
+      now: () => currentTime,
+      ttlMs: 100,
+    })
+    tracker.beginApprovalResponse({ ...input('stream-1'), decision: 'approve' })
+    tracker.markPendingApprovalResponsesUncertain('bot-1')
+
+    currentTime = 1_100
+    expect(tracker.hasPendingApprovalResponse('approval-1')).toBe(false)
+    expect(tracker.getApprovalResponse('stream-1')).toBeUndefined()
+    expect(rollbackApproval).toHaveBeenCalledWith('approval-1')
   })
 
   it('expires abandoned responses, rolls them back, and allows a retry', () => {

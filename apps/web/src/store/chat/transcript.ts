@@ -1,4 +1,4 @@
-import { reactive, ref, type Ref } from 'vue'
+import { reactive, ref, toRaw, type Ref } from 'vue'
 import type {
   ChatAttachment,
   FetchMessagesOptions,
@@ -53,6 +53,18 @@ interface EphemeralAssistantError {
   content: string
   timestamp: string
   userText?: string
+  userId?: string
+  userServerId?: string
+  externalMessageId?: string
+  externalMessageOrdinal?: number
+  standalone?: boolean
+  runtimeStreamId?: string
+  runtimeGeneration?: string
+}
+
+export interface RuntimeAssistantErrorIdentity {
+  streamId: string
+  generation: string
 }
 
 export interface TranscriptDeps {
@@ -66,7 +78,7 @@ export interface TranscriptDeps {
 }
 
 type SnapshotHook = (targetSessionId: string | undefined, turns: UITurn[]) => void
-type RefreshAppliedHook = (targetSessionId: string, latestTimestamp?: string) => void
+type RefreshAppliedHook = (botId: string, targetSessionId: string, latestTimestamp?: string) => void
 
 export interface LocateMessageResult {
   items: UITurn[]
@@ -86,6 +98,7 @@ export function createTranscriptController({
   locateMessage,
 }: TranscriptDeps) {
   const messages = reactive<ChatMessage[]>([])
+  const runtimeAssistantErrorIdentity = new WeakMap<ChatAssistantTurn, string>()
   const loadingMessages = ref(false)
   const loadingOlder = ref(false)
   const hasMoreOlder = ref(true)
@@ -194,11 +207,31 @@ export function createTranscriptController({
 
   function ephemeralErrorId(sessionID: string, error: EphemeralAssistantError): string {
     let hash = 0
-    const input = `${error.timestamp}:${error.content}`
+    const input = [
+      error.timestamp,
+      error.content,
+      error.runtimeStreamId ?? '',
+      error.runtimeGeneration ?? '',
+    ].join('\u0000')
     for (let i = 0; i < input.length; i += 1) {
       hash = ((hash << 5) - hash + input.charCodeAt(i)) | 0
     }
     return `ephemeral-error-${sessionID}-${Math.abs(hash).toString(36)}`
+  }
+
+  function runtimeErrorIdentityKey(identity: RuntimeAssistantErrorIdentity | EphemeralAssistantError | undefined): string {
+    const streamId = ('streamId' in (identity ?? {})
+      ? (identity as RuntimeAssistantErrorIdentity).streamId
+      : (identity as EphemeralAssistantError | undefined)?.runtimeStreamId)?.trim() ?? ''
+    const generation = ('generation' in (identity ?? {})
+      ? (identity as RuntimeAssistantErrorIdentity).generation
+      : (identity as EphemeralAssistantError | undefined)?.runtimeGeneration)?.trim() ?? ''
+    return streamId && generation ? `${streamId}\u0000${generation}` : ''
+  }
+
+  function associateRuntimeError(turn: ChatAssistantTurn, error: EphemeralAssistantError) {
+    const key = runtimeErrorIdentityKey(error)
+    if (key) runtimeAssistantErrorIdentity.set(toRaw(turn), key)
   }
 
   function hasAssistantError(items: ChatMessage[], text: string): boolean {
@@ -237,11 +270,27 @@ export function createTranscriptController({
 
   function findAnchorUserIndex(items: ChatMessage[], error: EphemeralAssistantError): number {
     const targetText = (error.userText ?? '').trim()
+    const targetUserId = (error.userId ?? '').trim()
+    const targetUserServerId = (error.userServerId ?? '').trim()
+    const targetExternalMessageId = (error.externalMessageId ?? error.runtimeStreamId ?? '').trim()
+    const targetExternalMessageOrdinal = error.externalMessageOrdinal ?? 0
+    if (targetExternalMessageId && targetExternalMessageOrdinal > 0) {
+      let ordinal = 0
+      for (let i = 0; i < items.length; i += 1) {
+        const item = items[i]
+        if (item?.role !== 'user' || item.externalMessageId !== targetExternalMessageId) continue
+        ordinal += 1
+        if (ordinal === targetExternalMessageOrdinal) return i
+      }
+    }
     let fallback = -1
     for (let i = items.length - 1; i >= 0; i -= 1) {
       const item = items[i]
       if (item?.role !== 'user') continue
       if (fallback < 0) fallback = i
+      if (targetUserServerId && (item.serverId === targetUserServerId || item.id === targetUserServerId)) return i
+      if (targetUserId && item.id === targetUserId) return i
+      if (targetExternalMessageId && item.externalMessageId === targetExternalMessageId) return i
       if (targetText && item.text.trim() === targetText) return i
     }
     return fallback
@@ -265,13 +314,16 @@ export function createTranscriptController({
   }
 
   function createEphemeralErrorTurn(sessionID: string, error: EphemeralAssistantError, timestamp = error.timestamp): ChatAssistantTurn {
-    return {
+    const turn: ChatAssistantTurn = {
       id: ephemeralErrorId(sessionID, error),
       role: 'assistant',
       messages: [{ id: 0, type: 'error', content: error.content }],
       timestamp,
       streaming: false,
+      __ephemeral: true,
     }
+    associateRuntimeError(turn, error)
+    return turn
   }
 
   function appendEphemeralErrors(items: ChatMessage[], targetSessionId?: string) {
@@ -281,13 +333,31 @@ export function createTranscriptController({
     if (!errors?.length) return
     for (const error of errors) {
       const text = error.content.trim()
-      if (!text || hasAssistantError(items, text)) continue
+      const runtimeKey = runtimeErrorIdentityKey(error)
+      if (!text || (!runtimeKey && hasAssistantError(items, text))) continue
       const anchorIndex = findAnchorUserIndex(items, error)
       const assistantTurn = anchorIndex >= 0
         ? findAssistantAfterAnchor(items, anchorIndex)
         : findAssistantTurnForEphemeralError(items, error.timestamp)
+      if (assistantTurn?.messages.some(block => block.type === 'error' && block.content === text)) {
+        associateRuntimeError(assistantTurn, error)
+        continue
+      }
+      if (
+        runtimeKey
+        && assistantTurn
+        && runtimeAssistantErrorIdentity.get(toRaw(assistantTurn)) === runtimeKey
+        && assistantTurn.messages.some(block => block.type === 'error' && block.content === text)
+      ) continue
+      if (error.standalone) {
+        const assistantIndex = assistantTurn ? items.indexOf(assistantTurn) : -1
+        const insertAt = assistantIndex >= 0 ? assistantIndex + 1 : anchorIndex >= 0 ? anchorIndex + 1 : items.length
+        items.splice(insertAt, 0, createEphemeralErrorTurn(sid, { ...error, content: text }))
+        continue
+      }
       if (assistantTurn) {
         assistantTurn.messages.push({ id: nextAssistantMessageId(assistantTurn), type: 'error', content: text })
+        associateRuntimeError(assistantTurn, error)
       } else {
         const insertAt = anchorIndex >= 0 ? anchorIndex + 1 : items.length
         const displayTimestamp = timestampAfter(items[anchorIndex]?.timestamp) ?? error.timestamp
@@ -456,19 +526,35 @@ export function createTranscriptController({
     loadingOlder.value = false
   }
 
-  async function refreshCurrentSession(targetBotId?: string, targetSessionId?: string) {
+  async function refreshCurrentSession(
+    targetBotId?: string,
+    targetSessionId?: string,
+    options: { afterCurrent?: boolean } = {},
+  ) {
     const bid = (targetBotId ?? currentBotId.value ?? '').trim()
     const sid = (targetSessionId ?? sessionId.value ?? '').trim()
     if (!bid || !sid) return
     const key = `${bid}:${sid}`
     const generation = historyGeneration
-
-    if (refreshPromise) {
-      if (refreshPromise.key === key) {
-        await refreshPromise.promise
-        return
+    let waitedForCurrentKey = false
+    for (;;) {
+      const currentRefresh = refreshPromise
+      if (!currentRefresh) break
+      try {
+        await currentRefresh.promise
+      } catch (error) {
+        if (
+          currentRefresh.key !== key
+          || !options.afterCurrent
+          || waitedForCurrentKey
+        ) {
+          throw error
+        }
       }
-      await refreshPromise.promise
+      if (!isCurrentHistoryContext(bid, sid, generation)) return
+      if (currentRefresh.key !== key) continue
+      if (!options.afterCurrent || waitedForCurrentKey) return
+      waitedForCurrentKey = true
     }
 
     const promise = (async () => {
@@ -486,7 +572,7 @@ export function createTranscriptController({
         // page is not proof that history ended. Only pagination can settle it.
         hasMoreOlder.value = true
       }
-      onRefreshApplied(sid, messages[messages.length - 1]?.timestamp)
+      onRefreshApplied(bid, sid, messages[messages.length - 1]?.timestamp)
     })().finally(() => {
       if (refreshPromise?.promise === promise) refreshPromise = null
     })
@@ -676,9 +762,9 @@ export function createTranscriptController({
     if (replacedTurns.length > 0) appendToView(...replacedTurns)
   }
 
-  function createOptimisticAssistantTurn(): ChatAssistantTurn {
+  function createOptimisticAssistantTurn(id = nextId()): ChatAssistantTurn {
     return {
-      id: nextId(),
+      id,
       role: 'assistant',
       messages: [],
       timestamp: new Date().toISOString(),
@@ -687,7 +773,7 @@ export function createTranscriptController({
     }
   }
 
-  function createOptimisticUserTurn(text: string, attachments?: ChatAttachment[]): ChatUserTurn {
+  function createOptimisticUserTurn(text: string, attachments?: ChatAttachment[], externalMessageId?: string): ChatUserTurn {
     return {
       id: nextId(),
       role: 'user',
@@ -699,6 +785,7 @@ export function createTranscriptController({
         mime: attachment.mime ?? '',
       })),
       timestamp: new Date().toISOString(),
+      externalMessageId: externalMessageId?.trim() || undefined,
       streaming: false,
       isSelf: true,
       __optimistic: true,
@@ -734,11 +821,24 @@ export function createTranscriptController({
       if (existing) {
         mergeToolCallBlock(existing, normalized)
         bumpFsChangedAtIfFsMutation(message)
-        return
+        return existing.id
       }
     }
     turn.messages = upsertById(turn.messages, normalized)
     bumpFsChangedAtIfFsMutation(message)
+    return normalized.id
+  }
+
+  function replaceAssistantUIMessageSnapshot(
+    turn: ChatAssistantTurn,
+    incoming: UIMessage[],
+    previousRuntimeMessageIds: ReadonlySet<number>,
+  ): Set<number> {
+    const incomingIds = new Set(incoming.map(message => upsertAssistantUIMessage(turn, message)))
+    turn.messages = turn.messages.filter(block =>
+      !previousRuntimeMessageIds.has(block.id) || incomingIds.has(block.id),
+    )
+    return incomingIds
   }
 
   function nextAssistantMessageId(turn: ChatAssistantTurn): number {
@@ -818,37 +918,88 @@ export function createTranscriptController({
     }
   }
 
-  function rememberAssistantError(errorMessage: string, targetSessionId: string, assistantTurn: ChatAssistantTurn) {
+  function rememberAssistantError(
+    errorMessage: string,
+    targetSessionId: string,
+    assistantTurn: ChatAssistantTurn,
+    standalone = false,
+    identity?: RuntimeAssistantErrorIdentity,
+  ) {
     const sid = targetSessionId.trim()
     const text = errorMessage.trim()
     if (!sid || !text) return
     const current = ephemeralAssistantErrors.get(sid) ?? []
-    if (current.some(item => item.content === text)) return
+    const runtimeKey = runtimeErrorIdentityKey(identity)
+    const existing = current.find((item) => {
+      const itemRuntimeKey = runtimeErrorIdentityKey(item)
+      return runtimeKey ? itemRuntimeKey === runtimeKey : !itemRuntimeKey && item.content === text
+    })
+    if (existing) {
+      associateRuntimeError(assistantTurn, existing)
+      return
+    }
     const anchorUser = findUserTurnBeforeAssistant(assistantTurn)
-    ephemeralAssistantErrors.set(sid, [...current, {
+    const externalMessageId = anchorUser?.externalMessageId?.trim() || undefined
+    const anchorIndex = anchorUser ? messages.indexOf(anchorUser) : -1
+    const externalMessageOrdinal = externalMessageId && anchorIndex >= 0
+      ? messages.slice(0, anchorIndex + 1).filter(turn =>
+          turn.role === 'user' && turn.externalMessageId === externalMessageId).length
+      : undefined
+    const error: EphemeralAssistantError = {
       content: text,
       timestamp: new Date().toISOString(),
       userText: anchorUser?.text.trim() || undefined,
-    }].slice(-5))
+      userId: anchorUser?.id.trim() || undefined,
+      userServerId: anchorUser?.serverId?.trim() || undefined,
+      externalMessageId,
+      externalMessageOrdinal,
+      standalone,
+      runtimeStreamId: identity?.streamId.trim() || undefined,
+      runtimeGeneration: identity?.generation.trim() || undefined,
+    }
+    ephemeralAssistantErrors.set(sid, [...current, error].slice(-5))
+    associateRuntimeError(assistantTurn, error)
   }
 
   // Stream errors are not persisted server-side. Keep a small session-scoped
   // replay set so a terminal REST refresh cannot make a visible failure vanish.
-  function appendAssistantError(assistantTurn: ChatAssistantTurn, targetSessionId: string, errorMessage: string) {
+  function appendAssistantError(
+    assistantTurn: ChatAssistantTurn,
+    targetSessionId: string,
+    errorMessage: string,
+    standalone = false,
+    identity?: RuntimeAssistantErrorIdentity,
+  ) {
     const text = errorMessage.trim()
     if (!text) return
-    rememberAssistantError(text, targetSessionId, assistantTurn)
+    rememberAssistantError(text, targetSessionId, assistantTurn, standalone, identity)
+    if (assistantTurn.messages.some(block => block.type === 'error' && block.content === text)) return
     assistantTurn.messages.push({ id: nextAssistantMessageId(assistantTurn), type: 'error', content: text })
   }
 
-  function finalizeStreamFailure(assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string, error: Error) {
+  function finalizeStreamFailure(
+    assistantTurn: ChatAssistantTurn,
+    botId: string,
+    targetSessionId: string,
+    error: Error,
+    identity?: RuntimeAssistantErrorIdentity,
+  ) {
     if (!hasVisibleAssistantBlocks(assistantTurn)) {
       removeTurnFromSession(botId, targetSessionId, assistantTurn)
       return
     }
     if (error.name === 'AbortError') return
     if (assistantTurn.messages.some(block => block.type === 'error')) return
-    appendAssistantError(assistantTurn, targetSessionId, error.message)
+    appendAssistantError(assistantTurn, targetSessionId, error.message, false, identity)
+  }
+
+  function assistantTurnForRuntimeError(targetSessionId: string, identity: RuntimeAssistantErrorIdentity): ChatAssistantTurn | null {
+    if ((sessionId.value ?? '').trim() !== targetSessionId.trim()) return null
+    const key = runtimeErrorIdentityKey(identity)
+    if (!key) return null
+    return messages.find((turn): turn is ChatAssistantTurn =>
+      turn.role === 'assistant' && runtimeAssistantErrorIdentity.get(toRaw(turn)) === key,
+    ) ?? null
   }
 
   function latestOptimisticUserText(): string {
@@ -874,7 +1025,11 @@ export function createTranscriptController({
   function latestVisibleTurn(role: ChatMessage['role']): ChatUserTurn | ChatAssistantTurn | null {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const turn = messages[index]
-      if (turn?.role === role && !turn.__optimistic) return turn as ChatUserTurn | ChatAssistantTurn
+      if (
+        turn?.role === role
+        && !turn.__optimistic
+        && (turn.role !== 'assistant' || !turn.__ephemeral)
+      ) return turn as ChatUserTurn | ChatAssistantTurn
     }
     return null
   }
@@ -951,6 +1106,7 @@ export function createTranscriptController({
     createOptimisticAssistantTurn,
     createOptimisticUserTurn,
     upsertAssistantUIMessage,
+    replaceAssistantUIMessageSnapshot,
     hasVisibleAssistantBlocks,
     finishAssistantTurn,
     snapshotToolApprovalStates,
@@ -959,7 +1115,9 @@ export function createTranscriptController({
     snapshotUserInputStates,
     assistantTurnForUserInput,
     restoreUserInputStates,
+    appendAssistantError,
     finalizeStreamFailure,
+    assistantTurnForRuntimeError,
     latestOptimisticUserText,
     hasTurn,
     findTurnByServerId,

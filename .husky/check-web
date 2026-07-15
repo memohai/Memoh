@@ -3,4 +3,7 @@
 export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 # echo "Check Web build..."
-pnpm exec lint-staged
+pnpm exec lint-staged || exit 1
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+sh "$SCRIPT_DIR/check-runtime-contract-fixtures"

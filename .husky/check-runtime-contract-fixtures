@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+
+if ! git diff --cached --name-only --diff-filter=ACMR \
+  | grep -Eq '^apps/web/src/store/__fixtures__/runtime-.*\.contract\.json$'; then
+  exit 0
+fi
+
+if command -v pnpm >/dev/null 2>&1; then
+  echo "Check runtime contract fixture consumers..."
+  pnpm test --run --testTimeout=15000 \
+    apps/web/src/composables/api/useChat.ws.test.ts \
+    apps/web/src/store/session-runtime-reducer.test.ts \
+    apps/web/src/store/chat-list.test.ts || exit 1
+fi

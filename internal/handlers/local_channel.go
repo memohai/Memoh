@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -207,7 +206,6 @@ func (h *LocalChannelHandler) Register(e *echo.Echo) {
 	prefix := fmt.Sprintf("/bots/:bot_id/%s", h.channelType.String())
 	group := e.Group(prefix)
 	group.GET("/stream", h.StreamMessages)
-	group.POST("/messages", h.PostMessage)
 	group.GET("/ws", h.HandleWebSocket)
 	e.GET("/bots/:bot_id/sessions/:session_id/runtime", h.GetSessionRuntime)
 	e.POST("/bots/:bot_id/quick-actions/execute", h.ExecuteQuickAction)
@@ -672,151 +670,6 @@ func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 
 func formatLocalStreamEvent(event channel.StreamEvent) ([]byte, error) {
 	return json.Marshal(event)
-}
-
-func jsonBodyHasKey(body []byte, key string) bool {
-	if len(bytes.TrimSpace(body)) == 0 || strings.TrimSpace(key) == "" {
-		return false
-	}
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(body, &obj); err != nil {
-		return false
-	}
-	_, ok := obj[key]
-	return ok
-}
-
-// LocalChannelMessageRequest is the request body for posting a local channel message.
-type LocalChannelMessageRequest struct {
-	Message           channel.Message `json:"message" validate:"required"`
-	ModelID           string          `json:"model_id,omitempty"`
-	ReasoningEffort   string          `json:"reasoning_effort,omitempty"`
-	WorkspaceTargetID string          `json:"workspace_target_id,omitempty"`
-}
-
-// PostMessage godoc
-// @Summary Send a message to a local channel
-// @Description Post a user message (with optional attachments) through the local channel pipeline.
-// @Tags local-channel
-// @Accept json
-// @Produce json
-// @Param bot_id path string true "Bot ID"
-// @Param payload body LocalChannelMessageRequest true "Message payload"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/web/messages [post].
-func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
-	channelIdentityID, err := h.requireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
-	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
-		return err
-	}
-	if err := h.ensureBotParticipant(c.Request().Context(), botID, channelIdentityID); err != nil {
-		return err
-	}
-	if h.channelManager == nil || h.channelStore == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "channel manager not configured")
-	}
-	body, readErr := io.ReadAll(c.Request().Body)
-	if readErr != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, readErr.Error())
-	}
-	c.Request().Body = io.NopCloser(bytes.NewReader(body))
-	if jsonBodyHasKey(body, "requested_skills") {
-		event := commandEvent("", "", "", "")
-		event.Type = "command_error"
-		event.Error = &CommandActionError{Code: slash.CodeUnsupportedLegacyEndpoint, Message: slashUserMessage(slash.CodeUnsupportedLegacyEndpoint)}
-		return c.JSON(http.StatusBadRequest, event)
-	}
-	var req LocalChannelMessageRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	if req.Message.IsEmpty() {
-		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
-	}
-	workspaceTargetID := strings.TrimSpace(req.WorkspaceTargetID)
-	if workspaceTargetID != "" {
-		perms, permissionErr := h.resolveCurrentUserPermissions(c.Request().Context(), channelIdentityID, botID)
-		if permissionErr != nil {
-			return permissionErr
-		}
-		if err := authorizeWorkspaceTargetSelection(perms, workspaceTargetID); err != nil {
-			return err
-		}
-		if h.resolver == nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "resolver not configured")
-		}
-		if err := h.resolver.ValidateWorkspaceTarget(c.Request().Context(), botID, workspaceTargetID); err != nil {
-			return echo.NewHTTPError(http.StatusConflict, err.Error())
-		}
-	}
-	if err := channel.RejectReservedSkillMetadata(req.Message); err != nil {
-		event := commandEvent("", "", "", "")
-		event.Type = "command_error"
-		event.Error = &CommandActionError{Code: slash.CodeReservedSkillMetadata, Message: slashUserMessage(slash.CodeReservedSkillMetadata)}
-		return c.JSON(http.StatusBadRequest, event)
-	}
-	if decision := h.classifyWebSlash(strings.TrimSpace(req.Message.PlainText()), len(req.Message.Attachments) > 0, slash.SurfaceWebWS); decision.Kind != slash.DecisionNormalChat {
-		event := commandEvent("", "", "", "")
-		event.Type = "command_error"
-		event.Error = &CommandActionError{Code: slash.CodeUnsupportedLegacyEndpoint, Message: slashUserMessage(slash.CodeUnsupportedLegacyEndpoint)}
-		return c.JSON(http.StatusOK, event)
-	}
-	cfg, err := h.channelStore.ResolveEffectiveConfig(c.Request().Context(), botID, h.channelType)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	routeKey := botID
-	msg := channel.InboundMessage{
-		Channel:     h.channelType,
-		Message:     req.Message,
-		BotID:       botID,
-		ReplyTarget: routeKey,
-		RouteKey:    routeKey,
-		Sender: channel.Identity{
-			SubjectID: channelIdentityID,
-			Attributes: map[string]string{
-				"user_id": channelIdentityID,
-			},
-		},
-		Conversation: channel.Conversation{
-			ID:   routeKey,
-			Type: channel.ConversationTypePrivate,
-		},
-		ReceivedAt: time.Now().UTC(),
-		Source:     "local",
-	}
-	if mid := strings.TrimSpace(req.ModelID); mid != "" {
-		if msg.Metadata == nil {
-			msg.Metadata = make(map[string]any)
-		}
-		msg.Metadata["model_id"] = mid
-	}
-	if re := strings.TrimSpace(req.ReasoningEffort); re != "" {
-		if msg.Metadata == nil {
-			msg.Metadata = make(map[string]any)
-		}
-		msg.Metadata["reasoning_effort"] = re
-	}
-	if workspaceTargetID != "" {
-		if msg.Metadata == nil {
-			msg.Metadata = make(map[string]any)
-		}
-		msg.Metadata["workspace_target_id"] = workspaceTargetID
-	}
-	if err := h.channelManager.HandleInbound(c.Request().Context(), cfg, msg); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
 
 var wsUpgrader = websocket.Upgrader{

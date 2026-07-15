@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "scenario": "gap_checkpoint_recovery",
+  "runtime_snapshot": {
+    "bot_id": "bot-1",
+    "epoch": "epoch-runtime-contract-v1",
+    "seq": 2,
+    "session_id": "session-1",
+    "snapshot": {
+      "bot_id": "bot-1",
+      "current_run_view": {
+        "canonical_ready": false,
+        "generation": "generation-stream-recovery",
+        "messages": [],
+        "request_user_turn": {
+          "attachments": [
+            {
+              "content_hash": "sha256:notes",
+              "name": "notes.txt",
+              "type": "file"
+            }
+          ],
+          "external_message_id": "stream-recovery",
+          "platform": "local",
+          "role": "user",
+          "sender_user_id": "user-1",
+          "text": "Inspect the workspace",
+          "timestamp": "2026-07-10T00:00:00Z"
+        },
+        "started_at": "2026-07-10T00:00:00Z",
+        "status": "running",
+        "stream_id": "stream-recovery",
+        "updated_at": "2026-07-10T00:00:10Z"
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "queue": [],
+      "seq": 2,
+      "session_id": "session-1",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    "type": "runtime_snapshot"
+  },
+  "gap_delta": {
+    "bot_id": "bot-1",
+    "delta": {
+      "message_appends": [
+        {
+          "content": "checkpoint",
+          "id": 0,
+          "type": "text"
+        }
+      ]
+    },
+    "epoch": "epoch-runtime-contract-v1",
+    "seq": 4,
+    "session_id": "session-1",
+    "stream_id": "stream-recovery",
+    "type": "runtime_delta",
+    "updated_at": "2026-07-10T00:00:10Z"
+  },
+  "delayed_delta": {
+    "bot_id": "bot-1",
+    "delta": {
+      "message_appends": [
+        {
+          "content": "missing ",
+          "id": 0,
+          "type": "text"
+        }
+      ]
+    },
+    "epoch": "epoch-runtime-contract-v1",
+    "seq": 3,
+    "session_id": "session-1",
+    "stream_id": "stream-recovery",
+    "type": "runtime_delta",
+    "updated_at": "2026-07-10T00:00:10Z"
+  },
+  "runtime_checkpoint": {
+    "bot_id": "bot-1",
+    "epoch": "epoch-runtime-contract-v1",
+    "seq": 4,
+    "session_id": "session-1",
+    "snapshot": {
+      "bot_id": "bot-1",
+      "current_run_view": {
+        "canonical_ready": false,
+        "generation": "generation-stream-recovery",
+        "messages": [
+          {
+            "content": "missing checkpoint",
+            "id": 0,
+            "type": "text"
+          }
+        ],
+        "request_user_turn": {
+          "attachments": [
+            {
+              "content_hash": "sha256:notes",
+              "name": "notes.txt",
+              "type": "file"
+            }
+          ],
+          "external_message_id": "stream-recovery",
+          "platform": "local",
+          "role": "user",
+          "sender_user_id": "user-1",
+          "text": "Inspect the workspace",
+          "timestamp": "2026-07-10T00:00:00Z"
+        },
+        "started_at": "2026-07-10T00:00:00Z",
+        "status": "running",
+        "stream_id": "stream-recovery",
+        "updated_at": "2026-07-10T00:00:10Z"
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "queue": [],
+      "seq": 4,
+      "session_id": "session-1",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    "type": "runtime_snapshot"
+  },
+  "post_recovery_delta": {
+    "bot_id": "bot-1",
+    "delta": {
+      "message_appends": [
+        {
+          "content": " continued",
+          "id": 0,
+          "type": "text"
+        }
+      ]
+    },
+    "epoch": "epoch-runtime-contract-v1",
+    "seq": 5,
+    "session_id": "session-1",
+    "stream_id": "stream-recovery",
+    "type": "runtime_delta",
+    "updated_at": "2026-07-10T00:00:10Z"
+  }
+}

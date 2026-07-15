@@ -1,0 +1,213 @@
+{
+  "version": 1,
+  "scenario": "generation_reuse",
+  "runtime_snapshot": {
+    "bot_id": "bot-1",
+    "epoch": "epoch-runtime-contract-v1",
+    "seq": 7,
+    "session_id": "session-1",
+    "snapshot": {
+      "bot_id": "bot-1",
+      "current_run_view": {
+        "canonical_ready": false,
+        "generation": "generation-b",
+        "messages": [
+          {
+            "content": "new partial",
+            "id": 0,
+            "type": "text"
+          }
+        ],
+        "request_user_turn": {
+          "external_message_id": "stream-generation-reuse",
+          "id": "user-generation-b",
+          "platform": "local",
+          "role": "user",
+          "sender_user_id": "user-1",
+          "text": "new prompt",
+          "timestamp": "2026-07-10T00:01:00Z"
+        },
+        "started_at": "2026-07-10T00:00:00Z",
+        "status": "running",
+        "stream_id": "stream-generation-reuse",
+        "updated_at": "2026-07-10T00:00:10Z"
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "queue": [],
+      "seq": 7,
+      "session_id": "session-1",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    "type": "runtime_snapshot"
+  },
+  "runtime_stream": [
+    {
+      "bot_id": "bot-1",
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 0,
+      "session_id": "session-1",
+      "snapshot": {
+        "bot_id": "bot-1",
+        "epoch": "epoch-runtime-contract-v1",
+        "queue": [],
+        "seq": 0,
+        "session_id": "session-1",
+        "updated_at": "2026-07-10T00:00:10Z"
+      },
+      "type": "runtime_snapshot"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "current_run_view": {
+          "canonical_ready": false,
+          "generation": "generation-a",
+          "messages": [],
+          "started_at": "2026-07-10T00:00:00Z",
+          "status": "admitting",
+          "stream_id": "stream-generation-reuse",
+          "updated_at": "2026-07-10T00:00:10Z"
+        }
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 1,
+      "session_id": "session-1",
+      "stream_id": "stream-generation-reuse",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "current_run_view": {
+          "canonical_ready": false,
+          "generation": "generation-a",
+          "messages": [],
+          "request_user_turn": {
+            "external_message_id": "stream-generation-reuse",
+            "id": "user-generation-a",
+            "platform": "local",
+            "role": "user",
+            "sender_user_id": "user-1",
+            "text": "old prompt",
+            "timestamp": "2026-07-10T00:00:00Z"
+          },
+          "started_at": "2026-07-10T00:00:00Z",
+          "status": "running",
+          "stream_id": "stream-generation-reuse",
+          "updated_at": "2026-07-10T00:00:10Z"
+        }
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 2,
+      "session_id": "session-1",
+      "stream_id": "stream-generation-reuse",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "message_appends": [
+          {
+            "content": "old answer",
+            "id": 0,
+            "type": "text"
+          }
+        ]
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 3,
+      "session_id": "session-1",
+      "stream_id": "stream-generation-reuse",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "run": {
+          "canonical_ready": false,
+          "error": "",
+          "history_committed": false,
+          "status": "completed",
+          "stream_id": "stream-generation-reuse",
+          "updated_at": "2026-07-10T00:00:10Z"
+        }
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 4,
+      "session_id": "session-1",
+      "stream_id": "stream-generation-reuse",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "current_run_view": {
+          "canonical_ready": false,
+          "generation": "generation-b",
+          "messages": [],
+          "started_at": "2026-07-10T00:00:00Z",
+          "status": "admitting",
+          "stream_id": "stream-generation-reuse",
+          "updated_at": "2026-07-10T00:00:10Z"
+        }
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 5,
+      "session_id": "session-1",
+      "stream_id": "stream-generation-reuse",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "current_run_view": {
+          "canonical_ready": false,
+          "generation": "generation-b",
+          "messages": [],
+          "request_user_turn": {
+            "external_message_id": "stream-generation-reuse",
+            "id": "user-generation-b",
+            "platform": "local",
+            "role": "user",
+            "sender_user_id": "user-1",
+            "text": "new prompt",
+            "timestamp": "2026-07-10T00:01:00Z"
+          },
+          "started_at": "2026-07-10T00:00:00Z",
+          "status": "running",
+          "stream_id": "stream-generation-reuse",
+          "updated_at": "2026-07-10T00:00:10Z"
+        }
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 6,
+      "session_id": "session-1",
+      "stream_id": "stream-generation-reuse",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    },
+    {
+      "bot_id": "bot-1",
+      "delta": {
+        "message_appends": [
+          {
+            "content": "new partial",
+            "id": 0,
+            "type": "text"
+          }
+        ]
+      },
+      "epoch": "epoch-runtime-contract-v1",
+      "seq": 7,
+      "session_id": "session-1",
+      "stream_id": "stream-generation-reuse",
+      "type": "runtime_delta",
+      "updated_at": "2026-07-10T00:00:10Z"
+    }
+  ]
+}

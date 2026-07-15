@@ -582,6 +582,7 @@
     "attachFiles": "Attach files",
     "send": "Send",
     "sendFailed": "Message failed to send",
+    "responseAborted": "Response stopped",
     "forkFailed": "Failed to fork session",
     "forkedFrom": "Forked from {session}",
     "forkSourceUnavailable": "The original session no longer exists or was deleted.",

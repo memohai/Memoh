@@ -133,7 +133,7 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     transcript.setSnapshotHook((targetSessionId, turns) => {
       deps.onSnapshot?.(view, targetSessionId, turns)
     })
-    transcript.setRefreshAppliedHook((targetSessionId, latestTimestamp) => {
+    transcript.setRefreshAppliedHook((_botId, targetSessionId, latestTimestamp) => {
       view.initialized = true
       deps.onRefreshApplied?.(view, targetSessionId, latestTimestamp)
     })

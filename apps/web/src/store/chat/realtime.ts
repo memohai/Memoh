@@ -22,6 +22,8 @@ interface SessionMessagesConnection {
 
 export interface ChatRealtimeCallbacks {
   onWebSocketEvent: (botId: string, event: UIStreamEvent) => void
+  onWebSocketOpen?: (botId: string) => void
+  onWebSocketClose?: (botId: string) => void
   prepareSessionMessages: (botId: string, sessionId: string) => Promise<void>
   onSessionMessageEvent: (botId: string, sessionId: string, event: SessionMessageStreamEvent) => void
   onBotSessionsActivityEvent: (botId: string, event: BotSessionActivityEvent) => void
@@ -74,6 +76,16 @@ export function createChatRealtimeController(
         if (generation !== webSocketGeneration || activeWebSocketBotId !== bid) return
         callbacks.onWebSocketEvent(bid, event)
       })
+      activeWebSocket.onOpen = () => {
+        if (generation === webSocketGeneration && activeWebSocketBotId === bid) {
+          callbacks.onWebSocketOpen?.(bid)
+        }
+      }
+      activeWebSocket.onClose = () => {
+        if (generation === webSocketGeneration && activeWebSocketBotId === bid) {
+          callbacks.onWebSocketClose?.(bid)
+        }
+      }
     } catch (error) {
       activeWebSocketBotId = ''
       throw error
@@ -93,12 +105,14 @@ export function createChatRealtimeController(
     return true
   }
 
-  function abortWebSocketStream(streamId: string, botId?: string): boolean {
+  function abortWebSocketStream(streamId: string, botId?: string, sessionId?: string, generation?: string): boolean {
     const id = streamId.trim()
     const bid = botId?.trim()
-    if (!id || !activeWebSocket?.connected) return false
+    const sid = sessionId?.trim()
+    const runGeneration = generation?.trim()
+    if (!id || !sid || !activeWebSocket?.connected) return false
     if (bid && bid !== activeWebSocketBotId) return false
-    activeWebSocket.abort(id)
+    activeWebSocket.abort(id, sid, runGeneration)
     return true
   }
 

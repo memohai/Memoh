@@ -14,13 +14,13 @@ function assistantTurn(id: string): ChatAssistantTurn {
   }
 }
 
-function makeRegistry(activeSessionId: string | null = 'session-a') {
+function makeRegistry(activeSessionId: string | null = 'session-a', onTracked?: Parameters<typeof createAssistantStreamRegistry>[0]['onTracked']) {
   const currentBotId = ref<string | null>('bot-1')
   const sessionId = ref<string | null>(activeSessionId)
   const finishAssistantTurn = vi.fn((turn: ChatAssistantTurn) => {
     turn.streaming = false
   })
-  const registry = createAssistantStreamRegistry({ currentBotId, sessionId, finishAssistantTurn })
+  const registry = createAssistantStreamRegistry({ currentBotId, sessionId, finishAssistantTurn, onTracked })
   return { registry, currentBotId, sessionId, finishAssistantTurn }
 }
 
@@ -41,6 +41,21 @@ function track(
 }
 
 describe('assistant stream registry', () => {
+  it('notifies synchronously after a stream is registered', async () => {
+    const onTracked = vi.fn()
+    const { registry } = makeRegistry('session-a', onTracked)
+    const entry = track(registry, 'stream-tracked')
+
+    expect(onTracked).toHaveBeenCalledOnce()
+    expect(onTracked).toHaveBeenCalledWith(expect.objectContaining({
+      streamId: 'stream-tracked', botId: 'bot-1', sessionId: 'session-a',
+    }))
+    expect(registry.getAssistantStream('stream-tracked')).toBeDefined()
+
+    registry.resolveAssistantStream('stream-tracked')
+    await entry.completion
+  })
+
   it('registers synchronously and resolves only after removing the active stream', async () => {
     const { registry, finishAssistantTurn } = makeRegistry()
     const { turn, completion } = track(registry, 'stream-1')
@@ -256,5 +271,37 @@ describe('assistant stream registry', () => {
     })
     expect(beforeReject).toEqual(['stream-a1', 'stream-b1', 'stream-a2'])
     expect(await Promise.all(completions)).toEqual([failure, failure, failure])
+  })
+
+  it('isolates identical stream ids across sessions', async () => {
+    const { registry } = makeRegistry()
+    const first = track(registry, 'shared-stream', 'session-a')
+    const second = track(registry, 'shared-stream', 'session-b')
+
+    expect(registry.getAssistantStream('shared-stream')).toBeUndefined()
+    expect(toRaw(registry.getAssistantStream('shared-stream', 'bot-1', 'session-a')!.assistantTurn)).toBe(first.turn)
+    expect(toRaw(registry.getAssistantStream('shared-stream', 'bot-1', 'session-b')!.assistantTurn)).toBe(second.turn)
+
+    registry.resolveAssistantStream('shared-stream', 'bot-1', 'session-a')
+    await first.completion
+    expect(registry.isTerminalStream('shared-stream', undefined, 'bot-1', 'session-a')).toBe(true)
+    expect(registry.getAssistantStream('shared-stream', 'bot-1', 'session-b')).toBeDefined()
+
+    registry.resolveAssistantStream('shared-stream', 'bot-1', 'session-b')
+    await second.completion
+  })
+
+  it('rejects an unbound stream instead of overwriting a bound identity during rekey', async () => {
+    const { registry } = makeRegistry()
+    const bound = track(registry, 'shared-stream', 'session-created')
+    const unbound = track(registry, 'shared-stream', '')
+
+    expect(registry.recordCreatedSession('shared-stream', 'session-created', 'bot-1')).toBe('')
+    await expect(unbound.completion).rejects.toThrow('stream_id shared-stream is already active in session session-created')
+    expect(registry.getAssistantStream('shared-stream', 'bot-1', 'session-created')?.assistantTurn.id)
+      .toBe(bound.turn.id)
+
+    registry.resolveAssistantStream('shared-stream', 'bot-1', 'session-created')
+    await bound.completion
   })
 })

@@ -642,7 +642,8 @@ const canEditUserMessage = computed(() =>
 const canForkAssistantMessage = computed(() =>
   props.message.role === 'assistant'
   && !props.message.streaming
-  && props.message.__optimistic !== true,
+  && props.message.__optimistic !== true
+  && props.message.__ephemeral !== true,
 )
 
 const canSubmitEdit = computed(() =>

@@ -1709,13 +1709,6 @@ export type HandlersListSnapshotsResponse = {
     snapshotter?: string;
 };
 
-export type HandlersLocalChannelMessageRequest = {
-    message: ChannelMessage;
-    model_id?: string;
-    reasoning_effort?: string;
-    workspace_target_id?: string;
-};
-
 export type HandlersLoginRequest = {
     password?: string;
     username?: string;
@@ -9814,49 +9807,6 @@ export type PutBotsByBotIdUserAccessByGrantIdResponses = {
 };
 
 export type PutBotsByBotIdUserAccessByGrantIdResponse = PutBotsByBotIdUserAccessByGrantIdResponses[keyof PutBotsByBotIdUserAccessByGrantIdResponses];
-
-export type PostBotsByBotIdWebMessagesData = {
-    /**
-     * Message payload
-     */
-    body: HandlersLocalChannelMessageRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/web/messages';
-};
-
-export type PostBotsByBotIdWebMessagesErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostBotsByBotIdWebMessagesError = PostBotsByBotIdWebMessagesErrors[keyof PostBotsByBotIdWebMessagesErrors];
-
-export type PostBotsByBotIdWebMessagesResponses = {
-    /**
-     * OK
-     */
-    200: {
-        [key: string]: string;
-    };
-};
-
-export type PostBotsByBotIdWebMessagesResponse = PostBotsByBotIdWebMessagesResponses[keyof PostBotsByBotIdWebMessagesResponses];
 
 export type GetBotsByBotIdWebStreamData = {
     body?: never;

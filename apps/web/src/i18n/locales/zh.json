@@ -582,6 +582,7 @@
     "attachFiles": "上传文件",
     "send": "发送",
     "sendFailed": "消息发送失败",
+    "responseAborted": "回复已停止",
     "forkFailed": "分叉会话失败",
     "forkedFrom": "分叉自 {session}",
     "forkSourceUnavailable": "原始会话不存在或已被删除。",

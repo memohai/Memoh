@@ -1,4 +1,16 @@
-import type { BotsBot } from '@memohai/sdk'
+import type {
+  BotsBot,
+} from '@memohai/sdk'
+import type {
+  SessionRuntimeDelta,
+  SessionRuntimeDeltaEvent,
+  SessionRuntimeDroppedEvent,
+  SessionRuntimeMessageAppend,
+  SessionRuntimeProgressAppend,
+  SessionRuntimeRunPatch,
+  SessionRuntimeSnapshotEvent,
+  SessionRuntimeStateEvent,
+} from '@memohai/sdk/session-runtime'
 
 export type Bot = BotsBot
 
@@ -391,6 +403,15 @@ export interface UIStreamUserMessageEvent {
   data: UIUserTurn
 }
 
+export type UIRuntimeSnapshotEvent = SessionRuntimeSnapshotEvent
+export type UIRuntimeDeltaEvent = SessionRuntimeDeltaEvent
+export type UIRuntimeDelta = SessionRuntimeDelta
+export type UIRuntimeRunPatch = SessionRuntimeRunPatch
+export type UIRuntimeMessageAppend = SessionRuntimeMessageAppend
+export type UIRuntimeProgressAppend = SessionRuntimeProgressAppend
+export type UIRuntimeDroppedEvent = SessionRuntimeDroppedEvent
+export type UIRuntimeStateEvent = SessionRuntimeStateEvent
+
 export type UIStreamEvent =
   | UIStreamStartEvent
   | UIStreamMessageEvent
@@ -398,6 +419,7 @@ export type UIStreamEvent =
   | UIStreamErrorEvent
   | UIStreamSessionCreatedEvent
   | UIStreamUserMessageEvent
+  | UIRuntimeStateEvent
   | CommandEventResponse
 
 export type UIStreamEventHandler = (event: UIStreamEvent) => void
