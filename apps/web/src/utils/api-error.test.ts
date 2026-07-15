@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { resolveApiErrorMessage } from '@/utils/api-error'
+import {
+  apiErrorStatus,
+  isApiErrorCode,
+  parseMemohError,
+  resolveApiErrorMessage,
+} from '@/utils/api-error'
 
 describe('resolveApiErrorMessage', () => {
   let locale = 'en'
@@ -77,5 +82,60 @@ describe('resolveApiErrorMessage', () => {
     }, 'fallback')
 
     expect(message).toBe(expected)
+  })
+
+  it.each([
+    ['en', 'This name is already taken.'],
+    ['zh', '该名称已被占用。'],
+    ['ja', 'この名前はすでに使用されています。'],
+  ])('derives the localized message from the stable code for %s', (language, expected) => {
+    locale = language
+
+    const error = {
+      code: 'bot.name_taken',
+      args: { field: 'name' },
+      detail: 'This name is already taken.',
+      request_id: 'req-1',
+      status: 409,
+    }
+
+    expect(resolveApiErrorMessage(error, 'fallback')).toBe(expected)
+    expect(isApiErrorCode(error, 'bot.name_taken')).toBe(true)
+    expect(parseMemohError(error)).toEqual({
+      code: 'bot.name_taken',
+      args: { field: 'name' },
+      message: 'This name is already taken.',
+      requestId: 'req-1',
+      status: 409,
+    })
+  })
+
+  it.each([
+    ['en', 'The workspace could not be reached.'],
+    ['zh', '暂时无法连接工作区，请稍后重试。'],
+    ['ja', 'Workspace に接続できません。しばらくしてからもう一度お試しください。'],
+  ])('localizes workspace.unreachable for %s', (language, expected) => {
+    locale = language
+
+    expect(resolveApiErrorMessage({
+      code: 'workspace.unreachable',
+      args: {},
+      detail: 'The workspace could not be reached.',
+    }, 'fallback')).toBe(expected)
+  })
+
+  it('keeps unknown codes as open strings and uses their safe fallback', () => {
+    const error = {
+      code: 'future.new_condition',
+      args: {},
+      detail: 'A future error occurred.',
+    }
+
+    expect(parseMemohError(error)?.code).toBe('future.new_condition')
+    expect(resolveApiErrorMessage(error, 'fallback')).toBe('A future error occurred.')
+  })
+
+  it('reads legacy HTTP status without parsing a message', () => {
+    expect(apiErrorStatus({ response: { status: 409 }, message: 'legacy' })).toBe(409)
   })
 })

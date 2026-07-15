@@ -92,6 +92,15 @@
     "actionRequired": "Action Required",
     "preview": "Preview"
   },
+  "errors": {
+    "bot": {
+      "name_taken": "This name is already taken."
+    },
+    "workspace": {
+      "unreachable": "The workspace could not be reached.",
+      "display_prepare_failed": "Display preparation failed."
+    }
+  },
   "auth": {
     "welcome": "Welcome Back",
     "pageTitle": "Sign in",

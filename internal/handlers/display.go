@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -13,7 +14,9 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/apperror"
 	displaypkg "github.com/memohai/memoh/internal/display"
+	"github.com/memohai/memoh/internal/httpx"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 	scriptassets "github.com/memohai/memoh/scripts"
@@ -224,13 +227,33 @@ const (
 var displayPrepareMainCommand = scriptassets.DisplayPrepare
 
 type displayPrepareStreamEvent struct {
-	Type    string            `json:"type"`
-	Step    string            `json:"step,omitempty"`
-	Code    string            `json:"code,omitempty"`
-	I18nKey string            `json:"i18n_key,omitempty"`
-	Args    map[string]string `json:"args,omitempty"`
-	Message string            `json:"message,omitempty"`
-	Percent int               `json:"percent,omitempty"`
+	Type      string            `json:"type"`
+	Step      string            `json:"step,omitempty"`
+	Code      string            `json:"code,omitempty"`
+	I18nKey   string            `json:"i18n_key,omitempty"`
+	Args      map[string]string `json:"args,omitempty"`
+	Detail    string            `json:"detail,omitempty"`
+	Message   string            `json:"message,omitempty"`
+	RequestID string            `json:"request_id,omitempty"`
+	Percent   int               `json:"percent,omitempty"`
+}
+
+func newDisplayPrepareAppError(step string, err error, requestID string) displayPrepareStreamEvent {
+	public, ok := apperror.PublicFrom(err, requestID)
+	if !ok {
+		return displayPrepareStreamEvent{
+			Type: "error", Step: step, Message: "Display preparation failed.",
+		}
+	}
+	return displayPrepareStreamEvent{
+		Type:      "error",
+		Step:      step,
+		Code:      string(public.Code),
+		Args:      public.Args,
+		Detail:    public.Detail,
+		Message:   public.Detail,
+		RequestID: public.RequestID,
+	}
 }
 
 // PrepareDisplay godoc
@@ -263,9 +286,25 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 	}
 	sendError := func(step, code, i18nKey, message string) {
 		send(displayPrepareStreamEvent{
-			Type: "error", Step: step, Code: code, I18nKey: i18nKey,
-			Args: map[string]string{}, Message: message,
+			Type:      "error",
+			Step:      step,
+			Code:      code,
+			I18nKey:   i18nKey,
+			Args:      map[string]string{},
+			Message:   message,
+			RequestID: httpx.RequestID(c),
 		})
+	}
+	streamRequestID := httpx.RequestID(c)
+	sendAppError := func(step string, code apperror.Code, cause error) {
+		if cause != nil {
+			h.logger.Error("display preparation failed",
+				slog.String("code", string(code)),
+				slog.String("request_id", streamRequestID),
+				slog.Any("error", cause),
+			)
+		}
+		send(newDisplayPrepareAppError(step, apperror.Wrap(code, cause, nil), streamRequestID))
 	}
 
 	ctx := c.Request().Context()
@@ -280,7 +319,10 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 
 	client, err := h.manager.NativeMCPClient(ctx, botID)
 	if err != nil || client == nil {
-		sendError("checking", "workspace_not_reachable", "chat.display.unavailable.container", "workspace is not reachable")
+		if err == nil {
+			err = errors.New("workspace bridge client is unavailable")
+		}
+		sendAppError("checking", apperror.CodeWorkspaceUnreachable, err)
 		return nil
 	}
 
@@ -293,7 +335,7 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 
 	stream, err := client.ExecStream(ctx, displayPrepareCommand(), "/", 1200)
 	if err != nil {
-		sendError("checking", "workspace_display_prepare_failed", "chat.display.prepare.failed", "start display preparation failed: "+err.Error())
+		sendAppError("checking", apperror.CodeWorkspaceUnreachable, err)
 		return nil
 	}
 	defer func() { _ = stream.Close() }()
@@ -309,7 +351,9 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 			break
 		}
 		if recvErr != nil {
-			sendError(lastStep, "workspace_display_prepare_failed", "chat.display.prepare.failed", "display preparation stream failed: "+recvErr.Error())
+			// The bridge was reachable and preparation already started, so a
+			// broken stream is a prepare failure, not "workspace unreachable".
+			sendAppError(lastStep, apperror.CodeWorkspaceDisplayPrepareFailed, recvErr)
 			return nil
 		}
 		switch msg.GetStream() {
@@ -348,11 +392,22 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 		appendLimitedLine(&stderrText, line)
 	}
 	if exitCode != 0 && !completed {
-		message := strings.TrimSpace(stderrText.String())
-		if message == "" {
-			message = "display preparation failed"
+		diagnostic := strings.TrimSpace(stderrText.String())
+		if diagnostic == "" {
+			diagnostic = "no stderr output"
 		}
-		sendError(lastStep, "workspace_display_prepare_failed", "chat.display.prepare.failed", message)
+		// A non-zero exit without a `complete` marker means the prepare script
+		// itself failed (unsupported base image, package install, browser
+		// launch, network). Route it through the shared app-error envelope so
+		// the SSE `error` event carries the stable
+		// `workspace.display_prepare_failed` code — identical to the mid-stream
+		// recvErr path above — instead of the legacy underscore string that the
+		// frontend's parseMemohError/isApiErrorCode branches can't match.
+		// sendAppError logs the private cause (exit code + stderr) with the
+		// request id, and apperror.PublicFrom renders only the catalog Detail,
+		// so the diagnostic never leaks into the user-facing response.
+		cause := fmt.Errorf("display preparation exited with status %d: %s", exitCode, diagnostic)
+		sendAppError(lastStep, apperror.CodeWorkspaceDisplayPrepareFailed, cause)
 		return nil
 	}
 	if !completed {

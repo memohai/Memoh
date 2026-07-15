@@ -628,7 +628,7 @@ async function handleSubmit() {
 function finishLocalCreate() {
   if (store.status === 'error') {
     const message = store.setupError ?? ''
-    if (message.toLowerCase().includes('already taken')) {
+    if (store.errorCode === 'bot.name_taken') {
       nameStatus.value = 'taken'
       toast.error(t('bots.nameStatus.taken'))
     } else {

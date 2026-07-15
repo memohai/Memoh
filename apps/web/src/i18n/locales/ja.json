@@ -89,6 +89,15 @@
     "show": "表示",
     "saveChanges": "変更を保存"
   },
+  "errors": {
+    "bot": {
+      "name_taken": "この名前はすでに使用されています。"
+    },
+    "workspace": {
+      "unreachable": "Workspace に接続できません。しばらくしてからもう一度お試しください。",
+      "display_prepare_failed": "ディスプレイの準備に失敗しました。しばらくしてからもう一度お試しください。"
+    }
+  },
   "auth": {
     "welcome": "おかえり",
     "pageTitle": "サインイン",

@@ -22,11 +22,13 @@ describe('useBotCreateStream', () => {
     })
     const failed = reduceBotCreateProgressEvent(created, {
       type: 'error',
+      code: 'workspace.unreachable',
       message: 'container setup failed',
     })
 
     expect(failed.bot).toEqual(bot)
     expect(failed.setupError).toBe('container setup failed')
+    expect(failed.errorCode).toBe('workspace.unreachable')
     expect(failed.progress).toEqual({
       phase: 'error',
       error: 'container setup failed',
@@ -114,5 +116,32 @@ describe('useBotCreateStream', () => {
     }
 
     expect(events).toEqual([{ type: 'ready', bot }])
+  })
+
+  it('preserves a structured HTTP problem when the SSE request is rejected', async () => {
+    const problem = {
+      code: 'bot.name_taken',
+      args: { field: 'name' },
+      detail: 'This name is already taken.',
+      status: 409,
+    }
+
+    vi.spyOn(client.sse, 'post').mockImplementation(async (options: Parameters<typeof client.sse.post>[0]) => {
+      expect(options.fetch).toBeTypeOf('function')
+      options.onSseError?.(problem)
+      return {
+        stream: (async function* (): AsyncGenerator<BotCreateStreamEvent, void, unknown> {})(),
+      }
+    })
+
+    const result = await postBotsStream({
+      body: { name: 'stream-bot', display_name: 'Stream Bot' },
+    })
+
+    await expect((async () => {
+      for await (const _event of result.stream) {
+        // The rejected request has no SSE events.
+      }
+    })()).rejects.toMatchObject(problem)
   })
 })
