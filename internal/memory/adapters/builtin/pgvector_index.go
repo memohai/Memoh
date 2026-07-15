@@ -559,9 +559,6 @@ func (r *pgvectorIndex) Health(ctx context.Context) error {
 	if err := r.ensureEmbeddingEnabled(ctx); err != nil {
 		return err
 	}
-	if err := r.ensureStore(ctx); err != nil {
-		return err
-	}
 	var ok bool
 	err := r.withTeamTx(ctx, func(tx pgx.Tx, teamUUID pgtype.UUID) error {
 		return tx.QueryRow(ctx, `
