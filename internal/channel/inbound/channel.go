@@ -1556,6 +1556,9 @@ func channelSlashAliases(msg channel.InboundMessage, identity InboundIdentity) [
 			aliases = append(aliases, value)
 		}
 	}
+	if values, ok := msg.Metadata["bot_aliases"].([]string); ok {
+		aliases = append(aliases, values...)
+	}
 	out := make([]string, 0, len(aliases))
 	seen := map[string]struct{}{}
 	for _, alias := range aliases {

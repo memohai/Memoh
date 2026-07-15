@@ -242,24 +242,66 @@ func removeTextRanges(text string, ranges []textRange) string {
 
 func isMentionToken(value string) bool {
 	value = strings.TrimSpace(value)
-	return (strings.HasPrefix(value, "@") && len(value) > 1) ||
-		(strings.HasPrefix(value, "<@") && strings.HasSuffix(value, ">") && len(value) > 3)
+	if strings.HasPrefix(value, "<@") {
+		end := strings.IndexByte(value, '>')
+		return end > 2 && mentionDelimiterSuffix(value[end+1:])
+	}
+	if !strings.HasPrefix(value, "@") {
+		return false
+	}
+	identity := strings.TrimPrefix(value, "@")
+	return strings.TrimRightFunc(identity, isMentionDelimiter) != ""
 }
 
 func aliasMatchesInvocation(value string, aliases []string) bool {
-	value = normalizeInvocationMention(value)
-	if value == "" {
+	candidates := normalizeInvocationMentionCandidates(value)
+	if len(candidates) == 0 {
 		return false
 	}
 	for _, alias := range aliases {
-		if normalized := normalizeInvocationMention(alias); normalized != "" && strings.EqualFold(value, normalized) {
-			return true
+		normalized := normalizeInvocationAlias(alias)
+		if normalized == "" {
+			continue
+		}
+		for _, candidate := range candidates {
+			if strings.EqualFold(candidate, normalized) {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-func normalizeInvocationMention(value string) string {
+func normalizeInvocationMentionCandidates(value string) []string {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "<@") {
+		end := strings.IndexByte(value, '>')
+		if end > 2 && mentionDelimiterSuffix(value[end+1:]) {
+			identity := strings.TrimPrefix(value[2:end], "!")
+			if identity = strings.TrimSpace(identity); identity != "" {
+				return []string{identity}
+			}
+		}
+	}
+
+	identity := normalizeInvocationAlias(value)
+	if identity == "" {
+		return nil
+	}
+	// Some channel identities may legitimately end in punctuation. Preserve the
+	// exact candidate first, then offer a delimiter-stripped fallback for natural
+	// forms such as "@bot, /help" without weakening exact alias matching.
+	candidates := []string{identity}
+	if strings.HasPrefix(value, "@") {
+		withoutDelimiter := strings.TrimRightFunc(identity, isMentionDelimiter)
+		if withoutDelimiter != "" && withoutDelimiter != identity {
+			candidates = append(candidates, withoutDelimiter)
+		}
+	}
+	return candidates
+}
+
+func normalizeInvocationAlias(value string) string {
 	value = strings.TrimSpace(value)
 	if strings.HasPrefix(value, "<@") && strings.HasSuffix(value, ">") {
 		value = strings.TrimSuffix(strings.TrimPrefix(value, "<@"), ">")
@@ -267,4 +309,22 @@ func normalizeInvocationMention(value string) string {
 		return strings.TrimSpace(value)
 	}
 	return strings.Trim(strings.TrimSpace(value), "@")
+}
+
+func mentionDelimiterSuffix(value string) bool {
+	for _, r := range value {
+		if !isMentionDelimiter(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func isMentionDelimiter(r rune) bool {
+	switch r {
+	case ',', '.', ':', ';', '!', '?', '，', '。', '：', '；', '！', '？':
+		return true
+	default:
+		return false
+	}
 }

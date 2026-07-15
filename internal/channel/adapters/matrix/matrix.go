@@ -691,6 +691,7 @@ func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConf
 			"is_mentioned":    isMentioned,
 			"is_reply_to_bot": isReplyToBot,
 			"bot_alias":       strings.TrimSpace(parsed.UserID),
+			"bot_aliases":     matrixBotMentionAliases(parsed.UserID),
 		},
 	}
 	if replyTo != "" {
@@ -1127,16 +1128,24 @@ func isMatrixBotMentioned(botUserID string, content map[string]any) bool {
 	if body == "" {
 		return false
 	}
-	localpart := botUserID
-	if idx := strings.Index(localpart, ":"); idx > 0 {
-		localpart = localpart[:idx]
-	}
-	for _, candidate := range []string{botUserID, localpart} {
+	for _, candidate := range matrixBotMentionAliases(botUserID) {
 		if matrixHasExactMentionToken(body, candidate) {
 			return true
 		}
 	}
 	return false
+}
+
+func matrixBotMentionAliases(botUserID string) []string {
+	botUserID = strings.TrimSpace(botUserID)
+	if botUserID == "" {
+		return nil
+	}
+	aliases := []string{botUserID}
+	if idx := strings.Index(botUserID, ":"); idx > 0 {
+		aliases = append(aliases, botUserID[:idx])
+	}
+	return aliases
 }
 
 func matrixHasExactMentionToken(body, candidate string) bool {

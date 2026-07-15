@@ -141,7 +141,10 @@ func TestChannelSlashAliasesExcludeSenderAndReplyTarget(t *testing.T) {
 	aliases := channelSlashAliases(channel.InboundMessage{
 		BotID:       "bot-1",
 		ReplyTarget: "group-1",
-		Metadata:    map[string]any{"bot_username": "memoh1bot"},
+		Metadata: map[string]any{
+			"bot_username": "memoh1bot",
+			"bot_aliases":  []string{"@memoh:example.com", "@memoh"},
+		},
 	}, InboundIdentity{BotID: "bot-1", DisplayName: "Alice"})
 	joined := strings.Join(aliases, ",")
 	if strings.Contains(joined, "Alice") || strings.Contains(joined, "group-1") {
@@ -149,6 +152,13 @@ func TestChannelSlashAliasesExcludeSenderAndReplyTarget(t *testing.T) {
 	}
 	if !strings.Contains(joined, "memoh1bot") {
 		t.Fatalf("aliases = %#v, want adapter-provided bot username", aliases)
+	}
+	seenAliases := make(map[string]bool, len(aliases))
+	for _, alias := range aliases {
+		seenAliases[alias] = true
+	}
+	if !seenAliases["memoh:example.com"] || !seenAliases["memoh"] {
+		t.Fatalf("aliases = %#v, want adapter-provided alias list", aliases)
 	}
 }
 
@@ -169,6 +179,30 @@ func TestClassifySlackAppMentionCommandUsesAdapterBotAlias(t *testing.T) {
 	decision := (&ChannelInboundProcessor{}).classifyChannelSlash("<@UBOT> /new discuss", msg, InboundIdentity{BotID: "bot-1"})
 	if decision.Kind != slash.DecisionCommandAction || !decision.Directed || decision.Invocation == nil {
 		t.Fatalf("decision = %#v, want directed Slack command", decision)
+	}
+	if decision.Invocation.CommandText != "/new discuss" {
+		t.Fatalf("command text = %q, want /new discuss", decision.Invocation.CommandText)
+	}
+}
+
+func TestClassifyMatrixLocalpartMentionUsesAdapterAliases(t *testing.T) {
+	t.Parallel()
+	msg := channel.InboundMessage{
+		BotID:   "bot-1",
+		Channel: channel.ChannelTypeMatrix,
+		Conversation: channel.Conversation{
+			ID:   "!room:example.com",
+			Type: channel.ConversationTypeGroup,
+		},
+		Metadata: map[string]any{
+			"bot_alias":    "@memoh:example.com",
+			"bot_aliases":  []string{"@memoh:example.com", "@memoh"},
+			"is_mentioned": true,
+		},
+	}
+	decision := (&ChannelInboundProcessor{}).classifyChannelSlash("@memoh /new discuss", msg, InboundIdentity{BotID: "bot-1"})
+	if decision.Kind != slash.DecisionCommandAction || !decision.Directed || decision.Invocation == nil {
+		t.Fatalf("decision = %#v, want directed Matrix command", decision)
 	}
 	if decision.Invocation.CommandText != "/new discuss" {
 		t.Fatalf("command text = %q, want /new discuss", decision.Invocation.CommandText)

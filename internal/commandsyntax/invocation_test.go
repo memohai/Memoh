@@ -22,6 +22,9 @@ func TestParseInvocationAddressing(t *testing.T) {
 	}{
 		{name: "plain", text: "/new discuss", aliases: []string{"memoh1bot"}, wantText: "/new discuss", wantAction: "discuss", wantRest: "discuss"},
 		{name: "leading mention", text: "@memoh1bot /new discuss", aliases: []string{"memoh1bot"}, wantText: "/new discuss", wantAction: "discuss", wantRest: "discuss", wantDirected: true},
+		{name: "leading mention comma", text: "@memoh1bot, /new discuss", aliases: []string{"memoh1bot"}, wantText: "/new discuss", wantAction: "discuss", wantRest: "discuss", wantDirected: true},
+		{name: "wrapped mention colon", text: "<@123>: /new discuss", aliases: []string{"123"}, wantText: "/new discuss", wantAction: "discuss", wantRest: "discuss", wantDirected: true},
+		{name: "leading mention full width colon", text: "@memoh1bot： /new discuss", aliases: []string{"memoh1bot"}, wantText: "/new discuss", wantAction: "discuss", wantRest: "discuss", wantDirected: true},
 		{name: "command suffix", text: "/new@memoh1bot discuss", aliases: []string{"memoh1bot"}, wantText: "/new discuss", wantAction: "discuss", wantRest: "discuss", wantDirected: true},
 		{name: "action suffix", text: "/new discuss@memoh1bot", aliases: []string{"memoh1bot"}, wantText: "/new discuss", wantAction: "discuss", wantRest: "discuss", wantDirected: true},
 		{name: "help action suffix", text: "/help model@memoh1bot", aliases: []string{"memoh1bot"}, wantText: "/help model", wantAction: "model", wantRest: "model", wantDirected: true},
@@ -67,6 +70,7 @@ func TestParseInvocationRejectsWrongAddressing(t *testing.T) {
 	}{
 		{name: "ordinary text", text: "hello /new", err: ErrNotCommand},
 		{name: "other leading mention", text: "@otherbot /new", err: ErrCommandForOtherBot},
+		{name: "other punctuated leading mention", text: "@otherbot, /new", err: ErrCommandForOtherBot},
 		{name: "other command suffix", text: "/new@otherbot", err: ErrCommandForOtherBot},
 	}
 	for _, tt := range tests {

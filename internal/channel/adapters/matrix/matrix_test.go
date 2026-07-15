@@ -52,6 +52,13 @@ func TestIsMatrixBotMentionedByLocalpartBodyFallback(t *testing.T) {
 	}
 }
 
+func TestMatrixBotMentionAliasesIncludeFullIDAndLocalpart(t *testing.T) {
+	aliases := matrixBotMentionAliases("@memoh:example.com")
+	if len(aliases) != 2 || aliases[0] != "@memoh:example.com" || aliases[1] != "@memoh" {
+		t.Fatalf("aliases = %#v, want full Matrix ID and localpart", aliases)
+	}
+}
+
 func TestIsMatrixBotMentionedDoesNotMatchSubstring(t *testing.T) {
 	content := map[string]any{
 		"body": "@memoh-helper:example.com ping",
@@ -526,6 +533,10 @@ func TestMatrixHandleEventUsesImageCaptionAsMessageText(t *testing.T) {
 	}
 	if alias, _ := captured.Metadata["bot_alias"].(string); alias != "@memoh:example.com" {
 		t.Fatalf("bot_alias = %q, want Matrix bot user id", alias)
+	}
+	aliases, _ := captured.Metadata["bot_aliases"].([]string)
+	if len(aliases) != 2 || aliases[0] != "@memoh:example.com" || aliases[1] != "@memoh" {
+		t.Fatalf("bot_aliases = %#v, want full Matrix ID and localpart", aliases)
 	}
 }
 
