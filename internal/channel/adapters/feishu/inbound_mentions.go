@@ -137,6 +137,19 @@ func feishuMentionTargets(mentions []feishuMention) []string {
 	return result
 }
 
+func feishuBotMentionAlias(mentions []feishuMention, botOpenID string) string {
+	botOpenID = strings.TrimSpace(botOpenID)
+	if botOpenID == "" {
+		return ""
+	}
+	for _, mention := range mentions {
+		if strings.TrimSpace(mention.OpenID) == botOpenID {
+			return feishuMentionDisplayName(mention)
+		}
+	}
+	return ""
+}
+
 // isFeishuBotMentioned checks whether the bot itself is mentioned in the message.
 // When botOpenID is provided, only mentions matching the bot's open_id count.
 // When botOpenID is empty (fallback), any mention is treated as a bot mention.

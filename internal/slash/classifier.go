@@ -2,7 +2,8 @@ package slash
 
 import (
 	"strings"
-	"unicode"
+
+	"github.com/memohai/memoh/internal/commandsyntax"
 )
 
 type Surface string
@@ -41,6 +42,7 @@ type Decision struct {
 	Directed    bool
 	Command     Command
 	SkillIntent SkillIntent
+	Invocation  *commandsyntax.Invocation
 }
 
 type ClassifyInput struct {
@@ -57,48 +59,51 @@ type ClassifyInput struct {
 
 func Classify(input ClassifyInput) Decision {
 	text := strings.TrimSpace(input.Text)
-	if text == "" || !isSlashLike(text, input.BotAliases) {
+	if text == "" {
+		return Decision{Kind: DecisionNormalChat, Directed: input.Directed}
+	}
+	invocation, err := commandsyntax.ParseInvocation(commandsyntax.InvocationInput{
+		Text:       text,
+		BotAliases: input.BotAliases,
+		Directed:   input.Directed,
+	})
+	if err != nil {
+		if input.Surface == SurfaceChannel && err == commandsyntax.ErrCommandForOtherBot {
+			return Decision{Kind: DecisionRejectNoop, Directed: false}
+		}
 		return Decision{Kind: DecisionNormalChat, Directed: input.Directed}
 	}
 
-	cmdText, directedByText := extractSlashText(text, input.BotAliases)
-	effectiveDirected := input.Directed || directedByText || slashCommandSuffixMatches(cmdText, input.BotAliases)
+	effectiveDirected := invocation.Directed
 	if input.Surface == SurfaceChannel && input.IsGroup && !effectiveDirected {
-		return Decision{Kind: DecisionRejectNoop, Directed: false}
+		return Decision{Kind: DecisionRejectNoop, Directed: false, Invocation: &invocation}
 	}
-
-	parsed, ok := parseSlash(cmdText, input.BotAliases)
-	if !ok {
-		// Slash-prefixed but with no parseable head token ("/ what is this"):
-		// prose, not a control message. Let it reach the model as chat.
-		return Decision{Kind: DecisionNormalChat, Directed: effectiveDirected}
-	}
-	effectiveDirected = effectiveDirected || parsed.Directed
+	parsed := invocation.Parsed
 
 	if parsed.Resource == "skill" && parsed.Action == "use" {
-		return Decision{Kind: DecisionReject, Code: CodeInvalidSkillSlashSyntax, Directed: effectiveDirected}
+		return Decision{Kind: DecisionReject, Code: CodeInvalidSkillSlashSyntax, Directed: effectiveDirected, Invocation: &invocation}
 	}
 
 	if input.Surface == SurfaceChannel && input.SupportsMode && isModePrefix(parsed.Resource) {
-		remainder := strings.TrimSpace(parsed.Rest)
+		remainder := strings.TrimSpace(invocation.Rest)
 		if strings.HasPrefix(remainder, "/") || isSlashLike(remainder, input.BotAliases) {
-			return Decision{Kind: DecisionReject, Code: CodeUnknownSlash, Directed: effectiveDirected}
+			return Decision{Kind: DecisionReject, Code: CodeUnknownSlash, Directed: effectiveDirected, Invocation: &invocation}
 		}
-		return Decision{Kind: DecisionNormalChat, Directed: effectiveDirected}
+		return Decision{Kind: DecisionNormalChat, Directed: effectiveDirected, Invocation: &invocation}
 	}
 
-	if parsed.ValidCommand && isKnown(input.KnownCommand, parsed.Resource) {
-		cmd := parsed.Command()
+	if isCommandName(invocation.Selector) && isKnown(input.KnownCommand, parsed.Resource) {
+		cmd := Command{Resource: parsed.Resource, Action: parsed.Action, Raw: invocation.CommandText}
 		if input.Surface == SurfaceWebWS {
 			if input.WebActionSupported != nil && input.WebActionSupported(parsed.Resource, parsed.Action) {
-				return Decision{Kind: DecisionCommandAction, Directed: effectiveDirected, Command: cmd}
+				return Decision{Kind: DecisionCommandAction, Directed: effectiveDirected, Command: cmd, Invocation: &invocation}
 			}
-			return Decision{Kind: DecisionUnsupportedCommand, Code: CodeUnsupportedWebCommand, Directed: effectiveDirected, Command: cmd}
+			return Decision{Kind: DecisionUnsupportedCommand, Code: CodeUnsupportedWebCommand, Directed: effectiveDirected, Command: cmd, Invocation: &invocation}
 		}
-		return Decision{Kind: DecisionCommandAction, Directed: effectiveDirected, Command: cmd}
+		return Decision{Kind: DecisionCommandAction, Directed: effectiveDirected, Command: cmd, Invocation: &invocation}
 	}
 
-	if isValidSkillSelector(parsed.Selector) {
+	if isValidSkillSelector(invocation.Selector) {
 		// The attachment fail-closed rule protects skill activation only: a
 		// requested-skill turn must not smuggle attachments (or unproven
 		// reply/forward attachments) into the model context. Fixed commands
@@ -106,14 +111,15 @@ func Classify(input ClassifyInput) Decision {
 		// photo captioned "/status", or a button tap whose synthetic message
 		// carries a reply ref the adapter can't vouch for, still executes.
 		if input.HasAttachments {
-			return Decision{Kind: DecisionReject, Code: CodeSlashAttachmentsUnsupported, Directed: effectiveDirected}
+			return Decision{Kind: DecisionReject, Code: CodeSlashAttachmentsUnsupported, Directed: effectiveDirected, Invocation: &invocation}
 		}
 		return Decision{
-			Kind:     DecisionSkillIntent,
-			Directed: effectiveDirected,
+			Kind:       DecisionSkillIntent,
+			Directed:   effectiveDirected,
+			Invocation: &invocation,
 			SkillIntent: SkillIntent{
-				Names:  []string{parsed.Selector},
-				Prompt: strings.TrimSpace(parsed.Rest),
+				Names:  []string{invocation.Selector},
+				Prompt: strings.TrimSpace(invocation.Rest),
 			},
 		}
 	}
@@ -128,124 +134,12 @@ func Classify(input ClassifyInput) Decision {
 	// pre-classifier command handler had. Plausible-but-unregistered control
 	// tokens never get here — they classify as skill intents above and fail
 	// closed with requested_skill_not_found at resolve time.
-	return Decision{Kind: DecisionNormalChat, Directed: effectiveDirected}
-}
-
-type parsedCommand struct {
-	Resource     string
-	Action       string
-	Args         string
-	Rest         string
-	Raw          string
-	Selector     string
-	Directed     bool
-	ValidCommand bool
-}
-
-func (p parsedCommand) Command() Command {
-	return Command{Resource: p.Resource, Action: p.Action, Raw: p.Raw}
+	return Decision{Kind: DecisionNormalChat, Directed: effectiveDirected, Invocation: &invocation}
 }
 
 func isSlashLike(text string, aliases []string) bool {
-	text = strings.TrimSpace(text)
-	if strings.HasPrefix(text, "/") {
-		return true
-	}
-	if stripped, ok := stripLeadingMention(text, aliases); ok {
-		return strings.HasPrefix(strings.TrimSpace(stripped), "/")
-	}
-	return false
-}
-
-func extractSlashText(text string, aliases []string) (string, bool) {
-	if stripped, ok := stripLeadingMention(text, aliases); ok {
-		return strings.TrimSpace(stripped), true
-	}
-	return strings.TrimSpace(text), false
-}
-
-func slashCommandSuffixMatches(text string, aliases []string) bool {
-	text = strings.TrimSpace(text)
-	if !strings.HasPrefix(text, "/") {
-		return false
-	}
-	head := strings.TrimPrefix(text, "/")
-	if idx := strings.IndexAny(head, " \t\r\n"); idx >= 0 {
-		head = head[:idx]
-	}
-	if before, after, ok := strings.Cut(head, "@"); ok && before != "" {
-		return aliasMatches(after, aliases)
-	}
-	return false
-}
-
-func stripLeadingMention(text string, aliases []string) (string, bool) {
-	fields := strings.Fields(strings.TrimSpace(text))
-	if len(fields) < 2 {
-		return "", false
-	}
-	first := strings.TrimPrefix(fields[0], "@")
-	if !aliasMatches(first, aliases) {
-		return "", false
-	}
-	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), fields[0])), true
-}
-
-func parseSlash(text string, aliases []string) (parsedCommand, bool) {
-	text = strings.TrimSpace(text)
-	if !strings.HasPrefix(text, "/") {
-		return parsedCommand{}, false
-	}
-	raw := text
-	text = strings.TrimPrefix(text, "/")
-	head, rest := cutHeadRest(text)
-	head = strings.TrimSpace(head)
-	rest = strings.TrimSpace(rest)
-	if head == "" {
-		return parsedCommand{}, false
-	}
-
-	selector := head
-	directed := false
-	if before, after, ok := strings.Cut(head, "@"); ok {
-		if !aliasMatches(after, aliases) {
-			return parsedCommand{}, false
-		}
-		selector = before
-		directed = true
-	}
-
-	action := ""
-	args := ""
-	if rest != "" {
-		action, args, _ = strings.Cut(rest, " ")
-		action = strings.TrimSpace(action)
-		args = strings.TrimSpace(args)
-	}
-	validCommand := isCommandName(selector)
-	resource := ""
-	if validCommand {
-		resource = strings.ToLower(selector)
-	}
-	return parsedCommand{
-		Resource:     resource,
-		Action:       strings.ToLower(action),
-		Args:         args,
-		Rest:         rest,
-		Raw:          raw,
-		Selector:     selector,
-		Directed:     directed,
-		ValidCommand: validCommand,
-	}, true
-}
-
-func cutHeadRest(text string) (string, string) {
-	for i, r := range text {
-		if unicode.IsSpace(r) {
-			return text[:i], text[i:]
-		}
-	}
-	return text, ""
+	_, err := commandsyntax.ParseInvocation(commandsyntax.InvocationInput{Text: text, BotAliases: aliases})
+	return err == nil
 }
 
 func isKnown(fn func(string) bool, resource string) bool {
@@ -296,18 +190,4 @@ func isValidSkillSelector(name string) bool {
 		}
 	}
 	return true
-}
-
-func aliasMatches(value string, aliases []string) bool {
-	value = strings.Trim(strings.TrimSpace(value), "@")
-	if value == "" {
-		return false
-	}
-	for _, alias := range aliases {
-		alias = strings.Trim(strings.TrimSpace(alias), "@")
-		if alias != "" && strings.EqualFold(value, alias) {
-			return true
-		}
-	}
-	return false
 }

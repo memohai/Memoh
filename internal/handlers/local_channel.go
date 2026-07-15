@@ -387,7 +387,7 @@ func (h *LocalChannelHandler) classifyWebSlash(text string, hasAttachments bool,
 			if resource == "help" || resource == "skill" {
 				return true
 			}
-			return h.commandHandler != nil && h.commandHandler.IsCommand("/"+resource)
+			return h.commandHandler != nil && h.commandHandler.HasCommandResource(resource)
 		},
 		WebActionSupported: func(resource, action string) bool {
 			return webActionID(resource, action) != ""

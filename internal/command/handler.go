@@ -95,12 +95,15 @@ type ExecuteInput struct {
 	ChannelIdentityID string
 	UserID            string
 	Text              string
-	ChannelType       string
-	ConversationType  string
-	ConversationID    string
-	ThreadID          string
-	RouteID           string
-	SessionID         string
+	// Invocation is the canonical channel parse. When present, command handling
+	// must use it instead of interpreting Text again.
+	Invocation       *Invocation
+	ChannelType      string
+	ConversationType string
+	ConversationID   string
+	ThreadID         string
+	RouteID          string
+	SessionID        string
 	// Locale optionally pins the command-UI locale. When empty, ExecuteResult
 	// resolves it from the bot's command_ui_language setting (auto → en).
 	Locale string
@@ -178,9 +181,9 @@ func (h *Handler) CurrentContext(ctx context.Context, botID string) (CurrentCont
 // topLevelCommands are standalone commands (no sub-actions) that IsCommand
 // recognises and that are handled outside the regular resource-group dispatch
 // (the channel inbound processor has the routing context they need). Only
-// /help, /start, /new, /stop are advertised in /help output — /approve and
-// /reject are internal tool-approval protocol verbs that users discover via the
-// inline approval prompt, not via the help listing.
+// /help, /start, /new, /stop are advertised in /help output. /approve, /reject,
+// and /respond are internal continuation protocol verbs that users discover via
+// the active prompt, not via the help listing.
 //
 // The map carries no per-key data — membership is the only fact callers need.
 // Localized descriptions for the advertised entries live under `cmd.help.top.*`
@@ -191,6 +194,7 @@ var topLevelCommands = map[string]struct{}{
 	"stop":    {},
 	"approve": {},
 	"reject":  {},
+	"respond": {},
 }
 
 // resourceAliases maps alternate spellings to the canonical command resource so
@@ -228,7 +232,13 @@ func (h *Handler) IsCommand(text string) bool {
 	if err != nil {
 		return false
 	}
-	resource := canonicalResource(parsed.Resource)
+	return h.HasCommandResource(parsed.Resource)
+}
+
+// HasCommandResource checks registry membership for an already parsed command.
+// Channel classification uses this form so it never reparses a synthetic string.
+func (h *Handler) HasCommandResource(resource string) bool {
+	resource = canonicalResource(strings.ToLower(strings.TrimSpace(resource)))
 	if resource == "help" {
 		return true
 	}
@@ -369,12 +379,8 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 		}
 	}()
 
-	cmdText := ExtractCommandText(input.Text)
-	if cmdText == "" {
-		return &Result{Text: h.registry.GlobalHelp(loc)}, nil
-	}
-	parsed, err := Parse(cmdText)
-	if err != nil {
+	parsed, ok := parsedCommandFromInput(input)
+	if !ok {
 		return &Result{Text: h.registry.GlobalHelp(loc)}, nil
 	}
 
@@ -627,7 +633,7 @@ func (h *Handler) chatACLAllows(cc CommandContext) (bool, error) {
 // processor uses it to gate the route-aware mode commands (/new, /stop, /status)
 // that do not flow through Execute.
 func (h *Handler) CommandAccess(ctx context.Context, input ExecuteInput) (bool, error) {
-	if parsed, err := Parse(ExtractCommandText(input.Text)); err == nil {
+	if parsed, ok := parsedCommandFromInput(input); ok {
 		if canonicalResource(parsed.Resource) == "link" {
 			return true, nil
 		}
@@ -664,6 +670,18 @@ func (h *Handler) CommandAccess(ctx context.Context, input ExecuteInput) (bool, 
 			ThreadID:         strings.TrimSpace(input.ThreadID),
 		},
 	})
+}
+
+func parsedCommandFromInput(input ExecuteInput) (ParsedCommand, bool) {
+	if input.Invocation != nil {
+		return input.Invocation.Parsed, true
+	}
+	cmdText := ExtractCommandText(input.Text)
+	if cmdText == "" {
+		return ParsedCommand{}, false
+	}
+	parsed, err := Parse(cmdText)
+	return parsed, err == nil
 }
 
 // safeExecute runs a sub-command handler and recovers from panics.

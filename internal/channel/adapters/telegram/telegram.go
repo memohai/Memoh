@@ -796,6 +796,7 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 	meta := map[string]any{
 		"is_mentioned":    isMentioned,
 		"is_reply_to_bot": isReplyToBot,
+		"bot_username":    strings.TrimSpace(botUsername),
 		"raw_text":        rawText,
 		"raw_chat_type":   chatTypeRaw,
 	}
@@ -1751,17 +1752,6 @@ func isTelegramBotMentioned(msg *tele.Message, botUsername string) bool {
 		return false
 	}
 	normalizedBot := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(botUsername), "@"))
-	if normalizedBot != "" {
-		text := strings.TrimSpace(msg.Text)
-		if text == "" {
-			text = strings.TrimSpace(msg.Caption)
-		}
-		if text != "" {
-			if strings.Contains(strings.ToLower(text), "@"+normalizedBot) {
-				return true
-			}
-		}
-	}
 	entities := make(tele.Entities, 0, len(msg.Entities)+len(msg.CaptionEntities))
 	entities = append(entities, msg.Entities...)
 	entities = append(entities, msg.CaptionEntities...)
@@ -1772,7 +1762,38 @@ func isTelegramBotMentioned(msg *tele.Message, botUsername string) bool {
 			}
 		}
 	}
+	text := strings.TrimSpace(msg.Text)
+	if text == "" {
+		text = strings.TrimSpace(msg.Caption)
+	}
+	return telegramTextHasExactUsernameMention(text, normalizedBot)
+}
+
+func telegramTextHasExactUsernameMention(text, username string) bool {
+	text = strings.ToLower(text)
+	target := "@" + strings.ToLower(strings.TrimPrefix(strings.TrimSpace(username), "@"))
+	if target == "@" {
+		return false
+	}
+	for offset := 0; offset < len(text); {
+		relative := strings.Index(text[offset:], target)
+		if relative < 0 {
+			return false
+		}
+		start := offset + relative
+		end := start + len(target)
+		beforeOK := start == 0 || !isTelegramUsernameByte(text[start-1])
+		afterOK := end == len(text) || !isTelegramUsernameByte(text[end])
+		if beforeOK && afterOK {
+			return true
+		}
+		offset = end
+	}
 	return false
+}
+
+func isTelegramUsernameByte(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= '0' && value <= '9' || value == '_'
 }
 
 func (a *TelegramAdapter) collectTelegramAttachments(bot *tele.Bot, msg *tele.Message) []channel.Attachment {

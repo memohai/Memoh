@@ -231,6 +231,7 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 				"guild_id":        m.GuildID,
 				"is_mentioned":    isMentioned,
 				"is_reply_to_bot": isReplyToBot,
+				"bot_alias":       strings.TrimSpace(botID),
 				"raw_text":        rawText,
 			},
 		}

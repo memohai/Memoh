@@ -150,6 +150,25 @@ func TestExecute_Help(t *testing.T) {
 	}
 }
 
+func TestExecuteResultUsesProvidedInvocation(t *testing.T) {
+	t.Parallel()
+	h := newTestHandler(&fakeRoleResolver{role: "owner"})
+	invocation, err := ParseInvocation(InvocationInput{Text: "/help @memoh1bot", BotAliases: []string{"memoh1bot"}})
+	if err != nil {
+		t.Fatalf("ParseInvocation() error = %v", err)
+	}
+	result, err := h.ExecuteResult(context.Background(), ExecuteInput{
+		Text:       "this deliberately is not reparsable",
+		Invocation: &invocation,
+	})
+	if err != nil {
+		t.Fatalf("ExecuteResult() error = %v", err)
+	}
+	if !strings.Contains(result.Text, "Available commands") {
+		t.Fatalf("result = %q, want global help", result.Text)
+	}
+}
+
 func TestExecute_HelpGroup(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(&fakeRoleResolver{role: "owner"})

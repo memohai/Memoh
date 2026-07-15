@@ -690,6 +690,7 @@ func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConf
 			"attachments":     len(attachments),
 			"is_mentioned":    isMentioned,
 			"is_reply_to_bot": isReplyToBot,
+			"bot_alias":       strings.TrimSpace(parsed.UserID),
 		},
 	}
 	if replyTo != "" {

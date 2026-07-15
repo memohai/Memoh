@@ -3,6 +3,7 @@ package inbound
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -10,11 +11,30 @@ import (
 	"github.com/memohai/memoh/internal/acpfeedback"
 	"github.com/memohai/memoh/internal/acpprofile"
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/channel/route"
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/i18n"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 )
+
+func mustCommandInvocation(t *testing.T, text string) command.Invocation {
+	t.Helper()
+	invocation, err := command.ParseInvocation(command.InvocationInput{Text: text, Directed: true})
+	if err != nil {
+		t.Fatalf("ParseInvocation(%q) error = %v", text, err)
+	}
+	return invocation
+}
+
+func resolveNewSessionTypeForTest(t *testing.T, text string, msg channel.InboundMessage) (string, error) {
+	t.Helper()
+	spec, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, text).Parsed, msg)
+	if err != nil {
+		return "", err
+	}
+	return spec.Type, nil
+}
 
 // TestResolveNewSessionType_BareConfirmFlag guards the hand-typed "/new
 // --confirm" edge: extractFlags doesn't recognize --confirm, so it lands as the
@@ -24,11 +44,11 @@ import (
 func TestResolveNewSessionType_BareConfirmFlag(t *testing.T) {
 	msg := channel.InboundMessage{Channel: channel.ChannelTypeTelegram}
 
-	bare, errBare := resolveNewSessionType("/new", msg)
+	bare, errBare := resolveNewSessionTypeForTest(t, "/new", msg)
 	if errBare != nil {
 		t.Fatalf("/new returned error: %v", errBare)
 	}
-	withFlag, err := resolveNewSessionType("/new --confirm", msg)
+	withFlag, err := resolveNewSessionTypeForTest(t, "/new --confirm", msg)
 	if err != nil {
 		t.Fatalf("/new --confirm should not error, got: %v", err)
 	}
@@ -36,14 +56,14 @@ func TestResolveNewSessionType_BareConfirmFlag(t *testing.T) {
 		t.Errorf("/new --confirm resolved to %q, want same as bare /new (%q)", withFlag, bare)
 	}
 	// Explicit modes must still resolve normally.
-	if got, err := resolveNewSessionType("/new chat", msg); err != nil || got != sessionpkg.TypeChat {
+	if got, err := resolveNewSessionTypeForTest(t, "/new chat", msg); err != nil || got != sessionpkg.TypeChat {
 		t.Errorf("/new chat = (%q, %v), want (%q, nil)", got, err, sessionpkg.TypeChat)
 	}
-	if got, err := resolveNewSessionType("/new discuss", msg); err != nil || got != sessionpkg.TypeDiscuss {
+	if got, err := resolveNewSessionTypeForTest(t, "/new discuss", msg); err != nil || got != sessionpkg.TypeDiscuss {
 		t.Errorf("/new discuss = (%q, %v), want (%q, nil)", got, err, sessionpkg.TypeDiscuss)
 	}
 	// A genuinely unknown mode still errors.
-	if _, err := resolveNewSessionType("/new bogus", msg); err == nil {
+	if _, err := resolveNewSessionTypeForTest(t, "/new bogus", msg); err == nil {
 		t.Errorf("/new bogus should error on unknown session type")
 	}
 }
@@ -68,7 +88,7 @@ func TestResolveNewSessionSpec_ACPAgent(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			spec, err := resolveNewSessionSpec(tc.cmd, tc.msg)
+			spec, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, tc.cmd).Parsed, tc.msg)
 			if err != nil {
 				t.Fatalf("resolveNewSessionSpec(%q) error = %v", tc.cmd, err)
 			}
@@ -85,9 +105,94 @@ func TestResolveNewSessionSpec_ACPAgent(t *testing.T) {
 	}
 }
 
+func TestResolveNewSessionSpecCanonicalBotMentionIsNotAnAgent(t *testing.T) {
+	t.Parallel()
+	group := channel.InboundMessage{Channel: channel.ChannelTypeTelegram, Conversation: channel.Conversation{Type: channel.ConversationTypeGroup}}
+
+	for _, text := range []string{
+		"/new @memoh1bot",
+		"/new discuss @memoh1bot",
+		"/new @alice @memoh1bot",
+		"/new discuss @alice @memoh1bot",
+		"@memoh1bot /new discuss",
+		"/new@memoh1bot discuss",
+	} {
+		t.Run(text, func(t *testing.T) {
+			t.Parallel()
+			invocation, err := command.ParseInvocation(command.InvocationInput{Text: text, BotAliases: []string{"memoh1bot"}})
+			if err != nil {
+				t.Fatalf("ParseInvocation() error = %v", err)
+			}
+			spec, err := resolveNewSessionSpecParsed(invocation.Parsed, group)
+			if err != nil {
+				t.Fatalf("resolveNewSessionSpecParsed() error = %v", err)
+			}
+			if spec.Mode != sessionpkg.TypeDiscuss || spec.Runtime != sessionpkg.RuntimeModel || acpNewSessionAgentID(spec) != "" {
+				t.Fatalf("spec = %#v, want native discuss session", spec)
+			}
+		})
+	}
+}
+
+func TestChannelSlashAliasesExcludeSenderAndReplyTarget(t *testing.T) {
+	t.Parallel()
+	aliases := channelSlashAliases(channel.InboundMessage{
+		BotID:       "bot-1",
+		ReplyTarget: "group-1",
+		Metadata:    map[string]any{"bot_username": "memoh1bot"},
+	}, InboundIdentity{BotID: "bot-1", DisplayName: "Alice"})
+	joined := strings.Join(aliases, ",")
+	if strings.Contains(joined, "Alice") || strings.Contains(joined, "group-1") {
+		t.Fatalf("aliases = %#v, sender and reply target must not address the bot", aliases)
+	}
+	if !strings.Contains(joined, "memoh1bot") {
+		t.Fatalf("aliases = %#v, want adapter-provided bot username", aliases)
+	}
+}
+
+func TestHandleInboundNewCommandIgnoresCurrentBotMentionArguments(t *testing.T) {
+	for _, text := range []string{"/new @memoh1bot", "/new discuss @memoh1bot"} {
+		t.Run(text, func(t *testing.T) {
+			channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channel-identity-1"}}
+			chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
+			gateway := &fakeChatGateway{}
+			ensurer := &fakeSessionEnsurer{}
+			processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
+			processor.SetACLService(&fakeChatACL{allowed: true})
+			processor.SetSessionEnsurer(ensurer)
+			processor.SetCommandHandler(command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil))
+			sender := &fakeReplySender{}
+
+			msg := channel.InboundMessage{
+				BotID:       "bot-1",
+				Channel:     channel.ChannelTypeTelegram,
+				Message:     channel.Message{ID: "msg-1", Text: text},
+				ReplyTarget: "group-1",
+				Sender:      channel.Identity{SubjectID: "user-1", DisplayName: "Alice"},
+				Conversation: channel.Conversation{
+					ID:   "group-1",
+					Type: channel.ConversationTypeGroup,
+				},
+				Metadata: map[string]any{
+					"raw_text":     text,
+					"is_mentioned": true,
+					"bot_username": "memoh1bot",
+				},
+			}
+			cfg := channel.ChannelConfig{ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelTypeTelegram}
+			if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+				t.Fatalf("HandleInbound() error = %v", err)
+			}
+			if ensurer.lastSpec.Mode != sessionpkg.TypeDiscuss || ensurer.lastSpec.Runtime != sessionpkg.RuntimeModel || acpNewSessionAgentID(ensurer.lastSpec) != "" {
+				t.Fatalf("created spec = %#v, want native discuss session", ensurer.lastSpec)
+			}
+		})
+	}
+}
+
 func TestResolveNewSessionSpec_GroupChatACPUnsupported(t *testing.T) {
 	group := channel.InboundMessage{Channel: channel.ChannelTypeTelegram, Conversation: channel.Conversation{Type: "group"}}
-	_, err := resolveNewSessionSpec("/new chat codex", group)
+	_, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, "/new chat codex").Parsed, group)
 	if err == nil {
 		t.Fatal("resolveNewSessionSpec error = nil, want group chat ACP unsupported")
 	}
@@ -134,7 +239,7 @@ func TestHandleNewSessionCommandCreatesACPChatSpec(t *testing.T) {
 		BotID:             "bot-1",
 		ChannelIdentityID: channelIdentityID,
 		UserID:            ownerID,
-	})
+	}, mustCommandInvocation(t, msg.Message.PlainText()))
 	if err != nil {
 		t.Fatalf("handleNewSessionCommand() error = %v", err)
 	}
@@ -179,7 +284,7 @@ func TestHandleNewSessionCommandCreatesNativeSessionWithCreator(t *testing.T) {
 		BotID:             "bot-1",
 		ChannelIdentityID: "cccccccc-cccc-cccc-cccc-cccccccccccc",
 		UserID:            creatorID,
-	})
+	}, mustCommandInvocation(t, msg.Message.PlainText()))
 	if err != nil {
 		t.Fatalf("handleNewSessionCommand() error = %v", err)
 	}
@@ -219,7 +324,7 @@ func TestHandleNewSessionCommandCancelsActiveStream(t *testing.T) {
 
 	err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{}, msg, sender, InboundIdentity{
 		BotID: "bot-1",
-	})
+	}, mustCommandInvocation(t, msg.Message.PlainText()))
 	if err != nil {
 		t.Fatalf("handleNewSessionCommand() error = %v", err)
 	}
@@ -263,7 +368,7 @@ func TestHandleNewSessionCommandBareNewInheritsDefaultACP(t *testing.T) {
 		BotID:             "bot-1",
 		ChannelIdentityID: "cccccccc-cccc-cccc-cccc-cccccccccccc",
 		UserID:            ownerID,
-	})
+	}, mustCommandInvocation(t, msg.Message.PlainText()))
 	if err != nil {
 		t.Fatalf("handleNewSessionCommand() error = %v", err)
 	}
@@ -309,7 +414,7 @@ func TestHandleNewSessionCommandExplicitACPInheritsDefaultProject(t *testing.T) 
 		BotID:             "bot-1",
 		ChannelIdentityID: "cccccccc-cccc-cccc-cccc-cccccccccccc",
 		UserID:            ownerID,
-	})
+	}, mustCommandInvocation(t, msg.Message.PlainText()))
 	if err != nil {
 		t.Fatalf("handleNewSessionCommand() error = %v", err)
 	}
@@ -353,7 +458,7 @@ func TestHandleNewSessionCommandPreflightsACPSetup(t *testing.T) {
 		BotID:             "bot-1",
 		ChannelIdentityID: "cccccccc-cccc-cccc-cccc-cccccccccccc",
 		UserID:            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-	})
+	}, mustCommandInvocation(t, msg.Message.PlainText()))
 	if err != nil {
 		t.Fatalf("handleNewSessionCommand() error = %v", err)
 	}
@@ -417,7 +522,7 @@ func TestHandleNewSessionCommandACPRequiresWorkspaceExec(t *testing.T) {
 		BotID:             "bot-1",
 		ChannelIdentityID: "user-no-exec",
 		UserID:            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-	})
+	}, mustCommandInvocation(t, msg.Message.PlainText()))
 	if err != nil {
 		t.Fatalf("handleNewSessionCommand() error = %v", err)
 	}

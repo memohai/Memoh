@@ -524,6 +524,9 @@ func TestMatrixHandleEventUsesImageCaptionAsMessageText(t *testing.T) {
 	if rawText, _ := captured.Metadata["raw_text"].(string); rawText != "A hand-drawn system architecture diagram" {
 		t.Fatalf("unexpected raw_text metadata: %q", rawText)
 	}
+	if alias, _ := captured.Metadata["bot_alias"].(string); alias != "@memoh:example.com" {
+		t.Fatalf("bot_alias = %q, want Matrix bot user id", alias)
+	}
 }
 
 func TestMatrixHandleEventMarksDirectConversationFromJoinedMembers(t *testing.T) {
