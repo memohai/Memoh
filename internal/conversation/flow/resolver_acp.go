@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/memohai/memoh/internal/acpfeedback"
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/agent/event"
+	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
@@ -24,6 +26,13 @@ import (
 
 type acpPrompter interface {
 	Prompt(ctx context.Context, input acpagent.PromptInput) (acpclient.PromptResult, error)
+}
+
+type acpPreparedAttachments struct {
+	Images                   []acpclient.PromptImage
+	Context                  []conversation.ChatAttachment
+	References               []string
+	CanFallbackImagesToFiles bool
 }
 
 type ACPSessionExecutionInfo struct {
@@ -107,8 +116,6 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 	if err := r.requireACPRuntimeOwnerWorkspaceExec(ctx, req.BotID, runtimeOwnerAccountID); err != nil {
 		return err
 	}
-	contextMarkdown := r.buildACPContextMarkdown(ctx, req, agentID, projectPath)
-
 	doneTurn, entered := r.tryEnterIdleSessionTurn(ctx, req.BotID, req.SessionID)
 	if !entered {
 		return acpfeedback.New(
@@ -121,6 +128,15 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		)
 	}
 	defer doneTurn()
+
+	preparedAttachments, err := r.prepareACPAttachments(ctx, req)
+	if err != nil {
+		return err
+	}
+	contextReq := req
+	contextReq.Attachments = preparedAttachments.Context
+	contextReq.ReplyAttachments = nil
+	contextMarkdown := r.buildACPContextMarkdown(ctx, contextReq, agentID, projectPath)
 
 	if req.RawQuery == "" {
 		req.RawQuery = strings.TrimSpace(req.Query)
@@ -207,23 +223,25 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 	// The first text_delta lazily creates the text block instead.
 
 	result, err := r.acpPool.Prompt(streamCtx, acpagent.PromptInput{
-		BotID:               req.BotID,
-		ChatID:              req.ChatID,
-		SessionID:           req.SessionID,
-		StreamID:            req.StreamID,
-		RouteID:             req.RouteID,
-		AgentID:             agentID,
-		ProjectPath:         projectPath,
-		Prompt:              req.Query,
-		ChannelIdentityID:   req.SourceChannelIdentityID,
-		SessionToken:        req.Token,
-		CurrentPlatform:     req.CurrentChannel,
-		ReplyTarget:         req.ReplyTarget,
-		ConversationType:    req.ConversationType,
-		CanRequestUserInput: r.canDeliverUserInputWS(eventCh),
-		// ACP/native MCP does not yet have the in-process read-media decoration
-		// path that turns read image bytes into model-native image input. Keep
-		// this false until ACP model capability and image transport are wired.
+		BotID:                    req.BotID,
+		ChatID:                   req.ChatID,
+		SessionID:                req.SessionID,
+		StreamID:                 req.StreamID,
+		RouteID:                  req.RouteID,
+		AgentID:                  agentID,
+		ProjectPath:              projectPath,
+		Prompt:                   req.Query,
+		Images:                   preparedAttachments.Images,
+		AttachmentReferences:     preparedAttachments.References,
+		CanFallbackImagesToFiles: preparedAttachments.CanFallbackImagesToFiles,
+		ChannelIdentityID:        req.SourceChannelIdentityID,
+		SessionToken:             req.Token,
+		CurrentPlatform:          req.CurrentChannel,
+		ReplyTarget:              req.ReplyTarget,
+		ConversationType:         req.ConversationType,
+		CanRequestUserInput:      r.canDeliverUserInputWS(eventCh),
+		// This flag controls image bytes returned later by the read-media MCP
+		// tool. Initial user images use ACP ImageBlock transport above.
 		SupportsImageInput:    false,
 		ToolOutputLimit:       r.toolOutputLimit(),
 		ToolHTTPURL:           req.ToolHTTPURL,
@@ -243,6 +261,9 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		var feedbackErr *acpfeedback.Error
 		if errors.As(err, &feedbackErr) {
 			return err
+		}
+		if feedbackErr := acpPromptInputFeedback(err); feedbackErr != nil {
+			return feedbackErr
 		}
 		result = ensureACPPromptOutput(result)
 		failedResult, failureDelta := acpFailureResult(result, err)
@@ -266,6 +287,120 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 	}
 	emit(acpTerminalStreamEvent(agentpkg.EventEnd, result))
 	return nil
+}
+
+func (r *Resolver) prepareACPAttachments(ctx context.Context, req conversation.ChatRequest) (acpPreparedAttachments, error) {
+	prepared := r.prepareGatewayAttachments(ctx, req)
+	result := acpPreparedAttachments{
+		Images:                   make([]acpclient.PromptImage, 0, len(prepared)),
+		Context:                  make([]conversation.ChatAttachment, 0, len(prepared)),
+		References:               make([]string, 0, len(prepared)),
+		CanFallbackImagesToFiles: true,
+	}
+	for i, item := range prepared {
+		attachmentType := strings.ToLower(strings.TrimSpace(item.Type))
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			name = fmt.Sprintf("attachment %d", i+1)
+		}
+
+		contextAttachment := conversation.ChatAttachment{
+			Type:        attachmentType,
+			ContentHash: strings.TrimSpace(item.ContentHash),
+			Name:        strings.TrimSpace(item.Name),
+			Mime:        attachmentpkg.NormalizeMime(item.Mime),
+			Size:        item.Size,
+			Metadata:    item.Metadata,
+		}
+		reference := strings.TrimSpace(item.FallbackPath)
+		if reference == "" && item.Transport == gatewayTransportPublicURL {
+			reference = strings.TrimSpace(item.Payload)
+		}
+		if reference != "" {
+			if isLikelyPublicURL(reference) {
+				contextAttachment.URL = reference
+			} else {
+				contextAttachment.Path = reference
+			}
+			result.References = append(result.References, reference)
+		}
+
+		if attachmentType == "image" && item.Transport == gatewayTransportInlineDataURL && strings.TrimSpace(item.Payload) != "" {
+			image, imageErr := acpPromptImageFromDataURL(item.Payload, item.Mime)
+			if imageErr != nil {
+				return acpPreparedAttachments{}, acpfeedback.New(
+					acpfeedback.CodeAttachmentInvalid,
+					"invalid_image_data",
+					http.StatusBadRequest,
+					"chat.acp.attachmentInvalid",
+					"The attachment is invalid. Please attach it again.",
+					map[string]string{"name": name},
+				)
+			}
+			result.Images = append(result.Images, image)
+			if reference == "" {
+				result.CanFallbackImagesToFiles = false
+			}
+		} else if reference == "" {
+			return acpPreparedAttachments{}, acpfeedback.New(
+				acpfeedback.CodeAttachmentUnavailable,
+				"attachment_not_reachable",
+				http.StatusBadRequest,
+				"chat.acp.attachmentUnavailable",
+				"The attachment could not be made available to the external agent. Please attach it again.",
+				map[string]string{"name": name},
+			)
+		}
+
+		result.Context = append(result.Context, contextAttachment)
+	}
+	return result, nil
+}
+
+func acpPromptImageFromDataURL(payload, fallbackMime string) (acpclient.PromptImage, error) {
+	payload = strings.TrimSpace(payload)
+	comma := strings.Index(payload, ",")
+	if comma < 0 || !strings.HasPrefix(strings.ToLower(payload), "data:") ||
+		!strings.Contains(strings.ToLower(payload[:comma]), ";base64") {
+		return acpclient.PromptImage{}, acpclient.ErrInvalidPromptImage
+	}
+	mimeType := attachmentpkg.MimeFromDataURL(payload)
+	if mimeType == "" || mimeType == "application/octet-stream" {
+		mimeType = attachmentpkg.NormalizeMime(fallbackMime)
+	}
+	normalized, err := acpclient.NormalizePromptImages([]acpclient.PromptImage{{
+		Data:     strings.TrimSpace(payload[comma+1:]),
+		MimeType: mimeType,
+	}})
+	if err != nil {
+		return acpclient.PromptImage{}, err
+	}
+	return normalized[0], nil
+}
+
+func acpPromptInputFeedback(err error) *acpfeedback.Error {
+	switch {
+	case errors.Is(err, acpclient.ErrImagePromptUnsupported):
+		return acpfeedback.New(
+			acpfeedback.CodeImageInputUnsupported,
+			"image_input_unsupported",
+			http.StatusBadRequest,
+			"chat.acp.imageInputUnsupported",
+			"This external agent cannot read the attached image.",
+			nil,
+		)
+	case errors.Is(err, acpclient.ErrInvalidPromptImage):
+		return acpfeedback.New(
+			acpfeedback.CodeAttachmentInvalid,
+			"invalid_image_data",
+			http.StatusBadRequest,
+			"chat.acp.attachmentInvalid",
+			"The attachment is invalid. Please attach it again.",
+			nil,
+		)
+	default:
+		return nil
+	}
 }
 
 func ensureACPPromptOutput(result acpclient.PromptResult) acpclient.PromptResult {

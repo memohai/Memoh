@@ -699,8 +699,21 @@ func (s *Server) ReadRaw(req *pb.ReadRawRequest, stream pb.ContainerService_Read
 }
 
 func (s *Server) WriteRaw(stream pb.ContainerService_WriteRawServer) error {
-	var f *os.File
-	var written int64
+	var (
+		f          *os.File
+		targetPath string
+		tmpPath    string
+		written    int64
+		committed  bool
+	)
+	defer func() {
+		if f != nil {
+			_ = f.Close()
+		}
+		if !committed && tmpPath != "" {
+			_ = os.Remove(tmpPath)
+		}
+	}()
 
 	for {
 		chunk, err := stream.Recv()
@@ -716,15 +729,16 @@ func (s *Server) WriteRaw(stream pb.ContainerService_WriteRawServer) error {
 			if path == "" {
 				return status.Error(codes.InvalidArgument, "first chunk must include path")
 			}
-			path = s.resolvePath(path)
-			if mkErr := os.MkdirAll(filepath.Dir(path), 0o750); mkErr != nil {
+			targetPath = s.resolvePath(path)
+			dir := filepath.Dir(targetPath)
+			if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
 				return status.Errorf(codes.Internal, "mkdir: %v", mkErr)
 			}
-			f, err = os.Create(path) //nolint:gosec // G304: workspace bridge intentionally serves agent-selected paths.
+			f, err = os.CreateTemp(dir, "."+filepath.Base(targetPath)+".tmp-*")
 			if err != nil {
-				return status.Errorf(codes.Internal, "create: %v", err)
+				return status.Errorf(codes.Internal, "create temp file: %v", err)
 			}
-			defer func() { _ = f.Close() }()
+			tmpPath = f.Name()
 		}
 
 		if len(chunk.GetData()) > 0 {
@@ -736,6 +750,22 @@ func (s *Server) WriteRaw(stream pb.ContainerService_WriteRawServer) error {
 		}
 	}
 
+	if f == nil {
+		return status.Error(codes.InvalidArgument, "first chunk must include path")
+	}
+	if err := f.Close(); err != nil {
+		f = nil
+		return status.Errorf(codes.Internal, "close: %v", err)
+	}
+	f = nil
+	if err := contextStatusError(stream.Context()); err != nil {
+		return err
+	}
+	// #nosec G703 -- targetPath is resolved by the workspace bridge, and tmpPath is created in the same directory.
+	if err := os.Rename(tmpPath, targetPath); err != nil {
+		return status.Errorf(codes.Internal, "commit: %v", err)
+	}
+	committed = true
 	return stream.SendAndClose(&pb.WriteRawResponse{BytesWritten: written})
 }
 

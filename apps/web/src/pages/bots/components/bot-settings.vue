@@ -554,10 +554,6 @@ async function handleSave() {
     toast.error(nameStatusMessage.value || t('bots.nameStatus.invalid'))
     return
   }
-  if (form.chat_runtime === 'acp_agent' && !form.chat_model_id) {
-    toast.error(t('bots.settings.externalAgentChatModelRequired'))
-    return
-  }
   try {
     if (hasSettingsChanges.value) {
       const { timezone: _timezone, ...settingsPayload } = form

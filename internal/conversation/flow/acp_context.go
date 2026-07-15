@@ -126,7 +126,7 @@ func renderACPContextMarkdown(input acpContextRenderInput) string {
 	}))
 
 	if attachments := formatACPContextAttachments(input.Attachments); attachments != "" {
-		writeACPContextSection(&sb, "Attachments", attachments)
+		writeACPContextSection(&sb, "Attachments", "These attachments are part of the current user turn. Image content may also be included as ACP image blocks; inspect path or URL references for other files.\n\n"+attachments)
 	}
 	if section := strings.TrimSpace(input.PlatformIdentitiesSection); section != "" {
 		sb.WriteString(section)

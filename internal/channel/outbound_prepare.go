@@ -27,7 +27,7 @@ type OutboundAttachmentStore interface {
 	Open(ctx context.Context, botID, contentHash string) (io.ReadCloser, media.Asset, error)
 	Ingest(ctx context.Context, input media.IngestInput) (media.Asset, error)
 	GetByStorageKey(ctx context.Context, botID, storageKey string) (media.Asset, error)
-	AccessPath(asset media.Asset) string
+	AccessPath(ctx context.Context, asset media.Asset) string
 }
 
 // ContainerAttachmentIngester is an optional extension of OutboundAttachmentStore
@@ -200,7 +200,7 @@ func preparePersistedAttachment(
 	if err != nil {
 		return Attachment{}, PreparedAttachment{}, fmt.Errorf("stat content hash attachment: %w", err)
 	}
-	applyPreparedAsset(store, asset, botID, &item, sourcePath)
+	applyPreparedAsset(ctx, store, asset, botID, &item, sourcePath)
 	return item, preparedUploadAttachment(store, botID, item), nil
 }
 
@@ -291,7 +291,7 @@ func prepareContainerAttachment(
 	if storageKey := extractPreparedStorageKey(sourcePath); storageKey != "" {
 		asset, err = store.GetByStorageKey(ctx, botID, storageKey)
 		if err == nil {
-			applyPreparedAsset(store, asset, botID, &item, sourcePath)
+			applyPreparedAsset(ctx, store, asset, botID, &item, sourcePath)
 			return item, preparedUploadAttachment(store, botID, item), nil
 		}
 	}
@@ -309,7 +309,7 @@ func prepareContainerAttachment(
 		}
 		return Attachment{}, PreparedAttachment{}, fmt.Errorf("prepare workspace attachment: %w", ingestErr)
 	}
-	applyPreparedAsset(store, asset, botID, &item, sourcePath)
+	applyPreparedAsset(ctx, store, asset, botID, &item, sourcePath)
 	return item, preparedUploadAttachment(store, botID, item), nil
 }
 
@@ -345,7 +345,7 @@ func ingestPreparedAttachment(
 		return Attachment{}, PreparedAttachment{}, fmt.Errorf("ingest attachment: %w", err)
 	}
 	item.Mime = attachmentpkg.NormalizeMime(finalMime)
-	applyPreparedAsset(store, asset, botID, &item, sourcePath)
+	applyPreparedAsset(ctx, store, asset, botID, &item, sourcePath)
 	return item, preparedUploadAttachment(store, botID, item), nil
 }
 
@@ -460,7 +460,7 @@ func allowsLinePreparedPublicURL(item Attachment) bool {
 	return IsPublicHost(parsed.Hostname())
 }
 
-func applyPreparedAsset(store OutboundAttachmentStore, asset media.Asset, botID string, item *Attachment, sourcePath string) {
+func applyPreparedAsset(ctx context.Context, store OutboundAttachmentStore, asset media.Asset, botID string, item *Attachment, sourcePath string) {
 	if item == nil {
 		return
 	}
@@ -468,7 +468,7 @@ func applyPreparedAsset(store OutboundAttachmentStore, asset media.Asset, botID 
 	if sourcePath = strings.TrimSpace(sourcePath); sourcePath != "" {
 		bundle.Path = sourcePath
 	}
-	*item = AttachmentFromBundle(bundle.WithAssetAccess(botID, asset, store.AccessPath(asset)))
+	*item = AttachmentFromBundle(bundle.WithAssetAccess(botID, asset, store.AccessPath(ctx, asset)))
 	item.SourcePlatform = ""
 	if item.Type == AttachmentFile || item.Type == "" {
 		item.Type = preparedAttachmentTypeFromMime(item.Mime)

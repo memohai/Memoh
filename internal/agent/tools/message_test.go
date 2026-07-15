@@ -136,7 +136,7 @@ func (messageTestAssetResolver) Ingest(context.Context, media.IngestInput) (medi
 	return media.Asset{}, context.Canceled
 }
 
-func (messageTestAssetResolver) AccessPath(asset media.Asset) string {
+func (messageTestAssetResolver) AccessPath(_ context.Context, asset media.Asset) string {
 	return "/data/media/" + asset.ContentHash
 }
 

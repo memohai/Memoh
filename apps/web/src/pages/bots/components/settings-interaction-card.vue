@@ -24,7 +24,7 @@
     >
       <Switch
         :model-value="externalAgentEnabled"
-        :disabled="!externalAgentEnabled && (!form.chat_model_id || selectableACPProfiles.length === 0)"
+        :disabled="!externalAgentEnabled && selectableACPProfiles.length === 0"
         @update:model-value="(val) => setExternalAgentRuntime(!!val)"
       />
     </SettingsRow>
@@ -162,9 +162,6 @@ const externalAgentDescription = computed(() =>
     : t('bots.settings.externalAgentDescription'),
 )
 const externalAgentRuntimeDescription = computed(() => {
-  if (!props.form.chat_model_id) {
-    return t('bots.settings.externalAgentChatModelRequired')
-  }
   return selectableACPProfiles.value.length > 0
     ? t('bots.settings.externalAgentRuntimeDescription')
     : t('bots.settings.externalAgentRuntimeUnavailable')

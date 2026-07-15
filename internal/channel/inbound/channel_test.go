@@ -512,7 +512,7 @@ func (*fakeMediaIngestor) IngestContainerFile(_ context.Context, _, _ string) (m
 	return media.Asset{}, errors.New("not implemented in test")
 }
 
-func (*fakeMediaIngestor) AccessPath(asset media.Asset) string {
+func (*fakeMediaIngestor) AccessPath(_ context.Context, asset media.Asset) string {
 	return "/data/media/" + asset.StorageKey
 }
 
@@ -545,7 +545,7 @@ func (f *fakeStorageProvider) Delete(_ context.Context, key string) error {
 	return nil
 }
 
-func (*fakeStorageProvider) AccessPath(key string) string {
+func (*fakeStorageProvider) AccessPath(_ context.Context, key string) string {
 	return "/data/media/" + key
 }
 

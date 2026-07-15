@@ -382,7 +382,7 @@ func TestSessionPromptBuildsEmbeddedContextResource(t *testing.T) {
 		URI:      "memoh://context/current-turn",
 		MimeType: "text/markdown",
 		Text:     markdown,
-	}})
+	}}, nil)
 	if len(blocks) != 2 {
 		t.Fatalf("prompt blocks = %d, want text + resource", len(blocks))
 	}
@@ -406,13 +406,60 @@ func TestSessionPromptFallsBackToTextContextWhenEmbeddedContextUnsupported(t *te
 		URI:      "memoh://context/current-turn",
 		MimeType: "text/markdown",
 		Text:     "Memoh context",
-	}})
+	}}, nil)
 	if len(blocks) != 1 || blocks[0].Text == nil {
 		t.Fatalf("prompt blocks = %#v, want single text fallback", blocks)
 	}
 	text := blocks[0].Text.Text
 	if !strings.Contains(text, `<context ref="memoh://context/current-turn">`) || !strings.Contains(text, "Memoh context") || !strings.Contains(text, "inspect the app") {
 		t.Fatalf("fallback text = %q, want context and prompt", text)
+	}
+}
+
+func TestSessionPromptBuildsImageOnlyContent(t *testing.T) {
+	t.Parallel()
+
+	sess := &Session{imagePromptSupported: true}
+	blocks := sess.promptBlocks("", nil, []PromptImage{{
+		Data:     "aW1hZ2U=",
+		MimeType: "image/png",
+	}})
+	if len(blocks) != 1 || blocks[0].Image == nil {
+		t.Fatalf("prompt blocks = %#v, want single image block", blocks)
+	}
+	image := blocks[0].Image
+	if image.Data != "aW1hZ2U=" || image.MimeType != "image/png" {
+		t.Fatalf("image block = %#v, want inline PNG", image)
+	}
+}
+
+func TestSessionPromptRejectsImagesWithoutCapability(t *testing.T) {
+	t.Parallel()
+
+	sess := &Session{conn: &clientConnection{}}
+	_, err := sess.PromptWithToolContextOptions(context.Background(), "inspect", nil, ToolSessionContext{}, PromptOptions{
+		Images: []PromptImage{{Data: "aW1hZ2U=", MimeType: "image/png"}},
+	})
+	if !errors.Is(err, ErrImagePromptUnsupported) {
+		t.Fatalf("PromptWithToolContextOptions() error = %v, want ErrImagePromptUnsupported", err)
+	}
+}
+
+func TestNormalizePromptImagesRejectsNonImageMIME(t *testing.T) {
+	t.Parallel()
+
+	_, err := NormalizePromptImages([]PromptImage{{Data: "dGV4dA==", MimeType: "text/plain"}})
+	if !errors.Is(err, ErrInvalidPromptImage) {
+		t.Fatalf("NormalizePromptImages() error = %v, want ErrInvalidPromptImage", err)
+	}
+}
+
+func TestNormalizePromptImagesRejectsMalformedBase64(t *testing.T) {
+	t.Parallel()
+
+	_, err := NormalizePromptImages([]PromptImage{{Data: "not-valid***", MimeType: "image/png"}})
+	if !errors.Is(err, ErrInvalidPromptImage) {
+		t.Fatalf("NormalizePromptImages() error = %v, want ErrInvalidPromptImage", err)
 	}
 }
 
@@ -536,6 +583,9 @@ func TestRunnerStartSessionReadsProtocolModelsAndSetsModel(t *testing.T) {
 	}
 	if len(state.Available) != 2 || state.Available[1].ID != "gpt-5.1-codex-high" {
 		t.Fatalf("available models = %#v", state.Available)
+	}
+	if state.Available[1].Description != "Highest reasoning" {
+		t.Fatalf("model description = %q, want protocol description", state.Available[1].Description)
 	}
 	state.Available[0].Name = "mutated"
 	if got := sess.ModelState().Available[0].Name; got == "mutated" {

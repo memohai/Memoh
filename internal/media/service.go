@@ -137,13 +137,38 @@ func (s *Service) GetByStorageKey(ctx context.Context, botID, storageKey string)
 	return deriveAssetFromKey(botID, storageKey), nil
 }
 
-// AccessPath returns a consumer-accessible reference for a persisted asset.
-func (s *Service) AccessPath(asset Asset) string {
+// AccessPath returns a reachable consumer reference for a persisted asset.
+// Providers that support materialization may promote spill storage into their
+// consumer-addressable primary store. Errors are intentionally collapsed for
+// legacy callers; new routing code should use EnsureAccessPath.
+func (s *Service) AccessPath(ctx context.Context, asset Asset) string {
+	accessPath, _ := s.EnsureAccessPath(ctx, asset)
+	return accessPath
+}
+
+// EnsureAccessPath returns a consumer-visible path, materializing the asset
+// into addressable storage when the provider supports it.
+func (s *Service) EnsureAccessPath(ctx context.Context, asset Asset) (string, error) {
 	if s.provider == nil {
-		return ""
+		return "", ErrProviderUnavailable
 	}
 	routingKey := path.Join(asset.BotID, asset.StorageKey)
-	return s.provider.AccessPath(routingKey)
+	if ensurer, ok := s.provider.(storage.AccessPathEnsurer); ok {
+		accessPath, err := ensurer.EnsureAccessPath(ctx, routingKey)
+		if err != nil {
+			return "", err
+		}
+		accessPath = strings.TrimSpace(accessPath)
+		if accessPath == "" {
+			return "", storage.ErrAccessPathUnavailable
+		}
+		return accessPath, nil
+	}
+	accessPath := strings.TrimSpace(s.provider.AccessPath(ctx, routingKey))
+	if accessPath == "" {
+		return "", storage.ErrAccessPathUnavailable
+	}
+	return accessPath, nil
 }
 
 // IngestContainerFile reads an arbitrary file from a bot's /data/ directory

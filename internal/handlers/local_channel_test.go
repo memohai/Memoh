@@ -1466,7 +1466,7 @@ func (p *localChannelMemoryProvider) Open(ctx context.Context, key string) (io.R
 
 func (*localChannelMemoryProvider) Delete(context.Context, string) error { return nil }
 
-func (*localChannelMemoryProvider) AccessPath(key string) string {
+func (*localChannelMemoryProvider) AccessPath(_ context.Context, key string) string {
 	parts := strings.SplitN(key, "/", 2)
 	if len(parts) != 2 {
 		return "/data/media/" + key

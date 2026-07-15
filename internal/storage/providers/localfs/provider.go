@@ -42,10 +42,14 @@ func (p *Provider) Open(_ context.Context, key string) (io.ReadCloser, error) {
 }
 
 func (p *Provider) Delete(_ context.Context, key string) error {
-	return os.Remove(p.resolve(key))
+	err := os.Remove(p.resolve(key))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
-func (p *Provider) AccessPath(key string) string {
+func (p *Provider) AccessPath(_ context.Context, key string) string {
 	return p.resolve(key)
 }
 

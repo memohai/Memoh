@@ -75,10 +75,13 @@ func (r *Resolver) prepareGatewayAttachments(ctx context.Context, req conversati
 		payload := strings.TrimSpace(bundle.Base64)
 		transport := ""
 		fallbackPath := strings.TrimSpace(bundle.Path)
+		rawURL := strings.TrimSpace(bundle.URL)
 		if payload != "" {
 			transport = gatewayTransportInlineDataURL
+			if fallbackPath == "" && rawURL != "" {
+				fallbackPath = rawURL
+			}
 		} else {
-			rawURL := strings.TrimSpace(bundle.URL)
 			contentHash := strings.TrimSpace(bundle.ContentHash)
 			switch {
 			case isLikelyPublicURL(rawURL) && contentHash == "":
@@ -108,11 +111,40 @@ func (r *Resolver) prepareGatewayAttachments(ctx context.Context, req conversati
 			Metadata:     bundle.Metadata,
 			FallbackPath: fallbackPath,
 		}
+		if item.ContentHash != "" && strings.TrimSpace(item.FallbackPath) == "" {
+			if accessPath, err := r.assetAccessPath(ctx, strings.TrimSpace(req.BotID), item.ContentHash); err != nil {
+				if r != nil && r.logger != nil {
+					r.logger.Warn(
+						"resolve gateway attachment access path failed",
+						slog.Any("error", err),
+						slog.String("bot_id", strings.TrimSpace(req.BotID)),
+						slog.String("content_hash", item.ContentHash),
+					)
+				}
+			} else {
+				item.FallbackPath = accessPath
+			}
+		}
 		item = normalizeGatewayAttachmentPayload(item)
 		item = r.inlineImageAttachmentAssetIfNeeded(ctx, strings.TrimSpace(req.BotID), item)
 		prepared = append(prepared, item)
 	}
 	return prepared
+}
+
+func (r *Resolver) assetAccessPath(ctx context.Context, botID, contentHash string) (string, error) {
+	if r == nil || r.assetLoader == nil {
+		return "", errors.New("gateway asset loader not configured")
+	}
+	accessPath, err := r.assetLoader.AccessPathForGateway(ctx, botID, contentHash)
+	if err != nil {
+		return "", err
+	}
+	accessPath = strings.TrimSpace(accessPath)
+	if accessPath == "" {
+		return "", errors.New("asset has no reachable access path")
+	}
+	return accessPath, nil
 }
 
 func requestAttachmentsForGateway(req conversation.ChatRequest) []conversation.ChatAttachment {

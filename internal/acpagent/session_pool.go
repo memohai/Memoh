@@ -146,16 +146,19 @@ type runtimeHandle struct {
 // session. Session metadata (agent, project path) is resolved from the
 // session store when available.
 type PromptInput struct {
-	BotID             string
-	ChatID            string
-	SessionID         string
-	StreamID          string
-	SessionType       string
-	RouteID           string
-	AgentID           string
-	ProjectPath       string
-	Prompt            string
-	ChannelIdentityID string
+	BotID                    string
+	ChatID                   string
+	SessionID                string
+	StreamID                 string
+	SessionType              string
+	RouteID                  string
+	AgentID                  string
+	ProjectPath              string
+	Prompt                   string
+	Images                   []acpclient.PromptImage
+	AttachmentReferences     []string
+	CanFallbackImagesToFiles bool
+	ChannelIdentityID        string
 	// SessionToken is consumed only by Prompt, where it flows into the
 	// per-prompt tool context overlay. Ensure and SetModel ignore it.
 	SessionToken          string //nolint:gosec // runtime session credential, not a hardcoded secret.
@@ -536,8 +539,13 @@ func (p *SessionPool) Prompt(ctx context.Context, input PromptInput) (acpclient.
 	if err != nil {
 		return acpclient.PromptResult{}, err
 	}
-	if strings.TrimSpace(input.Prompt) == "" {
-		return acpclient.PromptResult{}, errors.New("prompt is required")
+	input.Images, err = acpclient.NormalizePromptImages(input.Images)
+	if err != nil {
+		return acpclient.PromptResult{}, err
+	}
+	hasAttachmentContext := len(input.AttachmentReferences) > 0 && len(promptResources(input)) > 0
+	if strings.TrimSpace(input.Prompt) == "" && len(input.Images) == 0 && !hasAttachmentContext {
+		return acpclient.PromptResult{}, acpclient.ErrPromptRequired
 	}
 
 	p.reapIdle(time.Now())
@@ -585,11 +593,24 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 	unregisterToolSink := p.registerToolEventSink(input, toolSink)
 	defer unregisterToolSink()
 
-	result, err := sess.PromptWithToolContextOptions(ctx, input.Prompt, promptResources(input), toolCtx, acpclient.PromptOptions{
-		ToolOutputLimit: input.ToolOutputLimit,
-	}, toolSink)
+	resources := promptResources(input)
+	options := acpclient.PromptOptions{
+		ToolOutputLimit:   input.ToolOutputLimit,
+		Images:            input.Images,
+		AllowResourceOnly: len(input.AttachmentReferences) > 0 && len(resources) > 0,
+	}
+	result, err := sess.PromptWithToolContextOptions(ctx, input.Prompt, resources, toolCtx, options, toolSink)
+	if errors.Is(err, acpclient.ErrImagePromptUnsupported) && len(options.Images) > 0 && input.CanFallbackImagesToFiles {
+		options.Images = nil
+		result, err = sess.PromptWithToolContextOptions(ctx, input.Prompt, resources, toolCtx, options, toolSink)
+	}
 	toolSink.ApplyToResult(&result)
 	if err != nil {
+		if errors.Is(err, acpclient.ErrImagePromptUnsupported) ||
+			errors.Is(err, acpclient.ErrInvalidPromptImage) ||
+			errors.Is(err, acpclient.ErrPromptRequired) {
+			return result, false, err
+		}
 		// Prompt failures usually indicate the ACP process is in a bad state
 		// (transport hang, agent crash); drop the runtime so the next call
 		// starts fresh.

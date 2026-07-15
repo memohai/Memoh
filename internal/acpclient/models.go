@@ -16,6 +16,8 @@ var (
 	ErrSessionNotInitialized     = errors.New("ACP session is not initialized")
 	ErrSessionClosed             = errors.New("ACP session is closed")
 	ErrPromptRequired            = errors.New("prompt is required")
+	ErrImagePromptUnsupported    = errors.New("ACP agent does not support image prompts")
+	ErrInvalidPromptImage        = errors.New("invalid ACP prompt image")
 )
 
 type ModelInfo struct {

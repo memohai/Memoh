@@ -72,9 +72,27 @@ func (p *Provider) Delete(ctx context.Context, key string) error {
 	return client.DeleteFile(ctx, containerPath, false)
 }
 
-// AccessPath returns the container-internal path for a storage key.
-func (*Provider) AccessPath(key string) string {
-	_, sub := splitRoutingKey(key)
+// AccessPath returns a path in the workspace consumer's filesystem namespace.
+// Container workspaces use the stable /data mount; trusted local workspaces
+// need the corresponding absolute host path because ACP processes run directly
+// in the host namespace.
+func (p *Provider) AccessPath(ctx context.Context, key string) string {
+	botID, sub := splitRoutingKey(key)
+	if p != nil && p.clients != nil {
+		if infos, ok := p.clients.(bridge.WorkspaceInfoProvider); ok {
+			info, err := infos.WorkspaceInfo(ctx, botID)
+			if err != nil {
+				return ""
+			}
+			if info.Backend == bridge.WorkspaceBackendLocal {
+				root := strings.TrimSpace(info.DefaultWorkDir)
+				if root == "" || !filepath.IsAbs(root) {
+					return ""
+				}
+				return filepath.Join(root, containerMediaRoot, sub)
+			}
+		}
+	}
 	return attachmentpkg.MediaAccessPath(sub)
 }
 

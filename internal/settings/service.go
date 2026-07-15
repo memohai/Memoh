@@ -717,16 +717,6 @@ func validateChatRuntimeSettings(botMetadata []byte, current Settings) error {
 	if current.ChatRuntime != ChatRuntimeACPAgent {
 		return nil
 	}
-	if strings.TrimSpace(current.ChatModelID) == "" {
-		return acpfeedback.New(
-			acpfeedback.CodeInvalidChatRuntime,
-			"missing_chat_model_id",
-			400,
-			"chat.acp.invalidChatRuntime",
-			"chat_model_id is required when chat_runtime is acp_agent",
-			nil,
-		)
-	}
 	agentID := acpprofile.NormalizeAgentID(current.ChatACPAgentID)
 	if agentID == "" {
 		return acpfeedback.New(

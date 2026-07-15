@@ -96,7 +96,7 @@ func (s *MemoryAttachmentStore) GetByStorageKey(_ context.Context, botID, storag
 	return stored.asset, nil
 }
 
-func (*MemoryAttachmentStore) AccessPath(asset media.Asset) string {
+func (*MemoryAttachmentStore) AccessPath(_ context.Context, asset media.Asset) string {
 	return "/data/media/" + strings.TrimSpace(asset.StorageKey)
 }
 

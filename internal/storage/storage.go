@@ -7,9 +7,14 @@ import (
 	"io"
 )
 
-// ErrContainerFileNotSupported is returned when no underlying provider
-// implements ContainerFileOpener.
-var ErrContainerFileNotSupported = errors.New("provider does not support workspace file reading")
+var (
+	// ErrContainerFileNotSupported is returned when no underlying provider
+	// implements ContainerFileOpener.
+	ErrContainerFileNotSupported = errors.New("provider does not support workspace file reading")
+	// ErrAccessPathUnavailable means the stored bytes cannot currently be made
+	// addressable in the target consumer's filesystem namespace.
+	ErrAccessPathUnavailable = errors.New("storage object has no consumer-accessible path")
+)
 
 // Provider abstracts object storage operations.
 type Provider interface {
@@ -19,9 +24,17 @@ type Provider interface {
 	Open(ctx context.Context, key string) (io.ReadCloser, error)
 	// Delete removes the object at key.
 	Delete(ctx context.Context, key string) error
-	// AccessPath returns a consumer-accessible reference for a storage key.
-	// The format depends on the backend (e.g. container path, signed URL).
-	AccessPath(key string) string
+	// AccessPath returns a consumer-accessible reference for a storage key, or
+	// an empty string when no reachable reference can be resolved. Resolution
+	// may perform I/O and must honor ctx. The format depends on the backend
+	// (e.g. container path, signed URL).
+	AccessPath(ctx context.Context, key string) string
+}
+
+// AccessPathEnsurer is implemented by providers that can materialize an object
+// into consumer-addressable storage before returning its path.
+type AccessPathEnsurer interface {
+	EnsureAccessPath(ctx context.Context, key string) (string, error)
 }
 
 // ContainerFileOpener is an optional interface that providers can implement

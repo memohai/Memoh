@@ -71,6 +71,7 @@ type ConversationSettingsReader interface {
 // gatewayAssetLoader resolves content_hash references to binary payloads for gateway dispatch.
 type gatewayAssetLoader interface {
 	OpenForGateway(ctx context.Context, botID, contentHash string) (reader io.ReadCloser, mime string, err error)
+	AccessPathForGateway(ctx context.Context, botID, contentHash string) (string, error)
 }
 
 type botChannelConfigReader interface {

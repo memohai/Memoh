@@ -1606,11 +1606,11 @@ func (a *mediaAssetResolverAdapter) GetByStorageKey(ctx context.Context, botID, 
 	return a.media.GetByStorageKey(ctx, botID, storageKey)
 }
 
-func (a *mediaAssetResolverAdapter) AccessPath(asset media.Asset) string {
+func (a *mediaAssetResolverAdapter) AccessPath(ctx context.Context, asset media.Asset) string {
 	if a == nil || a.media == nil {
 		return ""
 	}
-	return a.media.AccessPath(asset)
+	return a.media.AccessPath(ctx, asset)
 }
 
 func (a *mediaAssetResolverAdapter) IngestContainerFile(ctx context.Context, botID, containerPath string) (messaging.AssetMeta, error) {
@@ -1633,6 +1633,21 @@ func (a *gatewayAssetLoaderAdapter) OpenForGateway(ctx context.Context, botID, c
 		return nil, "", err
 	}
 	return reader, strings.TrimSpace(asset.Mime), nil
+}
+
+func (a *gatewayAssetLoaderAdapter) AccessPathForGateway(ctx context.Context, botID, contentHash string) (string, error) {
+	if a == nil || a.media == nil {
+		return "", errors.New("media service not configured")
+	}
+	asset, err := a.media.Resolve(ctx, botID, contentHash)
+	if err != nil {
+		return "", err
+	}
+	accessPath, err := a.media.EnsureAccessPath(ctx, asset)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(accessPath), nil
 }
 
 type commandSkillLoaderAdapter struct {

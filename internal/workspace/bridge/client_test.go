@@ -1,12 +1,15 @@
 package bridge
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +25,18 @@ import (
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 	"github.com/memohai/memoh/internal/workspace/bridgesvc"
 )
+
+type failAfterDataReader struct {
+	sent bool
+}
+
+func (r *failAfterDataReader) Read(p []byte) (int, error) {
+	if r.sent {
+		return 0, errors.New("injected reader failure")
+	}
+	r.sent = true
+	return copy(p, "replacement"), nil
+}
 
 const testBufSize = 1 << 20
 
@@ -215,6 +230,61 @@ func TestClientReadRawSupportsEmptyFile(t *testing.T) {
 	}
 	if len(data) != 0 {
 		t.Fatalf("expected empty payload, got %q", string(data))
+	}
+}
+
+func TestClientWriteRawSupportsEmptyFile(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	client := newTestClient(t, bridgesvc.New(bridgesvc.Options{
+		DefaultWorkDir: root,
+		WorkspaceRoot:  root,
+		DataMount:      "/data",
+	}))
+	if _, err := client.WriteRaw(context.Background(), "/data/media/empty.txt", bytes.NewReader(nil)); err != nil {
+		t.Fatalf("WriteRaw() error = %v", err)
+	}
+	info, err := os.Stat(filepath.Join(root, "media", "empty.txt"))
+	if err != nil {
+		t.Fatalf("stat empty file: %v", err)
+	}
+	if info.Size() != 0 {
+		t.Fatalf("empty file size = %d, want 0", info.Size())
+	}
+}
+
+func TestClientWriteRawDoesNotReplaceTargetOnReaderFailure(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	target := filepath.Join(root, "media", "asset.txt")
+	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("original"), 0o600); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	client := newTestClient(t, bridgesvc.New(bridgesvc.Options{
+		DefaultWorkDir: root,
+		WorkspaceRoot:  root,
+		DataMount:      "/data",
+	}))
+	if _, err := client.WriteRaw(context.Background(), "/data/media/asset.txt", &failAfterDataReader{}); err == nil {
+		t.Fatal("WriteRaw() error = nil, want reader failure")
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		data, readErr := os.ReadFile(target) //nolint:gosec // G304: target is constructed under t.TempDir.
+		temps, globErr := filepath.Glob(filepath.Join(filepath.Dir(target), ".asset.txt.tmp-*"))
+		if readErr == nil && globErr == nil && string(data) == "original" && len(temps) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("atomic write cleanup: data=%q readErr=%v globErr=%v temps=%v", data, readErr, globErr, temps)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
