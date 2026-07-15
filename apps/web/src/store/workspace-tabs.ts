@@ -1498,6 +1498,75 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     })
   }
 
+  // GUI tools should keep the conversation visible on the left and reserve the
+  // first region to its right for the live Desktop. Bottom terminal groups do
+  // not count as editor regions, and a below-only split must not be mistaken for
+  // the requested right-side region.
+  function openDisplayForAgentUse() {
+    if (!hasCurrentPermission('manage')) return
+    const dock = api.value
+    if (!dock) return
+
+    const primaryGroup = dock.groups.find(group => !isTerminalOnlyGroup(group))
+    if (!primaryGroup) {
+      openDisplay()
+      return
+    }
+
+    const adjacentRight = dock.adjacentGroupInDirection(primaryGroup, 'right')
+    const secondaryGroup = adjacentRight && !isTerminalOnlyGroup(adjacentRight)
+      ? adjacentRight
+      : undefined
+    const existingDisplays = dock.panels.filter(panel => panelComponentOf(panel.id) === 'display')
+    const existing = existingDisplays[0]
+    let targetDisplay = existing
+
+    if (secondaryGroup) {
+      const displayInSecondary = secondaryGroup.panels.find(
+        panel => panelComponentOf(panel.id) === 'display',
+      )
+      if (displayInSecondary) {
+        targetDisplay = displayInSecondary
+        focusPanel(displayInSecondary)
+      }
+      else if (existing) {
+        existing.api.moveTo({ group: secondaryGroup, position: 'center' })
+        focusPanel(existing)
+      }
+      else {
+        dock.addPanel({
+          id: DISPLAY_PANEL_ID,
+          component: 'display',
+          title: i18n.global.t('chat.display.title'),
+          renderer: 'always',
+          position: { referenceGroup: secondaryGroup.id, direction: 'within' },
+        })
+      }
+    }
+    else if (existing) {
+      // Desktop is a singleton. When it is still a tab in the only editor
+      // region, move that live panel to a new right split instead of reconnecting
+      // a duplicate viewer.
+      if (existing.group.id !== primaryGroup.id || primaryGroup.panels.length > 1) {
+        existing.api.moveTo({ group: primaryGroup, position: 'right' })
+      }
+      focusPanel(existing)
+    }
+    else {
+      dock.addPanel({
+        id: DISPLAY_PANEL_ID,
+        component: 'display',
+        title: i18n.global.t('chat.display.title'),
+        renderer: 'always',
+        position: { referenceGroup: primaryGroup.id, direction: 'right' },
+      })
+    }
+
+    for (const extra of existingDisplays) {
+      if (extra !== targetDisplay) extra.api.close()
+    }
+  }
+
   function uniqueSplitPanelId(baseId: string): string {
     const dock = api.value
     if (!dock) return baseId
@@ -1952,6 +2021,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     pinPanel(panel.id)
     syncChatTitles()
   })
+
+  watch(() => chatStore.guiToolUseRequested, (request) => {
+    if (!request || request.botId !== (currentBotId.value ?? '').trim()) return
+    openDisplayForAgentUse()
+  }, { flush: 'sync' })
 
   // `/new` can finish resolving Agent defaults after focus has moved to a
   // different split. The workspace owns the final Draft panel id because a
