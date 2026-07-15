@@ -61,8 +61,12 @@
 // - 动作语义分两层:面板只拥有"复制并打开"与过期后的"重新获取"(emit retry);
 //   "取消整个流程"属于 caller 的入口控件(providers 页是行上的 Connect↔Cancel
 //   开关) —— 两个动作语义不同,不是重复,不要合并或砍掉其中一个。
-// - 复制并打开的顺序有讲究:新标签页必须在用户手势内同步打开(等剪贴板 Promise
-//   回来再 open 会被弹窗拦截),所以先开空白页占位,复制失败再收回、只报错不跳转。
+// - "复制并打开"顺序是【先发起复制、再同步打开,两行都不 await】:趁当前页仍
+//   聚焦时先发起 writeText(失焦会让 Chromium 复制失败),紧接着同步 open(仍在
+//   手势内、不被 popup blocker 拦、也不等剪贴板结果)。绝不能反过来"先开空白页
+//   占位再 await 剪贴板"—— 那样既失焦让复制失败,又在权限弹窗挂起时把用户永久
+//   留在 about:blank 白屏、还带离能看见权限提示和 device code 的原页面。复制成败
+//   只 toast,失败也不致命(码 select-all 展示着可手选)。详见 copyAndOpen 实现。
 // - 倒计时是面板唯一的活性信号(不放 spinner 行;授权轮询是 caller 的事,静默),
 //   秒级 ticker 带页面可见性守卫,后台 tab 不空转,回前台立即校准。
 // - 防钓鱼提示归属 caller 的 hint 文案(ACP 的 hint 即含警示语);面板不内置,
@@ -150,23 +154,29 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 
-async function copyAndOpen() {
+function copyAndOpen() {
   const userCode = props.code.trim()
   const verificationUri = props.verificationUri.trim()
   if (!userCode || !verificationUri) return
 
-  const tab = window.open('', '_blank')
-  const copied = await copyText(userCode)
-  if (!copied) {
-    tab?.close()
-    toast.error(t('deviceCode.copyFailed'))
-    return
-  }
-  if (tab) {
-    tab.location.href = verificationUri
-    tab.focus()
-    return
-  }
+  // 复制在前、打开在后,两行都不 await —— 这个顺序是刻意的,别调换:
+  //
+  // ① 复制必须在 window.open 之前【发起】。Chromium 的 writeText 要求发起文档
+  //    处于 focused;window.open 一开新标签页就把焦点夺走,之后再复制会以
+  //    NotAllowedError(Document is not focused)失败。趁焦点还在当前页时先发
+  //    起复制,成功率最高。
+  // ② 但复制【不能 await】。若 await 复制再 open,一来 open 脱离用户手势会被
+  //    popup blocker 拦;二来剪贴板权限弹窗会把 Promise 无限期挂住,页面就卡着
+  //    不跳转。所以 open 紧跟其后同步执行,仍在手势内、不被拦,且不等复制结果。
+  // ③ 复制成败只反馈 toast,绝不影响是否打开。失败也不致命:device code 一直
+  //    select-all 展示着,用户单击整段选中手动复制即可 —— 自动复制是锦上添花。
+  //
+  // 曾经的错误写法是"先开 about:blank 占位页 → await copyText → 再把占位页导航
+  // 过去":既失焦让复制失败,又在权限挂起时把用户永久留在白屏、还带离了能看见
+  // 权限提示和 device code 的原页面。别再回到那个方向。
+  void copyText(userCode).then((copied) => {
+    if (!copied) toast.error(t('deviceCode.copyFailed'))
+  })
   window.open(verificationUri, '_blank')
 }
 </script>
