@@ -107,18 +107,27 @@ func TestClassifyChannelCommandAddressingForms(t *testing.T) {
 
 func TestClassifyChannelCommandForOtherBotIsIgnored(t *testing.T) {
 	t.Parallel()
-	decision := Classify(ClassifyInput{
-		Text:       "/new@otherbot discuss",
-		Surface:    SurfaceChannel,
-		IsGroup:    true,
-		Directed:   true,
-		BotAliases: []string{"memoh1bot"},
-		KnownCommand: func(resource string) bool {
-			return resource == "new"
-		},
-	})
-	if decision.Kind != DecisionRejectNoop {
-		t.Fatalf("decision = %#v, want reject noop", decision)
+
+	for _, text := range []string{
+		"@otherbot /new discuss",
+		"/new@otherbot discuss",
+	} {
+		t.Run(text, func(t *testing.T) {
+			t.Parallel()
+			decision := Classify(ClassifyInput{
+				Text:       text,
+				Surface:    SurfaceChannel,
+				IsGroup:    true,
+				Directed:   true,
+				BotAliases: []string{"memoh1bot"},
+				KnownCommand: func(resource string) bool {
+					return resource == "new"
+				},
+			})
+			if decision.Kind != DecisionRejectNoop || decision.Directed {
+				t.Fatalf("decision = %#v, want undirected reject noop", decision)
+			}
+		})
 	}
 }
 

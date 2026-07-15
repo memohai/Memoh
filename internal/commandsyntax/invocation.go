@@ -79,8 +79,11 @@ func ParseInvocation(input InvocationInput) (Invocation, error) {
 			addressing = append(addressing, token.Value)
 		}
 	}
-	if commandIndex < 0 || (commandIndex > 0 && !addressed) {
+	if commandIndex < 0 {
 		return Invocation{}, ErrNotCommand
+	}
+	if commandIndex > 0 && !addressed {
+		return Invocation{}, ErrCommandForOtherBot
 	}
 
 	commandText := strings.TrimSpace(raw[tokens[commandIndex].Start:])

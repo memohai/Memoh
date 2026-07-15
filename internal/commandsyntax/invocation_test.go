@@ -66,7 +66,7 @@ func TestParseInvocationRejectsWrongAddressing(t *testing.T) {
 		err  error
 	}{
 		{name: "ordinary text", text: "hello /new", err: ErrNotCommand},
-		{name: "other leading mention", text: "@otherbot /new", err: ErrNotCommand},
+		{name: "other leading mention", text: "@otherbot /new", err: ErrCommandForOtherBot},
 		{name: "other command suffix", text: "/new@otherbot", err: ErrCommandForOtherBot},
 	}
 	for _, tt := range tests {
