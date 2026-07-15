@@ -21,7 +21,7 @@
     "tip": "New here? {help} shows what I can do. {new} starts a clean slate anytime."
   },
   "groupCommand": {
-    "telegramTip": "Group chat: include {bot} immediately after the command, as shown above, so Telegram sends it to me."
+    "telegramTip": "Group chat: when typing a command manually, address it to me, for example {example}."
   },
   "newSession": {
     "title": "✨ New {mode} started.",
@@ -187,7 +187,7 @@
         "approve": "approve the latest or specified pending tool call",
         "reject": "reject the latest or specified pending tool call"
       },
-      "globalHint": "Tap a command above to run it. To see a command's actions, type {example}.",
+      "globalHint": "Tap a command above to run it.",
       "runForDetails": "Run {command} for details.",
       "summaryLabel": "Summary:",
       "usageLabel": "Usage:",

@@ -104,8 +104,8 @@ type ExecuteInput struct {
 	ThreadID         string
 	RouteID          string
 	SessionID        string
-	// CommandTarget optionally scopes command links to a bot username. Channel
-	// callers set it only where /command@bot is the native addressing grammar.
+	// CommandTarget optionally identifies the bot username for transport-specific
+	// command guidance. Channel callers set it only for Telegram group messages.
 	CommandTarget string
 	// Locale optionally pins the command-UI locale. When empty, ExecuteResult
 	// resolves it from the bot's command_ui_language setting (auto → en).

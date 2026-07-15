@@ -21,7 +21,7 @@
     "tip": "第一次来？用 {help} 看看我能做什么；想从头开始，随时用 {new}。"
   },
   "groupCommand": {
-    "telegramTip": "群聊提示：请像上面这样在命令后紧跟 {bot}，Telegram 才会把命令发送给我。"
+    "telegramTip": "群聊提示：手动输入命令时请明确发给我，例如 {example}。"
   },
   "newSession": {
     "title": "✨ 已开启新{mode}。",
@@ -187,7 +187,7 @@
         "approve": "批准待执行的工具调用",
         "reject": "拒绝待执行的工具调用"
       },
-      "globalHint": "点击上面的命令即可执行；要查看某个命令的操作，请输入 {example}。",
+      "globalHint": "点击上面的命令即可执行。",
       "runForDetails": "运行 {command} 查看详情。",
       "summaryLabel": "说明：",
       "usageLabel": "用法：",

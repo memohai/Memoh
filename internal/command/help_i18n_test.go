@@ -43,9 +43,9 @@ func TestHelpUsesCommandTarget(t *testing.T) {
 		t.Fatal("nil result")
 	}
 	for _, want := range []string{
-		"/help@snowluocat_bot — show this help",
-		"/link@snowluocat_bot — Link this account",
-		"`/help@snowluocat_bot model`",
+		"/help — show this help",
+		"/link — Link this account",
+		"for example `/help@snowluocat_bot`",
 	} {
 		if !strings.Contains(res.Text, want) {
 			t.Fatalf("addressed help missing %q:\n%s", want, res.Text)
@@ -53,6 +53,9 @@ func TestHelpUsesCommandTarget(t *testing.T) {
 	}
 	if strings.Contains(res.Text, "group's actions") || strings.Contains(res.Text, "<group>") {
 		t.Fatalf("addressed help leaked internal group terminology:\n%s", res.Text)
+	}
+	if count := strings.Count(res.Text, "snowluocat_bot"); count != 1 {
+		t.Fatalf("addressed help repeats bot username %d times, want once:\n%s", count, res.Text)
 	}
 }
 

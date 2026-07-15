@@ -128,24 +128,25 @@ func (r *Registry) RegisterGroup(group *CommandGroup) {
 	r.order = append(r.order, group.Name)
 }
 
-// GlobalHelp returns the top-level help text listing all commands. Commands are
-// plain tokens so Telegram renders them as tap-to-send; when commandTarget is
-// present, each token uses Telegram's explicit /command@bot group grammar.
+// GlobalHelp returns the top-level help text listing all commands. Commands stay
+// short, plain, and tap-to-send; Telegram's manual /command@bot rule appears
+// once below the list instead of repeating the username on every row.
 func (r *Registry) GlobalHelp(t *i18n.Localizer, commandTarget string) string {
 	t = helpLocalizer(t)
 	var b strings.Builder
 	b.WriteString(MdBold(t.T("cmd.help.availableCommands")) + "\n\n")
-	b.WriteString("- " + CommandText("help", commandTarget) + " — " + t.T("cmd.help.top.help") + "\n")
-	b.WriteString("- " + CommandText("start", commandTarget) + " — " + t.T("cmd.help.top.start") + "\n")
-	b.WriteString("- " + CommandText("new", commandTarget) + " — " + t.T("cmd.help.top.new") + "\n")
-	b.WriteString("- " + CommandText("stop", commandTarget) + " — " + t.T("cmd.help.top.stop") + "\n")
+	b.WriteString("- " + CommandText("help", "") + " — " + t.T("cmd.help.top.help") + "\n")
+	b.WriteString("- " + CommandText("start", "") + " — " + t.T("cmd.help.top.start") + "\n")
+	b.WriteString("- " + CommandText("new", "") + " — " + t.T("cmd.help.top.new") + "\n")
+	b.WriteString("- " + CommandText("stop", "") + " — " + t.T("cmd.help.top.stop") + "\n")
 	for _, name := range r.order {
 		group := r.groups[name]
-		fmt.Fprintf(&b, "- %s — %s\n", CommandText(group.Name, commandTarget), commandDescription(t, group))
+		fmt.Fprintf(&b, "- %s — %s\n", CommandText(group.Name, ""), commandDescription(t, group))
 	}
-	b.WriteString("\n" + t.T("cmd.help.globalHint", map[string]any{
-		"example": MdCode(CommandText("help model", commandTarget)),
-	}))
+	b.WriteString("\n" + t.T("cmd.help.globalHint"))
+	if tip := TelegramGroupCommandTip(t, commandTarget); tip != "" {
+		b.WriteString("\n" + tip)
+	}
 	return strings.TrimRight(b.String(), "\n")
 }
 

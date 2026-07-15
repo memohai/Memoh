@@ -1,8 +1,11 @@
 package command
 
 import (
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/memohai/memoh/internal/i18n"
 )
 
 func TestCommandText(t *testing.T) {
@@ -23,6 +26,16 @@ func TestCommandText(t *testing.T) {
 				t.Fatalf("CommandText(%q, %q) = %q, want %q", tt.command, tt.target, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestTelegramGroupCommandTip(t *testing.T) {
+	got := TelegramGroupCommandTip(i18n.New("en"), "@snowluocat_bot")
+	if !strings.Contains(got, "`/help@snowluocat_bot`") {
+		t.Fatalf("TelegramGroupCommandTip() = %q", got)
+	}
+	if got := TelegramGroupCommandTip(i18n.New("en"), ""); got != "" {
+		t.Fatalf("TelegramGroupCommandTip(empty) = %q, want empty", got)
 	}
 }
 

@@ -288,13 +288,16 @@ func TestFormatStartWelcomeMessage(t *testing.T) {
 func TestFormatStartWelcomeMessageTelegramGroup(t *testing.T) {
 	got := formatStartWelcomeMessage(i18n.New("en"), "snowluocat_bot")
 	for _, want := range []string{
-		"/help@snowluocat_bot shows what I can do.",
-		"/new@snowluocat_bot starts a clean slate anytime.",
-		"include @snowluocat_bot immediately after the command",
+		"/help shows what I can do.",
+		"/new starts a clean slate anytime.",
+		"for example `/help@snowluocat_bot`",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Telegram group welcome missing %q:\n%s", want, got)
 		}
+	}
+	if count := strings.Count(got, "snowluocat_bot"); count != 1 {
+		t.Errorf("Telegram group welcome repeats bot username %d times, want once:\n%s", count, got)
 	}
 }
 
@@ -352,13 +355,16 @@ func TestFormatNewSessionMessageTelegramGroup(t *testing.T) {
 		ChatModel: "Claude Opus 4.7 (Anthropic)",
 	}, "@snowluocat_bot")
 	for _, want := range []string{
-		"/model@snowluocat_bot",
-		"/reasoning@snowluocat_bot",
-		"include @snowluocat_bot immediately after the command",
+		"/model",
+		"/reasoning",
+		"for example `/help@snowluocat_bot`",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Telegram group new-session message missing %q:\n%s", want, got)
 		}
+	}
+	if count := strings.Count(got, "snowluocat_bot"); count != 1 {
+		t.Errorf("Telegram group new-session message repeats bot username %d times, want once:\n%s", count, got)
 	}
 }
 

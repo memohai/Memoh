@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/memohai/memoh/internal/i18n"
 )
 
 // humanizeTime renders a timestamp relative to now ("just now", "5m ago",
@@ -136,6 +138,19 @@ func CommandText(cmd, botUsername string) string {
 		parts[0] += "@" + username
 	}
 	return "/" + strings.Join(parts, " ")
+}
+
+// TelegramGroupCommandTip explains the one transport-specific rule users need
+// when typing commands manually. Command lists stay visually clean; the bot
+// username appears once in this complete, copyable example.
+func TelegramGroupCommandTip(t *i18n.Localizer, botUsername string) string {
+	username := strings.TrimPrefix(strings.TrimSpace(botUsername), "@")
+	if username == "" {
+		return ""
+	}
+	return t.T("groupCommand.telegramTip", map[string]any{
+		"example": MdCode(CommandText("help", username)),
+	})
 }
 
 // CmdRef renders a slash-command reference as a tap-to-copy code span: on

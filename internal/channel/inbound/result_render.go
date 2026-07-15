@@ -64,8 +64,8 @@ func formatStartWelcomeMessage(t *i18n.Localizer, botUsername string) string {
 	b.WriteString("\n\n")
 	b.WriteString(t.T("startWelcome.intro"))
 	fmt.Fprintf(&b, "\n\n%s", t.T("startWelcome.tip", map[string]any{
-		"new":  command.CommandText("new", botUsername),
-		"help": command.CommandText("help", botUsername),
+		"new":  command.CommandText("new", ""),
+		"help": command.CommandText("help", ""),
 	}))
 	appendTelegramGroupCommandTip(&b, t, botUsername)
 	return b.String()
@@ -82,8 +82,8 @@ func formatNewSessionMessage(t *i18n.Localizer, modeLabel string, cc command.Cur
 	b.WriteString(command.MdBold(t.T("newSession.title", map[string]any{"mode": modeLabel})))
 	appendCurrentContextLines(&b, t, cc)
 	fmt.Fprintf(&b, "\n\n%s", t.T("newSession.tip", map[string]any{
-		"model":     command.CommandText("model", botUsername),
-		"reasoning": command.CommandText("reasoning", botUsername),
+		"model":     command.CommandText("model", ""),
+		"reasoning": command.CommandText("reasoning", ""),
 	}))
 	appendTelegramGroupCommandTip(&b, t, botUsername)
 	return b.String()
@@ -101,13 +101,9 @@ func telegramGroupBotUsername(msg channel.InboundMessage) string {
 }
 
 func appendTelegramGroupCommandTip(b *strings.Builder, t *i18n.Localizer, botUsername string) {
-	username := strings.TrimPrefix(strings.TrimSpace(botUsername), "@")
-	if username == "" {
-		return
+	if tip := command.TelegramGroupCommandTip(t, botUsername); tip != "" {
+		fmt.Fprintf(b, "\n\n%s", tip)
 	}
-	fmt.Fprintf(b, "\n\n%s", t.T("groupCommand.telegramTip", map[string]any{
-		"bot": "@" + username,
-	}))
 }
 
 // localizer resolves the command-UI Localizer for a bot, used for renderer
