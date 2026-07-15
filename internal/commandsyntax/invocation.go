@@ -50,8 +50,8 @@ type textRange struct {
 
 // ParseInvocation normalizes supported channel addressing forms and parses the
 // resulting command exactly once. It recognizes "@bot /command",
-// "/command@bot", and standalone mentions of the current bot around arguments.
-// Quoted mentions are data and are never removed.
+// "/command@bot", mentions attached to unquoted arguments, and standalone
+// mentions of the current bot. Quoted mentions are data and are never removed.
 func ParseInvocation(input InvocationInput) (Invocation, error) {
 	raw := strings.TrimSpace(input.Text)
 	if raw == "" {
@@ -107,12 +107,23 @@ func ParseInvocation(input InvocationInput) (Invocation, error) {
 	}
 
 	for _, token := range commandTokens[1:] {
-		if token.Quoted || !isMentionToken(token.Value) || !aliasMatchesInvocation(token.Value, input.BotAliases) {
+		if token.Quoted {
 			continue
 		}
-		removals = append(removals, mentionRemovalRange(commandText, token))
-		addressed = true
-		addressing = append(addressing, token.Value)
+		if isMentionToken(token.Value) && aliasMatchesInvocation(token.Value, input.BotAliases) {
+			removals = append(removals, mentionRemovalRange(commandText, token))
+			addressed = true
+			addressing = append(addressing, token.Value)
+			continue
+		}
+		// Whitespace separates ordinary arguments, but an exact @current_bot suffix
+		// is an IM addressing token even when the user glues it to the preceding
+		// value. Other @suffixes remain untouched, and quoting always wins above.
+		if at := strings.LastIndexByte(token.Value, '@'); at > 0 && aliasMatchesInvocation(token.Value[at+1:], input.BotAliases) {
+			removals = append(removals, textRange{Start: token.Start + at, End: token.End})
+			addressed = true
+			addressing = append(addressing, "@"+token.Value[at+1:])
+		}
 	}
 
 	commandText = strings.TrimSpace(removeTextRanges(commandText, removals))

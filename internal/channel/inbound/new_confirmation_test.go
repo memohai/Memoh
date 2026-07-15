@@ -116,6 +116,7 @@ func TestResolveNewSessionSpecCanonicalBotMentionIsNotAnAgent(t *testing.T) {
 		"/new discuss @alice @memoh1bot",
 		"@memoh1bot /new discuss",
 		"/new@memoh1bot discuss",
+		"/new discuss@memoh1bot",
 	} {
 		t.Run(text, func(t *testing.T) {
 			t.Parallel()
@@ -151,7 +152,7 @@ func TestChannelSlashAliasesExcludeSenderAndReplyTarget(t *testing.T) {
 }
 
 func TestHandleInboundNewCommandIgnoresCurrentBotMentionArguments(t *testing.T) {
-	for _, text := range []string{"/new @memoh1bot", "/new discuss @memoh1bot"} {
+	for _, text := range []string{"/new @memoh1bot", "/new discuss @memoh1bot", "/new discuss@memoh1bot"} {
 		t.Run(text, func(t *testing.T) {
 			channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channel-identity-1"}}
 			chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}

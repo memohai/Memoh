@@ -78,6 +78,7 @@ func TestClassifyChannelCommandAddressingForms(t *testing.T) {
 	}{
 		{name: "leading mention", text: "@memoh1bot /new discuss", want: "/new discuss"},
 		{name: "command suffix", text: "/new@memoh1bot discuss", want: "/new discuss"},
+		{name: "action suffix", text: "/new discuss@memoh1bot", want: "/new discuss"},
 		{name: "mention after command", text: "/new @memoh1bot", want: "/new"},
 		{name: "mention after action", text: "/new discuss @memoh1bot", want: "/new discuss"},
 		{name: "multiple leading mentions", text: "@alice @memoh1bot /new discuss", want: "/new discuss"},
