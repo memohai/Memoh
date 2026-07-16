@@ -2,58 +2,28 @@
   <PageShell
     variant="tab"
     :title="t('bots.remoteRuntime.title')"
-    :description="t('bots.remoteRuntime.description')"
   >
-    <template #actions>
-      <Button @click="openAddDialog">
-        <Plus class="size-4" />
-        {{ t('bots.remoteRuntime.addComputer') }}
-      </Button>
-    </template>
-
-    <SettingsSection :title="t('bots.remoteRuntime.workspaceTitle')">
-      <InlineLoadingRow
-        v-if="initialLoading"
-        surface="card-row"
+    <div class="space-y-8">
+      <SettingsSection
+        v-if="!loadFailed"
+        :title="t('bots.remoteRuntime.primary')"
       >
-        {{ t('bots.remoteRuntime.loading') }}
-      </InlineLoadingRow>
-
-      <SettingsRow
-        v-else-if="loadFailed"
-        :label="t('bots.remoteRuntime.loadFailed')"
-        :description="t('bots.remoteRuntime.loadFailedDescription')"
-      >
-        <Button
-          variant="outline"
-          size="sm"
-          @click="retry"
+        <InlineLoadingRow
+          v-if="initialLoading"
+          surface="card-row"
         >
-          {{ t('runtimes.retry') }}
-        </Button>
-      </SettingsRow>
-
-      <template v-else>
-        <SettingsRow
-          v-if="showThisComputerSetup"
-          stack="sm"
-          :label="t('bots.remoteRuntime.thisComputerOff')"
-          :description="t('bots.remoteRuntime.thisComputerOffDescription')"
-        >
-          <Button
-            variant="outline"
-            size="sm"
-            @click="openComputers"
-          >
-            {{ t('bots.remoteRuntime.openComputerSettings') }}
-          </Button>
-        </SettingsRow>
+          {{ t('bots.remoteRuntime.loading') }}
+        </InlineLoadingRow>
 
         <SettingsRow
+          v-else
           stack="sm"
-          :label="t('bots.remoteRuntime.primary')"
-          :description="t('bots.remoteRuntime.primaryDescription')"
         >
+          <template #content>
+            <p class="text-xs text-muted-foreground">
+              {{ t('bots.remoteRuntime.primaryDescription') }}
+            </p>
+          </template>
           <Select
             :model-value="primaryTargetId"
             :disabled="primarySaving"
@@ -74,55 +44,105 @@
             </SelectContent>
           </Select>
         </SettingsRow>
+      </SettingsSection>
+
+      <SettingsSection :title="t('bots.remoteRuntime.workspaceTitle')">
+        <template #actions>
+          <Button
+            size="sm"
+            @click="openAddDialog"
+          >
+            <Plus class="size-4" />
+            {{ t('bots.remoteRuntime.addComputer') }}
+          </Button>
+        </template>
+
+        <InlineLoadingRow
+          v-if="initialLoading"
+          surface="card-row"
+        >
+          {{ t('bots.remoteRuntime.loading') }}
+        </InlineLoadingRow>
 
         <SettingsRow
-          v-for="target in validTargets"
-          :key="target.target_id"
-          stack="sm"
-          :label="targetName(target)"
-          :description="targetSummary(target)"
+          v-else-if="loadFailed"
+          :label="t('bots.remoteRuntime.loadFailed')"
+          :description="t('bots.remoteRuntime.loadFailedDescription')"
         >
-          <div class="flex items-center gap-2">
-            <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span
-                class="size-1.5 rounded-full"
-                :class="statusDotClass(targetStatus(target))"
-              />
-              {{ statusLabel(targetStatus(target)) }}
-            </span>
-
-            <DropdownMenu v-if="target.kind === 'remote'">
-              <DropdownMenuTrigger as-child>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  :aria-label="t('common.actions')"
-                >
-                  <MoreHorizontal class="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  v-if="canEditTarget(target)"
-                  @select="openEditDialog(target)"
-                >
-                  <Pencil class="size-4" />
-                  {{ t('common.edit') }}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator v-if="canEditTarget(target)" />
-                <DropdownMenuItem
-                  variant="destructive"
-                  @select="pendingDeleteTarget = target"
-                >
-                  <Trash2 class="size-4" />
-                  {{ t('bots.remoteRuntime.removeFromBot') }}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            @click="retry"
+          >
+            {{ t('runtimes.retry') }}
+          </Button>
         </SettingsRow>
-      </template>
-    </SettingsSection>
+
+        <template v-else>
+          <SettingsRow
+            v-if="showThisComputerSetup"
+            stack="sm"
+            :label="t('bots.remoteRuntime.thisComputerOff')"
+            :description="t('bots.remoteRuntime.thisComputerOffDescription')"
+          >
+            <Button
+              variant="outline"
+              size="sm"
+              @click="openComputers"
+            >
+              {{ t('bots.remoteRuntime.openComputerSettings') }}
+            </Button>
+          </SettingsRow>
+
+          <SettingsRow
+            v-for="target in validTargets"
+            :key="target.target_id"
+            stack="sm"
+            :label="targetName(target)"
+            :description="targetSummary(target)"
+          >
+            <div class="flex items-center gap-2">
+              <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span
+                  class="size-1.5 rounded-full"
+                  :class="statusDotClass(targetStatus(target))"
+                />
+                {{ statusLabel(targetStatus(target)) }}
+              </span>
+
+              <DropdownMenu v-if="target.kind === 'remote'">
+                <DropdownMenuTrigger as-child>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    :aria-label="t('common.actions')"
+                  >
+                    <MoreHorizontal class="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    v-if="canEditTarget(target)"
+                    @select="openEditDialog(target)"
+                  >
+                    <Pencil class="size-4" />
+                    {{ t('common.edit') }}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator v-if="canEditTarget(target)" />
+                  <DropdownMenuItem
+                    variant="destructive"
+                    @select="pendingDeleteTarget = target"
+                  >
+                    <Trash2 class="size-4" />
+                    {{ t('bots.remoteRuntime.removeFromBot') }}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </SettingsRow>
+        </template>
+      </SettingsSection>
+    </div>
   </PageShell>
 
   <Dialog v-model:open="mountDialogOpen">
