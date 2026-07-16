@@ -23,10 +23,10 @@ func TestNewDefaultServiceUsesConfiguredRuntimeType(t *testing.T) {
 	t.Parallel()
 
 	svc := NewDefaultService(slog.New(slog.DiscardHandler), nil, config.Config{
-		Containerd: config.ContainerdConfig{RuntimeType: "io.containerd.kata.v2"},
+		Containerd: config.ContainerdConfig{RuntimeType: "io.containerd.runsc.v1"},
 	})
-	if got := svc.runtimeTypeOrDefault(); got != "io.containerd.kata.v2" {
-		t.Fatalf("runtime type = %q, want io.containerd.kata.v2", got)
+	if got := svc.runtimeTypeOrDefault(); got != "io.containerd.runsc.v1" {
+		t.Fatalf("runtime type = %q, want io.containerd.runsc.v1", got)
 	}
 }
 

@@ -228,16 +228,8 @@ func (m *Manager) ClearLegacyIP(botID string) {
 	m.legacyMu.Unlock()
 }
 
-func (m *Manager) usesKataRuntime() bool {
-	provider, ok := m.service.(interface{ RuntimeType() string })
-	if !ok {
-		return false
-	}
-	return strings.Contains(strings.ToLower(strings.TrimSpace(provider.RuntimeType())), "kata")
-}
-
 func (m *Manager) usesTCPBridge(ctx context.Context, containerID string) bool {
-	return m.IsLegacyContainer(ctx, containerID) || m.usesKataRuntime()
+	return m.IsLegacyContainer(ctx, containerID)
 }
 
 // clearLegacyRoute evicts any stale TCP fallback state for a bot so future
@@ -565,11 +557,7 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 	skillEnv := skillset.ContainerEnv(skillRoots)
 	env := make([]string, 0, len(tzEnv)+1+len(skillEnv))
 	env = append(env, tzEnv...)
-	if m.usesKataRuntime() {
-		env = append(env, fmt.Sprintf("BRIDGE_TCP_ADDR=:%d", legacyGRPCPort))
-	} else {
-		env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
-	}
+	env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
 	env = m.appendBridgeTLSEnv(env)
 	if m.botDisplayEnabled(ctx, botID) {
 		env = append(env,
