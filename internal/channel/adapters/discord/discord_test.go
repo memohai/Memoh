@@ -22,6 +22,39 @@ func TestDiscordDescriptorAdvertisesRichText(t *testing.T) {
 	}
 }
 
+func TestDiscordRuntimeStateIsScopedByConfig(t *testing.T) {
+	adapter := NewDiscordAdapter(nil)
+
+	first, err := adapter.getOrCreateSession("shared-token", "config-a")
+	if err != nil {
+		t.Fatalf("create first session: %v", err)
+	}
+	firstAgain, err := adapter.getOrCreateSession("shared-token", "config-a")
+	if err != nil {
+		t.Fatalf("reuse first session: %v", err)
+	}
+	second, err := adapter.getOrCreateSession("shared-token", "config-b")
+	if err != nil {
+		t.Fatalf("create second session: %v", err)
+	}
+	if firstAgain != first {
+		t.Fatal("same config and credentials must reuse its Discord session")
+	}
+	if second == first {
+		t.Fatal("different configs must not share a Discord session even when credentials match")
+	}
+
+	if adapter.isDuplicateInbound("config-a", "message-1") {
+		t.Fatal("first config-a message must not be a duplicate")
+	}
+	if !adapter.isDuplicateInbound("config-a", "message-1") {
+		t.Fatal("repeated config-a message must be a duplicate")
+	}
+	if adapter.isDuplicateInbound("config-b", "message-1") {
+		t.Fatal("same external message ID under another config must not collide")
+	}
+}
+
 func TestDiscordDescriptorAdvertisesURLButtonsOnly(t *testing.T) {
 	t.Parallel()
 

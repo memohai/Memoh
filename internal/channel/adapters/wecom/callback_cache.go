@@ -30,8 +30,8 @@ func newCallbackContextCache(ttl time.Duration) *callbackContextCache {
 	}
 }
 
-func (c *callbackContextCache) Put(messageID string, ctx callbackContext) {
-	key := strings.TrimSpace(messageID)
+func (c *callbackContextCache) Put(configID, messageID string, ctx callbackContext) {
+	key := callbackContextCacheKey(configID, messageID)
 	if key == "" {
 		return
 	}
@@ -44,8 +44,8 @@ func (c *callbackContextCache) Put(messageID string, ctx callbackContext) {
 	c.mu.Unlock()
 }
 
-func (c *callbackContextCache) Get(messageID string) (callbackContext, bool) {
-	key := strings.TrimSpace(messageID)
+func (c *callbackContextCache) Get(configID, messageID string) (callbackContext, bool) {
+	key := callbackContextCacheKey(configID, messageID)
 	if key == "" {
 		return callbackContext{}, false
 	}
@@ -62,6 +62,15 @@ func (c *callbackContextCache) Get(messageID string) (callbackContext, bool) {
 		return callbackContext{}, false
 	}
 	return item, true
+}
+
+func callbackContextCacheKey(configID, messageID string) string {
+	configID = strings.TrimSpace(configID)
+	messageID = strings.TrimSpace(messageID)
+	if configID == "" || messageID == "" {
+		return ""
+	}
+	return configID + "\x00" + messageID
 }
 
 func (c *callbackContextCache) gcLocked() {

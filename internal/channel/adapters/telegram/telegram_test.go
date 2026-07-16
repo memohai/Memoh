@@ -596,6 +596,19 @@ func TestSeenTelegramUpdate(t *testing.T) {
 	}
 }
 
+func TestTelegramBotCacheKeyIsScopedByConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := Config{BotToken: "shared-token"}
+	first := telegramBotCacheKey(cfg, "config-a")
+	if got := telegramBotCacheKey(cfg, "config-a"); got != first {
+		t.Fatalf("same config cache key changed: %q != %q", got, first)
+	}
+	if second := telegramBotCacheKey(cfg, "config-b"); second == first {
+		t.Fatal("different configs must not share a Telegram bot cache key")
+	}
+}
+
 func TestIsTelegramMediaGroupForChat(t *testing.T) {
 	t.Parallel()
 
