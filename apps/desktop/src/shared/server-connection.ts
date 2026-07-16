@@ -39,6 +39,10 @@ export function normalizeBaseUrl(raw: string): string {
   }
   url.hash = ''
   url.search = ''
+  if (!url.pathname.endsWith('/api')) {
+    url.pathname = `${url.pathname.replace(/\/$/, '')}/api`
+  }
+
   return url.toString().replace(/\/$/, '')
 }
 
