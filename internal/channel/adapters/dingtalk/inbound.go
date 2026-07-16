@@ -203,6 +203,11 @@ func buildInboundMessage(data *chatbot.BotCallbackDataModel) (channel.InboundMes
 			"is_admin":            data.IsAdmin,
 			"session_webhook":     strings.TrimSpace(data.SessionWebhook),
 			"session_webhook_exp": data.SessionWebhookExpiredTime,
+			// DingTalk only delivers a message to the bot when it is @-mentioned
+			// (group) or a direct chat, so every inbound is bot-directed. Mark it
+			// so isDirectedAtBot lets group replies drive plain-text ask_user;
+			// without this, the group fallback silently drops answers.
+			"is_mentioned": true,
 		},
 	}, true
 }

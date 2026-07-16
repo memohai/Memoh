@@ -88,6 +88,11 @@ func buildInboundMessage(body MessageCallbackBody, reqID string) (channel.Inboun
 			"chat_id":      strings.TrimSpace(body.ChatID),
 			"chat_type":    strings.TrimSpace(body.ChatType),
 			"response_url": strings.TrimSpace(body.ResponseURL),
+			// WeCom smart-robot webhooks only fire on an @-mention (group) or a
+			// direct chat, so every delivered user message is bot-directed. Mark
+			// it so isDirectedAtBot lets group replies drive plain-text ask_user;
+			// event callbacks (buildInboundEventMessage) intentionally omit this.
+			"is_mentioned": true,
 		},
 	}
 	return msg, true

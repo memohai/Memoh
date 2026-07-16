@@ -875,6 +875,32 @@ func TestChannelInboundProcessorPlainTextUserInputIgnoresUndirectedGroupMessage(
 	}
 }
 
+// A group message that is directed at the bot (is_mentioned) must reach the
+// plain-text ask_user fallback. Guards the DingTalk/WeCom P1 fix: those
+// adapters mark @-gated group messages so group answers are not silently
+// dropped. Kept as the mirror of the undirected case above.
+func TestChannelInboundProcessorPlainTextUserInputHandlesDirectedGroupMessage(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-1", RouteID: "route-1"}}
+	gateway := &fakeChatGateway{advanceResult: userinput.AdvanceTextResult{Handled: true}}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1"}})
+	msg := channel.InboundMessage{
+		BotID: "bot-1", Channel: channel.ChannelType("wecom"), ReplyTarget: "group-id",
+		Message:      channel.Message{Text: "1"},
+		Sender:       channel.Identity{SubjectID: "ext-1"},
+		Conversation: channel.Conversation{ID: "group-1", Type: channel.ConversationTypeGroup},
+		Metadata:     map[string]any{"is_mentioned": true},
+	}
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{BotID: "bot-1", ChannelType: msg.Channel}, msg, &fakeReplySender{}); err != nil {
+		t.Fatalf("HandleInbound() error = %v", err)
+	}
+	if gateway.advanceCalls != 1 {
+		t.Fatalf("directed group message advanced user input %d times, want 1", gateway.advanceCalls)
+	}
+}
+
 func TestChannelInboundProcessorRespondReplyUsesReplyTargetAndPreservesAnswer(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{
 		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"},
