@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/config"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
 )
 
@@ -276,7 +275,7 @@ func TestBuiltinProviderCRUDErrorsWithNilService(t *testing.T) {
 func TestNewBuiltinRuntimeFromConfig_DefaultIsGraphRequiringWikiStore(t *testing.T) {
 	t.Parallel()
 	// Default mode is now graph, so without a wiki store it must error.
-	if _, err := NewBuiltinRuntimeFromConfig(nil, nil, nil, nil, defaultTestConfig(), nil); err == nil {
+	if _, err := NewBuiltinRuntimeFromConfig(nil, nil, nil, nil, nil, nil); err == nil {
 		t.Fatal("expected error for default (graph) mode without wiki store")
 	}
 }
@@ -284,7 +283,7 @@ func TestNewBuiltinRuntimeFromConfig_DefaultIsGraphRequiringWikiStore(t *testing
 func TestNewBuiltinRuntimeFromConfig_LegacyDenseConfigUsesGraphWithoutAuxIndex(t *testing.T) {
 	t.Parallel()
 	cfg := map[string]any{"memory_mode": "dense"}
-	rt, err := NewBuiltinRuntimeFromConfig(nil, cfg, nil, nil, defaultTestConfig(), newFakeWikiStore())
+	rt, err := NewBuiltinRuntimeFromConfig(nil, cfg, nil, nil, nil, newFakeWikiStore())
 	if err != nil {
 		t.Fatalf("legacy dense config should fall back to graph without auxiliary index: %v", err)
 	}
@@ -297,11 +296,7 @@ func TestNewBuiltinRuntimeFromConfig_GraphRequiresWikiStore(t *testing.T) {
 	t.Parallel()
 	cfg := map[string]any{"memory_mode": "graph"}
 	// No wiki store -> error.
-	if _, err := NewBuiltinRuntimeFromConfig(nil, cfg, nil, nil, defaultTestConfig(), nil); err == nil {
+	if _, err := NewBuiltinRuntimeFromConfig(nil, cfg, nil, nil, nil, nil); err == nil {
 		t.Fatal("expected error for graph mode without wiki store")
 	}
-}
-
-func defaultTestConfig() config.Config {
-	return config.Config{}
 }

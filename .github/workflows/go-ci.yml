@@ -10,6 +10,8 @@ on:
       - ".golangci.yml"
       - "db/postgres/queries/**/*.sql"
       - "db/postgres/migrations/**/*.sql"
+      - "db/pgvector/queries/**/*.sql"
+      - "db/pgvector/migrations/**/*.sql"
       - ".github/workflows/go-ci.yml"
   pull_request:
     branches: ["main"]
@@ -20,6 +22,8 @@ on:
       - ".golangci.yml"
       - "db/postgres/queries/**/*.sql"
       - "db/postgres/migrations/**/*.sql"
+      - "db/pgvector/queries/**/*.sql"
+      - "db/pgvector/migrations/**/*.sql"
       - ".github/workflows/go-ci.yml"
   workflow_dispatch:
 
@@ -67,3 +71,32 @@ jobs:
           name: go-coverage
           path: coverage.txt
           if-no-files-found: error
+
+  pgvector-bootstrap:
+    name: Pgvector bootstrap
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      pgvector:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_DB: memoh_vector_test
+          POSTGRES_USER: memoh
+          POSTGRES_PASSWORD: memoh123
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U memoh -d memoh_vector_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test versioned pgvector schema and queries
+        env:
+          TEST_PGVECTOR_DSN: postgres://memoh:memoh123@127.0.0.1:5432/memoh_vector_test?sslmode=disable
+        run: go test -count=1 ./internal/db/pgvector ./internal/memory/adapters/builtin

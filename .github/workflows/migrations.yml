@@ -8,7 +8,10 @@ on:
       - "sqlc.yaml"
       - "db/postgres/migrations/**"
       - "db/postgres/queries/**"
+      - "db/pgvector/migrations/**"
+      - "db/pgvector/queries/**"
       - "internal/db/postgres/sqlc/**"
+      - "internal/db/pgvector/**"
       - "internal/db/*migration*_test.go"
       - "internal/db/*postgres_integration_test.go"
       - "internal/message/*postgres_integration_test.go"
@@ -19,7 +22,10 @@ on:
       - "sqlc.yaml"
       - "db/postgres/migrations/**"
       - "db/postgres/queries/**"
+      - "db/pgvector/migrations/**"
+      - "db/pgvector/queries/**"
       - "internal/db/postgres/sqlc/**"
+      - "internal/db/pgvector/**"
       - "internal/db/*migration*_test.go"
       - "internal/db/*postgres_integration_test.go"
       - "internal/message/*postgres_integration_test.go"
@@ -59,12 +65,12 @@ jobs:
       - name: Verify generated PostgreSQL queries
         run: |
           go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
-          untracked="$(git ls-files --others --exclude-standard -- internal/db/postgres/sqlc)"
+          untracked="$(git ls-files --others --exclude-standard -- internal/db/postgres/sqlc internal/db/pgvector/sqlc)"
           if [ -n "$untracked" ]; then
             printf 'Untracked generated SQL files:\n%s\n' "$untracked"
             exit 1
           fi
-          git diff --exit-code -- internal/db/postgres/sqlc
+          git diff --exit-code -- internal/db/postgres/sqlc internal/db/pgvector/sqlc
 
       - name: Build
         run: go build -o memoh-server ./cmd/agent

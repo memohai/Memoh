@@ -60,6 +60,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/db"
+	pgvectordb "github.com/memohai/memoh/internal/db/pgvector"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	emailpkg "github.com/memohai/memoh/internal/email"
@@ -164,6 +165,24 @@ func provideDBConn(lc fx.Lifecycle, cfg config.Config) (*pgxpool.Pool, error) {
 		},
 	})
 	return conn, nil
+}
+
+func providePGVectorStore(lc fx.Lifecycle, log *slog.Logger, cfg config.Config) (*pgvectordb.Store, error) {
+	if !cfg.PGVector.Enabled {
+		return nil, nil
+	}
+	store, err := pgvectordb.Open(context.Background(), log, cfg.PGVector)
+	if err != nil {
+		log.Warn("pgvector store unavailable; semantic memory index disabled", slog.Any("error", err))
+		return nil, nil
+	}
+	lc.Append(fx.Hook{
+		OnStop: func(context.Context) error {
+			store.Close()
+			return nil
+		},
+	})
+	return store, nil
 }
 
 func providePostgresStore(conn *pgxpool.Pool) (*postgresstore.Store, error) {
@@ -315,7 +334,7 @@ func provideMemoryLLM(modelsService *models.Service, settingsService *settings.S
 	}
 }
 
-func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, accountService *accounts.Service, provider bridge.Provider, queries dbstore.Queries, cfg config.Config, wikiStore *wikistore.Store) *memprovider.Registry {
+func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, accountService *accounts.Service, provider bridge.Provider, queries dbstore.Queries, vectorStore *pgvectordb.Store, wikiStore *wikistore.Store) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
 	fileStore := storefs.New(log, provider)
 	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
@@ -323,7 +342,7 @@ func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatSe
 		if wikiStore != nil {
 			ws = *wikiStore
 		}
-		runtime, err := membuiltin.NewBuiltinRuntimeFromConfig(log, providerConfig, fileStore, queries, cfg, ws)
+		runtime, err := membuiltin.NewBuiltinRuntimeFromConfig(log, providerConfig, fileStore, queries, vectorStore, ws)
 		if err != nil {
 			return nil, err
 		}
