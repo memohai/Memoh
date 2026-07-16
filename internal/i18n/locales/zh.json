@@ -468,7 +468,16 @@
     },
     "userInput": {
       "unavailable": "⚠️ 当前无法回复用户输入请求。",
-      "parseFailed": "无法识别。请发送 /respond <request> <answer> 回复。"
+      "parseFailed": "无法识别。请发送 /respond <request> <answer> 回复。",
+      "inputRequested": "需要你的回答",
+      "invalid": "没有识别到这个答案，请再试一次。",
+      "selectHint": "回复选项序号或选项文字。",
+      "multiHint": "可选择多项，回复多个序号并用逗号分隔。",
+      "textHint": "直接回复你的答案。",
+      "skipHint": "发送“跳过”跳过本题。",
+      "backHint": "发送“返回”回到上一题。",
+      "answerLabel": "答案",
+      "skipped": "已跳过"
     },
     "fallback": {
       "switch": "切换：{command}",

@@ -744,6 +744,7 @@ func (s *managerReplySender) OpenStream(ctx context.Context, target string, opts
 		stream:      stream,
 		channelType: s.channelType,
 		target:      target,
+		reply:       opts.Reply,
 		policy:      s.manager.resolveOutboundPolicy(s.channelType),
 		sender:      s.sender,
 		send: func(ctx context.Context, msg OutboundMessage) error {
@@ -770,6 +771,7 @@ type managerOutboundStream struct {
 	stream      PreparedOutboundStream
 	channelType ChannelType
 	target      string
+	reply       *ReplyRef
 	policy      OutboundPolicy // cached at open time; immutable after creation
 	sender      Sender
 	send        func(ctx context.Context, msg OutboundMessage) error
@@ -791,6 +793,12 @@ func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) err
 			if err := validateMessageAgainstCapabilities(caps, true, Message{Attachments: event.Attachments}); err != nil {
 				return err
 			}
+		}
+	}
+	if event.Type == StreamEventToolCallStart && event.ToolCall != nil && hasUserInputAction(event.ToolCall.Actions) {
+		caps, _ := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, s.target)
+		if !caps.NativeUserInput {
+			return s.pushPlainTextUserInput(ctx, event.ToolCall)
 		}
 	}
 
@@ -824,6 +832,29 @@ func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) err
 		return s.pushFinalWithChunking(ctx, event)
 	}
 	return s.pushPrepared(ctx, event)
+}
+
+// pushPlainTextUserInput closes any buffered assistant preamble, then sends the
+// pending question as a normal message. This keeps ask_user usable even when a
+// block-streaming adapter ignores tool lifecycle events entirely.
+func (s *managerOutboundStream) pushPlainTextUserInput(ctx context.Context, tc *StreamToolCall) error {
+	text := strings.TrimSpace(RenderToolCallMessage(BuildToolCallStart(tc)))
+	if text == "" {
+		return nil
+	}
+	if s.deltaRunes > 0 {
+		if err := s.splitStream(ctx); err != nil {
+			return err
+		}
+	}
+	if s.send == nil {
+		return errors.New("plain-text user input sender is not configured")
+	}
+	return s.send(ctx, OutboundMessage{Message: Message{
+		Format: MessageFormatPlain,
+		Text:   text,
+		Reply:  s.reply,
+	}})
 }
 
 // streamSplitSoftRatio controls the soft-limit window. The soft limit is

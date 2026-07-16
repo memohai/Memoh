@@ -12,6 +12,7 @@ import (
 
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/bots"
+	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/userinput"
 )
@@ -32,6 +33,10 @@ type fakeUserInputService struct {
 	submitHook    func()
 	canRespond    bool
 	canRespondSet bool
+}
+
+func (*fakeUserInputService) AdvanceText(context.Context, userinput.AdvanceTextInput) (userinput.AdvanceTextResult, error) {
+	return userinput.AdvanceTextResult{}, errors.New("unexpected AdvanceText")
 }
 
 func (f *fakeUserInputService) CreatePending(context.Context, userinput.CreatePendingInput) (userinput.Request, error) {
@@ -87,6 +92,48 @@ func chatResolvedRequest() userinput.Request {
 				map[string]any{"question_id": "q1", "selected": []any{map[string]any{"id": "q1.o1", "label": "Plan A"}}},
 			},
 		},
+	}
+}
+
+func TestPrepareUserInputContinuationHistoryClosesOlderPendingCall(t *testing.T) {
+	t.Parallel()
+
+	oldCall := sdkMessagesToModelMessages([]sdk.Message{{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{sdk.ToolCallPart{
+			ToolCallID: "old-call",
+			ToolName:   userinput.ToolNameAskUser,
+		}},
+	}})[0]
+	currentCall := sdkMessagesToModelMessages([]sdk.Message{{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{sdk.ToolCallPart{
+			ToolCallID: "current-call",
+			ToolName:   userinput.ToolNameAskUser,
+		}},
+	}})[0]
+	currentResult := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(sdk.ToolResultPart{
+		ToolCallID: "current-call",
+		ToolName:   userinput.ToolNameAskUser,
+		Result:     map[string]any{"status": userinput.StatusSubmitted},
+	})})[0]
+
+	got := prepareUserInputContinuationHistory([]conversation.ModelMessage{
+		oldCall,
+		{Role: "user", Content: conversation.NewTextContent("start another ask_user")},
+		currentCall,
+		currentResult,
+	})
+	if len(got) != 5 {
+		t.Fatalf("history length = %d, want 5: %#v", len(got), got)
+	}
+	oldResults := extractToolResultParts(got[1])
+	if len(oldResults) != 1 || oldResults[0].ToolCallID != "old-call" || !oldResults[0].IsError {
+		t.Fatalf("old call closure = %#v", oldResults)
+	}
+	currentResults := extractToolResultParts(got[4])
+	if len(currentResults) != 1 || currentResults[0].ToolCallID != "current-call" || currentResults[0].IsError {
+		t.Fatalf("current result = %#v", currentResults)
 	}
 }
 

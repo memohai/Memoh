@@ -468,7 +468,16 @@
     },
     "userInput": {
       "unavailable": "⚠️ 現在、ここではユーザー入力の返信を利用できません。",
-      "parseFailed": "読み取れませんでした。/respond <request> <answer> で返信してください。"
+      "parseFailed": "読み取れませんでした。/respond <request> <answer> で返信してください。",
+      "inputRequested": "回答が必要です",
+      "invalid": "回答を認識できませんでした。もう一度お試しください。",
+      "selectHint": "選択肢の番号またはテキストで返信してください。",
+      "multiHint": "複数選択できます。番号をカンマで区切って返信してください。",
+      "textHint": "回答をそのまま返信してください。",
+      "skipHint": "この質問を飛ばすには「スキップ」と送信してください。",
+      "backHint": "前の質問に戻るには「戻る」と送信してください。",
+      "answerLabel": "回答",
+      "skipped": "スキップ"
     },
     "fallback": {
       "switch": "{command}で切り替えます。",

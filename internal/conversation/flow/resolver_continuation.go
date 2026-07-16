@@ -28,7 +28,14 @@ func (r *Resolver) prepareContinuationRunConfig(
 	messages = sanitizeMessages(messages)
 
 	base.ContextFrags = historyContextFragsForMessages(messages, retained)
-	base.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
+	// Close any tool call left open by an interrupted turn before the transcript
+	// reaches providers that enforce strict assistant-tool adjacency. A process
+	// restart can orphan a deferred ask_user / tool-approval call while a later
+	// request still completes normally; repairing here (not in ContextFrags)
+	// keeps the fragments faithful to history while the outgoing messages stay
+	// provider-valid. Applies to every continuation path that resumes after a
+	// deferred tool call.
+	base.Messages = modelMessagesToSDKMessages(repairToolCallClosures(nonNilModelMessages(messages), syntheticToolClosureError))
 	base.Query = ""
 	base.LiveToolStream = eventCh != nil
 	base.CanRequestUserInput = r.canDeliverUserInputWS(eventCh)

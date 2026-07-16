@@ -563,7 +563,8 @@ func DeferredMetadata(req Request) map[string]any {
 }
 
 // submittedResult validates the user's answers against the stored payload and
-// builds the tool result returned to the model. Every question must be answered.
+// builds the tool result returned to the model. Every question needs an explicit
+// entry so a deliberate skip cannot be confused with a broken client payload.
 func submittedResult(payload UIPayload, answers []QuestionAnswer) (map[string]any, error) {
 	if len(payload.Questions) == 0 {
 		return nil, errors.New("user input request has no questions")
@@ -610,6 +611,13 @@ func answerEntry(question UIQuestion, answer QuestionAnswer) (map[string]any, er
 	optionIDs := cleanIDs(answer.OptionIDs)
 	customText := strings.TrimSpace(answer.CustomText)
 	text := strings.TrimSpace(answer.Text)
+	if answer.Skipped {
+		if len(optionIDs) > 0 || customText != "" || text != "" {
+			return nil, fmt.Errorf("question %q cannot be skipped and answered", question.ID)
+		}
+		entry["skipped"] = true
+		return entry, nil
+	}
 
 	if question.Kind == QuestionKindText {
 		if len(optionIDs) > 0 || customText != "" {
@@ -718,6 +726,7 @@ func requestFromRow(row sqlc.UserInputRequest) Request {
 		ToolName:                strings.TrimSpace(row.ToolName),
 		ShortID:                 int(row.ShortID),
 		Status:                  strings.TrimSpace(row.Status),
+		InteractionRevision:     int(row.InteractionRevision),
 		PromptExternalMessageID: strings.TrimSpace(row.PromptExternalMessageID),
 		SourcePlatform:          strings.TrimSpace(row.SourcePlatform),
 		ReplyTarget:             strings.TrimSpace(row.ReplyTarget),
@@ -749,6 +758,7 @@ func requestFromRow(row sqlc.UserInputRequest) Request {
 	}
 	_ = json.Unmarshal(row.InputJson, &req.Input)
 	req.UIPayload = PayloadFromStored(row.UiPayloadJson)
+	_ = json.Unmarshal(row.InteractionJson, &req.Interaction)
 	_ = json.Unmarshal(row.ResultJson, &req.Result)
 	_ = json.Unmarshal(row.ProviderMetadata, &req.ProviderMetadata)
 	return req

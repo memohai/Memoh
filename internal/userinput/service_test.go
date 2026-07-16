@@ -92,6 +92,23 @@ func TestSubmittedResultCustomText(t *testing.T) {
 	}
 }
 
+func TestSubmittedResultSkippedQuestion(t *testing.T) {
+	t.Parallel()
+
+	result, err := submittedResult(selectPayload(), []QuestionAnswer{
+		{QuestionID: "q1", OptionIDs: []string{"q1.o1"}},
+		{QuestionID: "q2", Skipped: true},
+		{QuestionID: "q3", Text: "done"},
+	})
+	if err != nil {
+		t.Fatalf("submitted result: %v", err)
+	}
+	answers := result["answers"].([]map[string]any)
+	if answers[1]["skipped"] != true || answers[1]["question"] != "Which features?" {
+		t.Fatalf("unexpected skipped answer: %#v", answers[1])
+	}
+}
+
 func TestSubmittedResultValidation(t *testing.T) {
 	t.Parallel()
 
@@ -140,6 +157,11 @@ func TestSubmittedResultValidation(t *testing.T) {
 		{"text on select question", []QuestionAnswer{
 			{QuestionID: "q1", Text: "Plan A"},
 			{QuestionID: "q2", OptionIDs: []string{"q2.o1"}},
+			{QuestionID: "q3", Text: "ok"},
+		}},
+		{"skipped with answer", []QuestionAnswer{
+			{QuestionID: "q1", OptionIDs: []string{"q1.o1"}},
+			{QuestionID: "q2", OptionIDs: []string{"q2.o1"}, Skipped: true},
 			{QuestionID: "q3", Text: "ok"},
 		}},
 	}

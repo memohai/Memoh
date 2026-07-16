@@ -110,6 +110,17 @@ SET prompt_message_id = sqlc.narg(prompt_message_id),
 WHERE id = sqlc.arg(id)
 RETURNING *;
 
+-- name: UpdateUserInputInteraction :one
+UPDATE user_input_requests
+SET interaction_json = sqlc.arg(interaction_json),
+    interaction_revision = interaction_revision + 1,
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND status = 'pending'
+  AND interaction_revision = sqlc.arg(interaction_revision)
+  AND (expires_at IS NULL OR expires_at > now())
+RETURNING *;
+
 -- name: UpdateUserInputAssistantMessage :one
 UPDATE user_input_requests
 SET assistant_message_id = sqlc.narg(assistant_message_id),

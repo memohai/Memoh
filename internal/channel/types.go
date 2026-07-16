@@ -151,6 +151,7 @@ type StreamFinalizePayload struct {
 type StreamToolCall struct {
 	Name       string   `json:"name"`
 	CallID     string   `json:"call_id,omitempty"`
+	Locale     string   `json:"locale,omitempty"`
 	Input      any      `json:"input,omitempty"`
 	Result     any      `json:"result,omitempty"`
 	ApprovalID string   `json:"approval_id,omitempty"`
