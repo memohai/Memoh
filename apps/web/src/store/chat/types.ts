@@ -157,6 +157,7 @@ export interface SendMessageOptions {
   target?: ChatViewTarget
   modelId?: string
   reasoningEffort?: string
+  workspaceTargetId?: string
   requestedSkills?: RequestedSkillSelection[]
   composerScope?: string
   /** Called immediately before a real chat turn is appended or dispatched. */
@@ -164,6 +165,15 @@ export interface SendMessageOptions {
   /** Called when that turn is rolled back after a startup-stage failure. */
   onTurnAppendAborted?: () => void
 }
+
+export interface ChatWorkspaceTargetSnapshot {
+  target_id: string
+  kind?: string
+  name?: string
+  workspace_path?: string
+}
+
+export type ChatWorkspaceTargetSelectionSource = 'unset' | 'default' | 'session' | 'user'
 
 export interface ACPAgentSessionInput {
   agentId: string

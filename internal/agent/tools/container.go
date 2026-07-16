@@ -78,6 +78,22 @@ func (*ContainerProvider) Usage(_ context.Context, session SessionContext, avail
 	if hasLocationTool {
 		parts = append(parts, locationRef+": list the current Server Workspace and connected computers available to this Bot for file and command work")
 	}
+	if targetID := strings.TrimSpace(session.WorkspaceTargetID); targetID != "" {
+		targetDescription := "request-selected execution location"
+		if sessionUsesRemoteWorkspaceTarget(session) {
+			targetDescription = "request-selected connected computer"
+		} else if strings.EqualFold(strings.TrimSpace(session.WorkspaceTargetKind), workspacepkg.WorkspaceTargetNative) || strings.EqualFold(targetID, workspacepkg.WorkspaceTargetNative) {
+			targetDescription = "native Server Workspace"
+		}
+		if name := strings.TrimSpace(session.WorkspaceTargetName); name != "" {
+			targetDescription += " " + strconv.Quote(name)
+		}
+		text := "File and command tools default to the " + targetDescription + " for this turn"
+		if workspacePath := strings.TrimSpace(session.WorkspacePath); workspacePath != "" {
+			text += ", starting in " + strconv.Quote(workspacePath)
+		}
+		parts = append(parts, text+". An explicit `target_id` still takes precedence.")
+	}
 	if ref, ok := available.Ref(ToolRead()); ok {
 		text := ref + ": read file content"
 		if session.SupportsImageInput {
@@ -101,7 +117,21 @@ func (*ContainerProvider) Usage(_ context.Context, session SessionContext, avail
 		parts = append(parts, ref+": execute command")
 	}
 	if hasLocationTool && len(available.Refs(ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolApplyPatch(), ToolExec())) > 0 {
-		parts = append(parts, "Use "+locationRef+" when the user names a computer, you need a non-default location, availability may have changed, or a target call fails. Pass its `target_id` to file and command tools; omit `target_id` to use the default. Listing locations does not switch locations or folders.")
+		defaultDescription := "the Bot's default"
+		if strings.TrimSpace(session.WorkspaceTargetID) != "" {
+			defaultDescription = "the request-selected default for this turn"
+		}
+		parts = append(parts, "Use "+locationRef+" when the user names a computer, you need a non-default location, availability may have changed, or a target call fails. Pass its `target_id` to file and command tools; omit `target_id` to use "+defaultDescription+". Listing locations does not switch locations or folders.")
+	}
+	if sessionUsesRemoteWorkspaceTarget(session) {
+		displayRefs := available.Refs(ToolBrowserObserve(), ToolBrowserAction(), ToolBrowserRemoteSession(), ToolComputerObserve(), ToolComputerAction())
+		if len(displayRefs) > 0 {
+			text := "The request-selected connected computer is the default only for file and command tools. Browser Use and Computer Use (" + strings.Join(displayRefs, ", ") + ") remain on the native Server Workspace and do not follow that default."
+			if readRef, ok := available.Ref(ToolRead()); ok {
+				text += " Use " + readRef + " with `target_id` `native` to read screenshots or other files those tools create there."
+			}
+			parts = append(parts, text)
+		}
 	}
 	return usageSection("Basic Tools", parts)
 }
@@ -279,7 +309,30 @@ Delete a file:
 		},
 	}
 	if resolver, ok := p.clients.(workspaceTargetResolver); ok {
-		toolList = append([]sdk.Tool{p.listExecutionLocationsTool(sess, resolver)}, toolList...)
+		locationTool := sdk.Tool{
+			Name: ToolListExecutionLocations().String(),
+			Description: "List the execution locations configured for this Bot for file operations and command execution, with current availability and status. " +
+				"The default field identifies the current turn's default (the request-selected target when present, otherwise the Bot's Primary). " +
+				"Use the returned target_id with file and command tools when a non-default location is needed. " +
+				"The available field says whether a location can currently be used. This tool does not change the default location or starting folder.",
+			Parameters: emptyObjectSchema(),
+			Execute: func(ctx *sdk.ToolExecContext, _ any) (any, error) {
+				ctx.Context = workspaceContextForSession(ctx.Context, sess)
+				targets, err := resolver.ListWorkspaceTargets(ctx.Context, sess.BotID)
+				if err != nil {
+					return nil, fmt.Errorf("list execution locations: %w", err)
+				}
+				locations := make([]executionLocation, 0, len(targets))
+				for _, target := range targets {
+					if strings.TrimSpace(target.TargetID) == "" {
+						continue
+					}
+					locations = append(locations, executionLocationFromTarget(target, sess.WorkspaceTargetID))
+				}
+				return listExecutionLocationsResult{Locations: locations}, nil
+			},
+		}
+		toolList = append([]sdk.Tool{locationTool}, toolList...)
 	}
 	return toolList, nil
 }
@@ -338,6 +391,7 @@ func (p *ContainerProvider) resolveToolWorkspace(ctx context.Context, session Se
 }
 
 func (p *ContainerProvider) resolveToolWorkspaceInfo(ctx context.Context, session SessionContext) bridge.WorkspaceInfo {
+	ctx = workspaceContextForSession(ctx, session)
 	info := bridge.WorkspaceInfo{
 		Backend:        bridge.WorkspaceBackendContainer,
 		DefaultWorkDir: p.execWorkDir,
@@ -387,35 +441,11 @@ func toolWorkspaceFromInfo(info bridge.WorkspaceInfo, fallbackWorkDir string) to
 func (*ContainerProvider) workspaceTargetParameter() map[string]any {
 	return map[string]any{
 		"type":        "string",
-		"description": "Exact target_id returned by list_execution_locations. Do not pass a location name, type, or runtime ID. Omit to use the default location.",
+		"description": "Exact target_id returned by list_execution_locations. Do not pass a location name, type, or runtime ID. Omit to use the default location for the current turn.",
 	}
 }
 
-func (*ContainerProvider) listExecutionLocationsTool(session SessionContext, resolver workspaceTargetResolver) sdk.Tool {
-	return sdk.Tool{
-		Name: ToolListExecutionLocations().String(),
-		Description: "List the execution locations configured for this Bot for file operations and command execution, with current availability and status. " +
-			"Use the returned target_id with file and command tools when a non-default location is needed. " +
-			"The available field says whether a location can currently be used. This tool does not change the default location or starting folder.",
-		Parameters: emptyObjectSchema(),
-		Execute: func(ctx *sdk.ToolExecContext, _ any) (any, error) {
-			targets, err := resolver.ListWorkspaceTargets(ctx.Context, session.BotID)
-			if err != nil {
-				return nil, fmt.Errorf("list execution locations: %w", err)
-			}
-			locations := make([]executionLocation, 0, len(targets))
-			for _, target := range targets {
-				if strings.TrimSpace(target.TargetID) == "" {
-					continue
-				}
-				locations = append(locations, executionLocationFromTarget(target))
-			}
-			return listExecutionLocationsResult{Locations: locations}, nil
-		},
-	}
-}
-
-func executionLocationFromTarget(target workspacepkg.WorkspaceTarget) executionLocation {
+func executionLocationFromTarget(target workspacepkg.WorkspaceTarget, requestTargetID string) executionLocation {
 	status := strings.TrimSpace(target.Status)
 	if status == "" {
 		if target.Online {
@@ -438,11 +468,16 @@ func executionLocationFromTarget(target workspacepkg.WorkspaceTarget) executionL
 			name = "Unavailable connected computer"
 		}
 	}
+	requestTargetID = strings.TrimSpace(requestTargetID)
+	isDefault := target.Primary
+	if requestTargetID != "" {
+		isDefault = strings.TrimSpace(target.TargetID) == requestTargetID
+	}
 	return executionLocation{
 		TargetID:       strings.TrimSpace(target.TargetID),
 		Name:           name,
 		Type:           targetType,
-		Default:        target.Primary,
+		Default:        isDefault,
 		Available:      status == workspacepkg.WorkspaceTargetStatusOnline,
 		Status:         status,
 		StartingFolder: strings.TrimSpace(target.WorkspacePath),
@@ -450,6 +485,7 @@ func executionLocationFromTarget(target workspacepkg.WorkspaceTarget) executionL
 }
 
 func (p *ContainerProvider) resolveToolTarget(ctx context.Context, session SessionContext, args map[string]any) (resolvedToolTarget, error) {
+	ctx = workspaceContextForSession(ctx, session)
 	targetID := StringArg(args, "target_id")
 	if resolver, ok := p.clients.(workspaceTargetResolver); ok {
 		resolved, err := resolver.ResolveWorkspaceTarget(ctx, session.BotID, targetID)
@@ -461,6 +497,12 @@ func (p *ContainerProvider) resolveToolTarget(ctx context.Context, session Sessi
 		}
 		if resolved.Client == nil {
 			return resolvedToolTarget{}, errors.New("workspace target is not reachable: client is unavailable")
+		}
+		// Keep the canonical target on the original input map. Besides making
+		// retries deterministic if the Bot Primary changes, this also leaves an
+		// unambiguous target_id in the persisted tool-call history.
+		if args != nil {
+			args["target_id"] = strings.TrimSpace(resolved.TargetID)
 		}
 		return resolvedToolTarget{
 			id:        resolved.TargetID,
@@ -482,6 +524,23 @@ func (p *ContainerProvider) resolveToolTarget(ctx context.Context, session Sessi
 		info:      info,
 		workspace: toolWorkspaceFromInfo(info, p.execWorkDir),
 	}, nil
+}
+
+func workspaceContextForSession(ctx context.Context, session SessionContext) context.Context {
+	targetID := strings.TrimSpace(session.WorkspaceTargetID)
+	if targetID == "" {
+		return ctx
+	}
+	return workspacepkg.WithWorkspaceTarget(ctx, targetID)
+}
+
+func sessionUsesRemoteWorkspaceTarget(session SessionContext) bool {
+	kind := strings.TrimSpace(session.WorkspaceTargetKind)
+	if kind != "" {
+		return strings.EqualFold(kind, workspacepkg.WorkspaceTargetRemote)
+	}
+	targetID := strings.TrimSpace(session.WorkspaceTargetID)
+	return targetID != "" && !strings.EqualFold(targetID, workspacepkg.WorkspaceTargetNative)
 }
 
 func hookWorkspaceInfoFromBridge(info bridge.WorkspaceInfo, fallbackWorkDir string) hooks.WorkspaceInfo {

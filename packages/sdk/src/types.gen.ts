@@ -1700,6 +1700,7 @@ export type HandlersLocalChannelMessageRequest = {
     message: ChannelMessage;
     model_id?: string;
     reasoning_effort?: string;
+    workspace_target_id?: string;
 };
 
 export type HandlersLoginRequest = {

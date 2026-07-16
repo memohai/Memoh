@@ -42,11 +42,13 @@ func (r *Resolver) prepareHistoryContext(
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}
+	compactableTokens := totalCompactableHistoryTokens(loaded)
+	loaded = injectWorkspaceTransitionRecords(loaded)
 	messages, records, estimatedTokens := trimMessagesAndRecordsByTokens(r.logger, loaded, contextTokenBudget)
 	return preparedHistoryContext{
 		messages:          messages,
 		records:           records,
 		estimatedTokens:   estimatedTokens,
-		compactableTokens: totalCompactableHistoryTokens(loaded),
+		compactableTokens: compactableTokens,
 	}, nil
 }

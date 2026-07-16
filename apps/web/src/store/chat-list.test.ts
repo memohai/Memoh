@@ -382,6 +382,7 @@ describe('chat-list store', () => {
     const result = await store.sendMessage('hello', undefined, {
       onBeforeTurnAppend,
       onTurnAppendAborted,
+      workspaceTargetId: 'computer-b',
     })
 
     expect(result).toMatchObject({
@@ -399,6 +400,10 @@ describe('chat-list store', () => {
     })
     expect(onBeforeTurnAppend).toHaveBeenCalledOnce()
     expect(onTurnAppendAborted).toHaveBeenCalledOnce()
+    expect(sentWSMessages.at(-1)).toMatchObject({
+      type: 'message',
+      workspace_target_id: 'computer-b',
+    })
   })
 
   it('uses structured API feedback for startup send failures', async () => {
@@ -3061,13 +3066,14 @@ describe('chat-list store', () => {
 
     await store.selectBot('bot-1')
     await flushPromises()
-    const retry = store.retryLatestAssistant('assistant-old')
+    const retry = store.retryLatestAssistant('assistant-old', { workspaceTargetId: 'computer-b' })
     await flushPromises()
 
     expect(sentWSMessages.at(-1)).toMatchObject({
       type: 'retry_message',
       session_id: 'session-1',
       message_id: 'assistant-old',
+      workspace_target_id: 'computer-b',
     })
     expect(store.messages.map(message => message.id)).not.toContain('assistant-old')
     expect(store.messages.map(message => message.role)).toEqual(['user', 'assistant'])
@@ -3498,7 +3504,7 @@ describe('chat-list store', () => {
 
     await store.selectBot('bot-1')
     await flushPromises()
-    const edit = store.editLatestUser('user-1', 'new prompt')
+    const edit = store.editLatestUser('user-1', 'new prompt', { workspaceTargetId: 'computer-a' })
     await flushPromises()
 
     expect(sentWSMessages.at(-1)).toMatchObject({
@@ -3506,6 +3512,7 @@ describe('chat-list store', () => {
       session_id: 'session-1',
       message_id: 'user-1',
       text: 'new prompt',
+      workspace_target_id: 'computer-a',
     })
     expect(store.messages.map(message => message.id)).not.toContain('user-1')
     expect(store.messages.map(message => message.id)).not.toContain('assistant-old')

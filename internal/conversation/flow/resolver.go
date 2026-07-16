@@ -81,6 +81,10 @@ type botPermissionChecker interface {
 	HasBotPermission(ctx context.Context, botID, accountID, permission string) (bool, error)
 }
 
+type workspaceTargetResolver interface {
+	ResolveWorkspaceTarget(ctx context.Context, botID, targetID string) (workspace.ResolvedWorkspaceTarget, error)
+}
+
 // Resolver orchestrates chat with the internal agent.
 type Resolver struct {
 	agent              *agentpkg.Agent
@@ -99,6 +103,7 @@ type Resolver struct {
 	assetLoader        gatewayAssetLoader
 	channelStore       botChannelConfigReader
 	botPermissions     botPermissionChecker
+	workspaceTargets   workspaceTargetResolver
 	pipeline           *pipelinepkg.Pipeline
 	streamHTTPClient   *http.Client
 	bgManager          *background.Manager
@@ -197,6 +202,11 @@ func (r *Resolver) SetGatewayAssetLoader(loader gatewayAssetLoader) {
 
 func (r *Resolver) SetBotPermissionChecker(checker botPermissionChecker) {
 	r.botPermissions = checker
+}
+
+// SetWorkspaceTargetResolver configures request-scoped Computer resolution.
+func (r *Resolver) SetWorkspaceTargetResolver(resolver workspaceTargetResolver) {
+	r.workspaceTargets = resolver
 }
 
 // SetChannelStore configures the bot channel config store used to load
@@ -421,6 +431,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			}
 		}
 	}
+	if notice := r.currentWorkspaceContextMessage(ctx, req); notice != nil {
+		messages = append(messages, *notice)
+	}
 	if memoryMsg != nil {
 		messages = append(messages, *memoryMsg)
 	}
@@ -533,6 +546,19 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	if err := r.rejectRequestedSkillsIfUnsupportedContext(ctx, req); err != nil {
 		return conversation.ChatResponse{}, err
 	}
+	if isACP, err := r.isACPAgentSession(ctx, req); err != nil {
+		return conversation.ChatResponse{}, err
+	} else if isACP {
+		if err := rejectACPWorkspaceTarget(req); err != nil {
+			return conversation.ChatResponse{}, err
+		}
+	} else {
+		var err error
+		ctx, req, err = r.prepareWorkspaceRequest(ctx, req)
+		if err != nil {
+			return conversation.ChatResponse{}, err
+		}
+	}
 
 	doneTurn := r.enterSessionTurn(ctx, req.BotID, req.SessionID)
 	defer doneTurn()
@@ -569,6 +595,9 @@ func (r *Resolver) Chat(ctx context.Context, req conversation.ChatRequest) (conv
 	if err := r.storeRoundWithOptions(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
 		SkipMemory: storeReq.SkipMemoryExtraction,
 	}); err != nil {
+		return conversation.ChatResponse{}, err
+	}
+	if err := r.persistSessionWorkspaceTarget(ctx, storeReq); err != nil {
 		return conversation.ChatResponse{}, err
 	}
 
@@ -712,6 +741,16 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 	}
 	if r.toolApproval != nil || r.userInput != nil {
 		cfg.ToolApprovalHandler = r.buildToolApprovalHandler(p)
+	}
+	if r.workspaceTargets != nil {
+		if target, targetErr := r.workspaceTargets.ResolveWorkspaceTarget(ctx, p.BotID, ""); targetErr == nil {
+			cfg.Identity.WorkspaceTargetID = strings.TrimSpace(target.TargetID)
+			cfg.Identity.WorkspaceTargetKind = strings.TrimSpace(target.Kind)
+			cfg.Identity.WorkspaceTargetName = strings.TrimSpace(target.Name)
+			cfg.Identity.WorkspacePath = strings.TrimSpace(target.WorkspacePath)
+		} else if workspace.WorkspaceTargetFromContext(ctx) != "" {
+			return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, targetErr
+		}
 	}
 
 	return cfg, chatModel, provider, nil
@@ -925,6 +964,7 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 				SourcePlatform:               p.CurrentPlatform,
 				ReplyTarget:                  p.ReplyTarget,
 				ConversationType:             p.ConversationType,
+				WorkspaceTargetID:            workspace.WorkspaceTargetFromContext(ctx),
 			})
 			if err != nil {
 				return sdk.ToolApprovalResult{}, err
@@ -956,6 +996,7 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 			ReplyTarget:                  p.ReplyTarget,
 			ConversationType:             p.ConversationType,
 			WorkspaceTargeted:            isWorkspaceTargetTool(call.ToolName),
+			WorkspaceTargetID:            workspace.WorkspaceTargetFromContext(ctx),
 		}
 		forcedApprovalReason, forcedApproval := agentpkg.HookForcedApprovalReason(ctx)
 		if r.toolApproval == nil {

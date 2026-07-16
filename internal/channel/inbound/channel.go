@@ -1174,6 +1174,9 @@ startStream:
 	if re, _ := msg.Metadata["reasoning_effort"].(string); strings.TrimSpace(re) != "" {
 		chatReq.ReasoningEffort = strings.TrimSpace(re)
 	}
+	if targetID, _ := msg.Metadata["workspace_target_id"].(string); strings.TrimSpace(targetID) != "" {
+		chatReq.WorkspaceTargetID = strings.TrimSpace(targetID)
+	}
 	// Create a cancellable context so /stop can abort the stream.
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	defer streamCancel()

@@ -25,6 +25,7 @@ type RetryLatestMessageInput struct {
 	ChatToken              string
 	Model                  string
 	ReasoningEffort        string
+	WorkspaceTargetID      string
 	ToolHTTPURL            string
 }
 
@@ -40,6 +41,7 @@ type EditLatestMessageInput struct {
 	ChatToken              string
 	Model                  string
 	ReasoningEffort        string
+	WorkspaceTargetID      string
 	ToolHTTPURL            string
 }
 
@@ -99,6 +101,7 @@ func (r *Resolver) RetryLatestMessageWS(ctx context.Context, input RetryLatestMe
 		Channels:                     []string{"local"},
 		Model:                        strings.TrimSpace(input.Model),
 		ReasoningEffort:              strings.TrimSpace(input.ReasoningEffort),
+		WorkspaceTargetID:            strings.TrimSpace(input.WorkspaceTargetID),
 		ToolHTTPURL:                  strings.TrimSpace(input.ToolHTTPURL),
 		ReusePersistedUserMessage:    true,
 		PersistedUserMessageID:       requestMessage.ID,
@@ -158,6 +161,7 @@ func (r *Resolver) EditLatestMessageWS(ctx context.Context, input EditLatestMess
 		Attachments:                  input.Attachments,
 		Model:                        strings.TrimSpace(input.Model),
 		ReasoningEffort:              strings.TrimSpace(input.ReasoningEffort),
+		WorkspaceTargetID:            strings.TrimSpace(input.WorkspaceTargetID),
 		ToolHTTPURL:                  strings.TrimSpace(input.ToolHTTPURL),
 		SkipHistoryTurn:              true,
 		HistoryCutoffBeforeMessageID: target.ID,

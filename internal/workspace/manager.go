@@ -264,8 +264,13 @@ func (m *Manager) NativeMCPClient(ctx context.Context, botID string) (*bridge.Cl
 	return m.nativeMCPClient(ctx, botID)
 }
 
-// MCPClient implements bridge.Provider and resolves the Bot's Primary target.
+// MCPClient implements bridge.Provider and resolves the request-scoped target
+// override before falling back to the Bot's persisted Primary target.
 func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
+	if targetID := WorkspaceTargetFromContext(ctx); targetID != "" {
+		target, err := m.ResolveWorkspaceTarget(ctx, botID, targetID)
+		return target.Client, err
+	}
 	if m.remote != nil {
 		if target, primary, err := m.remote.ResolvePrimary(ctx, botID); err != nil || primary {
 			return target.Client, err
@@ -276,6 +281,9 @@ func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, 
 
 func (m *Manager) ResolveWorkspaceTarget(ctx context.Context, botID, targetID string) (ResolvedWorkspaceTarget, error) {
 	targetID = strings.TrimSpace(targetID)
+	if targetID == "" {
+		targetID = WorkspaceTargetFromContext(ctx)
+	}
 	if targetID == "" && m.remote != nil {
 		if target, primary, err := m.remote.ResolvePrimary(ctx, botID); err != nil || primary {
 			return target, err
@@ -348,6 +356,10 @@ func (m *Manager) WaitForWorkspaceReady(ctx context.Context, botID string) error
 }
 
 func (m *Manager) WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error) {
+	if targetID := WorkspaceTargetFromContext(ctx); targetID != "" {
+		target, err := m.ResolveWorkspaceTarget(ctx, botID, targetID)
+		return target.Info, err
+	}
 	if m.remote != nil {
 		if target, primary, err := m.remote.ResolvePrimary(ctx, botID); err != nil || primary {
 			return target.Info, err

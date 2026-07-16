@@ -14,6 +14,7 @@ import (
 	"github.com/memohai/memoh/internal/models"
 	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/userinput"
+	"github.com/memohai/memoh/internal/workspace"
 )
 
 // userInputService is the slice of *userinput.Service the resolver depends
@@ -62,6 +63,9 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 		if err := r.authorizeACPUserInputResponse(ctx, target, input); err != nil {
 			return err
 		}
+	}
+	if !isACPMCP {
+		ctx = workspace.WithWorkspaceTarget(ctx, target.WorkspaceTargetID)
 	}
 	if isACPMCP && !r.userInput.CanRespond(target) {
 		if _, err := r.userInput.Cancel(ctx, userinput.CancelInput{
@@ -257,6 +261,11 @@ func splitUserInputAnswerText(text string) []string {
 
 func (r *Resolver) storeUserInputResultAndContinue(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error {
 	req = withLocalWebUserInputReplyTarget(req)
+	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
+	target, err := r.resolveWorkspaceTargetSnapshot(ctx, input.BotID, req.WorkspaceTargetID)
+	if err != nil {
+		return err
+	}
 	modelMessages := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(result)})
 	storeReq := conversation.ChatRequest{
 		BotID:                   input.BotID,
@@ -267,6 +276,8 @@ func (r *Resolver) storeUserInputResultAndContinue(ctx context.Context, req user
 		ReplyTarget:             req.ReplyTarget,
 		ConversationType:        req.ConversationType,
 		UserMessagePersisted:    true,
+		WorkspaceTargetID:       req.WorkspaceTargetID,
+		WorkspaceTarget:         target,
 	}
 	if err := r.storeRoundWithOptions(ctx, storeReq, modelMessages, "", storeRoundOptions{AllowPendingToolCalls: true}); err != nil {
 		return err
@@ -276,6 +287,7 @@ func (r *Resolver) storeUserInputResultAndContinue(ctx context.Context, req user
 
 func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.Request, input UserInputResponseInput, eventCh chan<- WSStreamEvent) error {
 	req = withLocalWebUserInputReplyTarget(req)
+	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
 	resolved, err := r.ResolveRunConfig(ctx,
 		input.BotID,
 		req.SessionID,
@@ -309,6 +321,8 @@ func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.R
 		ReplyTarget:             req.ReplyTarget,
 		ConversationType:        req.ConversationType,
 		UserMessagePersisted:    true,
+		WorkspaceTargetID:       req.WorkspaceTargetID,
+		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}
 
 	stream := r.agent.Stream(ctx, cfg)

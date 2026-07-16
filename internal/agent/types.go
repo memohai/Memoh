@@ -15,17 +15,21 @@ import (
 
 // SessionContext carries request-scoped identity and routing information.
 type SessionContext struct {
-	BotID             string
-	ChatID            string
-	SessionID         string
-	ChannelIdentityID string
-	CurrentPlatform   string
-	ReplyTarget       string
-	ConversationType  string
-	Timezone          string
-	TimezoneLocation  *time.Location
-	SessionToken      string //nolint:gosec // carries session credential material at runtime
-	IsSubagent        bool
+	BotID               string
+	ChatID              string
+	SessionID           string
+	ChannelIdentityID   string
+	CurrentPlatform     string
+	ReplyTarget         string
+	ConversationType    string
+	Timezone            string
+	TimezoneLocation    *time.Location
+	SessionToken        string //nolint:gosec // carries session credential material at runtime
+	WorkspaceTargetID   string
+	WorkspaceTargetKind string
+	WorkspaceTargetName string
+	WorkspacePath       string
+	IsSubagent          bool
 }
 
 // BotInfo is service-owned bot metadata injected into the system prompt.

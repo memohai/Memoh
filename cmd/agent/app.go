@@ -476,6 +476,7 @@ func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.
 func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries dbstore.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *pipelinepkg.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, hookService *hookspkg.Service) *flow.Resolver {
 	resolver := flow.NewResolver(log, modelsService, queries, chatService, msgService, settingsService, accountService, a, rc.TimezoneLocation, 120*time.Second)
 	resolver.SetBotPermissionChecker(&botPermissionCheckerAdapter{bots: botService, accounts: accountService})
+	resolver.SetWorkspaceTargetResolver(workspaceManager)
 	resolver.SetHookService(hookService)
 	if sessionService != nil {
 		sessionService.SetHookService(hookService)

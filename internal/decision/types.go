@@ -16,6 +16,7 @@ type Request struct {
 	SessionID               string         `json:"session_id"`
 	RouteID                 string         `json:"route_id,omitempty"`
 	ChannelIdentityID       string         `json:"channel_identity_id,omitempty"`
+	WorkspaceTargetID       string         `json:"workspace_target_id,omitempty"`
 	Kind                    string         `json:"kind"`
 	ToolCallID              string         `json:"tool_call_id"`
 	ToolName                string         `json:"tool_name"`

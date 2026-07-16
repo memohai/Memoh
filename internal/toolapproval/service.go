@@ -136,6 +136,10 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 	if !ok {
 		return Request{}, errors.New("unsupported tool approval operation")
 	}
+	workspaceTargetID := strings.TrimSpace(input.WorkspaceTargetID)
+	if input.ExecutionLocation != nil && strings.TrimSpace(input.ExecutionLocation.TargetID) != "" {
+		workspaceTargetID = strings.TrimSpace(input.ExecutionLocation.TargetID)
+	}
 	if err := s.runApprovalHook(ctx, hooks.EventBeforeApprovalCreate, input, Request{}, true); err != nil {
 		return Request{}, err
 	}
@@ -144,6 +148,7 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 		SessionID:                    sessionID,
 		RouteID:                      optionalUUID(input.RouteID),
 		ChannelIdentityID:            channelIdentityID,
+		WorkspaceTargetID:            workspaceTargetID,
 		ToolCallID:                   strings.TrimSpace(input.ToolCallID),
 		ToolName:                     strings.TrimSpace(input.ToolName),
 		Operation:                    operation,
@@ -626,6 +631,7 @@ func requestFromRow(row sqlc.ToolApprovalRequest) Request {
 		ID:                      uuid.UUID(row.ID.Bytes).String(),
 		BotID:                   uuid.UUID(row.BotID.Bytes).String(),
 		SessionID:               uuid.UUID(row.SessionID.Bytes).String(),
+		WorkspaceTargetID:       strings.TrimSpace(row.WorkspaceTargetID),
 		ToolCallID:              strings.TrimSpace(row.ToolCallID),
 		ToolName:                strings.TrimSpace(row.ToolName),
 		Operation:               strings.TrimSpace(row.Operation),

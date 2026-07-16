@@ -17822,6 +17822,9 @@ const docTemplate = `{
                 },
                 "reasoning_effort": {
                     "type": "string"
+                },
+                "workspace_target_id": {
+                    "type": "string"
                 }
             }
         },

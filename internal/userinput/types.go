@@ -43,6 +43,7 @@ type CreatePendingInput struct {
 	SessionID                    string
 	RouteID                      string
 	ChannelIdentityID            string
+	WorkspaceTargetID            string
 	RequestedByChannelIdentityID string
 	ToolCallID                   string
 	ToolName                     string
@@ -88,6 +89,7 @@ type Request struct {
 	SessionID               string         `json:"session_id"`
 	RouteID                 string         `json:"route_id,omitempty"`
 	ChannelIdentityID       string         `json:"channel_identity_id,omitempty"`
+	WorkspaceTargetID       string         `json:"workspace_target_id,omitempty"`
 	ToolCallID              string         `json:"tool_call_id"`
 	ToolName                string         `json:"tool_name"`
 	ShortID                 int            `json:"short_id"`

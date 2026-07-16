@@ -2858,6 +2858,8 @@ definitions:
         type: string
       reasoning_effort:
         type: string
+      workspace_target_id:
+        type: string
     required:
     - message
     type: object

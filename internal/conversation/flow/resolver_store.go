@@ -124,6 +124,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		pruneToolResults = !botSettings.PersistFullToolResults
 	}
 	meta := buildRouteMetadata(req)
+	meta = mergeMetadata(meta, workspaceTargetMetadata(req.WorkspaceTarget))
 	senderChannelIdentityID, senderUserID := r.resolvePersistSenderIDs(ctx, req)
 	sessionMode, runtimeType := r.persistSessionRuntimeSnapshot(ctx, req)
 
@@ -257,6 +258,44 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		}
 	}
 	return r.persistMessageInputs(ctx, persistInputs, turnRequestMessageID)
+}
+
+func workspaceTargetMetadata(target *conversation.WorkspaceTarget) map[string]any {
+	if target == nil || strings.TrimSpace(target.TargetID) == "" {
+		return nil
+	}
+	return map[string]any{
+		"execution_location": map[string]any{
+			"target_id":      strings.TrimSpace(target.TargetID),
+			"kind":           strings.TrimSpace(target.Kind),
+			"name":           strings.TrimSpace(target.Name),
+			"workspace_path": strings.TrimSpace(target.WorkspacePath),
+		},
+	}
+}
+
+func (r *Resolver) persistSessionWorkspaceTarget(ctx context.Context, req conversation.ChatRequest) error {
+	if r == nil || r.sessionService == nil || req.WorkspaceTarget == nil || strings.TrimSpace(req.SessionID) == "" {
+		return nil
+	}
+	sess, err := r.sessionService.Get(ctx, req.SessionID)
+	if err != nil {
+		return err
+	}
+	metadata := make(map[string]any, len(sess.Metadata)+2)
+	for key, value := range sess.Metadata {
+		metadata[key] = value
+	}
+	target := req.WorkspaceTarget
+	metadata["workspace_target_id"] = strings.TrimSpace(target.TargetID)
+	metadata["workspace_target"] = map[string]any{
+		"target_id":      strings.TrimSpace(target.TargetID),
+		"kind":           strings.TrimSpace(target.Kind),
+		"name":           strings.TrimSpace(target.Name),
+		"workspace_path": strings.TrimSpace(target.WorkspacePath),
+	}
+	_, err = r.sessionService.UpdateMetadata(ctx, req.SessionID, metadata)
+	return err
 }
 
 func (r *Resolver) persistMessageInputs(ctx context.Context, inputs []messagepkg.PersistInput, initialTurnRequestMessageID string) []messagepkg.Message {

@@ -106,11 +106,21 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 			errCh <- err
 			return
 		} else if ok {
+			if err := rejectACPWorkspaceTarget(streamReq); err != nil {
+				errCh <- err
+				return
+			}
 			r.streamACPAgentChunks(ctx, streamReq, chunkCh, errCh)
 			return
 		}
+		streamCtx, preparedReq, prepareErr := r.prepareWorkspaceRequest(ctx, streamReq)
+		if prepareErr != nil {
+			errCh <- prepareErr
+			return
+		}
+		streamReq = preparedReq
 
-		doneTurn := r.enterSessionTurn(ctx, streamReq.BotID, streamReq.SessionID)
+		doneTurn := r.enterSessionTurn(streamCtx, streamReq.BotID, streamReq.SessionID)
 		defer doneTurn()
 
 		if streamReq.RawQuery == "" {
@@ -118,7 +128,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		}
 		var err error
 		if !streamReq.UserMessagePersisted {
-			streamReq, err = r.applyUserMessageHook(ctx, streamReq)
+			streamReq, err = r.applyUserMessageHook(streamCtx, streamReq)
 			if err != nil {
 				r.logger.Error("agent stream user message hook failed",
 					slog.String("bot_id", streamReq.BotID),
@@ -129,7 +139,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 				return
 			}
 		}
-		rc, err := r.resolve(ctx, streamReq)
+		rc, err := r.resolve(streamCtx, streamReq)
 		if err != nil {
 			r.logger.Error("agent stream resolve failed",
 				slog.String("bot_id", streamReq.BotID),
@@ -141,15 +151,15 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		}
 		streamReq.Query = rc.query
 
-		go r.maybeGenerateSessionTitle(context.WithoutCancel(ctx), streamReq, streamReq.RawQuery)
+		go r.maybeGenerateSessionTitle(context.WithoutCancel(streamCtx), streamReq, streamReq.RawQuery)
 
 		cfg := rc.runConfig
 		cfg.LiveToolStream = true
 		cfg.CanRequestUserInput = r.canDeliverUserInputStream()
-		cfg = r.prepareRunConfig(ctx, cfg)
+		cfg = r.prepareRunConfig(streamCtx, cfg)
 
 		// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.
-		idleCtx, idleCancel := withIdleTimeout(ctx)
+		idleCtx, idleCancel := withIdleTimeout(streamCtx)
 		defer idleCancel.Stop()
 
 		eventCh := r.agent.Stream(idleCtx, cfg)
@@ -193,7 +203,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 						// Use WithoutCancel so persistence still succeeds even
 						// when the parent ctx has already been cancelled by a
 						// client disconnect or idle timeout.
-						if storeErr := r.persistTerminalSnapshot(context.WithoutCancel(ctx), streamReq, rc, snap); storeErr != nil {
+						if storeErr := r.persistTerminalSnapshot(context.WithoutCancel(streamCtx), streamReq, rc, snap); storeErr != nil {
 							r.logger.Error("stream persist failed", slog.Any("error", storeErr))
 						} else {
 							stored = true
@@ -209,7 +219,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 			if !clientGone {
 				select {
 				case chunkCh <- conversation.StreamChunk(data):
-				case <-ctx.Done():
+				case <-streamCtx.Done():
 					clientGone = true
 				}
 			}
@@ -222,7 +232,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 		if !stored {
 			switch {
 			case hasSnapshot:
-				_ = r.persistPartialResult(ctx, streamReq, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
+				_ = r.persistPartialResult(streamCtx, streamReq, rc, lastSnapshot.sdkMessages, toolCallCount, idleCancel.DidFire(), hasVisibleOutput)
 			default:
 				r.logger.Info("skip persisting failed startup stream",
 					slog.String("bot_id", streamReq.BotID),
@@ -247,7 +257,7 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 				if data, err := json.Marshal(timeoutEvent); err == nil {
 					select {
 					case chunkCh <- conversation.StreamChunk(data):
-					case <-ctx.Done():
+					case <-streamCtx.Done():
 					}
 				}
 			}
@@ -299,7 +309,15 @@ func (r *Resolver) streamChatWSResultWithHooks(
 		)
 		return nil, err
 	} else if ok {
+		if err := rejectACPWorkspaceTarget(req); err != nil {
+			return nil, err
+		}
 		return nil, r.streamACPAgentWS(ctx, req, eventCh, abortCh)
+	}
+	var prepareErr error
+	ctx, req, prepareErr = r.prepareWorkspaceRequest(ctx, req)
+	if prepareErr != nil {
+		return nil, prepareErr
 	}
 
 	doneTurn := r.enterSessionTurn(ctx, req.BotID, req.SessionID)
@@ -512,6 +530,11 @@ func (r *Resolver) persistTerminalSnapshotResult(ctx context.Context, req conver
 	})
 	if err != nil {
 		return nil, err
+	}
+	if len(persisted) > 0 {
+		if err := r.persistSessionWorkspaceTarget(ctx, storeReq); err != nil {
+			return nil, err
+		}
 	}
 
 	if inputTokens := extractInputTokensFromUsage(snap.usage); inputTokens > 0 {

@@ -504,9 +504,10 @@ func jsonBodyHasKey(body []byte, key string) bool {
 
 // LocalChannelMessageRequest is the request body for posting a local channel message.
 type LocalChannelMessageRequest struct {
-	Message         channel.Message `json:"message" validate:"required"`
-	ModelID         string          `json:"model_id,omitempty"`
-	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
+	Message           channel.Message `json:"message" validate:"required"`
+	ModelID           string          `json:"model_id,omitempty"`
+	ReasoningEffort   string          `json:"reasoning_effort,omitempty"`
+	WorkspaceTargetID string          `json:"workspace_target_id,omitempty"`
 }
 
 // PostMessage godoc
@@ -557,6 +558,22 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	}
 	if req.Message.IsEmpty() {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
+	}
+	workspaceTargetID := strings.TrimSpace(req.WorkspaceTargetID)
+	if workspaceTargetID != "" {
+		perms, permissionErr := h.resolveCurrentUserPermissions(c.Request().Context(), channelIdentityID, botID)
+		if permissionErr != nil {
+			return permissionErr
+		}
+		if err := authorizeWorkspaceTargetSelection(perms, workspaceTargetID); err != nil {
+			return err
+		}
+		if h.resolver == nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "resolver not configured")
+		}
+		if err := h.resolver.ValidateWorkspaceTarget(c.Request().Context(), botID, workspaceTargetID); err != nil {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 	}
 	if err := channel.RejectReservedSkillMetadata(req.Message); err != nil {
 		event := commandEvent("", "", "", "")
@@ -610,6 +627,12 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 		}
 		msg.Metadata["reasoning_effort"] = re
 	}
+	if workspaceTargetID != "" {
+		if msg.Metadata == nil {
+			msg.Metadata = make(map[string]any)
+		}
+		msg.Metadata["workspace_target_id"] = workspaceTargetID
+	}
 	if err := h.channelManager.HandleInbound(c.Request().Context(), cfg, msg); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -621,25 +644,26 @@ var wsUpgrader = websocket.Upgrader{
 }
 
 type wsClientMessage struct {
-	Type            string                     `json:"type"`
-	StreamID        string                     `json:"stream_id,omitempty"`
-	Text            string                     `json:"text,omitempty"`
-	SessionID       string                     `json:"session_id,omitempty"`
-	InvocationID    string                     `json:"invocation_id,omitempty"`
-	ComposerScope   string                     `json:"composer_scope,omitempty"`
-	MessageID       string                     `json:"message_id,omitempty"`
-	Attachments     []json.RawMessage          `json:"attachments,omitempty"`
-	RequestedSkills []webRequestedSkill        `json:"requested_skills,omitempty"`
-	ModelID         string                     `json:"model_id,omitempty"`
-	ReasoningEffort string                     `json:"reasoning_effort,omitempty"`
-	ApprovalID      string                     `json:"approval_id,omitempty"`
-	UserInputID     string                     `json:"user_input_id,omitempty"`
-	ShortID         int                        `json:"short_id,omitempty"`
-	ToolCallID      string                     `json:"tool_call_id,omitempty"`
-	Decision        string                     `json:"decision,omitempty"`
-	Reason          string                     `json:"reason,omitempty"`
-	Answers         []userinput.QuestionAnswer `json:"answers,omitempty"`
-	Canceled        bool                       `json:"canceled,omitempty"`
+	Type              string                     `json:"type"`
+	StreamID          string                     `json:"stream_id,omitempty"`
+	Text              string                     `json:"text,omitempty"`
+	SessionID         string                     `json:"session_id,omitempty"`
+	InvocationID      string                     `json:"invocation_id,omitempty"`
+	ComposerScope     string                     `json:"composer_scope,omitempty"`
+	MessageID         string                     `json:"message_id,omitempty"`
+	Attachments       []json.RawMessage          `json:"attachments,omitempty"`
+	RequestedSkills   []webRequestedSkill        `json:"requested_skills,omitempty"`
+	ModelID           string                     `json:"model_id,omitempty"`
+	ReasoningEffort   string                     `json:"reasoning_effort,omitempty"`
+	WorkspaceTargetID string                     `json:"workspace_target_id,omitempty"`
+	ApprovalID        string                     `json:"approval_id,omitempty"`
+	UserInputID       string                     `json:"user_input_id,omitempty"`
+	ShortID           int                        `json:"short_id,omitempty"`
+	ToolCallID        string                     `json:"tool_call_id,omitempty"`
+	Decision          string                     `json:"decision,omitempty"`
+	Reason            string                     `json:"reason,omitempty"`
+	Answers           []userinput.QuestionAnswer `json:"answers,omitempty"`
+	Canceled          bool                       `json:"canceled,omitempty"`
 }
 
 type webRequestedSkill struct {
@@ -1236,6 +1260,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			text := strings.TrimSpace(msg.Text)
 			sessionID := strings.TrimSpace(msg.SessionID)
 			streamID := strings.TrimSpace(msg.StreamID)
+			workspaceTargetID := strings.TrimSpace(msg.WorkspaceTargetID)
 
 			if streamID == "" {
 				sendWSError(writer, "", sessionID, "stream_id is required")
@@ -1244,6 +1269,16 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			if sessionID != "" {
 				if err := h.authorizeWSSession(c, channelIdentityID, botID, sessionID); err != nil {
 					sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+					continue
+				}
+			}
+			if err := authorizeWorkspaceTargetSelection(perms, workspaceTargetID); err != nil {
+				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				continue
+			}
+			if workspaceTargetID != "" {
+				if err := h.resolver.ValidateWorkspaceTarget(streamBaseCtx, botID, workspaceTargetID); err != nil {
+					sendWSError(writer, streamID, sessionID, err.Error())
 					continue
 				}
 			}
@@ -1472,6 +1507,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					ReplyTarget:             botID,
 					Attachments:             ingestedActivationAttachments,
 					RequestedSkills:         requestedSkillContexts,
+					WorkspaceTargetID:       workspaceTargetID,
 				}
 				preparedReq, persisted, persistErr := h.resolver.ApplyUserMessageHookAndPersistUserTurn(streamBaseCtx, userReq)
 				if persistErr != nil {
@@ -1530,6 +1566,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						SkipTitleGeneration:     hasSkillActivation && userVisibleText == "",
 						Model:                   strings.TrimSpace(msg.ModelID),
 						ReasoningEffort:         strings.TrimSpace(msg.ReasoningEffort),
+						WorkspaceTargetID:       workspaceTargetID,
 						ToolHTTPURL:             buildACPMCPToolsURL(c, botID),
 					}
 					if preparedActivationReq != nil {
@@ -1541,6 +1578,8 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						req.SkillActivation = preparedActivationReq.SkillActivation
 						req.RequestedSkills = preparedActivationReq.RequestedSkills
 						req.PersistedUserMessageID = preparedActivationReq.PersistedUserMessageID
+						req.WorkspaceTargetID = preparedActivationReq.WorkspaceTargetID
+						req.WorkspaceTarget = preparedActivationReq.WorkspaceTarget
 					}
 					return h.resolver.StreamChatWS(ctx, req, eventCh, abortCh)
 				},
@@ -1550,6 +1589,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			sessionID := strings.TrimSpace(msg.SessionID)
 			streamID := strings.TrimSpace(msg.StreamID)
 			messageID := strings.TrimSpace(msg.MessageID)
+			workspaceTargetID := strings.TrimSpace(msg.WorkspaceTargetID)
 			if streamID == "" {
 				sendWSError(writer, "", sessionID, "stream_id is required")
 				continue
@@ -1566,6 +1606,16 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
 				continue
 			}
+			if err := authorizeWorkspaceTargetSelection(perms, workspaceTargetID); err != nil {
+				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				continue
+			}
+			if workspaceTargetID != "" {
+				if err := h.resolver.ValidateWorkspaceTarget(streamBaseCtx, botID, workspaceTargetID); err != nil {
+					sendWSError(writer, streamID, sessionID, err.Error())
+					continue
+				}
+			}
 
 			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws retry stream error", nil,
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error {
@@ -1579,6 +1629,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						ChatToken:              bearerToken,
 						Model:                  strings.TrimSpace(msg.ModelID),
 						ReasoningEffort:        strings.TrimSpace(msg.ReasoningEffort),
+						WorkspaceTargetID:      workspaceTargetID,
 						ToolHTTPURL:            buildACPMCPToolsURL(c, botID),
 					}, eventCh, abortCh)
 				},
@@ -1589,6 +1640,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			sessionID := strings.TrimSpace(msg.SessionID)
 			streamID := strings.TrimSpace(msg.StreamID)
 			messageID := strings.TrimSpace(msg.MessageID)
+			workspaceTargetID := strings.TrimSpace(msg.WorkspaceTargetID)
 			if streamID == "" {
 				sendWSError(writer, "", sessionID, "stream_id is required")
 				continue
@@ -1618,6 +1670,16 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
 				continue
 			}
+			if err := authorizeWorkspaceTargetSelection(perms, workspaceTargetID); err != nil {
+				sendWSError(writer, streamID, sessionID, wsErrorMessage(err))
+				continue
+			}
+			if workspaceTargetID != "" {
+				if err := h.resolver.ValidateWorkspaceTarget(streamBaseCtx, botID, workspaceTargetID); err != nil {
+					sendWSError(writer, streamID, sessionID, err.Error())
+					continue
+				}
+			}
 
 			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws edit stream error", nil,
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error {
@@ -1634,6 +1696,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						ChatToken:              bearerToken,
 						Model:                  strings.TrimSpace(msg.ModelID),
 						ReasoningEffort:        strings.TrimSpace(msg.ReasoningEffort),
+						WorkspaceTargetID:      workspaceTargetID,
 						ToolHTTPURL:            buildACPMCPToolsURL(c, botID),
 					}, eventCh, abortCh)
 				},
@@ -1735,6 +1798,16 @@ func (h *LocalChannelHandler) ensureBotParticipant(ctx context.Context, botID, c
 
 func canOpenLocalWebSocket(perms []string) bool {
 	return bots.HasPermission(perms, bots.PermissionWorkspaceExec) || bots.HasPermission(perms, bots.PermissionManage)
+}
+
+func authorizeWorkspaceTargetSelection(perms []string, targetID string) error {
+	if strings.TrimSpace(targetID) == "" {
+		return nil
+	}
+	if bots.HasPermission(perms, bots.PermissionWorkspaceRead) {
+		return nil
+	}
+	return echo.NewHTTPError(http.StatusForbidden, "workspace_read permission is required to select a computer")
 }
 
 func (*LocalChannelHandler) requireChannelIdentityID(c echo.Context) (string, error) {
