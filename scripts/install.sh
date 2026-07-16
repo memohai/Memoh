@@ -587,11 +587,35 @@ gen_secret() {
   fi
 }
 
+gen_password() {
+  while :; do
+    if command -v openssl >/dev/null 2>&1; then
+      password=$(openssl rand -base64 32 | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 16)
+    else
+      password=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16)
+    fi
+    if [ "${#password}" -ne 16 ]; then
+      continue
+    fi
+    case "$password" in
+      *[ABCDEFGHIJKLMNOPQRSTUVWXYZ]*)
+        case "$password" in
+          *[abcdefghijklmnopqrstuvwxyz]*)
+            case "$password" in
+              *[0123456789]*) printf '%s' "$password"; return ;;
+            esac
+            ;;
+        esac
+        ;;
+    esac
+  done
+}
+
 # Configuration defaults (expand ~ for paths)
 WORKSPACE_DEFAULT="${HOME:-/tmp}/memoh"
 MEMOH_DATA_DIR_DEFAULT="${HOME:-/tmp}/memoh/data"
 ADMIN_USER="admin"
-ADMIN_PASS="admin123"
+ADMIN_PASS="$(gen_password)"
 JWT_SECRET="$(gen_secret)"
 PG_PASS="memoh123"
 WORKSPACE="$WORKSPACE_DEFAULT"
