@@ -1,120 +1,126 @@
 <template>
-  <div class="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+  <div
+    data-slot="input-group"
+    role="group"
+    class="chat-composer-edge flex w-full flex-col rounded-[20px] bg-surface-composer px-2.5 py-2.5"
+  >
     <div
-      class="max-h-[45vh] overflow-y-auto overscroll-contain px-3 py-2 pr-2"
+      class="max-h-[40vh] overflow-y-auto overscroll-contain"
       style="scrollbar-gutter: stable;"
     >
       <div
         v-for="(question, questionIndex) in questions"
         :key="question.id"
-        :class="questionIndex > 0 ? 'mt-3 border-t border-border/60 pt-3' : ''"
+        :class="questionIndex > 0 ? 'mt-3 border-t border-border-soft pt-3' : ''"
       >
-        <p class="whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-foreground">
+        <p class="whitespace-pre-wrap break-words px-3 py-1.5 text-label font-medium text-foreground">
           {{ question.text }}
         </p>
-        <div>
-          <div
-            v-if="question.kind !== 'text' && question.options?.length"
-            class="mt-2 flex flex-col gap-1"
+        <div
+          v-if="question.kind !== 'text' && question.options?.length"
+          class="mt-0.5 flex flex-col gap-1"
+        >
+          <Button
+            v-for="option in question.options"
+            :key="option.id"
+            type="button"
+            variant="ghost"
+            class="h-auto min-h-9 w-full justify-start whitespace-normal rounded-lg px-3 py-2 text-left text-control font-normal"
+            :title="option.description || option.label"
+            :role="question.kind === 'multi_select' ? 'checkbox' : 'radio'"
+            :aria-checked="isOptionSelected(question.id, option.id)"
+            @click="toggleOption(question, option.id)"
           >
-            <Button
-              v-for="option in question.options"
-              :key="option.id"
-              type="button"
-              size="sm"
-              variant="ghost"
-              class="h-auto min-h-8 w-full justify-start whitespace-normal rounded-md px-2.5 py-1.5 text-left text-xs"
-              :class="isOptionSelected(question.id, option.id) ? 'bg-muted text-foreground' : 'text-foreground hover:bg-accent'"
-              :title="option.description || option.label"
-              :role="question.kind === 'multi_select' ? 'checkbox' : 'radio'"
-              :aria-checked="isOptionSelected(question.id, option.id)"
-              @click="toggleOption(question, option.id)"
-            >
-              <span
-                class="mr-2 flex size-4 shrink-0 items-center justify-center"
-                :class="isOptionSelected(question.id, option.id) ? 'text-foreground' : 'text-muted-foreground'"
-              >
-                <component
-                  :is="optionIcon(question, isOptionSelected(question.id, option.id))"
-                  class="size-4"
-                />
-              </span>
-              <span class="min-w-0 flex-1 break-words">{{ option.label }}</span>
-            </Button>
-            <Button
-              v-if="question.allow_custom"
-              type="button"
-              size="sm"
-              variant="ghost"
-              class="h-auto min-h-8 w-full justify-start whitespace-normal rounded-md px-2.5 py-1.5 text-left text-xs"
-              :class="isCustomSelected(question.id) ? 'bg-muted text-foreground' : 'text-foreground hover:bg-accent'"
-              :role="question.kind === 'multi_select' ? 'checkbox' : 'radio'"
-              :aria-checked="isCustomSelected(question.id)"
-              @click="toggleCustom(question)"
-            >
-              <span
-                class="mr-2 flex size-4 shrink-0 items-center justify-center"
-                :class="isCustomSelected(question.id) ? 'text-foreground' : 'text-muted-foreground'"
-              >
-                <component
-                  :is="optionIcon(question, isCustomSelected(question.id))"
-                  class="size-4"
-                />
-              </span>
-              <span class="min-w-0 flex-1 break-words">{{ $t('chat.tools.userInputCustomOption') }}</span>
-            </Button>
-          </div>
-          <div
-            v-if="question.kind === 'text' || isCustomSelected(question.id)"
-            class="mt-1 flex items-center gap-2"
+            <component
+              :is="optionIcon(question, isOptionSelected(question.id, option.id))"
+              class="size-4 shrink-0"
+              :class="isOptionSelected(question.id, option.id) ? 'text-foreground' : 'text-muted-foreground'"
+            />
+            <span class="min-w-0 flex-1 break-words">{{ option.label }}</span>
+          </Button>
+          <Button
+            v-if="question.allow_custom && !isSingle"
+            type="button"
+            variant="ghost"
+            class="h-auto min-h-9 w-full justify-start whitespace-normal rounded-lg px-3 py-2 text-left text-control font-normal"
+            :role="question.kind === 'multi_select' ? 'checkbox' : 'radio'"
+            :aria-checked="isCustomSelected(question.id)"
+            @click="toggleCustom(question)"
           >
-            <input
-              :value="draftText(question)"
-              class="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              :placeholder="question.placeholder || $t('chat.tools.userInputPlaceholder')"
-              @input="setDraftText(question, ($event.target as HTMLInputElement).value)"
-              @keydown.enter.prevent="handleSubmit"
-            >
-          </div>
+            <component
+              :is="optionIcon(question, isCustomSelected(question.id))"
+              class="size-4 shrink-0"
+              :class="isCustomSelected(question.id) ? 'text-foreground' : 'text-muted-foreground'"
+            />
+            <span class="min-w-0 flex-1 break-words">{{ $t('chat.tools.userInputCustomOption') }}</span>
+          </Button>
         </div>
+        <Input
+          v-if="!isSingle && (question.kind === 'text' || isCustomSelected(question.id))"
+          class="mt-1"
+          :model-value="draftText(question)"
+          :placeholder="question.placeholder || $t('chat.tools.userInputPlaceholder')"
+          @update:model-value="setDraftText(question, String($event))"
+          @keydown.enter.prevent="handleSubmit"
+        />
       </div>
     </div>
-    <div class="flex items-center justify-end gap-2 border-t border-border/60 bg-card px-3 py-2">
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        class="text-xs text-muted-foreground hover:text-foreground"
-        @click="handleCancel"
-      >
-        {{ $t('chat.tools.cancelUserInput') }}
-      </Button>
-      <Button
-        type="button"
-        size="sm"
-        class="text-xs"
-        :disabled="!canSubmit"
-        @click="handleSubmit"
-      >
-        {{ $t('chat.tools.submitUserInput') }}
-      </Button>
+    <div class="mt-2 border-t border-border-soft pt-2">
+      <Input
+        v-if="footerInputVisible"
+        class="mb-2"
+        :model-value="footerText"
+        :placeholder="footerPlaceholder"
+        @update:model-value="setFooterText(String($event))"
+        @keydown.enter.prevent="handleSubmit"
+      />
+      <div class="flex gap-1.5">
+        <Button
+          type="button"
+          variant="default"
+          class="h-9 flex-1 rounded-lg"
+          :disabled="!canSubmit"
+          @click="handleSubmit"
+        >
+          {{ $t('chat.tools.submitUserInput') }}
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          class="h-9 flex-1 rounded-lg"
+          @click="handleCancel"
+        >
+          {{ $t('chat.tools.cancelUserInput') }}
+        </Button>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Button } from '@felinic/ui'
+import { Button, Input } from '@felinic/ui'
 import { Circle, CircleDot, Square, SquareCheck } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/store/chat-list'
 import type { UIUserInput, UIUserInputQuestion, WSUserInputAnswer } from '@/composables/api/useChat'
 import { useChatViewTarget } from '../composables/useChatViewContext'
 
-// Inline Q&A form for the ask_user tool. The parent decides WHICH pending
-// user-input to render (it scans the transcript); this component owns the
-// draft answers and submits/cancels straight through the chat store.
+// Inline Q&A selector for the ask_user tool. It REPLACES the chat composer
+// while a request is pending (the parent hides the textarea and shows this
+// capsule, styled like the composer, in its place) and is fully
+// self-contained: option rows on top, then a divider, then the free-text
+// input ("tell the bot more") and the Submit / Cancel pair. Cancel resolves
+// the request as canceled, which hands the composer back. Picking an option
+// also reveals the composer again so the user can keep typing.
+// Multi-question requests keep per-question inline inputs, because one footer
+// input cannot answer several text questions at once.
 const props = defineProps<{
   userInput: UIUserInput
+}>()
+
+const emit = defineEmits<{
+  (e: 'reveal-composer', opts: { focus?: boolean }): void
 }>()
 
 interface PendingUserInputDraft {
@@ -124,11 +130,35 @@ interface PendingUserInputDraft {
   text: string
 }
 
+const { t } = useI18n()
 const chatStore = useChatStore()
 const chatViewTarget = useChatViewTarget()
 const drafts = ref<Record<string, PendingUserInputDraft>>({})
 
 const questions = computed(() => props.userInput.questions ?? [])
+const isSingle = computed(() => questions.value.length === 1)
+const singleQuestion = computed(() => (isSingle.value ? questions.value[0] ?? null : null))
+
+// The footer free-text entry: the answer box for a lone text question, or the
+// custom ("Other") entry when the lone select question allows one.
+const footerInputVisible = computed(() => {
+  const question = singleQuestion.value
+  if (!question) return false
+  return question.kind === 'text' || question.allow_custom === true
+})
+const footerText = computed(() => {
+  const question = singleQuestion.value
+  if (!question) return ''
+  return draftText(question)
+})
+const footerPlaceholder = computed(() => {
+  const question = singleQuestion.value
+  if (!question) return ''
+  if (question.placeholder) return question.placeholder
+  return question.kind === 'text'
+    ? t('chat.tools.userInputPlaceholder')
+    : t('chat.tools.userInputTellMore')
+})
 
 // A new request invalidates any half-filled answers from the previous one.
 watch(
@@ -166,11 +196,14 @@ function toggleOption(question: UIUserInputQuestion, optionId: string) {
     draft.optionIds = draft.optionIds.includes(optionId)
       ? draft.optionIds.filter(id => id !== optionId)
       : [...draft.optionIds, optionId]
-    return
+  } else {
+    draft.optionIds = [optionId]
+    // An option and the custom entry are mutually exclusive for single_select.
+    draft.customSelected = false
+    draft.customText = ''
   }
-  draft.optionIds = [optionId]
-  draft.customSelected = false
-  draft.customText = ''
+  // Picking an option hands the textarea back so the user can keep typing.
+  emit('reveal-composer', { focus: isSingle.value })
 }
 
 function toggleCustom(question: UIUserInputQuestion) {
@@ -201,19 +234,39 @@ function setDraftText(question: UIUserInputQuestion, value: string) {
   draft.customText = value
 }
 
+function setFooterText(value: string) {
+  const question = singleQuestion.value
+  if (!question) return
+  const draft = ensureDraft(question.id)
+  setDraftText(question, value)
+  // Typing a custom answer displaces the picked option for single_select —
+  // the backend accepts exactly one of the two.
+  if (question.kind === 'single_select' && value.trim()) {
+    draft.optionIds = []
+  }
+}
+
 function answerFor(question: UIUserInputQuestion): WSUserInputAnswer | null {
   const draft = drafts.value[question.id]
-  const customText = draft?.customSelected ? draft.customText.trim() : ''
-  const text = draft?.text.trim() ?? ''
-  if (!draft) return null
   if (question.kind === 'text') {
+    const text = draft?.text.trim() ?? ''
     return text ? { question_id: question.id, text } : null
   }
-  if (draft.customSelected && !customText) return null
-  if (question.kind === 'single_select' && draft.optionIds.length + (customText ? 1 : 0) !== 1) return null
-  if (draft.optionIds.length === 0 && !customText) return null
+  const optionIds = draft?.optionIds ?? []
+  let customText = ''
+  if (isSingle.value) {
+    // The footer input needs no explicit "Other" selection — text present
+    // means the custom answer is in play.
+    customText = question.allow_custom === true ? (draft?.customText.trim() ?? '') : ''
+  } else {
+    const customSelected = draft?.customSelected ?? false
+    customText = customSelected ? (draft?.customText.trim() ?? '') : ''
+    if (customSelected && !customText) return null
+  }
+  if (question.kind === 'single_select' && optionIds.length + (customText ? 1 : 0) !== 1) return null
+  if (optionIds.length === 0 && !customText) return null
   const answer: WSUserInputAnswer = { question_id: question.id }
-  if (draft.optionIds.length > 0) answer.option_ids = [...draft.optionIds]
+  if (optionIds.length > 0) answer.option_ids = [...optionIds]
   if (customText) answer.custom_text = customText
   return answer
 }
@@ -238,6 +291,8 @@ function handleSubmit() {
 }
 
 function handleCancel() {
+  // Hand the composer back (focused) before the canceled state unmounts us.
+  emit('reveal-composer', { focus: true })
   void chatStore.respondUserInput(props.userInput, {
     canceled: true,
     reason: 'user_canceled',

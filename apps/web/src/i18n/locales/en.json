@@ -697,6 +697,7 @@
       "userInputExpired": "expired",
       "userInputPlaceholder": "Answer",
       "userInputCustomOption": "Other…",
+      "userInputTellMore": "Tell the bot more…",
       "submitUserInput": "Submit",
       "cancelUserInput": "Cancel",
       "userInputConnectionLost": "Connection lost. Reconnect and try again.",

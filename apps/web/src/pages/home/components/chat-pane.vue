@@ -189,7 +189,7 @@
           v-if="!isWelcome"
           aria-hidden="true"
           class="absolute inset-x-0 bottom-0 bg-surface-editor"
-          :style="{ height: composerMaskHeight }"
+          :style="{ height: bottomMaskHeight }"
         />
         <!-- welcome: top-anchored column — the greeting and the composer's top
              edge stay pinned at pt-[38dvh], so a growing composer (multiline
@@ -334,8 +334,10 @@
               >
                 <ChatUserInputForm
                   v-if="pendingUserInput"
-                  class="mb-2"
+                  ref="userInputFormEl"
+                  :class="composerVisible ? 'mb-2' : ''"
                   :user-input="pendingUserInput"
+                  @reveal-composer="handleUserInputReveal"
                 />
               </Transition>
               <div
@@ -423,6 +425,7 @@
               it crossed half-height, then jumped the corner in one step).
             -->
               <div
+                v-show="composerVisible"
                 ref="composerEl"
                 data-slot="input-group"
                 role="group"
@@ -806,7 +809,7 @@ import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMe
 import { useChatStore, type ACPAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { storeToRefs } from 'pinia'
-import { useIntersectionObserver } from '@vueuse/core'
+import { useElementSize, useIntersectionObserver } from '@vueuse/core'
 import { useQuery } from '@pinia/colada'
 import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets } from '@memohai/sdk'
 import type { AcpclientModelInfo, AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse, WorkspaceWorkspaceTarget } from '@memohai/sdk'
@@ -830,7 +833,7 @@ import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, availableEffortsForMode, resol
 import { useMediaGallery } from '../composables/useMediaGallery'
 import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAttachments } from '../composables/useComposerAttachments'
 import { useComposerDrafts } from '../composables/useComposerDrafts'
-import { useComposerLayout } from '../composables/useComposerLayout'
+import { COMPOSER_MASK_BELOW_PX, useComposerLayout } from '../composables/useComposerLayout'
 import { provideChatViewTarget } from '../composables/useChatViewContext'
 import { fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
 import { commandResultQuickActionText, isCommandResultItemSelectable } from './slash-command-result'
@@ -2012,6 +2015,32 @@ const { inputDraftKey, saveInputDraft, clearAllDrafts } = useComposerDrafts({
   inputText,
   onDraftKeySwap: snapComposerNext,
 })
+
+// While an ask_user request is pending the selector REPLACES the composer:
+// the capsule hides until the form reveals it again (an option was picked, or
+// the request resolved — submit and cancel both hand the composer back).
+const userInputFormEl = useTemplateRef<InstanceType<typeof ChatUserInputForm>>('userInputFormEl')
+const userInputComposerRevealed = ref(false)
+const composerVisible = computed(() => !pendingUserInput.value || userInputComposerRevealed.value)
+
+watch(() => pendingUserInput.value?.user_input_id ?? null, () => {
+  userInputComposerRevealed.value = false
+})
+
+function handleUserInputReveal(opts: { focus?: boolean }) {
+  userInputComposerRevealed.value = true
+  if (opts.focus) void nextTick(focusTextarea)
+}
+
+// The bottom backdrop normally rises to the composer's vertical centre; with
+// the composer hidden that measurement collapses to 0, so mirror the same
+// half-height rule against the user-input capsule that stands in for it.
+const { height: userInputFormHeight } = useElementSize(userInputFormEl)
+const bottomMaskHeight = computed(() => (
+  composerVisible.value
+    ? composerMaskHeight.value
+    : `${COMPOSER_MASK_BELOW_PX + userInputFormHeight.value / 2}px`
+))
 
 watch([
   startupSendFailure,
