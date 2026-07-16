@@ -303,6 +303,76 @@ describe('chat-list store', () => {
     expect(api.fetchSessions).toHaveBeenCalledWith('bot-ready')
   })
 
+  it('requests the Desktop once when each Browser Use or Computer Use call starts', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'browser_action',
+          input: { action: 'click' },
+          tool_call_id: 'call-browser',
+          running: true,
+        },
+      } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+
+    const sending = store.sendMessage('use the browser')
+    await flushPromises()
+    expect(store.guiToolUseRequested).toMatchObject({
+      botId: 'bot-1',
+      sessionId: 'session-1',
+      toolCallId: 'call-browser',
+      toolName: 'browser_action',
+      seq: 1,
+    })
+
+    streamHandler?.({
+      type: 'message',
+      stream_id: lastStreamId,
+      session_id: 'session-1',
+      data: {
+        id: 1,
+        type: 'tool',
+        name: 'browser_action',
+        input: { action: 'click', coordinate: [10, 20] },
+        tool_call_id: 'call-browser',
+        running: true,
+      },
+    } as UIStreamEvent)
+    expect(store.guiToolUseRequested?.seq).toBe(1)
+
+    streamHandler?.({
+      type: 'message',
+      stream_id: lastStreamId,
+      session_id: 'session-1',
+      data: {
+        id: 2,
+        type: 'tool',
+        name: 'computer_observe',
+        input: { observe: 'snapshot' },
+        tool_call_id: 'call-computer',
+        running: true,
+      },
+    } as UIStreamEvent)
+    expect(store.guiToolUseRequested).toMatchObject({
+      toolCallId: 'call-computer',
+      toolName: 'computer_observe',
+      seq: 2,
+    })
+
+    streamHandler?.({
+      type: 'end',
+      stream_id: lastStreamId,
+      session_id: 'session-1',
+    } as UIStreamEvent)
+    await expect(sending).resolves.toMatchObject({ ok: true })
+  })
+
   it('returns startup stream errors to the composer when no assistant output exists', async () => {
     const store = useChatStore()
     const onBeforeTurnAppend = vi.fn()
