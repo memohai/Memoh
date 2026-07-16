@@ -53,7 +53,7 @@ describe('desktop server connection', () => {
     )
     await expect(probeServerBaseUrl('https://memoh.example.com', success))
       .resolves.toEqual({ ok: true, baseUrl: 'https://memoh.example.com' })
-    expect(success).toHaveBeenCalledWith('https://memoh.example.com/ping', expect.objectContaining({
+    expect(success).toHaveBeenCalledWith('https://memoh.example.com/api/ping', expect.objectContaining({
       headers: { Accept: 'application/json' },
     }))
 
