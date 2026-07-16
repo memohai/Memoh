@@ -583,8 +583,65 @@
                         />
                       </DropdownMenuItem>
                     </template>
-                    <template v-if="!activeIsACP">
+                    <template v-if="showComputersMenu">
                       <DropdownMenuSeparator v-if="canChangeAgent && enabledACPProfiles.length" />
+                      <DropdownMenuLabel>{{ $t('chat.computers') }}</DropdownMenuLabel>
+                      <DropdownMenuItem
+                        v-if="workspaceTargetsInitialLoading"
+                        disabled
+                      >
+                        <Spinner />
+                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.computerLoading') }}</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        v-else-if="workspaceTargetsLoadFailed"
+                        disabled
+                      >
+                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.computerLoadFailed') }}</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        v-else-if="!workspaceTargets.length"
+                        disabled
+                      >
+                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.computerNone') }}</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        v-if="selectedWorkspaceTargetMissing"
+                        disabled
+                      >
+                        <Monitor class="size-4 shrink-0" />
+                        <span class="min-w-0 flex-1 truncate">
+                          {{ workspaceTargetSelection.snapshot?.name || $t('chat.computerUnavailable') }}
+                        </span>
+                        <span class="shrink-0 text-caption text-muted-foreground">{{ $t('chat.computerUnavailable') }}</span>
+                        <Check class="ml-auto" />
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        v-for="target in workspaceTargets"
+                        :key="target.target_id"
+                        :disabled="computerSwitchLocked || !workspaceTargetAvailable(target)"
+                        @select="selectWorkspaceTarget(target)"
+                      >
+                        <component
+                          :is="target.kind === 'native' ? Server : Monitor"
+                          class="size-4 shrink-0"
+                        />
+                        <span class="min-w-0 flex-1 truncate">{{ workspaceTargetName(target) }}</span>
+                        <span class="shrink-0 text-caption text-muted-foreground">
+                          {{ target.primary
+                            ? (workspaceTargetAvailable(target)
+                              ? $t('chat.computerDefault')
+                              : $t('chat.computerDefaultStatus', { status: workspaceTargetStatusLabel(target) }))
+                            : workspaceTargetStatusLabel(target) }}
+                        </span>
+                        <Check
+                          v-if="selectedWorkspaceTargetId === target.target_id"
+                          class="ml-auto"
+                        />
+                      </DropdownMenuItem>
+                    </template>
+                    <template v-if="!activeIsACP">
+                      <DropdownMenuSeparator v-if="(canChangeAgent && enabledACPProfiles.length) || showComputersMenu" />
                       <DropdownMenuItem
                         :disabled="!currentBotId || activeChatReadOnly || streaming || loadingMessages"
                         @select="fileInput?.click()"
@@ -835,15 +892,17 @@ import {
   Minimize2,
   Package,
   SquarePen,
+  Monitor,
+  Server,
 } from 'lucide-vue-next'
 import { ScrollArea, Button, Popover, PopoverContent, PopoverTrigger, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuItem, DropdownMenuSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Spinner, toast } from '@felinic/ui'
-import { useChatStore, type ACPAgentSessionInput, type ChatMessage } from '@/store/chat-list'
+import { useChatStore, type ACPAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { storeToRefs } from 'pinia'
 import { useIntersectionObserver } from '@vueuse/core'
 import { useQuery } from '@pinia/colada'
-import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings } from '@memohai/sdk'
-import type { AcpclientModelInfo, AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
+import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets } from '@memohai/sdk'
+import type { AcpclientModelInfo, AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse, WorkspaceWorkspaceTarget } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import MessageItem from './message-item.vue'
 import ChatAttachmentCard from './chat-attachment-card.vue'
@@ -1012,6 +1071,15 @@ const pendingUserInput = computed<UIUserInput | null>(() => {
   return null
 })
 
+const hasPendingToolApproval = computed(() => messages.value.some(message => (
+  message.role === 'assistant'
+  && message.messages.some(block => (
+    block.type === 'tool'
+    && block.approval?.status === 'pending'
+    && block.approval.can_approve !== false
+  ))
+)))
+
 const canForkAssistant = computed(() =>
   !streaming.value
   && !loadingMessages.value
@@ -1079,6 +1147,51 @@ const { data: acpProfileData, isLoading: acpProfilesLoading } = useQuery({
 })
 
 const currentBot = computed(() => bots.value.find(bot => bot.id === currentBotId.value) ?? null)
+const canWorkspaceRead = computed(() => (
+  hasBotPermission(currentBot.value?.current_user_permissions, 'workspace_read')
+))
+
+type ValidWorkspaceTarget = WorkspaceWorkspaceTarget & {
+  target_id: string
+  kind: string
+}
+
+const {
+  data: workspaceTargetsResponse,
+  error: workspaceTargetsError,
+  isLoading: workspaceTargetsLoading,
+} = useQuery({
+  key: () => ['bot-workspace-targets', currentBotId.value ?? ''],
+  query: async () => {
+    const { data } = await getBotsByBotIdWorkspaceTargets({
+      path: { bot_id: currentBotId.value! },
+      throwOnError: true,
+    })
+    return data
+  },
+  enabled: () => !!currentBotId.value && canWorkspaceRead.value,
+  refetchOnWindowFocus: true,
+})
+
+const workspaceTargets = computed<ValidWorkspaceTarget[]>(() => (
+  (workspaceTargetsResponse.value?.targets ?? []).filter((target): target is ValidWorkspaceTarget => (
+    typeof target.target_id === 'string'
+    && target.target_id.length > 0
+    && typeof target.kind === 'string'
+    && target.kind.length > 0
+  ))
+))
+const primaryWorkspaceTarget = computed(() => (
+  workspaceTargets.value.find(target => target.primary)
+  ?? workspaceTargets.value.find(target => target.target_id === 'native')
+  ?? null
+))
+const workspaceTargetsInitialLoading = computed(() => (
+  workspaceTargetsLoading.value && !workspaceTargetsResponse.value
+))
+const workspaceTargetsLoadFailed = computed(() => (
+  !!workspaceTargetsError.value && !workspaceTargetsResponse.value
+))
 
 // A third-party synced thread (Telegram/Discord/...) is a multi-participant
 // group conversation rather than the local 1:1 chat. The message list switches
@@ -1129,6 +1242,123 @@ const forkSourceDividerAfterIndex = computed<number | null>(() => {
 })
 const activeIsPendingACP = computed(() => activeChatTarget.value.isPendingACP)
 const activeIsACP = computed(() => activeChatTarget.value.isACP)
+const showComputersMenu = computed(() => (
+  !activeIsACP.value
+  && !activeIsPendingACP.value
+  && canWorkspaceRead.value
+))
+const computerSwitchLocked = computed(() => (
+  streaming.value
+  || creatingSession.value
+  || loadingMessages.value
+  || agentChanging.value
+  || hasPendingToolApproval.value
+  || !!pendingUserInput.value
+))
+const workspaceTargetSelection = computed(() => (
+  chatStore.workspaceTargetSelectionFor(paneTarget.value)
+))
+const selectedWorkspaceTargetId = computed(() => workspaceTargetSelection.value.targetId)
+const selectedWorkspaceTarget = computed(() => (
+  workspaceTargets.value.find(target => target.target_id === selectedWorkspaceTargetId.value) ?? null
+))
+const selectedWorkspaceTargetMissing = computed(() => (
+  !!selectedWorkspaceTargetId.value
+  && !selectedWorkspaceTarget.value
+  && !workspaceTargetsInitialLoading.value
+))
+
+function snapshotForWorkspaceTarget(target: ValidWorkspaceTarget): ChatWorkspaceTargetSnapshot {
+  return {
+    target_id: target.target_id,
+    kind: target.kind,
+    name: target.name,
+    workspace_path: target.workspace_path,
+  }
+}
+
+function workspaceTargetFromSessionMetadata(metadata: Record<string, unknown>): ChatWorkspaceTargetSnapshot | null {
+  const rawSnapshot = metadata.workspace_target
+  const snapshot = rawSnapshot && typeof rawSnapshot === 'object'
+    ? rawSnapshot as Record<string, unknown>
+    : {}
+  const targetId = String(metadata.workspace_target_id ?? snapshot.target_id ?? '').trim()
+  if (!targetId) return null
+  const value = (key: string) => {
+    const raw = snapshot[key]
+    return typeof raw === 'string' && raw.trim() ? raw.trim() : undefined
+  }
+  return {
+    target_id: targetId,
+    kind: value('kind'),
+    name: value('name'),
+    workspace_path: value('workspace_path'),
+  }
+}
+
+function workspaceTargetName(target: Pick<WorkspaceWorkspaceTarget, 'kind' | 'name'>): string {
+  if (target.kind === 'native') return t('bots.remoteRuntime.nativeWorkspace')
+  return target.name || t('bots.remoteRuntime.unknownComputer')
+}
+
+function workspaceTargetStatus(target: WorkspaceWorkspaceTarget): string {
+  if (target.kind === 'native') return 'online'
+  return target.status || (target.online ? 'online' : 'offline')
+}
+
+function workspaceTargetStatusLabel(target: WorkspaceWorkspaceTarget): string {
+  const status = workspaceTargetStatus(target)
+  const key = `runtimes.status.${status}`
+  const label = t(key)
+  return label === key ? status : label
+}
+
+function workspaceTargetAvailable(target: WorkspaceWorkspaceTarget): boolean {
+  return target.kind === 'native'
+    || (workspaceTargetStatus(target) === 'online' && target.online !== false)
+}
+
+function selectWorkspaceTarget(target: ValidWorkspaceTarget) {
+  if (computerSwitchLocked.value || !workspaceTargetAvailable(target)) return
+  chatStore.setWorkspaceTargetSelection(
+    paneTarget.value,
+    target.target_id,
+    snapshotForWorkspaceTarget(target),
+  )
+}
+
+watch([
+  activeIsACP,
+  activeIsPendingACP,
+  activeSessionMetadata,
+  workspaceTargets,
+  paneTarget,
+], () => {
+  if (activeIsACP.value || activeIsPendingACP.value) {
+    chatStore.resetWorkspaceTargetSelection(paneTarget.value)
+    return
+  }
+  const sessionTarget = paneTarget.value.sessionId
+    ? workspaceTargetFromSessionMetadata(activeSessionMetadata.value)
+    : null
+  if (sessionTarget) {
+    chatStore.initializeWorkspaceTargetSelection(
+      paneTarget.value,
+      sessionTarget.target_id,
+      sessionTarget,
+      'session',
+    )
+    return
+  }
+  const primary = primaryWorkspaceTarget.value
+  if (!primary) return
+  chatStore.initializeWorkspaceTargetSelection(
+    paneTarget.value,
+    primary.target_id,
+    snapshotForWorkspaceTarget(primary),
+    'default',
+  )
+}, { immediate: true })
 const activeACPAgentId = computed(() => normalizeACPAgentID(activeSessionMetadata.value.acp_agent_id))
 const activeACPProjectLabel = computed(() => {
   if (isACPNoProject(activeSessionMetadata.value)) return t('chat.noProject')
@@ -1167,7 +1397,9 @@ function showForkSourceDividerBefore(index: number): boolean {
 // mode). An in-progress ACP chat has neither, so the trigger is hidden rather
 // than opening an empty sheet.
 const composerMenuHasItems = computed(() =>
-  (canChangeAgent.value && enabledACPProfiles.value.length > 0) || !activeIsACP.value,
+  (canChangeAgent.value && enabledACPProfiles.value.length > 0)
+  || showComputersMenu.value
+  || !activeIsACP.value,
 )
 const activeSessionId = computed(() => paneTarget.value.sessionId ?? activeSession.value?.id ?? '')
 const requestedSkills = ref<RequestedSkillSelection[]>([])
@@ -2083,6 +2315,7 @@ async function handleRetryMessage(messageId: string) {
     target: paneTarget.value,
     modelId: overrideModelId.value,
     reasoningEffort: overrideReasoningEffort.value,
+    workspaceTargetId: selectedWorkspaceTargetId.value,
   })
   if (!result.ok && result.error) {
     composerError.value = result.error
@@ -2096,6 +2329,7 @@ async function handleEditMessage(messageId: string, text: string, done?: (starte
       target: paneTarget.value,
       modelId: overrideModelId.value,
       reasoningEffort: overrideReasoningEffort.value,
+      workspaceTargetId: selectedWorkspaceTargetId.value,
     })
     if (!result.ok && result.error) {
       composerError.value = result.error
@@ -2147,6 +2381,7 @@ async function handleSend() {
   )
   const sentModelId = overrideModelId.value
   const sentReasoningEffort = overrideReasoningEffort.value
+  const sentWorkspaceTargetId = selectedWorkspaceTargetId.value
   composerError.value = ''
   inputText.value = ''
   saveInputDraft(sentDraftKey, '')
@@ -2179,6 +2414,7 @@ async function handleSend() {
     target: sentContext.target,
     modelId: sentModelId,
     reasoningEffort: sentReasoningEffort,
+    workspaceTargetId: sentWorkspaceTargetId,
     requestedSkills: skills,
     composerScope: sentContext.composerScope,
     onBeforeTurnAppend: () => {

@@ -1,7 +1,12 @@
 import { ref } from 'vue'
 import type { UITurn } from '@/composables/api/useChat.types'
 import { createTranscriptController, type TranscriptDeps } from './transcript'
-import type { ChatMessage, ChatViewTarget } from './types'
+import type {
+  ChatMessage,
+  ChatViewTarget,
+  ChatWorkspaceTargetSelectionSource,
+  ChatWorkspaceTargetSnapshot,
+} from './types'
 
 export const CHAT_SESSION_VIEW_CACHE_LIMIT = 12
 
@@ -20,6 +25,9 @@ export interface ChatViewEntry {
   attachedPanelIds: Set<string>
   visiblePanelIds: Set<string>
   initialized: boolean
+  workspaceTargetId: Ref<string>
+  workspaceTargetSnapshot: Ref<ChatWorkspaceTargetSnapshot | null>
+  workspaceTargetSelectionSource: Ref<ChatWorkspaceTargetSelectionSource>
   lastAccess: number
 }
 
@@ -117,6 +125,9 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
       attachedPanelIds: new Set<string>(),
       visiblePanelIds: new Set<string>(),
       initialized: false,
+      workspaceTargetId: ref(''),
+      workspaceTargetSnapshot: ref(null),
+      workspaceTargetSelectionSource: ref('unset'),
       lastAccess: 0,
     }
     transcript.setSnapshotHook((targetSessionId, turns) => {
@@ -273,6 +284,13 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
         ...draft.transcript.messages.filter(turn => !knownTurns.has(turn)),
       )
       existing.initialized ||= draft.initialized
+      if (draft.workspaceTargetSelectionSource.value !== 'unset') {
+        existing.workspaceTargetId.value = draft.workspaceTargetId.value
+        existing.workspaceTargetSnapshot.value = draft.workspaceTargetSnapshot.value
+          ? { ...draft.workspaceTargetSnapshot.value }
+          : null
+        existing.workspaceTargetSelectionSource.value = draft.workspaceTargetSelectionSource.value
+      }
       for (const panelId of draft.attachedPanelIds) {
         existing.attachedPanelIds.add(panelId)
         panelKeys.set(panelId, existing.key)
@@ -293,6 +311,11 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     const replacement = createView({ botId: bid, sessionId: sid, viewId: vid })
     replacement.transcript.appendToView(...draft.transcript.messages)
     replacement.initialized = draft.initialized
+    replacement.workspaceTargetId.value = draft.workspaceTargetId.value
+    replacement.workspaceTargetSnapshot.value = draft.workspaceTargetSnapshot.value
+      ? { ...draft.workspaceTargetSnapshot.value }
+      : null
+    replacement.workspaceTargetSelectionSource.value = draft.workspaceTargetSelectionSource.value
     for (const panelId of draft.attachedPanelIds) {
       replacement.attachedPanelIds.add(panelId)
       panelKeys.set(panelId, replacement.key)

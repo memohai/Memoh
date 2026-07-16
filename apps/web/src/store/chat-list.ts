@@ -54,6 +54,8 @@ import type {
   ChatAssistantTurn,
   ChatMessage,
   ChatUserTurn,
+  ChatWorkspaceTargetSelectionSource,
+  ChatWorkspaceTargetSnapshot,
   ChatViewTarget,
   SendMessageOptions,
   SendMessageResult,
@@ -97,6 +99,7 @@ export type {
   ChatMessage,
   ChatSystemTurn,
   ChatUserTurn,
+  ChatWorkspaceTargetSnapshot,
   ContentBlock,
   ErrorBlock,
   SendMessageOptions,
@@ -290,6 +293,51 @@ export const useChatStore = defineStore('chat', () => {
 
   function chatView(target?: Partial<ChatViewTarget>): ChatViewEntry {
     return chatViews.getOrCreate(normalizedChatViewTarget(target))
+  }
+
+  function workspaceTargetSelectionFor(target?: ChatViewTarget) {
+    const view = chatView(target)
+    return {
+      targetId: view.workspaceTargetId.value,
+      snapshot: view.workspaceTargetSnapshot.value,
+      source: view.workspaceTargetSelectionSource.value,
+    }
+  }
+
+  function setWorkspaceTargetSelection(
+    target: ChatViewTarget,
+    targetId: string,
+    snapshot: ChatWorkspaceTargetSnapshot | null = null,
+    source: ChatWorkspaceTargetSelectionSource = 'user',
+  ) {
+    const id = targetId.trim()
+    if (!id) return
+    const view = chatView(target)
+    view.workspaceTargetId.value = id
+    view.workspaceTargetSnapshot.value = snapshot ? { ...snapshot, target_id: id } : null
+    view.workspaceTargetSelectionSource.value = source
+  }
+
+  function initializeWorkspaceTargetSelection(
+    target: ChatViewTarget,
+    targetId: string,
+    snapshot: ChatWorkspaceTargetSnapshot | null,
+    source: Extract<ChatWorkspaceTargetSelectionSource, 'default' | 'session'>,
+  ) {
+    const id = targetId.trim()
+    if (!id) return
+    const view = chatView(target)
+    const currentSource = view.workspaceTargetSelectionSource.value
+    if (currentSource === 'user') return
+    if (source === 'default' && currentSource !== 'unset') return
+    setWorkspaceTargetSelection(target, id, snapshot, source)
+  }
+
+  function resetWorkspaceTargetSelection(target: ChatViewTarget) {
+    const view = chatView(target)
+    view.workspaceTargetId.value = ''
+    view.workspaceTargetSnapshot.value = null
+    view.workspaceTargetSelectionSource.value = 'unset'
   }
 
   function sessionTranscript(botId: string, targetSessionId: string) {
@@ -949,6 +997,7 @@ export const useChatStore = defineStore('chat', () => {
     target?: ChatViewTarget,
   ) {
     const draft = targetDraftForACP(target)
+    resetWorkspaceTargetSelection(draft)
     invalidateDraftViewCommand(draft)
     activateDraftACPStage(draft)
     resetFocusedEmptyComposer(options)
@@ -2510,6 +2559,7 @@ export const useChatStore = defineStore('chat', () => {
         requested_skills: requestedSkills.length ? requestedSkillRequestsForWire(requestedSkills) : undefined,
         model_id: modelId,
         reasoning_effort: reasoningEffort,
+        workspace_target_id: options.workspaceTargetId?.trim() || undefined,
       })) throw new StreamFailureError('WebSocket is not connected', 'startup')
       await completion
       const createdSessionId = createdSessionIdForStream(sendStreamId)
@@ -2573,7 +2623,7 @@ export const useChatStore = defineStore('chat', () => {
 
   async function retryLatestAssistant(
     messageId: string,
-    options: { target?: ChatViewTarget, modelId?: string, reasoningEffort?: string } = {},
+    options: { target?: ChatViewTarget, modelId?: string, reasoningEffort?: string, workspaceTargetId?: string } = {},
   ): Promise<SendMessageResult> {
     const viewTarget = normalizedChatViewTarget(options.target)
     const bid = viewTarget.botId
@@ -2602,6 +2652,7 @@ export const useChatStore = defineStore('chat', () => {
         message_id: targetID,
         model_id: options.modelId?.trim() || overrideModelId.value || undefined,
         reasoning_effort: options.reasoningEffort?.trim() || overrideReasoningEffort.value || undefined,
+        workspace_target_id: options.workspaceTargetId?.trim() || undefined,
       })) throw new StreamFailureError('WebSocket is not connected', 'startup')
       await completion
       await refreshCurrentSession(bid, sid)
@@ -2628,7 +2679,7 @@ export const useChatStore = defineStore('chat', () => {
   async function editLatestUser(
     messageId: string,
     text: string,
-    options: { target?: ChatViewTarget, modelId?: string, reasoningEffort?: string } = {},
+    options: { target?: ChatViewTarget, modelId?: string, reasoningEffort?: string, workspaceTargetId?: string } = {},
   ): Promise<SendMessageResult> {
     const trimmed = text.trim()
     const viewTarget = normalizedChatViewTarget(options.target)
@@ -2661,6 +2712,7 @@ export const useChatStore = defineStore('chat', () => {
         text: trimmed,
         model_id: options.modelId?.trim() || overrideModelId.value || undefined,
         reasoning_effort: options.reasoningEffort?.trim() || overrideReasoningEffort.value || undefined,
+        workspace_target_id: options.workspaceTargetId?.trim() || undefined,
       })) throw new StreamFailureError('WebSocket is not connected', 'startup')
       await completion
       await refreshCurrentSession(bid, sid)
@@ -2821,6 +2873,10 @@ export const useChatStore = defineStore('chat', () => {
     focusChatView,
     promoteDraftChatView,
     chatTargetFor,
+    workspaceTargetSelectionFor,
+    setWorkspaceTargetSelection,
+    initializeWorkspaceTargetSelection,
+    resetWorkspaceTargetSelection,
     chatReadOnlyFor,
     chatCanForkFor,
     isChatViewStreaming,

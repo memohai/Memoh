@@ -134,6 +134,42 @@ describe('chat view registry', () => {
     expect(registry.getDraft('bot-1', 'chat:2')?.transcript.messages.map(message => message.id)).toEqual(['draft-b'])
   })
 
+  it('shares the selected Computer between panels for the same Session', () => {
+    const { registry } = makeRegistry()
+    const first = registry.getOrCreate({ botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:1' })
+    const second = registry.getOrCreate({ botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:2' })
+
+    first.workspaceTargetId.value = 'computer-b'
+    first.workspaceTargetSnapshot.value = {
+      target_id: 'computer-b',
+      kind: 'remote',
+      name: 'Computer B',
+    }
+    first.workspaceTargetSelectionSource.value = 'user'
+
+    expect(second.workspaceTargetId.value).toBe('computer-b')
+    expect(second.workspaceTargetSnapshot.value?.name).toBe('Computer B')
+    expect(second.workspaceTargetSelectionSource.value).toBe('user')
+  })
+
+  it('carries the draft Computer selection into the promoted Session', () => {
+    const { registry } = makeRegistry()
+    const draft = registry.getOrCreate({ botId: 'bot-1', sessionId: null, viewId: 'chat:1' })
+    draft.workspaceTargetId.value = 'computer-b'
+    draft.workspaceTargetSnapshot.value = {
+      target_id: 'computer-b',
+      kind: 'remote',
+      name: 'Computer B',
+    }
+    draft.workspaceTargetSelectionSource.value = 'user'
+
+    const promoted = registry.promoteDraft('bot-1', 'chat:1', 'session-a')
+
+    expect(promoted.workspaceTargetId.value).toBe('computer-b')
+    expect(promoted.workspaceTargetSnapshot.value?.name).toBe('Computer B')
+    expect(promoted.workspaceTargetSelectionSource.value).toBe('user')
+  })
+
   it('reference-counts visible panels for a shared session', () => {
     const { registry } = makeRegistry()
     const target = { botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:1' }
