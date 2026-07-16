@@ -620,14 +620,17 @@ func (a *TelegramAdapter) buildTelegramCallbackInboundMessage(cfg channel.Channe
 		text = "/" + action + " " + approvalID
 		extraMeta["is_mentioned"] = true
 	} else if userInputID, answer, ok := parseTelegramUserInputCallback(cb.Data); ok {
-		extraMeta["user_input_id"] = userInputID
+		// Upgrade compatibility: cards rendered by a pre-aui server still carry
+		// respond:<id>:<option> buttons, and chat-flow requests never expire.
+		// Bare respond:<id> has no answer to submit — it is acked as a no-op in
+		// handleTelegramCallback and rejected here for any other caller.
 		if answer == "" {
-			text = "/respond " + userInputID
-		} else {
-			// The command text stays compatible with reply-mode /respond while
-			// user_input_id metadata binds the answer to the exact request.
-			text = "/respond " + answer
+			return channel.InboundMessage{}, false
 		}
+		extraMeta["user_input_id"] = userInputID
+		// The command text stays compatible with reply-mode /respond while
+		// user_input_id metadata binds the answer to the exact request.
+		text = "/respond " + answer
 		extraMeta["is_mentioned"] = true
 	} else if parsed, ok := command.DecodeCallback(strings.TrimSpace(cb.Data)); ok {
 		syntheticCmd := parsed.SyntheticCommand()

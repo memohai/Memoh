@@ -205,7 +205,7 @@ func TestBuildTelegramRespondCallbackInboundMessageMarksDirected(t *testing.T) {
 		ID: 100,
 		Callback: &tele.Callback{
 			ID:     "callback-2",
-			Data:   "respond:input-1",
+			Data:   "respond:input-1:q1.o2",
 			Sender: &tele.User{ID: 123, Username: "alice"},
 			Message: &tele.Message{
 				ID:   456,
@@ -219,7 +219,7 @@ func TestBuildTelegramRespondCallbackInboundMessageMarksDirected(t *testing.T) {
 	if !ok {
 		t.Fatal("expected callback inbound message")
 	}
-	if got := msg.Message.PlainText(); got != "/respond input-1" {
+	if got := msg.Message.PlainText(); got != "/respond q1.o2" {
 		t.Fatalf("callback text = %q", got)
 	}
 	if mentioned, _ := msg.Metadata["is_mentioned"].(bool); !mentioned {
@@ -227,6 +227,13 @@ func TestBuildTelegramRespondCallbackInboundMessageMarksDirected(t *testing.T) {
 	}
 	if got, _ := msg.Metadata["user_input_id"].(string); got != "input-1" {
 		t.Fatalf("user_input_id metadata = %q", got)
+	}
+
+	// Bare respond:<id> has no answer to submit: build must reject it (the
+	// callback handler acks it as a no-op before ever dispatching).
+	update.Callback.Data = "respond:input-1"
+	if _, ok := adapter.buildTelegramCallbackInboundMessage(channel.ChannelConfig{}, update); ok {
+		t.Fatal("bare respond callback must not build an inbound message")
 	}
 }
 
