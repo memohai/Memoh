@@ -1,4 +1,4 @@
--- 0108_decision_workspace_target
+-- 0110_decision_workspace_target
 -- Preserve the selected workspace target across deferred approval and user input flows.
 
 ALTER TABLE tool_approval_requests

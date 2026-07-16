@@ -301,20 +301,16 @@ func (r *Resolver) continueUserInputSession(ctx context.Context, req userinput.R
 		return err
 	}
 
-	loaded, err := r.loadHistoryRecords(ctx, historyScopeFallbackFromUserInputRequest(req), req.SessionID, defaultMaxContextMinutes)
+	cfg, err := r.prepareContinuationRunConfig(
+		ctx,
+		resolved.RunConfig,
+		historyScopeFallbackFromUserInputRequest(req),
+		compactionSummaryScope(firstNonEmpty(req.BotID, input.BotID), "", req.SessionID, req.ConversationType, "", req.ReplyTarget),
+		eventCh,
+	)
 	if err != nil {
 		return err
 	}
-	loaded = pruneHistoryForGateway(loaded)
-	loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(firstNonEmpty(req.BotID, input.BotID), "", req.SessionID, req.ConversationType, "", req.ReplyTarget), loaded)
-	messages, _ := trimMessagesByTokens(r.logger, loaded, 0)
-
-	cfg := resolved.RunConfig
-	cfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(sanitizeMessages(messages)))
-	cfg.Query = ""
-	cfg.LiveToolStream = eventCh != nil
-	cfg.CanRequestUserInput = r.canDeliverUserInputWS(eventCh)
-	cfg = r.prepareRunConfig(ctx, cfg)
 
 	chatReq := conversation.ChatRequest{
 		BotID:                   input.BotID,

@@ -111,6 +111,13 @@ const chatStoreMock = vi.hoisted(() => ({
     wasDraft: boolean
     seq: number
   } | null>>,
+  guiToolUseRequested: undefined as unknown as ReturnType<typeof ref<{
+    botId: string
+    sessionId: string
+    toolCallId: string
+    toolName: string
+    seq: number
+  } | null>>,
   focusChatView: vi.fn(),
   selectSession: vi.fn(async (sessionId: string, options?: { explicitSelection?: boolean }) => {
     useChatSelectionStore().setSession(sessionId, options)
@@ -145,6 +152,9 @@ vi.mock('@/store/chat-list', () => ({
     activeSession: null,
     get userSentInSession() {
       return chatStoreMock.userSentInSession.value
+    },
+    get guiToolUseRequested() {
+      return chatStoreMock.guiToolUseRequested.value
     },
     get pendingACPSessionInput() {
       return chatStoreMock.pendingACPSessionInput.value
@@ -190,6 +200,7 @@ interface FakePanel {
     close: () => void
     setTitle: (title: string) => void
     updateParameters: (params: Record<string, unknown>) => void
+    moveTo: (options: { group?: FakeGroup; position?: 'top' | 'bottom' | 'left' | 'right' | 'center' }) => void
     readonly title: string
   }
 }
@@ -212,6 +223,7 @@ function createFakeDock() {
   const panels: FakePanel[] = []
   const groups: FakeGroup[] = []
   const groupActivePanels = new Map<string, FakePanel | null>()
+  const groupPositions = new Map<string, { referenceGroup: string; direction: string }>()
   const removeListeners: Array<(panel: FakePanel) => void> = []
   // Mirror dockview v7's real onDidActivePanelChange payload: `{ panel, origin }`.
   // The old fake used `{ activePanel }` (the v6 shape); that masked the v6→v7
@@ -312,6 +324,12 @@ function createFakeDock() {
     getPanel(id: string) {
       return panels.find((p) => p.id === id)
     },
+    adjacentGroupInDirection(group: FakeGroup, direction: 'left' | 'right' | 'above' | 'below') {
+      return groups.find((candidate) => {
+        const position = groupPositions.get(candidate.id)
+        return position?.referenceGroup === group.id && position.direction === direction
+      })
+    },
     addPanel(options: {
       id: string
       component: string
@@ -329,6 +347,9 @@ function createFakeDock() {
         : options.position
           ? createGroup()
           : activePanel?.group ?? primaryGroup
+      if (options.position && options.position.direction !== 'within') {
+        groupPositions.set(targetGroup.id, options.position)
+      }
       const panel: FakePanel = {
         id: options.id,
         component: options.component,
@@ -361,6 +382,28 @@ function createFakeDock() {
           updateParameters: (params: Record<string, unknown>) => {
             Object.assign(panel.params, params)
           },
+          moveTo: (options: { group?: FakeGroup; position?: 'top' | 'bottom' | 'left' | 'right' | 'center' }) => {
+            const sourceGroup = panel.group
+            const targetGroup = options.position === 'center'
+              ? options.group ?? sourceGroup
+              : createGroup()
+            if (options.position && options.position !== 'center' && options.group) {
+              groupPositions.set(targetGroup.id, {
+                referenceGroup: options.group.id,
+                direction: options.position,
+              })
+            }
+            panel.group = targetGroup
+            groupActivePanels.set(targetGroup.id, panel)
+            if (sourceGroup && sourceGroup !== primaryGroup && sourceGroup.panels.length === 0) {
+              const groupIndex = groups.indexOf(sourceGroup)
+              if (groupIndex >= 0) groups.splice(groupIndex, 1)
+              groupActivePanels.delete(sourceGroup.id)
+              groupPositions.delete(sourceGroup.id)
+            }
+            setActivePanel(panel)
+            emitLayoutChange()
+          },
           get title() {
             return panel.title
           },
@@ -376,6 +419,7 @@ function createFakeDock() {
       panels.splice(0, panels.length)
       groups.splice(1, groups.length - 1)
       groupActivePanels.clear()
+      groupPositions.clear()
       setActivePanel(null)
       emitLayoutChange()
     },
@@ -515,6 +559,7 @@ describe('workspace layout store', () => {
     chatStoreMock.draftViewRequested = ref(null)
     chatStoreMock.forkedSessionRequested = ref(null)
     chatStoreMock.userSentInSession = ref(null)
+    chatStoreMock.guiToolUseRequested = ref(null)
     chatStoreMock.sessions = reactive([]) as typeof chatStoreMock.sessions
     chatStoreMock.knownSessions = reactive([]) as typeof chatStoreMock.knownSessions
     chatStoreMock.knownSessionSummary.mockImplementation((sessionId: string) =>
@@ -557,6 +602,17 @@ describe('workspace layout store', () => {
     }
   }
 
+  function emitGuiToolUse(toolName = 'browser_action') {
+    const prevSeq = chatStoreMock.guiToolUseRequested.value?.seq ?? 0
+    chatStoreMock.guiToolUseRequested.value = {
+      botId: 'bot-1',
+      sessionId: 'session-1',
+      toolCallId: `call-${prevSeq + 1}`,
+      toolName,
+      seq: prevSeq + 1,
+    }
+  }
+
   it('opens browser panels and updates their address', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
@@ -593,6 +649,67 @@ describe('workspace layout store', () => {
     expect(store.openBrowserAt('localhost:5173/app')).toBe(true)
     expect(dock.panels.filter(p => p.component === 'browser')).toHaveLength(2)
     expect(dock.activePanel?.id).toBe('browser:1')
+  })
+
+  it('opens Desktop in a new right region when a GUI tool starts from a single region', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openDraftChat({ title: 'Session' })
+
+    emitGuiToolUse()
+
+    const display = dock.getPanel('display:1')
+    expect(display?.component).toBe('display')
+    expect(display?.group?.id).not.toBe('group-1')
+    expect(dock.activePanel?.id).toBe('display:1')
+  })
+
+  it('opens Desktop as a tab in the existing right region when a GUI tool starts', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openDraftChat({ title: 'Session' })
+    store.splitGroup('group-1', 'right')
+    const rightGroup = dock.activePanel!.group!
+
+    emitGuiToolUse('computer_observe')
+
+    expect(dock.getPanel('display:1')?.group?.id).toBe(rightGroup.id)
+    expect(dock.groups).toHaveLength(2)
+  })
+
+  it('creates a right Desktop region when the existing second region is below', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openDraftChat({ title: 'Session' })
+    store.splitGroup('group-1', 'below')
+    const belowGroup = dock.activePanel!.group!
+
+    emitGuiToolUse()
+
+    const display = dock.getPanel('display:1')!
+    expect(display.group?.id).not.toBe(belowGroup.id)
+    expect(dock.groups).toHaveLength(3)
+  })
+
+  it('focuses the existing Desktop tab in the right region when a GUI tool starts again', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openDraftChat({ title: 'Session' })
+    store.splitGroup('group-1', 'right')
+    const rightChat = dock.activePanel!
+    emitGuiToolUse()
+    const display = dock.getPanel('display:1')!
+    rightChat.api.setActive()
+    expect(dock.activePanel?.id).toBe(rightChat.id)
+
+    emitGuiToolUse('computer_action')
+
+    expect(dock.activePanel?.id).toBe(display.id)
+    expect(display.group?.id).toBe(rightChat.group?.id)
   })
 
   it('refuses to open a browser tab for a non-local address', () => {

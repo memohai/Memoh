@@ -80,6 +80,7 @@ vi.mock('@/store/capabilities', () => ({
 vi.mock('@/store/bot-create-progress', () => ({
   useBotCreateProgressStore: () => ({
     bot: null,
+    errorCode: null,
     setupError: null,
     start: mocks.startBotCreate,
     status: 'idle',

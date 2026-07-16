@@ -4,7 +4,13 @@ import type {
   HandlersCreateContainerResponse,
   PostBotsByBotIdContainerData,
 } from '@memohai/sdk'
-import { resolveApiErrorMessage } from '@/utils/api-error'
+import {
+  fetchSSEProblem,
+  isSSEErrorEvent,
+  localizeSSEErrorEvent,
+  normalizeSSEFailure,
+  type SSEErrorEvent,
+} from './sse-error'
 
 export type ContainerCreateLayerStatus = {
   ref: string
@@ -22,13 +28,7 @@ export type ContainerCreateStreamEvent =
   | { type: 'creating' }
   | { type: 'restoring' }
   | { type: 'complete'; container: HandlersCreateContainerResponse }
-  | {
-    type: 'error'
-    code?: string
-    i18n_key?: string
-    args?: Record<string, string>
-    message: string
-  }
+  | SSEErrorEvent
 
 export type ContainerCreateStreamResult = {
   stream: AsyncGenerator<ContainerCreateStreamEvent, void, unknown>
@@ -61,19 +61,10 @@ function isContainerCreateStreamEvent(value: unknown): value is ContainerCreateS
     case 'complete':
       return !!event.container && typeof event.container === 'object'
     case 'error':
-      return typeof event.message === 'string'
-        && (event.code === undefined || typeof event.code === 'string')
-        && (event.i18n_key === undefined || typeof event.i18n_key === 'string')
-        && (event.args === undefined || (!!event.args && typeof event.args === 'object'))
+      return isSSEErrorEvent(event)
     default:
       return false
   }
-}
-
-function toError(error: unknown): Error {
-  if (error instanceof Error) return error
-  if (typeof error === 'string' && error.trim()) return new Error(error)
-  return new Error('Workspace creation stream failed')
 }
 
 export async function postBotsByBotIdContainerStream(
@@ -90,6 +81,7 @@ export async function postBotsByBotIdContainerStream(
       Accept: 'text/event-stream',
       'Content-Type': 'application/json',
     },
+    fetch: fetchSSEProblem,
     onSseError: (error) => {
       streamError = error
     },
@@ -108,12 +100,12 @@ export async function postBotsByBotIdContainerStream(
           throw new Error('Invalid workspace creation stream event')
         }
         yield event.type === 'error'
-          ? { ...event, message: resolveApiErrorMessage(event, event.message) }
+          ? localizeSSEErrorEvent(event)
           : event
       }
 
       if (streamError) {
-        throw toError(streamError)
+        throw normalizeSSEFailure(streamError, 'Workspace creation stream failed')
       }
     })(),
   }

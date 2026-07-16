@@ -116,6 +116,7 @@ func (h *ContainerdHandler) ListSafeSkills(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/skills [post].
 func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
@@ -134,7 +135,7 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "workspace is not reachable")
+		return workspaceUnavailableError(err)
 	}
 
 	for _, raw := range req.Skills {
@@ -143,12 +144,15 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 		if dirErr != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "skill must have a valid name in YAML frontmatter")
 		}
+		// A pooled client can pass getGRPCClient and still fail on first use
+		// when the workspace just stopped; classify per-op errors so the dial
+		// diagnostics never reach the response body.
 		if err := client.Mkdir(ctx, dirPath); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("mkdir failed: %v", err))
+			return fsHTTPError(fmt.Errorf("mkdir skill dir: %w", err))
 		}
 		filePath := path.Join(dirPath, "SKILL.md")
 		if err := client.WriteFile(ctx, filePath, []byte(raw)); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("write failed: %v", err))
+			return fsHTTPError(fmt.Errorf("write skill file: %w", err))
 		}
 	}
 
@@ -164,6 +168,7 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/skills [delete].
 func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
@@ -182,7 +187,7 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "workspace is not reachable")
+		return workspaceUnavailableError(err)
 	}
 
 	for _, name := range req.Names {
@@ -211,6 +216,7 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/skills/actions [post].
 func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
@@ -226,7 +232,7 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "workspace is not reachable")
+		return workspaceUnavailableError(err)
 	}
 	roots, pluginRoots, err := h.skillDiscoveryRoots(ctx, botID)
 	if err != nil {

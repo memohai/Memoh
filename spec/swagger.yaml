@@ -560,6 +560,29 @@ definitions:
       total_text_bytes:
         type: integer
     type: object
+  apperror.Problem:
+    properties:
+      args:
+        additionalProperties:
+          type: string
+        type: object
+      code:
+        type: string
+      detail:
+        type: string
+      request_id:
+        type: string
+      status:
+        type: integer
+      type:
+        type: string
+    required:
+    - args
+    - code
+    - detail
+    - status
+    - type
+    type: object
   audio.ConfigSchema:
     properties:
       fields:
@@ -5155,6 +5178,10 @@ paths:
           description: Forbidden
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
@@ -6411,6 +6438,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Get file or directory info
       tags:
       - containerd
@@ -6453,6 +6484,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Download files and directories as tar.gz
       tags:
       - containerd
@@ -6492,6 +6527,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete a file or directory
       tags:
       - containerd
@@ -6528,6 +6567,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Download a file as binary stream
       tags:
       - containerd
@@ -6572,6 +6615,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Extract an archive file
       tags:
       - containerd
@@ -6606,6 +6653,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: List directory contents
       tags:
       - containerd
@@ -6641,6 +6692,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Create a directory
       tags:
       - containerd
@@ -6675,6 +6730,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Read file content as text
       tags:
       - containerd
@@ -6714,6 +6773,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Rename or move a file/directory
       tags:
       - containerd
@@ -6755,6 +6818,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Upload a file via multipart form
       tags:
       - containerd
@@ -6790,6 +6857,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Write text content to a file
       tags:
       - containerd
@@ -6873,6 +6944,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete Memoh-managed skills
       tags:
       - containerd
@@ -6937,6 +7012,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Upload skills into Memoh-managed directory
       tags:
       - containerd
@@ -6971,6 +7050,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Apply an action to a discovered or managed skill source
       tags:
       - containerd
@@ -10617,6 +10700,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:

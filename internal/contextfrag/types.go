@@ -224,19 +224,20 @@ type Part struct {
 
 // ContextFrag is the typed context fragment abstraction.
 type ContextFrag struct {
-	ID         string          `json:"id"`
-	Ref        ContextRef      `json:"ref,omitempty"`
-	Kind       Kind            `json:"kind"`
-	Role       sdk.MessageRole `json:"role,omitempty"`
-	Slot       Slot            `json:"slot"`
-	Priority   int             `json:"priority,omitempty"`
-	CacheClass CacheClass      `json:"cache_class,omitempty"`
-	Trust      TrustLevel      `json:"trust,omitempty"`
-	Scope      Scope           `json:"scope,omitempty"`
-	Budget     BudgetPolicy    `json:"budget,omitempty"`
-	Render     RenderPolicy    `json:"render,omitempty"`
-	Provenance Provenance      `json:"provenance,omitempty"`
-	Parts      []Part          `json:"parts,omitempty"`
+	ID         string           `json:"id"`
+	Ref        ContextRef       `json:"ref,omitempty"`
+	Kind       Kind             `json:"kind"`
+	Role       sdk.MessageRole  `json:"role,omitempty"`
+	Slot       Slot             `json:"slot"`
+	Priority   int              `json:"priority,omitempty"`
+	CacheClass CacheClass       `json:"cache_class,omitempty"`
+	Trust      TrustLevel       `json:"trust,omitempty"`
+	Scope      Scope            `json:"scope,omitempty"`
+	Budget     BudgetPolicy     `json:"budget,omitempty"`
+	Render     RenderPolicy     `json:"render,omitempty"`
+	Provenance Provenance       `json:"provenance,omitempty"`
+	Coverage   *SummaryCoverage `json:"coverage,omitempty"`
+	Parts      []Part           `json:"parts,omitempty"`
 }
 
 // AssembledContext is the compiled view produced from fragments.

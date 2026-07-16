@@ -146,7 +146,7 @@ import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { getAcpProfiles, getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getVideoProviders, getVideoModels, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild, getBotsNameAvailability } from '@memohai/sdk'
 import type { AcpprofilePublicProfile, SettingsSettings } from '@memohai/sdk'
 import type { Ref } from 'vue'
-import { resolveApiErrorMessage } from '@/utils/api-error'
+import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { useChatStore } from '@/store/chat-list'
 
 const props = defineProps<{
@@ -541,8 +541,11 @@ const hasChanges = computed(() => hasSettingsChanges.value || hasTimezoneChanges
 const saveLoading = computed(() => isLoading.value || isUpdatingBot.value)
 
 function isNameConflict(error: unknown): boolean {
-  const e = error as { status?: number, response?: { status?: number } } | null
-  if (e?.status === 409 || e?.response?.status === 409) return true
+  const code = parseMemohError(error)?.code
+  if (code) return code === 'bot.name_taken'
+  if (apiErrorStatus(error) === 409) return true
+  // Desktop can connect to older hosted servers whose conflict response
+  // carries neither a code nor a status field — only the English message.
   return resolveApiErrorMessage(error, '').toLowerCase().includes('already taken')
 }
 

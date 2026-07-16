@@ -1183,7 +1183,7 @@ func (s *DBService) DeleteByBot(ctx context.Context, botID string) error {
 	if err != nil {
 		return err
 	}
-	return s.queries.DeleteMessagesByBot(ctx, pgBotID)
+	return s.queries.ClearHistoryByBot(ctx, pgBotID)
 }
 
 // DeleteByIDs deletes specific messages by id.
@@ -1215,7 +1215,7 @@ func (s *DBService) DeleteBySession(ctx context.Context, sessionID string) error
 	if err != nil {
 		return err
 	}
-	return s.queries.DeleteMessagesBySession(ctx, pgSessionID)
+	return s.queries.ClearHistoryBySession(ctx, pgSessionID)
 }
 
 // --- Conversion helpers ---

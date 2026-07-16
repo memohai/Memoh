@@ -26,42 +26,102 @@ func (q *Queries) CountMessageAssetsByBot(ctx context.Context, botID pgtype.UUID
 }
 
 const createMessageAsset = `-- name: CreateMessageAsset :one
-INSERT INTO bot_history_message_assets (message_id, role, ordinal, content_hash, name, metadata)
-VALUES (
-  $1,
-  $2,
-  $3,
-  $4,
-  $5,
-  $6
+WITH message_locator AS MATERIALIZED (
+  SELECT message.id, message.session_id
+  FROM bot_history_messages message
+  WHERE message.id = $1
+),
+owner_session AS MATERIALIZED (
+  SELECT session.id, session.bot_id, session.compaction_epoch
+  FROM bot_sessions session
+  JOIN message_locator message ON message.session_id = session.id
+  FOR UPDATE
+),
+target_message AS MATERIALIZED (
+  SELECT message.id, message.session_id, message.compact_id
+  FROM bot_history_messages message
+  JOIN message_locator locator ON locator.id = message.id
+  LEFT JOIN owner_session owner ON owner.id = locator.session_id
+  WHERE locator.session_id IS NULL OR owner.id IS NOT NULL
+  FOR UPDATE OF message
+),
+changed_asset AS MATERIALIZED (
+  SELECT target.id, target.session_id, target.compact_id
+  FROM target_message target
+  LEFT JOIN bot_history_message_assets existing
+    ON existing.message_id = target.id
+   AND existing.content_hash = $2
+  WHERE existing.id IS NULL
+     OR existing.role IS DISTINCT FROM $3
+     OR existing.ordinal IS DISTINCT FROM $4
+     OR existing.name IS DISTINCT FROM $5
+     OR existing.metadata IS DISTINCT FROM $6
+),
+invalidated_session AS (
+  UPDATE bot_sessions session
+  SET compaction_epoch = session.compaction_epoch + 1
+  FROM changed_asset changed
+  JOIN owner_session owner ON owner.id = changed.session_id
+  JOIN bot_history_message_compacts compact ON compact.id = changed.compact_id
+  WHERE session.id = owner.id
+    AND compact.bot_id = owner.bot_id
+    AND compact.session_id = owner.id
+    AND compact.compaction_epoch = owner.compaction_epoch
+    AND compact.status IN ('pending', 'ok')
+  RETURNING session.id
+),
+upserted_asset AS (
+  INSERT INTO bot_history_message_assets (message_id, role, ordinal, content_hash, name, metadata)
+  SELECT
+    target.id,
+    $3,
+    $4,
+    $2,
+    $5,
+    $6
+  FROM target_message target
+  CROSS JOIN (SELECT count(*) FROM invalidated_session) invalidation_done
+  ON CONFLICT (message_id, content_hash) DO UPDATE SET
+    role = EXCLUDED.role,
+    ordinal = EXCLUDED.ordinal,
+    name = EXCLUDED.name,
+    metadata = EXCLUDED.metadata
+  RETURNING id, message_id, role, ordinal, content_hash, name, metadata, created_at
 )
-ON CONFLICT (message_id, content_hash) DO UPDATE SET
-  role = EXCLUDED.role,
-  ordinal = EXCLUDED.ordinal,
-  name = EXCLUDED.name,
-  metadata = EXCLUDED.metadata
-RETURNING id, message_id, role, ordinal, content_hash, name, metadata, created_at
+SELECT id, message_id, role, ordinal, content_hash, name, metadata, created_at
+FROM upserted_asset
 `
 
 type CreateMessageAssetParams struct {
 	MessageID   pgtype.UUID `json:"message_id"`
+	ContentHash string      `json:"content_hash"`
 	Role        string      `json:"role"`
 	Ordinal     int32       `json:"ordinal"`
-	ContentHash string      `json:"content_hash"`
 	Name        string      `json:"name"`
 	Metadata    []byte      `json:"metadata"`
 }
 
-func (q *Queries) CreateMessageAsset(ctx context.Context, arg CreateMessageAssetParams) (BotHistoryMessageAsset, error) {
+type CreateMessageAssetRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	MessageID   pgtype.UUID        `json:"message_id"`
+	Role        string             `json:"role"`
+	Ordinal     int32              `json:"ordinal"`
+	ContentHash string             `json:"content_hash"`
+	Name        string             `json:"name"`
+	Metadata    []byte             `json:"metadata"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) CreateMessageAsset(ctx context.Context, arg CreateMessageAssetParams) (CreateMessageAssetRow, error) {
 	row := q.db.QueryRow(ctx, createMessageAsset,
 		arg.MessageID,
+		arg.ContentHash,
 		arg.Role,
 		arg.Ordinal,
-		arg.ContentHash,
 		arg.Name,
 		arg.Metadata,
 	)
-	var i BotHistoryMessageAsset
+	var i CreateMessageAssetRow
 	err := row.Scan(
 		&i.ID,
 		&i.MessageID,

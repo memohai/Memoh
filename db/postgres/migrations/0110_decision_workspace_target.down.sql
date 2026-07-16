@@ -1,4 +1,4 @@
--- 0108_decision_workspace_target (rollback)
+-- 0110_decision_workspace_target (rollback)
 -- Remove persisted workspace targets from deferred decision requests.
 
 ALTER TABLE user_input_requests

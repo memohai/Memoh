@@ -80,6 +80,7 @@ import ToolCallDetailSpawn from './tool-call-detail-spawn.vue'
 import ToolCallDetailWebFetch from './tool-call-detail-web-fetch.vue'
 import ToolCallDetailWebSearch from './tool-call-detail-web-search.vue'
 import ToolCallDetailWrite from './tool-call-detail-write.vue'
+import { isGuiToolName } from '@/utils/gui-tools'
 
 export interface ToolDisplay {
   icon: Component
@@ -130,20 +131,15 @@ export function isReadOnlyTool(toolName: string): boolean {
 // side-effecting "action" calls as one continuous browsing activity. Splitting
 // them on every observe↔action flip would strand each step in its own segment,
 // so they share a single category and stay grouped together.
-const GUI_TOOLS = new Set([
-  'browser_action', 'browser_observe', 'browser_remote_session',
-  'computer_action', 'computer_observe',
-])
-
 export type ToolSegmentCategory = 'explore' | 'action' | 'gui'
 
 export function isGuiTool(toolName: string): boolean {
-  return GUI_TOOLS.has(toolName)
+  return isGuiToolName(toolName)
 }
 
 // Segment category used to group consecutive tool calls in a process run.
 export function toolSegmentCategory(toolName: string): ToolSegmentCategory {
-  if (GUI_TOOLS.has(toolName)) return 'gui'
+  if (isGuiToolName(toolName)) return 'gui'
   return isReadOnlyTool(toolName) ? 'explore' : 'action'
 }
 

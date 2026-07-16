@@ -35,13 +35,21 @@ func (*pairingQueries) ListCompactionLogsBySession(context.Context, pgtype.UUID)
 	return nil, nil
 }
 
+func (*pairingQueries) ListCompactionArtifactLineageBySession(context.Context, pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
+	return nil, nil
+}
+
+func (*pairingQueries) ListMessageAssetsBatch(context.Context, []pgtype.UUID) ([]sqlc.ListMessageAssetsBatchRow, error) {
+	return nil, nil
+}
+
 func (f *pairingQueries) CreateCompactionLog(context.Context, sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
 	return sqlc.BotHistoryMessageCompact{ID: f.logID}, nil
 }
 
-func (f *pairingQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) error {
-	f.markedIDs = append([]pgtype.UUID(nil), arg.Column2...)
-	return nil
+func (f *pairingQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) (int64, error) {
+	f.markedIDs = append([]pgtype.UUID(nil), arg.MessageIds...)
+	return int64(len(arg.MessageIds)), nil
 }
 
 func (*pairingQueries) CompleteCompactionLog(_ context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {

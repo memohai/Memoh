@@ -13,6 +13,14 @@ WHERE m.session_id = sqlc.arg(session_id)
 ORDER BY m.created_at DESC
 LIMIT 1;
 
+-- name: GetLatestSessionModelID :one
+SELECT m.model_id
+FROM bot_visible_history_messages m
+WHERE m.session_id = sqlc.arg(session_id)
+  AND m.model_id IS NOT NULL
+ORDER BY m.created_at DESC
+LIMIT 1;
+
 -- name: GetSessionCacheStats :one
 SELECT
   COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS total_input_tokens,

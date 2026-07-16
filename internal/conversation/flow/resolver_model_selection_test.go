@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -349,8 +350,9 @@ func TestResolveReasoningConfig(t *testing.T) {
 type modelSelectionFakeQueries struct {
 	dbstore.Queries
 
-	models   map[string]sqlc.Model
-	provider sqlc.Provider
+	models         map[string]sqlc.Model
+	provider       sqlc.Provider
+	sessionModelID pgtype.UUID
 }
 
 func (f *modelSelectionFakeQueries) ListModelsByModelID(_ context.Context, modelID string) ([]sqlc.Model, error) {
@@ -361,11 +363,27 @@ func (f *modelSelectionFakeQueries) ListModelsByModelID(_ context.Context, model
 	return []sqlc.Model{model}, nil
 }
 
+func (f *modelSelectionFakeQueries) GetModelByID(_ context.Context, id pgtype.UUID) (sqlc.Model, error) {
+	for _, model := range f.models {
+		if id.Valid && model.ID == id {
+			return model, nil
+		}
+	}
+	return sqlc.Model{}, pgx.ErrNoRows
+}
+
 func (f *modelSelectionFakeQueries) GetProviderByID(_ context.Context, id pgtype.UUID) (sqlc.Provider, error) {
 	if !id.Valid || id != f.provider.ID {
 		return sqlc.Provider{}, pgx.ErrNoRows
 	}
 	return f.provider, nil
+}
+
+func (f *modelSelectionFakeQueries) GetLatestSessionModelID(_ context.Context, _ pgtype.UUID) (pgtype.UUID, error) {
+	if !f.sessionModelID.Valid {
+		return pgtype.UUID{}, pgx.ErrNoRows
+	}
+	return f.sessionModelID, nil
 }
 
 func newModelSelectionResolver(t *testing.T, fake *modelSelectionFakeQueries) *Resolver {
@@ -406,6 +424,51 @@ func modelSelectionModelRow(t *testing.T, id string, modelID string, providerID 
 		Type:       string(modelType),
 		Enable:     enable,
 		Config:     []byte(`{}`),
+	}
+}
+
+func TestSelectChatModelFallsBackToSessionLastModel(t *testing.T) {
+	ctx := context.Background()
+	provider := modelSelectionProviderRow(t, "00000000-0000-0000-0000-000000000601", "openai-completions", true)
+	model := modelSelectionModelRow(t, "00000000-0000-0000-0000-000000000602", "gpt-session", provider.ID, models.ModelTypeChat, true)
+	fake := &modelSelectionFakeQueries{
+		models:         map[string]sqlc.Model{model.ModelID: model},
+		provider:       provider,
+		sessionModelID: model.ID,
+	}
+	resolver := newModelSelectionResolver(t, fake)
+
+	// No request model, no chat settings, no bot default: a resumed turn
+	// (ask_user / tool approval) must fall back to the model that produced
+	// the session's latest round instead of erroring.
+	req := conversation.ChatRequest{
+		BotID:     "00000000-0000-0000-0000-000000000600",
+		SessionID: "00000000-0000-0000-0000-000000000603",
+	}
+	got, prov, err := resolver.selectChatModel(ctx, req, settings.Settings{}, conversation.Settings{})
+	if err != nil {
+		t.Fatalf("selectChatModel session fallback error = %v, want nil", err)
+	}
+	if got.ModelID != "gpt-session" {
+		t.Fatalf("selectChatModel model_id = %q, want %q", got.ModelID, "gpt-session")
+	}
+	if prov.Name != provider.Name {
+		t.Fatalf("selectChatModel provider = %q, want %q", prov.Name, provider.Name)
+	}
+}
+
+func TestSelectChatModelWithoutAnyModelStillErrors(t *testing.T) {
+	ctx := context.Background()
+	fake := &modelSelectionFakeQueries{}
+	resolver := newModelSelectionResolver(t, fake)
+
+	req := conversation.ChatRequest{
+		BotID:     "00000000-0000-0000-0000-000000000700",
+		SessionID: "00000000-0000-0000-0000-000000000701",
+	}
+	_, _, err := resolver.selectChatModel(ctx, req, settings.Settings{}, conversation.Settings{})
+	if err == nil || !strings.Contains(err.Error(), "chat model not configured") {
+		t.Fatalf("selectChatModel without any model error = %v, want chat model not configured", err)
 	}
 }
 

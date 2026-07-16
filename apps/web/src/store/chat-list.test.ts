@@ -101,12 +101,12 @@ function singleSelectUserInput(id = 'input-1'): UIUserInput {
   }
 }
 
-function askUserTurn(userInput: UIUserInput, toolCallId = 'call-ask') {
+function askUserTurn(userInput: UIUserInput, toolCallId = 'call-ask', blockId = 1) {
   return {
     id: 'assistant-1',
     role: 'assistant' as const,
     messages: [{
-      id: 1,
+      id: blockId,
       type: 'tool' as const,
       name: 'ask_user',
       input: { questions: [{ text: userInput.questions?.[0]?.text ?? 'Question?', kind: 'single_select' }] },
@@ -123,12 +123,12 @@ function askUserTurn(userInput: UIUserInput, toolCallId = 'call-ask') {
   }
 }
 
-function approvalTurn(approval: UIToolApproval) {
+function approvalTurn(approval: UIToolApproval, blockId = 1) {
   return {
     id: 'assistant-approval',
     role: 'assistant' as const,
     messages: [{
-      id: 1,
+      id: blockId,
       type: 'tool' as const,
       name: 'exec',
       input: { command: 'pwd' },
@@ -301,6 +301,76 @@ describe('chat-list store', () => {
 
     expect(store.currentBotId).toBe('bot-ready')
     expect(api.fetchSessions).toHaveBeenCalledWith('bot-ready')
+  })
+
+  it('requests the Desktop once when each Browser Use or Computer Use call starts', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'browser_action',
+          input: { action: 'click' },
+          tool_call_id: 'call-browser',
+          running: true,
+        },
+      } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+
+    const sending = store.sendMessage('use the browser')
+    await flushPromises()
+    expect(store.guiToolUseRequested).toMatchObject({
+      botId: 'bot-1',
+      sessionId: 'session-1',
+      toolCallId: 'call-browser',
+      toolName: 'browser_action',
+      seq: 1,
+    })
+
+    streamHandler?.({
+      type: 'message',
+      stream_id: lastStreamId,
+      session_id: 'session-1',
+      data: {
+        id: 1,
+        type: 'tool',
+        name: 'browser_action',
+        input: { action: 'click', coordinate: [10, 20] },
+        tool_call_id: 'call-browser',
+        running: true,
+      },
+    } as UIStreamEvent)
+    expect(store.guiToolUseRequested?.seq).toBe(1)
+
+    streamHandler?.({
+      type: 'message',
+      stream_id: lastStreamId,
+      session_id: 'session-1',
+      data: {
+        id: 2,
+        type: 'tool',
+        name: 'computer_observe',
+        input: { observe: 'snapshot' },
+        tool_call_id: 'call-computer',
+        running: true,
+      },
+    } as UIStreamEvent)
+    expect(store.guiToolUseRequested).toMatchObject({
+      toolCallId: 'call-computer',
+      toolName: 'computer_observe',
+      seq: 2,
+    })
+
+    streamHandler?.({
+      type: 'end',
+      stream_id: lastStreamId,
+      session_id: 'session-1',
+    } as UIStreamEvent)
+    await expect(sending).resolves.toMatchObject({ ok: true })
   })
 
   it('returns startup stream errors to the composer when no assistant output exists', async () => {
@@ -982,6 +1052,44 @@ describe('chat-list store', () => {
 
     sendEvents = [{ type: 'start' } as UIStreamEvent, { type: 'end' } as UIStreamEvent]
     await expect(store.respondToolApproval(block.approval, 'approve')).resolves.toBe(true)
+  })
+
+  it('keeps the approved tool block visible while the response stream continues', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const approval: UIToolApproval = {
+      approval_id: 'approval-pwd',
+      short_id: 9,
+      status: 'pending',
+      can_approve: true,
+    }
+    store.messages.push(approvalTurn(approval, 0))
+
+    await expect(store.respondToolApproval(approval, 'approve')).resolves.toBe(true)
+    const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
+    streamHandler?.({
+      type: 'message',
+      stream_id: responseStreamId,
+      session_id: 'session-1',
+      data: { id: 0, type: 'reasoning', content: 'Running the approved tool' },
+    } as UIStreamEvent)
+
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    if (!assistant || assistant.role !== 'assistant') throw new Error('assistant turn was not found')
+    expect(assistant.messages.map(block => [block.id, block.type])).toEqual([
+      [0, 'tool'],
+      [1, 'reasoning'],
+    ])
+    const tool = assistant.messages.find(block => block.type === 'tool')
+    expect(tool?.approval).toMatchObject({ status: 'approved', can_approve: false })
+
+    streamHandler?.({ type: 'end', stream_id: responseStreamId, session_id: 'session-1' } as UIStreamEvent)
+    await flushPromises()
   })
 
   it('aborts silent approval and original streams once and ignores late response events', async () => {
@@ -2020,6 +2128,51 @@ describe('chat-list store', () => {
       expect(block.userInput?.status).toBe('submitted')
       expect(block.userInput?.can_respond).toBe(false)
     }
+  })
+
+  it('keeps the answered ask_user block visible while the response stream continues', async () => {
+    api.fetchSessions.mockResolvedValueOnce({ items: [
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ], nextCursor: null })
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const userInput = singleSelectUserInput()
+    store.messages.push(askUserTurn(userInput, 'call-ask', 0))
+
+    await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
+    const responseStreamId = sentWSMessages.at(-1)?.stream_id as string
+    streamHandler?.({
+      type: 'message',
+      stream_id: responseStreamId,
+      session_id: 'session-1',
+      data: { id: 0, type: 'reasoning', content: 'Continuing after your answer' },
+    } as UIStreamEvent)
+
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    if (!assistant || assistant.role !== 'assistant') throw new Error('assistant turn was not found')
+    expect(assistant.messages.map(block => [block.id, block.type])).toEqual([
+      [0, 'tool'],
+      [1, 'reasoning'],
+    ])
+    const askUser = assistant.messages.find(block => block.type === 'tool')
+    expect(askUser?.userInput).toMatchObject({ status: 'submitted', can_respond: false })
+
+    streamHandler?.({
+      type: 'message',
+      stream_id: responseStreamId,
+      session_id: 'session-1',
+      data: { id: 0, type: 'reasoning', content: 'Still continuing' },
+    } as UIStreamEvent)
+    expect(assistant.messages.map(block => [block.id, block.type])).toEqual([
+      [0, 'tool'],
+      [1, 'reasoning'],
+    ])
+    expect(assistant.messages[1]).toMatchObject({ content: 'Still continuing' })
+
+    streamHandler?.({ type: 'end', stream_id: responseStreamId, session_id: 'session-1' } as UIStreamEvent)
+    await flushPromises()
   })
 
   it('cancels user input over websocket and marks the block canceled', async () => {

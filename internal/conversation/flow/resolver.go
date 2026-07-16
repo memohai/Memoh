@@ -29,6 +29,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/historyfrag"
 	"github.com/memohai/memoh/internal/hooks"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	messagepkg "github.com/memohai/memoh/internal/message"
@@ -119,6 +120,8 @@ type Resolver struct {
 	sessionTurnMu       sync.Mutex
 	sessionTurnRefs     map[string]int // key: "botID:sessionID" → active turn refcount
 	sessionTurnLocks    map[string]*sync.Mutex
+	sessionCompactionMu sync.Mutex
+	sessionCompactions  map[string]*sessionCompactionGate
 	timeout             time.Duration
 	memorySearchTimeout time.Duration
 	clockLocation       *time.Location
@@ -292,6 +295,9 @@ type resolvedContext struct {
 	userMessageAlreadyInContext bool
 	injectedRecords             *[]conversation.InjectedMessageRecord
 	estimatedTokens             int // estimated input token count for compaction
+	compactableTokens           int // raw history eligible for compaction
+	compactableTokensKnown      bool
+	contextTokenBudget          int // token budget used to clamp compaction triggers
 }
 
 func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (resolvedContext, error) {
@@ -359,46 +365,44 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	}
 
 	var messages []conversation.ModelMessage
+	var historyRecords []historyfrag.HistoryRecord
 	var estimatedTokens int
+	var compactableTokens int
+	var compactableTokensKnown bool
 	if usePipeline {
 		messages = r.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
 	} else if r.conversationSvc != nil {
 		historyFallback := historyScopeFallbackFromChatRequest(req)
-		loaded, loadErr := r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
+		prepared, loadErr := r.prepareHistoryContext(ctx, req, historyFallback, contextTokenBudget)
 		if loadErr != nil {
-			r.logger.Error("resolve: loadHistoryRecords failed",
+			r.logger.Error("resolve: prepare history context failed",
 				slog.String("bot_id", req.BotID),
+				slog.String("stage", "initial"),
 				slog.Any("error", loadErr),
 			)
 			return resolvedContext{}, loadErr
 		}
-		loaded = pruneHistoryForGateway(loaded)
-		loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
-		loaded = dedupePersistedCurrentUserMessage(loaded, req)
-		loaded, loadErr = r.ensureRequiredHistoryMessage(ctx, loaded, req)
-		if loadErr != nil {
-			r.logger.Error("resolve: load required history message failed",
-				slog.String("bot_id", req.BotID),
-				slog.Any("error", loadErr),
-			)
-			return resolvedContext{}, loadErr
-		}
-		loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
-		loaded = injectWorkspaceTransitionRecords(loaded)
-		messages, estimatedTokens = trimMessagesByTokens(r.logger, loaded, contextTokenBudget)
-		// When context reaches 70% of the contextTokenBudget (the user-configured
-		// budget cap), run synchronous compaction before sending the request.
-		// contextTokenBudget is the authoritative limit for how much context
-		// the user wants to send to the LLM. We compact at 70% to keep the
-		// context healthy and avoid edge-case timeouts.
+		messages = prepared.messages
+		historyRecords = prepared.records
+		estimatedTokens = prepared.estimatedTokens
+		compactableTokens = prepared.compactableTokens
+		compactableTokensKnown = true
+		// When context reaches the shared budget share, run synchronous
+		// compaction before sending the request. contextTokenBudget is the
+		// authoritative limit for how much context the user wants to send
+		// to the LLM.
 		compactionThreshold := 0
 		if contextTokenBudget > 0 {
-			compactionThreshold = contextTokenBudget * 70 / 100
+			compactionThreshold = contextTokenBudget * compactionBudgetThresholdPercent / 100
 		}
-		if compactionThreshold > 0 && estimatedTokens >= compactionThreshold {
+		// The trigger only counts raw (compactable) rows: active summaries can
+		// never be compacted away, so including them would make the trigger
+		// self-sustaining once accumulated summaries cross the threshold.
+		if compactionThreshold > 0 && compactableTokens >= compactionThreshold {
 			r.logger.Warn("resolve: context reached compaction threshold, running synchronous compaction",
 				slog.String("bot_id", req.BotID),
 				slog.Int("estimated_tokens", estimatedTokens),
+				slog.Int("compactable_tokens", compactableTokens),
 				slog.Int("context_token_budget", contextTokenBudget),
 				slog.Int("compaction_threshold", compactionThreshold),
 			)
@@ -406,36 +410,26 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 			// summary. A noop (cooldown, in-flight, nothing markable) keeps
 			// this turn's context untouched — possibly still above the
 			// threshold — and the next turn re-evaluates.
-			if res := r.runCompactionSync(ctx, req, estimatedTokens); res.Status == compaction.StatusOK {
-				loaded, loadErr = r.loadHistoryRecords(ctx, historyFallback, req.SessionID, defaultMaxContextMinutes)
+			if res := r.runCompactionSync(ctx, req, compactableTokens, contextTokenBudget); res.Status == compaction.StatusOK {
+				prepared, loadErr = r.prepareHistoryContext(ctx, req, historyFallback, contextTokenBudget)
 				if loadErr != nil {
-					r.logger.Error("resolve: reload messages after compaction failed",
+					r.logger.Error("resolve: prepare history context failed",
 						slog.String("bot_id", req.BotID),
+						slog.String("stage", "post_compaction"),
 						slog.Any("error", loadErr),
 					)
 					return resolvedContext{}, loadErr
 				}
-				loaded = pruneHistoryForGateway(loaded)
-				loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
-				loaded = dedupePersistedCurrentUserMessage(loaded, req)
-				loaded, loadErr = r.ensureRequiredHistoryMessage(ctx, loaded, req)
-				if loadErr != nil {
-					r.logger.Error("resolve: reload required history message failed",
-						slog.String("bot_id", req.BotID),
-						slog.Any("error", loadErr),
-					)
-					return resolvedContext{}, loadErr
-				}
-				loaded = r.replaceCompactedMessages(ctx, compactionSummaryScope(req.BotID, req.ChatID, req.SessionID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded)
-				loaded = injectWorkspaceTransitionRecords(loaded)
-				messages, estimatedTokens = trimMessagesByTokens(r.logger, loaded, contextTokenBudget)
+				messages = prepared.messages
+				historyRecords = prepared.records
+				estimatedTokens = prepared.estimatedTokens
+				compactableTokens = prepared.compactableTokens
 				// Remove tool messages from the recent context — they are large
 				// and unnecessary when we already have a summary. Keep only
 				// user/assistant conversation turns.
-				messages = stripToolMessages(messages)
+				messages = stripToolMessagesWhenCompactionSummaryIsActive(messages, historyRecords)
 			}
 		}
-		_ = estimatedTokens
 	}
 	if notice := r.currentWorkspaceContextMessage(ctx, req); notice != nil {
 		messages = append(messages, *notice)
@@ -485,6 +479,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 	if strings.TrimSpace(modelQuery) != strings.TrimSpace(req.Query) {
 		headerifiedModelQuery = FormatUserHeader(headerInput, modelQuery)
 	}
+	runCfg.ContextFrags = historyContextFragsForMessages(messages, historyRecords)
 	runCfg.Messages = modelMessagesToSDKMessages(nonNilModelMessages(messages))
 	// When using the pipeline the user message is already in the RC;
 	// don't send it to the LLM again. headerifiedQuery is still kept
@@ -537,6 +532,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		userMessageAlreadyInContext: usePipeline,
 		injectedRecords:             injectedRecords,
 		estimatedTokens:             estimatedTokens,
+		compactableTokens:           compactableTokens,
+		compactableTokensKnown:      compactableTokensKnown,
+		contextTokenBudget:          contextTokenBudget,
 	}, nil
 }
 

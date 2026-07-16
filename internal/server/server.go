@@ -11,6 +11,7 @@ import (
 
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/channel/publicmedia"
+	"github.com/memohai/memoh/internal/httpx"
 )
 
 type Server struct {
@@ -32,6 +33,8 @@ func NewServer(log *slog.Logger, addr string, jwtSecret string,
 
 	e := echo.New()
 	e.HideBanner = true
+	e.HTTPErrorHandler = newHTTPErrorHandler(log, e.DefaultHTTPErrorHandler)
+	e.Use(middleware.RequestID())
 	e.Use(middleware.Recover())
 	e.Use(middleware.BodyLimitWithConfig(middleware.BodyLimitConfig{
 		Limit: "1M",
@@ -40,14 +43,16 @@ func NewServer(log *slog.Logger, addr string, jwtSecret string,
 		},
 	}))
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins: []string{"*"},
-		AllowMethods: []string{echo.GET, echo.HEAD, echo.POST, echo.PUT, echo.PATCH, echo.DELETE, echo.OPTIONS},
-		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+		AllowOrigins:  []string{"*"},
+		AllowMethods:  []string{echo.GET, echo.HEAD, echo.POST, echo.PUT, echo.PATCH, echo.DELETE, echo.OPTIONS},
+		AllowHeaders:  []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, echo.HeaderXRequestID},
+		ExposeHeaders: []string{echo.HeaderXRequestID},
 	}))
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
-		LogStatus: true,
-		LogURI:    true,
-		LogMethod: true,
+		HandleError: true,
+		LogStatus:   true,
+		LogURI:      true,
+		LogMethod:   true,
 		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
 			log.Info("request",
 				slog.String("method", v.Method),
@@ -55,6 +60,7 @@ func NewServer(log *slog.Logger, addr string, jwtSecret string,
 				slog.Int("status", v.Status),
 				slog.Duration("latency", v.Latency),
 				slog.String("remote_ip", c.RealIP()),
+				slog.String("request_id", httpx.RequestID(c)),
 			)
 			return nil
 		},

@@ -350,6 +350,17 @@ export type AdaptersUsageResponse = {
     total_text_bytes?: number;
 };
 
+export type ApperrorProblem = {
+    args: {
+        [key: string]: string;
+    };
+    code: string;
+    detail: string;
+    request_id?: string;
+    status: number;
+    type: string;
+};
+
 export type AudioConfigSchema = {
     fields?: Array<AudioFieldSchema>;
 };
@@ -3114,6 +3125,10 @@ export type PostBotsErrors = {
      */
     403: HandlersErrorResponse;
     /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
      * Internal Server Error
      */
     500: HandlersErrorResponse;
@@ -4842,6 +4857,10 @@ export type GetBotsByBotIdContainerFsErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type GetBotsByBotIdContainerFsError = GetBotsByBotIdContainerFsErrors[keyof GetBotsByBotIdContainerFsErrors];
@@ -4887,6 +4906,10 @@ export type PostBotsByBotIdContainerFsArchiveErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerFsArchiveError = PostBotsByBotIdContainerFsArchiveErrors[keyof PostBotsByBotIdContainerFsArchiveErrors];
@@ -4930,6 +4953,10 @@ export type PostBotsByBotIdContainerFsDeleteErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerFsDeleteError = PostBotsByBotIdContainerFsDeleteErrors[keyof PostBotsByBotIdContainerFsDeleteErrors];
@@ -4973,6 +5000,10 @@ export type GetBotsByBotIdContainerFsDownloadErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type GetBotsByBotIdContainerFsDownloadError = GetBotsByBotIdContainerFsDownloadErrors[keyof GetBotsByBotIdContainerFsDownloadErrors];
@@ -5020,6 +5051,10 @@ export type PostBotsByBotIdContainerFsExtractErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerFsExtractError = PostBotsByBotIdContainerFsExtractErrors[keyof PostBotsByBotIdContainerFsExtractErrors];
@@ -5063,6 +5098,10 @@ export type GetBotsByBotIdContainerFsListErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type GetBotsByBotIdContainerFsListError = GetBotsByBotIdContainerFsListErrors[keyof GetBotsByBotIdContainerFsListErrors];
@@ -5104,6 +5143,10 @@ export type PostBotsByBotIdContainerFsMkdirErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerFsMkdirError = PostBotsByBotIdContainerFsMkdirErrors[keyof PostBotsByBotIdContainerFsMkdirErrors];
@@ -5147,6 +5190,10 @@ export type GetBotsByBotIdContainerFsReadErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type GetBotsByBotIdContainerFsReadError = GetBotsByBotIdContainerFsReadErrors[keyof GetBotsByBotIdContainerFsReadErrors];
@@ -5192,6 +5239,10 @@ export type PostBotsByBotIdContainerFsRenameErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerFsRenameError = PostBotsByBotIdContainerFsRenameErrors[keyof PostBotsByBotIdContainerFsRenameErrors];
@@ -5239,6 +5290,10 @@ export type PostBotsByBotIdContainerFsUploadErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerFsUploadError = PostBotsByBotIdContainerFsUploadErrors[keyof PostBotsByBotIdContainerFsUploadErrors];
@@ -5280,6 +5335,10 @@ export type PostBotsByBotIdContainerFsWriteErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerFsWriteError = PostBotsByBotIdContainerFsWriteErrors[keyof PostBotsByBotIdContainerFsWriteErrors];
@@ -5388,6 +5447,10 @@ export type DeleteBotsByBotIdContainerSkillsErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdContainerSkillsError = DeleteBotsByBotIdContainerSkillsErrors[keyof DeleteBotsByBotIdContainerSkillsErrors];
@@ -5471,6 +5534,10 @@ export type PostBotsByBotIdContainerSkillsErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerSkillsError = PostBotsByBotIdContainerSkillsErrors[keyof PostBotsByBotIdContainerSkillsErrors];
@@ -5512,6 +5579,10 @@ export type PostBotsByBotIdContainerSkillsActionsErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerSkillsActionsError = PostBotsByBotIdContainerSkillsActionsErrors[keyof PostBotsByBotIdContainerSkillsActionsErrors];
@@ -9903,6 +9974,10 @@ export type PutBotsByIdErrors = {
      * Not Found
      */
     404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
     /**
      * Internal Server Error
      */

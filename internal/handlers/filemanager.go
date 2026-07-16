@@ -17,6 +17,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/apperror"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -261,7 +262,7 @@ func fsFileInfoFromEntry(containerPath, name string, isDir bool, size int64, mod
 }
 
 // fsHTTPError maps mcpclient domain errors to HTTP status codes.
-func fsHTTPError(err error) *echo.HTTPError {
+func fsHTTPError(err error) error {
 	switch {
 	case errors.Is(err, bridge.ErrNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
@@ -270,10 +271,14 @@ func fsHTTPError(err error) *echo.HTTPError {
 	case errors.Is(err, bridge.ErrForbidden):
 		return echo.NewHTTPError(http.StatusForbidden, err.Error())
 	case errors.Is(err, bridge.ErrUnavailable):
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
+		return workspaceUnavailableError(err)
 	default:
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+}
+
+func workspaceUnavailableError(cause error) error {
+	return apperror.Wrap(apperror.CodeWorkspaceUnreachable, cause, nil)
 }
 
 // ---------- handlers ----------
@@ -289,6 +294,7 @@ func fsHTTPError(err error) *echo.HTTPError {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs [get].
 func (h *ContainerdHandler) FSStat(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceRead)
@@ -308,7 +314,7 @@ func (h *ContainerdHandler) FSStat(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
+		return workspaceUnavailableError(err)
 	}
 
 	entry, err := client.Stat(ctx, containerPath)
@@ -336,6 +342,7 @@ func (h *ContainerdHandler) FSStat(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/list [get].
 func (h *ContainerdHandler) FSList(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceRead)
@@ -355,7 +362,7 @@ func (h *ContainerdHandler) FSList(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
+		return workspaceUnavailableError(err)
 	}
 
 	entries, err := client.ListDirAll(ctx, containerPath, false)
@@ -394,6 +401,7 @@ func (h *ContainerdHandler) FSList(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/read [get].
 func (h *ContainerdHandler) FSRead(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceRead)
@@ -413,7 +421,7 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
+		return workspaceUnavailableError(err)
 	}
 
 	rc, err := client.ReadRaw(ctx, containerPath)
@@ -446,6 +454,7 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/download [get].
 func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 	rawPath := c.QueryParam("path")
@@ -472,7 +481,7 @@ func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
+		return workspaceUnavailableError(err)
 	}
 
 	entry, err := client.Stat(ctx, containerPath)
@@ -519,6 +528,7 @@ func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/archive [post].
 func (h *ContainerdHandler) FSArchive(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceRead)
@@ -537,7 +547,7 @@ func (h *ContainerdHandler) FSArchive(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
+		return workspaceUnavailableError(err)
 	}
 	for _, p := range paths {
 		if _, err := client.Stat(ctx, p); err != nil {
@@ -644,6 +654,7 @@ func (h *ContainerdHandler) writeArchiveEntry(ctx context.Context, client *bridg
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/write [post].
 func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
@@ -666,7 +677,7 @@ func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
+		return workspaceUnavailableError(err)
 	}
 
 	if req.ExpectedRevision != nil {
@@ -708,6 +719,7 @@ func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/upload [post].
 func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
@@ -727,7 +739,7 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
+		return workspaceUnavailableError(err)
 	}
 
 	file, err := c.FormFile("file")
@@ -761,6 +773,7 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/mkdir [post].
 func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
@@ -783,7 +796,7 @@ func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
+		return workspaceUnavailableError(err)
 	}
 
 	if err := client.Mkdir(ctx, containerPath); err != nil {
@@ -804,6 +817,7 @@ func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/delete [post].
 func (h *ContainerdHandler) FSDelete(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
@@ -830,7 +844,7 @@ func (h *ContainerdHandler) FSDelete(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
+		return workspaceUnavailableError(err)
 	}
 
 	if err := client.DeleteFile(ctx, containerPath, req.Recursive); err != nil {
@@ -851,6 +865,7 @@ func (h *ContainerdHandler) FSDelete(c echo.Context) error {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/rename [post].
 func (h *ContainerdHandler) FSRename(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
@@ -877,7 +892,7 @@ func (h *ContainerdHandler) FSRename(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
+		return workspaceUnavailableError(err)
 	}
 
 	if err := client.Rename(ctx, oldPath, newPath); err != nil {
@@ -899,6 +914,7 @@ func (h *ContainerdHandler) FSRename(c echo.Context) error {
 // @Failure 404 {object} ErrorResponse
 // @Failure 409 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/extract [post].
 func (h *ContainerdHandler) FSExtract(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
@@ -924,7 +940,7 @@ func (h *ContainerdHandler) FSExtract(c echo.Context) error {
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace is not reachable")
+		return workspaceUnavailableError(err)
 	}
 	entry, err := client.Stat(ctx, containerPath)
 	if err != nil {

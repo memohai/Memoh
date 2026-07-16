@@ -594,7 +594,7 @@ func (r *Resolver) persistPartialResult(
 			// contexts don't deadlock (where the LLM can never succeed and
 			// therefore compaction never fires).
 			if rc.estimatedTokens > 0 {
-				r.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
+				go r.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
 			}
 			return persisted
 		}
@@ -612,7 +612,7 @@ func (r *Resolver) persistPartialResult(
 	)
 
 	if rc.estimatedTokens > 0 {
-		r.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
+		go r.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
 	}
 	return nil
 }

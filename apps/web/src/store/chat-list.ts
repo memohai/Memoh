@@ -86,6 +86,7 @@ import {
   locateMessageUI,
 } from '@/composables/api/useChat'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH } from '@/utils/acp'
+import { isGuiToolName } from '@/utils/gui-tools'
 import { getBotsByBotIdSettings } from '@memohai/sdk'
 import type { AcpagentRuntimeStatus } from '@memohai/sdk'
 
@@ -184,6 +185,14 @@ interface StartupSendFailure {
   restoreRequestedSkills?: RequestedSkillSelection[]
 }
 
+interface GuiToolUseRequest {
+  botId: string
+  sessionId: string
+  toolCallId: string
+  toolName: string
+  seq: number
+}
+
 class StreamFailureError extends Error {
   stage: SendMessageStage
 
@@ -232,6 +241,9 @@ export const useChatStore = defineStore('chat', () => {
     rememberBackgroundTask,
     applyPendingBackgroundEventsToTool,
   } = backgroundTasks
+  const guiToolUseRequested = ref<GuiToolUseRequest | null>(null)
+  const seenGuiToolCalls = new Set<string>()
+  let guiToolUseRequestSeq = 0
   const focusedChatViewId = ref('chat')
   let transcriptSnapshotHook: (view: ChatViewEntry, targetSessionId: string | undefined, turns: import('@/composables/api/useChat.types').UITurn[]) => void = () => {}
   let transcriptRefreshAppliedHook: (view: ChatViewEntry, targetSessionId: string, latestTimestamp?: string) => void = () => {}
@@ -422,6 +434,7 @@ export const useChatStore = defineStore('chat', () => {
     streamIdForEvent,
     trackAssistantStream,
     getAssistantStream,
+    mapAssistantStreamMessage,
     resolveAssistantStream,
     rejectAssistantStream,
     discardAssistantStream,
@@ -1215,8 +1228,27 @@ export const useChatStore = defineStore('chat', () => {
         ensureDiscussStream(streamId, sid, bid)
         break
       case 'message':
+        if (event.data.type === 'tool' && event.data.running && isGuiToolName(event.data.name)) {
+          const toolCallId = event.data.tool_call_id?.trim() ?? ''
+          const dedupeKey = `${bid}:${sid}:${toolCallId || `${streamId}:${event.data.id}:${event.data.name}`}`
+          if (!seenGuiToolCalls.has(dedupeKey)) {
+            seenGuiToolCalls.add(dedupeKey)
+            guiToolUseRequested.value = {
+              botId: bid,
+              sessionId: sid,
+              toolCallId,
+              toolName: event.data.name,
+              seq: ++guiToolUseRequestSeq,
+            }
+          }
+        }
         const messageStream = ensureDiscussStream(streamId, sid, bid)
-        if (messageStream) upsertAssistantUIMessage(messageStream.assistantTurn, event.data)
+        if (messageStream) {
+          upsertAssistantUIMessage(
+            messageStream.assistantTurn,
+            mapAssistantStreamMessage(streamId, event.data),
+          )
+        }
         break
       case 'end':
         const endedSession = getAssistantStream(streamId)
@@ -1295,6 +1327,8 @@ export const useChatStore = defineStore('chat', () => {
     resetApprovalResponses()
     forkingMessages.clear()
     backgroundTasks.clearBackgroundTasks()
+    seenGuiToolCalls.clear()
+    guiToolUseRequested.value = null
   }
 
   async function loadMoreSessions(): Promise<void> {
@@ -2950,6 +2984,7 @@ export const useChatStore = defineStore('chat', () => {
     draftViewRequested,
     applyDraftViewRequest,
     forkedSessionRequested,
+    guiToolUseRequested,
     deletedSession,
     removeSession,
     renameSession,

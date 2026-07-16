@@ -20,7 +20,7 @@ type Lifecycle string
 
 const (
 	LifecyclePersisted     Lifecycle = "persisted"
-	LifecycleLegacySummary Lifecycle = "legacy_summary"
+	LifecycleActiveSummary Lifecycle = "active_summary"
 )
 
 type ScopeFallback struct {
@@ -47,6 +47,7 @@ type HistoryRecord struct {
 	ExternalMessageID string
 	EventID           string
 	SessionID         string
+	SessionIDKnown    bool
 	BotID             string
 
 	SenderChannelIdentityID string
@@ -64,6 +65,8 @@ type HistoryRecord struct {
 	// Required marks a record that must survive trimming/compaction because it
 	// is pinned by a retry/edit request (conversation.ChatRequest.RequiredHistoryMessageID).
 	Required bool
+
+	Coverage *contextfrag.SummaryCoverage
 }
 
 type MediaRef struct {

@@ -28,23 +28,17 @@ func FromDBMessage(msg messagepkg.Message, fallback ScopeFallback) (HistoryRecor
 }
 
 func FromDBMessageWithLogger(log *slog.Logger, msg messagepkg.Message, fallback ScopeFallback) (HistoryRecord, error) {
-	rowID := strings.TrimSpace(msg.ID)
-	if rowID == "" {
-		return HistoryRecord{}, errors.New("history db message id is required")
+	ref, err := DBMessageIdentityRef(msg.ID)
+	if err != nil {
+		return HistoryRecord{}, err
 	}
+	rowID := ref.ID
 
 	modelMessage := modelMessageFromDBMessage(log, msg)
 	inputTokens, outputTokens := parseUsage(msg.Usage)
-	ref := contextfrag.ContextRef{
-		Namespace:   namespaceDBHistoryMessage,
-		ID:          rowID,
-		Version:     1,
-		Schema:      contextfrag.SchemaContextRef,
-		Durability:  contextfrag.RefDurable,
-		HashAlgo:    contextfrag.HashAlgoSHA256,
-		HashScope:   contextfrag.HashScopeSourcePayload,
-		ContentHash: DBMessageSourceHash(msg).Value,
-	}
+	ref.HashAlgo = contextfrag.HashAlgoSHA256
+	ref.HashScope = contextfrag.HashScopeSourcePayload
+	ref.ContentHash = DBMessageSourceHash(msg).Value
 	scope := scopeFromDBMessage(msg, fallback)
 	provenance := contextfrag.Provenance{
 		Source:    string(SourceDBMessage),
@@ -69,6 +63,7 @@ func FromDBMessageWithLogger(log *slog.Logger, msg messagepkg.Message, fallback 
 		ExternalMessageID: strings.TrimSpace(msg.ExternalMessageID),
 		EventID:           strings.TrimSpace(msg.EventID),
 		SessionID:         strings.TrimSpace(msg.SessionID),
+		SessionIDKnown:    true,
 		BotID:             strings.TrimSpace(msg.BotID),
 
 		SenderChannelIdentityID: strings.TrimSpace(msg.SenderChannelIdentityID),
@@ -85,6 +80,20 @@ func FromDBMessageWithLogger(log *slog.Logger, msg messagepkg.Message, fallback 
 	}, nil
 }
 
+func DBMessageIdentityRef(id string) (contextfrag.ContextRef, error) {
+	rowID := strings.TrimSpace(id)
+	if rowID == "" {
+		return contextfrag.ContextRef{}, errors.New("history db message id is required")
+	}
+	return contextfrag.ContextRef{
+		Namespace:  namespaceDBHistoryMessage,
+		ID:         rowID,
+		Version:    1,
+		Schema:     contextfrag.SchemaContextRef,
+		Durability: contextfrag.RefDurable,
+	}, nil
+}
+
 func DBMessageSourceHash(msg messagepkg.Message) contextfrag.FragmentHash {
 	payload := dbMessageSourceHashPayload{
 		ID:                      strings.TrimSpace(msg.ID),
@@ -92,7 +101,6 @@ func DBMessageSourceHash(msg messagepkg.Message) contextfrag.FragmentHash {
 		SessionID:               strings.TrimSpace(msg.SessionID),
 		SenderChannelIdentityID: strings.TrimSpace(msg.SenderChannelIdentityID),
 		SenderUserID:            strings.TrimSpace(msg.SenderUserID),
-		SenderDisplayName:       strings.TrimSpace(msg.SenderDisplayName),
 		Platform:                strings.TrimSpace(msg.Platform),
 		ExternalMessageID:       strings.TrimSpace(msg.ExternalMessageID),
 		SourceReplyToMessageID:  strings.TrimSpace(msg.SourceReplyToMessageID),
@@ -127,7 +135,6 @@ type dbMessageSourceHashPayload struct {
 	SessionID               string         `json:"session_id,omitempty"`
 	SenderChannelIdentityID string         `json:"sender_channel_identity_id,omitempty"`
 	SenderUserID            string         `json:"sender_user_id,omitempty"`
-	SenderDisplayName       string         `json:"sender_display_name,omitempty"`
 	Platform                string         `json:"platform,omitempty"`
 	ExternalMessageID       string         `json:"external_message_id,omitempty"`
 	SourceReplyToMessageID  string         `json:"source_reply_to_message_id,omitempty"`

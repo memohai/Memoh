@@ -1,18 +1,5 @@
 <template>
-  <PageShell
-    :title="t('runtimes.title')"
-    :description="t('runtimes.description')"
-  >
-    <template #actions>
-      <Button
-        size="sm"
-        @click="connectDialogOpen = true"
-      >
-        <Plus class="size-4" />
-        {{ desktopRuntimeBridge ? t('runtimes.connectOther') : t('runtimes.connect') }}
-      </Button>
-    </template>
-
+  <PageShell :title="t('runtimes.title')">
     <div class="space-y-8">
       <SettingsSection
         v-if="desktopRuntimeBridge"
@@ -64,6 +51,16 @@
       </SettingsSection>
 
       <SettingsSection :title="desktopRuntimeBridge ? t('runtimes.otherComputers') : t('runtimes.computers')">
+        <template #actions>
+          <Button
+            size="sm"
+            @click="connectDialogOpen = true"
+          >
+            <Plus class="size-4" />
+            {{ desktopRuntimeBridge ? t('runtimes.connectOther') : t('runtimes.connect') }}
+          </Button>
+        </template>
+
         <InlineLoadingRow
           v-if="runtimesLoading && runtimes === undefined"
           surface="card-row"
@@ -95,14 +92,6 @@
           <p class="mx-auto mt-1 max-w-md text-xs leading-relaxed text-muted-foreground">
             {{ desktopRuntimeBridge ? t('runtimes.emptyOtherDescription') : t('runtimes.emptyDescription') }}
           </p>
-          <Button
-            class="mt-4"
-            variant="outline"
-            size="sm"
-            @click="connectDialogOpen = true"
-          >
-            {{ desktopRuntimeBridge ? t('runtimes.connectOther') : t('runtimes.connect') }}
-          </Button>
         </div>
 
         <SettingsRow

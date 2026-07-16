@@ -1075,6 +1075,7 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, ac
 	}
 
 	eventCh := make(chan flow.WSStreamEvent, 64)
+	releaseCompaction := h.resolver.DeferSessionCompaction(botID, sessionID, streamID)
 	go func() {
 		defer streamCancel()
 		err := func() error {
@@ -1091,7 +1092,10 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, ac
 		}
 	}()
 
-	go h.forwardWSStreamEvents(streamCtx, baseCtx, writer, botID, sessionID, streamID, eventCh)
+	go func() {
+		defer releaseCompaction()
+		h.forwardWSStreamEvents(streamCtx, baseCtx, writer, botID, sessionID, streamID, eventCh)
+	}()
 }
 
 // HandleWebSocket godoc

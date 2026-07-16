@@ -1,20 +1,19 @@
 import { client } from '@memohai/sdk/client'
 import type { Options } from '@memohai/sdk'
-import { resolveApiErrorMessage } from '@/utils/api-error'
+import {
+  fetchSSEProblem,
+  isSSEErrorEvent,
+  localizeSSEErrorEvent,
+  normalizeSSEFailure,
+  type SSEErrorEvent,
+} from './sse-error'
 
 // codesync(display-prepare-stream): keep these manual SSE payload types in sync
 // with internal/handlers/display.go.
 export type DisplayPrepareStreamEvent =
   | { type: 'progress'; step?: string; message?: string; percent?: number }
   | { type: 'complete'; step?: string; message?: string; percent?: number }
-  | {
-    type: 'error'
-    step?: string
-    code?: string
-    i18n_key?: string
-    args?: Record<string, string>
-    message: string
-  }
+  | (SSEErrorEvent & { step?: string })
 
 export type DisplayPrepareStreamData = {
   path: { bot_id: string }
@@ -33,20 +32,11 @@ function isDisplayPrepareStreamEvent(value: unknown): value is DisplayPrepareStr
         && (event.message === undefined || typeof event.message === 'string')
         && (event.percent === undefined || typeof event.percent === 'number')
     case 'error':
-      return typeof event.message === 'string'
+      return isSSEErrorEvent(event)
         && (event.step === undefined || typeof event.step === 'string')
-        && (event.code === undefined || typeof event.code === 'string')
-        && (event.i18n_key === undefined || typeof event.i18n_key === 'string')
-        && (event.args === undefined || (!!event.args && typeof event.args === 'object'))
     default:
       return false
   }
-}
-
-function toError(error: unknown): Error {
-  if (error instanceof Error) return error
-  if (typeof error === 'string' && error.trim()) return new Error(error)
-  return new Error('Display preparation stream failed')
 }
 
 export async function postBotsByBotIdContainerDisplayPrepareStream(
@@ -61,6 +51,7 @@ export async function postBotsByBotIdContainerDisplayPrepareStream(
       ...options.headers as Record<string, string>,
       Accept: 'text/event-stream',
     },
+    fetch: fetchSSEProblem,
     onSseError: (error) => {
       streamError = error
     },
@@ -79,11 +70,11 @@ export async function postBotsByBotIdContainerDisplayPrepareStream(
           throw new Error('Invalid display preparation stream event')
         }
         yield event.type === 'error'
-          ? { ...event, message: resolveApiErrorMessage(event, event.message) }
+          ? localizeSSEErrorEvent(event)
           : event
       }
       if (streamError) {
-        throw toError(streamError)
+        throw normalizeSSEFailure(streamError, 'Display preparation stream failed')
       }
     })(),
   }

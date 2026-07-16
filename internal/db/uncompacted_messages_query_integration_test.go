@@ -15,10 +15,8 @@ import (
 )
 
 // TestListUncompactedMessagesReclaimEligibility exercises the real SQL
-// eligibility predicate against PostgreSQL: rows stay selectable unless their
-// compact log holds a usable summary (status ok AND non-empty), matching the
-// read path's substitution predicate, and passive_sync rows never enter the
-// candidate set.
+// eligibility predicate against PostgreSQL: usable summaries and fresh pending
+// leases stay excluded, while stale or failed claims are reclaimable.
 func TestListUncompactedMessagesReclaimEligibility(t *testing.T) {
 	dsn := os.Getenv("TEST_POSTGRES_DSN")
 	if dsn == "" {
@@ -66,20 +64,22 @@ func TestListUncompactedMessagesReclaimEligibility(t *testing.T) {
 	}
 
 	logs := map[string]string{
-		"usable":     uuid.NewString(),
-		"error":      uuid.NewString(),
-		"pending":    uuid.NewString(),
-		"poison":     uuid.NewString(),
-		"whitespace": uuid.NewString(),
+		"usable":       uuid.NewString(),
+		"error":        uuid.NewString(),
+		"pendingFresh": uuid.NewString(),
+		"pendingStale": uuid.NewString(),
+		"poison":       uuid.NewString(),
+		"whitespace":   uuid.NewString(),
 	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary) VALUES
-  ($1, $6, $7, 'ok', 'a usable summary'),
-  ($2, $6, $7, 'error', ''),
-  ($3, $6, $7, 'pending', ''),
-  ($4, $6, $7, 'ok', ''),
-  ($5, $6, $7, 'ok', E'  \n\t')
-`, logs["usable"], logs["error"], logs["pending"], logs["poison"], logs["whitespace"], botID, sessionID); err != nil {
+INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary, started_at) VALUES
+  ($1, $7, $8, 'ok', 'a usable summary', now()),
+  ($2, $7, $8, 'error', '', now()),
+  ($3, $7, $8, 'pending', '', now()),
+  ($4, $7, $8, 'pending', '', now() - INTERVAL '16 minutes'),
+  ($5, $7, $8, 'ok', '', now()),
+  ($6, $7, $8, 'ok', E'  \n\t', now())
+`, logs["usable"], logs["error"], logs["pendingFresh"], logs["pendingStale"], logs["poison"], logs["whitespace"], botID, sessionID); err != nil {
 		t.Fatalf("insert compact logs: %v", err)
 	}
 
@@ -93,7 +93,8 @@ INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summar
 		{name: "plain", eligible: true},
 		{name: "covered by usable summary", compactID: logs["usable"], eligible: false},
 		{name: "log failed", compactID: logs["error"], eligible: true},
-		{name: "log never completed", compactID: logs["pending"], eligible: true},
+		{name: "fresh pending lease", compactID: logs["pendingFresh"], eligible: false},
+		{name: "stale pending lease", compactID: logs["pendingStale"], eligible: true},
 		{name: "legacy ok with empty summary", compactID: logs["poison"], eligible: true},
 		{name: "legacy ok with whitespace-only summary", compactID: logs["whitespace"], eligible: true},
 		{name: "passive sync", metadata: `{"trigger_mode":"passive_sync"}`, eligible: false},
