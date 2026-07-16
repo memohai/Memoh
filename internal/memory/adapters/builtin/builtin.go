@@ -77,6 +77,18 @@ func (p *BuiltinProvider) SetLLM(llm adapters.LLM) {
 	p.llm = llm
 }
 
+// Close releases runtime-owned resources such as the semantic retry worker.
+// The process-level pgvector Store owns its shared connection pool.
+func (p *BuiltinProvider) Close() error {
+	if p == nil || p.service == nil {
+		return nil
+	}
+	if closer, ok := p.service.(interface{ Close() error }); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
 // SetPackerConfig overrides the default context packing configuration.
 // Zero-valued fields fall back to defaults.
 func (p *BuiltinProvider) SetPackerConfig(cfg contextPackerConfig) {

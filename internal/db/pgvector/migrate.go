@@ -13,7 +13,7 @@ import (
 const migrationsPath = "pgvector/migrations"
 
 // SchemaVersion is the newest pgvector migration understood by this binary.
-const SchemaVersion = uint(1)
+const SchemaVersion = uint(2)
 
 // MigrationsFS returns the independently versioned pgvector migration set.
 func MigrationsFS() (fs.FS, error) {

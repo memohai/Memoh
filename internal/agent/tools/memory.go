@@ -97,7 +97,7 @@ func (p *MemoryProvider) resolveProvider(ctx context.Context, botID string) memp
 	if providerID == "" {
 		return nil
 	}
-	prov, err := p.registry.Get(providerID)
+	prov, err := p.registry.Get(ctx, providerID)
 	if err != nil {
 		return nil
 	}

@@ -10,8 +10,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/memohai/memoh/internal/team"
 )
 
 // rlsConn returns a connection running as a non-superuser test role. Roles are
@@ -76,58 +74,6 @@ func TestTeamRLSForceEnabled(t *testing.T) {
 		if !enabled || !forced {
 			t.Errorf("table %s must have RLS enabled and forced", name)
 		}
-	}
-}
-
-func TestComposeRuntimeRoleEnforcesRLS(t *testing.T) {
-	ctx := context.Background()
-	pool := freshMigratedDB(t)
-
-	var roleExists bool
-	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'memoh_app')`).Scan(&roleExists); err != nil {
-		t.Fatalf("check memoh_app role: %v", err)
-	}
-	if !roleExists {
-		t.Skip("memoh_app role is provisioned by the Compose database bootstrap")
-	}
-
-	const (
-		teamTwo = "00000000-0000-0000-0000-000000000002"
-		userOne = "00000000-0000-0000-0000-000000000101"
-		userTwo = "00000000-0000-0000-0000-000000000102"
-	)
-	if _, err := pool.Exec(ctx, `INSERT INTO teams (id, slug) VALUES ($1, 'runtime-role-team') ON CONFLICT (id) DO NOTHING`, teamTwo); err != nil {
-		t.Fatalf("seed runtime role team: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO users (id, team_id) VALUES ($1, $2), ($3, $4)`, userOne, team.DefaultTeamID, userTwo, teamTwo); err != nil {
-		t.Fatalf("seed runtime role rows: %v", err)
-	}
-
-	conn, err := pool.Acquire(ctx)
-	if err != nil {
-		t.Fatalf("acquire runtime role connection: %v", err)
-	}
-	defer conn.Release()
-	defer func() { _, _ = conn.Exec(ctx, "RESET ROLE") }()
-	if _, err := conn.Exec(ctx, "SET ROLE memoh_app"); err != nil {
-		t.Fatalf("set runtime role: %v", err)
-	}
-	if _, err := conn.Exec(ctx, "SELECT set_config('memoh.team_id', $1, false)", teamTwo); err != nil {
-		t.Fatalf("bind runtime role team: %v", err)
-	}
-	var currentUser string
-	if err := conn.QueryRow(ctx, "SELECT current_user").Scan(&currentUser); err != nil {
-		t.Fatalf("read current user: %v", err)
-	}
-	if currentUser != "memoh_app" {
-		t.Fatalf("current_user = %q, want memoh_app", currentUser)
-	}
-	var visible int
-	if err := conn.QueryRow(ctx, "SELECT count(*) FROM users WHERE id = ANY($1::uuid[])", []string{userOne, userTwo}).Scan(&visible); err != nil {
-		t.Fatalf("query users as runtime role: %v", err)
-	}
-	if visible != 1 {
-		t.Fatalf("runtime role sees %d team fixture rows, want 1", visible)
 	}
 }
 

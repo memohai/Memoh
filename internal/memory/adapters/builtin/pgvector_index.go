@@ -19,6 +19,7 @@ import (
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/team"
 )
 
 const (
@@ -27,12 +28,13 @@ const (
 )
 
 type pgvectorIndex struct {
-	queries    *pgvectorsqlc.Queries
-	lookup     dbstore.Queries
-	embedModel *sdk.EmbeddingModel
-	model      embeddingModelSpec
-	modelRef   string
-	logger     *slog.Logger
+	store       *pgvectordb.Store
+	lookup      dbstore.Queries
+	embedModel  *sdk.EmbeddingModel
+	model       embeddingModelSpec
+	modelRef    string
+	resolveTeam adapters.TeamIDResolver
+	logger      *slog.Logger
 }
 
 type embeddingModelSpec struct {
@@ -44,7 +46,7 @@ type embeddingModelSpec struct {
 	dimensions int
 }
 
-func newPGVectorIndex(logger *slog.Logger, providerConfig map[string]any, queries dbstore.Queries, vectorStore *pgvectordb.Store) (*pgvectorIndex, error) {
+func newPGVectorIndex(ctx context.Context, logger *slog.Logger, providerConfig map[string]any, queries dbstore.Queries, vectorStore *pgvectordb.Store, resolver adapters.TeamIDResolver) (*pgvectorIndex, error) {
 	modelRef := strings.TrimSpace(adapters.StringFromConfig(providerConfig, "embedding_model_id"))
 	if modelRef == "" {
 		return nil, nil
@@ -60,17 +62,21 @@ func newPGVectorIndex(logger *slog.Logger, providerConfig map[string]any, querie
 		logger.Debug("graph: pgvector semantic index disabled without relational query store", slog.String("embedding_model_id", modelRef))
 		return nil, nil
 	}
-	spec, err := resolveEmbeddingModel(context.Background(), queries, modelRef)
+	if resolver == nil {
+		resolver = adapters.FixedTeamIDResolver(team.DefaultTeamID)
+	}
+	spec, err := resolveEmbeddingModel(ctx, queries, modelRef)
 	if err != nil {
 		return nil, err
 	}
 	index := &pgvectorIndex{
-		queries:    vectorStore.Queries(),
-		lookup:     queries,
-		embedModel: models.NewSDKEmbeddingModel(spec.clientType, spec.baseURL, spec.apiKey, spec.modelID, semanticEmbedTimeout, nil),
-		model:      spec,
-		modelRef:   modelRef,
-		logger:     logger,
+		store:       vectorStore,
+		lookup:      queries,
+		embedModel:  models.NewSDKEmbeddingModel(spec.clientType, spec.baseURL, spec.apiKey, spec.modelID, semanticEmbedTimeout, nil),
+		model:       spec,
+		modelRef:    modelRef,
+		resolveTeam: resolver,
+		logger:      logger,
 	}
 	return index, nil
 }
@@ -110,6 +116,49 @@ func (r *pgvectorIndex) lookupQueries() dbstore.Queries {
 	return r.lookup
 }
 
+func (r *pgvectorIndex) teamUUID(ctx context.Context) (pgtype.UUID, error) {
+	if r == nil || r.resolveTeam == nil {
+		return pgtype.UUID{}, errors.New("pgvector semantic index: team resolver is not configured")
+	}
+	teamID, err := r.resolveTeam(ctx)
+	if err != nil {
+		return pgtype.UUID{}, fmt.Errorf("pgvector semantic index: resolve team: %w", err)
+	}
+	teamUUID, err := db.ParseUUID(strings.TrimSpace(teamID))
+	if err != nil {
+		return pgtype.UUID{}, fmt.Errorf("pgvector semantic index: invalid team id: %w", err)
+	}
+	return teamUUID, nil
+}
+
+// withTeamTx binds the RLS context transaction-locally. Queries also include
+// team_id explicitly, so the GUC is a second isolation boundary rather than
+// the only one.
+func (r *pgvectorIndex) withTeamTx(ctx context.Context, fn func(*pgvectorsqlc.Queries, pgtype.UUID) error) error {
+	if r == nil || r.store == nil {
+		return nil
+	}
+	teamUUID, err := r.teamUUID(ctx)
+	if err != nil {
+		return err
+	}
+	tx, err := r.store.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("pgvector semantic index: begin team transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "SELECT set_config('memoh.team_id', $1, true)", teamUUID.String()); err != nil {
+		return fmt.Errorf("pgvector semantic index: bind team: %w", err)
+	}
+	if err := fn(r.store.Queries().WithTx(tx), teamUUID); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("pgvector semantic index: commit team transaction: %w", err)
+	}
+	return nil
+}
+
 func (r *pgvectorIndex) embedText(ctx context.Context, text string) ([]float32, error) {
 	if err := r.ensureEmbeddingEnabled(ctx); err != nil {
 		return nil, err
@@ -127,7 +176,7 @@ func (r *pgvectorIndex) embedText(ctx context.Context, text string) ([]float32, 
 }
 
 func (r *pgvectorIndex) Upsert(ctx context.Context, botID, nodeID, body, hash string) error {
-	if r == nil || r.queries == nil || strings.TrimSpace(body) == "" {
+	if r == nil || r.store == nil || strings.TrimSpace(body) == "" {
 		return nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -142,13 +191,16 @@ func (r *pgvectorIndex) Upsert(ctx context.Context, botID, nodeID, body, hash st
 	if err != nil {
 		return err
 	}
-	err = r.queries.UpsertMemoryNodeEmbedding(ctx, pgvectorsqlc.UpsertMemoryNodeEmbeddingParams{
-		BotID:      botUUID,
-		NodeID:     strings.TrimSpace(nodeID),
-		ModelID:    r.model.uuid,
-		Dimensions: dimensions,
-		BodyHash:   strings.TrimSpace(hash),
-		Embedding:  pgvector.NewVector(vec),
+	err = r.withTeamTx(ctx, func(teamQueries *pgvectorsqlc.Queries, teamUUID pgtype.UUID) error {
+		return teamQueries.UpsertMemoryNodeEmbedding(ctx, pgvectorsqlc.UpsertMemoryNodeEmbeddingParams{
+			TeamID:     teamUUID,
+			BotID:      botUUID,
+			NodeID:     strings.TrimSpace(nodeID),
+			ModelID:    r.model.uuid,
+			Dimensions: dimensions,
+			BodyHash:   strings.TrimSpace(hash),
+			Embedding:  pgvector.NewVector(vec),
+		})
 	})
 	if err != nil {
 		return fmt.Errorf("pgvector semantic index: upsert: %w", err)
@@ -157,7 +209,7 @@ func (r *pgvectorIndex) Upsert(ctx context.Context, botID, nodeID, body, hash st
 }
 
 func (r *pgvectorIndex) SearchSeeds(ctx context.Context, botID, query string, limit int) (map[string]float64, error) {
-	if r == nil || r.queries == nil || strings.TrimSpace(query) == "" || limit <= 0 {
+	if r == nil || r.store == nil || strings.TrimSpace(query) == "" || limit <= 0 {
 		return nil, nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -172,23 +224,30 @@ func (r *pgvectorIndex) SearchSeeds(ctx context.Context, botID, query string, li
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.queries.SearchMemoryNodeEmbeddings(ctx, pgvectorsqlc.SearchMemoryNodeEmbeddingsParams{
-		Embedding: pgvector.NewVector(vec),
-		BotID:     botUUID,
-		ModelID:   r.model.uuid,
-		RowLimit:  rowLimit,
+	seeds := map[string]float64{}
+	err = r.withTeamTx(ctx, func(teamQueries *pgvectorsqlc.Queries, teamUUID pgtype.UUID) error {
+		rows, queryErr := teamQueries.SearchMemoryNodeEmbeddings(ctx, pgvectorsqlc.SearchMemoryNodeEmbeddingsParams{
+			Embedding: pgvector.NewVector(vec),
+			TeamID:    teamUUID,
+			BotID:     botUUID,
+			ModelID:   r.model.uuid,
+			RowLimit:  rowLimit,
+		})
+		if queryErr != nil {
+			return queryErr
+		}
+		for _, row := range rows {
+			nodeID := strings.TrimSpace(row.NodeID)
+			if nodeID != "" {
+				seeds[nodeID] = row.Score
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("pgvector semantic index: search: %w", err)
 	}
 
-	seeds := map[string]float64{}
-	for _, row := range rows {
-		nodeID := strings.TrimSpace(row.NodeID)
-		if nodeID != "" {
-			seeds[nodeID] = row.Score
-		}
-	}
 	return seeds, nil
 }
 
@@ -200,7 +259,7 @@ func checkedPgvectorInt32(name string, n int) (int32, error) {
 }
 
 func (r *pgvectorIndex) DeleteNodes(ctx context.Context, botID string, nodeIDs []string) error {
-	if r == nil || r.queries == nil || len(nodeIDs) == 0 {
+	if r == nil || r.store == nil || len(nodeIDs) == 0 {
 		return nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -217,9 +276,12 @@ func (r *pgvectorIndex) DeleteNodes(ctx context.Context, botID string, nodeIDs [
 	if len(ids) == 0 {
 		return nil
 	}
-	err = r.queries.DeleteMemoryNodeEmbeddings(ctx, pgvectorsqlc.DeleteMemoryNodeEmbeddingsParams{
-		BotID:   botUUID,
-		NodeIds: ids,
+	err = r.withTeamTx(ctx, func(teamQueries *pgvectorsqlc.Queries, teamUUID pgtype.UUID) error {
+		return teamQueries.DeleteMemoryNodeEmbeddings(ctx, pgvectorsqlc.DeleteMemoryNodeEmbeddingsParams{
+			TeamID:  teamUUID,
+			BotID:   botUUID,
+			NodeIds: ids,
+		})
 	})
 	if err != nil {
 		return fmt.Errorf("pgvector semantic index: delete nodes: %w", err)
@@ -228,14 +290,19 @@ func (r *pgvectorIndex) DeleteNodes(ctx context.Context, botID string, nodeIDs [
 }
 
 func (r *pgvectorIndex) DeleteBot(ctx context.Context, botID string) error {
-	if r == nil || r.queries == nil {
+	if r == nil || r.store == nil {
 		return nil
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
 		return err
 	}
-	err = r.queries.DeleteBotMemoryNodeEmbeddings(ctx, botUUID)
+	err = r.withTeamTx(ctx, func(teamQueries *pgvectorsqlc.Queries, teamUUID pgtype.UUID) error {
+		return teamQueries.DeleteBotMemoryNodeEmbeddings(ctx, pgvectorsqlc.DeleteBotMemoryNodeEmbeddingsParams{
+			TeamID: teamUUID,
+			BotID:  botUUID,
+		})
+	})
 	if err != nil {
 		return fmt.Errorf("pgvector semantic index: delete bot: %w", err)
 	}
@@ -243,16 +310,22 @@ func (r *pgvectorIndex) DeleteBot(ctx context.Context, botID string) error {
 }
 
 func (r *pgvectorIndex) Count(ctx context.Context, botID string) (int, error) {
-	if r == nil || r.queries == nil {
+	if r == nil || r.store == nil {
 		return 0, nil
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
 		return 0, err
 	}
-	count, err := r.queries.CountMemoryNodeEmbeddings(ctx, pgvectorsqlc.CountMemoryNodeEmbeddingsParams{
-		BotID:   botUUID,
-		ModelID: r.model.uuid,
+	var count int64
+	err = r.withTeamTx(ctx, func(teamQueries *pgvectorsqlc.Queries, teamUUID pgtype.UUID) error {
+		var queryErr error
+		count, queryErr = teamQueries.CountMemoryNodeEmbeddings(ctx, pgvectorsqlc.CountMemoryNodeEmbeddingsParams{
+			TeamID:  teamUUID,
+			BotID:   botUUID,
+			ModelID: r.model.uuid,
+		})
+		return queryErr
 	})
 	if err != nil {
 		return 0, fmt.Errorf("pgvector semantic index: count: %w", err)
@@ -264,13 +337,16 @@ func (r *pgvectorIndex) Count(ctx context.Context, botID string) (int, error) {
 }
 
 func (r *pgvectorIndex) Health(ctx context.Context) error {
-	if r == nil || r.queries == nil {
+	if r == nil || r.store == nil {
 		return nil
 	}
 	if err := r.ensureEmbeddingEnabled(ctx); err != nil {
 		return err
 	}
-	if _, err := r.queries.MemoryNodeEmbeddingsExist(ctx); err != nil {
+	if err := r.withTeamTx(ctx, func(teamQueries *pgvectorsqlc.Queries, teamUUID pgtype.UUID) error {
+		_, queryErr := teamQueries.MemoryNodeEmbeddingsExist(ctx, teamUUID)
+		return queryErr
+	}); err != nil {
 		return fmt.Errorf("pgvector semantic index: health: %w", err)
 	}
 	return nil

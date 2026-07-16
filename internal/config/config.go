@@ -343,24 +343,22 @@ func WorkspaceImagePullCandidates(ref string) []string {
 }
 
 type PostgresConfig struct {
-	Host        string `toml:"host"`
-	Port        int    `toml:"port"`
-	User        string `toml:"user"`
-	Password    string `toml:"password" json:"-"`
-	Database    string `toml:"database"`
-	SSLMode     string `toml:"sslmode"`
-	RuntimeRole string `toml:"runtime_role"`
+	Host     string `toml:"host"`
+	Port     int    `toml:"port"`
+	User     string `toml:"user"`
+	Password string `toml:"password" json:"-"`
+	Database string `toml:"database"`
+	SSLMode  string `toml:"sslmode"`
 }
 
 type PGVectorConfig struct {
-	Enabled     bool   `toml:"enabled"`
-	Host        string `toml:"host"`
-	Port        int    `toml:"port"`
-	User        string `toml:"user"`
-	Password    string `toml:"password" json:"-"`
-	Database    string `toml:"database"`
-	SSLMode     string `toml:"sslmode"`
-	RuntimeRole string `toml:"runtime_role"`
+	Enabled  bool   `toml:"enabled"`
+	Host     string `toml:"host"`
+	Port     int    `toml:"port"`
+	User     string `toml:"user"`
+	Password string `toml:"password" json:"-"`
+	Database string `toml:"database"`
+	SSLMode  string `toml:"sslmode"`
 }
 
 func (c PGVectorConfig) PostgresConfig() PostgresConfig {
@@ -385,13 +383,12 @@ func (c PGVectorConfig) PostgresConfig() PostgresConfig {
 		sslMode = DefaultPGVectorSSLMode
 	}
 	return PostgresConfig{
-		Host:        host,
-		Port:        port,
-		User:        user,
-		Password:    c.Password,
-		Database:    database,
-		SSLMode:     sslMode,
-		RuntimeRole: strings.TrimSpace(c.RuntimeRole),
+		Host:     host,
+		Port:     port,
+		User:     user,
+		Password: c.Password,
+		Database: database,
+		SSLMode:  sslMode,
 	}
 }
 

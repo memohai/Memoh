@@ -69,7 +69,7 @@ type namespaceScope struct {
 
 const (
 	sharedMemoryNamespace    = "bot"
-	defaultBuiltinProviderID = "__builtin_default__"
+	defaultBuiltinProviderID = memprovider.DefaultBuiltinProviderID
 )
 
 // NewMemoryHandler creates a MemoryHandler.
@@ -103,7 +103,7 @@ func (h *MemoryHandler) resolveProvider(ctx context.Context, botID string) (memp
 		if err == nil {
 			providerID := strings.TrimSpace(botSettings.MemoryProviderID)
 			if providerID != "" {
-				p, getErr := h.memoryRegistry.Get(providerID)
+				p, getErr := h.memoryRegistry.Get(ctx, providerID)
 				if getErr == nil {
 					return p, nil
 				}
@@ -112,7 +112,7 @@ func (h *MemoryHandler) resolveProvider(ctx context.Context, botID string) (memp
 			}
 		}
 	}
-	p, err := h.memoryRegistry.Get(defaultBuiltinProviderID)
+	p, err := h.memoryRegistry.Get(ctx, defaultBuiltinProviderID)
 	if err != nil {
 		return nil, nil
 	}

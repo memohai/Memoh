@@ -228,23 +228,6 @@ BEGIN
 END
 $$;
 
--- The official Compose deployment creates this NOLOGIN role during database
--- initialization. Migrations continue to run as the database owner, while the
--- server uses SET ROLE so superuser/BYPASSRLS cannot bypass forced RLS. External
--- deployments may omit the role and provide their own non-superuser login.
-DO $memoh_app_grants$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'memoh_app') THEN
-        EXECUTE 'GRANT USAGE ON SCHEMA public TO memoh_app';
-        EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO memoh_app';
-        EXECUTE 'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO memoh_app';
-        EXECUTE 'GRANT EXECUTE ON FUNCTION public.memoh_current_team_id() TO memoh_app';
-        EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO memoh_app';
-        EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO memoh_app';
-    END IF;
-END
-$memoh_app_grants$;
-
 -- ---------------------------------------------------------------------------
 -- Team-scoped keys and foreign keys
 -- ---------------------------------------------------------------------------

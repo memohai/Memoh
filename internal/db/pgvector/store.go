@@ -2,9 +2,11 @@ package pgvector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	pgxvec "github.com/pgvector/pgvector-go/pgx"
 
@@ -44,6 +46,13 @@ func (s *Store) Queries() *pgvectorsqlc.Queries {
 		return nil
 	}
 	return s.queries
+}
+
+func (s *Store) Begin(ctx context.Context) (pgx.Tx, error) {
+	if s == nil || s.pool == nil {
+		return nil, errors.New("pgvector: store is not open")
+	}
+	return s.pool.Begin(ctx)
 }
 
 func (s *Store) Close() {

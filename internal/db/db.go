@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -30,21 +29,8 @@ func OpenPostgres(ctx context.Context, cfg config.PostgresConfig) (*pgxpool.Pool
 	// scope themselves with public.memoh_current_team_id(), which fail-closed raises if
 	// memoh.team_id is unset. Upstream is single-team, so we set the default
 	// team at the session level here.
-	poolCfg.AfterConnect = SetDefaultTeamAndRoleOnConnect(cfg.RuntimeRole)
+	poolCfg.AfterConnect = SetDefaultTeamOnConnect
 	return pgxpool.NewWithConfig(ctx, poolCfg)
-}
-
-// SetDefaultTeamAndRoleOnConnect switches application sessions to the
-// configured non-superuser role before binding the singleton team.
-func SetDefaultTeamAndRoleOnConnect(runtimeRole string) func(context.Context, *pgx.Conn) error {
-	return func(ctx context.Context, conn *pgx.Conn) error {
-		if role := strings.TrimSpace(runtimeRole); role != "" {
-			if _, err := conn.Exec(ctx, "SET ROLE "+pgx.Identifier{role}.Sanitize()); err != nil {
-				return fmt.Errorf("set postgres runtime role %q: %w", role, err)
-			}
-		}
-		return SetDefaultTeamOnConnect(ctx, conn)
-	}
 }
 
 // SetDefaultTeamOnConnect is a pgxpool AfterConnect hook that binds the

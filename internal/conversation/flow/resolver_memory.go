@@ -34,7 +34,7 @@ func (r *Resolver) resolveMemoryProviderWithID(ctx context.Context, botID string
 	if providerID == "" {
 		return "", nil
 	}
-	p, err := r.memoryRegistry.Get(providerID)
+	p, err := r.memoryRegistry.Get(ctx, providerID)
 	if err != nil {
 		r.logger.Warn("memory provider lookup failed", slog.String("provider_id", providerID), slog.Any("error", err))
 		return "", nil
