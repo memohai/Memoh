@@ -6,63 +6,69 @@
     id="settings-section-interaction"
     :title="$t('bots.settings.blocks.interaction')"
   >
-    <SettingsRow :label="$t('bots.settings.chatModel')">
+    <SettingsRow
+      :label="$t('bots.settings.defaultAgent')"
+      :description="defaultAgentDescription"
+    >
+      <Select
+        :model-value="defaultAgentValue"
+        @update:model-value="(value) => setDefaultAgent(String(value))"
+      >
+        <SelectTrigger class="w-56">
+          <SelectValue>
+            <div class="flex min-w-0 items-center gap-2">
+              <img
+                v-if="defaultAgentValue === MEMOH_AGENT_VALUE"
+                src="/logo.svg"
+                alt=""
+                class="size-4 shrink-0"
+              >
+              <component
+                :is="acpAgentIcon(selectedACPProfile.id, true)"
+                v-else-if="selectedACPProfile"
+              />
+              <span class="truncate">{{ selectedAgentLabel }}</span>
+            </div>
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem :value="MEMOH_AGENT_VALUE">
+            <div class="flex min-w-0 items-center gap-2">
+              <img
+                src="/logo.svg"
+                alt=""
+                class="size-4 shrink-0"
+              >
+              <span class="truncate">{{ $t('chat.agentMemoh') }}</span>
+            </div>
+          </SelectItem>
+          <SelectItem
+            v-for="profile in selectableACPProfiles"
+            :key="profile.id"
+            :value="agentOptionValue(profile.id)"
+          >
+            <div class="flex min-w-0 items-center gap-2">
+              <component :is="acpAgentIcon(profile.id, true)" />
+              <span class="truncate">{{ profile.display_name || profile.id }}</span>
+            </div>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    </SettingsRow>
+
+    <SettingsRow
+      :label="$t('bots.settings.chatModel')"
+      :description="$t('bots.settings.chatModelDescription')"
+    >
       <div class="w-56">
         <ModelSelect
           v-model="form.chat_model_id"
           :models="models"
           :providers="providers"
           model-type="chat"
-          :placeholder="$t('bots.settings.chatModel')"
+          :placeholder="$t('bots.settings.chatModelPlaceholder')"
         />
       </div>
-    </SettingsRow>
-
-    <SettingsRow
-      :label="$t('bots.settings.externalAgentRuntime')"
-      :description="externalAgentRuntimeDescription"
-    >
-      <Switch
-        :model-value="externalAgentEnabled"
-        :disabled="!externalAgentEnabled && (!form.chat_model_id || selectableACPProfiles.length === 0)"
-        @update:model-value="(val) => setExternalAgentRuntime(!!val)"
-      />
-    </SettingsRow>
-
-    <SettingsRow
-      v-if="externalAgentEnabled"
-      :label="$t('bots.settings.externalAgent')"
-      :description="externalAgentDescription"
-    >
-      <Select
-        :model-value="normalizedDefaultAgentID"
-        :disabled="selectableACPProfiles.length === 0"
-        @update:model-value="(value) => setDefaultACPAgent(String(value))"
-      >
-        <SelectTrigger class="w-56">
-          <SelectValue :placeholder="$t('bots.settings.externalAgentPlaceholder')">
-            <div
-              v-if="selectedACPProfile"
-              class="flex min-w-0 items-center gap-2"
-            >
-              <component :is="acpAgentIcon(selectedACPProfile.id, true)" />
-              <span class="truncate text-xs">{{ selectedACPProfile.display_name || selectedACPProfile.id }}</span>
-            </div>
-          </SelectValue>
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem
-            v-for="profile in selectableACPProfiles"
-            :key="profile.id"
-            :value="normalizeACPAgentID(profile.id)"
-          >
-            <div class="flex min-w-0 items-center gap-2">
-              <component :is="acpAgentIcon(profile.id, true)" />
-              <span class="truncate text-xs">{{ profile.display_name || profile.id }}</span>
-            </div>
-          </SelectItem>
-        </SelectContent>
-      </Select>
     </SettingsRow>
 
     <SettingsRow
@@ -140,6 +146,9 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
+const MEMOH_AGENT_VALUE = 'memoh'
+const ACP_AGENT_VALUE_PREFIX = 'acp:'
+
 const selectableACPProfiles = computed(() =>
   props.acpProfiles.filter((profile) => {
     if (!isACPAgentEnabled(props.botMetadata, profile.id)) return false
@@ -153,22 +162,28 @@ const normalizedDefaultAgentID = computed(() => normalizeACPAgentID(props.form.c
 const selectedACPProfile = computed(() =>
   selectableACPProfiles.value.find(profile => normalizeACPAgentID(profile.id) === normalizedDefaultAgentID.value),
 )
+const defaultAgentValue = computed(() =>
+  externalAgentEnabled.value
+    ? agentOptionValue(normalizedDefaultAgentID.value)
+    : MEMOH_AGENT_VALUE,
+)
 const selectedACPUnavailable = computed(() =>
-  externalAgentEnabled.value && !!normalizedDefaultAgentID.value && !selectedACPProfile.value,
+  externalAgentEnabled.value && !selectedACPProfile.value,
 )
-const externalAgentDescription = computed(() =>
+const defaultAgentDescription = computed(() =>
   selectedACPUnavailable.value
-    ? t('bots.settings.externalAgentUnavailableSaved')
-    : t('bots.settings.externalAgentDescription'),
+    ? t('bots.settings.defaultAgentUnavailableDescription')
+    : t('bots.settings.defaultAgentDescription'),
 )
-const externalAgentRuntimeDescription = computed(() => {
-  if (!props.form.chat_model_id) {
-    return t('bots.settings.externalAgentChatModelRequired')
-  }
-  return selectableACPProfiles.value.length > 0
-    ? t('bots.settings.externalAgentRuntimeDescription')
-    : t('bots.settings.externalAgentRuntimeUnavailable')
+const selectedAgentLabel = computed(() => {
+  if (!externalAgentEnabled.value) return t('chat.agentMemoh')
+  if (selectedACPProfile.value) return selectedACPProfile.value.display_name || selectedACPProfile.value.id
+  return t('bots.settings.defaultAgentUnavailable')
 })
+
+function agentOptionValue(agentID: unknown): string {
+  return `${ACP_AGENT_VALUE_PREFIX}${normalizeACPAgentID(agentID)}`
+}
 
 function ensureDefaultACPProject() {
   // eslint-disable-next-line vue/no-mutating-props
@@ -183,26 +198,28 @@ function setDefaultACPAgent(agentID: string) {
   ensureDefaultACPProject()
 }
 
-function setExternalAgentRuntime(enabled: boolean) {
-  if (!enabled) {
+function setDefaultAgent(value: string) {
+  if (value === MEMOH_AGENT_VALUE) {
     // eslint-disable-next-line vue/no-mutating-props
     props.form.chat_runtime = 'model'
     return
   }
-  const first = selectableACPProfiles.value[0]
-  if (!first) return
+
+  if (!value.startsWith(ACP_AGENT_VALUE_PREFIX)) return
+  const agentID = normalizeACPAgentID(value.slice(ACP_AGENT_VALUE_PREFIX.length))
+  if (!agentID) return
+  const profile = selectableACPProfiles.value.find(item => normalizeACPAgentID(item.id) === agentID)
+  if (!profile) return
+
+  setDefaultACPAgent(agentID)
   // eslint-disable-next-line vue/no-mutating-props
   props.form.chat_runtime = 'acp_agent'
-  if (!selectedACPProfile.value) {
-    setDefaultACPAgent(first.id)
-  } else {
-    ensureDefaultACPProject()
-  }
 }
 
 watch(selectableACPProfiles, (profiles) => {
   if (!externalAgentEnabled.value || profiles.length === 0 || normalizedDefaultAgentID.value || selectedACPProfile.value) return
-  setDefaultACPAgent(profiles[0]!.id)
+  const firstAgentID = normalizeACPAgentID(profiles[0]?.id)
+  if (firstAgentID) setDefaultACPAgent(firstAgentID)
 }, { immediate: true })
 
 const chatModelConfig = computed(() => {

@@ -522,10 +522,7 @@
                   @input="syncMultiline"
                 />
 
-                <DropdownMenu
-                  v-if="composerMenuHasItems"
-                  v-model:open="agentPopoverOpen"
-                >
+                <DropdownMenu v-model:open="agentPopoverOpen">
                   <DropdownMenuTrigger as-child>
                     <Button
                       type="button"
@@ -640,16 +637,14 @@
                         />
                       </DropdownMenuItem>
                     </template>
-                    <template v-if="!activeIsACP">
-                      <DropdownMenuSeparator v-if="(canChangeAgent && enabledACPProfiles.length) || showComputersMenu" />
-                      <DropdownMenuItem
-                        :disabled="!currentBotId || activeChatReadOnly || streaming || loadingMessages"
-                        @select="fileInput?.click()"
-                      >
-                        <Paperclip />
-                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.attachFiles') }}</span>
-                      </DropdownMenuItem>
-                    </template>
+                    <DropdownMenuSeparator v-if="(canChangeAgent && enabledACPProfiles.length) || showComputersMenu" />
+                    <DropdownMenuItem
+                      :disabled="!currentBotId || activeChatReadOnly || streaming || loadingMessages"
+                      @select="fileInput?.click()"
+                    >
+                      <Paperclip />
+                      <span class="min-w-0 flex-1 truncate">{{ $t('chat.attachFiles') }}</span>
+                    </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
 
@@ -687,112 +682,24 @@
                       side="top"
                       :side-offset="4"
                     >
-                      <div
-                        v-if="activeIsPendingACP"
-                        class="max-h-80 overflow-y-auto p-1"
+                      <InlineLoadingRow
+                        v-if="composerModelsLoading"
+                        class="px-2 py-3"
                       >
-                        <button
-                          type="button"
-                          class="flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
-                          @click="onPendingACPDefaultModelSelected"
-                        >
-                          <span class="min-w-0 flex-1 truncate">{{ $t('chat.modelDefault') }}</span>
-                          <Check
-                            v-if="!pendingACPModelId"
-                            class="mt-0.5 size-3 shrink-0 text-muted-foreground"
-                          />
-                        </button>
-                        <InlineLoadingRow
-                          v-if="acpModelsLoading"
-                          class="px-2 py-3"
-                        >
-                          {{ $t('common.loading') }}
-                        </InlineLoadingRow>
-                        <div
-                          v-else-if="!pendingACPModelOptions.length"
-                          class="px-2 py-3 text-xs text-muted-foreground"
-                        >
-                          {{ $t('chat.noModels') }}
-                        </div>
-                        <template v-else>
-                          <button
-                            v-for="model in pendingACPModelOptions"
-                            :key="model.id || model.name"
-                            type="button"
-                            class="flex min-h-8 w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
-                            @click="onACPModelSelected(model)"
-                          >
-                            <span class="min-w-0 flex-1">
-                              <span class="block truncate">
-                                {{ model.name || model.id }}
-                              </span>
-                              <span
-                                v-if="model.description"
-                                class="mt-0.5 block line-clamp-2 text-[11px] leading-snug text-muted-foreground"
-                              >
-                                {{ model.description }}
-                              </span>
-                            </span>
-                            <Check
-                              v-if="model.id === pendingACPModelId"
-                              class="mt-0.5 size-3 shrink-0 text-muted-foreground"
-                            />
-                          </button>
-                        </template>
-                      </div>
-                      <div
-                        v-else-if="activeIsACP"
-                        class="max-h-80 overflow-y-auto p-1"
-                      >
-                        <InlineLoadingRow
-                          v-if="acpModelsLoading"
-                          class="px-2 py-3"
-                        >
-                          {{ $t('common.loading') }}
-                        </InlineLoadingRow>
-                        <div
-                          v-else-if="!acpModels.length"
-                          class="px-2 py-3 text-xs text-muted-foreground"
-                        >
-                          {{ $t('chat.noModels') }}
-                        </div>
-                        <button
-                          v-for="model in acpModels"
-                          v-else
-                          :key="model.id || model.name"
-                          type="button"
-                          class="flex min-h-8 w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
-                          @click="onACPModelSelected(model)"
-                        >
-                          <span class="min-w-0 flex-1">
-                            <span class="block truncate">
-                              {{ model.name || model.id }}
-                            </span>
-                            <span
-                              v-if="model.description"
-                              class="mt-0.5 block line-clamp-2 text-[11px] leading-snug text-muted-foreground"
-                            >
-                              {{ model.description }}
-                            </span>
-                          </span>
-                          <Check
-                            v-if="model.id === currentACPModelId"
-                            class="mt-0.5 size-3 shrink-0 text-muted-foreground"
-                          />
-                        </button>
-                      </div>
-                      <div v-else>
-                        <ChatModelPicker
-                          v-model="overrideModelId"
-                          v-model:reasoning-effort="overrideReasoningEffort"
-                          :models="models"
-                          :providers="providers"
-                          model-type="chat"
-                          :open="modelPopoverOpen"
-                          @update:model-value="onModelSelected"
-                          @close="modelPopoverOpen = false"
-                        />
-                      </div>
+                        {{ $t('common.loading') }}
+                      </InlineLoadingRow>
+                      <ChatModelPicker
+                        v-else
+                        :model-value="composerModelValue"
+                        :reasoning-effort="composerReasoningEffort"
+                        :models="composerModels"
+                        :providers="composerModelProviders"
+                        model-type="chat"
+                        :open="modelPopoverOpen"
+                        @update:model-value="onComposerModelValueSelected"
+                        @update:reasoning-effort="onComposerReasoningEffortSelected"
+                        @close="modelPopoverOpen = false"
+                      />
                     </PopoverContent>
                   </Popover>
 
@@ -1242,6 +1149,7 @@ const forkSourceDividerAfterIndex = computed<number | null>(() => {
 })
 const activeIsPendingACP = computed(() => activeChatTarget.value.isPendingACP)
 const activeIsACP = computed(() => activeChatTarget.value.isACP)
+const activeUsesACPComposer = computed(() => activeIsPendingACP.value || activeIsACP.value)
 const showComputersMenu = computed(() => (
   !activeIsACP.value
   && !activeIsPendingACP.value
@@ -1392,15 +1300,6 @@ function showForkSourceDividerBefore(index: number): boolean {
     && index === 0
 }
 
-// The composer's "+" menu is worth showing only when it can do something:
-// switch the agent (empty session with ACP profiles) or attach files (Memoh
-// mode). An in-progress ACP chat has neither, so the trigger is hidden rather
-// than opening an empty sheet.
-const composerMenuHasItems = computed(() =>
-  (canChangeAgent.value && enabledACPProfiles.value.length > 0)
-  || showComputersMenu.value
-  || !activeIsACP.value,
-)
 const activeSessionId = computed(() => paneTarget.value.sessionId ?? activeSession.value?.id ?? '')
 const requestedSkills = ref<RequestedSkillSelection[]>([])
 const skillSlashEnabled = computed(() => !activeIsACP.value && !activeIsPendingACP.value)
@@ -1684,6 +1583,59 @@ const pendingACPModelOptions = computed<AcpclientModelInfo[]>(() => {
   return activeIsPendingACP.value ? pendingACPRuntimeStatus.value?.models?.available_models ?? [] : []
 })
 
+const activeACPModelPickerValue = computed(() =>
+  activeIsPendingACP.value ? pendingACPModelId.value : currentACPModelId.value,
+)
+
+const acpModelPickerModels = computed<ModelsGetResponse[]>(() => {
+  const source = activeIsPendingACP.value ? pendingACPModelOptions.value : acpModels.value
+  const adapted: ModelsGetResponse[] = []
+  if (activeIsPendingACP.value) {
+    adapted.push({
+      id: '',
+      model_id: '',
+      name: t('chat.modelDefault'),
+      provider_id: '',
+      type: 'chat',
+      config: {},
+    })
+  }
+  for (const model of source) {
+    const value = model.id?.trim() ?? ''
+    if (!value) continue
+    adapted.push({
+      id: value,
+      model_id: value,
+      name: model.name?.trim() || value,
+      provider_id: '',
+      type: 'chat',
+      config: {
+        description: model.description?.trim() || undefined,
+      },
+    })
+  }
+  return adapted
+})
+
+// Normalize runtime-specific model metadata into the one contract consumed by
+// Memoh's existing picker. The template stays runtime-agnostic; only this
+// adapter knows whether the values came from a native model or an ACP session.
+const composerModels = computed(() =>
+  activeUsesACPComposer.value ? acpModelPickerModels.value : models.value,
+)
+const composerModelProviders = computed(() =>
+  activeUsesACPComposer.value ? [] : providers.value,
+)
+const composerModelValue = computed(() =>
+  activeUsesACPComposer.value ? activeACPModelPickerValue.value : overrideModelId.value,
+)
+const composerReasoningEffort = computed(() =>
+  activeUsesACPComposer.value ? REASONING_EFFORT_DISABLE : overrideReasoningEffort.value,
+)
+const composerModelsLoading = computed(() =>
+  activeUsesACPComposer.value && acpModelsLoading.value,
+)
+
 const activeModel = computed(() => {
   const id = overrideModelId.value || botSettings.value?.chat_model_id || ''
   return models.value.find((m) => m.id === id)
@@ -1828,13 +1780,6 @@ watch(currentBotId, () => {
   overrideReasoningEffort.value = ''
 })
 
-watch(activeIsACP, (isACP) => {
-  if (isACP) {
-    pendingFiles.value = []
-    requestedSkills.value = []
-  }
-})
-
 function pendingMatchesDefaultACP(input: ACPAgentSessionInput): boolean {
   const metadata = activeChatTarget.value.metadata
   return activeChatTarget.value.kind === 'draft-acp'
@@ -1937,7 +1882,6 @@ async function selectACPAgent(profile: AcpprofilePublicProfile) {
       }, {}, paneTarget.value)
       await withAgentSwitchTimeout(chatStore.ensurePendingACPRuntime(paneTarget.value))
     }
-    pendingFiles.value = []
   } catch (error) {
     composerError.value = agentSwitchErrorMessage(error)
   } finally {
@@ -1976,9 +1920,23 @@ function onModelSelected() {
   }
 }
 
-async function onACPModelSelected(model: AcpclientModelInfo) {
-  const modelId = (model.id ?? '').trim()
-  if (!modelId || acpModelChanging.value) return
+async function onComposerModelValueSelected(value: string) {
+  if (activeUsesACPComposer.value) {
+    await onACPModelValueSelected(value)
+    return
+  }
+  overrideModelId.value = value
+  onModelSelected()
+}
+
+function onComposerReasoningEffortSelected(value: string) {
+  if (activeUsesACPComposer.value) return
+  overrideReasoningEffort.value = value
+}
+
+async function onACPModelValueSelected(value: string) {
+  const modelId = value.trim()
+  if (acpModelChanging.value) return
   modelPopoverOpen.value = false
   if (activeIsPendingACP.value) {
     acpModelChanging.value = true
@@ -1992,25 +1950,11 @@ async function onACPModelSelected(model: AcpclientModelInfo) {
     }
     return
   }
+  if (!modelId) return
   acpModelChanging.value = true
   composerError.value = ''
   try {
     await setActiveACPModel(modelId)
-  } catch (error) {
-    composerError.value = resolveApiErrorMessage(error, t('chat.modelSwitchFailed'))
-  } finally {
-    acpModelChanging.value = false
-  }
-}
-
-async function onPendingACPDefaultModelSelected() {
-  if (acpModelChanging.value) return
-  modelPopoverOpen.value = false
-  acpModelChanging.value = true
-  composerError.value = ''
-  try {
-    // May reset the warm runtime back to the agent default model.
-    await chatStore.setPendingACPModel('', paneTarget.value)
   } catch (error) {
     composerError.value = resolveApiErrorMessage(error, t('chat.modelSwitchFailed'))
   } finally {
@@ -2369,11 +2313,6 @@ async function handleSend() {
     composerError.value = defaultACPComposerError.value
     return
   }
-  if (activeIsACP.value && files.length) {
-    composerError.value = t('chat.acpAttachmentsUnsupported')
-    return
-  }
-
   const sentDraftKey = inputDraftKey.value
   const sentContext = captureChatPaneSendContext(
     paneTarget.value,

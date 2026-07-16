@@ -124,8 +124,8 @@ func TestValidateChatRuntimeSettings(t *testing.T) {
 
 	noModel := valid
 	noModel.ChatModelID = ""
-	if err := validateChatRuntimeSettings(metadata, noModel); err == nil {
-		t.Fatal("validateChatRuntimeSettings without chat model error = nil, want error")
+	if err := validateChatRuntimeSettings(metadata, noModel); err != nil {
+		t.Fatalf("validateChatRuntimeSettings without chat model error = %v, want nil", err)
 	}
 
 	disabled := valid

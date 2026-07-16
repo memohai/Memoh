@@ -1,6 +1,6 @@
 <template>
   <TooltipProvider v-if="normalizedDescription">
-    <Tooltip>
+    <Tooltip v-model:open="open">
       <TooltipTrigger as-child>
         <slot />
       </TooltipTrigger>
@@ -20,5 +20,6 @@ const props = defineProps<{
   description?: string | null
 }>()
 
+const open = defineModel<boolean>('open', { default: false })
 const normalizedDescription = computed(() => props.description?.trim() || '')
 </script>

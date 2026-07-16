@@ -431,21 +431,25 @@ func (c *Client) ReadRaw(ctx context.Context, path string) (io.ReadCloser, error
 
 // WriteRaw writes raw bytes to a file in the container.
 func (c *Client) WriteRaw(ctx context.Context, path string, r io.Reader) (int64, error) {
-	stream, err := c.svc.WriteRaw(ctx)
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	stream, err := c.svc.WriteRaw(streamCtx)
 	if err != nil {
 		return 0, mapError(err)
 	}
+	// Always send the path first, even for an empty reader. Besides making empty
+	// files representable, this lets the server create its temporary file before
+	// any payload chunks arrive.
+	if err := stream.Send(&pb.WriteRawChunk{Path: path}); err != nil {
+		return 0, err
+	}
 
 	buf := make([]byte, 64*1024)
-	first := true
 	for {
 		n, readErr := r.Read(buf)
 		if n > 0 {
 			chunk := &pb.WriteRawChunk{Data: buf[:n]}
-			if first {
-				chunk.Path = path
-				first = false
-			}
 			if sendErr := stream.Send(chunk); sendErr != nil {
 				return 0, sendErr
 			}

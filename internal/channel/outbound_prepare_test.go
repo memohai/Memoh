@@ -563,7 +563,7 @@ func TestPrepareOutboundMessage_ContainerPathHitStorageKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	accessPath := store.AccessPath(asset)
+	accessPath := store.AccessPath(context.Background(), asset)
 
 	prepared, err := PrepareOutboundMessage(context.Background(), store, ChannelConfig{
 		BotID:       "bot-1",
@@ -760,7 +760,7 @@ func (noContainerIngesterStore) Ingest(_ context.Context, _ media.IngestInput) (
 func (noContainerIngesterStore) GetByStorageKey(_ context.Context, _, _ string) (media.Asset, error) {
 	return media.Asset{}, media.ErrAssetNotFound
 }
-func (noContainerIngesterStore) AccessPath(_ media.Asset) string { return "" }
+func (noContainerIngesterStore) AccessPath(_ context.Context, _ media.Asset) string { return "" }
 
 func TestPrepareContainerAttachment_StoreWithoutIngesterFails(t *testing.T) {
 	t.Parallel()

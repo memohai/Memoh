@@ -65,7 +65,11 @@
                 class="group/row relative flex items-center gap-1 rounded-md px-1 transition-colors duration-75"
                 :class="modelValue === vRow.row.option.value ? 'bg-[var(--overlay-hover)]' : 'hover:bg-[var(--overlay-hover-light)]'"
               >
-                <ModelDescriptionTooltip :description="vRow.row.option.description">
+                <ModelDescriptionTooltip
+                  :description="vRow.row.option.description"
+                  :open="openDescriptionTooltipKey === vRow.row.key"
+                  @update:open="setDescriptionTooltipOpen(vRow.row.key, $event)"
+                >
                   <button
                     type="button"
                     class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-control"
@@ -182,6 +186,7 @@ const reasoningEffort = defineModel<string>('reasoningEffort', { default: '' })
 const searchTerm = ref('')
 const scrollHost = ref<HTMLElement | null>(null)
 const reasoningOpen = ref(false)
+const openDescriptionTooltipKey = ref<string | null>(null)
 // Sort order is captured when the picker opens. Changing models inside the same
 // open menu must not make the list jump under the pointer.
 const pinnedSortValue = ref('')
@@ -319,11 +324,19 @@ const measureRow = (el: unknown) => {
 }
 
 function handleListScroll() {
-  if (!reasoningOpen.value) return
   reasoningOpen.value = false
+  openDescriptionTooltipKey.value = null
 }
 
 useEventListener(scrollViewport, 'scroll', handleListScroll, { passive: true })
+
+function setDescriptionTooltipOpen(key: string, open: boolean) {
+  if (open) {
+    openDescriptionTooltipKey.value = key
+  } else if (openDescriptionTooltipKey.value === key) {
+    openDescriptionTooltipKey.value = null
+  }
+}
 
 const activeModel = computed(() =>
   options.value.find((o) => o.value === modelValue.value),
@@ -375,16 +388,19 @@ watch(() => props.open, (v) => {
   if (v) {
     searchTerm.value = ''
     pinnedSortValue.value = modelValue.value
+    openDescriptionTooltipKey.value = null
     nextTick(() => {
       virtualizer.value.scrollToOffset(0)
     })
   } else {
     reasoningOpen.value = false
+    openDescriptionTooltipKey.value = null
   }
 }, { immediate: true })
 
 watch(searchTerm, () => {
   reasoningOpen.value = false
+  openDescriptionTooltipKey.value = null
   nextTick(() => {
     virtualizer.value.scrollToOffset(0)
   })

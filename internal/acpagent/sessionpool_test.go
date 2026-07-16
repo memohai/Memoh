@@ -184,6 +184,113 @@ func TestSessionPoolPromptForceFreshRuntimeReplacesBoundRuntime(t *testing.T) {
 	}
 }
 
+func TestSessionPoolPromptSupportsImageOnly(t *testing.T) {
+	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_IMAGE", "1")
+	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_EXPECT_IMAGE", "1")
+	pool := newFakeScriptPool(t)
+
+	result, err := pool.Prompt(context.Background(), PromptInput{
+		BotID:                 "bot-1",
+		SessionID:             "session-1",
+		AgentID:               acpprofile.AgentCodexID,
+		ProjectPath:           "/data/project",
+		Images:                []acpclient.PromptImage{{Data: "aW1hZ2U=", MimeType: "image/png"}},
+		RuntimeOwnerAccountID: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	if !strings.Contains(result.Text, "session-pool-ok") {
+		t.Fatalf("result text = %q, want fake agent response", result.Text)
+	}
+}
+
+func TestSessionPoolPromptKeepsRuntimeWhenImageCapabilityUnsupported(t *testing.T) {
+	pool := newFakeScriptPool(t)
+
+	_, err := pool.Prompt(context.Background(), PromptInput{
+		BotID:                 "bot-1",
+		SessionID:             "session-1",
+		AgentID:               acpprofile.AgentCodexID,
+		ProjectPath:           "/data/project",
+		Prompt:                "inspect",
+		Images:                []acpclient.PromptImage{{Data: "aW1hZ2U=", MimeType: "image/png"}},
+		RuntimeOwnerAccountID: "user-1",
+	})
+	if !errors.Is(err, acpclient.ErrImagePromptUnsupported) {
+		t.Fatalf("Prompt() error = %v, want ErrImagePromptUnsupported", err)
+	}
+	if handle := pool.sessionHandle("session-1"); handle == nil || handle.session == nil {
+		t.Fatal("unsupported image prompt tore down a healthy runtime")
+	}
+}
+
+func TestSessionPoolPromptFallsBackToAttachmentReferenceWhenImageUnsupported(t *testing.T) {
+	pool := newFakeScriptPool(t)
+
+	result, err := pool.Prompt(context.Background(), PromptInput{
+		BotID:                    "bot-1",
+		SessionID:                "session-1",
+		AgentID:                  acpprofile.AgentCodexID,
+		ProjectPath:              "/data/project",
+		Prompt:                   "inspect the image",
+		Images:                   []acpclient.PromptImage{{Data: "aW1hZ2U=", MimeType: "image/png"}},
+		AttachmentReferences:     []string{"/data/media/aa/image.png"},
+		CanFallbackImagesToFiles: true,
+		ContextURI:               "memoh://context/current-turn",
+		ContextMarkdown:          "Attachment path: /data/media/aa/image.png",
+		RuntimeOwnerAccountID:    "user-1",
+	})
+	if err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	if !strings.Contains(result.Text, "session-pool-ok") {
+		t.Fatalf("result text = %q, want fake agent response", result.Text)
+	}
+}
+
+func TestSessionPoolPromptSupportsAttachmentOnly(t *testing.T) {
+	pool := newFakeScriptPool(t)
+
+	result, err := pool.Prompt(context.Background(), PromptInput{
+		BotID:                 "bot-1",
+		SessionID:             "session-1",
+		AgentID:               acpprofile.AgentCodexID,
+		ProjectPath:           "/data/project",
+		AttachmentReferences:  []string{"/data/media/aa/pasted-text.txt"},
+		ContextURI:            "memoh://context/current-turn",
+		ContextMarkdown:       "Attachment path: /data/media/aa/pasted-text.txt",
+		RuntimeOwnerAccountID: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	if !strings.Contains(result.Text, "session-pool-ok") {
+		t.Fatalf("result text = %q, want fake agent response", result.Text)
+	}
+}
+
+func TestSessionPoolRejectsInvalidImageBeforeStartingRuntime(t *testing.T) {
+	runner := &recordingRunner{
+		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
+		startErr: errors.New("runtime should not start"),
+	}
+	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-test"})})
+
+	_, err := pool.Prompt(context.Background(), PromptInput{
+		BotID:     "bot-1",
+		SessionID: "session-1",
+		AgentID:   acpprofile.AgentCodexID,
+		Images:    []acpclient.PromptImage{{Data: "not-valid***", MimeType: "image/png"}},
+	})
+	if !errors.Is(err, acpclient.ErrInvalidPromptImage) {
+		t.Fatalf("Prompt() error = %v, want ErrInvalidPromptImage", err)
+	}
+	if runner.req.AgentID != "" {
+		t.Fatalf("runtime was started for invalid input: %#v", runner.req)
+	}
+}
+
 func TestSessionPoolEnsureStartsRuntimeAndReportsModels(t *testing.T) {
 	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_MODELS", "1")
 	pool := newFakeScriptPool(t)
@@ -2134,9 +2241,13 @@ func (*sessionPoolFakeAgent) Authenticate(context.Context, acp.AuthenticateReque
 }
 
 func (*sessionPoolFakeAgent) Initialize(context.Context, acp.InitializeRequest) (acp.InitializeResponse, error) {
+	capabilities := acp.AgentCapabilities{LoadSession: false}
+	if os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_IMAGE") == "1" {
+		capabilities.PromptCapabilities.Image = true
+	}
 	return acp.InitializeResponse{
 		ProtocolVersion:   acp.ProtocolVersionNumber,
-		AgentCapabilities: acp.AgentCapabilities{LoadSession: false},
+		AgentCapabilities: capabilities,
 	}, nil
 }
 
@@ -2185,6 +2296,15 @@ func (a *sessionPoolFakeAgent) Prompt(ctx context.Context, p acp.PromptRequest) 
 			_ = os.WriteFile(path, []byte("cancelled"), 0o600) //nolint:gosec // test helper writes to env-provided temp path.
 		}
 		return acp.PromptResponse{}, ctx.Err()
+	}
+	if os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_EXPECT_IMAGE") == "1" {
+		if len(p.Prompt) != 1 || p.Prompt[0].Image == nil {
+			return acp.PromptResponse{}, fmt.Errorf("prompt blocks = %#v, want one image", p.Prompt)
+		}
+		image := p.Prompt[0].Image
+		if image.Data != "aW1hZ2U=" || image.MimeType != "image/png" {
+			return acp.PromptResponse{}, fmt.Errorf("image block = %#v, want inline PNG", image)
+		}
 	}
 	_ = a.conn.SessionUpdate(ctx, acp.SessionNotification{
 		SessionId: p.SessionId,

@@ -2663,7 +2663,7 @@ func (p *ChannelInboundProcessor) ingestInboundAttachments(
 		item = channel.AttachmentFromBundle(channel.BundleFromAttachment(item).WithAssetAccess(
 			botID,
 			asset,
-			p.mediaService.AccessPath(asset),
+			p.mediaService.AccessPath(ctx, asset),
 		))
 		result = append(result, item)
 	}

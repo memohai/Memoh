@@ -59,6 +59,9 @@
       "displayArgsInvalid": "The external agent display arguments are invalid.",
       "runtimeStartFailed": "External agent runtime failed to start.",
       "runtimeBusy": "External agent runtime is already processing a turn for this session.",
+      "attachmentInvalid": "The attachment is invalid. Please attach it again.",
+      "attachmentUnavailable": "The attachment could not be made available to the external agent. Please attach it again.",
+      "imageInputUnsupported": "This external agent cannot read the attached image.",
       "invalidChatRuntime": "The selected chat runtime is invalid."
     }
   },

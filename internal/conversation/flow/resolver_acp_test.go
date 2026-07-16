@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -76,6 +77,17 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 			BotID:     "bot-1",
 			SessionID: "session-1",
 			Query:     "inspect the app",
+			Attachments: []conversation.ChatAttachment{{
+				Type:   "image",
+				Base64: "data:image/png;base64,aW1hZ2U=",
+				Mime:   "image/png",
+				Name:   "screenshot.png",
+			}},
+			ReplyAttachments: []conversation.ChatAttachment{{
+				Type: "file",
+				Name: "previous.log",
+				URL:  "https://example.com/previous.log",
+			}},
 		},
 		eventCh,
 		make(chan struct{}),
@@ -91,6 +103,15 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 	}
 	if pool.input.ContextURI != acpContextURI || !strings.Contains(pool.input.ContextMarkdown, "## Current Runtime") || !strings.Contains(pool.input.ContextMarkdown, "Bot ID: bot-1") {
 		t.Fatalf("ACP context = uri %q markdown %q, want dynamic Memoh context", pool.input.ContextURI, pool.input.ContextMarkdown)
+	}
+	if len(pool.input.Images) != 1 || pool.input.Images[0].Data != "aW1hZ2U=" || pool.input.Images[0].MimeType != "image/png" {
+		t.Fatalf("ACP prompt images = %#v, want inline PNG", pool.input.Images)
+	}
+	if len(pool.input.AttachmentReferences) != 1 || pool.input.AttachmentReferences[0] != "https://example.com/previous.log" {
+		t.Fatalf("ACP attachment references = %#v, want reply attachment URL", pool.input.AttachmentReferences)
+	}
+	if !strings.Contains(pool.input.ContextMarkdown, "previous.log") || !strings.Contains(pool.input.ContextMarkdown, "https://example.com/previous.log") {
+		t.Fatalf("ACP context = %q, want reply attachment", pool.input.ContextMarkdown)
 	}
 	if len(messages.persisted) != 2 {
 		t.Fatalf("persisted %d messages, want user + assistant", len(messages.persisted))
@@ -190,6 +211,16 @@ func TestStreamChatWSRejectsConcurrentACPPromptForSameSession(t *testing.T) {
 	resolver := &Resolver{
 		messageService: &recordingMessageService{},
 		acpPool:        pool,
+		assetLoader: &fakeGatewayAssetLoader{
+			openFn: func(context.Context, string, string) (io.ReadCloser, string, error) {
+				t.Fatal("busy turn must not open attachment data")
+				return nil, "", nil
+			},
+			accessPathFn: func(context.Context, string, string) (string, error) {
+				t.Fatal("busy turn must not resolve attachment paths")
+				return "", nil
+			},
+		},
 		botPermissions: allowWorkspaceExecFor("user-1"),
 		sessionService: &fakeBackgroundSessionService{
 			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
@@ -221,7 +252,15 @@ func TestStreamChatWSRejectsConcurrentACPPromptForSameSession(t *testing.T) {
 
 	err := resolver.StreamChatWS(
 		context.Background(),
-		conversation.ChatRequest{BotID: "bot-1", SessionID: "session-1", Query: "second"},
+		conversation.ChatRequest{
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Query:     "second",
+			Attachments: []conversation.ChatAttachment{{
+				Type:        "image",
+				ContentHash: "busy-image",
+			}},
+		},
 		make(chan WSStreamEvent, 8),
 		make(chan struct{}),
 	)
@@ -881,7 +920,7 @@ func TestStreamACPAgentWSRequestsAutoTitle(t *testing.T) {
 	}
 
 	if pool.input.SupportsImageInput {
-		t.Fatalf("ACP prompt input SupportsImageInput = true, want false until ACP image transport is wired")
+		t.Fatalf("ACP prompt input SupportsImageInput = true, want false for read-media tool result decoration")
 	}
 	waitForSessionGets(t, sessionGets, 2)
 }
@@ -1265,6 +1304,56 @@ func TestStreamACPAgentWSFeedbackErrorSkipsPersistence(t *testing.T) {
 	events := drainAgentEvents(t, eventCh)
 	if !containsStreamEvent(events, agentpkg.EventStart) || containsStreamEvent(events, agentpkg.EventAbort) {
 		t.Fatalf("events = %#v, want only startup event before feedback return", events)
+	}
+}
+
+func TestStreamACPAgentWSImageCapabilityErrorUsesStructuredFeedback(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		acpPool:        &recordingACPPrompter{err: acpclient.ErrImagePromptUnsupported},
+		botPermissions: allowWorkspaceExecFor("user-1"),
+		sessionService: &fakeBackgroundSessionService{
+			getFn: func(_ context.Context, sessionID string) (session.Session, error) {
+				return session.Session{
+					ID:    sessionID,
+					BotID: "bot-1",
+					Type:  session.TypeACPAgent,
+					Metadata: map[string]any{
+						"acp_agent_id":             "codex",
+						"project_path":             "/data/app",
+						"runtime_owner_account_id": "user-1",
+					},
+				}, nil
+			},
+		},
+		logger: slog.New(slog.DiscardHandler),
+	}
+
+	err := resolver.streamACPAgentWS(
+		context.Background(),
+		conversation.ChatRequest{
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Query:     "inspect",
+			Attachments: []conversation.ChatAttachment{{
+				Type:   "image",
+				Name:   "screen.png",
+				Mime:   "image/png",
+				Base64: "data:image/png;base64,aW1hZ2U=",
+			}},
+		},
+		make(chan WSStreamEvent, 8),
+		make(chan struct{}),
+	)
+	var feedback *acpfeedback.Error
+	if !errors.As(err, &feedback) || feedback.Code != acpfeedback.CodeImageInputUnsupported || feedback.I18nKey != "chat.acp.imageInputUnsupported" {
+		t.Fatalf("streamACPAgentWS() error = %#v, want image capability feedback", err)
+	}
+	if len(messages.persisted) != 1 || messages.persisted[0].Role != "user" {
+		t.Fatalf("persisted messages = %#v, want only the user turn", messages.persisted)
 	}
 }
 

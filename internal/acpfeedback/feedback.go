@@ -23,6 +23,9 @@ const (
 	CodeDisplayArgsInvalid    = "acp_display_args_invalid"
 	CodeRuntimeStartFailed    = "acp_runtime_start_failed"
 	CodeRuntimeBusy           = "acp_runtime_busy"
+	CodeAttachmentInvalid     = "acp_attachment_invalid"
+	CodeAttachmentUnavailable = "acp_attachment_unavailable"
+	CodeImageInputUnsupported = "acp_image_input_unsupported"
 	CodeInvalidChatRuntime    = "invalid_chat_runtime"
 )
 

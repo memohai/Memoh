@@ -2,8 +2,10 @@ package acpclient
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -69,22 +71,32 @@ type PromptResource struct {
 	Text     string
 }
 
+// PromptImage is an inline image sent as an ACP image content block. Data is
+// raw base64 without the data URL prefix; MimeType must be an image MIME type.
+type PromptImage struct {
+	Data     string
+	MimeType string
+}
+
 type PromptOptions struct {
-	ToolOutputLimit ToolOutputLimit
+	ToolOutputLimit   ToolOutputLimit
+	Images            []PromptImage
+	AllowResourceOnly bool
 }
 
 type Session struct {
-	logger          *slog.Logger
-	proc            *bridgeProcess
-	callbacks       *clientCallbacks
-	conn            *clientConnection
-	sessionID       acp.SessionId
-	projectPath     string
-	modelState      ModelState
-	embeddedContext bool
-	defaultSink     EventSink
-	cancel          context.CancelFunc
-	reverseHTTPStop func()
+	logger               *slog.Logger
+	proc                 *bridgeProcess
+	callbacks            *clientCallbacks
+	conn                 *clientConnection
+	sessionID            acp.SessionId
+	projectPath          string
+	modelState           ModelState
+	embeddedContext      bool
+	imagePromptSupported bool
+	defaultSink          EventSink
+	cancel               context.CancelFunc
+	reverseHTTPStop      func()
 
 	promptMu     sync.Mutex
 	mu           sync.Mutex
@@ -313,17 +325,18 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 
 	finishStartup()
 	return &Session{
-		logger:          r.logger,
-		proc:            proc,
-		callbacks:       callbacks,
-		conn:            conn,
-		sessionID:       sess.SessionId,
-		projectPath:     projectPath,
-		modelState:      modelStateFromACP(sess.Models),
-		embeddedContext: initResp.AgentCapabilities.PromptCapabilities.EmbeddedContext,
-		defaultSink:     sink,
-		cancel:          cancel,
-		reverseHTTPStop: toolHTTPStop,
+		logger:               r.logger,
+		proc:                 proc,
+		callbacks:            callbacks,
+		conn:                 conn,
+		sessionID:            sess.SessionId,
+		projectPath:          projectPath,
+		modelState:           modelStateFromACP(sess.Models),
+		embeddedContext:      initResp.AgentCapabilities.PromptCapabilities.EmbeddedContext,
+		imagePromptSupported: initResp.AgentCapabilities.PromptCapabilities.Image,
+		defaultSink:          sink,
+		cancel:               cancel,
+		reverseHTTPStop:      toolHTTPStop,
 	}, nil
 }
 
@@ -633,8 +646,15 @@ func (s *Session) PromptWithToolContextOptions(ctx context.Context, prompt strin
 		return PromptResult{}, ErrSessionNotInitialized
 	}
 	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
+	images, err := NormalizePromptImages(options.Images)
+	if err != nil {
+		return PromptResult{}, err
+	}
+	if prompt == "" && len(images) == 0 && (!options.AllowResourceOnly || len(cleanPromptResources(resources)) == 0) {
 		return PromptResult{}, ErrPromptRequired
+	}
+	if len(images) > 0 && !s.imagePromptSupported {
+		return PromptResult{}, ErrImagePromptUnsupported
 	}
 
 	s.promptMu.Lock()
@@ -674,7 +694,7 @@ func (s *Session) PromptWithToolContextOptions(ctx context.Context, prompt strin
 		return PromptResult{}, ErrSessionNotInitialized
 	}
 
-	promptBlocks := s.promptBlocks(prompt, resources)
+	promptBlocks := s.promptBlocks(prompt, resources, images)
 	collector := newEventCollector(options.ToolOutputLimit)
 	sink := defaultSink
 	if len(sinks) > 0 {
@@ -747,13 +767,18 @@ func attachUsageToLastAssistant(output []sdk.Message, usage *sdk.Usage) []sdk.Me
 	return output
 }
 
-func (s *Session) promptBlocks(prompt string, resources []PromptResource) []acp.ContentBlock {
+func (s *Session) promptBlocks(prompt string, resources []PromptResource, images []PromptImage) []acp.ContentBlock {
 	cleaned := cleanPromptResources(resources)
-	if len(cleaned) == 0 {
-		return []acp.ContentBlock{acp.TextBlock(prompt)}
-	}
-	if s != nil && s.embeddedContext {
-		blocks := []acp.ContentBlock{acp.TextBlock(prompt)}
+	blocks := make([]acp.ContentBlock, 0, 1+len(cleaned)+len(images))
+	switch {
+	case len(cleaned) == 0:
+		if prompt != "" {
+			blocks = append(blocks, acp.TextBlock(prompt))
+		}
+	case s != nil && s.embeddedContext:
+		if prompt != "" {
+			blocks = append(blocks, acp.TextBlock(prompt))
+		}
 		for _, resource := range cleaned {
 			mimeType := resource.MimeType
 			blocks = append(blocks, acp.ResourceBlock(acp.EmbeddedResourceResource{
@@ -764,19 +789,53 @@ func (s *Session) promptBlocks(prompt string, resources []PromptResource) []acp.
 				},
 			}))
 		}
-		return blocks
+	default:
+		var sb strings.Builder
+		for _, resource := range cleaned {
+			sb.WriteString("<context ref=\"")
+			sb.WriteString(resource.URI)
+			sb.WriteString("\">\n")
+			sb.WriteString(resource.Text)
+			sb.WriteString("\n</context>\n\n")
+		}
+		sb.WriteString(prompt)
+		if text := strings.TrimSpace(sb.String()); text != "" {
+			blocks = append(blocks, acp.TextBlock(text))
+		}
 	}
+	for _, image := range images {
+		blocks = append(blocks, acp.ImageBlock(image.Data, image.MimeType))
+	}
+	return blocks
+}
 
-	var sb strings.Builder
-	for _, resource := range cleaned {
-		sb.WriteString("<context ref=\"")
-		sb.WriteString(resource.URI)
-		sb.WriteString("\">\n")
-		sb.WriteString(resource.Text)
-		sb.WriteString("\n</context>\n\n")
+const maxPromptImageBytes int64 = 20 * 1024 * 1024
+
+// NormalizePromptImages validates and normalizes images before a runtime is
+// started. Session prompt dispatch calls it again as a defense-in-depth check.
+func NormalizePromptImages(images []PromptImage) ([]PromptImage, error) {
+	out := make([]PromptImage, 0, len(images))
+	for i, image := range images {
+		data := strings.TrimSpace(image.Data)
+		mimeType := strings.ToLower(strings.TrimSpace(image.MimeType))
+		if idx := strings.Index(mimeType, ";"); idx >= 0 {
+			mimeType = strings.TrimSpace(mimeType[:idx])
+		}
+		if data == "" || !strings.HasPrefix(mimeType, "image/") || !validPromptImageBase64(data) {
+			return nil, fmt.Errorf("%w at index %d", ErrInvalidPromptImage, i)
+		}
+		out = append(out, PromptImage{
+			Data:     data,
+			MimeType: mimeType,
+		})
 	}
-	sb.WriteString(prompt)
-	return []acp.ContentBlock{acp.TextBlock(strings.TrimSpace(sb.String()))}
+	return out, nil
+}
+
+func validPromptImageBase64(data string) bool {
+	decoder := base64.NewDecoder(base64.StdEncoding.Strict(), strings.NewReader(data))
+	n, err := io.Copy(io.Discard, io.LimitReader(decoder, maxPromptImageBytes+1))
+	return err == nil && n <= maxPromptImageBytes
 }
 
 func cleanPromptResources(resources []PromptResource) []PromptResource {

@@ -48,7 +48,7 @@ func (*testAssetResolver) Ingest(_ context.Context, _ media.IngestInput) (media.
 	return media.Asset{}, context.Canceled
 }
 
-func (*testAssetResolver) AccessPath(asset media.Asset) string {
+func (*testAssetResolver) AccessPath(_ context.Context, asset media.Asset) string {
 	return "https://example.com/media/" + asset.ContentHash
 }
 

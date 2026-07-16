@@ -5,13 +5,18 @@ package fallback
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/memohai/memoh/internal/storage"
 )
 
-var _ storage.ContainerFileOpener = (*Provider)(nil)
+var (
+	_ storage.ContainerFileOpener = (*Provider)(nil)
+	_ storage.AccessPathEnsurer   = (*Provider)(nil)
+)
 
 // Provider delegates to primary and falls back to secondary on write errors.
 type Provider struct {
@@ -46,15 +51,89 @@ func (p *Provider) Open(ctx context.Context, key string) (io.ReadCloser, error) 
 }
 
 func (p *Provider) Delete(ctx context.Context, key string) error {
-	err := p.primary.Delete(ctx, key)
-	if err == nil {
-		return nil
+	var errs []error
+	if p != nil && p.primary != nil {
+		if err := p.primary.Delete(ctx, key); err != nil {
+			errs = append(errs, fmt.Errorf("delete primary: %w", err))
+		}
 	}
-	return p.secondary.Delete(ctx, key)
+	if p != nil && p.secondary != nil {
+		if err := p.secondary.Delete(ctx, key); err != nil {
+			errs = append(errs, fmt.Errorf("delete secondary: %w", err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
-func (p *Provider) AccessPath(key string) string {
-	return p.primary.AccessPath(key)
+// AccessPath returns only a path backed by primary storage. Objects that exist
+// solely in secondary spill storage are promoted first; a secondary provider's
+// path is never exposed because it may live in a different filesystem namespace
+// from the workspace consumer.
+func (p *Provider) AccessPath(ctx context.Context, key string) string {
+	accessPath, _ := p.EnsureAccessPath(ctx, key)
+	return accessPath
+}
+
+// EnsureAccessPath promotes secondary-only bytes into primary storage and then
+// returns the primary provider's consumer-visible path.
+func (p *Provider) EnsureAccessPath(ctx context.Context, key string) (string, error) {
+	if p == nil || p.primary == nil {
+		return "", storage.ErrAccessPathUnavailable
+	}
+	primaryPath, primaryPresent, primaryErr := providerAccessPath(ctx, p.primary, key)
+	if primaryPresent {
+		if primaryPath == "" {
+			return "", fmt.Errorf("primary object is not addressable: %w", storage.ErrAccessPathUnavailable)
+		}
+		return primaryPath, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if p.secondary == nil {
+		return "", errors.Join(primaryErr, storage.ErrAccessPathUnavailable)
+	}
+
+	source, err := p.secondary.Open(ctx, key)
+	if err != nil {
+		return "", errors.Join(primaryErr, fmt.Errorf("open secondary: %w", err), storage.ErrAccessPathUnavailable)
+	}
+	if source == nil {
+		return "", errors.Join(primaryErr, errors.New("secondary returned a nil reader"), storage.ErrAccessPathUnavailable)
+	}
+	defer func() { _ = source.Close() }()
+
+	if err := p.primary.Put(ctx, key, source); err != nil {
+		// A concurrent promotion (or a lost success response) may have committed
+		// the canonical object even though this Put reported an error.
+		if accessPath, present, _ := providerAccessPath(ctx, p.primary, key); present && accessPath != "" {
+			_ = p.secondary.Delete(ctx, key)
+			return accessPath, nil
+		}
+		return "", errors.Join(primaryErr, fmt.Errorf("promote secondary object to primary: %w", err), storage.ErrAccessPathUnavailable)
+	}
+	primaryPath = strings.TrimSpace(p.primary.AccessPath(ctx, key))
+	if primaryPath == "" {
+		return "", fmt.Errorf("promoted primary object is not addressable: %w", storage.ErrAccessPathUnavailable)
+	}
+	// The primary copy is now canonical. A failed spill cleanup must not make a
+	// successfully materialized object unavailable; Delete retries both stores.
+	_ = p.secondary.Delete(ctx, key)
+	return primaryPath, nil
+}
+
+func providerAccessPath(ctx context.Context, provider storage.Provider, key string) (string, bool, error) {
+	if provider == nil {
+		return "", false, errors.New("provider is nil")
+	}
+	rc, err := provider.Open(ctx, key)
+	if err != nil {
+		return "", false, err
+	}
+	if rc != nil {
+		_ = rc.Close()
+	}
+	return strings.TrimSpace(provider.AccessPath(ctx, key)), true, nil
 }
 
 // ListPrefix delegates to both providers and deduplicates.

@@ -59,6 +59,9 @@
       "displayArgsInvalid": "外部 Agent 的显示参数无效。",
       "runtimeStartFailed": "外部 Agent 运行时启动失败。",
       "runtimeBusy": "外部 Agent 正在处理该会话的上一轮请求。",
+      "attachmentInvalid": "附件无效，请重新添加。",
+      "attachmentUnavailable": "无法让外部 Agent 访问该附件，请重新添加。",
+      "imageInputUnsupported": "这个外部 Agent 无法读取所附图片。",
       "invalidChatRuntime": "选择的对话运行时无效。"
     }
   },

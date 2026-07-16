@@ -5,17 +5,27 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
 	"testing"
 
+	"github.com/memohai/memoh/internal/acpfeedback"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/models"
 )
 
 type fakeGatewayAssetLoader struct {
-	openFn func(ctx context.Context, botID, contentHash string) (io.ReadCloser, string, error)
+	openFn       func(ctx context.Context, botID, contentHash string) (io.ReadCloser, string, error)
+	accessPathFn func(ctx context.Context, botID, contentHash string) (string, error)
+}
+
+func (f *fakeGatewayAssetLoader) AccessPathForGateway(ctx context.Context, botID, contentHash string) (string, error) {
+	if f == nil || f.accessPathFn == nil {
+		return "", io.EOF
+	}
+	return f.accessPathFn(ctx, botID, contentHash)
 }
 
 func (f *fakeGatewayAssetLoader) OpenForGateway(ctx context.Context, botID, contentHash string) (io.ReadCloser, string, error) {
@@ -59,6 +69,40 @@ func TestPrepareGatewayAttachments_InlineAssetToBase64(t *testing.T) {
 	}
 	if prepared[0].Mime != "image/png" {
 		t.Fatalf("expected mime image/png, got %q", prepared[0].Mime)
+	}
+}
+
+func TestPrepareACPImages_InlineStoredAsset(t *testing.T) {
+	t.Parallel()
+
+	resolver := &Resolver{
+		logger: slog.Default(),
+		assetLoader: &fakeGatewayAssetLoader{
+			openFn: func(_ context.Context, botID, contentHash string) (io.ReadCloser, string, error) {
+				if botID != "bot-1" || contentHash != "asset-1" {
+					t.Fatalf("unexpected asset lookup: bot=%q hash=%q", botID, contentHash)
+				}
+				return io.NopCloser(strings.NewReader("image-binary")), "image/png", nil
+			},
+		},
+	}
+	prepared, err := resolver.prepareACPAttachments(context.Background(), conversation.ChatRequest{
+		BotID: "bot-1",
+		Attachments: []conversation.ChatAttachment{{
+			Type:        "image",
+			ContentHash: "asset-1",
+			Name:        "screenshot.png",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("prepareACPAttachments() error = %v", err)
+	}
+	images := prepared.Images
+	if len(images) != 1 {
+		t.Fatalf("prepareACPAttachments().Images = %#v, want one image", images)
+	}
+	if images[0].Data != base64.StdEncoding.EncodeToString([]byte("image-binary")) || images[0].MimeType != "image/png" {
+		t.Fatalf("prepared image = %#v, want inline PNG", images[0])
 	}
 }
 
@@ -168,6 +212,195 @@ func TestPrepareGatewayAttachments_IncludesReplyAttachments(t *testing.T) {
 	}
 	if prepared[0].Payload != "https://example.com/current.png" || prepared[1].Payload != "https://example.com/reply.png" {
 		t.Fatalf("unexpected prepared attachments: %#v", prepared)
+	}
+}
+
+func TestPrepareGatewayAttachments_ResolvesStoredFileAccessPath(t *testing.T) {
+	t.Parallel()
+
+	resolver := &Resolver{
+		logger: slog.Default(),
+		assetLoader: &fakeGatewayAssetLoader{
+			accessPathFn: func(_ context.Context, botID, contentHash string) (string, error) {
+				if botID != "bot-1" || contentHash != "asset-pdf" {
+					t.Fatalf("unexpected asset lookup: bot=%q hash=%q", botID, contentHash)
+				}
+				return "/data/media/aa/asset.pdf", nil
+			},
+		},
+	}
+	req := conversation.ChatRequest{
+		BotID: "bot-1",
+		Attachments: []conversation.ChatAttachment{{
+			Type:        "file",
+			Mime:        "application/pdf",
+			ContentHash: "asset-pdf",
+		}},
+	}
+
+	prepared := resolver.prepareGatewayAttachments(context.Background(), req)
+	if len(prepared) != 1 || prepared[0].FallbackPath != "/data/media/aa/asset.pdf" {
+		t.Fatalf("prepared attachments = %#v, want reachable PDF path", prepared)
+	}
+	merged := resolver.routeAndMergeAttachments(context.Background(), models.GetResponse{}, req)
+	if len(merged) != 1 {
+		t.Fatalf("routeAndMergeAttachments() length = %d, want 1", len(merged))
+	}
+	item, ok := merged[0].(gatewayAttachment)
+	if !ok || item.Transport != gatewayTransportToolFileRef || item.Payload != "/data/media/aa/asset.pdf" {
+		t.Fatalf("merged attachment = %#v, want tool file reference", merged[0])
+	}
+}
+
+func TestPrepareACPAttachments_UsesFileAndReplyReferences(t *testing.T) {
+	t.Parallel()
+
+	resolver := &Resolver{
+		logger: slog.Default(),
+		assetLoader: &fakeGatewayAssetLoader{
+			accessPathFn: func(_ context.Context, _, contentHash string) (string, error) {
+				if contentHash != "asset-pdf" {
+					t.Fatalf("unexpected content hash: %s", contentHash)
+				}
+				return "/data/media/aa/asset.pdf", nil
+			},
+		},
+	}
+	prepared, err := resolver.prepareACPAttachments(context.Background(), conversation.ChatRequest{
+		BotID: "bot-1",
+		Attachments: []conversation.ChatAttachment{{
+			Type:        "file",
+			Name:        "spec.pdf",
+			Mime:        "application/pdf",
+			ContentHash: "asset-pdf",
+		}},
+		ReplyAttachments: []conversation.ChatAttachment{{
+			Type: "image",
+			Name: "old.png",
+			URL:  "https://example.com/old.png",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("prepareACPAttachments() error = %v", err)
+	}
+	if len(prepared.Images) != 0 || len(prepared.Context) != 2 || len(prepared.References) != 2 {
+		t.Fatalf("prepared attachments = %#v, want two file references", prepared)
+	}
+	if prepared.Context[0].Path != "/data/media/aa/asset.pdf" || prepared.Context[1].URL != "https://example.com/old.png" {
+		t.Fatalf("context attachments = %#v, want PDF path and reply URL", prepared.Context)
+	}
+}
+
+func TestPrepareACPAttachments_PreservesLongPasteFile(t *testing.T) {
+	t.Parallel()
+
+	resolver := &Resolver{
+		logger: slog.Default(),
+		assetLoader: &fakeGatewayAssetLoader{
+			accessPathFn: func(_ context.Context, _, contentHash string) (string, error) {
+				if contentHash != "pasted-text-hash" {
+					t.Fatalf("unexpected content hash: %s", contentHash)
+				}
+				return "/data/media/aa/pasted-text.txt", nil
+			},
+		},
+	}
+	prepared, err := resolver.prepareACPAttachments(context.Background(), conversation.ChatRequest{
+		BotID: "bot-1",
+		Attachments: []conversation.ChatAttachment{{
+			Type:        "file",
+			Name:        "pasted-text.txt",
+			Mime:        "text/plain",
+			ContentHash: "pasted-text-hash",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("prepareACPAttachments() error = %v", err)
+	}
+	if len(prepared.References) != 1 || prepared.Context[0].Path != "/data/media/aa/pasted-text.txt" {
+		t.Fatalf("prepared attachments = %#v, want pasted text path", prepared)
+	}
+}
+
+func TestPrepareACPAttachments_FallsBackWhenStoredImageCannotInline(t *testing.T) {
+	t.Parallel()
+
+	resolver := &Resolver{
+		logger: slog.Default(),
+		assetLoader: &fakeGatewayAssetLoader{
+			openFn: func(context.Context, string, string) (io.ReadCloser, string, error) {
+				return nil, "", errors.New("asset too large")
+			},
+			accessPathFn: func(context.Context, string, string) (string, error) {
+				return "/data/media/aa/large.png", nil
+			},
+		},
+	}
+	prepared, err := resolver.prepareACPAttachments(context.Background(), conversation.ChatRequest{
+		BotID: "bot-1",
+		Attachments: []conversation.ChatAttachment{{
+			Type:        "image",
+			Name:        "large.png",
+			ContentHash: "asset-image",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("prepareACPAttachments() error = %v", err)
+	}
+	if len(prepared.Images) != 0 || len(prepared.References) != 1 || prepared.Context[0].Path != "/data/media/aa/large.png" {
+		t.Fatalf("prepared attachments = %#v, want image file fallback", prepared)
+	}
+}
+
+func TestPrepareACPAttachments_RejectsInvalidOrUnreachableData(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		resolver *Resolver
+		input    conversation.ChatAttachment
+		wantCode string
+	}{
+		{
+			name:     "invalid image base64",
+			resolver: &Resolver{logger: slog.Default()},
+			input: conversation.ChatAttachment{
+				Type:   "image",
+				Name:   "broken.png",
+				Base64: "data:image/png;base64,not-valid***",
+			},
+			wantCode: acpfeedback.CodeAttachmentInvalid,
+		},
+		{
+			name: "stored file without reachable path",
+			resolver: &Resolver{
+				logger: slog.Default(),
+				assetLoader: &fakeGatewayAssetLoader{
+					accessPathFn: func(context.Context, string, string) (string, error) {
+						return "", errors.New("missing")
+					},
+				},
+			},
+			input: conversation.ChatAttachment{
+				Type:        "file",
+				Name:        "missing.pdf",
+				ContentHash: "missing",
+			},
+			wantCode: acpfeedback.CodeAttachmentUnavailable,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := tt.resolver.prepareACPAttachments(context.Background(), conversation.ChatRequest{
+				BotID:       "bot-1",
+				Attachments: []conversation.ChatAttachment{tt.input},
+			})
+			var feedback *acpfeedback.Error
+			if !errors.As(err, &feedback) || feedback.Code != tt.wantCode || feedback.HTTPStatus != 400 {
+				t.Fatalf("error = %#v, want feedback code %q with status 400", err, tt.wantCode)
+			}
+		})
 	}
 }
 

@@ -1,6 +1,26 @@
 package containerfs
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"path/filepath"
+	"testing"
+
+	"github.com/memohai/memoh/internal/workspace/bridge"
+)
+
+type accessPathWorkspaceProvider struct {
+	info bridge.WorkspaceInfo
+	err  error
+}
+
+func (*accessPathWorkspaceProvider) MCPClient(context.Context, string) (*bridge.Client, error) {
+	return nil, errors.New("not used")
+}
+
+func (p *accessPathWorkspaceProvider) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
+	return p.info, p.err
+}
 
 func TestParseRoutingKey(t *testing.T) {
 	t.Parallel()
@@ -38,10 +58,35 @@ func TestProvider_AccessPath(t *testing.T) {
 		{key: "bot-1/file/xx/doc.pdf", want: "/data/media/file/xx/doc.pdf"},
 	}
 	for _, tt := range tests {
-		got := p.AccessPath(tt.key)
+		got := p.AccessPath(context.Background(), tt.key)
 		if got != tt.want {
 			t.Errorf("AccessPath(%q) = %q, want %q", tt.key, got, tt.want)
 		}
+	}
+}
+
+func TestProvider_AccessPathUsesHostPathForLocalWorkspace(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	p := &Provider{clients: &accessPathWorkspaceProvider{info: bridge.WorkspaceInfo{
+		Backend:        bridge.WorkspaceBackendLocal,
+		DefaultWorkDir: root,
+	}}}
+
+	got := p.AccessPath(context.Background(), "bot-1/aa/doc.pdf")
+	want := filepath.Join(root, "media", "aa", "doc.pdf")
+	if got != want {
+		t.Fatalf("AccessPath() = %q, want %q", got, want)
+	}
+}
+
+func TestProvider_AccessPathReturnsEmptyWhenWorkspaceInfoFails(t *testing.T) {
+	t.Parallel()
+
+	p := &Provider{clients: &accessPathWorkspaceProvider{err: errors.New("workspace unavailable")}}
+	if got := p.AccessPath(context.Background(), "bot-1/aa/doc.pdf"); got != "" {
+		t.Fatalf("AccessPath() = %q, want empty", got)
 	}
 }
 
