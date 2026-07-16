@@ -16,7 +16,7 @@ INSERT INTO bot_plugin_installations (
   bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-ON CONFLICT (bot_id, plugin_id)
+ON CONFLICT (team_id, bot_id, plugin_id)
 DO UPDATE SET plugin_name = EXCLUDED.plugin_name,
               version = EXCLUDED.version,
               status = EXCLUDED.status,
@@ -25,7 +25,7 @@ DO UPDATE SET plugin_name = EXCLUDED.plugin_name,
               metadata = EXCLUDED.metadata,
               manifest = EXCLUDED.manifest,
               updated_at = now()
-RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at
+RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id
 `
 
 type CreateBotPluginInstallationParams struct {
@@ -66,13 +66,14 @@ func (q *Queries) CreateBotPluginInstallation(ctx context.Context, arg CreateBot
 		&i.Manifest,
 		&i.InstalledAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const deleteBotPluginInstallation = `-- name: DeleteBotPluginInstallation :exec
 DELETE FROM bot_plugin_installations
-WHERE bot_id = $1 AND id = $2
+WHERE team_id = public.memoh_current_team_id() AND bot_id = $1 AND id = $2
 `
 
 type DeleteBotPluginInstallationParams struct {
@@ -87,7 +88,7 @@ func (q *Queries) DeleteBotPluginInstallation(ctx context.Context, arg DeleteBot
 
 const deleteBotPluginResources = `-- name: DeleteBotPluginResources :exec
 DELETE FROM bot_plugin_resources
-WHERE installation_id = $1
+WHERE team_id = public.memoh_current_team_id() AND installation_id = $1
 `
 
 func (q *Queries) DeleteBotPluginResources(ctx context.Context, installationID pgtype.UUID) error {
@@ -96,9 +97,9 @@ func (q *Queries) DeleteBotPluginResources(ctx context.Context, installationID p
 }
 
 const getBotPluginInstallationByID = `-- name: GetBotPluginInstallationByID :one
-SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at
+SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id
 FROM bot_plugin_installations
-WHERE bot_id = $1 AND id = $2
+WHERE team_id = public.memoh_current_team_id() AND bot_id = $1 AND id = $2
 LIMIT 1
 `
 
@@ -123,14 +124,15 @@ func (q *Queries) GetBotPluginInstallationByID(ctx context.Context, arg GetBotPl
 		&i.Manifest,
 		&i.InstalledAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listBotPluginInstallations = `-- name: ListBotPluginInstallations :many
-SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at
+SELECT id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id
 FROM bot_plugin_installations
-WHERE bot_id = $1
+WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 ORDER BY installed_at DESC
 `
 
@@ -156,6 +158,7 @@ func (q *Queries) ListBotPluginInstallations(ctx context.Context, botID pgtype.U
 			&i.Manifest,
 			&i.InstalledAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -168,9 +171,9 @@ func (q *Queries) ListBotPluginInstallations(ctx context.Context, botID pgtype.U
 }
 
 const listBotPluginResources = `-- name: ListBotPluginResources :many
-SELECT id, installation_id, resource_type, resource_key, resource_id, status, metadata, created_at, updated_at
+SELECT id, installation_id, resource_type, resource_key, resource_id, status, metadata, created_at, updated_at, team_id
 FROM bot_plugin_resources
-WHERE installation_id = $1
+WHERE team_id = public.memoh_current_team_id() AND installation_id = $1
 ORDER BY resource_type ASC, resource_key ASC
 `
 
@@ -193,6 +196,7 @@ func (q *Queries) ListBotPluginResources(ctx context.Context, installationID pgt
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -209,8 +213,8 @@ UPDATE bot_plugin_installations
 SET status = $3,
     enabled = $4,
     updated_at = now()
-WHERE bot_id = $1 AND id = $2
-RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at
+WHERE team_id = public.memoh_current_team_id() AND bot_id = $1 AND id = $2
+RETURNING id, bot_id, plugin_id, plugin_name, version, status, enabled, config, metadata, manifest, installed_at, updated_at, team_id
 `
 
 type UpdateBotPluginInstallationStatusParams struct {
@@ -241,6 +245,7 @@ func (q *Queries) UpdateBotPluginInstallationStatus(ctx context.Context, arg Upd
 		&i.Manifest,
 		&i.InstalledAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -250,12 +255,12 @@ INSERT INTO bot_plugin_resources (
   installation_id, resource_type, resource_key, resource_id, status, metadata
 )
 VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (installation_id, resource_type, resource_key)
+ON CONFLICT (team_id, installation_id, resource_type, resource_key)
 DO UPDATE SET resource_id = EXCLUDED.resource_id,
               status = EXCLUDED.status,
               metadata = EXCLUDED.metadata,
               updated_at = now()
-RETURNING id, installation_id, resource_type, resource_key, resource_id, status, metadata, created_at, updated_at
+RETURNING id, installation_id, resource_type, resource_key, resource_id, status, metadata, created_at, updated_at, team_id
 `
 
 type UpsertBotPluginResourceParams struct {
@@ -287,6 +292,7 @@ func (q *Queries) UpsertBotPluginResource(ctx context.Context, arg UpsertBotPlug
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

@@ -2,13 +2,15 @@
 WITH locked_session AS (
   SELECT id
   FROM bot_sessions
-  WHERE id = sqlc.arg(session_id)
+  WHERE team_id = public.memoh_current_team_id()
+    AND id = sqlc.arg(session_id)
   FOR UPDATE
 ),
 next_short_id AS (
   SELECT COALESCE(MAX(user_input_requests.short_id), 0) + 1 AS short_id
   FROM locked_session
   LEFT JOIN user_input_requests ON user_input_requests.session_id = locked_session.id
+    AND user_input_requests.team_id = public.memoh_current_team_id()
 )
 INSERT INTO user_input_requests (
   bot_id,
@@ -46,7 +48,7 @@ INSERT INTO user_input_requests (
   sqlc.narg(expires_at)
 FROM locked_session
 CROSS JOIN next_short_id
-ON CONFLICT (session_id, tool_call_id) DO UPDATE
+ON CONFLICT (team_id, session_id, tool_call_id) DO UPDATE
 SET input_json = EXCLUDED.input_json,
     ui_payload_json = EXCLUDED.ui_payload_json,
     provider_metadata = EXCLUDED.provider_metadata,
@@ -64,18 +66,20 @@ RETURNING *;
 -- name: GetUserInputRequest :one
 SELECT *
 FROM user_input_requests
-WHERE id = $1;
+WHERE team_id = public.memoh_current_team_id() AND id = $1;
 
 -- name: GetUserInputRequestBySessionToolCall :one
 SELECT *
 FROM user_input_requests
-WHERE session_id = $1
+WHERE team_id = public.memoh_current_team_id()
+  AND session_id = $1
   AND tool_call_id = $2;
 
 -- name: GetPendingUserInputBySessionShortID :one
 SELECT *
 FROM user_input_requests
-WHERE bot_id = $1
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $1
   AND session_id = $2
   AND short_id = $3
   AND status = 'pending'
@@ -84,7 +88,8 @@ WHERE bot_id = $1
 -- name: GetLatestPendingUserInputBySession :one
 SELECT *
 FROM user_input_requests
-WHERE bot_id = $1
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $1
   AND session_id = $2
   AND status = 'pending'
   AND (expires_at IS NULL OR expires_at > now())
@@ -94,7 +99,8 @@ LIMIT 1;
 -- name: GetPendingUserInputByReplyMessage :one
 SELECT *
 FROM user_input_requests
-WHERE bot_id = $1
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $1
   AND session_id = $2
   AND prompt_external_message_id = $3
   AND status = 'pending'
@@ -107,7 +113,7 @@ UPDATE user_input_requests
 SET prompt_message_id = sqlc.narg(prompt_message_id),
     prompt_external_message_id = sqlc.arg(prompt_external_message_id),
     updated_at = now()
-WHERE id = sqlc.arg(id)
+WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id)
 RETURNING *;
 
 -- name: UpdateUserInputInteraction :one
@@ -125,14 +131,14 @@ RETURNING *;
 UPDATE user_input_requests
 SET assistant_message_id = sqlc.narg(assistant_message_id),
     updated_at = now()
-WHERE id = sqlc.arg(id)
+WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id)
 RETURNING *;
 
 -- name: UpdateUserInputToolResultMessage :one
 UPDATE user_input_requests
 SET tool_result_message_id = sqlc.narg(tool_result_message_id),
     updated_at = now()
-WHERE id = sqlc.arg(id)
+WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id)
 RETURNING *;
 
 -- name: SubmitUserInputRequest :one
@@ -142,7 +148,8 @@ SET status = 'submitted',
     responded_by_channel_identity_id = sqlc.narg(responded_by_channel_identity_id),
     responded_at = now(),
     updated_at = now()
-WHERE id = sqlc.arg(id)
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(id)
   AND status = 'pending'
   AND (expires_at IS NULL OR expires_at > now())
 RETURNING *;
@@ -155,7 +162,8 @@ SET status = 'canceled',
     responded_at = now(),
     canceled_at = now(),
     updated_at = now()
-WHERE id = sqlc.arg(id)
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(id)
   AND status = 'pending'
   AND (expires_at IS NULL OR expires_at > now())
 RETURNING *;
@@ -167,7 +175,8 @@ SET status = 'canceled',
     responded_at = now(),
     canceled_at = now(),
     updated_at = now()
-WHERE bot_id = sqlc.arg(bot_id)
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id)
   AND session_id = sqlc.arg(session_id)
   AND status = 'pending'
   AND (expires_at IS NULL OR expires_at > now())
@@ -178,7 +187,8 @@ UPDATE user_input_requests
 SET status = 'failed',
     result_json = sqlc.arg(result_json),
     updated_at = now()
-WHERE id = sqlc.arg(id)
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(id)
   AND status = 'pending'
   AND (expires_at IS NULL OR expires_at > now())
 RETURNING *;
@@ -186,7 +196,8 @@ RETURNING *;
 -- name: ListPendingUserInputsBySession :many
 SELECT *
 FROM user_input_requests
-WHERE bot_id = $1
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $1
   AND session_id = $2
   AND status = 'pending'
   AND (expires_at IS NULL OR expires_at > now())
@@ -195,14 +206,16 @@ ORDER BY created_at ASC, short_id ASC;
 -- name: ListUserInputsBySession :many
 SELECT *
 FROM user_input_requests
-WHERE bot_id = $1
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $1
   AND session_id = $2
 ORDER BY created_at ASC, short_id ASC;
 
 -- name: ListUserInputsBySessionToolCalls :many
 SELECT *
 FROM user_input_requests
-WHERE bot_id = sqlc.arg(bot_id)
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id)
   AND session_id = sqlc.arg(session_id)
   AND tool_call_id = ANY(sqlc.arg(tool_call_ids)::text[])
 ORDER BY created_at ASC, short_id ASC;

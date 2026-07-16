@@ -20,9 +20,10 @@ SELECT
   parent_runtime_snapshot_name,
   snapshotter,
   source,
-  created_at
+  created_at,
+  team_id
 FROM snapshots
-WHERE container_id = $1
+WHERE team_id = public.memoh_current_team_id() AND container_id = $1
   AND runtime_snapshot_name = $2
 LIMIT 1
 `
@@ -44,6 +45,7 @@ func (q *Queries) GetSnapshotByContainerAndRuntimeName(ctx context.Context, arg 
 		&i.Snapshotter,
 		&i.Source,
 		&i.CreatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -57,9 +59,10 @@ SELECT
   parent_runtime_snapshot_name,
   snapshotter,
   source,
-  created_at
+  created_at,
+  team_id
 FROM snapshots
-WHERE container_id = $1
+WHERE team_id = public.memoh_current_team_id() AND container_id = $1
 ORDER BY created_at DESC
 `
 
@@ -81,6 +84,7 @@ func (q *Queries) ListSnapshotsByContainerID(ctx context.Context, containerID st
 			&i.Snapshotter,
 			&i.Source,
 			&i.CreatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -104,8 +108,8 @@ SELECT
   s.created_at,
   cv.version
 FROM snapshots s
-LEFT JOIN container_versions cv ON cv.snapshot_id = s.id
-WHERE s.container_id = $1
+LEFT JOIN container_versions cv ON cv.snapshot_id = s.id AND cv.team_id = public.memoh_current_team_id()
+WHERE s.team_id = public.memoh_current_team_id() AND s.container_id = $1
 ORDER BY s.created_at DESC
 `
 
@@ -168,13 +172,13 @@ VALUES (
   $5,
   $6
 )
-ON CONFLICT (container_id, runtime_snapshot_name) DO UPDATE
+ON CONFLICT (team_id, container_id, runtime_snapshot_name) DO UPDATE
 SET
   display_name = EXCLUDED.display_name,
   parent_runtime_snapshot_name = EXCLUDED.parent_runtime_snapshot_name,
   snapshotter = EXCLUDED.snapshotter,
   source = EXCLUDED.source
-RETURNING id, container_id, runtime_snapshot_name, display_name, parent_runtime_snapshot_name, snapshotter, source, created_at
+RETURNING id, container_id, runtime_snapshot_name, display_name, parent_runtime_snapshot_name, snapshotter, source, created_at, team_id
 `
 
 type UpsertSnapshotParams struct {
@@ -205,6 +209,7 @@ func (q *Queries) UpsertSnapshot(ctx context.Context, arg UpsertSnapshotParams) 
 		&i.Snapshotter,
 		&i.Source,
 		&i.CreatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

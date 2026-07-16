@@ -12,25 +12,25 @@ VALUES (
 RETURNING *;
 
 -- name: GetBotEmailBindingByID :one
-SELECT * FROM bot_email_bindings WHERE id = sqlc.arg(id);
+SELECT * FROM bot_email_bindings WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id);
 
 -- name: GetBotEmailBindingByBotAndProvider :one
 SELECT * FROM bot_email_bindings
-WHERE bot_id = sqlc.arg(bot_id) AND email_provider_id = sqlc.arg(email_provider_id);
+WHERE team_id = public.memoh_current_team_id() AND bot_id = sqlc.arg(bot_id) AND email_provider_id = sqlc.arg(email_provider_id);
 
 -- name: ListBotEmailBindings :many
 SELECT * FROM bot_email_bindings
-WHERE bot_id = sqlc.arg(bot_id)
+WHERE team_id = public.memoh_current_team_id() AND bot_id = sqlc.arg(bot_id)
 ORDER BY created_at DESC;
 
 -- name: ListBotEmailBindingsByProvider :many
 SELECT * FROM bot_email_bindings
-WHERE email_provider_id = sqlc.arg(email_provider_id)
+WHERE team_id = public.memoh_current_team_id() AND email_provider_id = sqlc.arg(email_provider_id)
 ORDER BY created_at DESC;
 
 -- name: ListReadableBindingsByProvider :many
 SELECT * FROM bot_email_bindings
-WHERE email_provider_id = sqlc.arg(email_provider_id) AND can_read = TRUE
+WHERE team_id = public.memoh_current_team_id() AND email_provider_id = sqlc.arg(email_provider_id) AND can_read = TRUE
 ORDER BY created_at DESC;
 
 -- name: UpdateBotEmailBinding :one
@@ -42,8 +42,8 @@ SET
   can_delete = sqlc.arg(can_delete),
   config = sqlc.arg(config),
   updated_at = now()
-WHERE id = sqlc.arg(id)
+WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id)
 RETURNING *;
 
 -- name: DeleteBotEmailBinding :exec
-DELETE FROM bot_email_bindings WHERE id = sqlc.arg(id);
+DELETE FROM bot_email_bindings WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id);

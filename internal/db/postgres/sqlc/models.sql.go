@@ -13,7 +13,7 @@ import (
 
 const countModels = `-- name: CountModels :one
 SELECT COUNT(*) FROM models
-WHERE type NOT IN ('speech', 'transcription', 'video')
+WHERE team_id = public.memoh_current_team_id() AND type NOT IN ('speech', 'transcription', 'video')
 `
 
 func (q *Queries) CountModels(ctx context.Context) (int64, error) {
@@ -24,7 +24,7 @@ func (q *Queries) CountModels(ctx context.Context) (int64, error) {
 }
 
 const countModelsByType = `-- name: CountModelsByType :one
-SELECT COUNT(*) FROM models WHERE type = $1
+SELECT COUNT(*) FROM models WHERE team_id = public.memoh_current_team_id() AND type = $1
 `
 
 func (q *Queries) CountModelsByType(ctx context.Context, type_ string) (int64, error) {
@@ -37,7 +37,7 @@ func (q *Queries) CountModelsByType(ctx context.Context, type_ string) (int64, e
 const countProviders = `-- name: CountProviders :one
 SELECT COUNT(*)
 FROM providers
-WHERE client_type NOT IN (
+WHERE team_id = public.memoh_current_team_id() AND client_type NOT IN (
   'edge-speech',
   'openai-speech',
   'openai-transcription',
@@ -76,7 +76,7 @@ VALUES (
   $5,
   $6
 )
-RETURNING id, model_id, name, provider_id, type, enable, config, created_at, updated_at
+RETURNING id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id
 `
 
 type CreateModelParams struct {
@@ -108,6 +108,7 @@ func (q *Queries) CreateModel(ctx context.Context, arg CreateModelParams) (Model
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -120,7 +121,7 @@ VALUES (
   $3,
   $4
 )
-RETURNING id, model_uuid, variant_id, weight, metadata, created_at, updated_at
+RETURNING id, model_uuid, variant_id, weight, metadata, created_at, updated_at, team_id
 `
 
 type CreateModelVariantParams struct {
@@ -146,6 +147,7 @@ func (q *Queries) CreateModelVariant(ctx context.Context, arg CreateModelVariant
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -160,7 +162,7 @@ VALUES (
   $5,
   $6
 )
-RETURNING id, name, client_type, icon, enable, config, metadata, created_at, updated_at
+RETURNING id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id
 `
 
 type CreateProviderParams struct {
@@ -192,12 +194,13 @@ func (q *Queries) CreateProvider(ctx context.Context, arg CreateProviderParams) 
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const deleteModel = `-- name: DeleteModel :exec
-DELETE FROM models WHERE id = $1
+DELETE FROM models WHERE team_id = public.memoh_current_team_id() AND id = $1
 `
 
 func (q *Queries) DeleteModel(ctx context.Context, id pgtype.UUID) error {
@@ -206,7 +209,7 @@ func (q *Queries) DeleteModel(ctx context.Context, id pgtype.UUID) error {
 }
 
 const deleteModelByModelID = `-- name: DeleteModelByModelID :exec
-DELETE FROM models WHERE model_id = $1
+DELETE FROM models WHERE team_id = public.memoh_current_team_id() AND model_id = $1
 `
 
 func (q *Queries) DeleteModelByModelID(ctx context.Context, modelID string) error {
@@ -216,7 +219,7 @@ func (q *Queries) DeleteModelByModelID(ctx context.Context, modelID string) erro
 
 const deleteModelByProviderAndType = `-- name: DeleteModelByProviderAndType :exec
 DELETE FROM models
-WHERE provider_id = $1
+WHERE team_id = public.memoh_current_team_id() AND provider_id = $1
   AND model_id = $2
   AND type = $3
 `
@@ -234,7 +237,7 @@ func (q *Queries) DeleteModelByProviderAndType(ctx context.Context, arg DeleteMo
 
 const deleteModelByProviderIDAndModelID = `-- name: DeleteModelByProviderIDAndModelID :exec
 DELETE FROM models
-WHERE provider_id = $1
+WHERE team_id = public.memoh_current_team_id() AND provider_id = $1
   AND model_id = $2
 `
 
@@ -249,7 +252,7 @@ func (q *Queries) DeleteModelByProviderIDAndModelID(ctx context.Context, arg Del
 }
 
 const deleteProvider = `-- name: DeleteProvider :exec
-DELETE FROM providers WHERE id = $1
+DELETE FROM providers WHERE team_id = public.memoh_current_team_id() AND id = $1
 `
 
 func (q *Queries) DeleteProvider(ctx context.Context, id pgtype.UUID) error {
@@ -258,7 +261,7 @@ func (q *Queries) DeleteProvider(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getModelByID = `-- name: GetModelByID :one
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models WHERE id = $1
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models WHERE team_id = public.memoh_current_team_id() AND id = $1
 `
 
 func (q *Queries) GetModelByID(ctx context.Context, id pgtype.UUID) (Model, error) {
@@ -274,12 +277,13 @@ func (q *Queries) GetModelByID(ctx context.Context, id pgtype.UUID) (Model, erro
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getModelByModelID = `-- name: GetModelByModelID :one
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models WHERE model_id = $1
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models WHERE team_id = public.memoh_current_team_id() AND model_id = $1
 `
 
 func (q *Queries) GetModelByModelID(ctx context.Context, modelID string) (Model, error) {
@@ -295,13 +299,14 @@ func (q *Queries) GetModelByModelID(ctx context.Context, modelID string) (Model,
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getModelByProviderAndModelID = `-- name: GetModelByProviderAndModelID :one
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
-WHERE provider_id = $1
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = public.memoh_current_team_id() AND provider_id = $1
   AND model_id = $2
 LIMIT 1
 `
@@ -324,12 +329,13 @@ func (q *Queries) GetModelByProviderAndModelID(ctx context.Context, arg GetModel
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getProviderByClientType = `-- name: GetProviderByClientType :one
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers WHERE client_type = $1
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers WHERE team_id = public.memoh_current_team_id() AND client_type = $1
 `
 
 func (q *Queries) GetProviderByClientType(ctx context.Context, clientType string) (Provider, error) {
@@ -345,12 +351,13 @@ func (q *Queries) GetProviderByClientType(ctx context.Context, clientType string
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getProviderByID = `-- name: GetProviderByID :one
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers WHERE id = $1
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers WHERE team_id = public.memoh_current_team_id() AND id = $1
 `
 
 func (q *Queries) GetProviderByID(ctx context.Context, id pgtype.UUID) (Provider, error) {
@@ -366,12 +373,13 @@ func (q *Queries) GetProviderByID(ctx context.Context, id pgtype.UUID) (Provider
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getProviderByName = `-- name: GetProviderByName :one
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers WHERE name = $1
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers WHERE team_id = public.memoh_current_team_id() AND name = $1
 `
 
 func (q *Queries) GetProviderByName(ctx context.Context, name string) (Provider, error) {
@@ -387,17 +395,18 @@ func (q *Queries) GetProviderByName(ctx context.Context, name string) (Provider,
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getSpeechModelWithProvider = `-- name: GetSpeechModelWithProvider :one
 SELECT
-  m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at,
+  m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id,
   p.client_type AS provider_type
 FROM models m
 JOIN providers p ON p.id = m.provider_id
-WHERE m.id = $1
+WHERE m.team_id = public.memoh_current_team_id() AND p.team_id = public.memoh_current_team_id() AND m.id = $1
   AND m.type = 'speech'
 `
 
@@ -411,6 +420,7 @@ type GetSpeechModelWithProviderRow struct {
 	Config       []byte             `json:"config"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 	ProviderType string             `json:"provider_type"`
 }
 
@@ -427,6 +437,7 @@ func (q *Queries) GetSpeechModelWithProvider(ctx context.Context, id pgtype.UUID
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 		&i.ProviderType,
 	)
 	return i, err
@@ -434,11 +445,11 @@ func (q *Queries) GetSpeechModelWithProvider(ctx context.Context, id pgtype.UUID
 
 const getTranscriptionModelWithProvider = `-- name: GetTranscriptionModelWithProvider :one
 SELECT
-  m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at,
+  m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id,
   p.client_type AS provider_type
 FROM models m
 JOIN providers p ON p.id = m.provider_id
-WHERE m.id = $1
+WHERE m.team_id = public.memoh_current_team_id() AND p.team_id = public.memoh_current_team_id() AND m.id = $1
   AND m.type = 'transcription'
 `
 
@@ -452,6 +463,7 @@ type GetTranscriptionModelWithProviderRow struct {
 	Config       []byte             `json:"config"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 	ProviderType string             `json:"provider_type"`
 }
 
@@ -468,6 +480,7 @@ func (q *Queries) GetTranscriptionModelWithProvider(ctx context.Context, id pgty
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 		&i.ProviderType,
 	)
 	return i, err
@@ -475,11 +488,11 @@ func (q *Queries) GetTranscriptionModelWithProvider(ctx context.Context, id pgty
 
 const getVideoModelWithProvider = `-- name: GetVideoModelWithProvider :one
 SELECT
-  m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at,
+  m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id,
   p.client_type AS provider_type
 FROM models m
 JOIN providers p ON p.id = m.provider_id
-WHERE m.id = $1
+WHERE m.team_id = public.memoh_current_team_id() AND p.team_id = public.memoh_current_team_id() AND m.id = $1
   AND m.type = 'video'
 `
 
@@ -493,6 +506,7 @@ type GetVideoModelWithProviderRow struct {
 	Config       []byte             `json:"config"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 	ProviderType string             `json:"provider_type"`
 }
 
@@ -509,16 +523,17 @@ func (q *Queries) GetVideoModelWithProvider(ctx context.Context, id pgtype.UUID)
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 		&i.ProviderType,
 	)
 	return i, err
 }
 
 const listEnabledModels = `-- name: ListEnabledModels :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id
 FROM models m
 JOIN providers p ON m.provider_id = p.id
-WHERE p.enable = true
+WHERE m.team_id = public.memoh_current_team_id() AND p.team_id = public.memoh_current_team_id() AND p.enable = true
   AND m.enable = true
   AND m.type NOT IN ('speech', 'transcription', 'video')
 ORDER BY m.created_at DESC
@@ -543,6 +558,7 @@ func (q *Queries) ListEnabledModels(ctx context.Context) ([]Model, error) {
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -555,10 +571,10 @@ func (q *Queries) ListEnabledModels(ctx context.Context) ([]Model, error) {
 }
 
 const listEnabledModelsByProviderClientType = `-- name: ListEnabledModelsByProviderClientType :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id
 FROM models m
 JOIN providers p ON m.provider_id = p.id
-WHERE p.enable = true
+WHERE m.team_id = public.memoh_current_team_id() AND p.team_id = public.memoh_current_team_id() AND p.enable = true
   AND m.enable = true
   AND p.client_type = $1
 ORDER BY m.created_at DESC
@@ -583,6 +599,7 @@ func (q *Queries) ListEnabledModelsByProviderClientType(ctx context.Context, cli
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -595,10 +612,10 @@ func (q *Queries) ListEnabledModelsByProviderClientType(ctx context.Context, cli
 }
 
 const listEnabledModelsByType = `-- name: ListEnabledModelsByType :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id
 FROM models m
 JOIN providers p ON m.provider_id = p.id
-WHERE p.enable = true
+WHERE m.team_id = public.memoh_current_team_id() AND p.team_id = public.memoh_current_team_id() AND p.enable = true
   AND m.enable = true
   AND m.type = $1
 ORDER BY m.created_at DESC
@@ -623,6 +640,7 @@ func (q *Queries) ListEnabledModelsByType(ctx context.Context, type_ string) ([]
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -635,8 +653,8 @@ func (q *Queries) ListEnabledModelsByType(ctx context.Context, type_ string) ([]
 }
 
 const listModelVariantsByModelUUID = `-- name: ListModelVariantsByModelUUID :many
-SELECT id, model_uuid, variant_id, weight, metadata, created_at, updated_at FROM model_variants
-WHERE model_uuid = $1
+SELECT id, model_uuid, variant_id, weight, metadata, created_at, updated_at, team_id FROM model_variants
+WHERE team_id = public.memoh_current_team_id() AND model_uuid = $1
 ORDER BY weight DESC, created_at DESC
 `
 
@@ -657,6 +675,7 @@ func (q *Queries) ListModelVariantsByModelUUID(ctx context.Context, modelUuid pg
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -669,8 +688,8 @@ func (q *Queries) ListModelVariantsByModelUUID(ctx context.Context, modelUuid pg
 }
 
 const listModels = `-- name: ListModels :many
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
-WHERE type NOT IN ('speech', 'transcription', 'video')
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = public.memoh_current_team_id() AND type NOT IN ('speech', 'transcription', 'video')
 ORDER BY created_at DESC
 `
 
@@ -693,6 +712,7 @@ func (q *Queries) ListModels(ctx context.Context) ([]Model, error) {
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -705,8 +725,8 @@ func (q *Queries) ListModels(ctx context.Context) ([]Model, error) {
 }
 
 const listModelsByModelID = `-- name: ListModelsByModelID :many
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
-WHERE model_id = $1
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = public.memoh_current_team_id() AND model_id = $1
 ORDER BY created_at DESC
 `
 
@@ -729,6 +749,7 @@ func (q *Queries) ListModelsByModelID(ctx context.Context, modelID string) ([]Mo
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -741,10 +762,10 @@ func (q *Queries) ListModelsByModelID(ctx context.Context, modelID string) ([]Mo
 }
 
 const listModelsByProviderClientType = `-- name: ListModelsByProviderClientType :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id
 FROM models m
 JOIN providers p ON m.provider_id = p.id
-WHERE p.client_type = $1
+WHERE m.team_id = public.memoh_current_team_id() AND p.team_id = public.memoh_current_team_id() AND p.client_type = $1
 ORDER BY m.created_at DESC
 `
 
@@ -767,6 +788,7 @@ func (q *Queries) ListModelsByProviderClientType(ctx context.Context, clientType
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -779,8 +801,8 @@ func (q *Queries) ListModelsByProviderClientType(ctx context.Context, clientType
 }
 
 const listModelsByProviderID = `-- name: ListModelsByProviderID :many
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
-WHERE provider_id = $1
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = public.memoh_current_team_id() AND provider_id = $1
   AND type NOT IN ('speech', 'transcription', 'video')
 ORDER BY created_at DESC
 `
@@ -804,6 +826,7 @@ func (q *Queries) ListModelsByProviderID(ctx context.Context, providerID pgtype.
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -816,8 +839,8 @@ func (q *Queries) ListModelsByProviderID(ctx context.Context, providerID pgtype.
 }
 
 const listModelsByProviderIDAndType = `-- name: ListModelsByProviderIDAndType :many
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
-WHERE provider_id = $1
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = public.memoh_current_team_id() AND provider_id = $1
   AND type = $2
 ORDER BY created_at DESC
 `
@@ -846,6 +869,7 @@ func (q *Queries) ListModelsByProviderIDAndType(ctx context.Context, arg ListMod
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -858,8 +882,8 @@ func (q *Queries) ListModelsByProviderIDAndType(ctx context.Context, arg ListMod
 }
 
 const listModelsByType = `-- name: ListModelsByType :many
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
-WHERE type = $1
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = public.memoh_current_team_id() AND type = $1
 ORDER BY created_at DESC
 `
 
@@ -882,6 +906,7 @@ func (q *Queries) ListModelsByType(ctx context.Context, type_ string) ([]Model, 
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -894,8 +919,8 @@ func (q *Queries) ListModelsByType(ctx context.Context, type_ string) ([]Model, 
 }
 
 const listProviders = `-- name: ListProviders :many
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers
-WHERE client_type NOT IN (
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
+WHERE team_id = public.memoh_current_team_id() AND client_type NOT IN (
   'edge-speech',
   'openai-speech',
   'openai-transcription',
@@ -937,6 +962,7 @@ func (q *Queries) ListProviders(ctx context.Context) ([]Provider, error) {
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -949,11 +975,11 @@ func (q *Queries) ListProviders(ctx context.Context) ([]Provider, error) {
 }
 
 const listSpeechModels = `-- name: ListSpeechModels :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at,
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id,
   p.client_type AS provider_type
 FROM models m
 JOIN providers p ON p.id = m.provider_id
-WHERE m.type = 'speech'
+WHERE m.team_id = public.memoh_current_team_id() AND p.team_id = public.memoh_current_team_id() AND m.type = 'speech'
   AND m.enable = true
 ORDER BY m.created_at DESC
 `
@@ -968,6 +994,7 @@ type ListSpeechModelsRow struct {
 	Config       []byte             `json:"config"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 	ProviderType string             `json:"provider_type"`
 }
 
@@ -990,6 +1017,7 @@ func (q *Queries) ListSpeechModels(ctx context.Context) ([]ListSpeechModelsRow, 
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 			&i.ProviderType,
 		); err != nil {
 			return nil, err
@@ -1003,8 +1031,8 @@ func (q *Queries) ListSpeechModels(ctx context.Context) ([]ListSpeechModelsRow, 
 }
 
 const listSpeechModelsByProviderID = `-- name: ListSpeechModelsByProviderID :many
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
-WHERE provider_id = $1
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = public.memoh_current_team_id() AND provider_id = $1
   AND type = 'speech'
   AND enable = true
 ORDER BY created_at DESC
@@ -1029,6 +1057,7 @@ func (q *Queries) ListSpeechModelsByProviderID(ctx context.Context, providerID p
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -1041,8 +1070,8 @@ func (q *Queries) ListSpeechModelsByProviderID(ctx context.Context, providerID p
 }
 
 const listSpeechProviders = `-- name: ListSpeechProviders :many
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers
-WHERE client_type IN (
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
+WHERE team_id = public.memoh_current_team_id() AND client_type IN (
   'edge-speech',
   'openai-speech',
   'openrouter-speech',
@@ -1075,6 +1104,7 @@ func (q *Queries) ListSpeechProviders(ctx context.Context) ([]Provider, error) {
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -1087,11 +1117,11 @@ func (q *Queries) ListSpeechProviders(ctx context.Context) ([]Provider, error) {
 }
 
 const listTranscriptionModels = `-- name: ListTranscriptionModels :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at,
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id,
   p.client_type AS provider_type
 FROM models m
 JOIN providers p ON p.id = m.provider_id
-WHERE m.type = 'transcription'
+WHERE m.team_id = public.memoh_current_team_id() AND p.team_id = public.memoh_current_team_id() AND m.type = 'transcription'
   AND m.enable = true
 ORDER BY m.created_at DESC
 `
@@ -1106,6 +1136,7 @@ type ListTranscriptionModelsRow struct {
 	Config       []byte             `json:"config"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 	ProviderType string             `json:"provider_type"`
 }
 
@@ -1128,6 +1159,7 @@ func (q *Queries) ListTranscriptionModels(ctx context.Context) ([]ListTranscript
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 			&i.ProviderType,
 		); err != nil {
 			return nil, err
@@ -1141,8 +1173,8 @@ func (q *Queries) ListTranscriptionModels(ctx context.Context) ([]ListTranscript
 }
 
 const listTranscriptionModelsByProviderID = `-- name: ListTranscriptionModelsByProviderID :many
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
-WHERE provider_id = $1
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = public.memoh_current_team_id() AND provider_id = $1
   AND type = 'transcription'
   AND enable = true
 ORDER BY created_at DESC
@@ -1167,6 +1199,7 @@ func (q *Queries) ListTranscriptionModelsByProviderID(ctx context.Context, provi
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -1179,8 +1212,8 @@ func (q *Queries) ListTranscriptionModelsByProviderID(ctx context.Context, provi
 }
 
 const listTranscriptionProviders = `-- name: ListTranscriptionProviders :many
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers
-WHERE client_type IN (
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
+WHERE team_id = public.memoh_current_team_id() AND client_type IN (
   'openai-transcription',
   'openrouter-transcription',
   'elevenlabs-transcription',
@@ -1209,6 +1242,7 @@ func (q *Queries) ListTranscriptionProviders(ctx context.Context) ([]Provider, e
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -1221,11 +1255,11 @@ func (q *Queries) ListTranscriptionProviders(ctx context.Context) ([]Provider, e
 }
 
 const listVideoModels = `-- name: ListVideoModels :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at,
+SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.enable, m.config, m.created_at, m.updated_at, m.team_id,
   p.client_type AS provider_type
 FROM models m
 JOIN providers p ON p.id = m.provider_id
-WHERE m.type = 'video'
+WHERE m.team_id = public.memoh_current_team_id() AND p.team_id = public.memoh_current_team_id() AND m.type = 'video'
   AND m.enable = true
 ORDER BY m.created_at DESC
 `
@@ -1240,6 +1274,7 @@ type ListVideoModelsRow struct {
 	Config       []byte             `json:"config"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 	ProviderType string             `json:"provider_type"`
 }
 
@@ -1262,6 +1297,7 @@ func (q *Queries) ListVideoModels(ctx context.Context) ([]ListVideoModelsRow, er
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 			&i.ProviderType,
 		); err != nil {
 			return nil, err
@@ -1275,8 +1311,8 @@ func (q *Queries) ListVideoModels(ctx context.Context) ([]ListVideoModelsRow, er
 }
 
 const listVideoModelsByProviderID = `-- name: ListVideoModelsByProviderID :many
-SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at FROM models
-WHERE provider_id = $1
+SELECT id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id FROM models
+WHERE team_id = public.memoh_current_team_id() AND provider_id = $1
   AND type = 'video'
   AND enable = true
 ORDER BY created_at DESC
@@ -1301,6 +1337,7 @@ func (q *Queries) ListVideoModelsByProviderID(ctx context.Context, providerID pg
 			&i.Config,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -1313,8 +1350,8 @@ func (q *Queries) ListVideoModelsByProviderID(ctx context.Context, providerID pg
 }
 
 const listVideoProviders = `-- name: ListVideoProviders :many
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers
-WHERE client_type IN (
+SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id FROM providers
+WHERE team_id = public.memoh_current_team_id() AND client_type IN (
   'openrouter-video',
   'modelark-video',
   'volcengine-video'
@@ -1341,6 +1378,7 @@ func (q *Queries) ListVideoProviders(ctx context.Context) ([]Provider, error) {
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -1362,8 +1400,8 @@ SET
   enable = $5,
   config = $6,
   updated_at = now()
-WHERE id = $7
-RETURNING id, model_id, name, provider_id, type, enable, config, created_at, updated_at
+WHERE team_id = public.memoh_current_team_id() AND id = $7
+RETURNING id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id
 `
 
 type UpdateModelParams struct {
@@ -1397,6 +1435,7 @@ func (q *Queries) UpdateModel(ctx context.Context, arg UpdateModelParams) (Model
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -1411,8 +1450,8 @@ SET
   config = $5,
   metadata = $6,
   updated_at = now()
-WHERE id = $7
-RETURNING id, name, client_type, icon, enable, config, metadata, created_at, updated_at
+WHERE team_id = public.memoh_current_team_id() AND id = $7
+RETURNING id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id
 `
 
 type UpdateProviderParams struct {
@@ -1446,6 +1485,7 @@ func (q *Queries) UpdateProvider(ctx context.Context, arg UpdateProviderParams) 
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -1453,7 +1493,7 @@ func (q *Queries) UpdateProvider(ctx context.Context, arg UpdateProviderParams) 
 const upsertRegistryModel = `-- name: UpsertRegistryModel :one
 INSERT INTO models (model_id, name, provider_id, type, config)
 VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (provider_id, model_id) DO UPDATE SET
+ON CONFLICT (team_id, provider_id, model_id) DO UPDATE SET
   name = EXCLUDED.name,
   type = EXCLUDED.type,
   config = CASE
@@ -1462,7 +1502,7 @@ ON CONFLICT (provider_id, model_id) DO UPDATE SET
     ELSE EXCLUDED.config
   END,
   updated_at = now()
-RETURNING id, model_id, name, provider_id, type, enable, config, created_at, updated_at
+RETURNING id, model_id, name, provider_id, type, enable, config, created_at, updated_at, team_id
 `
 
 type UpsertRegistryModelParams struct {
@@ -1492,6 +1532,7 @@ func (q *Queries) UpsertRegistryModel(ctx context.Context, arg UpsertRegistryMod
 		&i.Config,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -1499,11 +1540,11 @@ func (q *Queries) UpsertRegistryModel(ctx context.Context, arg UpsertRegistryMod
 const upsertRegistryProvider = `-- name: UpsertRegistryProvider :one
 INSERT INTO providers (name, client_type, icon, enable, config, metadata)
 VALUES ($1, $2, $3, false, $4, '{}')
-ON CONFLICT (name) DO UPDATE SET
+ON CONFLICT (team_id, name) DO UPDATE SET
   icon = EXCLUDED.icon,
   client_type = EXCLUDED.client_type,
   updated_at = now()
-RETURNING id, name, client_type, icon, enable, config, metadata, created_at, updated_at
+RETURNING id, name, client_type, icon, enable, config, metadata, created_at, updated_at, team_id
 `
 
 type UpsertRegistryProviderParams struct {
@@ -1531,6 +1572,7 @@ func (q *Queries) UpsertRegistryProvider(ctx context.Context, arg UpsertRegistry
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

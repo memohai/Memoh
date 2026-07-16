@@ -1,23 +1,23 @@
 -- name: CreateSchedule :one
 INSERT INTO schedule (name, description, pattern, max_calls, enabled, command, bot_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id;
+RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id;
 
 -- name: GetScheduleByID :one
-SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id
+SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id
 FROM schedule
-WHERE id = $1;
+WHERE team_id = public.memoh_current_team_id() AND id = $1;
 
 -- name: ListSchedulesByBot :many
-SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id
+SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id
 FROM schedule
-WHERE bot_id = $1
+WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 ORDER BY created_at DESC;
 
 -- name: ListEnabledSchedules :many
-SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id
+SELECT id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id
 FROM schedule
-WHERE enabled = true
+WHERE team_id = public.memoh_current_team_id() AND enabled = true
 ORDER BY created_at DESC;
 
 -- name: UpdateSchedule :one
@@ -29,12 +29,12 @@ SET name = $2,
     enabled = $6,
     command = $7,
     updated_at = now()
-WHERE id = $1
-RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id;
+WHERE team_id = public.memoh_current_team_id() AND id = $1
+RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id;
 
 -- name: DeleteSchedule :exec
 DELETE FROM schedule
-WHERE id = $1;
+WHERE team_id = public.memoh_current_team_id() AND id = $1;
 
 -- name: IncrementScheduleCalls :one
 UPDATE schedule
@@ -44,6 +44,6 @@ SET current_calls = current_calls + 1,
       ELSE enabled
     END,
     updated_at = now()
-WHERE id = $1
-RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id;
+WHERE team_id = public.memoh_current_team_id() AND id = $1
+RETURNING id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, team_id;
 

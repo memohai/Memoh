@@ -182,7 +182,7 @@ func TestCreateRejectsUnknownACLPreset(t *testing.T) {
 	db := &fakeDBTX{
 		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
 			switch {
-			case strings.Contains(sql, "FROM users") && strings.Contains(sql, "WHERE id = $1"):
+			case strings.Contains(sql, "FROM users") && strings.Contains(sql, "id = $1"):
 				return &fakeRow{scanFunc: func(_ ...any) error { return nil }}
 			case strings.Contains(sql, "INSERT INTO bots"):
 				createCalled = true
@@ -213,7 +213,7 @@ func TestCreateTreatsStoreNotFoundAsMissingOwner(t *testing.T) {
 	dbtx := &fakeDBTX{
 		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
 			switch {
-			case strings.Contains(sql, "FROM users") && strings.Contains(sql, "WHERE id = $1"):
+			case strings.Contains(sql, "FROM users") && strings.Contains(sql, "id = $1"):
 				return &fakeRow{scanFunc: func(_ ...any) error { return db.ErrNotFound }}
 			case strings.Contains(sql, "INSERT INTO bots"):
 				createCalled = true

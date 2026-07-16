@@ -9,18 +9,19 @@ VALUES (
 RETURNING *;
 
 -- name: GetSearchProviderByID :one
-SELECT * FROM search_providers WHERE id = sqlc.arg(id);
+SELECT * FROM search_providers WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id);
 
 -- name: GetSearchProviderByName :one
-SELECT * FROM search_providers WHERE name = sqlc.arg(name);
+SELECT * FROM search_providers WHERE team_id = public.memoh_current_team_id() AND name = sqlc.arg(name);
 
 -- name: ListSearchProviders :many
 SELECT * FROM search_providers
+WHERE team_id = public.memoh_current_team_id()
 ORDER BY created_at DESC;
 
 -- name: ListSearchProvidersByProvider :many
 SELECT * FROM search_providers
-WHERE provider = sqlc.arg(provider)
+WHERE team_id = public.memoh_current_team_id() AND provider = sqlc.arg(provider)
 ORDER BY created_at DESC;
 
 -- name: UpdateSearchProvider :one
@@ -31,8 +32,8 @@ SET
   config = sqlc.arg(config),
   enable = sqlc.arg(enable),
   updated_at = now()
-WHERE id = sqlc.arg(id)
+WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id)
 RETURNING *;
 
 -- name: DeleteSearchProvider :exec
-DELETE FROM search_providers WHERE id = sqlc.arg(id);
+DELETE FROM search_providers WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id);

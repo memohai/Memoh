@@ -4,4 +4,4 @@ SELECT
   overlay_provider,
   overlay_config
 FROM bots
-WHERE id = $1;
+WHERE team_id = public.memoh_current_team_id() AND id = $1;

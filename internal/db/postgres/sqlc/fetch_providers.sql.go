@@ -19,7 +19,7 @@ VALUES (
   $3,
   $4
 )
-RETURNING id, name, provider, config, enable, created_at, updated_at
+RETURNING id, name, provider, config, enable, created_at, updated_at, team_id
 `
 
 type CreateFetchProviderParams struct {
@@ -45,12 +45,13 @@ func (q *Queries) CreateFetchProvider(ctx context.Context, arg CreateFetchProvid
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const deleteFetchProvider = `-- name: DeleteFetchProvider :exec
-DELETE FROM fetch_providers WHERE id = $1
+DELETE FROM fetch_providers WHERE team_id = public.memoh_current_team_id() AND id = $1
 `
 
 func (q *Queries) DeleteFetchProvider(ctx context.Context, id pgtype.UUID) error {
@@ -59,7 +60,7 @@ func (q *Queries) DeleteFetchProvider(ctx context.Context, id pgtype.UUID) error
 }
 
 const getFetchProviderByID = `-- name: GetFetchProviderByID :one
-SELECT id, name, provider, config, enable, created_at, updated_at FROM fetch_providers WHERE id = $1
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM fetch_providers WHERE team_id = public.memoh_current_team_id() AND id = $1
 `
 
 func (q *Queries) GetFetchProviderByID(ctx context.Context, id pgtype.UUID) (FetchProvider, error) {
@@ -73,12 +74,13 @@ func (q *Queries) GetFetchProviderByID(ctx context.Context, id pgtype.UUID) (Fet
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getFetchProviderByName = `-- name: GetFetchProviderByName :one
-SELECT id, name, provider, config, enable, created_at, updated_at FROM fetch_providers WHERE name = $1
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM fetch_providers WHERE team_id = public.memoh_current_team_id() AND name = $1
 `
 
 func (q *Queries) GetFetchProviderByName(ctx context.Context, name string) (FetchProvider, error) {
@@ -92,12 +94,14 @@ func (q *Queries) GetFetchProviderByName(ctx context.Context, name string) (Fetc
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listFetchProviders = `-- name: ListFetchProviders :many
-SELECT id, name, provider, config, enable, created_at, updated_at FROM fetch_providers
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM fetch_providers
+WHERE team_id = public.memoh_current_team_id()
 ORDER BY created_at DESC
 `
 
@@ -118,6 +122,7 @@ func (q *Queries) ListFetchProviders(ctx context.Context) ([]FetchProvider, erro
 			&i.Enable,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -130,8 +135,8 @@ func (q *Queries) ListFetchProviders(ctx context.Context) ([]FetchProvider, erro
 }
 
 const listFetchProvidersByProvider = `-- name: ListFetchProvidersByProvider :many
-SELECT id, name, provider, config, enable, created_at, updated_at FROM fetch_providers
-WHERE provider = $1
+SELECT id, name, provider, config, enable, created_at, updated_at, team_id FROM fetch_providers
+WHERE team_id = public.memoh_current_team_id() AND provider = $1
 ORDER BY created_at DESC
 `
 
@@ -152,6 +157,7 @@ func (q *Queries) ListFetchProvidersByProvider(ctx context.Context, provider str
 			&i.Enable,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -171,8 +177,8 @@ SET
   config = $3,
   enable = $4,
   updated_at = now()
-WHERE id = $5
-RETURNING id, name, provider, config, enable, created_at, updated_at
+WHERE team_id = public.memoh_current_team_id() AND id = $5
+RETURNING id, name, provider, config, enable, created_at, updated_at, team_id
 `
 
 type UpdateFetchProviderParams struct {
@@ -200,6 +206,7 @@ func (q *Queries) UpdateFetchProvider(ctx context.Context, arg UpdateFetchProvid
 		&i.Enable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

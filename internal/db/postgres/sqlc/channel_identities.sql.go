@@ -14,7 +14,7 @@ import (
 const createChannelIdentity = `-- name: CreateChannelIdentity :one
 INSERT INTO channel_identities (channel_type, channel_subject_id, display_name, avatar_url, metadata)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at
+RETURNING id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, team_id
 `
 
 type CreateChannelIdentityParams struct {
@@ -43,14 +43,15 @@ func (q *Queries) CreateChannelIdentity(ctx context.Context, arg CreateChannelId
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getChannelIdentityByChannelSubject = `-- name: GetChannelIdentityByChannelSubject :one
-SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at
+SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, team_id
 FROM channel_identities
-WHERE channel_type = $1 AND channel_subject_id = $2
+WHERE team_id = public.memoh_current_team_id() AND channel_type = $1 AND channel_subject_id = $2
 `
 
 type GetChannelIdentityByChannelSubjectParams struct {
@@ -70,14 +71,15 @@ func (q *Queries) GetChannelIdentityByChannelSubject(ctx context.Context, arg Ge
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getChannelIdentityByID = `-- name: GetChannelIdentityByID :one
-SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at
+SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, team_id
 FROM channel_identities
-WHERE id = $1
+WHERE team_id = public.memoh_current_team_id() AND id = $1
 `
 
 func (q *Queries) GetChannelIdentityByID(ctx context.Context, id pgtype.UUID) (ChannelIdentity, error) {
@@ -92,14 +94,15 @@ func (q *Queries) GetChannelIdentityByID(ctx context.Context, id pgtype.UUID) (C
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getChannelIdentityByIDForUpdate = `-- name: GetChannelIdentityByIDForUpdate :one
-SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at
+SELECT id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, team_id
 FROM channel_identities
-WHERE id = $1
+WHERE team_id = public.memoh_current_team_id() AND id = $1
 FOR UPDATE
 `
 
@@ -115,6 +118,7 @@ func (q *Queries) GetChannelIdentityByIDForUpdate(ctx context.Context, id pgtype
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -128,13 +132,17 @@ SELECT
   ci.avatar_url,
   ci.metadata,
   ci.created_at,
-  ci.updated_at
+  ci.updated_at,
+  ci.team_id
 FROM channel_identities ci
 WHERE
-  $1::text = ''
-  OR ci.channel_type ILIKE '%' || $1::text || '%'
-  OR ci.channel_subject_id ILIKE '%' || $1::text || '%'
-  OR COALESCE(ci.display_name, '') ILIKE '%' || $1::text || '%'
+  ci.team_id = public.memoh_current_team_id()
+  AND (
+    $1::text = ''
+    OR ci.channel_type ILIKE '%' || $1::text || '%'
+    OR ci.channel_subject_id ILIKE '%' || $1::text || '%'
+    OR COALESCE(ci.display_name, '') ILIKE '%' || $1::text || '%'
+  )
 ORDER BY ci.updated_at DESC
 LIMIT $2
 `
@@ -162,6 +170,7 @@ func (q *Queries) SearchChannelIdentities(ctx context.Context, arg SearchChannel
 			&i.Metadata,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -176,13 +185,13 @@ func (q *Queries) SearchChannelIdentities(ctx context.Context, arg SearchChannel
 const upsertChannelIdentityByChannelSubject = `-- name: UpsertChannelIdentityByChannelSubject :one
 INSERT INTO channel_identities (channel_type, channel_subject_id, display_name, avatar_url, metadata)
 VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (channel_type, channel_subject_id)
+ON CONFLICT (team_id, channel_type, channel_subject_id)
 DO UPDATE SET
   display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), channel_identities.display_name),
   avatar_url = COALESCE(NULLIF(EXCLUDED.avatar_url, ''), channel_identities.avatar_url),
   metadata = EXCLUDED.metadata,
   updated_at = now()
-RETURNING id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at
+RETURNING id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at, team_id
 `
 
 type UpsertChannelIdentityByChannelSubjectParams struct {
@@ -211,6 +220,7 @@ func (q *Queries) UpsertChannelIdentityByChannelSubject(ctx context.Context, arg
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

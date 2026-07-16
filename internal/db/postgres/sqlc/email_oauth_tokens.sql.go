@@ -12,7 +12,7 @@ import (
 )
 
 const deleteEmailOAuthToken = `-- name: DeleteEmailOAuthToken :exec
-DELETE FROM email_oauth_tokens WHERE email_provider_id = $1
+DELETE FROM email_oauth_tokens WHERE team_id = public.memoh_current_team_id() AND email_provider_id = $1
 `
 
 func (q *Queries) DeleteEmailOAuthToken(ctx context.Context, emailProviderID pgtype.UUID) error {
@@ -21,7 +21,7 @@ func (q *Queries) DeleteEmailOAuthToken(ctx context.Context, emailProviderID pgt
 }
 
 const getEmailOAuthTokenByProvider = `-- name: GetEmailOAuthTokenByProvider :one
-SELECT id, email_provider_id, email_address, access_token, refresh_token, expires_at, scope, state, created_at, updated_at FROM email_oauth_tokens WHERE email_provider_id = $1
+SELECT id, email_provider_id, email_address, access_token, refresh_token, expires_at, scope, state, created_at, updated_at, team_id FROM email_oauth_tokens WHERE team_id = public.memoh_current_team_id() AND email_provider_id = $1
 `
 
 func (q *Queries) GetEmailOAuthTokenByProvider(ctx context.Context, emailProviderID pgtype.UUID) (EmailOauthToken, error) {
@@ -38,12 +38,13 @@ func (q *Queries) GetEmailOAuthTokenByProvider(ctx context.Context, emailProvide
 		&i.State,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getEmailOAuthTokenByState = `-- name: GetEmailOAuthTokenByState :one
-SELECT id, email_provider_id, email_address, access_token, refresh_token, expires_at, scope, state, created_at, updated_at FROM email_oauth_tokens WHERE state = $1 AND state != ''
+SELECT id, email_provider_id, email_address, access_token, refresh_token, expires_at, scope, state, created_at, updated_at, team_id FROM email_oauth_tokens WHERE team_id = public.memoh_current_team_id() AND state = $1 AND state != ''
 `
 
 func (q *Queries) GetEmailOAuthTokenByState(ctx context.Context, state string) (EmailOauthToken, error) {
@@ -60,6 +61,7 @@ func (q *Queries) GetEmailOAuthTokenByState(ctx context.Context, state string) (
 		&i.State,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -67,7 +69,7 @@ func (q *Queries) GetEmailOAuthTokenByState(ctx context.Context, state string) (
 const updateEmailOAuthState = `-- name: UpdateEmailOAuthState :exec
 INSERT INTO email_oauth_tokens (email_provider_id, state)
 VALUES ($1, $2)
-ON CONFLICT (email_provider_id) DO UPDATE SET
+ON CONFLICT (team_id, email_provider_id) DO UPDATE SET
   state      = EXCLUDED.state,
   updated_at = now()
 `
@@ -85,7 +87,7 @@ func (q *Queries) UpdateEmailOAuthState(ctx context.Context, arg UpdateEmailOAut
 const upsertEmailOAuthToken = `-- name: UpsertEmailOAuthToken :one
 INSERT INTO email_oauth_tokens (email_provider_id, email_address, access_token, refresh_token, expires_at, scope, state)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-ON CONFLICT (email_provider_id) DO UPDATE SET
+ON CONFLICT (team_id, email_provider_id) DO UPDATE SET
   email_address  = EXCLUDED.email_address,
   access_token   = EXCLUDED.access_token,
   refresh_token  = EXCLUDED.refresh_token,
@@ -93,7 +95,7 @@ ON CONFLICT (email_provider_id) DO UPDATE SET
   scope          = EXCLUDED.scope,
   state          = EXCLUDED.state,
   updated_at     = now()
-RETURNING id, email_provider_id, email_address, access_token, refresh_token, expires_at, scope, state, created_at, updated_at
+RETURNING id, email_provider_id, email_address, access_token, refresh_token, expires_at, scope, state, created_at, updated_at, team_id
 `
 
 type UpsertEmailOAuthTokenParams struct {
@@ -128,6 +130,7 @@ func (q *Queries) UpsertEmailOAuthToken(ctx context.Context, arg UpsertEmailOAut
 		&i.State,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

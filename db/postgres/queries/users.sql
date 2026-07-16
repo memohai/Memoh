@@ -6,7 +6,7 @@ RETURNING *;
 -- name: GetUserByID :one
 SELECT *
 FROM users
-WHERE id = $1;
+WHERE team_id = public.memoh_current_team_id() AND id = $1;
 
 -- name: CreateAccount :one
 UPDATE users
@@ -19,7 +19,7 @@ SET username = sqlc.arg(username),
     is_active = sqlc.arg(is_active),
     data_root = sqlc.arg(data_root),
     updated_at = now()
-WHERE id = sqlc.arg(user_id)
+WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(user_id)
 RETURNING *;
 
 -- name: UpsertAccountByUsername :one
@@ -36,7 +36,7 @@ VALUES (
   sqlc.arg(data_root),
   '{}'::jsonb
 )
-ON CONFLICT (username) DO UPDATE SET
+ON CONFLICT (team_id, username) DO UPDATE SET
   email = EXCLUDED.email,
   password_hash = EXCLUDED.password_hash,
   role = EXCLUDED.role,
@@ -48,26 +48,28 @@ ON CONFLICT (username) DO UPDATE SET
 RETURNING *;
 
 -- name: GetAccountByIdentity :one
-SELECT * FROM users WHERE username = sqlc.arg(identity) OR email = sqlc.arg(identity);
+SELECT * FROM users WHERE team_id = public.memoh_current_team_id() AND (username = sqlc.arg(identity) OR email = sqlc.arg(identity));
 
 -- name: GetAccountByUserID :one
-SELECT * FROM users WHERE id = sqlc.arg(user_id);
+SELECT * FROM users WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(user_id);
 
 -- name: CountAccounts :one
 SELECT COUNT(*)::bigint AS count
 FROM users
-WHERE username IS NOT NULL
+WHERE team_id = public.memoh_current_team_id()
+  AND username IS NOT NULL
   AND password_hash IS NOT NULL;
 
 -- name: ListAccounts :many
 SELECT * FROM users
-WHERE username IS NOT NULL
+WHERE team_id = public.memoh_current_team_id() AND username IS NOT NULL
 ORDER BY created_at DESC;
 
 -- name: SearchAccounts :many
 SELECT *
 FROM users
-WHERE username IS NOT NULL
+WHERE team_id = public.memoh_current_team_id()
+  AND username IS NOT NULL
   AND (
     sqlc.arg(query)::text = ''
     OR username ILIKE '%' || sqlc.arg(query)::text || '%'
@@ -85,7 +87,7 @@ SET display_name = $2,
     is_active = $5,
     metadata = $6,
     updated_at = now()
-WHERE id = $1
+WHERE team_id = public.memoh_current_team_id() AND id = $1
 RETURNING *;
 
 -- name: UpdateAccountAdmin :one
@@ -95,14 +97,14 @@ SET role = sqlc.arg(role)::user_role,
     avatar_url = sqlc.arg(avatar_url),
     is_active = sqlc.arg(is_active),
     updated_at = now()
-WHERE id = sqlc.arg(user_id)
+WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(user_id)
 RETURNING *;
 
 -- name: UpdateAccountPassword :one
 UPDATE users
 SET password_hash = $2,
     updated_at = now()
-WHERE id = $1
+WHERE team_id = public.memoh_current_team_id() AND id = $1
 RETURNING *;
 
 -- name: RemoveMember :one
@@ -115,12 +117,12 @@ SET username = NULL,
     data_root = NULL,
     is_active = FALSE,
     updated_at = now()
-WHERE id = sqlc.arg(user_id)
+WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(user_id)
 RETURNING id;
 
 -- name: UpdateAccountLastLogin :one
 UPDATE users
 SET last_login_at = now(),
     updated_at = now()
-WHERE id = $1
+WHERE team_id = public.memoh_current_team_id() AND id = $1
 RETURNING *;

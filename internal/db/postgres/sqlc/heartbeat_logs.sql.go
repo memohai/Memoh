@@ -19,8 +19,8 @@ SET status = $2,
     usage = $5,
     model_id = $6,
     completed_at = now()
-WHERE id = $1
-RETURNING id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at
+WHERE team_id = public.memoh_current_team_id() AND id = $1
+RETURNING id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at, team_id
 `
 
 type CompleteHeartbeatLogParams struct {
@@ -53,12 +53,13 @@ func (q *Queries) CompleteHeartbeatLog(ctx context.Context, arg CompleteHeartbea
 		&i.ModelID,
 		&i.StartedAt,
 		&i.CompletedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const countHeartbeatLogsByBot = `-- name: CountHeartbeatLogsByBot :one
-SELECT count(*) FROM bot_heartbeat_logs WHERE bot_id = $1
+SELECT count(*) FROM bot_heartbeat_logs WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 `
 
 func (q *Queries) CountHeartbeatLogsByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
@@ -109,7 +110,7 @@ func (q *Queries) CreateHeartbeatLog(ctx context.Context, arg CreateHeartbeatLog
 }
 
 const deleteHeartbeatLogsByBot = `-- name: DeleteHeartbeatLogsByBot :exec
-DELETE FROM bot_heartbeat_logs WHERE bot_id = $1
+DELETE FROM bot_heartbeat_logs WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 `
 
 func (q *Queries) DeleteHeartbeatLogsByBot(ctx context.Context, botID pgtype.UUID) error {
@@ -120,7 +121,7 @@ func (q *Queries) DeleteHeartbeatLogsByBot(ctx context.Context, botID pgtype.UUI
 const listHeartbeatLogsByBot = `-- name: ListHeartbeatLogsByBot :many
 SELECT id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM bot_heartbeat_logs
-WHERE bot_id = $1
+WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 ORDER BY started_at DESC
 LIMIT $2 OFFSET $3
 `

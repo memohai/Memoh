@@ -28,7 +28,7 @@ func setupScheduleIntegrationTest(t *testing.T) (*schedule.Service, dbstore.Quer
 	}
 
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
+	pool, err := db.OpenPostgresDSN(ctx, dsn)
 	if err != nil {
 		t.Skipf("skip integration test: cannot connect to database: %v", err)
 	}
@@ -80,6 +80,7 @@ func createUserBotAndSchedule(ctx context.Context, t *testing.T, queries dbstore
 	meta, _ := json.Marshal(map[string]any{"source": "schedule-integration-test"})
 	botRow, err := queries.CreateBot(ctx, sqlc.CreateBotParams{
 		OwnerUserID: pgOwnerID,
+		Name:        "schedule-test-bot",
 		DisplayName: pgtype.Text{String: "schedule-test-bot", Valid: true},
 		AvatarUrl:   pgtype.Text{},
 		IsActive:    true,

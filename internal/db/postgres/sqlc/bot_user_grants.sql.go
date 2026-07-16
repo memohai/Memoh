@@ -20,7 +20,7 @@ VALUES (
   $3,
   $5::uuid
 )
-RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at
+RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at, team_id
 `
 
 type CreateBotUserGrantParams struct {
@@ -49,12 +49,13 @@ func (q *Queries) CreateBotUserGrant(ctx context.Context, arg CreateBotUserGrant
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const deleteBotUserGrantByID = `-- name: DeleteBotUserGrantByID :exec
-DELETE FROM bot_user_grants WHERE id = $1
+DELETE FROM bot_user_grants WHERE team_id = public.memoh_current_team_id() AND id = $1
 `
 
 func (q *Queries) DeleteBotUserGrantByID(ctx context.Context, id pgtype.UUID) error {
@@ -63,9 +64,9 @@ func (q *Queries) DeleteBotUserGrantByID(ctx context.Context, id pgtype.UUID) er
 }
 
 const getBotUserGrantByID = `-- name: GetBotUserGrantByID :one
-SELECT id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at
+SELECT id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at, team_id
 FROM bot_user_grants
-WHERE id = $1
+WHERE team_id = public.memoh_current_team_id() AND id = $1
 `
 
 func (q *Queries) GetBotUserGrantByID(ctx context.Context, id pgtype.UUID) (BotUserGrant, error) {
@@ -80,6 +81,7 @@ func (q *Queries) GetBotUserGrantByID(ctx context.Context, id pgtype.UUID) (BotU
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -98,8 +100,8 @@ SELECT
   u.display_name AS user_display_name,
   u.avatar_url AS user_avatar_url
 FROM bot_user_grants g
-LEFT JOIN users u ON u.id = g.user_id
-WHERE g.bot_id = $1
+LEFT JOIN users u ON u.id = g.user_id AND u.team_id = public.memoh_current_team_id()
+WHERE g.team_id = public.memoh_current_team_id() AND g.bot_id = $1
 ORDER BY g.subject_type DESC, g.created_at ASC
 `
 
@@ -152,7 +154,8 @@ func (q *Queries) ListBotUserGrants(ctx context.Context, botID pgtype.UUID) ([]L
 const listBotUserGrantsForUser = `-- name: ListBotUserGrantsForUser :many
 SELECT id, bot_id, subject_type, user_id, permissions
 FROM bot_user_grants
-WHERE bot_id = $1
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $1
   AND (
     subject_type = 'everyone'
     OR (subject_type = 'user' AND user_id = $2::uuid)
@@ -202,8 +205,8 @@ const updateBotUserGrantPermissions = `-- name: UpdateBotUserGrantPermissions :o
 UPDATE bot_user_grants
 SET permissions = $2,
     updated_at = now()
-WHERE id = $1
-RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at
+WHERE team_id = public.memoh_current_team_id() AND id = $1
+RETURNING id, bot_id, subject_type, user_id, permissions, created_by_user_id, created_at, updated_at, team_id
 `
 
 type UpdateBotUserGrantPermissionsParams struct {
@@ -223,6 +226,7 @@ func (q *Queries) UpdateBotUserGrantPermissions(ctx context.Context, arg UpdateB
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }

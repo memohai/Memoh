@@ -42,15 +42,18 @@ func TestCompactionArtifactMigrationPostgresPath(t *testing.T) {
 	if _, err := tx.Exec(ctx, "SET LOCAL search_path TO "+quotedSchema); err != nil {
 		t.Fatalf("set search path: %v", err)
 	}
+	bindTeamQueryFixture(t, ctx, tx)
 	if _, err := tx.Exec(ctx, `
 CREATE TABLE bot_sessions (
   id UUID PRIMARY KEY,
-  bot_id UUID NOT NULL
+  bot_id UUID NOT NULL,
+  team_id UUID NOT NULL DEFAULT public.memoh_current_team_id()
 );
 
 CREATE TABLE bot_history_message_compacts (
   id UUID PRIMARY KEY,
   bot_id UUID NOT NULL,
+  team_id UUID NOT NULL DEFAULT public.memoh_current_team_id(),
   session_id UUID,
   status TEXT NOT NULL DEFAULT 'pending',
   summary TEXT NOT NULL DEFAULT '',
@@ -65,6 +68,7 @@ CREATE TABLE bot_history_message_compacts (
 CREATE TABLE bot_history_messages (
   id UUID PRIMARY KEY,
   bot_id UUID NOT NULL,
+  team_id UUID NOT NULL DEFAULT public.memoh_current_team_id(),
   session_id UUID,
   compact_id UUID REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL,
   turn_visible BOOLEAN NOT NULL DEFAULT true,

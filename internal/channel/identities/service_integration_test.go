@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	dbpkg "github.com/memohai/memoh/internal/db"
 
 	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -27,7 +27,7 @@ func setupIntegrationTest(t *testing.T) (*identities.Service, dbstore.Queries, f
 	}
 
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
+	pool, err := dbpkg.OpenPostgresDSN(ctx, dsn)
 	if err != nil {
 		t.Skipf("skip integration test: cannot connect to database: %v", err)
 	}

@@ -35,18 +35,18 @@ SELECT
   bots.overlay_config,
   bots.command_ui_language
 FROM bots
-LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id
-LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = bots.heartbeat_model_id
-LEFT JOIN models AS compaction_models ON compaction_models.id = bots.compaction_model_id
-LEFT JOIN models AS title_models ON title_models.id = bots.title_model_id
-LEFT JOIN models AS image_models ON image_models.id = bots.image_model_id
-LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id
-LEFT JOIN fetch_providers ON fetch_providers.id = bots.fetch_provider_id
-LEFT JOIN memory_providers ON memory_providers.id = bots.memory_provider_id
-LEFT JOIN models AS tts_models ON tts_models.id = bots.tts_model_id
-LEFT JOIN models AS transcription_models ON transcription_models.id = bots.transcription_model_id
-LEFT JOIN models AS video_models ON video_models.id = bots.video_model_id
-WHERE bots.id = $1;
+LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id AND chat_models.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = bots.heartbeat_model_id AND heartbeat_models.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS compaction_models ON compaction_models.id = bots.compaction_model_id AND compaction_models.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS title_models ON title_models.id = bots.title_model_id AND title_models.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS image_models ON image_models.id = bots.image_model_id AND image_models.team_id = public.memoh_current_team_id()
+LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id AND search_providers.team_id = public.memoh_current_team_id()
+LEFT JOIN fetch_providers ON fetch_providers.id = bots.fetch_provider_id AND fetch_providers.team_id = public.memoh_current_team_id()
+LEFT JOIN memory_providers ON memory_providers.id = bots.memory_provider_id AND memory_providers.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS tts_models ON tts_models.id = bots.tts_model_id AND tts_models.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS transcription_models ON transcription_models.id = bots.transcription_model_id AND transcription_models.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS video_models ON video_models.id = bots.video_model_id AND video_models.team_id = public.memoh_current_team_id()
+WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $1;
 
 -- name: UpsertBotSettings :one
 WITH updated AS (
@@ -88,7 +88,7 @@ WITH updated AS (
       overlay_config = sqlc.arg(overlay_config),
       command_ui_language = sqlc.arg(command_ui_language),
       updated_at = now()
-  WHERE bots.id = sqlc.arg(id)
+  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = sqlc.arg(id)
   RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
@@ -127,17 +127,17 @@ SELECT
   updated.overlay_config,
   updated.command_ui_language
 FROM updated
-LEFT JOIN models AS chat_models ON chat_models.id = updated.chat_model_id
-LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = updated.heartbeat_model_id
-LEFT JOIN models AS compaction_models ON compaction_models.id = updated.compaction_model_id
-LEFT JOIN models AS title_models ON title_models.id = updated.title_model_id
-LEFT JOIN models AS image_models ON image_models.id = updated.image_model_id
-LEFT JOIN search_providers ON search_providers.id = updated.search_provider_id
-LEFT JOIN fetch_providers ON fetch_providers.id = updated.fetch_provider_id
-LEFT JOIN memory_providers ON memory_providers.id = updated.memory_provider_id
-LEFT JOIN models AS tts_models ON tts_models.id = updated.tts_model_id
-LEFT JOIN models AS transcription_models ON transcription_models.id = updated.transcription_model_id
-LEFT JOIN models AS video_models ON video_models.id = updated.video_model_id;
+LEFT JOIN models AS chat_models ON chat_models.id = updated.chat_model_id AND chat_models.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = updated.heartbeat_model_id AND heartbeat_models.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS compaction_models ON compaction_models.id = updated.compaction_model_id AND compaction_models.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS title_models ON title_models.id = updated.title_model_id AND title_models.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS image_models ON image_models.id = updated.image_model_id AND image_models.team_id = public.memoh_current_team_id()
+LEFT JOIN search_providers ON search_providers.id = updated.search_provider_id AND search_providers.team_id = public.memoh_current_team_id()
+LEFT JOIN fetch_providers ON fetch_providers.id = updated.fetch_provider_id AND fetch_providers.team_id = public.memoh_current_team_id()
+LEFT JOIN memory_providers ON memory_providers.id = updated.memory_provider_id AND memory_providers.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS tts_models ON tts_models.id = updated.tts_model_id AND tts_models.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS transcription_models ON transcription_models.id = updated.transcription_model_id AND transcription_models.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS video_models ON video_models.id = updated.video_model_id AND video_models.team_id = public.memoh_current_team_id();
 
 -- name: DeleteSettingsByBotID :exec
 UPDATE bots
@@ -174,4 +174,4 @@ SET language = 'auto',
     overlay_enabled = false,
     overlay_config = '{}'::jsonb,
     updated_at = now()
-WHERE id = $1;
+WHERE team_id = public.memoh_current_team_id() AND id = $1;

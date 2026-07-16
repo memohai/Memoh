@@ -19,8 +19,8 @@ SET status = $2,
     usage = $5,
     model_id = $6,
     completed_at = now()
-WHERE id = $1
-RETURNING id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at
+WHERE team_id = public.memoh_current_team_id() AND id = $1
+RETURNING id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, model_id, started_at, completed_at, team_id
 `
 
 type CompleteScheduleLogParams struct {
@@ -54,12 +54,13 @@ func (q *Queries) CompleteScheduleLog(ctx context.Context, arg CompleteScheduleL
 		&i.ModelID,
 		&i.StartedAt,
 		&i.CompletedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const countScheduleLogsByBot = `-- name: CountScheduleLogsByBot :one
-SELECT count(*) FROM schedule_logs WHERE bot_id = $1
+SELECT count(*) FROM schedule_logs WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 `
 
 func (q *Queries) CountScheduleLogsByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
@@ -70,7 +71,7 @@ func (q *Queries) CountScheduleLogsByBot(ctx context.Context, botID pgtype.UUID)
 }
 
 const countScheduleLogsBySchedule = `-- name: CountScheduleLogsBySchedule :one
-SELECT count(*) FROM schedule_logs WHERE schedule_id = $1
+SELECT count(*) FROM schedule_logs WHERE team_id = public.memoh_current_team_id() AND schedule_id = $1
 `
 
 func (q *Queries) CountScheduleLogsBySchedule(ctx context.Context, scheduleID pgtype.UUID) (int64, error) {
@@ -124,7 +125,7 @@ func (q *Queries) CreateScheduleLog(ctx context.Context, arg CreateScheduleLogPa
 }
 
 const deleteScheduleLogsByBot = `-- name: DeleteScheduleLogsByBot :exec
-DELETE FROM schedule_logs WHERE bot_id = $1
+DELETE FROM schedule_logs WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 `
 
 func (q *Queries) DeleteScheduleLogsByBot(ctx context.Context, botID pgtype.UUID) error {
@@ -133,7 +134,7 @@ func (q *Queries) DeleteScheduleLogsByBot(ctx context.Context, botID pgtype.UUID
 }
 
 const deleteScheduleLogsBySchedule = `-- name: DeleteScheduleLogsBySchedule :exec
-DELETE FROM schedule_logs WHERE schedule_id = $1
+DELETE FROM schedule_logs WHERE team_id = public.memoh_current_team_id() AND schedule_id = $1
 `
 
 func (q *Queries) DeleteScheduleLogsBySchedule(ctx context.Context, scheduleID pgtype.UUID) error {
@@ -144,7 +145,7 @@ func (q *Queries) DeleteScheduleLogsBySchedule(ctx context.Context, scheduleID p
 const listScheduleLogsByBot = `-- name: ListScheduleLogsByBot :many
 SELECT id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM schedule_logs
-WHERE bot_id = $1
+WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 ORDER BY started_at DESC
 LIMIT $2 OFFSET $3
 `
@@ -202,7 +203,7 @@ func (q *Queries) ListScheduleLogsByBot(ctx context.Context, arg ListScheduleLog
 const listScheduleLogsBySchedule = `-- name: ListScheduleLogsBySchedule :many
 SELECT id, schedule_id, bot_id, session_id, status, result_text, error_message, usage, started_at, completed_at
 FROM schedule_logs
-WHERE schedule_id = $1
+WHERE team_id = public.memoh_current_team_id() AND schedule_id = $1
 ORDER BY started_at DESC
 LIMIT $2 OFFSET $3
 `

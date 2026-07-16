@@ -13,7 +13,7 @@ import (
 
 const countEmailOutboxByBot = `-- name: CountEmailOutboxByBot :one
 SELECT count(*) FROM email_outbox
-WHERE bot_id = $1
+WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 `
 
 func (q *Queries) CountEmailOutboxByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
@@ -36,7 +36,7 @@ VALUES (
   $8,
   $9
 )
-RETURNING id, provider_id, bot_id, message_id, from_address, to_addresses, subject, body_text, body_html, attachments, status, error, sent_at, created_at
+RETURNING id, provider_id, bot_id, message_id, from_address, to_addresses, subject, body_text, body_html, attachments, status, error, sent_at, created_at, team_id
 `
 
 type CreateEmailOutboxParams struct {
@@ -79,12 +79,13 @@ func (q *Queries) CreateEmailOutbox(ctx context.Context, arg CreateEmailOutboxPa
 		&i.Error,
 		&i.SentAt,
 		&i.CreatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const getEmailOutboxByID = `-- name: GetEmailOutboxByID :one
-SELECT id, provider_id, bot_id, message_id, from_address, to_addresses, subject, body_text, body_html, attachments, status, error, sent_at, created_at FROM email_outbox WHERE id = $1
+SELECT id, provider_id, bot_id, message_id, from_address, to_addresses, subject, body_text, body_html, attachments, status, error, sent_at, created_at, team_id FROM email_outbox WHERE team_id = public.memoh_current_team_id() AND id = $1
 `
 
 func (q *Queries) GetEmailOutboxByID(ctx context.Context, id pgtype.UUID) (EmailOutbox, error) {
@@ -105,13 +106,14 @@ func (q *Queries) GetEmailOutboxByID(ctx context.Context, id pgtype.UUID) (Email
 		&i.Error,
 		&i.SentAt,
 		&i.CreatedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
 const listEmailOutboxByBot = `-- name: ListEmailOutboxByBot :many
-SELECT id, provider_id, bot_id, message_id, from_address, to_addresses, subject, body_text, body_html, attachments, status, error, sent_at, created_at FROM email_outbox
-WHERE bot_id = $1
+SELECT id, provider_id, bot_id, message_id, from_address, to_addresses, subject, body_text, body_html, attachments, status, error, sent_at, created_at, team_id FROM email_outbox
+WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 ORDER BY created_at DESC
 LIMIT $3 OFFSET $2
 `
@@ -146,6 +148,7 @@ func (q *Queries) ListEmailOutboxByBot(ctx context.Context, arg ListEmailOutboxB
 			&i.Error,
 			&i.SentAt,
 			&i.CreatedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -160,7 +163,7 @@ func (q *Queries) ListEmailOutboxByBot(ctx context.Context, arg ListEmailOutboxB
 const updateEmailOutboxFailed = `-- name: UpdateEmailOutboxFailed :exec
 UPDATE email_outbox
 SET status = 'failed', error = $1
-WHERE id = $2
+WHERE team_id = public.memoh_current_team_id() AND id = $2
 `
 
 type UpdateEmailOutboxFailedParams struct {
@@ -176,7 +179,7 @@ func (q *Queries) UpdateEmailOutboxFailed(ctx context.Context, arg UpdateEmailOu
 const updateEmailOutboxSent = `-- name: UpdateEmailOutboxSent :exec
 UPDATE email_outbox
 SET message_id = $1, status = 'sent', sent_at = now()
-WHERE id = $2
+WHERE team_id = public.memoh_current_team_id() AND id = $2
 `
 
 type UpdateEmailOutboxSentParams struct {
