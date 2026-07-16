@@ -386,6 +386,7 @@ export const useChatStore = defineStore('chat', () => {
     streamIdForEvent,
     trackAssistantStream,
     getAssistantStream,
+    mapAssistantStreamMessage,
     resolveAssistantStream,
     rejectAssistantStream,
     discardAssistantStream,
@@ -1193,7 +1194,12 @@ export const useChatStore = defineStore('chat', () => {
           }
         }
         const messageStream = ensureDiscussStream(streamId, sid, bid)
-        if (messageStream) upsertAssistantUIMessage(messageStream.assistantTurn, event.data)
+        if (messageStream) {
+          upsertAssistantUIMessage(
+            messageStream.assistantTurn,
+            mapAssistantStreamMessage(streamId, event.data),
+          )
+        }
         break
       case 'end':
         const endedSession = getAssistantStream(streamId)

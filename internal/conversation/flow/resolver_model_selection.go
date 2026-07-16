@@ -23,12 +23,18 @@ func (r *Resolver) selectChatModel(ctx context.Context, req conversation.ChatReq
 	modelID := strings.TrimSpace(req.Model)
 	providerFilter := strings.TrimSpace(req.Provider)
 
-	// Priority: request model > chat settings > bot settings.
+	// Priority: request model > chat settings > bot settings > session history.
 	if modelID == "" && providerFilter == "" {
 		if value := strings.TrimSpace(cs.ModelID); value != "" {
 			modelID = value
 		} else if value := strings.TrimSpace(botSettings.ChatModelID); value != "" {
 			modelID = value
+		} else {
+			// Resumed turns (ask_user answers, tool approval decisions) carry no
+			// request model, and the bot may have no default chat model when the
+			// web client selects the model per request. Continue with the model
+			// that produced the session's latest round.
+			modelID = r.latestSessionModelID(ctx, req.SessionID)
 		}
 	}
 
@@ -60,6 +66,24 @@ func (r *Resolver) selectChatModel(ctx context.Context, req conversation.ChatReq
 		}
 	}
 	return models.GetResponse{}, sqlc.Provider{}, fmt.Errorf("chat model %q not found for provider %q", modelID, providerFilter)
+}
+
+// latestSessionModelID returns the models.id UUID of the most recent history
+// message in the session that recorded one, or "" when the session has no
+// model-bearing history yet.
+func (r *Resolver) latestSessionModelID(ctx context.Context, sessionID string) string {
+	if r.queries == nil {
+		return ""
+	}
+	pgSessionID, err := parseResolverUUID(sessionID)
+	if err != nil {
+		return ""
+	}
+	modelID, err := r.queries.GetLatestSessionModelID(ctx, pgSessionID)
+	if err != nil || !modelID.Valid {
+		return ""
+	}
+	return modelID.String()
 }
 
 func (r *Resolver) fetchChatModel(ctx context.Context, modelID string) (models.GetResponse, sqlc.Provider, error) {

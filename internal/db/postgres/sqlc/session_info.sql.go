@@ -59,6 +59,22 @@ func (q *Queries) GetLatestSessionIDByBot(ctx context.Context, botID pgtype.UUID
 	return id, err
 }
 
+const getLatestSessionModelID = `-- name: GetLatestSessionModelID :one
+SELECT m.model_id
+FROM bot_visible_history_messages m
+WHERE m.session_id = $1
+  AND m.model_id IS NOT NULL
+ORDER BY m.created_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLatestSessionModelID(ctx context.Context, sessionID pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getLatestSessionModelID, sessionID)
+	var model_id pgtype.UUID
+	err := row.Scan(&model_id)
+	return model_id, err
+}
+
 const getSessionCacheStats = `-- name: GetSessionCacheStats :one
 SELECT
   COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS total_input_tokens,

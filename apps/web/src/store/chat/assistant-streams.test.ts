@@ -158,6 +158,48 @@ describe('assistant stream registry', () => {
     expect(turn.streaming).toBe(false)
   })
 
+  it('maps resumed stream block ids after the existing assistant turn', async () => {
+    const { registry } = makeRegistry()
+    const turn = assistantTurn('resumed-turn')
+    turn.messages.push({
+      id: 4,
+      type: 'tool',
+      name: 'ask_user',
+      input: {},
+      tool_call_id: 'call-ask',
+      running: false,
+      toolCallId: 'call-ask',
+      toolName: 'ask_user',
+      result: null,
+      done: true,
+    })
+    const completion = registry.trackAssistantStream({
+      streamId: 'response-stream',
+      assistantTurn: turn,
+      botId: 'bot-1',
+      sessionId: 'session-a',
+    })
+
+    expect(registry.mapAssistantStreamMessage('response-stream', {
+      id: 0,
+      type: 'reasoning',
+      content: 'Continuing',
+    })).toMatchObject({ id: 5, content: 'Continuing' })
+    expect(registry.mapAssistantStreamMessage('response-stream', {
+      id: 0,
+      type: 'reasoning',
+      content: 'Continuing with more detail',
+    })).toMatchObject({ id: 5, content: 'Continuing with more detail' })
+    expect(registry.mapAssistantStreamMessage('response-stream', {
+      id: 1,
+      type: 'text',
+      content: 'Done',
+    })).toMatchObject({ id: 6, content: 'Done' })
+
+    registry.resolveAssistantStream('response-stream')
+    await completion
+  })
+
   it('binds a deferred stream once and retains created-session metadata past terminal', async () => {
     const { registry, sessionId } = makeRegistry(null)
     const deferred = track(registry, 'stream-1', '')
