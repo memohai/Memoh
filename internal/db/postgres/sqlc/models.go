@@ -180,17 +180,26 @@ type BotHistoryMessageAsset struct {
 }
 
 type BotHistoryMessageCompact struct {
-	ID           pgtype.UUID        `json:"id"`
-	BotID        pgtype.UUID        `json:"bot_id"`
-	SessionID    pgtype.UUID        `json:"session_id"`
-	Status       string             `json:"status"`
-	Summary      string             `json:"summary"`
-	MessageCount int32              `json:"message_count"`
-	ErrorMessage string             `json:"error_message"`
-	Usage        []byte             `json:"usage"`
-	ModelID      pgtype.UUID        `json:"model_id"`
-	StartedAt    pgtype.Timestamptz `json:"started_at"`
-	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
+	ID              pgtype.UUID        `json:"id"`
+	BotID           pgtype.UUID        `json:"bot_id"`
+	SessionID       pgtype.UUID        `json:"session_id"`
+	Status          string             `json:"status"`
+	Summary         string             `json:"summary"`
+	MessageCount    int32              `json:"message_count"`
+	ErrorMessage    string             `json:"error_message"`
+	Usage           []byte             `json:"usage"`
+	ModelID         pgtype.UUID        `json:"model_id"`
+	ArtifactVersion int32              `json:"artifact_version"`
+	Coverage        []byte             `json:"coverage"`
+	AnchorStartMs   int64              `json:"anchor_start_ms"`
+	AnchorEndMs     int64              `json:"anchor_end_ms"`
+	ArtifactLevel   int32              `json:"artifact_level"`
+	ParentIds       []pgtype.UUID      `json:"parent_ids"`
+	SupersededBy    pgtype.UUID        `json:"superseded_by"`
+	SupersededAt    pgtype.Timestamptz `json:"superseded_at"`
+	CompactionEpoch int64              `json:"compaction_epoch"`
+	StartedAt       pgtype.Timestamptz `json:"started_at"`
+	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
 }
 
 type BotPluginInstallation struct {
@@ -243,6 +252,7 @@ type BotSession struct {
 	Title            string             `json:"title"`
 	Metadata         []byte             `json:"metadata"`
 	NextTurnPosition int64              `json:"next_turn_position"`
+	CompactionEpoch  int64              `json:"compaction_epoch"`
 	ParentSessionID  pgtype.UUID        `json:"parent_session_id"`
 	CreatedByUserID  pgtype.UUID        `json:"created_by_user_id"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`

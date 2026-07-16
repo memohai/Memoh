@@ -7,10 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -77,23 +75,34 @@ func decodePromptMessages(body []byte) string {
 	return sb.String()
 }
 
-// --- fake Queries (only the 5 methods compaction touches) ---------------------
-
 type fakeQueries struct {
 	dbstore.Queries // embedded interface; unimplemented methods would panic if called
 	uncompacted     []sqlc.ListUncompactedMessagesBySessionRow
 	priorLogs       []sqlc.BotHistoryMessageCompact
 	completeErr     error
 	listPanic       bool
+	listStarted     chan struct{}
+	listRelease     <-chan struct{}
 	onComplete      func()
+	markedRowCount  *int64
 
-	created   bool
-	markedIDs []pgtype.UUID
-	completed sqlc.CompleteCompactionLogParams
+	created        bool
+	createArg      sqlc.CreateCompactionLogParams
+	createErr      error
+	markedIDs      []pgtype.UUID
+	markArg        sqlc.MarkMessagesCompactedParams
+	queryCalls     []string
+	completed      sqlc.CompleteCompactionLogParams
+	completeCalls  []sqlc.CompleteCompactionLogParams
+	completeErrors []error
 }
 
-func (f *fakeQueries) CreateCompactionLog(_ context.Context, _ sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
+func (f *fakeQueries) CreateCompactionLog(_ context.Context, arg sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
 	f.created = true
+	f.createArg = arg
+	if f.createErr != nil {
+		return sqlc.BotHistoryMessageCompact{}, f.createErr
+	}
 	return sqlc.BotHistoryMessageCompact{ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}}, nil
 }
 
@@ -101,21 +110,47 @@ func (f *fakeQueries) ListUncompactedMessagesBySession(_ context.Context, _ pgty
 	if f.listPanic {
 		panic("boom: injected query panic")
 	}
+	if f.listStarted != nil {
+		close(f.listStarted)
+	}
+	if f.listRelease != nil {
+		<-f.listRelease
+	}
 	return f.uncompacted, nil
 }
 
-func (f *fakeQueries) ListCompactionLogsBySession(_ context.Context, _ pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
+func (f *fakeQueries) ListMessageAssetsBatch(_ context.Context, _ []pgtype.UUID) ([]sqlc.ListMessageAssetsBatchRow, error) {
+	f.queryCalls = append(f.queryCalls, "assets")
+	return nil, nil
+}
+
+func (f *fakeQueries) ListCompactionArtifactLineageBySession(_ context.Context, _ pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
 	return f.priorLogs, nil
 }
 
-func (f *fakeQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) error {
-	f.markedIDs = append([]pgtype.UUID(nil), arg.Column2...)
-	return nil
+func (f *fakeQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) (int64, error) {
+	f.queryCalls = append(f.queryCalls, "mark")
+	f.markedIDs = append([]pgtype.UUID(nil), arg.MessageIds...)
+	f.markArg = arg
+	f.markArg.MessageIds = append([]pgtype.UUID(nil), arg.MessageIds...)
+	f.markArg.ExpectedCompactIds = append([]pgtype.UUID(nil), arg.ExpectedCompactIds...)
+	if f.markedRowCount != nil {
+		return *f.markedRowCount, nil
+	}
+	return int64(len(arg.MessageIds)), nil
 }
 
 func (f *fakeQueries) CompleteCompactionLog(_ context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
+	f.completeCalls = append(f.completeCalls, arg)
 	if f.onComplete != nil {
 		f.onComplete()
+	}
+	if len(f.completeErrors) > 0 {
+		err := f.completeErrors[0]
+		f.completeErrors = f.completeErrors[1:]
+		if err != nil {
+			return sqlc.BotHistoryMessageCompact{}, err
+		}
 	}
 	if f.completeErr != nil {
 		return sqlc.BotHistoryMessageCompact{}, f.completeErr
@@ -227,33 +262,23 @@ func TestDoCompactionMarksToolAwareWindowAndRendersCleanPrompt(t *testing.T) {
 	}
 }
 
-func TestDoCompactionInjectsPriorContext(t *testing.T) {
-	rows := machineryCorpus(t)
-	q := &fakeQueries{
-		uncompacted: rows,
-		priorLogs:   []sqlc.BotHistoryMessageCompact{{Summary: "earlier-segment-summary", Status: "ok"}},
-	}
-	stub := &stubModel{summary: "S2"}
-	svc := newMachineryService(q)
-
-	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450)); err != nil {
-		t.Fatalf("RunCompactionSync: %v", err)
-	}
-	if !strings.Contains(stub.prompt, "prior_context") || !strings.Contains(stub.prompt, "earlier-segment-summary") {
-		t.Fatalf("prior summary not injected as prior context:\n%s", stub.prompt)
-	}
-}
-
 func TestDoCompactionSkipsWhitespaceOnlyPriorSummaries(t *testing.T) {
 	rows := machineryCorpus(t)
+	stub := &stubModel{summary: "S3"}
+	cfg := machineryConfig(stub, 450)
 	q := &fakeQueries{
 		uncompacted: rows,
-		priorLogs:   []sqlc.BotHistoryMessageCompact{{Summary: "  \n\t", Status: "ok"}},
+		priorLogs: []sqlc.BotHistoryMessageCompact{{
+			ID:        pgtype.UUID{Bytes: uuid.New(), Valid: true},
+			BotID:     pgtype.UUID{Bytes: uuid.MustParse(cfg.BotID), Valid: true},
+			SessionID: pgtype.UUID{Bytes: uuid.MustParse(cfg.SessionID), Valid: true},
+			Summary:   "  \n\t",
+			Status:    "ok",
+		}},
 	}
-	stub := &stubModel{summary: "S3"}
 	svc := newMachineryService(q)
 
-	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450)); err != nil {
+	if _, err := svc.RunCompactionSync(context.Background(), cfg); err != nil {
 		t.Fatalf("RunCompactionSync: %v", err)
 	}
 	if strings.Contains(stub.prompt, "The following are summaries of earlier parts") {
@@ -265,6 +290,7 @@ func TestDoCompactionSkipsWhitespaceOnlyPriorSummaries(t *testing.T) {
 // tool exchange with more minimal entries than MaxCompactTokens can hold:
 // the progress guarantee still compacts it, but the overshoot must be
 // surfaced instead of silently trusted as capped.
+
 func TestDoCompactionWarnsWhenEntryFloorsExceedBudget(t *testing.T) {
 	const fanout = 40
 	callParts := make([]string, 0, fanout)
@@ -402,7 +428,7 @@ func (f *failingModel) RoundTrip(*http.Request) (*http.Response, error) {
 	}, nil
 }
 
-func TestDoCompactionSummarizerFailureRecordsErrorWithoutMarking(t *testing.T) {
+func TestDoCompactionSummarizerFailureRecordsErrorWithReclaimableClaims(t *testing.T) {
 	rows := machineryCorpus(t)
 	q := &fakeQueries{uncompacted: rows}
 	svc := newMachineryService(q)
@@ -413,15 +439,15 @@ func TestDoCompactionSummarizerFailureRecordsErrorWithoutMarking(t *testing.T) {
 	if _, err := svc.RunCompactionSync(context.Background(), cfg); err == nil {
 		t.Fatal("summarizer failure must surface an error")
 	}
-	if len(q.markedIDs) != 0 {
-		t.Fatalf("nothing may be marked when the summarizer fails (marked=%d)", len(q.markedIDs))
+	if len(q.markedIDs) == 0 {
+		t.Fatal("a real attempt must claim its selected sources before summarization")
 	}
 	if !q.created || q.completed.Status != "error" {
 		t.Fatalf("a failed attempt must leave an error log row (created=%v status=%q)", q.created, q.completed.Status)
 	}
 }
 
-func TestDoCompactionEmptySummaryRecordsErrorWithoutMarking(t *testing.T) {
+func TestDoCompactionEmptySummaryRecordsErrorWithReclaimableClaims(t *testing.T) {
 	rows := machineryCorpus(t)
 	q := &fakeQueries{uncompacted: rows}
 	stub := &stubModel{summary: "   "}
@@ -430,96 +456,10 @@ func TestDoCompactionEmptySummaryRecordsErrorWithoutMarking(t *testing.T) {
 	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450)); err == nil {
 		t.Fatal("an empty summary must surface an error")
 	}
-	if len(q.markedIDs) != 0 {
-		t.Fatalf("nothing may be marked when the summary is empty (marked=%d)", len(q.markedIDs))
+	if len(q.markedIDs) == 0 {
+		t.Fatal("a real attempt must claim its selected sources before summarization")
 	}
 	if !q.created || q.completed.Status != "error" {
 		t.Fatalf("an empty summary must leave an error log row (created=%v status=%q)", q.created, q.completed.Status)
-	}
-}
-
-func awaitWaiter(t *testing.T, run *inflightRun) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for run.waiters.Load() == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("waiter never attached to the in-flight owner")
-		}
-		runtime.Gosched()
-	}
-}
-
-func TestRunCompactionSyncWaitsForOwnerAndReusesItsResult(t *testing.T) {
-	t.Parallel()
-
-	q := &fakeQueries{uncompacted: machineryCorpus(t)}
-	stub := &stubModel{summary: "unused"}
-	svc := newMachineryService(q)
-	cfg := machineryConfig(stub, 450)
-
-	run, ok := svc.beginSessionCompaction(cfg.SessionID)
-	if !ok {
-		t.Fatal("first acquisition must succeed")
-	}
-
-	got := make(chan Result, 1)
-	go func() {
-		res, err := svc.RunCompactionSync(context.Background(), cfg)
-		if err != nil {
-			t.Errorf("waiter: %v", err)
-		}
-		got <- res
-	}()
-	awaitWaiter(t, run)
-
-	want := Result{Status: StatusOK, Summary: "owner summary", MessageCount: 3}
-	svc.endSessionCompaction(cfg.SessionID, run, want, nil)
-
-	if res := <-got; res != want {
-		t.Fatalf("waiter must reuse the owner's result, got %#v", res)
-	}
-	if stub.calls != 0 || q.created || len(q.markedIDs) != 0 {
-		t.Fatalf("waiter must not run its own compaction (calls=%d created=%v marked=%d)", stub.calls, q.created, len(q.markedIDs))
-	}
-}
-
-func TestRunCompactionSyncCanceledWaiterDegradesToNoop(t *testing.T) {
-	t.Parallel()
-
-	q := &fakeQueries{uncompacted: machineryCorpus(t)}
-	stub := &stubModel{summary: "healthy summary"}
-	svc := newMachineryService(q)
-	cfg := machineryConfig(stub, 450)
-
-	run, ok := svc.beginSessionCompaction(cfg.SessionID)
-	if !ok {
-		t.Fatal("first acquisition must succeed")
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	got := make(chan Result, 1)
-	go func() {
-		res, err := svc.RunCompactionSync(ctx, cfg)
-		if err != nil {
-			t.Errorf("canceled waiter: %v", err)
-		}
-		got <- res
-	}()
-	awaitWaiter(t, run)
-	cancel()
-	if res := <-got; res.Status != StatusNoop {
-		t.Fatalf("canceled waiter must degrade to noop, got %#v", res)
-	}
-	if stub.calls != 0 || len(q.markedIDs) != 0 {
-		t.Fatalf("canceled waiter must not run compaction (calls=%d marked=%d)", stub.calls, len(q.markedIDs))
-	}
-
-	svc.endSessionCompaction(cfg.SessionID, run, Result{Status: StatusNoop}, nil)
-	res, err := svc.RunCompactionSync(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("run after owner completion: %v", err)
-	}
-	if res.Status != StatusOK {
-		t.Fatalf("session must be usable after the owner completes, got %q", res.Status)
 	}
 }

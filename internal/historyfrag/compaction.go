@@ -9,12 +9,17 @@ import (
 
 const NamespaceCompactionLog = "compaction_log"
 
-func LegacySummaryRecord(compactID string, summary string, scope contextfrag.Scope) HistoryRecord {
+func SummaryRecord(compactID string, summary string, coveredRefs []contextfrag.ContextRef, scope contextfrag.Scope) HistoryRecord {
+	rec := summaryRecordBase(compactID, summary, scope)
+	rec.Kind = contextfrag.KindConversationSummary
+	rec.Lifecycle = LifecycleActiveSummary
+	coverage := contextfrag.NewSummaryCoverage(rec.Ref, coveredRefs)
+	rec.Coverage = &coverage
+	return rec
+}
+
+func summaryRecordBase(compactID string, summary string, scope contextfrag.Scope) HistoryRecord {
 	compactID = strings.TrimSpace(compactID)
-	modelMessage := conversation.ModelMessage{
-		Role:    "user",
-		Content: conversation.NewTextContent("<summary>\n" + summary + "\n</summary>"),
-	}
 	return HistoryRecord{
 		Ref: contextfrag.ContextRef{
 			Namespace:  NamespaceCompactionLog,
@@ -23,11 +28,12 @@ func LegacySummaryRecord(compactID string, summary string, scope contextfrag.Sco
 			Schema:     contextfrag.SchemaContextRef,
 			Durability: contextfrag.RefDurable,
 		},
-		Kind:         contextfrag.KindConversationEvent,
-		SourceKind:   SourceCompactionLog,
-		Lifecycle:    LifecycleLegacySummary,
-		ModelMessage: modelMessage,
-		Scope:        scope,
+		SourceKind: SourceCompactionLog,
+		ModelMessage: conversation.ModelMessage{
+			Role:    "user",
+			Content: conversation.NewTextContent("<summary>\n" + summary + "\n</summary>"),
+		},
+		Scope: scope,
 		Provenance: contextfrag.Provenance{
 			Source:    string(SourceCompactionLog),
 			SourceID:  compactID,

@@ -101,8 +101,16 @@ func (q *Queries) CreateChatRoute(ctx context.Context, arg CreateChatRouteParams
 }
 
 const deleteChatRoute = `-- name: DeleteChatRoute :exec
-DELETE FROM bot_channel_routes
-WHERE id = $1
+WITH route_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.route_id = $1
+  ORDER BY session.id
+  FOR UPDATE
+)
+DELETE FROM bot_channel_routes route
+WHERE route.id = $1
+  AND (SELECT count(*) FROM route_sessions) >= 0
 `
 
 func (q *Queries) DeleteChatRoute(ctx context.Context, id pgtype.UUID) error {
@@ -309,9 +317,19 @@ func (q *Queries) ListChatRoutes(ctx context.Context, chatID pgtype.UUID) ([]Lis
 }
 
 const setRouteActiveSession = `-- name: SetRouteActiveSession :exec
-UPDATE bot_channel_routes
-SET active_session_id = $1::uuid, updated_at = now()
-WHERE id = $2
+WITH destination_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.id = $1::uuid
+  FOR KEY SHARE
+)
+UPDATE bot_channel_routes route
+SET active_session_id = COALESCE(
+      (SELECT destination_session.id FROM destination_session),
+      $1::uuid
+    ),
+    updated_at = now()
+WHERE route.id = $2
 `
 
 type SetRouteActiveSessionParams struct {

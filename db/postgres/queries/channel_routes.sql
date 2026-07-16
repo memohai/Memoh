@@ -97,10 +97,28 @@ SET metadata = sqlc.arg(metadata), updated_at = now()
 WHERE id = sqlc.arg(id);
 
 -- name: SetRouteActiveSession :exec
-UPDATE bot_channel_routes
-SET active_session_id = sqlc.narg(active_session_id)::uuid, updated_at = now()
-WHERE id = sqlc.arg(id);
+WITH destination_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.id = sqlc.narg(active_session_id)::uuid
+  FOR KEY SHARE
+)
+UPDATE bot_channel_routes route
+SET active_session_id = COALESCE(
+      (SELECT destination_session.id FROM destination_session),
+      sqlc.narg(active_session_id)::uuid
+    ),
+    updated_at = now()
+WHERE route.id = sqlc.arg(id);
 
 -- name: DeleteChatRoute :exec
-DELETE FROM bot_channel_routes
-WHERE id = $1;
+WITH route_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.route_id = sqlc.arg(id)
+  ORDER BY session.id
+  FOR UPDATE
+)
+DELETE FROM bot_channel_routes route
+WHERE route.id = sqlc.arg(id)
+  AND (SELECT count(*) FROM route_sessions) >= 0;

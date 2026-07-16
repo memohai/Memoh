@@ -196,7 +196,13 @@ SELECT
 FROM inserted_message;
 
 -- name: CreateMessageInHistoryTurnByRequest :one
-WITH target AS (
+WITH owner_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.id = sqlc.arg(session_id)
+  FOR UPDATE
+),
+target AS MATERIALIZED (
   SELECT
     turns.turn_id,
     turns.session_id,
@@ -219,13 +225,14 @@ WITH target AS (
       ), 1)
     END AS turn_message_seq
   FROM bot_history_messages turns
+  JOIN owner_session owner ON owner.id = turns.session_id
   WHERE turns.session_id = sqlc.arg(session_id)
     AND turns.id = sqlc.arg(request_message_id)
     AND turns.turn_id IS NOT NULL
     AND turns.turn_position IS NOT NULL
     AND turns.turn_visible = true
   LIMIT 1
-  FOR UPDATE
+  FOR UPDATE OF turns
 ),
 inserted AS (
   INSERT INTO bot_history_messages (
@@ -308,7 +315,13 @@ SELECT
 FROM inserted;
 
 -- name: CreateMessageInHistoryTurnByRequestAndBind :one
-WITH target AS (
+WITH owner_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.id = sqlc.arg(session_id)
+  FOR UPDATE
+),
+target AS MATERIALIZED (
   SELECT
     turns.turn_id,
     turns.session_id,
@@ -331,13 +344,14 @@ WITH target AS (
       ), 1)
     END AS turn_message_seq
   FROM bot_history_messages turns
+  JOIN owner_session owner ON owner.id = turns.session_id
   WHERE turns.session_id = sqlc.arg(session_id)
     AND turns.id = sqlc.arg(request_message_id)
     AND turns.turn_id IS NOT NULL
     AND turns.turn_position IS NOT NULL
     AND turns.turn_visible = true
   LIMIT 1
-  FOR UPDATE
+  FOR UPDATE OF turns
 ),
 inserted AS (
   INSERT INTO bot_history_messages (
@@ -1060,11 +1074,17 @@ JOIN bot_history_messages m
 GROUP BY target.turn_id, target.session_id, target.turn_position;
 
 -- name: ReplaceHistoryTurn :one
-WITH old_turn_target AS (
+WITH owner_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.id = sqlc.arg(session_id)
+  FOR UPDATE
+),
+old_turn_target AS (
   SELECT m.turn_id, m.session_id, m.turn_position
   FROM bot_history_messages m
+  JOIN owner_session owner ON owner.id = m.session_id
   WHERE m.turn_id = sqlc.arg(old_turn_id)
-    AND m.session_id = sqlc.arg(session_id)
     AND m.turn_position IS NOT NULL
     AND m.turn_visible = true
   LIMIT 1
@@ -1089,7 +1109,7 @@ old_turn AS (
   GROUP BY old_turn_target.turn_id, old_turn_target.session_id, old_turn_target.turn_position
 ),
 old_lock AS (
-  SELECT m.id
+  SELECT m.id, m.bot_id, m.session_id, m.compact_id
   FROM bot_history_messages m
   JOIN old_turn ON old_turn.id = m.turn_id
   FOR UPDATE
@@ -1143,9 +1163,29 @@ replacement_input AS (
       )
     )
 ),
+affected_compaction_sessions AS MATERIALIZED (
+  SELECT DISTINCT locked.session_id
+  FROM old_lock locked
+  JOIN replacement_input ON replacement_input.session_id = locked.session_id
+  JOIN bot_history_message_compacts compact ON compact.id = locked.compact_id
+  JOIN bot_sessions session ON session.id = locked.session_id
+  WHERE locked.id IS DISTINCT FROM replacement_input.replacement_request_message_id
+    AND locked.id IS DISTINCT FROM replacement_input.replacement_assistant_message_id
+    AND compact.bot_id = locked.bot_id
+    AND compact.session_id = locked.session_id
+    AND compact.compaction_epoch = session.compaction_epoch
+),
 next_position AS (
   UPDATE bot_sessions s
-  SET next_turn_position = next_turn_position + 1
+  SET next_turn_position = next_turn_position + 1,
+      compaction_epoch = compaction_epoch + CASE
+        WHEN EXISTS (
+          SELECT 1
+          FROM affected_compaction_sessions affected
+          WHERE affected.session_id = s.id
+        ) THEN 1
+        ELSE 0
+      END
   FROM replacement_input
   WHERE s.id = replacement_input.session_id
   RETURNING s.next_turn_position - 1 AS position
@@ -1178,7 +1218,7 @@ updated AS (
     AND old.turn_superseded_at IS NULL
     AND old.id IS DISTINCT FROM replacement.request_message_id
     AND old.id IS DISTINCT FROM replacement.assistant_message_id
-  RETURNING old.turn_id
+  RETURNING old.turn_id, old.session_id, old.compact_id
 ),
 updated_turn AS (
   SELECT DISTINCT turn_id AS id FROM updated
@@ -1269,14 +1309,21 @@ CROSS JOIN linked_anchors_done
 CROSS JOIN linked_tail_done;
 
 -- name: SupersedeHistoryTurn :one
-WITH updated AS (
+WITH owner_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.id = sqlc.arg(session_id)
+  FOR UPDATE
+),
+updated AS (
   UPDATE bot_history_messages m
   SET turn_superseded_by_turn_id = sqlc.arg(superseded_by_turn_id),
       turn_superseded_at = sqlc.arg(superseded_at),
       turn_superseded_reason = sqlc.arg(superseded_reason),
       turn_visible = false
+  FROM owner_session owner
   WHERE m.turn_id = sqlc.arg(old_turn_id)
-    AND m.session_id = sqlc.arg(session_id)
+    AND m.session_id = owner.id
     AND m.turn_superseded_at IS NULL
   RETURNING
     m.turn_id,
@@ -1289,7 +1336,25 @@ WITH updated AS (
     m.turn_superseded_by_turn_id,
     m.turn_superseded_at,
     m.turn_superseded_reason,
+    m.compact_id,
     m.created_at
+),
+compaction_epoch_bump AS (
+  UPDATE bot_sessions session
+  SET compaction_epoch = session.compaction_epoch + 1
+  WHERE EXISTS (
+    SELECT 1
+    FROM updated changed
+    JOIN bot_history_message_compacts compact ON compact.id = changed.compact_id
+    WHERE changed.session_id = session.id
+      AND compact.bot_id = changed.bot_id
+      AND compact.session_id = session.id
+      AND compact.compaction_epoch = session.compaction_epoch
+  )
+  RETURNING session.id
+),
+compaction_epoch_done AS (
+  SELECT COUNT(*) AS count FROM compaction_epoch_bump
 )
 SELECT
   updated.turn_id AS id,
@@ -1304,12 +1369,47 @@ SELECT
   MIN(updated.created_at)::timestamptz AS created_at,
   COALESCE(MAX(updated.turn_superseded_at), MAX(updated.created_at))::timestamptz AS updated_at
 FROM updated
+CROSS JOIN compaction_epoch_done
 GROUP BY updated.turn_id, updated.session_id, updated.turn_position;
 
 -- name: HideMessagesByHistoryTurn :exec
-UPDATE bot_history_messages
-SET turn_visible = false
-WHERE turn_id = sqlc.arg(turn_id);
+WITH session_locator AS MATERIALIZED (
+  SELECT DISTINCT message.session_id
+  FROM bot_history_messages message
+  WHERE message.turn_id = sqlc.arg(turn_id)
+    AND message.turn_visible = true
+    AND message.session_id IS NOT NULL
+),
+owner_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  JOIN session_locator locator ON locator.session_id = session.id
+  ORDER BY session.id
+  FOR UPDATE
+),
+hidden AS (
+  UPDATE bot_history_messages
+  SET turn_visible = false
+  WHERE turn_id = sqlc.arg(turn_id)
+    AND turn_visible = true
+    AND (SELECT count(*) FROM owner_sessions) >= 0
+  RETURNING session_id, compact_id
+),
+compaction_epoch_bump AS (
+  UPDATE bot_sessions session
+  SET compaction_epoch = session.compaction_epoch + 1
+  WHERE EXISTS (
+    SELECT 1
+    FROM hidden changed
+    JOIN bot_history_message_compacts compact ON compact.id = changed.compact_id
+    WHERE changed.session_id = session.id
+      AND compact.bot_id = session.bot_id
+      AND compact.session_id = session.id
+      AND compact.compaction_epoch = session.compaction_epoch
+  )
+  RETURNING session.id
+)
+SELECT (SELECT count(*) FROM hidden) + (SELECT count(*) * 0 FROM compaction_epoch_bump);
 
 -- name: ListMessages :many
 SELECT
@@ -2146,17 +2246,132 @@ ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 SELECT COUNT(*) FROM bot_visible_history_messages
 WHERE bot_id = sqlc.arg(bot_id);
 
--- name: DeleteMessagesByBot :exec
-DELETE FROM bot_history_messages
-WHERE bot_id = sqlc.arg(bot_id);
+-- name: ClearHistoryByBot :exec
+WITH target_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.bot_id = sqlc.arg(target_bot_id)
+  ORDER BY session.id
+  FOR UPDATE
+),
+invalidated_sessions AS (
+  UPDATE bot_sessions session
+  SET compaction_epoch = session.compaction_epoch + 1
+  FROM target_sessions target
+  WHERE session.id = target.id
+  RETURNING session.id
+),
+target_compaction_artifacts AS MATERIALIZED (
+  SELECT compact.id
+  FROM bot_history_message_compacts compact
+  WHERE compact.bot_id = sqlc.arg(target_bot_id)
+    AND (SELECT count(*) FROM target_sessions) >= 0
+  ORDER BY compact.id
+  FOR UPDATE
+),
+deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts AS compact
+  USING target_compaction_artifacts target
+  WHERE compact.id = target.id
+  RETURNING compact.id
+),
+target_messages AS MATERIALIZED (
+  SELECT message.id
+  FROM bot_history_messages message
+  WHERE message.bot_id = sqlc.arg(target_bot_id)
+    AND (SELECT count(*) FROM target_sessions) >= 0
+    AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0
+  ORDER BY message.id
+  FOR UPDATE
+)
+DELETE FROM bot_history_messages AS message
+USING target_messages target
+WHERE message.id = target.id;
 
--- name: DeleteMessagesBySession :exec
-DELETE FROM bot_history_messages
-WHERE session_id = sqlc.arg(session_id);
+-- name: ClearHistoryBySession :exec
+WITH target_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.id = sqlc.arg(target_session_id)
+  FOR UPDATE
+),
+invalidated_session AS (
+  UPDATE bot_sessions session
+  SET compaction_epoch = session.compaction_epoch + 1
+  FROM target_session target
+  WHERE session.id = target.id
+  RETURNING session.id
+),
+target_compaction_artifacts AS MATERIALIZED (
+  SELECT compact.id
+  FROM bot_history_message_compacts compact
+  WHERE compact.session_id = sqlc.arg(target_session_id)
+    AND (SELECT count(*) FROM target_session) >= 0
+  ORDER BY compact.id
+  FOR UPDATE
+),
+deleted_compaction_artifacts AS (
+  DELETE FROM bot_history_message_compacts AS compact
+  USING target_compaction_artifacts target
+  WHERE compact.id = target.id
+  RETURNING compact.id
+),
+target_messages AS MATERIALIZED (
+  SELECT message.id
+  FROM bot_history_messages message
+  WHERE message.session_id = sqlc.arg(target_session_id)
+    AND (SELECT count(*) FROM target_session) >= 0
+    AND (SELECT count(*) FROM deleted_compaction_artifacts) >= 0
+  ORDER BY message.id
+  FOR UPDATE
+)
+DELETE FROM bot_history_messages AS message
+USING target_messages target
+WHERE message.id = target.id;
 
 -- name: DeleteMessagesByIDs :exec
-DELETE FROM bot_history_messages
-WHERE id = ANY(sqlc.arg(ids)::uuid[]);
+WITH session_locator AS MATERIALIZED (
+  SELECT DISTINCT message.session_id
+  FROM bot_history_messages message
+  WHERE message.id = ANY(sqlc.arg(ids)::uuid[])
+    AND message.session_id IS NOT NULL
+),
+owner_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  JOIN session_locator locator ON locator.session_id = session.id
+  ORDER BY session.id
+  FOR UPDATE
+),
+target_messages AS MATERIALIZED (
+  SELECT message.id
+  FROM bot_history_messages message
+  WHERE message.id = ANY(sqlc.arg(ids)::uuid[])
+    AND (SELECT count(*) FROM owner_sessions) >= 0
+  ORDER BY message.id
+  FOR UPDATE
+),
+deleted AS (
+  DELETE FROM bot_history_messages message
+  USING target_messages target
+  WHERE message.id = target.id
+  RETURNING message.session_id, message.compact_id
+),
+compaction_epoch_bump AS (
+  UPDATE bot_sessions session
+  SET compaction_epoch = session.compaction_epoch + 1
+  WHERE EXISTS (
+    SELECT 1
+    FROM deleted changed
+    JOIN bot_history_message_compacts compact ON compact.id = changed.compact_id
+    WHERE changed.session_id = session.id
+      AND compact.bot_id = session.bot_id
+      AND compact.session_id = session.id
+      AND compact.compaction_epoch = session.compaction_epoch
+  )
+  RETURNING session.id
+)
+SELECT (SELECT count(*) FROM deleted) + (SELECT count(*) * 0 FROM compaction_epoch_bump);
 
 -- name: ListObservedConversationsByChannelIdentity :many
 WITH observed_routes AS (
@@ -2276,10 +2491,173 @@ WHERE m.bot_id = sqlc.arg(bot_id)
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT sqlc.arg(max_count);
 
--- name: MarkMessagesCompacted :exec
-UPDATE bot_history_messages
-SET compact_id = $1
-WHERE id = ANY($2::uuid[]);
+-- name: MarkMessagesCompacted :execrows
+WITH expected_claims AS MATERIALIZED (
+  SELECT ids.message_id, claims.expected_compact_id
+  FROM UNNEST(sqlc.arg(message_ids)::uuid[]) WITH ORDINALITY AS ids(message_id, ordinal)
+  JOIN UNNEST(sqlc.arg(expected_compact_ids)::uuid[]) WITH ORDINALITY AS claims(expected_compact_id, ordinal)
+    USING (ordinal)
+), artifact_locator AS MATERIALIZED (
+  SELECT compact.id, compact.session_id
+  FROM bot_history_message_compacts compact
+  WHERE compact.id = sqlc.arg(compact_id)
+    OR compact.id = ANY(sqlc.arg(expected_compact_ids)::uuid[])
+), owner_sessions AS MATERIALIZED (
+  SELECT session.id, session.bot_id, session.compaction_epoch
+  FROM bot_sessions session
+  JOIN (
+    SELECT DISTINCT locator.session_id
+    FROM artifact_locator locator
+    WHERE locator.session_id IS NOT NULL
+  ) owner ON owner.session_id = session.id
+  ORDER BY session.id
+  FOR UPDATE OF session
+), locked_artifacts AS MATERIALIZED (
+  SELECT
+    compact.id,
+    compact.bot_id,
+    compact.session_id,
+    compact.compaction_epoch,
+    compact.status,
+    compact.summary,
+    compact.started_at
+  FROM bot_history_message_compacts compact
+  JOIN artifact_locator locator ON locator.id = compact.id
+  WHERE (SELECT count(*) FROM owner_sessions) >= 0
+    AND (
+      compact.session_id IS NULL
+      OR EXISTS (
+        SELECT 1
+        FROM owner_sessions owner
+        WHERE owner.id = compact.session_id
+      )
+    )
+  ORDER BY compact.id
+  FOR UPDATE OF compact
+), target_compact AS MATERIALIZED (
+  SELECT compact.id, compact.bot_id, compact.session_id, compact.compaction_epoch
+  FROM locked_artifacts compact
+  JOIN owner_sessions owner
+    ON owner.id = compact.session_id
+   AND owner.bot_id = compact.bot_id
+   AND owner.compaction_epoch = compact.compaction_epoch
+  WHERE compact.id = sqlc.arg(compact_id)
+    AND compact.status = 'pending'
+), foreign_pending_claims AS MATERIALIZED (
+  SELECT current_claim.id
+  FROM locked_artifacts current_claim
+  CROSS JOIN target_compact target
+  WHERE current_claim.id = ANY(sqlc.arg(expected_compact_ids)::uuid[])
+    AND current_claim.status = 'pending'
+    AND (
+      current_claim.bot_id IS DISTINCT FROM target.bot_id
+      OR current_claim.session_id IS DISTINCT FROM target.session_id
+    )
+), reclaimable_pending_claims AS MATERIALIZED (
+  SELECT current_claim.id
+  FROM locked_artifacts current_claim
+  CROSS JOIN target_compact target
+  WHERE current_claim.id = ANY(sqlc.arg(expected_compact_ids)::uuid[])
+    AND current_claim.status = 'pending'
+    AND CARDINALITY(sqlc.arg(message_ids)::uuid[]) = CARDINALITY(sqlc.arg(expected_compact_ids)::uuid[])
+    AND current_claim.bot_id IS NOT DISTINCT FROM target.bot_id
+    AND current_claim.session_id IS NOT DISTINCT FROM target.session_id
+    AND (
+      current_claim.compaction_epoch IS DISTINCT FROM target.compaction_epoch
+      OR current_claim.started_at <= now() - INTERVAL '15 minutes'
+    )
+  ORDER BY current_claim.id
+), stable_claims AS MATERIALIZED (
+  SELECT current_claim.id
+  FROM locked_artifacts current_claim
+  CROSS JOIN target_compact target
+  WHERE current_claim.id = ANY(sqlc.arg(expected_compact_ids)::uuid[])
+    AND current_claim.status <> 'pending'
+    AND (
+      current_claim.bot_id IS DISTINCT FROM target.bot_id
+      OR current_claim.session_id IS DISTINCT FROM target.session_id
+      OR current_claim.compaction_epoch IS DISTINCT FROM target.compaction_epoch
+      OR current_claim.status <> 'ok'
+      OR NULLIF(BTRIM(current_claim.summary, E' \t\n\r\f\x0B'), '') IS NULL
+    )
+), locked_messages AS MATERIALIZED (
+  SELECT message.id, claim.expected_compact_id
+  FROM bot_history_messages message
+  JOIN expected_claims claim ON claim.message_id = message.id
+  CROSS JOIN target_compact target
+  WHERE CARDINALITY(sqlc.arg(message_ids)::uuid[]) = CARDINALITY(sqlc.arg(expected_compact_ids)::uuid[])
+    AND message.compact_id IS NOT DISTINCT FROM claim.expected_compact_id
+    AND message.bot_id = target.bot_id
+    AND message.session_id = target.session_id
+    AND message.turn_visible = true
+    AND message.turn_id IS NOT NULL
+    AND message.turn_position IS NOT NULL
+    AND message.turn_message_seq IS NOT NULL
+    AND (
+      claim.expected_compact_id IS NULL
+      OR EXISTS (
+        SELECT 1
+        FROM reclaimable_pending_claims reclaimable
+        WHERE reclaimable.id = claim.expected_compact_id
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM foreign_pending_claims foreign_claim
+        WHERE foreign_claim.id = claim.expected_compact_id
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM stable_claims stable
+        WHERE stable.id = claim.expected_compact_id
+      )
+    )
+  ORDER BY message.id
+  FOR UPDATE OF message
+), claims_to_reclaim AS MATERIALIZED (
+  SELECT DISTINCT reclaimable.id
+  FROM reclaimable_pending_claims reclaimable
+  JOIN locked_messages message
+    ON message.expected_compact_id = reclaimable.id
+), reclaimed_claims AS MATERIALIZED (
+  UPDATE bot_history_message_compacts current_claim
+  SET status = 'error',
+      error_message = 'source lease reclaimed',
+      completed_at = now()
+  FROM claims_to_reclaim reclaimable
+  WHERE current_claim.id = reclaimable.id
+    AND current_claim.status = 'pending'
+  RETURNING current_claim.id
+)
+UPDATE bot_history_messages message
+SET compact_id = target.id
+FROM locked_messages locked,
+     target_compact target
+WHERE message.id = locked.id
+  AND message.compact_id IS NOT DISTINCT FROM locked.expected_compact_id
+  AND message.bot_id = target.bot_id
+  AND message.session_id = target.session_id
+  AND message.turn_visible = true
+  AND message.turn_id IS NOT NULL
+  AND message.turn_position IS NOT NULL
+  AND message.turn_message_seq IS NOT NULL
+  AND (
+    locked.expected_compact_id IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM reclaimed_claims reclaimed
+      WHERE reclaimed.id = locked.expected_compact_id
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM foreign_pending_claims foreign_claim
+      WHERE foreign_claim.id = locked.expected_compact_id
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM stable_claims stable
+      WHERE stable.id = locked.expected_compact_id
+    )
+  );
 
 -- name: ListUncompactedMessagesBySession :many
 SELECT
@@ -2301,6 +2679,7 @@ SELECT
   ci.display_name AS sender_display_name,
   ci.avatar_url AS sender_avatar_url,
   s.channel_type AS platform,
+  s.compaction_epoch,
   r.conversation_type AS conversation_type,
   COALESCE(
     NULLIF(TRIM(COALESCE(r.metadata->>'conversation_name', '')), ''),
@@ -2310,18 +2689,33 @@ SELECT
   r.default_reply_target AS reply_target
 FROM bot_visible_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
-LEFT JOIN bot_sessions s ON s.id = m.session_id
+JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN bot_channel_routes r ON r.id = s.route_id
 WHERE m.session_id = $1
-  -- Rows stay eligible unless their compact log holds a usable summary,
-  -- matching the read path's substitution predicate (status ok AND non-blank
-  -- summary). This also reclaims rows stranded by a crash between mark and
-  -- complete, by deleted logs, and legacy status='ok' rows whose summary is
-  -- empty or whitespace-only (the pre-existing poison states).
+  -- A fresh pending claim is a 15-minute cross-process lease. Stale pending,
+  -- error, deleted, and blank-summary claims remain reclaimable; current OK
+  -- summaries stay ineligible exactly as on the read path.
   AND (m.compact_id IS NULL OR NOT EXISTS (
     SELECT 1 FROM bot_history_message_compacts c
-    WHERE c.id = m.compact_id AND c.status = 'ok'
-      AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL
+    WHERE c.id = m.compact_id
+      AND c.bot_id = m.bot_id
+      AND c.session_id = s.id
+      AND c.compaction_epoch = s.compaction_epoch
+      AND (
+        (c.status = 'ok' AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL)
+        OR (c.status = 'pending' AND c.started_at > now() - INTERVAL '15 minutes')
+      )
   ))
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
+
+-- name: ListMessageRefsByCompactID :many
+-- Backfills coverage for summaries that predate persisted artifact coverage
+-- without pulling every compacted row's full content/usage.
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id
+FROM bot_history_messages m
+WHERE m.compact_id = $1
+ORDER BY m.created_at ASC, m.id ASC;

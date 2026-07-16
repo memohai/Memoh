@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/conversation"
@@ -12,7 +13,38 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 )
 
-func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatRequest, _ resolvedContext, inputTokens int) {
+// compactionBudgetThresholdPercent is the shared budget share at which
+// compaction triggers: the pre-send synchronous backstop fires when
+// compactable history reaches it, and async triggers clamp the user
+// threshold to it so they fire before the blocking backstop does.
+const compactionBudgetThresholdPercent = 70
+
+// effectiveCompactionThreshold clamps the user-configured absolute threshold
+// to the budget share, so an absolute default (e.g. 100000) still fires on
+// models whose context window never reaches it. A non-positive threshold
+// keeps async compaction disabled.
+func effectiveCompactionThreshold(threshold, contextTokenBudget int) int {
+	if threshold <= 0 || contextTokenBudget <= 0 {
+		return threshold
+	}
+	budgetThreshold := contextTokenBudget * compactionBudgetThresholdPercent / 100
+	if budgetThreshold > 0 && budgetThreshold < threshold {
+		return budgetThreshold
+	}
+	return threshold
+}
+
+func asyncCompactionInputTokens(rc resolvedContext, providerInputTokens int) int {
+	if rc.compactableTokensKnown {
+		return rc.compactableTokens
+	}
+	return providerInputTokens
+}
+
+func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, inputTokens int) {
+	done := r.enterSessionCompaction(req.BotID, req.SessionID)
+	defer done()
+	inputTokens = asyncCompactionInputTokens(rc, inputTokens)
 	if r.compactionService == nil || r.settingsService == nil {
 		r.logger.Info("compaction: skipped, service or settings nil")
 		return
@@ -29,10 +61,11 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 		)
 		return
 	}
-	if !compaction.ShouldCompact(inputTokens, botSettings.CompactionThreshold) {
+	threshold := effectiveCompactionThreshold(botSettings.CompactionThreshold, rc.contextTokenBudget)
+	if !compaction.ShouldCompact(inputTokens, threshold) {
 		r.logger.Info("compaction: skipped, below threshold",
 			slog.Int("input_tokens", inputTokens),
-			slog.Int("threshold", botSettings.CompactionThreshold),
+			slog.Int("threshold", threshold),
 		)
 		return
 	}
@@ -41,7 +74,7 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 		slog.String("bot_id", req.BotID),
 		slog.String("session_id", req.SessionID),
 		slog.Int("input_tokens", inputTokens),
-		slog.Int("threshold", botSettings.CompactionThreshold),
+		slog.Int("threshold", threshold),
 		slog.Int("ratio", botSettings.CompactionRatio),
 	)
 
@@ -56,7 +89,9 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 		// so the compaction service doesn't run hooks + fail on empty UUIDs.
 		return
 	}
-	r.compactionService.TriggerCompaction(ctx, cfg)
+	if err := r.compactionService.RunCompaction(ctx, cfg); err != nil {
+		r.logger.Error("compaction failed", slog.String("bot_id", cfg.BotID), slog.String("session_id", cfg.SessionID), slog.Any("error", err))
+	}
 }
 
 // runCompactionSync runs compaction synchronously when context reaches
@@ -64,7 +99,7 @@ func (r *Resolver) maybeCompact(ctx context.Context, req conversation.ChatReques
 // A noop (failure cooldown, another compaction in flight, or nothing to
 // compact) leaves this turn's context untouched: the request proceeds as-is,
 // possibly still above the threshold, and the next turn re-evaluates.
-func (r *Resolver) runCompactionSync(ctx context.Context, req conversation.ChatRequest, inputTokens int) compaction.Result {
+func (r *Resolver) runCompactionSync(ctx context.Context, req conversation.ChatRequest, inputTokens, contextTokenBudget int) compaction.Result {
 	if r.compactionService == nil || r.settingsService == nil {
 		r.logger.Warn("compaction sync: skipped, service or settings nil")
 		return compaction.Result{}
@@ -89,6 +124,7 @@ func (r *Resolver) runCompactionSync(ctx context.Context, req conversation.ChatR
 		// disabled means there is nothing to compact.
 		return compaction.Result{}
 	}
+	cfg.TargetTokens = syncCompactionTargetTokens(contextTokenBudget, cfg.Ratio)
 
 	r.logger.Info("compaction sync: running synchronously",
 		slog.String("bot_id", req.BotID),
@@ -97,6 +133,8 @@ func (r *Resolver) runCompactionSync(ctx context.Context, req conversation.ChatR
 		slog.String("model_id", cfg.ModelID),
 	)
 
+	done := r.enterSessionCompactionForStream(req.BotID, req.SessionID, strings.TrimSpace(req.StreamID))
+	defer done()
 	res, err := r.compactionService.RunCompactionSync(ctx, cfg)
 	if err != nil {
 		r.logger.Warn("compaction sync: failed", slog.Any("error", err))
@@ -164,10 +202,16 @@ func (r *Resolver) buildCompactionConfig(ctx context.Context, req conversation.C
 	if compactModel.Config.ContextWindow != nil && *compactModel.Config.ContextWindow > 0 {
 		cfg.MaxCompactTokens = *compactModel.Config.ContextWindow * 90 / 100
 	}
-	// For sync compaction: keep only the last few messages (~2000 tokens ≈ 3 messages).
-	// The summary provides reference context; if the LLM needs details,
-	// it will use tools (memory_read, search) to look them up.
-	cfg.TargetTokens = 2000
 
 	return cfg, nil
+}
+
+// syncCompactionTargetTokens derives the synchronous-compaction goal from the
+// context budget: after compaction the kept tail should be the (100-ratio)%
+// share the user asked to preserve, instead of a fixed absolute size.
+func syncCompactionTargetTokens(contextTokenBudget, ratio int) int {
+	if contextTokenBudget <= 0 || ratio >= 100 {
+		return 0
+	}
+	return contextTokenBudget * (100 - ratio) / 100
 }

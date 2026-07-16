@@ -4,11 +4,25 @@ on:
   push:
     branches: [main]
     paths:
+      - ".github/workflows/migrations.yml"
+      - "sqlc.yaml"
       - "db/postgres/migrations/**"
+      - "db/postgres/queries/**"
+      - "internal/db/postgres/sqlc/**"
+      - "internal/db/*migration*_test.go"
+      - "internal/db/*postgres_integration_test.go"
+      - "internal/message/*postgres_integration_test.go"
   pull_request:
     branches: [main]
     paths:
+      - ".github/workflows/migrations.yml"
+      - "sqlc.yaml"
       - "db/postgres/migrations/**"
+      - "db/postgres/queries/**"
+      - "internal/db/postgres/sqlc/**"
+      - "internal/db/*migration*_test.go"
+      - "internal/db/*postgres_integration_test.go"
+      - "internal/message/*postgres_integration_test.go"
 
 concurrency:
   group: migrations-${{ github.ref }}
@@ -42,6 +56,16 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Verify generated PostgreSQL queries
+        run: |
+          go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
+          untracked="$(git ls-files --others --exclude-standard -- internal/db/postgres/sqlc)"
+          if [ -n "$untracked" ]; then
+            printf 'Untracked generated SQL files:\n%s\n' "$untracked"
+            exit 1
+          fi
+          git diff --exit-code -- internal/db/postgres/sqlc
+
       - name: Build
         run: go build -o memoh-server ./cmd/agent
 
@@ -65,3 +89,8 @@ jobs:
 
       - name: Migrate up (idempotent)
         run: ./memoh-server migrate up
+
+      - name: Test PostgreSQL query and compaction lifecycle paths
+        env:
+          TEST_POSTGRES_DSN: postgres://memoh:memoh123@127.0.0.1:5432/memoh_test?sslmode=disable
+        run: go test -count=1 ./internal/db ./internal/message
