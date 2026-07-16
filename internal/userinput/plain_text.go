@@ -2,17 +2,11 @@ package userinput
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"unicode"
-
-	"github.com/jackc/pgx/v5"
-
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
 
 const maxTextInteractionRetries = 3
@@ -51,24 +45,12 @@ func (s *Service) AdvanceText(ctx context.Context, input AdvanceTextInput) (Adva
 			req.Interaction = state
 			return AdvanceTextResult{Handled: true, Invalid: invalid, Request: req}, nil
 		}
-		stateJSON, err := json.Marshal(state)
+		updated, ok, err := s.persistInteraction(ctx, req, state)
 		if err != nil {
 			return AdvanceTextResult{}, err
 		}
-		id, err := db.ParseUUID(req.ID)
-		if err != nil {
-			return AdvanceTextResult{}, err
-		}
-		row, err := s.queries.UpdateUserInputInteraction(ctx, sqlc.UpdateUserInputInteractionParams{
-			InteractionJson:     stateJSON,
-			ID:                  id,
-			InteractionRevision: int32(req.InteractionRevision), //nolint:gosec // revisions cannot approach int32 during one request.
-		})
-		if err == nil {
-			return AdvanceTextResult{Handled: true, Request: requestFromRow(row)}, nil
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return AdvanceTextResult{}, err
+		if ok {
+			return AdvanceTextResult{Handled: true, Request: updated}, nil
 		}
 	}
 	return AdvanceTextResult{}, errors.New("user input changed concurrently; retry the reply")

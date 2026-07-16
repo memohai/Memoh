@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -465,15 +466,15 @@ func (s *telegramOutboundStream) sendToolCallMessage(
 ) error {
 	text, parseMode := renderToolCallPresentation(tc, p)
 	actions := tcActions(tc)
-	var askUserToken string
+	var askUserRequestID string
 	// formatAskUser sets Status=waiting (user-facing pause), not running.
-	// Wizard rebuild must key off that, or we silently fall back to legacy
+	// Card rebuild must key off that, or we silently fall back to legacy
 	// respond: option buttons and never attach the paged aui keyboard.
-	if isTelegramAskUserStart(p) && isTelegramAskUser(tc) && s.adapter != nil {
-		if pageText, pageActions, token, ok := s.adapter.prepareTelegramAskUser(tc); ok {
+	if isTelegramAskUserStart(p) && isTelegramAskUser(tc) {
+		if pageText, pageActions, requestID, ok := prepareTelegramAskUser(tc); ok {
 			text = pageText
 			actions = pageActions
-			askUserToken = token
+			askUserRequestID = requestID
 			parseMode = ""
 		}
 	}
@@ -544,8 +545,13 @@ func (s *telegramOutboundStream) sendToolCallMessage(
 	if sendErr != nil {
 		return sendErr
 	}
-	if askUserToken != "" {
-		s.adapter.bindAskUserMessage(askUserToken, chatID, msgID)
+	if askUserRequestID != "" && s.adapter != nil && s.adapter.userInput != nil {
+		// Persist the card's Telegram message id so callbacks, plain-text
+		// replies, and post-restart rehydration all resolve the same request
+		// via prompt_external_message_id.
+		if _, err := s.adapter.userInput.UpdatePromptMessage(ctx, askUserRequestID, "", strconv.Itoa(msgID)); err != nil && s.adapter.logger != nil {
+			s.adapter.logger.Warn("telegram: ask_user prompt message bind failed", slog.Any("error", err))
+		}
 	}
 	if isTelegramToolCallStartStatus(p.Status) && callID != "" {
 		s.storeToolCallMessage(callID, telegramToolCallMessage{chatID: chatID, msgID: msgID, hasActions: len(actions) > 0})

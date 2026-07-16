@@ -111,12 +111,24 @@ type Request struct {
 	CanceledAt              *time.Time           `json:"canceled_at,omitempty"`
 }
 
-// TextInteractionState is the durable cursor used by channels without native
-// ask_user controls. Answers remain present when the user moves backward.
+// TextInteractionState is the durable ask_user cursor shared by every input
+// surface — plain-text replies (AdvanceText) and native buttons
+// (AdvanceInteraction). Answers remain present when the user moves backward.
 type TextInteractionState struct {
 	QuestionIndex int              `json:"question_index"`
 	Answers       []QuestionAnswer `json:"answers,omitempty"`
 	Completed     bool             `json:"completed,omitempty"`
+}
+
+// Answer returns the saved answer for a question. ok is false when the user
+// has not answered it yet (a persisted skip still counts as answered).
+func (s TextInteractionState) Answer(questionID string) (QuestionAnswer, bool) {
+	for _, answer := range s.Answers {
+		if answer.QuestionID == questionID {
+			return answer, true
+		}
+	}
+	return QuestionAnswer{}, false
 }
 
 type AdvanceTextInput struct {

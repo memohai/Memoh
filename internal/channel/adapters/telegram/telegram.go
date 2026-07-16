@@ -59,10 +59,31 @@ type TelegramAdapter struct {
 	seenUpdatesMu sync.Mutex
 	seenUpdates   map[string]time.Time
 
-	// ask_user multi-step wizard state (pagination, multi-select drafts,
-	// force-reply text capture). Process-local; expired entries are purged.
-	askUserOnce    sync.Once
-	askUserWizards *askUserWizardStore
+	// ask_user durable-state integration: ops are applied to the persistent
+	// interaction via the userinput service; only the force-reply prompt
+	// binding is process-local (losing it just means re-tapping the button).
+	askUserPromptsOnce sync.Once
+	askUserPrompts     *askUserTextPromptStore
+	userInput          askUserInteractionService
+}
+
+// askUserInteractionService is the slice of *userinput.Service the adapter
+// needs to drive ask_user buttons against the durable interaction state.
+type askUserInteractionService interface {
+	AdvanceInteraction(ctx context.Context, input userinput.AdvanceInteractionInput) (userinput.AdvanceInteractionResult, error)
+	UpdatePromptMessage(ctx context.Context, requestID, promptMessageID, externalID string) (userinput.Request, error)
+}
+
+// SetUserInputService injects the durable ask_user interaction service.
+func (a *TelegramAdapter) SetUserInputService(svc askUserInteractionService) {
+	a.userInput = svc
+}
+
+func (a *TelegramAdapter) askUserPromptStore() *askUserTextPromptStore {
+	a.askUserPromptsOnce.Do(func() {
+		a.askUserPrompts = newAskUserTextPromptStore()
+	})
+	return a.askUserPrompts
 }
 
 // telegramChannelRecipient implements tele.Recipient for @channel_username
@@ -528,9 +549,10 @@ func (a *TelegramAdapter) buildTelegramInboundMessage(bot *tele.Bot, cfg channel
 // place: pagination/selection re-dispatch a synthetic command, dismiss strips
 // the keyboard, and the page-indicator noop is ignored. Legacy approval
 // callbacks keep their prior behavior (clear buttons, then dispatch). ask_user
-// uses a process-local multi-step wizard (aui~…): page nav, multi-select, and
-// free-text capture stay on the adapter until answers are complete, then a
-// single structured /respond continuation is dispatched.
+// callbacks (aui~…) apply structured ops to the durable interaction state:
+// page nav, multi-select, and free-text capture all persist via the userinput
+// service, and a single structured /respond continuation is dispatched when
+// the answer set completes.
 func (a *TelegramAdapter) handleTelegramCallback(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, bot *tele.Bot, update *tele.Update) {
 	cb := update.Callback
 	if cb == nil {
@@ -677,7 +699,10 @@ func parseTelegramUserInputCallback(data string) (userInputID, answer string, ok
 }
 
 // handleAskUserWizardCallback owns multi-step ask_user interaction on Telegram.
-// Returns true when the callback was an aui~ wizard event (handled here).
+// Returns true when the callback was an aui~ event (handled here). Every op is
+// applied to the durable interaction state via the userinput service; the card
+// is re-rendered from the persisted result, so a restart or a concurrent
+// plain-text reply can never desync the keyboard from the real answer set.
 func (a *TelegramAdapter) handleAskUserWizardCallback(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, bot *tele.Bot, update *tele.Update) bool {
 	cb := update.Callback
 	if cb == nil {
@@ -687,73 +712,110 @@ func (a *TelegramAdapter) handleAskUserWizardCallback(ctx context.Context, cfg c
 	if !ok {
 		return false
 	}
-	w := a.askUserStore().get(parsed.Token)
-	if w == nil {
-		_ = bot.Respond(cb, &tele.CallbackResponse{Text: i18n.New("").T("cmd.userInput.expired"), ShowAlert: true})
+	loc := i18n.New(parsed.Locale)
+	if a.userInput == nil {
+		_ = bot.Respond(cb, &tele.CallbackResponse{Text: loc.T("cmd.userInput.unavailable"), ShowAlert: true})
 		return true
 	}
-	// Bind the originating message so later edits hit the same card.
+	var chatID int64
+	var msgID int
 	if cb.Message != nil && cb.Message.Chat != nil {
-		w.ChatID = cb.Message.Chat.ID
-		w.MessageID = cb.Message.ID
+		chatID = cb.Message.Chat.ID
+		msgID = cb.Message.ID
 	}
 
-	ready, needText, toast := applyAskUserCallback(w, parsed)
-	if toast != "" {
-		_ = bot.Respond(cb, &tele.CallbackResponse{Text: toast, ShowAlert: true})
-	} else {
-		_ = bot.Respond(cb, &tele.CallbackResponse{Text: "OK"})
-	}
-	a.askUserStore().put(w)
-
-	if ready {
-		a.submitAskUserWizard(ctx, cfg, handler, bot, update, w)
+	op, needText := interactionOpFromCallback(parsed)
+	result, err := a.userInput.AdvanceInteraction(ctx, userinput.AdvanceInteractionInput{
+		BotID:     cfg.BotID,
+		RequestID: parsed.RequestID,
+		Op:        op,
+	})
+	if err != nil {
+		if a.logger != nil {
+			a.logger.Warn("telegram: ask_user advance failed", slog.Any("error", err))
+		}
+		_ = bot.Respond(cb, &tele.CallbackResponse{Text: loc.T("cmd.userInput.unavailable"), ShowAlert: true})
 		return true
 	}
-	text, actions := w.renderPage()
-	if w.ChatID != 0 && w.MessageID != 0 {
-		_ = editTelegramMessageTextWithActions(bot, w.ChatID, w.MessageID, text, "", actions)
+	if !result.Handled {
+		// Not pending anymore: answered elsewhere, canceled, or expired.
+		_ = bot.Respond(cb, &tele.CallbackResponse{Text: loc.T("cmd.userInput.expired"), ShowAlert: true})
+		return true
+	}
+	if toast := askUserRejectToast(loc, result.Reject); toast != "" {
+		_ = bot.Respond(cb, &tele.CallbackResponse{Text: toast, ShowAlert: true})
+		return true
+	}
+	_ = bot.Respond(cb, &tele.CallbackResponse{})
+
+	req := result.Request
+	if req.Interaction.Completed {
+		a.submitAskUser(ctx, cfg, handler, bot, update, loc, req, chatID, msgID)
+		return true
+	}
+	if result.Changed && chatID != 0 && msgID != 0 {
+		text, actions := renderAskUserPage(req.ID, loc, req.UIPayload, req.Interaction)
+		_ = editTelegramMessageTextWithActions(bot, chatID, msgID, text, "", actions)
 	}
 	// Free-text input is opt-in. Auto-prompting on page entry adds another
 	// message and reply preview before the user has chosen to answer.
 	if needText {
-		a.promptAskUserText(bot, w)
+		a.promptAskUserText(bot, loc, req, parsed.QIndex, chatID, msgID)
 	}
 	return true
 }
 
-func (a *TelegramAdapter) promptAskUserText(bot *tele.Bot, w *askUserWizard) {
-	if bot == nil || w == nil || w.ChatID == 0 {
+// interactionOpFromCallback maps a Telegram callback to a durable interaction
+// op. needText marks "x": the op only navigates to the question; the typed
+// answer arrives later via the force-reply message.
+func interactionOpFromCallback(cb askUserCallback) (op userinput.InteractionOp, needText bool) {
+	switch cb.Op {
+	case "s":
+		return userinput.InteractionOp{Kind: userinput.OpSelectOption, QuestionIndex: cb.QIndex, OptionIndex: cb.OIndex}, false
+	case "t":
+		return userinput.InteractionOp{Kind: userinput.OpToggleOption, QuestionIndex: cb.QIndex, OptionIndex: cb.OIndex}, false
+	case "x":
+		return userinput.InteractionOp{Kind: userinput.OpNavigate, Page: cb.QIndex}, true
+	case "n":
+		return userinput.InteractionOp{Kind: userinput.OpNavigate, Page: cb.Page}, false
+	case "go":
+		return userinput.InteractionOp{Kind: userinput.OpSubmit}, false
+	default:
+		return userinput.InteractionOp{}, false
+	}
+}
+
+// promptAskUserText sends a force-reply prompt for the question at qIndex and
+// binds the sent message to the request so the next reply routes back here.
+func (a *TelegramAdapter) promptAskUserText(bot *tele.Bot, loc *i18n.Localizer, req userinput.Request, qIndex int, cardChatID int64, cardMsgID int) {
+	if bot == nil || cardChatID == 0 || qIndex < 0 || qIndex >= len(req.UIPayload.Questions) {
 		return
 	}
-	q, _ := w.questionAt(w.Page)
-	loc := w.localizer()
+	q := req.UIPayload.Questions[qIndex]
 	prompt := loc.T("cmd.userInput.replyTextPrompt")
 	if ph := strings.TrimSpace(q.Placeholder); ph != "" {
 		prompt = ph
 	} else if q.Kind != userinput.QuestionKindText {
 		prompt = loc.T("cmd.userInput.replyCustomPrompt")
 	}
-	// Bind which question the next reply belongs to.
-	if q.ID != "" {
-		w.TextPromptQ = q.ID
-	}
 	opts := &tele.SendOptions{
 		ReplyMarkup: &tele.ReplyMarkup{ForceReply: true, Selective: true},
 	}
-	if w.MessageID > 0 {
-		opts.ReplyTo = &tele.Message{ID: w.MessageID, Chat: &tele.Chat{ID: w.ChatID}}
+	if cardMsgID > 0 {
+		opts.ReplyTo = &tele.Message{ID: cardMsgID, Chat: &tele.Chat{ID: cardChatID}}
 	}
-	sent, err := bot.Send(tele.ChatID(w.ChatID), prompt, opts)
+	sent, err := bot.Send(tele.ChatID(cardChatID), prompt, opts)
 	if err != nil || sent == nil {
 		if a.logger != nil {
 			a.logger.Warn("telegram: ask_user force-reply prompt failed", slog.Any("error", err))
 		}
 		return
 	}
-	w.TextPromptID = sent.ID
-	a.askUserStore().put(w)
-	a.askUserStore().bindTextPrompt(w.ChatID, sent.ID, w.Token, q.ID)
+	a.askUserPromptStore().put(cardChatID, sent.ID, askUserTextPrompt{
+		RequestID:  req.ID,
+		QuestionID: q.ID,
+		Locale:     loc.Locale(),
+	})
 }
 
 func (a *TelegramAdapter) tryHandleAskUserTextReply(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, bot *tele.Bot, update *tele.Update) bool {
@@ -761,128 +823,110 @@ func (a *TelegramAdapter) tryHandleAskUserTextReply(ctx context.Context, cfg cha
 	if raw == nil || raw.ReplyTo == nil || raw.Chat == nil {
 		return false
 	}
-	token, questionID, ok := a.askUserStore().takeTextPrompt(raw.Chat.ID, raw.ReplyTo.ID)
-	if !ok {
+	prompt, ok := a.askUserPromptStore().take(raw.Chat.ID, raw.ReplyTo.ID)
+	if !ok || prompt.RequestID == "" {
 		return false
 	}
-	w := a.askUserStore().get(token)
-	if w == nil {
+	loc := i18n.New(prompt.Locale)
+	if a.userInput == nil {
 		return false
 	}
-	// Navigation may have moved since this prompt was sent. Bind the reply to
-	// the prompt's original question, not the wizard's latest page.
-	w.TextPromptQ = questionID
 	text := strings.TrimSpace(raw.Text)
 	if text == "" {
 		text = strings.TrimSpace(raw.Caption)
 	}
-	ready, toast := applyAskUserTextAnswer(w, text)
-	a.askUserStore().put(w)
-	if toast != "" && a.logger != nil {
-		a.logger.Debug("telegram: ask_user text answer rejected", slog.String("toast", toast))
-	}
-	if ready {
-		// Build a synthetic update so submit can reuse inbound identity fields.
-		a.submitAskUserWizard(ctx, cfg, handler, bot, update, w)
+	// The reply binds to the prompt's original question, not the current
+	// cursor — navigation may have moved since the prompt was sent.
+	result, err := a.userInput.AdvanceInteraction(ctx, userinput.AdvanceInteractionInput{
+		BotID:     cfg.BotID,
+		RequestID: prompt.RequestID,
+		Op:        userinput.InteractionOp{Kind: userinput.OpSetText, QuestionID: prompt.QuestionID, Text: text},
+	})
+	if err != nil || !result.Handled {
+		if err != nil && a.logger != nil {
+			a.logger.Warn("telegram: ask_user text answer failed", slog.Any("error", err))
+		}
 		return true
 	}
-	body, actions := w.renderPage()
-	if w.ChatID != 0 && w.MessageID != 0 {
-		_ = editTelegramMessageTextWithActions(bot, w.ChatID, w.MessageID, body, "", actions)
+	if result.Reject != userinput.RejectNone {
+		// Rebind so the user can just reply again to the same prompt.
+		a.askUserPromptStore().put(raw.Chat.ID, raw.ReplyTo.ID, prompt)
+		if a.logger != nil {
+			a.logger.Debug("telegram: ask_user text answer rejected", slog.String("reject", string(result.Reject)))
+		}
+		return true
+	}
+	req := result.Request
+	cardChatID, cardMsgID := askUserCardLocation(raw.Chat.ID, req)
+	if req.Interaction.Completed {
+		a.submitAskUser(ctx, cfg, handler, bot, update, loc, req, cardChatID, cardMsgID)
+		return true
+	}
+	if cardChatID != 0 && cardMsgID != 0 {
+		body, actions := renderAskUserPage(req.ID, loc, req.UIPayload, req.Interaction)
+		_ = editTelegramMessageTextWithActions(bot, cardChatID, cardMsgID, body, "", actions)
 	}
 	return true
 }
 
-func (a *TelegramAdapter) submitAskUserWizard(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, bot *tele.Bot, update *tele.Update, w *askUserWizard) {
-	if w == nil {
-		return
+// askUserCardLocation recovers the card message to edit from the persisted
+// prompt_external_message_id (chat is the conversation the reply arrived in).
+func askUserCardLocation(chatID int64, req userinput.Request) (int64, int) {
+	msgID, err := strconv.Atoi(strings.TrimSpace(req.PromptExternalMessageID))
+	if err != nil || msgID <= 0 {
+		return 0, 0
 	}
-	// Once submitted, replace the active page with a stable record of every
-	// question and final answer. During input we only show the current page.
-	if bot != nil && w.ChatID != 0 && w.MessageID != 0 {
-		summary := formatAskUserSubmittedSummary(w)
-		_ = editTelegramMessageTextWithActions(bot, w.ChatID, w.MessageID, summary, "", nil)
+	return chatID, msgID
+}
+
+// submitAskUser finalizes a completed interaction: freeze the card into a
+// summary, then dispatch a synthetic /respond continuation carrying the
+// structured answers from the durable state.
+func (a *TelegramAdapter) submitAskUser(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, bot *tele.Bot, update *tele.Update, loc *i18n.Localizer, req userinput.Request, cardChatID int64, cardMsgID int) {
+	if bot != nil && cardChatID != 0 && cardMsgID != 0 {
+		summary := formatAskUserSubmittedSummary(loc, req.UIPayload, req.Interaction)
+		_ = editTelegramMessageTextWithActions(bot, cardChatID, cardMsgID, summary, "", nil)
 	}
-	msg, ok := a.buildAskUserSubmitInbound(cfg, update, w)
-	a.askUserStore().delete(w.Token)
+	msg, ok := a.buildAskUserSubmitInbound(cfg, update, req, cardMsgID)
 	if !ok {
 		return
 	}
 	a.dispatchInbound(ctx, cfg, handler, msg)
 }
 
-func formatAskUserSubmittedSummary(w *askUserWizard) string {
-	loc := w.localizer()
-	if w == nil || len(w.Questions) == 0 {
-		return loc.T("cmd.userInput.inputRequested")
-	}
-	var b strings.Builder
-	for i, q := range w.Questions {
-		if i > 0 {
-			b.WriteString("\n\n")
-		}
-		b.WriteString(strconv.Itoa(i + 1))
-		b.WriteString(". ")
-		b.WriteString(q.Text)
-		b.WriteString("\n")
-		answer := formatDraftAnswer(q, w.draftFor(q.ID))
-		if answer == "" {
-			answer = loc.T("cmd.userInput.skipped")
-		}
-		b.WriteString(answer)
-	}
-	return b.String()
-}
-
-func (a *TelegramAdapter) buildAskUserSubmitInbound(cfg channel.ChannelConfig, update *tele.Update, w *askUserWizard) (channel.InboundMessage, bool) {
-	if w == nil || strings.TrimSpace(w.UserInputID) == "" {
+func (a *TelegramAdapter) buildAskUserSubmitInbound(cfg channel.ChannelConfig, update *tele.Update, req userinput.Request, cardMsgID int) (channel.InboundMessage, bool) {
+	if strings.TrimSpace(req.ID) == "" {
 		return channel.InboundMessage{}, false
 	}
-	// Prefer callback identity; fall back to message (force-reply path).
-	var (
-		rawSender *tele.User
-		replyID   string
-	)
-	if update != nil && update.Callback != nil {
-		rawSender = update.Callback.Sender
-		if update.Callback.Message != nil {
-			replyID = strconv.Itoa(update.Callback.Message.ID)
-			// Rewrite message text for the synthetic inbound.
-			update.Callback.Message.Text = "/respond"
-			update.Callback.Message.Sender = rawSender
-			raw := update.Callback.Message
-			extraMeta := map[string]any{
-				"update_id":          update.ID,
-				"user_input_id":      w.UserInputID,
-				"user_input_answers": w.collectAnswers(),
-				"is_mentioned":       true,
-			}
-			msg, ok := a.toInboundTelegramMessage(nil, cfg, raw, "/respond", nil, extraMeta)
-			if !ok {
-				return channel.InboundMessage{}, false
-			}
-			msg.Message.Reply = &channel.ReplyRef{MessageID: replyID, AttachmentsKnown: true}
-			return msg, true
+	extraMeta := func(updateID int) map[string]any {
+		return map[string]any{
+			"update_id":          updateID,
+			"user_input_id":      req.ID,
+			"user_input_answers": req.Interaction.Answers,
+			"is_mentioned":       true,
 		}
+	}
+	// Prefer callback identity; fall back to message (force-reply path).
+	if update != nil && update.Callback != nil && update.Callback.Message != nil {
+		raw := update.Callback.Message
+		raw.Text = "/respond"
+		raw.Sender = update.Callback.Sender
+		msg, ok := a.toInboundTelegramMessage(nil, cfg, raw, "/respond", nil, extraMeta(update.ID))
+		if !ok {
+			return channel.InboundMessage{}, false
+		}
+		msg.Message.Reply = &channel.ReplyRef{MessageID: strconv.Itoa(raw.ID), AttachmentsKnown: true}
+		return msg, true
 	}
 	if update != nil && update.Message != nil {
 		raw := update.Message
 		raw.Text = "/respond"
-		extraMeta := map[string]any{
-			"update_id":          update.ID,
-			"user_input_id":      w.UserInputID,
-			"user_input_answers": w.collectAnswers(),
-			"is_mentioned":       true,
-		}
-		if w.MessageID > 0 {
-			replyID = strconv.Itoa(w.MessageID)
-		}
-		msg, ok := a.toInboundTelegramMessage(nil, cfg, raw, "/respond", nil, extraMeta)
+		msg, ok := a.toInboundTelegramMessage(nil, cfg, raw, "/respond", nil, extraMeta(update.ID))
 		if !ok {
 			return channel.InboundMessage{}, false
 		}
-		if replyID != "" {
-			msg.Message.Reply = &channel.ReplyRef{MessageID: replyID, AttachmentsKnown: true}
+		if cardMsgID > 0 {
+			msg.Message.Reply = &channel.ReplyRef{MessageID: strconv.Itoa(cardMsgID), AttachmentsKnown: true}
 		}
 		return msg, true
 	}

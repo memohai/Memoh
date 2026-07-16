@@ -1,178 +1,117 @@
 package telegram
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/i18n"
 	"github.com/memohai/memoh/internal/userinput"
 )
 
-// ask_user interactive callbacks use a short process-local wizard token so
-// Telegram's 64-byte callback_data limit is never blown by UUIDs. Final submit
-// still goes through the existing /respond continuation with structured
-// Answers + user_input_id metadata — never by asking the human to type
-// /respond.
-const (
-	askUserCallbackPrefix = "aui~"
-	askUserWizardTTL      = 2 * time.Hour
-)
-
-type askUserOption struct {
-	ID    string
-	Label string
-}
-
-type askUserQuestion struct {
-	ID          string
-	Text        string
-	Kind        string
-	Options     []askUserOption
-	AllowCustom bool
-	Placeholder string
-}
-
-type askUserDraft struct {
-	OptionIDs  []string
-	CustomText string
-	Text       string
-	Answered   bool
-}
-
-type askUserWizard struct {
-	Token        string
-	UserInputID  string
-	Locale       string
-	Questions    []askUserQuestion
-	Page         int
-	Drafts       map[string]*askUserDraft
-	ChatID       int64
-	MessageID    int
-	CreatedAt    time.Time
-	TextPromptID int    // force-reply prompt message id
-	TextPromptQ  string // question id waiting for free-text
-}
+// Telegram ask_user rendering over the durable interaction state.
+//
+// There is deliberately NO adapter-side state machine here: every button
+// callback carries the request UUID and is applied to the persistent
+// userinput.TextInteractionState via Service.AdvanceInteraction (optimistic
+// CAS). The card is then re-rendered from the returned state. This is the
+// same state machine the plain-text fallback drives, so a pending ask_user
+// survives process restarts and can even be finished from another surface.
+//
+// The only ephemeral piece is the force-reply text-prompt binding
+// (askUserTextPrompts): losing it on restart merely means the user re-taps
+// the "Fill answer" button; no answers are lost.
+const askUserCallbackPrefix = "aui~"
 
 type askUserCallback struct {
-	Op     string
-	Token  string
-	Page   int
-	QIndex int
-	OIndex int
+	Op        string
+	RequestID string
+	Locale    string
+	Page      int
+	QIndex    int
+	OIndex    int
 }
 
-func (a *TelegramAdapter) askUserStore() *askUserWizardStore {
-	a.askUserOnce.Do(func() {
-		a.askUserWizards = newAskUserWizardStore()
-	})
-	return a.askUserWizards
-}
-
-type askUserWizardStore struct {
-	mu          sync.Mutex
-	byToken     map[string]*askUserWizard
-	textPrompts map[string]askUserTextPrompt // "chatID:msgID" → wizard/question
-}
-
+// askUserTextPrompt binds a sent force-reply prompt message to the request
+// and question awaiting typed text.
 type askUserTextPrompt struct {
-	Token      string
+	RequestID  string
 	QuestionID string
+	Locale     string
 }
 
-func newAskUserWizardStore() *askUserWizardStore {
-	return &askUserWizardStore{
-		byToken:     make(map[string]*askUserWizard),
-		textPrompts: make(map[string]askUserTextPrompt),
-	}
+type askUserTextPromptStore struct {
+	mu      sync.Mutex
+	byMsgID map[string]askUserTextPrompt // "chatID:msgID" → prompt
 }
 
-func (s *askUserWizardStore) put(w *askUserWizard) {
-	if s == nil || w == nil || w.Token == "" {
+func newAskUserTextPromptStore() *askUserTextPromptStore {
+	return &askUserTextPromptStore{byMsgID: make(map[string]askUserTextPrompt)}
+}
+
+func (s *askUserTextPromptStore) put(chatID int64, msgID int, prompt askUserTextPrompt) {
+	if s == nil || chatID == 0 || msgID == 0 || prompt.RequestID == "" {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.purgeExpiredLocked(time.Now())
-	s.byToken[w.Token] = w
+	s.byMsgID[textPromptKey(chatID, msgID)] = prompt
 }
 
-func (s *askUserWizardStore) get(token string) *askUserWizard {
+func (s *askUserTextPromptStore) take(chatID int64, msgID int) (askUserTextPrompt, bool) {
 	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.purgeExpiredLocked(time.Now())
-	return s.byToken[strings.TrimSpace(token)]
-}
-
-func (s *askUserWizardStore) delete(token string) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	w := s.byToken[token]
-	delete(s.byToken, token)
-	if w == nil {
-		return
-	}
-	s.deleteTextPromptsLocked(token)
-}
-
-func (s *askUserWizardStore) bindTextPrompt(chatID int64, msgID int, token, questionID string) {
-	if s == nil || chatID == 0 || msgID == 0 || token == "" || questionID == "" {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.textPrompts[textPromptKey(chatID, msgID)] = askUserTextPrompt{Token: token, QuestionID: questionID}
-}
-
-func (s *askUserWizardStore) takeTextPrompt(chatID int64, msgID int) (token, questionID string, ok bool) {
-	if s == nil {
-		return "", "", false
+		return askUserTextPrompt{}, false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := textPromptKey(chatID, msgID)
-	prompt, ok := s.textPrompts[key]
+	prompt, ok := s.byMsgID[key]
 	if ok {
-		delete(s.textPrompts, key)
+		delete(s.byMsgID, key)
 	}
-	return prompt.Token, prompt.QuestionID, ok
-}
-
-func (s *askUserWizardStore) purgeExpiredLocked(now time.Time) {
-	for token, w := range s.byToken {
-		if w == nil || now.Sub(w.CreatedAt) > askUserWizardTTL {
-			delete(s.byToken, token)
-			s.deleteTextPromptsLocked(token)
-		}
-	}
-}
-
-func (s *askUserWizardStore) deleteTextPromptsLocked(token string) {
-	for key, prompt := range s.textPrompts {
-		if prompt.Token == token {
-			delete(s.textPrompts, key)
-		}
-	}
+	return prompt, ok
 }
 
 func textPromptKey(chatID int64, msgID int) string {
 	return strconv.FormatInt(chatID, 10) + ":" + strconv.Itoa(msgID)
 }
 
-func askUserToken(userInputID string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(userInputID)))
-	return base64.RawURLEncoding.EncodeToString(sum[:12])
+// compactAskUserID strips dashes so a UUID fits Telegram's 64-byte
+// callback_data alongside op, locale, and indexes.
+func compactAskUserID(requestID string) string {
+	return strings.ReplaceAll(strings.TrimSpace(requestID), "-", "")
+}
+
+// expandAskUserID restores the canonical dashed UUID form. Returns "" when
+// the compact form is not a 32-char hex string.
+func expandAskUserID(compact string) string {
+	compact = strings.TrimSpace(compact)
+	if len(compact) != 32 {
+		return ""
+	}
+	for _, r := range compact {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+			return ""
+		}
+	}
+	return compact[0:8] + "-" + compact[8:12] + "-" + compact[12:16] + "-" + compact[16:20] + "-" + compact[20:32]
+}
+
+// Callback layout: aui~<op>~<id32>~<locale>[~args...]. Ops:
+//
+//	s <q> <opt>  single-select (auto-advance / toggle-off)
+//	t <q> <opt>  multi-select toggle
+//	x <q>        request free text (force-reply)
+//	n <page>     navigate
+//	go           submit with skips
+func encodeAskUserCallback(op, requestID, locale string, args ...int) string {
+	parts := []string{op, compactAskUserID(requestID), locale}
+	for _, arg := range args {
+		parts = append(parts, strconv.Itoa(arg))
+	}
+	return askUserCallbackPrefix + strings.Join(parts, "~")
 }
 
 func parseAskUserCallback(data string) (askUserCallback, bool) {
@@ -181,134 +120,75 @@ func parseAskUserCallback(data string) (askUserCallback, bool) {
 		return askUserCallback{}, false
 	}
 	parts := strings.Split(strings.TrimPrefix(data, askUserCallbackPrefix), "~")
-	if len(parts) < 2 {
+	if len(parts) < 3 {
 		return askUserCallback{}, false
 	}
 	cb := askUserCallback{
-		Op:    strings.TrimSpace(parts[0]),
-		Token: strings.TrimSpace(parts[1]),
+		Op:        strings.TrimSpace(parts[0]),
+		RequestID: expandAskUserID(parts[1]),
+		Locale:    strings.TrimSpace(parts[2]),
 	}
-	if cb.Op == "" || cb.Token == "" {
+	if cb.Op == "" || cb.RequestID == "" {
 		return askUserCallback{}, false
+	}
+	intArg := func(idx int) (int, bool) {
+		value, err := strconv.Atoi(parts[idx])
+		return value, err == nil && value >= 0
 	}
 	switch cb.Op {
 	case "n":
-		if len(parts) != 3 {
+		if len(parts) != 4 {
 			return askUserCallback{}, false
 		}
-		page, err := strconv.Atoi(parts[2])
-		if err != nil || page < 0 {
+		page, ok := intArg(3)
+		if !ok {
 			return askUserCallback{}, false
 		}
 		cb.Page = page
 		return cb, true
 	case "s", "t":
-		if len(parts) != 4 {
+		if len(parts) != 5 {
 			return askUserCallback{}, false
 		}
-		qi, errQ := strconv.Atoi(parts[2])
-		oi, errO := strconv.Atoi(parts[3])
-		if errQ != nil || errO != nil || qi < 0 || oi < 0 {
+		qi, okQ := intArg(3)
+		oi, okO := intArg(4)
+		if !okQ || !okO {
 			return askUserCallback{}, false
 		}
 		cb.QIndex, cb.OIndex = qi, oi
 		return cb, true
-	case "ok", "x":
-		if len(parts) != 3 {
+	case "x":
+		if len(parts) != 4 {
 			return askUserCallback{}, false
 		}
-		qi, err := strconv.Atoi(parts[2])
-		if err != nil || qi < 0 {
+		qi, ok := intArg(3)
+		if !ok {
 			return askUserCallback{}, false
 		}
 		cb.QIndex = qi
 		return cb, true
 	case "go":
-		if len(parts) != 2 {
-			return askUserCallback{}, false
-		}
-		return cb, true
+		return cb, len(parts) == 3
 	default:
 		return askUserCallback{}, false
 	}
 }
 
-func encodeAskUserCallback(parts ...string) string {
-	return askUserCallbackPrefix + strings.Join(parts, "~")
-}
-
-func parseAskUserToolCall(tc *channel.StreamToolCall) (userInputID string, questions []askUserQuestion, ok bool) {
+// parseAskUserToolCall extracts the pending request ID and canonical payload
+// from an ask_user tool-call start event. The payload decoder is the shared
+// read-side entry point (PayloadFromStored) so Telegram can never drift from
+// what the service persisted.
+func parseAskUserToolCall(tc *channel.StreamToolCall) (requestID string, payload userinput.UIPayload, ok bool) {
 	if tc == nil || !strings.EqualFold(strings.TrimSpace(tc.Name), "ask_user") {
-		return "", nil, false
+		return "", userinput.UIPayload{}, false
 	}
 	in, _ := tc.Input.(map[string]any)
 	if in == nil {
-		return "", nil, false
+		return "", userinput.UIPayload{}, false
 	}
-	userInputID = strings.TrimSpace(asString(in["user_input_id"]))
-	payload, _ := in["payload"].(map[string]any)
-	if payload == nil {
-		payload, _ = in["payload"].(map[string]interface{})
-	}
-	// payload may be nested as map from JSON round-trip; also accept direct questions.
-	rawQuestions := payload["questions"]
-	if rawQuestions == nil {
-		return userInputID, nil, userInputID != ""
-	}
-	list, _ := rawQuestions.([]any)
-	if list == nil {
-		if typed, ok := rawQuestions.([]map[string]any); ok {
-			for _, item := range typed {
-				list = append(list, item)
-			}
-		}
-	}
-	for i, raw := range list {
-		qMap, _ := raw.(map[string]any)
-		if qMap == nil {
-			continue
-		}
-		q := askUserQuestion{
-			ID:          strings.TrimSpace(asString(qMap["id"])),
-			Text:        strings.TrimSpace(asString(qMap["text"])),
-			Kind:        strings.TrimSpace(asString(qMap["kind"])),
-			AllowCustom: asBool(qMap["allow_custom"]),
-			Placeholder: strings.TrimSpace(asString(qMap["placeholder"])),
-		}
-		if q.ID == "" {
-			q.ID = fmt.Sprintf("q%d", i+1)
-		}
-		if q.Kind == "" {
-			q.Kind = userinput.QuestionKindText
-		}
-		opts, _ := qMap["options"].([]any)
-		if opts == nil {
-			if typed, ok := qMap["options"].([]map[string]any); ok {
-				for _, item := range typed {
-					opts = append(opts, item)
-				}
-			}
-		}
-		for j, rawOpt := range opts {
-			oMap, _ := rawOpt.(map[string]any)
-			if oMap == nil {
-				continue
-			}
-			opt := askUserOption{
-				ID:    strings.TrimSpace(asString(oMap["id"])),
-				Label: strings.TrimSpace(asString(oMap["label"])),
-			}
-			if opt.Label == "" {
-				continue
-			}
-			if opt.ID == "" {
-				opt.ID = fmt.Sprintf("%s.o%d", q.ID, j+1)
-			}
-			q.Options = append(q.Options, opt)
-		}
-		questions = append(questions, q)
-	}
-	return userInputID, questions, userInputID != "" && len(questions) > 0
+	requestID = strings.TrimSpace(asString(in["user_input_id"]))
+	payload = userinput.PayloadFromStored(in["payload"])
+	return requestID, payload, requestID != "" && len(payload.Questions) > 0
 }
 
 func asString(v any) string {
@@ -322,122 +202,59 @@ func asString(v any) string {
 	}
 }
 
-func asBool(v any) bool {
-	b, _ := v.(bool)
-	return b
+// askUserAnswered reports whether the question has a real (non-skip) answer.
+// Persisted skip entries render as unanswered so the user can still fill them
+// after navigating back.
+func askUserAnswered(state userinput.TextInteractionState, questionID string) (userinput.QuestionAnswer, bool) {
+	answer, ok := state.Answer(questionID)
+	if !ok || answer.Skipped {
+		return userinput.QuestionAnswer{}, false
+	}
+	return answer, true
 }
 
-func newAskUserWizard(userInputID string, questions []askUserQuestion) *askUserWizard {
-	w := &askUserWizard{
-		Token:       askUserToken(userInputID),
-		UserInputID: strings.TrimSpace(userInputID),
-		Questions:   questions,
-		Drafts:      make(map[string]*askUserDraft, len(questions)),
-		CreatedAt:   time.Now(),
-	}
-	for _, q := range questions {
-		w.Drafts[q.ID] = &askUserDraft{}
-	}
-	return w
-}
-
-func (w *askUserWizard) localizer() *i18n.Localizer {
-	if w == nil {
-		return i18n.New("")
-	}
-	return i18n.New(w.Locale)
-}
-
-func (w *askUserWizard) questionAt(page int) (askUserQuestion, bool) {
-	if w == nil || page < 0 || page >= len(w.Questions) {
-		return askUserQuestion{}, false
-	}
-	return w.Questions[page], true
-}
-
-func (w *askUserWizard) draftFor(qID string) *askUserDraft {
-	if w == nil {
-		return &askUserDraft{}
-	}
-	if d, ok := w.Drafts[qID]; ok && d != nil {
-		return d
-	}
-	d := &askUserDraft{}
-	if w.Drafts == nil {
-		w.Drafts = make(map[string]*askUserDraft)
-	}
-	w.Drafts[qID] = d
-	return d
-}
-
-func (w *askUserWizard) collectAnswers() []map[string]any {
-	out := make([]map[string]any, 0, len(w.Questions))
-	for _, q := range w.Questions {
-		d := w.draftFor(q.ID)
-		entry := map[string]any{"question_id": q.ID}
-		if !d.Answered {
-			entry["skipped"] = true
-			out = append(out, entry)
-			continue
-		}
-		if len(d.OptionIDs) > 0 {
-			ids := make([]any, 0, len(d.OptionIDs))
-			for _, id := range d.OptionIDs {
-				ids = append(ids, id)
-			}
-			entry["option_ids"] = ids
-		}
-		if strings.TrimSpace(d.CustomText) != "" {
-			entry["custom_text"] = d.CustomText
-		}
-		if strings.TrimSpace(d.Text) != "" {
-			entry["text"] = d.Text
-		}
-		out = append(out, entry)
-	}
-	return out
-}
-
-// Each question is one page. Choices update the draft in place; navigation is
-// always explicit so users can review, change, or skip any question. The card
-// only renders the current question and its current answer.
-func (w *askUserWizard) renderPage() (text string, actions []channel.Action) {
-	loc := w.localizer()
-	if w == nil || len(w.Questions) == 0 {
+// renderAskUserPage builds the card body and inline keyboard for the current
+// question of the durable interaction state. Each question is one page.
+// Choice buttons show selection state (✓ prefix); free text and custom values
+// stay in the body because they cannot fit in a button label.
+func renderAskUserPage(requestID string, loc *i18n.Localizer, payload userinput.UIPayload, state userinput.TextInteractionState) (text string, actions []channel.Action) {
+	if len(payload.Questions) == 0 {
 		return loc.T("cmd.userInput.inputRequested"), nil
 	}
-	if w.Page < 0 {
-		w.Page = 0
+	page := state.QuestionIndex
+	if page < 0 {
+		page = 0
 	}
-	if w.Page >= len(w.Questions) {
-		w.Page = len(w.Questions) - 1
+	if page >= len(payload.Questions) {
+		page = len(payload.Questions) - 1
 	}
-	q, ok := w.questionAt(w.Page)
-	if !ok {
-		return loc.T("cmd.userInput.inputRequested"), nil
-	}
+	q := payload.Questions[page]
+	locale := loc.Locale()
+
 	var b strings.Builder
 	b.WriteString(q.Text)
-	d := w.draftFor(q.ID)
-	// Choice buttons already show their selection state. Free text and custom
-	// values stay in the body because they cannot fit in a button label.
-	if ans := formatAskUserBodyAnswer(q, d, loc); ans != "" {
+	answer, answered := askUserAnswered(state, q.ID)
+	if body := askUserBodyAnswer(q, answer, answered, loc); body != "" {
 		b.WriteString("\n\n")
-		b.WriteString(ans)
+		b.WriteString(body)
 	}
 
 	row := 0
 	switch q.Kind {
-	case userinput.QuestionKindSingleSelect:
+	case userinput.QuestionKindSingleSelect, userinput.QuestionKindMultiSelect:
+		op := "s"
+		if q.Kind == userinput.QuestionKindMultiSelect {
+			op = "t"
+		}
 		for oi, opt := range q.Options {
 			label := opt.Label
-			if d.Answered && len(d.OptionIDs) == 1 && d.OptionIDs[0] == opt.ID && d.CustomText == "" {
+			if askUserOptionSelected(q.Kind, answer, answered, opt.ID) {
 				label = "✓ " + label
 			}
 			actions = append(actions, channel.Action{
 				Type:  "user_input",
 				Label: truncateAskUserLabel(label),
-				Value: encodeAskUserCallback("s", w.Token, strconv.Itoa(w.Page), strconv.Itoa(oi)),
+				Value: encodeAskUserCallback(op, requestID, locale, page, oi),
 				Row:   row,
 			})
 			if (oi+1)%2 == 0 {
@@ -449,174 +266,162 @@ func (w *askUserWizard) renderPage() (text string, actions []channel.Action) {
 		}
 		if q.AllowCustom {
 			label := loc.T("cmd.userInput.otherOption")
-			if d.Answered && strings.TrimSpace(d.CustomText) != "" {
+			if answered && strings.TrimSpace(answer.CustomText) != "" {
 				label = "✓ " + label
 			}
 			actions = append(actions, channel.Action{
 				Type:  "user_input",
 				Label: label,
-				Value: encodeAskUserCallback("x", w.Token, strconv.Itoa(w.Page)),
-				Row:   row,
-			})
-			row++
-		}
-	case userinput.QuestionKindMultiSelect:
-		for oi, opt := range q.Options {
-			label := opt.Label
-			if containsString(d.OptionIDs, opt.ID) {
-				label = "✓ " + label
-			}
-			actions = append(actions, channel.Action{
-				Type:  "user_input",
-				Label: truncateAskUserLabel(label),
-				Value: encodeAskUserCallback("t", w.Token, strconv.Itoa(w.Page), strconv.Itoa(oi)),
-				Row:   row,
-			})
-			if (oi+1)%2 == 0 {
-				row++
-			}
-		}
-		if len(q.Options)%2 != 0 {
-			row++
-		}
-		if q.AllowCustom {
-			label := loc.T("cmd.userInput.otherOption")
-			if strings.TrimSpace(d.CustomText) != "" {
-				label = "✓ " + label
-			}
-			actions = append(actions, channel.Action{
-				Type:  "user_input",
-				Label: label,
-				Value: encodeAskUserCallback("x", w.Token, strconv.Itoa(w.Page)),
+				Value: encodeAskUserCallback("x", requestID, locale, page),
 				Row:   row,
 			})
 			row++
 		}
 	default: // text
 		label := loc.T("cmd.userInput.fillAnswer")
-		if d.Answered {
+		if answered {
 			label = loc.T("cmd.userInput.refillAnswer")
 		}
 		actions = append(actions, channel.Action{
 			Type:  "user_input",
 			Label: label,
-			Value: encodeAskUserCallback("x", w.Token, strconv.Itoa(w.Page)),
+			Value: encodeAskUserCallback("x", requestID, locale, page),
 			Row:   row,
 		})
 		row++
 	}
 
-	if len(w.Questions) == 1 {
+	if len(payload.Questions) == 1 {
 		label := loc.T("cmd.userInput.submit")
-		if !d.Answered {
+		if !answered {
 			label = loc.T("cmd.userInput.skip")
 		}
 		actions = append(actions, channel.Action{
 			Type:  "user_input",
 			Label: label,
-			Value: encodeAskUserCallback("go", w.Token),
+			Value: encodeAskUserCallback("go", requestID, locale),
 			Row:   row,
 		})
 		return b.String(), actions
 	}
 
-	if w.Page > 0 {
+	if page > 0 {
 		actions = append(actions, channel.Action{
 			Type:  "user_input",
 			Label: "←",
-			Value: encodeAskUserCallback("n", w.Token, strconv.Itoa(w.Page-1)),
+			Value: encodeAskUserCallback("n", requestID, locale, page-1),
 			Row:   row,
 		})
 	}
+	// Page indicator navigates to the same page; AdvanceInteraction reports
+	// it unchanged, so tapping it never triggers a no-op message edit.
 	actions = append(actions, channel.Action{
 		Type:  "user_input",
-		Label: fmt.Sprintf("%d/%d", w.Page+1, len(w.Questions)),
-		Value: encodeAskUserCallback("n", w.Token, strconv.Itoa(w.Page)),
+		Label: fmt.Sprintf("%d/%d", page+1, len(payload.Questions)),
+		Value: encodeAskUserCallback("n", requestID, locale, page),
 		Row:   row,
 	})
-	if w.Page < len(w.Questions)-1 {
+	if page < len(payload.Questions)-1 {
 		label := loc.T("cmd.userInput.next") + " →"
-		if !d.Answered {
+		if !answered {
 			label = loc.T("cmd.userInput.skip") + " →"
 		}
 		actions = append(actions, channel.Action{
 			Type:  "user_input",
 			Label: label,
-			Value: encodeAskUserCallback("n", w.Token, strconv.Itoa(w.Page+1)),
+			Value: encodeAskUserCallback("n", requestID, locale, page+1),
 			Row:   row,
 		})
 	} else {
 		label := loc.T("cmd.userInput.submit")
-		if !d.Answered {
+		if !answered {
 			label = loc.T("cmd.userInput.skipAndSubmit")
 		}
 		actions = append(actions, channel.Action{
 			Type:  "user_input",
 			Label: label,
-			Value: encodeAskUserCallback("go", w.Token),
+			Value: encodeAskUserCallback("go", requestID, locale),
 			Row:   row,
 		})
 	}
-
 	return b.String(), actions
 }
 
-func formatAskUserBodyAnswer(q askUserQuestion, d *askUserDraft, loc *i18n.Localizer) string {
-	if d == nil || !d.Answered {
+func askUserOptionSelected(kind string, answer userinput.QuestionAnswer, answered bool, optionID string) bool {
+	if !answered {
+		return false
+	}
+	if kind == userinput.QuestionKindSingleSelect {
+		return len(answer.OptionIDs) == 1 && answer.OptionIDs[0] == optionID && answer.CustomText == ""
+	}
+	for _, id := range answer.OptionIDs {
+		if id == optionID {
+			return true
+		}
+	}
+	return false
+}
+
+// askUserBodyAnswer echoes free-text / custom answers into the card body.
+func askUserBodyAnswer(q userinput.UIQuestion, answer userinput.QuestionAnswer, answered bool, loc *i18n.Localizer) string {
+	if !answered {
 		return ""
 	}
 	if q.Kind == userinput.QuestionKindText {
-		return strings.TrimSpace(d.Text)
+		return strings.TrimSpace(answer.Text)
 	}
-	if custom := strings.TrimSpace(d.CustomText); custom != "" {
+	if custom := strings.TrimSpace(answer.CustomText); custom != "" {
 		return loc.T("cmd.userInput.customAnswerLabel") + ": " + custom
 	}
 	return ""
 }
 
-// formatDraftAnswer returns the saved answer for the current page.
-func formatDraftAnswer(q askUserQuestion, d *askUserDraft) string {
-	if d == nil || !d.Answered {
+// askUserAnswerLabel renders the final value for one question in the
+// submitted summary.
+func askUserAnswerLabel(q userinput.UIQuestion, state userinput.TextInteractionState) string {
+	answer, ok := askUserAnswered(state, q.ID)
+	if !ok {
 		return ""
 	}
-	switch q.Kind {
-	case userinput.QuestionKindText:
-		return strings.TrimSpace(d.Text)
-	case userinput.QuestionKindSingleSelect:
-		if custom := strings.TrimSpace(d.CustomText); custom != "" {
-			return custom
-		}
-		if len(d.OptionIDs) == 1 {
-			for _, opt := range q.Options {
-				if opt.ID == d.OptionIDs[0] {
-					return opt.Label
-				}
-			}
-			return d.OptionIDs[0]
-		}
-		return ""
-	case userinput.QuestionKindMultiSelect:
-		parts := make([]string, 0, len(d.OptionIDs)+1)
-		for _, id := range d.OptionIDs {
-			label := id
-			for _, opt := range q.Options {
-				if opt.ID == id {
-					label = opt.Label
-					break
-				}
-			}
-			parts = append(parts, label)
-		}
-		if custom := strings.TrimSpace(d.CustomText); custom != "" {
-			parts = append(parts, custom)
-		}
-		return strings.Join(parts, ", ")
-	default:
-		if s := strings.TrimSpace(d.Text); s != "" {
-			return s
-		}
-		return strings.TrimSpace(d.CustomText)
+	if text := strings.TrimSpace(answer.Text); text != "" {
+		return text
 	}
+	parts := make([]string, 0, len(answer.OptionIDs)+1)
+	for _, id := range answer.OptionIDs {
+		label := id
+		if opt, ok := q.Option(id); ok {
+			label = opt.Label
+		}
+		parts = append(parts, label)
+	}
+	if custom := strings.TrimSpace(answer.CustomText); custom != "" {
+		parts = append(parts, custom)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// formatAskUserSubmittedSummary replaces the active page with a stable record
+// of every question and final answer once the request is submitted.
+func formatAskUserSubmittedSummary(loc *i18n.Localizer, payload userinput.UIPayload, state userinput.TextInteractionState) string {
+	if len(payload.Questions) == 0 {
+		return loc.T("cmd.userInput.inputRequested")
+	}
+	var b strings.Builder
+	for i, q := range payload.Questions {
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(strconv.Itoa(i + 1))
+		b.WriteString(". ")
+		b.WriteString(q.Text)
+		b.WriteString("\n")
+		answer := askUserAnswerLabel(q, state)
+		if answer == "" {
+			answer = loc.T("cmd.userInput.skipped")
+		}
+		b.WriteString(answer)
+	}
+	return b.String()
 }
 
 func truncateAskUserLabel(label string) string {
@@ -630,197 +435,29 @@ func truncateAskUserLabel(label string) string {
 	return string(runes[:maxRunes-1]) + "…"
 }
 
-func containsString(list []string, target string) bool {
-	for _, item := range list {
-		if item == target {
-			return true
-		}
-	}
-	return false
-}
-
-func toggleString(list []string, target string) []string {
-	out := make([]string, 0, len(list)+1)
-	found := false
-	for _, item := range list {
-		if item == target {
-			found = true
-			continue
-		}
-		out = append(out, item)
-	}
-	if !found {
-		out = append(out, target)
-	}
-	return out
-}
-
-// applyAskUserCallback mutates the wizard for a callback. ready means the
-// wizard has a complete answer set and should be submitted. needText means
-// the adapter should prompt for free-text (force-reply). toast is a short
-// callback answer shown as a Telegram alert/toast.
-func applyAskUserCallback(w *askUserWizard, cb askUserCallback) (ready, needText bool, toast string) {
-	if w == nil {
-		return false, false, i18n.New("").T("cmd.userInput.expired")
-	}
-	loc := w.localizer()
-	switch cb.Op {
-	case "n":
-		if cb.Page < 0 || cb.Page >= len(w.Questions) {
-			return false, false, ""
-		}
-		w.Page = cb.Page
-		return false, false, ""
-	case "s":
-		q, ok := w.questionAt(cb.QIndex)
-		if !ok || cb.OIndex < 0 || cb.OIndex >= len(q.Options) {
-			return false, false, loc.T("cmd.userInput.invalidOperation")
-		}
-		if w.Page != cb.QIndex {
-			w.Page = cb.QIndex
-		}
-		d := w.draftFor(q.ID)
-		selectedID := q.Options[cb.OIndex].ID
-		if d.Answered && len(d.OptionIDs) == 1 && d.OptionIDs[0] == selectedID && d.CustomText == "" {
-			d.OptionIDs = nil
-			d.Answered = false
-			return false, false, ""
-		}
-		d.OptionIDs = []string{selectedID}
-		d.CustomText = ""
-		d.Text = ""
-		d.Answered = true
-		if w.Page < len(w.Questions)-1 {
-			w.Page++
-			return false, false, ""
-		}
-		return true, false, ""
-	case "t":
-		q, ok := w.questionAt(cb.QIndex)
-		if !ok || cb.OIndex < 0 || cb.OIndex >= len(q.Options) {
-			return false, false, loc.T("cmd.userInput.invalidOperation")
-		}
-		if w.Page != cb.QIndex {
-			w.Page = cb.QIndex
-		}
-		d := w.draftFor(q.ID)
-		d.OptionIDs = toggleString(d.OptionIDs, q.Options[cb.OIndex].ID)
-		d.Answered = len(d.OptionIDs) > 0 || strings.TrimSpace(d.CustomText) != ""
-		return false, false, ""
-	case "x":
-		q, ok := w.questionAt(cb.QIndex)
-		if !ok {
-			return false, false, loc.T("cmd.userInput.invalidOperation")
-		}
-		if w.Page != cb.QIndex {
-			w.Page = cb.QIndex
-		}
-		w.TextPromptQ = q.ID
-		return false, true, ""
-	case "go":
-		return true, false, ""
+// askUserRejectToast maps a structured rejection to a localized toast.
+func askUserRejectToast(loc *i18n.Localizer, reject userinput.InteractionReject) string {
+	switch reject {
+	case userinput.RejectNone:
+		return ""
+	case userinput.RejectEmptyText:
+		return loc.T("cmd.userInput.answerRequired")
+	case userinput.RejectCustomNotAllowed:
+		return loc.T("cmd.userInput.customNotAllowed")
 	default:
-		return false, false, loc.T("cmd.userInput.unknownOperation")
+		return loc.T("cmd.userInput.invalidOperation")
 	}
 }
 
-func applyAskUserTextAnswer(w *askUserWizard, text string) (ready bool, toast string) {
-	if w == nil {
-		return false, i18n.New("").T("cmd.userInput.expired")
-	}
-	loc := w.localizer()
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return false, loc.T("cmd.userInput.answerRequired")
-	}
-	qID := strings.TrimSpace(w.TextPromptQ)
-	if qID == "" {
-		// Fall back to current page.
-		if q, ok := w.questionAt(w.Page); ok {
-			qID = q.ID
-		}
-	}
-	var q askUserQuestion
-	found := false
-	for i, item := range w.Questions {
-		if item.ID == qID {
-			q = item
-			found = true
-			w.Page = i
-			break
-		}
-	}
-	if !found {
-		return false, loc.T("cmd.userInput.invalidOperation")
-	}
-	d := w.draftFor(q.ID)
-	switch q.Kind {
-	case userinput.QuestionKindText:
-		d.Text = text
-		d.OptionIDs = nil
-		d.CustomText = ""
-		d.Answered = true
-	case userinput.QuestionKindSingleSelect:
-		if !q.AllowCustom {
-			return false, loc.T("cmd.userInput.customNotAllowed")
-		}
-		d.CustomText = text
-		d.OptionIDs = nil
-		d.Text = ""
-		d.Answered = true
-	case userinput.QuestionKindMultiSelect:
-		if !q.AllowCustom {
-			return false, loc.T("cmd.userInput.customNotAllowed")
-		}
-		d.CustomText = text
-		// Custom alone (or with toggled options) is a complete multi answer.
-		d.Answered = true
-	default:
-		d.Text = text
-		d.Answered = true
-	}
-	w.TextPromptQ = ""
-	w.TextPromptID = 0
-	// Text and single-select custom answers are complete actions: advance to the
-	// next question, or submit immediately on the last page. Multi-select custom
-	// text stays on the page because the user may still add regular options.
-	if q.Kind != userinput.QuestionKindMultiSelect {
-		if w.Page < len(w.Questions)-1 {
-			w.Page++
-			return false, ""
-		}
-		return true, ""
-	}
-	return false, ""
-}
-
-// prepareTelegramAskUser builds wizard presentation for an outbound ask_user
-// tool card. Returns ok=false when the tool call is not an ask_user prompt.
-func (a *TelegramAdapter) prepareTelegramAskUser(tc *channel.StreamToolCall) (text string, actions []channel.Action, token string, ok bool) {
-	userInputID, questions, parsed := parseAskUserToolCall(tc)
+// prepareTelegramAskUser builds the initial card for an outbound ask_user
+// tool call: page 0 of an empty interaction. Returns ok=false when the tool
+// call is not a renderable ask_user prompt.
+func prepareTelegramAskUser(tc *channel.StreamToolCall) (text string, actions []channel.Action, requestID string, ok bool) {
+	requestID, payload, parsed := parseAskUserToolCall(tc)
 	if !parsed {
 		return "", nil, "", false
 	}
-	w := newAskUserWizard(userInputID, questions)
-	w.Locale = tc.Locale
-	// Single-question single_select without multi-step needs still benefits
-	// from wizard (Other → force-reply, no /respond). Always use wizard.
-	text, actions = w.renderPage()
-	if a != nil {
-		a.askUserStore().put(w)
-	}
-	return text, actions, w.Token, true
-}
-
-func (a *TelegramAdapter) bindAskUserMessage(token string, chatID int64, msgID int) {
-	if a == nil || token == "" {
-		return
-	}
-	w := a.askUserStore().get(token)
-	if w == nil {
-		return
-	}
-	w.ChatID = chatID
-	w.MessageID = msgID
-	a.askUserStore().put(w)
+	loc := i18n.New(tc.Locale)
+	text, actions = renderAskUserPage(requestID, loc, payload, userinput.TextInteractionState{})
+	return text, actions, requestID, true
 }
