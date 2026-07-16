@@ -7,6 +7,10 @@ import { ATTACHMENT_ANIM_MS } from './useComposerAttachments'
 // measurement + animation — no chat state; everything it reads arrives as
 // reactive deps.
 
+// The strip beneath the bottom box (pb-8). Shared with chat-pane so the mask
+// can apply the same half-height rule to whatever box replaces the composer.
+export const COMPOSER_MASK_BELOW_PX = 32
+
 export interface ComposerLayoutDeps {
   inputText: Ref<string>
   isActive: ComputedRef<boolean>
@@ -166,8 +170,7 @@ export function useComposerLayout(deps: ComposerLayoutDeps) {
   // edge is hidden by the box itself (no visible seam, no fade). Above that line
   // the box's rounded top is left to float over whatever is there; below it the
   // fill hides the bottom-corner gaps and the strip beneath, so nothing bleeds out.
-  const COMPOSER_MASK_BELOW = 32 // pb-8
-  const composerMaskHeight = computed(() => `${COMPOSER_MASK_BELOW + composerBoxHeight.value / 2}px`)
+  const composerMaskHeight = computed(() => `${COMPOSER_MASK_BELOW_PX + composerBoxHeight.value / 2}px`)
 
   let composerResizeObserver: ResizeObserver | null = null
   onMounted(() => {
